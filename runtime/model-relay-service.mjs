@@ -1,3 +1,4 @@
+import { createClineRelayCatalogBootstrap } from "./cline-relay-catalog-bootstrap.mjs";
 import { watch } from "node:fs";
 import { dirname, join } from "node:path";
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -11,6 +12,11 @@ import { relayPolicyFromConfig } from "./model-relay-config.mjs";
 export async function startModelRelayService(configPath, environment = process.env) {
   const { ModelRelayServer, RelayMetricsSender } = await import("../dist/model-relay/index.js");
   const { sendRelayMetrics, RelayTrafficDump } = await import("../dist/provider-proxy/index.js");
+  environment = { ...environment, CODEX_CONNECT_CONFIG_FILE: configPath };
+  const catalogBootstrap = createClineRelayCatalogBootstrap(environment, {
+    ready: () => refreshCurrent(),
+    failed: () => console.error("Cline Relay 模型目录自动下载失败，请在 WebUI 手动重试"),
+  });
   const paths = modelRelayPaths(configPath);
   const reader = new ModelRelayMaterialReader(configPath, environment);
   const dump = new RelayTrafficDump({ directory: join(dirname(configPath), "traffic"),
@@ -59,6 +65,7 @@ export async function startModelRelayService(configPath, environment = process.e
     if (next.debug.model_traffic_dump) void dump.prepare();
     const policyChanged = !snapshot || snapshot.digest !== next.digest;
     snapshot = next;
+    if (next.config.enabled && next.config.accounts.some(account => account.provider.startsWith("clp-"))) catalogBootstrap.ensure();
     relay ??= new ModelRelayServer({ queueChanged: () => control.changed(), capture: async (provider, signal, protocol) => {
       if (!snapshot?.debug.model_traffic_dump) return undefined;
       await dump.prepare(signal);
@@ -90,7 +97,7 @@ export async function startModelRelayService(configPath, environment = process.e
         }
         // URL keeps IPv6 brackets; Node's HTTP hostname option requires the bare address.
         const host = target.hostname.startsWith("[") ? target.hostname.slice(1, -1) : target.hostname;
-        return { models: material.models, protocols: material.protocols, target: { host, port: target.port ? Number(target.port) : target.protocol === "http:" ? 80 : 443,
+        return { models: material.models, extraModels: material.extraModels, protocols: material.protocols, target: { host, port: target.port ? Number(target.port) : target.protocol === "http:" ? 80 : 443,
           protocol: target.protocol === "http:" ? "http" : "https", basePath: target.pathname, authorization: `Bearer ${material.apiKey}`, ...(agent ? { agent } : {}) },
           recheck: () => {
             signal.throwIfAborted();
@@ -146,6 +153,7 @@ export async function startModelRelayService(configPath, environment = process.e
     closed = true; clearInterval(poll);
     for (const watcher of watchers.values()) watcher.close(); watchers.clear();
     closeTask = (async () => {
+      await catalogBootstrap.close();
       await control.close(); await reader.close();
       await refreshTask?.catch(() => {});
       await relay?.close(); await dump.close(); await sender.close(); await selector?.close();

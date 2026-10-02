@@ -1,10 +1,12 @@
+import * as clineCatalog from "../scripts/cline-relay-catalog.mjs";
+import { saveClineRelayCatalog } from "../scripts/cline-relay-catalog.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { manageModelRelay, parseModelRelayCommand } from "../scripts/model-relay-command.mjs";
 import * as providerRuntime from "../runtime/model-provider-runtime.mjs";
 import * as relayControl from "../runtime/model-relay-control.mjs";
 import * as fileLock from "../runtime/private-file-lock.mjs";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import { sample } from "./request-metrics-fixtures.js";
@@ -26,6 +28,9 @@ async function fixture() {
     supported_reasoning_levels: [{ effort: "high", description: "High" }], model_messages: { instructions_template: "fixture" },
   }] }));
   await applyClinePassConfiguration({ accountId: "test", apiKey: "UPSTREAM-SECRET" }, { environment: f.environment });
+  saveClineRelayCatalog({ version: 1, commit: "a".repeat(40), downloadedAt: 1,
+    models: [{ id: "cline-pass/deepseek-v4.1-flash", reasoningOptions: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }] }] }, f.environment);
+  await manageModelRelay({ command: "models", provider: "clp-test", enabledModels: ["cline-pass/deepseek-v4.1-flash"] }, f.environment);
   const managementOrigin = "http://127.0.0.1:0";
   const { origin } = await startWebuiTestServer(servers, f.environment, undefined, { managementOrigin, token: "admin-secret" });
   const headers = { origin: managementOrigin, authorization: "Bearer admin-secret", "content-type": "application/json" };
@@ -46,6 +51,23 @@ it("exposes bounded runtime status separately from configured concurrency", asyn
     query.mockResolvedValueOnce({ result: "unconfirmed" });
     expect((await f.snapshot()).runtime).toEqual({ state: "unknown" });
   } finally { query.mockRestore(); }
+});
+
+it("exposes Cline catalog modalities through the Relay management API", async () => {
+  const f = await fixture();
+  saveClineRelayCatalog({ version: 1, commit: "a".repeat(40), downloadedAt: 1, models: [
+    { id: "cline-pass/mimo", modalities: { input: ["text", "image", "audio", "video"], output: ["text"] } },
+    { id: "cline-pass/muse", capabilities: ["images", "video", "files", "tools", "reasoning"] },
+    { id: "cline-pass/unknown" },
+    { id: "cline-pass/toggle", reasoningOptions: [{ type: "toggle" }] },
+  ] }, f.environment);
+  expect((await f.snapshot()).providers[0]?.models).toEqual([
+    { id: "cline-pass/mimo", reasoningOff: false, inputModalities: ["text", "image", "audio", "video"] },
+    { id: "cline-pass/muse", reasoningOff: false, inputModalities: ["text", "image", "video", "pdf"] },
+    { id: "cline-pass/unknown", reasoningOff: false, inputModalities: [] },
+    { id: "cline-pass/toggle", reasoningOff: true, inputModalities: [] },
+  ]);
+  expect((await f.snapshot()).providers[0]?.extraModels).toEqual([]);
 });
 
 it("shows only declared input formats and keeps unknown capabilities explicit", async () => {
@@ -69,8 +91,81 @@ it("shows only declared input formats and keeps unknown capabilities explicit", 
   } finally { read.mockRestore(); }
 });
 
-const input: RelayManagementInput = { command: "issue", name: "沉浸式翻译", caller: "translation", key: "translation-key", provider: "clp-test",
-  models: ["cline-pass/deepseek-v4.1-flash"], reasoning: "off" };
+const input: Extract<RelayManagementInput, { command: "issue" }> = { command: "issue", name: "沉浸式翻译", caller: "translation", key: "translation-key", provider: "clp-test",
+  reasoning: "off" };
+it("rejects per-key model input and previews provider grants without writing", async () => {
+  const f = await fixture();
+  const revision = (await f.snapshot()).revision;
+  expect((await f.post("preview", { revision, input: { ...input, models: ["cline-pass/deepseek-v4.1-flash"] } })).status).toBe(400);
+  const before = readFileSync(join(f.home, "config.toml"), "utf8");
+  const preview = await f.post("preview", { revision, input: { command: "models", provider: "clp-test", enabledModels: [] } });
+  expect(preview.status).toBe(200);
+  expect(await preview.json()).toMatchObject({ preview: { enabledModels: [], caller: "clp-test" } });
+  expect(readFileSync(join(f.home, "config.toml"), "utf8")).toBe(before);
+});
+it.each([true, false])("enables mixed model capabilities while preserving a Key off preference (enabled=%s)", async enabled => {
+  const f = await fixture();
+  const muse = "cline-pass/muse-spark-1.3-contributor";
+  const deepseek = "cline-pass/deepseek-v4.1-flash";
+  saveClineRelayCatalog({ version: 1, commit: "a".repeat(40), downloadedAt: 1,
+    models: [{ id: deepseek }, { id: muse, reasoningOptions: [{ type: "effort", values: ["high"] }] }] }, f.environment);
+  await manageModelRelay(input, f.environment);
+  if (!enabled) await manageModelRelay({ command: "disable", caller: input.caller }, f.environment);
+  const mutation: RelayManagementInput = { command: "models", provider: "clp-test", enabledModels: [deepseek, muse], extraModels: [] };
+  const before = readFileSync(join(f.home, "config.toml"), "utf8");
+  const body = { revision: (await f.snapshot()).revision, input: mutation };
+  const previewResponse = await f.post("preview", body);
+  expect(previewResponse.status).toBe(200);
+  expect(readFileSync(join(f.home, "config.toml"), "utf8")).toBe(before);
+  const preview = await previewResponse.json() as { confirmationToken: string };
+  expect((await f.post("apply", { ...body, confirmationToken: preview.confirmationToken })).status).toBe(200);
+  const snapshot = await f.snapshot();
+  expect(snapshot.providers[0]?.enabledModels).toEqual([deepseek, muse]);
+  expect(snapshot.callers[0]).toMatchObject({ reasoning: "off", enabled });
+});
+it("does not spend the apply budget on model previews and keeps deletion refreshes readable", async () => {
+  const f = await fixture();
+  const model = { id: "cline-pass/deepseek-v4.1-flash", reasoning_efforts: ["none", "low", "high", "max"] as const, reasoning: "passthrough" as const };
+  const configured: RelayManagementInput = { command: "models", provider: "clp-test",
+    extraModels: [{ ...model, reasoning_efforts: [...model.reasoning_efforts] }] };
+  await manageModelRelay({ ...configured, models: [] }, f.environment);
+  const removal: RelayManagementInput = { ...configured, extraModels: [] };
+  const before = readFileSync(join(f.home, "config.toml"), "utf8");
+  for (let index = 0; index < 6; index++) {
+    expect((await f.post("preview", { input: removal, revision: (await f.snapshot()).revision })).status).toBe(200);
+  }
+  expect(readFileSync(join(f.home, "config.toml"), "utf8")).toBe(before);
+  for (let index = 0; index < 6; index++) {
+    const mutation = index % 2 === 0 ? removal : configured;
+    const revision = (await f.snapshot()).revision;
+    const preview = await f.post("preview", { input: mutation, revision });
+    expect(preview.status).toBe(200);
+    const { confirmationToken } = await preview.json() as { confirmationToken: string };
+    const applied = await f.post("apply", { input: mutation, revision, confirmationToken });
+    expect(applied.status).toBe(200);
+    const refreshed = await fetch(f.url, { headers: f.headers });
+    expect(refreshed.status).toBe(200);
+    const snapshot = await refreshed.json() as RelayManagementSnapshot;
+    expect(snapshot.providers[0]?.extraModels).toEqual(mutation.extraModels);
+    expect(snapshot.providers[0]?.models.map(value => value.id)).toContain(model.id);
+  }
+});
+
+it("does not auto-download a missing catalog while previewing model changes", async () => {
+  const f = await fixture();
+  const catalogPath = clineCatalog.clineRelayCatalogPath(f.environment);
+  unlinkSync(catalogPath);
+  const download = vi.spyOn(clineCatalog, "downloadClineRelayCatalog").mockRejectedValue(new Error("must not download"));
+  try {
+    const before = readFileSync(join(f.home, "config.toml"), "utf8");
+    const response = await f.post("preview", { input: { command: "models", provider: "clp-test", extraModels: [{ id: "cline-pass/deepseek-v4.1-flash", reasoning_efforts: [], reasoning: "passthrough" }] },
+      revision: (await f.snapshot()).revision });
+    expect(response.status).toBe(400);
+    expect(download).not.toHaveBeenCalled();
+    expect(existsSync(catalogPath)).toBe(false);
+    expect(readFileSync(join(f.home, "config.toml"), "utf8")).toBe(before);
+  } finally { download.mockRestore(); }
+});
 it("reads per-key usage across rotations without blocking management when metrics are absent", async () => {
   const f = await fixture();
   await manageModelRelay(input, f.environment);
@@ -131,7 +226,7 @@ it("requires auth/origin and confirmation; previews do not sign keys, and writes
   const badOrigin = await fetch(`${f.url}/preview`, { method: "POST", headers: { ...f.headers, origin: "https://evil.invalid" }, body: "{}" });
   expect(badOrigin.status).toBe(403);
   const snapshot = await f.snapshot();
-  expect(snapshot.providers[0]?.models).toContainEqual({ id: "cline-pass/deepseek-v4.1-flash", reasoningOff: true, inputModalities: ["text"] });
+  expect(snapshot.providers[0]?.models).toContainEqual({ id: "cline-pass/deepseek-v4.1-flash", reasoningOff: true, inputModalities: [] });
   expect(JSON.stringify(snapshot)).not.toContain("UPSTREAM-SECRET");
   const body = { input, revision: snapshot.revision };
   const before = readFileSync(join(f.home, "config.toml"), "utf8");
@@ -204,6 +299,7 @@ it("does not return confirmation or write config when preview cleanup fails", as
 it.each(["edit", "delete"] as const)("previews and confirms %s with revision and replay protection", async command => {
   const f = await fixture();
   await applyClinePassConfiguration({ accountId: "other", apiKey: "fixture-other" }, { environment: f.environment });
+  await manageModelRelay({ command: "models", provider: "clp-other", enabledModels: ["cline-pass/deepseek-v4.1-flash"] }, f.environment);
   async function apply(input: RelayManagementInput) {
     const body = { input, revision: (await f.snapshot()).revision };
     const response = await f.post("preview", body); expect(response.status).toBe(200);
@@ -213,11 +309,10 @@ it.each(["edit", "delete"] as const)("previews and confirms %s with revision and
     expect((await f.post("apply", { ...body, confirmationToken: preview.confirmationToken })).status).toBe(409);
     return preview.preview;
   }
-  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", input.caller, "--key", input.key, "--provider", input.provider,
-    "--model", input.models[0]!, "--name", "沉浸式翻译", "--reasoning", "off"]), f.environment);
+  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", input.caller, "--key", input.key, "--provider", input.provider, "--name", "沉浸式翻译", "--reasoning", "off"]), f.environment);
   const before = (await f.snapshot()).callers[0]!;
   if (command === "edit") {
-    const edited = await apply({ command, caller: input.caller, provider: "clp-other", models: input.models, reasoning: "off" });
+    const edited = await apply({ command, caller: input.caller, provider: "clp-other", reasoning: "off" });
     expect(edited.callers[0]?.provider).toBe("clp-other");
     expect((await f.snapshot()).callers[0]).toEqual({ ...before, provider: "clp-other" });
   } else {
@@ -272,4 +367,106 @@ it("streams authenticated Relay invalidations, preserves control capacity and cl
     expect((await reader.read()).done).toBe(true);
     reader.releaseLock();
   } finally { abort.abort(); await control.close(); }
+});
+
+it("manages Relay-only extra models with confirmation, revision, key grants and capability checks", async () => {
+  const f = await fixture();
+  const extra = { id: "vendor/extra", reasoning_efforts: ["none", "high"] as const, reasoning: "high" as const };
+  saveClineRelayCatalog({ version: 1, commit: "a".repeat(40), downloadedAt: 1, models: [
+    { id: extra.id, reasoningOptions: [{ type: "toggle" }, { type: "effort", values: ["high"] }] },
+    { id: "constructor", reasoningOptions: [] },
+  ] }, f.environment);
+  const original = providerRuntime.loadConfiguredRelayProviderMaterial("clp-test", f.environment);
+  const mutation: RelayManagementInput = { command: "models", provider: "clp-test", enabledModels: [extra.id], extraModels: [{ ...extra, reasoning_efforts: [...extra.reasoning_efforts] }, { id: "constructor", reasoning_efforts: [], reasoning: "passthrough" }] };
+  const before = readFileSync(join(f.home, "config.toml"), "utf8");
+  const body = { input: mutation, revision: (await f.snapshot()).revision };
+  const previewResponse = await f.post("preview", body); expect(previewResponse.status).toBe(200);
+  const preview = await previewResponse.json() as { confirmationToken: string };
+  expect(readFileSync(join(f.home, "config.toml"), "utf8")).toBe(before);
+  expect((await f.post("apply", body)).status).toBe(409);
+  expect((await f.post("apply", { ...body, confirmationToken: preview.confirmationToken })).status).toBe(200);
+  expect((await f.post("apply", { ...body, confirmationToken: preview.confirmationToken })).status).toBe(409);
+  const snapshot = await f.snapshot();
+  expect(snapshot.callers).toEqual([]);
+  expect(snapshot.providers[0]?.extraModels).toEqual(mutation.extraModels);
+  expect(snapshot.providers[0]?.models).toContainEqual({ id: extra.id, reasoningOff: true, inputModalities: [] });
+  expect(snapshot.providers[0]?.models).toContainEqual({ id: "constructor", reasoningOff: false, inputModalities: [] });
+  expect(providerRuntime.loadConfiguredRelayProviderMaterial("clp-test", f.environment)).toEqual(original);
+  const invalid = async (input: RelayManagementInput) => {
+    await expect(manageModelRelay({ ...input, models: [] }, f.environment)).rejects.toMatchObject({ code: "relay_invalid" });
+  };
+  await invalid({ ...mutation, extraModels: [{ ...mutation.extraModels![0]!, id: "not-in-relay-catalog" }] });
+  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "extra", "--key", "extra", "--provider", "clp-test", "--reasoning", "off"]), f.environment);
+  await manageModelRelay({ ...mutation, extraModels: [], models: [] }, f.environment);
+  expect((await f.snapshot()).callers[0]?.reasoning).toBe("off");
+  await manageModelRelay({ ...mutation, models: [] }, f.environment);
+  await invalid({ ...mutation, extraModels: [{ ...mutation.extraModels![0]!, reasoning_efforts: ["high"] }] });
+  await manageModelRelay(parseModelRelayCommand(["delete", "--caller", "extra"]), f.environment);
+  expect((await f.snapshot()).providers[0]?.extraModels).toEqual(mutation.extraModels);
+  await manageModelRelay({ ...mutation, extraModels: [], models: [] }, f.environment);
+  expect((await f.snapshot()).providers[0]?.extraModels).toEqual([]);
+});
+
+it("downloads Cline metadata without changing keys or policies and retains the old file on failure", async () => {
+  const f = await fixture();
+  const before = readFileSync(join(f.home, "config.toml"), "utf8");
+  const revision = (await f.snapshot()).revision;
+  const download = vi.spyOn(clineCatalog, "downloadClineRelayCatalog");
+  try {
+    const catalog = { version: 1 as const, commit: "a".repeat(40), downloadedAt: 100,
+      models: [{ id: "cline-pass/muse", reasoningOptions: [{ type: "effort" as const, values: ["high" as const] }] }] };
+    download.mockResolvedValue(catalog);
+    expect((await f.post("catalog/update", { url: "https://untrusted.invalid" })).status).toBe(400);
+    expect(download).not.toHaveBeenCalled();
+    expect((await fetch(`${f.url}/catalog/update`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).not.toBe(200);
+    expect(download).not.toHaveBeenCalled();
+    const result = await f.post("catalog/update", {}); expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({ catalog: { status: "ready", efforts: { "cline-pass/muse": ["high"] } } });
+    const updated = await f.snapshot();
+    expect(updated.revision).not.toBe(revision);
+    expect(updated.callers).toEqual([]);
+    expect(updated.providers[0]?.extraModels).toEqual([]);
+    expect(readFileSync(join(f.home, "config.toml"), "utf8")).toBe(before);
+    const path = clineCatalog.clineRelayCatalogPath(f.environment);
+    const saved = readFileSync(path, "utf8");
+    download.mockRejectedValue(new Error("PRIVATE-UPSTREAM-ERROR"));
+    const failure = await f.post("catalog/update", {}); expect(failure.status).toBe(502);
+    expect(await failure.text()).not.toContain("PRIVATE-UPSTREAM-ERROR");
+    expect(readFileSync(path, "utf8")).toBe(saved);
+    const mutation = { command: "models" as const, provider: "clp-test", extraModels: [{ id: "cline-pass/muse", reasoning_efforts: ["none" as const], reasoning: "none" as const }] };
+    expect((await f.post("preview", { revision: updated.revision, input: mutation })).status).toBe(400);
+  } finally { download.mockRestore(); }
+});
+
+it("invalidates pending model edits when the downloaded catalog changes and removes probe routes", async () => {
+  const f = await fixture();
+  const catalog = { version: 1 as const, commit: "a".repeat(40), downloadedAt: 100,
+    models: [{ id: "cline-pass/muse", reasoningOptions: [{ type: "effort" as const, values: ["high" as const] }] }] };
+  saveClineRelayCatalog(catalog, f.environment);
+  const revision = (await f.snapshot()).revision;
+  const input = { command: "models", provider: "clp-test", extraModels: [{ id: "cline-pass/muse", reasoning_efforts: ["high"], reasoning: "high" }] };
+  const preview = await f.post("preview", { revision, input }); expect(preview.status).toBe(200);
+  const { confirmationToken } = await preview.json() as { confirmationToken: string };
+  saveClineRelayCatalog({ ...catalog, downloadedAt: 200 }, f.environment);
+  expect((await f.post("apply", { revision, input, confirmationToken })).status).toBe(409);
+  expect((await f.post("probe/preview", {})).status).toBe(404);
+});
+
+it("grants catalog models directly without creating model overrides", async () => {
+  const f = await fixture();
+  saveClineRelayCatalog({ version: 1, commit: "a".repeat(40), downloadedAt: 1,
+    models: [{ id: "cline-pass/muse", reasoningOptions: [{ type: "effort", values: ["high"] }] }] }, f.environment);
+  const snapshot = await f.snapshot();
+  expect(snapshot.providers[0]?.models.map(model => model.id)).toEqual(["cline-pass/muse"]);
+  expect(snapshot.providers[0]?.extraModels).toEqual([]);
+  await manageModelRelay({ command: "models", provider: "clp-test", enabledModels: ["cline-pass/muse"] }, f.environment);
+  const current = await f.snapshot();
+  const issue = { ...input, reasoning: "passthrough" as const };
+  const preview = await f.post("preview", { revision: current.revision, input: issue });
+  expect(preview.status).toBe(200);
+  const { confirmationToken } = await preview.json() as { confirmationToken: string };
+  expect((await f.post("apply", { revision: current.revision, input: issue, confirmationToken })).status).toBe(200);
+  const saved = await f.snapshot();
+  expect(saved.callers[0]?.models).toEqual(["cline-pass/muse"]);
+  expect(saved.providers[0]?.extraModels).toEqual([]);
 });

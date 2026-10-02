@@ -8,7 +8,7 @@
 - `chat-to-responses.ts`：单选择 Chat 流转换为 Responses 文本、推理摘要与正文、函数调用、自由格式调用、客户端检索调用和用量事件。
 - `validation.ts`：模型 API 信任边界的结构验证和不含报文的错误。
 - `direct-request.ts`：原生请求共用的模型、流式字段校验及思考控制字段冲突定位；协议专属规则留在各请求模块。
-- `chat-request.ts`：独立 Relay 直接 Chat 请求保留：仅校验本地 model/messages/stream/n 边界，其他字段和值交给上游处理；提供安全字段路径错误及显式每 Key 关闭思考的出站副本投影，不经过 Responses 转换。
+- `chat-request.ts`：独立 Relay 直接 Chat 请求保留：仅校验本地 model/messages/stream/n 边界，其他字段和值交给上游处理；提供安全字段路径错误及仅对明确支持的模型应用每 Key 关闭思考策略，以及 CLP 额外模型声明等级的出站副本投影，不经过 Responses 转换。
 - `chat-response.ts`：直接 Chat JSON/SSE 的单选择响应观察、工具结构与资源边界、终态与 Usage 归约，不构造交付响应；公开不含报文的响应校验错误类别。
 - `responses-request.ts`：原生 Responses 同步无状态请求边界，保留输入、工具和模型参数，接受布尔 store/background 并关闭上游存储及后台执行，按可信 Provider 对 DS 放行上游忽略的历史引用，不经过 Chat 转换；由 Relay 原生 Responses HTTP 路由调用。
 

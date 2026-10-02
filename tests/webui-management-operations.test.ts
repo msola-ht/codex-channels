@@ -34,6 +34,10 @@ describe("WebUI management operation boundaries", () => {
   });
 
   it("keeps high-risk path classification explicit", () => {
+    expect(isHighRiskManagementPath("/relay/preview")).toBe(false);
+    for (const path of ["/relay/apply", "/relay/catalog/update", "/relay/preview/unknown"]) {
+      expect(isHighRiskManagementPath(path)).toBe(true);
+    }
     expect(isHighRiskManagementPath("/provider-settings/preview")).toBe(true);
     expect(isHighRiskManagementPath("/account-settings/preview")).toBe(true);
     expect(isHighRiskManagementPath("/tasks/preview")).toBe(true);

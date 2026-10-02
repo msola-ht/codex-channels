@@ -627,33 +627,40 @@ Responses 只提供同步无状态创建；`store` 可省略或传布尔值，�
 请求列表优先显示 Key 的当前中文用途名称，长名称省略显示，悬停或聚焦可查看完整名称与调用方 ID；未命名或已移除的调用方仍显示原 ID。名称仅用于展示，筛选和历史指标继续使用稳定 ID，不回写历史记录。
 
 WebUI 侧栏「模型转发」提供独立 Key 管理页。每个用途对应一把 Key，名称支持中文，内部调用方 ID 在新建时自动生成并保持不变。先选择已配置的提供商
-账户和允许模型，再选择「跟随客户端」或「强制关闭」。多把 Key 可以使用同一账户，策略互不影响。
+账户，再选择「跟随客户端」或「强制关闭（支持的模型）」。多把 Key 可以使用同一账户，策略互不影响。
 Key 列表显示原生 Chat/Responses 协议；双协议账户同时显示两者。模型选择中的文本、图片、音频标签来自现有目录，未声明时不推断能力；标签不改变上游参数处理。
 账户凭据在 WebUI「模型管理 → 账户与凭据」维护，自定义提供商的地址与凭据在「模型管理 → 提供商」编辑；Relay 页不复制上游秘密。新建、编辑、轮换、停用和删除使用居中弹窗，先预览再确认，
 完整新 Key 只显示一次，关闭后无法再次查看；响应丢失时先刷新确认记录，不能自动重复签发。
 若返回 `cleanupStatus: "failed"` 或页面提示管理锁清理失败，修改已经保存；先保存新 Key，再检查数据目录权限和磁盘，不要重复签发。读取失败可直接刷新；编辑时错误及刷新入口显示在弹窗内。刷新保留草稿，但检测到版本变化会禁止保存，须明确选择“重新加载并丢弃草稿”再编辑、预览，避免覆盖其他端修改。上游能力暂不可读取时保留现有策略，可仅改名或切换到可用提供商；不会把未知状态当作模型不支持。
 「查看调用」进入现有请求列表并精确筛选用途。停用后重新使用须轮换生成新秘密。
 
+旧版 `model_relay.callers[].models` 必须显式升级，新程序拒绝该字段，不自动兼容。先停止 Gateway、Relay 和 WebUI，使用新版本运行 `codexc relay upgrade-models`；源码入口是 `node bin/codexc.mjs relay upgrade-models`。此命令支持上一版每 Key 模型格式，将同提供商全部 Key（含停用 Key）的模型并集合并为 `model_relay.accounts[].models`，移除 Key 的模型字段。此合并可能扩大部分 Key 的模型范围；凭据、代次、启停状态和思考策略保持不变。升级前创建并核验私有 `.relay-models-*.bak` 备份，目标结构验证通过后原子保存，失败保留原配置，重复执行不写文件；不修改数据库、不启停服务。混合新旧格式或超出每提供商 256 模型上限时明确拒绝。
+
+升级后核对 `codexc relay providers` 和 `codexc relay callers`，确认模型范围再启动新版本。需要回滚时先停止相关服务并保留升级后配置；只有升级后没有任何 Key 创建、删除、轮换或权限修改时才可恢复已核验的升级前备份并运行旧版本。否则不能覆盖整份旧配置，以免恢复撤销过的凭据，需按当前凭据手动整理旧版模型授权。没有旧 Key 的新配置无需升级，各提供商模型默认全部关闭。
+
 CLI 使用同一管理逻辑，例如：
 
 ```bash
 codexc relay providers
-codexc relay issue --caller translation --key translation-key --provider clp-main --model cline-pass/deepseek-v4.1-flash --reasoning off --name "沉浸式翻译"
+codexc relay models --provider clp-main --model cline-pass/deepseek-v4.1-flash
+codexc relay issue --caller translation --key translation-key --provider clp-main --reasoning off --name "沉浸式翻译"
 codexc relay edit --caller translation --reasoning passthrough
 ```
 
 `issue` / `edit` 可通过 `--name "中文名称"` 设置 1–64 字符的用途名称，不含控制字符或首尾空白。名称可重复、可修改，身份仍以 caller_id 区分；改名不会取消请求或更改历史指标。旧记录未设名称时显示调用方 ID。
 
-`edit --model ID`（可重复）替换允许模型列表；不换提供商时省略则保持原列表。`edit --provider ID --model ID ...` 更换提供商，必须显式重选模型；API Key、调用方 ID 和凭据代次不变，客户端的模型名与协议路径需匹配新提供商。页面切换提供商时清空模型并将思考策略重置为跟随客户端；CLI 未指定 `--reasoning` 则保留原策略，不兼容时明确拒绝。缺省思考策略为透传。
+提供商统一保存启用模型列表；所有关联 Key 使用同一列表，Key 创建和编辑仅选择提供商，不接受 `--model`。使用 `codexc relay models --provider ID --model ID ...` 替换提供商的启用列表；省略全部 `--model` 则关闭所有模型。`edit --provider ID` 更换提供商，API Key、调用方 ID 和凭据代次不变。WebUI 切换提供商时将思考策略重置为跟随客户端；CLI 未指定 `--reasoning` 则保留原策略；关闭思考仅对新提供商明确支持的模型生效。
 
-`codexc relay delete --caller ID` 删除调用方并撤销 Key，取消其旧请求；历史指标和转储不删除。WebUI 的“删除”先预览再确认。改绑或删除会保留仅用于旧调用指标结算的历史身份摘要，不含秘密，不能用于请求鉴权；删除后新建必须使用新的 callerId 和 keyId。新建、编辑和删除会清理无人引用的 Relay 账户项，保留其他 Key 共用的引用，不删除上游账户或凭据。摘要最多 4096 条，同时受配置文件 1 MiB 限制；达到上限时拒绝整次操作，不静默清除历史摘要。
+`codexc relay delete --caller ID` 删除调用方并撤销 Key，取消其旧请求；历史指标和转储不删除。WebUI 的“删除”先预览再确认。改绑或删除会保留仅用于旧调用指标结算的历史身份摘要，不含秘密，不能用于请求鉴权；删除后新建必须使用新的 callerId 和 keyId。新建、编辑和删除只清理无人引用且没有模型授权或思考覆盖的空 Relay 账户项，保留提供商模型设置，不删除上游账户或凭据。摘要最多 4096 条，同时受配置文件 1 MiB 限制；达到上限时拒绝整次操作，不静默清除历史摘要。
 
 新增可选 `model_relay.retired_callers` 不要求迁移现有配置。首次改绑或删除前，应更新并重启 Gateway、Relay 和 WebUI，避免旧进程不识别新字段。回退旧程序前先等待指标收敛并停止上述进程，使用新版本执行 `codexc relay rollback-retired`；该命令备份后只移除历史摘要，保留当前凭据、提供商绑定和删除结果，之后不能保证补收旧调用指标。不要恢复整份历史配置以复活旧密钥。
-强制关闭支持 CLP 的精确模型 `cline-pass/deepseek-v4.1-flash`，以及 DS 的 `deepseek-flash` / `deepseek-v4-pro`，同一 Key 的全部允许模型必须支持。
-关闭策略覆盖顶层思考控制参数，CLP Chat 和 DS Responses 实际出站为 `reasoning.effort=none`，DS Chat 使用 `reasoning_effort=none`；不改历史消息或隐藏上游思考响应。
+CLP 转发使用独立于 Codex 的 Cline 模型目录。在 WebUI「模型转发 → 提供商模型」首次使用自动下载缺失的模型文件，之后可手动更新；点击提供商行的“模型列表”打开弹窗，统一启用／关闭模型及设置思考策略；所有关联 Key 同步生效，新目录模型默认关闭。已有上游账户密钥继续复用，无须申请新 Key。目录补齐前 CLP 转发暂不可用；自动下载失败可手动重试，不回退 Codex 模型文件。见[转发模型目录与设置](provider-api-relay-development.md#clp-转发模型目录与设置)。
+
+强制关闭支持目录或已保存覆盖显式声明 `none` 的 CLP 模型、CLP 的精确模型 `cline-pass/deepseek-v4.1-flash`，以及 DS 的 `deepseek-flash` / `deepseek-v4-pro`，只对当前请求中明确支持的模型生效。未声明或不支持关闭的模型继续使用模型覆盖设置或客户端原参数，仍可能产生思考内容；不会阻止模型启用或 Key 保存。
+关闭策略覆盖顶层思考控制参数，通用 CLP Chat 实际出站为 `reasoning.enabled=false`；CLP 精确模型 `cline-pass/deepseek-v4.1-flash` 保留已验证的 `reasoning.effort=none`，DS Responses 使用 `reasoning.effort=none`，DS Chat 使用 `reasoning_effort=none`；不改历史消息或隐藏上游思考响应。
 嵌套 `extra_body` / `extraBody` 的思考控制字段与关闭策略冲突时明确拒绝；跟随客户端不增加此限制。
 Chat 和 Responses 的冲突错误均定位到完整字段路径，例如 `extra_body.reasoning`。
-更换提供商、修改模型或策略会取消该 Key 的旧请求。配置保存与运行态应用分开报告，不会自动启动服务。
+更换提供商或 Key 策略会取消该 Key 的旧请求；修改提供商模型授权会撤销其关联 Key 的旧请求。配置保存与运行态应用分开报告，不会自动启动服务。
 
 新增可选字段 `model_relay.callers[].reasoning` 和 `display_name` 不要求旧配置升级；首次使用前应先停止旧 Gateway、
 Relay、WebUI（包括前台实例），更新全部程序后再启动，避免旧程序读取新字段失败。
@@ -707,7 +714,7 @@ Chat 的长度限制、内容过滤、`insufficient_system_resource` 和 `aborte
 Chat 与 Responses 的非流式首内容耗时在整包解析校验后观测，不是上游实际生成首 Token 的时间；空内容不填此值。
 
 Relay 返回 403 `model_not_allowed` 时，请使用当前 Key 的 `GET /v1/models` 返回的精确模型 ID，
-包括模型前缀。模型必须同时位于 Key 授权列表和 Provider 模型目录中；此类拒绝发生在出站前，
+包括模型前缀。模型必须同时位于提供商启用列表和 Provider 的有效模型目录中；此类拒绝发生在出站前，
 不会新增上游调用指标，也不表示 CLP 返回了 403。
 
 Relay 的 JSON 非流式响应同时接受标准 Chat 对象和 CLP 的 `{success:true,data:...}` 包装；
@@ -716,7 +723,7 @@ Relay 的 JSON 非流式响应同时接受标准 Chat 对象和 CLP 的 `{succes
 Relay 只执行全局限流，不与本机 App Server 的代理共用计数。`[model_relay]` 的
 `max_concurrency` 可设为 1–32，默认 10；`requests_per_minute` 可设为 0–600，默认 0
 （关闭分钟与突发限制）；`burst` 为 1–32，默认 10，仅在分钟速率为正数时生效。
-账户和 Key 只管理身份与模型授权，不再设置执行限额。鉴权失败保护始终保留。
+提供商管理模型授权，Key 管理身份与提供商绑定，不再设置执行限额。鉴权失败保护始终保留。
 
 Chat 与 Responses 请求在全局并发或令牌不足时排队：上传和等待合计最多 32 个，正文预算合计 16 MiB。
 上传前每个请求先预留 1 MiB，正文验证后按重新序列化的实际字节释放多余预算；单请求原始正文
@@ -733,8 +740,8 @@ Chat 与 Responses 请求在全局并发或令牌不足时排队：上传和等�
 旧配置中账户或 Key 的 `max_concurrency`、`requests_per_minute`、`burst` 不再受支持，
 新程序明确拒绝，不会静默忽略。切换新版本前使用新版本入口执行 `codexc relay upgrade-limits`
 （未安装时可在已构建的新源码目录执行 `node bin/codexc.mjs relay upgrade-limits`）。
-该命令校验配置、创建并核验私有备份，再原子移除上述字段；保留全局值、所有身份及凭据代次，
-不修改数据库、不重启服务。重复执行不写文件。之后按正常流程更新并重启 Relay。
+若仍含 Key 模型列表，先停止 Gateway、Relay 和 WebUI；命令会检查 Gateway 和 Relay 已停止。该命令校验配置、创建并核验私有备份，再原子移除上述字段；同时按并集合并到提供商（可能扩大部分 Key 范围）；保留全局值、所有身份及凭据代次，
+不修改数据库、不重启服务。重复执行不写文件。涉及模型授权升级后，使用新版本启动 Gateway、Relay 和 WebUI；仅移除限流字段则按正常流程更新并重启 Relay。
 旧进程与新控制 IPC 不兼容，升级期间的状态可能显示 `unconfirmed`，不能据此认定撤销已生效。
 回滚旧程序可让其使用缺省的账户/Key 限额；需要恢复原限额时只从备份核对这三个数值字段，
 不要覆盖当前凭据或禁用记录。实际数据升级操作需由使用者明确执行。

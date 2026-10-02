@@ -8,7 +8,8 @@ export function readManagedMarker(environment: NodeJS.ProcessEnv, definition: Mo
 export interface ManagedModelProviderRuntime {
   provider: ManagedModelProviderId;
 }
-export function loadConfiguredRelayProviderMaterial(provider: string, environment?: NodeJS.ProcessEnv): {
+export function loadConfiguredRelayProviderMaterial(provider: string, environment?: NodeJS.ProcessEnv, extraModels?: import("./model-relay-config.mjs").RelayExtraModel[]): {
+  extraModels?: import("./model-relay-config.mjs").RelayExtraModel[];
   provider: string; baseUrl: string; apiKey: string; models: string[]; modelInputs: Record<string, unknown[]>; protocols: ("chat" | "responses")[]; paths: string[]; revision: string;
 };
 

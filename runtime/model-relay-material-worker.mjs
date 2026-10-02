@@ -26,7 +26,7 @@ parentPort.on("message", () => {
       }
       const materials = []; const unavailable = [];
       if (config.enabled) for (const account of config.accounts) {
-        try { materials.push(loadConfiguredRelayProviderMaterial(account.provider, environment)); }
+        try { materials.push(loadConfiguredRelayProviderMaterial(account.provider, environment, account.extra_models)); }
         catch { unavailable.push(account.provider); }
       }
       const proxy = readCodexProxySnapshot(environment);

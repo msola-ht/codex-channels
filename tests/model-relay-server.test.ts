@@ -32,6 +32,7 @@ const frame = (value: unknown): string => `data: ${JSON.stringify(value)}\n\n`;
 it.each([false, true].flatMap(stream => ["clp-a", "ds-a"].map(provider => ({ stream, provider }))))(
   "pins CLP routing for JSON/SSE without changing other providers ($provider, $stream)", async ({ stream, provider }) => {
     const policy = config(); policy.accounts = [{ provider }]; policy.callers[0]!.provider = provider;
+    policy.callers[0]!.models = ["cline-pass/deepseek-v4.1-flash"];
     let received: unknown;
     const f = await fixture((request, response) => {
       const chunks: Buffer[] = []; request.on("data", chunk => chunks.push(Buffer.from(chunk)));
@@ -40,8 +41,8 @@ it.each([false, true].flatMap(stream => ["clp-a", "ds-a"].map(provider => ({ str
         response.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json" });
         response.end(stream ? frame({ ...answer, choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }] }) + "data: [DONE]\n\n" : JSON.stringify(answer));
       });
-    }, undefined, undefined, undefined, false, policy);
-    const input = { ...body, stream, providerOptions: { deepseek: { thinking: false }, gateway: { only: ["baseten"], order: ["deepseek"], marker: "keep" } } };
+    }, async prepared => ({ ...prepared, models: policy.callers[0]!.models }), undefined, undefined, false, policy);
+    const input = { ...body, model: "cline-pass/deepseek-v4.1-flash", stream, providerOptions: { deepseek: { thinking: false }, gateway: { only: ["baseten"], order: ["deepseek"], marker: "keep" } } };
     const response = await f.post(input); expect(response.status).toBe(200); await response.text();
     expect(received).toEqual({ ...input, providerOptions: { ...input.providerOptions,
       gateway: { ...input.providerOptions.gateway, only: provider === "clp-a" ? ["deepseek"] : ["baseten"] },
@@ -51,8 +52,9 @@ it.each([false, true].flatMap(stream => ["clp-a", "ds-a"].map(provider => ({ str
   });
 
 it.each([null, [], "invalid", { gateway: null }, { gateway: [] }].map(providerOptions => ({ providerOptions })))("rejects malformed CLP routing containers before upstream ($providerOptions)", async ({ providerOptions }) => {
-  const f = await fixture((_request, response) => { response.writeHead(500).end(); });
-  const response = await f.post({ ...body, providerOptions });
+  const policy = config(); policy.callers[0]!.models = ["cline-pass/deepseek-v4.1-flash"];
+  const f = await fixture((_request, response) => { response.writeHead(500).end(); }, async prepared => ({ ...prepared, models: policy.callers[0]!.models }), undefined, undefined, false, policy);
+  const response = await f.post({ ...body, model: "cline-pass/deepseek-v4.1-flash", providerOptions });
   expect(response.status).toBe(400); await response.text(); expect(f.calls()).toBe(0);
 });
 
@@ -299,9 +301,7 @@ describe("isolated Relay vertical request chain", () => {
       store: true, background: true, vendor_extension: { enabled: true }, tools: [{ type: "function", function: { name: "fixture" } }] };
     const result = await f.post(request);
     expect(result.status).toBe(200); expect(await result.json()).toEqual(answer);
-    expect(received).toEqual({ ...request, stream: false,
-      ...(provider.startsWith("clp-") ? { providerOptions: { gateway: { only: ["deepseek"] } } } : {}),
-    });
+    expect(received).toEqual({ ...request, stream: false });
   });
 
   it.each([false, true].flatMap(stream => ["stop", "length", "content_filter", "insufficient_system_resource", "aborted"].map(reason => ({ stream, reason }))))(
@@ -711,12 +711,13 @@ describe("isolated Relay vertical request chain", () => {
     const value = stream ? { model: answer.model, choices: [{ index: 0, delta: { content: "hello" }, finish_reason: "stop" }] }
       : { success: true, data: answer };
     let forwarded: Record<string, unknown> = {};
+    const policy = config(); policy.callers[0]!.models = ["cline-pass/deepseek-v4.1-flash"];
     const f = await fixture((req, res) => {
       forwarded = { ...req.headers };
       res.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json", "x-opaque": "upstream-diagnostic" })
         .end(stream ? frame(value) + "data: [DONE]\n\n" : JSON.stringify(value));
-    }, undefined, undefined, dump, true);
-    const input = { ...body, ...(stream ? { stream } : {}), ...(only ? { providerOptions: { gateway: { only } } } : {}) };
+    }, async prepared => ({ ...prepared, models: policy.callers[0]!.models }), undefined, dump, true, policy);
+    const input = { ...body, model: "cline-pass/deepseek-v4.1-flash", ...(stream ? { stream } : {}), ...(only ? { providerOptions: { gateway: { only } } } : {}) };
     const reply = await f.post(input, { origin: "https://example.test", referer: "https://example.test/path?token=PRIVATE", "x-client": "client-diagnostic", cookie: "PRIVATE", "user-agent": "WorkBuddy/5.6.2", "x-request-id": "3390a228-c744-47a8-99b4-601f202be616" });
     const received = await reply.text();
     expect(forwarded["x-client"]).toBe("client-diagnostic");
@@ -960,7 +961,7 @@ describe("isolated Relay vertical request chain", () => {
       messages: [{ role: "developer", content: "instructions" }, { role: "user", content: [
         { type: "text", text: "hello" }, { type: "image_url", image_url: { url: "http://127.0.0.1:1/image" } }] }] };
     const response = await f.post(input); expect(response.status).toBe(200); await response.text();
-    expect(received).toEqual({ ...input, stream: false, providerOptions: { gateway: { only: ["deepseek"] } } }); expect(f.metrics).toHaveLength(1);
+    expect(received).toEqual({ ...input, stream: false }); expect(f.metrics).toHaveLength(1);
   });
   it("keeps HTTP delivery successful while Gateway metrics IPC is absent, without retrying after recovery", async () => {
     const directory = mkdtempSync(join(tmpdir(), "relay-missing-gateway-"));
@@ -1153,7 +1154,7 @@ describe("isolated Relay vertical request chain", () => {
     const received: Buffer[] = []; for await (const chunk of response) received.push(Buffer.from(chunk as Buffer));
     expect(response.statusCode).toBe(200); expect(response.headers["set-cookie"]).toBeUndefined();
     expect(JSON.parse(Buffer.concat(received).toString()) as unknown).toMatchObject(answer);
-    expect(incoming).toEqual({ ...body, stream: false, providerOptions: { gateway: { only: ["deepseek"] } } });
+    expect(incoming).toEqual({ ...body, stream: false });
     expect(f.metrics[0]?.userAgent).toBe("fixture-client/1");
     expect(headers?.authorization).toBe("Bearer UPSTREAM-SECRET");
     expect(headers?.cookie).toBeUndefined(); expect(headers?.["x-codex-turn-metadata"]).toBeUndefined();
@@ -1437,3 +1438,70 @@ it.each(["chat", "responses"].flatMap(protocol => [false, true].map(stream => ({
     expect(f.metrics[0]?.deliveryStatus).toBe("disconnected");
     expect(f.metrics[0]?.errorStage).toBeUndefined();
   });
+
+it.each(["passthrough", "none", "high", "max", "key-off", "key-off-unsupported"] as const)("applies extra model reasoning %s without pinning DeepSeek routing", async mode => {
+  const policy = config();
+  if (mode.startsWith("key-off")) policy.callers[0]!.reasoning = "off";
+  let received: unknown;
+  const f = await fixture((request, response) => {
+    let text = ""; request.setEncoding("utf8"); request.on("data", chunk => { text += chunk; });
+    request.on("end", () => { received = JSON.parse(text); response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer)); });
+  }, async prepared => ({ ...prepared, extraModels: [{ id: body.model,
+    reasoning_efforts: mode === "key-off-unsupported" ? ["high"] : ["none", "high", "max"],
+    reasoning: mode === "key-off" || mode === "key-off-unsupported" ? "high" : mode }] }), undefined, undefined, false, policy);
+  const input = { ...body, stream: false, reasoning: { effort: "low" }, thinking: true, reasoning_effort: "low", enable_thinking: true, temperature: 0,
+    providerOptions: { gateway: { only: ["fixture"] } } };
+  const response = await f.post(input); expect(response.status).toBe(200); await response.text();
+  if (mode === "passthrough") expect(received).toEqual(input);
+  else { const rest: Record<string, unknown> = { ...input };
+    for (const field of ["thinking", "reasoning", "reasoning_effort", "enable_thinking"]) delete rest[field];
+    expect(received).toEqual({ ...rest, ...(mode === "key-off" || mode === "none" ? { reasoning: { enabled: false } }
+      : { reasoning_effort: mode === "max" ? "xhigh" : "high" }) }); }
+  expect(input.reasoning.effort).toBe("low");
+});
+
+it.each([false, true])("preserves Muse client controls when Key off is unsupported (extra model=%s)", async extraModel => {
+  const model = "cline-pass/muse-spark-1.3-contributor";
+  const policy = config(); policy.callers[0]!.reasoning = "off"; policy.callers[0]!.models = [model];
+  let received: unknown;
+  const f = await fixture((request, response) => {
+    let text = ""; request.setEncoding("utf8"); request.on("data", chunk => { text += chunk; });
+    request.on("end", () => { received = JSON.parse(text); response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer)); });
+  }, async prepared => ({ ...prepared, models: [model], ...(extraModel ? {
+    extraModels: [{ id: model, reasoning_efforts: [], reasoning: "passthrough" as const }],
+  } : {}) }), undefined, undefined, false, policy);
+  const input = { ...body, model, stream: false, reasoning: { effort: "high" }, extra_body: { thinking: true } };
+  const response = await f.post(input); expect(response.status).toBe(200); await response.text();
+  expect(received).toEqual(input); expect(f.calls()).toBe(1);
+});
+
+it("rejects undeclared explicit model off and nested conflicting controls before upstream", async () => {
+  const policy = config(); policy.callers[0]!.reasoning = "off";
+  const f = await fixture((_request, response) => response.end(), async prepared => ({ ...prepared,
+    extraModels: [{ id: body.model, reasoning_efforts: ["high"], reasoning: "none" }] }), undefined, undefined, false, policy);
+  expect((await f.post()).status).toBe(400); expect(f.calls()).toBe(0);
+  const g = await fixture((_request, response) => response.end(), async prepared => ({ ...prepared,
+    extraModels: [{ id: body.model, reasoning_efforts: ["high"], reasoning: "high" }] }));
+  expect((await g.post({ ...body, extra_body: { reasoning: { effort: "low" } } })).status).toBe(400); expect(g.calls()).toBe(0);
+});
+
+it.each(["usage-only", "content", "changed-finish", "no-usage", "tools"] as const)("handles repeated Chat finish trailers without accepting post-terminal output (%s)", async kind => {
+  const terminal = { id: "muse-fixture", model: "meta/muse-fixture", choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: "stop" }] };
+  const trailer = { ...terminal,
+    ...(kind === "no-usage" ? {} : { usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 } }),
+    choices: [{ index: 0, finish_reason: kind === "changed-finish" ? "length" : "stop",
+      delta: kind === "content" ? { content: "late output" } : kind === "tools" ? { tool_calls: [] } : { role: "assistant", content: "" } }] };
+  const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "text/event-stream" }).end(
+    frame({ ...terminal, choices: [{ index: 0, delta: { role: "assistant", content: "Hello" }, finish_reason: null }] })
+    + frame(terminal) + frame(trailer) + "data: [DONE]\n\n"));
+  const result = await f.post({ ...body, stream: true });
+  const text = await result.text();
+  expect(result.status).toBe(200);
+  if (kind === "usage-only") {
+    expect(text).toContain(frame(trailer)); expect(text).toContain("data: [DONE]");
+    expect(f.metrics[0]).toMatchObject({ status: "completed", deliveryStatus: "finished", inputTokens: 2, outputTokens: 3, totalTokens: 5 });
+  } else {
+    expect(text).toContain("invalid_upstream_message"); expect(text).not.toContain("data: [DONE]");
+    expect(f.metrics[0]).toMatchObject({ status: "failed", deliveryStatus: "failed" });
+  }
+});

@@ -1,3 +1,5 @@
+export type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
+import type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 export type RangeName =
   | "today" | "yesterday" | "24h" | "7d" | "30d" | "90d" | "all"
@@ -1049,12 +1051,15 @@ export interface TrafficTraceResponse extends Omit<TrafficDetailResponse, "excha
   exchange: Pick<TrafficExchangeDetail, "id" | "trace" | "tracePage">
 }
 
+export type { RelayExtraModel, RelayReasoningEffort } from "../runtime/model-relay-config.mjs";
+import type { RelayExtraModel } from "../runtime/model-relay-config.mjs";
 export type RelayReasoning = "passthrough" | "off";
 export interface RelayManagedCaller {
   caller_id: string; display_name?: string; key_id: string; credential_generation: number; enabled: boolean;
   provider: string; models: string[]; reasoning: RelayReasoning;
 }
 export interface RelayManagementSnapshot {
+  clineCatalog?: ClineRelayCatalogSnapshot;
   revision: string; enabled: boolean; maxConcurrency: number; callers: RelayManagedCaller[];
   usage: { observedAtMs: number; startAtMs: number; callers: Array<{
     callerId: string; keyId: string; lastRequestAtMs: number | null; requestCount: number; unsuccessfulRequestCount: number;
@@ -1064,14 +1069,15 @@ export interface RelayManagementSnapshot {
     capture: { enabled: boolean; state: "initializing" | "ready" | "failed" | "closed"; active: number; skippedCapacity: number };
     metrics: { accepted: number; unconfirmed: number; rejected: number; localDropped: number } }
     | { state: "stopped" | "unknown" };
-  providers: Array<{ id: string; available: boolean; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; reasoningOff: boolean; inputModalities: Array<"text" | "image" | "audio"> }> }>;
+  providers: Array<{ id: string; available: boolean; enabledModels: string[]; extraModels?: RelayExtraModel[]; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; reasoningOff: boolean; inputModalities: Array<"text" | "image" | "audio" | "video" | "pdf"> }> }>;
 }
 export type RelayManagementInput =
-  | { command: "issue"; name?: string; caller: string; key: string; provider: string; models: string[]; reasoning: RelayReasoning }
-  | { command: "edit"; name?: string; provider?: string; caller: string; models: string[]; reasoning: RelayReasoning }
+  | { command: "models"; provider: string; extraModels?: RelayExtraModel[]; enabledModels?: string[] }
+  | { command: "issue"; name?: string; caller: string; key: string; provider: string; reasoning: RelayReasoning }
+  | { command: "edit"; name?: string; provider?: string; caller: string; reasoning: RelayReasoning }
   | { command: "rotate" | "disable" | "delete"; caller: string };
 export interface RelayManagementMutation { revision: string; input: RelayManagementInput }
-export interface RelayManagementPreview { command: RelayManagementInput["command"]; caller: string; callers: RelayManagedCaller[] }
+export interface RelayManagementPreview { command: RelayManagementInput["command"]; caller: string; callers: RelayManagedCaller[]; extraModels?: RelayExtraModel[]; enabledModels?: string[] }
 export interface RelayManagementResult {
   cleanupStatus?: "failed";
   activation: "saved_and_applied" | "saved_not_running" | "saved_unconfirmed";

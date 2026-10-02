@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
-import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
+import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, type RelayExtraModel, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
 import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 
@@ -18,6 +18,7 @@ export interface RelayQueueEntry {
 }
 
 export interface PreparedRelayProvider {
+  readonly extraModels?: readonly RelayExtraModel[];
   readonly target: DirectChatTarget;
   readonly models: readonly string[];
   readonly protocols: readonly ("chat" | "responses")[];
@@ -161,13 +162,6 @@ export class ModelRelayServer {
           body = protocol === "responses" ? validateDirectResponsesRequest(lease.caller.provider, inbound) : validateDirectChatRequest(inbound);
         } finally { clearTimeout(uploadTimer); }
         lease.check(body.model); requestModel = body.model; stream = body.stream;
-        body = protocol === "responses" ? applyResponsesReasoningPolicy(body as DirectResponsesRequest, lease.caller.provider, lease.caller.reasoning ?? "passthrough")
-          : applyChatReasoningPolicy(body as DirectChatRequest, lease.caller.provider, lease.caller.reasoning ?? "passthrough");
-        if (protocol === "chat" && lease.caller.provider.startsWith("clp-")) {
-          const routed = pinClinePassRouting(body);
-          clineRoutingChanged = routed !== body;
-          body = routed;
-        }
       } else if (request.headers["transfer-encoding"] || Number(request.headers["content-length"] ?? 0) !== 0) {
         throw new RelayAdmissionError(400, "invalid_request");
       }
@@ -186,6 +180,15 @@ export class ModelRelayServer {
       }
       if (!prepared.protocols.includes(protocol)) throw new RelayAdmissionError(400, "protocol_not_supported");
       if (!prepared.models.includes(body!.model)) throw new RelayAdmissionError(403, "model_not_allowed");
+      // Model-specific input policy needs the current provider material.
+      phase = "input";
+      body = protocol === "responses" ? applyResponsesReasoningPolicy(body as DirectResponsesRequest, lease.caller.provider, lease.caller.reasoning ?? "passthrough")
+        : applyChatReasoningPolicy(body as DirectChatRequest, lease.caller.provider, lease.caller.reasoning ?? "passthrough", prepared.extraModels?.find(model => model.id === body!.model));
+      if (protocol === "chat" && lease.caller.provider.startsWith("clp-") && body.model === "cline-pass/deepseek-v4.1-flash") {
+        const routed = pinClinePassRouting(body);
+        clineRoutingChanged = routed !== body;
+        body = routed;
+      }
       phase = "upstream"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
       capture = await this.options.capture?.(lease.caller.provider, signal, protocol);
       capture?.inbound?.(inbound, request.headers);
@@ -194,7 +197,7 @@ export class ModelRelayServer {
       if (protocol === "responses" && inbound && typeof inbound === "object" && !("store" in inbound)) capture?.transformed?.("store_defaulted");
       inbound = undefined;
       const call = { diagnostics: (summary: ModelRequestDiagnostics) => { diagnostics = summary; }, ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
-        recheck: () => { lease!.check(body!.model); prepared.recheck(); },
+        recheck: () => { lease!.check(body.model); prepared.recheck(); },
         submitted: (ua: string | null) => { userAgent = ua; started = performance.now(); submittedAt = Date.now(); },
         headers: (status: number) => { httpStatus = status; },
         content: () => { firstTokenMs ??= performance.now() - started!; },

@@ -1,12 +1,12 @@
 # CLP（Cline Pass）
 
 通过 `codexc setup` → 模型与提供商 → 第三方 Provider → Cline Pass 官方配置。
-支持多个 CLP 账户，各账户使用独立 API Key，当前模型为 `cline-pass/deepseek-v4.1-flash`，支持固定与切换模式。
+支持多个 CLP 账户，各账户使用独立 API Key，当前 Codex 模型为 `cline-pass/deepseek-v4.1-flash`，支持固定与切换模式。
 Setup 和 WebUI 设置页均可添加、重新配置、设置默认及移除账户。账户 ID 为 1–32 位小写字母、数字、`-` 或 `_`；映射后凭据变量名相同的 ID 不可同时使用，例如 `a-b` 与 `a_b`。
 上下文、图片、思考等级与提示词复用 DS 的 `deepseek-flash`：优先读取本地 DS 目录，缺失时读取官方安装脚本中的目录并与 Cline 配置一并保存为本地共享 DS 模板，不执行脚本，无需手填上下文；目录自带的提示词（`model_messages.instructions_template`）随模板带入 CLP 目录。
 保留 Cline 已验证的 `none` 思考等级和 Chat 转换边界，不复制原生搜索等服务端能力。
 通过“模型上下文窗口”统一修改 `deepseek-flash`，同步 DS、同名受管模型、CLP 和已启用 DS 跟随的第三方自定义模型；不同模型不联动思考等级。
-所有 Cline 账户共享同一份模型目录。添加账户或更新密钥保留已有上下文及思考等级；调整上下文仍使用统一的模型窗口设置。
+所有 Cline 账户共享同一份 Codex 模型目录。独立 Relay 可下载／更新 Cline 模型文件，并按账户设置[独立模型目录和思考策略](provider-api-relay-development.md#clp-转发模型目录与设置)，不写入 Codex 目录。添加账户或更新密钥保留已有上下文及思考等级；调整上下文仍使用统一的模型窗口设置。
 
 切换模式按账户使用 `sf-clp-<账户>.config.toml` Profile 和独立 App Server；固定模式修改 Codex 主配置并保留该账户的初始备份。
 Key 使用现有私有文件机制保存，不写入 Gateway TOML 或命令行。配置文件位于 Codex Home，目录与管理标记

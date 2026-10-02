@@ -103,6 +103,8 @@
     "scripts/model-relay-listen-menu.mjs",
     "scripts/model-relay-command.mjs",
     "scripts/model-relay-management.mjs",
+    "scripts/cline-relay-catalog.mjs",
+    "scripts/cline-relay-catalog.d.mts",
     "scripts/webui-management-relay-route.mjs",
     "scripts/webui-management-delivery-route.mjs",
     "scripts/service-selection.mjs",

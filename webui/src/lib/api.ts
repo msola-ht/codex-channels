@@ -466,3 +466,8 @@ export function consumeResetCredit(attemptId: string, confirmationToken: string,
 export function cancelResetCredit(attemptId: string, confirmationToken: string, signal?: AbortSignal): Promise<{ cancelled: true }> {
   return requestJson(`${API_PREFIX}/management/accounts/openai/reset-credits/cancel`, { method: "POST", body: JSON.stringify({ attemptId, confirmationToken }) }, signal)
 }
+
+
+export function updateRelayCatalog(signal?: AbortSignal): Promise<{ auditStatus: "recorded" | "failed" }> {
+  return requestJson(`${API_PREFIX}/management/relay/catalog/update`, { method: "POST", body: "{}" }, signal)
+}

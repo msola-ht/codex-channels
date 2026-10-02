@@ -26,7 +26,30 @@ describe("native Responses request boundary", () => {
     const chat = validateDirectChatRequest({ model: "deepseek-flash", messages: [{ role: "user", content: "hello" }], reasoning: { effort: "high" }, thinking: { type: "enabled" } });
     const outgoing = applyChatReasoningPolicy(chat, "ds-main", "off");
     expect(outgoing.reasoning_effort).toBe("none"); expect(outgoing).not.toHaveProperty("reasoning"); expect(outgoing).not.toHaveProperty("thinking");
-    expect(() => applyResponsesReasoningPolicy(input, "rs-custom", "off")).toThrow("not supported");
+    expect(applyResponsesReasoningPolicy(input, "rs-custom", "off")).toBe(input);
+  });
+
+  it.each(["clp-main", "ds-main", "rs-custom"])("preserves unknown model controls when Key off cannot be applied (%s)", provider => {
+    const fields = { model: "cline-pass/muse-spark-1.3-contributor", reasoning: { effort: "high" }, extra_body: { thinking: true } };
+    const chat = validateDirectChatRequest({ ...fields, messages: [{ role: "user", content: "hello" }] });
+    const responses = validateDirectResponsesRequest(provider, { ...fields, input: "hello" });
+    expect(applyChatReasoningPolicy(chat, provider, "off")).toBe(chat);
+    expect(applyResponsesReasoningPolicy(responses, provider, "off")).toBe(responses);
+    if (provider.startsWith("clp-")) expect(applyChatReasoningPolicy(chat, provider, "off", {
+      id: fields.model, reasoning: "passthrough", reasoning_efforts: [],
+    })).toBe(chat);
+  });
+
+  it("honors verified static off capability even when an extra model only declares high", () => {
+    const model = "cline-pass/deepseek-v4.1-flash";
+    const chat = validateDirectChatRequest({ model, messages: [{ role: "user", content: "hello" }], reasoning: { effort: "low" } });
+    const extraModel = { id: model, reasoning: "high" as const, reasoning_efforts: ["high" as const] };
+    expect(applyChatReasoningPolicy(chat, "clp-main", "off", extraModel).reasoning).toEqual({ effort: "none" });
+    const overridden = applyChatReasoningPolicy(chat, "clp-main", "passthrough", extraModel);
+    expect(overridden.reasoning_effort).toBe("high"); expect(overridden).not.toHaveProperty("reasoning");
+    expect(() => applyChatReasoningPolicy(chat, "clp-main", "passthrough", { ...extraModel, reasoning: "none" }))
+      .toThrow("Reasoning effort is not declared");
+    expect(chat.reasoning).toEqual({ effort: "low" });
   });
   it("preserves opaque input, tools and parameters without converting to Chat", () => {
     const request = { model: "fixture/model", input: [

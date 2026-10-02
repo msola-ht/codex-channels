@@ -31,7 +31,7 @@ describe("management security core", () => {
     for (let i = 0; i < 120; i += 1) limiter.consume({ principalId: "account-user", category: "account-refresh" });
     expect(() => limiter.consume({ principalId: "account-user", category: "account-refresh" }))
       .toThrow(expect.objectContaining({ code: "management.rate-limited" }));
-    expect(limiter.consume({ principalId: "account-user", category: "write" }).remaining).toBe(29);
+    expect(limiter.consume({ principalId: "account-user", category: "write" }).remaining).toBe(59);
     now += 60_000;
     expect(limiter.consume({ principalId: "account-user", category: "account-refresh" }).remaining).toBe(119);
   });
@@ -42,12 +42,30 @@ describe("management security core", () => {
       "x-content-type-options": "nosniff",
     });
     const limiter = new ManagementRateLimiter();
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 30; index += 1) {
       limiter.consume({ principalId: "principal-a", category: "high-risk" });
     }
     expect(() => limiter.consume({ principalId: "principal-a", category: "high-risk" }))
       .toThrow(expect.objectContaining({ code: "management.rate-limited" }));
     expect(limiter.consume({ principalId: "principal-a", category: "read" }).remaining).toBe(119);
+  });
+
+  it("allows sixty writes and thirty high-risk operations with independent principals and window recovery", () => {
+    let now = 1_000;
+    const limiter = new ManagementRateLimiter({ now: () => now });
+    for (let index = 0; index < 30; index++) {
+      limiter.consume({ principalId: "user", category: "write" });
+      limiter.consume({ principalId: "user", category: "write" });
+      limiter.consume({ principalId: "user", category: "high-risk" });
+    }
+    for (const category of ["write", "high-risk"] as const) {
+      expect(() => limiter.consume({ principalId: "user", category }))
+        .toThrow(expect.objectContaining({ code: "management.rate-limited", status: 429 }));
+      expect(() => limiter.consume({ principalId: "another-user", category })).not.toThrow();
+    }
+    now += 60_000;
+    expect(limiter.consume({ principalId: "user", category: "write" }).remaining).toBe(59);
+    expect(limiter.consume({ principalId: "user", category: "high-risk" }).remaining).toBe(29);
   });
 
   it("consumes confirmations once and binds every preview field", () => {

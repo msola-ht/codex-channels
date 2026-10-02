@@ -1,8 +1,9 @@
+import { readClineRelayCatalog, clineRelayCatalogPath, clineRelayInputModalities, clineRelayReasoningEfforts } from "./cline-relay-catalog.mjs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { codexHomePath } from "./codex-home.mjs";
 import { loadManagedModelProviderDefinitions } from "./model-provider-definitions.mjs";
-import { loadConfiguredManagedProviderMaterial } from "./model-provider-managed-runtime.mjs";
+import { loadConfiguredManagedProviderMaterial, loadConfiguredManagedProviderCredentials } from "./model-provider-managed-runtime.mjs";
 import { loadCustomSwitchingProviderIds, loadConfiguredCustomSwitchingModelProviders,
   customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath,
   loadConfiguredCustomPrimaryModelProvider, loadConfiguredCustomPrimaryRelayProfile } from "./model-provider-custom-runtime.mjs";
@@ -21,7 +22,23 @@ export function listRelayProviderIds(environment = process.env) {
 }
 
 /** Reuses Provider-owned parsing; never uses App Server instances or OAuth credentials. */
-export function loadConfiguredRelayProviderMaterial(provider, environment = process.env) {
+export function loadConfiguredRelayProviderMaterial(provider, environment = process.env, extraModels = []) {
+  if (/^clp-[a-z0-9_-]{1,32}$/u.test(provider)) {
+    const credentials = loadConfiguredManagedProviderCredentials(provider, environment);
+    const catalog = readClineRelayCatalog(environment);
+    if (catalog.status !== "ready") throw new Error("Relay Cline model catalog is unavailable; download it in WebUI");
+    const models = catalog.catalog.models.map(model => model.id);
+    return { ...credentials, models, modelInputs: Object.fromEntries(catalog.catalog.models.map(model => [model.id, clineRelayInputModalities(model)])), protocols: ["chat"],
+      extraModels: catalog.catalog.models.map(model => structuredClone(extraModels.find(saved => saved.id === model.id)
+        ?? { id: model.id, reasoning_efforts: clineRelayReasoningEfforts(model), reasoning: "passthrough" })),
+      paths: [...credentials.paths, clineRelayCatalogPath(environment)],
+      revision: createHash("sha256").update(credentials.revision).update(JSON.stringify(catalog.catalog.models)).update(JSON.stringify(extraModels)).digest("hex") };
+  }
+  if (extraModels.length) throw new Error("Relay model policies require CLP");
+  return loadBaseRelayProviderMaterial(provider, environment);
+}
+
+function loadBaseRelayProviderMaterial(provider, environment) {
   if (loadManagedModelProviderDefinitions(environment).some(value => value.id === provider)) {
     return loadConfiguredManagedProviderMaterial(provider, environment);
   }

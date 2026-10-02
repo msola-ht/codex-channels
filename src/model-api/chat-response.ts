@@ -87,7 +87,15 @@ export class DirectChatResponse {
       part = "message";
       const message = object(stream ? choice.delta ?? {} : choice.message);
       if (message.role !== undefined && message.role !== "assistant") fail();
-      if (this.reason !== undefined && (choice.finish_reason != null || Object.keys(message).length > 0)) fail();
+      if (this.reason !== undefined && (choice.finish_reason != null || Object.keys(message).length > 0)) {
+        // Some CLP models repeat their finish reason on the final usage-only frame.
+        // Accept only an unchanged terminal and an explicitly empty assistant delta.
+        const usageTrailer = stream && chunk.usage != null && choice.finish_reason === this.reason
+          && Object.entries(message).every(([key, value]) => key === "role" ? value === "assistant"
+            : key === "content" && (value === "" || value === null));
+        if (!usageTrailer) fail();
+        return;
+      }
       for (const key of ["content", "reasoning", "reasoning_content"] as const) {
         if (message[key] != null) {
           const text = string(message[key]);

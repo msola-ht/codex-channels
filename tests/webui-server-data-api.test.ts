@@ -78,7 +78,7 @@ describe("webui server data API", () => {
     const owned = await fetch(`${origin}/api/v1/requests?range=all&source=owned`);
     expect(await owned.json()).toMatchObject({ records: [] });
     expect((await fetch(`${origin}/api/v1/requests?source=other`)).status).toBe(400);
-    appendFileSync(join(fixture.home, "config.toml"), `\n[[model_relay.accounts]]\nprovider = "clp-test"\n[[model_relay.callers]]\ncaller_id = "client"\nkey_id = "key"\nprovider = "clp-test"\nmodels = ["fixture"]\ncredential_generation = 2\nsecret_sha256 = "${"a".repeat(64)}"\nenabled = false\ndisplay_name = "沉浸式翻译"\n`);
+    appendFileSync(join(fixture.home, "config.toml"), `\n[[model_relay.accounts]]\nprovider = "clp-test"\nmodels = ["fixture"]\n[[model_relay.callers]]\ncaller_id = "client"\nkey_id = "key"\nprovider = "clp-test"\ncredential_generation = 2\nsecret_sha256 = "${"a".repeat(64)}"\nenabled = false\ndisplay_name = "沉浸式翻译"\n`);
     const named = await fetch(`${origin}/api/v1/requests?range=all&source=relay&callerId=client`);
     expect(named.status).toBe(200);
     expect(await named.json()).toMatchObject({ records: [{ callerId: "client", callerDisplayName: "沉浸式翻译" }] });

@@ -17,6 +17,9 @@ export function codexManagementError(error) {
 }
 
 export function isHighRiskManagementPath(path) {
+  // Relay previews issue a confirmation token but do not apply the mutation.
+  // They retain the ordinary POST budget without spending the apply budget.
+  if (path === "/relay/preview") return false;
   return path.startsWith("/accounts/openai/reset-credits/")
     || path.startsWith("/relay/")
     || path.startsWith("/delivery/")

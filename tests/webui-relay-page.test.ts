@@ -15,7 +15,6 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
           .replace('useState<string | null>(null)', 'useState<string | null>(globalThis.draftRevisionFixture ?? "r")')
           .replace('const [name, setName] = useState("")', 'const [name, setName] = useState(globalThis.editingFixture?.display_name ?? "")')
           .replace('const [provider, setProvider] = useState("")', 'const [provider, setProvider] = useState(globalThis.editingFixture?.provider ?? "")')
-          .replace('useState<string[]>([])', 'useState<string[]>(globalThis.editingFixture?.models ?? [])')
           .replace('useState<RelayReasoning>("passthrough")', 'useState<RelayReasoning>(globalThis.editingFixture?.reasoning ?? "passthrough")');
         if (id.endsWith('/components/ui/dialog.tsx')) return "import { createElement as h } from 'react';           export const Dialog = ({open, children}) => open ? children : null;           export const DialogContent = ({children}) => h('section', {role:'dialog'}, children);           export const DialogHeader = ({children}) => h('header', null, children);           export const DialogTitle = ({children}) => h('h2', null, children);           export const DialogDescription = ({children}) => h('p', null, children);           export const DialogFooter = ({children}) => h('footer', null, children);";
         if (id.endsWith('/hooks/use-relay-service-management.ts')) return 'export function useRelayServiceManagement(refresh, busy) { return {refresh,refreshBlocked:busy,services:{data:null,loading:false,error:null},tasks:{tasks:[],error:null,actionError:null,pendingPreview:null}}; }';
@@ -68,19 +67,22 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
       const staleEditor = render('en');
       globalThis.draftRevisionFixture = 'new-revision';
       const unavailableEditor = render('en');
-      globalThis.fixture.data.providers = [{ id: 'clp-main', available: true, protocols: ['chat'], models: [{ id: 'cline-pass/deepseek-v4.1-flash', reasoningOff: true, inputModalities: ['text', 'image', 'audio'] }] }];
+      globalThis.fixture.data.providers = [{ id: 'clp-main', available: true, enabledModels: ['cline-pass/deepseek-v4.1-flash'], protocols: ['chat'], models: [{ id: 'cline-pass/deepseek-v4.1-flash', reasoningOff: true, inputModalities: ['text', 'image', 'audio'] }] }];
       const availableEditor = render('en');
       const availableZh = render('zh');
       globalThis.fixture.data.providers[0].protocols = ['chat', 'responses'];
       const dual = render('en');
       globalThis.fixture.data.providers[0].models[0].inputModalities = [];
       const unknownInputs = render('en');
-      console.log(JSON.stringify({ unavailableUsage, zh, en, empty, unknown, stopped, refreshing, recovered, failed, editorError, staleEditor, unavailableEditor, availableEditor, availableZh, dual, unknownInputs }));
+      globalThis.fixture.data.providers[0].enabledModels.push('cline-pass/muse');
+      globalThis.fixture.data.providers[0].models.push({id:'cline-pass/muse',reasoningOff:false,inputModalities:[]});
+      const mixedReasoning = render('en');
+      console.log(JSON.stringify({ unavailableUsage, zh, en, empty, unknown, stopped, refreshing, recovered, failed, editorError, staleEditor, unavailableEditor, availableEditor, availableZh, dual, unknownInputs, mixedReasoning }));
     } finally { await server.close(); }
   `;
   const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
     cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
-  })) as { unavailableUsage: string; refreshing: string; recovered: string; unknown: string; stopped: string; zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string; availableZh: string; dual: string; unknownInputs: string };
+  })) as { unavailableUsage: string; refreshing: string; recovered: string; unknown: string; stopped: string; zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string; availableZh: string; dual: string; unknownInputs: string; mixedReasoning: string };
   expect(result.zh).toMatch(/<th[^>]*>凭据轮换<\/th>/u);
   expect(result.en).toContain("Credential rotation");
   expect(result.zh).toContain("沉浸式翻译 的更多操作");
@@ -105,6 +107,10 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
 
   expect(result.zh).toContain("沉浸式翻译"); expect(result.zh).toContain("强制关闭"); expect(result.zh).toContain("跟随客户端");
   expect(result.zh).toContain("callerId=translation"); expect(result.zh).toContain("callerId=kelivo");
+  expect(result.mixedReasoning).toContain("may still reason");
+  const offOption = result.mixedReasoning.match(/<button[^>]*>Force off \(supported models\)<\/button>/u)?.[0];
+  expect(offOption).toBeDefined();
+  expect(offOption).not.toMatch(/ disabled(?:=|\s|>)/u);
   expect(result.en).toContain("Force off"); expect(result.en).toContain("Follow client");
   expect(result.en).not.toContain("强制关闭");
   expect(result.zh).not.toContain(">删除</button>");
@@ -126,11 +132,11 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
   expect(result.unavailableEditor).not.toContain('data-invalid="true"');
   expect(result.unavailableEditor).toMatch(/<button(?![^>]* disabled=)[^>]*>Preview change<\/button>/u);
   expect(result.availableEditor).toContain('Native protocols: Chat Completions');
-  for (const label of ['Protocol', '>Chat<', '>Text<', '>Image<', '>Audio<']) expect(result.availableEditor).toContain(label);
-  for (const label of ['模型转发', '>文本<', '>图片<', '>音频<']) expect(result.availableZh).toContain(label);
+  for (const label of ['Protocol', '>Chat<']) expect(result.availableEditor).toContain(label);
+  for (const label of ['模型转发']) expect(result.availableZh).toContain(label);
   expect(result.dual).toContain('>Responses<');
-  expect(result.unknownInputs).toContain('>Not declared<');
-  expect(result.unavailableEditor).toContain('>Not declared<');
+  expect(result.availableEditor).toContain('This key follows the selected provider');
+  expect(result.availableEditor).not.toContain('type="checkbox"');
 });
 
 it("uses a queue table and shared loading, empty and unavailable components", () => {
@@ -221,4 +227,46 @@ it("scopes relay service controls and task feedback without bypassing the global
   expect(result.busy.match(/<button[^>]*disabled/g)).toHaveLength(2);
   expect(result.stopped).toContain("启动");
   expect(result.stopped).not.toMatch(/>重启<|>停止</u);
+});
+
+it("shows provider rows with a model-list dialog, enable controls and stale-draft protection", () => {
+  const script = String.raw`
+    import {createServer} from 'vite';
+    import {createElement as h} from 'react';
+    import {renderToStaticMarkup} from 'react-dom/server';
+    const server = await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent',plugins:[{
+      name:'model-dialog-fixture',enforce:'pre',transform(code,id) {
+        if(id.endsWith('/settings/relay-extra-models.tsx')) return code.replace('useState<Draft | null>(null)','useState<Draft | null>(globalThis.draft ?? null)');
+        if(id.endsWith('/components/ui/dialog.tsx')) return "import {createElement as h} from 'react'; export const Dialog=({open,children})=>open?children:null; export const DialogContent=({children})=>h('section',{role:'dialog'},children); export const DialogHeader=({children})=>h('header',null,children); export const DialogTitle=({children})=>h('h2',null,children); export const DialogDescription=({children})=>h('p',null,children); export const DialogFooter=({children})=>h('footer',null,children);";
+      }
+    }]});
+    try {
+      const {RelayExtraModels}=await server.ssrLoadModule('/src/components/settings/relay-extra-models.tsx');
+      const {LanguageContext}=await server.ssrLoadModule('/src/hooks/language-context.ts');
+      const snapshot={revision:'current',callers:[],providers:[
+        {id:'clp-main',available:true,enabledModels:['model/a'],extraModels:[],models:[{id:'model/a',inputModalities:['text','image','audio','video','pdf']},{id:'model/b',inputModalities:[]}]},
+        {id:'ds-main',available:true,enabledModels:[],models:[]}
+      ]};
+      const render=(language='en',confirmationOpen=false)=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(RelayExtraModels,{snapshot,blocked:false,confirmationOpen,onSubmit(){}})));
+      const list=render();
+      globalThis.draft={provider:'clp-main',revision:'current',enabledModels:['model/a'],extraModels:[]};
+      const editor=render('zh'), english=render();
+      const confirming=render('en',true);
+      snapshot.revision='changed';const stale=render();
+      console.log(JSON.stringify({list,editor,english,confirming,stale}));
+    } finally {await server.close();}
+  `;
+  const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
+  })) as Record<string, string>;
+  expect(result.list).toContain("Provider models");
+  expect(result.list).toContain("clp-main"); expect(result.list).toContain("ds-main");
+  expect(result.list).toContain("Model list"); expect(result.list).not.toContain('role="dialog"');
+  expect(result.list).not.toContain("model/a");
+  expect(result.editor).toContain('role="dialog"');
+  for (const label of ["model/a", "model/b", "启用", "关闭", "文本", "图片", "音频", "视频", "PDF", "未声明"]) expect(result.editor).toContain(label);
+  expect(result.english).toContain("Enable"); expect(result.english).toContain("Disable");
+  expect(result.confirming).not.toContain('role="dialog"');
+  expect(result.stale).toContain("Reload and discard draft");
+  expect(result.stale).toMatch(/<button[^>]*disabled[^>]*>Preview model settings<\/button>/u);
 });
