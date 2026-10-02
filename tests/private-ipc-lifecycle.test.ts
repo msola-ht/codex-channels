@@ -1,4 +1,5 @@
 import { chmodSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +11,12 @@ vi.mock("node:fs", async original => {
 });
 
 const roots: string[] = [];
+vi.mock("node:crypto", async original => {
+  const crypto = await original<typeof import("node:crypto")>();
+  return { ...crypto, randomBytes: vi.fn(crypto.randomBytes) };
+});
 afterEach(() => {
+  vi.mocked(randomBytes).mockReset();
   vi.mocked(linkSync).mockClear();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -27,6 +33,24 @@ function fixture() {
 const query = (path: string) => requestPrivateIpcJson(path, {}, { timeoutMs: 1000, maximumBytes: 128 });
 
 describe.skipIf(process.platform === "win32")("Unix private IPC endpoint ownership", () => {
+  it("skips a temporary name that differs from the public endpoint only by case", async () => {
+    const { root } = fixture();
+    const path = join(root, "s");
+    // 0x48 encodes to SA, so the first one-character candidate is S.
+    vi.mocked(randomBytes).mockImplementationOnce(() => Buffer.from([0x48]));
+    vi.mocked(randomBytes).mockImplementationOnce(() => Buffer.from([0]));
+    const server = new PrivateIpcServer(path, socket => {
+      socket.on("error", () => {});
+      socket.once("data", () => socket.end('{"ok":true}\n'));
+    });
+    try {
+      await server.start("occupied");
+      expect(readdirSync(root).sort()).toEqual(["A", "s"]);
+      expect(await query(path)).toEqual({ ok: true });
+    } finally { await server.close(); }
+    expect(readdirSync(root)).toEqual([]);
+  });
+
   it("rejects an overlong public name before publishing an unreachable endpoint", async () => {
     const { root } = fixture();
     const capacity = process.platform === "linux" ? 108 : 104;
