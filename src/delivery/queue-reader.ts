@@ -1,10 +1,11 @@
 import { lstatSync } from "node:fs";
-import { createDecipheriv, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { readPrivateFileSync } from "../../runtime/private-file.mjs";
 import { deliverySchemaVersion, type DeliveryQueueEntry, type DeliveryQueueSnapshot, type DeliveryState } from "./types.js";
+import { decryptDeliveryPayload, deliveryPayloadAad } from "./payload-codec.js";
 
 const integer = z.number().int().nonnegative().safe();
 const stateSchema = z.enum(["pending", "sending", "uncertain", "blocked"]);
@@ -52,16 +53,7 @@ export function readDeliveryQueue(directory: string, options: { before?: number;
   const before = integer.parse(options.before ?? 0);
   const filter = options.state === undefined ? null : stateSchema.parse(options.state);
   const id = options.id === undefined ? null : z.string().min(1).max(4096).parse(options.id);
-  const path = join(directory, "outbox.sqlite3");
-  if (!inspect(directory, true) || !inspect(path, false)) {
-    return { state: "missing", observedAt: Date.now(), summary: null, records: [], nextCursor: null };
-  }
-  const db = new DatabaseSync(path, { readOnly: true });
-  try {
-    db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=100; BEGIN;");
-    if (db.prepare("PRAGMA user_version").get()?.user_version !== deliverySchemaVersion) throw new Error("Unsupported delivery schema");
-    const metadata = db.prepare("SELECT version FROM metadata").all();
-    if (metadata.length !== 1 || metadata[0]?.version !== deliverySchemaVersion) throw new Error("Invalid delivery metadata");
+  return withReadDatabase<DeliveryQueueSnapshot>(directory, db => {
     const summary = { records: 0, bytes: 0, pending: 0, sending: 0, uncertain: 0, blocked: 0 };
     for (const row of db.prepare("SELECT state,COUNT(*) AS records,SUM(bytes) AS bytes FROM deliveries GROUP BY state").all()) {
       const state = stateSchema.parse(row.state);
@@ -74,7 +66,7 @@ export function readDeliveryQueue(directory: string, options: { before?: number;
     const records = rows.slice(0, 50);
     return { state: "available", observedAt: Date.now(), summary, records,
       nextCursor: rows.length > 50 ? records.at(-1)!.sequence : null };
-  } finally { db.close(); }
+  }) ?? { state: "missing", observedAt: Date.now(), summary: null, records: [], nextCursor: null };
 }
 
 /** Metadata lookup in one transaction, without global aggregates or payload access. */
@@ -103,10 +95,8 @@ function withReadDatabase<T>(directory: string, read: (db: DatabaseSync) => T): 
 function decryptPayload(db: DatabaseSync, key: Buffer, row: DeliveryQueueEntry): string {
   const raw = db.prepare("SELECT payload,nonce,tag FROM deliveries WHERE id=?").get(row.id)!;
   const payload = z.instanceof(Uint8Array).refine(value => value.length <= 4 * 1024 * 1024).parse(raw.payload);
-  const decipher = createDecipheriv("aes-256-gcm", key, z.instanceof(Uint8Array).parse(raw.nonce));
-  decipher.setAAD(Buffer.from(JSON.stringify([deliverySchemaVersion, row.id, row.account, row.conversation])));
-  decipher.setAuthTag(z.instanceof(Uint8Array).parse(raw.tag));
-  return Buffer.concat([decipher.update(payload), decipher.final()]).toString("utf8");
+  return decryptDeliveryPayload(key, payload, z.instanceof(Uint8Array).parse(raw.nonce),
+    z.instanceof(Uint8Array).parse(raw.tag), deliveryPayloadAad(row));
 }
 
 function readKey(directory: string): Buffer {

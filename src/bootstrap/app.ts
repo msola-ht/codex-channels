@@ -6,14 +6,20 @@ import {
   currentGitBranch,
   effectiveCodexBinary,
 } from "./gateway-component-graph.js";
+import type { BuiltInSurfacePlugin } from "./surface-plugin.js";
 
 export class GatewayApplication extends GatewayComponentGraph {
   private startTask: Promise<void> | undefined;
   private stopTask: Promise<void> | undefined;
   private startupSettled = false;
 
-  constructor(config: GatewayConfig, logger: Logger, configPath?: string) {
-    super(config, logger, configPath);
+  constructor(
+    config: GatewayConfig,
+    logger: Logger,
+    surfacePlugins: readonly BuiltInSurfacePlugin[],
+    configPath?: string,
+  ) {
+    super(config, logger, surfacePlugins, configPath);
   }
 
   start(): Promise<void> {

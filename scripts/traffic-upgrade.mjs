@@ -1,17 +1,11 @@
+import { TRAFFIC_UPGRADE_USAGE } from "./cli-command-usage.mjs";
+export { TRAFFIC_UPGRADE_USAGE } from "./cli-command-usage.mjs";
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { parseGatewayConfig, validateGatewayConfigDocument, withGatewayConfigLock } from "../runtime/gateway-config.mjs";
 import { removeLegacyRelayCapture } from "../runtime/model-relay-config.mjs";
 import { assertPrivateConfigAccessSync, readPrivateFileSync } from "../runtime/private-file.mjs";
 import { saveConfigWithBackup } from "./config-backup.mjs";
 import { locateUserConfig } from "./runtime-config.mjs";
-
-export const TRAFFIC_UPGRADE_USAGE = `用法：codexc traffic upgrade --enabled true|false --mode production|debug
-
-显式选择 Codex 与 Relay 共用的采集状态，备份后移除旧 Relay 独立采集配置。
-production 使用现有裁剪参数 3/65536；debug 使用 0/0。身份、凭据和保留天数不变。
-先执行 codexc service stop gateway（前台 Gateway 也须退出），避免旧进程补回已删除字段。
-不会停止、启动或重启服务。回退保留当前凭据和已有转储，不要恢复整份旧配置。
-所有参数必填；支持 -h/--help。`;
 
 export function parseTrafficUpgradeArgs(args) {
   const values = {};

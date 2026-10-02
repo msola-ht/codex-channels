@@ -115,11 +115,20 @@
 - `gateway-service-runtime.mjs`：持有内部 Gateway 服务子进程及其 reload、终止、退出信号转发；受管服务
   启动前的 App Server 就绪等待由服务命令脚本注入。
 - `app-server-unix-socket.mjs` / `app-server-unix-socket.d.mts`：校验固定 CLI 的 Unix rendezvous 链接、规范路径 SHA-256、受保护目录及真实 Socket 的权限和属主；Transport 与监管探测共用，连接仅使用校验后的物理路径，失效链接保留时不操作其目标。
-- `private-ipc.mjs` / `private-ipc.d.mts`：为 Gateway Owner、App Server Supervisor 和 Provider
-  Metrics 提供共享的当前用户私有 IPC。Unix 保留 `0600` Socket、属主和 inode 清理合同；Windows
-  使用默认仅创建用户与管理员可访问的命名管道，并在当前 SID 私有描述文件中保存随机管道名和随机
+- `private-ipc.mjs` / `private-ipc.d.mts`：为 Gateway Owner、账户操作、Delivery 控制、Relay 控制与指标、
+  队列通知、Provider Metrics 和 App Server Supervisor 提供共享的当前用户私有 IPC。
+  Unix 在同目录临时名字上监听，设置 `0600` 后通过独占硬链接发布原端点；绑定名保留到监听关闭，
+  防止其他实例提前复用该名字后被旧监听删除。正常关闭清理绑定名与仍归自身所有的公开端点，
+  避免 Node/libuv 关闭时按公开路径自动删除替代文件；公开端点仍按属主与 inode 检查管理。
+  临时路径不长于原路径；公开 Unix 路径拒绝 NUL，Linux 最多 107 字节、macOS 最多 103 字节，避免发布不可连接的长端点。
+  发布竞争不覆盖已有端点，不支持 Socket 硬链接的文件系统明确启动失败。
+  异常退出可能留下绑定名及公开端点；公开端点沿既有占用探测恢复，不扫描删除无法证明归属的随机名字。
+  Windows 使用默认仅创建用户与管理员可访问的命名管道，并在当前 SID 私有描述文件中保存随机管道名和随机
   认证令牌，连接首帧必须认证，关闭时只删除当前所有者发布的描述文件。
+  Relay 指标与控制查询共用单次 JSON 请求生命周期：调用方指定回应字节上限、绝对截止时间及可选取消信号，
+  统一关闭连接和清理等待，不重试；业务版本、关联 ID、确认结果和持久化含义由调用方验证。
 - `app-server-supervisor.mjs`：以当前用户私有 IPC 持有 App Server 监管入口互斥锁，
+  各平台监听与端点清理统一委托 `private-ipc.mjs`；关闭仍先销毁租约连接，再等待在途 Provider 操作，关闭后拒绝重启同一 Owner。
   对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供主 App Server 与受控 Provider 的按需
   启动、释放与 Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`），
   并为 macOS Desktop 受管 stdio Proxy 提供带独立能力版本的可信 Host 租约；该租约阻止主实例被

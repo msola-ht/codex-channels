@@ -1,4 +1,3 @@
-import { runRelayListenMenu } from "./model-relay-listen-menu.mjs";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -11,20 +10,7 @@ import {
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import {
-  runDisplaySettings,
-} from "./config-display-menu.mjs";
-import { runSystemSettings } from "./config-system-menu.mjs";
-import { runWebuiSettings } from "./config-webui-menu.mjs";
 import { reportMenuError } from "./cli-menu.mjs";
-import { runMetricsSettings } from "./metrics-config-menu.mjs";
-import { writeGatewayConfigSummary } from "./config-summary.mjs";
-import { runCodexUserSettingsSetup } from "./codex-user-settings-setup.mjs";
-import {
-  runAdvancedSettings,
-  runScheduledTasks,
-  runNetworkSettings,
-} from "./config-advanced-menu.mjs";
 
 export async function runConfig({
   environment = process.env,
@@ -33,7 +19,7 @@ export async function runConfig({
   output = process.stdout,
   prompts = clackPrompts,
   writeConfig = writeGatewayConfig,
-  codexUserSettingsSetup = runCodexUserSettingsSetup,
+  codexUserSettingsSetup = async (options) => (await import("./codex-user-settings-setup.mjs")).runCodexUserSettingsSetup(options),
   stayOnMenu = false,
 } = {}) {
   const { configPath, dataDir } = resolveConfigPaths(environment);
@@ -91,14 +77,14 @@ export async function runConfig({
     }
     const handlers = {
       codex_user: () => codexUserSettingsSetup({ environment, output, prompts }),
-      display: runDisplaySettings,
-      system: runSystemSettings,
-      scheduled_tasks: runScheduledTasks,
-      network: runNetworkSettings,
-      advanced: runAdvancedSettings,
-      relay: runRelayListenMenu,
-      webui: runWebuiSettings,
-      metrics: runMetricsSettings,
+      display: async (options) => (await import("./config-display-menu.mjs")).runDisplaySettings(options),
+      system: async (options) => (await import("./config-system-menu.mjs")).runSystemSettings(options),
+      scheduled_tasks: async (options) => (await import("./config-advanced-menu.mjs")).runScheduledTasks(options),
+      network: async (options) => (await import("./config-advanced-menu.mjs")).runNetworkSettings(options),
+      advanced: async (options) => (await import("./config-advanced-menu.mjs")).runAdvancedSettings(options),
+      relay: async (options) => (await import("./model-relay-listen-menu.mjs")).runRelayListenMenu(options),
+      webui: async (options) => (await import("./config-webui-menu.mjs")).runWebuiSettings(options),
+      metrics: async (options) => (await import("./metrics-config-menu.mjs")).runMetricsSettings(options),
     };
     if (!["summary", "paths"].includes(section) && !Object.hasOwn(handlers, section)) {
       throw new Error(`未知 Config 类别：${String(section)}`);
@@ -112,6 +98,7 @@ export async function runConfig({
         continue;
       }
       if (section === "summary") {
+        const { writeGatewayConfigSummary } = await import("./config-summary.mjs");
         writeGatewayConfigSummary(output, document, configPath, environment);
         continue;
       }

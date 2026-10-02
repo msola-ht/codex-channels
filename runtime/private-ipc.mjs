@@ -3,13 +3,14 @@ import {
   chmodSync,
   closeSync,
   lstatSync,
+  linkSync,
   mkdirSync,
   openSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createConnection, createServer } from "node:net";
-import { dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import {
   readPrivateFileSync,
@@ -59,14 +60,25 @@ export class PrivateIpcServer {
       await this.#startWindows(occupiedMessage);
       return;
     }
+    const maximumPathBytes = process.platform === "linux" ? 107 : 103;
+    if (Buffer.byteLength(this.#logicalPath) > maximumPathBytes || this.#logicalPath.includes("\0")) {
+      throw Object.assign(new Error("私有 IPC Socket 路径无效或超过平台长度限制"), { code: "ERR_PRIVATE_IPC_PATH" });
+    }
     await removeStaleUnixEndpoint(this.#logicalPath, occupiedMessage);
-    await listen(this.#server, this.#logicalPath, occupiedMessage);
+    // libuv unlinks its bind pathname on close without checking the inode. Bind
+    // under an unpublished name so it never owns cleanup of the public endpoint.
+    const boundPath = await listenUnpublishedUnix(this.#server, this.#logicalPath, occupiedMessage);
     try {
-      const status = lstatSync(this.#logicalPath);
+      const status = lstatSync(boundPath);
       this.#socketIdentity = { dev: status.dev, ino: status.ino };
-      chmodSync(this.#logicalPath, 0o600);
+      chmodSync(boundPath, 0o600);
+      // link is exclusive: a competing publisher must never be overwritten.
+      linkSync(boundPath, this.#logicalPath);
+      // Keep the bind name occupied until libuv closes and unlinks it. Releasing
+      // it early lets a later owner publish there and be deleted by this close.
     } catch (error) {
       await this.close();
+      if (error?.code === "EEXIST") throw new Error(occupiedMessage, { cause: error });
       throw error;
     }
   }
@@ -166,6 +178,47 @@ export function createPrivateIpcConnection(logicalPath) {
   return socket;
 }
 
+/** One bounded JSON exchange. Callers own response validation and confirmation semantics. */
+export function requestPrivateIpcJson(logicalPath, request, { timeoutMs, maximumBytes, signal }) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new Error("Private IPC request cancelled")); return; }
+    let socket;
+    let timer;
+    let done = false;
+    let bytes = 0;
+    const chunks = [];
+    const finish = (value, failed) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      socket?.destroy();
+      if (failed) reject(new Error("Private IPC request unconfirmed"));
+      else resolve(value);
+    };
+    const abort = () => finish(undefined, true);
+    try {
+      const payload = `${JSON.stringify(request)}\n`;
+      timer = setTimeout(abort, timeoutMs);
+      socket = createPrivateIpcConnection(logicalPath);
+      signal?.addEventListener("abort", abort, { once: true });
+      socket.once("connect", () => { if (!done) socket.write(payload); });
+      socket.on("error", abort);
+      socket.once("close", abort);
+      socket.on("data", chunk => {
+        if (done) return;
+        bytes += chunk.length;
+        if (bytes > maximumBytes) { abort(); return; }
+        chunks.push(chunk);
+        if (!chunk.includes(10)) return;
+        try { finish(JSON.parse(Buffer.concat(chunks).toString("utf8").trim()), false); }
+        catch { abort(); }
+      });
+      if (signal?.aborted) abort();
+    } catch { abort(); }
+  });
+}
+
 export function privateIpcAcceptsConnections(logicalPath) {
   if (!privateIpcEndpointExists(logicalPath)) return Promise.resolve(false);
   return new Promise((resolve) => {
@@ -261,7 +314,7 @@ function listen(server, path, occupiedMessage) {
   return new Promise((resolve, reject) => {
     const onError = (error) => {
       server.removeListener("listening", onListening);
-      reject(error?.code === "EADDRINUSE" ? new Error(occupiedMessage) : error);
+      reject(error?.code === "EADDRINUSE" ? new Error(occupiedMessage, { cause: error }) : error);
     };
     const onListening = () => {
       server.removeListener("error", onError);
@@ -271,6 +324,22 @@ function listen(server, path, occupiedMessage) {
     server.once("listening", onListening);
     server.listen(path);
   });
+}
+
+async function listenUnpublishedUnix(server, logicalPath, occupiedMessage) {
+  // Never lengthen the configured Socket path (including short macOS fixtures).
+  const nameLength = Math.min(24, Buffer.byteLength(basename(logicalPath)));
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const path = join(dirname(logicalPath), randomBytes(24).toString("base64url").slice(0, nameLength));
+    if (path === logicalPath) continue;
+    try {
+      await listen(server, path, occupiedMessage);
+      return path;
+    } catch (error) {
+      if (error?.cause?.code !== "EADDRINUSE") throw error;
+    }
+  }
+  throw new Error(occupiedMessage);
 }
 
 function closeServer(server) {

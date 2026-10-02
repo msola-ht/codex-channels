@@ -17,7 +17,7 @@ import {
   formatResetTime,
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
-import { formatCodexProviderLabel } from "./provider-format.js";
+import { formatCodexProviderLabel, formatDisplayedProvider } from "./provider-format.js";
 import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 
@@ -159,10 +159,6 @@ export function formatConversationModel(
   value: { model: string; modelProvider?: string },
 ): string {
   return `${label}：${value.model}${value.modelProvider ? ` · Provider：${formatDisplayedProvider(value.modelProvider)}` : ""}`;
-}
-
-export function formatDisplayedProvider(provider: string): string {
-  return provider.startsWith("ocg-") ? formatCodexProviderLabel(provider) : provider;
 }
 
 function formatModelStateLine(

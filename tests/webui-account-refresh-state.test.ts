@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  automaticAccountProviders, beginAccountRefreshAttempt, clearRecoveredAccountFailures, type AccountRefreshAttempts,
   openAiCreditsFromSnapshot,
   openAiWeeklyQuotaFromSnapshot,
   accountRefreshErrors,
@@ -20,9 +21,62 @@ import { estimateServerTime } from "../webui/src/lib/server-time.js";
 import type { OfficialAccountSourcesResponse, OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
 
 describe("WebUI per-account refresh state", () => {
+  it("automatically selects only missing or stale accounts using the server clock", () => {
+    const now = 2_000_000;
+    const accounts = ["fresh", "stale", "missing", "placeholder"].map(id => ({ id, displayName: id }));
+    const snapshots = { observedAtMs: now, warnings: [], snapshots: [
+      { provider: "fresh", observedAtMs: now - 900_000 },
+      { provider: "stale", observedAtMs: now - 900_001 },
+      { provider: "placeholder", observedAtMs: 0 },
+    ].map(item => ({ ...item, accountId: null, displayName: item.provider, default: false, available: true, usage: null, limits: null })) };
+    expect(automaticAccountProviders(accounts, snapshots, new Map(), now, 10)).toEqual(["stale", "missing", "placeholder"]);
+  });
+
+  it("clears only failures superseded by strictly newer observations", () => {
+    const attempts: AccountRefreshAttempts = new Map();
+    beginAccountRefreshAttempt(attempts, "clp-main", 100, 500);
+    attempts.get("clp-main")!.error = { kind: "refresh-failed", message: "failed" };
+    const snapshot = (observedAtMs: number): OfficialAccountSnapshotsResponse => ({ observedAtMs, warnings: [], snapshots: [{
+      provider: "clp-main", accountId: "main", displayName: "CLP", default: true, observedAtMs,
+      available: true, usage: null, limits: null,
+    }] });
+    for (const time of [0, 499, 500]) expect(clearRecoveredAccountFailures(attempts, snapshot(time))).toEqual([]);
+    expect(clearRecoveredAccountFailures(attempts, snapshot(501))).toEqual(["clp-main"]);
+    expect(attempts.size).toBe(0);
+    beginAccountRefreshAttempt(attempts, "clp-main", 100);
+    attempts.get("clp-main")!.error = { kind: "refresh-failed", message: "unknown baseline" };
+    expect(clearRecoveredAccountFailures(attempts, snapshot(501))).toEqual([]);
+    const accounts = [{ id: "clp-main", displayName: "CLP" }];
+    expect(automaticAccountProviders(accounts, snapshot(501), attempts, 501, 60_099)).toEqual([]);
+    expect(automaticAccountProviders(accounts, snapshot(501), attempts, 501, 60_100)).toEqual(["clp-main"]);
+  });
+
+  it("retains bounded attempt cooldown across navigation and permits retry after expiry", () => {
+    const attempts: AccountRefreshAttempts = new Map();
+    const accounts = [{ id: "clp-main", displayName: "CLP" }];
+    beginAccountRefreshAttempt(attempts, "clp-main", 100);
+    expect(automaticAccountProviders(accounts, null, attempts, 9_000_000, 60_099)).toEqual([]);
+    expect(automaticAccountProviders(accounts, null, attempts, 9_000_000, 60_100)).toEqual(["clp-main"]);
+    for (let i = 0; i < 300; i++) beginAccountRefreshAttempt(attempts, String(i), 100);
+    expect(attempts.size).toBe(256);
+    automaticAccountProviders(accounts, null, attempts, 9_000_000, 100);
+    expect(attempts.size).toBe(0);
+  });
+
   it("maps the isolated account source list without model configuration", () => {
     const accounts = ["openai", "clp-main", "ds-main"].map(provider => ({ provider, accountId: null, displayName: provider, default: false }));
     expect(refreshableAccounts({ accounts, warnings: [] })).toEqual(accounts.map(account => ({ id: account.provider, displayName: account.displayName })));
+  });
+
+  it("accepts a first single-account response and merges later accounts without replacing the list", () => {
+    const response = (provider: string): OfficialAccountSnapshotsResponse => ({ observedAtMs: 100, warnings: [], snapshots: [{
+      provider, accountId: "main", displayName: provider, default: false, observedAtMs: 100, available: true, usage: null, limits: null,
+    }] });
+    const first = accountSnapshotsAfterRefresh(null, ["clp-main"], [{ status: "fulfilled", value: response("clp-main") }]);
+    const next = accountSnapshotsAfterRefresh(first, ["ds-main"], [{ status: "fulfilled", value: response("ds-main") }]);
+    expect(next?.snapshots.map(snapshot => snapshot.provider)).toEqual(["clp-main", "ds-main"]);
+    expect(accountSnapshotsAfterRefresh(next, ["clp-main"], [{ status: "rejected", reason: new Error("failed") }])).toEqual(next);
+    expect(mergeAccountSnapshotLists(next, response("ds-main")).snapshots.map(snapshot => snapshot.provider)).toEqual(["ds-main"]);
   });
 
   it("keeps newer quota observations across late single-account and whole-list responses", () => {
@@ -122,6 +176,11 @@ describe("WebUI per-account refresh state", () => {
     };
     expect(quotaAccountFromSnapshot(snapshot)).toMatchObject({ account: null, windows: [{ resetsAt: 123000 }] });
     expect(quotaAccountFromSnapshot({ ...snapshot, accountId: "main" }).account).toBe("main");
+  });
+  it("preserves an unknown Cline reset time without converting it to epoch zero", () => {
+    const snapshot = { provider: "clp-main", accountId: "main", displayName: "Cline Pass main", default: true,
+      observedAtMs: 123, available: true, usage: { windows: [{ windowId: "five-hour", usedPercent: 0, resetsAt: null }] }, limits: null };
+    expect(quotaAccountFromSnapshot(snapshot)).toMatchObject({ windows: [{ usedPercent: 0, resetsAt: null }] });
   });
   it("keeps subscription facts in snapshots independently of refresh failures", () => {
     const snapshot = {

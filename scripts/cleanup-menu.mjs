@@ -1,16 +1,10 @@
+export { cleanupUsage } from "./cli-command-usage.mjs";
 import * as clackPrompts from "@clack/prompts";
 
 import { reportMenuError } from "./cli-menu.mjs";
 import { isPrunableMetricsProviderId } from "./metrics-command-options.mjs";
 import { runMetricsMaintenanceMenu } from "./metrics-menu.mjs";
 import { runSessionCleanupMenu } from "./session-menu.mjs";
-
-export const cleanupUsage = `用法：codexc cleanup
-
-交互选择：归档短会话及子会话、删除请求转储、清理旧指标、按 Provider 清理指标或重置指标库。
-会话归档需停止 Gateway，保留 App Server；转储删除需停止全部 App Server。
-旧指标清理会备份并停止后启动 Gateway；Provider 清理按原状态恢复 Gateway；重置指标库需先停止 Gateway。
-非交互终端只显示帮助。直接命令仍为 sessions cleanup、traffic cleanup、metrics cleanup|prune|reset。`;
 
 export async function runCleanupMenu({
   prompts = clackPrompts,

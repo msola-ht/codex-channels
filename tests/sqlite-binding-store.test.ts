@@ -474,18 +474,79 @@ describe("SqliteBindingStore", () => {
 
     expect(() => store.bind({
       ...previous,
+      workspaceId: "replacement-workspace",
       threadId: "thread-2",
       sessionId: "replacement-session",
     })).toThrow();
     expect(store.get(target)).toEqual(previous);
     expect(store.getByThread("thread-1")).toEqual(previous);
     expect(store.getByThread("thread-2")).toBeUndefined();
+    expect(store.getWorkspace(target)).toBe("main");
+    const inspection = new DatabaseSync(path, { readOnly: true });
+    try {
+      expect(inspection.prepare(`
+        SELECT workspace_id FROM conversation_workspaces
+        WHERE surface = ? AND account_id = ? AND conversation_id = ?
+      `).get(target.surface, target.accountId, target.conversationId)).toEqual({ workspace_id: "main" });
+    } finally {
+      inspection.close();
+    }
     store.close();
 
     const reopened = new SqliteBindingStore(path);
     expect(reopened.get(target)).toEqual(previous);
     expect(reopened.getByThread("thread-1")).toEqual(previous);
     expect(reopened.getByThread("thread-2")?.target.conversationId).toBe("200");
+    expect(reopened.getWorkspace(target)).toBe("main");
+    reopened.close();
+  });
+
+  it("rolls back workspace, bindings and idle state when takeover fails after workspace persistence", () => {
+    const { path } = databasePath();
+    const store = new SqliteBindingStore(path);
+    const destination = { ...target, conversationId: "destination" };
+    const owner = { target, workspaceId: "main", threadId: "owned", sessionId: "owned" };
+    const replaced = { target: destination, workspaceId: "other", threadId: "replaced", sessionId: "replaced" };
+    store.bind(owner);
+    store.bind(replaced);
+    const ownerIdle = store.idleState(target);
+    const destinationIdle = store.idleState(destination);
+    const external = new DatabaseSync(path);
+    external.exec(`
+      CREATE TRIGGER reject_takeover BEFORE INSERT ON conversation_bindings
+      WHEN NEW.thread_id = 'owned' AND NEW.conversation_id = 'destination'
+      BEGIN SELECT RAISE(ABORT, 'injected takeover failure'); END;
+    `);
+    external.close();
+
+    expect(() => store.transfer("owned", destination)).toThrow("injected takeover failure");
+    const inspection = new DatabaseSync(path, { readOnly: true });
+    try {
+      const workspace = inspection.prepare(`
+        SELECT workspace_id FROM conversation_workspaces
+        WHERE surface = ? AND account_id = ? AND conversation_id = ?
+      `);
+      expect(workspace.get(target.surface, target.accountId, target.conversationId))
+        .toEqual({ workspace_id: "main" });
+      expect(workspace.get(destination.surface, destination.accountId, destination.conversationId))
+        .toEqual({ workspace_id: "other" });
+    } finally {
+      inspection.close();
+    }
+    const assertUnchanged = (current: SqliteBindingStore): void => {
+      expect(current.get(target)).toEqual(owner);
+      expect(current.get(destination)).toEqual(replaced);
+      expect(current.getByThread("owned")).toEqual(owner);
+      expect(current.getByThread("replaced")).toEqual(replaced);
+      expect(current.getWorkspace(target)).toBe("main");
+      expect(current.getWorkspace(destination)).toBe("other");
+      expect(current.idleState(target)).toEqual(ownerIdle);
+      expect(current.idleState(destination)).toEqual(destinationIdle);
+    };
+    assertUnchanged(store);
+    store.close();
+    const reopened = new SqliteBindingStore(path);
+    assertUnchanged(reopened);
     reopened.close();
   });
 });

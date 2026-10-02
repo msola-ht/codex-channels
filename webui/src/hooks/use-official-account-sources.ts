@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import { useServerTimeSnapshot } from "@/hooks/use-server-time"
+import { estimateServerTime } from "@/lib/server-time"
+import type { OfficialAccountSnapshotsResponse } from "@/lib/types"
+
 import { ApiClientError } from "@/lib/api"
 import { useApi } from "@/hooks/use-api"
 import { scheduleVisibleSettingsRefresh } from "@/lib/api-polling"
@@ -9,6 +13,7 @@ import {
   refreshOfficialAccountSnapshot,
 } from "@/lib/api"
 import {
+  automaticAccountProviders, beginAccountRefreshAttempt, clearRecoveredAccountFailures, type AccountRefreshAttempts,
   accountRefreshErrors, accountSnapshotsWithMissingProviders, accountSnapshotsAfterRefresh, mergeAccountSnapshotLists,
   accountSnapshotsWithoutRemoved, ccgAccountFromSnapshot, deepseekAccountFromSnapshot,
   quotaAccountFromSnapshot, openAiCreditsFromSnapshot, openAiWeeklyQuotaFromSnapshot, refreshableAccounts, remainingRemovedAccountProviders, refreshAccountSnapshots,
@@ -16,7 +21,8 @@ import {
   type AccountRefreshFailure, type AccountRemovalNotice,
 } from "@/lib/account-refresh-state"
 
-export function useOfficialAccountSources() {
+export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
+  const clock = useServerTimeSnapshot()
   const snapshots = useApi(fetchOfficialAccountSnapshots, [], { mergeData: mergeAccountSnapshotLists })
   const [sourceWarnings, setSourceWarnings] = useState<Awaited<ReturnType<typeof fetchOfficialAccountSources>>["warnings"]>([])
   const [refreshing, setRefreshing] = useState(false)
@@ -29,22 +35,24 @@ export function useOfficialAccountSources() {
   const initialRefreshStarted = useRef(false)
   const refreshOperation = useRef<Promise<void> | null>(null)
   const refreshController = useRef<AbortController | null>(null)
-  const snapshotSync = useRef<AbortController | null>(null)
   const visibilityRefresh = useRef({ pending: false, lastRefresh: 0 })
   const replaceData = snapshots.replaceData
   const refetch = snapshots.refetch
   const refetchSnapshots = useCallback(() => {
-    // 独立同步（例如重置券操作后）优先于仍在等待的批量刷新收尾读取。
-    snapshotSync.current?.abort()
+    // 独立同步接管本页刷新，取消来源、预读、排队查询及收尾，避免迟到结果抢回所有权。
+    refreshController.current?.abort()
     refetch()
   }, [refetch])
-  const refresh = useCallback((provider?: string, snapshotsOnly = false) => {
+  const refresh = useCallback((provider?: string, snapshotsOnly = false, automatic = false, baseline?: OfficialAccountSnapshotsResponse | null) => {
+    if (automatic && document.visibilityState !== "visible") return Promise.resolve()
     if (refreshOperation.current !== null) return refreshOperation.current
     initialRefreshStarted.current = true
     if (provider === undefined && !snapshotsOnly) visibilityRefresh.current.pending = false
     visibilityRefresh.current.lastRefresh = Date.now()
     const controller = new AbortController()
     refreshController.current = controller
+    const pause = () => { if (document.visibilityState !== "visible") controller.abort() }
+    if (automatic) document.addEventListener("visibilitychange", pause)
     const operation = (async () => {
       setRefreshing(true)
       setRefreshError(null)
@@ -57,35 +65,57 @@ export function useOfficialAccountSources() {
           setProviders(accounts)
           setSourceWarnings(sources.warnings)
         }
-        const refreshableProviders = snapshotsOnly ? [] : provider === undefined ? accounts.map(account => account.id) : [provider]
+        let current = baseline ?? null
+        if (automatic && baseline === undefined) {
+          try {
+            current = await fetchOfficialAccountSnapshots(controller.signal)
+            if (controller.signal.aborted) return
+            replaceData(current)
+          } catch (error) { if (controller.signal.aborted) throw error }
+        }
+        if (controller.signal.aborted) return
+        const refreshableProviders = snapshotsOnly ? [] : automatic
+          ? automaticAccountProviders(accounts, current, attempts, estimateServerTime(clock), performance.now())
+          : provider === undefined ? accounts.map(account => account.id) : [provider]
+        if (automatic) setProviderErrors(previous => ({ ...previous, ...Object.fromEntries(accounts.map(account => [account.id, attempts.get(account.id)?.error ?? null])) }))
         setRefreshingProviders(refreshableProviders)
-        await refreshAccountSnapshots(refreshableProviders, refreshOfficialAccountSnapshot, (id, result) => {
+        await refreshAccountSnapshots(refreshableProviders, (id, signal) => {
+          signal.throwIfAborted()
+          const known = current ?? snapshots.data
+          beginAccountRefreshAttempt(attempts, id, performance.now(), known === null ? null
+            : known.snapshots.find(snapshot => snapshot.provider === id)?.observedAtMs ?? 0)
+          return refreshOfficialAccountSnapshot(id, signal)
+        }, (id, result) => {
           if (result.status === "fulfilled" && !result.value.snapshots.some(snapshot => snapshot.provider === id && snapshot.observedAtMs > 0)) {
             result = { status: "rejected", reason: new ApiClientError("账户来源不存在或尚未生成快照", 502, "provider_not_found") }
           }
-          setProviderErrors((previous) => ({ ...previous, ...accountRefreshErrors([id], [result]) }))
+          const errors = accountRefreshErrors([id], [result])
+          if (result.status === "fulfilled") attempts.delete(id)
+          else {
+            beginAccountRefreshAttempt(attempts, id, performance.now(), attempts.get(id)?.observedAtMs ?? null)
+            attempts.get(id)!.error = errors[id] ?? null
+          }
+          setProviderErrors((previous) => ({ ...previous, ...errors }))
           if (result.status === "fulfilled") replaceData(previous => accountSnapshotsAfterRefresh(previous, [id], [result]))
           setRefreshingProviders((previous) => previous.filter((candidate) => candidate !== id))
         }, controller.signal)
         if (controller.signal.aborted) return
-        const sync = new AbortController()
-        snapshotSync.current = sync
-        try {
-          const result = await fetchOfficialAccountSnapshots(AbortSignal.any([controller.signal, sync.signal]))
-          if (controller.signal.aborted || sync.signal.aborted) return
-          replaceData(result)
-          setRemovedProviders((removed) => remainingRemovedAccountProviders(result, accounts, removed))
-        } catch (error) {
-          if (!sync.signal.aborted) throw error
-        } finally {
-          if (snapshotSync.current === sync) snapshotSync.current = null
+        // No upstream work means the baseline already supplies the authoritative list.
+        if (automatic && refreshableProviders.length === 0 && current !== null) {
+          setRemovedProviders(removed => remainingRemovedAccountProviders(current, accounts, removed))
+          return
         }
+        const result = await fetchOfficialAccountSnapshots(controller.signal)
+        if (controller.signal.aborted) return
+        replaceData(result)
+        setRemovedProviders((removed) => remainingRemovedAccountProviders(result, accounts, removed))
       } catch (error) {
         if (!controller.signal.aborted) {
           const code = error instanceof ApiClientError ? error.code : null
           setRefreshError({ kind: snapshotsOnly ? "syncFailed" : "listFailed", code })
         }
       } finally {
+        if (automatic) document.removeEventListener("visibilitychange", pause)
         if (refreshController.current === controller) {
           refreshController.current = null
           refreshOperation.current = null
@@ -96,10 +126,18 @@ export function useOfficialAccountSources() {
     })()
     refreshOperation.current = operation
     return operation
-  }, [replaceData, providers])
+  }, [replaceData, providers, attempts, clock, snapshots.data])
+
+  useEffect(() => {
+    const recovered = clearRecoveredAccountFailures(attempts, snapshots.data)
+    if (recovered.length > 0) setProviderErrors(previous => ({ ...previous,
+      ...Object.fromEntries(recovered.map(id => [id, null])),
+    }))
+  }, [attempts, snapshots.data, providerErrors])
 
   const accountRemoved = useCallback((accountId: string, activation?: string) => {
     const removedProvider = `ocg-${accountId}`
+    attempts.delete(removedProvider)
     refreshController.current?.abort()
     refreshOperation.current = null
     setRemovedProviders((previous) => [...previous, removedProvider])
@@ -107,15 +145,15 @@ export function useOfficialAccountSources() {
     setProviderErrors((previous) => Object.fromEntries(Object.entries(previous).filter(([provider]) => provider !== removedProvider)))
     setRemovalNotice({ accountId, restartRequired: activation === "restart-all" })
     void refresh(undefined, true)
-  }, [refresh])
+  }, [refresh, attempts])
 
   useEffect(() => {
-    if (initialRefreshStarted.current) return
+    if (initialRefreshStarted.current || snapshots.loading) return
     initialRefreshStarted.current = true
-    void refresh()
-  }, [refresh])
+    void refresh(undefined, false, true, snapshots.data)
+  }, [refresh, snapshots.loading, snapshots.data])
 
-  useEffect(() => scheduleVisibleSettingsRefresh(() => { void refresh() }, refreshing, document, visibilityRefresh.current), [refresh, refreshing])
+  useEffect(() => scheduleVisibleSettingsRefresh(() => { void refresh(undefined, false, true) }, refreshing, document, visibilityRefresh.current), [refresh, refreshing])
 
   useEffect(() => () => {
     refreshController.current?.abort()

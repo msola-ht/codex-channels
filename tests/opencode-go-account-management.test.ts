@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   existsSync,
   mkdirSync,
@@ -28,9 +28,21 @@ const accounts = [
 ];
 
 describe("OpenCode Go account management", () => {
+  let fixtureHome: string;
+  let environment: NodeJS.ProcessEnv;
+  beforeEach(() => {
+    fixtureHome = mkdtempSync(join(tmpdir(), "ocg-management-"));
+    environment = {
+      CODEX_HOME: join(fixtureHome, "codex"),
+      CODEX_CONNECT_HOME: join(fixtureHome, "connect"),
+      CODEX_CONNECT_CONFIG_FILE: join(fixtureHome, "connect", "config.toml"),
+    };
+  });
+  afterEach(() => rmSync(fixtureHome, { recursive: true, force: true }));
+
   it("previews a default-account change without prompts or credentials", () => {
     const preview = previewOpencodeGoDefaultAccountChange("b", {
-      environment: {},
+      environment,
       loadAccounts: () => accounts,
     });
 
@@ -49,7 +61,7 @@ describe("OpenCode Go account management", () => {
     const writeAccounts = vi.fn();
 
     const result = await applyOpencodeGoDefaultAccountChange("b", {
-      environment: {},
+      environment,
       loadAccounts: () => accounts,
       writeAccounts,
     });
@@ -59,7 +71,7 @@ describe("OpenCode Go account management", () => {
       account: { id: "b", default: true },
       activation: "restart-all",
     });
-    expect(writeAccounts).toHaveBeenCalledWith({}, [
+    expect(writeAccounts).toHaveBeenCalledWith(environment, [
       { id: "main", default: false, email: "user@example.com" },
       { id: "b", default: true },
     ]);
@@ -71,7 +83,7 @@ describe("OpenCode Go account management", () => {
     const writeAccounts = vi.fn();
 
     await expect(applyOpencodeGoDefaultAccountChange("b", {
-      environment: {},
+      environment,
       loadAccounts,
       writeAccounts,
     })).resolves.toMatchObject({
@@ -79,8 +91,8 @@ describe("OpenCode Go account management", () => {
       currentDefaultAccountId: null,
       willChange: true,
     });
-    expect(loadAccounts).toHaveBeenCalledWith({}, { allowMissingDefault: true });
-    expect(writeAccounts).toHaveBeenCalledWith({}, [
+    expect(loadAccounts).toHaveBeenCalledWith(environment, { allowMissingDefault: true });
+    expect(writeAccounts).toHaveBeenCalledWith(environment, [
       { id: "main", default: false, email: "user@example.com" },
       { id: "b", default: true },
     ]);
@@ -89,7 +101,7 @@ describe("OpenCode Go account management", () => {
   it("returns a stable field error for an unknown account", () => {
     try {
       previewOpencodeGoDefaultAccountChange("missing", {
-        environment: {},
+        environment,
         loadAccounts: () => accounts,
       });
       throw new Error("expected unknown account validation to fail");
@@ -101,7 +113,7 @@ describe("OpenCode Go account management", () => {
 
   it("normalizes an unreadable account registry into a stable state error", () => {
     expect(() => previewOpencodeGoDefaultAccountChange("b", {
-      environment: {},
+      environment,
       loadAccounts: () => { throw new Error("private registry rejected"); },
     })).toThrowError(expect.objectContaining({
       code: "account-state-unavailable",
@@ -112,7 +124,7 @@ describe("OpenCode Go account management", () => {
 
   it("previews a running account and reports a held lease after execution", async () => {
     const options = {
-      environment: {},
+      environment,
       loadAccounts: () => accounts,
       resolvePrimarySocket: () => "/tmp/app-server.sock",
       inspectSupervisor: async () => ({
@@ -154,7 +166,7 @@ describe("OpenCode Go account management", () => {
   it("does not release an account whose App Server is not running", async () => {
     const releaseProvider = vi.fn();
     const result = await applyOpencodeGoAccountStop("b", {
-      environment: {},
+      environment,
       loadAccounts: () => accounts,
       resolvePrimarySocket: () => "/tmp/app-server.sock",
       inspectSupervisor: async () => ({ status: "missing" as const }),
@@ -174,7 +186,7 @@ describe("OpenCode Go account management", () => {
 
   it("previews non-default account removal without exposing credentials", async () => {
     const preview = await previewOpencodeGoAccountRemoval("b", {
-      environment: {},
+      environment,
       loadAccounts: () => accounts,
       readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
       resolvePrimarySocket: () => "/tmp/app-server.sock",
@@ -202,7 +214,7 @@ describe("OpenCode Go account management", () => {
 
   it("requires another default before removing the current default account", async () => {
     await expect(previewOpencodeGoAccountRemoval("main", {
-      environment: {},
+      environment,
       loadAccounts: () => accounts,
       readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
       resolvePrimarySocket: () => "/tmp/app-server.sock",
@@ -315,7 +327,7 @@ describe("OpenCode Go account management", () => {
 
   it("requires an explicit history-loss confirmation before account removal", async () => {
     await expect(applyOpencodeGoAccountRemoval({ accountId: "b" }, {
-      environment: {},
+      environment,
       loadAccounts: () => accounts,
       readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
       resolvePrimarySocket: () => "/tmp/app-server.sock",
@@ -331,7 +343,7 @@ describe("OpenCode Go account management", () => {
       accountId: "b",
       confirmHistoryLoss: true,
     }, {
-      environment: {},
+      environment,
       loadAccounts: () => accounts,
       readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
       resolvePrimarySocket: () => "/tmp/app-server.sock",

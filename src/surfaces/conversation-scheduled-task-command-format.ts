@@ -3,7 +3,7 @@ import type {
   ConversationCommandResult,
 } from "../application/index.js";
 
-import { formatDisplayedProvider } from "./conversation-model-account-command-format.js";
+import { formatDisplayedProvider } from "./provider-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 
 export function formatConversationScheduledTasks(

@@ -21,7 +21,6 @@ interface Subscription<T> {
   name: string;
   queue: BoundedAsyncQueue<QueuedEvent<T>>;
   controller: AbortController;
-  worker: Promise<void>;
 }
 
 export class EventBus<T> {
@@ -65,7 +64,6 @@ export class EventBus<T> {
       name,
       queue,
       controller,
-      worker,
     };
     this.subscriptions.add(subscription);
     return () => {

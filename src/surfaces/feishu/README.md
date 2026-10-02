@@ -18,14 +18,16 @@ Application 的内联 Data URL 输入，同一 Thread 的
 
 ## 文件索引
 
-- `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 只转出 Bootstrap 所需工厂、选项类型
-  和启动文案渲染器。
+- `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 通过显式加载函数提供 Bootstrap 所需工厂
+  和启动文案渲染器，静态出口仅转出选项类型。
 - `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，把同一富文本或 Inbox 已明确成批的图片合并为
-  一次最多 4 张的 Application 输入，并通过 Outbox 返回结果或安全错误。
+  一次最多 4 张的 Application 输入，协调命令执行与命令中心展示，并通过 Outbox 返回结果或安全错误。
 - `approval-card.ts`：生成有界 CardKit 2.0 审批卡片和移除动作后的处理结果卡片；短审批直接显示，
   长审批在待处理与处理结果中显示最多三行、150 字符的预览，完整命令、权限与持久规则保留在默认
   收起的核对面板中。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
+- `command-center-presentation.ts`：将命令结果转换为命令中心选项、输入表单和展示文案；仅接收动作与结果数据，
+  不执行命令或管理交互令牌。
 - `command-center.ts`：生成 CardKit 2.0 分类命令中心、帮助、选择与输入卡片，维护有界短期令牌与菜单事件去重，并复用
   Application 的唯一命令目录与执行入口；重置券选券及确认复用选择卡的一次性令牌，
   选择卡和通用输入卡不解析第二套命令语法。

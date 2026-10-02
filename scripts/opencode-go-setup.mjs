@@ -1,7 +1,7 @@
 import { opencodeGoReservedAccountIds } from "../runtime/managed-provider-account-options.mjs";
 import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
-import { hasLegacyOpencodeGoConfiguration, previewLegacyOpencodeGoRemoval, removeLegacyOpencodeGoAccount } from "./opencode-go-account-management.mjs";
+import { hasLegacyOpencodeGoConfiguration } from "./opencode-go-legacy-config.mjs";
 import {
   existsSync,
   rmSync,
@@ -423,6 +423,7 @@ export async function stopOpencodeGoAccount(accountId, {
 async function runLegacyOpencodeGoRemoval(accountId, {
   environment = process.env, output = process.stdout, prompts = clackPrompts, confirm = true,
 } = {}) {
+  const { previewLegacyOpencodeGoRemoval, removeLegacyOpencodeGoAccount } = await import("./opencode-go-legacy-removal.mjs");
   const preview = await previewLegacyOpencodeGoRemoval(accountId, { environment });
   output.write(`将移除或恢复以下旧账户文件：\n${preview.files.join("\n")}\n`);
   if (confirm && !await confirmPrompt(prompts, "移除旧 OCG 账户配置和 Key？保留备份与历史统计；之后需重新添加账户。", false)) {

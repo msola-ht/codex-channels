@@ -235,16 +235,7 @@ export class SqliteBindingStore implements BindingStore {
     if (binding && binding.workspaceId !== workspaceId) {
       throw new Error("切换 Workspace 前必须先解除当前 Thread 绑定");
     }
-    this.database
-      .prepare(`
-        INSERT INTO conversation_workspaces (
-          surface, account_id, conversation_id, workspace_id, updated_at
-        ) VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(surface, account_id, conversation_id) DO UPDATE SET
-          workspace_id = excluded.workspace_id,
-          updated_at = excluded.updated_at
-      `)
-      .run(target.surface, target.accountId, target.conversationId, workspaceId, Date.now());
+    this.writeWorkspace(target, workspaceId);
     this.memory.selectWorkspace(target, workspaceId);
   }
 
@@ -377,22 +368,7 @@ export class SqliteBindingStore implements BindingStore {
             .run(previous.threadId);
         }
       }
-      this.database
-        .prepare(`
-          INSERT INTO conversation_workspaces (
-            surface, account_id, conversation_id, workspace_id, updated_at
-          ) VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT(surface, account_id, conversation_id) DO UPDATE SET
-            workspace_id = excluded.workspace_id,
-            updated_at = excluded.updated_at
-        `)
-        .run(
-          binding.target.surface,
-          binding.target.accountId,
-          binding.target.conversationId,
-          binding.workspaceId,
-          Date.now(),
-        );
+      this.writeWorkspace(binding.target, binding.workspaceId);
       this.database
         .prepare(`
           INSERT INTO conversation_bindings (
@@ -527,22 +503,7 @@ export class SqliteBindingStore implements BindingStore {
       );
       this.upsertIdleState(previousOwner.target, previousAtMs, true);
       this.upsertIdleState(target, targetAtMs, false);
-      this.database
-        .prepare(`
-          INSERT INTO conversation_workspaces (
-            surface, account_id, conversation_id, workspace_id, updated_at
-          ) VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT(surface, account_id, conversation_id) DO UPDATE SET
-            workspace_id = excluded.workspace_id,
-            updated_at = excluded.updated_at
-        `)
-        .run(
-          target.surface,
-          target.accountId,
-          target.conversationId,
-          binding.workspaceId,
-          Date.now(),
-        );
+      this.writeWorkspace(target, binding.workspaceId);
       this.database
         .prepare(`
           INSERT INTO conversation_bindings (
@@ -610,6 +571,19 @@ export class SqliteBindingStore implements BindingStore {
     this.closed = true;
     this.database.close();
     this.memory.close();
+  }
+
+  private writeWorkspace(target: ConversationTarget, workspaceId: string): void {
+    this.database
+      .prepare(`
+        INSERT INTO conversation_workspaces (
+          surface, account_id, conversation_id, workspace_id, updated_at
+        ) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(surface, account_id, conversation_id) DO UPDATE SET
+          workspace_id = excluded.workspace_id,
+          updated_at = excluded.updated_at
+      `)
+      .run(target.surface, target.accountId, target.conversationId, workspaceId, Date.now());
   }
 
   private initializeSchema(): void {

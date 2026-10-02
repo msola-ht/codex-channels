@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react"
 
 import { useApi } from "@/hooks/use-api"
 import { useManagementTasks, useManagementTaskRefresh } from "@/hooks/use-management-tasks"
+import { scheduleVisibleSettingsRefresh } from "@/lib/api-polling"
 import { fetchManagementServices } from "@/lib/api"
 
 export function useRelayServiceManagement(onChanged: () => void, relayBusy: boolean) {
@@ -13,28 +14,17 @@ export function useRelayServiceManagement(onChanged: () => void, relayBusy: bool
     refetchServices()
     onChanged()
   }, [refetchServices, onChanged])
+  const visibilityRefresh = useRef({ pending: false, lastRefresh: Date.now() })
   const refresh = useCallback(() => {
+    visibilityRefresh.current.pending = false
+    visibilityRefresh.current.lastRefresh = Date.now()
     refreshResources()
     refetchTasks()
   }, [refreshResources, refetchTasks])
   useManagementTaskRefresh(tasks, refreshResources)
 
   const refreshBlocked = relayBusy || services.loading || tasks.loading || tasks.saving || tasks.pendingPreview !== null
-  const pendingVisibleRefresh = useRef(false)
-  const lastVisibleRefresh = useRef(0)
-  useEffect(() => {
-    const refreshVisible = () => {
-      if (document.visibilityState !== "visible") return
-      if (refreshBlocked) { pendingVisibleRefresh.current = true; return }
-      pendingVisibleRefresh.current = false
-      if (Date.now() - lastVisibleRefresh.current < 5_000) return
-      lastVisibleRefresh.current = Date.now()
-      refresh()
-    }
-    if (pendingVisibleRefresh.current) refreshVisible()
-    document.addEventListener("visibilitychange", refreshVisible)
-    return () => document.removeEventListener("visibilitychange", refreshVisible)
-  }, [refresh, refreshBlocked])
+  useEffect(() => scheduleVisibleSettingsRefresh(refresh, refreshBlocked, document, visibilityRefresh.current), [refresh, refreshBlocked])
 
   return { services, tasks, refresh, refreshBlocked }
 }

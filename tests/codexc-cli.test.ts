@@ -56,6 +56,24 @@ afterEach(() => {
 });
 
 describe("codexc CLI", { timeout: 15_000 }, () => {
+  it("loads help and version without command implementations or optional SDKs", () => {
+    const loader = `export async function resolve(specifier, context, nextResolve) {
+      if (["@clack/prompts", "ws", "undici", "grammy", "@larksuiteoapi/node-sdk"].includes(specifier)
+        || /\\/(?:service-command|desktop-app-command|timezone-command|traffic-upgrade|model-relay-command|cli-menu)\\.mjs$/.test(specifier)) {
+        throw new Error("Unexpected command dependency: " + specifier);
+      }
+      return nextResolve(specifier, context);
+    }`;
+    const preload = `import { register } from "node:module";
+      register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))}, import.meta.url);`;
+    for (const args of [["--help"], ["version"], ["service", "start", "--help"], ["desktop-app", "--help"], ["timezone", "--help"], ["traffic", "upgrade", "--help"]]) {
+      const output = execFileSync(process.execPath, [
+        "--import", "data:text/javascript," + encodeURIComponent(preload), cli, ...args,
+      ], { encoding: "utf8", timeout: 10_000 });
+      expect(output.trim()).not.toBe("");
+    }
+  });
+
   it.skipIf(process.platform === "win32")("suppresses only Node experimental warnings at the executable boundary", () => {
     expect(readFileSync(cli, "utf8").split("\n", 1)[0]).toBe(
       "#!/usr/bin/env -S node --disable-warning=ExperimentalWarning",

@@ -1,4 +1,4 @@
-import { hasLegacyOpencodeGoConfiguration } from "./opencode-go-account-management.mjs";
+import { hasLegacyOpencodeGoConfiguration } from "./opencode-go-legacy-config.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";

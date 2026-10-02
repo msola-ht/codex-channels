@@ -1,10 +1,4 @@
-import { chmodSync, lstatSync, unlinkSync, type Stats } from "node:fs";
-import {
-  createConnection,
-  createServer,
-  type Server,
-  type Socket,
-} from "node:net";
+import { createConnection, type Socket } from "node:net";
 
 import {
   createPrivateIpcConnection,
@@ -20,10 +14,8 @@ import {
 const maximumMetricsBytes = 8_192;
 
 export class ProviderProxyMetricsServer {
-  private readonly server: Server | undefined;
-  private readonly windowsServer: PrivateIpcServer | undefined;
+  private readonly server: PrivateIpcServer;
   private readonly sockets = new Set<Socket>();
-  private socketIdentity: Pick<Stats, "dev" | "ino"> | undefined;
   private started = false;
   private stopped = false;
 
@@ -32,39 +24,19 @@ export class ProviderProxyMetricsServer {
     private readonly onMetrics: (metrics: ProviderProxyMetrics) => void,
     private readonly onError?: (error: Error) => void,
   ) {
-    const listener = (socket: Socket): void => this.handleConnection(socket);
-    if (process.platform === "win32") {
-      this.windowsServer = new PrivateIpcServer(this.socketPath, listener);
-      this.server = undefined;
-    } else {
-      this.server = createServer({ allowHalfOpen: true }, listener);
-      this.windowsServer = undefined;
-    }
+    this.server = new PrivateIpcServer(this.socketPath, (socket) => this.handleConnection(socket));
   }
 
   async start(): Promise<void> {
+    if (this.stopped) throw new Error("模型代理指标接收器已关闭");
     if (this.started) {
       return;
     }
-    if (process.platform !== "win32") {
-      await removeStaleUnixSocket(this.socketPath);
-      await listenUnixServer(this.server!, this.socketPath);
-      try {
-        const status = lstatSync(this.socketPath);
-        this.socketIdentity = { dev: status.dev, ino: status.ino };
-        chmodSync(this.socketPath, 0o600);
-        this.started = true;
-      } catch (error) {
-        await this.close();
-        throw error;
-      }
-      return;
-    }
     try {
-      await this.windowsServer!.start(`模型代理指标 Socket 已被占用：${this.socketPath}`);
+      await this.server.start(`模型代理指标 Socket 已被占用：${this.socketPath}`);
       this.started = true;
     } catch (error) {
-      await this.close();
+      await this.closeResources();
       throw error;
     }
   }
@@ -74,19 +46,14 @@ export class ProviderProxyMetricsServer {
       return;
     }
     this.stopped = true;
+    await this.closeResources();
+  }
+
+  private async closeResources(): Promise<void> {
     for (const socket of this.sockets) {
       socket.destroy();
     }
-    if (process.platform === "win32") {
-      await this.windowsServer!.close();
-      return;
-    }
-    if (this.server!.listening) {
-      await new Promise<void>((resolveClose) => {
-        this.server!.close(() => resolveClose());
-      });
-    }
-    unlinkOwnedUnixSocket(this.socketPath, this.socketIdentity);
+    await this.server.close();
   }
 
   private handleConnection(socket: Socket): void {
@@ -167,56 +134,6 @@ export function sendProviderProxyMetrics(
     socket.once("end", finish);
     socket.once("error", finish);
   });
-}
-
-async function removeStaleUnixSocket(socketPath: string): Promise<void> {
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (!status) return;
-  if (!status.isSocket() || status.uid !== process.getuid?.()) {
-    throw new Error(`模型代理指标 Socket 路径已存在且不安全：${socketPath}`);
-  }
-  if (await unixSocketAcceptsConnections(socketPath)) {
-    throw new Error(`模型代理指标 Socket 已被占用：${socketPath}`);
-  }
-  unlinkSync(socketPath);
-}
-
-function unixSocketAcceptsConnections(socketPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection(socketPath);
-    socket.once("connect", () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once("error", () => resolve(false));
-  });
-}
-
-function listenUnixServer(server: Server, socketPath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onError = (error: Error): void => {
-      server.removeListener("listening", onListening);
-      reject(error);
-    };
-    const onListening = (): void => {
-      server.removeListener("error", onError);
-      resolve();
-    };
-    server.once("error", onError);
-    server.once("listening", onListening);
-    server.listen(socketPath);
-  });
-}
-
-function unlinkOwnedUnixSocket(
-  socketPath: string,
-  identity: Pick<Stats, "dev" | "ino"> | undefined,
-): void {
-  if (!identity) return;
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (status?.isSocket() && status.dev === identity.dev && status.ino === identity.ino) {
-    unlinkSync(socketPath);
-  }
 }
 
 function parseMetrics(value: string): ProviderProxyMetrics | undefined {

@@ -1,3 +1,5 @@
+import { desktopAppCommandUsage } from "./cli-command-usage.mjs";
+export { desktopAppCommandUsage } from "./cli-command-usage.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { closeSync, lstatSync, openSync, readSync } from "node:fs";
 import { homedir } from "node:os";
@@ -34,13 +36,6 @@ const macCompatibilityMarkers = [
 const bridgePath = "/codex-app-server";
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const desktopAppProxyPath = join(scriptDirectory, "desktop-app-proxy.mjs");
-
-export const desktopAppCommandUsage = `用法：codexc desktop-app <enable|disable|status|open>
-
-  enable [--port 端口]   启用 Desktop App 共享连接并重启 App Server 服务
-  disable                禁用共享连接并重启 App Server 服务
-  status [--json]        只读检查 Desktop、配置和连接状态
-  open                   通过共享 App Server 启动 Desktop App`;
 
 export async function runDesktopAppCommand(args, options = {}) {
   const parsed = parseDesktopAppArgs(args);

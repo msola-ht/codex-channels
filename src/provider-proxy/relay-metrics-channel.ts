@@ -1,5 +1,5 @@
 import type { Socket } from "node:net";
-import { createPrivateIpcConnection, PrivateIpcServer } from "../../runtime/private-ipc.mjs";
+import { requestPrivateIpcJson, PrivateIpcServer } from "../../runtime/private-ipc.mjs";
 import type { RelayMetric } from "./relay-metric.js";
 
 export interface RelayMetricEnvelope { version: 1; providerId: string; relayRequestId: string; sample: RelayMetric }
@@ -60,27 +60,7 @@ export class RelayMetricsServer {
 
 /** No retry. Caller classifies disconnects/timeouts as unconfirmed, never definite loss. */
 export function sendRelayMetrics(path: string, envelope: RelayMetricEnvelope, signal: AbortSignal): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) { reject(new Error("Relay metrics cancelled")); return; }
-    let socket: Socket;
-    try { socket = createPrivateIpcConnection(path); } catch { reject(new Error("Relay metrics unavailable")); return; }
-    let done = false; let buffer = "";
-    const finish = (value: unknown, failed: boolean): void => {
-      if (done) return; done = true; clearTimeout(timer); signal.removeEventListener("abort", abort); socket.destroy();
-      if (failed) reject(new Error("Relay metrics unconfirmed")); else resolve(value);
-    };
-    const abort = (): void => finish(undefined, true);
-    const timer = setTimeout(abort, 1000);
-    signal.addEventListener("abort", abort, { once: true });
-    socket.once("connect", () => { if (!done) socket.write(`${JSON.stringify(envelope)}\n`); });
-    socket.on("error", abort); socket.once("close", abort);
-    socket.on("data", (chunk: Buffer) => {
-      buffer += chunk.toString("utf8");
-      if (Buffer.byteLength(buffer) > 8192) { abort(); return; }
-      if (!buffer.includes("\n")) return;
-      try { finish(JSON.parse(buffer.trim()) as unknown, false); } catch { abort(); }
-    });
-  });
+  return requestPrivateIpcJson(path, envelope, { timeoutMs: 1000, maximumBytes: 8192, signal });
 }
 
 function validSample(value: unknown, provider: unknown, requestId: unknown): value is RelayMetric {

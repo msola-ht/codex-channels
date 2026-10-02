@@ -21,7 +21,7 @@ import {
 import { UsageCharts } from "@/components/overview/usage-charts"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
 import { useTranslation } from "@/hooks/use-translation"
-import type { AccountRefreshControl, AccountRefreshFailure, AccountRemovalNotice } from "@/lib/account-refresh-state"
+import type { AccountRefreshAttempts, AccountRefreshControl, AccountRefreshFailure, AccountRemovalNotice } from "@/lib/account-refresh-state"
 import { useDashboard } from "@/hooks/use-dashboard"
 import { translateApiError, translateApiErrorCode } from "@/lib/i18n/translate"
 import type { Translate } from "@/lib/i18n/messages"
@@ -38,14 +38,15 @@ import type {
   MetricsRangeQuery,
 } from "@/lib/types"
 
-export function ConsolePage({ range, onRangeChange }: {
+export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
+  refreshAttempts: AccountRefreshAttempts
   range: MetricsRangeQuery
   onRangeChange: (range: MetricsRangeQuery) => void
 }) {
   const { t } = useTranslation()
   const dashboard = useDashboard(range)
   const refetch = dashboard.refetch
-  const officialAccounts = useOfficialAccountSources()
+  const officialAccounts = useOfficialAccountSources(refreshAttempts)
   const refreshAccounts = officialAccounts.refresh
   const refreshing = dashboard.loading || officialAccounts.refreshing
 

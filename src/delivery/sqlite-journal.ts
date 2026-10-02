@@ -1,8 +1,9 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { readPrivateFileSync, securePrivateDirectorySync, securePrivateFileSync } from "../../runtime/private-file.mjs";
+import { decryptDeliveryPayload, deliveryPayloadAad, encryptDeliveryPayload } from "./payload-codec.js";
 import { readDeliveryQueueRows } from "./queue-reader.js";
 import { defaultDeliveryLimits, deliverySchemaVersion, DeliveryError, type DeliveryLimits, type DeliveryRecord, type DeliveryState, type DeliverySubmission, type DeliverySummary, type JournalCommand, type JournalResult } from "./types.js";
 
@@ -78,7 +79,7 @@ export class SqliteDeliveryJournal {
           CREATE INDEX conversation_order ON deliveries(conversation,sequence);
           CREATE INDEX account_usage ON deliveries(account);
           PRAGMA user_version=1;`);
-        const proof = this.encrypt("delivery-v1", "metadata");
+        const proof = encryptDeliveryPayload(this.key, "delivery-v1", "metadata");
         database.prepare("INSERT INTO metadata VALUES(?,?,?,?)").run(deliverySchemaVersion, proof.payload, proof.nonce, proof.tag);
         database.exec("COMMIT");
         this.syncDirectory();
@@ -87,7 +88,7 @@ export class SqliteDeliveryJournal {
       const proofs = database.prepare("SELECT * FROM metadata").all();
       const proof = proofs[0];
       if (version !== deliverySchemaVersion || proofs.length !== 1 || proof?.version !== deliverySchemaVersion
-        || this.decrypt(proof.proof as Uint8Array, proof.nonce as Uint8Array, proof.tag as Uint8Array, "metadata") !== "delivery-v1") throw new DeliveryError("storage");
+        || decryptDeliveryPayload(this.key, proof.proof as Uint8Array, proof.nonce as Uint8Array, proof.tag as Uint8Array, "metadata") !== "delivery-v1") throw new DeliveryError("storage");
       // Keyset reads keep one payload in memory and retain the statement across
       // calls; early Node 22 iterators can outlive their collected statement.
       const recovery = database.prepare("SELECT * FROM deliveries WHERE sequence>? ORDER BY sequence LIMIT 1");
@@ -207,7 +208,7 @@ export class SqliteDeliveryJournal {
       const account = this.database.prepare("SELECT COUNT(*) AS records, COALESCE(SUM(bytes),0) AS bytes FROM deliveries WHERE account=?").get(value.account)!;
       if (total.records >= this.limits.records || total.bytes + bytes > this.limits.bytes) throw new DeliveryError("capacity");
       if (Number(account.records) >= this.limits.accountRecords || Number(account.bytes) + bytes > this.limits.accountBytes) throw new DeliveryError("account-capacity");
-      const encrypted = this.encrypt(value.payload, this.aad(value));
+      const encrypted = encryptDeliveryPayload(this.key, value.payload, deliveryPayloadAad(value));
       const result = this.database.prepare("INSERT INTO deliveries(id,account,conversation,state,created_at,bytes,payload,nonce,tag) VALUES(?,?,?,'pending',?,?,?,?,?)")
         .run(value.id, value.account, value.conversation, Date.now(), bytes, encrypted.payload, encrypted.nonce, encrypted.tag);
       this.database.exec("COMMIT");
@@ -229,30 +230,12 @@ export class SqliteDeliveryJournal {
     return result;
   }
 
-  private aad(value: Pick<DeliverySubmission, "id" | "account" | "conversation">): string {
-    return JSON.stringify([deliverySchemaVersion, value.id, value.account, value.conversation]);
-  }
-
-  private encrypt(text: string, aad: string): { payload: Buffer; nonce: Buffer; tag: Buffer } {
-    const nonce = randomBytes(12);
-    const cipher = createCipheriv("aes-256-gcm", this.key, nonce);
-    cipher.setAAD(Buffer.from(aad));
-    return { payload: Buffer.concat([cipher.update(text, "utf8"), cipher.final()]), nonce, tag: cipher.getAuthTag() };
-  }
-
-  private decrypt(payload: Uint8Array, nonce: Uint8Array, tag: Uint8Array, aad: string): string {
-    const decipher = createDecipheriv("aes-256-gcm", this.key, nonce);
-    decipher.setAAD(Buffer.from(aad));
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(payload), decipher.final()]).toString("utf8");
-  }
-
   private decode(row: Row): DeliveryRecord {
     return { id: row.id, account: row.account, conversation: row.conversation, sequence: row.sequence,
       state: row.state, createdAt: row.created_at, attempt: row.attempt,
       bytes: row.bytes,
       progress: JSON.parse(row.progress) as DeliveryRecord["progress"],
-      payload: this.decrypt(row.payload, row.nonce, row.tag, this.aad(row)) };
+      payload: decryptDeliveryPayload(this.key, row.payload, row.nonce, row.tag, deliveryPayloadAad(row)) };
   }
 
   close(): void {

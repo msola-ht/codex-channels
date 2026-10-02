@@ -319,7 +319,11 @@ OpenCode Go 和自定义第三方代理仍拒绝这些路径。真实合同使�
 `POST /alpha/search` 能穿过该白名单并完成工具结果往返。
 
 Provider 生命周期补充：私有 [`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 不是
-Codex App Server RPC。它负责主实例与受管实例的按需启动和显式管理操作；`codexc remote` 连接实例
+Codex App Server RPC。监听与端点清理复用 [`private-ipc.mjs`](../runtime/private-ipc.mjs)，
+Unix 公开端点通过独占硬链接发布，绑定名保留至监听关闭，避免提前复用绑定名或关闭旧监听时误删替代路径；验证见
+[`private-ipc-lifecycle.test.ts`](../tests/private-ipc-lifecycle.test.ts)、[`app-server-supervisor.test.ts`](../tests/app-server-supervisor.test.ts)
+及 [`real-app-server-supervised-provider.test.ts`](../tests/real-app-server-supervised-provider.test.ts)。
+它负责主实例与受管实例的按需启动和显式管理操作；`codexc remote` 连接实例
 期间通过同一私有 Socket 持有生命周期租约，Supervisor 在租约存在时拒绝显式释放，并在连接正常退出
 或异常断开后自动撤销租约。同一实例的启动、释放与租约获取串行执行，释放响应区分已释放、
 租约占用与实例未运行；DS、OCG、CCG 通过共享 [`managed-provider-account-runtime.mjs`](../scripts/managed-provider-account-runtime.mjs)

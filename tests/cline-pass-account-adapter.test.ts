@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { createClinePassAccountAdapter } from "../src/bootstrap/cline-pass-account-adapter.js";
 import { ProviderAccountService, type OfficialAccountSnapshot } from "../src/application/index.js";
-import { applyClinePassConfiguration } from "../scripts/cline-pass-setup.mjs";
+import { applyClinePassConfiguration } from "../scripts/cline-pass-account-management.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 
 vi.mock("../scripts/model-catalog-validation.mjs", () => ({ validateModelCatalogWithCodex: async () => undefined }));
@@ -50,6 +50,21 @@ it.each([
   await expect(service.refreshAccountSnapshot("clp-test")).rejects.toMatchObject({ code: "provider.account.unavailable", message: "CLP 账户查询失败" });
   expect(snapshots).toHaveLength(1);
   expect(snapshots[0]).toMatchObject({ available: true, usage: { kind: "quota-windows" } });
+});
+
+it("refreshes and persists quota when the upstream omits a window reset time", async () => {
+  const fiveHour = { type: "five_hour", percentUsed: 0 };
+  const response = { success: true, data: { limits: [fiveHour, ...valid.data.limits.slice(1)] } };
+  const adapter = createClinePassAccountAdapter({ provider: "clp-test", environment: await fixture(), fetchImpl: async () => Response.json(response) });
+  const snapshots: OfficialAccountSnapshot[] = [];
+  const service = new ProviderAccountService([adapter], { writeOfficialAccountSnapshot: snapshot => { snapshots.push(snapshot); } });
+  await service.refreshAccountSnapshot("clp-test");
+  expect(snapshots).toHaveLength(1);
+  expect(snapshots[0]).toMatchObject({ available: true, usage: { kind: "quota-windows", windows: [
+    { windowId: "five-hour", usedPercent: 0, resetsAt: null },
+    { windowId: "weekly", usedPercent: 12.5, resetsAt: Math.floor(Date.parse(reset) / 1000) },
+    { windowId: "monthly", usedPercent: 25, resetsAt: Math.floor(Date.parse(reset) / 1000) },
+  ] } });
 });
 
 it.each([401, 403, 429, 500])("sanitizes HTTP %s without claiming no subscription", async status => {

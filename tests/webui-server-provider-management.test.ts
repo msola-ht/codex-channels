@@ -1,3 +1,5 @@
+// @ts-expect-error JavaScript WebUI route intentionally has no declaration file.
+import { sendAccountSnapshots } from "../scripts/webui-management-provider-route.mjs";
 import { GatewayAccountRefreshError, GatewayAccountRefreshServer } from "../runtime/gateway-account-refresh.mjs";
 import { clinePassAccountsFilePath } from "../runtime/cline-pass-accounts.mjs";
 import {createResponsesModelCatalog} from "../runtime/model-provider-responses-catalog.mjs";
@@ -45,6 +47,72 @@ function startServer(
 }
 
 describe("webui server Provider and account management", () => {
+  it.each([1, 4, 16])("bounds refresh result rows for %i accounts plus one authoritative sync", count => {
+    const fixture = createFixture();
+    const accounts = Array.from({ length: count }, (_,i) => ({ id: `a${i}`, default: i === 0 }));
+    writePrivateFileAtomicSync(clinePassAccountsFilePath(fixture.environment), JSON.stringify(accounts));
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const now = Date.now();
+    let rows = 0;
+    const bodies: string[] = [];
+    const latestAccountSnapshots = vi.fn(() => { const result = store.latestAccountSnapshots(); rows += result.length; return result; });
+    const latestAccountSnapshot = vi.fn((provider: string) => { const result = store.latestAccountSnapshot(provider); rows += result ? 1 : 0; return result; });
+    const close = vi.fn();
+    const open = () => ({ latestAccountSnapshot, latestAccountSnapshots, close });
+    const response = { writeHead: vi.fn(), end: (body: string) => { bodies.push(body); } };
+    try {
+      for (const account of accounts) store.upsertAccountSnapshot({ sourceId: `clp-${account.id}`, provider: `clp-${account.id}`,
+        accountId: account.id, displayName: account.id, enabled: true, observedAtMs: now, available: true, usage: null, limits: null });
+      for (const account of accounts) sendAccountSnapshots(fixture.environment, response, open, `clp-${account.id}`);
+      sendAccountSnapshots(fixture.environment, response, open);
+      expect(rows).toBe(2 * count);
+      expect(latestAccountSnapshot).toHaveBeenCalledTimes(count);
+      expect(latestAccountSnapshots).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledTimes(count + 1);
+      expect(bodies.slice(0, count).map(body => (JSON.parse(body) as OfficialAccountSnapshotsResponse).snapshots.length)).toEqual(accounts.map(() => 1));
+      const bytes = bodies.reduce((sum, body) => sum + Buffer.byteLength(body), 0);
+      const fullBytes = Buffer.byteLength(bodies.at(-1)!);
+      expect(bytes).toBeLessThanOrEqual((count + 1) * fullBytes);
+      if (count > 1) expect(bytes).toBeLessThan((count + 1) * fullBytes);
+    } finally { store.close(); }
+  });
+
+  it("returns only the refreshed Provider while retaining authoritative lists, warnings and removal checks", async () => {
+    const fixture = createFixture();
+    const registry = clinePassAccountsFilePath(fixture.environment);
+    writePrivateFileAtomicSync(registry, JSON.stringify([{ id: "one", default: true }, { id: "two", default: false }]));
+    writePrivateFileAtomicSync(deepseekAccountsFilePath(fixture.environment), "broken registry");
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const now = Date.now();
+    for (const [provider, accountId] of [["clp-one", "one"], ["clp-two", "two"]]) {
+      store.upsertAccountSnapshot({ sourceId: provider!, provider: provider!, accountId: accountId!, displayName: provider!,
+        enabled: true, observedAtMs: now, available: true, usage: { kind: "quota-windows", windows: [] }, limits: null });
+    }
+    store.close();
+    let removeDuringRefresh = false;
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin,
+      refreshGatewayAccount: async () => {
+        if (removeDuringRefresh) writePrivateFileAtomicSync(registry, JSON.stringify([{ id: "two", default: true }]));
+      },
+    });
+    const refresh = async (): Promise<OfficialAccountSnapshotsResponse> => {
+      const response = await fetch(`${origin}/api/v1/management/accounts/refresh`, { method: "POST",
+        headers: { origin: managementOrigin, "content-type": "application/json" }, body: JSON.stringify({ provider: "clp-one" }) });
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    const first = await refresh();
+    expect(first.snapshots).toEqual([expect.objectContaining({ provider: "clp-one", observedAtMs: now, default: true })]);
+    expect(first.warnings).toEqual([{ source: "deepseek", code: "registry_unavailable", message: "DeepSeek 账户元数据暂不可用" }]);
+    const all = await (await fetch(`${origin}/api/v1/accounts`)).json() as OfficialAccountSnapshotsResponse;
+    expect(all.snapshots.map(snapshot => snapshot.provider)).toEqual(["clp-one", "clp-two"]);
+    removeDuringRefresh = true;
+    expect((await refresh()).snapshots).toEqual([]);
+    const remaining = await (await fetch(`${origin}/api/v1/accounts`)).json() as OfficialAccountSnapshotsResponse;
+    expect(remaining.snapshots.map(snapshot => snapshot.provider)).toEqual(["clp-two"]);
+  });
+
   it("lists refresh sources without a database, model catalogs, or provider summary, isolating bad registries", async () => {
     const fixture = createFixture();
     writePrivateFileAtomicSync(clinePassAccountsFilePath(fixture.environment), JSON.stringify([{ id: "test", default: true }]));

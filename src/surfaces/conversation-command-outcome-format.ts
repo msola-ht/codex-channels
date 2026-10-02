@@ -13,10 +13,10 @@ import {
 } from "./conversation-scheduled-task-command-format.js";
 import {
   formatConversationModel,
-  formatDisplayedProvider,
   formatNextMessageModel,
 } from "./conversation-model-account-command-format.js";
 import { workspacePermissionLines } from "./conversation-workspace-status-command-format.js";
+import { formatDisplayedProvider } from "./provider-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 
 export function formatConversationCommandOutcome(
