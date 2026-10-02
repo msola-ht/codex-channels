@@ -98,7 +98,7 @@ export function RelayPage() {
     <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
     <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />
     <RelayServiceManagement controller={serviceManagement} snapshot={data} loading={management.loading} current={snapshotCurrent} />
-    {data && <RelayExtraModels key={extraModelsVersion} snapshot={data} blocked={blocked} onRefresh={management.refetch} confirmationOpen={preview !== undefined} error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} onSubmit={(provider, extraModels, revision, enabledModels) => {
+    {data && <RelayExtraModels key={extraModelsVersion} snapshot={data} blocked={blocked} refreshBlocked={refreshingBlocked} onRefresh={management.refetch} confirmationOpen={preview !== undefined} error={management.error ? translateApiError(t, management.error, management.errorCode) : management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} onSubmit={(provider, extraModels, revision, enabledModels) => {
       returnFocus.current = document.activeElement as HTMLElement
       mutate({ command: "models", provider, extraModels, enabledModels }, revision)
     }} />}

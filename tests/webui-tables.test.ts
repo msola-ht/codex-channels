@@ -235,6 +235,12 @@ describe("WebUI metrics table presentation", () => {
           requestsMissingModel: render(RequestsTable, { ...requestProps, records: [{ ...record, requestModel: null, responseModel: "model-test" }] }),
           requestsOtherUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "other-provider" }] }),
           trafficOtherUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "other-provider" }], onOpen: noop }),
+          requestsClpUnexpected: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", upstreamProvider: "other-provider" }] }),
+          trafficClpUnexpected: render(TrafficTable, { exchanges: [{ ...exchange, label: "relay.chat", account: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", upstreamProvider: "other-provider" }], onOpen: noop }),
+          detailClpUnexpected: render(TrafficDetail, { detail: { ...detail, account: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", upstreamProvider: "other-provider" }, provider: "relay.chat", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          requestsMuseUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/muse-spark-1.3-contributor", upstreamProvider: "meta" }] }),
+          detailMuseUpstream: render(TrafficDetail, { detail: { ...detail, account: "clp-main", requestModel: "cline-pass/muse-spark-1.3-contributor", upstreamProvider: "meta" }, provider: "relay.chat", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          requestsOtherProviderDeepSeek: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "custom", requestModel: "cline-pass/deepseek-v4.1-flash", upstreamProvider: "other-provider" }] }),
           requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek", upstreamAttemptCount: 3 }] }),
           trafficUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "deepseek" }], onOpen: noop }),
           loading: render(RequestsTable, { ...requestProps, loading: true }),
@@ -567,11 +573,17 @@ describe("WebUI metrics table presentation", () => {
       expect(tag).toContain('data-icon="inline-start"');
     }
     expect(badge(markup.requestsMissingModel!, "响应模型：model-test（信息不足）")).toContain('data-variant="outline"');
-    for (const key of ["trafficUpstream", "trafficOtherUpstream"]) {
+    for (const key of ["trafficUpstream", "trafficOtherUpstream", "requestsOtherUpstream", "requestsMuseUpstream", "detailMuseUpstream", "requestsOtherProviderDeepSeek"]) {
       const tag = badge(markup[key]!, "routing.finalProvider");
-      expect(tag).toContain(key.includes("Other") ? 'data-variant="destructive"' : 'data-variant="outline"');
+      expect(tag).toContain('data-variant="outline"');
+      expect(tag).not.toContain('data-icon="inline-start"');
       expect(tag).toContain('data-size="sm"');
       expect(tag).not.toContain("上游：");
+    }
+    for (const key of ["requestsClpUnexpected", "trafficClpUnexpected", "detailClpUnexpected"]) {
+      const tag = badge(markup[key]!, "routing.finalProvider");
+      expect(tag).toContain('data-variant="destructive"');
+      expect(tag).toContain('data-icon="inline-start"');
     }
   });
 

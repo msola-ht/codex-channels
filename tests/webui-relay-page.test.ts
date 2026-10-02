@@ -247,13 +247,16 @@ it("shows provider rows with a model-list dialog, enable controls and stale-draf
         {id:'clp-main',available:true,enabledModels:['model/a'],extraModels:[],models:[{id:'model/a',inputModalities:['text','image','audio','video','pdf']},{id:'model/b',inputModalities:[]}]},
         {id:'ds-main',available:true,enabledModels:[],models:[]}
       ]};
-      const render=(language='en',confirmationOpen=false)=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(RelayExtraModels,{snapshot,blocked:false,confirmationOpen,onSubmit(){}})));
+      const render=(language='en',confirmationOpen=false)=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(RelayExtraModels,{snapshot,blocked:!!globalThis.loadFailed,refreshBlocked:!!globalThis.refreshing,error:globalThis.modelError,onRefresh(){},confirmationOpen,onSubmit(){}})));
       const list=render();
       globalThis.draft={provider:'clp-main',revision:'current',enabledModels:['model/a'],extraModels:[]};
       const editor=render('zh'), english=render();
       const confirming=render('en',true);
+      globalThis.modelError='Reload required';globalThis.loadFailed=true;const refreshError=render();
+      globalThis.refreshing=true;const refreshingError=render();
+      globalThis.refreshing=false;globalThis.loadFailed=false;globalThis.modelError=null;
       snapshot.revision='changed';const stale=render();
-      console.log(JSON.stringify({list,editor,english,confirming,stale}));
+      console.log(JSON.stringify({list,editor,english,confirming,stale,refreshError,refreshingError}));
     } finally {await server.close();}
   `;
   const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
@@ -266,6 +269,13 @@ it("shows provider rows with a model-list dialog, enable controls and stale-draf
   expect(result.editor).toContain('role="dialog"');
   for (const label of ["model/a", "model/b", "启用", "关闭", "文本", "图片", "音频", "视频", "PDF", "未声明"]) expect(result.editor).toContain(label);
   expect(result.english).toContain("Enable"); expect(result.english).toContain("Disable");
+  const refreshButton = result.refreshError?.match(/<button[^>]*>Refresh<\/button>/u)?.[0];
+  expect(refreshButton).toBeDefined();
+  expect(refreshButton).not.toContain(' disabled=""');
+  const cancelButton = result.refreshError?.match(/<button[^>]*>Cancel<\/button>/u)?.[0];
+  expect(cancelButton).toBeDefined();
+  expect(cancelButton).not.toContain(' disabled=""');
+  expect(result.refreshingError).toMatch(/<button[^>]* disabled=""[^>]*>Refresh<\/button>/u);
   expect(result.confirming).not.toContain('role="dialog"');
   expect(result.stale).toContain("Reload and discard draft");
   expect(result.stale).toMatch(/<button[^>]*disabled[^>]*>Preview model settings<\/button>/u);

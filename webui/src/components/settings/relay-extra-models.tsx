@@ -15,9 +15,10 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface Draft { revision: string; provider: string; enabledModels: string[]; extraModels: RelayExtraModel[] }
 
-export function RelayExtraModels({ snapshot, blocked: parentBlocked, confirmationOpen = false, error, onSubmit, onRefresh }: {
+export function RelayExtraModels({ snapshot, blocked: parentBlocked, refreshBlocked = parentBlocked, confirmationOpen = false, error, onSubmit, onRefresh }: {
   snapshot: RelayManagementSnapshot
   blocked: boolean
+  refreshBlocked?: boolean
   confirmationOpen?: boolean
   error?: string | null
   onRefresh?: () => void
@@ -32,6 +33,7 @@ export function RelayExtraModels({ snapshot, blocked: parentBlocked, confirmatio
   const returnFocus = useRef<HTMLButtonElement | null>(null)
   useEffect(() => () => { controller.current?.abort(); controller.current = null; autoAttempted.current = false }, [])
   const blocked = parentBlocked || downloading
+  const closeBlocked = refreshBlocked || downloading
   const catalog = snapshot.clineCatalog?.status === "ready" ? snapshot.clineCatalog : null
   const download = useCallback(async () => {
     if (controller.current) return
@@ -89,13 +91,14 @@ export function RelayExtraModels({ snapshot, blocked: parentBlocked, confirmatio
         {downloadMessage && <p role="status">{t(`relay.catalog.${downloadMessage}`)}</p>}
       </CardContent>
     </Card>
-    <Dialog open={draft !== null && !confirmationOpen} onOpenChange={value => { if (!value && !blocked) setDraft(null) }}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-4xl" closeLabel={t("relay.close")} showCloseButton={!blocked}
-        onInteractOutside={event => event.preventDefault()} onEscapeKeyDown={event => { if (blocked) event.preventDefault() }}
+    <Dialog open={draft !== null && !confirmationOpen} onOpenChange={value => { if (!value && !closeBlocked) setDraft(null) }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-4xl" closeLabel={t("relay.close")} showCloseButton={!closeBlocked}
+        onInteractOutside={event => event.preventDefault()} onEscapeKeyDown={event => { if (closeBlocked) event.preventDefault() }}
         onCloseAutoFocus={event => { event.preventDefault(); if (!confirmationOpen) returnFocus.current?.focus() }}>
         <DialogHeader><DialogTitle>{t("relay.extra.manage")} · {draft?.provider}</DialogTitle><DialogDescription>{t("relay.extra.hint")}</DialogDescription></DialogHeader>
         <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
           {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+          {error && onRefresh && <Button variant="outline" disabled={refreshBlocked || downloading} onClick={onRefresh}>{t("relay.refresh")}</Button>}
           {stale && <Alert><AlertDescription>{t("relay.draftStale")}</AlertDescription></Alert>}
           {stale && selected && <Button variant="outline" disabled={blocked} onClick={() => open(selected)}>{t("relay.reloadDraft")}</Button>}
           {!selected?.available && <Alert><AlertDescription>{t("relay.capabilityUnavailable")}</AlertDescription></Alert>}
@@ -116,7 +119,7 @@ export function RelayExtraModels({ snapshot, blocked: parentBlocked, confirmatio
             })}</TableBody>
           </Table>
         </div>
-        <DialogFooter><Button variant="outline" disabled={blocked} onClick={() => setDraft(null)}>{t("relay.cancel")}</Button><Button disabled={blocked || stale || !selected?.available || !draft || draft.extraModels.length > 64} onClick={() => { if (draft) onSubmit(draft.provider, draft.extraModels, draft.revision, draft.enabledModels) }}>{t("relay.extra.preview")}</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" disabled={closeBlocked} onClick={() => setDraft(null)}>{t("relay.cancel")}</Button><Button disabled={blocked || stale || !selected?.available || !draft || draft.extraModels.length > 64} onClick={() => { if (draft) onSubmit(draft.provider, draft.extraModels, draft.revision, draft.enabledModels) }}>{t("relay.extra.preview")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   </>
