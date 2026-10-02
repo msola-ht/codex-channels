@@ -298,6 +298,7 @@ export class TelegramSurface {
         })),
       },
       options.onFatal,
+      { isInteractionUpdate: update => this.interactions.isInteractionUpdate(update) },
     );
     this.registerHandlers();
   }
@@ -409,11 +410,9 @@ export class TelegramSurface {
     this.bot.command("r", (context) =>
       this.executeCommand(context, surfaceCommandAliases.r));
     this.bot.command("stop", async (context) => {
-      if (this.interactions.stopForChat(String(context.chat.id))) {
-        await context.reply(interactionStoppedText);
-        return;
-      }
+      const cancelledInteraction = this.interactions.stopForChat(String(context.chat.id));
       await this.executeCommand(context, "stop");
+      if (cancelledInteraction) await context.reply(interactionStoppedText);
     });
     this.bot.callbackQuery(/^ws:([A-Za-z0-9_-]{43})$/, async (context) => {
       const workspace = this.service.listWorkspaces().find(

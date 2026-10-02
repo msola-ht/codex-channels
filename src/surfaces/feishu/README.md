@@ -287,7 +287,7 @@ StateStore 中已知且仍有授权 Actor 的精确 Chat 生成消息，不要�
 `/help`、`/workspace`、`/resume`，不重复加入命令中心菜单。飞书客户端不会像 Telegram 一样把
 斜杠文本注册成原生命令入口，因此命令发现以 CardKit 2.0 按钮为主；主卡的“帮助与更多命令”打开
 完整分类按钮页，手动输入的 `/start`、`/help` 仍打开同一命令中心卡片；
-`/stop` 优先停止当前 Actor 在本私聊中的最新待处理交互，没有待处理交互时调用共享 Turn
+`/stop` 取消当前 Actor 在本私聊中的最新待处理交互后，仍调用共享 Turn
 停止命令；Inbox 对授权且精确匹配的 `/stop` 使用独立有界紧急通道，不等待同一 Chat 中尚未
 返回的普通消息处理，但仍执行去重、Actor 记录和关闭等待。`/whoami` 和
 `/fs <status|doctor|revoke>` 留在飞书边界。`status` 展示当前进程实际观测到的

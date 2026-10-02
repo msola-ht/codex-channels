@@ -317,7 +317,24 @@ it.each(["telegram", "feishu"] as const)("retains the queued %s final after disc
   } finally { await f.close(); }
 });
 
-it.each(["telegram", "feishu"] as const)("keeps an unknown %s final across restart and fences later input mirrors", async (platform) => {
+it.each(["telegram", "feishu"] as const)("retains failed %s commentary but delivers the final and the next Turn", async (platform) => {
+  const f = await fixture(false, platform, true);
+  try {
+    f.output.publish({ ...answer, target: f.target, itemId: "process", text: "process explanation", phase: "commentary" });
+    await vi.waitFor(() => expect(f.faults).toEqual(["delivery-uncertain"]));
+    f.output.publish({ ...answer, target: f.target });
+    f.output.publish({ ...answer, target: f.target, turnId: "next-turn", itemId: "next-answer", text: "next turn answer" });
+    await f.manager.waitForPersistentOutput(f.target, AbortSignal.timeout(3000));
+    expect(f.sent).toEqual(["process explanation", "full answer", "next turn answer"]);
+    expect(f.faults).toEqual(["delivery-uncertain"]);
+  } finally { await f.close(); }
+  const stored = new SqliteDeliveryJournal(f.directory);
+  try {
+    expect(stored.execute({ type: "summary" })).toMatchObject({ records: 1, uncertain: 1, pending: 0 });
+  } finally { stored.close(); }
+});
+
+it.each(["telegram", "feishu"] as const)("keeps an unknown %s final across restart while continuing later input mirrors", async (platform) => {
   const f = await fixture(true, platform, false, true);
   try {
     f.outbox.handle({ target: f.target, type: "warning", message: "barrier" });
@@ -329,21 +346,24 @@ it.each(["telegram", "feishu"] as const)("keeps an unknown %s final across resta
     f.output.publish({ target: f.target, threadId: "thread", type: "connection.lost", message: "lost" });
     f.release();
     await vi.waitFor(() => expect(f.faults).toEqual(["delivery-uncertain"]));
-    expect(f.sent).toHaveLength(2);
+    await f.manager.waitForPersistentOutput(f.target, AbortSignal.timeout(3000));
+    expect(f.sent).toHaveLength(3);
   } finally { await f.close(); }
   const recovered = await fixture(false, platform, false, false, f.directory);
   try {
     recovered.output.publish({ ...base, target: f.target, type: "user.message", itemId: "input", text: "CLI input must not jump" });
     recovered.output.publish({ ...answer, target: f.target, itemId: "later", text: "later result" });
-    // Another Conversation can drain, proving recovery is running while this one remains fenced.
+    // Failed content is retained; both the original and independent Conversation can drain.
     const independent = { ...f.target, conversationId: "independent" };
     recovered.output.publish({ ...answer, target: independent, text: "independent result" });
     await recovered.manager.waitForPersistentOutput(independent, AbortSignal.timeout(3000));
-    expect(recovered.sent).toEqual(["independent result"]);
+    await recovered.manager.waitForPersistentOutput(f.target, AbortSignal.timeout(3000));
+    expect(recovered.sent).toEqual(expect.arrayContaining(["later result", "independent result"]));
+    expect(recovered.sent).not.toContain("full answer");
   } finally { await recovered.close(); }
   const stored = new SqliteDeliveryJournal(f.directory);
   try {
-    expect(stored.execute({ type: "summary" })).toMatchObject({ records: 3, uncertain: 1, pending: 2 });
+    expect(stored.execute({ type: "summary" })).toMatchObject({ records: 1, uncertain: 1, pending: 0 });
     const records = stored.execute({ type: "list", after: 0, limit: 100 }) as Array<Omit<DeliveryRecord, "payload">>;
     // Resolve only this stopped, isolated fixture to inspect the retained encrypted payload.
     expect(stored.execute({ type: "resolve", id: records[0]!.id, action: "retry" })).toBe(true);
@@ -677,7 +697,7 @@ it.each(auxiliaryNotices.flatMap((event) => (["telegram", "feishu"] as const).ma
   finally { retained.close(); }
 });
 
-it.each(["connection", "answer", "warning", "blocked", "turn-completed", "compaction-completed", "compaction-failed", "command-completed", "command-failed", "command-declined", "image-completed", "command-image"] as const)("rebuilds only eligible connection barriers after an interrupted %s send", async (kind) => {
+it.each(["connection", "answer", "warning", "blocked", "turn-completed", "compaction-completed", "compaction-failed", "command-completed", "command-failed", "command-declined", "image-completed", "command-image"] as const)("retains an interrupted %s send across restart without fencing later results", async (kind) => {
   const directory = mkdtempSync(join(tmpdir(), "codexc-recovered-barrier-"));
   directories.push(directory);
   const store = new SqliteDeliveryJournal(directory);
@@ -700,27 +720,16 @@ it.each(["connection", "answer", "warning", "blocked", "turn-completed", "compac
   } finally { store.close(); }
   const f = await fixture(false, "telegram", false, false, directory);
   try {
-    if (kind === "connection" || kind === "blocked" || kind === "command-completed") {
-      await f.manager.waitForPersistentOutput(target, AbortSignal.timeout(3000));
-      expect(f.sent).toEqual(["full answer"]);
-    } else {
-      await expect(f.manager.waitForPersistentOutput(target, AbortSignal.timeout(100))).rejects.toThrow();
-      expect(f.sent).toEqual([]);
-      expect(f.manager.acceptsExecution(target)).toBe(true);
-      const other = { ...target, conversationId: "other-chat" };
-      expect(f.manager.acceptsExecution(other)).toBe(true);
-      f.output.publish({ ...answer, target: other });
-      await f.manager.waitForPersistentOutput(other, AbortSignal.timeout(3000));
-      expect(f.sentTargets).toEqual(["other-chat"]);
-    }
+    await f.manager.waitForPersistentOutput(target, AbortSignal.timeout(3000));
+    expect(f.sent).toEqual(["full answer"]);
   } finally { await f.close(); }
   const retained = new SqliteDeliveryJournal(directory);
-  try { expect(retained.execute({ type: "summary" })).toMatchObject({ records: kind === "connection" || kind === "blocked" || kind === "command-completed" ? 1 : 2 }); }
+  try { expect(retained.execute({ type: "summary" })).toMatchObject({ records: 1 }); }
   finally { retained.close(); }
 });
 
 
-it.each(["unknown", "authorization"] as const)("keeps execution available while preserving delivery barriers on a live %s failure", async (failure) => {
+it.each(["unknown", "authorization"] as const)("keeps execution and interaction scheduling available while retaining a live %s failure", async (failure) => {
   const f = await fixture(true, "telegram", false, failure === "unknown");
   try {
     f.output.publish({ ...base, type: "turn.started" });
@@ -740,7 +749,7 @@ it.each(["unknown", "authorization"] as const)("keeps execution available while 
     await port.addQueueItem("thread", "next-input", "new-message");
     expect(start).toHaveBeenCalledOnce();
     expect(enqueue).toHaveBeenCalledOnce();
-    await expect(f.manager.waitForPersistentOutput(target, AbortSignal.timeout(100))).rejects.toThrow();
+    await f.manager.waitForPersistentOutput(target, AbortSignal.timeout(3000));
   } finally { await f.close(); }
 });
 

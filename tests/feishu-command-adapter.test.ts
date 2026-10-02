@@ -108,9 +108,24 @@ describe("Feishu command adapter", () => {
     await fixture.outbox.close();
 
     expect(stopForActor).toHaveBeenCalledWith(message.target, message.actorId);
-    expect(stop).not.toHaveBeenCalled();
-    expect(fixture.sent).toHaveLength(1);
+    expect(stop).toHaveBeenCalledWith(message.target);
+    expect(fixture.sent).toHaveLength(2);
     expect(fixture.sent[0]?.text).toBe("已停止当前交互请求。");
+  });
+
+  it.each([false, true])("stops the Turn before failed feedback (command center: %s)", async (commandCenter) => {
+    const stop = vi.fn(async () => true);
+    const notifyText = vi.fn(() => false);
+    const adapter = new FeishuConversationAdapter(
+      { stop }, { notifyText } as unknown as FeishuOutbox, imagePort,
+      undefined, undefined, undefined, undefined, { stopForActor: () => true },
+    );
+    const operation = commandCenter
+      ? adapter.handleCommandCenterAction(message.target, "stop", message.actorId, "")
+      : adapter.handle({ ...message, text: "/stop" });
+    await expect(operation).rejects.toMatchObject({ name: "FeishuOutputQueueError" });
+    expect(stop).toHaveBeenCalledWith(message.target);
+    expect(stop).toHaveBeenCalledOnce();
   });
 
   it("uses /stop to stop the active Turn when no interaction is pending", async () => {

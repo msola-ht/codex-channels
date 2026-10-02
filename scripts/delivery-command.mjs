@@ -6,7 +6,7 @@ import { locateUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
 
 export const deliveryCommandUsage = `用法：codexc delivery <status|list|retry|confirm>
-  status                            显示存储占用、保留通知和阻塞会话数量
+  status                            显示存储占用、待核对记录和阻塞会话数量
   list                              分页列出事件、会话、阻塞策略与发送检查点（不输出正文）
   retry <ID> --allow-duplicate        明确重发整条未知/阻塞结果，可能重复已送达的分片
   confirm <ID> --confirmed-delivered  已自行核实送达后删除未知/阻塞结果
@@ -44,8 +44,8 @@ export async function runDeliveryCommand(args, environment = process.env) {
         for (const record of page) {
           const stored = await journal.read(record.id);
           if (!stored) throw new Error("投递记录已变化");
-          const { event, image } = decodePersistentOutput(stored.payload);
-          const retainedNotice = (record.state === "uncertain" || record.state === "blocked") && mayReleaseUncertainOutputBarrier(event, image !== undefined);
+          const { event } = decodePersistentOutput(stored.payload);
+          const retainedNotice = (record.state === "uncertain" || record.state === "blocked") && mayReleaseUncertainOutputBarrier(event);
           if (retainedNotice) retainedNotices++;
           const blocksDelivery = (record.state === "blocked" || record.state === "uncertain") && !retainedNotice;
           if (blocksDelivery) blockedConversations.add(record.conversation);

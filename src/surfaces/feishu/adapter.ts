@@ -177,16 +177,8 @@ export class FeishuConversationAdapter {
           );
           return;
         }
-        if (
-          command.name === "stop"
-          && this.interactions?.stopForActor(message.target, message.actorId)
-        ) {
-          this.notifyText(
-            message.target.conversationId,
-            interactionStoppedText,
-          );
-          return;
-        }
+        const cancelledInteraction = command.name === "stop"
+          && this.interactions?.stopForActor(message.target, message.actorId);
         if (command.name === "fs") {
           await this.handleFeishuCommand(
             message.actorId,
@@ -208,6 +200,7 @@ export class FeishuConversationAdapter {
           command.argumentsText,
           message.actorId,
         );
+        if (cancelledInteraction) this.notifyText(message.target.conversationId, interactionStoppedText);
         if ((result.kind === "reset-credit" || result.kind === "limits") && this.commandCenter) {
           const response = renderCommandCenterChoices("limits", result);
           if (response) { await this.commandCenter.openResponse(message.target, message.actorId, response); return; }
@@ -435,19 +428,11 @@ export class FeishuConversationAdapter {
           "飞书命令不受支持",
         );
       }
-      if (
-        action === "stop"
-        && this.interactions?.stopForActor(target, actorId)
-      ) {
-        this.notifyText(
-          target.conversationId,
-          interactionStoppedText,
-        );
-        return;
-      }
+      const cancelledInteraction = action === "stop" && this.interactions?.stopForActor(target, actorId);
       const result = action === "fast" && input === ""
         ? await this.commands.execute(target, "model", "", actorId)
         : await this.commands.execute(target, action, input, actorId);
+      if (cancelledInteraction) this.notifyText(target.conversationId, interactionStoppedText);
       const followUpChoices = action === "model"
         && result.kind === "models"
         && result.nextSelection === "effort"

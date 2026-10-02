@@ -367,7 +367,7 @@ npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`
 - 帮助：`/help`、`/whoami`
 
-`/stop` 会优先中断当前活动 Turn；`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。
+`/stop` 会优先中断当前活动 Turn；飞书和 Telegram 同时取消当前待处理交互，原生 Queue 中的排队项保留，可通过 `/queue` 管理。`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。
 存在原 Thread 时，`/new` 的结果会显示 `恢复会话：/r <Thread ID>`，可直接复制该命令恢复旧会话。
 
 `/r` 的完整 ID、短 ID、名称和序号都只在当前工作区查找。恢复其他工作区的历史前，

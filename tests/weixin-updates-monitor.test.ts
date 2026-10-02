@@ -25,6 +25,8 @@ describe("WeixinUpdatesMonitor", () => {
       .mockResolvedValueOnce({ cursor: "third", messages: [
         imageMessage("slow"), // An in-flight duplicate must not be submitted again.
         textMessage("stop", "/stop"),
+        textMessage("approval", "/批准一次 abcdefgh"),
+        textMessage("answer", "/填写 abcdefgh 1 answer"),
         { ...textMessage("other", "hello"), conversationId: "other@im.wechat", actorId: "other@im.wechat" },
       ] })
       .mockImplementation((_cursor, signal) => untilAborted(signal));
@@ -36,12 +38,41 @@ describe("WeixinUpdatesMonitor", () => {
     });
     const running = monitor.run(controller.signal);
     try {
-      await vi.waitFor(() => expect(handled).toEqual(["slow", "stop", "other"]));
+      await vi.waitFor(() => expect(handled).toEqual(["slow", "stop", "approval", "other", "answer"]));
       expect(cursorStore.set).not.toHaveBeenCalled();
       expect(getUpdates.mock.calls.slice(0, 4).map(([cursor]) => cursor)).toEqual(["old", "first", "second", "third"]);
     } finally { release(); await running; }
-    expect(handled).toEqual(["slow", "stop", "other", "queued"]);
+    expect(handled).toEqual(["slow", "stop", "approval", "other", "answer", "queued"]);
     expect(cursorStore.set.mock.calls.map(([, cursor]) => cursor)).toEqual(["first", "second", "third"]);
+  });
+
+  it("preserves control reply order while stop bypasses a blocked control and cursors wait", async () => {
+    const controller = new AbortController();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const handled: string[] = [];
+    const cursorStore = cursorStoreFixture("old", async (_account, cursor) => {
+      if (cursor === "second") controller.abort();
+    });
+    const getUpdates = vi.fn<WeixinProtocolClient["getUpdates"]>()
+      .mockResolvedValueOnce({ cursor: "first", messages: [textMessage("answer1", "/填写 abcdefgh 1 first")] })
+      .mockResolvedValueOnce({ cursor: "second", messages: [
+        textMessage("answer2", "/填写 abcdefgh 2 second"), textMessage("stop", "/stop"),
+      ] })
+      .mockImplementation((_cursor, signal) => untilAborted(signal));
+    const monitor = createWeixinUpdatesMonitor({ accountId, client: { ...clientFixture([]), getUpdates }, cursorStore,
+      handleMessage: async message => {
+        handled.push(message.messageId);
+        if (message.messageId === "answer1") await gate;
+      },
+    });
+    const running = monitor.run(controller.signal);
+    try {
+      await vi.waitFor(() => expect(handled).toEqual(["answer1", "stop"]));
+      expect(cursorStore.set).not.toHaveBeenCalled();
+    } finally { release(); await running; }
+    expect(handled).toEqual(["answer1", "stop", "answer2"]);
+    expect(cursorStore.set.mock.calls.map(([, cursor]) => cursor)).toEqual(["first", "second"]);
   });
 
   it("does not commit later successful batches after an earlier failure", async () => {

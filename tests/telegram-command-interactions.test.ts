@@ -27,6 +27,23 @@ afterEach(() => {
 });
 
 describe("Telegram command interactions", () => {
+  it("interrupts the Turn even when stop also cancels an interaction", async () => {
+    const stop = vi.fn(async () => true);
+    const { surface, output } = createSurface(vi.fn(), vi.fn(), { stop });
+    const cancel = vi.spyOn(surface.interactions, "stopForChat").mockReturnValue(true);
+    try {
+      await surface.bot.handleUpdate({ update_id: 1, message: {
+        message_id: 1, date: 1, chat: telegramChat(), from: telegramUser(), text: "/stop",
+        entities: [{ type: "bot_command", offset: 0, length: 5 }],
+      } });
+      expect(cancel).toHaveBeenCalledWith("100");
+      expect(stop).toHaveBeenCalledOnce();
+    } finally {
+      await surface.stop();
+      await output.close();
+    }
+  });
+
   it("rejects an old marked form at the Bot entry point after restarting", async () => {
     const submit = vi.fn();
     const before = createSurface(submit, vi.fn());

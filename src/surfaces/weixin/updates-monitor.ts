@@ -1,4 +1,5 @@
 import { setImmediate as yieldToPolling } from "node:timers/promises";
+import { isWeixinInteractionCommand } from "./interactions.js";
 import { isEmergencyStopCommand } from "../slash-command.js";
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
@@ -79,6 +80,7 @@ export function createWeixinUpdatesMonitor(
       const controller = new AbortController();
       const pollingSignal = AbortSignal.any([signal, controller.signal]);
       const conversations = new Map<string, Promise<void>>();
+      const controls = new Map<string, Promise<void>>();
       const inFlightIds = new Map<string, Promise<void>>();
       const pendingBatches = new Set<Promise<void>>();
       let commitTail = Promise.resolve();
@@ -93,16 +95,17 @@ export function createWeixinUpdatesMonitor(
         if (recentMessageIds.has(message.messageId)) return Promise.resolve();
         const key = message.kind === "ignored" ? undefined : message.conversationId;
         const urgent = message.kind === "text" && isEmergencyStopCommand(message.text);
-        const previous = key === undefined || urgent ? Promise.resolve() : conversations.get(key) ?? Promise.resolve();
+        const lane = message.kind === "text" && isWeixinInteractionCommand(message.text) ? controls : conversations;
+        const previous = key === undefined || urgent ? Promise.resolve() : lane.get(key) ?? Promise.resolve();
         const task = previous.then(async () => {
           if (failure) throw failure.error;
           if (message.kind !== "ignored") await options.handleMessage(message, pollingSignal);
           recentMessageIds.add(message.messageId);
         });
         inFlightIds.set(message.messageId, task);
-        if (key !== undefined && !urgent) conversations.set(key, task);
+        if (key !== undefined && !urgent) lane.set(key, task);
         void task.then(() => {
-          if (key !== undefined && conversations.get(key) === task) conversations.delete(key);
+          if (key !== undefined && lane.get(key) === task) lane.delete(key);
         }, fail);
         return task;
       };

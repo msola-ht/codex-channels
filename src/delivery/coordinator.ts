@@ -9,7 +9,7 @@ export interface DeliveryCoordinatorOptions {
   concurrency?: number;
   timeoutMs?: number;
   changed?(): void;
-  /** Explicit opt-in for uncertain or authorization-blocked auxiliary records; never grants delivery permission. */
+  /** Explicit opt-in for retained uncertain or authorization-blocked records; never grants delivery permission. */
   mayReleaseUncertainBarrier?(record: DeliveryRecord): boolean;
 }
 

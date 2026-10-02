@@ -29,6 +29,7 @@ const updateGroupSizes = new WeakMap<object, number>();
 const updateReceivedAt = new WeakMap<object, number>();
 const maximumPendingUpdates = 1_000;
 const maximumUrgentUpdates = 100;
+const maximumConcurrentUpdateGroups = 8;
 const defaultCloseTimeoutMs = 5_000;
 
 export function telegramUpdateGroupSize(update: object): number | undefined {
@@ -48,16 +49,20 @@ export interface TelegramStartupNotification {
 
 export interface TelegramLifecycleOptions {
   closeTimeoutMs?: number;
+  isInteractionUpdate?: (update: Parameters<Bot["handleUpdate"]>[0]) => boolean;
 }
 
 export class TelegramLifecycle {
   private polling: Promise<void> | undefined;
   private startupNotificationTask: Promise<void> | undefined;
   private lifecycleAbort: AbortController | undefined;
-  private updateProcessing = Promise.resolve();
+  private readonly updateProcessing = new Map<string, Promise<void>>();
+  private readonly controlProcessing = new Map<string, Promise<void>>();
   private readonly urgentUpdateTasks = new Set<Promise<void>>();
   private readonly capacityWaiters = new Set<() => void>();
   private pendingUpdateCount = 0;
+  private activeUpdateGroups = 0;
+  private readonly updateSlots: Array<() => void> = [];
   private stopping = false;
   private readonly closeTimeoutMs: number;
 
@@ -66,7 +71,7 @@ export class TelegramLifecycle {
     private readonly logger: Logger,
     private readonly startupNotification?: TelegramStartupNotification,
     private readonly onFatal?: (error: Error) => void,
-    options: TelegramLifecycleOptions = {},
+    private readonly options: TelegramLifecycleOptions = {},
   ) {
     this.closeTimeoutMs = options.closeTimeoutMs ?? defaultCloseTimeoutMs;
   }
@@ -98,7 +103,7 @@ export class TelegramLifecycle {
     await this.polling?.catch(() => undefined);
     this.polling = undefined;
     const updatesCompleted = await waitAtMost(Promise.allSettled([
-      this.updateProcessing,
+      ...this.updateProcessing.values(),
       ...this.urgentUpdateTasks,
     ]), this.closeTimeoutMs);
     if (!updatesCompleted) {
@@ -251,17 +256,16 @@ export class TelegramLifecycle {
             firstInputId: String(updates[0]!.update_id), pending: this.pendingUpdateCount },
           "Telegram Long Polling 收到更新批次");
         }
-        const emergencyStops = new Set(
-          updates.filter((update) => isTelegramEmergencyStopUpdate(
-            update,
-            this.bot.botInfo.username,
-          )),
+        const controlUpdates = new Set(
+          updates.filter((update) => isTelegramEmergencyStopUpdate(update, this.bot.botInfo.username)
+            || update.callback_query?.data?.startsWith("ix:")
+            || this.options.isInteractionUpdate?.(update)),
         );
-        for (const update of emergencyStops) {
+        for (const update of controlUpdates) {
           this.runUrgentUpdate(update);
         }
         for (const group of groupTelegramUpdates(
-          updates.filter((update) => !emergencyStops.has(update)),
+          updates.filter((update) => !controlUpdates.has(update)),
         )) {
           if (group.length > 1) {
             for (const update of group) {
@@ -303,25 +307,44 @@ export class TelegramLifecycle {
     group: ReadonlyArray<Parameters<Bot["handleUpdate"]>[0]>,
   ): void {
     this.pendingUpdateCount += group.length;
-    const processing = this.updateProcessing.then(async () => {
-      await Promise.all(group.map((update) => this.handleUpdate(update)));
+    const key = telegramUpdateConversation(group[0]!);
+    const previous = this.updateProcessing.get(key) ?? Promise.resolve();
+    const processing = previous.then(async () => {
+      if (this.activeUpdateGroups >= maximumConcurrentUpdateGroups) {
+        await new Promise<void>(resolve => this.updateSlots.push(resolve));
+      } else {
+        this.activeUpdateGroups++;
+      }
+      try {
+        await Promise.all(group.map((update) => this.handleUpdate(update)));
+      } finally {
+        const next = this.updateSlots.shift();
+        if (next) next();
+        else this.activeUpdateGroups--;
+      }
     });
-    this.updateProcessing = processing.finally(() => {
+    const task = processing.finally(() => {
       this.pendingUpdateCount -= group.length;
+      if (this.updateProcessing.get(key) === task) this.updateProcessing.delete(key);
       this.notifyUpdateCapacity();
     });
+    this.updateProcessing.set(key, task);
   }
 
   private runUrgentUpdate(
     update: Parameters<Bot["handleUpdate"]>[0],
   ): void {
-    const task = Promise.resolve()
-      .then(() => this.handleUpdate(update))
+    const key = telegramUpdateConversation(update);
+    const stop = isTelegramEmergencyStopUpdate(update, this.bot.botInfo.username);
+    const previous = stop ? Promise.resolve() : this.controlProcessing.get(key) ?? Promise.resolve();
+    const task = previous.then(() => this.handleUpdate(update))
       .finally(() => {
         this.urgentUpdateTasks.delete(task);
+        if (this.controlProcessing.get(key) === task) this.controlProcessing.delete(key);
         this.notifyUpdateCapacity();
       });
     this.urgentUpdateTasks.add(task);
+    if (!stop) this.controlProcessing.set(key, task);
   }
 
   private async waitForUpdateCapacity(signal: AbortSignal): Promise<void> {
@@ -373,6 +396,11 @@ export class TelegramLifecycle {
   }
 }
 
+function telegramUpdateConversation(update: Parameters<Bot["handleUpdate"]>[0]): string {
+  const chatId = update.message?.chat.id ?? update.callback_query?.message?.chat.id;
+  return chatId === undefined ? "unattributed" : String(chatId);
+}
+
 function isTelegramEmergencyStopUpdate(
   update: Parameters<Bot["handleUpdate"]>[0],
   botUsername: string,
@@ -401,7 +429,7 @@ async function waitAtMost(operation: Promise<unknown>, timeoutMs: number): Promi
 }
 
 function groupTelegramUpdates<T extends {
-  message?: { media_group_id?: string };
+  message?: { media_group_id?: string; chat: { id: number } };
 }>(updates: readonly T[]): T[][] {
   const groups: T[][] = [];
   for (const update of updates) {
@@ -410,6 +438,7 @@ function groupTelegramUpdates<T extends {
     if (
       mediaGroupId !== undefined
       && previous?.at(-1)?.message?.media_group_id === mediaGroupId
+      && previous.at(-1)?.message?.chat.id === update.message?.chat.id
     ) {
       previous.push(update);
       continue;
