@@ -44,11 +44,16 @@ function parseUsage(value: unknown, provider: string): ProviderAccountUsage {
     if (typeof percentUsed !== "number" || !Number.isFinite(percentUsed) || percentUsed < 0) {
       throw new Error("Invalid CLP percentage");
     }
-    // The upstream uses RFC 3339 UTC timestamps with fractional seconds.
-    const resetMs = typeof resetsAt === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(resetsAt)
-      ? Date.parse(resetsAt) : NaN;
-    if (!Number.isFinite(resetMs) || resetMs <= 0 || new Date(resetMs).toISOString().slice(0, 19) !== String(resetsAt).slice(0, 19)) throw new Error("Invalid CLP reset time");
-    return { windowId, label, usedPercent: percentUsed, resetsAt: Math.floor(resetMs / 1_000), status: null };
+    // An upstream window may omit its reset time. Do not invent a countdown.
+    // When supplied, it must be an RFC 3339 UTC timestamp with fractional seconds.
+    let resetSeconds: number | null = null;
+    if (resetsAt !== undefined) {
+      if (typeof resetsAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(resetsAt)) throw new Error("Invalid CLP reset time");
+      const resetMs = Date.parse(resetsAt);
+      if (!Number.isFinite(resetMs) || resetMs <= 0 || new Date(resetMs).toISOString().slice(0, 19) !== resetsAt.slice(0, 19)) throw new Error("Invalid CLP reset time");
+      resetSeconds = Math.floor(resetMs / 1_000);
+    }
+    return { windowId, label, usedPercent: percentUsed, resetsAt: resetSeconds, status: null };
   });
   return { kind: "quota-windows", provider, available: true, windows };
 }

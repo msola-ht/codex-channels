@@ -263,32 +263,42 @@ it("cancels superseded batch snapshot reads without losing new accounts or retai
       } } };
     const fresh = { ...old, observedAtMs: 2000, snapshots: [cline, openai] };
     let sources = ["clp-test", "openai"], postResult = null;
+    const posts = [];
+    let sourceFailure = false, sourcePending = null, postPending = null;
     const api = {
       ApiClientError: class extends Error {},
-      fetchOfficialAccountSources: async () => ({ accounts: sources.map(provider => ({ provider, displayName: provider })), warnings: [] }),
+      fetchOfficialAccountSources: async signal => { if (sourcePending) { sourcePending.signal = signal; return sourcePending.promise; } if (sourceFailure) throw new Error("sources unavailable"); return { accounts: sources.map(provider => ({ provider, displayName: provider })), warnings: [] }; },
       fetchOfficialAccountSnapshots: signal => new Promise((resolve, reject) => reads.push({ signal, resolve, reject })),
-      refreshOfficialAccountSnapshot: async provider => {
+      refreshOfficialAccountSnapshot: async (provider, signal) => {
+        posts.push(provider);
+        if (postPending) { postPending.calls.push({ provider, signal }); return postPending.promise; }
         if (postResult) return postResult;
         if (provider === "openai") throw new Error("initial OpenAI failure");
         return old;
       },
     };
-    const polling = { scheduleVisibleSettingsRefresh: () => () => {} };
+    let visibleRefresh;
+    const polling = { scheduleVisibleSettingsRefresh: callback => { visibleRefresh = callback; return () => {}; } };
     const state = load("webui/src/lib/account-refresh-state.ts", {});
     const useApi = load("webui/src/hooks/use-api.ts", { react, "@/lib/api": api, "../lib/api-polling": polling });
     const { useOfficialAccountSources } = load("webui/src/hooks/use-official-account-sources.ts", {
       react, "@/lib/api": api, "@/hooks/use-api": useApi,
       "@/lib/api-polling": polling, "@/lib/account-refresh-state": state,
+      "@/hooks/use-server-time": { useServerTimeSnapshot: () => ({ nowMs: 10_000_000, receivedAtMs: Date.now() }) },
+      "@/lib/server-time": { estimateServerTime: snapshot => snapshot.nowMs },
     });
-    globalThis.document = {};
+    globalThis.document = Object.assign(new EventTarget(), { visibilityState: "visible" });
+    const attempts = new Map();
     const render = () => {
       si = ri = ei = 0;
-      const view = useOfficialAccountSources();
+      const view = useOfficialAccountSources(attempts);
       while (effects.length) effects.shift()();
       return view;
     };
     const settle = () => new Promise(resolve => setImmediate(resolve));
     render(); await settle();
+    assert.equal(reads.length, 1);
+    reads[0].resolve(old); await settle(); render(); await settle();
     assert.equal(reads.length, 2);
     let view = render();
     view.refetchSnapshots(); render();
@@ -326,6 +336,138 @@ it("cancels superseded batch snapshot reads without losing new accounts or retai
     for (const cleanup of cleanups) cleanup?.();
     assert.equal(pendingSync.signal.aborted, true);
     pendingSync.resolve(old); await unmount;
+    const remount = async baseline => {
+      for (const cleanup of cleanups) cleanup?.();
+      slots.length = refs.length = dependencies.length = cleanups.length = reads.length = posts.length = 0;
+      render(); await settle();
+      if (baseline instanceof Error) reads[0].reject(baseline); else reads[0].resolve(baseline);
+      await settle(); render(); await settle();
+      return render();
+    };
+    // Fresh snapshots skip all POSTs and the redundant trailing GET.
+    sources = ["clp-test"];
+    attempts.clear();
+    const recent = { ...old, snapshots: [{ ...cline, observedAtMs: 10_000_000 }] };
+    view = await remount(recent);
+    assert.deepEqual(posts, []);
+    assert.equal(reads.length, 1);
+    // Manual single-account refresh bypasses freshness and a failing source list.
+    sourceFailure = true;
+    postResult = recent;
+    const manual = view.refresh("clp-test"); await settle();
+    assert.deepEqual(posts, ["clp-test"]);
+    reads.at(-1).resolve(recent); await manual;
+    sourceFailure = false;
+    // Missing/stale OpenAI fails; remount retains the cooldown and error.
+    sources = ["openai"];
+    postResult = null;
+    view = await remount(old);
+    assert.deepEqual(posts, ["openai"]);
+    reads.at(-1).resolve(old); await settle(); render();
+    view = await remount(old);
+    assert.deepEqual(posts, []);
+    assert.ok(view.refreshControls.openai.error);
+    // Explicit retry bypasses that cooldown without needing sources.
+    const retryAccount = view.refresh("openai"); await settle();
+    assert.deepEqual(posts, ["openai"]);
+    reads.at(-1).resolve(old); await retryAccount;
+    // Restoring visibility reads a baseline; hiding cancels it before any POST.
+    attempts.clear(); render();
+    visibleRefresh(); await settle();
+    const hiddenRead = reads.at(-1);
+    document.visibilityState = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    assert.equal(hiddenRead.signal.aborted, true);
+    const count = posts.length;
+    hiddenRead.resolve(old); await settle();
+    assert.equal(posts.length, count);
+    document.visibilityState = "visible";
+    attempts.clear();
+    view = await remount(new Error("snapshot database unavailable"));
+    assert.deepEqual(posts, ["openai"]);
+    reads.at(-1).resolve(old); await settle(); render();
+
+    // A new independent sync owns reads and cancels automatic preflight too.
+    sources = ["clp-test", "openai"];
+    attempts.clear();
+    const allRecent = { ...recent, snapshots: [...recent.snapshots, { ...openai, observedAtMs: 10_000_000 }] };
+    view = await remount(allRecent);
+    visibleRefresh(); await settle();
+    const preflight = reads.at(-1);
+    render().refetchSnapshots(); render();
+    const independent = reads.at(-1);
+    assert.equal(preflight.signal.aborted, true);
+    independent.resolve(allRecent); await settle();
+    preflight.resolve(recent); await settle();
+    assert.equal(independent.signal.aborted, false);
+    assert.equal(render().data.openaiWeeklyQuota.usedPercent, 12);
+    assert.deepEqual(posts, []);
+    // The superseded preflight may resolve or reject before the new read finishes.
+    for (const rejectOld of [false, true]) {
+      render(); visibleRefresh(); await settle();
+      const oldRead = reads.at(-1);
+      render().refetchSnapshots(); render();
+      const latestRead = reads.at(-1);
+      if (rejectOld) oldRead.reject(new Error("old preflight cancelled")); else oldRead.resolve(recent);
+      await settle(); render();
+      assert.equal(latestRead.signal.aborted, false);
+      assert.equal(render().refreshError, null);
+      assert.equal(render().loading, true);
+      latestRead.resolve(allRecent); await settle(); render();
+      assert.equal(render().data.openaiWeeklyQuota.usedPercent, 12);
+      assert.deepEqual(posts, []);
+    }
+    // A stale failed account later gets a newer successful observation elsewhere.
+    attempts.clear(); sources = ["openai"]; postResult = null;
+    view = await remount(old);
+    reads.at(-1).resolve(old); await settle(); render();
+    assert.deepEqual(posts, ["openai"]);
+    view = await remount(allRecent);
+    assert.equal(view.refreshControls.openai.error, null);
+    assert.deepEqual(posts, []);
+    // A failure against this same fresh snapshot must remain visible.
+    const sameSnapshotFailure = view.refresh("openai"); await settle();
+    reads.at(-1).resolve(allRecent); await sameSnapshotFailure; render();
+    view = await remount(allRecent);
+    assert.ok(view.refreshControls.openai.error);
+    assert.deepEqual(posts, []);
+    // Independent synchronization can also clear that error without navigation.
+    view.refetchSnapshots(); render();
+    reads.at(-1).resolve({ ...allRecent, snapshots: allRecent.snapshots.map(item => ({ ...item, observedAtMs: 10_000_001 })) });
+    await settle(); render(); view = render();
+    assert.equal(view.refreshControls.openai.error, null);
+
+    // Cancel even before preflight starts; a delayed source response cannot start reads.
+    let finishSources;
+    sourcePending = { promise: new Promise(resolve => { finishSources = resolve; }) };
+    render(); visibleRefresh(); await settle();
+    render().refetchSnapshots(); render();
+    const sourceRead = reads.at(-1), readCount = reads.length;
+    assert.equal(sourcePending.signal.aborted, true);
+    sourceRead.resolve(allRecent); await settle();
+    finishSources({ accounts: [{ provider: "clp-test", displayName: "CLP" }], warnings: [] });
+    await settle(); render();
+    assert.equal(reads.length, readCount);
+    sourcePending = null;
+    // Cancel in-flight queries and never start the fifth queued account.
+    let finishPosts;
+    postPending = { calls: [], promise: new Promise(resolve => { finishPosts = resolve; }) };
+    sources = ["clp-one", "clp-two", "clp-three", "clp-four", "clp-five"];
+    posts.length = 0;
+    const batch = render().refresh(); await settle();
+    assert.equal(posts.length, 4);
+    render().refetchSnapshots(); render();
+    const newRead = reads.at(-1);
+    assert.ok(postPending.calls.every(call => call.signal.aborted));
+    newRead.resolve(allRecent); await settle();
+    finishPosts(old); await batch; render();
+    assert.equal(posts.length, 4);
+    assert.equal(newRead.signal.aborted, false);
+    assert.equal(render().data.openaiWeeklyQuota.usedPercent, 12);
+    assert.equal(render().refreshError, null);
+    postPending = null;
+    for (const cleanup of cleanups) cleanup?.();
+
   `;
   expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" })).not.toThrow();
 });

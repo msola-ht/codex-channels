@@ -6,7 +6,7 @@ import { scheduleVisibleSettingsRefresh } from "@/lib/api-polling"
 
 export function SettingsPageFrame({ title, busy, refresh, children }: { title: MessageKey; busy: boolean; refresh: () => void; children: ReactNode }) {
   const { t } = useTranslation()
-  const refreshState = useRef({ pending: false, lastRefresh: 0 })
+  const refreshState = useRef({ pending: false, lastRefresh: Date.now() })
   useEffect(() => scheduleVisibleSettingsRefresh(refresh, busy, document, refreshState.current), [busy, refresh])
   const manualRefresh = () => {
     refreshState.current.pending = false

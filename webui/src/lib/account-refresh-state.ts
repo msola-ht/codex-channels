@@ -13,6 +13,43 @@ export interface AccountRefreshError {
   message: string
 }
 
+/** Owned by the authenticated layout; survives route changes, never persisted. */
+export type AccountRefreshAttempts = Map<string, { retryAt: number; observedAtMs: number | null; error: AccountRefreshError | null }>
+
+/** Only a strictly newer successful observation supersedes a failed refresh. */
+export function clearRecoveredAccountFailures(attempts: AccountRefreshAttempts, snapshots: OfficialAccountSnapshotsResponse | null): string[] {
+  const recovered: string[] = []
+  for (const [id, attempt] of attempts) {
+    const snapshot = snapshots?.snapshots.find(item => item.provider === id)
+    if (attempt.error !== null && attempt.observedAtMs !== null && snapshot
+      && snapshot.observedAtMs > Math.max(0, attempt.observedAtMs)) {
+      attempts.delete(id)
+      recovered.push(id)
+    }
+  }
+  return recovered
+}
+
+export function automaticAccountProviders(accounts: readonly RefreshableAccount[], snapshots: OfficialAccountSnapshotsResponse | null,
+  attempts: AccountRefreshAttempts, serverNow: number, monotonicNow: number): string[] {
+  clearRecoveredAccountFailures(attempts, snapshots)
+  const active = new Set(accounts.map(account => account.id))
+  for (const id of attempts.keys()) if (!active.has(id)) attempts.delete(id)
+  return accounts.filter(({ id }) => {
+    if ((attempts.get(id)?.retryAt ?? 0) > monotonicNow) return false
+    const attempt = attempts.get(id)
+    if (attempt?.error && attempt.observedAtMs === null) return true
+    const snapshot = snapshots?.snapshots.find(item => item.provider === id)
+    return !snapshot || snapshot.observedAtMs <= 0 || accountSnapshotIsStale(snapshot.observedAtMs, serverNow)
+  }).map(account => account.id)
+}
+
+export function beginAccountRefreshAttempt(attempts: AccountRefreshAttempts, provider: string, now: number, observedAtMs: number | null = null) {
+  // Bound transient metadata even if account registries repeatedly change.
+  if (!attempts.has(provider) && attempts.size >= 256) attempts.delete(attempts.keys().next().value!)
+  attempts.set(provider, { retryAt: now + 60_000, observedAtMs, error: attempts.get(provider)?.error ?? null })
+}
+
 export interface AccountRefreshControl {
   refreshing: boolean
   disabled: boolean

@@ -1,3 +1,4 @@
+import type { AccountRefreshAttempts } from "@/lib/account-refresh-state"
 import { navItems, navGroups } from "@/lib/navigation"
 import { translateApiError } from "@/lib/i18n/translate"
 import { lazy, Suspense, useEffect, useState } from "react"
@@ -116,6 +117,7 @@ function ServerClock({ snapshot, syncFailed }: { snapshot: ServerClockSnapshot; 
 }
 
 function Layout() {
+  const [accountRefreshAttempts] = useState<AccountRefreshAttempts>(() => new Map())
   const { pathname } = useLocation()
   const { t, language, setLanguage } = useTranslation()
   const [consoleRange, setConsoleRange] = useState<MetricsRangeQuery>({ range: "30d" })
@@ -163,7 +165,7 @@ function Layout() {
             </p>
             <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">{t("common.loading")}</div>}>
               <Routes>
-                <Route path="/" element={<ConsolePage range={consoleRange} onRangeChange={setConsoleRange} />} />
+                <Route path="/" element={<ConsolePage refreshAttempts={accountRefreshAttempts} range={consoleRange} onRangeChange={setConsoleRange} />} />
                 <Route path="/threads" element={<ThreadsPage />} />
                 <Route path="/threads/:id" element={<ThreadDetailPage />} />
                 <Route path="/requests" element={<RequestsPage />} />
