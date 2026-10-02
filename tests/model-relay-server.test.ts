@@ -375,6 +375,24 @@ describe("isolated Relay vertical request chain", () => {
       expect(f.calls()).toBe(1); expect(f.metrics).toHaveLength(1);
     });
 
+  it("records upstream stream failure identifiers separately from the public error", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-error-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
+    const error = { code: "stream_initialization_failed", type: "stream_error", request_id: "upstream-id", message: `Failed to create stream: ${JSON.stringify({ error: { type: "rate_limit_exceeded", param: { statusCode: 429 }, message: "PRIVATE" } })}` };
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "text/event-stream" }).end(frame({ error })), undefined, undefined, dump);
+    const response = await f.post({ ...body, stream: true });
+    const reply = await response.text();
+    expect(reply).toContain("chat_upstream_error"); expect(reply).not.toContain("PRIVATE");
+    await vi.waitFor(() => expect(f.metrics).toHaveLength(1));
+    await dump.close();
+    const ref = f.metrics[0]!.traffic!;
+    const detail = await describeDumpExchange([join(directory, `relay.chat-${ref.session}`)], ref.interaction);
+    expect(detail.chatDiagnostics.fields).toMatchObject({ httpStatus: 200, "error.code": "chat_upstream_error", "error.stage": "stream", "error.retryable": false,
+      "upstreamError.code": "stream_initialization_failed", "upstreamError.request_id": "upstream-id", "upstreamError.cause.type": "rate_limit_exceeded", "upstreamError.cause.statusCode": 429 });
+    expect(JSON.stringify(detail.chatDiagnostics)).not.toContain("PRIVATE");
+  });
+
   it.each(["json", "wrapped", "sse"])("associates bounded final routing with the exact Relay call (%s)", async format => {
     const directory = mkdtempSync(join(tmpdir(), "relay-routing-"));
     cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });

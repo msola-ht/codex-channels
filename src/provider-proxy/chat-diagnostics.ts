@@ -23,6 +23,8 @@ export class ChatDiagnostics {
   header(requestId: unknown): void { this.put("requestId", requestId); }
   push(value: unknown): void {
     const chunk = record(value);
+    const failure: unknown = (Array.isArray(chunk.choices) ? chunk.choices : []).find(choice => record(choice).error != null || record(choice).finish_reason === "error");
+    this.upstreamError(chunk.error ?? record(failure).error);
     for (const key of identifiers) this.put(key, chunk[key]);
     this.put("created", chunk.created, true);
     const usage = record(chunk.usage);
@@ -60,6 +62,27 @@ export class ChatDiagnostics {
       const deepseek = record(metadata.deepseek);
       for (const key of ["promptCacheHitTokens", "promptCacheMissTokens", "systemFingerprint"]) this.put(`deepseek.${key}`, deepseek[key]);
     }
+  }
+  private upstreamError(value: unknown): void {
+    const error = record(value);
+    for (const key of ["code", "type", "request_id"]) this.put(`upstreamError.${key}`, error[key]);
+    // Observed Cline stream-initialization envelope. This is diagnostic evidence only:
+    // never classify, retry, or forward arbitrary message text based on this embedded JSON.
+    if (error.code !== "stream_initialization_failed" || typeof error.message !== "string") return;
+    if (Buffer.byteLength(error.message) > 64 * 1024) { this.truncated = true; return; }
+    if (!error.message.startsWith("Failed to create stream:")) return;
+    const start = error.message.indexOf("{");
+    if (start < 0) return;
+    let embedded: Record<string, unknown>;
+    try { embedded = record(record(JSON.parse(error.message.slice(start))).error); }
+    catch { return; }
+    for (const key of ["code", "type"]) this.put(`upstreamError.cause.${key}`, embedded[key]);
+    const param = record(embedded.param);
+    const status = param.statusCode;
+    if (typeof status === "number" && Number.isInteger(status) && status >= 400 && status <= 599) {
+      this.put("upstreamError.cause.statusCode", status);
+    }
+    this.put("upstreamError.cause.param.type", param.type);
   }
   error(code: string, stage: "http" | "stream", retryable: boolean): void {
     this.put("error.code", code); this.put("error.stage", stage); this.put("error.retryable", retryable);

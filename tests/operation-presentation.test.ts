@@ -7,6 +7,7 @@ import {
   operationMetadata,
   operationStatus,
   operationTitle,
+  shouldDisplayOperation,
   redactOperationDetail,
 } from "../src/surfaces/operation-presentation.js";
 
@@ -24,6 +25,14 @@ describe("shared operation presentation", () => {
     expect(notices.accept({ ...event, operation: { ...event.operation, itemId: "next", status: "running" } })).toBe("开始压缩上下文…");
   });
 
+  it.each(["running", "completed", "failed", "declined"] as const)("filters pure wait %s in compact mode while retaining errors", status => {
+    const waiting = { ...operation("sleep"), status };
+    expect(shouldDisplayOperation(waiting, "compact")).toBe(status === "failed" || status === "declined");
+    expect(shouldDisplayOperation(waiting, "full")).toBe(true);
+    expect(shouldDisplayOperation(waiting, "hidden")).toBe(false);
+    expect(shouldDisplayOperation({ ...waiting, kind: "command" }, "compact")).toBe(true);
+  });
+
   it("maps every operation kind to one shared title", () => {
     const titles = new Map<OperationUpdate["kind"], string>([
       ["command", "运行命令"],
@@ -34,7 +43,7 @@ describe("shared operation presentation", () => {
       ["webSearch", "搜索网页"],
       ["imageView", "查看图片"],
       ["imageGeneration", "生成图片"],
-      ["sleep", "等待"],
+      ["sleep", "暂停等待"],
       ["plan", "更新计划"],
       ["contextCompaction", "压缩上下文"],
       ["reviewMode", "进入审查模式"],

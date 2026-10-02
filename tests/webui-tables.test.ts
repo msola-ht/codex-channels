@@ -359,6 +359,13 @@ describe("WebUI metrics table presentation", () => {
         result.pendingCall = render(TrafficDetail, { detail: { ...detail, state: "pending" }, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
         result.failedCall = render(TrafficDetail, { detail: { ...completedDetail, state: "failed", response: { ...completedDetail.response,
           state: "failed", failureStage: "upstream_error", failure: "hidden-error", errorScope: "socket", error: "hidden-transport-error" } }, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        for (const [name, fields] of Object.entries({
+          rateLimit: { "upstreamError.code": "stream_initialization_failed", "upstreamError.cause.type": "rate_limit_exceeded", "upstreamError.cause.statusCode": 429, "upstreamError.request_id": "readable-request-id" },
+          authentication: { "upstreamError.cause.statusCode": 401 },
+          unknown: { "upstreamError.code": "unknown_upstream_code" },
+        })) {
+          result["errorSummary-" + name] = render(TrafficDetail, { detail: { ...completedDetail, state: "failed", response: { ...completedDetail.response, state: "failed", status: 200, error: "chat_upstream_error" }, chatDiagnostics: { fields, truncated: false } }, provider: "clp-main", session: "batch", onRetry: noop, onTracePageChange: noop });
+        }
         const completedWithDisconnect = { ...completedDetail, response: { ...completedDetail.response, errorScope: "client_disconnected" } };
         result.completedDisconnect = render(TrafficDetail, { detail: completedWithDisconnect, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
         globalThis.fixtureDisclosureOpen = true;
@@ -858,6 +865,14 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.failedCall!.match(/role="alert"/g)).toHaveLength(1);
     expect(markup.failedCall).toContain("错误详情");
     expect(markup.failedCall).not.toContain("hidden-error");
+    expect(markup["errorSummary-rateLimit"]).toContain("上游限流，请稍后重试或降低并发。");
+    expect(markup["errorSummary-rateLimit"]).toContain("stream_initialization_failed");
+    expect(markup["errorSummary-rateLimit"]).toContain("rate_limit_exceeded");
+    expect(markup["errorSummary-rateLimit"]).toContain("readable-request-id");
+    expect(markup["errorSummary-rateLimit"]).toContain("429");
+    expect(markup["errorSummary-rateLimit"]).toContain("HTTP 200");
+    expect(markup["errorSummary-authentication"]).toContain("上游认证失败，请检查 API Key。");
+    expect(markup["errorSummary-unknown"]).toContain("现有记录不足以确定具体原因");
     for (const category of ["prewarm", "models"]) {
       expect(markup['call-' + category]).not.toContain("首 Token");
       expect(markup['call-' + category]).not.toContain("输入 Token");

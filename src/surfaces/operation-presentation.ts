@@ -14,6 +14,9 @@ export function shouldDisplayOperation(
   if (display === "hidden") {
     return false;
   }
+  if (display === "compact" && record.kind === "sleep") {
+    return record.status === "failed" || record.status === "declined";
+  }
   if (display === "full" || record.kind !== "subagent") {
     return true;
   }
@@ -104,7 +107,7 @@ export function operationTitle(record: OperationUpdate): string {
     case "imageGeneration":
       return "生成图片";
     case "sleep":
-      return "等待";
+      return "暂停等待";
     case "plan":
       return "更新计划";
     case "contextCompaction":

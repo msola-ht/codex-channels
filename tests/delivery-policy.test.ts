@@ -392,3 +392,12 @@ it("releases retained persistent results without treating live intermediate outp
   expect(mayReleaseUncertainOutputBarrier({ type: "operation.updated", target, threadId: "t", turnId: "u",
     operation: { itemId: "i", kind: "imageGeneration", status: "completed", imagePath: "/private/result.png" } })).toBe(true);
 });
+
+it.each(["telegram", "feishu"] as const)("does not persist successful compact waits for %s but retains failures", surface => {
+  for (const status of ["running", "completed", "failed", "declined"] as const) {
+    const event: OutputEvent = { type: "operation.updated", target: { ...target, surface },
+      threadId: "thread", turnId: "turn", operation: { itemId: "wait", kind: "sleep", status } };
+    expect(isPersistentOutput(event, "compact")).toBe(status === "failed" || status === "declined");
+    expect(isPersistentOutput(event, "full")).toBe(status !== "running");
+  }
+});
