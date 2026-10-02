@@ -1,5 +1,9 @@
 import { visibleUpstreamMessage } from "./output-copy.js";
 
+export function formatTimezoneLine(): string {
+  return `时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+}
+
 interface RateLimitWindowView {
   usedPercent: number;
   windowDurationMins: number | null;
@@ -13,32 +17,25 @@ export function formatRateLimitWindow(
   if (window === null) {
     return "暂无数据";
   }
-  return [
-    `已使用 ${formatPercent(window.usedPercent)}`,
-    ...(options.includeDuration === false
-      || window.windowDurationMins === null
-      ? []
-      : [`周期 ${formatMinutes(window.windowDurationMins)}`]),
-    ...(window.resetsAt === null
-      ? []
-      : [`重置 ${formatResetTime(window.resetsAt)}`]),
-  ].join(" · ");
+  const duration = options.includeDuration === false || window.windowDurationMins === null
+    ? "" : `（${formatMinutes(window.windowDurationMins).replaceAll(" ", "")}）`;
+  const reset = window.resetsAt === null ? "" : `\n  - 重置：${formatResetTime(window.resetsAt)}\n  - ${formatTimeRemaining(window.resetsAt, Date.now(), "reset")}`;
+  return `剩余：${formatPercent(Math.min(100, Math.max(0, 100 - window.usedPercent)))}${duration}${reset}`;
 }
 
 export function formatRemainingRateLimitWindow(
   window: RateLimitWindowView,
   options: { includeDuration?: boolean } = {},
 ): string {
-  return [
-    `剩余 ${formatPercent(Math.min(100, Math.max(0, 100 - window.usedPercent)))}`,
-    ...(options.includeDuration === false
-      || window.windowDurationMins === null
-      ? []
-      : [`周期 ${formatMinutes(window.windowDurationMins)}`]),
-    ...(window.resetsAt === null
-      ? []
-      : [`重置 ${formatResetTime(window.resetsAt)}`]),
-  ].join(" · ");
+  return formatRateLimitWindow(window, options);
+}
+
+export function formatTimeRemaining(timestamp: number, now: number, kind: "reset" | "expiry"): string {
+  const remainingMs = timestamp * 1_000 - now;
+  if (remainingMs <= 0) return kind === "reset" ? "重置时间已过" : "已到期";
+  const hours = Math.floor(remainingMs / 3_600_000);
+  if (hours === 0) return "剩余不足 1 H";
+  return `剩余 ${Math.floor(hours / 24)} D ${hours % 24} H`;
 }
 
 export function formatPercent(value: number): string {

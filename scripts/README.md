@@ -85,10 +85,11 @@
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
   `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
 - `webui-management-codex-route.mjs` / `webui-management-gateway-route.mjs` /
-  `webui-management-provider-route.mjs`（账户刷新随 HTTP 断开取消私有 IPC 等待，上游认证失败保持 502；单账户刷新复用 Store 精确 Provider 查询，整表同步保留账户增删与来源告警） / `webui-management-task-route.mjs` /
+  `webui-management-provider-route.mjs`（账户刷新随 HTTP 断开取消私有 IPC 等待，上游认证失败保持 502；单账户刷新复用 Store 精确 Provider 查询，整表同步保留账户增删与来源告警；响应附加同账户的 OpenAI 登录缓存订阅日期，不写入快照） / `webui-management-task-route.mjs` /
   `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
   服务与上游状态资源；复用主服务传入的共享安全状态，不自行建立认证、限速、事务锁或错误出口。
-  Provider 与账户路由通过私有 Gateway IPC 刷新账户，不读取 Provider 凭据或直接请求官方接口；账户
+  Provider 与账户路由通过私有 Gateway IPC 刷新账户，不直接请求官方接口；订阅日期仅通过 runtime 读取器
+  获取匹配账户的登录缓存日期，不向浏览器返回凭据。账户
   来源清单独立读取各家账户注册表、OpenAI 鉴权文件存在性和主配置选择，不依赖模型目录或指标库，来源错误分别返回；
   快照按 DS、OCG、CCG、CLP 四家注册表补齐账户元数据和未刷新占位；状态路由返回受管服务安全摘要，并按
   5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。

@@ -116,7 +116,7 @@ describe("Feishu output renderer", () => {
       "- 协作模式：Default",
       "",
       "### 账户状态",
-      "- 周限：剩余 63%",
+      "- 周限：剩余：63%",
     ].join("\n"));
     expect(rendered).not.toContain("build-secret");
   });
@@ -326,12 +326,12 @@ describe("Feishu output renderer", () => {
         },
       },
     });
-    expect(status).toContain("输入命中缓存：600");
-    expect(status).toContain("输入未命中缓存：200");
+    expect(status).toContain("缓存：600");
+    expect(status).toContain("无缓存：200");
     expect(status).toContain("缓存命中率：75.00%");
     expect(status).toContain("缓存写入：50");
     expect(status).toContain("Git 分支：feature/weixin-surface");
-    expect(status).toContain("周限：剩余 63%");
+    expect(status).toContain("周限：剩余：63%");
 
     const limits = renderFeishuCommandResult({
       kind: "limits",
@@ -478,7 +478,7 @@ describe("Feishu output renderer", () => {
       "- OpenAI Credits：未提供",
       "",
       "### 账户状态",
-      "- 周限：剩余 63%",
+      "- 周限：剩余：63%",
     ].join("\n"));
   });
 

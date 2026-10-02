@@ -1467,6 +1467,7 @@ describe("Feishu command adapter", () => {
       chatId: "oc_chat",
       text: [
         "## Codex 状态",
+        `- 时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
         "- Workspace：Main (main)",
         "- Session：未命名",
         "- Session ID：thread-1",

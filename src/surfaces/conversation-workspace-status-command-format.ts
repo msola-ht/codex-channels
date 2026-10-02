@@ -8,7 +8,7 @@ import {
   type ThreadGoal,
 } from "../conversation-core/index.js";
 
-import { formatRemainingRateLimitWindow } from "./account-format.js";
+import { formatRemainingRateLimitWindow, formatTimezoneLine } from "./account-format.js";
 import { formatCodexProviderLabel, supportsFastMode } from "./provider-format.js";
 import { formatCacheHitRate, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
@@ -151,6 +151,7 @@ export function formatConversationGoal(
 export function formatConversationStatus(status: ConversationStatus): string {
   const lines = [
     "Codex 状态",
+    formatTimezoneLine(),
     `Workspace：${status.workspaceName} (${status.workspaceId})`,
     `Session：${status.threadId ? status.threadName ?? "未命名" : "尚未绑定"}`,
     `Session ID：${status.threadId ?? "尚未绑定"}`,
@@ -182,8 +183,8 @@ export function formatConversationStatus(status: ConversationStatus): string {
       "当前 Session 用量：",
       `- **Token**：${formatTokenCount(total.totalTokens)}`,
       `  - 最近模型请求：${formatTokenCount(last.totalTokens)}`,
-      `  - 输入命中缓存：${formatTokenCount(total.cachedInputTokens)}`,
-      `  - 输入未命中缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
+      `  - 缓存：${formatTokenCount(total.cachedInputTokens)}`,
+      `  - 无缓存：${formatTokenCount(Math.max(0, total.inputTokens - total.cachedInputTokens))}`,
       `  - 缓存命中率：${formatCacheHitRate(total.inputTokens, total.cachedInputTokens)}`,
       ...(total.cacheWriteInputTokens > 0
         ? [`  - 缓存写入：${formatTokenCount(total.cacheWriteInputTokens)}`]

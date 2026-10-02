@@ -1755,7 +1755,7 @@ describe("TelegramOutbox", () => {
         "• <b>Git 分支：</b>feature/weixin-surface",
         "",
         "<b>账户状态</b>",
-        "• <b>周限：</b>剩余 58%",
+        "• <b>周限：</b>剩余：58%",
       ].join("\n"),
     ]);
     expect(api.sendOptions[1]).toEqual({

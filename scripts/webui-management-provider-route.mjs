@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { codexHomePath, hasCodexAuthFile } from "../runtime/codex-home.mjs";
+import { readOpenAiSubscription } from "../runtime/openai-subscription.mjs";
 import { readCodexConfigFile } from "../runtime/model-provider-managed-runtime.mjs";
 import { routeResetCredits } from "./webui-reset-credit-route.mjs";
 import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
@@ -92,7 +93,7 @@ export async function routeProviderManagement({
     } finally {
       response.removeListener("close", disconnect);
     }
-    sendAccountSnapshots(environment, response, openMetricsStore, body.provider);
+    await sendAccountSnapshots(environment, response, openMetricsStore, body.provider);
     return true;
   }
   if (path === "/provider-settings" && request.method === "GET") {
@@ -260,7 +261,7 @@ export async function routeProviderManagement({
   return false;
 }
 
-export function sendAccountSnapshots(environment, response, openMetricsStore, provider) {
+export async function sendAccountSnapshots(environment, response, openMetricsStore, provider) {
   const store = openMetricsStore(environment);
   try {
     // A refresh owns one Provider; the separate GET remains the authoritative list.
@@ -313,6 +314,14 @@ export function sendAccountSnapshots(environment, response, openMetricsStore, pr
         displayName: account.displayName,
         default: account.default,
       });
+    }
+    for (const snapshot of snapshots) {
+      if (snapshot.provider !== "openai") continue;
+      const limits = snapshot.limits;
+      snapshot.subscription = await readOpenAiSubscription(
+        limits?.kind === "rate-limits" && limits.provider === "openai" ? limits.limits?.accountId : null,
+        environment,
+      );
     }
     sendJson(response, 200, {
       observedAtMs: snapshots.reduce((latest, item) => Math.max(latest, item.observedAtMs), 0),

@@ -636,7 +636,7 @@ describe("WeixinConversationAdapter", () => {
       1,
       target,
       expect.stringMatching(
-        /^\*\*Codex 状态\*\*\n- Workspace：[\s\S]*\n- Git 分支：feature\/weixin-surface/u,
+        /^\*\*Codex 状态\*\*\n- 时区：[^\n]+\n- Workspace：[\s\S]*\n- Git 分支：feature\/weixin-surface/u,
       ),
     );
     expect(notifyText).toHaveBeenNthCalledWith(

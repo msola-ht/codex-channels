@@ -40,8 +40,8 @@ export function formatConversationMetrics(
       ...(turn.cachedInputTokens === null
         ? ["  - 缓存：上游未提供完整数据"]
         : [
-            `  - 输入命中缓存：${formatTokenCount(turn.cachedInputTokens)}`,
-            `  - 输入未命中缓存：${formatTokenCount(Math.max(0, turn.inputTokens - turn.cachedInputTokens))}`,
+            `  - 缓存：${formatTokenCount(turn.cachedInputTokens)}`,
+            `  - 无缓存：${formatTokenCount(Math.max(0, turn.inputTokens - turn.cachedInputTokens))}`,
             `  - 缓存命中率：${formatCacheHitRate(turn.inputTokens, turn.cachedInputTokens)}`,
           ]),
       `  - 输出：${formatTokenCount(turn.outputTokens)}`,
@@ -66,8 +66,8 @@ export function formatConversationMetrics(
       ...(aggregate.cachedInputTokens === null
         ? ["  - 缓存：上游未提供完整数据"]
         : [
-            `  - 输入命中缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
-            `  - 输入未命中缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
+            `  - 缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
+            `  - 无缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
             `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
           ]),
       `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,
@@ -223,8 +223,8 @@ function formatMetricsAggregate(
     ...(aggregate.cachedInputTokens === null
       ? ["  - 缓存：上游未提供完整数据"]
       : [
-          `  - 输入命中缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
-          `  - 输入未命中缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
+          `  - 缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
+          `  - 无缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
           `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
         ]),
     `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,
@@ -262,8 +262,8 @@ function formatMetricsGroup(
     ...(aggregate.cachedInputTokens === null
       ? []
       : [
-          `  - 输入命中缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
-          `  - 输入未命中缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
+          `  - 缓存：${formatTokenCount(aggregate.cachedInputTokens)}`,
+          `  - 无缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
           `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
         ]),
     `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,

@@ -18,6 +18,13 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.quotaCreditsEnglish).toContain("No expiry");
     expect(markup.quotaCreditsEnglish).toContain("Other reset credits: 1");
     expect(markup.quotaCredits).toContain("可用重置券");
+    expect(markup.quotaCredits).toContain("订阅截止时间");
+    expect(markup.quotaCredits).toContain("订阅信息最后检查时间");
+    expect(markup.quotaCredits).toContain("2026-10-03 02:05");
+    expect(markup.quotaCredits).toContain("2026-09-23 02:41");
+    expect(markup.quotaCreditsEnglish).toContain("Subscription active until");
+    expect(markup.quotaCreditsEnglish).toContain("Subscription last checked");
+    expect(markup.quotaCreditsEnglish).toContain("From the login cache");
     expect(markup.quotaCredits).toContain("使用重置券");
     expect(markup.quotaCreditsEnglish).toContain("Use reset credit");
     expect(markup.quotaCredits).toContain("1970-01-01 00:33");
@@ -143,7 +150,7 @@ describe("WebUI metrics table presentation", () => {
           quotaCreditsEnglish: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: null, planType: null,
             credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "2", expirations: [{ expiresAt: null, count: 1 }], undisclosedCount: "1" } }, "en"),
           quotaCredits: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: 1000, planType: "plus",
-            credits: { observedAtMs: 1000, remaining: "12.34567890123456789", unlimited: false, resetCreditsAvailable: "5",
+            credits: { subscription: { activeUntil: 1790993155, lastChecked: 1790131317 }, observedAtMs: 1000, remaining: "12.34567890123456789", unlimited: false, resetCreditsAvailable: "5",
               expirations: [{ expiresAt: 2000, count: 2 }, { expiresAt: null, count: 1 }], undisclosedCount: "2" } }),
           quotaZeroCredits: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null,
             credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "0", expirations: [], undisclosedCount: null } }),

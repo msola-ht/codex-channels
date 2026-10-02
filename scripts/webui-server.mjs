@@ -486,7 +486,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
     return;
   }
   if (apiPath === "/accounts") {
-    sendAccountSnapshots(environment, response, openMetricsStore);
+    await sendAccountSnapshots(environment, response, openMetricsStore);
     return;
   }
   if (await routeTrafficApi({ apiPath, environment, request, response, url })) return;

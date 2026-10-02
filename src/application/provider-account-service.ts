@@ -23,6 +23,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
   constructor(
     adapters: readonly ProviderAccountAdapter[],
     private readonly snapshotWriter?: OfficialAccountSnapshotWriter,
+    private readonly readSubscription?: (accountId: string | null) => Promise<{ activeUntil: number | null; lastChecked: number | null } | null>,
   ) {
     for (const adapter of adapters) {
       if (!adapter.provider || this.adapters.has(adapter.provider)) {
@@ -73,14 +74,19 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     const sequence = ++this.limitsQuerySequence;
     const result = await adapter.accountLimits(signal);
     signal?.throwIfAborted();
-    if (sequence < (this.savedLimitsSequence.get(modelProvider) ?? 0)) return result;
-    this.persist(
-      this.snapshotUsage.get(modelProvider)
-        ?? { kind: "unsupported", provider: modelProvider },
-      result,
-    );
-    this.savedLimitsSequence.set(modelProvider, sequence);
-    return result;
+    if (sequence >= (this.savedLimitsSequence.get(modelProvider) ?? 0)) {
+      this.persist(
+        this.snapshotUsage.get(modelProvider)
+          ?? { kind: "unsupported", provider: modelProvider },
+        result,
+      );
+      this.savedLimitsSequence.set(modelProvider, sequence);
+    }
+    if (result.kind !== "rate-limits" || !this.readSubscription) return result;
+    // Login metadata is presentation-only; never persist it as an official quota snapshot.
+    const subscription = await this.readSubscription(result.limits.accountId);
+    signal?.throwIfAborted();
+    return { ...result, subscription };
   }
 
   /** 按需预热所有已注册账户；调用方应异步触发，不阻塞主服务启动。 */

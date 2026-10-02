@@ -19,8 +19,8 @@ describe("completion account status", () => {
     const result = render(provider, { provider, kind: "quota-windows", available: true, windows: [window,
       { ...window, windowId: "five-hour", label: "5小时", usedPercent: 100, resetsAt: null }] });
     expect(result).toContain("账户状态");
-    expect(result).toContain(`周限：剩余 91% · 重置 ${formatResetTime(window.resetsAt)}`);
-    expect(result).toContain("5小时：剩余 0%");
+    expect(result).toContain(`周限：剩余：91%\n  - 重置：${formatResetTime(window.resetsAt)}\n  - `);
+    expect(result).toContain("5小时：剩余：0%");
     expect(result).not.toContain("重置 未知");
   });
   it("shows official credits without mixing currencies with percentages", () => {

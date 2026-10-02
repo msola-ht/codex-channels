@@ -17,6 +17,7 @@ import {
   releaseAppServerProvider,
 } from "../../runtime/app-server-supervisor.mjs";
 import { hasCodexAuthFile } from "../../runtime/codex-home.mjs";
+import { readOpenAiSubscription } from "../../runtime/openai-subscription.mjs";
 import {
   effectiveCodexBinary,
   executableInvocation,
@@ -579,7 +580,7 @@ export abstract class GatewayComponentGraph {
           limits: snapshot.limits,
         });
       },
-    });
+    }, readOpenAiSubscription);
     const execution = withOutputExecutionAdmission(this.codex, (threadId) => {
       const target = this.bindings.getByThread(threadId)?.target;
       const reason = target ? this.surfaceManager.executionBlockReason(target) : "unavailable";

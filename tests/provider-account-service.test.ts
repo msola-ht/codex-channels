@@ -10,6 +10,21 @@ import {
 } from "../src/application/index.js";
 
 describe("ProviderAccountService", () => {
+  it("adds subscription cache dates after snapshot persistence without changing official limits", async () => {
+    const limits = { ...emptyRateLimits(), accountId: "account-a" };
+    const read = vi.fn().mockResolvedValue({ activeUntil: 1790993155, lastChecked: 1790131317 });
+    const write = vi.fn();
+    const service = new ProviderAccountService([{ provider: "openai", accountUsage: async () => ({ kind: "unsupported", provider: "openai" }),
+      accountLimits: async () => ({ kind: "rate-limits", provider: "openai", limits }),
+    }], { writeOfficialAccountSnapshot: write }, read);
+    expect(await service.accountLimits("openai")).toMatchObject({ subscription: { activeUntil: 1790993155, lastChecked: 1790131317 } });
+    expect(read).toHaveBeenCalledWith("account-a");
+    expect(write.mock.calls[0]![0].limits).not.toHaveProperty("subscription");
+    await service.accountUsage("openai");
+    expect(write.mock.calls.at(-1)![0].limits).not.toHaveProperty("subscription");
+    await service.accountLimits("other");
+    expect(read).toHaveBeenCalledTimes(1);
+  });
   it("does not refresh OpenAI quota age with usage or overwrite stored quotas after restart", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(1000);
     const write = vi.fn();
@@ -37,11 +52,14 @@ describe("ProviderAccountService", () => {
     const before = { kind: "rate-limits" as const, provider: "openai", limits: { ...emptyRateLimits(), resetCreditsAvailable: 2 } };
     const after = { ...before, limits: { ...before.limits, resetCreditsAvailable: 1 } };
     const read = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValue(after);
-    const service = new ProviderAccountService([{ provider: "openai", accountUsage: async () => ({ kind: "unsupported", provider: "openai" }), accountLimits: read }], { writeOfficialAccountSnapshot: write });
+    const subscription = { activeUntil: 1790993155, lastChecked: 1790131317 };
+    const readSubscription = vi.fn().mockResolvedValue(subscription);
+    const service = new ProviderAccountService([{ provider: "openai", accountUsage: async () => ({ kind: "unsupported", provider: "openai" }), accountLimits: read }], { writeOfficialAccountSnapshot: write }, readSubscription);
     const earlier = service.accountLimits("openai");
-    await service.accountLimits("openai");
+    expect(await service.accountLimits("openai")).toMatchObject({ subscription });
     finish(before);
-    await earlier;
+    expect(await earlier).toMatchObject({ subscription });
+    expect(readSubscription).toHaveBeenCalledTimes(2);
     expect(write).toHaveBeenCalledTimes(1);
     expect(write.mock.calls[0]?.[0].limits).toEqual(after);
   });
