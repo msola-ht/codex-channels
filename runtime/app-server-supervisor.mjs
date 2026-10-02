@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { chmodSync, lstatSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
-import { createConnection, createServer } from "node:net";
+import { lstatSync, mkdirSync, renameSync } from "node:fs";
+import { createConnection } from "node:net";
 import { basename, dirname, extname, resolve } from "node:path";
 import { Duplex } from "node:stream";
 
@@ -24,11 +24,9 @@ const desktopAppHostProtocolVersion = 1;
 const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 4_096;
 const connectionTimeoutMs = 1_000;
-const minimumUnixSocketPathLimitBytes = 104;
 const providerIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 
 export class AppServerSupervisorOwner {
-  #identity;
   #server;
   #socketPath;
   #sockets = new Set();
@@ -77,9 +75,7 @@ export class AppServerSupervisorOwner {
         void this.#handleRequest(socket, Buffer.concat(chunks).toString("utf8"));
       });
     };
-    this.#server = process.platform === "win32"
-      ? new PrivateIpcServer(this.#socketPath, listener)
-      : createServer({ allowHalfOpen: true }, listener);
+    this.#server = new PrivateIpcServer(this.#socketPath, listener);
   }
 
   async #handleRequest(socket, requestText) {
@@ -363,40 +359,12 @@ export class AppServerSupervisorOwner {
   }
 
   async start() {
-    if (process.platform === "win32") {
-      await this.#server.start("Codex App Server 统一监管入口已在运行");
-      return;
-    }
-    await removeStaleSupervisorSocket(this.#socketPath);
-    await listenUnixSupervisor(this.#server, this.#socketPath).catch((error) => {
-      if (error?.code === "EADDRINUSE") {
-        throw new Error("Codex App Server 统一监管入口已在运行");
-      }
-      if (
-        error?.code === "ENAMETOOLONG"
-        || (
-          error?.code === "EINVAL"
-          && Buffer.byteLength(this.#socketPath) > minimumUnixSocketPathLimitBytes
-        )
-      ) {
-        throw new Error(
-          `App Server 监管 Socket 无法创建（路径可能超过平台长度限制）：${this.#socketPath}`,
-          { cause: error },
-        );
-      }
-      throw error;
-    });
+    if (this.#closing) throw new Error("App Server 监管入口正在关闭");
     try {
-      const status = lstatSync(this.#socketPath);
-      this.#identity = { dev: status.dev, ino: status.ino };
-      chmodSync(this.#socketPath, 0o600);
+      await this.#server.start("Codex App Server 统一监管入口已在运行");
     } catch (error) {
-      await this.close();
-      if (error?.code === "ENOENT") {
-        throw new Error(
-          `App Server 监管 Socket 无法创建（路径可能超过平台长度限制）：${this.#socketPath}`,
-          { cause: error },
-        );
+      if (error?.code === "ERR_PRIVATE_IPC_PATH") {
+        throw new Error(`App Server 监管 Socket 无法创建（路径可能超过平台长度限制）：${this.#socketPath}`, { cause: error });
       }
       throw error;
     }
@@ -417,15 +385,8 @@ export class AppServerSupervisorOwner {
 
   async #closeInternal() {
     for (const socket of this.#sockets) socket.destroy();
-    if (process.platform === "win32") {
-      await this.#server.close();
-    } else if (this.#server.listening) {
-      await new Promise((resolveClose) => this.#server.close(() => resolveClose()));
-    }
+    await this.#server.close();
     await Promise.allSettled([...this.#providerOperations.values()]);
-    if (process.platform !== "win32") {
-      unlinkOwnedUnixSocket(this.#socketPath, this.#identity);
-    }
   }
 }
 
@@ -768,62 +729,6 @@ export async function appServerSocketAcceptsWebSocket(socketPath) {
     socket.once("open", () => finish(true));
     socket.once("error", () => finish(false));
   });
-}
-
-async function removeStaleSupervisorSocket(socketPath) {
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (!status) return;
-  if (
-    !status.isSocket()
-    || status.uid !== process.getuid?.()
-  ) {
-    throw new Error(`App Server 监管 Socket 路径不安全：${socketPath}`);
-  }
-  if (await unixSocketAcceptsConnections(socketPath)) {
-    throw new Error("Codex App Server 统一监管入口已在运行");
-  }
-  if ((status.mode & 0o077) !== 0) {
-    throw new Error(`App Server 监管 Socket 路径不安全：${socketPath}`);
-  }
-  const current = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (current?.dev === status.dev && current.ino === status.ino) {
-    unlinkSync(socketPath);
-  }
-}
-
-function unixSocketAcceptsConnections(socketPath) {
-  return new Promise((resolveCheck) => {
-    const socket = createConnection(socketPath);
-    socket.once("connect", () => {
-      socket.destroy();
-      resolveCheck(true);
-    });
-    socket.once("error", () => resolveCheck(false));
-  });
-}
-
-function listenUnixSupervisor(server, socketPath) {
-  return new Promise((resolveListen, rejectListen) => {
-    const onError = (error) => {
-      server.removeListener("listening", onListening);
-      rejectListen(error);
-    };
-    const onListening = () => {
-      server.removeListener("error", onError);
-      resolveListen();
-    };
-    server.once("error", onError);
-    server.once("listening", onListening);
-    server.listen(socketPath);
-  });
-}
-
-function unlinkOwnedUnixSocket(socketPath, identity) {
-  if (!identity) return;
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (status?.isSocket() && status.dev === identity.dev && status.ino === identity.ino) {
-    unlinkSync(socketPath);
-  }
 }
 
 function readSupervisorResponse(socketPath, request, timeoutMs = 1_000) {

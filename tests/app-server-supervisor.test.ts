@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +28,67 @@ afterEach(() => {
 describe("App Server supervisor", () => {
   const unixIt = process.platform === "win32" ? it.skip : it;
   const darwinIt = process.platform === "darwin" ? it : it.skip;
+  unixIt("preserves a replaced public endpoint on close", async () => {
+    const root = mkdtempSync("/tmp/sup-");
+    temporaryDirectories.push(root);
+    const primary = join(root, "s.sock");
+    const path = appServerSupervisorSocketPath(primary);
+    const owner = new AppServerSupervisorOwner(primary, {
+      primaryProvider: "openai", managedProviders: [], socketPaths: [primary],
+    });
+    try {
+      await owner.start();
+      renameSync(path, join(root, "old.sock"));
+      writeFileSync(path, "replacement", { mode: 0o600 });
+      await owner.close();
+      expect(readFileSync(path, "utf8")).toBe("replacement");
+      await expect(owner.start()).rejects.toThrow("正在关闭");
+    } finally { await owner.close(); }
+  });
+
+  it("retries an occupied endpoint after the previous owner closes", async () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "sup-"));
+    temporaryDirectories.push(root);
+    const primary = join(root, "s.sock");
+    const topology = { primaryProvider: "openai", managedProviders: [], socketPaths: [primary] };
+    const first = new AppServerSupervisorOwner(primary, topology);
+    const second = new AppServerSupervisorOwner(primary, topology);
+    try {
+      await first.start();
+      await expect(second.start()).rejects.toThrow("已在运行");
+      await first.close();
+      await second.start();
+      await first.close();
+      expect(await inspectAppServerSupervisor(primary)).toMatchObject({ primaryProvider: "openai" });
+    } finally { await first.close(); await second.close(); }
+  });
+
+  it("waits for an in-flight Provider operation while closing the listener", async () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "sup-"));
+    temporaryDirectories.push(root);
+    const primary = join(root, "s.sock");
+    let started!: () => void;
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const owner = new AppServerSupervisorOwner(primary, {
+      primaryProvider: "openai", managedProviders: [], socketPaths: [primary],
+    }, { ensureProvider: async () => { started(); await pending; } });
+    await owner.start();
+    const request = ensureAppServerProvider(primary, "openai").catch(() => undefined);
+    try {
+      await entered;
+      let closed = false;
+      const closing = owner.close().then(() => { closed = true; });
+      await request;
+      expect(closed).toBe(false);
+      finish();
+      await closing;
+      expect(closed).toBe(true);
+      expect(existsSync(appServerSupervisorSocketPath(primary))).toBe(false);
+    } finally { finish(); await owner.close(); await request; }
+  });
+
   it("refuses an unsafe supervisor path before requesting a Provider", async () => {
     const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-unsafe-"));
     temporaryDirectories.push(runtimeDir);
