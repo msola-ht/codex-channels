@@ -25,6 +25,8 @@
 
 分支：`refactor/lazy-cli-surface-loading`。本记录建立时 HEAD 为 `e93e0c9a`。
 M01、M02、M03、M04、M06、M07 及 R01 已提交为 `2683d70a`；此前 CLI 加载调整不计入本轮模块轻量化收益。
+M09、M10、M16、R02、M17 及 M08—M15 分析记录已提交为 `0b6365d1`；下文各项“未提交”描述其开发阶段，当前交付状态以本节与提交记录为准。
+M19 与 M20 已完成提交前审查，随本次 Delivery 编解码收敛提交交付；下文“尚未提交”和验证缺项保留开发阶段时点，提交全量门禁以本次正常 pre-commit 输出为准。
 各项原有验证记录描述开发阶段；本批提交门禁结果以本节记录为准。
 
 | 编号 | 模块与问题 | 状态 | 收益 |
@@ -266,7 +268,81 @@ M01、M02、M03、M04、M06、M07 及 R01 已提交为 `2683d70a`；此前 CLI �
 - 其他检查：类型、版本、运行时依赖边界、相关源码／测试 Lint、两份 JavaScript 语法检查、文档与 Diff 检查通过。Runtime 模块说明同步更新。
 - 限制：Linux 隔离 IPC／HTTP 夹具验证；没有操作真实服务或 App Server，未执行 Windows 实机、远程 CI 或提交全量门禁。共享 IPC 监听路径替换的既有问题仍单独保留，本次未修改服务端生命周期。
 
-## 后续候选
+## 第二批审查与提交结果
 
-继续检查非展示模块的重复资源管理或冗余依赖。M07 发现的 Unix Socket 路径替换问题单独保留为待审查缺陷，需评估 Node 自动 unlink 与所有私有 IPC 宿主的关闭链路，不将其混入后续无关轻量化。
-候选必须重新完成链路分析和改前审查，不将本文件视为批量改动未分析模块的依据。
+- 审查范围：11 个文件，包含三组实现收敛、Event Bus 闲置引用清理、回滚与 IPC 合同测试及文档；未发现新的阻断问题。R02 的持久化断言已补齐，IPC 控制回应校验保持原样。
+- 提交：`0b6365d1`，改动：收敛 Relay IPC 请求生命周期与绑定写入规则；未推送，提交后工作区干净。
+- 正常 pre-commit 门禁一次通过，使用 Node 22.13.0：380 个测试文件通过、11 个跳过，5519 项测试通过、103 项跳过；类型与版本、生产／测试 Lint、WebUI 构建及 Lint、翻译、文档、Shell 语法和 tarball 安装冒烟通过，总耗时 2 分 46.6 秒。
+- 门禁日志：`/tmp/codexc-module-lightweight-commit-next.log`，仅为当前环境临时日志；Windows 实机、远程 CI 及既有 Socket 路径替换问题仍不在已完成结果内。
+
+## M18：提交后继续审查其他 IPC 宿主（搁置扩展）
+
+目标是核对 M17 能否继续减少独立生命周期实现，不以 Socket、timer 或 JSON 等相似代码形态作为合并依据。
+
+| 链路 | 关联业务边界 | 结论 |
+| --- | --- | --- |
+| WebUI 投递管理 → requestDeliveryResolution → Gateway 在线处置；仅未发送时进入 DeliveryJournal maintenance | null 明确表示未发出命令，允许尝试离线维护；发送后断开必须是 unconfirmed，禁止再次处置 | 不直接改用只返回通用失败的请求函数 |
+| WebUI／重置券入口 → requestGatewayAccountOperation → GatewayAccountRefreshServer → 刷新或重置券执行 | 20 秒截止、512 KiB 回应、EOF 完成边界、AbortSignal 原因，以及 invalid_response／gateway_unavailable／受控业务错误分类 | 不通过增加一批模式开关扩大共享请求接口 |
+| 服务状态／安装健康确认 → gatewayOwnerIsReady → readGatewayOwnerStatus → GatewayOwner | 服务端连接后主动发送状态，客户端不发业务请求；ready 与持有进程互斥锁是不同状态 | 不把被动状态探测改成请求／响应模型 |
+
+- Delivery 证据：`scripts/webui-management-delivery-route.mjs` 的 resolveDelivery 仅在 result 为 null 时创建 maintenance Journal；`tests/delivery-control.test.ts` 覆盖端点缺失与写入后丢失回应的区别，并确认只执行一次。共享函数若抹掉“是否发送”的证据，将影响实际维护路径，不能为去重放宽。
+- 账户刷新证据：`runtime/gateway-account-refresh.mjs` 同时承载刷新与四类重置券操作，客户端按 end 解码响应，服务端绑定断连取消；`tests/gateway-account-refresh.test.ts` 覆盖受控公开错误、调用方取消及关闭取消。只看指标发送的外观会漏掉失败分类与操作取消责任。
+- 就绪探测证据：GatewayOwner 在接入时直接 socket.end 状态；`tests/gateway-owner.test.ts` 区分 owner 已活动与 markReady 后就绪，并验证开始关闭后不能重新宣称就绪。
+- 改前审查结论：三个候选尚不能在保留当前合同的同时直接复用 M17；本轮保留现状，不添加通用 IPC 框架。后续轻量化转向其他明确重复职责，不继续横向套用请求封装。
+- 本轮仅新增分析记录，执行文档与 Diff 检查；上述既有测试已包含在 `0b6365d1` 提交门禁中，不重复执行或将此分析算作新增功能验证。
+
+## M19：Delivery 写入与只读查看共用载荷编解码
+
+- 状态：已验证，未提交。
+- 前置筛选：复核 Coordinator → PersistentSurfaceOutput → 各 Surface deliver → DeliveryReceipt → 检查点写回。现有 Receipt 已共用操作确认，飞书完整内容补发、Telegram 空正文与微信回复窗口仍有必要差异；不新增通用 Outbox，也不合并授权复核、平台确认和本地 acknowledge 的失败域。
+- 写入链路：PersistentSurfaceOutput 快照 → DeliveryJournal Worker → SqliteDeliveryJournal.submit → 身份认证数据、AES-GCM 编码 → SQLite；重启验证 metadata proof 并逐条认证读取。
+- 查看链路：投递管理 → Delivery 公共只读入口 → queue-reader 私有路径、Schema 与行类型检查 → 读取密钥 → 单条解密或逐条投影。只读查看不启动恢复、不持有写锁，不改变投递状态。
+- 改前审查：两侧分别维护相同的 GCM 解密和 `[schemaVersion, id, account, conversation]` 认证数据构造。该格式只有一份持久化合同，可以集中实现；两侧不同的密钥生命周期、行校验、事务和失败策略不能一并移走。
+- 优化：增加模块内部 payload-codec，集中既有加密、解密和认证数据构造；写入／恢复和只读查看共用，未通过 index.ts 增加公共出口。Codec 不持有密钥或资源，不新增可选算法、配置或扩展机制。更新 Delivery 文件索引。
+- 改后审查：AES-256-GCM、12 字节随机 nonce、UTF-8、认证字段顺序、Schema v1、metadata 的 `delivery-v1`／`metadata` 字符串和 SQL 列全部不变；没有格式升级、数据迁移或用户数据操作。Writer 的 close 清零密钥仍在原处；只读路径继续检查载荷上限与字节类型。单条读取认证失败抛错，批量投影单条失败返回 null，Writer 恢复失败关闭。
+- 测试补强：使用 Node 原生加密与写死的 v1 认证数据构造独立夹具，不通过新 Codec 生成，验证写入端恢复与只读端均可读取既有格式；分别篡改 id、account、conversation，验证单条读取拒绝、批量投影为空、Writer 重开失败。
+- 验证：npm test 构建最新产物后，delivery-queue-reader、persistent-output、persistent-output-ownership、webui-delivery-management、module-boundaries 共 5 个文件、116 项通过；类型、版本、运行时依赖边界、相关 Lint、文档和 Diff 检查通过。
+- 收益与限制：认证格式和解密规则由两份维护入口收敛为一份，Writer 不再内嵌编解码方法；实现总代码净增加 3 行，不宣称体积或性能改善。不改 Coordinator 或平台确认行为，未运行提交全量门禁或操作真实服务。
+
+## M20：剩余模块候选审查与本轮收尾
+
+按 src/README.md 的 18 个一级模块补齐职责与候选链路盘点。以下“保留”表示检查过所列候选后没有确认值得实施的收敛方案，不表示逐行证明整个模块不存在任何缺陷或未来优化。
+
+| 模块 | 本轮核对的链路／责任 | 结论与证据 |
+| --- | --- | --- |
+| application | ConversationService、Queue、Revert 的会话锁；列表缓存刷新与代次失效 | 三者已经注入同一 ConversationLockCoordinator。查询缓存的 refresh promise、代次与 rerun 分别处理并发、迟到结果及后续刷新，不合并成第二份会话状态；保留现有边界 |
+| approval | Coordinator 的请求归属／决定映射 → InteractionRouter 排队、失效及 Surface 清理 | cancelMatching 已统一批量取消且先撤销整批再推进队列；safeDecline 与 safeInteractionDecision 返回不同层的类型，不能因都表示拒绝而合并；保留 |
+| bootstrap | 组合根接线、Provider 重连、绑定恢复与持久输出装配 | 重连处理连接代次与有限重试，绑定恢复处理 Thread 待恢复集合；恢复失败不能重新做已成功握手。M17、M19 已收敛实际重复实现，组合根仍负责具体装配 |
+| codex-client | BaseTransport → JsonRpcClient 初始化、pending 请求、Server Request 与通知分流 | Transport 事件分发已共用；pending 响应与反向 Server Request 生命周期不同；不将连接代次、业务缓存合成通用注册器，不改协议或平台 Transport |
+| codex-protocol | 锁定版本、受控 index 导出与 generated 类型 | 属于生成合同，排除手工删减／去重；没有新增协议依赖或能力 |
+| config | TOML 结构验证 → 运行语义／路径与权限校验 → 安全默认值补齐 | 结构与动态资源校验边界不同，校验成功后才写默认值；Registry 原子替换也需独立保护其输入。不删除安全校验或新增隐式默认回退 |
+| conversation-core | Client 稳定事件 → Core 活动状态归约 → TimingAccumulator → 输出总线 | 已将请求统计归约交给专属累加器；恢复观察者用于处理绑定期间开始／结束竞态，不替代长期活动状态；不合并状态寿命不同的集合 |
+| delivery | Worker、Coordinator、确认、只读查看和载荷编解码 | M02、M19 完成共享读取生命周期及编解码收敛；M08 保留 Worker 不同超时责任 |
+| event-bus | 活动订阅、独立消费者、预算与关闭等待 | M10 去除闲置引用；取消订阅后仍可能有在途消费者，保留 workers 关闭集合 |
+| model-api | 原生 Chat／Responses 请求与转换流状态 | 两个原生入口已共用 direct-request 的模型、stream 和思考冲突检查；协议保留与协议转换合同不同，不能将原生未知字段透传改成转换路径的严格拒绝 |
+| model-relay | 准入、取消、诊断、指标发送及停止 | M09、M17 完成；M11、M12 保留不同生命周期与确认语义 |
+| observability | 指标队列水位 → 批量事务 → 查询与行映射 | M12：落库、IPC 接受与查询水位不能互换；Store 已拆分 schema、查询和行映射，不再增设转发门面 |
+| policy | Surface + Account + Actor 授权 → 已配置 Workspace Registry | Telegram 要验证整数 Actor 的规范字符串，飞书／微信是精确字符串；为两份短字符串类新增通用授权基类收益不足。Registry 冻结快照及整体替换保护保留 |
+| provider-proxy | 原生转发、指标 IPC、转储流与保留预算 | M07、M17 完成 IPC 职责收敛；M15 保留已有共享流创建层与协议专属轮转／预算 |
+| scheduled-tasks | 定时／手动领取 → Store → dispatch → 终态通知归并 | M06 完成共同 INSERT；M14 保留领取和终态竞态差异 |
+| session-routing | Workspace 选择、Thread 绑定切换／接管、订阅补偿与存储 | M13、M16 核对完整链路；保留存储失败后的旧订阅恢复以及生命周期并发复核 |
+| storage | 最小绑定写入、内存索引与重启恢复 | M16、R02 完成写入收敛和直接持久化回滚断言；不删除内存索引、不改变 Schema |
+| surfaces | 平台输入／输出、共享展示、Receipt 与持久确认 | M01、M03、M04 完成；M05 与 M19 前置分析保留转义预算、完整内容确认、空正文及回复窗口差异，不新增通用 Outbox |
+
+补充证据与审查：
+
+- Application：ConversationService 只创建一个 locks 实例并注入 Queue／Revert；forConversations 去重后排序加锁。会话展示缓存用代次拒绝在新 Turn 开始前发出的旧查询结果，pending Promise 不能替代代次。
+- Approval：interaction-router 测试覆盖整批取消后才推进、迟到同 ID 回答不污染替代请求、异步问题不阻塞审批和账号隔离；本次仅核对现有行为，不改变审批决定或上游字段。
+- Policy／Config：policy 测试覆盖冻结快照、热替换失败保留旧 Registry、Surface／账号精确匹配与规范 Actor；Config 先完成 runtime 语义检查才调用 materializeGatewayConfigDefaults。二者独立入口承担不同业务不变量。
+- Bootstrap／Client：gateway-reconnect-coordinator 测试覆盖恢复失败不重复握手、重复断线不重置预算；json-rpc-connection-errors 覆盖旧 Transport 清理期间失效与并发关闭。各状态集合有明确所有者，本轮未发现可移除的完整重复状态层。
+- Model API：chat-request 与 responses-request 都实际调用 validateDirectModel、validateDirectStream、assertNoNestedReasoningControls；不为已有共享能力再建统一协议解释器。
+- Delivery 改后复审：与 HEAD 的私有 aad／encrypt／decrypt 函数体规范空白并把 this.key 对应为参数 key 后，三个实现体一致；随机 nonce、metadata proof 和密钥清零位置未改变。沿用 M19 的 116 项检查结果，不因只读审查重复执行。
+- 非生成源码的连续重复片段扫描仅用于发现候选；命中 Surface handle 中的相似片段后，结合完整 deliver 链路确认既有 Receipt 与平台差异。扫描未命中不作为“无重复实现”的证明。
+
+本轮完成状态：
+
+- 18 个一级模块均有上述候选审查结论；已确认有收益的 M01—M19 实施项均已完成开发、改后审查及记录范围内的验证，没有保留“确认应做但尚未实现”的轻量化项。
+- M19 及提交后分析记录尚未提交；其余本批实现见 2683d70a、0b6365d1。最新生产代码检查仍以 M19 的 116 项定向测试为准，0b6365d1 的全量门禁不能表述为 M19 的全量门禁。
+- 本轮没有变更 RPC、授权语义、持久化格式、平台交互或服务状态；不开展协议升级、部署与发布。不把“所有候选已有处理结论”扩张为“项目不存在其他优化或缺陷”。
+- M07 的 Unix Socket 路径替换是已复现的独立基线缺陷，仍未修复，不列为轻量化完成成果；Windows 实机、远程 CI 及 M19 提交全量门禁未执行。
+- 最终文档与索引、Diff 格式检查通过；后续有新证据时另开候选，继续沿用分析、改前审查、优化、改后审查修复、验证的流程，不把本次盘点作为批量改动未分析实现的授权。

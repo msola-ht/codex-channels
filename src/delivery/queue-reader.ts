@@ -1,10 +1,11 @@
 import { lstatSync } from "node:fs";
-import { createDecipheriv, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { readPrivateFileSync } from "../../runtime/private-file.mjs";
 import { deliverySchemaVersion, type DeliveryQueueEntry, type DeliveryQueueSnapshot, type DeliveryState } from "./types.js";
+import { decryptDeliveryPayload, deliveryPayloadAad } from "./payload-codec.js";
 
 const integer = z.number().int().nonnegative().safe();
 const stateSchema = z.enum(["pending", "sending", "uncertain", "blocked"]);
@@ -94,10 +95,8 @@ function withReadDatabase<T>(directory: string, read: (db: DatabaseSync) => T): 
 function decryptPayload(db: DatabaseSync, key: Buffer, row: DeliveryQueueEntry): string {
   const raw = db.prepare("SELECT payload,nonce,tag FROM deliveries WHERE id=?").get(row.id)!;
   const payload = z.instanceof(Uint8Array).refine(value => value.length <= 4 * 1024 * 1024).parse(raw.payload);
-  const decipher = createDecipheriv("aes-256-gcm", key, z.instanceof(Uint8Array).parse(raw.nonce));
-  decipher.setAAD(Buffer.from(JSON.stringify([deliverySchemaVersion, row.id, row.account, row.conversation])));
-  decipher.setAuthTag(z.instanceof(Uint8Array).parse(raw.tag));
-  return Buffer.concat([decipher.update(payload), decipher.final()]).toString("utf8");
+  return decryptDeliveryPayload(key, payload, z.instanceof(Uint8Array).parse(raw.nonce),
+    z.instanceof(Uint8Array).parse(raw.tag), deliveryPayloadAad(row));
 }
 
 function readKey(directory: string): Buffer {

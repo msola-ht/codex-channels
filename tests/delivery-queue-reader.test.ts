@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { createCipheriv } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
@@ -112,6 +113,42 @@ it("authenticates payload reads without state recovery and fails on a tampered a
   const db = new DatabaseSync(join(directory, "outbox.sqlite3"));
   db.prepare("UPDATE deliveries SET tag=? WHERE id='one'").run(Buffer.alloc(16)); db.close();
   expect(() => readDeliveryPayload(directory, "one")).toThrow();
+});
+
+it("reads the existing v1 encryption format independently of the shared codec", () => {
+  const directory = fixture();
+  const writer = new SqliteDeliveryJournal(directory);
+  writer.execute({ type: "submit", value: { id: "one", account: "a", conversation: "c", payload: "fixture body" } });
+  writer.close();
+  const key = Buffer.from(readFileSync(join(directory, "payload.key"), "utf8"), "hex");
+  // Fixed nonce is only for this isolated fixture, never used by the production encoder.
+  const nonce = Buffer.alloc(12, 7);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  cipher.setAAD(Buffer.from('[1,"one","a","c"]'));
+  const payload = Buffer.concat([cipher.update("fixture body", "utf8"), cipher.final()]);
+  const db = new DatabaseSync(join(directory, "outbox.sqlite3"));
+  try {
+    db.prepare("UPDATE deliveries SET payload=?,nonce=?,tag=? WHERE id='one'")
+      .run(payload, nonce, cipher.getAuthTag());
+  } finally { db.close(); key.fill(0); }
+  expect(readDeliveryPayload(directory, "one")?.payload).toBe("fixture body");
+  const reopened = new SqliteDeliveryJournal(directory);
+  try { expect(reopened.execute({ type: "read", id: "one" })).toMatchObject({ payload: "fixture body" }); }
+  finally { reopened.close(); }
+});
+
+it.each(["id", "account", "conversation"] as const)("rejects a changed %s in both payload readers", field => {
+  const directory = fixture();
+  const writer = new SqliteDeliveryJournal(directory);
+  writer.execute({ type: "submit", value: { id: "one", account: "a", conversation: "c", payload: "body" } });
+  writer.close();
+  const db = new DatabaseSync(join(directory, "outbox.sqlite3"));
+  try { db.prepare(`UPDATE deliveries SET ${field}=? WHERE id='one'`).run("changed"); }
+  finally { db.close(); }
+  const id = field === "id" ? "changed" : "one";
+  expect(() => readDeliveryPayload(directory, id)).toThrow();
+  expect(readDeliveryPayloads(directory, [id], (_row, body) => body)).toEqual([null]);
+  expect(() => new SqliteDeliveryJournal(directory)).toThrow("storage");
 });
 
 it("uses indexed lookups and one read transaction for batch metadata without global aggregates", () => {
