@@ -450,6 +450,8 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     });
 
     try {
+      // Model a valid private owner independently of the runner's umask.
+      chmodSync(ownerSocketPath, 0o600);
       const failure = await execFileAsync(
         process.execPath,
         [cli, "service-app-server"],
