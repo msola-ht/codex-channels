@@ -938,7 +938,7 @@ export interface TrafficDebugStage {
 }
 
 export interface TrafficExchangeDetail {
-  debug?: { inbound: TrafficDebugStage; delivered: TrafficDebugStage | null; transformations: Array<"headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "json_unwrapped"> }
+  debug?: { inbound: TrafficDebugStage; delivered: TrafficDebugStage | null; transformations: Array<"headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "provider_routing_pinned" | "json_unwrapped"> }
 
   chatDiagnostics?: { fields: Record<string, string | number | boolean>; truncated: boolean }
   modelEvidence: {

@@ -56,13 +56,13 @@ describe("Feishu interaction port", () => {
     await port.close();
   });
 
-  it("binds an approval to the exact chat, message, actor, and one-use token", async () => {
+  it.each(["command", "stdin"] as const)("binds an approval to the exact chat, message, actor, and one-use token: %s", async (kind) => {
     const logger = {
       info: vi.fn(),
       warn: vi.fn(),
     } as unknown as Logger;
     const fixture = createConfiguredFixture(["ou_actor"], logger);
-    const decision = fixture.interactions.request(target, approvalRequest());
+    const decision = fixture.interactions.request(target, { ...approvalRequest(), kind, allowSession: false });
     await settle();
 
     expect(fixture.sentCards).toHaveLength(1);

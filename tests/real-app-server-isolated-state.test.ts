@@ -22,7 +22,7 @@ import type { OutputEvent } from "../src/conversation-core/index.js";
 import { ProviderRoutingClient } from "../src/codex-client/index.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
+import { disableCodexDaemonAutoStart, updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
 import {
   loadCodexUserSettings,
   updateCodexUserSetting,
@@ -1348,6 +1348,24 @@ contractSuite("isolated Codex App Server state contract", () => {
     expect(after.marketplaces).toEqual(before.marketplaces);
     expect(after.plugins).toEqual(before.plugins);
     expect(after.model_providers).toEqual(before.model_providers);
+  }, 15_000);
+
+  it("disables daemon auto-start through an isolated config client without changing other settings", async () => {
+    const before = await ownerClient.readUserConfigSnapshot();
+    try {
+      await ownerClient.writeUserConfigEdits([{ keyPath: "features.daemon_auto_start", value: true }]);
+      const enabled = await ownerClient.readUserConfigSnapshot();
+      const environment = { ...process.env, CODEX_HOME: codexHome };
+      await disableCodexDaemonAutoStart(environment);
+      const after = await ownerClient.readUserConfigSnapshot();
+      expect(after.config).toEqual({ ...enabled.config, features: {
+        ...(enabled.config.features as Record<string, unknown>), daemon_auto_start: false,
+      } });
+      await disableCodexDaemonAutoStart(environment);
+      expect((await ownerClient.readUserConfigSnapshot()).version).toBe(after.version);
+    } finally {
+      await ownerClient.writeUserConfigEdits([{ keyPath: "features", value: before.config.features ?? null }]);
+    }
   }, 15_000);
 
   it("round-trips native tool policies and quoted keys through versioned config", async () => {

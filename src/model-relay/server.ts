@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
-import { sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type RelayMetric } from "../provider-proxy/index.js";
+import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 
 export interface RelayQueueEntry {
@@ -149,6 +149,7 @@ export class ModelRelayServer {
       const signal = AbortSignal.any([controller.signal, lease.signal]);
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new RelayAdmissionError(415, "unsupported_encoding");
       let body: DirectChatRequest | DirectResponsesRequest | undefined;
+      let clineRoutingChanged = false;
       if (!models) {
         if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") throw new RelayAdmissionError(415, "unsupported_media_type");
         if (Number(request.headers["content-length"] ?? 0) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
@@ -161,6 +162,11 @@ export class ModelRelayServer {
         lease.check(body.model); requestModel = body.model; stream = body.stream;
         body = protocol === "responses" ? applyResponsesReasoningPolicy(body as DirectResponsesRequest, lease.caller.provider, lease.caller.reasoning ?? "passthrough")
           : applyChatReasoningPolicy(body as DirectChatRequest, lease.caller.provider, lease.caller.reasoning ?? "passthrough");
+        if (protocol === "chat" && lease.caller.provider.startsWith("clp-")) {
+          const routed = pinClinePassRouting(body);
+          clineRoutingChanged = routed !== body;
+          body = routed;
+        }
       } else if (request.headers["transfer-encoding"] || Number(request.headers["content-length"] ?? 0) !== 0) {
         throw new RelayAdmissionError(400, "invalid_request");
       }
@@ -182,6 +188,7 @@ export class ModelRelayServer {
       phase = "upstream"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
       capture = await this.options.capture?.(lease.caller.provider, signal, protocol);
       capture?.inbound?.(inbound, request.headers);
+      if (clineRoutingChanged) capture?.transformed?.("provider_routing_pinned");
       if (inbound && typeof inbound === "object" && !("stream" in inbound)) capture?.transformed?.("stream_defaulted");
       if (protocol === "responses" && inbound && typeof inbound === "object" && !("store" in inbound)) capture?.transformed?.("store_defaulted");
       inbound = undefined;

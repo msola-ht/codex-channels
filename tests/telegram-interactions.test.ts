@@ -470,7 +470,7 @@ describe("TelegramInteractionPort", () => {
     );
   });
 
-  it("does not offer session approval when the protocol disallows it", async () => {
+  it.each(["command", "stdin"] as const)("does not offer session approval when the protocol disallows it: %s", async (kind) => {
     const sendMessage = vi.fn(async (
       _chatId: string,
       _text: string,
@@ -492,6 +492,7 @@ describe("TelegramInteractionPort", () => {
 
     const decision = interactions.request(target, {
       ...approvalRequest(),
+      kind,
       allowSession: false,
     });
     await settle();

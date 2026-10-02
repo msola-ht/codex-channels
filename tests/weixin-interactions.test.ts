@@ -67,7 +67,7 @@ describe("WeixinInteractionPort", () => {
     await second;
   });
 
-  it("delivers an opaque one-time command and resolves an exact once approval", async () => {
+  it.each(["command", "stdin"] as const)("delivers an opaque one-time command and resolves an exact once approval: %s", async (kind) => {
     const delivery = deliveryFixture();
     const port = new WeixinInteractionPort(
       delivery,
@@ -77,7 +77,7 @@ describe("WeixinInteractionPort", () => {
       () => "opaque-token",
     );
 
-    const pending = port.request(target, approvalRequest());
+    const pending = port.request(target, { ...approvalRequest(), kind, allowSession: false });
     await vi.waitFor(() => {
       expect(delivery.deliverTextSequence).toHaveBeenCalledWith(
         target,

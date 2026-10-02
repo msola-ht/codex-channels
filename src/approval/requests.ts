@@ -67,6 +67,16 @@ interface BaseApprovalRequest {
 
 export type ApprovalRequest =
   | (BaseApprovalRequest & {
+      type: "stdin";
+      turnId: string;
+      itemId: string;
+      approvalId: string;
+      command: string;
+      cwd: string;
+      reason: string | null;
+      additionalPermissions: AdditionalPermissionProfile | null;
+    })
+  | (BaseApprovalRequest & {
       type: "command";
       turnId: string;
       itemId: string;
@@ -132,6 +142,7 @@ export type CommandApprovalResult =
   | { type: "networkpolicy"; amendment: NetworkPolicyAmendment };
 
 export type ApprovalResponse =
+  | { type: "stdin"; decision: "accept" | "cancel" }
   | { type: "command"; decision: CommandApprovalResult }
   | { type: "file"; decision: "accept" | "acceptForSession" | "decline" | "cancel" }
   | {

@@ -418,6 +418,7 @@ const zh = {
       "plus": "Plus",
       "pro": "Pro",
       "prolite": "Pro Lite",
+      "promax": "Pro (Max)",
       "team": "Team",
       "businessUsageBased": "Business（按量）",
       "business": "Business",
@@ -509,7 +510,7 @@ const zh = {
     debugHeadersTruncated: "部分请求头或响应头超过记录上限，已省略。",
     debugChanges: "实际处理记录",
     debugState: { finished: "交付完成", disconnected: "客户端断开", failed: "交付失败", not_started: "尚未开始交付" },
-    debugChange: { headers_filtered: "已过滤跳级头、客户端凭据或保留身份头", headers_overridden: "已设置上游凭据与传输头", stream_defaulted: "客户端未指定 stream，已补入 false", store_defaulted: "客户端未指定 store，已补入 false", json_unwrapped: "已解包 CLP JSON 响应" },
+    debugChange: { headers_filtered: "已过滤跳级头、客户端凭据或保留身份头", headers_overridden: "已设置上游凭据与传输头", stream_defaulted: "客户端未指定 stream，已补入 false", store_defaulted: "客户端未指定 store，已补入 false", provider_routing_pinned: "已将 CLP 上游限定为 DeepSeek", json_unwrapped: "已解包 CLP JSON 响应" },
 
     "relayRetentionNote": "Relay 自动保留：{value}；新采集时清理过期非活动批次。",
     "relayCapture": "Relay 上游报文（已脱敏）",
@@ -1119,6 +1120,7 @@ const en: Messages = {
       "plus": "Plus",
       "pro": "Pro",
       "prolite": "Pro Lite",
+      "promax": "Pro (Max)",
       "team": "Team",
       "businessUsageBased": "Business (usage-based)",
       "business": "Business",
@@ -1210,7 +1212,7 @@ const en: Messages = {
     debugHeadersTruncated: "Some request or response headers exceeded the capture limit and were omitted.",
     debugChanges: "Applied transformations",
     debugState: { finished: "Delivery finished", disconnected: "Client disconnected", failed: "Delivery failed", not_started: "Delivery not started" },
-    debugChange: { headers_filtered: "Filtered hop-by-hop, client credential or reserved identity headers", headers_overridden: "Set upstream credentials and transport headers", stream_defaulted: "Defaulted missing stream to false", store_defaulted: "Defaulted missing store to false", json_unwrapped: "Unwrapped CLP JSON response" },
+    debugChange: { headers_filtered: "Filtered hop-by-hop, client credential or reserved identity headers", headers_overridden: "Set upstream credentials and transport headers", stream_defaulted: "Defaulted missing stream to false", store_defaulted: "Defaulted missing store to false", provider_routing_pinned: "Restricted CLP routing to DeepSeek", json_unwrapped: "Unwrapped CLP JSON response" },
 
     "relayRetentionNote": "Relay retention: {value}; expired inactive sessions are removed when new captures begin.",
     "relayCapture": "Relay upstream payload (redacted)",

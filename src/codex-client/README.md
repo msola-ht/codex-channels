@@ -11,7 +11,7 @@
 - `index.ts`：本模块的公开导出入口。
 - `transport.ts`：Transport 接口和公共生命周期基类。
 - `unix-websocket-transport.ts`：连接前校验当前用户私有的父目录和本人所有的真实 Unix Socket，
-  通过共享 Runtime 校验 0.156.1 的确定性 rendezvous 链接与受保护目标，再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
+  通过共享 Runtime 校验 0.160.0 的确定性 rendezvous 链接与受保护目标，再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
   128 MiB 边界一致，避免大型 Thread 恢复响应被客户端提前断开，同时保留有界内存约束。
 - `windows-proxy-transport.ts`：在 Windows 启动并拥有固定版 `codex app-server proxy --sock`
   子进程，把其双向 stdio 包装为标准 WebSocket Transport；复用 128 MiB 消息边界，握手使用独立
@@ -51,7 +51,7 @@
 - `account-adapter.ts`：把 `account/read` 的当前认证类型裁剪为 API、ChatGPT 或无需 OpenAI 认证的
   启动探测路由，不读取或传播凭据；把账户 Token 用量、单桶或多桶额度、重置券数量与到期时间、账户 ID、普通用量权限及
   有界 Luna Reserve 授权摘要映射为 Application
-  稳定摘要；接受当前 0.156.1 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
+  稳定摘要；接受当前 0.160.0 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
   不把上游响应正文交给 Surface。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
   使用稳定 `SkillMetadata.pluginId` 排除系统与 Plugin 所有项，不从安装路径猜测来源；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
@@ -84,7 +84,7 @@
   脱敏限长，不把执行代码或原始结果带入稳定事件。
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类
   Server Request 解码为 Approval 稳定请求；命令审批只接受缺省或明确的 `kind=command`，
-  `writeStdin` 与未知种类在没有独立预览合同前安全拒绝；其中按固定版本的空对象 Schema 与
+  `writeStdin` 解码为独立 stdin 审批，要求完整输入、目录、回调身份和仅 accept/cancel 决策；未知种类安全拒绝；其中按固定版本的空对象 Schema 与
   `mcp_tool_call` 元数据识别 MCP 工具审批，保留工具展示参数和上游提供的持久范围。稳定决定
   精确编码为当前官方响应；未协商的 `openai/userVerification` 模式显式取消，畸形请求安全拒绝，
   未知请求返回明确 JSON-RPC 方法错误。实验

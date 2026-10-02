@@ -11,7 +11,7 @@ import type { ProviderProxyMetrics } from "../src/provider-proxy/index.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); cleanups.length = 0; });
-async function fixture(reply: string | ((request: unknown) => string), status = 200, overrides: { timeoutMs?: number } = {}) {
+async function fixture(reply: string | ((request: unknown) => string), status = 200, overrides: { timeoutMs?: number; clinePass?: boolean } = {}) {
   let received: unknown;
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -33,6 +33,12 @@ async function fixture(reply: string | ((request: unknown) => string), status = 
 }
 const body = { model: "fixture", stream: true, input: [{ role: "user", content: "hello" }] };
 const frame = (delta: unknown, finish_reason: string | null = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\r\n\r\n`;
+it.each([false, true])("pins only the CLP bridge to DeepSeek (clinePass=%s)", async clinePass => {
+  const { bridge, received } = await fixture(frame({ content: "ok" }, "stop") + "data: [DONE]\n\n", 200, { clinePass });
+  const response = await fetch(`http://${bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  expect(await response.text()).toContain("response.completed");
+  expect((received() as Record<string, unknown>).providerOptions).toEqual(clinePass ? { gateway: { only: ["deepseek"] } } : undefined);
+});
 it.each([200, 400])("lets upstream accept or reject preserved hosted declarations (%s)", async status => {
   const { bridge, received } = await fixture(status === 200 ? frame({ content: "ok" }, "stop") + "data: [DONE]\n\n" : "private-upstream-error", status);
   const tools = [{ type: "web_search", external_web_access: false }];

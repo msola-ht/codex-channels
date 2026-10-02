@@ -96,7 +96,11 @@ codexc update
 预检。随后使用实际 CLI 核对候选源码锁定的公开参数合同、本地权限映射和
 `CODEX_HOME/config.toml` 根级及所有 Profile 用户设置；未设置 `CODEX_HOME` 时使用
 `~/.codex/config.toml`。即使 `main` 没有新提交或使用 npm 安装模式也执行同一只读检查。
-只有这些步骤全部通过，才停止已安装的核心服务，安装配套 CLI、切换源码并刷新全局命令，调用目标版本的数据库升级入口，成功后恢复服务并确认就绪。可选 Relay 在停止前记录运行状态，成功及失败恢复都只启动原本运行且仍启用的实例；手工停止的实例保持停止。更新不修改用户配置或 Provider 模型目录，也不处理历史服务和 PATH。
+只有这些步骤全部通过，才停止已安装的核心服务，安装配套 CLI、切换源码并刷新全局命令，调用目标版本的数据库升级入口，成功后恢复服务并确认就绪。可选 Relay 在停止前记录运行状态，成功及失败恢复都只启动原本运行且仍启用的实例；手工停止的实例保持停止。
+
+更新通过官方版本化配置事务将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，避免原生终端另起官方后台；已为 `false` 时不重复写入，未设置或为 `true` 时关闭。即使源码、CLI 和数据库无需更新，也执行该设置。其他用户偏好与 Provider 模型目录不改写，也不处理历史服务和 PATH。写入失败会使更新明确失败；数据库已就绪时仍按原恢复流程恢复项目服务。此操作不停止已有官方 daemon，不改变其自动更新设置；`codexc remote` 继续连接项目管理的实例。
+
+新安装完成配置后也可运行 `codexc update` 应用此设置。若首次升级由尚不包含该步骤的旧更新器执行，安装新代码后再运行一次 `codexc update`；以输出“已关闭 Codex 原生 daemon 自动启动”为已执行依据。
 
 当前状态数据库使用 Schema v6，新增未绑定渠道会话的模型偏好。`codexc update` 支持显式从 v5
 升级到 v6：预检只读检查旧结构，停服后获取 Gateway 独占锁，在数据库同目录创建
@@ -115,7 +119,7 @@ codexc update
 同一版本号下的新提交仍会更新。受管源码没有新提交时，检查并按需同步配套 CLI、执行已安装版本的待完成数据库升级；两者都无需更新时不停止服务。npm 安装模式执行相同流程，不更新 Gateway npm 包。
 从开发仓库执行 `npm run install:global` 不会将其登记为受管 `main` 仓库。该入口（包括内部 `--prepared`）在注册 Gateway 全局命令前检测 Codex CLI：默认 `codex` 缺失时通过 npm 补装 `src/codex-protocol/version.json` 锁定的正式版本，并检查安装后的版本和 PATH，无需初始化或渠道配置。已有 CLI 不静默升级或降级；版本不匹配时提示完成渠道配置后运行 `codexc update` 确认同步。显式 `CODEX_BINARY` 无效、CLI 无法执行、安装失败或安装后仍不可见时明确失败，不改用其他二进制。安装不自动登录或启动服务。
 
-新设备按 `npm run install:global` → `codexc init` → `codexc setup` → `codexc service install` 顺序操作；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。旧版源码安装漏装 CLI 时，可先执行 `npm install -g @openai/codex@0.156.1` 补齐当前基线，再继续 Setup。
+新设备按 `npm run install:global` → `codexc init` → `codexc setup` → `codexc service install` 顺序操作；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。旧版源码安装漏装 CLI 时，可先执行 `npm install -g @openai/codex@0.160.0` 补齐当前基线，再继续 Setup。
 本地构建包的 `codexc update` 会显示检查开始和完成结果；无需更新时明确提示配套 CLI 与数据库均无需更新。
 
 候选源码完成构建和只读预检后，如默认 Codex CLI 缺失或其要求的版本与本机不一致，交互终端会显示当前版本和

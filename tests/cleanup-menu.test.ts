@@ -3,10 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import { ReportedChildExitError } from "../runtime/process-lifecycle.mjs";
 import { runCleanupMenu } from "../scripts/cleanup-menu.mjs";
 
+vi.mock("../scripts/service-status.mjs", () => ({
+  inspectManagedServiceStatus: () => ({ services: [{ target: "gateway", running: false, state: "inactive/dead" }] }),
+}));
+
 function fixture(actions: unknown[], texts: unknown[] = [], confirms: unknown[] = []) {
   const cancelled = Symbol("cancel");
   return {
     cancelled,
+    services: { isRunning: vi.fn(async () => false), runService: vi.fn() },
     prompts: {
       intro: vi.fn(), cancel: vi.fn(),
       isCancel: (value: unknown) => value === cancelled,
@@ -22,6 +27,33 @@ function fixture(actions: unknown[], texts: unknown[] = [], confirms: unknown[] 
 }
 
 describe("unified cleanup menu", () => {
+  it("stops traffic writers in order and restores them after deletion", async () => {
+    const options = fixture(["traffic"], [], [true, true]);
+    options.services.isRunning.mockResolvedValue(true);
+    await runCleanupMenu(options);
+    expect(options.services.runService.mock.calls).toEqual([
+      ["stop", "gateway"], ["stop", "relay"], ["stop", "app-server"],
+      ["start", "app-server"], ["start", "relay"], ["start", "gateway"],
+    ]);
+    expect(options.services.runService.mock.invocationCallOrder[2]).toBeLessThan(options.runTrafficCleanup.mock.invocationCallOrder[1]!);
+    expect(options.runTrafficCleanup.mock.invocationCallOrder[1]).toBeLessThan(options.services.runService.mock.invocationCallOrder[3]!);
+  });
+
+  it.each(["cleanup", "reset"])("temporarily stops Gateway for %s", async action => {
+    const options = fixture([action], ["30", "5000"], [true, true]);
+    options.services.isRunning.mockResolvedValue(true);
+    await runCleanupMenu(options);
+    expect(options.services.runService.mock.calls).toEqual([["stop", "gateway"], ["start", "gateway"]]);
+    expect(options.runDatabaseCommand.mock.calls[0]?.[0][0]).toBe(action);
+  });
+
+  it("rejects untouched Provider input during validation", async () => {
+    const options = fixture(["prune"], ["openai"], [false]);
+    await runCleanupMenu(options);
+    const call = options.prompts.text.mock.calls as unknown as Array<[{ validate: (value: unknown) => unknown }]>;
+    for (const input of [undefined, "", "  "]) expect(call[0]![0].validate(input)).toBe("请输入合法的 Provider ID");
+    expect(call[0]![0].validate("OpenAI")).toBeUndefined();
+  });
   it("returns to the menu after a failed preview without deleting traffic", async () => {
     const options = fixture(["traffic", "cancel"]);
     options.runTrafficCleanup.mockRejectedValueOnce(new ReportedChildExitError(1));
@@ -50,7 +82,7 @@ describe("unified cleanup menu", () => {
     const options = fixture(["cleanup", "reset"], ["30", "5000"], [true, true]);
     await runCleanupMenu(options);
     expect(options.runDatabaseCommand.mock.calls).toEqual([
-      [["cleanup-restart", "--keep-days", "30", "--max-rows", "5000", "--vacuum"]],
+      [["cleanup", "--keep-days", "30", "--max-rows", "5000", "--vacuum"]],
       [["reset"]],
     ]);
   });

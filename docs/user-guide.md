@@ -90,7 +90,7 @@ auto_recap = false
 
 Codex 0.156.1 已停用模型人格：CLI 与 WebUI 不再提供人格选择，保存其他偏好不会改写配置中已有的 `personality`。
 
-在 `codexc config → Codex 新会话与用户偏好 → 其他用户偏好` 中选择推理摘要。开发基线 0.156.1
+在 `codexc config → Codex 新会话与用户偏好 → 其他用户偏好` 中选择推理摘要。开发基线 0.160.0
 在尚未配置时预选“关闭”，与配套 CLI 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
 不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
 检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`。
@@ -227,7 +227,7 @@ Remote Control、手机配对或第三方 Provider。Desktop 的连接环境属�
 macOS 上使用 ChatGPT `26.908.70816` 的实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
 Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
 私有 UDS，并在首次附加当前工具 Pipe 时短暂重启主 App Server 子进程，以 OpenAI 签名的 Desktop
-Node 托管项目锁定的 Codex CLI；开发基线为 0.156.1，既有私有 Pipe 与签名链实机验收使用 0.154.0，
+Node 托管项目锁定的 Codex CLI；开发基线为 0.160.0，既有私有 Pipe 与签名链实机验收使用 0.154.0，
 升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到共享主实例，
 Host 租约存在时空闲释放不会停止主实例。`desktop-app open` 会先通过 App Server 的官方
 `thread/loaded/list` 和 `thread/read` 检查全部已加载的持久及临时 Thread；发现活动 Thread、
@@ -300,7 +300,7 @@ codexc doctor
 更新发现默认 CLI 缺失或版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
 非交互调用会给出精确版本安装命令并退出，不静默安装。
 
-更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。目标版本按受支持范围执行显式数据库升级；指标 v20/v21/v22/v23→v24 保留旧数据并生成一致性备份，运行时不隐式迁移。用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
+更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。目标版本按受支持范围执行显式数据库升级；指标 v20/v21/v22/v23→v24 保留旧数据并生成一致性备份，运行时不隐式迁移。更新会将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，包括版本无需更新时；不停止已有官方后台。其他用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
 
 ### 本机清理与归档
 
@@ -316,13 +316,13 @@ codexc cleanup
 | --- | --- | --- |
 | 归档短会话及子会话 | `codexc sessions cleanup <最大轮数>` | 停止 Gateway、保留 App Server；预览并确认后归档 |
 | 删除请求与响应转储 | `codexc traffic cleanup` | 先预览，确认删除需停止全部 App Server 与 Relay；永久删除当前配置目录下全部转储 |
-| 清理旧指标 | `codexc metrics cleanup --restart-gateway` | 菜单填写保留天数、行数和是否压缩；备份清理，会停止后启动 Gateway（原先停止也会启动） |
+| 清理旧指标 | `codexc metrics cleanup --restart-gateway` | 备份清理；显式 `--restart-gateway` 会停止后启动 Gateway（原先停止也会启动），交互菜单则按原状态恢复 |
 | 核对未确认渠道结果 | `codexc delivery status` / `codexc delivery list` | 先停止 Gateway；明确重发、确认送达与停写备份见[投递箱运维](delivery.md) |
 | 清理指定 Provider 的指标 | `codexc metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
 | 保留数据升级指标库 | `codexc metrics upgrade --from 23 --to 24` | 默认预检；先停止 Gateway 与 Relay，核对后加 `--apply` |
 | 重置整个指标库 | `codexc metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
 
-`codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。菜单不会统一停掉所有服务，各项沿用原有条件；执行失败会报告错误并返回清理菜单。
+`codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。会话归档、旧指标清理和指标库重置会在确认后临停运行中的 Gateway；转储删除先预览并确认，再询问临停 Gateway、Relay 和 App Server。结束、取消或失败后按原状态恢复，原先停止的服务不会被启动；恢复失败会报告具体服务和手动启动命令。底层命令仍检查实际进程已退出，不终止前台自行运行的进程。执行失败会报告错误并返回清理菜单。
 
 会话归档示例：先停止 Gateway，保留 App Server，预览“主会话不超过 3 轮、整组可查询成员至少空闲 7 天”的候选：
 
@@ -338,7 +338,7 @@ codexc sessions cleanup 3 --idle-days 7 --confirm
 codexc service start gateway
 ```
 
-交互归档统一从 `codexc cleanup → 归档短会话及子会话` 进入；`codexc sessions` 无参数只显示帮助。不指定 `--idle-days` 就没有会话年龄限制。
+交互归档统一从 `codexc cleanup → 归档短会话及子会话` 进入。菜单在 Gateway 运行时先询问是否临时停止，保留 App Server；预览后的归档仍需确认。完成、取消或失败后恢复原先运行的 Gateway，原先停止则保持停止；恢复失败会提示手动启动。前台自行运行的 Gateway 仍须退出，菜单不终止非受管进程。`codexc sessions` 无参数只显示帮助。不指定 `--idle-days` 就没有会话年龄限制。
 轮数阈值只计算主会话，子孙轮数不累加；派生子孙随官方归档，Fork 独立筛选。
 活动、固定、渠道绑定或状态无法确认的成员会使整组跳过。归档保留历史，不是永久删除；
 官方操作可能部分成功，执行期间不要在其他客户端操作候选会话。完整筛选及核验口径见[展示说明](display.md)。

@@ -14,7 +14,7 @@ const reservationBytes = 9 * MiB + 64 * 1024;
 export interface DirectChatCapture {
   inbound?(value: unknown, headers: IncomingHttpHeaders): void;
   delivered?(value: unknown, stream: boolean, status: number, headers: OutgoingHttpHeaders): void;
-  transformed?(operation: "headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "json_unwrapped"): void;
+  transformed?(operation: "headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "provider_routing_pinned" | "json_unwrapped"): void;
   submitted(request: Record<string, unknown> & { model: string; stream: boolean }, headers: IncomingHttpHeaders | OutgoingHttpHeaders, path: string): void;
   head(status: number, headers: IncomingHttpHeaders | OutgoingHttpHeaders): void;
   value(value: unknown, stream: boolean): void;
@@ -144,7 +144,7 @@ export class RelayTrafficDump {
           delivered: (value: unknown, stream: boolean, status: number, headers: OutgoingHttpHeaders) => safe(() => {
             deliveredStatus = status; deliveredHeaders = capturedTrafficHeaders(headers); delivered!.value(value, stream);
           }),
-          transformed: (operation: "headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "json_unwrapped") => safe(() => {
+          transformed: (operation: "headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "provider_routing_pinned" | "json_unwrapped") => safe(() => {
             (operation === "json_unwrapped" ? responseChanges : requestChanges).add(operation);
           }),
         } : {}),

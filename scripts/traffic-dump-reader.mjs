@@ -592,6 +592,6 @@ function debugDetail(interaction, limit) {
   };
   if (!Array.isArray(request.transformations) || response !== undefined && !Array.isArray(response.transformations)) throw new TrafficDumpDebugError("traffic_unavailable", "Relay 调试处理标记损坏");
   const transformations = [...request.transformations, ...(response?.transformations ?? [])];
-  if (!transformations.every(value => ["headers_filtered", "headers_overridden", "stream_defaulted", "store_defaulted", "json_unwrapped"].includes(value))) throw new TrafficDumpDebugError("traffic_unsupported_version", "不支持的 Relay 调试处理标记");
+  if (!transformations.every(value => ["headers_filtered", "headers_overridden", "stream_defaulted", "store_defaulted", "provider_routing_pinned", "json_unwrapped"].includes(value))) throw new TrafficDumpDebugError("traffic_unsupported_version", "不支持的 Relay 调试处理标记");
   return { debug: { inbound: stage(request.inbound), delivered: response ? stage(response.delivered) : null, transformations } };
 }

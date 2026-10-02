@@ -34,8 +34,9 @@ WebUI 页面时间也随之呈现。缺省不写入配置，两个进程都沿�
 export const cleanupUsage = `用法：codexc cleanup
 
 交互选择：归档短会话及子会话、删除请求转储、清理旧指标、按 Provider 清理指标或重置指标库。
-会话归档需停止 Gateway，保留 App Server；转储删除需停止全部 App Server。
-旧指标清理会备份并停止后启动 Gateway；Provider 清理按原状态恢复 Gateway；重置指标库需先停止 Gateway。
+会话归档、旧指标清理和指标库重置会确认临停 Gateway，结束后按原状态恢复，保留 App Server。
+转储删除先预览和确认，再临停 Gateway、Relay 与 App Server，结束后按原状态恢复。
+指标清理与重置保留备份；Provider 清理按原状态恢复 Gateway。非受管前台进程仍须自行退出。
 非交互终端只显示帮助。直接命令仍为 sessions cleanup、traffic cleanup、metrics cleanup|prune|reset。`;
 
 export const TRAFFIC_UPGRADE_USAGE = `用法：codexc traffic upgrade --enabled true|false --mode production|debug

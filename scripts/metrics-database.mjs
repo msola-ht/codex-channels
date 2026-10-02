@@ -289,12 +289,20 @@ export function cleanupMetricsDatabaseWithGatewayRestart(
     ?? (() => runGatewayServiceAction("stop", environment));
   const startGateway = options.startGateway
     ?? (() => runGatewayServiceAction("start", environment));
-  stopGateway();
+  let result;
+  let operationError;
   try {
-    return cleanupMetricsDatabase(environment, options);
-  } finally {
+    stopGateway();
+    result = cleanupMetricsDatabase(environment, options);
+  } catch (error) { operationError = error; }
+  try {
     startGateway();
+  } catch (error) {
+    throw new AggregateError(operationError ? [operationError, error] : [error],
+      "指标清理流程结束，但 Gateway 恢复失败；请运行 codexc service start gateway", { cause: error });
   }
+  if (operationError) throw operationError;
+  return result;
 }
 
 function resolveCleanupPolicy(environment, options) {

@@ -56,10 +56,13 @@ export function decodeApprovalServerRequest(
 ): DecodeResult {
   switch (request.method) {
     case methods.command: {
-      const decoded = decodeCommandRequest(request);
+      const isStdin = asRecord(request.params)?.kind === "writeStdin";
+      const decoded = isStdin
+        ? decodeStdinRequest(request)
+        : decodeCommandRequest(request);
       return decoded
         ? { ok: true, request: decoded }
-        : { ok: false, response: { decision: "decline" } };
+        : { ok: false, response: { decision: isStdin ? "cancel" : "decline" } };
     }
     case methods.file: {
       const decoded = decodeFileRequest(request);
@@ -143,6 +146,31 @@ function decodeCommandRequest(
     proposedExecPolicyAmendment: proposedExecPolicyAmendment.value,
     proposedNetworkPolicyAmendments: proposedNetworkPolicyAmendments.value,
     availableDecisions: availableDecisions.value,
+  };
+}
+
+function decodeStdinRequest(
+  request: RpcServerRequest,
+): Extract<ApprovalRequest, { type: "stdin" }> | undefined {
+  const params = asRecord(request.params);
+  const base = approvalIdentity(request, params);
+  const command = nonEmptyString(params?.command);
+  const cwd = nonEmptyString(params?.cwd);
+  const approvalId = nonEmptyString(params?.approvalId);
+  const reason = nullableOptionalString(params?.reason);
+  const permissions = parseOptionalPermissionProfile(params?.additionalPermissions);
+  const decisions = params?.availableDecisions;
+  if (!base || !command || !cwd || !approvalId || !reason.valid || !permissions.valid
+    || !Array.isArray(decisions) || decisions.length !== 2
+    || !decisions.includes("accept") || !decisions.includes("cancel")
+    || params?.networkApprovalContext != null
+    || params?.proposedExecpolicyAmendment != null
+    || params?.proposedNetworkPolicyAmendments != null
+    || !/^write_stdin --session-id [0-9]+ .+/su.test(command)
+    || command.includes("\0")) return undefined;
+  return {
+    type: "stdin", ...base, approvalId, command, cwd,
+    reason: reason.value, additionalPermissions: permissions.value,
   };
 }
 
@@ -262,6 +290,7 @@ function encodeApprovalResponse(
   switch (response.type) {
     case "command":
       return { decision: encodeCommandDecision(response.decision) };
+    case "stdin":
     case "file":
       return { decision: response.decision };
     case "permissions":

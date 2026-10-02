@@ -52,6 +52,13 @@ export interface CodexUserConfigTransactionClient extends CodexUserConfigClientL
 export interface CodexUserConfigClient
   extends CodexDefaultSettingsClient, CodexUserConfigTransactionClient {}
 
+export function disableCodexDaemonAutoStart(
+  environment?: NodeJS.ProcessEnv,
+  dependencies?: {
+    createClient?: (options: { environment: NodeJS.ProcessEnv }) => Promise<CodexUserConfigTransactionClient>;
+  },
+): Promise<void>;
+
 export function writeCodexUserConfigEdits(
   environment: NodeJS.ProcessEnv,
   edits: CodexUserConfigEdit[],

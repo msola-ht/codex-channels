@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,6 +24,87 @@ const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 
 contractSuite("real supervised App Server tools", () => {
+    it.skipIf(process.platform === "win32").each(["accept", "cancel"] as const)("reviews real stdin callbacks without persistent permissions: %s", async (decision) => {
+      const directory = mkdtempSync(join("/tmp", "stdin-contract-"));
+      const codexHome = join(directory, "home");
+      let count = 0;
+      let completed = false;
+      const approvals: string[] = [];
+      let rpc: JsonRpcClient | undefined;
+      const backend = createServer((request, response) => {
+        const chunks: Buffer[] = [];
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          if (request.method !== "POST" || request.url !== "/responses") {
+            response.writeHead(404).end(); return;
+          }
+          const body = Buffer.concat(chunks).toString();
+          const number = ++count;
+          const id = `stdin-response-${number}`;
+          const sessionId = /Process running with session ID (\d+)/u.exec(body)?.[1];
+          const item = number === 1
+            ? { type: "function_call", call_id: "terminal-start", namespace: "functions", name: "exec_command",
+                arguments: JSON.stringify({ cmd: "read line; printf '%s' \"$line\" > stdin-result", shell: "/bin/sh", login: false,
+                  tty: true, yield_time_ms: 1, sandbox_permissions: "require_escalated", justification: "Isolated stdin contract" }) }
+            : number === 2 && sessionId
+            ? { type: "function_call", call_id: "terminal-input", namespace: "functions", name: "write_stdin",
+                arguments: JSON.stringify({ session_id: Number(sessionId), chars: "contract_input*[]\n", yield_time_ms: 1000 }) }
+            : { type: "message", role: "assistant", id: "stdin-done", content: [{ type: "output_text", text: "done" }] };
+          response.writeHead(200, { "content-type": "text/event-stream" });
+          for (const event of [{ type: "response.created", response: { id } }, { type: "response.output_item.done", item }, completedResponseEvent(id)]) {
+            response.write(`data: ${JSON.stringify(event)}\n\n`);
+          }
+          response.end();
+        });
+      });
+      try {
+        await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
+        const address = backend.address();
+        if (!address || typeof address === "string") throw new Error("Missing fixture address");
+        mkdirSync(codexHome, { mode: 0o700 });
+        const catalog = join(directory, "catalog.json");
+        writeFileSync(catalog, JSON.stringify({ models: [{
+          slug: "stdin-contract", display_name: "Stdin fixture", description: "Stdin fixture",
+          context_window: 200_000, default_reasoning_level: "high",
+          supported_reasoning_levels: [{ effort: "high", description: "Fixture" }],
+          shell_type: "shell_command", visibility: "list", supported_in_api: true, priority: 1,
+          availability_nux: null, upgrade: null, base_instructions: "You are a coding agent.",
+          support_verbosity: true, default_verbosity: "low", apply_patch_tool_type: "freeform",
+          truncation_policy: { mode: "tokens", limit: 10_000 }, supports_parallel_tool_calls: true,
+          experimental_supported_tools: [],
+        }] }));
+        writeFileSync(join(codexHome, "config.toml"), [
+          'model = "stdin-contract"', 'model_provider = "stdin-contract"', `model_catalog_json = ${JSON.stringify(catalog)}`,
+          '[model_providers.stdin-contract]', 'name = "Stdin fixture"', `base_url = "http://127.0.0.1:${address.port}"`,
+          'wire_api = "responses"', 'requires_openai_auth = false', 'supports_websockets = false',
+        ].join("\n"));
+        rpc = new JsonRpcClient(new StdioTransport({ codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: directory,
+          environment: { ...process.env, CODEX_HOME: codexHome } }));
+        rpc.setServerRequestHandler(request => handleApprovalServerRequest(request, { handle: async decoded => {
+          approvals.push(decoded.type);
+          if (decoded.type === "command") return { type: "command", decision: "accept" };
+          expect(decoded).toMatchObject({ type: "stdin", approvalId: "terminal-input", itemId: "terminal-start" });
+          if (decoded.type !== "stdin") throw new Error("Unexpected approval");
+          expect(decoded.command).toContain("contract_input*[]");
+          return { type: "stdin", decision };
+        } }));
+        const client = new CodexAppServerClient(rpc, { sandbox: "read-only" });
+        await client.connect();
+        client.onNotification(notification => { if (notification.method === "turn/completed") completed = true; });
+        const { thread } = await client.startThread(directory, { ephemeral: true, approvalPolicy: "on-request" });
+        await client.startTurn(thread.id, [{ type: "text", text: "Exercise terminal input" }], "codex_connect:stdin", directory);
+        await waitFor(() => completed, 20_000);
+        expect(approvals).toEqual(["command", "stdin"]);
+        expect(existsSync(join(directory, "stdin-result"))).toBe(decision === "accept");
+        if (decision === "accept") expect(readFileSync(join(directory, "stdin-result"), "utf8")).toBe("contract_input*[]");
+      } finally {
+        await rpc?.close();
+        backend.closeAllConnections();
+        await new Promise<void>(resolve => backend.close(() => resolve()));
+        rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
+    }, 30_000);
+
     it("exposes current ChatGPT credentials and workspace routing for image upload", async () => {
       const directory = mkdtempSync(join(tmpdir(), "codex-image-auth-contract-"));
       const accountId = "123e4567-e89b-42d3-a456-426614174000";

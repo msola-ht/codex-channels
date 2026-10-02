@@ -36,6 +36,7 @@ contract.each([
     request.on("end", () => {
       expect(request.url).toBe("/v1/chat/completions");
       bodies.push(JSON.parse(Buffer.concat(chunks).toString()) as typeof bodies[number]);
+      expect(JSON.parse(Buffer.concat(chunks).toString())).toMatchObject({ providerOptions: { gateway: { only: ["deepseek"] } } });
       const first = bodies.length === 1;
       const delta = first ? { tool_calls: [{ index: 0, id: "fixture-call", type: "function", function: { name: bodies.at(-1)!.tools.find(tool => tool.function?.name.endsWith("schedule_task"))!.function!.name, arguments: JSON.stringify({ action: "list" }) } }] } : { content: "Chat tool round trip complete" };
       response.writeHead(200, { "content-type": "text/event-stream" });
@@ -60,7 +61,7 @@ contract.each([
   try {
     await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
     const address = backend.address(); if (!address || typeof address === "string") throw new Error("No listener");
-    bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http", upstreamBasePath: "/v1" });
+    bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http", upstreamBasePath: "/v1", clinePass: true });
     await bridge.start();
   writePrivateFileAtomicSync(join(environment.CODEX_CONNECT_HOME, "providers", "deepseek", "models.json"), JSON.stringify({ models: [{
     slug: "deepseek-flash", display_name: "DeepSeek Flash", visibility: "list", supported_in_api: true,

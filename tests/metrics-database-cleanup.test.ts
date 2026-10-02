@@ -101,6 +101,23 @@ describe("model request metrics database cleanup and pruning", () => {
     expect(calls).toEqual([]);
   });
 
+  it("attempts recovery after a failed stop and preserves both failures", () => {
+    const { environment } = fixture();
+    const calls: string[] = [];
+    const stopError = new Error("stop failed");
+    const startError = new Error("start failed");
+    try {
+      cleanupMetricsDatabaseWithGatewayRestart(environment, {
+        stopGateway: () => { calls.push("stop"); throw stopError; },
+        startGateway: () => { calls.push("start"); throw startError; },
+      });
+      expect.fail("expected failure");
+    } catch (error) {
+      expect(error).toMatchObject({ errors: [stopError, startError], cause: startError });
+    }
+    expect(calls).toEqual(["stop", "start"]);
+  });
+
   it("prunes OpenAI rows from the local database and restarts Gateway", () => {
     const { environment, databasePath } = fixture();
     const store = new SqliteModelRequestMetricsStore(databasePath);

@@ -760,6 +760,7 @@ function parsePlanType(
     || value === "plus"
     || value === "pro"
     || value === "prolite"
+    || value === "promax"
     || value === "team"
     || value === "self_serve_business_prolite"
     || value === "self_serve_business_usage_based"

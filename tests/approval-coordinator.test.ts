@@ -151,7 +151,7 @@ describe("ApprovalCoordinator", () => {
     expect(interaction.requests).toEqual([]);
   });
 
-  it("declines write-stdin approvals until their distinct review is supported", async () => {
+  it("declines write-stdin approvals without a complete preview contract", async () => {
     const interaction = new FakeInteraction();
     const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
 
@@ -168,7 +168,52 @@ describe("ApprovalCoordinator", () => {
       },
     });
 
-    expect(response).toEqual({ decision: "decline" });
+    expect(response).toEqual({ decision: "cancel" });
+    expect(interaction.requests).toEqual([]);
+  });
+
+  it.each(["once", "session", "reject"] as const)("routes stdin approval independently: %s", async (choice) => {
+    const interaction = new FakeInteraction(choice === "reject"
+      ? { type: "approval", approved: false }
+      : { type: "approval", approved: true, scope: choice });
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+    const response = await handleRaw(coordinator, {
+      id: "stdin-rpc", method: "item/commandExecution/requestApproval",
+      params: {
+        kind: "writeStdin", threadId: "thread-1", turnId: "turn-1", itemId: "exec-1",
+        approvalId: "input-1", command: "write_stdin --session-id 123 'hello\n*world*'",
+        cwd: "/workspace", reason: "retained permissions",
+        availableDecisions: ["accept", "cancel"],
+      },
+    });
+    expect(response).toEqual({ decision: choice === "once" ? "accept" : "cancel" });
+    expect(interaction.requests[0]).toMatchObject({
+      kind: "stdin", allowSession: false, title: "Codex 请求向已有终端发送输入",
+      threadId: "thread-1", turnId: "turn-1", itemId: "exec-1",
+    });
+    expect(interaction.requests[0]).not.toHaveProperty("execPolicyAmendment");
+    expect(interaction.requests[0]).toHaveProperty("detail", expect.stringContaining("\\n\\u002aworld\\u002a"));
+  });
+
+  it.each([
+    { availableDecisions: ["accept", "acceptForSession", "cancel"] },
+    { approvalId: null },
+    { cwd: null },
+    { command: "arbitrary command" },
+    { command: "write_stdin --session-id 123 " + "x".repeat(4_000) },
+    { proposedExecpolicyAmendment: ["write_stdin"] },
+  ])("rejects unsafe stdin preview or authorization: %j", async (override) => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+    const response = await handleRaw(coordinator, {
+      id: "stdin-rpc", method: "item/commandExecution/requestApproval",
+      params: {
+        kind: "writeStdin", threadId: "thread-1", turnId: "turn-1", itemId: "exec-1",
+        approvalId: "input-1", command: "write_stdin --session-id 123 hello", cwd: "/workspace",
+        availableDecisions: ["accept", "cancel"], ...override,
+      },
+    });
+    expect(response).toHaveProperty("decision", expect.stringMatching(/^(decline|cancel)$/u));
     expect(interaction.requests).toEqual([]);
   });
 

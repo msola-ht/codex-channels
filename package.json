@@ -1,6 +1,6 @@
 {
   "name": "@hegenai/codexc",
-  "version": "0.156.1",
+  "version": "0.160.0",
   "description": "Chat surface gateway for a shared Codex App Server",
   "keywords": [
     "codex",
@@ -43,6 +43,7 @@
     "scripts/cli-menu.mjs",
     "scripts/cli-menu.d.mts",
     "scripts/cleanup-menu.mjs",
+    "scripts/maintenance-services.mjs",
     "scripts/codex-defaults-setup.mjs",
     "scripts/codex-public-cli-contract.mjs",
     "scripts/codex-remote-options.mjs",

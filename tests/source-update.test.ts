@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { disableCodexDaemonAutoStart } from "../scripts/codex-user-config.mjs";
 
 import {
   getCodexVersionMismatchRemediation,
@@ -35,6 +36,71 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
+  it.each([undefined, true, false])("disables daemon auto-start with version protection (previous=%s)", async previous => {
+    const config = { model: "keep", features: { daemon_auto_start: previous, write_stdin_approval: true } };
+    const writes: unknown[] = [];
+    let closed = false;
+    await disableCodexDaemonAutoStart({}, { createClient: async () => ({
+      connect: async () => undefined,
+      close: async () => { closed = true; },
+      readUserConfigSnapshot: async () => ({ config, version: "v1" }),
+      writeUserConfigEdits: async (edits, options) => { writes.push({ edits, options }); },
+    }) });
+    expect(writes).toEqual(previous === false ? [] : [{
+      edits: [{ keyPath: "features.daemon_auto_start", value: false }], options: { expectedVersion: "v1" },
+    }]);
+    expect(config.features.write_stdin_approval).toBe(true);
+    expect(closed).toBe(true);
+  });
+
+  it("reports daemon configuration failure without claiming update success", async () => {
+    const fixture = createInstalledFixture("daemon-settings-failure-");
+    const messages: string[] = [];
+    await expect(updateInstalledPackage(fixture.environment, {
+      projectDir: fixture.checkout,
+      inspectStaged: async () => ({ services: { installed: false }, databaseUpdatesRequired: false }),
+      validateCodexContract: () => {},
+      runCommand: (_command, args) => {
+        if (args.some(arg => arg.includes("disableCodexDaemonAutoStart"))) throw new Error("config conflict");
+      },
+      writeMessage: (_kind, message) => { messages.push(message); },
+    })).rejects.toMatchObject({ message: expect.stringContaining("config conflict") });
+    expect(messages.some(message => message.includes("检查完成"))).toBe(false);
+  });
+
+  it("closes the config client and propagates a concurrent write conflict", async () => {
+    let closed = false;
+    await expect(disableCodexDaemonAutoStart({}, { createClient: async () => ({
+      connect: async () => undefined,
+      close: async () => { closed = true; },
+      readUserConfigSnapshot: async () => ({ config: {}, version: "stale" }),
+      writeUserConfigEdits: async () => { throw new Error("version conflict"); },
+    }) })).rejects.toThrow("version conflict");
+    expect(closed).toBe(true);
+  });
+
+  it("restores services after daemon settings fail following a successful database step", async () => {
+    const fixture = createInstalledFixture("daemon-settings-restore-");
+    let restored = false;
+    const update = updateManagedSourceInstallation(fixture.environment, {
+      projectDir: fixture.checkout, repository: fixture.repository,
+      buildCheckout: () => {}, installGlobalPackage: () => {}, validateCodexContract: () => {},
+      inspectStaged: async () => ({ services: { installed: true }, databaseUpdatesRequired: true }),
+      stopServices: () => {}, inspectRelayRunning: () => false,
+      startServices: () => { restored = true; },
+      runCommand: (command, args, options) => {
+        if (args.some(arg => arg.includes("disableCodexDaemonAutoStart"))) throw new Error("config conflict");
+        execFileSync(command, args, {
+          cwd: options.cwd as string, env: options.environment as NodeJS.ProcessEnv, stdio: "ignore",
+        });
+      },
+    });
+    await expect(update).rejects.toThrow("config conflict");
+    const error = await update.catch(value => value);
+    expect(getSourceUpdateFailure(error)).toMatchObject({ stage: "configure-codex-daemon", recovery: { services: "restored" } });
+    expect(restored).toBe(true);
+  });
+
   it.each([false, true])("restores only previously running Relay after package update (running=%s)", async running => {
     const fixture = createInstalledFixture("relay-update-state-");
     writePackageVersion(fixture.checkout, "0.148.0");
@@ -256,6 +322,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     expect(calls).toEqual(["validate"]);
     expect(messages).toEqual([
       ["note", "正在检查配套 Codex CLI、当前配置和数据库升级条件。"],
+      ["note", "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc service 管理。"],
       ["success", "检查完成：配套 Codex CLI 0.147.0 与数据库均无需更新。"],
     ]);
   });
@@ -289,6 +356,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
         "switch-source",
         "refresh-command",
         "upgrade-databases",
+        "configure-codex-daemon",
         "restore-services",
         "cleanup",
       ],
@@ -391,6 +459,8 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       "refresh-command:completed",
       "upgrade-databases:started",
       "upgrade-databases:completed",
+      "configure-codex-daemon:started",
+      "configure-codex-daemon:completed",
       "cleanup:started",
       "cleanup:completed",
     ]);
@@ -446,6 +516,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       ["note", "正在核对候选版本的 Codex 公开合同。"],
       ["note", "候选源码已通过校验，准备切换。"],
       ["note", "源码命令已刷新到 npm 全局安装。"],
+      ["note", "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc service 管理。"],
     ]);
   });
 
@@ -1119,6 +1190,8 @@ function createMainRepository(root: string) {
     join(repository, "scripts", "local-installation.mjs"),
     "export function applyDatabaseUpdates() {}\n",
   );
+  writeFileSync(join(repository, "scripts", "codex-user-config.mjs"),
+    "export async function disableCodexDaemonAutoStart() {}\n");
   writeFileSync(
     join(repository, "scripts", "codex-public-cli-contract.mjs"),
     "if (process.argv[2] !== '--check-user-settings') process.exit(1);\n",

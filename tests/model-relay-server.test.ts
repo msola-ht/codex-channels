@@ -29,6 +29,33 @@ const answer = { id: "reply-1", model: "fixture/model", choices: [{ index: 0, me
   usage: { prompt_tokens: 3, completion_tokens: 2 } };
 const frame = (value: unknown): string => `data: ${JSON.stringify(value)}\n\n`;
 
+it.each([false, true].flatMap(stream => ["clp-a", "ds-a"].map(provider => ({ stream, provider }))))(
+  "pins CLP routing for JSON/SSE without changing other providers ($provider, $stream)", async ({ stream, provider }) => {
+    const policy = config(); policy.accounts = [{ provider }]; policy.callers[0]!.provider = provider;
+    let received: unknown;
+    const f = await fixture((request, response) => {
+      const chunks: Buffer[] = []; request.on("data", chunk => chunks.push(Buffer.from(chunk)));
+      request.on("end", () => {
+        received = JSON.parse(Buffer.concat(chunks).toString());
+        response.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json" });
+        response.end(stream ? frame({ ...answer, choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }] }) + "data: [DONE]\n\n" : JSON.stringify(answer));
+      });
+    }, undefined, undefined, undefined, false, policy);
+    const input = { ...body, stream, providerOptions: { deepseek: { thinking: false }, gateway: { only: ["baseten"], order: ["deepseek"], marker: "keep" } } };
+    const response = await f.post(input); expect(response.status).toBe(200); await response.text();
+    expect(received).toEqual({ ...input, providerOptions: { ...input.providerOptions,
+      gateway: { ...input.providerOptions.gateway, only: provider === "clp-a" ? ["deepseek"] : ["baseten"] },
+    } });
+    expect(input.providerOptions.gateway.only).toEqual(["baseten"]);
+    expect(f.calls()).toBe(1);
+  });
+
+it.each([null, [], "invalid", { gateway: null }, { gateway: [] }].map(providerOptions => ({ providerOptions })))("rejects malformed CLP routing containers before upstream ($providerOptions)", async ({ providerOptions }) => {
+  const f = await fixture((_request, response) => { response.writeHead(500).end(); });
+  const response = await f.post({ ...body, providerOptions });
+  expect(response.status).toBe(400); await response.text(); expect(f.calls()).toBe(0);
+});
+
 describe("native Responses relay", () => {
   const input = { model: "fixture/model", input: "hello", tools: [{ type: "vendor_tool", name: "fixture" }] };
   const responseValue = (status = "completed") => ({ id: "resp_fixture", object: "response", model: "fixture/model", status,
@@ -272,7 +299,9 @@ describe("isolated Relay vertical request chain", () => {
       store: true, background: true, vendor_extension: { enabled: true }, tools: [{ type: "function", function: { name: "fixture" } }] };
     const result = await f.post(request);
     expect(result.status).toBe(200); expect(await result.json()).toEqual(answer);
-    expect(received).toEqual({ ...request, stream: false });
+    expect(received).toEqual({ ...request, stream: false,
+      ...(provider.startsWith("clp-") ? { providerOptions: { gateway: { only: ["deepseek"] } } } : {}),
+    });
   });
 
   it.each([false, true].flatMap(stream => ["stop", "length", "content_filter", "insufficient_system_resource", "aborted"].map(reason => ({ stream, reason }))))(
@@ -658,7 +687,7 @@ describe("isolated Relay vertical request chain", () => {
     expect((await good.post()).status).toBe(200); expect(good.metrics[0]?.traffic).toBeUndefined();
   });
 
-  it.each([false, true])("records four debug stages with one metric and no credentials (stream=%s)", async stream => {
+  it.each([false, true].flatMap(stream => [undefined, ["deepseek"], ["baseten"]].map(only => ({ stream, only }))))("records routing changes and four debug stages without credentials ($stream, $only)", async ({ stream, only }) => {
     const directory = mkdtempSync(join(tmpdir(), "relay-debug-four-"));
     cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
     const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
@@ -670,7 +699,7 @@ describe("isolated Relay vertical request chain", () => {
       res.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json", "x-opaque": "upstream-diagnostic" })
         .end(stream ? frame(value) + "data: [DONE]\n\n" : JSON.stringify(value));
     }, undefined, undefined, dump, true);
-    const input = stream ? { ...body, stream } : body;
+    const input = { ...body, ...(stream ? { stream } : {}), ...(only ? { providerOptions: { gateway: { only } } } : {}) };
     const reply = await f.post(input, { origin: "https://example.test", referer: "https://example.test/path?token=PRIVATE", "x-client": "client-diagnostic", cookie: "PRIVATE", "user-agent": "WorkBuddy/5.6.2", "x-request-id": "3390a228-c744-47a8-99b4-601f202be616" });
     const received = await reply.text();
     expect(forwarded["x-client"]).toBe("client-diagnostic");
@@ -687,6 +716,8 @@ describe("isolated Relay vertical request chain", () => {
     expect(detail.debug.inbound.headers["x-request-id"]).toBe("3390a228-c744-47a8-99b4-601f202be616");
     expect(JSON.parse(detail.debug.inbound.body)).toEqual(input);
     expect(JSON.parse(detail.request.body).stream).toBe(stream);
+    expect(JSON.parse(detail.request.body).providerOptions.gateway.only).toEqual(["deepseek"]);
+    expect(detail.debug.transformations.includes("provider_routing_pinned")).toBe(only?.[0] !== "deepseek");
     expect(detail.debug.delivered.body).toBe(received);
     expect(detail.debug.delivered.state).toBe("finished");
     expect(detail.debug.inbound.headers["x-client"]).toBe("client-diagnostic");
@@ -912,7 +943,7 @@ describe("isolated Relay vertical request chain", () => {
       messages: [{ role: "developer", content: "instructions" }, { role: "user", content: [
         { type: "text", text: "hello" }, { type: "image_url", image_url: { url: "http://127.0.0.1:1/image" } }] }] };
     const response = await f.post(input); expect(response.status).toBe(200); await response.text();
-    expect(received).toEqual({ ...input, stream: false }); expect(f.metrics).toHaveLength(1);
+    expect(received).toEqual({ ...input, stream: false, providerOptions: { gateway: { only: ["deepseek"] } } }); expect(f.metrics).toHaveLength(1);
   });
   it("keeps HTTP delivery successful while Gateway metrics IPC is absent, without retrying after recovery", async () => {
     const directory = mkdtempSync(join(tmpdir(), "relay-missing-gateway-"));
@@ -1102,7 +1133,7 @@ describe("isolated Relay vertical request chain", () => {
     const received: Buffer[] = []; for await (const chunk of response) received.push(Buffer.from(chunk as Buffer));
     expect(response.statusCode).toBe(200); expect(response.headers["set-cookie"]).toBeUndefined();
     expect(JSON.parse(Buffer.concat(received).toString()) as unknown).toMatchObject(answer);
-    expect(incoming).toEqual({ ...body, stream: false });
+    expect(incoming).toEqual({ ...body, stream: false, providerOptions: { gateway: { only: ["deepseek"] } } });
     expect(f.metrics[0]?.userAgent).toBe("fixture-client/1");
     expect(headers?.authorization).toBe("Bearer UPSTREAM-SECRET");
     expect(headers?.cookie).toBeUndefined(); expect(headers?.["x-codex-turn-metadata"]).toBeUndefined();
@@ -1203,7 +1234,7 @@ it.each([false, true])("forces reasoning off on the outbound copy for JSON/SSE (
     messages: [{ role: "assistant", content: "history", reasoning: "keep history" }, { role: "user", content: "test" }] };
   const response = await f.post(input);
   expect(response.status).toBe(200); await response.text();
-  expect(outbound).toEqual({ model, stream, temperature: 0, reasoning: { effort: "none" }, messages: input.messages });
+  expect(outbound).toEqual({ model, stream, temperature: 0, reasoning: { effort: "none" }, messages: input.messages, providerOptions: { gateway: { only: ["deepseek"] } } });
   expect(input.reasoning.effort).toBe("high");
   await vi.waitFor(() => expect(f.metrics).toHaveLength(1));
   await dump.close();

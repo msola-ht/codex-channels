@@ -13,9 +13,9 @@
   CI 只校验已有字典，不生成翻译报告、调用翻译服务或自动写回译文；差异报告可在本地按需运行 `npm run i18n:report`。
   tarball 冒烟复用同次完整测试已经生成的 Gateway 构建产物和 npm 下载缓存，每次仍在新的临时目录安装依赖，干净源码安装不进入
   日常 PR 门禁，并在日志中记录各阶段与全部检查耗时。
-  独立的 App Server 合同任务安装锁定的 Codex CLI 0.156.1，检查协议版本与生成类型，并使用隔离
+  独立的 App Server 合同任务安装锁定的 Codex CLI 0.160.0，检查协议版本与生成类型，并使用隔离
   `CODEX_HOME` 验证 Fast 默认值的跨客户端读取和新 Thread 状态。真实工具合同需要 Linux user namespace；
-  合同 Job 与升级预览 Job 参照锁定版 [Codex CI 设置](https://github.com/openai/codex/blob/rust-v0.156.1/.github/actions/setup-ci/action.yml)，
+  合同 Job 与升级预览 Job 参照锁定版 [Codex CI 设置](https://github.com/openai/codex/blob/rust-v0.160.0/.github/actions/setup-ci/action.yml)，
   在临时 Ubuntu Runner 启用 `kernel.unprivileged_userns_clone`，并在该项存在时关闭
   `kernel.apparmor_restrict_unprivileged_userns`。这是运行器准备，不关闭 Codex 文件或网络沙箱，
   不修改用户服务、生产配置或 GitHub Token 权限。

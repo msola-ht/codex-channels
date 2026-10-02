@@ -1,14 +1,18 @@
 import * as clackPrompts from "@clack/prompts";
+import { maintenanceServiceRunning, runMaintenanceServices } from "./maintenance-services.mjs";
 
-export async function runSessionCleanupMenu({ prompts = clackPrompts, runCleanup }) {
+export async function runSessionCleanupMenu({ prompts = clackPrompts, runCleanup,
+  gatewayRunning = () => maintenanceServiceRunning("gateway"), runService,
+}) {
 
   const maxTurns = await prompts.text({
     message: "归档主会话的最大轮数（超过此数跳过整组）",
     placeholder: "3",
     initialValue: "3",
     validate: (value) => {
-      if (!/^\d+$/u.test(value.trim())) return "请输入 0 到 10000 的整数";
-      const number = Number(value.trim());
+      const input = (value ?? "").trim();
+      if (!/^\d+$/u.test(input)) return "请输入 0 到 10000 的整数";
+      const number = Number(input);
       return Number.isSafeInteger(number) && number <= 10_000
         ? undefined
         : "请输入 0 到 10000 的整数";
@@ -23,9 +27,10 @@ export async function runSessionCleanupMenu({ prompts = clackPrompts, runCleanup
     message: "连续空闲多少天（可留空）",
     placeholder: "不限制",
     validate: (value) => {
-      if (!value.trim()) return undefined;
-      if (!/^\d+$/u.test(value.trim())) return "请输入正整数，或直接回车跳过";
-      const number = Number(value.trim());
+      const input = (value ?? "").trim();
+      if (!input) return undefined;
+      if (!/^\d+$/u.test(input)) return "请输入正整数，或直接回车跳过";
+      const number = Number(input);
       return Number.isSafeInteger(number) && number >= 1 && number <= 36_500
         ? undefined
         : "请输入 1 到 36500 的整数";
@@ -41,5 +46,6 @@ export async function runSessionCleanupMenu({ prompts = clackPrompts, runCleanup
   // The cleanup command performs the candidate preview and its own final
   // confirmation in the terminal.
   args.push("--confirm");
-  return runCleanup(args);
+  return runMaintenanceServices({ prompts, targets: ["gateway"], isRunning: gatewayRunning,
+    ...(runService ? { runService: action => runService(action) } : {}), run: () => runCleanup(args) });
 }
