@@ -3,7 +3,7 @@ import { canReuseTrafficSummary, resolveTrafficData, resolveTrafficDetailSnapsho
 import { modelNameComparison } from "../runtime/model-name-comparison.mjs";
 
 describe("traffic request ownership", () => {
-  it("isolates failed batches, retains successes on retry and stops on cancellation", () => {
+  it("loads only summaries for a list and performs no supplemental diagnostic requests", () => {
     const script = String.raw`
       import fs from "node:fs";
       import ts from "typescript";
@@ -11,46 +11,19 @@ describe("traffic request ownership", () => {
       const source = fs.readFileSync("webui/src/hooks/use-traffic.ts", "utf8")
         .replace(/^import .*$/gm, "").replace(/export function/g, "function");
       const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
-      let page = { exchanges: ["a", "b", "c"].map(label => ({ label, session: "batch", id: 1 })) };
-      const calls = [], refs = [], loaders = [];
-      let refIndex = 0, apiIndex = 0, fail = true, controller;
-      const empty = { data: null, loading: false, error: null, refetch() {} };
-      let counts = empty;
-      const useApi = loader => { loaders.push(loader); return apiIndex++ === 0 ? { ...empty, data: { key: "{}", value: page } } : counts; };
-      const useRef = value => refs[refIndex++] ?? (refs[refIndex - 1] = { current: value });
-      const fetchCounts = async batch => {
-        calls.push(batch.label);
-        if (batch.label === "b" && fail) throw Error("fixture batch unavailable");
-        controller?.abort();
-        return { ...batch, exchanges: [{ id: 1, turnStateLengths: [{ source: "fixture", characters: 3 }] }] };
-      };
-      const key = value => JSON.stringify([value.label, value.session, value.id]);
-      const factory = new Function("ApiClientError", "useApi", "useRef", "resolveTrafficData", "fetchTrafficTurnStates", "trafficCallKey", compiled + ";return useTrafficExchanges;");
-      const hook = factory(class ApiClientError extends Error {}, useApi, useRef, (key, value) => value?.key === key ? value.value : null, fetchCounts, key);
-      const render = () => { apiIndex = refIndex = 0; loaders.length = 0; return hook({}); };
-      render();
-      const result = await loaders[1](new AbortController().signal);
-      counts = { ...empty, data: result };
-      let view = render();
-      assert.deepEqual(calls, ["a", "b", "c"]);
-      assert.equal(view.turnStates.size, 2);
-      assert.equal(view.turnStateErrors.size, 1);
-      assert.equal(view.turnStateErrors.get(key({label:"b",session:"batch",id:1})), "unknown");
-      assert.deepEqual(view.turnStatesError, {batches:["b / batch"]});
-      assert.ok(!JSON.stringify(result).includes("fixture batch unavailable"));
-      fail = false;
-      const retry = await loaders[1](new AbortController().signal);
-      counts = { ...empty, data: retry };
-      view = render();
-      assert.deepEqual(calls, ["a", "b", "c", "b"]);
-      assert.equal(view.turnStates.size, 3);
-      assert.equal(view.turnStatesError, null);
-      // A new list snapshot must not reuse the previous counts; abort stops subsequent batches.
-      page = { exchanges: page.exchanges.map(entry => ({ ...entry, session: "new-batch" })) };
-      controller = new AbortController();
-      render();
-      await assert.rejects(loaders[1](controller.signal), { name: "AbortError" });
-      assert.deepEqual(calls, ["a", "b", "c", "b", "a"]);
+      const loaders = [], calls = [];
+      const useApi = loader => { loaders.push(loader); return {data:null}; };
+      const fetchList = async (query, signal) => { calls.push({query,signal}); return {exchanges:[]}; };
+      const factory = new Function("useApi", "resolveTrafficData", "fetchTrafficExchanges", compiled + ";return useTrafficExchanges;");
+      const hook = factory(useApi, () => null, fetchList);
+      hook({limit:50});
+      assert.equal(loaders.length, 1);
+      const signal = new AbortController().signal;
+      await loaders[0](signal);
+      assert.deepEqual(calls, [{query:{limit:50},signal}]);
+      hook(null);
+      await loaders[1](signal);
+      assert.equal(calls.length, 1);
     `;
     expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" })).not.toThrow();
   });

@@ -1,8 +1,8 @@
 import * as React from "react"
-import { Link } from "react-router"
 import { Button } from "@/components/ui/button"
 import { TrafficModel } from "@/components/traffic/traffic-model"
-import { trafficDetailPath } from "@/lib/traffic-state"
+import { RequestDetail } from "@/components/requests/request-detail"
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import type { SortingState } from "@tanstack/react-table"
 
 import {
@@ -26,14 +26,18 @@ import {
   formatErrorMessage,
   formatElapsedDuration,
   formatErrorType,
-  formatTime,
+  formatRequestTime,
+  formatTimestamp,
+  getServerTimeZone,
   formatTokens,
 } from "@/lib/format"
 import type { RequestRecord } from "@/lib/types"
 
-const TABLE_STATE_KEY = "codex-webui:requests-table-state-v4"
+const TABLE_STATE_KEY = "codex-webui:requests-table-state-v5"
 
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
+  caller: false,
+  delivery: false,
   ua: false,
   error: false,
   operation: false,
@@ -73,11 +77,17 @@ export function RequestsTable({
   total: number
 }) {
   const { t, language } = useTranslation()
+  const [selected, setSelected] = React.useState<RequestRecord | null>(null)
+  const opener = React.useRef<HTMLElement | null>(null)
+  const openRequest = React.useCallback((record: RequestRecord) => {
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setSelected(record)
+  }, [])
   const columnLabels: Record<string, string> = {
     source: t("filters.source"),
     caller: t("filters.caller"),
     delivery: t("filters.delivery"),
-    time: t("metrics.time"),
+    time: t("requests.recordedAt"),
     provider: t("metrics.provider"),
     model: t("metrics.model"),
     ua: "User-Agent",
@@ -91,13 +101,16 @@ export function RequestsTable({
     reasoningOutput: t("requests.reasoningColumn"),
     firstContent: t("requests.firstColumn"),
     totalDuration: t("requests.durationColumn"),
-    traffic: t("requests.detailColumn"),
+    traffic: t("requestDetail.title"),
   }
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
     {
       id: "source", enableSorting: false, header: t("filters.source"),
-      cell: ({ row }) => row.original.source === "relay" ? t("filters.relay") : t("filters.owned"),
+      cell: ({ row }) => <div className="flex flex-col gap-1">
+        <span>{row.original.source === "relay" ? t("filters.relay") : t("filters.owned")}</span>
+        <TruncatedText text={row.original.callerDisplayName ?? row.original.callerId ?? ""} className="max-w-40 text-muted-foreground" />
+      </div>,
     },
     {
       id: "caller", enableSorting: false, header: t("filters.caller"),
@@ -115,11 +128,11 @@ export function RequestsTable({
       id: "time",
       accessorFn: (record) => record.recordedAtMs,
       header: ({ column }) => (
-        <SortableHeader column={column}>{t("metrics.time")}</SortableHeader>
+        <SortableHeader column={column}>{t("requests.recordedAt")}</SortableHeader>
       ),
       cell: ({ getValue }) => (
-        <span className="tabular-nums text-muted-foreground">
-          {formatTime(getValue<number>())}
+        <span className="tabular-nums text-muted-foreground" title={`${formatTimestamp(getValue<number>())} · ${getServerTimeZone()}`}>
+          {formatRequestTime(getValue<number>())}
         </span>
       ),
     },
@@ -144,7 +157,6 @@ export function RequestsTable({
             request={row.original.requestModel}
             responses={row.original.responseModel === null || row.original.responseModel === undefined ? [] : [row.original.responseModel]}
             fallback={row.original.model ?? undefined}
-            upstream={row.original.upstreamProvider}
           />
           <FastBadge tier={row.original.requestServiceTier} source="request" responseTier={row.original.serviceTier} />
         </span>
@@ -158,7 +170,9 @@ export function RequestsTable({
       ),
       cell: ({ row }) => {
         const record = row.original
-        if (record.source === "relay") return <RelayRequestStatus key={record.relayRequestId ?? record.id} record={record} />
+        if (record.source === "relay") return <div className="flex flex-col gap-1"><RelayRequestStatus key={record.relayRequestId ?? record.id} record={record} />
+          {record.deliveryStatus == null ? null : <span className="text-xs text-muted-foreground">{t("requestDetail.deliverySummary", { value: record.deliveryStatus === "finished" ? t("filters.deliveryFinished") : record.deliveryStatus === "disconnected" ? t("filters.deliveryDisconnected") : t("filters.deliveryFailed") })}</span>}
+        </div>
         const badge = <StatusBadge status={record.status} />
         if (!record.errorMessage && !record.errorType && !record.errorCode) return badge
         const details = [
@@ -269,12 +283,11 @@ export function RequestsTable({
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
-      id: "traffic", header: t("requests.detailColumn"), enableSorting: false,
-      cell: ({ row }) => row.original.traffic === null
-        ? <TableHint hint={row.original.source === "relay" ? t("requests.noTrafficReason") : null}><span className="text-muted-foreground">{t("requests.noTraffic")}</span></TableHint>
-        : <Button variant="link" size="sm" asChild>
-          <Link to={trafficDetailPath(row.original.traffic)}>{t("requests.viewTraffic")}</Link>
-        </Button>,
+      id: "traffic", header: t("requestDetail.title"), enableSorting: false,
+      cell: ({ row }) => <Button variant="link" size="sm" onClick={(event) => {
+        event.stopPropagation()
+        openRequest(row.original)
+      }}>{t("requestDetail.open")}</Button>,
     },
     {
       id: "ua",
@@ -355,15 +368,21 @@ export function RequestsTable({
         </span>
       ),
     },
-  ], [t, language])
+  ], [t, language, openRequest])
+
+  const order = ["time", "provider", "model", "status", "input", "cacheHitRate", "output", "firstContent", "totalDuration", "source", "traffic"]
+  const orderedColumns = [...columns].sort((a, b) => (order.includes(a.id!) ? order.indexOf(a.id!) : order.length) - (order.includes(b.id!) ? order.indexOf(b.id!) : order.length))
 
   return (
+    <>
     <DataTable
       numericColumnIds={["input", "cacheHitRate", "output", "firstContent", "totalDuration", "http", "reasoningOutput"]}
       loading={loading}
       title={t("requests.tableTitle")}
       description={() => t("requests.tableDescription", { total, count: records.length, page: pageNumber })}
-      columns={columns}
+      columns={orderedColumns}
+      getRowId={(record) => String(record.id)}
+      onRowClick={openRequest}
       data={records}
       storageKey={TABLE_STATE_KEY}
       columnLabels={columnLabels}
@@ -385,5 +404,15 @@ export function RequestsTable({
         serverTotal: total,
       }}
     />
+    <Sheet open={selected !== null} onOpenChange={(open) => { if (!open) setSelected(null) }}>
+      <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-xl overflow-y-auto" closeLabel={t("common.close")}
+        onCloseAutoFocus={(event) => {
+          if (opener.current?.isConnected) { event.preventDefault(); opener.current.focus() }
+        }}>
+        <SheetHeader><SheetTitle>{t("requestDetail.title")}</SheetTitle><SheetDescription>{t("requestDetail.description")}</SheetDescription></SheetHeader>
+        <div className="px-4 pb-4">{selected === null ? null : <RequestDetail record={selected} />}</div>
+      </SheetContent>
+    </Sheet>
+    </>
   )
 }

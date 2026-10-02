@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react"
-import { useSearchParams } from "react-router"
+import { useLocation, useSearchParams } from "react-router"
 
 export const trafficPageSizeOptions = [25, 50, 100, 200]
 
@@ -18,6 +18,7 @@ export interface TrafficQuery {
 
 export function useTrafficQuery() {
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
   const encoded = params.toString()
   const query = useMemo(() => {
     const search = new URLSearchParams(encoded)
@@ -64,8 +65,8 @@ export function useTrafficQuery() {
         next.set(key, String(value))
       }
       return next
-    }, { replace })
-  }, [setParams])
+    }, { replace, state: location.state })
+  }, [setParams, location.state])
 
   return { query, update }
 }

@@ -10,7 +10,7 @@ import { ModelRelayServer, type PreparedRelayProvider, type RelayMetric, type Re
 import { RelayMetricsSender } from "../src/model-relay/index.js";
 import { sendRelayMetrics, RelayTrafficDump, pruneModelTrafficDumpSessions } from "../src/provider-proxy/index.js";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
-import { describeDumpExchange, readDumpResponseProviders } from "../scripts/traffic-dump-reader.mjs";
+import { describeDumpExchange, summarizeDumpFiles } from "../scripts/traffic-dump-reader.mjs";
 import * as retention from "../src/provider-proxy/traffic-dump-retention.js";
 import { capturedTrafficHeaders } from "../src/provider-proxy/traffic-dump-headers.js";
 import { RelayMetricsComposition } from "../src/bootstrap/relay-metrics-composition.js";
@@ -398,9 +398,8 @@ describe("isolated Relay vertical request chain", () => {
       expect(detail.upstreamProvider).toBe(index === 0 ? "deepseek" : undefined);
       expect(detail.chatDiagnostics.fields["routing.finalProvider"]).toBe(detail.upstreamProvider);
       expect(JSON.stringify(detail.chatDiagnostics)).not.toContain("PRIVATE");
-      const providers = await readDumpResponseProviders(paths, [ref.interaction]);
-      expect(providers.get(ref.interaction)).toBe(detail.upstreamProvider);
-      expect([...providers.keys()]).toEqual(index === 0 ? [ref.interaction] : []);
+      const summary = await summarizeDumpFiles(paths);
+      expect(summary.exchanges.find((entry: { id: number }) => entry.id === ref.interaction)?.upstreamProvider).toBe(detail.upstreamProvider);
     }
   });
 

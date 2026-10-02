@@ -20,7 +20,7 @@ i18n-glossary.json  翻译术语、原样保留项和规则，供开发工具生
 src/
   lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时、页面可见性和设置页与控制台账户区恢复事件的延后补查，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 投影 OpenAI 当前周额度、Credits 余额和重置券到期明细，并管理自动查询的新鲜度筛选与有界冷却、有界并发查询、逐账户结果交付、观测时间合并及 DS、OCG、CCG、Cline Pass 账户快照时效，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址，i18n/ 存放中英文界面文案字典与取值函数
   hooks/       数据 hook（useApi 统一 loading/error/refetch，支持按当前状态更新和账户观测时间合并，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、Relay 服务管理 use-relay-service-management（统一手动、页面恢复及任务完成刷新）、Relay Key 管理 use-relay-management（复用确认 Hook）、use-relay-queue（队列页面挂载期间的 SSE 推送与有界快照刷新），设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）、全局货币上下文与 use-translation（按当前显示语言翻译界面文案）
-  components/  layout（app-sidebar 组合品牌入口、导航与侧栏状态恢复，Sidebar、Collapsible 与 SidebarMenuSub 组合调用监控、模型管理、模型转发、消息渠道和设置二级导航）、overview（控制台卡片、account-refresh-feedback 刷新反馈、account-subscription-notice 订阅状态与确认删除、reset-credit-action 实时选券与消费确认）、metrics（指标区块、query-filters 共用筛选栏、query-summary 期间汇总与共享数据表格）、requests（请求明细数据表格、relay-request-status 受控失败分类）、traffic（调用摘要、明细、traffic-model 共用模型名称对照、请求内容/参数对照与清理入口）、settings（按设置域拆分的卡片与控件，settings-page-frame 统一手动和可见性刷新，gateway-settings-section 组合 Gateway 加载/错误/确认反馈，settings-cli-commands 按用途展示现有 CLI 摘要，account-id-field 共用新增账户预设与自定义输入，relay-service-management 在模型转发页组合服务操作、任务确认与完成后状态刷新）
+  components/  layout（app-sidebar 组合品牌入口、导航与侧栏状态恢复，Sidebar、Collapsible 与 SidebarMenuSub 组合调用监控、模型管理、模型转发、消息渠道和设置二级导航）、overview（控制台卡片、account-refresh-feedback 刷新反馈、account-subscription-notice 订阅状态与确认删除、reset-credit-action 实时选券与消费确认）、metrics（指标区块、query-filters 共用筛选栏、query-summary 期间汇总与共享数据表格）、requests（请求明细数据表格、request-detail 独立指标快照侧栏、relay-request-status 受控失败分类）、traffic（调用摘要、明细、traffic-model 共用模型名称对照、请求内容/参数对照与清理入口）、settings（按设置域拆分的卡片与控件，settings-page-frame 统一手动和可见性刷新，gateway-settings-section 组合 Gateway 加载/错误/确认反馈，settings-cli-commands 按用途展示现有 CLI 摘要，account-id-field 共用新增账户预设与自定义输入，relay-service-management 在模型转发页组合服务操作、任务确认与完成后状态刷新）
   pages/       relay-queue-page 独立实时请求队列页；model-management-page 组合提供商、账户与凭据、模型配置、上下文与压缩四个独立路由，channels-page 组合渠道配置和消息展示，settings-page 组合常规、权限、网络、数据、服务五个子页；概览、会话、会话详情、请求、错误、调用详情、渠道投递队列、模型转发（独立 Key 管理，中文用途名称及居中弹窗，手动刷新运行状态）、设置（只负责组合设置域组件）
   App.tsx      路由布局与页面级懒加载，保留页面切换间的控制台已应用范围及有界账户自动查询冷却（不保存账户快照）（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
@@ -60,6 +60,8 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `pages/delivery-page.tsx` 组合渠道投递队列独立页面，由左侧「消息渠道 → 渠道投递队列」进入 `#/delivery`；`components/delivery/delivery-queue.tsx` 提供精简表格列表、状态计数筛选、行内内容摘要、游标分页和勾选批量重试/忽略确认；`hooks/use-delivery-queue.ts` 复用管理确认 Hook 与 `hooks/use-queue-events.ts` 的 SSE 变化订阅，筛选或翻页时重建当前查询，离开页面时取消请求。
 
 `components/settings/tool-access-settings.tsx` 组合电脑、浏览器与已有 MCP 的原生配置编辑器，复用 App Server 设置 Hook 的版本化预览和确认；用户层与合并配置分开展示。
+
+请求列表与错误列表不依赖调用采集或转储索引。`components/requests/request-detail.tsx` 仅展示已选指标快照，报文链接为可选入口；调用列表只加载摘要，Turn State 诊断保留在单次详情。
 
 调用详情正文复用 `components/traffic/traffic-content.tsx` 的延迟展开与只读文本操作组件，统一复制、换行、格式化和截断提示。
 

@@ -233,7 +233,7 @@
   Provider、模型与思考等级交互与中文渲染，写入复用管理接口；第三方 Provider 总菜单会先选择 Provider，DeepSeek 与 OpenCode Go 子菜单则复用同一入口并预选当前 Provider。上下文窗口不在本流程，转到
   `model-window-setup.mjs`；历史 Thread 仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
-  `multi_agent_v2` 普通键级修改及更新器关闭 daemon 自动启动、补写未设置的 OpenAI 默认模型作为官方 `config/batchWrite` 事务写入用户配置；
+  `multi_agent_v2` 普通键级修改及更新器关闭 daemon 自动启动作为官方 `config/batchWrite` 事务写入用户配置；
   用户设置修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
 - `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“项目技能”类别；列出项目 `.codex/skills` 下带
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
@@ -447,8 +447,7 @@
 - `traffic-dump-reader.mjs`：V2 转储共享读取实现，Relay debug v1 补充入站/交付阶段且拒绝未知版本，严格读取 `manifest.json`、`interactions.jsonl` 与
   payload 引用，按批次和逻辑调用编号配对产出摘要和详情；`codexc traffic` 与 WebUI 共用。WebUI 摘要
   分页用有界堆只保留当前页之前的候选，并限制 offset 上限；单条详情只保留目标调用。
-  `readDumpResponseProviders` 为指标列表按单批次的精确调用编号扫描响应索引，只保留命中的上游提供商，不读取正文。正文和独立 trace
-  均有界读取；`describeDumpTrace` 为 WebUI 事件翻页单独读取轨迹，不重读正文或聚合输出；`describeDumpTurnStates` 按精确批次与编号独立读取字符数，不阻塞列表摘要接口。旧版逐帧 JSONL 明确报错，不隐式迁移或混读。
+  正文和独立 trace 均有界读取；`describeDumpTrace` 为 WebUI 事件翻页单独读取轨迹，不重读正文或聚合输出。Turn State 字符数仅在单次调用诊断中提取，指标列表不读取调用索引。旧版逐帧 JSONL 明确报错，不隐式迁移或混读。
 - `traffic-dump-presentation.mjs`：从已有 V2 请求接口识别协议、请求头识别客户端自报名称，从正文投影每次调用的元数据、参数、用量和错误，从响应索引投影失败阶段；从终态或
   独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件；投影请求输入、声明工具与参数对照，并分开提取本次调用的服务端模型声明和安全缓冲候选及来源；仅从同次调用的单调时钟节点计算阶段，不与上游轮次或旧墙钟相减，不回写转储。
 

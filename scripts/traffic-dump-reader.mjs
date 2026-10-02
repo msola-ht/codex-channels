@@ -89,19 +89,6 @@ export async function forEachDumpRecord(paths, visit) {
   }
 }
 
-/** 单批次按精确调用编号读取响应索引，不读取正文，也不保留页外记录。 */
-export async function readDumpResponseProviders(paths, ids) {
-  const selected = new Set(ids);
-  const providers = new Map();
-  if (selected.size === 0) return providers;
-  await forEachDumpRecord(paths, (record) => {
-    if (record.kind !== "response" || !selected.has(record.id)) return;
-    const provider = upstreamProviderOf(record);
-    if (provider !== undefined) providers.set(record.id, provider);
-  });
-  return providers;
-}
-
 export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst = false } = {}) {
   const page = limit === undefined
     ? await readAllInteractionSummaries(paths, newestFirst)
@@ -120,40 +107,6 @@ export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst
     total: page.total,
     nextOffset: offset + exchanges.length < page.total ? offset + exchanges.length : null,
   };
-}
-
-/** 按列表已返回的精确编号读取，不重新分页，避免新增调用挤动页码。 */
-export async function describeDumpTurnStates(paths, ids) {
-  const selected = new Set(ids);
-  const entries = new Map();
-  await forEachDumpRecord(paths, (record, directory) => {
-    if (!selected.has(record.id) || (record.kind !== "request" && record.kind !== "response")) return;
-    if (!entries.has(record.id)) entries.set(record.id, { directory });
-    entries.get(record.id)[record.kind] = record;
-  });
-  if (ids.some((id) => entries.get(id)?.request === undefined)) return null;
-  const ordered = ids.map((id) => entries.get(id));
-  const lengths = await readPageTurnStateLengths(ordered);
-  return ordered.map((entry) => ({ id: entry.request.id, turnStateLengths: lengths.get(entry).result().turnStateLengths }));
-}
-
-async function readPageTurnStateLengths(entries) {
-  const collectors = new Map();
-  const batches = new Map();
-  for (const entry of entries) {
-    const evidence = createModelEvidenceCollector();
-    evidence.headers(entry.response?.headers, "http.headers");
-    evidence.event(parseJson(readPayload(entry.directory, entry.response?.payload, 4 * 1_048_576).text));
-    collectors.set(entry, evidence);
-    if (!batches.has(entry.directory)) batches.set(entry.directory, new Map());
-    batches.get(entry.directory).set(entry.request.id,
-      createOutputCollector(4 * 1_048_576, undefined, evidence.event, false));
-  }
-  for (const [directory, calls] of batches) {
-    for await (const record of traceRecords(directory)) calls.get(record?.interaction)?.consume(record);
-    for (const collector of calls.values()) collector.result();
-  }
-  return collectors;
 }
 
 export async function readDumpExchange(paths, id) {

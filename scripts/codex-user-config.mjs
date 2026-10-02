@@ -7,21 +7,16 @@ import {
 } from "../runtime/executable.mjs";
 import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 
-// Older running updaters import this entry after switching to the new checkout.
-export { configureCodexUpdateDefaults as disableCodexDaemonAutoStart };
+// A running updater from 77efce47 imports this name after switching checkouts.
+// Keep the handoff, but never seed or overwrite a model from either entry.
+export { disableCodexDaemonAutoStart as configureCodexUpdateDefaults };
 
-export async function configureCodexUpdateDefaults(environment = process.env, dependencies = {}) {
+export async function disableCodexDaemonAutoStart(environment = process.env, dependencies = {}) {
   await updateCodexUserConfig(environment, (config) => {
     const features = config.features;
-    const edits = features?.daemon_auto_start === false
+    return features?.daemon_auto_start === false
       ? []
       : [{ keyPath: "features.daemon_auto_start", value: false }];
-    // Only seed the unselected OpenAI root; preserve explicit models and Profiles.
-    if (config.model === undefined && config.profile === undefined
-      && (config.model_provider === undefined || config.model_provider === "openai")) {
-      edits.push({ keyPath: "model", value: "gpt-6.1-sol" });
-    }
-    return edits;
   }, dependencies);
 }
 

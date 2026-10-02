@@ -21,7 +21,7 @@ export function ErrorsTable({ records, query, loading, pagination }: {
       return <><ProviderBadge provider={record.provider} /></>
     } },
     { id: "model", enableSorting: false, header: t("metrics.model"), cell: ({ row: { original: record } }) => {
-      return <><span className="flex items-center gap-2 whitespace-nowrap"><TrafficModel provider={record.provider} request={record.model} responses={[]} upstream={record.upstreamProvider} /><FastBadge tier={record.requestServiceTier} source="request" responseTier={record.serviceTier} /></span></>
+      return <><span className="flex items-center gap-2 whitespace-nowrap"><TrafficModel provider={record.provider} request={record.model} responses={[]} /><FastBadge tier={record.requestServiceTier} source="request" responseTier={record.serviceTier} /></span></>
     } },
     { id: "status", enableSorting: false, header: t("filters.status"), cell: ({ row: { original: record } }) => {
       return <><StatusBadge status={record.status} /></>

@@ -32,6 +32,7 @@ export function RequestsPage() {
         <>
           <QuerySummary loading={loading} aggregate={data.aggregate} range={data.range} />
           <RequestsTable
+            key={JSON.stringify(query)}
             loading={loading}
             records={data.records}
             pageNumber={Math.floor(query.offset / query.limit) + 1}

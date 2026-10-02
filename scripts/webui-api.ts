@@ -221,8 +221,6 @@ export interface RequestRecord {
   credentialGeneration?: number | null
   relayRequestId?: string | null
   deliveryStatus?: "finished" | "disconnected" | "failed" | null
-  /** 按调用记录的 Chat 上游诊断关联出的实际上游提供商；仅列表接口按需填充，缺失表示调用记录不可用或未记录。 */
-  upstreamProvider?: string
   totalDurationMs: number | null
   traffic: { label: string; session: string; interaction: number } | null
   firstTokenMs: number | null
@@ -920,12 +918,6 @@ export interface TrafficListResponse {
   total: number
   maximumOffset: number
   nextOffset: number | null
-}
-
-export interface TrafficTurnStatesResponse {
-  label: string
-  session: string
-  exchanges: Array<{ id: number; turnStateLengths: Array<{ source: string; characters: number }> }>
 }
 
 export type TrafficHeaderValue = string | string[]
