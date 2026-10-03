@@ -16,13 +16,13 @@ import { RangeSelector } from "@/components/metrics/range-selector"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { useMetricsProviders } from "@/hooks/use-metrics-query"
 
-export function QueryFilters(props: { query: MetricsQuery; onChange: (query: Partial<MetricsQuery>) => void; threadId?: string; showThreadFilters?: boolean }) {
+export function QueryFilters(props: { query: MetricsQuery; onChange: (query: Partial<MetricsQuery>) => void; threadId?: string; showThreadFilters?: boolean; revision?: unknown }) {
   const { t } = useTranslation()
-  const providers = useMetricsProviders()
+  const providers = useMetricsProviders(props.revision)
   // 路由前进/后退和逐层跳转时重建草稿；翻页不影响已填写的筛选。
   const { offset: _offset, limit: _limit, sort: _sort, direction: _direction, ...scope } = props.query
   return <>
-    <ErrorBanner error={translateApiError(t, providers.error, providers.errorCode)} />
+    <ErrorBanner error={translateApiError(t, providers.error, providers.errorCode)} onRetry={providers.refetch} pending={providers.refreshing} />
     <QueryFiltersForm key={JSON.stringify(scope)} {...props} providers={providers.data?.providers ?? []} providersLoading={providers.loading} providersError={providers.error} />
   </>
 }

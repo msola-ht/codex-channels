@@ -13,6 +13,86 @@ class Page extends EventTarget {
 
 afterEach(() => vi.useRealTimers());
 
+it("publishes thread summary and turns together and pauses their shared notification read on history pages", () => {
+  execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import fs from "node:fs";
+    import ts from "typescript";
+    import assert from "node:assert/strict";
+    let loader, enabled, subscriptions = 0;
+    const pending = [];
+    const fetch = (id, signal) => new Promise((resolve, reject) => pending.push({ id, signal, resolve, reject }));
+    const imports = {
+      react: { useCallback: fn => fn },
+      "@/hooks/use-api": { useApi: fn => { loader = fn; return { data: null, loading: true, error: null, refetch() {} }; } },
+      "@/hooks/use-queue-events": {
+        useQueueSnapshot: load => ({ load }),
+        useQueueEvents: (_refresh, _loading, active) => { subscriptions++; enabled = active; return "live"; },
+      },
+      "@/lib/api": { fetchThreadRun: fetch, fetchThreadTurns: (id, _query, signal) => fetch(id, signal) },
+    };
+    const code = ts.transpileModule(fs.readFileSync("webui/src/hooks/use-thread-detail.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const exports = {}; new Function("require", "exports", code)(id => imports[id], exports);
+    exports.useThreadDetail("one", { offset: 0 }); assert.equal(subscriptions, 1); assert.equal(enabled, true);
+    const controller = new AbortController(); let published = false;
+    const result = loader(controller.signal).then(value => { published = true; return value; });
+    assert.equal(pending.length, 2); assert.ok(pending.every(item => item.id === "one" && !item.signal.aborted));
+    assert.equal(pending[0].signal, pending[1].signal);
+    pending.shift().resolve({ latestTurn: "new" }); await Promise.resolve(); assert.equal(published, false);
+    pending.shift().resolve({ turns: ["new"] }); assert.deepEqual((await result).data, { run: { latestTurn: "new" }, turns: { turns: ["new"] } });
+    assert.equal(exports.useThreadDetail("two", { offset: 20 }).notificationStatus, "paused"); assert.equal(enabled, false);
+    const failed = loader(controller.signal); const sibling = pending.shift(); pending.shift().reject(new Error("turns unavailable"));
+    await assert.rejects(failed, /turns unavailable/);
+    assert.equal(sibling.signal.aborted, true); assert.equal(controller.signal.aborted, false);
+    sibling.resolve({ latestTurn: "late" });
+    const failedRun = loader(controller.signal); pending.shift().reject(new Error("run unavailable")); const turns = pending.shift();
+    await assert.rejects(failedRun, /run unavailable/); assert.equal(turns.signal.aborted, true); turns.resolve({ turns: [] });
+    const cancelled = loader(controller.signal); const pair = pending.splice(0);
+    controller.abort(); assert.ok(pair.every(item => item.signal.aborted));
+    pair.forEach(item => item.reject(controller.signal.reason)); await assert.rejects(cancelled, { name: "AbortError" });
+  `], { cwd: process.cwd(), stdio: "pipe" });
+});
+
+it("coalesces provider options after page updates without another subscription or background reads", () => {
+  execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import fs from "node:fs";
+    import ts from "typescript";
+    import assert from "node:assert/strict";
+    let cleanup, loader, clock = 1000, refreshed = 0, sequence = 0;
+    const timers = new Map();
+    globalThis.setTimeout = (fn, delay) => { const id = ++sequence; timers.set(id, { fn, delay }); return id; };
+    globalThis.clearTimeout = id => timers.delete(id);
+    Date.now = () => clock;
+    globalThis.document = Object.assign(new EventTarget(), { visibilityState: "visible" });
+    globalThis.window = new EventTarget();
+    Object.defineProperty(globalThis, "navigator", { value: { onLine: true } });
+    const first = {}, second = {}, third = {};
+    const state = { data: { revision: first, value: { providers: ["openai"] }, completedAt: 1000 }, loading: false, error: null, refetch: () => refreshed++ };
+    const imports = {
+      react: { useEffect: fn => { cleanup?.(); cleanup = fn(); } },
+      "react-router": {},
+      "@/hooks/use-api": { useApi: fn => { loader = fn; return state; } },
+      "@/lib/api": { fetchMetricsProviders: async () => ({ providers: ["openai", "new-provider"] }) },
+    };
+    const code = ts.transpileModule(fs.readFileSync("webui/src/hooks/use-metrics-query.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const exports = {}; new Function("require", "exports", code)(id => imports[id], exports);
+    const render = exports.useMetricsProviders;
+    render(first); assert.equal(timers.size, 0);
+    render(second); assert.equal(timers.size, 1); assert.equal([...timers.values()][0].delay, 30000);
+    clock = 11000; render(third); assert.equal(timers.size, 1); assert.equal([...timers.values()][0].delay, 20000);
+    document.visibilityState = "hidden"; document.dispatchEvent(new Event("visibilitychange")); assert.equal(timers.size, 0);
+    clock = 31000; document.visibilityState = "visible"; document.dispatchEvent(new Event("visibilitychange"));
+    const timer = [...timers.values()][0]; assert.equal(timer.delay, 0); timer.fn(); timers.clear(); assert.equal(refreshed, 1);
+    state.loading = true; assert.equal(render(third).loading, false); assert.equal(timers.size, 0);
+    state.data = await loader(); state.loading = false;
+    assert.deepEqual(render(third).data.providers, ["openai", "new-provider"]); assert.equal(timers.size, 0);
+    render({}); assert.equal(timers.size, 1);
+    navigator.onLine = false; window.dispatchEvent(new Event("offline")); assert.equal(timers.size, 0);
+    navigator.onLine = true; window.dispatchEvent(new Event("online")); assert.equal(timers.size, 1);
+    state.error = "unavailable"; render({}); assert.equal(timers.size, 0);
+    cleanup?.(); window.dispatchEvent(new Event("online")); assert.equal(timers.size, 0);
+  `], { cwd: process.cwd(), stdio: "pipe" });
+});
+
 describe("WebUI 自动刷新", () => {
   it("supports a slower queue interval without changing the default interval", () => {
     vi.useFakeTimers();

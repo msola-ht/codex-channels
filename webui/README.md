@@ -78,6 +78,8 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 `hooks/use-requests.ts` 与 `hooks/use-errors.ts` 复用队列通知 Hook，在 Gateway 指标批次成功落库后更新第一页；历史分页延后读取，返回第一页补查，手动刷新始终可用。`GET /api/v1/metrics/events` 使用只读 API 鉴权，通知中断与快照失败分别显示，不影响历史查询。
 
+`hooks/use-threads.ts` 与 `hooks/use-thread-detail.ts` 沿用指标通知和历史分页暂停规则。会话详情通过 `useThreadDetail` 共用一条订阅，并行读取本地汇总和轮次，两项成功后一起更新；同条件刷新保留内容和展开状态。`useMetricsProviders` 跟随页面成功读取的结果合并更新提供商选项，自动读取至少间隔 30 秒，不另开订阅；后台或离线时暂停，失败可手动重试，不覆盖筛选草稿。
+
 `hooks/use-dashboard.ts` 为汇总、趋势和热力图共用一条指标订阅；`hooks/use-official-account-sources.ts` 独立订阅已保存账户快照，仅各账户手动刷新查询上游，进入页面、恢复可见与页头刷新均不触发上游账户查询。
 
 控制台、请求与错误列表区分首次加载和后台刷新：`loading` 仅用于当前查询没有结果时的占位，`refreshing` 用于刷新按钮和操作限制；同查询刷新保留内容，切换查询不展示旧范围结果。管理任务的 `notificationError` 独立于读取错误，通知中断不阻止已成功读取的终态触发关联刷新。

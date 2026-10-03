@@ -411,14 +411,14 @@ describe("WebUI metrics table presentation", () => {
         const { useRequests } = await server.ssrLoadModule("/src/hooks/use-requests.ts");
         const { useThreads } = await server.ssrLoadModule("/src/hooks/use-threads.ts");
         const { useErrors } = await server.ssrLoadModule("/src/hooks/use-errors.ts");
-        const { useThreadTurns } = await server.ssrLoadModule("/src/hooks/use-thread-detail.ts");
+        const { useThreadDetail } = await server.ssrLoadModule("/src/hooks/use-thread-detail.ts");
         const query = { range: "all", offset: 0, limit: 10 };
         const nextQuery = { ...query, offset: 10 };
         result.queryStates = JSON.stringify([
           [useRequests, JSON.stringify(query)],
           [useThreads, JSON.stringify(query)],
           [useErrors, JSON.stringify(query)],
-          [q => useThreadTurns("thread-1", q), JSON.stringify(["thread-1", query])],
+          [q => useThreadDetail("thread-1", q), JSON.stringify(["thread-1", query])],
         ].map(([hook, queryKey]) => {
           const readHook = q => {
             let value;
@@ -846,11 +846,11 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("marks changed queries pending before the API effect and preserves explicit failures", () => {
-    expect(JSON.parse(markup.queryStates!)).toEqual(Array.from({ length: 4 }, (_, index) => ({
+    expect(JSON.parse(markup.queryStates!)).toEqual(Array.from({ length: 4 }, () => ({
       ready: { data: { total: 1 }, error: null, loading: false },
       changed: { data: { total: 1 }, error: null, loading: true },
       returned: { data: { total: 1 }, error: null, loading: false },
-      pending: { data: { total: 1 }, error: null, loading: ![0, 2].includes(index) },
+      pending: { data: { total: 1 }, error: null, loading: false },
       failed: { data: { total: 1 }, error: "fixture failure", loading: false },
       initial: { data: null, error: null, loading: true },
     })));

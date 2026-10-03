@@ -29,7 +29,7 @@ export function RequestsPage() {
           </Button>
         </div>
       </div>
-      <QueryFilters query={query} onChange={update} showThreadFilters={false} />
+      <QueryFilters query={query} onChange={update} showThreadFilters={false} revision={data} />
       <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={refreshing} />
       <ErrorBanner error={exporter.failed ? translateApiErrorCode(t, exporter.errorCode) : null} onRetry={() => void exporter.download()} pending={exporter.pending || refreshing || error !== null} />
       {error !== null ? null : data === null ? <PageSkeleton rows={8} /> : (
