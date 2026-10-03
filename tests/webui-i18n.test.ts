@@ -127,6 +127,18 @@ describe("WebUI 界面文案语言切换", () => {
         const render = (component, props, language) => renderToStaticMarkup(
           h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(MemoryRouter, null, h(TooltipProvider, null, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props)))));
         const clock = { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" };
+        const { RefreshStatus } = await server.ssrLoadModule("/src/components/metrics/refresh-status.tsx");
+        for (const language of ["zh", "en"]) {
+          const staleText = translate(language, "refreshStatus.stale");
+          const saved = Date.parse("2026-10-03T12:34:00Z");
+          for (const props of [{status:"reconnecting"}, {status:"paused"}, {status:"live",failed:true}]) {
+            const html = render(RefreshStatus, { ...props, updatedAt: saved }, language);
+            if (!html.includes(staleText) || !html.includes("2026-10-03 12:34")) throw new Error("Missing stale snapshot evidence");
+          }
+          if (render(RefreshStatus, {status:"live",updatedAt:saved}, language).includes(staleText)) throw new Error("Healthy snapshot marked stale");
+          if (render(RefreshStatus, {status:"paused",history:true,updatedAt:saved}, language).includes(staleText)) throw new Error("Historical snapshot marked stale");
+          if (render(RefreshStatus, {status:"connecting",updatedAt:null}, language).includes("12:34")) throw new Error("Initial load shows old timestamp");
+        }
         const renderWithClock = (component, props, language) => renderToStaticMarkup(
           h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(MemoryRouter, null,
             h(TooltipProvider, null, h(ServerTimeContext.Provider, { value: clock }, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props))))));

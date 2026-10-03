@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react"
 
 import { useApi } from "@/hooks/use-api"
+import { useRangeRefresh } from "@/hooks/use-range-refresh"
 import { useQueueEvents, useQueueSnapshot } from "@/hooks/use-queue-events"
 import { fetchOverview, watchRequestMetrics } from "@/lib/api"
 import { resolveDashboardData } from "@/lib/overview-state"
@@ -17,11 +18,12 @@ export function useDashboard(query: MetricsRangeQuery) {
   const overview = useApi(load, [request])
   const current = resolveDashboardData(request, overview.data)
   const refetch = overview.refetch
+  useRangeRefresh(query, refetch, overview.lastReadStartedAt, overview.loading || overview.error !== null || current === null, true)
   const notificationStatus = useQueueEvents(refetch, overview.loading, true, latest, read, watchRequestMetrics)
   return {
     data: current, loading: current === null && overview.error === null,
     refreshing: overview.loading || (overview.error === null && current === null),
     error: overview.error, errorCode: overview.errorCode,
-    refetch, notificationStatus,
+    refetch, notificationStatus, lastUpdatedAt: current === null ? null : overview.lastUpdatedAt,
   }
 }

@@ -3,6 +3,7 @@ import { RefreshCwIcon } from "lucide-react"
 import { useId } from "react"
 
 import { ErrorBanner } from "@/components/metrics/error-banner"
+import { RefreshStatus } from "@/components/metrics/refresh-status"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { TrafficDetail } from "@/components/traffic/traffic-detail"
 import { TrafficCleanupControls } from "@/components/traffic/traffic-cleanup-controls"
@@ -72,8 +73,8 @@ export function TrafficPage() {
               {t("traffic.detailIntro")}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground" role="status">{query.traceOffset > 0 ? t("requests.historyUpdatesPaused") : t(`delivery.notifications.${detail.notificationStatus}`)}</span>
+          <div className="flex flex-wrap items-center gap-2">
+          <RefreshStatus status={detail.notificationStatus} updatedAt={detailView === null ? null : detail.lastUpdatedAt} failed={detail.error !== null} history={query.traceOffset > 0} />
           {requestsReturnTo === null ? null : <Button variant="outline" size="sm" render={<Link to={requestsReturnTo} />} nativeButton={false}>{t("requestDetail.back")}</Button>}
           <Button type="button" variant="outline" size="sm" disabled={detail.refreshing} onClick={detail.refetch}>
             {detail.refreshing ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}{t("common.refresh")}
@@ -166,7 +167,7 @@ export function TrafficPage() {
               </Field>
             ) : null}
           </FieldGroup>
-          <span className="text-xs text-muted-foreground" role="status">{query.offset > 0 ? t("requests.historyUpdatesPaused") : t(`delivery.notifications.${list.notificationStatus}`)}</span>
+          <RefreshStatus status={list.notificationStatus} updatedAt={listData === null ? null : list.lastUpdatedAt} failed={list.error !== null} history={query.offset > 0} />
           <Button
             type="button"
             variant="outline"

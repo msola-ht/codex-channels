@@ -1,3 +1,4 @@
+import { RefreshStatus } from "@/components/metrics/refresh-status"
 import { useTranslation } from "@/hooks/use-translation"
 import { translateApiError } from "@/lib/i18n/translate"
 import { ErrorBanner } from "@/components/metrics/error-banner"
@@ -12,14 +13,14 @@ import { useMetricsQuery } from "@/hooks/use-metrics-query"
 export function ThreadsPage() {
   const { t } = useTranslation()
   const { query, update, pagination } = useMetricsQuery("all", "last")
-  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus } = useThreads(query)
+  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt } = useThreads(query)
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6" aria-busy={refreshing}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="shrink-0 text-xl font-semibold">{t("pages.threads")}</h1>
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs text-muted-foreground" role="status">{query.offset > 0 ? t("requests.historyUpdatesPaused") : t(`delivery.notifications.${notificationStatus}`)}</span>
+          <RefreshStatus status={notificationStatus} updatedAt={lastUpdatedAt} failed={error !== null} history={query.offset > 0} />
           <Button variant="outline" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
         </div>
       </div>

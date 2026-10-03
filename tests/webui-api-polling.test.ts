@@ -23,6 +23,7 @@ it("publishes thread summary and turns together and pauses their shared notifica
     const fetch = (id, signal) => new Promise((resolve, reject) => pending.push({ id, signal, resolve, reject }));
     const imports = {
       react: { useCallback: fn => fn },
+      "@/hooks/use-range-refresh": { useRangeRefresh() {} },
       "@/hooks/use-api": { useApi: fn => { loader = fn; return { data: null, loading: true, error: null, refetch() {} }; } },
       "@/hooks/use-queue-events": {
         useQueueSnapshot: load => ({ load }),
@@ -230,20 +231,26 @@ it("invalidates failed live snapshots through retries while preserving the defau
         return result;
       };
       const settle = () => new Promise(resolve => setImmediate(resolve));
-      render(); pending[0].resolve({ requests: ["old"] }); await settle();
+      Date.now = () => 1000;
+      assert.equal(render().lastUpdatedAt, null); Date.now = () => 1500; pending[0].resolve({ requests: ["old"] }); await settle();
       let view = render(); assert.deepEqual(view.data, { requests: ["old"] });
+      assert.equal(view.lastUpdatedAt, 1500); assert.equal(view.lastReadStartedAt, 1000); Date.now = () => 2000;
       view.refetch(); render(); pending[1].reject(new Error("unavailable")); await settle();
       view = render(); assert.ok(view.error);
       const expected = retainDataOnError ? { requests: ["old"] } : null;
       assert.deepEqual(view.data, expected);
+      assert.equal(view.lastUpdatedAt, retainDataOnError ? 1500 : null);
+      assert.equal(view.lastReadStartedAt, retainDataOnError ? 1000 : null);
       view.refetch(); view = render();
       assert.equal(view.loading, true); assert.equal(view.error, null); assert.deepEqual(view.data, expected);
       pending[2].resolve({ requests: ["new"] }); await settle();
       view = render(); assert.deepEqual(view.data, { requests: ["new"] });
+      assert.equal(view.lastUpdatedAt, 2000); Date.now = () => 3000;
       view.refetch(); render(); cleanup();
       assert.equal(pending[3].signal.aborted, true);
       pending[3].resolve({ requests: ["late"] }); await settle();
       assert.deepEqual(render().data, { requests: ["new"] });
+      assert.equal(render().lastUpdatedAt, 2000);
       mergeData = (previous, next) => previous?.revision > next.revision ? previous : next;
       render(); pending.at(-1).resolve({ revision: 2, requests: ["fresh"] }); await settle();
       view = render(); view.refetch(); render();

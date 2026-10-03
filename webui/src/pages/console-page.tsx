@@ -1,3 +1,4 @@
+import { RefreshStatus } from "@/components/metrics/refresh-status"
 import { useCallback, useState } from "react"
 import { RefreshCwIcon } from "lucide-react"
 
@@ -63,7 +64,7 @@ export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
           <p className="text-sm text-muted-foreground">{t("console.description")}</p>
         </div>
         <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto sm:flex-1">
-          <span className="text-xs text-muted-foreground" role="status">{t(`delivery.notifications.${dashboard.notificationStatus}`)}</span>
+          <RefreshStatus status={dashboard.notificationStatus} updatedAt={dashboard.lastUpdatedAt} failed={dashboard.error !== null} />
           <DashboardRangeSelector key={JSON.stringify(range)} query={range} onChange={onRangeChange} />
           <Button variant="outline" size="sm" disabled={refreshing} onClick={refreshDashboard}>
             {refreshing ? <Spinner data-icon="inline-start" aria-label={t("common.loading")} /> : <RefreshCwIcon data-icon="inline-start" />}

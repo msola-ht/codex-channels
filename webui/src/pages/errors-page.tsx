@@ -1,3 +1,4 @@
+import { RefreshStatus } from "@/components/metrics/refresh-status"
 import { ErrorsTable } from "@/components/requests/errors-table"
 
 import { ErrorBanner } from "@/components/metrics/error-banner"
@@ -15,7 +16,7 @@ import { cn } from "cn"
 
 export function ErrorsPage() {
   const { query, update } = useMetricsQuery("30d")
-  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus } = useErrors(query)
+  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt } = useErrors(query)
   const { offset, limit } = query
   const pageNumber = Math.floor(offset / limit) + 1
   const { t } = useTranslation()
@@ -28,7 +29,7 @@ export function ErrorsPage() {
           <p className="text-sm text-muted-foreground">{t("errorList.description")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs text-muted-foreground" role="status">{offset > 0 ? t("requests.historyUpdatesPaused") : t(`delivery.notifications.${notificationStatus}`)}</span>
+          <RefreshStatus status={notificationStatus} updatedAt={lastUpdatedAt} failed={error !== null} history={offset > 0} />
           <Button variant="outline" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
         </div>
       </div>

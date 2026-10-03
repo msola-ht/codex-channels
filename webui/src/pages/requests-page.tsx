@@ -1,3 +1,4 @@
+import { RefreshStatus } from "@/components/metrics/refresh-status"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { QueryFilters } from "@/components/metrics/query-filters"
@@ -14,7 +15,7 @@ export function RequestsPage() {
   const { t } = useTranslation()
   const state = useMetricsQuery("30d")
   const { query, update, sorting, onSortingChange } = state
-  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus } = useRequests(query)
+  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt } = useRequests(query)
   const exporter = useMetricsExport(query)
 
   return (
@@ -22,7 +23,7 @@ export function RequestsPage() {
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">{t("requests.title")}</h1>
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs text-muted-foreground" role="status">{query.offset > 0 ? t("requests.historyUpdatesPaused") : t(`delivery.notifications.${notificationStatus}`)}</span>
+          <RefreshStatus status={notificationStatus} updatedAt={lastUpdatedAt} failed={error !== null} history={query.offset > 0} />
           <Button variant="outline" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
           <Button variant="outline" disabled={exporter.pending || refreshing || error !== null} onClick={() => void exporter.download()}>
             {exporter.pending ? t("requests.exporting") : t("requests.export")}

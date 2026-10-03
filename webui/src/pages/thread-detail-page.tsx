@@ -1,3 +1,4 @@
+import { RefreshStatus } from "@/components/metrics/refresh-status"
 import { translateApiError } from "@/lib/i18n/translate"
 import { useTranslation } from "@/hooks/use-translation"
 import { Link, useParams } from "react-router"
@@ -21,7 +22,7 @@ export function ThreadDetailPage() {
   const { t } = useTranslation()
   const { id = "" } = useParams<{ id: string }>()
   const { query, update, pagination } = useMetricsQuery("all")
-  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus } = useThreadDetail(id, query)
+  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt } = useThreadDetail(id, query)
   const run = data?.run
   const turns = data?.turns
 
@@ -30,7 +31,7 @@ export function ThreadDetailPage() {
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold" title={shortThreadId(id) === id ? undefined : id}>{t("threads.heading", { id: shortThreadId(id) })}</h1>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground" role="status">{query.offset > 0 ? t("requests.historyUpdatesPaused") : t(`delivery.notifications.${notificationStatus}`)}</span>
+          <RefreshStatus status={notificationStatus} updatedAt={lastUpdatedAt} failed={error !== null} history={query.offset > 0} />
           <Button variant="outline" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
           <Button variant="outline" render={<Link to={metricsLink("/requests", query, { threadId: id })} />} nativeButton={false}>{t("threads.viewRequests")}</Button>
           <Button variant="outline" render={<Link to={metricsLink("/errors", query, { threadId: id })} />} nativeButton={false}>{t("threads.viewErrors")}</Button>
