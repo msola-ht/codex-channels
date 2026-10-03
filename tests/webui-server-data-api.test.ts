@@ -624,12 +624,26 @@ describe("webui server data API", () => {
     expect(runBody.latestTurn?.turnId).toBe("turn-2");
     expect(runBody.threadAggregate?.turnCount).toBe(2);
 
+    const timingStore = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    try {
+      timingStore.replaceThreadExecutions("thread-1", "deepseek", [
+        { turnId: "turn-1", durationMs: 0, recordedAtMs: Date.now() },
+        { turnId: "turn-2", durationMs: 71_000, recordedAtMs: Date.now() },
+      ]);
+    } finally { timingStore.close(); }
+    expect(await (await fetch(`${origin}/api/v1/threads/thread-1/run`)).json())
+      .toMatchObject({ sessionDurationMs: 71_000, latestTurn: { turnId: "turn-2", durationMs: 71_000 } });
+
     const turns = await fetch(`${origin}/api/v1/threads/thread-1/turns`);
     expect(turns.status).toBe(200);
     const turnsBody = await turns.json() as {
       turns: Array<{ turnId: string }>;
     };
     expect(turnsBody.turns).toHaveLength(2);
+    expect(turnsBody.turns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ turnId: "turn-1", durationMs: 0 }),
+      expect.objectContaining({ turnId: "turn-2", durationMs: 71_000 }),
+    ]));
   });
 
   it("sorts request records across server pages and aggregates errors", async () => {

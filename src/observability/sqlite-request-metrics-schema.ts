@@ -157,6 +157,24 @@ export const schemaMetadataSql = `
   );
 `;
 
+export const turnExecutionSchemaSql = `
+  CREATE TABLE thread_execution_state (
+    thread_id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    history_complete INTEGER NOT NULL CHECK (history_complete IN (0, 1))
+  );
+  CREATE TABLE turn_execution_metrics (
+    thread_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    duration_ms INTEGER CHECK (duration_ms >= 0 AND duration_ms <= 9007199254740991),
+    ordinal INTEGER NOT NULL,
+    recorded_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, turn_id)
+  );
+  CREATE INDEX turn_execution_metrics_order ON turn_execution_metrics (thread_id, ordinal);
+  CREATE INDEX turn_execution_metrics_retention ON turn_execution_metrics (recorded_at_ms);
+`;
+
 export const initialSchemaSql = `
   CREATE TABLE account_sources (
     source_id TEXT PRIMARY KEY,
@@ -196,6 +214,7 @@ export const initialSchemaSql = `
     ON subagent_turns (parent_thread_id, parent_turn_id);
   ${modelRequestMetricsTableSql}
   ${modelRequestMetricsIndexesSql}
+  ${turnExecutionSchemaSql}
   INSERT INTO schema_metadata (name, value) VALUES ('schema_version', ${schemaVersion});
 `;
 
@@ -210,7 +229,7 @@ export class ModelRequestMetricsSchemaError extends Error {
     const detail = options?.cause === undefined
       ? `版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
       : `Schema ${actualVersion} 结构不完整。`;
-    const remedy = actualVersion === 20 || actualVersion === 21 || actualVersion === 22 || actualVersion === 23 || actualVersion === 24 ? `codexc metrics upgrade --from ${actualVersion} --to 25 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
+    const remedy = [20, 21, 22, 23, 24, 25].includes(actualVersion) ? `codexc metrics upgrade --from ${actualVersion} --to 26 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
     super(
       `模型请求指标数据库${detail}请运行 ${remedy}`,
       options,
@@ -243,6 +262,8 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
     throw new ModelRequestMetricsSchemaError(value ?? 0, schemaVersion);
   }
   try {
+    database.prepare("SELECT thread_id, provider, history_complete FROM thread_execution_state LIMIT 0").all();
+    database.prepare("SELECT thread_id, turn_id, duration_ms, ordinal, recorded_at_ms FROM turn_execution_metrics LIMIT 0").all();
     const metricColumns = database.prepare("PRAGMA table_info(model_request_metrics)")
       .all().map((column) => (column as { name: string }).name);
     if (
@@ -278,6 +299,11 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
     `).all();
     const tableSql = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'model_request_metrics'").get()?.sql;
     const normalize = (text: string): string => text.replace(/\s+/gu, " ").trim();
+    for (const statement of turnExecutionSchemaSql.split(";").filter(sql => sql.trim())) {
+      const name = /CREATE (?:TABLE|INDEX) (\w+)/u.exec(statement)?.[1];
+      const actual = database.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name!)?.sql;
+      if (typeof actual !== "string" || normalize(actual) !== normalize(statement)) throw new Error("轮次耗时 Schema 结构不匹配");
+    }
     if (typeof tableSql !== "string" || !normalize(tableSql).includes(normalize(relayIdentityCheck))) {
       throw new Error("Relay 指标身份约束缺失");
     }

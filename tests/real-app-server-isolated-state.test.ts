@@ -14,6 +14,8 @@ import { parse } from "smol-toml";
 import pino from "pino";
 
 import { GatewayReconnectCoordinator } from "../src/bootstrap/gateway-reconnect-coordinator.js";
+import { TurnExecutionTracker } from "../src/bootstrap/turn-execution-tracker.js";
+import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import { BindingRestoreCoordinator } from "../src/bootstrap/binding-restore-coordinator.js";
 import { withOutputExecutionAdmission } from "../src/bootstrap/output-execution-admission.js";
 import { PersistentInteractionPort } from "../src/bootstrap/persistent-interaction-port.js";
@@ -1229,6 +1231,23 @@ contractSuite("isolated Codex App Server state contract", () => {
         2_000,
       );
       expect(completedTurnDurationMs).toBeGreaterThanOrEqual(0);
+      if (completedTurnDurationMs === undefined) throw new Error("官方完成事件缺少耗时");
+      const timingStore = new SqliteModelRequestMetricsStore(join(testRuntime, "turn-metrics.sqlite3"));
+      const timingErrors: unknown[] = [];
+      const timingTracker = new TurnExecutionTracker(ownerClient, timingStore, () => undefined, error => timingErrors.push(error));
+      try {
+        timingTracker.handle({ type: "turn.completed", threadId, turnId, status: "completed", error: null,
+          durationMs: completedTurnDurationMs }, "openai");
+        await timingTracker.settled();
+        expect(timingStore.turnExecutionDuration(threadId, turnId)).toBe(completedTurnDurationMs);
+        expect(timingStore.sessionExecutionDuration(threadId, turnId)).toBe(completedTurnDurationMs);
+        timingTracker.reset("openai");
+        expect(timingStore.sessionExecutionDuration(threadId)).toBeNull();
+        timingTracker.synchronize(threadId, "openai");
+        await timingTracker.settled();
+        expect(timingStore.sessionExecutionDuration(threadId, turnId)).toBe(completedTurnDurationMs);
+        expect(timingErrors).toEqual([]);
+      } finally { await timingTracker.stop(); timingStore.close(); }
       turnId = undefined;
     } finally {
       removeNotification();

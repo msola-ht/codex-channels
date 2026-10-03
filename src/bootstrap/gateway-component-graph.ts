@@ -142,6 +142,7 @@ import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { completionAccountStatus } from "./completion-account-status.js";
 import { mergeCompletionTiming } from "./completion-timing.js";
+import { TurnExecutionTracker } from "./turn-execution-tracker.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server-request.js";
@@ -157,6 +158,7 @@ import {
 export abstract class GatewayComponentGraph {
   private readonly transport: CodexTransport;
   private readonly codex: ProviderRoutingClient;
+  private readonly turnExecution: TurnExecutionTracker;
   private readonly primaryProvider: string;
   private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
@@ -374,6 +376,9 @@ export abstract class GatewayComponentGraph {
     );
     this.metricsEvents = configPath === undefined ? undefined : new QueueEventsServer(metricsEventsPath(configPath));
     this.accountSnapshotEvents = configPath === undefined ? undefined : new QueueEventsServer(accountSnapshotEventsPath(configPath));
+    this.turnExecution = new TurnExecutionTracker(this.codex, metricsStore,
+      () => this.metricsEvents?.changed(),
+      (error, threadId) => logger.warn({ err: error, threadId }, "轮次耗时记录或同步失败"));
     const metricsWriter = new BufferedModelRequestMetricsWriter(
       metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
@@ -944,6 +949,10 @@ export abstract class GatewayComponentGraph {
           const summary = metricsStore.threadTurnSummary(threadId, turnId);
           return mergeCompletionTiming(summary, turnId, current);
         },
+        executionTiming: (threadId, turnId) => ({
+          durationMs: metricsStore.turnExecutionDuration(threadId, turnId),
+          sessionDurationMs: metricsStore.sessionExecutionDuration(threadId, turnId),
+        }),
         taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
           let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
@@ -1051,6 +1060,10 @@ export abstract class GatewayComponentGraph {
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
+        if (coreEvent.type === "turn.completed" || coreEvent.type === "thread.reverted") {
+          const timingProvider = this.codex.knownProvider(coreEvent.threadId);
+          if (timingProvider) this.turnExecution.handle(coreEvent, timingProvider);
+        }
         this.asyncQuestions.handleInput(coreEvent);
         if (coreEvent.type === "mcp.status.updated"
           && (coreEvent.modelProvider === "openai"
@@ -1123,6 +1136,10 @@ export abstract class GatewayComponentGraph {
 
   private bindingRestoreCoordinator(): BindingRestoreCoordinator {
     this.bindingRestore ??= new BindingRestoreCoordinator({
+      restored: (threadId) => {
+        const provider = this.codex.knownProvider(threadId);
+        if (provider) this.turnExecution.synchronize(threadId, provider);
+      },
       codex: this.codex,
       router: this.router,
       output: this.output,
@@ -1248,6 +1265,7 @@ export abstract class GatewayComponentGraph {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
+        this.turnExecution.reset(provider);
         this.gatewayReconnectCoordinator().disconnected(error, provider);
       });
       const initialized = await this.codex.connect();
@@ -1469,6 +1487,7 @@ export abstract class GatewayComponentGraph {
       // notification has been reduced. Closing Surface first loses this tail.
       ["Inbound Event Bus", () => this.inbound.close({ requireDrained: true })],
       ["Derived Output Inputs", () => this.output.drain()],
+      ["Turn Execution Metrics", () => this.turnExecution.stop()],
       ["Subagent Terminals", () => this.subagentCompletion?.drain()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Account Snapshot Warmup", async () => {

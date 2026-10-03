@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { securePrivateFileSync } from "../runtime/private-file.mjs";
 import { SqliteModelRequestMetricsStore, upgradeRequestMetricsDatabase, restoreRequestMetricsDatabase, BufferedModelRequestMetricsWriter,
   type ModelRequestMetricSample } from "../src/observability/index.js";
-import { initialSchemaSql, relayMetricColumnDefinitions, relayMetricIndexesSql, metricStorageV20Columns, modelRequestMetricsTableSql, modelRequestMetricsIndexesSql,
+import { initialSchemaSql, turnExecutionSchemaSql, relayMetricColumnDefinitions, relayMetricIndexesSql, metricStorageV20Columns, modelRequestMetricsTableSql, modelRequestMetricsIndexesSql,
   modelRequestMetricsV24TableSql, modelRequestMetricsV23TableSql, modelRequestMetricsV21TableSql, modelRequestMetricsV22TableSql, modelRequestMetricsV20TableSql, modelRequestMetricsV20IndexesSql, schemaMetadataSql } from "../src/observability/sqlite-request-metrics-schema.js";
 import { sample } from "./request-metrics-fixtures.js";
 
@@ -14,11 +14,33 @@ const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const relay = (): ModelRequestMetricSample => ({ ...sample(), source: "relay", threadId: null, turnId: null,
   callerId: "caller-a", keyId: "key-a", credentialGeneration: 1, relayRequestId: "47d8c4b4-03af-457e-857e-7ab710d55163", deliveryStatus: "finished" });
-function fixture(version: 20 | 21 | 22 | 23 | 24 = 20) {
+
+it("rolls back a failed v25 timing-table migration and archives new timing facts before restoring v25", () => {
+  const { path, row } = fixture(25);
+  const execute = DatabaseSync.prototype.exec;
+  const spy = vi.spyOn(DatabaseSync.prototype, "exec").mockImplementation(function (this: DatabaseSync, sql: string) {
+    execute.call(this, sql);
+    if (sql === turnExecutionSchemaSql) throw new Error("fixture timing migration failure");
+  });
+  try { expect(() => upgradeRequestMetricsDatabase(path, true, 25)).toThrow("保留备份"); }
+  finally { spy.mockRestore(); }
+  const old = new DatabaseSync(path);
+  expect(old.prepare("SELECT * FROM model_request_metrics").get()).toEqual(row);
+  expect(old.prepare("SELECT name FROM sqlite_master WHERE name = 'turn_execution_metrics'").get()).toBeUndefined();
+  old.close();
+  const result = upgradeRequestMetricsDatabase(path, true, 25);
+  const store = new SqliteModelRequestMetricsStore(path);
+  store.replaceThreadExecutions("thread", "openai", [{ turnId: "turn", durationMs: 71_000, recordedAtMs: Date.now() }]);
+  store.close();
+  const restored = restoreRequestMetricsDatabase(path, result.backupPath!, result.backupSha256!, 25);
+  const archive = new SqliteModelRequestMetricsStore(restored.archivedPath, undefined, { readOnly: true });
+  expect(archive.sessionExecutionDuration("thread")).toBe(71_000); archive.close();
+});
+function fixture(version: 20 | 21 | 22 | 23 | 24 | 25 = 20) {
   const root = mkdtempSync(join(tmpdir(), "relay-upgrade-")); roots.push(root);
   const path = join(root, "metrics.sqlite3"); const database = new DatabaseSync(path); securePrivateFileSync(path);
-  database.exec(schemaMetadataSql + initialSchemaSql.replace(modelRequestMetricsTableSql, version === 20 ? modelRequestMetricsV20TableSql : version === 21 ? modelRequestMetricsV21TableSql : version === 22 ? modelRequestMetricsV22TableSql : version === 23 ? modelRequestMetricsV23TableSql : modelRequestMetricsV24TableSql)
-    .replace(modelRequestMetricsIndexesSql, version === 20 ? modelRequestMetricsV20IndexesSql : modelRequestMetricsIndexesSql).replace("'schema_version', 25", `'schema_version', ${version}`));
+  database.exec(schemaMetadataSql + initialSchemaSql.replace(turnExecutionSchemaSql, "").replace(modelRequestMetricsTableSql, version === 20 ? modelRequestMetricsV20TableSql : version === 21 ? modelRequestMetricsV21TableSql : version === 22 ? modelRequestMetricsV22TableSql : version === 23 ? modelRequestMetricsV23TableSql : version === 24 ? modelRequestMetricsV24TableSql : modelRequestMetricsTableSql)
+    .replace(modelRequestMetricsIndexesSql, version === 20 ? modelRequestMetricsV20IndexesSql : modelRequestMetricsIndexesSql).replace("'schema_version', 26", `'schema_version', ${version}`));
   database.exec("PRAGMA journal_mode = WAL");
   database.exec(`INSERT INTO model_request_metrics(provider, transport, response_format, operation, status,
     request_started_at_ms, response_completed_at_ms, recorded_at_ms, input_tokens, first_token_ms, total_duration_ms)
@@ -59,7 +81,7 @@ describe("explicit Relay metrics upgrade", () => {
     const current = new DatabaseSync(path);
     expect(current.prepare("SELECT seq FROM sqlite_sequence WHERE name='model_request_metrics'").get()).toBeUndefined(); current.close();
   });
-  it.each([21, 22, 23, 24] as const)("upgrades v%s, preserves deleted sequence IDs and archives Relay dumps on rollback", version => {
+  it.each([21, 22, 23, 24, 25] as const)("upgrades v%s, preserves deleted sequence IDs and archives Relay dumps on rollback", version => {
     const { path } = fixture(version);
     const previous = new DatabaseSync(path);
     previous.exec("UPDATE sqlite_sequence SET seq=100 WHERE name='model_request_metrics'"); previous.close();
@@ -112,7 +134,7 @@ describe("explicit Relay metrics upgrade", () => {
   });
   it("previews without changing bytes, preserves historical columns and makes a readable private backup", () => {
     const { path, row } = fixture(); const bytes = readFileSync(path);
-    expect(upgradeRequestMetricsDatabase(path)).toMatchObject({ changed: false, from: 20, to: 25, backupPath: null });
+    expect(upgradeRequestMetricsDatabase(path)).toMatchObject({ changed: false, from: 20, to: 26, backupPath: null });
     expect(readFileSync(path)).toEqual(bytes);
     const result = upgradeRequestMetricsDatabase(path, true);
     expect(result.changed).toBe(true); expect(result.backupSha256).toMatch(/^[a-f0-9]{64}$/u);

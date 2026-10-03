@@ -609,6 +609,8 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
         parentThreadId: subagent.parentThreadId,
         parentTurnId: subagent.parentTurnId,
         latestTurn: summary.latestTurn,
+        sessionDurationMs: summary.sessionDurationMs,
+        latestExecution: summary.latestExecution,
         threadAggregate: summary.threadAggregate,
       });
       return;

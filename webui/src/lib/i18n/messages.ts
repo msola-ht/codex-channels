@@ -261,6 +261,11 @@ const zh = {
     "fastMismatch": "请求使用 Fast，响应回报层级：{tier}。"
   },
   threads: {
+    "turnDuration": "本轮耗时",
+    "latestDuration": "最近一轮耗时",
+    "totalDuration": "会话总耗时",
+    "durationHint": "官方整轮执行耗时，包含模型处理与工具执行；未提供时显示 —。",
+    "totalDurationHint": "当前会话保留轮次的执行耗时之和，不受上方筛选影响，不叠加子代理；历史未补齐或耗时缺失时显示 —。",
     "main": "主会话",
     "subagent": "子代理",
     "agentPath": "子代理 · {path}",
@@ -993,6 +998,11 @@ const en: Messages = {
     "fastMismatch": "Request used Fast; the response reported tier: {tier}."
   },
   threads: {
+    "turnDuration": "Turn duration",
+    "latestDuration": "Latest turn duration",
+    "totalDuration": "Thread total duration",
+    "durationHint": "Official execution time, including model processing and tools. Unavailable values appear as —.",
+    "totalDurationHint": "Execution time summed over retained turns in this thread, independent of filters and excluding subagents. Shown as — until history is complete and all durations are available.",
     "main": "Main thread",
     "subagent": "Subagent",
     "agentPath": "Subagent · {path}",

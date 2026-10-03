@@ -41,6 +41,7 @@ it("fences new execution but persists every accepted inbound result before closi
   const graph = Object.assign(Object.create(GatewayComponentGraph.prototype) as { shutdownComponents(): Promise<void> }, {
     bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
     channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
+    turnExecution: { stop: async () => { expect(reduced).toBe(100); } },
     inbound, output, codex: { close }, bindings: { close }, logger,
   });
   try {
@@ -79,6 +80,7 @@ it.each(["queued", "settling", "checkpoint"] as const)("persists derived subagen
   const graph = Object.assign(Object.create(GatewayComponentGraph.prototype) as { shutdownComponents(): Promise<void> }, {
     bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
     channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
+    turnExecution: { stop: close },
     subagentCompletion: tracker, inbound, output, codex: { close }, bindings: { close }, logger,
   });
   try {

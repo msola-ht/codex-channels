@@ -183,6 +183,7 @@ export interface ThreadsResponse extends MetricsPageSummary {
 }
 
 export interface TurnSummary {
+  durationMs?: number | null
   provider: string | null
   model: string | null
   reasoningEffort: string | null
@@ -198,6 +199,8 @@ export interface TurnSummary {
 }
 
 export interface ThreadRunResponse {
+  latestExecution?: { turnId: string; durationMs: number | null } | null
+  sessionDurationMs?: number | null
   generatedAt: string
   threadId: string
   agentPath: string | null

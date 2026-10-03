@@ -476,6 +476,7 @@ describe("Feishu output renderer", () => {
       "- 上下文压缩：2 次",
       "- Git 分支：feature/weixin-surface",
       "- OpenAI Credits：未提供",
+      "- 总耗时：未提供",
       "",
       "### 账户状态",
       "- 周限：剩余 63%",

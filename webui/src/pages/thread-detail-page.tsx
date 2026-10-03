@@ -9,12 +9,13 @@ import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { QueryFilters } from "@/components/metrics/query-filters"
 import { QuerySummary } from "@/components/metrics/query-summary"
 import { ThreadRunSummary } from "@/components/threads/thread-run-summary"
+import { StatCard } from "@/components/metrics/stat-card"
 import { TurnTable } from "@/components/threads/turn-table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useThreadDetail } from "@/hooks/use-thread-detail"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
-import { shortThreadId } from "@/lib/format"
+import { shortThreadId, formatElapsedDuration } from "@/lib/format"
 import { metricsLink } from "@/lib/metrics-query"
 import { cn } from "cn"
 
@@ -49,6 +50,10 @@ export function ThreadDetailPage() {
             </div>
           ) : null}
           <QuerySummary loading={loading} aggregate={turns.aggregate} range={turns.range} turns={turns.turnCount} />
+          <div className={cn("grid shrink-0 gap-4 sm:grid-cols-2", loading && "invisible")} inert={loading} aria-hidden={loading || undefined}>
+            <StatCard title={t("threads.latestDuration")} value={run.latestExecution?.durationMs == null ? "—" : formatElapsedDuration(run.latestExecution.durationMs)} description={t("threads.durationHint")} />
+            <StatCard title={t("threads.totalDuration")} value={run.sessionDurationMs == null ? "—" : formatElapsedDuration(run.sessionDurationMs)} description={t("threads.totalDurationHint")} />
+          </div>
           <p className="shrink-0 text-sm text-muted-foreground">{t("threads.turnHint")}</p>
           <details className={cn("shrink-0", loading && "invisible")} inert={loading} aria-hidden={loading || undefined}>
             <summary className="cursor-pointer text-sm text-muted-foreground">{t("threads.history")}</summary>

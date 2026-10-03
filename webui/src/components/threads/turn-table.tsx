@@ -17,6 +17,7 @@ import {
 } from "@/components/metrics/data-table"
 import {
   formatModelName,
+  formatElapsedDuration,
   formatTime,
   formatTokens,
 } from "@/lib/format"
@@ -31,6 +32,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
   const { t } = useTranslation()
   const columnLabels: Record<string, string> = {
     turn: t("metrics.turn"),
+    duration: t("threads.turnDuration"),
     time: t("metrics.time"),
     provider: t("metrics.provider"),
     model: t("metrics.model"),
@@ -183,11 +185,17 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
         </span>
       ),
     },
+    {
+      id: "duration",
+      enableSorting: false,
+      header: () => t("threads.turnDuration"),
+      cell: ({ row }) => row.original.durationMs == null ? "—" : formatElapsedDuration(row.original.durationMs),
+    },
   ], [threadId, query, t])
 
   return (
     <DataTable
-      numericColumnIds={["requests", "failures", "input", "output", "compact"]}
+      numericColumnIds={["requests", "failures", "input", "output", "compact", "duration"]}
       loading={loading}
       title={t("threads.turnList")}
       description={({ total, matched, pageSize }) =>

@@ -95,7 +95,8 @@ describe("WebUI metrics table presentation", () => {
           if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
           if (id.endsWith("/src/hooks/use-official-account-sources.ts")) return "export function useOfficialAccountSources() { return globalThis.fixtureAccounts; }";
           if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi() { return globalThis.fixtureApiState; }";
-          if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {} }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
+          if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {}, pagination() { return globalThis.fixturePagination; } }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
+          if (id.endsWith("/src/hooks/use-thread-detail.ts")) return _code.replace("export function useThreadDetail(", "function realUseThreadDetail(") + " export function useThreadDetail(...args) { return globalThis.fixtureThreadDetail ?? realUseThreadDetail(...args); }";
           if (id.endsWith("/src/components/metrics/query-filters.tsx")) return "import { createElement } from 'react'; export function QueryFilters(props) { return createElement('div', { 'data-query-filters': true, 'data-thread-filters': props.showThreadFilters }); }";
         } }],
       });
@@ -106,6 +107,7 @@ describe("WebUI metrics table presentation", () => {
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
         const { TurnTable } = await server.ssrLoadModule("/src/components/threads/turn-table.tsx");
+        const { ThreadDetailPage } = await server.ssrLoadModule("/src/pages/thread-detail-page.tsx");
         const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
         const { TrafficDetail } = await server.ssrLoadModule("/src/components/traffic/traffic-detail.tsx");
         const { ErrorBanner } = await server.ssrLoadModule("/src/components/metrics/error-banner.tsx");
@@ -248,7 +250,19 @@ describe("WebUI metrics table presentation", () => {
           threads: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null,
             parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination }),
           turns: render(TurnTable, { turns: [{ ...common, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
+          turnsDuration: render(TurnTable, { turns: [{ ...common, turnId: "turn-1", durationMs: 71_000 }], threadId: "thread-1", query: {}, pagination }),
+          turnsDurationZero: render(TurnTable, { turns: [{ ...common, turnId: "turn-1", durationMs: 0 }], threadId: "thread-1", query: {}, pagination }, "en"),
         };
+        globalThis.fixtureQuery = {};
+        globalThis.fixturePagination = pagination;
+        globalThis.fixtureThreadDetail = { error: null, loading: false, refreshing: false, refetch: noop,
+          data: { run: { latestTurn: { ...common, turnId: "turn-1", durationMs: 71_000 }, latestExecution: { turnId: "turn-1", durationMs: 71_000 }, sessionDurationMs: 120_000, threadAggregate: { ...common, turnCount: 2 } },
+            turns: { aggregate: common, range: { name: "all" }, turns: [], turnCount: 2 } } };
+        result.threadTiming = render(ThreadDetailPage, {});
+        result.threadTimingEn = render(ThreadDetailPage, {}, "en");
+        globalThis.fixtureThreadDetail.data.run.sessionDurationMs = null;
+        result.threadTimingMissing = render(ThreadDetailPage, {});
+        delete globalThis.fixtureThreadDetail;
         for (const provider of ["clp-main", "openai"]) {
           const model = "cline-pass/deepseek-v4.1-flash";
           result["threadsModel-" + provider] = render(ThreadTable, { threads: [{ ...common, provider, model,
@@ -702,6 +716,15 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("groups request identity, usage, performance and detail columns", () => {
+    expect(markup.turnsDuration).toContain("本轮耗时");
+    expect(markup.turnsDuration).toContain("1 min 11 s");
+    expect(markup.turnsDurationZero).toContain("Turn duration");
+    expect(markup.turnsDurationZero).toContain("0 ms");
+    expect(markup.threadTiming).toContain("会话总耗时");
+    expect(markup.threadTiming).toContain("1 min 11 s");
+    expect(markup.threadTiming).toContain("2 min");
+    expect(markup.threadTimingEn).toContain("Thread total duration");
+    expect(markup.threadTimingMissing).not.toContain("2 min");
     expect(headers(markup.requests!)).toEqual([
       "记录时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
       "首 Token", "请求耗时", "来源", "请求详情",
@@ -765,6 +788,7 @@ describe("WebUI metrics table presentation", () => {
     ]);
     expect(headers(markup.turns!)).toEqual([
       "时间", "轮次", "提供商", "模型", "请求", "失败", "输入 Token", "输出 Token",
+      "本轮耗时",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
   });

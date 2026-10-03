@@ -16,6 +16,7 @@ const turnCompletedPanel = [
   "<b>当前会话</b>",
   "• <b>Session：</b>测试会话",
   "• <b>Session ID：</b>thread-1",
+  "• <b>总耗时：</b>未提供",
 ].join("\n");
 
 class FakeTelegramApi {
@@ -867,6 +868,7 @@ describe("TelegramOutbox", () => {
         "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
+        "• <b>总耗时：</b>未提供",
       ].join("\n"),
     ]);
     expect(api.actions).toEqual([]);
@@ -1753,6 +1755,7 @@ describe("TelegramOutbox", () => {
         "• <b>上下文压缩：</b>2 次",
         "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
         "• <b>Git 分支：</b>feature/weixin-surface",
+        "• <b>总耗时：</b>未提供",
         "",
         "<b>账户状态</b>",
         "• <b>周限：</b>剩余 58%",
@@ -1784,6 +1787,7 @@ describe("TelegramOutbox", () => {
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
         "• <b>Git 分支：</b>feature/weixin-surface",
+        "• <b>总耗时：</b>未提供",
       ].join("\n"),
     ]);
   });

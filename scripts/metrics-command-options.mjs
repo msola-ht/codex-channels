@@ -55,8 +55,8 @@ export function metricsFilterOptions(options) {
 }
 
 export const metricsCommandUsage = Object.freeze({
-  upgrade: "用法：codexc metrics upgrade --from 20|21|22|23|24 --to 25 [--apply]",
-  rollback: "用法：codexc metrics rollback --from 25 --to 20|21|22|23|24 --backup PATH --sha256 HASH --apply",
+  upgrade: "用法：codexc metrics upgrade --from 20|21|22|23|24|25 --to 26 [--apply]",
+  rollback: "用法：codexc metrics rollback --from 26 --to 20|21|22|23|24|25 --backup PATH --sha256 HASH --apply",
   run: "用法：codexc metrics run <Thread ID> [--format markdown|json|csv] [--stdout]",
   turns: `用法：codexc metrics turns <Thread ID> ${rangeUsage} ${filtersUsage} [--turn ID] [--format markdown|json|csv] [--stdout]`,
   threads: `用法：codexc metrics threads ${rangeUsage} ${filtersUsage} [--thread ID] [--turn ID] [--format markdown|json|csv] [--stdout]`,
@@ -186,7 +186,7 @@ export function parseMetricsUpgradeOptions(command, args) {
     if (options[key] !== undefined || !value || value.startsWith("--")) throw new Error(metricsCommandUsage[command]);
     options[key] = value;
   }
-  if ((command === "upgrade" ? !["20", "21", "22", "23", "24"].includes(options.from) || options.to !== "25" : options.from !== "25" || !["20", "21", "22", "23", "24"].includes(options.to))
+  if ((command === "upgrade" ? !["20", "21", "22", "23", "24", "25"].includes(options.from) || options.to !== "26" : options.from !== "26" || !["20", "21", "22", "23", "24", "25"].includes(options.to))
     || command === "rollback" && (!options.apply || !options.backup || !/^[a-f0-9]{64}$/u.test(options.sha256 ?? ""))) throw new Error(metricsCommandUsage[command]);
   return options;
 }

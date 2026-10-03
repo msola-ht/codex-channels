@@ -16,7 +16,7 @@
   失效的 `unauthorized` 只以窄分类传递到完成事件并由共享 Surface 展示层生成固定提示；模型代理提供时，Core 把稳定请求统计输入
   交给 `turn-timing-accumulator.ts`，不读取 SQLite。完成卡片消费官方 Turn 总耗时以及请求结果、
   Token 与压缩摘要，以及组合层从指标库恢复的单次响应用量汇总与缺失计数；上游 `upstreamTtftMs` 仅保留内部原始统计。统计摘要不计算模型请求聚合耗时、
-  本地首段回复延迟或 TPS；完成卡仅展示官方整轮耗时；
+  本地首段回复延迟或 TPS；完成卡展示官方整轮耗时，以及组合层从官方历史恢复的会话累计执行耗时；
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
   不污染最终完成状态，Thread 与全局 warning 分开路由；MCP OAuth 完成结果按 Thread 精确投递，
   无 Thread 的结果只广播给相同 Provider 的会话。

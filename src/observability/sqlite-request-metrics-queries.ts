@@ -445,8 +445,13 @@ export class SqliteRequestMetricsQueries {
     `).get(threadId) as unknown as TurnSummaryRow;
     return {
       threadId,
+      latestExecution: this.reader.prepare(`SELECT turn_id AS turnId, duration_ms AS durationMs
+        FROM turn_execution_metrics WHERE thread_id = ? ORDER BY ordinal DESC LIMIT 1`).get(threadId) as
+        { turnId: string; durationMs: number | null } | undefined ?? null,
+      sessionDurationMs: this.sessionExecutionDuration(threadId),
       latestTurn: turn === undefined ? null : {
         ...toStoredTurnSummary(turn),
+        durationMs: this.turnExecutionDuration(threadId, latestTurn!.turn_id),
         responseUsage: this.turnResponseUsage(threadId, latestTurn!.turn_id),
       },
       threadAggregate: threadAggregate.request_count === 0
@@ -539,6 +544,7 @@ export class SqliteRequestMetricsQueries {
     const row = this.queryThreadTurnSummary(threadId, turnId);
     return row === undefined ? null : {
       ...toStoredTurnSummary(row),
+      durationMs: this.turnExecutionDuration(threadId, turnId),
       responseUsage: this.turnResponseUsage(threadId, turnId),
     };
   }
@@ -547,6 +553,29 @@ export class SqliteRequestMetricsQueries {
     return summarizeResponseUsage(this.reader.iterateRows(`${scopeSql}
       SELECT response_usage_amount FROM scoped WHERE provider = 'openai'
     `, ...parameters) as Iterable<{ response_usage_amount: string | null }>);
+  }
+
+  turnExecutionDuration(threadId: string, turnId: string): number | null {
+    this.reader.requireOpen();
+    validateThreadId(threadId, "Thread ID");
+    validateThreadId(turnId, "Turn ID");
+    const row = this.reader.prepare("SELECT duration_ms FROM turn_execution_metrics WHERE thread_id = ? AND turn_id = ?")
+      .get(threadId, turnId) as { duration_ms: number | null } | undefined;
+    return row?.duration_ms ?? null;
+  }
+
+  sessionExecutionDuration(threadId: string, throughTurnId?: string): number | null {
+    this.reader.requireOpen();
+    validateThreadId(threadId, "Thread ID");
+    if (throughTurnId !== undefined) validateThreadId(throughTurnId, "Turn ID");
+    const row = this.reader.prepare(`SELECT TOTAL(duration_ms) AS duration_ms,
+      COUNT(*) AS total, COUNT(duration_ms) AS known FROM turn_execution_metrics
+      WHERE thread_id = ? AND EXISTS (SELECT 1 FROM thread_execution_state WHERE thread_id = ? AND history_complete = 1)
+      ${throughTurnId === undefined ? "" : "AND ordinal <= (SELECT ordinal FROM turn_execution_metrics WHERE thread_id = ? AND turn_id = ?)"}`)
+      .get(threadId, threadId, ...(throughTurnId === undefined ? [] : [threadId, throughTurnId])) as {
+        duration_ms: number | null; total: number; known: number;
+      };
+    return row.total > 0 && row.total === row.known && Number.isSafeInteger(row.duration_ms) ? row.duration_ms : null;
   }
 
   private turnResponseUsage(threadId: string, turnId: string): ResponseUsageSummary | null {
@@ -631,6 +660,7 @@ export class SqliteRequestMetricsQueries {
       ...page,
       turns: rows.map((row) => ({
         ...toStoredTurnSummary(row),
+        durationMs: row.duration_ms,
         recordedAtMs: row.recorded_at_ms,
       })),
     };
@@ -710,14 +740,17 @@ export class SqliteRequestMetricsQueries {
         GROUP BY ${group}
       )
       SELECT grouped.*, latest.provider, latest.model, latest.reasoning_effort,
+        ${group === "turn_id" ? "timing.duration_ms" : "NULL AS duration_ms"},
         subagent.agent_path, subagent.parent_thread_id, subagent.parent_turn_id
       FROM grouped
       JOIN model_request_metrics AS latest ON latest.id = grouped.latest_id
+      ${group === "turn_id" ? "LEFT JOIN turn_execution_metrics AS timing ON timing.thread_id = grouped.thread_id AND timing.turn_id = grouped.turn_id" : ""}
       LEFT JOIN subagent_threads AS subagent ON subagent.thread_id = grouped.thread_id
       ORDER BY ${sortColumn} ${direction}, grouped.${group} ${direction}
       LIMIT ? OFFSET ?
     `).all(...scope.params, query.limit, offset) as unknown as Array<TurnSummaryRow & CacheUsageRow & {
       thread_id: string;
+      duration_ms: number | null;
       first_request_started_at_ms: number;
       recorded_at_ms: number;
       agent_path: string | null;

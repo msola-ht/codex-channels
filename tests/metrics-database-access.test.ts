@@ -75,7 +75,7 @@ describe("model request metrics database access", () => {
     `], { cwd: process.cwd(), encoding: "utf8", env: environment });
     expect(result.status).toBe(0);
     expect(result.stdout).not.toContain("metrics reset");
-    expect(result.stdout).toContain(version === 20 || version === 21 || version === 22 || version === 23 || version === 24 ? `--from ${version} --to 25` : "勿删除数据库");
+    expect(result.stdout).toContain(version === 20 || version === 21 || version === 22 || version === 23 || version === 24 || version === 25 ? `--from ${version} --to 26` : "勿删除数据库");
     const database = new DatabaseSync(databasePath, { readOnly: true });
     expect(database.prepare("SELECT value FROM schema_metadata WHERE name='schema_version'").get()?.value).toBe(version);
     expect(database.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get()?.count).toBe(1); database.close();
