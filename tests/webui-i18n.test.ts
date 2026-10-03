@@ -87,6 +87,9 @@ describe("WebUI 界面文案语言切换", () => {
         const { LanguageContext, useLanguage } = await server.ssrLoadModule("/src/hooks/language-context.ts");
         const { LanguageToggle } = await server.ssrLoadModule("/src/components/metrics/language-toggle.tsx");
         const { translate, translateApiError } = await server.ssrLoadModule("/src/lib/i18n/translate.ts");
+        for (const language of ["zh", "en"]) for (const code of ["traffic_exchange_not_found", "traffic_session_not_found", "traffic_label_not_found"]) {
+          if (translateApiError(key => translate(language, key), "private-path", code) !== translate(language, "errors.notFound")) throw new Error("Missing traffic error translation");
+        }
         const { messages } = await server.ssrLoadModule("/src/lib/i18n/messages.ts");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
         const { TurnTable } = await server.ssrLoadModule("/src/components/threads/turn-table.tsx");
@@ -281,8 +284,8 @@ describe("WebUI 界面文案语言切换", () => {
         globalThis.fixtureTrafficQuery = { query: { id: null, limit: 50, offset: 0 }, update: noop };
         globalThis.fixtureManagementTasks = { tasks: [], loading: false, error: null, saving: false,
           pendingPreview: null, actionError: null, run: noop, refetch: noop, confirm: noop, cancelPending: noop };
-        globalThis.fixtureTrafficDetail = { displayData: null, loading: false, error: null, errorCode: null, refetch: noop };
-        globalThis.fixtureTrafficList = { data: trafficListBase, loading: false, error: null, errorCode: null,
+        globalThis.fixtureTrafficDetail = { displayData: null, loading: false, refreshing: false, notificationStatus: "live", error: null, errorCode: null, refetch: noop };
+        globalThis.fixtureTrafficList = { data: trafficListBase, loading: false, refreshing: false, notificationStatus: "live", error: null, errorCode: null,
           refetch: noop };
         const trafficPageEn = render(TrafficPage, {}, "en");
         globalThis.fixtureTrafficList = { ...globalThis.fixtureTrafficList, data: { ...trafficListBase, enabled: false } };

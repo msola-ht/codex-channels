@@ -79,6 +79,8 @@ export function RequestsTable({
 }) {
   const { t, language } = useTranslation()
   const [selected, setSelected] = React.useState<RequestRecord | null>(null)
+  const currentSelected = selected === null ? null : records.find(record => record.id === selected.id) ?? selected
+  if (currentSelected !== selected) setSelected(currentSelected)
   const opener = React.useRef<HTMLElement | null>(null)
   const openRequest = React.useCallback((record: RequestRecord) => {
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -406,7 +408,7 @@ export function RequestsTable({
       <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-xl overflow-y-auto" closeLabel={t("common.close")}
         finalFocus={() => opener.current?.isConnected ? opener.current : true}>
         <SheetHeader><SheetTitle>{t("requestDetail.title")}</SheetTitle><SheetDescription>{t("requestDetail.description")}</SheetDescription></SheetHeader>
-        <div className="px-4 pb-4">{selected === null ? null : <RequestDetail record={selected} />}</div>
+        <div className="px-4 pb-4">{currentSelected === null ? null : <RequestDetail record={currentSelected} />}</div>
       </SheetContent>
     </Sheet>
     </>

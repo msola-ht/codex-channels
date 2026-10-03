@@ -69,6 +69,14 @@ export const watchManagementTasks = (signal: AbortSignal, receive: (event: Queue
 export const watchRequestMetrics = (signal: AbortSignal, receive: (event: QueueChangeEvent) => void) => watchQueue("metrics/events", signal, receive)
 export const watchAccountSnapshots = (signal: AbortSignal, receive: (event: QueueChangeEvent) => void) => watchQueue("accounts/events", signal, receive)
 
+export function watchTraffic(query: { label?: string; session?: string; detail?: boolean }, signal: AbortSignal, receive: (event: QueueChangeEvent) => void) {
+  const params = new URLSearchParams()
+  if (query.label !== undefined) params.set("label", query.label)
+  if (query.session !== undefined) params.set("session", query.session)
+  if (query.detail) params.set("detail", "1")
+  return watchQueue(`traffic/events?${params}`, signal, receive)
+}
+
 /** Fetch-based SSE keeps credentials in the Authorization header, never in the URL. */
 async function watchQueue(path: string, signal: AbortSignal, receive: (event: QueueChangeEvent) => void): Promise<void> {
   const controller = new AbortController()
@@ -78,7 +86,7 @@ async function watchQueue(path: string, signal: AbortSignal, receive: (event: Qu
     const headers = new Headers({ accept: "text/event-stream" })
     const token = getToken()
     if (token !== null) headers.set("authorization", `Bearer ${token}`)
-    const response = await fetch(`${API_PREFIX}/${path === "metrics/events" || path === "accounts/events" ? path : `management/${path}`}`, { headers, cache: "no-store", signal: AbortSignal.any([signal, controller.signal]) })
+    const response = await fetch(`${API_PREFIX}/${path === "metrics/events" || path === "accounts/events" || path.startsWith("traffic/events?") ? path : `management/${path}`}`, { headers, cache: "no-store", signal: AbortSignal.any([signal, controller.signal]) })
     if (response.status === 401) unauthorizedHandler?.()
     if (!response.ok) throw new ApiClientError("Queue notifications unavailable", response.status, path.startsWith("accounts/") ? "account_notifications_unavailable" : path.startsWith("metrics/") ? "metrics_notifications_unavailable" : path.startsWith("tasks/") ? "task_notifications_unavailable" : path.startsWith("relay/") ? "relay_unavailable" : "delivery_unavailable")
     if (!response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body) throw new Error("Invalid queue stream")

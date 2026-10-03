@@ -5,6 +5,7 @@ import type { QueueChangeEvent } from "@/lib/types"
 /** Notification subscription survives reads and confirmations; only invalidations are deferred. */
 export interface QueueSnapshotRead {
   confirmed: number
+  attempted: number
   completedAt: number
   failed: boolean
   failures: number
@@ -20,7 +21,7 @@ export function useQueueSnapshot<T>(fetchSnapshot: (signal?: AbortSignal) => Pro
     const revision = latest.current
     try {
       const snapshot = await fetchSnapshot(signal)
-      if (!signal?.aborted) setRead({ confirmed: revision, completedAt: Date.now(), failed: false, failures: 0, retryable: false, retryAt: 0 })
+      if (!signal?.aborted) setRead({ confirmed: revision, attempted: revision, completedAt: Date.now(), failed: false, failures: 0, retryable: false, retryAt: 0 })
       return snapshot
     } catch (error) {
       if (!signal?.aborted) {
@@ -30,7 +31,7 @@ export function useQueueSnapshot<T>(fetchSnapshot: (signal?: AbortSignal) => Pro
         setRead(previous => {
           const failures = (previous?.failures ?? 0) + 1
           const completedAt = Date.now()
-          return { confirmed: previous?.confirmed ?? 0, completedAt, failed: true, failures, retryable,
+          return { confirmed: previous?.confirmed ?? 0, attempted: revision, completedAt, failed: true, failures, retryable,
             retryAt: completedAt + (limited ? 60_000 : Math.min(8_000, 2_000 * 2 ** Math.min(failures - 1, 2))) }
         })
       }
@@ -41,10 +42,12 @@ export function useQueueSnapshot<T>(fetchSnapshot: (signal?: AbortSignal) => Pro
 }
 
 export function useQueueEvents(refetch: () => void, loading: boolean, enabled: boolean,
-  latest: RefObject<number>, read: QueueSnapshotRead | null, watch: (signal: AbortSignal, receive: (event: QueueChangeEvent) => void) => Promise<void>): "connecting" | "live" | "reconnecting" | "paused" | "retrying" | "stale" {
+  latest: RefObject<number>, read: QueueSnapshotRead | null, watch: ((signal: AbortSignal, receive: (event: QueueChangeEvent) => void) => Promise<void>) | null,
+  retryOnChange = false): "connecting" | "live" | "reconnecting" | "paused" | "retrying" | "stale" {
   const [status, setStatus] = useState<"connecting" | "live" | "reconnecting" | "paused">("connecting")
   const [revision, setRevision] = useState(0)
   useEffect(() => {
+    if (watch === null) { setStatus("paused"); return }
     let stopped = false
     let controller: AbortController | undefined
     let retry: ReturnType<typeof setTimeout> | undefined
@@ -97,16 +100,18 @@ export function useQueueEvents(refetch: () => void, loading: boolean, enabled: b
     }
   }, [latest, watch])
   const needsRefresh = revision > (read?.confirmed ?? 0)
+  const retryChangedSnapshot = retryOnChange && revision > (read?.attempted ?? 0)
   useEffect(() => {
     if (!enabled || loading || !["live", "reconnecting"].includes(status)) return
-    if (read?.failed && (!read.retryable || read.failures > 3)) return
+    if (read?.failed && (!read.retryable || read.failures > 3)
+      && !retryChangedSnapshot) return
     if (!needsRefresh && !read?.failed) return
     // Event-driven throttling, not polling: no timer remains once the snapshot catches up.
     // Reserve headroom for content reads and other management pages (120 shared reads/minute).
     const due = Math.max((read?.completedAt ?? 0) + 2_000, read?.retryAt ?? 0)
     const timer = setTimeout(refetch, Math.max(250, due - Date.now()))
     return () => clearTimeout(timer)
-  }, [refetch, loading, enabled, needsRefresh, status, read])
+  }, [refetch, loading, enabled, needsRefresh, status, read, retryChangedSnapshot])
   return status === "live" && read?.failed
     ? read.retryable && read.failures <= 3 ? "retrying" : "stale"
     : status

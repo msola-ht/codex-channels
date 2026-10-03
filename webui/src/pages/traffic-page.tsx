@@ -73,9 +73,10 @@ export function TrafficPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground" role="status">{query.traceOffset > 0 ? t("requests.historyUpdatesPaused") : t(`delivery.notifications.${detail.notificationStatus}`)}</span>
           {requestsReturnTo === null ? null : <Button variant="outline" size="sm" render={<Link to={requestsReturnTo} />} nativeButton={false}>{t("requestDetail.back")}</Button>}
-          <Button type="button" variant="outline" size="sm" disabled={detail.loading} onClick={detail.refetch}>
-            {detail.loading ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}{t("common.refresh")}
+          <Button type="button" variant="outline" size="sm" disabled={detail.refreshing} onClick={detail.refetch}>
+            {detail.refreshing ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}{t("common.refresh")}
           </Button>
           <Button
             type="button"
@@ -85,7 +86,7 @@ export function TrafficPage() {
           >{t("traffic.backToList")}</Button>
           </div>
         </div>
-        <ErrorBanner error={translateApiError(t, detail.error, detail.errorCode)} onRetry={detail.refetch} pending={detail.loading} />
+        <ErrorBanner error={translateApiError(t, detail.error, detail.errorCode)} onRetry={detail.refetch} pending={detail.refreshing} />
         {detailView === null ? detail.error !== null ? null : <PageSkeleton rows={6} /> : (
               <TrafficDetail
                 key={`${detailView.label}:${detailView.session}:${detailView.exchange.id}`}
@@ -165,21 +166,22 @@ export function TrafficPage() {
               </Field>
             ) : null}
           </FieldGroup>
+          <span className="text-xs text-muted-foreground" role="status">{query.offset > 0 ? t("requests.historyUpdatesPaused") : t(`delivery.notifications.${list.notificationStatus}`)}</span>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            disabled={list.loading}
+            disabled={list.refreshing}
             onClick={() => list.refetch()}
           >
-            {list.loading ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
-            {list.loading ? t("common.refreshing") : t("common.refresh")}
+            {list.refreshing ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
+            {list.refreshing ? t("common.refreshing") : t("common.refresh")}
           </Button>
           <TrafficCleanupControls tasks={tasks} onCompleted={list.refetch} />
         </div>
       </div>
 
-      <ErrorBanner error={translateApiError(t, list.error, list.errorCode)} onRetry={list.refetch} pending={list.loading} />
+      <ErrorBanner error={translateApiError(t, list.error, list.errorCode)} onRetry={list.refetch} pending={list.refreshing} />
       {list.error !== null && query.label !== undefined ? (
         <Button
           type="button"
@@ -211,7 +213,7 @@ export function TrafficPage() {
         </p>
       ) : null}
 
-      {list.error !== null ? null : listData === null ? <PageSkeleton rows={8} /> : (
+      {listData === null ? list.error !== null ? null : <PageSkeleton rows={8} /> : (
             <TrafficTable
               description={`${listData.label ?? t("traffic.allProviders")} · ${listData.session === null ? t("traffic.allSessionsCount", { count: listData.sessions.length }) : t("traffic.sessionScope", { name: listData.session })}`}
               pagination={{ mode: "server", pageNumber, pageSize: query.limit, pageSizeOptions: trafficPageSizeOptions, serverTotal: listData.total,

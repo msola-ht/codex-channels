@@ -61,7 +61,7 @@ import {
   isHighRiskManagementPath,
   ManagementOperationError,
 } from "./webui-management-operations.mjs";
-import { routeTrafficApi } from "./webui-traffic-route.mjs";
+import { routeTrafficApi, routeTrafficEvents } from "./webui-traffic-route.mjs";
 import {
   applyProviderSettingsMutation,
   previewProviderSettingsMutation,
@@ -210,6 +210,10 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         sendJson(response, 401, {
           error: { code: "unauthorized", message: "需要有效的访问令牌" },
         });
+        return;
+      }
+      if (url.pathname === `${API_PREFIX}/traffic/events`) {
+        routeTrafficEvents({ environment, request, response, url, state: management });
         return;
       }
       if (url.pathname === `${API_PREFIX}/metrics/events` || url.pathname === `${API_PREFIX}/accounts/events`) {

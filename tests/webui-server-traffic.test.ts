@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { routeTrafficApi } from "../scripts/webui-traffic-route.mjs";
+import { routeTrafficApi, routeTrafficEvents } from "../scripts/webui-traffic-route.mjs";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
 import { describeDumpExchange, summarizeDumpFiles } from "../scripts/traffic-dump-reader.mjs";
 import {
@@ -26,6 +26,35 @@ afterEach(async () => {
 });
 
 describe("webui traffic V2 API", () => {
+  it("rejects non-loopback subscriptions before opening a stream", () => {
+    expect(() => routeTrafficEvents({ environment: {}, request: { socket: { remoteAddress: "203.0.113.1" } },
+      response: {}, url: new URL("http://localhost/api/v1/traffic/events"), state: {} })).toThrow("调用记录查看只允许回环访问");
+  });
+  it.each(["ds-main", "_custom", "-custom"])("streams authenticated changes for provider %s and reads its saved calls", async label => {
+    const fixture = createFixture();
+    const server = await startWebuiTestServer(servers, fixture.environment, join(process.cwd(), "webui", "dist"), { token: "traffic-test-token" });
+    const endpoint = `${server.origin}/api/v1/traffic/events`;
+    expect((await fetch(endpoint)).status).toBe(401);
+    const headers = { authorization: "Bearer traffic-test-token" };
+    for (const query of ["?path=/tmp", "?label=../secret", "?session=a&session=b", "?detail=0"]) {
+      expect((await fetch(endpoint + query, { headers })).status).toBe(400);
+    }
+    const controller = new AbortController();
+    const response = await fetch(`${endpoint}?label=${encodeURIComponent(label)}`, { headers, signal: controller.signal });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const reader = response.body!.getReader();
+    try {
+      expect(new TextDecoder().decode((await reader.read()).value)).toBe('data: {"type":"changed"}\n\n');
+      writeSession(fixture.trafficDir, label, "events", [httpInteraction(1)]);
+      const next = await reader.read();
+      expect(new TextDecoder().decode(next.value)).toBe('data: {"type":"changed"}\n\n');
+      const snapshot = await fetch(`${server.origin}/api/v1/traffic?label=${encodeURIComponent(label)}`, { headers });
+      const body = await snapshot.json() as TrafficListBody;
+      expect(body.exchanges.map(row => row.id)).toEqual([1]);
+    } finally { controller.abort(); await reader.cancel().catch(() => {}); }
+  });
+
   it.each([
     ["Bob/1.21.0 (com.hezongyidev.Bob; build:260; macOS 15.8.0) Alamofire/5.6.2", "Bob"],
     ["NewClient/2.0-beta (macOS) NetworkKit/1.0", "NewClient"],

@@ -183,6 +183,7 @@
     "scripts/webui-queue-events.mjs",
     "scripts/webui-service-status.mjs",
     "scripts/webui-traffic-route.mjs",
+    "scripts/webui-traffic-events.mjs",
     "scripts/weixin-qr-contract-probe.mjs",
     "scripts/weixin-setup-session.mjs",
     "scripts/weixin-setup.mjs",

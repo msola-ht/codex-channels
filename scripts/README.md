@@ -100,6 +100,7 @@
   响应；默认跨批次按请求时间倒序分页，支持单批次筛选，明细按批次与编号定位，指标关联目标缺失时明确报错，不替换目标。
   只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录，不接受任意
   路径；正文超过上限时返回截断标记，独立 trace 按总字节与记录数分页。旧版逐帧 JSONL 不自动混读。
+- `webui-traffic-events.mjs`：按提供商及批次过滤转储文件变化，合并通知到只读 SSE；仅对相关批次建立非递归目录监听，监听首次目录创建、清理及重建，订阅关闭即释放文件监听与心跳，不读取正文或轮询 App Server。
 - `reset-credit-command.mjs`：`codexc reset-credit` 查询与交互确认入口，复用 Gateway 私有账户 IPC，不依赖 WebUI。
 - `webui-reset-credit-route.mjs`：OpenAI 重置券实时列表、预览及消费确认路由，复用管理鉴权、限速、一次性令牌和审计，通过 Gateway 私有账户 IPC 执行。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
