@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 it("shows catalog success as a toast but preserves actionable download and audit failures", () => {
   const script = String.raw`
@@ -87,7 +87,18 @@ it("copies exact authorized model IDs and offers manual copying when clipboard a
   expect(result.failed).toMatch(/<input[^>]*readOnly=""[^>]*value="clp-main\/mimo-v2.5"/u);
 });
 
-it("renders the real Relay page with per-key policy, exact caller links and localized empty state", () => {
+describe("Relay page presentation", () => {
+  let result: ReturnType<typeof renderRelayPageFixture>;
+  // Vite startup and SSR compilation are fixture setup, not assertion time.
+  // Bound the child itself too, because a synchronous child blocks hook timers.
+  beforeAll(() => { result = renderRelayPageFixture(); }, 35_000);
+
+  it("renders the real Relay page with per-key policy, exact caller links and localized empty state", () => {
+    assertRelayPage(result);
+  });
+});
+
+function renderRelayPageFixture() {
   const script = String.raw`
     import { createServer } from 'vite';
     import { createElement as h } from 'react';
@@ -169,9 +180,12 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
       console.log(JSON.stringify({ allModels, multiProvider, unavailableUsage, zh, en, empty, unknown, stopped, refreshing, recovered, failed, editorError, staleEditor, unavailableEditor, availableEditor, availableZh, dual, unknownInputs, mixedReasoning }));
     } finally { await server.close(); }
   `;
-  const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
+  return JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL",
   })) as { allModels: string; multiProvider: string; unavailableUsage: string; refreshing: string; recovered: string; unknown: string; stopped: string; zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string; availableZh: string; dual: string; unknownInputs: string; mixedReasoning: string };
+}
+
+function assertRelayPage(result: ReturnType<typeof renderRelayPageFixture>): void {
   for (const id of ['clp-main/deepseek-v4.1-flash', 'rs-main/other']) {
     expect(result.multiProvider).toMatch(new RegExp('aria-label="' + id + '"[^>]*aria-checked="true"|aria-checked="true"[^>]*aria-label="' + id + '"'));
   }
@@ -231,7 +245,7 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
   expect(result.mixedReasoning).not.toContain('aria-label="clp-main/muse"');
   expect(result.allModels).toContain('aria-label="clp-main/muse"');
   expect(result.availableEditor).toContain('role="checkbox"');
-});
+}
 
 it("uses a queue table and shared loading, empty and unavailable components", () => {
   const script = String.raw`
