@@ -21,6 +21,8 @@ import {
   writerSessionOf,
 } from "./traffic-dump-reader.mjs";
 import { ApiError, isLoopbackAddress, sendJson } from "./webui-http.mjs";
+import { openQueueStream } from "./webui-queue-events.mjs";
+import { watchTrafficChanges } from "./webui-traffic-events.mjs";
 
 const defaultPageSize = 100;
 const maximumPageSize = 500;
@@ -29,6 +31,31 @@ const maximumPageOffset = 50_000;
 const maximumSectionBytes = 4 * 1_048_576;
 /** Trace 页同时受正文总量和记录数约束，避免大量空记录绕过字节上限。 */
 const maximumTracePageSize = 100;
+
+export function routeTrafficEvents({ environment, request, response, url, state }) {
+  if (!isLoopbackAddress(request.socket.remoteAddress)) {
+    throw new ApiError(503, "traffic_unavailable", "调用记录查看只允许回环访问");
+  }
+  assertParameters(url, ["label", "session", "detail"]);
+  const scope = {};
+  for (const name of ["label", "session"]) {
+    const values = url.searchParams.getAll(name);
+    // Custom Provider IDs may start with '_' or '-'; keep their saved dump labels subscribable.
+    const pattern = name === "label" ? /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,199}$/u : /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/u;
+    if (values.length > 1 || (values.length === 1 && !pattern.test(values[0]))) {
+      throw new ApiError(400, "invalid_parameter", "调用通知范围无效");
+    }
+    if (values.length) scope[name] = values[0];
+  }
+  const detail = url.searchParams.getAll("detail");
+  if (detail.length > 1 || (detail.length === 1 && detail[0] !== "1")) {
+    throw new ApiError(400, "invalid_parameter", "调用通知范围无效");
+  }
+  scope.detail = detail.length === 1;
+  const located = locateOptionalUserConfig(environment);
+  const directory = join(located?.dataDir ?? userDataDir(environment), "traffic");
+  openQueueStream(state, response, (signal, send) => watchTrafficChanges(directory, scope, signal, send));
+}
 
 export async function routeTrafficApi({ apiPath, environment, request, response, url }) {
   if (!["/traffic", "/traffic/exchange", "/traffic/trace"].includes(apiPath)) return false;

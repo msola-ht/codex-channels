@@ -10,6 +10,8 @@ import { withOutputExecutionAdmission } from "./output-execution-admission.js";
 import { PersistentInteractionPort } from "./persistent-interaction-port.js";
 import { RelayMetricsComposition, createRelayMetricAuthorization } from "./relay-metrics-composition.js";
 import { modelRelayPaths } from "../../runtime/model-relay-paths.mjs";
+import { accountSnapshotEventsPath, metricsEventsPath } from "../../runtime/metrics-events.mjs";
+import { QueueEventsServer } from "../../runtime/queue-events.mjs";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
 import {
@@ -140,6 +142,7 @@ import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { completionAccountStatus } from "./completion-account-status.js";
 import { mergeCompletionTiming } from "./completion-timing.js";
+import { TurnExecutionTracker } from "./turn-execution-tracker.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server-request.js";
@@ -155,6 +158,7 @@ import {
 export abstract class GatewayComponentGraph {
   private readonly transport: CodexTransport;
   private readonly codex: ProviderRoutingClient;
+  private readonly turnExecution: TurnExecutionTracker;
   private readonly primaryProvider: string;
   private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
@@ -173,6 +177,8 @@ export abstract class GatewayComponentGraph {
   readonly refreshProviderModels: () => void;
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly relayMetrics: RelayMetricsComposition | undefined;
+  private readonly metricsEvents: QueueEventsServer | undefined;
+  private readonly accountSnapshotEvents: QueueEventsServer | undefined;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly conversationIdleReleaser?: ConversationIdleReleaser;
   private readonly providerAccounts?: ProviderAccountService;
@@ -368,9 +374,15 @@ export abstract class GatewayComponentGraph {
         maximumRows: config.metricsStorage.maxRows,
       },
     );
+    this.metricsEvents = configPath === undefined ? undefined : new QueueEventsServer(metricsEventsPath(configPath));
+    this.accountSnapshotEvents = configPath === undefined ? undefined : new QueueEventsServer(accountSnapshotEventsPath(configPath));
+    this.turnExecution = new TurnExecutionTracker(this.codex, metricsStore,
+      () => this.metricsEvents?.changed(),
+      (error, threadId) => logger.warn({ err: error, threadId }, "轮次耗时记录或同步失败"));
     const metricsWriter = new BufferedModelRequestMetricsWriter(
       metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
+      () => this.metricsEvents?.changed(),
     );
     this.relayMetrics = configPath === undefined ? undefined : new RelayMetricsComposition({
       path: modelRelayPaths(configPath).metrics,
@@ -568,7 +580,7 @@ export abstract class GatewayComponentGraph {
           ?? definitionAccountId
           ?? opencodeGoAccountIdFromProvider(snapshot.provider)
           ?? null;
-        metricsStore.upsertAccountSnapshot?.({
+        metricsStore.upsertAccountSnapshot({
           sourceId: `${snapshot.provider}:${accountId ?? "default"}`,
           provider: snapshot.provider,
           accountId,
@@ -579,6 +591,8 @@ export abstract class GatewayComponentGraph {
           usage: snapshot.usage,
           limits: snapshot.limits,
         });
+        try { this.accountSnapshotEvents?.changed(); }
+        catch (error) { logger.warn({ err: error }, "账户快照已保存，但变化通知失败"); }
       },
     }, readOpenAiSubscription);
     const execution = withOutputExecutionAdmission(this.codex, (threadId) => {
@@ -935,6 +949,10 @@ export abstract class GatewayComponentGraph {
           const summary = metricsStore.threadTurnSummary(threadId, turnId);
           return mergeCompletionTiming(summary, turnId, current);
         },
+        executionTiming: (threadId, turnId) => ({
+          durationMs: metricsStore.turnExecutionDuration(threadId, turnId),
+          sessionDurationMs: metricsStore.sessionExecutionDuration(threadId, turnId),
+        }),
         taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
           let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
@@ -1042,6 +1060,10 @@ export abstract class GatewayComponentGraph {
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
+        if (coreEvent.type === "turn.completed" || coreEvent.type === "thread.reverted") {
+          const timingProvider = this.codex.knownProvider(coreEvent.threadId);
+          if (timingProvider) this.turnExecution.handle(coreEvent, timingProvider);
+        }
         this.asyncQuestions.handleInput(coreEvent);
         if (coreEvent.type === "mcp.status.updated"
           && (coreEvent.modelProvider === "openai"
@@ -1114,6 +1136,10 @@ export abstract class GatewayComponentGraph {
 
   private bindingRestoreCoordinator(): BindingRestoreCoordinator {
     this.bindingRestore ??= new BindingRestoreCoordinator({
+      restored: (threadId) => {
+        const provider = this.codex.knownProvider(threadId);
+        if (provider) this.turnExecution.synchronize(threadId, provider);
+      },
       codex: this.codex,
       router: this.router,
       output: this.output,
@@ -1229,6 +1255,8 @@ export abstract class GatewayComponentGraph {
       await this.surfaceManager.preparePersistence();
       this.requireRunning();
       await this.providerMetrics.start();
+      await this.metricsEvents?.start();
+      await this.accountSnapshotEvents?.start();
       // IPC lifetime follows the writer, not the HTTP admission switch. It must
       // already exist for first enablement and drain terminal metrics on disable.
       await this.relayMetrics?.apply(true);
@@ -1237,6 +1265,7 @@ export abstract class GatewayComponentGraph {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
+        this.turnExecution.reset(provider);
         this.gatewayReconnectCoordinator().disconnected(error, provider);
       });
       const initialized = await this.codex.connect();
@@ -1458,6 +1487,7 @@ export abstract class GatewayComponentGraph {
       // notification has been reduced. Closing Surface first loses this tail.
       ["Inbound Event Bus", () => this.inbound.close({ requireDrained: true })],
       ["Derived Output Inputs", () => this.output.drain()],
+      ["Turn Execution Metrics", () => this.turnExecution.stop()],
       ["Subagent Terminals", () => this.subagentCompletion?.drain()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Account Snapshot Warmup", async () => {
@@ -1467,6 +1497,8 @@ export abstract class GatewayComponentGraph {
       }],
       ["Relay Metrics", () => this.relayMetrics?.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
+      ["Metrics Notifications", () => this.metricsEvents?.close()],
+      ["Account Snapshot Notifications", () => this.accountSnapshotEvents?.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],
       ["Binding Recovery", async () => {

@@ -1,5 +1,7 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -8,6 +10,70 @@ const workflows = [
 ];
 
 describe("commit verification workflows", () => {
+  it.skipIf(process.platform === "win32").each([
+    { failure: "", status: 0 },
+    { failure: "run check", status: 17 },
+    { failure: "run build -- --noCheck", status: 17 },
+    { failure: "vitest", status: 17 },
+  ])("checks types before emitting and stops dependent stages on $failure", ({ failure, status }) => {
+    const directory = mkdtempSync(join(tmpdir(), "commit-gate-"));
+    try {
+      for (const child of ["scripts", "runtime", "bin", "webui", "node_modules/vitest"]) {
+        mkdirSync(join(directory, child), { recursive: true });
+      }
+      for (const file of ["scripts/verify-commit.mjs", "runtime/executable.mjs"]) {
+        copyFileSync(join(process.cwd(), file), join(directory, file));
+      }
+      const recorder = `
+import { appendFileSync } from "node:fs";
+const command = process.argv[1].endsWith("vitest.mjs") ? "vitest" : process.argv.slice(2).join(" ");
+appendFileSync(process.env.VERIFY_EVENTS, command + "\\n");
+if (command === process.env.VERIFY_FAIL) process.exit(17);
+`;
+      for (const command of ["git", "npm", "bash", "plutil"]) {
+        writeFileSync(join(directory, "bin", command), `#!/usr/bin/env node\n${recorder}`, { mode: 0o755 });
+      }
+      writeFileSync(join(directory, "node_modules/vitest/vitest.mjs"), recorder);
+      const eventsFile = join(directory, "events");
+      const result = spawnSync(process.execPath, ["scripts/verify-commit.mjs"], {
+        cwd: directory,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${join(directory, "bin")}${delimiter}${process.env.PATH ?? ""}`,
+          VERIFY_EVENTS: eventsFile,
+          VERIFY_FAIL: failure,
+        },
+      });
+      expect(result.status, result.stderr).toBe(status);
+      const events = readFileSync(eventsFile, "utf8").trim().split("\n");
+      const check = events.indexOf("run check");
+      const build = events.indexOf("run build -- --noCheck");
+      const test = events.indexOf("vitest");
+      const pack = events.indexOf("run test:package:tarball-prepared");
+      expect(check).toBeGreaterThan(-1);
+      expect(events).not.toContain("test");
+      if (failure === "run check") {
+        expect(build).toBe(-1);
+      } else {
+        expect(build).toBeGreaterThan(check);
+        expect(events.filter((event) => event === "run build -- --noCheck")).toHaveLength(1);
+      }
+      if (failure === "run check" || failure === "run build -- --noCheck") {
+        expect(test).toBe(-1);
+      } else {
+        expect(test).toBeGreaterThan(build);
+      }
+      if (failure) {
+        expect(pack).toBe(-1);
+      } else {
+        expect(pack).toBeGreaterThan(test);
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("runs CI for pull requests and manual checks without push duplication", () => {
     const workflow = readFileSync(
       join(process.cwd(), ".github/workflows", "ci.yml"),

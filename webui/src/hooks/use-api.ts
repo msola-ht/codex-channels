@@ -8,6 +8,8 @@ export interface UseApiState<T> {
   loading: boolean
   error: string | null
   errorCode: string | null
+  lastUpdatedAt: number | null
+  lastReadStartedAt: number | null
 }
 
 export function useApi<T>(
@@ -23,6 +25,8 @@ export function useApi<T>(
     loading: true,
     error: null,
     errorCode: null,
+    lastUpdatedAt: null,
+    lastReadStartedAt: null,
   })
   const activeRequest = useRef<AbortController | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -31,17 +35,20 @@ export function useApi<T>(
     activeRequest.current?.abort()
     const controller = new AbortController()
     activeRequest.current = controller
+    const startedAt = Date.now()
     setState((previous) => ({ ...previous, loading: true, error: null, errorCode: null }))
     loader(controller.signal)
       .then((data) => {
         if (!controller.signal.aborted) {
-          setState((previous) => ({ data: mergeData ? mergeData(previous.data, data) : data, loading: false, error: null, errorCode: null }))
+          setState((previous) => ({ data: mergeData ? mergeData(previous.data, data) : data, loading: false, error: null, errorCode: null, lastUpdatedAt: Date.now(), lastReadStartedAt: startedAt }))
         }
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
           setState((previous) => ({
             data: retainDataOnError ? previous.data : null,
+            lastUpdatedAt: retainDataOnError ? previous.lastUpdatedAt : null,
+            lastReadStartedAt: retainDataOnError ? previous.lastReadStartedAt : null,
             loading: false,
             errorCode: error instanceof ApiClientError ? error.code
               : error instanceof Error && error.name === "TimeoutError" ? "request_timeout"
@@ -64,7 +71,7 @@ export function useApi<T>(
     activeRequest.current?.abort()
     setState((previous) => ({ data: typeof data === "function"
       ? (data as (previous: T | null) => T | null)(previous.data)
-      : mergeData ? mergeData(previous.data, data) : data, loading: false, error: null, errorCode: null }))
+      : mergeData ? mergeData(previous.data, data) : data, loading: false, error: null, errorCode: null, lastUpdatedAt: Date.now(), lastReadStartedAt: null }))
   }, [mergeData])
   return { ...state, refetch, replaceData }
 }

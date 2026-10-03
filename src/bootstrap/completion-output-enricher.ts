@@ -13,6 +13,7 @@ import type {
 const completionEnrichmentTimeoutMs = 250;
 
 export interface CompletionOutputEnricherOptions {
+  executionTiming?(threadId: string, turnId: string): { durationMs: number | null; sessionDurationMs: number | null };
   completionAccountStatus?(provider: string, signal: AbortSignal): Promise<CompletionAccountStatus | undefined>;
   completionTiming?(
     threadId: string,
@@ -94,6 +95,12 @@ export class CompletionOutputEnricher {
       ? await sessionAggregateResult
       : sessionAggregateResult;
     const accountStatus = await accountStatusResult;
+    let execution: ReturnType<NonNullable<CompletionOutputEnricherOptions["executionTiming"]>> | undefined;
+    try {
+      execution = this.options.executionTiming?.(event.threadId, event.turnId);
+    } catch {
+      this.logger.warn({ threadId: event.threadId, turnId: event.turnId }, "完成卡轮次耗时读取失败");
+    }
     return {
       ...event,
       ...(accountStatus === undefined ? {} : { accountStatus }),
@@ -101,6 +108,8 @@ export class CompletionOutputEnricher {
       ...(timing === undefined ? {} : { timing }),
       ...(taskAggregate === undefined ? {} : { taskAggregate }),
       ...(sessionAggregate === undefined ? {} : { sessionAggregate }),
+      ...(execution?.durationMs == null ? {} : { durationMs: execution.durationMs }),
+      sessionDurationMs: execution?.sessionDurationMs ?? undefined,
     };
   }
 

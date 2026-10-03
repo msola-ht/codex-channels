@@ -16,8 +16,8 @@
   拒绝并发覆盖；写入者可指定 `maximumBytes`，在保留注释后、原子替换前检查完整文件大小，
   并以 `0600` 权限写入 CLI、脚本和 Gateway 共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
-- `chat-reasoning.mjs` / `chat-reasoning.d.mts`：无 I/O 的精确 Chat 关闭思考能力表，供配置、管理和模型 API 共用。
-- `model-relay-config.mjs` / `model-relay-config.d.mts`：可选 Relay 严格配置、可选中文用途名称、仅结算使用的历史身份摘要、每 Key 思考策略及仅全局限流策略投影和显式旧限流字段转换；服务默认关闭和回环监听，允许显式 IPv4 内网/通配绑定、保留停用身份，不生成凭据；仅显式转储升级可验证并移除旧采集字段。
+- `chat-reasoning.mjs` / `chat-reasoning.d.mts`：无 I/O 的精确 Chat 关闭思考能力表及额外模型思考声明类型，供配置、管理和模型 API 共用。
+- `model-relay-config.mjs` / `model-relay-config.d.mts`：可选 Relay 严格配置、可选中文用途名称、仅结算使用的历史身份摘要、每 Key 多提供商模型授权、思考策略及仅全局限流策略投影；服务默认关闭和回环监听，允许显式 IPv4 内网/通配绑定、保留停用身份，不生成凭据；不接受旧 Relay 配置字段。
 - `network-proxy.mjs`：按 Codex `.env`、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
   `NO_PROXY`。Codex `.env` 或环境变量提供任一 HTTP、HTTPS 或 ALL 代理地址时跳过系统读取，不补齐其他字段；
@@ -66,7 +66,7 @@
   取消信号，快照随请求指标写入指标库供账户用量按周期归属本地 Token。
 - `model-provider-runtime.mjs` / `model-provider-runtime.d.mts`：保留受控模型 Provider 运行时的稳定
   导出门面与 TypeScript 接口；`readManagedMarker` 提供单个 Provider 管理标记的只读查询，不读取其他账户注册表。门面不承载具体读取、写入或启动逻辑。
-- `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录读取；提供原生协议集合、目录输入能力、依赖路径和修订摘要，不读取 OAuth 或创建 App Server。
+- `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录读取；提供原生协议集合、目录输入能力、CLP 独立转发目录与模型覆盖与思考声明、依赖路径和修订摘要，不读取 OAuth 或创建 App Server。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile；
   管理每个受管 Provider 的独立模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
@@ -151,7 +151,8 @@
   私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权
   建立与应用就绪使用不同状态，应用开始停止时立即撤销就绪；公开同源健康探针供本地更新确认
   Gateway 已完成应用启动且尚未进入关闭流程。
-- `queue-events.mjs` / `queue-events.d.mts`：投递箱与 Relay 共用的有界私有变化通知流；独立订阅连接、首次失效通知、100 毫秒合并、心跳、取消与背压清理，只传变化类型。
+- `queue-events.mjs` / `queue-events.d.mts`：投递箱、Relay、账户快照与请求指标共用的有界私有变化通知流；独立订阅连接、首次失效通知、100 毫秒合并、心跳、取消与背压清理，只传变化类型。
+- `metrics-events.mjs` / `metrics-events.d.mts`：按配置文件路径派生相互独立的请求指标与账户快照通知端点，供 Gateway 写入器与 WebUI 订阅共用；不携带指标或账户数据。
 - `delivery-control.mjs` / `delivery-control.d.mts`：投递箱私有在线管理与变化通知 IPC（`watchDeliveryChanges`）；Unix 使用系统 `/tmp` 规范目录下的当前用户私有短目录，以投递目录规范路径的 SHA-256 确定端点，连接前校验父目录及 Socket 所有者和权限；Windows 继续使用私有描述文件及认证管道。最多 50 条修订绑定的重试/忽略请求，限制连接数、报文大小和等待时间；只输出受控结果，已发送请求的响应丢失不允许离线回退或自动重试。
 - `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供 v2 私有账户 IPC，支持 Provider 刷新及 OpenAI 重置券列表、预览、取消和消费；
   WebUI 提交精确 Provider ID、券 ID 或短期操作 ID，Gateway 使用现有账户适配器和统一代理查询，并保持指标库单写入者；
@@ -218,7 +219,8 @@
 
 这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随本地 npm 打包产物安装，不向 npm Registry 发布新版本。
 
-- `model-relay-control.mjs` / `model-relay-control.d.mts`：独立 Relay 的 v4 私有状态（含队列等待时长、超时计数及采集状态）/配置摘要确认 IPC，另提供只读 queue 操作（携带运行配置、启用、监听状态及用途名称，最多 64 行、128 KiB 响应），有界连接、帧和等待，不传递秘密；独立 `.events` 端点推送队列变化，订阅不占用管理命令连接。
+- `model-relay-control.mjs` / `model-relay-control.d.mts`：独立 Relay 的 v5 私有状态（含队列等待时长、超时计数及采集状态）/配置摘要确认 IPC，另提供只读 queue 操作（携带运行配置、启用、监听状态及用途名称，最多 64 行、128 KiB 响应），有界连接、帧和等待，不传递秘密；独立 `.events` 端点推送队列变化，订阅不占用管理命令连接。
+- `model-relay-model-id.mjs` / `model-relay-model-id.d.mts`：公共调用 ID 的解析与目录映射，CLP 对外去掉上游前缀，保留出站精确原始 ID。
 - `model-relay-listen-host.mjs` / `model-relay-listen-host.d.mts`：配置与 HTTP 服务共用的纯监听地址校验，接受回环、RFC1918 IPv4 和显式 IPv4 通配地址，不解析 DNS 或选择网卡。
 - `model-relay-paths.mjs` / `model-relay-paths.d.mts`：按配置路径派生控制与指标端点。
 - `model-relay-material-reader.mjs` / `model-relay-material-worker.mjs`：单 Worker 按固定用途读取 Provider 材料或指标身份快照；串行、可取消、有界，不阻塞调用线程。指标身份准备限时 750 毫秒，不返回凭据或身份哈希。配置两次读取间发生原子替换时丢弃快照并完整重读一次，持续变化或校验失败则拒绝，不延长原有截止时间。
@@ -226,3 +228,8 @@
 - `model-relay-service.mjs` / `model-relay-service.d.mts`：独立进程组合与生命周期、材料刷新/撤销、共享网络出口选择和可选 V2 Relay 转储 owner；未变化配置不重复发布准入策略，代理连接池跟随全局并发上限；复用全局 debug 开关、裁剪模式和保留天数；不复用 App Server 的代理实例。
 
 公开服务命令通过 `service-targets.mjs` 的 `serviceCommandTarget` 将内部 `model-relay` 标识显示为 `relay`；平台服务标识和已有定义文件保持稳定。
+
+- `cline-relay-catalog.mjs` / `cline-relay-catalog.d.mts`：独立 Cline 转发模型文件的严格校验、只读快照与思考能力投影；不读取 Codex 模型目录。
+
+- `cline-relay-catalog-update.mjs` / `cline-relay-catalog-update.d.mts`：固定来源的目录下载、格式解析、备份和原子替换；供自动初始化与显式更新共用。
+- `cline-relay-catalog-bootstrap.mjs` / `cline-relay-catalog-bootstrap.d.mts`：服务拥有的缺失目录单次后台初始化，复用管理锁，取消、失败报告与限时关闭；不覆盖并发更新。

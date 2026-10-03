@@ -18,17 +18,15 @@ export function ModeToggle() {
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
+      <TooltipTrigger render={<Button
           aria-label={label}
           onClick={() => setTheme(nextTheme)}
           size="icon"
           type="button"
           variant="ghost"
-        >
+         />}>
           {isDark ? <Sun /> : <Moon />}
-        </Button>
-      </TooltipTrigger>
+        </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   )

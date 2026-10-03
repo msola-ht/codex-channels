@@ -1,4 +1,5 @@
 import type { IncomingHttpHeaders } from "node:http";
+import type { ModelRequestDiagnostics } from "./chat-diagnostics.js";
 import { StringDecoder } from "node:string_decoder";
 
 const maximumJsonMetadataBytes = 1_048_576;
@@ -20,7 +21,7 @@ export interface ProviderQuotaWindowSnapshot {
   status?: string | null;
 }
 
-export interface ProviderProxyMetrics {
+export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
   transport: "http" | "websocket";
   responseFormat: "sse" | "json" | "websocket" | "unknown";
   operation: "response" | "compact";

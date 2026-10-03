@@ -1,7 +1,7 @@
 import { useCallback } from "react"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
-import { useApi, useApiPolling, type UseApiState } from "@/hooks/use-api"
+import { useApi, type UseApiState } from "@/hooks/use-api"
 import { useManagementTasks, useManagementTaskRefresh } from "@/hooks/use-management-tasks"
 import { useTranslation } from "@/hooks/use-translation"
 import { fetchManagementProviders, fetchManagementServices, fetchUpstreamUserAgent, fetchSettingsSummary } from "@/lib/api"
@@ -94,7 +94,6 @@ export function ServiceSettingsPage() {
   const reloadServices = services.refetch, reloadTasks = tasks.refetch
   const refresh = useCallback(() => { reloadServices(); reloadTasks(); reloadSummary() }, [reloadServices, reloadTasks, reloadSummary])
   useManagementTaskRefresh(tasks, reloadServices)
-  useApiPolling(reloadServices, services.loading, tasks.tasks.some(task => ["queued", "running", "cancelling"].includes(task.state)))
   return <SettingsPageFrame title="navigation.services" busy={services.loading || tasksBusy(tasks) || summary.loading} refresh={refresh}>
     <TaskErrors tasks={tasks} />
     {services.error ? <SettingsError message={services.error} retry={reloadServices} /> : !services.data ? <LoadingSettingsCard title={t("navigation.services")} /> : <Card>
@@ -108,5 +107,6 @@ export function ServiceSettingsPage() {
 }
 
 function TaskErrors({ tasks }: { tasks: ManagementTaskController }) {
-  return <>{tasks.error && <SettingsError message={tasks.error} retry={tasks.refetch} />}{tasks.actionError && <Alert variant="destructive"><AlertDescription>{tasks.actionError}</AlertDescription></Alert>}</>
+  const error = tasks.error ?? tasks.notificationError
+  return <>{error && <SettingsError message={error} retry={tasks.refetch} />}{tasks.actionError && <Alert variant="destructive"><AlertDescription>{tasks.actionError}</AlertDescription></Alert>}</>
 }

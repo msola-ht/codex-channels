@@ -1,3 +1,4 @@
+import { ChatDiagnostics, modelRequestDiagnostics, type ModelRequestDiagnostics } from "./chat-diagnostics.js";
 import type { IncomingHttpHeaders } from "node:http";
 import { ModelConversionError, type DirectResponsesRequest, type DirectChatUsage } from "../model-api/index.js";
 import { parseDirectModelJson, validateDirectModelResponse, withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
@@ -47,6 +48,7 @@ interface DirectResponsesCall {
   signal: AbortSignal;
   clientHeaders?: IncomingHttpHeaders;
   capture?: DirectChatCapture;
+  diagnostics?(summary: ModelRequestDiagnostics): void;
   observer: DirectResponsesObserver;
   recheck(): void;
   submitted(userAgent: string | null): void;
@@ -56,34 +58,55 @@ interface DirectResponsesCall {
 }
 
 export async function sendDirectResponses(call: DirectResponsesCall): Promise<void> {
-  await withDirectModelResponse({ body: call.request, path: "/responses", target: call.target, signal: call.signal,
-    ...(call.clientHeaders ? { clientHeaders: call.clientHeaders } : {}), recheck: () => call.recheck(),
-    transformed: operation => call.capture?.transformed?.(operation),
-    submitted: (ua, headers, path) => { call.submitted(ua); call.capture?.submitted(call.request, headers, path); },
-  }, async incoming => {
-    call.headers(incoming.statusCode ?? 502); call.capture?.head(incoming.statusCode ?? 502, incoming.headers);
-    await validateDirectModelResponse(incoming, call.request.stream, call.capture);
-    if (!call.request.stream) {
-      const value = parse(await readChatBody(incoming, call.signal, 8 * 1024 * 1024), call.capture);
-      call.capture?.value(value, false);
-      if (!call.observer.observe(value, false)) throw new ModelConversionError("Responses JSON has no terminal state");
-      if (call.observer.hasContent) call.content();
-      call.capture?.done(call.observer.status === "unknown" ? "incomplete" : call.observer.status); await call.emit(deliverable(value, false), true); return;
-    }
-    for await (const frame of readModelFrames(incoming, call.signal, { frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024 })) {
-      const value = parse(frame.data, call.capture);
-      const event = frame.raw.split(/\r?\n/u).filter(line => line.startsWith("event:")).at(-1)?.slice(6).trim();
-      if (event && event !== value.type) throw new ModelConversionError("Responses SSE event does not match its payload");
-      call.capture?.value(value, true);
-      const terminal = call.observer.observe(value, true);
-      if (call.observer.hasContent) call.content();
-      if (terminal) call.capture?.done(call.observer.status === "unknown" ? "incomplete" : call.observer.status);
-      const output = deliverable(value, true);
-      await call.emit(output, terminal, output === value ? frame.raw : undefined);
-      if (terminal) return;
-    }
-    throw new ModelConversionError("Responses stream disconnected before a terminal event");
-  });
+  const diagnostics = new ChatDiagnostics();
+  let errorStage: "http" | "stream" = "http";
+  let delivering = false;
+  const emit: typeof call.emit = async (...args) => {
+    delivering = true;
+    await call.emit(...args);
+    delivering = false;
+  };
+  try {
+    await withDirectModelResponse({ body: call.request, path: "/responses", target: call.target, signal: call.signal,
+      ...(call.clientHeaders ? { clientHeaders: call.clientHeaders } : {}), recheck: () => call.recheck(),
+      transformed: operation => call.capture?.transformed?.(operation),
+      submitted: (ua, headers, path) => { call.submitted(ua); call.capture?.submitted(call.request, headers, path); },
+    }, async incoming => {
+      call.headers(incoming.statusCode ?? 502); call.capture?.head(incoming.statusCode ?? 502, incoming.headers);
+      await validateDirectModelResponse(incoming, call.request.stream, {
+        value: (value, stream) => { diagnostics.push(value); call.capture?.value(value, stream); },
+        invalid: count => call.capture?.invalid(count),
+      });
+      if (call.request.stream) errorStage = "stream";
+      if (!call.request.stream) {
+        const value = parse(await readChatBody(incoming, call.signal, 8 * 1024 * 1024), call.capture);
+        diagnostics.push(value);
+        call.capture?.value(value, false);
+        if (!call.observer.observe(value, false)) throw new ModelConversionError("Responses JSON has no terminal state");
+        if (call.observer.status === "failed") diagnostics.error("upstream_failure", errorStage, false);
+        if (call.observer.hasContent) call.content();
+        call.capture?.done(call.observer.status === "unknown" ? "incomplete" : call.observer.status); await emit(deliverable(value, false), true); return;
+      }
+      for await (const frame of readModelFrames(incoming, call.signal, { frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024 })) {
+        const value = parse(frame.data, call.capture);
+        const event = frame.raw.split(/\r?\n/u).filter(line => line.startsWith("event:")).at(-1)?.slice(6).trim();
+        if (event && event !== value.type) throw new ModelConversionError("Responses SSE event does not match its payload");
+        diagnostics.push(value.type === "error" ? value : value.response);
+        call.capture?.value(value, true);
+        const terminal = call.observer.observe(value, true);
+        if (call.observer.status === "failed") diagnostics.error("upstream_failure", errorStage, false);
+        if (call.observer.hasContent) call.content();
+        if (terminal) call.capture?.done(call.observer.status === "unknown" ? "incomplete" : call.observer.status);
+        const output = deliverable(value, true);
+        await emit(output, terminal, output === value ? frame.raw : undefined);
+        if (terminal) return;
+      }
+      throw new ModelConversionError("Responses stream disconnected before a terminal event");
+    });
+  } catch (error) {
+    if (!delivering && !call.signal.aborted) diagnostics.error("upstream_failure", errorStage, false);
+    throw error;
+  } finally { call.diagnostics?.(modelRequestDiagnostics(diagnostics.snapshot())); }
 }
 
 /** Model output is preserved; upstream failure messages remain controlled diagnostics. */

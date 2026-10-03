@@ -35,7 +35,7 @@ export function RangeSelector({
     <>
       <Field>
         <FieldLabel htmlFor={`${id}-range`}>{label ?? t("filters.range")}</FieldLabel>
-        <Select value={value} onValueChange={(next) => onChange(next as RangeName | "custom")}>
+        <Select items={ranges.map(value => ({ value, label: t(`ranges.${value}`) }))} value={value} onValueChange={(next) => { if (next !== null) onChange(next) }}>
           <SelectTrigger id={`${id}-range`}><SelectValue>{t(`ranges.${value}`)}</SelectValue></SelectTrigger>
           <SelectContent><SelectGroup>
             {ranges.map((range) => <SelectItem key={range} value={range}>{t(`ranges.${range}`)}</SelectItem>)}

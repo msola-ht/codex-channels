@@ -12,7 +12,7 @@ it("confirms successful snapshots, bounds event reads and retries, and cleans up
     const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
     const page=new EventTarget(),win=new EventTarget();page.visibilityState='visible';
     const network={onLine:true},slots=[],effects=[],timers=new Map(),watches=[],latest={current:0};
-    let si=0,ei=0,clock=100000,id=0,refreshes=0,loading=false,enabled=true,read=null,requested=0;
+    let si=0,ei=0,clock=100000,id=0,refreshes=0,loading=false,enabled=true,read=null,requested=0,retryOnChange=false,subscribed=true;
     Date.now=()=>clock;
     const useState=initial=>{const i=si++;if(!(i in slots))slots[i]=initial;return[slots[i],v=>{slots[i]=typeof v==='function'?v(slots[i]):v}];};
     const useEffect=(run,deps)=>{const i=ei++,old=effects[i];if(!old||deps.some((v,j)=>v!==old.deps[j]))effects[i]={run,deps,cleanup:old?.cleanup,pending:true};};
@@ -22,11 +22,11 @@ it("confirms successful snapshots, bounds event reads and retries, and cleans up
     const hook=new Function('useEffect','useState','watchDeliveryQueue','ApiClientError','document','window','navigator','setTimeout','clearTimeout',code+';return useQueueEvents;')(
       useEffect,useState,watch,class extends Error{},page,win,network,schedule,key=>timers.delete(key));
     const refresh=()=>{refreshes++;loading=true;requested=latest.current;queueMicrotask(()=>render());};
-    const render=()=>{si=ei=0;const status=hook(refresh,loading,enabled,latest,read,watch);for(const e of effects)if(e.pending){e.cleanup?.();e.pending=false;e.cleanup=e.run();}return status;};
+    const render=()=>{si=ei=0;const status=hook(refresh,loading,enabled,latest,read,subscribed?watch:null,retryOnChange);for(const e of effects)if(e.pending){e.cleanup?.();e.pending=false;e.cleanup=e.run();}return status;};
     const settle=()=>new Promise(resolve=>setImmediate(resolve));
     const push=()=>{watches.at(-1).receive({type:'changed'});render();};
     const success=()=>{loading=false;read={confirmed:requested,completedAt:clock,failed:false,failures:0,retryable:false,retryAt:0};render();};
-    const fail=(limited=false,retryable=true)=>{loading=false;const failures=(read?.failures??0)+1;read={confirmed:read?.confirmed??0,completedAt:clock,failed:true,failures,retryable,retryAt:clock+(limited?60000:Math.min(8000,2000*2**(failures-1)))};return render();};
+    const fail=(limited=false,retryable=true)=>{loading=false;const failures=(read?.failures??0)+1;read={confirmed:read?.confirmed??0,attempted:requested,completedAt:clock,failed:true,failures,retryable,retryAt:clock+(limited?60000:Math.min(8000,2000*2**(failures-1)))};return render();};
     render();push();tick(250);await settle();assert.equal(refreshes,1);
     push();success(); // A change during the read must survive that read's success.
     tick(1999);assert.equal(refreshes,1);tick(1);await settle();assert.equal(refreshes,2);success();
@@ -52,6 +52,12 @@ it("confirms successful snapshots, bounds event reads and retries, and cleans up
     refresh();await settle();success();assert.equal(render(),'live'); // Manual success resets failure budget.
     push();tick(2000);await settle();assert.equal(fail(false,false),'stale');const permanent=refreshes;push();tick(60000);assert.equal(refreshes,permanent);
     refresh();await settle();success();
+    retryOnChange=true;push();tick(2000);await settle();fail(false,false);
+    const missing=refreshes;tick(60000);assert.equal(refreshes,missing);
+    push();tick(250);await settle();assert.equal(refreshes,missing+1);success();
+    subscribed=false;enabled=false;render();await settle();render();assert(watches.at(-1).signal.aborted);
+    const detached=watches.length;tick(60000);assert.equal(watches.length,detached);
+    subscribed=true;enabled=true;render();push();tick(250);await settle();success();
     page.visibilityState='hidden';page.dispatchEvent(new Event('visibilitychange'));await settle();render();assert(watches.at(-1).signal.aborted);
     const before=watches.length;tick(60000);assert.equal(watches.length,before);
     page.visibilityState='visible';page.dispatchEvent(new Event('visibilitychange'));assert.equal(watches.length,before+1);
@@ -74,10 +80,12 @@ it("reads fragmented SSE with header authentication and rejects malformed or exp
     import assert from 'node:assert/strict';
     const server=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent'});
     try {
-      const {watchDeliveryQueue,watchRelayQueue,onUnauthorized}=await server.ssrLoadModule('/src/lib/api.ts');
+      const {watchDeliveryQueue,watchRelayQueue,watchRequestMetrics,watchAccountSnapshots,watchTraffic,onUnauthorized}=await server.ssrLoadModule('/src/lib/api.ts');
       globalThis.localStorage={getItem:()=> 'private-token'};
       const encoder=new TextEncoder();
       const response=parts=>new Response(new ReadableStream({start(controller){for(const part of parts)controller.enqueue(encoder.encode(part));controller.close();}}),{headers:{'content-type':'text/event-stream'}});
+      globalThis.fetch=async(url,init)=>{assert.equal(url,'/api/v1/traffic/events?label=relay.responses&session=batch&detail=1');assert.equal(init.headers.get('authorization'),'Bearer private-token');return response(['data: {"type":"changed"}\n\n']);};
+      await assert.rejects(watchTraffic({label:'relay.responses',session:'batch',detail:true},new AbortController().signal,()=>{}),/disconnected/);
       const received=[];
       globalThis.fetch=async(url,init)=>{
         assert.equal(url,'/api/v1/management/delivery/events');assert.equal(init.headers.get('authorization'),'Bearer private-token');
@@ -87,6 +95,10 @@ it("reads fragmented SSE with header authentication and rejects malformed or exp
       assert.deepEqual(received,['changed','heartbeat','changed']);
       globalThis.fetch=async(url,init)=>{assert.equal(url,'/api/v1/management/relay/queue/events');assert.equal(init.headers.get('authorization'),'Bearer private-token');return response(['data: {"type":"changed"}\n\n']);};
       await assert.rejects(watchRelayQueue(new AbortController().signal,()=>{}),/disconnected/);
+      globalThis.fetch=async(url,init)=>{assert.equal(url,'/api/v1/metrics/events');assert.equal(init.headers.get('authorization'),'Bearer private-token');return response(['data: {"type":"changed"}\n\n']);};
+      await assert.rejects(watchRequestMetrics(new AbortController().signal,()=>{}),/disconnected/);
+      globalThis.fetch=async(url,init)=>{assert.equal(url,'/api/v1/accounts/events');assert.equal(init.headers.get('authorization'),'Bearer private-token');return response(['data: {"type":"changed"}\n\n']);};
+      await assert.rejects(watchAccountSnapshots(new AbortController().signal,()=>{}),/disconnected/);
       for(const value of ['data: {"type":"unknown"}\n\n','data: {"type":"changed","secret":true}\n\n','x'.repeat(5000)]) {
         globalThis.fetch=async()=>response([value]);
         await assert.rejects(watchDeliveryQueue(new AbortController().signal,()=>assert.fail('invalid event escaped')));
@@ -117,8 +129,11 @@ it.each(["delivery", "relay"])("records %s snapshot outcomes without acknowledgi
     const useState=initial=>{const i=si++;if(!(i in slots))slots[i]=initial;return[slots[i],value=>{slots[i]=typeof value==='function'?value(slots[i]):value;}];};
     const useRef=initial=>refs[ri++]??(refs[ri-1]={current:initial});
     class ApiClientError extends Error{constructor(message,status=message,code){super('failure');this.status=status;this.code=code;}}
-    const hook=new Function('useState','useRef','useCallback','useManagementConfirmedMutation','useQueueEvents','watchDeliveryQueue','fetchDeliveryQueue','ApiClientError','previewDeliveryBatch','applyDeliveryBatch',code+';return useDeliveryQueue;')(
-      useState,useRef,fn=>fn,value=>{options=value;return{};},(refetch,loading,enabled,latest,read)=>{captured={latest,read};},()=>{},()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),ApiClientError,()=>{},()=>{});
+    const sharedSource=fs.readFileSync('webui/src/hooks/use-queue-events.ts','utf8').replace(/^import .*$/gm,'').replace(/export (function|interface)/g,'$1');
+    const sharedCode=ts.transpileModule(sharedSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+    const useQueueSnapshot=new Function('useState','useRef','useCallback','ApiClientError',sharedCode+';return useQueueSnapshot;')(useState,useRef,fn=>fn,ApiClientError);
+    const hook=new Function('useState','useRef','useCallback','useManagementConfirmedMutation','useQueueEvents','useQueueSnapshot','watchDeliveryQueue','fetchDeliveryQueue','ApiClientError','previewDeliveryBatch','applyDeliveryBatch',code+';return useDeliveryQueue;')(
+      useState,useRef,fn=>fn,value=>{options=value;return{};},(refetch,loading,enabled,latest,read)=>{captured={latest,read};},useQueueSnapshot,()=>{},()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),ApiClientError,()=>{},()=>{});
     const render=()=>{si=ri=0;hook(0,'all');};
     Date.now=()=>1000;render();captured.latest.current=5;
     const first=options.load();captured.latest.current=10;pending.shift().resolve({records:[]});await first;render();

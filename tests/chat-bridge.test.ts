@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
 import { listDumpFiles, describeDumpExchange } from "../scripts/traffic-dump-reader.mjs";
-import { ChatDiagnostics, ChatDiagnosticsChannel } from "../src/provider-proxy/chat-diagnostics.js";
+import { modelRequestDiagnostics, ChatDiagnostics, ChatDiagnosticsChannel } from "../src/provider-proxy/chat-diagnostics.js";
 import { createServer, request as httpRequest } from "node:http";
 import { afterEach, expect, it, vi } from "vitest";
 import { ChatCompletionsBridge, ProviderProxy, chatBridgeRequestTimeoutMs } from "../src/provider-proxy/index.js";
@@ -429,5 +429,32 @@ it("delivers a streaming timeout terminal through the proxy and releases upstrea
   expect(text).not.toContain("response.completed");
   await vi.waitFor(() => expect(upstreamClosed).toBe(true));
   expect(metrics).toHaveLength(1);
-  expect(metrics[0]).toMatchObject({ status: "failed" });
+  expect(metrics[0]).toMatchObject({ status: "failed", errorStage: "stream" });
+});
+
+
+it("collects request routing metrics without a traffic dump and keeps them out of model output", async () => {
+  const delta = { content: "hello", provider_metadata: { gateway: { routing: {
+    finalProvider: "deepseek", totalProviderAttemptCount: 3, modelAttemptCount: 2,
+  } } } };
+  const { bridge } = await fixture(frame(delta, "stop") + "data: [DONE]\n\n");
+  const metrics: ProviderProxyMetrics[] = [];
+  const proxy = new ProviderProxy("127.0.0.1:0", { ...bridge.proxyOptions(), onMetrics: value => { metrics.push(value); } });
+  await proxy.start(); cleanups.push(() => proxy.close());
+  const response = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  const output = await response.text();
+  expect(output).toContain("response.completed");
+  expect(output).not.toContain("finalProvider");
+  expect(metrics).toHaveLength(1);
+  expect(metrics[0]).toMatchObject({ upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2, finishReason: "stop" });
+  expect(metrics[0]?.traffic).toBeUndefined();
+});
+
+it("projects only bounded, correctly typed metric facts without inferring candidates", () => {
+  expect(modelRequestDiagnostics({ fields: { "routing.fallbacks.0": "deepseek", id: "private-id", "gateway.cost": "1" }, truncated: false })).toEqual({});
+  expect(modelRequestDiagnostics({ fields: { "routing.finalProvider": "unsafe value", "routing.totalProviderAttemptCount": "2",
+    "routing.modelAttemptCount": 1.5, finishReason: "x".repeat(257), "error.stage": "unknown", "upstreamError.cause.statusCode": 200 }, truncated: false })).toEqual({});
+  expect(modelRequestDiagnostics({ fields: { "routing.totalProviderAttemptCount": 0, "error.stage": "stream",
+    "upstreamError.cause.code": "rate_limit_exceeded", "upstreamError.cause.type": "rate_limit_error", "upstreamError.cause.statusCode": 429 }, truncated: false }))
+    .toEqual({ upstreamAttemptCount: 0, errorStage: "stream", upstreamErrorCode: "rate_limit_exceeded", upstreamErrorType: "rate_limit_error", upstreamHttpStatus: 429 });
 });

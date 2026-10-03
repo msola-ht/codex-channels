@@ -19,11 +19,13 @@ describe("shared Surface lifecycle presentation", () => {
     const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
       type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "100" },
       threadId: "thread-1", turnId: "turn-1", status: "completed", durationMs: 999_000,
+      sessionDurationMs: 1_071_000,
       timing: { modelRequestCount: 2 },
       sessionAggregate: { requestCount: 3, unsuccessfulRequestCount: 0, inputTokens: 100, cachedInputTokens: null,
         outputTokens: 1_000, reasoningOutputTokens: 0 },
     }));
     expect(rendered).not.toContain("Token/s");
+    expect(rendered).toContain("总耗时：17 min 51 s");
     expect(rendered).not.toContain("本次运行：");
     expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\nToken：1.1 K");
     expect(rendered).not.toContain("会话统计（含子代理）");
@@ -643,6 +645,7 @@ describe("shared Surface lifecycle presentation", () => {
       "Goal：进行中 · 12.5 K / 100 K",
       "Git 分支：feature/lifecycle",
       "OpenAI Credits：未提供",
+      "总耗时：未提供",
       "",
       "账户状态：",
       "周限：剩余 63%",
@@ -744,7 +747,8 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("思考次数：2 次");
     expect(rendered).toContain("Token：20.12 K");
     expect(rendered).toContain("缓存命中率：75.00%");
-    expect(rendered).not.toContain("耗时");
+    expect(rendered).not.toContain("本轮耗时");
+    expect(rendered).toContain("总耗时：未提供");
     expect(rendered).not.toContain("延迟");
     expect(rendered).not.toContain("速度");
   });

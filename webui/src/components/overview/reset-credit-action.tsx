@@ -95,7 +95,7 @@ function ResetCreditDialog({ onClose, onChanged }: { onClose: () => void; onChan
       </AlertDescription></Alert> : null}
       {!pending && management.data ? <Field>
         <FieldLabel htmlFor="reset-credit-choice">{t("resetCredits.choose")}</FieldLabel>
-        <Select value={selected} onValueChange={value => { setSelected(value); setResult(null) }} disabled={busy || management.loading}>
+        <Select items={[{ value: null, label: t("resetCredits.choose") }, ...management.data.credits.map(item => ({ value: item.id, label: `${item.title ?? t("resetCredits.defaultTitle")} · ${item.expiresAt === null ? t("overview.creditNoExpiry") : formatTime(item.expiresAt * 1000)}` }))]} value={selected || null} onValueChange={value => { if (value !== null) { setSelected(value); setResult(null) } }} disabled={busy || management.loading}>
           <SelectTrigger id="reset-credit-choice" className="w-full"><SelectValue placeholder={t("resetCredits.choose")} /></SelectTrigger>
           <SelectContent><SelectGroup>{management.data.credits.map(item => <SelectItem key={item.id} value={item.id}>
             {item.title ?? t("resetCredits.defaultTitle")} · {item.expiresAt === null ? t("overview.creditNoExpiry") : formatTime(item.expiresAt * 1000)}

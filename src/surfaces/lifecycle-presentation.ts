@@ -700,6 +700,10 @@ export function createTurnCompletedPresentation(
   if (event.modelProvider === "openai" || event.sessionAggregate?.responseUsage) {
     sessionFields.push({ label: "OpenAI Credits", value: formatResponseUsage(event.sessionAggregate?.responseUsage) });
   }
+  sessionFields.push({
+    label: "总耗时",
+    value: event.sessionDurationMs === undefined ? "未提供" : formatElapsedDuration(event.sessionDurationMs),
+  });
   const sections = [
     ...(sessionFields.length > 0
       ? [{ title: "当前会话", fields: sessionFields }]

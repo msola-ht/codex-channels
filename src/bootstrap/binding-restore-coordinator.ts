@@ -35,6 +35,7 @@ export interface BindingRestoreCoordinatorOptions {
   output: EventBus<OutputEvent>;
   enabledSurfaces(): readonly Pick<SurfaceAdapter, "surface" | "accountId">[];
   scheduledRecovery(): ScheduledBindingRecoveryPort | undefined;
+  restored?(threadId: string): void;
   markTurnStarted(
     target: ConversationBinding["target"],
     threadId: string,
@@ -207,6 +208,7 @@ export class BindingRestoreCoordinator {
     }
     if (this.stopped) return;
     for (const threadId of restoredThreadIds) {
+      this.options.restored?.(threadId);
       const pending = this.pendingBindingRestores.get(threadId);
       if (!pending) continue;
       this.pendingBindingRestores.delete(threadId);

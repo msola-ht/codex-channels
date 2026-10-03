@@ -21,7 +21,8 @@ export const metricStorageV20Columns = [
 export const metricStorageV23Columns = [...metricStorageV20Columns,
   "source", "caller_id", "key_id", "credential_generation", "relay_request_id", "delivery_status",
 ] as const;
-export const metricStorageColumns = [...metricStorageV23Columns, "response_usage_amount"] as const;
+export const metricStorageV24Columns = [...metricStorageV23Columns, "response_usage_amount"] as const;
+export const metricStorageColumns = [...metricStorageV24Columns, "upstream_provider", "upstream_attempt_count", "model_attempt_count", "finish_reason", "error_stage", "upstream_error_code", "upstream_error_type", "upstream_http_status"] as const;
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
 
 export const modelRequestMetricsV20TableSql = `
@@ -115,8 +116,21 @@ export const modelRequestMetricsV23TableSql = modelRequestMetricsV20TableSql.rep
 export const modelRequestMetricsV22TableSql = modelRequestMetricsV23TableSql.replace(relayIdentityCheck, relayIdentityV22Check);
 export const modelRequestMetricsV21TableSql = modelRequestMetricsV23TableSql.replace(relayIdentityCheck, relayIdentityV21Check);
 export const responseUsageAmountColumn = "response_usage_amount TEXT CHECK (response_usage_amount IS NULL OR (typeof(response_usage_amount) = 'text' AND length(response_usage_amount) BETWEEN 1 AND 128))";
-export const modelRequestMetricsTableSql = modelRequestMetricsV23TableSql.replace(
+export const modelRequestMetricsV24TableSql = modelRequestMetricsV23TableSql.replace(
   "    CHECK (", `    ${responseUsageAmountColumn},\n    CHECK (`,
+);
+export const requestDiagnosticColumnDefinitions = [
+  "upstream_provider TEXT CHECK (upstream_provider IS NULL OR (typeof(upstream_provider) = 'text' AND length(upstream_provider) BETWEEN 1 AND 256 AND upstream_provider NOT GLOB '*[^a-zA-Z0-9_.:/-]*'))",
+  "upstream_attempt_count INTEGER CHECK (upstream_attempt_count IS NULL OR (typeof(upstream_attempt_count) = 'integer' AND upstream_attempt_count BETWEEN 0 AND 9007199254740991))",
+  "model_attempt_count INTEGER CHECK (model_attempt_count IS NULL OR (typeof(model_attempt_count) = 'integer' AND model_attempt_count BETWEEN 0 AND 9007199254740991))",
+  "finish_reason TEXT CHECK (finish_reason IS NULL OR (typeof(finish_reason) = 'text' AND length(finish_reason) BETWEEN 1 AND 256 AND finish_reason NOT GLOB '*[^a-zA-Z0-9_.:/-]*'))",
+  "error_stage TEXT CHECK (error_stage IS NULL OR (error_stage IN ('http', 'stream')))",
+  "upstream_error_code TEXT CHECK (upstream_error_code IS NULL OR (typeof(upstream_error_code) = 'text' AND length(upstream_error_code) BETWEEN 1 AND 256 AND upstream_error_code NOT GLOB '*[^a-zA-Z0-9_.:/-]*'))",
+  "upstream_error_type TEXT CHECK (upstream_error_type IS NULL OR (typeof(upstream_error_type) = 'text' AND length(upstream_error_type) BETWEEN 1 AND 256 AND upstream_error_type NOT GLOB '*[^a-zA-Z0-9_.:/-]*'))",
+  "upstream_http_status INTEGER CHECK (upstream_http_status IS NULL OR (typeof(upstream_http_status) = 'integer' AND upstream_http_status BETWEEN 400 AND 599))",
+] as const;
+export const modelRequestMetricsTableSql = modelRequestMetricsV24TableSql.replace(
+  "    CHECK (", `    ${requestDiagnosticColumnDefinitions.join(",\n    ")},\n    CHECK (`,
 );
 export const relayMetricIndexesSql = `
   CREATE UNIQUE INDEX model_request_metrics_relay_request
@@ -141,6 +155,24 @@ export const schemaMetadataSql = `
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL
   );
+`;
+
+export const turnExecutionSchemaSql = `
+  CREATE TABLE thread_execution_state (
+    thread_id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    history_complete INTEGER NOT NULL CHECK (history_complete IN (0, 1))
+  );
+  CREATE TABLE turn_execution_metrics (
+    thread_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    duration_ms INTEGER CHECK (duration_ms >= 0 AND duration_ms <= 9007199254740991),
+    ordinal INTEGER NOT NULL,
+    recorded_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, turn_id)
+  );
+  CREATE INDEX turn_execution_metrics_order ON turn_execution_metrics (thread_id, ordinal);
+  CREATE INDEX turn_execution_metrics_retention ON turn_execution_metrics (recorded_at_ms);
 `;
 
 export const initialSchemaSql = `
@@ -182,6 +214,7 @@ export const initialSchemaSql = `
     ON subagent_turns (parent_thread_id, parent_turn_id);
   ${modelRequestMetricsTableSql}
   ${modelRequestMetricsIndexesSql}
+  ${turnExecutionSchemaSql}
   INSERT INTO schema_metadata (name, value) VALUES ('schema_version', ${schemaVersion});
 `;
 
@@ -196,7 +229,7 @@ export class ModelRequestMetricsSchemaError extends Error {
     const detail = options?.cause === undefined
       ? `版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
       : `Schema ${actualVersion} 结构不完整。`;
-    const remedy = actualVersion === 20 || actualVersion === 21 || actualVersion === 22 || actualVersion === 23 ? `codexc metrics upgrade --from ${actualVersion} --to 24 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
+    const remedy = [20, 21, 22, 23, 24, 25].includes(actualVersion) ? `codexc metrics upgrade --from ${actualVersion} --to 26 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
     super(
       `模型请求指标数据库${detail}请运行 ${remedy}`,
       options,
@@ -229,6 +262,8 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
     throw new ModelRequestMetricsSchemaError(value ?? 0, schemaVersion);
   }
   try {
+    database.prepare("SELECT thread_id, provider, history_complete FROM thread_execution_state LIMIT 0").all();
+    database.prepare("SELECT thread_id, turn_id, duration_ms, ordinal, recorded_at_ms FROM turn_execution_metrics LIMIT 0").all();
     const metricColumns = database.prepare("PRAGMA table_info(model_request_metrics)")
       .all().map((column) => (column as { name: string }).name);
     if (
@@ -264,6 +299,11 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
     `).all();
     const tableSql = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'model_request_metrics'").get()?.sql;
     const normalize = (text: string): string => text.replace(/\s+/gu, " ").trim();
+    for (const statement of turnExecutionSchemaSql.split(";").filter(sql => sql.trim())) {
+      const name = /CREATE (?:TABLE|INDEX) (\w+)/u.exec(statement)?.[1];
+      const actual = database.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name!)?.sql;
+      if (typeof actual !== "string" || normalize(actual) !== normalize(statement)) throw new Error("轮次耗时 Schema 结构不匹配");
+    }
     if (typeof tableSql !== "string" || !normalize(tableSql).includes(normalize(relayIdentityCheck))) {
       throw new Error("Relay 指标身份约束缺失");
     }

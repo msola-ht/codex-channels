@@ -57,7 +57,7 @@ export function formatFeishuOperation(
       );
     }
     const detail = safeOperationDetail(record.detail);
-    if (record.kind === "command") {
+    if (record.kind === "command" && record.commandExploration === undefined) {
       lines.push("```shell", detail, "```");
     } else {
       lines.push(`具体内容：\`${inlineOperationDetail(detail)}\``);

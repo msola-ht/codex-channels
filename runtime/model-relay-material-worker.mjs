@@ -1,3 +1,4 @@
+import { parseRelayModelId } from "./model-relay-model-id.mjs";
 import { parentPort, workerData } from "node:worker_threads";
 import { readPrivateFileSync, assertPrivateConfigAccessSync } from "./private-file.mjs";
 import { parseGatewayConfig, validateGatewayConfigDocument, validateDebugConfigDocument } from "./gateway-config.mjs";
@@ -20,14 +21,14 @@ parentPort.on("message", () => {
         let providers = [];
         try { providers = listRelayProviderIds(environment); } catch { /* Reject unknown accounts. */ }
         if (readPrivateFileSync(configPath, 1024 * 1024) !== content) continue;
-        parentPort.postMessage({ ok: true, providers, callers: [...config.callers, ...(config.retired_callers ?? [])].map(({ caller_id, key_id, provider, credential_generation }) =>
+        parentPort.postMessage({ ok: true, providers, callers: [...config.callers.flatMap(caller => [...new Set(caller.models.map(id => parseRelayModelId(id).provider))].map(provider => ({ ...caller, provider }))), ...(config.retired_callers ?? [])].map(({ caller_id, key_id, provider, credential_generation }) =>
           ({ caller_id, key_id, provider, credential_generation })) });
         return;
       }
       const materials = []; const unavailable = [];
-      if (config.enabled) for (const account of config.accounts) {
-        try { materials.push(loadConfiguredRelayProviderMaterial(account.provider, environment)); }
-        catch { unavailable.push(account.provider); }
+      if (config.enabled) for (const provider of new Set(config.callers.flatMap(caller => caller.models.map(id => parseRelayModelId(id).provider)))) {
+        try { materials.push(loadConfiguredRelayProviderMaterial(provider, environment)); }
+        catch { unavailable.push(provider); }
       }
       const proxy = readCodexProxySnapshot(environment);
       if (readPrivateFileSync(configPath, 1024 * 1024) !== content) continue;

@@ -5,7 +5,7 @@ import type * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { Label } from "@/components/ui/label"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 
 function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
   return <fieldset data-slot="field-set" className={cn("flex min-w-0 flex-col gap-4", className)} {...props} />

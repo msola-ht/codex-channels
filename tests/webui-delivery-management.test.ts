@@ -291,7 +291,7 @@ it("reads three full pages of summaries without consuming write quotas or exhaus
     for (let page = 0; page < 3; page++) {
       const snapshot = await (await fetch(`${f.url}/queue?before=${before}`, { headers: f.headers })).json() as DeliveryQueueSnapshot;
       const entries = snapshot.records.map(({ id, revision }) => ({ id, revision }));
-      // Six reads also prove these do not consume the five-operation high-risk budget.
+      // Repeated batch reads stay within the independent read budget.
       for (let repeat = 0; repeat < 2; repeat++) {
         const response = await f.post("content-batch", { entries });
         expect(response.status).toBe(200);

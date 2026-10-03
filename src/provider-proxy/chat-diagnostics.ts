@@ -8,6 +8,47 @@ const record = (value: unknown): Record<string, unknown> => value !== null && ty
 const identifiers = ["id", "generationId", "model", "object", "system_fingerprint", "service_tier"];
 const costs = ["cost", "gatewayCost", "inferenceCost", "inputInferenceCost", "outputInferenceCost", "marketCost", "surchargeCost"];
 
+/** Independent request metrics; excludes IDs, bodies, costs and routing history. */
+export interface ModelRequestDiagnostics {
+  upstreamProvider?: string | null;
+  upstreamAttemptCount?: number | null;
+  modelAttemptCount?: number | null;
+  finishReason?: string | null;
+  errorStage?: "http" | "stream" | null;
+  upstreamErrorCode?: string | null;
+  upstreamErrorType?: string | null;
+  upstreamHttpStatus?: number | null;
+}
+
+export const modelRequestDiagnosticKeys = ["upstreamProvider", "upstreamAttemptCount", "modelAttemptCount", "finishReason", "errorStage", "upstreamErrorCode", "upstreamErrorType", "upstreamHttpStatus"] as const;
+
+/** Shared IPC boundary validation for both owned and Relay requests. */
+export function validModelRequestDiagnostics(value: Record<string, unknown>): boolean {
+  return modelRequestDiagnosticKeys.every(key => {
+    const field = value[key];
+    if (field == null) return true;
+    if (key === "errorStage") return field === "http" || field === "stream";
+    if (key === "upstreamHttpStatus") return typeof field === "number" && Number.isInteger(field) && field >= 400 && field <= 599;
+    if (key === "upstreamAttemptCount" || key === "modelAttemptCount") return typeof field === "number" && Number.isSafeInteger(field) && field >= 0;
+    return typeof field === "string" && /^[a-zA-Z0-9_.:/-]{1,256}$/u.test(field);
+  });
+}
+
+export function modelRequestDiagnostics(snapshot: ChatDiagnosticSnapshot): ModelRequestDiagnostics {
+  const fields = snapshot.fields;
+  const candidates = {
+    upstreamProvider: fields["routing.finalProvider"],
+    upstreamAttemptCount: fields["routing.totalProviderAttemptCount"],
+    modelAttemptCount: fields["routing.modelAttemptCount"],
+    finishReason: fields.finishReason,
+    errorStage: fields["error.stage"],
+    upstreamErrorCode: fields["upstreamError.cause.code"],
+    upstreamErrorType: fields["upstreamError.cause.type"],
+    upstreamHttpStatus: fields["upstreamError.cause.statusCode"],
+  };
+  return Object.fromEntries(Object.entries(candidates).filter(([key, value]) => value !== undefined && validModelRequestDiagnostics({ [key]: value })));
+}
+
 export class ChatDiagnostics {
   private readonly fields: Fields = {};
   private truncated = false;

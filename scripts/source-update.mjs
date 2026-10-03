@@ -905,7 +905,7 @@ function inspectRelayRunning(environment) {
 async function startCoreServices(checkout, environment, options, relayWasRunning) {
   const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
   const targets = ["app-server", "gateway"];
-  if (relayWasRunning && serviceControlDefinitions(platform, "all", "start", environment).some(service => service.target === "model-relay")) targets.push("model-relay");
+  if (relayWasRunning && serviceControlDefinitions(platform, "all", "start", environment).some(service => service.target === "model-relay")) targets.push("relay");
   for (const target of targets) run(process.execPath,
     [join(checkout, "bin", "codexc.mjs"), "service", "start", target], checkout, environment, options.runCommand);
 }

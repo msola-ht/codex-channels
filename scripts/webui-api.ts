@@ -1,3 +1,5 @@
+export type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
+import type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 export type RangeName =
   | "today" | "yesterday" | "24h" | "7d" | "30d" | "90d" | "all"
@@ -181,6 +183,7 @@ export interface ThreadsResponse extends MetricsPageSummary {
 }
 
 export interface TurnSummary {
+  durationMs?: number | null
   provider: string | null
   model: string | null
   reasoningEffort: string | null
@@ -196,6 +199,8 @@ export interface TurnSummary {
 }
 
 export interface ThreadRunResponse {
+  latestExecution?: { turnId: string; durationMs: number | null } | null
+  sessionDurationMs?: number | null
   generatedAt: string
   threadId: string
   agentPath: string | null
@@ -213,6 +218,15 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  upstreamProvider?: string | null
+  upstreamAttemptCount?: number | null
+  modelAttemptCount?: number | null
+  finishReason?: string | null
+  errorStage?: "http" | "stream" | null
+  upstreamErrorCode?: string | null
+  upstreamErrorType?: string | null
+  upstreamHttpStatus?: number | null
+
   source?: "owned" | "relay"
   callerId?: string | null
   /** 当前配置中的用途名称；仅用于展示，不改变历史调用身份或筛选。 */
@@ -1043,9 +1057,10 @@ export interface TrafficTraceResponse extends Omit<TrafficDetailResponse, "excha
 export type RelayReasoning = "passthrough" | "off";
 export interface RelayManagedCaller {
   caller_id: string; display_name?: string; key_id: string; credential_generation: number; enabled: boolean;
-  provider: string; models: string[]; reasoning: RelayReasoning;
+  models: string[]; reasoning: RelayReasoning;
 }
 export interface RelayManagementSnapshot {
+  clineCatalog?: ClineRelayCatalogSnapshot;
   revision: string; enabled: boolean; maxConcurrency: number; callers: RelayManagedCaller[];
   usage: { observedAtMs: number; startAtMs: number; callers: Array<{
     callerId: string; keyId: string; lastRequestAtMs: number | null; requestCount: number; unsuccessfulRequestCount: number;
@@ -1055,11 +1070,11 @@ export interface RelayManagementSnapshot {
     capture: { enabled: boolean; state: "initializing" | "ready" | "failed" | "closed"; active: number; skippedCapacity: number };
     metrics: { accepted: number; unconfirmed: number; rejected: number; localDropped: number } }
     | { state: "stopped" | "unknown" };
-  providers: Array<{ id: string; available: boolean; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; reasoningOff: boolean; inputModalities: Array<"text" | "image" | "audio"> }> }>;
+  providers: Array<{ id: string; available: boolean; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; relayId: string; reasoningOff: boolean; inputModalities: Array<"text" | "image" | "audio" | "video" | "pdf"> }> }>;
 }
 export type RelayManagementInput =
-  | { command: "issue"; name?: string; caller: string; key: string; provider: string; models: string[]; reasoning: RelayReasoning }
-  | { command: "edit"; name?: string; provider?: string; caller: string; models: string[]; reasoning: RelayReasoning }
+  | { command: "issue"; name?: string; caller: string; key: string; models: string[]; reasoning: RelayReasoning }
+  | { command: "edit"; name?: string; models?: string[]; caller: string; reasoning: RelayReasoning }
   | { command: "rotate" | "disable" | "delete"; caller: string };
 export interface RelayManagementMutation { revision: string; input: RelayManagementInput }
 export interface RelayManagementPreview { command: RelayManagementInput["command"]; caller: string; callers: RelayManagedCaller[] }
@@ -1079,7 +1094,7 @@ export type RelayQueueSnapshot = { state: "stopped" | "unknown" } | {
     requestId: string;
     callerId: string;
     displayName: string | null;
-    provider: string;
+    provider: string | null;
     model: string | null;
     protocol: "chat" | "responses";
     phase: "input" | "queue" | "prepare" | "upstream" | "delivery";

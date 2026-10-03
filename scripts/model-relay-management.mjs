@@ -1,8 +1,10 @@
+import { parseRelayModelId, relayModelId } from "../runtime/model-relay-model-id.mjs";
+import { readClineRelayCatalog, downloadClineRelayCatalog, saveClineRelayCatalog } from "./cline-relay-catalog.mjs";
 import { stringify } from "smol-toml";
 import { createHash, randomBytes } from "node:crypto";
 import { parseGatewayConfig, validateGatewayConfigDocument, withGatewayConfigLock } from "../runtime/gateway-config.mjs";
 import { assertPrivateConfigAccessSync, readPrivateFileSync } from "../runtime/private-file.mjs";
-import { modelRelayConfigDigest, modelRelayConfigSchema, upgradeModelRelayLimits } from "../runtime/model-relay-config.mjs";
+import { modelRelayConfigDigest, modelRelayConfigSchema, relayKeyModelsSchema } from "../runtime/model-relay-config.mjs";
 import { loadConfiguredRelayProviderMaterial, listRelayProviderIds } from "../runtime/model-provider-runtime.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
@@ -12,9 +14,8 @@ import { locateUserConfig } from "./runtime-config.mjs";
 import { supportsChatReasoningOff } from "../runtime/chat-reasoning.mjs";
 import { ConfigManagementError } from "./config-management-error.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
-import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 
-const commands = ["listen", "status", "providers", "callers", "issue", "edit", "delete", "rotate", "disable", "enable", "upgrade-limits", "rollback-reasoning", "rollback-names", "rollback-providers", "rollback-retired"];
+const commands = ["listen", "status", "providers", "callers", "issue", "edit", "delete", "rotate", "disable", "enable"];
 const invalid = message => new ConfigManagementError("relay_invalid", "relay", message);
 const conflict = () => new ConfigManagementError("stale-revision", "relay", "Relay 配置或模型目录已变化，请刷新后重新预览");
 
@@ -33,20 +34,21 @@ export function readRelayManagement(environment = process.env) {
   const content = readPrivateFileSync(configPath, 1024 * 1024);
   const document = validateGatewayConfigDocument(parseGatewayConfig(content));
   const config = document.model_relay ?? modelRelayConfigSchema.parse({});
+  const clineCatalog = readClineRelayCatalog(environment);
   const materialRevisions = [];
   const providers = listRelayProviderIds(environment).map(id => {
     try {
       const material = loadConfiguredRelayProviderMaterial(id, environment);
       materialRevisions.push([id, material.revision]);
       return { id, available: true, protocols: material.protocols, models: material.models.map(idModel => {
-        const inputs = material.modelInputs[idModel];
-        const inputModalities = inputs?.length && inputs.every(value => ["text", "image", "audio"].includes(value)) ? [...new Set(inputs)] : [];
-        return { id: idModel, reasoningOff: supportsChatReasoningOff(id, idModel), inputModalities };
+        const inputs = Object.hasOwn(material.modelInputs, idModel) ? material.modelInputs[idModel] : undefined;
+        const inputModalities = inputs?.length && inputs.every(value => ["text", "image", "audio", "video", "pdf"].includes(value)) ? [...new Set(inputs)] : [];
+        return { id: idModel, relayId: relayModelId(id, idModel), reasoningOff: supportsChatReasoningOff(id, idModel) || (material.modelCapabilities ?? []).some(model => model.id === idModel && model.reasoning_efforts.includes("none")), inputModalities };
       }) };
     } catch { return { id, available: false, protocols: [], reason: "provider_material_unavailable", models: [] }; }
   });
-  return { revision: createHash("sha256").update(content).update(JSON.stringify([providers, materialRevisions])).digest("hex"),
-    enabled: config.enabled, maxConcurrency: config.max_concurrency, providers, callers: safeCallers(config.callers) };
+  return { revision: createHash("sha256").update(content).update(JSON.stringify([providers, materialRevisions, clineCatalog])).digest("hex"),
+    clineCatalog, enabled: config.enabled, maxConcurrency: config.max_concurrency, providers, callers: safeCallers(config.callers) };
 }
 
 /** Listener settings do not depend on Provider catalog availability. */
@@ -60,8 +62,8 @@ export function readRelayListener(environment = process.env) {
 }
 
 function safeCallers(callers) {
-  return callers.map(({ caller_id, key_id, credential_generation, enabled, provider, models, reasoning, display_name }) =>
-    ({ caller_id, key_id, credential_generation, enabled, provider, models, ...(display_name === undefined ? {} : { display_name }), reasoning: reasoning ?? "passthrough" }));
+  return callers.map(({ caller_id, key_id, credential_generation, enabled, reasoning, display_name, models }) =>
+    ({ caller_id, key_id, credential_generation, enabled, models: [...models], ...(display_name === undefined ? {} : { display_name }), reasoning: reasoning ?? "passthrough" }));
 }
 
 // Only recover a completed mutation result: failures before callback completion still fail closed.
@@ -95,6 +97,19 @@ function withRelayConfigLock(configPath, operation) {
 
 /** Explicit configuration transaction; service activation occurs only after atomic save. */
 export async function manageModelRelay(input, environment = process.env, options = {}) {
+  // Revision-bound confirmation must use exactly the catalog reviewed in its preview.
+  if (!options.preview && options.expectedRevision === undefined && readClineRelayCatalog(environment).status === "missing"
+    && (input.command === "providers" || ["issue", "edit"].includes(input.command) && input.models?.some(id => id.startsWith("clp-")))
+    && listRelayProviderIds(environment).some(id => input.command === "providers" ? id.startsWith("clp-") : input.models?.some(model => model.startsWith(`${id}/`)))) {
+    try {
+      const catalog = await downloadClineRelayCatalog(environment);
+      await withRelayManagementTransaction(environment, () => {
+        // Downloads must not block revocation. Another owner may have saved a catalog meanwhile.
+        if (readClineRelayCatalog(environment).status !== "missing") return {};
+        return { activation: "catalog_saved", catalog: saveClineRelayCatalog(catalog, environment) };
+      });
+    } catch { throw invalid("Cline 模型目录自动下载失败，请检查网络后重试，或在 WebUI 手动下载"); }
+  }
   if (["listen", "issue", "edit", "delete", "rotate", "disable", "enable"].includes(input.command)) {
     return withRelayManagementTransaction(environment, () => executeModelRelay(input, environment, options));
   }
@@ -103,6 +118,7 @@ export async function manageModelRelay(input, environment = process.env, options
 
 async function executeModelRelay(input, environment, options) {
   if (!commands.includes(input.command)) throw invalid("未知 Relay 操作");
+  if (Object.hasOwn(input, "extraModels") || ["issue", "edit"].includes(input.command) && Object.hasOwn(input, "provider")) throw invalid("提供商不再支持思考覆盖；请在 Key 设置思考策略");
   if (input.reasoning !== undefined && !["passthrough", "off"].includes(input.reasoning)) throw invalid("思考策略无效");
   const { configPath } = locateUserConfig(environment);
   const endpoint = modelRelayPaths(configPath).control;
@@ -114,26 +130,6 @@ async function executeModelRelay(input, environment, options) {
     const document = validateGatewayConfigDocument(parseGatewayConfig(readPrivateFileSync(configPath, 1024 * 1024)));
     return { callers: safeCallers(document.model_relay?.callers ?? []) };
   }
-  if (input.command === "upgrade-limits") return withRelayConfigLock(configPath, () => {
-    assertPrivateConfigAccessSync(configPath);
-    const content = readPrivateFileSync(configPath, 1024 * 1024);
-    const document = parseGatewayConfig(content);
-    if (document.model_relay === undefined) {
-      validateGatewayConfigDocument(document); return { result: "unchanged", backupPath: null };
-    }
-    const upgraded = upgradeModelRelayLimits(document.model_relay);
-    const entries = [...(document.model_relay.accounts ?? []), ...(document.model_relay.callers ?? [])];
-    const changed = entries.some(entry => ["max_concurrency", "requests_per_minute", "burst"].some(key => Object.hasOwn(entry, key)));
-    if (!changed) { validateGatewayConfigDocument(document); return { result: "unchanged", backupPath: null }; }
-    document.model_relay = upgraded;
-    validateGatewayConfigDocument(document);
-    return { result: "upgraded", backupPath: saveConfigWithBackup(configPath, content, document, "relay", { maximumBytes: 1024 * 1024 }) };
-  });
-  if (["rollback-reasoning", "rollback-names", "rollback-providers", "rollback-retired"].includes(input.command)) {
-    if (await gatewayOwnerIsActive(configPath) || (await queryModelRelayControl(endpoint, "status")).result !== "not_running") {
-      throw invalid("回退前须停止 Gateway、Relay 和 WebUI（含前台实例）；将按命令移除对应名称、策略、提供商引用或历史身份摘要");
-    }
-  }
   let secret;
   const result = withRelayConfigLock(configPath, () => {
     assertPrivateConfigAccessSync(configPath);
@@ -142,7 +138,6 @@ async function executeModelRelay(input, environment, options) {
     if (options.expectedConfigRevision !== undefined && createHash("sha256").update(content).digest("hex") !== options.expectedConfigRevision) throw conflict();
     const document = parseGatewayConfig(content);
     const validated = validateGatewayConfigDocument(document);
-    if (["rollback-reasoning", "rollback-names", "rollback-providers", "rollback-retired"].includes(input.command) && validated.model_relay === undefined) return { result: "unchanged", backupPath: null };
     const config = structuredClone(validated.model_relay ?? modelRelayConfigSchema.parse({}));
     const previous = modelRelayConfigDigest(config);
     let removed;
@@ -151,47 +146,19 @@ async function executeModelRelay(input, environment, options) {
       config.host = input.host; config.enabled = input.enabled;
     } else if (input.command === "issue") {
       if ([...config.callers, ...(config.retired_callers ?? [])].some(caller => caller.caller_id === input.caller || caller.key_id === input.key)) throw invalid("Relay 身份已存在，包含停用或历史记录；不能重复使用");
-      const material = loadConfiguredRelayProviderMaterial(input.provider, environment);
-      if (input.models.some(model => !material.models.includes(model))) throw invalid("Relay 模型不在账户目录中");
-      if (!config.accounts.some(account => account.provider === input.provider)) config.accounts.push({ provider: input.provider });
+      validateKeyModels(input.models, environment);
       const bytes = options.preview ? Buffer.alloc(32) : randomBytes(32); secret = `cr1.${input.key}.${bytes.toString("base64url")}`;
       config.callers.push({ caller_id: input.caller, key_id: input.key, credential_generation: 1,
         ...(input.name === undefined ? {} : { display_name: input.name }),
-        secret_sha256: createHash("sha256").update(bytes).digest("hex"), enabled: true, provider: input.provider, models: input.models, ...(input.reasoning === "off" ? { reasoning: "off" } : {}) });
-    } else if (input.command === "rollback-retired") {
-      delete config.retired_callers;
-    } else if (input.command === "rollback-providers") {
-      const selected = new Set(input.providers);
-      const nonClp = value => !/^clp-[a-z0-9_-]{1,32}$/u.test(value.provider);
-      if (!selected.size || [...selected].some(id => ![...config.accounts, ...config.callers].some(value => value.provider === id && nonClp(value)))
-        || [...config.accounts, ...config.callers].some(value => nonClp(value) && !selected.has(value.provider))) {
-        throw invalid("必须明确列出全部非 CLP Relay 账户；不允许删除 CLP 账户或隐式移除其他引用");
-      }
-      config.accounts = config.accounts.filter(value => !selected.has(value.provider));
-      config.callers = config.callers.filter(value => !selected.has(value.provider));
-    } else if (["rollback-reasoning", "rollback-names"].includes(input.command)) {
-      for (const caller of config.callers) {
-        if (input.command === "rollback-names") delete caller.display_name;
-        else delete caller.reasoning;
-      }
+        secret_sha256: createHash("sha256").update(bytes).digest("hex"), enabled: true, models: [...input.models], ...(input.reasoning === "off" ? { reasoning: "off" } : {}) });
     } else if (input.command === "edit") {
       const caller = config.callers.find(value => value.caller_id === input.caller);
       if (!caller) throw invalid("Relay 调用方不存在");
-      const provider = input.provider ?? caller.provider;
-      if (provider !== caller.provider && !input.models?.length) throw invalid("更换提供商时必须明确选择模型");
-      const models = input.models?.length ? input.models : caller.models;
-      const policyChanged = provider !== caller.provider || models.length !== caller.models.length || models.some(model => !caller.models.includes(model))
-        || input.reasoning !== undefined && input.reasoning !== (caller.reasoning ?? "passthrough");
-      if (policyChanged) {
-        const material = loadConfiguredRelayProviderMaterial(provider, environment);
-        if (models.some(model => !material.models.includes(model))) throw invalid("Relay 模型不在账户目录中");
-      }
-      if (caller.provider !== provider) {
-        if (!config.accounts.some(account => account.provider === provider)) config.accounts.push({ provider });
+      if (input.models !== undefined && JSON.stringify(input.models) !== JSON.stringify(caller.models)) {
+        validateKeyModels(input.models, environment);
         retainSettlementIdentity(config, caller);
+        caller.models = [...input.models];
       }
-      caller.provider = provider;
-      caller.models = models;
       if (input.name !== undefined) caller.display_name = input.name;
       if (input.reasoning === "off") caller.reasoning = "off";
       else if (input.reasoning === "passthrough") delete caller.reasoning;
@@ -210,14 +177,10 @@ async function executeModelRelay(input, environment, options) {
         caller.secret_sha256 = createHash("sha256").update(bytes).digest("hex"); caller.credential_generation++; caller.enabled = true;
       }
     } else config.enabled = input.command === "enable";
-    if (["issue", "edit", "delete"].includes(input.command)) {
-      const referenced = new Set(config.callers.map(caller => caller.provider));
-      config.accounts = config.accounts.filter(account => referenced.has(account.provider));
-    }
     const parsed = modelRelayConfigSchema.safeParse(config);
     if (!parsed.success) {
       const fields = new Set(parsed.error.issues.map(issue => issue.path.at(-1)));
-      if (fields.has("reasoning")) throw invalid("所选提供商和模型不支持强制关闭思考；请查询 codexc relay providers 或选择跟随请求");
+      if (fields.has("reasoning")) throw invalid("模型思考策略须属于显式声明的支持等级");
       if (fields.has("display_name")) throw invalid("用途名称须为 1–64 个字符，不含控制字符或首尾空白");
       throw invalid("Relay 身份、模型或配置限制无效；请核对身份格式、模型列表及账户/Key 数量限制");
     }
@@ -245,11 +208,26 @@ async function executeModelRelay(input, environment, options) {
 /** Retains settlement authority only; never a usable credential or request permission. */
 function retainSettlementIdentity(config, caller) {
   const retired = config.retired_callers ??= [];
-  const existing = retired.find(value => value.caller_id === caller.caller_id && value.key_id === caller.key_id && value.provider === caller.provider);
-  if (existing) existing.credential_generation = Math.max(existing.credential_generation, caller.credential_generation);
-  else {
-    if (retired.length >= 4096) throw invalid("Relay 历史身份摘要已达容量上限，未修改配置");
-    const { caller_id, key_id, provider, credential_generation } = caller;
-    retired.push({ caller_id, key_id, provider, credential_generation });
+  for (const provider of new Set(caller.models.map(id => parseRelayModelId(id).provider))) {
+    const existing = retired.find(value => value.caller_id === caller.caller_id && value.key_id === caller.key_id && value.provider === provider);
+    if (existing) existing.credential_generation = Math.max(existing.credential_generation, caller.credential_generation);
+    else {
+      if (retired.length >= 4096) throw invalid("Relay 历史身份已达容量上限");
+      retired.push({ caller_id: caller.caller_id, key_id: caller.key_id, provider, credential_generation: caller.credential_generation });
+    }
+  }
+}
+
+function validateKeyModels(models, environment) {
+  const parsed = relayKeyModelsSchema.safeParse(models);
+  if (!parsed.success) throw invalid("请为 Key 选择至少一个提供商/模型 ID，不能重复");
+  const materials = new Map();
+  for (const id of parsed.data) {
+    const { provider } = parseRelayModelId(id);
+    if (!materials.has(provider)) {
+      try { materials.set(provider, loadConfiguredRelayProviderMaterial(provider, environment)); }
+      catch { throw invalid("Key 提供商目录或凭据不可用，请刷新后重新选择模型"); }
+    }
+    if (materials.get(provider).models.filter(model => relayModelId(provider, model) === id).length !== 1) throw invalid("Key 模型在当前提供商目录中不可用");
   }
 }

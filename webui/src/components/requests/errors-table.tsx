@@ -36,7 +36,7 @@ export function ErrorsTable({ records, query, loading, pagination }: {
                             </TableHint> : <TruncatedText text={message} className="max-w-md text-xs text-muted-foreground" />}</>
     } },
     { id: "thread", enableSorting: false, header: t("errorList.threadColumn"), cell: ({ row: { original: record } }) => {
-      return <>{record.threadId === null ? "—" : <TruncatedText asChild text={record.turnId ?? record.threadId} className="max-w-40"><Link className="underline-offset-4 hover:underline" to={metricsLink("/requests", query, { threadId: record.threadId, turnId: record.turnId ?? undefined, status: undefined })}>{record.turnId ?? record.threadId}</Link></TruncatedText>}</>
+      return <>{record.threadId === null ? "—" : <TruncatedText render={<Link className="underline-offset-4 hover:underline" to={metricsLink("/requests", query, { threadId: record.threadId, turnId: record.turnId ?? undefined, status: undefined })} />} text={record.turnId ?? record.threadId} className="max-w-40">{record.turnId ?? record.threadId}</TruncatedText>}</>
     } },
   ]
   return <DataTable title={t("errorList.tableTitle")} description={() => t("errorList.tableDescription")}

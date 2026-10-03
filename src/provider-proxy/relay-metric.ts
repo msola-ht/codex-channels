@@ -1,6 +1,7 @@
+import type { ModelRequestDiagnostics } from "./chat-diagnostics.js";
 import type { DirectChatUsage } from "../model-api/index.js";
 
-export interface RelayMetric extends DirectChatUsage {
+export interface RelayMetric extends DirectChatUsage, ModelRequestDiagnostics {
   source: "relay";
   traffic?: { label: string; session: string; interaction: number };
   threadId: null;

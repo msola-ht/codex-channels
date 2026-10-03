@@ -16,6 +16,7 @@ export class WebuiManagementTaskRunner {
   #tasks = new Map();
   #now;
   #onEvent;
+  #listeners = new Set();
   #cancellationGraceMs;
   constructor({ now = Date.now, onEvent = null, cancellationGraceMs = defaultCancellationGraceMs } = {}) {
     this.#now = now;
@@ -94,6 +95,7 @@ export class WebuiManagementTaskRunner {
       auditMetadata,
     };
     this.#tasks.set(id, task);
+    this.#notify(task);
     // The runner must never leak a rejected promise into the WebUI process.
     // Resolution failures (missing executable, invalid Windows shell, etc.)
     // are represented as a failed task instead.
@@ -111,6 +113,35 @@ export class WebuiManagementTaskRunner {
 
   list(owner) {
     return [...this.#tasks.values()].filter((task) => task.owner === owner).map(publicTask);
+  }
+
+  watch(owner, signal, receive) {
+    if (signal.aborted) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      let heartbeat;
+      const cleanup = () => {
+        clearInterval(heartbeat);
+        this.#listeners.delete(listener);
+        signal.removeEventListener("abort", close);
+      };
+      const close = () => { cleanup(); resolve(); };
+      const send = (type) => {
+        try { receive(type); } catch (error) { cleanup(); reject(error); }
+      };
+      const listener = { owner, notify: () => send("changed") };
+      this.#listeners.add(listener);
+      signal.addEventListener("abort", close, { once: true });
+      heartbeat = setInterval(() => send("heartbeat"), 15_000);
+      heartbeat.unref?.();
+      // Subscribe before the initial invalidation so reads cannot miss a transition.
+      send("changed");
+    });
+  }
+
+  #notify(task) {
+    for (const listener of this.#listeners) {
+      if (listener.owner === task.owner) listener.notify();
+    }
   }
 
   cancel(id, owner) {
@@ -132,6 +163,7 @@ export class WebuiManagementTaskRunner {
           // The close/error event will finalize the task when possible.
         }
       }, this.#cancellationGraceMs);
+      this.#notify(task);
     }
     return publicTask(task);
   }
@@ -140,6 +172,7 @@ export class WebuiManagementTaskRunner {
     if (task.state !== "queued") return;
     task.state = "running";
     task.updatedAt = new Date(this.#now()).toISOString();
+    this.#notify(task);
     const args = normalized.operation === "service"
       ? ["service", normalized.action, ...(normalized.target === undefined ? [] : [serviceCommandTarget(normalized.target)])]
       : normalized.operation === "update"
@@ -203,6 +236,7 @@ export class WebuiManagementTaskRunner {
   }
 
   #emitTerminal(task, state, resultCode, recovery) {
+    this.#notify(task);
     if (this.#onEvent === null || task.auditMetadata === null) return;
     try {
       this.#onEvent({ ...task.auditMetadata, task: publicTask(task), phase: state, resultCode, recovery });
@@ -214,7 +248,10 @@ export class WebuiManagementTaskRunner {
   #pruneTerminalTasks() {
     if (this.#tasks.size < maximumTaskHistory) return;
     for (const [id, task] of this.#tasks) {
-      if (!["queued", "running", "cancelling"].includes(task.state)) this.#tasks.delete(id);
+      if (!["queued", "running", "cancelling"].includes(task.state)) {
+        this.#tasks.delete(id);
+        this.#notify(task);
+      }
       if (this.#tasks.size < maximumTaskHistory) return;
     }
   }

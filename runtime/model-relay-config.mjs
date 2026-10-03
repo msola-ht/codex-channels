@@ -1,5 +1,5 @@
+import { parseRelayModelId } from "./model-relay-model-id.mjs";
 import { isRelayListenHost } from "./model-relay-listen-host.mjs";
-import { supportsChatReasoningOff } from "./chat-reasoning.mjs";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 
@@ -11,18 +11,13 @@ const limits = (concurrency, burst) => ({
   requests_per_minute: z.number().int().min(0).max(600).default(0),
   burst: z.number().int().min(1).max(32).default(burst),
 });
-function schema(legacy, legacyCapture = false) {
-  return z.strictObject({
+export const relayKeyModelsSchema = z.array(z.string().refine(value => parseRelayModelId(value) !== null)).min(1).max(256)
+  .refine(values => new Set(values).size === values.length);
+export const modelRelayConfigSchema = z.strictObject({
     enabled: z.boolean().default(false),
-    ...(legacyCapture ? {
-      traffic_dump: z.boolean().default(false),
-      traffic_dump_mode: z.enum(["production", "debug"]).default("production"),
-      traffic_dump_debug: z.strictObject({ caller_id: identity, expires_at_ms: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).optional(),
-    } : {}),
     host: z.string().refine(isRelayListenHost, "Relay 监听地址须为回环、IPv4 内网地址或 0.0.0.0").default("127.0.0.1"),
     port: z.number().int().min(1024).max(65535).default(4119),
     ...limits(10, 10),
-    accounts: z.array(z.strictObject({ provider, ...(legacy ? limits(10, 10) : {}) })).max(128).default([]),
     retired_callers: z.array(z.strictObject({ caller_id: identity, key_id: identity, provider,
       credential_generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER) })).max(4096).optional(),
     callers: z.array(z.strictObject({
@@ -33,18 +28,10 @@ function schema(legacy, legacyCapture = false) {
       secret_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
       enabled: z.boolean(),
       reasoning: z.enum(["passthrough", "off"]).optional(),
-      provider,
-      models: z.array(z.string().min(1).max(200).refine(value => ![...value].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))).min(1).max(64)
-        .refine(values => new Set(values).size === values.length),
-      ...(legacy ? limits(10, 10) : {}),
+      models: relayKeyModelsSchema,
     })).max(128).default([]),
   }).superRefine((value, context) => {
-    if (legacyCapture && (value.traffic_dump_mode === "debug" ? !value.traffic_dump || !value.traffic_dump_debug || !value.callers.some(caller => caller.caller_id === value.traffic_dump_debug.caller_id)
-      : value.traffic_dump_debug !== undefined)) {
-      context.addIssue({ code: "custom", path: ["traffic_dump_debug"], message: "Relay 调试采集必须启用、指定已存在调用方和截止时间；生产模式不接受调试表" });
-    }
-    for (const [values, key, path] of [[value.accounts, "provider", "accounts"],
-      [value.callers, "caller_id", "callers"], [value.callers, "key_id", "callers"]]) {
+    for (const [values, key, path] of [[value.callers, "caller_id", "callers"], [value.callers, "key_id", "callers"]]) {
       if (new Set(values.map(entry => entry[key])).size !== values.length) {
         context.addIssue({ code: "custom", path: [path], message: `Relay ${key} 必须唯一` });
       }
@@ -61,26 +48,7 @@ function schema(legacy, legacyCapture = false) {
       }
       callerKeys.set(entry.caller_id, entry.key_id); keyCallers.set(entry.key_id, entry.caller_id);
     }
-    for (const [index, caller] of value.callers.entries()) {
-      if (caller.reasoning === "off" && !caller.models.every(model => supportsChatReasoningOff(caller.provider, model))) {
-        context.addIssue({ code: "custom", path: ["callers", index, "reasoning"], message: "所选提供商和模型不支持强制关闭思考" });
-      }
-      if (caller.enabled && !value.accounts.some(account => account.provider === caller.provider)) {
-        context.addIssue({ code: "custom", path: ["callers", index, "provider"], message: "Relay 调用方必须引用已声明账户" });
-      }
-    }
   });
-}
-export const modelRelayConfigSchema = schema(false);
-
-/** Explicit upgrade only; runtime validation never accepts removed limit fields. */
-export function upgradeModelRelayLimits(value) {
-  const legacy = schema(true).parse(value);
-  for (const entry of [...legacy.accounts, ...legacy.callers]) {
-    delete entry.max_concurrency; delete entry.requests_per_minute; delete entry.burst;
-  }
-  return modelRelayConfigSchema.parse(legacy);
-}
 
 /** Projection of already validated configuration; never loads provider credentials. */
 export function relayPolicyFromConfig(config) {
@@ -88,20 +56,12 @@ export function relayPolicyFromConfig(config) {
   return { enabled: config.enabled, ...limit(config),
     retiredCallers: (config.retired_callers ?? []).map(({ caller_id, key_id, credential_generation }) =>
       ({ callerId: caller_id, keyId: key_id, credentialGeneration: credential_generation })),
-    accounts: config.accounts.map(account => ({ provider: account.provider })),
+    accounts: [...new Set(config.callers.flatMap(caller => caller.models.map(id => parseRelayModelId(id).provider)))].map(provider => ({ provider })),
     callers: config.callers.map(caller => ({ callerId: caller.caller_id, keyId: caller.key_id,
       credentialGeneration: caller.credential_generation, secretSha256: caller.secret_sha256,
-      enabled: caller.enabled, provider: caller.provider, models: [...caller.models], reasoning: caller.reasoning ?? "passthrough" })) };
+      enabled: caller.enabled, models: [...caller.models], reasoning: caller.reasoning ?? "passthrough" })) };
 }
 
 export function modelRelayConfigDigest(config) {
   return createHash("sha256").update(JSON.stringify(config)).digest("hex");
-}
-
-/** Only the explicit traffic upgrade accepts the removed capture fields. */
-export function removeLegacyRelayCapture(value) {
-  schema(false, true).parse(value);
-  const current = { ...value };
-  for (const key of ["traffic_dump", "traffic_dump_mode", "traffic_dump_debug"]) delete current[key];
-  return current;
 }

@@ -1,19 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { useServerTimeSnapshot } from "@/hooks/use-server-time"
-import { estimateServerTime } from "@/lib/server-time"
-import type { OfficialAccountSnapshotsResponse } from "@/lib/types"
-
 import { ApiClientError } from "@/lib/api"
 import { useApi } from "@/hooks/use-api"
-import { scheduleVisibleSettingsRefresh } from "@/lib/api-polling"
+import { useQueueEvents, useQueueSnapshot } from "@/hooks/use-queue-events"
 import {
   fetchOfficialAccountSources,
   fetchOfficialAccountSnapshots,
   refreshOfficialAccountSnapshot,
+  watchAccountSnapshots,
 } from "@/lib/api"
 import {
-  automaticAccountProviders, beginAccountRefreshAttempt, clearRecoveredAccountFailures, type AccountRefreshAttempts,
+  beginAccountRefreshAttempt, clearRecoveredAccountFailures, type AccountRefreshAttempts,
   accountRefreshErrors, accountSnapshotsWithMissingProviders, accountSnapshotsAfterRefresh, mergeAccountSnapshotLists,
   accountSnapshotsWithoutRemoved, ccgAccountFromSnapshot, deepseekAccountFromSnapshot,
   quotaAccountFromSnapshot, openAiCreditsFromSnapshot, openAiWeeklyQuotaFromSnapshot, refreshableAccounts, remainingRemovedAccountProviders, refreshAccountSnapshots,
@@ -22,8 +19,8 @@ import {
 } from "@/lib/account-refresh-state"
 
 export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
-  const clock = useServerTimeSnapshot()
-  const snapshots = useApi(fetchOfficialAccountSnapshots, [], { mergeData: mergeAccountSnapshotLists })
+  const { load, latest, read } = useQueueSnapshot(fetchOfficialAccountSnapshots)
+  const snapshots = useApi(load, [], { mergeData: mergeAccountSnapshotLists })
   const [sourceWarnings, setSourceWarnings] = useState<Awaited<ReturnType<typeof fetchOfficialAccountSources>>["warnings"]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<AccountRefreshFailure | null>(null)
@@ -35,24 +32,19 @@ export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
   const initialRefreshStarted = useRef(false)
   const refreshOperation = useRef<Promise<void> | null>(null)
   const refreshController = useRef<AbortController | null>(null)
-  const visibilityRefresh = useRef({ pending: false, lastRefresh: 0 })
   const replaceData = snapshots.replaceData
   const refetch = snapshots.refetch
+  const notificationStatus = useQueueEvents(refetch, snapshots.loading, !refreshing, latest, read, watchAccountSnapshots)
   const refetchSnapshots = useCallback(() => {
     // 独立同步接管本页刷新，取消来源、预读、排队查询及收尾，避免迟到结果抢回所有权。
     refreshController.current?.abort()
     refetch()
   }, [refetch])
-  const refresh = useCallback((provider?: string, snapshotsOnly = false, automatic = false, baseline?: OfficialAccountSnapshotsResponse | null) => {
-    if (automatic && document.visibilityState !== "visible") return Promise.resolve()
+  const refresh = useCallback((provider?: string, snapshotsOnly = false) => {
     if (refreshOperation.current !== null) return refreshOperation.current
     initialRefreshStarted.current = true
-    if (provider === undefined && !snapshotsOnly) visibilityRefresh.current.pending = false
-    visibilityRefresh.current.lastRefresh = Date.now()
     const controller = new AbortController()
     refreshController.current = controller
-    const pause = () => { if (document.visibilityState !== "visible") controller.abort() }
-    if (automatic) document.addEventListener("visibilitychange", pause)
     const operation = (async () => {
       setRefreshing(true)
       setRefreshError(null)
@@ -64,25 +56,17 @@ export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
           accounts = refreshableAccounts(sources)
           setProviders(accounts)
           setSourceWarnings(sources.warnings)
-        }
-        let current = baseline ?? null
-        if (automatic && baseline === undefined) {
-          try {
-            current = await fetchOfficialAccountSnapshots(controller.signal)
-            if (controller.signal.aborted) return
-            replaceData(current)
-          } catch (error) { if (controller.signal.aborted) throw error }
+          const active = new Set(accounts.map(account => account.id))
+          for (const id of attempts.keys()) if (!active.has(id)) attempts.delete(id)
+          setProviderErrors(Object.fromEntries(accounts.map(account => [account.id, attempts.get(account.id)?.error ?? null])))
         }
         if (controller.signal.aborted) return
-        const refreshableProviders = snapshotsOnly ? [] : automatic
-          ? automaticAccountProviders(accounts, current, attempts, estimateServerTime(clock), performance.now())
-          : provider === undefined ? accounts.map(account => account.id) : [provider]
-        if (automatic) setProviderErrors(previous => ({ ...previous, ...Object.fromEntries(accounts.map(account => [account.id, attempts.get(account.id)?.error ?? null])) }))
+        const refreshableProviders = snapshotsOnly ? [] : provider === undefined ? accounts.map(account => account.id) : [provider]
         setRefreshingProviders(refreshableProviders)
         await refreshAccountSnapshots(refreshableProviders, (id, signal) => {
           signal.throwIfAborted()
-          const known = current ?? snapshots.data
-          beginAccountRefreshAttempt(attempts, id, performance.now(), known === null ? null
+          const known = snapshots.data
+          beginAccountRefreshAttempt(attempts, id, known === null ? null
             : known.snapshots.find(snapshot => snapshot.provider === id)?.observedAtMs ?? 0)
           return refreshOfficialAccountSnapshot(id, signal)
         }, (id, result) => {
@@ -92,7 +76,7 @@ export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
           const errors = accountRefreshErrors([id], [result])
           if (result.status === "fulfilled") attempts.delete(id)
           else {
-            beginAccountRefreshAttempt(attempts, id, performance.now(), attempts.get(id)?.observedAtMs ?? null)
+            beginAccountRefreshAttempt(attempts, id, attempts.get(id)?.observedAtMs ?? null)
             attempts.get(id)!.error = errors[id] ?? null
           }
           setProviderErrors((previous) => ({ ...previous, ...errors }))
@@ -100,12 +84,7 @@ export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
           setRefreshingProviders((previous) => previous.filter((candidate) => candidate !== id))
         }, controller.signal)
         if (controller.signal.aborted) return
-        // No upstream work means the baseline already supplies the authoritative list.
-        if (automatic && refreshableProviders.length === 0 && current !== null) {
-          setRemovedProviders(removed => remainingRemovedAccountProviders(current, accounts, removed))
-          return
-        }
-        const result = await fetchOfficialAccountSnapshots(controller.signal)
+        const result = await load(controller.signal)
         if (controller.signal.aborted) return
         replaceData(result)
         setRemovedProviders((removed) => remainingRemovedAccountProviders(result, accounts, removed))
@@ -115,7 +94,6 @@ export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
           setRefreshError({ kind: snapshotsOnly ? "syncFailed" : "listFailed", code })
         }
       } finally {
-        if (automatic) document.removeEventListener("visibilitychange", pause)
         if (refreshController.current === controller) {
           refreshController.current = null
           refreshOperation.current = null
@@ -126,7 +104,7 @@ export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
     })()
     refreshOperation.current = operation
     return operation
-  }, [replaceData, providers, attempts, clock, snapshots.data])
+  }, [replaceData, providers, attempts, snapshots.data, load])
 
   useEffect(() => {
     const recovered = clearRecoveredAccountFailures(attempts, snapshots.data)
@@ -150,10 +128,8 @@ export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
   useEffect(() => {
     if (initialRefreshStarted.current || snapshots.loading) return
     initialRefreshStarted.current = true
-    void refresh(undefined, false, true, snapshots.data)
+    void refresh(undefined, true)
   }, [refresh, snapshots.loading, snapshots.data])
-
-  useEffect(() => scheduleVisibleSettingsRefresh(() => { void refresh(undefined, false, true) }, refreshing, document, visibilityRefresh.current), [refresh, refreshing])
 
   useEffect(() => () => {
     refreshController.current?.abort()
@@ -178,7 +154,7 @@ export function useOfficialAccountSources(attempts: AccountRefreshAttempts) {
       : accountSources(accountSnapshotsWithoutRemoved(accountSnapshotsWithMissingProviders({ ...accountSnapshotData,
         warnings: [...new Map([...accountSnapshotData.warnings, ...sourceWarnings].map(warning => [warning.source, warning])).values()],
       }, providers), removedProviders)),
-    refreshing, refreshError, refresh, refreshControls, accountRemoved, removalNotice,
+    refreshing, refreshError, refresh, refreshControls, accountRemoved, removalNotice, notificationStatus,
     refetchSnapshots,
   }
 }

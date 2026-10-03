@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { GrammyError, type Api } from "grammy";
 import pino from "pino";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterAll, it, vi } from "vitest";
 import { EventBus } from "../src/event-bus/index.js";
 import { conversationTargetKey, surfaceAccountKey, type OutputEvent, type ConversationInputEvent } from "../src/conversation-core/index.js";
 import { SqliteDeliveryJournal } from "../src/delivery/sqlite-journal.js";
@@ -24,9 +24,11 @@ const target = { surface: "telegram" as const, accountId: "default", conversatio
 const base = { target, threadId: "thread", turnId: "turn" };
 const answer: OutputEvent = { ...base, type: "text.completed", itemId: "answer", text: "full answer", phase: "final_answer" };
 const directories: string[] = [];
-afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
+// Each case owns its Worker, journal, queues and platform mocks. Wait for all
+// concurrent cases to close those resources before removing their directories.
+afterAll(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 
-it("fences new execution but persists every accepted inbound result before closing the journal", async () => {
+it.concurrent("fences new execution but persists every accepted inbound result before closing the journal", async ({ expect }) => {
   const directory = mkdtempSync(join(tmpdir(), "codexc-stop-chain-")); directories.push(directory);
   const inbound = new EventBus<number>(logger); const output = new EventBus<OutputEvent>(logger);
   const surface: SurfaceAdapter = { surface: "telegram", accountId: "default", output: { handle: () => {} },
@@ -41,6 +43,7 @@ it("fences new execution but persists every accepted inbound result before closi
   const graph = Object.assign(Object.create(GatewayComponentGraph.prototype) as { shutdownComponents(): Promise<void> }, {
     bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
     channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
+    turnExecution: { stop: async () => { expect(reduced).toBe(100); } },
     inbound, output, codex: { close }, bindings: { close }, logger,
   });
   try {
@@ -55,7 +58,7 @@ it("fences new execution but persists every accepted inbound result before closi
   } finally { await manager.stop(); await inbound.close(); await output.close(); }
 });
 
-it.each(["queued", "settling", "checkpoint"] as const)("persists derived subagent completion during shutdown (%s)", async (stage) => {
+it.concurrent.for(["queued", "settling", "checkpoint"] as const)("persists derived subagent completion during shutdown (%s)", { timeout: 15_000 }, async (stage, { expect }) => {
   const directory = mkdtempSync(join(tmpdir(), "codexc-subagent-stop-")); directories.push(directory);
   const inbound = new EventBus<ConversationInputEvent>(logger); const output = new EventBus<OutputEvent>(logger);
   const surface: SurfaceAdapter = { surface: "telegram", accountId: "default", output: { handle: () => {} },
@@ -79,6 +82,7 @@ it.each(["queued", "settling", "checkpoint"] as const)("persists derived subagen
   const graph = Object.assign(Object.create(GatewayComponentGraph.prototype) as { shutdownComponents(): Promise<void> }, {
     bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
     channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
+    turnExecution: { stop: close },
     subagentCompletion: tracker, inbound, output, codex: { close }, bindings: { close }, logger,
   });
   try {
@@ -97,9 +101,9 @@ it.each(["queued", "settling", "checkpoint"] as const)("persists derived subagen
       expect(journal.execute({ type: "summary" })).toMatchObject({ records: 2, pending: 2 });
     } finally { journal.close(); }
   } finally { tracker.close(); await manager.stop(); await inbound.close(); await output.close(); }
-}, 15_000);
+});
 
-it.each(["html", "rich", "commentary"] as const)("confirms an unchanged Telegram %s body and drains its completion", async (format) => {
+it.concurrent.for(["html", "rich", "commentary"] as const)("confirms an unchanged Telegram %s body and drains its completion", async (format, { expect }) => {
   const edit = vi.fn(async () => { throw new GrammyError("unchanged", {
     ok: false, error_code: 400, description: "Bad Request: message is not modified",
   }, "editMessageText", {}); });
@@ -124,7 +128,7 @@ it.each(["html", "rich", "commentary"] as const)("confirms an unchanged Telegram
   finally { stored.close(); }
 });
 
-it("omits live empty commentary before admission without blocking the nonempty result", async () => {
+it.concurrent("omits live empty commentary before admission without blocking the nonempty result", async ({ expect }) => {
   const f = await fixture();
   try {
     f.output.publish({ ...answer, text: " \n ", phase: "commentary" });
@@ -136,7 +140,7 @@ it("omits live empty commentary before admission without blocking the nonempty r
   } finally { await f.close(); }
 });
 
-it("settles a previously persisted empty commentary after restart without inventing a platform checkpoint", async () => {
+it.concurrent("settles a previously persisted empty commentary after restart without inventing a platform checkpoint", async ({ expect }) => {
   const directory = mkdtempSync(join(tmpdir(), "codexc-empty-commentary-"));
   directories.push(directory);
   const stored = new SqliteDeliveryJournal(directory);
@@ -158,7 +162,7 @@ it("settles a previously persisted empty commentary after restart without invent
   finally { reopened.close(); }
 });
 
-it("keeps a Feishu completed card scoped to its original Conversation without requiring a disconnect", async () => {
+it.concurrent("keeps a Feishu completed card scoped to its original Conversation without requiring a disconnect", async ({ expect }) => {
   const finished = vi.fn(async () => {});
   const create = vi.fn(async () => ({ cardId: "old-card", messageId: "old-message" }));
   const f = await fixture(false, "feishu", false, false, undefined, { feishu: { createStreamingCard: create, finishStreamingCard: finished } });
@@ -178,7 +182,7 @@ it("keeps a Feishu completed card scoped to its original Conversation without re
   } finally { await f.close(); }
 });
 
-it.each(["cached", "in-flight", "queued-completion"] as const)("invalidates Feishu %s card reuse on disconnect while preserving the result", async (cut) => {
+it.concurrent.for(["cached", "in-flight", "queued-completion"] as const)("invalidates Feishu %s card reuse on disconnect while preserving the result", async (cut, { expect }) => {
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => { release = resolve; });
   const finished = vi.fn(async () => { if (cut === "in-flight") await blocked; });
@@ -210,12 +214,13 @@ it.each(["cached", "in-flight", "queued-completion"] as const)("invalidates Feis
   } finally { release(); await f.close(); }
 });
 
-it.each(["telegram", "feishu"] as const)("does not reuse a different Conversation's %s stream or reply target", async (platform) => {
+it.concurrent.for(["telegram", "feishu"] as const)("does not reuse a different Conversation's %s stream or reply target", async (platform, { expect }) => {
   const edit = vi.fn(async () => true);
   const reply = vi.fn(async () => "reply");
+  const createReply = vi.fn(async () => ({ cardId: "old-card", messageId: "old-message" }));
   const finished = vi.fn(async () => {});
   const f = await fixture(false, platform, false, false, undefined, {
-    telegramEdit: edit, feishu: { replyMarkdownCard: reply, createStreamingReplyCard: async () => ({ cardId: "old-card", messageId: "old-message" }), finishStreamingCard: finished },
+    telegramEdit: edit, feishu: { replyMarkdownCard: reply, createStreamingReplyCard: createReply, finishStreamingCard: finished },
   });
   try {
     if (f.outbox instanceof TelegramOutbox) f.outbox.prepareTurnReplyTarget("chat", 42);
@@ -223,7 +228,10 @@ it.each(["telegram", "feishu"] as const)("does not reuse a different Conversatio
     f.output.publish({ ...base, target: f.target, type: "turn.started" });
     await f.manager.waitForPersistentOutput(f.target, AbortSignal.timeout(3000));
     f.output.publish({ ...base, target: f.target, type: "text.delta", itemId: "answer", text: "old text", phase: "final_answer" });
-    await new Promise<void>((resolve) => setTimeout(resolve, platform === "telegram" ? 1100 : 400));
+    await vi.waitFor(() => {
+      if (platform === "telegram") expect(f.sent).toContain("old text");
+      else expect(createReply).toHaveBeenCalledOnce();
+    }, { timeout: 3000 });
     const previousReplies = reply.mock.calls.length;
     const previousSends = f.sent.length;
     const next = { ...f.target, conversationId: "new-chat" };
@@ -240,7 +248,7 @@ it.each(["telegram", "feishu"] as const)("does not reuse a different Conversatio
   } finally { await f.close(); }
 });
 
-it.each(["telegram", "feishu"] as const)("keeps %s cached state messages and terminal operations within their recipient", async (platform) => {
+it.concurrent.for(["telegram", "feishu"] as const)("keeps %s cached state messages and terminal operations within their recipient", async (platform, { expect }) => {
   const created: string[] = [];
   const edited: string[] = [];
   const createCard = async (chat: string) => { created.push(chat); return `message-${chat}`; };
@@ -276,7 +284,7 @@ it.each(["telegram", "feishu"] as const)("keeps %s cached state messages and ter
   } finally { await f.close(); }
 });
 
-it.each(["telegram", "feishu"] as const)("does not seal the old recipient's %s reasoning while delivering a new recipient's operation", async (platform) => {
+it.concurrent.for(["telegram", "feishu"] as const)("does not seal the old recipient's %s reasoning while delivering a new recipient's operation", async (platform, { expect }) => {
   const edit = vi.fn(async () => true);
   const create = vi.fn(async () => ({ cardId: "old-card", messageId: "old-message" }));
   const finish = vi.fn(async () => {});
@@ -298,7 +306,7 @@ it.each(["telegram", "feishu"] as const)("does not seal the old recipient's %s r
   } finally { await f.close(); }
 });
 
-it.each(["telegram", "feishu"] as const)("retains the queued %s final after disconnect clears its live stream", async (platform) => {
+it.concurrent.for(["telegram", "feishu"] as const)("retains the queued %s final after disconnect clears its live stream", async (platform, { expect }) => {
   const f = await fixture(true, platform);
   try {
     f.outbox.handle({ target: f.target, type: "warning", message: "barrier" });
@@ -317,7 +325,7 @@ it.each(["telegram", "feishu"] as const)("retains the queued %s final after disc
   } finally { await f.close(); }
 });
 
-it.each(["telegram", "feishu"] as const)("retains failed %s commentary but delivers the final and the next Turn", async (platform) => {
+it.concurrent.for(["telegram", "feishu"] as const)("retains failed %s commentary but delivers the final and the next Turn", async (platform, { expect }) => {
   const f = await fixture(false, platform, true);
   try {
     f.output.publish({ ...answer, target: f.target, itemId: "process", text: "process explanation", phase: "commentary" });
@@ -334,7 +342,7 @@ it.each(["telegram", "feishu"] as const)("retains failed %s commentary but deliv
   } finally { stored.close(); }
 });
 
-it.each(["telegram", "feishu"] as const)("keeps an unknown %s final across restart while continuing later input mirrors", async (platform) => {
+it.concurrent.for(["telegram", "feishu"] as const)("keeps an unknown %s final across restart while continuing later input mirrors", async (platform, { expect }) => {
   const f = await fixture(true, platform, false, true);
   try {
     f.outbox.handle({ target: f.target, type: "warning", message: "barrier" });
@@ -372,7 +380,7 @@ it.each(["telegram", "feishu"] as const)("keeps an unknown %s final across resta
   } finally { stored.close(); }
 });
 
-it.each([false, true])("releases a suspended account's snapshots without deleting its durable result (online=%s)", async (online) => {
+it.concurrent.for([false, true])("releases a suspended account's snapshots without deleting its durable result (online=%s)", async (online, { expect }) => {
   const directory = mkdtempSync(join(tmpdir(), "codexc-isolation-chain-"));
   directories.push(directory);
   const output = new EventBus<OutputEvent>(logger);
@@ -478,7 +486,7 @@ async function fixture(block = false, platform: "telegram" | "feishu" = "telegra
     close: async () => { release(); await manager.stop(); await output.close(); } };
 }
 
-it("keeps start before a same-tick completed answer while observing lifecycle immediately", async () => {
+it.concurrent("keeps start before a same-tick completed answer while observing lifecycle immediately", async ({ expect }) => {
   const f = await fixture();
   try {
     f.output.publish({ ...base, type: "turn.started" });
@@ -491,7 +499,7 @@ it("keeps start before a same-tick completed answer while observing lifecycle im
   } finally { await f.close(); }
 });
 
-it("retains lifecycle notices behind an in-flight answer and coalesces account state", async () => {
+it.concurrent("retains lifecycle notices behind an in-flight answer and coalesces account state", async ({ expect }) => {
   const f = await fixture(true);
   try {
     f.output.publish(answer, true);
@@ -514,7 +522,7 @@ it("retains lifecycle notices behind an in-flight answer and coalesces account s
   } finally { await f.close(); }
 });
 
-it.each(["completed", "disconnected"] as const)("expires pending running snapshots when %s before delivery resumes", async (ending) => {
+it.concurrent.for(["completed", "disconnected"] as const)("expires pending running snapshots when %s before delivery resumes", async (ending, { expect }) => {
   const f = await fixture(true);
   try {
     f.output.publish(answer, true);
@@ -531,7 +539,7 @@ it.each(["completed", "disconnected"] as const)("expires pending running snapsho
   } finally { await f.close(); }
 });
 
-it("rechecks recipient ownership before rendering a deferred snapshot", async () => {
+it.concurrent("rechecks recipient ownership before rendering a deferred snapshot", async ({ expect }) => {
   const f = await fixture(true);
   try {
     f.output.publish(answer, true);
@@ -545,7 +553,7 @@ it("rechecks recipient ownership before rendering a deferred snapshot", async ()
   } finally { await f.close(); }
 });
 
-it.each(["entries", "bytes"] as const)("reports deferred snapshot %s exhaustion without an unbounded queue", async (limit) => {
+it.concurrent.for(["entries", "bytes"] as const)("reports deferred snapshot %s exhaustion without an unbounded queue", async (limit, { expect }) => {
   const f = await fixture(true);
   try {
     f.output.publish(answer, true);
@@ -563,7 +571,7 @@ it.each(["entries", "bytes"] as const)("reports deferred snapshot %s exhaustion 
 });
 
 // No durable backlog: the platform queue itself is the bottleneck.
-it.each(["telegram", "feishu"] as const)("keeps only the in-flight and latest %s account snapshots until actual send completion", async (platform) => {
+it.concurrent.for(["telegram", "feishu"] as const)("keeps only the in-flight and latest %s account snapshots until actual send completion", async (platform, { expect }) => {
   const f = await fixture(true, platform);
   try {
     f.output.publish({ target: f.target, type: "account.updated", authMode: "chatgpt", planType: "free" });
@@ -581,7 +589,7 @@ it.each(["telegram", "feishu"] as const)("keeps only the in-flight and latest %s
   } finally { await f.close(); }
 });
 
-it.each(["telegram", "feishu"] as const)("rechecks %s snapshot ownership after it has entered the platform queue", async (platform) => {
+it.concurrent.for(["telegram", "feishu"] as const)("rechecks %s snapshot ownership after it has entered the platform queue", async (platform, { expect }) => {
   const f = await fixture(true, platform);
   try {
     f.outbox.handle({ target: f.target, type: "warning", message: "barrier" });
@@ -595,7 +603,7 @@ it.each(["telegram", "feishu"] as const)("rechecks %s snapshot ownership after i
   } finally { await f.close(); }
 });
 
-it.each(["telegram", "feishu"] as const)("orders the actual start/input/result/completion sequence on %s", async (platform) => {
+it.concurrent.for(["telegram", "feishu"] as const)("orders the actual start/input/result/completion sequence on %s", async (platform, { expect }) => {
   const f = await fixture(false, platform);
   try {
     f.output.publish({ ...base, target: f.target, type: "turn.started" });
@@ -612,7 +620,7 @@ it.each(["telegram", "feishu"] as const)("orders the actual start/input/result/c
   } finally { await f.close(); }
 });
 
-it.each(["telegram", "feishu"] as const)("continues to the latest %s state after an unknown send result without replaying the failed state", async (platform) => {
+it.concurrent.for(["telegram", "feishu"] as const)("continues to the latest %s state after an unknown send result without replaying the failed state", async (platform, { expect }) => {
   const f = await fixture(true, platform, true);
   try {
     f.output.publish({ target: f.target, type: "account.updated", authMode: "chatgpt", planType: "free" });
@@ -625,7 +633,7 @@ it.each(["telegram", "feishu"] as const)("continues to the latest %s state after
   } finally { await f.close(); }
 });
 
-it("charges both the in-flight payload and its pending replacement to the memory budget", async () => {
+it.concurrent("charges both the in-flight payload and its pending replacement to the memory budget", async ({ expect }) => {
   const f = await fixture(true);
   try {
     f.output.publish({ ...base, type: "plan.updated", explanation: "x".repeat(5 * 1024 * 1024), steps: [] });
@@ -635,7 +643,7 @@ it("charges both the in-flight payload and its pending replacement to the memory
   } finally { await f.close(); }
 });
 
-it("does not let a failed initial plan suppress a later live plan update", async () => {
+it.concurrent("does not let a failed initial plan suppress a later live plan update", async ({ expect }) => {
   const f = await fixture(true, "telegram", true);
   try {
     f.output.publish({ ...base, type: "plan.updated", explanation: "initial", steps: [{ step: "work", status: "inProgress" }] });
@@ -662,8 +670,8 @@ const auxiliaryNotices: OutputEvent[] = [
   { ...base, type: "subagent.contacted", agentThreadId: "child", agentPath: "agent" },
   { ...base, type: "operation.updated", operation: { itemId: "compact", kind: "contextCompaction", status: "running" } },
 ];
-it.each(auxiliaryNotices.flatMap((event) => (["telegram", "feishu"] as const).map((platform) => ({ platform, type: event.type, event }))))(
-  "retains an unknown $platform $type notice without fencing answers, snapshots or interaction waits", async ({ platform, event }) => {
+it.concurrent.for(auxiliaryNotices.flatMap((event) => (["telegram", "feishu"] as const).map((platform) => ({ platform, type: event.type, event }))))(
+  "retains an unknown $platform $type notice without fencing answers, snapshots or interaction waits", async ({ platform, event }, { expect }) => {
   const f = await fixture(true, platform, true, false, undefined, { trackCards: true });
   try {
     f.output.publish({ ...event, target: f.target });
@@ -697,7 +705,7 @@ it.each(auxiliaryNotices.flatMap((event) => (["telegram", "feishu"] as const).ma
   finally { retained.close(); }
 });
 
-it.each(["connection", "answer", "warning", "blocked", "turn-completed", "compaction-completed", "compaction-failed", "command-completed", "command-failed", "command-declined", "image-completed", "command-image"] as const)("retains an interrupted %s send across restart without fencing later results", async (kind) => {
+it.concurrent.for(["connection", "answer", "warning", "blocked", "turn-completed", "compaction-completed", "compaction-failed", "command-completed", "command-failed", "command-declined", "image-completed", "command-image"] as const)("retains an interrupted %s send across restart without fencing later results", async (kind, { expect }) => {
   const directory = mkdtempSync(join(tmpdir(), "codexc-recovered-barrier-"));
   directories.push(directory);
   const store = new SqliteDeliveryJournal(directory);
@@ -729,7 +737,7 @@ it.each(["connection", "answer", "warning", "blocked", "turn-completed", "compac
 });
 
 
-it.each(["unknown", "authorization"] as const)("keeps execution and interaction scheduling available while retaining a live %s failure", async (failure) => {
+it.concurrent.for(["unknown", "authorization"] as const)("keeps execution and interaction scheduling available while retaining a live %s failure", async (failure, { expect }) => {
   const f = await fixture(true, "telegram", false, failure === "unknown");
   try {
     f.output.publish({ ...base, type: "turn.started" });
@@ -753,7 +761,7 @@ it.each(["unknown", "authorization"] as const)("keeps execution and interaction 
   } finally { await f.close(); }
 });
 
-it("keeps execution available before and after offline delivery recovery", async () => {
+it.concurrent("keeps execution available before and after offline delivery recovery", async ({ expect }) => {
   const directory = mkdtempSync(join(tmpdir(), "codexc-admission-recovery-"));
   directories.push(directory);
   let store = new SqliteDeliveryJournal(directory);

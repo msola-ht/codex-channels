@@ -506,6 +506,28 @@ function configuredProfilePath(codexHome, descriptor, mode) {
   return join(codexHome, mode === "exclusive" ? "config.toml" : descriptor.profileName);
 }
 
+/** Relay shares the account credential, never its Codex model selection or catalog. */
+export function loadConfiguredManagedProviderCredentials(provider, environment = process.env) {
+  const definition = findManagedProviderDefinition(environment, provider);
+  if (!definition || !isClinePassAccountProvider(provider)) throw new Error("Relay CLP account is not registered");
+  const marker = readManagedMarker(environment, definition);
+  if (!marker) throw new Error("Relay CLP account marker is missing");
+  const descriptor = providerDescriptor(definition);
+  const profilePath = configuredProfilePath(codexHomePath(environment), descriptor, marker.mode);
+  const paths = [clinePassAccountsFilePath(environment), managedProviderMarkerPath(environment, definition), profilePath];
+  const fingerprint = () => {
+    const hash = createHash("sha256");
+    for (const path of paths) hash.update(JSON.stringify([path, readPrivateFile(path, maximumConfigBytes)]));
+    return hash.digest("hex");
+  };
+  const before = fingerprint();
+  const profile = readProviderProfile(profilePath, descriptor, { requireSelection: false });
+  if (fingerprint() !== before || !findManagedProviderDefinition(environment, provider)
+    || readManagedMarker(environment, definition)?.mode !== marker.mode) throw new Error("Relay CLP account changed during read");
+  return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, paths,
+    revision: createHash("sha256").update(JSON.stringify([provider, profile.baseUrl, profile.apiKey])).digest("hex") };
+}
+
 /** Narrow read-only native model material snapshot. All paths and credential parsing remain in the managed provider owner. */
 export function loadConfiguredManagedProviderMaterial(provider, environment = process.env) {
   assertResponsesContextSyncComplete(environment);

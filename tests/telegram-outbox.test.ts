@@ -3,7 +3,8 @@ import type { InputRichMessage } from "grammy/types";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { OutputEvent } from "../src/conversation-core/events.js";
+import type { OperationUpdate, OutputEvent } from "../src/conversation-core/events.js";
+import { formatOperationLog } from "../src/surfaces/telegram/operation-format.js";
 import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
 import { TelegramInteractionPort } from "../src/surfaces/telegram/interactions.js";
 
@@ -16,6 +17,7 @@ const turnCompletedPanel = [
   "<b>当前会话</b>",
   "• <b>Session：</b>测试会话",
   "• <b>Session ID：</b>thread-1",
+  "• <b>总耗时：</b>未提供",
 ].join("\n");
 
 class FakeTelegramApi {
@@ -616,6 +618,23 @@ describe("TelegramOutbox", () => {
     expect(api.sent[1]).toContain("修改文件 · 已完成");
   });
 
+  it("labels read-only exploration commands and keeps file names out of shell blocks", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(operationUpdated("read-1", "completed", "command", "AGENTS.md", "read"));
+    outbox.handle(operationUpdated("search-1", "completed", "command", "TODO in src", "search"));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      "<b>操作过程</b>\n\n📖 <b>读取文件 · 已完成</b>\n<code>AGENTS.md</code>",
+      "<b>操作过程</b>\n\n🔍 <b>搜索内容 · 已完成</b>\n<code>TODO in src</code>",
+    ]);
+  });
+
   it("does not send thinking status when reasoning display is disabled", async () => {
     const api = new FakeTelegramApi();
     const outbox = new TelegramOutbox(
@@ -867,6 +886,7 @@ describe("TelegramOutbox", () => {
         "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
+        "• <b>总耗时：</b>未提供",
       ].join("\n"),
     ]);
     expect(api.actions).toEqual([]);
@@ -1387,6 +1407,19 @@ describe("TelegramOutbox", () => {
     expect(api.sent.at(-1)).toBe(turnCompletedPanel);
   });
 
+  it.each(["full", "compact"] as const)("keeps distinct command exploration kinds separate in %s logs", (display) => {
+    const records: OperationUpdate[] = (["read", "search", "listFiles", "mixed", undefined, undefined] as const).map((kind, index) => ({
+      itemId: String(index), kind: "command", status: "completed", detail: "src",
+      ...(kind === undefined ? {} : { commandExploration: kind }),
+    }));
+    const text = formatOperationLog({ order: records.map((record) => record.itemId),
+      records: new Map(records.map((record) => [record.itemId, record])) }, display);
+    for (const title of ["读取文件", "搜索内容", "浏览目录", "探索文件"]) {
+      expect(text).toContain(`${title} · 已完成`);
+    }
+    expect(text).toContain("运行命令 (×2) · 已完成");
+  });
+
   it("groups identical consecutive file operations and escapes Telegram HTML", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
@@ -1753,6 +1786,7 @@ describe("TelegramOutbox", () => {
         "• <b>上下文压缩：</b>2 次",
         "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
         "• <b>Git 分支：</b>feature/weixin-surface",
+        "• <b>总耗时：</b>未提供",
         "",
         "<b>账户状态</b>",
         "• <b>周限：</b>剩余 58%",
@@ -1784,6 +1818,7 @@ describe("TelegramOutbox", () => {
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
         "• <b>Git 分支：</b>feature/weixin-surface",
+        "• <b>总耗时：</b>未提供",
       ].join("\n"),
     ]);
   });
@@ -2164,6 +2199,7 @@ function operationUpdated(
   status: "running" | "completed" | "failed" | "declined",
   kind: Extract<OutputEvent, { type: "operation.updated" }>["operation"]["kind"],
   detail?: string,
+  commandExploration?: Extract<OutputEvent, { type: "operation.updated" }>["operation"]["commandExploration"],
 ): Extract<OutputEvent, { type: "operation.updated" }> {
   return {
     type: "operation.updated",
@@ -2175,6 +2211,7 @@ function operationUpdated(
       status,
       kind,
       ...(detail ? { detail } : {}),
+      ...(commandExploration ? { commandExploration } : {}),
     },
   };
 }

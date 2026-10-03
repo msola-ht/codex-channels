@@ -27,11 +27,11 @@ describe("conversation model and account command formatting", () => {
     try {
       const list = formatConversationResetCredits({ kind: "reset-credit", result: { type: "list", accountId: "account",
         availableCount: "2", credits: [credit, { ...credit, id: "unlimited", expiresAt: null }], page: 1, pageCount: 1 } });
-      expect(list).toContain("剩余 5 D 17 H");
+      expect(list).toContain("剩余：5 D 17 H");
       expect(list).toContain("到期：无到期时间");
       const preview = formatConversationResetCredits({ kind: "reset-credit", result: { type: "preview", accountId: "account",
         credit, token: "fixture-token", expiresAt: Date.now() + 300000 } });
-      expect(preview).toContain("剩余 5 D 17 H");
+      expect(preview).toContain("剩余：5 D 17 H");
       expect(preview).toContain("确认有效期为 5 分钟");
     } finally { now.mockRestore(); }
   });
@@ -110,11 +110,11 @@ describe("conversation model and account command formatting", () => {
     limits.limits[0]!.primary = { usedPercent: 41, windowDurationMins: 10_080, resetsAt: reset / 1000 };
     const now = vi.spyOn(Date, "now").mockReturnValue(reset - 137 * 3_600_000);
     try {
-      expect(render()).toContain("剩余：59%（7天）\n  - 重置：10月7日 18:36\n  - 剩余 5 D 17 H");
+      expect(render()).toContain("剩余：59%（7天）\n  - 重置：10月7日 18:36\n  - 剩余：5 D 17 H");
       expect(render()).not.toContain("主窗口：");
       expect(render()).not.toContain("周期 7 天");
       now.mockReturnValue(reset - 1);
-      expect(render()).toContain("剩余不足 1 H");
+      expect(render()).toContain("剩余：不足 1 H");
       now.mockReturnValue(reset);
       expect(render()).toContain("重置时间已过");
     } finally { now.mockRestore(); }

@@ -252,6 +252,11 @@ export function cleanupMetricsDatabase(environment = process.env, options = {}) 
       DELETE FROM model_request_metrics
       WHERE id <= (SELECT MAX(id) FROM model_request_metrics) - ?
     `).run(maxRows).changes);
+    database.prepare("DELETE FROM turn_execution_metrics WHERE recorded_at_ms < ?").run(Math.max(0, beforeMs));
+    database.prepare(`DELETE FROM turn_execution_metrics WHERE rowid IN (
+      SELECT rowid FROM turn_execution_metrics ORDER BY recorded_at_ms DESC, rowid DESC LIMIT -1 OFFSET ?
+    )`).run(maxRows);
+    database.exec("DELETE FROM thread_execution_state WHERE thread_id NOT IN (SELECT thread_id FROM turn_execution_metrics)");
     database.exec("COMMIT");
     if (options.vacuum === true) database.exec("VACUUM");
     const remaining = Number(database.prepare(
@@ -358,9 +363,17 @@ function deleteProviderRows(databasePath, table, provider, allowVacuum) {
   const database = new DatabaseSync(databasePath);
   try {
     database.exec("PRAGMA busy_timeout = 10000;");
+    database.exec("BEGIN IMMEDIATE");
+    if (table === "model_request_metrics") {
+      database.prepare(`DELETE FROM turn_execution_metrics WHERE thread_id IN (
+        SELECT thread_id FROM thread_execution_state WHERE provider = ?
+      )`).run(provider);
+      database.prepare("DELETE FROM thread_execution_state WHERE provider = ?").run(provider);
+    }
     const info = database.prepare(
       `DELETE FROM ${table} WHERE provider = ?`,
     ).run(provider);
+    database.exec("COMMIT");
     if (allowVacuum) {
       database.exec("VACUUM");
     }

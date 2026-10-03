@@ -8,7 +8,7 @@ const token = (key = "key-a"): string => `Bearer cr1.${key}.${secret.toString("b
 const policy = (): RelayPolicy => ({ enabled: true, maxConcurrency: 8, requestsPerMinute: 60, burst: 8,
   accounts: [{ provider: "clp-a" }],
   callers: ["a", "b", "c"].map(id => ({ callerId: `caller-${id}`, keyId: `key-${id}`,
-    credentialGeneration: 1, secretSha256: hash, enabled: true, provider: "clp-a", models: ["fixture/model"],
+    credentialGeneration: 1, secretSha256: hash, enabled: true, models: ["clp-a/fixture/model"],
     })),
 });
 
@@ -48,7 +48,7 @@ describe("Relay admission and revocation", () => {
     expect(() => admission.acquire(token().replace("Bearer", "Basic"))).toThrow("invalid_api_key");
     const lease = admission.acquire(token());
     expect(() => lease.check("other/model")).toThrow("model_not_allowed");
-    lease.check("fixture/model"); lease.release(); lease.release();
+    lease.check("clp-a/fixture/model"); lease.release(); lease.release();
     expect(admission.active).toBe(0);
     expect(() => lease.check()).toThrow("request_revoked");
   });
@@ -112,7 +112,7 @@ describe("Relay bounded waiting admission", () => {
     const active = admission.acquire(token());
     const a1 = admission.reserve(token()); const a2 = admission.reserve(token()); const b = admission.reserve(token("key-b"));
     const order: string[] = [];
-    const wait = (lease: typeof a1, name: string) => admission.wait(lease, "fixture/model", 100, lease.signal).then(() => order.push(name));
+    const wait = (lease: typeof a1, name: string) => admission.wait(lease, "clp-a/fixture/model", 100, lease.signal).then(() => order.push(name));
     const promises = [wait(a1, "a1"), wait(a2, "a2"), wait(b, "b")];
     expect(admission.active).toBe(1); expect(admission.queue).toMatchObject({ pending: 3, waiting: 3, bytes: 300 });
     active.release(); await promises[0]; expect(order).toEqual(["a1"]);
@@ -128,7 +128,7 @@ describe("Relay bounded waiting admission", () => {
     const waits: Promise<void>[] = [];
     const enqueue = (key: string, name: string) => {
       const lease = admission.reserve(token(key)); leases.push(lease);
-      waits.push(admission.wait(lease, "fixture/model", 10, lease.signal).then(() => { order.push(name); },
+      waits.push(admission.wait(lease, "clp-a/fixture/model", 10, lease.signal).then(() => { order.push(name); },
         () => { errors.push(name); }));
       return lease;
     };
@@ -164,8 +164,8 @@ describe("Relay bounded waiting admission", () => {
     const upload = admission.reserve(token("key-b"));
     const behind = admission.reserve(token("key-b"));
     const other = admission.reserve(token("key-c"));
-    const behindWait = admission.wait(behind, "fixture/model", 20, behind.signal);
-    await admission.wait(other, "fixture/model", 20, other.signal);
+    const behindWait = admission.wait(behind, "clp-a/fixture/model", 20, behind.signal);
+    await admission.wait(other, "clp-a/fixture/model", 20, other.signal);
     expect(admission.active).toBe(2); expect(admission.queue.waiting).toBe(1);
     active.release(); expect(admission.queue.waiting).toBe(1);
     upload.release(); await behindWait;
@@ -185,7 +185,7 @@ describe("Relay bounded waiting admission", () => {
     const waits: Promise<void>[] = [];
     for (let i = 0; i < 32; i++) {
       const lease = admission.reserve(token());
-      waits.push(admission.wait(lease, "fixture/model", 1, lease.signal).catch(() => {}));
+      waits.push(admission.wait(lease, "clp-a/fixture/model", 1, lease.signal).catch(() => {}));
     }
     expect(admission.queue).toMatchObject({ pending: 32, waiting: 32, bytes: 32 });
     expect(() => admission.reserve(token("key-b"))).toThrow("relay_queue_full");
@@ -194,14 +194,14 @@ describe("Relay bounded waiting admission", () => {
   it("removes disconnected waiters without consuming rate credits", async () => {
     const admission = new RelayAdmission(queuePolicy()); const active = admission.acquire(token());
     const lease = admission.reserve(token()); const controller = new AbortController();
-    const result = admission.wait(lease, "fixture/model", 5, controller.signal);
+    const result = admission.wait(lease, "clp-a/fixture/model", 5, controller.signal);
     const rejection = expect(result).rejects.toThrow("client gone");
     controller.abort(new Error("client gone")); await rejection;
     expect(admission.queue.pending).toBe(0); expect(admission.active).toBe(1); active.release(); admission.close();
   });
   it.each(["rotation", "disabled", "model", "provider", "shutdown"])("cancels pending requests on %s", async change => {
     const config = queuePolicy(); const admission = new RelayAdmission(config); const active = admission.acquire(token());
-    const lease = admission.reserve(token()); const rejection = expect(admission.wait(lease, "fixture/model", 5, lease.signal)).rejects.toThrow("request_revoked");
+    const lease = admission.reserve(token()); const rejection = expect(admission.wait(lease, "clp-a/fixture/model", 5, lease.signal)).rejects.toThrow("request_revoked");
     if (change === "provider") admission.invalidateProvider("clp-a");
     else if (change === "shutdown") admission.stopWaiting();
     else admission.apply({ ...config, callers: config.callers.map(caller => ({ ...caller,
@@ -215,14 +215,14 @@ describe("Relay bounded waiting admission", () => {
     const config = queuePolicy(); const admission = new RelayAdmission({ ...config, requestsPerMinute: 60, burst: 1 }, () => Date.now());
     try {
       admission.acquire(token()).release();
-      const lease = admission.reserve(token()); const waiting = admission.wait(lease, "fixture/model", 5, lease.signal);
+      const lease = admission.reserve(token()); const waiting = admission.wait(lease, "clp-a/fixture/model", 5, lease.signal);
       await vi.advanceTimersByTimeAsync(999); expect(admission.active).toBe(0);
       expect(admission.queue.oldestWaitMs).toBe(999);
       await vi.advanceTimersByTimeAsync(1); await waiting; expect(admission.active).toBe(1); lease.release();
-      const next = admission.reserve(token()); const nextWait = admission.wait(next, "fixture/model", 5, next.signal);
+      const next = admission.reserve(token()); const nextWait = admission.wait(next, "clp-a/fixture/model", 5, next.signal);
       admission.apply(config); await nextWait;
       const timeout = admission.reserve(token());
-      const rejection = expect(admission.wait(timeout, "fixture/model", 5, timeout.signal)).rejects.toThrow("relay_queue_timeout");
+      const rejection = expect(admission.wait(timeout, "clp-a/fixture/model", 5, timeout.signal)).rejects.toThrow("relay_queue_timeout");
       await vi.advanceTimersByTimeAsync(30_000); await rejection;
       expect(admission.queue).toMatchObject({ pending: 0, oldestWaitMs: 0, timedOut: 1 });
       next.release(); expect(admission.active).toBe(0);
@@ -235,7 +235,7 @@ it("honors reduced global concurrency and an expired deadline even before its ti
   const config = { ...queuePolicy(), maxConcurrency: 2 }; let now = 0;
   const admission = new RelayAdmission(config, () => now);
   const a = admission.acquire(token()); const b = admission.acquire(token("key-b"));
-  const lease = admission.reserve(token()); const rejected = expect(admission.wait(lease, "fixture/model", 1, lease.signal)).rejects.toThrow("relay_queue_timeout");
+  const lease = admission.reserve(token()); const rejected = expect(admission.wait(lease, "clp-a/fixture/model", 1, lease.signal)).rejects.toThrow("relay_queue_timeout");
   admission.apply({ ...config, maxConcurrency: 1 }); a.release(); expect(admission.queue.waiting).toBe(1);
   now = 30_001; b.release(); await rejected;
   expect(admission.queue).toMatchObject({ oldestWaitMs: 0, timedOut: 1 });
@@ -248,7 +248,7 @@ it("revokes only the key whose reasoning policy changed, including waiting lease
   const active = admission.acquire(token());
   const sibling = admission.reserve(token("key-b"));
   const queued = admission.reserve(token());
-  const waiting = admission.wait(queued, "fixture/model", 10, queued.signal);
+  const waiting = admission.wait(queued, "clp-a/fixture/model", 10, queued.signal);
   const rejected = expect(waiting).rejects.toThrow("request_revoked");
   admission.apply({ ...initial, maxConcurrency: 1, callers: initial.callers.map(caller => caller.keyId === "key-a" ? { ...caller, reasoning: "off" } : caller) });
   await rejected;
@@ -265,9 +265,9 @@ it("rebinding and deletion cancel old leases without changing the secret or othe
   const other = admission.acquire(token("key-b"));
   const upload = admission.reserve(token());
   const waiting = admission.reserve(token());
-  const settled = admission.wait(waiting, "fixture/model", 10, waiting.signal).catch(error => error);
+  const settled = admission.wait(waiting, "clp-a/fixture/model", 10, waiting.signal).catch(error => error);
   const rebound = { ...config, accounts: [...config.accounts, { provider: "clp-new" }],
-    callers: config.callers.map(caller => caller.keyId === "key-a" ? { ...caller, provider: "clp-new" } : caller) };
+    callers: config.callers.map(caller => caller.keyId === "key-a" ? { ...caller, models: ["clp-new/fixture/model"] } : caller) };
   admission.apply(rebound);
   for (const lease of [active, upload, waiting]) {
     expect(lease.signal.aborted).toBe(true);
@@ -277,7 +277,8 @@ it("rebinding and deletion cancel old leases without changing the secret or othe
   expect(await settled).toBeInstanceOf(Error);
   expect(other.signal.aborted).toBe(false);
   const next = admission.acquire(token());
-  expect(next.caller.provider).toBe("clp-new");
+  next.check("clp-new/fixture/model");
+  expect(next.provider).toBe("clp-new");
   admission.apply({ ...rebound, callers: rebound.callers.filter(caller => caller.keyId !== "key-a") });
   expect(next.signal.aborted).toBe(true);
   expect(() => admission.acquire(token())).toThrow("invalid_api_key");

@@ -1,3 +1,4 @@
+import { RefreshStatus } from "@/components/metrics/refresh-status"
 import { ErrorsTable } from "@/components/requests/errors-table"
 
 import { ErrorBanner } from "@/components/metrics/error-banner"
@@ -5,26 +6,31 @@ import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { QueryFilters } from "@/components/metrics/query-filters"
 import { StatCard } from "@/components/metrics/stat-card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@/components/ui/button"
 import { useErrors } from "@/hooks/use-errors"
 import { useTranslation } from "@/hooks/use-translation"
 import { formatCount, formatSuccessRate } from "@/lib/format"
 import { translateApiError } from "@/lib/i18n/translate"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 
 export function ErrorsPage() {
   const { query, update } = useMetricsQuery("30d")
-  const { data, loading, error, errorCode, refetch } = useErrors(query)
+  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt } = useErrors(query)
   const { offset, limit } = query
   const pageNumber = Math.floor(offset / limit) + 1
   const { t } = useTranslation()
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6" aria-busy={refreshing}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">{t("pages.errors")}</h1>
           <p className="text-sm text-muted-foreground">{t("errorList.description")}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <RefreshStatus status={notificationStatus} updatedAt={lastUpdatedAt} failed={error !== null} history={offset > 0} />
+          <Button variant="outline" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
         </div>
       </div>
       {error === null && data !== null ? (
@@ -45,9 +51,9 @@ export function ErrorsPage() {
             {loading ? <Skeleton className="absolute inset-0" /> : null}
           </div>
       ) : null}
-      <QueryFilters query={query} onChange={update} showThreadFilters={false} />
+      <QueryFilters query={query} onChange={update} showThreadFilters={false} revision={data} />
 
-      <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={loading} />
+      <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={refreshing} />
 
       {error !== null ? null : data === null ? <PageSkeleton rows={5} /> : (
         <ErrorsTable records={data.records} query={query} loading={loading}

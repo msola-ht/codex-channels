@@ -3,6 +3,16 @@ export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
 export interface ModelRequestMetricSample {
+  /** 上游明确返回的诊断摘要；与可选报文转储独立，历史缺失为空。 */
+  upstreamProvider?: string | null;
+  upstreamAttemptCount?: number | null;
+  modelAttemptCount?: number | null;
+  finishReason?: string | null;
+  errorStage?: "http" | "stream" | null;
+  upstreamErrorCode?: string | null;
+  upstreamErrorType?: string | null;
+  upstreamHttpStatus?: number | null;
+
   source?: "owned" | "relay";
   callerId?: string | null;
   keyId?: string | null;
@@ -143,6 +153,7 @@ export interface ResponseUsageSummary {
 }
 
 export interface StoredTurnRequestMetricsSummary {
+  durationMs?: number | null;
   responseUsage?: ResponseUsageSummary | null;
   /** 当前 Thread/Turn 首个有效 OpenAI 样本，不含压缩和子代理。 */
   upstreamTtftMs?: number | null;
@@ -173,6 +184,8 @@ export interface StoredThreadRequestMetricsAggregate {
 }
 
 export interface StoredThreadRequestMetricsSummary {
+  latestExecution?: { turnId: string; durationMs: number | null } | null;
+  sessionDurationMs?: number | null;
   threadId: string;
   latestTurn: StoredTurnRequestMetricsSummary | null;
   threadAggregate: StoredThreadRequestMetricsAggregate | null;
@@ -375,6 +388,22 @@ export interface ModelRequestMetricsWriteStore {
     agentPath: string;
   }): void;
   close(): void;
+}
+
+/** Minimal official timing facts, without messages or a second conversation history. */
+export interface TurnExecutionMetric {
+  turnId: string;
+  durationMs: number | null;
+  recordedAtMs: number;
+}
+
+export interface TurnExecutionStore {
+  isExecutionHistoryComplete(threadId: string): boolean;
+  recordTurnExecution(threadId: string, provider: string, turn: TurnExecutionMetric): void;
+  replaceThreadExecutions(threadId: string, provider: string, turns: readonly TurnExecutionMetric[]): void;
+  invalidateThreadExecutions(threadId: string, clearDurations?: boolean): void;
+  turnExecutionDuration(threadId: string, turnId: string): number | null;
+  sessionExecutionDuration(threadId: string, throughTurnId?: string): number | null;
 }
 
 export interface ProviderTokenMetricQuery {

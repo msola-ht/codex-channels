@@ -192,7 +192,7 @@ Surface -> Application/Core <- Codex Client
 - Public `codexc` commands and subcommands must support both `-h` and `--help`. Keep only documented canonical names; do not add implicit aliases.
   `gateway`, `service-app-server` and `service-model-relay` are internal service-template entry points, excluded from public help.
 - Manage background processes through `codexc service`. Start, stop, restart, status and logs use the targets `gateway`, `app-server`, `webui`, `relay` and `all`.
-  `service start model-relay` is the documented upgrade handoff for already-running older updaters; it emits a migration notice and retains normal validation/readiness checks. Other public actions reject the old target spelling.
+  Public service actions reject the old `model-relay` target spelling.
   Start, stop and status default to `all`; restart and logs default to `gateway`.
   `all` starts Relay only when installed and enabled, and stops installed Relay before Gateway. WebUI remains separately managed.
 - Project Codex command presets live in `.codex/rules/default.rules`. They may preauthorize only read-only Git inspections, existing repository verification scripts,
@@ -220,6 +220,9 @@ Surface -> Application/Core <- Codex Client
 - `npm run verify:commit` is the shared full-check entry point for local commits and GitHub CI. In order, it covers staged diff formatting, types and versions,
   production and test Lint, WebUI build and Lint, translation dictionary keys and placeholders, documentation links and indexes, the full test suite, shell syntax,
   npm tarball installation smoke tests and service-template checks executable on the current platform.
+  Type checking may reuse TypeScript's dependency-aware incremental cache; version and boundary checks still run every time.
+  Only after the full type check succeeds may this gate build fresh Gateway artifacts with `--noCheck` for the full tests and tarball smoke test.
+  Standalone `npm test` and `npm run build` retain full type checking.
   Clean-source global installation is excluded from routine commit and PR gates, but remains required in full `npm run test:package`, explicitly authorized source releases and Codex CLI upgrade validation.
 - When changing check scripts, Git hooks or CI, keep `verify:commit`, `.githooks/pre-commit`, GitHub Actions and affected script indexes and workflow documentation consistent.
   Update the root README only when user-facing development entry points change.

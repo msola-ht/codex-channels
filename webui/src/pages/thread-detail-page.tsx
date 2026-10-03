@@ -1,3 +1,4 @@
+import { RefreshStatus } from "@/components/metrics/refresh-status"
 import { translateApiError } from "@/lib/i18n/translate"
 import { useTranslation } from "@/hooks/use-translation"
 import { Link, useParams } from "react-router"
@@ -8,55 +9,57 @@ import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { QueryFilters } from "@/components/metrics/query-filters"
 import { QuerySummary } from "@/components/metrics/query-summary"
 import { ThreadRunSummary } from "@/components/threads/thread-run-summary"
+import { StatCard } from "@/components/metrics/stat-card"
 import { TurnTable } from "@/components/threads/turn-table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { useThreadRun, useThreadTurns } from "@/hooks/use-thread-detail"
+import { useThreadDetail } from "@/hooks/use-thread-detail"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
-import { shortThreadId } from "@/lib/format"
+import { shortThreadId, formatElapsedDuration } from "@/lib/format"
 import { metricsLink } from "@/lib/metrics-query"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 
 export function ThreadDetailPage() {
   const { t } = useTranslation()
   const { id = "" } = useParams<{ id: string }>()
   const { query, update, pagination } = useMetricsQuery("all")
-  const run = useThreadRun(id)
-  const turns = useThreadTurns(id, query)
-  const error = run.error ?? turns.error
+  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt } = useThreadDetail(id, query)
+  const run = data?.run
+  const turns = data?.turns
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6" aria-busy={refreshing}>
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold" title={shortThreadId(id) === id ? undefined : id}>{t("threads.heading", { id: shortThreadId(id) })}</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" asChild><Link to={metricsLink("/requests", query, { threadId: id })}>{t("threads.viewRequests")}</Link></Button>
-          <Button variant="outline" asChild><Link to={metricsLink("/errors", query, { threadId: id })}>{t("threads.viewErrors")}</Link></Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <RefreshStatus status={notificationStatus} updatedAt={lastUpdatedAt} failed={error !== null} history={query.offset > 0} />
+          <Button variant="outline" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
+          <Button variant="outline" render={<Link to={metricsLink("/requests", query, { threadId: id })} />} nativeButton={false}>{t("threads.viewRequests")}</Button>
+          <Button variant="outline" render={<Link to={metricsLink("/errors", query, { threadId: id })} />} nativeButton={false}>{t("threads.viewErrors")}</Button>
         </div>
       </div>
-      <QueryFilters query={query} onChange={update} threadId={id} />
-      <ErrorBanner error={translateApiError(t, error, run.error !== null ? run.errorCode : turns.errorCode)} pending={run.loading || turns.loading} onRetry={() => {
-        if (run.error !== null) run.refetch()
-        if (turns.error !== null) turns.refetch()
-      }} />
-      {error !== null ? null : turns.data === null ? <PageSkeleton rows={4} /> : (
+      <QueryFilters query={query} onChange={update} threadId={id} revision={data} />
+      <ErrorBanner error={translateApiError(t, error, errorCode)} pending={refreshing} onRetry={refetch} />
+      {error !== null ? null : turns === undefined || run === undefined ? <PageSkeleton rows={4} /> : (
         <>
-          {run.data?.agentPath ? (
-            <div className={cn("flex shrink-0 flex-wrap items-center gap-2 text-sm", (turns.loading || run.loading) && "invisible")} inert={turns.loading || run.loading} aria-hidden={turns.loading || run.loading || undefined}>
+          {run.agentPath ? (
+            <div className={cn("flex shrink-0 flex-wrap items-center gap-2 text-sm", loading && "invisible")} inert={loading} aria-hidden={loading || undefined}>
               <Badge variant="secondary">{t("threads.subagent")}</Badge>
-              <TruncatedText text={run.data.agentPath} className="max-w-96" />
-              {run.data.parentThreadId !== null ? <Link to={metricsLink(`/threads/${encodeURIComponent(run.data.parentThreadId)}`, query, { threadId: undefined, turnId: undefined })}>{t("threads.parentLink", { id: shortThreadId(run.data.parentThreadId) })}</Link> : null}
+              <TruncatedText text={run.agentPath} className="max-w-96" />
+              {run.parentThreadId !== null ? <Link to={metricsLink(`/threads/${encodeURIComponent(run.parentThreadId)}`, query, { threadId: undefined, turnId: undefined })}>{t("threads.parentLink", { id: shortThreadId(run.parentThreadId) })}</Link> : null}
             </div>
           ) : null}
-          <QuerySummary loading={turns.loading} aggregate={turns.data.aggregate} range={turns.data.range} turns={turns.data.turnCount} />
+          <QuerySummary loading={loading} aggregate={turns.aggregate} range={turns.range} turns={turns.turnCount} />
+          <div className={cn("grid shrink-0 gap-4 sm:grid-cols-2", loading && "invisible")} inert={loading} aria-hidden={loading || undefined}>
+            <StatCard title={t("threads.latestDuration")} value={run.latestExecution?.durationMs == null ? "—" : formatElapsedDuration(run.latestExecution.durationMs)} description={t("threads.durationHint")} />
+            <StatCard title={t("threads.totalDuration")} value={run.sessionDurationMs == null ? "—" : formatElapsedDuration(run.sessionDurationMs)} description={t("threads.totalDurationHint")} />
+          </div>
           <p className="shrink-0 text-sm text-muted-foreground">{t("threads.turnHint")}</p>
-          {run.data === null ? null : (
-            <details className={cn("shrink-0", (turns.loading || run.loading) && "invisible")} inert={turns.loading || run.loading} aria-hidden={turns.loading || run.loading || undefined}>
-              <summary className="cursor-pointer text-sm text-muted-foreground">{t("threads.history")}</summary>
-              <div className="mt-3"><ThreadRunSummary latestTurn={run.data.latestTurn} threadAggregate={run.data.threadAggregate} /></div>
-            </details>
-          )}
-          <TurnTable loading={turns.loading} turns={turns.data.turns} threadId={id} query={query} pagination={pagination(turns.data)} />
+          <details className={cn("shrink-0", loading && "invisible")} inert={loading} aria-hidden={loading || undefined}>
+            <summary className="cursor-pointer text-sm text-muted-foreground">{t("threads.history")}</summary>
+            <div className="mt-3"><ThreadRunSummary latestTurn={run.latestTurn} threadAggregate={run.threadAggregate} /></div>
+          </details>
+          <TurnTable loading={loading} turns={turns.turns} threadId={id} query={query} pagination={pagination(turns)} />
         </>
       )}
     </div>

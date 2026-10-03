@@ -136,7 +136,7 @@ export class ChatCompletionsBridge {
       const message = failure?.message ?? "Chat upstream request failed";
       if (status === 502 && (!controller.signal.aborted || aborted)) this.options.onError?.(new Error(message));
       const detail = { code: failure instanceof ChatUpstreamError ? failure.code : status === 400 ? "invalid_request_error" : "chat_upstream_error", message };
-      if (failure instanceof ChatUpstreamError) diagnostics.error(failure.code, response.headersSent ? "stream" : "http", failure.retryable);
+      diagnostics.error(detail.code, response.headersSent ? "stream" : "http", failure instanceof ChatUpstreamError && failure.retryable);
       publishDiagnostics();
       if (!response.destroyed) {
         if (response.headersSent) {

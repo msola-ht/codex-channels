@@ -848,9 +848,9 @@ it.each(["失败", "失败。", "失败。。"])("normalizes operation failure p
 
 
 it.each([
-  [137 * 3600, "reset", "剩余 5 D 17 H"],
-  [17 * 3600, "expiry", "剩余 0 D 17 H"],
-  [3599, "reset", "剩余不足 1 H"],
+  [137 * 3600, "reset", "剩余：5 D 17 H"],
+  [17 * 3600, "expiry", "剩余：0 D 17 H"],
+  [3599, "reset", "剩余：不足 1 H"],
   [0, "reset", "重置时间已过"],
   [-1, "expiry", "已到期"],
 ] as const)("formats quota countdown %s with %s semantics", (seconds, kind, expected) => {

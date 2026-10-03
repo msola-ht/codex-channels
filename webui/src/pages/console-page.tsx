@@ -1,3 +1,4 @@
+import { RefreshStatus } from "@/components/metrics/refresh-status"
 import { useCallback, useState } from "react"
 import { RefreshCwIcon } from "lucide-react"
 
@@ -25,7 +26,7 @@ import type { AccountRefreshAttempts, AccountRefreshControl, AccountRefreshFailu
 import { useDashboard } from "@/hooks/use-dashboard"
 import { translateApiError, translateApiErrorCode } from "@/lib/i18n/translate"
 import type { Translate } from "@/lib/i18n/messages"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 import type {
   OpenAiAccountCredits,
   CcgCreditUsageResponse,
@@ -48,11 +49,11 @@ export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
   const refetch = dashboard.refetch
   const officialAccounts = useOfficialAccountSources(refreshAttempts)
   const refreshAccounts = officialAccounts.refresh
-  const refreshing = dashboard.loading || officialAccounts.refreshing
+  const refreshing = dashboard.refreshing || officialAccounts.refreshing
 
   const refreshDashboard = useCallback(() => {
     refetch()
-    void refreshAccounts()
+    void refreshAccounts(undefined, true)
   }, [refetch, refreshAccounts])
 
   return (
@@ -63,6 +64,7 @@ export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
           <p className="text-sm text-muted-foreground">{t("console.description")}</p>
         </div>
         <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto sm:flex-1">
+          <RefreshStatus status={dashboard.notificationStatus} updatedAt={dashboard.lastUpdatedAt} failed={dashboard.error !== null} />
           <DashboardRangeSelector key={JSON.stringify(range)} query={range} onChange={onRangeChange} />
           <Button variant="outline" size="sm" disabled={refreshing} onClick={refreshDashboard}>
             {refreshing ? <Spinner data-icon="inline-start" aria-label={t("common.loading")} /> : <RefreshCwIcon data-icon="inline-start" />}
@@ -92,8 +94,9 @@ export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
           ?? translateApiError(t, officialAccounts.error, officialAccounts.errorCode)}
         accountWarnings={officialAccounts.data?.warnings ?? []}
         refreshing={officialAccounts.refreshing}
-        onRefresh={() => void refreshAccounts()}
+        onRefresh={() => void refreshAccounts(undefined, true)}
       />
+      <p className="text-xs text-muted-foreground" role="status">{t("console.accountSnapshotUpdates", { status: t(`delivery.notifications.${officialAccounts.notificationStatus}`) })}</p>
     </div>
   )
 }

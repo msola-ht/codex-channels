@@ -1,16 +1,17 @@
+import { parseRelayModelId, relayModelId } from "../../runtime/model-relay-model-id.mjs";
 import { isRelayListenHost } from "../../runtime/model-relay-listen-host.mjs";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
-import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
-import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type RelayMetric } from "../provider-proxy/index.js";
+import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, type RelayModelCapability, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
+import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 
 export interface RelayQueueEntry {
   requestId: string;
   callerId: string;
-  provider: string;
+  provider: string | null;
   model: string | null;
   protocol: "chat" | "responses";
   phase: "input" | "queue" | "prepare" | "upstream" | "delivery";
@@ -18,6 +19,7 @@ export interface RelayQueueEntry {
 }
 
 export interface PreparedRelayProvider {
+  readonly modelCapabilities?: readonly RelayModelCapability[];
   readonly target: DirectChatTarget;
   readonly models: readonly string[];
   readonly protocols: readonly ("chat" | "responses")[];
@@ -112,6 +114,7 @@ export class ModelRelayServer {
     response.once("close", disconnected);
     let lease: RelayLease | undefined;
     let capture: DirectChatCapture | undefined;
+    let diagnostics: ModelRequestDiagnostics = {};
     let inbound: unknown;
     let started: number | undefined;
     let submittedAt: number | undefined;
@@ -121,6 +124,8 @@ export class ModelRelayServer {
     let userAgent: string | null = null;
     let errorCode: string | undefined;
     let requestModel = "";
+    let provider: string | null = null;
+    let bodyBytes = 0;
     let stream = false;
     let phase: "input" | "queue" | "prepare" | "upstream" | "delivery" = "input";
     const protocol = request.url === "/v1/responses" ? "responses" : "chat";
@@ -142,7 +147,7 @@ export class ModelRelayServer {
       if (!models) {
         const caller = lease.caller;
         this.requests.set(relayRequestId, () => ({ requestId: relayRequestId, callerId: caller.callerId,
-          provider: caller.provider, model: requestModel || null, protocol, phase,
+          provider, model: requestModel || null, protocol, phase,
           elapsedMs: Math.max(0, Math.floor(performance.now() - receivedAt)) }));
         this.options.queueChanged?.();
       }
@@ -157,43 +162,65 @@ export class ModelRelayServer {
         try {
           const text = await readChatBody(request, signal, 1024 * 1024);
           inbound = JSON.parse(text) as unknown;
-          body = protocol === "responses" ? validateDirectResponsesRequest(lease.caller.provider, inbound) : validateDirectChatRequest(inbound);
+          if (inbound === null || typeof inbound !== "object" || Array.isArray(inbound)) throw new DirectChatRequestError("body", "Expected a JSON object");
+          const route = parseRelayModelId((inbound as Record<string, unknown>).model);
+          if (!route) throw new DirectChatRequestError("model", "Expected provider/model identifier");
+          requestModel = (inbound as Record<string, unknown>).model as string;
+          lease.check(requestModel); provider = route.provider;
+          bodyBytes = Buffer.byteLength(text);
+          const routed = { ...(inbound as Record<string, unknown>), model: route.model };
+          body = protocol === "responses" ? validateDirectResponsesRequest(provider, routed) : validateDirectChatRequest(routed);
+          stream = body.stream;
         } finally { clearTimeout(uploadTimer); }
-        lease.check(body.model); requestModel = body.model; stream = body.stream;
-        body = protocol === "responses" ? applyResponsesReasoningPolicy(body as DirectResponsesRequest, lease.caller.provider, lease.caller.reasoning ?? "passthrough")
-          : applyChatReasoningPolicy(body as DirectChatRequest, lease.caller.provider, lease.caller.reasoning ?? "passthrough");
-        if (protocol === "chat" && lease.caller.provider.startsWith("clp-")) {
-          const routed = pinClinePassRouting(body);
-          clineRoutingChanged = routed !== body;
-          body = routed;
-        }
+
       } else if (request.headers["transfer-encoding"] || Number(request.headers["content-length"] ?? 0) !== 0) {
         throw new RelayAdmissionError(400, "invalid_request");
       }
-      if (body) {
+      if (!models) {
         phase = "queue"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
-        await this.admission.wait(lease, body.model, Buffer.byteLength(JSON.stringify(body)), signal);
+        await this.admission.wait(lease, requestModel, bodyBytes, signal);
         signal.throwIfAborted();
       }
       phase = "prepare"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
-      const prepared = await waitForChatOperation(this.options.prepare(lease.caller.provider, signal), signal);
-      lease.check(body?.model); prepared.recheck();
       if (models) {
-        await endResponse(response, JSON.stringify({ object: "list", data: prepared.models.filter(model => lease!.caller.models.includes(model))
-          .map(id => ({ id, object: "model", owned_by: "relay" })) }), signal);
+        const ids: string[] = [];
+        for (const providerId of new Set(lease.caller.models.map(id => parseRelayModelId(id)!.provider))) {
+          const material = await waitForChatOperation(this.options.prepare(providerId, signal), signal);
+          lease.check(); material.recheck();
+          for (const model of material.models) {
+            const id = relayModelId(providerId, model);
+            if (lease.caller.models.includes(id)) ids.push(id);
+          }
+        }
+        if (new Set(ids).size !== ids.length) throw new RelayAdmissionError(503, "model_id_conflict");
+        await endResponse(response, JSON.stringify({ object: "list", data: ids.map(id => ({ id, object: "model", owned_by: "relay" })) }), signal);
         return;
       }
+      const prepared = await waitForChatOperation(this.options.prepare(provider!, signal), signal);
+      lease.check(requestModel); prepared.recheck();
       if (!prepared.protocols.includes(protocol)) throw new RelayAdmissionError(400, "protocol_not_supported");
-      if (!prepared.models.includes(body!.model)) throw new RelayAdmissionError(403, "model_not_allowed");
+      const upstreamModels = prepared.models.filter(model => relayModelId(provider!, model) === requestModel);
+      if (upstreamModels.length !== 1) throw new RelayAdmissionError(upstreamModels.length ? 503 : 403, upstreamModels.length ? "model_id_conflict" : "model_not_allowed");
+      body = { ...body!, model: upstreamModels[0]! };
+      // Model-specific input policy needs the current provider material.
+      phase = "input";
+      body = protocol === "responses" ? applyResponsesReasoningPolicy(body as DirectResponsesRequest, provider!, lease.caller.reasoning ?? "passthrough")
+        : applyChatReasoningPolicy(body as DirectChatRequest, provider!, lease.caller.reasoning ?? "passthrough", prepared.modelCapabilities?.find(model => model.id === body!.model));
+      if (protocol === "chat" && provider!.startsWith("clp-") && body.model === "cline-pass/deepseek-v4.1-flash") {
+        const routed = pinClinePassRouting(body);
+        clineRoutingChanged = routed !== body;
+        body = routed;
+      }
+      if (Buffer.byteLength(JSON.stringify(body)) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
       phase = "upstream"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
-      capture = await this.options.capture?.(lease.caller.provider, signal, protocol);
+      capture = await this.options.capture?.(provider!, signal, protocol);
       capture?.inbound?.(inbound, request.headers);
       if (clineRoutingChanged) capture?.transformed?.("provider_routing_pinned");
       if (inbound && typeof inbound === "object" && !("stream" in inbound)) capture?.transformed?.("stream_defaulted");
       if (protocol === "responses" && inbound && typeof inbound === "object" && !("store" in inbound)) capture?.transformed?.("store_defaulted");
       inbound = undefined;
-      const call = { ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
-        recheck: () => { lease!.check(body!.model); prepared.recheck(); },
+      const call = { diagnostics: (summary: ModelRequestDiagnostics) => { diagnostics = summary; }, ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
+        recheck: () => { lease!.check(requestModel); prepared.recheck(); },
         submitted: (ua: string | null) => { userAgent = ua; started = performance.now(); submittedAt = Date.now(); },
         headers: (status: number) => { httpStatus = status; },
         content: () => { firstTokenMs ??= performance.now() - started!; },
@@ -219,7 +246,7 @@ export class ModelRelayServer {
         },
       };
       if (protocol === "responses") await sendDirectResponses({ ...call, request: body as DirectResponsesRequest, observer: observer as DirectResponsesObserver });
-      else await sendDirectChat({ ...call, request: body as DirectChatRequest, observer: observer as DirectChatResponse, unwrapClpEnvelope: lease.caller.provider.startsWith("clp-") });
+      else await sendDirectChat({ ...call, request: body as DirectChatRequest, observer: observer as DirectChatResponse, unwrapClpEnvelope: provider!.startsWith("clp-") });
       deliveryStatus = "finished";
     } catch (error) {
       const signalReason: unknown = controller.signal.reason ?? lease?.signal.reason;
@@ -248,7 +275,10 @@ export class ModelRelayServer {
           ...(phase === "input" && (failure instanceof DirectChatRequestError || failure instanceof DirectResponsesRequestError) ? { param: failure.param } : {}),
           phase, request_id: relayRequestId, ...(httpStatus === undefined ? {} : { upstream_status: httpStatus }),
           upstream_attempted: started !== undefined } };
-        if (!request.complete) response.once("finish", () => request.destroy());
+        // Draining the rejected upload keeps the socket open long enough for the client to read
+        // the rejection; destroying an unread request resets it and surfaces as EPIPE/ECONNRESET.
+        // The server's requestTimeout bounds how long an unfinished upload can hold the connection.
+        if (!request.complete) response.once("finish", () => request.resume());
         // Error delivery has a separate short bound, even if the model request was cancelled.
         try {
           if (response.headersSent) { capture?.delivered?.(detail, true, response.statusCode, response.getHeaders()); await endResponse(response, `${protocol === "responses" ? "event: error\n" : ""}data: ${JSON.stringify(detail)}\n\n`, AbortSignal.timeout(1000)); }
@@ -264,10 +294,10 @@ export class ModelRelayServer {
       const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs, observer.responseModel);
       if (lease && started !== undefined) {
         const ended = completedAt ?? performance.now();
-        const metric: RelayMetric = { source: "relay", threadId: null, turnId: null, relayRequestId,
+        const metric: RelayMetric = { ...diagnostics, source: "relay", threadId: null, turnId: null, relayRequestId,
           ...(traffic ? { traffic } : {}),
           callerId: lease.caller.callerId, keyId: lease.caller.keyId, credentialGeneration: lease.caller.credentialGeneration,
-          provider: lease.caller.provider, requestModel, ...(userAgent === null ? {} : { userAgent }), responseFormat: stream ? "sse" : "json",
+          provider: provider!, requestModel, ...(userAgent === null ? {} : { userAgent }), responseFormat: stream ? "sse" : "json",
           status: observer.status === "unknown" ? "failed" : observer.status, deliveryStatus,
           requestStartedAtMs: submittedAt!, responseCompletedAtMs: submittedAt! + (ended - started), totalDurationMs: ended - started,
           ...observer.usage, ...(firstTokenMs === undefined ? {} : { firstTokenMs }),

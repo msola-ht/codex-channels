@@ -17,6 +17,28 @@ function request(method: string, threadId = scheduledThread): RpcServerRequest {
 }
 
 describe("scheduled-task server request boundary", () => {
+  it("cancels unattended stdin without invoking interactive approval", async () => {
+    const rejected = vi.fn();
+    const fallback = vi.fn(async () => ({ decision: "accept" }));
+    const handle = createScheduledTaskServerRequestHandler({
+      taskForThread: (threadId) => threadId === scheduledThread ? {} : undefined,
+      noteServerRequestRejected: rejected,
+    }, fallback);
+    const stdin = {
+      ...request("item/commandExecution/requestApproval"),
+      params: { threadId: scheduledThread, kind: "writeStdin", availableDecisions: ["accept", "cancel"] },
+    };
+
+    await expect(handle(stdin)).resolves.toEqual({ decision: "cancel" });
+    expect(rejected).toHaveBeenCalledExactlyOnceWith(scheduledThread);
+    expect(fallback).not.toHaveBeenCalled();
+
+    const foreground = { ...stdin, params: { ...stdin.params, threadId: "foreground" } };
+    await expect(handle(foreground)).resolves.toEqual({ decision: "accept" });
+    expect(fallback).toHaveBeenCalledExactlyOnceWith(foreground);
+    expect(rejected).toHaveBeenCalledTimes(1);
+  });
+
   it("returns protocol-shaped safe refusals for every supported request", async () => {
     const lookup: ScheduledTaskThreadLookup = {
       taskForThread: (threadId) => threadId === scheduledThread ? {} : undefined,

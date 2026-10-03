@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TrafficModel } from "@/components/traffic/traffic-model"
 import { RequestDetail } from "@/components/requests/request-detail"
@@ -78,6 +79,8 @@ export function RequestsTable({
 }) {
   const { t, language } = useTranslation()
   const [selected, setSelected] = React.useState<RequestRecord | null>(null)
+  const currentSelected = selected === null ? null : records.find(record => record.id === selected.id) ?? selected
+  if (currentSelected !== selected) setSelected(currentSelected)
   const opener = React.useRef<HTMLElement | null>(null)
   const openRequest = React.useCallback((record: RequestRecord) => {
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -154,10 +157,13 @@ export function RequestsTable({
         <span className="flex items-center gap-2 whitespace-nowrap">
           <TrafficModel
             provider={row.original.provider}
+            upstream={row.original.upstreamProvider}
             request={row.original.requestModel}
             responses={row.original.responseModel === null || row.original.responseModel === undefined ? [] : [row.original.responseModel]}
             fallback={row.original.model ?? undefined}
           />
+          {(row.original.upstreamAttemptCount ?? 0) > 1 ? <Badge variant="secondary" size="sm"
+            title={t("requestDetail.attemptHint")}>{t("requestDetail.attemptBadge", { count: row.original.upstreamAttemptCount! })}</Badge> : null}
           <FastBadge tier={row.original.requestServiceTier} source="request" responseTier={row.original.serviceTier} />
         </span>
       ),
@@ -198,11 +204,9 @@ export function RequestsTable({
             : Math.max(0, record.inputTokens - record.cachedInputTokens)
         return (
           <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+            <TooltipTrigger aria-description={[t("metrics.cached", { count: formatTokens(record.cachedInputTokens) }), t("metrics.uncached", { count: uncached === null ? "—" : formatTokens(uncached) }), t("metrics.hitRate", { rate: record.cacheHitRate === null ? "—" : `${(record.cacheHitRate * 100).toFixed(1)}%` })].join("; ")} render={<span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" />}>
                 {formatTokens(record.inputTokens)}
-              </span>
-            </TooltipTrigger>
+              </TooltipTrigger>
             <TooltipContent side="right" align="start">
               <ul className="flex flex-col gap-1">
                 <li className="whitespace-nowrap">
@@ -245,11 +249,9 @@ export function RequestsTable({
             : Math.max(0, record.outputTokens - record.reasoningOutputTokens)
         return (
           <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+            <TooltipTrigger aria-description={[t("metrics.reasoning", { count: formatTokens(record.reasoningOutputTokens) }), t("metrics.nonReasoning", { count: nonReasoning === null ? "—" : formatTokens(nonReasoning) })].join("; ")} render={<span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" />}>
                 {formatTokens(record.outputTokens)}
-              </span>
-            </TooltipTrigger>
+              </TooltipTrigger>
             <TooltipContent side="right" align="start">
               <ul className="flex flex-col gap-1">
                 <li className="whitespace-nowrap">
@@ -340,9 +342,7 @@ export function RequestsTable({
         }
         return (
           <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 block max-w-40 truncate">{label}</span>
-            </TooltipTrigger>
+            <TooltipTrigger aria-description={[formatErrorMessage(message, language), row.original.errorCode ? t("common.errorCode", { code: row.original.errorCode }) : null].filter(Boolean).join("; ")} render={<span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 block max-w-40 truncate" />}>{label}</TooltipTrigger>
             <TooltipContent side="right" className="max-w-md">
               <p className="break-all whitespace-normal text-xs">{formatErrorMessage(message, language)}</p>
               {row.original.errorCode ? (
@@ -406,11 +406,9 @@ export function RequestsTable({
     />
     <Sheet open={selected !== null} onOpenChange={(open) => { if (!open) setSelected(null) }}>
       <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-xl overflow-y-auto" closeLabel={t("common.close")}
-        onCloseAutoFocus={(event) => {
-          if (opener.current?.isConnected) { event.preventDefault(); opener.current.focus() }
-        }}>
+        finalFocus={() => opener.current?.isConnected ? opener.current : true}>
         <SheetHeader><SheetTitle>{t("requestDetail.title")}</SheetTitle><SheetDescription>{t("requestDetail.description")}</SheetDescription></SheetHeader>
-        <div className="px-4 pb-4">{selected === null ? null : <RequestDetail record={selected} />}</div>
+        <div className="px-4 pb-4">{currentSelected === null ? null : <RequestDetail record={currentSelected} />}</div>
       </SheetContent>
     </Sheet>
     </>

@@ -124,37 +124,83 @@ describe("webui server settings and task management", () => {
       { token: "webui-token", managementOrigin },
     );
     const headers = { authorization: "Bearer webui-token", origin: managementOrigin, "content-type": "application/json" };
-    const preview = await fetch(`${origin}/api/v1/management/tasks/preview`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ operation: "update" }),
-    });
-    expect(preview.status).toBe(200);
-    const previewBody = await preview.json() as { confirmationToken: string };
-    const startBody = { operation: "update", confirmationToken: previewBody.confirmationToken };
-    const started = await fetch(`${origin}/api/v1/management/tasks`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(startBody),
-    });
-    expect(started.status).toBe(202);
-    const taskId = (await started.json() as { id: string }).id;
+    const controller = new AbortController();
+    const notifications = await fetch(`${origin}/api/v1/management/tasks/events`, { headers, signal: controller.signal });
+    expect(notifications.status).toBe(200);
+    expect(notifications.headers.get("content-type")).toContain("text/event-stream");
+    const reader = notifications.body!.getReader();
+    const decoder = new TextDecoder();
+    let streamed = "";
+    const receiving = (async () => {
+      try {
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) return;
+          streamed += decoder.decode(chunk.value, { stream: true });
+        }
+      } catch { if (!controller.signal.aborted) throw new Error("任务通知意外断开"); }
+    })();
+    try {
+      const preview = await fetch(`${origin}/api/v1/management/tasks/preview`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ operation: "update" }),
+      });
+      expect(preview.status).toBe(200);
+      const previewBody = await preview.json() as { confirmationToken: string };
+      const startBody = { operation: "update", confirmationToken: previewBody.confirmationToken };
+      const started = await fetch(`${origin}/api/v1/management/tasks`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(startBody),
+      });
+      expect(started.status).toBe(202);
+      const taskId = (await started.json() as { id: string }).id;
 
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const list = await fetch(`${origin}/api/v1/management/tasks`, { headers: { authorization: "Bearer webui-token" } });
-      expect(list.status).toBe(200);
-      const task = (await list.json() as { tasks: Array<{ id: string; state: string }> }).tasks.find((candidate) => candidate.id === taskId);
-      if (task?.state === "completed") break;
-      await new Promise<void>((resolve) => setTimeout(resolve, 10));
-      if (attempt === 99) throw new Error("管理任务未在预期时间内完成");
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const list = await fetch(`${origin}/api/v1/management/tasks`, { headers: { authorization: "Bearer webui-token" } });
+        expect(list.status).toBe(200);
+        const task = (await list.json() as { tasks: Array<{ id: string; state: string }> }).tasks.find((candidate) => candidate.id === taskId);
+        if (task?.state === "completed") break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        if (attempt === 99) throw new Error("管理任务未在预期时间内完成");
+      }
+
+      const replay = await fetch(`${origin}/api/v1/management/tasks`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(startBody),
+      });
+      expect(replay.status).toBe(409);
+      for (let attempt = 0; (streamed.match(/"changed"/gu) ?? []).length < 4; attempt += 1) {
+        if (attempt === 99) throw new Error("未收到任务终态通知");
+        await new Promise<void>(resolve => setTimeout(resolve, 10));
+      }
+      expect(streamed).not.toContain(taskId);
+      expect(streamed).not.toContain("webui-token");
+      expect(streamed.trim().split("\n\n").every(frame => /^data: \{"type":"(?:changed|heartbeat)"\}$/u.test(frame))).toBe(true);
+    } finally { controller.abort(); await receiving; reader.releaseLock(); }
+  });
+
+  it("authenticates task notifications and bounds shared subscriptions", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment, undefined, { token: "webui-token" });
+    const url = `${origin}/api/v1/management/tasks/events`, headers = { authorization: "Bearer webui-token" };
+    expect((await fetch(url)).status).toBe(401);
+    expect((await fetch(`${url}?token=webui-token`, { headers })).status).toBe(400);
+    expect((await fetch(url, { headers: { ...headers, origin: "https://evil.invalid" } })).status).toBe(403);
+    const controllers: AbortController[] = [], responses: Response[] = [];
+    try {
+      for (let index = 0; index < 8; index += 1) {
+        const controller = new AbortController(); controllers.push(controller);
+        const response = await fetch(url, { headers, signal: controller.signal }); responses.push(response);
+        expect(response.status).toBe(200);
+      }
+      expect((await fetch(url, { headers })).status).toBe(429);
+    } finally {
+      for (const controller of controllers) controller.abort();
+      await Promise.all(responses.map(response => response.body?.cancel().catch(() => undefined)));
     }
-
-    const replay = await fetch(`${origin}/api/v1/management/tasks`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(startBody),
-    });
-    expect(replay.status).toBe(409);
   });
 
   it("previews traffic cleanup with recognized dump counts", async () => {

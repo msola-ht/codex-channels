@@ -1,18 +1,19 @@
+import { downloadClineRelayCatalog, saveClineRelayCatalog } from "./cline-relay-catalog.mjs";
 import { openQueueStream } from "./webui-queue-events.mjs";
 import { watchRelayChanges } from "../runtime/model-relay-control.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { locateUserConfig } from "./runtime-config.mjs";
-import { relayDisplayNameSchema } from "../runtime/model-relay-config.mjs";
+import { relayDisplayNameSchema, relayKeyModelsSchema } from "../runtime/model-relay-config.mjs";
 import { z } from "zod";
 import { manageModelRelay, readRelayQueue, readRelayManagement, withRelayManagementTransaction } from "./model-relay-management.mjs";
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
 
 const identity = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
-const fields = { name: relayDisplayNameSchema.optional(), models: z.array(z.string().min(1).max(200)).min(1).max(64), reasoning: z.enum(["passthrough", "off"]) };
+const fields = { name: relayDisplayNameSchema.optional(), reasoning: z.enum(["passthrough", "off"]) };
 const mutation = z.discriminatedUnion("command", [
-  z.strictObject({ command: z.literal("issue"), caller: identity, key: identity, provider: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u), ...fields }),
-  z.strictObject({ command: z.literal("edit"), caller: identity, provider: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u).optional(), ...fields }),
+  z.strictObject({ command: z.literal("issue"), caller: identity, key: identity, models: relayKeyModelsSchema, ...fields }),
+  z.strictObject({ command: z.literal("edit"), caller: identity, models: relayKeyModelsSchema.optional(), ...fields }),
   z.strictObject({ command: z.literal("delete"), caller: identity }),
   z.strictObject({ command: z.literal("rotate"), caller: identity }),
   z.strictObject({ command: z.literal("disable"), caller: identity }),
@@ -20,6 +21,33 @@ const mutation = z.discriminatedUnion("command", [
 const envelope = z.strictObject({ input: mutation, revision: z.string().regex(/^[a-f0-9]{64}$/u), confirmationToken: z.string().max(128).optional() });
 
 export async function routeRelayManagement({ environment, maximumBodyBytes, openMetricsStore, path, principalId, request, response, state }) {
+  if (path === "/relay/catalog/update" && request.method === "POST") {
+    if (new URL(request.url, "http://localhost").search || !z.strictObject({}).safeParse(await readJsonBody(request, maximumBodyBytes)).success) {
+      throw new ApiError(400, "relay_invalid", "Cline 目录更新参数无效");
+    }
+    try { state.audit.assertWritable(); }
+    catch { throw new ApiError(503, "management_audit_unavailable", "审计不可用，未更新目录"); }
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    response.once("close", cancel);
+    const signal = globalThis.AbortSignal.any([controller.signal, globalThis.AbortSignal.timeout(25_000)]);
+    try {
+      const catalog = await downloadClineRelayCatalog(environment, signal);
+      signal.throwIfAborted();
+      const result = await withRelayManagementTransaction(environment, async () => {
+        signal.throwIfAborted();
+        state.audit.assertWritable();
+        return { activation: "saved", catalog: saveClineRelayCatalog(catalog, environment) };
+      });
+      let auditStatus = result.cleanupStatus === "failed" ? "failed" : "recorded";
+      try { state.audit.record({ sessionId: principalId, source: "webui", operation: "relay.catalog.update",
+        inputFingerprint: fingerprintManagementValue({ commit: catalog.commit }), phase: "completed", resultCode: "saved", recovery: "none" }); }
+      catch { auditStatus = "failed"; }
+      sendManagementJson(response, 200, { catalog: result.catalog, auditStatus });
+    } catch { throw new ApiError(502, "relay_invalid", "Cline 目录下载或保存失败，原目录保留"); }
+    finally { response.off("close", cancel); }
+    return true;
+  }
   if (path === "/relay/queue/events" && request.method === "GET") {
     if (new URL(request.url, "http://localhost").search) throw new ApiError(400, "relay_invalid", "Relay 管理参数无效");
     const { configPath } = locateUserConfig(environment);

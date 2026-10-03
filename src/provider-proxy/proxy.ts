@@ -1,4 +1,4 @@
-import { chatDiagnosticsHeader, type ChatDiagnosticsChannel } from "./chat-diagnostics.js";
+import { modelRequestDiagnostics, chatDiagnosticsHeader, type ChatDiagnosticsChannel } from "./chat-diagnostics.js";
 import {
   createServer,
   request as httpRequest,
@@ -356,9 +356,10 @@ export class ProviderProxy {
     const upstreamRequest = upstreamTarget.protocol === "http"
       ? httpRequest
       : httpsRequest;
-    const diagnosticObserver = exchange ? this.chatDiagnostics?.subscribe(snapshot => {
-      exchange.write({ kind: "chat_diagnostics", ...snapshot });
-    }) : undefined;
+    const diagnosticObserver = this.chatDiagnostics?.subscribe(snapshot => {
+      Object.assign(metrics, modelRequestDiagnostics(snapshot));
+      exchange?.write({ kind: "chat_diagnostics", ...snapshot });
+    });
     response.once("close", () => diagnosticObserver?.close());
     const upstreamHeaders = forwardedRequestHeaders(request.headers, upstreamTarget.host, upstreamTarget.port, this.upstreamUserAgent);
     delete upstreamHeaders[chatDiagnosticsHeader];

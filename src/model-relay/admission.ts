@@ -1,3 +1,4 @@
+import { parseRelayModelId } from "../../runtime/model-relay-model-id.mjs";
 import { createHash, timingSafeEqual } from "node:crypto";
 
 /** requestsPerMinute=0 disables only rate/burst admission, never concurrency. */
@@ -8,7 +9,6 @@ export interface RelayCaller {
   credentialGeneration: number;
   secretSha256: string;
   enabled: boolean;
-  provider: string;
   models: readonly string[];
   reasoning?: "passthrough" | "off";
 }
@@ -32,6 +32,7 @@ interface Bucket { tokens: number; updated: number; active: number; limit: Relay
 export interface RelayLease {
   readonly caller: Readonly<RelayCaller>;
   readonly signal: AbortSignal;
+  readonly provider: string | null;
   /** Synchronous guard immediately before opening the upstream connection. */
   check(model?: string): void;
   cancel(): void;
@@ -119,9 +120,10 @@ export class RelayAdmission {
       this.failures.tokens -= 1;
       throw new RelayAdmissionError(401, "invalid_api_key");
     }
-    if (this.revokedProviders.has(caller.provider)) throw new RelayAdmissionError(503, "provider_unavailable");
-    const account = this.policy.accounts.find(value => value.provider === caller.provider);
-    if (!account) throw new RelayAdmissionError(503, "provider_unavailable");
+    if (caller.models.length && caller.models.every(id => {
+      const provider = parseRelayModelId(id)?.provider;
+      return !provider || this.revokedProviders.has(provider) || !this.policy.accounts.some(account => account.provider === provider);
+    })) throw new RelayAdmissionError(503, "provider_unavailable");
     if (deferred) {
       if (this.pending.size >= 32 || this.pendingBytes + maximumBodyBytes > maximumPendingBytes) {
         throw new RelayAdmissionError(429, "relay_queue_full");
@@ -133,14 +135,23 @@ export class RelayAdmission {
     const controller = new AbortController();
     const identity = privilege(caller);
     let released = false;
+    let selectedModel: string | undefined;
+    let selectedProvider: string | null = null;
     const lease: RelayLease = {
       caller, signal: controller.signal,
+      get provider() { return selectedProvider; },
       check: (model) => {
         if (released || controller.signal.aborted || this.closed || !this.policy.enabled) throw new RelayAdmissionError(503, "request_revoked");
         const current = this.policy.callers.find(value => value.keyId === caller.keyId);
-        if (!current?.enabled || privilege(current) !== identity || this.revokedProviders.has(caller.provider)
-          || !this.policy.accounts.some(value => value.provider === caller.provider)) throw new RelayAdmissionError(503, "request_revoked");
-        if (model !== undefined && !current.models.includes(model)) throw new RelayAdmissionError(403, "model_not_allowed");
+        if (!current?.enabled || privilege(current) !== identity) throw new RelayAdmissionError(503, "request_revoked");
+        if (model !== undefined) {
+          const route = parseRelayModelId(model);
+          if (!route || !current.models.includes(model)) throw new RelayAdmissionError(403, "model_not_allowed");
+          if (selectedModel !== undefined && selectedModel !== model) throw new RelayAdmissionError(503, "request_revoked");
+          selectedModel = model; selectedProvider = route.provider;
+        }
+        if (selectedProvider !== null && (this.revokedProviders.has(selectedProvider)
+          || !this.policy.accounts.some(value => value.provider === selectedProvider))) throw new RelayAdmissionError(503, "provider_unavailable");
       },
       cancel: () => {
         controller.abort(new RelayAdmissionError(503, "request_revoked"));
@@ -268,7 +279,7 @@ export class RelayAdmission {
   invalidateProvider(provider: string): void {
     if (!this.policy.accounts.some(account => account.provider === provider)) return;
     this.revokedProviders.add(provider);
-    for (const lease of this.leases) if (lease.caller.provider === provider) lease.cancel();
+    for (const lease of this.leases) if (lease.provider === provider || lease.provider === null && lease.caller.models.some(id => parseRelayModelId(id)?.provider === provider)) lease.cancel();
   }
   restoreProvider(provider: string): void { if (!this.closed) this.revokedProviders.delete(provider); }
   failClosed(): void {
@@ -286,7 +297,7 @@ function refill(bucket: Bucket, now: number): void {
 }
 function privilege(caller: RelayCaller): string {
   return JSON.stringify([caller.callerId, caller.keyId, caller.credentialGeneration, caller.secretSha256,
-    caller.provider, [...caller.models].sort(), caller.enabled, caller.reasoning ?? "passthrough"]);
+    [...caller.models].sort(), caller.enabled, caller.reasoning ?? "passthrough"]);
 }
 function freezePolicy(policy: RelayPolicy): RelayPolicy {
   return Object.freeze({ ...policy,

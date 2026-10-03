@@ -1,3 +1,4 @@
+import { ChatDiagnostics, modelRequestDiagnostics, type ModelRequestDiagnostics } from "./chat-diagnostics.js";
 import type { IncomingHttpHeaders } from "node:http";
 import { DirectChatResponse, ModelConversionError, type DirectChatRequest } from "../model-api/index.js";
 import { ChatUpstreamError, chatStreamError, chatUpstreamError } from "./chat-errors.js";
@@ -10,6 +11,7 @@ export type DirectChatTarget = DirectModelTarget;
 export interface DirectChatCall {
   request: DirectChatRequest;
   capture?: DirectChatCapture;
+  diagnostics?(summary: ModelRequestDiagnostics): void;
   clientHeaders?: IncomingHttpHeaders;
   target: DirectChatTarget;
   signal: AbortSignal;
@@ -24,49 +26,68 @@ export interface DirectChatCall {
 
 /** One direct Chat exchange. No retries, redirects, caller identity or metric submission. */
 export async function sendDirectChat(call: DirectChatCall): Promise<void> {
-  await withDirectModelResponse({
-    body: call.request, path: "/chat/completions", target: call.target,
-    ...(call.clientHeaders ? { clientHeaders: call.clientHeaders } : {}),
-    signal: call.signal, recheck: () => call.recheck(),
-    transformed: operation => call.capture?.transformed?.(operation),
-    submitted: (userAgent, headers, path) => {
-      call.submitted(userAgent);
-      call.capture?.submitted(call.request, headers, path);
-    },
-  }, async incoming => {
-    call.headers(incoming.statusCode ?? 502);
-    call.capture?.head(incoming.statusCode ?? 502, incoming.headers);
-    await validateDirectModelResponse(incoming, call.request.stream, call.capture);
-    if (call.request.stream) {
-      for await (const data of readChatFrames(incoming, call.signal, {
-        frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024,
-      })) {
-        if (data === "[DONE]") { call.observer.finish(); call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete"); await call.emit(undefined, true); return; }
-        const value: unknown = parseDirectModelJson(data, call.capture);
-        call.capture?.value(value, true);
-        const error = chatStreamError(value);
-        if (error) throw error;
-        call.observer.push(value, true);
-        if (call.observer.hasContent) call.content();
-        await call.emit(value as Record<string, unknown>, false);
+  const diagnostics = new ChatDiagnostics();
+  let errorStage: "http" | "stream" = "http";
+  let delivering = false;
+  const emit: typeof call.emit = async (...args) => {
+    delivering = true;
+    await call.emit(...args);
+    delivering = false;
+  };
+  try {
+    await withDirectModelResponse({
+      body: call.request, path: "/chat/completions", target: call.target,
+      ...(call.clientHeaders ? { clientHeaders: call.clientHeaders } : {}),
+      signal: call.signal, recheck: () => call.recheck(),
+      transformed: operation => call.capture?.transformed?.(operation),
+      submitted: (userAgent, headers, path) => {
+        call.submitted(userAgent);
+        call.capture?.submitted(call.request, headers, path);
+      },
+    }, async incoming => {
+      call.headers(incoming.statusCode ?? 502);
+      call.capture?.head(incoming.statusCode ?? 502, incoming.headers);
+      await validateDirectModelResponse(incoming, call.request.stream, {
+        value: (value, stream) => { diagnostics.push(value); call.capture?.value(value, stream); },
+        invalid: count => call.capture?.invalid(count),
+      });
+      if (call.request.stream) errorStage = "stream";
+      if (call.request.stream) {
+        for await (const data of readChatFrames(incoming, call.signal, {
+          frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024,
+        })) {
+          if (data === "[DONE]") { call.observer.finish(); call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete"); await emit(undefined, true); return; }
+          const value: unknown = parseDirectModelJson(data, call.capture);
+          diagnostics.push(value);
+          call.capture?.value(value, true);
+          const error = chatStreamError(value);
+          if (error) throw error;
+          call.observer.push(value, true);
+          if (call.observer.hasContent) call.content();
+          await emit(value as Record<string, unknown>, false);
+        }
+        throw new ModelConversionError("Chat stream disconnected before DONE");
       }
-      throw new ModelConversionError("Chat stream disconnected before DONE");
-    }
-    const body = await readChatBody(incoming, call.signal, 8 * 1024 * 1024);
-    const parsed: unknown = parseDirectModelJson(body, call.capture);
-    call.capture?.value(parsed, false);
-    const envelopeError = chatStreamError(parsed);
-    if (envelopeError) throw envelopeError;
-    const value = call.unwrapClpEnvelope ? directChatJsonPayload(parsed) : parsed;
-    if (value !== parsed) call.capture?.transformed?.("json_unwrapped");
-    const error = chatStreamError(value);
-    if (error) throw error;
-    call.observer.push(value, false);
-    call.observer.finish();
-    if (call.observer.hasContent) call.content();
-    call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete");
-    await call.emit(value as Record<string, unknown>, true);
-  });
+      const body = await readChatBody(incoming, call.signal, 8 * 1024 * 1024);
+      const parsed: unknown = parseDirectModelJson(body, call.capture);
+      call.capture?.value(parsed, false);
+      const envelopeError = chatStreamError(parsed);
+      if (envelopeError) { diagnostics.push(parsed); throw envelopeError; }
+      const value = call.unwrapClpEnvelope ? directChatJsonPayload(parsed) : parsed;
+      if (value !== parsed) call.capture?.transformed?.("json_unwrapped");
+      diagnostics.push(value);
+      const error = chatStreamError(value);
+      if (error) throw error;
+      call.observer.push(value, false);
+      call.observer.finish();
+      if (call.observer.hasContent) call.content();
+      call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete");
+      await emit(value as Record<string, unknown>, true);
+    });
+  } catch (error) {
+    if (!delivering && !call.signal.aborted) diagnostics.error("upstream_failure", errorStage, false);
+    throw error;
+  } finally { call.diagnostics?.(modelRequestDiagnostics(diagnostics.snapshot())); }
 }
 
 /** CLP's observed non-streaming envelope; unwrap once, never guess arbitrary wrappers. */

@@ -2,7 +2,6 @@ import { TRAFFIC_UPGRADE_USAGE } from "./cli-command-usage.mjs";
 export { TRAFFIC_UPGRADE_USAGE } from "./cli-command-usage.mjs";
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { parseGatewayConfig, validateGatewayConfigDocument, withGatewayConfigLock } from "../runtime/gateway-config.mjs";
-import { removeLegacyRelayCapture } from "../runtime/model-relay-config.mjs";
 import { assertPrivateConfigAccessSync, readPrivateFileSync } from "../runtime/private-file.mjs";
 import { saveConfigWithBackup } from "./config-backup.mjs";
 import { locateUserConfig } from "./runtime-config.mjs";
@@ -29,7 +28,6 @@ export async function upgradeTrafficCapture(input, environment = process.env) {
     const content = readPrivateFileSync(configPath, 1024 * 1024);
     const document = parseGatewayConfig(content);
     const original = JSON.stringify(document);
-    if (document.model_relay !== undefined) document.model_relay = removeLegacyRelayCapture(document.model_relay);
     // Validate unrelated fields before replacing even the selected global values.
     validateGatewayConfigDocument(document);
     document.debug = { ...document.debug, model_traffic_dump: input.enabled,

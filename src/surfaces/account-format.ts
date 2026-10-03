@@ -42,8 +42,8 @@ export function formatTimeRemaining(timestamp: number, now: number, kind: "reset
   const remainingMs = timestamp * 1_000 - now;
   if (remainingMs <= 0) return kind === "reset" ? "重置时间已过" : "已到期";
   const hours = Math.floor(remainingMs / 3_600_000);
-  if (hours === 0) return "剩余不足 1 H";
-  return `剩余 ${Math.floor(hours / 24)} D ${hours % 24} H`;
+  if (hours === 0) return "剩余：不足 1 H";
+  return `剩余：${Math.floor(hours / 24)} D ${hours % 24} H`;
 }
 
 export function formatPercent(value: number): string {

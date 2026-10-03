@@ -19,4 +19,5 @@ export type { RelayMetric } from "./relay-metric.js";
 export { RelayMetricsServer, sendRelayMetrics, type RelayMetricEnvelope, type RelayMetricRejection } from "./relay-metrics-channel.js";
 
 export { RelayTrafficDump, type DirectChatCapture } from "./relay-traffic-dump.js";
+export type { ModelRequestDiagnostics } from "./chat-diagnostics.js";
 export { pinClinePassRouting } from "./cline-pass-routing.js";

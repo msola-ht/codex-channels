@@ -7,6 +7,7 @@ import pino from "pino";
 import { secureTestDirectory } from "./support/windows-fixtures.js";
 
 import { ScheduledTaskRunCoordinator } from "../src/bootstrap/scheduled-task-run-coordinator.js";
+import { createScheduledTaskServerRequestHandler } from "../src/bootstrap/scheduled-task-server-request.js";
 import { BindingRestoreCoordinator } from "../src/bootstrap/binding-restore-coordinator.js";
 import { EventBus } from "../src/event-bus/index.js";
 import type { OutputEvent } from "../src/conversation-core/index.js";
@@ -399,7 +400,7 @@ describe("ScheduledTaskRunCoordinator", () => {
     store.close();
   });
 
-  it("records a rejected unattended Server Request as an approval failure", () => {
+  it.each(["completed", "failed", "interrupted"] as const)("records unattended stdin rejection as an approval failure after %s", async (status) => {
     const history: ThreadHistoryPort = {
       listThreadTurns: async () => ({ turns: [], nextCursor: null }),
       revertThread: async () => ({ thread: thread("thread-1") }),
@@ -407,8 +408,13 @@ describe("ScheduledTaskRunCoordinator", () => {
     const { store, coordinator } = setup(history);
     coordinator.initialize();
 
-    coordinator.noteServerRequestRejected("thread-1");
-    coordinator.handleCompletion("thread-1", "turn-1", "completed");
+    const fallback = vi.fn(async () => ({ decision: "accept" }));
+    const handle = createScheduledTaskServerRequestHandler(coordinator, fallback);
+    await expect(handle({ id: 1, method: "item/commandExecution/requestApproval",
+      params: { threadId: "thread-1", kind: "writeStdin", availableDecisions: ["accept", "cancel"] },
+    })).resolves.toEqual({ decision: "cancel" });
+    expect(fallback).not.toHaveBeenCalled();
+    coordinator.handleCompletion("thread-1", "turn-1", status);
 
     expect(store.listRuns("task-1")[0]).toMatchObject({
       state: "failed",
@@ -417,9 +423,9 @@ describe("ScheduledTaskRunCoordinator", () => {
     store.close();
   });
 
-  it("preserves a rejected unattended Server Request across Gateway restart", async () => {
+  it.each(["completed", "interrupted"] as const)("preserves a rejected unattended Server Request across Gateway restart after %s", async (status) => {
     const history: ThreadHistoryPort = {
-      listThreadTurns: async () => ({ turns: [turn("turn-1", "completed")], nextCursor: null }),
+      listThreadTurns: async () => ({ turns: [turn("turn-1", status)], nextCursor: null }),
       revertThread: async () => ({ thread: thread("thread-1") }),
     };
     const { store, router, coordinator } = setup(history);

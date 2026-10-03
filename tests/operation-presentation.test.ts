@@ -61,6 +61,18 @@ describe("shared operation presentation", () => {
     expect(operationTitle(operation("subagent", "unknown"))).toBe("子代理活动");
   });
 
+  it("labels read-only exploration commands by their parsed intent", () => {
+    const exploration = {
+      ...operation("command"),
+      detail: "AGENTS.md",
+    };
+    expect(operationTitle({ ...exploration, commandExploration: "read" })).toBe("读取文件");
+    expect(operationTitle({ ...exploration, commandExploration: "search" })).toBe("搜索内容");
+    expect(operationTitle({ ...exploration, commandExploration: "listFiles" })).toBe("浏览目录");
+    expect(operationTitle({ ...exploration, commandExploration: "mixed" })).toBe("探索文件");
+    expect(operationTitle({ ...exploration, kind: "fileChange" })).toBe("修改文件");
+  });
+
   it("maps operation statuses and optional metadata", () => {
     expect([
       operationStatus("running"),

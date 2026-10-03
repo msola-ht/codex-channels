@@ -1,4 +1,5 @@
 import { runClinePassSetup } from "../scripts/cline-pass-setup.mjs";
+import { saveClineRelayCatalog } from "../scripts/cline-relay-catalog.mjs";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
@@ -57,6 +58,8 @@ it("isolates switching credentials and restores exclusive configuration on remov
   expect(JSON.parse(readFileSync(paths.catalog, "utf8"))).toMatchObject({ models: [{ input_modalities: ["text", "image"], default_reasoning_level: "high", apply_patch_tool_type: "freeform", supports_search_tool: true, model_messages: { instructions_template: "DS fixture prompt" }, supported_reasoning_levels: ["none", "low", "high", "max"].map(effort => ({ effort })) }] });
   expect(parse(readFileSync(paths.profile, "utf8")).model_reasoning_effort).toBe("high");
   expect(loadManagedModelProviderSettings(environment)).toContainEqual(expect.objectContaining({ provider: "clp-test", mode: "switching" }));
+  saveClineRelayCatalog({ version: 1, commit: "a".repeat(40), downloadedAt: 1,
+    models: [{ id: "cline-pass/deepseek-v4.1-flash" }] }, environment);
   const switchingMaterial = loadConfiguredRelayProviderMaterial("clp-test", environment);
   expect(switchingMaterial).toMatchObject({ provider: "clp-test", apiKey: input.apiKey, models: ["cline-pass/deepseek-v4.1-flash"] });
   expect(switchingMaterial.paths).toContain(paths.profile);
@@ -69,7 +72,8 @@ it("isolates switching credentials and restores exclusive configuration on remov
   const fixedMaterial = loadConfiguredRelayProviderMaterial("clp-test", environment);
   expect(fixedMaterial.apiKey).toBe(input.apiKey);
   expect(fixedMaterial.paths).toContain(paths.config);
-  expect(fixedMaterial.revision).not.toBe(switchingMaterial.revision);
+  // Codex mode changes do not revoke Relay requests when its credentials and catalog stay the same.
+  expect(fixedMaterial.revision).toBe(switchingMaterial.revision);
   await removeClinePassConfiguration({accountId:"test", confirmRemove: true }, { environment, resolvePrimarySocket: () => join(roots[0]!, "unused.sock"), inspectSupervisor: async () => ({ status: "missing" }) });
   expect(parse(readFileSync(paths.config, "utf8"))).toEqual(parse(original));
   expect(existsSync(paths.marker)).toBe(false);

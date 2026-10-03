@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  automaticAccountProviders, beginAccountRefreshAttempt, clearRecoveredAccountFailures, type AccountRefreshAttempts,
+  beginAccountRefreshAttempt, clearRecoveredAccountFailures, type AccountRefreshAttempts,
   openAiCreditsFromSnapshot,
   openAiWeeklyQuotaFromSnapshot,
   accountRefreshErrors,
@@ -21,20 +21,9 @@ import { estimateServerTime } from "../webui/src/lib/server-time.js";
 import type { OfficialAccountSourcesResponse, OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
 
 describe("WebUI per-account refresh state", () => {
-  it("automatically selects only missing or stale accounts using the server clock", () => {
-    const now = 2_000_000;
-    const accounts = ["fresh", "stale", "missing", "placeholder"].map(id => ({ id, displayName: id }));
-    const snapshots = { observedAtMs: now, warnings: [], snapshots: [
-      { provider: "fresh", observedAtMs: now - 900_000 },
-      { provider: "stale", observedAtMs: now - 900_001 },
-      { provider: "placeholder", observedAtMs: 0 },
-    ].map(item => ({ ...item, accountId: null, displayName: item.provider, default: false, available: true, usage: null, limits: null })) };
-    expect(automaticAccountProviders(accounts, snapshots, new Map(), now, 10)).toEqual(["stale", "missing", "placeholder"]);
-  });
-
   it("clears only failures superseded by strictly newer observations", () => {
     const attempts: AccountRefreshAttempts = new Map();
-    beginAccountRefreshAttempt(attempts, "clp-main", 100, 500);
+    beginAccountRefreshAttempt(attempts, "clp-main", 500);
     attempts.get("clp-main")!.error = { kind: "refresh-failed", message: "failed" };
     const snapshot = (observedAtMs: number): OfficialAccountSnapshotsResponse => ({ observedAtMs, warnings: [], snapshots: [{
       provider: "clp-main", accountId: "main", displayName: "CLP", default: true, observedAtMs,
@@ -43,24 +32,17 @@ describe("WebUI per-account refresh state", () => {
     for (const time of [0, 499, 500]) expect(clearRecoveredAccountFailures(attempts, snapshot(time))).toEqual([]);
     expect(clearRecoveredAccountFailures(attempts, snapshot(501))).toEqual(["clp-main"]);
     expect(attempts.size).toBe(0);
-    beginAccountRefreshAttempt(attempts, "clp-main", 100);
+    beginAccountRefreshAttempt(attempts, "clp-main");
     attempts.get("clp-main")!.error = { kind: "refresh-failed", message: "unknown baseline" };
     expect(clearRecoveredAccountFailures(attempts, snapshot(501))).toEqual([]);
-    const accounts = [{ id: "clp-main", displayName: "CLP" }];
-    expect(automaticAccountProviders(accounts, snapshot(501), attempts, 501, 60_099)).toEqual([]);
-    expect(automaticAccountProviders(accounts, snapshot(501), attempts, 501, 60_100)).toEqual(["clp-main"]);
   });
 
-  it("retains bounded attempt cooldown across navigation and permits retry after expiry", () => {
+  it("bounds manual refresh failure metadata across navigation", () => {
     const attempts: AccountRefreshAttempts = new Map();
-    const accounts = [{ id: "clp-main", displayName: "CLP" }];
     beginAccountRefreshAttempt(attempts, "clp-main", 100);
-    expect(automaticAccountProviders(accounts, null, attempts, 9_000_000, 60_099)).toEqual([]);
-    expect(automaticAccountProviders(accounts, null, attempts, 9_000_000, 60_100)).toEqual(["clp-main"]);
     for (let i = 0; i < 300; i++) beginAccountRefreshAttempt(attempts, String(i), 100);
     expect(attempts.size).toBe(256);
-    automaticAccountProviders(accounts, null, attempts, 9_000_000, 100);
-    expect(attempts.size).toBe(0);
+    expect(attempts.has("clp-main")).toBe(false);
   });
 
   it("maps the isolated account source list without model configuration", () => {

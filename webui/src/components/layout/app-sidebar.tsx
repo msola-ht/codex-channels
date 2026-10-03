@@ -42,11 +42,9 @@ export function AppSidebar() {
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild tooltip="Codex WebUI">
-              <Link to="/" onClick={() => setOpenMobile(false)}>
-                <Gauge />
-                <span>Codex WebUI</span>
-              </Link>
+            <SidebarMenuButton render={<Link to="/" onClick={() => setOpenMobile(false)} />} tooltip="Codex WebUI">
+              <Gauge />
+              <span>Codex WebUI</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -59,7 +57,7 @@ export function AppSidebar() {
               {navigation.map((item) => "children" in item ? <NavigationGroup key={item.id} item={item} /> : (
                 <SidebarMenuItem key={item.to}>
                   <SidebarMenuButton
-                    asChild
+                    render={<NavLink to={item.to} onClick={() => setOpenMobile(false)} />}
                     isActive={
                       item.to === "/"
                         ? pathname === "/"
@@ -67,10 +65,8 @@ export function AppSidebar() {
                     }
                     tooltip={t(item.labelKey)}
                   >
-                    <NavLink to={item.to} onClick={() => setOpenMobile(false)}>
-                      <item.icon />
-                      <span>{t(item.labelKey)}</span>
-                    </NavLink>
+                    <item.icon />
+                    <span>{t(item.labelKey)}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
@@ -93,20 +89,16 @@ function NavigationGroup({ item }: { item: NavGroup }) {
   const iconMode = !isMobile && state === "collapsed"
   const visibleExpanded = expanded && !iconMode
   useEffect(() => { if (active) setExpanded(true) }, [active, pathname])
-  return <Collapsible asChild open={visibleExpanded} onOpenChange={next => {
+  return <Collapsible render={<SidebarMenuItem />} open={visibleExpanded} onOpenChange={next => {
     if (iconMode) { setOpen(true); setExpanded(true) }
     else setExpanded(next)
   }}>
-    <SidebarMenuItem>
-      <CollapsibleTrigger asChild>
-        <SidebarMenuButton tooltip={t(item.labelKey)} isActive={iconMode && active} aria-label={t(visibleExpanded ? "navigation.collapse" : "navigation.expand", { name: t(item.labelKey) })}>
-          <item.icon /><span>{t(item.labelKey)}</span>
-          <ChevronRight aria-hidden="true" data-expanded={visibleExpanded} className="ml-auto transition-transform duration-200 motion-reduce:transition-none data-[expanded=true]:rotate-90 group-data-[collapsible=icon]:hidden" />
-        </SidebarMenuButton>
-      </CollapsibleTrigger>
-      <CollapsibleContent><SidebarMenuSub>
-        {item.children.map(item => <SidebarMenuSubItem key={item.to}><SidebarMenuSubButton asChild isActive={pathname === item.to}><NavLink to={item.to} onClick={() => setOpenMobile(false)}>{t(item.labelKey)}</NavLink></SidebarMenuSubButton></SidebarMenuSubItem>)}
-      </SidebarMenuSub></CollapsibleContent>
-    </SidebarMenuItem>
+    <CollapsibleTrigger render={<SidebarMenuButton tooltip={t(item.labelKey)} isActive={iconMode && active} aria-label={t(visibleExpanded ? "navigation.collapse" : "navigation.expand", { name: t(item.labelKey) })} />}>
+      <item.icon /><span>{t(item.labelKey)}</span>
+      <ChevronRight aria-hidden="true" data-expanded={visibleExpanded} className="ml-auto transition-transform duration-200 motion-reduce:transition-none data-[expanded=true]:rotate-90 group-data-[collapsible=icon]:hidden" />
+    </CollapsibleTrigger>
+    <CollapsibleContent><SidebarMenuSub>
+      {item.children.map(item => <SidebarMenuSubItem key={item.to}><SidebarMenuSubButton render={<NavLink to={item.to} onClick={() => setOpenMobile(false)} />} isActive={pathname === item.to}>{t(item.labelKey)}</SidebarMenuSubButton></SidebarMenuSubItem>)}
+    </SidebarMenuSub></CollapsibleContent>
   </Collapsible>
 }

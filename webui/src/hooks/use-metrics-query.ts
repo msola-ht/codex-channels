@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import { useSearchParams } from "react-router"
 import type { SortingState } from "@tanstack/react-table"
 
@@ -7,8 +7,30 @@ import type { DataTableProps } from "@/components/metrics/data-table"
 import { useApi } from "@/hooks/use-api"
 import { fetchMetricsProviders } from "@/lib/api"
 
-export function useMetricsProviders() {
-  return useApi(fetchMetricsProviders, [])
+export function useMetricsProviders(revision: unknown = null) {
+  const state = useApi(async signal => ({ revision, value: await fetchMetricsProviders(signal), completedAt: Date.now() }), [])
+  const { refetch } = state
+  useEffect(() => {
+    if (revision === null || state.loading || state.error !== null || state.data?.revision === revision) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const schedule = () => {
+      clearTimeout(timer)
+      if (document.visibilityState !== "visible" || !navigator.onLine) return
+      // Coalesce successful page updates without opening another notification stream.
+      timer = setTimeout(refetch, Math.max(0, (state.data?.completedAt ?? 0) + 30_000 - Date.now()))
+    }
+    schedule()
+    document.addEventListener("visibilitychange", schedule)
+    window.addEventListener("online", schedule)
+    window.addEventListener("offline", schedule)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener("visibilitychange", schedule)
+      window.removeEventListener("online", schedule)
+      window.removeEventListener("offline", schedule)
+    }
+  }, [revision, state.loading, state.error, state.data, refetch])
+  return { ...state, data: state.data?.value ?? null, refreshing: state.loading, loading: state.loading && state.data === null }
 }
 
 export function useMetricsQuery(defaultRange: RangeName, defaultSort = "time") {

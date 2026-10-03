@@ -92,7 +92,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     }
   });
 
-  linuxIt("accepts the old updater start invocation through the normal Relay readiness checks", async () => {
+  linuxIt("accepts only the canonical Relay start target through readiness checks", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-relay-handoff-"));
     temporaryDirectories.push(root);
     const manager = join(root, "systemctl");
@@ -110,14 +110,11 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     // Disabled isolated Relay provides a real private IPC readiness acknowledgment.
     const relay = await startModelRelayService(configPath, environment);
     try {
-      for (const target of ["model-relay", "relay"]) {
-        // model-relay is the exact argv emitted by the pre-rename updater after source switch.
-        const { stdout } = await execFileAsync(process.execPath, [cli, "service", "start", target], { env: environment, cwd: root });
-        expect(stdout.includes("旧版更新器")).toBe(target === "model-relay");
-      }
-      expect(readFileSync(log, "utf8").match(/start codex-connect-model-relay.service/gu)).toHaveLength(2);
+      await expect(execFileAsync(process.execPath, [cli, "service", "start", "model-relay"], { env: environment, cwd: root })).rejects.toThrow();
+      await execFileAsync(process.execPath, [cli, "service", "start", "relay"], { env: environment, cwd: root });
+      expect(readFileSync(log, "utf8").match(/start codex-connect-model-relay.service/gu)).toHaveLength(1);
     } finally { await relay.close(); }
-    await expect(execFileAsync(process.execPath, [cli, "service", "start", "model-relay"], { env: environment, cwd: root }))
+    await expect(execFileAsync(process.execPath, [cli, "service", "start", "relay"], { env: environment, cwd: root }))
       .rejects.toThrow("Model Relay 未就绪");
   });
 

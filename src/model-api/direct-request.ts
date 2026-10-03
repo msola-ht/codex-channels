@@ -25,7 +25,7 @@ export function assertNoNestedReasoningControls(request: Record<string, unknown>
   for (const container of ["extra_body", "extraBody"]) {
     const nested = request[container];
     if (isRequestObject(nested)) for (const field of reasoningControlFields) {
-      if (Object.hasOwn(nested, field)) throw new ErrorType(`${container}.${field}`, "Conflicts with this key's reasoning-off policy");
+      if (Object.hasOwn(nested, field)) throw new ErrorType(`${container}.${field}`, "Conflicts with the enforced reasoning policy");
     }
   }
 }

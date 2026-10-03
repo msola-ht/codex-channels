@@ -1,4 +1,5 @@
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
+import { openQueueStream } from "./webui-queue-events.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
 import {
   managementTaskResourceState,
@@ -15,6 +16,13 @@ export async function routeTaskManagement({
   response,
   state,
 }) {
+  if (path === "/tasks/events" && request.method === "GET") {
+    if (new URL(request.url, "http://localhost").searchParams.size > 0) {
+      throw new ApiError(400, "unsupported_parameter", "任务通知不接受查询参数");
+    }
+    openQueueStream(state, response, (signal, send) => state.tasks.watch(principalId, signal, send));
+    return true;
+  }
   const taskMatch = path.match(/^\/tasks(?:\/([^/]+))?$/u);
   if (taskMatch && request.method === "GET") {
     if (taskMatch[1] === undefined) {

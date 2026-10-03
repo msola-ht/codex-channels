@@ -1,4 +1,6 @@
-import { closeQueueStreams } from "./webui-queue-events.mjs";
+import { closeQueueStreams, openQueueStream } from "./webui-queue-events.mjs";
+import { watchQueueChanges } from "../runtime/queue-events.mjs";
+import { accountSnapshotEventsPath, metricsEventsPath } from "../runtime/metrics-events.mjs";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
@@ -31,7 +33,8 @@ import {
   loadGatewaySettings,
 } from "./config-management.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
-import { loadServiceStatusSummary } from "./webui-service-status.mjs";
+import { createSharedCodexUserConfigClient, readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
+import { invalidateServiceStatusSummary, loadServiceStatusSummary } from "./webui-service-status.mjs";
 import {
   ApiError,
   authorized,
@@ -58,7 +61,7 @@ import {
   isHighRiskManagementPath,
   ManagementOperationError,
 } from "./webui-management-operations.mjs";
-import { routeTrafficApi } from "./webui-traffic-route.mjs";
+import { routeTrafficApi, routeTrafficEvents } from "./webui-traffic-route.mjs";
 import {
   applyProviderSettingsMutation,
   previewProviderSettingsMutation,
@@ -119,8 +122,10 @@ export function createWebuiServer({
   token = null,
   port = DEFAULT_PORT,
   managementOrigin = null,
-  loadProviderState = loadModelProviderManagementState,
-  loadCodexSettings = loadCodexUserSettings,
+  loadProviderState = (options) => loadModelProviderManagementState({ ...options,
+    readUserConfig: (env) => readCodexUserConfigSnapshot(env, { createClient: createSharedCodexUserConfigClient }),
+  }),
+  loadCodexSettings = (options) => loadCodexUserSettings({ ...options, createClient: createSharedCodexUserConfigClient }),
   previewCodexSetting = previewCodexUserSetting,
   updateCodexSetting = updateCodexUserSetting,
   previewProviderSettings = previewProviderSettingsMutation,
@@ -207,6 +212,16 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         });
         return;
       }
+      if (url.pathname === `${API_PREFIX}/traffic/events`) {
+        routeTrafficEvents({ environment, request, response, url, state: management });
+        return;
+      }
+      if (url.pathname === `${API_PREFIX}/metrics/events` || url.pathname === `${API_PREFIX}/accounts/events`) {
+        if (url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "数据通知不接受查询参数");
+        const path = url.pathname === `${API_PREFIX}/accounts/events` ? accountSnapshotEventsPath : metricsEventsPath;
+        openQueueStream(management, response, (signal, send) => watchQueueChanges(path(resolveGatewayConfigPath(environment)), signal, send));
+        return;
+      }
       await routeApi(environment, url, request, response, serviceStatusCache);
       return;
     }
@@ -270,6 +285,7 @@ function createManagementState(
   const audit = new ManagementAuditWriter(join(dataDir, "management-audit.jsonl"));
   const tasks = new WebuiManagementTaskRunner({
     onEvent: ({ task, phase, resultCode, recovery, ...metadata }) => {
+      invalidateServiceStatusSummary(serviceStatusCache);
       if (typeof metadata.sessionId !== "string") return;
       audit.record({
         ...metadata,
@@ -593,6 +609,8 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
         parentThreadId: subagent.parentThreadId,
         parentTurnId: subagent.parentTurnId,
         latestTurn: summary.latestTurn,
+        sessionDurationMs: summary.sessionDurationMs,
+        latestExecution: summary.latestExecution,
         threadAggregate: summary.threadAggregate,
       });
       return;
@@ -645,7 +663,7 @@ async function handleRequests(environment, url, response) {
       const callers = new Map(relay.callers.map(caller => [caller.caller_id, caller]));
       for (const record of records) {
         const caller = callers.get(record.callerId);
-        if (record.source === "relay" && caller?.key_id === record.keyId && caller.provider === record.provider && caller.display_name) {
+        if (record.source === "relay" && caller?.key_id === record.keyId && caller.display_name) {
           record.callerDisplayName = caller.display_name;
         }
       }

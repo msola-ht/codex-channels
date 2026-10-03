@@ -6,7 +6,9 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { initializeUserData } from "../scripts/runtime-config.mjs";
-import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
+import { BufferedModelRequestMetricsWriter, SqliteModelRequestMetricsStore } from "../src/observability/index.js";
+import { QueueEventsServer } from "../runtime/queue-events.mjs";
+import { metricsEventsPath } from "../runtime/metrics-events.mjs";
 import { metricsLink, metricsQueryParams } from "../webui/src/lib/metrics-query.js";
 import {
   cleanupWebuiTestFixtures,
@@ -60,6 +62,50 @@ function writeCallIndex(
 }
 
 describe("webui server data API", () => {
+  it("notifies authenticated readers only after metrics commit and closes on writer shutdown", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const events = new QueueEventsServer(metricsEventsPath(configPath));
+    const writer = new BufferedModelRequestMetricsWriter(new SqliteModelRequestMetricsStore(fixture.databasePath), undefined, () => events.changed());
+    const controller = new AbortController();
+    let receiving: Promise<void> | undefined;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      await events.start();
+      const { origin } = await startServer(fixture.environment, undefined, { token: "webui-token" });
+      const url = `${origin}/api/v1/metrics/events`, headers = { authorization: "Bearer webui-token" };
+      expect((await fetch(url)).status).toBe(401);
+      expect((await fetch(`${url}?token=webui-token`, { headers })).status).toBe(400);
+      const response = await fetch(url, { headers, signal: controller.signal });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/event-stream");
+      reader = response.body!.getReader();
+      let received = "";
+      const decoder = new TextDecoder();
+      receiving = (async () => {
+        try { while (true) {
+          const chunk = await reader!.read();
+          if (chunk.done) return;
+          received += decoder.decode(chunk.value, { stream: true });
+        } } catch (error) { if (!controller.signal.aborted) throw error; }
+      })();
+      await expect.poll(() => (received.match(/"changed"/gu) ?? []).length).toBe(1);
+      writer.enqueue(metricSample());
+      expect(await writer.waitForCurrentWrites()).toBe(true);
+      await expect.poll(() => (received.match(/"changed"/gu) ?? []).length).toBe(2);
+      const snapshot = await fetch(`${origin}/api/v1/requests?range=all`, { headers });
+      expect(await snapshot.json()).toMatchObject({ total: 1 });
+      expect(received).not.toContain("webui-token");
+      expect(received).not.toContain(metricSample().provider);
+      await events.close();
+      await receiving;
+      expect(received).toContain('"unavailable"');
+    } finally {
+      controller.abort(); await receiving; reader?.releaseLock();
+      await writer.close(); await events.close();
+    }
+  });
+
   it("does not expose a separate metrics-only detail endpoint", async () => {
     const fixture = createFixture();
     const { origin } = await startServer(fixture.environment);
@@ -78,7 +124,7 @@ describe("webui server data API", () => {
     const owned = await fetch(`${origin}/api/v1/requests?range=all&source=owned`);
     expect(await owned.json()).toMatchObject({ records: [] });
     expect((await fetch(`${origin}/api/v1/requests?source=other`)).status).toBe(400);
-    appendFileSync(join(fixture.home, "config.toml"), `\n[[model_relay.accounts]]\nprovider = "clp-test"\n[[model_relay.callers]]\ncaller_id = "client"\nkey_id = "key"\nprovider = "clp-test"\nmodels = ["fixture"]\ncredential_generation = 2\nsecret_sha256 = "${"a".repeat(64)}"\nenabled = false\ndisplay_name = "沉浸式翻译"\n`);
+    appendFileSync(join(fixture.home, "config.toml"), `\n[[model_relay.callers]]\ncaller_id = "client"\nkey_id = "key"\nmodels = ["clp-test/fixture"]\ncredential_generation = 2\nsecret_sha256 = "${"a".repeat(64)}"\nenabled = false\ndisplay_name = "沉浸式翻译"\n`);
     const named = await fetch(`${origin}/api/v1/requests?range=all&source=relay&callerId=client`);
     expect(named.status).toBe(200);
     expect(await named.json()).toMatchObject({ records: [{ callerId: "client", callerDisplayName: "沉浸式翻译" }] });
@@ -87,7 +133,10 @@ describe("webui server data API", () => {
     writeFileSync(configPath, configuration.replace('display_name = "沉浸式翻译"', 'display_name = "网页翻译"'));
     const renamed = await fetch(`${origin}/api/v1/requests?range=all&source=relay`);
     expect(await renamed.json()).toMatchObject({ records: [{ callerId: "client", callerDisplayName: "网页翻译" }] });
-    for (const changed of [configuration.replace('key_id = "key"', 'key_id = "other-key"'), configuration.replaceAll('provider = "clp-test"', 'provider = "clp-other"')]) {
+    writeFileSync(configPath, configuration.replace('models = ["clp-test/fixture"]', 'models = ["clp-other/fixture"]'));
+    const rebound = await fetch(`${origin}/api/v1/requests?range=all&source=relay`);
+    expect(await rebound.json()).toMatchObject({ records: [{ callerId: "client", callerDisplayName: "沉浸式翻译" }] });
+    for (const changed of [configuration.replace('key_id = "key"', 'key_id = "other-key"'), configuration.replace('caller_id = "client"', 'caller_id = "other-client"')]) {
       writeFileSync(configPath, changed);
       const mismatched = await fetch(`${origin}/api/v1/requests?range=all&source=relay`);
       expect(mismatched.status).toBe(200);
@@ -114,7 +163,7 @@ describe("webui server data API", () => {
     recordSample(fixture.databasePath, {
       ...metricSample(), provider: "openai", upstreamTtftMs: 569.25,
       requestServiceTier: "priority", serviceTier: "default",
-      responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, outputTokens: 1_000, requestModel: "requested", responseModel: "echoed", traffic,
+      upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2, finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit_exceeded", upstreamErrorType: "rate_limit_error", upstreamHttpStatus: 429, responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, outputTokens: 1_000, requestModel: "requested", responseModel: "echoed", traffic,
     });
     recordSample(fixture.databasePath, metricSample());
     const { origin } = await startServer(fixture.environment);
@@ -124,7 +173,7 @@ describe("webui server data API", () => {
       const body = await response.json() as { records: Array<{ provider: string; upstreamTtftMs: number | null }> };
       expect(body.records.find((row) => row.provider === "openai")?.upstreamTtftMs).toBe(569.25);
       expect(body.records.find((row) => row.provider === "openai")).toMatchObject({
-        responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
+        upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2, finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit_exceeded", upstreamErrorType: "rate_limit_error", upstreamHttpStatus: 429, responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
         requestServiceTier: "priority", serviceTier: "default",
       });
       expect(body.records.find((row) => row.provider === "deepseek")).toMatchObject({
@@ -152,16 +201,16 @@ describe("webui server data API", () => {
     const list = await fetch(`${origin}/api/v1/requests?range=all`);
     expect(list.status).toBe(200);
     const record = ((await list.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
-    expect(record).not.toHaveProperty("upstreamProvider");
+    expect(record).toHaveProperty("upstreamProvider", null);
     const exported = await fetch(`${origin}/api/v1/requests/export?range=all`);
     expect(exported.status).toBe(200);
     const exportedRecord = ((await exported.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
-    expect(exportedRecord).not.toHaveProperty("upstreamProvider");
+    expect(exportedRecord).toHaveProperty("upstreamProvider", null);
   });
   it.each(["missing", "not-directory", "invalid-index"])("keeps requests, errors and export usable with unavailable capture: %s", async state => {
     const fixture = createFixture();
     const session = "broken-capture";
-    recordSample(fixture.databasePath, { ...metricSample(), status: "failed", httpStatus: 502,
+    recordSample(fixture.databasePath, { ...metricSample(), status: "failed", httpStatus: 502, upstreamProvider: "deepseek", upstreamAttemptCount: 2,
       traffic: { label: "openai", session, interaction: 1 } });
     if (state === "not-directory") writeFileSync(join(fixture.home, "traffic"), "not a dump directory");
     if (state === "invalid-index") {
@@ -175,7 +224,7 @@ describe("webui server data API", () => {
       const body = await response.json() as { records: Array<{ status: string; traffic: unknown; upstreamProvider?: string }> };
       expect(body.records).toHaveLength(1);
       expect(body.records[0]).toMatchObject({ status: "failed", traffic: { label: "openai", session, interaction: 1 } });
-      expect(body.records[0]).not.toHaveProperty("upstreamProvider");
+      expect(body.records[0]).toMatchObject({ upstreamProvider: "deepseek", upstreamAttemptCount: 2 });
     }
   });
   it("keeps serving the request list when the referenced call record is missing", async () => {
@@ -188,7 +237,7 @@ describe("webui server data API", () => {
     const list = await fetch(`${origin}/api/v1/requests?range=all`);
     expect(list.status).toBe(200);
     const record = ((await list.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
-    expect(record).not.toHaveProperty("upstreamProvider");
+    expect(record).toHaveProperty("upstreamProvider", null);
   });
   it("serves errors independently of optional traffic indexes", async () => {
     const fixture = createFixture();
@@ -205,7 +254,7 @@ describe("webui server data API", () => {
     const errors = await fetch(`${origin}/api/v1/errors?range=all`);
     expect(errors.status).toBe(200);
     const record = ((await errors.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
-    expect(record).not.toHaveProperty("upstreamProvider");
+    expect(record).toHaveProperty("upstreamProvider", null);
   });
   it("preserves every Provider in API parameters and scoped navigation links", () => {
     const query = { range: "30d" as const, provider: ["openai", "custom,provider"], offset: 50, limit: 50, sort: "input" };
@@ -575,12 +624,26 @@ describe("webui server data API", () => {
     expect(runBody.latestTurn?.turnId).toBe("turn-2");
     expect(runBody.threadAggregate?.turnCount).toBe(2);
 
+    const timingStore = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    try {
+      timingStore.replaceThreadExecutions("thread-1", "deepseek", [
+        { turnId: "turn-1", durationMs: 0, recordedAtMs: Date.now() },
+        { turnId: "turn-2", durationMs: 71_000, recordedAtMs: Date.now() },
+      ]);
+    } finally { timingStore.close(); }
+    expect(await (await fetch(`${origin}/api/v1/threads/thread-1/run`)).json())
+      .toMatchObject({ sessionDurationMs: 71_000, latestTurn: { turnId: "turn-2", durationMs: 71_000 } });
+
     const turns = await fetch(`${origin}/api/v1/threads/thread-1/turns`);
     expect(turns.status).toBe(200);
     const turnsBody = await turns.json() as {
       turns: Array<{ turnId: string }>;
     };
     expect(turnsBody.turns).toHaveLength(2);
+    expect(turnsBody.turns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ turnId: "turn-1", durationMs: 0 }),
+      expect.objectContaining({ turnId: "turn-2", durationMs: 71_000 }),
+    ]));
   });
 
   it("sorts request records across server pages and aggregates errors", async () => {

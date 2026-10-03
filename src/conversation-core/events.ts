@@ -206,6 +206,14 @@ export interface SubagentState {
   status: SubagentStatus;
 }
 
+/**
+ * 上游 commandActions 把命令整体解析为只读探索时的归类。
+ *
+ * 上游解析器只要发现任何无法识别的命令片段，就会把整条命令折叠为 unknown，
+ * 因此这里出现取值就表示整条命令都被识别为读取、搜索或列目录。
+ */
+export type CommandExplorationKind = "read" | "search" | "listFiles" | "mixed";
+
 export type OperationKind =
   | "command"
   | "fileChange"
@@ -232,6 +240,8 @@ export interface OperationUpdate {
   durationMs?: number;
   exitCode?: number;
   readOnlyHint?: boolean | null;
+  /** 只读探索命令的归类；普通命令与包含未知片段的命令不提供。 */
+  commandExploration?: CommandExplorationKind;
 }
 
 export interface TurnArtifacts {
@@ -264,7 +274,7 @@ export type OutputEvent =
   | { type: "subagent.spawned"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean }
   | { type: "subagent.contacted"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean }
   | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; status: SubagentTerminalStatus; metricsStatus: "available" | "empty" | "unavailable"; model: string | null; modelProvider: string | null; reasoningEffort: string | null; requestCount: number; unsuccessfulRequestCount: number; inputTokens: number; cachedInputTokens: number | null; outputTokens: number; reasoningOutputTokens: number; upstreamTtftMs?: number }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; sessionName?: string | null; turnId: string; status: TurnStatus; error?: string; errorCode?: TurnErrorCode; missingFinalResponse?: true; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; accountStatus?: CompletionAccountStatus; goal?: ThreadGoal; contextCompactionCount?: number; taskAggregate?: TurnTaskMetricsSummary; sessionAggregate?: TurnTaskMetricsSummary; workspaceId?: string; workspaceName?: string; gitBranch?: string | undefined; background?: boolean }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; sessionName?: string | null; turnId: string; status: TurnStatus; error?: string; errorCode?: TurnErrorCode; missingFinalResponse?: true; durationMs?: number; sessionDurationMs?: number | undefined; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; accountStatus?: CompletionAccountStatus; goal?: ThreadGoal; contextCompactionCount?: number; taskAggregate?: TurnTaskMetricsSummary; sessionAggregate?: TurnTaskMetricsSummary; workspaceId?: string; workspaceName?: string; gitBranch?: string | undefined; background?: boolean }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
   | { type: "thread.name"; target: ConversationTarget; threadId: string; name: string | null; background?: boolean }
   | { type: "thread.availability"; target: ConversationTarget; threadId: string; availability: "occupied" | "available"; background?: boolean }

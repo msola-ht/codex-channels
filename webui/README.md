@@ -18,11 +18,10 @@ npm run lint       # oxlint
 i18n-glossary.json  翻译术语、原样保留项和规则，供开发工具生成翻译任务
 .npmignore  覆盖本目录的 Git 忽略规则，确保构建后的 dist 进入 npm tarball
 src/
-  lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时、页面可见性和设置页与控制台账户区恢复事件的延后补查，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 投影 OpenAI 当前周额度、Credits 余额和重置券到期明细，并管理自动查询的新鲜度筛选与有界冷却、有界并发查询、逐账户结果交付、观测时间合并及 DS、OCG、CCG、Cline Pass 账户快照时效，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址，i18n/ 存放中英文界面文案字典与取值函数
+  lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时、页面可见性和设置页恢复事件的延后补查，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 投影 OpenAI 当前周额度、Credits 余额和重置券到期明细，并管理有界手动查询失败记录、有界并发查询、逐账户结果交付、观测时间合并及 DS、OCG、CCG、Cline Pass 账户快照时效，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址，i18n/ 存放中英文界面文案字典与取值函数
   hooks/       数据 hook（useApi 统一 loading/error/refetch，支持按当前状态更新和账户观测时间合并，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、Relay 服务管理 use-relay-service-management（统一手动、页面恢复及任务完成刷新）、Relay Key 管理 use-relay-management（复用确认 Hook）、use-relay-queue（队列页面挂载期间的 SSE 推送与有界快照刷新），设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）、全局货币上下文与 use-translation（按当前显示语言翻译界面文案）
-  components/  layout（app-sidebar 组合品牌入口、导航与侧栏状态恢复，Sidebar、Collapsible 与 SidebarMenuSub 组合调用监控、模型管理、模型转发、消息渠道和设置二级导航）、overview（控制台卡片、account-refresh-feedback 刷新反馈、account-subscription-notice 订阅状态与确认删除、reset-credit-action 实时选券与消费确认）、metrics（指标区块、query-filters 共用筛选栏、query-summary 期间汇总与共享数据表格）、requests（请求明细数据表格、request-detail 独立指标快照侧栏、relay-request-status 受控失败分类）、traffic（调用摘要、明细、traffic-model 共用模型名称对照、请求内容/参数对照与清理入口）、settings（按设置域拆分的卡片与控件，settings-page-frame 统一手动和可见性刷新，gateway-settings-section 组合 Gateway 加载/错误/确认反馈，settings-cli-commands 按用途展示现有 CLI 摘要，account-id-field 共用新增账户预设与自定义输入，relay-service-management 在模型转发页组合服务操作、任务确认与完成后状态刷新）
   pages/       relay-queue-page 独立实时请求队列页；model-management-page 组合提供商、账户与凭据、模型配置、上下文与压缩四个独立路由，channels-page 组合渠道配置和消息展示，settings-page 组合常规、权限、网络、数据、服务五个子页；概览、会话、会话详情、请求、错误、调用详情、渠道投递队列、模型转发（独立 Key 管理，中文用途名称及居中弹窗，手动刷新运行状态）、设置（只负责组合设置域组件）
-  App.tsx      路由布局与页面级懒加载，保留页面切换间的控制台已应用范围及有界账户自动查询冷却（不保存账户快照）（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
+  App.tsx      路由布局与页面级懒加载，保留页面切换间的控制台已应用范围及有界账户手动查询失败记录（不保存账户快照）（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
 
 令牌登录：服务端配置访问令牌时，API 返回 401 会显示令牌输入页；令牌存入浏览器
@@ -36,6 +35,9 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `scripts/webui-api.ts` 的共享声明，服务端与前端使用同一份类型。
 
 ## UI 组件规范
+
+- 组件使用官方 `base-nova` 样式和 `@base-ui/react`，类名合并统一使用 `cn` 包。组合触发器使用 `render`，Select 显式提供 `items` 的值与显示标签，ToggleGroup 的受控值使用数组；不保留 Radix 调用接口。
+- `components/ui/toast.tsx` 提供 Base UI 通知容器，`toast-manager.ts` 提供共享通知管理器；`App.tsx` 挂载容器，默认 3 秒关闭并本地化关闭按钮。成功通知短暂显示，错误及需要处理的警告仍保留在操作区域。
 
 - 基础 UI 组件放在 `components/ui/`，只通过 `npx shadcn@latest add` 安装或升级，
   不手写基础组件（按钮、卡片、表格、弹层等）；
@@ -61,18 +63,30 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 `components/settings/tool-access-settings.tsx` 组合电脑、浏览器与已有 MCP 的原生配置编辑器，复用 App Server 设置 Hook 的版本化预览和确认；用户层与合并配置分开展示。
 
-请求列表与错误列表不依赖调用采集或转储索引。`components/requests/request-detail.tsx` 仅展示已选指标快照，报文链接为可选入口；调用列表只加载摘要，Turn State 诊断保留在单次详情。
+请求列表与错误列表不依赖调用采集或转储索引。`components/requests/request-detail.tsx` 仅展示已选指标快照，报文链接为可选入口；请求模型旁的实际上游与尝试次数提示来自独立指标字段，详情展示受限诊断摘要；调用列表只加载摘要，Turn State 诊断保留在单次详情。
 
 调用详情正文复用 `components/traffic/traffic-content.tsx` 的延迟展开与只读文本操作组件，统一复制、换行、格式化和截断提示。
+
+`hooks/use-traffic.ts` 为当前调用列表或详情复用变化订阅，未显示的一侧不订阅；首页按转储文件变化合并读取，历史列表及原始事件分页暂停自动更新。详情按提供商及批次订阅、按调用 ID 精确读取，终态先补读原始事件，事件数变化时重建摘要以补齐迟到输出；手动刷新重新加载完整摘要。同查询后台读取保留内容和展开状态，记录已清理时明确显示缺失；最初尚未写入的记录在新通知到达后可补查。请求详情抽屉跟随列表中相同 ID 的记录更新；记录移出当前页时保留最后一次显示的数据。
 
 `components/metrics/service-tier.tsx` 为请求明细、错误记录和调用详情提供 Fast 标签；前两者使用请求层级，调用详情区分请求与响应来源。
 `components/requests/errors-table.tsx` 组合错误记录列、错误说明和会话/轮次跳转；`components/traffic/traffic-table.tsx` 组合调用列表及详情入口。两者与渠道投递队列、请求、会话页复用 `DataTable` 的标题摘要、列显隐、滚动区和服务端分页。公共组件支持业务工具栏、稳定行 ID及行点击。
 
 `components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。
 
-`components/ui/dialog.tsx`：沿用 Radix/shadcn 的居中弹窗，关闭按钮名称由调用方本地化；Relay 表单和一次性密钥结果复用此组件，确认操作使用已有 AlertDialog。
+`components/ui/dialog.tsx`：使用 Base UI/shadcn 居中弹窗，关闭按钮名称由调用方本地化；Relay 表单和一次性密钥结果复用此组件。确认操作使用 AlertDialog，并将初始焦点设到取消按钮；忙碌期间通过根组件的关闭事件阻止退出，`finalFocus` 恢复到操作入口。
 
-`hooks/use-queue-events.ts` 由渠道投递与 Relay 队列复用，负责可见性、退避重连、变化合并及快照确认；已连接通知中断时补查一次快照，未恢复连接的失败尝试不持续触发读取。Relay 侧栏通过现有 DataTable 提供排序、分页和列显隐，耗时表示快照时的值。
+`hooks/use-queue-events.ts` 由账户快照、请求指标、渠道投递、Relay 队列与管理任务复用，负责可见性、退避重连、变化合并、快照确认和有限重试；已连接通知中断时补查一次快照，未恢复连接的失败尝试不持续触发读取。管理任务只在变更后读取，终态刷新关联资源，服务状态不在任务执行期间轮询。Relay 侧栏通过现有 DataTable 提供排序、分页和列显隐，耗时表示快照时的值。
+
+`hooks/use-requests.ts` 与 `hooks/use-errors.ts` 复用队列通知 Hook，在 Gateway 指标批次成功落库后更新第一页；历史分页延后读取，返回第一页补查，手动刷新始终可用。`GET /api/v1/metrics/events` 使用只读 API 鉴权，通知中断与快照失败分别显示，不影响历史查询。
+
+`hooks/use-threads.ts` 与 `hooks/use-thread-detail.ts` 沿用指标通知和历史分页暂停规则。会话详情通过 `useThreadDetail` 共用一条订阅，并行读取本地汇总和轮次，两项成功后一起更新；同条件刷新保留内容和展开状态。`useMetricsProviders` 跟随页面成功读取的结果合并更新提供商选项，自动读取至少间隔 30 秒，不另开订阅；后台或离线时暂停，失败可手动重试，不覆盖筛选草稿。
+
+`hooks/use-dashboard.ts` 为汇总、趋势和热力图共用一条指标订阅；`hooks/use-official-account-sources.ts` 独立订阅已保存账户快照，仅各账户手动刷新查询上游，进入页面、恢复可见与页头刷新均不触发上游账户查询。
+
+`hooks/use-range-refresh.ts` 与 `lib/range-refresh.ts` 为指标页面补充时间范围失效调度：按服务端时区跨日更新今天、昨天及控制台热力图，滚动范围按最后成功请求的开始时间，每 5 分钟校准；后台、离线、历史分页、加载或错误期间不发起时间驱动读取。`components/metrics/refresh-status.tsx` 展示指标及调用页面的通知状态、最后成功读取时间和陈旧提示；跨日调度以成功请求的开始时间为基准，避免零点前读取、零点后返回的旧范围延迟一天才刷新。`useApi` 的成功完成时间用于展示，只随成功结果更新，失败保留内容时保留原时间，取消的请求不能更新时间。
+
+控制台、请求与错误列表区分首次加载和后台刷新：`loading` 仅用于当前查询没有结果时的占位，`refreshing` 用于刷新按钮和操作限制；同查询刷新保留内容，切换查询不展示旧范围结果。管理任务的 `notificationError` 独立于读取错误，通知中断不阻止已成功读取的终态触发关联刷新。
 
 ## 国际化维护
 
@@ -170,3 +184,7 @@ npm run docs:check
 渲染和错误翻译。其他两组测试覆盖共享表格与设置展示回归。
 测试通过不等同于完成浏览器布局验收；实际交互和视觉检查应单独记录结果。
 普通提交通过现有提交钩子执行完整 `verify:commit`，开发阶段按实际改动选择检查，不重复运行全量门禁。
+
+`components/settings/relay-provider-models.tsx` 按提供商显示只读模型目录弹窗与目录更新入口。
+`components/settings/relay-key-models.tsx` 在 Key 编辑弹窗按提供商分组勾选模型，可跨多个提供商；独立目录更新不扩大 Key 权限。
+`components/settings/relay-model-copy.tsx` 在 Key 列表中提供授权模型 ID 复制菜单、复制结果提示和剪贴板不可用时的手动复制入口。

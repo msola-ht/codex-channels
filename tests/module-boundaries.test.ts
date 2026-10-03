@@ -283,6 +283,9 @@ function runtimeImportViolations(): string[] {
         // Listener and strict configuration share only a pure address predicate, without runtime I/O.
         if (file === resolve(sourceRoot, "model-relay/server.ts")
           && target === resolve(runtimeRoot, "model-relay-listen-host.mjs")) continue;
+        // Admission, HTTP routing and strict config share one pure model-ID contract, without runtime I/O.
+        if (["model-relay/admission.ts", "model-relay/server.ts"].some(path => file === resolve(sourceRoot, path))
+          && target === resolve(runtimeRoot, "model-relay-model-id.mjs")) continue;
         // Transport and service supervision share the same platform socket validation.
         if (file === resolve(sourceRoot, "codex-client/unix-websocket-transport.ts")
           && target === resolve(runtimeRoot, "app-server-unix-socket.mjs")) continue;

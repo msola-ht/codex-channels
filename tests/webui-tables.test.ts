@@ -95,7 +95,8 @@ describe("WebUI metrics table presentation", () => {
           if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
           if (id.endsWith("/src/hooks/use-official-account-sources.ts")) return "export function useOfficialAccountSources() { return globalThis.fixtureAccounts; }";
           if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi() { return globalThis.fixtureApiState; }";
-          if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {} }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
+          if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {}, pagination() { return globalThis.fixturePagination; } }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
+          if (id.endsWith("/src/hooks/use-thread-detail.ts")) return _code.replace("export function useThreadDetail(", "function realUseThreadDetail(") + " export function useThreadDetail(...args) { return globalThis.fixtureThreadDetail ?? realUseThreadDetail(...args); }";
           if (id.endsWith("/src/components/metrics/query-filters.tsx")) return "import { createElement } from 'react'; export function QueryFilters(props) { return createElement('div', { 'data-query-filters': true, 'data-thread-filters': props.showThreadFilters }); }";
         } }],
       });
@@ -106,6 +107,7 @@ describe("WebUI metrics table presentation", () => {
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
         const { TurnTable } = await server.ssrLoadModule("/src/components/threads/turn-table.tsx");
+        const { ThreadDetailPage } = await server.ssrLoadModule("/src/pages/thread-detail-page.tsx");
         const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
         const { TrafficDetail } = await server.ssrLoadModule("/src/components/traffic/traffic-detail.tsx");
         const { ErrorBanner } = await server.ssrLoadModule("/src/components/metrics/error-banner.tsx");
@@ -188,7 +190,7 @@ describe("WebUI metrics table presentation", () => {
             credits: { observedAtMs: 1000, remaining: null, unlimited: true, resetCreditsAvailable: "1", expirations: null, undisclosedCount: "1" } }),
           emptyHint: render(TableHint, { hint: null, children: "—" }),
           shortText: render(TruncatedText, { text: "short" }),
-          shortLink: render(TruncatedText, { text: "short", asChild: true, children: h("a", { href: "/test" }, "short") }),
+          shortLink: render(TruncatedText, { text: "short", render: h("a", { href: "/test" }), children: "short" }),
           inputWithoutBreakdown: render(InputTokenTooltip, { inputTokens: 10, cachedInputTokens: null }),
           outputWithoutBreakdown: render(OutputTokenTooltip, { outputTokens: 10, reasoningOutputTokens: null }),
           matchingFast: render(FastBadge, { tier: "priority", source: "request", responseTier: "fast" }),
@@ -215,6 +217,10 @@ describe("WebUI metrics table presentation", () => {
           requests: render(RequestsTable, requestProps),
           requestDetail: render(RequestDetail, { record: { ...record, totalTokens: 120, transport: "http", responseFormat: "sse", reasoningEffort: "high", requestServiceTier: "priority", serviceTier: "default" } }),
           requestDetailEnglish: render(RequestDetail, { record }, "en"),
+          requestDiagnostics: render(RequestDetail, { record: { ...record, upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2,
+            finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit", upstreamErrorType: "limit", upstreamHttpStatus: 429 } }),
+          requestDiagnosticsEn: render(RequestDetail, { record: { ...record, upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2,
+            finishReason: "stop", errorStage: "http", upstreamErrorCode: "rate_limit", upstreamErrorType: "limit", upstreamHttpStatus: 429 } }, "en"),
           requestHistorical: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: null, model: "historical-model" } }),
           requestHistoricalEn: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: null, model: "historical-model" } }, "en"),
           requestMissingModels: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: null, model: null } }),
@@ -231,14 +237,32 @@ describe("WebUI metrics table presentation", () => {
           requestsMissingModel: render(RequestsTable, { ...requestProps, records: [{ ...record, requestModel: null, responseModel: "model-test" }] }),
           requestsOtherUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "other-provider" }] }),
           trafficOtherUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "other-provider" }], onOpen: noop }),
-          requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek" }] }),
+          requestsClpUnexpected: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", upstreamProvider: "other-provider" }] }),
+          trafficClpUnexpected: render(TrafficTable, { exchanges: [{ ...exchange, label: "relay.chat", account: "clp-main", requestModel: "clp-main/deepseek-v4.1-flash", upstreamProvider: "other-provider" }], onOpen: noop }),
+          detailClpUnexpected: render(TrafficDetail, { detail: { ...detail, account: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", upstreamProvider: "other-provider" }, provider: "relay.chat", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          requestsMuseUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/muse-spark-1.3-contributor", upstreamProvider: "meta" }] }),
+          detailMuseUpstream: render(TrafficDetail, { detail: { ...detail, account: "clp-main", requestModel: "cline-pass/muse-spark-1.3-contributor", upstreamProvider: "meta" }, provider: "relay.chat", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          requestsOtherProviderDeepSeek: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "custom", requestModel: "cline-pass/deepseek-v4.1-flash", upstreamProvider: "other-provider" }] }),
+          requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek", upstreamAttemptCount: 3 }] }),
           trafficUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "deepseek" }], onOpen: noop }),
           loading: render(RequestsTable, { ...requestProps, loading: true }),
           ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "totalDuration", desc: false }] }),
           threads: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null,
             parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination }),
           turns: render(TurnTable, { turns: [{ ...common, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
+          turnsDuration: render(TurnTable, { turns: [{ ...common, turnId: "turn-1", durationMs: 71_000 }], threadId: "thread-1", query: {}, pagination }),
+          turnsDurationZero: render(TurnTable, { turns: [{ ...common, turnId: "turn-1", durationMs: 0 }], threadId: "thread-1", query: {}, pagination }, "en"),
         };
+        globalThis.fixtureQuery = {};
+        globalThis.fixturePagination = pagination;
+        globalThis.fixtureThreadDetail = { error: null, loading: false, refreshing: false, refetch: noop,
+          data: { run: { latestTurn: { ...common, turnId: "turn-1", durationMs: 71_000 }, latestExecution: { turnId: "turn-1", durationMs: 71_000 }, sessionDurationMs: 120_000, threadAggregate: { ...common, turnCount: 2 } },
+            turns: { aggregate: common, range: { name: "all" }, turns: [], turnCount: 2 } } };
+        result.threadTiming = render(ThreadDetailPage, {});
+        result.threadTimingEn = render(ThreadDetailPage, {}, "en");
+        globalThis.fixtureThreadDetail.data.run.sessionDurationMs = null;
+        result.threadTimingMissing = render(ThreadDetailPage, {});
+        delete globalThis.fixtureThreadDetail;
         for (const provider of ["clp-main", "openai"]) {
           const model = "cline-pass/deepseek-v4.1-flash";
           result["threadsModel-" + provider] = render(ThreadTable, { threads: [{ ...common, provider, model,
@@ -270,7 +294,7 @@ describe("WebUI metrics table presentation", () => {
             : render(component, { accounts, refreshControls: {}, onAccountsChanged: noop });
         }
         globalThis.fixtureApiState = { data: null, loading: true, error: null };
-        globalThis.fixtureAccounts = { data: null, loading: true, refreshing: false, refreshControls: {}, refresh: noop,
+        globalThis.fixtureAccounts = { notificationStatus: "live", data: null, loading: true, refreshing: false, refreshControls: {}, refresh: noop,
           error: null, refreshError: null, removalNotice: null, accountRemoved: noop };
         const consoleProps = { range: { range: "30d" }, onRangeChange: noop };
         result.consoleAccountsLoading = render(ConsolePage, consoleProps);
@@ -392,6 +416,8 @@ describe("WebUI metrics table presentation", () => {
         errorsData.records[0].upstreamProvider = "deepseek";
         result.errorsUpstream = render(ErrorsPage, {});
         globalThis.fixtureApiState.loading = true;
+        result.errorsRefreshing = render(ErrorsPage, {});
+        globalThis.fixtureApiState.data.queryKey = "previous-filter";
         result.errorsLoading = render(ErrorsPage, {});
         const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx?actual");
         result.filters = render(QueryFilters, { query: { range: "all" }, onChange: noop });
@@ -399,25 +425,31 @@ describe("WebUI metrics table presentation", () => {
         const { useRequests } = await server.ssrLoadModule("/src/hooks/use-requests.ts");
         const { useThreads } = await server.ssrLoadModule("/src/hooks/use-threads.ts");
         const { useErrors } = await server.ssrLoadModule("/src/hooks/use-errors.ts");
-        const { useThreadTurns } = await server.ssrLoadModule("/src/hooks/use-thread-detail.ts");
+        const { useThreadDetail } = await server.ssrLoadModule("/src/hooks/use-thread-detail.ts");
         const query = { range: "all", offset: 0, limit: 10 };
         const nextQuery = { ...query, offset: 10 };
         result.queryStates = JSON.stringify([
           [useRequests, JSON.stringify(query)],
           [useThreads, JSON.stringify(query)],
           [useErrors, JSON.stringify(query)],
-          [q => useThreadTurns("thread-1", q), JSON.stringify(["thread-1", query])],
+          [q => useThreadDetail("thread-1", q), JSON.stringify(["thread-1", query])],
         ].map(([hook, queryKey]) => {
+          const readHook = q => {
+            let value;
+            function Probe() { const state = hook(q); value = { data: state.data, error: state.error, errorCode: state.errorCode, loading: state.loading }; return null; }
+            render(Probe, {});
+            return value;
+          };
           globalThis.fixtureApiState = { data: { queryKey, data: { total: 1 } }, loading: false, error: null };
-          const ready = hook(query);
-          const changed = hook(nextQuery);
-          const returned = hook(query);
+          const ready = readHook(query);
+          const changed = readHook(nextQuery);
+          const returned = readHook(query);
           globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: true };
-          const pending = hook(query);
+          const pending = readHook(query);
           globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: false, error: "fixture failure" };
-          const failed = hook(nextQuery);
+          const failed = readHook(nextQuery);
           globalThis.fixtureApiState = { data: null, loading: true, error: null };
-          const initial = hook(query);
+          const initial = readHook(query);
           return { ready, changed, returned, pending, failed, initial };
         }));
         console.log(JSON.stringify(result));
@@ -526,7 +558,7 @@ describe("WebUI metrics table presentation", () => {
   it("exposes the quota value and names its current snapshot correctly", () => {
     expect(markup.quota).toContain('aria-valuenow="62.5"');
     expect(markup.quota).toContain('aria-label="OpenAI 周额度剩余比例"');
-    expect(markup.quota).toContain('data-state="loading"');
+    expect(markup.quota).toContain('data-progressing=""');
     expect(markup.quotaEmpty).toContain("尚未获取 OpenAI 额度快照");
     expect(markup.quotaEmpty).not.toContain("role=\"progressbar\"");
     expect(markup.quotaExhausted).toContain('aria-valuenow="0"');
@@ -563,11 +595,17 @@ describe("WebUI metrics table presentation", () => {
       expect(tag).toContain('data-icon="inline-start"');
     }
     expect(badge(markup.requestsMissingModel!, "响应模型：model-test（信息不足）")).toContain('data-variant="outline"');
-    for (const key of ["trafficUpstream", "trafficOtherUpstream"]) {
+    for (const key of ["trafficUpstream", "trafficOtherUpstream", "requestsOtherUpstream", "requestsMuseUpstream", "detailMuseUpstream", "requestsOtherProviderDeepSeek"]) {
       const tag = badge(markup[key]!, "routing.finalProvider");
-      expect(tag).toContain(key.includes("Other") ? 'data-variant="destructive"' : 'data-variant="outline"');
+      expect(tag).toContain('data-variant="outline"');
+      expect(tag).not.toContain('data-icon="inline-start"');
       expect(tag).toContain('data-size="sm"');
       expect(tag).not.toContain("上游：");
+    }
+    for (const key of ["requestsClpUnexpected", "trafficClpUnexpected", "detailClpUnexpected"]) {
+      const tag = badge(markup[key]!, "routing.finalProvider");
+      expect(tag).toContain('data-variant="destructive"');
+      expect(tag).toContain('data-icon="inline-start"');
     }
   });
 
@@ -592,8 +630,7 @@ describe("WebUI metrics table presentation", () => {
 
   it("shows only actual upstream badges for CLP account and dump identities", () => {
     for (const key of ["requestsClp", "trafficClp"]) {
-      if (key === "trafficClp") expect(markup[key]).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
-      else expect(markup[key]).not.toContain('title="routing.finalProvider"');
+      expect(markup[key]).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
       expect(markup[key]).not.toContain("hidden-response-model");
       expect(markup[key]).not.toContain("响应模型：");
       expect(markup[key]).toContain('>deepseek-v4.1-flash</span>');
@@ -604,10 +641,20 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.trafficClpNoUpstream).not.toContain('title="routing.finalProvider"');
   });
 
-  it("does not project optional dump evidence onto requests or errors", () => {
-    for (const key of ["requestsUpstream", "requestsOtherUpstream", "errorsUpstream"]) {
-      expect(markup[key]).not.toContain('title="routing.finalProvider"');
+  it("renders independently collected request diagnostics in both languages", () => {
+    for (const key of ["requestDiagnostics", "requestDiagnosticsEn"]) {
+      for (const value of ["deepseek", "stop", "rate_limit", "429"]) expect(markup[key]).toContain(value);
     }
+    for (const label of ["实际上游提供商", "提供商尝试次数", "模型尝试次数", "流式阶段", "内层上游 HTTP 状态"]) expect(markup.requestDiagnostics).toContain(label);
+    for (const label of ["Actual upstream provider", "Provider attempts", "Model attempts", "HTTP phase", "Inner upstream HTTP status"]) expect(markup.requestDiagnosticsEn).toContain(label);
+  });
+
+  it("shows independently collected request upstream evidence, leaving aggregate errors unchanged", () => {
+    for (const key of ["requestsUpstream", "requestsOtherUpstream", "requestsClp"]) {
+      expect(markup[key]).toContain('title="routing.finalProvider"');
+    }
+    expect(markup.requestsUpstream).toContain("尝试 3 次");
+    expect(markup.errorsUpstream).not.toContain('title="routing.finalProvider"');
   });
 
   it("shows the reported final provider beside the detail model without inferring fallbacks", () => {
@@ -650,6 +697,9 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.errorsLoading).toMatch(/data-slot="card-content"[^>]*inert=""/);
     expect(markup.errorsLoading).toContain('data-slot="spinner"');
     expect(markup.errors).not.toContain('data-slot="skeleton"');
+    expect(markup.errorsRefreshing).not.toContain('data-slot="skeleton"');
+    expect([...markup.errorsRefreshing!.matchAll(/<tr\b/g)]).toHaveLength(51);
+    expect(markup.errorsRefreshing).toContain("刷新中");
   });
 
   it("places compact console-style error statistics before filters without thread inputs", () => {
@@ -666,6 +716,15 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("groups request identity, usage, performance and detail columns", () => {
+    expect(markup.turnsDuration).toContain("本轮耗时");
+    expect(markup.turnsDuration).toContain("1 min 11 s");
+    expect(markup.turnsDurationZero).toContain("Turn duration");
+    expect(markup.turnsDurationZero).toContain("0 ms");
+    expect(markup.threadTiming).toContain("会话总耗时");
+    expect(markup.threadTiming).toContain("1 min 11 s");
+    expect(markup.threadTiming).toContain("2 min");
+    expect(markup.threadTimingEn).toContain("Thread total duration");
+    expect(markup.threadTimingMissing).not.toContain("2 min");
     expect(headers(markup.requests!)).toEqual([
       "记录时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
       "首 Token", "请求耗时", "来源", "请求详情",
@@ -729,6 +788,7 @@ describe("WebUI metrics table presentation", () => {
     ]);
     expect(headers(markup.turns!)).toEqual([
       "时间", "轮次", "提供商", "模型", "请求", "失败", "输入 Token", "输出 Token",
+      "本轮耗时",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
   });
@@ -774,6 +834,8 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.emptyToken).not.toContain('data-slot="tooltip-trigger"');
     expect(markup.inputToken).toContain('tabindex="0"');
     expect(markup.outputToken).toContain('tabindex="0"');
+    expect(markup.inputToken).toMatch(/aria-description="[^"]*50\.0%/u);
+    expect(markup.outputToken).toContain('aria-description="推理输出：5; 非推理输出：5"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
     for (const label of ["首 Token", "请求耗时", "请求详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
@@ -803,7 +865,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.loading).toMatch(/data-slot="card-content"[^>]*inert=""/);
     expect(markup.loading).toContain('data-slot="skeleton"');
     expect(markup.loading).not.toContain("model-test");
-    expect(markup.loading).not.toContain("失败");
+    expect(markup.loading!.match(/<tbody\b[^>]*>([\s\S]*?)<\/tbody>/u)?.[1]).not.toContain("失败");
     expect(markup.loading).toMatch(/class="block invisible" aria-hidden="true">共 1 条匹配/);
   });
 
@@ -812,7 +874,7 @@ describe("WebUI metrics table presentation", () => {
       ready: { data: { total: 1 }, error: null, loading: false },
       changed: { data: { total: 1 }, error: null, loading: true },
       returned: { data: { total: 1 }, error: null, loading: false },
-      pending: { data: { total: 1 }, error: null, loading: true },
+      pending: { data: { total: 1 }, error: null, loading: false },
       failed: { data: { total: 1 }, error: "fixture failure", loading: false },
       initial: { data: null, error: null, loading: true },
     })));

@@ -87,6 +87,9 @@ describe("WebUI 界面文案语言切换", () => {
         const { LanguageContext, useLanguage } = await server.ssrLoadModule("/src/hooks/language-context.ts");
         const { LanguageToggle } = await server.ssrLoadModule("/src/components/metrics/language-toggle.tsx");
         const { translate, translateApiError } = await server.ssrLoadModule("/src/lib/i18n/translate.ts");
+        for (const language of ["zh", "en"]) for (const code of ["traffic_exchange_not_found", "traffic_session_not_found", "traffic_label_not_found"]) {
+          if (translateApiError(key => translate(language, key), "private-path", code) !== translate(language, "errors.notFound")) throw new Error("Missing traffic error translation");
+        }
         const { messages } = await server.ssrLoadModule("/src/lib/i18n/messages.ts");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
         const { TurnTable } = await server.ssrLoadModule("/src/components/threads/turn-table.tsx");
@@ -124,12 +127,24 @@ describe("WebUI 界面文案语言切换", () => {
         const render = (component, props, language) => renderToStaticMarkup(
           h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(MemoryRouter, null, h(TooltipProvider, null, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props)))));
         const clock = { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" };
+        const { RefreshStatus } = await server.ssrLoadModule("/src/components/metrics/refresh-status.tsx");
+        for (const language of ["zh", "en"]) {
+          const staleText = translate(language, "refreshStatus.stale");
+          const saved = Date.parse("2026-10-03T12:34:00Z");
+          for (const props of [{status:"reconnecting"}, {status:"paused"}, {status:"live",failed:true}]) {
+            const html = render(RefreshStatus, { ...props, updatedAt: saved }, language);
+            if (!html.includes(staleText) || !html.includes("2026-10-03 12:34")) throw new Error("Missing stale snapshot evidence");
+          }
+          if (render(RefreshStatus, {status:"live",updatedAt:saved}, language).includes(staleText)) throw new Error("Healthy snapshot marked stale");
+          if (render(RefreshStatus, {status:"paused",history:true,updatedAt:saved}, language).includes(staleText)) throw new Error("Historical snapshot marked stale");
+          if (render(RefreshStatus, {status:"connecting",updatedAt:null}, language).includes("12:34")) throw new Error("Initial load shows old timestamp");
+        }
         const renderWithClock = (component, props, language) => renderToStaticMarkup(
           h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(MemoryRouter, null,
             h(TooltipProvider, null, h(ServerTimeContext.Provider, { value: clock }, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props))))));
         const renderConsole = (language, dashboard, accounts) => {
-          globalThis.fixtureDashboard = dashboard;
-          globalThis.fixtureAccounts = accounts;
+          globalThis.fixtureDashboard = { ...dashboard, notificationStatus: "live" };
+          globalThis.fixtureAccounts = { ...accounts, notificationStatus: "live" };
           globalThis.fixtureAccountManagement = {
             settings: { opencodeGo: { accounts: [{ id: "main" }] } },
             loading: false, error: null, busy: false, pendingPreview: null, actionError: null,
@@ -213,9 +228,9 @@ describe("WebUI 界面文案语言切换", () => {
           update: noop, sorting: [], onSortingChange: noop };
         globalThis.fixtureMetricsProviders = { data: { providers: ["openai"] }, loading: false, error: null, errorCode: null };
         globalThis.fixtureExport = { download: noop, pending: false, failed: false, errorCode: null };
-        globalThis.fixtureRequests = { data: { aggregate: requestRecord, range, records: [requestRecord], total: 1,
+        globalThis.fixtureRequests = { notificationStatus: "live", data: { aggregate: requestRecord, range, records: [requestRecord], total: 1,
           nextOffset: null }, loading: false, error: null, errorCode: null, refetch: noop };
-        globalThis.fixtureErrors = { data: { errors: { requestCount: 100, unsuccessfulRequestCount: 60 },
+        globalThis.fixtureErrors = { notificationStatus: "live", data: { errors: { requestCount: 100, unsuccessfulRequestCount: 60 },
           total: 60, nextOffset: 50,
           records: [{ ...requestRecord, id: 1, threadId: "thread-1", turnId: "turn-1" }] },
           loading: false, error: null, errorCode: null, refetch: noop };
@@ -281,8 +296,8 @@ describe("WebUI 界面文案语言切换", () => {
         globalThis.fixtureTrafficQuery = { query: { id: null, limit: 50, offset: 0 }, update: noop };
         globalThis.fixtureManagementTasks = { tasks: [], loading: false, error: null, saving: false,
           pendingPreview: null, actionError: null, run: noop, refetch: noop, confirm: noop, cancelPending: noop };
-        globalThis.fixtureTrafficDetail = { displayData: null, loading: false, error: null, errorCode: null, refetch: noop };
-        globalThis.fixtureTrafficList = { data: trafficListBase, loading: false, error: null, errorCode: null,
+        globalThis.fixtureTrafficDetail = { displayData: null, loading: false, refreshing: false, notificationStatus: "live", error: null, errorCode: null, refetch: noop };
+        globalThis.fixtureTrafficList = { data: trafficListBase, loading: false, refreshing: false, notificationStatus: "live", error: null, errorCode: null,
           refetch: noop };
         const trafficPageEn = render(TrafficPage, {}, "en");
         globalThis.fixtureTrafficList = { ...globalThis.fixtureTrafficList, data: { ...trafficListBase, enabled: false } };
@@ -465,7 +480,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.consoleEnEmptyAccounts).toContain("No CommandCode Go account configured");
     expect(result.consoleEnQueryError).toContain("Invalid query. Check the filters.");
     expect(result.consoleEnListError).toContain("The access token is invalid or expired. Verify it again.");
-    expect(result.consoleEnSyncError).toContain("The local account was removed, but the list sync failed:");
+    expect(result.consoleEnSyncError).toContain("Account snapshot sync failed:");
     expect(result.consoleEnSyncError).toContain("Could not complete the request. Try again.");
     expect(result.consoleEnRemoved).toContain("Local account ocg-main was removed.");
     expect(result.consoleEnRemoved).toContain("Run codexc service restart all");

@@ -105,9 +105,9 @@
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。
 - `chat-io.ts`：Chat 桥和直接 Chat 共同使用的正文读取、取消等待、拉取式 SSE 分帧与下游背压。
 - `direct-model-http.ts`：直接模型请求共用的 HTTP 出站生命周期、响应状态/Content-Type 校验与安全 JSON 解码，保留普通应用请求头并复用跳级头清理，覆盖凭据和传输头、剔除 Cookie/伪造身份；同步出站复核、实际 UA 观测、首包/空闲超时、取消和关闭清理，不负责协议转换、重试或指标发送。
-- `direct-responses.ts`：原生 Responses JSON/SSE 交付，复用 HTTP 生命周期和 Responses 指标归约；非流式通过共享白名单识别首个非空输出，观测时间为整包解析校验后；保留事件、用量、终态与扩展字段，不生成 Chat DONE，断流不伪造成功。
+- `direct-responses.ts`：原生 Responses JSON/SSE 交付，复用 HTTP 生命周期和 Responses 指标归约；非流式通过共享白名单识别首个非空输出，观测时间为整包解析校验后；保留事件、用量、终态与扩展字段，不生成 Chat DONE，断流不伪造成功；独立诊断回调仅提交有证据的错误阶段与内层错误，不推断 Chat 专属路由或结束原因。
 - `cline-pass-routing.ts`：CLP 专属出站副本投影，固定 `providerOptions.gateway.only` 为 `deepseek`，保留其他对象字段并拒绝畸形容器；桥与 Relay 共用，不处理网络或重试。
-- `direct-chat.ts`：单次直接 Chat JSON/SSE 协议处理，复用公共 HTTP 生命周期；识别 CLP 显式成功的单层 JSON 包装后复用响应校验，可向注入的有界采集器提交已解析 Chat 报文。
+- `direct-chat.ts`：单次直接 Chat JSON/SSE 协议处理，复用公共 HTTP 生命周期；识别 CLP 显式成功的单层 JSON 包装后复用响应校验，可向注入的有界采集器提交已解析 Chat 报文；另经独立诊断回调提交受限请求指标摘要，关闭转储仍采集。
 
 模块只依赖 Node 内置 HTTP/HTTPS 与共享私有 IPC 能力，不接触平台 SDK、数据库或协议生成类型；
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标组合到
@@ -130,7 +130,7 @@ HTTP 生成失败交互索引，WebSocket 仅保留握手 trace，不伪造 `res
 
 ## Chat 上游
 
-`chat-diagnostics.ts` 白名单提取有界的上游模型、标识、路由、费用与用量明细，经请求级进程内回调在终态交付前提交给代理，写入独立 `chat_diagnostics` trace 事件；随机关联编号随本地 HTTP 传递，观察器随请求关闭清理；不进入 App Server 输出或指标。转储同时把同一次调用诊断里的 `routing.finalProvider` 作为可选 `upstreamProvider` 写入 V2 响应索引，供调用列表与请求明细列表在模型名旁展示上游标签；没有诊断或字段缺失时不写入，也不推断。
+`chat-diagnostics.ts` 白名单提取有界的上游模型、标识、路由、费用与用量明细，经请求级进程内回调在终态交付前提交给代理，写入独立 `chat_diagnostics` trace 事件；随机关联编号随本地 HTTP 传递，观察器随请求关闭清理；不进入 App Server 输出。指标订阅不依赖转储是否开启，仅投影受校验的实际上游、尝试次数、结束原因、错误阶段及内层上游错误摘要，经私有 IPC 独立入库；不保存诊断中的标识、费用、正文或路由历史。转储同时把同一次调用诊断里的 `routing.finalProvider` 作为可选 `upstreamProvider` 写入 V2 响应索引，供调用列表在模型名旁展示上游标签；请求明细列表从指标库独立读取同名字段；没有诊断或字段缺失时不写入，也不推断。
 
 `chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码；HTTP 错误可携带经验证的 Retry-After，供原生 Relay 交付，不自动重试。
 

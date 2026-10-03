@@ -55,6 +55,7 @@ function createGatewayApplicationFixture(
 ): GatewayApplicationFixture {
   return Object.assign(
     Object.create(GatewayApplication.prototype),
+    { turnExecution: { stop: async () => undefined, reset: vi.fn(), synchronize: vi.fn() } },
     { asyncQuestions: { close: vi.fn(async () => undefined), cancelThread: vi.fn() } },
     properties,
     { output: { drain: async () => undefined, ...(properties.output as object) } },
@@ -220,6 +221,28 @@ function createRestoreApplication(options: {
 }
 
 describe("GatewayApplication startup cleanup", () => {
+  it("synchronizes execution metrics only after a binding is actually restored", async () => {
+    const binding: RestoreTestBinding = {
+      target: { surface: "feishu", accountId: "default", conversationId: "metrics" },
+      workspaceId: "default", threadId: "thread", sessionId: "thread",
+    };
+    let restored = false;
+    const application = createRestoreApplication({ binding, published: [],
+      restoreSubscriptions: async (_shouldRestore, onRestored) => {
+        if (restored) onRestored(binding, { id: binding.threadId, status: { type: "idle" }, activeTurnId: null });
+        return [];
+      },
+    });
+    const coordinator = (Reflect.get(application, "bindingRestoreCoordinator") as () => BindingRestoreCoordinator).call(application);
+    const timing = Reflect.get(application, "turnExecution");
+    await coordinator.restore();
+    expect(timing.synchronize).not.toHaveBeenCalled();
+    restored = true;
+    await coordinator.restore();
+    expect(timing.synchronize).toHaveBeenCalledExactlyOnceWith("thread", "openai");
+    await application.stop();
+  });
+
   it.each(["provider success", "provider failure", "model missing", "model failure"])("preserves scheduled Runs when stopping startup during %s", async (stage) => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-stop-preparation-"));
     secureTestDirectory(directory);
@@ -686,6 +709,14 @@ describe("GatewayApplication startup cleanup", () => {
         start: async () => undefined,
         close: async () => undefined,
       },
+      metricsEvents: {
+        start: async () => { calls.push("start:metrics-events"); },
+        close: async () => { calls.push("close:metrics-events"); throw new Error("notification close failed"); },
+      },
+      accountSnapshotEvents: {
+        start: async () => { calls.push("start:account-events"); },
+        close: async () => { calls.push("close:account-events"); },
+      },
       stopping: false,
       codex: {
         onNotification: () => {
@@ -763,6 +794,8 @@ describe("GatewayApplication startup cleanup", () => {
     ).rejects.toThrow("surface start failed");
 
     expect(calls).toEqual([
+      "start:metrics-events",
+      "start:account-events",
       "listen:notification",
       "listen:disconnect",
       "connect:codex",
@@ -772,6 +805,8 @@ describe("GatewayApplication startup cleanup", () => {
       "close:channel-image-spool",
       "close:inbound",
       "close:surface",
+      "close:metrics-events",
+      "close:account-events",
       "close:output",
       "close:codex",
       "close:bindings",

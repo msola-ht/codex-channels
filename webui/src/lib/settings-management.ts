@@ -58,6 +58,7 @@ export interface ManagementTaskController {
   tasks: ManagementTask[]
   loading: boolean
   error: string | null
+  notificationError: string | null
   actionError: string | null
   saving: boolean
   pendingPreview: { input: ManagementTaskInput; preview: ManagementTaskPreview; confirmationToken: string } | null

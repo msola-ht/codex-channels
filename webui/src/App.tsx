@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/breadcrumb"
 import { SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { Toaster } from "@/components/ui/toast"
 import { LanguageProvider } from "@/hooks/language-provider"
 import { useTranslation } from "@/hooks/use-translation"
 import { ServerTimeContext, useServerTime } from "@/hooks/use-server-time"
@@ -73,7 +74,7 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
   if (pathname === "/traffic" && params.has("id")) {
     for (const key of ["id", "exchangeLabel", "exchangeSession", "traceOffset"]) params.delete(key)
     return <>
-      <BreadcrumbItem className="hidden md:block"><BreadcrumbLink asChild><Link to={{ pathname: "/traffic", search: params.toString() }}>{t("pages.traffic")}</Link></BreadcrumbLink></BreadcrumbItem>
+      <BreadcrumbItem className="hidden md:block"><BreadcrumbLink render={<Link to={{ pathname: "/traffic", search: params.toString() }} />}>{t("pages.traffic")}</BreadcrumbLink></BreadcrumbItem>
       <BreadcrumbSeparator className="hidden md:block" />
       <BreadcrumbItem><BreadcrumbPage>{t("pages.trafficDetail")}</BreadcrumbPage></BreadcrumbItem>
     </>
@@ -83,9 +84,7 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
     return (
       <>
         <BreadcrumbItem className="hidden md:block">
-          <BreadcrumbLink asChild>
-            <Link to="/threads">{t("pages.threads")}</Link>
-          </BreadcrumbLink>
+          <BreadcrumbLink render={<Link to="/threads" />}>{t("pages.threads")}</BreadcrumbLink>
         </BreadcrumbItem>
         <BreadcrumbSeparator className="hidden md:block" />
         <BreadcrumbItem>
@@ -143,9 +142,7 @@ function Layout() {
             <Breadcrumb aria-label={t("common.breadcrumb")} className="min-w-0 flex-1">
               <BreadcrumbList className="flex-nowrap">
                 <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink asChild>
-                    <Link to="/">Codex WebUI</Link>
-                  </BreadcrumbLink>
+                  <BreadcrumbLink render={<Link to="/" />}>Codex WebUI</BreadcrumbLink>
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbTrail pathname={pathname} />
@@ -194,10 +191,16 @@ function Layout() {
   )
 }
 
+function AppToaster() {
+  const { t } = useTranslation()
+  return <Toaster timeout={3000} closeLabel={t("common.close")} label={t("common.notifications")} />
+}
+
 export default function App() {
   return (
-    <TooltipProvider delayDuration={400} skipDelayDuration={0}>
+    <TooltipProvider delay={400} timeout={0}>
       <LanguageProvider>
+        <AppToaster />
         <AuthGate>
           <HashRouter>
             <Layout />

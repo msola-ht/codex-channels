@@ -55,7 +55,7 @@ export function validateDirectResponsesRequest(provider: string, value: unknown)
 export function applyResponsesReasoningPolicy(request: DirectResponsesRequest, provider: string, mode: "passthrough" | "off"): DirectResponsesRequest {
   if (mode === "passthrough") return request;
   if (!provider.startsWith("ds-") || !supportsChatReasoningOff(provider, request.model)) {
-    throw new DirectResponsesRequestError("model", "Reasoning off is not supported for this provider and protocol");
+    return request;
   }
   assertNoNestedReasoningControls(request, DirectResponsesRequestError);
   const result: DirectResponsesRequest = { ...request, reasoning: { ...(isRequestObject(request.reasoning) ? request.reasoning : {}), effort: "none" } };

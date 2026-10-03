@@ -1,11 +1,58 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { normalizeTaskInput, WebuiManagementTaskRunner } from "../scripts/webui-management-tasks.mjs";
 
 describe("WebUI management tasks", () => {
+  it("notifies only the owner for queued, running and failed tasks without audit metadata", async () => {
+    const runner = new WebuiManagementTaskRunner();
+    const a = new AbortController(), b = new AbortController();
+    const states: string[] = [], other: string[] = [];
+    const first = runner.watch("a", a.signal, type => { expect(type).toBe("changed"); states.push(runner.list("a").at(-1)?.state ?? "empty"); });
+    const second = runner.watch("b", b.signal, type => other.push(type));
+    try {
+      runner.start({ operation: "update" }, { owner: "a", environment: { PATH: "" } });
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(states).toEqual(["empty", "queued", "running", "failed"]);
+      expect(other).toEqual(["changed"]);
+      a.abort();
+      runner.start({ operation: "update" }, { owner: "a", environment: { PATH: "" } });
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(states).toHaveLength(4);
+    } finally { a.abort(); b.abort(); await Promise.all([first, second]); }
+  });
+
+  it("sends heartbeats and releases subscription timers on abort or subscriber failure", async () => {
+    vi.useFakeTimers();
+    const runner = new WebuiManagementTaskRunner(), controller = new AbortController();
+    const events: string[] = [];
+    try {
+      const watch = runner.watch("a", controller.signal, type => events.push(type));
+      vi.advanceTimersByTime(30_000);
+      expect(events).toEqual(["changed", "heartbeat", "heartbeat"]);
+      controller.abort(); await watch;
+      vi.advanceTimersByTime(30_000);
+      expect(events).toHaveLength(3);
+      await expect(runner.watch("b", new AbortController().signal, () => { throw new Error("disconnected"); })).rejects.toThrow("disconnected");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { controller.abort(); vi.useRealTimers(); }
+  });
+
+  it("notifies queued cancellation even when terminal audit fails", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const runner = new WebuiManagementTaskRunner({ onEvent: () => { throw new Error("audit unavailable"); } });
+    const controller = new AbortController(), events: string[] = [];
+    const watch = runner.watch("a", controller.signal, () => events.push(runner.list("a").at(-1)?.state ?? "empty"));
+    try {
+      const task = runner.start({ operation: "update" }, { owner: "a", environment: { PATH: "" }, auditMetadata: { sessionId: "a" } });
+      runner.cancel(task.id, "a");
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(events).toEqual(["empty", "queued", "cancelled"]);
+      expect(log).toHaveBeenCalledOnce();
+    } finally { controller.abort(); await watch; log.mockRestore(); }
+  });
   it("accepts only the documented service and maintenance actions", () => {
     expect(normalizeTaskInput({ operation: "service", action: "restart", target: "gateway" })).toEqual({ operation: "service", action: "restart", target: "gateway" });
     expect(normalizeTaskInput({ operation: "service", action: "stop", target: "model-relay" })).toEqual({ operation: "service", action: "stop", target: "model-relay" });

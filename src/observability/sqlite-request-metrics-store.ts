@@ -23,6 +23,8 @@ import {
 } from "./sqlite-request-metrics-schema.js";
 
 import type {
+  TurnExecutionMetric,
+  TurnExecutionStore,
   ModelRequestMetricSample,
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
@@ -52,7 +54,7 @@ const defaultRetentionDays = 365;
 const defaultMaximumRows = 1_000_000;
 const cleanupInterval = 100;
 
-export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
+export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore, TurnExecutionStore {
   private readonly database: DatabaseSync;
   private readonly queries = new SqliteRequestMetricsQueries({
     prepare: (sql) => this.database.prepare(sql),
@@ -158,6 +160,79 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     }
   }
 
+  recordTurnExecution(threadId: string, provider: string, turn: TurnExecutionMetric): void {
+    this.writeThreadExecutions(threadId, provider, [turn], false);
+  }
+
+  isExecutionHistoryComplete(threadId: string): boolean {
+    this.requireOpen();
+    validateThreadId(threadId, "Thread ID");
+    return this.database.prepare("SELECT history_complete FROM thread_execution_state WHERE thread_id = ?")
+      .get(threadId)?.history_complete === 1;
+  }
+
+  /** Complete authoritative snapshot, oldest first. Revert removes obsolete timing facts here. */
+  replaceThreadExecutions(threadId: string, provider: string, turns: readonly TurnExecutionMetric[]): void {
+    this.writeThreadExecutions(threadId, provider, turns, true);
+  }
+
+  invalidateThreadExecutions(threadId: string, clearDurations = true): void {
+    this.requireOpen();
+    if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
+    validateThreadId(threadId, "Thread ID");
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare("UPDATE thread_execution_state SET history_complete = 0 WHERE thread_id = ?").run(threadId);
+      if (clearDurations) this.database.prepare("DELETE FROM turn_execution_metrics WHERE thread_id = ?").run(threadId);
+      this.database.exec("COMMIT");
+    } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+  }
+
+  turnExecutionDuration(threadId: string, turnId: string): number | null {
+    return this.queries.turnExecutionDuration(threadId, turnId);
+  }
+
+  sessionExecutionDuration(threadId: string, throughTurnId?: string): number | null {
+    return this.queries.sessionExecutionDuration(threadId, throughTurnId);
+  }
+
+  private writeThreadExecutions(threadId: string, provider: string, turns: readonly TurnExecutionMetric[], replace: boolean): void {
+    this.requireOpen();
+    if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
+    validateThreadId(threadId, "Thread ID");
+    validateThreadId(provider, "Provider");
+    if (turns.length > 10_000) throw new Error("轮次耗时快照超过上限");
+    const ids = new Set<string>();
+    for (const turn of turns) {
+      validateThreadId(turn.turnId, "Turn ID");
+      if (ids.has(turn.turnId)) throw new Error("轮次耗时快照包含重复轮次");
+      ids.add(turn.turnId);
+      if ((turn.durationMs !== null && (!Number.isSafeInteger(turn.durationMs) || turn.durationMs < 0))
+        || !Number.isSafeInteger(turn.recordedAtMs) || turn.recordedAtMs < 0) throw new Error("轮次耗时无效");
+    }
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const resolved = replace ? turns.map(turn => ({ ...turn,
+        durationMs: turn.durationMs ?? this.turnExecutionDuration(threadId, turn.turnId),
+      })) : turns;
+      this.database.prepare(`INSERT INTO thread_execution_state VALUES (?, ?, ?)
+        ON CONFLICT(thread_id) DO UPDATE SET provider = excluded.provider,
+        history_complete = CASE WHEN ? THEN 1 ELSE history_complete END`).run(threadId, provider, replace ? 1 : 0, replace ? 1 : 0);
+      if (replace) this.database.prepare("DELETE FROM turn_execution_metrics WHERE thread_id = ?").run(threadId);
+      const insert = this.database.prepare(`INSERT INTO turn_execution_metrics VALUES (?, ?, ?,
+        (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM turn_execution_metrics WHERE thread_id = ?), ?)
+        ON CONFLICT(thread_id, turn_id) DO UPDATE SET
+          duration_ms = COALESCE(excluded.duration_ms, duration_ms)`);
+      const cutoff = Math.max(0, Date.now() - this.retentionMs);
+      for (const turn of resolved) {
+        if (turn.recordedAtMs < cutoff) continue;
+        insert.run(threadId, turn.turnId, turn.durationMs, threadId, turn.recordedAtMs);
+      }
+      this.database.exec("COMMIT");
+    } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+    this.finishRecords(turns.length, Date.now());
+  }
+
   record(sample: ModelRequestMetricSample): void {
     this.requireOpen();
     if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
@@ -241,6 +316,15 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.source ?? "owned", sample.callerId ?? null, sample.keyId ?? null,
       sample.credentialGeneration ?? null, sample.relayRequestId ?? null, sample.deliveryStatus ?? null,
       sample.responseUsageAmount ?? null,
+      sample.upstreamProvider ?? null,
+      sample.upstreamAttemptCount ?? null,
+      sample.modelAttemptCount ?? null,
+      sample.finishReason ?? null,
+      sample.errorStage ?? null,
+      sample.upstreamErrorCode ?? null,
+      sample.upstreamErrorType ?? null,
+      sample.upstreamHttpStatus ?? null,
+
     );
     return recordedAtMs;
   }
@@ -587,6 +671,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     this.requireOpen();
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      this.database.prepare("DELETE FROM turn_execution_metrics WHERE recorded_at_ms < ?").run(Math.max(0, nowMs - this.retentionMs));
+      this.database.prepare(`DELETE FROM turn_execution_metrics WHERE rowid IN (
+        SELECT rowid FROM turn_execution_metrics ORDER BY recorded_at_ms DESC, rowid DESC LIMIT -1 OFFSET ?
+      )`).run(this.maximumRows);
+      this.database.exec("DELETE FROM thread_execution_state WHERE thread_id NOT IN (SELECT thread_id FROM turn_execution_metrics)");
       this.database.prepare(`
         DELETE FROM model_request_metrics WHERE recorded_at_ms < ?
       `).run(Math.max(0, nowMs - this.retentionMs));
