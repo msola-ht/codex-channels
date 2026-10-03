@@ -217,7 +217,7 @@
     "i18n:report": "node scripts/webui-i18n.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "version:sync": "node scripts/sync-gateway-version.mjs",
-    "check": "tsc -p tsconfig.json --noEmit && node scripts/check-gateway-version.mjs && node scripts/check-runtime-boundaries.mjs",
+    "check": "tsc -p tsconfig.json --noEmit --incremental --tsBuildInfoFile node_modules/.cache/codexc/check.tsbuildinfo && node scripts/check-gateway-version.mjs && node scripts/check-runtime-boundaries.mjs",
     "dev": "tsx src/main.ts",
     "dev:all": "node scripts/dev-all.mjs",
     "webui:dev": "node scripts/webui-dev.mjs",

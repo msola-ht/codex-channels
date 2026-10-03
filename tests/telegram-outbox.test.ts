@@ -3,7 +3,8 @@ import type { InputRichMessage } from "grammy/types";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { OutputEvent } from "../src/conversation-core/events.js";
+import type { OperationUpdate, OutputEvent } from "../src/conversation-core/events.js";
+import { formatOperationLog } from "../src/surfaces/telegram/operation-format.js";
 import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
 import { TelegramInteractionPort } from "../src/surfaces/telegram/interactions.js";
 
@@ -1404,6 +1405,19 @@ describe("TelegramOutbox", () => {
     );
     expect(api.edits.at(-1)).toContain("运行命令 · 已完成");
     expect(api.sent.at(-1)).toBe(turnCompletedPanel);
+  });
+
+  it.each(["full", "compact"] as const)("keeps distinct command exploration kinds separate in %s logs", (display) => {
+    const records: OperationUpdate[] = (["read", "search", "listFiles", "mixed", undefined, undefined] as const).map((kind, index) => ({
+      itemId: String(index), kind: "command", status: "completed", detail: "src",
+      ...(kind === undefined ? {} : { commandExploration: kind }),
+    }));
+    const text = formatOperationLog({ order: records.map((record) => record.itemId),
+      records: new Map(records.map((record) => [record.itemId, record])) }, display);
+    for (const title of ["读取文件", "搜索内容", "浏览目录", "探索文件"]) {
+      expect(text).toContain(`${title} · 已完成`);
+    }
+    expect(text).toContain("运行命令 (×2) · 已完成");
   });
 
   it("groups identical consecutive file operations and escapes Telegram HTML", async () => {

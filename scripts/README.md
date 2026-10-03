@@ -432,8 +432,11 @@
 - `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置。
 - `webui-i18n.mjs`：静态读取 WebUI 中英文文案字典，检查键与占位符，并按 Git 基线输出包含术语表的增量翻译任务 JSON；不执行字典代码、不调用翻译服务、不写回译文。
 - `verify-commit.mjs`：为 pre-commit hook 与 GitHub CI 串行执行统一的完整提交检查，并输出每个
-  阶段及全部检查的累计耗时；完整测试已经成功构建 Gateway 后，日常门禁只复用该产物执行 tarball
-  安装冒烟。干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
+  阶段及全部检查的累计耗时。类型检查使用 TypeScript 原生增量缓存，仍覆盖源码与测试及其依赖；
+  缓存位于 `node_modules/.cache/codexc/check.tsbuildinfo`，可删除后重建，不缓存后续版本和边界检查。
+  完整类型检查成功后才清理并构建 Gateway，构建使用 `--noCheck` 避免重复类型分析；全量测试与 tarball
+  安装冒烟复用这一份新产物。独立 `npm test` 和 `npm run build` 保留完整类型检查。
+  干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
 - `config-backup.mjs`：调用方持有配置锁并验证目标后，执行私有备份、同步及逐字节校验，再原子保存，可传递完整文件容量上限；Relay 管理与全局转储升级共用。
 - `traffic-upgrade.mjs` / `traffic-upgrade.d.mts`：`codexc traffic upgrade` 先确认 Gateway owner 已退出，再显式统一 Codex/Relay 采集开关与模式；保留身份、凭据、保留天数和其他配置，不转换旧 Relay 字段。

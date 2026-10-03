@@ -26,7 +26,14 @@ const checks = [
   },
   { name: "WebUI 翻译字典", command: "npm", args: ["run", "i18n:check"] },
   { name: "文档与索引", command: "npm", args: ["run", "docs:check"] },
-  { name: "完整测试", command: "npm", args: ["test"] },
+  // The full source and test type check above must succeed before emit-only build.
+  // Keep ordinary `npm test` self-contained; this gate already checked the types.
+  { name: "Gateway 构建", command: "npm", args: ["run", "build", "--", "--noCheck"] },
+  {
+    name: "完整测试",
+    command: process.execPath,
+    args: ["node_modules/vitest/vitest.mjs", "run", "--config", "vitest.config.ts"],
+  },
   { name: "Shell 语法", command: "bash", args: [
     "-n",
     "install.sh",

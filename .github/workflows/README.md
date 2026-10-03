@@ -11,7 +11,9 @@
   差异、类型和版本、生产与测试 Lint、文档链接和索引、全量测试、Shell、真实 tarball 安装冒烟
   及平台模板检查；WebUI 字典检查通过 `npm run i18n:check` 校验键与占位符。
   CI 只校验已有字典，不生成翻译报告、调用翻译服务或自动写回译文；差异报告可在本地按需运行 `npm run i18n:report`。
-  tarball 冒烟复用同次完整测试已经生成的 Gateway 构建产物和 npm 下载缓存，每次仍在新的临时目录安装依赖，干净源码安装不进入
+  类型检查使用 TypeScript 原生增量缓存跟踪源码、测试及其依赖，版本与边界检查每次执行；完整类型检查通过后，
+  Gateway 清理旧产物并以 `--noCheck` 构建，避免重复类型分析。全量测试和 tarball 冒烟复用该次构建产物，
+  独立 `npm test`、`npm run build` 仍执行完整类型检查。tarball 冒烟复用 npm 下载缓存，每次仍在新的临时目录安装依赖，干净源码安装不进入
   日常 PR 门禁，并在日志中记录各阶段与全部检查耗时。
   独立的 App Server 合同任务安装锁定的 Codex CLI 0.160.0，检查协议版本与生成类型，并使用隔离
   `CODEX_HOME` 验证 Fast 默认值的跨客户端读取和新 Thread 状态。真实工具合同需要 Linux user namespace；

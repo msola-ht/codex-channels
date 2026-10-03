@@ -118,6 +118,7 @@ function groupOperations(records: OperationUpdate[]): OperationGroup[] {
 function operationGroupKey(record: OperationUpdate): string {
   return JSON.stringify([
     record.kind,
+    record.commandExploration ?? null,
     record.action ?? null,
     record.detail ?? null,
     record.status,
