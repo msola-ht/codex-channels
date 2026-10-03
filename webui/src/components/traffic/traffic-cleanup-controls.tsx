@@ -37,6 +37,7 @@ export function TrafficCleanupControls({ tasks, onCompleted }: {
         {t("traffic.cleanupAction")}
       </Button>
     </div>
+    {tasks.notificationError && <Alert><AlertDescription>{tasks.notificationError}<Button variant="outline" size="sm" disabled={tasks.loading} onClick={tasks.refetch}>{t("traffic.retryTasks")}</Button></AlertDescription></Alert>}
     {error === null ? null : <Alert variant="destructive">
       <AlertDescription>{t("errors.unknown")}{tasks.error !== null ? <Button variant="outline" size="sm" disabled={tasks.loading} onClick={tasks.refetch}>{t("traffic.retryTasks")}</Button> : null}</AlertDescription>
     </Alert>}

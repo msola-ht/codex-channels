@@ -2,14 +2,17 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import { settledTaskIds } from "@/lib/api-polling"
 import { useManagementConfirmedMutation } from "@/hooks/use-management-confirmed-mutation"
-import { useApiPolling } from "@/hooks/use-api"
-import { cancelManagementTask, fetchManagementTasks, previewManagementTask, startManagementTask } from "@/lib/api"
+import { useQueueEvents, useQueueSnapshot } from "@/hooks/use-queue-events"
+import { useTranslation } from "@/hooks/use-translation"
+import { cancelManagementTask, fetchManagementTasks, previewManagementTask, startManagementTask, watchManagementTasks } from "@/lib/api"
 import type { ManagementTaskController } from "@/lib/settings-management"
 import type { ManagementTaskInput } from "@/lib/types"
 
 export function useManagementTasks(): ManagementTaskController {
+  const { t } = useTranslation()
+  const { load, latest, read } = useQueueSnapshot(fetchManagementTasks)
   const mutation = useManagementConfirmedMutation({
-    load: fetchManagementTasks,
+    load,
     preview: previewManagementTask,
     apply: (input: ManagementTaskInput, confirmationToken: string, signal?: AbortSignal) =>
       startManagementTask({ ...input, confirmationToken }, signal),
@@ -21,8 +24,7 @@ export function useManagementTasks(): ManagementTaskController {
     const pending = cancellations.current
     return () => { for (const controller of pending.values()) controller.abort() }
   }, [])
-  useApiPolling(refetch, mutation.loading,
-    data?.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state)) ?? false)
+  const notificationStatus = useQueueEvents(refetch, mutation.loading, !mutation.busy && mutation.pendingPreview === null, latest, read, watchManagementTasks)
   const cancel = useCallback(async (id: string) => {
     if (cancellations.current.has(id)) return null
     const controller = new AbortController()
@@ -42,6 +44,7 @@ export function useManagementTasks(): ManagementTaskController {
   }, [refetch])
   return {
     ...mutation, tasks: data?.tasks ?? [], saving: mutation.busy,
+    notificationError: notificationStatus === "reconnecting" || notificationStatus === "stale" ? t("common.taskNotificationsUnavailable") : null,
     run: (input) => { setCancelError(null); return mutation.mutate(input) },
     confirm: mutation.confirm, cancelPending: mutation.cancel, cancel,
     actionError: cancelError ?? mutation.actionError,

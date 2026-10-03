@@ -686,6 +686,14 @@ describe("GatewayApplication startup cleanup", () => {
         start: async () => undefined,
         close: async () => undefined,
       },
+      metricsEvents: {
+        start: async () => { calls.push("start:metrics-events"); },
+        close: async () => { calls.push("close:metrics-events"); throw new Error("notification close failed"); },
+      },
+      accountSnapshotEvents: {
+        start: async () => { calls.push("start:account-events"); },
+        close: async () => { calls.push("close:account-events"); },
+      },
       stopping: false,
       codex: {
         onNotification: () => {
@@ -763,6 +771,8 @@ describe("GatewayApplication startup cleanup", () => {
     ).rejects.toThrow("surface start failed");
 
     expect(calls).toEqual([
+      "start:metrics-events",
+      "start:account-events",
       "listen:notification",
       "listen:disconnect",
       "connect:codex",
@@ -772,6 +782,8 @@ describe("GatewayApplication startup cleanup", () => {
       "close:channel-image-spool",
       "close:inbound",
       "close:surface",
+      "close:metrics-events",
+      "close:account-events",
       "close:output",
       "close:codex",
       "close:bindings",

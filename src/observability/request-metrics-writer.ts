@@ -30,6 +30,7 @@ export class BufferedModelRequestMetricsWriter<
   constructor(
     private readonly store: Store,
     private readonly onError?: (error: Error) => void,
+    private readonly onCommitted?: () => void,
   ) {}
 
   enqueue(sample: ModelRequestMetricSample): void {
@@ -93,10 +94,12 @@ export class BufferedModelRequestMetricsWriter<
     if (samples.length === 0) return;
     this.pendingRelay -= samples.filter(sample => sample.source === "relay").length;
     const firstSequence = this.processedCount + 1;
+    let committed = false;
     try {
       if (this.store.recordBatch) {
         try {
           this.store.recordBatch(samples);
+          committed = true;
         } catch (error) {
           this.markFailedSamples(samples, firstSequence);
           this.onError?.(asError(error));
@@ -105,6 +108,7 @@ export class BufferedModelRequestMetricsWriter<
         for (const [index, sample] of samples.entries()) {
           try {
             this.store.record(sample);
+            committed = true;
           } catch (error) {
             this.markFailedSamples([sample], firstSequence + index);
             this.onError?.(asError(error));
@@ -114,6 +118,10 @@ export class BufferedModelRequestMetricsWriter<
     } finally {
       this.processedCount += samples.length;
       this.resolveCheckpoints();
+    }
+    if (committed) {
+      // Notification failure must never turn a committed write into a failed write.
+      try { this.onCommitted?.(); } catch (error) { this.onError?.(asError(error)); }
     }
   }
 

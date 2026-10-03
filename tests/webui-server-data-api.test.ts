@@ -6,7 +6,9 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { initializeUserData } from "../scripts/runtime-config.mjs";
-import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
+import { BufferedModelRequestMetricsWriter, SqliteModelRequestMetricsStore } from "../src/observability/index.js";
+import { QueueEventsServer } from "../runtime/queue-events.mjs";
+import { metricsEventsPath } from "../runtime/metrics-events.mjs";
 import { metricsLink, metricsQueryParams } from "../webui/src/lib/metrics-query.js";
 import {
   cleanupWebuiTestFixtures,
@@ -60,6 +62,50 @@ function writeCallIndex(
 }
 
 describe("webui server data API", () => {
+  it("notifies authenticated readers only after metrics commit and closes on writer shutdown", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const events = new QueueEventsServer(metricsEventsPath(configPath));
+    const writer = new BufferedModelRequestMetricsWriter(new SqliteModelRequestMetricsStore(fixture.databasePath), undefined, () => events.changed());
+    const controller = new AbortController();
+    let receiving: Promise<void> | undefined;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      await events.start();
+      const { origin } = await startServer(fixture.environment, undefined, { token: "webui-token" });
+      const url = `${origin}/api/v1/metrics/events`, headers = { authorization: "Bearer webui-token" };
+      expect((await fetch(url)).status).toBe(401);
+      expect((await fetch(`${url}?token=webui-token`, { headers })).status).toBe(400);
+      const response = await fetch(url, { headers, signal: controller.signal });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/event-stream");
+      reader = response.body!.getReader();
+      let received = "";
+      const decoder = new TextDecoder();
+      receiving = (async () => {
+        try { while (true) {
+          const chunk = await reader!.read();
+          if (chunk.done) return;
+          received += decoder.decode(chunk.value, { stream: true });
+        } } catch (error) { if (!controller.signal.aborted) throw error; }
+      })();
+      await expect.poll(() => (received.match(/"changed"/gu) ?? []).length).toBe(1);
+      writer.enqueue(metricSample());
+      expect(await writer.waitForCurrentWrites()).toBe(true);
+      await expect.poll(() => (received.match(/"changed"/gu) ?? []).length).toBe(2);
+      const snapshot = await fetch(`${origin}/api/v1/requests?range=all`, { headers });
+      expect(await snapshot.json()).toMatchObject({ total: 1 });
+      expect(received).not.toContain("webui-token");
+      expect(received).not.toContain(metricSample().provider);
+      await events.close();
+      await receiving;
+      expect(received).toContain('"unavailable"');
+    } finally {
+      controller.abort(); await receiving; reader?.releaseLock();
+      await writer.close(); await events.close();
+    }
+  });
+
   it("does not expose a separate metrics-only detail endpoint", async () => {
     const fixture = createFixture();
     const { origin } = await startServer(fixture.environment);

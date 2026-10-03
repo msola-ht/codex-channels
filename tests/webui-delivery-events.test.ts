@@ -74,7 +74,7 @@ it("reads fragmented SSE with header authentication and rejects malformed or exp
     import assert from 'node:assert/strict';
     const server=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent'});
     try {
-      const {watchDeliveryQueue,watchRelayQueue,onUnauthorized}=await server.ssrLoadModule('/src/lib/api.ts');
+      const {watchDeliveryQueue,watchRelayQueue,watchRequestMetrics,watchAccountSnapshots,onUnauthorized}=await server.ssrLoadModule('/src/lib/api.ts');
       globalThis.localStorage={getItem:()=> 'private-token'};
       const encoder=new TextEncoder();
       const response=parts=>new Response(new ReadableStream({start(controller){for(const part of parts)controller.enqueue(encoder.encode(part));controller.close();}}),{headers:{'content-type':'text/event-stream'}});
@@ -87,6 +87,10 @@ it("reads fragmented SSE with header authentication and rejects malformed or exp
       assert.deepEqual(received,['changed','heartbeat','changed']);
       globalThis.fetch=async(url,init)=>{assert.equal(url,'/api/v1/management/relay/queue/events');assert.equal(init.headers.get('authorization'),'Bearer private-token');return response(['data: {"type":"changed"}\n\n']);};
       await assert.rejects(watchRelayQueue(new AbortController().signal,()=>{}),/disconnected/);
+      globalThis.fetch=async(url,init)=>{assert.equal(url,'/api/v1/metrics/events');assert.equal(init.headers.get('authorization'),'Bearer private-token');return response(['data: {"type":"changed"}\n\n']);};
+      await assert.rejects(watchRequestMetrics(new AbortController().signal,()=>{}),/disconnected/);
+      globalThis.fetch=async(url,init)=>{assert.equal(url,'/api/v1/accounts/events');assert.equal(init.headers.get('authorization'),'Bearer private-token');return response(['data: {"type":"changed"}\n\n']);};
+      await assert.rejects(watchAccountSnapshots(new AbortController().signal,()=>{}),/disconnected/);
       for(const value of ['data: {"type":"unknown"}\n\n','data: {"type":"changed","secret":true}\n\n','x'.repeat(5000)]) {
         globalThis.fetch=async()=>response([value]);
         await assert.rejects(watchDeliveryQueue(new AbortController().signal,()=>assert.fail('invalid event escaped')));
@@ -117,8 +121,11 @@ it.each(["delivery", "relay"])("records %s snapshot outcomes without acknowledgi
     const useState=initial=>{const i=si++;if(!(i in slots))slots[i]=initial;return[slots[i],value=>{slots[i]=typeof value==='function'?value(slots[i]):value;}];};
     const useRef=initial=>refs[ri++]??(refs[ri-1]={current:initial});
     class ApiClientError extends Error{constructor(message,status=message,code){super('failure');this.status=status;this.code=code;}}
-    const hook=new Function('useState','useRef','useCallback','useManagementConfirmedMutation','useQueueEvents','watchDeliveryQueue','fetchDeliveryQueue','ApiClientError','previewDeliveryBatch','applyDeliveryBatch',code+';return useDeliveryQueue;')(
-      useState,useRef,fn=>fn,value=>{options=value;return{};},(refetch,loading,enabled,latest,read)=>{captured={latest,read};},()=>{},()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),ApiClientError,()=>{},()=>{});
+    const sharedSource=fs.readFileSync('webui/src/hooks/use-queue-events.ts','utf8').replace(/^import .*$/gm,'').replace(/export (function|interface)/g,'$1');
+    const sharedCode=ts.transpileModule(sharedSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+    const useQueueSnapshot=new Function('useState','useRef','useCallback','ApiClientError',sharedCode+';return useQueueSnapshot;')(useState,useRef,fn=>fn,ApiClientError);
+    const hook=new Function('useState','useRef','useCallback','useManagementConfirmedMutation','useQueueEvents','useQueueSnapshot','watchDeliveryQueue','fetchDeliveryQueue','ApiClientError','previewDeliveryBatch','applyDeliveryBatch',code+';return useDeliveryQueue;')(
+      useState,useRef,fn=>fn,value=>{options=value;return{};},(refetch,loading,enabled,latest,read)=>{captured={latest,read};},useQueueSnapshot,()=>{},()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),ApiClientError,()=>{},()=>{});
     const render=()=>{si=ri=0;hook(0,'all');};
     Date.now=()=>1000;render();captured.latest.current=5;
     const first=options.load();captured.latest.current=10;pending.shift().resolve({records:[]});await first;render();

@@ -13,6 +13,7 @@ import { useTranslation } from "@/hooks/use-translation"
 export function RelayServiceManagement({ controller, snapshot, loading, current }: { controller: ReturnType<typeof useRelayServiceManagement>; snapshot: RelayManagementSnapshot | null; loading: boolean; current: boolean }) {
   const { t } = useTranslation()
   const { services, tasks } = controller
+  const taskError = tasks.error ?? tasks.notificationError
   return <Card size="sm">
     <CardHeader>
       <CardTitle>{t("relay.serviceManagement")}</CardTitle>
@@ -28,8 +29,8 @@ export function RelayServiceManagement({ controller, snapshot, loading, current 
       </div>
     </CardHeader>
     <CardContent className="flex flex-col gap-3">
-      {services.loading ? <Skeleton className="h-16 w-full" /> : services.error ? <SettingsError message={services.error} retry={services.refetch} /> : services.data && <ManagedServices services={services.data} tasks={tasks} scope="model-relay" />}
-      {tasks.error && <SettingsError message={tasks.error} retry={tasks.refetch} />}
+      {services.loading && !services.data ? <Skeleton className="h-16 w-full" /> : services.error ? <SettingsError message={services.error} retry={services.refetch} /> : services.data && <div inert={services.loading || undefined} aria-busy={services.loading}><ManagedServices services={services.data} tasks={tasks} scope="model-relay" /></div>}
+      {taskError && <SettingsError message={taskError} retry={tasks.refetch} />}
       {tasks.actionError && <Alert variant="destructive"><AlertDescription>{tasks.actionError}</AlertDescription></Alert>}
     </CardContent>
     <ManagementTaskConfirmationDialog tasks={tasks} />

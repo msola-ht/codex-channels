@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from "react"
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { ApiClientError } from "@/lib/api"
 import type { QueueChangeEvent } from "@/lib/types"
 
@@ -10,6 +10,34 @@ export interface QueueSnapshotRead {
   failures: number
   retryable: boolean
   retryAt: number
+}
+
+/** Shared revision acknowledgement and bounded snapshot retries for notification consumers. */
+export function useQueueSnapshot<T>(fetchSnapshot: (signal?: AbortSignal) => Promise<T>) {
+  const latest = useRef(0)
+  const [read, setRead] = useState<QueueSnapshotRead | null>(null)
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const revision = latest.current
+    try {
+      const snapshot = await fetchSnapshot(signal)
+      if (!signal?.aborted) setRead({ confirmed: revision, completedAt: Date.now(), failed: false, failures: 0, retryable: false, retryAt: 0 })
+      return snapshot
+    } catch (error) {
+      if (!signal?.aborted) {
+        const limited = error instanceof ApiClientError && error.status === 429
+        const retryable = error instanceof ApiClientError ? limited || error.status >= 500
+          : error instanceof TypeError || (error instanceof Error && error.name === "TimeoutError")
+        setRead(previous => {
+          const failures = (previous?.failures ?? 0) + 1
+          const completedAt = Date.now()
+          return { confirmed: previous?.confirmed ?? 0, completedAt, failed: true, failures, retryable,
+            retryAt: completedAt + (limited ? 60_000 : Math.min(8_000, 2_000 * 2 ** Math.min(failures - 1, 2))) }
+        })
+      }
+      throw error
+    }
+  }, [fetchSnapshot])
+  return { load, latest, read }
 }
 
 export function useQueueEvents(refetch: () => void, loading: boolean, enabled: boolean,

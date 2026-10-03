@@ -35,6 +35,7 @@ export class WebuiManagementTaskRunner {
   start(input: ManagementTaskInput, options?: { owner?: string; environment?: NodeJS.ProcessEnv; auditMetadata?: Record<string, unknown> | null }): Omit<ManagementTask, "owner">;
   get(id: string, owner: string): Omit<ManagementTask, "owner"> | null;
   list(owner: string): Array<Omit<ManagementTask, "owner">>;
+  watch(owner: string, signal: AbortSignal, receive: (type: "changed" | "heartbeat") => void): Promise<void>;
   cancel(id: string, owner: string): Omit<ManagementTask, "owner"> | null;
 }
 export function normalizeTaskInput(input: unknown): { operation: ManagementTaskOperation; action: string; target?: string };

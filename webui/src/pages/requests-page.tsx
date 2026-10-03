@@ -14,20 +14,24 @@ export function RequestsPage() {
   const { t } = useTranslation()
   const state = useMetricsQuery("30d")
   const { query, update, sorting, onSortingChange } = state
-  const { data, loading, error, errorCode, refetch } = useRequests(query)
+  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus } = useRequests(query)
   const exporter = useMetricsExport(query)
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6" aria-busy={refreshing}>
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">{t("requests.title")}</h1>
-        <Button variant="outline" disabled={exporter.pending || loading || error !== null} onClick={() => void exporter.download()}>
-          {exporter.pending ? t("requests.exporting") : t("requests.export")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs text-muted-foreground" role="status">{query.offset > 0 ? t("requests.historyUpdatesPaused") : t(`delivery.notifications.${notificationStatus}`)}</span>
+          <Button variant="outline" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
+          <Button variant="outline" disabled={exporter.pending || refreshing || error !== null} onClick={() => void exporter.download()}>
+            {exporter.pending ? t("requests.exporting") : t("requests.export")}
+          </Button>
+        </div>
       </div>
       <QueryFilters query={query} onChange={update} showThreadFilters={false} />
-      <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={loading} />
-      <ErrorBanner error={exporter.failed ? translateApiErrorCode(t, exporter.errorCode) : null} onRetry={() => void exporter.download()} pending={exporter.pending || loading || error !== null} />
+      <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={refreshing} />
+      <ErrorBanner error={exporter.failed ? translateApiErrorCode(t, exporter.errorCode) : null} onRetry={() => void exporter.download()} pending={exporter.pending || refreshing || error !== null} />
       {error !== null ? null : data === null ? <PageSkeleton rows={8} /> : (
         <>
           <QuerySummary loading={loading} aggregate={data.aggregate} range={data.range} />

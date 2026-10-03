@@ -128,8 +128,8 @@ describe("WebUI 界面文案语言切换", () => {
           h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(MemoryRouter, null,
             h(TooltipProvider, null, h(ServerTimeContext.Provider, { value: clock }, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props))))));
         const renderConsole = (language, dashboard, accounts) => {
-          globalThis.fixtureDashboard = dashboard;
-          globalThis.fixtureAccounts = accounts;
+          globalThis.fixtureDashboard = { ...dashboard, notificationStatus: "live" };
+          globalThis.fixtureAccounts = { ...accounts, notificationStatus: "live" };
           globalThis.fixtureAccountManagement = {
             settings: { opencodeGo: { accounts: [{ id: "main" }] } },
             loading: false, error: null, busy: false, pendingPreview: null, actionError: null,
@@ -213,9 +213,9 @@ describe("WebUI 界面文案语言切换", () => {
           update: noop, sorting: [], onSortingChange: noop };
         globalThis.fixtureMetricsProviders = { data: { providers: ["openai"] }, loading: false, error: null, errorCode: null };
         globalThis.fixtureExport = { download: noop, pending: false, failed: false, errorCode: null };
-        globalThis.fixtureRequests = { data: { aggregate: requestRecord, range, records: [requestRecord], total: 1,
+        globalThis.fixtureRequests = { notificationStatus: "live", data: { aggregate: requestRecord, range, records: [requestRecord], total: 1,
           nextOffset: null }, loading: false, error: null, errorCode: null, refetch: noop };
-        globalThis.fixtureErrors = { data: { errors: { requestCount: 100, unsuccessfulRequestCount: 60 },
+        globalThis.fixtureErrors = { notificationStatus: "live", data: { errors: { requestCount: 100, unsuccessfulRequestCount: 60 },
           total: 60, nextOffset: 50,
           records: [{ ...requestRecord, id: 1, threadId: "thread-1", turnId: "turn-1" }] },
           loading: false, error: null, errorCode: null, refetch: noop };
@@ -465,7 +465,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.consoleEnEmptyAccounts).toContain("No CommandCode Go account configured");
     expect(result.consoleEnQueryError).toContain("Invalid query. Check the filters.");
     expect(result.consoleEnListError).toContain("The access token is invalid or expired. Verify it again.");
-    expect(result.consoleEnSyncError).toContain("The local account was removed, but the list sync failed:");
+    expect(result.consoleEnSyncError).toContain("Account snapshot sync failed:");
     expect(result.consoleEnSyncError).toContain("Could not complete the request. Try again.");
     expect(result.consoleEnRemoved).toContain("Local account ocg-main was removed.");
     expect(result.consoleEnRemoved).toContain("Run codexc service restart all");

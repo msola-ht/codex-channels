@@ -83,6 +83,47 @@ function createWriter(
 }
 
 describe("BufferedModelRequestMetricsWriter", () => {
+  it("notifies after committed batches, never on enqueue or failed writes", async () => {
+    vi.useFakeTimers();
+    const committed = vi.fn(), onError = vi.fn();
+    const recordBatch = vi.fn();
+    const writer = new BufferedModelRequestMetricsWriter({ record: vi.fn(), recordBatch, close: vi.fn(), recordSubagentThread: vi.fn(), recordSubagentTurn: vi.fn() }, onError, committed);
+    writer.enqueue(sample());
+    writer.enqueue(sample());
+    expect(committed).not.toHaveBeenCalled();
+    const pending = writer.waitForCurrentWrites();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await pending).toBe(true);
+    expect(committed).toHaveBeenCalledOnce();
+    expect(recordBatch.mock.invocationCallOrder[0]).toBeLessThan(committed.mock.invocationCallOrder[0]!);
+    recordBatch.mockImplementationOnce(() => { throw new Error("rollback"); });
+    writer.enqueue(sample());
+    const failed = writer.waitForCurrentWrites();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await failed).toBe(false);
+    expect(committed).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledOnce();
+    await writer.close();
+  });
+
+  it("keeps commit success when notifications fail and notifies partial individual writes", async () => {
+    vi.useFakeTimers();
+    const committed = vi.fn(() => { throw new Error("notification failed"); }), onError = vi.fn();
+    const record = vi.fn().mockImplementationOnce(() => { throw new Error("write failed"); });
+    const writer = new BufferedModelRequestMetricsWriter({ record, close: vi.fn(), recordSubagentThread: vi.fn(), recordSubagentTurn: vi.fn() }, onError, committed);
+    writer.enqueue(sample()); writer.enqueue(sample());
+    const partial = writer.waitForCurrentWrites();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await partial).toBe(false);
+    expect(committed).toHaveBeenCalledOnce();
+    writer.enqueue(sample());
+    const success = writer.waitForCurrentWrites();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await success).toBe(true);
+    expect(onError).toHaveBeenCalledTimes(3);
+    await writer.close();
+  });
+
   it("writes one bounded batch per scheduled turn", async () => {
     vi.useFakeTimers();
     const record = vi.fn<ModelRequestMetricsStore["record"]>();

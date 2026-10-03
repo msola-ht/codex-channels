@@ -1,4 +1,6 @@
-import { closeQueueStreams } from "./webui-queue-events.mjs";
+import { closeQueueStreams, openQueueStream } from "./webui-queue-events.mjs";
+import { watchQueueChanges } from "../runtime/queue-events.mjs";
+import { accountSnapshotEventsPath, metricsEventsPath } from "../runtime/metrics-events.mjs";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
@@ -32,7 +34,7 @@ import {
 } from "./config-management.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { createSharedCodexUserConfigClient, readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
-import { loadServiceStatusSummary } from "./webui-service-status.mjs";
+import { invalidateServiceStatusSummary, loadServiceStatusSummary } from "./webui-service-status.mjs";
 import {
   ApiError,
   authorized,
@@ -210,6 +212,12 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         });
         return;
       }
+      if (url.pathname === `${API_PREFIX}/metrics/events` || url.pathname === `${API_PREFIX}/accounts/events`) {
+        if (url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "数据通知不接受查询参数");
+        const path = url.pathname === `${API_PREFIX}/accounts/events` ? accountSnapshotEventsPath : metricsEventsPath;
+        openQueueStream(management, response, (signal, send) => watchQueueChanges(path(resolveGatewayConfigPath(environment)), signal, send));
+        return;
+      }
       await routeApi(environment, url, request, response, serviceStatusCache);
       return;
     }
@@ -273,6 +281,7 @@ function createManagementState(
   const audit = new ManagementAuditWriter(join(dataDir, "management-audit.jsonl"));
   const tasks = new WebuiManagementTaskRunner({
     onEvent: ({ task, phase, resultCode, recovery, ...metadata }) => {
+      invalidateServiceStatusSummary(serviceStatusCache);
       if (typeof metadata.sessionId !== "string") return;
       audit.record({
         ...metadata,

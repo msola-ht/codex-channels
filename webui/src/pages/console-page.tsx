@@ -48,11 +48,11 @@ export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
   const refetch = dashboard.refetch
   const officialAccounts = useOfficialAccountSources(refreshAttempts)
   const refreshAccounts = officialAccounts.refresh
-  const refreshing = dashboard.loading || officialAccounts.refreshing
+  const refreshing = dashboard.refreshing || officialAccounts.refreshing
 
   const refreshDashboard = useCallback(() => {
     refetch()
-    void refreshAccounts()
+    void refreshAccounts(undefined, true)
   }, [refetch, refreshAccounts])
 
   return (
@@ -63,6 +63,7 @@ export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
           <p className="text-sm text-muted-foreground">{t("console.description")}</p>
         </div>
         <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto sm:flex-1">
+          <span className="text-xs text-muted-foreground" role="status">{t(`delivery.notifications.${dashboard.notificationStatus}`)}</span>
           <DashboardRangeSelector key={JSON.stringify(range)} query={range} onChange={onRangeChange} />
           <Button variant="outline" size="sm" disabled={refreshing} onClick={refreshDashboard}>
             {refreshing ? <Spinner data-icon="inline-start" aria-label={t("common.loading")} /> : <RefreshCwIcon data-icon="inline-start" />}
@@ -92,8 +93,9 @@ export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
           ?? translateApiError(t, officialAccounts.error, officialAccounts.errorCode)}
         accountWarnings={officialAccounts.data?.warnings ?? []}
         refreshing={officialAccounts.refreshing}
-        onRefresh={() => void refreshAccounts()}
+        onRefresh={() => void refreshAccounts(undefined, true)}
       />
+      <p className="text-xs text-muted-foreground" role="status">{t("console.accountSnapshotUpdates", { status: t(`delivery.notifications.${officialAccounts.notificationStatus}`) })}</p>
     </div>
   )
 }

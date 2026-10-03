@@ -280,7 +280,7 @@ describe("WebUI metrics table presentation", () => {
             : render(component, { accounts, refreshControls: {}, onAccountsChanged: noop });
         }
         globalThis.fixtureApiState = { data: null, loading: true, error: null };
-        globalThis.fixtureAccounts = { data: null, loading: true, refreshing: false, refreshControls: {}, refresh: noop,
+        globalThis.fixtureAccounts = { notificationStatus: "live", data: null, loading: true, refreshing: false, refreshControls: {}, refresh: noop,
           error: null, refreshError: null, removalNotice: null, accountRemoved: noop };
         const consoleProps = { range: { range: "30d" }, onRangeChange: noop };
         result.consoleAccountsLoading = render(ConsolePage, consoleProps);
@@ -402,6 +402,8 @@ describe("WebUI metrics table presentation", () => {
         errorsData.records[0].upstreamProvider = "deepseek";
         result.errorsUpstream = render(ErrorsPage, {});
         globalThis.fixtureApiState.loading = true;
+        result.errorsRefreshing = render(ErrorsPage, {});
+        globalThis.fixtureApiState.data.queryKey = "previous-filter";
         result.errorsLoading = render(ErrorsPage, {});
         const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx?actual");
         result.filters = render(QueryFilters, { query: { range: "all" }, onChange: noop });
@@ -418,16 +420,22 @@ describe("WebUI metrics table presentation", () => {
           [useErrors, JSON.stringify(query)],
           [q => useThreadTurns("thread-1", q), JSON.stringify(["thread-1", query])],
         ].map(([hook, queryKey]) => {
+          const readHook = q => {
+            let value;
+            function Probe() { const state = hook(q); value = { data: state.data, error: state.error, errorCode: state.errorCode, loading: state.loading }; return null; }
+            render(Probe, {});
+            return value;
+          };
           globalThis.fixtureApiState = { data: { queryKey, data: { total: 1 } }, loading: false, error: null };
-          const ready = hook(query);
-          const changed = hook(nextQuery);
-          const returned = hook(query);
+          const ready = readHook(query);
+          const changed = readHook(nextQuery);
+          const returned = readHook(query);
           globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: true };
-          const pending = hook(query);
+          const pending = readHook(query);
           globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: false, error: "fixture failure" };
-          const failed = hook(nextQuery);
+          const failed = readHook(nextQuery);
           globalThis.fixtureApiState = { data: null, loading: true, error: null };
-          const initial = hook(query);
+          const initial = readHook(query);
           return { ready, changed, returned, pending, failed, initial };
         }));
         console.log(JSON.stringify(result));
@@ -675,6 +683,9 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.errorsLoading).toMatch(/data-slot="card-content"[^>]*inert=""/);
     expect(markup.errorsLoading).toContain('data-slot="spinner"');
     expect(markup.errors).not.toContain('data-slot="skeleton"');
+    expect(markup.errorsRefreshing).not.toContain('data-slot="skeleton"');
+    expect([...markup.errorsRefreshing!.matchAll(/<tr\b/g)]).toHaveLength(51);
+    expect(markup.errorsRefreshing).toContain("刷新中");
   });
 
   it("places compact console-style error statistics before filters without thread inputs", () => {
@@ -835,11 +846,11 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("marks changed queries pending before the API effect and preserves explicit failures", () => {
-    expect(JSON.parse(markup.queryStates!)).toEqual(Array.from({ length: 4 }, () => ({
+    expect(JSON.parse(markup.queryStates!)).toEqual(Array.from({ length: 4 }, (_, index) => ({
       ready: { data: { total: 1 }, error: null, loading: false },
       changed: { data: { total: 1 }, error: null, loading: true },
       returned: { data: { total: 1 }, error: null, loading: false },
-      pending: { data: { total: 1 }, error: null, loading: true },
+      pending: { data: { total: 1 }, error: null, loading: ![0, 2].includes(index) },
       failed: { data: { total: 1 }, error: "fixture failure", loading: false },
       initial: { data: null, error: null, loading: true },
     })));

@@ -33,6 +33,7 @@
   Provider 装配模型指标组件，不持有模型转发数据通路；通过 `request-metrics-query-adapter.ts`
   把同一指标库的精确 Thread 查询映射为 Application `/metrics` 窄端口，并为 OpenAI `/limits`
   提供当前周窗口的精确 Provider 聚合；
+  同时拥有请求指标与账户快照的独立私有通知端点，指标批次或账户快照成功保存后发送对应失效通知，关闭时先停止指标写入再释放订阅端点；通知不调用 App Server。
   计划任务的内部组件、恢复顺序和
   Store 生命周期委托给 `scheduled-task-composition.ts`。
   同一组合根还把 Luna Reserve 状态机接到最终 `usageLimitExceeded`、Thread/账户生命周期和关闭顺序；

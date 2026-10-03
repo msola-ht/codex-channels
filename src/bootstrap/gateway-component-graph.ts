@@ -10,6 +10,8 @@ import { withOutputExecutionAdmission } from "./output-execution-admission.js";
 import { PersistentInteractionPort } from "./persistent-interaction-port.js";
 import { RelayMetricsComposition, createRelayMetricAuthorization } from "./relay-metrics-composition.js";
 import { modelRelayPaths } from "../../runtime/model-relay-paths.mjs";
+import { accountSnapshotEventsPath, metricsEventsPath } from "../../runtime/metrics-events.mjs";
+import { QueueEventsServer } from "../../runtime/queue-events.mjs";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
 import {
@@ -173,6 +175,8 @@ export abstract class GatewayComponentGraph {
   readonly refreshProviderModels: () => void;
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly relayMetrics: RelayMetricsComposition | undefined;
+  private readonly metricsEvents: QueueEventsServer | undefined;
+  private readonly accountSnapshotEvents: QueueEventsServer | undefined;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly conversationIdleReleaser?: ConversationIdleReleaser;
   private readonly providerAccounts?: ProviderAccountService;
@@ -368,9 +372,12 @@ export abstract class GatewayComponentGraph {
         maximumRows: config.metricsStorage.maxRows,
       },
     );
+    this.metricsEvents = configPath === undefined ? undefined : new QueueEventsServer(metricsEventsPath(configPath));
+    this.accountSnapshotEvents = configPath === undefined ? undefined : new QueueEventsServer(accountSnapshotEventsPath(configPath));
     const metricsWriter = new BufferedModelRequestMetricsWriter(
       metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
+      () => this.metricsEvents?.changed(),
     );
     this.relayMetrics = configPath === undefined ? undefined : new RelayMetricsComposition({
       path: modelRelayPaths(configPath).metrics,
@@ -568,7 +575,7 @@ export abstract class GatewayComponentGraph {
           ?? definitionAccountId
           ?? opencodeGoAccountIdFromProvider(snapshot.provider)
           ?? null;
-        metricsStore.upsertAccountSnapshot?.({
+        metricsStore.upsertAccountSnapshot({
           sourceId: `${snapshot.provider}:${accountId ?? "default"}`,
           provider: snapshot.provider,
           accountId,
@@ -579,6 +586,8 @@ export abstract class GatewayComponentGraph {
           usage: snapshot.usage,
           limits: snapshot.limits,
         });
+        try { this.accountSnapshotEvents?.changed(); }
+        catch (error) { logger.warn({ err: error }, "账户快照已保存，但变化通知失败"); }
       },
     }, readOpenAiSubscription);
     const execution = withOutputExecutionAdmission(this.codex, (threadId) => {
@@ -1229,6 +1238,8 @@ export abstract class GatewayComponentGraph {
       await this.surfaceManager.preparePersistence();
       this.requireRunning();
       await this.providerMetrics.start();
+      await this.metricsEvents?.start();
+      await this.accountSnapshotEvents?.start();
       // IPC lifetime follows the writer, not the HTTP admission switch. It must
       // already exist for first enablement and drain terminal metrics on disable.
       await this.relayMetrics?.apply(true);
@@ -1467,6 +1478,8 @@ export abstract class GatewayComponentGraph {
       }],
       ["Relay Metrics", () => this.relayMetrics?.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
+      ["Metrics Notifications", () => this.metricsEvents?.close()],
+      ["Account Snapshot Notifications", () => this.accountSnapshotEvents?.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],
       ["Binding Recovery", async () => {

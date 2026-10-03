@@ -2,7 +2,7 @@ import { watchDeliveryQueue } from "@/lib/api"
 import { useCallback, useRef, useState } from "react"
 import { useApi, useApiPolling } from "@/hooks/use-api"
 import { useManagementConfirmedMutation } from "@/hooks/use-management-confirmed-mutation"
-import { useQueueEvents, type QueueSnapshotRead } from "@/hooks/use-queue-events"
+import { useQueueEvents, useQueueSnapshot } from "@/hooks/use-queue-events"
 import { ApiClientError, fetchDeliveryContents, fetchDeliveryQueue, previewDeliveryBatch, applyDeliveryBatch } from "@/lib/api"
 import type { DeliveryBatchInput, DeliveryBatchResult, DeliveryContent, DeliveryQueueEntry } from "@/lib/types"
 
@@ -17,29 +17,8 @@ async function applyRetry(input: DeliveryBatchInput, token: string, signal?: Abo
 
 /** The list is remounted when its cursor or filter changes. */
 export function useDeliveryQueue(before: number, filter: string) {
-  const latest = useRef(0)
-  const [read, setRead] = useState<QueueSnapshotRead | null>(null)
-  const load = useCallback(async (signal?: AbortSignal) => {
-    const revision = latest.current
-    try {
-      const snapshot = await fetchDeliveryQueue(before, filter, signal)
-      if (!signal?.aborted) setRead({ confirmed: revision, completedAt: Date.now(), failed: false, failures: 0, retryable: false, retryAt: 0 })
-      return snapshot
-    } catch (error) {
-      if (!signal?.aborted) {
-        const limited = error instanceof ApiClientError && error.status === 429
-        const retryable = error instanceof ApiClientError ? limited || error.status >= 500
-          : error instanceof TypeError || (error instanceof Error && error.name === "TimeoutError")
-        setRead(previous => {
-          const failures = (previous?.failures ?? 0) + 1
-          const completedAt = Date.now()
-          return { confirmed: previous?.confirmed ?? 0, completedAt, failed: true, failures, retryable,
-            retryAt: completedAt + (limited ? 60_000 : Math.min(8_000, 2_000 * 2 ** Math.min(failures - 1, 2))) }
-        })
-      }
-      throw error
-    }
-  }, [before, filter])
+  const fetchSnapshot = useCallback((signal?: AbortSignal) => fetchDeliveryQueue(before, filter, signal), [before, filter])
+  const { load, latest, read } = useQueueSnapshot(fetchSnapshot)
   const state = useManagementConfirmedMutation({ load, preview: previewDeliveryBatch, apply: applyRetry, retainDataOnError: false })
   const [result, setResult] = useState<DeliveryBatchResult | null>(null)
   const notificationStatus = useQueueEvents(state.refetch, state.loading, !state.busy && state.pendingPreview === null, latest, read, watchDeliveryQueue)

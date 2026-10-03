@@ -14,6 +14,8 @@ import { opencodeGoAccountsFilePath, writeOpencodeGoAccounts } from "../runtime/
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import { ProviderAccountService } from "../src/application/index.js";
+import { QueueEventsServer } from "../runtime/queue-events.mjs";
+import { accountSnapshotEventsPath, metricsEventsPath } from "../runtime/metrics-events.mjs";
 import { createManagedProviderAccountAdapters } from "../src/bootstrap/managed-provider-capabilities.js";
 import { createClinePassAccountAdapter } from "../src/bootstrap/cline-pass-account-adapter.js";
 import { ccgAccountDefinition } from "../runtime/model-provider-definitions.mjs";
@@ -426,6 +428,51 @@ describe("webui server Provider and account management", () => {
       snapshots: [{ provider: "deepseek", available: true }],
       warnings: [],
     });
+  });
+  it("streams account snapshot invalidations independently of request metrics without refreshing upstream", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const accounts = new QueueEventsServer(accountSnapshotEventsPath(configPath));
+    const metrics = new QueueEventsServer(metricsEventsPath(configPath));
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const controllers: AbortController[] = [], readers: ReadableStreamDefaultReader<Uint8Array>[] = [], pending: Promise<void>[] = [];
+    const received = ["", ""];
+    let upstreamQueries = 0;
+    try {
+      await accounts.start(); await metrics.start();
+      const { origin } = await startServer(fixture.environment, undefined, { token: "snapshot-token", refreshGatewayAccount: async () => { upstreamQueries += 1; } });
+      const headers = { authorization: "Bearer snapshot-token" };
+      expect((await fetch(`${origin}/api/v1/accounts/events`)).status).toBe(401);
+      expect((await fetch(`${origin}/api/v1/accounts/events?token=snapshot-token`, { headers })).status).toBe(400);
+      for (const [index, path] of ["accounts", "metrics"].entries()) {
+        const controller = new AbortController(); controllers.push(controller);
+        const response = await fetch(`${origin}/api/v1/${path}/events`, { headers, signal: controller.signal });
+        expect(response.status).toBe(200);
+        const reader = response.body!.getReader(); readers.push(reader);
+        const decoder = new TextDecoder();
+        pending.push((async () => {
+          try { while (true) {
+            const chunk = await reader.read(); if (chunk.done) return;
+            received[index] += decoder.decode(chunk.value, { stream: true });
+          } } catch (error) { if (!controller.signal.aborted) throw error; }
+        })());
+      }
+      await expect.poll(() => received.map(value => (value.match(/"changed"/gu) ?? []).length)).toEqual([1, 1]);
+      store.upsertAccountSnapshot({ sourceId: "deepseek:default", provider: "deepseek", accountId: null,
+        displayName: "DeepSeek", enabled: true, observedAtMs: 1_800_000_000_000, available: true,
+        usage: { kind: "balance", provider: "deepseek", available: true, balances: [] }, limits: { kind: "unsupported", provider: "deepseek" } });
+      accounts.changed();
+      await expect.poll(() => (received[0]!.match(/"changed"/gu) ?? []).length).toBe(2);
+      expect((received[1]!.match(/"changed"/gu) ?? []).length).toBe(1);
+      const snapshot = await fetch(`${origin}/api/v1/accounts`, { headers });
+      expect(await snapshot.json()).toMatchObject({ observedAtMs: 1_800_000_000_000, snapshots: [{ provider: "deepseek" }] });
+      expect(upstreamQueries).toBe(0);
+      expect(received.join("")).not.toMatch(/deepseek|snapshot-token|observedAt/u);
+    } finally {
+      for (const controller of controllers) controller.abort();
+      await Promise.all(pending); for (const reader of readers) reader.releaseLock();
+      store.close(); await accounts.close(); await metrics.close();
+    }
   });
 
   it("keeps other account snapshots available when the OCG registry is invalid", async () => {
