@@ -15,6 +15,20 @@ import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-f
 import gatewayMetadata from "../src/version.json" with { type: "json" };
 
 describe("shared Surface lifecycle presentation", () => {
+  it.each([
+    [{ knownDurationMs: 71_000, missingTurnCount: 1, historyComplete: true }, "已知累计 1 min 11 s（1 轮耗时缺失）"],
+    [{ knownDurationMs: 0, missingTurnCount: 1, historyComplete: false }, "已知累计 0 ms（1 轮耗时缺失；历史未补齐）"],
+    [{ knownDurationMs: null, missingTurnCount: 2, historyComplete: true }, "未提供（2 轮耗时缺失）"],
+    [{ knownDurationMs: 71_000, missingTurnCount: 0, historyComplete: false }, "已知累计 1 min 11 s（历史未补齐）"],
+    [{ knownDurationMs: 71_000, missingTurnCount: 0, historyComplete: true }, "1 min 11 s"],
+  ] as const)("shows timing completeness without hiding known durations: %j", (sessionTiming, expected) => {
+    const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
+      type: "turn.completed", target: { surface: "feishu", accountId: "a", conversationId: "c" },
+      threadId: "thread", turnId: "turn", status: "interrupted", sessionTiming,
+    }));
+    expect(rendered).toContain("本轮耗时：未提供");
+    expect(rendered).toContain(`总耗时：${expected}`);
+  });
   it("shows only whole-turn duration without request speeds or upstream TTFT", () => {
     const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
       type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "100" },
@@ -45,7 +59,7 @@ describe("shared Surface lifecycle presentation", () => {
     }));
     expect(withDuration).toContain("本轮耗时：3.16 s");
     expect(withDuration).not.toContain("上游轮次首 Token");
-    expect(rendered).not.toContain("本轮耗时");
+    expect(rendered).toContain("本轮耗时：未提供");
     expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
       modelProvider: "deepseek" }))).not.toContain("上游轮次首 Token");
     expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
@@ -747,7 +761,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("思考次数：2 次");
     expect(rendered).toContain("Token：20.12 K");
     expect(rendered).toContain("缓存命中率：75.00%");
-    expect(rendered).not.toContain("本轮耗时");
+    expect(rendered).toContain("本轮耗时：未提供");
     expect(rendered).toContain("总耗时：未提供");
     expect(rendered).not.toContain("延迟");
     expect(rendered).not.toContain("速度");

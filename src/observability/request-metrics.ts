@@ -184,6 +184,7 @@ export interface StoredThreadRequestMetricsAggregate {
 }
 
 export interface StoredThreadRequestMetricsSummary {
+  sessionTiming?: SessionExecutionTiming;
   latestExecution?: { turnId: string; durationMs: number | null } | null;
   sessionDurationMs?: number | null;
   threadId: string;
@@ -398,12 +399,19 @@ export interface TurnExecutionMetric {
 }
 
 export interface TurnExecutionStore {
+  sessionExecutionTiming(threadId: string, throughTurnId?: string): SessionExecutionTiming;
   isExecutionHistoryComplete(threadId: string): boolean;
   recordTurnExecution(threadId: string, provider: string, turn: TurnExecutionMetric): void;
   replaceThreadExecutions(threadId: string, provider: string, turns: readonly TurnExecutionMetric[]): void;
   invalidateThreadExecutions(threadId: string, clearDurations?: boolean): void;
   turnExecutionDuration(threadId: string, turnId: string): number | null;
   sessionExecutionDuration(threadId: string, throughTurnId?: string): number | null;
+}
+
+export interface SessionExecutionTiming {
+  knownDurationMs: number | null;
+  missingTurnCount: number;
+  historyComplete: boolean;
 }
 
 export interface ProviderTokenMetricQuery {

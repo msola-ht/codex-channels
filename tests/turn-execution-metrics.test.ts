@@ -30,6 +30,40 @@ const completed = (turnId: string, durationMs = 71_000) => ({
 });
 
 describe("persisted official turn execution metrics", () => {
+  it("preserves known timing across restart and exposes missing durations without inventing a total", async () => {
+    const root = mkdtempSync(join(tmpdir(), "turn-time-")); roots.push(root);
+    const path = join(root, "metrics.sqlite3");
+    let store = new SqliteModelRequestMetricsStore(path); stores.push(store);
+    store.replaceThreadExecutions("thread-1", "openai", [metric("one", 100), metric("missing", null), metric("three", 200)]);
+    store.close(); stores.pop();
+    store = new SqliteModelRequestMetricsStore(path); stores.push(store);
+    const partial = { knownDurationMs: 300, missingTurnCount: 1, historyComplete: true };
+    expect(store.sessionExecutionTiming("thread-1")).toEqual(partial);
+    expect(store.threadSummary("thread-1")).toMatchObject({ sessionDurationMs: null, sessionTiming: partial });
+    expect(store.sessionExecutionTiming("thread-1", "one")).toEqual({ knownDurationMs: 100, missingTurnCount: 0, historyComplete: true });
+    expect(store.sessionExecutionTiming("thread-1", "missing")).toEqual({ ...partial, knownDurationMs: 100 });
+    expect(store.sessionExecutionTiming("thread-1", "absent")).toEqual({ knownDurationMs: null, missingTurnCount: 0, historyComplete: false });
+    const enricher = new CompletionOutputEnricher(pino({ enabled: false }), undefined, {
+      executionTiming: (threadId, turnId) => ({ durationMs: store.turnExecutionDuration(threadId, turnId),
+        sessionDurationMs: store.sessionExecutionDuration(threadId, turnId), sessionTiming: store.sessionExecutionTiming(threadId, turnId) }),
+    });
+    await expect(enricher.enrich({ type: "turn.completed", target: { surface: "feishu", accountId: "a", conversationId: "c" },
+      threadId: "thread-1", turnId: "missing", status: "interrupted" })).resolves.toMatchObject({
+      sessionDurationMs: undefined, sessionTiming: { ...partial, knownDurationMs: 100 },
+    });
+    store.invalidateThreadExecutions("thread-1", false);
+    expect(store.sessionExecutionTiming("thread-1")).toEqual({ ...partial, historyComplete: false });
+    store.replaceThreadExecutions("thread-1", "openai", [metric("one", 100), metric("missing", 50), metric("three", 200)]);
+    expect(store.sessionExecutionDuration("thread-1")).toBe(350);
+    expect(store.sessionExecutionTiming("thread-1")).toEqual({ knownDurationMs: 350, missingTurnCount: 0, historyComplete: true });
+    store.invalidateThreadExecutions("thread-1");
+    expect(store.sessionExecutionTiming("thread-1")).toEqual({ knownDurationMs: null, missingTurnCount: 0, historyComplete: false });
+    store.replaceThreadExecutions("thread-1", "openai", [metric("missing", null)]);
+    expect(store.sessionExecutionTiming("thread-1")).toEqual({ knownDurationMs: null, missingTurnCount: 1, historyComplete: true });
+    store.recordTurnExecution("thread-1", "openai", metric("zero", 0));
+    expect(store.sessionExecutionTiming("thread-1")).toEqual({ knownDurationMs: 0, missingTurnCount: 1, historyComplete: true });
+  });
+
   it("does not invalidate committed facts or retry history when refresh notification fails", async () => {
     const store = fixture();
     const listThreadTurns = vi.fn().mockResolvedValue({ turns: [turn("one", 100)], nextCursor: null });

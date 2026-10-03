@@ -624,9 +624,7 @@ export function createTurnCompletedPresentation(
       ),
     });
   }
-  if (event.durationMs !== undefined) {
-    runFields.push({ label: "本轮耗时", value: formatElapsedDuration(event.durationMs) });
-  }
+  runFields.push({ label: "本轮耗时", value: event.durationMs === undefined ? "未提供" : formatElapsedDuration(event.durationMs) });
   if (event.taskAggregate) {
     const task = event.taskAggregate;
     const taskFields: LifecyclePresentationField[] = [
@@ -702,7 +700,7 @@ export function createTurnCompletedPresentation(
   }
   sessionFields.push({
     label: "总耗时",
-    value: event.sessionDurationMs === undefined ? "未提供" : formatElapsedDuration(event.sessionDurationMs),
+    value: formatSessionExecutionTiming(event),
   });
   const sections = [
     ...(sessionFields.length > 0
@@ -847,4 +845,17 @@ function formatResponseUsage(usage: ResponseUsageSummary | null | undefined): st
   if (!usage || usage.amount === null) return "未提供";
   if (usage.missingRequestCount > 0) return `${usage.amount}（部分，${usage.missingRequestCount} 次请求未提供）`;
   return usage.amount;
+}
+
+function formatSessionExecutionTiming(event: Extract<OutputEvent, { type: "turn.completed" }>): string {
+  const timing = event.sessionTiming;
+  if (!timing) return event.sessionDurationMs === undefined ? "未提供" : formatElapsedDuration(event.sessionDurationMs);
+  const incomplete = !timing.historyComplete || timing.missingTurnCount > 0;
+  const value = timing.knownDurationMs === null ? "未提供"
+    : `${incomplete ? "已知累计 " : ""}${formatElapsedDuration(timing.knownDurationMs)}`;
+  const notes = [
+    ...(timing.missingTurnCount > 0 ? [`${timing.missingTurnCount} 轮耗时缺失`] : []),
+    ...(!timing.historyComplete ? ["历史未补齐"] : []),
+  ];
+  return notes.length === 0 ? value : `${value}（${notes.join("；")}）`;
 }

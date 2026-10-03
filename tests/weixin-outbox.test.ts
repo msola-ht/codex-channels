@@ -22,8 +22,8 @@ const target = {
   accountId,
   conversationId: actorId,
 } as const;
-const turnCompletedText = "**本次运行 · 已完成**\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 总耗时：未提供";
-const turnStoppedText = "**本次运行 · 已停止**\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 总耗时：未提供";
+const turnCompletedText = "**本次运行 · 已完成**\n\n- 本轮耗时：未提供\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 总耗时：未提供";
+const turnStoppedText = "**本次运行 · 已停止**\n\n- 本轮耗时：未提供\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 总耗时：未提供";
 
 describe("WeixinOutbox", () => {
   it.each(["short answer", "完整回答".repeat(6_000)])("retains and confirms unphased completed text (%#)", async (text) => {
@@ -398,7 +398,7 @@ describe("WeixinOutbox", () => {
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       turnStoppedText,
       "**本次运行 · 失败**\n\n"
-        + "- 错误：受控错误\n\n"
+        + "- 错误：受控错误\n- 本轮耗时：未提供\n\n"
         + "**当前会话**\n"
         + "- Session：测试会话\n"
         + "- Session ID：thread\n- 总耗时：未提供",

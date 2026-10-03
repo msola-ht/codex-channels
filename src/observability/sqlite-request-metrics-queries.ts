@@ -2,6 +2,7 @@ import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
 import { summarizeResponseUsage } from "./response-usage-summary.js";
 import type {
   ResponseUsageSummary,
+  SessionExecutionTiming,
   ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
@@ -443,12 +444,14 @@ export class SqliteRequestMetricsQueries {
         ${compactAggregateSql}
       FROM scoped
     `).get(threadId) as unknown as TurnSummaryRow;
+    const sessionTiming = this.sessionExecutionTiming(threadId);
     return {
       threadId,
+      sessionTiming,
       latestExecution: this.reader.prepare(`SELECT turn_id AS turnId, duration_ms AS durationMs
         FROM turn_execution_metrics WHERE thread_id = ? ORDER BY ordinal DESC LIMIT 1`).get(threadId) as
         { turnId: string; durationMs: number | null } | undefined ?? null,
-      sessionDurationMs: this.sessionExecutionDuration(threadId),
+      sessionDurationMs: sessionTiming.historyComplete && sessionTiming.missingTurnCount === 0 ? sessionTiming.knownDurationMs : null,
       latestTurn: turn === undefined ? null : {
         ...toStoredTurnSummary(turn),
         durationMs: this.turnExecutionDuration(threadId, latestTurn!.turn_id),
@@ -565,17 +568,27 @@ export class SqliteRequestMetricsQueries {
   }
 
   sessionExecutionDuration(threadId: string, throughTurnId?: string): number | null {
+    const timing = this.sessionExecutionTiming(threadId, throughTurnId);
+    return timing.historyComplete && timing.missingTurnCount === 0 ? timing.knownDurationMs : null;
+  }
+
+  sessionExecutionTiming(threadId: string, throughTurnId?: string): SessionExecutionTiming {
     this.reader.requireOpen();
     validateThreadId(threadId, "Thread ID");
     if (throughTurnId !== undefined) validateThreadId(throughTurnId, "Turn ID");
     const row = this.reader.prepare(`SELECT TOTAL(duration_ms) AS duration_ms,
+      (SELECT history_complete FROM thread_execution_state WHERE thread_id = ?) AS history_complete,
       COUNT(*) AS total, COUNT(duration_ms) AS known FROM turn_execution_metrics
-      WHERE thread_id = ? AND EXISTS (SELECT 1 FROM thread_execution_state WHERE thread_id = ? AND history_complete = 1)
+      WHERE thread_id = ?
       ${throughTurnId === undefined ? "" : "AND ordinal <= (SELECT ordinal FROM turn_execution_metrics WHERE thread_id = ? AND turn_id = ?)"}`)
       .get(threadId, threadId, ...(throughTurnId === undefined ? [] : [threadId, throughTurnId])) as {
-        duration_ms: number | null; total: number; known: number;
+        duration_ms: number | null; total: number; known: number; history_complete: number | null;
       };
-    return row.total > 0 && row.total === row.known && Number.isSafeInteger(row.duration_ms) ? row.duration_ms : null;
+    return {
+      knownDurationMs: row.known > 0 && Number.isSafeInteger(row.duration_ms) ? row.duration_ms : null,
+      missingTurnCount: row.total - row.known,
+      historyComplete: row.history_complete === 1 && row.total > 0,
+    };
   }
 
   private turnResponseUsage(threadId: string, turnId: string): ResponseUsageSummary | null {

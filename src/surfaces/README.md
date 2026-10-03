@@ -147,7 +147,7 @@ Conversation，旧会话完成不能删除新会话已登记的回复目标。�
 官方主路由缺少鉴权时增加未登录提示和 `codex login` 或 `/model` 的操作建议，不显示目标地址或
 底层错误；飞书和微信仍只通知已有安全会话。完成卡片对 `unauthorized` 按 OpenAI 官方与其他
 Provider 分别生成固定凭据提示，不展示上游原文。Turn 完成在正式与调试模式都显示当前
-工作区、Session 名称和 Session ID，并在官方 `Turn.durationMs` 可用时显示本轮总耗时，把本次运行、
+工作区、Session 名称和 Session ID，并显示官方 `Turn.durationMs` 或明确的“未提供”；会话耗时缺失时保留已知累计及完整性说明，把本次运行、
 当前会话累计和账户状态依次分区；按 Turn
 聚合统计代理捕获的全部模型请求与实际产生推理输出的思考次数，并保留 Provider
 通用的 Thread Token/上下文与请求数累计指标；父 Turn 存在显式子代理时另展示递归任务合计，

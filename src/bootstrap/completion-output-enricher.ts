@@ -13,7 +13,11 @@ import type {
 const completionEnrichmentTimeoutMs = 250;
 
 export interface CompletionOutputEnricherOptions {
-  executionTiming?(threadId: string, turnId: string): { durationMs: number | null; sessionDurationMs: number | null };
+  executionTiming?(threadId: string, turnId: string): {
+    durationMs: number | null;
+    sessionDurationMs: number | null;
+    sessionTiming?: Extract<OutputEvent, { type: "turn.completed" }>["sessionTiming"];
+  };
   completionAccountStatus?(provider: string, signal: AbortSignal): Promise<CompletionAccountStatus | undefined>;
   completionTiming?(
     threadId: string,
@@ -110,6 +114,7 @@ export class CompletionOutputEnricher {
       ...(sessionAggregate === undefined ? {} : { sessionAggregate }),
       ...(execution?.durationMs == null ? {} : { durationMs: execution.durationMs }),
       sessionDurationMs: execution?.sessionDurationMs ?? undefined,
+      sessionTiming: execution?.sessionTiming,
     };
   }
 

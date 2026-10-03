@@ -199,6 +199,7 @@ export interface TurnSummary {
 }
 
 export interface ThreadRunResponse {
+  sessionTiming?: { knownDurationMs: number | null; missingTurnCount: number; historyComplete: boolean }
   latestExecution?: { turnId: string; durationMs: number | null } | null
   sessionDurationMs?: number | null
   generatedAt: string

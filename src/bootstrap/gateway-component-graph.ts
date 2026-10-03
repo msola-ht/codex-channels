@@ -949,10 +949,15 @@ export abstract class GatewayComponentGraph {
           const summary = metricsStore.threadTurnSummary(threadId, turnId);
           return mergeCompletionTiming(summary, turnId, current);
         },
-        executionTiming: (threadId, turnId) => ({
-          durationMs: metricsStore.turnExecutionDuration(threadId, turnId),
-          sessionDurationMs: metricsStore.sessionExecutionDuration(threadId, turnId),
-        }),
+        executionTiming: (threadId, turnId) => {
+          const sessionTiming = metricsStore.sessionExecutionTiming(threadId, turnId);
+          return {
+            durationMs: metricsStore.turnExecutionDuration(threadId, turnId),
+            sessionDurationMs: sessionTiming.historyComplete && sessionTiming.missingTurnCount === 0
+              ? sessionTiming.knownDurationMs : null,
+            sessionTiming,
+          };
+        },
         taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
           let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;

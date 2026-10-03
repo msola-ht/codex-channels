@@ -6,6 +6,7 @@ export {
 export type {
   TurnExecutionMetric,
   TurnExecutionStore,
+  SessionExecutionTiming,
   ModelRequestMetricSample,
   ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsAggregationQuery,

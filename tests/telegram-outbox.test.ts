@@ -14,6 +14,8 @@ const turnCompletedTitle = "<b>本次运行 · 已完成</b>";
 const turnCompletedPanel = [
   turnCompletedTitle,
   "",
+  "• <b>本轮耗时：</b>未提供",
+  "",
   "<b>当前会话</b>",
   "• <b>Session：</b>测试会话",
   "• <b>Session ID：</b>thread-1",
@@ -882,6 +884,7 @@ describe("TelegramOutbox", () => {
         "<b>本次运行 · 失败</b>",
         "",
         "• <b>错误：</b>命令执行失败，TOKEN=[已隐藏]",
+        "• <b>本轮耗时：</b>未提供",
         "",
         "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
@@ -1778,6 +1781,7 @@ describe("TelegramOutbox", () => {
         "• <b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
         "• <b>提供商：</b>OpenAI 官方",
         "• <b>最近请求缓存命中率：</b>2.07%",
+        "• <b>本轮耗时：</b>未提供",
         "",
         "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
@@ -1813,6 +1817,8 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([
       [
         turnCompletedTitle,
+        "",
+        "• <b>本轮耗时：</b>未提供",
         "",
         "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
