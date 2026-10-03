@@ -22,19 +22,17 @@ export function listRelayProviderIds(environment = process.env) {
 }
 
 /** Reuses Provider-owned parsing; never uses App Server instances or OAuth credentials. */
-export function loadConfiguredRelayProviderMaterial(provider, environment = process.env, extraModels = []) {
+export function loadConfiguredRelayProviderMaterial(provider, environment = process.env) {
   if (/^clp-[a-z0-9_-]{1,32}$/u.test(provider)) {
     const credentials = loadConfiguredManagedProviderCredentials(provider, environment);
     const catalog = readClineRelayCatalog(environment);
     if (catalog.status !== "ready") throw new Error("Relay Cline model catalog is unavailable; download it in WebUI");
     const models = catalog.catalog.models.map(model => model.id);
     return { ...credentials, models, modelInputs: Object.fromEntries(catalog.catalog.models.map(model => [model.id, clineRelayInputModalities(model)])), protocols: ["chat"],
-      extraModels: catalog.catalog.models.map(model => structuredClone(extraModels.find(saved => saved.id === model.id)
-        ?? { id: model.id, reasoning_efforts: clineRelayReasoningEfforts(model), reasoning: "passthrough" })),
+      modelCapabilities: catalog.catalog.models.map(model => ({ id: model.id, reasoning_efforts: clineRelayReasoningEfforts(model) })),
       paths: [...credentials.paths, clineRelayCatalogPath(environment)],
-      revision: createHash("sha256").update(credentials.revision).update(JSON.stringify(catalog.catalog.models)).update(JSON.stringify(extraModels)).digest("hex") };
+      revision: createHash("sha256").update(credentials.revision).update(JSON.stringify(catalog.catalog.models)).digest("hex") };
   }
-  if (extraModels.length) throw new Error("Relay model policies require CLP");
   return loadBaseRelayProviderMaterial(provider, environment);
 }
 

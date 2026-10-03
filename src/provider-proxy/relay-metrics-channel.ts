@@ -85,7 +85,7 @@ function validSample(value: unknown, provider: unknown, requestId: unknown): val
     for (const key of ["requestModel", "responseModel", "errorCode"]) {
       const text = sample[key];
       if (text === undefined && key !== "requestModel") continue;
-      if (typeof text !== "string" || text.length < 1 || text.length > 200
+      if (typeof text !== "string" || text.length < 1 || text.length > (key === "requestModel" ? 265 : 200)
         || [...text].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
         || key === "errorCode" && !/^[a-zA-Z0-9._:/-]+$/u.test(text)) return false;
     }

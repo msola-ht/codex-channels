@@ -645,7 +645,7 @@ async function handleRequests(environment, url, response) {
       const callers = new Map(relay.callers.map(caller => [caller.caller_id, caller]));
       for (const record of records) {
         const caller = callers.get(record.callerId);
-        if (record.source === "relay" && caller?.key_id === record.keyId && caller.provider === record.provider && caller.display_name) {
+        if (record.source === "relay" && caller?.key_id === record.keyId && caller.display_name) {
           record.callerDisplayName = caller.display_name;
         }
       }

@@ -65,7 +65,7 @@ export async function startModelRelayService(configPath, environment = process.e
     if (next.debug.model_traffic_dump) void dump.prepare();
     const policyChanged = !snapshot || snapshot.digest !== next.digest;
     snapshot = next;
-    if (next.config.enabled && next.config.accounts.some(account => account.provider.startsWith("clp-"))) catalogBootstrap.ensure();
+    if (next.config.enabled && next.config.callers.some(caller => caller.models.some(id => id.startsWith("clp-")))) catalogBootstrap.ensure();
     relay ??= new ModelRelayServer({ queueChanged: () => control.changed(), capture: async (provider, signal, protocol) => {
       if (!snapshot?.debug.model_traffic_dump) return undefined;
       await dump.prepare(signal);
@@ -97,7 +97,7 @@ export async function startModelRelayService(configPath, environment = process.e
         }
         // URL keeps IPv6 brackets; Node's HTTP hostname option requires the bare address.
         const host = target.hostname.startsWith("[") ? target.hostname.slice(1, -1) : target.hostname;
-        return { models: material.models, extraModels: material.extraModels, protocols: material.protocols, target: { host, port: target.port ? Number(target.port) : target.protocol === "http:" ? 80 : 443,
+        return { models: material.models, modelCapabilities: material.modelCapabilities, protocols: material.protocols, target: { host, port: target.port ? Number(target.port) : target.protocol === "http:" ? 80 : 443,
           protocol: target.protocol === "http:" ? "http" : "https", basePath: target.pathname, authorization: `Bearer ${material.apiKey}`, ...(agent ? { agent } : {}) },
           recheck: () => {
             signal.throwIfAborted();

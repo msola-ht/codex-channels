@@ -601,7 +601,7 @@ npm test
 `codexc relay` 管理独立 Relay 的调用方和访问密钥；`status`、`callers` 只读，
 `issue` 签发、`rotate` 轮换、`disable --caller ID` 撤销。新秘密只在保存后显示一次。
 `enable`/`disable` 保存服务开关并确认当前进程生效；进程未运行时明确显示仅保存，
-通过 `codexc service start relay` 启动；停止、重启、状态和日志也使用 `relay` 目标，日常命令统一使用新名称；仅保留 `codexc service start model-relay` 作为旧更新器的显式升级启动入口，执行时输出迁移提示，其他操作拒绝旧名称。内部系统服务名称保持不变，无需为名称变更重新安装服务。首次启用前先完成指标库显式升级。
+通过 `codexc service start relay` 启动；停止、重启、状态和日志也使用 `relay` 目标，不接受旧目标名称 `model-relay`。内部系统服务名称保持不变，无需为名称变更重新安装服务。首次启用前先完成指标库显式升级。
 
 Relay 默认禁用、回环监听；可显式使用 IPv4 局域网监听，跨不可信网络使用自己管理的加密隧道。提供原生 Chat Completions 与 Responses JSON/SSE 和
 受限模型列表，不提供 App Server 的 Agent、Thread、Turn、工具执行或文件访问。
@@ -612,8 +612,6 @@ Responses 只提供同步无状态创建；`store` 可省略或传布尔值，�
 `background` 可省略或传布尔值，传入时统一设为 `false`，继续在当前请求内交付结果，不因 `true` 报错；省略时不补字段。
 官方 DS 的 `previous_response_id`、`conversation` 原样转发，由上游按其无状态合同忽略；客户端仍需在 `input` 中携带所需完整历史，引用不会恢复上下文。其他 Responses 提供商仍拒绝服务端会话引用：多个 Relay Key 可共享上游账户，当前没有响应/会话归属校验，不能通过引用读取共享账户历史。Relay 不提供响应管理端点。
 普通参数、工具声明和远程图片交由上游处理；Chat 保留原始响应字段与工具增量，客户端须等待有效终态后才执行工具。
-回退仅支持 CLP 的旧程序前，停止 Gateway、Relay 和 WebUI，使用 `codexc relay rollback-providers --provider ID`（可重复）明确列出所有非 CLP Relay 账户；
-命令备份后移除这些引用及其 Key，保持提供商自身配置和剩余凭据。重新接入须重新签发，不恢复备份中的旧秘密。
 完整双协议、提供商接入与升级回滚合同见[转发设计与边界](provider-api-relay-development.md)。
 局域网交互设置：运行 `codexc relay listen`，或进入 `codexc config` → 模型转发监听，选择关闭、仅本机、局域网（0.0.0.0）或指定内网 IP。确认后自动备份、原子保存并向运行中的 Relay 确认生效，保留 Key 和现有端口。若服务未运行，会提示启动命令，不自动安装或启动。配置被其他操作修改时拒绝覆盖，请重新进入菜单。
 
@@ -626,49 +624,36 @@ Responses 只提供同步无状态创建；`store` 可省略或传布尔值，�
 客户端可携带当前 Key 调用 `GET /v1/models` 查看获准且仍在提供商目录中的模型。WebUI 请求页面来源显示“Codex / 转发”，可按来源与真实调用方筛选；接收确认不代表指标已落盘，交付完成不证明客户端已收到。
 请求列表优先显示 Key 的当前中文用途名称，长名称省略显示，悬停或聚焦可查看完整名称与调用方 ID；未命名或已移除的调用方仍显示原 ID。名称仅用于展示，筛选和历史指标继续使用稳定 ID，不回写历史记录。
 
-WebUI 侧栏「模型转发」提供独立 Key 管理页。每个用途对应一把 Key，名称支持中文，内部调用方 ID 在新建时自动生成并保持不变。先选择已配置的提供商
-账户，再选择「跟随客户端」或「强制关闭（支持的模型）」。多把 Key 可以使用同一账户，策略互不影响。
+WebUI 侧栏「模型转发」提供独立 Key 管理页。每个用途对应一把 Key，名称支持中文，内部调用方 ID 在新建时自动生成并保持不变。按提供商分组勾选一个或多个模型，可跨多个提供商，再选择「跟随客户端」或「强制关闭（支持的模型）」。多把 Key 可以使用同一账户，策略互不影响。
 Key 列表显示原生 Chat/Responses 协议；双协议账户同时显示两者。模型选择中的文本、图片、音频标签来自现有目录，未声明时不推断能力；标签不改变上游参数处理。
 账户凭据在 WebUI「模型管理 → 账户与凭据」维护，自定义提供商的地址与凭据在「模型管理 → 提供商」编辑；Relay 页不复制上游秘密。新建、编辑、轮换、停用和删除使用居中弹窗，先预览再确认，
 完整新 Key 只显示一次，关闭后无法再次查看；响应丢失时先刷新确认记录，不能自动重复签发。
 若返回 `cleanupStatus: "failed"` 或页面提示管理锁清理失败，修改已经保存；先保存新 Key，再检查数据目录权限和磁盘，不要重复签发。读取失败可直接刷新；编辑时错误及刷新入口显示在弹窗内。刷新保留草稿，但检测到版本变化会禁止保存，须明确选择“重新加载并丢弃草稿”再编辑、预览，避免覆盖其他端修改。上游能力暂不可读取时保留现有策略，可仅改名或切换到可用提供商；不会把未知状态当作模型不支持。
 「查看调用」进入现有请求列表并精确筛选用途。停用后重新使用须轮换生成新秘密。
 
-旧版 `model_relay.callers[].models` 必须显式升级，新程序拒绝该字段，不自动兼容。先停止 Gateway、Relay 和 WebUI，使用新版本运行 `codexc relay upgrade-models`；源码入口是 `node bin/codexc.mjs relay upgrade-models`。此命令支持上一版每 Key 模型格式，将同提供商全部 Key（含停用 Key）的模型并集合并为 `model_relay.accounts[].models`，移除 Key 的模型字段。此合并可能扩大部分 Key 的模型范围；凭据、代次、启停状态和思考策略保持不变。升级前创建并核验私有 `.relay-models-*.bak` 备份，目标结构验证通过后原子保存，失败保留原配置，重复执行不写文件；不修改数据库、不启停服务。混合新旧格式或超出每提供商 256 模型上限时明确拒绝。
-
-升级后核对 `codexc relay providers` 和 `codexc relay callers`，确认模型范围再启动新版本。需要回滚时先停止相关服务并保留升级后配置；只有升级后没有任何 Key 创建、删除、轮换或权限修改时才可恢复已核验的升级前备份并运行旧版本。否则不能覆盖整份旧配置，以免恢复撤销过的凭据，需按当前凭据手动整理旧版模型授权。没有旧 Key 的新配置无需升级，各提供商模型默认全部关闭。
+模型权限只保存在 `model_relay.callers[].models`，每把 Key 必须选择 1–256 个唯一调用 ID。提供商模型目录只读，不保存全局启用列表或思考策略；目录新增模型不会自动扩大任何 Key 的权限。旧 Relay 字段与升级、回退命令均不受支持，不做自动转换。
 
 CLI 使用同一管理逻辑，例如：
 
 ```bash
 codexc relay providers
-codexc relay models --provider clp-main --model cline-pass/deepseek-v4.1-flash
-codexc relay issue --caller translation --key translation-key --provider clp-main --reasoning off --name "沉浸式翻译"
+codexc relay issue --caller translation --key translation-key --model clp-main/deepseek-v4.1-flash --reasoning off --name "沉浸式翻译"
 codexc relay edit --caller translation --reasoning passthrough
 ```
 
 `issue` / `edit` 可通过 `--name "中文名称"` 设置 1–64 字符的用途名称，不含控制字符或首尾空白。名称可重复、可修改，身份仍以 caller_id 区分；改名不会取消请求或更改历史指标。旧记录未设名称时显示调用方 ID。
 
-提供商统一保存启用模型列表；所有关联 Key 使用同一列表，Key 创建和编辑仅选择提供商，不接受 `--model`。使用 `codexc relay models --provider ID --model ID ...` 替换提供商的启用列表；省略全部 `--model` 则关闭所有模型。`edit --provider ID` 更换提供商，API Key、调用方 ID 和凭据代次不变。WebUI 切换提供商时将思考策略重置为跟随客户端；CLI 未指定 `--reasoning` 则保留原策略；关闭思考仅对新提供商明确支持的模型生效。
+`issue` 使用可重复的 `--model 提供商/模型ID` 选择模型；`edit --model ...` 替换该 Key 的完整授权列表，省略时保留原范围。调用 ID 使用本项目提供商前缀，CLP 对外去掉上游的 `cline-pass/`：例如 `clp-main/deepseek-v4.1-flash`，出站精确恢复目录中的 `cline-pass/deepseek-v4.1-flash`。不接受无提供商前缀的名称、不猜测上游 ID；映射重名时拒绝调用。Key 可以同时授权 Chat 和 Responses 提供商，请使用各自支持的原生端点。
 
-`codexc relay delete --caller ID` 删除调用方并撤销 Key，取消其旧请求；历史指标和转储不删除。WebUI 的“删除”先预览再确认。改绑或删除会保留仅用于旧调用指标结算的历史身份摘要，不含秘密，不能用于请求鉴权；删除后新建必须使用新的 callerId 和 keyId。新建、编辑和删除只清理无人引用且没有模型授权或思考覆盖的空 Relay 账户项，保留提供商模型设置，不删除上游账户或凭据。摘要最多 4096 条，同时受配置文件 1 MiB 限制；达到上限时拒绝整次操作，不静默清除历史摘要。
+`codexc relay delete --caller ID` 删除调用方并撤销 Key，取消其旧请求；历史指标和转储不删除。WebUI 的“删除”先预览再确认。改绑或删除会保留仅用于旧调用指标结算的历史身份摘要，不含秘密，不能用于请求鉴权；删除后新建必须使用新的 callerId 和 keyId。不删除上游账户或凭据。摘要最多 4096 条，同时受配置文件 1 MiB 限制；达到上限时拒绝整次操作，不静默清除历史摘要。
 
-新增可选 `model_relay.retired_callers` 不要求迁移现有配置。首次改绑或删除前，应更新并重启 Gateway、Relay 和 WebUI，避免旧进程不识别新字段。回退旧程序前先等待指标收敛并停止上述进程，使用新版本执行 `codexc relay rollback-retired`；该命令备份后只移除历史摘要，保留当前凭据、提供商绑定和删除结果，之后不能保证补收旧调用指标。不要恢复整份历史配置以复活旧密钥。
-CLP 转发使用独立于 Codex 的 Cline 模型目录。在 WebUI「模型转发 → 提供商模型」首次使用自动下载缺失的模型文件，之后可手动更新；点击提供商行的“模型列表”打开弹窗，统一启用／关闭模型及设置思考策略；所有关联 Key 同步生效，新目录模型默认关闭。已有上游账户密钥继续复用，无须申请新 Key。目录补齐前 CLP 转发暂不可用；自动下载失败可手动重试，不回退 Codex 模型文件。见[转发模型目录与设置](provider-api-relay-development.md#clp-转发模型目录与设置)。
+CLP 转发使用独立于 Codex 的 Cline 模型目录。在 WebUI「模型转发 → 提供商模型」首次使用自动下载缺失的模型文件，之后可手动更新；点击提供商行的“模型列表”打开弹窗，只读查看调用模型 ID、目录声明的输入格式及协议；模型授权和思考策略在 Key 编辑弹窗中设置。已有上游账户密钥继续复用，无须申请新 Key。目录补齐前 CLP 转发暂不可用；自动下载失败可手动重试，不回退 Codex 模型文件。见[转发模型目录与设置](provider-api-relay-development.md#clp-转发模型目录与设置)。
 
-强制关闭支持目录或已保存覆盖显式声明 `none` 的 CLP 模型、CLP 的精确模型 `cline-pass/deepseek-v4.1-flash`，以及 DS 的 `deepseek-flash` / `deepseek-v4-pro`，只对当前请求中明确支持的模型生效。未声明或不支持关闭的模型继续使用模型覆盖设置或客户端原参数，仍可能产生思考内容；不会阻止模型启用或 Key 保存。
+强制关闭支持目录显式声明 `none` 的 CLP 模型、CLP 的精确模型 `cline-pass/deepseek-v4.1-flash`，以及 DS 的 `deepseek-flash` / `deepseek-v4-pro`，只对当前请求中明确支持的模型生效。未声明或不支持关闭的模型继续使用客户端原参数，仍可能产生思考内容；不会阻止 Key 保存。
 关闭策略覆盖顶层思考控制参数，通用 CLP Chat 实际出站为 `reasoning.enabled=false`；CLP 精确模型 `cline-pass/deepseek-v4.1-flash` 保留已验证的 `reasoning.effort=none`，DS Responses 使用 `reasoning.effort=none`，DS Chat 使用 `reasoning_effort=none`；不改历史消息或隐藏上游思考响应。
 嵌套 `extra_body` / `extraBody` 的思考控制字段与关闭策略冲突时明确拒绝；跟随客户端不增加此限制。
 Chat 和 Responses 的冲突错误均定位到完整字段路径，例如 `extra_body.reasoning`。
-更换提供商或 Key 策略会取消该 Key 的旧请求；修改提供商模型授权会撤销其关联 Key 的旧请求。配置保存与运行态应用分开报告，不会自动启动服务。
-
-新增可选字段 `model_relay.callers[].reasoning` 和 `display_name` 不要求旧配置升级；首次使用前应先停止旧 Gateway、
-Relay、WebUI（包括前台实例），更新全部程序后再启动，避免旧程序读取新字段失败。
-回退旧程序前停止这些进程，用新版本执行 `codexc relay rollback-reasoning`，备份后仅移除策略字段，
-保留当前身份、哈希、代次和停用状态；此操作会使强制关闭失效。命令检查 Gateway 所有权和 Relay 控制端点，
-回退到不支持中文名称的版本前，用新版本执行 `codexc relay rollback-names`，仅移除 `display_name` 并保留当前凭据；若目标版本也不支持思考策略，再执行 `rollback-reasoning`。
-WebUI 及其他手工写入者须自行保持停止。失败保留原配置，不应恢复整份历史配置以免复活旧凭据。
-
+修改 Key 模型授权或思考策略会取消该 Key 的旧请求。配置保存与运行态应用分开报告，不会自动启动服务。
 
 Relay 的 Chat 请求保留模型参数、消息内容和扩展字段，由所选上游判断是否支持；远程图片 URL
 也由上游处理，Relay 不主动抓取。仅本地模型授权、JSON 对象/消息结构、stream 布尔、单选择
@@ -714,7 +699,7 @@ Chat 的长度限制、内容过滤、`insufficient_system_resource` 和 `aborte
 Chat 与 Responses 的非流式首内容耗时在整包解析校验后观测，不是上游实际生成首 Token 的时间；空内容不填此值。
 
 Relay 返回 403 `model_not_allowed` 时，请使用当前 Key 的 `GET /v1/models` 返回的精确模型 ID，
-包括模型前缀。模型必须同时位于提供商启用列表和 Provider 的有效模型目录中；此类拒绝发生在出站前，
+包括提供商前缀。模型必须同时位于 Key 授权列表和 Provider 的有效模型目录中；此类拒绝发生在出站前，
 不会新增上游调用指标，也不表示 CLP 返回了 403。
 
 Relay 的 JSON 非流式响应同时接受标准 Chat 对象和 CLP 的 `{success:true,data:...}` 包装；
@@ -737,14 +722,7 @@ Chat 与 Responses 请求在全局并发或令牌不足时排队：上传和等�
 `codexc relay status` 返回执行数 `active` 及 `queue.pending`（上传与等待）、`queue.waiting`
 （已验证正文的等待）、`queue.bytes`（正文预留预算），不包含请求正文。WebUI 左侧“模型转发”下的“请求队列”可查看实时阶段与等待情况，详见[WebUI](webui.md)。
 
-旧配置中账户或 Key 的 `max_concurrency`、`requests_per_minute`、`burst` 不再受支持，
-新程序明确拒绝，不会静默忽略。切换新版本前使用新版本入口执行 `codexc relay upgrade-limits`
-（未安装时可在已构建的新源码目录执行 `node bin/codexc.mjs relay upgrade-limits`）。
-若仍含 Key 模型列表，先停止 Gateway、Relay 和 WebUI；命令会检查 Gateway 和 Relay 已停止。该命令校验配置、创建并核验私有备份，再原子移除上述字段；同时按并集合并到提供商（可能扩大部分 Key 范围）；保留全局值、所有身份及凭据代次，
-不修改数据库、不重启服务。重复执行不写文件。涉及模型授权升级后，使用新版本启动 Gateway、Relay 和 WebUI；仅移除限流字段则按正常流程更新并重启 Relay。
-旧进程与新控制 IPC 不兼容，升级期间的状态可能显示 `unconfirmed`，不能据此认定撤销已生效。
-回滚旧程序可让其使用缺省的账户/Key 限额；需要恢复原限额时只从备份核对这三个数值字段，
-不要覆盖当前凭据或禁用记录。实际数据升级操作需由使用者明确执行。
+Relay 只支持当前严格配置，不接受旧账户模型列表、Key 单提供商字段、分层限流或独立采集字段。控制 IPC 为 v5，更新后需重启相关进程；新旧进程混用时确认结果为 `unconfirmed`，不能据此认定撤销已生效。配置备份不得覆盖当前凭据和撤销记录。
 
 ### 渠道文本附件
 

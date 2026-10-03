@@ -24,7 +24,7 @@ export function TrafficModel({ request, responses, fallback, upstream, provider:
   const rawName = request ?? (names.join(separator) || fallback) ?? null
   const name = formatModelName(rawName, source)
   const provider = typeof upstream === "string" && upstream.trim() !== "" ? upstream.trim() : null
-  const unexpectedProvider = isClinePass && request === "cline-pass/deepseek-v4.1-flash"
+  const unexpectedProvider = isClinePass && (request === "cline-pass/deepseek-v4.1-flash" || request === `${source}/deepseek-v4.1-flash`)
     && provider !== null && provider !== "deepseek"
   if (names.length === 0 && provider === null) return <TruncatedText text={name} className="max-w-64" />
   const comparisonHint = isClinePass

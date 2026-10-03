@@ -1,3 +1,4 @@
+import { relayModelId } from "../runtime/model-relay-model-id.mjs";
 import * as catalogUpdate from "../runtime/cline-relay-catalog-update.mjs";
 import * as providerDefinitions from "../runtime/model-provider-definitions.mjs";
 import { clineRelayCatalogPath, saveClineRelayCatalog } from "../scripts/cline-relay-catalog.mjs";
@@ -8,9 +9,9 @@ import { Worker } from "node:worker_threads";
 import { syncBuiltinESMExports } from "node:module";
 import { readRelayQueue, readRelayManagement, manageModelRelay as sharedManage } from "../scripts/model-relay-management.mjs";
 import { GatewayOwner } from "../runtime/gateway-owner.mjs";
-import { upgradeTrafficCapture, parseTrafficUpgradeArgs } from "../scripts/traffic-upgrade.mjs";
+import { upgradeTrafficCapture } from "../scripts/traffic-upgrade.mjs";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { createServer as createHttpServer, globalAgent } from "node:http";
 import { tmpdir } from "node:os";
@@ -24,7 +25,6 @@ import * as relayControl from "../runtime/model-relay-control.mjs";
 import { ModelRelayControl, queryModelRelayControl } from "../runtime/model-relay-control.mjs";
 import { manageModelRelay, parseModelRelayCommand, runModelRelayCommand } from "../scripts/model-relay-command.mjs";
 import { applyClinePassConfiguration, clinePassSetupPaths } from "../scripts/cline-pass-account-management.mjs";
-import * as privateFile from "../runtime/private-file.mjs";
 import * as gatewayConfig from "../runtime/gateway-config.mjs";
 import { PrivateIpcServer, createPrivateIpcConnection } from "../runtime/private-ipc.mjs";
 import { once } from "node:events";
@@ -65,7 +65,6 @@ async function fixture() {
   await applyClinePassConfiguration({ accountId: "test", apiKey: "sk_fixture-key" }, { environment });
   saveClineRelayCatalog({ version: 1, commit: "a".repeat(40), downloadedAt: 1,
     models: [{ id: "cline-pass/deepseek-v4.1-flash", reasoningOptions: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }] }] }, environment);
-  await manageModelRelay({ command: "models", provider: "clp-test", enabledModels: ["cline-pass/deepseek-v4.1-flash"] }, environment);
   return { configPath, environment };
 }
 
@@ -77,7 +76,7 @@ it("uses the configured proxy concurrency and republishes only changed policy", 
   cleanups.push(async () => { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); });
   const up = upstream.address(); if (!up || typeof up === "string") throw new Error("fixture");
   writePrivateFileAtomicSync(join(f.environment.CODEX_HOME, ".env"), `HTTPS_PROXY=http://127.0.0.1:${up.port}\nNO_PROXY=\n`);
-  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "batch", "--key", "batch", "--provider", "clp-test"]), f.environment);
+  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "batch", "--key", "batch", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment);
   const probe = createServer(); await new Promise<void>(resolve => probe.listen(0, "127.0.0.1", resolve));
   const address = probe.address(); if (!address || typeof address === "string") throw new Error("fixture");
   await new Promise<void>(resolve => probe.close(() => resolve()));
@@ -95,7 +94,7 @@ it("uses the configured proxy concurrency and republishes only changed policy", 
     held.length = 0;
     const pending = Array.from({ length: count }, () => fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, {
       method: "POST", headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" },
-      body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }] }),
+      body: JSON.stringify({ model: "clp-test/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }] }),
     }).then(async response => { expect(response.status).toBe(200); await response.text(); }));
     await vi.waitFor(() => expect(held).toHaveLength(count), { timeout: 5000 });
     for (const response of held) response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
@@ -136,10 +135,9 @@ it.each(["127.0.0.1", "[::1]"])("uses registered custom Responses material at %s
   finishResponsesModelCatalogWrite(catalog);
   writeCustomPrimaryProviderSwitchingProfile({ provider, model: "fixture/model", baseUrl: `http://${host}:${up.port}/v1`,
     apiKey: "fixture-custom-secret", catalogSource: { kind: "custom", reasoningEffort: null } }, f.environment);
-  await manageModelRelay({ command: "models", provider, enabledModels: ["fixture/model"] }, f.environment);
   expect(loadConfiguredRelayProviderMaterial(provider, f.environment)).toMatchObject({ protocols: ["responses"], models: ["fixture/model"], modelInputs: { "fixture/model": ["text", "image"] } });
   expect(readRelayManagement(f.environment).providers).toEqual(expect.arrayContaining([expect.objectContaining({ id: provider, protocols: ["responses"], available: true })]));
-  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "custom", "--key", "custom", "--provider", provider, "--reasoning", "off"]), f.environment);
+  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "custom", "--key", "custom", "--model", `${provider}/fixture/model`, "--reasoning", "off"]), f.environment);
   expect(readRelayManagement(f.environment).callers.find(caller => caller.caller_id === "custom")?.reasoning).toBe("off");
   const probe = createServer(); await new Promise<void>(resolve => probe.listen(0, "127.0.0.1", resolve));
   const address = probe.address(); if (!address || typeof address === "string") throw new Error("fixture");
@@ -153,7 +151,7 @@ it.each(["127.0.0.1", "[::1]"])("uses registered custom Responses material at %s
     authorize: createRelayMetricAuthorization(f.configPath, f.environment) });
   await receiver.apply(true); cleanups.push(() => receiver.close());
   const service = await startModelRelayService(f.configPath, f.environment); cleanups.push(() => service.close());
-  const request = () => fetch(`http://127.0.0.1:${address.port}/v1/responses`, { method: "POST", headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" }, body: JSON.stringify({ model: "fixture/model", store: true, background: true,
+  const request = () => fetch(`http://127.0.0.1:${address.port}/v1/responses`, { method: "POST", headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" }, body: JSON.stringify({ model: `${provider}/fixture/model`, store: true, background: true,
     input: Array.from({ length: 300 }, () => ({ role: "user", content: "fixture" })) }) });
   expect(await (await request()).json()).toMatchObject({ id: "resp_fixture", status: "completed" });
   await vi.waitFor(() => expect(store.count()).toBe(1));
@@ -162,24 +160,11 @@ it.each(["127.0.0.1", "[::1]"])("uses registered custom Responses material at %s
   const authorize = createRelayMetricAuthorization(f.configPath, f.environment);
   try { expect(await authorize({ provider, callerId: "custom", keyId: "custom", credentialGeneration: 1,
     source: "relay", threadId: null, turnId: null, relayRequestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98",
-    requestModel: "fixture/model", responseFormat: "json", status: "completed", deliveryStatus: "finished",
+    requestModel: `${provider}/fixture/model`, responseFormat: "json", status: "completed", deliveryStatus: "finished",
     requestStartedAtMs: 1, responseCompletedAtMs: 2, totalDurationMs: 1 })).toBeUndefined(); }
   finally { await authorize.close(); }
-  const before = readFileSync(f.configPath, "utf8");
-  await expect(manageModelRelay(parseModelRelayCommand(["rollback-providers", "--provider", provider]), f.environment)).rejects.toThrow("停止");
-  expect(readFileSync(f.configPath, "utf8")).toBe(before);
-  await manageModelRelay(parseModelRelayCommand(["disable", "--caller", "custom"]), f.environment);
-  expect((await request()).status).toBe(401);
   await service.close();
-  // Disabled identities may outlive their account reference; rollback must not strand them.
-  const orphaned = parse(readFileSync(f.configPath, "utf8"));
-  Object.assign(orphaned.model_relay!, { accounts: [] });
-  writePrivateFileAtomicSync(f.configPath, stringify(orphaned));
-  const current = readFileSync(f.configPath, "utf8");
-  const result = await manageModelRelay(parseModelRelayCommand(["rollback-providers", "--provider", provider]), f.environment);
-  expect(readFileSync(String(result.backupPath), "utf8")).toBe(current);
-  expect(gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay?.callers).toEqual([]);
-  expect(loadConfiguredRelayProviderMaterial(provider, f.environment).apiKey).toBe("fixture-custom-secret");
+
 });
 
 it("reads an independent custom primary API credential but never substitutes an OAuth login", async () => {
@@ -191,25 +176,24 @@ it("reads an independent custom primary API credential but never substitutes an 
     model_providers: { [provider]: { name: "Fixture", base_url: "https://example.test/v1", wire_api: "responses", experimental_bearer_token: "fixture-secret" } } };
   const path = join(f.environment.CODEX_HOME, "config.toml");
   writePrivateFileAtomicSync(path, stringify(config));
-  await manageModelRelay({ command: "models", provider, enabledModels: ["fixture/model"] }, f.environment);
   expect(loadConfiguredRelayProviderMaterial(provider, f.environment)).toMatchObject({ apiKey: "fixture-secret", protocols: ["responses"] });
   writePrivateFileAtomicSync(path, stringify({ ...config, model_providers: { [provider]: { ...config.model_providers[provider], requires_openai_auth: true } } }));
   expect(() => loadConfiguredRelayProviderMaterial(provider, f.environment)).toThrow("independent API credentials");
 });
 it("issues and rotates secrets once, preserves tombstones and configuration backups", async () => {
   const f = await fixture();
-  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]), f.environment);
+  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment);
   expect(issued.activation).toBe("saved_not_running");
   const token = String(issued.key);
   const content = readFileSync(f.configPath, "utf8");
   const saved = gatewayConfig.validateGatewayConfigDocument(gatewayConfig.parseGatewayConfig(content)).model_relay;
   const defaultLimits = { max_concurrency: 10, requests_per_minute: 0, burst: 10 };
   expect(saved).toMatchObject(defaultLimits);
-  expect(saved?.accounts[0]).toEqual({ provider: "clp-test", models: ["cline-pass/deepseek-v4.1-flash"] });
+  expect(saved).not.toHaveProperty("accounts");
   expect(saved?.callers[0]).not.toHaveProperty("max_concurrency");
   expect(content).not.toContain(token);
   expect(content).toContain(createHash("sha256").update(Buffer.from(token.split(".")[2]!, "base64url")).digest("hex"));
-  expect(gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(String(issued.backupPath), "utf8"))).model_relay?.callers).toEqual([]);
+  expect(gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(String(issued.backupPath), "utf8"))).model_relay?.callers ?? []).toEqual([]);
   const failedWrite = vi.spyOn(gatewayConfig, "writeGatewayConfig").mockImplementation(() => { throw new Error("fixture write failure"); });
   try {
     await expect(manageModelRelay(parseModelRelayCommand(["rotate", "--caller", "client"]), f.environment)).rejects.toThrow("fixture write failure");
@@ -221,14 +205,14 @@ it("issues and rotates secrets once, preserves tombstones and configuration back
   const callers = await manageModelRelay(parseModelRelayCommand(["callers"]), f.environment);
   expect(callers).toMatchObject({ callers: [{ caller_id: "client", key_id: "key", credential_generation: 2, enabled: false }] });
   expect(JSON.stringify(callers)).not.toContain("secret");
-  await expect(manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "other", "--provider", "clp-test"]), f.environment)).rejects.toThrow("身份已存在");
+  await expect(manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "other", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment)).rejects.toThrow("身份已存在");
 });
 it("owns a private control endpoint; enables, disables, fails closed and recovers without an App Server", async () => {
   const f = await fixture();
   const probe = createServer(); await new Promise<void>(resolve => probe.listen(0, "127.0.0.1", resolve));
   const address = probe.address(); if (!address || typeof address === "string") throw new Error("fixture");
   await new Promise<void>(resolve => probe.close(() => resolve()));
-  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]), f.environment);
+  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment);
   const document = parse(readFileSync(f.configPath, "utf8"));
   Object.assign(document.model_relay!, { port: address.port }); writePrivateFileAtomicSync(f.configPath, stringify(document));
   const service = await startModelRelayService(f.configPath, f.environment).catch((cause: unknown) => { throw new Error("initial service startup failed", { cause }); }); cleanups.push(() => service.close());
@@ -238,12 +222,12 @@ it("owns a private control endpoint; enables, disables, fails closed and recover
   malformed.on("error", () => {}); await once(malformed, "connect");
   malformed.write('{"version":1,"operation":"status","requestId":{"toString":null}}\n');
   await once(malformed, "close");
-  expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ version: 4, configurationValid: true, queue: { pending: 0, waiting: 0, bytes: 0 } });
+  expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ version: 5, configurationValid: true, queue: { pending: 0, waiting: 0, bytes: 0 } });
   await expect(startModelRelayService(f.configPath, f.environment)).rejects.toThrow();
   expect(await manageModelRelay(parseModelRelayCommand(["enable"]), f.environment)).toMatchObject({ activation: "saved_and_applied" });
   expect(await readRelayQueue(f.environment)).toMatchObject({ configurationValid: true, enabled: true, listening: true });
   const models = await fetch(`http://127.0.0.1:${address.port}/v1/models`, { headers: { authorization: `Bearer ${String(issued.key)}` } });
-  expect(models.status).toBe(200); expect(await models.json()).toMatchObject({ data: [{ id: "cline-pass/deepseek-v4.1-flash" }] });
+  expect(models.status).toBe(200); expect(await models.json()).toMatchObject({ data: [{ id: "clp-test/deepseek-v4.1-flash" }] });
   const rebound = parse(readFileSync(f.configPath, "utf8"));
   expect(await manageModelRelay({ command: "listen", host: "0.0.0.0", enabled: true, models: [] }, f.environment)).toMatchObject({ activation: "saved_and_applied" });
   Object.assign(rebound.model_relay!, { host: "0.0.0.0" });
@@ -278,16 +262,17 @@ it("owns a private control endpoint; enables, disables, fails closed and recover
 it("accepts help only for exact public paths and rejects unknown options", async () => {
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   try {
-    await runModelRelayCommand(["upgrade-limits", "-h"]);
-    await runModelRelayCommand(["upgrade-limits", "--help"]);
-    for (const command of ["listen", "status", "providers", "issue", "callers", "rotate", "delete", "disable", "enable", "edit", "rollback-reasoning", "rollback-names", "rollback-retired", "upgrade-limits", "upgrade-models", "models"]) for (const flag of ["-h", "--help"]) await runModelRelayCommand([command, flag]);
-    expect(log).toHaveBeenCalledTimes(34);
+    for (const command of ["listen", "status", "providers", "issue", "callers", "rotate", "delete", "disable", "enable", "edit"]) for (const flag of ["-h", "--help"]) await runModelRelayCommand([command, flag]);
+    expect(log).toHaveBeenCalledTimes(20);
   } finally { log.mockRestore(); }
-  expect(parseModelRelayCommand(["edit", "--caller", "a", "--provider", "clp-other"]).provider).toBe("clp-other");
+  expect(parseModelRelayCommand(["edit", "--caller", "a", "--model", "clp-other/deepseek-v4.1-flash"]).models).toEqual(["clp-other/deepseek-v4.1-flash"]);
   expect(parseModelRelayCommand(["delete", "--caller", "a"]).command).toBe("delete");
   expect(() => parseModelRelayCommand(["delete"])).toThrow("用法");
-  expect(() => parseModelRelayCommand(["delete", "--caller", "a", "--provider", "clp-other"])).toThrow("用法");
-  expect(() => parseModelRelayCommand(["upgrade-limits", "--force"])).toThrow("用法");
+  expect(() => parseModelRelayCommand(["delete", "--caller", "a", "--model", "clp-other/deepseek-v4.1-flash"])).toThrow("用法");
+  for (const command of ["models", "upgrade-limits", "upgrade-models", "rollback-providers", "rollback-retired", "rollback-reasoning", "rollback-names"]) {
+    expect(() => parseModelRelayCommand([command])).toThrow("用法");
+    await expect(runModelRelayCommand([command, "--help"])).rejects.toThrow("用法");
+  }
   await expect(runModelRelayCommand(["unknown", "--help"])).rejects.toThrow("用法");
   await expect(runModelRelayCommand(["listen"])).rejects.toThrow("交互终端");
   expect(() => parseModelRelayCommand(["listen", "--host", "0.0.0.0"])).toThrow("用法");
@@ -304,7 +289,7 @@ it("authorizes fresh settlement identities without allowing unknown identities o
     provider: "clp-test", requestModel: "cline-pass/deepseek-v4.1-flash", responseFormat: "json", status: "completed",
     deliveryStatus: "finished", requestStartedAtMs: 1, responseCompletedAtMs: 2, totalDurationMs: 1 };
   expect(await authorize(sample)).toBe("invalid_sample");
-  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]), f.environment);
+  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment);
   expect(await authorize(sample)).toBeUndefined();
   expect(await authorize({ ...sample, credentialGeneration: 2 })).toBe("invalid_sample");
   for (const mismatch of [{ callerId: "other" }, { keyId: "other" }, { provider: "clp-other" }]) {
@@ -343,7 +328,7 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   cleanups.push(async () => { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); });
   const upstreamAddress = upstream.address(); if (!upstreamAddress || typeof upstreamAddress === "string") throw new Error("fixture");
   writePrivateFileAtomicSync(join(f.environment.CODEX_HOME, ".env"), `HTTPS_PROXY=http://127.0.0.1:${upstreamAddress.port}\nNO_PROXY=\n`);
-  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]), f.environment);
+  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment);
   const portProbe = createServer(); await new Promise<void>(resolve => portProbe.listen(0, "127.0.0.1", resolve));
   const address = portProbe.address(); if (!address || typeof address === "string") throw new Error("fixture");
   await new Promise<void>(resolve => portProbe.close(() => resolve()));
@@ -367,7 +352,7 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   try {
     const waiting = fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST",
       headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" },
-      body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "waiting" }] }) });
+      body: JSON.stringify({ model: "clp-test/deepseek-v4.1-flash", messages: [{ role: "user", content: "waiting" }] }) });
     await preparationEntered;
     await upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment);
     await service.refresh(); releasePreparation();
@@ -381,13 +366,13 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
     if (stream) key = (await manageModelRelay(parseModelRelayCommand(["rotate", "--caller", "client"]), f.environment)).key;
     const response = await fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST",
       headers: { authorization: `Bearer ${String(key)}`, "content-type": "application/json" },
-      body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }], stream }) });
+      body: JSON.stringify({ model: "clp-test/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }], stream }) });
     expect(response.status).toBe(200); expect(await response.text()).toContain("fixture");
   }
-  const other = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "other", "--key", "other", "--provider", "clp-test"]), f.environment);
+  const other = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "other", "--key", "other", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment);
   const otherResponse = await fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST",
     headers: { authorization: `Bearer ${String(other.key)}`, "content-type": "application/json" },
-    body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }] }) });
+    body: JSON.stringify({ model: "clp-test/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }] }) });
   expect(otherResponse.status).toBe(200); await otherResponse.text();
   expect(received[1]).toMatchObject({ reasoning: { effort: "none" } });
   expect(received[2]).toMatchObject({ reasoning: { effort: "none" } });
@@ -395,7 +380,7 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   // Default rate limits are disabled: further requests need no refill wait.
   const pending = fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST",
     headers: { authorization: `Bearer ${String(key)}`, "content-type": "application/json" },
-    body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "pending" }] }) })
+    body: JSON.stringify({ model: "clp-test/deepseek-v4.1-flash", messages: [{ role: "user", content: "pending" }] }) })
     .then(async response => { await response.text(); }, () => undefined);
   await pendingUpstream;
   await manageModelRelay(parseModelRelayCommand(["disable"]), f.environment);
@@ -421,92 +406,6 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   expect(rows.records.find(row => row.status === "failed")).toMatchObject({ credentialGeneration: 2 });
 }, 15_000);
 
-it("explicitly backs up and upgrades only legacy limits, preserving credentials and refusing malformed input", async () => {
-  const f = await fixture();
-  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]), f.environment);
-  const document = parse(readFileSync(f.configPath, "utf8"));
-  const current = gatewayConfig.validateGatewayConfigDocument(document).model_relay!;
-  const legacy = { ...current, max_concurrency: 7, requests_per_minute: 40, burst: 3,
-    accounts: current.accounts.map(value => ({ ...value, max_concurrency: 4, requests_per_minute: 20, burst: 2 })),
-    callers: current.callers.map(value => ({ ...value, credential_generation: 9, enabled: false, max_concurrency: 2, requests_per_minute: 10, burst: 1 })) };
-  const original = stringify({ ...document, model_relay: legacy });
-  writePrivateFileAtomicSync(f.configPath, original);
-  const command = parseModelRelayCommand(["upgrade-limits"]);
-  const readPrivate = privateFile.readPrivateFileSync;
-  const failedBackup = vi.spyOn(privateFile, "readPrivateFileSync").mockImplementation((path, maxBytes) =>
-    String(path).endsWith(".bak") ? "fixture mismatched backup" : readPrivate(path, maxBytes));
-  try {
-    await expect(manageModelRelay(command, f.environment)).rejects.toThrow("备份校验失败");
-    expect(readFileSync(f.configPath, "utf8")).toBe(original);
-  } finally { failedBackup.mockRestore(); }
-  const failedWrite = vi.spyOn(gatewayConfig, "writeGatewayConfig").mockImplementation(() => { throw new Error("fixture write failure"); });
-  try {
-    await expect(manageModelRelay(command, f.environment)).rejects.toThrow("fixture write failure");
-    expect(readFileSync(f.configPath, "utf8")).toBe(original);
-    const backups = readdirSync(dirname(f.configPath)).filter(name => name.includes(".relay-") && name.endsWith(".bak"));
-    expect(backups.some(name => readFileSync(join(dirname(f.configPath), name), "utf8") === original)).toBe(true);
-  } finally { failedWrite.mockRestore(); }
-  const upgraded = await manageModelRelay(command, f.environment);
-  expect(upgraded.result).toBe("upgraded"); expect(readFileSync(String(upgraded.backupPath), "utf8")).toBe(original);
-  if (process.platform !== "win32") expect(statSync(String(upgraded.backupPath)).mode & 0o777).toBe(0o600);
-  const saved = gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8"))).model_relay!;
-  expect(saved).toEqual({ ...current, max_concurrency: 7, requests_per_minute: 40, burst: 3,
-    callers: current.callers.map(value => ({ ...value, credential_generation: 9, enabled: false })) });
-  const after = readFileSync(f.configPath, "utf8");
-  expect(await manageModelRelay(command, f.environment)).toEqual({ result: "unchanged", backupPath: null });
-  expect(readFileSync(f.configPath, "utf8")).toBe(after);
-  const malformed = stringify({ ...document, model_relay: { ...legacy, accounts: [{ provider: "clp-test", max_concurrency: 0 }] } });
-  writePrivateFileAtomicSync(f.configPath, malformed);
-  await expect(manageModelRelay(command, f.environment)).rejects.toThrow();
-  expect(readFileSync(f.configPath, "utf8")).toBe(malformed);
-});
-
-it("explicitly unifies capture while preserving rotated credentials, retention and unrelated settings", async () => {
-  const f = await fixture();
-  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]), f.environment);
-  await manageModelRelay(parseModelRelayCommand(["rotate", "--caller", "client"]), f.environment);
-  const before = parse(readFileSync(f.configPath, "utf8"));
-  for (const legacy of [{}, { traffic_dump: true }, { traffic_dump: true, traffic_dump_mode: "debug", traffic_dump_debug: { caller_id: "client", expires_at_ms: 2000 } }]) {
-    const source = { ...before, debug: { model_traffic_dump: true, model_traffic_retention_days: 14 }, model_relay: { ...before.model_relay as object, ...legacy } };
-    writePrivateFileAtomicSync(f.configPath, stringify(source));
-    const original = readFileSync(f.configPath, "utf8");
-    const result = await upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment);
-    expect(readFileSync(String(result.backupPath), "utf8")).toBe(original);
-    if (process.platform !== "win32") expect(statSync(String(result.backupPath)).mode & 0o777).toBe(0o600);
-    const after = parse(readFileSync(f.configPath, "utf8"));
-    expect(after.model_relay).toEqual(before.model_relay);
-    expect(after).toEqual({ ...before, debug: { model_traffic_dump: false, model_traffic_input_items: 3, model_traffic_item_max_bytes: 65536, model_traffic_retention_days: 14 } });
-    expect(await upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment)).toEqual({ result: "unchanged", backupPath: null });
-  }
-  for (const command of ["dump", "rollback-dump"]) expect(() => parseModelRelayCommand([command])).toThrow();
-});
-
-it("requires an explicit global choice and keeps the original config on invalid input or failed backup/save", async () => {
-  for (const args of [[], ["--enabled", "true"], ["--enabled", "true", "--mode", "debug", "--caller", "client"], ["--enabled", "true", "--mode", "debug", "--mode", "debug"]]) {
-    expect(() => parseTrafficUpgradeArgs(args)).toThrow();
-  }
-  const f = await fixture();
-  const before = readFileSync(f.configPath, "utf8");
-  const command = parseTrafficUpgradeArgs(["--enabled", "true", "--mode", "debug"]);
-  const save = vi.spyOn(gatewayConfig, "writeGatewayConfig").mockImplementationOnce(() => { throw new Error("fixture save failure"); });
-  try { await expect(upgradeTrafficCapture(command, f.environment)).rejects.toThrow("fixture save failure"); } finally { save.mockRestore(); }
-  expect(readFileSync(f.configPath, "utf8")).toBe(before);
-  const read = privateFile.readPrivateFileSync;
-  const brokenBackup = vi.spyOn(privateFile, "readPrivateFileSync").mockImplementation((path, max) => String(path).endsWith(".bak") ? "bad backup" : read(path, max));
-  try { await expect(upgradeTrafficCapture(command, f.environment)).rejects.toThrow("备份校验失败"); } finally { brokenBackup.mockRestore(); }
-  expect(readFileSync(f.configPath, "utf8")).toBe(before);
-  expect(readdirSync(dirname(f.configPath)).filter(name => name.endsWith(".bak")).some(name => readFileSync(join(dirname(f.configPath), name), "utf8") === before)).toBe(true);
-  for (const patch of [{ debug: { model_traffic_dump: "yes" } }, { model_relay: { traffic_dump: true, unknown: 1 } }]) {
-    const invalid = stringify({ ...parse(before), ...patch }); writePrivateFileAtomicSync(f.configPath, invalid);
-    await expect(upgradeTrafficCapture(command, f.environment)).rejects.toThrow();
-    expect(readFileSync(f.configPath, "utf8")).toBe(invalid);
-  }
-  writePrivateFileAtomicSync(f.configPath, before);
-  const result = await upgradeTrafficCapture(command, f.environment);
-  expect(readFileSync(String(result.backupPath), "utf8")).toBe(before);
-  expect(parse(readFileSync(f.configPath, "utf8")).debug).toEqual({ model_traffic_dump: true, model_traffic_input_items: 0, model_traffic_item_max_bytes: 0 });
-});
-
 it("refuses traffic upgrade before any write while a Gateway owner is active, including not-ready owners", async () => {
   const f = await fixture();
   const owner = new GatewayOwner(f.configPath); await owner.start(); cleanups.push(() => owner.close());
@@ -522,11 +421,11 @@ it("refuses traffic upgrade before any write while a Gateway owner is active, in
   expect(await upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment)).toMatchObject({ result: "upgraded" });
 });
 
-it("shares read-only previews and revision-checked policy edits, preserving credentials on rollback", async () => {
+it("shares read-only previews and revision-checked policy edits, preserving credentials on policy changes", async () => {
   const f = await fixture();
   const snapshot = readRelayManagement(f.environment);
   expect(snapshot.providers).toContainEqual(expect.objectContaining({ id: "clp-test", available: true }));
-  const input = parseModelRelayCommand(["issue", "--caller", "translation", "--key", "translation", "--provider", "clp-test", "--reasoning", "off"]);
+  const input = parseModelRelayCommand(["issue", "--caller", "translation", "--key", "translation", "--model", "clp-test/deepseek-v4.1-flash", "--reasoning", "off"]);
   const before = readFileSync(f.configPath, "utf8");
   const preview = await sharedManage(input, f.environment, { preview: true, expectedRevision: snapshot.revision });
   expect(JSON.stringify(preview)).not.toContain("secret_sha256");
@@ -539,21 +438,16 @@ it("shares read-only previews and revision-checked policy edits, preserving cred
   expect(off.reasoning).toBe("off");
   await manageModelRelay(parseModelRelayCommand(["disable", "--caller", "translation"]), f.environment);
   const disabledContent = readFileSync(f.configPath, "utf8");
-  const owner = new GatewayOwner(f.configPath); await owner.start();
-  try { await expect(manageModelRelay(parseModelRelayCommand(["rollback-reasoning"]), f.environment)).rejects.toThrow("停止 Gateway"); }
-  finally { await owner.close(); }
-  expect(readFileSync(f.configPath, "utf8")).toBe(disabledContent);
-  const failedSave = vi.spyOn(gatewayConfig, "writeGatewayConfig").mockImplementationOnce(() => { throw new Error("rollback save failure"); });
-  try { await expect(manageModelRelay(parseModelRelayCommand(["rollback-reasoning"]), f.environment)).rejects.toThrow("rollback save failure"); }
+  const reset = parseModelRelayCommand(["edit", "--caller", "translation", "--reasoning", "passthrough"]);
+  const failedSave = vi.spyOn(gatewayConfig, "writeGatewayConfig").mockImplementationOnce(() => { throw new Error("policy save failure"); });
+  try { await expect(manageModelRelay(reset, f.environment)).rejects.toThrow("policy save failure"); }
   finally { failedSave.mockRestore(); }
   expect(readFileSync(f.configPath, "utf8")).toBe(disabledContent);
-  const rollback = await manageModelRelay(parseModelRelayCommand(["rollback-reasoning"]), f.environment);
-  expect(readFileSync(String(rollback.backupPath), "utf8")).toBe(disabledContent);
-  const rolled = gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers[0]!;
-  expect(rolled.reasoning).toBeUndefined();
-  expect(rolled.enabled).toBe(false);
-  expect(rolled.secret_sha256).toBe(off.secret_sha256);
-  expect(rolled.credential_generation).toBe(off.credential_generation);
+  const changed = await manageModelRelay(reset, f.environment);
+  expect(readFileSync(String(changed.backupPath), "utf8")).toBe(disabledContent);
+  const updated = gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers[0]!;
+  expect(updated.reasoning).toBeUndefined(); expect(updated.enabled).toBe(false);
+  expect(updated.secret_sha256).toBe(off.secret_sha256);
   await manageModelRelay(parseModelRelayCommand(["edit", "--caller", "translation", "--reasoning", "off"]), f.environment);
   expect(gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers[0]!.enabled).toBe(false);
 });
@@ -563,7 +457,7 @@ it.each([
 ])("reports controlled management validation errors without changing configuration: $message", async ({ extra, message }) => {
   const f = await fixture();
   const before = readFileSync(f.configPath, "utf8");
-  const input = parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test", ...extra]);
+  const input = parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash", ...extra]);
   await expect(sharedManage(input, f.environment, { preview: true })).rejects.toThrow(message);
   await expect(manageModelRelay(input, f.environment)).rejects.toThrow(message);
   expect(readFileSync(f.configPath, "utf8")).toBe(before);
@@ -573,7 +467,7 @@ it("returns the saved one-time key even if activation probing throws", async () 
   const f = await fixture();
   const failedProbe = vi.spyOn(relayControl, "queryModelRelayControl").mockRejectedValueOnce(new Error("private endpoint unavailable"));
   try {
-    const result = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]), f.environment);
+    const result = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment);
     expect(result.activation).toBe("saved_unconfirmed"); expect(result.key).toMatch(/^cr1.key\./u);
     expect(gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers).toHaveLength(1);
   } finally { failedProbe.mockRestore(); }
@@ -588,7 +482,7 @@ it.each([".management-transaction.lock", "config.toml.lock"])("preserves the com
   });
   syncBuiltinESMExports();
   try {
-    const saved = await sharedManage(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]), f.environment);
+    const saved = await sharedManage(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment);
     expect(saved.cleanupStatus).toBe("failed");
     expect(saved.key).toMatch(/^cr1.key\./u);
     const bytes = Buffer.from(String(saved.key).split(".")[2]!, "base64url");
@@ -598,9 +492,9 @@ it.each([".management-transaction.lock", "config.toml.lock"])("preserves the com
   } finally { unlink.mockRestore(); syncBuiltinESMExports(); }
 });
 
-it("renames and rolls back display names without restoring old credentials", async () => {
+it("renames display names without restoring old credentials", async () => {
   const f = await fixture();
-  await sharedManage(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test", "--name", "沉浸式翻译"]), f.environment);
+  await sharedManage(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash", "--name", "沉浸式翻译"]), f.environment);
   const read = () => gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers[0]!;
   const initial = read();
   const revision = readRelayManagement(f.environment).revision;
@@ -612,16 +506,10 @@ it("renames and rolls back display names without restoring old credentials", asy
   await expect(sharedManage(edit, f.environment, { expectedRevision: revision })).rejects.toThrow("已变化");
   await sharedManage(parseModelRelayCommand(["rotate", "--caller", "client"]), f.environment);
   await sharedManage(parseModelRelayCommand(["disable", "--caller", "client"]), f.environment);
-  const current = read(), before = readFileSync(f.configPath, "utf8");
-  const failed = vi.spyOn(gatewayConfig, "writeGatewayConfig").mockImplementationOnce(() => { throw new Error("name rollback failed"); });
-  try { await expect(sharedManage(parseModelRelayCommand(["rollback-names"]), f.environment)).rejects.toThrow("name rollback failed"); }
-  finally { failed.mockRestore(); }
-  expect(readFileSync(f.configPath, "utf8")).toBe(before);
-  const result = await sharedManage(parseModelRelayCommand(["rollback-names"]), f.environment);
-  expect(readFileSync(String(result.backupPath), "utf8")).toBe(before);
-  const { display_name: removed, ...identity } = current;
-  expect(removed).toBe("网页翻译");
-  expect(read()).toEqual(identity);
+  const current = read();
+  expect(current.secret_sha256).not.toBe(initial.secret_sha256);
+  expect(current.enabled).toBe(false); expect(current.display_name).toBe("网页翻译");
+
 });
 
 
@@ -644,27 +532,26 @@ it("rejects incompatible or malformed runtime diagnostics instead of inventing z
   }
 });
 
-it("rebinds and deletes keys with durable settlement authority and safe rollback", async () => {
+it("rebinds and deletes keys with durable settlement authority and revocation", async () => {
   const f = await fixture();
   await applyClinePassConfiguration({ accountId: "other", apiKey: "fixture-other" }, { environment: f.environment });
-  await manageModelRelay({ command: "models", provider: "clp-other", enabledModels: ["cline-pass/deepseek-v4.1-flash"] }, f.environment);
   const run = (args: string[]) => manageModelRelay(parseModelRelayCommand(args), f.environment);
   const model = "cline-pass/deepseek-v4.1-flash";
-  await run(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]);
+  await run(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash"]);
   const before = readFileSync(f.configPath, "utf8");
   const prior = gatewayConfig.validateGatewayConfigDocument(parse(before)).model_relay!.callers[0]!;
-  await expect(run(["models", "--provider", "clp-other", "--model", "unknown"])).rejects.toThrow("目录");
+  await expect(run(["edit", "--caller", "client", "--model", "clp-other/unknown"])).rejects.toThrow("目录");
   expect(readFileSync(f.configPath, "utf8")).toBe(before);
-  const edit = ["edit", "--caller", "client", "--provider", "clp-other"];
+  const edit = ["edit", "--caller", "client", "--model", "clp-other/deepseek-v4.1-flash"];
   const preview = await sharedManage(parseModelRelayCommand(edit), f.environment, { preview: true });
-  expect(preview).toMatchObject({ preview: { callers: [{ provider: "clp-other" }] } });
+  expect(preview).toMatchObject({ preview: { callers: [{ models: ["clp-other/deepseek-v4.1-flash"] }] } });
   expect(readFileSync(f.configPath, "utf8")).toBe(before);
   const saved = await run(edit);
   expect(readFileSync(String(saved.backupPath), "utf8")).toBe(before);
   let config = gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8"))).model_relay!;
-  expect(config.callers[0]).toEqual({ ...prior, provider: "clp-other" });
+  expect(config.callers[0]).toEqual({ ...prior, models: ["clp-other/deepseek-v4.1-flash"] });
   expect(config.retired_callers).toEqual([{ caller_id: "client", key_id: "key", provider: "clp-test", credential_generation: 1 }]);
-  await run(["edit", "--caller", "client", "--provider", "clp-test"]);
+  await run(["edit", "--caller", "client", "--model", "clp-test/deepseek-v4.1-flash"]);
   await run(edit);
   config = gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8"))).model_relay!;
   expect(config.retired_callers).toHaveLength(2);
@@ -685,22 +572,17 @@ it("rebinds and deletes keys with durable settlement authority and safe rollback
   expect(await authorize({ ...sample, credentialGeneration: 2 })).toBe("invalid_sample");
   expect(await authorize({ ...sample, keyId: "other" })).toBe("invalid_sample");
   for (const [caller, key] of [["client", "new"], ["new", "key"]]) {
-    await expect(run(["issue", "--caller", caller!, "--key", key!, "--provider", "clp-test"])).rejects.toThrow("身份已存在");
+    await expect(run(["issue", "--caller", caller!, "--key", key!, "--model", "clp-test/deepseek-v4.1-flash"])).rejects.toThrow("身份已存在");
   }
-  await run(["issue", "--caller", "retained", "--key", "retained", "--provider", "clp-test"]);
+  await run(["issue", "--caller", "retained", "--key", "retained", "--model", "clp-test/deepseek-v4.1-flash"]);
   await run(["rotate", "--caller", "retained"]);
-  const live = (await run(["callers"])).callers;
-  const rolled = await run(["rollback-retired"]);
-  expect(readFileSync(String(rolled.backupPath), "utf8")).toContain("retired_callers");
-  expect(readFileSync(f.configPath, "utf8")).not.toContain("retired_callers");
-  expect((await run(["callers"])).callers).toEqual(live);
-  expect(await authorize(sample)).toBe("invalid_sample");
+  expect((await run(["callers"])).callers).toHaveLength(1);
+
 });
 
 it("settles cancelled calls under their original provider across rebind, deletion and restart", async () => {
   const f = await fixture();
   await applyClinePassConfiguration({ accountId: "other", apiKey: "fixture-other" }, { environment: f.environment });
-  await manageModelRelay({ command: "models", provider: "clp-other", enabledModels: ["cline-pass/deepseek-v4.1-flash"] }, f.environment);
   const run = (args: string[]) => manageModelRelay(parseModelRelayCommand(args), f.environment);
   const model = "cline-pass/deepseek-v4.1-flash";
   const held: import("node:http").ServerResponse[] = [];
@@ -709,7 +591,7 @@ it("settles cancelled calls under their original provider across rebind, deletio
   cleanups.push(async () => { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); });
   const up = upstream.address(); if (!up || typeof up === "string") throw new Error("fixture");
   writePrivateFileAtomicSync(join(f.environment.CODEX_HOME, ".env"), `HTTPS_PROXY=http://127.0.0.1:${up.port}\nNO_PROXY=\n`);
-  const issued = await run(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]);
+  const issued = await run(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash"]);
   const probe = createServer(); await new Promise<void>(resolve => probe.listen(0, "127.0.0.1", resolve));
   const address = probe.address(); if (!address || typeof address === "string") throw new Error("fixture");
   await new Promise<void>(resolve => probe.close(() => resolve()));
@@ -721,19 +603,19 @@ it("settles cancelled calls under their original provider across rebind, deletio
     authorize: createRelayMetricAuthorization(f.configPath, f.environment) });
   await receiver.apply(true); cleanups.push(() => receiver.close());
   const service = await startModelRelayService(f.configPath, f.environment); cleanups.push(() => service.close());
-  const request = () => fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST",
+  const request = (provider = "clp-test") => fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST",
     headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: "fixture" }] }) }).then(async response => { await response.text(); return response.status; }).catch(() => "disconnected" as const);
+    body: JSON.stringify({ model: relayModelId(provider, model), messages: [{ role: "user", content: "fixture" }] }) }).then(async response => { await response.text(); return response.status; }).catch(() => "disconnected" as const);
   const old = request(); await vi.waitFor(() => expect(held).toHaveLength(1));
   expect(await readRelayQueue(f.environment)).toMatchObject({ state: "running", listening: true, requests: [{ callerId: "client", displayName: null, provider: "clp-test" }] });
   await run(["edit", "--caller", "client", "--name", "新用途"]);
   expect(await readRelayQueue(f.environment)).toMatchObject({ requests: [{ callerId: "client", displayName: "新用途", phase: "upstream", provider: "clp-test" }] });
   expect(held).toHaveLength(1);
 
-  expect(await run(["edit", "--caller", "client", "--provider", "clp-other"])).toMatchObject({ activation: "saved_and_applied" });
+  expect(await run(["edit", "--caller", "client", "--model", "clp-other/deepseek-v4.1-flash"])).toMatchObject({ activation: "saved_and_applied" });
   expect([503, "disconnected"]).toContain(await old);
   await vi.waitFor(() => expect(store.count()).toBe(1));
-  const current = request(); await vi.waitFor(() => expect(held).toHaveLength(2));
+  const current = request("clp-other"); await vi.waitFor(() => expect(held).toHaveLength(2));
   expect(await run(["delete", "--caller", "client"])).toMatchObject({ activation: "saved_and_applied" });
   expect([503, "disconnected"]).toContain(await current);
   await vi.waitFor(() => expect(store.count()).toBe(2));
@@ -741,7 +623,6 @@ it("settles cancelled calls under their original provider across rebind, deletio
   expect(records.map(record => record.provider).sort()).toEqual(["clp-other", "clp-test"]);
   expect(records.every(record => record.callerId === "client")).toBe(true);
   expect(await request()).toBe(401);
-  await expect(run(["rollback-retired"])).rejects.toThrow("停止");
   await service.close();
   const restarted = await startModelRelayService(f.configPath, f.environment); cleanups.push(() => restarted.close());
   expect(await request()).toBe(401);
@@ -752,7 +633,7 @@ it("settles cancelled calls under their original provider across rebind, deletio
 it("rejects exhausted history and serialized file size before replacing configuration", async () => {
   const f = await fixture();
   const run = (args: string[]) => manageModelRelay(parseModelRelayCommand(args), f.environment);
-  await run(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]);
+  await run(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash"]);
   const original = readFileSync(f.configPath, "utf8");
   const document = parse(original);
   Object.assign(document.model_relay!, { retired_callers: Array.from({ length: 4096 }, (_, i) => ({
@@ -767,30 +648,6 @@ it("rejects exhausted history and serialized file size before replacing configur
   expect(readFileSync(f.configPath, "utf8")).toBe(padded);
 });
 
-it("keeps provider model grants after deleting keys and prunes only empty orphan references", async () => {
-  const f = await fixture();
-  await applyClinePassConfiguration({ accountId: "other", apiKey: "fixture-other" }, { environment: f.environment });
-  await manageModelRelay({ command: "models", provider: "clp-other", enabledModels: ["cline-pass/deepseek-v4.1-flash"] }, f.environment);
-  const run = (args: string[]) => manageModelRelay(parseModelRelayCommand(args), f.environment);
-  const model = "cline-pass/deepseek-v4.1-flash";
-  const read = () => gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8"))).model_relay!;
-  for (const id of ["a", "b"]) await run(["issue", "--caller", id, "--key", id, "--provider", "clp-test"]);
-  await run(["edit", "--caller", "a", "--provider", "clp-other"]);
-  expect(read().accounts).toEqual([{ provider: "clp-test", models: [model] }, { provider: "clp-other", models: [model] }]);
-  await run(["delete", "--caller", "b"]);
-  expect(read().accounts).toHaveLength(2);
-  expect(read().retired_callers).toHaveLength(2);
-  await run(["delete", "--caller", "a"]);
-  expect(read().accounts).toHaveLength(2);
-  expect(read().retired_callers).toHaveLength(3);
-  const document = parse(readFileSync(f.configPath, "utf8"));
-  Object.assign(document.model_relay!, { accounts: [{ provider: "clp-test", models: [model] }, ...Array.from({ length: 127 }, (_, i) => ({ provider: `clp-orphan${i}`, models: [] }))] });
-  writePrivateFileAtomicSync(f.configPath, stringify(document));
-  await run(["issue", "--caller", "c", "--key", "c", "--provider", "clp-test"]);
-  expect(read().accounts).toEqual([{ provider: "clp-test", models: [model] }]);
-  expect(loadConfiguredRelayProviderMaterial("clp-other", f.environment).apiKey).toBe("fixture-other");
-});
-
 it("validates bounded private queue snapshots and refuses incompatible peers", async () => {
   const f = await fixture();
   const row = { requestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", callerId: "client", displayName: "中文用途", provider: "clp-test",
@@ -801,7 +658,7 @@ it("validates bounded private queue snapshots and refuses incompatible peers", a
   await control.start(); cleanups.push(() => control.close());
   expect(await queryModelRelayControl(endpoint, "queue")).toMatchObject(response);
   for (const requests of [[{ ...row, secret: "hidden" }], [{ ...row, phase: "unknown" }], [{ ...row, elapsedMs: -1 }],
-    [{ ...row, displayName: "bad\nname" }], [{ ...row, displayName: undefined }], [{ ...row, model: "x".repeat(201) }], Array.from({ length: 65 }, () => row)]) {
+    [{ ...row, displayName: "bad\nname" }], [{ ...row, displayName: undefined }], [{ ...row, model: "x".repeat(266) }], Array.from({ length: 65 }, () => row)]) {
     response = { result: "queue", configurationValid: true, enabled: true, listening: true, requests };
     expect(await queryModelRelayControl(endpoint, "queue")).toEqual({ result: "unconfirmed" });
   }
@@ -819,7 +676,7 @@ it("preserves Unicode model names across fragmented queue IPC responses", async 
   const server = new PrivateIpcServer(endpoint, socket => {
     socket.once("data", data => {
       const request = JSON.parse(data.toString()) as { requestId: string };
-      const payload = Buffer.from(JSON.stringify({ version: 4, requestId: request.requestId, result: "queue", configurationValid: true, enabled: true, listening: true, requests: [{
+      const payload = Buffer.from(JSON.stringify({ version: 5, requestId: request.requestId, result: "queue", configurationValid: true, enabled: true, listening: true, requests: [{
         requestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", callerId: "client", displayName: "中文用途", provider: "clp-test",
         model: "中文模型", protocol: "responses", phase: "upstream", elapsedMs: 1,
       }] }) + "\n");
@@ -867,7 +724,7 @@ it.each(["provider", "metrics"])("rereads only a changing config once for %s sna
 
 it("updates listener interactively with backup, cancellation and stale-config protection", async () => {
   const f = await fixture();
-  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test"]), f.environment);
+  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment);
   const before = readFileSync(f.configPath, "utf8");
   const credentials = gatewayConfig.validateGatewayConfigDocument(parse(before)).model_relay!.callers;
   let mode = "lan", confirm = false, address = "192.168.1.10", concurrent = false;
@@ -921,93 +778,11 @@ it("automatically initializes the catalog for CLI key creation before the relay 
   rmSync(clineRelayCatalogPath(f.environment));
   const download = vi.spyOn(catalogUpdate, "downloadClineRelayCatalog").mockResolvedValue(catalog);
   try {
-    const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "auto-cli", "--key", "auto-cli", "--provider", "clp-test"]), f.environment);
+    const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "auto-cli", "--key", "auto-cli", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment);
     expect(issued.activation).toBe("saved_not_running");
     expect(download).toHaveBeenCalledOnce();
     expect(loadConfiguredRelayProviderMaterial("clp-test", f.environment).models).toContain("cline-pass/deepseek-v4.1-flash");
   } finally { download.mockRestore(); }
-});
-
-it.each(["gateway", "relay"])("refuses model-grant migration through limit upgrades while %s is running", async running => {
-  const f = await fixture();
-  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "legacy", "--key", "legacy", "--provider", "clp-test"]), f.environment);
-  const document = parse(readFileSync(f.configPath, "utf8"));
-  const legacy = document.model_relay as { accounts: Array<{ provider: string; models?: string[] }>; callers: Array<Record<string, unknown>> };
-  for (const caller of legacy.callers) { caller.models = legacy.accounts[0]!.models; caller.max_concurrency = 2; }
-  for (const account of legacy.accounts) delete account.models;
-  const before = stringify(document);
-  writePrivateFileAtomicSync(f.configPath, before);
-  const service = running === "gateway" ? new GatewayOwner(f.configPath)
-    : new ModelRelayControl(modelRelayPaths(f.configPath).control, async () => ({ result: "rejected", reason: "unavailable" }));
-  await service.start();
-  cleanups.push(() => service.close());
-  for (const command of ["upgrade-limits", "upgrade-models"]) {
-    await expect(manageModelRelay(parseModelRelayCommand([command]), f.environment)).rejects.toThrow("模型授权升级前须停止 Gateway 和 Relay");
-    expect(readFileSync(f.configPath, "utf8")).toBe(before);
-  }
-  expect(readdirSync(dirname(f.configPath)).some(name => name.includes(".relay-") && name.endsWith(".bak") && readFileSync(join(dirname(f.configPath), name), "utf8") === before)).toBe(false);
-  await service.close();
-  const upgraded = await manageModelRelay(parseModelRelayCommand(["upgrade-limits"]), f.environment);
-  expect(upgraded.result).toBe("upgraded");
-  expect(readFileSync(String(upgraded.backupPath), "utf8")).toBe(before);
-  const saved = gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8"))).model_relay!;
-  expect(saved.accounts[0]?.models).toEqual(["cline-pass/deepseek-v4.1-flash"]);
-  expect(saved.callers[0]).not.toHaveProperty("models");
-  expect(saved.callers[0]).not.toHaveProperty("max_concurrency");
-});
-
-it("backs up legacy model grants before explicit upgrade and leaves the original intact on failed writes", async () => {
-  const f = await fixture();
-  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "legacy", "--key", "legacy", "--provider", "clp-test"]), f.environment);
-  const current = gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8")));
-  const document = parse(readFileSync(f.configPath, "utf8"));
-  const legacy = document.model_relay as { accounts: Array<{ provider: string; models?: string[] }>; callers: Array<Record<string, unknown>> };
-  for (const caller of legacy.callers) caller.models = legacy.accounts[0]!.models;
-  for (const account of legacy.accounts) delete account.models;
-  writePrivateFileAtomicSync(f.configPath, stringify(document));
-  const before = readFileSync(f.configPath, "utf8");
-  expect(() => gatewayConfig.validateGatewayConfigDocument(parse(before))).toThrow();
-  const failure = vi.spyOn(gatewayConfig, "writeGatewayConfig").mockImplementation(() => { throw new Error("fixture write failure"); });
-  try { await expect(manageModelRelay(parseModelRelayCommand(["upgrade-models"]), f.environment)).rejects.toThrow("fixture write failure"); }
-  finally { failure.mockRestore(); }
-  expect(readFileSync(f.configPath, "utf8")).toBe(before);
-  const upgraded = await manageModelRelay(parseModelRelayCommand(["upgrade-models"]), f.environment);
-  expect(upgraded.result).toBe("upgraded");
-  expect(readFileSync(String(upgraded.backupPath), "utf8")).toBe(before);
-  expect(gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8")))).toEqual(current);
-  expect(await manageModelRelay(parseModelRelayCommand(["upgrade-models"]), f.environment)).toEqual({ result: "unchanged", backupPath: null });
-});
-
-it("applies provider model changes to every key and keeps new catalog models disabled", async () => {
-  const f = await fixture();
-  const keys = [];
-  for (const id of ["one", "two"]) keys.push(String((await manageModelRelay(parseModelRelayCommand(["issue", "--caller", id, "--key", id, "--provider", "clp-test"]), f.environment)).key));
-  saveClineRelayCatalog({ version: 1, commit: "a".repeat(40), downloadedAt: 1, models: [
-    { id: "cline-pass/deepseek-v4.1-flash" }, { id: "cline-pass/new" },
-  ] }, f.environment);
-  const listener = createServer(); await new Promise<void>(resolve => listener.listen(0, "127.0.0.1", resolve));
-  const address = listener.address(); if (!address || typeof address === "string") throw new Error("fixture");
-  await new Promise<void>(resolve => listener.close(() => resolve()));
-  const document = parse(readFileSync(f.configPath, "utf8")); Object.assign(document.model_relay!, { enabled: true, port: address.port });
-  writePrivateFileAtomicSync(f.configPath, stringify(document));
-  const service = await startModelRelayService(f.configPath, f.environment);
-  try {
-    const list = async (key: string) => {
-      const response = await fetch(`http://127.0.0.1:${address.port}/v1/models`, { headers: { authorization: `Bearer ${key}` } });
-      expect(response.status).toBe(200);
-      return (await response.json() as { data: Array<{ id: string }> }).data.map(model => model.id);
-    };
-    for (const key of keys) expect(await list(key)).toEqual(["cline-pass/deepseek-v4.1-flash"]);
-    expect(await manageModelRelay({ command: "models", provider: "clp-test", enabledModels: ["cline-pass/new"] }, f.environment)).toMatchObject({ activation: "saved_and_applied" });
-    for (const key of keys) {
-      expect(await list(key)).toEqual(["cline-pass/new"]);
-      const rejected = await fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-        body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }] }) });
-      expect(rejected.status).toBe(403);
-    }
-    await manageModelRelay({ command: "models", provider: "clp-test", enabledModels: [] }, f.environment);
-    for (const key of keys) expect(await list(key)).toEqual([]);
-  } finally { await service.close(); }
 });
 
 it("isolates the CLP relay catalog from Codex model settings while retaining shared credential revocation", async () => {
@@ -1049,7 +824,7 @@ it("rejects account revocation between registry lookup and the credential finger
 
 it("automatically restores a missing Cline catalog after relay startup without an App Server", async () => {
   const f = await fixture(); const model = "cline-pass/deepseek-v4.1-flash";
-  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "auto", "--key", "auto", "--provider", "clp-test"]), f.environment);
+  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "auto", "--key", "auto", "--model", "clp-test/deepseek-v4.1-flash"]), f.environment);
   const portProbe = createServer(); await new Promise<void>(resolve => portProbe.listen(0, "127.0.0.1", resolve));
   const address = portProbe.address(); if (!address || typeof address === "string") throw new Error("fixture");
   await new Promise<void>(resolve => portProbe.close(() => resolve()));
@@ -1064,13 +839,13 @@ it("automatically restores a missing Cline catalog after relay startup without a
     await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
     await vi.waitFor(async () => {
       const response = await fetch(`http://127.0.0.1:${address.port}/v1/models`, { headers: { authorization: `Bearer ${issued.key}` } });
-      expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ data: [{ id: model }] });
+      expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ data: [{ id: relayModelId("clp-test", model) }] });
     });
     await service.refresh(); expect(download).toHaveBeenCalledOnce();
   } finally { await service.close(); download.mockRestore(); }
 });
 
-it("loads extra model policies through the worker, scopes key model lists and revokes requests on policy changes", async () => {
+it("loads model capabilities through the worker, scopes Key grants and revokes requests on policy changes", async () => {
   const f = await fixture();
   const extra = { id: "fixture/relay-only", reasoning_efforts: ["none", "high"] as Array<"none" | "high">, reasoning: "high" as const };
   const toggleModel = "fixture/toggle-only", effortModel = "fixture/effort-none", museModel = "cline-pass/muse-spark-1.3-contributor";
@@ -1082,9 +857,8 @@ it("loads extra model policies through the worker, scopes key model lists and re
   const codexPaths = clinePassSetupPaths(f.environment, "test");
   writePrivateFileAtomicSync(codexPaths.catalog, "invalid Codex catalog"); writePrivateFileAtomicSync(codexPaths.manifest, "invalid Codex manifest");
   const baseline = loadConfiguredRelayProviderMaterial("clp-test", f.environment);
-  const saved = await sharedManage({ command: "models", provider: "clp-test", models: [], enabledModels: [extra.id], extraModels: [extra] }, f.environment);
-  expect(saved.backupPath).toEqual(expect.any(String)); expect(loadConfiguredRelayProviderMaterial("clp-test", f.environment)).toEqual(baseline);
-  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "extra", "--key", "extra", "--provider", "clp-test"]), f.environment);
+  const issued = await sharedManage({ command: "issue", caller: "extra", key: "extra", models: [extra.id, toggleModel, effortModel, museModel].map(id => relayModelId("clp-test", id)) }, f.environment);
+  expect(issued.backupPath).toEqual(expect.any(String)); expect(loadConfiguredRelayProviderMaterial("clp-test", f.environment)).toEqual(baseline);
   const held: import("node:http").ServerResponse[] = [], forwarded: Array<Record<string, unknown>> = []; let hold = false;
   const upstream = createHttpServer((request, response) => {
     let text = ""; request.setEncoding("utf8"); request.on("data", chunk => { text += chunk; });
@@ -1103,22 +877,21 @@ it("loads extra model policies through the worker, scopes key model lists and re
   const service = await startModelRelayService(f.configPath, f.environment); cleanups.push(() => service.close());
   const headers = { authorization: `Bearer ${issued.key}`, "content-type": "application/json" };
   const origin = `http://127.0.0.1:${port.port}`;
-  expect(await (await fetch(`${origin}/v1/models`, { headers })).json()).toMatchObject({ data: [{ id: extra.id }] });
-  const call = () => fetch(`${origin}/v1/chat/completions`, { method: "POST", headers, body: JSON.stringify({ model: extra.id, messages: [{ role: "user", content: "fixture" }] }) }).then(async response => { await response.text(); return response.status; }).catch(() => "disconnected");
-  expect(await call()).toBe(200); expect(forwarded[0]?.reasoning_effort).toBe("high"); expect(forwarded[0]).not.toHaveProperty("reasoning"); expect(forwarded[0]).not.toHaveProperty("provider");
+  expect(await (await fetch(`${origin}/v1/models`, { headers })).json()).toMatchObject({ data: [{ id: relayModelId("clp-test", extra.id) }, { id: relayModelId("clp-test", toggleModel) }, { id: relayModelId("clp-test", museModel) }, { id: relayModelId("clp-test", effortModel) }] });
+  const call = () => fetch(`${origin}/v1/chat/completions`, { method: "POST", headers, body: JSON.stringify({ model: relayModelId("clp-test", extra.id), messages: [{ role: "user", content: "fixture" }] }) }).then(async response => { await response.text(); return response.status; }).catch(() => "disconnected");
+  expect(await call()).toBe(200); expect(forwarded[0]).not.toHaveProperty("reasoning_effort"); expect(forwarded[0]).not.toHaveProperty("reasoning"); expect(forwarded[0]).not.toHaveProperty("provider");
   hold = true; const pending = call(); await vi.waitFor(() => expect(held).toHaveLength(1));
-  await sharedManage({ command: "models", provider: "clp-test", models: [], extraModels: [{ ...extra, reasoning: "none" }] }, f.environment);
+  await sharedManage({ command: "edit", caller: "extra", reasoning: "off" }, f.environment);
   expect(await pending).not.toBe(200);
   hold = false; expect(await call()).toBe(200); expect(forwarded.at(-1)?.reasoning).toEqual({ enabled: false });
-  await sharedManage({ command: "models", provider: "clp-test", enabledModels: [extra.id, toggleModel, effortModel, museModel] }, f.environment);
   await manageModelRelay(parseModelRelayCommand(["edit", "--caller", "extra", "--reasoning", "off"]), f.environment);
   const callModel = (model: string) => fetch(`${origin}/v1/chat/completions`, { method: "POST", headers,
-    body: JSON.stringify({ model, messages: [{ role: "user", content: "fixture" }] }),
+    body: JSON.stringify({ model: relayModelId("clp-test", model), messages: [{ role: "user", content: "fixture" }] }),
   }).then(async response => { await response.text(); return response.status; }).catch(() => "disconnected");
   expect(await callModel(toggleModel)).toBe(200); expect(forwarded.at(-1)?.reasoning).toEqual({ enabled: false });
   expect(await callModel(effortModel)).toBe(200); expect(forwarded.at(-1)?.reasoning).toEqual({ enabled: false });
   expect(await callModel(museModel)).toBe(200); expect(forwarded.at(-1)).not.toHaveProperty("reasoning");
-  expect(readRelayManagement(f.environment).providers.find(provider => provider.id === "clp-test")?.extraModels).toEqual([{ ...extra, reasoning: "none" }]);
+  expect(readRelayManagement(f.environment).providers.find(provider => provider.id === "clp-test")).not.toHaveProperty("extraModels");
   const beforeUpdate = loadConfiguredRelayProviderMaterial("clp-test", f.environment);
   hold = true; const pendingDefault = callModel(toggleModel); await vi.waitFor(() => expect(held).toHaveLength(2));
   saveClineRelayCatalog({ version: 1, commit: "b".repeat(40), downloadedAt: 2,
@@ -1126,6 +899,6 @@ it("loads extra model policies through the worker, scopes key model lists and re
   await service.refresh(); expect(await pendingDefault).not.toBe(200);
   expect(loadConfiguredRelayProviderMaterial("clp-test", f.environment).revision).not.toBe(beforeUpdate.revision);
   hold = false; expect(await callModel(toggleModel)).toBe(200); expect(forwarded.at(-1)).not.toHaveProperty("reasoning");
-  // Downloading new metadata does not replace a saved policy's capability snapshot.
-  expect(await call()).toBe(200); expect(forwarded.at(-1)?.reasoning).toEqual({ enabled: false });
+  // Capability removal prevents Key off from inventing an upstream control.
+  expect(await call()).toBe(200); expect(forwarded.at(-1)).not.toHaveProperty("reasoning");
 });

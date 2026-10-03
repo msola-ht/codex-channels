@@ -170,4 +170,6 @@ npm run docs:check
 测试通过不等同于完成浏览器布局验收；实际交互和视觉检查应单独记录结果。
 普通提交通过现有提交钩子执行完整 `verify:commit`，开发阶段按实际改动选择检查，不重复运行全量门禁。
 
-`components/settings/relay-extra-models.tsx` 按提供商显示模型列表弹窗，批量启用／关闭模型并选择 Cline 思考策略；独立目录下载不自动启用新模型，模型保存复用管理预览确认，关联 Key 统一跟随。
+`components/settings/relay-provider-models.tsx` 按提供商显示只读模型目录弹窗与目录更新入口。
+`components/settings/relay-key-models.tsx` 在 Key 编辑弹窗按提供商分组勾选模型，可跨多个提供商；独立目录更新不扩大 Key 权限。
+`components/settings/relay-model-copy.tsx` 在 Key 列表中提供授权模型 ID 复制菜单、复制结果提示和剪贴板不可用时的手动复制入口。

@@ -78,7 +78,7 @@ describe("webui server data API", () => {
     const owned = await fetch(`${origin}/api/v1/requests?range=all&source=owned`);
     expect(await owned.json()).toMatchObject({ records: [] });
     expect((await fetch(`${origin}/api/v1/requests?source=other`)).status).toBe(400);
-    appendFileSync(join(fixture.home, "config.toml"), `\n[[model_relay.accounts]]\nprovider = "clp-test"\nmodels = ["fixture"]\n[[model_relay.callers]]\ncaller_id = "client"\nkey_id = "key"\nprovider = "clp-test"\ncredential_generation = 2\nsecret_sha256 = "${"a".repeat(64)}"\nenabled = false\ndisplay_name = "沉浸式翻译"\n`);
+    appendFileSync(join(fixture.home, "config.toml"), `\n[[model_relay.callers]]\ncaller_id = "client"\nkey_id = "key"\nmodels = ["clp-test/fixture"]\ncredential_generation = 2\nsecret_sha256 = "${"a".repeat(64)}"\nenabled = false\ndisplay_name = "沉浸式翻译"\n`);
     const named = await fetch(`${origin}/api/v1/requests?range=all&source=relay&callerId=client`);
     expect(named.status).toBe(200);
     expect(await named.json()).toMatchObject({ records: [{ callerId: "client", callerDisplayName: "沉浸式翻译" }] });
@@ -87,7 +87,10 @@ describe("webui server data API", () => {
     writeFileSync(configPath, configuration.replace('display_name = "沉浸式翻译"', 'display_name = "网页翻译"'));
     const renamed = await fetch(`${origin}/api/v1/requests?range=all&source=relay`);
     expect(await renamed.json()).toMatchObject({ records: [{ callerId: "client", callerDisplayName: "网页翻译" }] });
-    for (const changed of [configuration.replace('key_id = "key"', 'key_id = "other-key"'), configuration.replaceAll('provider = "clp-test"', 'provider = "clp-other"')]) {
+    writeFileSync(configPath, configuration.replace('models = ["clp-test/fixture"]', 'models = ["clp-other/fixture"]'));
+    const rebound = await fetch(`${origin}/api/v1/requests?range=all&source=relay`);
+    expect(await rebound.json()).toMatchObject({ records: [{ callerId: "client", callerDisplayName: "沉浸式翻译" }] });
+    for (const changed of [configuration.replace('key_id = "key"', 'key_id = "other-key"'), configuration.replace('caller_id = "client"', 'caller_id = "other-client"')]) {
       writeFileSync(configPath, changed);
       const mismatched = await fetch(`${origin}/api/v1/requests?range=all&source=relay`);
       expect(mismatched.status).toBe(200);

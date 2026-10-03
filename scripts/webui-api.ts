@@ -1051,12 +1051,10 @@ export interface TrafficTraceResponse extends Omit<TrafficDetailResponse, "excha
   exchange: Pick<TrafficExchangeDetail, "id" | "trace" | "tracePage">
 }
 
-export type { RelayExtraModel, RelayReasoningEffort } from "../runtime/model-relay-config.mjs";
-import type { RelayExtraModel } from "../runtime/model-relay-config.mjs";
 export type RelayReasoning = "passthrough" | "off";
 export interface RelayManagedCaller {
   caller_id: string; display_name?: string; key_id: string; credential_generation: number; enabled: boolean;
-  provider: string; models: string[]; reasoning: RelayReasoning;
+  models: string[]; reasoning: RelayReasoning;
 }
 export interface RelayManagementSnapshot {
   clineCatalog?: ClineRelayCatalogSnapshot;
@@ -1069,15 +1067,14 @@ export interface RelayManagementSnapshot {
     capture: { enabled: boolean; state: "initializing" | "ready" | "failed" | "closed"; active: number; skippedCapacity: number };
     metrics: { accepted: number; unconfirmed: number; rejected: number; localDropped: number } }
     | { state: "stopped" | "unknown" };
-  providers: Array<{ id: string; available: boolean; enabledModels: string[]; extraModels?: RelayExtraModel[]; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; reasoningOff: boolean; inputModalities: Array<"text" | "image" | "audio" | "video" | "pdf"> }> }>;
+  providers: Array<{ id: string; available: boolean; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; relayId: string; reasoningOff: boolean; inputModalities: Array<"text" | "image" | "audio" | "video" | "pdf"> }> }>;
 }
 export type RelayManagementInput =
-  | { command: "models"; provider: string; extraModels?: RelayExtraModel[]; enabledModels?: string[] }
-  | { command: "issue"; name?: string; caller: string; key: string; provider: string; reasoning: RelayReasoning }
-  | { command: "edit"; name?: string; provider?: string; caller: string; reasoning: RelayReasoning }
+  | { command: "issue"; name?: string; caller: string; key: string; models: string[]; reasoning: RelayReasoning }
+  | { command: "edit"; name?: string; models?: string[]; caller: string; reasoning: RelayReasoning }
   | { command: "rotate" | "disable" | "delete"; caller: string };
 export interface RelayManagementMutation { revision: string; input: RelayManagementInput }
-export interface RelayManagementPreview { command: RelayManagementInput["command"]; caller: string; callers: RelayManagedCaller[]; extraModels?: RelayExtraModel[]; enabledModels?: string[] }
+export interface RelayManagementPreview { command: RelayManagementInput["command"]; caller: string; callers: RelayManagedCaller[] }
 export interface RelayManagementResult {
   cleanupStatus?: "failed";
   activation: "saved_and_applied" | "saved_not_running" | "saved_unconfirmed";
@@ -1094,7 +1091,7 @@ export type RelayQueueSnapshot = { state: "stopped" | "unknown" } | {
     requestId: string;
     callerId: string;
     displayName: string | null;
-    provider: string;
+    provider: string | null;
     model: string | null;
     protocol: "chat" | "responses";
     phase: "input" | "queue" | "prepare" | "upstream" | "delivery";

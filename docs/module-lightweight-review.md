@@ -265,7 +265,7 @@ A07 已提交为 `4b6d2671`，正常提交门禁通过：5550 项测试通过、
 - 状态：已验证，未提交。
 - 候选筛选：Provider 指标发送在 Unix 直接连接、采用空闲超时且只做尽力发送；Relay 指标有取消信号、绝对截止及明确确认分类，两者不强行合并。Queue Events 是持续订阅，也不进入单次请求实现。
 - 链路一：ModelRelayServer 生成指标 → RelayMetricsSender 有界队列 → sendRelayMetrics → 私有 IPC → RelayMetricsServer → Gateway 指标入队。Sender 保留四类结果及物理发送槽，接受不等于持久化。
-- 链路二：管理／WebUI 查询 → queryModelRelayControl → 私有 IPC → ModelRelayControl → v4 回应校验；apply 还需摘要匹配，queue 允许最多 128 KiB 回应，status／apply 为 8192 字节。
+- 链路二：管理／WebUI 查询 → queryModelRelayControl → 私有 IPC → ModelRelayControl → v5 回应校验；apply 还需摘要匹配，queue 允许最多 128 KiB 回应，status／apply 为 8192 字节。
 - 改前审查：两条链路重复持有 Socket、截止定时器、响应缓冲、单次结算标记，以及连接／数据／错误／关闭监听。它们均不重试，按换行接收单份 JSON；差异可以由现有调用方给定的截止时间、回应上限和可选取消信号表达，不需要业务回调或协议插件。
 - 优化：在既有 runtime/private-ipc 中集中 requestPrivateIpcJson，并补充类型声明；指标发送和控制查询移除各自请求生命周期实现。共享层只管理连接、字节预算、JSON 解码和清理，业务版本、请求 ID、摘要、结果字段校验仍归调用方。
 - 收益：两份客户端资源管理收敛为一个所有者；这是实际跨调用链复用，不是仅移动文件。三个实现文件合计净增加 8 行（另有类型声明），不以行数、性能或内存改善作为收益。未新增项目依赖、文件层级、队列、重试或用户配置。

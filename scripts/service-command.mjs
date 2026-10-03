@@ -91,11 +91,7 @@ export async function runServiceCommand(args) {
   if (!serviceCommandActions.includes(action)) {
     throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status|logs>");
   }
-  // Updaters already running before the rename use this exact invocation after
-  // switching source. Keep the documented start-only handoff, not a general alias.
-  const upgradeHandoff = action === "start" && rest.length === 1 && rest[0] === "model-relay";
-  const serviceArgs = parseServiceArguments(action, upgradeHandoff ? ["relay"] : rest);
-  if (upgradeHandoff) printCliMessage("note", "正在使用兼容旧版更新器的 Relay 启动入口；日常操作请使用 codexc service start relay。");
+  const serviceArgs = parseServiceArguments(action, rest);
   rejectUnsafeAppServerServiceAction(action, serviceArgs, process.env);
   if (action === "status" && serviceArgs[1] === "--json") {
     runNodeScript(

@@ -3,7 +3,7 @@ import { openQueueStream } from "./webui-queue-events.mjs";
 import { watchRelayChanges } from "../runtime/model-relay-control.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { locateUserConfig } from "./runtime-config.mjs";
-import { relayDisplayNameSchema, relayExtraModelsSchema } from "../runtime/model-relay-config.mjs";
+import { relayDisplayNameSchema, relayKeyModelsSchema } from "../runtime/model-relay-config.mjs";
 import { z } from "zod";
 import { manageModelRelay, readRelayQueue, readRelayManagement, withRelayManagementTransaction } from "./model-relay-management.mjs";
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
@@ -12,9 +12,8 @@ import { fingerprintManagementValue } from "./management-security.mjs";
 const identity = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
 const fields = { name: relayDisplayNameSchema.optional(), reasoning: z.enum(["passthrough", "off"]) };
 const mutation = z.discriminatedUnion("command", [
-  z.strictObject({ command: z.literal("models"), provider: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u), extraModels: relayExtraModelsSchema.optional(), enabledModels: z.array(z.string().min(1).max(200)).max(256).optional() }),
-  z.strictObject({ command: z.literal("issue"), caller: identity, key: identity, provider: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u), ...fields }),
-  z.strictObject({ command: z.literal("edit"), caller: identity, provider: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u).optional(), ...fields }),
+  z.strictObject({ command: z.literal("issue"), caller: identity, key: identity, models: relayKeyModelsSchema, ...fields }),
+  z.strictObject({ command: z.literal("edit"), caller: identity, models: relayKeyModelsSchema.optional(), ...fields }),
   z.strictObject({ command: z.literal("delete"), caller: identity }),
   z.strictObject({ command: z.literal("rotate"), caller: identity }),
   z.strictObject({ command: z.literal("disable"), caller: identity }),
@@ -101,7 +100,7 @@ export async function routeRelayManagement({ environment, maximumBodyBytes, open
     const result = await manageModelRelay(input, environment, { expectedRevision: revision });
     let auditStatus = "recorded";
     try {
-      state.audit.record({ sessionId: principalId, source: "webui", operation: `relay.${input.command}`, target: input.command === "models" ? input.provider : input.caller,
+      state.audit.record({ sessionId: principalId, source: "webui", operation: `relay.${input.command}`, target: input.caller,
         inputFingerprint: binding.inputFingerprint, revision, phase: "completed", resultCode: result.activation, recovery: "none" });
     } catch { auditStatus = "failed"; }
     // Saving has already succeeded. Never discard a one-time secret on an audit failure.

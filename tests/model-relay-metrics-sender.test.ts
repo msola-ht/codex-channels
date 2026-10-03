@@ -25,6 +25,12 @@ describe("Relay metric confirmation semantics", () => {
     const envelope = { version: 1 as const, providerId: sample.provider, relayRequestId: sample.relayRequestId, sample };
     try {
       expect(await sendRelayMetrics(path, envelope, AbortSignal.timeout(2000))).toMatchObject({ result: "accepted" });
+      const requestModel = `${"p".repeat(64)}/${"m".repeat(200)}`;
+      expect(await sendRelayMetrics(path, { ...envelope, sample: { ...sample, requestModel } }, AbortSignal.timeout(2000))).toMatchObject({ result: "accepted" });
+      expect(receive).toHaveBeenLastCalledWith(expect.objectContaining({ requestModel }), expect.any(AbortSignal));
+      for (const invalid of [{ requestModel: `${requestModel}x` }, { responseModel: "m".repeat(201) }]) {
+        expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, ...invalid } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
+      }
       expect(JSON.parse(await exchange({ ...envelope, version: 0 })) as unknown).toMatchObject({ result: "rejected", reason: "unsupported_version" });
       expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, threadId: "forged" } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
       expect(JSON.parse(await exchange({ ...envelope, providerId: "clp-other" })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
@@ -48,7 +54,7 @@ describe("Relay metric confirmation semantics", () => {
         socket.once("connect", () => socket.write("{")); socket.once("close", resolve);
       });
       expect(Date.now() - started).toBeLessThan(2500);
-      expect(receive).toHaveBeenCalledTimes(1);
+      expect(receive).toHaveBeenCalledTimes(2);
     } finally { await server.close(); rmSync(root, { recursive: true, force: true }); }
   });
   it.each([

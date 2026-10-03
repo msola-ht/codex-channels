@@ -435,7 +435,7 @@
   安装冒烟。干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
 - `config-backup.mjs`：调用方持有配置锁并验证目标后，执行私有备份、同步及逐字节校验，再原子保存，可传递完整文件容量上限；Relay 管理与全局转储升级共用。
-- `traffic-upgrade.mjs` / `traffic-upgrade.d.mts`：`codexc traffic upgrade` 先确认 Gateway owner 已退出，再显式统一 Codex/Relay 采集开关与模式；验证并移除旧 Relay 采集字段，保留身份、凭据、保留天数和其他配置。
+- `traffic-upgrade.mjs` / `traffic-upgrade.d.mts`：`codexc traffic upgrade` 先确认 Gateway owner 已退出，再显式统一 Codex/Relay 采集开关与模式；保留身份、凭据、保留天数和其他配置，不转换旧 Relay 字段。
 - `traffic-command-options.mjs` / `traffic-command-options.d.mts`：集中解析并预检 `codexc traffic` 的
   转储目录、逻辑调用编号、正文长度、关键字、跟随与清理参数，使顶层 CLI 在读取配置前拒绝非法输入，
   并向顶层帮助导出规范用法行。
@@ -496,7 +496,7 @@
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
   控制脚本实现 linger、旧 Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 明确失败关闭。
-- `service-command.mjs`：公开 `relay` 目标映射到既有内部 `model-relay` 服务标识，仅为旧更新器保留带提示的 `start model-relay` 升级入口；实现公开 `service` 子命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
+- `service-command.mjs`：公开 `relay` 目标映射到既有内部 `model-relay` 服务标识，拒绝旧公开目标名称；实现公开 `service` 子命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
   服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
   检查。CLI 只保留帮助展示和命令分派。
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
@@ -552,9 +552,9 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 - `cline-pass-account-management.mjs` / `cline-pass-account-management.d.mts`：CLI/WebUI 共用的 CLP 固定/切换配置、默认账户与移除预览及私有写入事务；共享 DS Flash 模板与统一上下文设置，不依赖终端交互。
 
 - `model-relay-listen-menu.mjs`：CLI 与 Config 一级菜单共用的监听交互入口，关闭/本机/局域网/指定 IP，保存前确认和配置修订检查，不自动安装或启动服务。
-- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑改绑/轮换/停用/删除、中文用途名称、显式旧限流与模型授权升级、提供商启用模型设置及名称/策略/非 CLP 引用/历史身份摘要回退。
+- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑改绑/轮换/停用/删除、中文用途名称及每 Key 多提供商模型授权，不提供旧格式转换命令。
 - `cline-relay-catalog.mjs` / `cline-relay-catalog.d.mts`：Cline 目录管理入口，转出 Runtime 共用的读取、下载和原子保存能力；不调用模型或修改 Key。
-- `model-relay-management.mjs` / `model-relay-management.d.mts`：CLI/WebUI 共享 Relay 管理，脱敏资源、提供商统一模型授权与 CLP 思考策略管理、目录输入能力与策略能力、只读预览、版本检查、配置锁/备份/原子保存及 IPC 生效确认；只在实际保存后返回一次新秘密；Relay 专用事务保留已保存结果并单独标记锁清理失败。
+- `model-relay-management.mjs` / `model-relay-management.d.mts`：CLI/WebUI 共享 Relay 管理，脱敏资源、Key 多提供商模型授权与思考策略管理、目录输入能力与策略能力、只读预览、版本检查、配置锁/备份/原子保存及 IPC 生效确认；只在实际保存后返回一次新秘密；Relay 专用事务保留已保存结果并单独标记锁清理失败。
 - `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 与队列 SSE 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
 - `webui-queue-events.mjs`：Relay 与渠道投递共用的鉴权后 SSE 转接、订阅总量限制及 WebUI 关闭清理；通知不携带队列内容。
 - `webui-management-delivery-route.mjs`：渠道投递箱鉴权 SSE 变化通知、只读分页查询、按需限定内容预览及单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，在线操作通过投递私有 IPC 交给 Gateway 单写者，确认未发送命令且 Gateway 不可连接时才使用 Journal 维护模式独占锁，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览及只读批量摘要认证解密后仅返回显式展示字段，摘要批次消耗读取配额，批量操作在同一事务中复核全部修订。

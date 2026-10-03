@@ -236,7 +236,7 @@ describe("WebUI metrics table presentation", () => {
           requestsOtherUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "other-provider" }] }),
           trafficOtherUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "other-provider" }], onOpen: noop }),
           requestsClpUnexpected: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", upstreamProvider: "other-provider" }] }),
-          trafficClpUnexpected: render(TrafficTable, { exchanges: [{ ...exchange, label: "relay.chat", account: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", upstreamProvider: "other-provider" }], onOpen: noop }),
+          trafficClpUnexpected: render(TrafficTable, { exchanges: [{ ...exchange, label: "relay.chat", account: "clp-main", requestModel: "clp-main/deepseek-v4.1-flash", upstreamProvider: "other-provider" }], onOpen: noop }),
           detailClpUnexpected: render(TrafficDetail, { detail: { ...detail, account: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", upstreamProvider: "other-provider" }, provider: "relay.chat", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           requestsMuseUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/muse-spark-1.3-contributor", upstreamProvider: "meta" }] }),
           detailMuseUpstream: render(TrafficDetail, { detail: { ...detail, account: "clp-main", requestModel: "cline-pass/muse-spark-1.3-contributor", upstreamProvider: "meta" }, provider: "relay.chat", session: "batch-1", onRetry: noop, onTracePageChange: noop }),

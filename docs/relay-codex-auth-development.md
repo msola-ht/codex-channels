@@ -260,8 +260,8 @@ TLS 指纹不做伪装。Codex 使用 rustls，Node 侧与 rustls 的 ClientHell
 | P2 | WSS 上游传输、头部对齐、取消与指标贯通，隔离链路通过 | 未开始 |
 | P3 | 真实调用验证、CLI 与 WebUI 展示、文档与索引收口 | 未开始 |
 
-回退不需要数据迁移：停止配置中的 `codex-auth` 引用后，该 Provider 及其 Key 一并失效，
-适用现有 `codexc relay rollback-providers` 语义；`auth.json`、`models_cache.json`、
+回退不需要数据迁移：从 Key 授权模型中移除 `codex-auth` 引用；若不再保留任何模型，删除对应 Key。
+不提供 Relay 旧配置回退命令；`auth.json`、`models_cache.json`、
 Codex 登录态与历史指标均不修改。
 
 ## 14. 未决事项

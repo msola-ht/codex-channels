@@ -1,6 +1,6 @@
 export type {
   DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
-  RelayExtraModel, RelayReasoningEffort, RelayQueueSnapshot, RelayReasoning, RelayManagedCaller, RelayManagementSnapshot, RelayManagementInput, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
+  RelayQueueSnapshot, RelayReasoning, RelayManagedCaller, RelayManagementSnapshot, RelayManagementInput, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
   Aggregate,
   CacheUsage,
   ServerTimeResponse,

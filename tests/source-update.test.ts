@@ -147,7 +147,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       runCommand: (_command, args) => { calls.push(args); },
     });
     expect(calls.filter(args => args[1] === "service").map(args => args.slice(2))).toEqual([
-      ["stop", "all"], ["start", "app-server"], ["start", "gateway"], ...(running ? [["start", "model-relay"]] : []),
+      ["stop", "all"], ["start", "app-server"], ["start", "gateway"], ...(running ? [["start", "relay"]] : []),
     ]);
   });
 
