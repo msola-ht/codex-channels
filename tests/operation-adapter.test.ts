@@ -95,6 +95,142 @@ describe("operation normalization", () => {
     )?.status).toBe("failed");
   });
 
+  describe("read-only exploration commands", () => {
+    it.each([
+      [
+        [{ type: "read", command: "cat AGENTS.md", name: "AGENTS.md", path: "/workspace/AGENTS.md" }],
+        "read",
+        "AGENTS.md",
+      ],
+      [
+        [{ type: "listFiles", command: "ls src", path: "src" }],
+        "listFiles",
+        "src",
+      ],
+      [
+        [{ type: "search", command: "rg -n TODO src", query: "TODO", path: "src" }],
+        "search",
+        "TODO in src",
+      ],
+      [
+        [{ type: "search", command: "rg --files-with-matches TODO", query: "TODO", path: null }],
+        "search",
+        "TODO",
+      ],
+    ])("summarizes %j without exposing the shell command", (commandActions, kind, detail) => {
+      expect(toOperationUpdate({
+        type: "commandExecution",
+        id: "explore",
+        command: "sed -n '1,120p' AGENTS.md",
+        status: "completed",
+        commandActions,
+      }, "completed")).toEqual({
+        itemId: "explore",
+        kind: "command",
+        status: "completed",
+        detail,
+        commandExploration: kind,
+      });
+    });
+
+    it("deduplicates read names and bounds long exploration summaries", () => {
+      const names = Array.from({ length: 9 }, (_value, index) => `file-${index}.ts`);
+      const operation = toOperationUpdate({
+        type: "commandExecution",
+        id: "many",
+        command: "cat file-*.ts",
+        status: "completed",
+        commandActions: [
+          { type: "read", command: "cat a.ts", name: "a.ts", path: "/workspace/a.ts" },
+          { type: "read", command: "cat a.ts", name: "a.ts", path: "/workspace/a.ts" },
+          ...names.map((name) => ({
+            type: "read", command: `cat ${name}`, name, path: `/workspace/${name}`,
+          })),
+        ],
+      }, "completed");
+      expect(operation?.commandExploration).toBe("read");
+      expect(operation?.detail).toBe(`${["a.ts", ...names].slice(0, 8).join("、")} 等 10 个文件`);
+    });
+
+    it("deduplicates repeated search queries in one summary", () => {
+      expect(toOperationUpdate({
+        type: "commandExecution",
+        id: "search-dedupe",
+        command: "rg -n TODO src",
+        status: "completed",
+        commandActions: [
+          { type: "search", command: "rg -n TODO src", query: "TODO", path: "src" },
+          { type: "search", command: "rg -n TODO src", query: "TODO", path: "src" },
+        ],
+      }, "completed")?.detail).toBe("TODO in src");
+    });
+
+    it("keeps the raw command for commands typed in the user's terminal", () => {
+      const operation = toOperationUpdate({
+        type: "commandExecution",
+        id: "user-shell",
+        command: "sed -n '1,120p' AGENTS.md",
+        source: "userShell",
+        status: "completed",
+        commandActions: [
+          { type: "read", command: "sed -n '1,120p' AGENTS.md", name: "AGENTS.md", path: "/workspace/AGENTS.md" },
+        ],
+      }, "completed");
+      expect(operation).toEqual({
+        itemId: "user-shell",
+        kind: "command",
+        status: "completed",
+        detail: "sed -n '1,120p' AGENTS.md",
+      });
+      expect(operation?.commandExploration).toBeUndefined();
+    });
+
+    it("combines mixed read-only actions into one labeled summary", () => {
+      expect(toOperationUpdate({
+        type: "commandExecution",
+        id: "mixed",
+        command: "sed -n '1,40p' a.ts && rg -n TODO src && ls test",
+        status: "completed",
+        commandActions: [
+          { type: "read", command: "sed -n '1,40p' a.ts", name: "a.ts", path: "/workspace/a.ts" },
+          { type: "search", command: "rg -n TODO src", query: "TODO", path: "src" },
+          { type: "listFiles", command: "ls test", path: "test" },
+        ],
+      }, "completed")).toMatchObject({
+        kind: "command",
+        commandExploration: "mixed",
+        detail: "读取 a.ts；搜索 TODO in src；浏览 test",
+      });
+    });
+
+    it.each([
+      undefined,
+      [],
+      [{ type: "unknown", command: "echo hi > out.txt" }],
+      [{ type: "read", command: "cat", name: "", path: "" }],
+      [{ type: "read", command: "cat /workspace/a.ts", name: null, path: "/workspace/a.ts" }],
+      [{ type: "search", command: "", query: null, path: null }],
+      [{ type: "listFiles", command: "" }],
+      [{ type: "read", command: "cat a.ts", name: "a.ts", path: "/a.ts" }, { type: "unknown", command: "rm a.ts" }],
+      "invalid",
+    ])("keeps the raw command when command actions are not fully recognized: %j", (commandActions) => {
+      const operation = toOperationUpdate({
+        type: "commandExecution",
+        id: "raw",
+        command: "sed -n '1,120p' AGENTS.md",
+        status: "completed",
+        ...(commandActions === undefined ? {} : { commandActions }),
+      }, "completed");
+      expect(operation).toEqual({
+        itemId: "raw",
+        kind: "command",
+        status: "completed",
+        detail: "sed -n '1,120p' AGENTS.md",
+      });
+      expect(operation?.commandExploration).toBeUndefined();
+    });
+  });
+
   it("maps only the official generated-image saved path as an artifact", () => {
     expect(toOperationUpdate({
       type: "imageGeneration",

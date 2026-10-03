@@ -60,6 +60,27 @@ describe("Feishu operation log formatter", () => {
     );
   });
 
+  it("renders read-only exploration commands with the parsed file intent", () => {
+    const record: OperationUpdate = {
+      itemId: "read-1",
+      kind: "command",
+      commandExploration: "read",
+      detail: "AGENTS.md、src/index.ts",
+      status: "completed",
+      durationMs: 125,
+      exitCode: 0,
+    };
+
+    expect(formatFeishuOperation(record)).toBe([
+      "**读取文件 · 已完成** · exit 0",
+      "具体内容：`AGENTS.md、src/index.ts`",
+      "",
+      "---",
+      "**耗时：** 125 ms",
+    ].join("\n"));
+    expect(formatFeishuOperation({ ...record, status: "running" })).not.toContain("```shell");
+  });
+
   it("shows MCP tool capability hints without changing the outcome", () => {
     expect(formatFeishuOperation({
       itemId: "mcp-write",

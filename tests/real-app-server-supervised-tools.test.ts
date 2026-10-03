@@ -395,6 +395,88 @@ contractSuite("real supervised App Server tools", () => {
       }
     }, 45_000);
 
+    it("classifies real read-only command items as exploration", async () => {
+      const directory = mkdtempSync(join("/tmp", "codex-explore-contract-"));
+      const codexHome = join(directory, "home");
+      let count = 0;
+      let completed = false;
+      const operations: OperationUpdate[] = [];
+      const apiServer = createServer((request, response) => {
+        const chunks: Buffer[] = [];
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          if (request.method !== "POST" || request.url !== "/responses") {
+            response.writeHead(404).end();
+            return;
+          }
+          const number = ++count;
+          const id = `explore-response-${number}`;
+          const item = number === 1
+            ? { type: "function_call", call_id: "explore-call", namespace: "functions", name: "exec_command",
+                arguments: JSON.stringify({ cmd: "sed -n '1,20p' AGENTS.md", login: false, yield_time_ms: 10_000, max_output_tokens: 2_000 }) }
+            : { type: "message", role: "assistant", id: "explore-done", content: [{ type: "output_text", text: "done" }] };
+          response.writeHead(200, { "content-type": "text/event-stream" });
+          for (const event of [{ type: "response.created", response: { id } }, { type: "response.output_item.done", item }, completedResponseEvent(id)]) {
+            response.write(`data: ${JSON.stringify(event)}\n\n`);
+          }
+          response.end();
+        });
+      });
+      let client: CodexAppServerClient | undefined;
+      let removeNotification: (() => void) | undefined;
+      try {
+        await new Promise<void>((resolve) => apiServer.listen(0, "127.0.0.1", resolve));
+        const address = apiServer.address();
+        if (!address || typeof address === "string") throw new Error("Missing fixture address");
+        mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+        writeFileSync(join(directory, "AGENTS.md"), "Real exploration fixture\n");
+        const catalog = join(codexHome, "models.json");
+        writeFileSync(catalog, JSON.stringify({ models: [{
+          slug: "explore-contract", display_name: "Explore fixture", description: "Explore fixture",
+          context_window: 200_000, default_reasoning_level: "high",
+          supported_reasoning_levels: [{ effort: "high", description: "Fixture" }],
+          shell_type: "shell_command", visibility: "list", supported_in_api: true, priority: 1,
+          availability_nux: null, upgrade: null, base_instructions: "You are a coding agent.",
+          support_verbosity: true, default_verbosity: "low", apply_patch_tool_type: "freeform",
+          truncation_policy: { mode: "tokens", limit: 10_000 }, supports_parallel_tool_calls: true,
+          experimental_supported_tools: [],
+        }] }));
+        writeFileSync(join(codexHome, "config.toml"), [
+          'model = "explore-contract"', 'model_provider = "explore-contract"', `model_catalog_json = ${JSON.stringify(catalog)}`,
+          '[features]', 'plugins = false', '[model_providers.explore-contract]', 'name = "Explore fixture"',
+          `base_url = "http://127.0.0.1:${address.port}"`,
+          'wire_api = "responses"', 'requires_openai_auth = false', 'supports_websockets = false',
+        ].join("\n"));
+        client = new CodexAppServerClient(new JsonRpcClient(new StdioTransport({
+          codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: directory,
+          environment: { ...process.env, CODEX_HOME: codexHome },
+        })), { sandbox: "read-only" });
+        await client.connect();
+        const { thread } = await client.startThread(directory, { ephemeral: true, approvalPolicy: "never" });
+        removeNotification = client.onNotification((notification) => {
+          const event = toConversationInputEvent(notification);
+          if (event?.type === "item.operation.updated" && event.threadId === thread.id) {
+            operations.push(event.operation);
+          }
+          if (event?.type === "turn.completed" && event.threadId === thread.id) completed = true;
+        });
+        await client.startTurn(thread.id, [{ type: "text", text: "Read AGENTS.md" }], "codex_connect:explore-contract", directory);
+        await waitFor(() => completed, 20_000);
+        const commands = operations.filter((operation) => operation.kind === "command");
+        expect(commands).toContainEqual(expect.objectContaining({
+          status: "completed",
+          commandExploration: "read",
+          detail: "AGENTS.md",
+        }));
+        expect(JSON.stringify(commands)).not.toContain("sed -n");
+      } finally {
+        removeNotification?.();
+        await client?.close();
+        await new Promise<void>((resolve) => apiServer.close(() => resolve()));
+        rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
+    }, 45_000);
+
     it.each(["disabled", "answer", "interrupt", "disconnect", "background", "skip"] as const)("probes Default-mode user input: %s", async (scenario) => {
       const directory = mkdtempSync(join(tmpdir(), "codex-async-contract-"));
       const codexHome = join(directory, "home");

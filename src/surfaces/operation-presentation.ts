@@ -78,7 +78,7 @@ export function operationStatus(status: OperationUpdate["status"]): string {
 export function operationTitle(record: OperationUpdate): string {
   switch (record.kind) {
     case "command":
-      return "运行命令";
+      return commandExplorationTitle(record.commandExploration);
     case "fileChange":
       return "修改文件";
     case "mcpTool":
@@ -114,6 +114,17 @@ export function operationTitle(record: OperationUpdate): string {
       return "压缩上下文";
     case "reviewMode":
       return record.action === "exited" ? "退出审查模式" : "进入审查模式";
+  }
+}
+
+/** 只读探索命令沿用原生 TUI 的读取、搜索与列目录语义，其余命令仍是「运行命令」。 */
+function commandExplorationTitle(kind: OperationUpdate["commandExploration"]): string {
+  switch (kind) {
+    case "read": return "读取文件";
+    case "search": return "搜索内容";
+    case "listFiles": return "浏览目录";
+    case "mixed": return "探索文件";
+    default: return "运行命令";
   }
 }
 

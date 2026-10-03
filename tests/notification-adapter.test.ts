@@ -210,6 +210,33 @@ describe("Notification adapter", () => {
       phase: "final_answer",
     });
     expect(toConversationInputEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "commandExecution",
+          id: "item-read",
+          command: "sed -n '1,120p' AGENTS.md",
+          status: "completed",
+          commandActions: [
+            { type: "read", command: "sed -n '1,120p' AGENTS.md", name: "AGENTS.md", path: "/workspace/AGENTS.md" },
+          ],
+        },
+      },
+    })).toEqual({
+      type: "item.operation.updated",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      operation: {
+        itemId: "item-read",
+        kind: "command",
+        status: "completed",
+        detail: "AGENTS.md",
+        commandExploration: "read",
+      },
+    });
+    expect(toConversationInputEvent({
       method: "item/started",
       params: {
         threadId: "thread-1",

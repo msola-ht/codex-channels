@@ -78,7 +78,10 @@
   残缺或无关通知不进入业务模块。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，保留 MCP Tool Item 的
   `readOnlyHint` 能力提示，把多代理工具调用的 `interrupted` 归为失败，并在离开 Client 边界前
-  清洗命令、查询及上游错误中的敏感文本；只把 `imageGeneration.savedPath` 映射为稳定生成图片
+  清洗命令、查询及上游错误中的敏感文本；`commandExecution.commandActions` 非空、全部为
+  read/listFiles/search 且来源不是用户终端命令时输出只读探索归类与文件名摘要，任何未知或畸形片段都退回
+  原始命令；该判定沿用上游 best-effort 解析，`find … -delete`、`… | tee` 之类写入形态可能一并归类；
+  只把 `imageGeneration.savedPath` 映射为稳定生成图片
   产物路径，不把 `imageView` 当作可外发产物。
   `cua_repl.js` / `js_reset` 归为 MCP 的 `computerUse` 操作，`js` 只提取参数中的操作标题并
   脱敏限长，不把执行代码或原始结果带入稳定事件。

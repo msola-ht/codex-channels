@@ -617,6 +617,23 @@ describe("TelegramOutbox", () => {
     expect(api.sent[1]).toContain("修改文件 · 已完成");
   });
 
+  it("labels read-only exploration commands and keeps file names out of shell blocks", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle(operationUpdated("read-1", "completed", "command", "AGENTS.md", "read"));
+    outbox.handle(operationUpdated("search-1", "completed", "command", "TODO in src", "search"));
+    await vi.advanceTimersByTimeAsync(750);
+    await settle();
+    await outbox.close();
+
+    expect(api.sent).toEqual([
+      "<b>操作过程</b>\n\n📖 <b>读取文件 · 已完成</b>\n<code>AGENTS.md</code>",
+      "<b>操作过程</b>\n\n🔍 <b>搜索内容 · 已完成</b>\n<code>TODO in src</code>",
+    ]);
+  });
+
   it("does not send thinking status when reasoning display is disabled", async () => {
     const api = new FakeTelegramApi();
     const outbox = new TelegramOutbox(
@@ -2168,6 +2185,7 @@ function operationUpdated(
   status: "running" | "completed" | "failed" | "declined",
   kind: Extract<OutputEvent, { type: "operation.updated" }>["operation"]["kind"],
   detail?: string,
+  commandExploration?: Extract<OutputEvent, { type: "operation.updated" }>["operation"]["commandExploration"],
 ): Extract<OutputEvent, { type: "operation.updated" }> {
   return {
     type: "operation.updated",
@@ -2179,6 +2197,7 @@ function operationUpdated(
       status,
       kind,
       ...(detail ? { detail } : {}),
+      ...(commandExploration ? { commandExploration } : {}),
     },
   };
 }

@@ -91,9 +91,11 @@ function renderOperationRecords(
     lines.push("", heading);
     if (record.detail) {
       const detail = escapeTelegramHtml(redactOperationDetail(record.detail));
-      lines.push(record.kind === "command"
+      lines.push(record.kind === "command" && record.commandExploration === undefined
         ? `<pre><code class="language-shell">${detail}</code></pre>`
-        : `<blockquote>${detail}</blockquote>`);
+        : record.commandExploration === undefined
+          ? `<blockquote>${detail}</blockquote>`
+          : `<code>${detail}</code>`);
     }
   }
   return lines.join("\n");
@@ -123,7 +125,7 @@ function operationGroupKey(record: OperationUpdate): string {
 }
 
 function operationIcon(record: OperationUpdate): string {
-  const icon = ({
+  const icon = record.commandExploration === undefined ? ({
     command: "💻",
     fileChange: "🔧",
     mcpTool: "🔌",
@@ -136,7 +138,12 @@ function operationIcon(record: OperationUpdate): string {
     plan: "📋",
     contextCompaction: "🗜️",
     reviewMode: "🔍",
-  } as const)[record.kind];
+  } as const)[record.kind] : ({
+    read: "📖",
+    search: "🔍",
+    listFiles: "🗂️",
+    mixed: "📖",
+  } as const)[record.commandExploration];
   const statusIcon = ({
     running: "⏳",
     completed: "",

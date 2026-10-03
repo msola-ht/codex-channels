@@ -34,6 +34,7 @@ export {
   usesOpenAiAccount,
   surfaceAccountKey,
   type ConversationTarget,
+  type CommandExplorationKind,
   type OperationKind,
   type OperationStatus,
   type OperationUpdate,

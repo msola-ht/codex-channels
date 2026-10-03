@@ -1,4 +1,5 @@
 import type {
+  CommandExplorationKind,
   OperationStatus,
   OperationUpdate,
   SubagentState,
@@ -28,10 +29,15 @@ export function toOperationUpdate(
         return undefined;
       }
       const exitCode = finiteNumber(item.exitCode);
+      // 与原生 TUI 的 is_exploring_call 一致：用户在终端输入的命令不作只读探索归类。
+      const exploration = stringValue(item.source) === "userShell"
+        ? undefined
+        : summarizeCommandExploration(item.commandActions);
       return {
         ...common,
         kind: "command",
-        detail: sanitizeOperationText(command),
+        detail: exploration?.detail ?? sanitizeOperationText(command),
+        ...(exploration ? { commandExploration: exploration.kind } : {}),
         ...(exitCode !== undefined ? { exitCode } : {}),
       };
     }
@@ -154,6 +160,122 @@ function subagentOperationStatus(
   )
     ? "failed"
     : status;
+}
+
+type ReadAction = { kind: "read"; name: string };
+type SearchAction = { kind: "search"; summary: string };
+type ListAction = { kind: "listFiles"; summary: string };
+type ExplorationAction = ReadAction | SearchAction | ListAction;
+type ExplorationSegment = {
+  kind: Exclude<CommandExplorationKind, "mixed">;
+  text: string;
+};
+
+interface CommandExploration {
+  kind: CommandExplorationKind;
+  detail: string;
+}
+
+const maximumExplorationItems = 8;
+
+/**
+ * 只读探索命令的展示摘要，语义与原生 TUI 的 “Explored / Read …” 一致。
+ *
+ * 判定条件与上游 is_exploring_call 相同：commandActions 非空且全部为 read/listFiles/search。
+ * 上游只要出现无法识别的片段就把整条命令折叠为 unknown，因此任何缺失、畸形或未知片段都
+ * 返回 undefined，由调用方退回原始命令。
+ *
+ * 该解析是上游声明的最佳近似：上游会忽略部分管道阶段与变更参数，`find … -delete`、
+ * `… | tee` 之类仍会被解析为只读动作。因此这里的归类只是展示口径，不是安全或只读保证，
+ * 也不参与审批与执行判定。
+ */
+function summarizeCommandExploration(value: unknown): CommandExploration | undefined {
+  const actions = parseExplorationActions(value);
+  if (actions === undefined) {
+    return undefined;
+  }
+  const reads = actions.filter((action): action is ReadAction => action.kind === "read");
+  const searches = actions.filter((action): action is SearchAction => action.kind === "search");
+  const lists = actions.filter((action): action is ListAction => action.kind === "listFiles");
+  const readDetail = summarizeNames(reads.map((action) => action.name));
+  const searchDetail = summarizeItems(searches.map((action) => action.summary));
+  const listDetail = summarizeItems(lists.map((action) => action.summary));
+  const segments = [
+    reads.length > 0 ? { kind: "read" as const, text: readDetail } : null,
+    searches.length > 0 ? { kind: "search" as const, text: searchDetail } : null,
+    lists.length > 0 ? { kind: "listFiles" as const, text: listDetail } : null,
+  ].filter((segment): segment is ExplorationSegment => segment !== null);
+  const only = segments.length === 1 ? segments[0]! : undefined;
+  const summary = only !== undefined
+    ? only.text
+    : segments.map((segment) => `${explorationSegmentLabel(segment.kind)} ${segment.text}`).join("；");
+  const detail = sanitizeOperationText(summary);
+  return detail.length === 0 ? undefined : { kind: only?.kind ?? "mixed", detail };
+}
+
+function explorationSegmentLabel(kind: ExplorationSegment["kind"]): string {
+  return ({ read: "读取", search: "搜索", listFiles: "浏览" } as const)[kind];
+}
+
+function parseExplorationActions(value: unknown): ExplorationAction[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) {
+    return undefined;
+  }
+  const actions: ExplorationAction[] = [];
+  for (const entry of value) {
+    const action = recordValue(entry);
+    if (action === undefined) {
+      return undefined;
+    }
+    switch (stringValue(action.type)) {
+      case "read": {
+        // 官方 name 是必填字段，path 是解析后的绝对路径；缺失 name 时退回原始命令，
+        // 不用绝对路径补位。
+        const name = stringValue(action.name);
+        if (name === undefined) {
+          return undefined;
+        }
+        actions.push({ kind: "read", name });
+        break;
+      }
+      case "search": {
+        const query = stringValue(action.query);
+        const path = stringValue(action.path);
+        const fallback = stringValue(action.command);
+        const summary = query !== undefined
+          ? path !== undefined ? `${query} in ${path}` : query
+          : path ?? fallback;
+        if (summary === undefined) {
+          return undefined;
+        }
+        actions.push({ kind: "search", summary });
+        break;
+      }
+      case "listFiles": {
+        const summary = stringValue(action.path) ?? stringValue(action.command);
+        if (summary === undefined) {
+          return undefined;
+        }
+        actions.push({ kind: "listFiles", summary });
+        break;
+      }
+      default:
+        return undefined;
+    }
+  }
+  return actions;
+}
+
+function summarizeNames(names: string[]): string {
+  const unique = [...new Set(names)];
+  const visible = unique.slice(0, maximumExplorationItems);
+  return `${visible.join("、")}${unique.length > visible.length ? ` 等 ${unique.length} 个文件` : ""}`;
+}
+
+function summarizeItems(items: string[]): string {
+  const unique = [...new Set(items)];
+  const visible = unique.slice(0, maximumExplorationItems);
+  return `${visible.join("、")}${unique.length > visible.length ? ` 等 ${unique.length} 项` : ""}`;
 }
 
 function parseSubagentStates(value: unknown): SubagentState[] {

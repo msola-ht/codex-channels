@@ -206,6 +206,14 @@ export interface SubagentState {
   status: SubagentStatus;
 }
 
+/**
+ * 上游 commandActions 把命令整体解析为只读探索时的归类。
+ *
+ * 上游解析器只要发现任何无法识别的命令片段，就会把整条命令折叠为 unknown，
+ * 因此这里出现取值就表示整条命令都被识别为读取、搜索或列目录。
+ */
+export type CommandExplorationKind = "read" | "search" | "listFiles" | "mixed";
+
 export type OperationKind =
   | "command"
   | "fileChange"
@@ -232,6 +240,8 @@ export interface OperationUpdate {
   durationMs?: number;
   exitCode?: number;
   readOnlyHint?: boolean | null;
+  /** 只读探索命令的归类；普通命令与包含未知片段的命令不提供。 */
+  commandExploration?: CommandExplorationKind;
 }
 
 export interface TurnArtifacts {
