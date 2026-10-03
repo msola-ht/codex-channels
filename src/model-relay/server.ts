@@ -275,7 +275,10 @@ export class ModelRelayServer {
           ...(phase === "input" && (failure instanceof DirectChatRequestError || failure instanceof DirectResponsesRequestError) ? { param: failure.param } : {}),
           phase, request_id: relayRequestId, ...(httpStatus === undefined ? {} : { upstream_status: httpStatus }),
           upstream_attempted: started !== undefined } };
-        if (!request.complete) response.once("finish", () => request.destroy());
+        // Draining the rejected upload keeps the socket open long enough for the client to read
+        // the rejection; destroying an unread request resets it and surfaces as EPIPE/ECONNRESET.
+        // The server's requestTimeout bounds how long an unfinished upload can hold the connection.
+        if (!request.complete) response.once("finish", () => request.resume());
         // Error delivery has a separate short bound, even if the model request was cancelled.
         try {
           if (response.headersSent) { capture?.delivered?.(detail, true, response.statusCode, response.getHeaders()); await endResponse(response, `${protocol === "responses" ? "event: error\n" : ""}data: ${JSON.stringify(detail)}\n\n`, AbortSignal.timeout(1000)); }
