@@ -25,6 +25,7 @@ export function translate(
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  logs_unavailable: "logs.unavailable",
   delivery_invalid: "delivery.invalid",
   delivery_unavailable: "delivery.unavailable",
   delivery_stale: "delivery.stale",

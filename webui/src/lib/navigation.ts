@@ -1,5 +1,6 @@
 import {
   Activity,
+  ScrollText,
   Network,
   SlidersHorizontal,
   FolderKey,
@@ -35,6 +36,7 @@ export const monitoringNavItems: NavItem[] = [
   { to: "/requests", labelKey: "pages.requests", icon: Activity },
   { to: "/traffic", labelKey: "pages.traffic", icon: Bug },
   { to: "/errors", labelKey: "pages.errors", icon: TriangleAlert },
+  { to: "/logs", labelKey: "logs.title", icon: ScrollText },
 ]
 export const channelNavItems: NavItem[] = [
   { to: "/channels", labelKey: "navigation.channelConfiguration", icon: MessagesSquare },

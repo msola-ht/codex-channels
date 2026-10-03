@@ -38,6 +38,7 @@ const ConsolePage = lazy(() =>
   import("@/pages/console-page").then((module) => ({ default: module.ConsolePage })))
 const ErrorsPage = lazy(() =>
   import("@/pages/errors-page").then((module) => ({ default: module.ErrorsPage })))
+const LogsPage = lazy(() => import("@/pages/logs-page").then(module => ({ default: module.LogsPage })))
 const RequestsPage = lazy(() =>
   import("@/pages/requests-page").then((module) => ({ default: module.RequestsPage })))
 const ThreadDetailPage = lazy(() =>
@@ -168,6 +169,7 @@ function Layout() {
                 <Route path="/requests" element={<RequestsPage />} />
                 <Route path="/traffic" element={<TrafficPage />} />
                 <Route path="/errors" element={<ErrorsPage />} />
+                <Route path="/logs" element={<LogsPage />} />
                 <Route path="/relay" element={<RelayPage />} />
                 <Route path="/relay/queue" element={<RelayQueuePage />} />
                 <Route path="/delivery" element={<DeliveryPage />} />

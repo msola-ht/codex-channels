@@ -1,5 +1,6 @@
 import type { ResetCreditSnapshot, ResetCreditPreview, ResetCreditResult } from "./types"
 import type {
+  ServiceLogTarget, ServiceLogsResponse,
   QueueChangeEvent,
   DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
   RelayQueueSnapshot, RelayManagementSnapshot, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
@@ -61,6 +62,8 @@ export class ApiClientError extends Error {
 }
 
 export const API_PREFIX = "/api/v1"
+export const getServiceLogs = (target: ServiceLogTarget, lines: number, signal?: AbortSignal) =>
+  getJson<ServiceLogsResponse>(`${API_PREFIX}/logs?${new URLSearchParams({ target, lines: String(lines) })}`, signal)
 let unauthorizedHandler: (() => void) | null = null
 
 export const watchDeliveryQueue = (signal: AbortSignal, receive: (event: QueueChangeEvent) => void) => watchQueue("delivery/events", signal, receive)

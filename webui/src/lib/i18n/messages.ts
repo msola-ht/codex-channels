@@ -5,6 +5,14 @@ import type { DisplayLanguage } from "@/lib/format"
  * 由 `Messages` 类型检查在构建期保证两种语言键一致。
  */
 const zh = {
+  logs: {
+    title: "服务日志", description: "查看最近的服务运行日志，常见凭据字段已隐藏。搜索仅作用于当前读取结果。",
+    service: "服务", lines: "最近行数", search: "搜索日志", searchHint: "筛选当前结果",
+    auto: "自动刷新（5 秒）", autoStopped: "读取失败，自动刷新已暂停；手动刷新成功后恢复。",
+    journal: "系统日志", stdout: "标准输出", stderr: "错误输出", count: "显示 {count} 行",
+    truncated: "仅显示末尾片段，较早内容已省略", missing: "尚无此日志文件", empty: "暂无日志", noMatches: "没有匹配的日志",
+    unavailable: "日志暂不可读取，请检查服务日志权限或稍后重试。",
+  },
   refreshStatus: { updatedAt: "最后成功更新：{time}", stale: "数据可能已过期" },
   resetCredits: {"open": "使用重置券", "confirmTitle": "确认使用这张重置券？", "description": "使用一张券重置官方允许的用量窗口，具体范围以券的说明和执行结果为准。", "choose": "选择重置券", "defaultTitle": "用量重置券", "noChoices": "暂无可选择的重置券，或官方未提供可用券明细。", "expires": "到期时间：{time}", "confirm": "确认使用", "preview": "预览使用", "cancel": "取消", "close": "关闭", "unknown": "结果待确认。请刷新核对券状态，不要直接重复消费。", "stale": "账户、券状态或确认已变化，请刷新后重新选择。", "busy": "已有重置操作正在处理，请稍后刷新。", "unavailable": "暂时无法操作重置券，请检查 Gateway 连接及 ChatGPT 登录状态。", "reset": "用量已重置。", "nothingToReset": "当前没有需要重置的用量窗口。", "noCredit": "所选重置券已不可用，请刷新列表。", "alreadyRedeemed": "本次操作此前已成功，未重复消费。", "manualRefreshFailed": "账户额度刷新失败，请稍后重试。", "refreshFailed": "操作结果已确认，但账户额度刷新失败，请稍后刷新。", "auditFailed": "操作结果已确认，但完成审计写入失败。"},
   channelSettings: {title: "通讯渠道状态", description: "来源为 Gateway 配置快照；渠道凭据、允许名单和运行连接不在 WebUI 展示。", empty: "当前没有已配置的通讯渠道。", channel: "渠道", state: "配置状态", enabled: "已启用", disabled: "已配置，未启用"},
@@ -745,6 +753,14 @@ const zh = {
 export type Messages = typeof zh
 
 const en: Messages = {
+  logs: {
+    title: "Service logs", description: "Recent service output with common credential fields hidden. Search filters only the loaded results.",
+    service: "Service", lines: "Recent lines", search: "Search logs", searchHint: "Filter loaded results",
+    auto: "Auto-refresh (5s)", autoStopped: "Reading failed. Auto-refresh is paused until a manual refresh succeeds.",
+    journal: "System journal", stdout: "Standard output", stderr: "Error output", count: "Lines shown: {count}",
+    truncated: "Showing the tail only; earlier content omitted", missing: "No log file yet", empty: "No logs yet", noMatches: "No matching logs",
+    unavailable: "Logs are unavailable. Check service log permissions or retry later.",
+  },
   refreshStatus: { updatedAt: "Last successful update: {time}", stale: "Data may be out of date" },
   resetCredits: {"open": "Use reset credit", "confirmTitle": "Use this reset credit?", "description": "Use one credit to reset eligible usage windows. The credit description and official result determine the scope.", "choose": "Select a reset credit", "defaultTitle": "Usage reset credit", "noChoices": "No selectable reset credits, or credit details were not provided.", "expires": "Expires: {time}", "confirm": "Confirm use", "preview": "Preview use", "cancel": "Cancel", "close": "Close", "unknown": "Result unknown. Refresh and check the credit status before another attempt.", "stale": "The account, credit, or confirmation has changed. Refresh and select again.", "busy": "A reset is already in progress. Refresh shortly.", "unavailable": "Reset credits are unavailable. Check the Gateway connection and ChatGPT sign-in.", "reset": "Usage limits reset.", "nothingToReset": "No usage windows need a reset right now.", "noCredit": "The selected credit is unavailable. Refresh the list.", "alreadyRedeemed": "This operation already succeeded. No duplicate redemption occurred.", "manualRefreshFailed": "Account refresh failed. Try again shortly.", "refreshFailed": "The operation result is confirmed, but account refresh failed. Refresh shortly.", "auditFailed": "The operation result is confirmed, but completion audit could not be recorded."},
   channelSettings: {title: "Channel configuration status", description: "Based on the Gateway configuration snapshot. Credentials, allowlists, and live connections are not shown here.", empty: "No channels are configured.", channel: "Channel", state: "Configuration status", enabled: "Enabled", disabled: "Configured, disabled"},

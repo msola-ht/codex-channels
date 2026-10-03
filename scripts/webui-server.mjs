@@ -82,6 +82,7 @@ import {
 } from "./webui-management-provider-route.mjs";
 import { routeStatusManagement } from "./webui-management-status-route.mjs";
 import { routeTaskManagement } from "./webui-management-task-route.mjs";
+import { routeLogsApi } from "./webui-logs-route.mjs";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
@@ -210,6 +211,10 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         sendJson(response, 401, {
           error: { code: "unauthorized", message: "需要有效的访问令牌" },
         });
+        return;
+      }
+      if (url.pathname === `${API_PREFIX}/logs`) {
+        await routeLogsApi({ environment, url, request, response });
         return;
       }
       if (url.pathname === `${API_PREFIX}/traffic/events`) {

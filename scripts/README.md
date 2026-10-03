@@ -96,6 +96,7 @@
   5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
+- `webui-logs-route.mjs`：服务日志只读路由，固定服务白名单、限量尾部读取、凭据脱敏和读取超时；Linux 读取用户 journald，macOS/Windows 读取运行目录内标准输出与错误输出。
 - `webui-traffic-route.mjs`：WebUI 的模型转储读取路由，列出 V2 逻辑调用摘要并提供单条请求与终态
   响应；默认跨批次按请求时间倒序分页，支持单批次筛选，明细按批次与编号定位，指标关联目标缺失时明确报错，不替换目标。
   只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录，不接受任意

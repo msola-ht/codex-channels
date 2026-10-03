@@ -47,6 +47,13 @@ export interface ServerTimeResponse {
   nowMs: number
 }
 
+export type ServiceLogTarget = "gateway" | "app-server" | "webui" | "relay"
+export interface ServiceLogsResponse {
+  target: ServiceLogTarget
+  observedAt: string
+  streams: { source: "journal" | "stdout" | "stderr"; lines: string[]; truncated: boolean; missing: boolean }[]
+}
+
 export interface CompactSummary {
   model: string | null
   hasMixedModels: boolean

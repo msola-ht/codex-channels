@@ -25,6 +25,7 @@ CLI 用例按领域直接保存在 `codexc-cli*.test.ts`；`codexc-cli-test-fixt
 - `delivery-control.test.ts`、`delivery-queue-reader.test.ts`、`webui-delivery-management.test.ts`、`webui-delivery-page.test.ts`、`webui-delivery-events.test.ts`：投递箱只读分页、在线管理 IPC、在线/离线确认重试和双语队列展示边界。
 - `windows-service-control.test.ts`：Windows 服务重启的停止失败隔离与显式停止合同。
 - CLI、WebUI、安装、服务和更新脚本：公开命令、管理接口、构建产物、跨平台服务模板与升级失败行为。
+- `webui-logs.test.ts`、`webui-logs-page.test.ts`：服务日志参数、鉴权、限量读取、脱敏、平台来源、双语展示和失败边界。
 - 模块边界测试：一级模块公开入口、允许依赖方向和生成协议类型隔离。
 
 ## 常规验证
