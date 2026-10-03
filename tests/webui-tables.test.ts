@@ -262,6 +262,9 @@ describe("WebUI metrics table presentation", () => {
         result.threadTimingEn = render(ThreadDetailPage, {}, "en");
         globalThis.fixtureThreadDetail.data.run.sessionDurationMs = null;
         result.threadTimingMissing = render(ThreadDetailPage, {});
+        globalThis.fixtureThreadDetail.data.run.sessionTiming = { knownDurationMs: 120_000, missingTurnCount: 1, historyComplete: false };
+        result.threadTimingPartial = render(ThreadDetailPage, {});
+        result.threadTimingPartialEn = render(ThreadDetailPage, {}, "en");
         delete globalThis.fixtureThreadDetail;
         for (const provider of ["clp-main", "openai"]) {
           const model = "cline-pass/deepseek-v4.1-flash";
@@ -724,6 +727,13 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.threadTiming).toContain("1 min 11 s");
     expect(markup.threadTiming).toContain("2 min");
     expect(markup.threadTimingEn).toContain("Thread total duration");
+    expect(markup.threadTimingPartial).toContain("会话已知累计耗时");
+    expect(markup.threadTimingPartial).toContain("2 min");
+    expect(markup.threadTimingPartial).toContain("耗时缺失轮数：1");
+    expect(markup.threadTimingPartial).toContain("历史未补齐");
+    expect(markup.threadTimingPartialEn).toContain("Thread known duration");
+    expect(markup.threadTimingPartialEn).toContain("Turns with missing duration: 1");
+    expect(markup.threadTimingPartialEn).toContain("History is incomplete");
     expect(markup.threadTimingMissing).not.toContain("2 min");
     expect(headers(markup.requests!)).toEqual([
       "记录时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",

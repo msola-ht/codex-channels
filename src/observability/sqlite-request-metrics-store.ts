@@ -25,6 +25,7 @@ import {
 import type {
   TurnExecutionMetric,
   TurnExecutionStore,
+  SessionExecutionTiming,
   ModelRequestMetricSample,
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
@@ -194,6 +195,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
 
   sessionExecutionDuration(threadId: string, throughTurnId?: string): number | null {
     return this.queries.sessionExecutionDuration(threadId, throughTurnId);
+  }
+
+  sessionExecutionTiming(threadId: string, throughTurnId?: string): SessionExecutionTiming {
+    return this.queries.sessionExecutionTiming(threadId, throughTurnId);
   }
 
   private writeThreadExecutions(threadId: string, provider: string, turns: readonly TurnExecutionMetric[], replace: boolean): void {

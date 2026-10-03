@@ -26,6 +26,14 @@ export function ThreadDetailPage() {
   const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt } = useThreadDetail(id, query)
   const run = data?.run
   const turns = data?.turns
+  const timing = run?.sessionTiming
+  const partialDuration = timing !== undefined && (!timing.historyComplete || timing.missingTurnCount > 0)
+  const duration = timing === undefined ? run?.sessionDurationMs : timing.knownDurationMs
+  const durationNotes = [
+    ...(timing && timing.missingTurnCount > 0 ? [t("threads.missingDurations", { count: timing.missingTurnCount })] : []),
+    ...(timing && !timing.historyComplete ? [t("threads.durationHistoryIncomplete")] : []),
+    t("threads.totalDurationHint"),
+  ].join(" ")
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6" aria-busy={refreshing}>
@@ -52,7 +60,7 @@ export function ThreadDetailPage() {
           <QuerySummary loading={loading} aggregate={turns.aggregate} range={turns.range} turns={turns.turnCount} />
           <div className={cn("grid shrink-0 gap-4 sm:grid-cols-2", loading && "invisible")} inert={loading} aria-hidden={loading || undefined}>
             <StatCard title={t("threads.latestDuration")} value={run.latestExecution?.durationMs == null ? "—" : formatElapsedDuration(run.latestExecution.durationMs)} description={t("threads.durationHint")} />
-            <StatCard title={t("threads.totalDuration")} value={run.sessionDurationMs == null ? "—" : formatElapsedDuration(run.sessionDurationMs)} description={t("threads.totalDurationHint")} />
+            <StatCard title={t(partialDuration ? "threads.knownDuration" : "threads.totalDuration")} value={duration == null ? "—" : formatElapsedDuration(duration)} description={durationNotes} />
           </div>
           <p className="shrink-0 text-sm text-muted-foreground">{t("threads.turnHint")}</p>
           <details className={cn("shrink-0", loading && "invisible")} inert={loading} aria-hidden={loading || undefined}>

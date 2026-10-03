@@ -634,6 +634,16 @@ describe("webui server data API", () => {
     expect(await (await fetch(`${origin}/api/v1/threads/thread-1/run`)).json())
       .toMatchObject({ sessionDurationMs: 71_000, latestTurn: { turnId: "turn-2", durationMs: 71_000 } });
 
+    const missingTimingStore = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    try {
+      missingTimingStore.recordTurnExecution("thread-1", "deepseek", { turnId: "missing", durationMs: null, recordedAtMs: Date.now() });
+    } finally { missingTimingStore.close(); }
+    expect(await (await fetch(`${origin}/api/v1/threads/thread-1/run`)).json()).toMatchObject({
+      sessionDurationMs: null,
+      sessionTiming: { knownDurationMs: 71_000, missingTurnCount: 1, historyComplete: true },
+      latestExecution: { turnId: "missing", durationMs: null },
+    });
+
     const turns = await fetch(`${origin}/api/v1/threads/thread-1/turns`);
     expect(turns.status).toBe(200);
     const turnsBody = await turns.json() as {
