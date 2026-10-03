@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { SubagentCompletionTracker } from "../src/bootstrap/subagent-completion-tracker.js";
+import { createScheduledTaskServerRequestHandler } from "../src/bootstrap/scheduled-task-server-request.js";
 import { ImageReferenceUpload } from "../src/codex-client/image-reference-upload.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { handleApprovalServerRequest } from "../src/codex-client/server-request-adapter.js";
@@ -28,11 +29,14 @@ const contractSuite = runContract ? describe : describe.skip;
 // the server and race temporary-directory cleanup. Plugin contracts enable it separately.
 
 contractSuite("real supervised App Server tools", () => {
-    it.skipIf(process.platform === "win32").each(["accept", "cancel"] as const)("reviews real stdin callbacks without persistent permissions: %s", async (decision) => {
+    it.skipIf(process.platform === "win32").each(["accept", "cancel", "unattended"] as const)("reviews real stdin callbacks without persistent permissions: %s", async (decision) => {
       const directory = mkdtempSync(join("/tmp", "stdin-contract-"));
       const codexHome = join(directory, "home");
       let count = 0;
       let completed = false;
+      let terminalStatus: string | undefined;
+      let unattendedThreadId: string | undefined;
+      const unattendedRejections: string[] = [];
       const approvals: string[] = [];
       let rpc: JsonRpcClient | undefined;
       const backend = createServer((request, response) => {
@@ -85,21 +89,34 @@ contractSuite("real supervised App Server tools", () => {
         ].join("\n"));
         rpc = new JsonRpcClient(new StdioTransport({ codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: directory,
           environment: { ...process.env, CODEX_HOME: codexHome } }));
-        rpc.setServerRequestHandler(request => handleApprovalServerRequest(request, { handle: async decoded => {
+        rpc.setServerRequestHandler(createScheduledTaskServerRequestHandler({
+          taskForThread: (threadId) => threadId === unattendedThreadId ? {} : undefined,
+          noteServerRequestRejected: (threadId) => { unattendedRejections.push(threadId); },
+        }, request => handleApprovalServerRequest(request, { handle: async decoded => {
           approvals.push(decoded.type);
-          if (decoded.type === "command") return { type: "command", decision: "accept" };
+          if (decoded.type === "command") {
+            // Prepare the isolated PTY, then exercise the unattended guard on its real stdin request.
+            if (decision === "unattended") unattendedThreadId = decoded.threadId;
+            return { type: "command", decision: "accept" };
+          }
           expect(decoded).toMatchObject({ type: "stdin", approvalId: "terminal-input", itemId: "terminal-start" });
           if (decoded.type !== "stdin") throw new Error("Unexpected approval");
           expect(decoded.command).toContain("contract_input*[]");
+          if (decision === "unattended") throw new Error("Unattended stdin reached interactive approval");
           return { type: "stdin", decision };
-        } }));
+        } })));
         const client = new CodexAppServerClient(rpc, { sandbox: "read-only" });
         await client.connect();
-        client.onNotification(notification => { if (notification.method === "turn/completed") completed = true; });
+        client.onNotification(notification => {
+          const event = toConversationInputEvent(notification);
+          if (event?.type === "turn.completed") { completed = true; terminalStatus = event.status; }
+        });
         const { thread } = await client.startThread(directory, { ephemeral: true, approvalPolicy: "on-request" });
         await client.startTurn(thread.id, [{ type: "text", text: "Exercise terminal input" }], "codex_connect:stdin", directory);
         await waitFor(() => completed, 20_000);
-        expect(approvals).toEqual(["command", "stdin"]);
+        expect(approvals).toEqual(decision === "unattended" ? ["command"] : ["command", "stdin"]);
+        expect(unattendedRejections).toEqual(decision === "unattended" ? [thread.id] : []);
+        expect(terminalStatus).toBe(decision === "accept" ? "completed" : "interrupted");
         expect(existsSync(join(directory, "stdin-result"))).toBe(decision === "accept");
         if (decision === "accept") expect(readFileSync(join(directory, "stdin-result"), "utf8")).toBe("contract_input*[]");
       } finally {

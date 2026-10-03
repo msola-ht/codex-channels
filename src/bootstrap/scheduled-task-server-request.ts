@@ -26,6 +26,9 @@ export function createScheduledTaskServerRequestHandler(
     lookup.noteServerRequestRejected?.(threadId);
     switch (request.method) {
       case "item/commandExecution/requestApproval":
+        // writeStdin offers only accept/cancel; decline rejects the tool but
+        // does not interrupt the unattended Turn.
+        return { decision: (request.params as Record<string, unknown>).kind === "writeStdin" ? "cancel" : "decline" };
       case "item/fileChange/requestApproval":
         return { decision: "decline" };
       case "item/permissions/requestApproval":

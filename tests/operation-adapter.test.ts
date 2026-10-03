@@ -165,6 +165,23 @@ describe("operation normalization", () => {
       }, "completed")?.detail).toBe("TODO in src");
     });
 
+    it.each(["read", "search", "listFiles"] as const)("redacts and bounds %s summaries while preserving failure metadata", (type) => {
+      const sensitive = `TOKEN=private-value ${"文".repeat(400)}`;
+      const action = type === "read"
+        ? { type, command: "cat file", name: sensitive, path: "/workspace/file" }
+        : type === "search"
+          ? { type, command: "rg query", query: sensitive, path: null }
+          : { type, command: "ls path", path: sensitive };
+      const operation = toOperationUpdate({
+        type: "commandExecution", id: "sensitive-exploration", command: "unused",
+        status: "failed", exitCode: 2, durationMs: 123, commandActions: [action],
+      }, "completed");
+      expect(operation).toMatchObject({ commandExploration: type, status: "failed", exitCode: 2, durationMs: 123 });
+      expect(operation?.detail).toContain("TOKEN=[REDACTED]");
+      expect(operation?.detail).not.toContain("private-value");
+      expect(Array.from(operation!.detail!)).toHaveLength(320);
+    });
+
     it("keeps the raw command for commands typed in the user's terminal", () => {
       const operation = toOperationUpdate({
         type: "commandExecution",
