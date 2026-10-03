@@ -2,6 +2,55 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
+it("shows catalog success as a toast but preserves actionable download and audit failures", () => {
+  const script = String.raw`
+    import {createServer} from 'vite';
+    import {createElement as h} from 'react';
+    import {renderToStaticMarkup} from 'react-dom/server';
+    let values=[], cursor=0;
+    globalThis.catalogState=initial=>{const i=cursor++;if(!(i in values))values[i]=initial;return [values[i],value=>{values[i]=value}];};
+    globalThis.catalogToasts=[];
+    globalThis.catalogButtons=[];
+    const server=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent',plugins:[{
+      name:'catalog-feedback-fixture',enforce:'pre',transform(code,id){
+        if(id.endsWith('/settings/relay-provider-models.tsx'))return code.replace('useRef, useState','useRef').replace('export function RelayProviderModels','const useState=globalThis.catalogState; export function RelayProviderModels');
+        if(id.endsWith('/ui/button.tsx'))return "import {createElement as h} from 'react'; export const Button=({children,onClick})=>{globalThis.catalogButtons.push({children,onClick});return h('button',null,children)};";
+        if(id.endsWith('/ui/toast-manager.ts'))return 'export const toast={add:entry=>globalThis.catalogToasts.push(entry)}';
+        if(id.endsWith('/lib/api.ts'))return 'export const updateRelayCatalog=()=>globalThis.catalogResult()';
+      }
+    }]});
+    try {
+      const {RelayProviderModels}=await server.ssrLoadModule('/src/components/settings/relay-provider-models.tsx');
+      const {LanguageContext}=await server.ssrLoadModule('/src/hooks/language-context.ts');
+      const {setServerTimeZone}=await server.ssrLoadModule('/src/lib/format.ts');setServerTimeZone('UTC');
+      const snapshot={providers:[{id:'clp-main',models:[]}],clineCatalog:{status:'ready',catalog:{commit:'1234567890ab',downloadedAt:1000}}};
+      let refreshes=0;
+      const render=()=>{cursor=0;globalThis.catalogButtons=[];return renderToStaticMarkup(h(LanguageContext.Provider,{value:{language:'zh',setLanguage(){}}},h(RelayProviderModels,{snapshot,blocked:false,onRefresh:()=>refreshes++})));};
+      const results=[];
+      for(const outcome of ['recorded','failed','network']) {
+        values=[];globalThis.catalogToasts=[];refreshes=0;
+        globalThis.catalogResult=async()=>{if(outcome==='network')throw Error('network');return {auditStatus:outcome}};
+        render();globalThis.catalogButtons.find(button=>button.children==='下载／更新 Cline 模型文件').onClick();
+        await new Promise(resolve=>setTimeout(resolve,0));
+        results.push({html:render(),toasts:globalThis.catalogToasts,refreshes});
+      }
+      console.log(JSON.stringify(results));
+    }finally{await server.close();}
+  `;
+  const [success, auditFailure, downloadFailure] = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
+  })) as Array<{ html: string; toasts: Array<{ title: string; type: string; timeout: number }>; refreshes: number }>;
+  expect(success!.toasts).toEqual([{ title: "模型目录已更新", type: "success", timeout: 3000 }]);
+  expect(success!.html).not.toContain("模型目录已更新");
+  expect(success!.refreshes).toBe(1);
+  expect(auditFailure!.toasts).toEqual([]);
+  expect(auditFailure!.html).toContain("目录已保存，但审计记录失败；请刷新确认。");
+  expect(auditFailure!.refreshes).toBe(1);
+  expect(downloadFailure!.toasts).toEqual([]);
+  expect(downloadFailure!.html).toContain("下载或保存失败，原目录保留。请检查网络后重试。");
+  expect(downloadFailure!.refreshes).toBe(0);
+});
+
 it("copies exact authorized model IDs and offers manual copying when clipboard access fails", () => {
   const script = String.raw`
     import { createServer } from 'vite';
@@ -13,7 +62,7 @@ it("copies exact authorized model IDs and offers manual copying when clipboard a
     const server=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent',plugins:[{
       name:'copy-fixture',enforce:'pre',transform(code,id){
         if(id.endsWith('/settings/relay-model-copy.tsx'))return code.replace('import { useState } from "react"','const useState = globalThis.copyState');
-        if(id.endsWith('/ui/dropdown-menu.tsx'))return "import {createElement as h} from 'react'; export const DropdownMenu=({children})=>children;export const DropdownMenuTrigger=DropdownMenu;export const DropdownMenuContent=DropdownMenu;export const DropdownMenuGroup=DropdownMenu;export const DropdownMenuItem=({children,onSelect})=>{globalThis.copyActions.push(onSelect);return h('div',null,children)};";
+        if(id.endsWith('/ui/dropdown-menu.tsx'))return "import {createElement as h} from 'react'; export const DropdownMenu=({children})=>children;export const DropdownMenuTrigger=DropdownMenu;export const DropdownMenuContent=DropdownMenu;export const DropdownMenuGroup=DropdownMenu;export const DropdownMenuItem=({children,onClick})=>{globalThis.copyActions.push(onClick);return h('div',null,children)};";
       }
     }]});
     try{

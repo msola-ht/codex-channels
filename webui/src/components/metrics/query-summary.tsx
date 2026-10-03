@@ -1,7 +1,7 @@
 import { useTranslation } from "@/hooks/use-translation"
 import { formatCacheUsage, formatCount, formatTokens, formatSuccessRate, formatTime } from "@/lib/format"
 import type { Aggregate, Range } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 
 export function QuerySummary({ aggregate, range, turns, loading = false }: { aggregate: Aggregate | null; range: Range<string>; turns?: number; loading?: boolean }) {
   const { t } = useTranslation()

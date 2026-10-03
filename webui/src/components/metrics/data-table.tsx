@@ -1,6 +1,5 @@
 import { useTranslation } from "@/hooks/use-translation"
 import * as React from "react"
-import { Slot } from "radix-ui"
 import {
   columnFilteringFeature,
   columnVisibilityFeature,
@@ -66,28 +65,36 @@ import {
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useRender } from "@base-ui/react/use-render"
 
 export function TableHint({ hint, children }: { hint: string | null; children: React.ReactNode }) {
   if (hint === null) return <>{children}</>
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={0} className="inline-flex min-w-0 max-w-full cursor-help focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2">
+      <TooltipTrigger aria-description={hint} render={<span tabIndex={0} className="inline-flex min-w-0 max-w-full cursor-help focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" />}>
           {children}
-        </span>
-      </TooltipTrigger>
+        </TooltipTrigger>
       <TooltipContent className="max-w-[min(28rem,calc(100vw-2rem))]"><p className="min-w-0 break-all whitespace-normal">{hint}</p></TooltipContent>
     </Tooltip>
   )
 }
 
-export function TruncatedText({ text, className, asChild = false, children }: { text: string | null | undefined; className?: string; asChild?: boolean; children?: React.ReactElement }) {
+export function TruncatedText({ text, className, render, children }: { text: string | null | undefined; className?: string; render?: React.ReactElement; children?: React.ReactNode }) {
   const ref = React.useRef<HTMLSpanElement>(null)
   const [truncated, setTruncated] = React.useState(false)
   const [open, setOpen] = React.useState(false)
-  const Component = asChild ? Slot.Root : "span"
+  const trigger = useRender({
+    defaultTagName: "span",
+    render,
+    ref,
+    props: {
+      tabIndex: truncated && !render ? 0 : undefined,
+      className: cn("block min-w-0 truncate", truncated && "cursor-help focus-visible:outline-2 focus-visible:outline-ring", className),
+      children: render ? children : text ?? "—",
+    },
+  })
   React.useEffect(() => {
     const element = ref.current!
     setOpen(false)
@@ -102,9 +109,7 @@ export function TruncatedText({ text, className, asChild = false, children }: { 
     return () => observer.disconnect()
   }, [text])
   return <Tooltip open={truncated && open} onOpenChange={(nextOpen) => setOpen(truncated && nextOpen)}>
-    <TooltipTrigger asChild>
-      <Component ref={ref} tabIndex={truncated && !asChild ? 0 : undefined} className={cn("block min-w-0 truncate", truncated && "cursor-help focus-visible:outline-2 focus-visible:outline-ring", className)}>{asChild ? children : text ?? "—"}</Component>
-    </TooltipTrigger>
+    <TooltipTrigger render={trigger} />
     {truncated ? <TooltipContent className="max-w-[min(28rem,calc(100vw-2rem))]"><p className="break-all whitespace-normal">{text}</p></TooltipContent> : null}
   </Tooltip>
 }
@@ -185,7 +190,7 @@ function SortableHeader<TData extends RowData>({
       )}
     </Button>
   )
-  return hint === undefined ? button : <Tooltip><TooltipTrigger asChild>{button}</TooltipTrigger><TooltipContent className="max-w-[min(28rem,calc(100vw-2rem))]"><p className="break-all whitespace-normal">{hint}</p></TooltipContent></Tooltip>
+  return hint === undefined ? button : <Tooltip><TooltipTrigger aria-description={hint} render={button} /><TooltipContent className="max-w-[min(28rem,calc(100vw-2rem))]"><p className="break-all whitespace-normal">{hint}</p></TooltipContent></Tooltip>
 }
 
 export { SortableHeader }
@@ -407,12 +412,10 @@ export function DataTable<TData extends RowData>({
             </div>
           )}
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
+            <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
                 <Columns3Icon data-icon="inline-start" />
                 {t("common.columns")}
-              </Button>
-            </DropdownMenuTrigger>
+              </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
               <DropdownMenuGroup className="grid grid-cols-2 gap-0.5">
                 {table
@@ -504,8 +507,10 @@ export function DataTable<TData extends RowData>({
                 {t("common.perPage")}
               </Label>
               <Select
+                items={pageSizeOptions.map(size => ({ value: String(size), label: String(size) }))}
                 value={String(pageSize)}
                 onValueChange={(value) => {
+                  if (value === null) return
                   const next = Number(value)
                   if (server) {
                     pagination.onPageSizeChange(next)

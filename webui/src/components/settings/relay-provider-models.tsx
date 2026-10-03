@@ -9,6 +9,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { toast } from "@/components/ui/toast-manager"
 
 export function RelayProviderModels({ snapshot, blocked: parentBlocked, refreshBlocked = parentBlocked, error, onRefresh }: {
   snapshot: RelayManagementSnapshot
@@ -20,7 +21,7 @@ export function RelayProviderModels({ snapshot, blocked: parentBlocked, refreshB
   const { t } = useTranslation()
   const [providerId, setProviderId] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
-  const [downloadMessage, setDownloadMessage] = useState<"error" | "updated" | "auditFailed" | null>(null)
+  const [downloadMessage, setDownloadMessage] = useState<"error" | "auditFailed" | null>(null)
   const controller = useRef<AbortController | null>(null)
   const autoAttempted = useRef(false)
   const returnFocus = useRef<HTMLButtonElement | null>(null)
@@ -35,10 +36,14 @@ export function RelayProviderModels({ snapshot, blocked: parentBlocked, refreshB
     setDownloading(true); setDownloadMessage(null)
     try {
       const result = await updateRelayCatalog(active.signal)
-      if (!active.signal.aborted) { setDownloadMessage(result.auditStatus === "failed" ? "auditFailed" : "updated"); onRefresh?.() }
+      if (!active.signal.aborted) {
+        if (result.auditStatus === "failed") setDownloadMessage("auditFailed")
+        else toast.add({ title: t("relay.catalog.updated"), type: "success", timeout: 3000 })
+        onRefresh?.()
+      }
     } catch { if (!active.signal.aborted) setDownloadMessage("error") }
     finally { if (controller.current === active) controller.current = null; if (!active.signal.aborted) setDownloading(false) }
-  }, [onRefresh])
+  }, [onRefresh, t])
   const hasCline = snapshot.providers.some(provider => provider.id.startsWith("clp-"))
   useEffect(() => {
     if (parentBlocked || !hasCline || snapshot.clineCatalog?.status !== "missing" || autoAttempted.current) return
@@ -66,10 +71,12 @@ export function RelayProviderModels({ snapshot, blocked: parentBlocked, refreshB
         {downloadMessage && <p role="status">{t(`relay.catalog.${downloadMessage}`)}</p>}
       </CardContent>
     </Card>
-    <Dialog open={providerId !== null} onOpenChange={value => { if (!value && !closeBlocked) setProviderId(null) }}>
+    <Dialog open={providerId !== null} disablePointerDismissal onOpenChange={(value, details) => {
+      if (closeBlocked) { details.cancel(); return }
+      if (!value) setProviderId(null)
+    }}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-5xl" closeLabel={t("relay.close")} showCloseButton={!closeBlocked}
-        onInteractOutside={event => event.preventDefault()} onEscapeKeyDown={event => { if (closeBlocked) event.preventDefault() }}
-        onCloseAutoFocus={event => { event.preventDefault(); returnFocus.current?.focus() }}>
+        finalFocus={returnFocus}>
         <DialogHeader><DialogTitle>{t("relay.extra.manage")} · {providerId}</DialogTitle><DialogDescription>{t("relay.extra.hint")}</DialogDescription></DialogHeader>
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
           {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}

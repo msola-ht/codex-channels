@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from "react"
 import { CopyIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useTranslation } from "@/hooks/use-translation"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 
 /** 收起时不挂载正文，避免隐藏内容仍占用渲染与格式化开销。 */
 export function TrafficDisclosure({ title, children }: { title: ReactNode; children: ReactNode }) {

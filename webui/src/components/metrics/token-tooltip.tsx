@@ -27,11 +27,9 @@ export function InputTokenTooltip({
       : null
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring">
+      <TooltipTrigger aria-description={[t("metrics.cached", { count: formatTokens(cachedInputTokens) }), t("metrics.uncached", { count: uncached === null ? "—" : formatTokens(uncached) }), t("metrics.hitRate", { rate: rate === null ? "—" : `${(rate * 100).toFixed(1)}%` })].join("; ")} render={<span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring" />}>
           {formatTokens(inputTokens)}
-        </span>
-      </TooltipTrigger>
+        </TooltipTrigger>
       <TooltipContent side="right" align="start">
         <ul className="flex flex-col gap-1">
           <li className="whitespace-nowrap">
@@ -64,11 +62,9 @@ export function OutputTokenTooltip({
       : Math.max(0, outputTokens - reasoningOutputTokens)
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring">
+      <TooltipTrigger aria-description={[t("metrics.reasoning", { count: formatTokens(reasoningOutputTokens) }), t("metrics.nonReasoning", { count: nonReasoning === null ? "—" : formatTokens(nonReasoning) })].join("; ")} render={<span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring" />}>
           {formatTokens(outputTokens)}
-        </span>
-      </TooltipTrigger>
+        </TooltipTrigger>
       <TooltipContent side="right" align="start">
         <ul className="flex flex-col gap-1">
           <li className="whitespace-nowrap">

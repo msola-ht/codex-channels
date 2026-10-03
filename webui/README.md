@@ -36,6 +36,9 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 ## UI 组件规范
 
+- 组件使用官方 `base-nova` 样式和 `@base-ui/react`，类名合并统一使用 `cn` 包。组合触发器使用 `render`，Select 显式提供 `items` 的值与显示标签，ToggleGroup 的受控值使用数组；不保留 Radix 调用接口。
+- `components/ui/toast.tsx` 提供 Base UI 通知容器，`toast-manager.ts` 提供共享通知管理器；`App.tsx` 挂载容器，默认 3 秒关闭并本地化关闭按钮。成功通知短暂显示，错误及需要处理的警告仍保留在操作区域。
+
 - 基础 UI 组件放在 `components/ui/`，只通过 `npx shadcn@latest add` 安装或升级，
   不手写基础组件（按钮、卡片、表格、弹层等）；
 - 业务组件按领域分目录组合：`components/layout/`（布局与鉴权）、
@@ -69,7 +72,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 `components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。
 
-`components/ui/dialog.tsx`：沿用 Radix/shadcn 的居中弹窗，关闭按钮名称由调用方本地化；Relay 表单和一次性密钥结果复用此组件，确认操作使用已有 AlertDialog。
+`components/ui/dialog.tsx`：使用 Base UI/shadcn 居中弹窗，关闭按钮名称由调用方本地化；Relay 表单和一次性密钥结果复用此组件。确认操作使用 AlertDialog，并将初始焦点设到取消按钮；忙碌期间通过根组件的关闭事件阻止退出，`finalFocus` 恢复到操作入口。
 
 `hooks/use-queue-events.ts` 由渠道投递与 Relay 队列复用，负责可见性、退避重连、变化合并及快照确认；已连接通知中断时补查一次快照，未恢复连接的失败尝试不持续触发读取。Relay 侧栏通过现有 DataTable 提供排序、分页和列显隐，耗时表示快照时的值。
 

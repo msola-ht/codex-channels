@@ -188,7 +188,7 @@ describe("WebUI metrics table presentation", () => {
             credits: { observedAtMs: 1000, remaining: null, unlimited: true, resetCreditsAvailable: "1", expirations: null, undisclosedCount: "1" } }),
           emptyHint: render(TableHint, { hint: null, children: "—" }),
           shortText: render(TruncatedText, { text: "short" }),
-          shortLink: render(TruncatedText, { text: "short", asChild: true, children: h("a", { href: "/test" }, "short") }),
+          shortLink: render(TruncatedText, { text: "short", render: h("a", { href: "/test" }), children: "short" }),
           inputWithoutBreakdown: render(InputTokenTooltip, { inputTokens: 10, cachedInputTokens: null }),
           outputWithoutBreakdown: render(OutputTokenTooltip, { outputTokens: 10, reasoningOutputTokens: null }),
           matchingFast: render(FastBadge, { tier: "priority", source: "request", responseTier: "fast" }),
@@ -536,7 +536,7 @@ describe("WebUI metrics table presentation", () => {
   it("exposes the quota value and names its current snapshot correctly", () => {
     expect(markup.quota).toContain('aria-valuenow="62.5"');
     expect(markup.quota).toContain('aria-label="OpenAI 周额度剩余比例"');
-    expect(markup.quota).toContain('data-state="loading"');
+    expect(markup.quota).toContain('data-progressing=""');
     expect(markup.quotaEmpty).toContain("尚未获取 OpenAI 额度快照");
     expect(markup.quotaEmpty).not.toContain("role=\"progressbar\"");
     expect(markup.quotaExhausted).toContain('aria-valuenow="0"');
@@ -799,6 +799,8 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.emptyToken).not.toContain('data-slot="tooltip-trigger"');
     expect(markup.inputToken).toContain('tabindex="0"');
     expect(markup.outputToken).toContain('tabindex="0"');
+    expect(markup.inputToken).toMatch(/aria-description="[^"]*50\.0%/u);
+    expect(markup.outputToken).toContain('aria-description="推理输出：5; 非推理输出：5"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
     for (const label of ["首 Token", "请求耗时", "请求详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
@@ -828,7 +830,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.loading).toMatch(/data-slot="card-content"[^>]*inert=""/);
     expect(markup.loading).toContain('data-slot="skeleton"');
     expect(markup.loading).not.toContain("model-test");
-    expect(markup.loading).not.toContain("失败");
+    expect(markup.loading!.match(/<tbody\b[^>]*>([\s\S]*?)<\/tbody>/u)?.[1]).not.toContain("失败");
     expect(markup.loading).toMatch(/class="block invisible" aria-hidden="true">共 1 条匹配/);
   });
 

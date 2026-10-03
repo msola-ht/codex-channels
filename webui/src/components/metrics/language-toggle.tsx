@@ -8,7 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 import type { DisplayLanguage } from "@/lib/format"
 import { useTranslation } from "@/hooks/use-translation"
 
@@ -29,18 +29,16 @@ export function LanguageToggle({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
+      <DropdownMenuTrigger render={<Button
           type="button"
           variant="outline"
           size="sm"
           className="gap-2"
           aria-label={t("shell.switchLanguage")}
-        >
+         />}>
           {current.label}
           <ChevronsUpDown data-icon="inline-end" className="opacity-50" />
-        </Button>
-      </DropdownMenuTrigger>
+        </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-28">
         <DropdownMenuGroup>
           {options.map((option) => (

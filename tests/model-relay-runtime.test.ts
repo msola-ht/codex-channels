@@ -785,6 +785,32 @@ it("automatically initializes the catalog for CLI key creation before the relay 
   } finally { download.mockRestore(); }
 });
 
+it.each(["providers", "issue"] as const)("keeps revocation available during CLI %s catalog download and preserves a concurrent update", async command => {
+  const f = await fixture();
+  await sharedManage({ command: "issue", caller: "existing", key: "existing", models: ["clp-test/deepseek-v4.1-flash"] }, f.environment);
+  const snapshot = catalogUpdate.readClineRelayCatalog(f.environment);
+  if (snapshot.status !== "ready") throw new Error("fixture catalog missing");
+  const catalog = snapshot.catalog;
+  rmSync(clineRelayCatalogPath(f.environment));
+  let complete!: (value: typeof catalog) => void;
+  const download = vi.spyOn(catalogUpdate, "downloadClineRelayCatalog").mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+  const pending = sharedManage(command === "providers" ? { command } : {
+    command, caller: "new", key: "new", models: ["clp-test/deepseek-v4.1-flash"],
+  }, f.environment).then(value => ({ value, error: undefined }), (error: unknown) => ({ value: undefined, error }));
+  try {
+    await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
+    expect((await sharedManage({ command: "disable", caller: "existing" }, f.environment)).activation).toBe("saved_not_running");
+    const newer = { ...snapshot.catalog, commit: "b".repeat(40), models: [{ id: "cline-pass/new-model" }] };
+    saveClineRelayCatalog(newer, f.environment);
+    complete(snapshot.catalog);
+    const result = await pending;
+    if (command === "issue") expect(result.error).toMatchObject({ message: "Key 模型在当前提供商目录中不可用" });
+    else expect(result.error).toBeUndefined();
+    expect(catalogUpdate.readClineRelayCatalog(f.environment)).toMatchObject({ status: "ready", catalog: newer });
+    expect(readRelayManagement(f.environment).callers).toEqual([expect.objectContaining({ caller_id: "existing", enabled: false })]);
+  } finally { complete?.(snapshot.catalog); await pending; download.mockRestore(); }
+});
+
 it("isolates the CLP relay catalog from Codex model settings while retaining shared credential revocation", async () => {
   const f = await fixture();
   const paths = clinePassSetupPaths(f.environment, "test");

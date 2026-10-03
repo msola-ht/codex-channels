@@ -211,6 +211,7 @@ export class ModelRelayServer {
         clineRoutingChanged = routed !== body;
         body = routed;
       }
+      if (Buffer.byteLength(JSON.stringify(body)) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
       phase = "upstream"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
       capture = await this.options.capture?.(provider!, signal, protocol);
       capture?.inbound?.(inbound, request.headers);

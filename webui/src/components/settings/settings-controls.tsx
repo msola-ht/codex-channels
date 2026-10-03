@@ -1,4 +1,4 @@
-import { useEffect, useId } from "react"
+import { useEffect, useId, useRef } from "react"
 import type { ComponentProps, ReactNode } from "react"
 
 import {
@@ -47,16 +47,17 @@ export function ManagementConfirmationDialog({
   children: ReactNode
 }) {
   const { t } = useTranslation()
+  const cancelRef = useRef<HTMLButtonElement>(null)
   return (
-    <AlertDialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !saving) onCancel() }}>
-      <AlertDialogContent className="max-h-[85dvh] overflow-y-auto">
+    <AlertDialog open={open} onOpenChange={(nextOpen, details) => { if (saving) { details.cancel(); return }; if (!nextOpen) onCancel() }}>
+      <AlertDialogContent initialFocus={cancelRef} className="max-h-[85dvh] overflow-y-auto">
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <div className="flex min-w-0 flex-col gap-1 text-sm [overflow-wrap:anywhere]">{children}</div>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={saving}>{t("accountConfirmation.cancel")}</AlertDialogCancel>
+          <AlertDialogCancel ref={cancelRef} disabled={saving}>{t("accountConfirmation.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             variant={confirmVariant}
             disabled={saving || loading || confirmDisabled}
@@ -121,7 +122,7 @@ export function ManagedSelect({ label, value, options, disabled, onChange, descr
   const labelContent = <FieldLabel className="text-muted-foreground" htmlFor={selectId}>{label}</FieldLabel>
   return <Field orientation="responsive" data-disabled={disabled}>
     {description ? <FieldContent className="min-w-0">{labelContent}<FieldDescription id={`${selectId}-description`}>{description}</FieldDescription></FieldContent> : labelContent}
-    <Select value={value} disabled={disabled} onValueChange={onChange}>
+    <Select items={[{ value: null, label: "未配置" }, ...effectiveOptions.map(([value, label]) => ({ value, label }))]} value={value || null} disabled={disabled} onValueChange={next => { if (next !== null) onChange(next) }}>
       <SelectTrigger id={selectId} aria-describedby={description ? `${selectId}-description` : undefined} size="sm" className="w-full sm:w-[160px]"><SelectValue placeholder={value === "" ? "未配置" : undefined} /></SelectTrigger>
       {effectiveOptions.length > 0 ? <SelectContent><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectGroup></SelectContent> : null}
     </Select>

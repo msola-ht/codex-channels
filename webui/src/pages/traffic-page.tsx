@@ -73,7 +73,7 @@ export function TrafficPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-          {requestsReturnTo === null ? null : <Button variant="outline" size="sm" asChild><Link to={requestsReturnTo}>{t("requestDetail.back")}</Link></Button>}
+          {requestsReturnTo === null ? null : <Button variant="outline" size="sm" render={<Link to={requestsReturnTo} />} nativeButton={false}>{t("requestDetail.back")}</Button>}
           <Button type="button" variant="outline" size="sm" disabled={detail.loading} onClick={detail.refetch}>
             {detail.loading ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}{t("common.refresh")}
           </Button>
@@ -106,7 +106,7 @@ export function TrafficPage() {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
       <div className="flex min-w-0 flex-col gap-4">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">{t("pages.traffic")}</h1><Button asChild variant="outline" size="sm"><Link to="/settings/data">{t("navigation.captureSettings")}</Link></Button></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">{t("pages.traffic")}</h1><Button render={<Link to="/settings/data" />} nativeButton={false} variant="outline" size="sm">{t("navigation.captureSettings")}</Button></div>
           <p className="text-sm text-muted-foreground">
             <code className="rounded bg-muted px-1 text-xs">{dumpKey}</code>{" "}
             {t("traffic.listIntro")}
@@ -118,8 +118,9 @@ export function TrafficPage() {
               <Field className="w-48">
                 <FieldLabel htmlFor={labelSelectId}>{t("traffic.captureSource")}</FieldLabel>
                 <Select
+                  items={[{ value: "all", label: t("traffic.allProviders") }, ...listData.labels.map(entry => ({ value: `label:${entry.label}`, label: t("traffic.providerOption", { label: entry.label, sessions: entry.sessions }) }))]}
                   value={query.label === undefined ? "all" : `label:${query.label}`}
-                  onValueChange={(value) => update({ label: value === "all" ? null : value.slice(6), session: null, exchangeSession: null, id: null }, true)}
+                  onValueChange={(value) => { if (value !== null) update({ label: value === "all" ? null : value.slice(6), session: null, exchangeSession: null, id: null }, true) }}
                 >
                   <SelectTrigger id={labelSelectId} size="sm" className="w-40">
                     <SelectValue />
@@ -141,10 +142,11 @@ export function TrafficPage() {
               <Field className="w-64">
                 <FieldLabel htmlFor={sessionSelectId}>{t("traffic.sessionFilterLabel")}</FieldLabel>
                 <Select
+                  items={[{ value: "all", label: t("traffic.allSessions") }, ...listData.sessions.map(entry => ({ value: entry.session, label: formatTime(entry.createdAtMs) }))]}
                   value={query.session ?? "all"}
-                  onValueChange={(value) => update({
+                  onValueChange={(value) => { if (value !== null) update({
                     session: value === "all" ? null : value, exchangeSession: null, id: null,
-                  }, true)}
+                  }, true) }}
                 >
                   <SelectTrigger id={sessionSelectId} size="sm" className="w-full">
                     <SelectValue />

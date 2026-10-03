@@ -77,7 +77,7 @@ const zh = {
     modelCopied: "已复制：{model}",
     modelCopyFailed: "无法访问剪贴板，请手动复制：{model}",
     providerModelsHint: "可勾选多个提供商的模型。调用时使用提供商/模型 ID；新目录模型不会自动授权。",
-    catalog: { unavailable: "待下载或不可用", update: "下载／更新 Cline 模型文件", downloading: "正在下载…", missing: "尚无可用的 Cline 模型文件；首次使用将自动下载，失败可手动重试。", version: "Cline {commit} · 下载于 {time}", hint: "从 Cline 官方仓库下载模型目录；不发送模型请求，不修改 Key 思考策略或模型授权。添加或编辑时采用目录声明，未知能力不推断。", error: "下载或保存失败，原目录保留。请检查网络后重试。", updated: "模型目录已更新，请从目录选择模型。", auditFailed: "目录已保存，但审计记录失败；请刷新确认。", controls: "目录声明的可选等级：{levels}", noControls: "无可用等级，保持跟随客户端", capabilities: "上下文：{context}；输出上限：{output}；能力：{capabilities}" },
+    catalog: { unavailable: "待下载或不可用", update: "下载／更新 Cline 模型文件", downloading: "正在下载…", missing: "尚无可用的 Cline 模型文件；首次使用将自动下载，失败可手动重试。", version: "Cline {commit} · 下载于 {time}", hint: "从 Cline 官方仓库下载模型目录；不发送模型请求，不修改 Key 思考策略或模型授权。添加或编辑时采用目录声明，未知能力不推断。", error: "下载或保存失败，原目录保留。请检查网络后重试。", updated: "模型目录已更新", auditFailed: "目录已保存，但审计记录失败；请刷新确认。", controls: "目录声明的可选等级：{levels}", noControls: "无可用等级，保持跟随客户端", capabilities: "上下文：{context}；输出上限：{output}；能力：{capabilities}" },
     extra: { modelCount: "{count} 个模型", providerCatalog: "提供商模型目录", listHint: "查看提供商模型目录；在 API Key 中选择授权模型。", catalogColumn: "模型目录", settingsColumn: "模型数量", manage: "模型列表", title: "提供商模型", hint: "此处只读展示模型目录。模型授权与思考策略在 API Key 中设置；调用 ID 会精确映射到上游模型。", modelId: "调用模型 ID" },
     otherTaskActive: "其他管理任务正在执行，完成后可操作转发服务。",
     viewTasks: "查看管理任务",
@@ -292,6 +292,7 @@ const zh = {
     "timeout": "请求超时，请重试。"
   },
   common: {
+    notifications: "通知",
     close: "关闭",
     sidebar: "侧栏导航",
     sidebarDescription: "浏览页面与本地服务信息。",
@@ -804,7 +805,7 @@ const en: Messages = {
     modelCopied: "Copied: {model}",
     modelCopyFailed: "Clipboard unavailable. Copy manually: {model}",
     providerModelsHint: "Select models from one or more providers. Use provider/model IDs when calling; new catalog models are not automatically authorized.",
-    catalog: { unavailable: "Missing or unavailable", update: "Download / update Cline models", downloading: "Downloading…", missing: "No valid Cline catalog. It downloads automatically on first use; retry manually if it fails.", version: "Cline {commit} · downloaded {time}", hint: "Downloads model metadata from the official Cline repository. No model requests, saved policy changes or key grants. Adding or editing uses declared capabilities; unknown capabilities remain unknown.", error: "Download or save failed. The previous catalog is preserved. Check the network and retry.", updated: "Model catalog updated. Select a model from the catalog.", auditFailed: "Catalog saved, but audit recording failed. Refresh to confirm.", controls: "Declared selectable levels: {levels}", noControls: "No selectable levels; follow the client", capabilities: "Context: {context}; output limit: {output}; capabilities: {capabilities}" },
+    catalog: { unavailable: "Missing or unavailable", update: "Download / update Cline models", downloading: "Downloading…", missing: "No valid Cline catalog. It downloads automatically on first use; retry manually if it fails.", version: "Cline {commit} · downloaded {time}", hint: "Downloads model metadata from the official Cline repository. No model requests, saved policy changes or key grants. Adding or editing uses declared capabilities; unknown capabilities remain unknown.", error: "Download or save failed. The previous catalog is preserved. Check the network and retry.", updated: "Model catalog updated", auditFailed: "Catalog saved, but audit recording failed. Refresh to confirm.", controls: "Declared selectable levels: {levels}", noControls: "No selectable levels; follow the client", capabilities: "Context: {context}; output limit: {output}; capabilities: {capabilities}" },
     extra: { modelCount: "Models: {count}", providerCatalog: "Provider model catalog", listHint: "View provider catalogs and select authorized models on each API key.", catalogColumn: "Model catalog", settingsColumn: "Model count", manage: "Model list", title: "Provider models", hint: "This catalog is read-only. Configure model access and reasoning on each API key. Calling IDs map to exact upstream models.", modelId: "Calling model ID" },
     otherTaskActive: "Another management task is running. Relay service actions will be available when it finishes.",
     viewTasks: "View management tasks",
@@ -1019,6 +1020,7 @@ const en: Messages = {
     "timeout": "The request timed out. Try again."
   },
   common: {
+    notifications: "Notifications",
     close: "Close",
     sidebar: "Sidebar navigation",
     sidebarDescription: "Browse pages and local service information.",

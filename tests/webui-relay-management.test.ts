@@ -93,6 +93,24 @@ it("shows only declared input formats and keeps unknown capabilities explicit", 
 const input: Extract<RelayManagementInput, { command: "issue" }> = { command: "issue", name: "沉浸式翻译", caller: "translation", key: "translation-key", models: ["clp-test/deepseek-v4.1-flash"],
   reasoning: "off" };
 
+it("saves a revision-bound rename without downloading a missing catalog", async () => {
+  const f = await fixture();
+  await manageModelRelay({ ...input, reasoning: "passthrough" }, f.environment);
+  const catalogPath = clineCatalog.clineRelayCatalogPath(f.environment);
+  unlinkSync(catalogPath);
+  const download = vi.spyOn(clineCatalog, "downloadClineRelayCatalog").mockRejectedValue(new Error("must not download"));
+  try {
+    const body = { input: { command: "edit", caller: input.caller, models: input.models, name: "改名", reasoning: "passthrough" }, revision: (await f.snapshot()).revision };
+    const previewResponse = await f.post("preview", body);
+    expect(previewResponse.status).toBe(200);
+    const preview = await previewResponse.json() as { confirmationToken: string };
+    expect((await f.post("apply", { ...body, confirmationToken: preview.confirmationToken })).status).toBe(200);
+    expect(download).not.toHaveBeenCalled();
+    expect(existsSync(catalogPath)).toBe(false);
+    expect((await f.snapshot()).callers[0]).toMatchObject({ display_name: "改名", models: input.models });
+  } finally { download.mockRestore(); }
+});
+
 it("does not auto-download a missing catalog while previewing model changes", async () => {
   const f = await fixture();
   const catalogPath = clineCatalog.clineRelayCatalogPath(f.environment);

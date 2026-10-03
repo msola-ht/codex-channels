@@ -276,6 +276,34 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
 }
 
 describe("isolated Relay vertical request chain", () => {
+  it.each(["chat", "responses"].flatMap(protocol => [0, 1].map(excess => ({ protocol, excess }))))(
+    "bounds the final upstream body after defaults and model mapping ($protocol, excess=$excess)", async ({ protocol, excess }) => {
+      let upstreamBytes = 0;
+      const f = await fixture((request, response) => {
+        request.on("data", (chunk: Buffer) => { upstreamBytes += chunk.length; });
+        request.on("end", () => {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify(protocol === "chat" ? answer : { id: "resp-1", object: "response", status: "completed", model: body.model, output: [] }));
+        });
+      });
+      const input = { ...(protocol === "chat" ? body : { model: body.model, input: "hello" }), padding: "" };
+      const normalized = { ...input, stream: false, ...(protocol === "responses" ? { store: false } : {}) };
+      input.padding = "x".repeat(1024 * 1024 + excess - Buffer.byteLength(JSON.stringify(normalized)));
+      const payload = JSON.stringify(wireRequest(input));
+      expect(Buffer.byteLength(payload)).toBeLessThanOrEqual(1024 * 1024);
+      const result = await fetch(`${f.relay.address()}/v1/${protocol === "chat" ? "chat/completions" : "responses"}`, {
+        method: "POST", headers: { authorization, "content-type": "application/json" }, body: payload,
+      });
+      expect(result.status).toBe(excess ? 413 : 200);
+      if (excess) expect(await result.json()).toMatchObject({ error: { code: "request_too_large", phase: "input", upstream_attempted: false } });
+      else await result.text();
+      expect(f.calls()).toBe(excess ? 0 : 1);
+      expect(upstreamBytes).toBe(excess ? 0 : 1024 * 1024);
+      expect(f.metrics).toHaveLength(excess ? 0 : 1);
+      expect(f.relay.diagnostics().active).toBe(0);
+      expect(f.relay.queueSnapshot()).toEqual([]);
+    });
+
   it.each(["chat", "responses"].flatMap(protocol => [false, true].flatMap(stream =>
     ["json", "content_type"].map(failure => ({ protocol, stream, failure })))))(
     "classifies response decoding failures consistently ($protocol, stream=$stream, $failure)", async ({ protocol, stream, failure }) => {

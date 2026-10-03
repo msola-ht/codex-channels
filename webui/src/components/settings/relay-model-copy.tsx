@@ -19,9 +19,9 @@ export function RelayModelCopy({ models }: { models: string[] }) {
   }
   return <div className="flex flex-col items-start gap-1">
     <DropdownMenu onOpenChange={open => { if (open) setFeedback(null) }}>
-      <DropdownMenuTrigger asChild><Button size="xs" variant="ghost" disabled={pending || !models.length}><CopyIcon data-icon="inline-start" />{t("relay.copyModelId")}</Button></DropdownMenuTrigger>
+      <DropdownMenuTrigger render={<Button size="xs" variant="ghost" disabled={pending || !models.length} />}><CopyIcon data-icon="inline-start" />{t("relay.copyModelId")}</DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="max-w-[calc(100vw-2rem)]">
-        <DropdownMenuGroup>{models.map(model => <DropdownMenuItem key={model} disabled={pending} onSelect={() => void copy(model)}>
+        <DropdownMenuGroup>{models.map(model => <DropdownMenuItem key={model} disabled={pending} onClick={() => void copy(model)}>
           <CopyIcon /><span className="break-all">{model}</span>
         </DropdownMenuItem>)}</DropdownMenuGroup>
       </DropdownMenuContent>

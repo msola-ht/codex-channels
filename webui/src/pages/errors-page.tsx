@@ -10,7 +10,7 @@ import { useTranslation } from "@/hooks/use-translation"
 import { formatCount, formatSuccessRate } from "@/lib/format"
 import { translateApiError } from "@/lib/i18n/translate"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 
 export function ErrorsPage() {
   const { query, update } = useMetricsQuery("30d")

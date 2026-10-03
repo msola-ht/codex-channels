@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
@@ -38,6 +38,7 @@ function DeliveryQueueList({ filter, before, pageNumber, onFilter, onNext, onPre
 }) {
   const { t } = useTranslation()
   const queue = useDeliveryQueue(before, filter)
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const { data, loading, error, errorCode, refetch, busy, pendingPreview } = queue
   const locked = busy || pendingPreview !== null
   const summaries = useDeliveryContents(error ? [] : data?.records ?? [])
@@ -48,7 +49,8 @@ function DeliveryQueueList({ filter, before, pageNumber, onFilter, onNext, onPre
   const columns: DataTableColumn<DeliveryQueueEntry>[] = [
     { id: "select", enableHiding: false, enableSorting: false,
       header: () => <Checkbox aria-label={t("delivery.selectPage")} disabled={!eligible.length || locked || loading}
-        checked={chosen.length > 0 && chosen.length === eligible.length ? true : chosen.length ? "indeterminate" : false}
+        checked={chosen.length > 0 && chosen.length === eligible.length}
+        indeterminate={chosen.length > 0 && chosen.length < eligible.length}
         onCheckedChange={value => setSelected(value === true ? Object.fromEntries(eligible.map(row => [row.id, row.revision])) : {})} />,
       cell: ({ row: { original: row } }) => <Checkbox aria-label={t("delivery.selectRecord", { id: row.id })} checked={selected[row.id] === row.revision}
         disabled={loading || locked || !["uncertain", "blocked"].includes(row.state)} onCheckedChange={value => setSelected({ ...selected, [row.id]: value === true ? row.revision : "" })} /> },
@@ -73,8 +75,8 @@ function DeliveryQueueList({ filter, before, pageNumber, onFilter, onNext, onPre
   ]
   return <div className="flex min-h-min min-w-0 flex-1 flex-col gap-4">
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-      <ToggleGroup type="single" variant="outline" size="sm" value={filter} disabled={locked} aria-label={t("delivery.filter")}
-        onValueChange={value => { if (filters.includes(value as Filter)) onFilter(value as Filter) }} className="flex-wrap">
+      <ToggleGroup variant="outline" size="sm" value={[filter]} disabled={locked} aria-label={t("delivery.filter")}
+        onValueChange={([value]) => { if (filters.includes(value as Filter)) onFilter(value as Filter) }} className="flex-wrap">
         {filters.map(value => <ToggleGroupItem key={value} value={value}>{t(`delivery.states.${value}`)}{!error && data?.summary && <span className="tabular-nums">{value === "all" ? data.summary.records : data.summary[value]}</span>}</ToggleGroupItem>)}
       </ToggleGroup>
       <div className="flex items-center gap-2">
@@ -104,8 +106,8 @@ function DeliveryQueueList({ filter, before, pageNumber, onFilter, onNext, onPre
         serverTotal: data?.summary ? filter === "all" ? data.summary.records : data.summary[filter] : 0,
         hasPrevious: before !== 0 && !locked, hasNext: !loading && !locked && data?.nextCursor != null, onPrevious,
         onNext: () => { if (data?.nextCursor != null) onNext(data.nextCursor) } }} />}
-    <AlertDialog open={pendingPreview !== null} onOpenChange={value => { if (!value) queue.cancel() }}>
-      <AlertDialogContent className="max-h-[90dvh] overflow-y-auto">
+    <AlertDialog open={pendingPreview !== null} onOpenChange={(value, details) => { if (busy) { details.cancel(); return }; if (!value) queue.cancel() }}>
+      <AlertDialogContent initialFocus={cancelRef} className="max-h-[90dvh] overflow-y-auto">
         <AlertDialogHeader><AlertDialogTitle>{t(pendingPreview?.input.action === "ignore" ? "delivery.ignoreTitle" : "delivery.confirmTitle")}</AlertDialogTitle><AlertDialogDescription>{t(pendingPreview?.input.action === "ignore" ? "delivery.ignoreHint" : "delivery.confirmHint")}</AlertDialogDescription></AlertDialogHeader>
         <p className="text-sm">{t("delivery.selected", { count: pendingPreview?.preview.count ?? 0 })}</p>
         <div className="max-h-48 overflow-y-auto" role="region" aria-label={t("delivery.reviewSelection")} tabIndex={0}>
@@ -120,7 +122,7 @@ function DeliveryQueueList({ filter, before, pageNumber, onFilter, onNext, onPre
           </ul>
         </div>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>{t("delivery.cancel")}</AlertDialogCancel>
+          <AlertDialogCancel ref={cancelRef} disabled={busy}>{t("delivery.cancel")}</AlertDialogCancel>
           <AlertDialogAction variant={pendingPreview?.input.action === "ignore" ? "destructive" : "default"} aria-busy={busy} disabled={busy || loading} onClick={event => { event.preventDefault(); void queue.confirm() }}>{busy && <Spinner data-icon="inline-start" aria-hidden="true" />}{t(busy ? "delivery.processing" : pendingPreview?.input.action === "ignore" ? "delivery.ignoreConfirm" : "delivery.confirm")}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

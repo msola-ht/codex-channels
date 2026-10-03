@@ -15,7 +15,7 @@ import { useThreadRun, useThreadTurns } from "@/hooks/use-thread-detail"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
 import { shortThreadId } from "@/lib/format"
 import { metricsLink } from "@/lib/metrics-query"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 
 export function ThreadDetailPage() {
   const { t } = useTranslation()
@@ -30,8 +30,8 @@ export function ThreadDetailPage() {
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold" title={shortThreadId(id) === id ? undefined : id}>{t("threads.heading", { id: shortThreadId(id) })}</h1>
         <div className="flex gap-2">
-          <Button variant="outline" asChild><Link to={metricsLink("/requests", query, { threadId: id })}>{t("threads.viewRequests")}</Link></Button>
-          <Button variant="outline" asChild><Link to={metricsLink("/errors", query, { threadId: id })}>{t("threads.viewErrors")}</Link></Button>
+          <Button variant="outline" render={<Link to={metricsLink("/requests", query, { threadId: id })} />} nativeButton={false}>{t("threads.viewRequests")}</Button>
+          <Button variant="outline" render={<Link to={metricsLink("/errors", query, { threadId: id })} />} nativeButton={false}>{t("threads.viewErrors")}</Button>
         </div>
       </div>
       <QueryFilters query={query} onChange={update} threadId={id} />

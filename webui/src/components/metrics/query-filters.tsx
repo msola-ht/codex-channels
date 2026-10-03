@@ -85,7 +85,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
             <FieldLabel className="sr-only" htmlFor={`${id}-filter`}>{t("filters.keyword")}</FieldLabel>
             <Input id={`${id}-filter`} value={draft.filter ?? ""} maxLength={128} placeholder={t("filters.search")} onChange={(event) => set("filter", event.target.value)} />
           </Field>
-          <SheetTrigger asChild><Button type="button" variant="outline"><SlidersHorizontalIcon data-icon="inline-start" />{t("common.filter")}{filterCount > 0 ? ` · ${filterCount}` : ""}</Button></SheetTrigger>
+          <SheetTrigger render={<Button type="button" variant="outline" />}><SlidersHorizontalIcon data-icon="inline-start" />{t("common.filter")}{filterCount > 0 ? ` · ${filterCount}` : ""}</SheetTrigger>
           <Button type="submit">{t("filters.query")}</Button>
           <Button type="button" variant="outline" onClick={reset}>{t("filters.reset")}</Button>
         </FieldGroup>
@@ -105,17 +105,15 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
         <Field>
           <FieldLabel htmlFor={`${id}-provider`}>{t("metrics.provider")}</FieldLabel>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button id={`${id}-provider`} type="button" variant="outline" className="w-full justify-between" disabled={providersLoading || providersError !== null}>
+            <DropdownMenuTrigger render={<Button id={`${id}-provider`} type="button" variant="outline" className="w-full justify-between" disabled={providersLoading || providersError !== null} />}>
                 <span className="truncate">{providersLoading ? t("common.loading") : providersError !== null ? t("common.loadFailed") : selectedProviders.length === 0 ? t("common.all") : selectedProviders.join("、")}</span>
                 <ChevronDownIcon data-icon="inline-end" />
-              </Button>
-            </DropdownMenuTrigger>
+              </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               <DropdownMenuGroup>
-                <DropdownMenuCheckboxItem checked={selectedProviders.length === 0} onSelect={(event) => event.preventDefault()} onCheckedChange={() => setDraft((previous) => ({ ...previous, provider: undefined }))}>{t("common.all")}</DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem checked={selectedProviders.length === 0} closeOnClick={false} onCheckedChange={() => setDraft((previous) => ({ ...previous, provider: undefined }))}>{t("common.all")}</DropdownMenuCheckboxItem>
                 {providerOptions.map((provider) => (
-                  <DropdownMenuCheckboxItem key={provider} checked={selectedProviders.includes(provider)} onSelect={(event) => event.preventDefault()} onCheckedChange={(checked) => setDraft((previous) => ({ ...previous, provider: checked ? [...(previous.provider ?? []), provider] : previous.provider?.filter((value) => value !== provider) }))}>
+                  <DropdownMenuCheckboxItem key={provider} checked={selectedProviders.includes(provider)} closeOnClick={false} onCheckedChange={(checked) => setDraft((previous) => ({ ...previous, provider: checked ? [...(previous.provider ?? []), provider] : previous.provider?.filter((value) => value !== provider) }))}>
                     {provider}
                   </DropdownMenuCheckboxItem>
                 ))}
@@ -132,7 +130,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
           ["status", t("filters.status"), [["completed", t("filters.completed")], ["failed", t("filters.failed")], ["incomplete", t("filters.incomplete")], ["unknown", t("filters.unknown")]]],
         ] as const).map(([key, label, options]) => (
           <Field key={key}><FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel>
-            <Select value={draft[key] || "all"} onValueChange={(value) => set(key, value === "all" ? "" : value)}>
+            <Select items={[{ value: "all", label: t("common.all") }, ...options.map(([value, label]) => ({ value, label }))]} value={draft[key] || "all"} onValueChange={(value) => { if (value !== null) set(key, value === "all" ? "" : value) }}>
               <SelectTrigger id={`${id}-${key}`}><SelectValue /></SelectTrigger>
               <SelectContent><SelectGroup><SelectItem value="all">{t("common.all")}</SelectItem>{options.map(([value, text]) => <SelectItem key={value} value={value}>{text}</SelectItem>)}</SelectGroup></SelectContent>
             </Select>

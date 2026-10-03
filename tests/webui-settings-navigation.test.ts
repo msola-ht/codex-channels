@@ -66,14 +66,14 @@ it("keeps settings fields and maintenance actions in their owning pages", () => 
   expect(result.sidebarHome).toContain('aria-label="展开设置"');
   expect(result.groups.find(group => group.id === "relay")?.children.map(item => item.to)).toEqual(["/relay", "/relay/queue"]);
   expect(result.sidebars.relay).toContain('aria-label="收起模型转发"');
-  expect(result.sidebars.relay).toMatch(/<a[^>]*data-active="true"[^>]*href="\/relay\/queue"/u);
+  expect(result.sidebars.relay).toMatch(/<a(?=[^>]*data-active="")(?=[^>]*href="\/relay\/queue")[^>]*>/u);
   expect(result.sidebars.settings).toContain('aria-label="收起设置"');
   expect(result.sidebarPreferences.closed).toContain('data-collapsible="icon"');
   expect(result.sidebarPreferences.closed).toContain('aria-label="展开设置"');
   expect(result.sidebarPreferences.closed).not.toContain('data-slot="sidebar-menu-sub"');
   const activeGroup = [...result.sidebarPreferences.closed!.matchAll(/<button\b([^>]*)>/gu)]
     .find(match => match[1]!.includes('aria-label="展开设置"'));
-  expect(activeGroup?.[1]).toContain('data-active="true"');
+  expect(activeGroup?.[1]).toContain('data-active=""');
   expect(activeGroup?.[1]).toContain('aria-expanded="false"');
   for (const state of ['open','missing','invalid','unavailable']) {
     expect(result.sidebarPreferences[state]).toContain('data-state="expanded"');
@@ -90,6 +90,7 @@ it("keeps settings fields and maintenance actions in their owning pages", () => 
   expect(descriptionId).toBeTruthy();
   expect(result.described).toContain(`id="${descriptionId}">Capture scope`);
   expect(result.described).toContain('data-slot="field-content"');
+  expect(result.described).toMatch(/data-slot="select-value"[^>]*>Production<\/span>/u);
   expect(result.channelEnglish).toContain('Channel');
   expect(result.channelEnglish).toContain('Enabled');
   expect(result.channelEnglish).not.toContain('已启用');

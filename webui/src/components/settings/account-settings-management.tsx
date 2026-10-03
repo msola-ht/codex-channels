@@ -78,7 +78,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   ]
   return <>
     <div className="flex flex-wrap items-center gap-2">
-      <Select value={filter} onValueChange={setFilter}><SelectTrigger aria-label={t("modelManagement.platform")}><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t("modelManagement.allPlatforms")}</SelectItem>{Object.entries(platforms).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectGroup></SelectContent></Select>
+      <Select items={[{ value: "all", label: t("modelManagement.allPlatforms") }, ...Object.entries(platforms).map(([value, label]) => ({ value, label }))]} value={filter} onValueChange={value => { if (value !== null) setFilter(value) }}><SelectTrigger aria-label={t("modelManagement.platform")}><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t("modelManagement.allPlatforms")}</SelectItem>{Object.entries(platforms).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectGroup></SelectContent></Select>
       {(Object.keys(platforms) as Platform[]).map(platform => <Button key={platform} variant="outline" disabled={disabled || (platform === "deepseek" && settings.deepseek.legacyConfigurationPresent)} onClick={() => open(platform)}>{t("modelManagement.addAccount", { platform: platforms[platform] })}</Button>)}
     </div>
     {settings.deepseek.legacyConfigurationPresent && <Alert><AlertDescription>{t("modelManagement.legacyHint")}<Button variant="destructive" size="sm" disabled={disabled} onClick={() => void management.mutate({ operation: "deepseek.legacy.remove" })}>{t("modelManagement.removeLegacy")}</Button></AlertDescription></Alert>}

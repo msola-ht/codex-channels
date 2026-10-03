@@ -57,7 +57,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       id: "turn",
       accessorFn: (turn) => turn.turnId,
       header: ({ column }) => <SortableHeader column={column}>{t("metrics.turn")}</SortableHeader>,
-      cell: ({ row }) => <TruncatedText asChild text={row.original.turnId} className="max-w-48"><Link className="underline-offset-4 hover:underline" to={metricsLink("/requests", query, { threadId, turnId: row.original.turnId })}>{row.original.turnId}</Link></TruncatedText>,
+      cell: ({ row }) => <TruncatedText render={<Link className="underline-offset-4 hover:underline" to={metricsLink("/requests", query, { threadId, turnId: row.original.turnId })} />} text={row.original.turnId} className="max-w-48">{row.original.turnId}</TruncatedText>,
     },
     {
       id: "provider",
@@ -118,11 +118,9 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
             : null
         return (
           <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+            <TooltipTrigger aria-description={[t("metrics.cached", { count: formatTokens(turn.cachedInputTokens) }), t("metrics.uncached", { count: uncached === null ? "—" : formatTokens(uncached) }), t("metrics.hitRate", { rate: rate === null ? "—" : `${(rate * 100).toFixed(1)}%` })].join("; ")} render={<span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" />}>
                 {formatTokens(turn.inputTokens)}
-              </span>
-            </TooltipTrigger>
+              </TooltipTrigger>
             <TooltipContent side="right" align="start">
               <ul className="flex flex-col gap-1">
                 <li className="whitespace-nowrap">
@@ -154,11 +152,9 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
         )
         return (
           <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+            <TooltipTrigger aria-description={[t("metrics.reasoning", { count: formatTokens(turn.reasoningOutputTokens) }), t("metrics.nonReasoning", { count: nonReasoning === null ? "—" : formatTokens(nonReasoning) })].join("; ")} render={<span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" />}>
                 {formatTokens(turn.outputTokens)}
-              </span>
-            </TooltipTrigger>
+              </TooltipTrigger>
             <TooltipContent side="right" align="start">
               <ul className="flex flex-col gap-1">
                 <li className="whitespace-nowrap">

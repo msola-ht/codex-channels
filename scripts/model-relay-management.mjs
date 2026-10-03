@@ -97,14 +97,18 @@ function withRelayConfigLock(configPath, operation) {
 
 /** Explicit configuration transaction; service activation occurs only after atomic save. */
 export async function manageModelRelay(input, environment = process.env, options = {}) {
-  if (!options.preview && readClineRelayCatalog(environment).status === "missing"
+  // Revision-bound confirmation must use exactly the catalog reviewed in its preview.
+  if (!options.preview && options.expectedRevision === undefined && readClineRelayCatalog(environment).status === "missing"
     && (input.command === "providers" || ["issue", "edit"].includes(input.command) && input.models?.some(id => id.startsWith("clp-")))
     && listRelayProviderIds(environment).some(id => input.command === "providers" ? id.startsWith("clp-") : input.models?.some(model => model.startsWith(`${id}/`)))) {
-    await withRelayManagementTransaction(environment, async () => {
-      if (readClineRelayCatalog(environment).status !== "missing") return {};
-      try { return { activation: "catalog_saved", catalog: saveClineRelayCatalog(await downloadClineRelayCatalog(environment), environment) }; }
-      catch { throw invalid("Cline 模型目录自动下载失败，请检查网络后重试，或在 WebUI 手动下载"); }
-    });
+    try {
+      const catalog = await downloadClineRelayCatalog(environment);
+      await withRelayManagementTransaction(environment, () => {
+        // Downloads must not block revocation. Another owner may have saved a catalog meanwhile.
+        if (readClineRelayCatalog(environment).status !== "missing") return {};
+        return { activation: "catalog_saved", catalog: saveClineRelayCatalog(catalog, environment) };
+      });
+    } catch { throw invalid("Cline 模型目录自动下载失败，请检查网络后重试，或在 WebUI 手动下载"); }
   }
   if (["listen", "issue", "edit", "delete", "rotate", "disable", "enable"].includes(input.command)) {
     return withRelayManagementTransaction(environment, () => executeModelRelay(input, environment, options));

@@ -25,7 +25,7 @@ import type { AccountRefreshAttempts, AccountRefreshControl, AccountRefreshFailu
 import { useDashboard } from "@/hooks/use-dashboard"
 import { translateApiError, translateApiErrorCode } from "@/lib/i18n/translate"
 import type { Translate } from "@/lib/i18n/messages"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 import type {
   OpenAiAccountCredits,
   CcgCreditUsageResponse,

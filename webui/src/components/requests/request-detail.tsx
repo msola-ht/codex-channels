@@ -69,7 +69,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
       </div>)}
     </dl>
     {record.traffic === null ? <p className="text-sm text-muted-foreground">{t("requests.noTrafficReason")}</p>
-      : <Button variant="outline" asChild><Link to={trafficDetailPath(record.traffic)}
-        state={{ requestsReturnTo: `${location.pathname}${location.search}` }}>{t("requests.viewTraffic")}</Link></Button>}
+      : <Button variant="outline" render={<Link to={trafficDetailPath(record.traffic)}
+        state={{ requestsReturnTo: `${location.pathname}${location.search}` }} />} nativeButton={false}>{t("requests.viewTraffic")}</Button>}
   </div>
 }
