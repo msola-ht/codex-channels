@@ -31,6 +31,7 @@ import {
   loadGatewaySettings,
 } from "./config-management.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
+import { createSharedCodexUserConfigClient, readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
 import { loadServiceStatusSummary } from "./webui-service-status.mjs";
 import {
   ApiError,
@@ -119,8 +120,10 @@ export function createWebuiServer({
   token = null,
   port = DEFAULT_PORT,
   managementOrigin = null,
-  loadProviderState = loadModelProviderManagementState,
-  loadCodexSettings = loadCodexUserSettings,
+  loadProviderState = (options) => loadModelProviderManagementState({ ...options,
+    readUserConfig: (env) => readCodexUserConfigSnapshot(env, { createClient: createSharedCodexUserConfigClient }),
+  }),
+  loadCodexSettings = (options) => loadCodexUserSettings({ ...options, createClient: createSharedCodexUserConfigClient }),
   previewCodexSetting = previewCodexUserSetting,
   updateCodexSetting = updateCodexUserSetting,
   previewProviderSettings = previewProviderSettingsMutation,

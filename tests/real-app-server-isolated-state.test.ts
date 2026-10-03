@@ -22,7 +22,9 @@ import type { OutputEvent } from "../src/conversation-core/index.js";
 import { ProviderRoutingClient } from "../src/codex-client/index.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { configureCodexUpdateDefaults, disableCodexDaemonAutoStart, updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
+import { configureCodexUpdateDefaults, createSharedCodexUserConfigClient, disableCodexDaemonAutoStart, updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
+import { initializeUserData } from "../scripts/runtime-config.mjs";
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   loadCodexUserSettings,
   updateCodexUserSetting,
@@ -41,6 +43,7 @@ import {
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
+import { startWebuiTestServer } from "./webui-server-test-fixture.js";
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
@@ -60,6 +63,55 @@ contractSuite("isolated Codex App Server state contract", () => {
   let oauthBaseUrl: string;
   let runtimeProbeExitFile: string;
   let appServerStderr = "";
+
+  it("reads WebUI settings through the existing server without starting a Codex process", async () => {
+    const environment = { ...process.env, CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(testRuntime, "webui"), CODEX_CONNECT_CONFIG_FILE: "", CODEX_BINARY: join(testRuntime, "must-not-start-codex") };
+    const initialized = initializeUserData({ environment, cwd: workdir });
+    const config = readGatewayConfig(initialized.configPath);
+    const codexConfig = config.codex as Record<string, string>;
+    codexConfig.socket_path = socketPath;
+    writeGatewayConfig(initialized.configPath, config);
+    const settings = await loadCodexUserSettings({ environment, createClient: createSharedCodexUserConfigClient, primaryProvider: () => "openai" });
+    expect(settings.version).not.toBe("");
+    expect(settings.models.length).toBeGreaterThan(0);
+    expect(processHandle.exitCode).toBeNull();
+    expect((await ownerClient.readUserConfigSnapshot()).version).toBe(settings.version);
+    const original = await ownerClient.readUserConfigSnapshot();
+    try {
+      await ownerClient.writeUserConfigEdits([{ keyPath: "model_reasoning_effort", value: "high" }], { expectedVersion: original.version });
+      const updated = await loadCodexUserSettings({ environment, createClient: createSharedCodexUserConfigClient, primaryProvider: () => "contract" });
+      expect(updated.version).not.toBe(original.version);
+      expect(updated.defaults.reasoningEffort).toBe("high");
+    } finally {
+      const current = await ownerClient.readUserConfigSnapshot();
+      await ownerClient.writeUserConfigEdits([{ keyPath: "model_reasoning_effort", value: original.config.model_reasoning_effort ?? null }], { expectedVersion: current.version });
+    }
+    const { server, origin } = await startWebuiTestServer([], environment, undefined, { token: "contract-token" });
+    try {
+      const headers = { authorization: "Bearer contract-token" };
+      for (const resource of ["codex/settings", "provider-settings"]) {
+        const response = await fetch(`${origin}/api/v1/management/${resource}`, { headers });
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        if (resource === "codex/settings") expect(body.models.length).toBeGreaterThan(0);
+      }
+      writeGatewayConfig(initialized.configPath, { ...config, codex: { ...codexConfig, socket_path: join(testRuntime, "released.sock") } });
+      for (const resource of ["codex/settings", "provider-settings"]) {
+        const response = await fetch(`${origin}/api/v1/management/${resource}`, { headers });
+        expect(response.status).toBe(503);
+        await response.json();
+      }
+      expect(processHandle.exitCode).toBeNull();
+    } finally {
+      await new Promise<void>(resolveClose => server.close(resolveClose));
+    }
+    writeGatewayConfig(initialized.configPath, { ...config, codex: { ...codexConfig, socket_path: 42 } });
+    await expect(createSharedCodexUserConfigClient({ environment })).rejects.toThrow("[codex]");
+    codexConfig.socket_path = join(testRuntime, "missing.sock");
+    writeGatewayConfig(initialized.configPath, { ...config, codex: codexConfig });
+    await expect(loadCodexUserSettings({ environment, createClient: createSharedCodexUserConfigClient, primaryProvider: () => "openai" })).rejects.toThrow();
+    expect(processHandle.exitCode).toBeNull();
+  });
 
   beforeAll(async () => {
     mkdirSync(runtimeRoot, { recursive: true });

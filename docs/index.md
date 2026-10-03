@@ -380,6 +380,9 @@ Schema v25 增加请求级上游诊断摘要，普通 Provider Proxy 与 Relay �
 
 CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，读取用户层并投影该连接的合并配置；渠道跨 Provider
 切换则向目标 App Server 发送带 Workspace CWD 的只读 `config/read`，取得该 Profile 的有效思考等级。
+WebUI 的 Codex 和 Provider 配置读取通过 `scripts/codex-user-config.mjs` 的共享 Client 连接已有主 App Server，关闭连接不停止服务，也不在服务不可用时启动临时进程。
+Codex 设置读取沿用 `model/list` 查询已有目录；每次读取后立即断开连接，不获取 Supervisor 保活租约或唤醒已释放实例，模型相关保存仍执行原有目录校验。
+验证见 `codex-user-settings-management.test.ts`、`webui-server-settings-management.test.ts` 与 `real-app-server-isolated-state.test.ts` 的 WebUI 共享连接合同。
 电脑、浏览器与已有 MCP 设置由 [`codex-tool-settings.mjs`](../scripts/codex-tool-settings.mjs) 受控投影，
 复用上述读取和带 `expectedVersion` 的 `config/batchWrite`，不新增 RPC。字段依据固定版
 [`computer_use.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/config/src/computer_use.rs)、

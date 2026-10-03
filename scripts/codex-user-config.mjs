@@ -6,6 +6,9 @@ import {
   resolveOptionalExecutable,
 } from "../runtime/executable.mjs";
 import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
+import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
+import { readGatewayConfig, validateCodexConfigDocument } from "../runtime/gateway-config.mjs";
+import { locateUserConfig } from "./runtime-config.mjs";
 
 // A running updater from 77efce47 imports this name after switching checkouts.
 // Keep the handoff, but never seed or overwrite a model from either entry.
@@ -95,6 +98,24 @@ export async function createCodexUserConfigClient({
     })),
     { sandbox: "read-only" },
   );
+}
+
+/** WebUI reads reuse the running primary server; never start a temporary server. */
+export async function createSharedCodexUserConfigClient({ environment = process.env } = {}) {
+  const config = locateUserConfig(environment);
+  const document = readGatewayConfig(config.configPath);
+  const codex = validateCodexConfigDocument(document.codex ?? {});
+  const socketPath = resolvePrimaryAppServerSocketPath({ codex }, config.dataDir);
+  const configuredBinary = stringValue(environment.CODEX_BINARY) || codex.binary;
+  const codexBinary = resolveOptionalExecutable(configuredBinary, environment) ?? configuredBinary;
+  const { CodexAppServerClient, JsonRpcClient, createAppServerTransport } = await import("../dist/codex-client/index.js");
+  const transport = createAppServerTransport({ kind: "local-app-server", socketPath }, {
+    codexBinary,
+    connectTimeoutMs: 3_000,
+    createCodexProcessInvocation: (args) => executableInvocation(codexBinary, args, environment),
+    terminateCodexProcess: terminateChildProcess,
+  });
+  return new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
 }
 
 function stringValue(value) {
