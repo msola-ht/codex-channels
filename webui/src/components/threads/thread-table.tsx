@@ -32,10 +32,18 @@ function ThreadTokenTotal({ thread }: { thread: ThreadListItem }) {
   const { t } = useTranslation()
   const labels = [t("threads.tokenInput"), t("threads.tokenCached"), t("threads.tokenOutput")]
   const groups = [
-    { label: t("threads.tokenSelf"), values: [thread.inputTokens, thread.cachedInputTokens, thread.outputTokens] },
-    { label: t("threads.tokenSubagents"), values: [thread.subagentUsage.inputTokens, thread.subagentUsage.cachedInputTokens, thread.subagentUsage.outputTokens] },
-  ]
-  const description = groups.map((group) => `${group.label}: ${group.values.map((value, index) => `${labels[index]} ${formatTokens(value)}`).join(", ")}`).join(". ")
+    { label: t("threads.tokenSelf"), values: [thread.inputTokens, thread.cachedInputTokens, thread.outputTokens], cacheUsage: thread.cacheUsage },
+    { label: t("threads.tokenSubagents"), values: [thread.subagentUsage.inputTokens, thread.subagentUsage.cachedInputTokens, thread.subagentUsage.outputTokens], cacheUsage: thread.subagentUsage.cacheUsage },
+  ].map((group) => ({
+    ...group,
+    values: group.values.map((value, index) => {
+      if (index === 1 && value === null && group.cacheUsage.cachedInputTokens !== null) {
+        return `≥ ${formatTokens(group.cacheUsage.cachedInputTokens)}`
+      }
+      return formatTokens(value)
+    }),
+  }))
+  const description = groups.map((group) => `${group.label}: ${group.values.map((value, index) => `${labels[index]} ${value}`).join(", ")}`).join(". ")
 
   return (
     <Tooltip>
@@ -53,7 +61,7 @@ function ThreadTokenTotal({ thread }: { thread: ThreadListItem }) {
                   {group.values.map((value, valueIndex) => (
                     <div key={labels[valueIndex]} className="flex flex-col gap-1">
                       <dt>{labels[valueIndex]}</dt>
-                      <dd className="tabular-nums">{formatTokens(value)}</dd>
+                      <dd className="tabular-nums">{value}</dd>
                     </div>
                   ))}
                 </dl>

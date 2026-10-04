@@ -168,7 +168,7 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 export interface ThreadListItem {
   totalTokens: number
   cachedInputTokens: number | null
-  subagentUsage: { inputTokens: number; cachedInputTokens: number | null; outputTokens: number }
+  subagentUsage: { inputTokens: number; cachedInputTokens: number | null; outputTokens: number; cacheUsage: CacheUsage }
   cacheUsage: CacheUsage
   sessionTiming: SessionExecutionTiming
   threadId: string

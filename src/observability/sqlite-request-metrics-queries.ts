@@ -737,6 +737,11 @@ export class SqliteRequestMetricsQueries {
           cachedInputTokens: row.subagent_cached_input_token_count === row.subagent_request_count
             ? row.subagent_cached_input_tokens ?? 0 : null,
           outputTokens: row.subagent_output_tokens ?? 0,
+          cacheUsage: toStoredCacheUsage({
+            known_cached_input_tokens: row.subagent_known_cached_input_tokens,
+            cache_observed_input_tokens: row.subagent_cache_observed_input_tokens,
+            cache_missing_request_count: row.subagent_cache_missing_request_count,
+          }),
         },
         totalTokens: row.total_tokens,
         compact: row.request_count === null ? null : toStoredCompactSummary(row),
@@ -798,6 +803,12 @@ export class SqliteRequestMetricsQueries {
           SUM(CASE WHEN thread_id != root_thread_id THEN output_tokens END) AS subagent_output_tokens,
           COUNT(CASE WHEN thread_id != root_thread_id THEN 1 END) AS subagent_request_count,
           COUNT(CASE WHEN thread_id != root_thread_id THEN cached_input_tokens END) AS subagent_cached_input_token_count,
+          SUM(CASE WHEN thread_id != root_thread_id AND input_tokens IS NOT NULL
+            THEN cached_input_tokens END) AS subagent_known_cached_input_tokens,
+          SUM(CASE WHEN thread_id != root_thread_id AND cached_input_tokens IS NOT NULL
+            THEN input_tokens END) AS subagent_cache_observed_input_tokens,
+          SUM(CASE WHEN thread_id != root_thread_id AND (input_tokens IS NULL OR cached_input_tokens IS NULL)
+            THEN 1 ELSE 0 END) AS subagent_cache_missing_request_count,
           MIN(request_started_at_ms) AS tree_first_request_started_at_ms,
           MAX(recorded_at_ms) AS tree_recorded_at_ms
         FROM tree_scoped GROUP BY root_thread_id
@@ -841,6 +852,9 @@ export class SqliteRequestMetricsQueries {
       subagent_output_tokens: number | null;
       subagent_request_count: number;
       subagent_cached_input_token_count: number;
+      subagent_known_cached_input_tokens: number | null;
+      subagent_cache_observed_input_tokens: number | null;
+      subagent_cache_missing_request_count: number;
       tree_first_request_started_at_ms: number;
       tree_recorded_at_ms: number;
       agent_path: string | null;

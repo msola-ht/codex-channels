@@ -221,7 +221,12 @@ export interface StoredThreadListItem {
   /** 当前请求筛选范围内的自身缓存合计；任意请求缺失时为 null，无请求时为 0。 */
   cachedInputTokens: number | null;
   /** 当前请求筛选范围内所有已登记子代理后代的用量，不含自身。 */
-  subagentUsage: { inputTokens: number; cachedInputTokens: number | null; outputTokens: number };
+  subagentUsage: {
+    inputTokens: number;
+    cachedInputTokens: number | null;
+    outputTokens: number;
+    cacheUsage: StoredCacheUsage;
+  };
   /** 自身与递归子代理的输入和输出之和；缓存已包含在输入中。 */
   totalTokens: number;
   compact: StoredCompactRequestMetricsSummary | null;

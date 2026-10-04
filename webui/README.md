@@ -88,7 +88,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `hooks/use-requests.ts` 与 `hooks/use-errors.ts` 复用队列通知 Hook，在 Gateway 指标批次成功落库后更新第一页；历史分页延后读取，返回第一页补查，手动刷新始终可用。`GET /api/v1/metrics/events` 使用只读 API 鉴权，通知中断与快照失败分别显示，不影响历史查询。
 
 `hooks/use-threads.ts` 与 `hooks/use-thread-detail.ts` 沿用指标通知和历史分页暂停规则。会话详情通过 `useThreadDetail` 共用一条订阅，并行读取本地汇总和轮次，两项成功后一起更新；同条件刷新保留内容和展开状态。`useMetricsProviders` 跟随页面成功读取的结果合并更新提供商选项，自动读取至少间隔 30 秒，不另开订阅；后台或离线时暂停，失败可手动重试，不覆盖筛选草稿。
-会话列表从同一次响应读取 `totalTokens`，仅展示可排序的“总计”列；悬浮提示上方显示自身输入/缓存/输出，下方显示 `subagentUsage` 的对应分项。页面使用不受分页影响的 `treeAggregate` 展示一份期间汇总，不在浏览器遍历子代理或相减推算缓存。
+会话列表从同一次响应读取 `totalTokens`，仅展示可排序的“总计”列；悬浮提示上方显示自身输入/缓存/输出，下方显示 `subagentUsage` 的对应分项。缓存不完整时读取各组 `cacheUsage` 的已知累计并标注 `≥`，全部未知仍显示 `—`。页面使用不受分页影响的 `treeAggregate` 展示一份期间汇总，不在浏览器遍历子代理或相减推算缓存。
 `hooks/use-metrics-snapshot.ts` 供请求、错误、会话列表和详情复用上述编排。查询变化仍保留旧 `data` 并标记 `loading`，消费方通过加载态隐藏旧结果；不将这一合同推广到有不同查询隔离语义的账户与调用详情。
 
 `components/threads/thread-subagents.tsx` 复用公共 `DataTable`，
