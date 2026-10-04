@@ -74,7 +74,7 @@ describe("webui server data API", () => {
     });
   });
 
-  it("lists only main Threads with main-only pagination and summaries while preserving child detail access", async () => {
+  it("lists main Threads with separate own and filtered descendant usage while preserving child detail access", async () => {
     const fixture = createFixture();
     const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
     const recordedAtMs = Date.now() - 10_000;
@@ -100,12 +100,15 @@ describe("webui server data API", () => {
     };
     const scope = "range=all&provider=deepseek&model=matching&limit=1";
     const first = await read(`threads?${scope}`);
-    expect(first).toMatchObject({ total: 2, turnCount: 3, nextOffset: 1, aggregate: { requestCount: 3, inputTokens: 3000, outputTokens: 300 }, threads: [{ threadId: "root-b", directSubagentCount: 0 }] });
+    expect(first).toMatchObject({ total: 2, turnCount: 3, nextOffset: 1, aggregate: { requestCount: 3, inputTokens: 3000, outputTokens: 300 }, treeAggregate: { requestCount: 5, inputTokens: 5000, outputTokens: 500 }, threads: [{ threadId: "root-b", directSubagentCount: 0, totalTokens: 1100, subagentUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 } }] });
     const second = await read(`threads?${scope}&offset=1`);
-    expect(second).toMatchObject({ total: 2, turnCount: 3, nextOffset: null, aggregate: first.aggregate, threads: [{ threadId: "root-a", directSubagentCount: 3, requestCount: 2 }] });
-    expect(await read(`threads?${scope}&offset=2`)).toMatchObject({ threads: [], total: 2, aggregate: first.aggregate });
-    expect(await read("threads?range=all")).toMatchObject({ total: 3, turnCount: 4, aggregate: { requestCount: 4 } });
-    expect(await read("threads?range=all&model=child-only")).toMatchObject({ threads: [], total: 0, turnCount: 0, aggregate: null });
+    expect(second).toMatchObject({ total: 2, turnCount: 3, nextOffset: null, aggregate: first.aggregate, treeAggregate: first.treeAggregate, threads: [{ threadId: "root-a", directSubagentCount: 3, requestCount: 2, inputTokens: 2000, totalTokens: 4400, subagentUsage: { inputTokens: 2000, outputTokens: 200 } }] });
+    expect(await read(`threads?${scope}&offset=2`)).toMatchObject({ threads: [], total: 2, aggregate: first.aggregate, treeAggregate: first.treeAggregate });
+    expect(await read(`threads?${scope}&sort=totalTokens&direction=desc`)).toMatchObject({ threads: [{ threadId: "root-a", totalTokens: 4400 }] });
+    expect(await read(`threads?${scope}&sort=totalTokens&direction=asc`)).toMatchObject({ threads: [{ threadId: "root-b", totalTokens: 1100 }] });
+    expect(await read("threads?range=all")).toMatchObject({ total: 3, turnCount: 4, aggregate: { requestCount: 4 }, treeAggregate: { requestCount: 7, inputTokens: 7000 } });
+    expect(await read("threads?range=all&model=child-only")).toMatchObject({ threads: [{ threadId: "root-a", inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, provider: null, model: null, totalTokens: 1100, subagentUsage: { inputTokens: 1000, outputTokens: 100 } }], total: 1, turnCount: 0, aggregate: null, treeAggregate: { requestCount: 1 } });
+    expect(await read("threads?range=all&threadId=root-a&model=child-only")).toMatchObject({ total: 1, treeAggregate: { requestCount: 1, inputTokens: 1000 } });
     expect(await read("threads?range=all&threadId=child-a")).toMatchObject({ threads: [], total: 0 });
     expect(await read("threads/child-a/run")).toMatchObject({ threadId: "child-a", parentThreadId: "root-a", agentPath: "/root/child-a" });
     expect(await read("threads/child-a/turns?range=all")).toMatchObject({ total: 1, turns: [{ turnId: "turn-1" }], aggregate: { requestCount: 1 } });
@@ -683,7 +686,7 @@ describe("webui server data API", () => {
     expect(exported.aggregate).toEqual(requests.aggregate);
     const errors = await read(`errors?${scope}&threadId=thread-1`);
     expect(errors).toMatchObject({ total: 1, errors: { requestCount: 2, unsuccessfulRequestCount: 1 } });
-    for (const sort of ["time", "last", "thread", "provider", "model", "turns", "requests", "input", "output", "compact"]) {
+    for (const sort of ["time", "last", "thread", "provider", "model", "turns", "requests", "input", "output", "totalTokens", "compact"]) {
       await read(`threads?${scope}&sort=${sort}&direction=asc`);
     }
     for (const sort of ["time", "last", "turn", "provider", "model", "requests", "failures", "input", "output", "compact"]) {
@@ -692,7 +695,7 @@ describe("webui server data API", () => {
     for (const path of [
       "threads?range=1h", "threads?from=2026-01-02", "threads?from=2026-02-30&to=2026-03-01",
       `threads?${scope}&range=7d`, "requests?turnId=turn-1", "requests?status=invalid",
-      "threads/thread-1/turns?threadId=thread-2", "threads?limit=501", "threads?sort=invalid",
+      "threads/thread-1/turns?threadId=thread-2", "threads/thread-1/turns?sort=totalTokens", "threads?sort=treeInput", "threads?sort=treeOutput", "threads?limit=501", "threads?sort=invalid",
       "requests?model=a&model=b", "requests?unsupported=value", "threads/thread-1/run?range=7d",
       "threads?from=1969-01-01&to=2026-01-02",
     ]) {

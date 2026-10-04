@@ -5,6 +5,8 @@ import App from "@/App"
 import { AuthGate } from "@/components/layout/auth-gate"
 import { PageErrorBoundary } from "@/components/layout/page-recovery"
 import { RequestsTable } from "@/components/requests/requests-table"
+import { ThreadTable } from "@/components/threads/thread-table"
+import { useMetricsQuery } from "@/hooks/use-metrics-query"
 import { ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -129,6 +131,17 @@ function RequestsFixture() {
     sorting={[]} onSortingChange={noop} filter="" total={1} />
 }
 
+function ThreadsFixture() {
+  const { query, pagination } = useMetricsQuery("all", "last")
+  const thread = { threadId: "root-browser", provider: "openai", model: "model-test", reasoningEffort: null,
+    agentPath: null, parentThreadId: null, parentTurnId: null, directSubagentCount: 2, turnCount: 1, requestCount: 1,
+    inputTokens: 100, cachedInputTokens: 50, outputTokens: 20, totalTokens: 1080,
+    subagentUsage: { inputTokens: 800, cachedInputTokens: 300, outputTokens: 160 }, compact: null,
+    cacheUsage: null, sessionTiming: { knownDurationMs: null, missingTurnCount: 0, historyComplete: false },
+    firstRequestStartedAtMs: 1700000000000, lastRecordedAtMs: 1700000000000 }
+  return <ThreadTable threads={[thread]} query={query} pagination={pagination({ total: 1, nextOffset: null })} />
+}
+
 function ConfirmationFixture() {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -147,7 +160,7 @@ function BoundaryFixture() {
 }
 
 const fixtures = { auth: AuthFixture, api: ApiFixture, reset: ResetFixture, tabs: TabsFixture,
-  requests: RequestsFixture, confirmation: ConfirmationFixture, boundary: BoundaryFixture, queue: QueueFixture, catalog: CatalogFixture, settings: SettingsFixture }
+  requests: RequestsFixture, threads: ThreadsFixture, confirmation: ConfirmationFixture, boundary: BoundaryFixture, queue: QueueFixture, catalog: CatalogFixture, settings: SettingsFixture }
 const Fixture = fixtures[scenario]
 createRoot(document.getElementById("root")).render(<StrictMode>{scenario === "app" ? <App /> :
   <LanguageContext.Provider value={{ language: "en", setLanguage: noop }}><TooltipProvider><HashRouter>

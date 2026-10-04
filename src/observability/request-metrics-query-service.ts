@@ -36,6 +36,7 @@ export type RequestMetricsQueryStore =
     ModelRequestMetricsThreadQueryStore,
     | "subagentThread"
     | "subagents"
+    | "threadCounts"
     | "threadList"
     | "threadSubagents"
     | "threadSummary"
@@ -183,15 +184,16 @@ export class RequestMetricsQueryService {
   overview(range: ResolvedRequestMetricsRange) {
     const global = this.aggregate("global", range);
     const providers = this.aggregate("provider", range);
-    const threads = this.threadList(range, { limit: 1 });
+    const scope = { startAtMs: range.startAtMs, endAtMs: range.endAtMs };
+    const threads = this.store.threadCounts(scope);
     return {
       global: global.aggregate,
-      threadCount: threads.matchedTotal,
+      threadCount: threads.threadCount,
       turnCount: threads.turnCount,
       providers: providers.groups.map((group) => {
         // Provider 维度直接按非空 provider 列分组；仅 global 维度会返回 null。
-        const scopedThreads = this.threadList(range, { provider: group.provider!, limit: 1 });
-        return { ...group, threadCount: scopedThreads.matchedTotal, turnCount: scopedThreads.turnCount };
+        const scopedThreads = this.store.threadCounts({ ...scope, provider: group.provider! });
+        return { ...group, threadCount: scopedThreads.threadCount, turnCount: scopedThreads.turnCount };
       }),
       errors: this.errors(range),
     };

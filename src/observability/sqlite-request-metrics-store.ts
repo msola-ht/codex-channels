@@ -30,6 +30,7 @@ import type {
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
   ModelRequestMetricsPageQuery,
+  ModelRequestMetricsScope,
   ModelRequestMetricsStore,
   ModelRequestMetricsThreadQuery,
   QuotaHistoryQuery,
@@ -601,6 +602,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
 
   threadList(query: ModelRequestMetricsThreadQuery): StoredThreadListPage {
     return this.queries.threadList(query);
+  }
+
+  threadCounts(query: ModelRequestMetricsScope): { threadCount: number; turnCount: number } {
+    return this.queries.threadCounts(query);
   }
 
   threadSubagents(threadId: string, query: SubagentThreadsQuery): StoredThreadSubagentsPage {

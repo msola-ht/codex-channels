@@ -69,6 +69,32 @@ try {
     } finally { await context.close() }
   }
 
+  await run("Threads: one total sorts and reveals own then subagent input, cache and output", "threads", async page => {
+    const total = page.getByRole("columnheader", { name: "Total", exact: true })
+    assert.equal(await total.count(), 1)
+    assert.equal(await page.getByRole("columnheader", { name: /Input tokens|Output tokens|Cache hit rate/ }).count(), 0)
+    const row = page.getByRole("row").filter({ has: page.getByRole("link", { name: "root-browser", exact: true }) })
+    const trigger = row.locator('[aria-description^="Own:"]')
+    assert.equal(await trigger.getAttribute("aria-description"), "Own: Input 100, Cached 50, Output 20. Subagents: Input 800, Cached 300, Output 160")
+    await trigger.hover()
+    const tooltip = page.locator('[data-slot="tooltip-content"]')
+    await tooltip.waitFor({ state: "visible" })
+    const content = await tooltip.innerText()
+    assert.ok(content.indexOf("Own") < content.indexOf("Subagents"))
+    for (const value of ["100", "50", "20", "800", "300", "160"]) assert.ok(content.includes(value))
+    await page.mouse.move(0, 0)
+    await tooltip.waitFor({ state: "hidden" })
+    await trigger.focus()
+    await tooltip.waitFor({ state: "visible" })
+    await total.getByRole("button").click()
+    await page.waitForFunction(() => location.hash.includes("sort=totalTokens"))
+    await page.waitForFunction(() => [...document.querySelectorAll('th')].some(element => element.textContent.trim() === "Total" && element.getAttribute("aria-sort") === "descending"))
+    await total.getByRole("button").click()
+    await page.waitForFunction(() => location.hash.includes("direction=asc"))
+    await page.waitForFunction(() => [...document.querySelectorAll('th')].some(element => element.textContent.trim() === "Total" && element.getAttribute("aria-sort") === "ascending"))
+    const detail = row.getByRole("link", { name: "root-browser", exact: true })
+    assert.equal((await detail.getAttribute("href")).includes("sort="), false)
+  })
   await run("Settings: refreshed unedited fields invalidate old errors while preserving edited drafts", "settings", async page => {
     const contextWindow = page.locator("#codex-context-window")
     const percent = page.locator("#codex-compact-percent")

@@ -895,7 +895,7 @@ function parseThreadQuery(url, threadId) {
   const sortKey = url.searchParams.get("sort") ?? "last";
   const sortDirection = url.searchParams.get("direction") ?? "desc";
   const sortKeys = threadId === undefined
-    ? ["time", "last", "thread", "provider", "model", "turns", "requests", "input", "output", "compact"]
+    ? ["time", "last", "thread", "provider", "model", "turns", "requests", "input", "output", "totalTokens", "compact"]
     : ["time", "last", "turn", "provider", "model", "requests", "failures", "input", "output", "compact"];
   if (!sortKeys.includes(sortKey)) throw new ApiError(400, "invalid_sort", "不支持该会话排序字段");
   if (!["asc", "desc"].includes(sortDirection)) throw new ApiError(400, "invalid_direction", "direction 只支持 asc 或 desc");

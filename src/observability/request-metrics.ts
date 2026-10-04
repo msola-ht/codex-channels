@@ -218,6 +218,12 @@ export interface StoredThreadListItem {
   requestCount: number;
   inputTokens: number;
   outputTokens: number;
+  /** 当前请求筛选范围内的自身缓存合计；任意请求缺失时为 null，无请求时为 0。 */
+  cachedInputTokens: number | null;
+  /** 当前请求筛选范围内所有已登记子代理后代的用量，不含自身。 */
+  subagentUsage: { inputTokens: number; cachedInputTokens: number | null; outputTokens: number };
+  /** 自身与递归子代理的输入和输出之和；缓存已包含在输入中。 */
+  totalTokens: number;
   compact: StoredCompactRequestMetricsSummary | null;
   firstRequestStartedAtMs: number;
   lastRecordedAtMs: number;
@@ -353,7 +359,8 @@ export interface StoredModelRequestMetricsPage {
 
 export type ModelRequestMetricsThreadSortKey =
   | "time" | "last" | "thread" | "turn" | "provider" | "model"
-  | "turns" | "requests" | "failures" | "input" | "output" | "compact";
+  | "turns" | "requests" | "failures" | "input" | "output" | "compact"
+  | "totalTokens";
 
 export interface ModelRequestMetricsThreadQuery extends ModelRequestMetricsScope {
   mainThreadsOnly?: boolean;
@@ -372,6 +379,8 @@ export interface StoredThreadMetricsPage {
 
 export interface StoredThreadListPage extends StoredThreadMetricsPage {
   threads: StoredThreadListItem[];
+  /** 所有匹配会话树的请求去重汇总，不受分页影响。 */
+  treeAggregate: StoredModelRequestMetricsAggregate | null;
 }
 
 export interface StoredThreadTurnsPage extends StoredThreadMetricsPage {
@@ -501,6 +510,7 @@ export interface ModelRequestMetricsThreadQueryStore {
   ): StoredTurnRequestMetricsSummary | null;
   threadTurnSummaries(threadId: string, query: ModelRequestMetricsThreadQuery): StoredThreadTurnsPage;
   threadTurnCount(threadId: string): number | null;
+  threadCounts(query: ModelRequestMetricsScope): { threadCount: number; turnCount: number };
   threadList(query: ModelRequestMetricsThreadQuery): StoredThreadListPage;
   subagents(query: SubagentThreadsQuery): StoredThreadSubagentsPage;
   threadSubagents(threadId: string, query: SubagentThreadsQuery): StoredThreadSubagentsPage;
