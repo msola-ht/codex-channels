@@ -157,7 +157,7 @@ export class SessionRouter {
         if (!isPending() || signal?.aborted || resolution.overflowed || visited.has(currentId)) return undefined;
         visited.add(currentId);
         relatedThreadIds.push(currentId);
-        const snapshot = await this.codex.readThread(currentId);
+        const snapshot = await this.codex.readThread(currentId, signal);
         if (!isPending() || signal?.aborted || resolution.overflowed
           || relatedThreadIds.some(id => resolution.changedThreads.has(id))) return undefined;
         if (snapshot.id !== currentId || snapshot.source === "automation" || !snapshot.modelProvider

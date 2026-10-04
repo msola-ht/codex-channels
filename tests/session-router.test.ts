@@ -107,6 +107,31 @@ describe("SessionRouter", () => {
     await expect(Promise.all(reads)).resolves.toEqual(Array(101).fill(undefined));
   });
 
+  it("cancels the underlying approval ancestry read without reading further ancestors", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "parent", sessionId: "parent" });
+    const controller = new AbortController();
+    const cancellation = new Error("approval cancelled");
+    const onReadCancelled = vi.fn();
+    const readThread = vi.fn((id: string, signal?: AbortSignal): Promise<ThreadSnapshot> => {
+      if (id !== "child") return Promise.resolve(thread(id, { type: "active" }));
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          onReadCancelled();
+          reject(signal.reason);
+        }, { once: true });
+      });
+    });
+    const router = new SessionRouter(threadPort({ readThread }), store, registry);
+    const resolving = router.resolveApprovalTarget("child", () => true, controller.signal);
+    expect(readThread).toHaveBeenCalledExactlyOnceWith("child", controller.signal);
+    const cancelled = expect(resolving).rejects.toBe(cancellation);
+    controller.abort(cancellation);
+    await cancelled;
+    expect(onReadCancelled).toHaveBeenCalledOnce();
+    expect(readThread).toHaveBeenCalledExactlyOnceWith("child", controller.signal);
+  });
+
   it.each(["unrelated", "parent", "child", "middle"])("remembers transient %s binding changes while ancestry is loading", async change => {
     const store = new MemoryBindingStore();
     const owner = { target, workspaceId: "main", threadId: "parent", sessionId: "parent" };
@@ -230,7 +255,7 @@ describe("SessionRouter", () => {
     const readThread = vi.fn(async (id: string) => thread(id, { type: "active" }));
     const router = new SessionRouter(threadPort({ readThread }), store, registry);
     expect(await router.resolveApprovalTarget("parent")).toMatchObject({ target, ownerThreadId: "parent", relatedThreadIds: ["parent"] });
-    expect(readThread).toHaveBeenCalledExactlyOnceWith("parent");
+    expect(readThread).toHaveBeenCalledExactlyOnceWith("parent", undefined);
     readThread.mockResolvedValue({ ...thread("parent", { type: "active" }), source: "automation" });
     expect(await router.resolveApprovalTarget("parent")).toBeUndefined();
   });
