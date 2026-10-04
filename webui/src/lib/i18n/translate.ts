@@ -47,6 +47,7 @@ const apiErrorKeys: Record<string, MessageKey> = {
   invalid_filter: "errors.invalidQuery",
   unsupported_parameter: "errors.invalidQuery",
   invalid_parameter: "errors.invalidQuery",
+  invalid_parent_turn_id: "errors.invalidQuery",
   network_error: "errors.network",
   request_timeout: "errors.timeout",
 }

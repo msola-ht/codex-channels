@@ -259,7 +259,7 @@ export interface ThreadRunResponse {
 export interface ThreadTurnsResponse extends MetricsPageSummary {
   generatedAt: string
   threadId: string
-  turns: TurnSummary[]
+  turns: Array<TurnSummary & { directSubagentCount: number }>
   turnCount: number
 }
 

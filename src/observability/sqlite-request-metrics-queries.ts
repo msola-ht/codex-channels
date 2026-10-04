@@ -671,12 +671,14 @@ export class SqliteRequestMetricsQueries {
       throw new Error("Thread ID 与查询范围不一致");
     }
     const { rows, ...page } = this.queryThreadTurnPage({ ...query, threadId });
+    const subagentCounts = this.turnDirectSubagentCounts(threadId, rows.map((row) => row.turn_id!));
     return {
       ...page,
       turns: rows.map((row) => ({
         ...toStoredTurnSummary(row),
         durationMs: row.duration_ms,
         recordedAtMs: row.recorded_at_ms,
+        directSubagentCount: subagentCounts.get(row.turn_id!) ?? 0,
       })),
     };
   }
@@ -901,6 +903,10 @@ export class SqliteRequestMetricsQueries {
 
   private subagentPage(query: SubagentThreadsQuery, parentThreadId?: string): StoredThreadSubagentsPage {
     this.reader.requireOpen();
+    if (query.parentTurnId !== undefined) {
+      if (parentThreadId === undefined) throw new Error("父 Turn ID 必须同时指定父 Thread ID");
+      validateThreadId(query.parentTurnId, "父 Turn ID");
+    }
     const offset = metricsPageOffset(query);
     if (query.limit > 100) throw new Error("子代理查询数量必须在 1 到 100 之间");
     const sortKey = query.sortKey ?? "last";
@@ -909,10 +915,17 @@ export class SqliteRequestMetricsQueries {
       throw new Error("子代理排序无效");
     }
     const sortColumn = sortKey === "time" ? "first_request_started_at_ms" : "last_recorded_at_ms";
-    const relationFilter = parentThreadId === undefined ? "" : "WHERE parent_thread_id = ?";
+    const relationFilter = parentThreadId === undefined ? "" : `WHERE relation.parent_thread_id = ?${
+      query.parentTurnId === undefined ? "" : ` AND relation.thread_id IN (
+        SELECT child.thread_id FROM subagent_turns AS child
+        WHERE child.parent_thread_id = ?
+          AND child.parent_turn_id = ?
+      )`
+    }`;
     const parameters = parentThreadId === undefined ? [] : [parentThreadId];
+    if (query.parentTurnId !== undefined) parameters.push(parentThreadId!, query.parentTurnId);
     const { total } = this.reader.prepare(`
-      SELECT COUNT(*) AS total FROM subagent_threads ${relationFilter}
+      SELECT COUNT(*) AS total FROM subagent_threads AS relation ${relationFilter}
     `).get(...parameters) as { total: number };
     const rows = this.reader.prepare(`
       WITH grouped AS (
@@ -922,7 +935,7 @@ export class SqliteRequestMetricsQueries {
           MIN(request_started_at_ms) AS first_request_started_at_ms,
           MAX(recorded_at_ms) AS last_recorded_at_ms
         FROM model_request_metrics
-        WHERE thread_id IN (SELECT thread_id FROM subagent_threads ${relationFilter})
+        WHERE thread_id IN (SELECT relation.thread_id FROM subagent_threads AS relation ${relationFilter})
         GROUP BY thread_id
       )
       SELECT relation.*, grouped.turn_count, grouped.request_count,
@@ -933,7 +946,7 @@ export class SqliteRequestMetricsQueries {
       FROM subagent_threads AS relation
       LEFT JOIN grouped ON grouped.thread_id = relation.thread_id
       LEFT JOIN model_request_metrics AS latest ON latest.id = grouped.latest_id
-      ${parentThreadId === undefined ? "" : "WHERE relation.parent_thread_id = ?"}
+      ${relationFilter}
       ORDER BY grouped.${sortColumn} IS NULL ASC, grouped.${sortColumn} ${direction}, relation.thread_id ASC
       LIMIT ? OFFSET ?
     `).all(...parameters, ...parameters, query.limit, offset) as unknown as Array<CacheUsageRow & {
@@ -987,6 +1000,20 @@ export class SqliteRequestMetricsQueries {
       GROUP BY parent_thread_id
     `).all(...threadIds) as Array<{ parent_thread_id: string; total: number }>;
     return new Map(rows.map((row) => [row.parent_thread_id, row.total]));
+  }
+
+  private turnDirectSubagentCounts(threadId: string, turnIds: string[]): Map<string, number> {
+    if (turnIds.length === 0) return new Map();
+    const rows = this.reader.prepare(`
+      SELECT child.parent_turn_id, COUNT(DISTINCT child.thread_id) AS total
+      FROM subagent_turns AS child
+      JOIN subagent_threads AS relation
+        ON relation.thread_id = child.thread_id AND relation.parent_thread_id = child.parent_thread_id
+      WHERE child.parent_thread_id = ?
+        AND child.parent_turn_id IN (${turnIds.map(() => "?").join(", ")})
+      GROUP BY child.parent_turn_id
+    `).all(threadId, ...turnIds) as Array<{ parent_turn_id: string; total: number }>;
+    return new Map(rows.map((row) => [row.parent_turn_id, row.total]));
   }
 
   private queryThreadTurnPage(query: ModelRequestMetricsThreadQuery) {

@@ -12,9 +12,11 @@ import {
   type DataTableProps,
 } from "@/components/metrics/data-table"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
+import { InputTokenTooltip } from "@/components/metrics/token-tooltip"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
+  formatCacheUsage,
   formatElapsedDuration,
   formatModelName,
   formatTime,
@@ -30,44 +32,43 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200]
 
 function ThreadTokenTotal({ thread }: { thread: ThreadListItem }) {
   const { t } = useTranslation()
-  const labels = [t("threads.tokenInput"), t("threads.tokenCached"), t("threads.tokenOutput")]
-  const groups = [
-    { label: t("threads.tokenSelf"), values: [thread.inputTokens, thread.cachedInputTokens, thread.outputTokens], cacheUsage: thread.cacheUsage },
-    { label: t("threads.tokenSubagents"), values: [thread.subagentUsage.inputTokens, thread.subagentUsage.cachedInputTokens, thread.subagentUsage.outputTokens], cacheUsage: thread.subagentUsage.cacheUsage },
-  ].map((group) => ({
-    ...group,
-    values: group.values.map((value, index) => {
-      if (index === 1 && value === null && group.cacheUsage.cachedInputTokens !== null) {
-        return `≥ ${formatTokens(group.cacheUsage.cachedInputTokens)}`
-      }
-      return formatTokens(value)
-    }),
-  }))
-  const description = groups.map((group) => `${group.label}: ${group.values.map((value, index) => `${labels[index]} ${value}`).join(", ")}`).join(". ")
+  const usage = thread.subagentUsage
+  const cached = usage.cachedInputTokens === null && usage.cacheUsage.cachedInputTokens !== null
+    ? `≥ ${formatTokens(usage.cacheUsage.cachedInputTokens)}`
+    : formatTokens(usage.cachedInputTokens)
+  const rows = [
+    [t("threads.tokenInput"), formatTokens(usage.inputTokens)],
+    [t("threads.tokenCached"), cached],
+    [t("metrics.cacheHitRate"), formatCacheUsage(usage.cacheUsage).rate],
+    [t("threads.tokenOutput"), formatTokens(usage.outputTokens)],
+    [t("threads.tokenSubtotal"), formatTokens(usage.inputTokens + usage.outputTokens)],
+  ]
+  const total = formatTokens(thread.totalTokens)
+  const description = `${t("threads.tokenSubagents")}: ${rows.map(([label, value]) => `${label}: ${value}`).join(", ")}. ${t("threads.totalTokens")}: ${total}`
 
   return (
     <Tooltip>
       <TooltipTrigger aria-description={description} render={<span tabIndex={0} className="inline-flex cursor-help tabular-nums focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" />}>
-        {formatTokens(thread.totalTokens)}
+        {total}
       </TooltipTrigger>
       <TooltipContent>
         <div className="flex flex-col gap-2">
-          {groups.map((group, index) => (
-            <React.Fragment key={group.label}>
-              {index === 0 ? null : <Separator />}
-              <div className="flex flex-col gap-1">
-                <span>{group.label}</span>
-                <dl className="grid grid-cols-3 gap-x-4">
-                  {group.values.map((value, valueIndex) => (
-                    <div key={labels[valueIndex]} className="flex flex-col gap-1">
-                      <dt>{labels[valueIndex]}</dt>
-                      <dd className="tabular-nums">{value}</dd>
-                    </div>
-                  ))}
-                </dl>
+          <span>{t("threads.tokenSubagents")}:</span>
+          <dl className="flex flex-col gap-1 ps-2">
+            {rows.map(([label, value]) => (
+              <div key={label} className="flex justify-between gap-4">
+                <dt>{label}:</dt>
+                <dd className="tabular-nums">{value}</dd>
               </div>
-            </React.Fragment>
-          ))}
+            ))}
+          </dl>
+          <Separator />
+          <dl>
+            <div className="flex justify-between gap-4">
+              <dt>{t("threads.totalTokens")}:</dt>
+              <dd className="tabular-nums">{total}</dd>
+            </div>
+          </dl>
         </div>
       </TooltipContent>
     </Tooltip>
@@ -83,6 +84,9 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
     model: t("metrics.model"),
     turns: t("metrics.turn"),
     requests: t("metrics.requests"),
+    input: t("metrics.input"),
+    cacheHitRate: t("metrics.cacheHitRate"),
+    output: t("metrics.output"),
     totalTokens: t("threads.totalTokens"),
     compact: t("metrics.compact"),
     last: t("metrics.last"),
@@ -158,6 +162,24 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       ),
     },
     {
+      id: "input",
+      accessorFn: (thread) => thread.inputTokens,
+      header: ({ column }) => <SortableHeader column={column}>{t("metrics.input")}</SortableHeader>,
+      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} cacheUsage={row.original.cacheUsage} />,
+    },
+    {
+      id: "cacheHitRate",
+      enableSorting: false,
+      header: t("metrics.cacheHitRate"),
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatCacheUsage(row.original.cacheUsage).rate}</span>,
+    },
+    {
+      id: "output",
+      accessorFn: (thread) => thread.outputTokens,
+      header: ({ column }) => <SortableHeader column={column}>{t("metrics.output")}</SortableHeader>,
+      cell: ({ row }) => <span className="tabular-nums">{formatTokens(row.original.outputTokens)}</span>,
+    },
+    {
       id: "totalTokens",
       accessorFn: (thread) => thread.totalTokens,
       header: ({ column }) => (
@@ -220,7 +242,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
 
   return (
     <DataTable
-      numericColumnIds={["turns", "requests", "totalTokens", "compact", "subagents"]}
+      numericColumnIds={["turns", "requests", "input", "cacheHitRate", "output", "totalTokens", "compact", "subagents"]}
       loading={loading}
       title={t("threads.list")}
       description={({ total }) =>

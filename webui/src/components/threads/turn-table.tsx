@@ -8,9 +8,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
+import { InputTokenTooltip } from "@/components/metrics/token-tooltip"
 import {
   DataTable,
   SortableHeader,
+  TableHint,
   TruncatedText,
   type DataTableColumn,
   type DataTableProps,
@@ -20,11 +22,13 @@ import {
   formatElapsedDuration,
   formatTime,
   formatTokens,
+  shortThreadId,
 } from "@/lib/format"
-import type { MetricsQuery, TurnSummary } from "@/lib/types"
+import type { MetricsQuery, ThreadTurnsResponse } from "@/lib/types"
 import { metricsLink } from "@/lib/metrics-query"
 
 const TABLE_STATE_KEY = "codex-webui:turns-table-state"
+type TurnSummary = ThreadTurnsResponse["turns"][number]
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
@@ -39,8 +43,10 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
     requests: t("metrics.requests"),
     failures: t("metrics.failures"),
     input: t("metrics.input"),
+    cacheHitRate: t("metrics.cacheHitRate"),
     output: t("metrics.output"),
     compact: t("metrics.compact"),
+    subagents: t("threads.directSubagents"),
   }
   const columns = React.useMemo<DataTableColumn<TurnSummary>[]>(() => [
     {
@@ -59,7 +65,15 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       id: "turn",
       accessorFn: (turn) => turn.turnId,
       header: ({ column }) => <SortableHeader column={column}>{t("metrics.turn")}</SortableHeader>,
-      cell: ({ row }) => <TruncatedText render={<Link className="underline-offset-4 hover:underline" to={metricsLink("/requests", query, { threadId, turnId: row.original.turnId })} />} text={row.original.turnId} className="max-w-48">{row.original.turnId}</TruncatedText>,
+      cell: ({ row }) => {
+        const turnId = row.original.turnId
+        const label = shortThreadId(turnId)
+        const link = <Link className="underline-offset-4 hover:underline" to={metricsLink("/requests", query, { threadId, turnId })}>{label}</Link>
+        return label === turnId ? link : <Tooltip>
+          <TooltipTrigger aria-description={turnId} render={link} />
+          <TooltipContent>{turnId}</TooltipContent>
+        </Tooltip>
+      },
     },
     {
       id: "provider",
@@ -107,37 +121,17 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       header: ({ column }) => (
         <SortableHeader column={column}>{t("metrics.input")}</SortableHeader>
       ),
+      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} />,
+    },
+    {
+      id: "cacheHitRate",
+      enableSorting: false,
+      header: t("metrics.cacheHitRate"),
       cell: ({ row }) => {
         const turn = row.original
-        if (turn.cachedInputTokens === null) return <span className="tabular-nums">{formatTokens(turn.inputTokens)}</span>
-        const uncached =
-          turn.cachedInputTokens === null
-            ? null
-            : Math.max(0, turn.inputTokens - turn.cachedInputTokens)
-        const rate =
-          turn.inputTokens > 0 && turn.cachedInputTokens !== null
-            ? turn.cachedInputTokens / turn.inputTokens
-            : null
-        return (
-          <Tooltip>
-            <TooltipTrigger aria-description={[t("metrics.cached", { count: formatTokens(turn.cachedInputTokens) }), t("metrics.uncached", { count: uncached === null ? "—" : formatTokens(uncached) }), t("metrics.hitRate", { rate: rate === null ? "—" : `${(rate * 100).toFixed(1)}%` })].join("; ")} render={<span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" />}>
-                {formatTokens(turn.inputTokens)}
-              </TooltipTrigger>
-            <TooltipContent side="right" align="start">
-              <ul className="flex flex-col gap-1">
-                <li className="whitespace-nowrap">
-                  {t("metrics.cached", { count: formatTokens(turn.cachedInputTokens) })}
-                </li>
-                <li className="whitespace-nowrap">
-                  {t("metrics.uncached", { count: uncached === null ? "—" : formatTokens(uncached) })}
-                </li>
-                <li className="whitespace-nowrap">
-                  {t("metrics.hitRate", { rate: rate === null ? "—" : `${(rate * 100).toFixed(1)}%` })}
-                </li>
-              </ul>
-            </TooltipContent>
-          </Tooltip>
-        )
+        return <span className="whitespace-nowrap tabular-nums">{turn.inputTokens > 0 && turn.cachedInputTokens !== null
+          ? `${(turn.cachedInputTokens / turn.inputTokens * 100).toFixed(1)}%`
+          : "—"}</span>
       },
     },
     {
@@ -191,16 +185,25 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       header: () => t("threads.turnDuration"),
       cell: ({ row }) => row.original.durationMs == null ? "—" : formatElapsedDuration(row.original.durationMs),
     },
+    {
+      id: "subagents",
+      enableSorting: false,
+      enableHiding: false,
+      header: () => <TableHint hint={t("threads.turnSubagentsHint")}>{t("threads.directSubagents")}</TableHint>,
+      cell: ({ row }) => row.original.directSubagentCount > 0 ? <Link
+        to={`/threads/${encodeURIComponent(threadId)}/subagents?parentTurnId=${encodeURIComponent(row.original.turnId)}`}
+        className="tabular-nums hover:underline"
+        aria-label={t("threads.subagentsForTurn", { id: shortThreadId(row.original.turnId), count: row.original.directSubagentCount })}
+      >{row.original.directSubagentCount}</Link> : <span className="tabular-nums">0</span>,
+    },
   ], [threadId, query, t])
 
   return (
     <DataTable
-      numericColumnIds={["requests", "failures", "input", "output", "compact", "duration"]}
+      numericColumnIds={["requests", "failures", "input", "cacheHitRate", "output", "compact", "duration", "subagents"]}
       loading={loading}
       title={t("threads.turnList")}
-      description={({ total, matched, pageSize }) =>
-        t("threads.turnDescription", { total, matched, pageSize })
-      }
+      description={({ matched }) => <TableHint hint={t("threads.turnHint")}>{t("threads.turnDescription", { matched })}</TableHint>}
       columns={columns}
       data={turns}
       storageKey={TABLE_STATE_KEY}

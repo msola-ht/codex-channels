@@ -383,6 +383,69 @@ describe("request metrics subagent session aggregation", () => {
     } finally { store.close(); }
   });
 
+  it("counts and pages exact parent-Turn children while retaining each child's full usage", () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-turn-subagents-"));
+    directories.push(directory);
+    const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"), 10_000);
+    try {
+      store.recordBatch([
+        { ...sample(), threadId: "root", turnId: "first", provider: "matching", recordedAtMs: 1100 },
+        { ...sample(), threadId: "root", turnId: "second", provider: "matching", recordedAtMs: 1200 },
+        { ...sample(), threadId: "root", turnId: "empty", provider: "matching", recordedAtMs: 1300 },
+        { ...sample(), threadId: "child-a", turnId: "a-1", provider: "other", inputTokens: 100, outputTokens: 10, recordedAtMs: 3000 },
+        { ...sample(), threadId: "child-a", turnId: "a-2", provider: "other", inputTokens: 200, outputTokens: 20, recordedAtMs: 4000 },
+        { ...sample(), threadId: "child-a", turnId: "a-3", provider: "other", inputTokens: 300, outputTokens: 30, recordedAtMs: 5000 },
+      ]);
+      for (const [agentThreadId, parentThreadId, parentTurnId] of [
+        ["child-a", "root", "first"], ["child-b", "root", "older"],
+        ["creation-only", "root", "first"], ["unknown", "root", "older"],
+        ["nested", "child-a", "first"], ["wrong-parent", "elsewhere", "first"],
+      ] as const) {
+        store.recordSubagentThread({ agentThreadId, parentThreadId, parentTurnId, agentPath: `/root/${agentThreadId}` });
+      }
+      for (const [agentThreadId, agentTurnId, parentThreadId, parentTurnId] of [
+        ["child-a", "a-1", "root", "first"], ["child-a", "a-2", "root", "first"],
+        ["child-a", "a-3", "root", "second"], ["child-b", "b-1", "root", "first"],
+        ["nested", "n-1", "child-a", "first"], ["wrong-parent", "w-1", "root", "first"],
+        ["unregistered", "u-1", "root", "first"],
+      ] as const) {
+        store.recordSubagentTurn({ agentThreadId, agentTurnId, parentThreadId, parentTurnId, agentPath: `/root/${agentThreadId}` });
+      }
+      const service = new RequestMetricsQueryService(store);
+      const range = { name: "all" as const, startAtMs: 1000, endAtMs: 2000 };
+      const query = { provider: "matching", sortKey: "turn" as const, sortDirection: "asc" as const, limit: 20 };
+      const page = service.threadTurnSummaries("root", range, query);
+      expect(page.turns.map(({ turnId, directSubagentCount }) => ({ turnId, directSubagentCount }))).toEqual([
+        { turnId: "empty", directSubagentCount: 0 },
+        { turnId: "first", directSubagentCount: 2 },
+        { turnId: "second", directSubagentCount: 1 },
+      ]);
+      expect(service.threadTurnSummaries("root", range, { ...query, offset: 1, limit: 1 })).toMatchObject({
+        matchedTotal: 3, nextOffset: 2, turns: [{ turnId: "first", directSubagentCount: 2 }],
+      });
+      const first = service.threadSubagents("root", { parentTurnId: "first", limit: 1 });
+      expect(first).toMatchObject({ total: 2, nextOffset: 1, subagents: [{
+        threadId: "child-a", directSubagentCount: 1, turnCount: 3, requestCount: 3, inputTokens: 600, outputTokens: 60,
+      }] });
+      expect(service.threadSubagents("root", { parentTurnId: "first", offset: 1, limit: 1 })).toMatchObject({
+        total: 2, nextOffset: null, subagents: [{ threadId: "child-b", requestCount: 0 }],
+      });
+      expect(service.threadSubagents("root", { parentTurnId: "first", offset: 2, limit: 1 })).toMatchObject({
+        total: 2, nextOffset: null, subagents: [],
+      });
+      expect(service.threadSubagents("root", { parentTurnId: "second", limit: 20 })).toMatchObject({
+        total: 1, subagents: [{ threadId: "child-a", requestCount: 3 }],
+      });
+      expect(service.threadSubagents("root", { parentTurnId: "empty", limit: 20 })).toMatchObject({ total: 0, subagents: [] });
+      expect(service.threadSubagents("elsewhere", { parentTurnId: "first", limit: 20 })).toMatchObject({ total: 0, subagents: [] });
+      expect(service.threadSubagents("root", { limit: 20 }).total).toBe(4);
+      for (const parentTurnId of ["", " ", "x".repeat(129)]) {
+        expect(() => service.threadSubagents("root", { parentTurnId, limit: 20 })).toThrow("Turn ID");
+      }
+      expect(() => service.subagents({ parentTurnId: "first", limit: 20 })).toThrow("必须同时指定父 Thread ID");
+    } finally { store.close(); }
+  });
+
   it("batches current-page session timing independently of request filters and descendant timing", () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-thread-list-timing-"));
     directories.push(directory);

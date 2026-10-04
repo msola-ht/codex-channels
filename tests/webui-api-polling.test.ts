@@ -50,7 +50,7 @@ it("refreshes the independent subagent page from metric notifications and isolat
       notify = refresh; enabled = active; assert.equal(watch, api.watchRequestMetrics); return "live";
     };
     const { useThreadSubagents } = load("webui/src/hooks/use-thread-subagents.ts", { react, "@/lib/api": api, "@/hooks/use-api": { useApi }, "@/hooks/use-queue-events": { useQueueSnapshot, useQueueEvents } });
-    const render = threadId => { si = ri = ei = 0; const view = useThreadSubagents(threadId); while (effects.length) effects.shift()(); return view; };
+    const render = (threadId, parentTurnId) => { si = ri = ei = 0; const view = useThreadSubagents(threadId, parentTurnId); while (effects.length) effects.shift()(); return view; };
     const settle = () => new Promise(resolve => setImmediate(resolve));
     const response = (threadId, child, offset = 0, nextOffset = 20) => ({ threadId, subagents: [{ threadId: child }], total: 41, offset, limit: 20, nextOffset });
     assert.equal(render("parent-a").data, null);
@@ -110,6 +110,16 @@ it("refreshes the independent subagent page from metric notifications and isolat
     const oldGlobalPage = reads.at(-1); view = render(undefined); view.pagination.onPageSizeChange(10);
     view = render(undefined); assert.equal(oldGlobalPage.signal.aborted, true); assert.equal(enabled, true);
     assert.deepEqual(reads.at(-1).page, { offset: 0, limit: 10, sortKey: "last", sortDirection: "desc" });
+    const oldScope = reads.at(-1);
+    view = render("parent-c", "turn-a"); assert.equal(oldScope.signal.aborted, true); assert.equal(view.data, null);
+    assert.equal(reads.at(-1).page.parentTurnId, "turn-a");
+    reads.at(-1).resolve(response("parent-c", "child-in-turn-a")); await settle();
+    view = render("parent-c", "turn-a"); view.pagination.onNext(); render("parent-c", "turn-a");
+    const oldTurnPage = reads.at(-1);
+    view = render("parent-c", "turn-b"); assert.equal(oldTurnPage.signal.aborted, true); assert.equal(view.data, null);
+    assert.deepEqual(reads.at(-1).page, { offset: 0, limit: 20, sortKey: "last", sortDirection: "desc", parentTurnId: "turn-b" });
+    oldTurnPage.resolve(response("parent-c", "stale-turn-a")); await settle();
+    assert.equal(render("parent-c", "turn-b").data, null);
     const pending = reads.at(-1); for (const cleanup of cleanups) cleanup?.(); assert.equal(pending.signal.aborted, true);
     pending.resolve(response("parent-c", "late-after-unmount")); await settle();
   `], { cwd: process.cwd(), stdio: "pipe" });
@@ -127,7 +137,8 @@ it("requests a parent's subagents with only relation pagination and an encoded t
     const exports = {}; new Function("require", "exports", code)(name => { assert.ok(name in imports, name); return imports[name]; }, exports);
     await exports.fetchThreadSubagents("parent/with spaces", { offset: 20, limit: 50, sortKey: "time", sortDirection: "asc", range: "today", provider: ["wrong"] }, new AbortController().signal);
     await exports.fetchSubagents({ offset: 50, limit: 100, sortKey: "last", sortDirection: "desc", range: "today", provider: ["wrong"] }, new AbortController().signal);
-    assert.deepEqual(paths, ["/api/v1/threads/parent%2Fwith%20spaces/subagents?offset=20&limit=50&sortKey=time&sortDirection=asc", "/api/v1/subagents?offset=50&limit=100&sortKey=last&sortDirection=desc"]);
+    await exports.fetchThreadSubagents("parent", { offset: 0, limit: 20, parentTurnId: "turn/a b" }, new AbortController().signal);
+    assert.deepEqual(paths, ["/api/v1/threads/parent%2Fwith%20spaces/subagents?offset=20&limit=50&sortKey=time&sortDirection=asc", "/api/v1/subagents?offset=50&limit=100&sortKey=last&sortDirection=desc", "/api/v1/threads/parent/subagents?offset=0&limit=20&parentTurnId=turn%2Fa+b"]);
   `], { cwd: process.cwd(), stdio: "pipe" });
 });
 

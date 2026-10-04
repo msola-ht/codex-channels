@@ -5,41 +5,40 @@ import {
 } from "@/components/ui/tooltip"
 import { useTranslation } from "@/hooks/use-translation"
 import { formatTokens } from "@/lib/format"
+import type { CacheUsage } from "@/lib/types"
 
 export function InputTokenTooltip({
   inputTokens,
   cachedInputTokens,
+  cacheUsage,
 }: {
   inputTokens: number | null
   cachedInputTokens: number | null
+  cacheUsage?: CacheUsage
 }) {
   const { t } = useTranslation()
-  if (cachedInputTokens === null) return <span className="tabular-nums">{formatTokens(inputTokens)}</span>
+  const partial = cachedInputTokens === null && cacheUsage?.cachedInputTokens != null
+  const cached = partial ? cacheUsage.cachedInputTokens : cachedInputTokens
+  if (cached === null) return <span className="tabular-nums">{formatTokens(inputTokens)}</span>
+  const knownInput = partial ? cacheUsage.inputTokens : inputTokens
   const uncached =
-    inputTokens === null || cachedInputTokens === null
+    knownInput === null
       ? null
-      : Math.max(0, inputTokens - cachedInputTokens)
-  const rate =
-    inputTokens !== null
-      && inputTokens > 0
-      && cachedInputTokens !== null
-      ? cachedInputTokens / inputTokens
-      : null
+      : Math.max(0, knownInput - cached)
+  const cachedText = `${partial ? "≥ " : ""}${formatTokens(cached)}`
+  const uncachedText = uncached === null ? "—" : `${partial ? "≥ " : ""}${formatTokens(uncached)}`
   return (
     <Tooltip>
-      <TooltipTrigger aria-description={[t("metrics.cached", { count: formatTokens(cachedInputTokens) }), t("metrics.uncached", { count: uncached === null ? "—" : formatTokens(uncached) }), t("metrics.hitRate", { rate: rate === null ? "—" : `${(rate * 100).toFixed(1)}%` })].join("; ")} render={<span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring" />}>
+      <TooltipTrigger aria-description={[t("metrics.cached", { count: cachedText }), t("metrics.uncached", { count: uncachedText })].join("; ")} render={<span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring" />}>
           {formatTokens(inputTokens)}
         </TooltipTrigger>
       <TooltipContent side="right" align="start">
         <ul className="flex flex-col gap-1">
           <li className="whitespace-nowrap">
-            {t("metrics.cached", { count: formatTokens(cachedInputTokens) })}
+            {t("metrics.cached", { count: cachedText })}
           </li>
           <li className="whitespace-nowrap">
-            {t("metrics.uncached", { count: uncached === null ? "—" : formatTokens(uncached) })}
-          </li>
-          <li className="whitespace-nowrap">
-            {t("metrics.hitRate", { rate: rate === null ? "—" : `${(rate * 100).toFixed(1)}%` })}
+            {t("metrics.uncached", { count: uncachedText })}
           </li>
         </ul>
       </TooltipContent>

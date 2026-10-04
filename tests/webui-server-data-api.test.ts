@@ -184,6 +184,69 @@ describe("webui server data API", () => {
     expect((await fetch(`${origin}/api/v1/threads/${"x".repeat(129)}/subagents`, { headers })).status).toBe(400);
   });
 
+  it("filters direct subagents by exact parent Turn associations and validates the scoped query", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    for (const [agentThreadId, parentThreadId, parentTurnId] of [
+      ["child-a", "root", "spawn"], ["child-b", "root", "first"], ["child-c", "root", "second"],
+      ["spawn-only", "root", "first"], ["nested", "child-a", "first"], ["unrelated", "other", "first"],
+    ] as const) {
+      store.recordSubagentThread({ agentThreadId, parentThreadId, parentTurnId, agentPath: `/root/${agentThreadId}` });
+    }
+    for (const [agentThreadId, agentTurnId, parentThreadId, parentTurnId] of [
+      ["child-a", "agent-first", "root", "first"], ["child-a", "agent-first-again", "root", "first"],
+      ["child-a", "agent-second", "root", "second"], ["child-b", "agent-first", "root", "first"],
+      ["child-c", "agent-second", "root", "second"], ["nested", "agent-first", "child-a", "first"],
+      ["unrelated", "agent-first", "other", "first"],
+    ] as const) {
+      store.recordSubagentTurn({ agentThreadId, agentTurnId, parentThreadId, parentTurnId, agentPath: `/root/${agentThreadId}` });
+    }
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const url = `${origin}/api/v1/threads/root/subagents`;
+    const read = async (query: string) => {
+      const response = await fetch(`${url}?${query}`);
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    expect(await read("parentTurnId=first")).toMatchObject({
+      threadId: "root", total: 2, offset: 0, limit: 20, nextOffset: null,
+      subagents: [{ threadId: "child-a", requestCount: 0 }, { threadId: "child-b", requestCount: 0 }],
+    });
+    expect(await read("parentTurnId=second")).toMatchObject({
+      total: 2, subagents: [{ threadId: "child-a" }, { threadId: "child-c" }],
+    });
+    expect(await read("parentTurnId=first&limit=1")).toMatchObject({
+      total: 2, offset: 0, limit: 1, nextOffset: 1, subagents: [{ threadId: "child-a" }],
+    });
+    expect(await read("parentTurnId=first&offset=1&limit=1&sortKey=time&sortDirection=asc")).toMatchObject({
+      total: 2, offset: 1, limit: 1, nextOffset: null, subagents: [{ threadId: "child-b" }],
+    });
+    expect(await read("parentTurnId=missing")).toMatchObject({ total: 0, subagents: [], nextOffset: null });
+    expect(await read("parentTurnId=FIRST")).toMatchObject({ total: 0, subagents: [] });
+    expect(await read("parentTurnId=first&offset=10")).toMatchObject({ total: 2, subagents: [], nextOffset: null });
+    expect(await (await fetch(`${origin}/api/v1/threads/other/subagents?parentTurnId=first`)).json()).toMatchObject({
+      total: 1, subagents: [{ threadId: "unrelated" }],
+    });
+    expect(await (await fetch(url)).json()).toMatchObject({ total: 4 });
+    for (const query of ["parentTurnId=", "parentTurnId=%20", `parentTurnId=${"x".repeat(129)}`]) {
+      const response = await fetch(`${url}?${query}`);
+      expect(response.status, query).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "invalid_parent_turn_id" } });
+    }
+    const duplicate = await fetch(`${url}?parentTurnId=first&parentTurnId=second`);
+    expect(duplicate.status).toBe(400);
+    expect(await duplicate.json()).toMatchObject({ error: { code: "invalid_parameter" } });
+    for (const query of ["turnId=first", "parentThreadId=root", "parentTurnId=first&provider=matching"]) {
+      const response = await fetch(`${url}?${query}`);
+      expect(response.status, query).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "unsupported_parameter" } });
+    }
+    const global = await fetch(`${origin}/api/v1/subagents?parentTurnId=first`);
+    expect(global.status).toBe(400);
+    expect(await global.json()).toMatchObject({ error: { code: "unsupported_parameter" } });
+  });
+
   it("keeps observed own and descendant cache usage after requests without usage fail", async () => {
     const fixture = createFixture();
     const store = new SqliteModelRequestMetricsStore(fixture.databasePath);

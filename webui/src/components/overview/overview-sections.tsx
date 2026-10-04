@@ -146,6 +146,7 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
               <TableHead>{t("overview.turnColumn")}</TableHead>
               <TableHead>{t("metrics.requests")}</TableHead>
               <TableHead>{t("metrics.input")}</TableHead>
+              <TableHead>{t("metrics.cacheHitRate")}</TableHead>
               <TableHead>{t("metrics.output")}</TableHead>
               <TableHead>{t("metrics.compact")}</TableHead>
             </TableRow>
@@ -161,7 +162,11 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
                   <InputTokenTooltip
                     inputTokens={group.aggregate.inputTokens}
                     cachedInputTokens={group.aggregate.cachedInputTokens}
+                    cacheUsage={group.aggregate.cacheUsage}
                   />
+                </TableCell>
+                <TableCell className="tabular-nums">
+                  {formatCacheUsage(group.aggregate.cacheUsage).rate}
                 </TableCell>
                 <TableCell className="tabular-nums">
                   <OutputTokenTooltip
@@ -178,7 +183,7 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
             ))}
             {providers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-16 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="h-16 text-center text-muted-foreground">
                   {t("overview.noData")}
                 </TableCell>
               </TableRow>

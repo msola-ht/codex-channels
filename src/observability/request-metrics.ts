@@ -194,6 +194,8 @@ export interface StoredThreadRequestMetricsSummary {
 
 export interface StoredThreadTurnSummary extends StoredTurnRequestMetricsSummary {
   recordedAtMs: number;
+  /** 精确登记归属于当前父 Thread/Turn 的直接子代理线程数，不随请求筛选变化。 */
+  directSubagentCount: number;
 }
 
 /** 已观测缓存样本；不把缺失字段视为零。 */
@@ -251,6 +253,8 @@ export interface StoredSubagentListItem extends StoredSubagentThreadRecord, Pick
 }
 
 export interface SubagentThreadsQuery {
+  /** 仅用于 threadSubagents，按精确运行关系筛选父轮次。 */
+  parentTurnId?: string;
   offset?: number;
   limit: number;
   sortKey?: "time" | "last";

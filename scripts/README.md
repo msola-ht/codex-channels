@@ -120,7 +120,7 @@
   `/api/v1/threads/:id/run|turns|subagents`、`/api/v1/requests`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；
   Providers 返回指标库完整去重名单，指标查询支持重复 `provider` 参数形成多选范围；
   Overview 在同一读快照和截止时间下返回汇总、趋势与热力图；Daily 按 `range` 返回系统本地日聚合。
-  Threads 只对主会话汇总和分页，返回首个请求开始时间和不受请求筛选影响的直接子代理数；Subagents 对已登记父子关系独立分页，包含尚无请求的子代理。
+  Threads 只对主会话汇总和分页，返回首个请求开始时间和不受请求筛选影响的直接子代理数；Turns 返回每轮精确关联的直接子代理数，按父 Thread 查询的 Subagents 可通过 `parentTurnId` 限定相同关系。Subagents 对已登记父子关系独立分页，包含尚无请求的子代理，行内用量仍为子线程自身全部保留历史。
   请求明细按受控字段在整个时间范围排序后偏移分页；
   `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；监听参数优先取命令行，其次
   `config.toml` 的 `[webui]` 段，默认回环无令牌；绑定非回环地址（`0.0.0.0`）时必须设置
