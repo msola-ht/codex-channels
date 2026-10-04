@@ -3,6 +3,42 @@ import { canReuseTrafficSummary, resolveTrafficData, resolveTrafficDetailSnapsho
 import { modelNameComparison } from "../runtime/model-name-comparison.mjs";
 
 describe("traffic request ownership", () => {
+  it("clears copy feedback when content changes and ignores late clipboard results", () => {
+    const script = String.raw`
+      import fs from "node:fs"; import ts from "typescript"; import assert from "node:assert/strict";
+      const slots=[], writes=[]; let index=0, changed=false;
+      const element=(type,props)=>({type,props});
+      const imports={
+        react:{useMemo:fn=>fn(),useState(initial){const i=index++;if(!(i in slots))slots[i]=initial;return [slots[i],value=>{const next=typeof value==="function"?value(slots[i]):value;if(next!==slots[i])changed=true;slots[i]=next;}];}},
+        "react/jsx-runtime":{jsx:element,jsxs:element},
+        "lucide-react":{CopyIcon:"copy-icon"},
+        "@/components/ui/button":{Button:"button"},
+        "@/hooks/use-translation":{useTranslation:()=>({t:key=>key})},
+        cn:{cn:(...names)=>names.filter(Boolean).join(" ")},
+      };
+      Object.defineProperty(globalThis,"navigator",{configurable:true,value:{clipboard:{writeText:text=>new Promise((resolve,reject)=>writes.push({text,resolve,reject}))}}});
+      const code=ts.transpileModule(fs.readFileSync("webui/src/components/traffic/traffic-content.tsx","utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+      const exports={};new Function("require","exports",code)(name=>{assert.ok(name in imports,name);return imports[name];},exports);
+      const all=node=>node==null?[]:Array.isArray(node)?node.flatMap(all):typeof node==="object"?[node,...all(node.props?.children)]:[];
+      const render=text=>{let tree;do{index=0;changed=false;tree=exports.TrafficContent({title:"body",text,json:true});}while(changed);return all(tree);};
+      const button=(nodes,label)=>nodes.find(node=>node.type==="button"&&allText(node.props.children).includes(label));
+      const allText=node=>node==null?"":Array.isArray(node)?node.map(allText).join(""):typeof node==="object"?allText(node.props?.children):String(node);
+      const status=nodes=>nodes.find(node=>node.props?.role==="status").props.children;
+      const settle=()=>new Promise(resolve=>setImmediate(resolve));
+      let nodes=render('{"value":1}');button(nodes,"traffic.wrap").props.onClick();
+      nodes=render('{"value":1}');button(nodes,"traffic.copyRaw").props.onClick();
+      assert.equal(writes[0].text,'{"value":1}');writes[0].resolve();await settle();
+      nodes=render('{"value":1}');assert.equal(status(nodes),"traffic.copiedRaw");
+      nodes=render('{"value":2}');assert.equal(status(nodes),"");assert.equal(button(nodes,"traffic.wrap").props["aria-pressed"],false);
+      button(nodes,"traffic.copyRaw").props.onClick();
+      nodes=render('{"value":3}');assert.equal(button(nodes,"traffic.copyRaw").props.disabled,false);button(nodes,"traffic.copyRaw").props.onClick();
+      writes[1].resolve();await settle();nodes=render('{"value":3}');assert.equal(status(nodes),"");assert.equal(button(nodes,"traffic.copyRaw").props.disabled,true);
+      writes[2].resolve();await settle();nodes=render('{"value":3}');assert.equal(status(nodes),"traffic.copiedRaw");
+      nodes=render('{"value":2}');assert.equal(status(nodes),"");button(nodes,"traffic.copyRaw").props.onClick();
+      nodes=render('{"value":4}');writes[3].reject(new Error("late failure"));await settle();assert.equal(status(render('{"value":4}')),"");
+    `;
+    expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" })).not.toThrow();
+  });
   it("pins a default detail to its first resolved identity and never revives a missing snapshot during retries", () => {
     const script = String.raw`
       import fs from "node:fs"; import ts from "typescript"; import assert from "node:assert/strict";

@@ -23,7 +23,7 @@ export function TrafficTable({
 }) {
   const { t } = useTranslation()
   const columns: DataTableColumn<TrafficExchangeSummary>[] = [
-    { id: "time", enableSorting: false, header: () => <>{t("traffic.startedAt")}</>, cell: ({ row: { original: exchange } }) => {
+    { id: "time", enableSorting: false, enableHiding: false, header: () => <>{t("traffic.startedAt")}</>, cell: ({ row: { original: exchange } }) => {
       return <><Button
                   type="button"
                   variant="link"

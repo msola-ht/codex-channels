@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react"
 
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { Button } from "@/components/ui/button"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ManagedSelect, SettingsRow } from "@/components/settings/settings-controls"
 import type { CodexSettingsController } from "@/lib/settings-management"
@@ -54,13 +53,13 @@ function ToolSettingEditor({ field, management, mergedAvailable }: {
       <SettingsRow label="App Server 合并配置" value={!mergedAvailable ? "不可用" : field.mergedValue === null ? "未设置，由上游决定" : JSON.stringify(field.mergedValue)} />
       {field.type === "choice" || field.type === "boolean"
         ? <ManagedSelect label="修改用户设置" value={field.userValue === null ? "inherit" : JSON.stringify(field.userValue)} options={[["inherit", "移除用户设置，跟随上游"], ...(field.type === "boolean" ? [true, false] : field.options ?? []).map((value) => [JSON.stringify(value), String(value)])]} disabled={busy} onChange={(value) => preview(value === "inherit" ? null : JSON.parse(value))} />
-        : <Field>
+        : <Field data-disabled={busy} data-invalid={error !== null}>
             <FieldLabel htmlFor="tool-setting-value">新值</FieldLabel>
-            <Input id="tool-setting-value" value={text} disabled={busy} onChange={(event) => patch({ text: event.target.value })} />
-            <FieldDescription>{field.type === "list" ? "工具名 JSON 数组；[] 表示空列表。" : "输入正数。"}留空移除用户设置。</FieldDescription>
+            <Input id="tool-setting-value" value={text} disabled={busy} aria-invalid={error !== null} aria-describedby={error === null ? "tool-setting-value-description" : "tool-setting-value-description tool-setting-value-error"} onChange={(event) => { patch({ text: event.target.value }); setError(null) }} />
+            <FieldDescription id="tool-setting-value-description">{field.type === "list" ? "工具名 JSON 数组；[] 表示空列表。" : "输入正数。"}留空移除用户设置。</FieldDescription>
+            {error !== null ? <FieldError id="tool-setting-value-error">{error}</FieldError> : null}
             <Button className="self-start" variant="outline" disabled={busy} onClick={saveText}>预览修改</Button>
           </Field>}
     </FieldGroup>
-    {error !== null ? <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert> : null}
   </>
 }

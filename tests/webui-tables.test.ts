@@ -220,7 +220,7 @@ describe("WebUI metrics table presentation", () => {
         const { ErrorsPage } = await server.ssrLoadModule("/src/pages/errors-page.tsx");
         const { LanguageContext } = await server.ssrLoadModule("/src/hooks/language-context.ts");
         const { TooltipProvider } = await server.ssrLoadModule("/src/components/ui/tooltip.tsx");
-        const { TableHint, TruncatedText } = await server.ssrLoadModule("/src/components/metrics/data-table.tsx");
+        const { DataTable, TableHint, TruncatedText } = await server.ssrLoadModule("/src/components/metrics/data-table.tsx");
         const { InputTokenTooltip, OutputTokenTooltip } = await server.ssrLoadModule("/src/components/metrics/token-tooltip.tsx");
         const { setServerTimeZone } = await server.ssrLoadModule("/src/lib/format.ts");
         setServerTimeZone("UTC");
@@ -573,6 +573,19 @@ describe("WebUI metrics table presentation", () => {
         } }, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop });
         globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ ua: true, error: true }) : null };
         result.preferences = render(RequestsTable, requestProps);
+        globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ traffic: false, time: false, provider: false, ua: true }) : null };
+        globalThis.fixtureCaptureTable = true;
+        result.requestsHiddenDetail = render(RequestsTable, requestProps);
+        result.requestsDetailVisibility = JSON.stringify({ visible: globalThis.fixtureTable.getColumn("traffic").getIsVisible(), canHide: globalThis.fixtureTable.getColumn("traffic").getCanHide() });
+        globalThis.fixtureTable.getColumn("traffic").toggleVisibility(false);
+        result.requestsDetailAfterHide = String(globalThis.fixtureTable.getColumn("traffic").getIsVisible());
+        result.trafficHiddenDetail = render(TrafficTable, { exchanges: [exchange], onOpen: noop });
+        result.trafficDetailVisibility = JSON.stringify({ visible: globalThis.fixtureTable.getColumn("time").getIsVisible(), canHide: globalThis.fixtureTable.getColumn("time").getCanHide() });
+        globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ nested_value: false, Action: false, optional: false }) : null };
+        result.requiredGroupedColumns = render(DataTable, { title: "Required", storageKey: "fixture-required", pagination: { mode: "none" },
+          columns: [{ id: "group", header: "Group", columns: [{ accessorKey: "nested.value", header: "Value", enableHiding: false }, { header: "Action", enableHiding: false, cell: () => h("button", { type: "button" }, "Open") }, { id: "optional", header: "Optional" }] }], data: [{ nested: { value: "required-cell" } }] });
+        globalThis.fixtureCaptureTable = false;
+        globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ ua: true, error: true }) : null };
         globalThis.fixtureQuery = { range: "30d", offset: 0, limit: 50 };
         const errorsData = { errors: { requestCount: 100, unsuccessfulRequestCount: 60 }, total: 60,
           nextOffset: 50, records: Array.from({ length: 50 }, (_, id) => ({ ...record, id, threadId: null })) };
@@ -1036,6 +1049,23 @@ describe("WebUI metrics table presentation", () => {
   it("preserves explicit existing column visibility preferences", () => {
     expect(headers(markup.preferences!)).toContain("User-Agent");
     expect(headers(markup.preferences!)).toContain("错误");
+  });
+
+  it("keeps native detail buttons available despite old hidden-column preferences", () => {
+    for (const key of ["requestsDetailVisibility", "trafficDetailVisibility"]) {
+      expect(JSON.parse(markup[key]!)).toEqual({ visible: true, canHide: false });
+    }
+    expect(markup.requestsDetailAfterHide).toBe("true");
+    expect(headers(markup.requestsHiddenDetail!)).toContain("请求详情");
+    expect(headers(markup.requestsHiddenDetail!)).toContain("User-Agent");
+    expect(headers(markup.requestsHiddenDetail!)).not.toContain("提供商");
+    expect(markup.requestsHiddenDetail).toMatch(/<button\b[^>]*type="button"[^>]*>查看请求<\/button>/u);
+    expect(headers(markup.trafficHiddenDetail!)).toContain("开始时间");
+    expect(headers(markup.trafficHiddenDetail!)).not.toContain("提供商");
+    expect(markup.trafficHiddenDetail).toMatch(/<button\b[^>]*aria-label="[^"]*的调用明细"/u);
+    expect(markup.requiredGroupedColumns).toContain("required-cell");
+    expect(markup.requiredGroupedColumns).toContain('<button type="button">Open</button>');
+    expect(headers(markup.requiredGroupedColumns!)).not.toContain("Optional");
   });
 
   it("keeps headers while hiding stale rows and disabling table interaction during loading", () => {

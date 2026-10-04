@@ -5,7 +5,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { ManagedSelect, PendingSettingDialog, SettingsRow } from "@/components/settings/settings-controls"
@@ -26,6 +26,11 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
   const { contextWindow, compactPercent } = compact
   const { planEffort, reasoningSummary, verbosity, startupUpdate, historyPersistence } = preferences
   const [localError, setLocalError] = useState<string | null>(null)
+  const [compactError, setCompactError] = useState<{ field: "contextWindow" | "compactPercent"; value: string; requiredByPercent?: string; message: string } | null>(null)
+  const visibleCompactError = compactError !== null
+    && compactError.value === compact[compactError.field]
+    && (compactError.requiredByPercent === undefined || compactError.requiredByPercent === compactPercent)
+      ? compactError : null
   useEffect(() => {
     if (management.lastAppliedSetting?.kind === "model-compact") resetCompact()
     if (management.lastAppliedSetting?.kind === "preferences") resetPreferences()
@@ -46,18 +51,18 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
     const parsedWindow = contextWindow.trim() === "" ? null : Number(contextWindow)
     const parsedPercent = compactPercent.trim() === "" ? null : Number(compactPercent)
     if (parsedWindow !== null && (!Number.isSafeInteger(parsedWindow) || parsedWindow <= 0)) {
-      setLocalError("模型上下文窗口必须是正整数")
+      setCompactError({ field: "contextWindow", value: contextWindow, message: "模型上下文窗口必须是正整数" })
       return
     }
     if (parsedPercent !== null && (!Number.isInteger(parsedPercent) || parsedPercent < 10 || parsedPercent > 90)) {
-      setLocalError("自动压缩百分比必须是 10–90 的整数")
+      setCompactError({ field: "compactPercent", value: compactPercent, message: "自动压缩百分比必须是 10–90 的整数" })
       return
     }
     if (parsedPercent !== null && parsedWindow === null) {
-      setLocalError("设置自动压缩百分比前必须先设置模型上下文窗口")
+      setCompactError({ field: "contextWindow", value: contextWindow, requiredByPercent: compactPercent, message: "设置自动压缩百分比前必须先设置模型上下文窗口" })
       return
     }
-    setLocalError(null)
+    setCompactError(null)
     void management.previewSetting({ kind: "model-compact", contextWindow: parsedWindow, autoCompactPercent: parsedPercent }, "模型上下文与自动压缩")
   }
 
@@ -107,8 +112,16 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
         <section className="flex flex-col gap-3">
           <div><h3 className="font-medium">模型上下文与自动压缩</h3><p className="text-xs text-muted-foreground">留空恢复模型默认；自动压缩百分比要求同时设置上下文窗口。</p></div>
           <FieldGroup className="grid gap-3 md:grid-cols-2">
-            <Field data-disabled={officialDisabled}><FieldLabel htmlFor="codex-context-window">上下文窗口（tokens）</FieldLabel><Input id="codex-context-window" type="number" min={1} value={contextWindow} disabled={officialDisabled} onChange={(event) => patchCompact({ contextWindow: event.target.value })} placeholder="模型默认" /></Field>
-            <Field data-disabled={officialDisabled}><FieldLabel htmlFor="codex-compact-percent">自动压缩百分比</FieldLabel><Input id="codex-compact-percent" type="number" min={10} max={90} value={compactPercent} disabled={officialDisabled} onChange={(event) => patchCompact({ compactPercent: event.target.value })} placeholder="默认 95%" /></Field>
+            <Field data-disabled={officialDisabled} data-invalid={visibleCompactError?.field === "contextWindow"}>
+              <FieldLabel htmlFor="codex-context-window">上下文窗口（tokens）</FieldLabel>
+              <Input id="codex-context-window" type="number" min={1} value={contextWindow} disabled={officialDisabled} aria-invalid={visibleCompactError?.field === "contextWindow"} aria-describedby={visibleCompactError?.field === "contextWindow" ? "codex-context-window-error" : undefined} onChange={(event) => { patchCompact({ contextWindow: event.target.value }); setCompactError(null) }} placeholder="模型默认" />
+              {visibleCompactError?.field === "contextWindow" ? <FieldError id="codex-context-window-error">{visibleCompactError.message}</FieldError> : null}
+            </Field>
+            <Field data-disabled={officialDisabled} data-invalid={visibleCompactError?.field === "compactPercent"}>
+              <FieldLabel htmlFor="codex-compact-percent">自动压缩百分比</FieldLabel>
+              <Input id="codex-compact-percent" type="number" min={10} max={90} value={compactPercent} disabled={officialDisabled} aria-invalid={visibleCompactError?.field === "compactPercent"} aria-describedby={visibleCompactError?.field === "compactPercent" ? "codex-compact-percent-error" : undefined} onChange={(event) => { patchCompact({ compactPercent: event.target.value }); setCompactError(null) }} placeholder="默认 95%" />
+              {visibleCompactError?.field === "compactPercent" ? <FieldError id="codex-compact-percent-error">{visibleCompactError.message}</FieldError> : null}
+            </Field>
           </FieldGroup>
           <Button className="self-start" variant="outline" disabled={officialDisabled} onClick={saveCompact}>保存压缩设置</Button>
         </section>

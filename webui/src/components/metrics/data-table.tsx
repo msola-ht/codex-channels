@@ -140,6 +140,21 @@ export type DataTableColumn<TData extends RowData> = ColumnDef<
 const DEFAULT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 const DEFAULT_SORTING: SortingState = [{ id: "time", desc: true }]
 
+function requiredColumnVisibility<TData extends RowData>(columns: readonly DataTableColumn<TData>[]): ColumnVisibilityState {
+  const visibility: ColumnVisibilityState = {}
+  for (const column of columns) {
+    if ("columns" in column && column.columns?.length) {
+      Object.assign(visibility, requiredColumnVisibility(column.columns))
+    } else if (column.enableHiding === false) {
+      const id = column.id
+        ?? ("accessorKey" in column && column.accessorKey !== undefined ? String(column.accessorKey).replaceAll(".", "_") : undefined)
+        ?? (typeof column.header === "string" ? column.header : undefined)
+      if (id !== undefined) visibility[id] = true
+    }
+  }
+  return visibility
+}
+
 function usePersistentTableState<T>(
   storageKey: string,
   key: string,
@@ -284,6 +299,11 @@ export function DataTable<TData extends RowData>({
     )
   const [globalFilter, setGlobalFilter] =
     usePersistentTableState<string>(storageKey, "filters", "")
+  // 列是否可隐藏属于当前组件合同，旧的隐藏偏好不能移除必要操作入口。
+  const effectiveColumnVisibility = React.useMemo(
+    () => ({ ...columnVisibility, ...requiredColumnVisibility(columns) }),
+    [columnVisibility, columns],
+  )
   // 排序只在本次会话内有效，刷新后回到默认（最新时间倒序）；
   // 持久化只保留列展示（columns）与筛选。
   const [clientSorting, setClientSorting] = React.useState<SortingState>(
@@ -312,7 +332,7 @@ export function DataTable<TData extends RowData>({
     data,
     state: {
       sorting,
-      columnVisibility,
+      columnVisibility: effectiveColumnVisibility,
       globalFilter,
     },
     ...(server

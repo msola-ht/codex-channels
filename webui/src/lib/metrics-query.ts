@@ -1,4 +1,11 @@
-import type { MetricsQuery } from "./types"
+import type { MetricsQuery, RangeName } from "./types"
+
+export function metricsRangeSelection(query: MetricsQuery): RangeName | "custom" | null {
+  if (query.from !== undefined || query.to !== undefined) return "custom"
+  const range = query.range ?? "all"
+  // URL inputs remain unchanged for the API to reject; never turn an invalid range into all history.
+  return ["today", "yesterday", "24h", "7d", "30d", "90d", "all"].includes(range) ? range : null
+}
 
 export function metricsQueryParams(query: MetricsQuery): string {
   const params = new URLSearchParams()

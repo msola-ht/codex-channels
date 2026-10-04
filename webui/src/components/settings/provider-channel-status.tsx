@@ -3,6 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import { SettingsRow } from "@/components/settings/settings-controls"
 import { SettingsEmpty } from "@/components/settings/settings-feedback"
 import type { ManagementProvidersResponse, SettingsSummaryResponse } from "@/lib/types"
 
@@ -19,18 +20,18 @@ export function ProviderStatusCard({ state }: { state: ManagementProvidersRespon
         <div className="grid gap-3 text-sm md:grid-cols-2">
           {state.primary.kind === "official" && !state.official.authenticated ? (
             <>
-              <StatusRow label="OpenAI 官方登录" value="未登录" badge />
-              <StatusRow label="官方鉴权文件" value="未检测到" />
+              <SettingsRow label="OpenAI 官方登录" value="未登录" badge />
+              <SettingsRow label="官方鉴权文件" value="未检测到" />
             </>
           ) : (
             <>
-              <StatusRow label="主 Provider" value={state.primary.displayName} badge />
-              <StatusRow label="主 Provider ID" value={state.primary.id} code />
+              <SettingsRow label="主 Provider" value={state.primary.displayName} badge />
+              <SettingsRow label="主 Provider ID" value={state.primary.id} code />
             </>
           )}
-          <StatusRow label="Codex 默认模型" value={state.defaults.model ?? "跟随 Provider 默认值"} />
-          <StatusRow label="默认思考等级" value={state.defaults.reasoningEffort ?? "跟随模型默认值"} />
-          <StatusRow label="配置版本" value={String(state.configVersion ?? "未知")} code />
+          <SettingsRow label="Codex 默认模型" value={state.defaults.model ?? "跟随 Provider 默认值"} />
+          <SettingsRow label="默认思考等级" value={state.defaults.reasoningEffort ?? "跟随模型默认值"} />
+          <SettingsRow label="配置版本" value={String(state.configVersion ?? "未知")} code />
         </div>
         <Separator />
         <div className="flex flex-col gap-3">
@@ -75,15 +76,6 @@ export function ChannelStatusCard({ channels }: { channels: Channel[] }) {
 
       </CardContent>
     </Card>
-  )
-}
-
-function StatusRow({ label, value, badge = false, code = false }: { label: string; value: string; badge?: boolean; code?: boolean }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-      <span className="text-muted-foreground">{label}</span>
-      {badge ? <Badge className="self-start sm:self-auto" variant="secondary">{value}</Badge> : code ? <code className="max-w-full break-all rounded bg-muted px-2 py-1 text-xs sm:text-right">{value}</code> : <span className="break-words sm:text-right">{value}</span>}
-    </div>
   )
 }
 

@@ -17,5 +17,5 @@ export function FastBadge({ tier, source, responseTier }: {
   const hint = source === "request" && responseTier && normalizedTier(responseTier) !== "fast"
     ? t("metrics.fastMismatch", { tier: responseTier })
     : null
-  return <TableHint hint={hint}><Badge variant="secondary" className="h-4 px-1.5 py-0 text-[10px]">Fast</Badge></TableHint>
+  return <TableHint hint={hint}><Badge variant="secondary" size="sm">Fast</Badge></TableHint>
 }

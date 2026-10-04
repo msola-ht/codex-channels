@@ -13,7 +13,7 @@ it("shows catalog success as a toast but preserves actionable download and audit
     globalThis.catalogButtons=[];
     const server=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent',plugins:[{
       name:'catalog-feedback-fixture',enforce:'pre',transform(code,id){
-        if(id.endsWith('/settings/relay-provider-models.tsx'))return code.replace('useRef, useState','useRef').replace('export function RelayProviderModels','const useState=globalThis.catalogState; export function RelayProviderModels');
+        if(id.endsWith('/hooks/use-relay-catalog.ts'))return code.replace('useRef, useState','useRef').replace('export function useRelayCatalog','const useState=globalThis.catalogState; export function useRelayCatalog');
         if(id.endsWith('/ui/button.tsx'))return "import {createElement as h} from 'react'; export const Button=({children,onClick})=>{globalThis.catalogButtons.push({children,onClick});return h('button',null,children)};";
         if(id.endsWith('/ui/toast-manager.ts'))return 'export const toast={add:entry=>globalThis.catalogToasts.push(entry)}';
         if(id.endsWith('/lib/api.ts'))return 'export const updateRelayCatalog=()=>globalThis.catalogResult()';
@@ -87,6 +87,66 @@ it("copies exact authorized model IDs and offers manual copying when clipboard a
   expect(result.failed).toMatch(/<input[^>]*readOnly=""[^>]*value="clp-main\/mimo-v2.5"/u);
 });
 
+it("binds key drafts to revisions and retains one-time secrets after saved audit failures", () => {
+  const script = String.raw`
+    import { createServer } from 'vite';
+    import { createElement as h } from 'react';
+    import { renderToStaticMarkup } from 'react-dom/server';
+    const values=[];let cursor=0;
+    globalThis.editorState=initial=>{const i=cursor++;if(!(i in values))values[i]=initial;return [values[i],value=>{values[i]=value}];};
+    const server=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent',plugins:[{
+      name:'key-editor-fixture',enforce:'pre',transform(code,id) {
+        if(id.endsWith('/hooks/use-relay-key-editor.ts'))return code.replace('import { useState } from "react"','const useState=globalThis.editorState');
+      }
+    }]});
+    try {
+      const {useRelayKeyEditor}=await server.ssrLoadModule('/src/hooks/use-relay-key-editor.ts');
+      const mutations=[];let confirmed=0,view;
+      const caller={caller_id:'client-existing',display_name:'翻译',key_id:'key-existing',models:['clp-main/off','clp-main/unknown'],reasoning:'passthrough'};
+      const saved={activation:'saved_unconfirmed',key:'one-time-secret',auditStatus:'failed',cleanupStatus:'failed'};
+      const management={data:{revision:'r1',callers:[caller],providers:[{id:'clp-main',available:true,models:[
+        {relayId:'clp-main/off',reasoningOff:true},{relayId:'clp-main/unknown',reasoningOff:false}
+      ]}]},clearError(){},mutate:input=>mutations.push(input),confirm:async()=>{confirmed++;return saved}};
+      const Probe=()=>{view=useRelayKeyEditor(management,false);return null;};
+      const render=()=>{cursor=0;renderToStaticMarkup(h(Probe));};
+      render();view.openEditor(caller);render();view.changeReasoning('off');render();view.submit();
+      const filtered={models:view.models,removed:view.removedModelCount,mutation:mutations[0]};
+      management.data.revision='r2';render();view.submit();
+      const stale={draftStale:view.draftStale,mutations:mutations.length};
+      view.openEditor(caller);render();view.submit();
+      const reloaded=mutations[1];
+      view.openEditor('new');render();view.setName('编码');view.setModels(['clp-main/off']);render();view.submit();
+      const issued=mutations[2];
+      await view.confirm();render();const result=view.result;
+      view.setResult(null);render();
+      console.log(JSON.stringify({filtered,stale,reloaded,issued,result,confirmed,closedResult:view.result}));
+    }finally{await server.close();}
+  `;
+  const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
+  })) as {
+    filtered: { models: string[]; removed: number; mutation: { revision: string; input: Record<string, unknown> } };
+    stale: { draftStale: boolean; mutations: number };
+    reloaded: { revision: string; input: { caller: string } };
+    issued: { revision: string; input: { command: string; caller: string; key: string; name: string } };
+    result: { key: string; auditStatus: string; cleanupStatus: string; activation: string };
+    confirmed: number; closedResult: null;
+  };
+  expect(result.filtered.models).toEqual(["clp-main/off"]);
+  expect(result.filtered.removed).toBe(1);
+  expect(result.filtered.mutation).toEqual({ revision: "r1", input: { command: "edit", caller: "client-existing", name: "翻译", models: ["clp-main/off"], reasoning: "off" } });
+  expect(result.stale).toEqual({ draftStale: true, mutations: 1 });
+  expect(result.reloaded.revision).toBe("r2");
+  expect(result.reloaded.input.caller).toBe("client-existing");
+  expect(result.issued.revision).toBe("r2");
+  expect(result.issued.input).toMatchObject({ command: "issue", name: "编码" });
+  expect(result.issued.input.caller).toMatch(/^client-[a-f0-9]{32}$/u);
+  expect(result.issued.input.key).toMatch(/^key-[a-f0-9]{32}$/u);
+  expect(result.result).toEqual({ key: "one-time-secret", auditStatus: "failed", cleanupStatus: "failed", activation: "saved_unconfirmed" });
+  expect(result.confirmed).toBe(1);
+  expect(result.closedResult).toBeNull();
+});
+
 describe("Relay page presentation", () => {
   let result: ReturnType<typeof renderRelayPageFixture>;
   // Vite startup and SSR compilation are fixture setup, not assertion time.
@@ -106,7 +166,7 @@ function renderRelayPageFixture() {
     import { MemoryRouter } from 'react-router';
     const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
       name: 'relay-fixture', enforce: 'pre', transform(code, id) {
-        if (id.endsWith('/pages/relay-page.tsx')) return code
+        if (id.endsWith('/hooks/use-relay-key-editor.ts')) return code
           .replace('useState<"new" | RelayManagedCaller | null>(null)', 'useState<"new" | RelayManagedCaller | null>(globalThis.editingFixture ?? null)')
           .replace('useState<string | null>(null)', 'useState<string | null>(globalThis.draftRevisionFixture ?? "r")')
           .replace('const [name, setName] = useState("")', 'const [name, setName] = useState(globalThis.editingFixture?.display_name ?? "")')

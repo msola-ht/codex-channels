@@ -9,7 +9,7 @@ describe("WebUI query token bootstrap", () => {
   });
 
   it("stores a query token and removes it from the visible URL", () => {
-    const storeToken = vi.fn();
+    const storeToken = vi.fn(() => true);
     const replaceUrl = vi.fn();
 
     expect(consumeQueryToken({
@@ -23,7 +23,7 @@ describe("WebUI query token bootstrap", () => {
   });
 
   it("ignores a missing token without rewriting the URL", () => {
-    const storeToken = vi.fn();
+    const storeToken = vi.fn(() => true);
     const replaceUrl = vi.fn();
 
     expect(consumeQueryToken({
@@ -36,7 +36,7 @@ describe("WebUI query token bootstrap", () => {
   });
 
   it("stores a token from a HashRouter route and removes it from the hash", () => {
-    const storeToken = vi.fn();
+    const storeToken = vi.fn(() => true);
     const replaceUrl = vi.fn();
 
     expect(consumeQueryToken({
@@ -64,10 +64,46 @@ describe("WebUI query token bootstrap", () => {
     vi.stubGlobal("localStorage", localStorage);
     vi.stubGlobal("sessionStorage", sessionStorage);
 
-    setToken("secret-value");
+    expect(setToken("secret-value")).toBe(true);
 
     expect(values.get("codex-webui:token")).toBe("secret-value");
     expect(getToken()).toBe("secret-value");
     expect(sessionStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it("clears both URL token locations before reporting storage failure", () => {
+    const steps: string[] = [];
+    expect(consumeQueryToken({
+      currentUrl: "https://metrics.example.com/?token=fixture#/requests?token=other&range=7d",
+      replaceUrl: url => { steps.push(url); },
+      storeToken: () => { steps.push("store"); return false; },
+      onStorageFailure: () => { steps.push("failed"); },
+    })).toBe(false);
+    expect(steps).toEqual(["/#/requests?range=7d", "store", "failed"]);
+  });
+
+  it("reports unavailable storage instead of claiming an in-memory login", () => {
+    const unavailable = () => { throw new Error("storage unavailable"); };
+    vi.stubGlobal("localStorage", { getItem: unavailable, setItem: unavailable, removeItem: unavailable });
+    vi.stubGlobal("sessionStorage", { getItem: unavailable, setItem: unavailable, removeItem: unavailable });
+    expect(setToken("synthetic-token")).toBe(false);
+    expect(getToken()).toBe(null);
+  });
+
+  it("uses the session fallback only when API reads can retrieve the same token", () => {
+    let old: string | null = "old-token";
+    let stored: string | null = null;
+    vi.stubGlobal("localStorage", {
+      getItem: () => old,
+      setItem: () => { throw new Error("quota"); },
+      removeItem: () => { old = null; },
+    });
+    vi.stubGlobal("sessionStorage", { getItem: () => stored, setItem: (_key: string, value: string) => { stored = value; } });
+    expect(setToken("new-token")).toBe(true);
+    expect(getToken()).toBe("new-token");
+    old = "old-token";
+    vi.stubGlobal("localStorage", { getItem: () => old, setItem: () => { throw new Error("blocked"); }, removeItem: () => { throw new Error("blocked"); } });
+    expect(setToken("another-token")).toBe(false);
+    expect(getToken()).toBe("old-token");
   });
 });

@@ -22,7 +22,7 @@ export function RangeSelector({
   onDateChange,
   label,
 }: {
-  value: RangeName | "custom"
+  value: RangeName | "custom" | null
   onChange: (value: RangeName | "custom") => void
   from?: string
   to?: string
@@ -33,10 +33,10 @@ export function RangeSelector({
   const id = useId()
   return (
     <>
-      <Field>
+      <Field data-invalid={value === null}>
         <FieldLabel htmlFor={`${id}-range`}>{label ?? t("filters.range")}</FieldLabel>
         <Select items={ranges.map(value => ({ value, label: t(`ranges.${value}`) }))} value={value} onValueChange={(next) => { if (next !== null) onChange(next) }}>
-          <SelectTrigger id={`${id}-range`}><SelectValue>{t(`ranges.${value}`)}</SelectValue></SelectTrigger>
+          <SelectTrigger id={`${id}-range`} aria-invalid={value === null}><SelectValue placeholder={t("filters.invalidRange")}>{value === null ? t("filters.invalidRange") : t(`ranges.${value}`)}</SelectValue></SelectTrigger>
           <SelectContent><SelectGroup>
             {ranges.map((range) => <SelectItem key={range} value={range}>{t(`ranges.${range}`)}</SelectItem>)}
           </SelectGroup></SelectContent>

@@ -1,13 +1,15 @@
 interface ConsumeQueryTokenOptions {
   currentUrl: string
-  storeToken(token: string): void
+  storeToken(token: string): boolean
   replaceUrl(url: string): void
+  onStorageFailure?(): void
 }
 
 export function consumeQueryToken({
   currentUrl,
   storeToken,
   replaceUrl,
+  onStorageFailure,
 }: ConsumeQueryTokenOptions): boolean {
   const url = new URL(currentUrl)
   const hashText = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash
@@ -30,6 +32,9 @@ export function consumeQueryToken({
   replaceUrl(`${url.pathname}${url.search}${url.hash}`)
   const token = rawToken.trim()
   if (token === "") return false
-  storeToken(token)
+  if (!storeToken(token)) {
+    onStorageFailure?.()
+    return false
+  }
   return true
 }
