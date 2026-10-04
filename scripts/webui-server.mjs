@@ -613,15 +613,21 @@ function handleThreadSubagents(environment, rawThreadId, url, response) {
 }
 
 function handleSubagents(environment, url, response, threadId) {
+  const allowed = ["offset", "limit", "sortKey", "sortDirection", ...(threadId === undefined ? [] : ["parentTurnId"])];
   for (const key of url.searchParams.keys()) {
-    if (!["offset", "limit", "sortKey", "sortDirection"].includes(key)) throw new ApiError(400, "unsupported_parameter", "子代理列表只接受 offset、limit、sortKey 和 sortDirection");
+    if (!allowed.includes(key)) throw new ApiError(400, "unsupported_parameter", `子代理列表只接受 ${allowed.join("、")}`);
     if (url.searchParams.getAll(key).length !== 1) throw new ApiError(400, "invalid_parameter", "子代理查询参数不能重复");
+  }
+  const parentTurnId = url.searchParams.get("parentTurnId");
+  if (parentTurnId !== null && (!parentTurnId.trim() || parentTurnId.length > 128)) {
+    throw new ApiError(400, "invalid_parent_turn_id", "parentTurnId 必须为 1–128 个字符");
   }
   const sortKey = url.searchParams.get("sortKey") ?? "last";
   const sortDirection = url.searchParams.get("sortDirection") ?? "desc";
   if (!["time", "last"].includes(sortKey)) throw new ApiError(400, "invalid_sort", "子代理列表只支持 time 或 last 排序");
   if (!["asc", "desc"].includes(sortDirection)) throw new ApiError(400, "invalid_direction", "sortDirection 只支持 asc 或 desc");
   const query = {
+    ...(parentTurnId === null ? {} : { parentTurnId }),
     offset: parseBoundedInt(url.searchParams.get("offset"), "offset", 0, null, 0),
     limit: parseBoundedInt(url.searchParams.get("limit"), "limit", 1, 100, 20),
     sortKey,

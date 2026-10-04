@@ -86,11 +86,11 @@
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
   `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
 - `webui-management-codex-route.mjs` / `webui-management-gateway-route.mjs` /
-  `webui-management-provider-route.mjs`（账户刷新随 HTTP 断开取消私有 IPC 等待，上游认证失败保持 502；单账户刷新复用 Store 精确 Provider 查询，整表同步保留账户增删与来源告警；响应附加同账户的 OpenAI 登录缓存订阅日期，不写入快照） / `webui-management-task-route.mjs` /
+  `webui-management-provider-route.mjs`（账户刷新随 HTTP 断开取消私有 IPC 等待，上游认证失败保持 502；单账户刷新复用 Store 精确 Provider 查询，整表同步保留账户增删与来源告警；响应附加同账户的 OpenAI 凭证刷新时间，不写入快照） / `webui-management-task-route.mjs` /
   `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
   服务与上游状态资源；复用主服务传入的共享安全状态，不自行建立认证、限速、事务锁或错误出口。
-  Provider 与账户路由通过私有 Gateway IPC 刷新账户，不直接请求官方接口；订阅日期仅通过 runtime 读取器
-  获取匹配账户的登录缓存日期，不向浏览器返回凭据。账户
+  Provider 与账户路由通过私有 Gateway IPC 刷新账户，不直接请求官方接口；凭证刷新时间仅通过 runtime 读取器
+  获取匹配账户的登录缓存 `last_refresh`，不向浏览器返回凭据。账户
   来源清单独立读取各家账户注册表、OpenAI 鉴权文件存在性和主配置选择，不依赖模型目录或指标库，来源错误分别返回；
   快照按 DS、OCG、CCG、CLP 四家注册表补齐账户元数据和未刷新占位；状态路由返回受管服务安全摘要，并按
   5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
@@ -120,7 +120,7 @@
   `/api/v1/threads/:id/run|turns|subagents`、`/api/v1/requests`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；
   Providers 返回指标库完整去重名单，指标查询支持重复 `provider` 参数形成多选范围；
   Overview 在同一读快照和截止时间下返回汇总、趋势与热力图；Daily 按 `range` 返回系统本地日聚合。
-  Threads 只对主会话汇总和分页，返回首个请求开始时间和不受请求筛选影响的直接子代理数；Subagents 对已登记父子关系独立分页，包含尚无请求的子代理。
+  Threads 只对主会话汇总和分页，返回首个请求开始时间和不受请求筛选影响的直接子代理数；Turns 返回每轮精确关联的直接子代理数，按父 Thread 查询的 Subagents 可通过 `parentTurnId` 限定相同关系。Subagents 对已登记父子关系独立分页，包含尚无请求的子代理，行内用量仍为子线程自身全部保留历史。
   请求明细按受控字段在整个时间范围排序后偏移分页；
   `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；监听参数优先取命令行，其次
   `config.toml` 的 `[webui]` 段，默认回环无令牌；绑定非回环地址（`0.0.0.0`）时必须设置

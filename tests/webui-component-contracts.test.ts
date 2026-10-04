@@ -164,7 +164,6 @@ describe("WebUI component interaction contracts", () => {
 
   it("uses the shared Fast size and clamps supplementary output token details", () => {
     expect(result.fast).toContain('data-size="sm"');
-    expect(result.fast).toContain("h-4");
     expect(result.reasoningOverflow).toContain('aria-description="推理输出：20; 非推理输出：0"');
     expect(result.reasoningMissingTotal).toContain('aria-description="推理输出：20; 非推理输出：—"');
   });

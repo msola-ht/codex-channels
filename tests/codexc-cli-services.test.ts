@@ -78,10 +78,11 @@ afterEach(() => {
 });
 
 describe("codexc CLI", { timeout: 15_000 }, () => {
-  it("documents relay and rejects retired spelling outside the start-only upgrade handoff", () => {
+  it("documents canonical service targets and rejects retired spelling for non-start actions", () => {
     for (const action of ["start", "stop", "restart", "status", "logs"]) {
       for (const flag of ["-h", "--help"]) {
         const help = execFileSync(process.execPath, [cli, "service", action, flag], { encoding: "utf8" });
+        expect(help).toContain(`用法：codexc service ${action}`);
         expect(help).toContain("gateway|app-server|webui|relay|all");
         expect(help).not.toContain("model-relay");
       }

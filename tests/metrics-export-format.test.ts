@@ -46,11 +46,22 @@ describe("metrics export display helpers", () => {
         requestServiceTier: "priority", serviceTier: "default",
         traffic: { label: "openai", session: "session-2", interaction: 23 } }],
     };
-    const render = (format: string) => execFileSync(process.execPath, ["--input-type=module", "-e",
+    const rendered = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e",
       `import { printMetricsExport } from './scripts/metrics-output-renderer.mjs';
-       printMetricsExport(${JSON.stringify(result)}, ${JSON.stringify(format)});`,
-    ], { encoding: "utf8" });
-    const [headingLine, valueLine] = render("csv").split("\n");
+       import { format } from 'node:util';
+       const result = ${JSON.stringify(result)};
+       const render = (kind) => {
+         const lines = [];
+         const originalLog = console.log;
+         try {
+           console.log = (...args) => lines.push(format(...args));
+           printMetricsExport(result, kind);
+           return lines.join('\\n') + '\\n';
+         } finally { console.log = originalLog; }
+       };
+       console.log(JSON.stringify({ csv: render('csv'), markdown: render('markdown') }));`,
+    ], { encoding: "utf8" })) as { csv: string; markdown: string };
+    const [headingLine, valueLine] = rendered.csv.split("\n");
     const headings = headingLine!.split(",");
     const values = valueLine!.split(",");
     for (const [field, value] of Object.entries({ upstreamProvider: "deepseek", finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit", upstreamErrorType: "rate_limit_error", responseUsageAmount: "0.12345678901234567890", firstTokenMs: "12.5", totalDurationMs: "1234.5", upstreamTtftMs: "672", requestModel: "requested", responseModel: "echoed",
@@ -58,7 +69,7 @@ describe("metrics export display helpers", () => {
       trafficLabel: "openai", trafficSession: "session-2", trafficInteraction: "23" })) {
       expect(values[headings.indexOf(field)]).toBe(value);
     }
-    const markdown = render("markdown");
+    const markdown = rendered.markdown;
     const markdownLines = markdown.split("\n");
     expect(markdownLines).toContain(`- 时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
     const headerIndex = markdownLines.findIndex((line) => line.startsWith("| 时间 |"));

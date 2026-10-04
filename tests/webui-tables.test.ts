@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
-  it("keeps one total token column and omits flat type and parent columns", () => {
+  it("keeps total and own token columns and omits flat type and parent columns", () => {
     expect(markup.threads).toContain("共 1 个匹配主会话");
     expect(markup.threadsEn).toContain("Matching main threads: 1");
     expect(markup.threads).not.toContain("本页主会话");
@@ -13,19 +13,27 @@ describe("WebUI metrics table presentation", () => {
     expect(headers(markup.threads!)).not.toContain("父会话");
     expect(markup.subagentDetailParent).toContain("子代理");
   });
-  it("renders own and descendant usage in an accessible total tooltip, including descendant-only matches", () => {
+  it("renders descendant breakdown and overall total in an accessible tooltip, including descendant-only matches", () => {
     const cell = (html: string, label: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf(label)]?.[1]?.replace(/<[^>]*>/g, "");
-    expect(headers(markup.threads!)).toEqual(["期间首次请求", "会话", "提供商", "模型", "轮次", "请求", "总计", "会话总耗时", "最后记录", "子代理"]);
+    expect(headers(markup.threads!)).toEqual(["期间首次请求", "会话", "提供商", "模型", "轮次", "请求", "输入 Token", "缓存命中率", "输出 Token", "总计", "会话总耗时", "最后记录", "子代理"]);
+    expect(cell(markup.threads!, "输入 Token")).toBe("100");
+    expect(cell(markup.threads!, "缓存命中率")).toBe("50.0%");
+    expect(cell(markup.threads!, "输出 Token")).toBe("20");
     expect(cell(markup.threads!, "总计")).toBe("1.08K");
-    expect(markup.threads).toContain('aria-description="自身: 输入 100, 缓存 50, 输出 20. 子代理: 输入 800, 缓存 300, 输出 160"');
+    expect(markup.threads).toContain('aria-description="子代理: 输入: 800, 缓存: 300, 缓存命中率: 37.5%, 输出: 160, 合计: 960. 总计: 1.08K"');
     expect(markup.threads).toMatch(/<span[^>]*tabindex="0"[^>]*data-slot="tooltip-trigger"/u);
     expect(cell(markup.threadsChildOnly!, "总计")).toBe("1.08K");
-    expect(markup.threadsChildOnly).toContain('aria-description="自身: 输入 0, 缓存 0, 输出 0. 子代理: 输入 900, 缓存 —, 输出 180"');
+    expect(cell(markup.threadsChildOnly!, "输入 Token")).toBe("0");
+    expect(cell(markup.threadsChildOnly!, "缓存命中率")).toBe("—");
+    expect(cell(markup.threadsChildOnly!, "输出 Token")).toBe("0");
+    expect(cell(markup.threadsUnknownCache!, "缓存命中率")).toBe("—");
+    expect(cell(markup.threadsPartialCache!, "缓存命中率")).toBe("50.0%");
+    expect(markup.threadsChildOnly).toContain('aria-description="子代理: 输入: 900, 缓存: —, 缓存命中率: —, 输出: 180, 合计: 1.08K. 总计: 1.08K"');
     expect(cell(markup.threadsChildOnly!, "模型")).toBe("—");
     expect(markup.threadsChildOnly).not.toContain("NaN");
     expect(markup.threadTotalSorting).toBe("totalTokens:desc");
     expect(headers(markup.threadsEn!)).toContain("Total");
-    expect(markup.threadsEn).toContain('aria-description="Own: Input 100, Cached 50, Output 20. Subagents: Input 800, Cached 300, Output 160"');
+    expect(markup.threadsEn).toContain('aria-description="Subagents: Input: 800, Cached: 300, Cache hit rate: 37.5%, Output: 160, Subtotal: 960. Total: 1.08K"');
   });
   it("shows a single descendant-inclusive summary and hides stale totals on query changes", () => {
     expect(markup.threadsPage).toContain("含子代理");
@@ -68,6 +76,27 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.subagentsRelated).not.toContain("登记时间");
     expect(markup.subagentsRelated).not.toContain("filtered-");
   });
+  it("shows model usage cards across pages with known-cache rates and localized input breakdowns", () => {
+    const summary = (html: string, label = "模型") => html.match(new RegExp(`<section aria-label="${label}"[^>]*>([\\s\\S]*?)</section>`))?.[1]?.replace(/ id="[^"]*"/gu, "");
+    const cards = summary(markup.subagentsRelated!);
+    expect(cards).toBeDefined();
+    expect(cards?.match(/data-slot="card"/gu)).toHaveLength(2);
+    expect(cards).toContain("model-card-one");
+    expect(cards).toContain("model-card-two");
+    expect(cards?.match(/<dd\b[^>]*>([\s\S]*?)<\/dd>/gu)?.map(cell => cell.replace(/<[^>]*>/gu, "")))
+      .toEqual(["2K", "75.0%", "500", "4K", "—", "0"]);
+    expect(cards).toContain('aria-description="缓存：≥ 750; 无缓存：≥ 250"');
+    expect(cards).not.toMatch(/aria-description="[^"]*命中率/u);
+    expect(summary(markup.subagentsLastPage!)).toBe(cards);
+    expect(summary(markup.allSubagents!)).toBe(cards);
+    const english = summary(markup.subagentsRelatedEn!, "Model");
+    expect(english).toContain("Input tokens");
+    expect(english).toContain("Cache hit rate");
+    expect(english).toContain("Output tokens");
+    for (const key of ["subagentsEmpty", "subagentsLoading", "subagentsFailed"]) {
+      expect(summary(markup[key]!)).toBeUndefined();
+    }
+  });
   it("shows localized relationship states and keeps a detail navigation entry when metrics fail", () => {
     expect(markup.subagentsEmpty).toContain("尚未登记子代理");
     expect(markup.subagentsEmptyEn).toContain("No subagents registered");
@@ -83,6 +112,22 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.subagentDetailParent).toContain('/threads/parent%2Fthread?range=all');
     expect(markup.subagentDetailParent).toContain('/requests?range=all&amp;threadId=parent%2Fthread&amp;turnId=creation%2Fturn');
     expect(markup.subagentDetailParent).toContain("不包含后续派发任务的全部轮次");
+  });
+  it("separates own filtered totals from collapsed history and links each turn to its subagents", () => {
+    expect(markup.threadTiming).toContain("当前筛选 · 会话自身");
+    expect(markup.threadTimingEn).toContain("Current filters · This thread only");
+    expect(markup.threadTiming).toContain("历史累计 · 含子代理");
+    expect(markup.threadTiming).toMatch(/<details\b(?![^>]*\bopen)[^>]*>/u);
+    expect(markup.threadTiming).not.toContain("最近轮次");
+    expect(markup.threadDetailLoading).toMatch(/<section[^>]*class="[^"]*invisible"[^>]*inert=""[^>]*aria-hidden="true"/u);
+    expect(markup.turnsWithSubagents).toContain('href="/threads/parent%2Fthread/subagents?parentTurnId=turn%2Fone"');
+    expect(markup.turnsWithSubagents).toContain('aria-label="查看轮次 turn/one 的 2 个子代理"');
+    expect(markup.turns).not.toContain('/subagents?parentTurnId=');
+    expect(markup.turnsLongId).toContain('>01a106b6…8882</a>');
+    expect(markup.turnsLongId).toContain('aria-description="01a106b6-f258-7b82-bed0-157cc3e38882"');
+    expect(markup.turnsLongId).toMatch(/<a\b[^>]*aria-description="01a106b6-f258-7b82-bed0-157cc3e38882"[^>]*>/u);
+    expect(markup.turnSubagentsPage).toContain("关联轮次：turn/one");
+    expect(markup.turnSubagentsPage).toContain("并非只计该父轮次内的用量");
   });
   it("renders the independent page and breadcrumb for an encoded owning thread without reading detail metrics", () => {
     expect(markup.subagentsPage).toContain("子代理 · parent/thread");
@@ -140,13 +185,9 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.quotaCreditsEnglish).toContain("No expiry");
     expect(markup.quotaCreditsEnglish).toContain("Other reset credits: 1");
     expect(markup.quotaCredits).toContain("可用重置券");
-    expect(markup.quotaCredits).toContain("订阅截止时间");
-    expect(markup.quotaCredits).toContain("订阅信息最后检查时间");
-    expect(markup.quotaCredits).toContain("2026-10-03 02:05");
+    expect(markup.quotaCredits).toContain("凭证刷新时间");
     expect(markup.quotaCredits).toContain("2026-09-23 02:41");
-    expect(markup.quotaCreditsEnglish).toContain("Subscription active until");
-    expect(markup.quotaCreditsEnglish).toContain("Subscription last checked");
-    expect(markup.quotaCreditsEnglish).toContain("From the login cache");
+    expect(markup.quotaCreditsEnglish).toContain("Credentials refreshed at");
     expect(markup.quotaCredits).toContain("使用重置券");
     expect(markup.quotaCreditsEnglish).toContain("Use reset credit");
     expect(markup.quotaCredits).toContain("1970-01-01 00:33");
@@ -166,6 +207,22 @@ describe("WebUI metrics table presentation", () => {
     expect(html).toContain("1970-01-01 00:33");
     expect(html).toContain("使用重置券");
     expect(html).toContain('<ul aria-label="重置券到期时间"');
+  });
+  it("shows only credential refresh time and handles missing credentials without subscription dates", () => {
+    expect(markup.credentialRefreshTime).toContain("凭证刷新时间: 2026-09-23 02:41");
+    expect(markup.credentialRefreshTimeEn).toContain("Credentials refreshed at: 2026-09-23 02:41");
+    expect(markup.credentialRefreshTimeMissing).toContain("凭证刷新时间: 未提供");
+    expect(markup.credentialRefreshTimeOmitted).toContain("凭证刷新时间: 未提供");
+    expect(markup.credentialRefreshTimeZero).toContain("1970-01-01 00:00");
+    for (const html of [markup.credentialRefreshTime, markup.credentialRefreshTimeEn, markup.credentialRefreshTimeMissing]) {
+      expect(html).not.toContain("2026-10-03 02:05");
+      expect(html).not.toContain("订阅截止时间");
+      expect(html).not.toContain("订阅信息最后检查时间");
+      expect(html).not.toContain("Subscription active until");
+      expect(html).not.toContain("Subscription last checked");
+      expect(html).not.toContain("缓存中的截止日期已过");
+      expect(html).not.toContain("From the login cache");
+    }
   });
   it("shows controlled relay outcomes without a request ID copy action", () => {
     expect(markup["relay-outcome-rejected"]).toContain("上游权限不足");
@@ -217,7 +274,7 @@ describe("WebUI metrics table presentation", () => {
           if (id.endsWith("/src/App.tsx")) return _code + " export { BreadcrumbTrail };";
           if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
           if (id.endsWith("/src/hooks/use-official-account-sources.ts")) return "export function useOfficialAccountSources() { return globalThis.fixtureAccounts; }";
-          if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi() { return globalThis.fixtureApiState; }";
+          if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi(load, deps) { globalThis.fixtureApiLoad = load; globalThis.fixtureApiDeps = deps; return globalThis.fixtureApiState; }";
           if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {}, pagination() { return globalThis.fixturePagination; } }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
           if (id.endsWith("/src/hooks/use-thread-detail.ts")) return _code.replace("export function useThreadDetail(", "function realUseThreadDetail(") + " export function useThreadDetail(...args) { globalThis.fixtureThreadDetailCalls++; return globalThis.fixtureThreadDetail ?? realUseThreadDetail(...args); }";
           if (id.endsWith("/src/hooks/use-thread-subagents.ts")) return "export function useThreadSubagents(threadId) { globalThis.fixtureSubagentCalls.push(threadId ?? 'all'); return globalThis.fixtureSubagentState; }";
@@ -239,7 +296,7 @@ describe("WebUI metrics table presentation", () => {
         const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
         const { TrafficDetail } = await server.ssrLoadModule("/src/components/traffic/traffic-detail.tsx");
         const { ErrorBanner } = await server.ssrLoadModule("/src/components/metrics/error-banner.tsx");
-        const { GlobalCards, WeeklyQuotaCard, OpencodeGoUsageCard, ClinePassUsageCard, DeepseekBalanceCards, CcgCreditUsageCards } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
+        const { GlobalCards, ProviderTable, WeeklyQuotaCard, OpencodeGoUsageCard, ClinePassUsageCard, DeepseekBalanceCards, CcgCreditUsageCards } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
         const { QuerySummary } = await server.ssrLoadModule("/src/components/metrics/query-summary.tsx");
         const { ConsolePage } = await server.ssrLoadModule("/src/pages/console-page.tsx");
         const { openAiWeeklyQuotaFromSnapshot, accountSnapshotsWithMissingProviders, deepseekAccountFromSnapshot, ccgAccountFromSnapshot, quotaAccountFromSnapshot } = await server.ssrLoadModule("/src/lib/account-refresh-state.ts");
@@ -261,7 +318,7 @@ describe("WebUI metrics table presentation", () => {
         const subagentPagination = { mode: "server", pageNumber: 1, pageSize: 20, pageSizeOptions: [10,20,50,100], serverTotal: 0,
           sorting: [{ id: "last", desc: true }], enableSortingRemoval: false, onSortingChange: noop, onPageSizeChange: noop,
           hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop };
-        globalThis.fixtureSubagentState = { data: { subagents: [], total: 0 }, error: null, errorCode: null,
+        globalThis.fixtureSubagentState = { data: { subagents: [], modelUsage: [], total: 0 }, error: null, errorCode: null,
           loading: false, refreshing: false, refetch: noop, pagination: subagentPagination, notificationStatus: "live", lastUpdatedAt: 1000,
         };
         const common = { provider: "openai", model: "model-test", recordedAtMs: 1000, directSubagentCount: 0,
@@ -294,6 +351,10 @@ describe("WebUI metrics table presentation", () => {
         const rollingWindow = quotaWindow("rolling", "5小时", 10);
         const fiveHourWindow = quotaWindow("five-hour", "5小时", 10);
         const result = {
+          providers: render(ProviderTable, { providers: [{ provider: "openai", threadCount: 1, turnCount: 1, aggregate: common }] }),
+          providersEmpty: render(ProviderTable, { providers: [] }),
+          providersUnknownCache: render(ProviderTable, { providers: [{ provider: "openai", threadCount: 1, turnCount: 1,
+            aggregate: { ...common, cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 1 } } }] }),
           ocgQuotaOrder: render(OpencodeGoUsageCard, { accounts: [{ ...quotaAccount, displayName: "OpenCode Go main",
             windows: [monthlyWindow, weeklyWindow, rollingWindow] }], refreshControls: {}, onAccountsChanged: noop }),
           clineQuotaOrder: render(ClinePassUsageCard, { account: { ...quotaAccount, displayName: "Cline Pass main",
@@ -321,7 +382,7 @@ describe("WebUI metrics table presentation", () => {
           quotaCreditsEnglish: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: null, planType: null,
             credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "2", expirations: [{ expiresAt: null, count: 1 }], undisclosedCount: "1" } }, "en"),
           quotaCredits: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: 1000, planType: "plus",
-            credits: { subscription: { activeUntil: 1790993155, lastChecked: 1790131317 }, observedAtMs: 1000, remaining: "12.34567890123456789", unlimited: false, resetCreditsAvailable: "5",
+            credits: { credentialRefreshedAt: 1790131317, observedAtMs: 1000, remaining: "12.34567890123456789", unlimited: false, resetCreditsAvailable: "5",
               expirations: [{ expiresAt: 2000, count: 2 }, { expiresAt: null, count: 1 }], undisclosedCount: "2" } }),
           quotaZeroCredits: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null,
             credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "0", expirations: [], undisclosedCount: null } }),
@@ -393,6 +454,11 @@ describe("WebUI metrics table presentation", () => {
           threadsPartialDuration: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", sessionTiming: { knownDurationMs: 120000, missingTurnCount: 1, historyComplete: false } }], query: {}, pagination }),
           threadsMissingDuration: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", sessionTiming: { knownDurationMs: null, missingTurnCount: 1, historyComplete: false } }], query: {}, pagination }),
           turns: render(TurnTable, { turns: [{ ...common, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
+          turnsWithSubagents: render(TurnTable, { turns: [{ ...common, turnId: "turn/one", directSubagentCount: 2 }], threadId: "parent/thread", query: { provider: ["filtered"] }, pagination }),
+          turnsLongId: render(TurnTable, { turns: [{ ...common, turnId: "01a106b6-f258-7b82-bed0-157cc3e38882" }], threadId: "thread-1", query: {}, pagination }),
+          turnsZeroCache: render(TurnTable, { turns: [{ ...common, cachedInputTokens: 0, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
+          turnsUnknownCache: render(TurnTable, { turns: [{ ...common, cachedInputTokens: null, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
+          turnsZeroInput: render(TurnTable, { turns: [{ ...common, inputTokens: 0, cachedInputTokens: 0, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
           turnsDuration: render(TurnTable, { turns: [{ ...common, turnId: "turn-1", durationMs: 71_000 }], threadId: "thread-1", query: {}, pagination }),
           turnsDurationZero: render(TurnTable, { turns: [{ ...common, turnId: "turn-1", durationMs: 0 }], threadId: "thread-1", query: {}, pagination }, "en"),
         };
@@ -406,6 +472,10 @@ describe("WebUI metrics table presentation", () => {
             cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 1 } },
           cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 } };
         result.threadsChildOnly = render(ThreadTable, { threads: [childOnlyThread], query: {}, pagination });
+        result.threadsUnknownCache = render(ThreadTable, { threads: [{ ...mainThread, cachedInputTokens: null,
+          cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 1 } }], query: {}, pagination });
+        result.threadsPartialCache = render(ThreadTable, { threads: [{ ...mainThread, cachedInputTokens: null,
+          cacheUsage: { inputTokens: 60, cachedInputTokens: 30, missingRequestCount: 1 } }], query: {}, pagination });
         globalThis.fixtureCaptureTable = true;
         const totalSortCycle = [];
         const totalPagination = { ...pagination, onSortingChange: next => {
@@ -432,13 +502,20 @@ describe("WebUI metrics table presentation", () => {
             turns: { aggregate: common, range: { name: "all" }, turns: [], turnCount: 2 } } };
         result.threadTiming = render(ThreadDetailPage, {});
         result.threadTimingEn = render(ThreadDetailPage, {}, "en");
+        globalThis.fixtureThreadDetail.loading = true;
+        result.threadDetailLoading = render(ThreadDetailPage, {});
+        globalThis.fixtureThreadDetail.loading = false;
         globalThis.fixtureThreadDetail.data.run.sessionDurationMs = null;
         result.threadTimingMissing = render(ThreadDetailPage, {});
         globalThis.fixtureThreadDetail.data.run.sessionTiming = { knownDurationMs: 120_000, missingTurnCount: 1, historyComplete: false };
         result.threadTimingPartial = render(ThreadDetailPage, {});
         result.threadTimingPartialEn = render(ThreadDetailPage, {}, "en");
         const relation = { ...common, turnCount: 2, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 120000, threadId: "child/one", parentThreadId: "thread-1", parentTurnId: "turn-create/one", agentPath: "/root/worker", recordedAtMs: 120000, directSubagentCount: 2 };
-        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], total: 21 },
+        const modelUsage = [
+          { model: "model-card-one", inputTokens: 2000, outputTokens: 500, cacheUsage: { inputTokens: 1000, cachedInputTokens: 750, missingRequestCount: 1 } },
+          { model: "model-card-two", inputTokens: 4000, outputTokens: 0, cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 2 } },
+        ];
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], modelUsage, total: 21 },
           pagination: { ...subagentPagination, serverTotal: 21, hasNext: true } };
         const filteredQuery = { range: "today", provider: ["filtered-provider"], model: "filtered-model", status: "failed", turnId: "filtered-turn", filter: "filtered-text", offset: 40, limit: 20 };
         globalThis.fixtureSubagentCalls.length = 0;
@@ -446,10 +523,10 @@ describe("WebUI metrics table presentation", () => {
         result.subagentsCollapsedCalls = String(globalThis.fixtureSubagentCalls.length);
         result.subagentsRelated = render(ThreadSubagents, { threadId: "thread-1" });
         result.subagentsRelatedEn = render(ThreadSubagents, { threadId: "thread-1" }, "en");
-        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [{ ...relation, parentTurnId: null, directSubagentCount: 0 }], total: 21 },
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [{ ...relation, parentTurnId: null, directSubagentCount: 0 }], modelUsage, total: 21 },
           pagination: { ...subagentPagination, serverTotal: 21, pageNumber: 2, hasPrevious: true } };
         result.subagentsLastPage = render(ThreadSubagents, { threadId: "thread-1" });
-        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [], total: 0 },
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [], modelUsage: [], total: 0 },
           pagination: subagentPagination };
         result.subagentsEmpty = render(ThreadSubagents, { threadId: "empty-thread" });
         result.subagentsEmptyEn = render(ThreadSubagents, { threadId: "empty-thread" }, "en");
@@ -457,11 +534,12 @@ describe("WebUI metrics table presentation", () => {
         result.subagentsFailed = render(ThreadSubagents, { threadId: "thread-1" });
         globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: null, error: null, loading: true, refreshing: true };
         result.subagentsLoading = render(ThreadSubagents, { threadId: "thread-1" });
-        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], total: 1 }, pagination: { ...subagentPagination, serverTotal: 1 }, loading: false, refreshing: false };
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], modelUsage, total: 1 }, pagination: { ...subagentPagination, serverTotal: 1 }, loading: false, refreshing: false };
         result.subagentsSingle = render(ThreadSubagents, { threadId: "thread-1" });
         globalThis.fixtureThreadDetailCalls = 0;
         result.subagentsPage = render(() => h(Routes, null, h(Route, { path: "/threads/:id/subagents", element: h(ThreadSubagentsPage) })), {}, "zh", "/threads/parent%2Fthread/subagents");
         result.subagentsPageEn = render(() => h(Routes, null, h(Route, { path: "/threads/:id/subagents", element: h(ThreadSubagentsPage) })), {}, "en", "/threads/parent%2Fthread/subagents");
+        result.turnSubagentsPage = render(() => h(Routes, null, h(Route, { path: "/threads/:id/subagents", element: h(ThreadSubagentsPage) })), {}, "zh", "/threads/parent%2Fthread/subagents?parentTurnId=turn%2Fone");
         result.subagentsPageDetailCalls = String(globalThis.fixtureThreadDetailCalls);
         globalThis.fixtureSubagentState.data.subagents[0].parentThreadId = "parent/thread";
         globalThis.fixtureSubagentCalls = [];
@@ -502,6 +580,8 @@ describe("WebUI metrics table presentation", () => {
           ["threadCacheZero", 100, 0], ["threadCacheUnknown", 100, null], ["threadInputZero", 0, 0],
         ]) {
           result[key] = render(ThreadTable, { threads: [{ ...common, inputTokens, cachedInputTokens,
+            subagentUsage: { inputTokens, cachedInputTokens, outputTokens: 20,
+              cacheUsage: { inputTokens: cachedInputTokens === null ? 0 : inputTokens, cachedInputTokens, missingRequestCount: cachedInputTokens === null ? 1 : 0 } },
             cacheUsage: { inputTokens: cachedInputTokens === null ? 0 : inputTokens, cachedInputTokens, missingRequestCount: cachedInputTokens === null ? 1 : 0 },
             threadId: "thread-1", agentPath: null, parentThreadId: null, turnCount: 1,
             firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination });
@@ -540,6 +620,17 @@ describe("WebUI metrics table presentation", () => {
         result.partialFailureRetainsSnapshot = render(ConsolePage, consoleProps);
         globalThis.fixtureAccounts.data.deepseek = null;
         globalThis.fixtureAccounts.data.warnings = [];
+        const credentialProps = { usedPercent: 37.5, resetsAt: null, planType: "plus",
+          credits: { credentialRefreshedAt: 1790131317, subscription: { activeUntil: 1790993155, lastChecked: 1790131317 }, observedAtMs: 1000,
+            remaining: "0", unlimited: false, resetCreditsAvailable: "0", expirations: [], undisclosedCount: null } };
+        result.credentialRefreshTime = render(WeeklyQuotaCard, credentialProps);
+        result.credentialRefreshTimeEn = render(WeeklyQuotaCard, credentialProps, "en");
+        result.credentialRefreshTimeMissing = render(WeeklyQuotaCard, { ...credentialProps,
+          credits: { ...credentialProps.credits, credentialRefreshedAt: null } });
+        result.credentialRefreshTimeOmitted = render(WeeklyQuotaCard, { ...credentialProps,
+          credits: { ...credentialProps.credits, credentialRefreshedAt: undefined } });
+        result.credentialRefreshTimeZero = render(WeeklyQuotaCard, { ...credentialProps,
+          credits: { ...credentialProps.credits, credentialRefreshedAt: 0 } });
         globalThis.fixtureServerClock = { nowMs: Date.now() - 20 * 60_000, receivedAtMs: Date.now(), timeZone: "UTC" };
         result.skewedClientFreshAccount = render(AccountUpdateDescription, { observedAtMs: globalThis.fixtureServerClock.nowMs, isDefault: false, refreshFailed: false });
         globalThis.fixtureServerClock = undefined;
@@ -565,6 +656,7 @@ describe("WebUI metrics table presentation", () => {
         result.partialSummary = render(QuerySummary, { aggregate: partial, range: { name: "all" } });
         result.partialGlobal = render(GlobalCards, { global: partial, threadCount: 1, turnCount: 1 });
         result.partialThread = render(ThreadTable, { threads: [{ ...partial, threadId: "thread-1", agentPath: null,
+          subagentUsage: { inputTokens: 1000, cachedInputTokens: null, outputTokens: 20, cacheUsage: partial.cacheUsage },
           parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination });
         globalThis.fixtureDisclosureOpen = true;
         for (const tier of ["fast", "priority", "default", "flex", "auto", null, undefined]) {
@@ -666,32 +758,55 @@ describe("WebUI metrics table presentation", () => {
         const { useThreads } = await server.ssrLoadModule("/src/hooks/use-threads.ts");
         const { useErrors } = await server.ssrLoadModule("/src/hooks/use-errors.ts");
         const { useThreadDetail } = await server.ssrLoadModule("/src/hooks/use-thread-detail.ts");
+        const { useMetricsSnapshot } = await server.ssrLoadModule("/src/hooks/use-metrics-snapshot.ts");
         const query = { range: "all", offset: 0, limit: 10 };
         const nextQuery = { ...query, offset: 10 };
-        result.queryStates = JSON.stringify([
-          [useRequests, JSON.stringify(query)],
-          [useThreads, JSON.stringify(query)],
-          [useErrors, JSON.stringify(query)],
-          [q => useThreadDetail("thread-1", q), JSON.stringify(["thread-1", query])],
-        ].map(([hook, queryKey]) => {
-          const readHook = q => {
-            let value;
-            function Probe() { const state = hook(q); value = { data: state.data, error: state.error, errorCode: state.errorCode, loading: state.loading }; return null; }
+        const readSnapshot = q => {
+          let value;
+          function Probe() {
+            const state = useMetricsSnapshot(q, JSON.stringify(q), noop);
+            value = { data: state.data, error: state.error, errorCode: state.errorCode, loading: state.loading };
+            return null;
+          }
+          render(Probe, {});
+          return value;
+        };
+        globalThis.fixtureApiState = { data: { queryKey: JSON.stringify(query), data: { total: 1 } }, loading: false, error: null };
+        const ready = readSnapshot(query);
+        const changed = readSnapshot(nextQuery);
+        const returned = readSnapshot(query);
+        globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: true };
+        const pending = readSnapshot(query);
+        globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: false, error: "fixture failure" };
+        const failed = readSnapshot(nextQuery);
+        globalThis.fixtureApiState = { data: null, loading: true, error: null };
+        const initial = readSnapshot(query);
+        result.queryStates = JSON.stringify({ ready, changed, returned, pending, failed, initial });
+
+        // Exercise each real wrapper and API loader, including changed filters and encoded thread IDs.
+        const wiringQuery = { ...query, provider: ["openai", "clp-main"], model: "fixture model" };
+        const nextWiringQuery = { ...wiringQuery, offset: 10 };
+        globalThis.fixtureThreadDetail = null;
+        const wiring = {};
+        for (const [name, hook] of Object.entries({ requests: useRequests, threads: useThreads, errors: useErrors, detail: useThreadDetail })) {
+          wiring[name] = [];
+          for (const [q, threadId] of [[wiringQuery, "thread/one"], [nextWiringQuery, "thread/two"]]) {
+            function Probe() { if (name === "detail") hook(threadId, q); else hook(q); return null; }
             render(Probe, {});
-            return value;
-          };
-          globalThis.fixtureApiState = { data: { queryKey, data: { total: 1 } }, loading: false, error: null };
-          const ready = readHook(query);
-          const changed = readHook(nextQuery);
-          const returned = readHook(query);
-          globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: true };
-          const pending = readHook(query);
-          globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: false, error: "fixture failure" };
-          const failed = readHook(nextQuery);
-          globalThis.fixtureApiState = { data: null, loading: true, error: null };
-          const initial = readHook(query);
-          return { ready, changed, returned, pending, failed, initial };
-        }));
+            const calls = [];
+            globalThis.fetch = async (path, init) => {
+              calls.push({ path, signal: init.signal });
+              return { ok: true, json: async () => ({ path }) };
+            };
+            const controller = new AbortController();
+            const snapshot = await globalThis.fixtureApiLoad(controller.signal);
+            const activeSignals = calls.every(call => call.signal instanceof AbortSignal && !call.signal.aborted);
+            controller.abort();
+            wiring[name].push({ deps: globalThis.fixtureApiDeps, snapshot, paths: calls.map(call => call.path),
+              activeSignals, cancelledSignals: calls.every(call => call.signal.aborted) });
+          }
+        }
+        result.queryWiring = JSON.stringify(wiring);
         console.log(JSON.stringify(result));
       } finally { await server.close(); }
     `;
@@ -1034,17 +1149,37 @@ describe("WebUI metrics table presentation", () => {
 
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
     expect(headers(markup.turns!)).toEqual([
-      "时间", "轮次", "提供商", "模型", "请求", "失败", "输入 Token", "输出 Token",
-      "本轮耗时",
+      "时间", "轮次", "提供商", "模型", "请求", "失败", "输入 Token", "缓存命中率", "输出 Token",
+      "本轮耗时", "子代理",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
   });
 
+  it("shows cache rates in separate columns and removes them from input tooltips", () => {
+    const cell = (html: string, label: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf(label)]?.[1] ?? "";
+    for (const key of ["requests", "threads", "turns", "providers", "subagentsRelated"]) {
+      expect(headers(markup[key]!)).toContain("缓存命中率");
+      expect(cell(markup[key]!, "缓存命中率")).toContain("50.0%");
+      const input = cell(markup[key]!, "输入 Token");
+      expect(input).toContain('aria-description="缓存：50; 无缓存：50"');
+      expect(input).not.toContain("命中率");
+      expect(input).not.toContain("50.0%");
+    }
+    expect(cell(markup.turnsZeroCache!, "缓存命中率")).toContain("0.0%");
+    for (const key of ["turnsUnknownCache", "turnsZeroInput", "providersUnknownCache"]) {
+      expect(cell(markup[key]!, "缓存命中率")).toContain("—");
+      expect(markup[key]).not.toContain("NaN");
+    }
+    expect(markup.providersEmpty).toContain('colSpan="8"');
+    expect(cell(markup.partialThread!, "输入 Token")).toContain('aria-description="缓存：≥ 50; 无缓存：≥ 50"');
+    expect(cell(markup.partialThread!, "输入 Token")).not.toContain("命中率");
+  });
+
   it("preserves unknown and zero cache counts in thread tooltips while retaining aggregate cache metrics", () => {
-    expect(markup.threadCacheZero).toContain("自身: 输入 100, 缓存 0, 输出 20");
-    expect(markup.threadCacheUnknown).toContain("自身: 输入 100, 缓存 —, 输出 20");
-    expect(markup.threadInputZero).toContain("自身: 输入 0, 缓存 0, 输出 20");
-    expect(markup.partialThread).toContain("自身: 输入 1K, 缓存 ≥ 50, 输出 20");
+    expect(markup.threadCacheZero).toContain("子代理: 输入: 100, 缓存: 0, 缓存命中率: 0.0%, 输出: 20, 合计: 120");
+    expect(markup.threadCacheUnknown).toContain("子代理: 输入: 100, 缓存: —, 缓存命中率: —, 输出: 20, 合计: 120");
+    expect(markup.threadInputZero).toContain("子代理: 输入: 0, 缓存: 0, 缓存命中率: —, 输出: 20, 合计: 20");
+    expect(markup.partialThread).toContain("子代理: 输入: 1K, 缓存: ≥ 50, 缓存命中率: 50.0%, 输出: 20, 合计: 1.02K");
     expect(markup.partialSummary).toContain("缓存 50");
     expect(markup.partialGlobal).toContain("缓存 50 · 命中率 50.0%");
     for (const key of ["partialThread", "partialSummary", "partialGlobal"]) {
@@ -1079,13 +1214,13 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.emptyToken).not.toContain('data-slot="tooltip-trigger"');
     expect(markup.inputToken).toContain('tabindex="0"');
     expect(markup.outputToken).toContain('tabindex="0"');
-    expect(markup.inputToken).toMatch(/aria-description="[^"]*50\.0%/u);
+    expect(markup.inputToken).toContain('aria-description="缓存：5; 无缓存：5"');
+    expect(markup.inputToken).not.toContain("50.0%");
     expect(markup.outputToken).toContain('aria-description="推理输出：5; 非推理输出：5"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
     for (const label of ["首 Token", "请求耗时", "请求详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
-    expect(markup['tier-fast']).toContain("h-4");
   });
 
   it("only offers supplemental token and Fast information and preserves link semantics", () => {
@@ -1132,14 +1267,31 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("marks changed queries pending before the API effect and preserves explicit failures", () => {
-    expect(JSON.parse(markup.queryStates!)).toEqual(Array.from({ length: 4 }, () => ({
+    expect(JSON.parse(markup.queryStates!)).toEqual({
       ready: { data: { total: 1 }, error: null, loading: false },
       changed: { data: { total: 1 }, error: null, loading: true },
       returned: { data: { total: 1 }, error: null, loading: false },
       pending: { data: { total: 1 }, error: null, loading: false },
       failed: { data: { total: 1 }, error: "fixture failure", loading: false },
       initial: { data: null, error: null, loading: true },
-    })));
+    });
+  });
+
+  it("wires each metrics wrapper to its query key and actual API loader", () => {
+    const wiring = JSON.parse(markup.queryWiring!) as Record<string, unknown[]>;
+    for (const name of ["requests", "threads", "errors", "detail"]) {
+      expect(wiring[name]).toEqual([0, 10].map((offset) => {
+        const query = { range: "all", offset, limit: 10, provider: ["openai", "clp-main"], model: "fixture model" };
+        const params = `range=all&offset=${offset}&limit=10&provider=openai&provider=clp-main&model=fixture+model`;
+        const threadId = offset === 0 ? "thread/one" : "thread/two";
+        const queryKey = JSON.stringify(name === "detail" ? [threadId, query] : query);
+        const paths = name === "detail"
+          ? [`/api/v1/threads/${encodeURIComponent(threadId)}/run`, `/api/v1/threads/${encodeURIComponent(threadId)}/turns?${params}`]
+          : [`/api/v1/${name}?${params}`];
+        const data = name === "detail" ? { run: { path: paths[0] }, turns: { path: paths[1] } } : { path: paths[0] };
+        return { deps: [queryKey], snapshot: { queryKey, data }, paths, activeSignals: true, cancelledSignals: true };
+      }));
+    }
   });
 
   it("aligns numeric headers and cells on the same edge", () => {

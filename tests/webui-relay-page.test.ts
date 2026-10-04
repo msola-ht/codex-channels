@@ -307,95 +307,98 @@ function assertRelayPage(result: ReturnType<typeof renderRelayPageFixture>): voi
   expect(result.availableEditor).toContain('role="checkbox"');
 }
 
-it("uses a queue table and shared loading, empty and unavailable components", () => {
+describe("Relay queue and service presentation", () => {
+  let fixture: ReturnType<typeof renderRelayQueueAndServiceFixture>;
+  beforeAll(() => { fixture = renderRelayQueueAndServiceFixture(); }, 35_000);
+
+  it("uses a queue table and shared loading, empty and unavailable components", () => {
+    const result = fixture.queue;
+    expect(result.disabled).toContain("Relay 已停用");
+    expect(result.disabled).toContain("long/model");
+    expect(result.invalid).toContain("当前运行配置不可用");
+    expect(result.notListening).toContain("Relay is not listening");
+    expect(result.ready).toContain("请求模型");
+    expect(result.ready).toMatch(/<h1[^>]*>请求队列<\/h1>/u);
+    expect(result.ready).not.toContain('role="dialog"');
+    expect(result.loading).toContain('data-slot="skeleton"');
+    expect(result.empty).toContain("No model requests in progress");
+    expect(result.unknown).toContain('data-slot="alert"');
+    expect(result.ready).toContain('data-slot="card"');
+    expect(result.ready).toContain("中文用途");
+    expect(result.ready).toContain("long/model");
+    expect(result.ready).toContain("Responses");
+    expect(result.ready).toContain("等待名额");
+    expect(result.ready).toContain("<table");
+    expect(result.failed).not.toContain("long/model");
+  });
+
+  it("scopes relay service controls and task feedback without bypassing the global task lock", () => {
+    const result = fixture.services;
+    expect(result.running).toContain("重启");
+    expect(result.running).toContain("停止");
+    expect(result.running).not.toContain("gateway");
+    expect(result.running).not.toContain("安装全部服务");
+    expect(result.running).not.toContain("卸载全部服务");
+    expect(result.running).toContain("service:restart:model-relay");
+    expect(result.busy).toContain("其他管理任务正在执行");
+    expect(result.busy).toContain('href="/settings/services"');
+    expect(result.busy.match(/<button[^>]*disabled/g)).toHaveLength(2);
+    expect(result.stopped).toContain("启动");
+    expect(result.stopped).not.toMatch(/>重启<|>停止</u);
+  });
+});
+
+function renderRelayQueueAndServiceFixture() {
   const script = String.raw`
     import { createServer } from 'vite';
     import { createElement as h } from 'react';
     import { renderToStaticMarkup } from 'react-dom/server';
+    import { MemoryRouter } from 'react-router';
     const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
       name: 'queue-fixture', enforce: 'pre', transform(code, id) {
         if (id.endsWith('/hooks/use-relay-queue.ts')) return 'export function useRelayQueue() { return globalThis.queue; }';
       }
     }] });
     try {
-      const {RelayQueuePage}=await server.ssrLoadModule('/src/pages/relay-queue-page.tsx');
       const {LanguageContext}=await server.ssrLoadModule('/src/hooks/language-context.ts');
-      const {TooltipProvider}=await server.ssrLoadModule('/src/components/ui/tooltip.tsx');
-      const render=language=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(TooltipProvider,null,h(RelayQueuePage))));
-      globalThis.queue={data:null,loading:true,error:null,errorCode:null,refetch(){}};
-      const loading=render('zh');
-      globalThis.queue={...globalThis.queue,loading:false,data:{state:'running',configurationValid:true,enabled:true,listening:true,requests:[]}};
-      const empty=render('en');
-      globalThis.queue.data={state:'unknown'}; const unknown=render('zh');
-      globalThis.queue.data={state:'running',configurationValid:true,enabled:true,listening:true,requests:[{requestId:'id',callerId:'client',displayName:'中文用途',provider:'clp-test',model:'long/model',protocol:'responses',phase:'queue',elapsedMs:2000}]};
-      const ready=render('zh');
-      globalThis.queue.data.enabled=false; globalThis.queue.data.listening=false; const disabled=render('zh');
-      globalThis.queue.data.configurationValid=false; const invalid=render('zh');
-      globalThis.queue.data.configurationValid=true; globalThis.queue.data.enabled=true; const notListening=render('en');
+      async function renderQueueScenario() {
+        const {RelayQueuePage}=await server.ssrLoadModule('/src/pages/relay-queue-page.tsx');
+        const {TooltipProvider}=await server.ssrLoadModule('/src/components/ui/tooltip.tsx');
+        const render=language=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(TooltipProvider,null,h(RelayQueuePage))));
+        globalThis.queue={data:null,loading:true,error:null,errorCode:null,refetch(){}};
+        const loading=render('zh');
+        globalThis.queue={...globalThis.queue,loading:false,data:{state:'running',configurationValid:true,enabled:true,listening:true,requests:[]}};
+        const empty=render('en');
+        globalThis.queue.data={state:'unknown'}; const unknown=render('zh');
+        globalThis.queue.data={state:'running',configurationValid:true,enabled:true,listening:true,requests:[{requestId:'id',callerId:'client',displayName:'中文用途',provider:'clp-test',model:'long/model',protocol:'responses',phase:'queue',elapsedMs:2000}]};
+        const ready=render('zh');
+        globalThis.queue.data.enabled=false; globalThis.queue.data.listening=false; const disabled=render('zh');
+        globalThis.queue.data.configurationValid=false; const invalid=render('zh');
+        globalThis.queue.data.configurationValid=true; globalThis.queue.data.enabled=true; const notListening=render('en');
 
-      globalThis.queue.error='unavailable'; const failed=render('zh');
-      console.log(JSON.stringify({loading,empty,unknown,ready,failed,disabled,invalid,notListening}));
-    } finally { await server.close(); }
-  `;
-  const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
-  })) as Record<string, string>;
-  expect(result.disabled).toContain("Relay 已停用");
-  expect(result.disabled).toContain("long/model");
-  expect(result.invalid).toContain("当前运行配置不可用");
-  expect(result.notListening).toContain("Relay is not listening");
-  expect(result.ready).toContain("请求模型");
-  expect(result.ready).toMatch(/<h1[^>]*>请求队列<\/h1>/u);
-  expect(result.ready).not.toContain('role="dialog"');
-  expect(result.loading).toContain('data-slot="skeleton"');
-  expect(result.empty).toContain("No model requests in progress");
-  expect(result.unknown).toContain('data-slot="alert"');
-  expect(result.ready).toContain('data-slot="card"');
-  expect(result.ready).toContain("中文用途");
-  expect(result.ready).toContain("long/model");
-  expect(result.ready).toContain("Responses");
-  expect(result.ready).toContain("等待名额");
-  expect(result.ready).toContain("<table");
-  expect(result.failed).not.toContain("long/model");
-});
-
-it("scopes relay service controls and task feedback without bypassing the global task lock", () => {
-  const script = String.raw`
-    import {createServer} from 'vite';
-    import {createElement as h} from 'react';
-    import {renderToStaticMarkup} from 'react-dom/server';
-    import {MemoryRouter} from 'react-router';
-    const server = await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent'});
-    try {
-      const {ManagedServices} = await server.ssrLoadModule('/src/components/settings/managed-services.tsx');
-      const {LanguageContext} = await server.ssrLoadModule('/src/hooks/language-context.ts');
-      const services = {platform:'systemd',entries:['gateway','model-relay'].map(target => ({target,name:target,loaded:true,running:true,state:'running',pid:123,version:'test',recentError:null}))};
-      const tasks = {loading:false,error:null,saving:false,pendingPreview:null,tasks:[{id:'other',operation:'service',action:'restart',target:'gateway',state:'completed'},{id:'relay',operation:'service',action:'restart',target:'model-relay',state:'completed'}]};
-      const render = () => renderToStaticMarkup(h(MemoryRouter,null,h(LanguageContext.Provider,{value:{language:'zh',setLanguage:()=>{}}},h(ManagedServices,{services,tasks,scope:'model-relay'}))));
-      const running = render();
-      tasks.tasks[0].state = 'running';
-      const busy = render();
-      tasks.tasks[0].state = 'completed';
-      services.entries[1].running = false;
-      const stopped = render();
-      console.log(JSON.stringify({running,busy,stopped}));
+        globalThis.queue.error='unavailable'; const failed=render('zh');
+        return {loading,empty,unknown,ready,failed,disabled,invalid,notListening};
+      }
+      async function renderServiceScenario() {
+        const {ManagedServices} = await server.ssrLoadModule('/src/components/settings/managed-services.tsx');
+        const services = {platform:'systemd',entries:['gateway','model-relay'].map(target => ({target,name:target,loaded:true,running:true,state:'running',pid:123,version:'test',recentError:null}))};
+        const tasks = {loading:false,error:null,saving:false,pendingPreview:null,tasks:[{id:'other',operation:'service',action:'restart',target:'gateway',state:'completed'},{id:'relay',operation:'service',action:'restart',target:'model-relay',state:'completed'}]};
+        const render = () => renderToStaticMarkup(h(MemoryRouter,null,h(LanguageContext.Provider,{value:{language:'zh',setLanguage:()=>{}}},h(ManagedServices,{services,tasks,scope:'model-relay'}))));
+        const running = render();
+        tasks.tasks[0].state = 'running';
+        const busy = render();
+        tasks.tasks[0].state = 'completed';
+        services.entries[1].running = false;
+        const stopped = render();
+        return {running,busy,stopped};
+      }
+      console.log(JSON.stringify({queue:await renderQueueScenario(),services:await renderServiceScenario()}));
     } finally {await server.close();}
   `;
-  const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
-  })) as {running:string;busy:string;stopped:string};
-  expect(result.running).toContain("重启");
-  expect(result.running).toContain("停止");
-  expect(result.running).not.toContain("gateway");
-  expect(result.running).not.toContain("安装全部服务");
-  expect(result.running).not.toContain("卸载全部服务");
-  expect(result.running).toContain("service:restart:model-relay");
-  expect(result.busy).toContain("其他管理任务正在执行");
-  expect(result.busy).toContain('href="/settings/services"');
-  expect(result.busy.match(/<button[^>]*disabled/g)).toHaveLength(2);
-  expect(result.stopped).toContain("启动");
-  expect(result.stopped).not.toMatch(/>重启<|>停止</u);
-});
+  return JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL",
+  })) as { queue: Record<string, string>; services: { running: string; busy: string; stopped: string } };
+}
 
 it("shows a read-only provider model catalog with refresh errors and no policy controls", () => {
   const script = String.raw`

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 const routes = [
   ["codex_user", "codex-user-settings-setup", "runCodexUserSettingsSetup"],
@@ -62,14 +62,45 @@ function runIsolatedConfig(action: string, replacement?: { module: string; sourc
 }
 
 describe("Config lazy loading", () => {
-  it("keeps JSON paths, noninteractive paths and cancellation independent of submenus", () => {
-    const result = runIsolatedConfig(`
-      writeFileSync(configPath, "[broken");
-      assert.equal((await runConfig({ environment, json: true, prompts: null, output })).exists, true);
-      assert.equal((await runConfig({ environment, input: { isTTY: false }, output })).action, "paths");
-      await runConfig({ environment, input, output, prompts: promptsFor(["paths", "cancel"]) });
-    `);
-    expect(result.status, result.stderr).toBe(0);
+  describe("without optional modules", () => {
+    let result: ReturnType<typeof runIsolatedConfig>;
+
+    beforeAll(() => {
+      result = runIsolatedConfig(`
+        writeFileSync(configPath, "[broken");
+        assert.equal((await runConfig({ environment, json: true, prompts: null, output })).exists, true);
+        assert.equal((await runConfig({ environment, input: { isTTY: false }, output })).action, "paths");
+        await runConfig({ environment, input, output, prompts: promptsFor(["paths", "cancel"]) });
+        console.log("paths passed");
+
+        writeFileSync(configPath, "[broken");
+        let called = false;
+        await runConfig({ environment, input, output, prompts: promptsFor(["codex_user"]),
+          codexUserSettingsSetup: async () => { called = true; },
+        });
+        assert.equal(called, true);
+        console.log("injected handler passed");
+
+        writeFileSync(configPath, "[broken");
+        await assert.rejects(runConfig({ environment, input, output, prompts: promptsFor(["display"]) }), /语法无效/);
+        console.log("invalid config passed");
+      `);
+    });
+
+    it("keeps JSON paths, noninteractive paths and cancellation independent of submenus", () => {
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("paths passed");
+    });
+
+    it("uses injected Codex settings even with broken Gateway config and no default handler", () => {
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("injected handler passed");
+    });
+
+    it("rejects broken Gateway config before loading a dependent submenu", () => {
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain("invalid config passed");
+    });
   });
 
   it.each(routes)("loads only the selected %s handler and forwards its existing ports", (section, module, entry) => {
@@ -105,26 +136,6 @@ describe("Config lazy loading", () => {
         globalThis.summarized = true;
       }
     ` });
-    expect(result.status, result.stderr).toBe(0);
-  });
-
-  it("uses injected Codex settings even with broken Gateway config and no default handler", () => {
-    const result = runIsolatedConfig(`
-      writeFileSync(configPath, "[broken");
-      let called = false;
-      await runConfig({ environment, input, output, prompts: promptsFor(["codex_user"]),
-        codexUserSettingsSetup: async () => { called = true; },
-      });
-      assert.equal(called, true);
-    `);
-    expect(result.status, result.stderr).toBe(0);
-  });
-
-  it("rejects broken Gateway config before loading a dependent submenu", () => {
-    const result = runIsolatedConfig(`
-      writeFileSync(configPath, "[broken");
-      await assert.rejects(runConfig({ environment, input, output, prompts: promptsFor(["display"]) }), /语法无效/);
-    `);
     expect(result.status, result.stderr).toBe(0);
   });
 

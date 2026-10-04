@@ -328,12 +328,13 @@ describe("OpenAI credit snapshot presentation", () => {
       resetCreditsAvailable: 5, resetCreditExpiresAt: [2000, null, 1000, 1000],
     } } };
   it("preserves zero, groups exact expiry dates, and counts undisclosed vouchers", () => {
-    expect(openAiCreditsFromSnapshot(snapshot)).toEqual({ observedAtMs: 1000, remaining: "0", unlimited: false, subscription: null,
+    expect(openAiCreditsFromSnapshot(snapshot)).toEqual({ observedAtMs: 1000, remaining: "0", unlimited: false, credentialRefreshedAt: null,
       resetCreditsAvailable: "5", expirations: [{ expiresAt: 1000, count: 2 }, { expiresAt: 2000, count: 1 }, { expiresAt: null, count: 1 }], undisclosedCount: "1" });
   });
-  it("passes through subscription dates separately from quota observation time", () => {
-    const subscription = { activeUntil: 2000, lastChecked: 500 };
-    expect(openAiCreditsFromSnapshot({ ...snapshot, subscription })).toMatchObject({ observedAtMs: 1000, subscription });
+  it("passes through credential refresh time separately from quota observation time", () => {
+    expect(openAiCreditsFromSnapshot({ ...snapshot, credentialRefreshedAt: 500 })).toMatchObject({ observedAtMs: 1000, credentialRefreshedAt: 500 });
+    expect(openAiCreditsFromSnapshot({ ...snapshot, credentialRefreshedAt: 0 })).toMatchObject({ credentialRefreshedAt: 0 });
+    expect(openAiCreditsFromSnapshot({ ...snapshot, credentialRefreshedAt: null })).toMatchObject({ credentialRefreshedAt: null });
   });
   it("distinguishes missing details from no expiry and preserves large serialized counts", () => {
     const limits = { ...snapshot.limits.limits, resetCreditsAvailable: "9007199254740993", resetCreditExpiresAt: null };

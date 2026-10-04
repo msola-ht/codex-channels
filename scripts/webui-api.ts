@@ -211,6 +211,12 @@ export interface SubagentListItem extends Pick<ThreadListItem,
 export interface SubagentsResponse {
   generatedAt: string
   subagents: SubagentListItem[]
+  modelUsage: Array<{
+    model: string | null
+    inputTokens: number
+    outputTokens: number
+    cacheUsage: CacheUsage
+  }>
   total: number
   offset: number
   limit: number
@@ -259,7 +265,7 @@ export interface ThreadRunResponse {
 export interface ThreadTurnsResponse extends MetricsPageSummary {
   generatedAt: string
   threadId: string
-  turns: TurnSummary[]
+  turns: Array<TurnSummary & { directSubagentCount: number }>
   turnCount: number
 }
 
@@ -892,7 +898,7 @@ export interface CcgCreditUsageResponse {
 }
 
 export interface OpenAiAccountCredits {
-  subscription?: { activeUntil: number | null; lastChecked: number | null } | null
+  credentialRefreshedAt?: number | null
   observedAtMs: number
   remaining: string | null
   unlimited: boolean
@@ -902,7 +908,7 @@ export interface OpenAiAccountCredits {
 }
 
 export interface OfficialAccountSnapshot {
-  subscription?: { activeUntil: number | null; lastChecked: number | null } | null
+  credentialRefreshedAt?: number | null
   provider: string
   accountId: string | null
   displayName: string

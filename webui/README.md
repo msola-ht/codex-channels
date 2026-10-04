@@ -78,7 +78,8 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `components/metrics/service-tier.tsx` 为请求明细、错误记录和调用详情提供 Fast 标签；前两者使用请求层级，调用详情区分请求与响应来源。
 `components/requests/errors-table.tsx` 组合错误记录列、错误说明和会话/轮次跳转；`components/traffic/traffic-table.tsx` 组合调用列表及详情入口。两者与渠道投递队列、请求、会话页复用 `DataTable` 的标题摘要、列显隐、滚动区和服务端分页。公共组件支持标题操作区、业务工具栏、稳定行 ID 及行点击；日志使用不分页模式、行内详情和表格视口滚动回调。
 
-`components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。
+`components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。共享 `TooltipContent` 默认在右侧显示，空间不足时由组件自动避让。
+输入 Token 的悬浮提示复用 `InputTokenTooltip`，仅展示缓存与无缓存数量；请求、会话、每轮明细、子代理列表和概览提供商表分别提供独立缓存命中率列。聚合缓存仅部分已知时，两项数量使用 `cacheUsage` 的已知请求统计并标注 `≥`，不从全部输入中扣减已知缓存来推算无缓存量。每轮明细以该轮缓存输入除以输入计算，缓存未知或输入为零时显示 `—`；提供商表沿用聚合 `cacheUsage` 的已知请求统计口径。
 必要操作列显式使用 `enableHiding: false`，公共表格覆盖这些列的旧隐藏偏好，保留其他列的用户选择。请求详情原生按钮打开抽屉后，关闭时恢复到仍存在的触发按钮；调用时间按钮同样保留键盘入口。
 
 `components/ui/dialog.tsx`：使用 Base UI/shadcn 居中弹窗，关闭按钮名称由调用方本地化；Relay 表单和一次性密钥结果复用此组件。确认操作使用 AlertDialog，并将初始焦点设到取消按钮；忙碌期间通过根组件的关闭事件阻止退出，`finalFocus` 恢复到操作入口。
@@ -88,7 +89,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `hooks/use-requests.ts` 与 `hooks/use-errors.ts` 复用队列通知 Hook，在 Gateway 指标批次成功落库后更新第一页；历史分页延后读取，返回第一页补查，手动刷新始终可用。`GET /api/v1/metrics/events` 使用只读 API 鉴权，通知中断与快照失败分别显示，不影响历史查询。
 
 `hooks/use-threads.ts` 与 `hooks/use-thread-detail.ts` 沿用指标通知和历史分页暂停规则。会话详情通过 `useThreadDetail` 共用一条订阅，并行读取本地汇总和轮次，两项成功后一起更新；同条件刷新保留内容和展开状态。`useMetricsProviders` 跟随页面成功读取的结果合并更新提供商选项，自动读取至少间隔 30 秒，不另开订阅；后台或离线时暂停，失败可手动重试，不覆盖筛选草稿。
-会话列表从同一次响应读取 `totalTokens`，仅展示可排序的“总计”列；悬浮提示上方显示自身输入/缓存/输出，下方显示 `subagentUsage` 的对应分项。缓存不完整时读取各组 `cacheUsage` 的已知累计并标注 `≥`，全部未知仍显示 `—`。页面使用不受分页影响的 `treeAggregate` 展示一份期间汇总，不在浏览器遍历子代理或相减推算缓存。
+会话列表分别展示自身的输入 Token、缓存命中率和输出 Token；输入、输出支持排序，命中率读取自身 `cacheUsage` 的已知请求统计，无有效分母或缓存未知时显示 `—`。同时从同一次响应读取包含自身与子代理的 `totalTokens`，展示可排序的“总计”列；悬浮提示纵向展示 `subagentUsage` 的输入、缓存、缓存命中率、输出与合计，底部显示自身加子代理的总计。子代理合计为输入加输出，缓存已包含在输入中，不重复相加；缓存不完整时读取子代理 `cacheUsage` 的已知累计并标注 `≥`，全部未知仍显示 `—`。页面使用不受分页影响的 `treeAggregate` 展示一份期间汇总，不在浏览器遍历子代理或相减推算缓存。
 `hooks/use-metrics-snapshot.ts` 供请求、错误、会话列表和详情复用上述编排。查询变化仍保留旧 `data` 并标记 `loading`，消费方通过加载态隐藏旧结果；不将这一合同推广到有不同查询隔离语义的账户与调用详情。
 
 `components/threads/thread-subagents.tsx` 复用公共 `DataTable`，
@@ -97,7 +98,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `hooks/use-thread-subagents.ts` 管理独立分页、错误与会话切换隔离，
 独立复用指标变化订阅和快照确认，历史分页暂停自动更新；仅查询关联数据，不读取会话详情。关联导航使用全部时间并清除请求筛选。
 
-`pages/thread-detail-page.tsx` 在上方展示筛选与统计，轮次 DataTable 填充剩余高度，表格区域滚动、分页栏位于底部；最小表格高度为窄视口保留可用空间。
+`pages/thread-detail-page.tsx` 在筛选下方以 `ThreadPeriodSummary` 卡片展示当前会话自身的轮次、请求、输入和输出，历史累计默认折叠为紧凑统计行并明确包含子代理。轮次 DataTable 填充剩余高度，表格区域滚动、分页栏位于底部；最小表格高度为窄视口保留可用空间。轮次 ID 缩写展示并保留完整提示及请求链接；每轮 `directSubagentCount` 链接到带 `parentTurnId` 的关联子代理页，切换父轮次会隔离旧快照并重置分页。
 
 `hooks/use-dashboard.ts` 为汇总、趋势和热力图共用一条指标订阅；`hooks/use-official-account-sources.ts` 独立订阅已保存账户快照，仅各账户手动刷新查询上游，进入页面、恢复可见与页头刷新均不触发上游账户查询。
 `components/overview/overview-sections.tsx` 在 OpenCode Go 账户组首次需要无订阅管理时挂载单个配置控制器和确认弹窗，所有提示卡复用读取；配置读取失败可以重试，删除仍受读取成功、忙碌态和预览确认限制。

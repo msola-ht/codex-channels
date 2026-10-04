@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 // 与现有 WebUI 展示合同相同，直接渲染生产组件，不复制组件的条件分支。
 describe("WebUI 状态与关联范围展示", () => {
@@ -37,144 +37,154 @@ describe("WebUI 状态与关联范围展示", () => {
     expect(result.stale).toContain("snapshot-load-failed");
     expect(result.button).toMatch(/\sdisabled(?:=|\s|>)/u);
   }, 30_000);
-  it("keeps cancellation available while confirmations wait for a snapshot", () => {
-    const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
-      import { createServer } from "vite";
-      import { createElement as h } from "react";
-      import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
-      const server = await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent",plugins:[{
-        name:"dialog-without-browser-portal",enforce:"pre",
-        load(id) {
-          if (!id.endsWith("/components/ui/alert-dialog.tsx")) return;
-          return 'import {createElement as h} from "react"; const box=({children})=>h("div",null,children); const button=({children,disabled})=>h("button",{disabled},children); export const AlertDialog=box,AlertDialogContent=box,AlertDialogDescription=box,AlertDialogFooter=box,AlertDialogHeader=box,AlertDialogTitle=box,AlertDialogAction=button,AlertDialogCancel=button;';
-        }
-      }]});
-      try {
-        const {LanguageContext}=await server.ssrLoadModule("/src/hooks/language-context.ts");
-        const renderToStaticMarkup=(element)=>renderMarkup(h(LanguageContext.Provider,{value:{language:"zh",setLanguage(){}}},element));
-        const {ManagementConfirmationDialog,PendingSettingDialog}=await server.ssrLoadModule("/src/components/settings/settings-controls.tsx");
-        const {AccountSettingsConfirmationDialog}=await server.ssrLoadModule("/src/components/settings/account-settings-management.tsx");
-        const {ManagementTaskConfirmationDialog}=await server.ssrLoadModule("/src/components/settings/management-task-controls.tsx");
-        const base={open:true,title:"test",description:"test",onConfirm(){},onCancel(){}};
-        const pending={kind:"test",label:"test",value:1,before:0,activation:{status:"none",commands:[]}};
-        const html = [
-          ...[{saving:false,loading:true},{saving:true,loading:false},{saving:false,loading:false}].map(state=>renderToStaticMarkup(h(ManagementConfirmationDialog,{...base,...state}))),
-          renderToStaticMarkup(h(PendingSettingDialog,{...base,pending,saving:false,loading:true})),
-          renderToStaticMarkup(h(AccountSettingsConfirmationDialog,{...base,pending:{input:{operation:"deepseek.remove"},preview:{operation:"remove"}},saving:false,loading:true})),
-          renderToStaticMarkup(h(ManagementTaskConfirmationDialog,{tasks:{saving:false,loading:true,pendingPreview:{input:{operation:"metrics",action:"clear"},preview:{operation:"metrics",action:"clear",effects:[],preconditions:[]}},confirm(){},cancelPending(){}}}))
-        ];
-        const {WebuiManagementTaskRunner}=await import("../scripts/webui-management-tasks.mjs");
-        const preview=new WebuiManagementTaskRunner({now:()=>1000}).preview({operation:"traffic",action:"cleanup"});
-        for(const [running,relayRunning] of [[true,false],[false,false],[false,true]]) {
-          const tasks={saving:false,loading:false,pendingPreview:{input:{operation:"traffic",action:"cleanup"},preview:{...preview,resource:{dumps:{bytes:1024,v2Sessions:2,legacyFiles:3},appServer:{running},modelRelay:{running:relayRunning}}}},confirm(){throw Error("must not confirm during render")},cancelPending(){throw Error("must not cancel during render")}};
-          html.push(renderMarkup(h(LanguageContext.Provider,{value:{language:"en",setLanguage(){}}},h(ManagementTaskConfirmationDialog,{tasks}))));
-        }
-        console.log(JSON.stringify(html));
-      } finally {await server.close();}
-    `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
-    const html = JSON.parse(output) as string[];
-    for (const index of [0, 3, 4, 5]) {
-      expect(html[index]).toContain('<button>取消</button>');
-      expect(html[index]).toMatch(/<button disabled="">[\s\S]*正在刷新…<\/button>/u);
-    }
-    expect(html[1]).toContain('<button disabled="">取消</button>');
-    expect(html[1]).toContain("处理中…");
-    expect(html[2]).toContain('<button>确认写入</button>');
-    for (const index of [6, 7, 8]) {
-      expect(html[index]).not.toMatch(/[\u4e00-\u9fff]/u);
-      expect(html[index]).toContain("All App Servers and Relay must be stopped");
-      expect(html[index]).toContain("This cannot be undone");
-      expect(html[index]).toContain("codexc traffic cleanup --confirm");
-      expect(html[index]).toContain("2 V2 batches and 3 legacy files");
-      expect(html[index]).toContain("<button>Cancel</button>");
-    }
-    expect(html[6]).toContain('<button disabled="">Confirm execution</button>');
-    expect(html[7]).toContain('<button>Confirm execution</button>');
-    expect(html[8]).toContain('<button disabled="">Confirm execution</button>');
-  }, 30_000);
+  describe("确认弹窗展示", () => {
+    let confirmations: { cancellation: string[]; removal: Record<string, string | boolean | number[]> };
 
-  it("localizes the console account removal confirmation and preserves busy guards", () => {
-    const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
-      import { createServer } from "vite";
-      import { createElement as h } from "react";
-      import { renderToStaticMarkup } from "react-dom/server";
-      const server = await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent",plugins:[{
-        name:"removal-preview-fixture",enforce:"pre",
-        load(id) {
-          if (id.endsWith("/hooks/use-account-settings-management.ts"))
-            return 'export function useAccountSettingsManagement(){globalThis.managementCalls++;return globalThis.management}';
-          if (!id.endsWith("/components/ui/alert-dialog.tsx")) return;
-          return 'import {createElement as h} from "react"; const box=({children})=>h("div",null,children); const button=({children,disabled})=>h("button",{disabled},children); export const AlertDialog=box,AlertDialogContent=box,AlertDialogDescription=box,AlertDialogFooter=box,AlertDialogHeader=box,AlertDialogTitle=box,AlertDialogAction=button,AlertDialogCancel=button;';
-        }
-      }]});
-      try {
-        const {LanguageContext}=await server.ssrLoadModule("/src/hooks/language-context.ts");
-        const {OpencodeGoUsageCard}=await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
-        const {ServerTimeContext}=await server.ssrLoadModule("/src/hooks/use-server-time.ts");
-        const {setServerTimeZone}=await server.ssrLoadModule("/src/lib/format.ts");setServerTimeZone("UTC");
-        const pending={input:{operation:"opencode.account.remove",accountId:"main"},preview:{operation:"opencode.account.remove",account:{id:"main",displayName:"Account main"},provider:{name:"OpenCode Go",id:"ocg-main"},mode:"switching",model:"test-model",status:"ready",effects:{stopAppServer:true,removeAccount:true},activation:"restart-all"}};
-        const before=JSON.stringify(pending);
-        globalThis.management={settings:{opencodeGo:{accounts:[{id:"main"},{id:"other"}]}},loading:false,error:null,busy:false,pendingPreview:pending,actionError:null,refetch(){},cancel(){throw new Error("unexpected cancel")},confirm(){throw new Error("unexpected confirmation")},mutate(){throw new Error("unexpected mutation")}};
-        const accounts=["main","other"].map(account=>({account,provider:"ocg-"+account,displayName:account,default:false,available:false,observedAtMs:1000,windows:[],subscriptionRequired:true}));
-        const calls=[];
-        const render=(language)=>{
-          globalThis.managementCalls=0;
-          const markup=renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(ServerTimeContext.Provider,{value:{nowMs:1000,receivedAtMs:Date.now(),timeZone:"UTC"}},h(OpencodeGoUsageCard,{accounts,refreshControls:{},onAccountsChanged(){}}))));
-          calls.push(globalThis.managementCalls);
-          return markup;
-        };
-        const zh=render("zh"), en=render("en"), zhAgain=render("zh");
-        globalThis.management.loading=true;
-        const loading=render("en");
-        globalThis.management.loading=false;
-        globalThis.management.busy=true;
-        const saving=render("en");
-        globalThis.management.busy=false;
-        globalThis.management.pendingPreview=null;
-        globalThis.management.error="snapshot-load-failed";
-        const failed=render("en");
-        globalThis.management.loading=true;
-        const retrying=render("en");
-        globalThis.management.loading=false;
-        globalThis.management.error=null;
-        const recovered=render("en");
-        globalThis.management.pendingPreview={...pending,input:{...pending.input,accountId:"other"},preview:{...pending.preview,account:{id:"other",displayName:"Account other"}}};
-        const other=render("en");
-        console.log(JSON.stringify({zh,en,zhAgain,loading,saving,failed,retrying,recovered,other,calls,unchanged:before===JSON.stringify(pending)}));
-      } finally {await server.close();}
-    `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
-    const result = JSON.parse(output) as Record<string, string | boolean | number[]>;
-    expect(result.zh).toContain("确认删除账户");
-    expect(result.zhAgain).toBe(result.zh);
-    expect(result.unchanged).toBe(true);
-    expect(result.en).toContain("Confirm account removal");
-    expect(result.en).toContain("past Threads cannot be recovered");
-    expect(result.en).toContain("does not cancel or renew the official subscription");
-    expect(result.en).toContain("Operation: opencode.account.remove");
-    expect(result.en).toContain("Account main (main)");
-    expect(result.en).toContain("Activation target: restart-all");
-    expect(result.en).toContain("stopAppServer=true; removeAccount=true");
-    expect(result.en).toContain("<button>Confirm removal</button>");
-    expect((result.en as string).match(/Confirm account removal/gu)).toHaveLength(1);
-    expect((result.other as string).match(/Confirm account removal/gu)).toHaveLength(1);
-    expect(result.other).toContain("Account other (other)");
-    expect(result.other).not.toContain("Account main (main)");
-    expect(result.calls).toEqual(Array(9).fill(1));
-    const buttons = (markup: string, label: string) => [...markup.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/gu)].filter(([button]) => button.includes(label));
-    const retries = buttons(result.failed as string, "Retry loading account configuration");
-    expect(retries).toHaveLength(2);
-    for (const [button] of retries) expect(button).not.toMatch(/\sdisabled(?:=|\s|>)/u);
-    for (const [button] of buttons(result.failed as string, "Remove local account")) expect(button).toMatch(/\sdisabled(?:=|\s|>)/u);
-    for (const [button] of buttons(result.retrying as string, "Retry loading account configuration")) expect(button).toMatch(/\sdisabled(?:=|\s|>)/u);
-    for (const [button] of buttons(result.recovered as string, "Remove local account")) expect(button).not.toMatch(/\sdisabled(?:=|\s|>)/u);
-    for (const state of [result.en, result.loading, result.saving]) {
-      expect(state).not.toMatch(/[\u4e00-\u9fff]/u);
-    }
-    expect(result.loading).toContain("<button>Cancel</button>");
-    expect(result.loading).toMatch(/<button disabled="">[\s\S]*Refreshing…<\/button>/u);
-    expect(result.saving).toContain('<button disabled="">Cancel</button>');
-    expect(result.saving).toContain("Processing…");
-    expect(result.saving).toContain('aria-label="Loading…"');
-  }, 30_000);
+    // 取消确认组件不依赖账户管理 Hook；两场景只共用弹窗呈现 mock。
+    beforeAll(() => {
+      const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+        import { createServer } from "vite";
+        import { createElement as h } from "react";
+        import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
+        const server = await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent",plugins:[{
+          name:"confirmation-presentation-fixture",enforce:"pre",
+          load(id) {
+            if (id.endsWith("/hooks/use-account-settings-management.ts"))
+              return 'export function useAccountSettingsManagement(){globalThis.managementCalls++;return globalThis.management}';
+            if (!id.endsWith("/components/ui/alert-dialog.tsx")) return;
+            return 'import {createElement as h} from "react"; const box=({children})=>h("div",null,children); const button=({children,disabled})=>h("button",{disabled},children); export const AlertDialog=box,AlertDialogContent=box,AlertDialogDescription=box,AlertDialogFooter=box,AlertDialogHeader=box,AlertDialogTitle=box,AlertDialogAction=button,AlertDialogCancel=button;';
+          }
+        }]});
+        try {
+          const {LanguageContext}=await server.ssrLoadModule("/src/hooks/language-context.ts");
+          const cancellationScenario=async()=>{
+            const renderToStaticMarkup=(element)=>renderMarkup(h(LanguageContext.Provider,{value:{language:"zh",setLanguage(){}}},element));
+            const {ManagementConfirmationDialog,PendingSettingDialog}=await server.ssrLoadModule("/src/components/settings/settings-controls.tsx");
+            const {AccountSettingsConfirmationDialog}=await server.ssrLoadModule("/src/components/settings/account-settings-management.tsx");
+            const {ManagementTaskConfirmationDialog}=await server.ssrLoadModule("/src/components/settings/management-task-controls.tsx");
+            const base={open:true,title:"test",description:"test",onConfirm(){},onCancel(){}};
+            const pending={kind:"test",label:"test",value:1,before:0,activation:{status:"none",commands:[]}};
+            const html = [
+              ...[{saving:false,loading:true},{saving:true,loading:false},{saving:false,loading:false}].map(state=>renderToStaticMarkup(h(ManagementConfirmationDialog,{...base,...state}))),
+              renderToStaticMarkup(h(PendingSettingDialog,{...base,pending,saving:false,loading:true})),
+              renderToStaticMarkup(h(AccountSettingsConfirmationDialog,{...base,pending:{input:{operation:"deepseek.remove"},preview:{operation:"remove"}},saving:false,loading:true})),
+              renderToStaticMarkup(h(ManagementTaskConfirmationDialog,{tasks:{saving:false,loading:true,pendingPreview:{input:{operation:"metrics",action:"clear"},preview:{operation:"metrics",action:"clear",effects:[],preconditions:[]}},confirm(){},cancelPending(){}}}))
+            ];
+            const {WebuiManagementTaskRunner}=await import("../scripts/webui-management-tasks.mjs");
+            const preview=new WebuiManagementTaskRunner({now:()=>1000}).preview({operation:"traffic",action:"cleanup"});
+            for(const [running,relayRunning] of [[true,false],[false,false],[false,true]]) {
+              const tasks={saving:false,loading:false,pendingPreview:{input:{operation:"traffic",action:"cleanup"},preview:{...preview,resource:{dumps:{bytes:1024,v2Sessions:2,legacyFiles:3},appServer:{running},modelRelay:{running:relayRunning}}}},confirm(){throw Error("must not confirm during render")},cancelPending(){throw Error("must not cancel during render")}};
+              html.push(renderMarkup(h(LanguageContext.Provider,{value:{language:"en",setLanguage(){}}},h(ManagementTaskConfirmationDialog,{tasks}))));
+            }
+            return html;
+          };
+          const removalScenario=async()=>{
+            const originalNow=Date.now;
+            const originalManagement=Object.getOwnPropertyDescriptor(globalThis,"management");
+            const originalManagementCalls=Object.getOwnPropertyDescriptor(globalThis,"managementCalls");
+            try {
+              Date.now=()=>1000;
+              const {OpencodeGoUsageCard}=await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
+              const {ServerTimeContext}=await server.ssrLoadModule("/src/hooks/use-server-time.ts");
+              const {setServerTimeZone}=await server.ssrLoadModule("/src/lib/format.ts");setServerTimeZone("UTC");
+              const pending={input:{operation:"opencode.account.remove",accountId:"main"},preview:{operation:"opencode.account.remove",account:{id:"main",displayName:"Account main"},provider:{name:"OpenCode Go",id:"ocg-main"},mode:"switching",model:"test-model",status:"ready",effects:{stopAppServer:true,removeAccount:true},activation:"restart-all"}};
+              const before=JSON.stringify(pending);
+              globalThis.management={settings:{opencodeGo:{accounts:[{id:"main"},{id:"other"}]}},loading:false,error:null,busy:false,pendingPreview:pending,actionError:null,refetch(){},cancel(){throw new Error("unexpected cancel")},confirm(){throw new Error("unexpected confirmation")},mutate(){throw new Error("unexpected mutation")}};
+              const accounts=["main","other"].map(account=>({account,provider:"ocg-"+account,displayName:account,default:false,available:false,observedAtMs:1000,windows:[],subscriptionRequired:true}));
+              const calls=[];
+              const render=(language)=>{
+                globalThis.managementCalls=0;
+                const markup=renderMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(ServerTimeContext.Provider,{value:{nowMs:1000,receivedAtMs:Date.now(),timeZone:"UTC"}},h(OpencodeGoUsageCard,{accounts,refreshControls:{},onAccountsChanged(){}}))));
+                calls.push(globalThis.managementCalls);
+                return markup;
+              };
+              const zh=render("zh"), en=render("en"), zhAgain=render("zh");
+              globalThis.management.loading=true;
+              const loading=render("en");
+              globalThis.management.loading=false;
+              globalThis.management.busy=true;
+              const saving=render("en");
+              globalThis.management.busy=false;
+              globalThis.management.pendingPreview=null;
+              globalThis.management.error="snapshot-load-failed";
+              const failed=render("en");
+              globalThis.management.loading=true;
+              const retrying=render("en");
+              globalThis.management.loading=false;
+              globalThis.management.error=null;
+              const recovered=render("en");
+              globalThis.management.pendingPreview={...pending,input:{...pending.input,accountId:"other"},preview:{...pending.preview,account:{id:"other",displayName:"Account other"}}};
+              const other=render("en");
+              return {zh,en,zhAgain,loading,saving,failed,retrying,recovered,other,calls,unchanged:before===JSON.stringify(pending)};
+            } finally {
+              Date.now=originalNow;
+              if (originalManagement) Object.defineProperty(globalThis,"management",originalManagement);
+              else delete globalThis.management;
+              if (originalManagementCalls) Object.defineProperty(globalThis,"managementCalls",originalManagementCalls);
+              else delete globalThis.managementCalls;
+            }
+          };
+          console.log(JSON.stringify({cancellation:await cancellationScenario(),removal:await removalScenario()}));
+        } finally {await server.close();}
+      `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL" });
+      confirmations = JSON.parse(output) as typeof confirmations;
+    }, 35_000);
 
+    it("keeps cancellation available while confirmations wait for a snapshot", () => {
+      const html = confirmations.cancellation;
+      for (const index of [0, 3, 4, 5]) {
+        expect(html[index]).toContain('<button>取消</button>');
+        expect(html[index]).toMatch(/<button disabled="">[\s\S]*正在刷新…<\/button>/u);
+      }
+      expect(html[1]).toContain('<button disabled="">取消</button>');
+      expect(html[1]).toContain("处理中…");
+      expect(html[2]).toContain('<button>确认写入</button>');
+      for (const index of [6, 7, 8]) {
+        expect(html[index]).not.toMatch(/[\u4e00-\u9fff]/u);
+        expect(html[index]).toContain("All App Servers and Relay must be stopped");
+        expect(html[index]).toContain("This cannot be undone");
+        expect(html[index]).toContain("codexc traffic cleanup --confirm");
+        expect(html[index]).toContain("2 V2 batches and 3 legacy files");
+        expect(html[index]).toContain("<button>Cancel</button>");
+      }
+      expect(html[6]).toContain('<button disabled="">Confirm execution</button>');
+      expect(html[7]).toContain('<button>Confirm execution</button>');
+      expect(html[8]).toContain('<button disabled="">Confirm execution</button>');
+    }, 30_000);
+
+    it("localizes the console account removal confirmation and preserves busy guards", () => {
+      const result = confirmations.removal;
+      expect(result.zh).toContain("确认删除账户");
+      expect(result.zhAgain).toBe(result.zh);
+      expect(result.unchanged).toBe(true);
+      expect(result.en).toContain("Confirm account removal");
+      expect(result.en).toContain("past Threads cannot be recovered");
+      expect(result.en).toContain("does not cancel or renew the official subscription");
+      expect(result.en).toContain("Operation: opencode.account.remove");
+      expect(result.en).toContain("Account main (main)");
+      expect(result.en).toContain("Activation target: restart-all");
+      expect(result.en).toContain("stopAppServer=true; removeAccount=true");
+      expect(result.en).toContain("<button>Confirm removal</button>");
+      expect((result.en as string).match(/Confirm account removal/gu)).toHaveLength(1);
+      expect((result.other as string).match(/Confirm account removal/gu)).toHaveLength(1);
+      expect(result.other).toContain("Account other (other)");
+      expect(result.other).not.toContain("Account main (main)");
+      expect(result.calls).toEqual(Array(9).fill(1));
+      const buttons = (markup: string, label: string) => [...markup.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/gu)].filter(([button]) => button.includes(label));
+      const retries = buttons(result.failed as string, "Retry loading account configuration");
+      expect(retries).toHaveLength(2);
+      for (const [button] of retries) expect(button).not.toMatch(/\sdisabled(?:=|\s|>)/u);
+      for (const [button] of buttons(result.failed as string, "Remove local account")) expect(button).toMatch(/\sdisabled(?:=|\s|>)/u);
+      for (const [button] of buttons(result.retrying as string, "Retry loading account configuration")) expect(button).toMatch(/\sdisabled(?:=|\s|>)/u);
+      for (const [button] of buttons(result.recovered as string, "Remove local account")) expect(button).not.toMatch(/\sdisabled(?:=|\s|>)/u);
+      for (const state of [result.en, result.loading, result.saving]) {
+        expect(state).not.toMatch(/[\u4e00-\u9fff]/u);
+      }
+      expect(result.loading).toContain("<button>Cancel</button>");
+      expect(result.loading).toMatch(/<button disabled="">[\s\S]*Refreshing…<\/button>/u);
+      expect(result.saving).toContain('<button disabled="">Cancel</button>');
+      expect(result.saving).toContain("Processing…");
+      expect(result.saving).toContain('aria-label="Loading…"');
+    }, 30_000);
+  });
 });

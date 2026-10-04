@@ -6,19 +6,20 @@ import { useQueueEvents, useQueueSnapshot } from "@/hooks/use-queue-events"
 import { fetchSubagents, fetchThreadSubagents, watchRequestMetrics } from "@/lib/api"
 
 /** The independent relationship page owns its metric notification subscription. */
-export function useThreadSubagents(threadId?: string) {
-  const [page, setPage] = useState<{ threadId?: string; offset: number; limit: number; sortKey: "time" | "last"; sortDirection: "asc" | "desc" }>({ threadId, offset: 0, limit: 20, sortKey: "last", sortDirection: "desc" })
-  const offset = page.threadId === threadId ? page.offset : 0
-  const sortKey = page.threadId === threadId ? page.sortKey : "last"
-  const sortDirection = page.threadId === threadId ? page.sortDirection : "desc"
-  const limit = page.threadId === threadId ? page.limit : 20
-  const queryKey = JSON.stringify([threadId, offset, limit, sortKey, sortDirection])
+export function useThreadSubagents(threadId?: string, parentTurnId?: string) {
+  const [page, setPage] = useState<{ threadId?: string; parentTurnId?: string; offset: number; limit: number; sortKey: "time" | "last"; sortDirection: "asc" | "desc" }>({ threadId, parentTurnId, offset: 0, limit: 20, sortKey: "last", sortDirection: "desc" })
+  const sameScope = page.threadId === threadId && page.parentTurnId === parentTurnId
+  const offset = sameScope ? page.offset : 0
+  const sortKey = sameScope ? page.sortKey : "last"
+  const sortDirection = sameScope ? page.sortDirection : "desc"
+  const limit = sameScope ? page.limit : 20
+  const queryKey = JSON.stringify([threadId, parentTurnId, offset, limit, sortKey, sortDirection])
   const requestedQuery = useRef(queryKey)
   const fetchSnapshot = useCallback(async (signal?: AbortSignal) => {
     requestedQuery.current = queryKey
-    const query = { offset, limit, sortKey, sortDirection }
+    const query = { offset, limit, sortKey, sortDirection, ...(parentTurnId === undefined ? {} : { parentTurnId }) }
     return { queryKey, data: await (threadId === undefined ? fetchSubagents(query, signal) : fetchThreadSubagents(threadId, query, signal)) }
-  }, [threadId, offset, limit, sortKey, sortDirection, queryKey])
+  }, [threadId, parentTurnId, offset, limit, sortKey, sortDirection, queryKey])
   const { load, latest, read } = useQueueSnapshot(fetchSnapshot)
   const state = useApi(load, [queryKey])
   const notificationStatus = useQueueEvents(state.refetch, state.loading, offset === 0, latest, read, watchRequestMetrics)
@@ -26,7 +27,7 @@ export function useThreadSubagents(threadId?: string) {
   const currentData = error === null && state.data?.queryKey === queryKey ? state.data.data : null
   const loading = error === null && currentData === null
   const refreshing = state.loading || loading
-  const updatePage = (nextOffset: number) => setPage({ threadId, offset: nextOffset, limit, sortKey, sortDirection })
+  const updatePage = (nextOffset: number) => setPage({ threadId, parentTurnId, offset: nextOffset, limit, sortKey, sortDirection })
 
   return {
     data: currentData,
@@ -48,11 +49,11 @@ export function useThreadSubagents(threadId?: string) {
       onSortingChange: (next: SortingState) => {
         const sort = next[0]
         if (sort?.id !== "time" && sort?.id !== "last") return
-        setPage({ threadId, offset: 0, limit, sortKey: sort.id, sortDirection: sort.desc ? "desc" : "asc" })
+        setPage({ threadId, parentTurnId, offset: 0, limit, sortKey: sort.id, sortDirection: sort.desc ? "desc" : "asc" })
       },
       onPageSizeChange: (nextLimit: number) => {
         if (![10, 20, 50, 100].includes(nextLimit)) return
-        setPage({ threadId, offset: 0, limit: nextLimit, sortKey, sortDirection })
+        setPage({ threadId, parentTurnId, offset: 0, limit: nextLimit, sortKey, sortDirection })
       },
       hasPrevious: !refreshing && offset > 0,
       hasNext: !refreshing && currentData?.nextOffset != null,

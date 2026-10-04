@@ -10,18 +10,44 @@ import {
 } from "../src/application/index.js";
 
 describe("ProviderAccountService", () => {
-  it("adds subscription cache dates after snapshot persistence without changing official limits", async () => {
+  it("requests login refresh for manual limits but not startup warmup and preserves caller cancellation", async () => {
+    const query = {
+      accountUsage: vi.fn(async () => ({ summary: {
+        lifetimeTokens: 1, peakDailyTokens: null, longestRunningTurnSec: null, currentStreakDays: null, longestStreakDays: null,
+      }, daily: [] })),
+      accountRateLimits: vi.fn(async () => emptyRateLimits()),
+      accountThreadUsage: vi.fn(async () => ({ kind: "unavailable" as const })),
+    } satisfies AccountQueryPort;
+    const adapter = createOpenAiAccountAdapter(query);
+    const accountLimits = vi.spyOn(adapter, "accountLimits");
+    const service = new ProviderAccountService([adapter]);
+    const manual = new AbortController();
+    await service.accountLimits("openai", manual.signal);
+    expect(accountLimits).toHaveBeenNthCalledWith(1, manual.signal, { refreshLogin: true });
+    expect(query.accountRateLimits).toHaveBeenNthCalledWith(1, { signal: manual.signal, refreshLogin: true });
+
+    const warmup = new AbortController();
+    await service.refreshSnapshots(warmup.signal);
+    expect(accountLimits).toHaveBeenNthCalledWith(2, warmup.signal, { refreshLogin: false });
+    expect(query.accountRateLimits).toHaveBeenNthCalledWith(2, { signal: warmup.signal });
+
+    manual.abort(new Error("manual refresh cancelled"));
+    await expect(service.accountLimits("openai", manual.signal)).rejects.toThrow("manual refresh cancelled");
+    expect(query.accountRateLimits).toHaveBeenCalledTimes(2);
+  });
+
+  it("adds credential refresh time after snapshot persistence without changing official limits", async () => {
     const limits = { ...emptyRateLimits(), accountId: "account-a" };
-    const read = vi.fn().mockResolvedValue({ activeUntil: 1790993155, lastChecked: 1790131317 });
+    const read = vi.fn().mockResolvedValue(1790131317);
     const write = vi.fn();
     const service = new ProviderAccountService([{ provider: "openai", accountUsage: async () => ({ kind: "unsupported", provider: "openai" }),
       accountLimits: async () => ({ kind: "rate-limits", provider: "openai", limits }),
     }], { writeOfficialAccountSnapshot: write }, read);
-    expect(await service.accountLimits("openai")).toMatchObject({ subscription: { activeUntil: 1790993155, lastChecked: 1790131317 } });
+    expect(await service.accountLimits("openai")).toMatchObject({ credentialRefreshedAt: 1790131317 });
     expect(read).toHaveBeenCalledWith("account-a");
-    expect(write.mock.calls[0]![0].limits).not.toHaveProperty("subscription");
+    expect(write.mock.calls[0]![0].limits).not.toHaveProperty("credentialRefreshedAt");
     await service.accountUsage("openai");
-    expect(write.mock.calls.at(-1)![0].limits).not.toHaveProperty("subscription");
+    expect(write.mock.calls.at(-1)![0].limits).not.toHaveProperty("credentialRefreshedAt");
     await service.accountLimits("other");
     expect(read).toHaveBeenCalledTimes(1);
   });
@@ -52,14 +78,14 @@ describe("ProviderAccountService", () => {
     const before = { kind: "rate-limits" as const, provider: "openai", limits: { ...emptyRateLimits(), resetCreditsAvailable: 2 } };
     const after = { ...before, limits: { ...before.limits, resetCreditsAvailable: 1 } };
     const read = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValue(after);
-    const subscription = { activeUntil: 1790993155, lastChecked: 1790131317 };
-    const readSubscription = vi.fn().mockResolvedValue(subscription);
-    const service = new ProviderAccountService([{ provider: "openai", accountUsage: async () => ({ kind: "unsupported", provider: "openai" }), accountLimits: read }], { writeOfficialAccountSnapshot: write }, readSubscription);
+    const credentialRefreshedAt = 1790131317;
+    const readCredentialRefreshTime = vi.fn().mockResolvedValue(credentialRefreshedAt);
+    const service = new ProviderAccountService([{ provider: "openai", accountUsage: async () => ({ kind: "unsupported", provider: "openai" }), accountLimits: read }], { writeOfficialAccountSnapshot: write }, readCredentialRefreshTime);
     const earlier = service.accountLimits("openai");
-    expect(await service.accountLimits("openai")).toMatchObject({ subscription });
+    expect(await service.accountLimits("openai")).toMatchObject({ credentialRefreshedAt });
     finish(before);
-    expect(await earlier).toMatchObject({ subscription });
-    expect(readSubscription).toHaveBeenCalledTimes(2);
+    expect(await earlier).toMatchObject({ credentialRefreshedAt });
+    expect(readCredentialRefreshTime).toHaveBeenCalledTimes(2);
     expect(write).toHaveBeenCalledTimes(1);
     expect(write.mock.calls[0]?.[0].limits).toEqual(after);
   });

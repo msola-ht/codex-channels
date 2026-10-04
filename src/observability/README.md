@@ -84,6 +84,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   `codexc metrics threads` 和 `turns` 导出复用。
   `subagents()` 从全部已登记关系读取各层子代理，`threadSubagents()` 限定为目标 Thread 的直接子代理；两者均包括尚无请求的代理，聚合各自全部保留请求的模型、提供商、轮次、Token 与缓存指标，在数据库内按首次请求或最后记录排序后分页；会话列表的
   `directSubagentCount` 同样只计直接子级，不随请求筛选变化，不把关系导航混入指标聚合。
+  每轮明细的 `directSubagentCount` 通过 `subagent_turns` 精确父 Thread/Turn 关联并验证直接父关系后，按不同子 Thread 计数；`threadSubagents()` 的可选 `parentTurnId` 使用相同关系筛选和分页，全局 `subagents()` 拒绝该字段，子代理行用量仍为自身全部保留历史。
   WebUI 顶层列表通过 `mainThreadsOnly` 在汇总和分页前排除已登记子代理；CLI 导出与控制台仍查询全部会话。
   会话列表的 `sessionTiming` 批量读取当前页各会话全部自身保留轮次的官方耗时，保留缺失轮数与历史完整性，不受请求筛选影响、不叠加后代。
   时间范围聚合覆盖指标库全部保留记录，可按全局、提供商或“提供商 + 模型”分组；支持 `today`、`yesterday`、`24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围，最多

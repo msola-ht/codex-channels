@@ -114,25 +114,7 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
     expect(JSON.parse(readFileSync(npmManifest, "utf8")).version).toBe("0.147.0");
   }, 30_000);
 
-  it("installs a missing Codex CLI and reports that login is still required", () => {
-    const root = temporaryDirectory("codexc-source-install-codex-");
-    const repository = createFixtureRepository(root);
-    const home = join(root, "home");
-
-    const result = runInstaller(root, repository, home, { codexInstalled: false });
-
-    expect(result.status, result.stderr || result.stdout).toBe(0);
-    expect(result.stdout).toContain(
-      "未检测到 Codex CLI，正在安装 @openai/codex@0.147.0",
-    );
-    expect(result.stdout).toContain("Codex CLI 0.147.0 已安装");
-    expect(result.stdout).toContain("0.147.0 · 未登录或登录状态不可用");
-    expect(result.stdout).toContain("下一步：codex login status");
-    expect(result.stdout).toContain("如未登录：codex login");
-    expect(existsSync(join(root, "fake-bin", "codex"))).toBe(true);
-  }, 30_000);
-
-  it("uses the protocol base version for a Gateway fix release", () => {
+  it("installs a missing Codex CLI using the protocol base version for a Gateway fix release and reports login requirements", () => {
     const root = temporaryDirectory("codexc-source-install-fix-");
     const repository = createFixtureRepository(root, {
       gatewayVersion: "0.147.0-fix1",
@@ -146,6 +128,11 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
       "未检测到 Codex CLI，正在安装 @openai/codex@0.147.0",
     );
     expect(result.stdout).not.toContain("@openai/codex@0.147.0-fix1");
+    expect(result.stdout).toContain("Codex CLI 0.147.0 已安装");
+    expect(result.stdout).toContain("0.147.0 · 未登录或登录状态不可用");
+    expect(result.stdout).toContain("下一步：codex login status");
+    expect(result.stdout).toContain("如未登录：codex login");
+    expect(existsSync(join(root, "fake-bin", "codex"))).toBe(true);
   }, 15_000);
 
   it.each(["version = 1\n", "[broken"])("uninstalls the managed source and preserves user data with config %j", async (configContent) => {

@@ -7,8 +7,7 @@ import { ErrorBanner } from "@/components/metrics/error-banner"
 import { TruncatedText } from "@/components/metrics/data-table"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { QueryFilters } from "@/components/metrics/query-filters"
-import { QuerySummary } from "@/components/metrics/query-summary"
-import { ThreadRunSummary } from "@/components/threads/thread-run-summary"
+import { ThreadPeriodSummary, ThreadRunSummary } from "@/components/threads/thread-run-summary"
 import { TurnTable } from "@/components/threads/turn-table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,11 +53,10 @@ export function ThreadDetailPage() {
               </Tooltip> : null}
             </div>
           ) : null}
-          <QuerySummary loading={loading} aggregate={turns.aggregate} range={turns.range} turns={turns.turnCount} />
-          <p className="shrink-0 text-sm text-muted-foreground">{t("threads.turnHint")}</p>
+          <ThreadPeriodSummary loading={loading} aggregate={turns.aggregate} range={turns.range} turnCount={turns.turnCount} />
           <details className={cn("shrink-0", loading && "invisible")} inert={loading} aria-hidden={loading || undefined}>
             <summary className="cursor-pointer text-sm text-muted-foreground">{t("threads.history")}</summary>
-            <div className="mt-3"><ThreadRunSummary latestTurn={run.latestTurn} threadAggregate={run.threadAggregate} /></div>
+            <div className="mt-3"><ThreadRunSummary threadAggregate={run.threadAggregate} /></div>
           </details>
           <div className="flex min-h-[20rem] flex-1 flex-col">
             <TurnTable loading={loading} turns={turns.turns} threadId={id} query={query} pagination={pagination(turns)} />

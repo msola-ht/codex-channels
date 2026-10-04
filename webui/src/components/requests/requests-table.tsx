@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { FastBadge } from "@/components/metrics/service-tier"
-import { OutputTokenTooltip } from "@/components/metrics/token-tooltip"
+import { InputTokenTooltip, OutputTokenTooltip } from "@/components/metrics/token-tooltip"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import { RelayRequestStatus } from "@/components/requests/relay-request-status"
 import {
@@ -196,38 +196,7 @@ export function RequestsTable({
       header: ({ column }) => (
         <SortableHeader column={column}>{t("metrics.input")}</SortableHeader>
       ),
-      cell: ({ row }) => {
-        const record = row.original
-        if (record.cachedInputTokens === null && record.cacheHitRate === null) return <span className="tabular-nums">{formatTokens(record.inputTokens)}</span>
-        const uncached =
-          record.inputTokens === null || record.cachedInputTokens === null
-            ? null
-            : Math.max(0, record.inputTokens - record.cachedInputTokens)
-        return (
-          <Tooltip>
-            <TooltipTrigger aria-description={[t("metrics.cached", { count: formatTokens(record.cachedInputTokens) }), t("metrics.uncached", { count: uncached === null ? "—" : formatTokens(uncached) }), t("metrics.hitRate", { rate: record.cacheHitRate === null ? "—" : `${(record.cacheHitRate * 100).toFixed(1)}%` })].join("; ")} render={<span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" />}>
-                {formatTokens(record.inputTokens)}
-              </TooltipTrigger>
-            <TooltipContent side="right" align="start">
-              <ul className="flex flex-col gap-1">
-                <li className="whitespace-nowrap">
-                  {t("metrics.cached", { count: formatTokens(record.cachedInputTokens) })}
-                </li>
-                <li className="whitespace-nowrap">
-                  {t("metrics.uncached", { count: uncached === null ? "—" : formatTokens(uncached) })}
-                </li>
-                <li className="whitespace-nowrap">
-                  {t("metrics.hitRate", {
-                    rate: record.cacheHitRate === null
-                      ? "—"
-                      : `${(record.cacheHitRate * 100).toFixed(1)}%`,
-                  })}
-                </li>
-              </ul>
-            </TooltipContent>
-          </Tooltip>
-        )
-      },
+      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} />,
     },
     {
       id: "cacheHitRate",

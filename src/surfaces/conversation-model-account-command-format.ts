@@ -354,8 +354,7 @@ export function formatConversationLimits(
     "OpenAI Codex 额度：",
     formatTimezoneLine(),
     `套餐：${planType ? formatPlanType(planType) : "未知"}`,
-    `订阅截止时间：${result.result.subscription?.activeUntil == null ? "未提供" : formatResetTime(result.result.subscription.activeUntil, true)}（登录缓存）`,
-    `订阅信息最后检查时间：${result.result.subscription?.lastChecked == null ? "未提供" : formatResetTime(result.result.subscription.lastChecked, true)}`,
+    `凭证刷新时间：${result.result.credentialRefreshedAt == null ? "未提供" : formatResetTime(result.result.credentialRefreshedAt, true)}`,
     ...result.result.limits.limits.flatMap((limit) => [
       "",
       `${limit.limitName ?? limit.limitId}：`,

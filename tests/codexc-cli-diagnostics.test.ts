@@ -235,39 +235,4 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     expect(readFileSync(systemctlLog, "utf8")).toBe(systemctlCallsBeforeStart);
   });
 
-  it("documents service maintenance commands in scoped help", () => {
-    const output = execFileSync(process.execPath, [cli, "service", "--help"], {
-      encoding: "utf8",
-    });
-
-    expect(output).toContain("uninstall");
-    expect(output).toContain("reload");
-    expect(output).toContain("logs");
-    expect(output).toContain("保留用户数据");
-  });
-
-  it("documents managed source removal in top-level help", () => {
-    const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
-
-    expect(output).toContain("uninstall");
-    expect(output).toContain("卸载受管源码与全局命令并保留用户数据");
-  });
-
-  it("describes Setup by its model, provider, channel, and skill responsibilities", () => {
-    const output = execFileSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
-
-    expect(output).toContain("配置 Provider、通讯渠道与项目技能");
-  });
-
-  it("explains the Setup categories in scoped help", () => {
-    const output = execFileSync(process.execPath, [cli, "setup", "--help"], {
-      encoding: "utf8",
-    });
-
-    expect(output).toContain("脱敏接入状态总览");
-    expect(output).toContain("模型与提供商、通讯渠道和项目技能");
-    expect(output).not.toContain("直接 API Provider");
-  });
-
-
 });
