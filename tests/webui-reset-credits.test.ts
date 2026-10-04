@@ -116,6 +116,47 @@ it("releases WebUI previews on cancel or close and serializes competing clicks",
 });
 
 
+it("serializes manual credit refresh with competing dialog actions and forwards cancellation", () => {
+  const script = String.raw`
+    import { createServer } from 'vite';
+    import { createElement as h } from 'react';
+    import { renderToStaticMarkup } from 'react-dom/server';
+    const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
+      name: 'reset-refresh-fixture', enforce: 'pre', transform(code, id) {
+        if (id.endsWith('/overview/reset-credit-action.tsx')) return code.replace('function ResetCreditDialog(', 'export function ResetCreditDialog(');
+        if (id.endsWith('/hooks/use-management-confirmed-mutation.ts')) return 'export function useManagementConfirmedMutation() { return globalThis.management; }';
+        if (id.endsWith('/hooks/use-translation.ts')) return 'export function useTranslation() { return {t:key=>key}; }';
+        if (id.endsWith('/ui/button.tsx')) return 'export function Button(props) { globalThis.buttons.push(props); return null; }';
+        if (id.endsWith('/ui/dialog.tsx')) return 'export function Dialog(props) { globalThis.dialog = props; return props.children; } export const DialogContent = p=>p.children; export const DialogDescription = p=>p.children; export const DialogFooter = p=>p.children; export const DialogHeader = p=>p.children; export const DialogTitle = p=>p.children;';
+      }
+    }] });
+    try {
+      const { ResetCreditDialog } = await server.ssrLoadModule('/src/components/overview/reset-credit-action.tsx');
+      const requests=[]; let finish, changed=0, refetched=0, closed=0, previewed=0;
+      globalThis.fetch=async (url, init)=>{requests.push({url,signal:init.signal,body:JSON.parse(init.body)});return new Promise(resolve=>{finish=()=>resolve(new Response('{}',{status:200}));});};
+      globalThis.management={busy:false,loading:false,error:null,actionError:null,data:null,pendingPreview:null,
+        clearError(){},refetch(){refetched++},mutate(){previewed++}};
+      globalThis.buttons=[];
+      renderToStaticMarkup(h(ResetCreditDialog,{onClose:()=>{closed++},onChanged:()=>{changed++}}));
+      const refresh=globalThis.buttons.find(button=>button.children==='common.refresh');
+      refresh.onClick();refresh.onClick();
+      globalThis.buttons.find(button=>button.children==='resetCredits.preview').onClick();
+      globalThis.buttons.find(button=>button.children==='resetCredits.cancel').onClick();
+      globalThis.dialog.onOpenChange(false);
+      const inFlight={requests:requests.length,closed,previewed,signal:requests[0]?.signal instanceof AbortSignal};
+      finish();await new Promise(resolve=>setImmediate(resolve));
+      console.log(JSON.stringify({inFlight,changed,refetched,body:requests[0].body}));
+    } finally { await server.close(); }
+  `;
+  const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
+  })) as { inFlight: { requests: number; closed: number; previewed: number; signal: boolean }; changed: number; refetched: number; body: unknown };
+  expect(result.inFlight).toEqual({ requests: 1, closed: 0, previewed: 0, signal: true });
+  expect(result.changed).toBe(1);
+  expect(result.refetched).toBe(1);
+  expect(result.body).toEqual({ provider: "openai" });
+});
+
 it("classifies uncertain HTTP consume responses without retrying or masking controlled rejections", () => {
   const script = String.raw`
     import { createServer } from 'vite';

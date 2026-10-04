@@ -4,16 +4,43 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
-  it("describes main thread metrics separately from subagent navigation and omits flat type and parent columns", () => {
+  it("keeps one total token column and omits flat type and parent columns", () => {
     expect(markup.threads).toContain("共 1 个匹配主会话");
-    expect(markup.threads).toContain("各行仅统计主会话自身请求，点击子代理数量查看关联子代理");
     expect(markup.threadsEn).toContain("Matching main threads: 1");
-    expect(markup.threadsEn).toContain("select the subagent count to view related subagents");
     expect(markup.threads).not.toContain("本页主会话");
     expect(markup.threadsEn).not.toContain("This page:");
     expect(headers(markup.threads!)).not.toContain("类型");
     expect(headers(markup.threads!)).not.toContain("父会话");
     expect(markup.subagentDetailParent).toContain("子代理");
+  });
+  it("renders own and descendant usage in an accessible total tooltip, including descendant-only matches", () => {
+    const cell = (html: string, label: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf(label)]?.[1]?.replace(/<[^>]*>/g, "");
+    expect(headers(markup.threads!)).toEqual(["期间首次请求", "会话", "提供商", "模型", "轮次", "请求", "总计", "会话总耗时", "最后记录", "子代理"]);
+    expect(cell(markup.threads!, "总计")).toBe("1.08K");
+    expect(markup.threads).toContain('aria-description="自身: 输入 100, 缓存 50, 输出 20. 子代理: 输入 800, 缓存 300, 输出 160"');
+    expect(markup.threads).toMatch(/<span[^>]*tabindex="0"[^>]*data-slot="tooltip-trigger"/u);
+    expect(cell(markup.threadsChildOnly!, "总计")).toBe("1.08K");
+    expect(markup.threadsChildOnly).toContain('aria-description="自身: 输入 0, 缓存 0, 输出 0. 子代理: 输入 900, 缓存 —, 输出 180"');
+    expect(cell(markup.threadsChildOnly!, "模型")).toBe("—");
+    expect(markup.threadsChildOnly).not.toContain("NaN");
+    expect(markup.threadTotalSorting).toBe("totalTokens:desc");
+    expect(headers(markup.threadsEn!)).toContain("Total");
+    expect(markup.threadsEn).toContain('aria-description="Own: Input 100, Cached 50, Output 20. Subagents: Input 800, Cached 300, Output 160"');
+  });
+  it("shows a single descendant-inclusive summary and hides stale totals on query changes", () => {
+    expect(markup.threadsPage).toContain("含子代理");
+    expect(markup.threadsPage).toContain("输入 950 · 缓存 350");
+    expect(markup.threadsPage).toContain("输出 190");
+    expect(markup.threadsPage).not.toContain("主会话自身");
+    expect(markup.threadsPage).not.toContain("合计按请求去重");
+    expect(markup.threadsPage).not.toContain("使用相同时间范围和请求筛选");
+    expect(markup.threadsPage).not.toContain("仅子代理匹配时也显示主会话");
+    expect(markup.threadsPage).not.toContain("轮次：");
+    expect(markup.threadsPageEn).toContain("Including subagents");
+    expect(markup.threadsPageEn).toContain("Input: 950 · Cached: 350");
+    expect(markup.threadsPageLoading).toMatch(/class="[^"]*invisible" aria-hidden="true"><span>含子代理/u);
+    expect(markup.threadsPageEmpty).toContain("输入 0 · 缓存 —");
+    expect(markup.threadsPageEmpty).not.toContain("NaN");
   });
   it("links main and child counts to independent subagent pages without inheriting metrics filters", () => {
     expect(markup.subagentsCollapsedCalls).toBe("0");
@@ -203,6 +230,7 @@ describe("WebUI metrics table presentation", () => {
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
+        const { ThreadsPage } = await server.ssrLoadModule("/src/pages/threads-page.tsx");
         const { ThreadSubagents } = await server.ssrLoadModule("/src/components/threads/thread-subagents.tsx");
         const { TurnTable } = await server.ssrLoadModule("/src/components/threads/turn-table.tsx");
         const { ThreadDetailPage } = await server.ssrLoadModule("/src/pages/thread-detail-page.tsx");
@@ -220,7 +248,7 @@ describe("WebUI metrics table presentation", () => {
         const { ErrorsPage } = await server.ssrLoadModule("/src/pages/errors-page.tsx");
         const { LanguageContext } = await server.ssrLoadModule("/src/hooks/language-context.ts");
         const { TooltipProvider } = await server.ssrLoadModule("/src/components/ui/tooltip.tsx");
-        const { TableHint, TruncatedText } = await server.ssrLoadModule("/src/components/metrics/data-table.tsx");
+        const { DataTable, TableHint, TruncatedText } = await server.ssrLoadModule("/src/components/metrics/data-table.tsx");
         const { InputTokenTooltip, OutputTokenTooltip } = await server.ssrLoadModule("/src/components/metrics/token-tooltip.tsx");
         const { setServerTimeZone } = await server.ssrLoadModule("/src/lib/format.ts");
         setServerTimeZone("UTC");
@@ -240,6 +268,7 @@ describe("WebUI metrics table presentation", () => {
           sessionTiming: { knownDurationMs: 120000, missingTurnCount: 0, historyComplete: true },
           cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
           inputTokens: 100, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 5,
+          totalTokens: 1080, subagentUsage: { inputTokens: 800, cachedInputTokens: 300, outputTokens: 160 },
           tokensPerSecond: 20, compact: null, requestCount: 1, unsuccessfulRequestCount: 0 };
         const record = { ...common, status: "failed", requestModel: "model-test", responseModel: "model-other",
           traffic: null, userAgent: "fixture-client", operation: "response", httpStatus: 502,
@@ -368,6 +397,34 @@ describe("WebUI metrics table presentation", () => {
         };
         globalThis.fixtureQuery = {};
         globalThis.fixturePagination = pagination;
+        const mainThread = { ...common, threadId: "thread-1", agentPath: null, parentThreadId: null,
+          turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 };
+        const childOnlyThread = { ...mainThread, provider: null, model: null, requestCount: 0, turnCount: 0,
+          inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+          subagentUsage: { inputTokens: 900, cachedInputTokens: null, outputTokens: 180 },
+          cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 } };
+        result.threadsChildOnly = render(ThreadTable, { threads: [childOnlyThread], query: {}, pagination });
+        globalThis.fixtureCaptureTable = true;
+        const totalSortCycle = [];
+        const totalPagination = { ...pagination, onSortingChange: next => {
+          const sort = next[0];
+          totalSortCycle.push(sort.id + ":" + (sort.desc ? "desc" : "asc"));
+        } };
+        render(ThreadTable, { threads: [mainThread], query: {}, pagination: totalPagination });
+        globalThis.fixtureTable.getColumn("totalTokens").getToggleSortingHandler()({ shiftKey: false });
+        result.threadTotalSorting = totalSortCycle.join(",");
+        globalThis.fixtureCaptureTable = false;
+        const threadPageData = { aggregate: common, treeAggregate: { ...common, inputTokens: 950, outputTokens: 190,
+          cacheUsage: { inputTokens: 950, cachedInputTokens: 350, missingRequestCount: 0 } },
+          threads: [mainThread], range: { name: "all" }, turnCount: 1, total: 2, nextOffset: 1 };
+        globalThis.fixtureApiState = { data: { queryKey: "{}", data: threadPageData }, loading: false, error: null };
+        result.threadsPage = render(ThreadsPage, {});
+        result.threadsPageEn = render(ThreadsPage, {}, "en");
+        globalThis.fixtureQuery = { model: "new-model" };
+        result.threadsPageLoading = render(ThreadsPage, {});
+        globalThis.fixtureQuery = {};
+        globalThis.fixtureApiState.data.data = { ...threadPageData, aggregate: null, treeAggregate: null, threads: [], turnCount: 0, total: 0, nextOffset: null };
+        result.threadsPageEmpty = render(ThreadsPage, {});
         globalThis.fixtureThreadDetail = { error: null, loading: false, refreshing: false, refetch: noop,
           data: { run: { latestTurn: { ...common, turnId: "turn-1", durationMs: 71_000 }, latestExecution: { turnId: "turn-1", durationMs: 71_000 }, sessionDurationMs: 120_000, threadAggregate: { ...common, turnCount: 2 } },
             turns: { aggregate: common, range: { name: "all" }, turns: [], turnCount: 2 } } };
@@ -573,6 +630,19 @@ describe("WebUI metrics table presentation", () => {
         } }, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop });
         globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ ua: true, error: true }) : null };
         result.preferences = render(RequestsTable, requestProps);
+        globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ traffic: false, time: false, provider: false, ua: true }) : null };
+        globalThis.fixtureCaptureTable = true;
+        result.requestsHiddenDetail = render(RequestsTable, requestProps);
+        result.requestsDetailVisibility = JSON.stringify({ visible: globalThis.fixtureTable.getColumn("traffic").getIsVisible(), canHide: globalThis.fixtureTable.getColumn("traffic").getCanHide() });
+        globalThis.fixtureTable.getColumn("traffic").toggleVisibility(false);
+        result.requestsDetailAfterHide = String(globalThis.fixtureTable.getColumn("traffic").getIsVisible());
+        result.trafficHiddenDetail = render(TrafficTable, { exchanges: [exchange], onOpen: noop });
+        result.trafficDetailVisibility = JSON.stringify({ visible: globalThis.fixtureTable.getColumn("time").getIsVisible(), canHide: globalThis.fixtureTable.getColumn("time").getCanHide() });
+        globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ nested_value: false, Action: false, optional: false }) : null };
+        result.requiredGroupedColumns = render(DataTable, { title: "Required", storageKey: "fixture-required", pagination: { mode: "none" },
+          columns: [{ id: "group", header: "Group", columns: [{ accessorKey: "nested.value", header: "Value", enableHiding: false }, { header: "Action", enableHiding: false, cell: () => h("button", { type: "button" }, "Open") }, { id: "optional", header: "Optional" }] }], data: [{ nested: { value: "required-cell" } }] });
+        globalThis.fixtureCaptureTable = false;
+        globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ ua: true, error: true }) : null };
         globalThis.fixtureQuery = { range: "30d", offset: 0, limit: 50 };
         const errorsData = { errors: { requestCount: 100, unsuccessfulRequestCount: 60 }, total: 60,
           nextOffset: 50, records: Array.from({ length: 50 }, (_, id) => ({ ...record, id, threadId: null })) };
@@ -961,10 +1031,6 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
-    expect(headers(markup.threads!)).toEqual([
-      "期间首次请求", "会话", "提供商", "模型", "轮次", "请求",
-      "输入 Token", "会话总耗时", "缓存命中率", "输出 Token", "最后记录", "子代理",
-    ]);
     expect(headers(markup.turns!)).toEqual([
       "时间", "轮次", "提供商", "模型", "请求", "失败", "输入 Token", "输出 Token",
       "本轮耗时",
@@ -972,13 +1038,11 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.turns).not.toContain('role="checkbox"');
   });
 
-  it("shows thread cache hit rates and preserves unknown or zero-input usage", () => {
-    const cacheCell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf("缓存命中率")]?.[1];
-    expect(cacheCell(markup.threads!)).toContain("50.0%");
-    expect(cacheCell(markup.threadCacheZero!)).toContain("0.0%");
-    expect(cacheCell(markup.threadCacheUnknown!)).toContain("—");
-    expect(cacheCell(markup.threadInputZero!)).toContain("—");
-    expect(cacheCell(markup.partialThread!)).toContain("50.0%");
+  it("preserves unknown and zero cache counts in thread tooltips while retaining aggregate cache metrics", () => {
+    expect(markup.threadCacheZero).toContain("自身: 输入 100, 缓存 0, 输出 20");
+    expect(markup.threadCacheUnknown).toContain("自身: 输入 100, 缓存 —, 输出 20");
+    expect(markup.threadInputZero).toContain("自身: 输入 0, 缓存 0, 输出 20");
+    expect(markup.partialThread).toContain("自身: 输入 1K, 缓存 —, 输出 20");
     expect(markup.partialSummary).toContain("缓存 50");
     expect(markup.partialGlobal).toContain("缓存 50 · 命中率 50.0%");
     for (const key of ["partialThread", "partialSummary", "partialGlobal"]) {
@@ -1036,6 +1100,23 @@ describe("WebUI metrics table presentation", () => {
   it("preserves explicit existing column visibility preferences", () => {
     expect(headers(markup.preferences!)).toContain("User-Agent");
     expect(headers(markup.preferences!)).toContain("错误");
+  });
+
+  it("keeps native detail buttons available despite old hidden-column preferences", () => {
+    for (const key of ["requestsDetailVisibility", "trafficDetailVisibility"]) {
+      expect(JSON.parse(markup[key]!)).toEqual({ visible: true, canHide: false });
+    }
+    expect(markup.requestsDetailAfterHide).toBe("true");
+    expect(headers(markup.requestsHiddenDetail!)).toContain("请求详情");
+    expect(headers(markup.requestsHiddenDetail!)).toContain("User-Agent");
+    expect(headers(markup.requestsHiddenDetail!)).not.toContain("提供商");
+    expect(markup.requestsHiddenDetail).toMatch(/<button\b[^>]*type="button"[^>]*>查看请求<\/button>/u);
+    expect(headers(markup.trafficHiddenDetail!)).toContain("开始时间");
+    expect(headers(markup.trafficHiddenDetail!)).not.toContain("提供商");
+    expect(markup.trafficHiddenDetail).toMatch(/<button\b[^>]*aria-label="[^"]*的调用明细"/u);
+    expect(markup.requiredGroupedColumns).toContain("required-cell");
+    expect(markup.requiredGroupedColumns).toContain('<button type="button">Open</button>');
+    expect(headers(markup.requiredGroupedColumns!)).not.toContain("Optional");
   });
 
   it("keeps headers while hiding stale rows and disabling table interaction during loading", () => {

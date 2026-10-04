@@ -1,4 +1,8 @@
 import { ResetCreditAction } from "./reset-credit-action"
+import { useState } from "react"
+import { AccountSettingsConfirmationDialog } from "@/components/settings/account-settings-management"
+import { useAccountSettingsManagement } from "@/hooks/use-account-settings-management"
+import type { AccountSettingsController } from "@/lib/settings-management"
 import {
   Card,
   CardAction,
@@ -404,28 +408,43 @@ function AccountProviderEmpty({ title, description }: { title: string; descripti
   </Card>
 }
 
-export function OpencodeGoUsageCard({
-  accounts,
-  refreshControls,
-  onAccountsChanged,
-}: {
-  accounts: Array<{
-    subscriptionRequired: boolean
-    account: string | null
-    displayName: string
-    default: boolean
-    available: boolean
-    windows: OpencodeGoQuotaWindow[]
-    provider: string
-    observedAtMs: number
-  }>
+interface OpencodeGoUsageCardProps {
+  accounts: QuotaAccountUsage[]
   refreshControls: Record<string, AccountRefreshControl>
   onAccountsChanged: (accountId: string, activation?: string) => void
-}) {
+}
+
+export function OpencodeGoUsageCard(props: OpencodeGoUsageCardProps) {
   const { t } = useTranslation()
-  if (accounts.length === 0) {
+  const needsManagement = props.accounts.some(account => account.subscriptionRequired)
+  const [managementStarted, setManagementStarted] = useState(needsManagement)
+  // Keep one owner mounted if a newer account snapshot removes its subscription notice.
+  if (needsManagement && !managementStarted) setManagementStarted(true)
+  if (managementStarted || needsManagement) return <ManagedOpencodeGoAccounts {...props} />
+  if (props.accounts.length === 0) {
     return <AccountProviderEmpty title="OpenCode Go" description={t("overview.openCodeGoEmpty")} />
   }
+  return <OpencodeGoAccounts {...props} />
+}
+
+function ManagedOpencodeGoAccounts({ onAccountsChanged, ...props }: OpencodeGoUsageCardProps) {
+  const { t } = useTranslation()
+  const management = useAccountSettingsManagement()
+  const pending = management.pendingPreview
+  const confirm = async () => {
+    const result = await management.confirm()
+    if (result?.action === "removed" && result.account?.id) onAccountsChanged(result.account.id, result.activation)
+  }
+  return <>
+    {props.accounts.length === 0 ? <AccountProviderEmpty title="OpenCode Go" description={t("overview.openCodeGoEmpty")} />
+      : <OpencodeGoAccounts {...props} management={management} />}
+    {management.actionError ? <Alert variant="destructive"><AlertTitle>{t("overview.removeIncomplete")}</AlertTitle><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
+    {pending ? <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} loading={management.loading}
+      onConfirm={() => void confirm()} onCancel={management.cancel} /> : null}
+  </>
+}
+
+function OpencodeGoAccounts({ accounts, refreshControls, management }: Omit<OpencodeGoUsageCardProps, "onAccountsChanged"> & { management?: AccountSettingsController }) {
   return (
     <>
       {accounts.map((account) => (
@@ -434,7 +453,7 @@ export function OpencodeGoUsageCard({
           {...account}
           refreshControl={refreshControls[account.provider]}
           providerName="OpenCode Go"
-          onRemoved={onAccountsChanged}
+          accountManagement={management}
         />
       ))}
     </>
@@ -458,7 +477,7 @@ function QuotaAccountCard({
   windows,
   observedAtMs,
   refreshControl,
-  onRemoved,
+  accountManagement,
   subscriptionRequired,
 }: {
   account: string | null
@@ -470,7 +489,7 @@ function QuotaAccountCard({
   windows: OpencodeGoQuotaWindow[]
   observedAtMs: number
   refreshControl: AccountRefreshControl | undefined
-  onRemoved?: (accountId: string, activation?: string) => void
+  accountManagement?: AccountSettingsController
   subscriptionRequired: boolean
 }) {
   const { t } = useTranslation()
@@ -482,8 +501,8 @@ function QuotaAccountCard({
         {refreshControl && !refreshControl.error && available && windows.length > 0
           ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
-      {subscriptionRequired && onRemoved
-        ? <CardContent className="flex flex-col gap-3"><AccountSubscriptionNotice accountId={account} control={refreshControl} onRemoved={onRemoved} /></CardContent>
+      {subscriptionRequired && accountManagement
+        ? <CardContent className="flex flex-col gap-3"><AccountSubscriptionNotice accountId={account} control={refreshControl} management={accountManagement} /></CardContent>
         : refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={available && windows.length > 0} /></CardContent> : null}
       {!subscriptionRequired && available && windows.length > 0 ? <CardContent>
         <div className="grid grid-cols-3 gap-2"><QuotaWindowCards windows={windows} /></div>

@@ -93,6 +93,20 @@ it("reads fragmented SSE with header authentication and rejects malformed or exp
       };
       await assert.rejects(watchDeliveryQueue(new AbortController().signal,event=>received.push(event.type)),/disconnected/);
       assert.deepEqual(received,['changed','heartbeat','changed']);
+      const combined=[];
+      globalThis.fetch=async()=>response(['data: {"type":"changed"}\n\n'.repeat(200)]);
+      await assert.rejects(watchDeliveryQueue(new AbortController().signal,event=>combined.push(event)),/disconnected/);
+      assert.equal(combined.length,200);
+      const prefix='data: {"type":"changed"}';
+      const exact=prefix+' '.repeat(4096-prefix.length);
+      globalThis.fetch=async()=>response([exact+'\n','\n']);
+      const boundary=[];
+      await assert.rejects(watchDeliveryQueue(new AbortController().signal,event=>boundary.push(event)),/disconnected/);
+      assert.equal(boundary.length,1);
+      for(const parts of [[exact+' \n\n'], [exact,'  ']]) {
+        globalThis.fetch=async()=>response(parts);
+        await assert.rejects(watchDeliveryQueue(new AbortController().signal,()=>assert.fail('oversized frame escaped')),/frame too large/);
+      }
       globalThis.fetch=async(url,init)=>{assert.equal(url,'/api/v1/management/relay/queue/events');assert.equal(init.headers.get('authorization'),'Bearer private-token');return response(['data: {"type":"changed"}\n\n']);};
       await assert.rejects(watchRelayQueue(new AbortController().signal,()=>{}),/disconnected/);
       globalThis.fetch=async(url,init)=>{assert.equal(url,'/api/v1/metrics/events');assert.equal(init.headers.get('authorization'),'Bearer private-token');return response(['data: {"type":"changed"}\n\n']);};

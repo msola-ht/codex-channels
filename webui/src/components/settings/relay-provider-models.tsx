@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { formatTimestamp } from "@/lib/format"
-import { updateRelayCatalog } from "@/lib/api"
+import { useRelayCatalog } from "@/hooks/use-relay-catalog"
 import type { RelayManagementSnapshot } from "@/lib/types"
 import { useTranslation } from "@/hooks/use-translation"
 import { Button } from "@/components/ui/button"
@@ -20,36 +20,16 @@ export function RelayProviderModels({ snapshot, blocked: parentBlocked, refreshB
 }) {
   const { t } = useTranslation()
   const [providerId, setProviderId] = useState<string | null>(null)
-  const [downloading, setDownloading] = useState(false)
-  const [downloadMessage, setDownloadMessage] = useState<"error" | "auditFailed" | null>(null)
-  const controller = useRef<AbortController | null>(null)
-  const autoAttempted = useRef(false)
   const returnFocus = useRef<HTMLButtonElement | null>(null)
-  useEffect(() => () => { controller.current?.abort(); controller.current = null; autoAttempted.current = false }, [])
+  const onSuccess = useCallback(() => {
+    toast.add({ title: t("relay.catalog.updated"), type: "success", timeout: 3000 })
+  }, [t])
+  const { downloading, downloadMessage, download } = useRelayCatalog({
+    snapshot, blocked: parentBlocked, onRefresh, onSuccess,
+  })
   const blocked = parentBlocked || downloading
   const closeBlocked = refreshBlocked || downloading
   const catalog = snapshot.clineCatalog?.status === "ready" ? snapshot.clineCatalog : null
-  const download = useCallback(async () => {
-    if (controller.current) return
-    const active = new AbortController()
-    controller.current = active
-    setDownloading(true); setDownloadMessage(null)
-    try {
-      const result = await updateRelayCatalog(active.signal)
-      if (!active.signal.aborted) {
-        if (result.auditStatus === "failed") setDownloadMessage("auditFailed")
-        else toast.add({ title: t("relay.catalog.updated"), type: "success", timeout: 3000 })
-        onRefresh?.()
-      }
-    } catch { if (!active.signal.aborted) setDownloadMessage("error") }
-    finally { if (controller.current === active) controller.current = null; if (!active.signal.aborted) setDownloading(false) }
-  }, [onRefresh, t])
-  const hasCline = snapshot.providers.some(provider => provider.id.startsWith("clp-"))
-  useEffect(() => {
-    if (parentBlocked || !hasCline || snapshot.clineCatalog?.status !== "missing" || autoAttempted.current) return
-    autoAttempted.current = true
-    void download()
-  }, [parentBlocked, hasCline, snapshot.clineCatalog?.status, download])
   const selected = snapshot.providers.find(provider => provider.id === providerId)
   if (!snapshot.providers.length) return null
   return <>

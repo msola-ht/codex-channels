@@ -149,8 +149,12 @@ it("publishes thread summary and turns together and pauses their shared notifica
       },
       "@/lib/api": { fetchThreadRun: fetch, fetchThreadTurns: (id, _query, signal) => fetch(id, signal) },
     };
-    const code = ts.transpileModule(fs.readFileSync("webui/src/hooks/use-thread-detail.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-    const exports = {}; new Function("require", "exports", code)(id => imports[id], exports);
+    const load = path => {
+      const code = ts.transpileModule(fs.readFileSync(path, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+      const exports = {}; new Function("require", "exports", code)(id => imports[id], exports); return exports;
+    };
+    imports["@/hooks/use-metrics-snapshot"] = load("webui/src/hooks/use-metrics-snapshot.ts");
+    const exports = load("webui/src/hooks/use-thread-detail.ts");
     exports.useThreadDetail("one", { offset: 0 }); assert.equal(subscriptions, 1); assert.equal(enabled, true);
     const controller = new AbortController(); let published = false;
     const result = loader(controller.signal).then(value => { published = true; return value; });

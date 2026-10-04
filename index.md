@@ -34,6 +34,7 @@
 
 ## 协议与设计
 
+- [`docs/webui-frontend-review.md`](docs/webui-frontend-review.md)：WebUI 前端组件规范、模块解耦、状态管理与重复实现的全面审查、关联修复及验证记录。
 - [`docs/module-lightweight-review.md`](docs/module-lightweight-review.md)：模块轻量化的链路分析、改前审查、优化、改后审查修复及验证记录。
 - [`docs/delivery.md`](docs/delivery.md)：关键结果投递箱的容量、状态、离线核对与备份恢复。
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：本机管理写接口的 Bearer 认证、Origin、修订、防重放、任务与审计边界。

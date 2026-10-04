@@ -27,6 +27,10 @@ src/
 令牌登录：服务端配置访问令牌时，API 返回 401 会显示令牌输入页；令牌存入浏览器
 `localStorage`，重新打开浏览器仍可复用，也可用 `?token=` 查询参数（放在 `#` 前或 HashRouter 路径中均可）打开页面自动登录。
 该令牌同时用于指标读取和设置页的低风险预览/修改。
+持久存储不可用时尝试会话存储；两者均不可用或写入后仍只能读到旧令牌时，登录页明确报错，不刷新页面。
+查询参数中的令牌先从当前 URL 清除，保存失败同样回到登录页。手动验证限时 30 秒，离开登录界面会取消请求；401/403 与服务故障分别提示。
+
+`components/layout/page-recovery.tsx` 提供非法地址与页面渲染失败的恢复入口；`App.tsx` 在会话路径解码边界拦截非法编码，并按路由重置页面错误边界。
 
 全局深色/浅色主题默认深色，右上角按钮切换，选择存入浏览器 `localStorage`
 （`next-themes`），刷新后保持。
@@ -75,6 +79,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `components/requests/errors-table.tsx` 组合错误记录列、错误说明和会话/轮次跳转；`components/traffic/traffic-table.tsx` 组合调用列表及详情入口。两者与渠道投递队列、请求、会话页复用 `DataTable` 的标题摘要、列显隐、滚动区和服务端分页。公共组件支持标题操作区、业务工具栏、稳定行 ID 及行点击；日志使用不分页模式、行内详情和表格视口滚动回调。
 
 `components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。
+必要操作列显式使用 `enableHiding: false`，公共表格覆盖这些列的旧隐藏偏好，保留其他列的用户选择。请求详情原生按钮打开抽屉后，关闭时恢复到仍存在的触发按钮；调用时间按钮同样保留键盘入口。
 
 `components/ui/dialog.tsx`：使用 Base UI/shadcn 居中弹窗，关闭按钮名称由调用方本地化；Relay 表单和一次性密钥结果复用此组件。确认操作使用 AlertDialog，并将初始焦点设到取消按钮；忙碌期间通过根组件的关闭事件阻止退出，`finalFocus` 恢复到操作入口。
 
@@ -83,6 +88,8 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `hooks/use-requests.ts` 与 `hooks/use-errors.ts` 复用队列通知 Hook，在 Gateway 指标批次成功落库后更新第一页；历史分页延后读取，返回第一页补查，手动刷新始终可用。`GET /api/v1/metrics/events` 使用只读 API 鉴权，通知中断与快照失败分别显示，不影响历史查询。
 
 `hooks/use-threads.ts` 与 `hooks/use-thread-detail.ts` 沿用指标通知和历史分页暂停规则。会话详情通过 `useThreadDetail` 共用一条订阅，并行读取本地汇总和轮次，两项成功后一起更新；同条件刷新保留内容和展开状态。`useMetricsProviders` 跟随页面成功读取的结果合并更新提供商选项，自动读取至少间隔 30 秒，不另开订阅；后台或离线时暂停，失败可手动重试，不覆盖筛选草稿。
+会话列表从同一次响应读取 `totalTokens`，仅展示可排序的“总计”列；悬浮提示上方显示自身输入/缓存/输出，下方显示 `subagentUsage` 的对应分项。页面使用不受分页影响的 `treeAggregate` 展示一份期间汇总，不在浏览器遍历子代理或相减推算缓存。
+`hooks/use-metrics-snapshot.ts` 供请求、错误、会话列表和详情复用上述编排。查询变化仍保留旧 `data` 并标记 `loading`，消费方通过加载态隐藏旧结果；不将这一合同推广到有不同查询隔离语义的账户与调用详情。
 
 `components/threads/thread-subagents.tsx` 复用公共 `DataTable`，
 展示已登记的直接子代理、会话链接、提供商、模型、自身全部保留历史的轮次与请求数、Token 与缓存指标及下级代理数量；名称与会话 ID 使用原生链接，保留键盘与焦点交互，
@@ -93,6 +100,8 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `pages/thread-detail-page.tsx` 在上方展示筛选与统计，轮次 DataTable 填充剩余高度，表格区域滚动、分页栏位于底部；最小表格高度为窄视口保留可用空间。
 
 `hooks/use-dashboard.ts` 为汇总、趋势和热力图共用一条指标订阅；`hooks/use-official-account-sources.ts` 独立订阅已保存账户快照，仅各账户手动刷新查询上游，进入页面、恢复可见与页头刷新均不触发上游账户查询。
+`components/overview/overview-sections.tsx` 在 OpenCode Go 账户组首次需要无订阅管理时挂载单个配置控制器和确认弹窗，所有提示卡复用读取；配置读取失败可以重试，删除仍受读取成功、忙碌态和预览确认限制。
+`hooks/use-reset-credits.ts` 组合重置券读取、预览、确认、账户刷新和取消，同步操作锁防止重入，卸载取消并阻止迟到结果触发刷新回调；结果不确定时保留既有禁止盲目重试语义。
 
 `hooks/use-range-refresh.ts` 与 `lib/range-refresh.ts` 为指标页面补充时间范围失效调度：按服务端时区跨日更新今天、昨天及控制台热力图，滚动范围按最后成功请求的开始时间，每 5 分钟校准；后台、离线、历史分页、加载或错误期间不发起时间驱动读取。`components/metrics/refresh-status.tsx` 展示指标及调用页面的通知状态、最后成功读取时间和陈旧提示；跨日调度以成功请求的开始时间为基准，避免零点前读取、零点后返回的旧范围延迟一天才刷新。`useApi` 的成功完成时间用于展示，只随成功结果更新，失败保留内容时保留原时间，取消的请求不能更新时间。
 
@@ -193,8 +202,11 @@ npm run docs:check
 [`webui-i18n.test.ts`](../tests/webui-i18n.test.ts)覆盖字典与占位符一致性、语言偏好读取、导航及 Threads
 渲染和错误翻译。其他两组测试覆盖共享表格与设置展示回归。
 测试通过不等同于完成浏览器布局验收；实际交互和视觉检查应单独记录结果。
+真实 React StrictMode、取消与键盘/焦点合同见[浏览器测试入口](../tests/README.md#webui-真实浏览器合同)，使用隔离夹具及临时浏览器工具，不连接当前用户服务。
 普通提交通过现有提交钩子执行完整 `verify:commit`，开发阶段按实际改动选择检查，不重复运行全量门禁。
 
 `components/settings/relay-provider-models.tsx` 按提供商显示只读模型目录弹窗与目录更新入口。
 `components/settings/relay-key-models.tsx` 在 Key 编辑弹窗按提供商分组勾选模型，可跨多个提供商；独立目录更新不扩大 Key 权限。
 `components/settings/relay-model-copy.tsx` 在 Key 列表中提供授权模型 ID 复制菜单、复制结果提示和剪贴板不可用时的手动复制入口。
+`hooks/use-relay-catalog.ts` 管理目录下载、一次自动尝试、取消和审计反馈。
+`hooks/use-relay-key-editor.ts` 管理 Key 草稿版本、模型能力筛选、提交参数与一次性结果；`components/settings/relay-key-table.tsx` 和 `relay-key-dialogs.tsx` 分别组合列表和编辑/确认/结果弹窗，`pages/relay-page.tsx` 保留页面组合和焦点恢复。

@@ -670,7 +670,7 @@ export class SqliteRequestMetricsQueries {
     if (query.threadId !== undefined && query.threadId !== threadId) {
       throw new Error("Thread ID 与查询范围不一致");
     }
-    const { rows, ...page } = this.queryThreadPage("turn_id", { ...query, threadId });
+    const { rows, ...page } = this.queryThreadTurnPage({ ...query, threadId });
     return {
       ...page,
       turns: rows.map((row) => ({
@@ -694,32 +694,166 @@ export class SqliteRequestMetricsQueries {
     return row.request_count === 0 ? null : row.turn_count;
   }
 
+  threadCounts(query: ModelRequestMetricsScope): { threadCount: number; turnCount: number } {
+    this.reader.requireOpen();
+    const scope = metricsScopeSql(query);
+    return this.reader.prepare(`
+      SELECT COUNT(DISTINCT thread_id) AS threadCount, COUNT(*) AS turnCount
+      FROM (
+        SELECT DISTINCT thread_id, turn_id FROM model_request_metrics
+        WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL
+      )
+    `).get(...scope.params) as { threadCount: number; turnCount: number };
+  }
+
   threadList(query: ModelRequestMetricsThreadQuery): StoredThreadListPage {
-    const { rows, ...page } = this.queryThreadPage("thread_id", query);
-    const threadIds = rows.map((row) => row.thread_id);
+    const { rows, ...page } = this.queryThreadListPage(query);
+    const threadIds = rows.map((row) => row.root_thread_id);
     const subagentCounts = this.directSubagentCounts(threadIds);
     const timings = this.threadSessionTimings(threadIds);
     return {
       ...page,
       threads: rows.map((row) => ({
-        cacheUsage: toStoredCacheUsage(row),
-        sessionTiming: timings.get(row.thread_id) ?? { knownDurationMs: null, missingTurnCount: 0, historyComplete: false },
-        threadId: row.thread_id,
+        cacheUsage: row.request_count === null
+          ? { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 }
+          : toStoredCacheUsage(row),
+        sessionTiming: timings.get(row.root_thread_id) ?? { knownDurationMs: null, missingTurnCount: 0, historyComplete: false },
+        threadId: row.root_thread_id,
         provider: row.provider ?? null,
         model: row.model ?? null,
         reasoningEffort: row.reasoning_effort ?? null,
         agentPath: row.agent_path,
         parentThreadId: row.parent_thread_id,
         parentTurnId: row.parent_turn_id,
-        directSubagentCount: subagentCounts.get(row.thread_id) ?? 0,
-        turnCount: row.turn_count,
-        requestCount: row.request_count,
+        directSubagentCount: subagentCounts.get(row.root_thread_id) ?? 0,
+        turnCount: row.turn_count ?? 0,
+        requestCount: row.request_count ?? 0,
         inputTokens: row.input_tokens ?? 0,
         outputTokens: row.output_tokens ?? 0,
-        compact: toStoredCompactSummary(row),
-        firstRequestStartedAtMs: row.first_request_started_at_ms,
-        lastRecordedAtMs: row.recorded_at_ms,
+        cachedInputTokens: row.request_count === null ? 0
+          : row.cached_input_token_count === row.request_count ? row.cached_input_tokens ?? 0 : null,
+        subagentUsage: {
+          inputTokens: row.subagent_input_tokens ?? 0,
+          cachedInputTokens: row.subagent_cached_input_token_count === row.subagent_request_count
+            ? row.subagent_cached_input_tokens ?? 0 : null,
+          outputTokens: row.subagent_output_tokens ?? 0,
+        },
+        totalTokens: row.total_tokens,
+        compact: row.request_count === null ? null : toStoredCompactSummary(row),
+        firstRequestStartedAtMs: row.first_request_started_at_ms ?? row.tree_first_request_started_at_ms,
+        lastRecordedAtMs: row.recorded_at_ms ?? row.tree_recorded_at_ms,
       })),
+    };
+  }
+
+  private queryThreadListPage(query: ModelRequestMetricsThreadQuery) {
+    this.reader.requireOpen();
+    // Thread ID selects the root unless an exact own Turn is requested. Other
+    // filters (including keyword searches) apply to descendant requests as well.
+    const scope = metricsScopeSql(query, true);
+    const offset = metricsPageOffset(query);
+    const sortColumns = {
+      time: "COALESCE(grouped.first_request_started_at_ms, tree_grouped.tree_first_request_started_at_ms)",
+      last: "COALESCE(grouped.recorded_at_ms, tree_grouped.tree_recorded_at_ms)",
+      thread: "tree_grouped.root_thread_id", turn: "grouped.turn_id",
+      provider: "latest.provider", model: "latest.model", turns: "COALESCE(grouped.turn_count, 0)",
+      requests: "COALESCE(grouped.request_count, 0)", failures: "COALESCE(grouped.unsuccessful_request_count, 0)",
+      input: "COALESCE(grouped.input_tokens, 0)", output: "COALESCE(grouped.output_tokens, 0)",
+      compact: "COALESCE(grouped.compact_request_count, 0)",
+      totalTokens: "tree_grouped.total_tokens",
+    };
+    const sortColumn = sortColumns[query.sortKey ?? "last"];
+    const direction = query.sortDirection ?? "desc";
+    if (sortColumn === undefined || !["asc", "desc"].includes(direction)) {
+      throw new Error("会话指标排序无效");
+    }
+    const parameters = [...scope.params, ...(query.threadId === undefined ? [] : [query.threadId])];
+    // Unfiltered Thread lists retain their own-request membership. Main lists also
+    // include registered parents whose only matching activity belongs to children.
+    const cte = `WITH RECURSIVE scoped AS (
+        SELECT * FROM model_request_metrics
+        WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL
+      ), ancestors(thread_id) AS (
+        SELECT DISTINCT thread_id FROM scoped
+        UNION
+        SELECT relation.parent_thread_id
+        FROM ancestors JOIN subagent_threads AS relation ON relation.thread_id = ancestors.thread_id
+      ), candidates AS (
+        SELECT DISTINCT candidate.thread_id FROM ${query.mainThreadsOnly ? "ancestors" : "scoped"} AS candidate
+        WHERE ${query.threadId === undefined ? "1 = 1" : "thread_id = ?"}
+          ${query.mainThreadsOnly ? "AND NOT EXISTS (SELECT 1 FROM subagent_threads WHERE subagent_threads.thread_id = candidate.thread_id)" : ""}
+      ), tree(root_thread_id, thread_id) AS (
+        SELECT thread_id, thread_id FROM candidates
+        UNION
+        SELECT tree.root_thread_id, child.thread_id
+        FROM tree JOIN subagent_threads AS child ON child.parent_thread_id = tree.thread_id
+      ), tree_scoped AS (
+        SELECT tree.root_thread_id, scoped.*
+        FROM tree JOIN scoped ON scoped.thread_id = tree.thread_id
+      ), tree_grouped AS (
+        SELECT root_thread_id,
+          SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)) AS total_tokens,
+          SUM(CASE WHEN thread_id != root_thread_id THEN input_tokens END) AS subagent_input_tokens,
+          SUM(CASE WHEN thread_id != root_thread_id THEN cached_input_tokens END) AS subagent_cached_input_tokens,
+          SUM(CASE WHEN thread_id != root_thread_id THEN output_tokens END) AS subagent_output_tokens,
+          COUNT(CASE WHEN thread_id != root_thread_id THEN 1 END) AS subagent_request_count,
+          COUNT(CASE WHEN thread_id != root_thread_id THEN cached_input_tokens END) AS subagent_cached_input_token_count,
+          MIN(request_started_at_ms) AS tree_first_request_started_at_ms,
+          MAX(recorded_at_ms) AS tree_recorded_at_ms
+        FROM tree_scoped GROUP BY root_thread_id
+      )`;
+    const summary = this.reader.prepare(`
+      ${cte}
+      SELECT ${metricsAggregateSql},
+        (SELECT COUNT(*) FROM tree_grouped) AS thread_count,
+        COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count
+      FROM scoped WHERE thread_id IN (SELECT root_thread_id FROM tree_grouped)
+    `).get(...parameters) as unknown as AggregateRow & { thread_count: number; turn_count: number };
+    const treeSummary = this.reader.prepare(`
+      ${cte}
+      SELECT ${metricsAggregateSql}
+      FROM scoped WHERE id IN (SELECT id FROM tree_scoped)
+    `).get(...parameters) as unknown as AggregateRow;
+    const rows = this.reader.prepare(`
+      ${cte}, grouped AS (
+        SELECT thread_id, turn_id, COUNT(DISTINCT turn_id) AS turn_count,
+          ${metricsAggregateSql},
+          MIN(request_started_at_ms) AS first_request_started_at_ms,
+          MAX(recorded_at_ms) AS recorded_at_ms, MAX(id) AS latest_id
+        FROM scoped WHERE thread_id IN (SELECT root_thread_id FROM tree_grouped)
+        GROUP BY thread_id
+      )
+      SELECT grouped.*, tree_grouped.*, latest.provider, latest.model, latest.reasoning_effort,
+        subagent.agent_path, subagent.parent_thread_id, subagent.parent_turn_id
+      FROM tree_grouped
+      LEFT JOIN grouped ON grouped.thread_id = tree_grouped.root_thread_id
+      LEFT JOIN model_request_metrics AS latest ON latest.id = grouped.latest_id
+      LEFT JOIN subagent_threads AS subagent ON subagent.thread_id = tree_grouped.root_thread_id
+      ORDER BY ${sortColumn} ${direction}, tree_grouped.root_thread_id ${direction}
+      LIMIT ? OFFSET ?
+    `).all(...parameters, query.limit, offset) as unknown as Array<TurnSummaryRow & CacheUsageRow & {
+      root_thread_id: string;
+      first_request_started_at_ms: number | null;
+      recorded_at_ms: number | null;
+      total_tokens: number;
+      subagent_input_tokens: number | null;
+      subagent_cached_input_tokens: number | null;
+      subagent_output_tokens: number | null;
+      subagent_request_count: number;
+      subagent_cached_input_token_count: number;
+      tree_first_request_started_at_ms: number;
+      tree_recorded_at_ms: number;
+      agent_path: string | null;
+      parent_thread_id: string | null;
+      parent_turn_id: string | null;
+    }>;
+    return {
+      rows,
+      matchedTotal: summary.thread_count,
+      nextOffset: offset + rows.length < summary.thread_count ? offset + rows.length : null,
+      aggregate: summary.request_count === 0 ? null : toStoredMetricsAggregate(summary),
+      treeAggregate: treeSummary.request_count === 0 ? null : toStoredMetricsAggregate(treeSummary),
+      turnCount: summary.turn_count,
     };
   }
 
@@ -841,35 +975,32 @@ export class SqliteRequestMetricsQueries {
     return new Map(rows.map((row) => [row.parent_thread_id, row.total]));
   }
 
-  private queryThreadPage(group: "thread_id" | "turn_id", query: ModelRequestMetricsThreadQuery) {
+  private queryThreadTurnPage(query: ModelRequestMetricsThreadQuery) {
     this.reader.requireOpen();
     const scope = metricsScopeSql(query);
     const offset = metricsPageOffset(query);
     const sortKey = query.sortKey ?? "last";
     const sortColumns = {
-      time: group === "thread_id" ? "first_request_started_at_ms" : "recorded_at_ms",
+      time: "recorded_at_ms",
       last: "recorded_at_ms", thread: "grouped.thread_id", turn: "grouped.turn_id",
       provider: "latest.provider", model: "latest.model", turns: "turn_count",
       requests: "request_count", failures: "unsuccessful_request_count",
       input: "input_tokens", output: "output_tokens", compact: "compact_request_count",
+      totalTokens: undefined,
     };
     const sortColumn = sortColumns[sortKey];
     const direction = query.sortDirection ?? "desc";
     if (sortColumn === undefined || !["asc", "desc"].includes(direction)) {
       throw new Error("会话指标排序无效");
     }
-    const mainThreadsSql = group === "thread_id" && query.mainThreadsOnly
-      ? "AND NOT EXISTS (SELECT 1 FROM subagent_threads WHERE subagent_threads.thread_id = model_request_metrics.thread_id)"
-      : "";
     const scoped = `SELECT * FROM model_request_metrics
-      WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL ${mainThreadsSql}`;
+      WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL`;
     const summary = this.reader.prepare(`
       SELECT ${metricsAggregateSql},
-        COUNT(DISTINCT thread_id) AS thread_count,
         COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count
       FROM (${scoped})
-    `).get(...scope.params) as unknown as AggregateRow & { thread_count: number; turn_count: number };
-    const matchedTotal = group === "thread_id" ? summary.thread_count : summary.turn_count;
+    `).get(...scope.params) as unknown as AggregateRow & { turn_count: number };
+    const matchedTotal = summary.turn_count;
     const rows = this.reader.prepare(`
       WITH scoped AS (${scoped}), grouped AS (
         SELECT thread_id, turn_id, COUNT(DISTINCT turn_id) AS turn_count,
@@ -878,16 +1009,16 @@ export class SqliteRequestMetricsQueries {
           MAX(recorded_at_ms) AS recorded_at_ms,
           MAX(id) AS latest_id
         FROM scoped
-        GROUP BY ${group}
+        GROUP BY turn_id
       )
       SELECT grouped.*, latest.provider, latest.model, latest.reasoning_effort,
-        ${group === "turn_id" ? "timing.duration_ms" : "NULL AS duration_ms"},
+        timing.duration_ms,
         subagent.agent_path, subagent.parent_thread_id, subagent.parent_turn_id
       FROM grouped
       JOIN model_request_metrics AS latest ON latest.id = grouped.latest_id
-      ${group === "turn_id" ? "LEFT JOIN turn_execution_metrics AS timing ON timing.thread_id = grouped.thread_id AND timing.turn_id = grouped.turn_id" : ""}
+      LEFT JOIN turn_execution_metrics AS timing ON timing.thread_id = grouped.thread_id AND timing.turn_id = grouped.turn_id
       LEFT JOIN subagent_threads AS subagent ON subagent.thread_id = grouped.thread_id
-      ORDER BY ${sortColumn} ${direction}, grouped.${group} ${direction}
+      ORDER BY ${sortColumn} ${direction}, grouped.turn_id ${direction}
       LIMIT ? OFFSET ?
     `).all(...scope.params, query.limit, offset) as unknown as Array<TurnSummaryRow & CacheUsageRow & {
       thread_id: string;
@@ -1048,7 +1179,7 @@ function metricsPageOffset(query: { offset?: number; limit: number }): number {
   return offset;
 }
 
-function metricsScopeSql(query: ModelRequestMetricsScope): { sql: string; params: Array<string | number> } {
+function metricsScopeSql(query: ModelRequestMetricsScope, selectThreadRoot = false): { sql: string; params: Array<string | number> } {
   validateMetricsTimeRange(query);
   const conditions = ["recorded_at_ms >= ?", "recorded_at_ms < ?"];
   const params: Array<string | number> = [query.startAtMs, query.endAtMs];
@@ -1060,6 +1191,7 @@ function metricsScopeSql(query: ModelRequestMetricsScope): { sql: string; params
     const value = query[key];
     if (value === undefined) continue;
     if (!value.trim() || value.length > 128) throw new Error(`${key} 筛选值无效`);
+    if (selectThreadRoot && key === "threadId" && query.turnId === undefined) continue;
     conditions.push(`${column} = ?`);
     params.push(value);
   }

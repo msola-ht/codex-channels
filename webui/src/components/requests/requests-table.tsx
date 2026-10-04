@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { FastBadge } from "@/components/metrics/service-tier"
+import { OutputTokenTooltip } from "@/components/metrics/token-tooltip"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import { RelayRequestStatus } from "@/components/requests/relay-request-status"
 import {
@@ -82,8 +83,8 @@ export function RequestsTable({
   const currentSelected = selected === null ? null : records.find(record => record.id === selected.id) ?? selected
   if (currentSelected !== selected) setSelected(currentSelected)
   const opener = React.useRef<HTMLElement | null>(null)
-  const openRequest = React.useCallback((record: RequestRecord) => {
-    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  const openRequest = React.useCallback((record: RequestRecord, trigger?: HTMLElement) => {
+    opener.current = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
     setSelected(record)
   }, [])
   const columnLabels: Record<string, string> = {
@@ -240,31 +241,7 @@ export function RequestsTable({
       header: ({ column }) => (
         <SortableHeader column={column}>{t("metrics.output")}</SortableHeader>
       ),
-      cell: ({ row }) => {
-        const record = row.original
-        if (record.reasoningOutputTokens === null) return <span className="tabular-nums">{formatTokens(record.outputTokens)}</span>
-        const nonReasoning =
-          record.outputTokens === null || record.reasoningOutputTokens === null
-            ? null
-            : Math.max(0, record.outputTokens - record.reasoningOutputTokens)
-        return (
-          <Tooltip>
-            <TooltipTrigger aria-description={[t("metrics.reasoning", { count: formatTokens(record.reasoningOutputTokens) }), t("metrics.nonReasoning", { count: nonReasoning === null ? "—" : formatTokens(nonReasoning) })].join("; ")} render={<span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" />}>
-                {formatTokens(record.outputTokens)}
-              </TooltipTrigger>
-            <TooltipContent side="right" align="start">
-              <ul className="flex flex-col gap-1">
-                <li className="whitespace-nowrap">
-                  {t("metrics.reasoning", { count: formatTokens(record.reasoningOutputTokens) })}
-                </li>
-                <li className="whitespace-nowrap">
-                  {t("metrics.nonReasoning", { count: nonReasoning === null ? "—" : formatTokens(nonReasoning) })}
-                </li>
-              </ul>
-            </TooltipContent>
-          </Tooltip>
-        )
-      },
+      cell: ({ row }) => <OutputTokenTooltip outputTokens={row.original.outputTokens} reasoningOutputTokens={row.original.reasoningOutputTokens} />,
     },
     {
       id: "firstContent",
@@ -285,10 +262,10 @@ export function RequestsTable({
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
-      id: "traffic", header: t("requestDetail.title"), enableSorting: false,
+      id: "traffic", header: t("requestDetail.title"), enableSorting: false, enableHiding: false,
       cell: ({ row }) => <Button variant="link" size="sm" onClick={(event) => {
         event.stopPropagation()
-        openRequest(row.original)
+        openRequest(row.original, event.currentTarget)
       }}>{t("requestDetail.open")}</Button>,
     },
     {

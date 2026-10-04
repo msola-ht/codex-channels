@@ -74,3 +74,7 @@ export const navigation: (NavItem | NavGroup)[] = [
 ]
 export const navItems = navigation.flatMap(item => "children" in item ? item.children : [item])
 export const navGroups = navigation.filter((item): item is NavGroup => "children" in item)
+
+export function decodeThreadPath(value: string): string | null {
+  try { return decodeURIComponent(value) } catch { return null }
+}

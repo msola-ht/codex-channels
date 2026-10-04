@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RequestMetricsQueryService, SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import { sample } from "./request-metrics-fixtures.js";
@@ -11,6 +11,203 @@ const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { force: true, recursive: true }); });
 
 describe("request metrics subagent session aggregation", () => {
+  it("counts scoped own Threads and Turns for overview without querying tree pages", () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-thread-counts-"));
+    directories.push(directory);
+    const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"), 10_000);
+    const scope = { startAtMs: 1000, endAtMs: 2000 };
+    const threadList = vi.spyOn(store, "threadList").mockImplementation(() => {
+      throw new Error("Overview must not query Thread pages");
+    });
+    const threadCounts = vi.spyOn(store, "threadCounts");
+    try {
+      const metric = (threadId: string | null, turnId: string | null, provider: string, recordedAtMs = 1100) => ({
+        ...sample(), threadId, turnId, provider, recordedAtMs,
+      });
+      store.recordBatch([
+        metric("root", "shared", "first", 1000),
+        metric("root", "shared", "first"),
+        metric("root", "shared", "second"),
+        metric("root", "another", "second"),
+        metric("child", "shared", "first"),
+        metric("peer", "shared", "second"),
+        metric("missing-turn", null, "first"),
+        metric(null, "missing-thread", "second"),
+        metric("before", "shared", "first", 999),
+        metric("after", "shared", "second", 2000),
+      ]);
+      store.recordSubagentThread({ agentThreadId: "child", parentThreadId: "absent-root", parentTurnId: "shared", agentPath: "/root/child" });
+      expect(store.threadCounts(scope)).toEqual({ threadCount: 3, turnCount: 4 });
+      expect(store.threadCounts({ ...scope, provider: "first" })).toEqual({ threadCount: 2, turnCount: 2 });
+      expect(store.threadCounts({ ...scope, provider: ["first", "second"] })).toEqual({ threadCount: 3, turnCount: 4 });
+      expect(store.threadCounts({ ...scope, threadId: "root", turnId: "shared" })).toEqual({ threadCount: 1, turnCount: 1 });
+      expect(store.threadCounts({ ...scope, provider: "missing" })).toEqual({ threadCount: 0, turnCount: 0 });
+      expect(() => store.threadCounts({ ...scope, turnId: "shared" })).toThrow("必须同时指定 Thread ID");
+      threadCounts.mockClear();
+      const overview = new RequestMetricsQueryService(store).overview({ ...scope, name: "all" });
+      expect(overview).toMatchObject({ threadCount: 3, turnCount: 4 });
+      expect(overview.providers.map(({ provider, threadCount, turnCount }) => ({ provider, threadCount, turnCount }))).toEqual([
+        { provider: "first", threadCount: 2, turnCount: 2 },
+        { provider: "second", threadCount: 2, turnCount: 3 },
+      ]);
+      expect(threadCounts).toHaveBeenCalledTimes(3);
+      expect(threadCounts).toHaveBeenCalledWith(scope);
+      expect(threadCounts).toHaveBeenCalledWith({ ...scope, provider: "first" });
+      expect(threadCounts).toHaveBeenCalledWith({ ...scope, provider: "second" });
+      expect(threadList).not.toHaveBeenCalled();
+    } finally {
+      threadList.mockRestore();
+      threadCounts.mockRestore();
+      store.close();
+    }
+  });
+
+  it("keeps own usage while filtering, sorting and paging recursive total Tokens", () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-thread-tree-"));
+    directories.push(directory);
+    const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"), 10_000);
+    try {
+      const metric = (threadId: string, inputTokens: number, recordedAtMs: number) => ({
+        ...sample(), threadId, inputTokens, outputTokens: inputTokens / 10,
+        cachedInputTokens: 50, recordedAtMs, requestStartedAtMs: recordedAtMs - 100,
+        provider: "matching", model: "matching",
+      });
+      store.recordBatch([
+        metric("root-a", 100, 1100),
+        metric("root-b", 200, 1200),
+        metric("child-a", 500, 1300),
+        { ...metric("nested", 700, 1400), status: "failed", operation: "compact", cachedInputTokens: null },
+        metric("child-only", 900, 1500),
+        { ...metric("root-only", 10_000, 3000), provider: "other", model: "other" },
+        { ...metric("child-excluded", 20_000, 1600), provider: "other", model: "other" },
+        metric("child-outside", 30_000, 4000),
+      ]);
+      for (const [agentThreadId, parentThreadId] of [
+        ["child-a", "root-a"], ["nested", "child-a"], ["child-only", "root-only"],
+        ["child-excluded", "root-a"], ["child-outside", "root-a"], ["no-requests", "root-a"],
+      ] as const) {
+        store.recordSubagentThread({ agentThreadId, parentThreadId, parentTurnId: "turn-1", agentPath: `/root/${agentThreadId}` });
+      }
+      const query = { startAtMs: 1000, endAtMs: 2000, provider: "matching", model: "matching", mainThreadsOnly: true, limit: 1 };
+      const page = store.threadList(query);
+      expect(page).toMatchObject({
+        matchedTotal: 3, turnCount: 2, nextOffset: 1,
+        aggregate: { requestCount: 2, inputTokens: 300, outputTokens: 30 },
+        treeAggregate: {
+          requestCount: 5, unsuccessfulRequestCount: 1, inputTokens: 2400, outputTokens: 240,
+          cachedInputTokens: null,
+          cacheUsage: { cachedInputTokens: 200, inputTokens: 1700, missingRequestCount: 1 },
+          compact: { requestCount: 1, inputTokens: 700, outputTokens: 70 },
+        },
+        threads: [{
+          threadId: "root-only", provider: null, model: null, requestCount: 0, turnCount: 0,
+          inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, totalTokens: 990,
+          subagentUsage: { inputTokens: 900, cachedInputTokens: 50, outputTokens: 90 },
+          firstRequestStartedAtMs: 1400, lastRecordedAtMs: 1500,
+          cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 }, compact: null,
+        }],
+      });
+      expect(store.threadList({ ...query, offset: 1 })).toMatchObject({
+        matchedTotal: 3, treeAggregate: page.treeAggregate,
+        threads: [{ threadId: "root-b", inputTokens: 200, cachedInputTokens: 50, totalTokens: 220,
+          subagentUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 } }],
+      });
+      expect(store.threadList({ ...query, offset: 2 })).toMatchObject({
+        nextOffset: null, treeAggregate: page.treeAggregate,
+        threads: [{ threadId: "root-a", inputTokens: 100, cachedInputTokens: 50, outputTokens: 10,
+          totalTokens: 1430, subagentUsage: { inputTokens: 1200, cachedInputTokens: null, outputTokens: 120 },
+          lastRecordedAtMs: 1100 }],
+      });
+      expect(store.threadList({ ...query, offset: 10 })).toMatchObject({ threads: [], matchedTotal: 3, treeAggregate: page.treeAggregate });
+      expect(store.threadList({ ...query, sortKey: "totalTokens" }).threads[0]?.threadId).toBe("root-a");
+      expect(store.threadList({ ...query, sortKey: "totalTokens", sortDirection: "asc" }).threads[0]?.threadId).toBe("root-b");
+      expect(store.threadList({ ...query, threadId: "root-a" })).toMatchObject({
+        matchedTotal: 1, aggregate: { inputTokens: 100 }, treeAggregate: { requestCount: 3, inputTokens: 1300 },
+      });
+      expect(store.threadList({
+        startAtMs: query.startAtMs, endAtMs: query.endAtMs, limit: query.limit,
+        provider: ["matching", "other"], mainThreadsOnly: true, threadId: "root-a",
+      }).treeAggregate).toMatchObject({ requestCount: 4, inputTokens: 21_300 });
+      expect(store.threadList({ ...query, startAtMs: 1300 })).toMatchObject({
+        matchedTotal: 2, aggregate: null, treeAggregate: { requestCount: 3, inputTokens: 2100 },
+      });
+      for (const filter of [{ status: "failed" as const }, { operation: "compact" as const }, { onlyFailures: true }, { filter: "nested" }]) {
+        expect(store.threadList({ ...query, ...filter })).toMatchObject({
+          matchedTotal: 1, aggregate: null, treeAggregate: { requestCount: 1, inputTokens: 700 },
+          threads: [{ threadId: "root-a", inputTokens: 0, cachedInputTokens: 0, totalTokens: 770,
+            subagentUsage: { inputTokens: 700, cachedInputTokens: null, outputTokens: 70 } }],
+        });
+      }
+      // Exact Turn selection must not include a child's coincidentally equal Turn ID.
+      expect(store.threadList({ ...query, threadId: "root-a", turnId: "turn-1" })).toMatchObject({
+        aggregate: { requestCount: 1, inputTokens: 100 }, treeAggregate: { requestCount: 1, inputTokens: 100 },
+        threads: [{ totalTokens: 110, subagentUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 } }],
+      });
+      const all = store.threadList({ ...query, mainThreadsOnly: false, limit: 20 });
+      expect(all).toMatchObject({ matchedTotal: 5, aggregate: page.treeAggregate, treeAggregate: page.treeAggregate });
+      expect(all.threads.some((thread) => thread.threadId === "root-only")).toBe(false);
+      expect(all.threads.find((thread) => thread.threadId === "child-a")).toMatchObject({ inputTokens: 500, totalTokens: 1320,
+        subagentUsage: { inputTokens: 700, cachedInputTokens: null, outputTokens: 70 } });
+      expect(store.threadList({ ...query, filter: "missing" })).toMatchObject({ matchedTotal: 0, aggregate: null, treeAggregate: null });
+      expect(() => store.threadList({ ...query, turnId: "turn-1" })).toThrow("必须同时指定 Thread ID");
+      expect(() => store.threadTurnSummaries("root-a", { ...query, sortKey: "totalTokens" })).toThrow("排序");
+    } finally { store.close(); }
+  });
+
+  it("tracks own and descendant cache completeness independently and counts cache only within input", () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-thread-usage-"));
+    directories.push(directory);
+    const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"), 10_000);
+    try {
+      const metric = (threadId: string, inputTokens: number | null, cachedInputTokens: number | null, outputTokens: number) => ({
+        ...sample(), threadId, inputTokens, cachedInputTokens, outputTokens, recordedAtMs: 1100,
+      });
+      store.recordBatch([
+        metric("complete-root", 100, 60, 10),
+        metric("complete-root", 200, 90, 20),
+        metric("complete-child", 1000, 500, 100),
+        metric("complete-nested", 500, 200, 50),
+        metric("partial-root", 100, 80, 1000),
+        metric("partial-root", 200, null, 20),
+        metric("known-child", 300, 90, 30),
+        metric("partial-child-root", 900, 900, 1),
+        metric("unknown-child", 500, null, 2),
+        metric("own-only", 1000, 1000, 1),
+        metric("child-only", 100, 50, 900),
+        metric("missing-input", null, 0, 5),
+      ]);
+      for (const [agentThreadId, parentThreadId] of [
+        ["complete-child", "complete-root"], ["complete-nested", "complete-child"],
+        ["known-child", "partial-root"], ["unknown-child", "partial-child-root"],
+        ["idle-child", "own-only"], ["child-only", "absent-root"],
+      ] as const) {
+        store.recordSubagentThread({ agentThreadId, parentThreadId, parentTurnId: "turn-1", agentPath: `/root/${agentThreadId}` });
+      }
+      const query = { startAtMs: 1000, endAtMs: 2000, mainThreadsOnly: true, limit: 20, sortKey: "totalTokens" as const };
+      const page = store.threadList(query);
+      expect(page.threads.map(({ threadId, inputTokens, cachedInputTokens, outputTokens, subagentUsage, totalTokens }) => ({
+        threadId, inputTokens, cachedInputTokens, outputTokens, subagentUsage, totalTokens,
+      }))).toEqual([
+        { threadId: "complete-root", inputTokens: 300, cachedInputTokens: 150, outputTokens: 30,
+          subagentUsage: { inputTokens: 1500, cachedInputTokens: 700, outputTokens: 150 }, totalTokens: 1980 },
+        { threadId: "partial-root", inputTokens: 300, cachedInputTokens: null, outputTokens: 1020,
+          subagentUsage: { inputTokens: 300, cachedInputTokens: 90, outputTokens: 30 }, totalTokens: 1650 },
+        { threadId: "partial-child-root", inputTokens: 900, cachedInputTokens: 900, outputTokens: 1,
+          subagentUsage: { inputTokens: 500, cachedInputTokens: null, outputTokens: 2 }, totalTokens: 1403 },
+        { threadId: "own-only", inputTokens: 1000, cachedInputTokens: 1000, outputTokens: 1,
+          subagentUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }, totalTokens: 1001 },
+        { threadId: "absent-root", inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+          subagentUsage: { inputTokens: 100, cachedInputTokens: 50, outputTokens: 900 }, totalTokens: 1000 },
+        { threadId: "missing-input", inputTokens: 0, cachedInputTokens: 0, outputTokens: 5,
+          subagentUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }, totalTokens: 5 },
+      ]);
+      expect(store.threadList({ ...query, sortDirection: "asc", limit: 2 }).threads.map(({ threadId }) => threadId))
+        .toEqual(["missing-input", "absent-root"]);
+      expect(page.treeAggregate).toMatchObject({ requestCount: 12, inputTokens: 4900, outputTokens: 2139, cachedInputTokens: null });
+      expect(page.threads.reduce((sum, thread) => sum + thread.totalTokens, 0)).toBe(7039);
+    } finally { store.close(); }
+  });
+
   it("filters main Threads before summary and paging while retaining unfiltered queries and child details", () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-main-thread-list-"));
     directories.push(directory);
@@ -234,6 +431,15 @@ describe("request metrics subagent session aggregation", () => {
     raw.prepare("INSERT INTO subagent_threads (thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms) VALUES (?, ?, ?, ?, ?)").run("root", "grandchild", "grand-turn", "/root/cycle", Date.now());
     raw.close();
     expect(store.threadSummary("root").threadAggregate).toMatchObject({ requestCount: 4, inputTokens: 1_000, outputTokens: 100, turnCount: 4 });
+    expect(store.threadList({ startAtMs: 0, endAtMs: Date.now() + 1_000, limit: 1, threadId: "root" })).toMatchObject({
+      matchedTotal: 1, aggregate: { requestCount: 1, inputTokens: 100 },
+      treeAggregate: { requestCount: 4, inputTokens: 1000, outputTokens: 100 },
+      threads: [{ inputTokens: 100, cachedInputTokens: 900, totalTokens: 1100,
+        subagentUsage: { inputTokens: 900, cachedInputTokens: 2700, outputTokens: 90 } }],
+    });
+    expect(store.threadList({ startAtMs: 0, endAtMs: Date.now() + 1_000, limit: 1 })).toMatchObject({
+      matchedTotal: 4, treeAggregate: { requestCount: 4, inputTokens: 1000, outputTokens: 100 },
+    });
     expect(store.threadTurnCount("root")).toBe(1);
     expect(store.threadTurnCount("child")).toBe(1);
     expect(store.aggregate({ dimension: "global", startAtMs: 0, endAtMs: Date.now() + 1_000 }).aggregate).toMatchObject({ requestCount: 4, inputTokens: 1_000, outputTokens: 100 });

@@ -104,9 +104,9 @@ async function watchQueue(path: string, signal: AbortSignal, receive: (event: Qu
       clearTimeout(idle)
       idle = setTimeout(() => controller.abort(), 35_000)
       buffer += decoder.decode(value, { stream: true })
-      if (buffer.length > 4096) throw new Error("Queue stream frame too large")
       let end: number
       while ((end = buffer.indexOf("\n\n")) >= 0) {
+        if (end > 4096) throw new Error("Queue stream frame too large")
         const frame = buffer.slice(0, end)
         buffer = buffer.slice(end + 2)
         if (!frame.startsWith("data: ")) throw new Error("Invalid queue event")
@@ -115,6 +115,9 @@ async function watchQueue(path: string, signal: AbortSignal, receive: (event: Qu
         if (event.type === "unavailable") throw new Error("Queue notifications unavailable")
         receive(event as QueueChangeEvent)
       }
+      // A network read may contain many valid frames; bound each frame and the unfinished tail.
+      const unfinishedLength = buffer.endsWith("\n") ? buffer.length - 1 : buffer.length
+      if (unfinishedLength > 4096) throw new Error("Queue stream frame too large")
     }
   } finally {
     clearTimeout(idle)

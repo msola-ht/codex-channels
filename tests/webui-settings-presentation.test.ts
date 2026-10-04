@@ -102,28 +102,48 @@ describe("WebUI 状态与关联范围展示", () => {
         name:"removal-preview-fixture",enforce:"pre",
         load(id) {
           if (id.endsWith("/hooks/use-account-settings-management.ts"))
-            return 'export function useAccountSettingsManagement(){return globalThis.management}';
+            return 'export function useAccountSettingsManagement(){globalThis.managementCalls++;return globalThis.management}';
           if (!id.endsWith("/components/ui/alert-dialog.tsx")) return;
           return 'import {createElement as h} from "react"; const box=({children})=>h("div",null,children); const button=({children,disabled})=>h("button",{disabled},children); export const AlertDialog=box,AlertDialogContent=box,AlertDialogDescription=box,AlertDialogFooter=box,AlertDialogHeader=box,AlertDialogTitle=box,AlertDialogAction=button,AlertDialogCancel=button;';
         }
       }]});
       try {
         const {LanguageContext}=await server.ssrLoadModule("/src/hooks/language-context.ts");
-        const {AccountSubscriptionNotice}=await server.ssrLoadModule("/src/components/overview/account-subscription-notice.tsx");
+        const {OpencodeGoUsageCard}=await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
+        const {ServerTimeContext}=await server.ssrLoadModule("/src/hooks/use-server-time.ts");
+        const {setServerTimeZone}=await server.ssrLoadModule("/src/lib/format.ts");setServerTimeZone("UTC");
         const pending={input:{operation:"opencode.account.remove",accountId:"main"},preview:{operation:"opencode.account.remove",account:{id:"main",displayName:"Account main"},provider:{name:"OpenCode Go",id:"ocg-main"},mode:"switching",model:"test-model",status:"ready",effects:{stopAppServer:true,removeAccount:true},activation:"restart-all"}};
         const before=JSON.stringify(pending);
-        globalThis.management={settings:{opencodeGo:{accounts:[{id:"main"}]}},loading:false,error:null,busy:false,pendingPreview:pending,actionError:null,refetch(){},cancel(){throw new Error("unexpected cancel")},confirm(){throw new Error("unexpected confirmation")},mutate(){throw new Error("unexpected mutation")}};
-        const render=(language)=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(AccountSubscriptionNotice,{accountId:"main",onRemoved(){}})));
+        globalThis.management={settings:{opencodeGo:{accounts:[{id:"main"},{id:"other"}]}},loading:false,error:null,busy:false,pendingPreview:pending,actionError:null,refetch(){},cancel(){throw new Error("unexpected cancel")},confirm(){throw new Error("unexpected confirmation")},mutate(){throw new Error("unexpected mutation")}};
+        const accounts=["main","other"].map(account=>({account,provider:"ocg-"+account,displayName:account,default:false,available:false,observedAtMs:1000,windows:[],subscriptionRequired:true}));
+        const calls=[];
+        const render=(language)=>{
+          globalThis.managementCalls=0;
+          const markup=renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(ServerTimeContext.Provider,{value:{nowMs:1000,receivedAtMs:Date.now(),timeZone:"UTC"}},h(OpencodeGoUsageCard,{accounts,refreshControls:{},onAccountsChanged(){}}))));
+          calls.push(globalThis.managementCalls);
+          return markup;
+        };
         const zh=render("zh"), en=render("en"), zhAgain=render("zh");
         globalThis.management.loading=true;
         const loading=render("en");
         globalThis.management.loading=false;
         globalThis.management.busy=true;
         const saving=render("en");
-        console.log(JSON.stringify({zh,en,zhAgain,loading,saving,unchanged:before===JSON.stringify(pending)}));
+        globalThis.management.busy=false;
+        globalThis.management.pendingPreview=null;
+        globalThis.management.error="snapshot-load-failed";
+        const failed=render("en");
+        globalThis.management.loading=true;
+        const retrying=render("en");
+        globalThis.management.loading=false;
+        globalThis.management.error=null;
+        const recovered=render("en");
+        globalThis.management.pendingPreview={...pending,input:{...pending.input,accountId:"other"},preview:{...pending.preview,account:{id:"other",displayName:"Account other"}}};
+        const other=render("en");
+        console.log(JSON.stringify({zh,en,zhAgain,loading,saving,failed,retrying,recovered,other,calls,unchanged:before===JSON.stringify(pending)}));
       } finally {await server.close();}
     `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
-    const result = JSON.parse(output) as Record<string, string | boolean>;
+    const result = JSON.parse(output) as Record<string, string | boolean | number[]>;
     expect(result.zh).toContain("确认删除账户");
     expect(result.zhAgain).toBe(result.zh);
     expect(result.unchanged).toBe(true);
@@ -135,6 +155,18 @@ describe("WebUI 状态与关联范围展示", () => {
     expect(result.en).toContain("Activation target: restart-all");
     expect(result.en).toContain("stopAppServer=true; removeAccount=true");
     expect(result.en).toContain("<button>Confirm removal</button>");
+    expect((result.en as string).match(/Confirm account removal/gu)).toHaveLength(1);
+    expect((result.other as string).match(/Confirm account removal/gu)).toHaveLength(1);
+    expect(result.other).toContain("Account other (other)");
+    expect(result.other).not.toContain("Account main (main)");
+    expect(result.calls).toEqual(Array(9).fill(1));
+    const buttons = (markup: string, label: string) => [...markup.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/gu)].filter(([button]) => button.includes(label));
+    const retries = buttons(result.failed as string, "Retry loading account configuration");
+    expect(retries).toHaveLength(2);
+    for (const [button] of retries) expect(button).not.toMatch(/\sdisabled(?:=|\s|>)/u);
+    for (const [button] of buttons(result.failed as string, "Remove local account")) expect(button).toMatch(/\sdisabled(?:=|\s|>)/u);
+    for (const [button] of buttons(result.retrying as string, "Retry loading account configuration")) expect(button).toMatch(/\sdisabled(?:=|\s|>)/u);
+    for (const [button] of buttons(result.recovered as string, "Remove local account")) expect(button).not.toMatch(/\sdisabled(?:=|\s|>)/u);
     for (const state of [result.en, result.loading, result.saving]) {
       expect(state).not.toMatch(/[\u4e00-\u9fff]/u);
     }

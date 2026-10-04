@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -18,14 +18,49 @@ import type { MessageKey } from "@/lib/i18n/messages"
 import { useTranslation } from "@/hooks/use-translation"
 import { API_PREFIX, onUnauthorized, setToken } from "@/lib/api"
 
-export function AuthGate({ children }: { children: ReactNode }) {
+export function AuthGate({ children, initialTokenStorageFailed = false }: { children: ReactNode; initialTokenStorageFailed?: boolean }) {
   const { t, language, setLanguage } = useTranslation()
-  const [unauthorized, setUnauthorized] = useState(false)
+  const [unauthorized, setUnauthorized] = useState(initialTokenStorageFailed)
   const [token, setTokenValue] = useState("")
-  const [error, setError] = useState<MessageKey | null>(null)
+  const [error, setError] = useState<MessageKey | null>(initialTokenStorageFailed ? "auth.storageFailed" : null)
   const [submitting, setSubmitting] = useState(false)
+  const operation = useRef<AbortController | null>(null)
 
   useEffect(() => onUnauthorized(() => setUnauthorized(true)), [])
+  useEffect(() => () => operation.current?.abort(), [])
+
+  const authenticate = async () => {
+    const candidate = token.trim()
+    if (!candidate || operation.current !== null) return
+    const current = new AbortController()
+    operation.current = current
+    const timeout = AbortSignal.timeout(30_000)
+    setSubmitting(true)
+    setError(null)
+    try {
+      const response = await fetch(`${API_PREFIX}/threads`, {
+        headers: { authorization: `Bearer ${candidate}` },
+        signal: AbortSignal.any([current.signal, timeout]),
+      })
+      if (current.signal.aborted) return
+      if (!response.ok) {
+        setError(response.status === 401 || response.status === 403 ? "auth.invalidToken" : "auth.serviceFailed")
+        return
+      }
+      if (!setToken(candidate)) {
+        setError("auth.storageFailed")
+        return
+      }
+      window.location.reload()
+    } catch {
+      if (!current.signal.aborted) setError(timeout.aborted ? "auth.timeout" : "auth.connectFailed")
+    } finally {
+      if (operation.current === current) {
+        operation.current = null
+        if (!current.signal.aborted) setSubmitting(false)
+      }
+    }
+  }
 
   if (!unauthorized) return children
 
@@ -39,7 +74,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
             {t("auth.tokenDescription")}
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+        <CardContent>
+          <form className="flex flex-col gap-3" onSubmit={event => { event.preventDefault(); void authenticate() }}>
           <Alert>
             <AlertTitle>{t("auth.restricted")}</AlertTitle>
             <AlertDescription>
@@ -64,31 +100,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
             <FieldError id="auth-token-error">{error === null ? null : t(error)}</FieldError>
           </Field>
           <Button
+            type="submit"
             disabled={token.trim() === "" || submitting}
-            onClick={async () => {
-              const candidate = token.trim()
-              setSubmitting(true)
-              setError(null)
-              try {
-                const response = await fetch(`${API_PREFIX}/threads`, {
-                  headers: { authorization: `Bearer ${candidate}` },
-                })
-                if (!response.ok) {
-                  setError("auth.invalidToken")
-                  return
-                }
-                setToken(candidate)
-                window.location.reload()
-              } catch {
-                setError("auth.connectFailed")
-              } finally {
-                setSubmitting(false)
-              }
-            }}
           >
             {submitting ? <Spinner data-icon="inline-start" aria-label={t("common.loading")} /> : null}
             {submitting ? t("auth.verifying") : t("auth.submit")}
           </Button>
+          </form>
         </CardContent>
       </Card>
     </main>

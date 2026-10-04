@@ -15,7 +15,7 @@ export function getToken(): string | null {
   }
 }
 
-export function setToken(token: string): void {
+export function setToken(token: string): boolean {
   try {
     localStorage.setItem(TOKEN_KEY, token)
     try {
@@ -23,7 +23,7 @@ export function setToken(token: string): void {
     } catch {
       // 清理旧的会话令牌失败时仍保留已写入的持久令牌
     }
-    return
+    return getToken() === token
   } catch {
     try {
       localStorage.removeItem(TOKEN_KEY)
@@ -33,7 +33,9 @@ export function setToken(token: string): void {
     try {
       sessionStorage.setItem(TOKEN_KEY, token)
     } catch {
-      // 存储不可用时仅本次会话内保留
+      return false
     }
+    // 读取优先级必须与 API 一致；不能把仍被旧持久令牌遮蔽的会话写入视为成功。
+    return getToken() === token
   }
 }

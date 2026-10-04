@@ -1,10 +1,11 @@
 import type { AccountRefreshAttempts } from "@/lib/account-refresh-state"
-import { navItems, navGroups } from "@/lib/navigation"
+import { navItems, navGroups, decodeThreadPath } from "@/lib/navigation"
 import { translateApiError } from "@/lib/i18n/translate"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
 
 import { AuthGate } from "@/components/layout/auth-gate"
+import { PageErrorBoundary, PageRecovery } from "@/components/layout/page-recovery"
 import { AppSidebar, AppSidebarProvider } from "@/components/layout/app-sidebar"
 import { ModeToggle } from "@/components/layout/mode-toggle"
 import { LanguageToggle } from "@/components/metrics/language-toggle"
@@ -87,7 +88,8 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
   }
   if (pathname.startsWith("/threads/")) {
     const threadPath = pathname.split("/")[2] ?? ""
-    const threadId = decodeURIComponent(threadPath)
+    const threadId = decodeThreadPath(threadPath)
+    if (threadId === null) return <BreadcrumbItem><BreadcrumbPage>{t("shell.invalidAddress")}</BreadcrumbPage></BreadcrumbItem>
     const subagents = pathname === `/threads/${threadPath}/subagents`
     return (
       <>
@@ -129,6 +131,7 @@ function ServerClock({ snapshot, syncFailed }: { snapshot: ServerClockSnapshot; 
 function Layout() {
   const [accountRefreshAttempts] = useState<AccountRefreshAttempts>(() => new Map())
   const { pathname } = useLocation()
+  const invalidThreadPath = pathname.startsWith("/threads/") && decodeThreadPath(pathname.split("/")[2] ?? "") === null
   const { t, language, setLanguage } = useTranslation()
   const [consoleRange, setConsoleRange] = useState<MetricsRangeQuery>({ range: "30d" })
   const time = useServerTime()
@@ -171,7 +174,9 @@ function Layout() {
             <p className="mb-3 text-xs text-muted-foreground lg:hidden">
               <ServerClock snapshot={time.data} syncFailed={time.error !== null} />
             </p>
+            <PageErrorBoundary key={pathname}>
             <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">{t("common.loading")}</div>}>
+              {invalidThreadPath ? <PageRecovery invalidAddress /> :
               <Routes>
                 <Route path="/" element={<ConsolePage refreshAttempts={accountRefreshAttempts} range={consoleRange} onRangeChange={setConsoleRange} />} />
                 <Route path="/threads" element={<ThreadsPage />} />
@@ -196,8 +201,10 @@ function Layout() {
                 <Route path="/settings/network" element={<NetworkSettingsPage />} />
                 <Route path="/settings/data" element={<DataSettingsPage />} />
                 <Route path="/settings/services" element={<ServiceSettingsPage />} />
-              </Routes>
+                <Route path="*" element={<PageRecovery invalidAddress />} />
+              </Routes>}
             </Suspense>
+            </PageErrorBoundary>
           </div>
         </SidebarInset>
       </AppSidebarProvider>
@@ -210,12 +217,12 @@ function AppToaster() {
   return <Toaster timeout={3000} closeLabel={t("common.close")} label={t("common.notifications")} />
 }
 
-export default function App() {
+export default function App({ initialTokenStorageFailed = false }: { initialTokenStorageFailed?: boolean }) {
   return (
     <TooltipProvider delay={400} timeout={0}>
       <LanguageProvider>
         <AppToaster />
-        <AuthGate>
+        <AuthGate initialTokenStorageFailed={initialTokenStorageFailed}>
           <HashRouter>
             <Layout />
           </HashRouter>

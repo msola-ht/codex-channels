@@ -17,22 +17,25 @@ export function TrafficContent({ title, text, json = false, truncated = false }:
   const { t } = useTranslation()
   const [wrap, setWrap] = useState(true)
   const [formatted, setFormatted] = useState(json && !truncated)
-  const [copyState, setCopyState] = useState<"idle" | "pending" | "copied" | "failed">("idle")
+  const [copy, setCopy] = useState<{ text: string; state: "idle" | "pending" | "copied" | "failed" }>({ text, state: "idle" })
+  if (copy.text !== text) setCopy({ text, state: "idle" })
+  const copyState = copy.text === text ? copy.state : "idle"
   const shown = useMemo(() => {
     if (!formatted || truncated) return text
     try { return JSON.stringify(JSON.parse(text), null, 2) } catch { return text }
   }, [formatted, text, truncated])
-  const copy = async () => {
-    setCopyState("pending")
+  const copyText = async () => {
+    const attempt = { text, state: "pending" as const }
+    setCopy(attempt)
     try {
       await navigator.clipboard.writeText(text)
-      setCopyState("copied")
-    } catch { setCopyState("failed") }
+      setCopy(current => current === attempt ? { text, state: "copied" } : current)
+    } catch { setCopy(current => current === attempt ? { text, state: "failed" } : current) }
   }
   return <section className="flex min-w-0 flex-col gap-2">
     <div className="flex flex-wrap items-center gap-2">
       <p className="break-all text-xs font-medium">{title}</p>
-      <Button type="button" size="sm" variant="outline" disabled={copyState === "pending"} onClick={() => void copy()}><CopyIcon data-icon="inline-start" />{t("traffic.copyRaw")}</Button>
+      <Button type="button" size="sm" variant="outline" disabled={copyState === "pending"} onClick={() => void copyText()}><CopyIcon data-icon="inline-start" />{t("traffic.copyRaw")}</Button>
       <Button type="button" size="sm" variant="outline" aria-pressed={wrap} onClick={() => setWrap(!wrap)}>{t("traffic.wrap")}</Button>
       {json && !truncated ? <Button type="button" size="sm" variant="outline" aria-pressed={formatted} onClick={() => setFormatted(!formatted)}>{t("traffic.format")}</Button> : null}
       <span role="status" className="text-xs text-muted-foreground">{copyState === "copied" ? t("traffic.copiedRaw") : copyState === "failed" ? t("traffic.copyFailedBody") : ""}</span>

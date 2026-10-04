@@ -29,6 +29,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
 - `request-metrics-query-service.ts`：在只读 Store 之上统一滚动时间范围、本地今天/昨天、自定义日期、请求筛选、聚合维度以及
   会话、请求、异常、趋势和额度查询；Bootstrap、`codexc metrics` 与 WebUI 复用同一查询语义，
   各自只负责授权、参数边界和结果呈现。
+  控制台整体及各 Provider 的会话/轮次计数使用 `threadCounts(scope)`，按自身 Thread/Turn 去重，不执行会话列表的递归用量、排序或行映射。
 - `request-metrics-writer.ts`：提供 10,000 条上限的有界延迟写入队列；指标 Socket 只负责入队，
   批次成功提交后通过注入回调通知读取方失效，通知故障不改变写入结果；失败批次不发送成功通知。
   每 10 ms 最多取 32 条并优先在一个 SQLite 事务中写入，关闭时排空，减少逐请求事务开销；公开
@@ -43,6 +44,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   Row 类型和纯领域映射，包括历史未观测响应归一化与额度窗口解析。
 - `sqlite-quota-queries.ts`：封装周额度估算、最新额度与历史窗口归约；通过 Store 的同一连接和受跟踪迭代器读取，不创建连接或事务，不承担 Store 关闭及 Schema 生命周期。
 - `sqlite-request-metrics-queries.ts`：请求分页、错误统计、日/小时汇总、Thread/Turn 聚合、Relay 调用方与 Key 的批量使用摘要及同步游标读取；通过 Store 的读取与关闭检查端口执行，SQL 和行映射不介入写入、事务或数据库生命周期。内部 Thread ID 校验同时供 Store 写入使用。
+  Thread 列表额外返回同筛选范围的 `totalTokens`、自身缓存与后代输入/缓存/输出分项，以及按请求去重的 `treeAggregate`，支持总计 Token 排序；缓存是输入子集，不重复累加，自身与后代分别判断缓存完整性。WebUI 主会话查询允许只有后代匹配的根入选。普通 Thread 查询仍保留自身有匹配记录的行集合，自身聚合与 Turn 查询口径不变；不新增持久化汇总或 Schema 字段。
 - `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v26 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 持有初始化事务，不隐式升级旧库。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、

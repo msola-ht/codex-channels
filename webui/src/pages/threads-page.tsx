@@ -28,7 +28,7 @@ export function ThreadsPage() {
       <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={refreshing} />
       {error !== null ? null : data === null ? <PageSkeleton rows={5} /> : (
         <>
-          <QuerySummary loading={loading} aggregate={data.aggregate} range={data.range} turns={data.turnCount} />
+          <QuerySummary loading={loading} label={t("threads.treeSummary")} aggregate={data.treeAggregate} range={data.range} />
           <ThreadTable loading={loading} threads={data.threads} query={query} pagination={pagination(data)} />
         </>
       )}

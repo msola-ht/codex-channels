@@ -17,6 +17,13 @@ describe("WebUI 界面文案语言切换", () => {
     enTurns: string;
     enSummary: string;
     enFilters: string;
+    rangePresentation: Record<"zh" | "en", {
+      invalidFilters: string; invalidSelector: string;
+      valid: Array<{ value: string; selection: string; filters: string; selector: string }>;
+    }>;
+    invalidRangeSelection: null;
+    savedKeyWarnings: { cleanup: string; audit: string };
+    decodedThreadPaths: { valid: string; invalid: null };
     enNavigation: string;
     restoredLanguage: string;
     unsupportedStoredLanguage: string;
@@ -95,6 +102,9 @@ describe("WebUI 界面文案语言切换", () => {
         const { TurnTable } = await server.ssrLoadModule("/src/components/threads/turn-table.tsx");
         const { QuerySummary } = await server.ssrLoadModule("/src/components/metrics/query-summary.tsx");
         const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx");
+        const { RangeSelector } = await server.ssrLoadModule("/src/components/metrics/range-selector.tsx");
+        const { metricsRangeSelection } = await server.ssrLoadModule("/src/lib/metrics-query.ts");
+        const { decodeThreadPath } = await server.ssrLoadModule("/src/lib/navigation.ts");
         const { ConsolePage } = await server.ssrLoadModule("/src/pages/console-page.tsx");
         const { RequestsPage } = await server.ssrLoadModule("/src/pages/requests-page.tsx");
         const { ErrorsPage } = await server.ssrLoadModule("/src/pages/errors-page.tsx");
@@ -127,6 +137,19 @@ describe("WebUI 界面文案语言切换", () => {
         const render = (component, props, language) => renderToStaticMarkup(
           h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(MemoryRouter, null, h(TooltipProvider, null, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props)))));
         const clock = { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" };
+        const rangeQueries = [
+          ...["24h", "90d", "all"].map(value => ({ value, query: { range: value } })),
+          { value: "custom", query: { from: "2026-10-01", to: "2026-10-03" } },
+        ];
+        const rangePresentation = Object.fromEntries(["zh", "en"].map(language => [language, {
+          invalidFilters: render(QueryFilters, { query: { range: "bogus" }, onChange: noop }, language),
+          invalidSelector: render(RangeSelector, { value: metricsRangeSelection({ range: "bogus" }), onChange: noop, onDateChange: noop }, language),
+          valid: rangeQueries.map(({ value, query }) => ({
+            value, selection: metricsRangeSelection(query),
+            filters: render(QueryFilters, { query, onChange: noop }, language),
+            selector: render(RangeSelector, { value: metricsRangeSelection(query), from: query.from, to: query.to, onChange: noop, onDateChange: noop }, language),
+          })),
+        }]));
         const { RefreshStatus } = await server.ssrLoadModule("/src/components/metrics/refresh-status.tsx");
         for (const language of ["zh", "en"]) {
           const staleText = translate(language, "refreshStatus.stale");
@@ -341,6 +364,10 @@ describe("WebUI 界面文案语言切换", () => {
           unavailableStorageLanguage: restore(() => { throw new Error("storage blocked"); }),
           enNavigation: render(SidebarProvider, { children: h(AppSidebar) }, "en"),
           enFilters: render(QueryFilters, { query: { range: "all" }, onChange: noop }, "en"),
+          rangePresentation,
+          invalidRangeSelection: metricsRangeSelection({ range: "bogus" }),
+          savedKeyWarnings: { cleanup: translate("en", "relay.cleanupFailed"), audit: translate("en", "relay.auditFailed") },
+          decodedThreadPaths: { valid: decodeThreadPath("parent%2Fthread"), invalid: decodeThreadPath("%") },
           unknownError: translateApiError((key)=>translate("en", key), "secret-internal-details", "unrecognized"),
           prototypeError: translateApiError((key)=>translate("en", key), "secret-internal-details", "__proto__"),
           knownError: translateApiError((key)=>translate("en", key), "secret-internal-details", "invalid_range"),
@@ -410,6 +437,52 @@ describe("WebUI 界面文案语言切换", () => {
   it("占位符一致，替换值按普通文本保留", () => {
     expect(result.placeholderParity).toBe(true);
     expect(result.interpolated).toBe("Thread · thread-$&-<script>");
+  });
+
+  it("非法 URL 时间范围使用双语无效提示且合法范围保留实际选择", () => {
+    expect(result.invalidRangeSelection).toBeNull();
+    const expectedLabels = {
+      zh: { "24h": "最近 24 小时", "90d": "最近 90 天", all: "全部历史", custom: "自定义日期" },
+      en: { "24h": "Last 24 hours", "90d": "Last 90 days", all: "All history", custom: "Custom dates" },
+    };
+    for (const language of ["zh", "en"] as const) {
+      const presentation = result.rangePresentation[language];
+      const invalidLabel = language === "zh" ? "时间范围无效，请重新选择。" : "Invalid time range. Select a supported range.";
+      for (const html of [presentation.invalidFilters, presentation.invalidSelector]) {
+        expect(html).toContain(invalidLabel);
+        expect(html).not.toContain("ranges.bogus");
+        expect(html).not.toContain("ranges.null");
+      }
+      expect(presentation.invalidSelector).toContain('aria-invalid="true"');
+      expect(presentation.valid.map(entry => entry.selection)).toEqual(["24h", "90d", "all", "custom"]);
+      for (const entry of presentation.valid) {
+        const label = expectedLabels[language][entry.value as keyof typeof expectedLabels["zh"]];
+        for (const html of [entry.filters, entry.selector]) {
+          expect(html).toContain(label);
+          expect(html).not.toContain(invalidLabel);
+          expect(html).not.toContain(`ranges.${entry.value}`);
+        }
+        expect(entry.selector).not.toContain('aria-invalid="true"');
+        if (entry.value === "custom") {
+          expect(entry.selector).toContain('value="2026-10-01"');
+          expect(entry.selector).toContain('value="2026-10-03"');
+        }
+      }
+    }
+  });
+
+  it("已保存但审计或清理失败时英文明确禁止再次签发", () => {
+    for (const warning of Object.values(result.savedKeyWarnings)) {
+      expect(warning).toContain("Changes were saved");
+      expect(warning).toContain("do not issue another key.");
+      expect(warning).not.toContain("automatically");
+    }
+    expect(result.savedKeyWarnings.cleanup).toContain("Save the new key first");
+  });
+
+  it("会话路径安全解码并拒绝非法百分号编码", () => {
+    expect(result.decodedThreadPaths.valid).toBe("parent/thread");
+    expect(result.decodedThreadPaths.invalid).toBeNull();
   });
 
   it("Threads 链路的表头、空状态、筛选、统计与分页覆盖英文", () => {

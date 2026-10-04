@@ -12,6 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFo
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { MetricsQuery, RangeName } from "@/lib/types"
+import { metricsRangeSelection } from "@/lib/metrics-query"
 import { RangeSelector } from "@/components/metrics/range-selector"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { useMetricsProviders } from "@/hooks/use-metrics-query"
@@ -33,7 +34,8 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
   const [draft, setDraft] = useState(query)
   const [open, setOpen] = useState(false)
   const [dateError, setDateError] = useState<boolean>(false)
-  const [range, setRange] = useState<RangeName | "custom">(query.from !== undefined || query.to !== undefined ? "custom" : query.range ?? "all")
+  const [range, setRange] = useState<RangeName | "custom" | null>(() => metricsRangeSelection(query))
+  const rangeLabel = range === null ? t("filters.invalidRange") : t(`ranges.${range}`)
   const set = (key: keyof MetricsQuery, value: string) => setDraft((previous) => ({ ...previous, [key]: value }))
   const selectedProviders = draft.provider ?? []
   const providerOptions = [...new Set([...providers, ...selectedProviders])].sort()
@@ -46,6 +48,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
   const scopedFields = !showThreadFilters ? (["threadId", "turnId"] as const).filter((key) => Boolean(query[key])) : []
   const filterCount = [range !== "all", selectedProviders.length > 0, ...textFields.map(([key]) => Boolean(draft[key]?.trim())), Boolean(draft.source), Boolean(draft.operation), Boolean(draft.status)].filter(Boolean).length + scopedFields.length
   const apply = () => {
+      if (range === null) { setOpen(true); return }
       if (range === "custom" && (!draft.from || !draft.to || draft.from > draft.to)) {
         setDateError(true)
         setOpen(true)
@@ -78,8 +81,8 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
     <Sheet open={open} onOpenChange={setOpen}>
       <form className="@container/filters min-w-0 shrink-0" onSubmit={(event) => { event.preventDefault(); apply() }}>
         <FieldGroup className="flex-row flex-nowrap items-center gap-2">
-          <Button type="button" variant="outline" className="hidden @lg/filters:inline-flex" aria-label={t("filters.rangeLabel", { range: t(`ranges.${range}`) })} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
-            {t(`ranges.${range}`)}<ChevronDownIcon data-icon="inline-end" />
+          <Button type="button" variant="outline" className="hidden @lg/filters:inline-flex" aria-label={t("filters.rangeLabel", { range: rangeLabel })} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
+            {rangeLabel}<ChevronDownIcon data-icon="inline-end" />
           </Button>
           <Field className="min-w-0 flex-1">
             <FieldLabel className="sr-only" htmlFor={`${id}-filter`}>{t("filters.keyword")}</FieldLabel>
@@ -100,7 +103,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
         <SheetHeader><SheetTitle>{t("filters.title")}</SheetTitle><SheetDescription>{t("filters.description")}</SheetDescription></SheetHeader>
         <form className="flex min-h-0 flex-1 flex-col" onSubmit={(event) => { event.preventDefault(); apply() }}>
       <FieldGroup className="min-h-0 flex-1 gap-4 overflow-y-auto px-4 pb-4">
-        <ErrorBanner error={dateError ? t("filters.invalidDate") : null} />
+        <ErrorBanner error={range === null ? t("filters.invalidRange") : dateError ? t("filters.invalidDate") : null} />
         <RangeSelector value={range} onChange={setRange} from={draft.from} to={draft.to} onDateChange={set} />
         <Field>
           <FieldLabel htmlFor={`${id}-provider`}>{t("metrics.provider")}</FieldLabel>

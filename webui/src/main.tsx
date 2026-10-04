@@ -6,10 +6,12 @@ import App from './App.tsx'
 import { setToken } from '@/lib/api'
 import { consumeQueryToken } from '@/lib/query-token'
 
+let initialTokenStorageFailed = false
 consumeQueryToken({
   currentUrl: window.location.href,
   storeToken: setToken,
   replaceUrl: (url) => history.replaceState(null, '', url),
+  onStorageFailure: () => { initialTokenStorageFailed = true },
 })
 
 createRoot(document.getElementById('root')!).render(
@@ -20,7 +22,7 @@ createRoot(document.getElementById('root')!).render(
       disableTransitionOnChange
       enableSystem={false}
     >
-      <App />
+      <App initialTokenStorageFailed={initialTokenStorageFailed} />
     </ThemeProvider>
   </StrictMode>,
 )
