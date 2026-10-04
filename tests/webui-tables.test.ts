@@ -4,6 +4,71 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
+  it("describes main thread metrics separately from the subagent expansion and omits flat type and parent columns", () => {
+    expect(markup.threads).toContain("共 1 个匹配主会话");
+    expect(markup.threads).toContain("各行仅统计主会话自身请求，子代理在会话详情查看");
+    expect(markup.threadsEn).toContain("Matching main threads: 1");
+    expect(markup.threadsEn).toContain("view subagents in thread details");
+    expect(markup.threads).not.toContain("本页主会话");
+    expect(markup.threadsEn).not.toContain("This page:");
+    expect(headers(markup.threads!)).not.toContain("类型");
+    expect(headers(markup.threads!)).not.toContain("父会话");
+    expect(markup.subagentDetailParent).toContain("子代理");
+  });
+  it("keeps only child counts in the main list and links related subagents in details independently of metrics filters", () => {
+    expect(markup.subagentsCollapsedCalls).toBe("0");
+    expect(markup.subagentsCollapsed).not.toContain('aria-controls=');
+    expect(markup.subagentsCollapsed).not.toContain("/root/worker");
+    expect(markup.subagentsRelated).toContain('/threads/child%2Fone?range=all');
+    expect(markup.subagentsRelated).toContain('data-slot="table"');
+    expect(headers(markup.subagentsRelated!)).toEqual(["首次请求", "子代理", "会话", "提供商", "模型", "轮次", "请求", "输入 Token", "缓存命中率", "输出 Token", "最后记录", "子代理"]);
+    expect(markup.subagentsRelated).toContain('aria-sort="descending"');
+    expect(markup.subagentsRelated).toContain("model-test");
+    expect(markup.subagentsRelated).toContain("openai");
+    expect(markup.subagentsRelated).toContain("50.0%");
+    expect(markup.subagentsRelated).toContain('scope="col"');
+    expect(markup.subagentsRelated).toContain('title="/root/worker"');
+    expect(markup.subagentsRelated).toContain(">worker</a>");
+    expect(markup.subagentsRelated).toContain("子代理 2");
+    expect(markup.subagentsRelated).toContain('data-slot="badge"');
+    expect(markup.subagentsRelated).toContain("共 21 个子代理");
+    expect(markup.subagentsRelatedEn).toContain("Subagents: 21");
+    expect(markup.subagentsRelatedEn).toContain("Subagents 2");
+    expect(markup.subagentsRelated).not.toContain('data-slot="dropdown-menu-trigger"');
+    expect(markup.subagentsRelated).not.toContain('role="combobox"');
+    expect(markup.subagentsRelated).not.toContain("父会话");
+    expect(markup.subagentsRelated).not.toContain("登记时间");
+    expect(markup.subagentsRelated).not.toContain("filtered-");
+  });
+  it("shows localized relationship empty, loading and failure states and keeps them visible when metrics fail", () => {
+    expect(markup.subagentsEmpty).toContain("尚未登记子代理");
+    expect(markup.subagentsEmptyEn).toContain("No subagents registered");
+    expect(markup.subagentsEmpty).toContain('data-slot="empty"');
+    expect(markup.subagentsFailed).toContain("无法连接服务");
+    expect(markup.subagentsFailed).toContain("重试");
+    expect(markup.subagentsFailed).not.toContain("hidden-internal-error");
+    expect(markup.subagentsLoading).toContain('aria-busy="true"');
+    expect(markup.subagentsLoading).toContain('data-slot="skeleton"');
+    expect(markup.subagentsWithFailedMetrics).toContain("关联子代理");
+    expect(markup.subagentsWithFailedMetrics).toContain('/threads/child%2Fone?range=all');
+    expect(markup.subagentDetailParent).toContain('/threads/parent%2Fthread?range=all');
+    expect(markup.subagentDetailParent).toContain('/requests?range=all&amp;threadId=parent%2Fthread&amp;turnId=creation%2Fturn');
+    expect(markup.subagentDetailParent).toContain("不包含后续派发任务的全部轮次");
+  });
+  it("uses server pagination for registered relationships, without inventing creation turns", () => {
+    expect(markup.subagentsRelated).toMatch(/disabled=""[^>]*aria-label="上一页"/u);
+    expect(markup.subagentsRelated).not.toMatch(/disabled=""[^>]*aria-label="下一页"/u);
+    expect(markup.subagentsLastPage).toMatch(/disabled=""[^>]*aria-label="下一页"/u);
+    expect(markup.subagentsLastPage).not.toMatch(/disabled=""[^>]*aria-label="上一页"/u);
+    expect(markup.subagentsRelated).toContain("第 1 页");
+    expect(markup.subagentsLastPage).toContain("第 2 页");
+    expect(markup.subagentsLastPage).not.toContain("子代理 2");
+    expect(markup.subagentsSingle).toContain("共 1 个子代理");
+    expect(markup.subagentsSingle).not.toContain('aria-label="上一页"');
+    expect(markup.subagentsSingle).not.toContain('aria-label="下一页"');
+    expect(markup.subagentsEmpty).not.toContain("第 1 页");
+    expect(markup.subagentsEmpty).not.toContain('aria-label="下一页"');
+  });
   it("shows OpenAI refresh progress and per-account failure feedback", () => {
     expect(markup.quotaRefreshing).toContain("刷新中");
     expect(markup.quotaRefreshing).toContain("disabled");
@@ -97,6 +162,7 @@ describe("WebUI metrics table presentation", () => {
           if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi() { return globalThis.fixtureApiState; }";
           if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {}, pagination() { return globalThis.fixturePagination; } }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
           if (id.endsWith("/src/hooks/use-thread-detail.ts")) return _code.replace("export function useThreadDetail(", "function realUseThreadDetail(") + " export function useThreadDetail(...args) { return globalThis.fixtureThreadDetail ?? realUseThreadDetail(...args); }";
+          if (id.endsWith("/src/hooks/use-thread-subagents.ts")) return "export function useThreadSubagents(threadId) { globalThis.fixtureSubagentCalls.push(threadId); return globalThis.fixtureSubagentState; }";
           if (id.endsWith("/src/components/metrics/query-filters.tsx")) return "import { createElement } from 'react'; export function QueryFilters(props) { return createElement('div', { 'data-query-filters': true, 'data-thread-filters': props.showThreadFilters }); }";
         } }],
       });
@@ -106,6 +172,7 @@ describe("WebUI metrics table presentation", () => {
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
+        const { ThreadSubagents } = await server.ssrLoadModule("/src/components/threads/thread-subagents.tsx");
         const { TurnTable } = await server.ssrLoadModule("/src/components/threads/turn-table.tsx");
         const { ThreadDetailPage } = await server.ssrLoadModule("/src/pages/thread-detail-page.tsx");
         const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
@@ -128,7 +195,13 @@ describe("WebUI metrics table presentation", () => {
         const pagination = { mode: "server", pageNumber: 1, pageSize: 10, hasPrevious: false, hasNext: false,
           onPrevious: noop, onNext: noop, onPageSizeChange: noop, onSortingChange: noop,
           sorting: [{ id: "time", desc: true }], serverTotal: 1 };
-        const common = { provider: "openai", model: "model-test", recordedAtMs: 1000,
+        globalThis.fixtureSubagentCalls = [];
+        const subagentPagination = { pageNumber: 1, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop };
+        globalThis.fixtureSubagentState = { data: { subagents: [], total: 0 }, error: null, errorCode: null,
+          loading: false, refreshing: false, refetch: noop, pagination: subagentPagination,
+          sorting: { sortKey: "last", sortDirection: "desc", onSort: noop } };
+        const common = { provider: "openai", model: "model-test", recordedAtMs: 1000, directSubagentCount: 0,
+          sessionTiming: { knownDurationMs: 120000, missingTurnCount: 0, historyComplete: true },
           cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
           inputTokens: 100, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 5,
           tokensPerSecond: 20, compact: null, requestCount: 1, unsuccessfulRequestCount: 0 };
@@ -249,6 +322,10 @@ describe("WebUI metrics table presentation", () => {
           ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "totalDuration", desc: false }] }),
           threads: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null,
             parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination }),
+          threadsEn: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null,
+            parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination }, "en"),
+          threadsPartialDuration: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", sessionTiming: { knownDurationMs: 120000, missingTurnCount: 1, historyComplete: false } }], query: {}, pagination }),
+          threadsMissingDuration: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", sessionTiming: { knownDurationMs: null, missingTurnCount: 1, historyComplete: false } }], query: {}, pagination }),
           turns: render(TurnTable, { turns: [{ ...common, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
           turnsDuration: render(TurnTable, { turns: [{ ...common, turnId: "turn-1", durationMs: 71_000 }], threadId: "thread-1", query: {}, pagination }),
           turnsDurationZero: render(TurnTable, { turns: [{ ...common, turnId: "turn-1", durationMs: 0 }], threadId: "thread-1", query: {}, pagination }, "en"),
@@ -265,6 +342,35 @@ describe("WebUI metrics table presentation", () => {
         globalThis.fixtureThreadDetail.data.run.sessionTiming = { knownDurationMs: 120_000, missingTurnCount: 1, historyComplete: false };
         result.threadTimingPartial = render(ThreadDetailPage, {});
         result.threadTimingPartialEn = render(ThreadDetailPage, {}, "en");
+        const relation = { ...common, turnCount: 2, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 120000, threadId: "child/one", parentThreadId: "thread-1", parentTurnId: "turn-create/one", agentPath: "/root/worker", recordedAtMs: 120000, directSubagentCount: 2 };
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], total: 21 },
+          pagination: { ...subagentPagination, hasNext: true } };
+        const filteredQuery = { range: "today", provider: ["filtered-provider"], model: "filtered-model", status: "failed", turnId: "filtered-turn", filter: "filtered-text", offset: 40, limit: 20 };
+        globalThis.fixtureSubagentCalls.length = 0;
+        result.subagentsCollapsed = render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null, parentThreadId: null, directSubagentCount: 21 }], query: filteredQuery, pagination });
+        result.subagentsCollapsedCalls = String(globalThis.fixtureSubagentCalls.length);
+        result.subagentsRelated = render(ThreadSubagents, { threadId: "thread-1" });
+        result.subagentsRelatedEn = render(ThreadSubagents, { threadId: "thread-1" }, "en");
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [{ ...relation, parentTurnId: null, directSubagentCount: 0 }], total: 21 },
+          pagination: { ...subagentPagination, pageNumber: 2, hasPrevious: true } };
+        result.subagentsLastPage = render(ThreadSubagents, { threadId: "thread-1" });
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [], total: 0 },
+          pagination: subagentPagination };
+        result.subagentsEmpty = render(ThreadSubagents, { threadId: "empty-thread" });
+        result.subagentsEmptyEn = render(ThreadSubagents, { threadId: "empty-thread" }, "en");
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: null, error: "hidden-internal-error", errorCode: "network_error" };
+        result.subagentsFailed = render(ThreadSubagents, { threadId: "thread-1" });
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: null, error: null, loading: true, refreshing: true };
+        result.subagentsLoading = render(ThreadSubagents, { threadId: "thread-1" });
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], total: 1 }, loading: false, refreshing: false };
+        result.subagentsSingle = render(ThreadSubagents, { threadId: "thread-1" });
+        globalThis.fixtureQuery = filteredQuery;
+        globalThis.fixtureThreadDetail = { ...globalThis.fixtureThreadDetail, error: "metrics-failed", errorCode: "unknown" };
+        result.subagentsWithFailedMetrics = render(ThreadDetailPage, {});
+        globalThis.fixtureThreadDetail.error = null;
+        Object.assign(globalThis.fixtureThreadDetail.data.run, { agentPath: "/root/worker", parentThreadId: "parent/thread", parentTurnId: "creation/turn" });
+        result.subagentDetailParent = render(ThreadDetailPage, {});
+        globalThis.fixtureQuery = {};
         delete globalThis.fixtureThreadDetail;
         for (const provider of ["clp-main", "openai"]) {
           const model = "cline-pass/deepseek-v4.1-flash";
@@ -722,17 +828,17 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.turnsDuration).toContain("1 min 11 s");
     expect(markup.turnsDurationZero).toContain("Turn duration");
     expect(markup.turnsDurationZero).toContain("0 ms");
-    expect(markup.threadTiming).toContain("会话总耗时");
-    expect(markup.threadTiming).toContain("1 min 11 s");
-    expect(markup.threadTiming).toContain("2 min");
-    expect(markup.threadTimingEn).toContain("Thread total duration");
-    expect(markup.threadTimingPartial).toContain("会话已知累计耗时");
-    expect(markup.threadTimingPartial).toContain("2 min");
-    expect(markup.threadTimingPartial).toContain("耗时缺失轮数：1");
-    expect(markup.threadTimingPartial).toContain("历史未补齐");
-    expect(markup.threadTimingPartialEn).toContain("Thread known duration");
-    expect(markup.threadTimingPartialEn).toContain("Turns with missing duration: 1");
-    expect(markup.threadTimingPartialEn).toContain("History is incomplete");
+    expect(markup.threadTiming).not.toContain("会话总耗时");
+    expect(markup.threadTiming).not.toContain("最近一轮耗时");
+    expect(markup.threads).toContain("会话总耗时");
+    expect(markup.threads).toContain("2 min");
+    expect(markup.threadsPartialDuration).toContain("2 min *");
+    expect(markup.threadsPartialDuration).toContain("耗时缺失轮数：1");
+    expect(markup.threadsPartialDuration).toContain("历史未补齐");
+    expect(markup.threadsMissingDuration).not.toContain("2 min");
+    expect(markup.threadTimingEn).not.toContain("Thread total duration");
+    expect(markup.threadTimingPartial).not.toContain("会话已知累计耗时");
+    expect(markup.threadTimingPartialEn).not.toContain("Thread known duration");
     expect(markup.threadTimingMissing).not.toContain("2 min");
     expect(headers(markup.requests!)).toEqual([
       "记录时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
@@ -797,8 +903,8 @@ describe("WebUI metrics table presentation", () => {
 
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
     expect(headers(markup.threads!)).toEqual([
-      "期间首次请求", "会话", "提供商", "模型", "类型", "轮次", "请求",
-      "输入 Token", "缓存命中率", "输出 Token", "最后记录",
+      "期间首次请求", "会话", "提供商", "模型", "轮次", "请求",
+      "输入 Token", "会话总耗时", "缓存命中率", "输出 Token", "最后记录", "子代理",
     ]);
     expect(headers(markup.turns!)).toEqual([
       "时间", "轮次", "提供商", "模型", "请求", "失败", "输入 Token", "输出 Token",
@@ -808,7 +914,7 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("shows thread cache hit rates and preserves unknown or zero-input usage", () => {
-    const cacheCell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][8]?.[1];
+    const cacheCell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf("缓存命中率")]?.[1];
     expect(cacheCell(markup.threads!)).toContain("50.0%");
     expect(cacheCell(markup.threadCacheZero!)).toContain("0.0%");
     expect(cacheCell(markup.threadCacheUnknown!)).toContain("—");

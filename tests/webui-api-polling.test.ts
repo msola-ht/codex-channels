@@ -13,6 +13,101 @@ class Page extends EventTarget {
 
 afterEach(() => vi.useRealTimers());
 
+it("keeps subagent pagination independent, shares its owner revision and isolates cancelled parent/page responses", () => {
+  execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import fs from "node:fs";
+    import ts from "typescript";
+    import assert from "node:assert/strict";
+    const slots = [], refs = [], dependencies = [], cleanups = [], effects = [];
+    let si = 0, ri = 0, ei = 0;
+    const react = {
+      useState(initial) {
+        const index = si++;
+        if (!(index in slots)) slots[index] = typeof initial === "function" ? initial() : initial;
+        return [slots[index], value => { slots[index] = typeof value === "function" ? value(slots[index]) : value; }];
+      },
+      useRef(initial) { return refs[ri++] ?? (refs[ri - 1] = { current: initial }); },
+      useCallback(fn) { return fn; },
+      useEffect(run, deps) {
+        const index = ei++;
+        if (!dependencies[index] || deps.some((value, i) => value !== dependencies[index][i])) effects.push(() => { cleanups[index]?.(); cleanups[index] = run(); });
+        dependencies[index] = deps;
+      },
+    };
+    const load = (path, imports) => {
+      const code = ts.transpileModule(fs.readFileSync(path, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+      const exports = {};
+      new Function("exports", "require", code)(exports, name => { assert.ok(name in imports, name); return imports[name]; });
+      return exports;
+    };
+    const reads = [];
+    const api = { ApiClientError: class extends Error {}, fetchThreadSubagents: (threadId, page, signal) => new Promise((resolve, reject) => reads.push({ threadId, page, signal, resolve, reject })) };
+    const { useApi } = load("webui/src/hooks/use-api.ts", { react, "@/lib/api": api, "../lib/api-polling": {} });
+    const { useThreadSubagents } = load("webui/src/hooks/use-thread-subagents.ts", { react, "@/lib/api": api, "@/hooks/use-api": { useApi } });
+    const render = (threadId, revision) => { si = ri = ei = 0; const view = useThreadSubagents(threadId, revision); while (effects.length) effects.shift()(); return view; };
+    const settle = () => new Promise(resolve => setImmediate(resolve));
+    const response = (threadId, child, offset = 0, nextOffset = 20) => ({ threadId, subagents: [{ threadId: child }], total: 41, offset, limit: 20, nextOffset });
+    const firstRevision = {};
+    assert.equal(render("parent-a", firstRevision).data, null);
+    assert.deepEqual(reads[0].page, { offset: 0, limit: 20, sortKey: "last", sortDirection: "desc" });
+    reads[0].resolve(response("parent-a", "child-a")); await settle();
+    let view = render("parent-a", firstRevision);
+    assert.equal(view.data.subagents[0].threadId, "child-a"); assert.equal(reads.length, 1);
+    const secondRevision = {};
+    view = render("parent-a", secondRevision);
+    assert.equal(view.data.subagents[0].threadId, "child-a"); assert.equal(reads.length, 2);
+    reads[1].resolve(response("parent-a", "child-a-updated")); await settle();
+    view = render("parent-a", secondRevision); view.pagination.onNext();
+    view = render("parent-a", secondRevision); assert.equal(view.data, null); assert.equal(view.loading, true);
+    assert.deepEqual(reads[2].page, { offset: 20, limit: 20, sortKey: "last", sortDirection: "desc" });
+    const thirdRevision = {};
+    render("parent-a", thirdRevision); assert.equal(reads.length, 3);
+    reads[2].resolve(response("parent-a", "child-a-page-two", 20, 40)); await settle();
+    view = render("parent-a", thirdRevision); assert.equal(view.pagination.pageNumber, 2); view.pagination.onNext();
+    render("parent-a", thirdRevision); const oldPage = reads[3];
+    const nextParentRevision = {};
+    view = render("parent-b", nextParentRevision); assert.equal(view.data, null); assert.equal(view.error, null);
+    assert.equal(oldPage.signal.aborted, true); assert.equal(reads[4].threadId, "parent-b");
+    assert.deepEqual(reads[4].page, { offset: 0, limit: 20, sortKey: "last", sortDirection: "desc" });
+    oldPage.resolve(response("parent-a", "late-old-child", 40, null)); await settle();
+    assert.equal(render("parent-b", nextParentRevision).data, null);
+    reads[4].resolve(response("parent-b", "child-b")); await settle();
+    view = render("parent-b", nextParentRevision); assert.equal(view.data.subagents[0].threadId, "child-b");
+    view.refetch(); view = render("parent-b", nextParentRevision);
+    assert.deepEqual(reads[5].page, { offset: 0, limit: 20, sortKey: "last", sortDirection: "desc" });
+    reads[5].reject(new TypeError("private-network-error")); await settle();
+    view = render("parent-b", nextParentRevision); assert.equal(view.errorCode, "network_error"); assert.equal(view.data, null); assert.equal(view.loading, false);
+    view = render("parent-c", nextParentRevision); assert.equal(view.error, null); assert.equal(view.data, null); assert.equal(reads[6].threadId, "parent-c");
+    reads[6].resolve(response("parent-c", "child-c")); await settle();
+    view = render("parent-c", nextParentRevision); view.pagination.onNext(); render("parent-c", nextParentRevision);
+    const previousSort = reads.at(-1);
+    view = render("parent-c", nextParentRevision); view.sorting.onSort("time");
+    view = render("parent-c", nextParentRevision);
+    assert.equal(previousSort.signal.aborted, true);
+    assert.equal(view.data, null);
+    assert.deepEqual(reads.at(-1).page, { offset: 0, limit: 20, sortKey: "time", sortDirection: "desc" });
+    view.sorting.onSort("time"); render("parent-c", nextParentRevision);
+    assert.deepEqual(reads.at(-1).page, { offset: 0, limit: 20, sortKey: "time", sortDirection: "asc" });
+    const pending = reads.at(-1); for (const cleanup of cleanups) cleanup?.(); assert.equal(pending.signal.aborted, true);
+    pending.resolve(response("parent-c", "late-after-unmount")); await settle();
+  `], { cwd: process.cwd(), stdio: "pipe" });
+});
+
+it("requests a parent's subagents with only relation pagination and an encoded thread ID", () => {
+  execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+    import fs from "node:fs";
+    import ts from "typescript";
+    import assert from "node:assert/strict";
+    const paths = [];
+    globalThis.fetch = async (path, init) => { paths.push(path); assert.ok(init.signal); return { ok: true, json: async () => ({ subagents: [] }) }; };
+    const imports = { "@/lib/token-storage": { getToken: () => null }, "./token-storage": { getToken: () => null }, "@/lib/metrics-query": { metricsQueryParams() { throw new Error("must not use metrics filters"); } } };
+    const code = ts.transpileModule(fs.readFileSync("webui/src/lib/api.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const exports = {}; new Function("require", "exports", code)(name => { assert.ok(name in imports, name); return imports[name]; }, exports);
+    await exports.fetchThreadSubagents("parent/with spaces", { offset: 20, limit: 50, sortKey: "time", sortDirection: "asc", range: "today", provider: ["wrong"] }, new AbortController().signal);
+    assert.deepEqual(paths, ["/api/v1/threads/parent%2Fwith%20spaces/subagents?offset=20&limit=50&sortKey=time&sortDirection=asc"]);
+  `], { cwd: process.cwd(), stdio: "pipe" });
+});
+
 it("publishes thread summary and turns together and pauses their shared notification read on history pages", () => {
   execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
     import fs from "node:fs";

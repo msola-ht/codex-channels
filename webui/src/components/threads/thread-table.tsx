@@ -6,14 +6,15 @@ import { Link } from "react-router"
 import {
   DataTable,
   SortableHeader,
+  TableHint,
   TruncatedText,
   type DataTableColumn,
   type DataTableProps,
 } from "@/components/metrics/data-table"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
-import { Badge } from "@/components/ui/badge"
 import {
   formatCacheUsage,
+  formatElapsedDuration,
   formatModelName,
   formatTime,
   formatTokens,
@@ -33,8 +34,6 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
     thread: t("metrics.thread"),
     provider: t("metrics.provider"),
     model: t("metrics.model"),
-    type: t("metrics.type"),
-    parent: t("metrics.parent"),
     turns: t("metrics.turn"),
     requests: t("metrics.requests"),
     input: t("metrics.input"),
@@ -42,9 +41,9 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
     output: t("metrics.output"),
     compact: t("metrics.compact"),
     last: t("metrics.last"),
+    subagents: t("threads.directSubagents"),
+    duration: t("threads.totalDuration"),
   }
-  const mainCount = threads.filter((thread) => thread.agentPath === null).length
-  const subagentCount = threads.length - mainCount
 
   const columns = React.useMemo<DataTableColumn<ThreadListItem>[]>(() => [
     {
@@ -94,24 +93,6 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       ),
     },
     {
-      id: "type",
-      enableSorting: false,
-      accessorFn: (thread) =>
-        thread.agentPath === null ? t("threads.main") : t("threads.agentPath", { path: thread.agentPath }),
-      header: t("metrics.type"),
-      cell: ({ row }) =>
-        row.original.agentPath === null ? (
-          <span className="text-muted-foreground">{t("threads.main")}</span>
-        ) : (
-          <Badge
-            variant="secondary"
-            className="max-w-64 justify-start"
-          >
-            <TruncatedText text={t("threads.agentPath", { path: row.original.agentPath! })} />
-          </Badge>
-        ),
-    },
-    {
       id: "turns",
       accessorFn: (thread) => thread.turnCount,
       header: ({ column }) => (
@@ -142,6 +123,23 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
           {formatTokens(row.original.inputTokens)}
         </span>
       ),
+    },
+    {
+      id: "duration",
+      enableSorting: false,
+      header: () => <TableHint hint={t("threads.totalDurationHint")}>{t("threads.totalDuration")}</TableHint>,
+      cell: ({ row }) => {
+        const timing = row.original.sessionTiming
+        if (timing.knownDurationMs === null) return "—"
+        const partial = !timing.historyComplete || timing.missingTurnCount > 0
+        const notes = [
+          ...(partial ? [t("threads.knownDuration")] : []),
+          ...(timing.missingTurnCount > 0 ? [t("threads.missingDurations", { count: timing.missingTurnCount })] : []),
+          ...(!timing.historyComplete ? [t("threads.durationHistoryIncomplete")] : []),
+          t("threads.totalDurationHint"),
+        ].join(" ")
+        return <TableHint hint={notes}><span className="tabular-nums">{formatElapsedDuration(timing.knownDurationMs)}{partial ? " *" : ""}</span></TableHint>
+      },
     },
     {
       id: "cacheHitRate",
@@ -178,22 +176,11 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       ),
     },
     {
-      id: "parent",
+      id: "subagents",
+      header: () => <TableHint hint={t("threads.subagentCountHint")}>{t("threads.directSubagents")}</TableHint>,
       enableSorting: false,
-      accessorFn: (thread) => thread.parentThreadId ?? "",
-      header: t("metrics.parent"),
-      cell: ({ row }) =>
-        row.original.parentThreadId === null ? (
-          <span className="text-muted-foreground">—</span>
-        ) : (
-          <Link
-            to={metricsLink(`/threads/${encodeURIComponent(row.original.parentThreadId)}`, query, { threadId: undefined, turnId: undefined })}
-            className="underline-offset-4 hover:underline"
-            title={shortThreadId(row.original.parentThreadId) === row.original.parentThreadId ? undefined : row.original.parentThreadId}
-          >
-            {shortThreadId(row.original.parentThreadId)}
-          </Link>
-        ),
+      enableHiding: false,
+      cell: ({ row }) => <span className="tabular-nums">{row.original.directSubagentCount}</span>,
     },
     {
       id: "compact",
@@ -210,17 +197,18 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
 
   return (
     <DataTable
-      numericColumnIds={["turns", "requests", "input", "cacheHitRate", "output", "compact"]}
+      numericColumnIds={["turns", "requests", "input", "cacheHitRate", "output", "compact", "subagents"]}
       loading={loading}
       title={t("threads.list")}
       description={({ total }) =>
-        t("threads.description", { total, main: mainCount, agents: subagentCount })
+        t("threads.description", { total })
       }
       columns={columns}
       data={threads}
+      getRowId={(thread) => thread.threadId}
       storageKey={TABLE_STATE_KEY}
       columnLabels={columnLabels}
-      defaultColumnVisibility={{ parent: false, compact: false }}
+      defaultColumnVisibility={{ compact: false }}
       emptyText={t("threads.empty")}
       noMatchText={t("threads.noMatch")}
       pagination={{ ...pagination, pageSizeOptions: PAGE_SIZE_OPTIONS }}

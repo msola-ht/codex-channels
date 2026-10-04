@@ -9,13 +9,14 @@ import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { QueryFilters } from "@/components/metrics/query-filters"
 import { QuerySummary } from "@/components/metrics/query-summary"
 import { ThreadRunSummary } from "@/components/threads/thread-run-summary"
-import { StatCard } from "@/components/metrics/stat-card"
 import { TurnTable } from "@/components/threads/turn-table"
+import { ThreadSubagents } from "@/components/threads/thread-subagents"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useThreadDetail } from "@/hooks/use-thread-detail"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
-import { shortThreadId, formatElapsedDuration } from "@/lib/format"
+import { shortThreadId } from "@/lib/format"
 import { metricsLink } from "@/lib/metrics-query"
 import { cn } from "cn"
 
@@ -23,17 +24,9 @@ export function ThreadDetailPage() {
   const { t } = useTranslation()
   const { id = "" } = useParams<{ id: string }>()
   const { query, update, pagination } = useMetricsQuery("all")
-  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt } = useThreadDetail(id, query)
+  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt, revision } = useThreadDetail(id, query)
   const run = data?.run
   const turns = data?.turns
-  const timing = run?.sessionTiming
-  const partialDuration = timing !== undefined && (!timing.historyComplete || timing.missingTurnCount > 0)
-  const duration = timing === undefined ? run?.sessionDurationMs : timing.knownDurationMs
-  const durationNotes = [
-    ...(timing && timing.missingTurnCount > 0 ? [t("threads.missingDurations", { count: timing.missingTurnCount })] : []),
-    ...(timing && !timing.historyComplete ? [t("threads.durationHistoryIncomplete")] : []),
-    t("threads.totalDurationHint"),
-  ].join(" ")
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6" aria-busy={refreshing}>
@@ -54,22 +47,25 @@ export function ThreadDetailPage() {
             <div className={cn("flex shrink-0 flex-wrap items-center gap-2 text-sm", loading && "invisible")} inert={loading} aria-hidden={loading || undefined}>
               <Badge variant="secondary">{t("threads.subagent")}</Badge>
               <TruncatedText text={run.agentPath} className="max-w-96" />
-              {run.parentThreadId !== null ? <Link to={metricsLink(`/threads/${encodeURIComponent(run.parentThreadId)}`, query, { threadId: undefined, turnId: undefined })}>{t("threads.parentLink", { id: shortThreadId(run.parentThreadId) })}</Link> : null}
+              {run.parentThreadId !== null ? <Link to={metricsLink(`/threads/${encodeURIComponent(run.parentThreadId)}`, { range: "all" })}>{t("threads.parentLink", { id: shortThreadId(run.parentThreadId) })}</Link> : null}
+              {run.parentThreadId !== null && run.parentTurnId !== null ? <Tooltip>
+                <TooltipTrigger aria-description={t("threads.creationTurnHint")} render={<Link to={metricsLink("/requests", { range: "all", threadId: run.parentThreadId, turnId: run.parentTurnId })} />}>{t("threads.creationTurnLink", { id: shortThreadId(run.parentTurnId) })}</TooltipTrigger>
+                <TooltipContent><p>{t("threads.creationTurnHint")}</p></TooltipContent>
+              </Tooltip> : null}
             </div>
           ) : null}
           <QuerySummary loading={loading} aggregate={turns.aggregate} range={turns.range} turns={turns.turnCount} />
-          <div className={cn("grid shrink-0 gap-4 sm:grid-cols-2", loading && "invisible")} inert={loading} aria-hidden={loading || undefined}>
-            <StatCard title={t("threads.latestDuration")} value={run.latestExecution?.durationMs == null ? "—" : formatElapsedDuration(run.latestExecution.durationMs)} description={t("threads.durationHint")} />
-            <StatCard title={t(partialDuration ? "threads.knownDuration" : "threads.totalDuration")} value={duration == null ? "—" : formatElapsedDuration(duration)} description={durationNotes} />
-          </div>
           <p className="shrink-0 text-sm text-muted-foreground">{t("threads.turnHint")}</p>
           <details className={cn("shrink-0", loading && "invisible")} inert={loading} aria-hidden={loading || undefined}>
             <summary className="cursor-pointer text-sm text-muted-foreground">{t("threads.history")}</summary>
             <div className="mt-3"><ThreadRunSummary latestTurn={run.latestTurn} threadAggregate={run.threadAggregate} /></div>
           </details>
-          <TurnTable loading={loading} turns={turns.turns} threadId={id} query={query} pagination={pagination(turns)} />
+          <div className="flex min-h-[32rem] shrink-0 flex-col">
+            <TurnTable loading={loading} turns={turns.turns} threadId={id} query={query} pagination={pagination(turns)} />
+          </div>
         </>
       )}
+      <ThreadSubagents key={id} threadId={id} revision={revision} />
     </div>
   )
 }

@@ -60,6 +60,8 @@ export type {
   ManagementAccountSettingsPreviewResponse,
   ManagementAccountSettingsMutationResponse,
   ThreadListItem,
+  SubagentListItem,
+  ThreadSubagentsResponse,
   ThreadRunResponse,
   ThreadsResponse,
   ThreadTurnsResponse,

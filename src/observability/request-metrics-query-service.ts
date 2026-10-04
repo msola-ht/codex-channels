@@ -3,6 +3,7 @@ import type {
   ModelRequestMetricsPageQuery,
   ModelRequestMetricsFilters,
   ModelRequestMetricsThreadQuery,
+  SubagentThreadsQuery,
   ModelRequestMetricsQuotaAccountStore,
   ModelRequestMetricsRequestQueryStore,
   ModelRequestMetricsThreadQueryStore,
@@ -35,6 +36,7 @@ export type RequestMetricsQueryStore =
     ModelRequestMetricsThreadQueryStore,
     | "subagentThread"
     | "threadList"
+    | "threadSubagents"
     | "threadSummary"
     | "threadTurnCount"
     | "threadTurnSummaries"
@@ -255,6 +257,10 @@ export class RequestMetricsQueryService {
 
   subagentThread(threadId: string) {
     return this.store.subagentThread(threadId);
+  }
+
+  threadSubagents(threadId: string, query: SubagentThreadsQuery) {
+    return this.store.threadSubagents(threadId, query);
   }
 
   latestWeeklyQuota(provider: string, nowMs: number) {

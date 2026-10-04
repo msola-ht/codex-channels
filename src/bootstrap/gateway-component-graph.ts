@@ -507,6 +507,7 @@ export abstract class GatewayComponentGraph {
             parentTurnId: event.turnId,
             agentPath: event.agentPath,
           });
+          this.metricsEvents?.changed();
         } catch (error) {
           logger.warn(
             {

@@ -79,8 +79,12 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   Provider、模型和思考等级取匹配范围内最后一条记录，不混入范围外的最新设置。父 Turn 任务窄查询由
   `threadTurnTaskSummary()` 提供，子代理完成卡片通过 `threadTurnSummary()` 精确读取官方终态对应
   Turn，再按需合并该 Turn 的子任务；`threadList()` 与 `threadTurnSummaries()` 供
-  `codexc metrics threads` 和 `turns` 导出复用。时间范围聚合覆盖指标库全部保留记录，
-  可按全局、提供商或“提供商 + 模型”分组；支持 `today`、`yesterday`、`24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围，最多
+  `codexc metrics threads` 和 `turns` 导出复用。
+  `threadSubagents()` 从已登记关系读取直接子代理（包括尚无请求的代理），聚合各自全部保留请求的模型、提供商、轮次、Token 与缓存指标，按首次请求或最后记录排序后分页；会话列表的
+  `directSubagentCount` 同样只计直接子级，不随请求筛选变化，不把关系导航混入指标聚合。
+  WebUI 顶层列表通过 `mainThreadsOnly` 在汇总和分页前排除已登记子代理；CLI 导出与控制台仍查询全部会话。
+  会话列表的 `sessionTiming` 批量读取当前页各会话全部自身保留轮次的官方耗时，保留缺失轮数与历史完整性，不受请求筛选影响、不叠加后代。
+  时间范围聚合覆盖指标库全部保留记录，可按全局、提供商或“提供商 + 模型”分组；支持 `today`、`yesterday`、`24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围，最多
   返回请求量最高的 20 组。OpenAI 请求还可保存统计代理归一化的周额度定点快照与账户套餐等级；
   同一重置周期内
   从首个基线开始累计请求，只在后续快照正向增长时形成加权估算区间，重置或倒退会断开区间。
