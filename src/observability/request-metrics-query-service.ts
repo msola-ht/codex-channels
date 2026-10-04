@@ -35,6 +35,7 @@ export type RequestMetricsQueryStore =
   & Pick<
     ModelRequestMetricsThreadQueryStore,
     | "subagentThread"
+    | "subagents"
     | "threadList"
     | "threadSubagents"
     | "threadSummary"
@@ -261,6 +262,10 @@ export class RequestMetricsQueryService {
 
   threadSubagents(threadId: string, query: SubagentThreadsQuery) {
     return this.store.threadSubagents(threadId, query);
+  }
+
+  subagents(query: SubagentThreadsQuery) {
+    return this.store.subagents(query);
   }
 
   latestWeeklyQuota(provider: string, nowMs: number) {

@@ -43,11 +43,12 @@ it("keeps settings fields and maintenance actions in their owning pages", () => 
       finally {delete globalThis.document;}
       const sidebarHome=render(h(AppSidebarProvider,null,h(AppSidebar)),"/");
       const sidebars=Object.fromEntries(navGroups.map(group=>[group.id,render(h(SidebarProvider,null,h(AppSidebar)),group.children.at(-1).to)]));
+      const nestedSidebars=Object.fromEntries(['/threads/parent%2Fthread','/threads/parent%2Fthread/subagents'].map(path=>[path,render(h(SidebarProvider,null,h(AppSidebar)),path)]));
       const described=render(h(ManagedSelect,{label:'Mode',description:'Capture scope',value:'production',options:[['production','Production']],disabled:false,onChange(){}}));
       const channelEnglish=renderToStaticMarkup(h(LanguageContext.Provider,{value:{language:'en',setLanguage(){}}},h(ChannelStatusCard,{channels:[{id:'feishu',displayName:'Feishu',enabled:true}]})));
       const cliError=render(h(SettingsCliCommands,{scope:'general',summary:{data:null,error:'summary unavailable',loading:false,refetch(){}}}));
       const cliReady=render(h(SettingsCliCommands,{scope:'general',summary:{data:{cli:[{id:'gateway-config',label:'Gateway command',command:'codexc config',detail:'fixture'},{id:'channels',label:'Channel command',command:'codexc channels',detail:'fixture'}]},error:null,loading:false,refetch(){}}}));
-      console.log(JSON.stringify({sidebarHome,sidebarPreferences,pruneEmpty,pruneCustom,described,channelEnglish,cliError,cliReady,gateway,data,network,stale,maintenance,sidebars,groups:navGroups,paths:navItems.map(item=>item.to)}));
+      console.log(JSON.stringify({sidebarHome,sidebarPreferences,pruneEmpty,pruneCustom,described,channelEnglish,cliError,cliReady,gateway,data,network,stale,maintenance,sidebars,nestedSidebars,groups:navGroups,paths:navItems.map(item=>item.to)}));
     } finally {await server.close();}
   `;
   const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
@@ -58,6 +59,7 @@ it("keeps settings fields and maintenance actions in their owning pages", () => 
     pruneEmpty: string; pruneCustom: string; described: string; channelEnglish: string; cliError: string; cliReady: string;
     gateway: Record<string, string>; data: string; network: string; stale: string;
     maintenance: Record<string, string>; sidebars: Record<string, string>; paths: string[];
+    nestedSidebars: Record<string, string>;
     groups: { id: string; children: {to: string}[] }[];
   };
   expect(result.sidebarHome).toContain('aria-label="收起调用监控"');
@@ -65,6 +67,13 @@ it("keeps settings fields and maintenance actions in their owning pages", () => 
   expect(result.sidebarHome).toContain('aria-label="收起消息渠道"');
   expect(result.sidebarHome).toContain('aria-label="展开设置"');
   expect(result.groups.find(group => group.id === "relay")?.children.map(item => item.to)).toEqual(["/relay", "/relay/queue"]);
+  expect(result.groups.find(group => group.id === "threads")?.children.map(item => item.to)).toEqual(["/threads", "/subagents"]);
+  expect(result.sidebars.threads).toContain('aria-label="收起会话"');
+  for (const [path, html] of Object.entries(result.nestedSidebars)) {
+    const target = path.endsWith("/subagents") ? "/subagents" : "/threads";
+    expect(html).toMatch(new RegExp('<a(?=[^>]*data-active="")(?=[^>]*aria-current="page")(?=[^>]*href="' + target + '")[^>]*>', "u"));
+    expect([...html.matchAll(/aria-current="page"/gu)]).toHaveLength(1);
+  }
   expect(result.sidebars.relay).toContain('aria-label="收起模型转发"');
   expect(result.sidebars.relay).toMatch(/<a(?=[^>]*data-active="")(?=[^>]*href="\/relay\/queue")[^>]*>/u);
   expect(result.sidebars.settings).toContain('aria-label="收起设置"');

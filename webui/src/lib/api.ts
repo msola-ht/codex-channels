@@ -35,6 +35,7 @@ import type {
   ManagementAccountSettingsMutationResponse,
   ThreadRunResponse,
   ThreadSubagentsResponse,
+  SubagentsResponse,
   ThreadsResponse,
   ThreadTurnsResponse,
   TrafficDetailResponse,
@@ -238,6 +239,16 @@ export function fetchThreadSubagents(
   if (page.sortKey !== undefined) params.set("sortKey", page.sortKey)
   if (page.sortDirection !== undefined) params.set("sortDirection", page.sortDirection)
   return getJson<ThreadSubagentsResponse>(`${API_PREFIX}/threads/${encodeURIComponent(threadId)}/subagents?${params}`, signal)
+}
+
+export function fetchSubagents(
+  page: { offset: number; limit: number; sortKey?: "time" | "last"; sortDirection?: "asc" | "desc" },
+  signal?: AbortSignal,
+): Promise<SubagentsResponse> {
+  const params = new URLSearchParams({ offset: String(page.offset), limit: String(page.limit) })
+  if (page.sortKey !== undefined) params.set("sortKey", page.sortKey)
+  if (page.sortDirection !== undefined) params.set("sortDirection", page.sortDirection)
+  return getJson<SubagentsResponse>(`${API_PREFIX}/subagents?${params}`, signal)
 }
 
 export function fetchThreadTurns(

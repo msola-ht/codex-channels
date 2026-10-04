@@ -502,6 +502,7 @@ export interface ModelRequestMetricsThreadQueryStore {
   threadTurnSummaries(threadId: string, query: ModelRequestMetricsThreadQuery): StoredThreadTurnsPage;
   threadTurnCount(threadId: string): number | null;
   threadList(query: ModelRequestMetricsThreadQuery): StoredThreadListPage;
+  subagents(query: SubagentThreadsQuery): StoredThreadSubagentsPage;
   threadSubagents(threadId: string, query: SubagentThreadsQuery): StoredThreadSubagentsPage;
   subagentThread(threadId: string): {
     agentPath: string | null;

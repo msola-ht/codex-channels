@@ -607,6 +607,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
     return this.queries.threadSubagents(threadId, query);
   }
 
+  subagents(query: SubagentThreadsQuery): StoredThreadSubagentsPage {
+    return this.queries.subagents(query);
+  }
+
   subagentThread(threadId: string): {
     agentPath: string | null;
     parentThreadId: string | null;

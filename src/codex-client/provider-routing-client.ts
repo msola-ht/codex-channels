@@ -351,28 +351,42 @@ export class ProviderRoutingClient {
   async readThread(
     ...args: Parameters<ProviderClientInstance["readThread"]>
   ): ReturnType<ProviderClientInstance["readThread"]> {
-    const [threadId] = args;
-    const provider = this.threadProviders.get(threadId);
-    if (provider) {
-      const thread = await this.withProviderActivity(provider, async () =>
-        (await this.ensureClient(provider)).readThread(...args)
-      );
-      this.assertReadThread(thread, threadId, provider);
+    const [threadId, signal] = args;
+    const read = async (): Promise<ThreadSnapshot> => {
+      signal?.throwIfAborted();
+      const provider = this.threadProviders.get(threadId);
+      if (provider) {
+        const thread = await this.withProviderActivity(provider, async () => {
+          const client = await this.ensureClient(provider);
+          signal?.throwIfAborted();
+          return client.readThread(...args);
+        });
+        signal?.throwIfAborted();
+        this.assertReadThread(thread, threadId, provider);
+        this.rememberThread(thread);
+        return thread;
+      }
+      const canonical = await this.withPrimaryActivity((client) => {
+        signal?.throwIfAborted();
+        return client.readThread(...args);
+      });
+      signal?.throwIfAborted();
+      this.assertReadThread(canonical, threadId);
+      this.rememberThread(canonical);
+      if (this.canonicalProvider(canonical.modelProvider) === this.primaryProvider) {
+        return canonical;
+      }
+      const thread = await this.withProviderActivity(canonical.modelProvider, async () => {
+        const client = await this.ensureClient(canonical.modelProvider);
+        signal?.throwIfAborted();
+        return client.readThread(...args);
+      });
+      signal?.throwIfAborted();
+      this.assertReadThread(thread, threadId, canonical.modelProvider);
       this.rememberThread(thread);
       return thread;
-    }
-    const canonical = await this.withPrimaryActivity((client) => client.readThread(...args));
-    this.assertReadThread(canonical, threadId);
-    this.rememberThread(canonical);
-    if (this.canonicalProvider(canonical.modelProvider) === this.primaryProvider) {
-      return canonical;
-    }
-    const thread = await this.withProviderActivity(canonical.modelProvider, async () =>
-      (await this.ensureClient(canonical.modelProvider)).readThread(...args)
-    );
-    this.assertReadThread(thread, threadId, canonical.modelProvider);
-    this.rememberThread(thread);
-    return thread;
+    };
+    return signal ? this.untilClosed(read, signal) : read();
   }
 
   async startThread(

@@ -2100,7 +2100,7 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["<b>子代理开始 · review_task</b>"]);
+    expect(api.sent).toEqual(["<b>子代理开始 · review_task</b>\n\n• <b>提供商：</b>未提供\n• <b>模型设置：</b>未提供\n• <b>思考强度：</b>未提供"]);
     expect(api.sent[0]).not.toContain("agent-thread-secret");
   });
 
@@ -2119,7 +2119,7 @@ describe("TelegramOutbox", () => {
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["<b>子代理继续 · review_task</b>"]);
+    expect(api.sent).toEqual(["<b>子代理继续 · review_task</b>\n\n• <b>提供商：</b>未提供\n• <b>模型设置：</b>未提供\n• <b>思考强度：</b>未提供"]);
     expect(api.sent[0]).not.toContain("agent-thread-secret");
   });
 });

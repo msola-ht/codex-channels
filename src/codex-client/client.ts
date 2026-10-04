@@ -335,11 +335,11 @@ export class CodexAppServerClient implements
     });
   }
 
-  async readThread(threadId: string): Promise<ThreadSnapshot> {
+  async readThread(threadId: string, signal?: AbortSignal): Promise<ThreadSnapshot> {
     const result = await this.rpc.request<ThreadReadResponse>({
       method: "thread/read",
       params: { threadId, includeTurns: false },
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(signal ? { signal } : {}) });
     return toThreadSnapshot(result.thread);
   }
 

@@ -399,7 +399,10 @@ Thread 的通知不向渠道广播。失败原因在 Client 边界先脱敏，Te
 指标库 `subagent_threads` 表中，`codexc metrics threads` 与 WebUI Threads 页面共用同一份数据。
 
 Telegram 和飞书的渠道开始通知：Gateway 在官方 `subAgentActivity.started` Item 完成后向父会话发送一次简短的
-“子代理开始 · 任务名”，不展示子线程 ID；后续 `interacted` 显示为“子代理继续 · 任务名”，
+“子代理开始 · 任务名”，附带“提供商”、“模型设置”和“思考强度”，不展示子线程 ID。
+这三项通过官方 `thread/read` 读取子线程当前配置，不代表每轮实际请求遥测；读取失败、超时或缺失时显示“未提供”，不从父线程或全局默认值推断。
+当前官方 v2 活动事件不公开 `fork_turns` 和任务摘要，因此不展示上下文继承方式，也不把可能继承自父会话的 `Thread.preview` 当作子任务摘要。
+后续 `interacted` 显示为“子代理继续 · 任务名”，同样在投递时重新读取提供商、模型设置和思考强度，不沿用开始卡的旧值；
 不改变正在运行的子代理存活状态；上一轮已经终止时会开启新一轮完成跟踪，`interrupted` 不会重复显示为开始。
 
 Telegram 和飞书的渠道完成通知：成功运行只以 App Server 发给发起父 Turn 的 `subAgentActivity.completed` 为事实

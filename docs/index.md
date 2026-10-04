@@ -323,6 +323,14 @@ RS 与 CCG 保存前通过 [`model-catalog-validation.mjs`](../scripts/model-cat
 OpenCode Go 和自定义第三方代理仍拒绝这些路径。真实合同使用当前锁定 App Server 验证
 `POST /alpha/search` 能穿过该白名单并完成工具结果往返。
 
+上表“子代理活动与终态”的开始和继续通知另复用 `thread/read` 的 `Thread.modelProvider`、`Thread.model`、`Thread.reasoningEffort`、`Thread.parentThreadId` 与 `Thread.sessionId`：
+[`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 映射官方当前配置，
+[`completion-output-enricher.ts`](../src/bootstrap/completion-output-enricher.ts) 在投递前有界读取，开始通知核验直接父子身份；继续通知的目标不是发起者直接子级时，另核验双方属于同一官方会话树，失败保留未知值；
+[`lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts) 展示提供商、模型设置与思考强度，不宣称实际请求遥测。
+官方依据为锁定版 [`thread_data.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs)；
+验证见 [`subagent-start-metadata.test.ts`](../tests/subagent-start-metadata.test.ts)、[`json-rpc-threads.test.ts`](../tests/json-rpc-threads.test.ts) 与 [`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts)。
+当前 v2 `subAgentActivity` 不公开上下文继承模式或任务摘要，`Thread.preview` 不作为本次子任务摘要。
+
 子代理交互复用已有 `thread/read`、`Thread.parentThreadId` 和原审批 Server Request，不新增 RPC。
 [`router.ts`](../src/session-routing/router.ts) 核验官方祖先、Workspace、Provider 和绑定有效性；
 [`coordinator.ts`](../src/approval/coordinator.ts) 保留子代理原有 Thread、Turn、Item 与请求身份，

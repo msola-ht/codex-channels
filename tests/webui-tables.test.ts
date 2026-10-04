@@ -4,21 +4,22 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
-  it("describes main thread metrics separately from the subagent expansion and omits flat type and parent columns", () => {
+  it("describes main thread metrics separately from subagent navigation and omits flat type and parent columns", () => {
     expect(markup.threads).toContain("共 1 个匹配主会话");
-    expect(markup.threads).toContain("各行仅统计主会话自身请求，子代理在会话详情查看");
+    expect(markup.threads).toContain("各行仅统计主会话自身请求，点击子代理数量查看关联子代理");
     expect(markup.threadsEn).toContain("Matching main threads: 1");
-    expect(markup.threadsEn).toContain("view subagents in thread details");
+    expect(markup.threadsEn).toContain("select the subagent count to view related subagents");
     expect(markup.threads).not.toContain("本页主会话");
     expect(markup.threadsEn).not.toContain("This page:");
     expect(headers(markup.threads!)).not.toContain("类型");
     expect(headers(markup.threads!)).not.toContain("父会话");
     expect(markup.subagentDetailParent).toContain("子代理");
   });
-  it("keeps only child counts in the main list and links related subagents in details independently of metrics filters", () => {
+  it("links main and child counts to independent subagent pages without inheriting metrics filters", () => {
     expect(markup.subagentsCollapsedCalls).toBe("0");
     expect(markup.subagentsCollapsed).not.toContain('aria-controls=');
     expect(markup.subagentsCollapsed).not.toContain("/root/worker");
+    expect(markup.subagentsCollapsed).toContain('href="/threads/thread-1/subagents"');
     expect(markup.subagentsRelated).toContain('/threads/child%2Fone?range=all');
     expect(markup.subagentsRelated).toContain('data-slot="table"');
     expect(headers(markup.subagentsRelated!)).toEqual(["首次请求", "子代理", "会话", "提供商", "模型", "轮次", "请求", "输入 Token", "缓存命中率", "输出 Token", "最后记录", "子代理"]);
@@ -26,34 +27,48 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.subagentsRelated).toContain("model-test");
     expect(markup.subagentsRelated).toContain("openai");
     expect(markup.subagentsRelated).toContain("50.0%");
-    expect(markup.subagentsRelated).toContain('scope="col"');
     expect(markup.subagentsRelated).toContain('title="/root/worker"');
     expect(markup.subagentsRelated).toContain(">worker</a>");
     expect(markup.subagentsRelated).toContain("子代理 2");
     expect(markup.subagentsRelated).toContain('data-slot="badge"');
+    expect(markup.subagentsRelated).toContain('href="/threads/child%2Fone/subagents"');
     expect(markup.subagentsRelated).toContain("共 21 个子代理");
     expect(markup.subagentsRelatedEn).toContain("Subagents: 21");
     expect(markup.subagentsRelatedEn).toContain("Subagents 2");
-    expect(markup.subagentsRelated).not.toContain('data-slot="dropdown-menu-trigger"');
-    expect(markup.subagentsRelated).not.toContain('role="combobox"');
+    expect(markup.subagentsRelated).toContain('data-slot="dropdown-menu-trigger"');
+    expect(markup.subagentsRelated).toContain('role="combobox"');
     expect(markup.subagentsRelated).not.toContain("父会话");
     expect(markup.subagentsRelated).not.toContain("登记时间");
     expect(markup.subagentsRelated).not.toContain("filtered-");
   });
-  it("shows localized relationship empty, loading and failure states and keeps them visible when metrics fail", () => {
+  it("shows localized relationship states and keeps a detail navigation entry when metrics fail", () => {
     expect(markup.subagentsEmpty).toContain("尚未登记子代理");
     expect(markup.subagentsEmptyEn).toContain("No subagents registered");
-    expect(markup.subagentsEmpty).toContain('data-slot="empty"');
+    expect(markup.subagentsEmpty).toContain('data-slot="table"');
     expect(markup.subagentsFailed).toContain("无法连接服务");
     expect(markup.subagentsFailed).toContain("重试");
     expect(markup.subagentsFailed).not.toContain("hidden-internal-error");
     expect(markup.subagentsLoading).toContain('aria-busy="true"');
     expect(markup.subagentsLoading).toContain('data-slot="skeleton"');
-    expect(markup.subagentsWithFailedMetrics).toContain("关联子代理");
-    expect(markup.subagentsWithFailedMetrics).toContain('/threads/child%2Fone?range=all');
+    expect(markup.subagentsWithFailedMetrics).toContain("查看子代理");
+    expect(markup.subagentsWithFailedMetrics).not.toContain('data-slot="table"');
+    expect(markup.detailSubagentCalls).toBe("0");
     expect(markup.subagentDetailParent).toContain('/threads/parent%2Fthread?range=all');
     expect(markup.subagentDetailParent).toContain('/requests?range=all&amp;threadId=parent%2Fthread&amp;turnId=creation%2Fturn');
     expect(markup.subagentDetailParent).toContain("不包含后续派发任务的全部轮次");
+  });
+  it("renders the independent page and breadcrumb for an encoded owning thread without reading detail metrics", () => {
+    expect(markup.subagentsPage).toContain("子代理 · parent/thread");
+    expect(markup.subagentsPage).toContain('href="/threads/parent%2Fthread?range=all"');
+    expect(markup.subagentsPage).toContain("返回所属会话");
+    expect(markup.subagentsPage).toContain('/threads/child%2Fone?range=all');
+    expect(markup.subagentsPageEn).toContain("Subagents · parent/thread");
+    expect(markup.subagentsPageEn).toContain("Back to owning thread");
+    expect(markup.subagentsPageDetailCalls).toBe("0");
+    expect(markup.subagentsBreadcrumb).toContain('href="/threads/parent%2Fthread?range=all"');
+    expect(markup.subagentsBreadcrumb).toContain("parent/thread");
+    expect(markup.subagentsBreadcrumb).toContain("关联子代理");
+    expect(markup.subagentsBreadcrumb).not.toContain("parent/thread/subagents");
   });
   it("uses server pagination for registered relationships, without inventing creation turns", () => {
     expect(markup.subagentsRelated).toMatch(/disabled=""[^>]*aria-label="上一页"/u);
@@ -64,10 +79,24 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.subagentsLastPage).toContain("第 2 页");
     expect(markup.subagentsLastPage).not.toContain("子代理 2");
     expect(markup.subagentsSingle).toContain("共 1 个子代理");
-    expect(markup.subagentsSingle).not.toContain('aria-label="上一页"');
-    expect(markup.subagentsSingle).not.toContain('aria-label="下一页"');
-    expect(markup.subagentsEmpty).not.toContain("第 1 页");
-    expect(markup.subagentsEmpty).not.toContain('aria-label="下一页"');
+    expect(markup.subagentsSingle).toMatch(/disabled=""[^>]*aria-label="下一页"/u);
+    expect(markup.subagentsEmpty).toContain("第 1 页");
+    expect(markup.subagentsEmpty).toMatch(/disabled=""[^>]*aria-label="下一页"/u);
+  });
+  it("uses the shared DataTable for all registered subagents and links their owning threads", () => {
+    expect(markup.allSubagents).toContain("全部子代理");
+    expect(markup.allSubagentsEn).toContain("All subagents");
+    expect(headers(markup.allSubagents!)).toContain("父会话");
+    expect(markup.allSubagents).toContain('href="/threads/parent%2Fthread?range=all"');
+    expect(markup.allSubagents).toContain('data-slot="dropdown-menu-trigger"');
+    expect(markup.allSubagents).toContain('role="combobox"');
+    expect(markup.allSubagents).toContain("[contain:size]");
+    expect(markup.allSubagents).toContain("minmax(10rem,1fr) auto");
+    expect(markup.allSubagents).not.toContain("filtered-");
+    expect(markup.allSubagentsCalls).toBe("all,all");
+    expect(markup.subagentSortCycle).toBe("last:asc,last:desc,time:desc,time:asc,time:desc");
+    expect(markup.subagentDetailParent).toContain("min-h-[20rem] flex-1");
+    expect(markup.subagentDetailParent).not.toContain("min-h-[32rem]");
   });
   it("shows OpenAI refresh progress and per-account failure feedback", () => {
     expect(markup.quotaRefreshing).toContain("刷新中");
@@ -154,15 +183,17 @@ describe("WebUI metrics table presentation", () => {
       import { createServer } from "vite";
       import { createElement as h } from "react";
       import { renderToStaticMarkup } from "react-dom/server";
-      import { MemoryRouter } from "react-router";
+      import { MemoryRouter, Routes, Route } from "react-router";
       const server = await createServer({ server: { middlewareMode: true }, appType: "custom", logLevel: "silent",
         plugins: [{ name: "fixture-api-state", enforce: "pre", transform(_code, id) {
+          if (id.endsWith("/src/components/metrics/data-table.tsx")) return _code.replace("  useTable,", "  useTable as realUseTable,") + " function useTable(...args) { const table = realUseTable(...args); if (globalThis.fixtureCaptureTable) globalThis.fixtureTable = table; return table; }";
+          if (id.endsWith("/src/App.tsx")) return _code + " export { BreadcrumbTrail };";
           if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
           if (id.endsWith("/src/hooks/use-official-account-sources.ts")) return "export function useOfficialAccountSources() { return globalThis.fixtureAccounts; }";
           if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi() { return globalThis.fixtureApiState; }";
           if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {}, pagination() { return globalThis.fixturePagination; } }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
-          if (id.endsWith("/src/hooks/use-thread-detail.ts")) return _code.replace("export function useThreadDetail(", "function realUseThreadDetail(") + " export function useThreadDetail(...args) { return globalThis.fixtureThreadDetail ?? realUseThreadDetail(...args); }";
-          if (id.endsWith("/src/hooks/use-thread-subagents.ts")) return "export function useThreadSubagents(threadId) { globalThis.fixtureSubagentCalls.push(threadId); return globalThis.fixtureSubagentState; }";
+          if (id.endsWith("/src/hooks/use-thread-detail.ts")) return _code.replace("export function useThreadDetail(", "function realUseThreadDetail(") + " export function useThreadDetail(...args) { globalThis.fixtureThreadDetailCalls++; return globalThis.fixtureThreadDetail ?? realUseThreadDetail(...args); }";
+          if (id.endsWith("/src/hooks/use-thread-subagents.ts")) return "export function useThreadSubagents(threadId) { globalThis.fixtureSubagentCalls.push(threadId ?? 'all'); return globalThis.fixtureSubagentState; }";
           if (id.endsWith("/src/components/metrics/query-filters.tsx")) return "import { createElement } from 'react'; export function QueryFilters(props) { return createElement('div', { 'data-query-filters': true, 'data-thread-filters': props.showThreadFilters }); }";
         } }],
       });
@@ -175,6 +206,8 @@ describe("WebUI metrics table presentation", () => {
         const { ThreadSubagents } = await server.ssrLoadModule("/src/components/threads/thread-subagents.tsx");
         const { TurnTable } = await server.ssrLoadModule("/src/components/threads/turn-table.tsx");
         const { ThreadDetailPage } = await server.ssrLoadModule("/src/pages/thread-detail-page.tsx");
+        const { ThreadSubagentsPage, SubagentsPage } = await server.ssrLoadModule("/src/pages/thread-subagents-page.tsx");
+        const { BreadcrumbTrail } = await server.ssrLoadModule("/src/App.tsx");
         const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
         const { TrafficDetail } = await server.ssrLoadModule("/src/components/traffic/traffic-detail.tsx");
         const { ErrorBanner } = await server.ssrLoadModule("/src/components/metrics/error-banner.tsx");
@@ -196,10 +229,13 @@ describe("WebUI metrics table presentation", () => {
           onPrevious: noop, onNext: noop, onPageSizeChange: noop, onSortingChange: noop,
           sorting: [{ id: "time", desc: true }], serverTotal: 1 };
         globalThis.fixtureSubagentCalls = [];
-        const subagentPagination = { pageNumber: 1, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop };
+        globalThis.fixtureThreadDetailCalls = 0;
+        const subagentPagination = { mode: "server", pageNumber: 1, pageSize: 20, pageSizeOptions: [10,20,50,100], serverTotal: 0,
+          sorting: [{ id: "last", desc: true }], enableSortingRemoval: false, onSortingChange: noop, onPageSizeChange: noop,
+          hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop };
         globalThis.fixtureSubagentState = { data: { subagents: [], total: 0 }, error: null, errorCode: null,
-          loading: false, refreshing: false, refetch: noop, pagination: subagentPagination,
-          sorting: { sortKey: "last", sortDirection: "desc", onSort: noop } };
+          loading: false, refreshing: false, refetch: noop, pagination: subagentPagination, notificationStatus: "live", lastUpdatedAt: 1000,
+        };
         const common = { provider: "openai", model: "model-test", recordedAtMs: 1000, directSubagentCount: 0,
           sessionTiming: { knownDurationMs: 120000, missingTurnCount: 0, historyComplete: true },
           cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
@@ -344,7 +380,7 @@ describe("WebUI metrics table presentation", () => {
         result.threadTimingPartialEn = render(ThreadDetailPage, {}, "en");
         const relation = { ...common, turnCount: 2, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 120000, threadId: "child/one", parentThreadId: "thread-1", parentTurnId: "turn-create/one", agentPath: "/root/worker", recordedAtMs: 120000, directSubagentCount: 2 };
         globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], total: 21 },
-          pagination: { ...subagentPagination, hasNext: true } };
+          pagination: { ...subagentPagination, serverTotal: 21, hasNext: true } };
         const filteredQuery = { range: "today", provider: ["filtered-provider"], model: "filtered-model", status: "failed", turnId: "filtered-turn", filter: "filtered-text", offset: 40, limit: 20 };
         globalThis.fixtureSubagentCalls.length = 0;
         result.subagentsCollapsed = render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null, parentThreadId: null, directSubagentCount: 21 }], query: filteredQuery, pagination });
@@ -352,7 +388,7 @@ describe("WebUI metrics table presentation", () => {
         result.subagentsRelated = render(ThreadSubagents, { threadId: "thread-1" });
         result.subagentsRelatedEn = render(ThreadSubagents, { threadId: "thread-1" }, "en");
         globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [{ ...relation, parentTurnId: null, directSubagentCount: 0 }], total: 21 },
-          pagination: { ...subagentPagination, pageNumber: 2, hasPrevious: true } };
+          pagination: { ...subagentPagination, serverTotal: 21, pageNumber: 2, hasPrevious: true } };
         result.subagentsLastPage = render(ThreadSubagents, { threadId: "thread-1" });
         globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [], total: 0 },
           pagination: subagentPagination };
@@ -362,11 +398,34 @@ describe("WebUI metrics table presentation", () => {
         result.subagentsFailed = render(ThreadSubagents, { threadId: "thread-1" });
         globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: null, error: null, loading: true, refreshing: true };
         result.subagentsLoading = render(ThreadSubagents, { threadId: "thread-1" });
-        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], total: 1 }, loading: false, refreshing: false };
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], total: 1 }, pagination: { ...subagentPagination, serverTotal: 1 }, loading: false, refreshing: false };
         result.subagentsSingle = render(ThreadSubagents, { threadId: "thread-1" });
+        globalThis.fixtureThreadDetailCalls = 0;
+        result.subagentsPage = render(() => h(Routes, null, h(Route, { path: "/threads/:id/subagents", element: h(ThreadSubagentsPage) })), {}, "zh", "/threads/parent%2Fthread/subagents");
+        result.subagentsPageEn = render(() => h(Routes, null, h(Route, { path: "/threads/:id/subagents", element: h(ThreadSubagentsPage) })), {}, "en", "/threads/parent%2Fthread/subagents");
+        result.subagentsPageDetailCalls = String(globalThis.fixtureThreadDetailCalls);
+        globalThis.fixtureSubagentState.data.subagents[0].parentThreadId = "parent/thread";
+        globalThis.fixtureSubagentCalls = [];
+        result.allSubagents = render(SubagentsPage, {});
+        result.allSubagentsEn = render(SubagentsPage, {}, "en");
+        result.allSubagentsCalls = globalThis.fixtureSubagentCalls.join(",");
+        globalThis.fixtureCaptureTable = true;
+        const sortCycle = [];
+        globalThis.fixtureSubagentState.pagination.onSortingChange = next => { globalThis.fixtureSubagentState.pagination.sorting = next; };
+        for (const key of ["last", "last", "time", "time", "time"]) {
+          render(SubagentsPage, {});
+          globalThis.fixtureTable.getColumn(key).getToggleSortingHandler()({ shiftKey: false });
+          const sort = globalThis.fixtureSubagentState.pagination.sorting[0];
+          sortCycle.push(sort.id + ":" + (sort.desc ? "desc" : "asc"));
+        }
+        result.subagentSortCycle = sortCycle.join(",");
+        globalThis.fixtureCaptureTable = false;
+        result.subagentsBreadcrumb = render(BreadcrumbTrail, { pathname: "/threads/parent%2Fthread/subagents" });
         globalThis.fixtureQuery = filteredQuery;
         globalThis.fixtureThreadDetail = { ...globalThis.fixtureThreadDetail, error: "metrics-failed", errorCode: "unknown" };
+        globalThis.fixtureSubagentCalls = [];
         result.subagentsWithFailedMetrics = render(ThreadDetailPage, {});
+        result.detailSubagentCalls = String(globalThis.fixtureSubagentCalls.length);
         globalThis.fixtureThreadDetail.error = null;
         Object.assign(globalThis.fixtureThreadDetail.data.run, { agentPath: "/root/worker", parentThreadId: "parent/thread", parentTurnId: "creation/turn" });
         result.subagentDetailParent = render(ThreadDetailPage, {});

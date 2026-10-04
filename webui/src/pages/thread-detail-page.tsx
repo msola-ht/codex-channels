@@ -10,7 +10,6 @@ import { QueryFilters } from "@/components/metrics/query-filters"
 import { QuerySummary } from "@/components/metrics/query-summary"
 import { ThreadRunSummary } from "@/components/threads/thread-run-summary"
 import { TurnTable } from "@/components/threads/turn-table"
-import { ThreadSubagents } from "@/components/threads/thread-subagents"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -24,7 +23,7 @@ export function ThreadDetailPage() {
   const { t } = useTranslation()
   const { id = "" } = useParams<{ id: string }>()
   const { query, update, pagination } = useMetricsQuery("all")
-  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt, revision } = useThreadDetail(id, query)
+  const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt } = useThreadDetail(id, query)
   const run = data?.run
   const turns = data?.turns
 
@@ -37,6 +36,7 @@ export function ThreadDetailPage() {
           <Button variant="outline" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
           <Button variant="outline" render={<Link to={metricsLink("/requests", query, { threadId: id })} />} nativeButton={false}>{t("threads.viewRequests")}</Button>
           <Button variant="outline" render={<Link to={metricsLink("/errors", query, { threadId: id })} />} nativeButton={false}>{t("threads.viewErrors")}</Button>
+          <Button variant="outline" render={<Link to={`/threads/${encodeURIComponent(id)}/subagents`} />} nativeButton={false}>{t("threads.viewSubagents")}</Button>
         </div>
       </div>
       <QueryFilters query={query} onChange={update} threadId={id} revision={data} />
@@ -60,12 +60,11 @@ export function ThreadDetailPage() {
             <summary className="cursor-pointer text-sm text-muted-foreground">{t("threads.history")}</summary>
             <div className="mt-3"><ThreadRunSummary latestTurn={run.latestTurn} threadAggregate={run.threadAggregate} /></div>
           </details>
-          <div className="flex min-h-[32rem] shrink-0 flex-col">
+          <div className="flex min-h-[20rem] flex-1 flex-col">
             <TurnTable loading={loading} turns={turns.turns} threadId={id} query={query} pagination={pagination(turns)} />
           </div>
         </>
       )}
-      <ThreadSubagents key={id} threadId={id} revision={revision} />
     </div>
   )
 }

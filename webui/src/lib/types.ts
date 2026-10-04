@@ -62,6 +62,7 @@ export type {
   ThreadListItem,
   SubagentListItem,
   ThreadSubagentsResponse,
+  SubagentsResponse,
   ThreadRunResponse,
   ThreadsResponse,
   ThreadTurnsResponse,

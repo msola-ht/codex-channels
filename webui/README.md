@@ -20,7 +20,7 @@ i18n-glossary.json  翻译术语、原样保留项和规则，供开发工具生
 src/
   lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时、页面可见性和设置页恢复事件的延后补查，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 投影 OpenAI 当前周额度、Credits 余额和重置券到期明细，并管理有界手动查询失败记录、有界并发查询、逐账户结果交付、观测时间合并及 DS、OCG、CCG、Cline Pass 账户快照时效，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址，i18n/ 存放中英文界面文案字典与取值函数
   hooks/       数据 hook（useApi 统一 loading/error/refetch，支持按当前状态更新和账户观测时间合并，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、Relay 服务管理 use-relay-service-management（统一手动、页面恢复及任务完成刷新）、Relay Key 管理 use-relay-management（复用确认 Hook）、use-relay-queue（队列页面挂载期间的 SSE 推送与有界快照刷新），设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）、全局货币上下文与 use-translation（按当前显示语言翻译界面文案）
-  pages/       relay-queue-page 独立实时请求队列页；model-management-page 组合提供商、账户与凭据、模型配置、上下文与压缩四个独立路由，channels-page 组合渠道配置和消息展示，settings-page 组合常规、权限、网络、数据、服务五个子页；概览、会话、会话详情、请求、错误、调用详情、渠道投递队列、模型转发（独立 Key 管理，中文用途名称及居中弹窗，手动刷新运行状态）、设置（只负责组合设置域组件）
+  pages/       relay-queue-page 独立实时请求队列页；thread-subagents-page 组合全部子代理和所属会话的关联子代理独立页；model-management-page 组合提供商、账户与凭据、模型配置、上下文与压缩四个独立路由，channels-page 组合渠道配置和消息展示，settings-page 组合常规、权限、网络、数据、服务五个子页；概览、会话、会话详情、请求、错误、调用详情、渠道投递队列、模型转发（独立 Key 管理，中文用途名称及居中弹窗，手动刷新运行状态）、设置（只负责组合设置域组件）
   App.tsx      路由布局与页面级懒加载，保留页面切换间的控制台已应用范围及有界账户手动查询失败记录（不保存账户快照）（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
 
@@ -84,11 +84,13 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 `hooks/use-threads.ts` 与 `hooks/use-thread-detail.ts` 沿用指标通知和历史分页暂停规则。会话详情通过 `useThreadDetail` 共用一条订阅，并行读取本地汇总和轮次，两项成功后一起更新；同条件刷新保留内容和展开状态。`useMetricsProviders` 跟随页面成功读取的结果合并更新提供商选项，自动读取至少间隔 30 秒，不另开订阅；后台或离线时暂停，失败可手动重试，不覆盖筛选草稿。
 
-`components/threads/thread-subagents.tsx` 组合官方 `components/ui/table.tsx` 的基础表格组件，
+`components/threads/thread-subagents.tsx` 复用公共 `DataTable`，
 展示已登记的直接子代理、会话链接、提供商、模型、自身全部保留历史的轮次与请求数、Token 与缓存指标及下级代理数量；名称与会话 ID 使用原生链接，保留键盘与焦点交互，
-仅作为详情页的独立关联区，支持首次请求与最后记录时间排序；主列表仅显示子代理数量及会话累计耗时，其过滤、汇总和分页在服务端完成。
+用于 `pages/thread-subagents-page.tsx` 的独立页面，支持列显隐、首次请求与最后记录时间排序，以及 10/20/50/100 条服务端分页；其他列不提供排序。左侧“会话 → 子代理”打开 `#/subagents` 全局页，展示全部已登记子代理并增加父会话链接；主列表的子代理数量和详情页的查看入口跳转到所属会话的 `#/threads/:id/subagents`，子代理行的下级数量跳转到下一层独立页面，页面保留返回所属会话入口。主列表仍展示会话累计耗时，其过滤、汇总和分页在服务端完成。
 `hooks/use-thread-subagents.ts` 管理独立分页、错误与会话切换隔离，
-跟随所属页面的读取版本刷新，不新增指标订阅；关联导航使用全部时间并清除请求筛选。
+独立复用指标变化订阅和快照确认，历史分页暂停自动更新；仅查询关联数据，不读取会话详情。关联导航使用全部时间并清除请求筛选。
+
+`pages/thread-detail-page.tsx` 在上方展示筛选与统计，轮次 DataTable 填充剩余高度，表格区域滚动、分页栏位于底部；最小表格高度为窄视口保留可用空间。
 
 `hooks/use-dashboard.ts` 为汇总、趋势和热力图共用一条指标订阅；`hooks/use-official-account-sources.ts` 独立订阅已保存账户快照，仅各账户手动刷新查询上游，进入页面、恢复可见与页头刷新均不触发上游账户查询。
 

@@ -38,6 +38,10 @@ export const monitoringNavItems: NavItem[] = [
   { to: "/errors", labelKey: "pages.errors", icon: TriangleAlert },
   { to: "/logs", labelKey: "logs.title", icon: ScrollText },
 ]
+export const threadNavItems: NavItem[] = [
+  { to: "/threads", labelKey: "threads.list", icon: MessagesSquare },
+  { to: "/subagents", labelKey: "threads.subagent", icon: Network },
+]
 export const channelNavItems: NavItem[] = [
   { to: "/channels", labelKey: "navigation.channelConfiguration", icon: MessagesSquare },
   { to: "/delivery", labelKey: "delivery.title", icon: ListOrdered },
@@ -58,7 +62,7 @@ export interface NavGroup {
 }
 export const navigation: (NavItem | NavGroup)[] = [
   { to: "/", labelKey: "pages.console", icon: LayoutDashboard },
-  { to: "/threads", labelKey: "pages.threads", icon: MessagesSquare },
+  { id: "threads", labelKey: "pages.threads", icon: MessagesSquare, children: threadNavItems },
   { id: "monitoring", labelKey: "navigation.monitoring", icon: Activity, children: monitoringNavItems },
   { id: "models", labelKey: "modelManagement.title", icon: Boxes, children: modelNavItems },
   { id: "relay", labelKey: "relay.title", icon: KeyRound, children: [

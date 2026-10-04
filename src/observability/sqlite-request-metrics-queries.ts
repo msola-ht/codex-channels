@@ -743,8 +743,16 @@ export class SqliteRequestMetricsQueries {
   }
 
   threadSubagents(threadId: string, query: SubagentThreadsQuery): StoredThreadSubagentsPage {
-    this.reader.requireOpen();
     validateThreadId(threadId, "Thread ID");
+    return this.subagentPage(query, threadId);
+  }
+
+  subagents(query: SubagentThreadsQuery): StoredThreadSubagentsPage {
+    return this.subagentPage(query);
+  }
+
+  private subagentPage(query: SubagentThreadsQuery, parentThreadId?: string): StoredThreadSubagentsPage {
+    this.reader.requireOpen();
     const offset = metricsPageOffset(query);
     if (query.limit > 100) throw new Error("子代理查询数量必须在 1 到 100 之间");
     const sortKey = query.sortKey ?? "last";
@@ -753,9 +761,11 @@ export class SqliteRequestMetricsQueries {
       throw new Error("子代理排序无效");
     }
     const sortColumn = sortKey === "time" ? "first_request_started_at_ms" : "last_recorded_at_ms";
+    const relationFilter = parentThreadId === undefined ? "" : "WHERE parent_thread_id = ?";
+    const parameters = parentThreadId === undefined ? [] : [parentThreadId];
     const { total } = this.reader.prepare(`
-      SELECT COUNT(*) AS total FROM subagent_threads WHERE parent_thread_id = ?
-    `).get(threadId) as { total: number };
+      SELECT COUNT(*) AS total FROM subagent_threads ${relationFilter}
+    `).get(...parameters) as { total: number };
     const rows = this.reader.prepare(`
       WITH grouped AS (
         SELECT thread_id, COUNT(DISTINCT turn_id) AS turn_count,
@@ -764,7 +774,7 @@ export class SqliteRequestMetricsQueries {
           MIN(request_started_at_ms) AS first_request_started_at_ms,
           MAX(recorded_at_ms) AS last_recorded_at_ms
         FROM model_request_metrics
-        WHERE thread_id IN (SELECT thread_id FROM subagent_threads WHERE parent_thread_id = ?)
+        WHERE thread_id IN (SELECT thread_id FROM subagent_threads ${relationFilter})
         GROUP BY thread_id
       )
       SELECT relation.*, grouped.turn_count, grouped.request_count,
@@ -775,10 +785,10 @@ export class SqliteRequestMetricsQueries {
       FROM subagent_threads AS relation
       LEFT JOIN grouped ON grouped.thread_id = relation.thread_id
       LEFT JOIN model_request_metrics AS latest ON latest.id = grouped.latest_id
-      WHERE relation.parent_thread_id = ?
+      ${parentThreadId === undefined ? "" : "WHERE relation.parent_thread_id = ?"}
       ORDER BY grouped.${sortColumn} IS NULL ASC, grouped.${sortColumn} ${direction}, relation.thread_id ASC
       LIMIT ? OFFSET ?
-    `).all(threadId, threadId, query.limit, offset) as unknown as Array<CacheUsageRow & {
+    `).all(...parameters, ...parameters, query.limit, offset) as unknown as Array<CacheUsageRow & {
       thread_id: string;
       parent_thread_id: string;
       parent_turn_id: string | null;

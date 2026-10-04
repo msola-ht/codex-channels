@@ -25,7 +25,6 @@ export function useThreadDetail(threadId: string, query: MetricsQuery) {
   const notificationStatus = useQueueEvents(state.refetch, state.loading, !historyPage, latest, read, watchRequestMetrics)
   return { data: state.data?.data ?? null, error: state.error, errorCode: state.errorCode, refetch: state.refetch,
     lastUpdatedAt: state.data?.queryKey === queryKey ? state.lastUpdatedAt : null,
-    revision: read,
     notificationStatus: historyPage ? "paused" as const : notificationStatus,
     refreshing: state.loading || (state.error === null && state.data?.queryKey !== queryKey),
     loading: state.error === null && state.data?.queryKey !== queryKey }

@@ -51,6 +51,9 @@ describe("request metrics subagent session aggregation", () => {
     directories.push(directory);
     const path = join(directory, "request-metrics.sqlite3");
     const writer = new SqliteModelRequestMetricsStore(path);
+    expect(new RequestMetricsQueryService(writer).subagents({ limit: 20 })).toEqual({
+      subagents: [], total: 0, offset: 0, limit: 20, nextOffset: null,
+    });
     writer.close();
     const raw = new DatabaseSync(path);
     const insert = raw.prepare("INSERT INTO subagent_threads (thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms) VALUES (?, ?, ?, ?, ?)");
@@ -86,8 +89,19 @@ describe("request metrics subagent session aggregation", () => {
       });
       expect(service.threadSubagents("root", { offset: 9, limit: 2 })).toEqual({ subagents: [], total: 3, offset: 9, limit: 2, nextOffset: null });
       expect(service.threadSubagents("missing", { limit: 20 })).toEqual({ subagents: [], total: 0, offset: 0, limit: 20, nextOffset: null });
+      const global = service.subagents({ limit: 20 });
+      expect(global).toMatchObject({ total: 6, offset: 0, limit: 20, nextOffset: null });
+      expect(global.subagents.map((agent) => agent.threadId)).toEqual([
+        "child-a", "child-b", "child-old", "grandchild", "great-grandchild", "unrelated",
+      ]);
+      expect(global.subagents.every((agent) => agent.requestCount === 0)).toBe(true);
+      expect(service.subagents({ offset: 3, limit: 2 })).toMatchObject({
+        total: 6, nextOffset: 5, subagents: [{ threadId: "grandchild" }, { threadId: "great-grandchild" }],
+      });
+      expect(service.subagents({ offset: 9, limit: 2 })).toEqual({ subagents: [], total: 6, offset: 9, limit: 2, nextOffset: null });
       for (const query of [{ limit: 0 }, { limit: 101 }, { limit: 1.5 }, { limit: 1, offset: -1 }, { limit: 1, offset: Number.MAX_SAFE_INTEGER + 1 }]) {
         expect(() => service.threadSubagents("root", query)).toThrow();
+        expect(() => service.subagents(query)).toThrow();
       }
       expect(() => service.threadSubagents(" ", { limit: 20 })).toThrow("Thread ID");
     } finally { store.close(); }
@@ -122,12 +136,24 @@ describe("request metrics subagent session aggregation", () => {
       expect(ids("last", "asc")).toEqual(["child-b", "child-a", "child-c", "no-requests"]);
       expect(ids("time", "asc")).toEqual(["child-b", "child-c", "child-a", "no-requests"]);
       expect(ids("time", "desc")).toEqual(["child-a", "child-c", "child-b", "no-requests"]);
+      const globalIds = (sortKey: "time" | "last", sortDirection: "asc" | "desc") =>
+        store.subagents({ limit: 10, sortKey, sortDirection }).subagents.map((agent) => agent.threadId);
+      expect(globalIds("last", "desc")).toEqual(["nested", "child-a", "child-c", "child-b", "no-requests"]);
+      expect(globalIds("last", "asc")).toEqual(["child-b", "child-a", "child-c", "nested", "no-requests"]);
+      expect(globalIds("time", "asc")).toEqual(["nested", "child-b", "child-c", "child-a", "no-requests"]);
+      expect(globalIds("time", "desc")).toEqual(["child-a", "child-c", "child-b", "nested", "no-requests"]);
+      expect(store.subagents({ limit: 1, offset: 1 })).toMatchObject({ total: 5, nextOffset: 2, subagents: [{
+        threadId: "child-a", requestCount: 3, inputTokens: 300, outputTokens: 60,
+        cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 2 },
+      }] });
       expect(store.threadSubagents("root", { limit: 1, offset: 1, sortKey: "time", sortDirection: "asc" })).toMatchObject({
         subagents: [{ threadId: "child-c" }], total: 4, nextOffset: 2,
       });
       expect(store.threadSubagents("root", { limit: 10 }).subagents[2]).toMatchObject({ provider: "other", model: null });
       expect(() => store.threadSubagents("root", { limit: 10, sortKey: "requests" as "time" })).toThrow("排序");
       expect(() => store.threadSubagents("root", { limit: 10, sortDirection: "invalid" as "asc" })).toThrow("排序");
+      expect(() => store.subagents({ limit: 10, sortKey: "requests" as "time" })).toThrow("排序");
+      expect(() => store.subagents({ limit: 10, sortDirection: "invalid" as "asc" })).toThrow("排序");
     } finally { store.close(); }
   });
 

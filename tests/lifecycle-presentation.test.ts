@@ -253,7 +253,7 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toBe("子代理开始 · review_task");
+    expect(rendered).toBe("子代理开始 · review_task\n\n提供商：未提供\n模型设置：未提供\n思考强度：未提供");
     expect(rendered).not.toContain("agent-thread-secret");
   });
 
@@ -273,7 +273,7 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toBe("子代理继续 · review_task");
+    expect(rendered).toBe("子代理继续 · review_task\n\n提供商：未提供\n模型设置：未提供\n思考强度：未提供");
     expect(rendered).not.toContain("agent-thread-secret");
   });
 

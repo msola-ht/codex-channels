@@ -79,11 +79,17 @@ export function AppSidebar() {
   )
 }
 
+function isNavigationActive(to: string, pathname: string) {
+  if (to === "/threads") return pathname === to || /^\/threads\/[^/]+$/.test(pathname)
+  if (to === "/subagents") return pathname === to || /^\/threads\/[^/]+\/subagents$/.test(pathname)
+  return pathname === to
+}
+
 function NavigationGroup({ item }: { item: NavGroup }) {
   const { pathname } = useLocation()
   const { state, setOpen, isMobile, setOpenMobile } = useSidebar()
   const { t } = useTranslation()
-  const active = item.children.some(child => child.to === pathname)
+  const active = item.children.some(child => isNavigationActive(child.to, pathname))
   const [expandedOverride, setExpanded] = useState<boolean | null>(null)
   const expanded = expandedOverride ?? (active || (!isMobile && item.id !== "settings"))
   const iconMode = !isMobile && state === "collapsed"
@@ -98,7 +104,9 @@ function NavigationGroup({ item }: { item: NavGroup }) {
       <ChevronRight aria-hidden="true" data-expanded={visibleExpanded} className="ml-auto transition-transform duration-200 motion-reduce:transition-none data-[expanded=true]:rotate-90 group-data-[collapsible=icon]:hidden" />
     </CollapsibleTrigger>
     <CollapsibleContent><SidebarMenuSub>
-      {item.children.map(item => <SidebarMenuSubItem key={item.to}><SidebarMenuSubButton render={<NavLink to={item.to} onClick={() => setOpenMobile(false)} />} isActive={pathname === item.to}>{t(item.labelKey)}</SidebarMenuSubButton></SidebarMenuSubItem>)}
+      {item.children.map(item => <SidebarMenuSubItem key={item.to}><SidebarMenuSubButton render={item.to === "/threads" || item.to === "/subagents"
+        ? <Link to={item.to} aria-current={isNavigationActive(item.to, pathname) ? "page" : undefined} onClick={() => setOpenMobile(false)} />
+        : <NavLink to={item.to} onClick={() => setOpenMobile(false)} />} isActive={isNavigationActive(item.to, pathname)}>{t(item.labelKey)}</SidebarMenuSubButton></SidebarMenuSubItem>)}
     </SidebarMenuSub></CollapsibleContent>
   </Collapsible>
 }

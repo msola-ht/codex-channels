@@ -11,6 +11,27 @@ import type { SessionRouter, ThreadSession, ThreadSnapshot } from "../src/sessio
 const cwd = "/workspace";
 
 describe("ProviderRoutingClient", () => {
+  it("forwards read cancellation and discards a late Thread without remembering its provider", async () => {
+    const openai = client();
+    const deepseek = client();
+    let resolve!: (thread: ThreadSnapshot) => void;
+    let entered!: () => void;
+    const ready = new Promise<void>((accept) => { entered = accept; });
+    openai.readThread.mockImplementation(() => { entered(); return new Promise((accept) => { resolve = accept; }); });
+    const routed = routing(openai, deepseek);
+    const controller = new AbortController();
+    const pending = routed.readThread("child", controller.signal);
+    await ready;
+    expect(openai.readThread).toHaveBeenCalledWith("child", controller.signal);
+    controller.abort(new Error("metadata read cancelled"));
+    await expect(pending).rejects.toThrow("metadata read cancelled");
+    resolve(snapshot("child", "deepseek", "active"));
+    await Promise.resolve();
+    expect(routed.knownProvider("child")).toBeUndefined();
+    expect(deepseek.readThread).not.toHaveBeenCalled();
+    await routed.close();
+  });
+
   it("isolates file approval context by originating Provider as well as thread identity", () => {
     const openai = client();
     const other = client();

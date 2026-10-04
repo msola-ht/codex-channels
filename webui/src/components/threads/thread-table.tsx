@@ -180,7 +180,11 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       header: () => <TableHint hint={t("threads.subagentCountHint")}>{t("threads.directSubagents")}</TableHint>,
       enableSorting: false,
       enableHiding: false,
-      cell: ({ row }) => <span className="tabular-nums">{row.original.directSubagentCount}</span>,
+      cell: ({ row }) => row.original.directSubagentCount > 0 ? <Link
+        to={`/threads/${encodeURIComponent(row.original.threadId)}/subagents`}
+        className="tabular-nums hover:underline"
+        aria-label={t("threads.subagentsForThread", { id: shortThreadId(row.original.threadId), count: row.original.directSubagentCount })}
+      >{row.original.directSubagentCount}</Link> : <span className="tabular-nums">0</span>,
     },
     {
       id: "compact",

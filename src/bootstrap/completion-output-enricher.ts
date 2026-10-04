@@ -13,6 +13,14 @@ import type {
 const completionEnrichmentTimeoutMs = 250;
 
 export interface CompletionOutputEnricherOptions {
+  subagentMetadata?(agentThreadId: string, signal: AbortSignal): Promise<{
+    id: string;
+    parentThreadId?: string | null;
+    sessionId?: string | null;
+    modelProvider?: string | null;
+    model?: string | null;
+    reasoningEffort?: string | null;
+  }>;
   executionTiming?(threadId: string, turnId: string): {
     durationMs: number | null;
     sessionDurationMs: number | null;
@@ -33,10 +41,10 @@ export interface CompletionOutputEnricherOptions {
   ): TurnTaskMetricsSummary | undefined | Promise<TurnTaskMetricsSummary | undefined>;
 }
 
-/** 投递前的完成信息补全；队列、授权复核与投递失败处理由调用方负责。 */
+/** 投递前的完成与子代理信息补全；队列、授权复核与投递失败处理由调用方负责。 */
 export class CompletionOutputEnricher {
   private stopping = false;
-  private readonly accountQueriesAbort = new AbortController();
+  private readonly queriesAbort = new AbortController();
 
   constructor(
     private readonly logger: Logger,
@@ -44,14 +52,14 @@ export class CompletionOutputEnricher {
     private readonly options: CompletionOutputEnricherOptions,
   ) {}
 
-  /** 禁止新账户查询，保留已在途查询直到 stop。 */
+  /** 禁止新查询，保留已在途查询直到 stop。 */
   beginShutdown(): void {
     this.stopping = true;
   }
 
   stop(): void {
     this.beginShutdown();
-    this.accountQueriesAbort.abort();
+    this.queriesAbort.abort();
   }
 
   /**
@@ -61,6 +69,9 @@ export class CompletionOutputEnricher {
    * 也不会触发读取，真正投递时再按当时已经落库的结果生成卡片。
    */
   async enrich(event: OutputEvent): Promise<OutputEvent> {
+    if (event.type === "subagent.spawned" || event.type === "subagent.contacted") {
+      return this.readSubagentMetadata(event);
+    }
     if (event.type !== "turn.completed") {
       return event;
     }
@@ -118,13 +129,65 @@ export class CompletionOutputEnricher {
     };
   }
 
+  private async readSubagentMetadata(
+    event: Extract<OutputEvent, { type: "subagent.spawned" | "subagent.contacted" }>,
+  ): Promise<OutputEvent> {
+    const fallback = { ...event, modelProvider: null, model: null, reasoningEffort: null };
+    if (!this.options.subagentMetadata || this.stopping) return fallback;
+    const deadline = new AbortController();
+    const signal = AbortSignal.any([deadline.signal, this.queriesAbort.signal]);
+    let cancel: (() => void) | undefined;
+    try {
+      const read = this.options.subagentMetadata.bind(this.options);
+      const query = (async () => {
+        const result = await read(event.agentThreadId, signal);
+        if (signal.aborted) return undefined;
+        let matches = result.id === event.agentThreadId && Boolean(result.parentThreadId?.trim());
+        if (matches && result.parentThreadId !== event.threadId) {
+          matches = false;
+          // interacted 可面向同一会话树的孙代理或同级代理；spawned 必须是直接子代理。
+          if (event.type === "subagent.contacted" && result.sessionId?.trim()) {
+            const sender = await read(event.threadId, signal);
+            matches = sender.id === event.threadId
+              && Boolean(sender.sessionId?.trim())
+              && sender.sessionId === result.sessionId;
+          }
+        }
+        return { result, matches };
+      })();
+      const cancelled = new Promise<undefined>((resolve) => {
+        cancel = () => resolve(undefined);
+        signal.addEventListener("abort", cancel, { once: true });
+        if (signal.aborted) cancel();
+      });
+      const metadata = await withDeadline(Promise.race([query, cancelled]), 2_000, () => {
+        deadline.abort();
+        this.logger.warn({ agentThreadId: event.agentThreadId }, "子代理配置读取超时，省略模型设置");
+        return undefined;
+      });
+      if (signal.aborted || !metadata) return fallback;
+      if (!metadata.matches) {
+        this.logger.warn({ agentThreadId: event.agentThreadId, threadId: event.threadId }, "子代理配置归属不匹配，省略模型设置");
+        return fallback;
+      }
+      const { result } = metadata;
+      return { ...event, modelProvider: result.modelProvider ?? null, model: result.model ?? null, reasoningEffort: result.reasoningEffort ?? null };
+    } catch {
+      if (!signal.aborted) this.logger.warn({ agentThreadId: event.agentThreadId }, "子代理配置读取失败，省略模型设置");
+      return fallback;
+    } finally {
+      if (cancel) signal.removeEventListener("abort", cancel);
+      deadline.abort();
+    }
+  }
+
   private async readCompletionAccountStatus(
     event: Extract<OutputEvent, { type: "turn.completed" }>,
   ): Promise<CompletionAccountStatus | undefined> {
     const provider = event.modelProvider;
     if (!provider || provider === "openai" || !this.options.completionAccountStatus || this.stopping) return undefined;
     const deadline = new AbortController();
-    const signal = AbortSignal.any([deadline.signal, this.accountQueriesAbort.signal]);
+    const signal = AbortSignal.any([deadline.signal, this.queriesAbort.signal]);
     try {
       const query = this.options.completionAccountStatus(provider, signal);
       const result = await withDeadline(query, 2_000, () => {

@@ -19,6 +19,10 @@ export interface ThreadSnapshot {
   /** Official spawned-parent relationship; forks remain independent. */
   parentThreadId?: string | null;
   modelProvider: string;
+  /** Current configured model, or latest persisted value when unloaded; not execution telemetry. */
+  model?: string | null;
+  /** Current configured effort, or latest persisted value when unloaded; not execution telemetry. */
+  reasoningEffort?: string | null;
   preview: string;
   name: string | null;
   isPinned: boolean;
@@ -92,7 +96,7 @@ export interface ThreadLifecyclePort {
    */
   isProviderConfigured?(provider: string): boolean;
   listThreads(cwd: string, options?: ThreadQueryOptions): Promise<ThreadSnapshot[]>;
-  readThread(threadId: string): Promise<ThreadSnapshot>;
+  readThread(threadId: string, signal?: AbortSignal): Promise<ThreadSnapshot>;
   startThread(cwd: string, options?: ThreadStartOptions): Promise<ThreadSession>;
   resumeThread(
     threadId: string,

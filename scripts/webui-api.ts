@@ -204,14 +204,17 @@ export interface SubagentListItem extends Pick<ThreadListItem,
   lastRecordedAtMs: number | null
 }
 
-export interface ThreadSubagentsResponse {
+export interface SubagentsResponse {
   generatedAt: string
-  threadId: string
   subagents: SubagentListItem[]
   total: number
   offset: number
   limit: number
   nextOffset: number | null
+}
+
+export interface ThreadSubagentsResponse extends SubagentsResponse {
+  threadId: string
 }
 
 export interface TurnSummary {

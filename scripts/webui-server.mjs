@@ -478,6 +478,10 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
     handleThreads(environment, url, response);
     return;
   }
+  if (apiPath === "/subagents") {
+    handleSubagents(environment, url, response);
+    return;
+  }
   const subagentsMatch = apiPath.match(/^\/threads\/([^/]+)\/subagents$/u);
   if (subagentsMatch) {
     handleThreadSubagents(environment, subagentsMatch[1], url, response);
@@ -605,7 +609,10 @@ function handleThreads(environment, url, response) {
 }
 
 function handleThreadSubagents(environment, rawThreadId, url, response) {
-  const threadId = parseThreadId(rawThreadId);
+  handleSubagents(environment, url, response, parseThreadId(rawThreadId));
+}
+
+function handleSubagents(environment, url, response, threadId) {
   for (const key of url.searchParams.keys()) {
     if (!["offset", "limit", "sortKey", "sortDirection"].includes(key)) throw new ApiError(400, "unsupported_parameter", "子代理列表只接受 offset、limit、sortKey 和 sortDirection");
     if (url.searchParams.getAll(key).length !== 1) throw new ApiError(400, "invalid_parameter", "子代理查询参数不能重复");
@@ -622,8 +629,11 @@ function handleThreadSubagents(environment, rawThreadId, url, response) {
   };
   const store = openMetricsStore(environment);
   try {
-    const page = store.readSnapshot(() => new RequestMetricsQueryService(store).threadSubagents(threadId, query));
-    sendJson(response, 200, { generatedAt: new Date().toISOString(), threadId, ...page });
+    const page = store.readSnapshot(() => {
+      const queries = new RequestMetricsQueryService(store);
+      return threadId === undefined ? queries.subagents(query) : queries.threadSubagents(threadId, query);
+    });
+    sendJson(response, 200, { generatedAt: new Date().toISOString(), ...(threadId === undefined ? {} : { threadId }), ...page });
   } finally {
     store.close();
   }

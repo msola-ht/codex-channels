@@ -222,6 +222,7 @@ type DataTablePagination =
       onPageSizeChange: (pageSize: number) => void
       pageSizeOptions?: number[]
       sorting: SortingState
+      enableSortingRemoval?: boolean
       onSortingChange: (sorting: SortingState) => void
       onFilterChange?: (filter: string) => void
       serverTotal?: number
@@ -317,6 +318,7 @@ export function DataTable<TData extends RowData>({
     ...(server
       ? {
           manualSorting: true,
+          ...(pagination.enableSortingRemoval === undefined ? {} : { enableSortingRemoval: pagination.enableSortingRemoval }),
           onSortingChange: (updater: SortingState | ((old: SortingState) => SortingState)) => {
             const next = typeof updater === "function" ? updater(sorting) : updater
             pagination.onSortingChange(

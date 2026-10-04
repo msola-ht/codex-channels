@@ -9,7 +9,7 @@
   稳定快照；快照保留 App Server 返回的 `historyMode`（`legacy` 或 `paginated`），新建 Thread 使用分页
   历史，既有 legacy Thread 不宣称支持 Revert；官方分区裁剪为稳定 `id/name/builtIn`，内置 Pinned 另投影为 `isPinned`，运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带
   模型 Provider、实际 Default/Plan 协作模式、更新时间/最近活跃时间；可选 `parentThreadId` 保留官方派生父子关系供本机归档识别和子代理交互归属核验，
-  压缩 Item ID，不向业务层暴露完整官方 Turn。端口可选声明已配置的模型 Provider 判定，用于把
+  压缩 Item ID，不向业务层暴露完整官方 Turn。Thread 快照还保留官方当前模型与思考设置，供子代理开始和继续展示；只读查询支持取消，不把当前配置当作历史轮次遥测。端口可选声明已配置的模型 Provider 判定，用于把
   Provider 已被移除的历史 Thread 排除在自动接续之外，未实现的部署视为不做限制。
 - `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权限（沙箱、审批策略、
   权限 Profile）作为启动参数传给新建或恢复的 Thread，协调持久化映射、订阅恢复、Provider/模型设置、

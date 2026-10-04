@@ -62,6 +62,18 @@ function writeCallIndex(
 }
 
 describe("webui server data API", () => {
+  it("returns an empty global subagent page when no relationships are registered", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/subagents`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      generatedAt: expect.any(String), subagents: [], total: 0, offset: 0, limit: 20, nextOffset: null,
+    });
+  });
+
   it("lists only main Threads with main-only pagination and summaries while preserving child detail access", async () => {
     const fixture = createFixture();
     const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
@@ -115,10 +127,14 @@ describe("webui server data API", () => {
     raw.close();
     const { origin } = await startServer(fixture.environment, undefined, { token: "subagent-token" });
     const url = `${origin}/api/v1/threads/root/subagents`;
+    const globalUrl = `${origin}/api/v1/subagents`;
     const headers = { authorization: "Bearer subagent-token" };
     expect((await fetch(url)).status).toBe(401);
     expect((await fetch(url, { headers: { authorization: "Bearer wrong" } })).status).toBe(401);
     expect((await fetch(url, { headers, method: "POST" })).status).toBe(405);
+    expect((await fetch(globalUrl)).status).toBe(401);
+    expect((await fetch(globalUrl, { headers: { authorization: "Bearer wrong" } })).status).toBe(401);
+    expect((await fetch(globalUrl, { headers, method: "POST" })).status).toBe(405);
     const defaults = await fetch(url, { headers });
     expect(defaults.status).toBe(200);
     expect(await defaults.json()).toMatchObject({
@@ -139,12 +155,28 @@ describe("webui server data API", () => {
     });
     expect(await (await fetch(`${url}?offset=10`, { headers })).json()).toMatchObject({ total: 3, subagents: [], nextOffset: null });
     expect(await (await fetch(`${origin}/api/v1/threads/missing/subagents`, { headers })).json()).toMatchObject({ total: 0, subagents: [] });
+    const global = await (await fetch(globalUrl, { headers })).json();
+    expect(global).toMatchObject({ generatedAt: expect.any(String), total: 6, offset: 0, limit: 20, nextOffset: null });
+    expect(global).not.toHaveProperty("threadId");
+    expect(global.subagents).toMatchObject([
+      { threadId: "child-a", parentThreadId: "root", requestCount: 0 },
+      { threadId: "child-b", parentThreadId: "root", requestCount: 0 },
+      { threadId: "deeper", parentThreadId: "nested", requestCount: 0 },
+      { threadId: "nested", parentThreadId: "child-a", requestCount: 0 },
+      { threadId: "older", parentThreadId: "root", requestCount: 0 },
+      { threadId: "unrelated", parentThreadId: "other", requestCount: 0 },
+    ]);
+    expect(await (await fetch(`${globalUrl}?offset=2&limit=2`, { headers })).json()).toMatchObject({
+      total: 6, offset: 2, limit: 2, nextOffset: 4, subagents: [{ threadId: "deeper" }, { threadId: "nested" }],
+    });
+    expect(await (await fetch(`${globalUrl}?offset=10`, { headers })).json()).toMatchObject({ total: 6, subagents: [], nextOffset: null });
     recordSample(fixture.databasePath, { ...metricSample(), threadId: "root", provider: "matching", recordedAtMs: Date.now() - 1000 });
     expect(await (await fetch(`${origin}/api/v1/threads?range=all&provider=matching`, { headers })).json()).toMatchObject({
       total: 1, threads: [{ threadId: "root", directSubagentCount: 3 }],
     });
     for (const query of ["range=all", "provider=matching", "sort=time", "threadId=root", "offset=0&offset=1", "limit=1&limit=2", "sortKey=time&sortKey=last", "sortDirection=asc&sortDirection=desc", "sortKey=requests", "sortDirection=invalid", "sortKey=", "sortDirection=", "offset=-1", "offset=1.5", "offset=9007199254740992", "limit=0", "limit=101", "limit=", "limit=no"]) {
       expect((await fetch(`${url}?${query}`, { headers })).status, query).toBe(400);
+      expect((await fetch(`${globalUrl}?${query}`, { headers })).status, query).toBe(400);
     }
     expect((await fetch(`${origin}/api/v1/threads/${"x".repeat(129)}/subagents`, { headers })).status).toBe(400);
   });
@@ -179,6 +211,22 @@ describe("webui server data API", () => {
     });
     expect(await (await fetch(`${url}?sortKey=time&sortDirection=desc&offset=2`)).json()).toMatchObject({
       total: 3, nextOffset: null, subagents: [{ threadId: "no-requests", firstRequestStartedAtMs: null, lastRecordedAtMs: null }],
+    });
+    const globalUrl = `${origin}/api/v1/subagents`;
+    expect(await (await fetch(`${globalUrl}?limit=1`)).json()).toMatchObject({
+      total: 4, nextOffset: 1, subagents: [{ threadId: "nested", parentThreadId: "child-a", requestCount: 1, inputTokens: 9000 }],
+    });
+    expect(await (await fetch(`${globalUrl}?offset=1&limit=1`)).json()).toMatchObject({
+      total: 4, nextOffset: 2, subagents: [{ threadId: "child-a", requestCount: 2, inputTokens: 300, outputTokens: 30 }],
+    });
+    expect(await (await fetch(`${globalUrl}?sortKey=time&sortDirection=asc&limit=1`)).json()).toMatchObject({
+      total: 4, nextOffset: 1, subagents: [{ threadId: "nested" }],
+    });
+    expect(await (await fetch(`${globalUrl}?sortKey=last&sortDirection=asc&limit=1`)).json()).toMatchObject({
+      total: 4, nextOffset: 1, subagents: [{ threadId: "child-b" }],
+    });
+    expect(await (await fetch(`${globalUrl}?sortKey=time&sortDirection=desc&offset=3`)).json()).toMatchObject({
+      total: 4, nextOffset: null, subagents: [{ threadId: "no-requests", firstRequestStartedAtMs: null, lastRecordedAtMs: null }],
     });
   });
 

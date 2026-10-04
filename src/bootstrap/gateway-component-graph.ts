@@ -943,6 +943,7 @@ export abstract class GatewayComponentGraph {
           this.interactions.setAvailable(surface, accountId, available, outcome);
           if (!available) this.asyncQuestions?.cancelSurface(surface, accountId);
         },
+        subagentMetadata: (agentThreadId, signal) => this.codex.readThread(agentThreadId, signal),
         completionAccountStatus: async (provider, signal) => {
           if (provider === "openai" || !this.providerAccounts || !accountAdapters.some((adapter) => adapter.provider === provider)) return undefined;
           return completionAccountStatus(provider, await this.providerAccounts.accountUsage(provider, undefined, signal));

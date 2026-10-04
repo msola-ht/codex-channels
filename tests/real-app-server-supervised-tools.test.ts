@@ -1427,6 +1427,7 @@ contractSuite("real supervised App Server tools", () => {
         { type: "item.subagentActivity" }
       >> = [];
       const parentSequence: string[] = [];
+      let childSettings: Promise<Awaited<ReturnType<CodexAppServerClient["readThread"]>>> | undefined;
       try {
         await waitFor(
           () => existsSync(socketPath),
@@ -1446,6 +1447,12 @@ contractSuite("real supervised App Server tools", () => {
           const event = toConversationInputEvent(notification);
           if (event?.type === "item.subagentActivity") {
             activities.push(event);
+            if (event.kind === "started") {
+              // Read the loaded child's authoritative configuration immediately;
+              // the parent is configured with a different model.
+              childSettings = client!.readThread(event.agentThreadId);
+              childSettings.catch(() => undefined);
+            }
             if (event.kind === "completed") parentSequence.push("subagent.completed");
           } else if (event?.type === "turn.completed" && event.threadId === threadId) {
             parentSequence.push("parent.turn.completed");
@@ -1467,6 +1474,12 @@ contractSuite("real supervised App Server tools", () => {
         const spawned = activities.find(({ kind }) => kind === "started");
         const completed = activities.find(({ kind }) => kind === "completed");
         expect(spawned).toBeDefined();
+        expect(started.thread.model).toBe("subagent-contract-model");
+        await expect(childSettings).resolves.toMatchObject({
+          id: spawned?.agentThreadId, parentThreadId: threadId,
+          sessionId: started.thread.sessionId,
+          model: "gpt-5.6-terra", reasoningEffort: "low",
+        });
         expect(childRequest).toMatchObject({ model: "gpt-5.6-terra", reasoning: { effort: "low" } });
         expect(childAuthorization).toBe("Bearer parent-contract-key");
         expect(completed).toMatchObject({
