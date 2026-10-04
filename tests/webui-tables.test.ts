@@ -268,7 +268,8 @@ describe("WebUI metrics table presentation", () => {
           sessionTiming: { knownDurationMs: 120000, missingTurnCount: 0, historyComplete: true },
           cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
           inputTokens: 100, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 5,
-          totalTokens: 1080, subagentUsage: { inputTokens: 800, cachedInputTokens: 300, outputTokens: 160 },
+          totalTokens: 1080, subagentUsage: { inputTokens: 800, cachedInputTokens: 300, outputTokens: 160,
+            cacheUsage: { inputTokens: 800, cachedInputTokens: 300, missingRequestCount: 0 } },
           tokensPerSecond: 20, compact: null, requestCount: 1, unsuccessfulRequestCount: 0 };
         const record = { ...common, status: "failed", requestModel: "model-test", responseModel: "model-other",
           traffic: null, userAgent: "fixture-client", operation: "response", httpStatus: 502,
@@ -401,7 +402,8 @@ describe("WebUI metrics table presentation", () => {
           turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 };
         const childOnlyThread = { ...mainThread, provider: null, model: null, requestCount: 0, turnCount: 0,
           inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
-          subagentUsage: { inputTokens: 900, cachedInputTokens: null, outputTokens: 180 },
+          subagentUsage: { inputTokens: 900, cachedInputTokens: null, outputTokens: 180,
+            cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 1 } },
           cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 } };
         result.threadsChildOnly = render(ThreadTable, { threads: [childOnlyThread], query: {}, pagination });
         globalThis.fixtureCaptureTable = true;
@@ -1042,7 +1044,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.threadCacheZero).toContain("自身: 输入 100, 缓存 0, 输出 20");
     expect(markup.threadCacheUnknown).toContain("自身: 输入 100, 缓存 —, 输出 20");
     expect(markup.threadInputZero).toContain("自身: 输入 0, 缓存 0, 输出 20");
-    expect(markup.partialThread).toContain("自身: 输入 1K, 缓存 —, 输出 20");
+    expect(markup.partialThread).toContain("自身: 输入 1K, 缓存 ≥ 50, 输出 20");
     expect(markup.partialSummary).toContain("缓存 50");
     expect(markup.partialGlobal).toContain("缓存 50 · 命中率 50.0%");
     for (const key of ["partialThread", "partialSummary", "partialGlobal"]) {

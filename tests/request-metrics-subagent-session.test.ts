@@ -115,7 +115,8 @@ describe("request metrics subagent session aggregation", () => {
       expect(store.threadList({ ...query, offset: 2 })).toMatchObject({
         nextOffset: null, treeAggregate: page.treeAggregate,
         threads: [{ threadId: "root-a", inputTokens: 100, cachedInputTokens: 50, outputTokens: 10,
-          totalTokens: 1430, subagentUsage: { inputTokens: 1200, cachedInputTokens: null, outputTokens: 120 },
+          totalTokens: 1430, subagentUsage: { inputTokens: 1200, cachedInputTokens: null, outputTokens: 120,
+            cacheUsage: { inputTokens: 500, cachedInputTokens: 50, missingRequestCount: 1 } },
           lastRecordedAtMs: 1100 }],
       });
       expect(store.threadList({ ...query, offset: 10 })).toMatchObject({ threads: [], matchedTotal: 3, treeAggregate: page.treeAggregate });
@@ -135,7 +136,8 @@ describe("request metrics subagent session aggregation", () => {
         expect(store.threadList({ ...query, ...filter })).toMatchObject({
           matchedTotal: 1, aggregate: null, treeAggregate: { requestCount: 1, inputTokens: 700 },
           threads: [{ threadId: "root-a", inputTokens: 0, cachedInputTokens: 0, totalTokens: 770,
-            subagentUsage: { inputTokens: 700, cachedInputTokens: null, outputTokens: 70 } }],
+            subagentUsage: { inputTokens: 700, cachedInputTokens: null, outputTokens: 70,
+              cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 1 } } }],
         });
       }
       // Exact Turn selection must not include a child's coincidentally equal Turn ID.
@@ -189,17 +191,23 @@ describe("request metrics subagent session aggregation", () => {
         threadId, inputTokens, cachedInputTokens, outputTokens, subagentUsage, totalTokens,
       }))).toEqual([
         { threadId: "complete-root", inputTokens: 300, cachedInputTokens: 150, outputTokens: 30,
-          subagentUsage: { inputTokens: 1500, cachedInputTokens: 700, outputTokens: 150 }, totalTokens: 1980 },
+          subagentUsage: { inputTokens: 1500, cachedInputTokens: 700, outputTokens: 150,
+            cacheUsage: { inputTokens: 1500, cachedInputTokens: 700, missingRequestCount: 0 } }, totalTokens: 1980 },
         { threadId: "partial-root", inputTokens: 300, cachedInputTokens: null, outputTokens: 1020,
-          subagentUsage: { inputTokens: 300, cachedInputTokens: 90, outputTokens: 30 }, totalTokens: 1650 },
+          subagentUsage: { inputTokens: 300, cachedInputTokens: 90, outputTokens: 30,
+            cacheUsage: { inputTokens: 300, cachedInputTokens: 90, missingRequestCount: 0 } }, totalTokens: 1650 },
         { threadId: "partial-child-root", inputTokens: 900, cachedInputTokens: 900, outputTokens: 1,
-          subagentUsage: { inputTokens: 500, cachedInputTokens: null, outputTokens: 2 }, totalTokens: 1403 },
+          subagentUsage: { inputTokens: 500, cachedInputTokens: null, outputTokens: 2,
+            cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 1 } }, totalTokens: 1403 },
         { threadId: "own-only", inputTokens: 1000, cachedInputTokens: 1000, outputTokens: 1,
-          subagentUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }, totalTokens: 1001 },
+          subagentUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+            cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 } }, totalTokens: 1001 },
         { threadId: "absent-root", inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
-          subagentUsage: { inputTokens: 100, cachedInputTokens: 50, outputTokens: 900 }, totalTokens: 1000 },
+          subagentUsage: { inputTokens: 100, cachedInputTokens: 50, outputTokens: 900,
+            cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 } }, totalTokens: 1000 },
         { threadId: "missing-input", inputTokens: 0, cachedInputTokens: 0, outputTokens: 5,
-          subagentUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }, totalTokens: 5 },
+          subagentUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+            cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 } }, totalTokens: 5 },
       ]);
       expect(store.threadList({ ...query, sortDirection: "asc", limit: 2 }).threads.map(({ threadId }) => threadId))
         .toEqual(["missing-input", "absent-root"]);

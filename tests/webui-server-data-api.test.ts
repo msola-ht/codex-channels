@@ -184,6 +184,38 @@ describe("webui server data API", () => {
     expect((await fetch(`${origin}/api/v1/threads/${"x".repeat(129)}/subagents`, { headers })).status).toBe(400);
   });
 
+  it("keeps observed own and descendant cache usage after requests without usage fail", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const current = { ...metricSample(), recordedAtMs: Date.now() - 1000 };
+    store.recordBatch([
+      { ...current, threadId: "root", inputTokens: 100, cachedInputTokens: 80, outputTokens: 10 },
+      { ...current, threadId: "child", inputTokens: 200, cachedInputTokens: 150, outputTokens: 20 },
+      { ...current, threadId: "nested", inputTokens: 300, cachedInputTokens: 0, outputTokens: 30 },
+      ...["root", "child"].map((threadId) => ({
+        ...current, threadId, status: "failed" as const, errorType: "client_disconnected",
+        inputTokens: null, cachedInputTokens: null, outputTokens: null, totalTokens: null,
+      })),
+      { ...current, threadId: "nested", inputTokens: null, cachedInputTokens: 50, outputTokens: null },
+    ]);
+    for (const [agentThreadId, parentThreadId] of [["child", "root"], ["nested", "child"]] as const) {
+      store.recordSubagentThread({ agentThreadId, parentThreadId, parentTurnId: "turn-1", agentPath: `/root/${agentThreadId}` });
+    }
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/threads?range=all`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      total: 1,
+      threads: [{
+        threadId: "root", inputTokens: 100, cachedInputTokens: null, outputTokens: 10, totalTokens: 660,
+        cacheUsage: { inputTokens: 100, cachedInputTokens: 80, missingRequestCount: 1 },
+        subagentUsage: { inputTokens: 500, cachedInputTokens: null, outputTokens: 50,
+          cacheUsage: { inputTokens: 500, cachedInputTokens: 150, missingRequestCount: 2 } },
+      }],
+    });
+  });
+
   it("returns child metrics and pages by request times without including descendant requests", async () => {
     const fixture = createFixture();
     const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
