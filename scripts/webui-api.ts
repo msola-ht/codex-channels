@@ -211,6 +211,12 @@ export interface SubagentListItem extends Pick<ThreadListItem,
 export interface SubagentsResponse {
   generatedAt: string
   subagents: SubagentListItem[]
+  modelUsage: Array<{
+    model: string | null
+    inputTokens: number
+    outputTokens: number
+    cacheUsage: CacheUsage
+  }>
   total: number
   offset: number
   limit: number

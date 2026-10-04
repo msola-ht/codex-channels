@@ -76,6 +76,27 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.subagentsRelated).not.toContain("登记时间");
     expect(markup.subagentsRelated).not.toContain("filtered-");
   });
+  it("shows model usage cards across pages with known-cache rates and localized input breakdowns", () => {
+    const summary = (html: string, label = "模型") => html.match(new RegExp(`<section aria-label="${label}"[^>]*>([\\s\\S]*?)</section>`))?.[1]?.replace(/ id="[^"]*"/gu, "");
+    const cards = summary(markup.subagentsRelated!);
+    expect(cards).toBeDefined();
+    expect(cards?.match(/data-slot="card"/gu)).toHaveLength(2);
+    expect(cards).toContain("model-card-one");
+    expect(cards).toContain("model-card-two");
+    expect(cards?.match(/<dd\b[^>]*>([\s\S]*?)<\/dd>/gu)?.map(cell => cell.replace(/<[^>]*>/gu, "")))
+      .toEqual(["2K", "75.0%", "500", "4K", "—", "0"]);
+    expect(cards).toContain('aria-description="缓存：≥ 750; 无缓存：≥ 250"');
+    expect(cards).not.toMatch(/aria-description="[^"]*命中率/u);
+    expect(summary(markup.subagentsLastPage!)).toBe(cards);
+    expect(summary(markup.allSubagents!)).toBe(cards);
+    const english = summary(markup.subagentsRelatedEn!, "Model");
+    expect(english).toContain("Input tokens");
+    expect(english).toContain("Cache hit rate");
+    expect(english).toContain("Output tokens");
+    for (const key of ["subagentsEmpty", "subagentsLoading", "subagentsFailed"]) {
+      expect(summary(markup[key]!)).toBeUndefined();
+    }
+  });
   it("shows localized relationship states and keeps a detail navigation entry when metrics fail", () => {
     expect(markup.subagentsEmpty).toContain("尚未登记子代理");
     expect(markup.subagentsEmptyEn).toContain("No subagents registered");
@@ -297,7 +318,7 @@ describe("WebUI metrics table presentation", () => {
         const subagentPagination = { mode: "server", pageNumber: 1, pageSize: 20, pageSizeOptions: [10,20,50,100], serverTotal: 0,
           sorting: [{ id: "last", desc: true }], enableSortingRemoval: false, onSortingChange: noop, onPageSizeChange: noop,
           hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop };
-        globalThis.fixtureSubagentState = { data: { subagents: [], total: 0 }, error: null, errorCode: null,
+        globalThis.fixtureSubagentState = { data: { subagents: [], modelUsage: [], total: 0 }, error: null, errorCode: null,
           loading: false, refreshing: false, refetch: noop, pagination: subagentPagination, notificationStatus: "live", lastUpdatedAt: 1000,
         };
         const common = { provider: "openai", model: "model-test", recordedAtMs: 1000, directSubagentCount: 0,
@@ -490,7 +511,11 @@ describe("WebUI metrics table presentation", () => {
         result.threadTimingPartial = render(ThreadDetailPage, {});
         result.threadTimingPartialEn = render(ThreadDetailPage, {}, "en");
         const relation = { ...common, turnCount: 2, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 120000, threadId: "child/one", parentThreadId: "thread-1", parentTurnId: "turn-create/one", agentPath: "/root/worker", recordedAtMs: 120000, directSubagentCount: 2 };
-        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], total: 21 },
+        const modelUsage = [
+          { model: "model-card-one", inputTokens: 2000, outputTokens: 500, cacheUsage: { inputTokens: 1000, cachedInputTokens: 750, missingRequestCount: 1 } },
+          { model: "model-card-two", inputTokens: 4000, outputTokens: 0, cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 2 } },
+        ];
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], modelUsage, total: 21 },
           pagination: { ...subagentPagination, serverTotal: 21, hasNext: true } };
         const filteredQuery = { range: "today", provider: ["filtered-provider"], model: "filtered-model", status: "failed", turnId: "filtered-turn", filter: "filtered-text", offset: 40, limit: 20 };
         globalThis.fixtureSubagentCalls.length = 0;
@@ -498,10 +523,10 @@ describe("WebUI metrics table presentation", () => {
         result.subagentsCollapsedCalls = String(globalThis.fixtureSubagentCalls.length);
         result.subagentsRelated = render(ThreadSubagents, { threadId: "thread-1" });
         result.subagentsRelatedEn = render(ThreadSubagents, { threadId: "thread-1" }, "en");
-        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [{ ...relation, parentTurnId: null, directSubagentCount: 0 }], total: 21 },
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [{ ...relation, parentTurnId: null, directSubagentCount: 0 }], modelUsage, total: 21 },
           pagination: { ...subagentPagination, serverTotal: 21, pageNumber: 2, hasPrevious: true } };
         result.subagentsLastPage = render(ThreadSubagents, { threadId: "thread-1" });
-        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [], total: 0 },
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [], modelUsage: [], total: 0 },
           pagination: subagentPagination };
         result.subagentsEmpty = render(ThreadSubagents, { threadId: "empty-thread" });
         result.subagentsEmptyEn = render(ThreadSubagents, { threadId: "empty-thread" }, "en");
@@ -509,7 +534,7 @@ describe("WebUI metrics table presentation", () => {
         result.subagentsFailed = render(ThreadSubagents, { threadId: "thread-1" });
         globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: null, error: null, loading: true, refreshing: true };
         result.subagentsLoading = render(ThreadSubagents, { threadId: "thread-1" });
-        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], total: 1 }, pagination: { ...subagentPagination, serverTotal: 1 }, loading: false, refreshing: false };
+        globalThis.fixtureSubagentState = { ...globalThis.fixtureSubagentState, data: { subagents: [relation], modelUsage, total: 1 }, pagination: { ...subagentPagination, serverTotal: 1 }, loading: false, refreshing: false };
         result.subagentsSingle = render(ThreadSubagents, { threadId: "thread-1" });
         globalThis.fixtureThreadDetailCalls = 0;
         result.subagentsPage = render(() => h(Routes, null, h(Route, { path: "/threads/:id/subagents", element: h(ThreadSubagentsPage) })), {}, "zh", "/threads/parent%2Fthread/subagents");

@@ -8,6 +8,7 @@ import { InputTokenTooltip } from "@/components/metrics/token-tooltip"
 import { RefreshStatus } from "@/components/metrics/refresh-status"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useThreadSubagents } from "@/hooks/use-thread-subagents"
 import { useTranslation } from "@/hooks/use-translation"
 import { formatCacheUsage, formatModelName, formatTime, formatTokens, shortThreadId } from "@/lib/format"
@@ -67,6 +68,31 @@ export function ThreadSubagents({ threadId, parentTurnId }: { threadId?: string;
       <Button variant="outline" size="sm" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
     </div>
     <ErrorBanner error={translateApiError(t, error, errorCode)} pending={refreshing} onRetry={refetch} />
+    {error === null && !loading && data !== null && data.modelUsage.length > 0 ? <section aria-label={t("metrics.model")} className="grid shrink-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {data.modelUsage.map(usage => <Card key={JSON.stringify(usage.model)} size="sm">
+        <CardHeader><CardTitle><TruncatedText text={formatModelName(usage.model, null)} /></CardTitle></CardHeader>
+        <CardContent>
+          <dl className="grid grid-cols-3 gap-3">
+            <div className="flex min-w-0 flex-col gap-1">
+              <dt className="text-sm text-muted-foreground">{t("metrics.input")}</dt>
+              <dd className="text-xl font-semibold tabular-nums"><InputTokenTooltip
+                inputTokens={usage.inputTokens}
+                cachedInputTokens={usage.cacheUsage.missingRequestCount > 0 ? null : usage.cacheUsage.cachedInputTokens}
+                cacheUsage={usage.cacheUsage}
+              /></dd>
+            </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <dt className="text-sm text-muted-foreground">{t("metrics.cacheHitRate")}</dt>
+              <dd className="text-xl font-semibold tabular-nums">{formatCacheUsage(usage.cacheUsage).rate}</dd>
+            </div>
+            <div className="flex min-w-0 flex-col gap-1">
+              <dt className="text-sm text-muted-foreground">{t("metrics.output")}</dt>
+              <dd className="text-xl font-semibold tabular-nums">{formatTokens(usage.outputTokens)}</dd>
+            </div>
+          </dl>
+        </CardContent>
+      </Card>)}
+    </section> : null}
     {error !== null ? null : <DataTable
       loading={loading}
       title={t(global ? "threads.allSubagents" : "threads.relatedSubagents")}

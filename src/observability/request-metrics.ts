@@ -263,6 +263,13 @@ export interface SubagentThreadsQuery {
 
 export interface StoredThreadSubagentsPage {
   subagents: StoredSubagentListItem[];
+  /** 当前关系范围内全部子代理自身请求按真实模型汇总，不受分页影响。 */
+  modelUsage: Array<{
+    model: string | null;
+    inputTokens: number;
+    outputTokens: number;
+    cacheUsage: StoredCacheUsage;
+  }>;
   total: number;
   offset: number;
   limit: number;

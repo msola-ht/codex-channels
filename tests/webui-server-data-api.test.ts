@@ -70,8 +70,54 @@ describe("webui server data API", () => {
     const response = await fetch(`${origin}/api/v1/subagents`);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      generatedAt: expect.any(String), subagents: [], total: 0, offset: 0, limit: 20, nextOffset: null,
+      generatedAt: expect.any(String), subagents: [], modelUsage: [], total: 0, offset: 0, limit: 20, nextOffset: null,
     });
+  });
+
+  it("returns complete model usage across subagent pages and exact parent Turn scopes", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.recordBatch([
+      { ...metricSample(), threadId: "child-a", model: "alpha", inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 },
+      { ...metricSample(), threadId: "child-a", model: "beta", inputTokens: 200, cachedInputTokens: null, outputTokens: 20 },
+      { ...metricSample(), threadId: "child-b", provider: "other", model: "alpha", inputTokens: 900, cachedInputTokens: 0, outputTokens: 90 },
+      { ...metricSample(), threadId: "nested", model: "alpha", inputTokens: 1000, cachedInputTokens: 500, outputTokens: 100 },
+    ]);
+    for (const [agentThreadId, parentThreadId, parentTurnId] of [
+      ["child-a", "root", "first"], ["child-b", "root", "second"], ["nested", "child-a", "first"],
+    ] as const) {
+      store.recordSubagentThread({ agentThreadId, parentThreadId, parentTurnId, agentPath: `/root/${agentThreadId}` });
+      store.recordSubagentTurn({ agentThreadId, agentTurnId: "agent-turn", parentThreadId, parentTurnId, agentPath: `/root/${agentThreadId}` });
+    }
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const read = async (path: string) => {
+      const response = await fetch(`${origin}/api/v1/${path}`);
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    const modelUsage = [
+      { model: "alpha", inputTokens: 1000, outputTokens: 100,
+        cacheUsage: { inputTokens: 1000, cachedInputTokens: 50, missingRequestCount: 0 } },
+      { model: "beta", inputTokens: 200, outputTokens: 20,
+        cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 1 } },
+    ];
+    for (const offset of [0, 1, 9]) {
+      expect(await read(`threads/root/subagents?limit=1&offset=${offset}`)).toMatchObject({ total: 2, modelUsage });
+    }
+    expect(await read("threads/root/subagents?parentTurnId=first&offset=9")).toMatchObject({
+      total: 1, subagents: [], modelUsage: [
+        { ...modelUsage[0], inputTokens: 100, outputTokens: 10,
+          cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 } },
+        modelUsage[1],
+      ],
+    });
+    expect(await read("subagents?limit=1&offset=1")).toMatchObject({ total: 3, modelUsage: [
+      { model: "alpha", inputTokens: 2000, outputTokens: 200,
+        cacheUsage: { inputTokens: 2000, cachedInputTokens: 550, missingRequestCount: 0 } },
+      modelUsage[1],
+    ] });
+    expect(await read("threads/root/subagents?parentTurnId=missing")).toMatchObject({ total: 0, modelUsage: [] });
   });
 
   it("lists main Threads with separate own and filtered descendant usage while preserving child detail access", async () => {

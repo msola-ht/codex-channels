@@ -927,6 +927,18 @@ export class SqliteRequestMetricsQueries {
     const { total } = this.reader.prepare(`
       SELECT COUNT(*) AS total FROM subagent_threads AS relation ${relationFilter}
     `).get(...parameters) as { total: number };
+    const modelUsageRows = this.reader.prepare(`
+      SELECT model, SUM(input_tokens) AS input_tokens,
+        SUM(output_tokens) AS output_tokens, ${cacheUsageSql}
+      FROM model_request_metrics
+      WHERE thread_id IN (SELECT relation.thread_id FROM subagent_threads AS relation ${relationFilter})
+      GROUP BY model
+      ORDER BY model IS NULL ASC, model ASC
+    `).all(...parameters) as unknown as Array<CacheUsageRow & {
+      model: string | null;
+      input_tokens: number | null;
+      output_tokens: number | null;
+    }>;
     const rows = this.reader.prepare(`
       WITH grouped AS (
         SELECT thread_id, COUNT(DISTINCT turn_id) AS turn_count,
@@ -984,6 +996,12 @@ export class SqliteRequestMetricsQueries {
           cacheUsage: row.request_count === null
             ? { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 }
             : toStoredCacheUsage(row),
+      })),
+      modelUsage: modelUsageRows.map((row) => ({
+        model: row.model,
+        inputTokens: row.input_tokens ?? 0,
+        outputTokens: row.output_tokens ?? 0,
+        cacheUsage: toStoredCacheUsage(row),
       })),
       total,
       offset,
