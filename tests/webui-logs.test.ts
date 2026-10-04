@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error JavaScript route intentionally has no declaration file.
 import { parseLogQuery, readServiceLogs, sanitizeLogText } from "../scripts/webui-logs-route.mjs";
 import { cleanupWebuiTestFixtures, createWebuiTestFixture, startWebuiTestServer, type WebuiTestServer } from "./webui-server-test-fixture.js";
+import { serviceLogEntries } from "../webui/src/lib/service-logs.js";
 
 const directories: string[] = [];
 const servers: WebuiTestServer[] = [];
@@ -11,7 +12,7 @@ afterEach(async () => cleanupWebuiTestFixtures(servers, directories));
 
 describe("WebUI service logs", () => {
   it("accepts only bounded line counts and canonical service names", () => {
-    expect(parseLogQuery(new URLSearchParams())).toEqual({ target: "gateway", lines: 200 });
+    expect(parseLogQuery(new URLSearchParams())).toEqual({ target: "gateway", lines: 100 });
     expect(parseLogQuery(new URLSearchParams("target=relay&lines=1000"))).toEqual({ target: "relay", lines: 1000 });
     for (const query of ["target=model-relay", "target=all", "target=../../secret", "lines=0", "lines=1001", "lines=1e2", "lines=02", "path=secret", "target=gateway&target=webui"]) {
       expect(() => parseLogQuery(new URLSearchParams(query))).toThrow("日志查询参数无效");
@@ -19,13 +20,51 @@ describe("WebUI service logs", () => {
   });
 
   it("uses fixed journald arguments, retains recent lines and reports truncation", async () => {
-    const run = vi.fn().mockResolvedValue({ stdout: "old\nnew\nlatest\n" });
+    const run = vi.fn().mockResolvedValue({ stdout: ["old", "new", "latest"].map(MESSAGE => JSON.stringify({ MESSAGE })).join("\n") });
     const snapshot = await readServiceLogs({ target: "relay", lines: 2 }, { platform: "linux", environment: {}, run });
-    expect(run.mock.calls[0]?.[1]).toEqual(["--user-unit=codex-connect-model-relay.service", "--lines=3", "--no-pager", "--quiet", "--output=short-iso"]);
+    expect(run.mock.calls[0]?.[1]).toEqual(["--user-unit=codex-connect-model-relay.service", "--lines=3", "--no-pager", "--quiet", "--output=json", "--all", "--output-fields=MESSAGE,PRIORITY,SYSLOG_IDENTIFIER,_COMM"]);
     expect(run.mock.calls[0]?.[2]).toMatchObject({ timeout: 5000, maxBuffer: 256 * 1024 });
-    expect(snapshot).toMatchObject({ target: "relay", streams: [{ source: "journal", lines: ["new", "latest"], truncated: true, missing: false }] });
+    expect(snapshot).toMatchObject({ target: "relay", streams: [{ source: "journal", lines: ['{"MESSAGE":"new"}', '{"MESSAGE":"latest"}'], truncated: true, missing: false }] });
     run.mockResolvedValueOnce({ stdout: "" });
     expect((await readServiceLogs({ target: "gateway", lines: 2 }, { platform: "linux", run })).streams[0].lines).toEqual([]);
+  });
+
+  it("preserves systemd priorities, identifiers and subsecond time without forwarding private journal fields", async () => {
+    const messages = [
+      "Stopping codex-connect-gateway.service - Codex Connect Gateway...",
+      "Stopped codex-connect-gateway.service - Codex Connect Gateway.",
+      "codex-connect-gateway.service: Consumed 2min 32.319s CPU time, 233.5M memory peak.",
+      "Started codex-connect-gateway.service - Codex Connect Gateway.",
+    ];
+    const run = vi.fn().mockResolvedValue({ stdout: messages.map((MESSAGE, i) => JSON.stringify({
+      MESSAGE, PRIORITY: "6", SYSLOG_IDENTIFIER: "systemd", __REALTIME_TIMESTAMP: String(1791051908000123 + i * 1000),
+      _CMDLINE: "PRIVATE", _EXE: "PRIVATE", __CURSOR: "PRIVATE",
+    })).join("\n") });
+    const result = await readServiceLogs({ target: "gateway", lines: 10 }, { platform: "linux", run });
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    const entries = serviceLogEntries(result);
+    expect(entries.map(entry => entry.message)).toEqual([...messages].reverse());
+    expect(entries.every(entry => entry.level === "info" && entry.module === "systemd")).toBe(true);
+    expect(entries[0]?.time).toBe(1791051908003.123);
+  });
+
+  it("prioritizes application severity and redacts nested JSON, multiline and binary journal messages", async () => {
+    const run = vi.fn().mockResolvedValue({ stdout: [
+      { MESSAGE: '{"level":50,"msg":"Failed","module":"delivery","token":"PRIVATE"}', PRIORITY: "6", SYSLOG_IDENTIFIER: "node" },
+      { MESSAGE: ["first", "token=PRIVATE"], PRIORITY: "4", SYSLOG_IDENTIFIER: "Bearer PRIVATE" },
+      { MESSAGE: Array.from(Buffer.from("token=PRIVATE")), _COMM: "systemd", PRIORITY: "7" },
+    ].map(entry => JSON.stringify(entry)).join("\n") });
+    const result = await readServiceLogs({ target: "gateway", lines: 10 }, { platform: "linux", run });
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    expect(serviceLogEntries(result)).toMatchObject([
+      { level: "error", module: "delivery", message: "Failed" },
+      { level: "warn", message: "first\ntoken=[REDACTED]" },
+      { level: "debug", module: "systemd" },
+    ]);
+    for (const stdout of ['{"MESSAGE":null}', "not-json"]) {
+      run.mockResolvedValueOnce({ stdout });
+      await expect(readServiceLogs({ target: "gateway", lines: 10 }, { platform: "linux", run })).rejects.toMatchObject({ code: "logs_unavailable" });
+    }
   });
 
   it("returns a designated failure without disclosing command errors", async () => {

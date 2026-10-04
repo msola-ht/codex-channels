@@ -9,6 +9,7 @@ export interface SafeErrorMetadata extends Record<string, unknown> {
 
 export function createLogger(
   config: Pick<GatewayConfig, "logLevel">,
+  context: { service: "gateway" | "webui" | "relay"; module?: string } = { service: "gateway" },
 ): Logger {
   return pino({
     level: config.logLevel,
@@ -44,7 +45,7 @@ export function createLogger(
       ],
       censor: "[REDACTED]",
     },
-  });
+  }).child(context);
 }
 
 export function safeErrorMetadata(error: unknown): SafeErrorMetadata {

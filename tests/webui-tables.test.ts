@@ -695,7 +695,7 @@ describe("WebUI metrics table presentation", () => {
   it("uses shared table skeletons and hides stale error values while loading", () => {
     expect(headers(markup.errorsLoading!)).toEqual(headers(markup.errors!));
     expect([...markup.errorsLoading!.matchAll(/<tr\b/g)]).toHaveLength(6);
-    expect([...markup.errorsLoading!.matchAll(/data-slot="skeleton"/g)]).toHaveLength(36);
+    expect([...markup.errorsLoading!.matchAll(/data-slot="skeleton"/g)]).toHaveLength(35);
     expect(markup.errorsLoading).not.toContain("fixture failure");
     expect(markup.errorsLoading).toMatch(/data-slot="card-content"[^>]*inert=""/);
     expect(markup.errorsLoading).toContain('data-slot="spinner"');
@@ -705,17 +705,16 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.errorsRefreshing).toContain("刷新中");
   });
 
-  it("places compact console-style error statistics before filters without thread inputs", () => {
+  it("shows error filters and table without summary cards or thread inputs", () => {
     const html = markup.errors!;
     const filters = html.indexOf('data-query-filters="true"');
     expect(filters).toBeGreaterThan(0);
     expect(html).toContain('data-thread-filters="false"');
     const cards = html.slice(0, filters);
-    expect(cards).toContain("grid gap-4 sm:grid-cols-2 xl:grid-cols-4");
-    expect(cards).toContain("请求总数 · 失败 60 次");
-    expect(cards).toContain("成功率 · 当前显示 50 / 60 条失败记录");
+    expect(cards).not.toContain("请求总数");
+    expect(cards).not.toContain("成功率");
     expect(cards).not.toContain('data-slot="card-header"');
-    expect([...cards.matchAll(/data-slot="card-content"/g)]).toHaveLength(2);
+    expect(cards).not.toContain('data-slot="card-content"');
   });
 
   it("groups request identity, usage, performance and detail columns", () => {
@@ -784,7 +783,12 @@ describe("WebUI metrics table presentation", () => {
   it("reserves intrinsic toolbar and pagination space around the bounded table viewport", () => {
     for (const key of ["requests", "threads", "turns", "loading"]) {
       expect(markup[key]).toMatch(/data-slot="card"[^>]*class="[^"]*min-h-min/);
-      expect(markup[key]).toMatch(/data-slot="card-content"[^>]*class="[^"]*grid-rows-\[auto_minmax\(10rem,1fr\)_auto\]/);
+      const html = markup[key]!;
+      const hasSearch = html.includes('data-slot="input-group"');
+      expect(html).toContain(`grid-template-rows:${hasSearch ? "auto " : ""}minmax(10rem,1fr) auto`);
+      const contentStart = html.indexOf('data-slot="card-content"');
+      expect(html.slice(0, contentStart)).toContain("lucide-columns3");
+      expect(html.slice(contentStart)).not.toContain("lucide-columns3");
       expect(markup[key]).toContain("[contain:size]");
     }
     expect(markup.summaryLoading).toMatch(/class="[^"]*invisible" aria-hidden="true"/);

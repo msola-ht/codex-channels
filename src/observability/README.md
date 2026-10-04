@@ -15,7 +15,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   不加载 SQLite 实现；其他业务模块仍通过模块根入口访问完整能力。
 - `logger.ts`：根据配置创建 Pino Logger，并对 Token、App Secret、Authorization、Cookie、密码等
   字段进行脱敏；`err` 和进程边界复用 `safeErrorMetadata`，只保留受约束的异常类型和机器错误码，
-  不保留 message、stack 或附加响应对象。
+  不保留 message、stack 或附加响应对象。`createLogger` 默认绑定 Gateway 服务，可显式选择 WebUI/Relay 服务及模块；子 Logger 继承脱敏规则，供服务宿主复用。
 - `request-metrics.ts`：定义与 Provider 实现无关的单次模型请求指标、内部查询结果，以及写入、普通
   请求查询、Thread/Subagent 查询、Quota/Account Snapshot 四类窄存储端口；组合接口只供同一
   SQLite 实现声明完整能力，各消费方按实际用途依赖窄端口。

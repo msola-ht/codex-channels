@@ -13,6 +13,7 @@ const allowedDistEntries = new Map([
     "dist/codex-client/index.js",
     "dist/provider-proxy/index.js",
     "dist/model-relay/index.js",
+    "dist/observability/index.js", // Service owners reuse the shared safe logger.
   ])],
   ["scripts", new Set([
     "dist/codex-client/index.js",

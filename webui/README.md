@@ -59,7 +59,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 详细行为见 `docs/webui.md`。
 
-`pages/logs-page.tsx` 组合「调用监控 → 服务日志」（`#/logs`）；`components/service-logs/service-logs.tsx` 提供服务、行数选择、当前结果搜索与日志展示，`hooks/use-service-logs.ts` 复用统一请求与可见页面刷新调度，切换查询隔离旧结果，离开页面取消读取。
+`pages/logs-page.tsx` 组合「调用监控 → 服务日志」（`#/logs`）；`components/service-logs/service-logs.tsx` 使用官方 `components/ui/tabs.tsx` 切换服务，搜索与行数、级别和刷新设置同排展示；`log-results.tsx` 组合撑满页面剩余高度的结构化表格、详情和阅读时的快照保留，日志在表格区域内滚动；`lib/service-logs.ts` 解析已脱敏的 Pino/tracing 日志及 journald 白名单元数据、合并来源并筛选，不猜测未知级别。`hooks/use-service-logs.ts` 复用统一请求与可见页面刷新调度，切换查询隔离旧结果，离开页面取消读取。
 
 `pages/delivery-page.tsx` 组合渠道投递队列独立页面，由左侧「消息渠道 → 渠道投递队列」进入 `#/delivery`；`components/delivery/delivery-queue.tsx` 提供精简表格列表、状态计数筛选、行内内容摘要、游标分页和勾选批量重试/忽略确认；`hooks/use-delivery-queue.ts` 复用管理确认 Hook 与 `hooks/use-queue-events.ts` 的 SSE 变化订阅，筛选或翻页时重建当前查询，离开页面时取消请求。
 
@@ -72,7 +72,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `hooks/use-traffic.ts` 为当前调用列表或详情复用变化订阅，未显示的一侧不订阅；首页按转储文件变化合并读取，历史列表及原始事件分页暂停自动更新。详情按提供商及批次订阅、按调用 ID 精确读取，终态先补读原始事件，事件数变化时重建摘要以补齐迟到输出；手动刷新重新加载完整摘要。同查询后台读取保留内容和展开状态，记录已清理时明确显示缺失；最初尚未写入的记录在新通知到达后可补查。请求详情抽屉跟随列表中相同 ID 的记录更新；记录移出当前页时保留最后一次显示的数据。
 
 `components/metrics/service-tier.tsx` 为请求明细、错误记录和调用详情提供 Fast 标签；前两者使用请求层级，调用详情区分请求与响应来源。
-`components/requests/errors-table.tsx` 组合错误记录列、错误说明和会话/轮次跳转；`components/traffic/traffic-table.tsx` 组合调用列表及详情入口。两者与渠道投递队列、请求、会话页复用 `DataTable` 的标题摘要、列显隐、滚动区和服务端分页。公共组件支持业务工具栏、稳定行 ID及行点击。
+`components/requests/errors-table.tsx` 组合错误记录列、错误说明和会话/轮次跳转；`components/traffic/traffic-table.tsx` 组合调用列表及详情入口。两者与渠道投递队列、请求、会话页复用 `DataTable` 的标题摘要、列显隐、滚动区和服务端分页。公共组件支持标题操作区、业务工具栏、稳定行 ID 及行点击；日志使用不分页模式、行内详情和表格视口滚动回调。
 
 `components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。
 

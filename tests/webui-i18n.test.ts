@@ -546,10 +546,10 @@ describe("WebUI 界面文案语言切换", () => {
     }
   });
 
-  it("错误页面的统计、表头、分页、空状态与错误提示覆盖英文", () => {
+  it("错误页面移除统计卡片，表头、分页、空状态与错误提示覆盖英文", () => {
     expect(result.errorsPageEn).toContain("Failed request records, newest first");
-    expect(result.errorsPageEn).toContain("Total requests · Failed: 60");
-    expect(result.errorsPageEn).toContain("Success rate · Showing 1 / 60 failed records");
+    expect(result.errorsPageEn).not.toContain("Total requests · Failed:");
+    expect(result.errorsPageEn).not.toContain("Success rate · Showing");
     expect(result.errorsPageEn).toContain("Error detail");
     expect(result.errorsPageEn).toContain("Thread / Turn");
     expect(result.errorCodeLabel).toBe("Error code: fixture_error");

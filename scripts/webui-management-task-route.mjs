@@ -1,4 +1,5 @@
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
+import { webuiLogger } from "./webui-logger.mjs";
 import { openQueueStream } from "./webui-queue-events.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
 import {
@@ -128,7 +129,7 @@ export async function routeTaskManagement({
         });
       } catch (error) {
         auditStatus = "degraded";
-        console.error("管理任务已启动，但启动审计记录失败", error);
+        webuiLogger.error({ module: "audit", event: "task.start_audit_failed", err: error }, "管理任务已启动，但启动审计记录失败");
       }
       sendManagementJson(response, 202, { ...task, auditStatus });
     } catch (error) {

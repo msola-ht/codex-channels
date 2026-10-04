@@ -6,11 +6,16 @@ import type { DisplayLanguage } from "@/lib/format"
  */
 const zh = {
   logs: {
-    title: "服务日志", description: "查看最近的服务运行日志，常见凭据字段已隐藏。搜索仅作用于当前读取结果。",
+    title: "服务日志", description: "搜索近期运行记录，展开查看详情。",
     service: "服务", lines: "最近行数", search: "搜索日志", searchHint: "筛选当前结果",
     auto: "自动刷新（5 秒）", autoStopped: "读取失败，自动刷新已暂停；手动刷新成功后恢复。",
-    journal: "系统日志", stdout: "标准输出", stderr: "错误输出", count: "显示 {count} 行",
-    truncated: "仅显示末尾片段，较早内容已省略", missing: "尚无此日志文件", empty: "暂无日志", noMatches: "没有匹配的日志",
+    journal: "系统日志", stdout: "标准输出", stderr: "标准错误",
+    recent: "最近日志", count: "{count} 条", filteredCount: "{shown} / {total} 条",
+    time: "时间", level: "级别", module: "模块", source: "来源", message: "消息", details: "详情", collapse: "收起",
+    fields: "结构化字段", raw: "脱敏原文", unknownTime: "时间未知",
+    newResults: "查看新日志", showLatest: "回到最新",
+    levels: { all: "全部级别", problems: "警告及错误", trace: "追踪", debug: "调试", info: "信息", warn: "警告", error: "错误", fatal: "致命", unknown: "未识别" },
+    missing: "尚无此日志文件", empty: "暂无日志", noMatches: "没有匹配的日志",
     unavailable: "日志暂不可读取，请检查服务日志权限或稍后重试。",
   },
   refreshStatus: { updatedAt: "最后成功更新：{time}", stale: "数据可能已过期" },
@@ -505,8 +510,6 @@ const zh = {
   },
   errorList: {
     "description": "失败请求记录，按发生时间倒序",
-    "requestTotal": "请求总数 · 失败 {count} 次",
-    "successRate": "成功率 · 当前显示 {shown} / {total} 条失败记录",
     "tableTitle": "错误记录",
     "tableDescription": "每一行是一条失败请求；错误明细跟随当前界面语言显示",
     "loadingRecords": "正在加载错误记录…",
@@ -754,11 +757,16 @@ export type Messages = typeof zh
 
 const en: Messages = {
   logs: {
-    title: "Service logs", description: "Recent service output with common credential fields hidden. Search filters only the loaded results.",
+    title: "Service logs", description: "Search recent activity and expand entries for details.",
     service: "Service", lines: "Recent lines", search: "Search logs", searchHint: "Filter loaded results",
     auto: "Auto-refresh (5s)", autoStopped: "Reading failed. Auto-refresh is paused until a manual refresh succeeds.",
-    journal: "System journal", stdout: "Standard output", stderr: "Error output", count: "Lines shown: {count}",
-    truncated: "Showing the tail only; earlier content omitted", missing: "No log file yet", empty: "No logs yet", noMatches: "No matching logs",
+    journal: "System journal", stdout: "Standard output", stderr: "Standard error",
+    recent: "Recent logs", count: "{count} entries", filteredCount: "{shown} / {total} entries",
+    time: "Time", level: "Level", module: "Module", source: "Source", message: "Message", details: "Details", collapse: "Collapse",
+    fields: "Structured fields", raw: "Redacted original", unknownTime: "Unknown time",
+    newResults: "View new logs", showLatest: "Back to latest",
+    levels: { all: "All levels", problems: "Warnings and errors", trace: "Trace", debug: "Debug", info: "Info", warn: "Warning", error: "Error", fatal: "Fatal", unknown: "Unrecognized" },
+    missing: "No log file yet", empty: "No logs yet", noMatches: "No matching logs",
     unavailable: "Logs are unavailable. Check service log permissions or retry later.",
   },
   refreshStatus: { updatedAt: "Last successful update: {time}", stale: "Data may be out of date" },
@@ -1253,8 +1261,6 @@ const en: Messages = {
   },
   errorList: {
     "description": "Failed request records, newest first",
-    "requestTotal": "Total requests · Failed: {count}",
-    "successRate": "Success rate · Showing {shown} / {total} failed records",
     "tableTitle": "Failed request records",
     "tableDescription": "Each row is a failed request; error details follow the selected language",
     "loadingRecords": "Loading failed request records…",

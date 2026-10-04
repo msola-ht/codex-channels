@@ -211,6 +211,8 @@ export abstract class GatewayComponentGraph {
     surfacePlugins: readonly BuiltInSurfacePlugin[],
     configPath?: string,
   ) {
+    logger = logger.child({ module: "gateway" });
+    this.logger = logger;
     verifyCodexVersion(config);
     this.workspacePermissions = configPath === undefined
       ? undefined
@@ -326,7 +328,7 @@ export abstract class GatewayComponentGraph {
           : this.providerIdleReleaser.runOperation(provider, operation);
       },
     );
-    this.inbound = new EventBus<RpcNotification>(logger, 2_000, undefined, {
+    this.inbound = new EventBus<RpcNotification>(logger.child({ module: "inbound" }), 2_000, undefined, {
       entries: 4_096,
       bytes: 32 * 1024 * 1024,
       size: (event) => Buffer.byteLength(JSON.stringify(event)),
@@ -335,7 +337,7 @@ export abstract class GatewayComponentGraph {
         void this.requestStop().catch(() => logger.error("协议通知超载后的 Gateway 清理失败"));
       },
     });
-    this.output = new EventBus<OutputEvent>(logger, 1_000, new SurfaceOutputCoalescer().key, {
+    this.output = new EventBus<OutputEvent>(logger.child({ module: "output" }), 1_000, new SurfaceOutputCoalescer().key, {
       entries: 2_048,
       bytes: 32 * 1024 * 1024,
       size: (event) => Buffer.byteLength(JSON.stringify(event)),
@@ -378,10 +380,10 @@ export abstract class GatewayComponentGraph {
     this.accountSnapshotEvents = configPath === undefined ? undefined : new QueueEventsServer(accountSnapshotEventsPath(configPath));
     this.turnExecution = new TurnExecutionTracker(this.codex, metricsStore,
       () => this.metricsEvents?.changed(),
-      (error, threadId) => logger.warn({ err: error, threadId }, "轮次耗时记录或同步失败"));
+      (error, threadId) => logger.warn({ module: "metrics", event: "turn_timing.sync_failed", err: error, threadId }, "轮次耗时记录或同步失败"));
     const metricsWriter = new BufferedModelRequestMetricsWriter(
       metricsStore,
-      (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
+      (error) => logger.error({ module: "metrics", event: "request_metrics.write_failed", err: error }, "模型请求指标后台写入失败"),
       () => this.metricsEvents?.changed(),
     );
     this.relayMetrics = configPath === undefined ? undefined : new RelayMetricsComposition({
@@ -915,7 +917,7 @@ export abstract class GatewayComponentGraph {
     this.surfaceManager = new SurfaceManager(
       this.surfaces,
       this.output,
-      logger,
+      logger.child({ module: "delivery" }),
       (target) => service.status(target, { includeGitBranch: true }).gitBranch,
       {
         persistence: {

@@ -204,6 +204,7 @@ export interface DataTableDescriptionInfo {
 }
 
 type DataTablePagination =
+  | { mode: "none"; pageSizeOptions?: number[]; defaultSorting?: never }
   | {
       mode: "client"
       defaultPageSize?: number
@@ -230,7 +231,7 @@ export interface DataTableProps<TData extends RowData> {
   loading?: boolean
   numericColumnIds?: readonly string[]
   title: string
-  description: (info: DataTableDescriptionInfo) => React.ReactNode
+  description?: (info: DataTableDescriptionInfo) => React.ReactNode
   columns: DataTableColumn<TData>[]
   data: TData[]
   storageKey: string
@@ -242,8 +243,11 @@ export interface DataTableProps<TData extends RowData> {
   noMatchText?: string
   pagination: DataTablePagination
   toolbar?: React.ReactNode
+  headerActions?: React.ReactNode
   getRowId?: (row: TData) => string
   onRowClick?: (row: TData) => void
+  renderExpandedRow?: (row: TData) => React.ReactNode
+  onViewportScroll?: React.UIEventHandler<HTMLDivElement>
 }
 
 export function DataTable<TData extends RowData>({
@@ -262,8 +266,11 @@ export function DataTable<TData extends RowData>({
   noMatchText,
   pagination,
   toolbar,
+  headerActions,
   getRowId,
   onRowClick,
+  renderExpandedRow,
+  onViewportScroll,
 }: DataTableProps<TData>) {
   const { t } = useTranslation()
   const server = pagination.mode === "server"
@@ -281,7 +288,7 @@ export function DataTable<TData extends RowData>({
   const [clientSorting, setClientSorting] = React.useState<SortingState>(
     pagination.mode === "client"
       ? pagination.defaultSorting ?? DEFAULT_SORTING
-      : DEFAULT_SORTING,
+      : pagination.mode === "none" ? [] : DEFAULT_SORTING,
   )
   const [clientPage, setClientPage] = React.useState(0)
   const [clientPageSize, setClientPageSize] = React.useState(
@@ -332,7 +339,7 @@ export function DataTable<TData extends RowData>({
 
   const queryValue =
     (table.state.globalFilter as string | undefined) ?? ""
-  const filteredRows = server
+  const filteredRows = server || pagination.mode === "none"
     ? table.getCoreRowModel().rows
     : table.getSortedRowModel().rows
   const matched = server
@@ -349,9 +356,9 @@ export function DataTable<TData extends RowData>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const pageSize = server ? pagination.pageSize : clientPageSize
+  const pageSize = server ? pagination.pageSize : pagination.mode === "none" ? Math.max(1, data.length) : clientPageSize
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize))
-  const currentPage = server
+  const currentPage = pagination.mode === "none" ? 0 : server
     ? pagination.pageNumber - 1
     : Math.min(clientPage, pageCount - 1)
   const pageRows = server
@@ -369,12 +376,34 @@ export function DataTable<TData extends RowData>({
       setClientPage(0)
     }
   }
+  const showFilter = pagination.mode !== "none" && (!server || pagination.onFilterChange !== undefined)
+  const showToolbar = toolbar != null || showFilter
 
   return (
     <Card className="flex min-h-min min-w-0 flex-1 flex-col" aria-busy={loading}>
       <CardHeader className="shrink-0">
-        <CardTitle>{title}</CardTitle>
-        <CardDescription className="relative">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <CardTitle>{title}</CardTitle>
+          <div className="flex shrink-0 items-center gap-2">
+          {headerActions}
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="shrink-0" disabled={loading} />}>
+              <Columns3Icon data-icon="inline-start" />
+              {t("common.columns")}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuGroup className="grid grid-cols-2 gap-0.5">
+                {table.getAllLeafColumns().filter(column => column.getCanHide()).map(column => (
+                  <DropdownMenuCheckboxItem key={column.id} checked={column.getIsVisible()} onCheckedChange={() => column.toggleVisibility()}>
+                    {columnLabels[column.id] ?? column.id}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          </div>
+        </div>
+        {description ? <CardDescription className="relative">
           <span className={cn("block", loading && "invisible")} aria-hidden={loading || undefined}>{description({
             total,
             matched,
@@ -383,12 +412,12 @@ export function DataTable<TData extends RowData>({
             serverTotal: server ? pagination.serverTotal : undefined,
           })}</span>
           {loading ? <span className="absolute inset-0 inline-flex items-center gap-2"><Spinner aria-label={t("common.loading")} />{t("common.loadingRecords")}</span> : null}
-        </CardDescription>
+        </CardDescription> : null}
       </CardHeader>
-      <CardContent className="grid min-h-min min-w-0 flex-1 grid-rows-[auto_minmax(10rem,1fr)_auto] gap-4" inert={loading}>
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+      <CardContent className="grid min-h-min min-w-0 flex-1 gap-4" style={{ gridTemplateRows: `${showToolbar ? "auto " : ""}minmax(10rem,1fr)${pagination.mode === "none" ? "" : " auto"}` }} inert={loading}>
+        {showToolbar ? <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
           {toolbar}
-          {server && pagination.onFilterChange === undefined ? null : (
+          {showFilter ? (
             <div className="flex items-center gap-2">
               <Label htmlFor={`${storageKey}-search`} className="sr-only">
                 {t("common.filter")}
@@ -410,35 +439,14 @@ export function DataTable<TData extends RowData>({
                 </span>
               )}
             </div>
-          )}
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
-                <Columns3Icon data-icon="inline-start" />
-                {t("common.columns")}
-              </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuGroup className="grid grid-cols-2 gap-0.5">
-                {table
-                  .getAllLeafColumns()
-                  .filter((column) => column.getCanHide())
-                  .map((column) => (
-                    <DropdownMenuCheckboxItem
-                      key={column.id}
-                      checked={column.getIsVisible()}
-                      onCheckedChange={() => column.toggleVisibility()}
-                    >
-                      {columnLabels[column.id] ?? column.id}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+          ) : null}
+        </div> : null}
 
         {/* 行数不参与卡片固有高度；网格为表格保留最小视口，为工具栏和分页保留实际高度。 */}
         <div
           className="min-h-0 min-w-0 overflow-y-auto [contain:size]"
           style={{ scrollbarWidth: "thin" }}
+          onScroll={onViewportScroll}
         >
           <Table aria-label={title}>
             <TableHeader>
@@ -470,7 +478,9 @@ export function DataTable<TData extends RowData>({
                   ))}
                 </TableRow>
               )) : pageRows.length > 0 ? (
-                pageRows.map((row) => (
+                pageRows.map((row) => {
+                  const expanded = renderExpandedRow?.(row.original)
+                  return <React.Fragment key={row.id}>
                   <TableRow
                     key={row.id}
                     className={onRowClick ? "cursor-pointer" : undefined}
@@ -482,7 +492,9 @@ export function DataTable<TData extends RowData>({
                       </TableCell>
                     ))}
                   </TableRow>
-                ))
+                  {expanded == null ? null : <TableRow><TableCell colSpan={row.getVisibleCells().length} className="whitespace-normal">{expanded}</TableCell></TableRow>}
+                  </React.Fragment>
+                })
               ) : (
                 <TableRow>
                   <TableCell
@@ -497,7 +509,7 @@ export function DataTable<TData extends RowData>({
           </Table>
         </div>
 
-        <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        {pagination.mode !== "none" ? <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <p className="text-sm text-muted-foreground">
             {loading ? t("common.loadingRecords") : t("common.matched", { count: matched })}
           </p>
@@ -578,6 +590,7 @@ export function DataTable<TData extends RowData>({
             </div>
           </div>
         </div>
+        : null}
       </CardContent>
     </Card>
   )

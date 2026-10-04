@@ -83,6 +83,9 @@ import {
 import { routeStatusManagement } from "./webui-management-status-route.mjs";
 import { routeTaskManagement } from "./webui-management-task-route.mjs";
 import { routeLogsApi } from "./webui-logs-route.mjs";
+import { webuiLogger } from "./webui-logger.mjs";
+
+const logger = webuiLogger.child({ module: "http" });
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
@@ -257,7 +260,7 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
       sendError(response, error.status, { error: { code: error.code, message: error.message } });
       return;
     }
-    console.error(error);
+    logger.error({ event: "request.failed", err: error }, "WebUI 请求处理失败");
     const sendInternalError = managementRequest ? sendManagementJson : sendJson;
     sendInternalError(response, 500, {
       error: { code: "internal_error", message: "WebUI 内部错误" },
@@ -966,6 +969,10 @@ function main() {
       process.exitCode = 1;
     });
     server.listen(settings.port, host, () => {
+      if (!process.stdout.isTTY) {
+        logger.info({ event: "service.started", host, port: settings.port }, "WebUI 已启动");
+        return;
+      }
       const configNote = existsSync(settings.configPath)
         ? `（配置 [webui]：${settings.configPath}，CLI 参数优先）`
         : "";
