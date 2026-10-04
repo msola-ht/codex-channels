@@ -4,6 +4,7 @@ import { ApprovalCoordinator } from "../src/approval/coordinator.js";
 import type { ApprovalRequestHandler } from "../src/approval/requests.js";
 import type { InteractionRequest } from "../src/approval/types.js";
 import { handleApprovalServerRequest } from "../src/codex-client/server-request-adapter.js";
+import { FileChangeApprovalContext } from "../src/codex-client/file-change-approval-context.js";
 import { JsonRpcError, type RpcServerRequest } from "../src/codex-client/json-rpc.js";
 import type { SessionRouter } from "../src/session-routing/router.js";
 import { approvalTarget as target, FakeInteraction } from "./approval-test-fixture.js";
@@ -726,9 +727,52 @@ describe("ApprovalCoordinator", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       itemId: "file-1",
-      detail: "更新测试",
+      detail: "更新测试\n\n未取得待修改文件明细，请先在原生 Codex 客户端核对。",
       allowSession: true,
     });
+  });
+
+  it("shows exact file operations before approval and escapes ambiguous path characters", async () => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+    await handleApprovalServerRequest({ id: "files", method: "item/fileChange/requestApproval",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1" } }, coordinator, () => [
+      { path: "/new", kind: "add" }, { path: "/delete", kind: "delete" },
+      { path: "/old", kind: "update", movePath: "/moved" },
+      { path: "/a\n[hidden]\u202e", kind: "update" },
+    ]);
+    expect(interaction.requests[0]).toMatchObject({ detail:
+      '新增："/new"\n删除："/delete"\n移动："/old" → "/moved"\n修改："/a\\n\\u005bhidden\\u005d\\u202e"',
+    });
+  });
+
+  it("declines file previews that cannot be shown in full without exposing paths to logs", async () => {
+    const interaction = new FakeInteraction();
+    const logger = { info: vi.fn(), warn: vi.fn() };
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000, logger);
+    const response = await coordinator.handle({ type: "file", requestId: "large", threadId: "thread-1",
+      turnId: "turn-1", itemId: "item-1", reason: null,
+      changes: [{ kind: "add", path: "/private/" + "x".repeat(3_000) }] });
+    expect(response).toEqual({ type: "file", decision: "decline" });
+    expect(interaction.requests).toEqual([]);
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("/private/");
+    expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({ reason: "file-preview-too-large" }), expect.any(String));
+  });
+
+  it.each(["count", "bytes", "invalid"])("does not offer a missing-details fallback for rejected file list %s", async (kind) => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+    const context = new FileChangeApprovalContext();
+    const changes = kind === "count" ? Array(101).fill({ path: "/a", kind: { type: "add" } })
+      : kind === "bytes" ? [{ path: "/" + "x".repeat(12_001), kind: { type: "add" } }]
+      : [{ path: "/a", kind: { type: "unknown" } }];
+    context.observe({ method: "item/started", params: { threadId: "thread-1", turnId: "turn-1",
+      item: { type: "fileChange", id: "item-1", status: "inProgress", changes } } });
+    expect(await handleApprovalServerRequest({ id: "invalid", method: "item/fileChange/requestApproval",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1" } }, coordinator,
+    request => context.get(request.threadId, request.turnId, request.itemId)))
+      .toEqual({ decision: "decline" });
+    expect(interaction.requests).toEqual([]);
   });
 
   it("returns only the approved turn-scoped permissions", async () => {

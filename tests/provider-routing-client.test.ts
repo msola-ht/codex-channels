@@ -11,6 +11,22 @@ import type { SessionRouter, ThreadSession, ThreadSnapshot } from "../src/sessio
 const cwd = "/workspace";
 
 describe("ProviderRoutingClient", () => {
+  it("isolates file approval context by originating Provider as well as thread identity", () => {
+    const openai = client();
+    const other = client();
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai], ["other", other]]));
+    routed.onNotification(() => undefined);
+    other.emitNotification({ method: "item/started", params: { threadId: "thread-other" } });
+    other.fileApprovalChanges.mockReturnValue([{ path: "/other/file", kind: "add" }]);
+    const request = { type: "file" as const, threadId: "thread-other", turnId: "turn", itemId: "item", reason: null,
+      requestId: "other:1" };
+    expect(routed.fileApprovalChanges(request)).toEqual([{ path: "/other/file", kind: "add" }]);
+    expect(routed.fileApprovalChanges({ ...request, requestId: "openai:1" })).toBeUndefined();
+    expect(routed.fileApprovalChanges({ ...request, threadId: "unknown" })).toBeUndefined();
+    expect(openai.fileApprovalChanges).not.toHaveBeenCalled();
+    expect(other.fileApprovalChanges).toHaveBeenCalledOnce();
+  });
+
   it("loads an exact Provider catalog through its connection and activity boundary", async () => {
     const openai = client();
     const rs = client();
@@ -1212,6 +1228,7 @@ function client() {
       return () => { disconnectHandler = undefined; };
     }),
     setServerRequestHandler: vi.fn((handler) => { result.serverRequestHandler = handler; }),
+    fileApprovalChanges: vi.fn(),
     listThreads: vi.fn(),
     listCollaborationModes: vi.fn(),
     readThread: vi.fn(),

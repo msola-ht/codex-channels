@@ -1,4 +1,6 @@
 import { lunaReserveModel } from "../application/index.js";
+import type { ApprovalRequest } from "../approval/index.js";
+import { FileChangeApprovalContext } from "./file-change-approval-context.js";
 import type {
   ReviewTarget,
   ThreadGoal,
@@ -179,12 +181,15 @@ export class CodexAppServerClient implements
   ThreadHistoryPort
 {
   private readonly imageUpload: ImageReferenceUpload | undefined;
+  private readonly fileChanges = new FileChangeApprovalContext();
 
   constructor(
     private readonly rpc: JsonRpcClient,
     private readonly defaults: ThreadDefaults,
     imageUploadHttp?: { upload: typeof fetch; local?: typeof fetch },
   ) {
+    this.rpc.onNotification(notification => this.fileChanges.observe(notification));
+    this.rpc.onDisconnect(() => this.fileChanges.clear());
     this.imageUpload = imageUploadHttp ? new ImageReferenceUpload(rpc, imageUploadHttp.upload, imageUploadHttp.local ?? fetch,
       signal => this.rpc.request<GetAuthStatusResponse>({
         method: "getAuthStatus",
@@ -197,10 +202,12 @@ export class CodexAppServerClient implements
   }
 
   reconnect(): Promise<InitializeResponse> {
+    this.fileChanges.clear();
     return this.rpc.reconnect();
   }
 
   close(): Promise<void> {
+    this.fileChanges.clear();
     this.imageUpload?.cancelAll();
     return this.rpc.close();
   }
@@ -215,6 +222,10 @@ export class CodexAppServerClient implements
 
   setServerRequestHandler(handler: ServerRequestHandler): void {
     this.rpc.setServerRequestHandler(handler);
+  }
+
+  fileApprovalChanges(request: Extract<ApprovalRequest, { type: "file" }>) {
+    return this.fileChanges.get(request.threadId, request.turnId, request.itemId);
   }
 
   async listThreads(
@@ -414,6 +425,7 @@ export class CodexAppServerClient implements
   }
 
   async unsubscribeThread(threadId: string): Promise<void> {
+    this.fileChanges.clearThread(threadId);
     this.cancelPendingInput(threadId);
     await this.rpc.request<ThreadUnsubscribeResponse>({
       method: "thread/unsubscribe",

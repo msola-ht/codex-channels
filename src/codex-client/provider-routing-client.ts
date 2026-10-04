@@ -1,4 +1,5 @@
 import type { CodexAppServerClient } from "./client.js";
+import type { ApprovalRequest } from "../approval/index.js";
 import type { InitializeResponse } from "../codex-protocol/index.js";
 import type {
   RpcNotification,
@@ -13,6 +14,7 @@ type ProviderClientMethod =
   | "onNotification"
   | "onDisconnect"
   | "setServerRequestHandler"
+  | "fileApprovalChanges"
   | "listThreads"
   | "listCollaborationModes"
   | "readThread"
@@ -240,6 +242,13 @@ export class ProviderRoutingClient {
   knownProvider(threadId: string): string | undefined {
     const provider = this.threadProviders.get(threadId);
     return provider === undefined ? undefined : this.canonicalProvider(provider);
+  }
+
+  fileApprovalChanges(request: Extract<ApprovalRequest, { type: "file" }>) {
+    const provider = this.knownProvider(request.threadId);
+    if (!provider || typeof request.requestId !== "string"
+      || !request.requestId.startsWith(`${provider}:`)) return undefined;
+    return this.clients.get(provider)?.fileApprovalChanges(request);
   }
 
   /** Availability preflight; it may connect/start the Provider App Server on demand. */

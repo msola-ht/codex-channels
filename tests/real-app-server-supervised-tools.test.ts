@@ -6,6 +6,11 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { ApprovalCoordinator } from "../src/approval/coordinator.js";
+import type { FileApprovalChange } from "../src/approval/requests.js";
+import type { SessionRouter } from "../src/session-routing/router.js";
+import { approvalTarget, FakeInteraction } from "./approval-test-fixture.js";
+
 import { SubagentCompletionTracker } from "../src/bootstrap/subagent-completion-tracker.js";
 import { createScheduledTaskServerRequestHandler } from "../src/bootstrap/scheduled-task-server-request.js";
 import { ImageReferenceUpload } from "../src/codex-client/image-reference-upload.js";
@@ -1362,4 +1367,145 @@ contractSuite("real supervised App Server tools", () => {
         });
       }
     }, 30_000);
+});
+
+contractSuite("real App Server file approval", () => {
+  it.each([true, false])("shows exact file changes before the decision and respects approval=%s", async (approved) => {
+    const directory = mkdtempSync(join("/tmp", "file-approval-"));
+    const codexHome = join(directory, "home");
+    const workspace = join(directory, "workspace");
+    mkdirSync(codexHome, { mode: 0o700 });
+    mkdirSync(workspace, { mode: 0o700 });
+    const added = join(workspace, "added.txt");
+    const updated = join(workspace, "updated.txt");
+    const deleted = join(workspace, "deleted.txt");
+    const moved = join(workspace, "moved.txt");
+    const destination = join(workspace, "destination.txt");
+    writeFileSync(updated, "old\n");
+    writeFileSync(deleted, "remove\n");
+    writeFileSync(moved, "before move\n");
+    const patch = [
+      "*** Begin Patch", "*** Add File: added.txt", "+added",
+      "*** Update File: updated.txt", "@@", "-old", "+new",
+      "*** Delete File: deleted.txt",
+      "*** Update File: moved.txt", "*** Move to: destination.txt", "@@", "-before move", "+after move",
+      "*** End Patch",
+    ].join("\n");
+    const interaction = new FakeInteraction(approved
+      ? { type: "approval", approved: true, scope: "once" }
+      : { type: "approval", approved: false });
+    let threadId: string | undefined;
+    let completed = false;
+    let requestCount = 0;
+    let changesAtApproval: FileApprovalChange[] | null | undefined;
+    let filesUnchangedAtApproval = false;
+    const methods: string[] = [];
+    let rpc: JsonRpcClient | undefined;
+    const backend = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        if (request.method !== "POST" || request.url !== "/responses") {
+          response.writeHead(404).end();
+          return;
+        }
+        const number = ++requestCount;
+        const id = `file-approval-${number}`;
+        const item = number === 1
+          ? {
+              type: "function_call", call_id: "patch-call", namespace: "functions", name: "exec_command",
+              arguments: JSON.stringify({ cmd: `apply_patch <<'EOF'\n${patch}\nEOF\n` }),
+            }
+          : { type: "message", role: "assistant", id: "patch-done", content: [{ type: "output_text", text: "done" }] };
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        for (const event of [
+          { type: "response.created", response: { id } },
+          { type: "response.output_item.done", item },
+          completedResponseEvent(id),
+        ]) response.write(`data: ${JSON.stringify(event)}\n\n`);
+        response.end();
+      });
+    });
+    try {
+      await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
+      const address = backend.address();
+      if (!address || typeof address === "string") throw new Error("Missing fixture address");
+      const catalog = join(directory, "catalog.json");
+      writeFileSync(catalog, JSON.stringify({ models: [{
+        slug: "file-approval-contract", display_name: "File approval fixture", description: "File approval fixture",
+        context_window: 200_000, default_reasoning_level: "high",
+        supported_reasoning_levels: [{ effort: "high", description: "Fixture" }],
+        shell_type: "shell_command", visibility: "list", supported_in_api: true, priority: 1,
+        availability_nux: null, upgrade: null, base_instructions: "You are a coding agent.",
+        support_verbosity: true, default_verbosity: "low", apply_patch_tool_type: "freeform",
+        truncation_policy: { mode: "tokens", limit: 10_000 }, supports_parallel_tool_calls: true,
+        experimental_supported_tools: [],
+      }] }));
+      writeFileSync(join(codexHome, "config.toml"), [
+        'model = "file-approval-contract"', 'model_provider = "file-approval-contract"',
+        `model_catalog_json = ${JSON.stringify(catalog)}`,
+        '[features]', 'plugins = false',
+        '[model_providers.file-approval-contract]', 'name = "File approval fixture"',
+        `base_url = "http://127.0.0.1:${address.port}"`,
+        'wire_api = "responses"', 'requires_openai_auth = false', 'supports_websockets = false',
+      ].join("\n"));
+      rpc = new JsonRpcClient(new StdioTransport({
+        codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: workspace,
+        environment: { ...process.env, CODEX_HOME: codexHome },
+      }));
+      const client = new CodexAppServerClient(rpc, { sandbox: "read-only" });
+      const coordinator = new ApprovalCoordinator({
+        targetForThread: (id: string) => id === threadId ? approvalTarget : undefined,
+        isBackgroundThread: () => false,
+      } as unknown as SessionRouter, interaction, 10_000);
+      rpc.setServerRequestHandler(request => {
+        methods.push(request.method);
+        return handleApprovalServerRequest(request, coordinator, decoded => {
+          changesAtApproval = client.fileApprovalChanges(decoded);
+          filesUnchangedAtApproval = !existsSync(added) && !existsSync(destination)
+            && readFileSync(updated, "utf8") === "old\n"
+            && readFileSync(deleted, "utf8") === "remove\n"
+            && readFileSync(moved, "utf8") === "before move\n";
+          return changesAtApproval;
+        });
+      });
+      await client.connect();
+      client.onNotification(notification => {
+        if (notification.method === "turn/completed") completed = true;
+      });
+      // Ephemeral threads cannot use thread/read includeTurns: details must come
+      // from the real item/started notification emitted before the approval RPC.
+      const { thread } = await client.startThread(workspace, { ephemeral: true, approvalPolicy: "on-request" });
+      threadId = thread.id;
+      await client.startTurn(thread.id, [{ type: "text", text: "Apply the fixture patch" }], "codex_connect:file-approval", workspace);
+      await waitFor(() => completed, 20_000);
+      expect(methods).toEqual(["item/fileChange/requestApproval"]);
+      expect(filesUnchangedAtApproval).toBe(true);
+      expect(changesAtApproval).toHaveLength(4);
+      expect(changesAtApproval).toEqual(expect.arrayContaining([
+        { path: added, kind: "add" }, { path: updated, kind: "update" },
+        { path: deleted, kind: "delete" }, { path: moved, kind: "update", movePath: destination },
+      ]));
+      expect(interaction.requests).toHaveLength(1);
+      const approval = interaction.requests[0];
+      expect(approval).toMatchObject({ type: "approval", kind: "file", threadId: thread.id, itemId: "patch-call" });
+      if (approval?.type !== "approval") throw new Error("Missing file approval");
+      for (const path of [added, updated, deleted, moved, destination]) {
+        expect(approval.detail).toContain(JSON.stringify(path));
+      }
+      expect(existsSync(added)).toBe(approved);
+      expect(readFileSync(updated, "utf8")).toBe(approved ? "new\n" : "old\n");
+      expect(existsSync(deleted)).toBe(!approved);
+      expect(existsSync(moved)).toBe(!approved);
+      expect(existsSync(destination)).toBe(approved);
+      if (approved) {
+        expect(readFileSync(added, "utf8")).toBe("added\n");
+        expect(readFileSync(destination, "utf8")).toBe("after move\n");
+      }
+    } finally {
+      await rpc?.close();
+      backend.closeAllConnections();
+      await new Promise<void>(resolve => backend.close(() => resolve()));
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  }, 30_000);
 });

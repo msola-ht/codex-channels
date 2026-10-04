@@ -57,10 +57,10 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
         // or mistake stdin bytes for a fresh command or persistent authorization.
         const detail = [
           "向已有终端发送输入，不是执行新命令。以下为 JSON 转义表示；请核对完整内容。",
-          `完整输入请求：${stdinPreview(request.command)}`,
-          `启动目录（当前目录可能已变化）：${stdinPreview(request.cwd)}`,
-          request.reason ? `原因：${stdinPreview(request.reason)}` : undefined,
-          request.additionalPermissions ? stdinPreview(formatAdditionalPermissions(request.additionalPermissions) ?? "") : undefined,
+          `完整输入请求：${approvalPreview(request.command)}`,
+          `启动目录（当前目录可能已变化）：${approvalPreview(request.cwd)}`,
+          request.reason ? `原因：${approvalPreview(request.reason)}` : undefined,
+          request.additionalPermissions ? approvalPreview(formatAdditionalPermissions(request.additionalPermissions) ?? "") : undefined,
         ].filter(Boolean).join("\n\n");
         // Fit every Surface without an approvable truncated preview.
         if (Buffer.byteLength(detail, "utf8") > 3_000) {
@@ -137,6 +137,25 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
         };
       }
       case "file": {
+        if (request.changes === null) {
+          this.logger?.warn({ ...metadata, reason: "invalid-file-preview" }, "文件审批明细无效或超限，已安全拒绝");
+          return { type: "file", decision: "decline" };
+        }
+        const files = request.changes?.map(change => {
+          const path = approvalPreview(change.path);
+          if (change.movePath) return `移动：${path} → ${approvalPreview(change.movePath)}`;
+          const label = change.kind === "add" ? "新增" : change.kind === "delete" ? "删除" : "修改";
+          return `${label}：${path}`;
+        });
+        const detail = [
+          request.reason || undefined,
+          files?.length ? files.join("\n") : "未取得待修改文件明细，请先在原生 Codex 客户端核对。",
+        ].filter(Boolean).join("\n\n");
+        // Never offer approval for a file list that a Surface would truncate.
+        if (Buffer.byteLength(detail, "utf8") > 3_000) {
+          this.logger?.warn({ ...metadata, reason: "file-preview-too-large" }, "文件审批无法完整展示，已安全拒绝");
+          return { type: "file", decision: "decline" };
+        }
         const decision = await this.interaction.request(target, {
           type: "approval",
           requestId,
@@ -145,7 +164,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           turnId: request.turnId,
           itemId: request.itemId,
           title: title("Codex 请求修改文件"),
-          detail: request.reason ?? "Codex 请求修改文件",
+          detail,
           allowSession: true,
           expiresInMs: this.timeoutMs,
         });
@@ -541,7 +560,7 @@ function truncate(value: string, maximumLength: number): string {
     : `${value.slice(0, maximumLength - 1)}…`;
 }
 
-function stdinPreview(value: string): string {
+function approvalPreview(value: string): string {
   // Escape formatting and invisible controls without changing the approved bytes.
   return JSON.stringify(value).replace(/[\p{Cf}\u2028\u2029`*_~#>[\]]/gu,
     (character) => character.split("").map(unit => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`).join(""));

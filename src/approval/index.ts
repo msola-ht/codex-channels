@@ -17,6 +17,7 @@ export type {
   CommandApprovalOption,
   CommandApprovalResult,
   ExecPolicyAmendment,
+  FileApprovalChange,
   FileSystemPath,
   FileSystemSandboxEntry,
   FileSystemSpecialPath,

@@ -1119,7 +1119,7 @@ export abstract class GatewayComponentGraph {
       }
     });
     const approvalHandler = (request: Parameters<typeof handleApprovalServerRequest>[0]) =>
-      handleApprovalServerRequest(request, this.approval);
+      handleApprovalServerRequest(request, this.approval, approval => this.codex.fileApprovalChanges(approval));
     const appServerRequestHandler: Parameters<typeof this.codex.setServerRequestHandler>[0] =
       async (request) => {
         if (request.method === "item/tool/call") {

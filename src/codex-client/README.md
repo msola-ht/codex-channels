@@ -85,6 +85,9 @@
   产物路径，不把 `imageView` 当作可外发产物。
   `cua_repl.js` / `js_reset` 归为 MCP 的 `computerUse` 操作，`js` 只提取参数中的操作标题并
   脱敏限长，不把执行代码或原始结果带入稳定事件。
+- `file-change-approval-context.ts`：按每个 Client 的 Thread、Turn、Item 精确关联批准前的
+  文件变更通知，仅有界保留路径、操作类型与移动目标，不保存 Diff；Item/Turn 完成、Thread
+  失效、取消订阅、断线与关闭时清理。缺失明细不借用其他 Item，Provider 路由同时校验请求来源。
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类
   Server Request 解码为 Approval 稳定请求；命令审批只接受缺省或明确的 `kind=command`，
   `writeStdin` 解码为独立 stdin 审批，要求完整输入、目录、回调身份和仅 accept/cancel 决策；未知种类安全拒绝；其中按固定版本的空对象 Schema 与
