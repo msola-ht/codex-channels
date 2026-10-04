@@ -53,7 +53,7 @@ describe("webui server Provider and account management", () => {
     const fixture = createFixture();
     const payload = { "https://api.openai.com/auth": { chatgpt_account_id: "account-a" } };
     writePrivateFileAtomicSync(join(fixture.environment.CODEX_HOME!, "auth.json"), JSON.stringify({ tokens: {
-      id_token: `header.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`, access_token: "PRIVATE-TOKEN",
+      account_id: "account-a", id_token: `header.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`, access_token: "PRIVATE-TOKEN",
     }, last_refresh: "2026-09-23T02:41:57Z" }));
     const snapshot = { provider: "openai", accountId: null, observedAtMs: 1000, available: true,
       usage: null, limits: { kind: "rate-limits", provider: "openai", limits: { accountId: "account-a" } } };

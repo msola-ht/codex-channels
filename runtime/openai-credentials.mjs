@@ -14,12 +14,7 @@ export async function readOpenAiCredentialRefreshTime(accountId, environment = p
     const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
     if (bytesRead > 128 * 1024) return null;
     const auth = JSON.parse(buffer.toString("utf8", 0, bytesRead));
-    const token = auth?.tokens?.id_token;
-    if (typeof token !== "string") return null;
-    const parts = token.split(".");
-    if (parts.length !== 3 || !/^[A-Za-z0-9_-]+$/u.test(parts[1])) return null;
-    const claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"))?.["https://api.openai.com/auth"];
-    if (claims?.chatgpt_account_id !== accountId) return null;
+    if (auth?.tokens?.account_id !== accountId) return null;
     return timestamp(auth.last_refresh);
   } catch {
     // Optional cache metadata must not expose credential contents or break quota queries.
