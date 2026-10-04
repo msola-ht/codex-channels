@@ -892,7 +892,7 @@ export interface CcgCreditUsageResponse {
 }
 
 export interface OpenAiAccountCredits {
-  subscription?: { activeUntil: number | null; lastChecked: number | null } | null
+  credentialRefreshedAt?: number | null
   observedAtMs: number
   remaining: string | null
   unlimited: boolean
@@ -902,7 +902,7 @@ export interface OpenAiAccountCredits {
 }
 
 export interface OfficialAccountSnapshot {
-  subscription?: { activeUntil: number | null; lastChecked: number | null } | null
+  credentialRefreshedAt?: number | null
   provider: string
   accountId: string | null
   displayName: string

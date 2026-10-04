@@ -164,13 +164,9 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.quotaCreditsEnglish).toContain("No expiry");
     expect(markup.quotaCreditsEnglish).toContain("Other reset credits: 1");
     expect(markup.quotaCredits).toContain("可用重置券");
-    expect(markup.quotaCredits).toContain("订阅截止时间");
-    expect(markup.quotaCredits).toContain("订阅信息最后检查时间");
-    expect(markup.quotaCredits).toContain("2026-10-03 02:05");
+    expect(markup.quotaCredits).toContain("凭证刷新时间");
     expect(markup.quotaCredits).toContain("2026-09-23 02:41");
-    expect(markup.quotaCreditsEnglish).toContain("Subscription active until");
-    expect(markup.quotaCreditsEnglish).toContain("Subscription last checked");
-    expect(markup.quotaCreditsEnglish).toContain("From the login cache");
+    expect(markup.quotaCreditsEnglish).toContain("Credentials refreshed at");
     expect(markup.quotaCredits).toContain("使用重置券");
     expect(markup.quotaCreditsEnglish).toContain("Use reset credit");
     expect(markup.quotaCredits).toContain("1970-01-01 00:33");
@@ -190,6 +186,22 @@ describe("WebUI metrics table presentation", () => {
     expect(html).toContain("1970-01-01 00:33");
     expect(html).toContain("使用重置券");
     expect(html).toContain('<ul aria-label="重置券到期时间"');
+  });
+  it("shows only credential refresh time and handles missing credentials without subscription dates", () => {
+    expect(markup.credentialRefreshTime).toContain("凭证刷新时间: 2026-09-23 02:41");
+    expect(markup.credentialRefreshTimeEn).toContain("Credentials refreshed at: 2026-09-23 02:41");
+    expect(markup.credentialRefreshTimeMissing).toContain("凭证刷新时间: 未提供");
+    expect(markup.credentialRefreshTimeOmitted).toContain("凭证刷新时间: 未提供");
+    expect(markup.credentialRefreshTimeZero).toContain("1970-01-01 00:00");
+    for (const html of [markup.credentialRefreshTime, markup.credentialRefreshTimeEn, markup.credentialRefreshTimeMissing]) {
+      expect(html).not.toContain("2026-10-03 02:05");
+      expect(html).not.toContain("订阅截止时间");
+      expect(html).not.toContain("订阅信息最后检查时间");
+      expect(html).not.toContain("Subscription active until");
+      expect(html).not.toContain("Subscription last checked");
+      expect(html).not.toContain("缓存中的截止日期已过");
+      expect(html).not.toContain("From the login cache");
+    }
   });
   it("shows controlled relay outcomes without a request ID copy action", () => {
     expect(markup["relay-outcome-rejected"]).toContain("上游权限不足");
@@ -349,7 +361,7 @@ describe("WebUI metrics table presentation", () => {
           quotaCreditsEnglish: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: null, planType: null,
             credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "2", expirations: [{ expiresAt: null, count: 1 }], undisclosedCount: "1" } }, "en"),
           quotaCredits: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: 1000, planType: "plus",
-            credits: { subscription: { activeUntil: 1790993155, lastChecked: 1790131317 }, observedAtMs: 1000, remaining: "12.34567890123456789", unlimited: false, resetCreditsAvailable: "5",
+            credits: { credentialRefreshedAt: 1790131317, observedAtMs: 1000, remaining: "12.34567890123456789", unlimited: false, resetCreditsAvailable: "5",
               expirations: [{ expiresAt: 2000, count: 2 }, { expiresAt: null, count: 1 }], undisclosedCount: "2" } }),
           quotaZeroCredits: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null,
             credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "0", expirations: [], undisclosedCount: null } }),
@@ -583,6 +595,17 @@ describe("WebUI metrics table presentation", () => {
         result.partialFailureRetainsSnapshot = render(ConsolePage, consoleProps);
         globalThis.fixtureAccounts.data.deepseek = null;
         globalThis.fixtureAccounts.data.warnings = [];
+        const credentialProps = { usedPercent: 37.5, resetsAt: null, planType: "plus",
+          credits: { credentialRefreshedAt: 1790131317, subscription: { activeUntil: 1790993155, lastChecked: 1790131317 }, observedAtMs: 1000,
+            remaining: "0", unlimited: false, resetCreditsAvailable: "0", expirations: [], undisclosedCount: null } };
+        result.credentialRefreshTime = render(WeeklyQuotaCard, credentialProps);
+        result.credentialRefreshTimeEn = render(WeeklyQuotaCard, credentialProps, "en");
+        result.credentialRefreshTimeMissing = render(WeeklyQuotaCard, { ...credentialProps,
+          credits: { ...credentialProps.credits, credentialRefreshedAt: null } });
+        result.credentialRefreshTimeOmitted = render(WeeklyQuotaCard, { ...credentialProps,
+          credits: { ...credentialProps.credits, credentialRefreshedAt: undefined } });
+        result.credentialRefreshTimeZero = render(WeeklyQuotaCard, { ...credentialProps,
+          credits: { ...credentialProps.credits, credentialRefreshedAt: 0 } });
         globalThis.fixtureServerClock = { nowMs: Date.now() - 20 * 60_000, receivedAtMs: Date.now(), timeZone: "UTC" };
         result.skewedClientFreshAccount = render(AccountUpdateDescription, { observedAtMs: globalThis.fixtureServerClock.nowMs, isDefault: false, refreshFailed: false });
         globalThis.fixtureServerClock = undefined;

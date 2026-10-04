@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { parse } from "smol-toml";
 import { webuiLogger } from "./webui-logger.mjs";
 import { codexHomePath, hasCodexAuthFile } from "../runtime/codex-home.mjs";
-import { readOpenAiSubscription } from "../runtime/openai-subscription.mjs";
+import { readOpenAiCredentialRefreshTime } from "../runtime/openai-credentials.mjs";
 import { readCodexConfigFile } from "../runtime/model-provider-managed-runtime.mjs";
 import { routeResetCredits } from "./webui-reset-credit-route.mjs";
 import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
@@ -319,7 +319,7 @@ export async function sendAccountSnapshots(environment, response, openMetricsSto
     for (const snapshot of snapshots) {
       if (snapshot.provider !== "openai") continue;
       const limits = snapshot.limits;
-      snapshot.subscription = await readOpenAiSubscription(
+      snapshot.credentialRefreshedAt = await readOpenAiCredentialRefreshTime(
         limits?.kind === "rate-limits" && limits.provider === "openai" ? limits.limits?.accountId : null,
         environment,
       );

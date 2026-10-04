@@ -86,19 +86,17 @@ describe("conversation model and account command formatting", () => {
     expect(limits.resetCreditExpiresAt).toEqual([2_000_000, null, 2_000_000]);
     const render = () => formatConversationLimits({
       kind: "limits",
-      result: { kind: "rate-limits", provider: "openai", limits, subscription: { activeUntil: 1790993155, lastChecked: 1790131317 } },
+      result: { kind: "rate-limits", provider: "openai", limits, credentialRefreshedAt: 1791116775 },
     });
     expect(render()).toContain("可用额度重置券：5");
     expect(render()).toContain(`时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
     expect(render()).not.toContain("网关时区");
-    expect(render()).toMatch(/订阅截止时间：2026年10月[23]日/u);
-    expect(render()).toContain("（登录缓存）");
-    expect(render()).toMatch(/订阅信息最后检查时间：2026年9月2[23]日/u);
-    expect(render()).not.toContain("订阅截止时间：未提供");
-    expect(render()).not.toContain("订阅信息最后检查时间：未提供");
+    expect(render()).toMatch(/凭证刷新时间：2026年10月[45]日/u);
+    expect(render()).not.toContain("订阅");
+    expect(render()).not.toContain("登录缓存");
     const missing = formatConversationLimits({ kind: "limits", result: { kind: "rate-limits", provider: "openai", limits } });
-    expect(missing).toContain("订阅截止时间：未提供");
-    expect(missing).toContain("订阅信息最后检查时间：未提供");
+    expect(missing).toContain("凭证刷新时间：未提供");
+    expect(missing).not.toContain("订阅");
     expect(render()).toContain("：2 张");
     expect(render()).toContain("无到期时间：1 张");
     expect(render()).toContain("其余 2 张：服务端未提供明细");

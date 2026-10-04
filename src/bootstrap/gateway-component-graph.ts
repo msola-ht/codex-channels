@@ -19,7 +19,7 @@ import {
   releaseAppServerProvider,
 } from "../../runtime/app-server-supervisor.mjs";
 import { hasCodexAuthFile } from "../../runtime/codex-home.mjs";
-import { readOpenAiSubscription } from "../../runtime/openai-subscription.mjs";
+import { readOpenAiCredentialRefreshTime } from "../../runtime/openai-credentials.mjs";
 import {
   effectiveCodexBinary,
   executableInvocation,
@@ -556,7 +556,7 @@ export abstract class GatewayComponentGraph {
       this.router,
       models,
     );
-    this.resetCredits = new OpenAiResetCreditService(this.codex, signal => this.providerAccounts!.accountLimits("openai", signal));
+    this.resetCredits = new OpenAiResetCreditService(this.codex, signal => this.providerAccounts!.accountLimits("openai", signal, { refreshLogin: false }));
     const accountAdapters = [
       createOpenAiAccountAdapter(this.codex),
       ...createManagedProviderAccountAdapters(
@@ -598,7 +598,7 @@ export abstract class GatewayComponentGraph {
         try { this.accountSnapshotEvents?.changed(); }
         catch (error) { logger.warn({ err: error }, "账户快照已保存，但变化通知失败"); }
       },
-    }, readOpenAiSubscription);
+    }, readOpenAiCredentialRefreshTime);
     const execution = withOutputExecutionAdmission(this.codex, (threadId) => {
       const target = this.bindings.getByThread(threadId)?.target;
       const reason = target ? this.surfaceManager.executionBlockReason(target) : "unavailable";

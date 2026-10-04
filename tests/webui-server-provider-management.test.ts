@@ -49,13 +49,12 @@ function startServer(
 }
 
 describe("webui server Provider and account management", () => {
-  it("adds matched login subscription metadata to responses without storing it", async () => {
+  it("adds matched credential refresh time to responses without storing it", async () => {
     const fixture = createFixture();
-    const payload = { "https://api.openai.com/auth": { chatgpt_account_id: "account-a",
-      chatgpt_subscription_active_until: "2026-10-03T02:05:55Z", chatgpt_subscription_last_checked: "2026-09-23T02:41:57Z" } };
+    const payload = { "https://api.openai.com/auth": { chatgpt_account_id: "account-a" } };
     writePrivateFileAtomicSync(join(fixture.environment.CODEX_HOME!, "auth.json"), JSON.stringify({ tokens: {
       id_token: `header.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`, access_token: "PRIVATE-TOKEN",
-    } }));
+    }, last_refresh: "2026-09-23T02:41:57Z" }));
     const snapshot = { provider: "openai", accountId: null, observedAtMs: 1000, available: true,
       usage: null, limits: { kind: "rate-limits", provider: "openai", limits: { accountId: "account-a" } } };
     let body = "";
@@ -63,13 +62,13 @@ describe("webui server Provider and account management", () => {
     const response = { writeHead: vi.fn(), end: (value: string) => { body = value; } };
     const open = () => ({ latestAccountSnapshots: () => [snapshot], close });
     await sendAccountSnapshots(fixture.environment, response, open);
-    expect(JSON.parse(body).snapshots[0].subscription).toEqual({ activeUntil: 1790993155, lastChecked: 1790131317 });
+    expect(JSON.parse(body).snapshots[0].credentialRefreshedAt).toBe(1790131317);
     expect(body).not.toContain("PRIVATE-TOKEN");
     expect(body).not.toContain("id_token");
-    expect(snapshot).not.toHaveProperty("subscription");
+    expect(snapshot).not.toHaveProperty("credentialRefreshedAt");
     snapshot.limits.limits.accountId = "account-b";
     await sendAccountSnapshots(fixture.environment, response, open);
-    expect(JSON.parse(body).snapshots[0].subscription).toBeNull();
+    expect(JSON.parse(body).snapshots[0].credentialRefreshedAt).toBeNull();
     expect(close).toHaveBeenCalledTimes(2);
   });
   it.each([1, 4, 16])("bounds refresh result rows for %i accounts plus one authoritative sync", async count => {
