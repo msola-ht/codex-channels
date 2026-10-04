@@ -20,7 +20,7 @@ i18n-glossary.json  翻译术语、原样保留项和规则，供开发工具生
 src/
   lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时、页面可见性和设置页恢复事件的延后补查，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 投影 OpenAI 当前周额度、Credits 余额和重置券到期明细，并管理有界手动查询失败记录、有界并发查询、逐账户结果交付、观测时间合并及 DS、OCG、CCG、Cline Pass 账户快照时效，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址，i18n/ 存放中英文界面文案字典与取值函数
   hooks/       数据 hook（useApi 统一 loading/error/refetch，支持按当前状态更新和账户观测时间合并，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、Relay 服务管理 use-relay-service-management（统一手动、页面恢复及任务完成刷新）、Relay Key 管理 use-relay-management（复用确认 Hook）、use-relay-queue（队列页面挂载期间的 SSE 推送与有界快照刷新），设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）、全局货币上下文与 use-translation（按当前显示语言翻译界面文案）
-  pages/       relay-queue-page 独立实时请求队列页；model-management-page 组合提供商、账户与凭据、模型配置、上下文与压缩四个独立路由，channels-page 组合渠道配置和消息展示，settings-page 组合常规、权限、网络、数据、服务五个子页；概览、会话、会话详情、请求、错误、调用详情、渠道投递队列、模型转发（独立 Key 管理，中文用途名称及居中弹窗，手动刷新运行状态）、设置（只负责组合设置域组件）
+  pages/       relay-queue-page 独立实时请求队列页；thread-subagents-page 组合全部子代理和所属会话的关联子代理独立页；model-management-page 组合提供商、账户与凭据、模型配置、上下文与压缩四个独立路由，channels-page 组合渠道配置和消息展示，settings-page 组合常规、权限、网络、数据、服务五个子页；概览、会话、会话详情、请求、错误、调用详情、渠道投递队列、模型转发（独立 Key 管理，中文用途名称及居中弹窗，手动刷新运行状态）、设置（只负责组合设置域组件）
   App.tsx      路由布局与页面级懒加载，保留页面切换间的控制台已应用范围及有界账户手动查询失败记录（不保存账户快照）（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
 
@@ -59,6 +59,8 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 详细行为见 `docs/webui.md`。
 
+`pages/logs-page.tsx` 组合「调用监控 → 服务日志」（`#/logs`）；`components/service-logs/service-logs.tsx` 使用官方 `components/ui/tabs.tsx` 切换服务，搜索与行数、级别和刷新设置同排展示；`log-results.tsx` 组合撑满页面剩余高度的结构化表格、详情和阅读时的快照保留，日志在表格区域内滚动；`lib/service-logs.ts` 解析已脱敏的 Pino/tracing 日志及 journald 白名单元数据、合并来源并筛选，不猜测未知级别。`hooks/use-service-logs.ts` 复用统一请求与可见页面刷新调度，切换查询隔离旧结果，离开页面取消读取。
+
 `pages/delivery-page.tsx` 组合渠道投递队列独立页面，由左侧「消息渠道 → 渠道投递队列」进入 `#/delivery`；`components/delivery/delivery-queue.tsx` 提供精简表格列表、状态计数筛选、行内内容摘要、游标分页和勾选批量重试/忽略确认；`hooks/use-delivery-queue.ts` 复用管理确认 Hook 与 `hooks/use-queue-events.ts` 的 SSE 变化订阅，筛选或翻页时重建当前查询，离开页面时取消请求。
 
 `components/settings/tool-access-settings.tsx` 组合电脑、浏览器与已有 MCP 的原生配置编辑器，复用 App Server 设置 Hook 的版本化预览和确认；用户层与合并配置分开展示。
@@ -70,7 +72,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `hooks/use-traffic.ts` 为当前调用列表或详情复用变化订阅，未显示的一侧不订阅；首页按转储文件变化合并读取，历史列表及原始事件分页暂停自动更新。详情按提供商及批次订阅、按调用 ID 精确读取，终态先补读原始事件，事件数变化时重建摘要以补齐迟到输出；手动刷新重新加载完整摘要。同查询后台读取保留内容和展开状态，记录已清理时明确显示缺失；最初尚未写入的记录在新通知到达后可补查。请求详情抽屉跟随列表中相同 ID 的记录更新；记录移出当前页时保留最后一次显示的数据。
 
 `components/metrics/service-tier.tsx` 为请求明细、错误记录和调用详情提供 Fast 标签；前两者使用请求层级，调用详情区分请求与响应来源。
-`components/requests/errors-table.tsx` 组合错误记录列、错误说明和会话/轮次跳转；`components/traffic/traffic-table.tsx` 组合调用列表及详情入口。两者与渠道投递队列、请求、会话页复用 `DataTable` 的标题摘要、列显隐、滚动区和服务端分页。公共组件支持业务工具栏、稳定行 ID及行点击。
+`components/requests/errors-table.tsx` 组合错误记录列、错误说明和会话/轮次跳转；`components/traffic/traffic-table.tsx` 组合调用列表及详情入口。两者与渠道投递队列、请求、会话页复用 `DataTable` 的标题摘要、列显隐、滚动区和服务端分页。公共组件支持标题操作区、业务工具栏、稳定行 ID 及行点击；日志使用不分页模式、行内详情和表格视口滚动回调。
 
 `components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。
 
@@ -81,6 +83,14 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `hooks/use-requests.ts` 与 `hooks/use-errors.ts` 复用队列通知 Hook，在 Gateway 指标批次成功落库后更新第一页；历史分页延后读取，返回第一页补查，手动刷新始终可用。`GET /api/v1/metrics/events` 使用只读 API 鉴权，通知中断与快照失败分别显示，不影响历史查询。
 
 `hooks/use-threads.ts` 与 `hooks/use-thread-detail.ts` 沿用指标通知和历史分页暂停规则。会话详情通过 `useThreadDetail` 共用一条订阅，并行读取本地汇总和轮次，两项成功后一起更新；同条件刷新保留内容和展开状态。`useMetricsProviders` 跟随页面成功读取的结果合并更新提供商选项，自动读取至少间隔 30 秒，不另开订阅；后台或离线时暂停，失败可手动重试，不覆盖筛选草稿。
+
+`components/threads/thread-subagents.tsx` 复用公共 `DataTable`，
+展示已登记的直接子代理、会话链接、提供商、模型、自身全部保留历史的轮次与请求数、Token 与缓存指标及下级代理数量；名称与会话 ID 使用原生链接，保留键盘与焦点交互，
+用于 `pages/thread-subagents-page.tsx` 的独立页面，支持列显隐、首次请求与最后记录时间排序，以及 10/20/50/100 条服务端分页；其他列不提供排序。左侧“会话 → 子代理”打开 `#/subagents` 全局页，展示全部已登记子代理并增加父会话链接；主列表的子代理数量和详情页的查看入口跳转到所属会话的 `#/threads/:id/subagents`，子代理行的下级数量跳转到下一层独立页面，页面保留返回所属会话入口。主列表仍展示会话累计耗时，其过滤、汇总和分页在服务端完成。
+`hooks/use-thread-subagents.ts` 管理独立分页、错误与会话切换隔离，
+独立复用指标变化订阅和快照确认，历史分页暂停自动更新；仅查询关联数据，不读取会话详情。关联导航使用全部时间并清除请求筛选。
+
+`pages/thread-detail-page.tsx` 在上方展示筛选与统计，轮次 DataTable 填充剩余高度，表格区域滚动、分页栏位于底部；最小表格高度为窄视口保留可用空间。
 
 `hooks/use-dashboard.ts` 为汇总、趋势和热力图共用一条指标订阅；`hooks/use-official-account-sources.ts` 独立订阅已保存账户快照，仅各账户手动刷新查询上游，进入页面、恢复可见与页头刷新均不触发上游账户查询。
 

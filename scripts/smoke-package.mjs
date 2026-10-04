@@ -139,6 +139,8 @@ try {
     "scripts/codex-user-settings-management.mjs",
     "scripts/codex-user-settings-setup.d.mts",
     "scripts/codex-user-settings-setup.mjs",
+    "scripts/codex-subagents-setup.d.mts",
+    "scripts/codex-subagents-setup.mjs",
     "scripts/setup.mjs",
     "scripts/source-update.d.mts",
     "scripts/source-update.mjs",

@@ -1,10 +1,47 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { appServerThread, FakeTransport, pinnedThreadSection } from "./support/json-rpc-fixtures.js";
 
 describe("JsonRpcClient threads", () => {
+    it("reads nullable official Thread model configuration", async () => {
+      const transport = new FakeTransport();
+      transport.threadReadData = appServerThread({ model: "child-model", reasoningEffort: "high" });
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      await client.connect();
+      try {
+        await expect(client.readThread("thread-1")).resolves.toMatchObject({ model: "child-model", reasoningEffort: "high" });
+        transport.threadReadData = appServerThread({ model: null, reasoningEffort: null });
+        await expect(client.readThread("thread-1")).resolves.toMatchObject({ model: null, reasoningEffort: null });
+      } finally { await client.close(); }
+    });
+
+    it.each([{ model: 42 }, { reasoningEffort: {} }, { model: "" }])("rejects malformed model configuration %j", async (invalid) => {
+      const transport = new FakeTransport();
+      transport.threadReadData = appServerThread(invalid);
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      await client.connect();
+      try { await expect(client.readThread("thread-1")).rejects.toThrow("Codex Thread 响应缺少有效"); }
+      finally { await client.close(); }
+    });
+
+    it("passes metadata-read cancellation to the RPC and avoids sending an aborted request", async () => {
+      const transport = new FakeTransport();
+      const rpc = new JsonRpcClient(transport);
+      const client = new CodexAppServerClient(rpc, { sandbox: "read-only" });
+      await client.connect();
+      const request = vi.spyOn(rpc, "request");
+      const controller = new AbortController();
+      controller.abort(new Error("metadata read cancelled"));
+      try {
+        await expect(client.readThread("thread-1", controller.signal)).rejects.toThrow("metadata read cancelled");
+        expect(request).toHaveBeenCalledWith({ method: "thread/read", params: { threadId: "thread-1", includeTurns: false } },
+          { retryOverload: true, signal: controller.signal });
+        expect(transport.sent.some((message) => message.method === "thread/read")).toBe(false);
+      } finally { await client.close(); }
+    });
+
     it("lists spawned descendants across directories with explicit sources and archive state", async () => {
       const transport = new FakeTransport();
       transport.threadListData = [appServerThread({ parentThreadId: "parent", cwd: "/other" })];

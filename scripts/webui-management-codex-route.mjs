@@ -1,4 +1,5 @@
 import { configActivationResult } from "./config-activation-result.mjs";
+import { webuiLogger } from "./webui-logger.mjs";
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
 import {
   codexManagementError,
@@ -104,7 +105,7 @@ export async function routeCodexSettingsManagement({
     try {
       current = await state.loadCodexSettings({ environment });
     } catch (error) {
-      console.error("App Server 用户设置已写入，但新修订读取失败", error);
+      webuiLogger.warn({ module: "settings", event: "settings.readback_failed", err: error }, "App Server 用户设置已写入，但新修订读取失败");
     }
     let auditStatus = "recorded";
     try {
@@ -121,7 +122,7 @@ export async function routeCodexSettingsManagement({
       });
     } catch (error) {
       auditStatus = "degraded";
-      console.error("App Server 用户设置已写入，但审计记录失败", error);
+      webuiLogger.error({ module: "audit", event: "settings.audit_failed", err: error }, "App Server 用户设置已写入，但审计记录失败");
     }
     sendManagementJson(response, 200, {
       revision: current?.version ?? null,

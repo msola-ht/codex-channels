@@ -1,6 +1,7 @@
 import { serviceCommandTarget } from "../runtime/service-targets.mjs";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { webuiLogger } from "./webui-logger.mjs";
 
 import { isPrunableMetricsProviderId } from "./metrics-command-options.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
@@ -241,7 +242,7 @@ export class WebuiManagementTaskRunner {
     try {
       this.#onEvent({ ...task.auditMetadata, task: publicTask(task), phase: state, resultCode, recovery });
     } catch (error) {
-      console.error("管理任务终态审计失败", error);
+      webuiLogger.error({ module: "audit", event: "task.terminal_audit_failed", taskId: task.id, err: error }, "管理任务终态审计失败");
     }
   }
 

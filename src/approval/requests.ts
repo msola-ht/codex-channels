@@ -1,5 +1,11 @@
 export type ServerRequestId = string | number;
 
+export interface FileApprovalChange {
+  path: string;
+  kind: "add" | "delete" | "update";
+  movePath?: string;
+}
+
 export type ExecPolicyAmendment = string[];
 
 export interface NetworkApprovalContext {
@@ -93,6 +99,8 @@ export type ApprovalRequest =
       turnId: string;
       itemId: string;
       reason: string | null;
+      /** Null means the observed file list was invalid or exceeded safe bounds. */
+      changes?: FileApprovalChange[] | null;
     })
   | (BaseApprovalRequest & {
       type: "permissions";

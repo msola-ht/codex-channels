@@ -15,7 +15,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   不加载 SQLite 实现；其他业务模块仍通过模块根入口访问完整能力。
 - `logger.ts`：根据配置创建 Pino Logger，并对 Token、App Secret、Authorization、Cookie、密码等
   字段进行脱敏；`err` 和进程边界复用 `safeErrorMetadata`，只保留受约束的异常类型和机器错误码，
-  不保留 message、stack 或附加响应对象。
+  不保留 message、stack 或附加响应对象。`createLogger` 默认绑定 Gateway 服务，可显式选择 WebUI/Relay 服务及模块；子 Logger 继承脱敏规则，供服务宿主复用。
 - `request-metrics.ts`：定义与 Provider 实现无关的单次模型请求指标、内部查询结果，以及写入、普通
   请求查询、Thread/Subagent 查询、Quota/Account Snapshot 四类窄存储端口；组合接口只供同一
   SQLite 实现声明完整能力，各消费方按实际用途依赖窄端口。
@@ -79,8 +79,12 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   Provider、模型和思考等级取匹配范围内最后一条记录，不混入范围外的最新设置。父 Turn 任务窄查询由
   `threadTurnTaskSummary()` 提供，子代理完成卡片通过 `threadTurnSummary()` 精确读取官方终态对应
   Turn，再按需合并该 Turn 的子任务；`threadList()` 与 `threadTurnSummaries()` 供
-  `codexc metrics threads` 和 `turns` 导出复用。时间范围聚合覆盖指标库全部保留记录，
-  可按全局、提供商或“提供商 + 模型”分组；支持 `today`、`yesterday`、`24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围，最多
+  `codexc metrics threads` 和 `turns` 导出复用。
+  `subagents()` 从全部已登记关系读取各层子代理，`threadSubagents()` 限定为目标 Thread 的直接子代理；两者均包括尚无请求的代理，聚合各自全部保留请求的模型、提供商、轮次、Token 与缓存指标，在数据库内按首次请求或最后记录排序后分页；会话列表的
+  `directSubagentCount` 同样只计直接子级，不随请求筛选变化，不把关系导航混入指标聚合。
+  WebUI 顶层列表通过 `mainThreadsOnly` 在汇总和分页前排除已登记子代理；CLI 导出与控制台仍查询全部会话。
+  会话列表的 `sessionTiming` 批量读取当前页各会话全部自身保留轮次的官方耗时，保留缺失轮数与历史完整性，不受请求筛选影响、不叠加后代。
+  时间范围聚合覆盖指标库全部保留记录，可按全局、提供商或“提供商 + 模型”分组；支持 `today`、`yesterday`、`24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围，最多
   返回请求量最高的 20 组。OpenAI 请求还可保存统计代理归一化的周额度定点快照与账户套餐等级；
   同一重置周期内
   从首个基线开始累计请求，只在后续快照正向增长时形成加权估算区间，重置或倒退会断开区间。

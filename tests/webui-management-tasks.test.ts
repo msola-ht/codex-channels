@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { normalizeTaskInput, WebuiManagementTaskRunner } from "../scripts/webui-management-tasks.mjs";
+// @ts-expect-error JavaScript service logger intentionally has no declaration file.
+import { webuiLogger } from "../scripts/webui-logger.mjs";
 
 describe("WebUI management tasks", () => {
   it("notifies only the owner for queued, running and failed tasks without audit metadata", async () => {
@@ -41,7 +43,7 @@ describe("WebUI management tasks", () => {
   });
 
   it("notifies queued cancellation even when terminal audit fails", async () => {
-    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const log = vi.spyOn(webuiLogger, "error").mockImplementation(() => undefined);
     const runner = new WebuiManagementTaskRunner({ onEvent: () => { throw new Error("audit unavailable"); } });
     const controller = new AbortController(), events: string[] = [];
     const watch = runner.watch("a", controller.signal, () => events.push(runner.list("a").at(-1)?.state ?? "empty"));
@@ -51,6 +53,7 @@ describe("WebUI management tasks", () => {
       await new Promise<void>(resolve => setImmediate(resolve));
       expect(events).toEqual(["empty", "queued", "cancelled"]);
       expect(log).toHaveBeenCalledOnce();
+      expect(log).toHaveBeenCalledWith(expect.objectContaining({ module: "audit", event: "task.terminal_audit_failed", taskId: task.id }), "管理任务终态审计失败");
     } finally { controller.abort(); await watch; log.mockRestore(); }
   });
   it("accepts only the documented service and maintenance actions", () => {

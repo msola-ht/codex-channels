@@ -39,6 +39,11 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
   requireString(thread.preview, "preview");
   requireString(thread.cwd, "cwd");
   if (thread.parentThreadId != null) requireString(thread.parentThreadId, "parentThreadId");
+  if (thread.model != null) requireString(thread.model, "model");
+  if (thread.reasoningEffort != null) requireString(thread.reasoningEffort, "reasoningEffort");
+  if (thread.model?.trim() === "" || thread.reasoningEffort?.trim() === "") {
+    throw new Error("Codex Thread 响应缺少有效模型设置");
+  }
   if (thread.name !== null) {
     requireString(thread.name, "name");
   }
@@ -58,6 +63,8 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
     sessionId: thread.sessionId,
     ...(thread.parentThreadId == null ? {} : { parentThreadId: thread.parentThreadId }),
     modelProvider: toThreadModelProvider(thread),
+    ...(thread.model === undefined ? {} : { model: thread.model }),
+    ...(thread.reasoningEffort === undefined ? {} : { reasoningEffort: thread.reasoningEffort }),
     preview: thread.preview,
     name: thread.name,
     isPinned: thread.section?.id === PINNED_THREAD_SECTION_ID,

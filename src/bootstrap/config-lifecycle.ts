@@ -53,7 +53,7 @@ export async function runGatewayProcess(): Promise<void> {
   await gatewayOwner.start();
   const eventQueuePath = configEventQueuePath(dirname(runtime.configPath));
   const watchedPaths = [runtime.configPath, eventQueuePath];
-  const logger = createLogger(config);
+  const logger = createLogger(config, { service: "gateway", module: "lifecycle" });
   let application: GatewayApplication;
   let weixinCredentialChange: (() => Promise<"changed" | "unchanged" | "unavailable">) | undefined;
   try {

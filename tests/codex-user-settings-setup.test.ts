@@ -4,6 +4,24 @@ import { runCodexUserSettingsSetup } from "../scripts/codex-user-settings-setup.
 import type { CodexUserSettingsState } from "../scripts/codex-user-settings-management.mjs";
 
 describe("Codex user settings setup", () => {
+  it.each(["subagents", "back"])("opens optional subagent setup only on explicit selection: %s", async (section) => {
+    const subagentsSetup = vi.fn(async () => ({ action: "back" as const }));
+    const updateSetting = vi.fn();
+    const environment = {};
+    const output = { write: () => undefined };
+    const prompts = { select: vi.fn(async () => section), confirm: vi.fn(), isCancel: () => false };
+    await runCodexUserSettingsSetup({
+      environment, output, prompts, subagentsSetup, updateSetting,
+      loadSettings: async () => settingsState(),
+    });
+    if (section === "subagents") {
+      expect(subagentsSetup).toHaveBeenCalledWith({ environment, output, prompts, createClient: undefined });
+    } else {
+      expect(subagentsSetup).not.toHaveBeenCalled();
+    }
+    expect(updateSetting).not.toHaveBeenCalled();
+  });
+
   it.each([
     { type: "number", invalid: ["30s", "-1", "0", "1e400", "false"], accepted: "30", value: 30 },
     { type: "integer", invalid: ["1.5", "0", "9007199254740992"], accepted: "2", value: 2 },
@@ -105,6 +123,7 @@ describe("Codex user settings setup", () => {
 
   it("writes every user default after one final confirmation", async () => {
     const output: string[] = [];
+    const subagentsSetup = vi.fn();
     const updateSetting = vi.fn(async () => ({
       kind: "all" as const,
       previousVersion: "version-1",
@@ -130,9 +149,11 @@ describe("Codex user settings setup", () => {
       prompts,
       loadSettings: async () => settingsState(),
       updateSetting,
+      subagentsSetup,
     });
 
     expect(prompts.confirm).toHaveBeenCalledOnce();
+    expect(subagentsSetup).not.toHaveBeenCalled();
     expect(updateSetting).toHaveBeenCalledWith({
       kind: "all",
       model: "gpt-test",

@@ -363,7 +363,7 @@ describe("Feishu outbox thinking and runtime display", () => {
     await outbox.close();
 
     expect(texts).toEqual([]);
-    expect(markdownCards).toEqual(["## 子代理开始 · review_task"]);
+    expect(markdownCards).toEqual(["## 子代理开始 · review_task\n\n- 提供商：未提供\n- 模型设置：未提供\n- 思考强度：未提供"]);
   });
 
   it("sends the subagent follow-up notice as a Markdown card", async () => {
@@ -395,7 +395,7 @@ describe("Feishu outbox thinking and runtime display", () => {
     await outbox.close();
 
     expect(texts).toEqual([]);
-    expect(markdownCards).toEqual(["## 子代理继续 · review_task"]);
+    expect(markdownCards).toEqual(["## 子代理继续 · review_task\n\n- 提供商：未提供\n- 模型设置：未提供\n- 思考强度：未提供"]);
   });
 
   it("renders runtime status updates as Markdown cards", async () => {

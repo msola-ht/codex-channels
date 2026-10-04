@@ -4,15 +4,11 @@ import { ErrorsTable } from "@/components/requests/errors-table"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { QueryFilters } from "@/components/metrics/query-filters"
-import { StatCard } from "@/components/metrics/stat-card"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { useErrors } from "@/hooks/use-errors"
 import { useTranslation } from "@/hooks/use-translation"
-import { formatCount, formatSuccessRate } from "@/lib/format"
 import { translateApiError } from "@/lib/i18n/translate"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
-import { cn } from "cn"
 
 export function ErrorsPage() {
   const { query, update } = useMetricsQuery("30d")
@@ -33,24 +29,6 @@ export function ErrorsPage() {
           <Button variant="outline" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
         </div>
       </div>
-      {error === null && data !== null ? (
-          <div className="relative" aria-busy={loading}>
-            <div className={cn("grid gap-4 sm:grid-cols-2 xl:grid-cols-4", loading && "invisible")} aria-hidden={loading || undefined}>
-              <StatCard
-                value={formatCount(data.errors.requestCount)}
-                description={t("errorList.requestTotal", { count: formatCount(data.errors.unsuccessfulRequestCount) })}
-              />
-              <StatCard
-                value={formatSuccessRate(
-                  data.errors.requestCount,
-                  data.errors.unsuccessfulRequestCount,
-                )}
-                description={t("errorList.successRate", { shown: data.records.length, total: data.total })}
-              />
-            </div>
-            {loading ? <Skeleton className="absolute inset-0" /> : null}
-          </div>
-      ) : null}
       <QueryFilters query={query} onChange={update} showThreadFilters={false} revision={data} />
 
       <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={refreshing} />

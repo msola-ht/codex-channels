@@ -8,7 +8,7 @@ export class PersistentInteractionPort implements InteractionPort {
     private readonly wait: (target: ConversationTarget, signal: AbortSignal) => Promise<void>) {}
 
   async request(target: ConversationTarget, request: InteractionRequest): Promise<InteractionDecision> {
-    if (this.waiting.size >= 100 || this.waiting.has(request.requestId)) return safeInteractionDecision(request);
+    if (request.isCurrent?.() === false || this.waiting.size >= 100 || this.waiting.has(request.requestId)) return safeInteractionDecision(request);
     const controller = new AbortController();
     this.waiting.set(request.requestId, controller);
     const deadline = performance.now() + request.expiresInMs;
@@ -23,9 +23,9 @@ export class PersistentInteractionPort implements InteractionPort {
     try {
       await Promise.race([this.wait(target, controller.signal), cancelled]);
       const remaining = Math.ceil(deadline - performance.now());
-      if (controller.signal.aborted || remaining <= 0) return safeInteractionDecision(request);
+      if (controller.signal.aborted || remaining <= 0 || request.isCurrent?.() === false) return safeInteractionDecision(request);
       const decision = await Promise.race([this.port.request(target, { ...request, expiresInMs: remaining }), cancelled]);
-      return controller.signal.aborted || performance.now() >= deadline ? safeInteractionDecision(request) : decision;
+      return controller.signal.aborted || performance.now() >= deadline || request.isCurrent?.() === false ? safeInteractionDecision(request) : decision;
     } catch {
       return safeInteractionDecision(request);
     } finally {

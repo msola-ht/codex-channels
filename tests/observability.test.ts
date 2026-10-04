@@ -6,6 +6,14 @@ import {
 } from "../src/observability/index.js";
 
 describe("createLogger", () => {
+  it("carries service and module context through child loggers without losing redaction", () => {
+    const record = captureLog(() => {
+      createLogger({ logLevel: "info" }, { service: "webui", module: "http" })
+        .child({ event: "request.failed" }).error({ err: new Error("PRIVATE"), token: "PRIVATE" }, "请求处理失败");
+    });
+    expect(record).toMatchObject({ service: "webui", module: "http", event: "request.failed", level: 50, token: "[REDACTED]", err: { type: "Error" } });
+    expect(JSON.stringify(record)).not.toContain("PRIVATE");
+  });
   it("summarizes unknown process errors without exposing their contents", () => {
     const error = Object.assign(new Error("Authorization Bearer secret"), {
       name: "opaque-secret",

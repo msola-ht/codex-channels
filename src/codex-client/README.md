@@ -26,7 +26,7 @@
   并发关闭及重连前清理共用 Transport 关闭任务，旧失败不清理替代连接。通过 `extensions` 显式声明已实现的 `openai/form`。
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned、运行状态、更新时间/最近活跃时间、来源（含稳定的
   `automation` 任务来源）、运行 Turn、
-  上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
+  上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；Thread 的当前模型及思考设置供子代理开始和继续通知只读展示，不等同实际请求遥测；
   恢复结果保留响应的实际 Default/Plan 模式、目录和权限，以及与请求配置的一致性，供 Router 在绑定前校验；
   缺少必需字段时失败关闭。`parentThreadId` 只映射官方派生关系；`listThreadDescendants` 以明确祖先查询所有来源及指定归档状态，不用父目录截断后代，供本机归档预览和核验。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
@@ -85,6 +85,9 @@
   产物路径，不把 `imageView` 当作可外发产物。
   `cua_repl.js` / `js_reset` 归为 MCP 的 `computerUse` 操作，`js` 只提取参数中的操作标题并
   脱敏限长，不把执行代码或原始结果带入稳定事件。
+- `file-change-approval-context.ts`：按每个 Client 的 Thread、Turn、Item 精确关联批准前的
+  文件变更通知，仅有界保留路径、操作类型与移动目标，不保存 Diff；Item/Turn 完成、Thread
+  失效、取消订阅、断线与关闭时清理。缺失明细不借用其他 Item，Provider 路由同时校验请求来源。
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类
   Server Request 解码为 Approval 稳定请求；命令审批只接受缺省或明确的 `kind=command`，
   `writeStdin` 解码为独立 stdin 审批，要求完整输入、目录、回调身份和仅 accept/cancel 决策；未知种类安全拒绝；其中按固定版本的空对象 Schema 与
@@ -124,6 +127,8 @@
   `listModelsForProvider` 通过指定实例和既有活动边界读取模型目录，供独立 RS 选择及精确可用性检查共用；不回退主实例目录。
 - `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
+  Server Request 的物理来源与已知 Thread Provider 冲突时拒绝；未知来源关联只作为读取路由提示，
+  后续官方 Thread 快照必须匹配所读实例及请求的 Thread ID，才可用于子代理审批归属。
   第三方实例在查询对应实时模型目录、首次选择模型或恢复其 Thread 时通过私有监管入口按需启动并连接，未使用的
   Provider 不增加 App Server 子进程；MCP 配置刷新只尝试当前已连接实例并传播任一失败，单 Provider
   重连只恢复该侧 Thread。组合根为所有 Provider 请求注入活动保护：统一空闲管理器在 Gateway 没有前后台

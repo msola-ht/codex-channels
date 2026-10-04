@@ -45,6 +45,20 @@ export interface ThreadListOptions {
   sortDirection?: "asc" | "desc";
 }
 
+export interface ApprovalTarget {
+  target: ConversationTarget;
+  ownerThreadId: string;
+  relatedThreadIds: readonly string[];
+  isCurrent(): boolean;
+}
+
+interface ApprovalResolution {
+  bindings: ReadonlyMap<string, ConversationBinding>;
+  workspaceCwds: ReadonlyMap<string, string>;
+  changedThreads: Set<string>;
+  overflowed: boolean;
+}
+
 const maximumBackgroundThreadsPerConversation = 3;
 class SupersededRestoreError extends Error {}
 
@@ -52,6 +66,7 @@ export class SessionRouter {
   private readonly forceNew = new Set<string>();
   private readonly backgroundStartQueues = new Map<string, Promise<void>>();
   private readonly threadLifecycleQueues = new Map<string, Promise<void>>();
+  private readonly approvalResolutions = new Set<ApprovalResolution>();
   // 模型设置保留到进程结束：thread/list 不返回 model，
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
@@ -111,6 +126,81 @@ export class SessionRouter {
 
   targetForThread(threadId: string): ConversationTarget | undefined {
     return this.bindings.getByThread(threadId)?.target;
+  }
+
+  /** Resolve only official spawned ancestry, without binding the child Thread. */
+  async resolveApprovalTarget(
+    threadId: string,
+    isPending: () => boolean = () => true,
+    signal?: AbortSignal,
+  ): Promise<ApprovalTarget | undefined> {
+    if (signal?.aborted || !isPending() || this.approvalResolutions.size >= 100) return undefined;
+    const initialBindings = new Map(this.bindings.list().map(binding => [binding.threadId, {
+      ...binding, target: { ...binding.target },
+    }]));
+    const visited = new Set<string>();
+    const initialWorkspaceCwds = new Map(this.workspaces.list().map(workspace => [workspace.id, workspace.cwd]));
+    const resolution: ApprovalResolution = {
+      bindings: initialBindings, workspaceCwds: initialWorkspaceCwds, changedThreads: new Set(), overflowed: false,
+    };
+    this.approvalResolutions.add(resolution);
+    const release = (): void => { this.approvalResolutions.delete(resolution); };
+    signal?.addEventListener("abort", release, { once: true });
+    const relatedThreadIds: string[] = [];
+    let expectedCwd: string | undefined;
+    let expectedProvider: string | undefined;
+    let currentId: string | null | undefined = threadId;
+    let retainObserver = false;
+    try {
+      // A malformed or unexpectedly deep tree must not create unbounded RPC work.
+      for (let depth = 0; currentId && depth < 16; depth += 1) {
+        if (!isPending() || signal?.aborted || resolution.overflowed || visited.has(currentId)) return undefined;
+        visited.add(currentId);
+        relatedThreadIds.push(currentId);
+        const snapshot = await this.codex.readThread(currentId, signal);
+        if (!isPending() || signal?.aborted || resolution.overflowed
+          || relatedThreadIds.some(id => resolution.changedThreads.has(id))) return undefined;
+        if (snapshot.id !== currentId || snapshot.source === "automation" || !snapshot.modelProvider
+          || !this.isProviderSelectable(snapshot.modelProvider)
+          || (expectedCwd !== undefined && snapshot.cwd !== expectedCwd)
+          || (expectedProvider !== undefined && snapshot.modelProvider !== expectedProvider)) return undefined;
+        expectedCwd = snapshot.cwd;
+        expectedProvider = snapshot.modelProvider;
+        const binding = initialBindings.get(currentId);
+        const currentBinding = this.bindings.getByThread(currentId);
+        if (!binding && currentBinding) return undefined;
+        if (binding) {
+          const workspace = this.workspaces.get(binding.workspaceId);
+          if (!workspace || workspace.cwd !== snapshot.cwd || workspace.cwd !== initialWorkspaceCwds.get(binding.workspaceId)) return undefined;
+          const ownerThreadId = currentId;
+          const provider = snapshot.modelProvider;
+          const cwd = workspace.cwd;
+          const isCurrent = (): boolean => {
+            const currentProvider = this.modelSettingsByThread.get(ownerThreadId)?.modelProvider;
+            return !signal?.aborted && !resolution.overflowed
+              && !relatedThreadIds.some(id => resolution.changedThreads.has(id))
+              && this.sameBinding(binding, this.bindings.getByThread(ownerThreadId))
+              && this.workspaces.get(binding.workspaceId)?.cwd === cwd
+              && this.isProviderSelectable(provider)
+              && (currentProvider === undefined || currentProvider === provider)
+              && relatedThreadIds.every(id => id === ownerThreadId || !this.bindings.getByThread(id));
+          };
+          if (!isCurrent()) return undefined;
+          // The coordinator owns the signal through routing, queueing and the final response.
+          // Keep observing across the promise handoff so an unbind/rebind cannot revive this route.
+          retainObserver = signal !== undefined;
+          return { target: binding.target, ownerThreadId, relatedThreadIds, isCurrent };
+        }
+        // forked_from_id is intentionally absent from the stable routing snapshot.
+        currentId = snapshot.parentThreadId;
+      }
+      return undefined;
+    } finally {
+      if (!retainObserver) {
+        release();
+        signal?.removeEventListener("abort", release);
+      }
+    }
   }
 
   workspaceForThread(threadId: string): RoutedWorkspace | undefined {
@@ -249,6 +339,7 @@ export class SessionRouter {
           } else {
             this.bindings.bind(restoredBinding);
           }
+          if (!this.sameBinding(binding, restoredBinding)) this.notifyBindingsChanged();
         } catch (error) {
           if (error instanceof SupersededRestoreError) return undefined;
           const normalized = error instanceof Error ? error : new Error(String(error));
@@ -264,7 +355,7 @@ export class SessionRouter {
             if (!this.bindings.get(binding.target)) {
               this.bindings.selectWorkspace(binding.target, workspace.id);
             }
-            this.onBindingsChanged?.();
+            this.notifyBindingsChanged();
           }
           return {
             binding,
@@ -286,6 +377,7 @@ export class SessionRouter {
           try {
             await this.codex.unsubscribeThread(restoredBinding.threadId);
             this.bindings.removeThread(restoredBinding.threadId);
+            this.notifyBindingsChanged();
           } catch (error) {
             return {
               binding: restoredBinding,
@@ -357,6 +449,7 @@ export class SessionRouter {
           const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
           this.bindings.bind(binding);
           this.clearForceNew(target, Date.now());
+          this.notifyBindingsChanged();
           return binding;
         });
       }
@@ -378,6 +471,7 @@ export class SessionRouter {
     const binding = { target, workspaceId: workspace.id, threadId: started.thread.id, sessionId: started.thread.sessionId };
     this.bindings.bind(binding);
     this.clearForceNew(target, Date.now());
+    this.notifyBindingsChanged();
     return binding;
   }
 
@@ -479,6 +573,7 @@ export class SessionRouter {
       session.thread.id,
       session.contextCompactionItemIds,
     );
+    this.notifyBindingsChanged();
     return { binding, session };
   }
 
@@ -562,7 +657,7 @@ export class SessionRouter {
     const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
     this.clearForceNew(target, Date.now());
     transition?.restored(binding, resumed.thread);
-    this.onBindingsChanged?.();
+    this.notifyBindingsChanged();
     return binding;
   }
 
@@ -605,7 +700,7 @@ export class SessionRouter {
     this.bindings.removeThread(threadId);
     this.contextCompactionItemIdsByThread.delete(threadId);
     if (wasForeground) this.markForceNew(binding.target, Date.now());
-    this.onBindingsChanged?.();
+    this.notifyBindingsChanged();
   }
 
   private async rejectIncompatibleThread(
@@ -711,6 +806,7 @@ export class SessionRouter {
     }
     this.markForceNew(owner.target, Date.now());
     this.clearForceNew(target, Date.now());
+    this.notifyBindingsChanged();
     return transfer;
   }
 
@@ -737,7 +833,7 @@ export class SessionRouter {
       await this.codex.unsubscribeThread(threadId);
       if (binding) this.bindings.removeThread(threadId);
       this.contextCompactionItemIdsByThread.delete(threadId);
-      this.onBindingsChanged?.();
+      this.notifyBindingsChanged();
       return binding?.target;
     });
   }
@@ -803,6 +899,7 @@ export class SessionRouter {
     };
     this.bindings.bind(binding);
     this.clearForceNew(target, Date.now());
+    this.notifyBindingsChanged();
     return binding;
   }
 
@@ -843,7 +940,7 @@ export class SessionRouter {
     this.namesByThread.delete(threadId);
     if (binding) {
       this.bindings.removeThread(threadId);
-      this.onBindingsChanged?.();
+      this.notifyBindingsChanged();
       return binding.target;
     }
     return undefined;
@@ -868,7 +965,7 @@ export class SessionRouter {
       await this.codex.unsubscribeThread(current.threadId);
       this.contextCompactionItemIdsByThread.delete(current.threadId);
       this.bindings.unbind(target, preference);
-      this.onBindingsChanged?.();
+      this.notifyBindingsChanged();
     } else {
       this.bindings.setModelPreference(target, preference);
     }
@@ -893,6 +990,34 @@ export class SessionRouter {
     return current !== undefined && current.threadId === expected.threadId
       && current.sessionId === expected.sessionId && current.workspaceId === expected.workspaceId
       && this.key(current.target) === this.key(expected.target);
+  }
+
+  private notifyBindingsChanged(): void {
+    if (this.approvalResolutions.size > 0) {
+      const currentBindings = new Map(this.bindings.list().map(binding => [binding.threadId, binding]));
+      for (const resolution of this.approvalResolutions) {
+        const changed = (id: string): void => {
+          resolution.changedThreads.add(id);
+          if (resolution.changedThreads.size > 1_024) {
+            resolution.overflowed = true;
+            resolution.changedThreads.clear();
+            this.approvalResolutions.delete(resolution);
+          }
+        };
+        for (const [id, binding] of resolution.bindings) {
+          if (!this.sameBinding(binding, currentBindings.get(id))
+            || this.workspaces.get(binding.workspaceId)?.cwd !== resolution.workspaceCwds.get(binding.workspaceId)) changed(id);
+          if (resolution.overflowed) break;
+        }
+        if (resolution.overflowed) continue;
+        for (const [id, binding] of currentBindings) {
+          const original = resolution.bindings.get(id);
+          if (!original || !this.sameBinding(original, binding)) changed(id);
+          if (resolution.overflowed) break;
+        }
+      }
+    }
+    this.onBindingsChanged?.();
   }
 
   private assertLifecycleCurrent(target: ConversationTarget, expected: ConversationBinding | undefined): void {

@@ -33,7 +33,10 @@ describe("Feishu output renderer", () => {
       turnId: "parent-turn",
       agentThreadId: "agent-thread-secret",
       agentPath: "/root/review_task",
-    })).toBe("## 子代理开始 · review_task");
+      modelProvider: "openai",
+      model: "gpt-6.1-sol",
+      reasoningEffort: "high",
+    })).toBe("## 子代理开始 · review_task\n\n- 提供商：OpenAI 官方\n- 模型设置：gpt-6.1-sol\n- 思考强度：high");
   });
 
   it("renders the thinking status with elapsed time", () => {

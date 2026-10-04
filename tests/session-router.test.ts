@@ -71,6 +71,218 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
 }
 
 describe("SessionRouter", () => {
+  it("keeps binding revocation across the resolver promise handoff until its owner aborts", async () => {
+    const store = new MemoryBindingStore();
+    const owner = { target, workspaceId: "main", threadId: "parent", sessionId: "parent" };
+    store.bind(owner);
+    const controller = new AbortController();
+    const router = new SessionRouter(threadPort({ readThread: async id => {
+      queueMicrotask(() => queueMicrotask(() => {
+        router.forgetThread("parent");
+        store.bind(owner);
+      }));
+      return thread(id, { type: "active" });
+    } }), store, registry);
+    try {
+      const route = await router.resolveApprovalTarget("parent", () => true, controller.signal);
+      expect(route).toBeDefined();
+      expect(route?.isCurrent()).toBe(false);
+    } finally { controller.abort(); }
+  });
+
+  it("releases cancelled resolution observers without waiting for readThread", async () => {
+    const store = new MemoryBindingStore();
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const readThread = vi.fn(async id => { await blocked; return thread(id, { type: "active" }); });
+    const router = new SessionRouter(threadPort({ readThread }), store, registry);
+    const reads = Array.from({ length: 101 }, () => {
+      const controller = new AbortController();
+      const reading = router.resolveApprovalTarget("child", () => true, controller.signal);
+      controller.abort();
+      return reading;
+    });
+    expect(readThread).toHaveBeenCalledTimes(101);
+    release();
+    await expect(Promise.all(reads)).resolves.toEqual(Array(101).fill(undefined));
+  });
+
+  it("cancels the underlying approval ancestry read without reading further ancestors", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "parent", sessionId: "parent" });
+    const controller = new AbortController();
+    const cancellation = new Error("approval cancelled");
+    const onReadCancelled = vi.fn();
+    const readThread = vi.fn((id: string, signal?: AbortSignal): Promise<ThreadSnapshot> => {
+      if (id !== "child") return Promise.resolve(thread(id, { type: "active" }));
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          onReadCancelled();
+          reject(signal.reason);
+        }, { once: true });
+      });
+    });
+    const router = new SessionRouter(threadPort({ readThread }), store, registry);
+    const resolving = router.resolveApprovalTarget("child", () => true, controller.signal);
+    expect(readThread).toHaveBeenCalledExactlyOnceWith("child", controller.signal);
+    const cancelled = expect(resolving).rejects.toBe(cancellation);
+    controller.abort(cancellation);
+    await cancelled;
+    expect(onReadCancelled).toHaveBeenCalledOnce();
+    expect(readThread).toHaveBeenCalledExactlyOnceWith("child", controller.signal);
+  });
+
+  it.each(["unrelated", "parent", "child", "middle"])("remembers transient %s binding changes while ancestry is loading", async change => {
+    const store = new MemoryBindingStore();
+    const owner = { target, workspaceId: "main", threadId: "parent", sessionId: "parent" };
+    store.bind(owner);
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    let firstRead = true;
+    const snapshot = (id: string) => ({ ...thread(id, { type: "idle" }), parentThreadId: id === "child" ? "middle" : id === "middle" ? "parent" : null });
+    const router = new SessionRouter(threadPort({
+      readThread: async id => {
+        if (firstRead) { firstRead = false; await blocked; }
+        return snapshot(id);
+      },
+      resumeThread: async id => session(snapshot(id)),
+      listThreads: async () => [],
+      startThread: async () => session(snapshot("unrelated")),
+      unsubscribeThread: async () => {},
+    }), store, registry);
+    const resolving = router.resolveApprovalTarget("child");
+    if (change === "unrelated") await router.ensure({ ...target, conversationId: "other" });
+    else if (change === "parent") {
+      router.forgetThread("parent");
+      await router.resume(target, "parent");
+    } else {
+      const temporaryTarget = { ...target, conversationId: "temporary" };
+      await router.resume(temporaryTarget, change);
+      await router.detach(temporaryTarget);
+    }
+    release();
+    if (change === "unrelated") expect(await resolving).toMatchObject({ target, ownerThreadId: "parent" });
+    else expect(await resolving).toBeUndefined();
+  });
+
+  it("routes nested subagent approvals to the nearest bound ancestor without binding descendants", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "parent", sessionId: "session" });
+    const readThread = vi.fn(async (id: string) => ({
+      ...thread(id, { type: "active" }), parentThreadId: id === "child" ? "middle" : id === "middle" ? "parent" : null,
+    }));
+    const router = new SessionRouter(threadPort({ readThread }), store, registry);
+    const route = await router.resolveApprovalTarget("child");
+    expect(route).toMatchObject({ target, ownerThreadId: "parent", relatedThreadIds: ["child", "middle", "parent"] });
+    expect(route?.isCurrent()).toBe(true);
+    expect(router.targetForThread("child")).toBeUndefined();
+    expect(store.list()).toHaveLength(1);
+    expect(readThread.mock.calls.map(([id]) => id)).toEqual(["child", "middle", "parent"]);
+    const nearerTarget = { ...target, conversationId: "nearer" };
+    store.bind({ target: nearerTarget, workspaceId: "main", threadId: "middle", sessionId: "session" });
+    expect(route?.isCurrent()).toBe(false);
+    expect(await router.resolveApprovalTarget("child")).toMatchObject({ target: nearerTarget, ownerThreadId: "middle", relatedThreadIds: ["child", "middle"] });
+  });
+
+  it.each(["missing", "fork", "cycle", "depth", "cwd", "provider", "wrong-id", "workspace", "cached-provider", "automation-ancestor", "automation-child"])(
+    "rejects unproven subagent ancestry: %s", async (failure) => {
+      const store = new MemoryBindingStore();
+      store.bind({ target, workspaceId: failure === "workspace" ? "other" : "main", threadId: "parent", sessionId: "session" });
+      const readThread = vi.fn(async (id: string): Promise<ThreadSnapshot> => {
+        if (failure === "missing") throw new Error("not found");
+        return {
+          ...thread(id, { type: "active" }),
+          id: failure === "wrong-id" ? "different" : id,
+          parentThreadId: id === "parent" ? null : failure === "fork" ? null : failure === "cycle" ? id : failure === "depth" ? `${id}-next` : "parent",
+          cwd: failure === "cwd" && id === "child" ? "/other" : "/workspace",
+          modelProvider: failure === "provider" && id === "child" ? "deepseek" : "openai",
+          source: (failure === "automation-ancestor" && id === "parent") || (failure === "automation-child" && id === "child") ? "automation" : "cli",
+        };
+      });
+      const router = new SessionRouter(threadPort({ readThread }), store, registry);
+      if (failure === "cached-provider") router.updateModelSettings("parent", { model: "test", modelProvider: "deepseek", effort: null, serviceTier: null, collaborationMode: "default" });
+      if (failure === "missing") await expect(router.resolveApprovalTarget("child")).rejects.toThrow("not found");
+      else expect(await router.resolveApprovalTarget("child")).toBeUndefined();
+      expect(readThread.mock.calls.length).toBeLessThanOrEqual(16);
+    },
+  );
+
+  it.each(["unbind", "takeover", "bind-child", "bind-middle", "provider", "workspace"])(
+    "invalidates resolved ancestry after %s", async (change) => {
+      const store = new MemoryBindingStore();
+      const workspaces = new WorkspaceRegistry([{ id: "main", name: "Main", cwd: "/workspace" }], "main");
+      const owner = { target, workspaceId: "main", threadId: "parent", sessionId: "parent" };
+      store.bind(owner);
+      const router = new SessionRouter(threadPort({ readThread: async id => ({ ...thread(id, { type: "active" }), parentThreadId: id === "child" ? "middle" : id === "middle" ? "parent" : null }) }), store, workspaces);
+      const route = await router.resolveApprovalTarget("child");
+      expect(route?.isCurrent()).toBe(true);
+      if (change === "unbind" || change === "takeover") store.unbind(target);
+      if (change === "takeover") store.bind({ ...owner, target: { ...target, conversationId: "other" } });
+      if (change === "bind-child" || change === "bind-middle") store.bind({ ...owner, threadId: change === "bind-child" ? "child" : "middle", target: { ...target, conversationId: "other" } });
+      if (change === "provider") router.updateModelSettings("parent", { model: "test", modelProvider: "deepseek", effort: null, serviceTier: null, collaborationMode: "default" });
+      if (change === "workspace") workspaces.replace([{ id: "main", name: "Main", cwd: "/other" }], "main");
+      expect(route?.isCurrent()).toBe(false);
+    },
+  );
+
+  it.each(["new-binding", "takeover", "child-binding", "cancelled"])(
+    "does not acquire approval ownership during an outstanding read: %s", async (change) => {
+      const store = new MemoryBindingStore();
+      const owner = { target, workspaceId: "main", threadId: "parent", sessionId: "parent" };
+      if (change !== "new-binding") store.bind(owner);
+      let release!: () => void;
+      let active = true;
+      const blocked = new Promise<void>(resolve => { release = resolve; });
+      const readThread = vi.fn(async (id: string) => {
+        if (id === "child") await blocked;
+        return { ...thread(id, { type: "active" }), parentThreadId: id === "child" ? "parent" : null };
+      });
+      const router = new SessionRouter(threadPort({ readThread }), store, registry);
+      const resolving = router.resolveApprovalTarget("child", () => active);
+      if (change === "new-binding") store.bind(owner);
+      if (change === "takeover") { store.unbind(target); store.bind({ ...owner, target: { ...target, conversationId: "other" } }); }
+      if (change === "child-binding") store.bind({ ...owner, threadId: "child", target: { ...target, conversationId: "other" } });
+      if (change === "cancelled") active = false;
+      release();
+      expect(await resolving).toBeUndefined();
+      if (change === "cancelled") expect(readThread).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("verifies a directly bound Thread through the same official read boundary", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "parent", sessionId: "parent" });
+    const readThread = vi.fn(async (id: string) => thread(id, { type: "active" }));
+    const router = new SessionRouter(threadPort({ readThread }), store, registry);
+    expect(await router.resolveApprovalTarget("parent")).toMatchObject({ target, ownerThreadId: "parent", relatedThreadIds: ["parent"] });
+    expect(readThread).toHaveBeenCalledExactlyOnceWith("parent", undefined);
+    readThread.mockResolvedValue({ ...thread("parent", { type: "active" }), source: "automation" });
+    expect(await router.resolveApprovalTarget("parent")).toBeUndefined();
+  });
+
+  it("signals approval invalidation when ownership transfers after an approval arrived during the read", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "parent", sessionId: "parent" });
+    let release!: () => void;
+    let entered!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const reading = new Promise<void>(resolve => { entered = resolve; });
+    let firstRead = true;
+    const changed = vi.fn();
+    const router = new SessionRouter(threadPort({ readThread: async id => {
+      if (firstRead) { firstRead = false; entered(); await blocked; }
+      return { ...thread(id, { type: "idle" }), parentThreadId: id === "child" ? "parent" : null };
+    } }), store, registry, [], changed);
+    const transfer = router.transferBinding({ ...target, surface: "feishu" }, "parent");
+    await reading;
+    const route = await router.resolveApprovalTarget("child");
+    expect(route?.isCurrent()).toBe(true);
+    changed.mockImplementation(() => { expect(route?.isCurrent()).toBe(false); });
+    release();
+    await transfer;
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
   it.each(["resume", "ensure", "restore"])("recovers authoritative Plan mode through %s", async (entry) => {
     const store = new MemoryBindingStore();
     const historical = thread("history", { type: "idle" });
@@ -919,7 +1131,7 @@ describe("SessionRouter", () => {
     await router.ensure(target);
 
     expect(unsubscribed).toEqual(["new"]);
-    expect(bindingsChanged).toHaveBeenCalledOnce();
+    expect(bindingsChanged).toHaveBeenCalledTimes(3);
   });
 
   it("persists the force-new marker until the next ordinary message creates a Thread", async () => {

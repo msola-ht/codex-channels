@@ -47,6 +47,13 @@ export interface ServerTimeResponse {
   nowMs: number
 }
 
+export type ServiceLogTarget = "gateway" | "app-server" | "webui" | "relay"
+export interface ServiceLogsResponse {
+  target: ServiceLogTarget
+  observedAt: string
+  streams: { source: "journal" | "stdout" | "stderr"; lines: string[]; truncated: boolean; missing: boolean }[]
+}
+
 export interface CompactSummary {
   model: string | null
   hasMixedModels: boolean
@@ -160,6 +167,7 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 
 export interface ThreadListItem {
   cacheUsage: CacheUsage
+  sessionTiming: SessionExecutionTiming
   threadId: string
   provider: string | null
   model: string | null
@@ -167,6 +175,7 @@ export interface ThreadListItem {
   agentPath: string | null
   parentThreadId: string | null
   parentTurnId: string | null
+  directSubagentCount: number
   turnCount: number
   requestCount: number
   inputTokens: number
@@ -180,6 +189,32 @@ export interface ThreadsResponse extends MetricsPageSummary {
   generatedAt: string
   threads: ThreadListItem[]
   turnCount: number
+}
+
+export interface SubagentListItem extends Pick<ThreadListItem,
+  "provider" | "model" | "turnCount" | "requestCount" | "inputTokens" | "outputTokens" | "cacheUsage"
+> {
+  threadId: string
+  parentThreadId: string
+  parentTurnId: string | null
+  agentPath: string
+  recordedAtMs: number
+  directSubagentCount: number
+  firstRequestStartedAtMs: number | null
+  lastRecordedAtMs: number | null
+}
+
+export interface SubagentsResponse {
+  generatedAt: string
+  subagents: SubagentListItem[]
+  total: number
+  offset: number
+  limit: number
+  nextOffset: number | null
+}
+
+export interface ThreadSubagentsResponse extends SubagentsResponse {
+  threadId: string
 }
 
 export interface TurnSummary {
@@ -198,8 +233,14 @@ export interface TurnSummary {
   recordedAtMs?: number
 }
 
+export interface SessionExecutionTiming {
+  knownDurationMs: number | null
+  missingTurnCount: number
+  historyComplete: boolean
+}
+
 export interface ThreadRunResponse {
-  sessionTiming?: { knownDurationMs: number | null; missingTurnCount: number; historyComplete: boolean }
+  sessionTiming?: SessionExecutionTiming
   latestExecution?: { turnId: string; durationMs: number | null } | null
   sessionDurationMs?: number | null
   generatedAt: string

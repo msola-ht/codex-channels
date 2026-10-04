@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { parse } from "smol-toml";
+import { webuiLogger } from "./webui-logger.mjs";
 import { codexHomePath, hasCodexAuthFile } from "../runtime/codex-home.mjs";
 import { readOpenAiSubscription } from "../runtime/openai-subscription.mjs";
 import { readCodexConfigFile } from "../runtime/model-provider-managed-runtime.mjs";
@@ -409,7 +410,7 @@ function recordProviderAudit(state, details, failureMessage) {
     });
     return "recorded";
   } catch (error) {
-    console.error(failureMessage, error);
+    webuiLogger.error({ module: "audit", event: "provider.audit_failed", err: error }, failureMessage);
     return "degraded";
   }
 }

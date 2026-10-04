@@ -8,7 +8,18 @@ import type {
   InteractionDecision,
   InteractionPort,
   InteractionRequest,
+  InteractionRoutingGuard,
 } from "./types.js";
+
+interface RoutingGuardState {
+  threadId: string;
+  ports: Map<string, InteractionPort>;
+  cancelledThreads: Set<string>;
+  cancelled: boolean;
+  targetKey?: string;
+  relatedThreadIds?: readonly string[];
+  cancel(): void;
+}
 
 interface QueuedInteraction {
   target: ConversationTarget;
@@ -34,6 +45,7 @@ export class InteractionRouter implements InteractionPort {
   private readonly unavailablePorts = new Set<string>();
   private readonly queues = new Map<string, ConversationInteractionQueue>();
   private readonly pendingByRequestId = new Map<string, QueuedInteraction>();
+  private readonly routingGuards = new Set<RoutingGuardState>();
 
   constructor(
     private readonly logger?: InteractionAuditLogger,
@@ -59,6 +71,30 @@ export class InteractionRouter implements InteractionPort {
     };
   }
 
+  captureRoutingGuard(threadId: string, cancel: () => void): InteractionRoutingGuard {
+    if (this.routingGuards.size >= this.capacity) {
+      this.cleanup(cancel);
+      return { isCurrent: () => false, release: () => {} };
+    }
+    const guard: RoutingGuardState = {
+      threadId, cancel, cancelled: false, cancelledThreads: new Set(),
+      ports: new Map([...this.ports].filter(([key]) => !this.unavailablePorts.has(key))),
+    };
+    this.routingGuards.add(guard);
+    return {
+      isCurrent: (target, relatedThreadIds) => {
+        const key = this.key(target.surface, target.accountId);
+        guard.targetKey = key;
+        guard.relatedThreadIds = relatedThreadIds;
+        return !guard.cancelled && this.routingGuards.has(guard)
+          && guard.ports.has(key) && guard.ports.get(key) === this.ports.get(key)
+          && !this.unavailablePorts.has(key)
+          && !relatedThreadIds.some(id => guard.cancelledThreads.has(id));
+      },
+      release: () => { this.routingGuards.delete(guard); },
+    };
+  }
+
   setAvailable(
     surface: SurfaceId,
     accountId: string,
@@ -71,6 +107,11 @@ export class InteractionRouter implements InteractionPort {
       return;
     }
     this.unavailablePorts.add(key);
+    // Remove the original registration permanently, including across a quick reconnect.
+    for (const guard of this.routingGuards) {
+      guard.ports.delete(key);
+      if (guard.targetKey === key) guard.cancelled = true;
+    }
     this.cancelMatching(
       (queued) => this.key(queued.target.surface, queued.target.accountId) === key,
       () => this.cleanup(() => this.ports.get(key)?.cancelAll?.(outcome)),
@@ -81,6 +122,10 @@ export class InteractionRouter implements InteractionPort {
     target: ConversationTarget,
     request: InteractionRequest,
   ): Promise<InteractionDecision> {
+    if (request.isCurrent?.() === false) {
+      this.warnRejected(target, request, "stale-interaction-owner");
+      return Promise.resolve(safeInteractionDecision(request));
+    }
     if (!Number.isFinite(request.expiresInMs) || request.expiresInMs <= 0 || request.expiresInMs > 2_147_483_647) {
       this.warnRejected(target, request, "invalid-interaction-lifetime");
       return Promise.resolve(safeInteractionDecision(request));
@@ -160,7 +205,7 @@ export class InteractionRouter implements InteractionPort {
 
   hasPendingForThread(threadId: string): boolean {
     for (const pending of this.pendingByRequestId.values()) {
-      if (pending.request.threadId === threadId) {
+      if (pending.request.threadId === threadId || pending.request.relatedThreadIds?.includes(threadId)) {
         return true;
       }
     }
@@ -168,15 +213,40 @@ export class InteractionRouter implements InteractionPort {
   }
 
   cancelThreads(threadIds: ReadonlySet<string>): void {
-    this.cancelMatching((queued) => threadIds.has(queued.request.threadId));
+    const cancelled: RoutingGuardState[] = [];
+    for (const guard of this.routingGuards) {
+      if (guard.relatedThreadIds) {
+        if (guard.relatedThreadIds.some(id => threadIds.has(id))) guard.cancelled = true;
+      } else {
+        for (const id of threadIds) {
+          guard.cancelledThreads.add(id);
+          if (id === guard.threadId || guard.cancelledThreads.size > 1_024) {
+            guard.cancelled = true;
+            break;
+          }
+        }
+      }
+      if (guard.cancelled) {
+        this.routingGuards.delete(guard);
+        cancelled.push(guard);
+      }
+    }
+    this.cancelMatching((queued) => threadIds.has(queued.request.threadId)
+      || queued.request.relatedThreadIds?.some(id => threadIds.has(id)) === true);
+    // All queued matches and guards are invalid before callbacks can advance a queue.
+    for (const guard of cancelled) if (!guard.relatedThreadIds) this.cleanup(() => guard.cancel());
   }
 
   cancelAll(outcome?: string): void {
+    const guards = [...this.routingGuards];
+    for (const guard of guards) guard.cancelled = true;
+    this.routingGuards.clear();
     this.cancelMatching(() => true, () => {
       for (const port of this.ports.values()) {
         this.cleanup(() => port.cancelAll?.(outcome));
       }
     });
+    for (const guard of guards) if (!guard.relatedThreadIds) this.cleanup(() => guard.cancel());
   }
 
   private cancelMatching(
@@ -267,6 +337,11 @@ export class InteractionRouter implements InteractionPort {
       return;
     }
     queue.active = next;
+    if (next.request.isCurrent?.() === false) {
+      this.warnRejected(next.target, next.request, "stale-interaction-owner");
+      this.cancelMatching(candidate => candidate === next);
+      return;
+    }
     const remainingMs = next.deadline - performance.now();
     if (remainingMs <= 0) {
       this.expire(next);
@@ -275,6 +350,11 @@ export class InteractionRouter implements InteractionPort {
     next.active = true;
     const complete = (settle: () => void): void => {
       if (this.pendingByRequestId.get(next.request.requestId) === next) {
+        if (next.request.isCurrent?.() === false) {
+          this.warnRejected(next.target, next.request, "stale-interaction-owner");
+          this.cancelMatching(candidate => candidate === next);
+          return;
+        }
         // A late platform callback may run before an overdue timer after event-loop congestion.
         if (performance.now() >= next.deadline) {
           this.expire(next);

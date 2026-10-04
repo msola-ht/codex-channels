@@ -6,6 +6,7 @@ import type {
   ApprovalResponse,
   CommandApprovalOption,
   FileSystemPath,
+  FileApprovalChange,
   FileSystemSandboxEntry,
   JsonValue,
   McpToolApproval,
@@ -42,10 +43,15 @@ type DecodeResult =
 export async function handleApprovalServerRequest(
   request: RpcServerRequest,
   handler: ApprovalRequestHandler,
+  fileChanges?: (request: Extract<ApprovalRequest, { type: "file" }>) => FileApprovalChange[] | null | undefined,
 ): Promise<unknown> {
   const decoded = decodeApprovalServerRequest(request);
   if (!decoded.ok) {
     return decoded.response;
+  }
+  if (decoded.request.type === "file") {
+    const changes = fileChanges?.(decoded.request);
+    if (changes !== undefined) decoded.request.changes = changes;
   }
   const response = await handler.handle(decoded.request);
   return encodeApprovalResponse(decoded.request, response);

@@ -8,8 +8,8 @@
 - `thread-port.ts`：定义 Thread 查询与生命周期窄端口，以及只包含路由、恢复和会话列表所需字段的
   稳定快照；快照保留 App Server 返回的 `historyMode`（`legacy` 或 `paginated`），新建 Thread 使用分页
   历史，既有 legacy Thread 不宣称支持 Revert；官方分区裁剪为稳定 `id/name/builtIn`，内置 Pinned 另投影为 `isPinned`，运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带
-  模型 Provider、实际 Default/Plan 协作模式、更新时间/最近活跃时间；可选 `parentThreadId` 保留官方派生父子关系供本机归档识别，
-  压缩 Item ID，不向业务层暴露完整官方 Turn。端口可选声明已配置的模型 Provider 判定，用于把
+  模型 Provider、实际 Default/Plan 协作模式、更新时间/最近活跃时间；可选 `parentThreadId` 保留官方派生父子关系供本机归档识别和子代理交互归属核验，
+  压缩 Item ID，不向业务层暴露完整官方 Turn。Thread 快照还保留官方当前模型与思考设置，供子代理开始和继续展示；只读查询支持取消，不把当前配置当作历史轮次遥测。端口可选声明已配置的模型 Provider 判定，用于把
   Provider 已被移除的历史 Thread 排除在自动接续之外，未实现的部署视为不做限制。
 - `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权限（沙箱、审批策略、
   权限 Profile）作为启动参数传给新建或恢复的 Thread，协调持久化映射、订阅恢复、Provider/模型设置、
@@ -66,6 +66,10 @@ Gateway 重连或重启后，Client 必须从 `thread/resume` 返回的 `status`
 
 本模块不得导入 `codex-client` 或 `codex-protocol`；具体 Client 由组合根作为
 `ThreadLifecyclePort` 实现注入。
+审批归属查询只沿官方 `parentThreadId` 查找已绑定祖先，并核对各层 Thread 身份、工作区路径和
+Provider；不把 Fork 或当前会话当作父子关系，不写入新的持久绑定。异步查询开始时固定绑定归属，
+查询结束及交互期间继续检查有效性，绑定转移不能把旧审批送给新会话。任一层属于无人值守
+`automation` 来源时拒绝交互，子代理不会绕过自动化任务的非交互边界。
 分区目录与排序不进入 StateStore；Application 每次从 App Server 读取权威目录，并通过 Router
 把官方分区过滤与 `section_position` 排序参数交给 Client。Router 只在已有 Thread 快照中携带
 当前归属，用于会话列表和 `before` 校验，不建立平行分区索引。

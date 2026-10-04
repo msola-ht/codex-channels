@@ -205,6 +205,7 @@ export interface StoredCacheUsage {
 
 export interface StoredThreadListItem {
   cacheUsage: StoredCacheUsage;
+  sessionTiming: SessionExecutionTiming;
   threadId: string;
   provider: string | null;
   model: string | null;
@@ -212,6 +213,7 @@ export interface StoredThreadListItem {
   agentPath: string | null;
   parentThreadId: string | null;
   parentTurnId: string | null;
+  directSubagentCount: number;
   turnCount: number;
   requestCount: number;
   inputTokens: number;
@@ -227,6 +229,29 @@ export interface StoredSubagentThreadRecord {
   parentTurnId: string | null;
   agentPath: string;
   recordedAtMs: number;
+}
+
+export interface StoredSubagentListItem extends StoredSubagentThreadRecord, Pick<StoredThreadListItem,
+  "provider" | "model" | "turnCount" | "requestCount" | "inputTokens" | "outputTokens" | "cacheUsage"
+> {
+  directSubagentCount: number;
+  firstRequestStartedAtMs: number | null;
+  lastRecordedAtMs: number | null;
+}
+
+export interface SubagentThreadsQuery {
+  offset?: number;
+  limit: number;
+  sortKey?: "time" | "last";
+  sortDirection?: "asc" | "desc";
+}
+
+export interface StoredThreadSubagentsPage {
+  subagents: StoredSubagentListItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  nextOffset: number | null;
 }
 
 export type ModelRequestMetricsAggregationDimension =
@@ -331,6 +356,7 @@ export type ModelRequestMetricsThreadSortKey =
   | "turns" | "requests" | "failures" | "input" | "output" | "compact";
 
 export interface ModelRequestMetricsThreadQuery extends ModelRequestMetricsScope {
+  mainThreadsOnly?: boolean;
   offset?: number;
   limit: number;
   sortKey?: ModelRequestMetricsThreadSortKey;
@@ -476,6 +502,8 @@ export interface ModelRequestMetricsThreadQueryStore {
   threadTurnSummaries(threadId: string, query: ModelRequestMetricsThreadQuery): StoredThreadTurnsPage;
   threadTurnCount(threadId: string): number | null;
   threadList(query: ModelRequestMetricsThreadQuery): StoredThreadListPage;
+  subagents(query: SubagentThreadsQuery): StoredThreadSubagentsPage;
+  threadSubagents(threadId: string, query: SubagentThreadsQuery): StoredThreadSubagentsPage;
   subagentThread(threadId: string): {
     agentPath: string | null;
     parentThreadId: string | null;

@@ -288,7 +288,11 @@ export function createSubagentStartedPresentation(
 ): LifecyclePresentation {
   return {
     title: `子代理开始 · ${subagentTaskName(event.agentPath)}`,
-    fields: [],
+    fields: [
+      { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
+      { label: "模型设置", value: event.model ?? "未提供" },
+      { label: "思考强度", value: event.reasoningEffort ?? "未提供" },
+    ],
   };
 }
 
@@ -297,7 +301,11 @@ export function createSubagentContactedPresentation(
 ): LifecyclePresentation {
   return {
     title: `子代理继续 · ${subagentTaskName(event.agentPath)}`,
-    fields: [],
+    fields: [
+      { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
+      { label: "模型设置", value: event.model ?? "未提供" },
+      { label: "思考强度", value: event.reasoningEffort ?? "未提供" },
+    ],
   };
 }
 

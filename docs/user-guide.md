@@ -75,6 +75,35 @@ enabled = true
 
 上游计划工具关闭时不会产生普通计划清单通知；`display.plan_updates` 不能替代它。修改后由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变，无需重启服务。
 
+### 子代理规则与配置（可选）
+
+入口为 `codexc config → Codex 新会话与用户偏好 → 子代理规则与配置（可选）`，仅对 OpenAI 主配置开放。
+安装、更新和“配置核心默认值”不会自动应用这套预设；仅在主动选择并确认后写入。
+可选择只写全局规则、只写 Codex 主配置，或同时写入。确认前显示实际路径和待写内容，
+路径遵循 `CODEX_HOME`，通常为 `~/.codex/AGENTS.md` 和 `~/.codex/config.toml`。
+
+规则按任务分工：检索摘要使用 `gpt-6-luna / high`，日常实现验证使用 `gpt-6.1-sol / high`，
+复杂分析审查使用 `gpt-6-astra / high`；允许按难度、不确定性与风险调整，但仅使用这三个模型，
+思考等级不超过 `high`。规则同时约束写入归属、交接和主代理验证，不扩大任务或外部操作授权。
+这些是代理行为指令，不是运行时强制的模型限制；使用前应确认所用 Provider 支持这些模型。
+
+主配置预设为：
+
+```toml
+[features.multi_agent_v2]
+enabled = true
+default_wait_timeout_ms = 600000
+
+[agents]
+default_subagent_model = "gpt-6.1-sol"
+default_subagent_reasoning_effort = "high"
+```
+
+`agents` 默认值用于未显式指定模型的派发，具体任务分工由规则指导。
+规则只更新专用托管段，保留其他内容；已有未托管的子代理章节需要先人工整理，避免叠加冲突。
+两个文件不构成同一个原子事务，失败时按终端提示检查已写入部分。
+入口不会自动重启服务；请在新的 Codex 会话中使用配置和规则。
+
 ### TUI 空闲总结
 
 在 `codexc config → Codex 新会话与用户偏好 → 空闲总结` 中控制 TUI 失去焦点后的自动回顾，默认写入关闭：

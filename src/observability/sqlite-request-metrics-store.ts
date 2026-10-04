@@ -41,6 +41,8 @@ import type {
   StoredModelRequestMetricsReport,
   StoredQuotaPeriod,
   StoredSubagentThreadRecord,
+  SubagentThreadsQuery,
+  StoredThreadSubagentsPage,
   StoredThreadListPage,
   StoredThreadRequestMetricsSummary,
   StoredThreadTurnsPage,
@@ -599,6 +601,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
 
   threadList(query: ModelRequestMetricsThreadQuery): StoredThreadListPage {
     return this.queries.threadList(query);
+  }
+
+  threadSubagents(threadId: string, query: SubagentThreadsQuery): StoredThreadSubagentsPage {
+    return this.queries.threadSubagents(threadId, query);
+  }
+
+  subagents(query: SubagentThreadsQuery): StoredThreadSubagentsPage {
+    return this.queries.subagents(query);
   }
 
   subagentThread(threadId: string): {

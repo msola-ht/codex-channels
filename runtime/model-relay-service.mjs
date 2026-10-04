@@ -11,16 +11,18 @@ import { relayPolicyFromConfig } from "./model-relay-config.mjs";
 /** Independent service owner. Never starts, stops or connects to App Server. */
 export async function startModelRelayService(configPath, environment = process.env) {
   const { ModelRelayServer, RelayMetricsSender } = await import("../dist/model-relay/index.js");
+  const { createLogger } = await import("../dist/observability/index.js");
+  const logger = createLogger({ logLevel: "info" }, { service: "relay", module: "service" });
   const { sendRelayMetrics, RelayTrafficDump } = await import("../dist/provider-proxy/index.js");
   environment = { ...environment, CODEX_CONNECT_CONFIG_FILE: configPath };
   const catalogBootstrap = createClineRelayCatalogBootstrap(environment, {
     ready: () => refreshCurrent(),
-    failed: () => console.error("Cline Relay 模型目录自动下载失败，请在 WebUI 手动重试"),
+    failed: () => logger.warn({ module: "catalog", event: "catalog.download_failed" }, "Cline Relay 模型目录自动下载失败，请在 WebUI 手动重试"),
   });
   const paths = modelRelayPaths(configPath);
   const reader = new ModelRelayMaterialReader(configPath, environment);
   const dump = new RelayTrafficDump({ directory: join(dirname(configPath), "traffic"),
-    onError: error => console.error(error.message) });
+    onError: error => logger.error({ module: "capture", event: "capture.failed", err: error }, "Relay 调用转储失败") });
   let snapshot;
   let relay;
   let selector;
@@ -116,6 +118,7 @@ export async function startModelRelayService(configPath, environment = process.e
       relay.admission.apply(relayPolicyFromConfig(next.config));
       if (address) await relay.start(next.config.port, next.config.host);
       listening = address;
+      logger.info({ event: address ? "listener.started" : "listener.stopped" }, address ? "Relay 已开始监听" : "Relay 已停止监听");
     }
     updateWatchers(next);
     if (policyChanged) control.changed();

@@ -82,6 +82,10 @@ import {
 } from "./webui-management-provider-route.mjs";
 import { routeStatusManagement } from "./webui-management-status-route.mjs";
 import { routeTaskManagement } from "./webui-management-task-route.mjs";
+import { routeLogsApi } from "./webui-logs-route.mjs";
+import { webuiLogger } from "./webui-logger.mjs";
+
+const logger = webuiLogger.child({ module: "http" });
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
@@ -212,6 +216,10 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         });
         return;
       }
+      if (url.pathname === `${API_PREFIX}/logs`) {
+        await routeLogsApi({ environment, url, request, response });
+        return;
+      }
       if (url.pathname === `${API_PREFIX}/traffic/events`) {
         routeTrafficEvents({ environment, request, response, url, state: management });
         return;
@@ -252,7 +260,7 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
       sendError(response, error.status, { error: { code: error.code, message: error.message } });
       return;
     }
-    console.error(error);
+    logger.error({ event: "request.failed", err: error }, "WebUI 请求处理失败");
     const sendInternalError = managementRequest ? sendManagementJson : sendJson;
     sendInternalError(response, 500, {
       error: { code: "internal_error", message: "WebUI 内部错误" },
@@ -470,6 +478,15 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
     handleThreads(environment, url, response);
     return;
   }
+  if (apiPath === "/subagents") {
+    handleSubagents(environment, url, response);
+    return;
+  }
+  const subagentsMatch = apiPath.match(/^\/threads\/([^/]+)\/subagents$/u);
+  if (subagentsMatch) {
+    handleThreadSubagents(environment, subagentsMatch[1], url, response);
+    return;
+  }
   const threadMatch = apiPath.match(/^\/threads\/([^/]+)\/(run|turns)$/u);
   if (threadMatch) {
     handleThreadDetail(
@@ -579,13 +596,44 @@ function handleThreads(environment, url, response) {
   const query = parseThreadQuery(url);
   const store = openMetricsStore(environment, range.endAtMs);
   try {
-    const { matchedTotal, ...page } = new RequestMetricsQueryService(store).threadList(range, query);
+    const { matchedTotal, ...page } = store.readSnapshot(() => new RequestMetricsQueryService(store).threadList(range, { ...query, mainThreadsOnly: true }));
     sendJson(response, 200, {
       generatedAt: new Date().toISOString(),
       range,
       ...page,
       total: matchedTotal,
     });
+  } finally {
+    store.close();
+  }
+}
+
+function handleThreadSubagents(environment, rawThreadId, url, response) {
+  handleSubagents(environment, url, response, parseThreadId(rawThreadId));
+}
+
+function handleSubagents(environment, url, response, threadId) {
+  for (const key of url.searchParams.keys()) {
+    if (!["offset", "limit", "sortKey", "sortDirection"].includes(key)) throw new ApiError(400, "unsupported_parameter", "子代理列表只接受 offset、limit、sortKey 和 sortDirection");
+    if (url.searchParams.getAll(key).length !== 1) throw new ApiError(400, "invalid_parameter", "子代理查询参数不能重复");
+  }
+  const sortKey = url.searchParams.get("sortKey") ?? "last";
+  const sortDirection = url.searchParams.get("sortDirection") ?? "desc";
+  if (!["time", "last"].includes(sortKey)) throw new ApiError(400, "invalid_sort", "子代理列表只支持 time 或 last 排序");
+  if (!["asc", "desc"].includes(sortDirection)) throw new ApiError(400, "invalid_direction", "sortDirection 只支持 asc 或 desc");
+  const query = {
+    offset: parseBoundedInt(url.searchParams.get("offset"), "offset", 0, null, 0),
+    limit: parseBoundedInt(url.searchParams.get("limit"), "limit", 1, 100, 20),
+    sortKey,
+    sortDirection,
+  };
+  const store = openMetricsStore(environment);
+  try {
+    const page = store.readSnapshot(() => {
+      const queries = new RequestMetricsQueryService(store);
+      return threadId === undefined ? queries.subagents(query) : queries.threadSubagents(threadId, query);
+    });
+    sendJson(response, 200, { generatedAt: new Date().toISOString(), ...(threadId === undefined ? {} : { threadId }), ...page });
   } finally {
     store.close();
   }
@@ -961,6 +1009,10 @@ function main() {
       process.exitCode = 1;
     });
     server.listen(settings.port, host, () => {
+      if (!process.stdout.isTTY) {
+        logger.info({ event: "service.started", host, port: settings.port }, "WebUI 已启动");
+        return;
+      }
       const configNote = existsSync(settings.configPath)
         ? `（配置 [webui]：${settings.configPath}，CLI 参数优先）`
         : "";

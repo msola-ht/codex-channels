@@ -279,6 +279,7 @@ HTTP 429/5xx 与传输失败继续使用剩余预算，路径与其他响应错�
 | --- | --- | --- |
 | 恢复协作模式 | `thread/resume.collaborationMode`（稳定响应字段） | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 将实际 Default/Plan 模式交给 [`router.ts`](../src/session-routing/router.ts)，用于显式接续、自动接续与订阅恢复；[`json-rpc-threads.test.ts`](../tests/json-rpc-threads.test.ts)、[`session-router.test.ts`](../tests/session-router.test.ts)、[`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts) |
 | 异步用户问题 | `item/started`、`item/completed` 的 `agentMessage.delivery` / `questions`；回答复用 `turn/steer`、`turn/start` | [`async-question-coordinator.ts`](../src/bootstrap/async-question-coordinator.ts) 复用三个 Surface 的输入交互，独立于阻塞审批；[`conversation-service.ts`](../src/application/conversation-service.ts) 在锁内验证原 Thread 和有效期；[`async-question-coordinator.test.ts`](../tests/async-question-coordinator.test.ts)、[`conversation-service-input-control.test.ts`](../tests/conversation-service-input-control.test.ts)、[`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts) |
+| 文件审批明细关联 | `item/started.fileChange.changes` 与 `item/fileChange/requestApproval` 的 Thread、Turn、Item 身份 | [`file-change-approval-context.ts`](../src/codex-client/file-change-approval-context.ts) 在每个 Client 内有界保留路径与操作，Provider 路由核对请求来源；[`coordinator.ts`](../src/approval/coordinator.ts) 为三个渠道生成完整转义详情，明细缺失显式提示，无效或过长预览拒绝；不缓存 Diff。官方顺序见固定版本 [`turn_start.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/tests/suite/v2/turn_start.rs) 的 `turn_start_file_change_approval_v2`；验证见 [`file-change-approval-context.test.ts`](../tests/file-change-approval-context.test.ts)、[`approval-coordinator.test.ts`](../tests/approval-coordinator.test.ts)、[`provider-routing-client.test.ts`](../tests/provider-routing-client.test.ts) 与 [`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts) |
 | Luna Reserve 自动回退 | `error.codexErrorInfo = usageLimitExceeded`、`account/rateLimits/read` 的 `supportsLunaReserve` / `excludeResetCreditDetails` 与账户、普通用量、后端 Banner 字段，`model/list.includeHidden`、`thread/settings/update` 及实验 `thread/settings/update.collaborationMode` | [`luna-reserve-port.ts`](../src/application/luna-reserve-port.ts) 与 [`luna-reserve-service.ts`](../src/application/luna-reserve-service.ts) 只把最终用量错误与同一 Turn 的完成事件配对，再验证同一 OpenAI 账户、受限模型和精确隐藏 `gpt-reserve`，以不重试的写请求切换当前 Thread；观察到活动 Turn 时延后写入，同一账户的 Reserve Thread 每轮共享一次轻量额度读取，失效期间的新触发在旧操作结束后续跑。只有权威普通额度明确恢复且无未知 Banner、消费控制或限额阻断时切回仍可用的原模型。待生效设置、手工改模、账户切换、Thread 关闭、归档、删除或 Gateway 关闭会取消状态；不可取消的设置写入若在账户失效后完成，只发出确认当前模型的告警，不执行可能覆盖后续选择的补偿写入。原模型仅保存在进程内，Gateway 不保存或重放失败消息，也不建立第二套 Queue；回退完成前由 App Server 自动开始的 Queue 消息仍可能失败并需重发。三个渠道复用稳定 warning 通知，并区分普通用量与 Reserve 自身用量耗尽；[`account-adapter.ts`](../src/codex-client/account-adapter.ts)、[`model-adapter.ts`](../src/codex-client/model-adapter.ts)、[`client.ts`](../src/codex-client/client.ts)、[`gateway-component-graph.ts`](../src/bootstrap/gateway-component-graph.ts)、[`luna-reserve-service.test.ts`](../tests/luna-reserve-service.test.ts)、[`json-rpc-account.test.ts`](../tests/json-rpc-account.test.ts)、[`json-rpc-models.test.ts`](../tests/json-rpc-models.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、真实 Thread 设置合同 [`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts) 与条件式真实账户/模型合同 [`real-app-server-websocket.test.ts`](../tests/real-app-server-websocket.test.ts) |
 | 结构化 Turn 错误 | `error`、`turn/completed` 中的 `TurnError.codexErrorInfo = misalignmentPolicyViolation` 与 `unauthorized` | Client 只识别这两个精确枚举并传递窄分类；Core 将错误文本与代码作为整体归约并保留 `willRetry=false` 与 `failed` 终态，三个 Surface 的完成卡片对策略错误使用固定脱敏中文提示，对登录或刷新令牌失效按 OpenAI 官方与其他 Provider 分别提示重新登录、改选第三方或更新凭据，Turn 指标保存独立分类与协议代码；[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts)、[`core.ts`](../src/conversation-core/core.ts)、[`turn-error-metrics.ts`](../src/bootstrap/turn-error-metrics.ts)、[`lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`conversation-core-lifecycle.test.ts`](../tests/conversation-core-lifecycle.test.ts)、[`turn-error-metrics.test.ts`](../tests/turn-error-metrics.test.ts)、[`lifecycle-presentation.test.ts`](../tests/lifecycle-presentation.test.ts)、条件式真实策略错误合同 [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | MCP Plugin 来源 | `mcpServerStatus/list` 的 `McpServerStatus.pluginId` | Client 只保留可空、长度受限且符合固定上游 `<plugin>@<marketplace>` 字符规则的 ID；仅 `/mcp` 详情显示来源 Plugin，不用于授权、审批、命令/脚本来源推断或 OAuth 参数；[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`conversation-extension-command-format.ts`](../src/surfaces/conversation-extension-command-format.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`conversation-extension-command-format.test.ts`](../tests/conversation-extension-command-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
@@ -321,6 +322,24 @@ RS 与 CCG 保存前通过 [`model-catalog-validation.mjs`](../scripts/model-cat
 搜索、图片、记忆摘要与 Realtime HTTP/WS 请求透明转发且不计入 Responses 指标；DeepSeek、
 OpenCode Go 和自定义第三方代理仍拒绝这些路径。真实合同使用当前锁定 App Server 验证
 `POST /alpha/search` 能穿过该白名单并完成工具结果往返。
+
+上表“子代理活动与终态”的开始和继续通知另复用 `thread/read` 的 `Thread.modelProvider`、`Thread.model`、`Thread.reasoningEffort`、`Thread.parentThreadId` 与 `Thread.sessionId`：
+[`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 映射官方当前配置，
+[`completion-output-enricher.ts`](../src/bootstrap/completion-output-enricher.ts) 在投递前有界读取，开始通知核验直接父子身份；继续通知的目标不是发起者直接子级时，另核验双方属于同一官方会话树，失败保留未知值；
+[`lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts) 展示提供商、模型设置与思考强度，不宣称实际请求遥测。
+官方依据为锁定版 [`thread_data.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs)；
+验证见 [`subagent-start-metadata.test.ts`](../tests/subagent-start-metadata.test.ts)、[`json-rpc-threads.test.ts`](../tests/json-rpc-threads.test.ts) 与 [`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts)。
+当前 v2 `subAgentActivity` 不公开上下文继承模式或任务摘要，`Thread.preview` 不作为本次子任务摘要。
+
+子代理交互复用已有 `thread/read`、`Thread.parentThreadId` 和原审批 Server Request，不新增 RPC。
+[`router.ts`](../src/session-routing/router.ts) 核验官方祖先、Workspace、Provider 和绑定有效性；
+[`coordinator.ts`](../src/approval/coordinator.ts) 保留子代理原有 Thread、Turn、Item 与请求身份，
+把交互送到已绑定祖先会话，归属解析与排队共用有效期，绑定变化或 `serverRequest/resolved` 会取消旧请求。
+无人值守 `automation` Thread 及其后代仍拒绝交互审批。
+官方依据为固定版 [`thread_data.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs)
+及 [`bespoke_event_handling.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/bespoke_event_handling.rs)；
+验证见审批与 Session Router 单元测试、[`provider-routing-client.test.ts`](../tests/provider-routing-client.test.ts)
+和 [`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts) 的真实子代理审批合同。
 
 Provider 生命周期补充：私有 [`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 不是
 Codex App Server RPC。监听与端点清理复用 [`private-ipc.mjs`](../runtime/private-ipc.mjs)，
@@ -397,6 +416,13 @@ Codex 设置读取沿用 `model/list` 查询已有目录；每次读取后立即
 Fast 只在用户之后通过 `/fast on` 明确开启时生效。
 模型、思考等级、Fast、计划清单工具、
 `multi_agent_v2` 的普通键级写入使用官方 `config/batchWrite` 事务。
+可选子代理预设入口为 [`codex-subagents-setup.mjs`](../scripts/codex-subagents-setup.mjs)：用户显式选择并确认后，
+以用户层修订保护写入 `features.multi_agent_v2.enabled`、`features.multi_agent_v2.default_wait_timeout_ms`、
+`agents.default_subagent_model` 和 `agents.default_subagent_reasoning_effort`；全局 `AGENTS.md` 规则为独立文件写入，
+不新增 RPC，不纳入安装、更新或核心默认值配置。字段依据固定版本
+[`config.schema.json`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/config.schema.json)，
+验证见 [`codex-subagents-setup.test.ts`](../tests/codex-subagents-setup.test.ts) 和
+[`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts)。
 Codex 原生角色的 Provider、凭据、目录与权限继承父线程；本项目不提供第三方子代理配置入口。
 官方行为见锁定版本的
 [`role.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/src/agent/role.rs) 与

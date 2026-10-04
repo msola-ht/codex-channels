@@ -1,5 +1,6 @@
 import type { ResetCreditSnapshot, ResetCreditPreview, ResetCreditResult } from "./types"
 import type {
+  ServiceLogTarget, ServiceLogsResponse,
   QueueChangeEvent,
   DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
   RelayQueueSnapshot, RelayManagementSnapshot, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
@@ -33,6 +34,8 @@ import type {
   ManagementAccountSettingsPreviewResponse,
   ManagementAccountSettingsMutationResponse,
   ThreadRunResponse,
+  ThreadSubagentsResponse,
+  SubagentsResponse,
   ThreadsResponse,
   ThreadTurnsResponse,
   TrafficDetailResponse,
@@ -61,6 +64,8 @@ export class ApiClientError extends Error {
 }
 
 export const API_PREFIX = "/api/v1"
+export const getServiceLogs = (target: ServiceLogTarget, lines: number, signal?: AbortSignal) =>
+  getJson<ServiceLogsResponse>(`${API_PREFIX}/logs?${new URLSearchParams({ target, lines: String(lines) })}`, signal)
 let unauthorizedHandler: (() => void) | null = null
 
 export const watchDeliveryQueue = (signal: AbortSignal, receive: (event: QueueChangeEvent) => void) => watchQueue("delivery/events", signal, receive)
@@ -223,6 +228,27 @@ export function fetchThreadRun(
     `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/run`,
     signal,
   )
+}
+
+export function fetchThreadSubagents(
+  threadId: string,
+  page: { offset: number; limit: number; sortKey?: "time" | "last"; sortDirection?: "asc" | "desc" },
+  signal?: AbortSignal,
+): Promise<ThreadSubagentsResponse> {
+  const params = new URLSearchParams({ offset: String(page.offset), limit: String(page.limit) })
+  if (page.sortKey !== undefined) params.set("sortKey", page.sortKey)
+  if (page.sortDirection !== undefined) params.set("sortDirection", page.sortDirection)
+  return getJson<ThreadSubagentsResponse>(`${API_PREFIX}/threads/${encodeURIComponent(threadId)}/subagents?${params}`, signal)
+}
+
+export function fetchSubagents(
+  page: { offset: number; limit: number; sortKey?: "time" | "last"; sortDirection?: "asc" | "desc" },
+  signal?: AbortSignal,
+): Promise<SubagentsResponse> {
+  const params = new URLSearchParams({ offset: String(page.offset), limit: String(page.limit) })
+  if (page.sortKey !== undefined) params.set("sortKey", page.sortKey)
+  if (page.sortDirection !== undefined) params.set("sortDirection", page.sortDirection)
+  return getJson<SubagentsResponse>(`${API_PREFIX}/subagents?${params}`, signal)
 }
 
 export function fetchThreadTurns(

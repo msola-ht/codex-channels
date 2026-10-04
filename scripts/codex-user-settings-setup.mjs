@@ -1,6 +1,7 @@
 import * as clackPrompts from "@clack/prompts";
 
 import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
+import { runCodexSubagentsSetup } from "./codex-subagents-setup.mjs";
 import {
   loadCodexUserSettings,
   updateCodexUserSetting,
@@ -34,6 +35,7 @@ export async function runCodexUserSettingsSetup({
   output = process.stdout,
   prompts = clackPrompts,
   defaultsSetup = runCodexDefaultsSetup,
+  subagentsSetup = runCodexSubagentsSetup,
   loadSettings = loadCodexUserSettings,
   updateSetting = updateCodexUserSetting,
   createClient,
@@ -94,10 +96,15 @@ export async function runCodexUserSettingsSetup({
         hint: permissionHint(settings.permissions),
       },
       { value: "tool-access", label: "电脑、浏览器与 MCP", hint: "查看合并配置，管理原生访问策略与已有 MCP 参数" },
+      ...(settings.defaultsEditable ? [{ value: "subagents", label: "子代理规则与配置（可选）", hint: "预览并选择写入全局规则、Codex 主配置；不默认启用" }] : []),
       { value: "back", label: "返回", hint: "返回设置类别" },
     ],
   });
   if (prompts.isCancel(section) || section === "back") return { action: "back" };
+  if (section === "subagents") {
+    if (!settings.defaultsEditable) throw new Error("子代理预设仅对 OpenAI 主配置开放");
+    return subagentsSetup({ environment, output, prompts, createClient });
+  }
   if (section === "tool-access") {
     return runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
   }

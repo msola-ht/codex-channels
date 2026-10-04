@@ -62,6 +62,202 @@ function writeCallIndex(
 }
 
 describe("webui server data API", () => {
+  it("returns an empty global subagent page when no relationships are registered", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/subagents`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      generatedAt: expect.any(String), subagents: [], total: 0, offset: 0, limit: 20, nextOffset: null,
+    });
+  });
+
+  it("lists only main Threads with main-only pagination and summaries while preserving child detail access", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const recordedAtMs = Date.now() - 10_000;
+    const current = { ...metricSample(), recordedAtMs, model: "matching" };
+    store.recordBatch([
+      { ...current, threadId: "root-a" },
+      { ...current, threadId: "root-a", turnId: "second", recordedAtMs: recordedAtMs + 100 },
+      { ...current, threadId: "root-b", recordedAtMs: recordedAtMs + 200 },
+      { ...current, threadId: "root-c", model: "excluded", recordedAtMs: recordedAtMs + 300 },
+      { ...current, threadId: "child-a", recordedAtMs: recordedAtMs + 400 },
+      { ...current, threadId: "child-b", recordedAtMs: recordedAtMs + 500 },
+      { ...current, threadId: "nested", model: "child-only", recordedAtMs: recordedAtMs + 600 },
+    ]);
+    for (const [agentThreadId, parentThreadId] of [["child-a", "root-a"], ["child-b", "root-a"], ["no-requests", "root-a"], ["nested", "child-a"]] as const) {
+      store.recordSubagentThread({ agentThreadId, parentThreadId, parentTurnId: "turn-1", agentPath: `/root/${agentThreadId}` });
+    }
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const read = async (path: string) => {
+      const response = await fetch(`${origin}/api/v1/${path}`);
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    const scope = "range=all&provider=deepseek&model=matching&limit=1";
+    const first = await read(`threads?${scope}`);
+    expect(first).toMatchObject({ total: 2, turnCount: 3, nextOffset: 1, aggregate: { requestCount: 3, inputTokens: 3000, outputTokens: 300 }, threads: [{ threadId: "root-b", directSubagentCount: 0 }] });
+    const second = await read(`threads?${scope}&offset=1`);
+    expect(second).toMatchObject({ total: 2, turnCount: 3, nextOffset: null, aggregate: first.aggregate, threads: [{ threadId: "root-a", directSubagentCount: 3, requestCount: 2 }] });
+    expect(await read(`threads?${scope}&offset=2`)).toMatchObject({ threads: [], total: 2, aggregate: first.aggregate });
+    expect(await read("threads?range=all")).toMatchObject({ total: 3, turnCount: 4, aggregate: { requestCount: 4 } });
+    expect(await read("threads?range=all&model=child-only")).toMatchObject({ threads: [], total: 0, turnCount: 0, aggregate: null });
+    expect(await read("threads?range=all&threadId=child-a")).toMatchObject({ threads: [], total: 0 });
+    expect(await read("threads/child-a/run")).toMatchObject({ threadId: "child-a", parentThreadId: "root-a", agentPath: "/root/child-a" });
+    expect(await read("threads/child-a/turns?range=all")).toMatchObject({ total: 1, turns: [{ turnId: "turn-1" }], aggregate: { requestCount: 1 } });
+    expect(await read("threads/root-a/subagents")).toMatchObject({ total: 3 });
+    expect(await read("overview?range=all")).toMatchObject({ threadCount: 6, turnCount: 7, global: { requestCount: 7 } });
+    expect((await fetch(`${origin}/api/v1/threads?mainThreadsOnly=false`)).status).toBe(400);
+  });
+
+  it("authenticates and pages registered subagents without requiring metric requests", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.close();
+    const raw = new DatabaseSync(fixture.databasePath);
+    const insert = raw.prepare("INSERT INTO subagent_threads (thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms) VALUES (?, ?, ?, ?, ?)");
+    for (const [id, parent, time] of [
+      ["child-b", "root", 200], ["child-a", "root", 200], ["older", "root", 100],
+      ["nested", "child-a", 300], ["deeper", "nested", 400], ["unrelated", "other", 500],
+    ] as const) insert.run(id, parent, id === "child-a" ? null : "parent-turn", `/root/${id}`, time);
+    raw.close();
+    const { origin } = await startServer(fixture.environment, undefined, { token: "subagent-token" });
+    const url = `${origin}/api/v1/threads/root/subagents`;
+    const globalUrl = `${origin}/api/v1/subagents`;
+    const headers = { authorization: "Bearer subagent-token" };
+    expect((await fetch(url)).status).toBe(401);
+    expect((await fetch(url, { headers: { authorization: "Bearer wrong" } })).status).toBe(401);
+    expect((await fetch(url, { headers, method: "POST" })).status).toBe(405);
+    expect((await fetch(globalUrl)).status).toBe(401);
+    expect((await fetch(globalUrl, { headers: { authorization: "Bearer wrong" } })).status).toBe(401);
+    expect((await fetch(globalUrl, { headers, method: "POST" })).status).toBe(405);
+    const defaults = await fetch(url, { headers });
+    expect(defaults.status).toBe(200);
+    expect(await defaults.json()).toMatchObject({
+      generatedAt: expect.any(String), threadId: "root", total: 3, offset: 0, limit: 20, nextOffset: null,
+      subagents: [
+        { threadId: "child-a", parentThreadId: "root", parentTurnId: null, agentPath: "/root/child-a", recordedAtMs: 200, directSubagentCount: 1,
+          provider: null, model: null, turnCount: 0, requestCount: 0, inputTokens: 0, outputTokens: 0,
+          firstRequestStartedAtMs: null, lastRecordedAtMs: null,
+          cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 } },
+        { threadId: "child-b", directSubagentCount: 0 }, { threadId: "older", directSubagentCount: 0 },
+      ],
+    });
+    expect(await (await fetch(`${url}?limit=1`, { headers })).json()).toMatchObject({
+      total: 3, offset: 0, limit: 1, nextOffset: 1, subagents: [{ threadId: "child-a" }],
+    });
+    expect(await (await fetch(`${url}?offset=1&limit=2`, { headers })).json()).toMatchObject({
+      total: 3, offset: 1, limit: 2, nextOffset: null, subagents: [{ threadId: "child-b" }, { threadId: "older" }],
+    });
+    expect(await (await fetch(`${url}?offset=10`, { headers })).json()).toMatchObject({ total: 3, subagents: [], nextOffset: null });
+    expect(await (await fetch(`${origin}/api/v1/threads/missing/subagents`, { headers })).json()).toMatchObject({ total: 0, subagents: [] });
+    const global = await (await fetch(globalUrl, { headers })).json();
+    expect(global).toMatchObject({ generatedAt: expect.any(String), total: 6, offset: 0, limit: 20, nextOffset: null });
+    expect(global).not.toHaveProperty("threadId");
+    expect(global.subagents).toMatchObject([
+      { threadId: "child-a", parentThreadId: "root", requestCount: 0 },
+      { threadId: "child-b", parentThreadId: "root", requestCount: 0 },
+      { threadId: "deeper", parentThreadId: "nested", requestCount: 0 },
+      { threadId: "nested", parentThreadId: "child-a", requestCount: 0 },
+      { threadId: "older", parentThreadId: "root", requestCount: 0 },
+      { threadId: "unrelated", parentThreadId: "other", requestCount: 0 },
+    ]);
+    expect(await (await fetch(`${globalUrl}?offset=2&limit=2`, { headers })).json()).toMatchObject({
+      total: 6, offset: 2, limit: 2, nextOffset: 4, subagents: [{ threadId: "deeper" }, { threadId: "nested" }],
+    });
+    expect(await (await fetch(`${globalUrl}?offset=10`, { headers })).json()).toMatchObject({ total: 6, subagents: [], nextOffset: null });
+    recordSample(fixture.databasePath, { ...metricSample(), threadId: "root", provider: "matching", recordedAtMs: Date.now() - 1000 });
+    expect(await (await fetch(`${origin}/api/v1/threads?range=all&provider=matching`, { headers })).json()).toMatchObject({
+      total: 1, threads: [{ threadId: "root", directSubagentCount: 3 }],
+    });
+    for (const query of ["range=all", "provider=matching", "sort=time", "threadId=root", "offset=0&offset=1", "limit=1&limit=2", "sortKey=time&sortKey=last", "sortDirection=asc&sortDirection=desc", "sortKey=requests", "sortDirection=invalid", "sortKey=", "sortDirection=", "offset=-1", "offset=1.5", "offset=9007199254740992", "limit=0", "limit=101", "limit=", "limit=no"]) {
+      expect((await fetch(`${url}?${query}`, { headers })).status, query).toBe(400);
+      expect((await fetch(`${globalUrl}?${query}`, { headers })).status, query).toBe(400);
+    }
+    expect((await fetch(`${origin}/api/v1/threads/${"x".repeat(129)}/subagents`, { headers })).status).toBe(400);
+  });
+
+  it("returns child metrics and pages by request times without including descendant requests", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const now = Date.now();
+    store.recordBatch([
+      { ...metricSample(), threadId: "child-a", provider: "old", model: "old", requestStartedAtMs: now - 3000, recordedAtMs: now - 2000, inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 },
+      { ...metricSample(), threadId: "child-a", turnId: "second", provider: "latest", model: "latest", requestStartedAtMs: now - 2000, recordedAtMs: now - 1000, inputTokens: 200, cachedInputTokens: null, outputTokens: 20 },
+      { ...metricSample(), threadId: "child-b", requestStartedAtMs: now - 4000, recordedAtMs: now - 3000 },
+      { ...metricSample(), threadId: "nested", provider: "nested", model: "nested", requestStartedAtMs: now - 5000, recordedAtMs: now, inputTokens: 9000, outputTokens: 900 },
+    ]);
+    for (const [agentThreadId, parentThreadId] of [["child-a", "root"], ["child-b", "root"], ["no-requests", "root"], ["nested", "child-a"]] as const) {
+      store.recordSubagentThread({ agentThreadId, parentThreadId, parentTurnId: "parent", agentPath: `/root/${agentThreadId}` });
+    }
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const url = `${origin}/api/v1/threads/root/subagents`;
+    expect(await (await fetch(`${url}?limit=1`)).json()).toMatchObject({
+      total: 3, nextOffset: 1, subagents: [{ threadId: "child-a", provider: "latest", model: "latest",
+        turnCount: 2, requestCount: 2, inputTokens: 300, outputTokens: 30,
+        firstRequestStartedAtMs: now - 3000, lastRecordedAtMs: now - 1000,
+        cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 1 } }],
+    });
+    expect(await (await fetch(`${url}?sortKey=time&sortDirection=asc&limit=1`)).json()).toMatchObject({
+      total: 3, nextOffset: 1, subagents: [{ threadId: "child-b" }],
+    });
+    expect(await (await fetch(`${url}?sortKey=last&sortDirection=asc&offset=1&limit=1`)).json()).toMatchObject({
+      total: 3, nextOffset: 2, subagents: [{ threadId: "child-a" }],
+    });
+    expect(await (await fetch(`${url}?sortKey=time&sortDirection=desc&offset=2`)).json()).toMatchObject({
+      total: 3, nextOffset: null, subagents: [{ threadId: "no-requests", firstRequestStartedAtMs: null, lastRecordedAtMs: null }],
+    });
+    const globalUrl = `${origin}/api/v1/subagents`;
+    expect(await (await fetch(`${globalUrl}?limit=1`)).json()).toMatchObject({
+      total: 4, nextOffset: 1, subagents: [{ threadId: "nested", parentThreadId: "child-a", requestCount: 1, inputTokens: 9000 }],
+    });
+    expect(await (await fetch(`${globalUrl}?offset=1&limit=1`)).json()).toMatchObject({
+      total: 4, nextOffset: 2, subagents: [{ threadId: "child-a", requestCount: 2, inputTokens: 300, outputTokens: 30 }],
+    });
+    expect(await (await fetch(`${globalUrl}?sortKey=time&sortDirection=asc&limit=1`)).json()).toMatchObject({
+      total: 4, nextOffset: 1, subagents: [{ threadId: "nested" }],
+    });
+    expect(await (await fetch(`${globalUrl}?sortKey=last&sortDirection=asc&limit=1`)).json()).toMatchObject({
+      total: 4, nextOffset: 1, subagents: [{ threadId: "child-b" }],
+    });
+    expect(await (await fetch(`${globalUrl}?sortKey=time&sortDirection=desc&offset=3`)).json()).toMatchObject({
+      total: 4, nextOffset: null, subagents: [{ threadId: "no-requests", firstRequestStartedAtMs: null, lastRecordedAtMs: null }],
+    });
+  });
+
+  it("exposes own session timing on main Threads independently of the request range and model", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const now = Date.now();
+    for (const threadId of ["complete", "partial", "missing"]) {
+      store.record({ ...metricSample(), threadId, model: "matching", recordedAtMs: now - 1000 });
+    }
+    store.replaceThreadExecutions("complete", "deepseek", [
+      { turnId: "turn-1", durationMs: 100, recordedAtMs: now - 1000 },
+      { turnId: "older", durationMs: 200, recordedAtMs: now - 100_000 },
+    ]);
+    store.replaceThreadExecutions("partial", "deepseek", [
+      { turnId: "turn-1", durationMs: 400, recordedAtMs: now - 1000 },
+      { turnId: "missing-turn", durationMs: null, recordedAtMs: now - 1000 },
+    ]);
+    store.recordSubagentThread({ agentThreadId: "child", parentThreadId: "complete", parentTurnId: "older", agentPath: "/root/child" });
+    store.replaceThreadExecutions("child", "deepseek", [{ turnId: "child-turn", durationMs: 9000, recordedAtMs: now - 1000 }]);
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/threads?range=24h&model=matching`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ total: 3, threads: expect.arrayContaining([
+      { threadId: "complete", sessionTiming: { knownDurationMs: 300, missingTurnCount: 0, historyComplete: true } },
+      { threadId: "partial", sessionTiming: { knownDurationMs: 400, missingTurnCount: 1, historyComplete: true } },
+      { threadId: "missing", sessionTiming: { knownDurationMs: null, missingTurnCount: 0, historyComplete: false } },
+    ].map((thread) => expect.objectContaining(thread))) });
+  });
+
   it("notifies authenticated readers only after metrics commit and closes on writer shutdown", async () => {
     const fixture = createFixture();
     const configPath = join(fixture.home, "config.toml");
@@ -350,8 +546,10 @@ describe("webui server data API", () => {
       ]));
       for (const group of overview.providers) {
         const threads = await (await fetch(`${origin}/api/v1/threads?range=${range}&provider=${group.provider}&limit=1`)).json();
-        expect(group.threadCount).toBe(threads.total);
-        expect(group.turnCount).toBe(threads.turnCount);
+        const childCount = group.provider === "deepseek" ? 1 : 0;
+        expect(threads.total).toBe(group.threadCount - childCount);
+        expect(threads.turnCount).toBe(group.turnCount - childCount);
+        expect(threads.threads.every((thread: { parentThreadId: string | null }) => thread.parentThreadId === null)).toBe(true);
       }
     }
   });
@@ -440,8 +638,9 @@ describe("webui server data API", () => {
       const overview = await response.json();
       expect(overview).toMatchObject({ threadCount, turnCount });
       const threads = await (await fetch(`${origin}/api/v1/threads?range=${range}&limit=1`)).json();
-      expect(overview.threadCount).toBe(threads.total);
-      expect(overview.turnCount).toBe(threads.turnCount);
+      expect(threads.total).toBe(threadCount - 1);
+      expect(threads.turnCount).toBe(turnCount - 1);
+      expect(threads.aggregate.requestCount).toBe(range === "24h" ? 3 : 4);
     }
     const empty = await (await fetch(`${origin}/api/v1/overview?from=2020-01-01&to=2020-01-01`)).json();
     expect(empty).toMatchObject({ global: null, threadCount: 0, turnCount: 0 });

@@ -38,10 +38,15 @@ const ConsolePage = lazy(() =>
   import("@/pages/console-page").then((module) => ({ default: module.ConsolePage })))
 const ErrorsPage = lazy(() =>
   import("@/pages/errors-page").then((module) => ({ default: module.ErrorsPage })))
+const LogsPage = lazy(() => import("@/pages/logs-page").then(module => ({ default: module.LogsPage })))
 const RequestsPage = lazy(() =>
   import("@/pages/requests-page").then((module) => ({ default: module.RequestsPage })))
 const ThreadDetailPage = lazy(() =>
   import("@/pages/thread-detail-page").then((module) => ({ default: module.ThreadDetailPage })))
+const ThreadSubagentsPage = lazy(() =>
+  import("@/pages/thread-subagents-page").then((module) => ({ default: module.ThreadSubagentsPage })))
+const SubagentsPage = lazy(() =>
+  import("@/pages/thread-subagents-page").then((module) => ({ default: module.SubagentsPage })))
 const ThreadsPage = lazy(() =>
   import("@/pages/threads-page").then((module) => ({ default: module.ThreadsPage })))
 const SettingsPage = lazy(() =>
@@ -61,6 +66,7 @@ const ChannelsPage = lazy(() => import("@/pages/channels-page").then(module => (
 const ChannelDisplayPage = lazy(() => import("@/pages/channels-page").then(module => ({ default: module.ChannelDisplayPage })))
 
 function pageTitle(pathname: string, t: Translate): string {
+  if (/^\/threads\/[^/]+\/subagents$/.test(pathname)) return t("pages.threadSubagents")
   if (pathname.startsWith("/threads/")) return t("pages.threadDetail")
   const page = navItems.find(item => item.to === pathname)
   if (page) return t(page.labelKey)
@@ -80,7 +86,9 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
     </>
   }
   if (pathname.startsWith("/threads/")) {
-    const threadId = decodeURIComponent(pathname.slice("/threads/".length))
+    const threadPath = pathname.split("/")[2] ?? ""
+    const threadId = decodeURIComponent(threadPath)
+    const subagents = pathname === `/threads/${threadPath}/subagents`
     return (
       <>
         <BreadcrumbItem className="hidden md:block">
@@ -88,10 +96,13 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
         </BreadcrumbItem>
         <BreadcrumbSeparator className="hidden md:block" />
         <BreadcrumbItem>
-          <BreadcrumbPage>
+          {subagents ? <BreadcrumbLink render={<Link to={`/threads/${threadPath}?range=all`} />}>
             <TruncatedText text={threadId} className="max-w-56" />
-          </BreadcrumbPage>
+          </BreadcrumbLink> : <BreadcrumbPage>
+            <TruncatedText text={threadId} className="max-w-56" />
+          </BreadcrumbPage>}
         </BreadcrumbItem>
+        {subagents ? <><BreadcrumbSeparator /><BreadcrumbItem><BreadcrumbPage>{t("pages.threadSubagents")}</BreadcrumbPage></BreadcrumbItem></> : null}
       </>
     )
   }
@@ -165,9 +176,12 @@ function Layout() {
                 <Route path="/" element={<ConsolePage refreshAttempts={accountRefreshAttempts} range={consoleRange} onRangeChange={setConsoleRange} />} />
                 <Route path="/threads" element={<ThreadsPage />} />
                 <Route path="/threads/:id" element={<ThreadDetailPage />} />
+                <Route path="/threads/:id/subagents" element={<ThreadSubagentsPage />} />
+                <Route path="/subagents" element={<SubagentsPage />} />
                 <Route path="/requests" element={<RequestsPage />} />
                 <Route path="/traffic" element={<TrafficPage />} />
                 <Route path="/errors" element={<ErrorsPage />} />
+                <Route path="/logs" element={<LogsPage />} />
                 <Route path="/relay" element={<RelayPage />} />
                 <Route path="/relay/queue" element={<RelayQueuePage />} />
                 <Route path="/delivery" element={<DeliveryPage />} />

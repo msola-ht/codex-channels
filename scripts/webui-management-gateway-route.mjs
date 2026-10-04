@@ -3,6 +3,7 @@ import {
   updateGatewaySetting,
 } from "./config-management.mjs";
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
+import { webuiLogger } from "./webui-logger.mjs";
 import { assertManagedSetting } from "./webui-management-operations.mjs";
 import {
   isHighRiskManagedSetting,
@@ -89,7 +90,7 @@ export async function routeGatewaySettingsManagement({
     try {
       state.audit.assertWritable();
     } catch (error) {
-      console.error("管理设置未写入，审计记录不可用", error);
+      webuiLogger.error({ module: "audit", event: "settings.audit_unavailable", err: error }, "管理设置未写入，审计记录不可用");
       sendManagementJson(response, 500, {
         error: {
           code: "management_audit_unavailable",
@@ -117,7 +118,7 @@ export async function routeGatewaySettingsManagement({
       });
     } catch (error) {
       auditStatus = "degraded";
-      console.error("管理设置已写入，但审计记录失败", error);
+      webuiLogger.error({ module: "audit", event: "settings.audit_failed", err: error }, "管理设置已写入，但审计记录失败");
     }
     sendManagementJson(response, 200, {
       revision: loadGatewaySettings(environment).revision,

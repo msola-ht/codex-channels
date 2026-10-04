@@ -82,7 +82,7 @@
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的 HTTP 服务、共享 API 类型与管理路由组合入口；
-  主服务托管静态前端和只读指标 API，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
+  主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
   `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
 - `webui-management-codex-route.mjs` / `webui-management-gateway-route.mjs` /
@@ -96,6 +96,8 @@
   5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
+- `webui-logs-route.mjs`：服务日志只读路由，固定服务白名单、限量尾部读取、凭据脱敏和读取超时；Linux 将用户 journald JSON 裁剪为消息、级别、时间与来源，macOS/Windows 读取运行目录内标准输出与错误输出。
+- `webui-logger.mjs`：WebUI 后台诊断的共享 Pino Logger，复用 Observability 公开入口的凭据脱敏和受限错误序列化，携带服务、模块和事件字段。
 - `webui-traffic-route.mjs`：WebUI 的模型转储读取路由，列出 V2 逻辑调用摘要并提供单条请求与终态
   响应；默认跨批次按请求时间倒序分页，支持单批次筛选，明细按批次与编号定位，指标关联目标缺失时明确报错，不替换目标。
   只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录，不接受任意
@@ -115,10 +117,10 @@
   只接受固定动作，任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或回环 Origin 隔离，输出不回传且支持取消；变更订阅按相同所有者隔离，仅通知状态变化与心跳，终态审计失败不阻断通知。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/time`（服务端时区与当前时间）、
   `/api/v1/overview`、`/api/v1/daily`、`/api/v1/threads`、
-  `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；
+  `/api/v1/threads/:id/run|turns|subagents`、`/api/v1/requests`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；
   Providers 返回指标库完整去重名单，指标查询支持重复 `provider` 参数形成多选范围；
   Overview 在同一读快照和截止时间下返回汇总、趋势与热力图；Daily 按 `range` 返回系统本地日聚合。
-  Threads 返回指标库首个请求开始时间，
+  Threads 只对主会话汇总和分页，返回首个请求开始时间和不受请求筛选影响的直接子代理数；Subagents 对已登记父子关系独立分页，包含尚无请求的子代理。
   请求明细按受控字段在整个时间范围排序后偏移分页；
   `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；监听参数优先取命令行，其次
   `config.toml` 的 `[webui]` 段，默认回环无令牌；绑定非回环地址（`0.0.0.0`）时必须设置
@@ -216,6 +218,9 @@
   更新检查和历史保存；第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
+- `codex-subagents-setup.mjs` / `codex-subagents-setup.d.mts`：Config 中显式选择的子代理规则与配置入口，
+  预览后按选择写入 Codex Home 的 `AGENTS.md` 托管规则段和主配置；主配置复用版本化 `config/batchWrite`。
+  安装、更新和核心默认值配置均不自动应用该预设。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
   默认模型与思考等级的无终端校验、预览与执行接口；写默认模型时保留模型目录中已有的上下文窗口，
   窗口由「模型上下文窗口」按模型名统一管理；切换模式更新私有 Profile，固定模式与切换模式共用统一

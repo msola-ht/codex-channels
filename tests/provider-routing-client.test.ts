@@ -11,6 +11,43 @@ import type { SessionRouter, ThreadSession, ThreadSnapshot } from "../src/sessio
 const cwd = "/workspace";
 
 describe("ProviderRoutingClient", () => {
+  it("forwards read cancellation and discards a late Thread without remembering its provider", async () => {
+    const openai = client();
+    const deepseek = client();
+    let resolve!: (thread: ThreadSnapshot) => void;
+    let entered!: () => void;
+    const ready = new Promise<void>((accept) => { entered = accept; });
+    openai.readThread.mockImplementation(() => { entered(); return new Promise((accept) => { resolve = accept; }); });
+    const routed = routing(openai, deepseek);
+    const controller = new AbortController();
+    const pending = routed.readThread("child", controller.signal);
+    await ready;
+    expect(openai.readThread).toHaveBeenCalledWith("child", controller.signal);
+    controller.abort(new Error("metadata read cancelled"));
+    await expect(pending).rejects.toThrow("metadata read cancelled");
+    resolve(snapshot("child", "deepseek", "active"));
+    await Promise.resolve();
+    expect(routed.knownProvider("child")).toBeUndefined();
+    expect(deepseek.readThread).not.toHaveBeenCalled();
+    await routed.close();
+  });
+
+  it("isolates file approval context by originating Provider as well as thread identity", () => {
+    const openai = client();
+    const other = client();
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai], ["other", other]]));
+    routed.onNotification(() => undefined);
+    other.emitNotification({ method: "item/started", params: { threadId: "thread-other" } });
+    other.fileApprovalChanges.mockReturnValue([{ path: "/other/file", kind: "add" }]);
+    const request = { type: "file" as const, threadId: "thread-other", turnId: "turn", itemId: "item", reason: null,
+      requestId: "other:1" };
+    expect(routed.fileApprovalChanges(request)).toEqual([{ path: "/other/file", kind: "add" }]);
+    expect(routed.fileApprovalChanges({ ...request, requestId: "openai:1" })).toBeUndefined();
+    expect(routed.fileApprovalChanges({ ...request, threadId: "unknown" })).toBeUndefined();
+    expect(openai.fileApprovalChanges).not.toHaveBeenCalled();
+    expect(other.fileApprovalChanges).toHaveBeenCalledOnce();
+  });
+
   it("loads an exact Provider catalog through its connection and activity boundary", async () => {
     const openai = client();
     const rs = client();
@@ -692,6 +729,114 @@ describe("ProviderRoutingClient", () => {
     });
   });
 
+  it.each(["openai", "deepseek"])("reads unknown approval Threads from their originating %s instance", async (provider) => {
+    const openai = client();
+    const deepseek = client();
+    const origin = provider === "openai" ? openai : deepseek;
+    const other = provider === "openai" ? deepseek : openai;
+    const thread = snapshot("child", provider, "active");
+    origin.readThread.mockResolvedValue(thread);
+    const routed = routing(openai, deepseek);
+    let entered = false;
+    routed.setServerRequestHandler(async (request) => {
+      entered = true;
+      expect(routed.knownProvider("child")).toBe(provider);
+      expect(request.id).toBe(`${provider}:7`);
+      await expect(routed.readThread("child")).resolves.toEqual(thread);
+      return { decision: "decline" };
+    });
+
+    const pending = origin.serverRequestHandler?.({
+      id: 7, method: "item/commandExecution/requestApproval", params: { threadId: "child" },
+    });
+    expect(entered).toBe(true);
+    await expect(pending).resolves.toEqual({ decision: "decline" });
+    expect(origin.readThread).toHaveBeenCalledWith("child");
+    expect(other.readThread).not.toHaveBeenCalled();
+  });
+
+  it("rejects Server Requests from a different physical Provider without changing known ownership", async () => {
+    const openai = client();
+    const deepseek = client();
+    const routed = routing(openai, deepseek);
+    routed.onNotification(() => undefined);
+    openai.emitNotification({ method: "item/started", params: { threadId: "parent" } });
+    const handler = vi.fn(async () => ({ decision: "accept" }));
+    routed.setServerRequestHandler(handler);
+
+    await expect(deepseek.serverRequestHandler?.({
+      id: 7, method: "item/commandExecution/requestApproval", params: { threadId: "parent" },
+    })).rejects.toMatchObject({ code: -32602, message: "Server Request Thread Provider 不匹配" });
+    expect(handler).not.toHaveBeenCalled();
+    expect(routed.knownProvider("parent")).toBe("openai");
+  });
+
+  it.each([
+    ["different-child", "deepseek"],
+    ["child", "openai"],
+  ])("rejects an approval snapshot with mismatched identity %s or Provider %s", async (id, provider) => {
+    const openai = client();
+    const deepseek = client();
+    deepseek.readThread.mockResolvedValue(snapshot(id, provider, "active"));
+    const routed = routing(openai, deepseek);
+    routed.setServerRequestHandler(async () => {
+      await routed.readThread("child");
+      return { decision: "accept" };
+    });
+
+    await expect(deepseek.serverRequestHandler?.({
+      id: 7, method: "item/commandExecution/requestApproval", params: { threadId: "child" },
+    })).rejects.toThrow("读取的 Thread 身份或模型 Provider 不匹配");
+    expect(routed.knownProvider("child")).toBe("deepseek");
+    expect(openai.readThread).not.toHaveBeenCalled();
+  });
+
+  it("accepts the official Thread Provider alias of the same physical primary instance", async () => {
+    const openai = client();
+    openai.readThread.mockResolvedValue(snapshot("child", "fixed-provider", "active"));
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai]]),
+      undefined, new Set(["fixed-provider"]), "fixed-provider");
+    routed.setServerRequestHandler(async () => {
+      await routed.readThread("child");
+      return { decision: "decline" };
+    });
+
+    await expect(openai.serverRequestHandler?.({
+      id: 7, method: "item/commandExecution/requestApproval", params: { threadId: "child" },
+    })).resolves.toEqual({ decision: "decline" });
+    await expect(openai.serverRequestHandler?.({
+      id: 8, method: "item/commandExecution/requestApproval", params: { threadId: "child" },
+    })).resolves.toEqual({ decision: "decline" });
+    expect(routed.knownProvider("child")).toBe("openai");
+  });
+
+  it.each([
+    ["different-thread", "deepseek"],
+    ["history", "openai"],
+  ])("validates the final Provider snapshot after primary history discovery: %s, %s", async (id, provider) => {
+    const openai = client();
+    const deepseek = client();
+    openai.readThread.mockResolvedValue(snapshot("history", "deepseek", "idle"));
+    deepseek.readThread.mockResolvedValue(snapshot(id, provider, "idle"));
+    const routed = routing(openai, deepseek);
+
+    await expect(routed.readThread("history")).rejects.toThrow("读取的 Thread 身份或模型 Provider 不匹配");
+    expect(routed.knownProvider("history")).toBe("deepseek");
+    expect(deepseek.readThread).toHaveBeenCalledWith("history");
+  });
+
+  it("rejects unrelated primary discovery results before remembering their routing", async () => {
+    const openai = client();
+    const deepseek = client();
+    openai.readThread.mockResolvedValue(snapshot("unrelated", "deepseek", "idle"));
+    const routed = routing(openai, deepseek);
+
+    await expect(routed.readThread("history")).rejects.toThrow("读取的 Thread 身份或模型 Provider 不匹配");
+    expect(routed.knownProvider("history")).toBeUndefined();
+    expect(routed.knownProvider("unrelated")).toBeUndefined();
+    expect(deepseek.readThread).not.toHaveBeenCalled();
+  });
+
   it("suppresses third-party account state and tags Provider-global notifications", () => {
     const openai = client();
     const deepseek = client();
@@ -1212,6 +1357,7 @@ function client() {
       return () => { disconnectHandler = undefined; };
     }),
     setServerRequestHandler: vi.fn((handler) => { result.serverRequestHandler = handler; }),
+    fileApprovalChanges: vi.fn(),
     listThreads: vi.fn(),
     listCollaborationModes: vi.fn(),
     readThread: vi.fn(),
