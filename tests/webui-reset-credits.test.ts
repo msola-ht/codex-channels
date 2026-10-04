@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { GatewayAccountRefreshServer } from "../runtime/gateway-account-refresh.mjs";
 import { OpenAiResetCreditService } from "../src/application/index.js";
 import { cleanupWebuiTestFixtures, createWebuiTestFixture, startWebuiTestServer, type WebuiTestServer } from "./webui-server-test-fixture.js";
@@ -70,13 +70,19 @@ describe("WebUI reset credit confirmation over real IPC", () => {
 });
 
 
-it("releases WebUI previews on cancel or close and serializes competing clicks", () => {
-  const script = String.raw`
+describe("WebUI reset credit dialog actions", () => {
+  let results: {
+    cancel: { requests: Array<{ url: string; body: unknown }>; cancelled: number; consumed: number; closed: number };
+    refresh: { inFlight: { requests: number; closed: number; previewed: number; signal: boolean }; changed: number; refetched: number; body: unknown };
+  };
+
+  beforeAll(() => {
+    const script = String.raw`
     import { createServer } from 'vite';
     import { createElement as h } from 'react';
     import { renderToStaticMarkup } from 'react-dom/server';
     const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
-      name: 'reset-cancel-fixture', enforce: 'pre', transform(code, id) {
+      name: 'reset-dialog-fixture', enforce: 'pre', transform(code, id) {
         if (id.endsWith('/overview/reset-credit-action.tsx')) return code.replace('function ResetCreditDialog(', 'export function ResetCreditDialog(');
         if (id.endsWith('/hooks/use-management-confirmed-mutation.ts')) return 'export function useManagementConfirmedMutation() { return globalThis.management; }';
         if (id.endsWith('/hooks/use-translation.ts')) return 'export function useTranslation() { return {t:key=>key}; }';
@@ -86,75 +92,65 @@ it("releases WebUI previews on cancel or close and serializes competing clicks",
     }] });
     try {
       const { ResetCreditDialog } = await server.ssrLoadModule('/src/components/overview/reset-credit-action.tsx');
-      const requests=[]; let cancelled=0, consumed=0, closed=0;
-      globalThis.fetch=async (url, init)=>{requests.push({url, body:JSON.parse(init.body)}); return new Response(JSON.stringify({cancelled:true}), {status:200});};
-      globalThis.management={busy:false,loading:false,error:null,actionError:null,data:null,
-        pendingPreview:{preview:{attemptId:'attempt',credit:{title:'Title',description:'Scope',expiresAt:null}},confirmationToken:'token'},
-        cancel:()=>{cancelled++},confirm:async()=>{consumed++;return null;}};
-      const render=()=>{globalThis.buttons=[];renderToStaticMarkup(h(ResetCreditDialog,{onClose:()=>{closed++},onChanged:()=>{}}));};
-      render();
-      const cancel=globalThis.buttons.find(button=>button.children==='resetCredits.cancel');
-      cancel.onClick(); cancel.onClick();
-      globalThis.buttons.find(button=>Array.isArray(button.children)&&button.children.includes('resetCredits.confirm')).onClick();
-      await new Promise(resolve=>setImmediate(resolve));
-      render(); globalThis.dialog.onOpenChange(false);
-      await new Promise(resolve=>setImmediate(resolve));
-      console.log(JSON.stringify({requests,cancelled,consumed,closed}));
+      const cancelScenario = async () => {
+        const requests=[]; let cancelled=0, consumed=0, closed=0;
+        globalThis.fetch=async (url, init)=>{requests.push({url, body:JSON.parse(init.body)}); return new Response(JSON.stringify({cancelled:true}), {status:200});};
+        globalThis.management={busy:false,loading:false,error:null,actionError:null,data:null,
+          pendingPreview:{preview:{attemptId:'attempt',credit:{title:'Title',description:'Scope',expiresAt:null}},confirmationToken:'token'},
+          cancel:()=>{cancelled++},confirm:async()=>{consumed++;return null;}};
+        const render=()=>{globalThis.buttons=[];renderToStaticMarkup(h(ResetCreditDialog,{onClose:()=>{closed++},onChanged:()=>{}}));};
+        render();
+        const cancel=globalThis.buttons.find(button=>button.children==='resetCredits.cancel');
+        cancel.onClick(); cancel.onClick();
+        globalThis.buttons.find(button=>Array.isArray(button.children)&&button.children.includes('resetCredits.confirm')).onClick();
+        await new Promise(resolve=>setImmediate(resolve));
+        render(); globalThis.dialog.onOpenChange(false);
+        await new Promise(resolve=>setImmediate(resolve));
+        return {requests,cancelled,consumed,closed};
+      };
+      const refreshScenario = async () => {
+        const requests=[]; let finish, changed=0, refetched=0, closed=0, previewed=0;
+        globalThis.fetch=async (url, init)=>{requests.push({url,signal:init.signal,body:JSON.parse(init.body)});return new Promise(resolve=>{finish=()=>resolve(new Response('{}',{status:200}));});};
+        globalThis.management={busy:false,loading:false,error:null,actionError:null,data:null,pendingPreview:null,
+          clearError(){},refetch(){refetched++},mutate(){previewed++}};
+        globalThis.buttons=[];
+        renderToStaticMarkup(h(ResetCreditDialog,{onClose:()=>{closed++},onChanged:()=>{changed++}}));
+        const refresh=globalThis.buttons.find(button=>button.children==='common.refresh');
+        refresh.onClick();refresh.onClick();
+        globalThis.buttons.find(button=>button.children==='resetCredits.preview').onClick();
+        globalThis.buttons.find(button=>button.children==='resetCredits.cancel').onClick();
+        globalThis.dialog.onOpenChange(false);
+        const inFlight={requests:requests.length,closed,previewed,signal:requests[0]?.signal instanceof AbortSignal};
+        finish();await new Promise(resolve=>setImmediate(resolve));
+        return {inFlight,changed,refetched,body:requests[0].body};
+      };
+      console.log(JSON.stringify({cancel:await cancelScenario(),refresh:await refreshScenario()}));
     } finally { await server.close(); }
-  `;
-  const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
-  })) as { requests: Array<{ url: string; body: unknown }>; cancelled: number; consumed: number; closed: number };
-  expect(result.requests).toHaveLength(2);
-  for (const request of result.requests) {
-    expect(request.url).toMatch(/reset-credits\/cancel$/u);
-    expect(request.body).toEqual({ attemptId: "attempt", confirmationToken: "token" });
-  }
-  expect(result.cancelled).toBe(2);
-  expect(result.consumed).toBe(0);
-  expect(result.closed).toBe(1);
-});
+    `;
+    results = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+      cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000,
+    })) as typeof results;
+  }, 35_000);
 
+  it("releases WebUI previews on cancel or close and serializes competing clicks", () => {
+    const result = results.cancel;
+    expect(result.requests).toHaveLength(2);
+    for (const request of result.requests) {
+      expect(request.url).toMatch(/reset-credits\/cancel$/u);
+      expect(request.body).toEqual({ attemptId: "attempt", confirmationToken: "token" });
+    }
+    expect(result.cancelled).toBe(2);
+    expect(result.consumed).toBe(0);
+    expect(result.closed).toBe(1);
+  });
 
-it("serializes manual credit refresh with competing dialog actions and forwards cancellation", () => {
-  const script = String.raw`
-    import { createServer } from 'vite';
-    import { createElement as h } from 'react';
-    import { renderToStaticMarkup } from 'react-dom/server';
-    const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
-      name: 'reset-refresh-fixture', enforce: 'pre', transform(code, id) {
-        if (id.endsWith('/overview/reset-credit-action.tsx')) return code.replace('function ResetCreditDialog(', 'export function ResetCreditDialog(');
-        if (id.endsWith('/hooks/use-management-confirmed-mutation.ts')) return 'export function useManagementConfirmedMutation() { return globalThis.management; }';
-        if (id.endsWith('/hooks/use-translation.ts')) return 'export function useTranslation() { return {t:key=>key}; }';
-        if (id.endsWith('/ui/button.tsx')) return 'export function Button(props) { globalThis.buttons.push(props); return null; }';
-        if (id.endsWith('/ui/dialog.tsx')) return 'export function Dialog(props) { globalThis.dialog = props; return props.children; } export const DialogContent = p=>p.children; export const DialogDescription = p=>p.children; export const DialogFooter = p=>p.children; export const DialogHeader = p=>p.children; export const DialogTitle = p=>p.children;';
-      }
-    }] });
-    try {
-      const { ResetCreditDialog } = await server.ssrLoadModule('/src/components/overview/reset-credit-action.tsx');
-      const requests=[]; let finish, changed=0, refetched=0, closed=0, previewed=0;
-      globalThis.fetch=async (url, init)=>{requests.push({url,signal:init.signal,body:JSON.parse(init.body)});return new Promise(resolve=>{finish=()=>resolve(new Response('{}',{status:200}));});};
-      globalThis.management={busy:false,loading:false,error:null,actionError:null,data:null,pendingPreview:null,
-        clearError(){},refetch(){refetched++},mutate(){previewed++}};
-      globalThis.buttons=[];
-      renderToStaticMarkup(h(ResetCreditDialog,{onClose:()=>{closed++},onChanged:()=>{changed++}}));
-      const refresh=globalThis.buttons.find(button=>button.children==='common.refresh');
-      refresh.onClick();refresh.onClick();
-      globalThis.buttons.find(button=>button.children==='resetCredits.preview').onClick();
-      globalThis.buttons.find(button=>button.children==='resetCredits.cancel').onClick();
-      globalThis.dialog.onOpenChange(false);
-      const inFlight={requests:requests.length,closed,previewed,signal:requests[0]?.signal instanceof AbortSignal};
-      finish();await new Promise(resolve=>setImmediate(resolve));
-      console.log(JSON.stringify({inFlight,changed,refetched,body:requests[0].body}));
-    } finally { await server.close(); }
-  `;
-  const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
-  })) as { inFlight: { requests: number; closed: number; previewed: number; signal: boolean }; changed: number; refetched: number; body: unknown };
-  expect(result.inFlight).toEqual({ requests: 1, closed: 0, previewed: 0, signal: true });
-  expect(result.changed).toBe(1);
-  expect(result.refetched).toBe(1);
-  expect(result.body).toEqual({ provider: "openai" });
+  it("serializes manual credit refresh with competing dialog actions and forwards cancellation", () => {
+    const result = results.refresh;
+    expect(result.inFlight).toEqual({ requests: 1, closed: 0, previewed: 0, signal: true });
+    expect(result.changed).toBe(1);
+    expect(result.refetched).toBe(1);
+    expect(result.body).toEqual({ provider: "openai" });
+  });
 });
 
 it("classifies uncertain HTTP consume responses without retrying or masking controlled rejections", () => {

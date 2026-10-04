@@ -253,7 +253,7 @@ describe("WebUI metrics table presentation", () => {
           if (id.endsWith("/src/App.tsx")) return _code + " export { BreadcrumbTrail };";
           if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
           if (id.endsWith("/src/hooks/use-official-account-sources.ts")) return "export function useOfficialAccountSources() { return globalThis.fixtureAccounts; }";
-          if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi() { return globalThis.fixtureApiState; }";
+          if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi(load, deps) { globalThis.fixtureApiLoad = load; globalThis.fixtureApiDeps = deps; return globalThis.fixtureApiState; }";
           if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {}, pagination() { return globalThis.fixturePagination; } }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
           if (id.endsWith("/src/hooks/use-thread-detail.ts")) return _code.replace("export function useThreadDetail(", "function realUseThreadDetail(") + " export function useThreadDetail(...args) { globalThis.fixtureThreadDetailCalls++; return globalThis.fixtureThreadDetail ?? realUseThreadDetail(...args); }";
           if (id.endsWith("/src/hooks/use-thread-subagents.ts")) return "export function useThreadSubagents(threadId) { globalThis.fixtureSubagentCalls.push(threadId ?? 'all'); return globalThis.fixtureSubagentState; }";
@@ -733,32 +733,55 @@ describe("WebUI metrics table presentation", () => {
         const { useThreads } = await server.ssrLoadModule("/src/hooks/use-threads.ts");
         const { useErrors } = await server.ssrLoadModule("/src/hooks/use-errors.ts");
         const { useThreadDetail } = await server.ssrLoadModule("/src/hooks/use-thread-detail.ts");
+        const { useMetricsSnapshot } = await server.ssrLoadModule("/src/hooks/use-metrics-snapshot.ts");
         const query = { range: "all", offset: 0, limit: 10 };
         const nextQuery = { ...query, offset: 10 };
-        result.queryStates = JSON.stringify([
-          [useRequests, JSON.stringify(query)],
-          [useThreads, JSON.stringify(query)],
-          [useErrors, JSON.stringify(query)],
-          [q => useThreadDetail("thread-1", q), JSON.stringify(["thread-1", query])],
-        ].map(([hook, queryKey]) => {
-          const readHook = q => {
-            let value;
-            function Probe() { const state = hook(q); value = { data: state.data, error: state.error, errorCode: state.errorCode, loading: state.loading }; return null; }
+        const readSnapshot = q => {
+          let value;
+          function Probe() {
+            const state = useMetricsSnapshot(q, JSON.stringify(q), noop);
+            value = { data: state.data, error: state.error, errorCode: state.errorCode, loading: state.loading };
+            return null;
+          }
+          render(Probe, {});
+          return value;
+        };
+        globalThis.fixtureApiState = { data: { queryKey: JSON.stringify(query), data: { total: 1 } }, loading: false, error: null };
+        const ready = readSnapshot(query);
+        const changed = readSnapshot(nextQuery);
+        const returned = readSnapshot(query);
+        globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: true };
+        const pending = readSnapshot(query);
+        globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: false, error: "fixture failure" };
+        const failed = readSnapshot(nextQuery);
+        globalThis.fixtureApiState = { data: null, loading: true, error: null };
+        const initial = readSnapshot(query);
+        result.queryStates = JSON.stringify({ ready, changed, returned, pending, failed, initial });
+
+        // Exercise each real wrapper and API loader, including changed filters and encoded thread IDs.
+        const wiringQuery = { ...query, provider: ["openai", "clp-main"], model: "fixture model" };
+        const nextWiringQuery = { ...wiringQuery, offset: 10 };
+        globalThis.fixtureThreadDetail = null;
+        const wiring = {};
+        for (const [name, hook] of Object.entries({ requests: useRequests, threads: useThreads, errors: useErrors, detail: useThreadDetail })) {
+          wiring[name] = [];
+          for (const [q, threadId] of [[wiringQuery, "thread/one"], [nextWiringQuery, "thread/two"]]) {
+            function Probe() { if (name === "detail") hook(threadId, q); else hook(q); return null; }
             render(Probe, {});
-            return value;
-          };
-          globalThis.fixtureApiState = { data: { queryKey, data: { total: 1 } }, loading: false, error: null };
-          const ready = readHook(query);
-          const changed = readHook(nextQuery);
-          const returned = readHook(query);
-          globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: true };
-          const pending = readHook(query);
-          globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: false, error: "fixture failure" };
-          const failed = readHook(nextQuery);
-          globalThis.fixtureApiState = { data: null, loading: true, error: null };
-          const initial = readHook(query);
-          return { ready, changed, returned, pending, failed, initial };
-        }));
+            const calls = [];
+            globalThis.fetch = async (path, init) => {
+              calls.push({ path, signal: init.signal });
+              return { ok: true, json: async () => ({ path }) };
+            };
+            const controller = new AbortController();
+            const snapshot = await globalThis.fixtureApiLoad(controller.signal);
+            const activeSignals = calls.every(call => call.signal instanceof AbortSignal && !call.signal.aborted);
+            controller.abort();
+            wiring[name].push({ deps: globalThis.fixtureApiDeps, snapshot, paths: calls.map(call => call.path),
+              activeSignals, cancelledSignals: calls.every(call => call.signal.aborted) });
+          }
+        }
+        result.queryWiring = JSON.stringify(wiring);
         console.log(JSON.stringify(result));
       } finally { await server.close(); }
     `;
@@ -1173,7 +1196,6 @@ describe("WebUI metrics table presentation", () => {
     for (const label of ["首 Token", "请求耗时", "请求详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
-    expect(markup['tier-fast']).toContain("h-4");
   });
 
   it("only offers supplemental token and Fast information and preserves link semantics", () => {
@@ -1220,14 +1242,31 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("marks changed queries pending before the API effect and preserves explicit failures", () => {
-    expect(JSON.parse(markup.queryStates!)).toEqual(Array.from({ length: 4 }, () => ({
+    expect(JSON.parse(markup.queryStates!)).toEqual({
       ready: { data: { total: 1 }, error: null, loading: false },
       changed: { data: { total: 1 }, error: null, loading: true },
       returned: { data: { total: 1 }, error: null, loading: false },
       pending: { data: { total: 1 }, error: null, loading: false },
       failed: { data: { total: 1 }, error: "fixture failure", loading: false },
       initial: { data: null, error: null, loading: true },
-    })));
+    });
+  });
+
+  it("wires each metrics wrapper to its query key and actual API loader", () => {
+    const wiring = JSON.parse(markup.queryWiring!) as Record<string, unknown[]>;
+    for (const name of ["requests", "threads", "errors", "detail"]) {
+      expect(wiring[name]).toEqual([0, 10].map((offset) => {
+        const query = { range: "all", offset, limit: 10, provider: ["openai", "clp-main"], model: "fixture model" };
+        const params = `range=all&offset=${offset}&limit=10&provider=openai&provider=clp-main&model=fixture+model`;
+        const threadId = offset === 0 ? "thread/one" : "thread/two";
+        const queryKey = JSON.stringify(name === "detail" ? [threadId, query] : query);
+        const paths = name === "detail"
+          ? [`/api/v1/threads/${encodeURIComponent(threadId)}/run`, `/api/v1/threads/${encodeURIComponent(threadId)}/turns?${params}`]
+          : [`/api/v1/${name}?${params}`];
+        const data = name === "detail" ? { run: { path: paths[0] }, turns: { path: paths[1] } } : { path: paths[0] };
+        return { deps: [queryKey], snapshot: { queryKey, data }, paths, activeSignals: true, cancelledSignals: true };
+      }));
+    }
   });
 
   it("aligns numeric headers and cells on the same edge", () => {

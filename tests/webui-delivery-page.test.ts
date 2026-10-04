@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 it("renders localized queue states, retry eligibility, missing and error views without stale rows", () => {
   const script = String.raw`
@@ -83,88 +83,94 @@ it("renders localized queue states, retry eligibility, missing and error views w
   expect(result.cleanupFailed).not.toContain("codexc service start gateway");
 });
 
-it("treats lost retry responses as unconfirmed while preserving definite server rejections", () => {
-  const script = String.raw`
-    import { createServer } from 'vite';
-    import { createElement as h } from 'react';
-    import { renderToStaticMarkup } from 'react-dom/server';
-    const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
-      name: 'capture-delivery-mutation', enforce: 'pre', transform(code, id) {
-        if (id.endsWith('/hooks/use-management-confirmed-mutation.ts')) return 'export function useManagementConfirmedMutation(options) { globalThis.options = options; return {refetch:()=>{},loading:false,busy:false,pendingPreview:null}; }';
-      }
-    }] });
-    try {
-      const { useDeliveryQueue } = await server.ssrLoadModule('/src/hooks/use-delivery-queue.ts');
-      function Probe() { useDeliveryQueue(0, 'all'); return null; }
-      renderToStaticMarkup(h(Probe));
-      const apply = () => globalThis.options.apply({id:'record',revision:'revision'}, 'token').then(()=>'success', error=>error.code);
-      globalThis.fetch = async () => { throw new TypeError('Connection lost after commit'); };
-      const network = await apply();
-      globalThis.fetch = async () => new Response(JSON.stringify({error:{code:'http_error',message:'Proxy failed'}}), {status:502});
-      const proxy = await apply();
-      globalThis.fetch = async () => new Response(JSON.stringify({error:{code:'delivery_busy',message:'Busy'}}), {status:409});
-      const busy = await apply();
-      globalThis.fetch = async () => new Response(JSON.stringify({error:{code:'management_audit_unavailable',message:'Audit failed'}}), {status:503});
-      const audit = await apply();
-      console.log(JSON.stringify({network,proxy,busy,audit}));
-    } finally { await server.close(); }
-  `;
-  const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
-  })) as Record<string, string>;
-  expect(result).toEqual({ network: "delivery_unconfirmed", proxy: "delivery_unconfirmed", busy: "delivery_busy", audit: "management_audit_unavailable" });
-});
+describe("delivery queue hook contracts", () => {
+  let results: { retry: Record<string, string>; summaries: boolean };
 
-it("batches inline summaries, reuses revisions and bounds transient retries", () => {
-  const script = String.raw`
+  beforeAll(() => {
+    const script = String.raw`
     import { createServer } from 'vite';
     import { createElement as h } from 'react';
     import { renderToStaticMarkup } from 'react-dom/server';
     import assert from 'node:assert/strict';
     const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
-      name: 'capture-summary-loader', enforce: 'pre', transform(code, id) {
+      name: 'capture-delivery-hooks', enforce: 'pre', transform(code, id) {
+        if (id.endsWith('/hooks/use-management-confirmed-mutation.ts')) return 'export function useManagementConfirmedMutation(options) { globalThis.options = options; return {refetch:()=>{},loading:false,busy:false,pendingPreview:null}; }';
         if (id.endsWith('/hooks/use-api.ts')) return 'export function useApi(loader) { globalThis.loadSummaries = loader; return {refetch:()=>{}}; } export function useApiPolling() {}';
       }
     }] });
     try {
-      const { useDeliveryContents } = await server.ssrLoadModule('/src/hooks/use-delivery-queue.ts');
-      function Probe() { useDeliveryContents(Array.from({length:8}, (_, index) => ({id:String(index),revision:'r'}))); return null; }
-      renderToStaticMarkup(h(Probe));
-      let active=0, maximum=0, calls=0;
-      globalThis.fetch = async () => {
-        calls++; active++; maximum=Math.max(maximum,active);
-        await new Promise(resolve=>setTimeout(resolve,5)); active--;
-        return new Response(JSON.stringify({records:Array.from({length:8},(_,i)=>({id:String(i),revision:'r',content:{type:'text.completed',text:'x'.repeat(160),status:null,truncated:true,threadId:null,turnId:null,imageFormat:null}}))}));
+      const { useDeliveryQueue, useDeliveryContents } = await server.ssrLoadModule('/src/hooks/use-delivery-queue.ts');
+      const retryScenario = async () => {
+        const originalFetch = globalThis.fetch, originalOptions = globalThis.options;
+        try {
+          function Probe() { useDeliveryQueue(0, 'all'); return null; }
+          renderToStaticMarkup(h(Probe));
+          const apply = () => globalThis.options.apply({id:'record',revision:'revision'}, 'token').then(()=>'success', error=>error.code);
+          globalThis.fetch = async () => { throw new TypeError('Connection lost after commit'); };
+          const network = await apply();
+          globalThis.fetch = async () => new Response(JSON.stringify({error:{code:'http_error',message:'Proxy failed'}}), {status:502});
+          const proxy = await apply();
+          globalThis.fetch = async () => new Response(JSON.stringify({error:{code:'delivery_busy',message:'Busy'}}), {status:409});
+          const busy = await apply();
+          globalThis.fetch = async () => new Response(JSON.stringify({error:{code:'management_audit_unavailable',message:'Audit failed'}}), {status:503});
+          const audit = await apply();
+          return {network,proxy,busy,audit};
+        } finally { globalThis.fetch = originalFetch; globalThis.options = originalOptions; }
       };
-      const signal = new AbortController().signal;
-      const first=await globalThis.loadSummaries(signal);
-      assert.equal(first.size,8); assert.equal(calls,1); assert.equal(maximum,1);
-      for(const value of first.values()) assert.equal(value.content.text.length,160);
-      await globalThis.loadSummaries(signal); assert.equal(calls,1);
-      const cancelled=new AbortController(); cancelled.abort();
-      await assert.rejects(globalThis.loadSummaries(cancelled.signal));
-      assert.equal(calls,1);
-      renderToStaticMarkup(h(Probe));
-      calls=0;
-      globalThis.fetch=async()=>{ calls++; return new Response(JSON.stringify({error:{code:'management.rate-limited',message:'limited'}}),{status:429}); };
-      const realNow=Date.now;
-      let now=realNow(); Date.now=()=>now;
-      await globalThis.loadSummaries(signal);
-      now+=59_999;
-      await globalThis.loadSummaries(signal); assert.equal(calls,1);
-      for(let i=0;i<5;i++) { now+=60_000; await globalThis.loadSummaries(signal); }
-      assert.equal(calls,3);
-      renderToStaticMarkup(h(Probe));
-      calls=0;
-      globalThis.fetch=async()=>{calls++;if(calls===1) throw new TypeError('offline');return new Response(JSON.stringify({records:Array.from({length:8},(_,i)=>({id:String(i),revision:'r',content:{type:'text.completed',text:'recovered'}}))}));};
-      await globalThis.loadSummaries(signal);
-      now+=60_000;
-      const recovered=await globalThis.loadSummaries(signal);
-      assert.equal(calls,2);assert.equal(recovered.get(JSON.stringify(['0','r'])).content.text,'recovered');
-      Date.now=realNow;
+      const summaryScenario = async () => {
+        const originalFetch = globalThis.fetch, originalLoader = globalThis.loadSummaries;
+        try {
+          function Probe() { useDeliveryContents(Array.from({length:8}, (_, index) => ({id:String(index),revision:'r'}))); return null; }
+          renderToStaticMarkup(h(Probe));
+          let active=0, maximum=0, calls=0;
+          globalThis.fetch = async () => {
+            calls++; active++; maximum=Math.max(maximum,active);
+            await new Promise(resolve=>setTimeout(resolve,5)); active--;
+            return new Response(JSON.stringify({records:Array.from({length:8},(_,i)=>({id:String(i),revision:'r',content:{type:'text.completed',text:'x'.repeat(160),status:null,truncated:true,threadId:null,turnId:null,imageFormat:null}}))}));
+          };
+          const signal = new AbortController().signal;
+          const first=await globalThis.loadSummaries(signal);
+          assert.equal(first.size,8); assert.equal(calls,1); assert.equal(maximum,1);
+          for(const value of first.values()) assert.equal(value.content.text.length,160);
+          await globalThis.loadSummaries(signal); assert.equal(calls,1);
+          const cancelled=new AbortController(); cancelled.abort();
+          await assert.rejects(globalThis.loadSummaries(cancelled.signal));
+          assert.equal(calls,1);
+          renderToStaticMarkup(h(Probe));
+          calls=0;
+          globalThis.fetch=async()=>{ calls++; return new Response(JSON.stringify({error:{code:'management.rate-limited',message:'limited'}}),{status:429}); };
+          const realNow=Date.now;
+          let now=realNow(); Date.now=()=>now;
+          try {
+            await globalThis.loadSummaries(signal);
+            now+=59_999;
+            await globalThis.loadSummaries(signal); assert.equal(calls,1);
+            for(let i=0;i<5;i++) { now+=60_000; await globalThis.loadSummaries(signal); }
+            assert.equal(calls,3);
+            renderToStaticMarkup(h(Probe));
+            calls=0;
+            globalThis.fetch=async()=>{calls++;if(calls===1) throw new TypeError('offline');return new Response(JSON.stringify({records:Array.from({length:8},(_,i)=>({id:String(i),revision:'r',content:{type:'text.completed',text:'recovered'}}))}));};
+            await globalThis.loadSummaries(signal);
+            now+=60_000;
+            const recovered=await globalThis.loadSummaries(signal);
+            assert.equal(calls,2);assert.equal(recovered.get(JSON.stringify(['0','r'])).content.text,'recovered');
+          } finally { Date.now=realNow; }
+          return true;
+        } finally { globalThis.fetch = originalFetch; globalThis.loadSummaries = originalLoader; }
+      };
+      console.log(JSON.stringify({retry:await retryScenario(),summaries:await summaryScenario()}));
     } finally { await server.close(); }
-  `;
-  expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
-  })).not.toThrow();
+    `;
+    results = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+      cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000,
+    })) as typeof results;
+  }, 35_000);
+
+  it("treats lost retry responses as unconfirmed while preserving definite server rejections", () => {
+    expect(results.retry).toEqual({ network: "delivery_unconfirmed", proxy: "delivery_unconfirmed", busy: "delivery_busy", audit: "management_audit_unavailable" });
+  });
+
+  it("batches inline summaries, reuses revisions and bounds transient retries", () => {
+    expect(results.summaries).toBe(true);
+  });
 });

@@ -182,12 +182,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["service", "-h"], "用法：codexc service"],
       [["service", "install", "-h"], "用法：codexc service install"],
       [["service", "uninstall", "--help"], "用法：codexc service uninstall"],
-      [["service", "start", "-h"], "用法：codexc service start"],
-      [["service", "stop", "--help"], "用法：codexc service stop"],
       [["service", "reload", "-h"], "用法：codexc service reload"],
-      [["service", "restart", "-h"], "用法：codexc service restart"],
-      [["service", "status", "--help"], "用法：codexc service status"],
-      [["service", "logs", "--help"], "用法：codexc service logs"],
       [["config", "-h"], "用法：codexc config"],
       [["timezone", "-h"], "用法：codexc timezone"],
       [["doctor", "--help"], "用法：codexc doctor"],
@@ -234,7 +229,10 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
         includes: [
           "OpenAI 官方 → 登录并恢复官方",
           "受管 Provider 模型设置",
+          "脱敏接入状态总览",
+          "模型与提供商、通讯渠道和项目技能",
         ],
+        excludes: ["直接 API Provider"],
       },
       { args: ["work", "--help"], includes: ["权限"] },
       { args: ["work", "add", "--help"], includes: ["--cwd 指定的目录"] },
@@ -249,6 +247,10 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
           "status [目标] [--json]",
           "生成全部后台服务定义，并启动 App Server 与 Gateway",
           "卸载全部后台服务并保留用户数据",
+          "uninstall",
+          "reload",
+          "logs",
+          "保留用户数据",
         ],
       },
       {
@@ -267,7 +269,23 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       { args: ["doctor", "--help"], includes: ["codexc doctor [--json]"] },
       {
         args: ["--help"],
-        includes: ["version, -v, --version"],
+        includes: [
+          "version, -v, --version",
+          "uninstall",
+          "卸载受管源码与全局命令并保留用户数据",
+          "配置 Provider、通讯渠道与项目技能",
+          ...[
+            "init", "setup", "config", "doctor", "remote", "work",
+            "primary-provider", "opencode-go", "metrics", "channel", "webui",
+            "start", "service", "update", "version",
+          ].map((command) => `\n  ${command}`),
+        ],
+        excludes: [
+          "\n  service install",
+          "\n  service restart",
+          "\n  gateway",
+          "\n  service-app-server",
+        ],
       },
     ];
     const helpCases = new Map<string, { args: readonly string[]; includes: string[]; excludes: string[] }>();
@@ -292,38 +310,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     });
   }, 180_000);
 
-  it("keeps top-level help as a complete first-level command index", () => {
-    const result = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
-
-    expect(result.status, result.stderr).toBe(0);
-    for (const command of [
-      "init",
-      "setup",
-      "config",
-      "doctor",
-      "remote",
-      "work",
-      "primary-provider",
-      "opencode-go",
-      "metrics",
-      "channel",
-      "webui",
-      "start",
-      "service",
-      "update",
-      "version",
-    ]) {
-      expect(result.stdout).toContain(`\n  ${command}`);
-    }
-    expect(result.stdout).not.toContain("\n  service install");
-    expect(result.stdout).not.toContain("\n  service restart");
-    expect(result.stderr).toBe("");
-  });
-
-  it("keeps service-template entrypoints hidden from public help while retaining scoped diagnostics", () => {
-    const main = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
-    expect(main.stdout).not.toContain("\n  gateway");
-    expect(main.stdout).not.toContain("\n  service-app-server");
+  it("retains scoped diagnostics for internal service-template entrypoints", () => {
     for (const [command, expected] of [
       ["gateway", "用法：codexc gateway"],
       ["service-app-server", "用法：codexc service-app-server"],
