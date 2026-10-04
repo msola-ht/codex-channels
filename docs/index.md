@@ -398,6 +398,13 @@ Codex 设置读取沿用 `model/list` 查询已有目录；每次读取后立即
 Fast 只在用户之后通过 `/fast on` 明确开启时生效。
 模型、思考等级、Fast、计划清单工具、
 `multi_agent_v2` 的普通键级写入使用官方 `config/batchWrite` 事务。
+可选子代理预设入口为 [`codex-subagents-setup.mjs`](../scripts/codex-subagents-setup.mjs)：用户显式选择并确认后，
+以用户层修订保护写入 `features.multi_agent_v2.enabled`、`features.multi_agent_v2.default_wait_timeout_ms`、
+`agents.default_subagent_model` 和 `agents.default_subagent_reasoning_effort`；全局 `AGENTS.md` 规则为独立文件写入，
+不新增 RPC，不纳入安装、更新或核心默认值配置。字段依据固定版本
+[`config.schema.json`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/config.schema.json)，
+验证见 [`codex-subagents-setup.test.ts`](../tests/codex-subagents-setup.test.ts) 和
+[`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts)。
 Codex 原生角色的 Provider、凭据、目录与权限继承父线程；本项目不提供第三方子代理配置入口。
 官方行为见锁定版本的
 [`role.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/src/agent/role.rs) 与

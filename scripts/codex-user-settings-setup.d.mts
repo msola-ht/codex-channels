@@ -8,6 +8,7 @@ export function runCodexUserSettingsSetup(options?: {
     isCancel(value: unknown): boolean;
   };
   defaultsSetup?: typeof import("./codex-defaults-setup.mjs").runCodexDefaultsSetup;
+  subagentsSetup?: typeof import("./codex-subagents-setup.mjs").runCodexSubagentsSetup;
   loadSettings?: typeof import("./codex-user-settings-management.mjs").loadCodexUserSettings;
   updateSetting?: typeof import("./codex-user-settings-management.mjs").updateCodexUserSetting;
   createClient?: import("./codex-user-settings-management.mjs").CodexUserSettingsDependencies["createClient"];

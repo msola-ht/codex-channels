@@ -52,6 +52,7 @@
     "scripts/codex-user-config.mjs",
     "scripts/codex-user-settings-management.mjs",
     "scripts/codex-user-settings-setup.mjs",
+    "scripts/codex-subagents-setup.mjs",
     "scripts/config-activation-notice.mjs",
     "scripts/config-activation-result.mjs",
     "scripts/config-advanced-menu.mjs",

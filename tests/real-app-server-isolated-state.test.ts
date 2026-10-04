@@ -1547,6 +1547,74 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
+  it("persists recommended subagent defaults through a versioned official config transaction", async () => {
+    const original = await ownerClient.readUserConfigSnapshot();
+    try {
+      await ownerClient.writeUserConfigEdits([
+        {
+          keyPath: "features.multi_agent_v2",
+          value: {
+            enabled: false,
+            default_wait_timeout_ms: 30_000,
+            max_concurrent_threads_per_session: 4,
+          },
+        },
+        { keyPath: "agents.default_subagent_model", value: "gpt-6-luna" },
+        { keyPath: "agents.default_subagent_reasoning_effort", value: "low" },
+        { keyPath: "agents.max_depth", value: 2 },
+        {
+          keyPath: "agents.contract_subagents",
+          value: { description: "Keep this existing native role" },
+        },
+      ], { expectedVersion: original.version });
+      const before = await peerClient.readUserConfigSnapshot();
+      const beforeFeatures = before.config.features as Record<string, unknown>;
+      const beforeMultiAgent = beforeFeatures.multi_agent_v2 as Record<string, unknown>;
+      const beforeAgents = before.config.agents as Record<string, unknown>;
+
+      await ownerClient.writeUserConfigEdits([
+        { keyPath: "features.multi_agent_v2.enabled", value: true },
+        { keyPath: "features.multi_agent_v2.default_wait_timeout_ms", value: 600_000 },
+        { keyPath: "agents.default_subagent_model", value: "gpt-6.1-sol" },
+        { keyPath: "agents.default_subagent_reasoning_effort", value: "high" },
+      ], { expectedVersion: before.version });
+
+      const after = await peerClient.readUserConfigSnapshot();
+      expect(after.version).not.toBe(before.version);
+      expect(after.config).toEqual({
+        ...before.config,
+        features: {
+          ...beforeFeatures,
+          multi_agent_v2: {
+            ...beforeMultiAgent,
+            enabled: true,
+            default_wait_timeout_ms: 600_000,
+          },
+        },
+        agents: {
+          ...beforeAgents,
+          default_subagent_model: "gpt-6.1-sol",
+          default_subagent_reasoning_effort: "high",
+        },
+      });
+      expect(parse(readFileSync(join(codexHome, "config.toml"), "utf8")))
+        .toEqual(after.config);
+      await expect(peerClient.writeUserConfigEdits([
+        { keyPath: "agents.default_subagent_model", value: "gpt-6-luna" },
+      ], { expectedVersion: before.version })).rejects.toMatchObject({
+        data: { config_write_error_code: "configVersionConflict" },
+      });
+      expect(await ownerClient.readUserConfigSnapshot()).toEqual(after);
+    } finally {
+      const current = await ownerClient.readUserConfigSnapshot();
+      await ownerClient.writeUserConfigEdits([
+        { keyPath: "features", value: original.config.features ?? null },
+        { keyPath: "agents", value: original.config.agents ?? null },
+      ], { expectedVersion: current.version });
+    }
+    expect((await peerClient.readUserConfigSnapshot()).config).toEqual(original.config);
+  }, 15_000);
+
   it("persists and removes an agent role through the official user config transaction", async () => {
     const configPath = join(codexHome, "config.toml");
     const roleConfigPath = join(codexHome, "contract-agent.config.toml");
