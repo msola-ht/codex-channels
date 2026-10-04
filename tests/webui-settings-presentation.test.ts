@@ -37,6 +37,113 @@ describe("WebUI 状态与关联范围展示", () => {
     expect(result.stale).toContain("snapshot-load-failed");
     expect(result.button).toMatch(/\sdisabled(?:=|\s|>)/u);
   }, 30_000);
+
+  it("设置、模型和渠道文案双语渲染且保留配置及用户数据", () => {
+    const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+      import {createServer} from "vite";
+      import {createElement as h} from "react";
+      import {renderToStaticMarkup} from "react-dom/server";
+      const server=await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent"});
+      try {
+        const {LanguageContext}=await server.ssrLoadModule("/src/hooks/language-context.ts");
+        const {GatewaySettingsCard}=await server.ssrLoadModule("/src/components/settings/gateway-settings-card.tsx");
+        const {AppServerSettingsCard}=await server.ssrLoadModule("/src/components/settings/app-server-settings-card.tsx");
+        const {ProviderSettingsManagement}=await server.ssrLoadModule("/src/components/settings/provider-settings-management.tsx");
+        const {ProviderStatusCard,ChannelStatusCard}=await server.ssrLoadModule("/src/components/settings/provider-channel-status.tsx");
+        const {ToolAccessSettings}=await server.ssrLoadModule("/src/components/settings/tool-access-settings.tsx");
+        const {ManagedSelect}=await server.ssrLoadModule("/src/components/settings/settings-controls.tsx");
+        const unexpected=()=>{throw Error("language rendering must not invoke management actions")};
+        const render=(component,props,language)=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage:unexpected}},h(component,props)));
+        const shared={loading:false,error:null,actionError:null,saving:false,busy:false,pendingSetting:null,pendingPreview:null,lastAppliedSetting:null,previewSetting:unexpected,confirmSetting:unexpected,cancelSetting:unexpected,refetch:unexpected,mutate:unexpected,confirm:unexpected,cancel:unexpected,clearError:unexpected};
+        const managedSettings={revision:"r1",system:{sandbox:"workspace-write",approvalTimeoutSeconds:300,idleReleaseMinutes:5,modelTrafficMode:"production",modelTrafficDumpEnabled:false,modelTrafficRetentionDays:3,defaultWorkspace:"main",workspaces:[{id:"main",name:"Workspace main"}],officialTuiIdentity:{clientIdentity:{name:"fixture-client"},terminalIdentity:"fixture-terminal/1",upstreamUserAgent:"fixture-agent/1",defaults:{name:"codex",version:"fixture-version"}}},display:{operationUpdates:"compact",planUpdatesEnabled:true,reasoningEnabled:false},telegram:{configured:true,messageFormat:"rich"},automation:{scheduledTasksEnabled:false},advanced:{loggingLevel:"info",pluginApiEnabled:false}};
+        const codexSettings={version:"fixture-version",provider:"fixture-provider",defaultsEditable:true,models:[{model:"model-fixture",displayName:"Fixture model",defaultReasoningEffort:"high",reasoningEfforts:[{effort:"high",description:"Fixture effort"}]}],defaults:{model:"model-fixture",reasoningEffort:"high",fastEnabled:false,webSearch:"cached",updatePlanEnabled:true,autoRecapEnabled:false},compact:{contextWindow:64000,autoCompactPercent:80}};
+        const settings={defaults:{model:"model-fixture",reasoningEffort:"high"},managedProviders:[{id:"fixture-provider",displayName:"Fixture provider",model:"model-fixture",reasoningEffort:"high",models:[{id:"model-fixture",displayName:"Fixture model",contextWindow:64000,maxContextWindow:128000,reasoningEfforts:[{effort:"high",description:"Fixture effort"}]}]}],modelWindow:[{id:"model-fixture",displayName:"Fixture model",contextWindow:64000,maxContextWindow:128000,providers:["fixture-provider"],windowPercent:50,conflicts:true,perProvider:{"fixture-provider":50,"fixture-other":75}}],customProviders:{fixedCandidates:[{id:"custom-fixture",displayName:"Fixture custom",baseUrl:"https://fixture.invalid/v1",active:true,state:"configured",kind:"custom"}],switchingProviders:[],backupCandidates:[]}};
+        const providerState={primary:{kind:"official",id:"openai",displayName:"OpenAI"},official:{authenticated:true},defaults:{model:"model-fixture",reasoningEffort:"high"},configVersion:7,providers:[{id:"custom-fixture",displayName:"Fixture custom",kind:"custom",mode:"switching",model:"model-fixture",modelCount:2,selected:false,state:"configured"},{id:"backup-fixture",displayName:"Fixture backup",kind:"custom",mode:"backup",model:null,modelCount:null,selected:false,state:"backup"}]};
+        const channels=[{id:"feishu",displayName:"Feishu",enabled:true},{id:"telegram",displayName:"Telegram",enabled:false}];
+        const toolFields=[
+          {path:["mcp_servers","my-custom","tools","some_tool","output_token_limit"],label:"MCP my-custom / some_tool：输出 token 上限",type:"integer",userValue:1000,mergedValue:2000},
+          {path:["plugins","my-plugin","mcp_servers","srv","enabled"],label:"插件 my-plugin / srv：启用",type:"boolean",userValue:true,mergedValue:true},
+          {path:["plugins","my-plugin","mcp_servers","srv","tools","some_tool","output_token_limit"],label:"插件 my-plugin / srv / some_tool：输出 token 上限",type:"integer",userValue:3000,mergedValue:4000},
+        ];
+        const before=JSON.stringify({managedSettings,codexSettings,settings,providerState,channels,toolFields});
+        const presentation=Object.fromEntries(["zh","en","zhAgain"].map(key=>{
+          const language=key==="en"?"en":"zh";
+          return [key,{
+            gateway:Object.fromEntries(["general","permissions","network","data","display"].map(section=>[section,render(GatewaySettingsCard,{management:{...shared,managedSettings},section,upstreamAgent:{data:{effectiveUserAgent:"fixture-agent/1",recentRequestUserAgent:"fixture-agent/1",source:"override"},error:null,loading:false}},language)])),
+            codex:Object.fromEntries(["general","models","context"].map(section=>[section,render(AppServerSettingsCard,{management:{...shared,codexSettings},section},language)])),
+            provider:Object.fromEntries(["providers","models","context"].map(section=>[section,render(ProviderSettingsManagement,{management:{...shared,settings},section},language)])),
+            tools:Object.fromEntries(toolFields.map(field=>[field.path.join("."),render(ToolAccessSettings,{management:{...shared,codexSettings:{...codexSettings,toolSettings:{mergedAvailable:true,fields:[field]}}}},language)])),
+            status:render(ProviderStatusCard,{state:providerState},language),
+            channels:render(ChannelStatusCard,{channels},language),
+            emptyChannels:render(ChannelStatusCard,{channels:[]},language),
+            unconfigured:render(ManagedSelect,{label:"Fixture",value:"",options:[],disabled:false,onChange:unexpected},language),
+          }];
+        }));
+        const userData=render(ProviderStatusCard,{state:{...providerState,primary:{...providerState.primary,id:"用户-provider",displayName:"用户名称"},defaults:{model:"用户-model",reasoningEffort:"high"},providers:[]}},"en");
+        const translatedChannel=render(ChannelStatusCard,{channels:[{id:"feishu",displayName:"飞书",enabled:true}]},"en");
+        console.log(JSON.stringify({presentation,userData,translatedChannel,unchanged:before===JSON.stringify({managedSettings,codexSettings,settings,providerState,channels,toolFields})}));
+      } finally {await server.close();}
+    `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000, maxBuffer: 2 * 1024 * 1024 });
+    type Presentation = {
+      gateway: Record<string, string>; codex: Record<string, string>; provider: Record<string, string>; tools: Record<string, string>;
+      status: string; channels: string; emptyChannels: string; unconfigured: string;
+    };
+    const { presentation, userData, translatedChannel, unchanged } = JSON.parse(output) as {
+      presentation: Record<"zh" | "en" | "zhAgain", Presentation>;
+      userData: string; translatedChannel: string; unchanged: boolean;
+    };
+    expect(unchanged).toBe(true);
+    expect(presentation.zhAgain).toEqual(presentation.zh);
+    const english = presentation.en;
+    for (const html of [
+      ...Object.values(english.gateway), ...Object.values(english.codex), ...Object.values(english.provider), ...Object.values(english.tools),
+      english.status, english.channels, english.emptyChannels, english.unconfigured,
+    ]) {
+      expect(html).not.toMatch(/[\u4e00-\u9fff]/u);
+      expect(html).not.toMatch(/\b(?:settingsFields|settingsUi|managementUi|modelManagement|channelSettings)\.[A-Za-z]/u);
+      expect(html).not.toContain("undefined");
+    }
+    for (const html of [presentation.zh.gateway.network!, english.gateway.network!]) {
+      expect(html).toContain('value="fixture-client"');
+      expect(html).toContain('value="fixture-agent/1"');
+      expect(html).toContain('value="fixture-terminal/1"');
+    }
+    for (const html of [presentation.zh.codex.context!, english.codex.context!]) {
+      expect(html).toContain('value="64000"');
+      expect(html).toContain('value="80"');
+    }
+    for (const html of [presentation.zh.provider.providers!, english.provider.providers!]) {
+      expect(html).toContain("custom-fixture");
+      expect(html).toContain("https://fixture.invalid/v1");
+    }
+    for (const html of [presentation.zh.provider.context!, english.provider.context!]) {
+      expect(html).toContain("fixture-provider");
+      expect(html).toContain("fixture-other 75%");
+      expect(html).toContain('value="50"');
+    }
+    expect(presentation.zh.unconfigured).toContain("未配置");
+    expect(english.unconfigured).toContain("Not configured");
+    expect(presentation.zh.channels).toContain("已启用");
+    expect(english.channels).toContain("Enabled");
+    expect(english.channels).toContain("Configured, disabled");
+    expect(userData).toContain("用户名称");
+    expect(userData).toContain("用户-provider");
+    expect(userData).toContain("用户-model");
+    expect(translatedChannel).toContain("Feishu");
+    expect(translatedChannel).not.toContain("飞书");
+    expect(translatedChannel).toContain("Enabled");
+    for (const language of ["zh", "en"] as const) {
+      const tools = presentation[language].tools;
+      expect(tools["mcp_servers.my-custom.tools.some_tool.output_token_limit"]).toContain("my-custom");
+      expect(tools["mcp_servers.my-custom.tools.some_tool.output_token_limit"]).toContain("some_tool");
+      expect(tools["mcp_servers.my-custom.tools.some_tool.output_token_limit"]).toContain('value="1000"');
+      expect(tools["plugins.my-plugin.mcp_servers.srv.enabled"]).toContain("my-plugin");
+      expect(tools["plugins.my-plugin.mcp_servers.srv.enabled"]).toContain("srv");
+      expect(tools["plugins.my-plugin.mcp_servers.srv.tools.some_tool.output_token_limit"]).toContain("some_tool");
+      expect(tools["plugins.my-plugin.mcp_servers.srv.tools.some_tool.output_token_limit"]).toContain('value="3000"');
+    }
+  }, 30_000);
+
   describe("确认弹窗展示", () => {
     let confirmations: { cancellation: string[]; removal: Record<string, string | boolean | number[]> };
 

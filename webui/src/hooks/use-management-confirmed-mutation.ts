@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import { ApiClientError } from "@/lib/api"
 import { useApi } from "@/hooks/use-api"
+import { useTranslation } from "@/hooks/use-translation"
+import { translateApiError, translateApiErrorCode } from "@/lib/i18n/translate"
 
 export interface PendingManagementMutation<Input, Preview> {
   input: Input
@@ -21,12 +23,12 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
   retainDataOnError?: boolean
 }) {
   const request = useApi(load, [], { retainDataOnError })
+  const { t } = useTranslation()
   const { refetch } = request
   const operation = useRef<AbortController | null>(null)
   useEffect(() => () => operation.current?.abort(), [])
   const [busy, setBusy] = useState(false)
   const [actionErrorCode, setActionErrorCode] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
   const [pendingPreview, setPendingPreview] = useState<PendingManagementMutation<Input, Preview> | null>(null)
 
   useEffect(() => { if (request.error !== null && operation.current === null) setPendingPreview(null) }, [request.error, busy])
@@ -36,7 +38,6 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
     const controller = new AbortController()
     operation.current = controller
     setBusy(true)
-    setActionError(null)
     setActionErrorCode(null)
     try {
       const result = await preview(input, controller.signal)
@@ -46,8 +47,7 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
     } catch (error) {
       if (controller.signal.aborted) return null
       setPendingPreview(null)
-      setActionErrorCode(error instanceof ApiClientError ? error.code : "unknown")
-      setActionError(error instanceof Error ? error.message : String(error))
+      setActionErrorCode(error instanceof ApiClientError ? error.code ?? "unknown" : "unknown")
       return null
     } finally {
       if (operation.current === controller) {
@@ -63,7 +63,6 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
     const controller = new AbortController()
     operation.current = controller
     setBusy(true)
-    setActionError(null)
     setActionErrorCode(null)
     try {
       const result = await apply(pending.input, pending.confirmationToken, controller.signal, pending.preview)
@@ -74,8 +73,7 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
     } catch (error) {
       if (controller.signal.aborted) return null
       setPendingPreview(null)
-      setActionErrorCode(error instanceof ApiClientError ? error.code : "unknown")
-      setActionError(error instanceof Error ? error.message : String(error))
+      setActionErrorCode(error instanceof ApiClientError ? error.code ?? "unknown" : "unknown")
       return null
     } finally {
       if (operation.current === controller) {
@@ -88,16 +86,16 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
   const cancel = useCallback(() => {
     if (operation.current !== null || busy) return
     setPendingPreview(null)
-    setActionError(null)
     setActionErrorCode(null)
   }, [busy])
 
-  const clearError = useCallback(() => { setActionError(null); setActionErrorCode(null) }, [])
+  const clearError = useCallback(() => { setActionErrorCode(null) }, [])
   return {
     ...request,
+    error: translateApiError(t, request.error, request.errorCode),
     busy,
     pendingPreview,
-    actionError,
+    actionError: actionErrorCode === null ? null : translateApiErrorCode(t, actionErrorCode),
     actionErrorCode,
     mutate,
     confirm,

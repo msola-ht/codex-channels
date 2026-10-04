@@ -179,7 +179,7 @@ describe("WebUI component interaction contracts", () => {
     expect(input(result.toolInvalidAfterSnapshot!, "tool-setting-value")).toContain('aria-invalid="true"');
     expect(result.toolCorrected).not.toContain('aria-invalid="true"');
     expect(result.toolCorrected).not.toContain('id="tool-setting-value-error"');
-    expect(JSON.parse(result.toolPreview!)).toEqual({ value: { kind: "tool-access", path: ["tools", "allowed"], value: ["read"] }, label: "Allowed tools" });
+    expect(JSON.parse(result.toolPreview!)).toEqual({ value: { kind: "tool-access", path: ["tools", "allowed"], value: ["read"] }, label: "tools.allowed" });
     expect(JSON.parse(result.toolRemoved!).value.value).toBeNull();
     expect(input(result.toolNumberInvalid!, "tool-setting-value")).toContain('aria-invalid="true"');
     expect(result.toolNumberInvalid).toContain("请输入有效数字。");
@@ -205,7 +205,7 @@ describe("WebUI component interaction contracts", () => {
     expect(input(result.invalidPercentAfterOtherSnapshot!, "codex-context-window")).toContain('value="2000"');
     expect(input(result.invalidPercentAfterOtherSnapshot!, "codex-compact-percent")).toContain('value="95"');
     expect(input(result.invalidPercentAfterOtherSnapshot!, "codex-compact-percent")).toContain('aria-invalid="true"');
-    expect(JSON.parse(result.compactPreview!)).toEqual({ value: { kind: "model-compact", contextWindow: 1000, autoCompactPercent: 80 }, label: "模型上下文与自动压缩" });
+    expect(JSON.parse(result.compactPreview!)).toEqual({ value: { kind: "model-compact", contextWindow: 1000, autoCompactPercent: 80 }, label: { key: "settingsFields.contextCompaction" } });
     expect(JSON.parse(result.compactRemoved!).value).toEqual({ kind: "model-compact", contextWindow: null, autoCompactPercent: null });
     expect(result.compactValid).not.toContain('aria-invalid="true"');
     expect(input(result.compactDisabled!, "codex-context-window")).toContain('disabled=""');

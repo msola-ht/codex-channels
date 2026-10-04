@@ -4,6 +4,7 @@ import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-managemen
 import { useApi, type UseApiState } from "@/hooks/use-api"
 import { useManagementTasks, useManagementTaskRefresh } from "@/hooks/use-management-tasks"
 import { useTranslation } from "@/hooks/use-translation"
+import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { fetchManagementProviders, fetchManagementServices, fetchUpstreamUserAgent, fetchSettingsSummary } from "@/lib/api"
 import { SettingsPageFrame } from "@/components/settings/settings-page-frame"
 import { GatewaySettingsSection } from "@/components/settings/gateway-settings-section"
@@ -63,6 +64,7 @@ export function NetworkSettingsPage() {
 }
 
 export function DataSettingsPage() {
+  const { t } = useTranslation()
   const summary = useApi(fetchSettingsSummary, [])
   const reloadSummary = summary.refetch
   const gateway = useSettingsManagement()
@@ -77,7 +79,7 @@ export function DataSettingsPage() {
       <GatewaySettingsCard management={gateway} section="data" />
       <WebuiDataSettingsCard management={gateway} section="data" />
     </GatewaySettingsSection>
-    {providers.error && <SettingsError message={providers.error} retry={reloadProviders} />}
+    {providers.error && <SettingsError message={translateApiErrorCode(t, providers.errorCode)} retry={reloadProviders} />}
     <TaskErrors tasks={tasks} />
     <ManagementTaskControls tasks={tasks} section="data" providerIds={[...(providers.data?.primary.id ? [providers.data.primary.id] : []), ...(providers.data?.providers.map(provider => provider.id) ?? [])]} />
     {tasks.tasks.length > 0 && <RecentManagementTasks tasks={tasks} />}
@@ -96,7 +98,7 @@ export function ServiceSettingsPage() {
   useManagementTaskRefresh(tasks, reloadServices)
   return <SettingsPageFrame title="navigation.services" busy={services.loading || tasksBusy(tasks) || summary.loading} refresh={refresh}>
     <TaskErrors tasks={tasks} />
-    {services.error ? <SettingsError message={services.error} retry={reloadServices} /> : !services.data ? <LoadingSettingsCard title={t("navigation.services")} /> : <Card>
+    {services.error ? <SettingsError message={translateApiErrorCode(t, services.errorCode)} retry={reloadServices} /> : !services.data ? <LoadingSettingsCard title={t("navigation.services")} /> : <Card>
       <CardHeader><CardTitle>{t("navigation.services")}</CardTitle><CardDescription>{t("navigation.servicesHint")}</CardDescription></CardHeader>
       <CardContent><ManagedServices services={{ ...services.data, entries: services.data.entries.filter(service => service.target !== "model-relay") }} tasks={tasks} showTasks={false} /></CardContent>
     </Card>}

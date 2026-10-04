@@ -25,6 +25,14 @@ export function translate(
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  management_unavailable: "settingsUi.unavailable",
+  codex_settings_unavailable: "settingsUi.unavailable",
+  provider_state_unavailable: "settingsUi.unavailable",
+  account_state_unavailable: "settingsUi.unavailable",
+  invalid_json: "settingsUi.invalid",
+  invalid_provider_operation: "settingsUi.invalid",
+  invalid_account_operation: "settingsUi.invalid",
+  task_not_found: "settingsUi.taskMissing",
   logs_unavailable: "logs.unavailable",
   delivery_invalid: "delivery.invalid",
   delivery_unavailable: "delivery.unavailable",

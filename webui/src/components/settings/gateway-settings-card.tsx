@@ -11,6 +11,7 @@ import { ManagedInputRow, ManagedSelect, SettingsRow } from "@/components/settin
 import type { UseApiState } from "@/hooks/use-api"
 import type { GatewaySettingsController } from "@/lib/settings-management"
 import type { UpstreamUserAgentResponse } from "@/lib/types"
+import { translateApiErrorCode } from "@/lib/i18n/translate"
 
 export function GatewaySettingsCard({ management, upstreamAgent, section = "general" }: {
   management: GatewaySettingsController
@@ -38,22 +39,22 @@ export function GatewaySettingsCard({ management, upstreamAgent, section = "gene
   const effectiveUserAgent = upstreamAgent?.data?.effectiveUserAgent ?? null
   const recentRequestUserAgent = upstreamAgent?.data?.recentRequestUserAgent ?? null
   const upstreamAgentValue = upstreamAgent?.error != null
-    ? `读取失败：${upstreamAgent?.error}`
+    ? t("settingsFields.uaReadFailed", { message: translateApiErrorCode(t, upstreamAgent.errorCode) })
     : upstreamAgent?.data == null
-      ? "读取中…"
-      : effectiveUserAgent ?? "不可用：App Server 未运行，且未配置覆盖"
+      ? t("common.loading")
+      : effectiveUserAgent ?? t("settingsFields.uaUnavailable")
   const upstreamAgentSource = upstreamAgent?.error != null || upstreamAgent?.data == null
     ? null
     : upstreamAgent?.data.source === "override"
-      ? "显式覆盖"
-      : upstreamAgent?.data.source === "app-server" ? "App Server 生成" : null
+      ? t("settingsFields.explicitOverride")
+      : upstreamAgent?.data.source === "app-server" ? t("settingsFields.appServerGenerated") : null
   const upstreamAgentState = effectiveUserAgent === null || recentRequestUserAgent === null
     ? null
     : recentRequestUserAgent === effectiveUserAgent
-      ? "已生效（与最近一次请求一致）"
+      ? t("settingsFields.uaEffective")
       : upstreamAgent?.data?.source === "override"
-        ? "配置已保存，重启后生效"
-        : "与最近一次请求不一致"
+        ? t("settingsFields.uaRestartRequired")
+        : t("settingsFields.uaMismatch")
   const saveIdentity = () => {
     void management.previewSetting("system.official-tui-identity", {
       clientIdentity: {
@@ -63,53 +64,53 @@ export function GatewaySettingsCard({ management, upstreamAgent, section = "gene
       },
       upstreamUserAgent: upstreamUserAgent.trim() || null,
       terminalIdentity: terminalIdentity.trim() || null,
-    }, "官方 TUI 请求身份")
+    }, { key: "settingsFields.tuiIdentity" })
   }
 
   return <Card>
     <CardHeader><CardTitle>{t(section === "display" ? "navigation.channelDisplay" : section === "permissions" ? "navigation.gatewayPermissions" : section === "network" ? "navigation.gatewayNetwork" : section === "data" ? "navigation.gatewayData" : "navigation.gatewayGeneral")}</CardTitle><CardDescription>{t("navigation.configurationHint")}</CardDescription></CardHeader>
     <CardContent className="flex flex-col gap-5 text-sm">
       <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
-        {section === "permissions" && <ManagedSelect label="Sandbox" value={managedSettings.system.sandbox} options={[["read-only", "只读"], ["workspace-write", "工作区可写"]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.sandbox", value, "Sandbox")} />}
-        {section === "permissions" && <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.approval-timeout" ? management.lastAppliedSetting : null} label="审批超时（秒）" type="number" defaultValue={String(managedSettings.system.approvalTimeoutSeconds)} placeholder="30–3600" disabled={disabled} onBlur={(value) => void management.previewSetting("system.approval-timeout", Number(value), "审批超时")} />}
-        {section === "general" && <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.idle-release-minutes" ? management.lastAppliedSetting : null} label="空闲自动解除（分钟）" type="number" defaultValue={String(managedSettings.system.idleReleaseMinutes)} placeholder="0–1440，0 为关闭" disabled={disabled} onBlur={(value) => void management.previewSetting("system.idle-release-minutes", Number(value), "空闲自动解除")} />}
-        {section === "data" && <ManagedSelect label="记录调用详情" value={String(managedSettings.system.modelTrafficDumpEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.model-traffic-dump", value === "true", "记录调用详情")} />}
-        {section === "data" && <ManagedSelect description={t("capture.scope")} label={t("capture.mode")} value={managedSettings.system.modelTrafficMode} options={[["production", t("capture.production")], ["debug", t("capture.debug")]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.model-traffic-mode", value, t("capture.mode"))} />}
-        {section === "data" && <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.model-traffic-retention-days" ? management.lastAppliedSetting : null} label="调用记录保留天数" type="number" defaultValue={String(managedSettings.system.modelTrafficRetentionDays)} placeholder="0–36500，0 为关闭" disabled={disabled} onBlur={(value) => void management.previewSetting("system.model-traffic-retention-days", Number(value), "调用记录保留天数")} />}
-        {section === "permissions" && <ManagedSelect label="默认 Workspace" value={managedSettings.system.defaultWorkspace ?? ""} options={managedSettings.system.workspaces.map((workspace) => [workspace.id, workspace.name])} disabled={disabled || managedSettings.system.workspaces.length === 0} onChange={(value) => void management.previewSetting("system.default-workspace", value, "默认 Workspace")} />}
-        {section === "display" && <ManagedSelect label="Telegram 消息格式" value={managedSettings.telegram.messageFormat} options={[["html", "HTML"], ["rich", "富文本"]]} disabled={disabled || !managedSettings.telegram.configured} onChange={(value) => void management.previewSetting("telegram.message-format", value, "Telegram 消息格式")} />}
-        {section === "display" && <ManagedSelect label="操作详情" value={managedSettings.display.operationUpdates} options={[["full", "完整"], ["compact", "紧凑"], ["hidden", "隐藏"]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.operation-updates", value, "操作详情")} />}
-        {section === "display" && <ManagedSelect label="计划更新" value={String(managedSettings.display.planUpdatesEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.plan-updates", value === "true", "计划更新")} />}
-        {section === "display" && <ManagedSelect label="思考状态" value={String(managedSettings.display.reasoningEnabled)} options={[["true", "已启用"], ["false", "未启用（默认）"]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.reasoning", value === "true", "思考状态")} />}
-        {section === "general" && <ManagedSelect label="计划任务" value={String(managedSettings.automation.scheduledTasksEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("automation.scheduled-tasks", value === "true", "计划任务")} />}
-        {section === "data" && <ManagedSelect label="日志等级" value={managedSettings.advanced.loggingLevel} options={[["fatal", "fatal"], ["error", "error"], ["warn", "warn"], ["info", "info"], ["debug", "debug"], ["trace", "trace"]]} disabled={disabled} onChange={(value) => void management.previewSetting("advanced.logging-level", value, "日志等级")} />}
-        {section === "network" && <ManagedSelect label="Plugin API" value={String(managedSettings.advanced.pluginApiEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("advanced.plugin-api", value === "true", "Plugin API")} />}
+        {section === "permissions" && <ManagedSelect label="Sandbox" value={managedSettings.system.sandbox} options={[["read-only", t("settingsFields.readOnly")], ["workspace-write", t("settingsFields.workspaceWrite")]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.sandbox", value, { key: "settingsFields.sandbox" })} />}
+        {section === "permissions" && <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.approval-timeout" ? management.lastAppliedSetting : null} label={t("settingsFields.approvalTimeoutSeconds")} type="number" defaultValue={String(managedSettings.system.approvalTimeoutSeconds)} placeholder="30–3600" disabled={disabled} onBlur={(value) => void management.previewSetting("system.approval-timeout", Number(value), { key: "settingsFields.approvalTimeout" })} />}
+        {section === "general" && <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.idle-release-minutes" ? management.lastAppliedSetting : null} label={t("settingsFields.idleReleaseMinutes")} type="number" defaultValue={String(managedSettings.system.idleReleaseMinutes)} placeholder={t("settingsFields.idleReleasePlaceholder")} disabled={disabled} onBlur={(value) => void management.previewSetting("system.idle-release-minutes", Number(value), { key: "settingsFields.idleRelease" })} />}
+        {section === "data" && <ManagedSelect label={t("settingsFields.trafficDump")} value={String(managedSettings.system.modelTrafficDumpEnabled)} options={[["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.model-traffic-dump", value === "true", { key: "settingsFields.trafficDump" })} />}
+        {section === "data" && <ManagedSelect description={t("capture.scope")} label={t("capture.mode")} value={managedSettings.system.modelTrafficMode} options={[["production", t("capture.production")], ["debug", t("capture.debug")]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.model-traffic-mode", value, { key: "capture.mode" })} />}
+        {section === "data" && <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.model-traffic-retention-days" ? management.lastAppliedSetting : null} label={t("settingsFields.trafficRetentionDays")} type="number" defaultValue={String(managedSettings.system.modelTrafficRetentionDays)} placeholder={t("settingsFields.trafficRetentionPlaceholder")} disabled={disabled} onBlur={(value) => void management.previewSetting("system.model-traffic-retention-days", Number(value), { key: "settingsFields.trafficRetentionDays" })} />}
+        {section === "permissions" && <ManagedSelect label={t("settingsFields.defaultWorkspace")} value={managedSettings.system.defaultWorkspace ?? ""} options={managedSettings.system.workspaces.map((workspace) => [workspace.id, workspace.name])} disabled={disabled || managedSettings.system.workspaces.length === 0} onChange={(value) => void management.previewSetting("system.default-workspace", value, { key: "settingsFields.defaultWorkspace" })} />}
+        {section === "display" && <ManagedSelect label={t("settingsFields.telegramFormat")} value={managedSettings.telegram.messageFormat} options={[["html", "HTML"], ["rich", t("settingsFields.richText")]]} disabled={disabled || !managedSettings.telegram.configured} onChange={(value) => void management.previewSetting("telegram.message-format", value, { key: "settingsFields.telegramFormat" })} />}
+        {section === "display" && <ManagedSelect label={t("settingsFields.operationUpdates")} value={managedSettings.display.operationUpdates} options={[["full", t("settingsFields.full")], ["compact", t("settingsFields.compact")], ["hidden", t("settingsFields.hidden")]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.operation-updates", value, { key: "settingsFields.operationUpdates" })} />}
+        {section === "display" && <ManagedSelect label={t("settingsFields.planUpdates")} value={String(managedSettings.display.planUpdatesEnabled)} options={[["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.plan-updates", value === "true", { key: "settingsFields.planUpdates" })} />}
+        {section === "display" && <ManagedSelect label={t("settingsFields.reasoningStatus")} value={String(managedSettings.display.reasoningEnabled)} options={[["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabledDefault")]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.reasoning", value === "true", { key: "settingsFields.reasoningStatus" })} />}
+        {section === "general" && <ManagedSelect label={t("settingsFields.scheduledTasks")} value={String(managedSettings.automation.scheduledTasksEnabled)} options={[["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]]} disabled={disabled} onChange={(value) => void management.previewSetting("automation.scheduled-tasks", value === "true", { key: "settingsFields.scheduledTasks" })} />}
+        {section === "data" && <ManagedSelect label={t("settingsFields.loggingLevel")} value={managedSettings.advanced.loggingLevel} options={[["fatal", "fatal"], ["error", "error"], ["warn", "warn"], ["info", "info"], ["debug", "debug"], ["trace", "trace"]]} disabled={disabled} onChange={(value) => void management.previewSetting("advanced.logging-level", value, { key: "settingsFields.loggingLevel" })} />}
+        {section === "network" && <ManagedSelect label="Plugin API" value={String(managedSettings.advanced.pluginApiEnabled)} options={[["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]]} disabled={disabled} onChange={(value) => void management.previewSetting("advanced.plugin-api", value === "true", { key: "settingsFields.pluginApi" })} />}
       </FieldGroup>
 
       {section === "network" && <>
       <Separator />
       <section className="flex flex-col gap-3">
-        <div><h3 className="font-medium">官方 TUI 请求身份</h3><p className="text-xs text-muted-foreground">客户端身份、终端标识和上游 User-Agent 作为一组写入；全部留空使用默认官方 TUI 身份 {identityDefaults.name} / {identityDefaults.version} 并跟随 Codex CLI 升级，填写后写死为显式覆盖。</p></div>
+        <div><h3 className="font-medium">{t("settingsFields.tuiIdentity")}</h3><p className="text-xs text-muted-foreground">{t("settingsFields.tuiIdentityHint", { name: identityDefaults.name, version: identityDefaults.version })}</p></div>
         <FieldGroup className="grid gap-3 md:grid-cols-3">
-          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-name">名称</FieldLabel><Input id="tui-identity-name" value={identityName} disabled={disabled} maxLength={64} onChange={(event) => patch({ identityName: event.target.value })} placeholder={identityDefaults.name} /></Field>
-          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-title">标题</FieldLabel><Input id="tui-identity-title" value={identityTitle} disabled={disabled} maxLength={128} onChange={(event) => patch({ identityTitle: event.target.value })} placeholder="可选" /></Field>
-          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-version">版本</FieldLabel><Input id="tui-identity-version" value={identityVersion} disabled={disabled} maxLength={64} onChange={(event) => patch({ identityVersion: event.target.value })} placeholder={identityDefaults.version} /></Field>
+          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-name">{t("settingsFields.identityName")}</FieldLabel><Input id="tui-identity-name" value={identityName} disabled={disabled} maxLength={64} onChange={(event) => patch({ identityName: event.target.value })} placeholder={identityDefaults.name} /></Field>
+          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-title">{t("settingsFields.identityTitle")}</FieldLabel><Input id="tui-identity-title" value={identityTitle} disabled={disabled} maxLength={128} onChange={(event) => patch({ identityTitle: event.target.value })} placeholder={t("settingsFields.optional")} /></Field>
+          <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-version">{t("settingsFields.identityVersion")}</FieldLabel><Input id="tui-identity-version" value={identityVersion} disabled={disabled} maxLength={64} onChange={(event) => patch({ identityVersion: event.target.value })} placeholder={identityDefaults.version} /></Field>
         </FieldGroup>
         <Field data-disabled={disabled}>
-          <FieldLabel htmlFor="tui-terminal-identity">终端标识</FieldLabel>
-          <Input id="tui-terminal-identity" value={terminalIdentity} disabled={disabled} maxLength={64} onChange={(event) => patch({ terminalIdentity: event.target.value })} placeholder="留空由 App Server 自行探测" />
-          <FieldDescription>App Server 由服务进程启动、自身没有终端，缺省时模型上游 UA 的终端标识为 unknown；通常由 codexc config、安装或更新服务时按运行命令的终端自动写入，也可在此填写「终端名」或「终端名/版本」（如 iTerm.app/3.5.14），写入其进程环境并在重启后生效。</FieldDescription>
+          <FieldLabel htmlFor="tui-terminal-identity">{t("settingsFields.terminalIdentity")}</FieldLabel>
+          <Input id="tui-terminal-identity" value={terminalIdentity} disabled={disabled} maxLength={64} onChange={(event) => patch({ terminalIdentity: event.target.value })} placeholder={t("settingsFields.terminalIdentityPlaceholder")} />
+          <FieldDescription>{t("settingsFields.terminalIdentityHint")}</FieldDescription>
         </Field>
-        <Field data-disabled={disabled}><FieldLabel htmlFor="tui-upstream-user-agent">上游 User-Agent</FieldLabel><Input id="tui-upstream-user-agent" value={upstreamUserAgent} disabled={disabled} maxLength={512} onChange={(event) => patch({ upstreamUserAgent: event.target.value })} placeholder="留空透传官方 TUI UA" /></Field>
-        <Button className="self-start" variant="outline" disabled={disabled} onClick={saveIdentity}>保存请求身份</Button>
-        <SettingsRow label="当前模型上游 User-Agent" value={upstreamAgentValue} code />
-        {upstreamAgentSource === null ? null : <SettingsRow label="UA 取值来源" value={upstreamAgentSource} />}
+        <Field data-disabled={disabled}><FieldLabel htmlFor="tui-upstream-user-agent">{t("settingsFields.upstreamUserAgent")}</FieldLabel><Input id="tui-upstream-user-agent" value={upstreamUserAgent} disabled={disabled} maxLength={512} onChange={(event) => patch({ upstreamUserAgent: event.target.value })} placeholder={t("settingsFields.upstreamUserAgentPlaceholder")} /></Field>
+        <Button className="self-start" variant="outline" disabled={disabled} onClick={saveIdentity}>{t("settingsFields.saveIdentity")}</Button>
+        <SettingsRow label={t("settingsFields.currentUserAgent")} value={upstreamAgentValue} code />
+        {upstreamAgentSource === null ? null : <SettingsRow label={t("settingsFields.uaSource")} value={upstreamAgentSource} />}
         <SettingsRow
-          label="最近一次请求实际使用"
-          value={recentRequestUserAgent ?? "无请求样本"}
+          label={t("settingsFields.recentUserAgent")}
+          value={recentRequestUserAgent ?? t("settingsFields.noRequestSample")}
           code={recentRequestUserAgent !== null}
         />
-        {upstreamAgentState === null ? null : <SettingsRow label="生效状态" value={upstreamAgentState} />}
+        {upstreamAgentState === null ? null : <SettingsRow label={t("settingsFields.activationState")} value={upstreamAgentState} />}
       </section>
       </>}
     </CardContent>

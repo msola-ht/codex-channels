@@ -20,6 +20,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { useTranslation } from "@/hooks/use-translation"
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import type { PendingSetting } from "@/lib/settings-management"
+import type { Translate } from "@/lib/i18n/messages"
 
 export function ManagementConfirmationDialog({
   open,
@@ -88,6 +89,7 @@ export function ManagedInputRow({ id, label, defaultValue, value, placeholder, d
 }
 
 export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCancel }: { pending: PendingSetting | null; saving: boolean; loading?: boolean; onConfirm: () => void; onCancel: () => void }) {
+  const { t } = useTranslation()
   const destructive = pending !== null
     && pending.value !== null
     && typeof pending.value === "object"
@@ -96,8 +98,8 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
   return (
     <ManagementConfirmationDialog
       open={pending !== null}
-      title="确认配置修改"
-      description="确认后写入对应配置；下方显示实际生效方式。"
+      title={t("settingsUi.confirmTitle")}
+      description={t("settingsUi.confirmDescription")}
       saving={saving}
       loading={loading}
       confirmVariant={destructive ? "destructive" : "default"}
@@ -105,10 +107,10 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
       onCancel={onCancel}
     >
       {pending !== null ? <>
-          <p>{pending.label}将从“{formatPreviewValue(pending.before)}”改为“{formatPreviewValue(pending.value)}”。</p>
-          <p className="text-muted-foreground">生效方式：{formatActivation(pending.activation)}</p>
+          <p>{t("settingsUi.change", { label: typeof pending.label === "string" ? pending.label : t(pending.label.key, pending.label.params), before: formatPreviewValue(pending.before), after: formatPreviewValue(pending.value) })}</p>
+          <p className="text-muted-foreground">{t("settingsUi.activation", { value: formatActivation(pending.activation, t) })}</p>
           {pending.activation.commands.length > 0
-            ? <p className="text-muted-foreground">{activationCommandLabel(pending.activation)}：{pending.activation.commands.join("；")}</p>
+            ? <p className="text-muted-foreground">{t(pending.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: pending.activation.commands.join("; ") })}</p>
             : null}
         </> : null}
     </ManagementConfirmationDialog>
@@ -116,14 +118,15 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
 }
 
 export function ManagedSelect({ label, value, options, disabled, onChange, description }: { description?: string; label: string; value: string; options: string[][]; disabled: boolean; onChange: (value: string) => void }) {
+  const { t } = useTranslation()
   const selectId = useId()
   const nonEmptyOptions = options.filter(([option]) => option !== "")
   const effectiveOptions = value !== "" && !nonEmptyOptions.some(([option]) => option === value) ? [[value, value], ...nonEmptyOptions] : nonEmptyOptions
   const labelContent = <FieldLabel className="text-muted-foreground" htmlFor={selectId}>{label}</FieldLabel>
   return <Field orientation="responsive" data-disabled={disabled}>
     {description ? <FieldContent className="min-w-0">{labelContent}<FieldDescription id={`${selectId}-description`}>{description}</FieldDescription></FieldContent> : labelContent}
-    <Select items={[{ value: null, label: "未配置" }, ...effectiveOptions.map(([value, label]) => ({ value, label }))]} value={value || null} disabled={disabled} onValueChange={next => { if (next !== null) onChange(next) }}>
-      <SelectTrigger id={selectId} aria-describedby={description ? `${selectId}-description` : undefined} size="sm" className="w-full sm:w-[160px]"><SelectValue placeholder={value === "" ? "未配置" : undefined} /></SelectTrigger>
+    <Select items={[{ value: null, label: t("settingsUi.notConfigured") }, ...effectiveOptions.map(([value, label]) => ({ value, label }))]} value={value || null} disabled={disabled} onValueChange={next => { if (next !== null) onChange(next) }}>
+      <SelectTrigger id={selectId} aria-describedby={description ? `${selectId}-description` : undefined} size="sm" className="w-full sm:w-[160px]"><SelectValue placeholder={value === "" ? t("settingsUi.notConfigured") : undefined} /></SelectTrigger>
       {effectiveOptions.length > 0 ? <SelectContent><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectGroup></SelectContent> : null}
     </Select>
   </Field>
@@ -134,39 +137,35 @@ function formatPreviewValue(value: unknown): string {
   return String(value)
 }
 
-function formatActivation(activation: PendingSetting["activation"]): string {
-  if (activation.status === "none") return "当前值未变化"
+function formatActivation(activation: PendingSetting["activation"], t: Translate): string {
+  if (activation.status === "none") return t("settingsUi.unchanged")
   if (activation.status === "next-thread" && activation.target === "codex") {
-    return "新建或重新加载的 Thread 生效；当前已加载的 Thread 不变，无需重启服务"
+    return t("settingsUi.nextThread")
   }
   if (activation.status === "next-tui" && activation.target === "codex") {
-    return "新启动的 TUI 生效；无需重启后台服务"
+    return t("settingsUi.nextTui")
   }
   if (activation.status === "next-thread-and-tui" && activation.target === "codex") {
-    return "会话设置由新建或重新加载的 Thread 读取，TUI 设置由新启动的 TUI 读取；当前已加载的 Thread 不变，无需重启后台服务"
+    return t("settingsUi.nextThreadAndTui")
   }
   if (activation.status === "reload" && activation.target === "gateway") {
-    return "Gateway 自动热加载"
+    return t("settingsUi.reloadGateway")
   }
   if (activation.status === "restart" && activation.target === "gateway") {
-    return "后台 Gateway 自动重启；前台 Gateway 需重新启动"
+    return t("settingsUi.restartGateway")
   }
   if (activation.status === "restart" && activation.target === "app-server") {
-    return "重启 App Server"
+    return t("settingsUi.restartAppServer")
   }
   if (activation.status === "restart" && activation.target === "all") {
-    return "重启 Gateway 与 App Server"
+    return t("settingsUi.restartAll")
   }
   if (activation.status === "restart" && activation.target === "app-server-gateway-webui") {
-    return "重启 App Server 与 WebUI；托管网关自动重启，直接运行的网关需重新执行原启动命令"
+    return t("settingsUi.restartAllWebui")
   }
   if (activation.status === "restart" && activation.target === "webui") {
-    return "重启 WebUI"
+    return t("settingsUi.restartWebui")
   }
-  if (activation.status === "reinstall-required") return "重新安装服务定义"
+  if (activation.status === "reinstall-required") return t("settingsUi.reinstall")
   return `${activation.status} / ${activation.target}`
-}
-
-function activationCommandLabel(activation: PendingSetting["activation"]): string {
-  return activation.status === "reload" ? "手动触发" : "命令"
 }

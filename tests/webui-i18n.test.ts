@@ -731,4 +731,130 @@ describe("WebUI 界面文案语言切换", () => {
     expect(results[2]!.en).toBe("Could not complete the request. Try again.");
   }, 30_000);
 
+  it("设置预览、已显示错误与输入草稿随语言更新且不重复请求", () => {
+    const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+      import { createServer } from "vite";
+      import { createElement as h } from "react";
+      import { renderToStaticMarkup } from "react-dom/server";
+      const server = await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent",plugins:[{
+        name:"settings-state-fixture",enforce:"pre",transform(code,id) {
+          if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi(){return globalThis.settingsRequest}";
+          if (id.endsWith("/src/hooks/use-translation.ts")) return "export function useTranslation(){return {language:globalThis.fixtureLanguage,t:(key,params)=>globalThis.fixtureTranslate(globalThis.fixtureLanguage,key,params)}}";
+          if (id.endsWith("/src/hooks/use-versioned-settings-management.ts") || id.endsWith("/src/hooks/use-management-confirmed-mutation.ts")) return code.replace('import { useCallback, useEffect, useRef, useState } from "react"','const {useCallback,useEffect,useRef,useState}=globalThis.settingsHooks');
+          if (id.endsWith("/src/hooks/use-settings-draft.ts")) return code.replace('import { useCallback, useState } from "react"','const {useCallback,useState}=globalThis.settingsHooks');
+          if (id.endsWith("/src/components/settings/gateway-settings-card.tsx")) return code.replace('import { useEffect } from "react"','const {useEffect}=globalThis.settingsHooks');
+          if (id.endsWith("/src/components/ui/alert-dialog.tsx")) return 'import {createElement as h} from "react"; const box=({children})=>h("div",null,children); const root=({open,children})=>open?h(box,null,children):null; const button=({children,disabled})=>h("button",{disabled},children); export const AlertDialog=root,AlertDialogContent=box,AlertDialogDescription=box,AlertDialogFooter=box,AlertDialogHeader=box,AlertDialogTitle=box,AlertDialogAction=button,AlertDialogCancel=button;';
+        }
+      }]});
+      let slots=[],cursor=0;
+      const same=(previous,next)=>previous!==undefined&&next!==undefined&&previous.length===next.length&&previous.every((value,index)=>Object.is(value,next[index]));
+      globalThis.settingsHooks={
+        useState(value){const index=cursor++;if(!(index in slots))slots[index]=typeof value==="function"?value():value;return [slots[index],next=>{slots[index]=typeof next==="function"?next(slots[index]):next}]},
+        useRef(value){const index=cursor++;return slots[index]??=({current:value})},
+        useCallback(callback,deps){const index=cursor++;if(!same(slots[index]?.deps,deps))slots[index]={deps,callback};return slots[index].callback},
+        useEffect(effect,deps){const index=cursor++;if(!same(slots[index]?.deps,deps)){slots[index]?.cleanup?.();slots[index]={deps,cleanup:effect()}}}
+      };
+      try {
+        const {translate}=await server.ssrLoadModule("/src/lib/i18n/translate.ts");
+        globalThis.fixtureTranslate=translate;
+        globalThis.fixtureLanguage="zh";
+        let previews=0,updates=0,refetches=0,cause=null;
+        globalThis.settingsRequest={data:{revision:"r1",value:"model-before"},loading:false,error:null,errorCode:null,refetch(){refetches++}};
+        const {ApiClientError}=await server.ssrLoadModule("/src/lib/api.ts");
+        const {useVersionedSettingsManagement}=await server.ssrLoadModule("/src/hooks/use-versioned-settings-management.ts");
+        const {PendingSettingDialog}=await server.ssrLoadModule("/src/components/settings/settings-controls.tsx");
+        const {SettingsError}=await server.ssrLoadModule("/src/components/settings/settings-feedback.tsx");
+        const options={load:async()=>{throw Error("fixture must isolate snapshot loads")},revisionOf:snapshot=>snapshot.revision,currentValue:snapshot=>snapshot.value,
+          preview:async()=>{previews++;if(cause)throw cause;return {value:"model-after",activation:{status:"restart",target:"all",commands:["codexc service restart all"]},confirmationToken:"fixture-token"}},
+          update:async()=>{updates++;throw Error("must not apply while switching languages")}};
+        const read=language=>{globalThis.fixtureLanguage=language;cursor=0;return useVersionedSettingsManagement(options)};
+        const label={key:"modelManagement.channelModel"};
+        await read("zh").previewSetting({kind:"defaults",model:"model-after"},label);
+        const pendingBefore=JSON.stringify(read("zh").pendingSetting);
+        const confirmations=["zh","en","zh"].map(language=>{
+          const management=read(language);
+          return renderToStaticMarkup(h(PendingSettingDialog,{pending:management.pendingSetting,saving:management.saving,onConfirm(){throw Error("unexpected confirm")},onCancel(){throw Error("unexpected cancel")}}));
+        });
+        const pendingAfter=JSON.stringify(read("en").pendingSetting);
+        const previewRequests={previews,updates,refetches};
+        read("en").cancelSetting();
+        const errors=[];
+        for (cause of [new ApiClientError("private API detail",401,"unauthorized"),new Error("private internal detail")]) {
+          await read("zh").previewSetting({kind:"defaults",model:"model-after"},label);
+          const zhState=read("zh"),enState=read("en");
+          errors.push({zh:renderToStaticMarkup(h(SettingsError,{message:zhState.actionError,retry(){}})),en:renderToStaticMarkup(h(SettingsError,{message:enState.actionError,retry(){}})),pending:enState.pendingSetting});
+        }
+        const errorRequests={previews,updates,refetches};
+        slots=[];
+        const {useManagementConfirmedMutation}=await server.ssrLoadModule("/src/hooks/use-management-confirmed-mutation.ts");
+        let mutationPreviews=0;
+        const mutationOptions={load:options.load,preview:async()=>{mutationPreviews++;throw new ApiClientError("private mutation detail",403,"forbidden")},apply:options.update};
+        const mutationState=language=>{globalThis.fixtureLanguage=language;cursor=0;return useManagementConfirmedMutation(mutationOptions)};
+        await mutationState("zh").mutate({operation:"primary.switch",providerId:"fixture-provider"});
+        const mutationErrors=["zh","en","zh"].map(language=>mutationState(language).actionError);
+        slots=[];
+        const {GatewaySettingsCard}=await server.ssrLoadModule("/src/components/settings/gateway-settings-card.tsx");
+        const identityCalls=[];
+        const managedSettings={system:{officialTuiIdentity:{clientIdentity:{name:"saved-name"},upstreamUserAgent:null,terminalIdentity:null,defaults:{name:"codex",version:"fixture-version"}}},advanced:{pluginApiEnabled:false}};
+        const management={managedSettings,loading:false,error:null,saving:false,pendingSetting:null,lastAppliedSetting:null,previewSetting(...args){identityCalls.push(args)}};
+        const tree=language=>{globalThis.fixtureLanguage=language;cursor=0;return GatewaySettingsCard({management,section:"network"})};
+        const walk=node=>Array.isArray(node)?node.flatMap(walk):node&&typeof node==="object"&&node.props?[node,...walk(node.props.children)]:[];
+        const text=node=>Array.isArray(node)?node.map(text).join(""):node&&typeof node==="object"&&node.props?text(node.props.children):typeof node==="string"?node:"";
+        let current=tree("zh");
+        walk(current).find(node=>node.props.id==="tui-identity-name").props.onChange({target:{value:"draft-name"}});
+        walk(current).find(node=>node.props.id==="tui-upstream-user-agent").props.onChange({target:{value:"fixture-agent/1"}});
+        const drafts=["zh","en","zh"].map(language=>{
+          current=tree(language);
+          return {language,name:walk(current).find(node=>node.props.id==="tui-identity-name").props.value,userAgent:walk(current).find(node=>node.props.id==="tui-upstream-user-agent").props.value,labels:text(current),requests:identityCalls.length};
+        });
+        current=tree("en");
+        walk(current).find(node=>typeof node.props.onClick==="function"&&text(node)==="Save request identity").props.onClick();
+        console.log(JSON.stringify({confirmations,pendingBefore,pendingAfter,previewRequests,errorRequests,errors,mutationErrors,mutationPreviews,drafts,identityCalls}));
+      } finally {await server.close();}
+    `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
+    const state = JSON.parse(output) as {
+      confirmations: string[]; pendingBefore: string; pendingAfter: string;
+      previewRequests: { previews: number; updates: number; refetches: number };
+      errorRequests: { previews: number; updates: number; refetches: number };
+      errors: Array<{ zh: string; en: string; pending: null }>;
+      mutationErrors: string[]; mutationPreviews: number;
+      drafts: Array<{ language: string; name: string; userAgent: string; labels: string; requests: number }>;
+      identityCalls: Array<[string, { clientIdentity: { name: string }; upstreamUserAgent: string }, unknown]>;
+    };
+    expect(state.confirmations[0]).toContain("确认配置修改");
+    expect(state.confirmations[1]).toContain("Confirm configuration change");
+    expect(state.confirmations[1]).toContain("Channel session model");
+    expect(state.confirmations[1]).not.toMatch(/[\u4e00-\u9fff]/u);
+    expect(state.confirmations[2]).toBe(state.confirmations[0]);
+    expect(state.pendingAfter).toBe(state.pendingBefore);
+    for (const html of state.confirmations) {
+      expect(html).toContain("model-before");
+      expect(html).toContain("model-after");
+      expect(html).toContain("codexc service restart all");
+    }
+    expect(state.previewRequests).toEqual({ previews: 1, updates: 0, refetches: 0 });
+    expect(state.errorRequests).toEqual({ previews: 3, updates: 0, refetches: 0 });
+    for (const error of state.errors) {
+      expect(error.pending).toBeNull();
+      expect(error.zh).toMatch(/[\u4e00-\u9fff]/u);
+      expect(error.en).not.toMatch(/[\u4e00-\u9fff]/u);
+      expect(error.zh + error.en).not.toContain("private");
+    }
+    expect(state.errors[0]!.en).toContain("The access token is invalid or expired");
+    expect(state.errors[1]!.en).toContain("Could not complete the request");
+    expect(state.mutationErrors[0]).toMatch(/[\u4e00-\u9fff]/u);
+    expect(state.mutationErrors[1]).not.toMatch(/[\u4e00-\u9fff]/u);
+    expect(state.mutationErrors[2]).toBe(state.mutationErrors[0]);
+    expect(state.mutationErrors.join(" ")).not.toContain("private");
+    expect(state.mutationPreviews).toBe(1);
+    for (const draft of state.drafts) {
+      expect(draft).toMatchObject({ name: "draft-name", userAgent: "fixture-agent/1", requests: 0 });
+    }
+    expect(state.drafts[0]!.labels).toContain("保存请求身份");
+    expect(state.drafts[1]!.labels).toContain("Save request identity");
+    expect(state.drafts[1]!.labels).not.toMatch(/[\u4e00-\u9fff]/u);
+    expect(state.identityCalls).toHaveLength(1);
+    expect(state.identityCalls[0]).toMatchObject(["system.official-tui-identity", { clientIdentity: { name: "draft-name" }, upstreamUserAgent: "fixture-agent/1" }, { key: "settingsFields.tuiIdentity" }]);
+  }, 30_000);
+
 });

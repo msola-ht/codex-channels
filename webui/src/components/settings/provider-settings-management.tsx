@@ -1,6 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useEffect, useMemo, useState } from "react"
+import { useTranslation } from "@/hooks/use-translation"
 
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { Badge } from "@/components/ui/badge"
@@ -17,9 +18,10 @@ import type { ManagementProviderSettingsResponse } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 
 export function ProviderSettingsManagement({ management, onChanged, section }: { management: ProviderSettingsController; onChanged?: () => void; section: "providers" | "models" | "context" }) {
+  const { t } = useTranslation()
   const settings = management.settings
-  if (management.loading && settings === null) return <LoadingSettingsCard title="Provider 设置" />
-  if (settings === null) return <SettingsError message={management.error ?? "Provider 设置暂不可用"} retry={management.refetch} />
+  if (management.loading && settings === null) return <LoadingSettingsCard title={t("managementUi.providerSettings")} />
+  if (settings === null) return <SettingsError message={management.error ?? t("managementUi.providerSettingsUnavailable")} retry={management.refetch} />
   return <>{management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : null}<ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} section={section} /></>
 }
 
@@ -34,6 +36,7 @@ function ProviderSettingsCard({
   management: ProviderSettingsController
   onChanged?: () => void
 }) {
+  const { t } = useTranslation()
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [providerId, setProviderId] = useState("")
@@ -48,7 +51,7 @@ function ProviderSettingsCard({
   const [confirmRemoveBaseUrl, setConfirmRemoveBaseUrl] = useState(false)
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
   const [windowModel, setWindowModel] = useState(settings.modelWindow[0]?.id ?? "")
-  const [windowError, setWindowError] = useState<string | null>(null)
+  const [windowError, setWindowError] = useState<"invalid-percent" | null>(null)
 
   const managed = settings.managedProviders.find((provider) => provider.id === managedProvider) ?? settings.managedProviders[0]
   const windowEntry = settings.modelWindow.find((candidate) => candidate.id === windowModel) ?? settings.modelWindow[0]
@@ -145,7 +148,7 @@ function ProviderSettingsCard({
     if (windowEntry === undefined) return
     const parsedPercent = Number(windowPercent)
     if (!Number.isInteger(parsedPercent) || parsedPercent < 10 || parsedPercent > 100) {
-      setWindowError("窗口占比（%）必须是 10–100 的整数")
+      setWindowError("invalid-percent")
       return
     }
     setWindowError(null)
@@ -174,81 +177,81 @@ function ProviderSettingsCard({
 
   return <Card>
     <CardHeader>
-      <CardTitle>{section === "providers" ? "自定义提供商" : section === "models" ? "托管提供商默认值" : "托管模型上下文窗口"}</CardTitle>
-      <CardDescription>{section === "providers" ? "管理接入地址、模型和凭据；修改前预览确认，凭据不会回显。" : section === "models" ? "选择每个托管提供商的默认模型与思考等级。" : "同名模型在所有托管提供商间共用窗口占比。"}</CardDescription>
+      <CardTitle>{section === "providers" ? t("managementUi.customProviders") : section === "models" ? t("managementUi.managedDefaults") : t("managementUi.managedWindows")}</CardTitle>
+      <CardDescription>{section === "providers" ? t("managementUi.customProvidersHint") : section === "models" ? t("managementUi.managedDefaultsHint") : t("managementUi.managedWindowsHint")}</CardDescription>
     </CardHeader>
     <CardContent className="flex flex-col gap-6 text-sm">
       {section === "models" && <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <div><h3 className="font-medium">托管 Provider 默认值</h3><p className="text-xs text-muted-foreground">修改模型目录中的默认模型与思考等级；上下文窗口在下方「模型上下文窗口」按模型名统一设置。</p></div>
-          <Badge variant="outline">{settings.managedProviders.length} 个</Badge>
+          <div><h3 className="font-medium">{t("managementUi.managedDefaults")}</h3><p className="text-xs text-muted-foreground">{t("managementUi.managedDefaultsDetail")}</p></div>
+          <Badge variant="outline">{t("managementUi.count", { count: settings.managedProviders.length })}</Badge>
         </div>
-        {managed === undefined ? <SettingsEmpty>当前没有已配置的托管 Provider。</SettingsEmpty> : <>
+        {managed === undefined ? <SettingsEmpty>{t("managementUi.managedProvidersEmpty")}</SettingsEmpty> : <>
           <FieldGroup>
-            <ManagedSelect label="Provider" value={managed.id} options={settings.managedProviders.map((provider) => [provider.id, provider.displayName])} disabled={busy || pending !== null} onChange={setManagedProvider} />
-            <ManagedSelect label="默认模型" value={managedModel} options={managed.models.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={(value) => patchManaged({ model: value })} />
-            <ManagedSelect label="思考等级" value={managedReasoning} options={(managedModelEntry?.reasoningEfforts ?? []).map((candidate) => [candidate.effort, candidate.effort])} disabled={busy || pending !== null} onChange={(value) => patchManaged({ reasoning: value })} />
+            <ManagedSelect label={t("managementUi.provider")} value={managed.id} options={settings.managedProviders.map((provider) => [provider.id, provider.displayName])} disabled={busy || pending !== null} onChange={setManagedProvider} />
+            <ManagedSelect label={t("managementUi.defaultModel")} value={managedModel} options={managed.models.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={(value) => patchManaged({ model: value })} />
+            <ManagedSelect label={t("managementUi.reasoning")} value={managedReasoning} options={(managedModelEntry?.reasoningEfforts ?? []).map((candidate) => [candidate.effort, candidate.effort])} disabled={busy || pending !== null} onChange={(value) => patchManaged({ reasoning: value })} />
           </FieldGroup>
-          <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || managedModelEntry === undefined} onClick={() => void updateManagedDefault()}>保存托管 Provider 默认值</Button>
+          <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || managedModelEntry === undefined} onClick={() => void updateManagedDefault()}>{t("managementUi.saveManagedDefaults")}</Button>
         </>}
       </section>}
       {section === "context" && <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <div><h3 className="font-medium">模型上下文窗口</h3><p className="text-xs text-muted-foreground">按模型名统一上下文窗口占比（相对模型最大窗口）；同名模型在所有 Provider 共享同一值，自动压缩使用上游默认。</p></div>
-          <Badge variant="outline">{settings.modelWindow.length} 个模型</Badge>
+          <div><h3 className="font-medium">{t("managementUi.modelWindows")}</h3><p className="text-xs text-muted-foreground">{t("managementUi.modelWindowsDetail")}</p></div>
+          <Badge variant="outline">{t("managementUi.modelCount", { count: settings.modelWindow.length })}</Badge>
         </div>
-        {windowEntry === undefined ? <SettingsEmpty>当前没有可设置的受管模型。</SettingsEmpty> : <>
+        {windowEntry === undefined ? <SettingsEmpty>{t("managementUi.managedModelsEmpty")}</SettingsEmpty> : <>
           <FieldGroup>
-            <Table><TableHeader><TableRow><TableHead>模型</TableHead><TableHead>提供商</TableHead><TableHead>窗口占比</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{settings.modelWindow.map(entry => <TableRow key={entry.id} data-state={entry.id === windowEntry.id ? "selected" : undefined}><TableCell>{entry.displayName}</TableCell><TableCell>{entry.providers.join("、")}</TableCell><TableCell>{entry.conflicts ? "不一致" : `${entry.windowPercent ?? 100}%`}</TableCell><TableCell><Button size="sm" variant="outline" disabled={busy || pending !== null || entry.id === windowEntry.id} onClick={() => setWindowModel(entry.id)}>选择</Button></TableCell></TableRow>)}</TableBody></Table>
-            <p className="text-sm">当前编辑：{windowEntry.displayName}</p>
-            <Field orientation="responsive" data-invalid={windowError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-window-percent">窗口占比（%）</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-window-percent" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "provider-window-percent-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={10} max={100} value={windowPercent} disabled={busy || pending !== null} onChange={(event) => { patchWindow({ percent: event.target.value }); setWindowError(null) }} /><FieldError id="provider-window-percent-error" className="sm:text-right">{windowError}</FieldError></FieldContent></Field>
+            <Table><TableHeader><TableRow><TableHead>{t("modelManagement.model")}</TableHead><TableHead>{t("managementUi.provider")}</TableHead><TableHead>{t("managementUi.windowPercent")}</TableHead><TableHead>{t("modelManagement.actions")}</TableHead></TableRow></TableHeader><TableBody>{settings.modelWindow.map(entry => <TableRow key={entry.id} data-state={entry.id === windowEntry.id ? "selected" : undefined}><TableCell>{entry.displayName}</TableCell><TableCell>{entry.providers.join(t("managementUi.listSeparator"))}</TableCell><TableCell>{entry.conflicts ? t("managementUi.inconsistent") : `${entry.windowPercent ?? 100}%`}</TableCell><TableCell><Button size="sm" variant="outline" disabled={busy || pending !== null || entry.id === windowEntry.id} onClick={() => setWindowModel(entry.id)}>{t("managementUi.select")}</Button></TableCell></TableRow>)}</TableBody></Table>
+            <p className="text-sm">{t("managementUi.editingModel", { model: windowEntry.displayName })}</p>
+            <Field orientation="responsive" data-invalid={windowError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-window-percent">{t("managementUi.windowPercentLabel")}</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-window-percent" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "provider-window-percent-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={10} max={100} value={windowPercent} disabled={busy || pending !== null} onChange={(event) => { patchWindow({ percent: event.target.value }); setWindowError(null) }} /><FieldError id="provider-window-percent-error" className="sm:text-right">{windowError === null ? null : t("managementUi.windowInvalid")}</FieldError></FieldContent></Field>
           </FieldGroup>
-          <p className="text-xs text-muted-foreground">应用 Provider：{windowEntry.providers.join("、") || "无"} · 上下文窗口 {formatTokens(windowEntry.contextWindow)} / 最大 {formatTokens(windowEntry.maxContextWindow)} tokens</p>
-          {windowEntry.conflicts === true ? <Alert><AlertTitle>窗口占比不一致</AlertTitle><AlertDescription>当前不同 Provider 的窗口占比不一致：{Object.entries(windowEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join("；") || "部分未设置"}；保存后将以本次输入统一。</AlertDescription></Alert> : null}
-          <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || windowEntry === undefined} onClick={() => void updateWindow()}>保存模型上下文窗口</Button>
+          <p className="text-xs text-muted-foreground">{t("managementUi.windowSummary", { providers: windowEntry.providers.join(t("managementUi.listSeparator")) || t("managementUi.none"), context: formatTokens(windowEntry.contextWindow), max: formatTokens(windowEntry.maxContextWindow) })}</p>
+          {windowEntry.conflicts === true ? <Alert><AlertTitle>{t("managementUi.windowConflict")}</AlertTitle><AlertDescription>{t("managementUi.windowConflictDescription", { values: Object.entries(windowEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join(t("accountConfirmation.listSeparator")) || t("managementUi.partlyUnset") })}</AlertDescription></Alert> : null}
+          <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || windowEntry === undefined} onClick={() => void updateWindow()}>{t("managementUi.saveWindow")}</Button>
         </>}
       </section>}
       {section === "providers" && <section className="flex flex-col gap-3">
-        <div><h3 className="font-medium">自定义提供商</h3><p className="text-xs text-muted-foreground">Codex 兼容 Provider 使用官方目录；自定义 Responses Provider 使用下方声明的模型与能力。可切换模式保留官方主 Provider；固定模式会修改 Codex 主配置并需要重启全部服务。</p></div>
-        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null} onClick={() => { resetForm(); management.clearError(); setEditorOpen(true) }}>新增提供商</Button><Button variant="outline" disabled={busy || pending !== null} onClick={() => void switchProvider("openai")}>切回官方 OpenAI</Button></div>
-        <Table><TableHeader><TableRow><TableHead>提供商</TableHead><TableHead>地址</TableHead><TableHead>状态</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>
-          {candidates.length === 0 ? <TableRow><TableCell colSpan={4}><SettingsEmpty>当前没有自定义提供商。</SettingsEmpty></TableCell></TableRow> : candidates.map(candidate => <TableRow key={candidate.id}>
+        <div><h3 className="font-medium">{t("managementUi.customProviders")}</h3><p className="text-xs text-muted-foreground">{t("managementUi.customProvidersDetail")}</p></div>
+        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null} onClick={() => { resetForm(); management.clearError(); setEditorOpen(true) }}>{t("managementUi.addProvider")}</Button><Button variant="outline" disabled={busy || pending !== null} onClick={() => void switchProvider("openai")}>{t("managementUi.backOfficial")}</Button></div>
+        <Table><TableHeader><TableRow><TableHead>{t("managementUi.provider")}</TableHead><TableHead>{t("managementUi.address")}</TableHead><TableHead>{t("channelSettings.state")}</TableHead><TableHead>{t("modelManagement.actions")}</TableHead></TableRow></TableHeader><TableBody>
+          {candidates.length === 0 ? <TableRow><TableCell colSpan={4}><SettingsEmpty>{t("managementUi.customProvidersEmpty")}</SettingsEmpty></TableCell></TableRow> : candidates.map(candidate => <TableRow key={candidate.id}>
             <TableCell><div className="flex flex-col gap-1"><span>{candidate.displayName}</span><span className="text-xs text-muted-foreground">{candidate.id}</span></div></TableCell>
             <TableCell className="max-w-64 truncate">{candidate.baseUrl || "—"}</TableCell>
-            <TableCell>{"active" in candidate && candidate.active ? <Badge variant="secondary">当前</Badge> : "—"}</TableCell>
-            <TableCell><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(candidate)}>编辑</Button><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => void switchProvider(candidate.id)}>切换</Button><Button variant="destructive" size="sm" disabled={busy || pending !== null} onClick={() => void removeProvider(candidate.id)}>删除</Button></div></TableCell>
+            <TableCell>{"active" in candidate && candidate.active ? <Badge variant="secondary">{t("managementUi.current")}</Badge> : "—"}</TableCell>
+            <TableCell><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(candidate)}>{t("modelManagement.edit")}</Button><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => void switchProvider(candidate.id)}>{t("managementUi.switch")}</Button><Button variant="destructive" size="sm" disabled={busy || pending !== null} onClick={() => void removeProvider(candidate.id)}>{t("modelManagement.remove")}</Button></div></TableCell>
           </TableRow>)}
         </TableBody></Table>
-        <Dialog open={editorOpen} onOpenChange={open => { if (!open && !management.busy && pending === null) resetForm() }}><DialogContent closeLabel="关闭" showCloseButton={!management.busy && pending === null} className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{editingId === null ? "新增提供商" : "编辑提供商"}</DialogTitle><DialogDescription>配置地址、模型和凭据；预览确认后保存，API Key 不会回显。</DialogDescription></DialogHeader>
-        <ManagedSelect label="提供商类型" value={catalogKind} options={[["official", "Codex 兼容 Provider"], ["custom", "自定义 Responses Provider"]]} disabled={busy || pending !== null || editingId !== null} onChange={(value) => { setCatalogKind(value); setProviderId(value === "custom" ? "rs-" : ""); setModel(""); setCustomModels([]) }} />
+        <Dialog open={editorOpen} onOpenChange={open => { if (!open && !management.busy && pending === null) resetForm() }}><DialogContent closeLabel={t("common.close")} showCloseButton={!management.busy && pending === null} className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{editingId === null ? t("managementUi.addProvider") : t("managementUi.editProvider")}</DialogTitle><DialogDescription>{t("managementUi.providerEditorHint")}</DialogDescription></DialogHeader>
+        <ManagedSelect label={t("managementUi.providerType")} value={catalogKind} options={[["official", t("managementUi.compatibleProvider")], ["custom", t("managementUi.responsesProvider")]]} disabled={busy || pending !== null || editingId !== null} onChange={(value) => { setCatalogKind(value); setProviderId(value === "custom" ? "rs-" : ""); setModel(""); setCustomModels([]) }} />
         <FieldGroup className="grid gap-3 md:grid-cols-2">
-          <Field data-disabled={busy || pending !== null || editingId !== null}><FieldLabel htmlFor="custom-provider-id">{catalogKind === "custom" ? "Provider ID（rs- 开头）" : "Provider ID"}</FieldLabel><Input id="custom-provider-id" placeholder="例如 my-provider" value={providerId} disabled={busy || pending !== null || editingId !== null} onChange={(event) => setProviderId(event.target.value)} /></Field>
-          <Field data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-name">显示名称</FieldLabel><Input id="custom-provider-name" placeholder="显示名称" value={providerName} disabled={busy || pending !== null} onChange={(event) => setProviderName(event.target.value)} /></Field>
-          <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-endpoint">Responses 基础地址（HTTPS）</FieldLabel><Input id="custom-provider-endpoint" placeholder="https://example.com/v1" value={baseUrl} disabled={busy || pending !== null} onChange={(event) => setBaseUrl(event.target.value)} /></Field>
-          <Field data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-model">{catalogKind === "custom" ? "默认模型 ID（须在下方列表中）" : "模型 ID（Codex 官方目录）"}</FieldLabel><Input id="custom-provider-model" placeholder="模型 ID" value={model} disabled={busy || pending !== null} onChange={(event) => setModel(event.target.value)} /></Field>
-          <ManagedSelect label="运行模式" value={mode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={busy || pending !== null} onChange={(value) => setMode(value as "switching" | "exclusive")} />
-          <ManagedSelect label="WebSocket" value={supportsWebsockets} options={[["true", "支持"], ["false", "不支持"]]} disabled={busy || pending !== null} onChange={setSupportsWebsockets} />
-          <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-api-key">API Key</FieldLabel><Input id="custom-provider-api-key" type="password" autoComplete="new-password" placeholder="留空沿用已有凭据" value={apiKey} disabled={busy || pending !== null} onChange={(event) => setApiKey(event.target.value)} /></Field>
+          <Field data-disabled={busy || pending !== null || editingId !== null}><FieldLabel htmlFor="custom-provider-id">{catalogKind === "custom" ? t("managementUi.responsesProviderId") : t("managementUi.providerId")}</FieldLabel><Input id="custom-provider-id" placeholder={t("managementUi.providerIdExample")} value={providerId} disabled={busy || pending !== null || editingId !== null} onChange={(event) => setProviderId(event.target.value)} /></Field>
+          <Field data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-name">{t("managementUi.displayName")}</FieldLabel><Input id="custom-provider-name" placeholder={t("managementUi.displayName")} value={providerName} disabled={busy || pending !== null} onChange={(event) => setProviderName(event.target.value)} /></Field>
+          <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-endpoint">{t("managementUi.responsesBaseUrl")}</FieldLabel><Input id="custom-provider-endpoint" placeholder="https://example.com/v1" value={baseUrl} disabled={busy || pending !== null} onChange={(event) => setBaseUrl(event.target.value)} /></Field>
+          <Field data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-model">{catalogKind === "custom" ? t("managementUi.defaultModelId") : t("managementUi.officialModelId")}</FieldLabel><Input id="custom-provider-model" placeholder={t("managementUi.modelId")} value={model} disabled={busy || pending !== null} onChange={(event) => setModel(event.target.value)} /></Field>
+          <ManagedSelect label={t("modelManagement.mode")} value={mode} options={[["switching", t("modelManagement.switching")], ["exclusive", t("modelManagement.exclusive")]]} disabled={busy || pending !== null} onChange={(value) => setMode(value as "switching" | "exclusive")} />
+          <ManagedSelect label="WebSocket" value={supportsWebsockets} options={[["true", t("managementUi.supported")], ["false", t("managementUi.unsupported")]]} disabled={busy || pending !== null} onChange={setSupportsWebsockets} />
+          <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-api-key">API Key</FieldLabel><Input id="custom-provider-api-key" type="password" autoComplete="new-password" placeholder={t("managementUi.preserveCredentials")} value={apiKey} disabled={busy || pending !== null} onChange={(event) => setApiKey(event.target.value)} /></Field>
         </FieldGroup>
         {catalogKind === "custom" ? <div className="flex flex-col gap-3">
-          <p className="text-xs text-muted-foreground">请按平台文档声明能力。上游须兼容 Codex 的 Responses 流式请求与工具调用；不推理时发送 none，网页搜索默认关闭。</p>
+          <p className="text-xs text-muted-foreground">{t("managementUi.responsesHint")}</p>
           {customModels.map((entry, index) => {
             const patch = (changes: Partial<typeof entry>) => setCustomModels(current => current.map((value, position) => position === index ? { ...value, ...changes } : value))
             return <FieldGroup key={index} className="rounded-md border p-3">
-              <Field><FieldLabel htmlFor={`responses-model-${index}`}>模型 ID</FieldLabel><Input id={`responses-model-${index}`} value={entry.id} disabled={busy || pending !== null} onChange={event => patch({ id: event.target.value })} /></Field>
-              <Field><FieldLabel htmlFor={`responses-name-${index}`}>显示名称</FieldLabel><Input id={`responses-name-${index}`} value={entry.name} disabled={busy || pending !== null} onChange={event => patch({ name: event.target.value })} /></Field>
-              {entry.template?.source === "deepseek" ? <Field orientation="horizontal"><Checkbox id={`responses-follow-${index}`} checked={entry.template.followContext} disabled={busy || pending !== null} onCheckedChange={value => patch({template: {...entry.template!, followContext: value === true}})} /><FieldLabel htmlFor={`responses-follow-${index}`}>跟随 DS {entry.template.model} 的上下文</FieldLabel></Field> : null}
-              <Field><FieldLabel htmlFor={`responses-context-${index}`}>上下文窗口（Token）</FieldLabel><Input id={`responses-context-${index}`} type="number" min={1024} max={entry.maxContextWindow ?? 100000000} value={entry.contextWindow || ""} disabled={busy || pending !== null || entry.template?.followContext === true} onChange={event => patch({ contextWindow: Number(event.target.value) })} /></Field>
-              <Field><FieldLabel htmlFor={`responses-reasoning-${index}`}>思考等级（逗号分隔；留空表示不支持）</FieldLabel><Input id={`responses-reasoning-${index}`} value={entry.reasoningEfforts.join(",")} placeholder="low,medium,high" disabled={busy || pending !== null} onChange={event => { const values = event.target.value === "" ? [] : event.target.value.split(","); patch({ reasoningEfforts: values, defaultReasoningEffort: values.includes(entry.defaultReasoningEffort ?? "") ? entry.defaultReasoningEffort : values[0] ?? null }) }} /></Field>
-              {entry.reasoningEfforts.length > 0 ? <Field><FieldLabel htmlFor={`responses-default-${index}`}>默认思考等级</FieldLabel><Input id={`responses-default-${index}`} value={entry.defaultReasoningEffort ?? ""} disabled={busy || pending !== null} onChange={event => patch({ defaultReasoningEffort: event.target.value })} /></Field> : null}
-              <Field orientation="horizontal"><Checkbox id={`responses-images-${index}`} checked={entry.supportsImages} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsImages: value === true })} /><FieldLabel htmlFor={`responses-images-${index}`}>支持图片输入</FieldLabel></Field>
-              <Button variant="outline" disabled={busy || pending !== null} onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>移除此模型</Button>
+              <Field><FieldLabel htmlFor={`responses-model-${index}`}>{t("managementUi.modelId")}</FieldLabel><Input id={`responses-model-${index}`} value={entry.id} disabled={busy || pending !== null} onChange={event => patch({ id: event.target.value })} /></Field>
+              <Field><FieldLabel htmlFor={`responses-name-${index}`}>{t("managementUi.displayName")}</FieldLabel><Input id={`responses-name-${index}`} value={entry.name} disabled={busy || pending !== null} onChange={event => patch({ name: event.target.value })} /></Field>
+              {entry.template?.source === "deepseek" ? <Field orientation="horizontal"><Checkbox id={`responses-follow-${index}`} checked={entry.template.followContext} disabled={busy || pending !== null} onCheckedChange={value => patch({template: {...entry.template!, followContext: value === true}})} /><FieldLabel htmlFor={`responses-follow-${index}`}>{t("managementUi.followDsContext", { model: entry.template.model })}</FieldLabel></Field> : null}
+              <Field><FieldLabel htmlFor={`responses-context-${index}`}>{t("managementUi.contextTokens")}</FieldLabel><Input id={`responses-context-${index}`} type="number" min={1024} max={entry.maxContextWindow ?? 100000000} value={entry.contextWindow || ""} disabled={busy || pending !== null || entry.template?.followContext === true} onChange={event => patch({ contextWindow: Number(event.target.value) })} /></Field>
+              <Field><FieldLabel htmlFor={`responses-reasoning-${index}`}>{t("managementUi.reasoningList")}</FieldLabel><Input id={`responses-reasoning-${index}`} value={entry.reasoningEfforts.join(",")} placeholder="low,medium,high" disabled={busy || pending !== null} onChange={event => { const values = event.target.value === "" ? [] : event.target.value.split(","); patch({ reasoningEfforts: values, defaultReasoningEffort: values.includes(entry.defaultReasoningEffort ?? "") ? entry.defaultReasoningEffort : values[0] ?? null }) }} /></Field>
+              {entry.reasoningEfforts.length > 0 ? <Field><FieldLabel htmlFor={`responses-default-${index}`}>{t("managementUi.defaultReasoning")}</FieldLabel><Input id={`responses-default-${index}`} value={entry.defaultReasoningEffort ?? ""} disabled={busy || pending !== null} onChange={event => patch({ defaultReasoningEffort: event.target.value })} /></Field> : null}
+              <Field orientation="horizontal"><Checkbox id={`responses-images-${index}`} checked={entry.supportsImages} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsImages: value === true })} /><FieldLabel htmlFor={`responses-images-${index}`}>{t("managementUi.imageInput")}</FieldLabel></Field>
+              <Button variant="outline" disabled={busy || pending !== null} onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>{t("managementUi.removeModel")}</Button>
             </FieldGroup>
           })}
-          <Button variant="outline" disabled={busy || pending !== null || customModels.length >= 64} onClick={() => setCustomModels(current => [...current, { id: current.length === 0 ? model : "", name: current.length === 0 ? model : "", contextWindow: 0, reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false }])}>添加模型</Button>
+          <Button variant="outline" disabled={busy || pending !== null || customModels.length >= 64} onClick={() => setCustomModels(current => [...current, { id: current.length === 0 ? model : "", name: current.length === 0 ? model : "", contextWindow: 0, reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false }])}>{t("managementUi.addModel")}</Button>
         </div> : null}
-        {mode === "exclusive" ? <Field orientation="horizontal" data-disabled={busy || pending !== null}><Checkbox id="custom-provider-remove-base-url" checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} /><FieldLabel htmlFor="custom-provider-remove-base-url" className="text-xs text-muted-foreground">确认固定模式需要时移除顶层 openai_base_url</FieldLabel></Field> : null}
-        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? "新增 Provider" : "保存 Provider"}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>取消编辑</Button> : null}</div>
+        {mode === "exclusive" ? <Field orientation="horizontal" data-disabled={busy || pending !== null}><Checkbox id="custom-provider-remove-base-url" checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} /><FieldLabel htmlFor="custom-provider-remove-base-url" className="text-xs text-muted-foreground">{t("managementUi.removeBaseUrl")}</FieldLabel></Field> : null}
+        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
         </DialogContent></Dialog>
       </section>}
@@ -271,20 +274,21 @@ function ProviderSettingsConfirmationDialog({
   onConfirm: () => void
   onCancel: () => void
 }) {
-  const lines = [`操作：${pending.operation}`]
-  if (pending.provider !== undefined) lines.push(`Provider：${pending.provider.displayName ?? pending.provider.name ?? pending.provider.id}`)
-  if (pending.provider?.models !== undefined) for (const model of pending.provider.models) lines.push(`模型：${model.name}（${model.id}），上下文 ${model.contextWindow} Token，图片 ${model.supportsImages ? "支持" : "不支持"}，思考等级 ${model.reasoningEfforts.join("/") || "不支持"}，默认 ${model.defaultReasoningEffort ?? "none"}${model.template ? `，模板 ${model.template.source}/${model.template.model}，上下文${model.template.followContext ? "跟随" : "独立"}` : ""}`)
-  if (pending.target !== undefined) lines.push(`目标：${pending.target.displayName}（${pending.target.id}）`)
-  if (pending.model !== undefined) lines.push(`模型：${pending.model.displayName}（${pending.model.id}）`)
-  if (pending.providers !== undefined && pending.providers.length > 0) lines.push(`应用 Provider：${pending.providers.join("、")}`)
-  if (pending.overridden !== undefined && pending.overridden.length > 0) lines.push(`将覆盖：${pending.overridden.map((entry) => `${entry.provider}（原 ${entry.previousPercent}%）`).join("、")}`)
-  if (pending.conflicts === true) lines.push(`提示：该模型在不同 Provider 的窗口占比不一致，保存后统一为本次输入。`)
-  if (pending.windowConflict === true) lines.push(`提示：该模型在不同 Provider 的最大窗口不一致，无法统一窗口设置。`)
-  if (pending.reasoningEffort !== undefined) lines.push(`思考等级：${pending.reasoningEffort}`)
-  if (pending.windowPercent !== undefined) lines.push(`上下文窗口：${pending.windowPercent}%`)
-  if (pending.credential?.action !== undefined) lines.push(`凭据：${pending.credential.action === "replace" ? "写入新 API Key" : "沿用已有 API Key"}`)
-  return <ManagementConfirmationDialog open saving={saving} loading={loading} title="确认 Provider 配置修改" description="确认后写入对应配置，不会自动执行生效目标。" confirmVariant={pending.operation === "remove" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
+  const { t } = useTranslation()
+  const lines = [t("accountConfirmation.operation", { value: pending.operation })]
+  if (pending.provider !== undefined) lines.push(t("managementUi.providerConfirm", { name: pending.provider.displayName ?? pending.provider.name ?? pending.provider.id }))
+  if (pending.provider?.models !== undefined) for (const model of pending.provider.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: t(model.supportsImages ? "managementUi.supported" : "managementUi.unsupported"), reasoning: model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? "none" }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model, mode: t(model.template.followContext ? "managementUi.follow" : "managementUi.independent") }) : ""))
+  if (pending.target !== undefined) lines.push(t("managementUi.targetConfirm", { name: pending.target.displayName, id: pending.target.id }))
+  if (pending.model !== undefined) lines.push(t("managementUi.modelConfirm", { name: pending.model.displayName, id: pending.model.id }))
+  if (pending.providers !== undefined && pending.providers.length > 0) lines.push(t("managementUi.appliedProviders", { providers: pending.providers.join(t("managementUi.listSeparator")) }))
+  if (pending.overridden !== undefined && pending.overridden.length > 0) lines.push(t("managementUi.overridden", { values: pending.overridden.map(entry => t("managementUi.previousPercent", { provider: entry.provider, percent: entry.previousPercent })).join(t("managementUi.listSeparator")) }))
+  if (pending.conflicts === true) lines.push(t("managementUi.percentConflictConfirm"))
+  if (pending.windowConflict === true) lines.push(t("managementUi.maxWindowConflict"))
+  if (pending.reasoningEffort !== undefined) lines.push(t("managementUi.reasoningConfirm", { value: pending.reasoningEffort }))
+  if (pending.windowPercent !== undefined) lines.push(t("managementUi.windowConfirm", { percent: pending.windowPercent }))
+  if (pending.credential?.action !== undefined) lines.push(t("managementUi.credentialConfirm", { action: t(pending.credential.action === "replace" ? "managementUi.replaceCredential" : "managementUi.preserveCredential") }))
+  return <ManagementConfirmationDialog open saving={saving} loading={loading} title={t("managementUi.providerConfirmTitle")} description={t("accountConfirmation.changeDescription")} confirmVariant={pending.operation === "remove" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
     <p className="whitespace-pre-line">{lines.join("\n")}</p>
-    <p className="text-muted-foreground">生效目标：{pending.activation}</p>
+    <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: pending.activation })}</p>
   </ManagementConfirmationDialog>
 }

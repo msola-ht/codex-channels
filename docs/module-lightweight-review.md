@@ -21,11 +21,13 @@
 阶段状态使用：待分析、分析中、改前审查通过、优化中、待验证、已验证、审查发现回归待修复、搁置。
 “已验证”指记录范围内的本地验证完成，不代表已提交、全量检查通过或真实平台验收。
 
-## 当前工作区
+## 当前交付状态
 
-交付更新：PR [#206](https://github.com/msola-ht/codex-channels/pull/206) 已创建，用户随后授权在检查通过后合并；后续轻量化仍暂停。`32161c86` 的远程 Linux 门禁发现夹具权限问题，处理见 A09；先前本地验证与审查结论不能替代该失败结果。
+2026-10-04 核实：PR [#206](https://github.com/msola-ht/codex-channels/pull/206) 已于 2026-10-02 合并至 `main`，合并提交为 `b3f5245a`。最终分支 HEAD `9fdc7359` 的 Linux、macOS、Windows runtime、Codex 0.156.1 App Server 合同及 PR 描述检查均通过。`32161c86` 的远程 Linux 夹具权限失败已由 A09 修复，不再列为未解决问题。上述 CI 结果只对应当时提交与协议基线，不替代后续版本验证，也不证明已部署。
 
-分支：`refactor/lazy-cli-surface-loading`。本记录建立时 HEAD 为 `e93e0c9a`。
+后续轻量化仍暂停；A08 的正文序列化候选及历史搁置项不转为待办。待验收范围以[渠道验收矩阵](channel-acceptance-matrix.md)、[WebUI 指南](webui.md)和 [Desktop 实施记录](codex-desktop-app-development.md)的当前状态为准；真实平台故障边界、浏览器交互和 Desktop 实机限制不能由 CI 通过代替。以下保留开发阶段的提交、验证及授权历史，不把其中的“未提交／未推送／未授权合并”解读为当前交付状态。
+
+历史分支：`refactor/lazy-cli-surface-loading`。本记录建立时 HEAD 为 `e93e0c9a`。
 M01、M02、M03、M04、M06、M07 及 R01 已提交为 `2683d70a`；此前 CLI 加载调整不计入本轮模块轻量化收益。
 M09、M10、M16、R02、M17 及 M08—M15 分析记录已提交为 `0b6365d1`；下文各项“未提交”描述其开发阶段，当前交付状态以本节与提交记录为准。
 M19 与 M20 已提交为 `7da3fe20`；该提交正常 pre-commit 全量门禁通过，5523 项测试通过、103 项跳过，详见文末第三批提交结果。

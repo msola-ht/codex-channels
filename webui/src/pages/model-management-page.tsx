@@ -5,6 +5,7 @@ import { useAccountSettingsManagement } from "@/hooks/use-account-settings-manag
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { useTranslation } from "@/hooks/use-translation"
+import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { fetchManagementProviders, fetchSettingsSummary } from "@/lib/api"
 import { ProviderSettingsManagement } from "@/components/settings/provider-settings-management"
 import { AccountSettingsManagement } from "@/components/settings/account-settings-management"
@@ -21,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 
 export function ProvidersPage() {
+  const { t } = useTranslation()
   const summary = useApi(fetchSettingsSummary, [])
   const reloadSummary = summary.refetch
   const management = useProviderSettingsManagement()
@@ -29,7 +31,7 @@ export function ProvidersPage() {
   const reloadStatus = status.refetch
   const refresh = useCallback(() => { reload(); reloadStatus(); reloadSummary() }, [reload, reloadStatus, reloadSummary])
   return <SettingsPageFrame title="modelManagement.providers" busy={management.busy || management.loading || management.pendingPreview !== null || status.loading || summary.loading} refresh={refresh}>
-    {status.error ? <SettingsError message={status.error} retry={reloadStatus} /> : status.data ? <ProviderStatusCard state={status.data} /> : <LoadingSettingsCard title="Provider" />}
+    {status.error ? <SettingsError message={translateApiErrorCode(t, status.errorCode)} retry={reloadStatus} /> : status.data ? <ProviderStatusCard state={status.data} /> : <LoadingSettingsCard title={t("modelManagement.providers")} />}
     <ProviderSettingsManagement management={management} section="providers" onChanged={reloadStatus} />
     <SettingsCliCommands scope="providers" summary={summary} />
   </SettingsPageFrame>
@@ -55,7 +57,7 @@ export function ModelConfigurationPage() {
     <ProviderSettingsManagement management={providers} section="models" onChanged={reloadCodex} />
     <Card><CardHeader><CardTitle>{t("modelManagement.channelModel")}</CardTitle><CardDescription>{t("modelManagement.channelModelHint")}</CardDescription></CardHeader><CardContent>
       {gateway.loading && gateway.managedSettings === null && <Skeleton className="h-9 w-full" />}
-      {gateway.error ? <SettingsError message={gateway.error} retry={reloadGateway} /> : gateway.managedSettings && <FieldGroup><ManagedInputRow label={t("modelManagement.channelModel")} defaultValue={gateway.managedSettings.system.defaultModel ?? ""} placeholder={t("modelManagement.followDefault")} disabled={busy} saved={gateway.lastAppliedSetting?.kind === "system.default-model" ? gateway.lastAppliedSetting : null} onBlur={value => void gateway.previewSetting("system.default-model", value || null, t("modelManagement.channelModel"))} /></FieldGroup>}
+      {gateway.error ? <SettingsError message={gateway.error} retry={reloadGateway} /> : gateway.managedSettings && <FieldGroup><ManagedInputRow label={t("modelManagement.channelModel")} defaultValue={gateway.managedSettings.system.defaultModel ?? ""} placeholder={t("modelManagement.followDefault")} disabled={busy} saved={gateway.lastAppliedSetting?.kind === "system.default-model" ? gateway.lastAppliedSetting : null} onBlur={value => void gateway.previewSetting("system.default-model", value || null, { key: "modelManagement.channelModel" })} /></FieldGroup>}
       {gateway.actionError && <Alert variant="destructive"><AlertDescription>{gateway.actionError}</AlertDescription></Alert>}
     </CardContent></Card>
     <PendingSettingDialog pending={gateway.pendingSetting} saving={gateway.saving} loading={gateway.loading} onCancel={gateway.cancelSetting} onConfirm={() => void gateway.confirmSetting()} />

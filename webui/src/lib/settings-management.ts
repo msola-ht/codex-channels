@@ -1,3 +1,4 @@
+import type { MessageKey, TranslateParams } from "@/lib/i18n/messages"
 import type {
   CodexUserSettingInput,
   CodexUserSettingsResponse,
@@ -17,11 +18,13 @@ import type {
   ManagementTaskPreview,
 } from "@/lib/types"
 
+export type SettingLabel = string | { key: MessageKey; params?: TranslateParams }
+
 export type PendingSetting = {
   kind: string
   before: unknown
   value: unknown
-  label: string
+  label: SettingLabel
   activation: ManagementSettingMutationResponse["activation"]
   confirmationToken?: string
 }
@@ -34,7 +37,7 @@ export interface GatewaySettingsController {
   actionError: string | null
   saving: boolean
   pendingSetting: PendingSetting | null
-  previewSetting: (kind: string, value: unknown, label: string) => Promise<void>
+  previewSetting: (kind: string, value: unknown, label: SettingLabel) => Promise<void>
   confirmSetting: () => Promise<boolean>
   cancelSetting: () => void
   refetch: () => void
@@ -48,7 +51,7 @@ export interface CodexSettingsController {
   actionError: string | null
   saving: boolean
   pendingSetting: PendingSetting | null
-  previewSetting: (setting: CodexUserSettingInput, label: string) => Promise<void>
+  previewSetting: (setting: CodexUserSettingInput, label: SettingLabel) => Promise<void>
   confirmSetting: () => Promise<boolean>
   cancelSetting: () => void
   refetch: () => void
