@@ -7,8 +7,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ApprovalCoordinator } from "../src/approval/coordinator.js";
+import { InteractionRouter } from "../src/approval/interaction-router.js";
 import type { FileApprovalChange } from "../src/approval/requests.js";
-import type { SessionRouter } from "../src/session-routing/router.js";
+import type { InteractionPort, InteractionRequest } from "../src/approval/types.js";
+import { SessionRouter } from "../src/session-routing/router.js";
 import { approvalTarget, FakeInteraction } from "./approval-test-fixture.js";
 
 import { SubagentCompletionTracker } from "../src/bootstrap/subagent-completion-tracker.js";
@@ -23,6 +25,8 @@ import { StdioTransport } from "../src/codex-client/stdio-transport.js";
 import type { ConfigReadResponse, GetAccountResponse, GetAuthStatusResponse, ThreadStartResponse, ThreadTurnsListResponse, TurnStartResponse } from "../src/codex-protocol/index.js";
 import type { OperationUpdate } from "../src/conversation-core/index.js";
 import { ProviderProxy } from "../src/provider-proxy/index.js";
+import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
+import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
 import { TextAttachmentStore } from "../src/surfaces/text-attachment-store.js";
 import { completedResponseEvent } from "./support/real-app-server-supervised-fixtures.js";
@@ -1105,6 +1109,164 @@ contractSuite("real supervised App Server tools", () => {
       }
     }, 30_000);
 
+    it.each([true, false])("routes real child command approvals after the parent Turn completes without sharing one-time decisions: %s", async (approveFirst) => {
+      const directory = mkdtempSync(join("/tmp", "child-approval-"));
+      const codexHome = join(directory, "home");
+      const workspace = join(directory, "workspace");
+      const childPrompt = "Execute the isolated child approval contract.";
+      const childModel = "gpt-6.1-sol";
+      const requests: Array<{ target: typeof approvalTarget; request: InteractionRequest }> = [];
+      const methods: string[] = [];
+      const protocolResponses: unknown[] = [];
+      const parentCompletedAtApproval: boolean[] = [];
+      let parentThreadId: string | undefined;
+      let parentTurnId: string | undefined;
+      let parentCompleted = false;
+      let childCompleted = false;
+      let parentResponses = 0;
+      let childResponses = 0;
+      let releaseChild!: () => void;
+      const parentCompletion = new Promise<void>(resolve => { releaseChild = resolve; });
+      const backend = createServer((request, response) => {
+        const chunks: Buffer[] = [];
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          if (request.method !== "POST" || request.url !== "/responses") {
+            response.writeHead(404).end();
+            return;
+          }
+          const body = JSON.parse(Buffer.concat(chunks).toString()) as { model: string };
+          const child = body.model === childModel;
+          const number = child ? ++childResponses : ++parentResponses;
+          const id = `${child ? "child" : "parent"}-approval-response-${number}`;
+          const item = child && number <= 2
+            ? { type: "function_call", call_id: `child-command-${number}`, namespace: "functions", name: "exec_command",
+                arguments: JSON.stringify({ cmd: `printf approved > child-marker-${number}`, shell: "/bin/sh", login: false,
+                  yield_time_ms: 1000, sandbox_permissions: "require_escalated", justification: "Isolated child approval contract" }) }
+            : !child && number === 1
+            ? { type: "function_call", call_id: "spawn-approval-child", namespace: "collaboration", name: "spawn_agent",
+                arguments: JSON.stringify({ message: childPrompt, task_name: "approval_worker", fork_turns: "none", agent_type: "external" }) }
+            : { type: "message", role: "assistant", id: `${child ? "child" : "parent"}-done`,
+                content: [{ type: "output_text", text: "done" }] };
+          const sendResponse = () => {
+            response.writeHead(200, { "content-type": "text/event-stream" });
+            for (const event of [
+              { type: "response.created", response: { id } },
+              { type: "response.output_item.done", item },
+              completedResponseEvent(id),
+            ]) response.write(`data: ${JSON.stringify(event)}\n\n`);
+            response.end();
+          };
+          // The binding survives its foreground Turn; the running child must
+          // retain that routing without changing its own request identity.
+          if (child && number === 1) void parentCompletion.then(sendResponse);
+          else sendResponse();
+        });
+      });
+      const interaction = new InteractionRouter();
+      const port: InteractionPort = {
+        async request(target, request) {
+          requests.push({ target, request });
+          parentCompletedAtApproval.push(parentCompleted);
+          const approved = requests.length === 1 ? approveFirst : !approveFirst;
+          return approved
+            ? { type: "approval", approved: true, scope: "once" }
+            : { type: "approval", approved: false };
+        },
+      };
+      interaction.register(approvalTarget.surface, approvalTarget.accountId, port);
+      let rpc: JsonRpcClient | undefined;
+      let client: CodexAppServerClient | undefined;
+      let removeNotification: (() => void) | undefined;
+      try {
+        await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
+        const address = backend.address();
+        if (!address || typeof address === "string") throw new Error("Missing child approval fixture address");
+        mkdirSync(codexHome, { mode: 0o700 });
+        mkdirSync(workspace, { mode: 0o700 });
+        const rolePath = join(codexHome, "approval-agent.config.toml");
+        writeFileSync(rolePath, `model = ${JSON.stringify(childModel)}\nmodel_reasoning_effort = "high"\n`, { mode: 0o600 });
+        writeFileSync(join(codexHome, "config.toml"), [
+          'model = "subagent-approval-contract"', 'model_provider = "subagent-approval-contract"',
+          '[features]', 'plugins = false', 'multi_agent_v2 = true',
+          '[agents.external]', 'description = "Isolated approval contract"', `config_file = ${JSON.stringify(rolePath)}`,
+          '[model_providers.subagent-approval-contract]', 'name = "Child approval fixture"',
+          `base_url = "http://127.0.0.1:${address.port}"`, 'wire_api = "responses"',
+          'requires_openai_auth = false', 'supports_websockets = false',
+        ].join("\n"), { mode: 0o600 });
+        rpc = new JsonRpcClient(new StdioTransport({
+          codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: workspace,
+          environment: { PATH: process.env.PATH, CODEX_HOME: codexHome },
+        }));
+        client = new CodexAppServerClient(rpc, { sandbox: "read-only" });
+        const bindings = new MemoryBindingStore();
+        const router = new SessionRouter(client, bindings, new WorkspaceRegistry([
+          { id: "main", name: "Main", cwd: workspace, sandbox: "read-only", approvalPolicy: "on-request" },
+        ], "main"));
+        const coordinator = new ApprovalCoordinator(router, interaction, 10_000);
+        rpc.setServerRequestHandler(async request => {
+          methods.push(request.method);
+          const response = await handleApprovalServerRequest(request, coordinator);
+          protocolResponses.push(response);
+          return response;
+        });
+        await client.connect();
+        const { thread } = await client.startThread(workspace, { approvalPolicy: "on-request" });
+        parentThreadId = thread.id;
+        bindings.bind({ target: approvalTarget, workspaceId: "main", threadId: thread.id, sessionId: thread.sessionId });
+        removeNotification = client.onNotification(notification => {
+          if (notification.method === "serverRequest/resolved") {
+            const params = notification.params as { requestId?: string | number };
+            if (params.requestId !== undefined) coordinator.resolved(params.requestId);
+          }
+          const event = toConversationInputEvent(notification);
+          if (event?.type === "turn.completed" && event.threadId === parentThreadId) {
+            parentCompleted = true;
+            releaseChild();
+          } else if (event?.type === "item.subagentActivity" && event.kind === "completed") {
+            childCompleted = true;
+          }
+        });
+        const turn = await client.startTurn(thread.id, [{ type: "text", text: "Spawn the isolated approval worker." }],
+          "codex_connect:child-approval-contract", workspace);
+        parentTurnId = turn.turnId;
+        await waitFor(() => childCompleted, 20_000);
+        expect(methods).toEqual(["item/commandExecution/requestApproval", "item/commandExecution/requestApproval"]);
+        expect(protocolResponses).toEqual([
+          { decision: approveFirst ? "accept" : "decline" },
+          { decision: approveFirst ? "decline" : "accept" },
+        ]);
+        expect(parentCompletedAtApproval).toEqual([true, true]);
+        expect(requests).toHaveLength(2);
+        const first = requests[0]!.request;
+        const second = requests[1]!.request;
+        expect(requests.map(({ target }) => target)).toEqual([approvalTarget, approvalTarget]);
+        expect(first).toMatchObject({ type: "approval", kind: "command", itemId: "child-command-1" });
+        expect(second).toMatchObject({ type: "approval", kind: "command", itemId: "child-command-2",
+          threadId: first.threadId, turnId: first.turnId });
+        expect(first.threadId).not.toBe(thread.id);
+        expect(first.turnId).not.toBe(turn.turnId);
+        expect(first.requestId).not.toBe(second.requestId);
+        expect(await client.readThread(first.threadId)).toMatchObject({ parentThreadId: thread.id });
+        expect(bindings.list()).toEqual([expect.objectContaining({ target: approvalTarget, threadId: thread.id })]);
+        expect(bindings.getByThread(first.threadId)).toBeUndefined();
+        expect(existsSync(join(workspace, "child-marker-1"))).toBe(approveFirst);
+        expect(existsSync(join(workspace, "child-marker-2"))).toBe(!approveFirst);
+        expect(interaction.hasPendingForThread(first.threadId)).toBe(false);
+      } finally {
+        releaseChild();
+        interaction.cancelAll();
+        removeNotification?.();
+        if (client && parentThreadId && parentTurnId && !parentCompleted) {
+          await client.interruptTurn(parentThreadId, parentTurnId).catch(() => undefined);
+        }
+        await rpc?.close();
+        backend.closeAllConnections();
+        await new Promise<void>(resolve => backend.close(() => resolve()));
+        rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
+    }, 30_000);
+
     it("inherits parent Provider credentials with native role model overrides and attributes completion to the parent Turn", async () => {
       const testRuntime = mkdtempSync(join(tmpdir(), "codex-subagent-completion-contract-"));
       const codexHome = join(testRuntime, "codex-home");
@@ -1394,7 +1556,6 @@ contractSuite("real App Server file approval", () => {
     const interaction = new FakeInteraction(approved
       ? { type: "approval", approved: true, scope: "once" }
       : { type: "approval", approved: false });
-    let threadId: string | undefined;
     let completed = false;
     let requestCount = 0;
     let changesAtApproval: FileApprovalChange[] | null | undefined;
@@ -1453,10 +1614,11 @@ contractSuite("real App Server file approval", () => {
         environment: { ...process.env, CODEX_HOME: codexHome },
       }));
       const client = new CodexAppServerClient(rpc, { sandbox: "read-only" });
-      const coordinator = new ApprovalCoordinator({
-        targetForThread: (id: string) => id === threadId ? approvalTarget : undefined,
-        isBackgroundThread: () => false,
-      } as unknown as SessionRouter, interaction, 10_000);
+      const bindings = new MemoryBindingStore();
+      const router = new SessionRouter(client, bindings, new WorkspaceRegistry([
+        { id: "main", name: "Main", cwd: workspace, sandbox: "read-only", approvalPolicy: "on-request" },
+      ], "main"));
+      const coordinator = new ApprovalCoordinator(router, interaction, 10_000);
       rpc.setServerRequestHandler(request => {
         methods.push(request.method);
         return handleApprovalServerRequest(request, coordinator, decoded => {
@@ -1475,7 +1637,7 @@ contractSuite("real App Server file approval", () => {
       // Ephemeral threads cannot use thread/read includeTurns: details must come
       // from the real item/started notification emitted before the approval RPC.
       const { thread } = await client.startThread(workspace, { ephemeral: true, approvalPolicy: "on-request" });
-      threadId = thread.id;
+      bindings.bind({ target: approvalTarget, workspaceId: "main", threadId: thread.id, sessionId: thread.sessionId });
       await client.startTurn(thread.id, [{ type: "text", text: "Apply the fixture patch" }], "codex_connect:file-approval", workspace);
       await waitFor(() => completed, 20_000);
       expect(methods).toEqual(["item/fileChange/requestApproval"]);

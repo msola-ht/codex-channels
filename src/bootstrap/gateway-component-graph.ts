@@ -358,6 +358,7 @@ export abstract class GatewayComponentGraph {
       config.scheduledTasksEnabled ? [scheduledTaskToolSpec] : [],
       () => {
         this.asyncQuestions?.cancelStale();
+        this.approval?.cancelStale();
         void this.providerIdleReleaser?.closeIfIdle().catch((error) => {
           this.logger.warn(
             { err: error },

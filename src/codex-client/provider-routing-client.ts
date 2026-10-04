@@ -1,10 +1,11 @@
 import type { CodexAppServerClient } from "./client.js";
 import type { ApprovalRequest } from "../approval/index.js";
 import type { InitializeResponse } from "../codex-protocol/index.js";
-import type {
-  RpcNotification,
-  RpcServerRequest,
-  ServerRequestHandler,
+import {
+  JsonRpcError,
+  type RpcNotification,
+  type RpcServerRequest,
+  type ServerRequestHandler,
 } from "./json-rpc.js";
 
 type ProviderClientMethod =
@@ -232,10 +233,20 @@ export class ProviderRoutingClient {
 
   setServerRequestHandler(handler: ServerRequestHandler): void {
     for (const [provider, client] of this.clients) {
-      client.setServerRequestHandler((request) => handler({
-        ...request,
-        id: namespaceRequestId(provider, request.id),
-      }));
+      client.setServerRequestHandler(async (request) => {
+        const params = asRecord(request.params);
+        const threadId = typeof params?.threadId === "string" ? params.threadId : undefined;
+        if (threadId) {
+          const known = this.knownProvider(threadId);
+          if (known !== undefined && known !== this.canonicalProvider(provider)) {
+            throw new JsonRpcError(-32602, "Server Request Thread Provider 不匹配");
+          }
+          // Record only a routing hint; readThread verifies the official snapshot.
+          // Forward synchronously so resolved notifications cannot precede registration.
+          if (known === undefined) this.threadProviders.set(threadId, provider);
+        }
+        return handler({ ...request, id: namespaceRequestId(provider, request.id) });
+      });
     }
   }
 
@@ -346,10 +357,12 @@ export class ProviderRoutingClient {
       const thread = await this.withProviderActivity(provider, async () =>
         (await this.ensureClient(provider)).readThread(...args)
       );
+      this.assertReadThread(thread, threadId, provider);
       this.rememberThread(thread);
       return thread;
     }
     const canonical = await this.withPrimaryActivity((client) => client.readThread(...args));
+    this.assertReadThread(canonical, threadId);
     this.rememberThread(canonical);
     if (this.canonicalProvider(canonical.modelProvider) === this.primaryProvider) {
       return canonical;
@@ -357,6 +370,7 @@ export class ProviderRoutingClient {
     const thread = await this.withProviderActivity(canonical.modelProvider, async () =>
       (await this.ensureClient(canonical.modelProvider)).readThread(...args)
     );
+    this.assertReadThread(thread, threadId, canonical.modelProvider);
     this.rememberThread(thread);
     return thread;
   }
@@ -874,6 +888,13 @@ export class ProviderRoutingClient {
   private rememberThread(thread: ThreadSnapshot): void {
     this.clientForProvider(thread.modelProvider);
     this.threadProviders.set(thread.id, thread.modelProvider);
+  }
+
+  private assertReadThread(thread: ThreadSnapshot, threadId: string, provider?: string): void {
+    if (thread.id !== threadId || (provider !== undefined
+      && this.canonicalProvider(thread.modelProvider) !== this.canonicalProvider(provider))) {
+      throw new Error("读取的 Thread 身份或模型 Provider 不匹配");
+    }
   }
 
   private rememberNotificationProvider(provider: string, notification: RpcNotification): void {

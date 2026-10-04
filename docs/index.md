@@ -323,6 +323,16 @@ RS 与 CCG 保存前通过 [`model-catalog-validation.mjs`](../scripts/model-cat
 OpenCode Go 和自定义第三方代理仍拒绝这些路径。真实合同使用当前锁定 App Server 验证
 `POST /alpha/search` 能穿过该白名单并完成工具结果往返。
 
+子代理交互复用已有 `thread/read`、`Thread.parentThreadId` 和原审批 Server Request，不新增 RPC。
+[`router.ts`](../src/session-routing/router.ts) 核验官方祖先、Workspace、Provider 和绑定有效性；
+[`coordinator.ts`](../src/approval/coordinator.ts) 保留子代理原有 Thread、Turn、Item 与请求身份，
+把交互送到已绑定祖先会话，归属解析与排队共用有效期，绑定变化或 `serverRequest/resolved` 会取消旧请求。
+无人值守 `automation` Thread 及其后代仍拒绝交互审批。
+官方依据为固定版 [`thread_data.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs)
+及 [`bespoke_event_handling.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/bespoke_event_handling.rs)；
+验证见审批与 Session Router 单元测试、[`provider-routing-client.test.ts`](../tests/provider-routing-client.test.ts)
+和 [`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts) 的真实子代理审批合同。
+
 Provider 生命周期补充：私有 [`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 不是
 Codex App Server RPC。监听与端点清理复用 [`private-ipc.mjs`](../runtime/private-ipc.mjs)，
 Unix 公开端点通过独占硬链接发布，绑定名保留至监听关闭，避免提前复用绑定名或关闭旧监听时误删替代路径；验证见

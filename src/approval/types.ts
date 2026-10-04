@@ -4,7 +4,11 @@ import type {
   NetworkPolicyAmendment,
 } from "./requests.js";
 
-export type InteractionRequest =
+export type InteractionRequest = {
+  /** Ephemeral ancestry metadata; never part of the App Server response or persisted content. */
+  relatedThreadIds?: readonly string[];
+  isCurrent?: () => boolean;
+} & (
   | {
       type: "approval";
       requestId: string;
@@ -54,7 +58,7 @@ export type InteractionRequest =
         allowAlways: boolean;
       };
       expiresInMs: number;
-    };
+    });
 
 export type InteractionDecision =
   | { type: "approval"; approved: true; scope: "once" | "session" | "execpolicy" }
@@ -73,7 +77,14 @@ export type InteractionDecision =
       scope?: "once" | "session" | "always";
     };
 
+export interface InteractionRoutingGuard {
+  isCurrent(target: ConversationTarget, relatedThreadIds: readonly string[]): boolean;
+  release(): void;
+}
+
 export interface InteractionPort {
+  /** Capture cancellations while an approval's authoritative ancestry is still loading. */
+  captureRoutingGuard?(threadId: string, cancel: () => void): InteractionRoutingGuard;
   request(target: ConversationTarget, request: InteractionRequest): Promise<InteractionDecision>;
   resolved?(requestId: string): void;
   cancelAll?(outcome?: string): void;

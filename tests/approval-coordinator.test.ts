@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ApprovalCoordinator } from "../src/approval/coordinator.js";
+import { InteractionRouter } from "../src/approval/interaction-router.js";
 import type { ApprovalRequestHandler } from "../src/approval/requests.js";
-import type { InteractionRequest } from "../src/approval/types.js";
+import type { InteractionDecision, InteractionRequest } from "../src/approval/types.js";
 import { handleApprovalServerRequest } from "../src/codex-client/server-request-adapter.js";
 import { FileChangeApprovalContext } from "../src/codex-client/file-change-approval-context.js";
 import { JsonRpcError, type RpcServerRequest } from "../src/codex-client/json-rpc.js";
-import type { SessionRouter } from "../src/session-routing/router.js";
+import type { ApprovalTarget, SessionRouter } from "../src/session-routing/router.js";
 import { approvalTarget as target, FakeInteraction } from "./approval-test-fixture.js";
 
 function handleRaw(
@@ -17,6 +18,143 @@ function handleRaw(
 }
 
 describe("ApprovalCoordinator", () => {
+  it.each(["resolved", "timeout"])("cancels ancestry loading on %s and never presents a late result", async (operation) => {
+    vi.useFakeTimers();
+    let release!: (route: ApprovalTarget) => void;
+    const resolving = new Promise<ApprovalTarget>(resolve => { release = resolve; });
+    const interaction = new FakeInteraction();
+    const router = { resolveApprovalTarget: () => resolving } as unknown as SessionRouter;
+    const coordinator = new ApprovalCoordinator(router, interaction, 100);
+    try {
+      const result = handleRaw(coordinator, childCommand("child-request", "child"));
+      if (operation === "resolved") coordinator.resolved("child-request");
+      if (operation === "timeout") await vi.advanceTimersByTimeAsync(100);
+      await expect(result).resolves.toEqual({ decision: "decline" });
+      release({ target, ownerThreadId: "parent", relatedThreadIds: ["child", "parent"], isCurrent: () => true });
+      await Promise.resolve();
+      expect(interaction.requests).toEqual([]);
+      expect(interaction.resolvedIds).toEqual(["child-request"]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not cancel an unresolved approval when an unrelated binding changes", async () => {
+    let release!: (route: ApprovalTarget) => void;
+    const resolving = new Promise<ApprovalTarget>(resolve => { release = resolve; });
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator({ resolveApprovalTarget: () => resolving } as unknown as SessionRouter, interaction, 30_000);
+    const result = handleRaw(coordinator, childCommand("child-request", "child"));
+    coordinator.cancelStale();
+    release({ target, ownerThreadId: "parent", relatedThreadIds: ["child", "parent"], isCurrent: () => true });
+    await expect(result).resolves.toEqual({ decision: "accept" });
+    expect(interaction.requests).toHaveLength(1);
+  });
+
+  it.each(["ancestor", "all", "surface", "unregister", "unrelated-thread", "unrelated-surface"])(
+    "captures %s cancellation before the approval route is known", async (operation) => {
+      let release!: (route: ApprovalTarget) => void;
+      const resolving = new Promise<ApprovalTarget>(resolve => { release = resolve; });
+      const native = new FakeInteraction();
+      const interactions = new InteractionRouter();
+      const unregister = interactions.register("telegram", "default", native);
+      interactions.register("feishu", "other", new FakeInteraction());
+      const coordinator = new ApprovalCoordinator({ resolveApprovalTarget: () => resolving } as unknown as SessionRouter, interactions, 30_000);
+      const result = handleRaw(coordinator, childCommand("request", "child"));
+      if (operation === "ancestor") interactions.cancelThreads(new Set(["parent"]));
+      if (operation === "all") interactions.cancelAll();
+      if (operation === "surface") {
+        interactions.setAvailable("telegram", "default", false);
+        interactions.setAvailable("telegram", "default", true);
+      }
+      if (operation === "unregister") {
+        unregister();
+        interactions.register("telegram", "default", native);
+      }
+      if (operation === "unrelated-thread") interactions.cancelThreads(new Set(["unrelated"]));
+      if (operation === "unrelated-surface") interactions.setAvailable("feishu", "other", false);
+      release({ target, ownerThreadId: "parent", relatedThreadIds: ["child", "parent"], isCurrent: () => true });
+      const allowed = operation.startsWith("unrelated");
+      await expect(result).resolves.toEqual({ decision: allowed ? "accept" : "decline" });
+      expect(native.requests).toHaveLength(allowed ? 1 : 0);
+    },
+  );
+
+  it("includes ancestry reads in the approval deadline", async () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValue(0);
+    const interaction = new FakeInteraction();
+    const router = {
+      resolveApprovalTarget: async () => {
+        clock.mockReturnValue(75);
+        return { target, ownerThreadId: "parent", relatedThreadIds: ["child", "parent"], isCurrent: () => true };
+      },
+    } as unknown as SessionRouter;
+    try {
+      const coordinator = new ApprovalCoordinator(router, interaction, 100);
+      await expect(handleRaw(coordinator, childCommand("request", "child"))).resolves.toEqual({ decision: "accept" });
+      expect(interaction.requests[0]).toMatchObject({ expiresInMs: 25, threadId: "child", turnId: "turn-child", itemId: "item-child", title: "子代理 · child · Codex 请求执行命令" });
+    } finally { clock.mockRestore(); }
+  });
+
+  it("keeps two sibling requests isolated in the same conversation", async () => {
+    const requests: InteractionRequest[] = [];
+    const answers = new Map<string, (decision: InteractionDecision) => void>();
+    const resolved = vi.fn();
+    const interaction = new InteractionRouter();
+    interaction.register("telegram", "default", {
+      request: async (_target, request) => {
+        requests.push(request);
+        return new Promise<InteractionDecision>(resolve => { answers.set(request.requestId, resolve); });
+      },
+      resolved,
+    });
+    const router = {
+      resolveApprovalTarget: async (id: string) => ({ target, ownerThreadId: "parent", relatedThreadIds: [id, "parent"], isCurrent: () => true }),
+    } as unknown as SessionRouter;
+    const coordinator = new ApprovalCoordinator(router, interaction, 30_000);
+    const first = handleRaw(coordinator, childCommand("one", "child-one"));
+    const second = handleRaw(coordinator, childCommand("two", "child-two"));
+    await vi.waitFor(() => expect(requests.map(value => value.requestId)).toEqual(["one"]));
+    expect(interaction.hasPendingForThread("parent")).toBe(true);
+    coordinator.resolved("one");
+    await expect(first).resolves.toEqual({ decision: "decline" });
+    expect(requests.map(value => value.requestId)).toEqual(["one", "two"]);
+    answers.get("one")?.({ type: "approval", approved: true, scope: "session" });
+    answers.get("two")?.({ type: "approval", approved: true, scope: "once" });
+    await expect(second).resolves.toEqual({ decision: "accept" });
+    expect(resolved).toHaveBeenCalledExactlyOnceWith("one");
+    expect(requests[1]).toMatchObject({ threadId: "child-two", turnId: "turn-child-two", itemId: "item-child-two" });
+  });
+
+  it.each([true, false])("rejects changed ownership after Surface preparation, cancellation event=%s", async (notify) => {
+    let current = true;
+    let answer!: (decision: InteractionDecision) => void;
+    const request = vi.fn(async () => new Promise<InteractionDecision>(resolve => { answer = resolve; }));
+    const resolved = vi.fn();
+    const router = { resolveApprovalTarget: async () => ({ target, ownerThreadId: "parent", relatedThreadIds: ["child", "parent"], isCurrent: () => current }) } as unknown as SessionRouter;
+    const coordinator = new ApprovalCoordinator(router, { request, resolved }, 30_000);
+    const result = handleRaw(coordinator, childCommand("one", "child"));
+    await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+    current = false;
+    if (notify) coordinator.cancelStale();
+    answer({ type: "approval", approved: true, scope: "session" });
+    await expect(result).resolves.toEqual({ decision: "decline" });
+    if (notify) expect(resolved).toHaveBeenCalledExactlyOnceWith("one");
+  });
+
+  it("bounds unresolved ancestry work and reclaims it on cancellation", async () => {
+    const read = vi.fn(() => new Promise<ApprovalTarget>(() => {}));
+    const coordinator = new ApprovalCoordinator({ resolveApprovalTarget: read } as unknown as SessionRouter, new FakeInteraction(), 30_000);
+    const requests = Array.from({ length: 100 }, (_, index) => handleRaw(coordinator, childCommand(String(index), "child")));
+    await expect(handleRaw(coordinator, childCommand("overflow", "child"))).resolves.toEqual({ decision: "decline" });
+    expect(read).toHaveBeenCalledTimes(100);
+    for (let index = 0; index < 100; index += 1) coordinator.resolved(String(index));
+    await expect(Promise.all(requests)).resolves.toEqual(Array(100).fill({ decision: "decline" }));
+    const next = handleRaw(coordinator, childCommand("next", "child"));
+    expect(read).toHaveBeenCalledTimes(101);
+    coordinator.resolved("next");
+    await expect(next).resolves.toEqual({ decision: "decline" });
+  });
+
   it("rejects unsupported Server Requests without forwarding raw params", async () => {
     const coordinator = new ApprovalCoordinator(
       routerWithTarget(),
@@ -845,7 +983,7 @@ describe("ApprovalCoordinator", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       itemId: "tool-1",
-      expiresInMs: 30_000,
+      expiresInMs: expect.any(Number),
       title: isBlocking ? "Codex 等待回答" : "Codex 请求补充信息（可跳过）",
       questions: [{
         id: "choice",
@@ -1010,13 +1148,15 @@ describe("ApprovalCoordinator", () => {
       title: "MCP GitHub 请求批准",
       message: "Allow GitHub to update a pull request?",
       mode: "tool-approval",
+      relatedThreadIds: ["thread-1"],
+      isCurrent: expect.any(Function),
       toolApproval: {
         toolTitle: "Update pull request",
         detail: "Pull request：146",
         allowSession: true,
         allowAlways: true,
       },
-      expiresInMs: 30_000,
+      expiresInMs: expect.any(Number),
     });
     expect(response).toEqual({
       action,
@@ -1125,11 +1265,18 @@ describe("ApprovalCoordinator", () => {
 
 function routerWithTarget(options: { background?: boolean } = {}): SessionRouter {
   return {
-    targetForThread: () => target,
+    resolveApprovalTarget: async (threadId: string) => ({ target, ownerThreadId: threadId, relatedThreadIds: [threadId], isCurrent: () => true }),
     isBackgroundThread: () => options.background ?? false,
   } as unknown as SessionRouter;
 }
 
 function routerWithoutTarget(): SessionRouter {
-  return { targetForThread: () => undefined } as unknown as SessionRouter;
+  return { resolveApprovalTarget: async () => undefined } as unknown as SessionRouter;
+}
+
+function childCommand(id: string, threadId: string): RpcServerRequest {
+  return {
+    id, method: "item/commandExecution/requestApproval",
+    params: { threadId, turnId: `turn-${threadId}`, itemId: `item-${threadId}`, command: "npm test" },
+  };
 }

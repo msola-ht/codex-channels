@@ -10,6 +10,25 @@ import { PersistentSurfaceOutput } from "../src/bootstrap/persistent-surface-out
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "chat" };
 const request: InteractionRequest = { type: "approval", requestId: "request", threadId: "thread", turnId: "turn", itemId: "item", kind: "command", title: "Approval", detail: "fixture", allowSession: false, expiresInMs: 5_000 };
 
+it.each(["wait", "answer"])("rejects changed ownership after persistent %s", async (boundary) => {
+  let current = true;
+  let release!: () => void;
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  const native = { request: vi.fn(async () => {
+    if (boundary === "answer") await barrier;
+    return { type: "approval" as const, approved: true as const, scope: "once" as const };
+  }) };
+  const port = new PersistentInteractionPort(native, async () => {
+    if (boundary === "wait") await barrier;
+  });
+  const decision = port.request(target, { ...request, isCurrent: () => current });
+  if (boundary === "answer") await vi.waitFor(() => expect(native.request).toHaveBeenCalledOnce());
+  current = false;
+  release();
+  await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+  if (boundary === "wait") expect(native.request).not.toHaveBeenCalled();
+});
+
 it("waits for earlier durable output to be acknowledged before presenting an ephemeral approval", async () => {
   const directory = mkdtempSync(join(tmpdir(), "delivery-interaction-"));
   const events: string[] = [];

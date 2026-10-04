@@ -27,4 +27,4 @@ export type {
   NetworkPolicyAmendment,
   ServerRequestId,
 } from "./requests.js";
-export type { InteractionDecision, InteractionPort, InteractionRequest } from "./types.js";
+export type { InteractionDecision, InteractionPort, InteractionRequest, InteractionRoutingGuard } from "./types.js";

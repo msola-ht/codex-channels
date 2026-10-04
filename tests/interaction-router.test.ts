@@ -45,6 +45,82 @@ class ControlledInteraction implements InteractionPort {
 }
 
 describe("InteractionRouter", () => {
+  it("bounds unresolved routing guards and reclaims released guards", () => {
+    const router = new InteractionRouter(undefined, 1);
+    router.register("telegram", "default", new FakeInteraction());
+    const cancel = vi.fn();
+    const first = router.captureRoutingGuard("first", cancel);
+    const overflow = router.captureRoutingGuard("overflow", cancel);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(overflow.isCurrent(target, ["overflow", "parent"])).toBe(false);
+    first.release();
+    const next = router.captureRoutingGuard("next", cancel);
+    expect(next.isCurrent(target, ["next", "parent"])).toBe(true);
+    expect(cancel).toHaveBeenCalledOnce();
+    next.release();
+  });
+
+  it.each(["thread", "all"])("immediately cancels unresolved guards on %s cancellation", operation => {
+    const router = new InteractionRouter();
+    const cancel = vi.fn();
+    const guard = router.captureRoutingGuard("child", cancel);
+    if (operation === "thread") router.cancelThreads(new Set(["child"]));
+    else router.cancelAll();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(guard.isCurrent(target, ["child", "parent"])).toBe(false);
+    guard.release();
+  });
+
+  it.each(["ancestor", "all", "surface"])("invalidates sibling guards before %s cancellation advances the queue", async operation => {
+    const port = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", port);
+    const guards = ["one", "two"].map(id => router.captureRoutingGuard(id, () => router.resolved(id)));
+    const decisions = guards.map((guard, index) => {
+      const id = index === 0 ? "one" : "two";
+      const relatedThreadIds = [id, "parent"];
+      return router.request(target, approvalInteractionRequest({ requestId: id, threadId: id, relatedThreadIds, isCurrent: () => guard.isCurrent(target, relatedThreadIds) }));
+    });
+    if (operation === "ancestor") router.cancelThreads(new Set(["parent"]));
+    if (operation === "all") router.cancelAll();
+    if (operation === "surface") router.setAvailable("telegram", "default", false);
+    await expect(Promise.all(decisions)).resolves.toEqual(Array(2).fill({ type: "approval", approved: false }));
+    expect(port.requests.map(value => value.requestId)).toEqual(["one"]);
+    guards.forEach(guard => guard.release());
+  });
+
+  it("protects every ancestor and cancels two child approvals as one batch without exposing the queued child", async () => {
+    const port = new ControlledInteraction();
+    const resolved = vi.fn();
+    Object.assign(port, { resolved });
+    const router = new InteractionRouter();
+    router.register("telegram", "default", port);
+    const first = router.request(target, approvalInteractionRequest({ requestId: "child-one", threadId: "one", relatedThreadIds: ["one", "middle", "parent"] }));
+    const second = router.request(target, approvalInteractionRequest({ requestId: "child-two", threadId: "two", relatedThreadIds: ["two", "middle", "parent"] }));
+    expect(router.hasPendingForThread("parent")).toBe(true);
+    expect(router.hasPendingForThread("middle")).toBe(true);
+    expect(router.hasPendingForThread("two")).toBe(true);
+    router.cancelThreads(new Set(["parent"]));
+    await expect(Promise.all([first, second])).resolves.toEqual([{ type: "approval", approved: false }, { type: "approval", approved: false }]);
+    expect(port.requests.map(value => value.requestId)).toEqual(["child-one"]);
+    expect(resolved).toHaveBeenCalledExactlyOnceWith("child-one");
+    expect(router.hasPendingForThread("parent")).toBe(false);
+  });
+
+  it.each(["queued", "answer"])("rejects stale ownership at the %s boundary", async (boundary) => {
+    const port = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", port);
+    let current = true;
+    const first = router.request(target, approvalInteractionRequest({ requestId: "first", isCurrent: () => boundary === "queued" || current }));
+    const second = boundary === "queued" ? router.request(target, approvalInteractionRequest({ requestId: "second", isCurrent: () => current })) : undefined;
+    current = false;
+    port.resolveNext({ type: "approval", approved: true, scope: "session" });
+    await expect(first).resolves.toMatchObject({ approved: boundary === "queued" });
+    if (second) await expect(second).resolves.toMatchObject({ approved: false });
+    expect(port.requests.map(value => value.requestId)).toEqual(["first"]);
+  });
+
   it("rejects a decision past the monotonic deadline even before the timer callback runs", async () => {
     const clock = vi.spyOn(performance, "now").mockReturnValue(0);
     const port = new ControlledInteraction();

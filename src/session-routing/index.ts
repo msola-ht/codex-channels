@@ -3,6 +3,7 @@ export {
   type SubscriptionRestoreFailure,
   type ThreadModelSettings,
   type ThreadListOptions,
+  type ApprovalTarget,
 } from "./router.js";
 export {
   type ThreadLifecyclePort,

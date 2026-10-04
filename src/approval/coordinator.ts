@@ -1,4 +1,5 @@
-import type { SessionRouter } from "../session-routing/index.js";
+import type { ApprovalTarget, SessionRouter } from "../session-routing/index.js";
+import { safeInteractionDecision } from "./interaction-router.js";
 import type {
   AdditionalPermissionProfile,
   ApprovalRequest,
@@ -17,9 +18,16 @@ import type {
   InteractionAuditLogger,
   InteractionDecision,
   InteractionPort,
+  InteractionRequest,
 } from "./types.js";
 
+interface PendingApproval {
+  route?: ApprovalTarget;
+  cancel(): void;
+}
+
 export class ApprovalCoordinator implements ApprovalRequestHandler {
+  private readonly pending = new Map<string, PendingApproval>();
   constructor(
     private readonly router: SessionRouter,
     private readonly interaction: InteractionPort,
@@ -28,29 +36,79 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
   ) {}
 
   async handle(request: ApprovalRequest): Promise<ApprovalResponse> {
+    const requestId = String(request.requestId);
     const metadata = {
-      requestId: String(request.requestId),
+      requestId,
       requestType: request.type,
       threadId: request.threadId,
       turnId: request.turnId,
     };
     this.logger?.info(metadata, "Codex 交互请求已收到");
-    const target = this.router.targetForThread(request.threadId);
-    if (!target) {
-      this.logger?.warn(
-        {
-          ...metadata,
-          reason: "unmapped-thread",
-        },
-        "Codex 交互请求没有可投递的外部会话，已安全拒绝",
-      );
+    if (this.pending.has(requestId) || this.pending.size >= 100
+      || !Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0 || this.timeoutMs > 2_147_483_647) {
+      this.logger?.warn({ ...metadata, reason: "invalid-or-overloaded-approval" }, "Codex 交互请求已安全拒绝");
       return safeDecline(request);
     }
+    const deadline = performance.now() + this.timeoutMs;
+    const controller = new AbortController();
+    let cancel!: () => void;
+    const cancelled = new Promise<ApprovalResponse>(resolve => { cancel = () => resolve(safeDecline(request)); });
+    const pending: PendingApproval = { cancel: () => { controller.abort(); cancel(); } };
+    // Register before the first read: another client may resolve the RPC while ancestry is loading.
+    this.pending.set(requestId, pending);
+    const timer = setTimeout(() => this.cancel(requestId, pending), this.timeoutMs);
+    timer.unref();
+    const guard = this.interaction.captureRoutingGuard?.(request.threadId, () => this.cancel(requestId, pending));
+    const isPending = (): boolean => this.pending.get(requestId) === pending && performance.now() < deadline;
+    const isCurrent = (): boolean => isPending() && pending.route?.isCurrent() === true
+      && guard?.isCurrent(pending.route.target, pending.route.relatedThreadIds) !== false;
+    const run = async (): Promise<ApprovalResponse> => {
+      if (!isPending()) return safeDecline(request);
+      const route = await this.router.resolveApprovalTarget(request.threadId, isPending, controller.signal);
+      if (!route) {
+        this.logger?.warn({ ...metadata, reason: "unmapped-thread" }, "Codex 交互请求没有可投递的外部会话，已安全拒绝");
+        return safeDecline(request);
+      }
+      pending.route = route;
+      if (!isCurrent()) return safeDecline(request);
+      const response = await this.handleRouted(request, route, async interactionRequest => {
+        if (!isCurrent()) return safeInteractionDecision(interactionRequest);
+        const decision = await this.interaction.request(route.target, {
+          ...interactionRequest,
+          relatedThreadIds: route.relatedThreadIds,
+          isCurrent,
+          expiresInMs: Math.ceil(deadline - performance.now()),
+        });
+        return isCurrent() ? decision : safeInteractionDecision(interactionRequest);
+      });
+      return isCurrent() ? response : safeDecline(request);
+    };
+    try {
+      return await Promise.race([run(), cancelled]);
+    } catch {
+      this.logger?.warn({ ...metadata, reason: "approval-routing-failed" }, "Codex 交互请求归属读取或投递失败，已安全拒绝");
+      this.cancel(requestId, pending);
+      return safeDecline(request);
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+      guard?.release();
+      if (this.pending.get(requestId) === pending) this.pending.delete(requestId);
+    }
+  }
 
+  private async handleRouted(
+    request: ApprovalRequest,
+    route: ApprovalTarget,
+    requestInteraction: (request: InteractionRequest) => Promise<InteractionDecision>,
+  ): Promise<ApprovalResponse> {
     const requestId = String(request.requestId);
-    const title = (value: string): string => this.router.isBackgroundThread(request.threadId)
-      ? `后台任务 · ${request.threadId.slice(0, 12)} · ${value}`
-      : value;
+    const metadata = { requestId, requestType: request.type, threadId: request.threadId, turnId: request.turnId };
+    const title = (value: string): string => route.ownerThreadId !== request.threadId
+      ? `子代理 · ${request.threadId.slice(0, 12)} · ${value}`
+      : this.router.isBackgroundThread(request.threadId)
+        ? `后台任务 · ${request.threadId.slice(0, 12)} · ${value}`
+        : value;
     switch (request.type) {
       case "stdin": {
         // Preserve the entire upstream representation; do not parse shell words
@@ -67,7 +125,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           this.logger?.warn({ ...metadata, reason: "stdin-preview-too-large" }, "终端输入审批无法完整展示，已安全中止");
           return { type: "stdin", decision: "cancel" };
         }
-        const decision = await this.interaction.request(target, {
+        const decision = await requestInteraction({
           type: "approval", requestId, kind: "stdin",
           threadId: request.threadId, turnId: request.turnId, itemId: request.itemId,
           title: title("Codex 请求向已有终端发送输入"), detail,
@@ -93,7 +151,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           return { type: "command", decision: "decline" };
         }
         const isNetworkOnly = request.networkApprovalContext !== null && !hasCommand;
-        const decision = await this.interaction.request(target, {
+        const decision = await requestInteraction({
           type: "approval",
           requestId,
           kind: "command",
@@ -156,7 +214,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           this.logger?.warn({ ...metadata, reason: "file-preview-too-large" }, "文件审批无法完整展示，已安全拒绝");
           return { type: "file", decision: "decline" };
         }
-        const decision = await this.interaction.request(target, {
+        const decision = await requestInteraction({
           type: "approval",
           requestId,
           kind: "file",
@@ -174,7 +232,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
         };
       }
       case "permissions": {
-        const decision = await this.interaction.request(target, {
+        const decision = await requestInteraction({
           type: "approval",
           requestId,
           kind: "permissions",
@@ -195,7 +253,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
         };
       }
       case "user-input": {
-        const decision = await this.interaction.request(target, {
+        const decision = await requestInteraction({
           type: "user-input",
           requestId,
           threadId: request.threadId,
@@ -219,7 +277,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
       }
       case "elicitation": {
         const toolApproval = request.toolApproval;
-        const decision = await this.interaction.request(target, {
+        const decision = await requestInteraction({
           type: "elicitation",
           requestId,
           threadId: request.threadId,
@@ -298,7 +356,28 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
   }
 
   resolved(requestId: string | number): void {
-    this.interaction.resolved?.(String(requestId));
+    const id = String(requestId);
+    const pending = this.pending.get(id);
+    if (pending) this.cancel(id, pending);
+    else this.interaction.resolved?.(id);
+  }
+
+  cancelStale(): void {
+    // Unresolved ancestry tracks relevant binding changes in SessionRouter.
+    for (const [id, pending] of this.pending) {
+      if (pending.route && !pending.route.isCurrent()) this.cancel(id, pending);
+    }
+  }
+
+  private cancel(id: string, pending: PendingApproval): void {
+    if (this.pending.get(id) !== pending) return;
+    this.pending.delete(id);
+    pending.cancel();
+    try {
+      this.interaction.resolved?.(id);
+    } catch {
+      this.logger?.warn({ requestId: id, reason: "interaction-cleanup-failed" }, "Codex 交互已取消，渠道清理失败");
+    }
   }
 }
 
