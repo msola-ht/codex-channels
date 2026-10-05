@@ -41,6 +41,7 @@ import {
   activeScheduledRunStates,
   scheduledTaskDatabaseFileName,
   scheduledTasksSchemaVersion,
+  ScheduledTaskStateError,
   type CreateScheduledTaskInput,
   type ScheduledRun,
   type ScheduledRunErrorCategory,
@@ -66,15 +67,6 @@ export function scheduledTaskDatabasePath(stateDatabasePath: string): string {
 }
 
 export { ScheduledTaskSchemaError } from "./sqlite-schema.js";
-
-export class ScheduledTaskStateError extends Error {
-  readonly code = "scheduled-task.state.invalid" as const;
-
-  constructor(message: string) {
-    super(message);
-    this.name = "ScheduledTaskStateError";
-  }
-}
 
 export class ScheduledTaskStoreClosedError extends Error {
   readonly code = "scheduled-task.store.closed" as const;
@@ -389,21 +381,35 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     nowMs: number,
     result: "claimed" | "skipped_capacity" = "claimed",
   ): ScheduledTaskClaimResult {
+    return this.claimManualOccurrence(taskId, nowMs, result);
+  }
+
+  claimRetry(runId: string, nowMs: number, result: "claimed" | "skipped_capacity" = "claimed"): ScheduledTaskClaimResult {
+    return this.claimManualOccurrence(this.requireRun(runId).taskId, nowMs, result, runId);
+  }
+
+  private claimManualOccurrence(taskId: string, nowMs: number, result: "claimed" | "skipped_capacity", retryRunId?: string): ScheduledTaskClaimResult {
     this.requireOpen();
     this.requireTimestamp(nowMs);
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const task = this.requireTask(taskId);
-      if (task.status === "deleted" || task.status === "blocked" || task.status === "finished") {
+      const retry = retryRunId === undefined ? undefined : this.requireRun(retryRunId);
+      if (retry && (retry.taskId !== taskId || retry.state !== "uncertain")) {
+        throw new ScheduledTaskStateError("只有 uncertain Run 可以显式解除后重试");
+      }
+      if (task.status === "deleted" || task.status === "blocked"
+        || (task.status === "finished" && !(retry && task.schedule?.type === "once"))) {
         throw new ScheduledTaskStateError("当前任务状态不允许手动运行");
       }
       const blocking = this.database
         .prepare(`
           SELECT state FROM runs
           WHERE task_id = ? AND state IN ('dispatching', 'running', 'uncertain')
+            AND (? IS NULL OR run_id <> ?)
           ORDER BY CASE state WHEN 'uncertain' THEN 0 ELSE 1 END LIMIT 1
         `)
-        .get(taskId) as { state: string } | undefined;
+        .get(taskId, retryRunId ?? null, retryRunId ?? null) as { state: string } | undefined;
       const kind = blocking === undefined
         ? result
         : blocking.state === "uncertain" ? "blocked" : "skipped_overlap";
@@ -413,6 +419,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         .prepare("SELECT MAX(scheduled_for) AS value FROM runs WHERE task_id = ?")
         .get(taskId) as { value: number | null };
       const scheduledFor = Math.max(nowMs, (latest.value ?? -1) + 1);
+      if (retry && kind === "claimed") this.resolveUncertain(retry.runId, "failed", nowMs);
       this.insertRun(runId, taskId, scheduledFor, state, nowMs);
       this.database.exec("COMMIT");
       return { kind, run: this.requireRun(runId) };

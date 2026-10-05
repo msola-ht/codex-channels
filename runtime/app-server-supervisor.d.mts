@@ -25,6 +25,16 @@ export type AppServerProviderReleaseResult =
   | { released: true; reason: "released" }
   | { released: false; reason: "leased" | "not-running" };
 
+export interface AppServerProviderSettingsSnapshot {
+  fingerprint: string;
+  defaultModel: string | null;
+}
+
+export type AppServerProviderSettingsResult = (
+  | { applied: true; changed: boolean }
+  | { applied: false; reason: "leased" | "active" }
+) & { snapshot?: AppServerProviderSettingsSnapshot };
+
 export type AppServerSupervisorInspection =
   | { status: "missing" }
   | { status: "incompatible" }
@@ -37,6 +47,8 @@ export class AppServerSupervisorOwner {
     options?: {
       ensureProvider?: (provider: string) => Promise<void>;
       releaseProvider?: (provider: string) => Promise<boolean>;
+      applyProviderSettings?: (provider: string, signal: AbortSignal, canApply: () => boolean) => Promise<AppServerProviderSettingsResult>;
+      providerSettingsSnapshot?: (provider: string) => AppServerProviderSettingsSnapshot | undefined;
       attachDesktopApp?: (attachment: {
         appPath: string;
         pipePath: string;
@@ -47,6 +59,7 @@ export class AppServerSupervisorOwner {
   );
   start(): Promise<void>;
   markRunning(provider: string): void;
+  markReleased(provider: string): void;
   close(): Promise<void>;
 }
 
@@ -78,6 +91,12 @@ export function releaseAppServerProvider(
   primarySocketPath: string,
   provider: string,
 ): Promise<AppServerProviderReleaseResult>;
+export function applyAppServerProviderSettings(
+  primarySocketPath: string,
+  provider: string,
+  signal?: AbortSignal,
+): Promise<AppServerProviderSettingsResult>;
+export function readAppServerProviderSettingsFingerprint(provider: string, environment?: NodeJS.ProcessEnv): string;
 export function sameAppServerTopology(
   actual: InspectedAppServerTopology | undefined,
   expected: AppServerTopology,

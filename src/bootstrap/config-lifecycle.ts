@@ -28,7 +28,6 @@ import {
   ProviderSettingsWatcher,
   type ProviderSettingsStateKind,
 } from "./provider-settings-watcher.js";
-import { restartAppServerService } from "./service-restart-runner.js";
 
 const providerSettingsAction: Record<
   ProviderSettingsStateKind,
@@ -105,9 +104,9 @@ export async function runGatewayProcess(): Promise<void> {
 
   const providerSettingsWatcher = new ProviderSettingsWatcher({
     logger,
-    hasActiveTurns: () => application.hasActiveTurns(),
-    restartAppServer: () => restartAppServerService({ environment: process.env }),
-    refreshProviderModels: () => application.refreshProviderModels(),
+    configuredProviders: application.managedSettingsProviders,
+    applyProviderSettings: (provider, signal) => application.applyProviderSettings(provider, signal),
+    refreshProviderModels: (provider, signal) => application.refreshProviderModels(provider, signal),
     onStateChange: (change) =>
       application.notifyProviderSettingsChange(
         providerSettingsAction[change.kind],
@@ -123,7 +122,7 @@ export async function runGatewayProcess(): Promise<void> {
   });
 
   const stopWatching = (): Promise<void> => {
-    providerSettingsWatcher.stop();
+    const providersStopped = providerSettingsWatcher.stop();
     const networkStopped = networkProxyWatcher.stop();
     if (reloadTimer) {
       clearTimeout(reloadTimer);
@@ -134,7 +133,7 @@ export async function runGatewayProcess(): Promise<void> {
     }
     process.removeListener("SIGHUP", scheduleReload);
     process.removeListener("message", controlFromParent);
-    return networkStopped;
+    return Promise.all([providersStopped, networkStopped]).then(() => undefined);
   };
   const stop = (exitCode = 0): void => {
     if (stopping) {

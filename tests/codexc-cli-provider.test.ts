@@ -1,12 +1,14 @@
 import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { writeCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { inspectAppServerSupervisor } from "../runtime/app-server-supervisor.mjs";
 import { cli, mkdtempSync, table, unixSocketTmpdir, updateGatewayConfig, waitForCondition } from "./codexc-cli-test-fixture.js";
+import { stopDetachedTestProcess } from "./support/real-app-server-helpers.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -30,7 +32,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     it.skip("Windows 使用独立服务合同测试覆盖 Provider；Unix 套接字集成夹具不适用", () => undefined);
     return;
   }
-  it("starts the App Server with effective proxy settings and the official path allowlist", () => {
+  it("starts the App Server with effective proxy settings and the official path allowlist", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-entry-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -42,7 +44,9 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     mkdirSync(codexHome);
     writeFileSync(fakeCodex, [
       "#!/usr/bin/env node",
-      "import { writeFileSync } from 'node:fs';",
+      "import { chmodSync, writeFileSync } from 'node:fs';",
+      "import { createServer } from 'node:http';",
+      `const { WebSocketServer } = await import(${JSON.stringify(pathToFileURL(resolve("node_modules/ws/wrapper.mjs")).href)});`,
       "const args = process.argv.slice(2);",
       "const baseUrlArgument = args.find((value) => value.startsWith('openai_base_url='));",
       "const openAiApiPathStatus = baseUrlArgument === undefined ? null : (await fetch(`${JSON.parse(baseUrlArgument.slice('openai_base_url='.length))}/alpha/search`, { method: 'POST' })).status;",
@@ -54,6 +58,10 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       "  lowerHttpsProxy: process.env.https_proxy,",
       "  serviceRole: process.env.CODEX_CONNECT_SERVICE_ROLE,",
       "}));",
+      "const socketPath = args.at(-1).slice('unix://'.length);",
+      "const server = createServer();",
+      "new WebSocketServer({ server });",
+      "server.listen(socketPath, () => chmodSync(socketPath, 0o600));",
     ].join("\n"));
     chmodSync(fakeCodex, 0o700);
     writeFileSync(
@@ -75,33 +83,41 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       writeCodexProxySettings({ https_proxy: "http://127.0.0.1:8899" }, environment);
     });
 
-    execFileSync(process.execPath, [cli, "service-app-server"], {
+    const service = spawn(process.execPath, [cli, "service-app-server"], {
       cwd: root,
       env: environment,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
     });
-
-    const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
-      args: string[];
-      openAiApiPathStatus: number;
-      cwd: string;
-      httpsProxy: string;
-      lowerHttpsProxy: string;
-      serviceRole: string;
-    };
-    expect(captured.args).toEqual([
-      "-c",
-      expect.stringMatching(/^openai_base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
-      "app-server",
-      "--listen",
-      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
-    ]);
-    expect(captured).toMatchObject({
-      openAiApiPathStatus: 502,
-      cwd: realpathSync(join(home, "workspace")),
-      httpsProxy: "http://127.0.0.1:8899",
-      lowerHttpsProxy: "http://127.0.0.1:8899",
-      serviceRole: "app-server",
-    });
+    try {
+      await vi.waitFor(async () => {
+        expect((await inspectAppServerSupervisor(join(home, "runtime", "codex-app-server.sock")))?.runningProviders).toContain("openai");
+      }, { timeout: 5_000 });
+      const captured = JSON.parse(readFileSync(capturePath, "utf8")) as {
+        args: string[];
+        openAiApiPathStatus: number;
+        cwd: string;
+        httpsProxy: string;
+        lowerHttpsProxy: string;
+        serviceRole: string;
+      };
+      expect(captured.args).toEqual([
+        "-c",
+        expect.stringMatching(/^openai_base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
+        "app-server",
+        "--listen",
+        `unix://${join(home, "runtime", "codex-app-server.sock")}`,
+      ]);
+      expect(captured).toMatchObject({
+        openAiApiPathStatus: 502,
+        cwd: realpathSync(join(home, "workspace")),
+        httpsProxy: "http://127.0.0.1:8899",
+        lowerHttpsProxy: "http://127.0.0.1:8899",
+        serviceRole: "app-server",
+      });
+    } finally {
+      await stopDetachedTestProcess(service, 5_000);
+    }
   });
 
   it("finishes service shutdown when an App Server ignores graceful termination", async () => {

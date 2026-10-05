@@ -138,9 +138,12 @@
   检查；Gateway 关闭时停止新的检查，并在有界时间内等待已开始的关闭完成。
 - `conversation-idle-releaser.ts`：按 `conversation.idle_release_minutes` 定期扫描前台 Thread
   绑定；输入或输出刷新最近活动时间，超过阈值且 App Server 确认为空闲后由
-  `ConversationService.releaseIdle` 取消订阅并解绑，成功后通过共享结构化事件只通知一次
+  `ConversationService.releaseIdle` 取得会话锁，持续复核扫描时的 Thread、活动时间与取消代次，取消订阅后
+  只释放同一有效绑定；新活动使扫描失效时恢复原订阅，失败交给既有绑定恢复任务。
+  成功后通过共享结构化事件只通知一次
   “自动解除占用”，并携带当前 Thread ID 供 `/r` 直接恢复。
-  正在恢复或 Provider 断线的绑定会跳过本轮，强制新建标记也会跳过扫描；关闭时停止定时器并限时等待已经在途的
+  正在恢复或 Provider 断线的绑定会跳过本轮；断线只取消对应 Provider 的候选，其余候选仍可完成扫描和订阅补偿。
+  补偿恢复暂时失败后继续使用既有恢复协调器的退避调度。强制新建标记也会跳过扫描；关闭时停止定时器并限时等待已经在途的
   扫描退出，避免释放 RPC 卡住 Gateway 关闭。
 - `turn-error-metrics.ts`：把同步 RPC 与异步 `turn.error` 通知的 Turn 级失败统一转换为脱敏的
   模型请求失败样本，保存脱敏、限长后的错误消息与分类；结构化 `misalignmentPolicyViolation` 使用独立分类并
@@ -152,17 +155,20 @@
   协议标记为就绪，供服务管理入口区分进程占位和可用 Gateway；账户刷新私有 IPC 与应用一同启停。
   该 IPC 根据受控账户查询原因生成固定文案，不透传内部异常 message；按 Provider 记录阶段、分类、
   耗时和受控状态码，主动取消不记录为上游失败；快照等未知本地异常按内部故障处理。
-- `provider-settings-watcher.ts`：监听受管第三方 Provider 的模型目录、Profile 与管理标记变化，
-  校验通过后防抖等待该 Provider 无活动 Turn，再自动触发 App Server 重启；校验失败保留旧基线并
-  等待修复；重启后刷新 Gateway 模型目录，两步均成功才报告生效，任一步失败按冷却时间重试；
-  等待、重启中、生效和失败状态通过共享配置变更通知投递给
-  所有渠道，停止 Gateway 时一并关闭。
+- `provider-settings-watcher.ts`：监听当前 Gateway 已启用的受管 Provider 模型目录、Profile 与管理标记；
+  校验后逐 Provider 调用监管设置应用端口，原生 TUI/Desktop 租约或权威活动 Thread 保留待应用状态。
+  组合根在同一 Provider RPC 准入入口排空请求并阻止新请求；监管重新派生启动材料并只更新目标实例，
+  连接与绑定恢复复用既有协调器；设置恢复期间再次意外断线必须重新握手，主动释放或关闭会取消设置等待者。
+  模型目录只刷新成功的 Provider：启动前先核对宿主已应用的指纹与默认设置，运行实例读取权威目录，
+  未运行实例仅使用匹配该指纹的已捕获目录；不会为目录读取唤醒实例或提前发布其他 Provider 的待应用设置。
+  模型目录刷新成功且文件代次仍匹配后才确认生效，连续变化及失败
+  保留待应用项并按冷却时间重试；每 Provider 每文件代次最多失败 12 次，新的文件变化或 Gateway
+  重建重置预算。启动静默核对宿主的已应用指纹，相同指纹不重启实例，避免重建丢失待生效变化。
+  停止时取消应用、最多等待五秒，迟到结果不刷新模型或发状态通知。
 - `network-proxy-watcher.ts`：按字段保留 Codex `.env` 与标准环境代理优先级；已有任一代理地址时跳过系统查询，
   否则监听系统发现参与解析后的有效代理变化；单独配置 `NO_PROXY` 不禁用观察。仅记录需手动刷新 Gateway 和 App Server 的提示，区分
   后台服务与前台入口，不自动重启共享进程。系统查询异步执行且不重叠，失败保留上次结果并告警；
   停止 Gateway 时取消后续检查及在途查询，并等待查询结束。
-- `service-restart-runner.ts`：统一执行 App Server 服务重启的异步子进程封装，Gateway 自动重启
-  与未来 CLI 单 Provider 重启复用同一入口，输出脱敏后写入日志。
 - `completion-output-enricher.ts`：在实际投递前为 `turn.completed` 补全当前授权 Workspace 的 Git 分支、
   本轮统计、显式父 Turn 任务合计与递归包含子代理后代的 Session 累计统计；通过注入端口等待指标写入水位。
   统计读取顺序共享 250 ms 预算，耗尽后不启动后续查询，已启动查询的迟到失败仍被捕获；失败时保留 Core

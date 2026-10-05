@@ -75,7 +75,7 @@ export function formatSurfaceConfigurationChange(
         ...(change.providers && change.providers.length > 0
           ? [`Provider：${change.providers.join("、")}`]
           : []),
-        "等待当前任务完成后自动重启 App Server 生效。",
+        "等待对应 Provider 的任务结束并释放原生客户端租约后自动应用。",
       ].join("\n"));
     case "provider-settings-restarting":
       return toStructuredMarkdownList([
@@ -83,7 +83,7 @@ export function formatSurfaceConfigurationChange(
         ...(change.providers && change.providers.length > 0
           ? [`Provider：${change.providers.join("、")}`]
           : []),
-        "正在重启 App Server。",
+        "正在检查并应用对应 Provider 的设置。",
       ].join("\n"));
     case "provider-settings-applied":
       return toStructuredMarkdownList([
@@ -91,15 +91,15 @@ export function formatSurfaceConfigurationChange(
         ...(change.providers && change.providers.length > 0
           ? [`Provider：${change.providers.join("、")}`]
           : []),
-        "App Server 已重启。",
+        "对应 Provider 的设置应用与 Gateway 模型目录刷新已确认。",
       ].join("\n"));
     case "provider-settings-failed":
       return toStructuredMarkdownList([
-        "第三方模型设置更新后 App Server 重启失败",
+        "第三方模型设置应用失败",
         ...(change.providers && change.providers.length > 0
           ? [`Provider：${change.providers.join("、")}`]
           : []),
-        "Gateway 将自动重试；请查看服务日志。",
+        "待应用状态已保留；Gateway 在重试预算内自动重试，耗尽后等待设置变化或 Gateway 重建。请查看服务日志。",
       ].join("\n"));
   }
 }

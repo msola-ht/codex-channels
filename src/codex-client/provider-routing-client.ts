@@ -161,6 +161,17 @@ export class ProviderRoutingClient {
     });
   }
 
+  /** Connect after an intentional close, coalescing with normal Provider admission. */
+  async connectProvider(provider: string): ReturnType<ProviderClientInstance["connect"]> {
+    const canonical = this.canonicalProvider(provider);
+    return this.withProviderActivity(canonical, async () => {
+      await this.ensureClient(canonical);
+      const initialized = this.initializationResponses.get(canonical);
+      if (!initialized) throw new Error(`模型 Provider App Server 未完成初始化：${canonical}`);
+      return initialized;
+    });
+  }
+
   closeProvider(provider: string): Promise<void> {
     const canonical = this.canonicalProvider(provider);
     const existing = this.providerCloseTasks.get(canonical);

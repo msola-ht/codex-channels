@@ -22,6 +22,46 @@ afterEach(() => {
 });
 
 describe("ScheduledTaskScheduler", () => {
+  it("serializes concurrent retries and reuses only the selected uncertain Run's capacity", async () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    const task = store.createTask(taskInput());
+    const original = store.claimManual(task.taskId, base + 1).run;
+    store.markUncertain(original.runId, base + 2);
+    const execute = vi.fn<ScheduledTaskExecutionPort["execute"]>(async () => ({ kind: "running", threadId: "retry-thread", turnId: "retry-turn" }));
+    const scheduler = new ScheduledTaskScheduler(store, { execute }, { maxConcurrentRunsPerConversation: 1, clock: { now: () => base + 10 } });
+    const attempts = await Promise.allSettled([scheduler.retryRun(original.runId), scheduler.retryRun(original.runId)]);
+    expect(attempts.map((attempt) => attempt.status)).toEqual(["fulfilled", "rejected"]);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(store.listRuns(task.taskId).map((run) => run.state).sort()).toEqual(["failed", "running"]);
+    await scheduler.stop();
+    store.close();
+  });
+
+  it.each(["capacity", "stopping", "deleted"])("preserves retryability when %s changes during admission", async (reason) => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    const task = store.createTask(taskInput());
+    const original = store.claimManual(task.taskId, base + 1).run;
+    store.markUncertain(original.runId, base + 2);
+    let resolveCapacity!: (value: number) => void;
+    const availableCapacity = vi.fn(() => new Promise<number>((resolve) => { resolveCapacity = resolve; }));
+    const execute = vi.fn<ScheduledTaskExecutionPort["execute"]>(async () => ({ kind: "running" }));
+    const scheduler = new ScheduledTaskScheduler(store, { execute, availableCapacity }, { clock: { now: () => base + 10 } });
+    const retrying = scheduler.retryRun(original.runId);
+    const outcome = reason === "capacity" ? expect(retrying).resolves.toMatchObject({ state: "skipped_capacity" }) : expect(retrying).rejects.toThrow();
+    await waitFor(() => availableCapacity.mock.calls.length === 1);
+    if (reason === "deleted") store.deleteTask(task.taskId, base + 3);
+    const stopping = reason === "stopping" ? scheduler.stop() : undefined;
+    resolveCapacity(reason === "capacity" ? 0 : 1);
+    await outcome;
+    await stopping;
+    expect(store.getRun(original.runId)?.state).toBe("uncertain");
+    expect(execute).not.toHaveBeenCalled();
+    await scheduler.stop();
+    store.close();
+  });
+
   it("dispatches an explicit manual run and records capacity rejection", async () => {
     const { path } = databasePath();
     const store = new SqliteScheduledTaskStore(path);

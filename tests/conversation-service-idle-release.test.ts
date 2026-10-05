@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ConversationIdleReleaser } from "../src/bootstrap/conversation-idle-releaser.js";
 
 import {
   ConversationService,
@@ -48,6 +49,9 @@ function createService({
   collaborationClear,
   status = { type: "idle" },
   newSession,
+  routerOverrides = {},
+  coreOverrides = {},
+  queueList,
 }: {
   activeTurn?: unknown;
   hasQueue?: boolean;
@@ -59,12 +63,17 @@ function createService({
   collaborationClear?: ReturnType<typeof vi.fn>;
   status?: { type: "idle" | "active" | "notLoaded" | "systemError" };
   newSession: ReturnType<typeof vi.fn>;
+  routerOverrides?: Record<string, unknown>;
+  coreOverrides?: Record<string, unknown>;
+  queueList?: ReturnType<typeof vi.fn>;
 }): ConversationService {
   const router = {
     current: () => binding,
     readThread: async () => ({ status }),
-    newSession,
+    releaseIdle: newSession,
+    idleState: () => ({ lastActivityAt: 1, forceNew: false }),
     touchActivity: vi.fn(),
+    ...routerOverrides,
   } as unknown as SessionRouter;
   const transfers: ConversationTransferPort = {
     hasPendingInteraction: () => pendingInteraction,
@@ -81,7 +90,7 @@ function createService({
   return new ConversationService(
     {} as never,
     router,
-    { activeTurn: () => activeTurn } as unknown as ConversationCore,
+    { activeTurn: () => activeTurn, ...coreOverrides } as unknown as ConversationCore,
     models,
     queryPort(),
     undefined,
@@ -95,10 +104,10 @@ function createService({
     undefined,
     undefined,
     {
-      listQueue: async () => ({
+      listQueue: queueList ?? (async () => ({
         items: hasQueue ? [{}] : [],
         nextCursor: null,
-      }),
+      })),
     } as never,
     undefined,
     pendingSubagent ? () => true : undefined,
@@ -106,15 +115,104 @@ function createService({
 }
 
 describe("ConversationService idle release", () => {
+  it("does not unsubscribe in new scans while disconnect inspection is pending and authoritative reads fail", async () => {
+    const releaseIdle = vi.fn(async () => true);
+    const readThread = vi.fn(async () => { throw new Error("App Server disconnected"); });
+    const restoreBinding = vi.fn();
+    const service = createService({ newSession: releaseIdle, routerOverrides: { readThread } });
+    const releaser = new ConversationIdleReleaser({
+      logger: { info: vi.fn(), warn: vi.fn() } as never,
+      idleThresholdMs: 10, nowMs: () => 100, listForegroundBindings: () => [binding],
+      idleState: () => ({ lastActivityAt: 1, forceNew: false }), ensureIdleState: vi.fn(),
+      // The asynchronous supervisor inspection has not marked this Provider as restoring yet.
+      isBindingRestoring: () => false, restoreBinding,
+      releaseIdle: (candidate, condition) => service.releaseIdle(candidate, condition), notifyReleased: vi.fn(),
+    });
+    releaser.cancelPending(new Set([binding.threadId]));
+    await releaser.scan();
+    await releaser.scan();
+    expect(readThread).toHaveBeenCalledTimes(2);
+    expect(releaseIdle).not.toHaveBeenCalled();
+    expect(restoreBinding).not.toHaveBeenCalled();
+    await releaser.stop();
+  });
+
+  it("rejects a scanned Thread replaced before the conversation lock is acquired", async () => {
+    const releaseIdle = vi.fn(async () => true);
+    let current = binding;
+    const service = createService({ newSession: releaseIdle, routerOverrides: { current: () => current } });
+    const releasing = service.releaseIdle(target);
+    current = { ...binding, threadId: "replacement", sessionId: "replacement" };
+    await expect(releasing).resolves.toEqual({ status: "busy", threadId: "replacement" });
+    expect(releaseIdle).not.toHaveBeenCalled();
+  });
+
+  it.each(["activity", "disabled", "cancelled", "restoring", "interaction"])(
+    "keeps the binding when %s changes during the authoritative read",
+    async (change) => {
+      let finishRead!: () => void;
+      let at = 1;
+      let restoring = false;
+      let interaction = false;
+      const controller = new AbortController();
+      const releaseIdle = vi.fn(async () => true);
+      const readThread = vi.fn(async () => {
+        await new Promise<void>(resolve => { finishRead = resolve; });
+        return { status: { type: "idle" } };
+      });
+      const service = createService({
+        newSession: releaseIdle,
+        routerOverrides: { readThread, idleState: () => ({ lastActivityAt: at, forceNew: false }) },
+        coreOverrides: { activeTurn: () => interaction ? { threadId: binding.threadId } : undefined },
+      });
+      const releasing = service.releaseIdle(target, {
+        threadId: binding.threadId, lastActivityAt: 1, signal: controller.signal,
+        isCurrent: () => !restoring, canRestore: () => !restoring,
+      });
+      await vi.waitFor(() => expect(readThread).toHaveBeenCalled());
+      if (change === "activity") at = 2;
+      if (change === "disabled") { service.setIdleReleaseEnabled(false); service.setIdleReleaseEnabled(true); }
+      if (change === "cancelled") controller.abort();
+      if (change === "restoring") restoring = true;
+      if (change === "interaction") interaction = true;
+      finishRead();
+      await expect(releasing).resolves.toEqual({ status: "busy", threadId: binding.threadId });
+      expect(releaseIdle).not.toHaveBeenCalled();
+    },
+  );
+
+  it("asks the existing recovery owner to restore an unsuccessful subscription cleanup", async () => {
+    const restoreRequired = vi.fn();
+    const service = createService({ newSession: vi.fn(async () => { throw new Error("restore unavailable"); }) });
+    await expect(service.releaseIdle(target, {
+      threadId: binding.threadId, lastActivityAt: 1, signal: new AbortController().signal,
+      isCurrent: () => true, canRestore: () => true, restoreRequired,
+    })).resolves.toMatchObject({ status: "busy" });
+    expect(restoreRequired).toHaveBeenCalledOnce();
+  });
+
+  it.each(["queue", "active"])("rechecks native %s state after the unsubscribe boundary", async change => {
+    const readThread = vi.fn()
+      .mockResolvedValueOnce({ status: { type: "idle" } })
+      .mockResolvedValue({ status: { type: change === "active" ? "active" : "idle" } });
+    const queueList = vi.fn()
+      .mockResolvedValueOnce({ items: [], nextCursor: null })
+      .mockResolvedValue({ items: change === "queue" ? [{}] : [], nextCursor: null });
+    const releaseIdle = vi.fn(async (_target, _binding, _snapshot, condition) => condition.verifyIdle());
+    const service = createService({ newSession: releaseIdle, routerOverrides: { readThread }, queueList });
+    await expect(service.releaseIdle(target)).resolves.toEqual({ status: "busy", threadId: binding.threadId });
+    expect(queueList).toHaveBeenCalledTimes(2);
+  });
+
   it("releases an idle foreground binding through the router", async () => {
-    const newSession = vi.fn(async () => undefined);
+    const newSession = vi.fn(async () => true);
     const service = createService({ newSession });
 
     await expect(service.releaseIdle(target)).resolves.toEqual({
       status: "released",
       threadId: binding.threadId,
     });
-    expect(newSession).toHaveBeenCalledWith(target, false, undefined);
+    expect(newSession).toHaveBeenCalledWith(target, binding, expect.objectContaining({ status: { type: "idle" } }), expect.objectContaining({ isCurrent: expect.any(Function) }), undefined);
   });
 
   it("restores model preference and clears pending collaboration after idle release", async () => {
@@ -128,7 +226,7 @@ describe("ConversationService idle release", () => {
     const restorePreference = vi.fn();
     const modelClear = vi.fn();
     const collaborationClear = vi.fn();
-    const newSession = vi.fn(async () => undefined);
+    const newSession = vi.fn(async () => true);
     const service = createService({
       capturePreference,
       restorePreference,

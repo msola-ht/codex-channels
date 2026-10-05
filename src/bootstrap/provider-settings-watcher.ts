@@ -12,19 +12,21 @@ import {
 import {
   managedProviderMarkerPath,
   managedProviderDirectory,
+  readManagedMarker,
   validateConfiguredModelProviders,
 } from "../../runtime/model-provider-runtime.mjs";
 
 export interface ProviderSettingsWatcherOptions {
   logger: Logger;
-  hasActiveTurns: () => boolean;
-  restartAppServer: () => Promise<void>;
-  refreshProviderModels: () => void;
+  applyProviderSettings: (provider: string, signal: AbortSignal) => Promise<boolean>;
+  configuredProviders?: readonly string[];
+  refreshProviderModels: (provider: string, signal: AbortSignal) => void | Promise<void>;
   onStateChange?: (change: ProviderSettingsStateChange) => void;
   environment?: NodeJS.ProcessEnv;
   pollIntervalMs?: number;
   restartCooldownMs?: number;
   validationCooldownMs?: number;
+  stopTimeoutMs?: number;
   nowMs?: () => number;
   validate?: () => void;
 }
@@ -49,12 +51,12 @@ interface ManagedProviderFiles {
 const defaultPollIntervalMs = 2_000;
 const defaultRestartCooldownMs = 30_000;
 const defaultValidationCooldownMs = 30_000;
+const maximumApplyFailures = 12;
 
 export class ProviderSettingsWatcher {
   private readonly logger: Logger;
-  private readonly hasActiveTurns: () => boolean;
-  private readonly restartAppServer: () => Promise<void>;
-  private readonly refreshProviderModels: () => void;
+  private readonly applyProviderSettings: ProviderSettingsWatcherOptions["applyProviderSettings"];
+  private readonly refreshProviderModels: ProviderSettingsWatcherOptions["refreshProviderModels"];
   private readonly onStateChange:
     | ((change: ProviderSettingsStateChange) => void)
     | undefined;
@@ -72,15 +74,22 @@ export class ProviderSettingsWatcher {
   private timer: NodeJS.Timeout | undefined;
   private stopping = false;
   private initialized = false;
-  private restartInFlight = false;
-  private restartPending = false;
-  private pendingProviders: string[] = [];
+  private readonly pendingProviders = new Map<string, number>();
+  private readonly applyFailures = new Map<string, { generation: number; count: number }>();
+  private readonly deferredGenerations = new Map<string, number>();
+  private generation = 0;
+  private readonly cancellation = new AbortController();
+  private readonly stopTimeoutMs: number;
+  private restartTask: Promise<void> | undefined;
   private lastRestartAttemptAt = 0;
 
   constructor(options: ProviderSettingsWatcherOptions) {
     this.logger = options.logger;
-    this.hasActiveTurns = options.hasActiveTurns;
-    this.restartAppServer = options.restartAppServer;
+    this.applyProviderSettings = options.applyProviderSettings;
+    this.stopTimeoutMs = options.stopTimeoutMs ?? 5_000;
+    if (!Number.isSafeInteger(this.stopTimeoutMs) || this.stopTimeoutMs < 0) {
+      throw new RangeError("Provider 设置停止等待上限必须是非负整数毫秒");
+    }
     this.refreshProviderModels = options.refreshProviderModels;
     this.onStateChange = options.onStateChange;
     this.environment = options.environment ?? process.env;
@@ -93,7 +102,7 @@ export class ProviderSettingsWatcher {
       validateConfiguredModelProviders(this.environment);
     });
     const visibleProviderIds = new Set(
-      loadManagedModelProviderDefinitions(this.environment)
+      options.configuredProviders ?? loadManagedModelProviderDefinitions(this.environment)
         .map((definition) => definition.id),
     );
     const codexHome = codexHomePath(this.environment);
@@ -109,7 +118,9 @@ export class ProviderSettingsWatcher {
           managedProviderDirectory(this.environment, definition),
           definition.catalogFileName,
         ),
-        join(codexHome, definition.profileFileName),
+        join(codexHome, readManagedMarker(this.environment, definition)?.mode === "exclusive"
+          ? "config.toml"
+          : definition.profileFileName),
         managedProviderMarkerPath(this.environment, definition),
       ];
       for (const path of paths) {
@@ -123,6 +134,8 @@ export class ProviderSettingsWatcher {
 
   start(): void {
     this.fingerprints = this.tryReadFingerprints() ?? new Map<string, string>();
+    // The supervisor owns the applied baseline, so a Gateway rebuild cannot lose pending changes.
+    for (const provider of this.visibleProviderIds) this.pendingProviders.set(provider, 0);
     this.initialized = true;
     this.timer = setInterval(() => {
       void this.checkNow();
@@ -130,15 +143,32 @@ export class ProviderSettingsWatcher {
     this.timer.unref?.();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopping = true;
+    this.cancellation.abort(new Error("Provider 设置监听已停止"));
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;
     }
+    if (!this.restartTask) return;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.restartTask,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            this.logger.warn({ timeoutMs: this.stopTimeoutMs }, "Provider 设置应用停止等待超时");
+            resolve();
+          }, this.stopTimeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
-  checkNow(): void {
+  async checkNow(): Promise<void> {
     if (this.stopping) {
       return;
     }
@@ -152,82 +182,108 @@ export class ProviderSettingsWatcher {
           this.fingerprints.get(path) !== nextFingerprints.get(path)))
         .map(({ provider }) => provider)
         .filter((provider) => this.visibleProviderIds.has(provider));
+      if (providers.length === 0) {
+        this.fingerprints = nextFingerprints;
+        this.considerRestart();
+        await this.restartTask;
+        return;
+      }
       if (!this.validateSettings(providers)) {
         return;
       }
       this.fingerprints = nextFingerprints;
-      this.pendingProviders = providers;
+      const generation = ++this.generation;
+      for (const provider of providers) {
+        this.pendingProviders.set(provider, generation);
+        this.applyFailures.delete(provider);
+        this.deferredGenerations.delete(provider);
+      }
       this.emitState("scheduled", providers);
       this.logger.info(
         { providers },
-        "第三方模型设置已变化，准备重启 App Server 使其生效",
+        "第三方模型设置已变化，等待对应 Provider 安全应用",
       );
       this.considerRestart();
+      await this.restartTask;
       return;
     }
-    if (this.restartPending) {
+    if (this.pendingProviders.size > 0) {
       this.considerRestart();
     }
+    await this.restartTask;
   }
 
   private considerRestart(): void {
-    if (this.stopping || this.restartInFlight) {
-      this.restartPending = true;
-      return;
-    }
-    if (this.hasActiveTurns()) {
-      if (!this.restartPending) {
-        this.logger.info(
-          { providers: this.pendingProviders },
-          "第三方模型设置已变化，等待当前 Turn 完成后重启 App Server",
-        );
-      }
-      this.restartPending = true;
-      return;
-    }
+    if (this.stopping || this.restartTask || this.pendingProviders.size === 0) return;
     if (this.nowMs() - this.lastRestartAttemptAt < this.restartCooldownMs) {
-      this.restartPending = true;
       return;
     }
-    if (!this.validateSettings(this.pendingProviders)) {
-      this.restartPending = true;
-      return;
-    }
-    const providers = this.pendingProviders;
-    this.restartPending = false;
-    this.pendingProviders = [];
-    void this.runRestart(providers);
+    const pending = new Map([...this.pendingProviders].filter(([provider, generation]) => {
+      const failures = this.applyFailures.get(provider);
+      return failures?.generation !== generation || failures.count < maximumApplyFailures;
+    }));
+    if (pending.size === 0) return;
+    if (!this.validateSettings([...pending.keys()])) return;
+    const task = this.runRestart(pending).finally(() => {
+      if (this.restartTask === task) this.restartTask = undefined;
+    });
+    this.restartTask = task;
   }
 
-  private async runRestart(providers: string[]): Promise<void> {
-    if (this.stopping || this.restartInFlight) {
-      return;
-    }
-    this.restartInFlight = true;
+  private async runRestart(pending: ReadonlyMap<string, number>): Promise<void> {
+    // Defer until the owner has stored this task, including for reentrant notifications.
+    await Promise.resolve();
+    if (this.stopping) return;
     this.lastRestartAttemptAt = this.nowMs();
-    this.emitState("restarting", providers);
-    this.logger.info(
-      { providers },
-      "正在重启 App Server 以应用第三方模型设置",
-    );
-    try {
-      await this.restartAppServer();
-      this.refreshProviderModels();
-      this.emitState("applied", providers);
-      this.logger.info(
-        { providers },
-        "第三方模型设置已应用，App Server 重启完成",
-      );
-    } catch (error) {
-      this.emitState("failed", providers);
-      this.restartPending = true;
-      this.pendingProviders = providers;
-      this.logger.error(
-        { err: error, providers },
-        "第三方模型设置应用失败，将在冷却后重试",
-      );
-    } finally {
-      this.restartInFlight = false;
+    for (const [provider, generation] of pending) {
+      if (this.stopping) return;
+      try {
+        const wasDeferred = this.deferredGenerations.get(provider) === generation;
+        if (generation > 0 && !wasDeferred) this.emitState("restarting", [provider]);
+        const applied = await this.applyProviderSettings(provider, this.cancellation.signal);
+        if (this.stopping) return;
+        if (!applied) {
+          if (generation > 0 && !wasDeferred) this.emitState("scheduled", [provider]);
+          this.deferredGenerations.set(provider, generation);
+          continue;
+        }
+        if (generation > 0 && wasDeferred) this.emitState("restarting", [provider]);
+        this.deferredGenerations.delete(provider);
+        // Re-read before confirming: a change made during application remains pending.
+        void this.checkNow();
+        if (this.stopping) return;
+        const current = this.tryReadFingerprints();
+        if (!current || this.filesByProvider.some((files) => files.provider === provider
+          && files.paths.some((path) => current.get(path) !== this.fingerprints.get(path)))) continue;
+        if (this.pendingProviders.get(provider) !== generation) continue;
+        await this.refreshProviderModels(provider, this.cancellation.signal);
+        if (this.stopping) return;
+        const confirmed = this.tryReadFingerprints();
+        if (!confirmed || this.filesByProvider.some((files) => files.provider === provider
+          && files.paths.some((path) => confirmed.get(path) !== this.fingerprints.get(path)))) {
+          void this.checkNow();
+          continue;
+        }
+        if (this.pendingProviders.get(provider) !== generation) continue;
+        this.pendingProviders.delete(provider);
+        this.applyFailures.delete(provider);
+        if (generation > 0) this.emitState("applied", [provider]);
+        this.logger.info({ provider }, "第三方模型设置已安全应用到对应 Provider");
+      } catch (error) {
+        if (this.stopping) return;
+        this.deferredGenerations.delete(provider);
+        const old = this.applyFailures.get(provider);
+        const count = old?.generation === generation ? old.count + 1 : 1;
+        // Do not debit a newer file generation for an earlier attempt's failure.
+        if (this.pendingProviders.get(provider) === generation) this.applyFailures.set(provider, { generation, count });
+        this.emitState("failed", [provider]);
+        this.logger.error(
+          { err: error, provider, attempt: count, maximumApplyFailures },
+          count >= maximumApplyFailures
+            ? "第三方模型设置应用失败次数耗尽，保留待应用状态，等待设置变化或 Gateway 重建"
+            : "第三方模型设置应用失败，将在冷却后重试",
+        );
+      }
     }
   }
 
@@ -235,7 +291,7 @@ export class ProviderSettingsWatcher {
     kind: ProviderSettingsStateKind,
     providers: string[],
   ): void {
-    if (!this.onStateChange) {
+    if (this.stopping || !this.onStateChange) {
       return;
     }
     try {

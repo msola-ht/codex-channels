@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, renameSync } from "node:fs";
 import { createConnection } from "node:net";
-import { basename, dirname, extname, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { Duplex } from "node:stream";
 
 import WebSocket from "ws";
@@ -14,13 +15,20 @@ import {
 import { resolveExecutableInvocation } from "./executable.mjs";
 import {
   assertPrivateDirectoryAccessSync,
+  readPrivateFileSync,
   securePrivateDirectorySync,
 } from "./private-file.mjs";
 import { terminateChildProcess } from "./process-lifecycle.mjs";
 import { inspectAppServerUnixSocket } from "./app-server-unix-socket.mjs";
+import { codexHomePath } from "./codex-home.mjs";
+import { loadManagedModelProviderDefinitions } from "./model-provider-definitions.mjs";
+import { managedProviderDirectory, managedProviderMarkerPath, readManagedMarker } from "./model-provider-runtime.mjs";
+import { readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
 
 const protocolVersion = 5;
 const desktopAppHostProtocolVersion = 1;
+const providerSettingsProtocolVersion = 1;
+const providerSettingsTimeoutMs = 30_000;
 const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 4_096;
 const connectionTimeoutMs = 1_000;
@@ -34,6 +42,8 @@ export class AppServerSupervisorOwner {
   #closing = false;
   #ensureProvider;
   #releaseProvider;
+  #applyProviderSettings;
+  #providerSettingsSnapshot;
   #attachDesktopApp;
   #detachDesktopApp;
   #topology;
@@ -47,12 +57,14 @@ export class AppServerSupervisorOwner {
   constructor(
     primarySocketPath,
     topology,
-    { ensureProvider, releaseProvider, attachDesktopApp, detachDesktopApp } = {},
+    { ensureProvider, releaseProvider, applyProviderSettings, providerSettingsSnapshot, attachDesktopApp, detachDesktopApp } = {},
   ) {
     this.#socketPath = appServerSupervisorSocketPath(primarySocketPath);
     this.#topology = topology;
     this.#ensureProvider = ensureProvider;
     this.#releaseProvider = releaseProvider;
+    this.#applyProviderSettings = applyProviderSettings;
+    this.#providerSettingsSnapshot = providerSettingsSnapshot;
     this.#attachDesktopApp = attachDesktopApp;
     this.#detachDesktopApp = detachDesktopApp;
     const listener = (socket) => {
@@ -235,6 +247,41 @@ export class AppServerSupervisorOwner {
       }
       return;
     }
+    if (request?.action === "applyProviderSettings") {
+      if (request.settingsProtocolVersion !== providerSettingsProtocolVersion
+        || typeof request.provider !== "string" || !providerIdPattern.test(request.provider)
+        || !providerIds(this.#topology).includes(request.provider) || !this.#applyProviderSettings) {
+        socket.end(`${JSON.stringify({ version: protocolVersion, settingsProtocolVersion: providerSettingsProtocolVersion, ok: false })}\n`);
+        return;
+      }
+      const controller = new AbortController();
+      const cancel = () => controller.abort(new Error("Provider 设置应用已取消"));
+      socket.once("close", cancel);
+      const timer = setTimeout(() => { cancel(); socket.destroy(); }, providerSettingsTimeoutMs);
+      socket.setTimeout(0);
+      try {
+        const canApply = () => {
+          controller.signal.throwIfAborted();
+          return !this.#hasProviderLease(request.provider);
+        };
+        const result = await this.#runProviderOperation(request.provider, async () => {
+          const outcome = !canApply()
+            ? { applied: false, reason: "leased" }
+            : await this.#applyProviderSettings(request.provider, controller.signal, canApply);
+          const snapshot = this.#providerSettingsSnapshot?.(request.provider);
+          return snapshot === undefined ? outcome : { ...outcome, snapshot };
+        });
+        if (!controller.signal.aborted) socket.end(`${JSON.stringify({ version: protocolVersion,
+          settingsProtocolVersion: providerSettingsProtocolVersion, ok: true, provider: request.provider, ...result })}\n`);
+      } catch {
+        if (!socket.destroyed) socket.end(`${JSON.stringify({ version: protocolVersion,
+          settingsProtocolVersion: providerSettingsProtocolVersion, ok: false, provider: request.provider })}\n`);
+      } finally {
+        clearTimeout(timer);
+        socket.removeListener("close", cancel);
+      }
+      return;
+    }
     if (request?.action === "releaseProvider") {
       if (
         typeof request.provider !== "string"
@@ -373,6 +420,11 @@ export class AppServerSupervisorOwner {
   markRunning(provider) {
     this.#releasedProviders.delete(provider);
     this.#runningProviders.add(provider);
+  }
+
+  markReleased(provider) {
+    this.#runningProviders.delete(provider);
+    this.#releasedProviders.add(provider);
   }
 
   close() {
@@ -642,6 +694,50 @@ export async function releaseAppServerProvider(primarySocketPath, provider) {
   return { released: value.released, reason: value.reason };
 }
 
+/** Cancellation withdraws work before release; an already released instance is restored by its owner. */
+export async function applyAppServerProviderSettings(primarySocketPath, provider, signal) {
+  signal?.throwIfAborted();
+  const socketPath = appServerSupervisorSocketPath(primarySocketPath);
+  assertSafeSupervisorSocket(socketPath);
+  const response = await readSupervisorResponse(socketPath, {
+    action: "applyProviderSettings", settingsProtocolVersion: providerSettingsProtocolVersion, provider,
+  }, providerSettingsTimeoutMs, signal);
+  signal?.throwIfAborted();
+  let value;
+  try { value = JSON.parse(response); } catch { throw new Error("Provider 设置应用未确认"); }
+  if (value?.version !== protocolVersion || value.settingsProtocolVersion !== providerSettingsProtocolVersion) {
+    throw new Error("App Server 监管入口不支持定向设置应用，请运行 codexc service restart app-server 后重试");
+  }
+  if (value.provider !== provider || value.ok !== true
+    || Object.keys(value).some(key => !["version", "settingsProtocolVersion", "provider", "ok", "applied", "reason", "changed", "snapshot"].includes(key))) {
+    throw new Error("Provider 设置应用失败");
+  }
+  const snapshot = value.snapshot;
+  if (snapshot !== undefined && (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)
+    || Object.keys(snapshot).length !== 2 || typeof snapshot.fingerprint !== "string" || !/^[a-f0-9]{64}$/u.test(snapshot.fingerprint)
+    || !(snapshot.defaultModel === null || (typeof snapshot.defaultModel === "string" && snapshot.defaultModel.length > 0)))) {
+    throw new Error("Provider 设置应用快照无效");
+  }
+  const captured = snapshot === undefined ? {} : { snapshot };
+  if (value.applied === true && value.reason === undefined && typeof value.changed === "boolean") return { applied: true, changed: value.changed, ...captured };
+  if (value.applied === false && value.changed === undefined && ["leased", "active"].includes(value.reason)) return { applied: false, reason: value.reason, ...captured };
+  throw new Error("Provider 设置应用响应无效");
+}
+
+export function readAppServerProviderSettingsFingerprint(provider, environment = process.env) {
+  const definition = loadManagedModelProviderDefinitions(environment).find(value => value.id === provider);
+  if (!definition) throw new Error("Provider 不属于受管设置范围");
+  const marker = readManagedMarker(environment, definition);
+  if (!marker) throw new Error("Provider 管理标记不可用");
+  const profilePath = join(codexHomePath(environment), marker.mode === "exclusive" ? "config.toml" : definition.profileFileName);
+  const parts = [
+    readPrivateFileSync(managedProviderMarkerPath(environment, definition)),
+    marker.mode === "exclusive" ? readCodexConfigFile(profilePath) : readPrivateFileSync(profilePath),
+    readPrivateFileSync(join(managedProviderDirectory(environment, definition), definition.catalogFileName), 2_097_152),
+  ];
+  return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+}
+
 function supervisorVersionMismatch(value) {
   return typeof value?.version === "number" && value.version !== protocolVersion;
 }
@@ -731,7 +827,7 @@ export async function appServerSocketAcceptsWebSocket(socketPath) {
   });
 }
 
-function readSupervisorResponse(socketPath, request, timeoutMs = 1_000) {
+function readSupervisorResponse(socketPath, request, timeoutMs = 1_000, signal) {
   return new Promise((resolveResponse) => {
     const socket = process.platform === "win32"
       ? createPrivateIpcConnection(socketPath)
@@ -743,10 +839,13 @@ function readSupervisorResponse(socketPath, request, timeoutMs = 1_000) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       socket.destroy();
       resolveResponse(value);
     };
     const timer = setTimeout(() => finish(undefined), timeoutMs);
+    const abort = () => finish(undefined);
+    signal?.addEventListener("abort", abort, { once: true });
     socket.once("connect", () => {
       socket.write(`${JSON.stringify(request)}\n`);
     });
@@ -760,6 +859,7 @@ function readSupervisorResponse(socketPath, request, timeoutMs = 1_000) {
     });
     socket.once("end", () => finish(Buffer.concat(chunks).toString("utf8")));
     socket.once("error", () => finish(undefined));
+    if (signal?.aborted) abort();
   });
 }
 

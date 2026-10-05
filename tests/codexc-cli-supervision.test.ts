@@ -5,10 +5,13 @@ import { createServer as createNetServer } from "node:net";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 
 import { GatewayOwner, gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
+import { inspectAppServerSupervisor } from "../runtime/app-server-supervisor.mjs";
+import { stopDetachedTestProcess } from "./support/real-app-server-helpers.js";
+import { appServerModel } from "./support/json-rpc-fixtures.js";
 import {
   deepseekAccountDefinition,
   opencodeGoProviderDefinition
@@ -67,16 +70,22 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     mkdirSync(codexHome);
     writeFileSync(fakeCodex, [
       "#!/usr/bin/env node",
-      "import { writeFileSync } from 'node:fs';",
-      "import { get } from 'node:http';",
+      "import { chmodSync, writeFileSync } from 'node:fs';",
+      "import { createServer, get } from 'node:http';",
+      `const { WebSocketServer } = await import(${JSON.stringify(pathToFileURL(resolve("node_modules/ws/wrapper.mjs")).href)});`,
       "const baseUrlArg = process.argv.slice(2).find((value) => value.startsWith('model_providers.ocg-main.base_url='));",
-      "if (!baseUrlArg) { await new Promise((resolve) => setTimeout(resolve, 500)); process.exit(0); }",
+      "if (baseUrlArg) {",
       "const baseUrl = JSON.parse(baseUrlArg.slice(baseUrlArg.indexOf('=') + 1));",
       "const status = await new Promise((resolve) => {",
       "  const request = get(new URL('/health', baseUrl), (response) => { response.resume(); response.on('end', () => resolve(response.statusCode)); });",
       "  request.on('error', () => resolve(0));",
       "});",
       "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({ baseUrl, status }));",
+      "}",
+      "const socketPath = process.argv.at(-1).slice('unix://'.length);",
+      "const server = createServer();",
+      "new WebSocketServer({ server });",
+      "server.listen(socketPath, () => chmodSync(socketPath, 0o600));",
     ].join("\n"));
     chmodSync(fakeCodex, 0o700);
     writeManagedProviderFixture(
@@ -98,12 +107,20 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       table(document.codex).binary = fakeCodex;
     });
 
-    execFileSync(process.execPath, [cli, "service-app-server"], {
+    const service = spawn(process.execPath, [cli, "service-app-server"], {
       cwd: root,
       env: environment,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
     });
-
-    expect(existsSync(capturePath)).toBe(false);
+    try {
+      await vi.waitFor(async () => {
+        expect((await inspectAppServerSupervisor(join(home, "runtime", "codex-app-server.sock")))?.runningProviders).toEqual(["openai"]);
+      }, { timeout: 5_000 });
+      expect(existsSync(capturePath)).toBe(false);
+    } finally {
+      await stopDetachedTestProcess(service, 5_000);
+    }
   });
 
   it("starts an exclusive DeepSeek Gateway and reclaims ownership after forced shutdown", async () => {
@@ -136,6 +153,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       "  requestRetries: args.find((value) => value === 'model_providers.ds-test.request_max_retries=1'),",
       "  streamRetries: args.find((value) => value === 'model_providers.ds-test.stream_max_retries=0'),",
       "  initialized: false,",
+      "  modelsListed: false,",
       "};",
       "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(capture));",
       "if (!socketPath) process.exit(2);",
@@ -152,6 +170,11 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       "      codexHome: process.env.CODEX_HOME, platformFamily: 'unix', platformOs: 'linux',",
       "    },",
       "    }));",
+      "  }",
+      "  if (message.method === 'model/list') {",
+      "    capture.modelsListed = true;",
+      "    writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(capture));",
+      `    client.send(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { data: [${JSON.stringify(appServerModel({ id: deepseekAccountDefinition("test").defaultModel, model: deepseekAccountDefinition("test").defaultModel }))}], nextCursor: null } }));`,
       "  }",
       "}));",
       "server.listen(socketPath);",
@@ -254,8 +277,10 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       requestRetries?: string;
       streamRetries?: string;
       initialized?: boolean;
+      modelsListed?: boolean;
     };
     expect(captured.initialized).toBe(true);
+    expect(captured.modelsListed).toBe(true);
     expect(captured.baseUrlArg).toMatch(
       /^model_providers\.ds-test\.base_url="http:\/\/127\.0\.0\.1:\d+\/go\/test"$/u,
     );
@@ -538,7 +563,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       (error: Error & { stderr?: string }) => error,
     );
     expect(failure?.stderr).toContain(
-      "App Server 在 WebSocket 就绪前退出",
+      "App Server 启动失败：openai（exit=0）",
     );
     expect(failure?.stderr).not.toContain("至少需要配置一个通讯渠道");
   });

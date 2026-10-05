@@ -3,10 +3,11 @@ import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   AppServerSupervisorOwner,
+  applyAppServerProviderSettings,
   acquireAppServerProviderLease,
   acquireMacDesktopAppHostLease,
   appServerSupervisorSocketPath,
@@ -28,6 +29,130 @@ afterEach(() => {
 describe("App Server supervisor", () => {
   const unixIt = process.platform === "win32" ? it.skip : it;
   const darwinIt = process.platform === "darwin" ? it : it.skip;
+  it("applies only the selected Provider and defers leased or active instances", async () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "sup-"));
+    temporaryDirectories.push(root);
+    const primary = join(root, "s.sock");
+    const applied: string[] = [];
+    const snapshot = { fingerprint: "a".repeat(64), defaultModel: "fixture-default" };
+    let active = true;
+    const owner = new AppServerSupervisorOwner(primary, {
+      primaryProvider: "openai", managedProviders: ["ds-test"], socketPaths: [primary],
+    }, {
+      ensureProvider: async () => undefined,
+      providerSettingsSnapshot: () => snapshot,
+      applyProviderSettings: async provider => {
+        if (active) return { applied: false, reason: "active" };
+        applied.push(provider); return { applied: true, changed: true };
+      },
+    });
+    let lease;
+    try {
+      await owner.start();
+      await expect(applyAppServerProviderSettings(primary, "ds-test")).resolves.toEqual({ applied: false, reason: "active", snapshot });
+      lease = await acquireAppServerProviderLease(primary, "ds-test");
+      active = false;
+      await expect(applyAppServerProviderSettings(primary, "ds-test")).resolves.toEqual({ applied: false, reason: "leased", snapshot });
+      expect(applied).toEqual([]);
+      await lease.close();
+      await vi.waitFor(async () => expect((await inspectAppServerSupervisor(primary))?.leasedProviders).toEqual([]));
+      await expect(applyAppServerProviderSettings(primary, "ds-test")).resolves.toEqual({ applied: true, changed: true, snapshot });
+      expect(applied).toEqual(["ds-test"]);
+      await expect(applyAppServerProviderSettings(primary, "unknown")).rejects.toThrow("应用失败");
+    } finally { await lease?.close(); await owner.close(); }
+  });
+
+  it("rechecks a lease arriving during settings preparation before applying", async () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "sup-"));
+    temporaryDirectories.push(root);
+    const primary = join(root, "s.sock");
+    let enter!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const owner = new AppServerSupervisorOwner(primary, {
+      primaryProvider: "openai", managedProviders: [], socketPaths: [primary],
+    }, {
+      ensureProvider: async () => undefined,
+      applyProviderSettings: async (_provider, _signal, canApply) => {
+        enter(); await gate;
+        return canApply() ? { applied: true, changed: true } : { applied: false, reason: "leased" };
+      },
+    });
+    await owner.start();
+    const applying = applyAppServerProviderSettings(primary, "openai");
+    let lease;
+    try {
+      await entered;
+      const acquiring = acquireAppServerProviderLease(primary, "openai");
+      await vi.waitFor(async () => expect((await inspectAppServerSupervisor(primary))?.leasedProviders).toEqual(["openai"]));
+      release();
+      expect(await applying).toEqual({ applied: false, reason: "leased" });
+      lease = await acquiring;
+    } finally { release(); await applying.catch(() => undefined); await lease?.close(); await owner.close(); }
+  });
+
+  it.each(["caller", "owner"])("cancels settings preparation when the %s closes", async ending => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "sup-"));
+    temporaryDirectories.push(root);
+    const primary = join(root, "s.sock");
+    let entered = false;
+    let cancelled = false;
+    const owner = new AppServerSupervisorOwner(primary, {
+      primaryProvider: "openai", managedProviders: [], socketPaths: [primary],
+    }, { applyProviderSettings: async (_provider, signal) => {
+      entered = true;
+      await new Promise<void>(resolve => signal.addEventListener("abort", () => { cancelled = true; resolve(); }, { once: true }));
+      signal.throwIfAborted();
+      return { applied: true, changed: true };
+    } });
+    const controller = new AbortController();
+    try {
+      await owner.start();
+      const result = applyAppServerProviderSettings(primary, "openai", controller.signal).catch(error => error);
+      await vi.waitFor(() => expect(entered).toBe(true));
+      if (ending === "caller") controller.abort();
+      else await owner.close();
+      expect(await result).toBeInstanceOf(Error);
+      await vi.waitFor(() => expect(cancelled).toBe(true));
+    } finally { controller.abort(); await owner.close(); }
+  });
+
+  it("finishes an already started restoration before accepting the next lease after cancellation", async () => {
+    const root = mkdtempSync(join(unixSocketTmpdir, "sup-"));
+    temporaryDirectories.push(root);
+    const primary = join(root, "s.sock");
+    let released = false;
+    let restored = false;
+    let resume!: () => void;
+    const recovery = new Promise<void>(resolve => { resume = resolve; });
+    const owner = new AppServerSupervisorOwner(primary, {
+      primaryProvider: "openai", managedProviders: [], socketPaths: [primary],
+    }, {
+      ensureProvider: async () => { expect(restored).toBe(true); },
+      applyProviderSettings: async () => {
+        released = true;
+        await recovery;
+        restored = true;
+        return { applied: true, changed: true };
+      },
+    });
+    const controller = new AbortController();
+    let lease;
+    try {
+      await owner.start();
+      const applying = applyAppServerProviderSettings(primary, "openai", controller.signal).catch(error => error);
+      await vi.waitFor(() => expect(released).toBe(true));
+      controller.abort();
+      expect(await applying).toBeInstanceOf(Error);
+      const acquiring = acquireAppServerProviderLease(primary, "openai");
+      await vi.waitFor(async () => expect((await inspectAppServerSupervisor(primary))?.leasedProviders).toEqual(["openai"]));
+      expect(restored).toBe(false);
+      resume();
+      lease = await acquiring;
+      expect(restored).toBe(true);
+    } finally { resume(); await lease?.close(); await owner.close(); }
+  });
   unixIt("preserves a replaced public endpoint on close", async () => {
     const root = mkdtempSync("/tmp/sup-");
     temporaryDirectories.push(root);
@@ -161,8 +286,9 @@ describe("App Server supervisor", () => {
     const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
     const supervisorSocketPath = appServerSupervisorSocketPath(primarySocketPath);
     const server = createServer((socket) => {
-      socket.once("data", () => {
-        socket.end(`${JSON.stringify({ version: 4, provider: "openai", ok: true })}\n`);
+      socket.once("data", (data) => {
+        const settings = JSON.parse(data.toString()).action === "applyProviderSettings";
+        socket.end(`${JSON.stringify({ version: settings ? 5 : 4, provider: "openai", ok: true })}\n`);
       });
     });
     await new Promise<void>((resolve) => server.listen(supervisorSocketPath, () => resolve()));
@@ -170,6 +296,8 @@ describe("App Server supervisor", () => {
     try {
       await expect(ensureAppServerProvider(primarySocketPath, "openai"))
         .rejects.toThrow("请运行 codexc service restart all");
+      await expect(applyAppServerProviderSettings(primarySocketPath, "openai"))
+        .rejects.toThrow("请运行 codexc service restart app-server");
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

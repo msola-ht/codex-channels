@@ -41,6 +41,7 @@ it.concurrent("fences new execution but persists every accepted inbound result b
   inbound.subscribe("core", (id) => { reduced++; output.publish({ ...answer, itemId: String(id) }, true); });
   const close = async () => {};
   const graph = Object.assign(Object.create(GatewayComponentGraph.prototype) as { shutdownComponents(): Promise<void> }, {
+    providerSettingsAbort: new AbortController(),
     bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
     channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
     turnExecution: { stop: async () => { expect(reduced).toBe(100); } },
@@ -80,6 +81,7 @@ it.concurrent.for(["queued", "settling", "checkpoint"] as const)("persists deriv
   });
   const close = async () => {};
   const graph = Object.assign(Object.create(GatewayComponentGraph.prototype) as { shutdownComponents(): Promise<void> }, {
+    providerSettingsAbort: new AbortController(),
     bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
     channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
     turnExecution: { stop: close },

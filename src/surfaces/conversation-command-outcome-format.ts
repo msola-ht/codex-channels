@@ -227,7 +227,9 @@ export function formatConversationCommandOutcome(
       return toStructuredMarkdownList([
         outcome.type === "scheduled-task.run-requested"
           ? "已请求立即运行计划任务"
-          : "已解除 uncertain Run 并请求重试",
+          : outcome.run.dispatchStartedAt === null
+            ? "重试未执行，原 uncertain Run 仍保留"
+            : "已解除原 uncertain Run 并领取重试 Run",
         `Run：${outcome.run.runId}`,
         `状态：${scheduledRunStateLabel(outcome.run.state)}`,
         `计划时间：${formatScheduledAt(outcome.run.scheduledFor)}`,

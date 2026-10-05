@@ -8,6 +8,15 @@
 export const scheduledTasksSchemaVersion = 2 as const;
 export const scheduledTaskDatabaseFileName = "scheduled-tasks.sqlite3" as const;
 
+export class ScheduledTaskStateError extends Error {
+  readonly code = "scheduled-task.state.invalid" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ScheduledTaskStateError";
+  }
+}
+
 export const scheduleWeekdays = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 export type ScheduleWeekday = (typeof scheduleWeekdays)[number];
 
@@ -217,6 +226,8 @@ export interface ScheduledTaskStore {
     nowMs: number,
     result?: "claimed" | "skipped_capacity",
   ): ScheduledTaskClaimResult;
+  /** Resolve an explicitly selected uncertain Run only when its replacement is claimed. */
+  claimRetry(runId: string, nowMs: number, result?: "claimed" | "skipped_capacity"): ScheduledTaskClaimResult;
   markRunning(
     runId: string,
     nowMs: number,

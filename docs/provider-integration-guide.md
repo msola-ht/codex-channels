@@ -158,7 +158,7 @@ codexc doctor
 - 新会话、同 Provider 历史 Thread、跨 Provider 新建 Thread 的模型与思考等级符合预期；
 - `codexc remote --profile sf-<Provider ID>` 能拉起隔离 App Server 并共享会话；
 - `/usage` 按账户形态展示余额或配额窗口与本机 Token 用量；
-- 修改默认模型/思考等级后，watcher 校验通过并在无活动 Turn 时自动重启 App Server；
+- 修改默认模型/思考等级后，watcher 校验通过并定向应用到受影响且已启用的 Provider；原生客户端租约或权威活动 Thread 会推迟应用；
   设置应用后 Gateway 同步刷新受管模型目录与默认模型，已有 Thread 和手动选择保持不变；
   重启或目录刷新失败时报告应用失败，并沿用 watcher 的冷却重试流程，刷新成功后才报告已应用；
 

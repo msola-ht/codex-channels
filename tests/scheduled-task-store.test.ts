@@ -266,6 +266,45 @@ describe("SqliteScheduledTaskStore", () => {
     store.close();
   });
 
+  it("atomically retries a finished once task while keeping ordinary manual starts disabled", () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    const task = store.createTask(taskInput({ schedule: { type: "once", afterMinutes: 1, anchorAt: base } }));
+    const original = store.claimDue(task.taskId, base + 60_000, "claimed", base + 60_000).run;
+    store.markUncertain(original.runId, base + 60_001);
+    expect(() => store.claimManual(task.taskId, base + 60_002)).toThrow(ScheduledTaskStateError);
+    const retry = store.claimRetry(original.runId, base + 60_002);
+    expect(retry.kind).toBe("claimed");
+    expect(retry.run.runId).not.toBe(original.runId);
+    expect(store.getRun(original.runId)?.state).toBe("failed");
+    expect(store.getTask(task.taskId)).toMatchObject({ status: "finished", nextRunAt: null });
+    expect(() => store.claimRetry(original.runId, base + 60_003)).toThrow(ScheduledTaskStateError);
+    store.close();
+  });
+
+  it.each(["blocked", "deleted", "capacity", "insert failure"])("preserves the original uncertain Run after retry %s", (failure) => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    const task = store.createTask(taskInput());
+    const original = store.claimManual(task.taskId, base + 1).run;
+    store.markUncertain(original.runId, base + 2);
+    if (failure === "blocked") store.blockTask(task.taskId, base + 3);
+    if (failure === "deleted") store.deleteTask(task.taskId, base + 3);
+    if (failure === "insert failure") {
+      const fixture = new DatabaseSync(path);
+      fixture.exec("CREATE TRIGGER reject_retry BEFORE INSERT ON runs BEGIN SELECT RAISE(ABORT, 'fixture insert failed'); END");
+      fixture.close();
+    }
+    if (failure === "capacity") {
+      expect(store.claimRetry(original.runId, base + 4, "skipped_capacity").kind).toBe("skipped_capacity");
+    } else {
+      expect(() => store.claimRetry(original.runId, base + 4)).toThrow();
+      expect(store.listRuns(task.taskId)).toHaveLength(1);
+    }
+    expect(store.getRun(original.runId)?.state).toBe("uncertain");
+    store.close();
+  });
+
   it("atomically claims an occurrence and rejects a duplicate claim", () => {
     const { path } = databasePath();
     const store = new SqliteScheduledTaskStore(path);

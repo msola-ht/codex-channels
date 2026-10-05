@@ -32,7 +32,8 @@
   恢复已由其他渠道绑定的空闲 Thread 时，同时锁定新旧 Conversation，确认双方无活动 Turn、
   排队消息或待处理交互后调用路由层原子转移，并向原渠道发布关键解绑通知；
   扩展与账户查询分别委托给独立组件，通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与 Permission Profile 均使用稳定结果。
-  空闲释放通过 `releaseIdle` 核对活动 Turn、原生 Queue、待处理交互和待结算子代理，再取消
+  空闲释放通过 `releaseIdle` 保留扫描时的 Thread 与活动时间，在会话锁、查询和生命周期 RPC 后复核，
+  同时核对活动 Turn、原生 Queue、待处理交互和待结算子代理，再取消
   App Server 订阅并解绑；释放后按主动新建同一语义恢复模型偏好、清除待生效协作模式并失效
   Revert/Queue 快照。普通输入、平台本地命令和审批交互刷新活动时间，输出事件也由组合根统一刷新。
 - `conversation-lock-coordinator.ts`：为同一 Conversation、多个 Conversation 的有序加锁；Queue、Revert
@@ -45,7 +46,7 @@
   独立 RS 切换 Provider 经模型端口读取对应 App Server 目录，官方兼容目录与独立目录分别装配；默认选择保留精确 Provider 和平台模型 ID；总览隔离各 RS 的读取故障，定向操作只查询目标 RS，故障条目不参与能力选择。
   官方未登录时为未绑定会话解析唯一第三方，或组合根明确提供的同类账户默认 Provider，并使用其
   Profile 默认模型供状态、菜单与建线程复用；
-  受管 Provider 设置应用后更新补充模型目录与默认标记，保留已绑定模型及待生效的明确选择；
+  受管 Provider 设置应用后按精确 Provider 替换已确认的补充模型目录与默认标记，保留其他 Provider 的目录、已绑定模型及待生效的明确选择；
   没有明确默认 Provider 的多个可选第三方保持未选择状态，发送前要求明确选择；模型选择始终保留 Provider 身份，
   实际离开旧 Thread 的 Provider 切换提示与身份字段分开维护，目标 Thread 建立后不再提示待切换。
   模型选择入口按注入的共享账户状态过滤无有效订阅的 Provider，浏览和手动选择使用相同结果；

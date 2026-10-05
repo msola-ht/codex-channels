@@ -131,6 +131,7 @@ export class ScheduledTaskComposition {
       isProviderConfigured: (provider) => options.codex.isProviderConfigured(provider),
       creationContext: (target) => options.creationContext(target),
       runTaskNow: (taskId) => this.scheduler.runTaskNow(taskId),
+      retryRun: (runId) => this.scheduler.retryRun(runId),
     }, Date.now);
     const toolService = new ScheduledTaskToolService(this.service, Date.now);
     this.toolHandler = createScheduledTaskToolRequestHandler({

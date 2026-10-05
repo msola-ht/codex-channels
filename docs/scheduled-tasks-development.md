@@ -158,8 +158,12 @@ occurrence claim -> missed | skipped_overlap | skipped_capacity | blocked | disp
 
 领取 occurrence 时先在本地事务中写入唯一 `runId` 和 `dispatching`，再调用 App Server。只有收到
 明确响应后才写入 Thread/Turn ID 并进入 `running`。Gateway 在写请求结果未知时把 Run 标记为
-`uncertain`，重启后不得自动重试；只有显式解除（`resolveUncertain`）后，未来的 `/schedule retry <runId>`
-才能创建新 Run，解除本身不会自动重试。
+`uncertain`，重启后不得自动重试。`/schedule retry <runId>` 经过同一串行调度与容量准入后，
+在单个事务中将所选未知 Run 解除为 `failed` 并领取新 Run；容量不足、任务阻塞或删除、停止与领取失败
+均保留原未知状态。到期后已 `finished` 的一次性任务也可显式重试其未知 Run，但不会恢复自动调度或开放普通手动运行。
+渠道反馈以新 Run 的领取记录区分是否解除原未知 Run：未领取时明确提示重试未执行、原未知状态仍保留；
+领取后即使执行失败或再次进入未知状态，也会报告原未知 Run 已解除，并展示新 Run 的实际状态。
+重试可能重复原运行已经产生的外部副作用；只由用户显式选择，不自动执行。
 
 这种设计选择“结果未知时可能漏跑”而不是“自动重试造成重复命令或外部副作用”。App Server 当前
 没有可让 Thread 创建与 Gateway Run 原子提交的幂等键，因此不能宣称 exactly-once。

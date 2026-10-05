@@ -85,6 +85,7 @@ export {
   type AgentRolePort,
   type ConversationInput,
   type ConversationIdleReleaseResult,
+  type ConversationIdleReleaseCondition,
   type ConversationAccountMetricsUseCases,
   type ConversationExtensionUseCases,
   type ConversationQueryPort,
