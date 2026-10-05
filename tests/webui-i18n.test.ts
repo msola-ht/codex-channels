@@ -763,7 +763,7 @@ describe("WebUI 界面文案语言切换", () => {
         const {translate}=await server.ssrLoadModule("/src/lib/i18n/translate.ts");
         globalThis.fixtureTranslate=translate;
         globalThis.fixtureLanguage="zh";
-        let previews=0,updates=0,refetches=0,cause=null;
+        let previews=0,updates=0,refetches=0,cause=null,updateCause=null;
         globalThis.settingsRequest={data:{revision:"r1",value:"model-before"},loading:false,error:null,errorCode:null,refetch(){refetches++}};
         const {ApiClientError}=await server.ssrLoadModule("/src/lib/api.ts");
         const {useVersionedSettingsManagement}=await server.ssrLoadModule("/src/hooks/use-versioned-settings-management.ts");
@@ -771,7 +771,7 @@ describe("WebUI 界面文案语言切换", () => {
         const {SettingsError}=await server.ssrLoadModule("/src/components/settings/settings-feedback.tsx");
         const options={load:async()=>{throw Error("fixture must isolate snapshot loads")},revisionOf:snapshot=>snapshot.revision,currentValue:snapshot=>snapshot.value,
           preview:async()=>{previews++;if(cause)throw cause;return {value:"model-after",activation:{status:"restart",target:"all",commands:["codexc service restart all"]},confirmationToken:"fixture-token"}},
-          update:async()=>{updates++;throw Error("must not apply while switching languages")}};
+          update:async()=>{updates++;throw updateCause??Error("must not apply while switching languages")}};
         const read=language=>{globalThis.fixtureLanguage=language;cursor=0;return useVersionedSettingsManagement(options)};
         const label={key:"modelManagement.channelModel"};
         await read("zh").previewSetting({kind:"defaults",model:"model-after"},label);
@@ -790,6 +790,39 @@ describe("WebUI 界面文案语言切换", () => {
           errors.push({zh:renderToStaticMarkup(h(SettingsError,{message:zhState.actionError,retry(){}})),en:renderToStaticMarkup(h(SettingsError,{message:enState.actionError,retry(){}})),pending:enState.pendingSetting});
         }
         const errorRequests={previews,updates,refetches};
+        const validationErrors=[];
+        for (const [kind,code] of [
+          ["webui.host","required"],["system.approval-timeout","invalid-integer"],
+          ["system.idle-release-minutes","invalid-integer"],["system.model-traffic-retention-days","invalid-integer"],
+          ["webui.port","invalid-integer"],["metrics.storage","invalid-integer"],
+          ["model-compact","invalid-percent"],["model-compact","window-required"],
+          ["webui.token","required"],["webui.token","invalid-secret"],["webui.token","public-token-required"],
+          ["network.proxy","invalid-proxy"],["workspace.permissions","unknown-workspace"],["workspace.permissions","permission-conflict"],
+          ["workspace.permissions","too-long"],["system.default-model","too-long"],["system.official-tui-identity","too-long"],
+          ["defaults","unknown-model"],["defaults","unsupported-reasoning-effort"],["preferences","invalid-reasoning-effort"],
+          ["preferences","invalid-reasoningSummary"],["preferences","invalid-verbosity"],["preferences","invalid-historyPersistence"],
+          ["preferences","unsupported-field"],["model-compact","invalid-window"],["permissions","permission-profile-active"],
+          ["permissions","invalid-sandbox"],["permissions","invalid-approval-policy"],["fast","third-party-primary"],
+          ["web-search","invalid-web-search"],["auto-recap","invalid-boolean"],["tool-access","unsupported-tool-setting"],
+          ["tool-access","invalid-tool-setting"],["display.operation-updates","invalid-choice"],
+          ["webui.port","invalid-input"],["webui.port","setting_not_allowed"],["defaults","unknown-setting"],
+          ["network.proxy-batch","unknown-field"],["webui.host","required-revision"],
+          ["webui.host","private_unknown_code"],["webui.host","__proto__"],
+        ]) {
+          cause=new ApiClientError("private token=secret /internal/path",400,code);
+          const before={previews,updates,refetches};
+          await read("zh").previewSetting({kind,value:1},label);
+          const messages=["zh","en","zh"].map(language=>read(language).actionError);
+          validationErrors.push({kind,code,messages,requestDelta:previews-before.previews,updates:updates-before.updates,refetches:refetches-before.refetches,pending:read("en").pendingSetting});
+        }
+        cause=null;
+        await read("zh").previewSetting({kind:"system.approval-timeout",value:900},label);
+        updateCause=new ApiClientError("private rejected update",400,"invalid-integer");
+        const confirmResult=await read("en").confirmSetting();
+        const confirmError=["zh","en","zh"].map(language=>read(language).actionError);
+        const confirmPending=read("en").pendingSetting;
+        read("en").cancelSetting();
+        const cancelledError=read("en").actionError;
         slots=[];
         const {useManagementConfirmedMutation}=await server.ssrLoadModule("/src/hooks/use-management-confirmed-mutation.ts");
         let mutationPreviews=0;
@@ -814,7 +847,7 @@ describe("WebUI 界面文案语言切换", () => {
         });
         current=tree("en");
         walk(current).find(node=>typeof node.props.onClick==="function"&&text(node)==="Save request identity").props.onClick();
-        console.log(JSON.stringify({confirmations,pendingBefore,pendingAfter,previewRequests,errorRequests,errors,mutationErrors,mutationPreviews,drafts,identityCalls}));
+        console.log(JSON.stringify({confirmations,pendingBefore,pendingAfter,previewRequests,errorRequests,errors,validationErrors,confirmResult,confirmError,confirmPending,cancelledError,mutationErrors,mutationPreviews,drafts,identityCalls}));
       } finally {await server.close();}
     `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
     const state = JSON.parse(output) as {
@@ -822,6 +855,8 @@ describe("WebUI 界面文案语言切换", () => {
       previewRequests: { previews: number; updates: number; refetches: number };
       errorRequests: { previews: number; updates: number; refetches: number };
       errors: Array<{ zh: string; en: string; pending: null }>;
+      validationErrors: Array<{ kind: string; code: string; messages: string[]; requestDelta: number; updates: number; refetches: number; pending: null }>;
+      confirmResult: boolean; confirmError: string[]; confirmPending: null; cancelledError: null;
       mutationErrors: string[]; mutationPreviews: number;
       drafts: Array<{ language: string; name: string; userAgent: string; labels: string; requests: number }>;
       identityCalls: Array<[string, { clientIdentity: { name: string }; upstreamUserAgent: string }, unknown]>;
@@ -847,6 +882,38 @@ describe("WebUI 界面文案语言切换", () => {
     }
     expect(state.errors[0]!.en).toContain("The access token is invalid or expired");
     expect(state.errors[1]!.en).toContain("Could not complete the request");
+    for (const error of state.validationErrors) {
+      expect(error).toMatchObject({ requestDelta: 1, updates: 0, refetches: 0, pending: null });
+      expect(error.messages[0]).toMatch(/[\u4e00-\u9fff]/u);
+      expect(error.messages[1]).not.toMatch(/[\u4e00-\u9fff]/u);
+      expect(error.messages[2]).toBe(error.messages[0]);
+      expect(error.messages.join(" ")).not.toMatch(/private|secret|internal/u);
+    }
+    expect(state.validationErrors[0]!.messages[0]).toContain("先设置令牌");
+    expect(state.validationErrors[0]!.messages[1]).toContain("Set a token before changing the listen address");
+    for (const [index,minimum,maximum] of [[1,30,3600],[2,0,1440],[3,0,36500],[4,1,65535],[5,1,3650],[6,10,90]]) {
+      expect(state.validationErrors[index!]!.messages[0]).toContain(`${minimum}–${maximum}`);
+      expect(state.validationErrors[index!]!.messages[1]).toContain(`between ${minimum} and ${maximum}`);
+    }
+    expect(state.validationErrors[5]!.messages[1]).toContain("between 1000 and 10000000");
+    expect(state.validationErrors[7]!.messages[1]).toContain("Set the model context window before");
+    for (const error of state.validationErrors) {
+      if (error.code === "private_unknown_code" || error.code === "__proto__") {
+        expect(error.messages[1]).toBe("Could not complete the request. Try again.");
+      } else {
+        expect(error.messages[1]).not.toBe("Could not complete the request. Try again.");
+      }
+    }
+    expect(state.validationErrors[8]!.messages[1]).toContain("access token cannot be empty");
+    expect(state.validationErrors[9]!.messages[1]).toContain("4096");
+    expect(state.validationErrors[11]!.messages[1]).toContain("2048");
+    expect(state.validationErrors[14]!.messages[1]).toContain("128");
+    expect(state.validationErrors[15]!.messages[1]).toContain("256");
+    expect(state.validationErrors[16]!.messages[1]).toContain("512");
+    expect(state.confirmResult).toBe(false);
+    expect(state.confirmPending).toBeNull();
+    expect(state.confirmError).toEqual(state.validationErrors[1]!.messages);
+    expect(state.cancelledError).toBeNull();
     expect(state.mutationErrors[0]).toMatch(/[\u4e00-\u9fff]/u);
     expect(state.mutationErrors[1]).not.toMatch(/[\u4e00-\u9fff]/u);
     expect(state.mutationErrors[2]).toBe(state.mutationErrors[0]);

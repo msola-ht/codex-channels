@@ -3,10 +3,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useApi } from "@/hooks/use-api"
 import { ApiClientError } from "@/lib/api"
 import { useTranslation } from "@/hooks/use-translation"
-import { translateApiError, translateApiErrorCode } from "@/lib/i18n/translate"
+import { translateApiError, translateSettingErrorCode } from "@/lib/i18n/translate"
 import type { PendingSetting, SettingLabel, SettingMutationPreview } from "@/lib/settings-management"
 
 type VersionedSnapshot = object
+type SettingError = { code: string; kind?: string }
 type PreviewRequest<Setting> = (revision: string, setting: Setting, signal?: AbortSignal) => Promise<SettingMutationPreview>
 type UpdateRequest<Setting> = (revision: string, setting: Setting, confirmationToken?: string, signal?: AbortSignal) => Promise<SettingMutationPreview>
 
@@ -29,7 +30,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
   const request = useApi(load, [])
   const { data, refetch } = request
   const [lastAppliedSetting, setLastAppliedSetting] = useState<Setting | null>(null)
-  const [actionErrorCode, setActionErrorCode] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<SettingError | null>(null)
   const [saving, setSaving] = useState(false)
   const [pending, setPending] = useState<{ setting: Setting; revision: string; value: PendingSetting } | null>(null)
   const operation = useRef<AbortController | null>(null)
@@ -42,7 +43,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
     const controller = new AbortController()
     operation.current = controller
     setSaving(true)
-    setActionErrorCode(null)
+    setActionError(null)
     try {
       const result = await preview(revisionOf(snapshot), setting, controller.signal)
       if (controller.signal.aborted) return
@@ -60,7 +61,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
       })
     } catch (error) {
       if (!controller.signal.aborted) {
-        handleError(error, refetch, () => setPending(null), setActionErrorCode)
+        handleError(error, setting, refetch, () => setPending(null), setActionError)
       }
     } finally {
       if (operation.current === controller) operation.current = null
@@ -75,7 +76,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
     const controller = new AbortController()
     operation.current = controller
     setSaving(true)
-    setActionErrorCode(null)
+    setActionError(null)
     try {
       await update(pendingSetting.revision, pendingSetting.setting, pendingSetting.value.confirmationToken, controller.signal)
       if (controller.signal.aborted) return false
@@ -86,7 +87,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
     } catch (error) {
       if (!controller.signal.aborted) {
         setPending(null)
-        handleError(error, refetch, () => setPending(null), setActionErrorCode)
+        handleError(error, pendingSetting.setting, refetch, () => setPending(null), setActionError)
       }
       return false
     } finally {
@@ -98,7 +99,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
   const cancelSetting = useCallback(() => {
     if (operation.current !== null) return
     setPending(null)
-    setActionErrorCode(null)
+    setActionError(null)
     setSaving(false)
   }, [])
 
@@ -107,7 +108,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
     error: translateApiError(t, request.error, request.errorCode),
     pendingSetting: pending?.value ?? null,
     lastAppliedSetting,
-    actionError: actionErrorCode === null ? null : translateApiErrorCode(t, actionErrorCode),
+    actionError: actionError === null ? null : translateSettingErrorCode(t, actionError.code, actionError.kind),
     saving,
     previewSetting,
     confirmSetting,
@@ -117,11 +118,13 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
 
 function handleError(
   error: unknown,
+  setting: unknown,
   refetch: () => void,
   clearPending: () => void,
-  setErrorCode: (code: string) => void,
+  setError: (error: SettingError) => void,
 ) {
-  setErrorCode(error instanceof ApiClientError ? error.code ?? "unknown" : "unknown")
+  const kind = typeof setting === "object" && setting !== null && "kind" in setting && typeof setting.kind === "string" ? setting.kind : undefined
+  setError({ code: error instanceof ApiClientError ? error.code : "unknown", kind })
   if (error instanceof ApiClientError && error.code === "stale-revision") {
     clearPending()
     refetch()
