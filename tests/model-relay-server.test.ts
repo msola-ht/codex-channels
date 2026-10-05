@@ -88,8 +88,20 @@ describe("native Responses relay", () => {
     if (provider.startsWith("ds-")) {
       expect(result.status).toBe(200); expect(await result.json()).toEqual(responseValue());
       expect(received).toEqual({ ...request, stream: false, store: false, background: false });
-      const oversized = await post(f.relay, { ...request, input: "x".repeat(1024 * 1024) });
-      expect(oversized.status).toBe(413); await oversized.text(); expect(f.calls()).toBe(1);
+      const oversizedBody = JSON.stringify(wireRequest({ ...request, input: "x".repeat(1024 * 1024) }, provider));
+      // Send only the headers to check Content-Length admission. A buffered fetch upload can
+      // race the relay's early rejection and Connection: close on macOS.
+      const upload = httpRequest(`${f.relay.address()}/v1/responses`, { method: "POST", headers: {
+        authorization, "content-type": "application/json", "content-length": Buffer.byteLength(oversizedBody),
+      } });
+      const rejected = once(upload, "response"); upload.flushHeaders();
+      try {
+        const [oversized] = await rejected as [IncomingMessage];
+        const chunks: Buffer[] = []; for await (const chunk of oversized) chunks.push(Buffer.from(chunk));
+        expect(oversized.statusCode).toBe(413);
+        expect(JSON.parse(Buffer.concat(chunks).toString())).toMatchObject({ error: { code: "request_too_large", upstream_attempted: false } });
+      } finally { upload.destroy(); }
+      expect(f.calls()).toBe(1); expect(f.preparedCount()).toBe(1); expect(f.metrics).toHaveLength(1);
     } else {
       expect(result.status).toBe(400); expect(await result.json()).toMatchObject({ error: { param: "previous_response_id", upstream_attempted: false } });
       expect(f.calls()).toBe(0);
