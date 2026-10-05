@@ -10,6 +10,9 @@ import { SqliteDeliveryJournal } from "../src/delivery/sqlite-journal.js";
 import { DeliveryCoordinator, DeliveryJournal, DeliveryError, defaultDeliveryLimits } from "../src/delivery/index.js";
 import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
 import { PersistentSurfaceOutput } from "../src/bootstrap/persistent-surface-output.js";
+import { CompletionOutputEnricher } from "../src/bootstrap/completion-output-enricher.js";
+import { mergeCompletionTiming } from "../src/bootstrap/completion-timing.js";
+import { createTurnCompletedPresentation, renderPlainLifecyclePresentation } from "../src/surfaces/lifecycle-presentation.js";
 import { EventBus } from "../src/event-bus/index.js";
 import type { OutputEvent } from "../src/conversation-core/index.js";
 import { FeishuOutbox } from "../src/surfaces/feishu/outbox.js";
@@ -27,6 +30,29 @@ const submission = (id: string, conversation = "chat") => ({ id, account: "accou
 afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }); });
 
 describe("encrypted delivery journal", () => {
+  it("replays retained v1 compaction without outcome counts when metric records are unavailable", async () => {
+    const payload = decodePersistentOutput(JSON.stringify({
+      version: 1, owner: "owner", event: {
+        type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "chat" },
+        threadId: "thread", turnId: "turn", status: "completed", timing: {
+          compact: { model: "model", hasMixedModels: false, requestCount: 2, unsuccessfulRequestCount: 1,
+            inputTokens: 100, cachedInputTokens: null, outputTokens: 10 },
+        },
+      },
+    }));
+    const enricher = new CompletionOutputEnricher(logger, undefined, {
+      completionTiming: (_threadId, turnId, timing) => mergeCompletionTiming(null, turnId, timing),
+    });
+    try {
+      const event = await enricher.enrich(payload.event);
+      if (event.type !== "turn.completed") throw new Error("Expected retained completion");
+      expect(event.timing?.compact).not.toHaveProperty("requestOutcomes");
+      const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation(event));
+      expect(rendered).toContain("未完成 1 次（结果分类未提供）");
+      expect(rendered).not.toContain("其他失败");
+    } finally { enricher.stop(); }
+  });
+
   it("retains pending results and fences uncertain sends across restart without exposing plaintext", () => {
     const directory = fixture();
     let store = new SqliteDeliveryJournal(directory);

@@ -78,7 +78,22 @@ export interface ThreadGoal {
   updatedAt: number;
 }
 
+export interface RequestOutcomeCounts {
+  completed: number;
+  interrupted: number;
+  failed: number;
+  incomplete: number;
+}
+
+export interface RequestInterruptionSummary {
+  followedByCompletion: number;
+  noObservedCompletion: number;
+  usageUnobserved: number;
+}
+
 export interface CompactRequestMetricsSummary {
+  /** Supplied by query-time enrichment; retained live snapshots need not contain it. */
+  requestOutcomes?: RequestOutcomeCounts;
   model: string | null;
   hasMixedModels: boolean;
   requestCount: number;
@@ -114,6 +129,8 @@ export interface TurnOutputTiming {
 }
 
 export interface TurnTaskMetricsSummary {
+  requestOutcomes: RequestOutcomeCounts;
+  interruptionSummary: RequestInterruptionSummary;
   responseUsage?: ResponseUsageSummary | null;
   requestCount: number;
   unsuccessfulRequestCount: number;

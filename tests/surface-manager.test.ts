@@ -1351,6 +1351,8 @@ describe("SurfaceManager", () => {
         return {
           responseUsage: { amount: "1.2", observedRequestCount: 4, missingRequestCount: 1 },
           requestCount: 2,
+          requestOutcomes: { completed: 2, interrupted: 0, failed: 0, incomplete: 0 },
+          interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
           unsuccessfulRequestCount: 0,
           inputTokens: 1_000,
           cachedInputTokens: 800,

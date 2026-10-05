@@ -1,9 +1,10 @@
 import { Link, useLocation } from "react-router"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/metrics/status-badge"
+import { Badge } from "@/components/ui/badge"
 import { RelayRequestStatus } from "@/components/requests/relay-request-status"
 import { useTranslation } from "@/hooks/use-translation"
-import { formatElapsedDuration, formatErrorMessage, formatErrorType, formatTimestamp, getServerTimeZone } from "@/lib/format"
+import { formatElapsedDuration, formatErrorMessage, formatErrorType, formatTimestamp, getServerTimeZone, isClientInterruption } from "@/lib/format"
 import { trafficDetailPath } from "@/lib/traffic-state"
 import type { RequestRecord } from "@/lib/types"
 
@@ -11,12 +12,14 @@ import type { RequestRecord } from "@/lib/types"
 export function RequestDetail({ record }: { record: RequestRecord }) {
   const { t, language } = useTranslation()
   const location = useLocation()
+  const interrupted = isClientInterruption(record)
   const formatCount = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString(language === "zh" ? "zh-CN" : "en-US")
   const uncached = record.inputTokens === null || record.cachedInputTokens === null
     ? null : Math.max(0, record.inputTokens - record.cachedInputTokens)
   const fields = [
     [t("requests.recordedAt"), `${formatTimestamp(record.recordedAtMs)} · ${getServerTimeZone()}`],
     [t("metrics.provider"), record.provider],
+    [t("metrics.recordedStatus"), record.status],
     [t("requestDetail.upstreamProvider"), record.upstreamProvider],
     [t("requestDetail.upstreamAttemptCount"), formatCount(record.upstreamAttemptCount)],
     [t("requestDetail.modelAttemptCount"), formatCount(record.modelAttemptCount)],
@@ -57,10 +60,10 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     ["User-Agent", record.userAgent],
   ] as const
   return <div className="flex flex-col gap-4">
-    {record.source === "relay" ? <RelayRequestStatus record={record} /> : <StatusBadge status={record.status} />}
+    {record.source === "relay" ? <RelayRequestStatus record={record} /> : interrupted ? <Badge variant="secondary">{t("metrics.interrupted")}</Badge> : <StatusBadge status={record.status} />}
     {record.errorType || record.errorCode || record.errorMessage ? <div className="flex flex-col gap-1 break-words" role="note">
-      <p>{formatErrorType(record.errorType ?? record.errorCode, language)}</p>
-      {record.errorMessage ? <p>{formatErrorMessage(record.errorMessage, language)}</p> : null}
+      <p>{interrupted ? t("metrics.clientInterruption") : formatErrorType(record.errorType ?? record.errorCode, language)}</p>
+      {!interrupted && record.errorMessage ? <p>{formatErrorMessage(record.errorMessage, language)}</p> : null}
       {record.errorCode ? <p>{t("common.errorCode", { code: record.errorCode })}</p> : null}
     </div> : null}
     <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-x-4 gap-y-2">

@@ -9,6 +9,7 @@ import type {
   ThreadGoal,
   TurnErrorCode,
   TurnStartIdentity,
+  TurnTaskMetricsSummary,
 } from "../conversation-core/index.js";
 import { usesOpenAiAccount } from "../conversation-core/index.js";
 
@@ -640,6 +641,7 @@ export function createTurnCompletedPresentation(
         label: "模型请求",
         value: `${formatRequestCount(task.requestCount)} 次`,
       },
+      ...requestOutcomeFields(task),
       {
         title: "Token",
         value: formatTokenCount(task.inputTokens + task.outputTokens),
@@ -692,6 +694,7 @@ export function createTurnCompletedPresentation(
       label: "模型请求",
       value: `${formatRequestCount(session.requestCount)} 次`,
     });
+    sessionFields.push(...requestOutcomeFields(session));
     sessionFields.push({
       title: "Token",
       value: formatTokenCount(session.inputTokens + session.outputTokens),
@@ -847,6 +850,24 @@ function turnStatusLabel(
     inProgress: "运行中",
   } as const;
   return labels[status];
+}
+
+function requestOutcomeFields(summary: TurnTaskMetricsSummary): LifecyclePresentationField[] {
+  const { completed, interrupted, failed, incomplete } = summary.requestOutcomes;
+  const fields: LifecyclePresentationField[] = [{
+    label: "请求结果",
+    value: `完成 ${formatRequestCount(completed)} · 客户端中断 ${formatRequestCount(interrupted)} · 其他失败 ${formatRequestCount(failed)} · 未完整观测 ${formatRequestCount(incomplete)}`,
+  }];
+  if (interrupted > 0) {
+    const following = summary.interruptionSummary;
+    fields.push({ label: "中断后同轮有成功请求", value: `${formatRequestCount(following.followedByCompletion)} 次` });
+    fields.push({ label: "未观测到后续成功", value: `${formatRequestCount(following.noObservedCompletion)} 次` });
+    if (following.usageUnobserved > 0) fields.push({
+      label: "中断用量未完整观测",
+      value: `${formatRequestCount(following.usageUnobserved)} 次，不代表零消耗`,
+    });
+  }
+  return fields;
 }
 
 function formatResponseUsage(usage: ResponseUsageSummary | null | undefined): string {

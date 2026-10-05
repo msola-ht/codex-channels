@@ -176,6 +176,7 @@ describe("WebUI 界面文案语言切换", () => {
           return renderWithClock(ConsolePage, { range: { range: "30d" }, onRangeChange: noop }, language);
         };
         const aggregate = { cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
+          requestOutcomes: { completed: 3, interrupted: 0, failed: 1, incomplete: 0 },
           requestCount: 4, unsuccessfulRequestCount: 1, inputTokens: 100, cachedInputTokens: 50,
           outputTokens: 20, reasoningOutputTokens: 5, compact: { requestCount: 2 } };
         const range = { name: "30d", startAtMs: 1000, endAtMs: 2000 };
@@ -187,7 +188,7 @@ describe("WebUI 界面文案语言切换", () => {
         const baseDashboard = {
           data: { range, generatedAt: "2026-01-01T00:00:00.000Z", global: aggregate, threadCount: 2, turnCount: 3,
             providers: [{ provider: "openai", model: "model-test", aggregate, threadCount: 2, turnCount: 3 }],
-            errors: { startAtMs: 1000, endAtMs: 2000, requestCount: 4, unsuccessfulRequestCount: 1, groups: [], totalGroupCount: 0 },
+            errors: { startAtMs: 1000, endAtMs: 2000, requestCount: 4, unsuccessfulRequestCount: 1, requestOutcomes: aggregate.requestOutcomes, groups: [], totalGroupCount: 0 },
             weeklyQuota: null, trend: { range, generatedAt: "2026-01-01T00:00:00.000Z", granularity: "day", daily: [] },
             heatmap: { range, generatedAt: "2026-01-01T00:00:00.000Z", daily: [] } },
           loading: false, error: null, errorCode: null, refetch: noop,
@@ -237,6 +238,8 @@ describe("WebUI 界面文案语言切换", () => {
           { control: { refreshing: false, disabled: false, error: { kind: "refresh-failed", message: "账户刷新失败" }, onRefresh: noop },
             hasSnapshot: true }, "en");
         const requestRecord = { id: 42, provider: "openai", model: "model-test", recordedAtMs: 1000,
+          requestOutcomes: { completed: 1, interrupted: 0, failed: 0, incomplete: 0 },
+          interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
           cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
           inputTokens: 100, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 5,
           tokensPerSecond: 20, compact: null, requestCount: 1, unsuccessfulRequestCount: 0,
@@ -522,7 +525,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.consoleEn).toContain("Local metrics database and account status");
     expect(result.consoleEn).toContain("Summary range");
     expect(result.consoleEn).toContain("Total tokens");
-    expect(result.consoleEn).toContain("Requests: 4 · Success rate: 75.0%");
+    expect(result.consoleEn).toContain("Requests: 4 · Completed: 3 · Client interruptions: 0 · Other failures: 1 · Not fully observed: 0");
     expect(result.consoleEn).toContain("Cached: 50 · Hit rate: 50.0%");
     expect(result.consoleEn).toContain("Turns: 3");
     expect(result.consoleEn).toContain("By Provider");
@@ -533,7 +536,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.consoleEn).toContain("Activity heatmap");
     expect(result.consoleEn).toContain("Error summary");
     expect(result.consoleEn).toContain("Failure rate: 25.0%");
-    expect(result.consoleEn).toContain("No failed requests");
+    expect(result.consoleEn).toContain("No unsuccessful request records");
     expect(result.consoleEn).toContain("OpenAI weekly quota");
     expect(result.consoleEn).toContain("Weekly quota remaining: 62.5%");
     expect(result.consoleEn).toContain("Local accounts and quotas");
@@ -620,7 +623,7 @@ describe("WebUI 界面文案语言切换", () => {
   });
 
   it("错误页面移除统计卡片，表头、分页、空状态与错误提示覆盖英文", () => {
-    expect(result.errorsPageEn).toContain("Failed request records, newest first");
+    expect(result.errorsPageEn).toContain("Unsuccessful requests, including client interruptions, failures and incomplete requests, newest first");
     expect(result.errorsPageEn).not.toContain("Total requests · Failed:");
     expect(result.errorsPageEn).not.toContain("Success rate · Showing");
     expect(result.errorsPageEn).toContain("Error detail");
@@ -630,7 +633,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.errorsPageEn).toContain("Previous page");
     expect(result.errorsPageEn).toContain("Next page");
     expect(result.errorsPageLoadingEn).toContain("Loading…");
-    expect(result.errorsPageEmptyEn).toContain("No failed requests");
+    expect(result.errorsPageEmptyEn).toContain("No unsuccessful request records");
     expect(result.errorsPageErrorEn).toContain("The requested data was not found or has been removed.");
     for (const html of [result.errorsPageEn, result.errorsPageLoadingEn, result.errorsPageEmptyEn, result.errorsPageErrorEn]) {
       expect(html).not.toMatch(/[\u4e00-\u9fff]/u);

@@ -975,6 +975,8 @@ export abstract class GatewayComponentGraph {
           if (summary === null) return undefined;
           return {
             responseUsage: summary.responseUsage ?? null,
+            requestOutcomes: summary.requestOutcomes,
+            interruptionSummary: summary.interruptionSummary,
             requestCount: summary.requestCount,
             unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
             inputTokens: summary.inputTokens,
@@ -990,6 +992,8 @@ export abstract class GatewayComponentGraph {
           if (aggregate === null) return undefined;
           return {
             responseUsage: aggregate.responseUsage ?? null,
+            requestOutcomes: aggregate.requestOutcomes,
+            interruptionSummary: aggregate.interruptionSummary,
             requestCount: aggregate.requestCount,
             unsuccessfulRequestCount: aggregate.unsuccessfulRequestCount,
             inputTokens: aggregate.inputTokens,

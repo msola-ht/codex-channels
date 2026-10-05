@@ -13,6 +13,8 @@ describe("conversation metrics formatting", () => {
           turnId: "turn-1",
           requestCount: 3,
           unsuccessfulRequestCount: 1,
+          requestOutcomes: { completed: 2, interrupted: 1, failed: 0, incomplete: 0 },
+          interruptionSummary: { followedByCompletion: 1, noObservedCompletion: 0, usageUnobserved: 1 },
           inputTokens: 30_000,
           cachedInputTokens: 24_000,
           outputTokens: 900,
@@ -22,6 +24,7 @@ describe("conversation metrics formatting", () => {
             hasMixedModels: false,
             requestCount: 1,
             unsuccessfulRequestCount: 0,
+            requestOutcomes: { completed: 1, interrupted: 0, failed: 0, incomplete: 0 },
             inputTokens: 10_000,
             cachedInputTokens: 9_000,
             outputTokens: 500,
@@ -31,6 +34,8 @@ describe("conversation metrics formatting", () => {
           turnCount: 8,
           requestCount: 21,
           unsuccessfulRequestCount: 2,
+          requestOutcomes: { completed: 19, interrupted: 1, failed: 0, incomplete: 1 },
+          interruptionSummary: { followedByCompletion: 1, noObservedCompletion: 0, usageUnobserved: 1 },
           inputTokens: 180_000,
           cachedInputTokens: 174_000,
           outputTokens: 4_200,
@@ -40,6 +45,7 @@ describe("conversation metrics formatting", () => {
             hasMixedModels: false,
             requestCount: 2,
             unsuccessfulRequestCount: 0,
+            requestOutcomes: { completed: 2, interrupted: 0, failed: 0, incomplete: 0 },
             inputTokens: 20_000,
             cachedInputTokens: 18_000,
             outputTokens: 1_000,
@@ -48,7 +54,12 @@ describe("conversation metrics formatting", () => {
       },
     });
 
-    expect(rendered).toContain("模型请求：3 次（异常 1 次）");
+    expect(rendered).toContain("模型请求：3 次");
+    expect(rendered).toContain("完成：2 · 客户端中断：1 · 其他失败：0 · 未完整观测：0");
+    expect(rendered).toContain("同一 Turn 后续有完成 1 次 · 未观测到后续完成 0 次");
+    expect(rendered).toContain("中断请求用量未完整观测：1 次");
+    expect(rendered).toContain("不代表重试或恢复因果");
+    expect(rendered).not.toContain("异常 1 次");
     expect(rendered).not.toContain("Token/s");
     expect(rendered).toContain("缓存命中率：80.00%");
     expect(rendered).toContain("其中推理输出：300");
@@ -77,6 +88,8 @@ describe("conversation metrics formatting", () => {
           turnId: "turn-1",
           requestCount: 3,
           unsuccessfulRequestCount: 1,
+          requestOutcomes: { completed: 2, interrupted: 0, failed: 1, incomplete: 0 },
+          interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
           inputTokens: 30_000,
           cachedInputTokens: 24_000,
           outputTokens: 900,
@@ -87,6 +100,8 @@ describe("conversation metrics formatting", () => {
           turnCount: 8,
           requestCount: 21,
           unsuccessfulRequestCount: 2,
+          requestOutcomes: { completed: 19, interrupted: 0, failed: 2, incomplete: 0 },
+          interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
           inputTokens: 180_000,
           cachedInputTokens: 174_000,
           outputTokens: 4_200,
@@ -104,6 +119,7 @@ describe("conversation metrics formatting", () => {
     const aggregate = {
       requestCount: 7_955,
       unsuccessfulRequestCount: 1_234,
+      requestOutcomes: { completed: 6_721, interrupted: 1_200, failed: 30, incomplete: 4 },
       inputTokens: 120_000,
       cachedInputTokens: 96_000,
       outputTokens: 2_400,
@@ -113,6 +129,7 @@ describe("conversation metrics formatting", () => {
         hasMixedModels: false,
         requestCount: 2,
         unsuccessfulRequestCount: 0,
+        requestOutcomes: { completed: 2, interrupted: 0, failed: 0, incomplete: 0 },
         inputTokens: 20_000,
         cachedInputTokens: 18_000,
         outputTokens: 1_000,
@@ -141,10 +158,11 @@ describe("conversation metrics formatting", () => {
 
     expect(rendered).toContain("请求指标 · 按模型");
     expect(rendered).toContain("范围：最近 7 天");
-    expect(rendered).toContain("模型请求：7.96 K 次（异常 1.23 K 次）");
+    expect(rendered).toContain("模型请求：7.96 K 次");
+    expect(rendered).toContain("客户端中断：1.2 K · 其他失败：30 · 未完整观测：4");
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
     expect(rendered).toContain("custom / gpt-5.6-luna");
-    expect(rendered).toContain("请求：1 M 次（异常 1.23 K 次）");
+    expect(rendered).toContain("请求：1 M 次");
     expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token");
     expect(rendered).not.toContain("耗时");
     expect(rendered).not.toContain("延迟");
@@ -161,12 +179,13 @@ describe("conversation metrics formatting", () => {
         endAtMs: 2,
         requestCount: 100,
         unsuccessfulRequestCount: 3,
+        requestOutcomes: { completed: 97, interrupted: 2, failed: 0, incomplete: 1 },
         groups: [{
           provider: "openai",
           model: "gpt-5.6-sol",
           status: "failed",
           httpStatus: null,
-          errorType: "websocket_closed",
+          errorType: "client_disconnected",
           lastErrorMessage: null,
           requestCount: 2,
           lastOccurredAtMs: 1_785_640_800_000,
@@ -184,12 +203,13 @@ describe("conversation metrics formatting", () => {
       },
     });
 
-    expect(rendered).toContain("## 请求指标 · 异常请求");
-    expect(rendered).toContain("异常率：3%");
+    expect(rendered).toContain("## 请求指标 · 中断、失败与未完整观测");
+    expect(rendered).toContain("其他失败率：0%");
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
-    expect(rendered).toContain("WebSocket 提前关闭 · 失败 · 2 次");
+    expect(rendered).toContain("客户端提前断开 · 客户端中断 · 2 次");
+    expect(rendered).not.toContain("客户端提前断开 · 其他失败");
     expect(rendered).toContain("custom / gpt-5.6-luna");
-    expect(rendered).toContain("rate_limit_error · 未完成 · HTTP 429 · 1 次");
+    expect(rendered).toContain("rate_limit_error · 未完整观测 · HTTP 429 · 1 次");
     expect(rendered).toContain("最近发生：");
     expect(rendered).toContain(`时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
   });
@@ -204,6 +224,7 @@ describe("conversation metrics formatting", () => {
         endAtMs: 2,
         requestCount: 1,
         unsuccessfulRequestCount: 1,
+        requestOutcomes: { completed: 0, interrupted: 0, failed: 1, incomplete: 0 },
         groups: [{
           provider: "openai",
           model: "gpt-5.6-sol",
@@ -218,7 +239,7 @@ describe("conversation metrics formatting", () => {
       },
     });
 
-    expect(rendered).toContain("其他错误 · 失败 · HTTP 500");
+    expect(rendered).toContain("其他错误 · 其他失败 · HTTP 500");
     expect(rendered).not.toContain("伪造字段");
     expect(rendered).not.toContain("**");
   });

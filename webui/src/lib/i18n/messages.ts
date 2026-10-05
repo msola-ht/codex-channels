@@ -1,4 +1,4 @@
-import type { DisplayLanguage } from "@/lib/format"
+import type { DisplayLanguage } from "../format"
 
 /**
  * 前端界面文案字典。中文为源语言，英文必须保持完全相同的键结构，
@@ -623,6 +623,12 @@ const zh = {
     "compact": "压缩",
     "last": "最后记录",
     "failures": "失败",
+    "interrupted": "客户端中断",
+    "incompleteObservation": "未完整观测",
+    "recordedStatus": "原始请求状态",
+    "requestOutcomes": "完成 {completed} · 客户端中断 {interrupted} · 其他失败 {failed} · 未完整观测 {incomplete}",
+    "interruptionEvidence": "中断后同轮有成功请求 {completed} · 未观测到同轮后续成功 {unobserved} · 用量未完整观测 {usage}。",
+    "clientInterruption": "客户端中断；当前记录无法确定断开原因。",
     "times": "{count} 次",
     "cached": "缓存：{count}",
     "uncached": "无缓存：{count}",
@@ -718,7 +724,7 @@ const zh = {
     "refreshing": "刷新中",
     "unknown": "未知",
     "errorCode": "错误码：{code}",
-    "noFailedRequests": "没有异常请求",
+    "noFailedRequests": "没有未成功请求记录",
     "loadFailed": "加载失败",
     "loadingRecords": "正在加载…",
     "all": "全部",
@@ -902,9 +908,9 @@ const zh = {
     "viewTraffic": "查看调用详情"
   },
   errorList: {
-    "description": "失败请求记录，按发生时间倒序",
+    "description": "未成功请求记录，包含客户端中断、失败和未完成，按发生时间倒序",
     "tableTitle": "错误记录",
-    "tableDescription": "每一行是一条失败请求；错误明细跟随当前界面语言显示",
+    "tableDescription": "每行是一条未成功请求，客户端中断单独标注；明细跟随当前界面语言显示",
     "loadingRecords": "正在加载错误记录…",
     "detailColumn": "错误明细",
     "threadColumn": "会话 / 轮次"
@@ -1776,6 +1782,12 @@ const en: Messages = {
     "compact": "Compaction",
     "last": "Last recorded",
     "failures": "Failures",
+    "interrupted": "Client interruptions",
+    "incompleteObservation": "Not fully observed",
+    "recordedStatus": "Recorded request status",
+    "requestOutcomes": "Completed: {completed} · Client interruptions: {interrupted} · Other failures: {failed} · Not fully observed: {incomplete}",
+    "interruptionEvidence": "Interruptions followed by a successful request in the same turn: {completed} · No later success observed in the same turn: {unobserved} · Usage not fully observed: {usage}.",
+    "clientInterruption": "Client interruption; the record does not establish why the connection closed.",
     "times": "Count: {count}",
     "cached": "Cached: {count}",
     "uncached": "Uncached: {count}",
@@ -1871,7 +1883,7 @@ const en: Messages = {
     "refreshing": "Refreshing",
     "unknown": "Unknown",
     "errorCode": "Error code: {code}",
-    "noFailedRequests": "No failed requests",
+    "noFailedRequests": "No unsuccessful request records",
     "loadFailed": "Loading failed",
     "loadingRecords": "Loading…",
     "all": "All",
@@ -2055,10 +2067,10 @@ const en: Messages = {
     "viewTraffic": "View traffic detail"
   },
   errorList: {
-    "description": "Failed request records, newest first",
-    "tableTitle": "Failed request records",
-    "tableDescription": "Each row is a failed request; error details follow the selected language",
-    "loadingRecords": "Loading failed request records…",
+    "description": "Unsuccessful requests, including client interruptions, failures and incomplete requests, newest first",
+    "tableTitle": "Unsuccessful request records",
+    "tableDescription": "Each row is an unsuccessful request; client interruptions are labeled separately and details follow the display language",
+    "loadingRecords": "Loading unsuccessful request records…",
     "detailColumn": "Error detail",
     "threadColumn": "Thread / Turn"
   },

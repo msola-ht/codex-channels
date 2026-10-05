@@ -4,6 +4,8 @@ export {
   type SafeErrorMetadata,
 } from "./logger.js";
 export type {
+  RequestOutcomeCounts,
+  RequestInterruptionSummary,
   TurnExecutionMetric,
   TurnExecutionStore,
   SessionExecutionTiming,

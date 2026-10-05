@@ -36,29 +36,8 @@ function reconcileModelRequestStatuses(
   timing: TurnOutputTiming,
   latestTurn: StoredTurnRequestMetricsSummary,
 ): void {
-  const hasLiveBreakdown = [
-    timing.completedModelRequestCount,
-    timing.interruptedModelRequestCount,
-    timing.incompleteModelRequestCount,
-    timing.failedModelRequestCount,
-  ].some((value) => value !== undefined);
-  if (!hasLiveBreakdown) return;
-
-  const unsuccessful = Math.min(
-    latestTurn.requestCount,
-    Math.max(0, latestTurn.unsuccessfulRequestCount),
-  );
-  const interrupted = Math.min(
-    unsuccessful,
-    Math.max(0, timing.interruptedModelRequestCount ?? 0),
-  );
-  const afterInterrupted = unsuccessful - interrupted;
-  const failed = Math.min(
-    afterInterrupted,
-    Math.max(0, timing.failedModelRequestCount ?? 0),
-  );
-  const incomplete = afterInterrupted - failed;
-  timing.completedModelRequestCount = latestTurn.requestCount - unsuccessful;
+  const { completed, interrupted, failed, incomplete } = latestTurn.requestOutcomes;
+  timing.completedModelRequestCount = completed;
   timing.interruptedModelRequestCount = interrupted;
   timing.incompleteModelRequestCount = incomplete;
   timing.failedModelRequestCount = failed;

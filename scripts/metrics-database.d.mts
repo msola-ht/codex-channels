@@ -1,4 +1,4 @@
-import type { ModelRequestMetricsFilters, StoredModelRequestMetricsAggregate } from "../dist/observability/index.js";
+import type { ModelRequestMetricsFilters, RequestOutcomeCounts, StoredModelRequestMetricsAggregate } from "../dist/observability/index.js";
 export function maintainMetricsSchema(command: "upgrade" | "rollback", args: string[], environment?: NodeJS.ProcessEnv): Promise<unknown>;
 
 export interface MetricsQueryOptions extends ModelRequestMetricsFilters {
@@ -24,6 +24,7 @@ export interface MetricsDatabaseResetResult {
 }
 
 export interface MetricsCompactSummary {
+  requestOutcomes: RequestOutcomeCounts;
   model: string | null;
   hasMixedModels: boolean;
   requestCount: number;
@@ -84,6 +85,7 @@ export interface MetricsThreadsDocument {
     reasoningEffort: string | null;
     turnCount: number;
     requestCount: number;
+    requestOutcomes: RequestOutcomeCounts;
     inputTokens: number;
     outputTokens: number;
     compact: MetricsCompactSummary | null;

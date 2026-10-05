@@ -1,6 +1,8 @@
 import type {
   ConversationCommandResult,
   RequestMetricsTimeRange,
+  RequestOutcomeCounts,
+  RequestInterruptionSummary,
 } from "../application/index.js";
 
 import {
@@ -36,7 +38,9 @@ export function formatConversationMetrics(
     lines.push(
       "",
       "### 最近运行聚合",
-      `模型请求：${formatRequestCount(turn.requestCount)} 次${turn.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(turn.unsuccessfulRequestCount)} 次）` : ""}`,
+      `模型请求：${formatRequestCount(turn.requestCount)} 次`,
+      formatRequestOutcomes(turn.requestOutcomes),
+      ...formatInterruptionSummary(turn.interruptionSummary),
       `- **Token**：${formatTokenCount(turn.inputTokens + turn.outputTokens)}`,
       ...(turn.cachedInputTokens === null
         ? ["  - 缓存：上游未提供完整数据"]
@@ -62,7 +66,9 @@ export function formatConversationMetrics(
       "",
       "### 当前会话指标累计",
       `Turn：${aggregate.turnCount} 次`,
-      `模型请求：${formatRequestCount(aggregate.requestCount)} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(aggregate.unsuccessfulRequestCount)} 次）` : ""}`,
+      `模型请求：${formatRequestCount(aggregate.requestCount)} 次`,
+      formatRequestOutcomes(aggregate.requestOutcomes),
+      ...formatInterruptionSummary(aggregate.interruptionSummary),
       `- **Token**：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
       ...(aggregate.cachedInputTokens === null
         ? ["  - 缓存：上游未提供完整数据"]
@@ -91,26 +97,28 @@ function formatErrorMetricsReport(
 ): string {
   const failureRate = report.requestCount === 0
     ? 0
-    : report.unsuccessfulRequestCount / report.requestCount * 100;
+    : report.requestOutcomes.failed / report.requestCount * 100;
   const lines = [
-    "## 请求指标 · 异常请求",
+    "## 请求指标 · 中断、失败与未完整观测",
     formatTimezoneLine(),
     `范围：${formatMetricsRange(report.range)}`,
     "",
     `模型请求：${formatRequestCount(report.requestCount)} 次`,
-    `异常请求：${formatRequestCount(report.unsuccessfulRequestCount)} 次`,
-    `异常率：${formatPercent(failureRate)}`,
+    formatRequestOutcomes(report.requestOutcomes),
+    `其他失败率：${formatPercent(failureRate)}`,
   ];
   if (report.groups.length === 0) {
-    lines.push("", "本时间范围未记录异常请求。");
+    lines.push("", "本时间范围未记录中断、失败或未完整观测请求。");
     return toStructuredMarkdownList(lines.join("\n"));
   }
   lines.push(
     "",
-    "### 异常明细",
+    "### 请求明细",
     ...report.groups.map((group, index) => {
       const provider = formatCodexProviderLabel(group.provider);
-      const status = formatRequestStatus(group.status);
+      const status = group.errorType === "client_disconnected"
+        ? "客户端中断"
+        : formatRequestStatus(group.status);
       const httpStatus = group.httpStatus === null
         ? ""
         : ` · HTTP ${group.httpStatus}`;
@@ -212,6 +220,7 @@ function formatMetricsAggregate(
   aggregate: {
   requestCount: number;
   unsuccessfulRequestCount: number;
+  requestOutcomes: RequestOutcomeCounts;
   inputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
@@ -220,7 +229,8 @@ function formatMetricsAggregate(
   },
 ): string[] {
   return [
-    `模型请求：${formatRequestCount(aggregate.requestCount)} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(aggregate.unsuccessfulRequestCount)} 次）` : ""}`,
+    `模型请求：${formatRequestCount(aggregate.requestCount)} 次`,
+    formatRequestOutcomes(aggregate.requestOutcomes),
     `- **Token**：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
     ...(aggregate.cachedInputTokens === null
       ? ["  - 缓存：上游未提供完整数据"]
@@ -260,7 +270,8 @@ function formatMetricsGroup(
     : "";
   return [
     `${index + 1}. ${label}`,
-    `  - 请求：${formatRequestCount(aggregate.requestCount)} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(aggregate.unsuccessfulRequestCount)} 次）` : ""}`,
+    `  - 请求：${formatRequestCount(aggregate.requestCount)} 次`,
+    `  - ${formatRequestOutcomes(aggregate.requestOutcomes)}`,
     ...(aggregate.cachedInputTokens === null
       ? []
       : [
@@ -289,6 +300,7 @@ export function formatCompactMetricsValue(
     hasMixedModels: boolean;
     requestCount: number;
     unsuccessfulRequestCount: number;
+    requestOutcomes?: RequestOutcomeCounts;
     inputTokens: number;
     outputTokens: number;
   },
@@ -296,10 +308,25 @@ export function formatCompactMetricsValue(
   const model = compact.hasMixedModels
     ? "混合模型"
     : compact.model ?? "模型未知";
-  const failures = compact.unsuccessfulRequestCount === 0
-    ? ""
-    : `（异常 ${formatRequestCount(compact.unsuccessfulRequestCount)} 次）`;
-  return `${formatRequestCount(compact.requestCount)} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token`;
+  const outcomes = compact.requestOutcomes
+    ? ` · ${formatRequestOutcomes(compact.requestOutcomes)}`
+    : compact.unsuccessfulRequestCount > 0
+      ? ` · 未完成 ${formatRequestCount(compact.unsuccessfulRequestCount)} 次（结果分类未提供）`
+      : "";
+  return `${formatRequestCount(compact.requestCount)} 次 · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token${outcomes}`;
+}
+
+function formatRequestOutcomes(outcomes: RequestOutcomeCounts): string {
+  return `完成：${formatRequestCount(outcomes.completed)} · 客户端中断：${formatRequestCount(outcomes.interrupted)} · 其他失败：${formatRequestCount(outcomes.failed)} · 未完整观测：${formatRequestCount(outcomes.incomplete)}`;
+}
+
+function formatInterruptionSummary(summary: RequestInterruptionSummary): string[] {
+  if (summary.followedByCompletion + summary.noObservedCompletion === 0) return [];
+  return [
+    `客户端中断后：同一 Turn 后续有完成 ${formatRequestCount(summary.followedByCompletion)} 次 · 未观测到后续完成 ${formatRequestCount(summary.noObservedCompletion)} 次`,
+    `中断请求用量未完整观测：${formatRequestCount(summary.usageUnobserved)} 次（Token 仅含已观测用量）`,
+    "后续完成仅表示时间顺序，不代表重试或恢复因果。",
+  ];
 }
 
 function formatMetricsRange(range: RequestMetricsTimeRange): string {
@@ -317,8 +344,8 @@ function formatRequestStatus(
 ): string {
   switch (status) {
     case "completed": return "已完成";
-    case "failed": return "失败";
-    case "incomplete": return "未完成";
-    case "unknown": return "未知";
+    case "failed": return "其他失败";
+    case "incomplete": return "未完整观测";
+    case "unknown": return "未完整观测";
   }
 }

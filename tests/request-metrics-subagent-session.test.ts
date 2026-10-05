@@ -276,6 +276,7 @@ describe("request metrics subagent session aggregation", () => {
       const service = new RequestMetricsQueryService(store);
       expect(store.count()).toBe(0);
       const emptyMetrics = {
+        requestOutcomes: { completed: 0, interrupted: 0, failed: 0, incomplete: 0 },
         provider: null, model: null, turnCount: 0, requestCount: 0, inputTokens: 0, outputTokens: 0,
         firstRequestStartedAtMs: null, lastRecordedAtMs: null,
         cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 },

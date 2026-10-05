@@ -2,6 +2,19 @@ export type ModelRequestTransport = "http" | "websocket";
 export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
+export interface RequestOutcomeCounts {
+  completed: number;
+  interrupted: number;
+  failed: number;
+  incomplete: number;
+}
+
+export interface RequestInterruptionSummary {
+  followedByCompletion: number;
+  noObservedCompletion: number;
+  /** 中断请求输入或输出用量至少一项缺失；已知部分仍参与用量合计。 */
+  usageUnobserved: number;
+}
 export interface ModelRequestMetricSample {
   /** 上游明确返回的诊断摘要；与可选报文转储独立，历史缺失为空。 */
   upstreamProvider?: string | null;
@@ -139,6 +152,7 @@ export interface StoredModelRequestMetric extends ModelRequestMetricSample {
 }
 
 export interface StoredCompactRequestMetricsSummary {
+  requestOutcomes: RequestOutcomeCounts;
   model: string | null;
   hasMixedModels: boolean;
   requestCount: number;
@@ -156,6 +170,8 @@ export interface ResponseUsageSummary {
 }
 
 export interface StoredTurnRequestMetricsSummary {
+  requestOutcomes: RequestOutcomeCounts;
+  interruptionSummary: RequestInterruptionSummary;
   durationMs?: number | null;
   responseUsage?: ResponseUsageSummary | null;
   /** 当前 Thread/Turn 首个有效 OpenAI 样本，不含压缩和子代理。 */
@@ -174,6 +190,8 @@ export interface StoredTurnRequestMetricsSummary {
 }
 
 export interface StoredThreadRequestMetricsAggregate {
+  requestOutcomes: RequestOutcomeCounts;
+  interruptionSummary: RequestInterruptionSummary;
   responseUsage?: ResponseUsageSummary | null;
   provider: string | null;
   turnCount: number;
@@ -209,6 +227,7 @@ export interface StoredCacheUsage {
 }
 
 export interface StoredThreadListItem {
+  requestOutcomes: RequestOutcomeCounts;
   cacheUsage: StoredCacheUsage;
   sessionTiming: SessionExecutionTiming;
   threadId: string;
@@ -248,7 +267,7 @@ export interface StoredSubagentThreadRecord {
 }
 
 export interface StoredSubagentListItem extends StoredSubagentThreadRecord, Pick<StoredThreadListItem,
-  "provider" | "model" | "turnCount" | "requestCount" | "inputTokens" | "outputTokens" | "cacheUsage"
+  "provider" | "model" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"
 > {
   directSubagentCount: number;
   firstRequestStartedAtMs: number | null;
@@ -308,6 +327,7 @@ export interface ModelRequestMetricsAggregationQuery extends ModelRequestMetrics
 }
 
 export interface StoredModelRequestMetricsAggregate {
+  requestOutcomes: RequestOutcomeCounts;
   cacheUsage: StoredCacheUsage;
   requestCount: number;
   unsuccessfulRequestCount: number;
@@ -418,6 +438,7 @@ export interface StoredModelRequestMetricsErrorGroup {
 }
 
 export interface StoredModelRequestMetricsErrorReport {
+  requestOutcomes: RequestOutcomeCounts;
   startAtMs: number;
   endAtMs: number;
   requestCount: number;

@@ -19,6 +19,8 @@ import {
 } from "@/components/metrics/data-table"
 import {
   formatModelName,
+  formatInterruptionSummary,
+  formatInterruptedUsage,
   formatElapsedDuration,
   formatTime,
   formatTokens,
@@ -42,6 +44,8 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
     model: t("metrics.model"),
     requests: t("metrics.requests"),
     failures: t("metrics.failures"),
+    interrupted: t("metrics.interrupted"),
+    incomplete: t("metrics.incompleteObservation"),
     input: t("metrics.input"),
     cacheHitRate: t("metrics.cacheHitRate"),
     output: t("metrics.output"),
@@ -105,13 +109,13 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
     },
     {
       id: "failures",
-      accessorFn: (turn) => turn.unsuccessfulRequestCount,
+      accessorFn: (turn) => turn.requestOutcomes.failed,
       header: ({ column }) => (
         <SortableHeader column={column}>{t("metrics.failures")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">
-          {row.original.unsuccessfulRequestCount}
+          {row.original.requestOutcomes.failed}
         </span>
       ),
     },
@@ -121,7 +125,9 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       header: ({ column }) => (
         <SortableHeader column={column}>{t("metrics.input")}</SortableHeader>
       ),
-      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} />,
+      cell: ({ row }) => row.original.interruptionSummary.usageUnobserved > 0
+        ? <TableHint hint={formatInterruptionSummary(row.original.interruptionSummary, t)}>{formatInterruptedUsage(row.original.inputTokens, row.original.interruptionSummary)}</TableHint>
+        : <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} />,
     },
     {
       id: "cacheHitRate",
@@ -129,6 +135,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       header: t("metrics.cacheHitRate"),
       cell: ({ row }) => {
         const turn = row.original
+        if (turn.interruptionSummary.usageUnobserved > 0) return "—"
         return <span className="whitespace-nowrap tabular-nums">{turn.inputTokens > 0 && turn.cachedInputTokens !== null
           ? `${(turn.cachedInputTokens / turn.inputTokens * 100).toFixed(1)}%`
           : "—"}</span>
@@ -142,6 +149,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       ),
       cell: ({ row }) => {
         const turn = row.original
+        if (turn.interruptionSummary.usageUnobserved > 0) return <TableHint hint={formatInterruptionSummary(turn.interruptionSummary, t)}>{formatInterruptedUsage(turn.outputTokens, turn.interruptionSummary)}</TableHint>
         const nonReasoning = Math.max(
           0,
           turn.outputTokens - turn.reasoningOutputTokens,
@@ -180,6 +188,22 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       ),
     },
     {
+      id: "interrupted",
+      enableSorting: false,
+      accessorFn: (turn) => turn.requestOutcomes.interrupted,
+      header: t("metrics.interrupted"),
+      cell: ({ row }) => <TableHint hint={row.original.requestOutcomes.interrupted > 0 ? formatInterruptionSummary(row.original.interruptionSummary, t) : null}>
+        <span className="tabular-nums">{row.original.requestOutcomes.interrupted}</span>
+      </TableHint>,
+    },
+    {
+      id: "incomplete",
+      enableSorting: false,
+      accessorFn: (turn) => turn.requestOutcomes.incomplete,
+      header: t("metrics.incompleteObservation"),
+      cell: ({ row }) => <span className="tabular-nums">{row.original.requestOutcomes.incomplete}</span>,
+    },
+    {
       id: "duration",
       enableSorting: false,
       header: () => t("threads.turnDuration"),
@@ -200,7 +224,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
 
   return (
     <DataTable
-      numericColumnIds={["requests", "failures", "input", "cacheHitRate", "output", "compact", "duration", "subagents"]}
+      numericColumnIds={["requests", "failures", "interrupted", "incomplete", "input", "cacheHitRate", "output", "compact", "duration", "subagents"]}
       loading={loading}
       title={t("threads.turnList")}
       description={({ matched }) => <TableHint hint={t("threads.turnHint")}>{t("threads.turnDescription", { matched })}</TableHint>}

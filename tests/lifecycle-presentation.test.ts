@@ -36,12 +36,14 @@ describe("shared Surface lifecycle presentation", () => {
       sessionDurationMs: 1_071_000,
       timing: { modelRequestCount: 2 },
       sessionAggregate: { requestCount: 3, unsuccessfulRequestCount: 0, inputTokens: 100, cachedInputTokens: null,
+        requestOutcomes: { completed: 3, interrupted: 0, failed: 0, incomplete: 0 },
+        interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
         outputTokens: 1_000, reasoningOutputTokens: 0 },
     }));
     expect(rendered).not.toContain("Token/s");
     expect(rendered).toContain("总耗时：17 min 51 s");
     expect(rendered).not.toContain("本次运行：");
-    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\nToken：1.1 K");
+    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\n请求结果：完成 3 · 客户端中断 0 · 其他失败 0 · 未完整观测 0\nToken：1.1 K");
     expect(rendered).not.toContain("会话统计（含子代理）");
     expect(rendered).not.toContain("上游轮次首 Token");
   });
@@ -787,6 +789,8 @@ describe("shared Surface lifecycle presentation", () => {
           requestOutputTokens: 20,
         },
         taskAggregate: {
+          requestOutcomes: { completed: 3, interrupted: 0, failed: 0, incomplete: 0 },
+          interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
           requestCount: 3,
           unsuccessfulRequestCount: 0,
           inputTokens: 3_000,
@@ -824,6 +828,8 @@ describe("shared Surface lifecycle presentation", () => {
           requestOutputTokens: 100,
         },
         sessionAggregate: {
+          requestOutcomes: { completed: 8, interrupted: 1, failed: 0, incomplete: 0 },
+          interruptionSummary: { followedByCompletion: 1, noObservedCompletion: 0, usageUnobserved: 1 },
           requestCount: 9,
           unsuccessfulRequestCount: 1,
           inputTokens: 90_000,
@@ -836,6 +842,9 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(rendered).toContain("当前会话：");
     expect(rendered).toContain("模型请求：9 次");
+    expect(rendered).toContain("请求结果：完成 8 · 客户端中断 1 · 其他失败 0 · 未完整观测 0");
+    expect(rendered).toContain("中断后同轮有成功请求：1 次");
+    expect(rendered).toContain("中断用量未完整观测：1 次，不代表零消耗");
     expect(rendered).toContain("Token：92 K");
     expect(rendered).toContain("缓存命中率：66.67%");
     expect(rendered).toContain("Token：92 K\n  缓存命中率：66.67%");
@@ -1044,6 +1053,8 @@ describe("completion response usage", () => {
       threadId: "thread", turnId: "turn", status: "completed", modelProvider: "openai",
       timing: { responseUsage: { amount: "0", observedRequestCount: 1, missingRequestCount: 0 } },
       sessionAggregate: { requestCount: 4, unsuccessfulRequestCount: 0, inputTokens: 1,
+        requestOutcomes: { completed: 4, interrupted: 0, failed: 0, incomplete: 0 },
+        interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
         cachedInputTokens: null, outputTokens: 1, reasoningOutputTokens: 0,
         responseUsage: { amount: "0.1234567890123456789", observedRequestCount: 3, missingRequestCount: 1 } },
     });

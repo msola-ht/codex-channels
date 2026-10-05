@@ -1,5 +1,5 @@
 import { useTranslation } from "@/hooks/use-translation"
-import { formatCacheUsage, formatCount, formatTokens, formatSuccessRate, formatTime } from "@/lib/format"
+import { formatCacheUsage, formatCount, formatTokens, formatRequestOutcomes, formatTime } from "@/lib/format"
 import type { Aggregate, Range } from "@/lib/types"
 import { cn } from "cn"
 
@@ -12,7 +12,7 @@ export function QuerySummary({ aggregate, range, turns, label, loading = false }
       <span>{t("metrics.period", { range: range.name === "all" ? t("metrics.allHistory") : t("metrics.dateRange", { from: formatTime(range.startAtMs), to: formatTime(range.endAtMs) }) })}</span>
       {turns === undefined ? null : <span>{t("metrics.turns", { count: formatCount(turns) })}</span>}
       <span>{t("metrics.requestsTotal", { count: formatCount(aggregate?.requestCount ?? 0) })}</span>
-      <span>{t("metrics.success", { rate: formatSuccessRate(aggregate?.requestCount ?? 0, aggregate?.unsuccessfulRequestCount ?? 0) })}</span>
+      <span>{formatRequestOutcomes(aggregate?.requestOutcomes ?? null, t)}</span>
       <span>{t("metrics.inputCache", { input: formatTokens(aggregate?.inputTokens ?? 0), cached: cache.cached })}</span>
       <span>{t("metrics.cacheRate", { rate: cache.rate })}</span>
       <span>{t("metrics.outputTotal", { count: formatTokens(aggregate?.outputTokens ?? 0) })}</span>

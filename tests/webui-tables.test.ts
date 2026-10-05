@@ -4,6 +4,42 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
+  it("separates client interruptions from failures in cards, histories and turn columns", () => {
+    for (const name of ["interruptedSummary", "interruptedGlobal", "interruptedErrorsSummary"]) {
+      expect(markup[name]).toContain("完成 2 · 客户端中断 5 · 其他失败 1 · 未完整观测 2");
+      expect(markup[name]).not.toContain("失败 8");
+    }
+    expect(markup.interruptedSummaryEn).toContain("Completed: 2 · Client interruptions: 5 · Other failures: 1 · Not fully observed: 2");
+    expect(markup.interruptedErrorsSummary).toContain("失败率 10.0%");
+    expect(headers(markup.interruptedTurns!)).toContain("客户端中断");
+    expect(headers(markup.interruptedTurns!)).toContain("未完整观测");
+    const cells = [...markup.interruptedTurns!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)].map(match => match[1]?.replace(/<[^>]*>/gu, ""));
+    expect(cells[headers(markup.interruptedTurns!).indexOf("失败")]).toBe("1");
+    expect(cells[headers(markup.interruptedTurns!).indexOf("客户端中断")]).toBe("5");
+    expect(cells[headers(markup.interruptedTurns!).indexOf("输入 Token")]).toBe("≥ 100");
+    const unknown = [...markup.interruptedTurnsUnknown!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)].map(match => match[1]?.replace(/<[^>]*>/gu, ""));
+    expect(unknown[headers(markup.interruptedTurnsUnknown!).indexOf("输入 Token")]).toBe("—");
+    expect(unknown[headers(markup.interruptedTurnsUnknown!).indexOf("输出 Token")]).toBe("—");
+    expect(markup.interruptedHistory).toContain("中断后同轮有成功请求 2");
+    expect(markup.interruptedHistory).toContain("未观测到同轮后续成功 3");
+    expect(markup.interruptedHistory).toContain("用量未完整观测 1");
+    expect(markup.interruptedHistoryEn).toContain("Interruptions followed by a successful request in the same turn: 2");
+    for (const name of ["interruptedHistory", "interruptedTurns"]) {
+      expect(markup[name]).not.toContain("重试成功");
+      expect(markup[name]).not.toContain("正常取消");
+    }
+  });
+  it("presents interruption records neutrally while retaining the recorded status and unknown usage", () => {
+    for (const name of ["interruptedRequests", "interruptedErrors", "interruptedRequestDetail"]) {
+      expect(markup[name]).toContain("客户端中断");
+      expect(markup[name]).toContain("当前记录无法确定断开原因");
+      expect(markup[name]).not.toContain("request failed due to cancellation");
+    }
+    expect(markup.interruptedRequestDetail).toContain("原始请求状态");
+    expect(markup.interruptedRequestDetail).toContain(">failed</dd>");
+    expect(markup.interruptedRequestDetailEn).toContain("Client interruption; the record does not establish why the connection closed.");
+    expect(markup.interruptedRequestDetail).not.toContain(">0</dd>");
+  });
   it("keeps total and own token columns and omits flat type and parent columns", () => {
     expect(markup.threads).toContain("共 1 个匹配主会话");
     expect(markup.threadsEn).toContain("Matching main threads: 1");
@@ -296,7 +332,8 @@ describe("WebUI metrics table presentation", () => {
         const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
         const { TrafficDetail } = await server.ssrLoadModule("/src/components/traffic/traffic-detail.tsx");
         const { ErrorBanner } = await server.ssrLoadModule("/src/components/metrics/error-banner.tsx");
-        const { GlobalCards, ProviderTable, WeeklyQuotaCard, OpencodeGoUsageCard, ClinePassUsageCard, DeepseekBalanceCards, CcgCreditUsageCards } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
+        const { GlobalCards, ErrorsSummary, ProviderTable, WeeklyQuotaCard, OpencodeGoUsageCard, ClinePassUsageCard, DeepseekBalanceCards, CcgCreditUsageCards } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
+        const { ThreadRunSummary } = await server.ssrLoadModule("/src/components/threads/thread-run-summary.tsx");
         const { QuerySummary } = await server.ssrLoadModule("/src/components/metrics/query-summary.tsx");
         const { ConsolePage } = await server.ssrLoadModule("/src/pages/console-page.tsx");
         const { openAiWeeklyQuotaFromSnapshot, accountSnapshotsWithMissingProviders, deepseekAccountFromSnapshot, ccgAccountFromSnapshot, quotaAccountFromSnapshot } = await server.ssrLoadModule("/src/lib/account-refresh-state.ts");
@@ -327,6 +364,8 @@ describe("WebUI metrics table presentation", () => {
           inputTokens: 100, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 5,
           totalTokens: 1080, subagentUsage: { inputTokens: 800, cachedInputTokens: 300, outputTokens: 160,
             cacheUsage: { inputTokens: 800, cachedInputTokens: 300, missingRequestCount: 0 } },
+          requestOutcomes: { completed: 1, interrupted: 0, failed: 0, incomplete: 0 },
+          interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
           tokensPerSecond: 20, compact: null, requestCount: 1, unsuccessfulRequestCount: 0 };
         const record = { ...common, status: "failed", requestModel: "model-test", responseModel: "model-other",
           traffic: null, userAgent: "fixture-client", operation: "response", httpStatus: 502,
@@ -462,6 +501,21 @@ describe("WebUI metrics table presentation", () => {
           turnsDuration: render(TurnTable, { turns: [{ ...common, turnId: "turn-1", durationMs: 71_000 }], threadId: "thread-1", query: {}, pagination }),
           turnsDurationZero: render(TurnTable, { turns: [{ ...common, turnId: "turn-1", durationMs: 0 }], threadId: "thread-1", query: {}, pagination }, "en"),
         };
+        const interrupted = { ...common, requestCount: 10, unsuccessfulRequestCount: 8,
+          requestOutcomes: { completed: 2, interrupted: 5, failed: 1, incomplete: 2 },
+          interruptionSummary: { followedByCompletion: 2, noObservedCompletion: 3, usageUnobserved: 1 } };
+        const interruptedRecord = { ...record, id: 91, source: "owned", status: "failed", errorType: "client_disconnected", errorCode: "client_disconnected", errorMessage: "request failed due to cancellation", inputTokens: null, outputTokens: null, totalTokens: null };
+        result.interruptedSummary = render(QuerySummary, { aggregate: interrupted, range: { name: "all" } });
+        result.interruptedSummaryEn = render(QuerySummary, { aggregate: interrupted, range: { name: "all" } }, "en");
+        result.interruptedGlobal = render(GlobalCards, { global: interrupted, threadCount: 1, turnCount: 1 });
+        result.interruptedHistory = render(ThreadRunSummary, { threadAggregate: { ...interrupted, turnCount: 1 } });
+        result.interruptedHistoryEn = render(ThreadRunSummary, { threadAggregate: { ...interrupted, turnCount: 1 } }, "en");
+        result.interruptedTurns = render(TurnTable, { turns: [{ ...interrupted, turnId: "turn-interrupted" }], threadId: "thread-1", query: {}, pagination });
+        result.interruptedTurnsUnknown = render(TurnTable, { turns: [{ ...interrupted, inputTokens: 0, outputTokens: 0, turnId: "turn-interrupted" }], threadId: "thread-1", query: {}, pagination });
+        result.interruptedRequests = render(RequestsTable, { ...requestProps, records: [interruptedRecord] });
+        result.interruptedRequestDetail = render(RequestDetail, { record: interruptedRecord });
+        result.interruptedRequestDetailEn = render(RequestDetail, { record: interruptedRecord }, "en");
+        result.interruptedErrorsSummary = render(ErrorsSummary, { errors: { requestCount: 10, unsuccessfulRequestCount: 8, requestOutcomes: interrupted.requestOutcomes, groups: [{ provider: "openai", model: "model-test", status: "failed", errorType: "client_disconnected", requestCount: 5, lastOccurredAtMs: 1000 }] } });
         globalThis.fixtureQuery = {};
         globalThis.fixturePagination = pagination;
         const mainThread = { ...common, threadId: "thread-1", agentPath: null, parentThreadId: null,
@@ -738,10 +792,12 @@ describe("WebUI metrics table presentation", () => {
         globalThis.fixtureCaptureTable = false;
         globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ ua: true, error: true }) : null };
         globalThis.fixtureQuery = { range: "30d", offset: 0, limit: 50 };
-        const errorsData = { errors: { requestCount: 100, unsuccessfulRequestCount: 60 }, total: 60,
+        const errorsData = { errors: { requestCount: 100, unsuccessfulRequestCount: 60, requestOutcomes: { completed: 40, interrupted: 0, failed: 60, incomplete: 0 } }, total: 60,
           nextOffset: 50, records: Array.from({ length: 50 }, (_, id) => ({ ...record, id, threadId: null })) };
         globalThis.fixtureApiState = { data: { queryKey: JSON.stringify(globalThis.fixtureQuery), data: errorsData }, loading: false, error: null };
         result.errors = render(ErrorsPage, {});
+        errorsData.records[0] = { ...interruptedRecord, threadId: null };
+        result.interruptedErrors = render(ErrorsPage, {});
         errorsData.records[0].requestServiceTier = "priority";
         errorsData.records[0].serviceTier = "default";
         result.fastErrors = render(ErrorsPage, {});
@@ -1150,7 +1206,7 @@ describe("WebUI metrics table presentation", () => {
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
     expect(headers(markup.turns!)).toEqual([
       "时间", "轮次", "提供商", "模型", "请求", "失败", "输入 Token", "缓存命中率", "输出 Token",
-      "本轮耗时", "子代理",
+      "客户端中断", "未完整观测", "本轮耗时", "子代理",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
   });

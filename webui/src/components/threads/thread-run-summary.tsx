@@ -6,11 +6,13 @@ import { cn } from "cn"
 import {
   formatCacheUsage,
   formatCount,
-  formatSuccessRate,
+  formatRequestOutcomes,
+  formatInterruptionSummary,
+  formatInterruptedUsage,
   formatTime,
   formatTokens,
 } from "@/lib/format"
-import type { Aggregate, Range } from "@/lib/types"
+import type { Aggregate, Range, RequestInterruptionSummary } from "@/lib/types"
 
 export function ThreadPeriodSummary({ aggregate, range, turnCount, loading }: {
   aggregate: Aggregate | null
@@ -27,7 +29,7 @@ export function ThreadPeriodSummary({ aggregate, range, turnCount, loading }: {
       </div>
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <StatCard title={t("metrics.turn")} value={formatCount(turnCount)} />
-        <StatCard title={t("metrics.requestCount")} value={formatCount(aggregate?.requestCount ?? 0)} description={t("metrics.success", { rate: formatSuccessRate(aggregate?.requestCount ?? 0, aggregate?.unsuccessfulRequestCount ?? 0) })} />
+        <StatCard title={t("metrics.requestCount")} value={formatCount(aggregate?.requestCount ?? 0)} description={formatRequestOutcomes(aggregate?.requestOutcomes ?? null, t)} />
         <StatCard title={t("metrics.input")} value={<InputTokenTooltip inputTokens={aggregate?.inputTokens ?? 0} cachedInputTokens={aggregate?.cachedInputTokens ?? null} cacheUsage={aggregate?.cacheUsage} />} description={t("metrics.cacheRate", { rate: formatCacheUsage(aggregate?.cacheUsage ?? null).rate })} />
         <StatCard title={t("metrics.output")} value={formatTokens(aggregate?.outputTokens ?? 0)} />
       </div>
@@ -38,7 +40,7 @@ export function ThreadPeriodSummary({ aggregate, range, turnCount, loading }: {
 export function ThreadRunSummary({
   threadAggregate,
 }: {
-  threadAggregate: (Omit<Aggregate, "cacheUsage"> & { turnCount: number }) | null
+  threadAggregate: (Omit<Aggregate, "cacheUsage"> & { turnCount: number; interruptionSummary: RequestInterruptionSummary }) | null
 }) {
   const { t } = useTranslation()
   if (threadAggregate === null) {
@@ -56,12 +58,16 @@ export function ThreadRunSummary({
         {[
           [t("metrics.turn"), formatCount(threadAggregate.turnCount)],
           [t("metrics.requestCount"), formatCount(threadAggregate.requestCount)],
-          [t("metrics.failures"), formatCount(threadAggregate.unsuccessfulRequestCount)],
-          [t("metrics.input"), formatTokens(threadAggregate.inputTokens)],
-          [t("metrics.output"), formatTokens(threadAggregate.outputTokens)],
-          [t("threads.totalTokens"), formatTokens(threadAggregate.inputTokens + threadAggregate.outputTokens)],
+          [t("status.completed"), formatCount(threadAggregate.requestOutcomes.completed)],
+          [t("metrics.interrupted"), formatCount(threadAggregate.requestOutcomes.interrupted)],
+          [t("metrics.failures"), formatCount(threadAggregate.requestOutcomes.failed)],
+          [t("metrics.incompleteObservation"), formatCount(threadAggregate.requestOutcomes.incomplete)],
+          [t("metrics.input"), formatInterruptedUsage(threadAggregate.inputTokens, threadAggregate.interruptionSummary)],
+          [t("metrics.output"), formatInterruptedUsage(threadAggregate.outputTokens, threadAggregate.interruptionSummary)],
+          [t("threads.totalTokens"), formatInterruptedUsage(threadAggregate.inputTokens + threadAggregate.outputTokens, threadAggregate.interruptionSummary)],
         ].map(([label, value]) => <div key={label} className="flex items-baseline gap-2"><dt className="text-muted-foreground">{label}</dt><dd className="tabular-nums">{value}</dd></div>)}
       </dl>
+      {threadAggregate.requestOutcomes.interrupted > 0 && <p className="text-muted-foreground">{formatInterruptionSummary(threadAggregate.interruptionSummary, t)}</p>}
     </div>
   )
 }

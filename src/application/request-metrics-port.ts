@@ -3,7 +3,21 @@ import type {
   AccountWeeklyLimitEstimate,
 } from "./account-port.js";
 
+export interface RequestOutcomeCounts {
+  completed: number;
+  interrupted: number;
+  failed: number;
+  incomplete: number;
+}
+
+export interface RequestInterruptionSummary {
+  followedByCompletion: number;
+  noObservedCompletion: number;
+  usageUnobserved: number;
+}
+
 export interface CompactRequestMetricsSummary {
+  requestOutcomes: RequestOutcomeCounts;
   model: string | null;
   hasMixedModels: boolean;
   requestCount: number;
@@ -14,6 +28,8 @@ export interface CompactRequestMetricsSummary {
 }
 
 export interface TurnRequestMetricsSummary {
+  requestOutcomes: RequestOutcomeCounts;
+  interruptionSummary: RequestInterruptionSummary;
   /** 上游轮次首 Token，不是本地单请求首 Token 延迟。 */
   upstreamTtftMs?: number | null;
   turnId: string;
@@ -27,6 +43,8 @@ export interface TurnRequestMetricsSummary {
 }
 
 export interface ThreadRequestMetricsAggregate {
+  requestOutcomes: RequestOutcomeCounts;
+  interruptionSummary: RequestInterruptionSummary;
   turnCount: number;
   requestCount: number;
   unsuccessfulRequestCount: number;
@@ -72,6 +90,7 @@ export interface RequestMetricsCommandQuery {
 }
 
 export interface RequestMetricsAggregate {
+  requestOutcomes: RequestOutcomeCounts;
   requestCount: number;
   unsuccessfulRequestCount: number;
   inputTokens: number;
@@ -109,6 +128,7 @@ export interface RequestMetricsErrorGroup {
 }
 
 export interface RequestMetricsErrorReport {
+  requestOutcomes: RequestOutcomeCounts;
   view: "errors";
   range: RequestMetricsTimeRange;
   startAtMs: number;

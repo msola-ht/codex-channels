@@ -1,4 +1,5 @@
-import type { CacheUsage } from "./types"
+import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord } from "./types"
+import type { Translate } from "./i18n/messages"
 
 /** 调用转储使用 clp，请求指标使用精确账户 Provider clp-<id>。 */
 export function isClinePassProvider(provider: string | null | undefined): boolean {
@@ -184,6 +185,33 @@ export function formatSuccessRate(requestCount: number, unsuccessful: number): s
 export function formatFailureRate(requestCount: number, unsuccessful: number): string {
   if (requestCount <= 0) return "—"
   return `${(unsuccessful / requestCount * 100).toFixed(1)}%`
+}
+
+export function formatRequestOutcomes(outcomes: RequestOutcomeCounts | null, t: Translate): string {
+  return t("metrics.requestOutcomes", {
+    completed: formatCount(outcomes?.completed ?? 0),
+    interrupted: formatCount(outcomes?.interrupted ?? 0),
+    failed: formatCount(outcomes?.failed ?? 0),
+    incomplete: formatCount(outcomes?.incomplete ?? 0),
+  })
+}
+
+export function isClientInterruption(record: Pick<RequestRecord, "status" | "errorType">): boolean {
+  return record.status !== "completed" && record.errorType === "client_disconnected"
+}
+
+export function formatInterruptionSummary(summary: RequestInterruptionSummary, t: Translate): string {
+  return t("metrics.interruptionEvidence", {
+    completed: formatCount(summary.followedByCompletion),
+    unobserved: formatCount(summary.noObservedCompletion),
+    usage: formatCount(summary.usageUnobserved),
+  })
+}
+
+/** Missing usage remains unknown; positive observed totals are a lower bound. */
+export function formatInterruptedUsage(value: number, summary: RequestInterruptionSummary): string {
+  if (summary.usageUnobserved === 0) return formatTokens(value)
+  return value > 0 ? `≥ ${formatTokens(value)}` : "—"
 }
 
 export function shortThreadId(threadId: string): string {

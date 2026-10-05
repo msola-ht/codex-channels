@@ -54,11 +54,25 @@ export interface ServiceLogsResponse {
   streams: { source: "journal" | "stdout" | "stderr"; lines: string[]; truncated: boolean; missing: boolean }[]
 }
 
+export interface RequestOutcomeCounts {
+  completed: number
+  interrupted: number
+  failed: number
+  incomplete: number
+}
+
+export interface RequestInterruptionSummary {
+  followedByCompletion: number
+  noObservedCompletion: number
+  usageUnobserved: number
+}
+
 export interface CompactSummary {
   model: string | null
   hasMixedModels: boolean
   requestCount: number
   unsuccessfulRequestCount: number
+  requestOutcomes: RequestOutcomeCounts
   inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
@@ -74,6 +88,7 @@ export interface Aggregate {
   cacheUsage: CacheUsage
   requestCount: number
   unsuccessfulRequestCount: number
+  requestOutcomes: RequestOutcomeCounts
   inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
@@ -105,6 +120,7 @@ export interface ErrorsReport {
   endAtMs: number
   requestCount: number
   unsuccessfulRequestCount: number
+  requestOutcomes: RequestOutcomeCounts
   groups: ErrorGroup[]
   totalGroupCount: number
 }
@@ -166,6 +182,7 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 )
 
 export interface ThreadListItem {
+  requestOutcomes: RequestOutcomeCounts
   totalTokens: number
   cachedInputTokens: number | null
   subagentUsage: { inputTokens: number; cachedInputTokens: number | null; outputTokens: number; cacheUsage: CacheUsage }
@@ -196,7 +213,7 @@ export interface ThreadsResponse extends MetricsPageSummary {
 }
 
 export interface SubagentListItem extends Pick<ThreadListItem,
-  "provider" | "model" | "turnCount" | "requestCount" | "inputTokens" | "outputTokens" | "cacheUsage"
+  "provider" | "model" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"
 > {
   threadId: string
   parentThreadId: string
@@ -235,6 +252,8 @@ export interface TurnSummary {
   turnId: string
   requestCount: number
   unsuccessfulRequestCount: number
+  requestOutcomes: RequestOutcomeCounts
+  interruptionSummary: RequestInterruptionSummary
   inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
@@ -259,7 +278,7 @@ export interface ThreadRunResponse {
   parentThreadId: string | null
   parentTurnId: string | null
   latestTurn: TurnSummary | null
-  threadAggregate: (Omit<Aggregate, "cacheUsage"> & { turnCount: number }) | null
+  threadAggregate: (Omit<Aggregate, "cacheUsage"> & { turnCount: number; interruptionSummary: RequestInterruptionSummary }) | null
 }
 
 export interface ThreadTurnsResponse extends MetricsPageSummary {

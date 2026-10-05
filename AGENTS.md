@@ -200,6 +200,17 @@ Surface -> Application/Core <- Codex Client
   Do not preauthorize Git staging, commits, pushes, dependency installation, releases, service management, arbitrary shell commands or destructive commands.
 - Rules belong to the on-disk project and must not be stored in or depend on Workspace Registry.
 
+## Agent Collaboration
+
+- Before delegating, specify the goal, file ownership, shared interfaces, constraints and expected verification together.
+  Establish shared interfaces before parallel implementation; sequence tightly coupled changes instead of repeatedly correcting active agents.
+- Send messages to running agents only for blockers, material scope or interface changes, ownership conflicts, or urgent correctness issues.
+  Combine related review findings into one actionable message. Do not send acknowledgements, repeated status requests or routine progress fragments.
+- Agents should report completion once with findings, changed files, verification and remaining issues. Report blockers promptly;
+  do not withhold information needed for another task to proceed merely to reduce messages.
+- Use passive status inspection or wait for completion when no intervention is needed. Keep user-facing progress updates separate from agent messages.
+  Do not change Codex mailbox scheduling or enable experimental preemption settings as an implicit optimization.
+
 ## Verification
 
 - Match verification to risk and stage. Do not repeat checks for every save or small edit. After a verifiable batch, run the smallest directly relevant test set.

@@ -26,6 +26,7 @@ import {
 import { useTranslation } from "@/hooks/use-translation"
 import {
   formatErrorMessage,
+  isClientInterruption,
   formatElapsedDuration,
   formatErrorType,
   formatRequestTime,
@@ -180,7 +181,8 @@ export function RequestsTable({
         if (record.source === "relay") return <div className="flex flex-col gap-1"><RelayRequestStatus key={record.relayRequestId ?? record.id} record={record} />
           {record.deliveryStatus == null ? null : <span className="text-xs text-muted-foreground">{t("requestDetail.deliverySummary", { value: record.deliveryStatus === "finished" ? t("filters.deliveryFinished") : record.deliveryStatus === "disconnected" ? t("filters.deliveryDisconnected") : t("filters.deliveryFailed") })}</span>}
         </div>
-        const badge = <StatusBadge status={record.status} />
+        const badge = isClientInterruption(record) ? <Badge variant="secondary">{t("metrics.interrupted")}</Badge> : <StatusBadge status={record.status} />
+        if (isClientInterruption(record)) return <TableHint hint={t("metrics.clientInterruption")}>{badge}</TableHint>
         if (!record.errorMessage && !record.errorType && !record.errorCode) return badge
         const details = [
           formatErrorType(record.errorType ?? record.errorCode ?? null, language),
@@ -278,6 +280,7 @@ export function RequestsTable({
         <SortableHeader column={column}>{t("requests.errorColumn")}</SortableHeader>
       ),
       cell: ({ row }) => {
+        if (isClientInterruption(row.original)) return <TruncatedText text={t("metrics.clientInterruption")} className="max-w-40" />
         const label = formatErrorType(
           row.original.errorType ?? row.original.errorCode ?? null,
           language,
