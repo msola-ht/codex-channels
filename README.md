@@ -109,12 +109,12 @@ DS、OCG、CCG、CLP 支持多账户，在 `codexc setup → 模型与提供商`
 git clone https://github.com/msola-ht/codex-channels.git
 cd codex-channels
 npm ci
-npm run check
-npm run lint
-npm run docs:check
-npm run i18n:check
-npm test
+# 按改动选择相关测试；此处以会话路由为例
+npm test -- tests/session-router.test.ts
 ```
+
+本地提交自动执行按改动范围选择的检查；PR CI 执行完整回归。需要在本地复现完整 CI 回归时运行
+`npm run verify:ci`。验证入口与专项检查见[测试说明](tests/README.md)和[CI 流程](.github/workflows/README.md)。
 
 协议升级、上游参考仓库和真实 App Server 合同必须遵循[`上游源码维护规则`](docs/upstream-sources.md)与[`Codex CLI 升级流程`](docs/codex-cli-upgrade.md)。
 

@@ -805,7 +805,7 @@ function checkOpenAiProxy() {
       "OpenAI 代理",
       false,
       errorMessage(error),
-      "修正 config.toml 的 [network] 代理 URL 或 NO_PROXY 后重新运行 codexc doctor",
+      "修正 Codex .env 或标准代理环境变量中的代理 URL、NO_PROXY 后重新运行 codexc doctor",
     );
   }
 }

@@ -134,28 +134,43 @@ Codex 应按以下顺序处理，操作者不需要人工阅读协议文件：
 
 ## 3. 完成验证
 
-Codex 完成适配后至少运行：
+Codex 完成适配后，使用统一升级验证入口，报告和逐阶段日志写入独立临时目录：
 
 ```bash
-npm run protocol:check
-npm run check
-npm run lint
+upgrade_report_dir="$(mktemp -d /tmp/codexc-upgrade-validation.XXXXXX)"
+npm run codex:upgrade:validate -- "$upgrade_report_dir"
+```
+
+该入口执行协议、类型与版本、Lint、Gateway/WebUI 构建、完整测试、当前全部隔离真实 App Server
+合同、tarball 安装和干净源码全局安装验证。真实合同包含 Desktop 桥、自定义 Responses/Chat
+Provider 和重置券，范围与 [CI 隔离合同清单](../tests/README.md#真实-app-server-合同)一致。
+完整测试、真实合同与 tarball 检查复用同一份当前工作树构建；干净源码安装独立验证。
+单项失败会保留日志并继续其他可执行阶段，最后返回失败；前置失败导致的跳过不算通过。
+
+统一升级验证会跳过稳定版文档检查，也不等同于 `verify:commit`。适配完成后补齐以下检查，
+无需再手动重复类型检查、完整测试、构建或打包：
+
+```bash
 npm run docs:check
-npm test
-TMPDIR=/tmp RUN_CODEX_CONTRACT=1 npm test -- --run \
-  tests/real-app-server.test.ts \
-  tests/real-app-server-isolated-state.test.ts \
-  tests/real-app-server-queue.test.ts \
-  tests/real-app-server-supervised-provider.test.ts \
-  tests/real-app-server-supervised-thread-state.test.ts \
-  tests/real-app-server-supervised-tools.test.ts
-npm run verify:commit
+npm --prefix webui run lint
+npm run i18n:check
+bash -n install.sh scripts/launchd-control.sh scripts/systemd-control.sh
+```
+
+macOS 还需检查当前平台的服务模板：
+
+```bash
+plutil -lint \
+  launchd/com.hegenai.codex-app-server.plist.template \
+  launchd/com.hegenai.codex-gateway.plist.template \
+  launchd/com.hegenai.codex-webui.plist.template
 ```
 
 非 Windows 升级验证使用短临时根 `/tmp`，避免 macOS 默认临时目录使真实合同的 Unix Socket
 超过 `SUN_LEN`；各合同仍创建独立随机子目录。
 
-真实合同测试需要目标版本 Codex CLI，但不调用模型。全部检查通过并经差异审查后，才可以按用户
+真实合同测试需要目标版本 Codex CLI，但不调用模型。获得提交授权后，正常提交仍由 pre-commit
+hook 执行按范围选择的 `verify:commit`，PR CI 执行完整 `verify:ci`；升级所需完整合同和安装验证不能由本地快速检查替代。全部检查通过并经差异审查后，才可以按用户
 明确指示提交、推送、重新全局安装并重建服务。
 
 升级 PR 转为 Ready 或合并前，把自动提案的通用描述更新为实际审查结果，至少写明：
@@ -201,7 +216,7 @@ npm 发布工作流、Trusted Publishing 或 npm dist-tag 操作。npm 仍用于
 日常交付通过官方 `main` 源码与 `codexc update` 完成，无需为每次合并创建 Tag 或 Release。
 只有用户明确要求 GitHub 源码发行时才执行以下步骤：
 
-1. 确认 `main` 与远端同步、工作区干净，待发行提交已通过 PR CI 和完整 `verify:commit`。
+1. 确认 `main` 与远端同步、工作区干净，待发行提交已通过 PR CI 的完整 `verify:ci` 和本节要求的发布验证。
 2. 校验 `package.json`、锁文件、`src/version.json`、生成协议与 CI 的版本基线一致；保持 README
    的当前源码基线准确。受控的 `-fixN` / `-rc.N` 后缀继续对应同一正式 Codex CLI 基础版本。
 3. 运行 `npm run test:package`，验证本地 tarball 安装与干净源码全局安装。不得执行 npm 发布。

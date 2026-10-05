@@ -190,7 +190,7 @@ Relay 与 Codex 共用全局 debug 转储开关与 production/debug 模式。V2 
 关闭、迟到材料、配置备份失败、指标单次结算、转储关联、v20/v21/v22 升级与回滚。
 执行入口包括 `tests/model-relay-server.test.ts`、`tests/model-relay-runtime.test.ts`、
 `tests/direct-chat-request.test.ts`、`tests/direct-responses-request.test.ts`、
-`tests/request-metrics-relay-upgrade.test.ts`；测试范围以对应文件为准，完整提交门禁走 `verify:commit`。
+`tests/request-metrics-relay-upgrade.test.ts`；测试范围以对应文件为准，本地提交走按范围选择的 `verify:commit`，PR CI 通过 `verify:ci` 执行完整回归。
 
 2026-09-29 部署后只读核查已确认 DS Responses SSE/JSON、CLP Chat SSE/JSON 的既有成功调用，
 实际指标库为 v23，提供商、状态、用量与转储可关联，Thread/Turn 为空。此证据限于当时部署与样本，

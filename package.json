@@ -221,6 +221,7 @@
     "install:global": "node scripts/install-global-source.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "verify:commit": "node scripts/verify-commit.mjs",
+    "verify:ci": "node scripts/verify-commit.mjs --ci",
     "i18n:check": "node scripts/webui-i18n.mjs --check",
     "i18n:report": "node scripts/webui-i18n.mjs",
     "docs:check": "node scripts/check-docs.mjs",

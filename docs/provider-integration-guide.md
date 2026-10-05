@@ -144,7 +144,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 ## 5. 验收流程
 
-开发时先运行受影响的定向检查；普通提交由 pre-commit 执行完整 `verify:commit`，不提前重复。下列源码安装、服务重启及线上检查只用于已获授权的部署验收：
+开发时先运行受影响的定向检查；普通提交由 pre-commit 执行按范围选择的 `verify:commit`，PR CI 使用 `verify:ci` 完整回归，不提前重复。下列源码安装、服务重启及线上检查只用于已获授权的部署验收：
 
 ```bash
 npm run install:global

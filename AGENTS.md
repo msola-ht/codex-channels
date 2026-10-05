@@ -9,26 +9,28 @@
 - Do not reread unchanged material already in context. After compaction, a model switch or an interruption, restore missing applicable rules.
   When the workspace, rules or task scope changes, read the newly relevant parts. Editing, committing, continuing across turns or elapsed time alone does not trigger rereading.
 - This file defines stable development boundaries. User-facing behavior is defined by the guides and topic documents linked from the root README; module responsibilities are defined by module READMEs.
+- Apply topic-specific rules when the task changes or investigates that boundary, not merely because a file mentions it.
+  Load linked material as needed to resolve the affected contract; links are not a mandatory reading checklist.
 - Support only interfaces explicitly defined by current documentation, configuration examples, protocol baselines and storage schemas. Reject unsupported inputs explicitly; do not add implicit aliases, migrations or fallbacks.
 
 ## Consulting Official Sources
 
-- Before adding or changing WeChat or Feishu platform interactions, locate the relevant sources through `docs/upstream-sources.md`.
+- Before changing WeChat or Feishu API calls, event interpretation, authentication or platform lifecycle behavior, locate the relevant sources through `docs/upstream-sources.md`.
   If the referenced local `upstream/` repository exists and its HEAD matches the locked baseline, consult its source and tests first;
   do not search online for the same version first. Online queries are allowed only when local sources are missing, the baseline differs,
   required information is absent from the locked source, dynamic platform documentation needs checking, or the user explicitly requests an update. Explain the reason first.
 - `upstream/` contains read-only reference repositories ignored by the main project. Do not modify, commit or push their contents,
   silently `fetch` or switch versions, or substitute remote `main` for the locked baseline. Before upgrading an upstream baseline,
   review differences under `docs/upstream-sources.md`, then update the relevant source index, implementation and tests together.
-- Before adding, changing or removing Codex App Server RPC methods, business dependencies on `codex-protocol` types, or behavior involving
-  Transport, initialization, Thread, Turn, Item, Notification, Server Request, approvals, model settings, Fast, Goal, Review, account usage,
-  Skill, MCP, Plugin or the Codex CLI version, consult the relevant `docs/index.md` entries and check local generated types, module public interfaces and project tests.
-  When adding or changing protocol semantics, also check official source and tests at the locked version; official documentation supplements the contract.
-  Read only the affected methods, fields and call chains. Copy edits, formatting and cleanup that do not change protocol behavior do not trigger upstream reading.
-  Do not implement protocol fields or behavior from memory.
+- Before changing RPC methods, protocol fields, request encoding, response interpretation, event reduction or upstream lifecycle semantics,
+  consult the affected `docs/index.md` entries, generated types, module interfaces and project tests, then check official source and tests at the locked version.
+  Official documentation supplements that contract. Read only the affected methods, fields and call chains; do not implement protocol behavior from memory.
+  Adding a business dependency on a `codex-protocol` type also requires checking its controlled export and supported local purpose.
+  Presentation, metrics aggregation and internal refactoring over unchanged local interfaces normally need only the relevant local contracts and tests.
+  If those contracts cannot establish the required semantics, investigate the specific upstream uncertainty before proceeding.
 - If official documentation, locked source and local implementation are unclear or appear inconsistent, perform a targeted investigation and identify version differences first.
   Do not substitute official `main` for the locked version or infer the protocol through repeated trial edits.
-- When a protocol upgrade or the above behavior, official source locations or local implementation entry points change, update the affected versions,
+- When the protocol baseline, supported capabilities, official source locations or indexed local implementation entry points change, update the affected versions,
   counts, pinned links, support matrix entries, implementation mappings or verification commands in `docs/index.md`.
   Before adding a protocol capability, record its official method, local entry point and verification in the matrix.
   Generated types do not establish local support; they remain the final source of truth for protocol fields of the locked CLI.
@@ -99,13 +101,16 @@ Surface -> Application/Core <- Codex Client
   Before archiving, check the Workspace, Provider and protection state of queryable descendants. Do not claim this enumerates all official internal agents.
 - Before automatic continuation, check Thread source, Workspace, running state and existing bindings.
 - A Thread cannot be bound to multiple external Conversations simultaneously. Do not unconditionally append a new Turn to an active Thread.
-- When switching, exiting, creating, archiving or unbinding, cancel old subscriptions through the protocol; deleting local mappings alone is insufficient.
+- When a binding is released and no longer retained, cancel its subscription through the protocol; deleting local mappings alone is insufficient.
+  Switching or creating a foreground Thread may preserve the previous running Thread as an authorized background binding.
+  Keep that subscription until authoritative state permits background cleanup or authorization is revoked.
 - `thread/resume`, `thread/read`, request responses and state notifications are authoritative. Local caches serve routing and presentation only.
 - Do not infer state transitions that App Server has not explicitly returned from a single request invocation.
 
 ## State and Persistence
 
-- SQLite StateStore stores only minimal bindings for Conversation identity, authorized Actor, Workspace, Thread and Session.
+- SQLite StateStore stores minimal Conversation, Actor, Workspace, Thread and Session bindings, plus the necessary session preferences
+  and binding-recovery state explicitly defined by the current schema. Its storage boundary is documented in `src/storage/README.md`.
 - A Conversation is uniquely identified by `surface + accountId + conversationId`.
 - StateStore must not persist message bodies, Turn/Item history, Diff, Plan, approval content or copies of Codex session files.
 - Runtime accepts only the current schema and performs no implicit migration; unsupported versions must fail closed.
@@ -126,8 +131,9 @@ Surface -> Application/Core <- Codex Client
   Do not support old configuration formats, rewrite configuration or output sensitive content.
 - When adding project dependencies, explain necessity, impact and removal, and reuse applicable user authorization; ask first if not authorized.
   Temporary tool dependencies used only for the current task, without changing project configuration or user data, follow environment permissions rather than data-upgrade approval procedures.
-- Before changing persistence formats, provide a concrete plan for data handling, backup, failure recovery and rollback, and obtain applicable authorization.
-  Do not reconfirm an approved plan unless its scope or risk changes materially.
+- Before changing user-data persistence formats, compatibility or recovery behavior, provide a concrete plan for data handling, backup, failure recovery and rollback.
+  Obtain authorization when existing authorization does not cover that plan; do not reconfirm unless its scope or risk changes materially.
+  Read-only queries, disposable test fixtures and internal changes that preserve the on-disk contract do not trigger this approval requirement.
 
 ## Surfaces, Approvals and Concurrency
 
@@ -185,71 +191,55 @@ Surface -> Application/Core <- Codex Client
 
 ## Commands and Permission Escalation
 
-- Follow the current environment's permission policy. Reuse applicable authorization rather than adding confirmation for every Git, npm or verification command.
-  Request escalation directly when outside-sandbox permissions are known to be required. Handle sandbox restrictions as the tool requires; never bypass permission controls.
-- Escalation requests must explain the command's purpose and remain within this repository and task. They must not expand permission to modify, commit or write remotely.
-- Escalation grants execution permission, not user authorization. Commits, pushes, dependency changes and other external writes still follow their corresponding rules here.
+- Follow the global permission rules. Escalation requests must identify the task-related operation and must not broaden its authorized scope;
+  permission to execute a command does not itself authorize commits, remote writes, deployment or dependency changes.
 - Public `codexc` commands and subcommands must support both `-h` and `--help`. Keep only documented canonical names; do not add implicit aliases.
   `gateway`, `service-app-server` and `service-model-relay` are internal service-template entry points, excluded from public help.
-- Manage background processes through `codexc service`. Start, stop, restart, status and logs use the targets `gateway`, `app-server`, `webui`, `relay` and `all`.
-  Public service actions reject the old `model-relay` target spelling.
-  Start, stop and status default to `all`; restart and logs default to `gateway`.
-  `all` starts Relay only when installed and enabled, and stops installed Relay before Gateway. WebUI remains separately managed.
+- Manage background processes through `codexc service`. For service operations or changes, consult `docs/user-guide.md` for targets, defaults and lifecycle ordering.
+  Preserve Gateway/App Server independence and the separately managed WebUI; do not infer what `all` includes from its name.
 - Project Codex command presets live in `.codex/rules/default.rules`. They may preauthorize only read-only Git inspections, existing repository verification scripts,
   and the explicitly listed `codexc channel send-image` operation, which sends a local image that has passed shared validation to a bound channel conversation.
   Do not preauthorize Git staging, commits, pushes, dependency installation, releases, service management, arbitrary shell commands or destructive commands.
 - Rules belong to the on-disk project and must not be stored in or depend on Workspace Registry.
 
-## Agent Collaboration
-
-- Before delegating, specify the goal, file ownership, shared interfaces, constraints and expected verification together.
-  Establish shared interfaces before parallel implementation; sequence tightly coupled changes instead of repeatedly correcting active agents.
-- Send messages to running agents only for blockers, material scope or interface changes, ownership conflicts, or urgent correctness issues.
-  Combine related review findings into one actionable message. Do not send acknowledgements, repeated status requests or routine progress fragments.
-- Agents should report completion once with findings, changed files, verification and remaining issues. Report blockers promptly;
-  do not withhold information needed for another task to proceed merely to reduce messages.
-- Use passive status inspection or wait for completion when no intervention is needed. Keep user-facing progress updates separate from agent messages.
-  Do not change Codex mailbox scheduling or enable experimental preemption settings as an implicit optimization.
-
 ## Verification
 
-- Match verification to risk and stage. Do not repeat checks for every save or small edit. After a verifiable batch, run the smallest directly relevant test set.
-  Do not proactively repeat successful development checks when their inputs and environment are unchanged. Commit and CI gates still run through their own entry points.
-- During development, choose targeted tests, `check`, `lint` or `docs:check` according to impact; do not default to full tests, builds, packaging or installation smoke tests.
+- During development, choose targeted tests, `check`, `lint` or `docs:check` according to impact, reusing valid verification evidence;
+  do not default to full tests, builds, packaging or installation smoke tests. Commit and CI gates still run through their own entry points.
   Add specialized checks when their corresponding boundaries change, such as protocol, Transport, service templates or package installation.
+- Select checks for changed behavior, relevant failure paths and integration risks. Repeat a successful check only when its inputs or environment changed,
+  or a concrete unresolved concern requires it; entering review or delivery alone does not require another validation round.
 - Build requirements depend on test inputs. Tests loading source directly may run alone; CLI, installation or integration tests reading `dist/` must use current build output.
   `npm test -- <test-file>` already builds; do not add another build.
 - Authorized development includes relevant local verification using disposable fixtures and fixing failures caused by the requested change, without approval at every step.
   For integration operations touching the user's current App Server, account, specific Thread or service state, check actual effects and existing authorization.
   Do not extend isolated-test authorization to live environments.
 - New behavior, security boundaries, failure paths and regression fixes need effective test coverage and relevant execution. Add or adjust tests only when coverage is insufficient.
-  Do not mechanically add duplicate tests for moves, renames, deduplication or internal refactors already covered by behavioral tests; add one shared contract suite when needed.
-- Ordinary commits run the full `verify:commit` once through `.githooks/pre-commit`; do not run it manually beforehand.
-  `npm ci`, `npm install` or `npm run hooks:install` must install the hook. If missing or unusable, repair it with `npm run hooks:install`, then let the normal commit run validation.
+  Each added test must close a specific coverage gap; prefer extending an existing behavioral suite over adding parallel suites or implementation-detail assertions.
+  Do not mechanically add duplicate tests for moves, renames, deduplication or internal refactors already covered by behavioral tests.
+  Consolidate redundant coverage when it is directly affected by the task; do not delete tests merely to reduce their count.
+- Ordinary commits run scoped `verify:commit` once through `.githooks/pre-commit`; do not run it manually beforehand.
+  In a local source checkout, `npm ci` and `npm install` install the hook unless lifecycle scripts are explicitly disabled.
+  Honor `--ignore-scripts`, including in CI. Before a normal local commit, repair a missing or unusable hook with `npm run hooks:install`.
   Manual runs are allowed when changing CI or gates, explicitly requested, or needed to diagnose a failure independently.
   Never bypass gates with `--no-verify` or reduced checks.
-- `npm run verify:commit` is the shared full-check entry point for local commits and GitHub CI. In order, it covers staged diff formatting, types and versions,
-  production and test Lint, WebUI build and Lint, translation dictionary keys and placeholders, documentation links and indexes, the full test suite, shell syntax,
-  npm tarball installation smoke tests and service-template checks executable on the current platform.
-  Type checking may reuse TypeScript's dependency-aware incremental cache; version and boundary checks still run every time.
-  Only after the full type check succeeds may this gate build fresh Gateway artifacts with `--noCheck` for the full tests and tarball smoke test.
-  Standalone `npm test` and `npm run build` retain full type checking.
-  Clean-source global installation is excluded from routine commit and PR gates, but remains required in full `npm run test:package`, explicitly authorized source releases and Codex CLI upgrade validation.
-- When changing check scripts, Git hooks or CI, keep `verify:commit`, `.githooks/pre-commit`, GitHub Actions and affected script indexes and workflow documentation consistent.
+- Local commits run necessary static checks and affected tests; PR CI runs full regression through `npm run verify:ci`.
+  Test selection must account for runtime-loaded code and compiled artifacts, not only static imports; uncertain impact requires a conservative fallback.
+  Installation smoke checks run for installation, packaging or npm lifecycle changes, and for releases and CLI upgrades, rather than every ordinary commit.
+  CI runs real App Server contracts for relevant protocol, lifecycle or contract changes; manual CI dispatch retains full specialized verification.
+  Only after a full type check succeeds may verification emit fresh artifacts with `--noCheck`; standalone `npm test` and `npm run build` retain full type checking.
+  Clean-source global installation remains required in full `npm run test:package`, explicitly authorized source releases and Codex CLI upgrade validation.
+- When changing check scripts, Git hooks or CI, keep `verify:commit`, `verify:ci`, `.githooks/pre-commit`, GitHub Actions and affected script indexes and workflow documentation consistent.
   Update the root README only when user-facing development entry points change.
 - When changing installation, packaging or npm lifecycle behavior, verify the affected path with the Node.js version pinned in CI and its bundled npm, not only the local default version.
   Prepared-artifact checks must not implicitly rebuild source artifacts or reinstall source dependencies; lifecycle entry points must honor explicit script-disabling settings even when npm invokes them.
-- Unix socket test fixtures must fit the strictest supported platform path limit, including generated filenames and nested directories.
-  On macOS, follow the existing short `/tmp` fixture convention instead of the long system temporary directory; keep directories private and clean them up.
-  Port-occupation fixtures must bind the same address family, address and port as the listener under test; do not assume wildcard and loopback bindings conflict on every platform.
-  Do not change production socket paths or relax ownership/permission checks merely to make a fixture pass.
+- When changing tests, use the relevant coverage and fixture guidance in [`tests/README.md`](tests/README.md).
+  Keep fixtures isolated; do not change production behavior or weaken security boundaries merely to make a fixture pass.
 - For failed CI, inspect each failed job and its first actionable error; compare runtime versions, platform, paths and lifecycle behavior before editing.
   Reproduce with isolated fixtures where possible and add focused regression coverage. Do not replace diagnosis with blind reruns, skipped tests or weaker checks.
   Local verification and remote CI are separate evidence: report the exact commit and remaining failed/pending jobs, and never describe a PR as fully verified until its current required checks pass.
-- Protocol, Transport or shared App Server behavior changes require real App Server smoke verification covering the change. Extend existing contracts if insufficient; mocks alone are not enough.
-- Core protocol tests should cover initialization, message routing, request cleanup, primary Thread/Turn paths and subscription cancellation.
-- Session tests should cover bidirectional discovery and continuation, exclusive binding, active state and recovery after Gateway restart.
-- Surface tests should cover authorization, approval expiry and invalidation, output ordering, platform timeout isolation and sensitive-data sanitization.
+- Changes to protocol semantics, Transport behavior or shared App Server lifecycle/state handling require real App Server smoke verification covering the change.
+  Extend existing contracts if insufficient; mocks alone are not enough. Presentation or internal changes over unchanged contracts do not trigger this requirement by association.
 - If required verification cannot run, report the missing checks, reasons and executable follow-up checks in the delivery.
 
 ## Documentation Placement
@@ -273,13 +263,10 @@ Determine the document's responsibility before adding or changing content. Do no
 ## Git and Delivery
 
 - Preserve Git history. Do not delete or reinitialize the repository to avoid review.
-- Do not overwrite, revert or mix in the user's existing uncommitted changes. Stop and explain if they cannot be safely avoided.
-- Before committing, review relevant root README sections, affected directory READMEs and documentation indexes against the staged diff.
-  Do not traverse unrelated modules or reread unchanged documents already read for the task.
-- Staged documentation changes must follow the responsibilities above. Review only affected content, not unrelated topics again.
+- Before committing, review the staged scope and affected README sections, module documentation and indexes against the diff;
+  reuse completed review evidence and follow the documentation responsibilities above without traversing unrelated topics.
 - Fix index gaps, orphaned links, old names and inconsistent behavior descriptions introduced or directly affected by this change.
   Record unrelated existing issues separately without automatically broadening cleanup. Report existing gate failures honestly and resolve them or obtain an appropriate disposition; never claim a failed check passed.
-- Review staged scope and content before committing. The pre-commit `verify:commit` handles diff formatting, documentation indexes and full verification.
 - Do not commit, push, rewrite history or perform other remote writes unless explicitly requested by the user.
 - Before creating a PR or pushing updates to an existing PR, refresh the target branch (normally `main`) and review the complete branch diff from its merge base, not only the latest commit.
   Trace affected call chains across module boundaries, including authorization, concurrency, failure recovery, public behavior, tests and documentation.
@@ -292,16 +279,11 @@ Determine the document's responsibility before adding or changing content. Do no
 - On delivery, explain affected modules and behavior, verification performed, public interfaces or security boundaries involved and remaining risks.
 - Do not repeat work rules in the delivery. Unless requested, present only results, evidence and limitations.
 
-## Completion and Persistence
+## Completion and Review
 
-- Continue authorized development through implementation, necessary verification, relevant documentation and identified regressions within scope; do not stop automatically after the first implementation to seek confirmation.
-  Decide routine implementation choices, test boundaries and reversible local fixes independently. Ask only when missing information materially affects the result,
-  scope must expand or an action exceeds existing authorization. Do not reconfirm permissions or preferences already given.
-- After repeated failures, reconsider evidence, hypotheses and methods rather than stopping at a fixed attempt count.
-  Report concrete blocked dependencies while completing independent work. Do not claim full verification when required checks remain missing.
-- Completion means the requested scope is implemented, applicable checks pass, related interfaces and documentation agree, and remaining limitations are stated.
-  Do not expand indefinitely for optional improvements. Commits, pushes, releases and deployment are completion conditions only when explicitly requested.
-- Read-only review is complete when it supplies issue locations, impacts, evidence and proposed adjustments. When the user requests confirmation before edits, deliver review findings first.
-- When changing Skills, preserve project-specific constraints, trigger them by concrete tasks and load references as needed.
-  Do not discard rules wholesale because of a model upgrade, or substitute fixed reading routines, repeated confirmations or per-file checks for judgment about results.
-  Specialized workflows follow applicable project rules and current user authorization.
+- Apply the global scope and completion rules. Project delivery must leave affected interfaces and documentation consistent and identify missing required checks.
+  Commits, pushes, releases and deployment are completion conditions only when explicitly requested; optional improvements do not extend the task indefinitely.
+  Repeated failures call for revisiting evidence and methods, not blind retries or an arbitrary stopping count.
+- Read-only review reports issue locations, impacts, evidence and proposed adjustments. Honor requests to review before editing.
+- Skill changes must preserve project-specific constraints and task-based loading. Do not discard rules because of a model upgrade
+  or replace judgment with fixed reading routines, repeated confirmations or per-file checks.
