@@ -79,13 +79,6 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     throw new ApiError(404, "traffic_session_not_found", "关联调用记录不可用：批次尚未写入、写入失败或已被清理；不会匹配其他请求");
   }
   if (labels.length === 0) {
-    if (catalog.legacyFiles.length > 0) {
-      throw new ApiError(
-        503,
-        "traffic_legacy_format",
-        "现有调用记录是旧版逐帧格式；请重启 App Server 生成 V2 调用记录，旧文件不会自动迁移",
-      );
-    }
     throw new ApiError(
       503,
       "traffic_unavailable",

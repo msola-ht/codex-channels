@@ -44,12 +44,12 @@ afterEach(async () => {
 });
 
 describe("traffic command options", () => {
-  it("exposes upgrade help through both public help flags without loading user configuration", () => {
+  it("rejects removed upgrade commands through both help flags", () => {
     for (const flag of ["-h", "--help"]) {
       const result = spawnSync(process.execPath, [resolve("bin/codexc.mjs"), "traffic", "upgrade", flag], {
         encoding: "utf8", env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: "/nonexistent/fixture-config.toml" },
       });
-      expect(result.status).toBe(0); expect(result.stdout).toContain("--enabled true|false --mode production|debug");
+      expect(result.status).toBe(1); expect(result.stderr).not.toContain("--enabled true|false --mode production|debug");
     }
   });
 
@@ -98,7 +98,7 @@ describe("traffic command options", () => {
       expect(TRAFFIC_USAGE).toContain(option);
     }
     expect(TRAFFIC_USAGE).toContain("V2 session");
-    expect(TRAFFIC_USAGE).toContain("旧版逐帧");
+    expect(TRAFFIC_USAGE).toContain("只接受一个 V2 session 目录");
   });
 
   it("parses cleanup preview and confirmation options", () => {
@@ -127,9 +127,10 @@ describe("traffic cleanup", () => {
       output: { log: (line) => { lines.push(line); } },
     });
 
-    expect(preview).toMatchObject({ v2Sessions: 1, legacyFiles: 1, labels: 1 });
+    expect(preview).toMatchObject({ v2Sessions: 1, labels: 1 });
     expect(lines.join("\n")).toContain("未删除");
-    expect(trafficCleanupPreview(directory).targets).toEqual([session, legacy]);
+    expect(trafficCleanupPreview(directory).targets).toEqual([session]);
+    expect(readFileSync(legacy, "utf8")).toBe("{}\n");
     expect(readFileSync(unknown, "utf8")).toBe("keep\n");
   });
 
@@ -157,7 +158,7 @@ describe("traffic cleanup", () => {
     });
 
     expect(checked).toBe(1);
-    expect(result).toMatchObject({ v2Sessions: 1, legacyFiles: 1 });
+    expect(result).toMatchObject({ v2Sessions: 1 });
     expect(trafficCleanupPreview(directory).targets).toEqual([]);
     expect(readFileSync(unknown, "utf8")).toBe("keep\n");
   });
@@ -290,7 +291,7 @@ describe("traffic command V2 rendering", () => {
     writeFileSync(join(legacyDirectory, "openai-2026-09-18T00-00-00-000Z-1.jsonl"), "{}\n");
     const legacy = runTraffic(["--dir", legacyDirectory]);
     expect(legacy.status).toBe(1);
-    expect(legacy.stderr).toContain("旧版逐帧 JSONL");
+    expect(legacy.stderr).toContain("没有找到转储 session");
 
     const directory = temporaryDirectory();
     writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [interaction(1, "hello")]);

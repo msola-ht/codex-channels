@@ -10,7 +10,6 @@ DS 不另造 `deepseek-v4.1-flash` 模型 ID。
 也可在 WebUI 账户设置中操作，或使用以下命令：
 
 ```bash
-codexc deepseek legacy remove              # 确认后移除旧单账户，再重新添加
 codexc deepseek account add work           # 新增账户，交互输入模式和 Key
 codexc deepseek account reconfigure work   # 重新配置已有账户
 codexc deepseek account list --json        # 列出账户与默认标记，不包含 Key
@@ -21,12 +20,7 @@ codexc service restart all                 # 应用配置变化
 
 账户 ID 必须由用户填写，使用 1–32 位小写字母、数字、`-` 或 `_`，不自动创建 `main`。
 首个账户标记为默认，后续可手动修改。不同 ID 不能生成相同的凭据环境变量名。
-旧单账户不再迁移。已有配置保持原样，需先运行 `codexc deepseek legacy remove`，
-确认移除旧 Key、Profile 和管理标记后，再使用明确账户 ID 重新添加。
-固定模式只恢复该 Provider 管理的主配置字段；安装前备份和历史统计保留。
-Remote TUI 正在使用旧实例时，需先退出。
-旧配置与新账户并存时，移除旧账户保留现有注册表、账户文件和共享模型目录。
-必要恢复备份缺失时明确报错，写入失败会回滚本次文件变更。
+仅支持当前多账户格式。删除固定模式账户时只恢复该 Provider 管理的主配置字段，保留安装前备份与历史统计；Remote TUI 正在使用该实例时须先退出。写入失败会回滚本次文件变更。
 
 更新器不处理旧 DS 配置，不移动文件或改写账户身份。
 旧 Thread 的 `deepseek` 身份不改写，也不保证继续恢复；历史指标仍在 `deepseek` 名下查询，

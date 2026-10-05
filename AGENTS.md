@@ -114,7 +114,8 @@ Surface -> Application/Core <- Codex Client
 - A Conversation is uniquely identified by `surface + accountId + conversationId`.
 - StateStore must not persist message bodies, Turn/Item history, Diff, Plan, approval content or copies of Codex session files.
 - Runtime accepts only the current schema and performs no implicit migration; unsupported versions must fail closed.
-  Database schema changes must ship an explicit upgrade process with a defined supported range, backup, failure handling and verification. Do not replace upgrades with database deletion.
+  Use fresh installations as the baseline. Do not retain database upgrades, legacy-account removal or legacy-installation cleanup paths.
+  Reject unsupported data without modifying it; never replace compatibility checks with database deletion.
 - Keep StateStore replaceable. Business modules may depend only on its public interface.
 - Do not store user configuration, databases, sockets, logs or temporary uploads in package directories replaced by npm upgrades.
 - Surface user OAuth Tokens must not be stored in configuration files or StateStore. Use the system Keychain on macOS;

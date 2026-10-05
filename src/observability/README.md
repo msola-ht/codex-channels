@@ -37,9 +37,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   返回该范围内的实际写入结果。
 - `request-metrics-database.ts`：集中保存指标 Schema 版本、固定路径和进程级独占锁；Gateway 与 reset
   共用独立 SQLite 锁库中的排他事务，由操作系统在进程退出时释放，不依赖 PID 或失效锁删除；真实
-  运行中持有者与并发重建均失败关闭。升级时会检查旧 JSON 锁：失效 PID、Linux 跨系统重启遗留锁
-  和超过保护期的残缺锁可清理；近期残缺锁、仍在运行的旧 Gateway，以及非 Linux 上 PID 仍存活的
-  旧锁继续失败关闭。
+  运行中持有者与并发重建均失败关闭。
 - `sqlite-request-metrics-row-codec.ts`：集中保存指标明细、Turn、Thread、聚合与压缩摘要的 SQLite
   Row 类型和纯领域映射，包括历史未观测响应归一化与额度窗口解析。
 - `sqlite-quota-queries.ts`：封装周额度估算、最新额度与历史窗口归约；通过 Store 的同一连接和受跟踪迭代器读取，不创建连接或事务，不承担 Store 关闭及 Schema 生命周期。
@@ -69,7 +67,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
   请求明细读取时直接从输入与缓存 Token 计算未缓存 Token 和缓存命中率，不保存派生列。
   请求首 Token 与总耗时均从提交发送计时；不计算 TPS，不把请求计时聚合为整轮耗时。
-  Schema v20 将旧 `first_content_ms` 替换为 `first_token_ms` 并统一发送起点；v20 之前的计时不迁移；当前支持的 v20/v21/v22/v23/v24/v25/v26→v27 显式升级见下方存储边界。
+  `first_token_ms` 使用提交发送起点，只接受当前 Schema。
   内部读取限制为每次
   最多 500 条；精确 Thread 查询把
   最近 Turn 的运行聚合和指标库保留范围内的 Thread 会话累计分开返回，由
@@ -132,11 +130,10 @@ WebUI 还通过同一只读 Store 的 `daily()` / `hourly()` 按系统本地日�
 查询服务 `trend()` 为今天、昨天和自定义单日返回补零的小时统计，其他范围返回日统计。
 热力图固定展示含今天的最近 90 天，趋势图跟随控制台汇总范围；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
-HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v27；v20/v21/v22/v23/v24/v25/v26 使用显式 upgrade 保留数据升级，其他历史版本不隐式迁移。
+HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v27，不提供历史版本迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
 `warn` 输出，避免关闭调试后形成历史数据断档或隐藏采集故障。
 
-- `request-metrics-upgrade.ts`：显式 v20/v21/v22/v23/v24/v25/v26→v27 升级预检、一致性备份、逐列保留与事务迁移；回滚先归档 v27，再恢复摘要验证的 v20/v21/v22/v23/v24/v25/v26，复用数据库独占锁。对已确认精确结构的可选 `model_request_costs` 附加表原样保留并纳入历史数据摘要，不提供费用运行时功能。
 
 v21 增加真实 source/caller/key/代次/请求 UUID 与交付字段，v22 允许 Relay 关联 label=relay.chat 的完整转储定位，v23 增加 relay.responses，Thread/Turn 必须为空，
 唯一索引去重同一次调用。写入队列保留自有流量空间，Relay 至多占 256 个待写位置；IPC 接收确认只代表入队。

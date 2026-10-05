@@ -42,16 +42,16 @@
 - `sessions`：无子命令时显示帮助，交互归档集中在 `cleanup`；使用 `sessions cleanup <最大轮数>` 直接预览或确认归档旧会话。
 - `cleanup`：统一交互选择会话归档、转储删除、旧指标清理、Provider 指标清理与指标库重置；复用各自执行入口与服务状态检查，完成或取消单项后返回菜单，非交互终端只显示帮助。
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
-- `deepseek account remove <id>`、`opencode-go account remove <id>`、`ccg account remove <id>`：确认后移除对应账户；三家均以 `legacy remove` 移除没有 ID 的旧单账户，保留备份与历史统计，之后重新添加。
+- `deepseek account remove <id>`、`opencode-go account remove <id>`、`ccg account remove <id>`：确认后移除对应账户，保留备份与历史统计；只支持当前多账户格式。
 - `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；新增账户必须输入邮箱或手机号二选一，联系方式只用于本机展示；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
   释放对应隔离实例。
-- `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令、调用目标版本的数据库升级入口，再恢复核心服务。数据库入口支持带一致性备份的显式状态库 v5→v6 和指标库 v20/v21/v22→v23 升级，范围与恢复步骤见[源码安装与更新](../docs/source-install.md)；用户设置和 Provider 模型目录不改写。npm 安装仅同步配套 CLI 并检查数据库升级，不更新 Gateway 包。
-- `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令
-  和旧 Shell PATH 配置，保留用户配置、数据库、凭据、日志和输出。Registry 安装交给 npm 卸载。
+- `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令，再恢复核心服务。数据库只读校验当前 Schema，不迁移或清空数据；流程见[源码安装与更新](../docs/source-install.md)。用户设置和 Provider 模型目录不改写。npm 安装仅同步配套 CLI 并校验数据库，不更新 Gateway 包。
+- `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令，
+  保留用户配置、数据库、凭据、日志、输出和 Shell 配置。Registry 安装交给 npm 卸载。
 - `reset-credit`：通过 Gateway 查询 OpenAI 重置券，交互选券、预览后默认拒绝消费；明确确认才提交，非交互终端仅支持查询。
 - `metrics`：交互菜单提供运行、会话明细、会话列表、聚合、请求明细、历史额度窗口和数据库状态；清理与重置交互集中在 `cleanup`，直接维护子命令保留；`status --json` 返回稳定的路径、Schema
-  兼容性与记录数，日常兼容升级使用 `update`。
+  兼容性与记录数；数据库只接受当前 Schema，`update` 不执行数据库迁移。
 - `traffic`：把 `[debug].model_traffic_dump` 生成的 V2 session 转储渲染成人可读文本，支持列出
   exchange 摘要、展开指定 exchange 的完整请求与响应、关键字与长度过滤，以及持续跟随新写入的
   记录；参数在读取用户配置前完成校验，查询只读转储目录，不访问网络或凭据。`traffic cleanup` 默认预览，确认删除要求全部 App Server 与 Relay 已停止。

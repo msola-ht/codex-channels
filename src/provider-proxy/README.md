@@ -88,7 +88,7 @@
   Turn 完成事件不会抢先清理请求统计状态；Gateway 不在线时指标直接丢弃并继续模型响应。接收端拒绝
   不安全、无认证或已被活动进程占用的端点；Unix 公开端点由共享运行时独占发布并按 inode 清理，
   关闭旧监听不会按原公开路径自动删除已替换的文件或新监听端点。指标按换行完成单帧并在归约后
-  确认，不依赖 Windows named pipe 不具备的半关闭时序。
+  确认，不依赖 Windows named pipe 不具备的半关闭时序。只接受当前指标结构，必需的可空字段必须显式传入；缺字段的旧记录直接拒绝。
 - `traffic-dump.ts`：仅在 `[debug].model_traffic_dump` 开启时使用的模型报文旁路转储入口与 HTTP/WebSocket
   逻辑调用归约；`traffic-dump-storage.ts` 管理 V2 session、顺序写入和文件轮转，
   `traffic-dump-retention.ts` 管理历史批次保留，`traffic-dump-content.ts` 负责正文分片、终态解析、裁剪与凭据头脱敏。V2 为每个 writer

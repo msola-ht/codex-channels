@@ -178,19 +178,17 @@ Relay 与 Codex 共用全局 debug 转储开关与 production/debug 模式。V2 
 
 当前 Relay 配置不保存 `accounts` 或调用方 `provider` 字段，授权只来自 `callers[].models`。旧字段、升级及回退命令明确拒绝，不自动转换。提供商 ID 为 1–64 位 ASCII 字母、数字、下划线、连字符，模型部分最多 200 字符；保存与出站均核对实际目录。事务备份用于恢复失败，不得恢复已撤销的凭据。
 
-指标库 v22→v23 不增删列、索引或历史记录，仅把 Relay CHECK 中 traffic_label 的允许值由 NULL/relay.chat 扩展为 NULL/relay.chat/relay.responses；保留三元组完整性、真实调用方、空 Thread/Turn 和请求 UUID 去重约束。v24 增加可空的单次响应用量原值；v25 增加与调用转储独立的上游诊断摘要，v26 新增官方轮次耗时与同步标记，v27 增加可空的额度快照接收时间 `quota_observed_at_ms`，历史值保持 NULL。显式升级支持完整 v20/v21/v22/v23/v24/v25/v26，运行时只接受 v27。升级先停写并取得数据库所有权锁，检查精确源 Schema、空间与 integrity_check，做 SQLite 一致性备份，校验 SHA-256、备份 Schema、完整性和逻辑数据摘要，再 BEGIN IMMEDIATE 迁移；v26 仅新增额度快照时间列并保留已有耗时表与同步标记，v25 还新增这两张表，v20 逐列追加缺失字段与索引，v21–v24 重建请求表并复制全部历史列及 ID，恢复 sqlite_sequence 和原索引。核对历史摘要后设置版本并提交；事务失败回滚且保留备份，提交后校验失败仍报告未完成、服务保持停止。已有辅助成本数据按现有合同原样保留。
+指标库只接受 Schema v27，保留 Relay 三元组完整性、真实调用方、空 Thread/Turn 和请求 UUID 去重约束。新安装直接创建当前结构，不提供跨版本迁移或恢复入口。
 
-回滚复用显式指标恢复入口：校验指定源备份的版本和 SHA-256，先一致性归档并校验当前 v27 数据库，再通过受控临时文件恢复选定 v20/v21/v22/v23/v24/v25/v26 备份。新版本请求和额度快照接收时间留在归档，不伪装为已迁入旧库；失败保留当前库及所有备份。V2 转储不转换、不删除；旧程序可能无法关联 Responses 标签，升级后仍可读取。配置回退与数据库回退分别执行，数据库恢复不得恢复任何配置或旧凭据。
-
-服务公开目标仅接受 `relay`，内部服务名及 `service-model-relay` 入口保持不变。旧 Relay 限流、模型授权、策略及采集配置转换入口均已移除。指标数据库升级和恢复仍使用独立的数据管理入口，不删除历史记录。
+服务公开目标仅接受 `relay`，内部服务名及 `service-model-relay` 入口保持不变。配置与采集只接受当前格式。
 
 ## 验证范围与剩余限制
 
 隔离回归覆盖双协议 JSON/SSE、提供商发现与撤销、Key 改绑/删除、等待公平性、背压、取消、
-关闭、迟到材料、配置备份失败、指标单次结算、转储关联、v20/v21/v22 升级与回滚。
+关闭、迟到材料、配置备份失败、指标单次结算、转储关联及旧 Schema 拒绝。
 执行入口包括 `tests/model-relay-server.test.ts`、`tests/model-relay-runtime.test.ts`、
 `tests/direct-chat-request.test.ts`、`tests/direct-responses-request.test.ts`、
-`tests/request-metrics-relay-upgrade.test.ts`；测试范围以对应文件为准，本地提交走按范围选择的 `verify:commit`，PR CI 通过 `verify:ci` 执行完整回归。
+`tests/request-metrics-relay.test.ts`；测试范围以对应文件为准，本地提交走按范围选择的 `verify:commit`，PR CI 通过 `verify:ci` 执行完整回归。
 
 2026-09-29 部署后只读核查已确认 DS Responses SSE/JSON、CLP Chat SSE/JSON 的既有成功调用，
 实际指标库为 v23，提供商、状态、用量与转储可关联，Thread/Turn 为空。此证据限于当时部署与样本，

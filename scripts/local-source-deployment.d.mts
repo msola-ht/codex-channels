@@ -1,7 +1,7 @@
 import type { SourceUpdateOptions } from "./source-update.mjs";
 import type { DatabaseInspection } from "./local-installation.mjs";
 
-export type LocalSourceDeploymentStage = "validate-candidate" | "build-candidate" | "validate-codex-contract" | "inspect-candidate" | "prepare-packages" | "stop-services" | "install-package" | "upgrade-databases" | "restore-services" | "verify-deployment" | "recover-deployment";
+export type LocalSourceDeploymentStage = "validate-candidate" | "build-candidate" | "validate-codex-contract" | "inspect-candidate" | "prepare-packages" | "stop-services" | "install-package" | "validate-databases" | "restore-services" | "verify-deployment" | "recover-deployment";
 export interface LocalSourceDeploymentRecovery {
   status: "not-needed" | "restored" | "stopped" | "failed";
   package?: "candidate" | "previous";
@@ -12,7 +12,6 @@ export interface LocalSourceDeploymentResult {
   version?: string;
   previousVersion?: string;
   packageSha256?: string;
-  backupPaths: string[];
   restoredServices: string[];
   recovery?: LocalSourceDeploymentRecovery;
 }
@@ -20,14 +19,12 @@ export interface LocalSourceDeploymentFailure {
   stage: LocalSourceDeploymentStage;
   summary: string;
   recovery: LocalSourceDeploymentRecovery;
-  backupPaths: string[];
   errors: string[];
 }
 export interface LocalSourceDeploymentProgress {
   status: "started" | "completed";
   version?: string;
   previousVersion?: string;
-  backupPaths: string[];
   restoredServices: string[];
   recovery?: LocalSourceDeploymentRecovery;
   failedStage?: LocalSourceDeploymentStage;
@@ -36,7 +33,6 @@ export interface LocalSourceDeploymentInspection {
   config: { configPath: string };
   services: { installed: boolean };
   databases: {
-    required: boolean;
     state: DatabaseInspection;
     metrics: DatabaseInspection;
     sessionDisplayCache: DatabaseInspection;
@@ -76,7 +72,6 @@ export interface LocalSourceDeploymentOptions {
   serviceAction?: (action: "start" | "stop", target: string, directory: string, environment: NodeJS.ProcessEnv) => void | Promise<void>;
   preparePackage?: (context: LocalSourceDeploymentOptions, directory: string, label: "previous" | "candidate") => PreparedLocalSourcePackage | Promise<PreparedLocalSourcePackage>;
   installPackage?: (prepared: PreparedLocalSourcePackage, installedDirectory: string, environment: NodeJS.ProcessEnv) => void | Promise<void>;
-  applyDatabases?: (directory: string, environment: NodeJS.ProcessEnv) => unknown | Promise<unknown>;
 }
 export function deployLocalSource(options: LocalSourceDeploymentOptions): Promise<LocalSourceDeploymentResult>;
 export function recoverLocalSource(options: LocalSourceDeploymentOptions): Promise<LocalSourceDeploymentResult>;

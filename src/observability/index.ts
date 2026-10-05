@@ -76,7 +76,6 @@ export {
   type ResolvedRequestMetricsRange,
 } from "./request-metrics-query-service.js";
 export { BufferedModelRequestMetricsWriter } from "./request-metrics-writer.js";
-export { upgradeRequestMetricsDatabase, restoreRequestMetricsDatabase, type MetricsUpgradeResult } from "./request-metrics-upgrade.js";
 export {
   acquireRequestMetricsDatabaseLock,
   modelRequestMetricsSchemaVersion,

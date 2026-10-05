@@ -47,8 +47,8 @@ beforeEach(() => {
   fixture.lock.mockImplementation(async (_root: string, callback: () => Promise<unknown>) => callback());
   fixture.write.mockImplementation(() => undefined);
   fixture.release.mockImplementation(() => undefined);
-  fixture.deploy.mockResolvedValue({ version: "0.160.0", backupPaths: [], restoredServices: ["app-server", "gateway"] });
-  fixture.recover.mockResolvedValue({ backupPaths: [], restoredServices: [], recovery: { status: "not-needed", restoredServices: [], errors: [] } });
+  fixture.deploy.mockResolvedValue({ version: "0.160.0",  restoredServices: ["app-server", "gateway"] });
+  fixture.recover.mockResolvedValue({  restoredServices: [], recovery: { status: "not-needed", restoredServices: [], errors: [] } });
 });
 
 describe("background update worker identity", () => {
@@ -76,7 +76,7 @@ describe.skipIf(process.platform !== "linux")("background update worker orchestr
     fixture.deploy.mockImplementation(async (context: { onProgress: (stage: string, details: { status: string }) => Promise<void> }) => {
       await context.onProgress("inspect-candidate", { status: "started" });
       expect(fixture.write).toHaveBeenLastCalledWith("/updates", fixture.id, expect.objectContaining({ status: "running", stage: "inspect-candidate" }));
-      return { version: "0.160.0", backupPaths: [], restoredServices: ["app-server", "gateway"] };
+      return { version: "0.160.0",  restoredServices: ["app-server", "gateway"] };
     });
     const receipt = await runBackgroundUpdateWorker("/updates", fixture.id);
     expect(receipt).toMatchObject({ status: "succeeded", stage: "complete", result: { version: "0.160.0" } });
@@ -88,7 +88,7 @@ describe.skipIf(process.platform !== "linux")("background update worker orchestr
 
   it("runs recovery after failure and releases only a proved safe recovery", async () => {
     fixture.deploy.mockRejectedValue(new Error("private upstream detail"));
-    fixture.recover.mockResolvedValue({ backupPaths: ["/backup"], restoredServices: ["gateway"], recovery: { status: "restored", restoredServices: ["gateway"], errors: [] } });
+    fixture.recover.mockResolvedValue({  restoredServices: ["gateway"], recovery: { status: "restored", restoredServices: ["gateway"], errors: [] } });
     const receipt = await runBackgroundUpdateWorker("/updates", fixture.id);
     expect(receipt.status).toBe("failed");
     expect(receipt.error).not.toContain("private upstream detail");
@@ -98,7 +98,7 @@ describe.skipIf(process.platform !== "linux")("background update worker orchestr
 
   it.each(["failed", "stopped", "unknown"])("retains the reservation for an unsafe recovery result %s", async (status) => {
     fixture.deploy.mockRejectedValue(new Error("failure"));
-    fixture.recover.mockResolvedValue({ recovery: { status }, backupPaths: [] });
+    fixture.recover.mockResolvedValue({ recovery: { status } });
     expect((await runBackgroundUpdateWorker("/updates", fixture.id)).status).toBe("recovery-required");
     expect(fixture.release).not.toHaveBeenCalled();
   });
@@ -112,7 +112,7 @@ describe.skipIf(process.platform !== "linux")("background update worker orchestr
 
   it("keeps private recovery exception details out of public status receipts", async () => {
     fixture.deploy.mockRejectedValue(new Error("failure"));
-    fixture.recover.mockResolvedValue({ recovery: { status: "failed", restoredServices: [], errors: ["Authorization: private-secret"] }, backupPaths: [] });
+    fixture.recover.mockResolvedValue({ recovery: { status: "failed", restoredServices: [], errors: ["Authorization: private-secret"] } });
     const receipt = await runBackgroundUpdateWorker("/updates", fixture.id);
     expect(JSON.stringify(receipt)).not.toContain("private-secret");
     expect(receipt.status).toBe("recovery-required");
@@ -167,7 +167,7 @@ describe.skipIf(process.platform !== "linux")("background update worker orchestr
 
   it("uses an engine-proved recovery without restarting services a second time", async () => {
     const error = Object.assign(new Error("failure"), { localDeploymentFailure: {
-      stage: "build-candidate", recovery: { status: "not-needed", restoredServices: [], errors: [] }, backupPaths: [], errors: [],
+      stage: "build-candidate", recovery: { status: "not-needed", restoredServices: [], errors: [] },  errors: [],
     } });
     fixture.deploy.mockRejectedValue(error);
     expect((await runBackgroundUpdateWorker("/updates", fixture.id)).status).toBe("failed");
@@ -178,7 +178,7 @@ describe.skipIf(process.platform !== "linux")("background update worker orchestr
   it("preserves a controlled version-mismatch diagnostic without exposing raw failure details", async () => {
     fixture.deploy.mockRejectedValue(Object.assign(new Error("Authorization: private-secret"), { localDeploymentFailure: {
       stage: "validate-candidate", summary: "Codex CLI 版本不匹配：需要 0.160.0，当前 0.159.0",
-      recovery: { status: "not-needed", restoredServices: [], errors: [] }, backupPaths: [], errors: ["private-secret"],
+      recovery: { status: "not-needed", restoredServices: [], errors: [] },  errors: ["private-secret"],
     } }));
     const receipt = await runBackgroundUpdateWorker("/updates", fixture.id);
     expect(receipt.error).toContain("需要 0.160.0，当前 0.159.0");
@@ -187,8 +187,8 @@ describe.skipIf(process.platform !== "linux")("background update worker orchestr
 
   it("retains an engine-reported unsafe recovery without a second ordinary recovery attempt", async () => {
     fixture.deploy.mockRejectedValue(Object.assign(new Error("failure"), { localDeploymentFailure: {
-      stage: "upgrade-databases", summary: "数据库版本尚未就绪；保持服务停止。",
-      recovery: { status: "stopped", restoredServices: [], errors: [] }, backupPaths: [], errors: [],
+      stage: "validate-databases", summary: "数据库版本尚未就绪；保持服务停止。",
+      recovery: { status: "stopped", restoredServices: [], errors: [] },  errors: [],
     } }));
     expect((await runBackgroundUpdateWorker("/updates", fixture.id)).status).toBe("recovery-required");
     expect(fixture.recover).not.toHaveBeenCalled();

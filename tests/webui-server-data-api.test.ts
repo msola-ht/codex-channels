@@ -1236,7 +1236,7 @@ describe("webui server data API", () => {
     const body = await response.json();
     expect(body).toMatchObject({ error: {
       code: "metrics_database_incompatible",
-      message: "指标数据库版本或结构不兼容，请核对版本及备份，并按显式升级流程处理，勿删除数据库",
+      message: "指标数据库版本或结构不兼容，仅支持当前 Schema；请核对版本及备份，勿删除数据库",
     } });
     expect(JSON.stringify(body)).not.toContain(fixture.databasePath);
   });

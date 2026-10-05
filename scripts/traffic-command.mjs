@@ -9,7 +9,6 @@ import { parseTrafficCommandArgs } from "./traffic-command-options.mjs";
 import { formatElapsedDuration, formatLocalTime, formatLocalTimeZone } from "./metrics-export-format.mjs";
 import {
   describeDumpExchange,
-  dumpCatalog,
   labelOf,
   listDumpFiles,
   selectFilesOfLabel,
@@ -81,10 +80,7 @@ async function followTraffic() {
 
 async function renderSessions(paths) {
   if (paths.length === 0) {
-    const catalog = dumpCatalog(directory);
-    console.error(catalog.legacyFiles.length > 0
-      ? "只找到旧版逐帧 JSONL；请重启 App Server 生成 V2 转储，旧文件不会自动迁移"
-      : `没有找到转储 session：${directory}`);
+    console.error(`没有找到转储 session：${directory}`);
     process.exitCode = 1;
     return;
   }

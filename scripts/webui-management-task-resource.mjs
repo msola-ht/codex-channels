@@ -77,7 +77,6 @@ export async function managementTaskResourceState(normalized, environment, servi
         dumps: {
           bytes: preview.bytes,
           labels: preview.labels,
-          legacyFiles: preview.legacyFiles,
           resources: preview.resources,
           v2Sessions: preview.v2Sessions,
         },

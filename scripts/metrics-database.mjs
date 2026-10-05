@@ -22,12 +22,7 @@ import {
 import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
   acquireRequestMetricsDatabaseLock,
-  upgradeRequestMetricsDatabase,
-  restoreRequestMetricsDatabase,
 } from "../dist/observability/index.js";
-import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
-import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
-import { locateUserConfig } from "./runtime-config.mjs";
 import {
   inspectMetricsDatabase,
   readMetricsExport,
@@ -49,7 +44,6 @@ import {
   parseCleanupOptions,
   parseLocalDate,
   parseMetricsOptions,
-  parseMetricsUpgradeOptions,
   parseMetricsRunArgs,
   parseMetricsThreadsArgs,
   parseMetricsTurnsArgs,
@@ -70,24 +64,6 @@ import {
 
 export { metricsRange } from "./metrics-command-options.mjs";
 
-export async function maintainMetricsSchema(command, args, environment = process.env) {
-  const options = parseMetricsUpgradeOptions(command, args);
-  const { databasePath, document } = resolveMetricsDatabaseContext(environment);
-  if (options.apply) {
-    for (const target of ["gateway", "model-relay"]) {
-      const status = inspectManagedServiceStatus({ environment, target });
-      if (status.services.some(service => service.running || !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state))) {
-        throw new Error(`请先停止 ${target}，确认服务状态后重试指标维护`);
-      }
-    }
-    const { configPath } = locateUserConfig(environment);
-    const relay = await queryModelRelayControl(modelRelayPaths(configPath).control, "status");
-    if (relay.result !== "not_running") throw new Error("Relay 进程仍存在或状态未确认；请停止后重试");
-    if (command === "rollback" && document.model_relay?.enabled === true) throw new Error("回滚前必须禁用 Relay；保留当前凭据代次及停用记录，禁止恢复旧配置备份");
-  }
-  return command === "upgrade" ? upgradeRequestMetricsDatabase(databasePath, options.apply, Number(options.from))
-    : restoreRequestMetricsDatabase(databasePath, options.backup, options.sha256, Number(options.to));
-}
 export {
   inspectMetricsDatabase,
   readMetricsExport,
@@ -548,8 +524,6 @@ if (
       )
     ) {
       printStatus(inspectMetricsDatabase(), { json: process.argv[3] === "--json" });
-    } else if (command === "upgrade" || command === "rollback") {
-      console.log(JSON.stringify(await maintainMetricsSchema(command, process.argv.slice(3)), null, 2));
     } else if (command === "reset" && process.argv.length === 3) {
       const result = resetMetricsDatabase();
       if (!result.changed) {

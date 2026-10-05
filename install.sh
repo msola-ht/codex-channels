@@ -196,8 +196,6 @@ npm install --global --ignore-scripts --loglevel=error --no-audit --no-fund "$pa
 [ -x "$global_launcher" ] \
   || fail "npm 全局命令入口不存在：$global_launcher"
 completed=true
-node "$checkout/scripts/source-shell-path.mjs" remove \
-  || note "旧 Shell PATH 配置清理失败；可手工删除 Codex Connect 配置块。"
 
 rm -rf "$staging"
 staging=""

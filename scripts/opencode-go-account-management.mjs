@@ -318,9 +318,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
 
 function buildDefaultPlan(accountId, { environment, loadAccounts }) {
   const normalizedId = validAccountId(accountId);
-  const accounts = loadAccountsSafely(loadAccounts, environment, {
-    allowMissingDefault: true,
-  });
+  const accounts = loadAccountsSafely(loadAccounts, environment);
   const account = accounts.find((candidate) => candidate.id === normalizedId);
   if (account === undefined) {
     throw invalid(
@@ -520,8 +518,7 @@ async function applyLastAccountRemovalFiles(
 }
 
 async function readOpencodeGoRestoreBaseline(paths) {
-  return await readOptionalProviderFile(join(paths.backupDirectory, "config.toml"))
-    ?? await readOptionalProviderFile(join(paths.providerDirectory, "backup", "config.toml"));
+  return await readOptionalProviderFile(join(paths.backupDirectory, "config.toml"));
 }
 
 async function restoreOpencodeGoBaseConfig(plan, initialConfig) {
@@ -623,9 +620,9 @@ function validAccountId(value) {
   }
 }
 
-function loadAccountsSafely(loadAccounts, environment, options) {
+function loadAccountsSafely(loadAccounts, environment) {
   try {
-    return loadAccounts(environment, options);
+    return loadAccounts(environment);
   } catch (error) {
     throw invalid(
       "account-state-unavailable",

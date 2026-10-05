@@ -37,8 +37,6 @@ vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
 
 import {
   addOpencodeGoAccount,
-  applyOpencodeGoRestore,
-  previewOpencodeGoRestore,
   runOpenCodeGoSetup,
 } from "../scripts/opencode-go-setup.mjs";
 import { applyOpencodeGoAccountConfiguration } from "../scripts/opencode-go-account-provisioning.mjs";
@@ -129,7 +127,9 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     };
     await applyOpencodeGoAccountConfiguration(options, { environment, downloadCatalog: successfulCatalog });
     const paths = opencodeGoAccountPaths(environment, "main");
-    expect(existsSync(join(paths.providerDirectory, "backup", "state.json"))).toBe(true);
+    expect(existsSync(join(paths.providerDirectory, "backup"))).toBe(false);
+    mkdirSync(join(paths.providerDirectory, "backup"), { mode: 0o700 });
+    writeFileSync(join(paths.providerDirectory, "backup", "config.toml"), 'model_provider = "openai"\n', { mode: 0o600 });
     rmSync(join(paths.backupDirectory, "config.toml"));
     const files = [paths.configPath, paths.markerPath, paths.catalogPath, paths.manifestPath,
       join(paths.providerDirectory, "accounts.json")];
@@ -445,126 +445,6 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     });
     expect(parse(readFileSync(join(codexHome, "sf-ocg-main.config.toml"), "utf8")))
       .toMatchObject({ model_provider: "ocg-main" });
-  });
-
-  it("restores the initial config and provider files", async () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-restore-"));
-    const original = 'model = "gpt-5.6-sol"\n';
-    writeFileSync(join(codexHome, "config.toml"), original, { mode: 0o600 });
-    await runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
-      output: { write: () => undefined },
-      prompter: prompt("exclusive"),
-      downloadCatalog: successfulCatalog,
-    });
-
-    const result = await runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
-      output: { write: () => undefined },
-      prompter: prompt("restore"),
-    });
-
-    expect(result).toMatchObject({ action: "restored" });
-    expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe(original);
-    expect(existsSync(join(codexHome, "sf-ocg-main.config.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "accounts", "main", "managed.toml"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"))).toBe(false);
-  });
-
-  it("exposes a credential-free restore preview and requires explicit confirmation", async () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-restore-preview-"));
-    const environment = {
-      CODEX_HOME: codexHome,
-      CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
-    };
-    await runOpenCodeGoSetup({
-      environment,
-      output: { write: () => undefined },
-      prompter: prompt("switching"),
-      downloadCatalog: successfulCatalog,
-    });
-
-    expect(previewOpencodeGoRestore({ environment })).toEqual({
-      operation: "restore",
-      provider: { id: "ocg", name: "OpenCode Go" },
-      effects: {
-        restoresInitialConfig: true,
-        removesManagedCatalog: true,
-        restoresExternalAgentConfig: true,
-        removesManagedAccounts: true,
-      },
-      confirmation: { required: true, field: "confirmRestore" },
-      activation: "restart-all",
-    });
-    await expect(applyOpencodeGoRestore({}, { environment })).rejects.toMatchObject({
-      code: "confirmation-required",
-      field: "confirmRestore",
-    });
-  });
-
-  it("returns a stable error when no restore backup exists", () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-no-restore-"));
-
-    expect(() => previewOpencodeGoRestore({
-      environment: {
-        CODEX_HOME: codexHome,
-        CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
-      },
-    })).toThrow(expect.objectContaining({
-      code: "backup-not-found",
-      field: "restore",
-    }));
-  });
-
-  it("rejects a backup missing catalog ownership fields without restoring files", async () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-legacy-restore-"));
-    await runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
-      output: { write: () => undefined },
-      prompter: prompt("switching"),
-      downloadCatalog: successfulCatalog,
-    });
-    const statePath = join(codexHome, ".codex-connect", "providers", "opencode-go", "backup", "state.json");
-    const state = JSON.parse(readFileSync(statePath, "utf8"));
-    delete state.catalog;
-    delete state.manifest;
-    writeFileSync(statePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
-
-    await expect(runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
-      output: { write: () => undefined },
-      prompter: prompt("restore"),
-    })).rejects.toMatchObject({ code: "backup-invalid", field: "restore" });
-
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(true);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"))).toBe(true);
-  });
-
-  it("validates the complete backup state before restoring any file", async () => {
-    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-invalid-restore-"));
-    writeFileSync(join(codexHome, "config.toml"), "custom = true\n", { mode: 0o600 });
-    await runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
-      output: { write: () => undefined },
-      prompter: prompt("switching"),
-      downloadCatalog: successfulCatalog,
-    });
-    const configPath = join(codexHome, "config.toml");
-    const configBefore = readFileSync(configPath, "utf8");
-    const statePath = join(codexHome, ".codex-connect", "providers", "opencode-go", "backup", "state.json");
-    const state = JSON.parse(readFileSync(statePath, "utf8"));
-    delete state.manifest;
-    writeFileSync(statePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
-
-    await expect(runOpenCodeGoSetup({
-      environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
-      output: { write: () => undefined },
-      prompter: prompt("restore"),
-    })).rejects.toMatchObject({ code: "backup-invalid", field: "restore" });
-
-    expect(readFileSync(configPath, "utf8")).toBe(configBefore);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(true);
   });
 
   it("preserves the selected model and per-model settings when setup is repeated", async () => {

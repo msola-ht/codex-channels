@@ -19,7 +19,7 @@ const serviceEntries = { "app-server": "service-app-server", gateway: "gateway",
 /** Execute a frozen local source deployment from a supervisor-independent worker. */
 export async function deployLocalSource(options) {
   const context = deploymentContext(options);
-  const state = { schemaVersion: 1, stage: "validate-candidate", stopStarted: false, migrationStarted: false, backupPaths: [], restoredServices: [] };
+  const state = { schemaVersion: 2, stage: "validate-candidate", stopStarted: false, restoredServices: [] };
   if (existsSync(context.statePath)) throw new Error("本机部署执行状态已存在，拒绝重复执行；请使用恢复入口");
   try {
     await stage(context, state, "validate-candidate", async () => {
@@ -38,6 +38,7 @@ export async function deployLocalSource(options) {
     await stage(context, state, "inspect-candidate", async () => {
       state.candidateInspection = await inspectPackage(context, context.sourceDirectory);
       state.previousInspection = await inspectPackage(context, context.runnerDirectory);
+      if (!databasesReady(state.candidateInspection.databases)) throw new Error("候选版本不支持当前数据库结构");
       if (!state.candidateInspection.services.installed) throw new Error("本机源码后台部署要求已完整安装 systemd 核心服务");
       state.services = await inspectServices(context);
       if (!state.services.some(service => service.target === "gateway") || !state.services.some(service => service.target === "app-server")) throw new Error("部署前核心服务状态不完整");
@@ -73,20 +74,9 @@ export async function deployLocalSource(options) {
       await installPackage(context, state.packages.candidate);
       assertInstalledPackage(context, state.packages.candidate);
     });
-    await stage(context, state, "upgrade-databases", async () => {
-      state.migrationStarted = true;
-      saveState(context, state);
-      const before = backupFiles(state.candidateInspection.databases);
-      try {
-        const migration = await applyDatabases(context);
-        state.backupPaths = [...new Set([...state.backupPaths, ...resultBackupPaths(migration)])];
-      } finally {
-        state.backupPaths = [...new Set([...state.backupPaths, ...backupFiles(state.candidateInspection.databases).filter(path => !before.includes(path))])];
-        saveState(context, state);
-      }
+    await stage(context, state, "validate-databases", async () => {
       const inspection = await inspectPackage(context, context.sourceDirectory);
-      if (!databasesReady(inspection.databases)) throw new Error("候选数据库升级后结构尚未就绪；保持服务停止");
-      state.databaseUpdatesCompleted = true;
+      if (!databasesReady(inspection.databases)) throw new Error("候选版本不支持当前数据库结构；保持服务停止");
     });
     await stage(context, state, "restore-services", () => restoreServices(context, state, context.installedDirectory));
     await stage(context, state, "verify-deployment", async () => {
@@ -112,9 +102,9 @@ export async function deployLocalSource(options) {
 /** Recover only package/database combinations proved compatible, without database rollback. */
 export async function recoverLocalSource(options) {
   const context = deploymentContext(options);
-  if (!existsSync(context.statePath)) return { recovery: { status: "not-needed", restoredServices: [], errors: [] }, backupPaths: [] };
+  if (!existsSync(context.statePath)) return { recovery: { status: "not-needed", restoredServices: [], errors: [] }, restoredServices: [] };
   const state = JSON.parse(readFileSync(context.statePath, "utf8"));
-  if (state.schemaVersion !== 1 || !Array.isArray(state.backupPaths) || !Array.isArray(state.restoredServices)) throw new Error("本机部署恢复状态格式不受支持");
+  if (state.schemaVersion !== 2 || !Array.isArray(state.restoredServices)) throw new Error("本机部署恢复状态格式不受支持");
   if (!state.stopStarted || state.completed) return { ...deploymentResult(state), recovery: { status: "not-needed", restoredServices: [...state.restoredServices], errors: [] } };
   const recovery = await recoverState(context, state);
   if (recovery.status === "failed" || recovery.status === "stopped") throw failure(new Error("本机部署恢复未完成"), state, recovery);
@@ -201,12 +191,12 @@ function writeJson(path, value) {
 }
 
 function progressDetails(state) {
-  return { version: state.version, previousVersion: state.previousVersion, backupPaths: [...state.backupPaths], restoredServices: [...state.restoredServices] };
+  return { version: state.version, previousVersion: state.previousVersion, restoredServices: [...state.restoredServices] };
 }
 
 async function inspectPackage(context, directory) {
   if (context.inspectPackage) return context.inspectPackage(directory, context.environment);
-  return childModule(context, directory, "local-installation.mjs", "const config = candidate.inspectGatewayConfiguration(process.env); const databases = candidate.inspectDatabaseUpdates(process.env); const services = candidate.inspectCoreServiceInstallation(process.env, 'linux'); return { config, databases, services };");
+  return childModule(context, directory, "local-installation.mjs", "const config = candidate.inspectGatewayConfiguration(process.env); const databases = candidate.inspectDatabases(process.env); const services = candidate.inspectCoreServiceInstallation(process.env, 'linux'); return { config, databases, services };");
 }
 
 function childModule(context, directory, script, body) {
@@ -219,11 +209,6 @@ function childModule(context, directory, script, body) {
   const line = output.split(/\r?\n/u).findLast(value => value.startsWith(marker));
   if (!line) throw new Error("候选部署入口未返回结构化结果");
   return JSON.parse(line.slice(marker.length));
-}
-
-async function applyDatabases(context) {
-  if (context.applyDatabases) return context.applyDatabases(context.sourceDirectory, context.environment);
-  return childModule(context, context.sourceDirectory, "local-installation.mjs", "return await candidate.applyDatabaseUpdates(process.env);");
 }
 
 async function inspectServices(context) {
@@ -405,17 +390,8 @@ function fingerprintPaths(paths) {
   return paths.flatMap(path => [path, `${path}-wal`].map(file => ({ path: file, sha256: existsSync(file) ? hashFile(file) : null })));
 }
 
-function backupFiles(databases) {
-  return databasePaths(databases).flatMap(path => existsSync(dirname(path)) ? readdirSync(dirname(path)).filter(name => name.startsWith(`${basename(path)}.`) && (name.includes("backup") || name.endsWith(".bak"))).map(name => join(dirname(path), name)) : []).sort();
-}
-
-function resultBackupPaths(result) {
-  if (!result || typeof result !== "object") return [];
-  return Object.entries(result).flatMap(([key, value]) => key === "backupPath" && typeof value === "string" ? [value] : value && typeof value === "object" ? resultBackupPaths(value) : []);
-}
-
 function databasesReady(databases) {
-  if (!databases || databases.required !== false) return false;
+  if (!databases) return false;
   const visit = value => {
     if (!value || typeof value !== "object") return true;
     if (Object.hasOwn(value, "exists") && value.exists === true && value.compatible !== true) return false;
@@ -436,7 +412,7 @@ async function recoverState(context, state) {
   try { candidate = await inspectPackage(context, context.sourceDirectory); } catch (error) { result.errors.push(message(error)); }
   let candidateInstalled = false;
   try { assertInstalledPackage(context, state.packages.candidate); candidateInstalled = true; } catch { /* The installation may have been interrupted. */ }
-  if ((candidateInstalled || state.migrationStarted) && databasesReady(candidate?.databases)) selected = "candidate";
+  if (candidateInstalled && databasesReady(candidate?.databases)) selected = "candidate";
   if (!selected) {
     try {
       const previous = await inspectPackage(context, context.runnerDirectory);
@@ -481,14 +457,14 @@ async function recoverState(context, state) {
 }
 
 function deploymentResult(state) {
-  return { version: state.version, previousVersion: state.previousVersion, packageSha256: state.packages?.candidate?.sha256, backupPaths: [...state.backupPaths], restoredServices: [...state.restoredServices] };
+  return { version: state.version, previousVersion: state.previousVersion, packageSha256: state.packages?.candidate?.sha256, restoredServices: [...state.restoredServices] };
 }
 
 function failure(error, state, recovery) {
   const result = new Error(`本机源码部署失败（${state.stage}）：${message(error)}`, { cause: error });
   const versionMismatch = /^Codex CLI 版本不匹配：需要 (\d+\.\d+\.\d+)，当前 (\d+\.\d+\.\d+|未知)$/u.exec(message(error));
   const summary = versionMismatch ? `Codex CLI 版本不匹配：需要 ${versionMismatch[1]}，当前 ${versionMismatch[2]}` : `本机源码部署失败（${state.stage}）`;
-  result.localDeploymentFailure = { stage: state.stage, summary, recovery, backupPaths: [...state.backupPaths], errors: [message(error), ...recovery.errors] };
+  result.localDeploymentFailure = { stage: state.stage, summary, recovery, errors: [message(error), ...recovery.errors] };
   return result;
 }
 

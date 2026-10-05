@@ -2,10 +2,8 @@ export interface TrafficCleanupPreview {
   bytes: number;
   directory: string;
   labels: number;
-  legacyFiles: number;
   resources: Array<
     | { createdAtMs: number; label: string; session: string; type: "v2" }
-    | { name: string; type: "legacy" }
   >;
   targets: string[];
   v2Sessions: number;

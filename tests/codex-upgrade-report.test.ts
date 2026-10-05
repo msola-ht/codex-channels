@@ -309,7 +309,7 @@ describe("Codex release upgrade preview", () => {
       },
     );
 
-    expect(failure.status).toBe(0);
+    expect(failure.status, failure.stderr || failure.stdout).toBe(0);
     expect(readFileSync(join(output, "target-version.txt"), "utf8"))
       .toBe("unresolved\n");
     expect(readFileSync(join(output, "summary.md"), "utf8"))

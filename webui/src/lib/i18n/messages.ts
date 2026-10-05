@@ -467,8 +467,6 @@ const zh = {
     allPlatforms: "全部平台",
     addAccount: "添加 {platform}",
     credentialsHint: "API Key 仅写入，不会回显；修改前需预览确认。",
-    legacyHint: "请先移除旧 DeepSeek 账户，再重新添加；保留备份与历史统计。",
-    removeLegacy: "移除旧账户",
     add: "新增",
     contact: "邮箱或手机号",
     cancel: "取消",
@@ -1166,8 +1164,8 @@ const zh = {
     "cleanupEffect": "执行 {command}",
     "cleanupStoppedRequired": "全部 App Server 与 Relay 必须已停止",
     "cleanupIrreversible": "永久删除全部可识别调用记录，无法恢复；未知文件与目录不处理",
-    "cleanupResourceRunning": "将删除 {sessions} 个 V2 批次、{files} 个旧版文件，合计 {size}；受管 App Server 或 Relay 当前仍在运行。",
-    "cleanupResourceStopped": "将删除 {sessions} 个 V2 批次、{files} 个旧版文件，合计 {size}；受管 App Server 与 Relay 当前未运行，执行时还会复核。"
+    "cleanupResourceRunning": "将删除 {sessions} 个 V2 批次，合计 {size}；受管 App Server 或 Relay 当前仍在运行。",
+    "cleanupResourceStopped": "将删除 {sessions} 个 V2 批次，合计 {size}；受管 App Server 与 Relay 当前未运行，执行时还会复核。"
   },
   shell: {
     invalidAddress: "页面地址无效",
@@ -1667,8 +1665,6 @@ const en: Messages = {
     allPlatforms: "All platforms",
     addAccount: "Add {platform}",
     credentialsHint: "API keys are write-only and never shown. Preview and confirm changes before applying.",
-    legacyHint: "Remove the legacy DeepSeek account before adding a new one. Backups and historical metrics are retained.",
-    removeLegacy: "Remove legacy account",
     add: "Add",
     contact: "Email or phone",
     cancel: "Cancel",
@@ -2366,8 +2362,8 @@ const en: Messages = {
     "cleanupEffect": "Run {command}",
     "cleanupStoppedRequired": "All App Servers and Relay must be stopped",
     "cleanupIrreversible": "Permanently deletes all recognized traffic records. This cannot be undone; unknown files and directories are left untouched.",
-    "cleanupResourceRunning": "Will delete {sessions} V2 batches and {files} legacy files, totaling {size}; a managed App Server or Relay is still running.",
-    "cleanupResourceStopped": "Will delete {sessions} V2 batches and {files} legacy files, totaling {size}; managed App Servers and Relay are stopped; checked again at execution."
+    "cleanupResourceRunning": "Will delete {sessions} V2 batches, totaling {size}; a managed App Server or Relay is still running.",
+    "cleanupResourceStopped": "Will delete {sessions} V2 batches, totaling {size}; managed App Servers and Relay are stopped; checked again at execution."
   },
   shell: {
     navigation: "Navigation",

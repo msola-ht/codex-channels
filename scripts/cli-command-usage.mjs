@@ -39,13 +39,6 @@ export const cleanupUsage = `用法：codexc cleanup
 指标清理与重置保留备份；Provider 清理按原状态恢复 Gateway。非受管前台进程仍须自行退出。
 非交互终端只显示帮助。直接命令仍为 sessions cleanup、traffic cleanup、metrics cleanup|prune|reset。`;
 
-export const TRAFFIC_UPGRADE_USAGE = `用法：codexc traffic upgrade --enabled true|false --mode production|debug
-
-显式选择 Codex 与 Relay 共用的采集状态，备份后移除旧 Relay 独立采集配置。
-production 使用现有裁剪参数 3/65536；debug 使用 0/0。身份、凭据和保留天数不变。
-先执行 codexc service stop gateway（前台 Gateway 也须退出），避免旧进程补回已删除字段。
-不会停止、启动或重启服务。回退保留当前凭据和已有转储，不要恢复整份旧配置。
-所有参数必填；支持 -h/--help。`;
 
 export const serviceCommandActions = Object.freeze([
   "install",

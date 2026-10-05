@@ -35,14 +35,14 @@ export function validateBasicManagedProviderAccounts(value, options) {
 export function assertManagedProviderDefaultAccount(
   accounts,
   providerLabel,
-  { allowEmpty = false, allowMissingDefault = false } = {},
+  { allowEmpty = false } = {},
 ) {
   if (accounts.length === 0) {
     if (allowEmpty) return;
     throw new Error(`${providerLabel} 账户注册表无效`);
   }
   const defaultCount = accounts.filter((account) => account.default === true).length;
-  if (defaultCount === 0 && !allowMissingDefault) {
+  if (defaultCount === 0) {
     throw new Error(`${providerLabel} 账户注册表必须有一个默认账户`);
   }
   if (defaultCount > 1) {

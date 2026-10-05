@@ -406,17 +406,18 @@ describe("webui server Provider and account management", () => {
   });
   it("returns the latest unified account snapshots without calling provider APIs", async () => {
     const fixture = createFixture();
+    writePrivateFileAtomicSync(deepseekAccountsFilePath(fixture.environment), `${JSON.stringify([{ id: "main", default: true }])}\n`);
     const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
     store.upsertAccountSnapshot!({
-      sourceId: "deepseek:default",
-      provider: "deepseek",
-      accountId: null,
+      sourceId: "ds-main:main",
+      provider: "ds-main",
+      accountId: "main",
       displayName: "DeepSeek",
       enabled: true,
       observedAtMs: 1_800_000_000_000,
       available: true,
-      usage: { kind: "balance", provider: "deepseek", available: true, balances: [] },
-      limits: { kind: "unsupported", provider: "deepseek" },
+      usage: { kind: "balance", provider: "ds-main", available: true, balances: [] },
+      limits: { kind: "unsupported", provider: "ds-main" },
     });
     store.close();
     const { origin } = await startServer(fixture.environment);
@@ -424,12 +425,13 @@ describe("webui server Provider and account management", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       observedAtMs: 1_800_000_000_000,
-      snapshots: [{ provider: "deepseek", available: true }],
+      snapshots: [{ provider: "ds-main", available: true }],
       warnings: [],
     });
   });
   it("streams account snapshot invalidations independently of request metrics without refreshing upstream", async () => {
     const fixture = createFixture();
+    writePrivateFileAtomicSync(deepseekAccountsFilePath(fixture.environment), `${JSON.stringify([{ id: "main", default: true }])}\n`);
     const configPath = join(fixture.home, "config.toml");
     const accounts = new QueueEventsServer(accountSnapshotEventsPath(configPath));
     const metrics = new QueueEventsServer(metricsEventsPath(configPath));
@@ -457,14 +459,14 @@ describe("webui server Provider and account management", () => {
         })());
       }
       await expect.poll(() => received.map(value => (value.match(/"changed"/gu) ?? []).length)).toEqual([1, 1]);
-      store.upsertAccountSnapshot({ sourceId: "deepseek:default", provider: "deepseek", accountId: null,
+      store.upsertAccountSnapshot({ sourceId: "ds-main:main", provider: "ds-main", accountId: "main",
         displayName: "DeepSeek", enabled: true, observedAtMs: 1_800_000_000_000, available: true,
-        usage: { kind: "balance", provider: "deepseek", available: true, balances: [] }, limits: { kind: "unsupported", provider: "deepseek" } });
+        usage: { kind: "balance", provider: "ds-main", available: true, balances: [] }, limits: { kind: "unsupported", provider: "ds-main" } });
       accounts.changed();
       await expect.poll(() => (received[0]!.match(/"changed"/gu) ?? []).length).toBe(2);
       expect((received[1]!.match(/"changed"/gu) ?? []).length).toBe(1);
       const snapshot = await fetch(`${origin}/api/v1/accounts`, { headers });
-      expect(await snapshot.json()).toMatchObject({ observedAtMs: 1_800_000_000_000, snapshots: [{ provider: "deepseek" }] });
+      expect(await snapshot.json()).toMatchObject({ observedAtMs: 1_800_000_000_000, snapshots: [{ provider: "ds-main" }] });
       expect(upstreamQueries).toBe(0);
       expect(received.join("")).not.toMatch(/deepseek|snapshot-token|observedAt/u);
     } finally {
@@ -476,17 +478,18 @@ describe("webui server Provider and account management", () => {
 
   it("keeps other account snapshots available when the OCG registry is invalid", async () => {
     const fixture = createFixture();
+    writePrivateFileAtomicSync(deepseekAccountsFilePath(fixture.environment), `${JSON.stringify([{ id: "main", default: true }])}\n`);
     const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
     store.upsertAccountSnapshot!({
-      sourceId: "deepseek:default",
-      provider: "deepseek",
-      accountId: null,
+      sourceId: "ds-main:main",
+      provider: "ds-main",
+      accountId: "main",
       displayName: "DeepSeek",
       enabled: true,
       observedAtMs: 1_800_000_000_000,
       available: true,
-      usage: { kind: "balance", provider: "deepseek", available: true, balances: [] },
-      limits: { kind: "unsupported", provider: "deepseek" },
+      usage: { kind: "balance", provider: "ds-main", available: true, balances: [] },
+      limits: { kind: "unsupported", provider: "ds-main" },
     });
     store.close();
     const registryDirectory = join(fixture.home, "providers", "opencode-go");
@@ -499,7 +502,7 @@ describe("webui server Provider and account management", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      snapshots: [{ provider: "deepseek", available: true }],
+      snapshots: [{ provider: "ds-main", available: true }],
       warnings: [{
         source: "opencode-go",
         code: "registry_unavailable",
@@ -878,13 +881,14 @@ describe("webui server Provider and account management", () => {
 
   it("refreshes one account through Gateway and returns the updated snapshot", async () => {
     const fixture = createFixture();
+    writePrivateFileAtomicSync(deepseekAccountsFilePath(fixture.environment), `${JSON.stringify([{ id: "main", default: true }])}\n`);
     const managementOrigin = "http://127.0.0.1:0";
     const refreshGatewayAccount = vi.fn(async (_configPath: string, provider: string) => {
       const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
       store.upsertAccountSnapshot!({
-        sourceId: `${provider}:default`,
+        sourceId: `${provider}:main`,
         provider,
-        accountId: null,
+        accountId: "main",
         displayName: "DeepSeek",
         enabled: true,
         observedAtMs: 1_800_000_000_001,
@@ -902,17 +906,17 @@ describe("webui server Provider and account management", () => {
     const response = await fetch(`${origin}/api/v1/management/accounts/refresh`, {
       method: "POST",
       headers: { origin: managementOrigin, "content-type": "application/json" },
-      body: JSON.stringify({ provider: "deepseek" }),
+      body: JSON.stringify({ provider: "ds-main" }),
     });
 
     expect(response.status).toBe(200);
     expect(refreshGatewayAccount).toHaveBeenCalledWith(
       join(fixture.home, "config.toml"),
-      "deepseek",
+      "ds-main",
       expect.any(AbortSignal),
     );
     expect(await response.json()).toMatchObject({
-      snapshots: [{ provider: "deepseek", observedAtMs: 1_800_000_000_001 }],
+      snapshots: [{ provider: "ds-main", observedAtMs: 1_800_000_000_001 }],
     });
   });
 

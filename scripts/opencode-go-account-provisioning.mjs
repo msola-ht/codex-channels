@@ -1,4 +1,3 @@
-import { hasLegacyOpencodeGoConfiguration } from "./opencode-go-legacy-config.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -41,7 +40,6 @@ import {
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import {
   opencodeGoAccountPaths,
-  opencodeGoProfileFileName,
 } from "./opencode-go-account-files.mjs";
 import {
   assertProviderFileSnapshots,
@@ -192,9 +190,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     await assertProviderFileSnapshots(guards);
     mkdirSync(plan.paths.accountDirectory, { recursive: true, mode: 0o700 });
     mkdirSync(plan.paths.backupDirectory, { recursive: true, mode: 0o700 });
-    if (plan.accounts.length === 0) {
-      await preserveInitialFiles(plan.paths, plan.account.id);
-    }
     const currentConfig = await readTomlFile(plan.paths.configPath);
     const accountBaseline = existsSync(exclusiveBaselinePath)
       ? await readTomlFile(exclusiveBaselinePath)
@@ -293,10 +288,6 @@ async function buildPlan(
     accounts = loadAccounts(environment);
   } catch (error) {
     throw normalize("account-state-unavailable", "accountId", error);
-  }
-  if (hasLegacyOpencodeGoConfiguration(environment)
-    || accounts.some((account) => hasLegacyOpencodeGoConfiguration(environment, account.id))) {
-    throw invalid("provider-state-unavailable", "accountId", "请先通过 legacy remove 或 account remove <id> 移除旧 OCG 账户，再重新添加");
   }
   const existing = accounts.find((account) => account.id === accountId);
   if (existing !== undefined && reconfigure !== true) {
@@ -451,39 +442,6 @@ function publicPaths(paths) {
     markerPath: paths.markerPath,
     catalogPath: paths.catalogPath,
   };
-}
-
-async function preserveInitialFiles(paths, accountId) {
-  const backup = join(paths.providerDirectory, definition.backupDirectoryName);
-  const statePath = join(backup, "state.json");
-  if (existsSync(statePath)) return;
-  mkdirSync(backup, { recursive: true, mode: 0o700 });
-  const state = {
-    version: 2,
-    accountId,
-    config: await backupOptional(paths.configPath, join(backup, "config.toml")),
-    profile: await backupOptional(
-      paths.profilePath,
-      join(backup, opencodeGoProfileFileName(accountId)),
-    ),
-    marker: await backupOptional(paths.markerPath, join(backup, "managed.toml")),
-    catalog: await backupOptional(
-      paths.catalogPath,
-      join(backup, definition.catalogFileName),
-    ),
-    manifest: await backupOptional(
-      paths.manifestPath,
-      join(backup, definition.catalogManifestFileName),
-    ),
-  };
-  await writePrivateFileAtomic(statePath, `${JSON.stringify(state)}\n`);
-}
-
-async function backupOptional(source, target) {
-  const content = await readOptionalProviderFile(source);
-  if (content === undefined) return false;
-  await writePrivateFileAtomic(target, content);
-  return true;
 }
 
 async function readTomlFile(path) {

@@ -227,7 +227,7 @@ describe("webui server settings and task management", () => {
         operation: "traffic",
         action: "cleanup",
         resource: {
-          dumps: { bytes: 0, labels: 0, legacyFiles: 0, v2Sessions: 0 },
+          dumps: { bytes: 0, labels: 0, v2Sessions: 0 },
         },
       },
       confirmationToken: expect.any(String),

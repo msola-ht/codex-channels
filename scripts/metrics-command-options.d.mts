@@ -74,7 +74,6 @@ export function validateMetricsCommandArgs(
 ): void;
 
 export function parseCleanupOptions(args: string[]): MetricsCleanupOptions;
-export function parseMetricsUpgradeOptions(command: "upgrade" | "rollback", args: string[]): { apply: boolean; from: string; to: string; backup?: string; sha256?: string };
 
 export function parseMetricsRunArgs(
   args: string[],

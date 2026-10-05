@@ -783,7 +783,6 @@ export interface ManagementAccountSettingsResponse {
   }
   deepseek: {
     configured: boolean
-    legacyConfigurationPresent: boolean
     accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
 }
@@ -812,7 +811,6 @@ export type ManagementAccountSettingsMutationInput =
       confirmExclusiveConfigChange?: boolean
     }
   | { operation: "deepseek.default" | "deepseek.remove" | "clp.default" | "clp.remove"; accountId: string }
-  | { operation: "deepseek.legacy.remove" }
 
 export interface ManagementAccountSettingsPreview {
   operation: string

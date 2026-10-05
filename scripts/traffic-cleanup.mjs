@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { lstatSync, readdirSync, rmSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
@@ -43,18 +43,17 @@ export async function runTrafficCleanup(
   for (const target of confirmed.targets) {
     rmSync(target, { force: true, recursive: true });
   }
-  output.log(`已删除 ${confirmed.v2Sessions} 个 V2 session、${confirmed.legacyFiles} 个旧版 JSONL（${formatBytes(confirmed.bytes)}）。`);
+  output.log(`已删除 ${confirmed.v2Sessions} 个 V2 session（${formatBytes(confirmed.bytes)}）。`);
   return confirmed;
 }
 
 export function trafficCleanupPreview(directory) {
   const catalog = dumpCatalog(directory);
-  const targets = [...catalog.files, ...catalog.legacyFiles];
+  const targets = catalog.files;
   return {
     bytes: targets.reduce((total, target) => total + pathSize(target), 0),
     directory,
     labels: catalog.labels.length,
-    legacyFiles: catalog.legacyFiles.length,
     resources: [
       ...catalog.sessions.map((session) => ({
         createdAtMs: session.createdAtMs,
@@ -62,7 +61,6 @@ export function trafficCleanupPreview(directory) {
         session: session.session,
         type: "v2",
       })),
-      ...catalog.legacyFiles.map((path) => ({ name: basename(path), type: "legacy" })),
     ],
     targets,
     v2Sessions: catalog.files.length,
@@ -101,7 +99,6 @@ function renderPreview(preview, output) {
     "转储清理预览：",
     `目录：${preview.directory}`,
     `V2 session：${preview.v2Sessions}（${preview.labels} 个 Provider 标签）`,
-    `旧版 JSONL：${preview.legacyFiles}`,
     `占用：${formatBytes(preview.bytes)}`,
   ].join("\n"));
 }

@@ -66,7 +66,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     }`;
     const preload = `import { register } from "node:module";
       register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))}, import.meta.url);`;
-    for (const args of [["--help"], ["version"], ["service", "start", "--help"], ["desktop-app", "--help"], ["timezone", "--help"], ["traffic", "upgrade", "--help"], ["update", "--help"], ["update", "status", "--help"]]) {
+    for (const args of [["--help"], ["version"], ["service", "start", "--help"], ["desktop-app", "--help"], ["timezone", "--help"], ["traffic", "--help"], ["update", "--help"], ["update", "status", "--help"]]) {
       const output = execFileSync(process.execPath, [
         "--import", "data:text/javascript," + encodeURIComponent(preload), cli, ...args,
       ], { encoding: "utf8", timeout: 10_000 });
@@ -267,7 +267,12 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       },
       {
         args: ["update", "--help"],
-        includes: ["数据库升级未完成时不启动服务", "当前数据库基线无迁移写入", "执行目标版本的数据库升级入口"],
+        includes: ["数据库只接受当前 Schema", "预检失败时不停止服务"],
+      },
+      {
+        args: ["uninstall", "--help"],
+        includes: ["保留", "输出和 Shell 配置"],
+        excludes: ["清理旧安装", "Shell PATH"],
       },
       { args: ["doctor", "--help"], includes: ["codexc doctor [--json]"] },
       {
@@ -284,6 +289,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
           ].map((command) => `\n  ${command}`),
         ],
         excludes: [
+          "旧单账户",
           "\n  service install",
           "\n  service restart",
           "\n  gateway",

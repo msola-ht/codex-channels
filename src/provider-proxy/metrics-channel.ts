@@ -164,13 +164,14 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || (record.responseModel !== undefined && !nullableString(record.responseModel))
     || (record.traffic !== undefined && !validTrafficReference(record.traffic))
     || !nullableString(record.serviceTier)
+    || !nullableString(record.reasoningEffort)
     || (record.requestServiceTier !== undefined && !nullableString(record.requestServiceTier))
     || !oneOf(record.status, ["completed", "failed", "incomplete", "unknown"])
     || !nullableHttpStatus(record.httpStatus)
-    || (record.userAgent !== undefined && !nullableUserAgent(record.userAgent))
+    || !nullableUserAgent(record.userAgent)
     || !nullableString(record.errorType)
     || !nullableString(record.errorCode)
-    || (record.errorMessage !== undefined && !nullableMessage(record.errorMessage))
+    || !nullableMessage(record.errorMessage)
     || !nullableString(record.incompleteReason)
     || !nullableTokenCount(record.inputTokens)
     || !nullableTokenCount(record.cachedInputTokens)
@@ -194,11 +195,11 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     return undefined;
   }
   const weeklyQuota = record.weeklyQuota;
-  if (weeklyQuota !== undefined && !nullableWeeklyQuota(weeklyQuota)) {
+  if (!nullableWeeklyQuota(weeklyQuota)) {
     return undefined;
   }
   const quotaWindows = record.quotaWindows;
-  if (quotaWindows !== undefined && !nullableQuotaWindows(quotaWindows)) {
+  if (!nullableQuotaWindows(quotaWindows)) {
     return undefined;
   }
   const quotaObservedAtMs = record.quotaObservedAtMs;
@@ -209,7 +210,6 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     && (!Array.isArray(quotaWindows) || quotaWindows.length === 0)) {
     return undefined;
   }
-  const quota = weeklyQuota as Record<string, unknown> | null | undefined;
   const userAgent = record.userAgent;
   return {
     ...record,
@@ -218,12 +218,8 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     errorMessage: typeof record.errorMessage === "string"
       ? record.errorMessage
       : null,
-    weeklyQuota: quota === null || quota === undefined
-      ? null
-      : { ...quota, planType: quota.planType ?? null },
-    quotaWindows: quotaWindows === null || quotaWindows === undefined
-      ? null
-      : quotaWindows,
+    weeklyQuota,
+    quotaWindows,
     quotaObservedAtMs: quotaObservedAtMs ?? null,
   } as unknown as ProviderProxyMetrics;
 }
@@ -289,8 +285,7 @@ function nullableWeeklyQuota(value: unknown): boolean {
     && Number.isSafeInteger(quota.resetsAt)
     && quota.resetsAt >= 0
     && (
-      quota.planType === undefined
-      || quota.planType === null
+      quota.planType === null
       || (
         typeof quota.planType === "string"
         && quota.planType.length > 0

@@ -25,7 +25,7 @@ import {
   writeManagedModelProviderProfileDefault,
 } from "../runtime/model-provider-runtime.mjs";
 import { JsonRpcClient, StdioTransport } from "../src/codex-client/index.js";
-import { applyDeepseekAccountConfiguration, deepseekAccountPaths, previewLegacyDeepseekRemoval, removeLegacyDeepseekAccount, removeDeepseekAccount, setDeepseekDefaultAccount } from "../scripts/deepseek-account-management.mjs";
+import { applyDeepseekAccountConfiguration, deepseekAccountPaths, removeDeepseekAccount, setDeepseekDefaultAccount } from "../scripts/deepseek-account-management.mjs";
 import { loadConfiguredRelayProviderMaterial } from "../runtime/model-provider-runtime.mjs";
 
 const homes: string[] = [];
@@ -59,30 +59,6 @@ it("exposes both native Relay protocols from existing DS credentials and rejects
   expect(material.paths).toContain(options.paths.profile);
   expect(() => loadConfiguredRelayProviderMaterial("ds-missing", options.environment)).toThrow();
 });
-
-async function legacyFixture(mode: "switching" | "exclusive", oldest = false) {
-  const options = fixture();
-  await applyDeepseekAccountConfiguration({ ...input, mode, confirmExclusiveConfigChange: true }, options);
-  const source = mode === "exclusive" ? options.paths.config : options.paths.profile;
-  const document = parse(readFileSync(source, "utf8"));
-  const providers = document.model_providers as Record<string, unknown>;
-  document.model_provider = "deepseek";
-  providers.deepseek = providers["ds-personal"];
-  delete providers["ds-personal"];
-  const directory = join(options.environment.CODEX_CONNECT_HOME, "providers", "deepseek");
-  const legacyMarker = oldest ? join(options.environment.CODEX_HOME, "codex-connect-deepseek.config.toml") : join(directory, "managed.toml");
-  const legacyProfile = join(options.environment.CODEX_HOME, oldest ? "deepseek.config.toml" : "sf-deepseek.config.toml");
-  writePrivateFileAtomicSync(mode === "exclusive" ? options.paths.config : legacyProfile, stringify(document));
-  writePrivateFileAtomicSync(legacyMarker, `version = 1\nprovider = "deepseek"\nmode = "${mode}"\n`);
-  const originalBackup = join(oldest ? join(options.environment.CODEX_HOME, "backup-codex-connect-deepseek") : join(directory, "backup"), "config.toml");
-  writePrivateFileAtomicSync(originalBackup, 'model = "original"\n');
-  const current = parse(readFileSync(options.paths.config, "utf8"));
-  current.personal_setting = "keep";
-  writePrivateFileAtomicSync(options.paths.config, stringify(current));
-  rmSync(options.paths.registry); rmSync(options.paths.marker); rmSync(options.paths.backup);
-  if (existsSync(options.paths.profile)) rmSync(options.paths.profile);
-  return { ...options, legacyMarker, legacyProfile, originalBackup };
-}
 
 describe("DeepSeek managed accounts", () => {
   it("requires explicit valid IDs and rejects colliding credential names", () => {
@@ -133,34 +109,6 @@ describe("DeepSeek managed accounts", () => {
     expect(loadDeepseekAccountCredential(options.environment, "ds-personal")).toBe("sk-personal");
   });
 
-  it.each(["switching", "exclusive"] as const)("removes a legacy %s account only after confirmation", async (mode) => {
-    const options = await legacyFixture(mode);
-    const preview = await previewLegacyDeepseekRemoval(options);
-    expect(preview.files).toContain(options.legacyMarker);
-    const paths = [options.legacyMarker, options.legacyProfile, options.paths.catalog, options.paths.config, options.originalBackup];
-    const before = paths.map((path) => existsSync(path) ? readFileSync(path) : undefined);
-    await expect(removeLegacyDeepseekAccount({}, options)).rejects.toThrow("明确确认");
-    expect(paths.map((path) => existsSync(path) ? readFileSync(path) : undefined)).toEqual(before);
-    await removeLegacyDeepseekAccount({ confirmRemove: true }, options);
-    expect(existsSync(options.legacyMarker)).toBe(false);
-    expect(existsSync(options.legacyProfile)).toBe(false);
-    expect(existsSync(options.paths.catalog)).toBe(false);
-    expect(existsSync(options.originalBackup)).toBe(true);
-    expect(parse(readFileSync(options.paths.config, "utf8"))).toEqual({ model: "original", personal_setting: "keep" });
-    await applyDeepseekAccountConfiguration(input, options);
-    expect(loadDeepseekAccountCredential(options.environment, "ds-personal")).toBe("sk-personal");
-  });
-
-  it("removes the oldest file layout without running a migration", async () => {
-    const options = await legacyFixture("exclusive", true);
-    await removeLegacyDeepseekAccount({ confirmRemove: true }, options);
-    expect(existsSync(options.legacyMarker)).toBe(false);
-    expect(existsSync(options.legacyProfile)).toBe(false);
-    expect(existsSync(options.originalBackup)).toBe(true);
-    expect(existsSync(join(options.environment.CODEX_CONNECT_HOME, "backups"))).toBe(false);
-    expect(parse(readFileSync(options.paths.config, "utf8"))).toEqual({ model: "original", personal_setting: "keep" });
-  });
-
   it("narrows existing DS capabilities transactionally without resetting model settings", async () => {
     const options = fixture();
     await applyDeepseekAccountConfiguration(input, options);
@@ -188,43 +136,6 @@ describe("DeepSeek managed accounts", () => {
     }));
     expect(readFileSync(options.paths.profile, "utf8")).toBe(profile);
     expect(options.downloadCatalog).toHaveBeenCalledTimes(1);
-  });
-
-  it("preserves existing accounts and an unrelated custom role", async () => {
-    const options = fixture();
-    await applyDeepseekAccountConfiguration(input, options);
-    const marker = join(options.environment.CODEX_HOME, "sf-deepseek.managed.toml");
-    writePrivateFileAtomicSync(marker, 'version = 1\nprovider = "deepseek"\nmode = "switching"\n');
-    const role = join(options.environment.CODEX_HOME!, "fixture-agent.toml");
-    writePrivateFileAtomicSync(role, 'model_provider = "custom-provider"\nmodel = "custom-model"\n');
-    writePrivateFileAtomicSync(options.paths.config, stringify({ model: "original", agents: { external: { config_file: role } } }));
-    const retained = [options.paths.profile, options.paths.marker, options.paths.registry, options.paths.catalog, options.paths.config, role];
-    const before = retained.map((path) => readFileSync(path));
-    await removeLegacyDeepseekAccount({ confirmRemove: true }, options);
-    expect(existsSync(marker)).toBe(false);
-    expect(retained.map((path) => readFileSync(path))).toEqual(before);
-    expect(loadDeepseekAccountCredential(options.environment, "ds-personal")).toBe("sk-personal");
-  });
-
-  it("rolls back deleted files if restoring the fixed config fails", async () => {
-    const options = await legacyFixture("exclusive");
-    const paths = [options.legacyMarker, options.paths.catalog, options.paths.config];
-    const before = paths.map((path) => readFileSync(path));
-    failure.path = options.paths.config;
-    await expect(removeLegacyDeepseekAccount({ confirmRemove: true }, options)).rejects.toThrow("injected");
-    expect(paths.map((path) => readFileSync(path))).toEqual(before);
-  });
-
-  it("rejects missing restore backups and leased runtimes before removing files", async () => {
-    const options = await legacyFixture("exclusive");
-    await expect(removeLegacyDeepseekAccount({ confirmRemove: true }, {
-      ...options, inspectSupervisor: async () => ({ status: "ready", topology: { version: 5, pid: 1, primaryProvider: "openai", managedProviders: ["deepseek"], socketPaths: [], runningProviders: ["deepseek"], releasedProviders: [], leasedProviders: ["deepseek"] } }),
-      releaseProvider: async () => ({ released: false, reason: "leased" }),
-    })).rejects.toThrow("正在被 Remote TUI 使用");
-    expect(existsSync(options.legacyMarker)).toBe(true);
-    rmSync(options.originalBackup);
-    await expect(removeLegacyDeepseekAccount({ confirmRemove: true }, options)).rejects.toThrow("备份缺失");
-    expect(existsSync(options.legacyMarker)).toBe(true);
   });
 
   it("requires detaching RS followers before removing the final DS account",async()=>{

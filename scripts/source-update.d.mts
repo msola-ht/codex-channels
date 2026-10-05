@@ -19,7 +19,6 @@ export type SourceUpdateStage =
   | "stop-services"
   | "switch-source"
   | "refresh-command"
-  | "upgrade-databases"
   | "configure-codex-daemon"
   | "restore-services"
   | "cleanup";
@@ -106,7 +105,7 @@ export interface SourceUpdateOptions {
   inspectStaged?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
-  ) => Promise<{ services: { installed: boolean }; databaseUpdatesRequired: boolean }>;
+  ) => Promise<{ services: { installed: boolean } }>;
   stopServices?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,

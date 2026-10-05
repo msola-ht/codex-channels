@@ -93,7 +93,6 @@ export function inspectManagedSourceUpdatePlan(
             "install-codex-cli",
             "switch-source",
             "refresh-command",
-            "upgrade-databases",
             "configure-codex-daemon",
             "restore-services",
             "cleanup",
@@ -177,7 +176,6 @@ export async function updateManagedSourceInstallation(
   let servicesRestored = false;
   let relayWasRunning = false;
   let backupPath;
-  let databasesReady = true;
   const renamePath = options.renamePath ?? renameSync;
   try {
     writeMessageSafely(writeMessage, "note", "正在克隆 Git main 候选源码。");
@@ -241,7 +239,6 @@ export async function updateManagedSourceInstallation(
       () => (options.inspectStaged ?? inspectStagedInstallation)(stagedCheckout, environment),
     );
     const candidateRequiresServiceInterruption = inspection.services.installed;
-    databasesReady = !inspection.databaseUpdatesRequired;
     notifySafely(options.onPrepared, withSourceUpdateRevision({
       ...plan,
       steps: inspection.services.installed
@@ -321,10 +318,6 @@ export async function updateManagedSourceInstallation(
         options,
       ),
     );
-    databasesReady = false;
-    await runStage("upgrade-databases", () =>
-      applyCandidateDatabaseUpdates(checkout, environment, options));
-    databasesReady = true;
     await runStage("configure-codex-daemon", () =>
       disableCandidateDaemonAutoStart(checkout, environment, options));
     if (inspection.services.installed) {
@@ -350,18 +343,6 @@ export async function updateManagedSourceInstallation(
         `main 源码已切换，但更新未完成；旧源码保留在 ${backupPath}。${errorMessage(error)}`,
         { cause: error },
       );
-    }
-    if (switched && !databasesReady) {
-      throw annotateSourceUpdateFailure(updateError, {
-        stage: activeStage,
-        completedStages,
-        recovery: {
-          services: servicesMayNeedRestore ? "stopped" : "not-needed",
-          source: sourceRecoveryStatus(switched, backupPath),
-          ...(backupPath ? { backupPath } : {}),
-        },
-        recommendation: "数据库升级尚未完成，未启动服务；检查迁移错误和数据库备份，修复后重新运行 codexc update；不要直接回退源码或启动服务",
-      });
     }
     if (servicesMayNeedRestore) {
       try {
@@ -843,32 +824,14 @@ async function inspectStagedInstallation(checkout, environment) {
   const moduleUrl = `${pathToFileURL(join(checkout, "scripts", "local-installation.mjs")).href}?staged`;
   const staged = await import(moduleUrl);
   const config = staged.inspectGatewayConfiguration(environment);
-  const databases = staged.inspectDatabaseUpdates(environment);
-  if (typeof databases.required !== "boolean") {
-    throw new Error("候选版本未返回数据库升级预检结果");
-  }
+  staged.inspectDatabases(environment);
   const services = staged.inspectCoreServiceInstallation(environment);
   if (!services.installed && await gatewayOwnerIsActive(config.configPath)) {
     throw new Error(
       "核心后台服务未安装，但检测到前台 Gateway 正在运行；请先按 Ctrl-C 结束后再更新",
     );
   }
-  return { config, services, databaseUpdatesRequired: databases.required };
-}
-
-async function applyCandidateDatabaseUpdates(checkout, environment, options) {
-  run(
-    process.execPath,
-    [
-      "--input-type=module",
-      "--eval",
-      "const candidate = await import(process.argv[1]); await candidate.applyDatabaseUpdates(process.env);",
-      pathToFileURL(join(checkout, "scripts", "local-installation.mjs")).href,
-    ],
-    checkout,
-    environment,
-    options.runCommand,
-  );
+  return { config, services };
 }
 
 function disableCandidateDaemonAutoStart(checkout, environment, options) {
@@ -1009,14 +972,11 @@ export async function updateInstalledPackage(environment = process.env, options 
   const checkout = options.projectDir ?? packageDir;
   const expected = codexVersion(checkout);
   const writeMessage = options.writeMessage ?? writeCliMessage;
-  writeMessageSafely(writeMessage, "note", "正在检查配套 Codex CLI、当前配置和数据库升级条件。");
+  writeMessageSafely(writeMessage, "note", "正在检查配套 Codex CLI、当前配置和数据库结构。");
   const inspection = await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
   let temporaryDirectory;
   let servicesStopped = false;
-  let serviceStopCompleted = false;
   let relayWasRunning = false;
-  let databasesReady = !inspection.databaseUpdatesRequired;
-  let packageStage = "install-codex-cli";
   try {
     const prepared = await prepareCodexVersion(expected, checkout, environment, writeMessage, {
       ...options,
@@ -1031,21 +991,12 @@ export async function updateInstalledPackage(environment = process.env, options 
     await (options.validateCodexContract ?? validateCodexContract)(
       checkout, prepared.validationEnvironment, options,
     );
-    if ((prepared.installRequired || inspection.databaseUpdatesRequired) && inspection.services.installed) {
+    if (prepared.installRequired && inspection.services.installed) {
       relayWasRunning = await (options.inspectRelayRunning ?? inspectRelayRunning)(environment);
       servicesStopped = true;
-      packageStage = "stop-services";
       await (options.stopServices ?? stopCoreServices)(checkout, environment, options);
-      serviceStopCompleted = true;
     }
-    packageStage = "install-codex-cli";
     await installPreparedCodexVersion(prepared, expected, checkout, environment, writeMessage, options);
-    if (inspection.databaseUpdatesRequired) {
-      packageStage = "upgrade-databases";
-      await applyCandidateDatabaseUpdates(checkout, environment, options);
-      databasesReady = true;
-    }
-    packageStage = "configure-codex-daemon";
     disableCandidateDaemonAutoStart(checkout, environment, options);
     if (servicesStopped) {
       await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);
@@ -1054,22 +1005,11 @@ export async function updateInstalledPackage(environment = process.env, options 
     writeMessageSafely(
       writeMessage,
       "success",
-      prepared.installRequired || inspection.databaseUpdatesRequired
-        ? `配套 Codex CLI ${expected} 与数据库更新已完成。`
-        : `检查完成：配套 Codex CLI ${expected} 与数据库均无需更新。`,
+      prepared.installRequired
+        ? `配套 Codex CLI ${expected} 更新已完成。`
+        : `检查完成：配套 Codex CLI ${expected} 无需更新，数据库结构有效。`,
     );
   } catch (error) {
-    if (!databasesReady && (servicesStopped || packageStage === "upgrade-databases")) {
-      throw annotateSourceUpdateFailure(error, {
-        stage: packageStage,
-        completedStages: [],
-        recovery: {
-          services: serviceStopCompleted ? "stopped" : servicesStopped ? "unknown" : "not-needed",
-          source: "unchanged",
-        },
-        recommendation: "数据库升级尚未完成，未尝试启动服务；检查迁移错误和数据库备份，修复后重新运行 codexc update",
-      });
-    }
     if (servicesStopped) {
       try {
         await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);

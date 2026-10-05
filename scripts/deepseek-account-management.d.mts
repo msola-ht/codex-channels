@@ -4,7 +4,6 @@ type Catalog = { models: Array<Record<string, unknown>> };
 export function deepseekAccountPaths(environment: NodeJS.ProcessEnv, accountId: string): {
   config: string; profile: string; marker: string; backup: string; registry: string; catalog: string; manifest: string; role: string;
 };
-export function hasLegacyDeepseekConfiguration(environment?: NodeJS.ProcessEnv): boolean;
 export interface DeepseekAccountConfigurationInput {
   accountId: string;
   mode?: "switching" | "exclusive";
@@ -24,13 +23,6 @@ export function applyDeepseekAccountConfiguration(input: DeepseekAccountConfigur
   downloadCatalog?: (fetchImpl: typeof fetch) => Promise<{ catalog: Catalog }>;
   fetchImpl?: typeof fetch;
 }): Promise<ReturnType<typeof previewDeepseekAccountConfiguration> & { action: "configured"; model: string }>;
-export function previewLegacyDeepseekRemoval(options?: ManagedAccountRuntimeOptions): Promise<{
-  operation: "legacy-remove"; account: { provider: "deepseek" }; mode: "switching" | "exclusive";
-  files: string[]; effects: { stopsRunningAppServer: boolean; restoresInitialConfig: boolean; preservesPrivateBackup: true }; activation: "restart-all";
-}>;
-export function removeLegacyDeepseekAccount(input?: { confirmRemove?: boolean }, options?: ManagedAccountRuntimeOptions): Promise<{
-  action: "legacy-removed"; runtime: "stopped" | "not-running"; activation: "restart-all";
-}>;
 export function setDeepseekDefaultAccount(accountId: string, options?: Options): Promise<{ action: "default-set"; accountId: string; activation: "restart-all" }>;
 export function previewDeepseekAccountRemoval(accountId: string, options?: ManagedAccountRuntimeOptions): Promise<{
   operation: "remove"; account: { id: string; provider: string };

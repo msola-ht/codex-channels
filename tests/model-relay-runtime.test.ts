@@ -8,10 +8,8 @@ import fs from "node:fs";
 import { Worker } from "node:worker_threads";
 import { syncBuiltinESMExports } from "node:module";
 import { readRelayQueue, readRelayManagement, manageModelRelay as sharedManage } from "../scripts/model-relay-management.mjs";
-import { GatewayOwner } from "../runtime/gateway-owner.mjs";
-import { upgradeTrafficCapture } from "../scripts/traffic-upgrade.mjs";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { createServer as createHttpServer, globalAgent } from "node:http";
 import { tmpdir } from "node:os";
@@ -337,7 +335,12 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   const service = await startModelRelayService(f.configPath, f.environment); cleanups.push(() => service.close());
   await manageModelRelay(parseModelRelayCommand(["enable"]), f.environment);
   expect(gatewayConfig.validateDebugConfigDocument(parse(readFileSync(f.configPath, "utf8")).debug ?? {}).model_traffic_dump).toBe(false);
-  expect(await upgradeTrafficCapture({ enabled: true, mode: "debug" }, f.environment)).toMatchObject({ result: "upgraded" });
+  const setCapture = (enabled: boolean) => {
+    const current = parse(readFileSync(f.configPath, "utf8"));
+    current.debug = { ...gatewayConfig.validateDebugConfigDocument(current.debug ?? {}), model_traffic_dump: enabled, model_traffic_input_items: enabled ? 0 : 3, model_traffic_item_max_bytes: enabled ? 0 : 65_536 };
+    writePrivateFileAtomicSync(f.configPath, stringify(current));
+  };
+  setCapture(true);
   await service.refresh();
   // Force capture preparation to overlap a global disable, after authentication/material preparation.
   const { RelayTrafficDump } = await import("../dist/provider-proxy/index.js");
@@ -354,11 +357,11 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
       headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" },
       body: JSON.stringify({ model: "clp-test/deepseek-v4.1-flash", messages: [{ role: "user", content: "waiting" }] }) });
     await preparationEntered;
-    await upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment);
+    setCapture(false);
     await service.refresh(); releasePreparation();
     const response = await waiting; expect(response.status).toBe(200); await response.text();
   } finally { releasePreparation(); preparation.mockRestore(); }
-  await upgradeTrafficCapture({ enabled: true, mode: "debug" }, f.environment);
+  setCapture(true);
   await service.refresh();
   await manageModelRelay(parseModelRelayCommand(["edit", "--caller", "client", "--reasoning", "off"]), f.environment);
   let key = issued.key;
@@ -405,21 +408,6 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   expect(completed.map(row => row.inputTokens).sort()).toEqual([2, 3]);
   expect(rows.records.find(row => row.status === "failed")).toMatchObject({ credentialGeneration: 2 });
 }, 15_000);
-
-it("refuses traffic upgrade before any write while a Gateway owner is active, including not-ready owners", async () => {
-  const f = await fixture();
-  const owner = new GatewayOwner(f.configPath); await owner.start(); cleanups.push(() => owner.close());
-  const before = readFileSync(f.configPath, "utf8");
-  const files = readdirSync(dirname(f.configPath));
-  for (const ready of [false, true]) {
-    if (ready) owner.markReady();
-    await expect(upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment)).rejects.toThrow("codexc service stop gateway");
-    expect(readFileSync(f.configPath, "utf8")).toBe(before);
-    expect(readdirSync(dirname(f.configPath))).toEqual(files);
-  }
-  await owner.close();
-  expect(await upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment)).toMatchObject({ result: "upgraded" });
-});
 
 it("shares read-only previews and revision-checked policy edits, preserving credentials on policy changes", async () => {
   const f = await fixture();

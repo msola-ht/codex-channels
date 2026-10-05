@@ -57,7 +57,7 @@ codexc relay status          # 查询可选模型 API 转发进程
 codexc traffic               # 查看模型请求与响应转储
 codexc reset-credit list     # 查询 OpenAI 可用重置券；use 交互确认使用
 codexc webui                 # 启动本地指标与设置 WebUI
-codexc update                # 更新受管源码、同步配套 CLI 并检查数据库升级
+codexc update                # 更新受管源码、同步配套 CLI 并校验当前数据库
 codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc desktop-app status    # 检查 Desktop App 共享连接与 macOS 内置工具 Host（预览）
 ```
@@ -81,7 +81,7 @@ Codex 用户配置：
 共享代理通过 `codexc config → 网络代理` 设置，保存在 `~/.codex/.env`，见[代理设置](docs/user-guide.md#代理与权限)。
 
 配置示例见[`config.example.toml`](config.example.toml)。不要把 Token、Cookie 或 Authorization Header 写入日志或提交到仓库。
-DS、OCG、CCG、CLP 支持多账户，在 `codexc setup → 模型与提供商` 中管理。旧单账户需要先确认移除再重新添加，更新器不执行账户迁移；具体命令见下面的提供商文档。
+DS、OCG、CCG、CLP 使用当前多账户结构，在 `codexc setup → 模型与提供商` 中添加和管理；具体命令见下面的提供商文档。
 
 ## 专题文档
 

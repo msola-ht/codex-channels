@@ -235,7 +235,7 @@ function validateReceipt(receipt) {
   }
   if (receipt.error !== undefined && (!string(receipt.error) || receipt.error.length > 1024)) throw new Error("更新错误摘要无效");
   if (receipt.result !== undefined) {
-    exactKeys(receipt.result, [], ["version", "previousVersion", "packageSha256", "backupPaths", "restoredServices", "recovery"]);
+    exactKeys(receipt.result, [], ["version", "previousVersion", "packageSha256", "restoredServices", "recovery"]);
     const result = receipt.result;
     if (result.version !== undefined && !string(result.version)) throw new Error("更新结果版本无效");
     if (result.previousVersion !== undefined && !string(result.previousVersion)) throw new Error("更新结果原版本无效");
@@ -249,10 +249,9 @@ function validateReceipt(receipt) {
         throw new Error("更新恢复结果无效");
       }
     }
-    for (const key of ["backupPaths", "restoredServices"]) {
-      if (result[key] !== undefined && (!Array.isArray(result[key]) || result[key].length > 32 || !result[key].every(string))) {
-        throw new Error("更新结果列表无效");
-      }
+    if (result.restoredServices !== undefined && (!Array.isArray(result.restoredServices)
+      || result.restoredServices.length > 32 || !result.restoredServices.every(string))) {
+      throw new Error("更新结果列表无效");
     }
   }
 }

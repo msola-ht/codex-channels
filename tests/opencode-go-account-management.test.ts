@@ -77,27 +77,6 @@ describe("OpenCode Go account management", () => {
     ]);
   });
 
-  it("repairs an existing registry whose default account is missing", async () => {
-    const legacyAccounts = accounts.map((account) => ({ ...account, default: false }));
-    const loadAccounts = vi.fn(() => legacyAccounts);
-    const writeAccounts = vi.fn();
-
-    await expect(applyOpencodeGoDefaultAccountChange("b", {
-      environment,
-      loadAccounts,
-      writeAccounts,
-    })).resolves.toMatchObject({
-      action: "default-set",
-      currentDefaultAccountId: null,
-      willChange: true,
-    });
-    expect(loadAccounts).toHaveBeenCalledWith(environment, { allowMissingDefault: true });
-    expect(writeAccounts).toHaveBeenCalledWith(environment, [
-      { id: "main", default: false, email: "user@example.com" },
-      { id: "b", default: true },
-    ]);
-  });
-
   it("returns a stable field error for an unknown account", () => {
     try {
       previewOpencodeGoDefaultAccountChange("missing", {
@@ -285,17 +264,16 @@ describe("OpenCode Go account management", () => {
     };
     const paths = opencodeGoAccountPaths(environment, "main");
     mkdirSync(join(paths.markerPath, ".."), { recursive: true, mode: 0o700 });
-    mkdirSync(join(paths.providerDirectory, "backup"), { recursive: true, mode: 0o700 });
+    mkdirSync(paths.backupDirectory, { recursive: true, mode: 0o700 });
     writeFileSync(
       paths.markerPath,
       'version = 1\nprovider = "ocg-main"\nmode = "exclusive"\n',
       { mode: 0o600 },
     );
-    writeFileSync(join(paths.providerDirectory, "backup", "config.toml"), "profile = \"openai\"\n", { mode: 0o600 });
+    writeFileSync(join(paths.backupDirectory, "config.toml"), "profile = \"openai\"\n", { mode: 0o600 });
     mkdirSync(join(join(environment.CODEX_HOME, "fixture-agent.toml"), ".."), { recursive: true, mode: 0o700 });
     writeFileSync(join(environment.CODEX_HOME, "fixture-agent.toml"), "[agents]\n", { mode: 0o600 });
     writeFileSync(paths.catalogPath, "current-catalog", { mode: 0o600 });
-    writeFileSync(join(paths.providerDirectory, "backup", "models.json"), "old-catalog", { mode: 0o600 });
     try {
       await expect(applyOpencodeGoAccountRemoval({
         accountId: "main",
@@ -319,7 +297,6 @@ describe("OpenCode Go account management", () => {
       })).resolves.toMatchObject({ action: "removed" });
       expect(readFileSync(join(environment.CODEX_HOME, "fixture-agent.toml"), "utf8")).toBe("[agents]\n");
       expect(existsSync(paths.catalogPath)).toBe(false);
-      expect(readFileSync(join(paths.providerDirectory, "backup", "models.json"), "utf8")).toBe("old-catalog");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

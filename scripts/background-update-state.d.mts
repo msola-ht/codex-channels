@@ -16,7 +16,6 @@ export interface UpdateResult {
   version?: string;
   previousVersion?: string;
   packageSha256?: string;
-  backupPaths?: string[];
   restoredServices?: string[];
   recovery?: {
     status: "not-needed" | "restored" | "failed" | "stopped";

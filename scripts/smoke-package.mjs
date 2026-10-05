@@ -148,8 +148,6 @@ try {
     "scripts/source-install-metadata.mjs",
     "scripts/source-uninstall.d.mts",
     "scripts/source-uninstall.mjs",
-    "scripts/source-shell-path.d.mts",
-    "scripts/source-shell-path.mjs",
     "scripts/cli-status.mjs",
     "scripts/cli-help.mjs",
     "scripts/cli-menu.mjs",

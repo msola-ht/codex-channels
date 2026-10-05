@@ -59,7 +59,7 @@
 
 
 DeepSeek 运行实例采用 `ds-<账户>` 与 `sf-ds-<账户>`，账户共享官方 DS 目录和统计代理。
-旧单账户需先移除再以明确账户 ID 重新添加，旧 Thread 不做兼容；历史 `deepseek` 指标保留，新指标按账户归属。
+只支持显式账户 ID 的当前多账户结构，Thread 与新指标按账户归属，不提供旧单账户迁移或移除入口。
 实现见 [`deepseek-account-management.mjs`](../scripts/deepseek-account-management.mjs)，
 验证见 [`deepseek-account-management.test.ts`](../tests/deepseek-account-management.test.ts)，
 其中真实 App Server 合同读取两个账户的模型目录，不调用付费模型。
@@ -411,7 +411,7 @@ Schema v24 新增可空 `response_usage_amount`，由 Provider Proxy 从 HTTP JS
 Schema v25 增加请求级上游诊断摘要，普通 Provider Proxy 与 Relay 通过独立采集和受校验 IPC 写入同一指标库；WebUI 请求列表及详情、JSON/CSV 导出直接读取，不依赖调用转储。
 Schema v26 增加官方轮次耗时事实及历史同步标记，完成卡与 WebUI 共用查询；会话累计值按轮次求和，不重复存储。
 Schema v27 增加可空的额度快照接收时间，历史记录保持 NULL，不替换请求开始、完成或入库时间。
-运行时只接受当前 Schema v27；v20/v21/v22/v23/v24/v25/v26 通过带一致性备份的显式 upgrade 保留数据升级，不支持的旧版本失败关闭，新安装直接建库。流程见[源码安装与更新](source-install.md)。
+运行时与安装预检只接受当前 Schema v27，不提供历史版本迁移，新安装直接建库。流程见[源码安装与更新](source-install.md)。
 
 更新器关闭原生 daemon 自动启动也复用用户层 `config/read` 与版本化 `config/batchWrite`；
 入口为 `scripts/codex-user-config.mjs`，由 `source-update.mjs` 在候选切换和无需升级两条路径调用，

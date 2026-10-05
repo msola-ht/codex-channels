@@ -31,8 +31,7 @@ export interface CoreServiceReadinessOptions {
 export interface CoreServiceInstallation { installed: boolean; }
 export function inspectCoreServiceInstallation(environment?: LocalUpdateEnvironment, platform?: NodeJS.Platform): CoreServiceInstallation;
 export function inspectGatewayConfiguration(environment?: LocalUpdateEnvironment): { configPath: string };
-export function inspectDatabaseUpdates(environment?: LocalUpdateEnvironment): { required: boolean; state: DatabaseInspection; metrics: DatabaseInspection; sessionDisplayCache: DatabaseInspection };
-export function applyDatabaseUpdates(environment?: LocalUpdateEnvironment): void | Promise<void>;
+export function inspectDatabases(environment?: LocalUpdateEnvironment): { state: DatabaseInspection; metrics: DatabaseInspection; sessionDisplayCache: DatabaseInspection };
 export function inspectSessionDisplayCache(environment?: LocalUpdateEnvironment): DatabaseInspection;
 
 export function waitForCoreServiceTarget(

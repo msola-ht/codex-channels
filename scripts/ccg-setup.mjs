@@ -49,7 +49,7 @@ import {
 } from "./managed-provider-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
-import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
+import { stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
 import { createCcgCatalog } from "./provider-model-catalog.mjs";
 
 const maximumCatalogBytes = 2 * 1024 * 1024;
@@ -95,20 +95,6 @@ export function ccgSetupPaths(environment = process.env, accountId) {
   };
 }
 
-function legacyCcgPaths(environment) {
-  const directory = managedProviderDirectory(environment, baseDefinition);
-  return {
-    profile: join(codexHomePath(environment), baseDefinition.profileFileName),
-    marker: join(directory, baseDefinition.managedMarkerFileName),
-    backup: join(directory, baseDefinition.backupDirectoryName, "config.json"),
-  };
-}
-
-export function hasLegacyCcgConfiguration(environment = process.env) {
-  const paths = legacyCcgPaths(environment);
-  return existsSync(paths.marker) || existsSync(paths.profile);
-}
-
 export async function applyCcgConfiguration({
   accountId,
   apiKey,
@@ -121,7 +107,6 @@ export async function applyCcgConfiguration({
   environment = process.env,
 } = {}) {
   validateCcgAccountId(accountId);
-  if (hasLegacyCcgConfiguration(environment)) throw new Error("请先通过 CCG Setup 移除旧单账户，再重新添加账户");
   if (!["switching", "exclusive"].includes(mode)) throw new Error("CCG 模式无效");
   const definition = ccgAccountDefinition(accountId);
   if (!isManagedProviderApiKeyValid(definition, apiKey)) throw new Error("CCG API Key 无效");
@@ -210,52 +195,6 @@ export async function applyCcgConfiguration({
   });
 }
 
-async function legacyCcgRemovalPlan(environment) {
-  const legacy = legacyCcgPaths(environment);
-  const marker = await readConfig(legacy.marker);
-  if (marker.version !== 1 || marker.provider !== "ccg"
-    || !["switching", "exclusive"].includes(marker.mode)) {
-    throw new Error("旧 CCG 管理标记无效");
-  }
-  const configPath = join(codexHomePath(environment), "config.toml");
-  const current = await readConfig(configPath);
-  const updates = new Map([[legacy.marker, undefined], [legacy.profile, undefined]]);
-  if (marker.mode === "exclusive") {
-    if (current.model_provider !== "ccg") throw new Error("旧 CCG 配置与管理标记不一致");
-    const initial = await readInitialConfig(legacy.backup);
-    if (!initial) throw new Error("旧 CCG 初始配置备份缺失");
-    updates.set(configPath, stringify(restoreProviderBaseConfig(current, initial.config, baseDefinition)));
-  } else if (current.model_provider === "ccg") {
-    throw new Error("旧 CCG 配置与管理标记不一致");
-  }
-  if (loadCcgAccounts(environment).length === 0) {
-    const directory = managedProviderDirectory(environment, baseDefinition);
-    updates.set(join(directory, baseDefinition.catalogFileName), undefined);
-    updates.set(join(directory, baseDefinition.catalogManifestFileName), undefined);
-  }
-  const snapshots = snapshotProviderFiles([...updates.keys()]);
-  return { updates, snapshots, mode: marker.mode };
-}
-
-export async function previewLegacyCcgRemoval(options = {}) {
-  const plan = await legacyCcgRemovalPlan(options.environment ?? process.env);
-  const runtime = await inspectManagedAccountRuntime("ccg", options);
-  return { operation: "legacy-remove", account: { provider: "ccg" }, files: [...plan.updates.keys()],
-    effects: { stopsRunningAppServer: runtime.running, restoresInitialConfig: plan.mode === "exclusive",
-      preservesPrivateBackup: true, historyThreadsBecomeUnavailable: true }, activation: "restart-all" };
-}
-
-export async function removeLegacyCcgAccount({ confirmRemove = false } = {}, options = {}) {
-  const environment = options.environment ?? process.env;
-  if (confirmRemove !== true) throw new Error("移除旧 CCG 账户必须明确确认");
-  return withModelProviderManagementTransaction(environment, async () => {
-    const plan = await legacyCcgRemovalPlan(environment);
-    const runtime = await stopManagedAccountForRemoval("ccg", options);
-    await applyProviderFileUpdates(plan.updates, plan.snapshots);
-    return { action: "legacy-removed", runtime, activation: "restart-all" };
-  });
-}
-
 export async function setCcgDefaultAccount(accountId, { environment = process.env } = {}) {
   validateCcgAccountId(accountId);
   return withModelProviderManagementTransaction(environment, async () => {
@@ -318,11 +257,10 @@ export async function runCcgSetup({
   accountId: requestedAccountId,
 } = {}) {
   const accounts = loadCcgAccounts(environment);
-  const legacy = hasLegacyCcgConfiguration(environment);
   const action = requestedAction ?? await prompts.select({
     message: "CCG（CommandCode）账户管理",
     options: [
-      ...(legacy ? [{ value: "legacy-remove", label: "移除旧单账户，然后重新添加" }] : [{ value: "add", label: "新增账户" }]),
+      { value: "add", label: "新增账户" },
       ...(accounts.length === 0 ? [] : [
         { value: "reconfigure", label: "重新配置账户" },
         { value: "settings", label: "修改默认模型与思考等级" },
@@ -333,18 +271,6 @@ export async function runCcgSetup({
     ],
   });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
-  if (action === "legacy-remove") {
-    const preview = await previewLegacyCcgRemoval({ environment });
-    output.write(`将移除或恢复以下旧账户文件：\n${preview.files.join("\n")}\n`);
-    const confirmed = await prompts.confirm({
-      message: "移除旧 CCG 账户的 Key 与运行配置？保留备份和历史统计，之后需重新添加。",
-      initialValue: false,
-    });
-    if (confirmed !== true) return { action: "back" };
-    const result = await removeLegacyCcgAccount({ confirmRemove: true }, { environment });
-    writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
-    return result;
-  }
   const accountId = requestedAccountId ?? (action === "add"
     ? await promptManagedAccountId(prompts, accounts)
     : await prompts.select({
@@ -444,15 +370,12 @@ async function readInitialConfig(path) {
 }
 
 export async function runCcgAccountCli(args, options = {}) {
-  const usage = "用法：codexc ccg account remove <id>\ncodexc ccg legacy remove（确认后移除旧单账户）";
-  if (isCommandHelp(args, [[], ["account"], ["legacy"], ["legacy", "remove"], ["account", "remove"]], usage)) {
+  const usage = "用法：codexc ccg account remove <id>";
+  if (isCommandHelp(args, [[], ["account"], ["account", "remove"]], usage)) {
     (options.output ?? process.stdout).write(`${usage}\n`);
     return;
   }
   const [command, action, accountId, ...rest] = args;
-  if (command === "legacy" && action === "remove" && accountId === undefined) {
-    return runCcgSetup({ ...options, action: "legacy-remove" });
-  }
   if (command !== "account" || action !== "remove" || accountId === undefined || rest.length !== 0) {
     throw new Error(usage);
   }

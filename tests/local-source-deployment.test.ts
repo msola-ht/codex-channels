@@ -54,12 +54,10 @@ function fixture() {
     executeCommand: () => "codex-cli 0.160.0\n",
     buildCandidate: () => { calls.push("build"); },
     validateContract: () => { calls.push("contract"); },
-    inspectPackage: packageDirectory => {
+    inspectPackage: () => {
       if (databaseState === "unknown") throw new Error("unrecognized schema");
-      const isCandidate = packageDirectory === source;
-      const compatible = isCandidate ? databaseState === "new" : databaseState === "old";
+      const compatible = databaseState === "old";
       return { config: { configPath: join(directory, "config.toml") }, services: { installed: true }, databases: {
-        required: !compatible,
         state: { compatible, exists: true, databasePath: database, schemaVersion: databaseState === "new" ? 6 : 5 },
         metrics: { compatible: true, exists: false }, sessionDisplayCache: { compatible: true, exists: false },
       } };
@@ -93,14 +91,6 @@ function fixture() {
       rmSync(installed, { recursive: true, force: true });
       cpSync(packageDirectory, installed, { recursive: true });
     },
-    applyDatabases: () => {
-      calls.push("migrate");
-      const backupPath = `${database}.v5-backup-fixture`;
-      cpSync(database, backupPath);
-      writeFileSync(database, "new database");
-      databaseState = "new";
-      return { backupPath };
-    },
   };
   return { directory, source, runner, installed, database, calls, services, options, setDatabaseState: (value: typeof databaseState) => { databaseState = value; } };
 }
@@ -122,11 +112,23 @@ describe("本机源码后台部署", () => {
     expect(entry).toMatchObject({ kind: "file", sha256: hash(content) });
   });
 
+  it("rejects obsolete deployment recovery state without touching data or services", async () => {
+    const test = fixture();
+    const statePath = join(test.directory, "deployment-state.json");
+    const state = JSON.stringify({ schemaVersion: 1, backupPaths: [], restoredServices: [] });
+    writeFileSync(statePath, state, { mode: 0o600 });
+
+    await expect(recoverLocalSource(test.options)).rejects.toThrow("恢复状态格式不受支持");
+
+    expect(test.calls).toEqual([]);
+    expect(readFileSync(statePath, "utf8")).toBe(state);
+    expect(readFileSync(test.database, "utf8")).toBe("old database");
+  });
+
   it("prepares both complete packages before stopping and restores only running targets including WebUI", async () => {
     const test = fixture();
     const result = await deployLocalSource(test.options);
-    expect(test.calls).toEqual(["build", "contract", "prepare:previous", "prepare:candidate", "stop:webui", "stop:relay", "stop:gateway", "stop:app-server", "install:candidate", "migrate", "start:app-server", "start:gateway", "start:webui"]);
-    expect(result.backupPaths).toEqual([`${test.database}.v5-backup-fixture`]);
+    expect(test.calls).toEqual(["build", "contract", "prepare:previous", "prepare:candidate", "stop:webui", "stop:relay", "stop:gateway", "stop:app-server", "install:candidate", "start:app-server", "start:gateway", "start:webui"]);
     expect(readFileSync(join(test.installed, "marker.txt"), "utf8")).toBe("new");
     expect(result.restoredServices).toEqual(["app-server", "gateway", "webui"]);
     const before = [...test.calls];
@@ -185,24 +187,32 @@ describe("本机源码后台部署", () => {
     expect(readFileSync(test.database, "utf8")).toBe("old database");
   });
 
-  it("keeps a complete new package when migration completes but reports an error", async () => {
+  it("keeps a complete new package when service restoration fails once", async () => {
     const test = fixture();
-    const migrate = test.options.applyDatabases!;
-    test.options.applyDatabases = async (...args) => { await migrate(...args); throw new Error("post-migration failure"); };
+    const serviceAction = test.options.serviceAction!;
+    let failed = false;
+    test.options.serviceAction = async (...args) => {
+      if (args[0] === "start" && !failed) { failed = true; throw new Error("start failure"); }
+      return serviceAction(...args);
+    };
     const error: unknown = await deployLocalSource(test.options).catch(value => value);
     expect(recovery(error)).toMatchObject({ status: "restored", package: "candidate" });
     expect(test.calls).not.toContain("install:previous");
-    expect(readFileSync(test.database, "utf8")).toBe("new database");
-    expect((error as Error & { localDeploymentFailure: { backupPaths: string[] } }).localDeploymentFailure.backupPaths).toEqual([`${test.database}.v5-backup-fixture`]);
+    expect(readFileSync(test.database, "utf8")).toBe("old database");
   });
 
-  it("does not restore old databases or start writers after an unproved partial migration", async () => {
+  it("does not restore databases or start writers after an external schema change", async () => {
     const test = fixture();
-    test.options.applyDatabases = () => { writeFileSync(test.database, "partial changes with old schema"); throw new Error("partial migration failed"); };
+    const install = test.options.installPackage!;
+    test.options.installPackage = async (...args) => {
+      await install(...args);
+      writeFileSync(test.database, "unknown schema");
+      test.setDatabaseState("unknown");
+    };
     const error: unknown = await deployLocalSource(test.options).catch(value => value);
     expect(recovery(error).status).toBe("stopped");
     expect(test.calls.some(call => call.startsWith("start:"))).toBe(false);
-    expect(readFileSync(test.database, "utf8")).toBe("partial changes with old schema");
+    expect(readFileSync(test.database, "utf8")).toBe("unknown schema");
     await expect(recoverLocalSource(test.options)).rejects.toThrow("恢复未完成");
   });
 
@@ -246,13 +256,13 @@ describe("本机源码后台部署", () => {
     const path = join(test.directory, "deployment-state.json");
     const state = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
     state.completed = false;
-    state.stage = "upgrade-databases";
+    state.stage = "validate-databases";
     writeFileSync(path, JSON.stringify(state));
     for (const service of test.services) { service.running = false; service.state = "inactive/dead"; }
     const result = await recoverLocalSource(test.options);
     expect(result.recovery).toMatchObject({ status: "restored", package: "candidate" });
     expect(test.services.find(service => service.target === "webui")?.running).toBe(true);
-    expect(readFileSync(test.database, "utf8")).toBe("new database");
+    expect(readFileSync(test.database, "utf8")).toBe("old database");
   });
 
   it("rejects unsupported platforms and mismatched npm targets before invoking commands", async () => {
@@ -302,8 +312,8 @@ describe("本机源码后台部署", () => {
       return install(...args);
     };
     const result = await recoverLocalSource(test.options);
-    expect(result.recovery).toMatchObject({ status: "restored", package: "candidate" });
-    expect(readFileSync(join(test.installed, "marker.txt"), "utf8")).toBe("new");
+    expect(result.recovery).toMatchObject({ status: "restored", package: "previous" });
+    expect(readFileSync(join(test.installed, "marker.txt"), "utf8")).toBe("old");
   });
 
   it("provides only controlled CLI-version or stage summaries for worker logs", async () => {
@@ -313,24 +323,22 @@ describe("本机源码后台部署", () => {
     expect((error as Error & { localDeploymentFailure: { summary: string } }).localDeploymentFailure.summary).toBe("Codex CLI 版本不匹配：需要 0.160.0，当前 0.159.0");
   });
 
-  it("executes candidate-owned inspection and migration in real isolated Node.js processes", async () => {
+  it("executes read-only candidate inspection in real isolated Node.js processes", async () => {
     const test = fixture();
     delete test.options.inspectPackage;
-    delete test.options.applyDatabases;
     test.options.environment = { ...test.options.environment, FIXTURE_DATABASE: test.database };
-    for (const [directory, expected] of [[test.source, "new database"], [test.runner, "old database"]] as const) {
+    for (const directory of [test.source, test.runner]) {
       mkdirSync(join(directory, "scripts"));
-      writeFileSync(join(directory, "scripts", "local-installation.mjs"), `import { readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+      writeFileSync(join(directory, "scripts", "local-installation.mjs"), `import { readFileSync } from 'node:fs';
 export function inspectGatewayConfiguration() { return { configPath: 'fixture-config' }; }
 export function inspectCoreServiceInstallation() { return { installed: true }; }
-export function inspectDatabaseUpdates(environment) { const compatible = readFileSync(environment.FIXTURE_DATABASE, 'utf8') === ${JSON.stringify(expected)}; return { required: !compatible, state: { exists: true, compatible, databasePath: environment.FIXTURE_DATABASE }, metrics: { exists: false, compatible: true }, sessionDisplayCache: { exists: false, compatible: true } }; }
-export function applyDatabaseUpdates(environment) { const backupPath = environment.FIXTURE_DATABASE + '.migration.bak'; copyFileSync(environment.FIXTURE_DATABASE, backupPath); writeFileSync(environment.FIXTURE_DATABASE, 'new database'); console.log('fixture migration diagnostic'); return { backupPath }; }
+export function inspectDatabases(environment) { const compatible = readFileSync(environment.FIXTURE_DATABASE, 'utf8') === 'old database'; return { state: { exists: true, compatible, databasePath: environment.FIXTURE_DATABASE }, metrics: { exists: false, compatible: true }, sessionDisplayCache: { exists: false, compatible: true } }; }
 `);
     }
     test.options.executeCommand = (command, args, commandOptions) => command === "fixture-codex" ? "codex-cli 0.160.0\n" : execFileSync(command, args, { cwd: commandOptions.cwd, env: commandOptions.environment, encoding: "utf8", timeout: 30_000 });
     const result = await deployLocalSource(test.options);
-    expect(result.backupPaths).toEqual([`${test.database}.migration.bak`]);
-    expect(readFileSync(test.database, "utf8")).toBe("new database");
+    expect(result.restoredServices).toEqual(["app-server", "gateway", "webui"]);
+    expect(readFileSync(test.database, "utf8")).toBe("old database");
   });
 
   it("bundles exact production dependencies and installs both prepared packages offline in disposable prefixes", async () => {

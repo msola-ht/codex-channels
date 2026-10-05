@@ -29,11 +29,9 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 同一目录中引用某模型的账户 Profile 同步该模型的默认思考等级；选择其他模型的账户保留各自模型等级。
 新目录不再包含账户默认模型时明确失败。
 
-账户移除命令为 `codexc ccg account remove <id>`。旧版单实例 `ccg` 不再迁移，
-使用 `codexc ccg legacy remove`，或进入 CCG Setup 选择“移除旧单账户，然后重新添加”，
-确认后移除旧 Key 和运行配置，保留安装前备份及历史统计，再填写明确账户 ID 重新添加。
+账户移除命令为 `codexc ccg account remove <id>`，确认后移除该账户 Key 和运行配置，保留安装前备份及历史统计。
 固定模式恢复原有主配置字段；Remote TUI 正在使用时须先退出。
-更新器不检查或清理 Provider 旧账户配置。旧 Provider 的历史 Thread 不再接续。
+仅支持当前多账户格式。
 
 ## 文件与运行模式
 

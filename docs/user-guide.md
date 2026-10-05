@@ -174,8 +174,7 @@ Gateway 会在关闭 Client 和停止 App Server 前向所有已知授权渠道�
 恢复时若 Provider、模型或设置已不可用，会要求重新选择，不自动换账户或模型。
 已有绑定仍以 App Server 的 Thread 设置为准；显式恢复同 Provider 历史会话继续沿用渠道偏好，
 跨 Provider 恢复尊重目标 Thread，原生 Queue 存在时清除待生效覆盖。撤权、归档和跨渠道接管
-等清理操作不会让旧偏好在重启后重新生效。首次采用此功能需通过
-[状态数据库升级流程](source-install.md)将 v5 显式升级至 v6。
+等清理操作不会让旧偏好在重启后重新生效。状态库仅接受当前 Schema v6。
 此后直接发送消息只会开启新会话，不会接续旧 Thread；需要继续旧会话时直接使用提示中的
 `/r <Thread ID>` 命令显式恢复；飞书显示为 CardKit 2.0 卡片，Telegram 为 HTML 面板，微信为
 结构化文本。修改后需要重启 Gateway。
@@ -367,7 +366,7 @@ CLI 版本不匹配时预检失败，不静默升级；完整流程与恢复条�
 更新发现默认 CLI 缺失或版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
 非交互调用会给出精确版本安装命令并退出，不静默安装。
 
-更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。目标版本按受支持范围执行显式数据库升级；指标 v20/v21/v22/v23/v24/v25/v26→v27 保留旧数据并生成一致性备份，运行时不隐式迁移。更新会将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，包括版本无需更新时；不停止已有官方后台。其他用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
+更新先检查源码、公开合同、当前配置和数据库结构，通过后在一个停机窗口完成程序及配套 Codex CLI 安装与服务恢复。仅接受当前 Schema，不迁移或改写数据库。更新会将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，包括版本无需更新时；不停止已有官方后台。其他用户偏好与 Provider 模型目录不改写，不支持的配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
 
 ### 本机清理与归档
 
@@ -386,7 +385,6 @@ codexc cleanup
 | 清理旧指标 | `codexc metrics cleanup --restart-gateway` | 备份清理；显式 `--restart-gateway` 会停止后启动 Gateway（原先停止也会启动），交互菜单则按原状态恢复 |
 | 核对未确认渠道结果 | `codexc delivery status` / `codexc delivery list` | 先停止 Gateway；明确重发、确认送达与停写备份见[投递箱运维](delivery.md) |
 | 清理指定 Provider 的指标 | `codexc metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
-| 保留数据升级指标库 | `codexc metrics upgrade --from 26 --to 27` | 默认预检；先停止 Gateway 与 Relay，核对后加 `--apply` |
 | 重置整个指标库 | `codexc metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
 
 `codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。会话归档、旧指标清理和指标库重置会在确认后临停运行中的 Gateway；转储删除先预览并确认，再询问临停 Gateway、Relay 和 App Server。结束、取消或失败后按原状态恢复，原先停止的服务不会被启动；恢复失败会报告具体服务和手动启动命令。底层命令仍检查实际进程已退出，不终止前台自行运行的进程。执行失败会报告错误并返回清理菜单。
@@ -571,9 +569,7 @@ offset/bytes 引用轮转的 `payload-*.bin`，原始传输轨迹位于 `trace-*
 `model_traffic_retention_days` 默认 `30`。App Server 服务每次启动，以及开启转储后建立新 writer
 session 时，都会按 session 最后活动时间删除超过该天数的可识别 V2 历史批次；启动清理即使当前已
 关闭转储也会执行。清理以完整 session 为单位，含保留期内记录的批次会整体保留；设为 `0` 可关闭按
-时间自动清理。旧版逐帧 JSONL、未知文件和未知目录不会自动删除。升级后首次启动会按同一规则处理
-已有 V2 历史批次；需要回滚到不识别该键的旧版时，先从 `[debug]` 删除
-`model_traffic_retention_days`。
+时间自动清理。未知文件和未知目录不会自动删除。
 
 转储默认按下一节的体积控制规则裁剪，不会把每次请求重发的完整会话历史原样落盘。流被提前终止时，
 该逻辑调用会得到 `failed` 或 `incomplete` 终态及明确的 `errorScope`；已收到的传输块仍在 trace 中。
@@ -593,9 +589,8 @@ codexc traffic cleanup --confirm               # 停止全部 App Server 与 Rel
 摘要行包含调用编号、时间、请求路径或 WebSocket URL、线程、轮次、模型和终态；详情固定分为“请求”
 与“响应”，并补充参数、Token 用量和已完成输出条目。列表区分模型列表查询、连接预热与模型请求。
 不传路径时读取 `traffic/` 中最新标签的最新 writer session；也可以用 `--dir` 指定根
-目录，或传入一个 V2 session 目录。旧版逐帧 JSONL 原样保留但不自动迁移或混读，重启 App Server
-后会生成 V2 session；回滚旧版本时旧文件仍可继续使用。`codexc traffic -h` 列出全部选项。
-`cleanup` 会预览默认 `traffic/` 或 `--dir` 指定目录中可识别的全部 V2 session 和旧版逐帧 JSONL，
+目录，或传入一个 V2 session 目录。仅支持 V2 session。`codexc traffic -h` 列出全部选项。
+`cleanup` 会预览默认 `traffic/` 或 `--dir` 指定目录中可识别的全部 V2 session，
 未知文件与目录不处理。实际删除只允许当前配置的数据目录下的 `traffic/`；先运行
 `codexc service stop relay` 和 `codexc service stop app-server`，再加 `--confirm`。删除不可恢复，完成后可按需运行
 `codexc service start app-server`，此前启用的 Relay 可按需运行 `codexc service start relay`。
@@ -670,7 +665,7 @@ npm test -- tests/session-router.test.ts
 `codexc relay` 管理独立 Relay 的调用方和访问密钥；`status`、`callers` 只读，
 `issue` 签发、`rotate` 轮换、`disable --caller ID` 撤销。新秘密只在保存后显示一次。
 `enable`/`disable` 保存服务开关并确认当前进程生效；进程未运行时明确显示仅保存，
-通过 `codexc service start relay` 启动；停止、重启、状态和日志也使用 `relay` 目标，不接受旧目标名称 `model-relay`。内部系统服务名称保持不变，无需为名称变更重新安装服务。首次启用前先完成指标库显式升级。
+通过 `codexc service start relay` 启动；停止、重启、状态和日志也使用 `relay` 目标。指标库只接受当前 Schema，新安装直接创建。
 
 Relay 默认禁用、回环监听；可显式使用 IPv4 局域网监听，跨不可信网络使用自己管理的加密隧道。提供原生 Chat Completions 与 Responses JSON/SSE 和
 受限模型列表，不提供 App Server 的 Agent、Thread、Turn、工具执行或文件访问。
@@ -736,15 +731,7 @@ Relay 保留普通应用请求头（例如 User-Agent、HTTP-Referer、X-Title�
 
 Codex 和 Relay 共用 `[debug].model_traffic_dump`，默认关闭。在 WebUI 的 Gateway 系统设置或 `codexc config` 系统设置中，用“记录调用详情”控制采集，用“调用记录模式”选择生产或调试；不再单独按 Key 开启。只记录启用后实际出站的调用，不补录历史。
 
-如果配置仍含旧 `model_relay.traffic_dump`、`traffic_dump_mode` 或 `traffic_dump_debug`，运行时会明确拒绝。安装新版本后、运行 `codexc update` 或启动服务前，先停止旧 Gateway（包括前台进程），再显式选择统一后的状态。旧进程会按旧 Schema 自动补齐刚移除的字段；安装新文件不会替换其内存中的代码。例如保留关闭并采用生产模式：
-
-```bash
-codexc service stop gateway
-codexc traffic upgrade --enabled false --mode production
-codexc update
-```
-
-要统一开启调试，可明确选择 `--enabled true --mode debug`。升级命令锁定配置、校验旧字段、保存并校验私有备份后原子替换；不修改身份、凭据、数据库或已有转储，不自动重启服务。不能用旧开关的逻辑“或”自动扩大采集范围。
+只接受当前全局采集配置，未知字段明确拒绝；不提供旧采集配置转换命令。
 
 模式复用已有裁剪参数：生产预设为 `model_traffic_input_items = 3`、`model_traffic_item_max_bytes = 65536`，调试预设为 `0/0`；仅两项都为 0 时视为调试。自定义非零裁剪值仍受支持，切换模式才会写入预设值。Codex 沿用现有精简/完整转储，Relay 生产记录出站请求与上游响应，调试为所有调用方增加入站、交付及实际处理记录。调试没有 Key 限定或自动到期；排查完可手动恢复生产或关闭采集。Codex 更改在重启 App Server 后生效，运行中的 Relay 在配置刷新后用于新请求；已开始采集的请求按开始时的模式完成。
 
@@ -752,7 +739,7 @@ Codex/Relay 在生产和调试模式均保留普通请求/响应头及关联 ID�
 
 Relay 生产记录脱敏后的出站 Chat/Responses 参数、输入和上游 JSON/SSE；请求与响应头遵循上述必要脱敏规则。翻译原文、回答及自由文本内的秘密仍会保存。请求正文最多 1 MiB、响应 8 MiB；Relay 共用 512 MiB 磁盘和 16 MiB 待写预算。保留天数统一使用 `[debug].model_traffic_retention_days`，默认 30 天，0 关闭按时间清理但保留 Relay 容量上限。首次启用在取消/超时边界内等待异步容量初始化，随后按实际已写及待写字节记账，并为在途调用预留空间。后台清理保护活动批次及扫描期间新建批次，整理期间继续采集；容量不足、写入故障或超限会留下日志或截断标记。写入故障会停止本进程后续采集，排除故障并重启 Relay 后恢复，模型转发继续。
 
-停止采集不删除已有文件。回退程序前停止相关写入服务并归档调试批次；统一后的全局字段已被旧程序支持，旧 Relay 因独立字段缺失默认不采集。不要恢复整份旧配置覆盖当前凭据。如需回退指标库，按升级输出的备份路径及 SHA-256 执行 `codexc metrics rollback --from 27 --to 26 --backup PATH --sha256 HASH --apply`，先归档新库再恢复；从 v20 升级的备份使用 `--to 20`。
+停止采集不删除已有文件。指标库只接受当前 Schema，不提供跨版本升级或回退。不要恢复旧配置覆盖当前凭据。
 
 模型转发管理页显示配置并发上限及运行状态，点击“刷新”更新服务状态，左侧“模型转发”下的二级菜单“请求队列”独立展示当前请求及执行阶段。配置上限不代表运行进程已应用；服务停止或状态无法确认时，不显示虚假的零队列。
 

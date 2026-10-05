@@ -89,7 +89,6 @@ export async function runBackgroundUpdateWorker(root, id, options = {}) {
           const receipt = persist(safe ? "failed" : "recovery-required", failure.stage, {
             error: failure.summary ?? (safe ? failedMessage : recoveryMessage),
             result: {
-              backupPaths: failure.backupPaths,
               restoredServices: failure.recovery.restoredServices,
               recovery: failure.recovery,
             },
