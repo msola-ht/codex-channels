@@ -267,7 +267,7 @@ export interface StoredSubagentThreadRecord {
 }
 
 export interface StoredSubagentListItem extends StoredSubagentThreadRecord, Pick<StoredThreadListItem,
-  "provider" | "model" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"
+  "provider" | "model" | "reasoningEffort" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"
 > {
   directSubagentCount: number;
   firstRequestStartedAtMs: number | null;

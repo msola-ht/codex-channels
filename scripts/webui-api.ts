@@ -213,7 +213,7 @@ export interface ThreadsResponse extends MetricsPageSummary {
 }
 
 export interface SubagentListItem extends Pick<ThreadListItem,
-  "provider" | "model" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"
+  "provider" | "model" | "reasoningEffort" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"
 > {
   threadId: string
   parentThreadId: string
@@ -965,6 +965,8 @@ export interface TrafficLabel {
 }
 
 export interface TrafficExchangeSummary {
+  /** 已保存请求正文中的思考等级；缺失时不推断默认值。 */
+  reasoningEffort?: string
   /** 从已记录 User-Agent 识别的客户端自报名称，并非已验证身份。 */
   clientName?: string
   /** 已记录请求接口使用的协议，不代表提供商的全部能力。 */
@@ -1172,6 +1174,8 @@ export type RelayQueueSnapshot = { state: "stopped" | "unknown" } | {
     displayName: string | null;
     provider: string | null;
     model: string | null;
+    /** 已验证入站请求的思考等级；尚未解析或无可展示值时为 null。 */
+    reasoningEffort: string | null;
     protocol: "chat" | "responses";
     phase: "input" | "queue" | "prepare" | "upstream" | "delivery";
     elapsedMs: number;

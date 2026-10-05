@@ -9,6 +9,24 @@ import { sample } from "./request-metrics-fixtures.js";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
+  it("shows recorded reasoning effort immediately after model in every request metrics table", () => {
+    const tables = ["requests", "errors", "threads", "turns", "traffic", "subagentsRelated", "allSubagents"];
+    for (const table of tables) {
+      const labels = headers(markup[table]!);
+      expect(labels[labels.indexOf("模型") + 1]).toBe("思考");
+      const cells = [...markup[table]!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)];
+      expect(cells[labels.indexOf("思考")]?.[1]?.replace(/<[^>]*>/gu, "")).toBe("high");
+      for (const [variant, expected] of [["null", "—"], ["none", "none"], ["future", "future"]]) {
+        const html = markup[`${table}-reasoning-${variant}`]!;
+        const values = [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)];
+        expect(values[headers(html).indexOf("思考")]?.[1]?.replace(/<[^>]*>/gu, "")).toBe(expected);
+      }
+    }
+    for (const name of ["threadsEn", "subagentsRelatedEn", "allSubagentsEn"]) {
+      const labels = headers(markup[name]!);
+      expect(labels[labels.indexOf("Model") + 1]).toBe("Reasoning");
+    }
+  });
   it("separates client interruptions from failures in cards and turn columns", () => {
     for (const name of ["interruptedSummary", "interruptedGlobal", "interruptedErrorsSummary"]) {
       expect(markup[name]).toContain("完成 2 · 客户端中断 5 · 其他失败 1 · 未完整观测 2");
@@ -16,23 +34,23 @@ describe("WebUI metrics table presentation", () => {
     }
     expect(markup.interruptedSummaryEn).toContain("Completed: 2 · Client interruptions: 5 · Other failures: 1 · Not fully observed: 2");
     expect(markup.interruptedErrorsSummary).toContain("失败率 10.0%");
-    expect(headers(markup.interruptedTurns!)).toContain("客户端中断");
-    expect(headers(markup.interruptedTurns!)).toContain("未完整观测");
+    expect(headers(markup.interruptedTurns!)).toContain("中断");
+    expect(headers(markup.interruptedTurns!)).toContain("未完整");
     const cells = [...markup.interruptedTurns!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)].map(match => match[1]?.replace(/<[^>]*>/gu, ""));
     expect(cells[headers(markup.interruptedTurns!).indexOf("失败")]).toBe("1");
-    expect(cells[headers(markup.interruptedTurns!).indexOf("客户端中断")]).toBe("5");
-    expect(cells[headers(markup.interruptedTurns!).indexOf("输入 Token")]).toBe("≥ 100");
-    expect(cells[headers(markup.interruptedTurns!).indexOf("缓存命中率")]).toBe("50.0%");
+    expect(cells[headers(markup.interruptedTurns!).indexOf("中断")]).toBe("5");
+    expect(cells[headers(markup.interruptedTurns!).indexOf("输入")]).toBe("≥ 100");
+    expect(cells[headers(markup.interruptedTurns!).indexOf("命中率")]).toBe("50.0%");
     expect(markup.interruptedTurns).toContain('aria-description="按已记录的输入和缓存用量计算；未观测到的用量不参与计算。"');
     expect(markup.interruptedTurnsEn).toContain('aria-description="Calculated from recorded input and cached usage; unobserved usage is excluded."');
     for (const [name, rate] of [["interruptedTurnsZeroCache", "0.0%"], ["interruptedTurnsUnknownCache", "—"], ["interruptedTurnsUnknown", "—"]]) {
-      const cacheCell = [...markup[name!]!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)][headers(markup[name!]!).indexOf("缓存命中率")]?.[1];
+      const cacheCell = [...markup[name!]!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)][headers(markup[name!]!).indexOf("命中率")]?.[1];
       expect(cacheCell?.replace(/<[^>]*>/gu, "")).toBe(rate);
       if (rate === "—") expect(cacheCell).not.toContain("aria-description");
     }
     const unknown = [...markup.interruptedTurnsUnknown!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)].map(match => match[1]?.replace(/<[^>]*>/gu, ""));
-    expect(unknown[headers(markup.interruptedTurnsUnknown!).indexOf("输入 Token")]).toBe("—");
-    expect(unknown[headers(markup.interruptedTurnsUnknown!).indexOf("输出 Token")]).toBe("—");
+    expect(unknown[headers(markup.interruptedTurnsUnknown!).indexOf("输入")]).toBe("—");
+    expect(unknown[headers(markup.interruptedTurnsUnknown!).indexOf("输出")]).toBe("—");
     expect(markup.interruptedTurns).not.toContain("重试成功");
     expect(markup.interruptedTurns).not.toContain("正常取消");
   });
@@ -58,19 +76,19 @@ describe("WebUI metrics table presentation", () => {
   });
   it("renders descendant breakdown and overall total in an accessible tooltip, including descendant-only matches", () => {
     const cell = (html: string, label: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf(label)]?.[1]?.replace(/<[^>]*>/g, "");
-    expect(headers(markup.threads!)).toEqual(["期间首次请求", "会话", "提供商", "模型", "轮次", "请求", "输入 Token", "缓存命中率", "输出 Token", "总计", "会话总耗时", "最后记录", "子代理"]);
-    expect(cell(markup.threads!, "输入 Token")).toBe("100");
-    expect(cell(markup.threads!, "缓存命中率")).toBe("50.0%");
-    expect(cell(markup.threads!, "输出 Token")).toBe("20");
+    expect(headers(markup.threads!)).toEqual(["期间首次请求", "会话", "提供商", "模型", "思考", "轮次", "请求", "输入", "命中率", "输出", "总计", "总耗时", "最后记录", "子代理"]);
+    expect(cell(markup.threads!, "输入")).toBe("100");
+    expect(cell(markup.threads!, "命中率")).toBe("50.0%");
+    expect(cell(markup.threads!, "输出")).toBe("20");
     expect(cell(markup.threads!, "总计")).toBe("1.08K");
     expect(markup.threads).toContain('aria-description="子代理: 输入: 800, 缓存: 300, 缓存命中率: 37.5%, 输出: 160, 合计: 960. 总计: 1.08K"');
     expect(markup.threads).toMatch(/<span[^>]*tabindex="0"[^>]*data-slot="tooltip-trigger"/u);
     expect(cell(markup.threadsChildOnly!, "总计")).toBe("1.08K");
-    expect(cell(markup.threadsChildOnly!, "输入 Token")).toBe("0");
-    expect(cell(markup.threadsChildOnly!, "缓存命中率")).toBe("—");
-    expect(cell(markup.threadsChildOnly!, "输出 Token")).toBe("0");
-    expect(cell(markup.threadsUnknownCache!, "缓存命中率")).toBe("—");
-    expect(cell(markup.threadsPartialCache!, "缓存命中率")).toBe("50.0%");
+    expect(cell(markup.threadsChildOnly!, "输入")).toBe("0");
+    expect(cell(markup.threadsChildOnly!, "命中率")).toBe("—");
+    expect(cell(markup.threadsChildOnly!, "输出")).toBe("0");
+    expect(cell(markup.threadsUnknownCache!, "命中率")).toBe("—");
+    expect(cell(markup.threadsPartialCache!, "命中率")).toBe("50.0%");
     expect(markup.threadsChildOnly).toContain('aria-description="子代理: 输入: 900, 缓存: —, 缓存命中率: —, 输出: 180, 合计: 1.08K. 总计: 1.08K"');
     expect(cell(markup.threadsChildOnly!, "模型")).toBe("—");
     expect(markup.threadsChildOnly).not.toContain("NaN");
@@ -100,7 +118,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.subagentsCollapsed).toContain('href="/threads/thread-1/subagents"');
     expect(markup.subagentsRelated).toContain('/threads/child%2Fone?range=all');
     expect(markup.subagentsRelated).toContain('data-slot="table"');
-    expect(headers(markup.subagentsRelated!)).toEqual(["首次请求", "子代理", "会话", "提供商", "模型", "轮次", "请求", "输入 Token", "缓存命中率", "输出 Token", "最后记录", "子代理"]);
+    expect(headers(markup.subagentsRelated!)).toEqual(["首次请求", "子代理", "会话", "提供商", "模型", "思考", "轮次", "请求", "输入", "命中率", "输出", "最后记录", "子代理"]);
     expect(markup.subagentsRelated).toContain('aria-sort="descending"');
     expect(markup.subagentsRelated).toContain("model-test");
     expect(markup.subagentsRelated).toContain("openai");
@@ -243,7 +261,7 @@ describe("WebUI metrics table presentation", () => {
       expect(card).not.toContain("缓存：60");
       expect(card).not.toContain("无缓存：240");
       const table = markup[`pairedCacheTurns-${name}`]!;
-      const cacheCell = [...table.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)][headers(table).indexOf("缓存命中率")]?.[1];
+      const cacheCell = [...table.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)][headers(table).indexOf("命中率")]?.[1];
       expect(cacheCell?.replace(/<[^>]*>/gu, "")).toBe(rate);
       expect(table).not.toContain("20.0%");
     }
@@ -443,6 +461,7 @@ describe("WebUI metrics table presentation", () => {
         const { AccountIdField } = await server.ssrLoadModule("/src/components/settings/account-id-field.tsx");
         const { RequestDetail } = await server.ssrLoadModule("/src/components/requests/request-detail.tsx");
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
+        const { ErrorsTable } = await server.ssrLoadModule("/src/components/requests/errors-table.tsx");
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
         const { ThreadsPage } = await server.ssrLoadModule("/src/pages/threads-page.tsx");
@@ -479,7 +498,7 @@ describe("WebUI metrics table presentation", () => {
         globalThis.fixtureSubagentState = { data: { subagents: [], modelUsage: [], total: 0 }, error: null, errorCode: null,
           loading: false, refreshing: false, refetch: noop, pagination: subagentPagination, notificationStatus: "live", lastUpdatedAt: 1000,
         };
-        const common = { provider: "openai", model: "model-test", recordedAtMs: 1000, directSubagentCount: 0,
+        const common = { provider: "openai", model: "model-test", reasoningEffort: "high", recordedAtMs: 1000, directSubagentCount: 0,
           sessionTiming: { knownDurationMs: 120000, missingTurnCount: 0, historyComplete: true },
           cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
           inputTokens: 100, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 5,
@@ -496,7 +515,7 @@ describe("WebUI metrics table presentation", () => {
           h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(TooltipProvider, null,
             h(ServerTimeContext.Provider, { value: globalThis.fixtureServerClock ?? { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" } }, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props))))));
         const requestProps = { ...pagination, records: [{ ...record, id: 42 }], filter: "", total: 1 };
-        const exchange = { protocol: "responses", clientName: "WorkBuddy", id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
+        const exchange = { protocol: "responses", reasoningEffort: "high", clientName: "WorkBuddy", id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
           state: "completed", firstTokenMs: 100, durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
         const detail = { ...exchange, transport: "http", modelEvidence: { serverModels: [], safetyModels: [], turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }], truncated: false },
           parameterComparison: [], request: { headers: {}, body: "request-body", parameters: {},
@@ -748,6 +767,18 @@ describe("WebUI metrics table presentation", () => {
         result.allSubagents = render(SubagentsPage, {});
         result.allSubagentsEn = render(SubagentsPage, {}, "en");
         result.allSubagentsCalls = globalThis.fixtureSubagentCalls.join(",");
+        for (const reasoningEffort of [null, "none", "future"]) {
+          const variant = String(reasoningEffort);
+          result['requests-reasoning-' + variant] = render(RequestsTable, { ...requestProps, records: [{ ...record, id: 42, reasoningEffort }] });
+          result['errors-reasoning-' + variant] = render(ErrorsTable, { records: [{ ...record, id: 42, reasoningEffort }], query: {}, pagination });
+          result['threads-reasoning-' + variant] = render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", reasoningEffort }], query: {}, pagination });
+          result['turns-reasoning-' + variant] = render(TurnTable, { turns: [{ ...common, turnId: "turn-1", reasoningEffort }], threadId: "thread-1", query: {}, pagination });
+          result['traffic-reasoning-' + variant] = render(TrafficTable, { exchanges: [{ ...exchange, reasoningEffort: reasoningEffort ?? undefined }], onOpen: noop });
+          globalThis.fixtureSubagentState.data.subagents[0].reasoningEffort = reasoningEffort;
+          result['subagentsRelated-reasoning-' + variant] = render(ThreadSubagents, { threadId: "thread-1" });
+          result['allSubagents-reasoning-' + variant] = render(ThreadSubagents, {});
+        }
+        globalThis.fixtureSubagentState.data.subagents[0].reasoningEffort = "high";
         globalThis.fixtureCaptureTable = true;
         const sortCycle = [];
         globalThis.fixtureSubagentState.pagination.onSortingChange = next => { globalThis.fixtureSubagentState.pagination.sorting = next; };
@@ -1139,13 +1170,11 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.traffic).not.toContain('title="routing.finalProvider"');
   });
 
-  it("uses compact normal and warning badges for response models and actual upstreams", () => {
+  it("omits identical response model badges while preserving evidence and warning badges", () => {
     const badge = (html: string, title: string) => [...html.matchAll(/<span\b[^>]*data-slot="badge"[^>]*>[\s\S]*?<\/span>/g)].find(match => match[0].includes(`title="${title}"`))?.[0] ?? "";
     for (const key of ["requestsMatch", "traffic"]) {
-      const tag = badge(markup[key]!, "响应模型：model-test（名称一致）");
-      expect(tag).toContain('data-variant="outline"');
-      expect(tag).toContain('data-size="sm"');
-      expect(tag).toContain('>model-test</span>');
+      expect(badge(markup[key]!, "响应模型：model-test（名称一致）")).toBe("");
+      expect(markup[key]).toContain('aria-description="请求：model-test；响应回显：model-test。仅比较名称，不验证模型身份。"');
     }
     for (const key of ["requests", "trafficMismatch"]) {
       const tag = badge(markup[key]!, "响应模型：model-other（名称不一致）");
@@ -1251,7 +1280,7 @@ describe("WebUI metrics table presentation", () => {
   it("uses shared table skeletons and hides stale error values while loading", () => {
     expect(headers(markup.errorsLoading!)).toEqual(headers(markup.errors!));
     expect([...markup.errorsLoading!.matchAll(/<tr\b/g)]).toHaveLength(6);
-    expect([...markup.errorsLoading!.matchAll(/data-slot="skeleton"/g)]).toHaveLength(35);
+    expect([...markup.errorsLoading!.matchAll(/data-slot="skeleton"/g)]).toHaveLength(headers(markup.errorsLoading!).length * 5);
     expect(markup.errorsLoading).not.toContain("fixture failure");
     expect(markup.errorsLoading).toMatch(/data-slot="card-content"[^>]*inert=""/);
     expect(markup.errorsLoading).toContain('data-slot="spinner"');
@@ -1280,7 +1309,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.turnsDurationZero).toContain("0 ms");
     expect(markup.threadTiming).not.toContain("会话总耗时");
     expect(markup.threadTiming).not.toContain("最近一轮耗时");
-    expect(markup.threads).toContain("会话总耗时");
+    expect(headers(markup.threads!)).toContain("总耗时");
     expect(markup.threads).toContain("2 min");
     expect(markup.threadsPartialDuration).toContain("2 min *");
     expect(markup.threadsPartialDuration).toContain("耗时缺失轮数：1");
@@ -1291,8 +1320,8 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.threadTimingPartialEn).not.toContain("Thread known duration");
     expect(markup.threadTimingMissing).not.toContain("2 min");
     expect(headers(markup.requests!)).toEqual([
-      "记录时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
-      "首 Token", "请求耗时", "来源", "请求详情",
+      "记录时间", "提供商", "模型", "思考", "状态", "输入", "命中率", "输出",
+      "首 Token", "耗时", "来源", "请求详情",
     ]);
     expect(markup.requests).not.toContain("未关联");
     expect(markup.requests).toContain("查看请求");
@@ -1304,7 +1333,7 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("shows request and period cache hit rates without treating missing data as zero", () => {
-    const cacheCell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf("缓存命中率")]?.[1];
+    const cacheCell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf("命中率")]?.[1];
     expect(cacheCell(markup.requests!)).toContain("50.0%");
     expect(cacheCell(markup['request-cache-0']!)).toContain("0.0%");
     expect(cacheCell(markup['request-cache-null']!)).toContain("—");
@@ -1353,8 +1382,8 @@ describe("WebUI metrics table presentation", () => {
 
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
     expect(headers(markup.turns!)).toEqual([
-      "时间", "轮次", "提供商", "模型", "请求", "失败", "输入 Token", "缓存命中率", "输出 Token",
-      "客户端中断", "未完整观测", "本轮耗时", "子代理",
+      "时间", "轮次", "提供商", "模型", "思考", "请求", "失败", "输入", "命中率", "输出",
+      "中断", "未完整", "耗时", "子代理",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
   });
@@ -1362,21 +1391,25 @@ describe("WebUI metrics table presentation", () => {
   it("shows cache rates in separate columns and removes them from input tooltips", () => {
     const cell = (html: string, label: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf(label)]?.[1] ?? "";
     for (const key of ["requests", "threads", "turns", "providers", "subagentsRelated"]) {
-      expect(headers(markup[key]!)).toContain("缓存命中率");
-      expect(cell(markup[key]!, "缓存命中率")).toContain("50.0%");
-      const input = cell(markup[key]!, "输入 Token");
+      expect(headers(markup[key]!)).toContain("命中率");
+      expect(cell(markup[key]!, "命中率")).toContain("50.0%");
+      const input = cell(markup[key]!, "输入");
+      const head = markup[key]!.match(/<thead\b[^>]*>([\s\S]*?)<\/thead>/u)?.[1];
+      expect(head).toContain('aria-description="输入 Token"');
+      expect(head).toContain('aria-description="输出 Token"');
+      expect(head).toContain('aria-description="缓存命中率"');
       expect(input).toContain('aria-description="缓存：50; 无缓存：50"');
       expect(input).not.toContain("命中率");
       expect(input).not.toContain("50.0%");
     }
-    expect(cell(markup.turnsZeroCache!, "缓存命中率")).toContain("0.0%");
+    expect(cell(markup.turnsZeroCache!, "命中率")).toContain("0.0%");
     for (const key of ["turnsUnknownCache", "turnsZeroInput", "providersUnknownCache"]) {
-      expect(cell(markup[key]!, "缓存命中率")).toContain("—");
+      expect(cell(markup[key]!, "命中率")).toContain("—");
       expect(markup[key]).not.toContain("NaN");
     }
     expect(markup.providersEmpty).toContain('colSpan="8"');
-    expect(cell(markup.partialThread!, "输入 Token")).toContain('aria-description="缓存：≥ 50; 无缓存：≥ 50"');
-    expect(cell(markup.partialThread!, "输入 Token")).not.toContain("命中率");
+    expect(cell(markup.partialThread!, "输入")).toContain('aria-description="缓存：≥ 50; 无缓存：≥ 50"');
+    expect(cell(markup.partialThread!, "输入")).not.toContain("命中率");
   });
 
   it("preserves unknown and zero cache counts in thread tooltips while retaining aggregate cache metrics", () => {
@@ -1397,7 +1430,7 @@ describe("WebUI metrics table presentation", () => {
     const ascendingHeaders = [...markup.ascending!.matchAll(/<th\b[^>]*>[\s\S]*?<\/th>/g)]
       .map((match) => match[0]);
     const timeIndex = headers(markup.requests!).indexOf("记录时间");
-    const speedIndex = headers(markup.ascending!).indexOf("请求耗时");
+    const speedIndex = headers(markup.ascending!).indexOf("耗时");
     const statusIndex = headers(markup.requests!).indexOf("状态");
     expect(timeIndex).toBeGreaterThanOrEqual(0);
     expect(speedIndex).toBeGreaterThanOrEqual(0);
@@ -1422,7 +1455,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.inputToken).not.toContain("50.0%");
     expect(markup.outputToken).toContain('aria-description="推理输出：5; 非推理输出：5"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
-    for (const label of ["首 Token", "请求耗时", "请求详情"]) {
+    for (const label of ["首 Token", "耗时", "请求详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
   });
@@ -1499,7 +1532,7 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("aligns numeric headers and cells on the same edge", () => {
-    const columnIndex = headers(markup.requests!).indexOf("输入 Token");
+    const columnIndex = headers(markup.requests!).indexOf("输入");
     const heads = [...markup.requests!.matchAll(/<th\b[^>]*>/g)].map(match => match[0]);
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>/g)].map(match => match[0]);
     expect(columnIndex).toBeGreaterThanOrEqual(0);
@@ -1508,7 +1541,7 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration with compact response-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["开始时间", "提供商", "客户端", "模型", "协议", "状态", "首 Token", "请求耗时", "类型"]);
+    expect(headers(markup.traffic!)).toEqual(["开始时间", "提供商", "客户端", "模型", "思考", "协议", "状态", "首 Token", "耗时", "类型"]);
     expect(markup.traffic).toContain("WorkBuddy");
     expect(markup.traffic).toContain("客户端");
     expect(markup.traffic).toContain("Responses");
@@ -1517,7 +1550,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.traffic).not.toContain("加载中…");
     expect(markup.traffic).not.toContain("#7");
     expect(markup.traffic).toContain("的调用明细");
-    expect(markup.traffic).toContain("响应模型：model-test（名称一致）");
+    expect(markup.traffic).toContain("请求：model-test；响应回显：model-test。");
     expect(markup.traffic).not.toContain("→");
     expect(markup.trafficMismatch).toContain("名称不一致");
     expect(headers(markup.trafficLoading!)).toEqual(headers(markup.traffic!));
@@ -1527,7 +1560,7 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("distinguishes zero first-token latency from an unrecorded value", () => {
-    const cell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][6]?.[1];
+    const cell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf("首 Token")]?.[1];
     expect(cell(markup.trafficFirstZero!)).toBe("0 ms");
     expect(cell(markup.trafficFirstMissing!)).toBe("—");
   });

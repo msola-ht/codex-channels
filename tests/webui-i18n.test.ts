@@ -601,7 +601,8 @@ describe("WebUI 界面文案语言切换", () => {
   it("请求明细的表头、提示、空状态与页面文案覆盖英文", () => {
     expect(result.requestsTableEn).toContain("Records");
     expect(result.requestsTableEn).toContain("Matching records: 1 · This page: 1 · Page 1");
-    expect(result.requestsTableEn).toContain("Request duration");
+    expect(result.requestsTableEn).toContain(">Duration<");
+    expect(result.requestsTableEn).toContain('aria-description="From submitting to request completion or failure; excludes preparation before sending and client rendering."');
     expect(result.requestsTableEn).toContain("View request");
     expect(result.requestsTableEn).not.toContain("Not linked");
     expect(result.requestsTableEn).not.toContain('href="/requests/');
@@ -643,7 +644,8 @@ describe("WebUI 界面文案语言切换", () => {
   it("调用列表与详情的表格、提示、空状态与失败覆盖英文", () => {
     expect(result.trafficTableEn).not.toContain("Turn State characters");
     expect(result.trafficTableEn).toContain("Started at");
-    expect(result.trafficTableEn).toContain("Request duration");
+    expect(result.trafficTableEn).toContain(">Duration<");
+    expect(result.trafficTableEn).toContain('aria-description="From submitting to request completion or failure; excludes preparation before sending and client rendering."');
     expect(result.trafficTableEn).toContain("Model request");
     expect(result.trafficTableEn).toContain("Completed");
     expect(result.trafficTableEmptyEn).toContain("No traffic records");

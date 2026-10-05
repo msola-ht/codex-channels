@@ -1057,7 +1057,7 @@ export class SqliteRequestMetricsQueries {
         grouped.input_tokens, grouped.output_tokens, grouped.known_cached_input_tokens,
         grouped.cache_observed_input_tokens, grouped.cache_missing_request_count,
         grouped.first_request_started_at_ms, grouped.last_recorded_at_ms,
-        latest.provider, latest.model
+        latest.provider, latest.model, latest.reasoning_effort
       FROM subagent_threads AS relation
       LEFT JOIN grouped ON grouped.thread_id = relation.thread_id
       LEFT JOIN model_request_metrics AS latest ON latest.id = grouped.latest_id
@@ -1072,6 +1072,7 @@ export class SqliteRequestMetricsQueries {
       recorded_at_ms: number;
       provider: string | null;
       model: string | null;
+      reasoning_effort: string | null;
       turn_count: number | null;
       request_count: number | null;
       input_tokens: number | null;
@@ -1090,6 +1091,7 @@ export class SqliteRequestMetricsQueries {
           directSubagentCount: counts.get(row.thread_id) ?? 0,
           provider: row.provider,
           model: row.model,
+          reasoningEffort: row.reasoning_effort,
           turnCount: row.turn_count ?? 0,
           requestCount: row.request_count ?? 0,
           requestOutcomes: toStoredRequestOutcomes(row),

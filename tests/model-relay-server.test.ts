@@ -829,6 +829,22 @@ describe("isolated Relay vertical request chain", () => {
     for (const session of readdirSync(directory)) expect(readdirSync(join(directory, session))).toEqual(["manifest.json"]);
   });
 
+  it.each(["high", "none", "future", undefined, 42])("shows only recorded native Responses effort in queue snapshots (%s)", async effort => {
+    let reply: ServerResponse | undefined;
+    const f = await fixture((_request, response) => { reply = response; });
+    const pending = fetch(`${f.relay.address()}/v1/responses`, {
+      method: "POST", headers: { authorization, "content-type": "application/json" },
+      body: JSON.stringify(wireRequest({ model: body.model, input: "hello", reasoning: { effort } })),
+    });
+    await vi.waitFor(() => expect(f.calls()).toBe(1));
+    expect(f.relay.queueSnapshot()).toMatchObject([{ protocol: "responses", reasoningEffort: typeof effort === "string" ? effort : null }]);
+    reply!.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+      id: "response-fixture", object: "response", model: body.model, status: "completed", output: [],
+    }));
+    await (await pending).text();
+    await vi.waitFor(() => expect(f.relay.queueSnapshot()).toEqual([]));
+  });
+
   it("queues behind ten executing requests and delivers JSON/SSE exactly once after release", async () => {
     const replies: ServerResponse[] = [];
     const f = await fixture((_request, response) => { replies.push(response); });
@@ -837,7 +853,7 @@ describe("isolated Relay vertical request chain", () => {
       accounts: base.accounts, callers: base.callers }));
     const running = Array.from({ length: 10 }, () => f.post());
     await vi.waitFor(() => expect(f.calls()).toBe(10));
-    const queuedJson = f.post(); const queuedStream = f.post({ ...body, stream: true });
+    const queuedJson = f.post({ ...body, reasoning_effort: "high" }); const queuedStream = f.post({ ...body, stream: true, reasoning: { effort: "future" } });
     await vi.waitFor(() => expect(f.relay.diagnostics().queue.waiting).toBe(2));
     expect(f.preparedCount()).toBe(10); expect(f.relay.diagnostics().active).toBe(10);
     const snapshot = f.relay.queueSnapshot();
@@ -846,8 +862,10 @@ describe("isolated Relay vertical request chain", () => {
     expect(snapshot.filter(row => row.phase === "upstream")).toHaveLength(10);
     for (const row of snapshot) {
       expect(row).toEqual({ requestId: expect.any(String), callerId: "caller-a", provider: "clp-a", model: "clp-a/fixture/model",
+        reasoningEffort: row.phase === "queue" ? expect.any(String) : null,
         protocol: "chat", phase: expect.any(String), elapsedMs: expect.any(Number) });
     }
+    expect(snapshot.filter(row => row.phase === "queue").map(row => row.reasoningEffort).sort()).toEqual(["future", "high"]);
 
     replies[0]!.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer));
     await vi.waitFor(() => expect(f.calls()).toBe(11));

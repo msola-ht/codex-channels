@@ -62,9 +62,10 @@ export function requestMetadata(body) {
   };
 }
 
-export function requestParameters(body) {
+export function requestParameters(body, protocol) {
   return {
-    reasoningEffort: stringValue(body?.reasoning?.effort),
+    reasoningEffort: stringValue(protocol === "chat" && body?.reasoning_effort !== undefined
+      ? body.reasoning_effort : body?.reasoning?.effort),
     serviceTier: stringValue(body?.service_tier),
     previousResponseId: stringValue(body?.previous_response_id),
     generate: typeof body?.generate === "boolean" ? body.generate : undefined,

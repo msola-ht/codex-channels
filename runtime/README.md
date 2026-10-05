@@ -233,7 +233,7 @@
 
 这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随本地 npm 打包产物安装，不向 npm Registry 发布新版本。
 
-- `model-relay-control.mjs` / `model-relay-control.d.mts`：独立 Relay 的 v5 私有状态（含队列等待时长、超时计数及采集状态）/配置摘要确认 IPC，另提供只读 queue 操作（携带运行配置、启用、监听状态及用途名称，最多 64 行、128 KiB 响应），有界连接、帧和等待，不传递秘密；独立 `.events` 端点推送队列变化，订阅不占用管理命令连接。
+- `model-relay-control.mjs` / `model-relay-control.d.mts`：独立 Relay 的 v6 私有状态（含队列等待时长、超时计数及采集状态）/配置摘要确认 IPC，另提供只读 queue 操作（携带运行配置、启用、监听状态、用途名称及必需的可空入站思考等级，最多 64 行、128 KiB 响应），有界连接、帧和等待，不传递秘密；拒绝旧版本和旧队列行结构，更新后须正常重启 Relay 和 WebUI。独立 `.events` 端点推送队列变化，订阅不占用管理命令连接。
 - `model-relay-model-id.mjs` / `model-relay-model-id.d.mts`：公共调用 ID 的解析与目录映射，CLP 对外去掉上游前缀，保留出站精确原始 ID。
 - `model-relay-listen-host.mjs` / `model-relay-listen-host.d.mts`：配置与 HTTP 服务共用的纯监听地址校验，接受回环、RFC1918 IPv4 和显式 IPv4 通配地址，不解析 DNS 或选择网卡。
 - `model-relay-paths.mjs` / `model-relay-paths.d.mts`：按配置路径派生控制与指标端点。

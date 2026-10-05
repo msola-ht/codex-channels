@@ -423,7 +423,7 @@ describe("request metrics subagent session aggregation", () => {
       expect(store.count()).toBe(0);
       const emptyMetrics = {
         requestOutcomes: { completed: 0, interrupted: 0, failed: 0, incomplete: 0 },
-        provider: null, model: null, turnCount: 0, requestCount: 0, inputTokens: 0, outputTokens: 0,
+        provider: null, model: null, reasoningEffort: null, turnCount: 0, requestCount: 0, inputTokens: 0, outputTokens: 0,
         firstRequestStartedAtMs: null, lastRecordedAtMs: null,
         cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 },
       };
@@ -465,10 +465,10 @@ describe("request metrics subagent session aggregation", () => {
     const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"), 10_000);
     try {
       store.recordBatch([
-        { ...sample(), threadId: "child-a", turnId: "first", provider: "old", model: "old", requestStartedAtMs: 100, recordedAtMs: 100, inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 },
+        { ...sample(), threadId: "child-a", turnId: "first", provider: "old", model: "old", reasoningEffort: "low", requestStartedAtMs: 100, recordedAtMs: 100, inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 },
         { ...sample(), threadId: "child-a", turnId: "second", provider: "middle", model: "middle", requestStartedAtMs: 300, recordedAtMs: 900, inputTokens: 200, cachedInputTokens: null, outputTokens: 20 },
-        { ...sample(), threadId: "child-a", turnId: "second", provider: "latest", model: "latest", requestStartedAtMs: 200, recordedAtMs: 200, inputTokens: null, cachedInputTokens: 10, outputTokens: 30 },
-        { ...sample(), threadId: "child-b", provider: "other", model: null, requestStartedAtMs: 50, recordedAtMs: 500 },
+        { ...sample(), threadId: "child-a", turnId: "second", provider: "latest", model: "latest", reasoningEffort: "high", requestStartedAtMs: 200, recordedAtMs: 200, inputTokens: null, cachedInputTokens: 10, outputTokens: 30 },
+        { ...sample(), threadId: "child-b", provider: "other", model: null, reasoningEffort: null, requestStartedAtMs: 50, recordedAtMs: 500 },
         { ...sample(), threadId: "child-c", requestStartedAtMs: 80, recordedAtMs: 900 },
         { ...sample(), threadId: "nested", provider: "nested", model: "nested", requestStartedAtMs: 1, recordedAtMs: 1000, inputTokens: 9000, outputTokens: 900 },
       ]);
@@ -477,7 +477,7 @@ describe("request metrics subagent session aggregation", () => {
       }
       const page = store.threadSubagents("root", { limit: 1 });
       expect(page).toMatchObject({ total: 4, nextOffset: 1, subagents: [{
-        threadId: "child-a", provider: "latest", model: "latest", directSubagentCount: 1,
+        threadId: "child-a", provider: "latest", model: "latest", reasoningEffort: "high", directSubagentCount: 1,
         turnCount: 2, requestCount: 3, inputTokens: 300, outputTokens: 60,
         firstRequestStartedAtMs: 100, lastRecordedAtMs: 900,
         cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 2 },
@@ -495,13 +495,14 @@ describe("request metrics subagent session aggregation", () => {
       expect(globalIds("time", "asc")).toEqual(["nested", "child-b", "child-c", "child-a", "no-requests"]);
       expect(globalIds("time", "desc")).toEqual(["child-a", "child-c", "child-b", "nested", "no-requests"]);
       expect(store.subagents({ limit: 1, offset: 1 })).toMatchObject({ total: 5, nextOffset: 2, subagents: [{
-        threadId: "child-a", requestCount: 3, inputTokens: 300, outputTokens: 60,
+        threadId: "child-a", reasoningEffort: "high", requestCount: 3, inputTokens: 300, outputTokens: 60,
         cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 2 },
       }] });
       expect(store.threadSubagents("root", { limit: 1, offset: 1, sortKey: "time", sortDirection: "asc" })).toMatchObject({
         subagents: [{ threadId: "child-c" }], total: 4, nextOffset: 2,
       });
-      expect(store.threadSubagents("root", { limit: 10 }).subagents[2]).toMatchObject({ provider: "other", model: null });
+      expect(store.threadSubagents("root", { limit: 10 }).subagents[2]).toMatchObject({ provider: "other", model: null, reasoningEffort: null });
+      expect(store.threadSubagents("root", { limit: 10 }).subagents[3]).toMatchObject({ threadId: "no-requests", reasoningEffort: null });
       expect(() => store.threadSubagents("root", { limit: 10, sortKey: "requests" as "time" })).toThrow("排序");
       expect(() => store.threadSubagents("root", { limit: 10, sortDirection: "invalid" as "asc" })).toThrow("排序");
       expect(() => store.subagents({ limit: 10, sortKey: "requests" as "time" })).toThrow("排序");

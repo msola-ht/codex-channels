@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -119,6 +119,45 @@ describe("webui traffic V2 API", () => {
     const response = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=ds-main`);
     expect(response.body.exchanges.find(row => row.id === 1)?.protocol).toBe("chat");
     expect(response.body.exchanges.find(row => row.id === 2)?.protocol).toBe("responses");
+  });
+
+  it("projects reasoning effort from saved request bodies consistently in lists and details", async () => {
+    const fixture = createFixture();
+    const inputs = [
+      { protocol: "responses", body: { reasoning: { effort: "high" } }, expected: "high" },
+      { protocol: "responses", body: { reasoning: { effort: "none" } }, expected: "none" },
+      { protocol: "responses", body: { reasoning: { effort: "future" } }, expected: "future" },
+      { protocol: "responses", body: { reasoning: { effort: 0 } }, expected: undefined },
+      { protocol: "responses", body: { reasoning_output_tokens: 5 }, expected: undefined },
+      { protocol: "chat", body: { reasoning_effort: "medium" }, expected: "medium" },
+      { protocol: "chat", body: { reasoning: { effort: "high" } }, expected: "high" },
+      { protocol: "chat", body: { reasoning_effort: null, reasoning: { effort: "high" } }, expected: undefined },
+      { protocol: "responses", body: {}, expected: undefined },
+    ];
+    const calls = inputs.map((input, index) => {
+      const call = httpInteraction(index + 1);
+      call.request.path = input.protocol === "chat" ? "/v1/chat/completions" : "/v1/responses";
+      call.requestBody = JSON.stringify(input.body);
+      return call;
+    });
+    writeSession(fixture.trafficDir, "ds-main", "reasoning", calls);
+    const paths = [join(fixture.trafficDir, "ds-main-reasoning")];
+    const page = await summarizeDumpFiles(paths, { offset: 1, limit: 2 });
+    expect(page.exchanges.map((row: { reasoningEffort?: string }) => row.reasoningEffort)).toEqual(["none", "future"]);
+    const server = await startServer(fixture.environment);
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=ds-main`);
+    for (const [index, input] of inputs.entries()) {
+      const id = index + 1;
+      expect(list.body.exchanges.find(row => row.id === id)?.reasoningEffort).toBe(input.expected);
+      const detail = await describeDumpExchange(paths, id);
+      expect(detail.reasoningEffort).toBe(input.expected);
+      expect(detail.request.parameters.reasoningEffort).toBe(input.expected);
+    }
+    // 未选中的正文不读取；选中非法引用仍失败，不用缺失正文恢复绕过引用检查。
+    const indexPath = join(paths[0]!, "interactions.jsonl");
+    writeFileSync(indexPath, readFileSync(indexPath, "utf8").replace('"file":"payload-1.bin"', '"file":"../private"'));
+    await expect(summarizeDumpFiles(paths, { offset: 1, limit: 1 })).resolves.toMatchObject({ exchanges: [{ id: 2, reasoningEffort: "none" }] });
+    await expect(summarizeDumpFiles(paths, { limit: 1 })).rejects.toThrow("正文引用无效");
   });
 
   it("projects client names from saved User-Agent with inbound precedence and browser identification", async () => {
@@ -295,6 +334,11 @@ describe("webui traffic V2 API", () => {
     expect(list.status).toBe(200);
     expect(list.body.exchanges).toHaveLength(1);
     expect(list.body.exchanges[0]).not.toHaveProperty("turnStateLengths");
+    expect(list.body.exchanges[0]).not.toHaveProperty("reasoningEffort");
+    unlinkSync(join(fixture.trafficDir, "openai-independent-counts", "payload-1.bin"));
+    const missing = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+    expect(missing.status).toBe(200);
+    expect(missing.body.exchanges[0]).not.toHaveProperty("reasoningEffort");
   });
 
   it("identifies WebSocket failure terminals without an HTTP eventType index", async () => {
@@ -467,7 +511,7 @@ describe("webui traffic V2 API", () => {
     writeSession(fixture.trafficDir, "openai", "2026-09-17T00-00-00-000Z", [call]);
     const server = await startServer(fixture.environment);
     const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
-    expect(list.body.exchanges[0]).toMatchObject({ requestKind: "turn", turnId: "turn-current" });
+    expect(list.body.exchanges[0]).toMatchObject({ requestKind: "turn", turnId: "turn-current", reasoningEffort: "high" });
     const detail = await getJson<TrafficDetailBody>(`${server.origin}/api/v1/traffic/exchange?id=1`);
     expect(detail.body.exchange).toMatchObject({
       request: { parameters: { reasoningEffort: "high", serviceTier: "priority", previousResponseId: "resp-before" } },

@@ -24,6 +24,7 @@ export function ErrorsTable({ records, query, loading, pagination }: {
     { id: "model", enableSorting: false, header: t("metrics.model"), cell: ({ row: { original: record } }) => {
       return <><span className="flex items-center gap-2 whitespace-nowrap"><TrafficModel provider={record.provider} request={record.model} responses={[]} /><FastBadge tier={record.requestServiceTier} source="request" responseTier={record.serviceTier} /></span></>
     } },
+    { id: "reasoningEffort", enableSorting: false, header: t("metrics.reasoningEffort"), cell: ({ row }) => row.original.reasoningEffort ?? "—" },
     { id: "status", enableSorting: false, header: t("filters.status"), cell: ({ row: { original: record } }) => {
       return isClientInterruption(record) ? <Badge variant="secondary">{t("metrics.interrupted")}</Badge> : <StatusBadge status={record.status} />
     } },
@@ -43,6 +44,6 @@ export function ErrorsTable({ records, query, loading, pagination }: {
   return <DataTable title={t("errorList.tableTitle")} description={() => t("errorList.tableDescription")}
     columns={columns} data={records} getRowId={row => String(row.id)} loading={loading}
     storageKey="codex-webui:errors-table-v1" numericColumnIds={["http"]}
-    columnLabels={{time: t("metrics.time"), provider: t("metrics.provider"), model: t("metrics.model"), status: t("filters.status"), http: "HTTP", detail: t("errorList.detailColumn"), thread: t("errorList.threadColumn")}}
+    columnLabels={{time: t("metrics.time"), provider: t("metrics.provider"), model: t("metrics.model"), reasoningEffort: t("metrics.reasoningEffort"), status: t("filters.status"), http: "HTTP", detail: t("errorList.detailColumn"), thread: t("errorList.threadColumn")}}
     emptyText={t("common.noFailedRequests")} pagination={pagination} />
 }

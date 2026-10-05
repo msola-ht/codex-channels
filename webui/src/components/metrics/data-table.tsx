@@ -478,7 +478,7 @@ export function DataTable<TData extends RowData>({
                     <TableHead
                       key={header.id}
                       colSpan={header.colSpan}
-                      className={cn(numericColumnIds.includes(header.column.id) && "text-right [&_button]:ml-0 [&_button]:-mr-2")}
+                      className={cn("h-9", numericColumnIds.includes(header.column.id) && "text-right [&_button]:ml-0 [&_button]:-mr-2")}
                       aria-sort={header.column.getCanSort()
                         ? header.column.getIsSorted() === "asc" ? "ascending"
                           : header.column.getIsSorted() === "desc" ? "descending" : "none"
@@ -496,7 +496,7 @@ export function DataTable<TData extends RowData>({
               {loading ? Array.from({ length: 5 }, (_, index) => (
                 <TableRow key={index}>
                   {table.getVisibleLeafColumns().map((column) => (
-                    <TableCell key={column.id}><Skeleton className="h-5 w-full min-w-12" /></TableCell>
+                    <TableCell key={column.id} className="py-1.5"><Skeleton className="h-5 w-full min-w-12" /></TableCell>
                   ))}
                 </TableRow>
               )) : pageRows.length > 0 ? (
@@ -509,7 +509,7 @@ export function DataTable<TData extends RowData>({
                     onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id} className={cn(numericColumnIds.includes(cell.column.id) && "text-right tabular-nums")}>
+                      <TableCell key={cell.id} className={cn("py-1.5", numericColumnIds.includes(cell.column.id) && "text-right tabular-nums")}>
                         <table.FlexRender cell={cell} />
                       </TableCell>
                     ))}

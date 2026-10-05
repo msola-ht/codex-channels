@@ -95,6 +95,7 @@ export function RequestsTable({
     time: t("requests.recordedAt"),
     provider: t("metrics.provider"),
     model: t("metrics.model"),
+    reasoningEffort: t("metrics.reasoningEffort"),
     ua: "User-Agent",
     operation: t("filters.operation"),
     status: t("filters.status"),
@@ -171,6 +172,12 @@ export function RequestsTable({
       ),
     },
     {
+      id: "reasoningEffort",
+      enableSorting: false,
+      header: t("metrics.reasoningEffort"),
+      cell: ({ row }) => row.original.reasoningEffort ?? "—",
+    },
+    {
       id: "status",
       accessorFn: (record) => record.status,
       header: ({ column }) => (
@@ -196,21 +203,21 @@ export function RequestsTable({
       id: "input",
       accessorFn: (record) => record.inputTokens ?? Number.NEGATIVE_INFINITY,
       header: ({ column }) => (
-        <SortableHeader column={column}>{t("metrics.input")}</SortableHeader>
+        <SortableHeader column={column} hint={t("metrics.input")}>{t("metrics.inputColumn")}</SortableHeader>
       ),
       cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} />,
     },
     {
       id: "cacheHitRate",
       enableSorting: false,
-      header: t("metrics.cacheHitRate"),
+      header: () => <TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.cacheHitRate == null ? "—" : `${(row.original.cacheHitRate * 100).toFixed(1)}%`}</span>,
     },
     {
       id: "output",
       accessorFn: (record) => record.outputTokens ?? Number.NEGATIVE_INFINITY,
       header: ({ column }) => (
-        <SortableHeader column={column}>{t("metrics.output")}</SortableHeader>
+        <SortableHeader column={column} hint={t("metrics.output")}>{t("metrics.outputColumn")}</SortableHeader>
       ),
       cell: ({ row }) => <OutputTokenTooltip outputTokens={row.original.outputTokens} reasoningOutputTokens={row.original.reasoningOutputTokens} />,
     },
@@ -229,7 +236,7 @@ export function RequestsTable({
     {
       id: "totalDuration",
       accessorFn: (record) => record.totalDurationMs,
-      header: ({ column }) => <SortableHeader column={column} hint={t("requests.durationHint")}>{t("requests.durationColumn")}</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column} hint={t("requests.durationHint")}>{t("metrics.durationColumn")}</SortableHeader>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
@@ -319,7 +326,7 @@ export function RequestsTable({
     },
   ], [t, language, openRequest])
 
-  const order = ["time", "provider", "model", "status", "input", "cacheHitRate", "output", "firstContent", "totalDuration", "source", "traffic"]
+  const order = ["time", "provider", "model", "reasoningEffort", "status", "input", "cacheHitRate", "output", "firstContent", "totalDuration", "source", "traffic"]
   const orderedColumns = [...columns].sort((a, b) => (order.includes(a.id!) ? order.indexOf(a.id!) : order.length) - (order.includes(b.id!) ? order.indexOf(b.id!) : order.length))
 
   return (

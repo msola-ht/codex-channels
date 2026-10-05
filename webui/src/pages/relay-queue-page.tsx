@@ -17,6 +17,7 @@ export function RelayQueuePage() {
   const columns: DataTableColumn<Row>[] = [
     { id: "caller", accessorFn: row => row.displayName ?? row.callerId, header: ({ column }) => <SortableHeader column={column}>{t("relay.callerId")}</SortableHeader>, cell: ({ row: { original: row } }) => <TruncatedText text={row.displayName ?? row.callerId} /> },
     { accessorKey: "model", header: ({ column }) => <SortableHeader column={column}>{t("relay.queueModel")}</SortableHeader>, cell: ({ row: { original: row } }) => <div className="flex max-w-56 flex-col gap-1"><TruncatedText text={row.model ?? t("relay.queueModelPending")} /><TruncatedText text={`${row.provider} · ${row.protocol === "chat" ? "Chat" : "Responses"}`} className="text-xs text-muted-foreground" /></div> },
+    { id: "reasoningEffort", enableSorting: false, header: t("metrics.reasoningEffort"), cell: ({ row }) => row.original.reasoningEffort ?? "—" },
     { accessorKey: "phase", header: ({ column }) => <SortableHeader column={column}>{t("relay.queuePhase")}</SortableHeader>, cell: ({ row: { original: row } }) => <Badge variant={row.phase === "queue" ? "outline" : "secondary"}>{t(`relay.queuePhases.${row.phase}`)}</Badge> },
     { accessorKey: "elapsedMs", header: ({ column }) => <SortableHeader column={column}>{t("relay.queueElapsed")}</SortableHeader>, cell: ({ row: { original: row } }) => formatElapsedDuration(row.elapsedMs) },
   ]
@@ -43,7 +44,7 @@ export function RelayQueuePage() {
           </div>
           <DataTable title={t("relay.queueDetails")} description={() => t("relay.queueSnapshotHint")}
             data={data.requests} columns={columns} getRowId={row => row.requestId} storageKey="codex-webui:relay-queue-table-v1"
-            columnLabels={{ caller: t("relay.callerId"), model: t("relay.queueModel"), phase: t("relay.queuePhase"), elapsedMs: t("relay.queueElapsed") }}
+            columnLabels={{ caller: t("relay.callerId"), model: t("relay.queueModel"), reasoningEffort: t("metrics.reasoningEffort"), phase: t("relay.queuePhase"), elapsedMs: t("relay.queueElapsed") }}
             numericColumnIds={["elapsedMs"]} emptyText={t("relay.queueEmpty")}
             pagination={{ mode: "client", defaultSorting: [], defaultPageSize: 10, pageSizeOptions: [10, 25, 50] }} />
         </div>)}

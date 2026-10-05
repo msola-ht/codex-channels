@@ -46,6 +46,7 @@ export function TrafficTable({
     { id: "model", enableSorting: false, header: () => <>{t("metrics.model")}</>, cell: ({ row: { original: exchange } }) => {
       return <><TrafficModel provider={["relay.chat", "relay.responses"].includes(exchange.label) ? exchange.account : exchange.label} request={exchange.requestModel} responses={exchange.responseModels} upstream={exchange.upstreamProvider} /></>
     } },
+    { id: "reasoningEffort", enableSorting: false, header: t("metrics.reasoningEffort"), cell: ({ row }) => row.original.reasoningEffort ?? "—" },
     { id: "protocol", enableSorting: false, header: () => <>{t("traffic.protocol")}</>, cell: ({ row: { original: exchange } }) => {
       return <>{exchange.protocol ? <Badge variant="outline">{exchange.protocol === "chat" ? "Chat" : "Responses"}</Badge> : "—"}</>
     } },
@@ -57,7 +58,7 @@ export function TrafficTable({
     { id: "first", enableSorting: false, header: () => <><TableHint hint={t("traffic.firstTokenHint")}>{t("requests.firstColumn")}</TableHint></>, cell: ({ row: { original: exchange } }) => {
       return <>{exchange.firstTokenMs == null ? "—" : formatElapsedDuration(exchange.firstTokenMs)}</>
     } },
-    { id: "duration", enableSorting: false, header: () => <>{t("requests.durationColumn")}</>, cell: ({ row: { original: exchange } }) => {
+    { id: "duration", enableSorting: false, header: () => <TableHint hint={t("requests.durationHint")}>{t("metrics.durationColumn")}</TableHint>, cell: ({ row: { original: exchange } }) => {
       return <>{exchange.durationMs === undefined ? "—" : formatElapsedDuration(exchange.durationMs)}</>
     } },
     { id: "type", enableSorting: false, header: () => <>{t("metrics.type")}</>, cell: ({ row: { original: exchange } }) => {
@@ -71,7 +72,7 @@ export function TrafficTable({
   return <DataTable title={t("traffic.listTitle", { count: pagination.mode === "server" ? pagination.serverTotal ?? exchanges.length : exchanges.length })}
     description={() => description} data={exchanges} columns={columns} loading={loading}
     storageKey="codex-webui:traffic-table-v2" defaultColumnVisibility={{ request: false }} getRowId={trafficCallKey} onRowClick={onOpen}
-    columnLabels={{time: t("traffic.startedAt"), provider: t("metrics.provider"), client: t("traffic.client"), model: t("metrics.model"), protocol: t("traffic.protocol"), status: t("filters.status"), first: t("requests.firstColumn"), duration: t("requests.durationColumn"), type: t("metrics.type"), request: t("metrics.requests")}}
+    columnLabels={{time: t("traffic.startedAt"), provider: t("metrics.provider"), client: t("traffic.client"), model: t("metrics.model"), reasoningEffort: t("metrics.reasoningEffort"), protocol: t("traffic.protocol"), status: t("filters.status"), first: t("requests.firstColumn"), duration: t("requests.durationColumn"), type: t("metrics.type"), request: t("metrics.requests")}}
     numericColumnIds={["first", "duration"]} emptyText={t("traffic.empty")} pagination={pagination} />
 }
 

@@ -82,6 +82,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
     thread: t("metrics.thread"),
     provider: t("metrics.provider"),
     model: t("metrics.model"),
+    reasoningEffort: t("metrics.reasoningEffort"),
     turns: t("metrics.turn"),
     requests: t("metrics.requests"),
     input: t("metrics.input"),
@@ -142,6 +143,12 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       ),
     },
     {
+      id: "reasoningEffort",
+      enableSorting: false,
+      header: t("metrics.reasoningEffort"),
+      cell: ({ row }) => row.original.reasoningEffort ?? "—",
+    },
+    {
       id: "turns",
       accessorFn: (thread) => thread.turnCount,
       header: ({ column }) => (
@@ -164,19 +171,19 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
     {
       id: "input",
       accessorFn: (thread) => thread.inputTokens,
-      header: ({ column }) => <SortableHeader column={column}>{t("metrics.input")}</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column} hint={t("metrics.input")}>{t("metrics.inputColumn")}</SortableHeader>,
       cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} cacheUsage={row.original.cacheUsage} />,
     },
     {
       id: "cacheHitRate",
       enableSorting: false,
-      header: t("metrics.cacheHitRate"),
+      header: () => <TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatCacheUsage(row.original.cacheUsage).rate}</span>,
     },
     {
       id: "output",
       accessorFn: (thread) => thread.outputTokens,
-      header: ({ column }) => <SortableHeader column={column}>{t("metrics.output")}</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column} hint={t("metrics.output")}>{t("metrics.outputColumn")}</SortableHeader>,
       cell: ({ row }) => <span className="tabular-nums">{formatTokens(row.original.outputTokens)}</span>,
     },
     {
@@ -190,7 +197,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
     {
       id: "duration",
       enableSorting: false,
-      header: () => <TableHint hint={t("threads.totalDurationHint")}>{t("threads.totalDuration")}</TableHint>,
+      header: () => <TableHint hint={t("threads.totalDurationHint")}>{t("metrics.totalDurationColumn")}</TableHint>,
       cell: ({ row }) => {
         const timing = row.original.sessionTiming
         if (timing.knownDurationMs === null) return "—"

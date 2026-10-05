@@ -28,6 +28,7 @@ import {
   OutputTokenTooltip,
 } from "@/components/metrics/token-tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
+import { TableHint } from "@/components/metrics/data-table"
 import { StatCard } from "@/components/metrics/stat-card"
 import { AccountUpdateDescription, AccountRefreshButton, AccountRefreshFeedback, AccountSnapshotEmpty } from "./account-refresh-feedback"
 import { AccountSubscriptionNotice } from "./account-subscription-notice"
@@ -142,9 +143,9 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
               <TableHead>{t("overview.threads")}</TableHead>
               <TableHead>{t("overview.turnColumn")}</TableHead>
               <TableHead>{t("metrics.requests")}</TableHead>
-              <TableHead>{t("metrics.input")}</TableHead>
-              <TableHead>{t("metrics.cacheHitRate")}</TableHead>
-              <TableHead>{t("metrics.output")}</TableHead>
+              <TableHead><TableHint hint={t("metrics.input")}>{t("metrics.inputColumn")}</TableHint></TableHead>
+              <TableHead><TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint></TableHead>
+              <TableHead><TableHint hint={t("metrics.output")}>{t("metrics.outputColumn")}</TableHint></TableHead>
               <TableHead>{t("metrics.compact")}</TableHead>
             </TableRow>
           </TableHeader>
