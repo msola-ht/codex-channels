@@ -83,12 +83,10 @@ export async function runCustomPrimaryProviderSetup({
   if (!custom && officialModelIds.size === 0) {
     throw new Error("Codex App Server 没有返回可用的官方模型");
   }
-  const activeProviderId = optionalString(config.model_provider);
   const switchingProviders = loadConfiguredCustomSwitchingModelProviders(environment);
   const currentProviders = record(config.model_providers);
   const configuredProviderIds = listCustomPrimaryProviderCandidates(currentProviders, environment);
-  const effectiveActiveProviderId = activeProviderId
-    ?? (configuredProviderIds.length === 1 ? configuredProviderIds[0] : undefined);
+  const effectiveActiveProviderId = optionalString(config.model_provider);
   const currentMainLabel = effectiveActiveProviderId === undefined
     || effectiveActiveProviderId === "openai"
     ? "OpenAI 官方"
@@ -132,7 +130,7 @@ export async function runCustomPrimaryProviderSetup({
     : fixedProvider;
   const currentModel = switchingProvider !== undefined && switchingProvider.id === fixedProviderId
     ? switchingProvider.model
-    : activeProviderId === fixedProviderId
+    : effectiveActiveProviderId === fixedProviderId
       ? optionalString(config.model)
       : undefined;
   const currentBaseUrl = optionalString(currentProvider?.base_url) ?? "";
@@ -195,7 +193,7 @@ export async function runCustomPrimaryProviderSetup({
           hint: "不使用上游地址作为 Provider ID",
         },
       ],
-      initialValue: custom || activeProviderId === derivedProviderId ? derivedProviderId : primaryProviderId,
+      initialValue: custom || effectiveActiveProviderId === derivedProviderId ? derivedProviderId : primaryProviderId,
     });
     if (prompts.isCancel(providerId) || providerId === "back") {
       return { action: allowBack ? "back" : "cancel" };

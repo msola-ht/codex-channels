@@ -371,17 +371,17 @@ describe("custom model provider runtime", () => {
       .toThrow("base_url 必须是无凭据、查询和片段的 HTTP(S) URL");
   });
 
-  it("keeps the official primary when multiple candidates have no explicit selection", async () => {
+  it.each([1, 2])("keeps the official primary when %s candidates have no explicit selection", async (count) => {
     const codexHome = await mkdtemp(join(tmpdir(), "codexc-custom-primary-ambiguous-"));
     writeFileSync(join(codexHome, "config.toml"), [
       "[model_providers.first]",
       'base_url = "https://first.example.test/v1"',
       'wire_api = "responses"',
       "",
-      "[model_providers.second]",
+      ...(count === 1 ? [] : ["[model_providers.second]",
       'base_url = "https://second.example.test/v1"',
       'wire_api = "responses"',
-      "",
+      ""]),
     ].join("\n"), { mode: 0o600 });
 
     expect(loadConfiguredCustomPrimaryModelProvider(testEnvironment(codexHome)))

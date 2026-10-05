@@ -122,19 +122,9 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
     throw new Error("Codex 主模型 Provider 配置无法安全读取");
   }
   const providers = record(document.model_providers);
-  const configuredIds = listCustomPrimaryProviderCandidates(providers, environment);
-  let id = document.model_provider;
-  if (id === "openai") {
-    // 显式选择官方时锁定官方，不自动激活候选。
+  const id = document.model_provider;
+  if (id === undefined || id === "openai") {
     return undefined;
-  }
-  if (id === undefined) {
-    if (configuredIds.length === 0) return undefined;
-    if (configuredIds.length > 1) {
-      // 多个候选且未显式选择时保持官方主 Provider，候选可通过 primary-provider 命令切换。
-      return undefined;
-    }
-    [id] = configuredIds;
   }
   const reservedError = validateCustomPrimaryModelProviderId(id, environment);
   if (reservedError !== null) {

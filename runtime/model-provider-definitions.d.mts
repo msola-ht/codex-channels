@@ -6,10 +6,7 @@ export type ManagedModelProviderId =
   | "deepseek"
   | `ds-${string}`
   | "ocg"
-  | `ocg-${string}`
-  /** 仅用于读取遗留配置；运行时不再生成或接受该 Provider。 */
-  | "opencode-go"
-  | `opencode-go-${string}`;
+  | `ocg-${string}`;
 
 export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go" | "ccg" | "clp";
 export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts" | "ccg-accounts" | "clp-accounts";
@@ -48,22 +45,24 @@ export interface ModelProviderDefinition {
   readonly capabilities: ModelProviderCapabilities;
 }
 
+export type ModelProviderTemplate = Omit<ModelProviderDefinition, "profileName" | "profileFileName">;
+
 export function clinePassAccountDefinition(accountId: string): ModelProviderDefinition;
-export const clinePassProviderDefinition: ModelProviderDefinition;
-export const deepseekProviderDefinition: ModelProviderDefinition;
+export const clinePassProviderDefinition: ModelProviderTemplate;
+export const deepseekProviderDefinition: ModelProviderTemplate;
 export function deepseekAccountDefinition(accountId: string): ModelProviderDefinition;
-export const commandCodeProviderDefinition: ModelProviderDefinition;
+export const commandCodeProviderDefinition: ModelProviderTemplate;
 export function ccgAccountDefinition(accountId: string): ModelProviderDefinition;
-export function isManagedProviderApiKeyValid(definition: ModelProviderDefinition, apiKey: unknown): boolean;
+export function isManagedProviderApiKeyValid(definition: ModelProviderTemplate, apiKey: unknown): boolean;
 export function isManagedProviderModelValid(
   definition: Pick<ModelProviderDefinition, "id" | "storageId" | "defaultModel">,
   model: unknown,
 ): boolean;
-export const opencodeGoProviderDefinition: ModelProviderDefinition;
-export const managedModelProviderDefinitions: readonly ModelProviderDefinition[];
+export const opencodeGoProviderDefinition: ModelProviderTemplate;
+export const managedModelProviderDefinitions: readonly ModelProviderTemplate[];
 export function sharedManagedProviderDefinition(
   proxyKey: string,
-): ModelProviderDefinition | undefined;
+): ModelProviderTemplate | undefined;
 
 export function opencodeGoAccountDefinition(
   accountId: string,
@@ -78,9 +77,9 @@ export function loadManagedModelProviderDefinitions(
 ): readonly ModelProviderDefinition[];
 export function loadManagedModelProviderWatcherDefinitions(
   environment?: NodeJS.ProcessEnv,
-): readonly ModelProviderDefinition[];
+): readonly (ModelProviderTemplate | ModelProviderDefinition)[];
 export function expandManagedModelProviderDefinitions(
-  definitions: readonly ModelProviderDefinition[],
+  definitions: readonly ModelProviderTemplate[],
   environment?: NodeJS.ProcessEnv,
 ): readonly ModelProviderDefinition[];
 export function assertManagedModelProviderCapabilities(

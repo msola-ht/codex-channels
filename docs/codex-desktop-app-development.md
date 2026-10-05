@@ -172,8 +172,7 @@ Windows 首次启用时在 Gateway 数据目录创建 `credentials/desktop-app-b
 - 令牌、完整 WebSocket URL、查询参数和 Desktop 环境值不得进入日志、Doctor 文本、JSON 状态、
   异常或平台消息。
 
-Windows 增加一个独立的私有凭据文件，不改变 StateStore、指标库或计划任务数据库 Schema。回滚旧版本前
-先关闭功能并删除配置子表；保留的令牌文件不会被旧版本读取，可以由用户在服务停止后手工删除。
+Windows 使用独立的私有凭据文件，不改变 StateStore、指标库或计划任务数据库 Schema。
 
 ## Windows 回环桥安全边界
 
@@ -414,8 +413,6 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
   端口占用、令牌文件不安全、桥无法连接私有 UDS 时，拒绝相应操作并保留原状态。
 - 桥运行失败不回退到 Desktop 私有 App Server，不启动官方 daemon，不开放无认证端口。
 - 禁用时恢复配置；没有持久环境需要清理，也不强制结束 Desktop。
-- 回滚代码前先执行 `codexc desktop-app disable`。该命令移除 `[codex.desktop_app]`；旧版本会
-  忽略保留的私有令牌文件。
 
 ## 停止条件
 

@@ -118,10 +118,12 @@ export class ProviderSettingsWatcher {
           managedProviderDirectory(this.environment, definition),
           definition.catalogFileName,
         ),
-        join(codexHome, readManagedMarker(this.environment, definition)?.mode === "exclusive"
-          ? "config.toml"
-          : definition.profileFileName),
-        managedProviderMarkerPath(this.environment, definition),
+        ...("profileFileName" in definition ? [
+          join(codexHome, readManagedMarker(this.environment, definition)?.mode === "exclusive"
+            ? "config.toml"
+            : definition.profileFileName),
+          managedProviderMarkerPath(this.environment, definition),
+        ] : []),
       ];
       for (const path of paths) {
         if (!files.paths.includes(path)) files.paths.push(path);

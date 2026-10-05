@@ -167,8 +167,8 @@ codexc doctor
 Gateway 将使用 Responses 接口、复用 Codex 官方模型目录的自定义提供商称为“Codex 兼容 Provider”，
 并提供固定与切换两种运行模式。此入口的模型 ID 必须来自官方目录，不支持任意第三方模型 ID。
 它读取 `~/.codex/config.toml` 的 `model_provider` 和 `[model_providers.<id>]`；若
-`model_provider` 显式配置为 `openai` 时锁定官方 OpenAI，不自动激活候选；未配置且只存在一个候选
-时沿用该候选兼容旧配置。自定义 Provider 只在 Gateway 监管的 App Server 子进程中选择。
+`model_provider` 为 `openai` 或未配置时使用官方 OpenAI，不自动激活候选。
+自定义 Provider 必须显式选择，只在 Gateway 监管的 App Server 子进程中生效。
 Gateway 在 App Server 前启动本地统计代理；原配置中的认证方式、模型名、
 `supports_websockets` 等字段仍由 Codex 处理。当前只支持 `wire_api = "responses"`，不为它伪造
 账户余额或用量接口。
@@ -177,6 +177,7 @@ Gateway 在 App Server 前启动本地统计代理；原配置中的认证方式
 
 ```toml
 model = "gpt-5.6-terra"
+model_provider = "thirdparty"
 
 [model_providers.thirdparty]
 name = "Third-party Responses"
@@ -189,8 +190,7 @@ stream_max_retries = 0
 ```
 
 可配置多个自定义主 Provider 候选块，但同一时刻只激活一个：`model_provider` 显式选中时激活
-该候选，显式配置为 `openai` 时锁定官方 OpenAI；`model_provider` 未配置且只有一个候选时仍沿用
-该候选兼容旧配置。配置自定义主 Provider 时不能同时设置顶层 `openai_base_url`。通过
+该候选，显式配置为 `openai` 或未配置时使用官方 OpenAI。配置自定义主 Provider 时不能同时设置顶层 `openai_base_url`。通过
 `codexc primary-provider` 的
 `list` / `add` / `switch` / `remove` 管理候选与激活状态。`list --json` 提供稳定的脚本输出，包含当前
 主实例、固定候选、切换 Provider 与备份候选摘要，不包含 API Key 或其他认证字段。

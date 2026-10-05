@@ -133,7 +133,7 @@ Daily、Weekdays、Weekly 和 Monthly 按任务时区计算：不存在的本地
 若一次性任务在 `paused` 或 `blocked` 期间到期，恢复时直接收敛为 `finished`，不保留无法执行的死状态。
 
 首期不解析任意 RRULE。若以后对齐 App 的高级 Schedule，应采用经过审查的 RFC 5545 实现，并先
-说明新增依赖、迁移与回滚；不能手写一个看似兼容但语义不完整的解析器。
+说明新增依赖与失败恢复；不能手写一个看似兼容但语义不完整的解析器。
 
 ### 到期、停机与重叠
 
@@ -356,8 +356,7 @@ enabled = false
 合同中。开启后 Scheduler 随 Gateway 运行，Linux systemd linger 可让用户未登录时继续运行；Gateway
 未运行期间不会准时触发，只按前述五分钟窗口有限补跑。
 
-关闭功能只停止新领取，不删除数据库、不停止已经进入 App Server 的 Turn。回滚到不认识该配置的
-旧版本前，必须先移除 `[scheduled_tasks]` 配置段；私有数据库可以保留并由新版本重新使用。
+关闭功能只停止新领取，不删除数据库、不停止已经进入 App Server 的 Turn。
 
 ## 分阶段实施
 

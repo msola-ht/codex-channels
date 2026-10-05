@@ -290,9 +290,7 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
   if (!custom && !officialModelIds.has(model)) {
     throw invalid("unknown-model", "model", `模型 ID 不在 Codex 官方模型目录中：${model}`);
   }
-  const activeProviderId = optionalString(config.model_provider);
-  const effectiveActiveProviderId = activeProviderId
-    ?? (configuredProviderIds.length === 1 ? configuredProviderIds[0] : undefined);
+  const effectiveActiveProviderId = optionalString(config.model_provider);
   const hasOfficialMainProvider = effectiveActiveProviderId === undefined
     || effectiveActiveProviderId === "openai";
   const hasCustomFixedMainProvider = effectiveActiveProviderId !== undefined

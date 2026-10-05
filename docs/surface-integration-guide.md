@@ -300,7 +300,7 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 
 ## 存储与安全
 
-- 不改变当前 SQLite Schema，除非新渠道确实需要恢复绑定之外的最小字段，并先单独评审迁移方案。
+- 不改变当前 SQLite Schema，除非新渠道确实需要恢复绑定之外的最小字段，并先单独评审当前结构与失败关闭行为。
 - 由操作者明确输入、属于静态应用配置的 Bot Token、App Secret 等平台凭据保存在权限受限的统一
   `config.toml`，不得复制到 SQLite、日志、服务定义或其他平台文件。扫码登录、OAuth 或其他平台
   授权流程签发的账号 Token 不属于静态应用配置；需要跨重启使用时必须保存到项目规定的 macOS

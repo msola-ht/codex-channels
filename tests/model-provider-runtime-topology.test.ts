@@ -134,10 +134,7 @@ describe("model provider App Server topology", () => {
     ].join("\n"), { mode: 0o600 });
     const environment = testEnvironment(codexHome);
 
-    expect(loadConfiguredCustomPrimaryModelProvider(environment)).toEqual({
-      id: "thirdparty",
-      baseUrl: "https://proxy.example.test/v1",
-    });
+    expect(loadConfiguredCustomPrimaryModelProvider(environment)).toBeUndefined();
     expect(loadPrimaryModelProvider(environment)).toBe("openai");
     expect(resolveAppServerRuntime(
       { codex: { socket_path: "runtime/codex.sock" } },

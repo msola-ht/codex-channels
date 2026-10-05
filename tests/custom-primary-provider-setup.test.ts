@@ -421,7 +421,7 @@ describe("custom primary Provider setup", () => {
     expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
   });
 
-  it("blocks switching mode while an implicit fixed primary Provider is active", async () => {
+  it("allows switching setup when an unselected fixed candidate exists", async () => {
     const environment = testEnvironment();
     const { client, createClient } = clientFixture({
       model_providers: {
@@ -433,8 +433,8 @@ describe("custom primary Provider setup", () => {
       },
     });
     const prompts = promptFixture({
-      texts: ["https://api.example.test/v1", "Example"],
-      selects: ["api-example-test", "switching"],
+      texts: ["https://api.example.test/v1", "Example", "gpt-5.6-sol"],
+      selects: ["api-example-test", "switching", "no"],
     });
 
     await expect(runCustomPrimaryProviderSetup({
@@ -442,13 +442,13 @@ describe("custom primary Provider setup", () => {
       output: { write: vi.fn() },
       prompts,
       createClient,
-    })).rejects.toThrow("当前固定主 Provider thirdparty 必须先切回官方 OpenAI");
+    })).resolves.toMatchObject({ provider: "api-example-test", model: "gpt-5.6-sol" });
 
     expect(prompts.select).toHaveBeenNthCalledWith(2, expect.objectContaining({
       message: "运行模式",
-      initialValue: "exclusive",
+      initialValue: "switching",
     }));
-    expect(prompts.password).not.toHaveBeenCalled();
+    expect(prompts.password).toHaveBeenCalled();
     expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
   });
 
