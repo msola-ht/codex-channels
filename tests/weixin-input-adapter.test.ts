@@ -353,7 +353,7 @@ describe("WeixinInputAdapter", () => {
     const outbox = outboxFixture();
     const service = {
       ...serviceFixture(),
-      status: vi.fn(() => conversationStatus({
+      statusForDisplay: vi.fn(async () => conversationStatus({
         threadId: "thread",
         model: "gpt-test",
         effort: "medium",

@@ -35,7 +35,7 @@ import type {
 import type { FeishuCardDocument } from "./approval-card.js";
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
 import { FeishuMessageError } from "./message-error.js";
-import { bindOutboxMessagePort, type FeishuMessagePort } from "./outbox-message-port.js";
+import { bindOutboxMessagePort, type FeishuMessagePort, type ObserveFeishuCardCreation } from "./outbox-message-port.js";
 export type { FeishuMessagePort } from "./outbox-message-port.js";
 import { renderFeishuConversationIdleReleasedCard } from "./idle-release-card.js";
 import {
@@ -792,13 +792,14 @@ export class FeishuOutbox implements SurfaceOutputPort {
     chatId: string,
     card: FeishuCardDocument,
     requestSignal?: AbortSignal,
+    observeCreation?: ObserveFeishuCardCreation,
   ): Promise<string> {
     if (this.closed) {
       return Promise.reject(new Error("飞书输出队列已经关闭"));
     }
     return this.delivery.runOrdered(
       chatId,
-      (signal) => this.messagePort.sendCard(chatId, card, signal),
+      (signal) => this.messagePort.sendCard(chatId, card, signal, observeCreation),
       requestSignal,
     );
   }
@@ -807,6 +808,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     chatId: string,
     messageId: string,
     card: FeishuCardDocument,
+    requestSignal?: AbortSignal,
   ): Promise<void> {
     if (this.closed) {
       return Promise.reject(new Error("飞书输出队列已经关闭"));
@@ -814,6 +816,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     return this.delivery.runOrdered(
       chatId,
       (signal) => this.messagePort.updateCard(messageId, card, signal),
+      requestSignal,
     );
   }
 

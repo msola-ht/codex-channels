@@ -25,7 +25,7 @@
   `submitAsyncAnswer` 在同一 Conversation 锁内、发送前校验原 Thread 绑定和问题有效性，再复用普通 start/steer 路径；
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
-  并通过组合根注入的只读端口取得当前 Workspace Git 分支；
+  普通 `status` 不执行 Git IO，展示入口 `statusForDisplay` 通过组合根注入的异步只读端口取得当前 Workspace Git 分支；完成卡仅调用 `workspaceGitBranch`，不连带查询模型与账户状态；
   `/stop` 同时取消当前 Thread 尚未提交的图片准备；已提交 Turn 继续使用官方中断。
   所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；
   通过 Core 跟踪恢复期间的 Turn 通知，在绑定成功后恢复仍有效的活动状态。
@@ -90,7 +90,7 @@
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
   OpenAI 额度可在快照保存后附加由组合根提供的凭证刷新时间，仅供展示，不写入官方账户快照。
-  手动额度查询要求适配器先尝试刷新官方登录；启动预热显式关闭主动登录刷新，凭证刷新时间不由查询时间生成。
+  手动额度查询与启动预热直接读取官方额度，不主动刷新登录凭据；凭证刷新时间只读取已有值，不由查询时间生成。
   账户用量、额度、单账户刷新和启动预热可携带取消信号，取消后的结果不写入快照。启动预热按
   Provider 与查询类型回报失败，主动取消不回报为查询失败。第三方同账户查询共享正在进行的
   上游请求，等待方独立取消，最后一个等待方取消才中止上游；失效请求不能清理替代请求。

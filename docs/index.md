@@ -313,11 +313,12 @@ HTTP 429/5xx 与传输失败继续使用剩余预算，路径与其他响应错�
 [`app-server-supervisor.test.ts`](../tests/app-server-supervisor.test.ts) 与
 [`real-app-server-supervised-provider.test.ts`](../tests/real-app-server-supervised-provider.test.ts)。
 
-手动 OpenAI `/limits` 与 WebUI 单账户刷新通过 [`client.ts`](../src/codex-client/client.ts) 先调用
-稳定 `account/read { refreshToken: true }`，再调用 `account/rateLimits/read`；启动探测、预热与后台轮询不主动刷新登录。
-刷新登录请求沿用取消信号且不自动重试；凭证刷新时间仅取账户匹配的 `auth.json.last_refresh`，不以 RPC 成功或查询时间伪造更新。
+手动 OpenAI `/limits` 与 WebUI 单账户刷新通过 [`client.ts`](../src/codex-client/client.ts) 直接调用
+稳定 `account/rateLimits/read`，沿用取消信号；额度查询、启动探测、预热与后台轮询均不主动刷新登录凭据。
+后台额度查询通过 `excludeResetCreditDetails` 省略重置券详情；凭证刷新时间仅读取账户匹配的 `auth.json.last_refresh`，不以 RPC 成功或查询时间伪造更新。
 固定版本 [`account_processor.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/request_processors/account_processor.rs)
-定义托管认证刷新与外部认证忽略刷新语义；上游可在临时失败时继续返回旧账户，也可只刷新 Access Token。
+及其 [`workspace_routing.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs)
+区分额度读取与 `account/read.refreshToken` 的主动刷新语义，Gateway 额度查询不发出该刷新请求。
 验证见 [`provider-account-service.test.ts`](../tests/provider-account-service.test.ts)、[`json-rpc-account.test.ts`](../tests/json-rpc-account.test.ts)
 与隔离真实合同 [`real-app-server-reset-credits.test.ts`](../tests/real-app-server-reset-credits.test.ts)。
 
@@ -436,7 +437,11 @@ Fast 只在用户之后通过 `/fast on` 明确开启时生效。
 可选子代理预设入口为 [`codex-subagents-setup.mjs`](../scripts/codex-subagents-setup.mjs)：用户显式选择并确认后，
 以用户层修订保护写入 `features.multi_agent_v2.enabled`、`features.multi_agent_v2.default_wait_timeout_ms`、
 `agents.default_subagent_model` 和 `agents.default_subagent_reasoning_effort`；全局 `AGENTS.md` 规则为独立文件写入，
-不新增 RPC，不纳入安装、更新或核心默认值配置。字段依据固定版本
+不新增 RPC，不纳入安装、更新或核心默认值配置。托管规则仅授权主代理派发，每个子代理只执行一轮，
+使用 `fork_turns="none"`，禁止子代理再派发、复用及调用 `followup_task`；交付后的补充工作由全新代理接手。
+模型按交付职责分工：Astra 负责规划、设计与独立验收，Sol 负责实现、执行、测试和故障诊断，
+Luna 负责检索、事实摘要和步骤明确的低风险简单任务；验收发现缺陷由全新 Sol 修正，需要再次验收时使用全新 Astra。
+这些是行为指令而非运行时强制限制，完整操作说明见[子代理规则与配置](user-guide.md#子代理规则与配置可选)。字段依据固定版本
 [`config.schema.json`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/config.schema.json)，
 验证见 [`codex-subagents-setup.test.ts`](../tests/codex-subagents-setup.test.ts) 和
 [`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts)。

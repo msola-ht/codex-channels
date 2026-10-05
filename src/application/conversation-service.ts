@@ -127,7 +127,7 @@ export interface ConversationInput {
 }
 
 export interface WorkspaceStatusPort {
-  currentGitBranch(projectRoot: string): string | undefined;
+  currentGitBranch(projectRoot: string, signal?: AbortSignal): Promise<string | undefined>;
 }
 
 export interface ConversationTransferPort {
@@ -323,10 +323,8 @@ export interface ConversationSessionUseCases {
     target: ConversationTarget,
     condition?: ConversationIdleReleaseCondition,
   ): Promise<ConversationIdleReleaseResult>;
-  status(
-    target: ConversationTarget,
-    options?: { includeGitBranch?: boolean },
-  ): ConversationStatus;
+  status(target: ConversationTarget): ConversationStatus;
+  statusForDisplay(target: ConversationTarget, signal?: AbortSignal): Promise<ConversationStatus>;
 }
 
 /** Stable account and local request-metrics boundary. */
@@ -1449,10 +1447,7 @@ export class ConversationService implements
     });
   }
 
-  status(
-    target: ConversationTarget,
-    options: { includeGitBranch?: boolean } = {},
-  ): ConversationStatus {
+  status(target: ConversationTarget): ConversationStatus {
     const binding = this.router.current(target);
     const active = this.core.activeTurn(target);
     const workspace = this.router.workspace(target);
@@ -1469,9 +1464,6 @@ export class ConversationService implements
       mode: "default" as const,
       pending: false,
     };
-    const gitBranch = options.includeGitBranch
-      ? this.workspaceStatus?.currentGitBranch(workspace.cwd)
-      : undefined;
     return {
       ...(binding ? { threadId: binding.threadId } : {}),
       ...(binding ? { threadName: this.router.threadNameForThread?.(binding.threadId) ?? null } : {}),
@@ -1483,7 +1475,6 @@ export class ConversationService implements
       workspaceId: workspace.id,
       workspaceName: workspace.name,
       cwd: workspace.cwd,
-      ...(gitBranch ? { gitBranch } : {}),
       model: model.model,
       ...(model.modelProvider ? { modelProvider: model.modelProvider } : {}),
       effort: model.effort,
@@ -1494,6 +1485,22 @@ export class ConversationService implements
       collaborationMode: collaborationMode.mode,
       collaborationModePending: collaborationMode.pending,
     };
+  }
+
+  async workspaceGitBranch(target: ConversationTarget, signal?: AbortSignal): Promise<string | undefined> {
+    const workspace = this.router.workspace(target);
+    if (signal?.aborted) return undefined;
+    return this.workspaceStatus?.currentGitBranch(workspace.cwd, signal);
+  }
+
+  async statusForDisplay(target: ConversationTarget, signal?: AbortSignal): Promise<ConversationStatus> {
+    const status = this.status(target);
+    const gitBranch = await this.workspaceGitBranch(target, signal);
+    signal?.throwIfAborted();
+    // Recheck the current Workspace after asynchronous IO; outer callers own authorization.
+    const workspace = this.router.workspace(target);
+    if (workspace.id !== status.workspaceId || workspace.cwd !== status.cwd) return this.status(target);
+    return gitBranch ? { ...status, gitBranch } : status;
   }
 
   private async ensureSession(target: ConversationTarget) {

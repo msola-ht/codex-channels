@@ -149,11 +149,15 @@ export class FeishuTextStreams {
     if (!state.timer) {
       state.timer = setTimeout(() => {
         delete state.timer;
+        const generation = state.flushGeneration;
         this.delivery.enqueue(
           state.chatId,
-          (signal) => this.flushStream(key, false, false, signal),
+          async (signal) => {
+            if (this.streams.get(key) !== state || state.flushGeneration !== generation) return;
+            await this.flushStream(key, false, false, signal, state);
+          },
           false,
-          { coalesceKey: `stream:${key}:${state.flushGeneration}` },
+          { coalesceKey: `stream:${key}:${generation}` },
         );
       }, feishuStreamFlushDelayMs);
       state.timer.unref();

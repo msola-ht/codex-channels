@@ -44,6 +44,7 @@
 - `scheduled-task-composition.ts`：在功能启用时集中创建计划任务 Store、Executor、Run Coordinator、Scheduler、
   Application Service 与动态工具 Handler，并拥有恢复、启动、停止和关闭顺序；Gateway 组合根只保留
   Surface 创建上下文、无人值守权限边界和 App Server 请求接线。
+- `git-workspace-status.ts`：通过异步子进程读取当前授权 Workspace 的 Git 分支，限制执行时间与输出大小，接收调用方取消；状态命令、上线通知与完成卡共用该读取器，不阻塞 Gateway 事件循环。
 - `request-metrics-query-adapter.ts`：复用 Observability 统一只读查询服务，把查询结果和 Provider
   显示名映射为 Application 的 `/metrics` 窄端口；不让 Application 依赖 SQLite 实现。
 - `managed-provider-capabilities.ts`：按 `runtime/model-provider-definitions.mjs` 的编译期能力元数据
@@ -171,13 +172,13 @@
   停止 Gateway 时取消后续检查及在途查询，并等待查询结束。
 - `completion-output-enricher.ts`：在实际投递前为 `turn.completed` 补全当前授权 Workspace 的 Git 分支、
   本轮统计、显式父 Turn 任务合计与递归包含子代理后代的 Session 累计统计；通过注入端口等待指标写入水位。
-  统计读取顺序共享 250 ms 预算，耗尽后不启动后续查询，已启动查询的迟到失败仍被捕获；失败时保留 Core
+  Git 异步读取与统计补全并行，共享 250 ms 展示预算；统计读取按序执行，耗尽后不启动后续查询，已启动查询的迟到失败仍被捕获；失败时保留 Core
   本轮统计并省略不可靠的累计值。第三方账户额度并行读取、独立上限 2 秒，失败或超时省略，不回退到其他账户或缓存。
   本轮与会话耗时只读指标库，不在投递路径扫描官方历史；读取失败保留当前官方本轮耗时并省略累计值。
   子代理开始和继续通知通过注入的只读 Thread 端口，在共享的 2 秒预算内重新获取当前提供商、模型与思考设置；开始通知核验直接父子身份，继续通知目标非直接子级时补读发起 Thread 并核验同一官方 session tree。失败、超时或关闭时保留未知，不读取任务正文或推测上下文继承。
   `beginShutdown` 禁止新账户与子代理配置查询，`stop` 取消在途查询；超时同样取消出站查询。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，投递前委托
-  `completion-output-enricher.ts` 补全完成事件与子代理开始、继续设置，保留投递授权复核与各路径的失败处理。并行完成各 Surface 的首次启动，
+  `completion-output-enricher.ts` 补全完成事件与子代理开始、继续设置；持久与非持久投递共用补全异常降级，保留原始事件继续投递。取消、授权复核、平台发送和持久确认仍各自处理失败。并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
   生产装配将终态与独立生命周期通知写入投递箱，实时调用 Surface 的本地生命周期观察端口；最新展示状态在 512 项/8 MiB 内存预算内按键合并，前序持久结果排空后复核归属再展示，直到渠道实际结算才释放预算，同键在途状态和最新替换值共同计费。
   实时状态与持久结果共用 Conversation 调度，CLI 输入镜像按到达序号排在前序通知之后、后续结果之前；完成或断线将失效传播到渠道队列。永久隔离账号时移除其临时快照，排队任务取消后释放预算，在途任务等实际结算，持久记录不删除。未装配持久投递的独立路径保留原有内存恢复队列；补投与实时输出共用每 Conversation 的有界顺序队列；

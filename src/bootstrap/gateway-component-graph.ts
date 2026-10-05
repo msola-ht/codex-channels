@@ -1,4 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { currentGitBranch } from "./git-workspace-status.js";
 import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
@@ -565,7 +566,7 @@ export abstract class GatewayComponentGraph {
       this.router,
       models,
     );
-    this.resetCredits = new OpenAiResetCreditService(this.codex, signal => this.providerAccounts!.accountLimits("openai", signal, { refreshLogin: false }));
+    this.resetCredits = new OpenAiResetCreditService(this.codex, signal => this.providerAccounts!.accountLimits("openai", signal));
     const accountAdapters = [
       createOpenAiAccountAdapter(this.codex),
       ...createManagedProviderAccountAdapters(
@@ -933,7 +934,7 @@ export abstract class GatewayComponentGraph {
       this.surfaces,
       this.output,
       logger.child({ module: "delivery" }),
-      (target) => service.status(target, { includeGitBranch: true }).gitBranch,
+      (target, signal) => service.workspaceGitBranch(target, signal),
       {
         persistence: {
           directory: join(dirname(config.stateDatabasePath), "delivery-outbox"),
@@ -2043,26 +2044,6 @@ function verifyCodexVersion(config: GatewayConfig): void {
     throw new Error(
       `Codex 版本不受支持：当前 ${actual}，协议基线 ${supportedCodexCliVersion}`,
     );
-  }
-}
-
-export function currentGitBranch(projectRoot: string): string | undefined {
-  try {
-    const branch = execFileSync(
-      "git",
-      ["-C", projectRoot, "branch", "--show-current"],
-      {
-        encoding: "utf8",
-        maxBuffer: 4_096,
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 2_000,
-      },
-    ).trim();
-    return branch && Buffer.byteLength(branch, "utf8") <= 512
-      ? branch
-      : undefined;
-  } catch {
-    return undefined;
   }
 }
 

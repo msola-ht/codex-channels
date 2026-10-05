@@ -339,6 +339,33 @@ describe("WeixinSurface", () => {
     }, expect.any(AbortSignal));
   });
 
+  it("cancels startup status preparation before sending its late result", async () => {
+    let notificationSignal!: AbortSignal;
+    const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
+    const surface = new WeixinSurface({
+      accountId,
+      client: { getUpdates: vi.fn((_cursor, signal) => waitForAbort(signal)), sendText },
+      cursorStore: cursorStoreFixture(), service: serviceFixture(), access: accessFixture(true),
+      replyContextPersistence: replyContextPersistenceFixture({ version: 1, accountId, actorId,
+        contextToken: "restored-context", updatedAt: 1_000 }),
+      startupNotification: {
+        targets: () => [target],
+        text: async (_target, signal) => {
+          notificationSignal = signal;
+          await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+          return "late status";
+        },
+      },
+      logger: pino({ level: "silent" }), onFatal: vi.fn(),
+    });
+    const starting = surface.start();
+    await vi.waitFor(() => expect(notificationSignal).toBeInstanceOf(AbortSignal));
+    await surface.stop();
+    await starting;
+    expect(notificationSignal.aborted).toBe(true);
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
   it("uses official lifecycle notifications without depending on reply context", async () => {
     const lifecycleClient: WeixinLifecycleProtocolClient = {
       notifyStart: vi.fn(async () => {}),

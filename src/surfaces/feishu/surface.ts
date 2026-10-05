@@ -99,7 +99,7 @@ interface FeishuSurfaceDependencies {
 }
 
 export interface FeishuStartupNotification {
-  messages(): ReadonlyArray<{ chatId: string; text: string }> | Promise<ReadonlyArray<{ chatId: string; text: string }>>;
+  messages(signal: AbortSignal): ReadonlyArray<{ chatId: string; text: string }> | Promise<ReadonlyArray<{ chatId: string; text: string }>>;
 }
 
 export interface FeishuSurfaceOptions {
@@ -163,6 +163,8 @@ export class FeishuSurface implements SurfaceAdapter {
   private cardActionObserved = false;
   private menuEventObserved = false;
   private stopPromise: Promise<void> | undefined;
+  private startupAbort: AbortController | undefined;
+  private startupTask: Promise<void> | undefined;
 
   constructor(
     options: FeishuSurfaceOptions,
@@ -513,6 +515,9 @@ export class FeishuSurface implements SurfaceAdapter {
   private readonly files: FeishuFilePort | undefined;
 
   async start(): Promise<void> {
+    this.startupAbort?.abort();
+    const startupAbort = new AbortController();
+    this.startupAbort = startupAbort;
     const imagesStarting = this.images.start();
     const audiosStarting = this.audios.start();
     this.logger.info(this.lifecycleContext(), "飞书长连接正在连接");
@@ -520,12 +525,13 @@ export class FeishuSurface implements SurfaceAdapter {
     try {
       await Promise.all([imagesStarting, audiosStarting, this.files?.start?.(), connectionStarting]);
     } catch (error) {
+      startupAbort.abort();
       this.connection.resetAfterStartFailure?.();
       throw error;
     }
     this.connectionReady = true;
     this.logger.info(this.lifecycleContext(), "飞书长连接已就绪");
-    void this.sendStartupNotifications();
+    this.startupTask = this.sendStartupNotifications(startupAbort.signal);
   }
 
   stop(): Promise<void> {
@@ -534,8 +540,10 @@ export class FeishuSurface implements SurfaceAdapter {
   }
 
   private async stopOnce(): Promise<void> {
+    this.startupAbort?.abort();
     this.connectionReady = false;
     await this.connection.stop();
+    await this.startupTask;
     await this.inbox.close();
     await this.adapter.close();
     await this.applicationSetup.close();
@@ -590,14 +598,15 @@ export class FeishuSurface implements SurfaceAdapter {
     return recipients;
   }
 
-  private async sendStartupNotifications(): Promise<void> {
+  private async sendStartupNotifications(signal: AbortSignal): Promise<void> {
     if (!this.startupNotification) {
       return;
     }
     let messages: ReadonlyArray<{ chatId: string; text: string }>;
     try {
-      messages = await this.startupNotification.messages();
+      messages = await this.startupNotification.messages(signal);
     } catch (error) {
+      if (signal.aborted) return;
       this.logger.warn(
         {
           ...this.lifecycleContext(),
@@ -609,6 +618,7 @@ export class FeishuSurface implements SurfaceAdapter {
     }
     const delivered = new Set<string>();
     for (const { chatId, text } of messages) {
+      if (signal.aborted) return;
       if (!/^oc_.+$/u.test(chatId)) {
         this.logger.warn(
           this.lifecycleContext(),

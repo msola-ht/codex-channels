@@ -234,6 +234,163 @@ describe("Feishu outbox streaming lifecycle", () => {
     await outbox.close();
   });
 
+  it.each(["text", "turn"] as const)("supersedes a queued refresh with %s completion while preserving the in-flight update and receipt", async (completion) => {
+    vi.useFakeTimers();
+    let releaseUpdate!: () => void;
+    let releaseFinish!: () => void;
+    const updateBlocked = new Promise<void>((resolve) => { releaseUpdate = resolve; });
+    const finishBlocked = new Promise<void>((resolve) => { releaseFinish = resolve; });
+    const calls: string[] = [];
+    let updateSignal: AbortSignal | undefined;
+    const checkpoints: string[] = [];
+    const delivered = vi.fn();
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      updateStreamingCard: async (_id, text, sequence, signal) => {
+        calls.push(`update:${text}:${sequence}`);
+        updateSignal = signal;
+        await updateBlocked;
+      },
+      finishStreamingCard: async (_id, sequence, text) => {
+        calls.push(`finish:${text}:${sequence}`);
+        await finishBlocked;
+      },
+    }, pino({ level: "silent" }));
+    try {
+      outbox.handle(delta("A"));
+      await vi.advanceTimersByTimeAsync(300);
+      outbox.handle(delta("B"));
+      await vi.advanceTimersByTimeAsync(300);
+      outbox.handle(delta("C"));
+      await vi.advanceTimersByTimeAsync(300);
+      const finalText = completion === "text" ? "ABC-final" : "ABC";
+      const delivery = outbox.deliver(completion === "text" ? completed({}, finalText, "item-1") : turnCompleted(),
+        new AbortController().signal, async ({ state }) => { checkpoints.push(state); }).then(delivered);
+
+      expect(calls).toEqual(["update:AB:1"]);
+      expect(updateSignal?.aborted).toBe(false);
+      releaseUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls).toEqual(["update:AB:1", `finish:${finalText}:2`]);
+      expect(delivered).not.toHaveBeenCalled();
+      expect(checkpoints).not.toContain("confirmed");
+      releaseFinish();
+      await delivery;
+      expect(delivered).toHaveBeenCalledOnce();
+      expect(checkpoints).toContain("confirmed");
+    } finally {
+      releaseUpdate();
+      releaseFinish();
+      await outbox.close();
+    }
+  });
+
+  it.each(["item", "chat"] as const)("invalidates queued refreshes only for the completed stream across a different %s", async (isolation) => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const calls: string[] = [];
+    const otherTarget = isolation === "chat" ? { ...target, conversationId: "oc_other" } : target;
+    const otherDelta = (text: string): OutputEvent => ({ ...delta(text, "item-2"), target: otherTarget });
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      createStreamingCard: async (chatId, text) => ({ cardId: `${chatId}:${text}`, messageId: "message" }),
+      updateStreamingCard: async (id, text, sequence) => {
+        calls.push(`update:${id}:${text}:${sequence}`);
+        if (sequence === 1) await blocked;
+      },
+      finishStreamingCard: async (id, sequence, text) => { calls.push(`finish:${id}:${text}:${sequence}`); },
+    }, pino({ level: "silent" }));
+    try {
+      outbox.handle(delta("A"));
+      outbox.handle(otherDelta("X"));
+      await vi.advanceTimersByTimeAsync(300);
+      outbox.handle(delta("B"));
+      outbox.handle(otherDelta("Y"));
+      await vi.advanceTimersByTimeAsync(300);
+      outbox.handle(delta("C"));
+      outbox.handle(otherDelta("Z"));
+      await vi.advanceTimersByTimeAsync(300);
+      outbox.handle(completed({}, "ABC-final", "item-1"));
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(calls.filter((call) => call.includes(`${target.conversationId}:A:`))).toEqual([
+        `update:${target.conversationId}:A:AB:1`, `finish:${target.conversationId}:A:ABC-final:2`,
+      ]);
+      expect(calls.filter((call) => call.includes(`${otherTarget.conversationId}:X:`))).toEqual(isolation === "chat" ? [
+        `update:${otherTarget.conversationId}:X:XY:1`, `update:${otherTarget.conversationId}:X:XYZ:2`,
+      ] : [`update:${otherTarget.conversationId}:X:XYZ:1`]);
+    } finally {
+      release();
+      await outbox.close();
+    }
+  });
+
+  it("does not let a queued refresh update a replacement stream with the same identity", async () => {
+    vi.useFakeTimers();
+    const pending: Array<(signal: AbortSignal) => Promise<void>> = [];
+    const create = vi.fn(cardMethods.createStreamingCard);
+    const streams = new FeishuTextStreams({ ...cardMethods, createStreamingCard: create,
+      sendText: async () => {}, sendPost: async () => {} },
+    { enqueue: (_chat, run) => { pending.push(run); return true; } },
+    { get: () => undefined }, pino({ level: "silent" }), () => false, async () => {}, async () => 0);
+    try {
+      streams.acceptStreamDelta(delta("old") as Extract<OutputEvent, { type: "text.delta" }>);
+      await vi.advanceTimersByTimeAsync(300);
+      streams.clearThread("thread-1");
+      streams.acceptStreamDelta(delta("replacement") as Extract<OutputEvent, { type: "text.delta" }>);
+      await vi.advanceTimersByTimeAsync(300);
+
+      await pending[0]!(new AbortController().signal);
+      expect(create).not.toHaveBeenCalled();
+      await pending[1]!(new AbortController().signal);
+      expect(create).toHaveBeenCalledOnce();
+      expect(create).toHaveBeenCalledWith(target.conversationId, "replacement", expect.any(AbortSignal));
+    } finally {
+      streams.clear();
+    }
+  });
+
+  it("preserves the queued refresh barrier before visible output when completion follows", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const calls: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      sendMarkdownCard: async () => { calls.push("operation"); },
+      updateStreamingCard: async (_id, text, sequence) => {
+        calls.push(`update:${text}:${sequence}`);
+        if (sequence === 1) await blocked;
+      },
+      finishStreamingCard: async (_id, sequence, text) => { calls.push(`finish:${text}:${sequence}`); },
+    }, pino({ level: "silent" }));
+    try {
+      outbox.handle(delta("A"));
+      await vi.advanceTimersByTimeAsync(300);
+      outbox.handle(delta("B"));
+      await vi.advanceTimersByTimeAsync(300);
+      outbox.handle(delta("C"));
+      await vi.advanceTimersByTimeAsync(300);
+      outbox.handle(operationUpdated("completed"));
+      outbox.handle(completed({}, "ABC-final", "item-1"));
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(calls).toEqual(["update:AB:1", "update:ABC-final:2", "operation", "finish:ABC-final:3"]);
+    } finally {
+      release();
+      await outbox.close();
+    }
+  });
+
   it("preserves deltas received while a full card rolls over", async () => {
     vi.useFakeTimers();
     let release!: () => void;

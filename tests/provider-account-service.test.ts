@@ -10,7 +10,7 @@ import {
 } from "../src/application/index.js";
 
 describe("ProviderAccountService", () => {
-  it("requests login refresh for manual limits but not startup warmup and preserves caller cancellation", async () => {
+  it("reads limits for manual queries and startup warmup with caller cancellation", async () => {
     const query = {
       accountUsage: vi.fn(async () => ({ summary: {
         lifetimeTokens: 1, peakDailyTokens: null, longestRunningTurnSec: null, currentStreakDays: null, longestStreakDays: null,
@@ -23,12 +23,12 @@ describe("ProviderAccountService", () => {
     const service = new ProviderAccountService([adapter]);
     const manual = new AbortController();
     await service.accountLimits("openai", manual.signal);
-    expect(accountLimits).toHaveBeenNthCalledWith(1, manual.signal, { refreshLogin: true });
-    expect(query.accountRateLimits).toHaveBeenNthCalledWith(1, { signal: manual.signal, refreshLogin: true });
+    expect(accountLimits).toHaveBeenNthCalledWith(1, manual.signal);
+    expect(query.accountRateLimits).toHaveBeenNthCalledWith(1, { signal: manual.signal });
 
     const warmup = new AbortController();
     await service.refreshSnapshots(warmup.signal);
-    expect(accountLimits).toHaveBeenNthCalledWith(2, warmup.signal, { refreshLogin: false });
+    expect(accountLimits).toHaveBeenNthCalledWith(2, warmup.signal);
     expect(query.accountRateLimits).toHaveBeenNthCalledWith(2, { signal: warmup.signal });
 
     manual.abort(new Error("manual refresh cancelled"));

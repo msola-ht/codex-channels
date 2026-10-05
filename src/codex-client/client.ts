@@ -1011,18 +1011,8 @@ export class CodexAppServerClient implements
   }
 
   async accountRateLimits(
-    options: { background?: boolean; refreshLogin?: boolean; signal?: AbortSignal } = {},
+    options: { background?: boolean; signal?: AbortSignal } = {},
   ): Promise<AccountRateLimits> {
-    if (options.refreshLogin && !options.background) {
-      // Managed auth may update cached credentials. The RPC does not attest
-      // that refresh succeeded, and token rotation must not be retried.
-      const account = await this.rpc.request<GetAccountResponse>({
-        method: "account/read",
-        params: { refreshToken: true } satisfies GetAccountParams,
-      }, { retryOverload: false, ...(options.signal ? { signal: options.signal } : {}) });
-      toOpenAiAccountRoute(account);
-      options.signal?.throwIfAborted();
-    }
     const params = {
       supportsLunaReserve: true,
       ...(options.background ? { excludeResetCreditDetails: true } : {}),

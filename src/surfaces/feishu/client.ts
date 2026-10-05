@@ -22,7 +22,8 @@ import {
   sanitizeFeishuMarkdown,
 } from "./message-content.js";
 import { extractFeishuQuotedText } from "./inbound-content.js";
-import type { FeishuMessagePort } from "./outbox-message-port.js";
+import type { FeishuMessagePort, ObserveFeishuCardCreation } from "./outbox-message-port.js";
+import { feishuSdkRequestSignal, runFeishuSdkRequest } from "./sdk-request-context.js";
 import { FeishuMessageError, feishuApiDiagnostics } from "./message-error.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 export { FeishuMessageError, type FeishuMessageErrorCode } from "./message-error.js";
@@ -75,14 +76,14 @@ export function createFeishuOAuthApi(
     {
       fetch: createFeishuOAuthFetch(openApiHttp, accountsHttp),
       sleep: abortableSleep,
-      listGrantedUserScopes: (signal) => client.request({
+      listGrantedUserScopes: (signal) => runFeishuSdkRequest(() => client.request({
         method: "GET",
         url: `/open-apis/application/v6/applications/${options.appId}`,
         signal,
         params: {
           lang: "zh_cn",
         },
-      }),
+      }), 15_000, new FeishuMessageError("read-timeout", "飞书权限读取超时"), signal),
     },
   );
 }
@@ -280,12 +281,8 @@ export class FeishuMessageClient implements
         ...(signal === undefined ? {} : { signal }),
       }, async () => {
         if (signal?.aborted) throw createAbortError();
-        const response = await withTimeout(request(), timeoutMs, timeoutError, signal);
-        if (response !== null && typeof response === "object" && "code" in response
-          && typeof response.code === "number" && response.code !== 0) {
-          throw new FeishuMessageError(isFeishuRateLimitCode(response.code) ? "rate-limited" : "invalid-response",
-            "飞书 API 返回业务错误", feishuApiDiagnostics({ response: { data: response } }));
-        }
+        const response = await runFeishuSdkRequest(request, timeoutMs, timeoutError, signal);
+        validateBusinessResponse(response);
         return response;
       }));
   }
@@ -603,11 +600,12 @@ export class FeishuMessageClient implements
     chatId: string,
     card: FeishuCardDocument,
     signal?: AbortSignal,
+    observeCreation?: ObserveFeishuCardCreation,
   ): Promise<string> {
     return this.sendMessage(
       chatId,
       "interactive",
-      JSON.stringify(card), signal,
+      JSON.stringify(card), signal, observeCreation,
     );
   }
 
@@ -1064,10 +1062,11 @@ export class FeishuMessageClient implements
     messageType: "text" | "post" | "interactive" | "file" | "image",
     content: string,
     signal?: AbortSignal,
+    observeCreation?: ObserveFeishuCardCreation,
   ): Promise<string> {
     try {
-      const response = await this.observeRequest("createMessage",
-        () => this.sdkClient.createMessage({
+      return await this.observeRequest("createMessage", () => {
+        const creation = this.sdkClient.createMessage({
           params: {
             receive_id_type: "chat_id",
           },
@@ -1076,23 +1075,22 @@ export class FeishuMessageClient implements
             msg_type: messageType,
             content,
           },
-        }),
+        }).then((response) => {
+          validateBusinessResponse(response);
+          if (typeof response?.data?.message_id !== "string" || response.data.message_id.trim().length === 0) {
+            throw new FeishuMessageError("invalid-response", "飞书消息响应无效");
+          }
+          return response.data.message_id;
+        });
+        observeCreation?.(creation);
+        return creation;
+      },
         this.sendTimeoutMs,
         new FeishuMessageError(
           "send-timeout",
           "飞书消息发送超时",
         ), signal,
       );
-      if (
-        typeof response?.data?.message_id !== "string"
-        || response.data.message_id.trim().length === 0
-      ) {
-        throw new FeishuMessageError(
-          "invalid-response",
-          "飞书消息响应无效",
-        );
-      }
-      return response.data.message_id;
     } catch (error) {
       if (isAbortError(error)) {
         throw error;
@@ -1117,6 +1115,14 @@ export class FeishuMessageClient implements
 
 function isFeishuRateLimitCode(code: number): boolean {
   return code === 99991400;
+}
+
+function validateBusinessResponse(response: unknown): void {
+  if (response !== null && typeof response === "object" && "code" in response
+    && typeof response.code === "number" && response.code !== 0) {
+    throw new FeishuMessageError(isFeishuRateLimitCode(response.code) ? "rate-limited" : "invalid-response",
+      "飞书 API 返回业务错误", feishuApiDiagnostics({ response: { data: response } }));
+  }
 }
 
 function isFeishuRateLimitError(error: unknown): boolean {
@@ -1244,19 +1250,24 @@ export function applyFeishuHttpPolicy(
 ): HttpInstance {
   const options = <D>(
     value?: HttpRequestOptions<D>,
-  ): HttpRequestOptions<D> => ({
-    ...value,
-    timeout: timeoutMs,
-    ...(agent
-      ? {
-          httpAgent: agent,
-          httpsAgent: agent,
-          proxy: false,
-        }
-      : disableEnvironmentProxy
-      ? { proxy: false }
-      : {}),
-  });
+  ): HttpRequestOptions<D> => {
+    const signal = feishuSdkRequestSignal((value as { signal?: AbortSignal | null } | undefined)?.signal);
+    signal?.throwIfAborted();
+    return {
+      ...value,
+      ...(signal === undefined ? {} : { signal }),
+      timeout: timeoutMs,
+      ...(agent
+        ? {
+            httpAgent: agent,
+            httpsAgent: agent,
+            proxy: false,
+          }
+        : disableEnvironmentProxy
+        ? { proxy: false }
+        : {}),
+    };
+  };
   return {
     request: (value) => base.request(options(value)),
     get: (url, value) => base.get(url, options(value)),
@@ -1335,36 +1346,6 @@ function hasValidCredentials(
 ): boolean {
   return FEISHU_APP_ID_PATTERN.test(options.appId)
     && options.appSecret.trim().length > 0;
-}
-
-async function withTimeout<T>(
-  operation: Promise<T>,
-  timeoutMs: number,
-  timeoutError: Error,
-  signal?: AbortSignal,
-): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  let onAbort: (() => void) | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      reject(timeoutError);
-    }, timeoutMs);
-    timer.unref();
-  });
-  const aborted = new Promise<never>((_resolve, reject) => {
-    if (!signal) return;
-    onAbort = () => reject(createAbortError());
-    if (signal.aborted) onAbort();
-    else signal.addEventListener("abort", onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([operation, timeout, aborted]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
-  }
 }
 
 function createAbortError(): Error {

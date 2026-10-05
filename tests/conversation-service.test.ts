@@ -667,7 +667,7 @@ describe("ConversationService model selection", () => {
     await output.close();
   });
 
-  it("includes the current Core Goal in Conversation status", () => {
+  it("includes the current Core Goal and reads Git only for display", async () => {
     const goal = {
       threadId: "thread-1",
       objective: "完成 Gateway",
@@ -678,7 +678,13 @@ describe("ConversationService model selection", () => {
       createdAt: 1_000,
       updatedAt: 2_000,
     };
-    const currentGitBranch = vi.fn(() => "feature/weixin-surface");
+    const currentGitBranch = vi.fn(async () => "feature/weixin-surface");
+    const modelStatus = vi.fn(() => ({
+      model: "gpt-main", effort: "medium", serviceTier: "default",
+      modelPending: false, effortPending: false, serviceTierPending: false,
+    }));
+    let workspace = main;
+    let authorized = true;
     const service = new ConversationService(
       turnPort(),
       {
@@ -688,7 +694,10 @@ describe("ConversationService model selection", () => {
           threadId: "thread-1",
           sessionId: "session-1",
         }),
-        workspace: () => main,
+        workspace: () => {
+          if (!authorized) throw new Error("Workspace access revoked");
+          return workspace;
+        },
       } as unknown as SessionRouter,
       {
         activeTurn: () => undefined,
@@ -698,26 +707,35 @@ describe("ConversationService model selection", () => {
         weeklyRateLimit: () => undefined,
       } as unknown as ConversationCore,
       {
-        status: () => ({
-          model: "gpt-main",
-          effort: "medium",
-          serviceTier: "default",
-          modelPending: false,
-          effortPending: false,
-          serviceTierPending: false,
-        }),
+        status: modelStatus,
       } as unknown as ModelSelectionService,
       queryPort(),
       { currentGitBranch },
     );
 
-    expect(service.status(target, { includeGitBranch: true })).toMatchObject({
+    expect(service.status(target)).not.toHaveProperty("gitBranch");
+    expect(currentGitBranch).not.toHaveBeenCalled();
+    expect(await service.statusForDisplay(target)).toMatchObject({
       threadId: "thread-1",
       goal,
       contextCompactionCount: 2,
       gitBranch: "feature/weixin-surface",
     });
-    expect(currentGitBranch).toHaveBeenCalledWith(main.cwd);
+    expect(currentGitBranch).toHaveBeenCalledWith(main.cwd, undefined);
+    modelStatus.mockClear();
+    expect(await service.workspaceGitBranch(target)).toBe("feature/weixin-surface");
+    expect(modelStatus).not.toHaveBeenCalled();
+
+    currentGitBranch.mockImplementationOnce(async () => {
+      workspace = { id: "other", name: "Other", cwd: "/workspace/other" };
+      return "feature/old-workspace";
+    });
+    expect(await service.statusForDisplay(target)).toMatchObject({ workspaceId: "other", cwd: "/workspace/other" });
+    currentGitBranch.mockImplementationOnce(async () => { authorized = false; return "feature/revoked"; });
+    await expect(service.statusForDisplay(target)).rejects.toThrow("Workspace access revoked");
+    currentGitBranch.mockClear();
+    await expect(service.workspaceGitBranch(target)).rejects.toThrow("Workspace access revoked");
+    expect(currentGitBranch).not.toHaveBeenCalled();
   });
 
   it("starts an inline Plan prompt with the selected collaboration mode override", async () => {

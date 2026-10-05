@@ -53,8 +53,8 @@
   有界 Luna Reserve 授权摘要映射为 Application
   稳定摘要；接受当前 0.160.0 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
   不把上游响应正文交给 Surface。
-  `client.ts` 的手动额度查询可先通过 `account/read.refreshToken` 尝试刷新托管登录，携带取消信号且不重试令牌轮换；
-  后台额度查询与启动认证路由不主动刷新，不把账户 RPC 成功视为凭据已更新。
+  `client.ts` 的手动与后台额度查询直接调用 `account/rateLimits/read`，携带取消信号且不主动刷新登录凭据；
+  后台查询省略重置券详情，启动认证路由使用 `account/read.refreshToken: false`。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
   使用稳定 `SkillMetadata.pluginId` 排除系统与 Plugin 所有项，不从安装路径猜测来源；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、
   绝对路径均通过校验的引用。

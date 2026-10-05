@@ -107,7 +107,7 @@ TMPDIR=/tmp RUN_CODEX_CONTRACT=1 npm test -- --run \
 各合同仍使用独立随机子目录。合同覆盖真实握手、Desktop JSONL stdio 到 Unix WebSocket 的
 `initialize` 转换、Desktop 回环桥的双 Client Thread 共享、跨 Client
 状态、Provider 监管、Queue、设置更新、Goal、Skill、MCP、Plugin、Permission Profile 和工具审批
-等当前支持矩阵中的能力，以及使用隔离模拟账户验证显式额度查询的凭证刷新时间、重置券读取和幂等消费。
+等当前支持矩阵中的能力，以及使用隔离模拟账户验证额度查询只读取已有凭证刷新时间且不主动触发 OAuth、重置券读取和幂等消费。
 Desktop 桥合同使用普通 App Server Client，不覆盖打包 Desktop 动态创建
 的 `CODEX_APP_TOOLS_PIPE_PATH`、代码签名校验或内置 `codex_app` MCP 生命周期；这些能力必须单独
 实机验收。跳过或环境拒绝不计为通过。

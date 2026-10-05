@@ -10,6 +10,7 @@ import {
   FeishuEventConnection,
   type FeishuApplicationSnapshot,
   type FeishuCardDocument,
+  type FeishuStartupNotification,
 } from "../src/surfaces/feishu/index.js";
 import { FeishuSurface } from "../src/surfaces/feishu/surface.js";
 import {
@@ -141,6 +142,24 @@ describe("Feishu Surface", () => {
       }),
     ]));
     expect(JSON.stringify(fixture.logs)).not.toContain("secret");
+  });
+
+  it("cancels startup status preparation on stop and never enqueues its late result", async () => {
+    let notificationSignal!: AbortSignal;
+    const fixture = createFixture(undefined, undefined, {
+      messages: async (signal) => {
+        notificationSignal = signal;
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+        return [{ chatId: "oc_chat", text: "late status" }];
+      },
+    });
+    const starting = fixture.surface.start();
+    fixture.ready();
+    await starting;
+    expect(notificationSignal.aborted).toBe(false);
+    await fixture.surface.stop();
+    expect(notificationSignal.aborted).toBe(true);
+    expect(fixture.sent).toEqual([]);
   });
 
   it("rejects invalid and duplicate startup notification chats", async () => {
@@ -491,7 +510,7 @@ describe("Feishu Surface", () => {
   });
 
   it("routes command center buttons through the shared Application command service", async () => {
-    const status = vi.fn(() => ({
+    const status = vi.fn(async () => ({
       workspaceId: "main",
       workspaceName: "Main",
       cwd: "/workspace",
@@ -512,7 +531,7 @@ describe("Feishu Surface", () => {
         turnId: "turn-1",
         steered: false,
       }),
-      status,
+      statusForDisplay: status,
     });
     const starting = fixture.surface.start();
     fixture.ready();
@@ -528,8 +547,6 @@ describe("Feishu Surface", () => {
       surface: "feishu",
       accountId: "cli_0123456789abcdef",
       conversationId: "oc_chat",
-    }, {
-      includeGitBranch: true,
     });
     expect(fixture.sent).toEqual([]);
     expect(fixture.cards).toHaveLength(2);
@@ -718,9 +735,7 @@ describe("Feishu Surface", () => {
 function createFixture(
   service: ConversationMethodOverrides | undefined = undefined,
   configurationRecipients?: () => readonly string[],
-  startupNotification?: {
-    messages(): ReadonlyArray<{ chatId: string; text: string }>;
-  },
+  startupNotification?: FeishuStartupNotification,
   applicationSnapshot: FeishuApplicationSnapshot = {
     grantedTenantScopes: [
       "application:application:self_manage",

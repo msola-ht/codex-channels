@@ -919,7 +919,7 @@ describe("SurfaceManager", () => {
       [feishu],
       output,
       logger,
-      () => "feature/weixin-surface",
+      async () => "feature/weixin-surface",
     );
     await manager.start();
 
@@ -973,6 +973,34 @@ describe("SurfaceManager", () => {
     expect(received.slice(2)).toEqual(["slow:turn.completed", "slow:warning"]);
     await output.close();
     await manager.stop();
+  });
+
+  it("shares the metric deadline with Git and cancels its query without blocking another Conversation", async () => {
+    vi.useFakeTimers();
+    const received: OutputEvent[] = [];
+    const feishu = surface("feishu", "tenant-a", []);
+    feishu.output.handle = (event) => { received.push(event); };
+    let gitSignal!: AbortSignal;
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = new SurfaceManager([feishu], output, logger,
+      async (_target, signal) => { gitSignal = signal; return new Promise(() => {}); },
+      { taskAggregate: async () => new Promise(() => {}) });
+    try {
+      await manager.start();
+      const target = { surface: "feishu", accountId: "tenant-a", conversationId: "slow" };
+      output.publish({ type: "turn.completed", target, threadId: "thread", turnId: "turn", status: "completed", timing: { modelRequestCount: 7 } }, true);
+      output.publish({ type: "warning", target: { ...target, conversationId: "other" }, message: "independent" }, true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(received.map((event) => event.type)).toEqual(["warning"]);
+      await vi.advanceTimersByTimeAsync(250);
+      await settle();
+      expect(received).toEqual([
+        expect.objectContaining({ type: "warning" }),
+        expect.objectContaining({ type: "turn.completed", timing: { modelRequestCount: 7 } }),
+      ]);
+      expect(received[1]).not.toHaveProperty("gitBranch");
+      expect(gitSignal.aborted).toBe(true);
+    } finally { vi.useRealTimers(); await manager.stop(); await output.close(); }
   });
 
   it.each(["clp-main", "openai", undefined])("reads completion account data only for the exact third-party provider %s", async (provider) => {
@@ -1499,6 +1527,7 @@ describe("SurfaceManager", () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: OutputEvent[] = [];
     const warnings: string[] = [];
+    const metadata: Record<string, unknown>[] = [];
     feishu.output.handle = (event) => {
       received.push(event);
     };
@@ -1509,13 +1538,14 @@ describe("SurfaceManager", () => {
       {
         debug() {},
         info() {},
-        warn: (_fields: Record<string, unknown>, message: string) => {
+        warn: (fields: Record<string, unknown>, message: string) => {
+          metadata.push(fields);
           warnings.push(message);
         },
         error() {},
       } as unknown as Logger,
       () => {
-        throw new Error("git branch lookup failed");
+        throw new Error("Authorization: secret");
       },
     );
     await manager.start();
@@ -1534,6 +1564,8 @@ describe("SurfaceManager", () => {
     await flushEventBus();
 
     expect(warnings).toContain("Turn 完成统计富化失败，改用未富化输出");
+    expect(metadata).toContainEqual(expect.objectContaining({ errorChain: ["Error"] }));
+    expect(JSON.stringify(metadata)).not.toContain("secret");
     expect(received).toEqual([
       expect.objectContaining({ type: "turn.completed", turnId: "turn-1" }),
     ]);

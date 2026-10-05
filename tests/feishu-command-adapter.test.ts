@@ -23,12 +23,12 @@ describe("Feishu command adapter", () => {
   it("uses rich posts for command results but keeps failures as plain text", async () => {
     const notifyMarkdown = vi.fn(() => true);
     const notifyText = vi.fn(() => true);
-    const status = vi.fn(() => conversationStatus({
+    const status = vi.fn(async () => conversationStatus({
       model: "gpt-test",
       effort: "medium",
     }));
     const adapter = new FeishuConversationAdapter(
-      { status },
+      { statusForDisplay: status },
       { notifyMarkdown, notifyText } as unknown as FeishuOutbox,
       imagePort,
     );
@@ -633,7 +633,7 @@ describe("Feishu command adapter", () => {
     const fixture = createOutbox();
     const adapter = new FeishuConversationAdapter(
       {
-        status: vi.fn(() => conversationStatus({
+        statusForDisplay: vi.fn(async () => conversationStatus({
           threadId: "thread-1",
           model: "gpt-test",
           modelProvider: "openai",
@@ -1458,7 +1458,7 @@ describe("Feishu command adapter", () => {
       turnId: "turn-1",
       steered: false,
     }));
-    const status = vi.fn(() => conversationStatus({
+    const status = vi.fn(async () => conversationStatus({
       threadId: "thread-1",
       turnId: "turn-1",
       model: "gpt-test",
@@ -1466,7 +1466,7 @@ describe("Feishu command adapter", () => {
       serviceTier: "priority",
     }));
     const adapter = new FeishuConversationAdapter(
-      { submit, status },
+      { submit, statusForDisplay: status },
       fixture.outbox,
       imagePort,
     );
@@ -1475,9 +1475,7 @@ describe("Feishu command adapter", () => {
     await fixture.outbox.close();
 
     expect(submit).not.toHaveBeenCalled();
-    expect(status).toHaveBeenCalledWith(message.target, {
-      includeGitBranch: true,
-    });
+    expect(status).toHaveBeenCalledWith(message.target);
     expect(fixture.sent).toEqual([{
       chatId: "oc_chat",
       text: [

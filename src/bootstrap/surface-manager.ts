@@ -117,7 +117,8 @@ export class SurfaceManager {
     private readonly logger: Logger,
     currentGitBranch?: (
       target: OutputEvent["target"],
-    ) => string | undefined,
+      signal: AbortSignal,
+    ) => Promise<string | undefined>,
     private readonly options: SurfaceManagerOptions = {},
   ) {
     this.completionEnricher = new CompletionOutputEnricher(logger, currentGitBranch, options);
@@ -163,8 +164,9 @@ export class SurfaceManager {
       deliver: async (event, signal, checkpoint, authorized, liveOrder) => {
         const surface = this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId));
         if (!surface || !this.active.has(surface) || !surface.output.deliver) throw new Error("可靠投递端口不可用");
-        const enriched = await this.completionEnricher.enrich(event);
+        const enriched = await this.enrichSafely(event, signal);
         signal.throwIfAborted();
+        if (!this.acceptingOutput) throw new Error("可靠投递已停止");
         if (!authorized()) throw new Error("可靠投递授权已变化");
         if (liveOrder !== undefined) {
           // Coordinator has settled every preceding durable record in this Conversation.
@@ -179,6 +181,7 @@ export class SurfaceManager {
           }
         }
         await this.requireRuntime(surface).delivery.runOrdered(event.target.conversationId, async (active) => {
+          if (!this.acceptingOutput) throw new Error("可靠投递已停止");
           if (!authorized()) throw new Error("可靠投递授权已变化");
           await surface.output.deliver!(enriched, active, checkpoint);
         }, signal);
@@ -858,23 +861,8 @@ export class SurfaceManager {
     event: OutputEvent,
     order: number,
   ): Promise<void> {
-    let routedEvent: OutputEvent;
-    try {
-      routedEvent = await this.completionEnricher.enrich(event);
-    } catch (error) {
-      // 完成卡不能因为统计读取失败而缺席，也不能在恢复重放里变成未处理的拒绝；
-      // 退化为未富化输出，并保留可观测性。
-      this.logger.warn(
-        {
-          err: error,
-          surface: surface.surface,
-          accountId: surface.accountId,
-          eventType: event.type,
-        },
-        "Turn 完成统计富化失败，改用未富化输出",
-      );
-      routedEvent = event;
-    }
+    const routedEvent = await this.enrichSafely(event);
+    if (!this.acceptingOutput) return;
     if (!this.active.has(surface)) {
       if (!this.stopping) {
         const decision = resolveSurfaceDelivery(surface.surface, event);
@@ -904,6 +892,25 @@ export class SurfaceManager {
         },
         "Surface 拒绝输出事件",
       );
+    }
+  }
+
+  private async enrichSafely(event: OutputEvent, signal?: AbortSignal): Promise<OutputEvent> {
+    try {
+      return await this.completionEnricher.enrich(event, signal);
+    } catch (error) {
+      // 完成卡不能因为统计读取失败而缺席，也不能在恢复重放里变成未处理的拒绝；
+      // 退化为未富化输出，并保留可观测性。
+      this.logger.warn(
+        {
+          errorChain: surfaceErrorChain(error),
+          surface: event.target.surface,
+          accountId: event.target.accountId,
+          eventType: event.type,
+        },
+        "Turn 完成统计富化失败，改用未富化输出",
+      );
+      return event;
     }
   }
 
