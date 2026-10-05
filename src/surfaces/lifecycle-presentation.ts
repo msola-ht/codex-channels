@@ -550,7 +550,7 @@ export function createTurnCompletedPresentation(
     const details = [
       ["完成", event.timing.completedModelRequestCount],
       ["中断", event.timing.interruptedModelRequestCount],
-      ["未完整观测", event.timing.incompleteModelRequestCount],
+      ["不完整", event.timing.incompleteModelRequestCount],
       [
         "自动重试",
         recoveredFailureCount,
@@ -622,7 +622,7 @@ export function createTurnCompletedPresentation(
       }],
     });
   }
-  if (event.modelProvider === "openai" || event.timing?.responseUsage) {
+  if (event.timing?.responseUsage?.amount != null) {
     runFields.push({ label: "OpenAI Credits", value: formatResponseUsage(event.timing?.responseUsage) });
   }
   if (event.timing?.compact) {
@@ -679,7 +679,7 @@ export function createTurnCompletedPresentation(
         }],
       },
     ];
-    if (task.responseUsage) taskFields.push({ label: "OpenAI Credits", value: formatResponseUsage(task.responseUsage) });
+    if (task.responseUsage?.amount != null) taskFields.push({ label: "OpenAI Credits", value: formatResponseUsage(task.responseUsage) });
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
   if (Object.hasOwn(event, "gitBranch")) {
@@ -706,7 +706,7 @@ export function createTurnCompletedPresentation(
       ],
     });
   }
-  if (event.modelProvider === "openai" || event.sessionAggregate?.responseUsage) {
+  if (event.sessionAggregate?.responseUsage?.amount != null) {
     sessionFields.push({ label: "OpenAI Credits", value: formatResponseUsage(event.sessionAggregate?.responseUsage) });
   }
   sessionFields.push({
@@ -854,20 +854,10 @@ function turnStatusLabel(
 
 function requestOutcomeFields(summary: TurnTaskMetricsSummary): LifecyclePresentationField[] {
   const { completed, interrupted, failed, incomplete } = summary.requestOutcomes;
-  const fields: LifecyclePresentationField[] = [{
+  return [{
     label: "请求结果",
-    value: `完成 ${formatRequestCount(completed)} · 客户端中断 ${formatRequestCount(interrupted)} · 其他失败 ${formatRequestCount(failed)} · 未完整观测 ${formatRequestCount(incomplete)}`,
+    value: `完成 ${formatRequestCount(completed)} · 中断 ${formatRequestCount(interrupted)} · 失败 ${formatRequestCount(failed)} · 不完整 ${formatRequestCount(incomplete)}`,
   }];
-  if (interrupted > 0) {
-    const following = summary.interruptionSummary;
-    fields.push({ label: "中断后同轮有成功请求", value: `${formatRequestCount(following.followedByCompletion)} 次` });
-    fields.push({ label: "未观测到后续成功", value: `${formatRequestCount(following.noObservedCompletion)} 次` });
-    if (following.usageUnobserved > 0) fields.push({
-      label: "中断用量未完整观测",
-      value: `${formatRequestCount(following.usageUnobserved)} 次，不代表零消耗`,
-    });
-  }
-  return fields;
 }
 
 function formatResponseUsage(usage: ResponseUsageSummary | null | undefined): string {

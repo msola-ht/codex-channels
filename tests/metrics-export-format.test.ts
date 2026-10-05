@@ -93,7 +93,8 @@ describe("metrics export display helpers", () => {
     [0, "0 ms"], [0.125, "0.13 ms"], [672, "672 ms"], [999.994, "999.99 ms"],
     [999.999, "1 s"], [1000, "1 s"], [1250, "1.25 s"], [59994, "59.99 s"],
     [59995, "1 min"], [60000, "1 min"], [65000, "1 min 5 s"],
-    [3599500, "1 h"], [3661000, "1 h 1 min 1 s"],
+    [3599500, "1 h"], [3661000, "1 h 1 min"],
+    [10621000, "2 h 57 min"], [10620000, "2 h 57 min"],
   ])("formats %s ms consistently across surfaces, CLI and WebUI", (value, expected) => {
     expect(formatElapsedDuration(Number(value))).toBe(expected);
     expect(formatCliDuration(Number(value))).toBe(expected);

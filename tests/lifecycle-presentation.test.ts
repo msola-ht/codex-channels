@@ -43,7 +43,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).not.toContain("Token/s");
     expect(rendered).toContain("总耗时：17 min 51 s");
     expect(rendered).not.toContain("本次运行：");
-    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\n请求结果：完成 3 · 客户端中断 0 · 其他失败 0 · 未完整观测 0\nToken：1.1 K");
+    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\n请求结果：完成 3 · 中断 0 · 失败 0 · 不完整 0\nToken：1.1 K");
     expect(rendered).not.toContain("会话统计（含子代理）");
     expect(rendered).not.toContain("上游轮次首 Token");
   });
@@ -649,7 +649,6 @@ describe("shared Surface lifecycle presentation", () => {
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
       "最近请求缓存命中率：75.00%",
-      "OpenAI Credits：未提供",
       "本轮耗时：1 min 5 s",
       "",
       "当前会话：",
@@ -660,7 +659,6 @@ describe("shared Surface lifecycle presentation", () => {
       "上下文压缩：2 次",
       "Goal：进行中 · 12.5 K / 100 K",
       "Git 分支：feature/lifecycle",
-      "OpenAI Credits：未提供",
       "总耗时：未提供",
       "",
       "账户状态：",
@@ -842,9 +840,10 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(rendered).toContain("当前会话：");
     expect(rendered).toContain("模型请求：9 次");
-    expect(rendered).toContain("请求结果：完成 8 · 客户端中断 1 · 其他失败 0 · 未完整观测 0");
-    expect(rendered).toContain("中断后同轮有成功请求：1 次");
-    expect(rendered).toContain("中断用量未完整观测：1 次，不代表零消耗");
+    expect(rendered).toContain("请求结果：完成 8 · 中断 1 · 失败 0 · 不完整 0");
+    expect(rendered).not.toContain("中断后同轮有成功请求");
+    expect(rendered).not.toContain("未观测到后续成功");
+    expect(rendered).not.toContain("中断用量未完整观测");
     expect(rendered).toContain("Token：92 K");
     expect(rendered).toContain("缓存命中率：66.67%");
     expect(rendered).toContain("Token：92 K\n  缓存命中率：66.67%");
@@ -1063,10 +1062,14 @@ describe("completion response usage", () => {
       label: "OpenAI Credits", value: "0.1234567890123456789（部分，1 次请求未提供）",
     });
   });
-  it("keeps unavailable official usage unknown and does not label third-party usage as OpenAI Credits", () => {
+  it("hides unavailable Credits without inventing zero usage", () => {
     const event = { type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "test" },
       threadId: "thread", turnId: "turn", status: "completed", modelProvider: "openai" } as const;
-    expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation(event)).match(/OpenAI Credits：未提供/gu)).toHaveLength(2);
+    expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation(event))).not.toContain("OpenAI Credits");
+    expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({
+      ...event,
+      timing: { responseUsage: { amount: null, observedRequestCount: 0, missingRequestCount: 1 } },
+    }))).not.toContain("OpenAI Credits");
     expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event, modelProvider: "deepseek" }))).not.toContain("OpenAI Credits");
     const unknownProviderEvent: Parameters<typeof createTurnCompletedPresentation>[0] = { ...event };
     delete unknownProviderEvent.modelProvider;

@@ -10,7 +10,7 @@ export function formatElapsedDuration(durationMs: number): string {
   return [
     ...(hours > 0 ? [`${hours} h`] : []),
     ...(minutes > 0 ? [`${minutes} min`] : []),
-    ...(remainingSeconds > 0 ? [`${remainingSeconds} s`] : []),
+    ...(hours === 0 && remainingSeconds > 0 ? [`${remainingSeconds} s`] : []),
   ].join(" ");
 }
 

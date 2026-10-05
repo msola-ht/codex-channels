@@ -58,6 +58,14 @@ describe("optional Codex subagent setup", () => {
     expect(written).toContain("gpt-6-luna/high");
     expect(written).toContain("gpt-6.1-sol/high");
     expect(written).toContain("gpt-6-astra/high");
+    expect(written).toContain("Assign an end-to-end deliverable");
+    expect(written).toContain("starting a job is not completion");
+    expect(written).toContain("coordinate directly with the relevant agents");
+    expect(written).toContain("send messages only for an actual blocker");
+    expect(written).toContain("1, 2, 4, 8 and 16 minutes");
+    expect(written).toContain("2, 4, 8, 16 and 30 minutes");
+    expect(written).toContain("Reuse the original agent");
+    expect(written).toContain("Do not invent hash manifests, extra approval steps or additional gates");
     expect(f.createClient).not.toHaveBeenCalled();
     expect(await readFile(f.configPath, "utf8")).toBe('model = "unchanged"\n');
     expect(f.output.join("")).toContain(f.configPath);
