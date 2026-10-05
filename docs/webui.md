@@ -126,7 +126,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 模型转发 / API Key | `#/relay` | `GET /api/v1/management/relay`（脱敏 Key 与账户模型能力）；`POST /api/v1/management/relay/preview`、`POST /api/v1/management/relay/apply`（版本化预览与一次性确认写入） |
 | 模型转发 / 请求队列 | `#/relay/queue` | `GET /api/v1/management/relay/queue`（当前请求快照）；`GET /api/v1/management/relay/queue/events`（SSE 变化通知） |
-| 设置与管理 | `#/settings`、`#/settings/permissions`、`#/settings/network`、`#/settings/data`、`#/settings/services`；模型管理见下文 | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
+| 设置与管理 | `#/settings`、`#/settings/permissions`、`#/settings/network`、`#/settings/data`、`#/settings/services`；模型管理见下文 | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/调用记录维护任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 | 渠道投递队列 | `#/delivery`（左侧导航） | `GET /api/v1/management/delivery/queue?before=&state=`；`GET /api/v1/management/delivery/events`（SSE 变化通知）；`POST /api/v1/management/delivery/content-batch`（批量摘要）；`GET /api/v1/management/delivery/content?id=&revision=`（单条内容预览）；`POST /api/v1/management/delivery/batch-preview`、`POST /api/v1/management/delivery/batch-apply`（批量重试/忽略）；`POST /api/v1/management/delivery/preview`、`POST /api/v1/management/delivery/retry`（单条重试） |
 
@@ -176,7 +176,7 @@ Codex 统计代理不从非流式 JSON 补算首 Token；Relay 的 JSON 调用�
 “请求耗时”从同一起点计到首次终态；没有终态时计到结束或本地确认失败，不包含终态后指标投递和客户端显示。
 请求明细 API 及 CLI JSON/CSV 导出新增 `responseUsageAmount`：来自单次响应的 `usage_metadata.amount`，按原始十进制字符串提供。未返回或历史未采集为 `null`，明确的 `"0"` 保留；不做美元换算、费用汇总或最终账单判断。页面表格暂不新增列。
 
-当前 Schema v27 使用 `first_token_ms`（导出 `firstTokenMs`）和 `total_duration_ms`（导出 `totalDurationMs`），计时口径沿用 v20；不接受旧库或把旧计时改标为新口径。
+当前 Schema v27 使用 `first_token_ms`（导出 `firstTokenMs`）和 `total_duration_ms`（导出 `totalDurationMs`），只接受当前格式，不补算未观测计时。
 耗时展示复用[全局自适应单位](display.md#完成汇报)，API 和机器可读导出保留毫秒原值。
 不再计算、展示或导出 TPS，也不接受 TPS 排序。上游 `upstreamTtftMs` 仅保留原始指标与机器导出，不在普通页面或完成卡中显示。
 模型对照分别保留 `requestModel` 与 `responseModel`，请求明细、调用详情与 CLI 共用“名称一致 / 名称不一致 / 信息不足”口径；去除首尾空白后精确比较，不折叠大小写或推断别名，缺少任一名称时为信息不足。名称回显不证明实际模型身份。
@@ -192,7 +192,7 @@ Relay 调用列表和详情使用记录中的实际账户（如 `clp-main`）应
 指标库保存可空 `request_service_tier`，HTTP 与 WebSocket 独立采集，不依赖调用转储；JSON/CSV 导出为 `requestServiceTier`。
 请求层级缺失时为 NULL，不从响应 `serviceTier`、当前 Fast 设置或耗时反推，因此缺少该字段的记录不显示请求 Fast 标签。
 部署当前开发分支（含未提交改动）时，先在该仓库根目录运行 `npm run install:global`，构建并安装当前 Gateway 与 WebUI，确认数据库为当前结构后重启采集端；仅重启服务不会安装工作区代码。
-正式更新按[源码安装与更新](source-install.md#更新)执行：托管源码的 `codexc update` 更新官方 `main`；npm 安装模式需先安装目标版本，再运行 `codexc update` 同步配套 CLI 并只读校验当前数据库。`codexc update` 不用于安装任意开发分支的未提交改动。
+正式更新从本机终端按[源码安装与更新](source-install.md#更新)执行：受管源码的 `codexc update` 更新官方 `main`；本地构建包只同步配套 CLI 并只读校验当前数据库。`codexc update` 不用于安装任意开发分支的未提交改动，WebUI 不提供源码更新任务。
 调用详情在原有请求与响应服务层级旁分别显示 `Fast`，只使用各自字段；其他值或缺失均不显示标签。
 沿用精确调用关联，不把同一 Thread、Turn 或连接中的其他请求层级带入当前调用。调用列表摘要及会话/轮次聚合未提供逐次服务层级，不推断整组为 FAST。
 采集不依赖转储开关；开启转储时，同一次观测值同时进入转储响应索引与指标库，精简模式也保留它。
@@ -335,7 +335,7 @@ OpenAI 周额度读取当前快照，不随所选历史日期回退。账户余�
 会话累计与每轮摘要保留中断后同轮成功的时间关联及用量未完整观测提示，不把它们解释为自动重试成功或零消耗。
 原始状态和错误明细继续可查，分类与查询范围规则见[请求指标](display.md#metrics-命令)。
 
-控制台顶部卡片使用总计、输入、输出三项 Token 口径；总计卡附带请求次数与四类结果计数，输入卡附带
+控制台顶部四张卡片分别显示总计 Token、输入 Token、输出 Token 和会话数；总计卡附带请求次数与四类结果计数，输入卡附带
 缓存 Token 与命中率。控制台输入卡、期间统计的缓存量及 会话命中率剔除输入或缓存字段缺失的请求，明确返回缓存为零的请求仍参与；总请求数与总输入 Token 不受剔除影响。页面只展示缓存数值与命中率，不附加样本说明；全部缺失时显示 `—`。这些汇总通过 `cacheUsage` 返回已知样本的缓存合计、对应输入合计和缺失请求数，不用全量输入作命中率分母；原有 `cachedInputTokens` 字段仍保留完整性语义。用量趋势图使用输入、缓存、输出三项口径：输入与缓存共用左轴，输出使用右轴独立刻度，
 两轴均从零开始；曲线高度不代表跨轴数量相同，悬浮提示保留实际数值。WebUI 中的 Token 与汇总请求数统一使用
 `K`、`M`、`B` 英文紧凑单位：Token 的 `K` / `M` 最多保留两位小数、`B` 最多保留三位小数，
@@ -344,7 +344,7 @@ OpenAI 周额度读取当前快照，不随所选历史日期回退。账户余�
 顶部四张统计卡按标题、数值、补充说明纵向排列，说明放在数值下方。账户、图表和 Provider 卡片的说明放在标题下方，账户刷新按钮使用标题栏右侧的操作区；配额百分比与错误失败率等短数值保留在标题右侧。未配置、暂无记录等空状态放在卡片正文，不重复占用副标题。账户标题统一使用 DeepSeek、OpenCode Go、CommandCode Go、Cline Pass 全名，账户名以标签显示在名称旁；快照缺少账户标识时保留配置展示名称用于区分账户，不据此推断删除等操作的目标。
 账户区域在宽屏使用两列网格，每个账户独立占位，同一行卡片自动等高、边框对齐；窄屏使用单列。
 控制台账户内的 OCG、Cline Pass 配额按 5 小时、7 天、月度三个紧凑卡片横向排列；CCG 按剩余额度、5 小时、7 天展示，仅显示上游实际返回的配额窗口。
-配额卡片标题右侧显示已用百分比，进度条下方显示重置时间。
+配额卡片标题右侧显示剩余百分比，进度条下方显示重置时间。
 控制台同时显示本机错误和官方账户额度。切换统计范围或刷新本地指标期间保留最近取得的 OpenAI 额度快照。官方配额窗口不在 WebUI 展示费用估算；OpenAI、DeepSeek、OpenCode Go、CommandCode 与 Cline Pass
 账户统一显示更新时间，过期判断与页头时钟共用服务端校准时间基准，不直接依赖浏览器本机时间；快照超过 15 分钟时在时间后标记“待更新”，页面静置到期或重新可见时自动更新提示。尚未采集显示“尚未更新”，刷新失败显示“更新失败”，不以零用量代替。账户列表加载期间显示占位，读取失败显示错误，只有成功读取的空列表才显示未配置。控制台进入、恢复可见和页头刷新只读取已保存快照，不因缺失或过期自动查询上游，也不唤醒 App Server。汇总范围旁的刷新按钮更新本地指标、固定 90 天热力图及已保存账户快照；各账户卡片的刷新按钮才主动查询该账户的最新额度。没有快照时保留“尚未更新”，超过 15 分钟仅提示“待更新”。
 账户来源由 `GET /api/v1/management/accounts/sources` 独立读取注册表，不依赖数据库、模型目录或整份提供商配置；响应包含 `accounts` 和按来源隔离的 `warnings`。OpenAI 只检查鉴权文件是否存在及主配置的 Provider 选择，不读取鉴权文件内容。单账户刷新直接提交目标 Provider，由 Gateway 校验，不以整表读取成功为前提。
@@ -355,7 +355,7 @@ OpenAI 周额度读取当前快照，不随所选历史日期回退。账户余�
 手动查询时，WebUI 通过私有 Gateway IPC 发起查询，由 Gateway 实时访问第三方官方账户接口，OpenAI 则复用
 App Server 额度查询；成功结果由 Gateway 写入快照后返回页面。数据库保存最近一次观测，不代表持续实时更新。
 单账户 `POST /api/v1/management/accounts/refresh` 仅查询并返回目标 Provider 的最新快照，沿用原有响应结构和来源告警；该结果不表示完整账户列表。前端逐账户合并结果，批次结束仍通过 `GET /api/v1/accounts` 读取权威整表以确认账户增删。刷新期间已移除的账户不返回历史快照，未生成快照的已配置账户仍返回未观测占位。
-WebUI 不读取凭据、不直接调用官方接口、不执行 CLI 命令，也不定时轮询。查询失败时
+此账户查询通过 Gateway IPC 获取脱敏快照，不读取凭据、不直接调用官方接口、不执行 CLI 命令，也不定时轮询。查询失败时
 保留最后一次有效快照，在对应账户卡片内显示“刷新失败”与单账户重试；查询失败按配置、超时、认证、限流、网络、服务与响应异常生成固定提示，未知内部异常仍显示“账户刷新失败”，
 不透传异常正文。上游认证失败返回账户刷新错误，不触发 WebUI 退出登录。Gateway 日志只记录 Provider、
 失败阶段、分类、耗时和受控 HTTP/网络错误码，不含凭据与响应正文。
@@ -443,7 +443,7 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 投递 SSE 使用 Authorization 请求头及现有管理鉴权、Origin 校验和读取限速，不把令牌放入 URL。通知只包含 changed / heartbeat / unavailable 类型，不携带正文或身份。Gateway 在投递入箱、状态转换、检查点及管理操作完成后，经独立私有通知 IPC 推送变化，100 毫秒内合并通知；通知端点沿用投递控制端点路径并追加 `.events`，与管理写操作独立，各最多 8 个连接。订阅先注册再通知首次读取，避免快照与订阅间漏变化。15 秒心跳不查询数据库，连接最多保留 5 分钟后重新建立以重新鉴权；慢客户端超过写缓冲即断开，由重连后的快照收敛。WebUI 停止时关闭长连接。
 
 
-预览只读，记录修订覆盖展示字段、完整检查点和加密载荷身份。提交经同一管理鉴权、Origin、高风险限速与审计后，优先通过投递箱的私有 IPC 交给运行中的 Gateway。Coordinator 暂停取出新投递，目标会话有在途投递则返回忙碌，其他会话继续处理；在一个事务内重新校验全部记录并处理，同步内存容量、顺序屏障并唤醒调度；预览及提交前按 ID 索引在一次读事务中读取所选元数据，不重复统计全局队列；任一记录变化则整批拒绝。IPC 请求有版本、最多 50 条的唯一 ID/修订、256 KiB 帧及 20 秒超时限制，Unix 端点位于系统 `/tmp` 对应的规范目录下 `cdc-<uid>/<投递目录规范路径的 SHA-256>`，长度不随数据目录增长；父目录须为当前用户拥有的私有目录，Socket 仅当前用户可访问。Windows 使用已有私有描述文件及认证管道。批量查询通过单个 Worker 命令执行，查询与管理写入均不占用确认、关闭的预留邮箱容量，过载时返回忙碌。仅在确认未发送 IPC 命令且 Gateway 不可连接时使用维护模式并获取独占锁；命令发出后响应丢失返回结果未确认，不自动重试或回退。旧 Gateway 未提供在线接口且持有写锁时提示升级并重启。维护模式不创建投递箱、不恢复其他 `sending`、不清理临时图片，也不自动启停服务。在线重试成功后自动恢复发送，仍复核当前授权；Gateway 未运行时保留待发送状态直到启动。提交结果未知时刷新核对；审计和关闭失败分别报告，关闭未确认时先检查进程与队列。单条 `/delivery/preview`、`/delivery/retry` 接口仍仅支持重试。
+预览只读，记录修订覆盖展示字段、完整检查点和加密载荷身份。提交经同一管理鉴权、Origin、高风险限速与审计后，优先通过投递箱的私有 IPC 交给运行中的 Gateway。Coordinator 暂停取出新投递，目标会话有在途投递则返回忙碌，其他会话继续处理；在一个事务内重新校验全部记录并处理，同步内存容量、顺序屏障并唤醒调度；预览及提交前按 ID 索引在一次读事务中读取所选元数据，不重复统计全局队列；任一记录变化则整批拒绝。IPC 请求有版本、最多 50 条的唯一 ID/修订、256 KiB 帧及 20 秒超时限制，Unix 端点位于系统 `/tmp` 对应的规范目录下 `cdc-<uid>/<投递目录规范路径的 SHA-256>`，长度不随数据目录增长；父目录须为当前用户拥有的私有目录，Socket 仅当前用户可访问。Windows 使用已有私有描述文件及认证管道。批量查询通过单个 Worker 命令执行，查询与管理写入均不占用确认、关闭的预留邮箱容量，过载时返回忙碌。仅在确认未发送 IPC 命令且 Gateway 不可连接时使用维护模式并获取独占锁；命令发出后响应丢失返回结果未确认，不自动重试或回退。运行中的 Gateway 未提供当前在线接口且持有写锁时明确拒绝操作，提示核对版本并重启；不会绕过写锁进入维护模式。维护模式不创建投递箱、不恢复其他 `sending`、不清理临时图片，也不自动启停服务。在线重试成功后自动恢复发送，仍复核当前授权；Gateway 未运行时保留待发送状态直到启动。提交结果未知时刷新核对；审计和关闭失败分别报告，关闭未确认时先检查进程与队列。单条 `/delivery/preview`、`/delivery/retry` 接口仍仅支持重试。
 
 
 调用详情的调用列表、错误记录列表也复用上述公共表格，列显隐分别保存。调用列表保留提供商/批次筛选、每页条数、分页上限和点击行进入详情；错误列表保留查询筛选及会话/轮次跳转，并使用统一的每页条数与分页控件。三者维持服务端原有顺序，不提供仅对当前页生效的伪全局排序。
@@ -464,7 +464,7 @@ webui/src/
 
 侧栏「调用监控」归并请求、调用详情与错误，原有 `#/requests`、`#/traffic`、`#/errors` 地址和查询参数保留。「消息渠道」包含渠道配置（`#/channels`）、投递队列（`#/delivery`）和消息展示（`#/channels/display`）。渠道配置只显示 Gateway 配置快照，不代表实时连接状态；配置与授权继续使用对应 CLI 入口。消息展示集中管理 Telegram 格式、操作详情、计划更新和思考状态。
 
-「设置」分为常规与偏好（`#/settings`）、工作区与权限（`#/settings/permissions`）、网络与访问（`#/settings/network`）、数据与日志（`#/settings/data`）、服务与维护（`#/settings/services`）。常规页保留 Codex 整组用户偏好和 Gateway 会话/自动化选项；权限页分别展示 Codex、Gateway 全局和 Workspace 权限，并集中默认 Workspace 选择；网络页管理 WebUI 监听/令牌、共享代理、Plugin API 与整组官方 TUI 请求身份；数据页管理调用采集、日志、指标保留与清理；服务页管理服务、源码更新及后台任务结果。Relay 服务仍在模型转发页操作。
+「设置」分为常规与偏好（`#/settings`）、工作区与权限（`#/settings/permissions`）、网络与访问（`#/settings/network`）、数据与日志（`#/settings/data`）、服务与维护（`#/settings/services`）。常规页保留 Codex 整组用户偏好和 Gateway 会话/自动化选项；权限页分别展示 Codex、Gateway 全局和 Workspace 权限，并集中默认 Workspace 选择；网络页管理 WebUI 监听/令牌、共享代理、Plugin API 与整组官方 TUI 请求身份；数据页管理调用采集、日志、指标保留与清理；服务页管理服务及后台任务结果；源码安装与更新只在本机终端执行。Relay 服务仍在模型转发页操作。
 
 侧栏顶部品牌链接返回控制台，页面入口统一保留在主导航，不再重复提供顶部页面下拉或底部信息菜单。桌面侧栏复用现有折叠状态 Cookie，刷新页面后恢复；读取失败时默认展开。桌面宽度（768px 及以上）默认展开调用监控、模型管理和消息渠道，设置默认收起；手机抽屉中的分组默认收起，直接进入子页时展开所属分组，手动展开或收起不会被普通刷新覆盖。所有导航分组使用同一套 Sidebar/Collapsible 组合：一级文字与箭头共同控制展开或收起，不跳转页面；点击子菜单才进入对应页面，箭头带旋转过渡；分组组件不会随路由重建，进入子页时展开对应组，其他组保留手动展开状态。桌面图标模式高亮当前分组，点击父级展开侧栏；手机点击子页关闭抽屉。设置子页只组合所需配置与资源；恢复可见时节流读取，预览确认或写入期间延后刷新，后台读取保留表单及草稿。CLI 命令仍从设置摘要读取，按页面用途显示；该摘要是现有整份接口，未新增分区 API。调用详情的「采集设置」进入数据页，Relay 管理任务提示进入服务页。
 
@@ -485,7 +485,7 @@ Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOM
 前端只在有补充信息时提供悬浮提示：长文本实际截断或 ID 被缩写、存在 Token 分项、错误详情或模型差异时保留；已完整展示的文字、普通数值、空值和缺少分项的 Token 不重复提示。耗时和速率的统计口径集中在列标题；图表数据点、纯图标按钮、折叠导航及数据过期原因保留必要说明。组件提示停留 400 ms 后显示，支持键盘聚焦。`Fast` 使用小号标签，请求列表和错误页仅在响应明确回报非 Fast 层级时提示差异；调用详情已分别展示请求和响应层级，不再重复提示。
 支持服务端组合筛选、排序与分页及列显隐，不提供无对应批量操作的行选择。请求列按时间、Provider、模型、状态、输入 Token、缓存命中率、输出 Token、首 Token/请求耗时、调用详情排列；User-Agent、操作、HTTP、错误和推理输出默认隐藏，异常状态保留可聚焦的错误摘要。会话与轮次列表同样将身份信息放在用量之前，父会话及压缩等次要列默认隐藏；已有列显隐偏好保持不变。排序表头提供可访问的方向状态。表格在视口内内部滚动，输入、输出与
 缓存提示支持悬浮及键盘聚焦；请求明细的 `User-Agent` 列展示该请求实际发往模型上游的 UA（截断显示，
-悬浮查看完整值，Schema v13 起入库，当前 Schema v27 继续保留，早期历史记录显示 `—`）；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
+悬浮查看完整值，未采集时显示 `—`）；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
 分页，每页条数支持 10–500。会话的“期间首次请求”表示匹配条件中首个请求的
 开始时间，不等同于 App Server 中 Thread 对象的创建时间。会话用量保留自身输入、缓存命中率和输出列，以及包含子代理的总计列；输入提示展示缓存与无缓存数量，总计提示展示子代理分项，悬浮默认在右侧。子代理关系由 Gateway 观测并登记到指标库，主列表不再提供平铺的“类型”和父会话列，关联子代理通过独立页面查看。
 
@@ -563,7 +563,7 @@ OpenAI 账户卡片提供“使用重置券”：实时读取当前 ChatGPT 账�
 
 ### 独立请求诊断
 
-Schema v25 起，普通代理和 Relay 的请求指标独立采集上游明确返回的诊断摘要，无需开启调用采集。
+普通代理和 Relay 的请求指标独立采集上游明确返回的诊断摘要，无需开启调用采集。
 请求列表在模型旁展示实际上游提供商；提供商尝试次数大于 1 时显示次数提示，不将它解释为切换次数。
 请求详情还显示模型尝试次数、Chat `finishReason`、HTTP/流式错误阶段，以及 CLP 已识别错误包装中的
 内层错误码、类型和 HTTP 状态。内层状态不覆盖本次请求的 HTTP 状态，也不触发自动重试。

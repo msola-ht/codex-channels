@@ -41,13 +41,8 @@
 | Lark 海外版 | 未支持 |
 
 依赖升级时不得只修改版本数字；还要复核下方资料、已知约束、支持矩阵、实现映射和验证结果。
-`1.73.3` 在 `1.73.0` 的 OpenAPI 代码基础上只修改 SDK 运行时：取消应用注册后不再继续轮询，
-关闭连接中的 WebSocket 时不再遗留错误、重连或定时器，自定义 Domain 保留显式端口，畸形入站帧
-会经过分片校验和受控错误处理。公开类型、生成 API、依赖范围以及本项目使用的符号与端点保持不变。
-
-`1.74.0` 在此基础上新增 `EventDispatcher.unregister(...keys)`，并把重复注册处理器的日志从
-error 调整为 warn；生成 API、WebSocket、CardKit、媒体及依赖范围未变化。本项目每次连接创建
-独立 Dispatcher，不新增动态注销或替换逻辑，继续使用既有消息、卡片与菜单注册路径。
+重点复核取消后的轮询、WebSocket 关闭时的错误与定时器清理、自定义 Domain 端口和畸形帧处理。
+本项目每次连接创建独立 Dispatcher，使用消息、卡片与菜单注册路径，不动态注销或替换处理器。
 
 ## 官方资料
 
@@ -80,7 +75,7 @@ error 调整为 warn；生成 API、WebSocket、CardKit、媒体及依赖范围�
 | 机器人自定义菜单配置 | [机器人自定义菜单](https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/bot-v3/bot-customized-menu) | 核对菜单层级与数量限制；项目只要求一个 `codexc_home` 事件菜单，功能分类留在命令中心卡片内，避免 Owner 重复配置平台菜单 |
 | 机器人自定义菜单事件 | [机器人菜单事件](https://open.feishu.cn/document/client-docs/bot-v3/events/menu) | 核对 `application.bot.menu_v6` 只负责事件类型菜单点击后的事件投递，不负责创建或启用菜单；事件只提供操作者与事件 Key、不提供 Chat ID，项目只路由唯一已授权私聊 |
 | 事件接收安全 | [接收事件](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-/encrypt-key-encryption-configuration-case) | Webhook 阶段的验签和加密入口 |
-| 消息卡片 | [消息卡片介绍](https://open.feishu.cn/document/ukTMukTMukTM/uczM3QjL3MzN04yNzcDN) | 后续卡片呈现和交互边界 |
+| 消息卡片 | [消息卡片介绍](https://open.feishu.cn/document/ukTMukTMukTM/uczM3QjL3MzN04yNzcDN) | 卡片呈现和交互边界 |
 | 创建卡片实体 | [新建卡片实体](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/cardkit-v1/card/create) | 核对 CardKit 2.0 流式卡片实体和 `cardkit:card:write` 应用权限 |
 | 流式更新文本 | [流式更新文本](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/cardkit-v1/card-element/content) | 核对 `card_id + element_id`、递增 `sequence`、请求 UUID 与元素内容更新 |
 | 全量更新卡片 | [更新卡片实体](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/cardkit-v1/card/update) | 核对终态以 `streaming_mode=false` 的完整静态卡片覆盖正文、摘要、序列和 UUID，避免关闭打字机动画时尾字尚未绘制 |
@@ -100,7 +95,7 @@ error 调整为 warn；生成 API、WebSocket、CardKit、媒体及依赖范围�
 - 同一应用的多个客户端按集群模式接收，只有随机一个客户端得到事件，不支持广播。
 - 长连接支持事件订阅，不支持回调订阅。
 
-因此第一版同一个 `appId` 只允许一个活动的 Gateway 长连接消费者。SDK 回调只能完成校验、授权
+因此同一个 `appId` 只允许一个活动的 Gateway 长连接消费者。SDK 回调只能完成校验、授权
 和有界入队，不能等待 Codex Turn。Setup、Doctor 或测试脚本不得在生产 Gateway 运行时为同一
 应用静默启动第二个消费者。
 

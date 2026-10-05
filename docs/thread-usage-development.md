@@ -1,7 +1,7 @@
-# OpenAI Thread 官方用量设计
+# OpenAI Thread 官方用量
 
-本文定义 Codex CLI `0.148.0` 引入、并在当前锁定 `0.160.0` 复核的 `account/usage/read.threadId` 与 `threadUsage` 在 Gateway
-中的采用方案。目标是在不新增聊天命令、不改变第三方 Provider 用量口径、不建立第二套账本的
+本文定义锁定 Codex CLI `0.160.0` 的 `account/usage/read.threadId` 与 `threadUsage` 在 Gateway
+中的使用合同。在不新增聊天命令、不改变第三方 Provider 用量口径、不建立第二套账本的
 前提下，让现有 `/usage` 同时展示 OpenAI 账户活动摘要和当前 Thread 的官方估算。
 
 ## 结论与范围
@@ -13,7 +13,7 @@
 - 当前 Thread 属于 DeepSeek、OpenCode Go 或其他 Provider 时保持各自既有 `/usage` 行为，
   不调用 OpenAI App Server，也不显示伪造的统一估算。
 - Thread 估算是可选增强。不可用或查询失败不得使已经成功取得的账户摘要丢失。
-- 首期只查询当前精确 Thread ID，不递归查询或合计子代理 Thread，不写入本地指标数据库。
+- 只查询当前精确 Thread ID，不递归查询或合计子代理 Thread，不写入本地指标数据库。
 
 本设计不修改公开命令语法、Gateway 配置、StateStore 或指标 Schema。
 

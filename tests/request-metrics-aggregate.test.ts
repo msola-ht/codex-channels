@@ -40,7 +40,7 @@ describe("request metrics aggregate reports", () => {
         { ...sample(), recordedAtMs: now, status: "failed", errorType: "upstream_error" },
         { ...sample(), recordedAtMs: now, status: "unknown" },
         { ...sample(), recordedAtMs: now, status: "incomplete" },
-        { ...sample(), recordedAtMs: now, responseFormat: "unknown", model: null, inputTokens: null, outputTokens: null, totalTokens: null },
+        { ...sample(), recordedAtMs: now, status: "incomplete", incompleteReason: "response_not_observed", responseFormat: "unknown", model: null, inputTokens: null, outputTokens: null, totalTokens: null },
         { ...sample(), recordedAtMs: now, errorType: "client_disconnected" },
       ]);
       const requestOutcomes = { completed: 2, interrupted: 2, failed: 1, incomplete: 3 };
@@ -374,13 +374,15 @@ describe("request metrics aggregate reports", () => {
     store.close();
   });
 
-  it("normalizes historical unobservable HTTP successes as incomplete", () => {
+  it("aggregates explicitly unobserved responses as incomplete", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
       join(directory, "request-metrics.sqlite3"),
     );
     store.record({
       ...sample(),
+      status: "incomplete",
+      incompleteReason: "response_not_observed",
       responseFormat: "unknown",
       model: null,
       serviceTier: null,
@@ -425,7 +427,7 @@ describe("request metrics aggregate reports", () => {
     store.close();
   });
 
-  it("keeps a historical completed record with only total tokens observable", () => {
+  it.each([null, 120])("preserves completion with partial usage (totalTokens=%s)", (totalTokens) => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
       join(directory, "request-metrics.sqlite3"),
@@ -439,13 +441,13 @@ describe("request metrics aggregate reports", () => {
       cachedInputTokens: null,
       outputTokens: null,
       reasoningOutputTokens: null,
-      totalTokens: 120,
+      totalTokens,
     });
 
     expect(store.recent(1)[0]).toMatchObject({
       status: "completed",
       incompleteReason: null,
-      totalTokens: 120,
+      totalTokens,
     });
     expect(store.threadSummary("thread-1").latestTurn).toMatchObject({
       requestCount: 1,

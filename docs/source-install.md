@@ -100,10 +100,10 @@ codexc update
 与本机 Codex CLI 一致，并完成 `npm ci`、Gateway/WebUI 构建以及候选源码对当前配置和数据库的只读
 预检。随后使用实际 CLI 核对候选源码锁定的公开参数合同、本地权限映射和
 `CODEX_HOME/config.toml` 根级及所有 Profile 用户设置；未设置 `CODEX_HOME` 时使用
-`~/.codex/config.toml`。即使 `main` 没有新提交或使用 npm 安装模式也执行同一只读检查。
+`~/.codex/config.toml`。即使 `main` 没有新提交或使用本地构建包，也执行同一只读检查。
 只有这些步骤全部通过，才记录服务状态并按 WebUI、Relay、Gateway、App Server 顺序停止运行中的服务，安装配套 CLI、切换源码并刷新全局命令。成功及失败恢复均只启动原本运行的服务，顺序为 App Server、Gateway、仍启用的 Relay、WebUI；手工停止的服务保持停止。Windows 临时克隆也启用 Git 长路径支持。
 
-更新通过官方版本化配置事务将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，避免原生终端另起官方后台；已为 `false` 时不重复写入，未设置或为 `true` 时关闭。即使源码、CLI 和数据库无需更新，也执行该设置。其他用户偏好与 Provider 模型目录不改写，也不处理历史服务和 PATH。写入失败会使更新明确失败；数据库已就绪时仍按原恢复流程恢复项目服务。此操作不停止已有官方 daemon，不改变其自动更新设置；`codexc remote` 继续连接项目管理的实例。
+更新通过官方版本化配置事务将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，避免原生终端另起官方后台；已为 `false` 时不重复写入，未设置或为 `true` 时关闭。即使源码与 CLI 无需更新且数据库已满足当前结构，也执行该设置。其他用户偏好与 Provider 模型目录不改写，也不处理历史服务和 PATH。写入失败会使更新明确失败；数据库已就绪时仍按原恢复流程恢复项目服务。此操作不停止已有官方 daemon，不改变其自动更新设置；`codexc remote` 继续连接项目管理的实例。
 
 默认模型由 `codexc config` 交互确认后设置，更新不补写或覆盖模型。
 
@@ -115,7 +115,7 @@ App Server 的会话历史不在这些数据库中。
 
 已有受管源码目录时直接使用 `codexc update`，不要重复运行安装器。
 
-同一版本号下的新提交仍会更新。受管源码没有新提交时，只读校验配置和数据库并按需同步配套 CLI；CLI 无需更新时不停止服务。npm 安装模式执行相同流程，不更新 Gateway npm 包。
+同一版本号下的新提交仍会更新。受管源码没有新提交时，只读校验配置和数据库并按需同步配套 CLI；CLI 无需更新时不停止服务。本地构建包执行相同检查和 CLI 同步，不更新 Gateway 包；安装工作区代码使用 `npm run install:global`。
 从开发仓库执行 `npm run install:global` 不会将其登记为受管 `main` 仓库。该入口（包括内部 `--prepared`）在注册 Gateway 全局命令前检测 Codex CLI：默认 `codex` 缺失或版本不符时通过 npm 同步为 `src/codex-protocol/version.json` 锁定的正式版本，并检查安装后的版本和 PATH，无需初始化或渠道配置。显式 `CODEX_BINARY` 无效或版本不符时明确失败，不替换指定二进制。CLI 无法执行、安装失败或安装后仍不可见时也明确失败。安装不自动登录或启动服务。
 
 ### 本地工作树安装与部署

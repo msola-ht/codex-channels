@@ -57,16 +57,7 @@ const pageSortSql = {
   reasoningOutputTokens: "reasoning_output_tokens",
   totalDurationMs: "total_duration_ms",
 } as const;
-const observableCompletionSql = `
-  status = 'completed'
-  AND NOT (
-    response_format = 'unknown'
-    AND model IS NULL
-    AND input_tokens IS NULL
-    AND output_tokens IS NULL
-    AND total_tokens IS NULL
-  )
-`;
+const observableCompletionSql = "status = 'completed'";
 const compactAggregateSql = `
   ${requestOutcomeSql("operation = 'compact'", "compact_")},
   COUNT(CASE WHEN operation = 'compact' THEN 1 END) AS compact_request_count,
@@ -86,18 +77,7 @@ const compactAggregateSql = `
   SUM(CASE WHEN operation = 'compact' THEN output_tokens END)
     AS compact_output_tokens
 `;
-const normalizedStatusSql = `
-  CASE
-    WHEN status = 'completed'
-      AND response_format = 'unknown'
-      AND model IS NULL
-      AND input_tokens IS NULL
-      AND output_tokens IS NULL
-      AND total_tokens IS NULL
-      THEN 'incomplete'
-    ELSE status
-  END
-`;
+const normalizedStatusSql = "status";
 const cacheUsageSql = `
   SUM(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS known_cached_input_tokens,
   SUM(CASE WHEN cached_input_tokens IS NOT NULL THEN input_tokens END) AS cache_observed_input_tokens,
@@ -359,10 +339,6 @@ export class SqliteRequestMetricsQueries {
           *,
           ${normalizedStatusSql} AS normalized_status,
           CASE
-            WHEN ${normalizedStatusSql} = 'incomplete'
-              AND error_type IS NULL
-              AND incomplete_reason IS NULL
-              THEN 'response_not_observed'
             WHEN incomplete_reason = 'response_not_observed'
               AND error_type IS NULL
               THEN 'response_not_observed'

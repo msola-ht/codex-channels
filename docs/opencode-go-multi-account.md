@@ -6,7 +6,7 @@ Codex Connect 支持在一个 Gateway 内配置多个 OpenCode Go 账户。每�
 
 当前配置和常用命令见 [`OpenCode Go 使用说明`](opencode-go.md)，第三方 Provider 的通用约束见
 [`第三方模型 Provider 接入指南`](provider-integration-guide.md)。本文只说明多账户的实现边界、
-生命周期和兼容行为。
+生命周期和当前数据格式。
 
 ## Provider 与 Thread 语义
 
@@ -65,7 +65,7 @@ codexc opencode-go account stop <id>
 `list --json` 输出账户 ID、邮箱或手机号（若有）、展示名、默认标记、Provider ID 与运行模式，不包含 API Key 或 Profile 路径。
 
 - `add` 下载或复用共享模型目录，写入账户 Profile、管理标记与注册表；失败时按写入前快照回滚；
-- `remove` 先停止账户实例并备份 Profile 与管理标记，再删除注册项和受管文件；任何删除步骤失败
+- `codexc opencode-go account remove <accountId>` 先预览确认，停止账户实例并备份 Profile 与管理标记，再删除注册项和受管文件；任何删除步骤失败
   都按删除前快照回滚；存在 Remote TUI
   租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；删除最后一个账户时
   同时清理共享模型目录，若该账户是固定模式还会恢复安装前的 Codex 主配置；
@@ -82,9 +82,7 @@ codexc opencode-go account stop <id>
 删除固定账户或把它改回切换模式时，仅恢复该 Provider 管理的主配置字段，保留之后产生的
 其他用户设置。
 
-仅支持当前多账户格式，删除账户使用 `codexc opencode-go account remove <accountId>`。
-命令先预览并要求确认，再停止对应实例并清理配置；保留其他账户、备份和历史统计。
-固定模式只恢复受管主配置字段，不恢复或删除无关子代理；删除最后一个账户清理共享模型目录。
+只接受当前多账户格式。账户删除保留其他账户、备份和历史统计，不恢复或删除无关子代理。
 
 ## 共享统计代理
 

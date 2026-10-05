@@ -6,7 +6,7 @@
 绑定 Actor 的短期按钮与输入卡片。
 功能仍须显式开启并完成部署验收。
 
-首期功能必须对外称为“Gateway 计划任务（由 App Server 执行）”，不得称为“App Server 原生计划
+当前功能必须对外称为“Gateway 计划任务（由 App Server 执行）”，不得称为“App Server 原生计划
 任务”。App Server 负责 Thread、Turn、工具和运行状态，Gateway 负责调度、任务定义与投递；两者的
 事实来源不能混淆。
 
@@ -25,13 +25,13 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
 - 实验 `turn/start.additionalContext` 可以注入 `automation_info` 等应用上下文。
 - `plugin/read.scheduledTasks` 只返回插件目录中的任务模板摘要，不是用户任务列表或运行状态 API。
 
-因此，Gateway 若要在 Telegram、飞书和微信中提供计划任务，必须拥有一套明确的宿主调度器。首期
+因此，Gateway 若要在 Telegram、飞书和微信中提供计划任务，必须拥有一套明确的宿主调度器。当前
 复用稳定的 Thread/Turn 能力和 `threadSource`，并接入官方实验动态工具作为前台入口；动态工具最终
 仍由 Gateway 执行，不把调度器放进 App Server 或模型内部。
 
 ## 目标与非目标
 
-### 首期目标
+### 当前目标
 
 1. 允许已授权用户为当前 Conversation 和 Workspace 创建、查看、暂停、恢复、删除并手动运行任务。
 2. 每次到期运行强制创建新的后台 Codex Thread，不替换或追加当前前台 Thread。
@@ -39,7 +39,7 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
 4. Gateway 或 App Server 重启后能够恢复调度，不重复执行结果未知的任务。
 5. 只持久化任务定义与最小运行元数据，不复制 App Server Thread 历史或模型输出正文。
 
-### 首期非目标
+### 当前非目标
 
 - 不兼容或导入 ChatGPT/Codex App 已创建的 Scheduled；官方没有公开同步 API。
 - 不在同一 Thread 上按计划继续上下文；这需要与活动 Turn、原生 Queue 和会话设置单独设计。
@@ -89,7 +89,7 @@ Scheduler 是另一种入站适配器，权限不得高于 Surface 用户。它�
 
 ### 每次运行都新建 Thread
 
-首期使用独立运行语义：一个计划任务的每次触发都强制 `thread/start`，随后启动一个 Turn。
+当前使用独立运行语义：一个计划任务的每次触发都强制 `thread/start`，随后启动一个 Turn。
 
 - 不调用 `SessionRouter.ensure`，避免恢复任意空闲历史 Thread。
 - `thread/start` 继续使用 `historyMode: "paginated"`。
@@ -107,7 +107,7 @@ Scheduler 是另一种入站适配器，权限不得高于 Surface 用户。它�
 
 ### 调度范围
 
-首期以固定版插件任务摘要中的基本 Schedule 为能力边界，并补充宿主调度必需的
+当前以固定版插件任务摘要中的基本 Schedule 为能力边界，并补充宿主调度必需的
 `anchorAt` 与一次性任务：
 
 | 类型 | 必需字段 | 语义 |
@@ -123,7 +123,7 @@ Scheduler 是另一种入站适配器，权限不得高于 Surface 用户。它�
 没有提供时区时必须要求补充。`time` 固定为 `HH:mm`，工作日使用 `MO` 至 `SU`。
 
 `interval.anchorAt` 是确认创建成功的 UTC 时间，后续 occurrence 始终由上一计划时间增加固定分钟数，
-不因 DST 改变间隔；固定版插件摘要允许 Hourly 附带可选工作日，但首期明确拒绝该组合。`once` 只计算
+不因 DST 改变间隔；固定版插件摘要允许 Hourly 附带可选工作日，但当前明确拒绝该组合。`once` 只计算
 目标本地时刻，创建时早于当前时间或落在 DST 缺口中时命令失败关闭；重复的本地时间只执行第一次。
 相对延时形式以创建时刻的 UTC `anchorAt` 加固定分钟数为准确绝对时刻，不受 DST 影响；由自然语言
 「N 分钟后/小时后执行一次」生成，不会映射为循环 `interval`。
@@ -132,7 +132,7 @@ Daily、Weekdays、Weekly 和 Monthly 按任务时区计算：不存在的本地
 启动恢复时重新校验，不通过字符串比较判断到期。
 若一次性任务在 `paused` 或 `blocked` 期间到期，恢复时直接收敛为 `finished`，不保留无法执行的死状态。
 
-首期不解析任意 RRULE。若以后对齐 App 的高级 Schedule，应采用经过审查的 RFC 5545 实现，并先
+当前不解析任意 RRULE。若以后对齐 App 的高级 Schedule，应采用经过审查的 RFC 5545 实现，并先
 说明新增依赖与失败恢复；不能手写一个看似兼容但语义不完整的解析器。
 
 ### 到期、停机与重叠
@@ -198,7 +198,7 @@ Provider 恢复后台绑定和订阅，再读取权威 Thread 与分页 Turn 状
 
 不得保存模型回答、完整 Item、Diff、Plan、命令参数、审批内容或外部工具结果。`prompt` 是任务定义
 不可避免的正文，应在产品文案中明确会持久化；数据库目录权限固定 `0700`、文件固定 `0600`，日志、
-错误和指标不得包含 Prompt。实施前必须取得用户对这一新持久化格式的确认。
+错误和指标不得包含 Prompt。创建预览须明确披露 Prompt 将持久化，只有用户确认后才保存。
 
 Schema 当前为 v2，只接受当前版本；旧版本明确报错，不执行迁移或自动清空，新安装直接创建当前结构。删除任务写入不可运行的墓碑并立即清空 Prompt、Schedule 与用户派生
 名称，只保留任务 ID、固定删除标记和既有 Run 关联；不删除 App Server Thread。Run 元数据沿用指标库的保留思路，默认最多
@@ -212,7 +212,7 @@ Scheduler 在首次 tick 和之后每 24 小时最多执行一次清理；清理
 1. 创建和每次运行都校验 Surface Actor 仍被授权、Conversation 仍存在、Workspace 仍已注册。
 2. Actor 撤权、Workspace 删除、Surface 停用或 Provider 删除时自动把任务置为 `blocked`，不改投其他
    Actor、Workspace 或 Provider。
-3. 首期只允许 `read-only` 或 `workspace-write`；拒绝 `danger-full-access`。
+3. 当前只允许 `read-only` 或 `workspace-write`；拒绝 `danger-full-access`。
 4. 使用 Workspace 当前权限配置，但 Approval Policy 固定为 `never`；若组织要求或 Permission
    Profile 不能形成无需人工批准的运行环境，则创建或运行失败关闭。
 5. 运行中仍出现命令、文件、额外权限、用户输入或 MCP elicitation Server Request 时自动拒绝或
@@ -309,7 +309,7 @@ WebUI 接入 Run 与指标关联，只能根据 Run 的 Thread ID 查询现有�
 
 ## 模块落点
 
-### 新增模块
+### 调度模块
 
 - `src/scheduled-tasks/`：封闭的 Schedule 类型、下次运行计算、SQLite Store、到期领取、状态机和
   生命周期；通过窄端口请求执行，不导入 Surface SDK 或 App Server 协议。
@@ -327,7 +327,7 @@ Surface -> Application -> Scheduled Tasks
                     App Server / Routing
 ```
 
-### 现有模块修改
+### 跨模块协作
 
 - `codex-client`：给稳定 `ThreadStartOptions` 增加封闭的 `threadSource: "automation"` 与受控动态
   工具规格，并在 `thread/start` 原样编码；不导出额外上下文类型。
@@ -345,54 +345,23 @@ Surface -> Application -> Scheduled Tasks
 
 ## 配置与部署
 
-功能默认关闭，实施时增加严格配置：
+功能默认关闭，通过严格配置显式开启：
 
 ```toml
 [scheduled_tasks]
 enabled = false
 ```
 
-首期不增加默认时区、默认权限或并发数量配置；任务时区显式保存，安全边界与并发上限固定在实现
+当前不增加默认时区、默认权限或并发数量配置；任务时区显式保存，安全边界与并发上限固定在实现
 合同中。开启后 Scheduler 随 Gateway 运行，Linux systemd linger 可让用户未登录时继续运行；Gateway
 未运行期间不会准时触发，只按前述五分钟窗口有限补跑。
 
 关闭功能只停止新领取，不删除数据库、不停止已经进入 App Server 的 Turn。
 
-## 分阶段实施
+## 尚未采用的扩展
 
-以下是已落地的实施分工，当前边界以本页合同和模块公共接口为准；后续扩展单独列在下一节。
+以下仅为候选，不属于当前支持范围：
 
-### PR 1：存储与纯调度域
-
-1. 新模块、Schedule 封闭联合、IANA 时区与 DST 测试。
-2. 独立 SQLite Schema v2、权限与严格版本检查；新库直接初始化当前结构，不提供历史版本迁移。
-3. Task/Run 状态机、到期领取、五分钟有限补跑、重叠与容量结果。
-4. 只使用假执行端口的时钟和崩溃恢复测试，不连接 App Server 或 Surface。
-
-### PR 2：App Server 执行与路由
-
-1. `threadSource: "automation"` 受控编码和稳定来源映射。
-2. 强制新建后台 Thread，不改变前台绑定，不自动重试写请求。
-3. Provider/模型/Workspace 当前状态复核，无人值守 Server Request 默认拒绝。
-4. Bootstrap 完成 Run 与 Thread 的关联；完成卡片、后台释放和指标继续按 Thread ID 复用现有链路。
-5. 真实 App Server 合同覆盖创建、Turn 完成、Gateway 重启恢复、App Server 断线和不确定派发。
-
-### PR 3：命令与三 Surface
-
-1. 已接入 `/schedule` 规范命令、五分钟列表快照、创建/删除一次性确认和 Run 查询。
-2. 已接入 Telegram、飞书、微信统一文案，飞书列表、创建和管理卡片，以及飞书、Telegram 创建/删除确认按钮。
-3. 已同步 `/help`、菜单、根 README、`docs/display.md`、错误字典与渠道验收矩阵。
-4. 已复用执行层对授权撤销、Workspace 删除、Provider 删除和 Surface 停用的运行前失败关闭。
-
-### PR 4：前台 Agent 计划任务工具
-
-1. 前台新 Thread 注册官方实验 `thread/start.dynamicTools` 的 `schedule_task`。
-2. Bootstrap 解码 `item/tool/call` 并校验 Thread 绑定与唯一授权 Actor。
-3. `ScheduledTaskToolService` 复用现有创建、确认、列表和生命周期用例，不新增业务逻辑。
-4. 后台计划任务 Thread 不注册工具，且现有无人值守 Server Request 边界拒绝递归工具调用。
-5. 固定句式仍由 Application 直接解析；不再创建临时草案 Thread。
-
-### 后续候选，不与首期合并
 
 - 同一聊天上下文计划任务：单独审查 App Server Queue 顺序、活动 Turn、模型设置和停止条件。
 - 插件任务模板：等待 `plugin/read` 被项目正式采用，再把模板作为创建预览输入；不得自动启用。
@@ -405,7 +374,7 @@ enabled = false
 实施至少覆盖：
 
 - Schedule 解析、非法日期/时区、DST 缺失和重复时间、稳定 nextRunAt。
-- SQLite 当前 Schema、文件权限、事务领取、保留清理和升级备份。
+- SQLite 当前 Schema、文件权限、事务领取、保留清理、备份及不支持版本拒绝。
 - 同任务不重叠、Conversation 后台容量、停机补跑和稳定排序。
 - `dispatching` 崩溃恢复为 `uncertain`，所有 App Server 写请求不自动重试。
 - Actor/Workspace/Provider/模型重新授权与撤权后的失败关闭。

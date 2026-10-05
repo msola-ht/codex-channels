@@ -15,12 +15,12 @@ describe("WebUI management tasks", () => {
     const first = runner.watch("a", a.signal, type => { expect(type).toBe("changed"); states.push(runner.list("a").at(-1)?.state ?? "empty"); });
     const second = runner.watch("b", b.signal, type => other.push(type));
     try {
-      runner.start({ operation: "update" }, { owner: "a", environment: { PATH: "" } });
+      runner.start({ operation: "service", action: "reload" }, { owner: "a", environment: { PATH: "" } });
       await new Promise<void>(resolve => setImmediate(resolve));
       expect(states).toEqual(["empty", "queued", "running", "failed"]);
       expect(other).toEqual(["changed"]);
       a.abort();
-      runner.start({ operation: "update" }, { owner: "a", environment: { PATH: "" } });
+      runner.start({ operation: "service", action: "reload" }, { owner: "a", environment: { PATH: "" } });
       await new Promise<void>(resolve => setImmediate(resolve));
       expect(states).toHaveLength(4);
     } finally { a.abort(); b.abort(); await Promise.all([first, second]); }
@@ -48,7 +48,7 @@ describe("WebUI management tasks", () => {
     const controller = new AbortController(), events: string[] = [];
     const watch = runner.watch("a", controller.signal, () => events.push(runner.list("a").at(-1)?.state ?? "empty"));
     try {
-      const task = runner.start({ operation: "update" }, { owner: "a", environment: { PATH: "" }, auditMetadata: { sessionId: "a" } });
+      const task = runner.start({ operation: "service", action: "reload" }, { owner: "a", environment: { PATH: "" }, auditMetadata: { sessionId: "a" } });
       runner.cancel(task.id, "a");
       await new Promise<void>(resolve => setImmediate(resolve));
       expect(events).toEqual(["empty", "queued", "cancelled"]);
@@ -63,7 +63,8 @@ describe("WebUI management tasks", () => {
     expect(normalizeTaskInput({ operation: "metrics", action: "cleanup" })).toEqual({ operation: "metrics", action: "cleanup" });
     expect(normalizeTaskInput({ operation: "metrics", action: "prune", target: "deepseek" })).toEqual({ operation: "metrics", action: "prune", target: "deepseek" });
     expect(normalizeTaskInput({ operation: "traffic", action: "cleanup" })).toEqual({ operation: "traffic", action: "cleanup", target: undefined });
-    expect(normalizeTaskInput({ operation: "update" })).toEqual({ operation: "update", action: "source", target: undefined });
+    expect(() => normalizeTaskInput({ operation: "update" })).toThrow("任务类型无效");
+    expect(() => normalizeTaskInput({ operation: "update", action: "source" })).toThrow("任务类型无效");
     expect(() => normalizeTaskInput({ operation: "service", action: "exec", target: "gateway" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "service", action: "reload", target: "gateway" })).toThrow("服务重载不接受服务目标");
     expect(() => normalizeTaskInput({ operation: "metrics", action: "shell" })).toThrow();
@@ -106,7 +107,7 @@ describe("WebUI management tasks", () => {
       onEvent: ({ phase, resultCode }) => events.push({ phase, resultCode }),
     });
     const task = runner.start(
-      { operation: "update" },
+      { operation: "service", action: "reload" },
       { owner: "owner-a", environment: { PATH: "" }, auditMetadata: { sessionId: "session-a" } },
     );
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -135,7 +136,7 @@ describe("WebUI management tasks", () => {
         onEvent: () => resolveTaskFinished(),
       });
       const task = runner.start(
-        { operation: "update" },
+        { operation: "service", action: "reload" },
         {
           owner: "owner-output",
           environment: { ...process.env, PATH: directory },

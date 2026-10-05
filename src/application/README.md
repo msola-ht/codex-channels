@@ -15,7 +15,7 @@
 - `scheduled-task-service.ts`：执行计划任务用例，持有列表选择器和一次性确认状态；消费命令解析结果，并通过注入端口检查授权、取得创建上下文及触发运行。
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
   参数校验后映射到 `ScheduledTaskApplicationService`；创建和删除仍返回待确认预览，不直接改写 Store。
-- `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标查询；`ConversationService` 只保留兼容门面委托。
+- `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标查询；`ConversationService` 作为统一用例入口委托执行。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
 - `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态；不修改绑定，不建立独立会话索引。
 - `conversation-event-coordinator.ts`：在稳定输入事件归约前失效选择快照与展示缓存、处理待生效偏好和 Reserve 标记，归约后执行 Reserve 收尾；子代理跟踪和后台释放调度通过注入端口保持原顺序，不等待 RPC 或渠道输出。
@@ -138,7 +138,7 @@ Queue 由 App Server 持久化并按 Thread 限制为 100 条；Application 默�
 不含正文的 Conversation 选择快照，数字选择器只使用该快照，完整 ID 则重新复核权威列表。
 `thread/queue/changed` 只使快照失效，不触发网络读取；Queue 非空时转移、接管或转后台失败关闭。
 新建 Thread 使用分页历史模式；`/revert list`、预览和确认只使用最近一次有效页面快照，执行前重新读取
-历史、活动 Turn 和完整 Queue，并在并发变化时失败关闭；Queue 按真实 0.148 合同保留原顺序且不会因 Revert 自动启动。成功的
+历史、活动 Turn 和完整 Queue，并在并发变化时失败关闭；Queue 按锁定版本的真实合同保留原顺序且不会因 Revert 自动启动。成功的
 `thread.reverted` 会清除 Core 的产物、计划、目标、上下文压缩、用量与计时等派生展示缓存；不持久化
 Turn/Item 历史，也不承诺恢复工作区文件。
 后台 Thread 正常或失败完成释放前通过一次原生 `thread/queue/start` 协调自动派发竞态，再读取权威状态；中断完成只查询并保留 Queue，延后释放的重试继续沿用该限制；Gateway 不保存或重放下一 Turn 正文；仍有待结算子代理时保留订阅，

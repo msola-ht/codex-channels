@@ -47,7 +47,7 @@ daemon 则以 Codex Home 为管理单元。隔离实测中，在启动命令加 
 与 [CLI 分发](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/cli/src/main.rs)
 支持这一结果。不能把现有参数数组直接加在 daemon 命令上就宣称等价。
 
-迁移前须明确受控配置如何进入后台，以及 Provider 切换时配置和进程如何一起更新。
+未来决定接入前须明确受控配置如何进入后台，以及 Provider 切换时配置和进程如何一起更新。
 改为多个 Codex Home 还会影响账户、历史、配置、Skills 等资源解析；双 Home 探测只证明
 实例独立，不证明符合当前 Provider 的数据语义。不得复制内部会话库或通过随意符号链接
 拼接 Home。若最终方案需要改变用户持久化布局，必须另行给出备份、失败恢复与回退方案。
@@ -133,9 +133,8 @@ Gateway 停止不得主动终止共享 App Server；Relay、WebUI 不在 daemon 
 观察模型请求；最后读取已加载列表与 Turn 状态，再对比显式 stop/start。结束时停止两个实例
 并检查无遗留进程。不要把该步骤直接用于用户正在工作的 Home。
 
-本次临时诊断脚本为 `/tmp/codexc-daemon-probe.mjs`、`/tmp/codexc-daemon-phase2.mjs`，报告为
-对应的 `-report.json` 文件；它们不是仓库测试或长期交付依赖。上表保存可持续复核的结果，
-正式接入时须把必要断言纳入仓库真实 App Server 合同，不能以临时报告代替回归测试。
+上表保留隔离探测的条件与结果。正式接入前须将必要断言纳入仓库真实 App Server 合同，
+临时诊断脚本与报告不是交付依赖，也不能代替回归测试。
 
 ## 接入验收与后续决策
 

@@ -73,19 +73,20 @@ HTML 报告写入被 Git 忽略的 `coverage/`。项目记录覆盖情况，但�
 API 使用受控夹具，浏览器拒绝未声明的网络请求；不会连接当前用户 Gateway、账户或服务。
 它补充 SSR/模拟 Hook 无法证明的取消、键盘、焦点与卸载行为，不替代读屏、视觉或性能验收。
 
-浏览器工具不进入项目依赖或常规 `verify:commit`。按需使用已安装的 Playwright，或复用以下临时安装方式：
+浏览器工具不进入项目依赖或常规 `verify:commit`。优先复用已安装的 Playwright 和浏览器缓存；确需临时安装时，在磁盘临时目录创建独立目录：
 
 ```bash
-npm install --prefix /tmp/codexc-browser-review --no-audit --no-fund playwright@1.63.0
-PLAYWRIGHT_BROWSERS_PATH=/tmp/codexc-browser-review/browsers /tmp/codexc-browser-review/node_modules/.bin/playwright install chromium
-PLAYWRIGHT_BROWSERS_PATH=/tmp/codexc-browser-review/browsers node tests/browser/webui-contracts.mjs /tmp/codexc-browser-review/node_modules/playwright/index.mjs
+browser_tools_dir=$(mktemp -d /var/tmp/codexc-browser-review.XXXXXX)
+npm install --prefix "$browser_tools_dir" --no-audit --no-fund playwright@1.63.0
+"$browser_tools_dir/node_modules/.bin/playwright" install chromium
+node tests/browser/webui-contracts.mjs "$browser_tools_dir/node_modules/playwright/index.mjs"
 ```
 
 脚本首个参数为 Playwright 模块路径，省略时使用通常的 `import("playwright")`。
 依赖只保存在指定临时目录；删除该目录即可移除工具，不需要修改项目包文件。
 浏览器没有安装、启动失败或任一合同失败都会返回失败，不计为跳过或通过。
 Linux 环境还需 Chromium 运行库及可用字体；精简容器可能只有浏览器文件而缺少这些依赖。
-本次使用临时解压库与独立字体配置的执行记录见 [前端关联修复记录](../docs/webui-frontend-review.md#修复后的整合验证)。
+截图等仓库内产物放在 `output/playwright/`；结束后关闭浏览器和本地服务，仅清理本次创建的临时目录。组件约定见 [WebUI 模块说明](../webui/README.md)。
 
 ## 真实 App Server 合同
 

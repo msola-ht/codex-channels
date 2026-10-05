@@ -22,9 +22,7 @@ codexc service restart all                 # 应用配置变化
 首个账户标记为默认，后续可手动修改。不同 ID 不能生成相同的凭据环境变量名。
 仅支持当前多账户格式。删除固定模式账户时只恢复该 Provider 管理的主配置字段，保留安装前备份与历史统计；Remote TUI 正在使用该实例时须先退出。写入失败会回滚本次文件变更。
 
-更新器不处理旧 DS 配置，不移动文件或改写账户身份。
-旧 Thread 的 `deepseek` 身份不改写，也不保证继续恢复；历史指标仍在 `deepseek` 名下查询，
-新请求按 `ds-<账户>` 统计。
+请求与指标按精确的 `ds-<账户>` 身份归属，只恢复能映射到当前账户的 Thread。
 
 ## 文件与运行模式
 
@@ -130,7 +128,7 @@ Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review�
 2. 在下一条消息中为目标 Provider 新建 Thread。
 3. 不复制可能包含 Provider 专属 reasoning、工具结果或加密内容的历史。
 
-同一账户的 Thread 仍可通过 `/resume` 恢复，旧单账户的 `deepseek` Thread 不再接续。同一 Provider 内切换模型时不新建 Thread，选择在下一次 Turn
+同一账户的 Thread 可通过 `/resume` 恢复。同一 Provider 内切换模型时不新建 Thread，选择在下一次 Turn
 生效。切换 Workspace、新会话或同 Provider 历史 Thread 时，渠道会在内存中保留当前模型、思考
 等级和服务层级并用于下一 Turn。切换 Workspace 后下一条消息会新建 Thread，不自动接续目标 Workspace 的历史
 Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Provider。
@@ -174,7 +172,6 @@ Files API 或其他图片入口。图片 Token 由 DeepSeek 按尺寸换算并�
 Pro 仍为文字模型，收到图片时会在 Turn 前明确拒绝；需要看图时使用 `/model` 切换到
 `deepseek-flash`。Gateway 不再把图片转交给另一套外部视觉 API。
 
-不支持旧版 `[vision]` 配置；更新器不清理旧配置或凭据。
 
 固定模式下，DeepSeek 代理服务于主 App Server；切换模式按需启动。原生子代理复用父线程所在实例与统计代理。代理支持项目当前使用的
 HTTP/SSE、Responses WebSocket、压缩和模型目录请求，复用统一网络代理，并保留用户已有的

@@ -86,8 +86,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 无账户接口：`/usage` 明确显示不支持，不回退 OpenAI；仍可使用显式账户 ID 隔离多个凭据和运行实例；
 - 指标库本地用量与 Token 汇总必须按 Provider 过滤；GO 形态还需在统计代理注册窗口
   快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方
-  5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9；当前指标库为
-  Schema v27，另含子代理运行级父子 Turn 关联与逐请求上游 `User-Agent`），
+  5h/7d/月窗口 `resetsAt` 快照并写入当前指标库 `quota_windows` 列，
   读取时对 5 小时滚动窗口按当前时间范围和请求开始时间判定，对 7 天/月度固定窗口优先按快照
   归属；快照缺失或请求开始时已经过期才回退到请求时间。账户窗口只展示官方已用百分比、重置时间
   和本地 Token，不展示总额或费用。
@@ -234,7 +233,7 @@ OCG、CCG 或 CLP 实例且没有混合其他 Provider 时连接该家默认账�
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
 和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
 `openai`、`ollama`、`lmstudio`、`amazon-bedrock`、DeepSeek 保留命名空间 `deepseek` / `ds-*`、OpenCode Go 保留命名空间
-`ocg` / `ocg-*`、CCG 保留命名空间 `ccg` / `ccg-*`，或其他项目受管 Provider ID。`opencode-go` 仅保留为管理命令和既有磁盘目录的历史名称。
+`ocg` / `ocg-*`、CCG 保留命名空间 `ccg` / `ccg-*`、CLP 保留命名空间 `clp` / `clp-*`，或其他项目受管 Provider ID。`opencode-go` 是当前管理命令与磁盘目录名称。
 
 修改后运行 `codexc service restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。
@@ -288,16 +287,6 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 `codexc primary-provider switch openai` 将候选移入私有备份，再编辑为切换模式；Setup 不会留下
 同名主配置块和切换 Profile。
 
-## 关联文档
-
-- [`docs/opencode-go.md`](opencode-go.md)：GO 形态参考实现；
-- [`docs/ccg.md`](ccg.md)：DS 基础目录适配、多账户隔离与 Command Code Credits 查询的参考实现；
-- [`docs/deepseek.md`](deepseek.md)：官方账户余额查询参考实现，不计算本地价格或费用；
-- [`docs/surface-integration-guide.md`](surface-integration-guide.md)：通讯渠道接入；
-- [`docs/index.md`](index.md)：协议支持矩阵与实现映射；
-- [`docs/codex-cli-upgrade-decisions.md`](codex-cli-upgrade-decisions.md)：Provider 边界决策。
-
-
 ## 7. 自定义 Responses Provider
 
 `codexc setup → 模型与提供商 → 第三方 Provider → 自定义第三方` 与
@@ -337,7 +326,7 @@ CLI Setup 的 Codex 兼容 Provider 和自定义 Responses Provider，新增与�
 ### 存储、备份与恢复
 
 每个 Provider 的 `~/.codex-connect/providers/responses/<Provider ID>/models.json` 使用版本 4 格式，
-包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`。模型定义可携带 `template: { source, model, followContext }` 关联。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不再保存完整模板快照，输入旧 `snapshot` 字段会明确拒绝。只接受当前版本，不自动升级版本 2／3 等旧目录或给已有模型推断关联；旧目录需保留备份后按新格式重新配置。Codex 读取其中的
+包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`。模型定义可携带 `template: { source, model, followContext }` 关联。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不再保存完整模板快照，输入旧 `snapshot` 字段会明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联。Codex 读取其中的
 `models`，Gateway 严格核对版本与生成结果；不接受未知字段、重复 ID、任意外部路径或手写的第三方目录。
 模型目录保存为两空格缩进的 JSON，DS 上下文同步也保留该排版。文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。
 WebUI 的 Provider 预览与保存请求上限为 2 MiB，其他管理接口仍为 64 KiB。模型数量上限仍为 64 个。模型目录（定义和生成结果）不得超过 2 MiB，超限在写入前拒绝。上下文不得超过模板原始最大窗口。模型文件不含 Key。Key 仍写入现有私有 Profile／主配置；连接配置的恢复快照单独位于
@@ -357,5 +346,13 @@ codexc primary-provider recover rs-example keep
 `rollback` 使用上一目录；首次创建没有上一目录时删除未完成目录。`keep` 保留新目录。
 恢复会校验所选目录与当前配置的模型、路径及思考等级，并核对 Profile 与注册表是否一致、运行时能否加载；缺失注册项或 Profile 时须先恢复对应配置，不能仅保留目录。冲突时保留未完成标记并拒绝完成，不覆盖用户后来修改的配置。首次创建前主配置不存在时，可以回滚到无主配置、无模型目录的原始状态；配置损坏或权限错误不能按文件不存在处理。
 可在自定义 Responses Provider 交互菜单中执行同一恢复流程。完成后运行 `codexc service restart all`。
-回退到不支持此类型的 Gateway 版本前，先恢复官方主 Provider 并删除所有 Responses 切换 Provider，
-保留私有备份供重新安装支持版本后人工恢复；不通过删除数据库或静默迁移实现回退。
+
+## 关联文档
+
+- [`docs/opencode-go.md`](opencode-go.md)：GO 形态参考实现；
+- [`docs/ccg.md`](ccg.md)：DS 基础目录适配、多账户隔离与 Command Code Credits 查询的参考实现；
+- [`docs/cline-pass.md`](cline-pass.md)：CLP 账户、Chat 转换与用量；
+- [`docs/deepseek.md`](deepseek.md)：官方账户余额查询参考实现，不计算本地价格或费用；
+- [`docs/surface-integration-guide.md`](surface-integration-guide.md)：通讯渠道接入；
+- [`docs/index.md`](index.md)：协议支持矩阵与实现映射；
+- [`docs/codex-cli-upgrade-decisions.md`](codex-cli-upgrade-decisions.md)：Provider 边界决策。

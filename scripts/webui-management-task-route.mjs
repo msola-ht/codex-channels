@@ -9,7 +9,6 @@ import {
 
 export async function routeTaskManagement({
   environment,
-  gatewayVersion,
   maximumBodyBytes,
   path,
   principalId,
@@ -49,7 +48,6 @@ export async function routeTaskManagement({
       normalized,
       environment,
       state.serviceStatusCache,
-      gatewayVersion,
     );
     preview = { ...preview, resource };
     const resourceRevision = fingerprintManagementValue(resource);
@@ -85,7 +83,6 @@ export async function routeTaskManagement({
       normalized,
       environment,
       state.serviceStatusCache,
-      gatewayVersion,
     );
     preview = { ...preview, resource };
     const resourceRevision = fingerprintManagementValue(resource);
@@ -147,12 +144,11 @@ export async function routeTaskManagement({
   return false;
 }
 
-function taskResource(normalized, environment, serviceStatusCache, gatewayVersion) {
+function taskResource(normalized, environment, serviceStatusCache) {
   return managementTaskResourceState(
     normalized,
     environment,
     serviceStatusCache,
-    gatewayVersion,
     (...args) => new ApiError(...args),
   );
 }

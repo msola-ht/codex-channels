@@ -95,11 +95,10 @@ DS、OCG、CCG、CLP 使用当前多账户结构，在 `codexc setup → 模型�
 - [OpenCode Go](docs/opencode-go.md)
 - [CCG（CommandCode）](docs/ccg.md)
 - [CLP（Cline Pass）](docs/cline-pass.md)
-- [Provider 模型 API 转发：原生 Chat/Responses、提供商接入、调用方密钥与指标升级](docs/provider-api-relay-development.md)
-- [Relay 只读 Codex 登录转发设计（设计稿，尚未实施）](docs/relay-codex-auth-development.md)
+- [Provider 模型 API 转发：原生 Chat/Responses、提供商接入、调用方密钥与指标](docs/provider-api-relay-development.md)
 - [Provider 接入指南](docs/provider-integration-guide.md)
 - [官方协议与源码索引](docs/index.md)
-- [Codex Desktop App 共享 App Server 实施方案](docs/codex-desktop-app-development.md)
+- [Codex Desktop App 共享 App Server](docs/codex-desktop-app-development.md)
 - [渠道图片输入与支持范围](docs/user-guide.md#正常发图与图片引用)
 - [项目文档索引](index.md)
 

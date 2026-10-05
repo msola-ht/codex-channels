@@ -400,10 +400,7 @@ async function routeManagement(environment, url, request, response, state, token
     configPath: resolveGatewayConfigPath(environment),
     openMetricsStore,
   })) return;
-  if (await routeTaskManagement({
-    ...routeContext,
-    gatewayVersion: SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null,
-  })) return;
+  if (await routeTaskManagement(routeContext)) return;
   if (await routeRelayManagement({ ...routeContext, openMetricsStore })) return;
   if (await routeDeliveryManagement(routeContext)) return;
   if (await routeGatewaySettingsManagement({ ...routeContext, consumeHighRisk })) return;

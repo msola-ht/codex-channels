@@ -7,8 +7,8 @@
 ## 命令
 
 ```bash
-codexc channel send-image /tmp/截图.png                 # 只有一个会话绑定时自动选择目标
-codexc channel send-image /tmp/截图.png --thread <Thread ID>  # 明确指定目标会话
+codexc channel send-image /absolute/path/to/project/output/playwright/screenshot.png                 # 只有一个会话绑定时自动选择目标
+codexc channel send-image /absolute/path/to/project/output/playwright/screenshot.png --thread <Thread ID>  # 明确指定目标会话
 ```
 
 - 图片必须是绝对路径、普通文件、PNG/JPEG，大小 1 字节到 10 MiB。

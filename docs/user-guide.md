@@ -289,7 +289,7 @@ Host 租约存在时空闲释放不会停止主实例。`codexc app` 会先通�
 视为正式平台支持。
 
 实现边界、阶段状态和验收标准见
-[`Codex Desktop App 共享 App Server 实施方案`](codex-desktop-app-development.md)。
+[`Codex Desktop App 共享 App Server`](codex-desktop-app-development.md)。
 
 ### Computer Use 与浏览器排障
 
@@ -343,8 +343,8 @@ codexc service logs -n 200
 某个 Provider 成功不会提前发布其他仍等待生效的目录。确认失败时保留原有已确认目录；重建后
 没有可确认目录的 Provider 暂不可选。显式模型选择及已有 Thread 的实际模型继续保留。
 停止或重建 Gateway 会取消未开始的操作；如果目标实例已经停止，监管会完成重新启动以恢复共享
-实例，但旧 Gateway 不再刷新或发送成功提示。旧版 App Server 监管端不支持定向应用时会明确提示
-手动重启服务，不回退到自动整体重启。账户增删或 Provider 拓扑变化仍需显式管理服务。
+实例，但已停止的 Gateway 不再刷新或发送成功提示。监管端未提供当前所需的定向应用能力时，操作明确失败并提示
+重启 App Server 服务后重试，不自动改为整体重启。账户增删或 Provider 拓扑变化仍需显式管理服务。
 
 Linux 使用 systemd 用户服务；Windows 使用当前用户计划任务和隐藏的 PowerShell 7 进程，不需要管理员权限。Windows 私有配置 ACL 修复：
 
@@ -375,7 +375,7 @@ codexc doctor
 codexc cleanup
 ```
 
-清理菜单包含归档、转储删除、旧指标清理、Provider 指标清理和重置五项，完成或取消后返回菜单。下表另列出独立的投递核对与指标升级命令：
+清理菜单包含归档、转储删除、过期指标清理、Provider 指标清理和重置五项，完成或取消后返回菜单。下表另列出独立的投递核对命令：
 
 | 维护项目 | 直接命令 | 执行条件与结果 |
 | --- | --- | --- |
