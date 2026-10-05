@@ -112,9 +112,10 @@ describe("conversation model and account command formatting", () => {
       expect(render()).not.toContain("主窗口：");
       expect(render()).not.toContain("周期 7 天");
       now.mockReturnValue(reset - 1);
-      expect(render()).toContain("剩余：不足 1 H");
+      expect(render()).toContain("剩余：不足 1 min");
       now.mockReturnValue(reset);
       expect(render()).toContain("重置时间已过");
+      expect(render()).toContain("当前时间：2026年10月7日 18:36");
     } finally { now.mockRestore(); }
   });
 

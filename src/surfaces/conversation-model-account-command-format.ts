@@ -353,6 +353,7 @@ export function formatConversationLimits(
   return toStructuredMarkdownList([
     "OpenAI Codex 额度：",
     formatTimezoneLine(),
+    `当前时间：${formatResetTime(Date.now() / 1_000, true)}`,
     `套餐：${planType ? formatPlanType(planType) : "未知"}`,
     `凭证刷新时间：${result.result.credentialRefreshedAt == null ? "未提供" : formatResetTime(result.result.credentialRefreshedAt, true)}`,
     ...result.result.limits.limits.flatMap((limit) => [

@@ -41,9 +41,10 @@ export function formatRemainingRateLimitWindow(
 export function formatTimeRemaining(timestamp: number, now: number, kind: "reset" | "expiry"): string {
   const remainingMs = timestamp * 1_000 - now;
   if (remainingMs <= 0) return kind === "reset" ? "重置时间已过" : "已到期";
-  const hours = Math.floor(remainingMs / 3_600_000);
-  if (hours === 0) return "剩余：不足 1 H";
-  return `剩余：${Math.floor(hours / 24)} D ${hours % 24} H`;
+  const totalMinutes = Math.floor(remainingMs / 60_000);
+  if (totalMinutes === 0) return "剩余：不足 1 min";
+  const hours = Math.floor(totalMinutes / 60);
+  return `剩余：${Math.floor(hours / 24)} D ${hours % 24} H ${totalMinutes % 60} min`;
 }
 
 export function formatPercent(value: number): string {
