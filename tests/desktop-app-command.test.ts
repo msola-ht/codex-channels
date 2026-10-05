@@ -22,6 +22,70 @@ afterEach(() => {
 });
 
 describe("desktop-app command", () => {
+  it("rejects an explicit open subcommand before reading configuration", async () => {
+    await expect(runDesktopAppCommand(["open"], { environment: {} })).rejects.toThrow("用法：codexc app");
+  });
+  it.each(["darwin", "win32"] as const)("confirms first open, enables sharing and launches on %s", async (platform) => {
+    const fixture = createFixture();
+    const events: string[] = [];
+    const options = {
+      environment: fixture.environment,
+      platform,
+      inspectDesktopApp: platform === "darwin" ? compatibleStoppedApp : compatibleStoppedWindowsApp,
+      inspectSupervisorState: readyDesktopHostSupervisor,
+      inspectActiveThreads: async () => 0,
+      confirmEnable: async () => { events.push("confirm"); return true; },
+      restartAppServer: async () => { events.push("restart"); },
+      probeBridge: async () => true,
+      openDesktop: async () => { events.push("open"); },
+      writeMessage: () => undefined,
+    };
+    await expect(runDesktopAppCommand([], options)).resolves.toEqual({ action: "open", opened: true });
+    expect(events).toEqual(["confirm", "restart", "open"]);
+    expect(readGatewayConfig(fixture.configPath).codex).toMatchObject({
+      desktop_app: { enabled: true, port: 47_821 },
+    });
+    events.length = 0;
+    await runDesktopAppCommand([], options);
+    expect(events).toEqual(["open"]);
+  });
+
+  it("leaves configuration and services untouched when first open is declined", async () => {
+    const fixture = createFixture();
+    const before = readGatewayConfig(fixture.configPath);
+    const events: string[] = [];
+    await expect(runDesktopAppCommand([], {
+      environment: fixture.environment,
+      platform: "darwin",
+      inspectDesktopApp: compatibleStoppedApp,
+      confirmEnable: async () => false,
+      restartAppServer: async () => { events.push("restart"); },
+      openDesktop: async () => { events.push("open"); },
+      writeMessage: () => undefined,
+    })).resolves.toEqual({ action: "open", opened: false });
+    expect(events).toEqual([]);
+    expect(readGatewayConfig(fixture.configPath)).toEqual(before);
+  });
+
+  it.each(["darwin", "win32"] as const)("rolls back failed first-open enablement without launching on %s", async (platform) => {
+    const fixture = createFixture({ enabled: false, port: 49_205 });
+    const before = readGatewayConfig(fixture.configPath);
+    const events: string[] = [];
+    await expect(runDesktopAppCommand([], {
+      environment: fixture.environment,
+      platform,
+      inspectDesktopApp: platform === "darwin" ? compatibleStoppedApp : compatibleStoppedWindowsApp,
+      inspectSupervisorState: async () => ({ status: "missing" }),
+      probeBridge: async () => false,
+      confirmEnable: async () => true,
+      restartAppServer: async () => { events.push("restart"); },
+      openDesktop: async () => { events.push("open"); },
+      writeMessage: () => undefined,
+    })).rejects.toThrow(platform === "darwin" ? "不支持当前 Desktop Host" : "桥在服务重启后未就绪");
+    expect(events).toEqual(["restart", "restart"]);
+    expect(readGatewayConfig(fixture.configPath)).toEqual(before);
+  });
+
   it("enables the macOS managed host and verifies supervisor readiness", async () => {
     const fixture = createFixture();
     let restarts = 0;
@@ -129,7 +193,7 @@ describe("desktop-app command", () => {
     const opened: Array<{ path: string; endpoint: string }> = [];
     let bridgeProbed = false;
 
-    await expect(runDesktopAppCommand(["open"], {
+    await expect(runDesktopAppCommand([], {
       environment: fixture.environment,
       platform: "darwin",
       inspectDesktopApp: compatibleStoppedApp,
@@ -154,7 +218,7 @@ describe("desktop-app command", () => {
     const fixture = createFixture({ enabled: true, port: 49_203 });
     let opened = false;
 
-    await expect(runDesktopAppCommand(["open"], {
+    await expect(runDesktopAppCommand([], {
       environment: fixture.environment,
       platform: "darwin",
       inspectDesktopApp: compatibleStoppedApp,
@@ -171,7 +235,7 @@ describe("desktop-app command", () => {
     const fixture = createFixture({ enabled: true, port: 49_203 });
     let opened = false;
 
-    await expect(runDesktopAppCommand(["open"], {
+    await expect(runDesktopAppCommand([], {
       environment: fixture.environment,
       platform: "darwin",
       inspectDesktopApp: compatibleStoppedApp,
@@ -189,7 +253,7 @@ describe("desktop-app command", () => {
     let activityInspected = false;
     let opened = false;
 
-    await expect(runDesktopAppCommand(["open"], {
+    await expect(runDesktopAppCommand([], {
       environment: fixture.environment,
       platform: "darwin",
       inspectDesktopApp: compatibleStoppedApp,
@@ -265,7 +329,7 @@ describe("desktop-app command", () => {
       writeMessage: () => undefined,
     })).resolves.toEqual({ action: "enable", enabled: true, port: 49_204 });
 
-    await expect(runDesktopAppCommand(["open"], {
+    await expect(runDesktopAppCommand([], {
       environment: fixture.environment,
       platform: "win32",
       inspectDesktopApp: compatibleStoppedWindowsApp,

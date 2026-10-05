@@ -24,6 +24,7 @@ import {
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
 import { locateUserConfig, requireUserConfig } from "./runtime-config.mjs";
 import { runServiceCommand } from "./service-command.mjs";
+import { createPrompter } from "./terminal-prompter.mjs";
 
 const defaultBridgePort = 47_821;
 const compatibilityMarker = Buffer.from("CODEX_APP_SERVER_WS_URL", "utf8");
@@ -66,7 +67,7 @@ export async function runDesktopAppCommand(args, options = {}) {
     CODEX_BINARY: stringValue(codex.binary) || "codex",
   };
   const appServer = resolveAppServerRuntime(document, located.dataDir, runtimeEnvironment);
-  const desktopConfig = desktopAppConfig(codex.desktop_app);
+  let desktopConfig = desktopAppConfig(codex.desktop_app);
   const supported = platform === "darwin" || platform === "win32";
   const app = supported
     ? inspectDesktopApp()
@@ -104,12 +105,34 @@ export async function runDesktopAppCommand(args, options = {}) {
       : "无法确认 ChatGPT Desktop App 是否已退出");
   }
 
+  async function enableSharing(port) {
+    const token = platform === "darwin" ? undefined : loadOrCreateDesktopAppBridgeToken(located.dataDir);
+    const applied = { enabled: true, port };
+    const previous = writeDesktopAppConfig(located.configPath, applied);
+    try {
+      await restartAppServer();
+      if (platform === "darwin") {
+        await assertMacDesktopAppHostReady(appServer.primarySocketPath, inspectSupervisorState);
+      } else if (token !== undefined && !await probeBridge(privateBridgeEndpoint(port, token))) {
+        throw new Error("Codex Desktop App 桥在服务重启后未就绪");
+      }
+    } catch (error) {
+      await rollbackDesktopAppConfig({ configPath: located.configPath, previous, applied, restartAppServer, cause: error });
+    }
+    desktopConfig = applied;
+  }
+
   if (parsed.action === "open") {
     if (appServer.primaryProvider !== "openai") {
       throw new Error("Codex Desktop App 共享只支持 OpenAI 主 Provider");
     }
     if (desktopConfig?.enabled !== true) {
-      throw new Error("Codex Desktop App 共享尚未启用，请先运行 codexc desktop-app enable");
+      const confirmed = await (options.confirmEnable ?? confirmDesktopAppEnable)();
+      if (confirmed !== true) {
+        writeMessage("note", "已取消启动；共享配置和服务未改动。");
+        return { action: "open", opened: false };
+      }
+      await enableSharing(desktopConfig?.port ?? defaultBridgePort);
     }
     if (platform === "darwin") {
       const topology = await assertMacDesktopAppHostReady(
@@ -162,32 +185,9 @@ export async function runDesktopAppCommand(args, options = {}) {
       throw new Error("Codex Desktop App 共享只支持 OpenAI 主 Provider");
     }
     const port = parsed.port ?? desktopConfig?.port ?? defaultBridgePort;
-    const token = platform === "darwin"
-      ? undefined
-      : loadOrCreateDesktopAppBridgeToken(located.dataDir);
-    const applied = { enabled: true, port };
-    const previous = writeDesktopAppConfig(located.configPath, applied);
-    try {
-      await restartAppServer();
-      if (platform === "darwin") {
-        await assertMacDesktopAppHostReady(
-          appServer.primarySocketPath,
-          inspectSupervisorState,
-        );
-      } else if (token !== undefined && !await probeBridge(privateBridgeEndpoint(port, token))) {
-        throw new Error("Codex Desktop App 桥在服务重启后未就绪");
-      }
-    } catch (error) {
-      await rollbackDesktopAppConfig({
-        configPath: located.configPath,
-        previous,
-        applied,
-        restartAppServer,
-        cause: error,
-      });
-    }
+    await enableSharing(port);
     writeMessage("success", "Codex Desktop App 共享已启用。");
-    writeMessage("note", "请使用 codexc desktop-app open 启动 ChatGPT Desktop App。");
+    writeMessage("note", "请使用 codexc app 启动 ChatGPT Desktop App。");
     return { action: "enable", enabled: true, port };
   }
 
@@ -209,6 +209,18 @@ export async function runDesktopAppCommand(args, options = {}) {
   }
   writeMessage("success", "Codex Desktop App 共享已禁用。");
   return { action: "disable", enabled: false };
+}
+
+async function confirmDesktopAppEnable() {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error("首次启动需要在本机终端确认启用共享；非交互使用请先显式运行 codexc app enable");
+  }
+  const prompts = createPrompter(process.stdin, process.stdout);
+  try {
+    return await prompts.confirm("首次启动将启用共享并重启 App Server，现有连接与进行中的任务可能中断。是否继续？", false);
+  } finally {
+    prompts.close();
+  }
 }
 
 async function assertMacDesktopAppHostReady(primarySocketPath, inspectSupervisorState) {
@@ -412,6 +424,7 @@ export function openWindowsDesktopApp(
 }
 
 function parseDesktopAppArgs(args) {
+  if (args.length === 0) return { action: "open" };
   const [action, ...rest] = args;
   if (action === "status") {
     if (rest.length === 0) return { action, json: false };
@@ -426,7 +439,7 @@ function parseDesktopAppArgs(args) {
       }
     }
   }
-  if ((action === "disable" || action === "open") && rest.length === 0) {
+  if (action === "disable" && rest.length === 0) {
     return { action };
   }
   throw new Error(desktopAppCommandUsage);

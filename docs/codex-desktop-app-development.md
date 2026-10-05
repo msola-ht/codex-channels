@@ -142,6 +142,8 @@ Desktop 生成、删除、重写或缓存业务消息。macOS Proxy 只在 JSONL
 一一对应的消息边界；Windows 桥只转发文本帧，二进制帧以 WebSocket `1003` 关闭，单帧上限为
 128 MiB。
 
+两个平台的每个转发方向最多保留 128 条、合计 128 MiB 的消息，包含正在发送的消息；macOS 未完成的 JSONL 行也限制为 128 MiB。单次发送等待最多 5 秒，容量或超时失败明确终止当前连接，不丢弃消息后继续会话、不自动重放写请求。Windows 桥以 `1013` 通知转发不可用并释放 Transport 与租约；macOS Proxy 返回失败并清理输入监听。恢复连接仍由 Desktop 或操作者处理。
+
 两条平台路径都在连接期间持有主 Provider 租约，空闲释放不能终止主实例。macOS 最后一个 Host
 租约关闭时只清除服务内存中的临时 Pipe 附加状态，不终止共享主实例；Windows 桥连接关闭时释放
 上游 Transport 与租约。App Server 服务关闭时停止接受新连接并有限等待现有生命周期操作。
@@ -187,13 +189,13 @@ Windows 使用独立的私有凭据文件，不改变 StateStore、指标库或�
 
 ## Desktop 连接与命令
 
-新增公开命令 `codexc desktop-app`，所有层级支持 `-h` / `--help`：
+公开命令 `codexc app`，日常统一使用 `codexc app`，所有层级支持 `-h` / `--help`：
 
 ```text
-codexc desktop-app enable [--port <1-65535>]
-codexc desktop-app disable
-codexc desktop-app status [--json]
-codexc desktop-app open
+codexc app
+codexc app enable [--port <1-65535>]
+codexc app disable
+codexc app status [--json]
 ```
 
 ### `enable`
@@ -202,7 +204,7 @@ codexc desktop-app open
 2. macOS 检查强制 CLI、CLI 路径、工具 Pipe 和内置插件配置标记；Windows 检查 WebSocket 入口。
 3. Windows 创建或验证私有桥令牌；macOS 不创建令牌。原子写入 `[codex.desktop_app]` 并保留其余
    TOML 注释和字段。
-4. 不写当前用户或系统级持久环境；平台连接参数只由 `open` 注入本次 Desktop 子进程。
+4. 不写当前用户或系统级持久环境；平台连接参数只由 `codexc app` 注入本次 Desktop 子进程。
 5. 重启 App Server 服务；Windows 继续等待桥就绪，macOS 只依赖 Supervisor 和私有 UDS。
 6. 任一步失败时按修改前快照恢复配置；令牌文件可保留。
 
@@ -219,8 +221,12 @@ codexc desktop-app open
 能力与当前租约状态；Windows 报告桥端口是否可连接。两个平台都只报告采用单次启动环境，不尝试
 读取运行中 Desktop 的进程环境。只有 Windows JSON 输出不带查询参数的回环 URL。
 
-### `open`
+### `codexc app`
 
+- 尚未启用时，在本机交互终端提示启用共享会重启 App Server、可能中断连接与任务，默认拒绝。
+  确认后复用 `enable` 的配置、就绪检查与失败回滚流程，然后启动 App；取消则不修改配置或服务。
+  非交互调用必须先显式执行 `enable`。已启用时直接进入启动检查，不重复启用或重启服务。
+- 启用成功后若启动检查或 App 启动失败，保留已生效的共享配置，排除问题后可再次执行 `codexc app`。
 - 只在配置、平台兼容探测与对应服务路径就绪时启动 Desktop。
 - Desktop 已运行时拒绝，提示先完全退出；不强制结束用户进程。
 - macOS 在启动前先拒绝仍由 `codexc remote` 持有的主实例租约，再通过官方
@@ -255,12 +261,12 @@ codexc desktop-app open
 
 | 项目 | 结果 | 结论 |
 | --- | --- | --- |
-| `desktop-app enable/open/status` | 通过 | 配置、令牌、桥、单次启动环境和服务重启主路径可用 |
+| `app`、`app enable/status` | 通过 | 配置、令牌、桥、单次启动环境和服务重启主路径可用 |
 | Desktop 与渠道双向发现并继续 Thread | 通过 | 两端连接同一主 OpenAI App Server |
 | App Server 重启后的 Desktop 恢复 | 通过 | 重启期间渠道收到断线提示，主实例就绪后自动重连并继续双向接续 |
 | Desktop 内置 `codex_app` MCP | 通过 | 签名 Host 隔离探针返回 38 个工具；修复后的受管启动不再出现 Pipe 缺失、`tools/list` 超时或启动卡住 |
 | 签名 Host 隔离合同 | 通过 | 受管 stdio Proxy 连接同一 UDS，`codex_app` 0.1.0 返回 38 个工具且无错误 |
-| 完整 macOS Desktop 受管入口 | 通过 | 源码部署后的启动、双向接续和服务重启恢复已实测；仍须使用 `codexc desktop-app open` 注入单次启动环境 |
+| 完整 macOS Desktop 受管入口 | 通过 | 源码部署后的启动、双向接续和服务重启恢复已实测；仍须使用 `codexc app` 注入单次启动环境 |
 
 自动化真实 App Server 合同只能证明两个普通 App Server Client 通过桥共享 Thread，不能模拟打包
 Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周期。后续验收必须把这部分列为独立
@@ -277,7 +283,7 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
   通过当前用户私有 Supervisor
   连接交给服务；Desktop 提供的内置插件布尔启用值原样受控应用到共享主实例。该平台不启动回环
   桥，不创建桥令牌，也不解析 JSON-RPC 业务消息。
-- 用户从 Dock 直接重新启动时不会经过受管入口，可能回到 Desktop 私有 App Server；`status` 的 `toolHostAttached` 仅报告当前工具 Host 租约，不能证明任意 Desktop 进程的环境；需通过 `codexc desktop-app open` 启动。
+- 用户从 Dock 直接重新启动时不会经过受管入口，可能回到 Desktop 私有 App Server；`status` 的 `toolHostAttached` 仅报告当前工具 Host 租约，不能证明任意 Desktop 进程的环境；需通过 `codexc app` 启动。
 
 ### Windows
 
@@ -339,7 +345,7 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
 
 ### 阶段二：macOS 命令与真实 Desktop 验收
 
-1. 增加 `desktop-app enable|disable|status|open` 与帮助。
+1. 增加 `app [enable|disable|status]` 与帮助。
 2. 实现 ChatGPT Bundle 探测、兼容入口检查和 `open --env` 启动。
 3. 完成配置与服务重启事务、冲突恢复和脱敏状态输出。
 4. 实机验证双向发现、空闲 Thread 继续、活动 Turn 观察、审批归属、App Server 重启和禁用回滚。
@@ -363,7 +369,7 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
 
 ### 阶段五：macOS 完整兼容修订
 
-1. `desktop-app open` 在 macOS 使用受管 CLI 入口，不再让 Desktop 直接把本机 App Server 的
+1. `codexc app` 在 macOS 使用受管 CLI 入口，不再让 Desktop 直接把本机 App Server 的
    `CODEX_APP_TOOLS_PIPE_PATH` 丢在外部共享连接之外；Windows 启动路径本轮不改。
 2. 受管入口只从 Desktop 继承当前启动生成的 Pipe 与随包资源路径，通过现有私有 Supervisor Socket
    建立租约。请求必须限定当前用户、主 Provider `openai`、已启用配置、类型为 Socket 且同属当前
@@ -379,9 +385,9 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
    由同一 Pipe 重新附加并切换可信托管。该重连行为必须通过真实 Desktop 验收，不能只靠进程模型
    推断。
 6. Desktop 入口退出时释放 Supervisor 租约并终止自己持有的 Proxy 子进程，不结束共享 App Server。
-   Pipe 失效后的下一次 `open` 必须用新 Pipe 重新附加，不能复用旧路径或静默启动 Desktop 私有
+   Pipe 失效后的下一次 `codexc app` 必须用新 Pipe 重新附加，不能复用旧路径或静默启动 Desktop 私有
    App Server。
-   首次附加和 Pipe 切换会短暂重启主 App Server 子进程；`desktop-app open` 必须先检查主实例租约与
+   首次附加和 Pipe 切换会短暂重启主 App Server 子进程；`codexc app` 必须先检查主实例租约与
    全部已加载 Thread 的活动状态，状态不空闲或无法确认时失败关闭，且不能把切换伪装成无中断操作。
 7. 先运行现有类型、Lint、文档、服务与真实 App Server 合同，再在 ChatGPT `26.908.70816` 上实机
    验证 Thread 双向共享、`codex_app` 工具目录、App Server 服务重启恢复、Desktop 完全退出后重开

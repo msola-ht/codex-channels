@@ -2,7 +2,6 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { createConnection } from "node:net";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 
 import WebSocket, { WebSocketServer } from "ws";
 
@@ -21,6 +20,8 @@ const bridgePath = "/codex-app-server";
 const bridgeTokenPattern = /^[A-Za-z0-9_-]{43}$/u;
 const maximumConnections = 4;
 const maximumPayloadBytes = 128 * 1024 * 1024;
+const maximumQueuedMessages = 128;
+const forwardingTimeoutMs = 5_000;
 const serviceRestartCloseCode = 1012;
 const unsupportedDataCloseCode = 1003;
 const upstreamFailureCloseCode = 1011;
@@ -110,9 +111,6 @@ export async function proxyDesktopAppStdioToUnixSocket({
   });
   await waitForWebSocketOpen(socket, connectTimeoutMs);
 
-  const lines = createInterface({ input, crlfDelay: Infinity });
-  let upstreamQueue = Promise.resolve();
-  let downstreamQueue = Promise.resolve();
   let closeTimer;
   let settled = false;
   let resolveCompletion;
@@ -132,25 +130,22 @@ export async function proxyDesktopAppStdioToUnixSocket({
     settled = true;
     resolveCompletion();
   };
+  const upstreamQueue = forwardingQueue((line) => sendText(socket, line), fail);
+  const downstreamQueue = forwardingQueue((message) => writeLine(output, message), fail);
 
   socket.on("message", (data, isBinary) => {
     if (isBinary) {
       fail(new Error("Codex App Server 返回了不支持的二进制 WebSocket 帧"));
       return;
     }
-    downstreamQueue = downstreamQueue.then(() =>
-      writeLine(output, decodeTextMessage(data))
-    );
-    void downstreamQueue.catch(fail);
+    downstreamQueue.push(decodeTextMessage(data));
   });
   socket.once("error", fail);
   socket.once("close", complete);
-  lines.on("line", (line) => {
-    upstreamQueue = upstreamQueue.then(() => sendText(socket, line));
-    void upstreamQueue.catch(fail);
-  });
-  lines.once("close", () => {
-    void upstreamQueue.then(() => {
+  output.on("error", fail);
+  const removeInput = readDesktopLines(input, (line) => upstreamQueue.push(line), fail, () => {
+    void upstreamQueue.drain().then(() => {
+      if (settled) return;
       if (socket.readyState !== WebSocket.OPEN) {
         complete();
         return;
@@ -163,11 +158,14 @@ export async function proxyDesktopAppStdioToUnixSocket({
 
   try {
     await completion;
-    await upstreamQueue;
-    await downstreamQueue;
+    upstreamQueue.close();
+    await downstreamQueue.drain();
   } finally {
+    upstreamQueue.close();
+    downstreamQueue.close();
     if (closeTimer !== undefined) clearTimeout(closeTimer);
-    lines.close();
+    removeInput();
+    output.off("error", fail);
     socket.removeAllListeners();
     if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
   }
@@ -282,7 +280,7 @@ export class DesktopAppBridge {
     };
     this.#pending.add(attempt);
     attempt.task = this.#acceptUpgrade(attempt, request, head);
-    void attempt.task;
+    void attempt.task.catch(() => this.#onEvent({ type: "connection-error", stage: "upstream" }));
   }
 
   async #acceptUpgrade(attempt, request, head) {
@@ -327,30 +325,36 @@ export class DesktopAppBridge {
     };
     this.#sessions.add(session);
     this.#onEvent({ type: "connected", connections: this.#sessions.size });
-    let upstreamQueue = Promise.resolve();
-    let downstreamQueue = Promise.resolve();
     const closeSession = (code, reason, terminate = false) => {
       if (session.closePromise) return session.closePromise;
+      upstreamQueue.close();
+      downstreamQueue.close();
       session.closePromise = (async () => {
         session.removeTransportMessage?.();
         session.removeTransportClose?.();
-        this.#sessions.delete(session);
         await closeWebSocket(webSocket, code, reason, terminate ? 250 : 0);
         try {
           await transport.close();
         } finally {
-          await lease.close();
-          this.#onEvent({ type: "disconnected", connections: this.#sessions.size });
+          try { await lease.close(); }
+          finally {
+            this.#sessions.delete(session);
+            this.#onEvent({ type: "disconnected", connections: this.#sessions.size });
+          }
         }
       })();
+      void session.closePromise.catch(() => this.#onEvent({ type: "connection-error", stage: "upstream" }));
       return session.closePromise;
     };
+    const forwardingFailed = (stage) => {
+      this.#onEvent({ type: "connection-error", stage });
+      void closeSession(1013, "Desktop forwarding unavailable", true);
+    };
+    const upstreamQueue = forwardingQueue((message) => transport.send(message), () => forwardingFailed("upstream-send"));
+    const downstreamQueue = forwardingQueue((message) => sendText(webSocket, message), () => forwardingFailed("downstream-send"));
     session.close = closeSession;
     session.removeTransportMessage = transport.onMessage((message) => {
-      downstreamQueue = downstreamQueue.then(() => sendText(webSocket, message)).catch(() => {
-        this.#onEvent({ type: "connection-error", stage: "downstream-send" });
-        void closeSession(upstreamFailureCloseCode, "Upstream connection failed");
-      });
+      downstreamQueue.push(message);
     });
     session.removeTransportClose = transport.onClose(() => {
       void closeSession(upstreamFailureCloseCode, "Upstream connection closed");
@@ -361,10 +365,7 @@ export class DesktopAppBridge {
         return;
       }
       const message = decodeTextMessage(data);
-      upstreamQueue = upstreamQueue.then(() => transport.send(message)).catch(() => {
-        this.#onEvent({ type: "connection-error", stage: "upstream-send" });
-        void closeSession(upstreamFailureCloseCode, "Upstream connection failed");
-      });
+      upstreamQueue.push(message);
     });
     webSocket.once("error", () => {
       void closeSession(upstreamFailureCloseCode, "Desktop connection failed", true);
@@ -386,17 +387,142 @@ export class DesktopAppBridge {
     const sessionCloses = [...this.#sessions].map((session) =>
       session.close(serviceRestartCloseCode, "Service restarting", true));
     this.#webSocketServer.close();
-    await Promise.allSettled([
+    const cleanup = Promise.allSettled([
       serverClosed,
       ...sessionCloses,
       ...[...this.#pending].map((attempt) => attempt.task),
       ...[...this.#pending].map((attempt) => attempt.abortTask),
     ]);
+    let timer;
+    try {
+      const results = await Promise.race([
+        cleanup,
+        new Promise((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("Desktop 桥关闭超时，资源清理尚未完成")), forwardingTimeoutMs);
+          timer.unref();
+        }),
+      ]);
+      const failures = results.filter(result => result.status === "rejected").map(result => result.reason);
+      if (failures.length > 0) throw new AggregateError(failures, "Desktop 桥资源清理失败");
+    } finally {
+      clearTimeout(timer);
+    }
     this.#sessions.clear();
     this.#pending.clear();
     this.#started = false;
     this.#onEvent({ type: "stopped" });
   }
+}
+
+// Count the in-flight message as well as pending messages. Closing clears retained
+// payloads and wakes the worker even when a transport callback never settles.
+function forwardingQueue(send, onFailure) {
+  let pending = [];
+  let bytes = 0;
+  let count = 0;
+  let closed = false;
+  let task;
+  let failure;
+  let cancel;
+  const close = () => { closed = true; pending = []; cancel?.(); };
+  const fail = (error) => {
+    if (closed) return;
+    failure = error;
+    close();
+    onFailure(error);
+  };
+  async function run() {
+    try {
+      while (!closed && pending.length > 0) {
+        const message = pending.shift();
+        let timer;
+        try {
+          await new Promise((resolve, reject) => {
+            cancel = resolve;
+            timer = setTimeout(() => reject(new Error("Desktop 消息转发超时")), forwardingTimeoutMs);
+            timer.unref();
+            void Promise.resolve().then(() => { if (!closed) return send(message); }).then(resolve, reject);
+          });
+        } catch (error) {
+          fail(error);
+        } finally {
+          clearTimeout(timer);
+          cancel = undefined;
+          bytes -= Buffer.byteLength(message);
+          count--;
+        }
+      }
+    } finally {
+      // Release ownership in the same microtask that observes an empty queue.
+      // A later push must start a new worker, even before this promise settles.
+      task = undefined;
+    }
+  }
+  return {
+    push(message) {
+      if (closed) return;
+      const size = Buffer.byteLength(message);
+      if (count >= maximumQueuedMessages || bytes + size > maximumPayloadBytes) {
+        fail(new Error("Desktop 消息转发队列超出容量"));
+        return;
+      }
+      pending.push(message);
+      count++;
+      bytes += size;
+      task ??= Promise.resolve().then(run);
+    },
+    close,
+    async drain() { while (task) await task; if (failure) throw failure; },
+  };
+}
+
+function readDesktopLines(input, onLine, onFailure, onEnd) {
+  let chunks = [];
+  let size = 0;
+  let stopped = false;
+  const fail = (error) => { stopped = true; chunks = []; onFailure(error); };
+  const flush = () => {
+    const line = Buffer.concat(chunks, size).toString("utf8").replace(/\r$/u, "");
+    chunks = [];
+    size = 0;
+    onLine(line);
+  };
+  const data = (value) => {
+    if (stopped) return;
+    const buffer = Buffer.isBuffer(value) ? value : Buffer.from(value);
+    let offset = 0;
+    while (offset < buffer.length && !stopped) {
+      const newline = buffer.indexOf(0x0a, offset);
+      const end = newline === -1 ? buffer.length : newline;
+      const part = buffer.subarray(offset, end);
+      if (size + part.length > maximumPayloadBytes) {
+        fail(new Error("Desktop JSONL 消息超出容量"));
+        return;
+      }
+      chunks.push(part);
+      size += part.length;
+      if (newline !== -1) flush();
+      offset = end + 1;
+    }
+  };
+  const end = () => {
+    if (stopped) return;
+    if (size > 0) flush();
+    stopped = true;
+    onEnd();
+  };
+  input.on("error", fail);
+  input.on("data", data);
+  input.once("end", end);
+  input.once("close", end);
+  return () => {
+    stopped = true;
+    chunks = [];
+    input.off("data", data);
+    input.off("end", end);
+    input.off("close", end);
+    input.off("error", fail);
+  };
 }
 
 function authenticatedToken(requestUrl, expectedToken) {

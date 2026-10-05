@@ -14,6 +14,7 @@ export interface DesktopAppCommandOptions {
   writeMessage?: (kind: "success" | "failure" | "note", message: string) => void;
   inspectDesktopApp?: () => DesktopAppInspection;
   restartAppServer?: () => Promise<void>;
+  confirmEnable?: () => boolean | Promise<boolean>;
   probeBridge?: (endpoint: string) => Promise<boolean>;
   inspectSupervisorState?: typeof import("../runtime/app-server-supervisor.mjs").inspectAppServerSupervisorState;
   inspectActiveThreads?: (options: {

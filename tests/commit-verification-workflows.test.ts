@@ -98,6 +98,10 @@ if (command === process.env.VERIFY_FAIL) process.exit(17);
 
     expect(workflow).toContain("tests/windows-desktop-app-command.test.ts");
     expect(workflow).toContain("tests/desktop-app-bridge.test.ts");
+    expect(workflow).toContain("Get-Item -LiteralPath 'install.ps1'");
+    expect(workflow).toContain("tests/windows-source-install.test.ts");
+    expect(workflow).toContain("tests/windows-service-host.test.ts");
+    expect(workflow).toContain("tests/windows-service-control.test.ts");
     expect(workflow).not.toMatch(/(?:^|\s)-t(?:\s|$)/u);
   });
 

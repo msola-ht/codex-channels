@@ -252,16 +252,18 @@ ChatGPT App，并确保主 Provider 是 OpenAI、App Server 后台服务已经�
 PowerShell 7 和当前用户安装的 `OpenAI.Codex` 包：
 
 ```bash
-codexc desktop-app status
-codexc desktop-app enable
-codexc desktop-app open
+codexc app
 ```
 
-以后每次都使用 `codexc desktop-app open` 启动；从 Dock 或开始菜单直接打开不会继承本次共享端点。
+首次运行会询问是否启用共享，并说明重启 App Server 可能中断现有连接与任务；默认拒绝。
+确认后自动启用共享并启动 App，取消则不修改配置或服务。以后每次都使用同一命令启动，
+不再询问或执行启用步骤；从 Dock 或开始菜单直接打开不会继承本次共享端点。
+需要诊断时使用 `codexc app status`；非交互启用或指定 Windows 桥端口时，
+使用 `codexc app enable [--port <端口>]`，再执行 `codexc app`。
 关闭功能前同样先完全退出 App，再执行：
 
 ```bash
-codexc desktop-app disable
+codexc app disable
 ```
 
 `status --json` 保持脱敏。Windows 只输出不带令牌的回环地址；macOS 的 `port`、`endpoint`、
@@ -276,7 +278,7 @@ Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
 私有 UDS，并在首次附加当前工具 Pipe 时短暂重启主 App Server 子进程，以 OpenAI 签名的 Desktop
 Node 托管项目锁定的 Codex CLI；开发基线为 0.160.0，既有私有 Pipe 与签名链实机验收使用 0.154.0，
 升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到共享主实例，
-Host 租约存在时空闲释放不会停止主实例。`desktop-app open` 会先通过 App Server 的官方
+Host 租约存在时空闲释放不会停止主实例。`codexc app` 会先通过 App Server 的官方
 `thread/loaded/list` 和 `thread/read` 检查全部已加载的持久及临时 Thread；发现活动 Thread、
 `codexc remote` 主实例租约，或无法完成
 只读状态检查时都会拒绝启动，不会进入子进程切换。隔离实测已经确认该进程链可启动 `codex_app`，
@@ -305,7 +307,7 @@ Host 租约存在时空闲释放不会停止主实例。`desktop-app open` 会�
 审批模式 `auto` 按工具属性判断，`prompt` 每次询问，`writes` 对非只读工具询问，`approve` 免除此层工具审批；
 应用/站点的 `allow` 不会取消其他审批。保存后在新会话中使用；已有 MCP 连接与桌面客户端不保证即时采用新配置。
 
-`desktop-app status` 的 `toolHostAttached` 只描述上面的 Desktop 私有工具 Host，不能据此判断
+`app status` 的 `toolHostAttached` 只描述上面的 Desktop 私有工具 Host，不能据此判断
 独立 Computer Use 或浏览器插件是否可用。`/mcp health` 可以检查当前 Thread 的 MCP 连接，
 但工具已注册、原生应用列表可读、浏览器扩展可发现，都不代表窗口或标签页操作已经成功。
 

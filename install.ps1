@@ -65,6 +65,19 @@ function Read-CodexVersion($Command) {
   return ($output.Trim() -split '\s+')[-1].TrimStart('v')
 }
 
+function Ensure-CodexCli($Command, [string]$ExpectedVersion, [string]$Npm, [string]$WorkingDirectory) {
+  $actual = Read-CodexVersion $Command
+  if ($actual -ne $ExpectedVersion) {
+    $currentVersion = if ($actual) { $actual } else { '未安装' }
+    Write-Host "[提示] Codex CLI 当前 $currentVersion，正在同步为项目锁定版本 $ExpectedVersion"
+    Invoke-Checked $Npm @('install', '--global', '--no-audit', '--no-fund', "@openai/codex@$ExpectedVersion") $WorkingDirectory | Out-Host
+    $Command = Get-Command codex -ErrorAction Stop
+  }
+  $actual = Read-CodexVersion $Command
+  if ($actual -ne $ExpectedVersion) { throw "Codex CLI 版本不匹配：需要 $ExpectedVersion，当前 $actual；请检查 PATH" }
+  return $Command
+}
+
 $git = (Get-Command git.exe -ErrorAction Stop).Source
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 $npm = (Get-Command npm.cmd -ErrorAction Stop).Source
@@ -109,15 +122,8 @@ try {
   $versionDocument = Get-Content -LiteralPath (Join-Path $repositoryRoot 'src\codex-protocol\version.json') -Raw -Encoding utf8 | ConvertFrom-Json
   $version = ([string]$versionDocument.codexCli) -replace '^codex-cli ', ''
   if ($version -notmatch '^\d+\.\d+\.\d+$') { throw '源码协议元数据缺少正式 Codex CLI 版本' }
+  $codexCommand = Ensure-CodexCli $codexCommand $version $npm $repositoryRoot
   $codexVersion = Read-CodexVersion $codexCommand
-  if ($codexVersion -ne $version) {
-    $currentVersion = if ($codexVersion) { $codexVersion } else { '未安装' }
-    Write-Output "[提示] Codex CLI 当前 $currentVersion，正在同步为项目锁定版本 $version"
-    Invoke-Checked $npm @('install', '--global', '--no-audit', '--no-fund', "@openai/codex@$version") $repositoryRoot
-    $codexCommand = Get-Command codex -ErrorAction Stop
-  }
-  $codexVersion = Read-CodexVersion $codexCommand
-  if ($codexVersion -ne $version) { throw "Codex CLI 版本不匹配：main 需要 $version，当前 $($codexVersion ?? '未知')" }
   & $codexCommand.Source 'login' 'status' *> $null
   $loginState = if ($LASTEXITCODE -eq 0) { '已登录' } else { '未登录或登录状态不可用' }
   Write-Output "[提示] Codex CLI 检测通过：$($codexCommand.Source) · $codexVersion · $loginState"

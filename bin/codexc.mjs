@@ -79,7 +79,7 @@ const helpText = {
 
 项目与 Codex：
   remote [参数]                启动共享 App Server 的 Codex TUI
-  desktop-app                 管理 Codex Desktop App 共享连接
+  app                         启动 Codex Desktop App 或管理共享连接
   work                         管理 Workspace（交互菜单或子命令）
   primary-provider             管理第三方主 Provider（新增、列表、切换、删除）
   opencode-go                  管理 OpenCode Go 多账户
@@ -373,11 +373,11 @@ async function executeCommand(command, args) {
         failureReportedByChild: true,
       });
       break;
-    case "desktop-app":
+    case "app":
       if (showRequestedHelp(args, "desktop_app")) {
         break;
       }
-      if (isCommandHelp(args, [[], ["enable"], ["disable"], ["status"], ["open"]], desktopAppCommandUsage)) {
+      if (isCommandHelp(args, [[], ["enable"], ["disable"], ["status"]], desktopAppCommandUsage)) {
         console.log(desktopAppCommandUsage);
         break;
       }

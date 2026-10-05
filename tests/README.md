@@ -31,6 +31,8 @@ CLI 用例按领域直接保存在 `codexc-cli*.test.ts`；`codexc-cli-test-fixt
 - `persistent-output-faults.test.ts`：持久投递的隔离进程崩溃切点与持续积压资源验证，依赖当前 `dist/`；SIGKILL 切点仅在非 Windows 环境执行。
 - `delivery-control.test.ts`、`delivery-queue-reader.test.ts`、`webui-delivery-management.test.ts`、`webui-delivery-page.test.ts`、`webui-delivery-events.test.ts`：投递箱只读分页、在线管理 IPC、在线/离线确认重试和双语队列展示边界。
 - `windows-service-control.test.ts`：Windows 服务重启的停止失败隔离与显式停止合同。
+- `windows-service-host.test.ts`：Windows 服务子进程启动、控制端点失败与资源回收合同。
+- `windows-source-install.test.ts`：在 Windows PowerShell 7 中执行安装器的 Codex 版本同步函数，以隔离命令覆盖缺失、版本差异、安装失败和 PATH 冲突。
 - CLI、WebUI、安装、服务和更新脚本：公开命令、管理接口、构建产物、跨平台服务模板与升级失败行为。
 - `webui-logs.test.ts`、`webui-logs-page.test.ts`：服务日志参数、鉴权、限量读取、脱敏、平台来源、双语展示和失败边界。
 - `webui-component-contracts.test.ts`：公共组件方向、字段错误关联、详情入口焦点目标与 Token 展示边界；SSR 与事件夹具不替代真实浏览器交互验证。

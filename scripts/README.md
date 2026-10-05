@@ -13,7 +13,7 @@
   `CODEX_CONNECT_HOME`、配置路径、Codex 可执行文件和代理环境；同时保留未合并系统代理的环境，供
   前台监管与 Gateway 服务子进程自行解析，避免自动发现结果变成固定环境覆盖。需要在配置损坏时仍可运行的服务恢复
   命令使用独立的最小控制环境。
-- `desktop-app-command.mjs` / `desktop-app-command.d.mts`：实现公开 `codexc desktop-app` 的严格
+- `desktop-app-command.mjs` / `desktop-app-command.d.mts`：实现公开 `codexc app` 的严格
   参数、只读状态、macOS ChatGPT Bundle 与 Windows 当前用户 `OpenAI.Codex` 包兼容探测、配置
   写入与回滚、App Server 服务重启、Windows 受认证桥就绪探测和单次环境启动；状态不输出桥令牌，两个
   平台均明确标为预览。macOS 启动时改用受管 stdio Proxy，不再依赖桥端口或令牌，并单独报告受管
@@ -530,7 +530,7 @@
   通过计划任务控制脚本执行 App Server、Gateway 和 WebUI 的安装、启停、重启、状态、日志
   与卸载；
   核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
-- `windows-service-host.mjs`：计划任务启动的 Windows 服务宿主，按 JSON 定义启动并监管单个
+- `windows-service-host.mjs` / `windows-service-host.d.mts`：计划任务启动的 Windows 服务宿主，按 JSON 定义启动并监管单个
   Node 服务进程，转发控制请求并把标准输出、错误输出写入用户级运行日志。
 - `windows-service-launcher.ps1`：Windows 计划任务调用的 PowerShell 启动器，设置受控环境后
   转交服务宿主，不依赖当前终端目录或用户 Shell 配置。

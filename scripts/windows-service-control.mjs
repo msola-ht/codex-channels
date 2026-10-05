@@ -29,7 +29,8 @@ import { serviceControlDefinitions, serviceSnapshotHealthy } from "./service-sel
 
 const definitionLimitBytes = 64 * 1024;
 const hostStartTimeoutMs = 15_000;
-const hostStopTimeoutMs = 15_000;
+// The host allows 10s for graceful IPC stop, then up to 6s for tree termination.
+const hostStopTimeoutMs = 20_000;
 const pollIntervalMs = 100;
 
 export function windowsServiceDefinitionsDirectory(environment = process.env) {

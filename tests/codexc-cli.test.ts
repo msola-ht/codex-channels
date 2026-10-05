@@ -66,7 +66,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     }`;
     const preload = `import { register } from "node:module";
       register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))}, import.meta.url);`;
-    for (const args of [["--help"], ["version"], ["service", "start", "--help"], ["desktop-app", "--help"], ["timezone", "--help"], ["traffic", "--help"], ["update", "--help"]]) {
+    for (const args of [["--help"], ["version"], ["service", "start", "--help"], ["app", "--help"], ["timezone", "--help"], ["traffic", "--help"], ["update", "--help"]]) {
       const output = execFileSync(process.execPath, [
         "--import", "data:text/javascript," + encodeURIComponent(preload), cli, ...args,
       ], { encoding: "utf8", timeout: 10_000 });
@@ -143,7 +143,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     const env = { ...process.env, CODEX_CONNECT_HOME: root, CODEX_CONNECT_CONFIG_FILE: configPath, CODEX_HOME: join(root, "codex") };
     const validPaths = [["security", "repair"], ["update"], ...["add", "list", "switch", "remove"].map((action) => ["primary-provider", action])];
     const invalidPaths = [
-      ["desktop-app", "nonsense"], ["opencode-go", "nonsense", "add"],
+      ["app", "nonsense"], ["app", "open"], ["opencode-go", "nonsense", "add"],
       ["deepseek", "nonsense"], ["ccg", "nonsense"],
       ["primary-provider", "remove", "some-id"],
       ["opencode-go", "account", "add", "some-id"],
@@ -171,11 +171,11 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["setup", "--help"], "用法：codexc setup"],
       [["start", "-h"], "用法：codexc start"],
       [["remote", "-h"], "用法：codexc remote"],
-      [["desktop-app", "--help"], "用法：codexc desktop-app"],
-      [["desktop-app", "enable", "-h"], "enable [--port 端口]"],
-      [["desktop-app", "disable", "--help"], "disable"],
-      [["desktop-app", "status", "-h"], "status [--json]"],
-      [["desktop-app", "open", "--help"], "open"],
+      [["app", "--help"], "用法：codexc app"],
+      [["app", "enable", "-h"], "enable [--port 端口]"],
+      [["app", "disable", "--help"], "disable"],
+      [["app", "status", "-h"], "status [--json]"],
+      [["app", "-h"], "用法：codexc app"],
       [["work", "-h"], "用法：codexc work"],
       [["work", "list", "--help"], "用法：codexc work list"],
       [["work", "add", "-h"], "用法：codexc work add"],
