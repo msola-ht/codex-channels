@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,7 +14,7 @@ afterEach(() => { for (const directory of temporaryDirectories.splice(0)) rmSync
 function hash(value: string | Buffer) { return createHash("sha256").update(value).digest("hex"); }
 
 function fixture() {
-  const directory = mkdtempSync(join(tmpdir(), "codexc-local-deploy-"));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "codexc-local-deploy-")));
   temporaryDirectories.push(directory);
   const source = join(directory, "source");
   const runner = join(directory, "runner");

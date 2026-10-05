@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -218,7 +219,7 @@ if (command === process.env.VERIFY_FAIL) process.exit(17);
   });
 
   it.skipIf(process.platform === "win32")("executes graph, compiled and implicit helper boundaries without unrelated suites", () => {
-    const root = mkdtempSync(join(tmpdir(), "commit-vitest-related-"));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "commit-vitest-related-")));
     try {
       for (const path of ["tests/support", "src/delivery", "dist/delivery"]) mkdirSync(join(root, path), { recursive: true });
       symlinkSync(resolve("node_modules"), join(root, "node_modules"), "dir");
@@ -236,7 +237,7 @@ if (command === process.env.VERIFY_FAIL) process.exit(17);
       const test = plan.checks.find((check: { name: string }) => check.name === "受影响测试");
       const result = spawnSync(test.command, test.args, { cwd: root, encoding: "utf8" });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stdout).toMatch(/Test Files\s+4 passed/u);
+      expect(stripVTControlCharacters(result.stdout)).toMatch(/Test Files\s+4 passed/u);
     } finally { rmSync(root, { recursive: true, force: true }); }
   }, 15_000);
 

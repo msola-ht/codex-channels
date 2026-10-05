@@ -37,7 +37,7 @@ it("separates model settings from general preferences and renders model submenus
     } finally {await server.close();}
   `;
   const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
+    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL",
   })) as Record<string, string> & {paths: string[]};
   expect(result.general).not.toContain("Sandbox");
   expect(result.permissions).toContain("Sandbox");
@@ -64,4 +64,4 @@ it("separates model settings from general preferences and renders model submenus
   for (const path of result.paths) expect(result.sidebar).toContain('href="' + path + '"');
   expect(result.sidebar).toContain('aria-expanded="true"');
   expect(result.sidebar).toContain('aria-current="page"');
-});
+}, 35_000);

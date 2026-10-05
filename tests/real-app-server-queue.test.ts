@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -28,7 +29,7 @@ import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } 
 
 describe.skipIf(process.platform === "win32")("real App Server Queue contract", () => {
   it("runs the native Queue capacity, paging, dispatch and restart contract", async () => {
-    const testRuntime = mkdtempSync(join(tmpdir(), "codex-queue-contract-"));
+    const testRuntime = realpathSync(mkdtempSync(join(tmpdir(), "codex-queue-contract-")));
     const codexHome = join(testRuntime, "codex-home");
     const workspace = join(testRuntime, "workspace");
     const socketPath = join(testRuntime, "codex-app-server.sock");
