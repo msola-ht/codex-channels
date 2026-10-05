@@ -18,7 +18,7 @@ export function createOpencodeGoQuotaWindowsProvider(options = {}) {
   return async (signal) => {
     const nowMs = options.nowMs?.() ?? Date.now();
     if (cached !== null && nowMs < cached.expiresAtMs) {
-      return cached.windows;
+      return cached.snapshot;
     }
     if (inflight === null) {
       inflight = (async () => {
@@ -31,20 +31,22 @@ export function createOpencodeGoQuotaWindowsProvider(options = {}) {
           );
           if (windows === null) {
             if (signal?.aborted) return null;
-            cached = { windows: null, expiresAtMs: nowMs + fallbackCacheMs };
+            cached = { snapshot: null, expiresAtMs: nowMs + fallbackCacheMs };
             return null;
           }
+          const observedAtMs = options.nowMs?.() ?? Date.now();
+          const snapshot = { windows, observedAtMs };
           const nextResetMs = Math.min(...windows.map((window) =>
             window.resetsAt === null ? Number.POSITIVE_INFINITY : window.resetsAt * 1_000));
           cached = {
-            windows,
-            expiresAtMs: Number.isFinite(nextResetMs) && nextResetMs > nowMs
+            snapshot,
+            expiresAtMs: Number.isFinite(nextResetMs) && nextResetMs > observedAtMs
               ? nextResetMs
-              : nowMs + fallbackCacheMs,
+              : observedAtMs + fallbackCacheMs,
           };
-          return windows;
+          return snapshot;
         } catch {
-          cached = { windows: null, expiresAtMs: nowMs + fallbackCacheMs };
+          cached = { snapshot: null, expiresAtMs: nowMs + fallbackCacheMs };
           return null;
         } finally {
           inflight = null;

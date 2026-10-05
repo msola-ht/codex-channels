@@ -37,6 +37,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 源码安装的目录、更新、代理和 Windows 处理见[`源码安装与更新`](docs/source-install.md)。
 本地开发源码执行 `npm run install:global` 时会补装缺失的配套 Codex CLI，随后运行 `codexc init`、`codexc setup`、`codexc service install`。已有 CLI 的版本同步使用 `codexc update`。
+Linux systemd 用户服务可通过 `codexc update --background --source <目录>` 部署本机源码，使用 `codexc update status` 查看结果；先全局安装包含此入口的新版本 CLI。流程与恢复说明见[本机源码后台部署](docs/source-install.md#本机源码后台部署)。
 
 ## 常用入口
 

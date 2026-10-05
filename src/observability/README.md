@@ -45,7 +45,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
 - `sqlite-quota-queries.ts`：封装周额度估算、最新额度与历史窗口归约；通过 Store 的同一连接和受跟踪迭代器读取，不创建连接或事务，不承担 Store 关闭及 Schema 生命周期。
 - `sqlite-request-metrics-queries.ts`：请求分页、错误统计、日/小时汇总、Thread/Turn 聚合、Relay 调用方与 Key 的批量使用摘要及同步游标读取；通过 Store 的读取与关闭检查端口执行，SQL 和行映射不介入写入、事务或数据库生命周期。内部 Thread ID 校验同时供 Store 写入使用。
   Thread 列表额外返回同筛选范围的 `totalTokens`、自身缓存与后代输入/缓存/输出分项，以及按请求去重的 `treeAggregate`，支持总计 Token 排序；缓存是输入子集，不重复累加，自身与后代分别判断缓存完整性。自身 `cacheUsage` 与后代 `subagentUsage.cacheUsage` 分别保留输入和缓存均已观测的缓存样本及缺失请求数，供部分采集时展示已知缓存；完整缓存合计仍在任意请求缺失时返回 null。WebUI 主会话查询允许只有后代匹配的根入选。普通 Thread 查询仍保留自身有匹配记录的行集合，自身聚合与 Turn 查询口径不变；不新增持久化汇总或 Schema 字段。
-- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v26 建库 SQL、存储列定义、版本错误和
+- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v27 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 持有初始化事务，不隐式升级旧库。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、
   逐请求上游 `User-Agent` 和额度快照写入独立 `request-metrics.sqlite3`。新采集请求不解析上游时间戳；
@@ -54,7 +54,8 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   普通响应样本，不合计或平均。Schema v16 曾增加可空 `first_content_ms`、`request_model`、`response_model`。
   Schema v17 增加可空 `traffic_label`、`traffic_session`、`traffic_interaction`，三字段全部为空或共同定位一次转储调用。
   Schema v18 引入可空 `total_duration_ms`，v20 统一为提交发送至首次模型终态或结束/失败的单调时钟耗时，支持明细排序与导出，不聚合为 Turn 耗时。
-  数据库使用严格 Schema v26、Unix `0600` / Windows 当前 SID 私有文件权限，
+  Schema v27 增加可空 `quota_observed_at_ms`，保存额度快照的本机采集时间；旧记录保持空值。
+  数据库使用严格 Schema v27、Unix `0600` / Windows 当前 SID 私有文件权限，
   v19 的可空 `request_service_tier` 独立保留出站请求层级。
   只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为
@@ -68,7 +69,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
   请求明细读取时直接从输入与缓存 Token 计算未缓存 Token 和缓存命中率，不保存派生列。
   请求首 Token 与总耗时均从提交发送计时；不计算 TPS，不把请求计时聚合为整轮耗时。
-  Schema v20 将旧 `first_content_ms` 替换为 `first_token_ms` 并统一发送起点；v20 之前的计时不迁移；当前支持的 v20/v21/v22/v23/v24/v25→v26 显式升级见下方存储边界。
+  Schema v20 将旧 `first_content_ms` 替换为 `first_token_ms` 并统一发送起点；v20 之前的计时不迁移；当前支持的 v20/v21/v22/v23/v24/v25/v26→v27 显式升级见下方存储边界。
   内部读取限制为每次
   最多 500 条；精确 Thread 查询把
   最近 Turn 的运行聚合和指标库保留范围内的 Thread 会话累计分开返回，由
@@ -90,7 +91,10 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   时间范围聚合覆盖指标库全部保留记录，可按全局、提供商或“提供商 + 模型”分组；支持 `today`、`yesterday`、`24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围，最多
   返回请求量最高的 20 组。OpenAI 请求还可保存统计代理归一化的周额度定点快照与账户套餐等级；
   同一重置周期内
-  从首个基线开始累计请求，只在后续快照正向增长时形成加权估算区间，重置或倒退会断开区间。
+  从首个基线开始累计请求，只在后续快照超过该周期已观测最高比例时形成加权估算区间；
+  同周期回退不降低基线，不同周期快照断开区间。估算仅使用闭合区间，周期请求总量另行累计。
+  快照估算、最新额度及额度历史优先按采集时间排序；缺失该字段的旧样本按入库时间近似排序，
+  不把入库时间写回为采集时间。请求明细与导出保留两种时间。
   WebSocket 上游握手失败、WS 内包装错误事件（如 429 usage_limit_reached）与 Gateway 层未发起
   上游请求的 Turn 级失败（如用量上限）也以 failed 记录落库：前者保留 HTTP 状态，后者无 Token
   失败记录还保存提供商、模型与受限长度的错误消息，供 WebUI 与导出展示详情。账户快照历史使用
@@ -124,11 +128,11 @@ WebUI 还通过同一只读 Store 的 `daily()` / `hourly()` 按系统本地日�
 查询服务 `trend()` 为今天、昨天和自定义单日返回补零的小时统计，其他范围返回日统计。
 热力图固定展示含今天的最近 90 天，趋势图跟随控制台汇总范围；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
-HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v26；v20/v21/v22/v23/v24/v25 使用显式 upgrade 保留数据升级，其他历史版本不隐式迁移。
+HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v27；v20/v21/v22/v23/v24/v25/v26 使用显式 upgrade 保留数据升级，其他历史版本不隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
 `warn` 输出，避免关闭调试后形成历史数据断档或隐藏采集故障。
 
-- `request-metrics-upgrade.ts`：显式 v20/v21/v22/v23/v24/v25→v26 升级预检、一致性备份、逐列保留与事务迁移；回滚先归档 v26，再恢复摘要验证的 v20/v21/v22/v23/v24/v25，复用数据库独占锁。对已确认精确结构的可选 `model_request_costs` 附加表原样保留并纳入历史数据摘要，不提供费用运行时功能。
+- `request-metrics-upgrade.ts`：显式 v20/v21/v22/v23/v24/v25/v26→v27 升级预检、一致性备份、逐列保留与事务迁移；回滚先归档 v27，再恢复摘要验证的 v20/v21/v22/v23/v24/v25/v26，复用数据库独占锁。对已确认精确结构的可选 `model_request_costs` 附加表原样保留并纳入历史数据摘要，不提供费用运行时功能。
 
 v21 增加真实 source/caller/key/代次/请求 UUID 与交付字段，v22 允许 Relay 关联 label=relay.chat 的完整转储定位，v23 增加 relay.responses，Thread/Turn 必须为空，
 唯一索引去重同一次调用。写入队列保留自有流量空间，Relay 至多占 256 个待写位置；IPC 接收确认只代表入队。

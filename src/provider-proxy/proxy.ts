@@ -47,7 +47,7 @@ import {
   weeklyQuotaFromHeaders,
   type MetricsState,
   type ProviderProxyMetrics,
-  type ProviderQuotaWindowSnapshot,
+  type ProviderQuotaWindowsSnapshot,
 } from "./response-metrics-observer.js";
 import { ModelTrafficDump } from "./traffic-dump.js";
 import type { TrafficCallTiming } from "./traffic-call-timing.js";
@@ -56,6 +56,7 @@ import { createTopLevelStringFieldScanner, scanTopLevelStringField } from "./tra
 export type {
   ProviderProxyMetrics,
   ProviderQuotaWindowSnapshot,
+  ProviderQuotaWindowsSnapshot,
   ProviderWeeklyQuotaSnapshot,
 } from "./response-metrics-observer.js";
 
@@ -104,7 +105,7 @@ export interface ProviderProxyOptions {
   quotaWindowsProvider?: (
     accountId?: string,
     signal?: AbortSignal,
-  ) => Promise<readonly ProviderQuotaWindowSnapshot[] | null>;
+  ) => Promise<ProviderQuotaWindowsSnapshot | null>;
   onMetrics?: (
     metrics: ProviderProxyMetrics,
     accountId?: string,
@@ -135,7 +136,7 @@ export class ProviderProxy {
     | ((
         accountId?: string,
         signal?: AbortSignal,
-      ) => Promise<readonly ProviderQuotaWindowSnapshot[] | null>)
+      ) => Promise<ProviderQuotaWindowsSnapshot | null>)
     | undefined;
   private readonly timeoutMs: number;
   private readonly onMetrics:
@@ -144,7 +145,7 @@ export class ProviderProxy {
   private readonly onError: ((error: Error) => void) | undefined;
   private readonly quotaWindowsByAccount = new Map<
     string,
-    readonly ProviderQuotaWindowSnapshot[] | null
+    ProviderQuotaWindowsSnapshot | null
   >();
   private readonly quotaRefreshByAccount = new Map<string, {
     controller: AbortController;
@@ -373,9 +374,11 @@ export class ProviderProxy {
       method: request.method,
       headers: upstreamHeaders,
     }, (upstreamResponse) => {
+      const receivedAtMs = Date.now();
       metrics.httpStatus = upstreamResponse.statusCode ?? null;
       metrics.responseFormat = httpResponseFormat(upstreamResponse.headers["content-type"]);
       metrics.weeklyQuota = weeklyQuotaFromHeaders(upstreamResponse.headers);
+      metrics.quotaObservedAtMs = metrics.weeklyQuota === null ? null : receivedAtMs;
       exchange?.responseHead(
         upstreamResponse.statusCode ?? null,
         upstreamResponse.headers,
@@ -706,7 +709,11 @@ export class ProviderProxy {
         const observed = inspectResponseEvent(text, "", currentMetrics.firstTokenMs === undefined);
         const { type, event: parsed } = observed;
         if (type === "codex.rate_limits") {
-          currentMetrics.weeklyQuota = weeklyQuotaFromEvent(parsed);
+          const weeklyQuota = weeklyQuotaFromEvent(parsed);
+          if (weeklyQuota !== null) {
+            currentMetrics.weeklyQuota = weeklyQuota;
+            currentMetrics.quotaObservedAtMs = receivedAtMs;
+          }
         }
         if (observeResponseEvent(currentMetrics, type, parsed, receivedAtMs, receivedAtMonotonicMs)) {
           activeMetrics = undefined;
@@ -801,12 +808,16 @@ export class ProviderProxy {
     metrics: MetricsState,
     accountId?: string,
   ): Promise<void> {
-    const quotaWindows = this.quotaWindowsByAccount.get(
+    const cachedQuota = this.quotaWindowsByAccount.get(
       quotaAccountKey(accountId),
-    ) ?? null;
+    );
+    const quotaWindows = cachedQuota?.windows ?? null;
+    const quotaObservedAtMs = metrics.weeklyQuota === null
+      ? quotaWindows !== null && quotaWindows.length > 0 ? cachedQuota?.observedAtMs ?? null : null
+      : quotaWindows !== null && quotaWindows.length > 0 ? null : metrics.quotaObservedAtMs ?? null;
     this.refreshQuotaWindows(accountId);
     try {
-      await this.onMetrics?.({ ...metrics, quotaWindows }, accountId);
+      await this.onMetrics?.({ ...metrics, quotaWindows, quotaObservedAtMs }, accountId);
     } catch (error) {
       this.onError?.(asError(error));
     }
@@ -819,8 +830,8 @@ export class ProviderProxy {
     const controller = new AbortController();
     const refresh = Promise.resolve()
       .then(() => this.quotaWindowsProvider!(accountId, controller.signal))
-      .then((windows) => {
-        if (!this.stopped) this.quotaWindowsByAccount.set(key, windows);
+      .then((snapshot) => {
+        if (!this.stopped) this.quotaWindowsByAccount.set(key, snapshot);
       })
       .catch((error) => {
         if (!controller.signal.aborted) this.onError?.(asError(error));

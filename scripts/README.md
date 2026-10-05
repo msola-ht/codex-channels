@@ -28,6 +28,11 @@
 - `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
 - `source-update.mjs` / `source-update.d.mts`：比较受管源码与官方 `main` 的提交，在同盘候选目录构建并只读检查当前配置、数据库升级条件和精确 Codex CLI 合同；CLI 不匹配时确认后准备候选并校验，通过后才安装。统一负责停止核心服务、切换源码与全局命令、调用目标版本数据库升级入口、恢复服务并等待就绪；停止前记录 Relay 运行状态，成功及失败恢复都只启动原本运行且仍启用的 Relay。失败保留阶段信息和必要的旧源码备份，数据库升级未完成时不启动服务。无新提交或 npm 安装时同步配套 CLI 并执行必要的数据库升级，不更新 Gateway 包；各更新路径在 CLI 合同通过后通过目标版本配置入口关闭用户层 daemon 自动启动，其他用户设置不变。
+- `background-update-options.mjs` / `background-update-options.d.mts`：纯解析公开更新参数和严格帮助路径，在读取配置前拒绝未知、重复、不完整及额外参数；保留无参数交互入口，仅接受显式本机源码后台提交和 UUID 任务状态查询。
+- `background-update.mjs` / `background-update.d.mts`：提交 Linux systemd 用户服务的本机源码部署任务，准备工作树快照及独立私有 runner；提供不初始化配置、不修改路径权限的只读状态查询。
+- `background-update-worker.mjs` / `background-update-worker.d.mts`：从持久任务目录执行预检、部署和恢复，记录执行阶段及最终结果；非交互 CLI 版本不匹配时在停服前失败。
+- `background-update-state.mjs` / `background-update-state.d.mts`：管理用户目录 `maintenance/updates/<UUID>/` 下的任务记录、日志和回执，定位最新任务；保留回执和恢复备份供人工核查。
+- `local-source-deployment.mjs` / `local-source-deployment.d.mts`：部署本机源码快照，预检通过后才进入停机窗口，刷新全局命令并调用目标版本数据库升级入口；恢复 App Server、Gateway 与原本运行的 Relay/WebUI，服务恢复以程序、CLI 和数据库版本相容证明为前提，不自动倒回用户数据。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，
@@ -36,7 +41,7 @@
   不匹配路径，并保留配置、数据库、凭据、日志和输出。
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
-- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装，提供稳定的数据库升级合同：`inspectDatabaseUpdates` 只读预检并返回 `required`，`applyDatabaseUpdates` 由更新器在停服后通过独立 Node 进程导入目标版本并调用。当前支持状态库 v5 → v6 与指标库 v20/v21/v22/v23/v24/v25 → v26；执行入口获取 Gateway 独占锁，创建私有备份、事务升级并校验目标结构，保持入口兼容，供旧更新器调用。不支持的起始 Schema 明确报错，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定。
+- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装，提供稳定的数据库升级合同：`inspectDatabaseUpdates` 只读预检并返回 `required`，`applyDatabaseUpdates` 由更新器在停服后通过独立 Node 进程导入目标版本并调用。当前支持状态库 v5 → v6 与指标库 v20/v21/v22/v23/v24/v25/v26 → v27；执行入口获取 Gateway 独占锁，创建私有备份、事务升级并校验目标结构，保持入口兼容，供旧更新器调用。不支持的起始 Schema 明确报错，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定。
 - `state-database.mjs`：提供状态库与计划任务库的只读版本/结构检查，以及供安装流程调用的 v5 → v6 显式升级；运行时不迁移。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
@@ -569,6 +574,6 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 - `webui-management-delivery-route.mjs`：渠道投递箱鉴权 SSE 变化通知、只读分页查询、按需限定内容预览及单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，在线操作通过投递私有 IPC 交给 Gateway 单写者，确认未发送命令且 Gateway 不可连接时才使用 Journal 维护模式独占锁，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览及只读批量摘要认证解密后仅返回显式展示字段，摘要批次消耗读取配额，批量操作在同一事务中复核全部修订。
 - `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
 
-`metrics-database.mjs` 的 `upgrade --from 25 --to 26` 默认只预检，`--apply` 才持锁备份迁移；
-`rollback --from 26 --to 25 --backup PATH --sha256 HASH --apply` 先归档新库再恢复验证过的备份。
+`metrics-database.mjs` 的 `upgrade --from 26 --to 27` 默认只预检，`--apply` 才持锁备份迁移；
+`rollback --from 27 --to 26 --backup PATH --sha256 HASH --apply` 先归档新库再恢复验证过的备份。
 两者不自动操作服务，回滚不恢复旧配置/凭据。查询与导出支持 `--source owned|relay`、`--caller ID`。

@@ -421,35 +421,32 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
-  it("estimates a weekly quota across small reset timestamp jitter", () => {
+  it("keeps the weekly quota high-water mark across reset jitter and backwards snapshots", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
       join(directory, "request-metrics.sqlite3"),
     );
     const resetsAt = Math.floor(Date.now() / 1_000) + 24 * 60 * 60;
-    store.record({
-      ...sample(),
-      provider: "openai",
-      weeklyQuota: {
-        limitId: "codex",
-        usedPercentMillionths: 8_000_000,
-        resetsAt: resetsAt + 2,
-        planType: "plus",
-      },
-    });
-    store.record({
-      ...sample(),
-      provider: "openai",
-      inputTokens: 900,
-      outputTokens: 100,
-      totalTokens: 1_000,
-      weeklyQuota: {
-        limitId: "codex",
-        usedPercentMillionths: 9_000_000,
-        resetsAt: resetsAt + 1,
-        planType: "plus",
-      },
-    });
+    for (const [usedPercentMillionths, resetOffset] of [
+      [8_000_000, 300],
+      [7_000_000, -300],
+      [8_000_000, 1],
+      [9_000_000, 0],
+    ] as const) {
+      store.record({
+        ...sample(),
+        provider: "openai",
+        inputTokens: 900,
+        outputTokens: 100,
+        totalTokens: 1_000,
+        weeklyQuota: {
+          limitId: "codex",
+          usedPercentMillionths,
+          resetsAt: resetsAt + resetOffset,
+          planType: "plus",
+        },
+      });
+    }
 
     expect(store.weeklyQuotaEstimate({
       provider: "openai",
@@ -459,13 +456,15 @@ describe("SqliteModelRequestMetricsStore", () => {
     })).toMatchObject({
       observedDeltaPercentMillionths: 1_000_000,
       intervalCount: 1,
-      requestCount: 1,
-      totalTokens: 1_000,
+      requestCount: 3,
+      totalTokens: 3_000,
+      periodRequestCount: 4,
+      periodTotalTokens: 4_000,
     });
     store.close();
   });
 
-  it("breaks a weekly estimate interval when the percentage moves backwards", () => {
+  it("does not count recovery to the weekly quota high-water mark as new usage", () => {
     const directory = temporaryDirectory();
     const store = new SqliteModelRequestMetricsStore(
       join(directory, "request-metrics.sqlite3"),
@@ -496,10 +495,295 @@ describe("SqliteModelRequestMetricsStore", () => {
       limitId: "codex",
       resetsAt,
       nowMs: Date.now() + 1,
-    })).toMatchObject({
+    })).toBeNull();
+    store.close();
+  });
+
+  it("keeps request tokens through weekly percentage regressions until a new high-water mark", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const now = Date.now();
+    const resetsAt = Math.floor(now / 1_000) + 24 * 60 * 60;
+    for (const [index, usedPercent] of [0, 1, 0, 1, 2].entries()) {
+      store.record({
+        ...sample(), provider: "openai", recordedAtMs: now + index,
+        inputTokens: (index + 1) * 100, outputTokens: (index + 1) * 10,
+        totalTokens: (index + 1) * 110,
+        weeklyQuota: { limitId: "codex", resetsAt, usedPercentMillionths: usedPercent * 1_000_000, planType: null },
+      });
+    }
+
+    expect(store.weeklyQuotaEstimate({ provider: "openai", limitId: "codex", resetsAt, nowMs: now + 100 })).toMatchObject({
+      intervalCount: 2,
+      observedDeltaPercentMillionths: 2_000_000,
+      latestUsedPercentMillionths: 2_000_000,
+      requestCount: 4,
+      inputTokens: 1_400,
+      outputTokens: 140,
+      totalTokens: 1_540,
+      periodRequestCount: 5,
+      periodInputTokens: 1_500,
+      periodOutputTokens: 150,
+      periodTotalTokens: 1_650,
+    });
+    store.close();
+  });
+
+  it.each([null, 1_000_000, 0])("excludes an unclosed weekly estimate tail with snapshot %s", (tailUsedPercentMillionths) => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const now = Date.now();
+    const resetsAt = Math.floor(now / 1_000) + 24 * 60 * 60;
+    for (const [index, usedPercentMillionths] of [0, 1_000_000, tailUsedPercentMillionths].entries()) {
+      store.record({
+        ...sample(), provider: "openai", recordedAtMs: now + index,
+        inputTokens: (index + 1) * 100, outputTokens: (index + 1) * 10,
+        totalTokens: (index + 1) * 110,
+        weeklyQuota: usedPercentMillionths === null ? null
+          : { limitId: "codex", resetsAt, usedPercentMillionths, planType: null },
+      });
+    }
+
+    expect(store.weeklyQuotaEstimate({ provider: "openai", limitId: "codex", resetsAt, nowMs: now + 100 })).toMatchObject({
+      intervalCount: 1,
       observedDeltaPercentMillionths: 1_000_000,
+      latestUsedPercentMillionths: tailUsedPercentMillionths ?? 1_000_000,
       requestCount: 1,
-      totalTokens: 1_000,
+      inputTokens: 200,
+      outputTokens: 20,
+      totalTokens: 220,
+      periodRequestCount: 3,
+      periodInputTokens: 600,
+      periodOutputTokens: 60,
+      periodTotalTokens: 660,
+    });
+    store.close();
+  });
+
+  it.each([301, -301, 7 * 24 * 60 * 60])("breaks sampling at another weekly reset %s without recounting previous usage", (resetOffset) => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const now = Date.now();
+    const resetsAt = Math.floor(now / 1_000) + 24 * 60 * 60;
+    const snapshots = [
+      [0, resetsAt],
+      [1_000_000, resetsAt],
+      [0, resetsAt],
+      [99_000_000, resetsAt + resetOffset],
+      [null, null],
+      [0, resetsAt],
+      [1_000_000, resetsAt],
+      [2_000_000, resetsAt],
+    ] as const;
+    for (const [index, [usedPercentMillionths, snapshotReset]] of snapshots.entries()) {
+      store.record({
+        ...sample(), provider: "openai", recordedAtMs: now + index,
+        inputTokens: (index + 1) * 100, outputTokens: 0, totalTokens: (index + 1) * 100,
+        weeklyQuota: usedPercentMillionths === null ? null
+          : { limitId: "codex", resetsAt: snapshotReset, usedPercentMillionths, planType: null },
+      });
+    }
+
+    expect(store.weeklyQuotaEstimate({ provider: "openai", limitId: "codex", resetsAt, nowMs: now + 100 })).toMatchObject({
+      intervalCount: 2,
+      observedDeltaPercentMillionths: 2_000_000,
+      requestCount: 3,
+      inputTokens: 1_700,
+      outputTokens: 0,
+      totalTokens: 1_700,
+      periodRequestCount: 8,
+      periodTotalTokens: 3_600,
+    });
+    store.close();
+  });
+
+  it("isolates weekly quota high-water marks and token samples by provider", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const now = Date.now();
+    const resetsAt = Math.floor(now / 1_000) + 24 * 60 * 60;
+    const snapshots = [
+      ["openai", 0, 0],
+      ["other-openai", 50_000_000, 0],
+      ["openai", 1_000_000, 0],
+      ["other-openai", 0, 7 * 24 * 60 * 60],
+      ["openai", 0, 0],
+      ["openai", 1_000_000, 0],
+      ["openai", 2_000_000, 0],
+    ] as const;
+    for (const [index, [provider, usedPercentMillionths, resetOffset]] of snapshots.entries()) {
+      store.record({
+        ...sample(), provider, recordedAtMs: now + index,
+        inputTokens: 100, outputTokens: 0, totalTokens: 100,
+        weeklyQuota: { limitId: "codex", resetsAt: resetsAt + resetOffset,
+          usedPercentMillionths, planType: null },
+      });
+    }
+
+    expect(store.weeklyQuotaEstimate({ provider: "openai", limitId: "codex", resetsAt, nowMs: now + 100 })).toMatchObject({
+      intervalCount: 2,
+      observedDeltaPercentMillionths: 2_000_000,
+      requestCount: 4,
+      totalTokens: 400,
+      periodRequestCount: 5,
+      periodTotalTokens: 500,
+    });
+    expect(store.weeklyQuotaEstimate({ provider: "other-openai", limitId: "codex", resetsAt, nowMs: now + 100 })).toBeNull();
+    store.close();
+  });
+
+  it("persists quota observation times independently from insertion times without filling historical nulls", () => {
+    const path = join(temporaryDirectory(), "metrics.sqlite3");
+    const store = new SqliteModelRequestMetricsStore(path);
+    const now = Date.now();
+    const resetsAt = Math.floor(now / 1_000) + 24 * 60 * 60;
+    const weeklyQuota = { limitId: "codex" as const, resetsAt, usedPercentMillionths: 0, planType: null };
+    store.record({ ...sample(), recordedAtMs: now, quotaObservedAtMs: now - 100, weeklyQuota });
+    store.record({ ...sample(), recordedAtMs: now + 1, quotaObservedAtMs: now + 100,
+      quotaWindows: [{ windowId: "weekly", resetsAt }] });
+    store.record({ ...sample(), recordedAtMs: now + 2, weeklyQuota });
+    store.record({ ...sample(), recordedAtMs: now + 3, quotaObservedAtMs: null, weeklyQuota });
+    store.record({ ...sample(), recordedAtMs: now + 4, quotaObservedAtMs: null });
+    store.close();
+
+    const reader = new SqliteModelRequestMetricsStore(path, 5_000, { readOnly: true });
+    expect(reader.requestRowsAfter(0, 10)).toMatchObject([
+      { recordedAtMs: now, quotaObservedAtMs: now - 100, weeklyQuota },
+      { recordedAtMs: now + 1, quotaObservedAtMs: now + 100, quotaWindows: [{ windowId: "weekly", resetsAt }] },
+      { recordedAtMs: now + 2, quotaObservedAtMs: null },
+      { recordedAtMs: now + 3, quotaObservedAtMs: null },
+      { recordedAtMs: now + 4, quotaObservedAtMs: null },
+    ]);
+    expect(reader.recent(5).map((row) => row.quotaObservedAtMs)).toEqual([null, null, null, now + 100, now - 100]);
+    reader.close();
+  });
+
+  it("rejects invalid quota observation times and observation times without a quota snapshot", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const weeklyQuota = { limitId: "codex" as const, resetsAt: 2_000_000_000, usedPercentMillionths: 0, planType: null };
+    for (const quotaObservedAtMs of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => store.record({ ...sample(), weeklyQuota, quotaObservedAtMs })).toThrow();
+    }
+    expect(() => store.record({ ...sample(), quotaObservedAtMs: 1 })).toThrow();
+    expect(() => store.record({ ...sample(), quotaObservedAtMs: 1, quotaWindows: [] })).toThrow();
+    expect(store.requestRowsAfter(0, 10)).toEqual([]);
+    store.close();
+  });
+
+  it.each([
+    [0, 1, 2],
+    [2, 0, 1],
+    [2, 1, 0],
+    [1, 2, 0],
+  ])("orders quota snapshots by observation time when insertion order is %s, %s, %s", (...insertionOrder) => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const now = Date.now();
+    const resetsAt = Math.floor(now / 1_000) + 24 * 60 * 60;
+    for (const [index, usedPercent] of insertionOrder.entries()) {
+      store.record({
+        ...sample(), provider: "openai", recordedAtMs: now + index * 1_000,
+        quotaObservedAtMs: now + usedPercent * 100,
+        inputTokens: (usedPercent + 1) * 100, outputTokens: 0, totalTokens: (usedPercent + 1) * 100,
+        weeklyQuota: { limitId: "codex", resetsAt, usedPercentMillionths: usedPercent * 1_000_000, planType: null },
+        quotaWindows: [{ windowId: "rolling", resetsAt, usedPercentMillionths: usedPercent * 1_000_000 }],
+      });
+    }
+
+    expect(store.weeklyQuotaEstimate({ provider: "openai", limitId: "codex", resetsAt, nowMs: now + 10_000 })).toMatchObject({
+      firstObservedAtMs: now,
+      lastObservedAtMs: now + 200,
+      latestUsedPercentMillionths: 2_000_000,
+      intervalCount: 2,
+      observedDeltaPercentMillionths: 2_000_000,
+      requestCount: 2,
+      totalTokens: 500,
+      periodRequestCount: 3,
+      periodTotalTokens: 600,
+    });
+    expect(store.latestWeeklyQuota("openai", now + 10_000)).toMatchObject({
+      usedPercentMillionths: 2_000_000,
+      observedAtMs: now + 200,
+    });
+    const history = store.quotaHistory({ startAtMs: now, endAtMs: now + 10_000 });
+    expect(history).toHaveLength(2);
+    expect(history).toEqual(expect.arrayContaining(["codex", "rolling"].map((windowId) => expect.objectContaining({
+      windowId,
+      firstObservedAtMs: now,
+      lastObservedAtMs: now + 200,
+      latestUsedPercentMillionths: 2_000_000,
+      snapshotCount: 3,
+      totalTokens: 600,
+    }))));
+    store.close();
+  });
+
+  it("orders historical null observation times by insertion timestamp without filling the stored field", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const now = Date.now();
+    const resetsAt = Math.floor(now / 1_000) + 24 * 60 * 60;
+    for (const usedPercent of [2, 0, 1]) {
+      store.record({
+        ...sample(), provider: "openai", recordedAtMs: now + usedPercent * 100,
+        quotaObservedAtMs: null, inputTokens: (usedPercent + 1) * 100, outputTokens: 0,
+        totalTokens: (usedPercent + 1) * 100,
+        weeklyQuota: { limitId: "codex", resetsAt, usedPercentMillionths: usedPercent * 1_000_000, planType: null },
+      });
+    }
+
+    expect(store.weeklyQuotaEstimate({ provider: "openai", limitId: "codex", resetsAt, nowMs: now + 1_000 })).toMatchObject({
+      firstObservedAtMs: now, lastObservedAtMs: now + 200,
+      observedDeltaPercentMillionths: 2_000_000, intervalCount: 2, totalTokens: 500,
+    });
+    expect(store.latestWeeklyQuota("openai", now + 1_000)).toMatchObject({ usedPercentMillionths: 2_000_000, observedAtMs: now + 200 });
+    expect(store.quotaHistory({ startAtMs: now, endAtMs: now + 1_000 })[0]).toMatchObject({
+      firstObservedAtMs: now, lastObservedAtMs: now + 200, latestUsedPercentMillionths: 2_000_000,
+    });
+    expect(store.requestRowsAfter(0, 10).map((row) => row.quotaObservedAtMs)).toEqual([null, null, null]);
+    store.close();
+  });
+
+  it("uses record ids to order quota snapshots sharing an observation timestamp", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const now = Date.now();
+    const resetsAt = Math.floor(now / 1_000) + 24 * 60 * 60;
+    for (const usedPercent of [0, 1, 2]) {
+      store.record({
+        ...sample(), provider: "openai", recordedAtMs: now + (2 - usedPercent) * 100,
+        quotaObservedAtMs: now, inputTokens: 100, outputTokens: 0, totalTokens: 100,
+        weeklyQuota: { limitId: "codex", resetsAt, usedPercentMillionths: usedPercent * 1_000_000, planType: null },
+      });
+    }
+
+    expect(store.weeklyQuotaEstimate({ provider: "openai", limitId: "codex", resetsAt, nowMs: now + 1_000 })).toMatchObject({
+      firstObservedAtMs: now, lastObservedAtMs: now,
+      observedDeltaPercentMillionths: 2_000_000, intervalCount: 2, totalTokens: 200,
+    });
+    expect(store.latestWeeklyQuota("openai", now + 1_000)).toMatchObject({ usedPercentMillionths: 2_000_000, observedAtMs: now });
+    expect(store.quotaHistory({ startAtMs: now, endAtMs: now + 1_000 })[0]).toMatchObject({
+      firstObservedAtMs: now, lastObservedAtMs: now, latestUsedPercentMillionths: 2_000_000,
+    });
+    store.close();
+  });
+
+  it("keeps snapshots observed before the weekly period out of estimates while retaining period totals", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const now = Date.now();
+    const resetsAt = Math.floor(now / 1_000) + 24 * 60 * 60;
+    const periodStartAtMs = resetsAt * 1_000 - 7 * 24 * 60 * 60 * 1_000;
+    for (const usedPercent of [0, 1, 2]) {
+      store.record({
+        ...sample(), provider: "openai", recordedAtMs: now + usedPercent,
+        quotaObservedAtMs: usedPercent === 0 ? periodStartAtMs - 1 : now + usedPercent,
+        inputTokens: (usedPercent + 1) * 100, outputTokens: 0, totalTokens: (usedPercent + 1) * 100,
+        weeklyQuota: { limitId: "codex", resetsAt, usedPercentMillionths: usedPercent * 1_000_000, planType: null },
+      });
+    }
+
+    expect(store.weeklyQuotaEstimate({ provider: "openai", limitId: "codex", resetsAt, nowMs: now + 1_000 })).toMatchObject({
+      firstObservedAtMs: now + 1,
+      lastObservedAtMs: now + 2,
+      observedDeltaPercentMillionths: 1_000_000,
+      intervalCount: 1,
+      requestCount: 1,
+      totalTokens: 300,
+      periodRequestCount: 3,
+      periodTotalTokens: 600,
     });
     store.close();
   });

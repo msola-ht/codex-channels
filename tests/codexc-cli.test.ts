@@ -59,14 +59,14 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
   it("loads help and version without command implementations or optional SDKs", () => {
     const loader = `export async function resolve(specifier, context, nextResolve) {
       if (["@clack/prompts", "ws", "undici", "grammy", "@larksuiteoapi/node-sdk"].includes(specifier)
-        || /\\/(?:service-command|desktop-app-command|timezone-command|traffic-upgrade|model-relay-command|cli-menu)\\.mjs$/.test(specifier)) {
+        || /\\/(?:service-command|desktop-app-command|timezone-command|traffic-upgrade|model-relay-command|cli-menu|background-update)\\.mjs$/.test(specifier)) {
         throw new Error("Unexpected command dependency: " + specifier);
       }
       return nextResolve(specifier, context);
     }`;
     const preload = `import { register } from "node:module";
       register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))}, import.meta.url);`;
-    for (const args of [["--help"], ["version"], ["service", "start", "--help"], ["desktop-app", "--help"], ["timezone", "--help"], ["traffic", "upgrade", "--help"]]) {
+    for (const args of [["--help"], ["version"], ["service", "start", "--help"], ["desktop-app", "--help"], ["timezone", "--help"], ["traffic", "upgrade", "--help"], ["update", "--help"], ["update", "status", "--help"]]) {
       const output = execFileSync(process.execPath, [
         "--import", "data:text/javascript," + encodeURIComponent(preload), cli, ...args,
       ], { encoding: "utf8", timeout: 10_000 });
@@ -141,12 +141,13 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     const configPath = join(root, "config.toml");
     writeFileSync(configPath, "[broken");
     const env = { ...process.env, CODEX_CONNECT_HOME: root, CODEX_CONNECT_CONFIG_FILE: configPath, CODEX_HOME: join(root, "codex") };
-    const validPaths = [["security", "repair"], ...["add", "list", "switch", "remove"].map((action) => ["primary-provider", action])];
+    const validPaths = [["security", "repair"], ["update"], ["update", "status"], ...["add", "list", "switch", "remove"].map((action) => ["primary-provider", action])];
     const invalidPaths = [
       ["desktop-app", "nonsense"], ["opencode-go", "nonsense", "add"],
       ["deepseek", "nonsense"], ["ccg", "nonsense"],
       ["primary-provider", "remove", "some-id"],
       ["opencode-go", "account", "add", "some-id"],
+      ["update", "--background"], ["update", "status", "some-id"],
     ];
     const cases = ["-h", "--help"].flatMap((flag) => [
       ...validPaths.map((path) => ({ args: [...path, flag], status: 0 })),
@@ -195,6 +196,8 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["opencode-go", "account", "default", "--help"], "用法：codexc opencode-go account default"],
       [["opencode-go", "account", "stop", "-h"], "用法：codexc opencode-go account stop"],
       [["update", "--help"], "用法：codexc update"],
+      [["update", "status", "-h"], "用法：codexc update status"],
+      [["update", "status", "--help"], "用法：codexc update status"],
       [["uninstall", "--help"], "用法：codexc uninstall"],
       [["metrics", "-h"], "用法：codexc metrics"],
       [["cleanup", "-h"], "用法：codexc cleanup"],

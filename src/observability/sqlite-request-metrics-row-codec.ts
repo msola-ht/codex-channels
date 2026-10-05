@@ -50,6 +50,7 @@ export interface MetricRow {
   request_started_at_ms: number;
   response_completed_at_ms: number;
   recorded_at_ms: number;
+  quota_observed_at_ms: number | null;
   weekly_quota_limit_id: "codex" | null;
   weekly_used_percent_millionths: number | null;
   weekly_resets_at: number | null;
@@ -202,6 +203,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
           planType: row.weekly_quota_plan_type,
         },
     quotaWindows: parseQuotaWindows(row.quota_windows),
+    quotaObservedAtMs: row.quota_observed_at_ms,
     recordedAtMs: row.recorded_at_ms,
     uncachedInputTokens: row.input_tokens !== null
       && row.cached_input_tokens !== null

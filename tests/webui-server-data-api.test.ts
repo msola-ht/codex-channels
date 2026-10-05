@@ -912,6 +912,40 @@ describe("webui server data API", () => {
     expect(body.weeklyQuota.resetsAt).toBeGreaterThan(1_000_000_000_000);
   });
 
+  it("keeps quota estimates aligned across snapshot backtracking and an unclosed tail", async () => {
+    const fixture = createFixture();
+    const resetsAt = Math.floor(Date.now() / 1_000) + 24 * 60 * 60;
+    for (const [usedPercent, inputTokens] of [[0, 100], [1, 100], [0, 100], [1, 100], [2, 100], [2, 9_000]] as const) {
+      recordSample(fixture.databasePath, {
+        ...metricSample(),
+        provider: "openai",
+        inputTokens,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        totalTokens: inputTokens,
+        weeklyQuota: { limitId: "codex", planType: "plus", usedPercentMillionths: usedPercent * 1_000_000, resetsAt },
+      });
+    }
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/overview?range=24h`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      global: { requestCount: 6, inputTokens: 9_500, outputTokens: 0 },
+      weeklyQuota: {
+        usedPercent: 2,
+        remainingPercent: 98,
+        estimate: {
+          observedDeltaPercent: 2,
+          intervalCount: 2,
+          requestCount: 4,
+          inputTokensPerPercent: 200,
+          outputTokensPerPercent: 0,
+          totalTokensPerPercent: 200,
+        },
+      },
+    });
+  });
+
   it("lists threads and returns run and turns details", async () => {
     const fixture = createFixture();
     recordSample(fixture.databasePath, {

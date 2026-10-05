@@ -61,7 +61,8 @@
   config 编辑映射；DeepSeek、OpenCode Go、CCG 与自定义 Provider 共用一次 HTTP 重试、零次流重连的
   故障边界，避免 Codex 默认两层重试相乘；OpenAI 官方 Provider 保持 Codex 原生策略。
 - `opencode-go-quota-windows.mjs` / `opencode-go-quota-windows.d.mts`：为 OpenCode Go 统计代理
-  提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照；按最早 `resetsAt` 失效前缓存，失败时短时
+  提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照，以 `{ windows, observedAtMs }` 返回成功采样
+  的窗口及本地接收时刻；缓存命中保持原时刻，真实请求成功后才更新。按最早 `resetsAt` 失效前缓存，失败时短时
   退避后重试，缺失或已过期的重置时间同样短时退避，避免每个模型请求重复查询；接受代理生命周期
   取消信号，快照随请求指标写入指标库供账户用量按周期归属本地 Token。
 - `model-provider-runtime.mjs` / `model-provider-runtime.d.mts`：保留受控模型 Provider 运行时的稳定

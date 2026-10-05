@@ -279,6 +279,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       || sample.responseUsageAmount.length > 128 || !/^[0-9]+(?:\.[0-9]+)?$/u.test(sample.responseUsageAmount))) {
       throw new Error("单次响应用量数值无效");
     }
+    if (sample.quotaObservedAtMs != null && (
+      !Number.isSafeInteger(sample.quotaObservedAtMs) || sample.quotaObservedAtMs < 0
+      || (sample.weeklyQuota == null && !sample.quotaWindows?.length)
+    )) throw new Error("额度快照采集时间无效");
     const recordedAtMs = sample.recordedAtMs ?? Date.now();
     this.insert!.run(
       sample.provider,
@@ -332,7 +336,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       sample.upstreamErrorCode ?? null,
       sample.upstreamErrorType ?? null,
       sample.upstreamHttpStatus ?? null,
-
+      sample.quotaObservedAtMs ?? null,
     );
     return recordedAtMs;
   }

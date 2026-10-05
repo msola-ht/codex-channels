@@ -22,7 +22,8 @@ export const metricStorageV23Columns = [...metricStorageV20Columns,
   "source", "caller_id", "key_id", "credential_generation", "relay_request_id", "delivery_status",
 ] as const;
 export const metricStorageV24Columns = [...metricStorageV23Columns, "response_usage_amount"] as const;
-export const metricStorageColumns = [...metricStorageV24Columns, "upstream_provider", "upstream_attempt_count", "model_attempt_count", "finish_reason", "error_stage", "upstream_error_code", "upstream_error_type", "upstream_http_status"] as const;
+export const metricStorageV25Columns = [...metricStorageV24Columns, "upstream_provider", "upstream_attempt_count", "model_attempt_count", "finish_reason", "error_stage", "upstream_error_code", "upstream_error_type", "upstream_http_status"] as const;
+export const metricStorageColumns = [...metricStorageV25Columns, "quota_observed_at_ms"] as const;
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
 
 export const modelRequestMetricsV20TableSql = `
@@ -129,8 +130,12 @@ export const requestDiagnosticColumnDefinitions = [
   "upstream_error_type TEXT CHECK (upstream_error_type IS NULL OR (typeof(upstream_error_type) = 'text' AND length(upstream_error_type) BETWEEN 1 AND 256 AND upstream_error_type NOT GLOB '*[^a-zA-Z0-9_.:/-]*'))",
   "upstream_http_status INTEGER CHECK (upstream_http_status IS NULL OR (typeof(upstream_http_status) = 'integer' AND upstream_http_status BETWEEN 400 AND 599))",
 ] as const;
-export const modelRequestMetricsTableSql = modelRequestMetricsV24TableSql.replace(
+export const modelRequestMetricsV25TableSql = modelRequestMetricsV24TableSql.replace(
   "    CHECK (", `    ${requestDiagnosticColumnDefinitions.join(",\n    ")},\n    CHECK (`,
+);
+export const quotaObservedAtColumn = "quota_observed_at_ms INTEGER CHECK (quota_observed_at_ms IS NULL OR (typeof(quota_observed_at_ms) = 'integer' AND quota_observed_at_ms BETWEEN 0 AND 9007199254740991))";
+export const modelRequestMetricsTableSql = modelRequestMetricsV25TableSql.replace(
+  "    CHECK (", `    ${quotaObservedAtColumn},\n    CHECK (`,
 );
 export const relayMetricIndexesSql = `
   CREATE UNIQUE INDEX model_request_metrics_relay_request
@@ -229,7 +234,7 @@ export class ModelRequestMetricsSchemaError extends Error {
     const detail = options?.cause === undefined
       ? `版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
       : `Schema ${actualVersion} 结构不完整。`;
-    const remedy = [20, 21, 22, 23, 24, 25].includes(actualVersion) ? `codexc metrics upgrade --from ${actualVersion} --to 26 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
+    const remedy = [20, 21, 22, 23, 24, 25, 26].includes(actualVersion) ? `codexc metrics upgrade --from ${actualVersion} --to 27 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
     super(
       `模型请求指标数据库${detail}请运行 ${remedy}`,
       options,
@@ -306,6 +311,9 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
     }
     if (typeof tableSql !== "string" || !normalize(tableSql).includes(normalize(relayIdentityCheck))) {
       throw new Error("Relay 指标身份约束缺失");
+    }
+    if (!normalize(tableSql).includes(normalize(quotaObservedAtColumn))) {
+      throw new Error("额度快照时间约束缺失");
     }
     const relayIndex = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'model_request_metrics_relay_request'").get()?.sql;
     if (typeof relayIndex !== "string" || normalize(relayIndex) !== normalize(relayMetricIndexesSql.split(";")[0]!)) {

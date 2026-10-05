@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 
 import {
@@ -12,12 +12,60 @@ import {
 const openServers: Array<{ close(): Promise<void> }> = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   while (openServers.length > 0) {
     const server = openServers.pop()!;
     await server.close();
   }
 });
 describe("ProviderProxy WebSocket metrics", () => {
+  it("pairs the last valid quota event with its receive time and preserves it through invalid events", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    upstreamWebSocket.on("connection", socket => {
+      let stage = 0;
+      socket.on("message", () => {
+        stage += 1;
+        clock.mockReturnValue(stage * 1_000);
+        if (stage <= 3) {
+          socket.send(JSON.stringify({ type: "codex.rate_limits", rate_limits: { secondary: {
+            used_percent: stage === 3 ? 200 : stage * 10, window_minutes: 10080, reset_at: 1786233600,
+          } } }));
+        } else {
+          socket.send(JSON.stringify({ type: "response.completed", response: { status: "completed" } }));
+        }
+      });
+    });
+    await new Promise<void>(resolve => upstreamServer.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: async () => {
+      for (const client of upstreamWebSocket.clients) client.terminate();
+      await new Promise<void>(resolve => upstreamWebSocket.close(() => resolve()));
+      await new Promise<void>(resolve => upstreamServer.close(() => resolve()));
+    } });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (upstreamServer.address() as AddressInfo).port,
+      upstreamProtocol: "http", onMetrics: metric => { metrics.push(metric); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    await new Promise<void>((resolve, reject) => {
+      client.on("open", () => client.send(JSON.stringify({ type: "response.create", model: "model",
+        client_metadata: { "x-codex-turn-metadata": JSON.stringify({ thread_id: "thread-quota", turn_id: "turn-quota" }) } })));
+      client.on("message", data => {
+        const event = JSON.parse(data.toString()) as { type: string };
+        if (event.type === "response.completed") { client.close(); resolve(); }
+        else client.send(JSON.stringify({ type: "continue" }));
+      });
+      client.on("error", reject);
+    });
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({ weeklyQuota: { usedPercentMillionths: 20_000_000 },
+      quotaObservedAtMs: 2_000, responseCompletedAtMs: 4_000 });
+  });
+
   it("classifies remote compaction v2 WebSocket traffic and strips private metadata", async () => {
     const upstreamServer = createServer();
     const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });

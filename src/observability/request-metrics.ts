@@ -56,6 +56,8 @@ export interface ModelRequestMetricSample {
   traffic?: { label: string; session: string; interaction: number } | null;
   /** 记录入库时刻（毫秒）；缺省为写入时的 Date.now()，测试可显式指定以保证窗口确定性。 */
   recordedAtMs?: number;
+  /** Local quota snapshot observation time; null for historical samples without this information. */
+  quotaObservedAtMs?: number | null;
   weeklyQuota: {
     limitId: "codex";
     usedPercentMillionths: number;
@@ -131,6 +133,7 @@ export interface StoredQuotaPeriod {
 export interface StoredModelRequestMetric extends ModelRequestMetricSample {
   id: number;
   recordedAtMs: number;
+  quotaObservedAtMs: number | null;
   uncachedInputTokens: number | null;
   cacheHitRate: number | null;
 }

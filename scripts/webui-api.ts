@@ -317,6 +317,8 @@ export interface RequestRecord {
   reasoningOutputTokens: number | null
   totalTokens: number | null
   cacheHitRate: number | null
+  /** Local quota snapshot observation time; null when not collected. */
+  quotaObservedAtMs: number | null
   recordedAtMs: number
 }
 

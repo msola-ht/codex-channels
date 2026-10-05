@@ -68,6 +68,7 @@ describe("ProviderMetricsComposition", () => {
         ...(provider === "openai" ? { upstreamTtftMs: 569 } : {}),
         responseUsageAmount: "0.12345678901234567890",
         reasoningEffort: null,
+        quotaObservedAtMs: null,
       });
     });
     expect(timings).toEqual([{
@@ -123,6 +124,7 @@ describe("ProviderMetricsComposition", () => {
         provider: "openai",
         ...unassociated,
         reasoningEffort: null,
+        quotaObservedAtMs: null,
       });
     });
     expect(onModelTiming).not.toHaveBeenCalled();

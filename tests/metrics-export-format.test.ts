@@ -40,7 +40,9 @@ describe("metrics export display helpers", () => {
   it("exports request latency and echoed model independently of turn timing", () => {
     const result = {
       generatedAt: "2026-09-19T00:00:00Z", range: { name: "all" }, weeklyQuota: null,
-      records: [{ recordedAtMs: 0, weeklyQuota: null, firstTokenMs: 12.5, totalDurationMs: 1234.5, upstreamTtftMs: 672,
+      records: [{ recordedAtMs: 100, quotaObservedAtMs: 0,
+        weeklyQuota: { limitId: "codex", usedPercentMillionths: 1_000_000, resetsAt: 2_000_000_000, planType: "plus" },
+        firstTokenMs: 12.5, totalDurationMs: 1234.5, upstreamTtftMs: 672,
         responseUsageAmount: "0.12345678901234567890", upstreamProvider: "deepseek", finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit", upstreamErrorType: "rate_limit_error",
         requestModel: "requested", responseModel: "echoed", operation: "response",
         requestServiceTier: "priority", serviceTier: "default",
@@ -64,7 +66,7 @@ describe("metrics export display helpers", () => {
     const [headingLine, valueLine] = rendered.csv.split("\n");
     const headings = headingLine!.split(",");
     const values = valueLine!.split(",");
-    for (const [field, value] of Object.entries({ upstreamProvider: "deepseek", finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit", upstreamErrorType: "rate_limit_error", responseUsageAmount: "0.12345678901234567890", firstTokenMs: "12.5", totalDurationMs: "1234.5", upstreamTtftMs: "672", requestModel: "requested", responseModel: "echoed",
+    for (const [field, value] of Object.entries({ quotaObservedAtMs: "0", weeklyQuotaObservedAtMs: "0", upstreamProvider: "deepseek", finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit", upstreamErrorType: "rate_limit_error", responseUsageAmount: "0.12345678901234567890", firstTokenMs: "12.5", totalDurationMs: "1234.5", upstreamTtftMs: "672", requestModel: "requested", responseModel: "echoed",
       requestServiceTier: "priority", serviceTier: "default",
       trafficLabel: "openai", trafficSession: "session-2", trafficInteraction: "23" })) {
       expect(values[headings.indexOf(field)]).toBe(value);

@@ -401,7 +401,8 @@ Schema v24 新增可空 `response_usage_amount`，由 Provider Proxy 从 HTTP JS
 验证使用 HTTP/WS metrics、指标 IPC、request metrics store、relay upgrade、metrics export、thread summary、completion timing 与 lifecycle presentation 测试。
 Schema v25 增加请求级上游诊断摘要，普通 Provider Proxy 与 Relay 通过独立采集和受校验 IPC 写入同一指标库；WebUI 请求列表及详情、JSON/CSV 导出直接读取，不依赖调用转储。
 Schema v26 增加官方轮次耗时事实及历史同步标记，完成卡与 WebUI 共用查询；会话累计值按轮次求和，不重复存储。
-运行时只接受当前 Schema v26；v20/v21/v22/v23/v24/v25 通过带一致性备份的显式 upgrade 保留数据升级，不支持的旧版本失败关闭，新安装直接建库。流程见[源码安装与更新](source-install.md)。
+Schema v27 增加可空的额度快照接收时间，历史记录保持 NULL，不替换请求开始、完成或入库时间。
+运行时只接受当前 Schema v27；v20/v21/v22/v23/v24/v25/v26 通过带一致性备份的显式 upgrade 保留数据升级，不支持的旧版本失败关闭，新安装直接建库。流程见[源码安装与更新](source-install.md)。
 
 更新器关闭原生 daemon 自动启动也复用用户层 `config/read` 与版本化 `config/batchWrite`；
 入口为 `scripts/codex-user-config.mjs`，由 `source-update.mjs` 在候选切换和无需升级两条路径调用，

@@ -311,7 +311,7 @@ function flattenRecordedWeeklyQuota(record) {
     weeklyQuotaUsedPercent: usedPercent,
     weeklyQuotaRemainingPercent: Math.max(0, 100 - usedPercent),
     weeklyQuotaResetsAt: quota.resetsAt,
-    weeklyQuotaObservedAtMs: record.recordedAtMs,
+    weeklyQuotaObservedAtMs: record.quotaObservedAtMs ?? record.recordedAtMs,
   };
 }
 
@@ -578,6 +578,7 @@ function csvColumns() {
     ["recordedAt", (record) => record.recordedAtMs === undefined
       ? ""
       : new Date(record.recordedAtMs).toISOString()],
+    ["quotaObservedAtMs", (record) => record.quotaObservedAtMs],
     ["provider", (record) => record.provider],
     ["model", (record) => record.model],
     ["serviceTier", (record) => record.serviceTier],

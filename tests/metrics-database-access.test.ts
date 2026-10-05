@@ -66,7 +66,7 @@ describe("model request metrics database access", () => {
     }
   });
 
-  it.each([19, 20, 21, 99])("preserves incompatible schema %s and gives non-destructive CLI guidance", (version) => {
+  it.each([19, 20, 21, 26, 99])("preserves incompatible schema %s and gives non-destructive CLI guidance", (version) => {
     const { environment, databasePath } = fixture();
     createMetricsDatabase(databasePath, version, 1);
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
@@ -75,7 +75,7 @@ describe("model request metrics database access", () => {
     `], { cwd: process.cwd(), encoding: "utf8", env: environment });
     expect(result.status).toBe(0);
     expect(result.stdout).not.toContain("metrics reset");
-    expect(result.stdout).toContain(version === 20 || version === 21 || version === 22 || version === 23 || version === 24 || version === 25 ? `--from ${version} --to 26` : "勿删除数据库");
+    expect(result.stdout).toContain([20, 21, 22, 23, 24, 25, 26].includes(version) ? `--from ${version} --to 27` : "勿删除数据库");
     const database = new DatabaseSync(databasePath, { readOnly: true });
     expect(database.prepare("SELECT value FROM schema_metadata WHERE name='schema_version'").get()?.value).toBe(version);
     expect(database.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get()?.count).toBe(1); database.close();
