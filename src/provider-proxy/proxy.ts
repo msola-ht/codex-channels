@@ -765,7 +765,23 @@ export class ProviderProxy {
       const closedAtMonotonicMs = performance.now();
       noteFailureType("websocket_closed", closedAtMonotonicMs);
       exchange?.webSocketClose("upstream", code, reason, closedAtMonotonicMs);
-      closePeer(client, code, reason);
+      if (forwarding && client.readyState === WebSocket.OPEN && !this.stopped) {
+        // The final frame may still be waiting for its metrics acknowledgement.
+        // Keep upstream close ordered after every frame already accepted for delivery.
+        const timer = setTimeout(() => {
+          this.onError?.(new Error("模型 WebSocket 收尾交付超时"));
+          client.terminate();
+        }, this.timeoutMs);
+        const cancelDrain = (): void => clearTimeout(timer);
+        client.once("close", cancelDrain);
+        void forwarding.then(() => {
+          clearTimeout(timer);
+          client.removeListener("close", cancelDrain);
+          closePeer(client, code, reason);
+        });
+      } else {
+        closePeer(client, code, reason);
+      }
       if (!activeMetrics) return;
       const reasonType = websocketCloseErrorType(reason);
       if (reasonType) {

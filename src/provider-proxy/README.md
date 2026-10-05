@@ -41,8 +41,10 @@
   请求指标投递；`quotaObservedAtMs` 保存响应头或有效额度事件到达的本地时刻，后续终态或失败
   不刷新该时间，无效事件不覆盖已有快照；缺失快照或历史未采集时为 null，不从请求时间推断。
   不保存完整 Header、事件正文或其他额度桶。
-  普通增量不经过指标确认链；终态指标仍在对应完成事件转发前完成投递确认。从
-  `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联，并只识别精确的
+  普通增量不经过指标确认链；终态指标仍在对应完成事件转发前完成投递确认。
+  上游收到 WebSocket 关闭后，先交付已排队的终态再关闭客户端；收尾等待沿用上游超时预算，
+  超时记录错误并释放连接，客户端断开或代理停止立即取消等待。
+  从 `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联，并只识别精确的
   `request_kind=compaction` 操作标记和不计指标的 `request_kind=prewarm`；其他值保持普通响应语义。
   SSE 单行使用 1,048,576 字符上限，非流式 JSON Responses 使用 1 MiB 临时上限解析相同元数据，
   正文和响应 ID 不进入指标；HTTP 请求正文不截取 `reasoning.effort`，普通 Thread 由组合层按

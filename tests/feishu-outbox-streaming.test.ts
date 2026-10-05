@@ -1,6 +1,8 @@
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OutputEvent } from "../src/conversation-core/index.js";
+import type { ConversationDeliveryQueue } from "../src/surfaces/conversation-delivery-queue.js";
+import { FeishuTextStreams } from "../src/surfaces/feishu/text-streams.js";
 import {
   FeishuMessageError,
   FeishuOutbox,
@@ -28,6 +30,184 @@ afterEach(() => {
 
 
 describe("Feishu outbox streaming lifecycle", () => {
+  it("waits for every completion operation when a rejected enqueue already settled", () => {
+    vi.useFakeTimers();
+    let acceptedSettlement: (() => void) | undefined;
+    const enqueue = vi.fn<ConversationDeliveryQueue["enqueue"]>((_chat, _run, _critical, options) => {
+      if (enqueue.mock.calls.length === 1) {
+        options?.settled?.();
+        return false;
+      }
+      acceptedSettlement = options?.settled;
+      return true;
+    });
+    const streams = new FeishuTextStreams({ ...cardMethods, sendText: async () => {}, sendPost: async () => {} },
+      { enqueue }, { get: () => undefined }, pino({ level: "silent" }), () => false,
+      async () => {}, async () => 0);
+    streams.acceptStreamDelta(delta("first", "first-item") as Extract<OutputEvent, { type: "text.delta" }>);
+    streams.acceptStreamDelta(delta("second", "second-item") as Extract<OutputEvent, { type: "text.delta" }>);
+    const settled = vi.fn();
+
+    expect(streams.finishStreamsForTurn(target.conversationId, "thread-1", "turn-1", "footer", settled)).toBe(true);
+    expect(settled).not.toHaveBeenCalled();
+    expect(acceptedSettlement).toBeDefined();
+    acceptedSettlement!();
+    acceptedSettlement!();
+    expect(settled).toHaveBeenCalledOnce();
+    streams.clear();
+  });
+
+  it("delivers completion independently after a durable final rollover fails", async () => {
+    vi.useFakeTimers();
+    const footers: string[] = [];
+    const finish = vi.fn(async () => {
+      throw new FeishuMessageError("send-timeout", "fixture");
+    });
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      sendMarkdownCard: async (_id, body) => { footers.push(body); },
+      finishStreamingCard: finish,
+    }, pino({ level: "silent" }));
+    try {
+      outbox.handle(delta("partial"));
+      await vi.advanceTimersByTimeAsync(300);
+      await expect(outbox.deliver(completed({}, "partial" + "x".repeat(5_001), "item-1"),
+        new AbortController().signal, async () => {})).rejects.toThrow();
+
+      await outbox.deliver(turnCompleted(), new AbortController().signal, async () => {});
+
+      expect(finish).toHaveBeenCalledOnce();
+      expect(footers).toEqual([turnCompletedMarkdown]);
+    } finally {
+      await outbox.close();
+    }
+  });
+
+  it.each(["active", "finished"] as const)("releases reply targets after %s stream completion", async (state) => {
+    vi.useFakeTimers();
+    const sent = vi.fn(async () => "sent-message");
+    const replied = vi.fn(async () => "reply-message");
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      sendMarkdownCard: sent,
+      replyMarkdownCard: replied,
+    }, pino({ level: "silent" }));
+    try {
+      outbox.prepareTurnReplyTarget(target.conversationId, "input-message");
+      outbox.handle({ type: "turn.started", target, threadId: "thread-1", turnId: "turn-1" });
+      outbox.handle(delta("partial"));
+      await vi.advanceTimersByTimeAsync(300);
+      expect(replied).toHaveBeenCalledWith("input-message", expect.any(String), expect.any(AbortSignal));
+      outbox.handle(completed({}, "partial FINAL", "item-1"));
+      if (state === "finished") await vi.advanceTimersByTimeAsync(0);
+      outbox.handle(turnCompleted());
+      await vi.advanceTimersByTimeAsync(0);
+      sent.mockClear();
+      replied.mockClear();
+
+      // An explicitly replayed result for a settled Turn has no live input reply target.
+      await outbox.deliver(completed({}, "replayed result", "replayed-item"),
+        new AbortController().signal, async () => {});
+
+      expect(replied).not.toHaveBeenCalled();
+      expect(sent).toHaveBeenCalledWith(target.conversationId, "replayed result", expect.any(AbortSignal));
+    } finally {
+      await outbox.close();
+    }
+  });
+
+  it("does not replay a durable final body cancelled while queued when delivering completion", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const finish = vi.fn(async () => {});
+    const footers: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      updateStreamingCard: async () => { await blocked; },
+      finishStreamingCard: finish,
+      sendMarkdownCard: async (_id, body) => { footers.push(body); },
+    }, pino({ level: "silent" }));
+    try {
+      outbox.handle(delta("partial"));
+      await vi.advanceTimersByTimeAsync(300);
+      outbox.handle(delta(" updated"));
+      await vi.advanceTimersByTimeAsync(300);
+      const controller = new AbortController();
+      const body = outbox.deliver(completed({}, "partial updated FINAL", "item-1"),
+        controller.signal, async () => {});
+      const rejected = expect(body).rejects.toThrow();
+      controller.abort();
+      await rejected;
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await outbox.deliver(turnCompleted(), new AbortController().signal, async () => {});
+
+      expect(finish).not.toHaveBeenCalled();
+      expect(footers).toEqual([turnCompletedMarkdown]);
+    } finally {
+      release();
+      await outbox.close();
+    }
+  });
+
+  it.each(["failed", "cancelled"] as const)("releases reply targets after a %s streaming footer", async (outcome) => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const sent = vi.fn(async () => "sent-message");
+    const replied = vi.fn(async () => "reply-message");
+    const footerStarted = vi.fn();
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      sendMarkdownCard: sent,
+      replyMarkdownCard: replied,
+      finishStreamingCard: async (_id, _sequence, _body, footer) => {
+        if (footer === undefined) return;
+        footerStarted();
+        if (outcome === "failed") throw new FeishuMessageError("send-timeout", "fixture");
+        await blocked;
+      },
+    }, pino({ level: "silent" }));
+    try {
+      outbox.prepareTurnReplyTarget(target.conversationId, "input-message");
+      outbox.handle({ type: "turn.started", target, threadId: "thread-1", turnId: "turn-1" });
+      outbox.handle(delta("partial"));
+      await vi.advanceTimersByTimeAsync(300);
+      await outbox.deliver(completed({}, "partial FINAL", "item-1"),
+        new AbortController().signal, async () => {});
+      const controller = new AbortController();
+      const completion = outbox.deliver(turnCompleted(), controller.signal, async () => {});
+      const rejected = expect(completion).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(footerStarted).toHaveBeenCalledOnce();
+      if (outcome === "cancelled") controller.abort();
+      await rejected;
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      sent.mockClear();
+      replied.mockClear();
+
+      await outbox.deliver(completed({}, "replayed result", "replayed-item"),
+        new AbortController().signal, async () => {});
+
+      expect(replied).not.toHaveBeenCalled();
+      expect(sent).toHaveBeenCalledWith(target.conversationId, "replayed result", expect.any(AbortSignal));
+    } finally {
+      release();
+      await outbox.close();
+    }
+  });
+
   it("keeps deltas received while a content update is pending", async () => {
     vi.useFakeTimers();
     let release!: () => void;

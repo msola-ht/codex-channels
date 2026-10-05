@@ -884,20 +884,40 @@ export class SessionRouter {
         ...this.workspacePermissions(workspace),
       },
     );
-    this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier);
-    this.namesByThread.set(forked.thread.id, forked.thread.name);
-    this.contextCompactionItemIdsByThread.set(
-      forked.thread.id,
-      forked.contextCompactionItemIds,
-    );
-    await this.detachUnlocked(target);
     const binding = {
       target,
       workspaceId: workspace.id,
       threadId: forked.thread.id,
       sessionId: forked.thread.sessionId,
     };
-    this.bindings.bind(binding);
+    let previousUnsubscribed = false;
+    const assertCurrent = (): void => {
+      if (!this.sameBinding(current, this.bindings.get(target))) {
+        throw new UserFacingError("thread.takeover.changed", "等待期间会话绑定已变化，请重新选择");
+      }
+    };
+    try {
+      assertCurrent();
+      await this.codex.unsubscribeThread(current.threadId);
+      previousUnsubscribed = true;
+      assertCurrent();
+      this.bindings.switchForeground(binding, false);
+    } catch (error) {
+      let failure = error;
+      if (previousUnsubscribed && this.sameBinding(current, this.bindings.get(target))) {
+        try {
+          await this.resumeInWorkspace(await this.codex.readThread(current.threadId), workspace, {}, false,
+            () => this.sameBinding(current, this.bindings.get(target)));
+        } catch (restoreError) {
+          failure = new AggregateError([error, restoreError], "分叉绑定切换失败，且原订阅恢复失败", { cause: error });
+        }
+      }
+      await this.cleanupFailedResume(forked.thread.id, failure);
+    }
+    this.contextCompactionItemIdsByThread.delete(current.threadId);
+    this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier);
+    this.namesByThread.set(forked.thread.id, forked.thread.name);
+    this.contextCompactionItemIdsByThread.set(forked.thread.id, forked.contextCompactionItemIds);
     this.clearForceNew(target, Date.now());
     this.notifyBindingsChanged();
     return binding;

@@ -271,7 +271,7 @@ describe("GatewayApplication startup cleanup", () => {
       bindings: { conversations: () => [target], actors: () => ["actor"] },
       workspaces: new WorkspaceRegistry([{ id: "main", name: "Main", cwd: directory,
         sandbox: "read-only", approvalPolicy: "never" }], "main"),
-      core: Reflect.get(application, "core"), output: { subscribe: () => undefined },
+      core: Reflect.get(application, "core"), output: { subscribe: () => undefined, observe: () => undefined },
       logger: pino({ level: "silent" }), isSurfaceEnabled: () => true,
       acceptsExecution: () => true,
       creationContext: () => { throw new Error("unexpected creation"); }, presentConfirmation: () => undefined,

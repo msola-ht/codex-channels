@@ -343,7 +343,7 @@ export class ConversationService implements
   private readonly extensionQueries: ConversationExtensionQueryService;
   private readonly accountMetrics: ConversationAccountMetricsService;
   private readonly lunaReserve: LunaReserveService | undefined;
-  private readonly pendingBackgroundReleases = new Set<string>();
+  private readonly pendingBackgroundReleases = new Map<string, boolean>();
   private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
   private idleReleaseEnabled = true;
   private readonly sessionQueries: ConversationSessionQueryService;
@@ -1554,9 +1554,12 @@ export class ConversationService implements
     threadId: string,
     options: { dispatchQueued?: boolean } = {},
   ): Promise<boolean> {
+    // Retries must keep the latest completion's dispatch policy: interruption
+    // preserves Queue entries even when subagent settlement delays release.
+    this.pendingBackgroundReleases.set(threadId, options.dispatchQueued !== false);
     const current = this.backgroundReleaseAttempts.get(threadId);
     if (current) return current;
-    const attempt = this.performBackgroundRelease(threadId, options);
+    const attempt = this.performBackgroundRelease(threadId);
     this.backgroundReleaseAttempts.set(threadId, attempt);
     try {
       return await attempt;
@@ -1569,17 +1572,15 @@ export class ConversationService implements
 
   private async performBackgroundRelease(
     threadId: string,
-    options: { dispatchQueued?: boolean },
   ): Promise<boolean> {
     if (!this.router.isBackgroundThread(threadId)) {
       this.pendingBackgroundReleases.delete(threadId);
       return false;
     }
-    this.pendingBackgroundReleases.add(threadId);
     if (this.hasPendingSubagentRuns?.(threadId)) {
       return false;
     }
-    if (options.dispatchQueued !== false) {
+    if (this.pendingBackgroundReleases.get(threadId) !== false) {
       const queueState = await this.dispatchNativeQueueBeforeRelease(threadId);
       if (queueState !== "empty" && queueState !== "unavailable") {
         return false;
@@ -1609,10 +1610,11 @@ export class ConversationService implements
    * the App Server notification reader itself.
    */
   retryPendingBackgroundRelease(threadId: string): Promise<boolean> {
-    if (!this.pendingBackgroundReleases.has(threadId)) {
+    const dispatchQueued = this.pendingBackgroundReleases.get(threadId);
+    if (dispatchQueued === undefined) {
       return Promise.resolve(false);
     }
-    return this.releaseBackgroundIfComplete(threadId);
+    return this.releaseBackgroundIfComplete(threadId, { dispatchQueued });
   }
 
   private async dispatchNativeQueueBeforeRelease(

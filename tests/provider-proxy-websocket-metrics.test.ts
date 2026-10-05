@@ -554,7 +554,14 @@ describe("ProviderProxy WebSocket metrics", () => {
     });
   });
 
-  it("emits one completed metric when a WebSocket closes during delivery", async () => {
+  it.each([
+    { status: "completed", ending: "delivered" },
+    { status: "failed", ending: "delivered" },
+    { status: "incomplete", ending: "delivered" },
+    { status: "completed", ending: "client disconnect" },
+    { status: "completed", ending: "proxy stop" },
+    { status: "completed", ending: "delivery timeout" },
+  ])("settles $status once with $ending while upstream close waits for metrics", async ({ status, ending }) => {
     const upstreamServer = createServer();
     const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
     let resolveUpstreamClosed: () => void = () => undefined;
@@ -565,8 +572,8 @@ describe("ProviderProxy WebSocket metrics", () => {
       socket.on("close", resolveUpstreamClosed);
       socket.on("message", () => {
         socket.send(JSON.stringify({
-          type: "response.completed",
-          response: { model: "gpt-5.6-sol", status: "completed" },
+          type: `response.${status}`,
+          response: { model: "fixture-model", status },
         }), () => socket.close());
       });
     });
@@ -582,6 +589,7 @@ describe("ProviderProxy WebSocket metrics", () => {
       },
     });
     const metrics: ProviderProxyMetrics[] = [];
+    const errors: Error[] = [];
     const releases: Array<() => void> = [];
     let resolveFirstMetric: () => void = () => undefined;
     const firstMetric = new Promise<void>((resolve) => {
@@ -591,6 +599,8 @@ describe("ProviderProxy WebSocket metrics", () => {
       upstreamHost: "127.0.0.1",
       upstreamPort: upstreamAddress.port,
       upstreamProtocol: "http",
+      timeoutMs: 1000,
+      onError: error => errors.push(error),
       onMetrics: (metric) => {
         metrics.push(metric);
         resolveFirstMetric();
@@ -600,6 +610,9 @@ describe("ProviderProxy WebSocket metrics", () => {
     await proxy.start();
     openServers.push(proxy);
     const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    const events: string[] = [];
+    client.on("message", data => events.push((JSON.parse(data.toString()) as { type: string }).type));
+    const closed = new Promise<void>(resolve => client.once("close", () => { events.push("close"); resolve(); }));
     client.on("open", () => {
       client.send(JSON.stringify({
         type: "response.create",
@@ -615,13 +628,19 @@ describe("ProviderProxy WebSocket metrics", () => {
     await firstMetric;
     await upstreamClosed;
     await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(client.readyState).toBe(WebSocket.OPEN);
+    if (ending === "client disconnect") client.close();
+    if (ending === "proxy stop") await proxy.close();
+    if (ending !== "delivered") await closed;
     for (const release of releases) release();
+    await closed;
 
     expect(metrics).toEqual([expect.objectContaining({
-      status: "completed",
-      model: "gpt-5.6-sol",
+      status,
+      model: "fixture-model",
     })]);
-    client.terminate();
+    expect(events).toEqual(ending === "delivered" ? [`response.${status}`, "close"] : ["close"]);
+    expect(errors.map(error => error.message)).toEqual(ending === "delivery timeout" ? ["模型 WebSocket 收尾交付超时"] : []);
   });
 
   it("keeps the request model when a WebSocket closes before completion", async () => {

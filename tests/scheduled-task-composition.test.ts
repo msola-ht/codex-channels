@@ -33,7 +33,7 @@ describe("ScheduledTaskComposition", () => {
       } as unknown as SqliteBindingStore,
       workspaces: {} as WorkspaceRegistry,
       core: {} as ConversationCore,
-      output: { subscribe } as unknown as EventBus<OutputEvent>,
+      output: { subscribe, observe: vi.fn() } as unknown as EventBus<OutputEvent>,
       logger: pino({ level: "silent" }),
       isSurfaceEnabled: () => true,
       acceptsExecution: () => true,

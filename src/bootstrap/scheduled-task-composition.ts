@@ -96,6 +96,17 @@ export class ScheduledTaskComposition {
       {
         validateRun: (task, signal) => executor.validateRun(task, signal),
         logger: options.logger,
+        onRecovered: (run, target) => {
+          const status = run.state === "completed" ? "已完成"
+            : run.state === "interrupted" ? "已中断" : "失败";
+          options.output.publish({
+            type: "warning",
+            target,
+            threadId: run.threadId!,
+            background: true,
+            message: `计划任务在 Gateway 离线期间已结束，恢复确认：${status}。运行 ID：${run.runId}。Thread：${run.threadId}。可通过 /schedule runs ${run.taskId} 查看运行记录。`,
+          }, true);
+        },
       },
     );
     coordinatorRef.current = coordinator;
@@ -109,6 +120,7 @@ export class ScheduledTaskComposition {
     options.output.subscribe("scheduled-task-run-coordinator", (event) => {
       this.coordinator.handleOutput(event);
     });
+    options.output.observe((event) => this.coordinator.observeOutput(event));
     this.service = new ScheduledTaskApplicationService(this.store, {
       isActorAuthorized: (target, actorId) =>
         options.bindings.conversations().some((candidate) =>

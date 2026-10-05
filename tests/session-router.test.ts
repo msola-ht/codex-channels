@@ -859,6 +859,80 @@ describe("SessionRouter", () => {
     expect(unsubscribed).toEqual([]);
   });
 
+  it.each([false, true])("cleans the Fork subscription when original unsubscribe fails; cleanup failure=%s", async (cleanupFails) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    const unsubscribeThread = vi.fn(async (id: string) => {
+      if (id === "original" || cleanupFails) throw new Error(`unsubscribe failed: ${id}`);
+    });
+    const router = new SessionRouter(threadPort({
+      forkThread: async () => session(thread("forked", { type: "idle" })),
+      unsubscribeThread,
+    }), store, registry);
+
+    await expect(router.fork(target)).rejects.toThrow(cleanupFails ? "新订阅清理失败" : "unsubscribe failed: original");
+    expect(unsubscribeThread.mock.calls.map(([id]) => id)).toEqual(["original", "forked"]);
+    expect(store.get(target)?.threadId).toBe("original");
+    expect(store.getByThread("forked")).toBeUndefined();
+  });
+
+  it.each([false, true])("restores the original subscription after Fork binding fails; restore failure=%s", async (restoreFails) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    vi.spyOn(store, "switchForeground").mockImplementationOnce(() => { throw new Error("binding failed"); });
+    const resumeThread = vi.fn(async () => {
+      if (restoreFails) throw new Error("restore failed");
+      return session(thread("original", { type: "idle" }));
+    });
+    const unsubscribeThread = vi.fn<(id: string) => Promise<void>>(async () => undefined);
+    const router = new SessionRouter(threadPort({
+      forkThread: async () => session(thread("forked", { type: "idle" })),
+      resumeThread, unsubscribeThread,
+    }), store, registry);
+
+    await expect(router.fork(target)).rejects.toThrow(restoreFails ? "原订阅恢复失败" : "binding failed");
+    expect(resumeThread).toHaveBeenCalledExactlyOnceWith("original", "/workspace", {});
+    expect(unsubscribeThread.mock.calls.map(([id]) => id)).toEqual(["original", "forked"]);
+    expect(store.get(target)?.threadId).toBe("original");
+    expect(router.modelSettingsForThread("forked")).toBeUndefined();
+  });
+
+  it("does not recreate a revoked binding after Fork returns", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    const unsubscribeThread = vi.fn(async () => undefined);
+    const router = new SessionRouter(threadPort({
+      forkThread: async () => {
+        router.forgetThread("original");
+        return session(thread("forked", { type: "idle" }));
+      },
+      unsubscribeThread,
+    }), store, registry);
+
+    await expect(router.fork(target)).rejects.toMatchObject({ code: "thread.takeover.changed" });
+    expect(store.get(target)).toBeUndefined();
+    expect(unsubscribeThread).toHaveBeenCalledExactlyOnceWith("forked");
+  });
+
+  it("cleans both subscriptions if ownership is revoked during Fork compensation", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    vi.spyOn(store, "switchForeground").mockImplementationOnce(() => { throw new Error("binding failed"); });
+    const unsubscribeThread = vi.fn<(id: string) => Promise<void>>(async () => undefined);
+    const router = new SessionRouter(threadPort({
+      forkThread: async () => session(thread("forked", { type: "idle" })),
+      resumeThread: async () => {
+        router.forgetThread("original");
+        return session(thread("original", { type: "idle" }));
+      },
+      unsubscribeThread,
+    }), store, registry);
+
+    await expect(router.fork(target)).rejects.toThrow("原订阅恢复失败");
+    expect(store.get(target)).toBeUndefined();
+    expect(unsubscribeThread.mock.calls.map(([id]) => id)).toEqual(["original", "original", "forked"]);
+  });
+
   it("transfers an idle binding without unsubscribing the selected Thread", async () => {
     const destination = {
       surface: "feishu" as const,

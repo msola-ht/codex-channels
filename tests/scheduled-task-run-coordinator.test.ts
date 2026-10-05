@@ -113,7 +113,10 @@ function turn(id: string, status: ThreadTurnSummary["status"]): ThreadTurnSummar
   };
 }
 
-function setup(history: ThreadHistoryPort, options: { readonly markRunning?: boolean } = {}) {
+function setup(history: ThreadHistoryPort, options: {
+  readonly markRunning?: boolean;
+  readonly onRecovered?: ConstructorParameters<typeof ScheduledTaskRunCoordinator>[3]["onRecovered"];
+} = {}) {
   const directory = mkdtempSync(join(tmpdir(), "codexc-scheduled-coordinator-"));
   directories.push(directory);
   secureTestDirectory(directory);
@@ -149,10 +152,12 @@ function setup(history: ThreadHistoryPort, options: { readonly markRunning?: boo
   }
   return {
     store,
+    bindings,
     router,
     task,
     coordinator: new ScheduledTaskRunCoordinator(store, router, history, {
       validateRun: async () => undefined,
+      ...(options.onRecovered ? { onRecovered: options.onRecovered } : {}),
     }),
   };
 }
@@ -249,18 +254,98 @@ describe("ScheduledTaskRunCoordinator", () => {
     store.close();
   });
 
-  it("reconciles a running Run from terminal Turn history and releases its background binding", async () => {
+  it.each(["completed", "failed", "interrupted"] as const)("reports recovered %s once before releasing its background binding", async (status) => {
     const history: ThreadHistoryPort = {
-      listThreadTurns: async () => ({ turns: [turn("turn-1", "completed")], nextCursor: null }),
+      listThreadTurns: async () => ({ turns: [turn("turn-1", status)], nextCursor: null }),
       revertThread: async () => ({ thread: thread("thread-1") }),
     };
-    const { store, router, coordinator } = setup(history);
+    const onRecovered = vi.fn(() => {
+      expect(router.isBackgroundThread("thread-1")).toBe(true);
+    });
+    const { store, router, coordinator } = setup(history, { onRecovered });
     coordinator.initialize();
 
     await coordinator.recoverRunning();
 
-    expect(store.listRuns("task-1")[0]?.state).toBe("completed");
+    expect(store.listRuns("task-1")[0]?.state).toBe(status);
+    expect(onRecovered).toHaveBeenCalledWith(expect.objectContaining({ state: status, threadId: "thread-1" }), target);
     expect(router.isBackgroundThread("thread-1")).toBe(false);
+    await coordinator.recoverRunning();
+    expect(onRecovered).toHaveBeenCalledTimes(1);
+    store.close();
+  });
+
+  it("does not duplicate a live completion that arrives during the recovery history read", async () => {
+    let resolveHistory!: (value: Awaited<ReturnType<ThreadHistoryPort["listThreadTurns"]>>) => void;
+    const history: ThreadHistoryPort = {
+      listThreadTurns: () => new Promise((resolve) => { resolveHistory = resolve; }),
+      revertThread: async () => ({ thread: thread("thread-1") }),
+    };
+    const onRecovered = vi.fn();
+    const { store, coordinator } = setup(history, { onRecovered });
+    coordinator.initialize();
+    const recovering = coordinator.recoverRunning();
+    await vi.waitFor(() => expect(resolveHistory).toBeTypeOf("function"));
+    coordinator.handleCompletion("thread-1", "turn-1", "completed");
+    resolveHistory({ turns: [turn("turn-1", "completed")], nextCursor: null });
+    await recovering;
+    expect(onRecovered).not.toHaveBeenCalled();
+    expect(store.listRuns("task-1")[0]?.state).toBe("completed");
+    store.close();
+  });
+
+  it("does not publish recovery when live completion is still queued on the output bus", async () => {
+    let resolveHistory!: (value: Awaited<ReturnType<ThreadHistoryPort["listThreadTurns"]>>) => void;
+    const history: ThreadHistoryPort = {
+      listThreadTurns: () => new Promise((resolve) => { resolveHistory = resolve; }),
+      revertThread: async () => ({ thread: thread("thread-1") }),
+    };
+    const onRecovered = vi.fn();
+    const { store, coordinator } = setup(history, { onRecovered });
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    let unblock!: () => void;
+    const blocked = new Promise<void>((resolve) => { unblock = resolve; });
+    output.observe((event) => coordinator.observeOutput(event));
+    output.subscribe("scheduled-task-run-coordinator", async (event) => {
+      await blocked;
+      coordinator.handleOutput(event);
+    });
+    coordinator.initialize();
+    try {
+      const recovering = coordinator.recoverRunning();
+      await vi.waitFor(() => expect(resolveHistory).toBeTypeOf("function"));
+      output.publish({ type: "turn.completed", target, threadId: "thread-1", turnId: "turn-1", status: "completed" }, true);
+      resolveHistory({ turns: [turn("turn-1", "completed")], nextCursor: null });
+      await recovering;
+      expect(onRecovered).not.toHaveBeenCalled();
+      expect(store.listRuns("task-1")[0]?.state).toBe("completed");
+    } finally {
+      unblock();
+      await output.close();
+      store.close();
+    }
+  });
+
+  it("does not notify an old target or release a transferred background binding after history returns", async () => {
+    let resolveHistory!: (value: Awaited<ReturnType<ThreadHistoryPort["listThreadTurns"]>>) => void;
+    const history: ThreadHistoryPort = {
+      listThreadTurns: () => new Promise((resolve) => { resolveHistory = resolve; }),
+      revertThread: async () => ({ thread: thread("thread-1") }),
+    };
+    const onRecovered = vi.fn();
+    const { store, bindings, router, coordinator } = setup(history, { onRecovered });
+    coordinator.initialize();
+    const recovering = coordinator.recoverRunning();
+    await vi.waitFor(() => expect(resolveHistory).toBeTypeOf("function"));
+    const nextTarget = { ...target, conversationId: "new-owner" };
+    bindings.removeThread("thread-1");
+    bindings.bindBackground({ target: nextTarget, workspaceId: "main", threadId: "thread-1", sessionId: "thread-1" });
+    resolveHistory({ turns: [turn("turn-1", "completed")], nextCursor: null });
+    await recovering;
+    expect(onRecovered).not.toHaveBeenCalled();
+    expect(router.targetForThread("thread-1")).toEqual(nextTarget);
+    expect(router.isBackgroundThread("thread-1")).toBe(true);
+    expect(store.listRuns("task-1")[0]?.state).toBe("completed");
     store.close();
   });
 

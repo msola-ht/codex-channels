@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { pino } from "pino";
 
 import {
@@ -22,6 +22,7 @@ import type { ConversationTarget } from "../src/conversation-core/index.js";
 const temporaryDirectories: string[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -81,6 +82,60 @@ function spool(
 }
 
 describe("channel image spool", () => {
+  it("bounds retained archive failures and resumes pending sends after storage repair", async () => {
+    vi.useFakeTimers();
+    const dir = fixture();
+    for (let index = 0; index < 129; index++) {
+      writeEntry(dir.pending, `entry-${String(index).padStart(3, "0")}`);
+    }
+    const sendImage = vi.fn(async (): Promise<void> => {
+      if (existsSync(dir.failed)) rmSync(dir.failed, { recursive: true });
+      throw new Error("unconfirmed send");
+    });
+    const { instance } = spool(dir.root, { sendImage });
+    try {
+      await instance.start();
+      expect(sendImage).toHaveBeenCalledTimes(128);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sendImage).toHaveBeenCalledTimes(128);
+      mkdirSync(dir.failed);
+      sendImage.mockResolvedValue(undefined);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sendImage).toHaveBeenCalledTimes(129);
+      expect(readdirSync(dir.pending)).toEqual([]);
+    } finally {
+      await instance.stop();
+    }
+  });
+
+  it("backs off incomplete failure archives without resending and resumes archival after repair", async () => {
+    vi.useFakeTimers();
+    const dir = fixture();
+    writeEntry(dir.pending, "entry-1");
+    writeEntry(dir.pending, "entry-2");
+    const blockedErrorFile = join(dir.failed, "entry-1.error.txt");
+    mkdirSync(blockedErrorFile, { recursive: true });
+    const sendImage = vi.fn(async (_target: ConversationTarget, imagePath: string) => {
+      if (imagePath.endsWith("entry-1.png")) throw new Error("unconfirmed send");
+    });
+    const { instance } = spool(dir.root, { sendImage });
+    try {
+      await instance.start();
+      expect(sendImage).toHaveBeenCalledTimes(2);
+      expect(existsSync(join(dir.pending, "entry-1.json"))).toBe(true);
+      expect(existsSync(join(dir.done, "entry-2.json"))).toBe(true);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sendImage).toHaveBeenCalledTimes(2);
+      rmSync(blockedErrorFile, { recursive: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(sendImage).toHaveBeenCalledTimes(2);
+      expect(existsSync(join(dir.failed, "entry-1.json"))).toBe(true);
+      expect(readdirSync(dir.pending)).toEqual([]);
+    } finally {
+      await instance.stop();
+    }
+  });
+
   it("sends a pending entry to the bound conversation and archives it", async () => {
     const dir = fixture();
     const imagePath = writeEntry(dir.pending, "entry-1");

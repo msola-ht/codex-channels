@@ -406,7 +406,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
       );
       if (
         completion !== null
-        && this.textStreams.finishStreamsForTurn(event.target.conversationId, event.threadId, event.turnId, completion)
+        && this.textStreams.finishStreamsForTurn(
+          event.target.conversationId, event.threadId, event.turnId, completion,
+          () => this.replyTargets.delete(event.target.conversationId, turnKey(event.threadId, event.turnId)),
+        )
       ) {
         return;
       }

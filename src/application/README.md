@@ -140,7 +140,7 @@ Queue 由 App Server 持久化并按 Thread 限制为 100 条；Application 默�
 历史、活动 Turn 和完整 Queue，并在并发变化时失败关闭；Queue 按真实 0.148 合同保留原顺序且不会因 Revert 自动启动。成功的
 `thread.reverted` 会清除 Core 的产物、计划、目标、上下文压缩、用量与计时等派生展示缓存；不持久化
 Turn/Item 历史，也不承诺恢复工作区文件。
-后台 Thread 完成释放前通过一次原生 `thread/queue/start` 协调自动派发竞态，再读取权威状态；Gateway 不保存或重放下一 Turn 正文；仍有待结算子代理时保留订阅，
+后台 Thread 正常或失败完成释放前通过一次原生 `thread/queue/start` 协调自动派发竞态，再读取权威状态；中断完成只查询并保留 Queue，延后释放的重试继续沿用该限制；Gateway 不保存或重放下一 Turn 正文；仍有待结算子代理时保留订阅，
 最后一个子代理终态完成后重试此前挂起的释放。
 Gateway 计划任务通过 `ScheduledTaskApplicationService` 暴露创建预览、一次性确认、列表、运行记录、
 重命名、暂停、恢复、立即运行、uncertain 重试和删除预览；每次操作精确绑定 Surface Actor 与

@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
-  it.each([false, true])("settles retained final and completion together after disconnect (unknown=%s)", async (unknown) => {
+  it.each([false, true])("settles completion independently of a retained final after disconnect (unknown=%s)", async (unknown) => {
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => { release = resolve; });
     const sent: string[] = [];
@@ -53,9 +53,9 @@ describe("Feishu outbox", () => {
       const outcomes = Promise.allSettled([body, completion]);
       outbox.observe({ target, type: "connection.lost", threadId: "thread-1", message: "lost" });
       release();
-      expect((await outcomes).map((value) => value.status)).toEqual(unknown ? ["rejected", "rejected"] : ["fulfilled", "fulfilled"]);
+      expect((await outcomes).map((value) => value.status)).toEqual(unknown ? ["rejected", "fulfilled"] : ["fulfilled", "fulfilled"]);
       expect(sent.filter((value) => value.includes("FULL_RESULT"))).toHaveLength(1);
-      expect(sent.filter((value) => value.includes("本次运行"))).toHaveLength(unknown ? 0 : 1);
+      expect(sent.filter((value) => value.includes("本次运行"))).toHaveLength(1);
     } finally { release(); await outbox.close(); }
   });
 

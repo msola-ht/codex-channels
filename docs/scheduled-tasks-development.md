@@ -168,6 +168,8 @@ occurrence claim -> missed | skipped_overlap | skipped_capacity | blocked | disp
 Provider 恢复后台绑定和订阅，再读取权威 Thread 与分页 Turn 状态：活动 Turn 继续等待；终态 Turn
 按官方状态完成 Run；Thread、Turn 或 Provider 无法定位时进入 `uncertain`。不得只凭 Thread 当前
 空闲推断 Run 已成功，也不得为补齐完成通知重新启动 Turn。
+恢复确认终态后，在释放后台绑定前向原 Conversation 发送恢复通知，包含运行状态、Run ID、Thread ID
+和 `/schedule runs` 查看入口；不复制模型正文，也不把无法确认的 Run 报告为成功。
 
 ## 持久化设计
 

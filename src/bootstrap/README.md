@@ -10,7 +10,7 @@
 - `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前复核投递存储可用性和容量（不因单条失败禁止执行），统一覆盖普通输入、扩展调用、Review 和计划任务；保留停止、查询与 Queue 删除能力，不修改协议字段。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，避免输出积压导致旧问题重新登记；拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
 - `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限；异步预检返回后及 Thread 创建后再次复核当前授权、取消、Workspace 与投递准入，撤权时释放新建后台绑定而不启动 Turn。临时容量拒绝不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
-- `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
+- `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态；确认离线终态后通过组合层向原 Conversation 发布恢复通知，再释放后台绑定。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
 - `scheduled-task-server-request.ts`：为已关联的计划任务 Thread 返回五类 Server Request 的官方安全拒绝形状；普通命令和文件审批返回 `decline`，已有终端输入 `writeStdin` 返回 `cancel` 中止本轮，其他方法明确失败；非计划任务请求交给既有审批处理器。只在 `scheduled_tasks.enabled=true` 时由组合根安装。
 - `scheduled-task-tool-request.ts`：校验前台 `item/tool/call` 的 Thread 绑定、唯一授权 Actor 和
   `schedule_task` 工具名，把结果复用现有计划任务渲染格式返回给 Agent，并把确认预览交给当前
@@ -185,7 +185,8 @@
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据
   发送，成功归档到 `done/`、失败归档到 `failed/` 并保留原因；Unix 使用 `0700/0600`，Windows
   使用当前 SID 私有 ACL，并在启动时收紧既有受管文件；只接受
-  pending 目录内的绝对图片路径。
+  pending 目录内的绝对图片路径。每次轮询只处理一批快照；失败归档未完成时，当前进程按轮询间隔
+  仅重试归档，不再次发送图片，停止时不继续处理下一条。
 
 业务状态和平台逻辑应留在对应模块，只有具体实现选择、交互端口注册与生命周期协调放在这里。
 Provider 账户能力同样通过编译期显式注册：OpenAI 复用 Codex Client，第三方实现 Application
