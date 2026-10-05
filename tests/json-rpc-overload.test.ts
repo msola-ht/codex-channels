@@ -6,8 +6,6 @@ import { BaseTransport } from "../src/codex-client/transport.js";
 class OverloadTransport extends BaseTransport {
   readonly kind = "stdio" as const;
   readonly sent: Array<Record<string, unknown>> = [];
-  overloadResponses = 0;
-  private usageAttempts = 0;
 
   async connect(): Promise<void> {}
   async close(): Promise<void> {}
@@ -20,17 +18,6 @@ class OverloadTransport extends BaseTransport {
         id: request.id,
         result: { platformOs: "macos" },
       })));
-    } else if (request.method === "account/usage/read") {
-      this.usageAttempts += 1;
-      if (this.usageAttempts <= 2) {
-        this.overloadResponses += 1;
-        queueMicrotask(() => this.emitMessage(JSON.stringify({
-          id: request.id,
-          error: { code: -32000, message: "Client overloaded; request rejected." },
-        })));
-      } else {
-        queueMicrotask(() => this.emitMessage(JSON.stringify({ id: request.id, result: { ok: true } })));
-      }
     }
   }
 

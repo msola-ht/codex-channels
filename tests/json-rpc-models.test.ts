@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
@@ -142,7 +142,7 @@ describe("JsonRpcClient models", () => {
       await expect(client.lunaReserveModel()).resolves.toBeNull();
     });
 
-    it("updates Luna Reserve thread settings without retrying the write", async () => {
+    it("encodes Luna Reserve thread settings", async () => {
       const transport = new FakeTransport();
       const client = new CodexAppServerClient(new JsonRpcClient(transport), {
         sandbox: "workspace-write",
@@ -173,6 +173,26 @@ describe("JsonRpcClient models", () => {
             },
           },
         }));
+    });
+
+    it("does not retry a Luna Reserve settings write after overload", async () => {
+      const transport = new FakeTransport();
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "workspace-write" });
+      await client.connect();
+      const send = vi.spyOn(transport, "send").mockImplementation(async (message) => {
+        const request = JSON.parse(message) as { id: number; method: string };
+        expect(request.method).toBe("thread/settings/update");
+        queueMicrotask(() => transport.receive({ id: request.id, error: { code: -32001, message: "overloaded" } }));
+      });
+      try {
+        await expect(client.updateLunaReserveThreadSettings("thread-1", {
+          model: "gpt-reserve", effort: "medium", serviceTier: null, collaborationMode: "plan",
+        })).rejects.toThrow("overloaded");
+        expect(send).toHaveBeenCalledTimes(1);
+      } finally {
+        send.mockRestore();
+        await client.close();
+      }
     });
 
     it("fails closed for invalid model lifecycle metadata", async () => {

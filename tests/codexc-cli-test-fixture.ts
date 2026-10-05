@@ -7,10 +7,7 @@ import { promisify } from "node:util";
 import { stringify } from "smol-toml";
 
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
-import {
-  opencodeGoAccountDefinition,
-  type ModelProviderDefinition
-} from "../runtime/model-provider-definitions.mjs";
+import type { ModelProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { secureTestDirectory } from "./support/windows-fixtures.js";
 
 export const cli = resolve("bin/codexc.mjs");
@@ -48,53 +45,49 @@ export function writeManagedProviderFixture(
   mode: "switching" | "exclusive",
   apiKey = "sk-service-secret",
 ) {
-  const resolvedDefinition = definition.capabilities.instanceAdapter === "opencode-go-accounts"
-    && definition.accountId === undefined
-    ? opencodeGoAccountDefinition("main")
-    : definition;
   const providerDirectory = join(
     connectHome,
     "providers",
-    resolvedDefinition.storageId ?? resolvedDefinition.id,
+    definition.storageId ?? definition.id,
   );
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
-  const catalogPath = join(providerDirectory, resolvedDefinition.catalogFileName);
-  writeFileSync(catalogPath, managedModelCatalog(resolvedDefinition), { mode: 0o600 });
+  const catalogPath = join(providerDirectory, definition.catalogFileName);
+  writeFileSync(catalogPath, managedModelCatalog(definition), { mode: 0o600 });
   const target = mode === "exclusive"
     ? join(codexHome, "config.toml")
-    : join(codexHome, resolvedDefinition.profileFileName);
+    : join(codexHome, definition.profileFileName);
   writeFileSync(target, stringify({
-    model: resolvedDefinition.defaultModel,
-    model_provider: resolvedDefinition.id,
-    ...(mode === "switching" ? { model_reasoning_effort: resolvedDefinition.defaultReasoningEffort } : {}),
+    model: definition.defaultModel,
+    model_provider: definition.id,
+    ...(mode === "switching" ? { model_reasoning_effort: definition.defaultReasoningEffort } : {}),
     model_catalog_json: catalogPath,
     model_providers: {
-      [resolvedDefinition.id]: {
-        name: resolvedDefinition.id,
-        base_url: resolvedDefinition.baseUrl,
-        wire_api: resolvedDefinition.wireApi,
+      [definition.id]: {
+        name: definition.id,
+        base_url: definition.baseUrl,
+        wire_api: definition.wireApi,
         requires_openai_auth: false,
-        ...(resolvedDefinition.supportsWebsockets === undefined
+        ...(definition.supportsWebsockets === undefined
           ? {}
-          : { supports_websockets: resolvedDefinition.supportsWebsockets }),
+          : { supports_websockets: definition.supportsWebsockets }),
         experimental_bearer_token: apiKey,
       },
     },
   }), { mode: 0o600 });
-  const markerDirectory = resolvedDefinition.accountId === undefined
+  const markerDirectory = definition.accountId === undefined
     ? providerDirectory
-    : join(providerDirectory, "accounts", resolvedDefinition.accountId);
+    : join(providerDirectory, "accounts", definition.accountId);
   mkdirSync(markerDirectory, { recursive: true, mode: 0o700 });
-  if (resolvedDefinition.accountId !== undefined) {
+  if (definition.accountId !== undefined) {
     writeFileSync(
       join(providerDirectory, "accounts.json"),
-      `${JSON.stringify([{ id: resolvedDefinition.accountId, default: true }], null, 2)}\n`,
+      `${JSON.stringify([{ id: definition.accountId, default: true }], null, 2)}\n`,
       { mode: 0o600 },
     );
   }
   writeFileSync(
-    join(markerDirectory, resolvedDefinition.managedMarkerFileName),
-    stringify({ version: 1, provider: resolvedDefinition.id, mode }),
+    join(markerDirectory, definition.managedMarkerFileName),
+    stringify({ version: 1, provider: definition.id, mode }),
     { mode: 0o600 },
   );
 }

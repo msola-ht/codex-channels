@@ -84,32 +84,6 @@ describe("OpenCode Go account adapter", () => {
     );
   });
 
-  it("reads the default account credential after migrating to the account registry", async () => {
-    const codexHome = await createAccountRegistryCodexHome();
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
-      usage: {
-        rolling: { status: "ok", percent: 10, resetsAt: "2026-08-16T18:03:54.934Z" },
-      },
-    }), { status: 200 }));
-    const adapter = createOpencodeGoAccountAdapter({
-      environment: testEnvironment(codexHome),
-      fetchImpl: fetchImpl as typeof fetch,
-    });
-
-    await expect(adapter.accountUsage()).resolves.toMatchObject({
-      kind: "quota-windows",
-      provider: "ocg-main",
-      available: true,
-      windows: [{ windowId: "rolling", usedPercent: 10 }],
-    });
-    expect(fetchImpl).toHaveBeenCalledWith(
-      "https://opencode.ai/zen/go/v1/usage",
-      expect.objectContaining({
-        headers: expect.objectContaining({ authorization: "Bearer sk-test-secret" }),
-      }),
-    );
-  });
-
   it("fails with a stable user error without exposing malformed responses", async () => {
     const codexHome = await createCodexHome();
     const adapter = createOpencodeGoAccountAdapter({
@@ -572,10 +546,6 @@ async function createCodexHome(): Promise<string> {
     { mode: 0o600 },
   );
   return directory;
-}
-
-async function createAccountRegistryCodexHome(): Promise<string> {
-  return createCodexHome();
 }
 
 async function createAccountRegistry(

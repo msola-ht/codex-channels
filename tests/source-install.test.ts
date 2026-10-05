@@ -88,7 +88,8 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
 
     expect(result.status).not.toBe(0);
     expect(existsSync(join(home, ".codex-connect", "codex-channels"))).toBe(false);
-    expect(existsSync(join(home, ".codex-connect", ".bin", "codexc"))).toBe(false);
+    expect(existsSync(join(root, "npm-global", "bin", "codexc"))).toBe(false);
+    expect(existsSync(join(root, "npm-global", "lib", "node_modules", "@hegenai", "codexc"))).toBe(false);
   });
 
   it("replaces an existing global npm package with the built main source", () => {

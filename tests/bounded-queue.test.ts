@@ -192,14 +192,18 @@ describe("BoundedAsyncQueue", () => {
     expect(await queue.shift()).toBe("other");
   });
 
-  it("keeps non-critical accounting consistent when coalescing changes criticality", () => {
-    const queue = new BoundedAsyncQueue<string>(2);
+  it("uses the latest criticality when deciding which coalesced entries can be evicted", async () => {
+    const queue = new BoundedAsyncQueue<string>(1);
     queue.push("non-critical", false, "k");
-    expect(nonCriticalCount(queue)).toBe(1);
     queue.push("critical", true, "k");
-    expect(nonCriticalCount(queue)).toBe(0);
+    expect(queue.push("disposable")).toBe(false);
+    expect(queue.size).toBe(1);
+    expect(await queue.shift()).toBe("critical");
+    queue.push("critical-again", true, "k");
     queue.push("non-critical-again", false, "k");
-    expect(nonCriticalCount(queue)).toBe(1);
+    expect(queue.push("replacement", true)).toBe(true);
+    expect(queue.size).toBe(1);
+    expect(await queue.shift()).toBe("replacement");
   });
 
   it("drops the coalesce key after the entry is shifted", async () => {
@@ -248,10 +252,6 @@ describe("BoundedAsyncQueue", () => {
     expect(await queue.shift()).toBe("other");
   });
 });
-
-function nonCriticalCount<T>(queue: BoundedAsyncQueue<T>): number {
-  return (queue as unknown as { nonCriticalCount: number }).nonCriticalCount;
-}
 
 describe("EventBus", () => {
   it("coalesces waiting snapshots independently for slow subscribers without blocking fast ones", async () => {

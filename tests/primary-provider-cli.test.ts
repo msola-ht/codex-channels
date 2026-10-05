@@ -137,7 +137,7 @@ describe("primary provider CLI", () => {
     expect(JSON.stringify(value)).not.toContain("sk-switch-secret");
   });
 
-  it("does not expose credentials from a legacy backup URL in JSON", async () => {
+  it("does not expose credentials from a credential-bearing backup URL in JSON", async () => {
     const environment = isolatedEnvironment("codexc-primary-provider-json-backup-");
     backupPrimaryProviderCandidates({
       thirdparty: {

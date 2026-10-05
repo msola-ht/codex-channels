@@ -328,7 +328,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     }
   });
 
-  it.skipIf(process.platform === "win32")("writes large metrics exports completely without overwriting same-second files", () => {
+  it.skipIf(process.platform === "win32")("writes large metrics exports completely without overwriting previous exports", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-export-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -488,7 +488,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     ]));
   });
 
-  it("does not infer one aggregate provider from truncated report groups", () => {
+  it("retains the total group count when report groups are truncated", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-groups-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");

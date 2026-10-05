@@ -52,6 +52,8 @@ Gateway 配置位于：
 
 `codexc setup` 要求标准输入与提示输出均连接终端；不满足时在初始化用户目录前报错。`setup --json` 仍需交互输入及终端 stderr，stdout 输出脱敏 JSON Lines，适合将操作结果重定向到文件，不是无人值守配置接口。
 
+Setup 仅按具体操作返回的激活范围提示重启。列出账户、停止账户等操作不会因经过模型菜单而附加“重启全部服务”；需要重启的配置修改会返回对应服务目标，Setup 不自动执行重启。
+
 `codexc timezone` 设置模型可见时区，WebUI 同步跟随；网关默认也跟随，可用 `codexc timezone --gateway` 选择系统或自定义时区，细节见[`模型可见时区`](model-timezone.md)。
 
 Telegram、飞书和微信至少启用一个。Telegram 需要 Bot Token 和允许用户；飞书需要应用凭据和允许的 `open_id`；微信需要扫码凭据、账号和允许用户，Setup 最终确认保存时会直接启用消息接收。

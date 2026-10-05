@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -297,7 +296,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     ]);
   });
 
-  it("returns a redacted revisioned plan before changing a managed checkout", () => {
+  it("inspects a managed checkout without exposing the repository address", () => {
     const fixture = createInstalledFixture("codexc-source-update-plan-");
 
     const plan = inspectManagedSourceUpdatePlan(fixture.environment, {
@@ -330,32 +329,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
         "cleanup",
       ],
     });
-    expect(plan.revision).toMatch(/^[0-9a-f]{64}$/u);
     expect(JSON.stringify(plan)).not.toContain(fixture.repository);
-  });
-
-  it("rejects a stale plan before cloning or stopping services", async () => {
-    const fixture = createInstalledFixture("codexc-source-update-stale-plan-");
-    const plan = inspectManagedSourceUpdatePlan(fixture.environment, {
-      projectDir: fixture.checkout,
-      repository: fixture.repository,
-    });
-    writeFileSync(join(fixture.repository, "later.txt"), "later");
-    runGit(fixture.repository, ["add", "."]);
-    runGit(fixture.repository, ["commit", "--quiet", "-m", "later"]);
-    let cloned = false;
-    let stopped = false;
-
-    await expect(updateManagedSourceInstallation(fixture.environment, {
-      expectedRevision: plan.revision,
-      projectDir: fixture.checkout,
-      repository: fixture.repository,
-      runCommand: () => { cloned = true; },
-      stopServices: () => { stopped = true; },
-    })).rejects.toThrow("源码更新预检状态已变化");
-
-    expect(cloned).toBe(false);
-    expect(stopped).toBe(false);
   });
 
   it("does not echo credentials from a mismatched repository origin", () => {
@@ -375,62 +349,6 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     expect((failure as Error).message).toContain("已配置其他地址");
     expect((failure as Error).message).not.toContain("secret");
     expect((failure as Error).message).not.toContain(fixture.repository);
-  });
-
-  it("reports prepared state and ordered progress without trusting observers", async () => {
-    const fixture = createInstalledFixture("codexc-source-update-progress-");
-    const progress: string[] = [];
-    let prepared: unknown;
-
-    const result = await updateManagedSourceInstallation(fixture.environment, {
-      buildCheckout: () => undefined,
-      inspectStaged: async () => ({ services: { installed: false } }),
-      installGlobalPackage: () => undefined,
-      onPrepared: (value) => { prepared = value; },
-      onProgress: (event) => {
-        progress.push(`${event.stage}:${event.status}`);
-        if (event.stage === "inspect" && event.status === "started") {
-          throw new Error("observer failed");
-        }
-      },
-      projectDir: fixture.checkout,
-      repository: fixture.repository,
-    });
-
-    expect(result.changed).toBe(true);
-    expect(prepared).toMatchObject({
-      operation: "source-update",
-      services: { installed: false },
-      requiresServiceInterruption: false,
-      targetVersion: "0.147.0",
-    });
-    expect((prepared as { steps: string[] }).steps).not.toContain("stop-services");
-    expect(progress).toEqual([
-      "inspect:started",
-      "inspect:completed",
-      "clone-candidate:started",
-      "clone-candidate:completed",
-      "validate-candidate:started",
-      "validate-candidate:completed",
-      "build-candidate:started",
-      "build-candidate:completed",
-      "inspect-candidate:started",
-      "inspect-candidate:completed",
-      "prepare-codex-cli:started",
-      "prepare-codex-cli:completed",
-      "validate-codex-contract:started",
-      "validate-codex-contract:completed",
-      "install-codex-cli:started",
-      "install-codex-cli:completed",
-      "switch-source:started",
-      "switch-source:completed",
-      "refresh-command:started",
-      "refresh-command:completed",
-      "configure-codex-daemon:started",
-      "configure-codex-daemon:completed",
-      "cleanup:started",
-      "cleanup:completed",
-    ]);
   });
 
   it("updates to a newer main commit without requiring a version change", async () => {
@@ -463,8 +381,6 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     });
     expect(readFileSync(join(fixture.checkout, "fix.txt"), "utf8")).toBe("fixed");
     expect(globalInstalls).toBe(1);
-    expect(existsSync(fixture.legacyLauncher)).toBe(true);
-    expect(readFileSync(fixture.profile, "utf8")).toContain("PATH");
     expect(gitOutput(fixture.checkout, [
       "config",
       "--local",
@@ -728,9 +644,10 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       .toBe(true);
   });
 
-  it("reports both failures when services cannot recover after switching source", async () => {
+  it("reports incomplete global installation and blocks service recovery after switching source", async () => {
     const fixture = createInstalledFixture("codexc-source-global-install-start-failure-");
     let failure: unknown;
+    const startServices = vi.fn();
 
     try {
       await updateManagedSourceInstallation(fixture.environment, {
@@ -739,7 +656,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
         installGlobalPackage: () => { throw new Error("global install failed"); },
         projectDir: fixture.checkout,
         repository: fixture.repository,
-        startServices: () => { throw new Error("service start failed"); },
+        startServices,
         stopServices: () => undefined,
       });
     } catch (error) {
@@ -747,6 +664,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     }
 
     expect(failure).toBeInstanceOf(AggregateError);
+    expect(startServices).not.toHaveBeenCalled();
     expect((failure as AggregateError).message)
       .toBe("源码已切换但更新失败，且核心服务未能恢复运行");
     expect((failure as AggregateError).errors.map((error) => (error as Error).message))
@@ -1129,18 +1047,9 @@ function createInstalledFixture(prefix: string) {
   const home = join(root, "home");
   const installRoot = join(home, ".codex-connect");
   const checkout = join(installRoot, "codex-channels");
-  const legacyLauncher = join(installRoot, "bin", "codexc");
-  const hiddenLauncher = join(installRoot, ".bin", "codexc");
-  const profile = join(home, ".zshrc");
   mkdirSync(installRoot, { recursive: true });
   runGit(root, ["clone", "--quiet", "--branch", "main", source.repository, checkout]);
   runGit(checkout, ["reset", "--quiet", "--hard", source.initialCommit]);
-  mkdirSync(join(installRoot, "bin"), { recursive: true });
-  writeFileSync(
-    legacyLauncher,
-    '#!/bin/sh\nexec node "$CODEX_CONNECT_HOME/codex-channels/bin/codexc.mjs" "$@"\n',
-  );
-  writeFileSync(profile, 'export PATH="$HOME/.codex-connect/bin:$PATH"\n');
   const codex = join(root, "codex");
   writeFileSync(codex, "#!/bin/sh\nprintf '%s\\n' 'codex-cli 0.147.0'\n");
   chmodSync(codex, 0o755);
@@ -1156,11 +1065,8 @@ function createInstalledFixture(prefix: string) {
       HOME: home,
     },
     installRoot,
-    hiddenLauncher,
     initialCommit: source.initialCommit,
-    legacyLauncher,
     latestCommit: source.latestCommit,
-    profile,
     repository: source.repository,
   };
 }

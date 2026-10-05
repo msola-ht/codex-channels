@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -11,8 +10,6 @@ import {
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-
-
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { resolveExecutableInvocation, resolveOptionalExecutable } from "../runtime/executable.mjs";
@@ -48,11 +45,11 @@ export function inspectManagedSourceUpdatePlan(
   assertSourceUpdateCaller(environment);
   const checkout = options.projectDir ?? managedSourceCheckout(environment);
   if (!checkout) {
-    return withSourceUpdateRevision({
+    return {
       operation: "source-update",
       managed: false,
       steps: ["inspect"],
-    });
+    };
   }
   const repository = options.repository ?? officialRepository;
   assertManagedRepository(checkout, repository, environment, options.captureCommand);
@@ -71,7 +68,7 @@ export function inspectManagedSourceUpdatePlan(
   ).trim();
   const currentVersion = packageVersion(checkout);
   const updateAvailable = currentCommit !== targetCommit;
-  return withSourceUpdateRevision({
+  return {
     operation: "source-update",
     managed: true,
     checkout,
@@ -99,7 +96,7 @@ export function inspectManagedSourceUpdatePlan(
           ]
         : ["update-installation"]),
     ],
-  });
+  };
 }
 
 export async function updateManagedSourceInstallation(
@@ -110,26 +107,15 @@ export async function updateManagedSourceInstallation(
   let activeStage = "inspect";
   const runStage = async (stage, operation) => {
     activeStage = stage;
-    emitSourceUpdateProgress(options, stage, "started", completedStages);
-    try {
-      const result = await operation();
-      completedStages.push(stage);
-      emitSourceUpdateProgress(options, stage, "completed", completedStages);
-      return result;
-    } catch (error) {
-      emitSourceUpdateProgress(options, stage, "failed", completedStages);
-      throw error;
-    }
+    const result = await operation();
+    completedStages.push(stage);
+    return result;
   };
   let plan;
   try {
     plan = await runStage(
       "inspect",
-      () => {
-        const current = inspectManagedSourceUpdatePlan(environment, options);
-        assertSourceUpdateRevision(options.expectedRevision, current.revision);
-        return current;
-      },
+      () => inspectManagedSourceUpdatePlan(environment, options),
     );
   } catch (error) {
     throw annotateSourceUpdateFailure(error, {
@@ -239,16 +225,6 @@ export async function updateManagedSourceInstallation(
       "inspect-candidate",
       () => (options.inspectStaged ?? inspectStagedInstallation)(stagedCheckout, environment),
     );
-    const candidateRequiresServiceInterruption = inspection.services.installed;
-    notifySafely(options.onPrepared, withSourceUpdateRevision({
-      ...plan,
-      steps: inspection.services.installed
-        ? plan.steps
-        : plan.steps.filter((stage) => stage !== "stop-services" && stage !== "restore-services"),
-      services: inspection.services,
-      requiresServiceInterruption: candidateRequiresServiceInterruption,
-      targetVersion: candidate.targetVersion,
-    }));
     const preparedCodex = await runStage(
       "prepare-codex-cli",
       () => prepareCodexVersion(
@@ -420,45 +396,6 @@ function assertSourceUpdateCaller(environment) {
     || environment.CODEX_CONNECT_SERVICE_ROLE === "gateway"
   ) {
     throw new Error("不能在运行中的 Codex 服务内执行更新；请在本机终端运行 codexc update");
-  }
-}
-
-function withSourceUpdateRevision(plan) {
-  const document = { ...plan };
-  Reflect.deleteProperty(document, "revision");
-  return {
-    ...document,
-    revision: createHash("sha256")
-      .update(JSON.stringify(document))
-      .digest("hex"),
-  };
-}
-
-function assertSourceUpdateRevision(expected, current) {
-  if (expected === undefined) return;
-  if (typeof expected !== "string" || !/^[0-9a-f]{64}$/u.test(expected)) {
-    throw new Error("源码更新计划修订值无效");
-  }
-  if (expected !== current) {
-    throw new Error("源码更新预检状态已变化，请重新生成更新计划");
-  }
-}
-
-function emitSourceUpdateProgress(options, stage, status, completedStages) {
-  notifySafely(options.onProgress, {
-    operation: "source-update",
-    stage,
-    status,
-    completedStages: [...completedStages],
-  });
-}
-
-function notifySafely(observer, value) {
-  if (!observer) return;
-  try {
-    observer(value);
-  } catch {
-    // 观察者不属于更新事务，不能改变更新结果。
   }
 }
 
@@ -1061,7 +998,7 @@ async function main() {
   if (!result.changed) {
     writeCliMessage(
       "note",
-      `Git 源码已是 main 最新提交 ${result.commit.slice(0, 12)}（版本 ${result.version}），配套 CLI 与数据库更新检查已完成。`,
+      `Git 源码已是 main 最新提交 ${result.commit.slice(0, 12)}（版本 ${result.version}），配套 CLI 版本与安装状态检查已完成。`,
     );
     return;
   }

@@ -69,8 +69,9 @@ describe("withDeliveryRetry", () => {
     expect(attempts).toBe(1);
   });
 
-  it("cancels a pending retry wait", async () => {
+  it("cancels a pending retry wait and preserves the failed send as its cause", async () => {
     const controller = new AbortController();
+    const failure = new Error("可重试失败");
     let attempts = 0;
     const pending = withDeliveryRetry(
       {
@@ -82,30 +83,6 @@ describe("withDeliveryRetry", () => {
       },
       async () => {
         attempts += 1;
-        throw new Error("可重试失败");
-      },
-      controller.signal,
-    );
-
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    controller.abort();
-
-    await expect(pending).rejects.toThrow("渠道发送重试已取消");
-    expect(attempts).toBe(1);
-  });
-
-  it("keeps the failed send as the cause when a retry wait is cancelled", async () => {
-    const controller = new AbortController();
-    const failure = new Error("平台拒绝");
-    const pending = withDeliveryRetry(
-      {
-        component: "Test",
-        maximumAttempts: 3,
-        maximumDelayMs: 5_000,
-        delayMs: () => 1_000,
-        logger,
-      },
-      async () => {
         throw failure;
       },
       controller.signal,
@@ -114,9 +91,11 @@ describe("withDeliveryRetry", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     controller.abort();
 
-    // 取消不能掩盖真正失败的发送错误，否则日志里只剩一次无原因的取消。
+    await expect(pending).rejects.toThrow("渠道发送重试已取消");
     await expect(pending).rejects.toMatchObject({ cause: failure });
+    expect(attempts).toBe(1);
   });
+
 });
 
 it("does not start an already cancelled send", async () => {

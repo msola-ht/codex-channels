@@ -25,7 +25,6 @@ export type SourceUpdateStage =
 
 export interface SourceUpdatePlan {
   operation: "source-update";
-  revision: string;
   managed: boolean;
   checkout?: string;
   currentCommit?: string;
@@ -33,19 +32,6 @@ export interface SourceUpdatePlan {
   targetCommit?: string;
   updateAvailable?: boolean;
   steps: SourceUpdateStage[];
-}
-
-export interface PreparedSourceUpdatePlan extends SourceUpdatePlan {
-  requiresServiceInterruption: boolean;
-  services: { installed: boolean };
-  targetVersion: string;
-}
-
-export interface SourceUpdateProgress {
-  operation: "source-update";
-  stage: SourceUpdateStage;
-  status: "started" | "completed" | "failed";
-  completedStages: SourceUpdateStage[];
 }
 
 export interface SourceUpdateFailure {
@@ -62,7 +48,6 @@ export interface SourceUpdateFailure {
 }
 
 export interface SourceUpdateOptions {
-  expectedRevision?: string;
   projectDir?: string;
   repository?: string;
   captureCommand?: (
@@ -125,8 +110,6 @@ export interface SourceUpdateOptions {
     options: SourceUpdateOptions,
   ) => Promise<void> | void;
   renamePath?: (oldPath: string, newPath: string) => void;
-  onPrepared?: (plan: PreparedSourceUpdatePlan) => void;
-  onProgress?: (progress: SourceUpdateProgress) => void;
 }
 
 export function managedSourceCheckout(

@@ -234,7 +234,7 @@ describe("custom primary Provider setup", () => {
       ]),
       { expectedVersion: "v1" },
     );
-    expect(existsSync(customPrimaryProviderProfilePath(environment, "thirdparty"))).toBe(false);
+    expect(existsSync(customPrimaryProviderProfilePath(environment, "127-0-0-1"))).toBe(false);
     const rendered = output.write.mock.calls.flat().join("");
     expect(rendered).toContain("明文写入 0600 主配置");
     expect(rendered).toContain("新 Thread 使用该固定 Provider");

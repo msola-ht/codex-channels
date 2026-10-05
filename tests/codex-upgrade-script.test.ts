@@ -92,8 +92,6 @@ describe("Codex CLI upgrade preparation", () => {
         body: [
           "## 新增",
           "新增当前项目决定采用的协议能力。",
-          "## 修复",
-          "无",
           "## 改动",
           "更新协议类型、实现、测试与文档基线。",
           "## 对本项目的收益",
@@ -136,9 +134,6 @@ describe("Codex CLI upgrade preparation", () => {
         draft: false,
         title: "统一 PR 描述",
         body: [
-          "## 新增",
-          "<!-- 没有新增内容时写“无”。 -->",
-          "无",
           "## 修复",
           "修复所有 Ready PR 缺少统一分类的问题。",
           "## 改动",
@@ -158,16 +153,15 @@ describe("Codex CLI upgrade preparation", () => {
     }
 
     for (const section of ["新增", "修复", "改动"]) {
-      expect(() => checkPullRequestDescription({
-        ...ready,
-        pull_request: {
-          ...ready.pull_request,
-          body: ready.pull_request.body.replace(
-            new RegExp(`## ${section}[\\s\\S]*?(?=\\n\\n## |$)`, "u"),
-            `## ${section}\n\n<!-- 仍是模板占位 -->`,
-          ),
-        },
-      })).toThrow(section);
+      for (const emptyContent of ["无", "- 无", "<!-- 仍是模板占位 -->"]) {
+        expect(() => checkPullRequestDescription({
+          ...ready,
+          pull_request: {
+            ...ready.pull_request,
+            body: `## ${section}\n\n${emptyContent}\n\n## ${section === "修复" ? "改动" : "修复"}\n\n修正安装命令的拼写错误。`,
+          },
+        })).toThrow(section);
+      }
     }
   });
 });

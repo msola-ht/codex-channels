@@ -68,7 +68,7 @@ describe("management security core", () => {
     expect(limiter.consume({ principalId: "user", category: "high-risk" }).remaining).toBe(29);
   });
 
-  it("consumes confirmations once and binds every preview field", () => {
+  it("consumes confirmations once and binds the resource revision", () => {
     let now = 1_000;
     const confirmations = new ManagementConfirmationStore({
       now: () => now,
@@ -141,7 +141,7 @@ describe("management security core", () => {
     })).toThrow(expect.objectContaining({ code: "management.request-line-too-large" }));
   });
 
-  it("writes bounded private audit events without arbitrary request fields", () => {
+  it("writes private audit events without arbitrary request fields", () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-management-audit-"));
     roots.push(root);
     const path = join(root, "audit.jsonl");
