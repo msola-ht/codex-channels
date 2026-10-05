@@ -2,6 +2,9 @@ import { checkpointDelivery } from "../delivery-receipt.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import { FeishuMessageError } from "./message-error.js";
 
+/** Observe verified creation independently of the cancellable delivery receipt. */
+export type ObserveFeishuCardCreation = (creation: Promise<string>) => void;
+
 export interface FeishuMessagePort {
   sendText(chatId: string, text: string, signal?: AbortSignal): Promise<void>;
   sendPost(chatId: string, markdown: string, signal?: AbortSignal): Promise<void>;
@@ -10,7 +13,7 @@ export interface FeishuMessagePort {
   sendImage?(chatId: string, image: Buffer, signal?: AbortSignal): Promise<void>;
   replyPost?(messageId: string, markdown: string, signal?: AbortSignal): Promise<void>;
   replyMarkdownCard?(messageId: string, markdown: string, signal?: AbortSignal): Promise<string | void>;
-  sendCard(chatId: string, card: FeishuCardDocument, signal?: AbortSignal): Promise<string>;
+  sendCard(chatId: string, card: FeishuCardDocument, signal?: AbortSignal, observeCreation?: ObserveFeishuCardCreation): Promise<string>;
   updateCard(messageId: string, card: FeishuCardDocument, signal?: AbortSignal): Promise<void>;
   createStreamingCard(
     chatId: string,
@@ -52,7 +55,8 @@ export function bindOutboxMessagePort(port: FeishuMessagePort, closed: AbortSign
     sendText: (chatId, text, signal) => send((active) => port.sendText(chatId, text, active), signal),
     sendPost: (chatId, text, signal) => send((active) => port.sendPost(chatId, text, active), signal),
     sendMarkdownCard: (chatId, text, signal) => send((active) => port.sendMarkdownCard(chatId, text, active), signal),
-    sendCard: (chatId, card, signal) => send((active) => port.sendCard(chatId, card, active), signal),
+    sendCard: (chatId, card, signal, observeCreation) => send((active) => observeCreation === undefined
+      ? port.sendCard(chatId, card, active) : port.sendCard(chatId, card, active, observeCreation), signal),
     updateCard: (id, card, signal) => send((active) => port.updateCard(id, card, active), signal),
     createStreamingCard: (chatId, text, signal) => send((active) => port.createStreamingCard(chatId, text, active), signal),
     updateStreamingCard: (id, text, sequence, signal) => send((active) => port.updateStreamingCard(id, text, sequence, active), signal),

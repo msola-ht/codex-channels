@@ -19,6 +19,7 @@ import {
 } from "../interaction-copy.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import { PendingInteractionRegistry, waitForInteractionPreparation } from "../pending-interaction-registry.js";
+import { DeliveryReceipt } from "../delivery-receipt.js";
 import type { Logger } from "pino";
 import {
   renderFeishuApprovalCard,
@@ -32,17 +33,20 @@ import {
   renderFeishuInputOutcomeCard,
   supportsFeishuInputRequest,
 } from "./input-card.js";
+import type { ObserveFeishuCardCreation } from "./outbox-message-port.js";
 
 interface FeishuInteractionDelivery {
   deliverCard(
     chatId: string,
     card: FeishuCardDocument,
     signal?: AbortSignal,
+    observeCreation?: ObserveFeishuCardCreation,
   ): Promise<string>;
   updateCard(
     chatId: string,
     messageId: string,
     card: FeishuCardDocument,
+    signal?: AbortSignal,
   ): Promise<void>;
   prepareInteraction?(request: InteractionRequest): void;
   finishInteraction?(request: InteractionRequest, decision: InteractionDecision): void;
@@ -65,8 +69,12 @@ export type FeishuCardActionResult =
 
 export class FeishuInteractionPort implements InteractionPort {
   private readonly pending = new PendingInteractionRegistry<PendingInteraction>();
-  private readonly preparations = new Set<Promise<string | undefined>>();
+  private readonly preparations = new Set<Promise<unknown>>();
   private readonly statusUpdates = new Set<Promise<void>>();
+  private readonly preparationDisposals = new Set<() => void>();
+  private readonly statusAbort = new AbortController();
+  private closePromise: Promise<void> | undefined;
+  private cleanupClosed = false;
   private closed = false;
 
   constructor(
@@ -136,13 +144,22 @@ export class FeishuInteractionPort implements InteractionPort {
     return true;
   }
 
-  async close(): Promise<void> {
-    if (!this.closed) {
-      this.closed = true;
-    }
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
     this.cancelAll("Gateway 已停止");
+    this.closePromise = this.drainClose();
+    return this.closePromise;
+  }
+
+  private async drainClose(): Promise<void> {
     await waitAtMost(Promise.allSettled([...this.preparations]), 5_000);
+    this.cleanupClosed = true;
+    for (const dispose of this.preparationDisposals) dispose();
+    this.preparationDisposals.clear();
+    this.preparations.clear();
     await waitAtMost(Promise.allSettled([...this.statusUpdates]), 5_000);
+    this.statusAbort.abort();
   }
 
   handleCardAction(action: FeishuCardAction): FeishuCardActionResult {
@@ -217,31 +234,39 @@ export class FeishuInteractionPort implements InteractionPort {
       return safeInteractionDecision(request);
     }
     const signal = this.pending.signal(token);
+    const cardPreparation = this.observePreparation(target, request, signal);
     const preparation = this.prepareInteractionCard(
       target,
       request,
       token,
       signal,
+      cardPreparation.observe,
+      cardPreparation.receive,
     );
     this.preparations.add(preparation);
     void preparation.then(
-      () => this.preparations.delete(preparation),
-      () => this.preparations.delete(preparation),
+      () => { cardPreparation.settled(); this.preparations.delete(preparation); },
+      () => { cardPreparation.settled(); this.preparations.delete(preparation); },
     );
     let messageId: Awaited<typeof preparation>;
     try {
       messageId = await waitForInteractionPreparation(signal, preparation);
     } catch (error) {
       const cancelled = signal.aborted;
+      cardPreparation.invalidate();
       this.pending.release(request.requestId, token);
       if (!cancelled) throw error;
       return safeInteractionDecision(request);
     }
     if (!messageId) {
+      cardPreparation.invalidate();
+      this.pending.release(request.requestId, token);
       return safeInteractionDecision(request);
     }
-    if (signal.aborted || this.closed) {
-      await this.updateCard(target, messageId, request, safeInteractionDecision(request), "请求已失效");
+    cardPreparation.receive(messageId);
+    if (signal.aborted || this.closed || !this.access.isAllowed({ target, actorId: authorizedActors[0]! })) {
+      cardPreparation.invalidate();
+      this.pending.release(request.requestId, token);
       return safeInteractionDecision(request);
     }
 
@@ -265,7 +290,10 @@ export class FeishuInteractionPort implements InteractionPort {
       });
       if (activation === "missing") {
         clearTimeout(timer);
+        cardPreparation.invalidate();
         resolve(safeInteractionDecision(request));
+      } else {
+        cardPreparation.activate();
       }
     });
   }
@@ -275,6 +303,8 @@ export class FeishuInteractionPort implements InteractionPort {
     request: InteractionRequest,
     token: string,
     signal: AbortSignal,
+    observeCreation: ObserveFeishuCardCreation,
+    receive: (messageId: string) => void,
   ): Promise<string | undefined> {
     let messageId: string;
     try {
@@ -285,7 +315,9 @@ export class FeishuInteractionPort implements InteractionPort {
           ? renderFeishuApprovalCard(request, token)
           : renderFeishuInputCard(request, token),
         signal,
+        observeCreation,
       );
+      receive(messageId);
     } catch (error) {
       if (signal.aborted) return undefined;
       this.logger?.warn(
@@ -304,18 +336,66 @@ export class FeishuInteractionPort implements InteractionPort {
       },
       "飞书交互请求已送达",
     );
-    if (!this.closed && !signal.aborted) {
-      return messageId;
-    }
-    this.pending.release(request.requestId, token);
-    await this.updateCard(
-      target,
-      messageId,
-      request,
-      safeInteractionDecision(request),
-      this.closed ? "Gateway 已停止" : (signal.reason as Error).message,
-    );
-    return undefined;
+    return messageId;
+  }
+
+  private observePreparation(target: ConversationTarget, request: InteractionRequest, signal: AbortSignal) {
+    // Only preparation owns invalidation cleanup. Activation transfers ownership
+    // to pending/finish, whose outcome must not be replaced by its release abort.
+    const holder: { current: {
+      target: ConversationTarget; request: InteractionRequest; messageId?: string;
+      invalid: boolean; cleanupStarted: boolean; creationPending: boolean; preparationSettled: boolean;
+    } | undefined } = {
+      current: { target, request, invalid: false, cleanupStarted: false, creationPending: false, preparationSettled: false },
+    };
+    const cleanupOnce = (): void => {
+      const state = holder.current;
+      if (!state || !state.messageId || state.cleanupStarted || this.cleanupClosed) return;
+      if (!state.invalid && !signal.aborted && !this.closed) return;
+      state.cleanupStarted = true;
+      const outcome = this.closed ? "Gateway 已停止"
+        : signal.aborted && signal.reason instanceof Error ? signal.reason.message : "请求已失效";
+      void this.updateCard(state.target, state.messageId, state.request, safeInteractionDecision(state.request), outcome);
+      dispose();
+    };
+    const receive = (messageId: string): void => {
+      if (!holder.current) return;
+      holder.current.messageId = messageId;
+      cleanupOnce();
+    };
+    const dispose = (): void => {
+      signal.removeEventListener("abort", cleanupOnce);
+      holder.current = undefined;
+      this.preparationDisposals.delete(dispose);
+    };
+    const disposeIfFinished = (): void => {
+      const state = holder.current;
+      if (state?.preparationSettled && !state.creationPending && (state.invalid || signal.aborted)) dispose();
+    };
+    signal.addEventListener("abort", cleanupOnce);
+    this.preparationDisposals.add(dispose);
+    return {
+      receive,
+      observe: (creation: Promise<string>): void => {
+        if (holder.current) holder.current.creationPending = true;
+        const observed = creation.then(receive, () => {}).then(() => {
+          if (holder.current) holder.current.creationPending = false;
+          disposeIfFinished();
+        });
+        this.preparations.add(observed);
+        void observed.then(() => this.preparations.delete(observed));
+      },
+      invalidate: (): void => {
+        if (holder.current) holder.current.invalid = true;
+        cleanupOnce();
+        disposeIfFinished();
+      },
+      activate: dispose,
+      settled: (): void => {
+        if (holder.current) holder.current.preparationSettled = true;
+        disposeIfFinished();
+      },
+    };
   }
 
   private finish(
@@ -330,15 +410,13 @@ export class FeishuInteractionPort implements InteractionPort {
     this.delivery?.finishInteraction?.(pending.request, decision);
     pending.resolve(decision);
 
-    const statusUpdate = this.updateCard(
+    void this.updateCard(
       pending.target,
       pending.messageId,
       pending.request,
       decision,
       outcome,
     );
-    this.statusUpdates.add(statusUpdate);
-    void statusUpdate.finally(() => this.statusUpdates.delete(statusUpdate));
   }
 
   private updateCard(
@@ -348,7 +426,16 @@ export class FeishuInteractionPort implements InteractionPort {
     decision: InteractionDecision,
     outcome: string,
   ): Promise<void> {
-    return this.delivery!.updateCard(
+    if (this.cleanupClosed) return Promise.resolve();
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, this.statusAbort.signal]);
+    let onAbort!: () => void;
+    const cancelled = new Promise<void>((resolve) => { onAbort = resolve; });
+    signal.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    timer.unref();
+    // Status cleanup has its own budget and must survive a failed creation receipt.
+    const update = Promise.resolve().then(() => DeliveryReceipt.without(() => this.delivery!.updateCard(
       target.conversationId,
       messageId,
       request.type === "approval" && decision.type === "approval"
@@ -356,7 +443,8 @@ export class FeishuInteractionPort implements InteractionPort {
         : request.type !== "approval" && decision.type !== "approval"
           ? renderFeishuInputOutcomeCard(request, decision, outcome)
           : renderMismatchedOutcomeCard(request.title),
-    ).catch(() => {
+      signal,
+    ))).catch(() => {
       this.logger?.warn(
         {
           surface: target.surface,
@@ -367,6 +455,13 @@ export class FeishuInteractionPort implements InteractionPort {
         "飞书交互卡片状态更新失败",
       );
     });
+    const statusUpdate = Promise.race([update, cancelled]).finally(() => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      this.statusUpdates.delete(statusUpdate);
+    });
+    this.statusUpdates.add(statusUpdate);
+    return statusUpdate;
   }
 }
 

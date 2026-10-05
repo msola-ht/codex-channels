@@ -50,7 +50,7 @@ import type { WeixinUpdatesRetryEvent } from "./updates-monitor.js";
 
 export interface WeixinStartupNotification {
   targets(): readonly ConversationTarget[];
-  text(target: ConversationTarget): string | Promise<string>;
+  text(target: ConversationTarget, signal: AbortSignal): string | Promise<string>;
 }
 
 export interface WeixinSurfaceOptions {
@@ -108,6 +108,7 @@ export class WeixinSurface implements SurfaceAdapter {
   private readonly lifecycleClient: WeixinLifecycleProtocolClient | undefined;
   private startPromise: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
+  private readonly startupAbort = new AbortController();
 
   constructor(options: WeixinSurfaceOptions) {
     const replyContexts = new WeixinReplyContextStore(options.accountId);
@@ -310,6 +311,7 @@ export class WeixinSurface implements SurfaceAdapter {
   }
 
   private async stopOnce(): Promise<void> {
+    this.startupAbort.abort();
     try {
       await this.input.stop();
     } finally {
@@ -360,8 +362,10 @@ export class WeixinSurface implements SurfaceAdapter {
     await this.input.start();
     await this.notifyLifecycle("start");
     for (const target of restored) {
+      if (this.startupAbort.signal.aborted) return;
       try {
-        const text = await this.startupNotification?.text(target);
+        const text = await this.startupNotification?.text(target, this.startupAbort.signal);
+        if (this.startupAbort.signal.aborted) return;
         if (text) {
           await this.output.deliverText(
             target,

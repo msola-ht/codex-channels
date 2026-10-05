@@ -145,10 +145,10 @@ function createWeixinModule(
         access,
         config.accountId,
       ),
-      text: (target) => {
-        const status = options.service.status(target, { includeGitBranch: true });
+      text: async (target, signal) => {
+        const status = await options.service.statusForDisplay(target, signal);
         const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
-        return Promise.resolve(renderWeixinStartupNotification(
+        return renderWeixinStartupNotification(
           options.config.workspaces,
           status,
           {
@@ -167,7 +167,7 @@ function createWeixinModule(
             openAiConnectivity: options.openAiConnectivity(),
             debugEnabled: isDebugLogLevel(options.config.logLevel),
           },
-        ));
+        );
       },
     },
     debugEnabled: isDebugLogLevel(options.config.logLevel),
@@ -246,44 +246,49 @@ function createFeishuModule(
       config.appId,
     ),
     startupNotification: {
-      messages: () => Promise.resolve(authorizedFeishuConversations(
-        options.bindings,
-        access,
-        config.appId,
-      ).map((chatId) => {
-        const status = options.service.status(
-          {
-            surface: "feishu",
-            accountId: config.appId,
-            conversationId: chatId,
-          },
-          { includeGitBranch: true },
-        );
-        const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
-        return {
-          chatId,
-          text: renderFeishuStartupNotification(
-            options.config.workspaces,
-            status,
+      messages: async (signal) => {
+        const messages: Array<{ chatId: string; text: string }> = [];
+        for (const chatId of authorizedFeishuConversations(
+          options.bindings,
+          access,
+          config.appId,
+        )) {
+          signal.throwIfAborted();
+          const status = await options.service.statusForDisplay(
             {
-              platform: process.platform,
-              architecture: process.arch,
-              ...(options.config.codexTimezone === undefined
-                ? {} : { appServerTimezone: options.config.codexTimezone }),
-              gatewayVersion: options.gatewayVersion,
-              nodeVersion: process.version,
-              transport: "Unix WebSocket",
-              codexUpstreamUserAgent:
-                options.codexUpstreamUserAgent() ?? null,
-              ...(officialOpenAiAuthenticated === undefined
-                ? {}
-                : { officialOpenAiAuthenticated }),
-              openAiConnectivity: options.openAiConnectivity(),
-              debugEnabled: isDebugLogLevel(options.config.logLevel),
+              surface: "feishu",
+              accountId: config.appId,
+              conversationId: chatId,
             },
-          ),
-        };
-      })),
+            signal,
+          );
+          const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
+          messages.push({
+            chatId,
+            text: renderFeishuStartupNotification(
+              options.config.workspaces,
+              status,
+              {
+                platform: process.platform,
+                architecture: process.arch,
+                ...(options.config.codexTimezone === undefined
+                  ? {} : { appServerTimezone: options.config.codexTimezone }),
+                gatewayVersion: options.gatewayVersion,
+                nodeVersion: process.version,
+                transport: "Unix WebSocket",
+                codexUpstreamUserAgent:
+                  options.codexUpstreamUserAgent() ?? null,
+                ...(officialOpenAiAuthenticated === undefined
+                  ? {}
+                  : { officialOpenAiAuthenticated }),
+                openAiConnectivity: options.openAiConnectivity(),
+                debugEnabled: isDebugLogLevel(options.config.logLevel),
+              },
+            ),
+          });
+        }
+        return messages;
+      },
     },
   });
   return createFeishuRuntimeModule(

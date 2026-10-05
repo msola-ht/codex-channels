@@ -3,7 +3,6 @@ import type { Logger } from "pino";
 import type { GatewayConfig } from "../config/index.js";
 import {
   GatewayComponentGraph,
-  currentGitBranch,
   effectiveCodexBinary,
 } from "./gateway-component-graph.js";
 import type { BuiltInSurfacePlugin } from "./surface-plugin.js";
@@ -40,4 +39,4 @@ export class GatewayApplication extends GatewayComponentGraph {
   }
 }
 
-export { currentGitBranch, effectiveCodexBinary };
+export { effectiveCodexBinary };

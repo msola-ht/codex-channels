@@ -1042,6 +1042,7 @@ describe("ConversationCommandService", () => {
     const service = {
       resume: vi.fn(async () => ({ threadId: "thread-resumed" })),
       listSessions: vi.fn(async () => []),
+      statusForDisplay: vi.fn(async () => conversationStatus({ workspaceId: "main", model: "gpt-test", modelProvider: "openai" })),
       status: vi.fn(() => conversationStatus({
         workspaceId: "main",
         model: "gpt-test",
@@ -1176,7 +1177,7 @@ describe("ConversationCommandService", () => {
       ["unarchive", "thread-1", "unarchive"],
       ["pin", "", "setPinned"],
       ["unpin", "", "setPinned"],
-      ["status", "", "status"],
+      ["status", "", "statusForDisplay"],
       ["workspace", "main", "selectWorkspace"],
       ["workspaceperm", "approval never", "updateWorkspacePermissions"],
       ["stop", "", "stop"],
@@ -1210,9 +1211,7 @@ describe("ConversationCommandService", () => {
       await expect(commands.execute(target, command, input, "actor-1")).resolves.toHaveProperty("kind");
       expect(service[method].mock.calls.length).toBeGreaterThan(before);
     }
-    expect(service.status).toHaveBeenCalledWith(target, {
-      includeGitBranch: true,
-    });
+    expect(service.statusForDisplay).toHaveBeenCalledWith(target);
     expect(service.setPinned).toHaveBeenNthCalledWith(1, target, true);
     expect(service.setPinned).toHaveBeenNthCalledWith(2, target, false);
   });

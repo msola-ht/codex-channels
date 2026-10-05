@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Logger } from "pino";
+import pino, { type Logger } from "pino";
+import { AppType, Client, type HttpInstance, type HttpRequestOptions } from "@larksuiteoapi/node-sdk";
+import { applyFeishuHttpPolicy, FeishuMessageClient } from "../src/surfaces/feishu/client.js";
+import { FeishuOutbox } from "../src/surfaces/feishu/outbox.js";
+import { DeliveryReceipt } from "../src/surfaces/delivery-receipt.js";
 
 import type {
   InteractionRequest,
@@ -17,6 +21,221 @@ const target = {
 } as const;
 
 describe("Feishu interaction port", () => {
+  it.each(["before-id", "with-id"] as const)("cleans a production-chain card exactly once after cancellation %s", async (when) => {
+    const fixture = productionFixture();
+    const decision = fixture.interactions.request(target, approvalRequest());
+    await settle();
+    const creation = fixture.creations[0]!;
+    const token = interactionToken(creation.card, "approve-once");
+    if (when === "before-id") fixture.interactions.cancelAll("连接已断开");
+    creation.resolve({ code: 0, data: { get message_id() {
+      if (when === "with-id") fixture.interactions.cancelAll("连接已断开");
+      return "om_late";
+    } } });
+    await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+    await settle();
+    expect(creation.signal.aborted).toBe(true);
+    expect(fixture.patches).toHaveLength(1);
+    expect(fixture.patches[0]).toMatchObject({ messageId: "om_late" });
+    expect(JSON.stringify(fixture.patches[0]!.card)).toContain("连接已断开");
+    expect(fixture.interactions.handleCardAction(cardAction("om_late", token))).toBe("stale");
+    await fixture.interactions.close();
+    await fixture.outbox.close();
+    expect(fixture.patches).toHaveLength(1);
+  });
+
+  it("releases a timed-out reservation while independently cleaning its late ID and accepting a new token", async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = productionFixture();
+      const old = fixture.interactions.request(target, approvalRequest());
+      const failed = expect(old).rejects.toMatchObject({ code: "send-timeout" });
+      await vi.advanceTimersByTimeAsync(100);
+      await failed;
+      const oldCreation = fixture.creations[0]!;
+      const next = fixture.interactions.request(target, approvalRequest());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.creations).toHaveLength(2);
+      oldCreation.resolve({ code: 0, data: { message_id: "om_old" } });
+      fixture.creations[1]!.resolve({ code: 0, data: { message_id: "om_new" } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.interactions.handleCardAction(cardAction("om_old", interactionToken(oldCreation.card, "approve-once")))).toBe("stale");
+      expect(fixture.interactions.handleCardAction(cardAction("om_new", interactionToken(fixture.creations[1]!.card, "approve-once")))).toBe("accepted");
+      await expect(next).resolves.toMatchObject({ approved: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.patches.map(({ messageId }) => messageId)).toEqual(["om_old", "om_new"]);
+      expect(JSON.stringify(fixture.patches[1]!.card)).toContain("已批准一次");
+      expect(JSON.stringify(fixture.patches[1]!.card)).not.toContain("请求已失效");
+      await fixture.interactions.close();
+      await fixture.outbox.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["business-error", "raw-rejection"] as const)("never treats %s as a successful creation even after cancellation", async (result) => {
+    const fixture = productionFixture();
+    const decision = fixture.interactions.request(target, approvalRequest());
+    await settle();
+    fixture.interactions.cancelAll();
+    await decision;
+    if (result === "business-error") fixture.creations[0]!.resolve({ code: 230001, data: { message_id: "om_invalid" } });
+    else fixture.creations[0]!.reject(new Error("fixture"));
+    await settle();
+    expect(fixture.patches).toEqual([]);
+    await fixture.interactions.close();
+    await fixture.outbox.close();
+  });
+
+  it("does not bypass the closed production outbox to clean an ID after ordered-wait cancellation", async () => {
+    const fixture = productionFixture();
+    const decision = fixture.interactions.request(target, approvalRequest());
+    const failed = expect(decision).rejects.toThrow();
+    await settle();
+    await fixture.outbox.close();
+    await failed;
+    fixture.creations[0]!.resolve({ code: 0, data: { message_id: "om_after_close" } });
+    await settle();
+    expect(fixture.patches).toEqual([]);
+    expect(fixture.interactions.handleCardAction(cardAction("om_after_close", interactionToken(fixture.creations[0]!.card, "approve-once")))).toBe("stale");
+    await fixture.interactions.close();
+  });
+
+  it("bounds shutdown with an unsettled creation, then stops late cleanup and releases its captures", async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = productionFixture();
+      const decision = fixture.interactions.request(target, approvalRequest());
+      await vi.advanceTimersByTimeAsync(0);
+      const close = fixture.interactions.close();
+      expect(fixture.interactions.close()).toBe(close);
+      await expect(decision).resolves.toMatchObject({ approved: false });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await close;
+      expect(Reflect.get(fixture.interactions, "preparationDisposals").size).toBe(0);
+      fixture.creations[0]!.resolve({ code: 0, data: { message_id: "om_after_deadline" } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.patches).toEqual([]);
+      await fixture.outbox.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("bounds a stalled cleanup from enqueue time and aborts its production HTTP", async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = productionFixture(true);
+      const decision = fixture.interactions.request(target, approvalRequest());
+      await vi.advanceTimersByTimeAsync(0);
+      fixture.interactions.cancelAll();
+      await decision;
+      fixture.creations[0]!.resolve({ code: 0, data: { message_id: "om_stalled_cleanup" } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.patches).toHaveLength(1);
+      expect(fixture.patches[0]!.signal.aborted).toBe(false);
+      const close = fixture.interactions.close();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await close;
+      expect(fixture.patches[0]!.signal.aborted).toBe(true);
+      await fixture.outbox.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("expires queued cleanup without starting platform HTTP after its entire budget was spent waiting", async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = productionFixture(true);
+      const decision = fixture.interactions.request(target, approvalRequest());
+      await vi.advanceTimersByTimeAsync(0);
+      fixture.interactions.cancelAll();
+      await decision;
+      await vi.advanceTimersByTimeAsync(0);
+      const blocker = fixture.outbox.deliverText(target.conversationId, "fixture");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.creations).toHaveLength(2);
+      fixture.creations[0]!.resolve({ code: 0, data: { message_id: "om_queued_cleanup" } });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fixture.patches).toEqual([]);
+      expect(fixture.creations[1]!.signal.aborted).toBe(false);
+      fixture.creations[1]!.resolve({ code: 0, data: { message_id: "om_blocker" } });
+      await blocker;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.patches).toEqual([]);
+      await fixture.interactions.close();
+      await fixture.outbox.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("rechecks the original actor authorization before activating a delivered card", async () => {
+    const fixture = productionFixture();
+    const decision = fixture.interactions.request(target, approvalRequest());
+    await settle();
+    fixture.allowed.value = false;
+    fixture.creations[0]!.resolve({ code: 0, data: { message_id: "om_revoked" } });
+    await expect(decision).resolves.toMatchObject({ approved: false });
+    await settle();
+    expect(fixture.patches).toHaveLength(1);
+    expect(fixture.interactions.handleCardAction(cardAction("om_revoked", interactionToken(fixture.creations[0]!.card, "approve-once")))).toBe("stale");
+    await fixture.interactions.close();
+    await fixture.outbox.close();
+  });
+
+  it("retains the platform ID and cleans independently when the creation checkpoint cancels and fails", async () => {
+    const fixture = productionFixture();
+    const interactions = new FeishuInteractionPort({
+      deliverCard: (chatId, card, signal, observeCreation) => {
+        const receipt = new DeliveryReceipt(async ({ state, messageId }) => {
+          if (state !== "confirmed") return;
+          expect(messageId).toBe("om_checkpoint");
+          interactions.cancelAll("请求已失效");
+          throw new Error("checkpoint failure");
+        }, signal!, true);
+        const sending = receipt.run(() => fixture.outbox.deliverCard(chatId, card, signal, observeCreation));
+        receipt.release();
+        return sending;
+      },
+      updateCard: (...args) => fixture.outbox.updateCard(...args),
+    }, { actors: () => ["ou_actor"], rememberActor() {} }, { isAllowed: () => true });
+    const decision = interactions.request(target, approvalRequest());
+    await settle();
+    fixture.creations[0]!.resolve({ code: 0, data: { message_id: "om_checkpoint" } });
+    await expect(decision).resolves.toMatchObject({ approved: false });
+    await settle();
+    expect(fixture.patches).toHaveLength(1);
+    expect(fixture.patches[0]!.messageId).toBe("om_checkpoint");
+    await interactions.close();
+    await fixture.interactions.close();
+    await fixture.outbox.close();
+  });
+
+  it("disposes preparations which fail before observing any SDK creation", async () => {
+    const interactions = new FeishuInteractionPort({
+      deliverCard: () => { throw new Error("fixture"); }, updateCard: async () => {},
+    }, { actors: () => ["ou_actor"], rememberActor() {} }, { isAllowed: () => true });
+    await expect(interactions.request(target, approvalRequest())).rejects.toThrow("fixture");
+    expect(Reflect.get(interactions, "preparationDisposals").size).toBe(0);
+    // The same request ID can be reserved again after an ordinary failure.
+    await expect(interactions.request(target, approvalRequest())).rejects.toThrow("fixture");
+    await interactions.close();
+  });
+
+  it("releases a preparation cancelled in the production FIFO before any card creation starts", async () => {
+    const fixture = productionFixture();
+    const blocker = fixture.outbox.deliverText(target.conversationId, "fixture");
+    await settle();
+    const decision = fixture.interactions.request(target, approvalRequest());
+    await settle();
+    expect(fixture.creations).toHaveLength(1);
+    fixture.interactions.resolved("approval-1");
+    await expect(decision).resolves.toMatchObject({ approved: false });
+    await settle();
+    expect(Reflect.get(fixture.interactions, "preparationDisposals").size).toBe(0);
+    fixture.creations[0]!.resolve({ code: 0, data: { message_id: "om_blocker" } });
+    await blocker;
+    await settle();
+    expect(fixture.creations).toHaveLength(1);
+    expect(fixture.patches).toEqual([]);
+    await fixture.interactions.close();
+    await fixture.outbox.close();
+  });
+
   it.each(["Codex 等待回答", "Codex 请求补充信息（可跳过）", "异步问题（任务继续执行）"])("preserves the upstream question presentation: %s", async (title) => {
     const fixture = createConfiguredFixture();
     const decision = fixture.interactions.request(target, { ...userInputRequest(), title });
@@ -1039,6 +1258,49 @@ describe("Feishu interaction port", () => {
     expect(fixture.sentCards).toEqual([]);
   });
 });
+
+function productionFixture(stallCleanup = false) {
+  type Options = HttpRequestOptions<{ content: string }> & { signal: AbortSignal };
+  const creations: Array<{
+    card: FeishuCardDocument; signal: AbortSignal;
+    resolve(response: { code: number; data: { message_id: string } }): void;
+    reject(error: Error): void;
+  }> = [];
+  const patches: Array<{ messageId: string; card: FeishuCardDocument; signal: AbortSignal }> = [];
+  const sdk = new Client({
+    appId: "cli_0123456789abcdef", appSecret: "fixture", appType: AppType.SelfBuild,
+    logger: { error() {}, warn() {}, info() {}, debug() {}, trace() {} },
+    cache: { async get() { return undefined; }, async set() { return true; } },
+    httpInstance: applyFeishuHttpPolicy({
+      post: async () => ({ tenant_access_token: "fixture", expire: 3600 }),
+      request: (options: Options) => {
+        if (options.method === "PATCH") {
+          patches.push({ messageId: options.url!.split("/").at(-1)!, card: JSON.parse(options.data!.content), signal: options.signal });
+          return stallCleanup ? new Promise(() => {}) : Promise.resolve({ code: 0 });
+        }
+        return new Promise((resolve, reject) => creations.push({ card: JSON.parse(options.data!.content), signal: options.signal, resolve, reject }));
+      },
+    } as unknown as HttpInstance, 15_000),
+  });
+  const client = new FeishuMessageClient({ appId: "cli_0123456789abcdef", appSecret: "fixture" }, {
+    sendTimeoutMs: stallCleanup ? 15_000 : 100,
+    createSdkClient: () => ({
+      createMessage: (payload) => sdk.im.v1.message.create(payload),
+      patchMessage: (payload) => sdk.im.v1.message.patch(payload),
+      downloadResource: (payload) => sdk.im.v1.messageResource.get(payload),
+    }),
+  });
+  const outbox = new FeishuOutbox(target.accountId, client, pino({ enabled: false }));
+  const allowed = { value: true };
+  const interactions = new FeishuInteractionPort(outbox,
+    { actors: () => ["ou_actor"], rememberActor() {} }, { isAllowed: () => allowed.value });
+  return { interactions, outbox, creations, patches, allowed };
+}
+
+function cardAction(messageId: string, token: string) {
+  return { messageId, chatId: target.conversationId, actorOpenId: "ou_actor", tag: "button",
+    value: { interaction_token: token, decision: "approve-once" } };
+}
 
 function createConfiguredFixture(
   actors: readonly string[] = ["ou_actor"],

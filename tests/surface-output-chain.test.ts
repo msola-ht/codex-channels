@@ -431,7 +431,8 @@ it.concurrent.for([false, true])("releases a suspended account's snapshots witho
 });
 
 async function fixture(block = false, platform: "telegram" | "feishu" = "telegram", failFirst = false, failAnswer = false, existingDirectory?: string,
-  options: { trackCards?: boolean; telegramEdit?: (...args: unknown[]) => Promise<unknown>; telegramFormat?: "html" | "rich"; feishu?: Partial<FeishuMessagePort> } = {}) {
+  options: { trackCards?: boolean; telegramEdit?: (...args: unknown[]) => Promise<unknown>; telegramFormat?: "html" | "rich"; feishu?: Partial<FeishuMessagePort>;
+    gitBranch?: ConstructorParameters<typeof SurfaceManager>[3] } = {}) {
   const target = { surface: platform, accountId: "default", conversationId: "chat" };
   const directory = existingDirectory ?? mkdtempSync(join(tmpdir(), "codexc-state-chain-"));
   if (!existingDirectory) directories.push(directory);
@@ -479,7 +480,7 @@ async function fixture(block = false, platform: "telegram" | "feishu" = "telegra
     interactions: { request: async () => ({ type: "approval", approved: false }) },
     start: async () => {}, stop: () => outbox.close(), deliverConfigurationChange: async () => {},
   };
-  const manager = new SurfaceManager([surface], output, logger, undefined, {
+  const manager = new SurfaceManager([surface], output, logger, options.gitBranch, {
     persistence: { directory, workerUrl: new URL("../dist/delivery/worker.js", import.meta.url),
       owner: () => "actor", authorized: () => authorized, fault: (code) => { faults.push(code); } },
   });
@@ -487,6 +488,52 @@ async function fixture(block = false, platform: "telegram" | "feishu" = "telegra
   return { directory, target, outbox, output, manager, rendered, observed, sent, sentTargets, checkpoints, faults, release, revoke: () => { authorized = false; },
     close: async () => { release(); await manager.stop(); await output.close(); } };
 }
+
+it.concurrent.for([false, true])("degrades a persistent completion's optional enrichment and preserves real send failure (failure=%s)", async (failure, { expect }) => {
+  const f = await fixture(false, "telegram", failure, false, undefined, {
+    gitBranch: async () => { throw new Error("PRIVATE OPTIONAL LOOKUP FAILURE"); },
+  });
+  const completion: OutputEvent = { ...base, type: "turn.completed", status: "completed", timing: { modelRequestCount: 7 } };
+  try {
+    f.output.publish(completion, true);
+    await f.manager.waitForPersistentOutput(f.target, AbortSignal.timeout(3_000));
+    expect(f.rendered).toContainEqual(completion);
+    expect(f.sent).toHaveLength(1);
+    expect(f.checkpoints.map((checkpoint) => checkpoint.state)).toEqual(failure ? ["started"] : ["started", "confirmed"]);
+    if (failure) await vi.waitFor(() => expect(f.faults).toEqual(["delivery-uncertain"]));
+    expect(f.faults).toEqual(failure ? ["delivery-uncertain"] : []);
+  } finally { await f.close(); }
+  const stored = new SqliteDeliveryJournal(f.directory);
+  try { expect(stored.execute({ type: "summary" })).toMatchObject(failure ? { records: 1, uncertain: 1 } : { records: 0 }); }
+  finally { stored.close(); }
+});
+
+it.concurrent.for(["authorization", "cancel"] as const)("does not send a persistent completion after %s changes during enrichment", async (reason, { expect }) => {
+  let signal!: AbortSignal;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const f = await fixture(false, "telegram", false, false, undefined, {
+    gitBranch: async (_target, active) => { signal = active; await gate; return "feature/stale"; },
+  });
+  try {
+    f.output.publish({ ...base, type: "turn.completed", status: "completed" }, true);
+    await vi.waitFor(() => expect(signal).toBeInstanceOf(AbortSignal));
+    if (reason === "authorization") {
+      f.revoke();
+      release();
+      await vi.waitFor(() => expect(f.faults).toEqual(["delivery-uncertain"]));
+    } else {
+      await f.manager.stop();
+      expect(signal.aborted).toBe(true);
+      release();
+    }
+    expect(f.sent).toEqual([]);
+    expect(f.checkpoints).toEqual([]);
+  } finally { release(); await f.close(); }
+  const stored = new SqliteDeliveryJournal(f.directory);
+  try { expect(stored.execute({ type: "summary" })).toMatchObject({ records: 1, uncertain: 1 }); }
+  finally { stored.close(); }
+});
 
 it.concurrent("keeps start before a same-tick completed answer while observing lifecycle immediately", async ({ expect }) => {
   const f = await fixture();

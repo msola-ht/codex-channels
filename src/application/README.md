@@ -25,7 +25,7 @@
   `submitAsyncAnswer` 在同一 Conversation 锁内、发送前校验原 Thread 绑定和问题有效性，再复用普通 start/steer 路径；
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
-  并通过组合根注入的只读端口取得当前 Workspace Git 分支；
+  普通 `status` 不执行 Git IO，展示入口 `statusForDisplay` 通过组合根注入的异步只读端口取得当前 Workspace Git 分支；完成卡仅调用 `workspaceGitBranch`，不连带查询模型与账户状态；
   `/stop` 同时取消当前 Thread 尚未提交的图片准备；已提交 Turn 继续使用官方中断。
   所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；
   通过 Core 跟踪恢复期间的 Turn 通知，在绑定成功后恢复仍有效的活动状态。

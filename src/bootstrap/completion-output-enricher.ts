@@ -48,7 +48,7 @@ export class CompletionOutputEnricher {
 
   constructor(
     private readonly logger: Logger,
-    private readonly currentGitBranch: ((target: OutputEvent["target"]) => string | undefined) | undefined,
+    private readonly currentGitBranch: ((target: OutputEvent["target"], signal: AbortSignal) => Promise<string | undefined>) | undefined,
     private readonly options: CompletionOutputEnricherOptions,
   ) {}
 
@@ -68,15 +68,19 @@ export class CompletionOutputEnricher {
    * 富化放在投递前而不是入队前：渠道不可用期间不读取指标库，被恢复缓冲裁掉的过程事件
    * 也不会触发读取，真正投递时再按当时已经落库的结果生成卡片。
    */
-  async enrich(event: OutputEvent): Promise<OutputEvent> {
+  async enrich(event: OutputEvent, callerSignal?: AbortSignal): Promise<OutputEvent> {
+    const signal = callerSignal ? AbortSignal.any([callerSignal, this.queriesAbort.signal]) : this.queriesAbort.signal;
     if (event.type === "subagent.spawned" || event.type === "subagent.contacted") {
-      return this.readSubagentMetadata(event);
+      return this.readSubagentMetadata(event, signal);
     }
     if (event.type !== "turn.completed") {
       return event;
     }
-    const accountStatusResult = this.readCompletionAccountStatus(event);
+    const accountStatusResult = this.readCompletionAccountStatus(event, signal);
     const enrichmentDeadline = Date.now() + completionEnrichmentTimeoutMs;
+    const gitBranchResult = this.readGitBranch(event, enrichmentDeadline, signal);
+    // Keep unexpected callback failures observed while the ordered metrics settle.
+    void gitBranchResult.catch(() => undefined);
     const timingResult = this.resolveCompletionMetrics(
       event,
       "turn",
@@ -110,6 +114,7 @@ export class CompletionOutputEnricher {
       ? await sessionAggregateResult
       : sessionAggregateResult;
     const accountStatus = await accountStatusResult;
+    const gitBranch = await gitBranchResult;
     let execution: ReturnType<NonNullable<CompletionOutputEnricherOptions["executionTiming"]>> | undefined;
     try {
       execution = this.options.executionTiming?.(event.threadId, event.turnId);
@@ -119,7 +124,7 @@ export class CompletionOutputEnricher {
     return {
       ...event,
       ...(accountStatus === undefined ? {} : { accountStatus }),
-      gitBranch: this.currentGitBranch?.(event.target),
+      ...(gitBranch ? { gitBranch } : {}),
       ...(timing === undefined ? {} : { timing }),
       ...(taskAggregate === undefined ? {} : { taskAggregate }),
       ...(sessionAggregate === undefined ? {} : { sessionAggregate }),
@@ -129,13 +134,40 @@ export class CompletionOutputEnricher {
     };
   }
 
+  private async readGitBranch(
+    event: Extract<OutputEvent, { type: "turn.completed" }>,
+    deadlineAtMs: number,
+    callerSignal: AbortSignal,
+  ): Promise<string | undefined> {
+    if (!this.currentGitBranch || this.stopping || callerSignal.aborted) return undefined;
+    const deadline = new AbortController();
+    const signal = AbortSignal.any([deadline.signal, callerSignal]);
+    let cancel!: () => void;
+    const cancelled = new Promise<undefined>((resolve) => {
+      cancel = () => resolve(undefined);
+      signal.addEventListener("abort", cancel, { once: true });
+    });
+    try {
+      const branch = await withDeadline(
+        Promise.race([this.currentGitBranch(event.target, signal), cancelled]),
+        Math.max(0, deadlineAtMs - Date.now()),
+        () => { deadline.abort(); return undefined; },
+      );
+      return signal.aborted ? undefined : branch;
+    } finally {
+      signal.removeEventListener("abort", cancel);
+      deadline.abort();
+    }
+  }
+
   private async readSubagentMetadata(
     event: Extract<OutputEvent, { type: "subagent.spawned" | "subagent.contacted" }>,
+    callerSignal: AbortSignal,
   ): Promise<OutputEvent> {
     const fallback = { ...event, modelProvider: null, model: null, reasoningEffort: null };
-    if (!this.options.subagentMetadata || this.stopping) return fallback;
+    if (!this.options.subagentMetadata || this.stopping || callerSignal.aborted) return fallback;
     const deadline = new AbortController();
-    const signal = AbortSignal.any([deadline.signal, this.queriesAbort.signal]);
+    const signal = AbortSignal.any([deadline.signal, callerSignal]);
     let cancel: (() => void) | undefined;
     try {
       const read = this.options.subagentMetadata.bind(this.options);
@@ -183,11 +215,12 @@ export class CompletionOutputEnricher {
 
   private async readCompletionAccountStatus(
     event: Extract<OutputEvent, { type: "turn.completed" }>,
+    callerSignal: AbortSignal,
   ): Promise<CompletionAccountStatus | undefined> {
     const provider = event.modelProvider;
-    if (!provider || provider === "openai" || !this.options.completionAccountStatus || this.stopping) return undefined;
+    if (!provider || provider === "openai" || !this.options.completionAccountStatus || this.stopping || callerSignal.aborted) return undefined;
     const deadline = new AbortController();
-    const signal = AbortSignal.any([deadline.signal, this.queriesAbort.signal]);
+    const signal = AbortSignal.any([deadline.signal, callerSignal]);
     try {
       const query = this.options.completionAccountStatus(provider, signal);
       const result = await withDeadline(query, 2_000, () => {

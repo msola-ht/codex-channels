@@ -466,9 +466,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "status":
         return {
           kind: "status",
-          status: this.conversations.status(target, {
-            includeGitBranch: true,
-          }),
+          status: await this.conversations.statusForDisplay(target),
         };
       case "workspace": {
         if (argumentsText) {

@@ -8,6 +8,34 @@ import {
 } from "../src/surfaces/telegram/lifecycle.js";
 
 describe("TelegramLifecycle", () => {
+  it("cancels startup status preparation and suppresses its late result on stop", async () => {
+    const bot = new Bot("123:token");
+    vi.spyOn(bot, "init").mockResolvedValue();
+    vi.spyOn(bot, "botInfo", "get").mockReturnValue({ username: "test_bot" } as Bot["botInfo"]);
+    const sent: string[] = [];
+    bot.api.config.use(async (_previous, method, _payload, signal) => {
+      if (method === "getUpdates") {
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+        return { ok: true, result: [] } as never;
+      }
+      if (method === "sendMessage") sent.push(method);
+      return { ok: true, result: true } as never;
+    });
+    let notificationSignal!: AbortSignal;
+    const lifecycle = new TelegramLifecycle(bot, pino({ level: "silent" }), {
+      messages: async (signal) => {
+        notificationSignal = signal;
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+        return [{ chatId: 123, text: "late status" }];
+      },
+    });
+    lifecycle.start();
+    await vi.waitFor(() => expect(notificationSignal).toBeInstanceOf(AbortSignal));
+    await lifecycle.stop();
+    expect(notificationSignal.aborted).toBe(true);
+    expect(sent).toEqual([]);
+  });
+
   it("passes shutdown cancellation to command registration through the real SDK", async () => {
     const bot = new Bot("123:token");
     vi.spyOn(bot, "init").mockResolvedValue();

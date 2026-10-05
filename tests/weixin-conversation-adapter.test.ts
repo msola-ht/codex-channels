@@ -606,7 +606,7 @@ describe("WeixinConversationAdapter", () => {
   });
 
   it("uses shared status, new, and stop command semantics", async () => {
-    const status = vi.fn(() => conversationStatus({
+    const status = vi.fn<(inputTarget: typeof target) => ReturnType<typeof conversationStatus>>(() => conversationStatus({
       gitBranch: "feature/weixin-surface",
       threadId: "thread",
       model: "gpt-test",
@@ -619,7 +619,7 @@ describe("WeixinConversationAdapter", () => {
     const stop = vi.fn(async () => true);
     const notifyText = vi.fn(() => true);
     const adapter = new WeixinConversationAdapter(
-      serviceFixture({ status, newSession, stop }),
+      serviceFixture({ status, statusForDisplay: async (target) => status(target), newSession, stop }),
       { notifyText },
     );
 
@@ -627,9 +627,7 @@ describe("WeixinConversationAdapter", () => {
     await adapter.handle({ ...message, text: "/new" });
     await adapter.handle({ ...message, text: "/stop" });
 
-    expect(status).toHaveBeenCalledWith(target, {
-      includeGitBranch: true,
-    });
+    expect(status).toHaveBeenCalledWith(target);
     expect(newSession).toHaveBeenCalledWith(target);
     expect(stop).toHaveBeenCalledWith(target);
     expect(notifyText).toHaveBeenNthCalledWith(
@@ -669,7 +667,7 @@ describe("WeixinConversationAdapter", () => {
     ).getTime();
     const adapter = new WeixinConversationAdapter(
       serviceFixture({
-        status: vi.fn(() => conversationStatus({
+        statusForDisplay: vi.fn(async () => conversationStatus({
           threadId: "thread",
           model: "gpt-test",
           effort: "medium",

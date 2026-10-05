@@ -143,7 +143,7 @@ export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
 
 export type TelegramConversationUseCases =
   & Pick<ConversationTurnUseCases, "touchActivity" | "submit">
-  & Pick<ConversationSessionUseCases, "status" | "listWorkspaces">
+  & Pick<ConversationSessionUseCases, "status" | "statusForDisplay" | "listWorkspaces">
   & Pick<ConversationExtensionUseCases, "modelState" | "listPlugins">;
 
 export function createTelegramSurface(
@@ -267,37 +267,42 @@ export class TelegramSurface {
       this.bot,
       logger,
       {
-        messages: () => Promise.resolve([...startupRecipients].map((chatId) => {
-          const status = this.service.status(
-            {
-              surface: "telegram",
-              accountId: telegramDefaultAccountId,
-              conversationId: String(chatId),
-            },
-            { includeGitBranch: true },
-          );
-          const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated?.();
-          return {
-            chatId,
-            text: formatStartupNotification(workspaces, status, {
-              platform: process.platform,
-              architecture: process.arch,
-              ...(options.appServerTimezone === undefined
-                ? {} : { appServerTimezone: options.appServerTimezone }),
-              gatewayVersion: options.gatewayVersion,
-              nodeVersion: process.version,
-              transport: "Unix WebSocket",
-              codexUpstreamUserAgent: options.codexUpstreamUserAgent?.() ?? null,
-              ...(officialOpenAiAuthenticated === undefined
-                ? {}
-                : { officialOpenAiAuthenticated }),
-              ...(options.openAiConnectivity
-                ? { openAiConnectivity: options.openAiConnectivity() }
-                : {}),
-              debugEnabled: this.debugEnabled,
-            }),
-          };
-        })),
+        messages: async (signal) => {
+          const messages: Array<{ chatId: number; text: string }> = [];
+          for (const chatId of startupRecipients) {
+            signal.throwIfAborted();
+            const status = await this.service.statusForDisplay(
+              {
+                surface: "telegram",
+                accountId: telegramDefaultAccountId,
+                conversationId: String(chatId),
+              },
+              signal,
+            );
+            const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated?.();
+            messages.push({
+              chatId,
+              text: formatStartupNotification(workspaces, status, {
+                platform: process.platform,
+                architecture: process.arch,
+                ...(options.appServerTimezone === undefined
+                  ? {} : { appServerTimezone: options.appServerTimezone }),
+                gatewayVersion: options.gatewayVersion,
+                nodeVersion: process.version,
+                transport: "Unix WebSocket",
+                codexUpstreamUserAgent: options.codexUpstreamUserAgent?.() ?? null,
+                ...(officialOpenAiAuthenticated === undefined
+                  ? {}
+                  : { officialOpenAiAuthenticated }),
+                ...(options.openAiConnectivity
+                  ? { openAiConnectivity: options.openAiConnectivity() }
+                  : {}),
+                debugEnabled: this.debugEnabled,
+              }),
+            });
+          }
+          return messages;
+        },
       },
       options.onFatal,
       { isInteractionUpdate: update => this.interactions.isInteractionUpdate(update) },

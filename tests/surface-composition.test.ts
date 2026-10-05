@@ -651,6 +651,7 @@ function options(
     service: {
       submit: vi.fn(),
       status: vi.fn(),
+      statusForDisplay: vi.fn(),
       listWorkspaces: vi.fn(),
       modelState: vi.fn(),
       listPlugins: vi.fn(),
