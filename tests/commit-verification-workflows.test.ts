@@ -267,7 +267,7 @@ if (command === process.env.VERIFY_FAIL) process.exit(17);
     "package.json", "package-lock.json", "scripts/verification-scope.mjs", "scripts/verify-commit.mjs",
     "scripts/run-upgrade-validation.mjs", ".github/workflows/ci.yml", ".githooks/pre-commit",
     "runtime/executable.mjs", "scripts/service-install-management.mjs", "scripts/service-install-context.mjs",
-    "scripts/local-installation.mjs", "scripts/local-source-deployment.mjs",
+    "scripts/local-installation.mjs",
   ])("checks installation and App Server boundaries when their gate or inputs change: %s", path => {
     expect(verificationScope([{ status: "M", path }])).toEqual({ package: true, appServer: true });
   });

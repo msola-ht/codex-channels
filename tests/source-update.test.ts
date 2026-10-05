@@ -11,10 +11,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
-import { configureCodexUpdateDefaults, disableCodexDaemonAutoStart } from "../scripts/codex-user-config.mjs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { disableCodexDaemonAutoStart } from "../scripts/codex-user-config.mjs";
 
 import {
   getCodexVersionMismatchRemediation,
@@ -28,6 +28,13 @@ import {
 
 const temporaryDirectories: string[] = [];
 
+vi.mock("../scripts/service-status.mjs", () => ({
+  inspectManagedServiceStatus: ({ target }: { target: string }) => ({
+    services: target === "webui" ? [{ target: "webui", running: false, state: "not-found" }]
+      : ["app-server", "gateway"].map(target => ({ target, running: true, state: "active/running" })),
+  }),
+}));
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -35,12 +42,11 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
-  it.each([undefined, "keep-user-model"])("supports the previous updater handoff without setting a model: %s", async model => {
+  it.each([undefined, "keep-user-model"])("preserves the model when disabling daemon auto-start: %s", async model => {
     const config = { ...(model === undefined ? {} : { model }), features: { daemon_auto_start: true } };
     const writes: unknown[] = [];
     let closed = false;
-    expect(configureCodexUpdateDefaults).toBe(disableCodexDaemonAutoStart);
-    await configureCodexUpdateDefaults({}, { createClient: async () => ({
+    await disableCodexDaemonAutoStart({}, { createClient: async () => ({
       connect: async () => undefined,
       close: async () => { closed = true; },
       readUserConfigSnapshot: async () => ({ config, version: "handoff-version" }),
@@ -114,7 +120,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       projectDir: fixture.checkout, repository: fixture.repository,
       buildCheckout: () => {}, installGlobalPackage: () => {}, validateCodexContract: () => {},
       inspectStaged: async () => ({ services: { installed: true } }),
-      stopServices: () => {}, inspectRelayRunning: () => false,
+      stopServices: () => {}, inspectServices: () => [],
       startServices: () => { restored = true; },
       runCommand: (command, args, options) => {
         if (args.some(arg => arg.includes("disableCodexDaemonAutoStart"))) throw new Error("config conflict");
@@ -129,7 +135,12 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     expect(restored).toBe(true);
   });
 
-  it.each([false, true])("restores only previously running Relay after package update (running=%s)", async running => {
+  it.each([
+    { running: false, core: true, webui: true },
+    { running: true, core: true, webui: true },
+    { running: false, core: false, webui: true },
+    { running: false, core: false, webui: false },
+  ])("restores only previously running services after package update (%j)", async ({ running, core, webui }) => {
     const fixture = createInstalledFixture("relay-update-state-");
     writePackageVersion(fixture.checkout, "0.148.0");
     const config = join(fixture.installRoot, "config.toml");
@@ -140,13 +151,15 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     const calls: string[][] = [];
     await updateInstalledPackage({ ...fixture.environment, CODEX_CONNECT_CONFIG_FILE: config, XDG_CONFIG_HOME: join(fixture.environment.HOME, ".config") }, {
       projectDir: fixture.checkout, inspectStaged: async () => ({ services: { installed: true } }),
-      inspectRelayRunning: () => running, confirmCodexCliInstall: () => true,
+      inspectServices: () => [{ target: "app-server", running: core }, { target: "gateway", running: core },
+        { target: "webui", running: webui }, { target: "model-relay", running }], confirmCodexCliInstall: () => true,
       installCodexCliForValidation: version => writeFakeCodex(join(fixture.installRoot, "candidate"), version),
       validateCodexContract: () => {}, installCodexCli: version => { writeFakeCodex(fixture.codex, version); },
       runCommand: (_command, args) => { calls.push(args); },
     });
     expect(calls.filter(args => args[1] === "service").map(args => args.slice(2))).toEqual([
-      ["stop", "all"], ["start", "app-server"], ["start", "gateway"], ...(running ? [["start", "relay"]] : []),
+      ...(webui ? [["stop", "webui"]] : []), ...(running ? [["stop", "relay"]] : []), ...(core ? [["stop", "gateway"], ["stop", "app-server"]] : []),
+      ...(core ? [["start", "app-server"], ["start", "gateway"]] : []), ...(running ? [["start", "relay"]] : []), ...(webui ? [["start", "webui"]] : []),
     ]);
   });
 
@@ -156,18 +169,18 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     await expect(updateManagedSourceInstallation(fixture.environment, {
       projectDir: fixture.checkout, repository: fixture.repository, buildCheckout: () => {},
       inspectStaged: async () => ({ services: { installed: true } }),
-      inspectRelayRunning: () => { captured = true; return running; }, validateCodexContract: () => {},
+      inspectServices: () => { captured = true; return [{ target: "model-relay", running }]; }, validateCodexContract: () => {},
       stopServices: () => { expect(captured).toBe(true); throw new Error("fixture stop failure"); },
-      startServices: (_checkout, _environment, _options, wasRunning) => { restored.push(wasRunning); throw new Error("fixture recovery failure"); },
+      startServices: (_checkout, _environment, _options, services) => { restored.push(services[0]!.running); throw new Error("fixture recovery failure"); },
     })).rejects.toThrow("未能恢复");
     expect(restored).toEqual([running]);
   });
 
-  it("installs a missing default CLI through the confirmed candidate flow", async () => {
+  it.each(["", "codex"])("installs a missing default CLI through the confirmed candidate flow (%s)", async binary => {
     const fixture = createInstalledFixture("codexc-package-missing-cli-");
     const bin = join(fixture.installRoot, "empty-bin");
     mkdirSync(bin);
-    const environment = { ...fixture.environment, CODEX_BINARY: "", PATH: bin };
+    const environment = { ...fixture.environment, CODEX_BINARY: binary, PATH: bin };
     const calls: string[] = [];
     await updateInstalledPackage(environment, {
       projectDir: fixture.checkout,
@@ -187,10 +200,11 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     expect(calls).toEqual(["confirm", "prepare", "validate", "install"]);
   });
 
-  it("does not replace a missing explicitly configured Codex binary", async () => {
+  it.each(["missing", "mismatch"])("does not replace an explicitly configured Codex binary (%s)", async state => {
     const fixture = createInstalledFixture("codexc-package-explicit-missing-");
     let confirmed = false;
-    await expect(updateInstalledPackage({ ...fixture.environment, CODEX_BINARY: join(fixture.installRoot, "absent") }, {
+    writePackageVersion(fixture.checkout, "0.148.0");
+    await expect(updateInstalledPackage({ ...fixture.environment, CODEX_BINARY: state === "missing" ? join(fixture.installRoot, "absent") : fixture.codex }, {
       projectDir: fixture.checkout,
       inspectStaged: async () => ({ services: { installed: false } }),
       confirmCodexCliInstall: () => { confirmed = true; return true; },
@@ -667,7 +681,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       .toEqual(["stop failed", "start failed"]);
   });
 
-  it("restores services when the global command refresh fails after switching source", async () => {
+  it("keeps services stopped when the global command refresh fails after switching source", async () => {
     const fixture = createInstalledFixture("codexc-source-global-install-failure-");
     let startCalls = 0;
 
@@ -687,7 +701,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     }
 
     expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toContain("main 源码已切换，但更新未完成");
+    expect((failure as Error).message).toContain("源码已切换但更新失败");
     expect(getSourceUpdateFailure(failure)).toMatchObject({
       operation: "source-update",
       code: "source-update-failed",
@@ -703,12 +717,12 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
         "switch-source",
       ]),
       recovery: {
-        services: "restored",
+        services: "failed",
         source: "switched-backup-retained",
         backupPath: expect.stringContaining("pre-update"),
       },
     });
-    expect(startCalls).toBe(1);
+    expect(startCalls).toBe(0);
     expect(readFileSync(join(fixture.checkout, "fix.txt"), "utf8")).toBe("fixed");
     expect(readdirSync(fixture.installRoot).some((name) => name.includes("pre-update")))
       .toBe(true);
@@ -738,7 +752,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     expect((failure as AggregateError).errors.map((error) => (error as Error).message))
       .toEqual([
         expect.stringContaining("main 源码已切换，但更新未完成"),
-        "service start failed",
+        expect.stringContaining("全局程序安装未完成"),
       ]);
   });
 
@@ -1135,7 +1149,8 @@ function createInstalledFixture(prefix: string) {
     checkout,
     environment: {
       ...process.env,
-      CODEX_BINARY: codex,
+      CODEX_BINARY: "codex",
+      PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
       CODEX_CONNECT_HOME: installRoot,
       CODEX_CONNECT_SERVICE_ROLE: "",
       HOME: home,

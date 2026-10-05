@@ -110,13 +110,14 @@ export interface SourceUpdateOptions {
     checkout: string,
     environment: NodeJS.ProcessEnv,
     options: SourceUpdateOptions,
+    services: readonly { target: string; running: boolean }[],
   ) => Promise<void> | void;
-  inspectRelayRunning?: (environment: NodeJS.ProcessEnv) => Promise<boolean> | boolean;
+  inspectServices?: (environment: NodeJS.ProcessEnv) => Promise<{ target: string; running: boolean }[]> | { target: string; running: boolean }[];
   startServices?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
     options: SourceUpdateOptions,
-    relayWasRunning: boolean,
+    services: readonly { target: string; running: boolean }[],
   ) => Promise<void> | void;
   installGlobalPackage?: (
     checkout: string,

@@ -58,6 +58,13 @@ function Protect-Directory([string]$Path, [string]$WorkingDirectory) {
   Invoke-Checked 'node.exe' @('--input-type=module', '--eval', "import { securePrivateDirectorySync } from './runtime/private-file.mjs'; securePrivateDirectorySync(process.argv[1]);", $Path) $WorkingDirectory
 }
 
+function Read-CodexVersion($Command) {
+  if (-not $Command) { return '' }
+  $output = & $Command.Source '--version' 2>$null | Out-String
+  if ($LASTEXITCODE -ne 0) { throw 'Codex CLI 无法执行，请修复当前命令后重新安装' }
+  return ($output.Trim() -split '\s+')[-1].TrimStart('v')
+}
+
 $git = (Get-Command git.exe -ErrorAction Stop).Source
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 $npm = (Get-Command npm.cmd -ErrorAction Stop).Source
@@ -102,12 +109,14 @@ try {
   $versionDocument = Get-Content -LiteralPath (Join-Path $repositoryRoot 'src\codex-protocol\version.json') -Raw -Encoding utf8 | ConvertFrom-Json
   $version = ([string]$versionDocument.codexCli) -replace '^codex-cli ', ''
   if ($version -notmatch '^\d+\.\d+\.\d+$') { throw '源码协议元数据缺少正式 Codex CLI 版本' }
-  if (-not $codexCommand) {
-    Write-Output "[提示] 未检测到 Codex CLI，正在安装 @openai/codex@$version"
+  $codexVersion = Read-CodexVersion $codexCommand
+  if ($codexVersion -ne $version) {
+    $currentVersion = if ($codexVersion) { $codexVersion } else { '未安装' }
+    Write-Output "[提示] Codex CLI 当前 $currentVersion，正在同步为项目锁定版本 $version"
     Invoke-Checked $npm @('install', '--global', '--no-audit', '--no-fund', "@openai/codex@$version") $repositoryRoot
     $codexCommand = Get-Command codex -ErrorAction Stop
   }
-  $codexVersion = ((& $codexCommand.Source '--version').Trim() -split '\s+')[-1].TrimStart('v')
+  $codexVersion = Read-CodexVersion $codexCommand
   if ($codexVersion -ne $version) { throw "Codex CLI 版本不匹配：main 需要 $version，当前 $($codexVersion ?? '未知')" }
   & $codexCommand.Source 'login' 'status' *> $null
   $loginState = if ($LASTEXITCODE -eq 0) { '已登录' } else { '未登录或登录状态不可用' }

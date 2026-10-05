@@ -57,11 +57,6 @@ import {
 } from "../scripts/metrics-command-options.mjs";
 import { configuredEnvironment, serviceControlEnvironment } from "../scripts/runtime-environment.mjs";
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
-import {
-  BACKGROUND_UPDATE_STATUS_USAGE,
-  BACKGROUND_UPDATE_USAGE,
-  parseBackgroundUpdateArgs,
-} from "../scripts/background-update-options.mjs";
 
 const foregroundShutdownTimeoutMs = 5_000;
 const foregroundProcessGroupExitTimeoutMs = 1_000;
@@ -191,12 +186,13 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
   "opencode_go.account.remove": "用法：codexc opencode-go account remove <id>",
   "opencode_go.account.default": "用法：codexc opencode-go account default <id>",
   "opencode_go.account.stop": "用法：codexc opencode-go account stop <id>",
-  update: `${BACKGROUND_UPDATE_USAGE}
+  update: `用法：codexc update
 
 Git 源码安装检查并构建官方 main 最新提交，校验当前配置、数据库与配套 Codex CLI 合同后，
 在一个停机窗口更新程序与所需 CLI，再恢复核心服务。
 CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CLI，不更新 Gateway 程序包。
-数据库只接受当前 Schema；配置与模型目录不改写。预检失败时不停止服务，更新失败报告阶段并尝试恢复服务。必须从本机终端执行。`,
+数据库只接受当前 Schema，不迁移或删除数据；关闭 Codex daemon 自动启动，其他用户偏好与模型目录不改写。
+预检失败时不停止服务；更新按原运行状态恢复核心服务和 WebUI，失败报告阶段并尝试恢复。必须从本机终端执行。`,
   uninstall: `用法：codexc uninstall
 
 卸载后台服务、受管 Git 源码仓库与对应 npm 全局命令；保留
@@ -450,16 +446,9 @@ async function executeCommand(command, args) {
       opencodeGoAccount(args);
       break;
     case "update": {
-      const updateOptions = parseBackgroundUpdateArgs(args);
-      if (updateOptions.kind === "help") {
-        console.log(updateOptions.topic === "status" ? BACKGROUND_UPDATE_STATUS_USAGE : helpText.update);
-        break;
-      }
-      if (updateOptions.kind === "interactive") {
-        runScript("scripts/source-update.mjs", [], { failureReportedByChild: true });
-      } else {
-        await (await import("../scripts/background-update.mjs")).runBackgroundUpdateCommand(args);
-      }
+      if (showRequestedHelp(args, "update")) break;
+      requireNoArguments(args, "用法：codexc update");
+      runScript("scripts/source-update.mjs", [], { failureReportedByChild: true });
       break;
     }
     case "uninstall":

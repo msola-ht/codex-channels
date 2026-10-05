@@ -41,8 +41,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 | iex
 ```
 
-该脚本要求 Git、Node.js 22.13+、npm 和固定版本 Codex CLI；缺少 Codex CLI 时会通过 `npm.cmd`
-安装精确版本。它只使用当前用户目录，不要求管理员权限；安装失败会清理临时目录和不完整源码。
+该脚本要求 Git、Node.js 22.13+ 和 npm；Codex CLI 缺失或版本不符时会通过 `npm.cmd`
+同步为项目锁定的精确版本，随后重新检查版本与 PATH。它只使用当前用户目录，不要求管理员权限；安装失败会清理临时目录和不完整源码。
 默认克隆官方 `main`；本地开发验证可显式传入 `-Repository <本地仓库路径> -Branch <分支>`，该参数不改变
 正式安装默认值。安装器会在 Git checkout 时启用长路径支持，以覆盖 Windows 深层源码目录。
 
@@ -52,7 +52,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 全局版 `@hegenai/codexc` 及当前 `codexc` 命令来源；源码构建完成后会用当前 `main` 构建结果替换
 当前 Node.js 环境中的同名全局包。
 Codex CLI 是 Gateway 的必需运行时。安装器找不到 `codex` 时，会通过 npm 安装与 `main` 项目版本
-一致的 `@openai/codex`；已有版本不匹配时失败关闭，不自动覆盖。安装器使用固定版本官方
+一致的 `@openai/codex`；已有版本不匹配时也同步到锁定版本，可能升级或降级。同步失败或 PATH 仍指向其他版本时停止安装。安装器使用固定版本官方
 `codex login status` 检查登录状态；未登录或状态检查错误不阻止源码安装，用户需先运行该命令诊断，
 并在未登录时执行 `codex login`。npm 全局 `bin` 不在 PATH 时，自动安装后会明确停止并提示修正。
 安装器把构建产物打成临时 npm 包并安装到 `npm prefix --global`，因此不会把源码路径显示为 npm
@@ -90,38 +90,8 @@ Git 仓库用于跟踪和构建 `main`，日常命令由构建后的 npm 全局�
 codexc update
 ```
 
-### 本机源码后台部署
-
-已在本机准备好需要部署的源码时，可提交后台任务；此模式仅支持 Linux systemd 用户服务。
-先从包含此命令的新版本源码执行 `npm run install:global`，使全局 `codexc` 获得新入口，再提交：
-
-```bash
-codexc update --background --source /绝对路径/codex-channels
-codexc update status
-codexc update status <提交返回的任务 UUID> --json
-```
-
-`--source` 仅接受本机 Git 工作树根目录，不提供后台更新官方 `main` 的模式。任务包含已跟踪文件的修改和未被 Git 忽略的新增文件，
-跳过已删除文件、构建产物及依赖目录；含符号链接或子模块的源码会被拒绝。复制过程中源码发生变化也会拒绝提交，请保存后重试。
-候选源码的依赖安装、构建和部署在任务私有目录中进行；不会在用户源目录修改源码、安装依赖或提交 Git。
-后台任务由独立、持久且私有的 runner 执行，不依赖当前终端或 Gateway 进程继续存活。
-
-提交成功只表示任务已接收，不表示部署成功。`status` 只读显示执行阶段和最终结果；省略 UUID 时查看
-最新任务，可用 `--json` 查询结构化状态。查询不初始化用户配置，也不修改路径权限。
-任务记录、日志和部署回执保存在 Gateway 用户目录（`CODEX_CONNECT_HOME`，默认 `~/.codex-connect`）下的 `maintenance/updates/<UUID>/`，
-回执和程序包备份保留供人工核查；当前版本不自动删除备份，确认不再需要后再人工清理。
-部署恢复状态仅支持当前格式 v2；不读取旧部署状态，也不生成数据库迁移备份。
-
-后台模式非交互：候选源码的配套 Codex CLI 版本与当前版本不符时，在预检阶段失败并提示精确版本，
-不会静默升级 CLI。任务先完成快照、构建、配置、当前数据库结构和公开 CLI 合同预检，全部通过后才停止服务。
-完成切换并再次校验当前数据库后，恢复部署前运行的 App Server、Gateway、Relay 和 WebUI，
-等待所需服务就绪后才报告成功。
-
-前台更新与后台部署共用独占锁，同一用户目录一次只允许一个更新任务。后台任务最长运行 45 分钟，
-进程异常或超时会触发独立恢复任务，并另设恢复定时器兜底；恢复无法确认安全时保留任务占用并标记 `recovery-required`，不会自动开始下一个部署。
-
-失败结果会保留阶段、日志与回执。服务恢复必须先证明当前程序、CLI 和数据库版本相容；无法证明时保持停止，
-按状态结果及备份人工处理。恢复流程不会自动倒回用户数据，不能仅回退程序文件就启动不兼容服务。
+更新统一从本机终端执行，不提供后台任务或任务状态查询。三平台使用同一用户目录中的独占锁，阻止并发更新。
+`codex.binary = "codex"` 使用 PATH 中的默认命令，缺失或版本不符时可确认同步；显式指定其他名称或路径时由操作者维护，更新会在停服前拒绝无效或版本不符的二进制，不尝试安装另一个全局 CLI 来替代。
 
 ### 交互更新受管源码
 
@@ -131,11 +101,11 @@ codexc update status <提交返回的任务 UUID> --json
 预检。随后使用实际 CLI 核对候选源码锁定的公开参数合同、本地权限映射和
 `CODEX_HOME/config.toml` 根级及所有 Profile 用户设置；未设置 `CODEX_HOME` 时使用
 `~/.codex/config.toml`。即使 `main` 没有新提交或使用 npm 安装模式也执行同一只读检查。
-只有这些步骤全部通过，才停止已安装的核心服务，安装配套 CLI、切换源码并刷新全局命令，成功后恢复服务并确认就绪。可选 Relay 在停止前记录运行状态，成功及失败恢复都只启动原本运行且仍启用的实例；手工停止的实例保持停止。
+只有这些步骤全部通过，才记录服务状态并按 WebUI、Relay、Gateway、App Server 顺序停止运行中的服务，安装配套 CLI、切换源码并刷新全局命令。成功及失败恢复均只启动原本运行的服务，顺序为 App Server、Gateway、仍启用的 Relay、WebUI；手工停止的服务保持停止。Windows 临时克隆也启用 Git 长路径支持。
 
 更新通过官方版本化配置事务将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，避免原生终端另起官方后台；已为 `false` 时不重复写入，未设置或为 `true` 时关闭。即使源码、CLI 和数据库无需更新，也执行该设置。其他用户偏好与 Provider 模型目录不改写，也不处理历史服务和 PATH。写入失败会使更新明确失败；数据库已就绪时仍按原恢复流程恢复项目服务。此操作不停止已有官方 daemon，不改变其自动更新设置；`codexc remote` 继续连接项目管理的实例。
 
-为已运行更新器切换候选后的交接保留 `configureCodexUpdateDefaults` 内部入口，与 `disableCodexDaemonAutoStart` 委托同一实现；两个入口都只关闭 daemon 自动启动，不补写或覆盖模型。默认模型由 `codexc config` 交互确认后设置。
+默认模型由 `codexc config` 交互确认后设置，更新不补写或覆盖模型。
 
 新安装完成配置后也可运行 `codexc update` 应用此设置；以输出“已关闭 Codex 原生 daemon 自动启动”为已执行依据。
 
@@ -146,7 +116,15 @@ App Server 的会话历史不在这些数据库中。
 已有受管源码目录时直接使用 `codexc update`，不要重复运行安装器。
 
 同一版本号下的新提交仍会更新。受管源码没有新提交时，只读校验配置和数据库并按需同步配套 CLI；CLI 无需更新时不停止服务。npm 安装模式执行相同流程，不更新 Gateway npm 包。
-从开发仓库执行 `npm run install:global` 不会将其登记为受管 `main` 仓库。该入口（包括内部 `--prepared`）在注册 Gateway 全局命令前检测 Codex CLI：默认 `codex` 缺失时通过 npm 补装 `src/codex-protocol/version.json` 锁定的正式版本，并检查安装后的版本和 PATH，无需初始化或渠道配置。已有 CLI 不静默升级或降级；版本不匹配时提示完成渠道配置后运行 `codexc update` 确认同步。显式 `CODEX_BINARY` 无效、CLI 无法执行、安装失败或安装后仍不可见时明确失败，不改用其他二进制。安装不自动登录或启动服务。
+从开发仓库执行 `npm run install:global` 不会将其登记为受管 `main` 仓库。该入口（包括内部 `--prepared`）在注册 Gateway 全局命令前检测 Codex CLI：默认 `codex` 缺失或版本不符时通过 npm 同步为 `src/codex-protocol/version.json` 锁定的正式版本，并检查安装后的版本和 PATH，无需初始化或渠道配置。显式 `CODEX_BINARY` 无效或版本不符时明确失败，不替换指定二进制。CLI 无法执行、安装失败或安装后仍不可见时也明确失败。安装不自动登录或启动服务。
+
+### 本地工作树安装与部署
+
+在需要安装的源码根目录运行 `npm run install:global`（Windows 可用 `npm.cmd run install:global`）。命令自动准备依赖、构建 Gateway/WebUI，再安装当前工作树的构建包；未提交改动也会进入构建。仅执行 `npm run build` 不会刷新全局命令。
+
+已有运行服务时，先从本机终端记录 `codexc service status all` 和 `codexc service status webui` 的状态，停止运行中的 WebUI，再执行 `codexc service stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；安装失败先处理错误，不启动版本未就绪的服务。程序目录或 Node.js 路径改变时用 `codexc service install` 重建服务定义。
+
+此安装路径不拉取 Git，也不自动管理服务。自行选择分支并更新源码后重复执行安装；没有受管仓库时，`codexc update` 只同步配套 CLI 和校验配置、数据库，不更新本地源码或 Gateway 包。
 
 新设备按 `npm run install:global` → `codexc init` → `codexc setup` → `codexc service install` 顺序操作；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。
 本地构建包的 `codexc update` 会显示检查开始和完成结果；无需更新时明确提示配套 CLI 无需更新、数据库结构有效。
@@ -154,15 +132,13 @@ App Server 的会话历史不在这些数据库中。
 候选源码完成构建和只读预检后，如默认 Codex CLI 缺失或其要求的版本与本机不一致，交互终端会显示当前版本和
 目标版本，并询问是否现在全局安装精确的 `@openai/codex` 版本；提示为 `[Y/n]`，直接回车表示确认。
 确认后先把目标 CLI 安装到随候选源码一同清理的临时目录，以该二进制完成真实公开合同和用户设置
-检查；只有检查通过才修改全局 CLI 并继续同一次源码更新。输入 `N/n`、临时候选或全局安装失败、
-合同检查失败或从脚本/管道等非交互终端运行时，不停止服务、不切换源码；合同检查失败也不修改
-全局 CLI，并显示可操作的错误或安装与重试命令。
+检查；只有检查通过才停止服务并修改全局 CLI。输入 `N/n`、临时候选安装或合同检查失败，以及需要确认却处于非交互终端时，不停止服务、不切换源码、不修改全局 CLI，并显示处理命令。全局安装失败发生在停机窗口内，恢复前必须重新校验实际 CLI 和当前配置、数据库；无法通过校验时保持停止。
 公开参数发生删除、改名或枚举变化时，候选版本必须先完成代码适配并更新合同快照；用户配置包含
 目标 CLI 已退役的值时，更新会指出根级或 `profiles.<name>` 精确字段和实际配置路径并要求手动
 删除。命令不把 `untrusted` 等值自动改成 `on-request` 或 `never`，避免在升级中改变审批语义。
 
-源码切换前失败不会影响当前仓库和服务。切换后刷新全局命令或恢复服务失败时，新源码会保留，旧
-仓库保存在错误消息给出的 `codex-channels.pre-update-*` 路径。命令会尝试恢复已停止的核心服务，恢复也失败时同时报告更新与服务错误。
+构建和预检失败不会影响当前仓库和服务。切换后刷新全局命令或恢复服务失败时，新源码会保留，原
+仓库保存在错误消息给出的 `codex-channels.pre-update-*` 路径。全局命令安装未完成时保持服务停止；在所选源码目录执行 `npm run install:global` 完成安装、核对版本后，按原状态启动服务。其他失败会在校验通过后尝试恢复，恢复也失败时同时报告更新与服务错误。不自动回退或删除用户数据。
 
 更新会显示当前与远程 `main` 提交、候选源码克隆、构建预检和切换结果。依赖安装与构建成功时只显示
 阶段摘要；失败时输出对应工具的完整错误。源码切换后会重新打包并刷新 npm 全局命令。

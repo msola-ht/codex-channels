@@ -27,12 +27,7 @@
   自身退出时只释放租约和 Proxy，不终止共享 App Server。
 - `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
-- `source-update.mjs` / `source-update.d.mts`：比较受管源码与官方 `main` 的提交，在同盘候选目录构建并只读检查当前配置、数据库结构和精确 Codex CLI 合同；CLI 不匹配时确认后准备候选并校验，通过后才安装。统一负责停止核心服务、切换源码与全局命令、恢复服务并等待就绪；停止前记录 Relay 运行状态，成功及失败恢复都只启动原本运行且仍启用的 Relay。失败保留阶段信息和必要的源码备份。无新提交或 npm 安装时同步配套 CLI，不更新 Gateway 包；各更新路径在 CLI 合同通过后关闭用户层 daemon 自动启动，其他用户设置不变。
-- `background-update-options.mjs` / `background-update-options.d.mts`：纯解析公开更新参数和严格帮助路径，在读取配置前拒绝未知、重复、不完整及额外参数；保留无参数交互入口，仅接受显式本机源码后台提交和 UUID 任务状态查询。
-- `background-update.mjs` / `background-update.d.mts`：提交 Linux systemd 用户服务的本机源码部署任务，准备工作树快照及独立私有 runner；提供不初始化配置、不修改路径权限的只读状态查询。
-- `background-update-worker.mjs` / `background-update-worker.d.mts`：从持久任务目录执行预检、部署和恢复，记录执行阶段及最终结果；非交互 CLI 版本不匹配时在停服前失败。
-- `background-update-state.mjs` / `background-update-state.d.mts`：管理用户目录 `maintenance/updates/<UUID>/` 下的任务记录、日志和回执，定位最新任务；保留回执和恢复备份供人工核查。
-- `local-source-deployment.mjs` / `local-source-deployment.d.mts`：部署本机源码快照，只读校验当前数据库结构，预检通过后才进入停机窗口并刷新全局命令；恢复 App Server、Gateway 与原本运行的 Relay/WebUI，服务恢复以程序、CLI 和数据库版本相容证明为前提，不改写用户数据。
+- `source-update.mjs` / `source-update.d.mts`：从本机终端更新受管官方 `main`；跨平台独占锁阻止并发更新，候选克隆启用长路径支持。先构建并只读检查配置、数据库结构和精确 CLI 合同，CLI 不匹配时确认后同步。记录 App Server、Gateway、Relay、WebUI 状态，按依赖顺序停服；刷新源码与全局命令后，只恢复原本运行的服务，Relay 还须保持启用。恢复前再次校验 CLI 版本和配置、数据库，失败保留阶段及必要备份。无新提交或本地构建包只同步配套 CLI，不更新 Gateway 包；关闭 daemon 自动启动，其他用户偏好和模型目录不变。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程与受管源码目录归属后，先卸载后台服务，再删除 Git 仓库及已记录和当前包所属 npm prefix 中的全局命令；拒绝符号链接或不匹配路径，保留配置、数据库、凭据、日志、输出和 Shell 配置。
@@ -460,7 +455,7 @@
 ## 构建、打包与服务
 
 - 根目录 `install.sh`：在 Linux/macOS 上克隆 Codex Connect 官方 `main`，把完整 Git 仓库安装
-  到 `~/.codex-connect/codex-channels`，检测 npm 与 Codex CLI，缺少 Codex CLI 时安装项目精确版本，
+  到 `~/.codex-connect/codex-channels`，检测 npm 与 Codex CLI，CLI 缺失或版本不符时同步项目精确版本，
   并检查登录状态；随后完成依赖、Gateway/WebUI 构建和 npm 全局命令注册。不覆盖现有源码目录、
   配置或数据，也不写入 Shell PATH。
 - `clean-dist.mjs`：构建前清理 `dist/`。
@@ -468,7 +463,7 @@
 - `install-global-source.mjs`：显式准备干净源码、自动执行 webui 子项目依赖安装与前端构建
   （`webui/dist`），再生成临时 npm tarball 并通过禁用隐式生命周期脚本的 npm 全局安装；安装结果
   不链接或依赖源码目录，并避免 npm 12 脚本策略跳过构建；源码更新可用内部 `--prepared` 复用已
-  验证的 Gateway/WebUI 构建结果，避免重复构建。注册全局 Gateway 前按协议元数据补装缺失的默认 Codex CLI；已有版本不静默替换，显式二进制无效时失败关闭，不依赖渠道配置。
+  验证的 Gateway/WebUI 构建结果，避免重复构建。注册全局 Gateway 前按协议元数据同步缺失或版本不符的默认 Codex CLI；显式二进制无效或版本不符时失败关闭，不依赖渠道配置。
 - `webui-dev.mjs`：仓库根目录 `npm run webui:dev` 的一键开发入口，并行启动
   `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。

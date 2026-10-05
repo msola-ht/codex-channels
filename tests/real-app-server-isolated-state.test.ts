@@ -24,7 +24,7 @@ import type { OutputEvent } from "../src/conversation-core/index.js";
 import { ProviderRoutingClient } from "../src/codex-client/index.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { configureCodexUpdateDefaults, createSharedCodexUserConfigClient, disableCodexDaemonAutoStart, updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
+import { createSharedCodexUserConfigClient, disableCodexDaemonAutoStart, updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
@@ -1428,7 +1428,7 @@ contractSuite("isolated Codex App Server state contract", () => {
         { keyPath: "model", value: null }]);
       const enabled = await ownerClient.readUserConfigSnapshot();
       const environment = { ...process.env, CODEX_HOME: codexHome };
-      await configureCodexUpdateDefaults(environment);
+      await disableCodexDaemonAutoStart(environment);
       const after = await ownerClient.readUserConfigSnapshot();
       expect(after.config).toEqual({ ...enabled.config, features: {
         ...(enabled.config.features as Record<string, unknown>), daemon_auto_start: false,

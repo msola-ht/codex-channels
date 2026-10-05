@@ -55,7 +55,6 @@ export interface CodexUserConfigClient
 export function createSharedCodexUserConfigClient(options?: { environment?: NodeJS.ProcessEnv }): Promise<CodexUserConfigClient>;
 
 /** Handoff for an already-running updater; only disables daemon auto-start. */
-export { disableCodexDaemonAutoStart as configureCodexUpdateDefaults };
 
 export function disableCodexDaemonAutoStart(
   environment?: NodeJS.ProcessEnv,

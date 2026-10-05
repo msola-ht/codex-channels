@@ -357,12 +357,9 @@ codexc update
 codexc doctor
 ```
 
-部署已准备好的本机源码可使用 `codexc update --background --source <目录>`，仅支持 Linux systemd
-用户服务，并要求先全局安装包含此入口的新版本 CLI。任务使用源工作树快照和独立持久 runner；提交后
-用 `codexc update status [task-id] [--json]` 查看阶段与最终结果。提交成功只表示已接收，后台模式在
-CLI 版本不匹配时预检失败，不静默升级；完整流程与恢复条件见[源码安装与更新](source-install.md#本机源码后台部署)。
+安装和更新统一从本机终端执行。本地源码更新后重新执行 `npm run install:global`，该命令不自动停启服务，具体顺序见[本地工作树安装与部署](source-install.md#本地工作树安装与部署)。
 
-本地源码通过 `npm run install:global` 安装时，缺少 Codex CLI 会自动补装项目锁定版本，无需先初始化或配置渠道；随后执行 `codexc init`、`codexc setup`、`codexc service install`。已有 CLI 不被静默替换；完成渠道配置后可运行 `codexc update` 同步已安装包要求的版本。
+官方安装器和本地 `npm run install:global` 在默认 Codex CLI 缺失或版本不符时自动同步项目锁定版本，无需先初始化或配置渠道；随后执行 `codexc init`、`codexc setup`、`codexc service install`。显式 `CODEX_BINARY` 由操作者管理，本地安装遇到版本不符时拒绝替换。
 更新发现默认 CLI 缺失或版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
 非交互调用会给出精确版本安装命令并退出，不静默安装。
 

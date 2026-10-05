@@ -181,6 +181,15 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
     expect(readFileSync(profile, "utf8")).toContain("# Codex Connect");
   });
 
+  it.each(["0.146.0", "0.148.0"])("synchronizes an existing CLI %s to the locked version during fresh installation", (version) => {
+    const root = temporaryDirectory("codexc-source-version-sync-");
+    const repository = createFixtureRepository(root);
+    const result = runInstaller(root, repository, join(root, "home"), { codexVersion: version });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(`Codex CLI 当前 ${version}，正在同步为项目锁定版本 0.147.0`);
+    expect(result.stdout).toContain("Codex CLI 0.147.0 已安装");
+  }, 30_000);
+
   it("leaves unrelated command entries untouched", async () => {
     const root = temporaryDirectory("codexc-source-uninstall-unsafe-");
     const installRoot = join(root, ".codex-connect");
@@ -386,16 +395,17 @@ function runInstaller(
   root: string,
   repository: string,
   home: string,
-  options: { codexInstalled?: boolean; shell?: string } = {},
+  options: { codexInstalled?: boolean; codexVersion?: string; shell?: string } = {},
 ) {
   const fakeBin = join(root, "fake-bin");
   mkdirSync(fakeBin, { recursive: true });
   writeFileSync(join(fakeBin, "bwrap"), `#!${process.execPath}\nconsole.log('--perms');\n`, { mode: 0o755 });
   const codex = join(fakeBin, "codex");
   if (options.codexInstalled !== false) {
-    writeFileSync(codex, fakeCodexScript(true));
+    writeFileSync(codex, fakeCodexScript(true).replaceAll("0.147.0", options.codexVersion ?? "0.147.0"));
     chmodSync(codex, 0o755);
-  } else {
+  }
+  if (options.codexInstalled === false || options.codexVersion) {
     symlinkSync(process.execPath, join(fakeBin, "node"));
     const realNpm = execFileSync("which", ["npm"], { encoding: "utf8" }).trim();
     const npm = join(fakeBin, "npm");
@@ -505,9 +515,9 @@ describe.skipIf(process.platform === "win32")("local source install Codex bootst
       expect(result.status, result.stderr).toBe(success ? 0 : 1);
       expect(calls.some((args) => args[0] === "pack")).toBe(success);
       expect(calls.filter((args) => args.includes("@openai/codex@0.156.1"))).toHaveLength(
-        ["missing", "install-failed", "path-missing", "wrong-installed"].includes(mode) ? 1 : 0,
+        ["missing", "mismatch", "install-failed", "path-missing", "wrong-installed"].includes(mode) ? 1 : 0,
       );
-      if (mode === "mismatch") expect(result.stdout).toContain("保留已有 Codex CLI 0.155.0");
+      if (mode === "mismatch") expect(result.stdout).toContain("正在同步为项目锁定版本 0.156.1");
       if (mode === "path-missing") expect(result.stderr).toContain("PATH");
       if (mode === "explicit-missing") expect(result.stderr).toContain("CODEX_BINARY");
       expect(existsSync(join(root, ".codex-connect"))).toBe(false);

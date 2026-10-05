@@ -26,7 +26,7 @@ import {
 import { createPrompter } from "./terminal-prompter.mjs";
 import { serviceControlDefinitions } from "./service-selection.mjs";
 import { inspectManagedServiceStatus } from "./service-status.mjs";
-import { readActiveUpdate, updateRoot, withUpdateLock } from "./background-update-state.mjs";
+import { withPrivateFileLock } from "../runtime/private-file-lock.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
@@ -174,7 +174,7 @@ export async function updateManagedSourceInstallation(
   let switched = false;
   let servicesMayNeedRestore = false;
   let servicesRestored = false;
-  let relayWasRunning = false;
+  let servicesBeforeUpdate = [];
   let backupPath;
   const renamePath = options.renamePath ?? renameSync;
   try {
@@ -185,6 +185,7 @@ export async function updateManagedSourceInstallation(
       runQuiet(
         "git",
         [
+          "-c", "core.longpaths=true",
           "clone",
           "--quiet",
           "--branch",
@@ -268,11 +269,11 @@ export async function updateManagedSourceInstallation(
       ),
     );
     if (inspection.services.installed) {
-      relayWasRunning = await (options.inspectRelayRunning ?? inspectRelayRunning)(environment);
+      servicesBeforeUpdate = await (options.inspectServices ?? inspectUpdateServices)(environment);
       servicesMayNeedRestore = true;
       await runStage(
         "stop-services",
-        () => (options.stopServices ?? stopCoreServices)(checkout, environment, options),
+        () => (options.stopServices ?? stopCoreServices)(checkout, environment, options, servicesBeforeUpdate),
       );
     }
     await runStage(
@@ -322,7 +323,7 @@ export async function updateManagedSourceInstallation(
       disableCandidateDaemonAutoStart(checkout, environment, options));
     if (inspection.services.installed) {
       await runStage("restore-services", () =>
-        (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning));
+        (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate));
       servicesMayNeedRestore = false;
     }
     await runStage("cleanup", () => {
@@ -346,7 +347,10 @@ export async function updateManagedSourceInstallation(
     }
     if (servicesMayNeedRestore) {
       try {
-        await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);
+        if (switched && !completedStages.includes("refresh-command")) {
+          throw new Error("全局程序安装未完成，保留服务停止状态；请从保留的源码完成 npm run install:global 后按原状态启动服务", { cause: error });
+        }
+        await (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate);
         servicesRestored = true;
       } catch (startError) {
         const combinedError = new AggregateError(
@@ -365,8 +369,8 @@ export async function updateManagedSourceInstallation(
             ...(backupPath ? { backupPath } : {}),
           },
           recommendation: switched
-            ? "检查保留的旧源码并手动恢复核心服务"
-            : "修复核心服务后运行 codexc service start all",
+            ? "核对源码与全局程序安装，完成 npm run install:global 后按原运行状态恢复服务"
+            : "修复失败原因并核对 CLI 版本后，按原运行状态恢复服务",
         });
       }
     }
@@ -605,6 +609,9 @@ async function prepareCodexVersion(expected, checkout, environment, writeMessage
     return { installRequired: false, validationEnvironment: environment };
   }
   const failure = codexVersionMismatchError(expected, actual);
+  if (environment.CODEX_BINARY?.trim() && environment.CODEX_BINARY.trim() !== "codex") {
+    throw new Error(`CODEX_BINARY 版本不匹配：需要 ${expected}，当前 ${actual || "未知"}；请更新指定二进制后重试`, { cause: failure });
+  }
   if (!options.confirmCodexCliInstall) throw failure;
   const confirmed = await options.confirmCodexCliInstall({
     currentVersion: actual || undefined,
@@ -697,7 +704,7 @@ function installedCodexVersion(environment, captureCommand) {
   const configured = environment.CODEX_BINARY?.trim();
   const executable = configured || "codex";
   if (!captureCommand && !resolveOptionalExecutable(executable, environment)) {
-    if (configured) throw new Error("CODEX_BINARY 指定的可执行文件不存在，请修正后重新运行 codexc update");
+    if (configured && configured !== "codex") throw new Error("CODEX_BINARY 指定的可执行文件不存在，请修正后重新运行 codexc update");
     return "";
   }
   const output = capture(
@@ -845,31 +852,33 @@ function disableCandidateDaemonAutoStart(checkout, environment, options) {
     "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc service 管理。");
 }
 
-async function stopCoreServices(checkout, environment, options) {
-  run(
-    process.execPath,
-    [join(checkout, "bin", "codexc.mjs"), "service", "stop", "all"],
-    checkout,
-    environment,
-    options.runCommand,
-  );
-}
-
-function inspectRelayRunning(environment) {
-  const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
-  if (!serviceControlDefinitions(platform, "all", "status", environment).some(service => service.target === "model-relay")) return false;
-  const service = inspectManagedServiceStatus({ environment, target: "model-relay" }).services[0];
-  if (service?.running) return true;
-  if (!service || !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state)) {
-    throw new Error("无法确认更新前 Relay 运行状态；未停止服务");
+async function stopCoreServices(checkout, environment, options, services) {
+  for (const target of ["webui", "model-relay", "gateway", "app-server"]) {
+    if (!services.find(service => service.target === target)?.running) continue;
+    run(process.execPath, [join(checkout, "bin", "codexc.mjs"), "service", "stop", target === "model-relay" ? "relay" : target], checkout, environment, options.runCommand);
   }
-  return false;
 }
 
-async function startCoreServices(checkout, environment, options, relayWasRunning) {
+function inspectUpdateServices(environment) {
+  const services = [...inspectManagedServiceStatus({ environment, target: "all" }).services,
+    ...inspectManagedServiceStatus({ environment, target: "webui" }).services];
+  for (const service of services) {
+    if (!service.running && !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state)) {
+      throw new Error(`无法确认更新前 ${service.target} 运行状态；未停止服务`);
+    }
+  }
+  return services;
+}
+
+async function startCoreServices(checkout, environment, options, services) {
+  // A failed CLI/package switch must not restart services against an unverified installation.
+  assertCodexVersion(codexVersion(checkout), environment, options.captureCommand);
+  await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
   const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
-  const targets = ["app-server", "gateway"];
-  if (relayWasRunning && serviceControlDefinitions(platform, "all", "start", environment).some(service => service.target === "model-relay")) targets.push("relay");
+  const targets = ["app-server", "gateway", "model-relay", "webui"].filter(target =>
+    services.find(service => service.target === target)?.running
+    && (target !== "model-relay" || serviceControlDefinitions(platform, "all", "start", environment).some(service => service.target === target)))
+    .map(target => target === "model-relay" ? "relay" : target);
   for (const target of targets) run(process.execPath,
     [join(checkout, "bin", "codexc.mjs"), "service", "start", target], checkout, environment, options.runCommand);
 }
@@ -976,7 +985,7 @@ export async function updateInstalledPackage(environment = process.env, options 
   const inspection = await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
   let temporaryDirectory;
   let servicesStopped = false;
-  let relayWasRunning = false;
+  let servicesBeforeUpdate = [];
   try {
     const prepared = await prepareCodexVersion(expected, checkout, environment, writeMessage, {
       ...options,
@@ -992,14 +1001,14 @@ export async function updateInstalledPackage(environment = process.env, options 
       checkout, prepared.validationEnvironment, options,
     );
     if (prepared.installRequired && inspection.services.installed) {
-      relayWasRunning = await (options.inspectRelayRunning ?? inspectRelayRunning)(environment);
+      servicesBeforeUpdate = await (options.inspectServices ?? inspectUpdateServices)(environment);
       servicesStopped = true;
-      await (options.stopServices ?? stopCoreServices)(checkout, environment, options);
+      await (options.stopServices ?? stopCoreServices)(checkout, environment, options, servicesBeforeUpdate);
     }
     await installPreparedCodexVersion(prepared, expected, checkout, environment, writeMessage, options);
     disableCandidateDaemonAutoStart(checkout, environment, options);
     if (servicesStopped) {
-      await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);
+      await (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate);
       servicesStopped = false;
     }
     writeMessageSafely(
@@ -1012,7 +1021,7 @@ export async function updateInstalledPackage(environment = process.env, options 
   } catch (error) {
     if (servicesStopped) {
       try {
-        await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);
+        await (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate);
       } catch (restoreError) {
         throw new AggregateError([error, restoreError], "配套 CLI 更新失败，且核心服务恢复失败", { cause: restoreError });
       }
@@ -1068,16 +1077,7 @@ if (
 ) {
   try {
     assertSourceUpdateCaller(process.env);
-    if (process.platform === "linux") {
-      await withUpdateLock(updateRoot(process.env), async () => {
-        if (readActiveUpdate(updateRoot(process.env))) {
-          throw new Error("已有后台更新任务，请先查看 codexc update status");
-        }
-        await main();
-      });
-    } else {
-      await main();
-    }
+    await withPrivateFileLock(join(userDataDir(process.env), ".source-update"), main, { label: "程序更新" });
   } catch (error) {
     writeSourceUpdateFailure(error);
     process.exitCode = 1;
