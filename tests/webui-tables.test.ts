@@ -1,10 +1,15 @@
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
+import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
+import { sample } from "./request-metrics-fixtures.js";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
-  it("separates client interruptions from failures in cards, histories and turn columns", () => {
+  it("separates client interruptions from failures in cards and turn columns", () => {
     for (const name of ["interruptedSummary", "interruptedGlobal", "interruptedErrorsSummary"]) {
       expect(markup[name]).toContain("完成 2 · 客户端中断 5 · 其他失败 1 · 未完整观测 2");
       expect(markup[name]).not.toContain("失败 8");
@@ -17,17 +22,19 @@ describe("WebUI metrics table presentation", () => {
     expect(cells[headers(markup.interruptedTurns!).indexOf("失败")]).toBe("1");
     expect(cells[headers(markup.interruptedTurns!).indexOf("客户端中断")]).toBe("5");
     expect(cells[headers(markup.interruptedTurns!).indexOf("输入 Token")]).toBe("≥ 100");
+    expect(cells[headers(markup.interruptedTurns!).indexOf("缓存命中率")]).toBe("50.0%");
+    expect(markup.interruptedTurns).toContain('aria-description="按已记录的输入和缓存用量计算；未观测到的用量不参与计算。"');
+    expect(markup.interruptedTurnsEn).toContain('aria-description="Calculated from recorded input and cached usage; unobserved usage is excluded."');
+    for (const [name, rate] of [["interruptedTurnsZeroCache", "0.0%"], ["interruptedTurnsUnknownCache", "—"], ["interruptedTurnsUnknown", "—"]]) {
+      const cacheCell = [...markup[name!]!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)][headers(markup[name!]!).indexOf("缓存命中率")]?.[1];
+      expect(cacheCell?.replace(/<[^>]*>/gu, "")).toBe(rate);
+      if (rate === "—") expect(cacheCell).not.toContain("aria-description");
+    }
     const unknown = [...markup.interruptedTurnsUnknown!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)].map(match => match[1]?.replace(/<[^>]*>/gu, ""));
     expect(unknown[headers(markup.interruptedTurnsUnknown!).indexOf("输入 Token")]).toBe("—");
     expect(unknown[headers(markup.interruptedTurnsUnknown!).indexOf("输出 Token")]).toBe("—");
-    expect(markup.interruptedHistory).toContain("中断后同轮有成功请求 2");
-    expect(markup.interruptedHistory).toContain("未观测到同轮后续成功 3");
-    expect(markup.interruptedHistory).toContain("用量未完整观测 1");
-    expect(markup.interruptedHistoryEn).toContain("Interruptions followed by a successful request in the same turn: 2");
-    for (const name of ["interruptedHistory", "interruptedTurns"]) {
-      expect(markup[name]).not.toContain("重试成功");
-      expect(markup[name]).not.toContain("正常取消");
-    }
+    expect(markup.interruptedTurns).not.toContain("重试成功");
+    expect(markup.interruptedTurns).not.toContain("正常取消");
   });
   it("presents interruption records neutrally while retaining the recorded status and unknown usage", () => {
     for (const name of ["interruptedRequests", "interruptedErrors", "interruptedRequestDetail"]) {
@@ -149,11 +156,12 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.subagentDetailParent).toContain('/requests?range=all&amp;threadId=parent%2Fthread&amp;turnId=creation%2Fturn');
     expect(markup.subagentDetailParent).toContain("不包含后续派发任务的全部轮次");
   });
-  it("separates own filtered totals from collapsed history and links each turn to its subagents", () => {
-    expect(markup.threadTiming).toContain("当前筛选 · 会话自身");
-    expect(markup.threadTimingEn).toContain("Current filters · This thread only");
-    expect(markup.threadTiming).toContain("历史累计 · 含子代理");
-    expect(markup.threadTiming).toMatch(/<details\b(?![^>]*\bopen)[^>]*>/u);
+  it("shows filtered summaries without historical totals and links each turn to its subagents", () => {
+    expect(markup.threadTiming).toContain("当前筛选");
+    expect(markup.threadTimingEn).toContain("Current filters");
+    expect(markup.threadTiming).not.toContain("历史累计");
+    expect(markup.threadTimingEn).not.toContain("Historical totals");
+    expect(markup.threadTiming).not.toContain("<details");
     expect(markup.threadTiming).not.toContain("最近轮次");
     expect(markup.threadDetailLoading).toMatch(/<section[^>]*class="[^"]*invisible"[^>]*inert=""[^>]*aria-hidden="true"/u);
     expect(markup.turnsWithSubagents).toContain('href="/threads/parent%2Fthread/subagents?parentTurnId=turn%2Fone"');
@@ -164,6 +172,96 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.turnsLongId).toMatch(/<a\b[^>]*aria-description="01a106b6-f258-7b82-bed0-157cc3e38882"[^>]*>/u);
     expect(markup.turnSubagentsPage).toContain("关联轮次：turn/one");
     expect(markup.turnSubagentsPage).toContain("并非只计该父轮次内的用量");
+  });
+  const periodSection = (html: string) => html.match(/<section\b[^>]*aria-label="(?:当前筛选|Current filters)"[^>]*>([\s\S]*?)<\/section>/u)?.[1] ?? "";
+  const periodCards = (html: string) => periodSection(html).split(/<div data-slot="card"/u).slice(1);
+  const periodActivity = (html: string) => periodSection(html).match(/<p\b[^>]*aria-label="(?:轮次与请求|Turns and requests)[^"]*"[^>]*>([\s\S]*?)<\/p>/u)?.[1] ?? "";
+  const periodCounts = (html: string) => [...periodActivity(html).replace(/<[^>]*>/gu, "").matchAll(/(?:轮次|请求|Turn|Requests) ([^·]+) · /gu)].map(match => match[1]);
+  const values = (html: string) => [...html.matchAll(/<dd\b[^>]*>([\s\S]*?)<\/dd>/gu)].map(match => match[1]?.replace(/<[^>]*>/gu, ""));
+  it("combines counts and outcomes below three token cards with separate subtotals", () => {
+    for (const key of ["threadTiming", "threadTimingEn"]) {
+      const cards = periodCards(markup[key]!);
+      const english = key.endsWith("En");
+      expect(cards).toHaveLength(3);
+      expect(cards.map(card => card.match(/data-slot="card-title"[^>]*>([^<]*)</u)?.[1]))
+        .toEqual(english ? ["Input tokens", "Output tokens", "Total"] : ["输入 Token", "输出 Token", "合计"]);
+      const counts = periodActivity(markup[key]!);
+      expect(periodSection(markup[key]!).split(/<div data-slot="card"/u)[0]).not.toContain("<dl");
+      expect(counts.replace(/<[^>]*>/gu, "")).toBe(english
+        ? "Turn 5 · Requests 6 · Completed: 4 · Client interruptions: 1 · Other failures: 1 · Not fully observed: 0"
+        : "轮次 5 · 请求 6 · 完成 4 · 客户端中断 1 · 其他失败 1 · 未完整观测 0");
+      expect(periodCounts(markup[key]!)).toEqual(["5", "6"]);
+      expect(counts).toContain(english ? 'aria-description="Thread 2 + Subagents 3"' : 'aria-description="会话 2 + 子代理 3"');
+      expect(counts).toContain(english ? 'aria-description="Thread 1 + Subagents 5"' : 'aria-description="会话 1 + 子代理 5"');
+      for (const card of cards.slice(0, 2)) {
+        expect([...card.matchAll(/<dt\b[^>]*>([^<]*)</gu)].map(match => match[1]))
+          .toEqual(english ? ["Thread", "Subagents"] : ["会话", "子代理"]);
+      }
+      expect([...cards[2]!.matchAll(/<dt\b[^>]*>([^<]*)</gu)].map(match => match[1]))
+        .toEqual(english ? ["Thread", "Subagents", "Total"] : ["会话", "子代理", "合计"]);
+      expect(values(cards[0]!)).toEqual(["100", "800"]);
+      expect(values(cards[1]!)).toEqual(["20", "160"]);
+      expect(cards[1]).toContain(english ? 'aria-description="Reasoning output: 5; Non-reasoning output: 15"' : 'aria-description="推理输出：5; 非推理输出：15"');
+      expect(cards[1]).toContain(english ? 'aria-description="Reasoning output: 5; Non-reasoning output: 155"' : 'aria-description="推理输出：5; 非推理输出：155"');
+      expect(cards[0]).toContain("50.0%");
+      expect(cards[0]).toContain("37.5%");
+      expect(values(cards[2]!)).toEqual(["120", "960", "1.08K"]);
+      expect(cards[2]).not.toContain(english ? "Input + output" : "输入 + 输出");
+      expect(markup[key]).not.toContain(english ? "Own" : "自身");
+    }
+    expect(periodCards(markup.threadTiming!)[0]).toContain('aria-description="缓存：300; 无缓存：500"');
+    expect(periodCards(markup.threadTimingEn!)[0]).toContain('aria-description="Cached: 300; Uncached: 500"');
+  });
+  it("keeps descendant partial cache information, unknown cache and empty filtered totals distinct", () => {
+    const partial = periodCards(markup.threadPeriodPartialCache!)[0]!;
+    expect(values(partial)).toEqual(["100", "1K"]);
+    expect(partial).toContain('aria-description="缓存：≥ 30; 无缓存：≥ 30"');
+    expect(partial).toContain("50.0%");
+    const unknown = periodCards(markup.threadPeriodUnknownCache!)[0]!;
+    expect(values(unknown)).toEqual(["100", "800"]);
+    expect(unknown).toMatch(/aria-description="缓存命中率"[^>]*>—</u);
+    expect(unknown).not.toContain("缓存：0");
+    const empty = periodCards(markup.threadPeriodEmpty!);
+    expect(periodCounts(markup.threadPeriodEmpty!)).toEqual(["0", "0"]);
+    expect(values(empty[0]!)).toEqual(["0", "0"]);
+    expect(values(empty[1]!)).toEqual(["0", "0"]);
+    expect(values(empty[2]!)).toEqual(["0", "0", "0"]);
+    expect(empty[0]?.match(/aria-description="缓存命中率"[^>]*>—</gu)).toHaveLength(2);
+    expect(markup.threadPeriodEmpty).not.toContain("NaN");
+    const descendantsOnly = periodCards(markup.threadPeriodDescendantsOnly!);
+    expect(periodCounts(markup.threadPeriodDescendantsOnly!)).toEqual(["3", "5"]);
+    expect(values(descendantsOnly[0]!)).toEqual(["0", "800"]);
+    expect(values(descendantsOnly[1]!)).toEqual(["0", "160"]);
+    expect(values(descendantsOnly[2]!)).toEqual(["0", "960", "960"]);
+  });
+  it("renders database cache pairs consistently in the period cards and interrupted Turn rates", () => {
+    for (const [name, rate, input] of [["complementary", "—", "300"], ["unobserved", "50.0%", "100"]]) {
+      const card = periodCards(markup[`pairedCache-${name}`]!)[0]!;
+      expect(values(card)[0]).toBe(input);
+      expect(card).toContain("50.0%");
+      expect(card).toContain('aria-description="缓存：≥ 50; 无缓存：≥ 50"');
+      expect(card).not.toContain("缓存：60");
+      expect(card).not.toContain("无缓存：240");
+      const table = markup[`pairedCacheTurns-${name}`]!;
+      const cacheCell = [...table.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)][headers(table).indexOf("缓存命中率")]?.[1];
+      expect(cacheCell?.replace(/<[^>]*>/gu, "")).toBe(rate);
+      expect(table).not.toContain("20.0%");
+    }
+  });
+  it("marks descendants and total unavailable for an applied exact turn filter in both languages", () => {
+    for (const key of ["threadPeriodExactTurn", "threadPeriodExactTurnEn"]) {
+      const cards = periodCards(markup[key]!);
+      expect(periodCounts(markup[key]!)).toEqual(["—", "—"]);
+      expect(periodActivity(markup[key]!)).toContain(key.endsWith("En") ? 'aria-description="Thread 1 + Subagents —"' : 'aria-description="会话 1 + 子代理 —"');
+      expect(markup[key]).toContain(key.endsWith("En") ? 'aria-label="Turns and requests (thread)"' : 'aria-label="轮次与请求（会话）"');
+      expect(periodActivity(markup[key]!)).toContain(key.endsWith("En") ? "Completed: 1" : "完成 1");
+      expect(markup[key]).not.toContain(key.endsWith("En") ? "Turns and requests (including subagents)" : "轮次与请求（含子代理）");
+      expect(values(cards[0]!)).toEqual(["100", "—"]);
+      expect(values(cards[1]!)).toEqual(["20", "—"]);
+      expect(cards[1]?.match(/data-slot="tooltip-trigger"/gu)).toHaveLength(1);
+      expect(values(cards[2]!)).toEqual(["120", "—", "—"]);
+      expect(markup[key]).toContain(key.endsWith("En") ? "descendant requests cannot be assigned to a parent turn" : "无法确定后代请求属于哪个父轮次");
+    }
   });
   it("renders the independent page and breadcrumb for an encoded owning thread without reading detail metrics", () => {
     expect(markup.subagentsPage).toContain("子代理 · parent/thread");
@@ -298,6 +396,30 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.requestResponseOnly).toContain("response-only-model");
   });
   beforeAll(() => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-webui-cache-pairs-"));
+    const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"), 10_000);
+    const pairedCacheFixtures = (() => {
+      try {
+        const request = { ...sample(), recordedAtMs: 1500, outputTokens: 10 };
+        store.recordBatch([
+          { ...request, threadId: "complementary", inputTokens: 100, cachedInputTokens: 50 },
+          { ...request, threadId: "complementary", inputTokens: 200, cachedInputTokens: null },
+          { ...request, threadId: "complementary", inputTokens: null, cachedInputTokens: 10, outputTokens: null,
+            status: "failed", errorType: "client_disconnected", responseCompletedAtMs: 1700 },
+          { ...request, threadId: "unobserved", inputTokens: 100, cachedInputTokens: 50 },
+          { ...request, threadId: "unobserved", inputTokens: null, cachedInputTokens: null, outputTokens: null,
+            status: "failed", errorType: "client_disconnected", responseCompletedAtMs: 1700 },
+        ]);
+        const query = { startAtMs: 1000, endAtMs: 2000, limit: 10 };
+        return {
+          complementary: store.threadTurnSummaries("complementary", query),
+          unobserved: store.threadTurnSummaries("unobserved", query),
+        };
+      } finally {
+        store.close();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    })();
     // Render actual components with the WebUI's existing Vite/React dependencies.
     const script = String.raw`
       import { createServer } from "vite";
@@ -333,7 +455,6 @@ describe("WebUI metrics table presentation", () => {
         const { TrafficDetail } = await server.ssrLoadModule("/src/components/traffic/traffic-detail.tsx");
         const { ErrorBanner } = await server.ssrLoadModule("/src/components/metrics/error-banner.tsx");
         const { GlobalCards, ErrorsSummary, ProviderTable, WeeklyQuotaCard, OpencodeGoUsageCard, ClinePassUsageCard, DeepseekBalanceCards, CcgCreditUsageCards } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
-        const { ThreadRunSummary } = await server.ssrLoadModule("/src/components/threads/thread-run-summary.tsx");
         const { QuerySummary } = await server.ssrLoadModule("/src/components/metrics/query-summary.tsx");
         const { ConsolePage } = await server.ssrLoadModule("/src/pages/console-page.tsx");
         const { openAiWeeklyQuotaFromSnapshot, accountSnapshotsWithMissingProviders, deepseekAccountFromSnapshot, ccgAccountFromSnapshot, quotaAccountFromSnapshot } = await server.ssrLoadModule("/src/lib/account-refresh-state.ts");
@@ -508,9 +629,10 @@ describe("WebUI metrics table presentation", () => {
         result.interruptedSummary = render(QuerySummary, { aggregate: interrupted, range: { name: "all" } });
         result.interruptedSummaryEn = render(QuerySummary, { aggregate: interrupted, range: { name: "all" } }, "en");
         result.interruptedGlobal = render(GlobalCards, { global: interrupted, threadCount: 1, turnCount: 1 });
-        result.interruptedHistory = render(ThreadRunSummary, { threadAggregate: { ...interrupted, turnCount: 1 } });
-        result.interruptedHistoryEn = render(ThreadRunSummary, { threadAggregate: { ...interrupted, turnCount: 1 } }, "en");
         result.interruptedTurns = render(TurnTable, { turns: [{ ...interrupted, turnId: "turn-interrupted" }], threadId: "thread-1", query: {}, pagination });
+        result.interruptedTurnsEn = render(TurnTable, { turns: [{ ...interrupted, turnId: "turn-interrupted" }], threadId: "thread-1", query: {}, pagination }, "en");
+        result.interruptedTurnsZeroCache = render(TurnTable, { turns: [{ ...interrupted, cachedInputTokens: 0, turnId: "turn-interrupted" }], threadId: "thread-1", query: {}, pagination });
+        result.interruptedTurnsUnknownCache = render(TurnTable, { turns: [{ ...interrupted, cachedInputTokens: null, turnId: "turn-interrupted" }], threadId: "thread-1", query: {}, pagination });
         result.interruptedTurnsUnknown = render(TurnTable, { turns: [{ ...interrupted, inputTokens: 0, outputTokens: 0, turnId: "turn-interrupted" }], threadId: "thread-1", query: {}, pagination });
         result.interruptedRequests = render(RequestsTable, { ...requestProps, records: [interruptedRecord] });
         result.interruptedRequestDetail = render(RequestDetail, { record: interruptedRecord });
@@ -553,12 +675,38 @@ describe("WebUI metrics table presentation", () => {
         result.threadsPageEmpty = render(ThreadsPage, {});
         globalThis.fixtureThreadDetail = { error: null, loading: false, refreshing: false, refetch: noop,
           data: { run: { latestTurn: { ...common, turnId: "turn-1", durationMs: 71_000 }, latestExecution: { turnId: "turn-1", durationMs: 71_000 }, sessionDurationMs: 120_000, threadAggregate: { ...common, turnCount: 2 } },
-            turns: { aggregate: common, range: { name: "all" }, turns: [], turnCount: 2 } } };
+            turns: { aggregate: common, subagentAggregate: { ...common, ...common.subagentUsage, requestCount: 5,
+              requestOutcomes: { completed: 3, interrupted: 1, failed: 1, incomplete: 0 } },
+              treeAggregate: { ...common, inputTokens: 900, outputTokens: 180, requestCount: 6,
+                requestOutcomes: { completed: 4, interrupted: 1, failed: 1, incomplete: 0 } }, range: { name: "all" }, turns: [], turnCount: 2, subagentTurnCount: 3 } } };
         result.threadTiming = render(ThreadDetailPage, {});
         result.threadTimingEn = render(ThreadDetailPage, {}, "en");
         globalThis.fixtureThreadDetail.loading = true;
         result.threadDetailLoading = render(ThreadDetailPage, {});
         globalThis.fixtureThreadDetail.loading = false;
+        const ownPeriodTurns = globalThis.fixtureThreadDetail.data.turns;
+        for (const [name, data] of Object.entries(${JSON.stringify(pairedCacheFixtures)})) {
+          globalThis.fixtureThreadDetail.data.turns = { ...ownPeriodTurns, ...data, turnCount: 1 };
+          result['pairedCache-' + name] = render(ThreadDetailPage, {});
+          result['pairedCacheTurns-' + name] = render(TurnTable, { turns: data.turns, threadId: name, query: {}, pagination });
+        }
+        globalThis.fixtureThreadDetail.data.turns = { ...ownPeriodTurns, subagentAggregate: { ...common, inputTokens: 1000, cachedInputTokens: null,
+          cacheUsage: { inputTokens: 60, cachedInputTokens: 30, missingRequestCount: 1 } } };
+        result.threadPeriodPartialCache = render(ThreadDetailPage, {});
+        globalThis.fixtureThreadDetail.data.turns = { ...ownPeriodTurns, subagentAggregate: { ...common, ...common.subagentUsage, cachedInputTokens: null,
+          cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 1 } } };
+        result.threadPeriodUnknownCache = render(ThreadDetailPage, {});
+        globalThis.fixtureThreadDetail.data.turns = { ...ownPeriodTurns, aggregate: null, subagentAggregate: null, treeAggregate: null, turnCount: 0, subagentTurnCount: 0 };
+        result.threadPeriodEmpty = render(ThreadDetailPage, {});
+        globalThis.fixtureThreadDetail.data.turns = { ...ownPeriodTurns, aggregate: null, turnCount: 0,
+          treeAggregate: { ...common, ...common.subagentUsage } };
+        result.threadPeriodDescendantsOnly = render(ThreadDetailPage, {});
+        globalThis.fixtureThreadDetail.data.turns = { ...ownPeriodTurns, subagentAggregate: null, treeAggregate: null, turnCount: 1, subagentTurnCount: null };
+        globalThis.fixtureQuery = { turnId: "selected-turn" };
+        result.threadPeriodExactTurn = render(ThreadDetailPage, {});
+        result.threadPeriodExactTurnEn = render(ThreadDetailPage, {}, "en");
+        globalThis.fixtureQuery = {};
+        globalThis.fixtureThreadDetail.data.turns = ownPeriodTurns;
         globalThis.fixtureThreadDetail.data.run.sessionDurationMs = null;
         result.threadTimingMissing = render(ThreadDetailPage, {});
         globalThis.fixtureThreadDetail.data.run.sessionTiming = { knownDurationMs: 120_000, missingTurnCount: 1, historyComplete: false };
@@ -868,7 +1016,7 @@ describe("WebUI metrics table presentation", () => {
     `;
     markup = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
       cwd: fileURLToPath(new URL("../webui/", import.meta.url)),
-      encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024,
+      encoding: "utf8", timeout: 30_000, maxBuffer: 8 * 1024 * 1024,
     })) as Record<string, string>;
   }, 35_000);
 

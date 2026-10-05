@@ -11,6 +11,152 @@ const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { force: true, recursive: true }); });
 
 describe("request metrics subagent session aggregation", () => {
+  it("keeps observed cache pairs usable but rejects complementary missing input and cache fields", () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-cache-pairs-"));
+    directories.push(directory);
+    const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"), 10_000);
+    const scope = { startAtMs: 1000, endAtMs: 2000, limit: 10 };
+    try {
+      const request = { ...sample(), threadId: "child", turnId: "paired", recordedAtMs: 1500, outputTokens: 10 };
+      store.recordBatch([
+        { ...request, inputTokens: 100, cachedInputTokens: 50 },
+        { ...request, inputTokens: 200, cachedInputTokens: null },
+        { ...request, inputTokens: null, cachedInputTokens: 10, outputTokens: null,
+          status: "failed", errorType: "client_disconnected", responseCompletedAtMs: 1700 },
+        { ...request, threadId: "observed", inputTokens: 100, cachedInputTokens: 50 },
+        { ...request, threadId: "observed", inputTokens: null, cachedInputTokens: null, outputTokens: null,
+          status: "failed", errorType: "client_disconnected", responseCompletedAtMs: 1700 },
+      ]);
+      store.recordSubagentThread({ agentThreadId: "child", parentThreadId: "root", parentTurnId: "parent", agentPath: "/root/child" });
+      store.recordSubagentTurn({ agentThreadId: "child", agentTurnId: "paired", parentThreadId: "root", parentTurnId: "parent", agentPath: "/root/child" });
+      const paired = { requestCount: 3, inputTokens: 300, cachedInputTokens: null, outputTokens: 20 };
+      const cacheUsage = { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 2 };
+      expect(store.threadTurnSummary("child", "paired")).toMatchObject({ ...paired,
+        interruptionSummary: { usageUnobserved: 1 } });
+      expect(store.threadSummary("child").threadAggregate).toMatchObject(paired);
+      expect(store.threadTurnTaskSummary("root", "parent")).toMatchObject(paired);
+      expect(store.threadTurnSummaries("child", scope)).toMatchObject({
+        turns: [paired], aggregate: { ...paired, cacheUsage }, treeAggregate: { ...paired, cacheUsage },
+      });
+      expect(store.threadTurnSummaries("root", scope)).toMatchObject({
+        subagentAggregate: { ...paired, cacheUsage }, treeAggregate: { ...paired, cacheUsage },
+      });
+      expect(store.threadList({ ...scope, threadId: "child" }).threads[0]).toMatchObject({ ...paired, cacheUsage });
+      expect(store.threadList({ ...scope, mainThreadsOnly: true }).threads.find(thread => thread.threadId === "root"))
+        .toMatchObject({ subagentUsage: { inputTokens: 300, cachedInputTokens: null, cacheUsage } });
+      expect(store.daily(scope).every(row => row.cachedInputTokens === null)).toBe(true);
+      expect(store.aggregate({ ...scope, dimension: "global", threadId: "child" }).aggregate)
+        .toMatchObject({ ...paired, cacheUsage });
+      expect(store.threadTurnSummary("observed", "paired")).toMatchObject({
+        inputTokens: 100, cachedInputTokens: 50, interruptionSummary: { usageUnobserved: 1 },
+      });
+      expect(store.threadTurnSummaries("observed", scope).aggregate).toMatchObject({
+        inputTokens: 100, cachedInputTokens: null,
+        cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 1 },
+      });
+      store.recordBatch([
+        { ...request, threadId: "compact", operation: "compact", inputTokens: 100, cachedInputTokens: 50 },
+        { ...request, threadId: "compact", operation: "compact", inputTokens: 200, cachedInputTokens: null },
+        { ...request, threadId: "compact", operation: "compact", inputTokens: null, cachedInputTokens: 10, outputTokens: null,
+          status: "failed", errorType: "client_disconnected" },
+      ]);
+      expect(store.threadTurnSummary("compact", "paired")?.compact).toMatchObject({
+        inputTokens: 300, cachedInputTokens: null,
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("aggregates filtered detail subtrees independently of own Turn pages and exact Turn scopes", () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-detail-tree-"));
+    directories.push(directory);
+    const store = new SqliteModelRequestMetricsStore(join(directory, "request-metrics.sqlite3"), 10_000);
+    try {
+      const metric = (threadId: string, turnId: string, inputTokens: number, recordedAtMs = 1200) => ({
+        ...sample(), threadId, turnId, inputTokens, outputTokens: inputTokens / 10,
+        cachedInputTokens: inputTokens / 2, recordedAtMs, provider: "matching", model: "matching",
+      });
+      store.recordBatch([
+        metric("parent", "first", 10_000),
+        metric("root", "first", 100),
+        metric("root", "second", 200),
+        metric("child", "first", 300),
+        { ...metric("nested", "first", 400), cachedInputTokens: null, status: "failed", operation: "compact" },
+        metric("sibling", "first", 20_000),
+        metric("unregistered", "first", 30_000),
+        metric("only-child", "first", 500),
+        metric("child", "outside", 40_000, 3000),
+        { ...metric("child", "first", 50_000), provider: "other" },
+        { ...metric("child", "other-model", 60_000), model: "other" },
+      ]);
+      for (const [agentThreadId, parentThreadId] of [
+        ["root", "parent"], ["sibling", "parent"], ["child", "root"], ["nested", "child"],
+        ["only-child", "no-requests-root"],
+      ] as const) {
+        store.recordSubagentThread({ agentThreadId, parentThreadId, parentTurnId: "first", agentPath: `/root/${agentThreadId}` });
+      }
+      const service = new RequestMetricsQueryService(store);
+      const range = { name: "all" as const, startAtMs: 1000, endAtMs: 2000 };
+      const query = { provider: "matching", model: "matching", limit: 1, sortKey: "turn" as const, sortDirection: "asc" as const };
+      const page = store.readSnapshot(() => service.threadTurnSummaries("root", range, query));
+      expect(page).toMatchObject({
+        matchedTotal: 2, turnCount: 2, subagentTurnCount: 2, nextOffset: 1, turns: [{ turnId: "first" }],
+        aggregate: { requestCount: 2, inputTokens: 300, outputTokens: 30,
+          cacheUsage: { inputTokens: 300, cachedInputTokens: 150, missingRequestCount: 0 } },
+        subagentAggregate: { requestCount: 2, inputTokens: 700, outputTokens: 70, cachedInputTokens: null,
+          cacheUsage: { inputTokens: 300, cachedInputTokens: 150, missingRequestCount: 1 },
+          compact: { requestCount: 1, inputTokens: 400 } },
+        treeAggregate: { requestCount: 4, inputTokens: 1000, outputTokens: 100, cachedInputTokens: null,
+          cacheUsage: { inputTokens: 600, cachedInputTokens: 300, missingRequestCount: 1 } },
+      });
+      for (const offset of [1, 20]) {
+        expect(service.threadTurnSummaries("root", range, { ...query, offset })).toMatchObject({
+          matchedTotal: 2, turnCount: 2, subagentTurnCount: 2, aggregate: page.aggregate,
+          subagentAggregate: page.subagentAggregate, treeAggregate: page.treeAggregate,
+        });
+      }
+      expect(service.threadTurnSummaries("child", range, query)).toMatchObject({
+        subagentTurnCount: 1,
+        aggregate: { requestCount: 1, inputTokens: 300 },
+        subagentAggregate: { requestCount: 1, inputTokens: 400 },
+        treeAggregate: { requestCount: 2, inputTokens: 700 },
+      });
+      expect(service.threadTurnSummaries("no-requests-root", range, query)).toMatchObject({
+        matchedTotal: 0, subagentTurnCount: 1, turns: [], aggregate: null,
+        subagentAggregate: { requestCount: 1, inputTokens: 500 },
+        treeAggregate: { requestCount: 1, inputTokens: 500 },
+      });
+      for (const filter of [{ status: "failed" as const }, { operation: "compact" as const }, { onlyFailures: true }, { filter: "nested" }]) {
+        expect(service.threadTurnSummaries("root", range, { ...query, ...filter })).toMatchObject({
+          matchedTotal: 0, turnCount: 0, subagentTurnCount: 1, turns: [], aggregate: null,
+          subagentAggregate: { requestCount: 1, inputTokens: 400 },
+          treeAggregate: { requestCount: 1, inputTokens: 400 },
+        });
+      }
+      expect(service.threadTurnSummaries("root", range, { ...query, provider: ["matching", "other"] }))
+        .toMatchObject({ subagentTurnCount: 2, subagentAggregate: { requestCount: 3 },
+          treeAggregate: { requestCount: 5, inputTokens: 51_000 } });
+      expect(service.threadTurnSummaries("root", range, { ...query, turnId: "first" })).toMatchObject({
+        matchedTotal: 1, aggregate: { requestCount: 1, inputTokens: 100 },
+        subagentTurnCount: null, subagentAggregate: null, treeAggregate: null,
+      });
+      for (const unavailable of [{ filter: "absent" }, { turnId: "absent" }]) {
+        expect(service.threadTurnSummaries("root", range, { ...query, ...unavailable })).toMatchObject({
+          matchedTotal: 0, turns: [], aggregate: null, subagentAggregate: null, treeAggregate: null,
+          subagentTurnCount: "turnId" in unavailable ? null : 0,
+        });
+      }
+      expect(service.threadTurnSummaries("nested", range, query)).toMatchObject({
+        subagentTurnCount: 0,
+        aggregate: { requestCount: 1, inputTokens: 400 }, subagentAggregate: null,
+        treeAggregate: { requestCount: 1, inputTokens: 400 },
+      });
+    } finally {
+      store.close();
+    }
+  });
+
   it("counts scoped own Threads and Turns for overview without querying tree pages", () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-thread-counts-"));
     directories.push(directory);
@@ -205,7 +351,7 @@ describe("request metrics subagent session aggregation", () => {
         { threadId: "absent-root", inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
           subagentUsage: { inputTokens: 100, cachedInputTokens: 50, outputTokens: 900,
             cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 } }, totalTokens: 1000 },
-        { threadId: "missing-input", inputTokens: 0, cachedInputTokens: 0, outputTokens: 5,
+        { threadId: "missing-input", inputTokens: 0, cachedInputTokens: null, outputTokens: 5,
           subagentUsage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
             cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 } }, totalTokens: 5 },
       ]);

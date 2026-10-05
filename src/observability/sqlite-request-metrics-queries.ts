@@ -112,6 +112,7 @@ const metricsAggregateSql = `
   SUM(cached_input_tokens) AS cached_input_tokens,
   COUNT(input_tokens) AS input_token_count,
   COUNT(cached_input_tokens) AS cached_input_token_count,
+  COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
   SUM(output_tokens) AS output_tokens,
   SUM(reasoning_output_tokens) AS reasoning_output_tokens,
   ${compactAggregateSql}
@@ -330,8 +331,8 @@ export class SqliteRequestMetricsQueries {
       period: row.period,
       requestCount: row.request_count,
       inputTokens: row.input_tokens ?? 0,
-      cachedInputTokens: row.input_token_count > 0
-        && row.cached_input_token_count === row.input_token_count
+      cachedInputTokens: row.input_token_count === row.request_count
+        && row.cached_input_token_count === row.request_count
         ? row.cached_input_tokens ?? 0
         : null,
       outputTokens: row.output_tokens ?? 0,
@@ -464,6 +465,7 @@ export class SqliteRequestMetricsQueries {
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM scoped
     `).get(threadId) as unknown as TurnSummaryRow;
@@ -551,6 +553,7 @@ export class SqliteRequestMetricsQueries {
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM scoped
     `).get(threadId, turnId, threadId, turnId, turnId) as TurnSummaryRow | undefined;
@@ -715,6 +718,7 @@ export class SqliteRequestMetricsQueries {
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM model_request_metrics
       WHERE thread_id = ? AND turn_id = ?
@@ -737,6 +741,7 @@ export class SqliteRequestMetricsQueries {
     const interruptionByTurn = new Map(interruptions.map((row) => [row.turn_id, interruptionFromRow(row)]));
     return {
       ...page,
+      ...this.threadTreeAggregates(threadId, query),
       turns: rows.map((row) => ({
         ...toStoredTurnSummary(row),
         interruptionSummary: interruptionByTurn.get(row.turn_id!) ?? emptyInterruptionSummary(),
@@ -744,6 +749,40 @@ export class SqliteRequestMetricsQueries {
         recordedAtMs: row.recorded_at_ms,
         directSubagentCount: subagentCounts.get(row.turn_id!) ?? 0,
       })),
+    };
+  }
+
+  private threadTreeAggregates(
+    threadId: string,
+    query: ModelRequestMetricsThreadQuery,
+  ): Pick<StoredThreadTurnsPage, "subagentTurnCount" | "subagentAggregate" | "treeAggregate"> {
+    // An own Turn filter does not establish which descendant Turns belong to it.
+    if (query.turnId !== undefined) return { subagentTurnCount: null, subagentAggregate: null, treeAggregate: null };
+    const scope = metricsScopeSql({ ...query, threadId }, true);
+    const cte = `WITH RECURSIVE tree(thread_id) AS (
+      SELECT ?
+      UNION
+      SELECT child.thread_id FROM tree
+      JOIN subagent_threads AS child ON child.parent_thread_id = tree.thread_id
+    ), scoped AS (
+      SELECT * FROM model_request_metrics
+      WHERE ${scope.sql} AND turn_id IS NOT NULL
+        AND thread_id IN (SELECT thread_id FROM tree)
+    )`;
+    const parameters = [threadId, ...scope.params];
+    const treeSummary = this.reader.prepare(`
+      ${cte} SELECT ${metricsAggregateSql} FROM scoped
+    `).get(...parameters) as unknown as AggregateRow;
+    const subagentSummary = this.reader.prepare(`
+      ${cte}, descendants AS (SELECT * FROM scoped WHERE thread_id != ?)
+      SELECT ${metricsAggregateSql},
+        (SELECT COUNT(*) FROM (SELECT DISTINCT thread_id, turn_id FROM descendants)) AS turn_count
+      FROM descendants
+    `).get(...parameters, threadId) as unknown as AggregateRow & { turn_count: number };
+    return {
+      subagentTurnCount: subagentSummary.turn_count,
+      subagentAggregate: subagentSummary.request_count === 0 ? null : toStoredMetricsAggregate(subagentSummary),
+      treeAggregate: treeSummary.request_count === 0 ? null : toStoredMetricsAggregate(treeSummary),
     };
   }
 
@@ -798,10 +837,10 @@ export class SqliteRequestMetricsQueries {
         inputTokens: row.input_tokens ?? 0,
         outputTokens: row.output_tokens ?? 0,
         cachedInputTokens: row.request_count === null ? 0
-          : row.cached_input_token_count === row.request_count ? row.cached_input_tokens ?? 0 : null,
+          : row.cache_missing_request_count === 0 ? row.cached_input_tokens ?? 0 : null,
         subagentUsage: {
           inputTokens: row.subagent_input_tokens ?? 0,
-          cachedInputTokens: row.subagent_cached_input_token_count === row.subagent_request_count
+          cachedInputTokens: row.subagent_cache_missing_request_count === 0
             ? row.subagent_cached_input_tokens ?? 0 : null,
           outputTokens: row.subagent_output_tokens ?? 0,
           cacheUsage: toStoredCacheUsage({
@@ -868,8 +907,6 @@ export class SqliteRequestMetricsQueries {
           SUM(CASE WHEN thread_id != root_thread_id THEN input_tokens END) AS subagent_input_tokens,
           SUM(CASE WHEN thread_id != root_thread_id THEN cached_input_tokens END) AS subagent_cached_input_tokens,
           SUM(CASE WHEN thread_id != root_thread_id THEN output_tokens END) AS subagent_output_tokens,
-          COUNT(CASE WHEN thread_id != root_thread_id THEN 1 END) AS subagent_request_count,
-          COUNT(CASE WHEN thread_id != root_thread_id THEN cached_input_tokens END) AS subagent_cached_input_token_count,
           SUM(CASE WHEN thread_id != root_thread_id AND input_tokens IS NOT NULL
             THEN cached_input_tokens END) AS subagent_known_cached_input_tokens,
           SUM(CASE WHEN thread_id != root_thread_id AND cached_input_tokens IS NOT NULL
@@ -917,8 +954,6 @@ export class SqliteRequestMetricsQueries {
       subagent_input_tokens: number | null;
       subagent_cached_input_tokens: number | null;
       subagent_output_tokens: number | null;
-      subagent_request_count: number;
-      subagent_cached_input_token_count: number;
       subagent_known_cached_input_tokens: number | null;
       subagent_cache_observed_input_tokens: number | null;
       subagent_cache_missing_request_count: number;
@@ -1282,6 +1317,7 @@ export class SqliteRequestMetricsQueries {
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql},
         COUNT(*) OVER () AS total_group_count
       FROM filtered

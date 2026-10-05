@@ -113,6 +113,7 @@ export interface TurnSummaryRow extends CompactSummaryRow, RequestOutcomeRow {
   cached_input_tokens: number | null;
   input_token_count: number;
   cached_input_token_count: number;
+  cache_observed_request_count: number;
   output_tokens: number | null;
   reasoning_output_tokens: number | null;
 }
@@ -240,6 +241,8 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
 }
 
 export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSummary {
+  // Fully unobserved requests do not affect the observed Turn rate, but input
+  // and cache fields from different requests must never fill each other's gaps.
   return {
     requestOutcomes: toStoredRequestOutcomes(row),
     interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
@@ -251,8 +254,9 @@ export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetri
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
     inputTokens: row.input_tokens ?? 0,
-    cachedInputTokens: row.input_token_count > 0
-      && row.cached_input_token_count === row.input_token_count
+    cachedInputTokens: row.cache_observed_request_count > 0
+      && row.cache_observed_request_count === row.input_token_count
+      && row.cache_observed_request_count === row.cached_input_token_count
       ? row.cached_input_tokens ?? 0
       : null,
     outputTokens: row.output_tokens ?? 0,
@@ -298,8 +302,8 @@ export function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestM
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
     inputTokens: row.input_tokens ?? 0,
-    cachedInputTokens: row.input_token_count > 0
-      && row.cached_input_token_count === row.input_token_count
+    cachedInputTokens: row.request_count > 0
+      && row.cache_missing_request_count === 0
       ? row.cached_input_tokens ?? 0
       : null,
     outputTokens: row.output_tokens ?? 0,
@@ -324,8 +328,8 @@ export function toStoredCompactSummary(
     requestCount: row.compact_request_count,
     unsuccessfulRequestCount: row.compact_unsuccessful_request_count,
     inputTokens: row.compact_input_tokens ?? 0,
-    cachedInputTokens: row.compact_input_token_count > 0
-      && row.compact_cached_input_token_count === row.compact_input_token_count
+    cachedInputTokens: row.compact_input_token_count === row.compact_request_count
+      && row.compact_cached_input_token_count === row.compact_request_count
       ? row.compact_cached_input_tokens ?? 0
       : null,
     outputTokens: row.compact_output_tokens ?? 0,

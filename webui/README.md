@@ -98,7 +98,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `hooks/use-thread-subagents.ts` 管理独立分页、错误与会话切换隔离，
 独立复用指标变化订阅和快照确认，历史分页暂停自动更新；仅查询关联数据，不读取会话详情。关联导航使用全部时间并清除请求筛选。
 
-`pages/thread-detail-page.tsx` 在筛选下方以 `ThreadPeriodSummary` 卡片展示当前会话自身的轮次、请求、输入和输出，历史累计默认折叠为紧凑统计行并明确包含子代理。轮次 DataTable 填充剩余高度，表格区域滚动、分页栏位于底部；最小表格高度为窄视口保留可用空间。轮次 ID 缩写展示并保留完整提示及请求链接；每轮 `directSubagentCount` 链接到带 `parentTurnId` 的关联子代理页，切换父轮次会隔离旧快照并重置分页。
+`pages/thread-detail-page.tsx` 通过 `ThreadPeriodSummary` 组合当前筛选的输入、输出、合计三张卡和轮次、请求结果摘要；消费同一 `/turns` 响应的会话、后代及整组聚合，不再渲染历史累计折叠区。输入、输出分别复用 `InputTokenTooltip`、`OutputTokenTooltip`，摘要中的轮次与请求通过 `TableHint` 展示会话和子代理分项。精确 Turn 筛选保留后代统计不可用状态，切换查询通过加载态隐藏旧汇总。`/run` 仍用于子代理身份和父会话导航。轮次 DataTable 填充剩余高度，表格区域滚动、分页栏位于底部；最小表格高度为窄视口保留可用空间。轮次 ID 缩写展示并保留完整提示及请求链接；每轮 `directSubagentCount` 链接到带 `parentTurnId` 的关联子代理页，切换父轮次会隔离旧快照并重置分页。每轮表在部分中断用量缺失时保留有效的已记录缓存命中率，并通过提示说明统计范围。
 
 `hooks/use-dashboard.ts` 为汇总、趋势和热力图共用一条指标订阅；`hooks/use-official-account-sources.ts` 独立订阅已保存账户快照，仅各账户手动刷新查询上游，进入页面、恢复可见与页头刷新均不触发上游账户查询。
 `components/overview/overview-sections.tsx` 在 OpenCode Go 账户组首次需要无订阅管理时挂载单个配置控制器和确认弹窗，所有提示卡复用读取；配置读取失败可以重试，删除仍受读取成功、忙碌态和预览确认限制。

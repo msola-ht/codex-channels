@@ -79,6 +79,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   会话与每轮期间查询由 `threadList(query)`、`threadTurnSummaries(threadId, query)` 提供，先按请求
   记录时间及精确条件筛选，再按自身 Thread/Turn 汇总、排序和分页，返回匹配总数和不受分页影响的
   汇总；Provider 筛选支持单值或多值并集，`providers()` 返回库内完整去重名单供筛选选项使用。
+  `threadTurnSummaries()` 另外返回同筛选范围、分页前的后代 `subagentAggregate`、按 Thread/Turn 去重的 `subagentTurnCount` 和会话加后代的 `treeAggregate`；递归关系只覆盖已登记后代，请求必须具有 Turn 归属，不改变自身轮次列表与聚合口径。精确 Turn 筛选时这三个字段均为 null，避免推断后代请求的父轮次归属；无匹配请求时聚合为 null、后代轮数为零。WebUI `/turns` 入口在同一读取快照中取得这些汇总和轮次分页。
   Provider、模型和思考等级取匹配范围内最后一条记录，不混入范围外的最新设置。父 Turn 任务窄查询由
   `threadTurnTaskSummary()` 提供，子代理完成卡片通过 `threadTurnSummary()` 精确读取官方终态对应
   Turn，再按需合并该 Turn 的子任务；`threadList()` 与 `threadTurnSummaries()` 供

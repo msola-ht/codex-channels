@@ -135,10 +135,12 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       header: t("metrics.cacheHitRate"),
       cell: ({ row }) => {
         const turn = row.original
-        if (turn.interruptionSummary.usageUnobserved > 0) return "—"
-        return <span className="whitespace-nowrap tabular-nums">{turn.inputTokens > 0 && turn.cachedInputTokens !== null
+        const rate = turn.inputTokens > 0 && turn.cachedInputTokens !== null
           ? `${(turn.cachedInputTokens / turn.inputTokens * 100).toFixed(1)}%`
-          : "—"}</span>
+          : "—"
+        return <span className="whitespace-nowrap tabular-nums">{rate !== "—" && turn.interruptionSummary.usageUnobserved > 0
+          ? <TableHint hint={t("metrics.observedCacheHitRateHint")}>{rate}</TableHint>
+          : rate}</span>
       },
     },
     {

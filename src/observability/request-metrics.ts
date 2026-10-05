@@ -424,6 +424,12 @@ export interface StoredThreadListPage extends StoredThreadMetricsPage {
 
 export interface StoredThreadTurnsPage extends StoredThreadMetricsPage {
   turns: StoredThreadTurnSummary[];
+  /** 同筛选范围、分页前的后代 Thread/Turn 去重轮数；精确 Turn 筛选时不可用。 */
+  subagentTurnCount: number | null;
+  /** 同筛选范围、分页前的全部已登记后代；精确 Turn 筛选时不可用。 */
+  subagentAggregate: StoredModelRequestMetricsAggregate | null;
+  /** 目标 Thread 自身和全部已登记后代；精确 Turn 筛选时不可用。 */
+  treeAggregate: StoredModelRequestMetricsAggregate | null;
 }
 
 export interface StoredModelRequestMetricsErrorGroup {

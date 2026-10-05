@@ -286,6 +286,9 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
   threadId: string
   turns: Array<TurnSummary & { directSubagentCount: number }>
   turnCount: number
+  subagentTurnCount: number | null
+  subagentAggregate: Aggregate | null
+  treeAggregate: Aggregate | null
 }
 
 export interface RequestRecord {
