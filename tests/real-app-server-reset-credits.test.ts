@@ -4,11 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CodexAppServerClient, JsonRpcClient, StdioTransport } from "../src/codex-client/index.js";
+import { ProviderAccountService, createOpenAiAccountAdapter } from "../src/application/index.js";
 import { readOpenAiCredentialRefreshTime } from "../runtime/openai-credentials.mjs";
 
 const suite = process.env.RUN_CODEX_CONTRACT === "1" ? describe : describe.skip;
 suite("real App Server reset credit contract with isolated mock account", () => {
-  it("updates credential refresh time only on explicit quota refresh, including when the ID token is omitted", async () => {
+  it("reads existing credential refresh time without triggering OAuth on repeated quota queries", async () => {
     const directory = mkdtempSync(join(tmpdir(), "credentials-contract-"));
     const accountId = "123e4567-e89b-42d3-a456-426614174000";
     const initialRefreshTime = new Date(Date.now() - 60_000).toISOString();
@@ -19,19 +20,15 @@ suite("real App Server reset credit contract with isolated mock account", () => 
       return `eyJhbGciOiJub25lIn0.${payload}.fixture`;
     };
     const persistedRefreshTime = (): string => JSON.parse(readFileSync(join(directory, "auth.json"), "utf8")).last_refresh;
-    const refreshBodies: unknown[] = [];
+    let refreshRequests = 0;
     const usageAuthorization: Array<string | undefined> = [];
-    const backend = createServer(async (request, response) => {
-      let body = ""; for await (const chunk of request) body += String(chunk);
+    const backend = createServer((request, response) => {
       const path = request.url ?? "";
       response.setHeader("content-type", "application/json");
       if (path === "/oauth/token") {
-        refreshBodies.push(JSON.parse(body));
-        response.end(JSON.stringify({
-          ...(refreshBodies.length === 1 ? { id_token: token() } : {}),
-          access_token: `refreshed-access-token-${refreshBodies.length}`,
-          refresh_token: `refreshed-refresh-token-${refreshBodies.length}`,
-        }));
+        refreshRequests += 1;
+        response.writeHead(500);
+        response.end(JSON.stringify({ error: "unexpected credential refresh" }));
         return;
       }
       if (path.endsWith("/usage")) {
@@ -62,26 +59,23 @@ suite("real App Server reset credit contract with isolated mock account", () => 
         environment: { PATH: process.env.PATH, CODEX_HOME: directory, CODEX_REFRESH_TOKEN_URL_OVERRIDE: `${origin}/oauth/token` },
       })), { sandbox: "read-only" });
       await client.connect();
+      const accounts = new ProviderAccountService([createOpenAiAccountAdapter(client)], undefined,
+        id => readOpenAiCredentialRefreshTime(id, { CODEX_HOME: directory }));
 
       await client.accountRateLimits({ background: true });
-      expect(refreshBodies).toEqual([]);
+      expect(refreshRequests).toBe(0);
       expect(await readOpenAiCredentialRefreshTime(accountId, { CODEX_HOME: directory })).toBe(Math.floor(Date.parse(initialRefreshTime) / 1000));
       expect(persistedRefreshTime()).toBe(initialRefreshTime);
 
-      await client.accountRateLimits({ refreshLogin: true });
-      expect(refreshBodies).toEqual([expect.objectContaining({ grant_type: "refresh_token", refresh_token: "fixture-refresh-token" })]);
-      const refreshedTime = persistedRefreshTime();
-      expect(Date.parse(refreshedTime)).toBeGreaterThan(Date.parse(initialRefreshTime));
-      expect(await readOpenAiCredentialRefreshTime(accountId, { CODEX_HOME: directory })).toBe(Math.floor(Date.parse(refreshedTime) / 1000));
-
-      await client.accountRateLimits({ refreshLogin: true });
-      expect(refreshBodies).toHaveLength(2);
-      expect(refreshBodies[1]).toEqual(expect.objectContaining({ grant_type: "refresh_token", refresh_token: "refreshed-refresh-token-1" }));
-      const refreshedWithoutIdTokenTime = persistedRefreshTime();
-      expect(refreshedWithoutIdTokenTime).not.toBe(refreshedTime);
-      expect(Date.parse(refreshedWithoutIdTokenTime)).toBeGreaterThanOrEqual(Date.parse(refreshedTime));
-      expect(await readOpenAiCredentialRefreshTime(accountId, { CODEX_HOME: directory })).toBe(Math.floor(Date.parse(refreshedWithoutIdTokenTime) / 1000));
-      expect(usageAuthorization).toEqual(["Bearer fixture-access-token", "Bearer refreshed-access-token-1", "Bearer refreshed-access-token-2"]);
+      for (let query = 0; query < 2; query += 1) {
+        await expect(accounts.accountLimits("openai")).resolves.toMatchObject({
+          kind: "rate-limits", limits: { accountId }, credentialRefreshedAt: Math.floor(Date.parse(initialRefreshTime) / 1000),
+        });
+        expect(refreshRequests).toBe(0);
+        expect(persistedRefreshTime()).toBe(initialRefreshTime);
+      }
+      expect(await readOpenAiCredentialRefreshTime("another-account", { CODEX_HOME: directory })).toBeNull();
+      expect(usageAuthorization).toEqual(Array(3).fill("Bearer fixture-access-token"));
     } finally {
       await client?.close(); backend.closeAllConnections();
       await new Promise<void>(resolve => backend.close(() => resolve()));

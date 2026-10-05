@@ -66,13 +66,13 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     return result;
   }
 
-  async accountLimits(modelProvider: string, signal?: AbortSignal, options: { refreshLogin?: boolean } = { refreshLogin: true }): Promise<ProviderAccountLimits> {
+  async accountLimits(modelProvider: string, signal?: AbortSignal): Promise<ProviderAccountLimits> {
     signal?.throwIfAborted();
     const adapter = this.adapters.get(modelProvider);
     // 不支持的能力没有新的账户观测，不能覆盖进程重启前保存的状态。
     if (!adapter?.accountLimits) return { kind: "unsupported", provider: modelProvider };
     const sequence = ++this.limitsQuerySequence;
-    const result = await adapter.accountLimits(signal, options);
+    const result = await adapter.accountLimits(signal);
     signal?.throwIfAborted();
     if (sequence >= (this.savedLimitsSequence.get(modelProvider) ?? 0)) {
       this.persist(
@@ -102,7 +102,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     };
     await Promise.all([...this.adapters.values()].flatMap((adapter) => [
       observe(adapter.provider, "usage", this.accountUsage(adapter.provider, undefined, signal)),
-      ...(adapter.accountLimits ? [observe(adapter.provider, "limits", this.accountLimits(adapter.provider, signal, { refreshLogin: false }))] : []),
+      ...(adapter.accountLimits ? [observe(adapter.provider, "limits", this.accountLimits(adapter.provider, signal))] : []),
     ]));
   }
 
@@ -193,11 +193,11 @@ export function createOpenAiAccountAdapter(
     async accountThreadUsage(threadId) {
       return await query.accountThreadUsage(threadId);
     },
-    async accountLimits(signal, options) {
+    async accountLimits(signal) {
       return {
         kind: "rate-limits",
         provider: "openai",
-        limits: await query.accountRateLimits({ ...(signal ? { signal } : {}), ...(options?.refreshLogin ? { refreshLogin: true } : {}) }),
+        limits: await query.accountRateLimits(signal ? { signal } : {}),
       };
     },
   };

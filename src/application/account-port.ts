@@ -132,7 +132,7 @@ export interface AccountWeeklyLimitEstimate {
 
 export interface AccountQueryPort {
   accountUsage(): Promise<AccountUsage>;
-  accountRateLimits(options?: { background?: boolean; refreshLogin?: boolean; signal?: AbortSignal }): Promise<AccountRateLimits>;
+  accountRateLimits(options?: { background?: boolean; signal?: AbortSignal }): Promise<AccountRateLimits>;
   accountThreadUsage(threadId: string): Promise<AccountThreadUsage>;
 }
 
@@ -194,7 +194,7 @@ export interface ProviderAccountAdapter {
   provider: string;
   accountUsage(signal?: AbortSignal): Promise<ProviderAccountUsage>;
   accountThreadUsage?(threadId: string): Promise<AccountThreadUsage>;
-  accountLimits?(signal?: AbortSignal, options?: { refreshLogin?: boolean }): Promise<ProviderAccountLimits>;
+  accountLimits?(signal?: AbortSignal): Promise<ProviderAccountLimits>;
 }
 
 export interface ProviderAccountQueryPort {

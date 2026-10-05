@@ -163,6 +163,139 @@ describe("Feishu command center", () => {
     expect(fixture.execute).toHaveBeenCalledExactlyOnceWith(target, "limits", "ou_actor", input);
   });
 
+  it("coalesces limits clicks through query and result delivery, then allows another query", async () => {
+    const fixture = createFixture();
+    await fixture.center.open(target, "ou_actor");
+    const action = cardAction(fixture.cards[0]!, "limits");
+    const response = {
+      title: "OpenAI 额度",
+      choices: [{ label: "查看重置券", action: "limits" as const, input: "reset" }],
+    };
+    let finishQuery!: () => void;
+    const querying = new Promise<void>((resolve) => { finishQuery = resolve; });
+    let finishDelivery!: () => void;
+    const delivering = new Promise<void>((resolve) => { finishDelivery = resolve; });
+    fixture.execute.mockImplementationOnce(async () => {
+      await querying;
+      return response;
+    }).mockResolvedValue(response);
+    const sendCard = fixture.deliverCard.getMockImplementation()!;
+    fixture.deliverCard.mockImplementationOnce(async (chatId, card) => {
+      await delivering;
+      return sendCard(chatId, card);
+    });
+
+    for (let click = 0; click < 3; click += 1) {
+      expect(fixture.center.handleCardAction(action)).toBe("accepted");
+    }
+    expect(fixture.execute).toHaveBeenCalledExactlyOnceWith(target, "limits", "ou_actor", "");
+    expect(fixture.deliverCard).toHaveBeenCalledTimes(1);
+    finishQuery();
+    await settle();
+    expect(fixture.deliverCard).toHaveBeenCalledTimes(2);
+    expect(fixture.cards).toHaveLength(1);
+    expect(fixture.center.handleCardAction(action)).toBe("accepted");
+    expect(fixture.center.handleCardAction(action)).toBe("accepted");
+    expect(fixture.execute).toHaveBeenCalledOnce();
+
+    finishDelivery();
+    await settle();
+    expect(fixture.cards).toHaveLength(2);
+    expect(fixture.center.handleCardAction(action)).toBe("accepted");
+    await settle();
+    expect(fixture.execute).toHaveBeenCalledTimes(2);
+    expect(fixture.cards).toHaveLength(3);
+
+    let finishClosingDelivery!: () => void;
+    const closingDelivery = new Promise<void>((resolve) => { finishClosingDelivery = resolve; });
+    fixture.deliverCard.mockImplementationOnce(async (chatId, card) => {
+      await closingDelivery;
+      return sendCard(chatId, card);
+    });
+    expect(fixture.center.handleCardAction(action)).toBe("accepted");
+    await settle();
+    let closed = false;
+    const closing = fixture.center.close().then(() => { closed = true; });
+    await settle();
+    expect(closed).toBe(false);
+    expect(fixture.center.handleCardAction(action)).toBe("invalid");
+    finishClosingDelivery();
+    await closing;
+    expect(fixture.cards).toHaveLength(4);
+  });
+
+  it("checks authorization before coalescing and keeps limits work local to each bound card", async () => {
+    const fixture = createFixture();
+    fixture.isAllowed.mockReturnValue(true);
+    const otherTarget = { ...target, conversationId: "oc_other" };
+    await fixture.center.open(target, "ou_actor");
+    await fixture.center.open(target, "ou_actor");
+    await fixture.center.open(otherTarget, "ou_actor");
+    await fixture.center.open(target, "ou_other");
+    let finish!: () => void;
+    const querying = new Promise<void>((resolve) => { finish = resolve; });
+    fixture.execute.mockReturnValue(querying);
+    const action = cardAction(fixture.cards[0]!, "limits");
+    expect(fixture.center.handleCardAction(action)).toBe("accepted");
+    expect(fixture.center.handleCardAction(action)).toBe("accepted");
+    for (const invalid of [
+      { ...action, actorOpenId: "ou_other" },
+      { ...action, chatId: "oc_other" },
+      { ...action, messageId: "om_other" },
+      { ...action, value: { ...action.value, codexc_command_input: "reset" } },
+    ]) {
+      expect(fixture.center.handleCardAction(invalid)).toBe("invalid");
+    }
+    fixture.isAllowed.mockReturnValue(false);
+    expect(fixture.center.handleCardAction(action)).toBe("invalid");
+    fixture.isAllowed.mockReturnValue(true);
+    expect(fixture.execute).toHaveBeenCalledOnce();
+
+    expect(fixture.center.handleCardAction(cardAction(fixture.cards[1]!, "limits"))).toBe("accepted");
+    expect(fixture.center.handleCardAction(cardAction(fixture.cards[2]!, "limits"))).toBe("accepted");
+    expect(fixture.center.handleCardAction({
+      ...cardAction(fixture.cards[3]!, "limits"), actorOpenId: "ou_other",
+    })).toBe("accepted");
+    expect(fixture.execute).toHaveBeenCalledTimes(4);
+    expect(fixture.execute).toHaveBeenNthCalledWith(3, otherTarget, "limits", "ou_actor", "");
+    expect(fixture.execute).toHaveBeenNthCalledWith(4, target, "limits", "ou_other", "");
+    expect(fixture.center.handleCardAction(cardAction(fixture.cards[0]!, "status"))).toBe("accepted");
+    expect(fixture.execute).toHaveBeenLastCalledWith(target, "status", "ou_actor", "");
+    finish();
+    await fixture.center.close();
+    expect(fixture.center.handleCardAction(action)).toBe("invalid");
+  });
+
+  it.each(["query", "synchronous query", "result delivery"])(
+    "allows another limits query after a failed %s",
+    async (phase) => {
+      const fixture = createFixture();
+      await fixture.center.open(target, "ou_actor");
+      const action = cardAction(fixture.cards[0]!, "limits");
+      const response = {
+        title: "OpenAI 额度",
+        choices: [{ label: "查看重置券", action: "limits" as const, input: "reset" }],
+      };
+      fixture.execute.mockResolvedValue(response);
+      if (phase === "result delivery") {
+        fixture.deliverCard.mockRejectedValueOnce(new Error("network"));
+      } else if (phase === "synchronous query") {
+        fixture.execute.mockImplementationOnce(() => { throw new Error("query"); });
+      } else {
+        fixture.execute.mockRejectedValueOnce(new Error("query"));
+      }
+
+      expect(fixture.center.handleCardAction(action)).toBe("accepted");
+      await settle();
+      expect(fixture.cards).toHaveLength(1);
+      expect(fixture.center.handleCardAction(action)).toBe("accepted");
+      await settle();
+      expect(fixture.execute).toHaveBeenCalledTimes(2);
+      expect(fixture.cards).toHaveLength(2);
+      await fixture.center.close();
+    },
+  );
+
   it("opens a directly supplied schedule confirmation as a bound choice card", async () => {
     const fixture = createFixture();
     const input = "confirm 12345678-1234-1234-1234-123456789abc";
@@ -775,30 +908,32 @@ function createFixture(
 ): {
   center: FeishuCommandCenter;
   cards: Array<{ chatId: string; messageId: string; card: FeishuCardDocument }>;
-  execute: ReturnType<typeof vi.fn>;
+  execute: ReturnType<typeof vi.fn<ConstructorParameters<typeof FeishuCommandCenter>[2]>>;
+  deliverCard: ReturnType<typeof vi.fn<(chatId: string, card: FeishuCardDocument) => Promise<string>>>;
+  isAllowed: ReturnType<typeof vi.fn<ConstructorParameters<typeof FeishuCommandCenter>[1]["isAllowed"]>>;
 } {
   const cards: Array<{
     chatId: string;
     messageId: string;
     card: FeishuCardDocument;
   }> = [];
-  const execute = vi.fn(async () => {});
+  const execute = vi.fn<ConstructorParameters<typeof FeishuCommandCenter>[2]>(async () => {});
+  const deliverCard = vi.fn(async (chatId: string, card: FeishuCardDocument) => {
+    const messageId = `om_card_${cards.length + 1}`;
+    cards.push({ chatId, messageId, card });
+    return messageId;
+  });
+  const isAllowed = vi.fn<ConstructorParameters<typeof FeishuCommandCenter>[1]["isAllowed"]>(
+    ({ actorId }) => actorId === "ou_actor",
+  );
   const center = new FeishuCommandCenter(
-    {
-      deliverCard: async (chatId, card) => {
-        const messageId = `om_card_${cards.length + 1}`;
-        cards.push({ chatId, messageId, card });
-        return messageId;
-      },
-    },
-    {
-      isAllowed: ({ actorId }) => actorId === "ou_actor",
-    },
+    { deliverCard },
+    { isAllowed },
     execute,
     pino({ level: "silent" }),
     options,
   );
-  return { center, cards, execute };
+  return { center, cards, execute, deliverCard, isAllowed };
 }
 
 function cardAction(

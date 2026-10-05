@@ -565,7 +565,7 @@ export abstract class GatewayComponentGraph {
       this.router,
       models,
     );
-    this.resetCredits = new OpenAiResetCreditService(this.codex, signal => this.providerAccounts!.accountLimits("openai", signal, { refreshLogin: false }));
+    this.resetCredits = new OpenAiResetCreditService(this.codex, signal => this.providerAccounts!.accountLimits("openai", signal));
     const accountAdapters = [
       createOpenAiAccountAdapter(this.codex),
       ...createManagedProviderAccountAdapters(

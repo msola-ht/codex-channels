@@ -7,33 +7,27 @@ import type { GetAccountTokenUsageResponse } from "../src/codex-protocol/index.j
 import { appServerRateLimit, FakeTransport } from "./support/json-rpc-fixtures.js";
 
 describe("JsonRpcClient account", () => {
-    it("waits for an explicit login refresh before reading quota", async () => {
+    it("reads quota directly without requesting a login refresh", async () => {
       const transport = new FakeTransport();
       transport.ignoreAccountRead = true;
       const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "workspace-write" });
       await client.connect();
       try {
-        const result = client.accountRateLimits({ refreshLogin: true });
-        const refresh = transport.sent.findLast(message => message.method === "account/read");
-        expect(refresh).toMatchObject({ method: "account/read", params: { refreshToken: true } });
-        expect(transport.sent.some(message => message.method === "account/rateLimits/read")).toBe(false);
-        transport.receive({ id: refresh!.id, result: transport.accountResult });
-        await result;
+        await client.accountRateLimits();
         expect(transport.sent.filter(message => String(message.method).startsWith("account/")).map(message => ({
           method: message.method, params: message.params,
         }))).toEqual([
-          { method: "account/read", params: { refreshToken: true } },
           { method: "account/rateLimits/read", params: { supportsLunaReserve: true } },
         ]);
       } finally { await client.close(); }
     });
 
-    it("does not proactively refresh login for background quota queries even when requested", async () => {
+    it("omits reset-credit details for background quota queries without requesting a login refresh", async () => {
       const transport = new FakeTransport();
       const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "workspace-write" });
       await client.connect();
       try {
-        await client.accountRateLimits({ background: true, refreshLogin: true });
+        await client.accountRateLimits({ background: true });
         expect(transport.sent.some(message => message.method === "account/read")).toBe(false);
         expect(transport.sent.findLast(message => message.method === "account/rateLimits/read")).toMatchObject({
           params: { supportsLunaReserve: true, excludeResetCreditDetails: true },
@@ -41,35 +35,20 @@ describe("JsonRpcClient account", () => {
       } finally { await client.close(); }
     });
 
-    it("does not read quota after the caller cancels an in-flight login refresh", async () => {
+    it("cancels an in-flight manual quota query without requesting a login refresh", async () => {
       const transport = new FakeTransport();
-      transport.ignoreAccountRead = true;
       const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "workspace-write" });
       await client.connect();
+      vi.spyOn(transport, "send").mockImplementation(async message => {
+        transport.sent.push(JSON.parse(message) as Record<string, unknown>);
+      });
       try {
         const controller = new AbortController();
-        const result = client.accountRateLimits({ refreshLogin: true, signal: controller.signal });
-        const refresh = transport.sent.findLast(message => message.method === "account/read");
-        expect(refresh).toBeDefined();
+        const result = client.accountRateLimits({ signal: controller.signal });
         controller.abort(new Error("manual refresh cancelled"));
         await expect(result).rejects.toThrow("manual refresh cancelled");
-        transport.receive({ id: refresh!.id, result: transport.accountResult });
-        expect(transport.sent.some(message => message.method === "account/rateLimits/read")).toBe(false);
-      } finally { await client.close(); }
-    });
-
-    it("does not retry token rotation or read quota when login refresh is overloaded", async () => {
-      const transport = new FakeTransport();
-      transport.ignoreAccountRead = true;
-      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "workspace-write" });
-      await client.connect();
-      try {
-        const result = client.accountRateLimits({ refreshLogin: true });
-        const refresh = transport.sent.findLast(message => message.method === "account/read");
-        transport.receive({ id: refresh!.id, error: { code: -32000, message: "Client overloaded; request rejected." } });
-        await expect(result).rejects.toThrow("Client overloaded");
-        expect(transport.sent.filter(message => message.method === "account/read")).toHaveLength(1);
-        expect(transport.sent.some(message => message.method === "account/rateLimits/read")).toBe(false);
+        expect(transport.sent.filter(message => message.method === "account/rateLimits/read")).toHaveLength(1);
+        expect(transport.sent.some(message => message.method === "account/read")).toBe(false);
       } finally { await client.close(); }
     });
 

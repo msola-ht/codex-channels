@@ -111,6 +111,7 @@ interface PendingCommandCenter {
   acceptedStates: ReadonlyMap<string, FeishuCommandAcceptedState>;
   form?: FeishuCommandCenterForm;
   consumeOnUse: boolean;
+  limitsQueryInFlight?: boolean;
 }
 
 interface FeishuCommandCenterOptions {
@@ -315,6 +316,15 @@ export class FeishuCommandCenter {
     ) {
       return "invalid";
     }
+    const isLimitsQuery = resolvedCommand === "limits"
+      && submittedInput === ""
+      && !pending.consumeOnUse;
+    if (isLimitsQuery && pending.limitsQueryInFlight) {
+      return "accepted";
+    }
+    if (isLimitsQuery) {
+      pending.limitsQueryInFlight = true;
+    }
     if (
       pending.consumeOnUse
       || commandCenterActionConsumesToken(resolvedCommand, submittedInput!)
@@ -345,23 +355,31 @@ export class FeishuCommandCenter {
       );
     }
     void this.track(
-      (resolvedCommand === "help"
-        ? this.openCard(
-            pending.target,
-            pending.actorId,
-            renderFeishuCategorizedCommandsCard,
-          )
-        : this.execute(
-            pending.target,
-            resolvedCommand,
-            pending.actorId,
-            submittedInput!,
-          ).then((response) =>
-            response
-              ? this.openResponse(pending.target, pending.actorId, response)
-              : undefined
-          )
-      ).catch((error: unknown) => {
+      (async () => {
+        try {
+          if (resolvedCommand === "help") {
+            await this.openCard(
+              pending.target,
+              pending.actorId,
+              renderFeishuCategorizedCommandsCard,
+            );
+          } else {
+            const response = await this.execute(
+              pending.target,
+              resolvedCommand,
+              pending.actorId,
+              submittedInput!,
+            );
+            if (response) {
+              await this.openResponse(pending.target, pending.actorId, response);
+            }
+          }
+        } finally {
+          if (isLimitsQuery) {
+            pending.limitsQueryInFlight = false;
+          }
+        }
+      })().catch((error: unknown) => {
         this.logger.warn(
           {
             surface: pending.target.surface,
