@@ -13,12 +13,6 @@
       "skillPath": "i18n-expert/SKILL.md",
       "computedHash": "53863be6a9330da7395c800aa23eaaa2d4e6cf4578b60b8ac13f4f920cd97fd4"
     },
-    "migrate-radix-to-base": {
-      "source": "shadcn/ui",
-      "sourceType": "github",
-      "skillPath": "skills/migrate-radix-to-base/SKILL.md",
-      "computedHash": "e1f2030ee5059be3dff0812ca0e4b995ee9fa3132176f049ebe6c90346a6755e"
-    },
     "shadcn": {
       "source": "shadcn/ui",
       "sourceType": "github",
