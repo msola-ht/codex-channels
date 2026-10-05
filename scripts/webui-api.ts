@@ -54,11 +54,25 @@ export interface ServiceLogsResponse {
   streams: { source: "journal" | "stdout" | "stderr"; lines: string[]; truncated: boolean; missing: boolean }[]
 }
 
+export interface RequestOutcomeCounts {
+  completed: number
+  interrupted: number
+  failed: number
+  incomplete: number
+}
+
+export interface RequestInterruptionSummary {
+  followedByCompletion: number
+  noObservedCompletion: number
+  usageUnobserved: number
+}
+
 export interface CompactSummary {
   model: string | null
   hasMixedModels: boolean
   requestCount: number
   unsuccessfulRequestCount: number
+  requestOutcomes: RequestOutcomeCounts
   inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
@@ -74,6 +88,7 @@ export interface Aggregate {
   cacheUsage: CacheUsage
   requestCount: number
   unsuccessfulRequestCount: number
+  requestOutcomes: RequestOutcomeCounts
   inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
@@ -105,6 +120,7 @@ export interface ErrorsReport {
   endAtMs: number
   requestCount: number
   unsuccessfulRequestCount: number
+  requestOutcomes: RequestOutcomeCounts
   groups: ErrorGroup[]
   totalGroupCount: number
 }
@@ -166,6 +182,7 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 )
 
 export interface ThreadListItem {
+  requestOutcomes: RequestOutcomeCounts
   totalTokens: number
   cachedInputTokens: number | null
   subagentUsage: { inputTokens: number; cachedInputTokens: number | null; outputTokens: number; cacheUsage: CacheUsage }
@@ -196,7 +213,7 @@ export interface ThreadsResponse extends MetricsPageSummary {
 }
 
 export interface SubagentListItem extends Pick<ThreadListItem,
-  "provider" | "model" | "turnCount" | "requestCount" | "inputTokens" | "outputTokens" | "cacheUsage"
+  "provider" | "model" | "reasoningEffort" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"
 > {
   threadId: string
   parentThreadId: string
@@ -235,6 +252,8 @@ export interface TurnSummary {
   turnId: string
   requestCount: number
   unsuccessfulRequestCount: number
+  requestOutcomes: RequestOutcomeCounts
+  interruptionSummary: RequestInterruptionSummary
   inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
@@ -259,7 +278,7 @@ export interface ThreadRunResponse {
   parentThreadId: string | null
   parentTurnId: string | null
   latestTurn: TurnSummary | null
-  threadAggregate: (Omit<Aggregate, "cacheUsage"> & { turnCount: number }) | null
+  threadAggregate: (Omit<Aggregate, "cacheUsage"> & { turnCount: number; interruptionSummary: RequestInterruptionSummary }) | null
 }
 
 export interface ThreadTurnsResponse extends MetricsPageSummary {
@@ -267,6 +286,9 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
   threadId: string
   turns: Array<TurnSummary & { directSubagentCount: number }>
   turnCount: number
+  subagentTurnCount: number | null
+  subagentAggregate: Aggregate | null
+  treeAggregate: Aggregate | null
 }
 
 export interface RequestRecord {
@@ -317,6 +339,8 @@ export interface RequestRecord {
   reasoningOutputTokens: number | null
   totalTokens: number | null
   cacheHitRate: number | null
+  /** Local quota snapshot observation time; null when not collected. */
+  quotaObservedAtMs: number | null
   recordedAtMs: number
 }
 
@@ -941,6 +965,8 @@ export interface TrafficLabel {
 }
 
 export interface TrafficExchangeSummary {
+  /** 已保存请求正文中的思考等级；缺失时不推断默认值。 */
+  reasoningEffort?: string
   /** 从已记录 User-Agent 识别的客户端自报名称，并非已验证身份。 */
   clientName?: string
   /** 已记录请求接口使用的协议，不代表提供商的全部能力。 */
@@ -1148,6 +1174,8 @@ export type RelayQueueSnapshot = { state: "stopped" | "unknown" } | {
     displayName: string | null;
     provider: string | null;
     model: string | null;
+    /** 已验证入站请求的思考等级；尚未解析或无可展示值时为 null。 */
+    reasoningEffort: string | null;
     protocol: "chat" | "responses";
     phase: "input" | "queue" | "prepare" | "upstream" | "delivery";
     elapsedMs: number;

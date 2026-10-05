@@ -212,8 +212,8 @@ export class SessionRouter {
     return workspace ? { id: workspace.id, name: workspace.name } : undefined;
   }
 
-  readThread(threadId: string): Promise<ThreadSnapshot> {
-    return this.codex.readThread(threadId);
+  readThread(threadId: string, signal?: AbortSignal): Promise<ThreadSnapshot> {
+    return this.codex.readThread(threadId, signal);
   }
 
   foregroundThreadId(target: ConversationTarget): string | undefined {
@@ -221,7 +221,8 @@ export class SessionRouter {
   }
 
   touchActivity(target: ConversationTarget, atMs: number): void {
-    this.bindings.touchActivity(target, atMs);
+    // Distinguish inputs arriving in the same millisecond from an idle scan.
+    this.bindings.touchActivity(target, Math.max(atMs, this.bindings.idleState(target).lastActivityAt + 1));
   }
 
   ensureIdleState(target: ConversationTarget, atMs: number): void {
@@ -823,6 +824,52 @@ export class SessionRouter {
     });
   }
 
+  async releaseIdle(
+    target: ConversationTarget,
+    expected: ConversationBinding,
+    snapshot: ThreadSnapshot,
+    condition: {
+      isCurrent(): boolean;
+      verifyIdle(): Promise<boolean>;
+      canRestore(): boolean;
+      restored(thread: ThreadSnapshot): void;
+    },
+    preference?: ConversationModelPreference,
+  ): Promise<boolean> {
+    return this.withThreadLifecycle([expected.threadId], async () => {
+      const ownsBinding = () => this.sameBinding(expected, this.bindings.get(target));
+      if (!ownsBinding() || !condition.isCurrent()) return false;
+      await this.codex.unsubscribeThread(expected.threadId);
+      let verified = false;
+      try {
+        verified = ownsBinding() && condition.isCurrent() && await condition.verifyIdle();
+      } catch {
+        // An inconclusive final read must preserve the binding and restore its
+        // subscription just like activity arriving during unsubscribe.
+      }
+      if (!verified || !ownsBinding() || !condition.isCurrent()) {
+        // Unsubscribe is already effective on the server. Keep the local binding
+        // and restore its subscription when cancellation came from new activity.
+        // Shutdown/disconnection instead leaves restoration to reconnect.
+        if (ownsBinding() && condition.canRestore()) {
+          const workspace = this.workspaces.require(expected.workspaceId);
+          const resumed = await this.resumeInWorkspace(snapshot, workspace, {}, false,
+            () => ownsBinding() && condition.canRestore());
+          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode);
+          this.namesByThread.set(resumed.thread.id, resumed.thread.name);
+          this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
+          condition.restored(resumed.thread);
+        }
+        return false;
+      }
+      this.contextCompactionItemIdsByThread.delete(expected.threadId);
+      this.bindings.unbind(target, preference);
+      this.markForceNew(target, Date.now());
+      this.notifyBindingsChanged();
+      return true;
+    });
+  }
+
   async releaseBackground(threadId: string): Promise<ConversationTarget | undefined> {
     return this.withThreadLifecycle([threadId], async () => {
       const binding = this.bindings.getByThread(threadId);
@@ -884,20 +931,40 @@ export class SessionRouter {
         ...this.workspacePermissions(workspace),
       },
     );
-    this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier);
-    this.namesByThread.set(forked.thread.id, forked.thread.name);
-    this.contextCompactionItemIdsByThread.set(
-      forked.thread.id,
-      forked.contextCompactionItemIds,
-    );
-    await this.detachUnlocked(target);
     const binding = {
       target,
       workspaceId: workspace.id,
       threadId: forked.thread.id,
       sessionId: forked.thread.sessionId,
     };
-    this.bindings.bind(binding);
+    let previousUnsubscribed = false;
+    const assertCurrent = (): void => {
+      if (!this.sameBinding(current, this.bindings.get(target))) {
+        throw new UserFacingError("thread.takeover.changed", "等待期间会话绑定已变化，请重新选择");
+      }
+    };
+    try {
+      assertCurrent();
+      await this.codex.unsubscribeThread(current.threadId);
+      previousUnsubscribed = true;
+      assertCurrent();
+      this.bindings.switchForeground(binding, false);
+    } catch (error) {
+      let failure = error;
+      if (previousUnsubscribed && this.sameBinding(current, this.bindings.get(target))) {
+        try {
+          await this.resumeInWorkspace(await this.codex.readThread(current.threadId), workspace, {}, false,
+            () => this.sameBinding(current, this.bindings.get(target)));
+        } catch (restoreError) {
+          failure = new AggregateError([error, restoreError], "分叉绑定切换失败，且原订阅恢复失败", { cause: error });
+        }
+      }
+      await this.cleanupFailedResume(forked.thread.id, failure);
+    }
+    this.contextCompactionItemIdsByThread.delete(current.threadId);
+    this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier);
+    this.namesByThread.set(forked.thread.id, forked.thread.name);
+    this.contextCompactionItemIdsByThread.set(forked.thread.id, forked.contextCompactionItemIds);
     this.clearForceNew(target, Date.now());
     this.notifyBindingsChanged();
     return binding;

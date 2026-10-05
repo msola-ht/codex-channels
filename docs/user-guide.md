@@ -85,6 +85,10 @@ enabled = true
 规则按任务分工：检索摘要使用 `gpt-6-luna / high`，日常实现验证使用 `gpt-6.1-sol / high`，
 复杂分析审查使用 `gpt-6-astra / high`；允许按难度、不确定性与风险调整，但仅使用这三个模型，
 思考等级不超过 `high`。规则同时约束写入归属、交接和主代理验证，不扩大任务或外部操作授权。
+子代理负责完整任务的调查、实现、验证、修正及外部工具结果回收；依赖协调优先直接联系相关代理，
+仅在实际阻塞、需要共同决定或影响其他任务时发送过程消息。优先等待完成通知；必要轮询按
+1、2、4、8、16 分钟递增，长命令按 2、4、8、16、30 分钟递增，到上限后保持。
+同一任务优先复用原代理，中断后恢复已有成果；主代理核对关键结果并集成，复用有效证据，不重复整轮调查或验证。
 这些是代理行为指令，不是运行时强制的模型限制；使用前应确认所用 Provider 支持这些模型。
 
 主配置预设为：
@@ -136,7 +140,10 @@ idle_release_minutes = 15
 
 该值对 Telegram、飞书和微信统一生效，允许 0–1440 分钟，0 表示关闭。用户消息、平台本地命令、
 审批与输入交互和任何带目标会话的输出都会刷新活动时间；正在恢复的 Thread 不会被同时释放。
-Provider 断线期间也会跳过扫描。
+Provider 断线期间也会跳过对应 Thread；断线只取消该 Provider 的候选，其他 Provider 的扫描与补偿继续执行。
+扫描保留 Thread 与活动时间快照，在取得会话锁及每次权威读取后复核；新输入、配置禁用、断线、
+恢复或关闭会取消旧轮次。取消订阅后若出现新活动且连接仍可用，会恢复同一 Thread 的订阅；
+恢复失败交给既有有界恢复任务，保留绑定且不发送解除成功提示。
 连续达到配置的空闲时间且没有任何输入和输出时，Gateway 才会在确认 Thread、原生 Queue、审批和子代理都已
 空闲后取消订阅并解除前台绑定；如果此时 Gateway 已没有任何前台或后台绑定、进行中的 Provider 操作或
 启动任务，还会关闭全部 Provider Client，并在每 60 秒一次的空闲复检中停止全部未被租约占用的
@@ -312,6 +319,20 @@ codexc service logs -n 200
 
 默认情况下 `start`、`stop`、`status` 操作全部核心服务；`restart`、`logs` 默认只操作 Gateway。App Server 与 Gateway 是独立目标，渠道内禁止停止或重启 App Server。整体重启先停止已安装的 Relay、Gateway，再停止 App Server，随后按 App Server、Gateway、已安装且启用的 Relay 顺序启动，避免正常整体重启生成断开通知；Linux 重新安装服务也使用这一停止顺序。整体重启中任一停止失败即中止，不继续停止后续依赖或启动服务。macOS 普通 `start` 不强制重启已运行的服务。单独重启 Gateway 不停止共享 App Server；单独重启 App Server 时，仍运行的 Gateway 会按真实断线处理并重连。
 
+受管第三方 Provider 的模型目录、Profile 或管理标记变化会自动校验，并仅应用到当前 Gateway
+已启用且受影响的 Provider。原生 TUI/Desktop 租约或该实例的权威活动 Thread 会推迟应用；
+其他 Provider 的实例和活动轮次继续运行。目标实例重新读取启动材料，恢复连接和绑定并刷新模型
+目录后才提示生效；失败保留待应用状态，冷却后重试，每 Provider 每次文件变化最多失败 12 次，
+耗尽后等待下一次设置变化或 Gateway 重建。连续修改不会丢掉尚未应用的变化。
+新 Gateway 启动后静默核对宿主的已应用指纹；相同指纹不动实例，未生效变化继续等待安全应用。
+模型目录与默认值按 Provider 单独确认：已有实例读取 App Server 的实际目录，并使用宿主已应用的
+默认设置；未运行实例只有在宿主确认相同文件指纹后才开放目录，不为读取目录启动实例。
+某个 Provider 成功不会提前发布其他仍等待生效的目录。确认失败时保留原有已确认目录；重建后
+没有可确认目录的 Provider 暂不可选。显式模型选择及已有 Thread 的实际模型继续保留。
+停止或重建 Gateway 会取消未开始的操作；如果目标实例已经停止，监管会完成重新启动以恢复共享
+实例，但旧 Gateway 不再刷新或发送成功提示。旧版 App Server 监管端不支持定向应用时会明确提示
+手动重启服务，不回退到自动整体重启。账户增删或 Provider 拓扑变化仍需显式管理服务。
+
 Linux 使用 systemd 用户服务；Windows 使用当前用户计划任务和隐藏的 PowerShell 7 进程，不需要管理员权限。Windows 私有配置 ACL 修复：
 
 ```powershell
@@ -325,11 +346,16 @@ codexc update
 codexc doctor
 ```
 
+部署已准备好的本机源码可使用 `codexc update --background --source <目录>`，仅支持 Linux systemd
+用户服务，并要求先全局安装包含此入口的新版本 CLI。任务使用源工作树快照和独立持久 runner；提交后
+用 `codexc update status [task-id] [--json]` 查看阶段与最终结果。提交成功只表示已接收，后台模式在
+CLI 版本不匹配时预检失败，不静默升级；完整流程与恢复条件见[源码安装与更新](source-install.md#本机源码后台部署)。
+
 本地源码通过 `npm run install:global` 安装时，缺少 Codex CLI 会自动补装项目锁定版本，无需先初始化或配置渠道；随后执行 `codexc init`、`codexc setup`、`codexc service install`。已有 CLI 不被静默替换；完成渠道配置后可运行 `codexc update` 同步已安装包要求的版本。
 更新发现默认 CLI 缺失或版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
 非交互调用会给出精确版本安装命令并退出，不静默安装。
 
-更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。目标版本按受支持范围执行显式数据库升级；指标 v20/v21/v22/v23/v24/v25→v26 保留旧数据并生成一致性备份，运行时不隐式迁移。更新会将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，包括版本无需更新时；不停止已有官方后台。其他用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
+更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。目标版本按受支持范围执行显式数据库升级；指标 v20/v21/v22/v23/v24/v25/v26→v27 保留旧数据并生成一致性备份，运行时不隐式迁移。更新会将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，包括版本无需更新时；不停止已有官方后台。其他用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
 
 ### 本机清理与归档
 
@@ -348,7 +374,7 @@ codexc cleanup
 | 清理旧指标 | `codexc metrics cleanup --restart-gateway` | 备份清理；显式 `--restart-gateway` 会停止后启动 Gateway（原先停止也会启动），交互菜单则按原状态恢复 |
 | 核对未确认渠道结果 | `codexc delivery status` / `codexc delivery list` | 先停止 Gateway；明确重发、确认送达与停写备份见[投递箱运维](delivery.md) |
 | 清理指定 Provider 的指标 | `codexc metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
-| 保留数据升级指标库 | `codexc metrics upgrade --from 25 --to 26` | 默认预检；先停止 Gateway 与 Relay，核对后加 `--apply` |
+| 保留数据升级指标库 | `codexc metrics upgrade --from 26 --to 27` | 默认预检；先停止 Gateway 与 Relay，核对后加 `--apply` |
 | 重置整个指标库 | `codexc metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
 
 `codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。会话归档、旧指标清理和指标库重置会在确认后临停运行中的 Gateway；转储删除先预览并确认，再询问临停 Gateway、Relay 和 App Server。结束、取消或失败后按原状态恢复，原先停止的服务不会被启动；恢复失败会报告具体服务和手动启动命令。底层命令仍检查实际进程已退出，不终止前台自行运行的进程。执行失败会报告错误并返回清理菜单。
@@ -615,11 +641,13 @@ WebSocket 提供方（OpenAI 官方）同样生效：客户端 `response.create`
 git clone https://github.com/msola-ht/codex-channels.git
 cd codex-channels
 npm ci
-npm run check
-npm run lint
-npm run docs:check
-npm test
+# 按改动选择相关测试；此处以会话路由为例
+npm test -- tests/session-router.test.ts
 ```
+
+开发阶段按影响选择类型、Lint、文档检查或相关测试。提交 Hook 自动运行 `npm run verify:commit`
+选择必要检查，PR CI 使用 `npm run verify:ci` 执行完整回归；安装和真实 App Server 合同按相关改动执行。
+具体入口见[测试说明](../tests/README.md)与[CI 流程](../.github/workflows/README.md)，无需每次修改都手动运行全部检查。
 
 协议升级必须先查阅 [`docs/index.md`](index.md)、官方固定 Tag 和 [`上游源码维护规则`](upstream-sources.md)，不得把生成类型存在误认为 Gateway 已支持。完整项目文档索引见 [`index.md`](../index.md)。
 
@@ -712,7 +740,7 @@ Codex/Relay 在生产和调试模式均保留普通请求/响应头及关联 ID�
 
 Relay 生产记录脱敏后的出站 Chat/Responses 参数、输入和上游 JSON/SSE；请求与响应头遵循上述必要脱敏规则。翻译原文、回答及自由文本内的秘密仍会保存。请求正文最多 1 MiB、响应 8 MiB；Relay 共用 512 MiB 磁盘和 16 MiB 待写预算。保留天数统一使用 `[debug].model_traffic_retention_days`，默认 30 天，0 关闭按时间清理但保留 Relay 容量上限。首次启用在取消/超时边界内等待异步容量初始化，随后按实际已写及待写字节记账，并为在途调用预留空间。后台清理保护活动批次及扫描期间新建批次，整理期间继续采集；容量不足、写入故障或超限会留下日志或截断标记。写入故障会停止本进程后续采集，排除故障并重启 Relay 后恢复，模型转发继续。
 
-停止采集不删除已有文件。回退程序前停止相关写入服务并归档调试批次；统一后的全局字段已被旧程序支持，旧 Relay 因独立字段缺失默认不采集。不要恢复整份旧配置覆盖当前凭据。如需回退指标库，按升级输出的备份路径及 SHA-256 执行 `codexc metrics rollback --from 26 --to 25 --backup PATH --sha256 HASH --apply`，先归档新库再恢复；从 v20 升级的备份使用 `--to 20`。
+停止采集不删除已有文件。回退程序前停止相关写入服务并归档调试批次；统一后的全局字段已被旧程序支持，旧 Relay 因独立字段缺失默认不采集。不要恢复整份旧配置覆盖当前凭据。如需回退指标库，按升级输出的备份路径及 SHA-256 执行 `codexc metrics rollback --from 27 --to 26 --backup PATH --sha256 HASH --apply`，先归档新库再恢复；从 v20 升级的备份使用 `--to 20`。
 
 模型转发管理页显示配置并发上限及运行状态，点击“刷新”更新服务状态，左侧“模型转发”下的二级菜单“请求队列”独立展示当前请求及执行阶段。配置上限不代表运行进程已应用；服务停止或状态无法确认时，不显示虚假的零队列。
 
@@ -751,7 +779,7 @@ Chat 与 Responses 请求在全局并发或令牌不足时排队：上传和等�
 `codexc relay status` 返回执行数 `active` 及 `queue.pending`（上传与等待）、`queue.waiting`
 （已验证正文的等待）、`queue.bytes`（正文预留预算），不包含请求正文。WebUI 左侧“模型转发”下的“请求队列”可查看实时阶段与等待情况，详见[WebUI](webui.md)。
 
-Relay 只支持当前严格配置，不接受旧账户模型列表、Key 单提供商字段、分层限流或独立采集字段。控制 IPC 为 v5，更新后需重启相关进程；新旧进程混用时确认结果为 `unconfirmed`，不能据此认定撤销已生效。配置备份不得覆盖当前凭据和撤销记录。
+Relay 只支持当前严格配置，不接受旧账户模型列表、Key 单提供商字段、分层限流或独立采集字段。控制 IPC 为 v6，更新后需重启相关进程；新旧进程混用时确认结果为 `unconfirmed`，不能据此认定撤销已生效。配置备份不得覆盖当前凭据和撤销记录。
 
 ### 渠道文本附件
 

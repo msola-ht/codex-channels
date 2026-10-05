@@ -19,26 +19,26 @@ describe("formatSurfaceConfigurationChange", () => {
     );
     expect(scheduled).toContain("第三方模型设置已更新");
     expect(scheduled).toContain("Provider：opencode-go、deepseek");
-    expect(scheduled).toContain("等待当前任务完成后自动重启");
+    expect(scheduled).toContain("等待对应 Provider 的任务结束并释放原生客户端租约后自动应用");
 
     const restarting = formatSurfaceConfigurationChange(
       { ...base, action: "provider-settings-restarting" },
       "telegram",
     );
-    expect(restarting).toContain("正在重启 App Server");
+    expect(restarting).toContain("正在检查并应用对应 Provider 的设置");
 
     const applied = formatSurfaceConfigurationChange(
       { ...base, action: "provider-settings-applied" },
       "telegram",
     );
     expect(applied).toContain("第三方模型设置已生效");
-    expect(applied).toContain("App Server 已重启");
+    expect(applied).toContain("设置应用与 Gateway 模型目录刷新已确认");
 
     const failed = formatSurfaceConfigurationChange(
       { ...base, action: "provider-settings-failed" },
       "telegram",
     );
-    expect(failed).toContain("App Server 重启失败");
-    expect(failed).toContain("自动重试");
+    expect(failed).toContain("设置应用失败");
+    expect(failed).toContain("在重试预算内自动重试，耗尽后等待设置变化或 Gateway 重建");
   });
 });

@@ -2,6 +2,19 @@ export type ModelRequestTransport = "http" | "websocket";
 export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
+export interface RequestOutcomeCounts {
+  completed: number;
+  interrupted: number;
+  failed: number;
+  incomplete: number;
+}
+
+export interface RequestInterruptionSummary {
+  followedByCompletion: number;
+  noObservedCompletion: number;
+  /** 中断请求输入或输出用量至少一项缺失；已知部分仍参与用量合计。 */
+  usageUnobserved: number;
+}
 export interface ModelRequestMetricSample {
   /** 上游明确返回的诊断摘要；与可选报文转储独立，历史缺失为空。 */
   upstreamProvider?: string | null;
@@ -56,6 +69,8 @@ export interface ModelRequestMetricSample {
   traffic?: { label: string; session: string; interaction: number } | null;
   /** 记录入库时刻（毫秒）；缺省为写入时的 Date.now()，测试可显式指定以保证窗口确定性。 */
   recordedAtMs?: number;
+  /** Local quota snapshot observation time; null for historical samples without this information. */
+  quotaObservedAtMs?: number | null;
   weeklyQuota: {
     limitId: "codex";
     usedPercentMillionths: number;
@@ -131,11 +146,13 @@ export interface StoredQuotaPeriod {
 export interface StoredModelRequestMetric extends ModelRequestMetricSample {
   id: number;
   recordedAtMs: number;
+  quotaObservedAtMs: number | null;
   uncachedInputTokens: number | null;
   cacheHitRate: number | null;
 }
 
 export interface StoredCompactRequestMetricsSummary {
+  requestOutcomes: RequestOutcomeCounts;
   model: string | null;
   hasMixedModels: boolean;
   requestCount: number;
@@ -153,6 +170,8 @@ export interface ResponseUsageSummary {
 }
 
 export interface StoredTurnRequestMetricsSummary {
+  requestOutcomes: RequestOutcomeCounts;
+  interruptionSummary: RequestInterruptionSummary;
   durationMs?: number | null;
   responseUsage?: ResponseUsageSummary | null;
   /** 当前 Thread/Turn 首个有效 OpenAI 样本，不含压缩和子代理。 */
@@ -171,6 +190,8 @@ export interface StoredTurnRequestMetricsSummary {
 }
 
 export interface StoredThreadRequestMetricsAggregate {
+  requestOutcomes: RequestOutcomeCounts;
+  interruptionSummary: RequestInterruptionSummary;
   responseUsage?: ResponseUsageSummary | null;
   provider: string | null;
   turnCount: number;
@@ -206,6 +227,7 @@ export interface StoredCacheUsage {
 }
 
 export interface StoredThreadListItem {
+  requestOutcomes: RequestOutcomeCounts;
   cacheUsage: StoredCacheUsage;
   sessionTiming: SessionExecutionTiming;
   threadId: string;
@@ -245,7 +267,7 @@ export interface StoredSubagentThreadRecord {
 }
 
 export interface StoredSubagentListItem extends StoredSubagentThreadRecord, Pick<StoredThreadListItem,
-  "provider" | "model" | "turnCount" | "requestCount" | "inputTokens" | "outputTokens" | "cacheUsage"
+  "provider" | "model" | "reasoningEffort" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"
 > {
   directSubagentCount: number;
   firstRequestStartedAtMs: number | null;
@@ -305,6 +327,7 @@ export interface ModelRequestMetricsAggregationQuery extends ModelRequestMetrics
 }
 
 export interface StoredModelRequestMetricsAggregate {
+  requestOutcomes: RequestOutcomeCounts;
   cacheUsage: StoredCacheUsage;
   requestCount: number;
   unsuccessfulRequestCount: number;
@@ -401,6 +424,12 @@ export interface StoredThreadListPage extends StoredThreadMetricsPage {
 
 export interface StoredThreadTurnsPage extends StoredThreadMetricsPage {
   turns: StoredThreadTurnSummary[];
+  /** 同筛选范围、分页前的后代 Thread/Turn 去重轮数；精确 Turn 筛选时不可用。 */
+  subagentTurnCount: number | null;
+  /** 同筛选范围、分页前的全部已登记后代；精确 Turn 筛选时不可用。 */
+  subagentAggregate: StoredModelRequestMetricsAggregate | null;
+  /** 目标 Thread 自身和全部已登记后代；精确 Turn 筛选时不可用。 */
+  treeAggregate: StoredModelRequestMetricsAggregate | null;
 }
 
 export interface StoredModelRequestMetricsErrorGroup {
@@ -415,6 +444,7 @@ export interface StoredModelRequestMetricsErrorGroup {
 }
 
 export interface StoredModelRequestMetricsErrorReport {
+  requestOutcomes: RequestOutcomeCounts;
   startAtMs: number;
   endAtMs: number;
   requestCount: number;

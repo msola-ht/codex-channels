@@ -32,6 +32,7 @@ export interface ScheduledTaskRunCoordinatorOptions {
     signal?: AbortSignal,
   ) => Promise<ScheduledTaskRunValidation | undefined>;
   logger?: Logger;
+  onRecovered?: (run: ScheduledRun, target: ConversationTarget) => void;
 }
 
 export interface ScheduledTaskRunValidation {
@@ -52,6 +53,7 @@ export class ScheduledTaskRunCoordinator {
   private readonly pendingFailureByRun = new Map<string, ScheduledRunErrorCategory>();
   private readonly validateRun: ScheduledTaskRunCoordinatorOptions["validateRun"];
   private readonly logger: Logger | undefined;
+  private readonly onRecovered: ScheduledTaskRunCoordinatorOptions["onRecovered"];
 
   constructor(
     private readonly store: ScheduledTaskStore,
@@ -64,6 +66,7 @@ export class ScheduledTaskRunCoordinator {
     }
     this.validateRun = options.validateRun;
     this.logger = options.logger;
+    this.onRecovered = options.onRecovered;
   }
 
   initialize(): void {
@@ -178,6 +181,13 @@ export class ScheduledTaskRunCoordinator {
     this.handleCompletion(event.threadId, event.turnId, event.status);
   }
 
+  /** Remember live completion before asynchronous output consumers can fall behind recovery. */
+  observeOutput(event: OutputEvent): void {
+    if (event.type !== "turn.completed" || event.status === "inProgress") return;
+    const reference = this.referenceFor(event.threadId, event.turnId);
+    if (reference) this.pendingTerminalByRun.set(reference.runId, { status: event.status });
+  }
+
   handleCompletion(
     threadId: string,
     turnId: string,
@@ -239,7 +249,18 @@ export class ScheduledTaskRunCoordinator {
           continue;
         }
         if (turn.status === "inProgress") continue;
-        this.applyTerminal(run.runId, turn.status);
+        const liveCompletionObserved = this.pendingTerminalByRun.has(run.runId);
+        const currentTarget = this.router.targetForThread(reference.threadId);
+        const stillOwned = currentTarget?.surface === binding.surface
+          && currentTarget.accountId === binding.accountId
+          && currentTarget.conversationId === binding.conversationId
+          && currentTarget.surface === task.surface
+          && currentTarget.accountId === task.accountId
+          && currentTarget.conversationId === task.conversationId
+          && this.router.isBackgroundThread(reference.threadId);
+        const recovered = this.applyTerminal(run.runId, turn.status);
+        if (!stillOwned) continue;
+        if (recovered && !liveCompletionObserved) this.onRecovered?.(recovered, currentTarget);
         await this.router.releaseBackground(reference.threadId).catch((error) => {
           if (signal?.aborted) return;
           this.logger?.warn({ err: error, threadId: reference.threadId }, "恢复计划任务后台绑定清理失败");
@@ -319,7 +340,7 @@ export class ScheduledTaskRunCoordinator {
   private applyTerminal(
     runId: string,
     status: Exclude<TurnStatus, "inProgress">,
-  ): void {
+  ): ScheduledRun | undefined {
     const run = this.store.getRun(runId);
     if (!run || (run.state !== "running" && run.state !== "dispatching")) return;
     const forcedFailure = this.pendingFailureByRun.get(runId);
@@ -334,6 +355,7 @@ export class ScheduledTaskRunCoordinator {
       this.store.markFailed(runId, "unknown");
     }
     this.forget(runId);
+    return this.store.getRun(runId);
   }
 
   private referenceFor(threadId: string, turnId: string): ExecutionReference | undefined {
@@ -354,6 +376,7 @@ export class ScheduledTaskRunCoordinator {
     const reference = this.referencesByRun.get(runId);
     if (!reference) return;
     this.referencesByRun.delete(runId);
+    this.pendingTerminalByRun.delete(runId);
     this.pendingFailureByRun.delete(runId);
     const runs = this.runIdsByThread.get(reference.threadId);
     runs?.delete(runId);

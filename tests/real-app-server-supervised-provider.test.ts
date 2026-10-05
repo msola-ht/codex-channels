@@ -10,10 +10,12 @@ import { describeDumpExchange, listDumpFiles, summarizeDumpFiles } from "../scri
 
 import {
   acquireAppServerProviderLease,
+  applyAppServerProviderSettings,
   appServerSupervisorSocketPath,
   ensureAppServerProvider,
   inspectAppServerSupervisor,
   releaseAppServerProvider,
+  readAppServerProviderSettingsFingerprint,
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
@@ -26,22 +28,37 @@ import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-trans
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
 import { configuredHome, providerCatalogPath, testEnvironment } from "./model-provider-runtime-test-fixture.js";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
-import type { ConfigReadResponse } from "../src/codex-protocol/index.js";
+import type { ConfigReadResponse, ModelListResponse, ThreadStartResponse, ThreadReadResponse, TurnStartResponse } from "../src/codex-protocol/index.js";
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 
 contractSuite("real supervised App Server provider", () => {
-    it.each(["switching", "exclusive"] as const)("disables DS hosted search in %s mode without rewriting the base preference", async (mode) => {
+    it.each(["switching", "exclusive"] as const)("applies DS settings only to an idle unleased instance in %s mode", async (mode) => {
       const home = await configuredHome(mode);
       const environment = { ...process.env, ...testEnvironment(home) };
       const configPath = join(environment.CODEX_CONNECT_HOME!, "config.toml");
       const socketPath = join(home, "server.sock");
       const basePath = join(home, "config.toml");
-      const baseConfig = 'web_search = "live"\n' + (mode === "exclusive" ? readFileSync(basePath, "utf8") : 'model_provider = "openai"\n');
+      let upstreamRequests = 0;
+      const apiServer = createServer((request, response) => {
+        request.resume();
+        if (request.method === "POST" && request.url === "/v1/responses") {
+          upstreamRequests += 1;
+          response.writeHead(200, { "content-type": "text/event-stream" });
+          response.flushHeaders();
+          return;
+        }
+        response.writeHead(404); response.end();
+      });
+      await new Promise<void>(resolveListen => apiServer.listen(0, "127.0.0.1", resolveListen));
+      const address = apiServer.address();
+      if (!address || typeof address === "string") throw new Error("fixture requires TCP address");
+      const baseConfig = 'web_search = "live"\n' + (mode === "exclusive" ? readFileSync(basePath, "utf8") : 'model_provider = "openai"\n')
+        + `\n[model_providers.settings_fixture]\nname="settings fixture"\nbase_url="http://127.0.0.1:${address.port}/v1"\nwire_api="responses"\nrequires_openai_auth=false\nsupports_websockets=false\n`;
       writeFileSync(basePath, baseConfig, { mode: 0o600 });
       writeFileSync(providerCatalogPath(home), JSON.stringify(createResponsesModelCatalog([
-        {id:"deepseek-v4-flash",name:"DS fixture",contextWindow:64000,reasoningEfforts:["high"],defaultReasoningEffort:"high",supportsImages:false},
+        {id:"deepseek-v4-flash",name:"DS fixture",contextWindow:64000,reasoningEfforts:["low", "high"],defaultReasoningEffort:"high",supportsImages:false},
       ], "deepseek-v4-flash")), { mode: 0o600 });
       writeGatewayConfig(configPath, {
         version: 1, default_workspace: "integration",
@@ -60,6 +77,9 @@ contractSuite("real supervised App Server provider", () => {
         stream?.on("data", (chunk: string) => { diagnostic = appendDiagnostic(diagnostic, chunk); });
       }
       let rpc: JsonRpcClient | undefined;
+      let primaryRpc: JsonRpcClient | undefined;
+      let primaryTurn: { threadId: string; turnId: string } | undefined;
+      let lease: Awaited<ReturnType<typeof acquireAppServerProviderLease>> | undefined;
       try {
         await waitFor(() => existsSync(socketPath) && existsSync(appServerSupervisorSocketPath(socketPath)), 15000,
           () => service.exitCode === null && service.signalCode === null ? undefined : new Error(appServerFailure("DS fixture startup failed", diagnostic)));
@@ -67,8 +87,20 @@ contractSuite("real supervised App Server provider", () => {
         await rpc.connect();
         const primary = await rpc.request<ConfigReadResponse>({ method: "config/read", params: { includeLayers: false } });
         expect(primary.config.web_search).toBe(mode === "exclusive" ? "disabled" : "live");
+        const initialSnapshot = { fingerprint: readAppServerProviderSettingsFingerprint("ds-test", environment), defaultModel: "deepseek-v4-flash" };
+        expect(await applyAppServerProviderSettings(socketPath, "ds-test")).toEqual({ applied: true, changed: false, snapshot: initialSnapshot });
+        await rpc.request({ method: "config/read", params: { includeLayers: false } });
         if (mode === "switching") {
-          await rpc.close();
+          primaryRpc = rpc;
+          const { thread } = await primaryRpc.request<ThreadStartResponse>({ method: "thread/start", params: {
+            cwd: home, modelProvider: "settings_fixture", model: "gpt-5.4", approvalPolicy: "never", sandbox: "read-only",
+          } });
+          const { turn } = await primaryRpc.request<TurnStartResponse>({ method: "turn/start", params: {
+            threadId: thread.id, input: [{ type: "text", text: "keep the primary Provider active", text_elements: [] }],
+          } });
+          primaryTurn = { threadId: thread.id, turnId: turn.id };
+          await vi.waitFor(() => expect(upstreamRequests).toBe(1));
+          expect((await inspectAppServerSupervisor(socketPath))?.runningProviders).toEqual(["openai"]);
           await ensureAppServerProvider(socketPath, "ds-test");
           rpc = new JsonRpcClient(new UnixWebSocketTransport(providerAppServerSocketPath(socketPath, "ds-test")));
           await rpc.connect();
@@ -76,9 +108,147 @@ contractSuite("real supervised App Server provider", () => {
           expect(ds.config.web_search).toBe("disabled");
         }
         expect(readFileSync(basePath,"utf8")).toBe(baseConfig);
+        const settingsPath = mode === "switching" ? join(home, "sf-ds-test.config.toml") : basePath;
+        writeFileSync(settingsPath, readFileSync(settingsPath, "utf8") + '\n# settings pending\n', { mode: 0o600 });
+        const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: {
+          cwd: home, modelProvider: "settings_fixture", model: "deepseek-v4-flash", approvalPolicy: "never", sandbox: "read-only",
+        } });
+        const { turn } = await rpc.request<TurnStartResponse>({ method: "turn/start", params: {
+          threadId: thread.id, input: [{ type: "text", text: "hold the fixture response", text_elements: [] }],
+        } });
+        await vi.waitFor(() => expect(upstreamRequests).toBe(mode === "switching" ? 2 : 1));
+        expect(await applyAppServerProviderSettings(socketPath, "ds-test")).toEqual({ applied: false, reason: "active", snapshot: initialSnapshot });
+        const stillActive = await rpc.request<ThreadReadResponse>({ method: "thread/read", params: { threadId: thread.id, includeTurns: false } });
+        expect(stillActive.thread.status.type).toBe("active");
+        await rpc.request({ method: "turn/interrupt", params: { threadId: thread.id, turnId: turn.id } });
+        await vi.waitFor(async () => {
+          const result = await rpc!.request<ThreadReadResponse>({ method: "thread/read", params: { threadId: thread.id, includeTurns: false } });
+          expect(result.thread.status.type).toBe("idle");
+        });
+        const settings = readFileSync(settingsPath, "utf8").replace('model = "deepseek-v4-flash"', 'model = "deepseek-v4-updated"');
+        writeFileSync(settingsPath, mode === "switching"
+          ? settings.replace('model_reasoning_effort = "high"', 'model_reasoning_effort = "low"')
+          : settings, { mode: 0o600 });
+        writeFileSync(providerCatalogPath(home), JSON.stringify(createResponsesModelCatalog([
+          {id:"deepseek-v4-updated",name:"DS fixture updated",contextWindow:64000,reasoningEfforts:["low", "high"],defaultReasoningEffort:"low",supportsImages:false},
+        ], "deepseek-v4-updated")), { mode: 0o600 });
+        lease = await acquireAppServerProviderLease(socketPath, "ds-test");
+        expect(readAppServerProviderSettingsFingerprint("ds-test", environment)).not.toBe(initialSnapshot.fingerprint);
+        expect(await applyAppServerProviderSettings(socketPath, "ds-test")).toEqual({ applied: false, reason: "leased", snapshot: initialSnapshot });
+        await rpc.request({ method: "config/read", params: { includeLayers: false } });
+        await lease.close();
+        await vi.waitFor(async () => expect((await inspectAppServerSupervisor(socketPath))?.leasedProviders).toEqual([]));
+        const validSettings = readFileSync(settingsPath, "utf8");
+        writeFileSync(settingsPath, validSettings.replace('model = "deepseek-v4-updated"', 'model = "missing-model"'), { mode: 0o600 });
+        await expect(applyAppServerProviderSettings(socketPath, "ds-test")).rejects.toThrow("应用失败");
+        await rpc.request({ method: "config/read", params: { includeLayers: false } });
+        writeFileSync(settingsPath, validSettings, { mode: 0o600 });
+        if (mode === "exclusive") {
+          const validBase = readFileSync(basePath, "utf8");
+          writeFileSync(basePath, 'sandbox_mode = "invalid-fixture-mode"\n' + validBase, { mode: 0o600 });
+          await expect(applyAppServerProviderSettings(socketPath, "ds-test")).rejects.toThrow("应用失败");
+          expect((await inspectAppServerSupervisor(socketPath))?.releasedProviders).toContain("ds-test");
+          expect((await inspectAppServerSupervisor(socketPath))?.runningProviders).not.toContain("ds-test");
+          writeFileSync(basePath, validBase, { mode: 0o600 });
+          // A subsequent native TUI startup can finish the failed settings recovery.
+          lease = await acquireAppServerProviderLease(socketPath, "ds-test");
+          await lease.close();
+          await vi.waitFor(async () => expect((await inspectAppServerSupervisor(socketPath))?.leasedProviders).toEqual([]));
+        }
+        const updatedSnapshot = { fingerprint: readAppServerProviderSettingsFingerprint("ds-test", environment), defaultModel: "deepseek-v4-updated" };
+        expect(await applyAppServerProviderSettings(socketPath, "ds-test")).toEqual({ applied: true, changed: mode !== "exclusive", snapshot: updatedSnapshot });
+        expect((await inspectAppServerSupervisor(socketPath))?.runningProviders).toContain("ds-test");
+        await rpc.close();
+        rpc = new JsonRpcClient(new UnixWebSocketTransport(mode === "exclusive"
+          ? socketPath : providerAppServerSocketPath(socketPath, "ds-test")));
+        await rpc.connect();
+        const updated = await rpc.request<ConfigReadResponse>({ method: "config/read", params: { includeLayers: false } });
+        expect(updated.config.model).toBe("deepseek-v4-updated");
+        if (mode === "switching") expect(updated.config.model_reasoning_effort).toBe("low");
+        const models = await rpc.request<ModelListResponse>({ method: "model/list", params: {} });
+        expect(models.data.find(model => model.model === "deepseek-v4-updated")?.defaultReasoningEffort).toBe("low");
+        expect(updated.config.web_search).toBe("disabled");
+        expect(await applyAppServerProviderSettings(socketPath, "ds-test")).toEqual({ applied: true, changed: false, snapshot: updatedSnapshot });
+        await rpc.request({ method: "config/read", params: { includeLayers: false } });
+        if (primaryRpc) {
+          const unchanged = await primaryRpc.request<ConfigReadResponse>({ method: "config/read", params: { includeLayers: false } });
+          expect(unchanged.config.web_search).toBe("live");
+          const active = await primaryRpc.request<ThreadReadResponse>({ method: "thread/read", params: {
+            threadId: primaryTurn!.threadId, includeTurns: false,
+          } });
+          expect(active.thread.status.type).toBe("active");
+        }
+        // Cancel exactly when the selected shared instance disconnects: the owner
+        // must finish restoration even though the Gateway caller stopped waiting.
+        writeFileSync(settingsPath, readFileSync(settingsPath, "utf8").replace('model = "deepseek-v4-updated"', 'model = "deepseek-v4-restored"'), { mode: 0o600 });
+        writeFileSync(providerCatalogPath(home), JSON.stringify(createResponsesModelCatalog([
+          {id:"deepseek-v4-restored",name:"DS restored fixture",contextWindow:64000,reasoningEfforts:["low", "high"],defaultReasoningEffort:"low",supportsImages:false},
+        ], "deepseek-v4-restored")), { mode: 0o600 });
+        const cancellation = new AbortController();
+        const unsubscribe = rpc.onDisconnect(() => cancellation.abort(new Error("settings caller stopped")));
+        try {
+          await expect(applyAppServerProviderSettings(socketPath, "ds-test", cancellation.signal)).rejects.toThrow("settings caller stopped");
+          expect(cancellation.signal.aborted).toBe(true);
+        } finally { unsubscribe(); }
+        await rpc.close();
+        await vi.waitFor(async () => {
+          const reconnected = new JsonRpcClient(new UnixWebSocketTransport(mode === "exclusive"
+            ? socketPath : providerAppServerSocketPath(socketPath, "ds-test")));
+          try {
+            await reconnected.connect();
+            const restored = await reconnected.request<ConfigReadResponse>({ method: "config/read", params: { includeLayers: false } });
+            expect(restored.config.model).toBe("deepseek-v4-restored");
+            rpc = reconnected;
+          } catch (error) {
+            await reconnected.close();
+            throw error;
+          }
+        }, { timeout: 15000, interval: 50 });
+        await vi.waitFor(async () => {
+          expect((await inspectAppServerSupervisor(socketPath))?.runningProviders).toContain("ds-test");
+        });
+        lease = await acquireAppServerProviderLease(socketPath, "ds-test");
+        const restoredSnapshot = { fingerprint: readAppServerProviderSettingsFingerprint("ds-test", environment), defaultModel: "deepseek-v4-restored" };
+        // Cancellation suppresses the caller's confirmation, not the host's successfully applied baseline.
+        expect(await applyAppServerProviderSettings(socketPath, "ds-test")).toEqual({ applied: false, reason: "leased", snapshot: restoredSnapshot });
+        await lease.close();
+        await vi.waitFor(async () => expect((await inspectAppServerSupervisor(socketPath))?.leasedProviders).toEqual([]));
+        expect(await applyAppServerProviderSettings(socketPath, "ds-test")).toEqual({
+          applied: true, changed: false, snapshot: restoredSnapshot,
+        });
+        // An idle release ends that process's baseline. A native lease must start
+        // from the new material, including switching-mode CLI overrides.
+        await rpc.close();
+        expect(await releaseAppServerProvider(socketPath, "ds-test")).toEqual({ released: true, reason: "released" });
+        writeFileSync(settingsPath, readFileSync(settingsPath, "utf8").replace('model = "deepseek-v4-restored"', 'model = "deepseek-v4-native"'), { mode: 0o600 });
+        writeFileSync(providerCatalogPath(home), JSON.stringify(createResponsesModelCatalog([
+          {id:"deepseek-v4-native",name:"DS native fixture",contextWindow:64000,reasoningEfforts:["low", "high"],defaultReasoningEffort:"low",supportsImages:false},
+        ], "deepseek-v4-native")), { mode: 0o600 });
+        lease = await acquireAppServerProviderLease(socketPath, "ds-test");
+        rpc = new JsonRpcClient(new UnixWebSocketTransport(mode === "exclusive"
+          ? socketPath : providerAppServerSocketPath(socketPath, "ds-test")));
+        await rpc.connect();
+        const native = await rpc.request<ConfigReadResponse>({ method: "config/read", params: { includeLayers: false } });
+        expect(native.config.model).toBe("deepseek-v4-native");
+        const nativeSnapshot = { fingerprint: readAppServerProviderSettingsFingerprint("ds-test", environment), defaultModel: "deepseek-v4-native" };
+        expect(await applyAppServerProviderSettings(socketPath, "ds-test")).toEqual({ applied: false, reason: "leased", snapshot: nativeSnapshot });
+        await lease.close();
+        await vi.waitFor(async () => expect((await inspectAppServerSupervisor(socketPath))?.leasedProviders).toEqual([]));
+        expect(await applyAppServerProviderSettings(socketPath, "ds-test")).toEqual({ applied: true, changed: false, snapshot: nativeSnapshot });
+        if (primaryRpc && primaryTurn) {
+          const active = await primaryRpc.request<ThreadReadResponse>({ method: "thread/read", params: {
+            threadId: primaryTurn.threadId, includeTurns: false,
+          } });
+          expect(active.thread.status.type).toBe("active");
+          await primaryRpc.request({ method: "turn/interrupt", params: primaryTurn });
+        }
       } finally {
+        await lease?.close();
+        await primaryRpc?.close();
         await rpc?.close();
         await stopDetachedTestProcess(service, 5000);
+        apiServer.closeAllConnections();
+        await new Promise<void>(resolveClose => apiServer.close(() => resolveClose()));
         rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }, 30000);

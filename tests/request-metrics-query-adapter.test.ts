@@ -31,6 +31,7 @@ describe("RequestMetricsQueryAdapter", () => {
       startAtMs: 1,
       endAtMs: 2,
       requestCount: 1,
+      requestOutcomes: { completed: 0, interrupted: 1, failed: 0, incomplete: 0 },
       unsuccessfulRequestCount: 1,
       groups: [{
         provider: "custom",
@@ -70,6 +71,9 @@ describe("RequestMetricsQueryAdapter", () => {
     });
     expect(adapter.errors("all").groups[0]).toMatchObject({
       provider: "custom",
+    });
+    expect(adapter.errors("all").requestOutcomes).toEqual({
+      completed: 0, interrupted: 1, failed: 0, incomplete: 0,
     });
     expect(aggregate).toHaveBeenCalledWith({
       dimension: "provider",

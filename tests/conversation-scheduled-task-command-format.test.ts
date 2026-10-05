@@ -239,4 +239,30 @@ describe("conversation scheduled task command formatting", () => {
     expect(rendered).toContain("触发时间：2026-08-24T02:00:01.000Z");
   });
 
+  it.each(["skipped_capacity", "blocked", "skipped_overlap"] as const)(
+    "reports that a %s retry preserves the original uncertain Run",
+    (state) => {
+      const rendered = formatConversationCommandOutcome({
+        type: "scheduled-task.retry-requested",
+        run: {
+          runId: "skipped-retry",
+          taskId: "task-1",
+          scheduledFor: 1,
+          state,
+          threadId: null,
+          turnId: null,
+          dispatchStartedAt: null,
+          startedAt: null,
+          completedAt: 1,
+          errorCategory: null,
+          errorMessage: null,
+        },
+      });
+
+      expect(rendered).toContain("重试未执行，原 uncertain Run 仍保留");
+      expect(rendered).not.toContain("已解除");
+      expect(rendered).not.toContain("触发时间：");
+    },
+  );
+
 });

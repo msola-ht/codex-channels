@@ -3,9 +3,10 @@ import { DataTable, TableHint, TruncatedText, type DataTableColumn, type DataTab
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { FastBadge } from "@/components/metrics/service-tier"
 import { StatusBadge } from "@/components/metrics/status-badge"
+import { Badge } from "@/components/ui/badge"
 import { TrafficModel } from "@/components/traffic/traffic-model"
 import { useTranslation } from "@/hooks/use-translation"
-import { formatErrorMessage, formatErrorType, formatTime } from "@/lib/format"
+import { formatErrorMessage, formatErrorType, formatTime, isClientInterruption } from "@/lib/format"
 import { metricsLink } from "@/lib/metrics-query"
 import type { MetricsQuery, RequestRecord } from "@/lib/types"
 
@@ -23,14 +24,15 @@ export function ErrorsTable({ records, query, loading, pagination }: {
     { id: "model", enableSorting: false, header: t("metrics.model"), cell: ({ row: { original: record } }) => {
       return <><span className="flex items-center gap-2 whitespace-nowrap"><TrafficModel provider={record.provider} request={record.model} responses={[]} /><FastBadge tier={record.requestServiceTier} source="request" responseTier={record.serviceTier} /></span></>
     } },
+    { id: "reasoningEffort", enableSorting: false, header: t("metrics.reasoningEffort"), cell: ({ row }) => row.original.reasoningEffort ?? "—" },
     { id: "status", enableSorting: false, header: t("filters.status"), cell: ({ row: { original: record } }) => {
-      return <><StatusBadge status={record.status} /></>
+      return isClientInterruption(record) ? <Badge variant="secondary">{t("metrics.interrupted")}</Badge> : <StatusBadge status={record.status} />
     } },
     { id: "http", enableSorting: false, header: "HTTP", cell: ({ row: { original: record } }) => {
       return <>{record.httpStatus ?? "—"}</>
     } },
     { id: "detail", enableSorting: false, header: t("errorList.detailColumn"), cell: ({ row: { original: record } }) => {
-      const message = record.errorMessage === null ? formatErrorType(record.errorType ?? record.errorCode, language) : formatErrorMessage(record.errorMessage, language)
+      const message = isClientInterruption(record) ? t("metrics.clientInterruption") : record.errorMessage === null ? formatErrorType(record.errorType ?? record.errorCode, language) : formatErrorMessage(record.errorMessage, language)
       return <>{record.errorCode ? <TableHint hint={`${message} · ${t("common.errorCode", { code: record.errorCode })}`}>
                               <span className="block max-w-md truncate text-xs text-muted-foreground">{message}</span>
                             </TableHint> : <TruncatedText text={message} className="max-w-md text-xs text-muted-foreground" />}</>
@@ -42,6 +44,6 @@ export function ErrorsTable({ records, query, loading, pagination }: {
   return <DataTable title={t("errorList.tableTitle")} description={() => t("errorList.tableDescription")}
     columns={columns} data={records} getRowId={row => String(row.id)} loading={loading}
     storageKey="codex-webui:errors-table-v1" numericColumnIds={["http"]}
-    columnLabels={{time: t("metrics.time"), provider: t("metrics.provider"), model: t("metrics.model"), status: t("filters.status"), http: "HTTP", detail: t("errorList.detailColumn"), thread: t("errorList.threadColumn")}}
+    columnLabels={{time: t("metrics.time"), provider: t("metrics.provider"), model: t("metrics.model"), reasoningEffort: t("metrics.reasoningEffort"), status: t("filters.status"), http: "HTTP", detail: t("errorList.detailColumn"), thread: t("errorList.threadColumn")}}
     emptyText={t("common.noFailedRequests")} pagination={pagination} />
 }

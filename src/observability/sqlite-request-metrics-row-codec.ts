@@ -1,4 +1,5 @@
 import type {
+  RequestOutcomeCounts,
   StoredCacheUsage,
   StoredCompactRequestMetricsSummary,
   StoredModelRequestMetric,
@@ -50,6 +51,7 @@ export interface MetricRow {
   request_started_at_ms: number;
   response_completed_at_ms: number;
   recorded_at_ms: number;
+  quota_observed_at_ms: number | null;
   weekly_quota_limit_id: "codex" | null;
   weekly_used_percent_millionths: number | null;
   weekly_resets_at: number | null;
@@ -67,6 +69,10 @@ export interface MetricRow {
 }
 
 export interface CompactSummaryRow {
+  compact_completed_request_count: number;
+  compact_interrupted_request_count: number;
+  compact_failed_request_count: number;
+  compact_incomplete_request_count: number;
   compact_request_count: number;
   compact_unsuccessful_request_count: number;
   compact_model: string | null;
@@ -78,7 +84,23 @@ export interface CompactSummaryRow {
   compact_output_tokens: number | null;
 }
 
-export interface TurnSummaryRow extends CompactSummaryRow {
+export interface RequestOutcomeRow {
+  completed_request_count: number;
+  interrupted_request_count: number;
+  failed_request_count: number;
+  incomplete_request_count: number;
+}
+
+export function toStoredRequestOutcomes(row: RequestOutcomeRow): RequestOutcomeCounts {
+  return {
+    completed: row.completed_request_count ?? 0,
+    interrupted: row.interrupted_request_count ?? 0,
+    failed: row.failed_request_count ?? 0,
+    incomplete: row.incomplete_request_count ?? 0,
+  };
+}
+
+export interface TurnSummaryRow extends CompactSummaryRow, RequestOutcomeRow {
   upstream_ttft_ms?: number | null;
   provider?: string | null;
   model?: string | null;
@@ -91,6 +113,7 @@ export interface TurnSummaryRow extends CompactSummaryRow {
   cached_input_tokens: number | null;
   input_token_count: number;
   cached_input_token_count: number;
+  cache_observed_request_count: number;
   output_tokens: number | null;
   reasoning_output_tokens: number | null;
 }
@@ -115,7 +138,7 @@ export interface AggregateRow extends Omit<TurnSummaryRow, "turn_id" | "turn_cou
   total_group_count: number;
 }
 
-export interface ErrorSummaryRow {
+export interface ErrorSummaryRow extends RequestOutcomeRow {
   request_count: number;
   unsuccessful_request_count: number;
 }
@@ -202,6 +225,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
           planType: row.weekly_quota_plan_type,
         },
     quotaWindows: parseQuotaWindows(row.quota_windows),
+    quotaObservedAtMs: row.quota_observed_at_ms,
     recordedAtMs: row.recorded_at_ms,
     uncachedInputTokens: row.input_tokens !== null
       && row.cached_input_tokens !== null
@@ -217,7 +241,11 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
 }
 
 export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSummary {
+  // Fully unobserved requests do not affect the observed Turn rate, but input
+  // and cache fields from different requests must never fill each other's gaps.
   return {
+    requestOutcomes: toStoredRequestOutcomes(row),
+    interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
     ...(row.upstream_ttft_ms === undefined ? {} : { upstreamTtftMs: row.upstream_ttft_ms }),
     provider: row.provider ?? null,
     model: row.model ?? null,
@@ -226,8 +254,9 @@ export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetri
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
     inputTokens: row.input_tokens ?? 0,
-    cachedInputTokens: row.input_token_count > 0
-      && row.cached_input_token_count === row.input_token_count
+    cachedInputTokens: row.cache_observed_request_count > 0
+      && row.cache_observed_request_count === row.input_token_count
+      && row.cache_observed_request_count === row.cached_input_token_count
       ? row.cached_input_tokens ?? 0
       : null,
     outputTokens: row.output_tokens ?? 0,
@@ -244,6 +273,8 @@ export function toStoredThreadAggregate(
     turn_id: "aggregate",
   });
   return {
+    requestOutcomes: summary.requestOutcomes,
+    interruptionSummary: summary.interruptionSummary,
     provider: summary.provider,
     turnCount: row.turn_count,
     requestCount: summary.requestCount,
@@ -266,12 +297,13 @@ export function toStoredMetricsGroup(row: AggregateRow): StoredModelRequestMetri
 
 export function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsAggregate {
   return {
+    requestOutcomes: toStoredRequestOutcomes(row),
     cacheUsage: toStoredCacheUsage(row),
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
     inputTokens: row.input_tokens ?? 0,
-    cachedInputTokens: row.input_token_count > 0
-      && row.cached_input_token_count === row.input_token_count
+    cachedInputTokens: row.request_count > 0
+      && row.cache_missing_request_count === 0
       ? row.cached_input_tokens ?? 0
       : null,
     outputTokens: row.output_tokens ?? 0,
@@ -285,13 +317,19 @@ export function toStoredCompactSummary(
 ): StoredCompactRequestMetricsSummary | null {
   if (row.compact_request_count === 0) return null;
   return {
+    requestOutcomes: toStoredRequestOutcomes({
+      completed_request_count: row.compact_completed_request_count,
+      interrupted_request_count: row.compact_interrupted_request_count,
+      failed_request_count: row.compact_failed_request_count,
+      incomplete_request_count: row.compact_incomplete_request_count,
+    }),
     model: row.compact_model_count === 1 ? row.compact_model : null,
     hasMixedModels: row.compact_model_count > 1,
     requestCount: row.compact_request_count,
     unsuccessfulRequestCount: row.compact_unsuccessful_request_count,
     inputTokens: row.compact_input_tokens ?? 0,
-    cachedInputTokens: row.compact_input_token_count > 0
-      && row.compact_cached_input_token_count === row.compact_input_token_count
+    cachedInputTokens: row.compact_input_token_count === row.compact_request_count
+      && row.compact_cached_input_token_count === row.compact_request_count
       ? row.compact_cached_input_tokens ?? 0
       : null,
     outputTokens: row.compact_output_tokens ?? 0,

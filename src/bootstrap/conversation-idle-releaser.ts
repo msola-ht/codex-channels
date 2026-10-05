@@ -2,6 +2,7 @@ import type { Logger } from "pino";
 
 import type {
   ConversationIdleReleaseResult,
+  ConversationIdleReleaseCondition,
 } from "../application/index.js";
 import type { ConversationTarget } from "../conversation-core/index.js";
 import type {
@@ -22,7 +23,9 @@ export interface ConversationIdleReleaserOptions {
   idleState: (target: ConversationTarget) => ConversationIdleState;
   ensureIdleState: (target: ConversationTarget, atMs: number) => void;
   isBindingRestoring?: (threadId: string) => boolean;
-  releaseIdle: (target: ConversationTarget) => Promise<ConversationIdleReleaseResult>;
+  canRelease?: (threadId: string) => boolean;
+  restoreBinding?: (threadId: string) => void;
+  releaseIdle: (target: ConversationTarget, condition: ConversationIdleReleaseCondition) => Promise<ConversationIdleReleaseResult>;
   notifyReleased: (target: ConversationTarget, threadId: string) => void;
 }
 
@@ -47,6 +50,10 @@ export class ConversationIdleReleaser {
   private timer: NodeJS.Timeout | undefined;
   private scanTask: Promise<void> | undefined;
   private stopped = false;
+  private cancellation = new AbortController();
+  private readonly releaseCancellations = new Map<string, AbortController>();
+  private readonly canRelease: ConversationIdleReleaserOptions["canRelease"];
+  private readonly restoreBinding: ConversationIdleReleaserOptions["restoreBinding"];
 
   constructor(options: ConversationIdleReleaserOptions) {
     this.logger = options.logger;
@@ -58,6 +65,8 @@ export class ConversationIdleReleaser {
     this.idleState = options.idleState;
     this.ensureIdleState = options.ensureIdleState;
     this.isBindingRestoring = options.isBindingRestoring;
+    this.canRelease = options.canRelease;
+    this.restoreBinding = options.restoreBinding;
     this.releaseIdle = options.releaseIdle;
     this.notifyReleased = options.notifyReleased;
   }
@@ -90,6 +99,7 @@ export class ConversationIdleReleaser {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.cancelPending();
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;
@@ -106,12 +116,22 @@ export class ConversationIdleReleaser {
     }
   }
 
+  cancelPending(threadIds?: ReadonlySet<string>): void {
+    if (threadIds !== undefined) {
+      for (const threadId of threadIds) this.releaseCancellations.get(threadId)?.abort();
+      return;
+    }
+    this.cancellation.abort();
+    this.cancellation = new AbortController();
+  }
+
   scan(): Promise<void> {
     if (this.idleThresholdMs <= 0 || this.stopped) {
       return Promise.resolve();
     }
     if (this.scanTask) return this.scanTask;
     const task = this.scanOnce().finally(() => {
+      this.releaseCancellations.clear();
       if (this.scanTask === task) this.scanTask = undefined;
     });
     this.scanTask = task;
@@ -119,9 +139,15 @@ export class ConversationIdleReleaser {
   }
 
   private async scanOnce(): Promise<void> {
-    for (const binding of this.listForegroundBindings()) {
-      if (this.stopped) return;
+    const scanSignal = this.cancellation.signal;
+    const candidates = this.listForegroundBindings();
+    for (const binding of candidates) this.releaseCancellations.set(binding.threadId, new AbortController());
+    for (const binding of candidates) {
+      if (this.stopped || scanSignal.aborted) return;
+      const signal = AbortSignal.any([scanSignal, this.releaseCancellations.get(binding.threadId)!.signal]);
+      if (signal.aborted) continue;
       const state = this.idleState(binding.target);
+      const lastActivityAt = state.lastActivityAt;
       if (state.forceNew) continue;
       if (state.lastActivityAt === 0) {
         this.ensureIdleState(binding.target, this.nowMs());
@@ -130,15 +156,28 @@ export class ConversationIdleReleaser {
       if (this.nowMs() - state.lastActivityAt < this.idleThresholdMs) {
         continue;
       }
-      if (this.isBindingRestoring?.(binding.threadId) === true) {
+      const canRestore = () => !this.stopped && !signal.aborted
+        && this.isBindingRestoring?.(binding.threadId) !== true
+        && (this.canRelease?.(binding.threadId) ?? true);
+      if (!canRestore()) {
         continue;
       }
       try {
-        const result = await this.releaseIdle(binding.target);
-        if (this.stopped) {
+        const result = await this.releaseIdle(binding.target, {
+          threadId: binding.threadId,
+          lastActivityAt,
+          signal,
+          canRestore,
+          restoreRequired: () => this.restoreBinding?.(binding.threadId),
+          isCurrent: () => canRestore()
+            && this.idleState(binding.target).lastActivityAt === lastActivityAt
+            && !this.idleState(binding.target).forceNew,
+        });
+        if (this.stopped || scanSignal.aborted) {
           return;
         }
-        if (result.status === "released") {
+        if (signal.aborted) continue;
+        if (result.status === "released" && result.threadId === binding.threadId && canRestore()) {
           this.notifyReleased(binding.target, result.threadId);
           this.logger.info(
             {
@@ -151,6 +190,8 @@ export class ConversationIdleReleaser {
           );
         }
       } catch (error) {
+        if (this.stopped || scanSignal.aborted) return;
+        if (signal.aborted) continue;
         this.logger.warn(
           { err: error, threadId: binding.threadId },
           "渠道会话空闲释放失败，已保留绑定供后续重试",

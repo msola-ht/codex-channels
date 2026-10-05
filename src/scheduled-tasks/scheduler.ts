@@ -1,4 +1,5 @@
 import {
+  ScheduledTaskStateError,
   type ScheduledRun,
   type ScheduledTask,
   type ScheduledTaskClock,
@@ -188,7 +189,15 @@ export class ScheduledTaskScheduler {
     return this.tick(nowMs);
   }
 
-  async runTaskNow(taskId: string, nowMs = this.clock.now()): Promise<ScheduledRun> {
+  runTaskNow(taskId: string, nowMs = this.clock.now()): Promise<ScheduledRun> {
+    return this.runManual({ taskId }, nowMs);
+  }
+
+  retryRun(runId: string, nowMs = this.clock.now()): Promise<ScheduledRun> {
+    return this.runManual({ runId }, nowMs);
+  }
+
+  private async runManual(selection: { taskId: string } | { runId: string }, nowMs: number): Promise<ScheduledRun> {
     let releaseManualRun!: () => void;
     const predecessor = this.manualRunTail;
     this.manualRunTail = new Promise<void>((resolve) => {
@@ -204,14 +213,22 @@ export class ScheduledTaskScheduler {
       this.tickCompletion = new Promise<void>((resolve) => {
         this.resolveTickCompletion = resolve;
       });
+      const retry = "runId" in selection ? this.store.getRun(selection.runId) : undefined;
+      if ("runId" in selection && retry?.state !== "uncertain") {
+        throw new ScheduledTaskStateError("只有 uncertain Run 可以显式解除后重试");
+      }
+      const taskId = "taskId" in selection ? selection.taskId : retry!.taskId;
       const task = this.store.getTask(taskId);
       if (!task) throw new Error(`任务不存在：${taskId}`);
-      if (!await this.capacityAvailable(task, 0)) {
+      const claimOccurrence = (result: "claimed" | "skipped_capacity") => retry
+        ? this.store.claimRetry(retry.runId, nowMs, result)
+        : this.store.claimManual(taskId, nowMs, result);
+      if (!await this.capacityAvailable(task, 0, retry !== undefined)) {
         if (this.stopping) throw new Error("计划任务调度器正在停止");
-        return this.store.claimManual(taskId, nowMs, "skipped_capacity").run;
+        return claimOccurrence("skipped_capacity").run;
       }
       if (this.stopping) throw new Error("计划任务调度器正在停止");
-      const claim = this.store.claimManual(taskId, nowMs);
+      const claim = claimOccurrence("claimed");
       if (claim.kind !== "claimed") return claim.run;
       return await this.dispatch(task, claim.run);
     } finally {
@@ -270,8 +287,9 @@ export class ScheduledTaskScheduler {
   private async capacityAvailable(
     task: ScheduledTask,
     reservedCapacity: number,
+    replacingUncertain = false,
   ): Promise<boolean> {
-    const activeCount = this.store.countConversationActiveRuns(task);
+    const activeCount = this.store.countConversationActiveRuns(task) - (replacingUncertain ? 1 : 0);
     if (activeCount >= this.maxConcurrentRunsPerConversation) return false;
     if (this.executor.availableCapacity !== undefined) {
       const available = await this.executor.availableCapacity(task);

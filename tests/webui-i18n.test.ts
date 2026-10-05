@@ -176,6 +176,7 @@ describe("WebUI 界面文案语言切换", () => {
           return renderWithClock(ConsolePage, { range: { range: "30d" }, onRangeChange: noop }, language);
         };
         const aggregate = { cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
+          requestOutcomes: { completed: 3, interrupted: 0, failed: 1, incomplete: 0 },
           requestCount: 4, unsuccessfulRequestCount: 1, inputTokens: 100, cachedInputTokens: 50,
           outputTokens: 20, reasoningOutputTokens: 5, compact: { requestCount: 2 } };
         const range = { name: "30d", startAtMs: 1000, endAtMs: 2000 };
@@ -187,7 +188,7 @@ describe("WebUI 界面文案语言切换", () => {
         const baseDashboard = {
           data: { range, generatedAt: "2026-01-01T00:00:00.000Z", global: aggregate, threadCount: 2, turnCount: 3,
             providers: [{ provider: "openai", model: "model-test", aggregate, threadCount: 2, turnCount: 3 }],
-            errors: { startAtMs: 1000, endAtMs: 2000, requestCount: 4, unsuccessfulRequestCount: 1, groups: [], totalGroupCount: 0 },
+            errors: { startAtMs: 1000, endAtMs: 2000, requestCount: 4, unsuccessfulRequestCount: 1, requestOutcomes: aggregate.requestOutcomes, groups: [], totalGroupCount: 0 },
             weeklyQuota: null, trend: { range, generatedAt: "2026-01-01T00:00:00.000Z", granularity: "day", daily: [] },
             heatmap: { range, generatedAt: "2026-01-01T00:00:00.000Z", daily: [] } },
           loading: false, error: null, errorCode: null, refetch: noop,
@@ -237,6 +238,8 @@ describe("WebUI 界面文案语言切换", () => {
           { control: { refreshing: false, disabled: false, error: { kind: "refresh-failed", message: "账户刷新失败" }, onRefresh: noop },
             hasSnapshot: true }, "en");
         const requestRecord = { id: 42, provider: "openai", model: "model-test", recordedAtMs: 1000,
+          requestOutcomes: { completed: 1, interrupted: 0, failed: 0, incomplete: 0 },
+          interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
           cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
           inputTokens: 100, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 5,
           tokensPerSecond: 20, compact: null, requestCount: 1, unsuccessfulRequestCount: 0,
@@ -522,7 +525,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.consoleEn).toContain("Local metrics database and account status");
     expect(result.consoleEn).toContain("Summary range");
     expect(result.consoleEn).toContain("Total tokens");
-    expect(result.consoleEn).toContain("Requests: 4 · Success rate: 75.0%");
+    expect(result.consoleEn).toContain("Requests: 4 · Completed: 3 · Client interruptions: 0 · Other failures: 1 · Not fully observed: 0");
     expect(result.consoleEn).toContain("Cached: 50 · Hit rate: 50.0%");
     expect(result.consoleEn).toContain("Turns: 3");
     expect(result.consoleEn).toContain("By Provider");
@@ -533,7 +536,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.consoleEn).toContain("Activity heatmap");
     expect(result.consoleEn).toContain("Error summary");
     expect(result.consoleEn).toContain("Failure rate: 25.0%");
-    expect(result.consoleEn).toContain("No failed requests");
+    expect(result.consoleEn).toContain("No unsuccessful request records");
     expect(result.consoleEn).toContain("OpenAI weekly quota");
     expect(result.consoleEn).toContain("Weekly quota remaining: 62.5%");
     expect(result.consoleEn).toContain("Local accounts and quotas");
@@ -598,7 +601,8 @@ describe("WebUI 界面文案语言切换", () => {
   it("请求明细的表头、提示、空状态与页面文案覆盖英文", () => {
     expect(result.requestsTableEn).toContain("Records");
     expect(result.requestsTableEn).toContain("Matching records: 1 · This page: 1 · Page 1");
-    expect(result.requestsTableEn).toContain("Request duration");
+    expect(result.requestsTableEn).toContain(">Duration<");
+    expect(result.requestsTableEn).toContain('aria-description="From submitting to request completion or failure; excludes preparation before sending and client rendering."');
     expect(result.requestsTableEn).toContain("View request");
     expect(result.requestsTableEn).not.toContain("Not linked");
     expect(result.requestsTableEn).not.toContain('href="/requests/');
@@ -620,7 +624,7 @@ describe("WebUI 界面文案语言切换", () => {
   });
 
   it("错误页面移除统计卡片，表头、分页、空状态与错误提示覆盖英文", () => {
-    expect(result.errorsPageEn).toContain("Failed request records, newest first");
+    expect(result.errorsPageEn).toContain("Unsuccessful requests, including client interruptions, failures and incomplete requests, newest first");
     expect(result.errorsPageEn).not.toContain("Total requests · Failed:");
     expect(result.errorsPageEn).not.toContain("Success rate · Showing");
     expect(result.errorsPageEn).toContain("Error detail");
@@ -630,7 +634,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.errorsPageEn).toContain("Previous page");
     expect(result.errorsPageEn).toContain("Next page");
     expect(result.errorsPageLoadingEn).toContain("Loading…");
-    expect(result.errorsPageEmptyEn).toContain("No failed requests");
+    expect(result.errorsPageEmptyEn).toContain("No unsuccessful request records");
     expect(result.errorsPageErrorEn).toContain("The requested data was not found or has been removed.");
     for (const html of [result.errorsPageEn, result.errorsPageLoadingEn, result.errorsPageEmptyEn, result.errorsPageErrorEn]) {
       expect(html).not.toMatch(/[\u4e00-\u9fff]/u);
@@ -640,7 +644,8 @@ describe("WebUI 界面文案语言切换", () => {
   it("调用列表与详情的表格、提示、空状态与失败覆盖英文", () => {
     expect(result.trafficTableEn).not.toContain("Turn State characters");
     expect(result.trafficTableEn).toContain("Started at");
-    expect(result.trafficTableEn).toContain("Request duration");
+    expect(result.trafficTableEn).toContain(">Duration<");
+    expect(result.trafficTableEn).toContain('aria-description="From submitting to request completion or failure; excludes preparation before sending and client rendering."');
     expect(result.trafficTableEn).toContain("Model request");
     expect(result.trafficTableEn).toContain("Completed");
     expect(result.trafficTableEmptyEn).toContain("No traffic records");
@@ -729,6 +734,199 @@ describe("WebUI 界面文案语言切换", () => {
     expect(results[0]!.en).toBe("Cannot reach the service. Check your connection and retry.");
     expect(results[1]!.en).toMatch(/timed out/i);
     expect(results[2]!.en).toBe("Could not complete the request. Try again.");
+  }, 30_000);
+
+  it("设置预览、已显示错误与输入草稿随语言更新且不重复请求", () => {
+    const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+      import { createServer } from "vite";
+      import { createElement as h } from "react";
+      import { renderToStaticMarkup } from "react-dom/server";
+      const server = await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent",plugins:[{
+        name:"settings-state-fixture",enforce:"pre",transform(code,id) {
+          if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi(){return globalThis.settingsRequest}";
+          if (id.endsWith("/src/hooks/use-translation.ts")) return "export function useTranslation(){return {language:globalThis.fixtureLanguage,t:(key,params)=>globalThis.fixtureTranslate(globalThis.fixtureLanguage,key,params)}}";
+          if (id.endsWith("/src/hooks/use-versioned-settings-management.ts") || id.endsWith("/src/hooks/use-management-confirmed-mutation.ts")) return code.replace('import { useCallback, useEffect, useRef, useState } from "react"','const {useCallback,useEffect,useRef,useState}=globalThis.settingsHooks');
+          if (id.endsWith("/src/hooks/use-settings-draft.ts")) return code.replace('import { useCallback, useState } from "react"','const {useCallback,useState}=globalThis.settingsHooks');
+          if (id.endsWith("/src/components/settings/gateway-settings-card.tsx")) return code.replace('import { useEffect } from "react"','const {useEffect}=globalThis.settingsHooks');
+          if (id.endsWith("/src/components/ui/alert-dialog.tsx")) return 'import {createElement as h} from "react"; const box=({children})=>h("div",null,children); const root=({open,children})=>open?h(box,null,children):null; const button=({children,disabled})=>h("button",{disabled},children); export const AlertDialog=root,AlertDialogContent=box,AlertDialogDescription=box,AlertDialogFooter=box,AlertDialogHeader=box,AlertDialogTitle=box,AlertDialogAction=button,AlertDialogCancel=button;';
+        }
+      }]});
+      let slots=[],cursor=0;
+      const same=(previous,next)=>previous!==undefined&&next!==undefined&&previous.length===next.length&&previous.every((value,index)=>Object.is(value,next[index]));
+      globalThis.settingsHooks={
+        useState(value){const index=cursor++;if(!(index in slots))slots[index]=typeof value==="function"?value():value;return [slots[index],next=>{slots[index]=typeof next==="function"?next(slots[index]):next}]},
+        useRef(value){const index=cursor++;return slots[index]??=({current:value})},
+        useCallback(callback,deps){const index=cursor++;if(!same(slots[index]?.deps,deps))slots[index]={deps,callback};return slots[index].callback},
+        useEffect(effect,deps){const index=cursor++;if(!same(slots[index]?.deps,deps)){slots[index]?.cleanup?.();slots[index]={deps,cleanup:effect()}}}
+      };
+      try {
+        const {translate}=await server.ssrLoadModule("/src/lib/i18n/translate.ts");
+        globalThis.fixtureTranslate=translate;
+        globalThis.fixtureLanguage="zh";
+        let previews=0,updates=0,refetches=0,cause=null,updateCause=null;
+        globalThis.settingsRequest={data:{revision:"r1",value:"model-before"},loading:false,error:null,errorCode:null,refetch(){refetches++}};
+        const {ApiClientError}=await server.ssrLoadModule("/src/lib/api.ts");
+        const {useVersionedSettingsManagement}=await server.ssrLoadModule("/src/hooks/use-versioned-settings-management.ts");
+        const {PendingSettingDialog}=await server.ssrLoadModule("/src/components/settings/settings-controls.tsx");
+        const {SettingsError}=await server.ssrLoadModule("/src/components/settings/settings-feedback.tsx");
+        const options={load:async()=>{throw Error("fixture must isolate snapshot loads")},revisionOf:snapshot=>snapshot.revision,currentValue:snapshot=>snapshot.value,
+          preview:async()=>{previews++;if(cause)throw cause;return {value:"model-after",activation:{status:"restart",target:"all",commands:["codexc service restart all"]},confirmationToken:"fixture-token"}},
+          update:async()=>{updates++;throw updateCause??Error("must not apply while switching languages")}};
+        const read=language=>{globalThis.fixtureLanguage=language;cursor=0;return useVersionedSettingsManagement(options)};
+        const label={key:"modelManagement.channelModel"};
+        await read("zh").previewSetting({kind:"defaults",model:"model-after"},label);
+        const pendingBefore=JSON.stringify(read("zh").pendingSetting);
+        const confirmations=["zh","en","zh"].map(language=>{
+          const management=read(language);
+          return renderToStaticMarkup(h(PendingSettingDialog,{pending:management.pendingSetting,saving:management.saving,onConfirm(){throw Error("unexpected confirm")},onCancel(){throw Error("unexpected cancel")}}));
+        });
+        const pendingAfter=JSON.stringify(read("en").pendingSetting);
+        const previewRequests={previews,updates,refetches};
+        read("en").cancelSetting();
+        const errors=[];
+        for (cause of [new ApiClientError("private API detail",401,"unauthorized"),new Error("private internal detail")]) {
+          await read("zh").previewSetting({kind:"defaults",model:"model-after"},label);
+          const zhState=read("zh"),enState=read("en");
+          errors.push({zh:renderToStaticMarkup(h(SettingsError,{message:zhState.actionError,retry(){}})),en:renderToStaticMarkup(h(SettingsError,{message:enState.actionError,retry(){}})),pending:enState.pendingSetting});
+        }
+        const errorRequests={previews,updates,refetches};
+        const validationErrors=[];
+        for (const [kind,code] of [
+          ["webui.host","required"],["system.approval-timeout","invalid-integer"],
+          ["system.idle-release-minutes","invalid-integer"],["system.model-traffic-retention-days","invalid-integer"],
+          ["webui.port","invalid-integer"],["metrics.storage","invalid-integer"],
+          ["model-compact","invalid-percent"],["model-compact","window-required"],
+          ["webui.token","required"],["webui.token","invalid-secret"],["webui.token","public-token-required"],
+          ["network.proxy","invalid-proxy"],["workspace.permissions","unknown-workspace"],["workspace.permissions","permission-conflict"],
+          ["workspace.permissions","too-long"],["system.default-model","too-long"],["system.official-tui-identity","too-long"],
+          ["defaults","unknown-model"],["defaults","unsupported-reasoning-effort"],["preferences","invalid-reasoning-effort"],
+          ["preferences","invalid-reasoningSummary"],["preferences","invalid-verbosity"],["preferences","invalid-historyPersistence"],
+          ["preferences","unsupported-field"],["model-compact","invalid-window"],["permissions","permission-profile-active"],
+          ["permissions","invalid-sandbox"],["permissions","invalid-approval-policy"],["fast","third-party-primary"],
+          ["web-search","invalid-web-search"],["auto-recap","invalid-boolean"],["tool-access","unsupported-tool-setting"],
+          ["tool-access","invalid-tool-setting"],["display.operation-updates","invalid-choice"],
+          ["webui.port","invalid-input"],["webui.port","setting_not_allowed"],["defaults","unknown-setting"],
+          ["network.proxy-batch","unknown-field"],["webui.host","required-revision"],
+          ["webui.host","private_unknown_code"],["webui.host","__proto__"],
+        ]) {
+          cause=new ApiClientError("private token=secret /internal/path",400,code);
+          const before={previews,updates,refetches};
+          await read("zh").previewSetting({kind,value:1},label);
+          const messages=["zh","en","zh"].map(language=>read(language).actionError);
+          validationErrors.push({kind,code,messages,requestDelta:previews-before.previews,updates:updates-before.updates,refetches:refetches-before.refetches,pending:read("en").pendingSetting});
+        }
+        cause=null;
+        await read("zh").previewSetting({kind:"system.approval-timeout",value:900},label);
+        updateCause=new ApiClientError("private rejected update",400,"invalid-integer");
+        const confirmResult=await read("en").confirmSetting();
+        const confirmError=["zh","en","zh"].map(language=>read(language).actionError);
+        const confirmPending=read("en").pendingSetting;
+        read("en").cancelSetting();
+        const cancelledError=read("en").actionError;
+        slots=[];
+        const {useManagementConfirmedMutation}=await server.ssrLoadModule("/src/hooks/use-management-confirmed-mutation.ts");
+        let mutationPreviews=0;
+        const mutationOptions={load:options.load,preview:async()=>{mutationPreviews++;throw new ApiClientError("private mutation detail",403,"forbidden")},apply:options.update};
+        const mutationState=language=>{globalThis.fixtureLanguage=language;cursor=0;return useManagementConfirmedMutation(mutationOptions)};
+        await mutationState("zh").mutate({operation:"primary.switch",providerId:"fixture-provider"});
+        const mutationErrors=["zh","en","zh"].map(language=>mutationState(language).actionError);
+        slots=[];
+        const {GatewaySettingsCard}=await server.ssrLoadModule("/src/components/settings/gateway-settings-card.tsx");
+        const identityCalls=[];
+        const managedSettings={system:{officialTuiIdentity:{clientIdentity:{name:"saved-name"},upstreamUserAgent:null,terminalIdentity:null,defaults:{name:"codex",version:"fixture-version"}}},advanced:{pluginApiEnabled:false}};
+        const management={managedSettings,loading:false,error:null,saving:false,pendingSetting:null,lastAppliedSetting:null,previewSetting(...args){identityCalls.push(args)}};
+        const tree=language=>{globalThis.fixtureLanguage=language;cursor=0;return GatewaySettingsCard({management,section:"network"})};
+        const walk=node=>Array.isArray(node)?node.flatMap(walk):node&&typeof node==="object"&&node.props?[node,...walk(node.props.children)]:[];
+        const text=node=>Array.isArray(node)?node.map(text).join(""):node&&typeof node==="object"&&node.props?text(node.props.children):typeof node==="string"?node:"";
+        let current=tree("zh");
+        walk(current).find(node=>node.props.id==="tui-identity-name").props.onChange({target:{value:"draft-name"}});
+        walk(current).find(node=>node.props.id==="tui-upstream-user-agent").props.onChange({target:{value:"fixture-agent/1"}});
+        const drafts=["zh","en","zh"].map(language=>{
+          current=tree(language);
+          return {language,name:walk(current).find(node=>node.props.id==="tui-identity-name").props.value,userAgent:walk(current).find(node=>node.props.id==="tui-upstream-user-agent").props.value,labels:text(current),requests:identityCalls.length};
+        });
+        current=tree("en");
+        walk(current).find(node=>typeof node.props.onClick==="function"&&text(node)==="Save request identity").props.onClick();
+        console.log(JSON.stringify({confirmations,pendingBefore,pendingAfter,previewRequests,errorRequests,errors,validationErrors,confirmResult,confirmError,confirmPending,cancelledError,mutationErrors,mutationPreviews,drafts,identityCalls}));
+      } finally {await server.close();}
+    `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
+    const state = JSON.parse(output) as {
+      confirmations: string[]; pendingBefore: string; pendingAfter: string;
+      previewRequests: { previews: number; updates: number; refetches: number };
+      errorRequests: { previews: number; updates: number; refetches: number };
+      errors: Array<{ zh: string; en: string; pending: null }>;
+      validationErrors: Array<{ kind: string; code: string; messages: string[]; requestDelta: number; updates: number; refetches: number; pending: null }>;
+      confirmResult: boolean; confirmError: string[]; confirmPending: null; cancelledError: null;
+      mutationErrors: string[]; mutationPreviews: number;
+      drafts: Array<{ language: string; name: string; userAgent: string; labels: string; requests: number }>;
+      identityCalls: Array<[string, { clientIdentity: { name: string }; upstreamUserAgent: string }, unknown]>;
+    };
+    expect(state.confirmations[0]).toContain("确认配置修改");
+    expect(state.confirmations[1]).toContain("Confirm configuration change");
+    expect(state.confirmations[1]).toContain("Channel session model");
+    expect(state.confirmations[1]).not.toMatch(/[\u4e00-\u9fff]/u);
+    expect(state.confirmations[2]).toBe(state.confirmations[0]);
+    expect(state.pendingAfter).toBe(state.pendingBefore);
+    for (const html of state.confirmations) {
+      expect(html).toContain("model-before");
+      expect(html).toContain("model-after");
+      expect(html).toContain("codexc service restart all");
+    }
+    expect(state.previewRequests).toEqual({ previews: 1, updates: 0, refetches: 0 });
+    expect(state.errorRequests).toEqual({ previews: 3, updates: 0, refetches: 0 });
+    for (const error of state.errors) {
+      expect(error.pending).toBeNull();
+      expect(error.zh).toMatch(/[\u4e00-\u9fff]/u);
+      expect(error.en).not.toMatch(/[\u4e00-\u9fff]/u);
+      expect(error.zh + error.en).not.toContain("private");
+    }
+    expect(state.errors[0]!.en).toContain("The access token is invalid or expired");
+    expect(state.errors[1]!.en).toContain("Could not complete the request");
+    for (const error of state.validationErrors) {
+      expect(error).toMatchObject({ requestDelta: 1, updates: 0, refetches: 0, pending: null });
+      expect(error.messages[0]).toMatch(/[\u4e00-\u9fff]/u);
+      expect(error.messages[1]).not.toMatch(/[\u4e00-\u9fff]/u);
+      expect(error.messages[2]).toBe(error.messages[0]);
+      expect(error.messages.join(" ")).not.toMatch(/private|secret|internal/u);
+    }
+    expect(state.validationErrors[0]!.messages[0]).toContain("先设置令牌");
+    expect(state.validationErrors[0]!.messages[1]).toContain("Set a token before changing the listen address");
+    for (const [index,minimum,maximum] of [[1,30,3600],[2,0,1440],[3,0,36500],[4,1,65535],[5,1,3650],[6,10,90]]) {
+      expect(state.validationErrors[index!]!.messages[0]).toContain(`${minimum}–${maximum}`);
+      expect(state.validationErrors[index!]!.messages[1]).toContain(`between ${minimum} and ${maximum}`);
+    }
+    expect(state.validationErrors[5]!.messages[1]).toContain("between 1000 and 10000000");
+    expect(state.validationErrors[7]!.messages[1]).toContain("Set the model context window before");
+    for (const error of state.validationErrors) {
+      if (error.code === "private_unknown_code" || error.code === "__proto__") {
+        expect(error.messages[1]).toBe("Could not complete the request. Try again.");
+      } else {
+        expect(error.messages[1]).not.toBe("Could not complete the request. Try again.");
+      }
+    }
+    expect(state.validationErrors[8]!.messages[1]).toContain("access token cannot be empty");
+    expect(state.validationErrors[9]!.messages[1]).toContain("4096");
+    expect(state.validationErrors[11]!.messages[1]).toContain("2048");
+    expect(state.validationErrors[14]!.messages[1]).toContain("128");
+    expect(state.validationErrors[15]!.messages[1]).toContain("256");
+    expect(state.validationErrors[16]!.messages[1]).toContain("512");
+    expect(state.confirmResult).toBe(false);
+    expect(state.confirmPending).toBeNull();
+    expect(state.confirmError).toEqual(state.validationErrors[1]!.messages);
+    expect(state.cancelledError).toBeNull();
+    expect(state.mutationErrors[0]).toMatch(/[\u4e00-\u9fff]/u);
+    expect(state.mutationErrors[1]).not.toMatch(/[\u4e00-\u9fff]/u);
+    expect(state.mutationErrors[2]).toBe(state.mutationErrors[0]);
+    expect(state.mutationErrors.join(" ")).not.toContain("private");
+    expect(state.mutationPreviews).toBe(1);
+    for (const draft of state.drafts) {
+      expect(draft).toMatchObject({ name: "draft-name", userAgent: "fixture-agent/1", requests: 0 });
+    }
+    expect(state.drafts[0]!.labels).toContain("保存请求身份");
+    expect(state.drafts[1]!.labels).toContain("Save request identity");
+    expect(state.drafts[1]!.labels).not.toMatch(/[\u4e00-\u9fff]/u);
+    expect(state.identityCalls).toHaveLength(1);
+    expect(state.identityCalls[0]).toMatchObject(["system.official-tui-identity", { clientIdentity: { name: "draft-name" }, upstreamUserAgent: "fixture-agent/1" }, { key: "settingsFields.tuiIdentity" }]);
   }, 30_000);
 
 });

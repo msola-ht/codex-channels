@@ -121,7 +121,7 @@ export function AccountSettingsConfirmationDialog({
   const lines = [t("accountConfirmation.operation", { value: preview.operation })]
   if (account?.id !== undefined) lines.push(t("accountConfirmation.account", { name: account.displayName ?? account.email ?? account.phone ?? account.id, id: account.id }))
   if (provider?.name !== undefined) lines.push(t("accountConfirmation.provider", { name: provider.name, id: provider.id ?? t("common.unknown") }))
-  if (preview.mode !== undefined) lines.push(t("accountConfirmation.mode", { value: preview.mode }))
+  if (preview.mode !== undefined) lines.push(t("accountConfirmation.mode", { value: preview.mode === "exclusive" ? t("modelManagement.exclusive") : preview.mode === "switching" ? t("modelManagement.switching") : preview.mode }))
   if (preview.model !== undefined) lines.push(t("accountConfirmation.model", { value: preview.model }))
   if (preview.status !== undefined) lines.push(t("accountConfirmation.status", { value: preview.status }))
   if (preview.effects !== undefined) {

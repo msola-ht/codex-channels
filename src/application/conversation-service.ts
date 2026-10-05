@@ -151,6 +151,15 @@ export type ConversationIdleReleaseResult =
   | { status: "busy"; threadId: string }
   | { status: "released"; threadId: string };
 
+export interface ConversationIdleReleaseCondition {
+  threadId: string;
+  lastActivityAt: number;
+  signal: AbortSignal;
+  isCurrent(): boolean;
+  canRestore(): boolean;
+  restoreRequired?(): void;
+}
+
 export type ConversationQueryPort =
   & AccountQueryPort
   & ConversationExtensionQueryPort;
@@ -312,6 +321,7 @@ export interface ConversationSessionUseCases {
   ): Promise<ThreadOccupancyReleaseResult>;
   releaseIdle?(
     target: ConversationTarget,
+    condition?: ConversationIdleReleaseCondition,
   ): Promise<ConversationIdleReleaseResult>;
   status(
     target: ConversationTarget,
@@ -343,9 +353,10 @@ export class ConversationService implements
   private readonly extensionQueries: ConversationExtensionQueryService;
   private readonly accountMetrics: ConversationAccountMetricsService;
   private readonly lunaReserve: LunaReserveService | undefined;
-  private readonly pendingBackgroundReleases = new Set<string>();
+  private readonly pendingBackgroundReleases = new Map<string, boolean>();
   private readonly backgroundReleaseAttempts = new Map<string, Promise<boolean>>();
   private idleReleaseEnabled = true;
+  private idleReleaseGeneration = 0;
   private readonly sessionQueries: ConversationSessionQueryService;
 
   constructor(
@@ -459,34 +470,51 @@ export class ConversationService implements
   }
 
   setIdleReleaseEnabled(enabled: boolean): void {
+    if (this.idleReleaseEnabled !== enabled) this.idleReleaseGeneration += 1;
     this.idleReleaseEnabled = enabled;
   }
 
   releaseIdle(
     target: ConversationTarget,
+    condition?: ConversationIdleReleaseCondition,
   ): Promise<ConversationIdleReleaseResult> {
+    const original = this.router.current(target);
+    const expected = original ? { ...original } : undefined;
+    const lastActivityAt = condition?.lastActivityAt ?? this.router.idleState(target).lastActivityAt;
+    const generation = this.idleReleaseGeneration;
     return this.locked(target, async () => {
-      const current = this.router.current(target);
-      if (!current) {
+      const binding = this.router.current(target);
+      if (!binding) {
         return { status: "unbound" };
       }
-      if (this.core.activeTurn(target)) {
+      const current = { ...binding };
+      const isCurrent = () => {
+        const latest = this.router.current(target);
+        const idle = this.router.idleState(target);
+        return this.idleReleaseEnabled && generation === this.idleReleaseGeneration
+          && !condition?.signal.aborted && (condition?.isCurrent() ?? true)
+          && current.threadId === (condition?.threadId ?? expected?.threadId)
+          && latest?.threadId === current.threadId
+          && latest?.sessionId === expected?.sessionId
+          && latest?.workspaceId === expected?.workspaceId
+          && idle.lastActivityAt === lastActivityAt && !idle.forceNew;
+      };
+      const isLocallyBusy = () => this.core.activeTurn(target) !== undefined
+        || this.hasPendingSubagentRuns?.(current.threadId) === true
+        || this.transfers?.hasPendingInteraction(current.threadId) === true;
+      const busy = (): ConversationIdleReleaseResult => ({ status: "busy", threadId: current.threadId });
+      if (!isCurrent()) return busy();
+      if (isLocallyBusy()) {
         this.touchActivity(target);
-        return { status: "busy", threadId: current.threadId };
-      }
-      if (this.hasPendingSubagentRuns?.(current.threadId)) {
-        this.touchActivity(target);
-        return { status: "busy", threadId: current.threadId };
+        return busy();
       }
       if (await this.probeNativeQueueItems(current.threadId)) {
         this.touchActivity(target);
-        return { status: "busy", threadId: current.threadId };
+        return busy();
       }
-      if (this.transfers?.hasPendingInteraction(current.threadId)) {
-        this.touchActivity(target);
-        return { status: "busy", threadId: current.threadId };
-      }
-      const snapshot = await this.router.readThread(current.threadId);
+      if (!isCurrent() || isLocallyBusy()) return busy();
+      const snapshot = await this.router.readThread(current.threadId, condition?.signal);
+      if (!isCurrent() || isLocallyBusy()) return busy();
       if (
         snapshot.status.type !== "idle"
         && snapshot.status.type !== "notLoaded"
@@ -495,10 +523,30 @@ export class ConversationService implements
         return { status: "busy", threadId: current.threadId };
       }
       const modelPreference = this.models.capturePreference?.(target);
+      const activity = this.core.trackThreadActivity?.(current.threadId);
       try {
-        await this.router.newSession(target, false, modelPreference);
+        const released = await this.router.releaseIdle(target, current, snapshot, {
+          isCurrent: () => isCurrent() && !isLocallyBusy(),
+          verifyIdle: async () => {
+            if (!isCurrent() || isLocallyBusy()) return false;
+            if (await this.probeNativeQueueItems(current.threadId)) {
+              this.touchActivity(target);
+              return false;
+            }
+            if (!isCurrent() || isLocallyBusy()) return false;
+            const latest = await this.router.readThread(current.threadId, condition?.signal);
+            return isCurrent() && !isLocallyBusy()
+              && (latest.status.type === "idle" || latest.status.type === "notLoaded");
+          },
+          canRestore: () => !condition?.signal.aborted && (condition?.canRestore() ?? true),
+          restored: (thread) => activity?.restore(target, thread.activeTurnId),
+        }, modelPreference);
+        if (!released) return busy();
       } catch {
-        return { status: "busy", threadId: current.threadId };
+        if (condition?.canRestore() && !condition.signal.aborted) condition.restoreRequired?.();
+        return busy();
+      } finally {
+        activity?.stop();
       }
       this.invalidateRevertSnapshot(target);
       this.invalidateQueueSnapshot(current.threadId);
@@ -695,6 +743,7 @@ export class ConversationService implements
     input: TurnInput[],
     identity?: TurnStartIdentity,
   ): Promise<Submission> {
+    this.touchActivity(target);
     return this.locked(
       target,
       () => this.submitInputLocked(target, input, identity),
@@ -818,6 +867,7 @@ export class ConversationService implements
     target: ConversationTarget,
     selector: string,
   ): Promise<ConversationResumeResult> {
+    this.touchActivity(target);
     const { selected, selectionCwd } = await this.locked(target, async () => ({
       selectionCwd: this.router.workspace(target).cwd,
       selected: resolveThread(pinnedFirst(await this.router.list(target)), selector.trim()),
@@ -1554,9 +1604,12 @@ export class ConversationService implements
     threadId: string,
     options: { dispatchQueued?: boolean } = {},
   ): Promise<boolean> {
+    // Retries must keep the latest completion's dispatch policy: interruption
+    // preserves Queue entries even when subagent settlement delays release.
+    this.pendingBackgroundReleases.set(threadId, options.dispatchQueued !== false);
     const current = this.backgroundReleaseAttempts.get(threadId);
     if (current) return current;
-    const attempt = this.performBackgroundRelease(threadId, options);
+    const attempt = this.performBackgroundRelease(threadId);
     this.backgroundReleaseAttempts.set(threadId, attempt);
     try {
       return await attempt;
@@ -1569,17 +1622,15 @@ export class ConversationService implements
 
   private async performBackgroundRelease(
     threadId: string,
-    options: { dispatchQueued?: boolean },
   ): Promise<boolean> {
     if (!this.router.isBackgroundThread(threadId)) {
       this.pendingBackgroundReleases.delete(threadId);
       return false;
     }
-    this.pendingBackgroundReleases.add(threadId);
     if (this.hasPendingSubagentRuns?.(threadId)) {
       return false;
     }
-    if (options.dispatchQueued !== false) {
+    if (this.pendingBackgroundReleases.get(threadId) !== false) {
       const queueState = await this.dispatchNativeQueueBeforeRelease(threadId);
       if (queueState !== "empty" && queueState !== "unavailable") {
         return false;
@@ -1609,10 +1660,11 @@ export class ConversationService implements
    * the App Server notification reader itself.
    */
   retryPendingBackgroundRelease(threadId: string): Promise<boolean> {
-    if (!this.pendingBackgroundReleases.has(threadId)) {
+    const dispatchQueued = this.pendingBackgroundReleases.get(threadId);
+    if (dispatchQueued === undefined) {
       return Promise.resolve(false);
     }
-    return this.releaseBackgroundIfComplete(threadId);
+    return this.releaseBackgroundIfComplete(threadId, { dispatchQueued });
   }
 
   private async dispatchNativeQueueBeforeRelease(

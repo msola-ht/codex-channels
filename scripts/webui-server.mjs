@@ -670,7 +670,7 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
       });
       return;
     }
-    const { matchedTotal, ...page } = queries.threadTurnSummaries(threadId, range, query);
+    const { matchedTotal, ...page } = store.readSnapshot(() => queries.threadTurnSummaries(threadId, range, query));
     sendJson(response, 200, {
       generatedAt: new Date().toISOString(),
       threadId,

@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 import { Link } from "react-router"
 
-import { DataTable, SortableHeader, TruncatedText, type DataTableColumn } from "@/components/metrics/data-table"
+import { DataTable, SortableHeader, TableHint, TruncatedText, type DataTableColumn } from "@/components/metrics/data-table"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { InputTokenTooltip } from "@/components/metrics/token-tooltip"
@@ -23,6 +23,7 @@ export function ThreadSubagents({ threadId, parentTurnId }: { threadId?: string;
   const columnLabels = {
     time: t("threads.firstRequest"), agent: t("threads.subagent"), thread: t("metrics.thread"),
     parent: t("threads.parentThread"), provider: t("metrics.provider"), model: t("metrics.model"),
+    reasoningEffort: t("metrics.reasoningEffort"),
     turns: t("metrics.turn"), requests: t("metrics.requests"), input: t("metrics.input"),
     cacheHitRate: t("metrics.cacheHitRate"), output: t("metrics.output"), last: t("metrics.last"),
     subagents: t("threads.directSubagents"),
@@ -44,15 +45,16 @@ export function ThreadSubagents({ threadId, parentTurnId }: { threadId?: string;
       title={row.original.parentThreadId} className="hover:underline">{shortThreadId(row.original.parentThreadId)}</Link> } satisfies DataTableColumn<SubagentListItem>] : []),
     { id: "provider", enableSorting: false, header: t("metrics.provider"), cell: ({ row }) => <ProviderBadge provider={row.original.provider} /> },
     { id: "model", enableSorting: false, header: t("metrics.model"), cell: ({ row }) => <TruncatedText text={formatModelName(row.original.model, row.original.provider)} className="max-w-40" /> },
+    { id: "reasoningEffort", enableSorting: false, header: t("metrics.reasoningEffort"), cell: ({ row }) => row.original.reasoningEffort ?? "—" },
     { id: "turns", enableSorting: false, header: t("metrics.turn"), cell: ({ row }) => row.original.turnCount },
     { id: "requests", enableSorting: false, header: t("metrics.requests"), cell: ({ row }) => row.original.requestCount },
-    { id: "input", enableSorting: false, header: t("metrics.input"), cell: ({ row }) => <InputTokenTooltip
+    { id: "input", enableSorting: false, header: () => <TableHint hint={t("metrics.input")}>{t("metrics.inputColumn")}</TableHint>, cell: ({ row }) => <InputTokenTooltip
       inputTokens={row.original.inputTokens}
       cachedInputTokens={row.original.cacheUsage.missingRequestCount > 0 ? null : row.original.cacheUsage.cachedInputTokens}
       cacheUsage={row.original.cacheUsage}
     /> },
-    { id: "cacheHitRate", enableSorting: false, header: t("metrics.cacheHitRate"), cell: ({ row }) => formatCacheUsage(row.original.cacheUsage).rate },
-    { id: "output", enableSorting: false, header: t("metrics.output"), cell: ({ row }) => formatTokens(row.original.outputTokens) },
+    { id: "cacheHitRate", enableSorting: false, header: () => <TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint>, cell: ({ row }) => formatCacheUsage(row.original.cacheUsage).rate },
+    { id: "output", enableSorting: false, header: () => <TableHint hint={t("metrics.output")}>{t("metrics.outputColumn")}</TableHint>, cell: ({ row }) => formatTokens(row.original.outputTokens) },
     { id: "last", accessorFn: agent => agent.lastRecordedAtMs, sortDescFirst: true,
       header: ({ column }) => <SortableHeader column={column}>{t("metrics.last")}</SortableHeader>,
       cell: ({ row }) => row.original.lastRecordedAtMs == null ? "—" : formatTime(row.original.lastRecordedAtMs) },

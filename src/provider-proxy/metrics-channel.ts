@@ -201,6 +201,14 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
   if (quotaWindows !== undefined && !nullableQuotaWindows(quotaWindows)) {
     return undefined;
   }
+  const quotaObservedAtMs = record.quotaObservedAtMs;
+  if (quotaObservedAtMs !== undefined && !nullableTokenCount(quotaObservedAtMs)) {
+    return undefined;
+  }
+  if (quotaObservedAtMs != null && weeklyQuota == null
+    && (!Array.isArray(quotaWindows) || quotaWindows.length === 0)) {
+    return undefined;
+  }
   const quota = weeklyQuota as Record<string, unknown> | null | undefined;
   const userAgent = record.userAgent;
   return {
@@ -216,6 +224,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     quotaWindows: quotaWindows === null || quotaWindows === undefined
       ? null
       : quotaWindows,
+    quotaObservedAtMs: quotaObservedAtMs ?? null,
   } as unknown as ProviderProxyMetrics;
 }
 

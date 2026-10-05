@@ -37,6 +37,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 源码安装的目录、更新、代理和 Windows 处理见[`源码安装与更新`](docs/source-install.md)。
 本地开发源码执行 `npm run install:global` 时会补装缺失的配套 Codex CLI，随后运行 `codexc init`、`codexc setup`、`codexc service install`。已有 CLI 的版本同步使用 `codexc update`。
+Linux systemd 用户服务可通过 `codexc update --background --source <目录>` 部署本机源码，使用 `codexc update status` 查看结果；先全局安装包含此入口的新版本 CLI。流程与恢复说明见[本机源码后台部署](docs/source-install.md#本机源码后台部署)。
 
 ## 常用入口
 
@@ -108,12 +109,12 @@ DS、OCG、CCG、CLP 支持多账户，在 `codexc setup → 模型与提供商`
 git clone https://github.com/msola-ht/codex-channels.git
 cd codex-channels
 npm ci
-npm run check
-npm run lint
-npm run docs:check
-npm run i18n:check
-npm test
+# 按改动选择相关测试；此处以会话路由为例
+npm test -- tests/session-router.test.ts
 ```
+
+本地提交自动执行按改动范围选择的检查；PR CI 执行完整回归。需要在本地复现完整 CI 回归时运行
+`npm run verify:ci`。验证入口与专项检查见[测试说明](tests/README.md)和[CI 流程](.github/workflows/README.md)。
 
 协议升级、上游参考仓库和真实 App Server 合同必须遵循[`上游源码维护规则`](docs/upstream-sources.md)与[`Codex CLI 升级流程`](docs/codex-cli-upgrade.md)。
 

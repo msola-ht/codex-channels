@@ -150,6 +150,12 @@ export function inspectManagedSourceUpdatePlan(
 ): SourceUpdatePlan;
 
 export function getSourceUpdateFailure(error: unknown): SourceUpdateFailure | undefined;
+export function assertCodexVersion(expected: string, environment: NodeJS.ProcessEnv, captureCommand?: SourceUpdateOptions["captureCommand"]): void;
+export function validateCodexContract(checkout: string, environment: NodeJS.ProcessEnv, options: SourceUpdateOptions): void;
+export function buildCheckout(checkout: string, environment: NodeJS.ProcessEnv, options: SourceUpdateOptions): Promise<void>;
+export function packageVersion(checkout: string): string;
+export function codexVersion(checkout: string): string;
+export function isGatewayVersionCompatible(gatewayVersion: string, expectedCodexVersion: string): boolean;
 export function getCodexVersionMismatchRemediation(error: unknown): string[];
 export function writeSourceUpdateFailure(
   error: unknown,

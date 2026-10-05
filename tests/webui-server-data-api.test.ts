@@ -62,6 +62,28 @@ function writeCallIndex(
 }
 
 describe("webui server data API", () => {
+  it("returns paired cache coverage without inventing a complete rate for complementary missing fields", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const request = metricSample();
+    store.recordBatch([
+      { ...request, inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 },
+      { ...request, inputTokens: 200, cachedInputTokens: null, outputTokens: 20 },
+      { ...request, inputTokens: null, cachedInputTokens: 10, outputTokens: null,
+        status: "failed", errorType: "client_disconnected" },
+    ]);
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/threads/thread-1/turns?range=all`);
+    expect(response.status).toBe(200);
+    const aggregate = { requestCount: 3, inputTokens: 300, cachedInputTokens: null, outputTokens: 30,
+      cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 2 } };
+    expect(await response.json()).toMatchObject({
+      turns: [{ turnId: "turn-1", inputTokens: 300, cachedInputTokens: null,
+        interruptionSummary: { usageUnobserved: 1 } }], aggregate, treeAggregate: aggregate,
+    });
+  });
+
   it("returns an empty global subagent page when no relationships are registered", async () => {
     const fixture = createFixture();
     const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
@@ -157,7 +179,33 @@ describe("webui server data API", () => {
     expect(await read("threads?range=all&threadId=root-a&model=child-only")).toMatchObject({ total: 1, treeAggregate: { requestCount: 1, inputTokens: 1000 } });
     expect(await read("threads?range=all&threadId=child-a")).toMatchObject({ threads: [], total: 0 });
     expect(await read("threads/child-a/run")).toMatchObject({ threadId: "child-a", parentThreadId: "root-a", agentPath: "/root/child-a" });
-    expect(await read("threads/child-a/turns?range=all")).toMatchObject({ total: 1, turns: [{ turnId: "turn-1" }], aggregate: { requestCount: 1 } });
+    expect(await read("threads/child-a/turns?range=all")).toMatchObject({
+      total: 1, subagentTurnCount: 1, turns: [{ turnId: "turn-1" }], aggregate: { requestCount: 1 },
+      subagentAggregate: { requestCount: 1, inputTokens: 1000 },
+      treeAggregate: { requestCount: 2, inputTokens: 2000 },
+    });
+    const detail = await read(`threads/root-a/turns?${scope}`);
+    expect(detail).toMatchObject({
+      total: 2, turnCount: 2, subagentTurnCount: 2, nextOffset: 1,
+      aggregate: { requestCount: 2, inputTokens: 2000 },
+      subagentAggregate: { requestCount: 2, inputTokens: 2000 },
+      treeAggregate: { requestCount: 4, inputTokens: 4000 },
+    });
+    expect(await read(`threads/root-a/turns?${scope}&offset=20`)).toMatchObject({
+      turns: [], total: 2, subagentTurnCount: 2, aggregate: detail.aggregate,
+      subagentAggregate: detail.subagentAggregate, treeAggregate: detail.treeAggregate,
+    });
+    expect(await read("threads/root-a/turns?range=all&model=child-only")).toMatchObject({
+      turns: [], total: 0, turnCount: 0, subagentTurnCount: 1, aggregate: null,
+      subagentAggregate: { requestCount: 1, inputTokens: 1000 }, treeAggregate: { requestCount: 1, inputTokens: 1000 },
+    });
+    expect(await read("threads/root-a/turns?range=all&turnId=turn-1")).toMatchObject({
+      turns: [{ turnId: "turn-1" }], total: 1, aggregate: { requestCount: 1 },
+      subagentTurnCount: null, subagentAggregate: null, treeAggregate: null,
+    });
+    expect(await read("threads/root-a/turns?range=all&model=missing")).toMatchObject({
+      turns: [], total: 0, subagentTurnCount: 0, aggregate: null, subagentAggregate: null, treeAggregate: null,
+    });
     expect(await read("threads/root-a/subagents")).toMatchObject({ total: 3 });
     expect(await read("overview?range=all")).toMatchObject({ threadCount: 6, turnCount: 7, global: { requestCount: 7 } });
     expect((await fetch(`${origin}/api/v1/threads?mainThreadsOnly=false`)).status).toBe(400);
@@ -910,6 +958,40 @@ describe("webui server data API", () => {
       usedPercent: 12.5,
     });
     expect(body.weeklyQuota.resetsAt).toBeGreaterThan(1_000_000_000_000);
+  });
+
+  it("keeps quota estimates aligned across snapshot backtracking and an unclosed tail", async () => {
+    const fixture = createFixture();
+    const resetsAt = Math.floor(Date.now() / 1_000) + 24 * 60 * 60;
+    for (const [usedPercent, inputTokens] of [[0, 100], [1, 100], [0, 100], [1, 100], [2, 100], [2, 9_000]] as const) {
+      recordSample(fixture.databasePath, {
+        ...metricSample(),
+        provider: "openai",
+        inputTokens,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        totalTokens: inputTokens,
+        weeklyQuota: { limitId: "codex", planType: "plus", usedPercentMillionths: usedPercent * 1_000_000, resetsAt },
+      });
+    }
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/overview?range=24h`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      global: { requestCount: 6, inputTokens: 9_500, outputTokens: 0 },
+      weeklyQuota: {
+        usedPercent: 2,
+        remainingPercent: 98,
+        estimate: {
+          observedDeltaPercent: 2,
+          intervalCount: 2,
+          requestCount: 4,
+          inputTokensPerPercent: 200,
+          outputTokensPerPercent: 0,
+          totalTokensPerPercent: 200,
+        },
+      },
+    });
   });
 
   it("lists threads and returns run and turns details", async () => {

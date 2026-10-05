@@ -304,8 +304,8 @@ export function requireCompatibleMetricsDatabase(environment = process.env) {
   const status = inspectMetricsDatabase(environment);
   if (!status.exists) throw new Error(`指标数据库尚未创建：${status.databasePath}`);
   if (!status.compatible) {
-    throw new Error([20, 21, 22, 23, 24, 25].includes(status.schemaVersion)
-      ? `模型请求指标库需要显式升级；停止 Gateway 与 Relay 后运行 codexc metrics upgrade --from ${status.schemaVersion} --to 26，核对后加 --apply`
+    throw new Error([20, 21, 22, 23, 24, 25, 26].includes(status.schemaVersion)
+      ? `模型请求指标库需要显式升级；停止 Gateway 与 Relay 后运行 codexc metrics upgrade --from ${status.schemaVersion} --to 27，核对后加 --apply`
       : "模型请求指标数据库版本不兼容；请核对数据库版本及备份，并按显式升级流程处理，勿删除数据库");
   }
   return status.databasePath;

@@ -58,6 +58,11 @@ import {
 } from "../scripts/metrics-command-options.mjs";
 import { configuredEnvironment, serviceControlEnvironment } from "../scripts/runtime-environment.mjs";
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
+import {
+  BACKGROUND_UPDATE_STATUS_USAGE,
+  BACKGROUND_UPDATE_USAGE,
+  parseBackgroundUpdateArgs,
+} from "../scripts/background-update-options.mjs";
 
 const foregroundShutdownTimeoutMs = 5_000;
 const foregroundProcessGroupExitTimeoutMs = 1_000;
@@ -189,7 +194,7 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
   "opencode_go.account.remove": "用法：codexc opencode-go account remove <id>",
   "opencode_go.account.default": "用法：codexc opencode-go account default <id>",
   "opencode_go.account.stop": "用法：codexc opencode-go account stop <id>",
-  update: `用法：codexc update
+  update: `${BACKGROUND_UPDATE_USAGE}
 
 Git 源码安装检查并构建官方 main 最新提交，校验当前配置、数据库与配套 Codex CLI 合同后，
 在一个停机窗口更新程序与所需 CLI，执行目标版本的数据库升级入口，再恢复核心服务。
@@ -453,13 +458,19 @@ async function executeCommand(command, args) {
     case "opencode-go":
       opencodeGoAccount(args);
       break;
-    case "update":
-      if (showRequestedHelp(args, "update")) {
+    case "update": {
+      const updateOptions = parseBackgroundUpdateArgs(args);
+      if (updateOptions.kind === "help") {
+        console.log(updateOptions.topic === "status" ? BACKGROUND_UPDATE_STATUS_USAGE : helpText.update);
         break;
       }
-      requireNoArguments(args, "用法：codexc update");
-      runScript("scripts/source-update.mjs", [], { failureReportedByChild: true });
+      if (updateOptions.kind === "interactive") {
+        runScript("scripts/source-update.mjs", [], { failureReportedByChild: true });
+      } else {
+        await (await import("../scripts/background-update.mjs")).runBackgroundUpdateCommand(args);
+      }
       break;
+    }
     case "uninstall":
       if (showRequestedHelp(args, "uninstall")) {
         break;

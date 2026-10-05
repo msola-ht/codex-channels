@@ -4,23 +4,32 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import pino from "pino";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { toConversationInputEvent, toThreadQueueChangedEvent } from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
+import { ConversationService } from "../src/application/conversation-service.js";
+import { ModelSelectionService } from "../src/application/model-selection-service.js";
+import { ConversationCore } from "../src/conversation-core/index.js";
+import { EventBus } from "../src/event-bus/index.js";
+import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
+import { SessionRouter } from "../src/session-routing/index.js";
+import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
 
 describe.skipIf(process.platform === "win32")("real App Server Queue contract", () => {
   it("runs the native Queue capacity, paging, dispatch and restart contract", async () => {
-    const testRuntime = mkdtempSync(join(tmpdir(), "codex-queue-contract-"));
+    const testRuntime = realpathSync(mkdtempSync(join(tmpdir(), "codex-queue-contract-")));
     const codexHome = join(testRuntime, "codex-home");
     const workspace = join(testRuntime, "workspace");
     const socketPath = join(testRuntime, "codex-app-server.sock");
@@ -65,6 +74,7 @@ describe.skipIf(process.platform === "win32")("real App Server Queue contract", 
     writeFileSync(join(codexHome, "config.toml"), [
       'model = "queue-contract-model"',
       'model_provider = "queue-contract"',
+      "thread_unload_delay_secs = 1",
       "",
       "[model_providers.queue-contract]",
       'name = "Queue Contract Provider"',
@@ -102,6 +112,8 @@ describe.skipIf(process.platform === "win32")("real App Server Queue contract", 
     const changedThreadIds: string[] = [];
     const startedTurnIds = new Set<string>();
     const completedTurnIds = new Set<string>();
+    const closedThreadIds = new Set<string>();
+    const forkedThreadIds = new Set<string>();
     const attachNotifications = (): void => {
       removeNotification?.();
       removeNotification = client?.onNotification((notification) => {
@@ -111,6 +123,7 @@ describe.skipIf(process.platform === "win32")("real App Server Queue contract", 
         if (!event || !("threadId" in event)) return;
         if (event.type === "turn.started") startedTurnIds.add(event.turnId);
         if (event.type === "turn.completed") completedTurnIds.add(event.turnId);
+        if (event.type === "thread.closed") closedThreadIds.add(event.threadId);
       });
     };
     const completeResponse = (responseId: string): void => {
@@ -197,6 +210,26 @@ describe.skipIf(process.platform === "win32")("real App Server Queue contract", 
         activeTurnId = undefined;
         expect((await client.listQueue(threadId, { limit: 100 })).items).toHaveLength(100);
 
+        const target = { surface: "telegram" as const, accountId: "contract", conversationId: "background" };
+        const registry = new WorkspaceRegistry([{ id: "contract", name: "Contract", cwd: workspace }], "contract");
+        const store = new MemoryBindingStore();
+        store.bindBackground({ target, workspaceId: "contract", threadId, sessionId: started.thread.sessionId });
+        const router = new SessionRouter(client, store, registry);
+        let pendingSubagents = true;
+        const conversations = new ConversationService(
+          client, router, new ConversationCore(router, new EventBus(pino({ level: "silent" }))),
+          new ModelSelectionService(client, router), client,
+          undefined, undefined, undefined, undefined, undefined,
+          undefined, undefined, undefined, undefined, undefined, client, undefined,
+          () => pendingSubagents,
+        );
+        await expect(conversations.releaseBackgroundIfComplete(threadId, { dispatchQueued: false })).resolves.toBe(false);
+        pendingSubagents = false;
+        await expect(conversations.retryPendingBackgroundRelease(threadId)).resolves.toBe(false);
+        expect((await client.listQueue(threadId, { limit: 100 })).items).toEqual(full.items);
+        expect((await client.readThread(threadId)).status.type).toBe("idle");
+        expect(router.isBackgroundThread(threadId)).toBe(true);
+
         const specified = queuedItems[1]!;
         const specifiedTurn = await client.startQueueItem(threadId, specified.id);
         await waitFor(() => startedTurnIds.has(specifiedTurn.turnId), 10_000);
@@ -250,6 +283,32 @@ describe.skipIf(process.platform === "win32")("real App Server Queue contract", 
         await waitFor(() => responseIds.length > materializeResponseIndex, 5_000);
         completeResponse(responseIds[materializeResponseIndex]!);
         await waitFor(() => completedTurnIds.has(materialize.turnId), 10_000);
+        const forkTarget = { ...target, conversationId: "fork" };
+        store.bind({ target: forkTarget, workspaceId: "contract", threadId: coldThreadId, sessionId: coldThread.thread.sessionId });
+        for (const failure of ["unsubscribe", "binding"] as const) {
+          let forkedId: string | undefined;
+          const originalFork = client.forkThread.bind(client);
+          const forkSpy = vi.spyOn(client, "forkThread").mockImplementationOnce(async (...args) => {
+            const result = await originalFork(...args);
+            forkedId = result.thread.id;
+            forkedThreadIds.add(forkedId);
+            return result;
+          });
+          const fault = failure === "unsubscribe"
+            ? vi.spyOn(client, "unsubscribeThread").mockRejectedValueOnce(new Error("contract unsubscribe failed"))
+            : vi.spyOn(store, "switchForeground").mockImplementationOnce(() => { throw new Error("contract binding failed"); });
+          try {
+            await expect(router.fork(forkTarget)).rejects.toThrow(`contract ${failure} failed`);
+            expect(router.current(forkTarget)?.threadId).toBe(coldThreadId);
+            expect(forkedId).toBeDefined();
+            await waitFor(() => closedThreadIds.has(forkedId!), 10_000);
+            expect((await client.readThread(forkedId!)).status.type).toBe("notLoaded");
+            expect(store.getByThread(forkedId!)).toBeUndefined();
+          } finally {
+            fault.mockRestore();
+            forkSpy.mockRestore();
+          }
+        }
         await client.unsubscribeThread(coldThreadId);
 
         removeNotification?.();
@@ -322,6 +381,10 @@ describe.skipIf(process.platform === "win32")("real App Server Queue contract", 
       if (coldThreadId) {
         await client?.unsubscribeThread(coldThreadId).catch(() => undefined);
         await client?.deleteThread(coldThreadId).catch(() => undefined);
+      }
+      for (const forkedId of forkedThreadIds) {
+        await client?.unsubscribeThread(forkedId).catch(() => undefined);
+        await client?.deleteThread(forkedId).catch(() => undefined);
       }
       await client?.close().catch(() => undefined);
       if (processHandle.exitCode === null) {

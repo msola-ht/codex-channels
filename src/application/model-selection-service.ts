@@ -63,8 +63,11 @@ export class ModelSelectionService {
     private readonly independentCatalogProviders: readonly OfficialModelCatalogProvider[] = [],
   ) {}
 
-  updateSupplementaryModels(models: readonly ModelOption[]): void {
-    this.supplementaryModels = models;
+  updateSupplementaryModels(models: readonly ModelOption[], provider?: string): void {
+    this.supplementaryModels = provider === undefined ? models : [
+      ...this.supplementaryModels.filter((model) => model.provider !== provider),
+      ...models.filter((model) => model.provider === provider),
+    ];
   }
 
   async state(target: ConversationTarget, requireSelection = false): Promise<ModelSelectionState> {

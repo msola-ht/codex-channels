@@ -17,6 +17,7 @@ import {
   AppServerSupervisorOwner,
   appServerSocketAcceptsWebSocket,
   prepareAppServerSocketPaths,
+  readAppServerProviderSettingsFingerprint,
 } from "./app-server-supervisor.mjs";
 import { writeCliMessage as printCliMessage } from "./cli-presentation.mjs";
 import { executableInvocation, resolveExecutable } from "./executable.mjs";
@@ -32,7 +33,10 @@ import {
 import {
   loadConfiguredCustomPrimaryModelProvider,
   loadOpenAiBaseUrl,
+  loadManagedModelProviderSettings,
+  readManagedMarker,
   providerMetricsSocketPath,
+  validateConfiguredModelProviders,
   withOfficialModelCatalog,
   withOpenAiBaseUrl,
   withProviderBaseUrl,
@@ -78,11 +82,27 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   applyAppServerTerminalIdentity(runtime.environment, validatedCodex.terminal_identity);
   applyAppServerTimezone(runtime.environment, validatedCodex.timezone);
   const defaultWorkspace = resolveDefaultWorkspace();
+  const providerDefinitions = new Map(
+    loadManagedModelProviderDefinitions(runtime.environment)
+      .map((definition) => [definition.id, definition]),
+  );
+  const settingsFingerprints = new Map([...providerDefinitions.values()]
+    .filter(definition => readManagedMarker(runtime.environment, definition))
+    .map(definition => [definition.id, readAppServerProviderSettingsFingerprint(definition.id, runtime.environment)]));
+  const initialSettings = loadManagedModelProviderSettings(runtime.environment);
+  const settingsSnapshots = new Map([...settingsFingerprints].map(([provider, fingerprint]) => [provider, {
+    fingerprint, defaultModel: initialSettings.find(value => value.provider === provider)?.model ?? null,
+  }]));
   const appServerRuntime = resolveAppServerRuntime(
     runtime.document,
     runtime.dataDir,
     runtime.environment,
   );
+  for (const [provider, fingerprint] of settingsFingerprints) {
+    if (readAppServerProviderSettingsFingerprint(provider, runtime.environment) !== fingerprint) {
+      throw new Error("Provider 设置在启动材料读取期间发生变化");
+    }
+  }
   const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
   const customSwitchingProviderIds = new Set(
     appServerRuntime.customSwitchingProviders.map((provider) => provider.provider),
@@ -250,10 +270,6 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     providerProxyRuntimes.remove(proxy);
     await proxy.close();
   };
-  const providerDefinitions = new Map(
-    loadManagedModelProviderDefinitions(runtime.environment)
-      .map((definition) => [definition.id, definition]),
-  );
   const goAccounts = loadOpencodeGoAccounts(runtime.environment);
   const clineAccounts = loadClinePassAccounts(runtime.environment);
   const dsAccounts = loadDeepseekAccounts(runtime.environment);
@@ -304,6 +320,32 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     provider.provider,
     { runtime: provider, socketPath: managedSocketPaths[index] },
   ]));
+  const prepareProviderSettings = (provider) => {
+    if (!providerDefinitions.has(provider)) return undefined;
+    const fingerprint = readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+    validateConfiguredModelProviders(runtime.environment);
+    const next = resolveAppServerRuntime(runtime.document, runtime.dataDir, runtime.environment);
+    const defaultModel = loadManagedModelProviderSettings(runtime.environment)
+      .find(value => value.provider === provider)?.model ?? null;
+    if (readAppServerProviderSettingsFingerprint(provider, runtime.environment) !== fingerprint) {
+      throw new Error("Provider 设置在读取期间发生变化");
+    }
+    if (JSON.stringify(next.topology) !== JSON.stringify(appServerRuntime.topology)) {
+      throw new Error("App Server 拓扑已变化，需要显式重启服务");
+    }
+    const managed = managedByProvider.get(provider);
+    const material = next.managedProviders.find(value => value.provider === provider);
+    if (managed && !material) throw new Error("Provider 启动材料不可用");
+    if (managed) managed.runtime = material;
+    return { fingerprint, defaultModel };
+  };
+  const confirmProviderSettings = (provider, snapshot) => {
+    if (!snapshot) return;
+    if (readAppServerProviderSettingsFingerprint(provider, runtime.environment) !== snapshot.fingerprint) {
+      throw new Error("Provider 设置在应用期间发生变化");
+    }
+    settingsSnapshots.set(provider, snapshot);
+  };
   const instanceLaunches = new Map();
   const children = [];
   const childrenByProvider = new Map();
@@ -313,7 +355,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   let watchChild;
   let detachChild;
   const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment);
-  const ensureInstance = (provider, { waitForReady = true } = {}) => {
+  const ensureInstance = (provider) => {
     const existing = instanceLaunches.get(provider);
     if (existing) return existing;
     const launch = (async () => {
@@ -325,6 +367,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         }
         if (await appServerSocketAcceptsWebSocket(socketPath)) return;
         await prepareAppServerSocketPaths([socketPath]);
+        settingsSnapshots.delete(provider);
+        const snapshot = prepareProviderSettings(provider);
         const primaryAppServerArguments = [
           ...primaryArguments,
           ...(desktopAppAttachment
@@ -356,12 +400,10 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
             );
         children.push(child);
         childrenByProvider.set(provider, child);
-        if (!waitForReady) {
-          watchChild(child);
-          return;
-        }
         try {
           await waitForAppServer(socketPath, child, provider);
+          confirmProviderSettings(provider, snapshot);
+          settingsRecoveryRequired.delete(provider);
           watchChild(child);
           console.log(`${provider} App Server 已按需启动：${socketPath}`);
         } catch (error) {
@@ -396,6 +438,11 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       if (!managed || (!definition && !customDefinition) || !managed.socketPath) {
         throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
       }
+      const runningChild = childrenByProvider.get(provider);
+      if (runningChild) {
+        await waitForAppServer(managed.socketPath, runningChild, provider);
+        return;
+      }
       if (await appServerSocketAcceptsWebSocket(managed.socketPath)) return;
       await prepareAppServerSocketPaths([managed.socketPath]);
       const proxyKey = sharedProviderProxyKey(provider);
@@ -412,6 +459,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               )),
         );
         proxy = startedProxy.proxy;
+        settingsSnapshots.delete(provider);
+        const snapshot = prepareProviderSettings(provider);
         const providerBaseUrl = proxyAccountId(provider) !== undefined
           ? `${startedProxy.baseUrl}/go/${proxyAccountId(provider)}`
           : startedProxy.baseUrl;
@@ -441,6 +490,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           provider,
           "模型 Provider App Server",
         );
+        confirmProviderSettings(provider, snapshot);
+        settingsRecoveryRequired.delete(provider);
         watchChild(child);
         console.log(`${provider} App Server 已按需启动：${managed.socketPath}`);
       } catch (error) {
@@ -500,6 +551,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       throw error;
     }
     childrenByProvider.delete(provider);
+    // The baseline belongs to the terminated instance, even if proxy cleanup fails.
+    settingsSnapshots.delete(provider);
     if (provider !== primaryProvider) {
       const proxyKey = sharedProviderProxyKey(provider);
       providerProxyRuntimes.removeUser(proxyKey, provider);
@@ -514,6 +567,64 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         : managedByProvider.get(provider).socketPath
     }`);
     return true;
+  };
+  const settingsRecoveryRequired = new Set();
+  const applyProviderSettings = async (provider, signal, canApply) => {
+    // Initial primary startup also uses ensureInstance, before any IPC operation
+    // owns the Provider queue. Do not reconcile against its unconfirmed baseline.
+    await instanceLaunches.get(provider);
+    signal.throwIfAborted();
+    // Managed settings may change launch material, never the host's socket topology.
+    // Account addition/removal and primary-provider changes require explicit service management.
+    if (!providerDefinitions.has(provider)) throw new Error("Provider 不支持受管设置应用");
+    const fingerprint = readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+    if (!settingsRecoveryRequired.has(provider) && settingsSnapshots.get(provider)?.fingerprint === fingerprint) {
+      return { applied: true, changed: false };
+    }
+    const managed = managedByProvider.get(provider);
+    if (provider !== primaryProvider && !managed) throw new Error("Provider 启动材料不可用");
+    const targetSocket = provider === primaryProvider ? socketPath : managed.socketPath;
+    const running = childrenByProvider.has(provider);
+    if (running) {
+      const { CodexAppServerClient, createAppServerTransport, JsonRpcClient } = await import("../dist/codex-client/index.js");
+      signal.throwIfAborted();
+      const client = new CodexAppServerClient(new JsonRpcClient(createAppServerTransport(
+        { kind: "local-app-server", socketPath: targetSocket },
+        { codexBinary: runtime.environment.CODEX_BINARY, connectTimeoutMs: 3_000 },
+      ), 5_000), { sandbox: "read-only" });
+      const cancel = () => { void client.close().catch(() => undefined); };
+      signal.addEventListener("abort", cancel, { once: true });
+      try {
+        await client.connect();
+        signal.throwIfAborted();
+        if (await client.countActiveLoadedThreads() > 0) return { applied: false, reason: "active" };
+      } finally {
+        signal.removeEventListener("abort", cancel);
+        await client.close();
+      }
+    } else if (await appServerSocketAcceptsWebSocket(targetSocket)) {
+      throw new Error("拒绝重启未受监管的 App Server");
+    }
+    // Lease acquisition can race the asynchronous authoritative read. The owner
+    // registers leases before queueing them, so this guard sees pending TUI clients too.
+    if (!canApply()) return { applied: false, reason: "leased" };
+    signal.throwIfAborted();
+    const snapshot = prepareProviderSettings(provider);
+    if (running || settingsRecoveryRequired.has(provider)) {
+      if (running) {
+        settingsRecoveryRequired.add(provider);
+        await releaseInstance(provider);
+        supervisorOwner.markReleased(provider);
+      }
+      // Once released, restore the shared instance even if the requester disconnected.
+      await ensureInstance(provider);
+      settingsRecoveryRequired.delete(provider);
+      supervisorOwner.markRunning(provider);
+    }
+    // A cancelled caller receives no confirmation, but a completed restoration
+    // still establishes the host's actual baseline for the next Gateway.
+    confirmProviderSettings(provider, snapshot);
+    return { applied: true, changed: true };
   };
   const attachDesktopApp = async ({ appPath, pipePath, toolsEnabled }) => {
     if (
@@ -653,6 +764,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       {
         ensureProvider: ensureInstance,
         releaseProvider: releaseInstance,
+        applyProviderSettings,
+        providerSettingsSnapshot: provider => settingsSnapshots.get(provider),
         attachDesktopApp,
         detachDesktopApp,
       },
@@ -669,7 +782,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         + (error instanceof Error ? error.message : String(error)),
       );
     }
-    await ensureInstance(primaryProvider, { waitForReady: false });
+    await ensureInstance(primaryProvider);
     supervisorOwner.markRunning(primaryProvider);
     if (validatedCodex.desktop_app?.enabled === true && process.platform === "win32") {
       await ensureInstance(primaryProvider);

@@ -85,6 +85,7 @@ export {
   type AgentRolePort,
   type ConversationInput,
   type ConversationIdleReleaseResult,
+  type ConversationIdleReleaseCondition,
   type ConversationAccountMetricsUseCases,
   type ConversationExtensionUseCases,
   type ConversationQueryPort,
@@ -168,6 +169,8 @@ export {
 } from "./permission-port.js";
 export {
   estimateWeeklyLimit,
+  type RequestOutcomeCounts,
+  type RequestInterruptionSummary,
   type RequestMetricsAggregate,
   type RequestMetricsAggregateReport,
   type RequestMetricsAggregateView,

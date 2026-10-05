@@ -55,6 +55,7 @@ export interface ScheduledTaskApplicationPort {
   isActorAuthorized(target: ConversationTarget, actorId: string): boolean;
   creationContext(target: ConversationTarget): ScheduledTaskCreationContext;
   runTaskNow(taskId: string): Promise<ScheduledRun>;
+  retryRun(runId: string): Promise<ScheduledRun>;
   /** Synchronous fail-closed check used when a Provider is explicitly requested. */
   isProviderConfigured(provider: string): boolean;
 }
@@ -404,13 +405,13 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     selector: string,
   ): Promise<ScheduledRun> {
     const run = this.resolveRun(target, actorId, selector);
-    const task = this.requireOwnedTask(target, actorId, run.taskId);
+    this.requireOwnedTask(target, actorId, run.taskId);
     if (run.state !== "uncertain") {
       throw scheduledError("scheduled-task.state.invalid", "只有 uncertain Run 可以显式解除后重试");
     }
-    this.mutateTask(() => this.store.resolveUncertain(run.runId, "failed", this.now()));
+    const retried = await this.mutateTaskAsync(() => this.application.retryRun(run.runId));
     this.invalidateTarget(target, actorId);
-    return await this.mutateTaskAsync(async () => await this.application.runTaskNow(task.taskId));
+    return retried;
   }
 
   previewDelete(

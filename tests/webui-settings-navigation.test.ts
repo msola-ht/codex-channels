@@ -103,9 +103,11 @@ it("keeps settings fields and maintenance actions in their owning pages", () => 
   expect(result.channelEnglish).toContain('Channel');
   expect(result.channelEnglish).toContain('Enabled');
   expect(result.channelEnglish).not.toContain('已启用');
-  expect(result.cliError).toContain('summary unavailable');
-  expect(result.cliReady).toContain('Gateway command');
-  expect(result.cliReady).not.toContain('Channel command');
+  expect(result.cliError).toContain('无法完成请求，请重试。');
+  expect(result.cliError).not.toContain('summary unavailable');
+  expect(result.cliReady).toContain('日常设置');
+  expect(result.cliReady).toContain('codexc config');
+  expect(result.cliReady).not.toContain('codexc channels');
   const ownership = {
     general: ["空闲自动解除", "计划任务"], permissions: ["默认 Workspace", "审批超时", "Sandbox"],
     network: ["Plugin API", "官方 TUI 请求身份"], data: ["记录调用详情", "调用记录保留天数", "日志等级"],

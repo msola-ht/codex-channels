@@ -4,7 +4,8 @@ import { settledTaskIds } from "@/lib/api-polling"
 import { useManagementConfirmedMutation } from "@/hooks/use-management-confirmed-mutation"
 import { useQueueEvents, useQueueSnapshot } from "@/hooks/use-queue-events"
 import { useTranslation } from "@/hooks/use-translation"
-import { cancelManagementTask, fetchManagementTasks, previewManagementTask, startManagementTask, watchManagementTasks } from "@/lib/api"
+import { ApiClientError, cancelManagementTask, fetchManagementTasks, previewManagementTask, startManagementTask, watchManagementTasks } from "@/lib/api"
+import { translateApiErrorCode } from "@/lib/i18n/translate"
 import type { ManagementTaskController } from "@/lib/settings-management"
 import type { ManagementTaskInput } from "@/lib/types"
 
@@ -36,7 +37,7 @@ export function useManagementTasks(): ManagementTaskController {
       refetch()
       return task
     } catch (error) {
-      if (!controller.signal.aborted) setCancelError(error instanceof Error ? error.message : String(error))
+      if (!controller.signal.aborted) setCancelError(error instanceof ApiClientError ? error.code ?? "unknown" : "unknown")
       return null
     } finally {
       cancellations.current.delete(id)
@@ -47,7 +48,7 @@ export function useManagementTasks(): ManagementTaskController {
     notificationError: notificationStatus === "reconnecting" || notificationStatus === "stale" ? t("common.taskNotificationsUnavailable") : null,
     run: (input) => { setCancelError(null); return mutation.mutate(input) },
     confirm: mutation.confirm, cancelPending: mutation.cancel, cancel,
-    actionError: cancelError ?? mutation.actionError,
+    actionError: cancelError === null ? mutation.actionError : translateApiErrorCode(t, cancelError),
   }
 }
 

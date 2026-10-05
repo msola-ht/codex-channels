@@ -130,6 +130,7 @@ describe("Codex release upgrade preview", () => {
         "tests/real-app-server-supervised-tools.test.ts",
         "tests/real-app-server-responses-provider.test.ts",
         "tests/real-app-server-chat-provider.test.ts",
+        "tests/real-app-server-reset-credits.test.ts",
       ]),
     });
   });

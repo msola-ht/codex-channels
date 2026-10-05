@@ -13,6 +13,8 @@ export interface RelayQueueEntry {
   callerId: string;
   provider: string | null;
   model: string | null;
+  /** 已验证入站请求的等级，不推断默认值或后续 Key 策略效果。 */
+  reasoningEffort: string | null;
   protocol: "chat" | "responses";
   phase: "input" | "queue" | "prepare" | "upstream" | "delivery";
   elapsedMs: number;
@@ -124,6 +126,7 @@ export class ModelRelayServer {
     let userAgent: string | null = null;
     let errorCode: string | undefined;
     let requestModel = "";
+    let reasoningEffort: string | null = null;
     let provider: string | null = null;
     let bodyBytes = 0;
     let stream = false;
@@ -147,7 +150,7 @@ export class ModelRelayServer {
       if (!models) {
         const caller = lease.caller;
         this.requests.set(relayRequestId, () => ({ requestId: relayRequestId, callerId: caller.callerId,
-          provider, model: requestModel || null, protocol, phase,
+          provider, model: requestModel || null, reasoningEffort, protocol, phase,
           elapsedMs: Math.max(0, Math.floor(performance.now() - receivedAt)) }));
         this.options.queueChanged?.();
       }
@@ -170,6 +173,12 @@ export class ModelRelayServer {
           bodyBytes = Buffer.byteLength(text);
           const routed = { ...(inbound as Record<string, unknown>), model: route.model };
           body = protocol === "responses" ? validateDirectResponsesRequest(provider, routed) : validateDirectChatRequest(routed);
+          const reasoning = body.reasoning;
+          const effort = protocol === "chat" && body.reasoning_effort !== undefined ? body.reasoning_effort
+            : reasoning !== null && typeof reasoning === "object" && !Array.isArray(reasoning)
+              ? (reasoning as Record<string, unknown>).effort : undefined;
+          if (typeof effort === "string" && effort.length > 0 && effort.length <= 64
+            && ![...effort].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) reasoningEffort = effort;
           stream = body.stream;
         } finally { clearTimeout(uploadTimer); }
 

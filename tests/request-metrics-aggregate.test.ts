@@ -11,6 +11,69 @@ const directories: string[] = [];
 afterEach(() => { vi.useRealTimers(); for (const directory of directories.splice(0)) rmSync(directory, { force: true, recursive: true }); });
 
 describe("request metrics aggregate reports", () => {
+  it("sorts failure columns by actual failures before pagination, excluding interruptions and incomplete requests", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "request-metrics.sqlite3"));
+    const now = Date.now();
+    const query = { startAtMs: now - 1, endAtMs: now + 1, limit: 1, sortKey: "failures", sortDirection: "desc" } as const;
+    try {
+      store.recordBatch([
+        { ...sample(), recordedAtMs: now, turnId: "a-failed", status: "failed" },
+        ...[1, 2, 3].map(() => ({ ...sample(), recordedAtMs: now, turnId: "z-interrupted", status: "failed", errorType: "client_disconnected" }) as const),
+        ...[1, 2, 3].map(() => ({ ...sample(), recordedAtMs: now, turnId: "y-incomplete", status: "unknown" }) as const),
+        { ...sample(), recordedAtMs: now, threadId: "other", turnId: "other-turn", status: "failed", errorType: "client_disconnected" },
+      ]);
+      expect(store.threadTurnSummaries("thread-1", query).turns[0]?.turnId).toBe("a-failed");
+      expect(store.threadList(query).threads[0]?.threadId).toBe("thread-1");
+      expect(store.threadList({ ...query, sortDirection: "asc" }).threads[0]?.threadId).toBe("other");
+    } finally { store.close(); }
+  });
+
+  it("separates interrupted requests in every aggregate while preserving raw status and unsuccessful totals", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "request-metrics.sqlite3"));
+    const now = Date.now();
+    const scope = { startAtMs: now - 1, endAtMs: now + 1, limit: 20 };
+    try {
+      store.recordBatch([
+        { ...sample(), recordedAtMs: now },
+        { ...sample(), recordedAtMs: now, status: "failed", errorType: "client_disconnected", inputTokens: null, outputTokens: null },
+        { ...sample(), recordedAtMs: now, status: "incomplete", errorType: "client_disconnected", operation: "compact", inputTokens: 40, outputTokens: null },
+        { ...sample(), recordedAtMs: now, status: "failed", errorType: "upstream_error" },
+        { ...sample(), recordedAtMs: now, status: "unknown" },
+        { ...sample(), recordedAtMs: now, status: "incomplete" },
+        { ...sample(), recordedAtMs: now, responseFormat: "unknown", model: null, inputTokens: null, outputTokens: null, totalTokens: null },
+        { ...sample(), recordedAtMs: now, errorType: "client_disconnected" },
+      ]);
+      const requestOutcomes = { completed: 2, interrupted: 2, failed: 1, incomplete: 3 };
+      const expected = { requestCount: 8, unsuccessfulRequestCount: 6, requestOutcomes };
+      for (const dimension of ["global", "provider", "model"] as const) {
+        const report = store.aggregate({ ...scope, dimension });
+        expect(report.aggregate).toMatchObject(expected);
+        if (dimension !== "global") {
+          expect(report.groups.reduce((sum, group) => sum + group.aggregate.requestOutcomes.interrupted, 0)).toBe(2);
+        }
+      }
+      expect(store.page(scope).aggregate).toMatchObject(expected);
+      expect(store.errors(scope)).toMatchObject(expected);
+      expect(store.threadSummary("thread-1").threadAggregate).toMatchObject(expected);
+      expect(store.threadTurnSummary("thread-1", "turn-1")).toMatchObject(expected);
+      const threads = store.threadList(scope);
+      expect(threads.aggregate).toMatchObject(expected);
+      expect(threads.treeAggregate).toMatchObject(expected);
+      expect(threads.threads[0]?.requestOutcomes).toEqual(requestOutcomes);
+      const turns = store.threadTurnSummaries("thread-1", scope);
+      expect(turns.aggregate).toMatchObject(expected);
+      expect(turns.turns[0]?.requestOutcomes).toEqual(requestOutcomes);
+      expect(turns.turns[0]?.compact?.requestOutcomes).toEqual({ completed: 0, interrupted: 1, failed: 0, incomplete: 0 });
+      store.recordSubagentThread({ agentThreadId: "thread-1", parentThreadId: "parent", parentTurnId: "parent-turn", agentPath: "/parent/child" });
+      expect(store.threadSubagents("parent", { limit: 10 }).subagents[0]?.requestOutcomes).toEqual(requestOutcomes);
+      expect(store.subagents({ limit: 10 }).subagents[0]?.requestOutcomes).toEqual(requestOutcomes);
+      const rawInterrupted = store.page({ ...scope, status: "failed" }).records.find((row) => row.errorType === "client_disconnected");
+      expect(rawInterrupted?.status).toBe("failed");
+      expect(rawInterrupted?.inputTokens).toBeNull();
+      expect(store.errors({ ...scope, provider: "missing" }).requestOutcomes).toEqual({ completed: 0, interrupted: 0, failed: 0, incomplete: 0 });
+    } finally { store.close(); }
+  });
+
   it("excludes missing cache samples from both sides of cache usage without losing total usage", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "request-metrics.sqlite3"));
     const now = Date.now();

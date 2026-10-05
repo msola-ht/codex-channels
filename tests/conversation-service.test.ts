@@ -188,6 +188,7 @@ describe("ConversationService model selection", () => {
       startAtMs: 1,
       endAtMs: 2,
       requestCount: 3,
+      requestOutcomes: { completed: 2, interrupted: 0, failed: 1, incomplete: 0 },
       unsuccessfulRequestCount: 1,
       groups: [],
       totalGroupCount: 0,

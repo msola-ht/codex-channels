@@ -375,7 +375,7 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 平台 SDK 的 Mock 测试只验证 Surface 边界；Application、Core、Approval 和 Routing 继续使用各自
 现有测试。条件允许时增加平台测试租户或沙箱集成测试，但不得依赖真实模型调用完成常规提交门禁。
 
-开发阶段运行受影响的定向测试与 `npm run docs:check`；普通提交由 pre-commit 执行一次完整 `verify:commit`，不提前重复。
+开发阶段运行受影响的定向测试与 `npm run docs:check`；普通提交由 pre-commit 执行一次按范围选择的 `verify:commit`，PR CI 使用 `verify:ci` 完整回归，不提前重复。
 
 并同步更新根 README 文档索引、`src/README.md`、`src/surfaces/README.md`、新渠道目录 README、
 测试索引、配置示例与公开 Setup/Doctor 说明。

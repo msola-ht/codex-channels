@@ -10,7 +10,7 @@
 - `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前复核投递存储可用性和容量（不因单条失败禁止执行），统一覆盖普通输入、扩展调用、Review 和计划任务；保留停止、查询与 Queue 删除能力，不修改协议字段。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，避免输出积压导致旧问题重新登记；拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
 - `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限；异步预检返回后及 Thread 创建后再次复核当前授权、取消、Workspace 与投递准入，撤权时释放新建后台绑定而不启动 Turn。临时容量拒绝不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
-- `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
+- `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态；确认离线终态后通过组合层向原 Conversation 发布恢复通知，再释放后台绑定。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
 - `scheduled-task-server-request.ts`：为已关联的计划任务 Thread 返回五类 Server Request 的官方安全拒绝形状；普通命令和文件审批返回 `decline`，已有终端输入 `writeStdin` 返回 `cancel` 中止本轮，其他方法明确失败；非计划任务请求交给既有审批处理器。只在 `scheduled_tasks.enabled=true` 时由组合根安装。
 - `scheduled-task-tool-request.ts`：校验前台 `item/tool/call` 的 Thread 绑定、唯一授权 Actor 和
   `schedule_task` 工具名，把结果复用现有计划任务渲染格式返回给 Agent，并把确认预览交给当前
@@ -138,9 +138,12 @@
   检查；Gateway 关闭时停止新的检查，并在有界时间内等待已开始的关闭完成。
 - `conversation-idle-releaser.ts`：按 `conversation.idle_release_minutes` 定期扫描前台 Thread
   绑定；输入或输出刷新最近活动时间，超过阈值且 App Server 确认为空闲后由
-  `ConversationService.releaseIdle` 取消订阅并解绑，成功后通过共享结构化事件只通知一次
+  `ConversationService.releaseIdle` 取得会话锁，持续复核扫描时的 Thread、活动时间与取消代次，取消订阅后
+  只释放同一有效绑定；新活动使扫描失效时恢复原订阅，失败交给既有绑定恢复任务。
+  成功后通过共享结构化事件只通知一次
   “自动解除占用”，并携带当前 Thread ID 供 `/r` 直接恢复。
-  正在恢复或 Provider 断线的绑定会跳过本轮，强制新建标记也会跳过扫描；关闭时停止定时器并限时等待已经在途的
+  正在恢复或 Provider 断线的绑定会跳过本轮；断线只取消对应 Provider 的候选，其余候选仍可完成扫描和订阅补偿。
+  补偿恢复暂时失败后继续使用既有恢复协调器的退避调度。强制新建标记也会跳过扫描；关闭时停止定时器并限时等待已经在途的
   扫描退出，避免释放 RPC 卡住 Gateway 关闭。
 - `turn-error-metrics.ts`：把同步 RPC 与异步 `turn.error` 通知的 Turn 级失败统一转换为脱敏的
   模型请求失败样本，保存脱敏、限长后的错误消息与分类；结构化 `misalignmentPolicyViolation` 使用独立分类并
@@ -152,17 +155,20 @@
   协议标记为就绪，供服务管理入口区分进程占位和可用 Gateway；账户刷新私有 IPC 与应用一同启停。
   该 IPC 根据受控账户查询原因生成固定文案，不透传内部异常 message；按 Provider 记录阶段、分类、
   耗时和受控状态码，主动取消不记录为上游失败；快照等未知本地异常按内部故障处理。
-- `provider-settings-watcher.ts`：监听受管第三方 Provider 的模型目录、Profile 与管理标记变化，
-  校验通过后防抖等待该 Provider 无活动 Turn，再自动触发 App Server 重启；校验失败保留旧基线并
-  等待修复；重启后刷新 Gateway 模型目录，两步均成功才报告生效，任一步失败按冷却时间重试；
-  等待、重启中、生效和失败状态通过共享配置变更通知投递给
-  所有渠道，停止 Gateway 时一并关闭。
+- `provider-settings-watcher.ts`：监听当前 Gateway 已启用的受管 Provider 模型目录、Profile 与管理标记；
+  校验后逐 Provider 调用监管设置应用端口，原生 TUI/Desktop 租约或权威活动 Thread 保留待应用状态。
+  组合根在同一 Provider RPC 准入入口排空请求并阻止新请求；监管重新派生启动材料并只更新目标实例，
+  连接与绑定恢复复用既有协调器；设置恢复期间再次意外断线必须重新握手，主动释放或关闭会取消设置等待者。
+  模型目录只刷新成功的 Provider：启动前先核对宿主已应用的指纹与默认设置，运行实例读取权威目录，
+  未运行实例仅使用匹配该指纹的已捕获目录；不会为目录读取唤醒实例或提前发布其他 Provider 的待应用设置。
+  模型目录刷新成功且文件代次仍匹配后才确认生效，连续变化及失败
+  保留待应用项并按冷却时间重试；每 Provider 每文件代次最多失败 12 次，新的文件变化或 Gateway
+  重建重置预算。启动静默核对宿主的已应用指纹，相同指纹不重启实例，避免重建丢失待生效变化。
+  停止时取消应用、最多等待五秒，迟到结果不刷新模型或发状态通知。
 - `network-proxy-watcher.ts`：按字段保留 Codex `.env` 与标准环境代理优先级；已有任一代理地址时跳过系统查询，
   否则监听系统发现参与解析后的有效代理变化；单独配置 `NO_PROXY` 不禁用观察。仅记录需手动刷新 Gateway 和 App Server 的提示，区分
   后台服务与前台入口，不自动重启共享进程。系统查询异步执行且不重叠，失败保留上次结果并告警；
   停止 Gateway 时取消后续检查及在途查询，并等待查询结束。
-- `service-restart-runner.ts`：统一执行 App Server 服务重启的异步子进程封装，Gateway 自动重启
-  与未来 CLI 单 Provider 重启复用同一入口，输出脱敏后写入日志。
 - `completion-output-enricher.ts`：在实际投递前为 `turn.completed` 补全当前授权 Workspace 的 Git 分支、
   本轮统计、显式父 Turn 任务合计与递归包含子代理后代的 Session 累计统计；通过注入端口等待指标写入水位。
   统计读取顺序共享 250 ms 预算，耗尽后不启动后续查询，已启动查询的迟到失败仍被捕获；失败时保留 Core
@@ -185,7 +191,8 @@
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据
   发送，成功归档到 `done/`、失败归档到 `failed/` 并保留原因；Unix 使用 `0700/0600`，Windows
   使用当前 SID 私有 ACL，并在启动时收紧既有受管文件；只接受
-  pending 目录内的绝对图片路径。
+  pending 目录内的绝对图片路径。每次轮询只处理一批快照；失败归档未完成时，当前进程按轮询间隔
+  仅重试归档，不再次发送图片，停止时不继续处理下一条。
 
 业务状态和平台逻辑应留在对应模块，只有具体实现选择、交互端口注册与生命周期协调放在这里。
 Provider 账户能力同样通过编译期显式注册：OpenAI 复用 Codex Client，第三方实现 Application

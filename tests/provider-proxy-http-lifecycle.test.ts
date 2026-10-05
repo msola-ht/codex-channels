@@ -166,10 +166,10 @@ it("does not wait for quota refresh before forwarding a completed response", asy
     });
 
     let resolveQuota: (
-      windows: readonly { windowId: string; resetsAt: number | null }[] | null,
+      snapshot: { windows: readonly { windowId: string; resetsAt: number | null }[]; observedAtMs: number } | null,
     ) => void = () => undefined;
     const quota = new Promise<
-      readonly { windowId: string; resetsAt: number | null }[] | null
+      { windows: readonly { windowId: string; resetsAt: number | null }[]; observedAtMs: number } | null
     >((resolve) => {
       resolveQuota = resolve;
     });

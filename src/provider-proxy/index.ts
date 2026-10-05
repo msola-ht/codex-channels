@@ -2,6 +2,7 @@ export {
   ProviderProxy,
   type ProviderProxyMetrics,
   type ProviderWeeklyQuotaSnapshot,
+  type ProviderQuotaWindowsSnapshot,
   type ProviderProxyOptions,
 } from "./proxy.js";
 export {

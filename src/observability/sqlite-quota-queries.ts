@@ -25,13 +25,13 @@ export class SqliteQuotaQueries {
     validateWeeklyQuotaEstimateQuery(query);
     const startAtMs = query.resetsAt * 1_000 - weeklyWindowMs;
     const rows = this.reader.iterateRows(`
-      SELECT status, input_tokens, output_tokens, recorded_at_ms,
+      SELECT status, input_tokens, output_tokens, recorded_at_ms, quota_observed_at_ms,
         weekly_quota_limit_id, weekly_resets_at, weekly_used_percent_millionths
       FROM model_request_metrics
       WHERE provider = ?
         AND recorded_at_ms >= ?
         AND recorded_at_ms <= ?
-      ORDER BY id ASC
+      ORDER BY COALESCE(quota_observed_at_ms, recorded_at_ms) ASC, id ASC
     `, query.provider, startAtMs, query.nowMs) as unknown as Iterable<WeeklyQuotaRow>;
     return estimateWeeklyQuotaRows(rows, query);
   }
@@ -48,27 +48,28 @@ export class SqliteQuotaQueries {
     ) throw new Error("最新周额度查询无效");
     const row = this.reader.prepare(`
       SELECT weekly_quota_limit_id, weekly_used_percent_millionths,
-        weekly_resets_at, weekly_quota_plan_type, recorded_at_ms
+        weekly_resets_at, weekly_quota_plan_type,
+        COALESCE(quota_observed_at_ms, recorded_at_ms) AS observed_at_ms
       FROM model_request_metrics
       WHERE provider = ?
         AND weekly_quota_limit_id IS NOT NULL
         AND weekly_resets_at * 1000 > ?
         AND recorded_at_ms <= ?
-      ORDER BY id DESC
+      ORDER BY COALESCE(quota_observed_at_ms, recorded_at_ms) DESC, id DESC
       LIMIT 1
     `).get(provider, nowMs, nowMs) as {
       weekly_quota_limit_id: string;
       weekly_used_percent_millionths: number;
       weekly_resets_at: number;
       weekly_quota_plan_type: string | null;
-      recorded_at_ms: number;
+      observed_at_ms: number;
     } | undefined;
     return row
       ? {
           limitId: row.weekly_quota_limit_id,
           usedPercentMillionths: row.weekly_used_percent_millionths,
           resetsAt: row.weekly_resets_at,
-          observedAtMs: row.recorded_at_ms,
+          observedAtMs: row.observed_at_ms,
           planType: row.weekly_quota_plan_type,
         }
       : null;
@@ -82,11 +83,12 @@ export class SqliteQuotaQueries {
     const rows = this.reader.iterateRows(`
       SELECT * FROM model_request_metrics
       WHERE recorded_at_ms >= ? AND recorded_at_ms < ?
-      ORDER BY recorded_at_ms ASC, id ASC
+      ORDER BY COALESCE(quota_observed_at_ms, recorded_at_ms) ASC, id ASC
     `, query.startAtMs, query.endAtMs) as unknown as Iterable<MetricRow>;
     const groups = new Map<string, StoredQuotaPeriod>();
     for (const row of rows) {
       const metric = toStoredMetric(row);
+      const observedAtMs = metric.quotaObservedAtMs ?? metric.recordedAtMs;
       const snapshots: Array<{
         windowId: string;
         resetsAt: number | null;
@@ -132,8 +134,8 @@ export class SqliteQuotaQueries {
             resetsAt: snapshot.resetsAt,
             periodStartAtMs: quotaPeriodStartAtMs(snapshot.windowId, snapshot.resetsAt),
             periodEndAtMs: snapshot.resetsAt * 1_000,
-            firstObservedAtMs: metric.recordedAtMs,
-            lastObservedAtMs: metric.recordedAtMs,
+            firstObservedAtMs: observedAtMs,
+            lastObservedAtMs: observedAtMs,
             snapshotCount: 1,
             requestCount: 1,
             unsuccessfulRequestCount: 1 - successful,
@@ -144,7 +146,7 @@ export class SqliteQuotaQueries {
             planType: snapshot.planType,
           });
         } else {
-          existing.lastObservedAtMs = metric.recordedAtMs;
+          existing.lastObservedAtMs = observedAtMs;
           existing.snapshotCount += 1;
           existing.requestCount += 1;
           existing.unsuccessfulRequestCount += 1 - successful;
@@ -214,7 +216,7 @@ function validateWeeklyQuotaEstimateQuery(query: WeeklyQuotaEstimateQuery): void
 }
 
 type WeeklyQuotaRow = Pick<MetricRow,
-  "status" | "input_tokens" | "output_tokens" | "recorded_at_ms"
+  "status" | "input_tokens" | "output_tokens" | "recorded_at_ms" | "quota_observed_at_ms"
   | "weekly_quota_limit_id" | "weekly_resets_at" | "weekly_used_percent_millionths">;
 
 function estimateWeeklyQuotaRows(
@@ -222,6 +224,7 @@ function estimateWeeklyQuotaRows(
   query: WeeklyQuotaEstimateQuery,
 ): StoredWeeklyQuotaEstimate | null {
   let baseline: number | null = null;
+  let highestUsedPercentMillionths: number | null = null;
   let firstObservedAtMs: number | null = null;
   let lastObservedAtMs: number | null = null;
   let latestUsedPercentMillionths: number | null = null;
@@ -233,6 +236,8 @@ function estimateWeeklyQuotaRows(
 
   for (const row of rows) {
     addWeeklyIntervalRow(periodTotal, row);
+    const observedAtMs = row.quota_observed_at_ms ?? row.recorded_at_ms;
+    if (observedAtMs < query.resetsAt * 1_000 - weeklyWindowMs) continue;
     const matching = row.weekly_quota_limit_id === query.limitId
       && row.weekly_resets_at !== null
       && Math.abs(row.weekly_resets_at - query.resetsAt) <= quotaResetJitterSeconds
@@ -245,10 +250,13 @@ function estimateWeeklyQuotaRows(
     }
     if (baseline === null) {
       if (!matching) continue;
-      baseline = row.weekly_used_percent_millionths!;
-      latestUsedPercentMillionths = baseline;
-      firstObservedAtMs ??= row.recorded_at_ms;
-      lastObservedAtMs = row.recorded_at_ms;
+      const current = row.weekly_used_percent_millionths!;
+      // 其他周期的快照会断开采样，但不能让目标周期已经计过的增长再次计数。
+      baseline = Math.max(highestUsedPercentMillionths ?? current, current);
+      highestUsedPercentMillionths = baseline;
+      latestUsedPercentMillionths = current;
+      firstObservedAtMs ??= observedAtMs;
+      lastObservedAtMs = observedAtMs;
       continue;
     }
 
@@ -256,24 +264,20 @@ function estimateWeeklyQuotaRows(
     if (!matching) continue;
     const current = row.weekly_used_percent_millionths!;
     latestUsedPercentMillionths = current;
-    lastObservedAtMs = row.recorded_at_ms;
+    lastObservedAtMs = observedAtMs;
     const delta = current - baseline;
-    if (delta < 0) {
-      baseline = current;
-      pending = emptyWeeklyInterval();
-      continue;
-    }
-    if (delta === 0) continue;
+    // 请求完成/入库顺序不保证额度快照单调。同周期回退不证明发生重置；
+    // 保持高水位，回退期间的请求只在超越该水位时进入闭合样本。
+    if (delta <= 0) continue;
     observedDeltaPercentMillionths += delta;
     intervalCount += 1;
     mergeWeeklyInterval(total, pending);
     baseline = current;
+    highestUsedPercentMillionths = current;
     pending = emptyWeeklyInterval();
   }
 
-  // 周期内最后一个额度快照之后通常仍有请求；它们没有下一个快照
-  // 可以闭合区间，但仍属于本周期样本，必须计入总量。
-  mergeWeeklyInterval(total, pending);
+  // 未闭合的尾部请求只进入 periodTotal；没有对应的额度增长，不能用于每 1% 估算。
 
   if (
     observedDeltaPercentMillionths <= 0

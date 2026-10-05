@@ -1,15 +1,15 @@
 # Git Hooks
 
 本目录保存仓库共享的 Git hooks。`npm ci`、`npm install` 或 `npm run hooks:install`
-会把本仓库的 `core.hooksPath` 设置为 `.githooks`，不会修改用户的全局 Git 配置。
+在未禁用生命周期脚本时会把本仓库的 `core.hooksPath` 设置为 `.githooks`，不会修改用户的全局 Git 配置。
 
-- `pre-commit`：先清空 git 提交过程注入的临时索引与仓库环境变量，再执行
-  `npm run verify:commit`；任一类型、Lint、文档索引、测试、Shell、
-  npm tarball 安装或差异检查失败都会阻止提交。完整测试成功生成的 Gateway 构建产物会由随后
-  的 tarball 冒烟复用，不重复执行相同构建；干净源码安装只在显式打包验证、正式发布和升级验证
-  中执行。输出同时记录每阶段与全部检查耗时，便于定位提交门禁性能回退。
+- `pre-commit`：先从实际提交索引取得改动范围，再隔离 Git 注入的环境变量，执行
+  `npm run verify:commit`。按范围选择必要静态检查和受影响测试；选中的检查失败即阻止提交。
+  安装和真实 App Server 专项仅在相关范围变化时执行，PR 的完整回归使用 `npm run verify:ci`。
+  检查构建产物的用例使用当前构建；完整类型检查通过后可用 `--noCheck` 输出产物。
+  干净源码安装保留在显式打包验证、正式发布和升级验证中。日志记录选中范围和检查耗时。
 
-普通提交由 hook 执行一次完整检查，不在提交前手动重复。修改 CI/门禁、用户明确要求或独立诊断失败时，可手动运行：
+普通提交由 hook 执行一次按范围选择的检查，不在提交前手动重复。修改 CI/门禁、用户明确要求或独立诊断失败时，可手动运行：
 
 ```bash
 npm run verify:commit

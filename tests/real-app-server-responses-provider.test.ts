@@ -7,12 +7,14 @@ import { stringify } from "smol-toml";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 
 import { ModelSelectionService } from "../src/application/model-selection-service.js";
 import type { SessionRouter } from "../src/session-routing/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
+import { ProviderProxy, type ProviderProxyMetrics } from "../src/provider-proxy/index.js";
 import type { ModelListResponse, ThreadStartResponse, TurnStartResponse, ConfigReadResponse } from "../src/codex-protocol/index.js";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createResponsesModelCatalog, writeResponsesModelCatalog, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
@@ -24,6 +26,76 @@ import { waitFor } from "./support/real-app-server-helpers.js";
 
 const contract = process.env.RUN_CODEX_CONTRACT === "1" ? it : it.skip;
 describe("real custom Responses provider", () => {
+  contract("completes a real WebSocket turn when upstream closes before metrics acknowledgement", async () => {
+    const root = mkdtempSync(join(tmpdir(), "responses-ws-contract-"));
+    const environment = { ...process.env, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };
+    let httpRequests = 0;
+    let modelRequests = 0;
+    let upstreamClosed = false;
+    const backend = createServer((request, response) => { httpRequests++; request.resume(); response.writeHead(501).end(); });
+    const sockets = new WebSocketServer({ server: backend });
+    sockets.on("connection", socket => {
+      socket.on("message", data => {
+        const body = JSON.parse(data.toString()) as { generate?: boolean };
+        const id = body.generate === false ? "warmup" : "fixture-response";
+        socket.send(JSON.stringify({ type: "response.created", response: { id } }));
+        if (body.generate === false) { socket.send(JSON.stringify(completedResponseEvent(id))); return; }
+        modelRequests++;
+        socket.once("close", () => { upstreamClosed = true; });
+        socket.send(JSON.stringify({ type: "response.output_item.done", item: {
+          type: "message", role: "assistant", id: "fixture-message", content: [{ type: "output_text", text: "WebSocket complete" }],
+        } }));
+        socket.send(JSON.stringify(completedResponseEvent(id)), () => socket.close());
+      });
+    });
+    const metrics: ProviderProxyMetrics[] = [];
+    let acknowledge: (() => void) | undefined;
+    let proxy: ProviderProxy | undefined;
+    let rpc: JsonRpcClient | undefined;
+    try {
+      await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
+      const address = backend.address();
+      if (!address || typeof address === "string") throw new Error("Missing fixture listener");
+      proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http",
+        onMetrics: metric => { metrics.push(metric); return new Promise<void>(resolve => { acknowledge = resolve; }); } });
+      await proxy.start();
+      writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), stringify({
+        model: "fixture-model", model_provider: "fixture", web_search: "disabled",
+        model_providers: { fixture: { name: "WebSocket fixture", base_url: `http://${proxy.address()}`,
+          wire_api: "responses", requires_openai_auth: false, supports_websockets: true, request_max_retries: 0, stream_max_retries: 0 } },
+      }));
+      rpc = new JsonRpcClient(new StdioTransport({ codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: root, environment }), 15000);
+      const turns: Array<{ id: string; status: string }> = [];
+      rpc.onNotification(notification => {
+        if (notification.method === "turn/completed") turns.push((notification.params as { turn: { id: string; status: string } }).turn);
+      });
+      rpc.setServerRequestHandler(async () => { throw new Error("Unexpected privileged request"); });
+      await rpc.connect();
+      const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: {
+        cwd: root, model: "fixture-model", modelProvider: "fixture", sandbox: "read-only", approvalPolicy: "never", ephemeral: true,
+      } });
+      const { turn } = await rpc.request<TurnStartResponse>({ method: "turn/start", params: {
+        threadId: thread.id, input: [{ type: "text", text: "Say hello", text_elements: [] }],
+      } });
+      await waitFor(() => metrics.length === 1 && upstreamClosed, 10000);
+      acknowledge?.();
+      await waitFor(() => turns.some(value => value.id === turn.id), 10000);
+      expect(turns).toContainEqual(expect.objectContaining({ id: turn.id, status: "completed" }));
+      expect(metrics).toEqual([expect.objectContaining({ transport: "websocket", status: "completed", threadId: thread.id, turnId: turn.id })]);
+      expect(modelRequests).toBe(1);
+      expect(httpRequests).toBe(0);
+    } finally {
+      acknowledge?.();
+      await rpc?.close();
+      await proxy?.close();
+      for (const socket of sockets.clients) socket.terminate();
+      await new Promise<void>(resolve => sockets.close(() => resolve()));
+      backend.closeAllConnections();
+      await new Promise<void>(resolve => backend.close(() => resolve()));
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  }, 30000);
+
   contract("imports the real bundled official catalog including current reasoning levels", async () => {
     const models=await loadResponsesModelTemplates("official");
     expect(models.length).toBeGreaterThan(0);

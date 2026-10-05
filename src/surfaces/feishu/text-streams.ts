@@ -192,11 +192,20 @@ export class FeishuTextStreams {
       delete state.timer;
     }
     state.flushGeneration += 1;
-    this.delivery.enqueue(
+    let released = false;
+    const settled = (): void => {
+      if (released) return;
+      released = true;
+      if (state.terminalOutcome === undefined) state.terminalOutcome = "failed";
+      if (this.streams.get(key) === state) this.streams.delete(key);
+    };
+    const accepted = this.delivery.enqueue(
       state.chatId,
       (signal) => this.flushStream(key, true, true, signal, state),
       true,
+      { settled },
     );
+    if (!accepted) settled();
     return true;
   }
 
@@ -227,6 +236,7 @@ export class FeishuTextStreams {
     threadId: string,
     turnId: string,
     footer: string,
+    onSettled: () => void,
   ): boolean {
     const matching = [...this.streams].filter(([, state]) =>
       state.chatId === chatId && state.threadId === threadId && state.turnId === turnId
@@ -234,7 +244,14 @@ export class FeishuTextStreams {
     const footerTarget = matching.findLast(([, state]) =>
       state.phase !== "commentary"
     );
+    let pending = matching.length;
     for (const [key, state] of matching) {
+      let released = false;
+      const settled = footerTarget === undefined ? undefined : (): void => {
+        if (released) return;
+        released = true;
+        if (--pending === 0) onSettled();
+      };
       if (footerTarget?.[0] === key) {
         state.completionFooter = footer;
       }
@@ -243,17 +260,19 @@ export class FeishuTextStreams {
         delete state.timer;
       }
       state.flushGeneration += 1;
-      this.delivery.enqueue(
+      const accepted = this.delivery.enqueue(
         state.chatId,
         async (signal) => {
-          await this.flushStream(key, true, true, signal, state);
+          if (state.terminalOutcome !== "failed") await this.flushStream(key, true, true, signal, state);
           if (footerTarget?.[0] === key && state.confirmedFooter !== footer) {
             await this.sendMarkdown(state.chatId, footer, maximumFeishuMessageChunks, undefined, undefined, signal);
             state.confirmedFooter = footer;
           }
         },
         true,
+        settled === undefined ? undefined : { settled },
       );
+      if (!accepted) settled?.();
     }
     if (footerTarget !== undefined) {
       return true;
@@ -263,7 +282,13 @@ export class FeishuTextStreams {
     if (!completed) {
       return false;
     }
-    this.delivery.enqueue(
+    let released = false;
+    const settled = (): void => {
+      if (released) return;
+      released = true;
+      onSettled();
+    };
+    const accepted = this.delivery.enqueue(
       chatId,
       async (signal) => {
         if (this.finishedStreams.get(key) !== completed) {
@@ -286,7 +311,9 @@ export class FeishuTextStreams {
         }
       },
       true,
+      { settled },
     );
+    if (!accepted) settled();
     return true;
   }
 
@@ -321,7 +348,11 @@ export class FeishuTextStreams {
       await this.flushStreamState(key, state, terminal, fallbackPost, signal);
       if (terminal) state.terminalOutcome = "confirmed";
     } catch (error) {
-      if (terminal) state.terminalOutcome = "failed";
+      if (terminal) {
+        state.terminalOutcome = "failed";
+        // A retained failed result cannot own a later Turn's completion feedback.
+        if (this.streams.get(key) === state) this.streams.delete(key);
+      }
       throw error;
     }
   }

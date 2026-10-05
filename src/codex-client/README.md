@@ -142,6 +142,8 @@
   关闭所有受管 Client 并拒绝后续连接；晚到的结果不能重新登记连接，不终止独立 App Server。
   并发整体关闭共用清理任务，清理失败可再次关闭重试。
   单 Provider 关闭也取消该侧在途建连，新的请求等待关闭结束后再建立连接；其他 Provider 不受影响。
+  `connectProvider` 在定向设置应用后的主动关闭场景复用按实例合并的握手，与普通请求共同建立连接，
+  不重置已经建立的新连接；意外断线仍由 `reconnectProvider` 恢复。
   第三方 Provider 的账户通知不会进入 OpenAI 账户状态；
   无法关联 Thread 的 MCP 启动状态与 warning 全局通知携带 Provider 来源，只发送到对应 Provider
   会话；无法关联 Thread 的 OAuth 完成通知不进入渠道。

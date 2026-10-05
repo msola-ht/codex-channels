@@ -83,6 +83,7 @@ export function printMetricsReport(result, format) {
       ["lastOccurredAtMs", (row) => row.lastOccurredAtMs],
       ["requestCount", (row) => row.requestCount],
       ["unsuccessfulRequestCount", (row) => row.unsuccessfulRequestCount],
+      ...outcomeCsvColumns(),
       ["inputTokens", (row) => row.inputTokens],
       ["cachedInputTokens", (row) => row.cachedInputTokens],
       ["outputTokens", (row) => row.outputTokens],
@@ -115,6 +116,7 @@ export function printMetricsReport(result, format) {
         group: "global",
         requestCount: result.errors.requestCount,
         unsuccessfulRequestCount: result.errors.unsuccessfulRequestCount,
+        requestOutcomes: result.errors.requestOutcomes,
       },
       ...result.errors.groups.map((group) => ({
         type: "error",
@@ -155,7 +157,7 @@ export function printMetricsReport(result, format) {
     return;
   }
   console.log(`- 模型请求：${formatRequestCount(aggregate.requestCount)}`);
-  console.log(`- 异常或未完整观测：${formatRequestCount(aggregate.unsuccessfulRequestCount)}`);
+  console.log(`- ${formatRequestOutcomes(aggregate.requestOutcomes)}`);
   console.log(`- 输入 Token：${aggregate.inputTokens}`);
   console.log(`- 缓存：${aggregate.cachedInputTokens ?? "未知"}`);
   console.log(`- 输出 Token：${aggregate.outputTokens}`);
@@ -165,26 +167,26 @@ export function printMetricsReport(result, format) {
     console.log("");
     console.log("## 明细");
     console.log("");
-    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存 | 输出 | 上下文压缩 |");
+    console.log("| 提供商 | 模型 | 请求 | 请求结果 | 输入 | 缓存 | 输出 | 上下文压缩 |");
     console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |");
     for (const group of result.report.groups) {
       const value = group.aggregate;
-      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${value.requestCount} | ${value.unsuccessfulRequestCount} | ${value.inputTokens} | ${value.cachedInputTokens ?? "未知"} | ${value.outputTokens} | ${markdownCell(formatCompactSummary(value.compact) ?? "无")} |`);
+      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${value.requestCount} | ${formatRequestOutcomes(value.requestOutcomes)} | ${value.inputTokens} | ${value.cachedInputTokens ?? "未知"} | ${value.outputTokens} | ${markdownCell(formatCompactSummary(value.compact) ?? "无")} |`);
     }
     const hidden = result.report.totalGroupCount - result.report.groups.length;
     if (hidden > 0) console.log(`\n仅显示请求量最高的 ${result.report.groups.length} 组，另有 ${hidden} 组。`);
   }
   console.log("");
-  console.log("## 异常与未完整观测");
+  console.log("## 中断、失败与未完整观测");
   console.log("");
   if (result.errors.groups.length === 0) {
-    console.log("本时间范围没有异常或未完整观测请求。");
+    console.log("本时间范围没有中断、失败或未完整观测请求。");
     return;
   }
   console.log("| 提供商 | 模型 | 状态 | 类型 | HTTP | 次数 |");
   console.log("| --- | --- | --- | --- | ---: | ---: |");
   for (const group of result.errors.groups) {
-    console.log(`| ${markdownCell(group.provider)} | ${markdownCell(group.model ?? "未观测")} | ${group.status} | ${markdownCell(group.errorType ?? "未提供")} | ${group.httpStatus ?? ""} | ${group.requestCount} |`);
+    console.log(`| ${markdownCell(group.provider)} | ${markdownCell(group.model ?? "未观测")} | ${formatRequestStatus(group)} | ${markdownCell(group.errorType ?? "未提供")} | ${group.httpStatus ?? ""} | ${group.requestCount} |`);
   }
 }
 
@@ -225,10 +227,10 @@ export function printMetricsExport(result, format) {
           markdownCell(record.model ?? ""),
           markdownCell(record.operation),
           markdownCell(record.reasoningEffort ?? "模型默认"),
-          markdownCell(record.status ?? ""),
-          markdownCell(formatTokenCount(record.inputTokens ?? 0)),
-          markdownCell(formatTokenCount(record.cachedInputTokens ?? 0)),
-          markdownCell(formatTokenCount(record.outputTokens ?? 0)),
+          markdownCell(formatRequestStatus(record)),
+          markdownCell(record.inputTokens == null ? "未观测" : formatTokenCount(record.inputTokens)),
+          markdownCell(record.cachedInputTokens == null ? "未观测" : formatTokenCount(record.cachedInputTokens)),
+          markdownCell(record.outputTokens == null ? "未观测" : formatTokenCount(record.outputTokens)),
           markdownCell(record.firstTokenMs == null ? "—" : formatElapsedDuration(record.firstTokenMs)),
           markdownCell(record.totalDurationMs == null ? "—" : formatElapsedDuration(record.totalDurationMs)),
           markdownCell(record.requestModel ?? "未知"),
@@ -311,7 +313,7 @@ function flattenRecordedWeeklyQuota(record) {
     weeklyQuotaUsedPercent: usedPercent,
     weeklyQuotaRemainingPercent: Math.max(0, 100 - usedPercent),
     weeklyQuotaResetsAt: quota.resetsAt,
-    weeklyQuotaObservedAtMs: record.recordedAtMs,
+    weeklyQuotaObservedAtMs: record.quotaObservedAtMs ?? record.recordedAtMs,
   };
 }
 
@@ -337,6 +339,7 @@ function compactCsvColumns() {
     ["compactRequestCount", (row) => row.compact?.requestCount],
     ["compactUnsuccessfulRequestCount", (row) =>
       row.compact?.unsuccessfulRequestCount],
+    ...outcomeCsvColumns("compact", (row) => row.compact?.requestOutcomes),
     ["compactInputTokens", (row) => row.compact?.inputTokens],
     ["compactCachedInputTokens", (row) => row.compact?.cachedInputTokens],
     ["compactOutputTokens", (row) => row.compact?.outputTokens],
@@ -354,10 +357,35 @@ function formatCompactSummary(compact) {
   const model = compact.hasMixedModels
     ? "混合模型"
     : compact.model ?? "模型未知";
-  const failures = compact.unsuccessfulRequestCount > 0
-    ? `（异常 ${formatRequestCount(compact.unsuccessfulRequestCount)} 次）`
-    : "";
-  return `${formatRequestCount(compact.requestCount)} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token`;
+  return `${formatRequestCount(compact.requestCount)} 次 · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token · ${formatRequestOutcomes(compact.requestOutcomes)}`;
+}
+
+function formatRequestOutcomes(outcomes) {
+  return `完成：${formatRequestCount(outcomes.completed)} · 客户端中断：${formatRequestCount(outcomes.interrupted)} · 其他失败：${formatRequestCount(outcomes.failed)} · 未完整观测：${formatRequestCount(outcomes.incomplete)}`;
+}
+
+function formatRequestStatus(record) {
+  if (record.status === "completed") return "完成";
+  if (record.errorType === "client_disconnected") return "客户端中断";
+  if (record.status === "failed") return "其他失败";
+  return "未完整观测";
+}
+
+function outcomeCsvColumns(prefix = "", read = (row) => row.requestOutcomes) {
+  return ["completed", "interrupted", "failed", "incomplete"].map((key) => [
+    `${prefix}${prefix ? "Request" : "request"}Outcomes.${key}`,
+    (row) => read(row)?.[key],
+  ]);
+}
+
+function interruptionCsvColumns() {
+  return ["followedByCompletion", "noObservedCompletion", "usageUnobserved"].map((key) => [
+    `interruptionSummary.${key}`, (row) => row.interruptionSummary?.[key],
+  ]);
+}
+
+function formatInterruptionSummary(summary) {
+  return `同一 Turn 后续有完成 ${formatRequestCount(summary.followedByCompletion)} 次 · 未观测到后续完成 ${formatRequestCount(summary.noObservedCompletion)} 次 · 中断用量未完整观测 ${formatRequestCount(summary.usageUnobserved)} 次`;
 }
 
 export function printMetricsRun(result, format) {
@@ -411,6 +439,8 @@ function printTurnSummaryCsv(rows) {
     ["turnId", (row) => row.turnId],
     ["requestCount", (row) => row.requestCount],
     ["unsuccessfulRequestCount", (row) => row.unsuccessfulRequestCount],
+    ...outcomeCsvColumns(),
+    ...interruptionCsvColumns(),
     ["inputTokens", (row) => row.inputTokens],
     ["cachedInputTokens", (row) => row.cachedInputTokens],
     ["outputTokens", (row) => row.outputTokens],
@@ -443,8 +473,8 @@ export function printMetricsTurns(result, format) {
     console.log("该会话暂无可导出的对话记录。");
     return;
   }
-  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 总 Token | 缓存率 | 上下文压缩 |");
-  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |");
+  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 请求结果 | 中断后续观测 | 总 Token | 缓存率 | 上下文压缩 |");
+  console.log("| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | --- | --- |");
   for (const [index, turn] of result.turns.entries()) {
     const cacheRate = turn.cachedInputTokens === null || turn.inputTokens === 0
       ? "未知"
@@ -457,13 +487,15 @@ export function printMetricsTurns(result, format) {
         markdownCell(turn.model ?? "未观测"),
         markdownCell(turn.reasoningEffort ?? "模型默认"),
         String(turn.requestCount),
-        String(turn.unsuccessfulRequestCount),
+        formatRequestOutcomes(turn.requestOutcomes),
+        formatInterruptionSummary(turn.interruptionSummary),
         formatTokenCount(turn.inputTokens + turn.outputTokens),
         cacheRate,
         markdownCell(formatCompactSummary(turn.compact) ?? "无"),
       ].join(" | "),
     );
   }
+  console.log("后续完成仅表示时间顺序，不代表重试或恢复因果；Token 仅含已观测用量。");
 }
 
 export function printMetricsThreads(result, format) {
@@ -480,6 +512,7 @@ export function printMetricsThreads(result, format) {
       ["agentPath", (thread) => thread.agentPath],
       ["turnCount", (thread) => thread.turnCount],
       ["requestCount", (thread) => thread.requestCount],
+      ...outcomeCsvColumns(),
       ["inputTokens", (thread) => thread.inputTokens],
       ["outputTokens", (thread) => thread.outputTokens],
       ...compactCsvColumns(),
@@ -499,8 +532,8 @@ export function printMetricsThreads(result, format) {
   console.log(`- 时区：${formatLocalTimeZone()}`);
   console.log(`- 时间范围：${result.range.name} · 各会话自身的期间统计`);
   console.log("");
-  console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 总 Token | 上下文压缩 | 最近记录 |");
-  console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |");
+  console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 请求结果 | 总 Token | 上下文压缩 | 最近记录 |");
+  console.log("| --- | --- | --- | --- | --- | ---: | ---: | --- | ---: | --- | --- |");
   for (const [index, thread] of result.threads.entries()) {
     console.log(
       [
@@ -513,6 +546,7 @@ export function printMetricsThreads(result, format) {
           : `子代理 · ${thread.agentPath}`),
         String(thread.turnCount),
         String(thread.requestCount),
+        formatRequestOutcomes(thread.requestOutcomes),
         formatTokenCount(thread.inputTokens + thread.outputTokens),
         markdownCell(formatCompactSummary(thread.compact) ?? "无"),
         markdownCell(formatLocalTime(thread.lastRecordedAtMs)),
@@ -532,8 +566,13 @@ function printTurnSummary(summary) {
     console.log(`- 思考等级：${summary.reasoningEffort}`);
   }
   console.log(
-    `- 模型请求：${formatRequestCount(summary.requestCount)} 次${summary.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(summary.unsuccessfulRequestCount)} 次）` : ""}`,
+    `- 模型请求：${formatRequestCount(summary.requestCount)} 次`,
   );
+  console.log(`- ${formatRequestOutcomes(summary.requestOutcomes)}`);
+  if (summary.requestOutcomes.interrupted > 0) {
+    console.log(`- 中断后续观测：${formatInterruptionSummary(summary.interruptionSummary)}`);
+    console.log("- 后续完成仅表示时间顺序，不代表重试或恢复因果；Token 仅含已观测用量。");
+  }
   console.log(`- 总 Token：${formatTokenCount(totalTokens)}`);
   if (summary.cachedInputTokens === null) {
     console.log("  - 缓存：上游未提供完整数据");
@@ -578,6 +617,7 @@ function csvColumns() {
     ["recordedAt", (record) => record.recordedAtMs === undefined
       ? ""
       : new Date(record.recordedAtMs).toISOString()],
+    ["quotaObservedAtMs", (record) => record.quotaObservedAtMs],
     ["provider", (record) => record.provider],
     ["model", (record) => record.model],
     ["serviceTier", (record) => record.serviceTier],

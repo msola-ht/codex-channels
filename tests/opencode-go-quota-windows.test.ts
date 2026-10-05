@@ -16,9 +16,31 @@ afterEach(async () => {
 });
 
 describe("OpenCode Go quota windows provider", () => {
+  it("records the successful fetch time and shares it with concurrent and cached readers", async () => {
+    const codexHome = await createCodexHome();
+    let nowMs = 1_000;
+    let finishFetch: (response: Response) => void = () => undefined;
+    const fetchImpl = vi.fn(() => new Promise<Response>(resolve => { finishFetch = resolve; }));
+    const provider = createOpencodeGoQuotaWindowsProvider({ environment: testEnvironment(codexHome),
+      fetchImpl: fetchImpl as typeof fetch, nowMs: () => nowMs });
+    const first = provider();
+    const concurrent = provider();
+    nowMs = 2_000;
+    finishFetch(new Response(JSON.stringify({ usage: { rolling: { percent: 10,
+      resetsAt: "2026-09-15T10:22:00.000Z", status: "ok" } } }), { status: 200 }));
+    const expected = { observedAtMs: 2_000, windows: [{ windowId: "rolling", usedPercentMillionths: 10_000_000,
+      resetsAt: Math.floor(Date.parse("2026-09-15T10:22:00.000Z") / 1_000), status: "ok" }] };
+    await expect(first).resolves.toEqual(expected);
+    await expect(concurrent).resolves.toEqual(expected);
+    nowMs = 3_000;
+    await expect(provider()).resolves.toEqual(expected);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("caches window snapshots until the earliest reset time", async () => {
     const codexHome = await createCodexHome();
-    const nowMs = Date.parse("2026-08-17T14:00:00.000Z");
+    let nowMs = Date.parse("2026-08-17T14:00:00.000Z");
+    const observedAtMs = nowMs;
     const rollingResetsAt = new Date(nowMs + 30 * 60 * 1_000).toISOString();
     const weeklyResetsAt = new Date(nowMs + 12 * 60 * 60 * 1_000).toISOString();
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
@@ -54,9 +76,10 @@ describe("OpenCode Go quota windows provider", () => {
       },
     ];
 
-    await expect(provider()).resolves.toEqual(expected);
+    await expect(provider()).resolves.toEqual({ windows: expected, observedAtMs });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    await expect(provider()).resolves.toEqual(expected);
+    nowMs += 60_000;
+    await expect(provider()).resolves.toEqual({ windows: expected, observedAtMs });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
@@ -90,14 +113,17 @@ describe("OpenCode Go quota windows provider", () => {
 
     const first = await provider();
     expect(calls).toBe(1);
-    expect(first?.[0]?.resetsAt).toBe(
+    expect(first?.observedAtMs).toBe(nowMs);
+    expect(first?.windows[0]?.resetsAt).toBe(
       Math.floor((nowMs + 30 * 60 * 1_000) / 1_000),
     );
 
     nowMs += 31 * 60 * 1_000;
     const second = await provider();
     expect(calls).toBe(2);
-    expect(second?.[0]?.resetsAt).toBe(
+    expect(second?.observedAtMs).toBe(nowMs);
+    expect(second?.observedAtMs).toBeGreaterThan(first!.observedAtMs);
+    expect(second?.windows[0]?.resetsAt).toBe(
       Math.floor((nowMs + 30 * 60 * 1_000) / 1_000),
     );
   });
@@ -119,8 +145,8 @@ describe("OpenCode Go quota windows provider", () => {
       nowMs: () => nowMs,
     });
 
-    await expect(provider()).resolves.toHaveLength(3);
-    await expect(provider()).resolves.toHaveLength(3);
+    expect((await provider())?.windows).toHaveLength(3);
+    expect((await provider())?.windows).toHaveLength(3);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
@@ -184,14 +210,14 @@ describe("OpenCode Go quota windows provider", () => {
 
     await expect(pending).resolves.toBeNull();
     expect(requestSignal?.aborted).toBe(true);
-    await expect(provider()).resolves.toEqual([
+    await expect(provider()).resolves.toEqual({ observedAtMs: expect.any(Number), windows: [
       {
         windowId: "rolling",
         resetsAt: Math.floor(Date.parse("2026-09-15T10:22:00.000Z") / 1_000),
         usedPercentMillionths: 45_000_000,
         status: "ok",
       },
-    ]);
+    ] });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
@@ -235,17 +261,17 @@ describe("OpenCode Go quota windows provider", () => {
       nowMs: () => nowMs,
     });
 
-    await expect(provider()).resolves.toEqual([
+    await expect(provider()).resolves.toEqual({ observedAtMs: nowMs, windows: [
       { windowId: "rolling", resetsAt: null, usedPercentMillionths: 45_000_000, status: "ok" },
       { windowId: "weekly", resetsAt: null, usedPercentMillionths: 18_000_000, status: "ok" },
       { windowId: "monthly", resetsAt: null, usedPercentMillionths: 15_000_000, status: "ok" },
-    ]);
+    ] });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    await expect(provider()).resolves.toEqual([
+    await expect(provider()).resolves.toEqual({ observedAtMs: nowMs, windows: [
       { windowId: "rolling", resetsAt: null, usedPercentMillionths: 45_000_000, status: "ok" },
       { windowId: "weekly", resetsAt: null, usedPercentMillionths: 18_000_000, status: "ok" },
       { windowId: "monthly", resetsAt: null, usedPercentMillionths: 15_000_000, status: "ok" },
-    ]);
+    ] });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });

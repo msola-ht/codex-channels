@@ -19,6 +19,8 @@ import {
 } from "@/components/metrics/data-table"
 import {
   formatModelName,
+  formatInterruptionSummary,
+  formatInterruptedUsage,
   formatElapsedDuration,
   formatTime,
   formatTokens,
@@ -40,8 +42,11 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
     time: t("metrics.time"),
     provider: t("metrics.provider"),
     model: t("metrics.model"),
+    reasoningEffort: t("metrics.reasoningEffort"),
     requests: t("metrics.requests"),
     failures: t("metrics.failures"),
+    interrupted: t("metrics.interrupted"),
+    incomplete: t("metrics.incompleteObservation"),
     input: t("metrics.input"),
     cacheHitRate: t("metrics.cacheHitRate"),
     output: t("metrics.output"),
@@ -94,6 +99,12 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       ),
     },
     {
+      id: "reasoningEffort",
+      enableSorting: false,
+      header: t("metrics.reasoningEffort"),
+      cell: ({ row }) => row.original.reasoningEffort ?? "—",
+    },
+    {
       id: "requests",
       accessorFn: (turn) => turn.requestCount,
       header: ({ column }) => (
@@ -105,13 +116,13 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
     },
     {
       id: "failures",
-      accessorFn: (turn) => turn.unsuccessfulRequestCount,
+      accessorFn: (turn) => turn.requestOutcomes.failed,
       header: ({ column }) => (
         <SortableHeader column={column}>{t("metrics.failures")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">
-          {row.original.unsuccessfulRequestCount}
+          {row.original.requestOutcomes.failed}
         </span>
       ),
     },
@@ -119,29 +130,35 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       id: "input",
       accessorFn: (turn) => turn.inputTokens,
       header: ({ column }) => (
-        <SortableHeader column={column}>{t("metrics.input")}</SortableHeader>
+        <SortableHeader column={column} hint={t("metrics.input")}>{t("metrics.inputColumn")}</SortableHeader>
       ),
-      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} />,
+      cell: ({ row }) => row.original.interruptionSummary.usageUnobserved > 0
+        ? <TableHint hint={formatInterruptionSummary(row.original.interruptionSummary, t)}>{formatInterruptedUsage(row.original.inputTokens, row.original.interruptionSummary)}</TableHint>
+        : <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} />,
     },
     {
       id: "cacheHitRate",
       enableSorting: false,
-      header: t("metrics.cacheHitRate"),
+      header: () => <TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint>,
       cell: ({ row }) => {
         const turn = row.original
-        return <span className="whitespace-nowrap tabular-nums">{turn.inputTokens > 0 && turn.cachedInputTokens !== null
+        const rate = turn.inputTokens > 0 && turn.cachedInputTokens !== null
           ? `${(turn.cachedInputTokens / turn.inputTokens * 100).toFixed(1)}%`
-          : "—"}</span>
+          : "—"
+        return <span className="whitespace-nowrap tabular-nums">{rate !== "—" && turn.interruptionSummary.usageUnobserved > 0
+          ? <TableHint hint={t("metrics.observedCacheHitRateHint")}>{rate}</TableHint>
+          : rate}</span>
       },
     },
     {
       id: "output",
       accessorFn: (turn) => turn.outputTokens,
       header: ({ column }) => (
-        <SortableHeader column={column}>{t("metrics.output")}</SortableHeader>
+        <SortableHeader column={column} hint={t("metrics.output")}>{t("metrics.outputColumn")}</SortableHeader>
       ),
       cell: ({ row }) => {
         const turn = row.original
+        if (turn.interruptionSummary.usageUnobserved > 0) return <TableHint hint={formatInterruptionSummary(turn.interruptionSummary, t)}>{formatInterruptedUsage(turn.outputTokens, turn.interruptionSummary)}</TableHint>
         const nonReasoning = Math.max(
           0,
           turn.outputTokens - turn.reasoningOutputTokens,
@@ -180,9 +197,25 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       ),
     },
     {
+      id: "interrupted",
+      enableSorting: false,
+      accessorFn: (turn) => turn.requestOutcomes.interrupted,
+      header: () => <TableHint hint={t("metrics.clientInterruption")}>{t("metrics.interruptedColumn")}</TableHint>,
+      cell: ({ row }) => <TableHint hint={row.original.requestOutcomes.interrupted > 0 ? formatInterruptionSummary(row.original.interruptionSummary, t) : null}>
+        <span className="tabular-nums">{row.original.requestOutcomes.interrupted}</span>
+      </TableHint>,
+    },
+    {
+      id: "incomplete",
+      enableSorting: false,
+      accessorFn: (turn) => turn.requestOutcomes.incomplete,
+      header: () => <TableHint hint={t("metrics.incompleteObservation")}>{t("metrics.incompleteColumn")}</TableHint>,
+      cell: ({ row }) => <span className="tabular-nums">{row.original.requestOutcomes.incomplete}</span>,
+    },
+    {
       id: "duration",
       enableSorting: false,
-      header: () => t("threads.turnDuration"),
+      header: () => <TableHint hint={t("threads.turnDuration")}>{t("metrics.durationColumn")}</TableHint>,
       cell: ({ row }) => row.original.durationMs == null ? "—" : formatElapsedDuration(row.original.durationMs),
     },
     {
@@ -200,7 +233,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
 
   return (
     <DataTable
-      numericColumnIds={["requests", "failures", "input", "cacheHitRate", "output", "compact", "duration", "subagents"]}
+      numericColumnIds={["requests", "failures", "interrupted", "incomplete", "input", "cacheHitRate", "output", "compact", "duration", "subagents"]}
       loading={loading}
       title={t("threads.turnList")}
       description={({ matched }) => <TableHint hint={t("threads.turnHint")}>{t("threads.turnDescription", { matched })}</TableHint>}

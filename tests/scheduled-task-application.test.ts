@@ -15,7 +15,8 @@ import {
 } from "../src/application/scheduled-task-command.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import { UserFacingError } from "../src/conversation-core/index.js";
-import { SqliteScheduledTaskStore } from "../src/scheduled-tasks/index.js";
+import { SqliteScheduledTaskStore, ScheduledTaskScheduler, type ScheduledTaskExecutionPort } from "../src/scheduled-tasks/index.js";
+import { formatConversationCommandOutcome } from "../src/surfaces/conversation-command-format.js";
 
 const directories: string[] = [];
 const now = Date.parse("2026-08-23T12:00:00.000Z");
@@ -175,8 +176,8 @@ describe("ScheduledTaskApplicationService", () => {
     store.close();
   });
 
-  it("retries only the latest listed uncertain Run and closes it first", async () => {
-    const { store, service, runTaskNow } = createService();
+  it("retries only the latest listed uncertain Run through the explicit retry port", async () => {
+    const { store, service, retryRun } = createService();
     const task = store.createTask(taskInput());
     const claimed = store.claimManual(task.taskId, now);
     store.markUncertain(claimed.run.runId, now + 1);
@@ -184,9 +185,71 @@ describe("ScheduledTaskApplicationService", () => {
     expect(service.runs(target, "actor-1", task.taskId).runs[0]?.selector).toBe("1");
     await service.retry(target, "actor-1", "1");
     expect(store.getRun(claimed.run.runId)?.state).toBe("failed");
-    expect(runTaskNow).toHaveBeenCalledWith(task.taskId);
+    expect(retryRun).toHaveBeenCalledWith(claimed.run.runId);
     store.close();
   });
+
+  it("runs an explicit retry of a finished once task through admission and reports its new Run", async () => {
+    const at = now + 60_000;
+    const execute = vi.fn<ScheduledTaskExecutionPort["execute"]>(async () => ({ kind: "completed", threadId: "retry-thread", turnId: "retry-turn" }));
+    const { store, service } = createService(() => at + 2, { execute });
+    const task = store.createTask({ ...taskInput(), schedule: { type: "once", afterMinutes: 1, anchorAt: now } });
+    const original = store.claimDue(task.taskId, at, "claimed", at).run;
+    store.markUncertain(original.runId, at + 1);
+    await expect(service.retry(target, "actor-2", original.runId)).rejects.toMatchObject({ code: "scheduled-task.forbidden" });
+    expect(store.getRun(original.runId)?.state).toBe("uncertain");
+    const retried = await service.retry(target, "actor-1", original.runId);
+    expect(retried).toMatchObject({ state: "completed", threadId: "retry-thread", turnId: "retry-turn" });
+    expect(retried.runId).not.toBe(original.runId);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(store.getTask(task.taskId)).toMatchObject({ status: "finished", nextRunAt: null });
+    expect(service.runs(target, "actor-1", task.taskId).runs).toHaveLength(2);
+    await expect(service.retry(target, "actor-1", original.runId)).rejects.toMatchObject({ code: "scheduled-task.state.invalid" });
+    store.close();
+  });
+
+  it("reports capacity-rejected retries without claiming that the original uncertain Run was resolved", async () => {
+    const execute = vi.fn<ScheduledTaskExecutionPort["execute"]>();
+    const { store, service } = createService(() => now + 2, {
+      availableCapacity: () => 0,
+      execute,
+    });
+    const task = store.createTask(taskInput());
+    const original = store.claimManual(task.taskId, now).run;
+    store.markUncertain(original.runId, now + 1);
+    service.runs(target, "actor-1", task.taskId);
+
+    const retried = await service.retry(target, "actor-1", "1");
+    const rendered = formatConversationCommandOutcome({ type: "scheduled-task.retry-requested", run: retried });
+
+    expect(retried).toMatchObject({ state: "skipped_capacity", dispatchStartedAt: null });
+    expect(store.getRun(original.runId)?.state).toBe("uncertain");
+    expect(execute).not.toHaveBeenCalled();
+    expect(rendered).toContain("重试未执行，原 uncertain Run 仍保留");
+    expect(rendered).not.toContain("已解除");
+    store.close();
+  });
+
+  it.each(["failed", "uncertain", "completed"] as const)(
+    "reports successful retry admission even when its execution becomes %s",
+    async (kind) => {
+      const execute = vi.fn<ScheduledTaskExecutionPort["execute"]>(async () => ({ kind }));
+      const { store, service } = createService(() => now + 2, { execute });
+      const task = store.createTask(taskInput());
+      const original = store.claimManual(task.taskId, now).run;
+      store.markUncertain(original.runId, now + 1);
+
+      const retried = await service.retry(target, "actor-1", original.runId);
+      const rendered = formatConversationCommandOutcome({ type: "scheduled-task.retry-requested", run: retried });
+
+      expect(retried).toMatchObject({ state: kind, dispatchStartedAt: now + 2 });
+      expect(store.getRun(original.runId)?.state).toBe("failed");
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(rendered).toContain("已解除原 uncertain Run 并领取重试 Run");
+      expect(rendered).not.toContain("重试未执行");
+      store.close();
+    },
+  );
 
   it("resolves an explicit provider/model selection and fails closed on an unconfigured Provider", () => {
     const { store, service } = createService();
@@ -296,18 +359,23 @@ describe("parseScheduledTaskOperation", () => {
 
 function createService(
   clock: () => number = () => now,
+  executor?: ScheduledTaskExecutionPort,
 ): {
   readonly store: SqliteScheduledTaskStore;
   readonly service: ScheduledTaskApplicationService;
   readonly runTaskNow: ReturnType<typeof vi.fn<ScheduledTaskApplicationPort["runTaskNow"]>>;
+  readonly retryRun: ReturnType<typeof vi.fn<ScheduledTaskApplicationPort["retryRun"]>>;
 } {
   const directory = mkdtempSync(join(tmpdir(), "codexc-scheduled-application-"));
   directories.push(directory);
   secureTestDirectory(directory);
   const store = new SqliteScheduledTaskStore(join(directory, "scheduled.sqlite3"));
+  const scheduler = executor ? new ScheduledTaskScheduler(store, executor, { clock: { now: clock } }) : undefined;
   const runTaskNow = vi.fn<ScheduledTaskApplicationPort["runTaskNow"]>(async (taskId) =>
-    store.claimManual(taskId, now + 2).run
+    scheduler ? scheduler.runTaskNow(taskId) : store.claimManual(taskId, now + 2).run
   );
+  const retryRun = vi.fn<ScheduledTaskApplicationPort["retryRun"]>(async (runId) => scheduler
+    ? scheduler.retryRun(runId) : store.claimRetry(runId, now + 2).run);
   const application: ScheduledTaskApplicationPort = {
     isActorAuthorized: (_target, actorId) => actorId === "actor-1",
     isProviderConfigured: (provider) => provider === "openai" || provider === "deepseek",
@@ -327,11 +395,13 @@ function createService(
       serviceTierPending: false,
     }),
     runTaskNow,
+    retryRun,
   };
   return {
     store,
     service: new ScheduledTaskApplicationService(store, application, clock),
     runTaskNow,
+    retryRun,
   };
 }
 

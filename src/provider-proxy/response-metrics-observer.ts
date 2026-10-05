@@ -21,6 +21,11 @@ export interface ProviderQuotaWindowSnapshot {
   status?: string | null;
 }
 
+export interface ProviderQuotaWindowsSnapshot {
+  windows: readonly ProviderQuotaWindowSnapshot[];
+  observedAtMs: number;
+}
+
 export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
   transport: "http" | "websocket";
   responseFormat: "sse" | "json" | "websocket" | "unknown";
@@ -62,6 +67,8 @@ export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
   requestStartedAtMs: number;
   responseCompletedAtMs: number;
   weeklyQuota: ProviderWeeklyQuotaSnapshot | null;
+  /** 本地收到所存额度快照的时刻；两个独立来源共存或缺失时为 null，不推断。 */
+  quotaObservedAtMs?: number | null;
   /** 请求完成时对应的官方配额窗口快照（如 OpenCode Go 5h/7d/月），缺省为 null。 */
   quotaWindows: readonly ProviderQuotaWindowSnapshot[] | null;
 }
@@ -112,6 +119,7 @@ export function createMetricsState(
     requestStartedAtMs: startedAtMs,
     responseCompletedAtMs: startedAtMs,
     weeklyQuota: null,
+    quotaObservedAtMs: null,
     quotaWindows: null,
   };
   if (submittedAtMonotonicMs !== undefined) observeRequestSubmitted(metrics, submittedAtMonotonicMs);

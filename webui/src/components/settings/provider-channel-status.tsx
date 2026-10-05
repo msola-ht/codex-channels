@@ -10,48 +10,49 @@ import type { ManagementProvidersResponse, SettingsSummaryResponse } from "@/lib
 type Channel = SettingsSummaryResponse["gateway"]["channels"][number]
 
 export function ProviderStatusCard({ state }: { state: ManagementProvidersResponse }) {
+  const { t } = useTranslation()
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Provider 状态</CardTitle>
-        <CardDescription>只读显示当前 Provider 与 Codex 默认值；凭据、地址和 Profile 不会返回。</CardDescription>
+        <CardTitle>{t("managementUi.providerStatus")}</CardTitle>
+        <CardDescription>{t("managementUi.providerStatusDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <div className="grid gap-3 text-sm md:grid-cols-2">
           {state.primary.kind === "official" && !state.official.authenticated ? (
             <>
-              <SettingsRow label="OpenAI 官方登录" value="未登录" badge />
-              <SettingsRow label="官方鉴权文件" value="未检测到" />
+              <SettingsRow label={t("managementUi.officialLogin")} value={t("managementUi.notLoggedIn")} badge />
+              <SettingsRow label={t("managementUi.officialAuthFile")} value={t("managementUi.notDetected")} />
             </>
           ) : (
             <>
-              <SettingsRow label="主 Provider" value={state.primary.displayName} badge />
-              <SettingsRow label="主 Provider ID" value={state.primary.id} code />
+              <SettingsRow label={t("managementUi.primaryProvider")} value={state.primary.displayName} badge />
+              <SettingsRow label={t("managementUi.primaryProviderId")} value={state.primary.id} code />
             </>
           )}
-          <SettingsRow label="Codex 默认模型" value={state.defaults.model ?? "跟随 Provider 默认值"} />
-          <SettingsRow label="默认思考等级" value={state.defaults.reasoningEffort ?? "跟随模型默认值"} />
-          <SettingsRow label="配置版本" value={String(state.configVersion ?? "未知")} code />
+          <SettingsRow label={t("managementUi.codexDefaultModel")} value={state.defaults.model ?? t("managementUi.followProviderDefault")} />
+          <SettingsRow label={t("managementUi.defaultReasoning")} value={state.defaults.reasoningEffort ?? t("managementUi.followModelDefault")} />
+          <SettingsRow label={t("managementUi.configVersion")} value={String(state.configVersion ?? t("common.unknown"))} code />
         </div>
         <Separator />
         <div className="flex flex-col gap-3">
           <div>
-            <h3 className="text-sm font-medium">已发现 Provider</h3>
-            <p className="text-xs text-muted-foreground">仅展示可用于当前 Setup 的非凭据摘要。</p>
+            <h3 className="text-sm font-medium">{t("managementUi.discoveredProviders")}</h3>
+            <p className="text-xs text-muted-foreground">{t("managementUi.discoveredHint")}</p>
           </div>
           {state.providers.length === 0 ? (
             <SettingsEmpty>
               {state.primary.kind === "official" && !state.official.authenticated
-                ? "当前没有可用的第三方 Provider；OpenAI 官方未登录。"
-                : "当前没有额外可切换的 Provider；主 Provider 见上方。"}
+                ? t("managementUi.providersEmptyLoggedOut")
+                : t("managementUi.providersEmpty")}
             </SettingsEmpty>
           ) : (
-            <Table><TableHeader><TableRow><TableHead>提供商</TableHead><TableHead>模式</TableHead><TableHead>模型</TableHead><TableHead>状态</TableHead></TableRow></TableHeader><TableBody>
+            <Table><TableHeader><TableRow><TableHead>{t("managementUi.provider")}</TableHead><TableHead>{t("modelManagement.mode")}</TableHead><TableHead>{t("modelManagement.model")}</TableHead><TableHead>{t("channelSettings.state")}</TableHead></TableRow></TableHeader><TableBody>
               {state.providers.map(provider => <TableRow key={`${provider.kind}:${provider.id}:${provider.mode}`}>
                 <TableCell><div className="flex flex-col gap-1"><span>{provider.displayName}</span><span className="text-xs text-muted-foreground">{provider.id}</span></div></TableCell>
-                <TableCell>{providerModeLabel(provider.mode)}</TableCell>
-                <TableCell>{provider.model ?? "—"}{provider.modelCount !== null && ` · ${provider.modelCount} 个模型`}</TableCell>
-                <TableCell><Badge variant={provider.selected ? "secondary" : "outline"}>{provider.selected ? "当前" : providerStateLabel(provider.state)}</Badge></TableCell>
+                <TableCell>{t(providerModeKey(provider.mode))}</TableCell>
+                <TableCell>{provider.model ?? "—"}{provider.modelCount !== null && ` · ${t("managementUi.modelCount", { count: provider.modelCount })}`}</TableCell>
+                <TableCell><Badge variant={provider.selected ? "secondary" : "outline"}>{t(provider.selected ? "managementUi.current" : provider.state === "backup" ? "managementUi.backup" : "managementUi.configured")}</Badge></TableCell>
               </TableRow>)}
             </TableBody></Table>
           )}
@@ -72,19 +73,15 @@ export function ChannelStatusCard({ channels }: { channels: Channel[] }) {
       <CardContent className="flex flex-col gap-3">
         {channels.length === 0 ? (
           <SettingsEmpty>{t("channelSettings.empty")}</SettingsEmpty>
-        ) : <Table><TableHeader><TableRow><TableHead>{t("channelSettings.channel")}</TableHead><TableHead>{t("channelSettings.state")}</TableHead></TableRow></TableHeader><TableBody>{channels.map(channel => <TableRow key={channel.id}><TableCell>{channel.displayName}</TableCell><TableCell><Badge variant={channel.enabled ? "secondary" : "outline"}>{t(channel.enabled ? "channelSettings.enabled" : "channelSettings.disabled")}</Badge></TableCell></TableRow>)}</TableBody></Table>}
+        ) : <Table><TableHeader><TableRow><TableHead>{t("channelSettings.channel")}</TableHead><TableHead>{t("channelSettings.state")}</TableHead></TableRow></TableHeader><TableBody>{channels.map(channel => <TableRow key={channel.id}><TableCell>{channel.id === "feishu" ? t("managementUi.feishu") : channel.id === "weixin" ? t("managementUi.weixin") : channel.displayName}</TableCell><TableCell><Badge variant={channel.enabled ? "secondary" : "outline"}>{t(channel.enabled ? "channelSettings.enabled" : "channelSettings.disabled")}</Badge></TableCell></TableRow>)}</TableBody></Table>}
 
       </CardContent>
     </Card>
   )
 }
 
-function providerModeLabel(mode: ManagementProvidersResponse["providers"][number]["mode"]): string {
-  if (mode === "exclusive") return "固定主 Provider"
-  if (mode === "fixed") return "已配置"
-  return mode === "switching" ? "可切换" : "备份"
-}
-
-function providerStateLabel(state: ManagementProvidersResponse["providers"][number]["state"]): string {
-  return state === "backup" ? "备份" : "已配置"
+function providerModeKey(mode: ManagementProvidersResponse["providers"][number]["mode"]) {
+  if (mode === "exclusive") return "modelManagement.exclusive"
+  if (mode === "fixed") return "managementUi.configured"
+  return mode === "switching" ? "modelManagement.switching" : "managementUi.backup"
 }

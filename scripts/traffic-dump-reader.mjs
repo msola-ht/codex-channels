@@ -96,11 +96,10 @@ export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst
   const boundedLimit = limit ?? page.entries.length;
   const entries = page.entries.slice(offset, offset + boundedLimit);
   const exchanges = entries.map((entry) => {
-    const body = entry.request.transport === "websocket"
-      && (entry.request.requestKind === undefined || entry.request.requestKind === "prewarm")
-      ? parseJson(readPayload(entry.directory, entry.request.payload, 4 * 1_048_576).text)
-      : undefined;
-    return summaryOf(entry, body);
+    const body = parseJson(readPayload(entry.directory, entry.request.payload, 4 * 1_048_576, true).text);
+    const includeMetadata = entry.request.transport === "websocket"
+      && (entry.request.requestKind === undefined || entry.request.requestKind === "prewarm");
+    return summaryOf(entry, body, includeMetadata);
   });
   return {
     exchanges,
@@ -186,7 +185,7 @@ export async function describeDumpExchange(
       bodyTruncated: requestPayload.truncated,
       bytes: interaction.request.bytes ?? interaction.request.payload?.bytes,
       storedBytes: interaction.request.payload?.bytes,
-      parameters: requestParameters(requestBody),
+      parameters: requestParameters(requestBody, requestProtocol(interaction.request)),
       content: requestContent(requestBody),
     },
     response: interaction.response === undefined ? null : {
@@ -368,17 +367,19 @@ function compareInteraction(left, right, newestFirst) {
     : left.request.id - right.request.id;
 }
 
-function summaryOf(interaction, body) {
+function summaryOf(interaction, body, includeMetadata = true) {
   const request = interaction.request;
   const response = interaction.response;
   const relay = ["relay.chat", "relay.responses"].includes(labelOf(interaction.directory));
-  const metadata = relay ? {} : requestMetadata(body);
-  const requestKind = relay ? undefined : metadata.requestKind ?? (body?.generate === false ? "prewarm" : request.requestKind);
+  const metadata = relay || !includeMetadata ? {} : requestMetadata(body);
+  const requestKind = relay ? undefined : metadata.requestKind ?? (includeMetadata && body?.generate === false ? "prewarm" : request.requestKind);
   const firstTokenMs = firstTokenMsOf(response);
   const clientName = requestClientName(request);
   const protocol = requestProtocol(request);
+  const reasoningEffort = requestParameters(body, protocol).reasoningEffort;
   return {
     id: request.id,
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     ...(clientName === undefined ? {} : { clientName }),
     ...(protocol === undefined ? {} : { protocol }),
     label: labelOf(interaction.directory),
@@ -420,7 +421,7 @@ function firstTokenMsOf(response) {
   return Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-function readPayload(directory, payload, maxBytes) {
+function readPayload(directory, payload, maxBytes, allowUnavailable = false) {
   if (payload === undefined || !Array.isArray(payload.parts)) return { text: "", truncated: false };
   const buffers = [];
   let remaining = maxBytes;
@@ -432,7 +433,8 @@ function readPayload(directory, payload, maxBytes) {
     }
     assertPayloadPart(part);
     const length = Math.min(part.bytes, remaining);
-    const buffer = readFileSlice(join(directory, part.file), part.offset, length);
+    const buffer = readFileSlice(join(directory, part.file), part.offset, length, allowUnavailable);
+    if (buffer === undefined) return { text: "", truncated: true };
     buffers.push(part.encoding === "utf8"
       ? buffer
       : Buffer.from(`<二进制正文 ${part.bytes} 字节>`));
@@ -452,11 +454,19 @@ function assertPayloadPart(part) {
   }
 }
 
-function readFileSlice(path, offset, length) {
-  const descriptor = openSync(path, "r");
+function readFileSlice(path, offset, length, allowUnavailable = false) {
+  let descriptor;
+  try { descriptor = openSync(path, "r"); }
+  catch (error) {
+    if (allowUnavailable && error.code === "ENOENT") return undefined;
+    throw error;
+  }
   try {
     const size = fstatSync(descriptor).size;
-    if (offset + length > size) throw new Error("模型流量正文引用超出文件范围");
+    if (offset + length > size) {
+      if (allowUnavailable) return undefined;
+      throw new Error("模型流量正文引用超出文件范围");
+    }
     const buffer = Buffer.allocUnsafe(length);
     let read = 0;
     while (read < length) {

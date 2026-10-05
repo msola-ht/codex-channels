@@ -28,6 +28,7 @@ import {
   OutputTokenTooltip,
 } from "@/components/metrics/token-tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
+import { TableHint } from "@/components/metrics/data-table"
 import { StatCard } from "@/components/metrics/stat-card"
 import { AccountUpdateDescription, AccountRefreshButton, AccountRefreshFeedback, AccountSnapshotEmpty } from "./account-refresh-feedback"
 import { AccountSubscriptionNotice } from "./account-subscription-notice"
@@ -39,7 +40,7 @@ import {
   formatErrorType,
   formatFailureRate,
   formatCacheUsage,
-  formatSuccessRate,
+  formatRequestOutcomes,
   formatTime,
   formatTokens,
 } from "@/lib/format"
@@ -106,10 +107,7 @@ export function GlobalCards({ global, threadCount, turnCount }: { global: Aggreg
       <StatCard
         title={t("overview.totalTokens")}
         value={formatTokens(global.inputTokens + global.outputTokens)}
-        description={t("overview.requestsSummary", {
-          count: formatCount(global.requestCount),
-          rate: formatSuccessRate(global.requestCount, global.unsuccessfulRequestCount),
-        })}
+        description={`${t("metrics.requestsTotal", { count: formatCount(global.requestCount) })} · ${formatRequestOutcomes(global.requestOutcomes, t)}`}
       />
       <StatCard
         title={t("metrics.input")}
@@ -145,9 +143,9 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
               <TableHead>{t("overview.threads")}</TableHead>
               <TableHead>{t("overview.turnColumn")}</TableHead>
               <TableHead>{t("metrics.requests")}</TableHead>
-              <TableHead>{t("metrics.input")}</TableHead>
-              <TableHead>{t("metrics.cacheHitRate")}</TableHead>
-              <TableHead>{t("metrics.output")}</TableHead>
+              <TableHead><TableHint hint={t("metrics.input")}>{t("metrics.inputColumn")}</TableHint></TableHead>
+              <TableHead><TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint></TableHead>
+              <TableHead><TableHint hint={t("metrics.output")}>{t("metrics.outputColumn")}</TableHint></TableHead>
               <TableHead>{t("metrics.compact")}</TableHead>
             </TableRow>
           </TableHeader>
@@ -568,10 +566,11 @@ export function ErrorsSummary({ errors }: { errors: ErrorsReport }) {
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <CardTitle>{t("overview.errorsTitle")}</CardTitle>
         <CardDescription className="ml-auto">
-          {t("overview.failureRate", { rate: formatFailureRate(errors.requestCount, errors.unsuccessfulRequestCount) })}
+          {t("overview.failureRate", { rate: formatFailureRate(errors.requestCount, errors.requestOutcomes.failed) })}
         </CardDescription>
       </CardHeader>
       <CardContent>
+        <p className="mb-3 text-sm text-muted-foreground">{formatRequestOutcomes(errors.requestOutcomes, t)}</p>
         {errors.groups.length === 0 ? (
           <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>{t("common.noFailedRequests")}</EmptyTitle></EmptyHeader></Empty>
         ) : (
@@ -581,7 +580,9 @@ export function ErrorsSummary({ errors }: { errors: ErrorsReport }) {
                 <div className="flex items-center justify-between gap-2 text-sm">
                   <span className="truncate">
                     {group.provider ?? t("common.unknown")} ·{" "}
-                    {group.errorType === null
+                    {group.status !== "completed" && group.errorType === "client_disconnected"
+                      ? t("metrics.interrupted")
+                      : group.errorType === null
                       ? group.status
                       : formatErrorType(group.errorType, language)}
                   </span>

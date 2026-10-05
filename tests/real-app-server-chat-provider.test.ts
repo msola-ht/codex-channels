@@ -18,6 +18,9 @@ import { waitFor } from "./support/real-app-server-helpers.js";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 
 const contract = process.env.RUN_CODEX_CONTRACT === "1" ? it : it.skip;
+// These provider contracts do not exercise plugins. Isolate Codex's background
+// curated marketplace Git sync so it cannot write after stdio fixture shutdown.
+const isolatedCodexConfig = 'model_provider = "openai"\n[features]\nplugins = false\n';
 const imageUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAb0lEQVR4nO3PAQkAAAyEwO9feoshgnABdNvJ8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ2oPcf88OIhvJ6vAAAAAElFTkSuQmCC";
 contract.each([
   { emptyOpening: false, effort: "high", useDefault: true, incomplete: false },
@@ -72,7 +75,7 @@ contract.each([
     context_window: 64000, max_context_window: 128000, input_modalities: ["text", "image"],
     default_reasoning_level: "high", supported_reasoning_levels: ["low", "high", "max"].map(effort => ({ effort })),
   }] }));
-    writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), 'model_provider = "openai"\n');
+    writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), isolatedCodexConfig);
     await applyClinePassConfiguration({accountId:"test", apiKey: "sk_fixture" }, { environment });
     const managed = loadManagedProviderAppServers(environment)[0]!;
     const runtime = { ...managed, arguments: withProviderBaseUrl(managed.arguments, managed.provider, `http://${bridge.address()}`) };
@@ -208,6 +211,7 @@ contract.each(["custom", "tool_search", "clp_combined"] as const)("executes %s t
     writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), [
       `model = ${JSON.stringify(models[0]!.slug)}`, 'model_provider = "fixture"', 'web_search = "disabled"',
       `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+      '[features]', 'plugins = false',
       '[model_providers.fixture]', 'name = "Fixture"', `base_url = "http://${bridge.address()}"`,
       'wire_api = "responses"', 'supports_websockets = false', 'request_max_retries = 0', 'stream_max_retries = 0',
     ].join("\n"));
@@ -293,7 +297,7 @@ contract("isolates two real Cline App Servers behind one shared Chat proxy", asy
       context_window: 64000, max_context_window: 128000, input_modalities: ["text", "image"],
       default_reasoning_level: "high", supported_reasoning_levels: ["low", "high", "max"].map(effort => ({ effort, description: effort })),
     }] }));
-    writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), 'model_provider = "openai"\n');
+    writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), isolatedCodexConfig);
     for (const accountId of ["main", "work"]) await applyClinePassConfiguration({ accountId, apiKey: `sk_${accountId}` }, { environment });
     const runtimes = loadManagedProviderAppServers(environment);
     expect(runtimes).toHaveLength(2);
@@ -358,7 +362,7 @@ contract("maps Codex structured output onto the Chat response format", async () 
       context_window: 64000, max_context_window: 128000, input_modalities: ["text", "image"],
       default_reasoning_level: "high", supported_reasoning_levels: ["low", "high", "max"].map(effort => ({ effort, description: effort })),
     }] }));
-    writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), 'model_provider = "openai"\n');
+    writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), isolatedCodexConfig);
     await applyClinePassConfiguration({ accountId: "test", apiKey: "sk_fixture" }, { environment });
     const managed = loadManagedProviderAppServers(environment)[0]!;
     const runtime = { ...managed, arguments: withProviderBaseUrl(managed.arguments, managed.provider, `http://${bridge.address()}`) };

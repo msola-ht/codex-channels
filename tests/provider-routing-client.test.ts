@@ -11,6 +11,23 @@ import type { SessionRouter, ThreadSession, ThreadSnapshot } from "../src/sessio
 const cwd = "/workspace";
 
 describe("ProviderRoutingClient", () => {
+  it("设置应用后的连接与普通请求共用握手，不重置已经建立的新连接", async () => {
+    const openai = client();
+    let finish!: (value: ReturnType<typeof initializeResponse>) => void;
+    openai.connect.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const ensure = vi.fn(async () => undefined);
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai]]), ensure);
+    const recovery = routed.connectProvider("openai");
+    const models = routed.listModelsForProvider("openai");
+    await vi.waitFor(() => expect(openai.connect).toHaveBeenCalledOnce());
+    finish(initializeResponse());
+    await Promise.all([recovery, models]);
+    await routed.connectProvider("openai");
+    expect(ensure).toHaveBeenCalledOnce();
+    expect(openai.connect).toHaveBeenCalledOnce();
+    expect(openai.reconnect).not.toHaveBeenCalled();
+    await routed.close();
+  });
   it("forwards read cancellation and discards a late Thread without remembering its provider", async () => {
     const openai = client();
     const deepseek = client();

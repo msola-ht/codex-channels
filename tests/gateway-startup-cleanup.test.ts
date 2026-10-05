@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { ProviderAccountService } from "../src/application/index.js";
+import { ModelSelectionService, ProviderAccountService, type ModelOption, type ModelSelectionPort } from "../src/application/index.js";
+import type { SessionRouter } from "../src/session-routing/index.js";
 import { AccountQueryError } from "../src/bootstrap/account-query.js";
 import type { AccountRateLimits } from "../src/application/index.js";
 import { GatewayApplication } from "../src/bootstrap/app.js";
@@ -55,6 +56,8 @@ function createGatewayApplicationFixture(
 ): GatewayApplicationFixture {
   return Object.assign(
     Object.create(GatewayApplication.prototype),
+    { providerSettingsAbort: new AbortController(), providersApplyingSettings: new Set(), pendingProviderSettings: new Set(), settingsDisconnects: new Map(), stageProviderModels: async () => undefined,
+      managedSettingsProviders: [], captureProviderModels: () => ({ fingerprint: "a".repeat(64), models: [] }) },
     { turnExecution: { stop: async () => undefined, reset: vi.fn(), synchronize: vi.fn() } },
     { asyncQuestions: { close: vi.fn(async () => undefined), cancelThread: vi.fn() } },
     properties,
@@ -62,6 +65,200 @@ function createGatewayApplicationFixture(
     { surfaceManager: { preparePersistence: async () => undefined, ...(properties.surfaceManager as object) } },
   ) as GatewayApplicationFixture;
 }
+
+describe("Gateway Provider设置应用闭环", () => {
+  it("Gateway重建先确认各Provider目录：A生效、B租约busy仍保留宿主旧目录与精确默认", async () => {
+    const directory = mkdtempSync(join(unixSocketTmpdir, "codexc-catalog-"));
+    secureTestDirectory(directory);
+    const socketPath = join(directory, "app.sock");
+    const entry = (name: string, isDefault = false): ModelOption => ({ id: name, model: name,
+      displayName: name, isDefault, supportedReasoningEfforts: [], defaultReasoningEffort: "high",
+      serviceTiers: [], defaultServiceTier: null, inputModalities: ["text"] });
+    const target = { surface: "telegram" as const, accountId: "test", conversationId: "new" };
+    const models = new ModelSelectionService({ listModels: async () => [] } as unknown as ModelSelectionPort,
+      { current: () => undefined, modelSettings: () => undefined } as unknown as SessionRouter,
+      undefined, [], "openai", [], () => false, () => new Set(), "provider-b");
+    const snapshots = new Map<string, ModelOption[]>();
+    const applied = vi.fn(async (provider: string) => provider === "provider-a"
+      ? { applied: true as const, changed: true, snapshot: { fingerprint: "a".repeat(64), defaultModel: "a-new" } }
+      : { applied: false as const, reason: "active" as const, snapshot: { fingerprint: "b".repeat(64), defaultModel: "b-old-default" } });
+    const owner = new AppServerSupervisorOwner(socketPath, { primaryProvider: "openai",
+      managedProviders: ["provider-a", "provider-b"], socketPaths: [socketPath] }, { applyProviderSettings: applied });
+    await owner.start();
+    owner.markRunning("provider-a");
+    owner.markRunning("provider-b");
+    const catalog = vi.fn(async (provider: string) => provider === "provider-a" ? [entry("a-new")]
+      : [entry("b-picker-first", true), entry("b-old-default")]);
+    const application = createGatewayApplicationFixture({ config: { codexSocketPath: socketPath },
+      logger: pino({ level: "silent" }), stopping: false,
+      managedSettingsProviders: ["provider-a", "provider-b"], providerModelSnapshots: snapshots, modelSelection: models,
+      captureProviderModels: (provider: string) => ({ fingerprint: "a".repeat(64), models: [entry(`${provider}-disk-new`)] }),
+      stageProviderModels: Reflect.get(GatewayApplication.prototype, "stageProviderModels"),
+      codex: { connectedProviderIds: () => [], closeProvider: async () => undefined, listModelsForProvider: catalog },
+      providerIdleReleaser: { applySettings: async (_provider: string, _signal: AbortSignal, operation: () => Promise<boolean>) => operation() },
+    });
+    const signal = new AbortController().signal;
+    try {
+      expect(() => models.threadStartOptions(target)).toThrow("请先通过 /model");
+      await (Reflect.get(application, "initializeProviderModels") as (signal: AbortSignal) => Promise<void>).call(application, signal);
+      expect(models.threadStartOptions(target)).toEqual({ model: "b-old-default", modelProvider: "provider-b" });
+      expect((await models.state(target)).models.map(model => model.model)).toEqual(["a-new", "b-picker-first", "b-old-default"]);
+      expect(catalog.mock.calls.map(([provider]) => provider)).toEqual(["provider-a", "provider-b"]);
+      application.refreshProviderModels("provider-a", signal);
+      expect(models.threadStartOptions(target).model).toBe("b-old-default");
+      expect(catalog).toHaveBeenCalledTimes(2);
+    } finally { await owner.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it("未运行Provider只接受同代次目录，不启动实例；缺快照或取消保留原目录", async () => {
+    const directory = mkdtempSync(join(unixSocketTmpdir, "codexc-catalog-"));
+    secureTestDirectory(directory);
+    const socketPath = join(directory, "app.sock");
+    const owner = new AppServerSupervisorOwner(socketPath, { primaryProvider: "openai", managedProviders: ["provider-a"], socketPaths: [socketPath] });
+    await owner.start();
+    const snapshots = new Map<string, ModelOption[]>();
+    const catalog = vi.fn();
+    const application = createGatewayApplicationFixture({ config: { codexSocketPath: socketPath },
+      providerModelSnapshots: snapshots, codex: { listModelsForProvider: catalog },
+      stageProviderModels: Reflect.get(GatewayApplication.prototype, "stageProviderModels") });
+    const stage = Reflect.get(application, "stageProviderModels") as (provider: string, result: unknown, candidate: unknown, signal: AbortSignal) => Promise<void>;
+    const entry: ModelOption = { id: "confirmed", model: "confirmed", displayName: "confirmed", isDefault: false,
+      supportedReasoningEfforts: [], defaultReasoningEffort: "high", serviceTiers: [], defaultServiceTier: null, inputModalities: ["text"] };
+    const candidate = { fingerprint: "a".repeat(64), models: [entry] };
+    const result = { applied: true, changed: true, snapshot: { fingerprint: candidate.fingerprint, defaultModel: entry.model } };
+    try {
+      await stage.call(application, "provider-a", result, candidate, new AbortController().signal);
+      const confirmed = snapshots.get("provider-a");
+      await expect(stage.call(application, "provider-a", result, { ...candidate, fingerprint: "b".repeat(64) }, new AbortController().signal)).rejects.toThrow("尚未确认");
+      await expect(stage.call(application, "provider-a", { applied: false, reason: "leased" }, candidate, new AbortController().signal)).rejects.toThrow("快照不可用");
+      const cancellation = new AbortController(); cancellation.abort(new Error("stopped"));
+      await expect(stage.call(application, "provider-a", result, candidate, cancellation.signal)).rejects.toThrow("stopped");
+      expect(snapshots.get("provider-a")).toBe(confirmed);
+      expect(catalog).not.toHaveBeenCalled();
+    } finally { await owner.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it("设置关闭和意外断线只取消对应Provider空闲候选", async () => {
+    const binding: RestoreTestBinding = {
+      target: { surface: "feishu", accountId: "default", conversationId: "idle" },
+      workspaceId: "default", threadId: "thread-a", sessionId: "thread-a",
+    };
+    let disconnect!: (error: Error, provider: string) => void;
+    const cancelPending = vi.fn();
+    const application = createRestoreApplication({ binding, published: [], restoreSubscriptions: async () => [],
+      overrides: {
+        conversationIdleReleaser: { start: vi.fn(), stop: async () => undefined, cancelPending },
+        gatewayReconnectCoordinator: () => ({ disconnected: vi.fn(), stop: async () => undefined }),
+        router: { allBindings: () => [binding, { ...binding, threadId: "thread-b" }] },
+        codex: { onNotification: () => undefined,
+          onDisconnect: (handler: typeof disconnect) => { disconnect = handler; },
+          connect: async () => ({ userAgent: "test" }),
+          knownProvider: (id: string) => id === "thread-a" ? "provider-a" : "provider-b",
+          accountRateLimits: async () => emptyRateLimits(), close: async () => undefined },
+        restoreBindings: async () => undefined, scheduleBindingRestore: () => undefined,
+      } });
+    try {
+      await application.start();
+      (Reflect.get(application, "providersApplyingSettings") as Set<string>).add("provider-a");
+      disconnect(new Error("supervised close"), "provider-a");
+      expect(cancelPending).toHaveBeenLastCalledWith(new Set(["thread-a"]));
+      disconnect(new Error("unexpected loss"), "provider-b");
+      expect(cancelPending).toHaveBeenLastCalledWith(new Set(["thread-b"]));
+    } finally { await application.stop(); }
+  });
+
+  it("空闲补偿恢复失败后仍调度既有绑定重试", async () => {
+    const schedule = vi.fn();
+    const restore = vi.fn(async () => { throw new Error("temporarily unavailable"); });
+    const application = createGatewayApplicationFixture({
+      logger: pino({ level: "silent" }), restoreBindings: restore, scheduleBindingRestore: schedule,
+    });
+    await (Reflect.get(application, "restoreIdleBinding") as (threadId: string) => Promise<void>)
+      .call(application, "cancelled-thread");
+    expect(restore).toHaveBeenCalledExactlyOnceWith(undefined, new Set(["cancelled-thread"]));
+    expect(schedule).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true, "unchanged", "unchanged-disconnected"] as const)("监管applied=%s只影响目标Client并等待目标恢复", async (applied) => {
+    const directory = mkdtempSync(join(unixSocketTmpdir, "codexc-apply-"));
+    secureTestDirectory(directory);
+    const socketPath = join(directory, "app.sock");
+    const apply = vi.fn(async () => applied !== false
+      ? { applied: true as const, changed: applied === true }
+      : { applied: false as const, reason: "active" as const });
+    const owner = new AppServerSupervisorOwner(socketPath, {
+      primaryProvider: "openai", managedProviders: ["ocg-main"], socketPaths: [socketPath],
+    }, { applyProviderSettings: apply });
+    await owner.start();
+    let restore!: () => void;
+    const restored = new Promise<void>((resolve) => { restore = resolve; });
+    const recover = vi.fn(async () => { await restored; });
+    const close = vi.fn(async () => undefined);
+    const application = createGatewayApplicationFixture({
+      config: { codexSocketPath: socketPath }, managedSettingsProviders: ["ocg-main"],
+      codex: { connectedProviderIds: () => ["ocg-main", "openai"], closeProvider: close },
+      providerIdleReleaser: { applySettings: async (_provider: string, _signal: AbortSignal, operation: () => Promise<boolean>) => operation() },
+      gatewayReconnectCoordinator: () => ({ recoverAppliedSettings: recover, disconnected: vi.fn() }),
+    });
+    if (applied === "unchanged-disconnected") apply.mockImplementationOnce(async () => {
+      (Reflect.get(application, "settingsDisconnects") as Map<string, Error>).set("ocg-main", new Error("unexpected disconnect"));
+      return { applied: true, changed: false };
+    });
+    let finished = false;
+    const running = application.applyProviderSettings("ocg-main", new AbortController().signal)
+      .then((result) => { finished = true; return result; });
+    void running.catch(() => undefined);
+    try {
+      await vi.waitFor(() => expect(apply).toHaveBeenCalledOnce());
+      if (applied === true || applied === "unchanged-disconnected") {
+        await vi.waitFor(() => expect(recover).toHaveBeenCalledOnce());
+        expect(finished).toBe(false);
+        await expect(application.applyProviderSettings("ocg-main", new AbortController().signal))
+          .rejects.toThrow("已在应用中");
+        expect(close).toHaveBeenCalledExactlyOnceWith("ocg-main");
+        restore();
+      }
+      expect(await running).toBe(applied !== false);
+      if (applied !== true && applied !== "unchanged-disconnected") {
+        expect(close).not.toHaveBeenCalled();
+        expect(recover).not.toHaveBeenCalled();
+      }
+    } finally {
+      restore();
+      await running.catch(() => undefined);
+      await owner.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("监管部分失败后的目标断线交给既有恢复协调器", async () => {
+    const directory = mkdtempSync(join(unixSocketTmpdir, "codexc-apply-"));
+    secureTestDirectory(directory);
+    const socketPath = join(directory, "app.sock");
+    const disconnected = vi.fn();
+    const application = createGatewayApplicationFixture({
+      config: { codexSocketPath: socketPath }, managedSettingsProviders: ["ocg-main"],
+      codex: { connectedProviderIds: () => ["ocg-main"], closeProvider: vi.fn() },
+      providerIdleReleaser: { applySettings: async (_provider: string, _signal: AbortSignal, operation: () => Promise<boolean>) => operation() },
+      gatewayReconnectCoordinator: () => ({ disconnected }),
+    });
+    const error = new Error("target disconnected");
+    const owner = new AppServerSupervisorOwner(socketPath, {
+      primaryProvider: "openai", managedProviders: ["ocg-main"], socketPaths: [socketPath],
+    }, { applyProviderSettings: async () => {
+      (Reflect.get(application, "settingsDisconnects") as Map<string, Error>).set("ocg-main", error);
+      throw new Error("launch failed");
+    } });
+    await owner.start();
+    try {
+      await expect(application.applyProviderSettings("ocg-main", new AbortController().signal)).rejects.toThrow();
+      expect(disconnected).toHaveBeenCalledExactlyOnceWith(error, "ocg-main");
+    } finally {
+      await owner.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
 
 it("keeps Provider settings notifications separate from model refresh", () => {
   const events: string[] = [];
@@ -271,7 +468,7 @@ describe("GatewayApplication startup cleanup", () => {
       bindings: { conversations: () => [target], actors: () => ["actor"] },
       workspaces: new WorkspaceRegistry([{ id: "main", name: "Main", cwd: directory,
         sandbox: "read-only", approvalPolicy: "never" }], "main"),
-      core: Reflect.get(application, "core"), output: { subscribe: () => undefined },
+      core: Reflect.get(application, "core"), output: { subscribe: () => undefined, observe: () => undefined },
       logger: pino({ level: "silent" }), isSurfaceEnabled: () => true,
       acceptsExecution: () => true,
       creationContext: () => { throw new Error("unexpected creation"); }, presentConfirmation: () => undefined,
@@ -328,7 +525,7 @@ describe("GatewayApplication startup cleanup", () => {
         providerMetrics: { start: stage === "metrics" ? pause : async () => undefined, close: async () => undefined },
         surfaceManager: { preparePersistence: stage === "persistence" ? pause : async () => undefined, start: surfaceStart, stop: async () => undefined },
         channelImageSpool: { start: spoolStart, stop: async () => undefined },
-        conversationIdleReleaser: { start: idleStart, stop: async () => undefined },
+        conversationIdleReleaser: { start: idleStart, stop: async () => undefined, cancelPending: vi.fn() },
       },
     });
     Object.assign(Reflect.get(application, "codex") as object, { connect });

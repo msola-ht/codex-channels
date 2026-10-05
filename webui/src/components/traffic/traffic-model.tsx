@@ -35,7 +35,7 @@ export function TrafficModel({ request, responses, fallback, upstream, provider:
     <TableHint hint={[comparisonHint, upstreamHint].filter(Boolean).join(" ")}>
       <span className="inline-flex max-w-[32rem] flex-wrap items-center gap-1.5 align-middle">
         <span className="max-w-64 truncate">{name ?? "—"}</span>
-        {names.map(response => {
+        {names.filter(response => response !== request?.trim()).map(response => {
           const comparison = modelNameComparison(request, response)
           const comparisonKey = comparisonKeys[comparison]
           const mismatch = comparisonKey === "modelComparison.mismatch"

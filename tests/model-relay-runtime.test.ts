@@ -222,7 +222,7 @@ it("owns a private control endpoint; enables, disables, fails closed and recover
   malformed.on("error", () => {}); await once(malformed, "connect");
   malformed.write('{"version":1,"operation":"status","requestId":{"toString":null}}\n');
   await once(malformed, "close");
-  expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ version: 5, configurationValid: true, queue: { pending: 0, waiting: 0, bytes: 0 } });
+  expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ version: 6, configurationValid: true, queue: { pending: 0, waiting: 0, bytes: 0 } });
   await expect(startModelRelayService(f.configPath, f.environment)).rejects.toThrow();
   expect(await manageModelRelay(parseModelRelayCommand(["enable"]), f.environment)).toMatchObject({ activation: "saved_and_applied" });
   expect(await readRelayQueue(f.environment)).toMatchObject({ configurationValid: true, enabled: true, listening: true });
@@ -651,18 +651,20 @@ it("rejects exhausted history and serialized file size before replacing configur
 it("validates bounded private queue snapshots and refuses incompatible peers", async () => {
   const f = await fixture();
   const row = { requestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", callerId: "client", displayName: "中文用途", provider: "clp-test",
-    model: "x".repeat(200), protocol: "chat", phase: "queue", elapsedMs: 123 };
+    model: "x".repeat(200), reasoningEffort: "high", protocol: "chat", phase: "queue", elapsedMs: 123 };
   let response: Record<string, unknown> = { result: "queue", configurationValid: true, enabled: true, listening: true, requests: Array.from({ length: 64 }, () => row) };
   const endpoint = modelRelayPaths(f.configPath).control;
   const control = new ModelRelayControl(endpoint, async () => response);
   await control.start(); cleanups.push(() => control.close());
   expect(await queryModelRelayControl(endpoint, "queue")).toMatchObject(response);
   for (const requests of [[{ ...row, secret: "hidden" }], [{ ...row, phase: "unknown" }], [{ ...row, elapsedMs: -1 }],
-    [{ ...row, displayName: "bad\nname" }], [{ ...row, displayName: undefined }], [{ ...row, model: "x".repeat(266) }], Array.from({ length: 65 }, () => row)]) {
+    [{ ...row, displayName: "bad\nname" }], [{ ...row, displayName: undefined }], [{ ...row, model: "x".repeat(266) }],
+    [{ ...row, reasoningEffort: undefined }], [{ ...row, reasoningEffort: 0 }], [{ ...row, reasoningEffort: "" }],
+    [{ ...row, reasoningEffort: "x".repeat(65) }], [{ ...row, reasoningEffort: "bad\neffort" }], Array.from({ length: 65 }, () => row)]) {
     response = { result: "queue", configurationValid: true, enabled: true, listening: true, requests };
     expect(await queryModelRelayControl(endpoint, "queue")).toEqual({ result: "unconfirmed" });
   }
-  for (const patch of [{ version: 3 }, { configurationValid: undefined }, { enabled: "yes" }, { listening: undefined }]) {
+  for (const patch of [{ version: 3 }, { version: 5 }, { configurationValid: undefined }, { enabled: "yes" }, { listening: undefined }]) {
     response = { result: "queue", configurationValid: true, enabled: true, listening: true, requests: [], ...patch };
     expect(await queryModelRelayControl(endpoint, "queue")).toEqual({ result: "unconfirmed" });
   }
@@ -676,9 +678,9 @@ it("preserves Unicode model names across fragmented queue IPC responses", async 
   const server = new PrivateIpcServer(endpoint, socket => {
     socket.once("data", data => {
       const request = JSON.parse(data.toString()) as { requestId: string };
-      const payload = Buffer.from(JSON.stringify({ version: 5, requestId: request.requestId, result: "queue", configurationValid: true, enabled: true, listening: true, requests: [{
+      const payload = Buffer.from(JSON.stringify({ version: 6, requestId: request.requestId, result: "queue", configurationValid: true, enabled: true, listening: true, requests: [{
         requestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", callerId: "client", displayName: "中文用途", provider: "clp-test",
-        model: "中文模型", protocol: "responses", phase: "upstream", elapsedMs: 1,
+        model: "中文模型", reasoningEffort: null, protocol: "responses", phase: "upstream", elapsedMs: 1,
       }] }) + "\n");
       const boundary = payload.indexOf(Buffer.from("中")) + 1;
       socket.write(payload.subarray(0, boundary));

@@ -9,7 +9,7 @@ import type { BindingRestoreCoordinator } from "./binding-restore-coordinator.js
 type Initialization = Awaited<ReturnType<ProviderRoutingClient["reconnectProvider"]>>;
 
 export interface GatewayReconnectOptions {
-  codex: Pick<ProviderRoutingClient, "knownProvider" | "reconnectProvider" | "closeProvider">;
+  codex: Pick<ProviderRoutingClient, "knownProvider" | "reconnectProvider" | "connectProvider" | "closeProvider">;
   router: Pick<SessionRouter, "allBindings">;
   core: Pick<ConversationCore, "connectionLost" | "connectionRestored">;
   interactions: Pick<InteractionRouter, "cancelThreads">;
@@ -30,11 +30,40 @@ export class GatewayReconnectCoordinator {
   private readonly disconnectChecks = new Map<string, Promise<void>>();
   private readonly attempts = new Map<string, number>();
   private readonly generations = new Map<string, number>();
+  private readonly appliedSettingsProviders = new Set<string>();
+  private readonly settingsRecoveries = new Map<string, {
+    promise: Promise<void>;
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  }>();
   private stopped = false;
   private failed = false;
   private stopTask: Promise<void> | undefined;
 
   constructor(private readonly options: GatewayReconnectOptions) {}
+
+  /** Reuse the disconnect owner after a supervised settings application. */
+  async recoverAppliedSettings(provider: string, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (this.stopping) throw new Error("Gateway 正在停止，不能恢复 Provider 设置");
+    const checking = this.disconnectChecks.get(provider);
+    if (checking) await checking;
+    signal.throwIfAborted();
+    if (this.stopping) throw new Error("Gateway 正在停止，不能恢复 Provider 设置");
+    let recovery = this.settingsRecoveries.get(provider);
+    if (recovery) return waitForRecovery(recovery.promise, signal);
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    recovery = { promise, resolve, reject };
+    this.settingsRecoveries.set(provider, recovery);
+    this.appliedSettingsProviders.add(provider);
+    this.generations.set(provider, (this.generations.get(provider) ?? 0) + 1);
+    this.markDisconnected(provider, `${provider} 设置已应用，正在恢复连接`);
+    this.beginReconnect();
+    await waitForRecovery(recovery.promise, signal);
+    signal.throwIfAborted();
+  }
 
   private get stopping(): boolean {
     return this.stopped || this.failed || this.options.isStopping();
@@ -42,11 +71,15 @@ export class GatewayReconnectCoordinator {
 
   disconnected(error: Error, provider: string): void {
     if (this.stopping || this.disconnectChecks.has(provider)) return;
+    // Only the supervised close may reuse a handshake made by a concurrent
+    // request. A subsequent socket loss requires a fresh connection.
+    this.appliedSettingsProviders.delete(provider);
     this.generations.set(provider, (this.generations.get(provider) ?? 0) + 1);
     const task = this.handleCodexDisconnect(error, provider).catch((failure) => {
       if (!this.stopping) {
         this.options.logger.error({ err: failure, provider }, "处理 Codex 断线失败");
         this.failed = true;
+        this.failSettingsRecoveries(failure);
         void this.options.requestStop().catch((stopError) => {
           this.options.logger.error({ err: stopError }, "Codex 断线失败后停止 Gateway 失败");
         });
@@ -60,6 +93,7 @@ export class GatewayReconnectCoordinator {
   stop(): Promise<void> {
     if (this.stopTask) return this.stopTask;
     this.stopped = true;
+    this.failSettingsRecoveries(new Error("Gateway 正在停止，设置恢复已取消"));
     this.reconnectAbort?.abort();
     this.stopTask = Promise.allSettled([
       ...this.disconnectChecks.values(),
@@ -81,6 +115,7 @@ export class GatewayReconnectCoordinator {
         }
         this.options.logger.fatal({ err: error }, "Codex App Server 重连次数耗尽，Gateway 将停止");
         this.failed = true;
+        this.failSettingsRecoveries(error);
         void this.options.requestStop().catch((stopError) => {
           this.options.logger.error({ err: stopError }, "Codex 重连失败后停止 Gateway 失败");
         });
@@ -140,6 +175,9 @@ export class GatewayReconnectCoordinator {
       if (this.stopping) return;
       this.options.bindings.completeProviderReconnect(provider);
       this.attempts.delete(provider);
+      this.appliedSettingsProviders.delete(provider);
+      this.settingsRecoveries.get(provider)?.reject(new Error(`${provider} 已主动停止，设置连接恢复已取消`));
+      this.settingsRecoveries.delete(provider);
       this.options.interactions.cancelThreads(affectedThreadIds);
       this.options.core.connectionLost(
         `${provider} App Server 已主动停止；再次使用时将自动启动`,
@@ -148,14 +186,19 @@ export class GatewayReconnectCoordinator {
       this.options.logger.info({ provider }, "模型 Provider App Server 已主动停止");
       return;
     }
-    this.options.bindings.markProviderDisconnected(provider, affectedThreadIds);
     this.options.logger.warn({ err: error, provider }, "Codex App Server 连接已断开");
-    this.options.interactions.cancelThreads(affectedThreadIds);
-    this.options.core.connectionLost(
-      `${provider} App Server 连接已断开，正在恢复连接`,
-      affectedThreadIds,
-    );
+    this.markDisconnected(provider, `${provider} App Server 连接已断开，正在恢复连接`);
     this.beginReconnect();
+  }
+
+  private markDisconnected(provider: string, message: string): void {
+    const affectedThreadIds = new Set(this.options.router.allBindings()
+      .map((binding) => binding.threadId)
+      .filter((threadId) => this.options.codex.knownProvider(threadId) === provider));
+    for (const threadId of affectedThreadIds) this.options.cancelQuestions(threadId);
+    this.options.bindings.markProviderDisconnected(provider, affectedThreadIds);
+    this.options.interactions.cancelThreads(affectedThreadIds);
+    this.options.core.connectionLost(message, affectedThreadIds);
   }
 
   private async reconnectProvider(provider: string, signal: AbortSignal): Promise<void> {
@@ -182,7 +225,9 @@ export class GatewayReconnectCoordinator {
       }
       this.attempts.set(provider, attempt);
       try {
-        initialized ??= await this.options.codex.reconnectProvider(provider);
+        initialized ??= await (this.appliedSettingsProviders.has(provider)
+          ? this.options.codex.connectProvider(provider)
+          : this.options.codex.reconnectProvider(provider));
         if (superseded()) {
           return;
         }
@@ -207,6 +252,9 @@ export class GatewayReconnectCoordinator {
           );
         }
         this.options.bindings.completeProviderReconnect(provider);
+        this.appliedSettingsProviders.delete(provider);
+        this.settingsRecoveries.get(provider)?.resolve();
+        this.settingsRecoveries.delete(provider);
         this.attempts.delete(provider);
         this.options.logger.info(
           {
@@ -233,6 +281,20 @@ export class GatewayReconnectCoordinator {
     }
   }
 
+  private failSettingsRecoveries(error: unknown): void {
+    for (const recovery of this.settingsRecoveries.values()) recovery.reject(error);
+    this.settingsRecoveries.clear();
+    this.appliedSettingsProviders.clear();
+  }
+}
+
+function waitForRecovery(task: Promise<void>, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const abort = (): void => reject(signal.reason instanceof Error ? signal.reason : new Error("Provider 设置恢复已取消"));
+    signal.addEventListener("abort", abort, { once: true });
+    task.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
 async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {

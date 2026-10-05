@@ -11,7 +11,8 @@ function responses(name: string, request: object) {
   const overview: OverviewResponse = {
     range, generatedAt: "", global: null, threadCount: 0, turnCount: 0, providers: [],
     weeklyQuota: { limitId: "codex", planType: "plus", usedPercent: 12.5, remainingPercent: 87.5, resetsAt: 1000, observedAtMs: 1, estimate: null },
-    errors: { startAtMs: 1, endAtMs: 2, requestCount: 0, unsuccessfulRequestCount: 0, groups: [], totalGroupCount: 0 },
+    errors: { startAtMs: 1, endAtMs: 2, requestCount: 0, unsuccessfulRequestCount: 0,
+      requestOutcomes: { completed: 0, interrupted: 0, failed: 0, incomplete: 0 }, groups: [], totalGroupCount: 0 },
     trend: { range, generatedAt: "", granularity: "day", daily: [] },
     heatmap: { range, generatedAt: "", daily: [] },
   };

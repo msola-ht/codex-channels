@@ -19,6 +19,7 @@ import {
 import type { ConversationTarget } from "../conversation-core/index.js";
 
 const defaultPollIntervalMs = 3_000;
+const maximumFailedArchives = 128;
 
 export interface ChannelImageManifest {
   version: 1;
@@ -48,6 +49,8 @@ export class ChannelImageSpool {
   private timer: NodeJS.Timeout | undefined;
   private running: Promise<void> | undefined;
   private stopped = false;
+  // A failed archive must never turn a possibly delivered image into a fresh send.
+  private readonly failedArchives = new Map<string, string>();
 
   constructor(
     private readonly options: ChannelImageSpoolOptions,
@@ -109,19 +112,11 @@ export class ChannelImageSpool {
     if (this.running !== undefined) {
       return this.running;
     }
-    this.running = this.drainLoop().finally(() => {
+    // Retry remaining files on the next poll, including persistent filesystem failures.
+    this.running = this.drainOnce().then(() => undefined).finally(() => {
       this.running = undefined;
     });
     return this.running;
-  }
-
-  private async drainLoop(): Promise<void> {
-    while (!this.stopped) {
-      const result = await this.drainOnce();
-      if (result.processed === 0 && result.failed === 0) {
-        return;
-      }
-    }
   }
 
   private async drainOnce(): Promise<ChannelImageSpoolDrainResult> {
@@ -138,16 +133,27 @@ export class ChannelImageSpool {
       );
       return result;
     }
+    const pendingNames = new Set(entries);
+    for (const name of this.failedArchives.keys()) {
+      if (!pendingNames.has(name)) this.failedArchives.delete(name);
+    }
     for (const name of entries) {
+      if (this.stopped) break;
+      const archiveFailure = this.failedArchives.get(name);
+      if (archiveFailure !== undefined) {
+        if (this.archiveEntry(name, archiveFailure)) this.failedArchives.delete(name);
+        result.failed += 1;
+        continue;
+      }
+      if (this.failedArchives.size >= maximumFailedArchives) continue;
       try {
         await this.processEntry(name);
         result.processed += 1;
       } catch (error) {
         result.failed += 1;
-        this.archiveEntry(
-          name,
-          error instanceof Error ? error.message : String(error),
-        );
+        const message = error instanceof Error ? error.message : String(error);
+        this.failedArchives.set(name, message);
+        if (this.archiveEntry(name, message)) this.failedArchives.delete(name);
       }
     }
     return result;
@@ -234,7 +240,7 @@ export class ChannelImageSpool {
       || resolved.startsWith(`${pending}${sep}`);
   }
 
-  private archiveEntry(name: string, message: string): void {
+  private archiveEntry(name: string, message: string): boolean {
     try {
       const manifestPath = join(this.pendingDirectory, name);
       const base = name.replace(/\.json$/u, "");
@@ -249,11 +255,13 @@ export class ChannelImageSpool {
       );
       securePrivateFileSync(join(this.failedDirectory, `${base}.error.txt`));
       renameSync(manifestPath, join(this.failedDirectory, name));
+      return true;
     } catch (error) {
       this.options.logger.error(
         { err: error, manifest: name },
         "渠道图片发送失败后归档不完整",
       );
+      return false;
     }
   }
 

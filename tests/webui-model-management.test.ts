@@ -37,7 +37,7 @@ it("separates model settings from general preferences and renders model submenus
     } finally {await server.close();}
   `;
   const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
+    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL",
   })) as Record<string, string> & {paths: string[]};
   expect(result.general).not.toContain("Sandbox");
   expect(result.permissions).toContain("Sandbox");
@@ -52,7 +52,7 @@ it("separates model settings from general preferences and renders model submenus
   expect(result.context).not.toContain("Sandbox");
   expect(result.custom).toContain("新增提供商");
   expect(result.custom).not.toContain("保存模型上下文窗口");
-  expect(result.defaults).toContain("保存托管 Provider 默认值");
+  expect(result.defaults).toContain("保存托管提供商默认值");
   expect(result.defaults).not.toContain("新增提供商");
   expect(result.windows).toContain("保存模型上下文窗口");
   expect(result.windows).toContain("<table");
@@ -64,4 +64,4 @@ it("separates model settings from general preferences and renders model submenus
   for (const path of result.paths) expect(result.sidebar).toContain('href="' + path + '"');
   expect(result.sidebar).toContain('aria-expanded="true"');
   expect(result.sidebar).toContain('aria-current="page"');
-});
+}, 35_000);

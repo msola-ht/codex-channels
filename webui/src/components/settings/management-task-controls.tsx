@@ -10,8 +10,8 @@ import { formatBytes } from "@/lib/format"
 import type { ManagementTaskController } from "@/lib/settings-management"
 
 const maintenanceActions = [
-  ["cleanup", "清理指标库"],
-  ["reset", "重建指标库"],
+  ["cleanup", "managementUi.metricsCleanup"],
+  ["reset", "managementUi.metricsReset"],
 ] as const
 
 export function ManagementTaskControls({ tasks, providerIds = [], section = "data" }: { tasks: ManagementTaskController; providerIds?: string[]; section?: "data" | "services" }) {
@@ -30,14 +30,14 @@ export function ManagementTaskControls({ tasks, providerIds = [], section = "dat
       </CardHeader>
       <CardContent className="flex flex-col gap-4 text-sm">
         <div className="flex flex-wrap gap-2">
-          {section === "services" && <Button variant="outline" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "update" })}>更新源码</Button>}
+          {section === "services" && <Button variant="outline" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "update" })}>{t("managementUi.updateSource")}</Button>}
           {section === "data" && maintenanceActions.map(([action, label]) => (
-            <Button key={action} variant="destructive" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "metrics", action })}>{label}</Button>
+            <Button key={action} variant="destructive" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "metrics", action })}>{t(label)}</Button>
           ))}
         </div>
         {section === "data" && <FieldGroup className="gap-0">
           <Field orientation="responsive" data-disabled={disabled}>
-            <FieldLabel htmlFor="management-prune-provider" className="text-muted-foreground">清理 Provider 指标</FieldLabel>
+            <FieldLabel htmlFor="management-prune-provider" className="text-muted-foreground">{t("managementUi.pruneProvider")}</FieldLabel>
             <FieldContent className="flex-row items-center gap-2">
               <Input
                 id="management-prune-provider"
@@ -45,7 +45,7 @@ export function ManagementTaskControls({ tasks, providerIds = [], section = "dat
                 list="management-prune-provider-options"
                 value={pruneProvider}
                 onChange={(event) => setPruneProvider(event.target.value)}
-                placeholder="例如 openai"
+                placeholder={t("managementUi.providerExample")}
                 disabled={disabled}
               />
               <datalist id="management-prune-provider-options">
@@ -56,7 +56,7 @@ export function ManagementTaskControls({ tasks, providerIds = [], section = "dat
                 size="sm"
                 disabled={disabled || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(pruneProvider)}
                 onClick={() => void tasks.run({ operation: "metrics", action: "prune", target: pruneProvider })}
-              >清理
+              >{t("managementUi.cleanup")}
               </Button>
             </FieldContent>
           </Field>
@@ -72,20 +72,29 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
   const pending = tasks.pendingPreview
   if (pending === null) return null
   const isTraffic = pending.input.operation === "traffic"
-  // 仅翻译清理预览的受控文案；未知预览原样保留，避免丢失确认所需信息。
+  // 翻译已知受控预览文案；未知内容保留原值，避免丢失确认信息。
   const previewText = (value: string) => {
-    if (!isTraffic) return value
     if (value === "执行 codexc traffic cleanup --confirm") return t("traffic.cleanupEffect", { command: "codexc traffic cleanup --confirm" })
+    if (value === "执行 codexc update（独立更新子进程）") return t("managementUi.executeUpdate")
+    if (value.startsWith("执行 codexc ")) return t("managementUi.executeCommand", { command: value.slice(3) })
+    const known = {
+      "Gateway 必须已停止，且指标 Socket 不可用": "managementUi.metricsStoppedRequired",
+      "操作前备份本地指标库；失败时保留备份并尝试恢复原服务状态": "managementUi.pruneRecovery",
+      "操作前保留指标数据库备份；失败时保留备份并重试": "managementUi.metricsRecovery",
+      "服务管理器失败时任务标记失败，不自动扩大操作范围": "managementUi.serviceRecovery",
+      "更新子进程负责备份、版本切换和服务恢复；失败时保留恢复信息": "managementUi.updateRecovery",
+    } as const
+    if (Object.hasOwn(known, value)) return t(known[value as keyof typeof known])
     if (value === "全部 App Server 与 Relay 必须已停止") return t("traffic.cleanupStoppedRequired")
     if (value === "永久删除全部可识别调用记录，无法恢复；未知文件与目录不处理") return t("traffic.cleanupIrreversible")
     return value
   }
   const description = [
-    isTraffic ? t("traffic.cleanupOperation", { operation: pending.preview.operation, action: pending.preview.action }) : `操作：${pending.preview.operation} · ${pending.preview.action}`,
-    pending.preview.target ? (isTraffic ? t("traffic.cleanupTarget", { target: pending.preview.target }) : `目标：${pending.preview.target}`) : null,
+    t("managementUi.operationAction", { operation: pending.preview.operation, action: pending.preview.action }),
+    pending.preview.target ? t("managementUi.target", { target: pending.preview.target }) : null,
     ...pending.preview.effects.map(previewText),
-    ...pending.preview.preconditions.map((condition) => isTraffic ? t("traffic.cleanupPrecondition", { condition: previewText(condition) }) : `前置条件：${condition}`),
-    pending.preview.recovery ? (isTraffic ? t("traffic.cleanupRecovery", { recovery: previewText(pending.preview.recovery) }) : `失败处理：${pending.preview.recovery}`) : null,
+    ...pending.preview.preconditions.map((condition) => t("managementUi.precondition", { condition: previewText(condition) })),
+    pending.preview.recovery ? t("managementUi.recovery", { recovery: previewText(pending.preview.recovery) }) : null,
   ].filter((item): item is string => item !== null)
   const destructive = pending.input.operation === "metrics"
     || pending.input.operation === "traffic"
@@ -93,7 +102,7 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
   const traffic = pending.input.operation === "traffic"
     ? trafficCleanupResource(pending.preview.resource)
     : null
-  return <ManagementConfirmationDialog open saving={tasks.saving} loading={tasks.loading} title={isTraffic ? t("traffic.cleanupConfirmTitle") : "确认执行管理任务"} description={isTraffic ? t("traffic.cleanupConfirmDescription") : "确认后提交后台任务，任务将在服务端串行执行。"} confirmLabel={isTraffic ? t("traffic.cleanupConfirmAction") : "确认执行"} confirmVariant={destructive ? "destructive" : "default"} confirmDisabled={traffic?.writersRunning === true} onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
+  return <ManagementConfirmationDialog open saving={tasks.saving} loading={tasks.loading} title={isTraffic ? t("traffic.cleanupConfirmTitle") : t("managementUi.taskConfirmTitle")} description={isTraffic ? t("traffic.cleanupConfirmDescription") : t("managementUi.taskConfirmDescription")} confirmLabel={isTraffic ? t("traffic.cleanupConfirmAction") : t("managementUi.confirmExecute")} confirmVariant={destructive ? "destructive" : "default"} confirmDisabled={traffic?.writersRunning === true} onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
     <p className="whitespace-pre-line">{description.join("\n") || pending.input.operation}</p>
     {traffic === null ? null : <p className="mt-2 text-muted-foreground">
       {t(traffic.writersRunning ? "traffic.cleanupResourceRunning" : "traffic.cleanupResourceStopped", {

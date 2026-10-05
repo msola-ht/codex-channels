@@ -1,6 +1,7 @@
 import { useApi } from "@/hooks/use-api"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { useTranslation } from "@/hooks/use-translation"
+import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { fetchSettingsSummary } from "@/lib/api"
 import { SettingsPageFrame } from "@/components/settings/settings-page-frame"
 import { GatewaySettingsSection } from "@/components/settings/gateway-settings-section"
@@ -13,7 +14,7 @@ export function ChannelsPage() {
   const { t } = useTranslation()
   const summary = useApi(fetchSettingsSummary, [])
   return <SettingsPageFrame title="navigation.channelConfiguration" busy={summary.loading} refresh={summary.refetch}>
-    {summary.error ? <SettingsError message={summary.error} retry={summary.refetch} /> : summary.data ? <ChannelStatusCard channels={summary.data.gateway.channels} /> : <LoadingSettingsCard title={t("navigation.channelConfiguration")} />}
+    {summary.error ? <SettingsError message={translateApiErrorCode(t, summary.errorCode)} retry={summary.refetch} /> : summary.data ? <ChannelStatusCard channels={summary.data.gateway.channels} /> : <LoadingSettingsCard title={t("navigation.channelConfiguration")} />}
     {summary.data && <SettingsCliCommandList scope="channels" entries={summary.data.cli} />}
   </SettingsPageFrame>
 }

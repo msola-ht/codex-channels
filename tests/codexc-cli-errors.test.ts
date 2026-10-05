@@ -183,7 +183,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     expect(result.stderr).not.toContain("file://");
   });
 
-  it.skipIf(process.platform === "win32")("reports a silent non-zero App Server exit exactly once", () => {
+  it.skipIf(process.platform === "win32").each([0, 1])("reports a silent App Server exit=%i before readiness exactly once", (exitCode) => {
     const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-start-exit-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -192,7 +192,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     const fakeCodex = join(root, "fake-codex.mjs");
     mkdirSync(workspace);
     mkdirSync(codexHome);
-    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(1);\n");
+    writeFileSync(fakeCodex, `#!/usr/bin/env node\nprocess.exit(${exitCode});\n`);
     chmodSync(fakeCodex, 0o700);
     const environment = {
       ...process.env,
@@ -213,7 +213,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Codex App Server 进程意外退出：exit=1");
+    expect(result.stderr).toContain(`App Server 启动失败：openai（exit=${exitCode}）`);
     expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
     expect(result.stderr).not.toContain("子命令执行失败");
     expect(result.stderr).not.toContain("Node.js v");

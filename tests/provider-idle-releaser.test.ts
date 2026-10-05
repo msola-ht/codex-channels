@@ -10,6 +10,84 @@ const binding = {
 };
 
 describe("ProviderIdleReleaser", () => {
+  it("设置应用排空目标在途请求并阻止新请求，其他Provider继续运行", async () => {
+    const events: string[] = [];
+    let finish!: () => void;
+    let finishApply!: () => void;
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(), listConnectedProviders: () => [],
+      closeProvider: async () => undefined, listBindings: () => [binding],
+    });
+    const running = releaser.runActivity("target", async () => {
+      events.push("old");
+      await new Promise<void>((resolve) => { finish = resolve; });
+    });
+    const applying = releaser.applySettings("target", new AbortController().signal, async () => {
+      events.push("apply");
+      await new Promise<void>((resolve) => { finishApply = resolve; });
+    });
+    const next = releaser.runActivity("target", async () => { events.push("next"); });
+    await releaser.runActivity("other", async () => { events.push("other"); });
+    expect(events).toEqual(["old", "other"]);
+    finish();
+    await running;
+    await vi.waitFor(() => expect(events).toEqual(["old", "other", "apply"]));
+    finishApply();
+    await Promise.all([applying, next]);
+    expect(events).toEqual(["old", "other", "apply", "next"]);
+    await releaser.stop();
+  });
+
+  it("取消等待排空的设置应用立即释放新请求且不启动应用", async () => {
+    let finish!: () => void;
+    const apply = vi.fn(async () => undefined);
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(), listConnectedProviders: () => [],
+      closeProvider: async () => undefined, listBindings: () => [binding],
+    });
+    const running = releaser.runOperation("target", async () => {
+      await new Promise<void>((resolve) => { finish = resolve; });
+    });
+    const cancellation = new AbortController();
+    const applying = releaser.applySettings("target", cancellation.signal, apply);
+    cancellation.abort(new Error("stopped"));
+    await expect(applying).rejects.toThrow("stopped");
+    await releaser.runOperation("target", async () => undefined);
+    expect(apply).not.toHaveBeenCalled();
+    finish();
+    await running;
+    await releaser.stop();
+  });
+
+  it("第二次设置应用取消不清除第一轮排空所有权，也不提前放行请求", async () => {
+    let finish!: () => void;
+    let applied!: () => void;
+    const events: string[] = [];
+    const releaser = new ProviderIdleReleaser({
+      logger: silentLogger(), listConnectedProviders: () => [],
+      closeProvider: async () => undefined, listBindings: () => [binding],
+    });
+    const running = releaser.runOperation("target", async () => {
+      await new Promise<void>((resolve) => { finish = resolve; });
+    });
+    const first = releaser.applySettings("target", new AbortController().signal, async () => {
+      events.push("apply");
+      await new Promise<void>((resolve) => { applied = resolve; });
+    });
+    const cancellation = new AbortController();
+    const second = releaser.applySettings("target", cancellation.signal, async () => { events.push("cancelled-apply"); });
+    const next = releaser.runOperation("target", async () => { events.push("next"); });
+    cancellation.abort(new Error("cancelled"));
+    await expect(second).rejects.toThrow("cancelled");
+    expect(events).toEqual([]);
+    finish();
+    await running;
+    await vi.waitFor(() => expect(events).toEqual(["apply"]));
+    applied();
+    await Promise.all([first, next]);
+    expect(events).toEqual(["apply", "next"]);
+    await releaser.stop();
+  });
   it("closes every Client and stops its App Server when the Gateway has no bindings", async () => {
     const events: string[] = [];
     const releaser = new ProviderIdleReleaser({

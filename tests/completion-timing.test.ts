@@ -25,6 +25,7 @@ describe("mergeCompletionTiming", () => {
       outputTokens: 100,
       reasoningOutputTokens: 40,
       compact: {
+        requestOutcomes: { completed: 1, interrupted: 0, failed: 0, incomplete: 0 },
         model: "gpt-5.6-sol",
         hasMixedModels: false,
         requestCount: 1,
@@ -37,11 +38,16 @@ describe("mergeCompletionTiming", () => {
 
     expect(mergeCompletionTiming(latestTurn, "turn-1", undefined)).toEqual({
       modelRequestCount: 2,
+      completedModelRequestCount: 2,
+      interruptedModelRequestCount: 0,
+      failedModelRequestCount: 0,
+      incompleteModelRequestCount: 0,
       requestInputTokens: 1_000,
       requestCachedInputTokens: 800,
       requestOutputTokens: 100,
       reasoningTokens: 40,
       compact: {
+        requestOutcomes: { completed: 1, interrupted: 0, failed: 0, incomplete: 0 },
         model: "gpt-5.6-sol",
         hasMixedModels: false,
         requestCount: 1,
@@ -66,6 +72,7 @@ describe("mergeCompletionTiming", () => {
       requestCachedInputTokens: 400,
       reasoningTokens: 20,
       compact: {
+        requestOutcomes: { completed: 1, interrupted: 0, failed: 0, incomplete: 0 },
         model: "stale-model",
         hasMixedModels: false,
         requestCount: 1,
@@ -86,10 +93,19 @@ describe("mergeCompletionTiming", () => {
     expect(timing).not.toHaveProperty("compact");
   });
 
-  it("reconciles persisted request totals with the live request status breakdown", () => {
+  it("restores persisted outcomes even when live status events were missed", () => {
     const latestTurn = turnSummary({
       requestCount: 22,
       unsuccessfulRequestCount: 14,
+      requestOutcomes: { completed: 8, interrupted: 2, failed: 11, incomplete: 1 },
+    });
+
+    expect(mergeCompletionTiming(latestTurn, "turn-1", undefined)).toMatchObject({
+      modelRequestCount: 22,
+      completedModelRequestCount: 8,
+      interruptedModelRequestCount: 2,
+      incompleteModelRequestCount: 1,
+      failedModelRequestCount: 11,
     });
 
     expect(mergeCompletionTiming(latestTurn, "turn-1", {
@@ -113,6 +129,7 @@ describe("mergeCompletionTiming", () => {
     const latestTurn = turnSummary({
       requestCount: 5,
       unsuccessfulRequestCount: 2,
+      requestOutcomes: { completed: 3, interrupted: 1, failed: 1, incomplete: 0 },
     });
 
     expect(mergeCompletionTiming(latestTurn, "turn-1", {
@@ -143,6 +160,8 @@ function turnSummary(
     turnId: "turn-1",
     requestCount: 0,
     unsuccessfulRequestCount: 0,
+    requestOutcomes: { completed: overrides.requestCount ?? 0, interrupted: 0, failed: 0, incomplete: 0 },
+    interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
     inputTokens: 0,
     cachedInputTokens: 0,
     outputTokens: 0,

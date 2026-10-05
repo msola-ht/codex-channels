@@ -28,7 +28,7 @@ export function inspectGatewayConfiguration(environment = process.env) {
 export function inspectDatabaseUpdates(environment = process.env) {
   const state = inspectStateDatabaseUpgrade(environment);
   const status = inspectMetricsDatabase(environment);
-  const metricsUpgrade = status.exists && [20, 21, 22, 23, 24, 25].includes(status.schemaVersion);
+  const metricsUpgrade = status.exists && [20, 21, 22, 23, 24, 25, 26].includes(status.schemaVersion);
   if (metricsUpgrade) upgradeRequestMetricsDatabase(status.databasePath);
   const metrics = metricsUpgrade ? { ...status, targetSchemaVersion: modelRequestMetricsSchemaVersion } : validateMetricsDatabaseStructure(environment);
   const sessionDisplayCache = inspectSessionDisplayCache(environment);
@@ -42,7 +42,7 @@ export function inspectDatabaseUpdates(environment = process.env) {
 export function applyDatabaseUpdates(environment = process.env) {
   const inspection = inspectDatabaseUpdates(environment);
   const state = upgradeStateDatabase(environment);
-  if (inspection.metrics.exists && [20, 21, 22, 23, 24, 25].includes(inspection.metrics.schemaVersion)) {
+  if (inspection.metrics.exists && [20, 21, 22, 23, 24, 25, 26].includes(inspection.metrics.schemaVersion)) {
     return Promise.resolve(state).then(() => maintainMetricsSchema("upgrade", ["--from", String(inspection.metrics.schemaVersion), "--to", String(modelRequestMetricsSchemaVersion), "--apply"], environment));
   }
   return state;

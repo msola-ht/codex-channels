@@ -21,7 +21,7 @@ export class ModelRelayControl {
         handled = true;
         let request;
         try { request = JSON.parse(Buffer.concat(chunks).toString("utf8").trim()); } catch { socket.destroy(); return; }
-        if (!request || Array.isArray(request) || typeof request !== "object" || request.version !== 5
+        if (!request || Array.isArray(request) || typeof request !== "object" || request.version !== 6
           || typeof request.requestId !== "string" || !uuid.test(request.requestId) || !["apply", "status", "queue"].includes(request.operation)
           || Object.keys(request).some(key => !["version", "requestId", "operation", ...(request.operation === "apply" ? ["digest"] : [])].includes(key))
           || (request.operation === "apply" && (typeof request.digest !== "string" || !/^[a-f0-9]{64}$/u.test(request.digest)))) {
@@ -31,8 +31,8 @@ export class ModelRelayControl {
           if (this.#closed || controller.signal.aborted) throw new Error("Control closed");
           return handler(request, controller.signal);
         }).then(result => {
-          if (!this.#closed && !controller.signal.aborted) socket.end(`${JSON.stringify({ version: 5, requestId: request.requestId, ...result })}\n`);
-        }, () => { if (!socket.destroyed) socket.end(`${JSON.stringify({ version: 5, requestId: request.requestId, result: "rejected", reason: "unavailable" })}\n`); });
+          if (!this.#closed && !controller.signal.aborted) socket.end(`${JSON.stringify({ version: 6, requestId: request.requestId, ...result })}\n`);
+        }, () => { if (!socket.destroyed) socket.end(`${JSON.stringify({ version: 6, requestId: request.requestId, result: "rejected", reason: "unavailable" })}\n`); });
       });
     }, { maximumConnections: 4, connectionTimeoutMs: 2000 });
   }
@@ -49,9 +49,9 @@ export async function queryModelRelayControl(path, operation, digest) {
   const requestId = randomUUID();
   try {
     const response = await requestPrivateIpcJson(path,
-      { version: 5, requestId, operation, ...(digest === undefined ? {} : { digest }) },
+      { version: 6, requestId, operation, ...(digest === undefined ? {} : { digest }) },
       { timeoutMs: 2000, maximumBytes: operation === "queue" ? 128 * 1024 : 8192 });
-    if (response.version !== 5 || response.requestId !== requestId
+    if (response.version !== 6 || response.requestId !== requestId
       || (operation === "apply" && (response.result !== "applied" || response.digest !== digest))
       || (operation === "status" && response.result !== "status")
       || (operation === "queue" && response.result !== "queue")) throw new Error("Invalid acknowledgment");
@@ -62,12 +62,14 @@ export async function queryModelRelayControl(path, operation, digest) {
     if (operation === "queue") {
       if (typeof response.configurationValid !== "boolean" || typeof response.enabled !== "boolean" || typeof response.listening !== "boolean"
         || !Array.isArray(response.requests) || response.requests.length > 64 || response.requests.some(row =>
-        !row || typeof row !== "object" || Array.isArray(row) || Object.keys(row).length !== 8
+        !row || typeof row !== "object" || Array.isArray(row) || Object.keys(row).length !== 9
         || (row.displayName !== null && !relayDisplayNameSchema.safeParse(row.displayName).success)
         || typeof row.requestId !== "string" || !uuid.test(row.requestId)
         || typeof row.callerId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(row.callerId)
         || (row.provider !== null && (typeof row.provider !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(row.provider)))
         || (row.model !== null && (typeof row.model !== "string" || row.model.length < 1 || row.model.length > 265))
+        || (row.reasoningEffort !== null && (typeof row.reasoningEffort !== "string" || row.reasoningEffort.length < 1
+          || row.reasoningEffort.length > 64 || [...row.reasoningEffort].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)))
         || !["chat", "responses"].includes(row.protocol)
         || !["input", "queue", "prepare", "upstream", "delivery"].includes(row.phase)
         || !Number.isSafeInteger(row.elapsedMs) || row.elapsedMs < 0)) throw new Error("Invalid queue snapshot");

@@ -318,6 +318,12 @@ describe("Relay queue and service presentation", () => {
     expect(result.invalid).toContain("当前运行配置不可用");
     expect(result.notListening).toContain("Relay is not listening");
     expect(result.ready).toContain("请求模型");
+    const headers = (html: string) => [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/gu)].map(match => match[1]?.replace(/<[^>]*>/gu, ""));
+    expect(headers(result.ready!)).toEqual(["调用方 ID", "请求模型", "思考", "阶段", "已耗时"]);
+    expect(result.ready).toMatch(/<td\b[^>]*>high<\/td>/u);
+    expect(result.missingEffort).toMatch(/<td\b[^>]*>—<\/td>/u);
+    expect(result.unknownEffort).toMatch(/<td\b[^>]*>future<\/td>/u);
+    expect(headers(result.englishEffort!)).toContain("Reasoning");
     expect(result.ready).toMatch(/<h1[^>]*>请求队列<\/h1>/u);
     expect(result.ready).not.toContain('role="dialog"');
     expect(result.loading).toContain('data-slot="skeleton"');
@@ -370,14 +376,17 @@ function renderRelayQueueAndServiceFixture() {
         globalThis.queue={...globalThis.queue,loading:false,data:{state:'running',configurationValid:true,enabled:true,listening:true,requests:[]}};
         const empty=render('en');
         globalThis.queue.data={state:'unknown'}; const unknown=render('zh');
-        globalThis.queue.data={state:'running',configurationValid:true,enabled:true,listening:true,requests:[{requestId:'id',callerId:'client',displayName:'中文用途',provider:'clp-test',model:'long/model',protocol:'responses',phase:'queue',elapsedMs:2000}]};
+        globalThis.queue.data={state:'running',configurationValid:true,enabled:true,listening:true,requests:[{requestId:'id',callerId:'client',displayName:'中文用途',provider:'clp-test',model:'long/model',reasoningEffort:'high',protocol:'responses',phase:'queue',elapsedMs:2000}]};
         const ready=render('zh');
+        const englishEffort=render('en');
+        globalThis.queue.data.requests[0].reasoningEffort=null; const missingEffort=render('zh');
+        globalThis.queue.data.requests[0].reasoningEffort='future'; const unknownEffort=render('zh');
         globalThis.queue.data.enabled=false; globalThis.queue.data.listening=false; const disabled=render('zh');
         globalThis.queue.data.configurationValid=false; const invalid=render('zh');
         globalThis.queue.data.configurationValid=true; globalThis.queue.data.enabled=true; const notListening=render('en');
 
         globalThis.queue.error='unavailable'; const failed=render('zh');
-        return {loading,empty,unknown,ready,failed,disabled,invalid,notListening};
+        return {loading,empty,unknown,ready,failed,disabled,invalid,notListening,englishEffort,missingEffort,unknownEffort};
       }
       async function renderServiceScenario() {
         const {ManagedServices} = await server.ssrLoadModule('/src/components/settings/managed-services.tsx');

@@ -15,6 +15,8 @@ import { QueueEventsServer } from "../../runtime/queue-events.mjs";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
 import {
+  applyAppServerProviderSettings,
+  readAppServerProviderSettingsFingerprint,
   ensureAppServerProvider,
   releaseAppServerProvider,
 } from "../../runtime/app-server-supervisor.mjs";
@@ -32,7 +34,6 @@ import {
   loadConfiguredCustomPrimaryModelProvider,
   loadConfiguredCustomSwitchingModelProviders,
   loadManagedModelProviders,
-  loadManagedModelProviderSettings,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
   loadManagedModelWindow,
@@ -93,6 +94,7 @@ import {
   ConversationResetCreditService,
   type ThreadLockHolder,
   type ThreadOccupancyReleaseResult,
+  type ModelOption,
 } from "../application/index.js";
 import {
   ConversationCore,
@@ -174,7 +176,14 @@ export abstract class GatewayComponentGraph {
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
   private readonly conversations: ConversationService;
-  readonly refreshProviderModels: () => void;
+  private readonly modelSelection: ModelSelectionService;
+  private readonly providerModelSnapshots = new Map<string, ModelOption[]>();
+  private readonly captureProviderModels: (provider: string) => { fingerprint: string; models: ModelOption[] };
+  readonly managedSettingsProviders: readonly string[];
+  private readonly providerSettingsAbort = new AbortController();
+  private readonly providersApplyingSettings = new Set<string>();
+  private readonly pendingProviderSettings = new Set<string>();
+  private readonly settingsDisconnects = new Map<string, Error>();
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly relayMetrics: RelayMetricsComposition | undefined;
   private readonly metricsEvents: QueueEventsServer | undefined;
@@ -231,19 +240,19 @@ export abstract class GatewayComponentGraph {
       primaryProvider,
       ...managedProviders.map(({ provider }) => provider),
     ]);
-    const readSupplementaryModels = () => {
-      const managedDefaults = loadManagedModelProviderSettings();
-      return providerDefinitions.flatMap((definition) =>
-        loadManagedModelOptions(
-          managedProviderDirectory(process.env, definition),
-          configuredProviders.has(definition.id),
-          definition,
-        ).map((model) => ({
-          ...model,
-          isDefault: model.model === managedDefaults.find((entry) => entry.provider === definition.id)?.model,
-        })));
+    this.managedSettingsProviders = providerDefinitions
+      .map((definition) => definition.id)
+      .filter((provider) => configuredProviders.has(provider));
+    this.captureProviderModels = (provider) => {
+      const definition = providerDefinitions.find((entry) => entry.id === provider);
+      if (!definition) throw new Error("Provider 模型目录定义不存在");
+      const fingerprint = readAppServerProviderSettingsFingerprint(provider);
+      const models = loadManagedModelOptions(managedProviderDirectory(process.env, definition), true, definition);
+      if (fingerprint !== readAppServerProviderSettingsFingerprint(provider)) throw new Error("Provider 模型目录在读取期间发生变化");
+      return { fingerprint, models };
     };
-    const supplementaryModels = readSupplementaryModels();
+    const unavailableModels = providerDefinitions.filter((definition) => !configuredProviders.has(definition.id))
+      .flatMap((definition) => loadManagedModelOptions(managedProviderDirectory(process.env, definition), false, definition));
     const codexBinary = resolveExecutable(effectiveCodexBinary(config.codexBinary));
     const createCodexProcessInvocation = (args: readonly string[]) =>
       executableInvocation(codexBinary, args);
@@ -530,7 +539,7 @@ export abstract class GatewayComponentGraph {
       this.codex,
       this.router,
       config.codexModel,
-      supplementaryModels,
+      unavailableModels,
       customPrimaryProvider?.id ?? primaryProvider,
       customSwitchingProviders.filter((provider) => provider.catalogSource.kind === "official").map((provider) => ({
         provider: provider.provider,
@@ -550,7 +559,7 @@ export abstract class GatewayComponentGraph {
         defaultModel: provider.model,
       })),
     );
-    this.refreshProviderModels = () => models.updateSupplementaryModels(readSupplementaryModels());
+    this.modelSelection = models;
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,
       this.router,
@@ -689,7 +698,11 @@ export abstract class GatewayComponentGraph {
         idleState: (target) => this.router.idleState(target),
         ensureIdleState: (target, atMs) =>
           this.router.ensureIdleState(target, atMs),
-        releaseIdle: (target) => service.releaseIdle(target),
+        releaseIdle: (target, condition) => service.releaseIdle(target, condition),
+        canRelease: (threadId) => !this.stopping && !this.isBindingRestoring(threadId),
+        restoreBinding: (threadId) => {
+          void this.restoreIdleBinding(threadId);
+        },
         notifyReleased: (target, threadId) => {
           this.output.publish({
             type: "conversation.idle.released",
@@ -975,6 +988,8 @@ export abstract class GatewayComponentGraph {
           if (summary === null) return undefined;
           return {
             responseUsage: summary.responseUsage ?? null,
+            requestOutcomes: summary.requestOutcomes,
+            interruptionSummary: summary.interruptionSummary,
             requestCount: summary.requestCount,
             unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
             inputTokens: summary.inputTokens,
@@ -990,6 +1005,8 @@ export abstract class GatewayComponentGraph {
           if (aggregate === null) return undefined;
           return {
             responseUsage: aggregate.responseUsage ?? null,
+            requestOutcomes: aggregate.requestOutcomes,
+            interruptionSummary: aggregate.interruptionSummary,
             requestCount: aggregate.requestCount,
             unsuccessfulRequestCount: aggregate.unsuccessfulRequestCount,
             inputTokens: aggregate.inputTokens,
@@ -1220,8 +1237,133 @@ export abstract class GatewayComponentGraph {
     return result;
   }
 
-  hasActiveTurns(): boolean {
-    return this.core.hasActiveTurns();
+  async applyProviderSettings(provider: string, signal: AbortSignal): Promise<boolean> {
+    this.requireRunning();
+    if (!this.managedSettingsProviders.includes(provider)) {
+      throw new Error("Provider 不属于当前 Gateway 的设置应用范围");
+    }
+    const cancellation = AbortSignal.any([signal, this.providerSettingsAbort.signal]);
+    cancellation.throwIfAborted();
+    if (this.pendingProviderSettings.has(provider)) throw new Error("该 Provider 设置已在应用中");
+    this.pendingProviderSettings.add(provider);
+    try {
+      return await this.applyProviderSettingsOnce(provider, cancellation);
+    } finally {
+      this.pendingProviderSettings.delete(provider);
+    }
+  }
+
+  refreshProviderModels(provider: string, signal: AbortSignal): void {
+    this.requireRunning();
+    const cancellation = AbortSignal.any([signal, this.providerSettingsAbort.signal]);
+    cancellation.throwIfAborted();
+    const snapshot = this.providerModelSnapshots.get(provider);
+    if (!snapshot) throw new Error("Provider 模型目录尚未确认应用");
+    this.modelSelection.updateSupplementaryModels(snapshot, provider);
+  }
+
+  private async stageProviderModels(
+    provider: string,
+    result: Awaited<ReturnType<typeof applyAppServerProviderSettings>>,
+    candidate: { fingerprint: string; models: ModelOption[] } | undefined,
+    signal: AbortSignal,
+  ): Promise<void> {
+    signal.throwIfAborted();
+    const snapshot = result.snapshot;
+    if (!snapshot) throw new Error("Provider 已应用设置快照不可用");
+    const inspection = await inspectAppServerSupervisorState(this.config.codexSocketPath);
+    signal.throwIfAborted();
+    let catalog: ModelOption[];
+    if (inspection.status !== "ready") throw new Error("App Server 监管状态暂不可用");
+    if (inspection.topology.runningProviders.includes(provider)) {
+      catalog = await this.codex.listModelsForProvider(provider);
+      signal.throwIfAborted();
+    } else {
+      if (!result.applied || candidate?.fingerprint !== snapshot.fingerprint) {
+        throw new Error("Provider 模型目录尚未确认应用");
+      }
+      catalog = candidate.models;
+    }
+    const confirmed = catalog.map((model) => ({ ...model, provider,
+      isDefault: model.model === snapshot.defaultModel }));
+    if (snapshot.defaultModel !== null && !confirmed.some((model) => model.isDefault)) {
+      throw new Error("Provider 已应用默认模型不在确认目录中");
+    }
+    signal.throwIfAborted();
+    this.providerModelSnapshots.set(provider, confirmed);
+  }
+
+  private async initializeProviderModels(signal: AbortSignal): Promise<void> {
+    for (const provider of this.managedSettingsProviders) {
+      this.requireRunning();
+      signal.throwIfAborted();
+      try {
+        await this.applyProviderSettings(provider, signal);
+        this.refreshProviderModels(provider, signal);
+      } catch (error) {
+        signal.throwIfAborted();
+        this.requireRunning();
+        this.logger.warn({ err: error, provider }, "Provider 模型目录确认失败，暂不开放未确认目录");
+      }
+    }
+  }
+
+  private async applyProviderSettingsOnce(provider: string, cancellation: AbortSignal): Promise<boolean> {
+    let candidate: { fingerprint: string; models: ModelOption[] } | undefined;
+    try {
+      candidate = this.captureProviderModels(provider);
+    } catch (error) {
+      this.logger.warn({ err: error, provider }, "Provider 待应用模型目录暂不可读，将只使用宿主确认目录");
+    }
+    let result: Awaited<ReturnType<typeof applyAppServerProviderSettings>> | undefined;
+    let connected = false;
+    let recovering: Promise<void> | undefined;
+    let disconnectedDuringApply: Error | undefined;
+    let applied: boolean;
+    try {
+      applied = await this.providerIdleReleaser.applySettings(provider, cancellation, async () => {
+        this.providersApplyingSettings.add(provider);
+        connected = this.codex.connectedProviderIds().includes(provider);
+        cancellation.throwIfAborted();
+        result = await applyAppServerProviderSettings(this.config.codexSocketPath, provider, cancellation);
+        cancellation.throwIfAborted();
+        if (!result.applied) return false;
+        const disconnected = this.settingsDisconnects.has(provider);
+        if (!result.changed && !disconnected) return true;
+        await this.codex.closeProvider(provider);
+        cancellation.throwIfAborted();
+        if (connected || disconnected) {
+          recovering = this.gatewayReconnectCoordinator().recoverAppliedSettings(provider, cancellation);
+          // Recovery waits on this admission barrier; own rejection until it is released.
+          void recovering.catch(() => undefined);
+        }
+        return true;
+      });
+    } catch (error) {
+      const disconnected = this.settingsDisconnects.get(provider);
+      if (disconnected && !this.stopping) {
+        this.gatewayReconnectCoordinator().disconnected(disconnected, provider);
+      }
+      throw error;
+    } finally {
+      this.providersApplyingSettings.delete(provider);
+      disconnectedDuringApply = this.settingsDisconnects.get(provider);
+      this.settingsDisconnects.delete(provider);
+    }
+    if (!applied) {
+      if (disconnectedDuringApply && !this.stopping) {
+        this.gatewayReconnectCoordinator().disconnected(disconnectedDuringApply, provider);
+      }
+      if (result) await this.stageProviderModels(provider, result, candidate, cancellation);
+      return false;
+    }
+    cancellation.throwIfAborted();
+    if (recovering) {
+      await recovering;
+      cancellation.throwIfAborted();
+    }
+    if (result) await this.stageProviderModels(provider, result, candidate, cancellation);
+    return true;
   }
 
   async resetCreditOperation(request: import("../../runtime/gateway-account-refresh.mjs").ResetCreditRequest, signal: AbortSignal): Promise<unknown> {
@@ -1275,7 +1417,14 @@ export abstract class GatewayComponentGraph {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
+        this.conversationIdleReleaser?.cancelPending(new Set(this.router.allBindings()
+          .filter((binding) => this.codex.knownProvider(binding.threadId) === provider)
+          .map((binding) => binding.threadId)));
         this.turnExecution.reset(provider);
+        if (this.providersApplyingSettings.has(provider)) {
+          this.settingsDisconnects.set(provider, error);
+          return;
+        }
         this.gatewayReconnectCoordinator().disconnected(error, provider);
       });
       const initialized = await this.codex.connect();
@@ -1305,6 +1454,8 @@ export abstract class GatewayComponentGraph {
           );
         }
       }
+      this.requireRunning();
+      await this.initializeProviderModels(this.startupAbort.signal);
       this.requireRunning();
       await this.scheduledTasks?.prepareRecovery(this.startupAbort.signal);
       this.requireRunning();
@@ -1364,6 +1515,9 @@ export abstract class GatewayComponentGraph {
 
   protected async stopInternal(startup: Promise<void> | undefined, startupSettled: boolean): Promise<void> {
     this.stopping = true;
+    this.providerSettingsAbort.abort(new Error("Gateway 正在停止"));
+    this.conversationIdleReleaser?.cancelPending();
+    this.conversations?.setIdleReleaseEnabled(false);
     this.surfaceManager.beginShutdown?.();
     this.startupAbort?.abort();
     void this.startupNetworkRecovery?.stop();
@@ -1474,6 +1628,9 @@ export abstract class GatewayComponentGraph {
 
   private async shutdownComponentsOnce(): Promise<void> {
     this.stopping = true;
+    this.providerSettingsAbort.abort(new Error("Gateway 正在停止"));
+    this.conversationIdleReleaser?.cancelPending();
+    this.conversations?.setIdleReleaseEnabled(false);
     this.surfaceManager.beginShutdown?.();
     this.startupAbort?.abort();
     const restoringBindings = this.bindingRestoreCoordinator().close();
@@ -1709,6 +1866,16 @@ export abstract class GatewayComponentGraph {
 
   private isBindingRestoring(threadId: string): boolean {
     return this.bindingRestoreCoordinator().isRestoring(threadId);
+  }
+
+  private async restoreIdleBinding(threadId: string): Promise<void> {
+    try {
+      await this.restoreBindings(undefined, new Set([threadId]));
+    } catch (error) {
+      this.logger.warn({ err: error, threadId }, "空闲释放取消后的绑定恢复失败");
+    } finally {
+      this.scheduleBindingRestore();
+    }
   }
 
   private restoreBindings(

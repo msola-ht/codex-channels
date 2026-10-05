@@ -87,7 +87,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 指标库本地用量与 Token 汇总必须按 Provider 过滤；GO 形态还需在统计代理注册窗口
   快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方
   5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9；当前指标库为
-  Schema v26，另含子代理运行级父子 Turn 关联与逐请求上游 `User-Agent`），
+  Schema v27，另含子代理运行级父子 Turn 关联与逐请求上游 `User-Agent`），
   读取时对 5 小时滚动窗口按当前时间范围和请求开始时间判定，对 7 天/月度固定窗口优先按快照
   归属；快照缺失或请求开始时已经过期才回退到请求时间。账户窗口只展示官方已用百分比、重置时间
   和本地 Token，不展示总额或费用。
@@ -144,7 +144,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 ## 5. 验收流程
 
-开发时先运行受影响的定向检查；普通提交由 pre-commit 执行完整 `verify:commit`，不提前重复。下列源码安装、服务重启及线上检查只用于已获授权的部署验收：
+开发时先运行受影响的定向检查；普通提交由 pre-commit 执行按范围选择的 `verify:commit`，PR CI 使用 `verify:ci` 完整回归，不提前重复。下列源码安装、服务重启及线上检查只用于已获授权的部署验收：
 
 ```bash
 npm run install:global
@@ -158,7 +158,7 @@ codexc doctor
 - 新会话、同 Provider 历史 Thread、跨 Provider 新建 Thread 的模型与思考等级符合预期；
 - `codexc remote --profile sf-<Provider ID>` 能拉起隔离 App Server 并共享会话；
 - `/usage` 按账户形态展示余额或配额窗口与本机 Token 用量；
-- 修改默认模型/思考等级后，watcher 校验通过并在无活动 Turn 时自动重启 App Server；
+- 修改默认模型/思考等级后，watcher 校验通过并定向应用到受影响且已启用的 Provider；原生客户端租约或权威活动 Thread 会推迟应用；
   设置应用后 Gateway 同步刷新受管模型目录与默认模型，已有 Thread 和手动选择保持不变；
   重启或目录刷新失败时报告应用失败，并沿用 watcher 的冷却重试流程，刷新成功后才报告已应用；
 

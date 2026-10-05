@@ -29,6 +29,24 @@ afterEach(() => {
 });
 
 describe("Provider proxy metrics channel", () => {
+  it("validates quota observation times and leaves missing historical times unknown", async () => {
+    const directory = mkdtempSync(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "codexc-qo-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "m.sock");
+    const received: ProviderProxyMetrics[] = [];
+    const server = new ProviderProxyMetricsServer(socketPath, metric => { received.push(metric); });
+    await server.start();
+    try {
+      const weeklyQuota = { limitId: "codex" as const, usedPercentMillionths: 10_000_000, resetsAt: 1_786_233_600, planType: null };
+      for (const quotaObservedAtMs of [undefined, null, 0, 1_500, -1, 1.5, "1500", Number.MAX_SAFE_INTEGER + 1]) {
+        await sendProviderProxyMetrics(socketPath, { ...metrics(), weeklyQuota, quotaObservedAtMs } as ProviderProxyMetrics);
+      }
+      await sendProviderProxyMetrics(socketPath, { ...metrics(), quotaObservedAtMs: 1_500 });
+      await sendProviderProxyMetrics(socketPath, { ...metrics(), quotaWindows: [], quotaObservedAtMs: 1_500 });
+      await sendProviderProxyMetrics(socketPath, metrics());
+      expect(received.map(metric => metric.quotaObservedAtMs)).toEqual([null, null, 0, 1_500, null]);
+    } finally { await server.close(); }
+  });
   it("accepts finite nonnegative TTFT and rejects malformed values at IPC", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-provider-ttft-"));
     temporaryDirectories.push(directory);
@@ -347,5 +365,6 @@ function metrics(): ProviderProxyMetrics {
     responseCompletedAtMs: 1_900,
     weeklyQuota: null,
     quotaWindows: null,
+    quotaObservedAtMs: null,
   };
 }

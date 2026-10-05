@@ -26,6 +26,7 @@ import {
 import { createPrompter } from "./terminal-prompter.mjs";
 import { serviceControlDefinitions } from "./service-selection.mjs";
 import { inspectManagedServiceStatus } from "./service-status.mjs";
+import { readActiveUpdate, updateRoot, withUpdateLock } from "./background-update-state.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
@@ -693,12 +694,12 @@ async function installPreparedCodexVersion(
   );
 }
 
-function assertCodexVersion(expected, environment, captureCommand) {
+export function assertCodexVersion(expected, environment, captureCommand) {
   const actual = installedCodexVersion(environment, captureCommand);
   if (actual !== expected) throw codexVersionMismatchError(expected, actual);
 }
 
-function validateCodexContract(checkout, environment, options) {
+export function validateCodexContract(checkout, environment, options) {
   capture(
     process.execPath,
     [
@@ -800,7 +801,7 @@ function installCodexCli(version, checkout, environment, options) {
   );
 }
 
-async function buildCheckout(checkout, environment, options) {
+export async function buildCheckout(checkout, environment, options) {
   for (const [cwd, args] of [
     [checkout, ["ci", "--no-audit", "--no-fund"]],
     [checkout, ["run", "build"]],
@@ -910,7 +911,7 @@ async function startCoreServices(checkout, environment, options, relayWasRunning
     [join(checkout, "bin", "codexc.mjs"), "service", "start", target], checkout, environment, options.runCommand);
 }
 
-function packageVersion(checkout) {
+export function packageVersion(checkout) {
   const metadata = JSON.parse(readFileSync(join(checkout, "package.json"), "utf8"));
   if (!releaseVersionPattern.test(metadata.version ?? "")) {
     throw new Error("源码 package.json 缺少正式版本、rc 预发行版或 fix 修复版本号");
@@ -918,7 +919,7 @@ function packageVersion(checkout) {
   return metadata.version;
 }
 
-function codexVersion(checkout) {
+export function codexVersion(checkout) {
   const metadata = JSON.parse(
     readFileSync(join(checkout, "src", "codex-protocol", "version.json"), "utf8"),
   );
@@ -949,7 +950,7 @@ function versionParts(value) {
   return [...stable.split(".").map(Number), stage, sequence];
 }
 
-function isGatewayVersionCompatible(gatewayVersion, expectedCodexVersion) {
+export function isGatewayVersionCompatible(gatewayVersion, expectedCodexVersion) {
   return gatewayVersion === expectedCodexVersion
     || new RegExp(
       `^${escapeRegExp(expectedCodexVersion)}-(?:fix[1-9]\\d*|rc\\.[1-9]\\d*)$`,
@@ -1126,7 +1127,17 @@ if (
   && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
   try {
-    await main();
+    assertSourceUpdateCaller(process.env);
+    if (process.platform === "linux") {
+      await withUpdateLock(updateRoot(process.env), async () => {
+        if (readActiveUpdate(updateRoot(process.env))) {
+          throw new Error("已有后台更新任务，请先查看 codexc update status");
+        }
+        await main();
+      });
+    } else {
+      await main();
+    }
   } catch (error) {
     writeSourceUpdateFailure(error);
     process.exitCode = 1;

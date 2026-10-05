@@ -10,15 +10,20 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
+import { ProviderRoutingClient } from "../src/codex-client/provider-routing-client.js";
+import { GatewayReconnectCoordinator } from "../src/bootstrap/gateway-reconnect-coordinator.js";
+import pino from "pino";
+import { secureTestDirectory } from "./support/windows-fixtures.js";
 import { ProviderProxy } from "../src/provider-proxy/index.js";
 import { ModelSelectionService } from "../src/application/model-selection-service.js";
 import { ProviderAccountService, createOpenAiAccountAdapter } from "../src/application/index.js";
 import { ConversationService } from "../src/application/conversation-service.js";
+import { ConversationIdleReleaser } from "../src/bootstrap/conversation-idle-releaser.js";
 import type { ConversationCore } from "../src/conversation-core/index.js";
 import { SessionRouter } from "../src/session-routing/index.js";
 import { SqliteBindingStore } from "../src/storage/index.js";
@@ -107,6 +112,75 @@ describe("real App Server test process cleanup", () => {
     },
   );
 });
+
+contractTest("settings recovery reconnects a second lost socket and coalesces the first ordinary request handshake", async () => {
+  const runtimeRoot = resolve(".runtime");
+  mkdirSync(runtimeRoot, { recursive: true });
+  const home = mkdtempSync(join(runtimeRoot, "provider-recovery-contract-"));
+  secureTestDirectory(home);
+  const socketPath = join(home, "server.sock");
+  writeFileSync(join(home, "config.toml"), "", { mode: 0o600 });
+  const transport = new UnixWebSocketTransport(socketPath);
+  const send = vi.spyOn(transport, "send");
+  const routing = new ProviderRoutingClient("openai", new Map([
+    ["openai", new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" })],
+  ]), async () => undefined);
+  const processHandle = spawn(process.env.CODEX_BINARY ?? "codex", ["app-server", "--listen", `unix://${socketPath}`], {
+    cwd: home, env: { ...process.env, CODEX_HOME: home }, stdio: ["ignore", "ignore", "pipe"],
+    detached: process.platform !== "win32",
+  });
+  let diagnostic = "";
+  processHandle.stderr?.setEncoding("utf8");
+  processHandle.stderr?.on("data", (chunk: string) => { diagnostic = appendDiagnostic(diagnostic, chunk); });
+  let coordinator: GatewayReconnectCoordinator | undefined;
+  let remove: (() => void) | undefined;
+  let finish!: () => void;
+  try {
+    await waitFor(() => existsSync(socketPath), 10_000, () => processHandle.exitCode === null
+      ? undefined : new Error(appServerFailure("Provider recovery fixture startup failed", diagnostic)));
+    await routing.connect();
+    const { thread } = await routing.startThread(home);
+    await routing.closeProvider("openai");
+    const disconnected = new Map<string, ReadonlySet<string>>();
+    const pending = new Promise<void>(resolveFinish => { finish = resolveFinish; });
+    const restore = vi.fn(async () => { await routing.readThread(thread.id); });
+    restore.mockImplementationOnce(async () => { await routing.readThread(thread.id); await pending; });
+    const restored = vi.fn();
+    coordinator = new GatewayReconnectCoordinator({ codex: routing,
+      router: { allBindings: () => [{ threadId: thread.id, sessionId: thread.id, workspaceId: "fixture",
+        target: { surface: "telegram", accountId: "fixture", conversationId: "fixture" } }] },
+      core: { connectionLost: vi.fn(), connectionRestored: restored }, interactions: { cancelThreads: vi.fn() },
+      bindings: { hasDisconnectedProviders: () => disconnected.size > 0,
+        nextDisconnectedProvider: () => disconnected.keys().next().value,
+        markProviderDisconnected: (provider, ids) => { disconnected.set(provider, ids); },
+        completeProviderReconnect: provider => { disconnected.delete(provider); },
+        affectedThreadsForProvider: provider => disconnected.get(provider), restore, schedule: vi.fn() },
+      logger: pino({ level: "silent" }), isStopping: () => false, cancelQuestions: vi.fn(),
+      intentionallyReleased: async () => false, connected: async () => undefined, requestStop: vi.fn(async () => undefined),
+    });
+    remove = routing.onDisconnect((error, provider) => coordinator!.disconnected(error, provider));
+    const ordinaryRequest = routing.readThread(thread.id);
+    const recovery = coordinator.recoverAppliedSettings("openai", AbortSignal.timeout(10_000));
+    void recovery.catch(() => undefined);
+    await ordinaryRequest;
+    await vi.waitFor(() => expect(restore).toHaveBeenCalledOnce());
+    const initializations = () => send.mock.calls.filter(([message]) =>
+      (JSON.parse(message) as { method?: string }).method === "initialize").length;
+    expect(initializations()).toBe(2);
+    await transport.close();
+    finish();
+    await recovery;
+    expect(initializations()).toBe(3);
+    expect(restore).toHaveBeenCalledTimes(2);
+    expect((await routing.readThread(thread.id)).id).toBe(thread.id);
+    expect(restored).toHaveBeenCalledOnce();
+    expect(disconnected.size).toBe(0);
+  } finally {
+    finish?.(); remove?.(); await coordinator?.stop(); await routing.close();
+    await stopDetachedTestProcess(processHandle, 5_000);
+    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}, 30_000);
 
 contractTest(
   "reads the no-login OpenAI account route without refreshing credentials",
@@ -355,6 +429,54 @@ deepseekCatalogContractTest(
       if (!deepseekCatalogPath) await selection.selectEffort(target, "medium");
       const preference = selection.capturePreference(target);
       expect(preference).toBeDefined();
+      let concurrentSubmission: ReturnType<ConversationService["submit"]> | undefined;
+      let concurrentTurnCompleted = false;
+      let idleReleaseResult: Awaited<ReturnType<ConversationService["releaseIdle"]>> | undefined;
+      const idleReleaser = new ConversationIdleReleaser({
+        logger: { info() {}, warn() {} } as never, idleThresholdMs: 1, nowMs: () => Date.now() + 10_000,
+        listForegroundBindings: () => [router.current(target)!],
+        idleState: candidate => router.idleState(candidate),
+        ensureIdleState: (candidate, at) => router.ensureIdleState(candidate, at),
+        releaseIdle: async (candidate, condition) => {
+          idleReleaseResult = await conversations.releaseIdle(candidate, condition);
+          return idleReleaseResult;
+        },
+        notifyReleased: () => { throw new Error("活动变化后不应提示释放成功"); },
+      });
+      const removeConcurrentNotification = client.onNotification(notification => {
+        if (notification.method === "turn/completed"
+          && (notification.params as { threadId?: string }).threadId === threadId) concurrentTurnCompleted = true;
+      });
+      const unsubscribeThread = client.unsubscribeThread.bind(client);
+      const unsubscribe = vi.spyOn(client, "unsubscribeThread").mockImplementation(async (id) => {
+        await unsubscribeThread(id);
+        idleReleaser.cancelPending(new Set(["disconnected-other-provider-thread"]));
+        concurrentSubmission = conversations.submit(target, "Continue on the existing contract Thread.");
+      });
+      try {
+        await idleReleaser.scan();
+        expect(idleReleaseResult).toEqual({ status: "busy", threadId });
+        if (!concurrentSubmission) throw new Error("并发输入未进入会话");
+        expect((await concurrentSubmission).threadId).toBe(threadId);
+        await waitFor(() => concurrentTurnCompleted, 10_000);
+        expect(router.current(target)?.threadId).toBe(threadId);
+        expect(router.idleState(target).forceNew).toBe(false);
+      } finally {
+        await idleReleaser.stop();
+        unsubscribe.mockRestore();
+        removeConcurrentNotification();
+      }
+      let observedName = false;
+      const removeNameNotification = client.onNotification(notification => {
+        if (notification.method === "thread/name/updated"
+          && (notification.params as { threadId?: string }).threadId === threadId) observedName = true;
+      });
+      try {
+        await client.setThreadName(threadId, "idle cancellation subscription contract");
+        await waitFor(() => observedName, 2_000);
+      } finally {
+        removeNameNotification();
+      }
       expect(await conversations.releaseIdle(target)).toEqual({ status: "released", threadId });
       expect(bindings.modelPreference(target)).toEqual(preference);
       bindings.close();

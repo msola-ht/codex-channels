@@ -39,6 +39,8 @@ export class ProviderIdleReleaser {
     ProviderIdleReleaserOptions["notifyBeforeClose"];
   private readonly launching = new Set<string>();
   private readonly activeOperations = new Map<string, number>();
+  private readonly settingsBarriers = new Map<string, Promise<void>>();
+  private readonly operationDrained = new Map<string, () => void>();
   private graceTimer: NodeJS.Timeout | undefined;
   private graceTask: Promise<void> | undefined;
   private resolveGraceTask: (() => void) | undefined;
@@ -115,6 +117,37 @@ export class ProviderIdleReleaser {
     return this.runProviderOperation(provider, operation);
   }
 
+  /** Hold admission for this Provider while settings are applied by its supervisor. */
+  async applySettings<T>(provider: string, signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+    signal.throwIfAborted();
+    let release!: () => void;
+    const previous = this.settingsBarriers.get(provider);
+    const ownedBarrier = new Promise<void>((resolve) => { release = resolve; });
+    const barrier = previous ? previous.then(() => ownedBarrier) : ownedBarrier;
+    this.settingsBarriers.set(provider, barrier);
+    void barrier.then(() => {
+      if (this.settingsBarriers.get(provider) === barrier) this.settingsBarriers.delete(provider);
+    });
+    this.cancelGrace();
+    let drainResolve: (() => void) | undefined;
+    try {
+      if (previous) await waitForSettings(previous, signal);
+      if (this.closeTask) await waitForSettings(this.closeTask, signal);
+      if (this.activeOperations.has(provider)) {
+        await waitForSettings(new Promise<void>((resolve) => {
+          drainResolve = resolve;
+          this.operationDrained.set(provider, resolve);
+        }), signal);
+      }
+      signal.throwIfAborted();
+      if (this.stopped) throw new Error("Provider 已停止，不能应用设置");
+      return await operation();
+    } finally {
+      if (drainResolve && this.operationDrained.get(provider) === drainResolve) this.operationDrained.delete(provider);
+      release();
+    }
+  }
+
   /**
    * Schedule a global Client close after the grace window when idle.
    *
@@ -174,6 +207,7 @@ export class ProviderIdleReleaser {
   private isGloballyIdle(): boolean {
     return this.listBindings().length === 0
       && this.activeOperations.size === 0
+      && this.settingsBarriers.size === 0
       && this.launching.size === 0;
   }
 
@@ -271,9 +305,9 @@ export class ProviderIdleReleaser {
     operation: () => Promise<T>,
   ): Promise<T> {
     while (true) {
-      const closeTask = this.closeTask;
-      if (!closeTask) break;
-      await closeTask.catch(() => undefined);
+      const barrier = this.settingsBarriers.get(provider) ?? this.closeTask;
+      if (!barrier) break;
+      await barrier.catch(() => undefined);
     }
     this.cancelGrace();
     this.activeOperations.set(
@@ -284,7 +318,10 @@ export class ProviderIdleReleaser {
       return await operation();
     } finally {
       const remaining = (this.activeOperations.get(provider) ?? 1) - 1;
-      if (remaining === 0) this.activeOperations.delete(provider);
+      if (remaining === 0) {
+        this.activeOperations.delete(provider);
+        this.operationDrained.get(provider)?.();
+      }
       else this.activeOperations.set(provider, remaining);
       if (!this.stopped && this.isGloballyIdle()) {
         void this.closeIfIdle().catch((error) => {
@@ -296,6 +333,15 @@ export class ProviderIdleReleaser {
       }
     }
   }
+}
+
+function waitForSettings(task: Promise<void>, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const abort = (): void => reject(signal.reason instanceof Error ? signal.reason : new Error("Provider 设置应用已取消"));
+    signal.addEventListener("abort", abort, { once: true });
+    task.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
 async function waitAtMost(task: Promise<void>, timeoutMs: number): Promise<boolean> {

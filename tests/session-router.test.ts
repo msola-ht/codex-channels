@@ -71,6 +71,110 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
 }
 
 describe("SessionRouter", () => {
+  it("does not unsubscribe an idle scan superseded while waiting for a Thread lifecycle operation", async () => {
+    const store = new MemoryBindingStore();
+    const binding = { target, workspaceId: "main", threadId: "idle", sessionId: "idle" };
+    store.bind(binding);
+    let finishRead!: () => void;
+    const readThread = vi.fn(async () => {
+      await new Promise<void>(resolve => { finishRead = resolve; });
+      return thread("idle", { type: "idle" });
+    });
+    const unsubscribeThread = vi.fn(async () => undefined);
+    const router = new SessionRouter(threadPort({ readThread, unsubscribeThread,
+      resumeThread: async id => session(thread(id, { type: "idle" })),
+    }), store, registry);
+    const restoring = router.restoreSubscriptions();
+    await vi.waitFor(() => expect(readThread).toHaveBeenCalled());
+    let current = true;
+    const releasing = router.releaseIdle(target, binding, thread("idle", { type: "idle" }), {
+      isCurrent: () => current, verifyIdle: async () => true, canRestore: () => true, restored: vi.fn(),
+    });
+    current = false;
+    finishRead();
+    await restoring;
+    await expect(releasing).resolves.toBe(false);
+    expect(unsubscribeThread).not.toHaveBeenCalled();
+    expect(router.current(target)?.threadId).toBe("idle");
+  });
+
+  it.each([true, false])("keeps the binding after cancellation during unsubscribe (can restore: %s)", async canRestore => {
+    const store = new MemoryBindingStore();
+    const binding = { target, workspaceId: "main", threadId: "idle", sessionId: "idle" };
+    store.bind(binding);
+    let finishUnsubscribe!: () => void;
+    const unsubscribeThread = vi.fn(async () => {
+      await new Promise<void>(resolve => { finishUnsubscribe = resolve; });
+    });
+    const resumeThread = vi.fn(async id => session(thread(id, { type: "idle" })));
+    const router = new SessionRouter(threadPort({ unsubscribeThread, resumeThread }), store, registry);
+    let current = true;
+    const restored = vi.fn();
+    const releasing = router.releaseIdle(target, binding, thread("idle", { type: "idle" }), {
+      isCurrent: () => current, verifyIdle: async () => true, canRestore: () => canRestore, restored,
+    });
+    await vi.waitFor(() => expect(unsubscribeThread).toHaveBeenCalled());
+    current = false;
+    finishUnsubscribe();
+    await expect(releasing).resolves.toBe(false);
+    expect(router.current(target)).toEqual(binding);
+    expect(router.idleState(target).forceNew).toBe(false);
+    expect(resumeThread).toHaveBeenCalledTimes(canRestore ? 1 : 0);
+    expect(restored).toHaveBeenCalledTimes(canRestore ? 1 : 0);
+  });
+
+  it("invalidates an idle activity snapshot even when new input has the same timestamp", () => {
+    const router = new SessionRouter(threadPort(), new MemoryBindingStore(), registry);
+    router.touchActivity(target, 100);
+    const before = router.idleState(target).lastActivityAt;
+    router.touchActivity(target, 100);
+    expect(router.idleState(target).lastActivityAt).toBeGreaterThan(before);
+  });
+
+  it("does not publish a restored state when shutdown starts during compensating resume", async () => {
+    const store = new MemoryBindingStore();
+    const binding = { target, workspaceId: "main", threadId: "idle", sessionId: "idle" };
+    store.bind(binding);
+    let finishResume!: () => void;
+    let canRestore = true;
+    let current = true;
+    const restored = vi.fn();
+    const resumeThread = vi.fn(async id => {
+      await new Promise<void>(resolve => { finishResume = resolve; });
+      return session(thread(id, { type: "idle" }));
+    });
+    const router = new SessionRouter(threadPort({
+      unsubscribeThread: async () => { current = false; }, resumeThread,
+    }), store, registry);
+    const releasing = router.releaseIdle(target, binding, thread("idle", { type: "idle" }), {
+      isCurrent: () => current, verifyIdle: async () => true, canRestore: () => canRestore, restored,
+    });
+    await vi.waitFor(() => expect(resumeThread).toHaveBeenCalled());
+    canRestore = false;
+    finishResume();
+    await expect(releasing).rejects.toBeInstanceOf(Error);
+    expect(store.get(target)).toEqual(binding);
+    expect(restored).not.toHaveBeenCalled();
+  });
+
+  it.each(["busy", "unavailable"])("restores the subscription when the final idle query is %s", async outcome => {
+    const store = new MemoryBindingStore();
+    const binding = { target, workspaceId: "main", threadId: "idle", sessionId: "idle" };
+    store.bind(binding);
+    const resumeThread = vi.fn(async id => session(thread(id, { type: "idle" })));
+    const router = new SessionRouter(threadPort({ unsubscribeThread: async () => undefined, resumeThread }), store, registry);
+    await expect(router.releaseIdle(target, binding, thread("idle", { type: "idle" }), {
+      isCurrent: () => true, canRestore: () => true, restored: vi.fn(),
+      verifyIdle: async () => {
+        if (outcome === "unavailable") throw new Error("read unavailable");
+        return false;
+      },
+    })).resolves.toBe(false);
+    expect(resumeThread).toHaveBeenCalledOnce();
+    expect(store.get(target)).toEqual(binding);
+    expect(store.idleState(target).forceNew).toBe(false);
+  });
+
   it("keeps binding revocation across the resolver promise handoff until its owner aborts", async () => {
     const store = new MemoryBindingStore();
     const owner = { target, workspaceId: "main", threadId: "parent", sessionId: "parent" };
@@ -857,6 +961,80 @@ describe("SessionRouter", () => {
 
     expect(store.get(target)?.threadId).toBe("original");
     expect(unsubscribed).toEqual([]);
+  });
+
+  it.each([false, true])("cleans the Fork subscription when original unsubscribe fails; cleanup failure=%s", async (cleanupFails) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    const unsubscribeThread = vi.fn(async (id: string) => {
+      if (id === "original" || cleanupFails) throw new Error(`unsubscribe failed: ${id}`);
+    });
+    const router = new SessionRouter(threadPort({
+      forkThread: async () => session(thread("forked", { type: "idle" })),
+      unsubscribeThread,
+    }), store, registry);
+
+    await expect(router.fork(target)).rejects.toThrow(cleanupFails ? "新订阅清理失败" : "unsubscribe failed: original");
+    expect(unsubscribeThread.mock.calls.map(([id]) => id)).toEqual(["original", "forked"]);
+    expect(store.get(target)?.threadId).toBe("original");
+    expect(store.getByThread("forked")).toBeUndefined();
+  });
+
+  it.each([false, true])("restores the original subscription after Fork binding fails; restore failure=%s", async (restoreFails) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    vi.spyOn(store, "switchForeground").mockImplementationOnce(() => { throw new Error("binding failed"); });
+    const resumeThread = vi.fn(async () => {
+      if (restoreFails) throw new Error("restore failed");
+      return session(thread("original", { type: "idle" }));
+    });
+    const unsubscribeThread = vi.fn<(id: string) => Promise<void>>(async () => undefined);
+    const router = new SessionRouter(threadPort({
+      forkThread: async () => session(thread("forked", { type: "idle" })),
+      resumeThread, unsubscribeThread,
+    }), store, registry);
+
+    await expect(router.fork(target)).rejects.toThrow(restoreFails ? "原订阅恢复失败" : "binding failed");
+    expect(resumeThread).toHaveBeenCalledExactlyOnceWith("original", "/workspace", {});
+    expect(unsubscribeThread.mock.calls.map(([id]) => id)).toEqual(["original", "forked"]);
+    expect(store.get(target)?.threadId).toBe("original");
+    expect(router.modelSettingsForThread("forked")).toBeUndefined();
+  });
+
+  it("does not recreate a revoked binding after Fork returns", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    const unsubscribeThread = vi.fn(async () => undefined);
+    const router = new SessionRouter(threadPort({
+      forkThread: async () => {
+        router.forgetThread("original");
+        return session(thread("forked", { type: "idle" }));
+      },
+      unsubscribeThread,
+    }), store, registry);
+
+    await expect(router.fork(target)).rejects.toMatchObject({ code: "thread.takeover.changed" });
+    expect(store.get(target)).toBeUndefined();
+    expect(unsubscribeThread).toHaveBeenCalledExactlyOnceWith("forked");
+  });
+
+  it("cleans both subscriptions if ownership is revoked during Fork compensation", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "original", sessionId: "original" });
+    vi.spyOn(store, "switchForeground").mockImplementationOnce(() => { throw new Error("binding failed"); });
+    const unsubscribeThread = vi.fn<(id: string) => Promise<void>>(async () => undefined);
+    const router = new SessionRouter(threadPort({
+      forkThread: async () => session(thread("forked", { type: "idle" })),
+      resumeThread: async () => {
+        router.forgetThread("original");
+        return session(thread("original", { type: "idle" }));
+      },
+      unsubscribeThread,
+    }), store, registry);
+
+    await expect(router.fork(target)).rejects.toThrow("原订阅恢复失败");
+    expect(store.get(target)).toBeUndefined();
+    expect(unsubscribeThread.mock.calls.map(([id]) => id)).toEqual(["original", "original", "forked"]);
   });
 
   it("transfers an idle binding without unsubscribing the selected Thread", async () => {

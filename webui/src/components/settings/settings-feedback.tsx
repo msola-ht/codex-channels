@@ -6,9 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { RefreshCwIcon } from "lucide-react"
+import { useTranslation } from "@/hooks/use-translation"
 
 export function SettingsError({ message, retry }: { message: string; retry: () => void }) {
-  return <Alert variant="destructive"><AlertTitle>设置快照加载失败</AlertTitle><AlertDescription>{message}</AlertDescription><AlertAction><Button variant="outline" size="sm" onClick={retry}><RefreshCwIcon data-icon="inline-start" />重试</Button></AlertAction></Alert>
+  const { t } = useTranslation()
+  return <Alert variant="destructive"><AlertTitle>{t("settingsUi.loadFailed")}</AlertTitle><AlertDescription>{message}</AlertDescription><AlertAction><Button variant="outline" size="sm" onClick={retry}><RefreshCwIcon data-icon="inline-start" />{t("common.retry")}</Button></AlertAction></Alert>
 }
 
 export function LoadingSettingsCard({ title }: { title: string }) {

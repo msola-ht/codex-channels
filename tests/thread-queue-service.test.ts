@@ -633,6 +633,38 @@ describe("ConversationService native Thread Queue", () => {
     expect(releaseBackground).toHaveBeenCalledTimes(1);
   });
 
+  it.each([false, true])("preserves interrupted Queue across release retries; deferred subagents=%s", async (pendingSubagents) => {
+    let pending = pendingSubagents;
+    const queue = queuePort([item(1)]);
+    const releaseBackground = vi.fn(async () => undefined);
+    const service = serviceWithQueue(queue, {
+      router: { isBackgroundThread: () => true, releaseBackground },
+      hasPendingSubagentRuns: () => pending,
+    });
+
+    await expect(service.releaseBackgroundIfComplete(binding.threadId, { dispatchQueued: false }))
+      .resolves.toBe(false);
+    pending = false;
+    await expect(service.retryPendingBackgroundRelease(binding.threadId)).resolves.toBe(false);
+    expect(queue.startQueueItem).not.toHaveBeenCalled();
+    expect(queue.items).toEqual([item(1)]);
+    expect(releaseBackground).not.toHaveBeenCalled();
+
+    queue.items.splice(0);
+    await expect(service.retryPendingBackgroundRelease(binding.threadId)).resolves.toBe(true);
+    expect(queue.startQueueItem).not.toHaveBeenCalled();
+    expect(releaseBackground).toHaveBeenCalledTimes(1);
+  });
+
+  it("permits native Queue dispatch after a later normally completed Turn", async () => {
+    const queue = queuePort([item(1)]);
+    const service = serviceWithQueue(queue, { router: { isBackgroundThread: () => true } });
+    await expect(service.releaseBackgroundIfComplete(binding.threadId, { dispatchQueued: false }))
+      .resolves.toBe(false);
+    await expect(service.releaseBackgroundIfComplete(binding.threadId)).resolves.toBe(false);
+    expect(queue.startQueueItem).toHaveBeenCalledExactlyOnceWith(binding.threadId);
+  });
+
   it("uses native Queue start as the completion-release barrier", async () => {
     let resolveStart: ((result: { turnId: string }) => void) | undefined;
     const queue = queuePort([item(1)]);

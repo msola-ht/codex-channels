@@ -1,6 +1,7 @@
 import {
   createServer,
   request as httpRequest,
+  type ServerResponse,
 } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -25,6 +26,74 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy HTTP metrics", () => {
+  it("keeps header quota observation times when concurrent requests finish in reverse order", async () => {
+    const responses: ServerResponse[] = [];
+    const upstream = createServer((request, response) => {
+      request.resume();
+      const index = responses.push(response) - 1;
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        ...(index < 2 ? {
+          "x-codex-secondary-used-percent": String(10 + index),
+          "x-codex-secondary-window-minutes": "10080",
+          "x-codex-secondary-reset-at": "1786233600",
+        } : {}),
+      });
+      response.flushHeaders();
+      response.write(": ready\n\n");
+    });
+    await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: () => new Promise<void>(resolve => upstream.close(() => resolve())) });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (upstream.address() as AddressInfo).port,
+      upstreamProtocol: "http", onMetrics: metric => { metrics.push(metric); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    const begin = () => {
+      let resolveHead: () => void = () => undefined;
+      const head = new Promise<void>(resolve => { resolveHead = resolve; });
+      const done = new Promise<void>((resolve, reject) => {
+        const request = httpRequest({ hostname: "127.0.0.1", port: Number(proxy.address().split(":")[1]),
+          path: "/responses", method: "POST" }, response => {
+          resolveHead();
+          response.resume();
+          response.on("end", resolve);
+          response.on("error", reject);
+        });
+        request.on("error", reject);
+        request.end("{}");
+      });
+      return { head, done };
+    };
+    const first = begin();
+    await first.head;
+    clock.mockReturnValue(2_000);
+    const second = begin();
+    await second.head;
+    const finish = (index: number, status: "completed" | "failed" = "completed") => responses[index]!.end(sse(`response.${status}`, {
+      type: `response.${status}`, response: { status, usage: { input_tokens: 10, output_tokens: 1 } },
+    }));
+    clock.mockReturnValue(3_000);
+    finish(1);
+    await second.done;
+    clock.mockReturnValue(4_000);
+    finish(0, "failed");
+    await first.done;
+    expect(metrics.map(metric => [metric.weeklyQuota?.usedPercentMillionths, metric.quotaObservedAtMs, metric.responseCompletedAtMs]))
+      .toEqual([[11_000_000, 2_000, 3_000], [10_000_000, 1_000, 4_000]]);
+    expect(metrics[1]?.status).toBe("failed");
+    clock.mockReturnValue(5_000);
+    const third = begin();
+    await third.head;
+    clock.mockReturnValue(6_000);
+    finish(2);
+    await third.done;
+    expect(metrics[2]).toMatchObject({ weeklyQuota: null, quotaObservedAtMs: null });
+  });
+
 it("does not mark an unobservable HTTP 200 response as completed", async () => {
     const upstream = createServer((request, response) => {
       request.resume();
@@ -89,11 +158,13 @@ it("does not mark an unobservable HTTP 200 response as completed", async () => {
         resetsAt: 1_786_233_600,
         planType: null,
       },
+      quotaObservedAtMs: expect.any(Number),
     })]);
   });
 
-it("attaches quota snapshots and measures forwarding through event arrival excluding route wait and parsing", async () => {
+it.each([false, true])("attaches original window times and keeps mixed-source times unknown (%s)", async (includeWeeklyQuota) => {
     const clock = vi.spyOn(performance, "now").mockReturnValue(100);
+    const quotaClock = vi.spyOn(Date, "now").mockReturnValue(1_000);
     const observeChunk = HttpResponseMetricsObserver.prototype.observeChunk;
     vi.spyOn(HttpResponseMetricsObserver.prototype, "observeChunk").mockImplementation(function (this: HttpResponseMetricsObserver, ...args) {
       clock.mockReturnValue(900);
@@ -102,7 +173,11 @@ it("attaches quota snapshots and measures forwarding through event arrival exclu
     const upstream = createServer((request, response) => {
       request.resume();
       request.on("end", () => {
-        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.writeHead(200, { "content-type": "text/event-stream", ...(includeWeeklyQuota ? {
+          "x-codex-secondary-used-percent": "10",
+          "x-codex-secondary-window-minutes": "10080",
+          "x-codex-secondary-reset-at": "1786233600",
+        } : {}) });
         clock.mockReturnValue(350);
         response.write(sse("response.output_text.delta", {
           type: "response.output_text.delta", delta: "content",
@@ -142,7 +217,7 @@ it("attaches quota snapshots and measures forwarding through event arrival exclu
       upstreamHost: "127.0.0.1",
       upstreamPort: upstreamAddress.port,
       upstreamProtocol: "http",
-      quotaWindowsProvider: async () => quotaWindows,
+      quotaWindowsProvider: async () => ({ windows: quotaWindows, observedAtMs: 1_000 }),
       resolveUpstream: async () => {
         await Promise.resolve();
         clock.mockReturnValue(300);
@@ -154,6 +229,8 @@ it("attaches quota snapshots and measures forwarding through event arrival exclu
     });
     await proxy.start();
     openServers.push(proxy);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    quotaClock.mockReturnValue(2_000);
 
     const proxyPort = Number(proxy.address().split(":")[1]);
     await new Promise<void>((resolveResponse, rejectResponse) => {
@@ -180,6 +257,7 @@ it("attaches quota snapshots and measures forwarding through event arrival exclu
       requestModel: "requested-model",
       responseModel: "deepseek-v4-flash",
       quotaWindows,
+      quotaObservedAtMs: includeWeeklyQuota ? null : 1_000,
     });
     expect(metrics[0]?.firstTokenMs).toBe(50);
     expect(metrics[0]?.totalDurationMs).toBeGreaterThanOrEqual(50);

@@ -22,7 +22,6 @@ const mocks = vi.hoisted(() => ({
   createProviderSettingsWatcher: vi.fn(),
   createNetworkProxyWatcher: vi.fn(),
   readCodexProxySettings: vi.fn(),
-  restartAppServerService: vi.fn(),
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -40,7 +39,8 @@ const mocks = vi.hoisted(() => ({
     reloadConfig: vi.fn(),
     refreshAccountSnapshot: vi.fn(),
     refreshProviderModels: vi.fn(),
-    hasActiveTurns: vi.fn(),
+    managedSettingsProviders: ["ocg-main"],
+    applyProviderSettings: vi.fn(),
     notifyProviderSettingsChange: vi.fn(),
     notifyConfigReloadFailure: vi.fn(),
     deliverAddedWorkspaceNotifications: vi.fn(),
@@ -58,7 +58,9 @@ const mocks = vi.hoisted(() => ({
     stop: vi.fn(),
   },
   providerSettingsOptions: undefined as undefined | {
-    refreshProviderModels(): void;
+    configuredProviders: readonly string[];
+    applyProviderSettings(provider: string, signal: AbortSignal): Promise<boolean>;
+    refreshProviderModels(provider: string, signal: AbortSignal): void | Promise<void>;
     onStateChange(change: { kind: string; providers: string[] }): void;
   },
 }));
@@ -127,9 +129,6 @@ vi.mock("../src/bootstrap/network-proxy-watcher.js", () => ({
     }
   },
 }));
-vi.mock("../src/bootstrap/service-restart-runner.js", () => ({
-  restartAppServerService: mocks.restartAppServerService,
-}));
 
 const { runGatewayProcess } = await import("../src/bootstrap/config-lifecycle.js");
 
@@ -168,11 +167,10 @@ beforeEach(() => {
   mocks.application.start.mockResolvedValue(undefined);
   mocks.application.stop.mockResolvedValue(undefined);
   mocks.application.reloadConfig.mockReturnValue({ action: "reload", changes: [] });
-  mocks.application.hasActiveTurns.mockReturnValue(false);
+  mocks.application.applyProviderSettings.mockResolvedValue(true);
   mocks.application.deliverAddedWorkspaceNotifications.mockResolvedValue(undefined);
   mocks.accountRefresh.start.mockResolvedValue(undefined);
   mocks.accountRefresh.close.mockResolvedValue(undefined);
-  mocks.restartAppServerService.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -293,10 +291,12 @@ describe("runGatewayProcess", () => {
     isolateProcessLifecycle();
     await runGatewayProcess();
     const error = new Error("catalog read failed");
+    const signal = new AbortController().signal;
     mocks.application.refreshProviderModels.mockImplementationOnce(() => { throw error; });
-    expect(() => mocks.providerSettingsOptions!.refreshProviderModels()).toThrow(error);
-    mocks.providerSettingsOptions!.refreshProviderModels();
+    expect(() => mocks.providerSettingsOptions!.refreshProviderModels("ocg-main", signal)).toThrow(error);
+    mocks.providerSettingsOptions!.refreshProviderModels("ocg-main", signal);
     expect(mocks.application.refreshProviderModels).toHaveBeenCalledTimes(2);
+    expect(mocks.application.refreshProviderModels).toHaveBeenLastCalledWith("ocg-main", signal);
     expect(mocks.application.notifyProviderSettingsChange).not.toHaveBeenCalled();
   });
 
@@ -377,6 +377,33 @@ describe("runGatewayProcess", () => {
     expect(mocks.application.stop).toHaveBeenCalledOnce();
     expect(mocks.owner.close).toHaveBeenCalledOnce();
     expect(process.exit).toHaveBeenCalledWith(75);
+  });
+
+  it("设置应用传递目标与取消信号，重建Gateway会等待Watcher关闭后释放所有权", async () => {
+    vi.useFakeTimers();
+    const processHandlers = isolateProcessLifecycle();
+    let stopped!: () => void;
+    const waiting = new Promise<void>((resolve) => { stopped = resolve; });
+    mocks.providerSettingsWatcher.stop.mockReturnValueOnce(waiting);
+    mocks.application.reloadConfig
+      .mockReturnValueOnce({ action: "reload", changes: [] })
+      .mockReturnValueOnce({ action: "restart", changes: [{ code: "codex.default-model" }] });
+    await runGatewayProcess();
+    const signal = new AbortController().signal;
+    expect(mocks.providerSettingsOptions?.configuredProviders).toEqual(["ocg-main"]);
+    await mocks.providerSettingsOptions?.applyProviderSettings("ocg-main", signal);
+    expect(mocks.application.applyProviderSettings).toHaveBeenCalledWith("ocg-main", signal);
+    processHandlers.get("SIGHUP")?.();
+    await vi.advanceTimersByTimeAsync(150);
+    await settlePromises();
+    expect(mocks.providerSettingsWatcher.stop).toHaveBeenCalledOnce();
+    expect(mocks.application.stop).toHaveBeenCalledOnce();
+    expect(mocks.owner.close).not.toHaveBeenCalled();
+    expect(process.exit).not.toHaveBeenCalled();
+    stopped();
+    await settlePromises();
+    expect(mocks.owner.close).toHaveBeenCalledOnce();
+    expect(process.exit).toHaveBeenCalledWith(0);
   });
 
   it("checks same-account credentials on config reload and restarts the supervised Gateway", async () => {
