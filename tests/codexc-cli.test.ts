@@ -66,7 +66,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     }`;
     const preload = `import { register } from "node:module";
       register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))}, import.meta.url);`;
-    for (const args of [["--help"], ["version"], ["restart", "--help"], ["service", "start", "--help"], ["app", "--help"], ["timezone", "--help"], ["traffic", "--help"], ["update", "--help"]]) {
+    for (const args of [["--help"], ["version"], ["restart", "--help"], ["start", "--help"], ["app", "--help"], ["timezone", "--help"], ["traffic", "--help"], ["update", "--help"]]) {
       const output = execFileSync(process.execPath, [
         "--import", "data:text/javascript," + encodeURIComponent(preload), cli, ...args,
       ], { encoding: "utf8", timeout: 10_000 });
@@ -169,6 +169,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     const cases = [
       [["init", "-h"], "用法：codexc init"],
       [["setup", "--help"], "用法：codexc setup"],
+      [["run", "-h"], "用法：codexc run"],
       [["start", "-h"], "用法：codexc start"],
       [["restart", "-h"], "用法：codexc restart"],
       [["remote", "-h"], "用法：codexc remote"],
@@ -181,10 +182,9 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["work", "list", "--help"], "用法：codexc work list"],
       [["work", "add", "-h"], "用法：codexc work add"],
       [["work", "remove", "--help"], "用法：codexc work remove"],
-      [["service", "-h"], "用法：codexc service"],
-      [["service", "install", "-h"], "用法：codexc service install"],
-      [["service", "uninstall", "--help"], "用法：codexc service uninstall"],
-      [["service", "reload", "-h"], "用法：codexc service reload"],
+      [["install", "-h"], "用法：codexc install"],
+      [["uninstall", "--services", "--help"], "--services 只停止并卸载后台服务"],
+      [["reload", "-h"], "用法：codexc reload"],
       [["config", "-h"], "用法：codexc config"],
       [["timezone", "-h"], "用法：codexc timezone"],
       [["doctor", "--help"], "用法：codexc doctor"],
@@ -243,16 +243,9 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
         includes: ["--stdout"],
       })),
       {
-        args: ["service", "--help"],
+        args: ["start", "--help"],
         includes: [
-          "此处 all 包含 App Server、Gateway 与按安装及启用状态选取的 Relay",
-          "status [目标] [--json]",
-          "生成全部后台服务定义，并启动 App Server 与 Gateway",
-          "卸载全部后台服务并保留用户数据",
-          "uninstall",
-          "reload",
-          "logs",
-          "保留用户数据",
+          "默认 all", "不含 WebUI", "前台运行使用 codexc run",
         ],
       },
       {
@@ -279,12 +272,12 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
         includes: [
           "version, -v, --version",
           "uninstall",
-          "卸载受管源码与全局命令并保留用户数据",
+          "--services 仅卸载后台服务",
           "配置 Provider、通讯渠道与项目技能",
           ...[
             "init", "setup", "config", "doctor", "remote", "work",
             "primary-provider", "opencode-go", "metrics", "channel", "webui",
-            "start", "restart", "service", "update", "version",
+            "run", "install", "start", "stop", "restart", "status", "logs", "reload", "update", "version",
           ].map((command) => `\n  ${command}`),
         ],
         excludes: [

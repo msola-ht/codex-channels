@@ -11,7 +11,7 @@ export const deliveryCommandUsage = `用法：codexc delivery <status|list|retry
   retry <ID> --allow-duplicate        明确重发整条未知/阻塞结果，可能重复已送达的分片
   confirm <ID> --confirmed-delivered  已自行核实送达后删除未知/阻塞结果
 
-先用 codexc service stop gateway 停止 Gateway；不需要停止共享 App Server。
+先用 codexc stop gateway 停止 Gateway；不需要停止共享 App Server。
 重发恢复后仍须通过当前授权检查。未确认记录不按时间或容量自动删除。`;
 
 export async function runDeliveryCommand(args, environment = process.env) {
@@ -68,7 +68,7 @@ export async function runDeliveryCommand(args, environment = process.env) {
     }
   } catch (error) {
     if (error instanceof DeliveryError && error.code === "conflict") {
-      throw new Error("投递箱正被其他进程占用（通常是运行中的 Gateway）；请先在本机运行 codexc service stop gateway，再执行 codexc delivery。此命令仅支持离线维护，未修改投递记录。", { cause: error });
+      throw new Error("投递箱正被其他进程占用（通常是运行中的 Gateway）；请先在本机运行 codexc stop gateway，再执行 codexc delivery。此命令仅支持离线维护，未修改投递记录。", { cause: error });
     }
     throw error;
   } finally { await journal.close(); }

@@ -21,14 +21,14 @@ describe("CLI navigation", () => {
   });
 
   it("groups launch actions and returns through both menu levels", async () => {
-    const prompts = fixture(["launch", "remote", "webui", "back", "doctor", "cancel"]);
+    const prompts = fixture(["launch", "remote", "webui", "run", "back", "service", "status", "appserver", "cancel", "doctor", "cancel"]);
     const runCommand = vi.fn().mockResolvedValue(undefined);
     await runCliMenu({ prompts, runCommand });
-    expect(runCommand.mock.calls).toEqual([[["remote"]], [["webui"]], [["doctor"]]]);
+    expect(runCommand.mock.calls).toEqual([[["remote"]], [["webui"]], [["run"]], [["status", "appserver"]], [["doctor"]]]);
     expect(prompts.select.mock.calls[0]?.[0]).toMatchObject({
       options: expect.arrayContaining([expect.objectContaining({ value: "launch" })]),
     });
-    expect(prompts.select).toHaveBeenCalledTimes(6);
+    expect(prompts.select).toHaveBeenCalledTimes(11);
   });
 
   it("does not turn a forwarded process signal into another prompt", async () => {
@@ -52,7 +52,7 @@ describe("service menu", () => {
     const runCommand = vi.fn();
     await runServiceMenu({ prompts, runCommand });
     expect(runCommand.mock.calls).toEqual([
-      [["service", "status", "all"]], [["restart", "webui"]], [["service", "logs", "gateway", "--lines", "100"]], [["service", "reload"]],
+      [["status", "all"]], [["restart", "webui"]], [["logs", "gateway", "--lines", "100"]], [["reload"]],
     ]);
     expect(prompts.select.mock.calls[1]?.[0]).toMatchObject({
       options: expect.arrayContaining([expect.objectContaining({ value: "all", hint: expect.stringContaining("不含 WebUI") })]),
@@ -63,7 +63,7 @@ describe("service menu", () => {
     const prompts = fixture(["stop", "back", "uninstall", "uninstall", "cancel"], [false, true]);
     const runCommand = vi.fn();
     await runServiceMenu({ prompts, runCommand });
-    expect(runCommand).toHaveBeenCalledExactlyOnceWith(["service", "uninstall"]);
+    expect(runCommand).toHaveBeenCalledExactlyOnceWith(["uninstall", "--services"]);
     expect(prompts.confirm.mock.calls[0]?.[0]).toMatchObject({ initialValue: false });
   });
 

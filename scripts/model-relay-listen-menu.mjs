@@ -30,8 +30,8 @@ export async function runRelayListenMenu({ environment = process.env, output = p
   if (prompts.isCancel(confirmed) || confirmed !== true) return { action: "back" };
   const result = await manageModelRelay({ command: "listen", host, enabled, models: [] }, environment, { expectedConfigRevision: current.revision });
   output.write(result.activation === "saved_and_applied" ? "监听配置已保存并生效。\n" : result.activation === "saved_not_running"
-    ? `配置已保存，Relay 未运行。${enabled ? "已安装服务可运行 codexc service start relay。" : ""}\n`
-    : "配置已保存，但生效未确认；请运行 codexc relay status 核对。需要立即停止入口时运行 codexc service stop relay。\n");
+    ? `配置已保存，Relay 未运行。${enabled ? "已安装服务可运行 codexc start relay。" : ""}\n`
+    : "配置已保存，但生效未确认；请运行 codexc relay status 核对。需要立即停止入口时运行 codexc stop relay。\n");
   if (result.cleanupStatus === "failed") output.write("配置已保存，但配置锁清理失败；请先核查锁状态，勿重复操作。\n");
   if (enabled) output.write(host === "0.0.0.0" ? `客户端地址：http://服务器内网IP:${current.port}/v1（不要填写 0.0.0.0）\n`
     : `客户端地址：http://${host === "::1" ? "[::1]" : host}:${current.port}/v1\n`);

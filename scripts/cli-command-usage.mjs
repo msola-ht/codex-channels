@@ -62,11 +62,11 @@ export const restartCommandUsage = `用法：codexc restart [${serviceTargetUsag
 失败即中止后续步骤，不自动回滚。App Server 与 all 必须在本机终端执行。`;
 
 export const serviceCommandUsage = Object.freeze({
-  install: "用法：codexc service install",
-  uninstall: "用法：codexc service uninstall",
-  start: `用法：codexc service start [${serviceTargetUsage}]`,
-  stop: `用法：codexc service stop [${serviceTargetUsage}]`,
-  reload: "用法：codexc service reload",
-  status: `用法：codexc service status [${serviceTargetUsage}] [--json]`,
-  logs: `用法：codexc service logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]`,
+  install: "用法：codexc install\n\n生成全部后台服务定义，并启动 App Server、Gateway 及已安装且启用的 Relay；WebUI 单独启动。",
+  uninstall: "用法：codexc uninstall --services",
+  start: `用法：codexc start [${serviceTargetUsage}]\n\n默认 all：启动 App Server、Gateway 及已安装且启用的 Relay，不含 WebUI。前台运行使用 codexc run。`,
+  stop: `用法：codexc stop [${serviceTargetUsage}]\n\n默认 all：停止已安装 Relay、Gateway 和 App Server，不含 WebUI。`,
+  reload: "用法：codexc reload\n\n通知 Gateway 重新读取配置。",
+  status: `用法：codexc status [${serviceTargetUsage}] [--json]\n\n默认 all：查看 App Server、Gateway 及已安装 Relay，不含 WebUI。`,
+  logs: `用法：codexc logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]\n\n默认 gateway；all 不含 WebUI。`,
 });

@@ -8,7 +8,7 @@ export function configActivationResult(activation) {
     case "none":
       return result("none", "none", []);
     case "reload":
-      return result("reload", "gateway", ["codexc service reload"]);
+      return result("reload", "gateway", ["codexc reload"]);
     case "next-thread":
       return result("next-thread", "codex", []);
     case "next-tui":
@@ -20,18 +20,18 @@ export function configActivationResult(activation) {
     case "restart-webui":
       return result("restart", "webui", ["codexc restart webui"]);
     case "restart-app-server":
-      return result("restart", "app-server", ["codexc restart app-server"]);
+      return result("restart", "app-server", ["codexc restart appserver"]);
     case "restart-app-server-gateway-webui":
       return result("restart", "app-server-gateway-webui", [
-        "codexc service stop gateway",
-        "codexc restart app-server",
-        "codexc service start gateway",
+        "codexc stop gateway",
+        "codexc restart appserver",
+        "codexc start gateway",
         "codexc restart webui",
       ]);
     case "restart-all":
       return result("restart", "all", ["codexc restart all"]);
     case "reinstall-services":
-      return result("reinstall-required", "services", ["codexc service install"]);
+      return result("reinstall-required", "services", ["codexc install"]);
     default:
       return result("failed", "unknown", []);
   }

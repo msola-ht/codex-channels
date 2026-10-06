@@ -113,10 +113,18 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     });
     expect(guarded.status).toBe(1);
     expect(guarded.stderr).toContain("不能在 Codex App Server 内执行");
-    for (const args of [["service", "restart"], ["service", "restart", "--help"], ["restart", "model-relay"]]) {
+    for (const args of [["restart", "model-relay"], ["restart", "app-server"]]) {
       const rejected = spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });
       expect(rejected.status).toBe(1);
-      expect(rejected.stderr).toMatch(/重启入口为|服务目标必须是/u);
+      expect(rejected.stderr).toContain("服务目标必须是");
+    }
+  });
+
+  it("rejects the removed service namespace even for help", () => {
+    for (const args of [[], ["-h"], ["--help"], ...["install", "uninstall", "start", "stop", "restart", "status", "logs", "reload"].map(action => [action])]) {
+      const result = spawnSync(process.execPath, [cli, "service", ...args], { encoding: "utf8" });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("未知命令");
     }
   });
 
@@ -170,15 +178,17 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
   it("documents canonical service targets and rejects retired spelling for non-start actions", () => {
     for (const action of ["start", "stop", "status", "logs"]) {
       for (const flag of ["-h", "--help"]) {
-        const help = execFileSync(process.execPath, [cli, "service", action, flag], { encoding: "utf8" });
-        expect(help).toContain(`用法：codexc service ${action}`);
-        expect(help).toContain("gateway|app-server|webui|relay|all");
+        const help = execFileSync(process.execPath, [cli, action, flag], { encoding: "utf8" });
+        expect(help).toContain(`用法：codexc ${action}`);
+        expect(help).toContain("gateway|appserver|webui|relay|all");
         expect(help).not.toContain("model-relay");
       }
       if (action === "start") continue;
-      const old = spawnSync(process.execPath, [cli, "service", action, "model-relay"], { encoding: "utf8" });
-      expect(old.status).toBe(1);
-      expect(old.stderr).toContain("服务目标必须是 gateway、app-server、webui、relay、all");
+      for (const target of ["model-relay", "app-server"]) {
+        const old = spawnSync(process.execPath, [cli, action, target], { encoding: "utf8" });
+        expect(old.status).toBe(1);
+        expect(old.stderr).toContain("服务目标必须是 gateway、appserver、webui、relay、all");
+      }
     }
   });
 
@@ -200,15 +210,15 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     // Disabled isolated Relay provides a real private IPC readiness acknowledgment.
     const relay = await startModelRelayService(configPath, environment);
     try {
-      await expect(execFileAsync(process.execPath, [cli, "service", "start", "model-relay"], { env: environment, cwd: root })).rejects.toThrow();
-      await execFileAsync(process.execPath, [cli, "service", "start", "relay"], { env: environment, cwd: root });
+      await expect(execFileAsync(process.execPath, [cli, "start", "model-relay"], { env: environment, cwd: root })).rejects.toThrow();
+      await execFileAsync(process.execPath, [cli, "start", "relay"], { env: environment, cwd: root });
       expect(readFileSync(log, "utf8").match(/start codex-connect-model-relay.service/gu)).toHaveLength(1);
     } finally { await relay.close(); }
-    await expect(execFileAsync(process.execPath, [cli, "service", "start", "relay"], { env: environment, cwd: root }))
+    await expect(execFileAsync(process.execPath, [cli, "start", "relay"], { env: environment, cwd: root }))
       .rejects.toThrow("Model Relay 未就绪");
   });
 
-  linuxIt("maps public relay stop and status to the installed systemd unit", () => {
+  linuxIt.each([["relay", "model-relay"], ["appserver", "app-server"]])("maps public %s stop and status to the installed systemd unit", (target, internalTarget) => {
     const root = mkdtempSync(join(tmpdir(), "codexc-relay-name-"));
     temporaryDirectories.push(root);
     const manager = join(root, "systemctl");
@@ -217,26 +227,26 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     chmodSync(manager, 0o755);
     const environment = { ...process.env, HOME: root, CODEX_CONNECT_HOME: root,
       CODEX_CONNECT_CONFIG_FILE: join(root, "missing.toml"), SYSTEMCTL_BINARY: manager,
-      XDG_CONFIG_HOME: join(root, "config"), SERVICE_TEST_LOG: log };
+      XDG_CONFIG_HOME: join(root, "config"), SERVICE_TEST_LOG: log, CODEX_CONNECT_SERVICE_ROLE: "" };
     for (const action of ["stop", "status"]) {
-      execFileSync(process.execPath, [cli, "service", action, "relay"], { env: environment, encoding: "utf8" });
+      execFileSync(process.execPath, [cli, action, target], { env: environment, encoding: "utf8" });
     }
     const calls = readFileSync(log, "utf8");
-    expect(calls).toContain("stop codex-connect-model-relay.service");
-    expect(calls).toContain("status codex-connect-model-relay.service");
-    expect(calls).not.toContain("codex-connect-relay.service");
+    expect(calls).toContain(`stop codex-connect-${internalTarget}.service`);
+    expect(calls).toContain(`status codex-connect-${internalTarget}.service`);
+    expect(calls).not.toContain(`codex-connect-${target}.service`);
   });
 
   it("rejects invalid service log options before reading user configuration", () => {
-    const invalidLines = spawnSync(process.execPath, [cli, "service", "logs", "--lines", "0"], {
+    const invalidLines = spawnSync(process.execPath, [cli, "logs", "--lines", "0"], {
       encoding: "utf8",
     });
-    const unknown = spawnSync(process.execPath, [cli, "service", "logs", "--unknown"], {
+    const unknown = spawnSync(process.execPath, [cli, "logs", "--unknown"], {
       encoding: "utf8",
     });
     const removedServiceOption = spawnSync(
       process.execPath,
-      [cli, "service", "logs", "--service", "all"],
+      [cli, "logs", "--service", "all"],
       { encoding: "utf8" },
     );
     const invalidTarget = spawnSync(
@@ -287,17 +297,17 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
 
     for (const args of [
-      ["restart", "app-server"],
+      ["restart", "appserver"],
       ["restart", "all"],
       ["stop", "gateway"],
-      ["stop", "app-server"],
+      ["stop", "appserver"],
       ["stop", "all"],
       ["install"],
-      ["uninstall"],
+      ["uninstall", "--services"],
     ]) {
       const result = spawnSync(
         process.execPath,
-        [cli, ...(args[0] === "restart" ? [] : ["service"]), ...args],
+        [cli, ...args],
         { cwd: workspace, env: environment, encoding: "utf8" },
       );
       expect(result.status).toBe(1);
@@ -372,7 +382,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       try {
         await execFileAsync(
         process.execPath,
-        [cli, "service", "start", "webui"],
+        [cli, "start", "webui"],
         { env: environment, encoding: "utf8" },
       );
       } finally {
@@ -385,7 +395,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       writeFileSync(systemctlLog, "");
       const { stdout: allStdout } = await execFileAsync(
         process.execPath,
-        [cli, "service", "start", "all"],
+        [cli, "start", "all"],
         { env: environment, encoding: "utf8" },
       );
       expect(allStdout).toContain("Codex App Server 与 Gateway 已就绪");
@@ -397,7 +407,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       writeFileSync(systemctlLog, "");
       const { stdout: defaultStartStdout } = await execFileAsync(
         process.execPath,
-        [cli, "service", "start"],
+        [cli, "start"],
         { env: environment, encoding: "utf8" },
       );
       expect(defaultStartStdout).toContain("Codex App Server 与 Gateway 已就绪");

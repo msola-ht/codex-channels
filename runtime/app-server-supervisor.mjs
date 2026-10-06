@@ -475,7 +475,7 @@ export async function ensureAppServerProvider(primarySocketPath, provider) {
   if (response === undefined) {
     throw new Error(
       `无法连接 App Server 监管入口：${socketPath}；`
-      + "请确认 codexc service app-server 正在运行",
+      + "请运行 codexc status appserver 确认服务正在运行",
     );
   }
   let value;
@@ -667,7 +667,7 @@ export async function releaseAppServerProvider(primarySocketPath, provider) {
   if (response === undefined) {
     throw new Error(
       `无法连接 App Server 监管入口：${socketPath}；`
-      + "请确认 codexc service app-server 正在运行",
+      + "请运行 codexc status appserver 确认服务正在运行",
     );
   }
   let value;
@@ -706,7 +706,7 @@ export async function applyAppServerProviderSettings(primarySocketPath, provider
   let value;
   try { value = JSON.parse(response); } catch { throw new Error("Provider 设置应用未确认"); }
   if (value?.version !== protocolVersion || value.settingsProtocolVersion !== providerSettingsProtocolVersion) {
-    throw new Error("App Server 监管入口不支持定向设置应用，请运行 codexc restart app-server 后重试");
+    throw new Error("App Server 监管入口不支持定向设置应用，请运行 codexc restart appserver 后重试");
   }
   if (value.provider !== provider || value.ok !== true
     || Object.keys(value).some(key => !["version", "settingsProtocolVersion", "provider", "ok", "applied", "reason", "changed", "snapshot"].includes(key))) {

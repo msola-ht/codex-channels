@@ -87,5 +87,6 @@ export function serviceIdentifiers(platform, target = "all", order = "start") {
 
 /** Public CLI spelling; installed service identifiers remain stable. */
 export function serviceCommandTarget(target) {
+  if (target === "app-server") return "appserver";
   return target === "model-relay" ? "relay" : target;
 }

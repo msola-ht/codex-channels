@@ -77,8 +77,8 @@ Telegram `editMessageText` 明确返回 `400 message is not modified` 时，表�
 先读取日志，无需停止服务：
 
 ```sh
-codexc service status all
-codexc service logs gateway -n 100
+codexc status all
+codexc logs gateway -n 100
 ```
 
 新投递日志的 `persistentDeliveryId` 与 `codexc delivery list` 的记录 `id` 一致，可从入箱后的故障定位到渲染、排队和平台调用；分片仍有各自的 `deliveryId` 和 `diagnosticId`。历史日志缺少该字段时不能追补。关联 ID 不包含正文或凭据，也不新增持久字段。
@@ -105,7 +105,7 @@ SDK 正常返回但包含非零业务码同样是失败，不能因为附带消�
 以下维护命令必须先停止 Gateway；单写者锁会拒绝与正在运行的 Gateway 同时维护。无需停止共享 App Server。
 
 ```sh
-codexc service stop gateway
+codexc stop gateway
 codexc delivery status
 codexc delivery list
 ```
@@ -117,7 +117,7 @@ codexc delivery list
 ```sh
 codexc delivery retry DELIVERY_ID --allow-duplicate
 codexc delivery confirm DELIVERY_ID --confirmed-delivered
-codexc service start gateway
+codexc start gateway
 ```
 
 `retry` 明确重发整条结果，可能重复已送达的分片；清除旧尝试检查点，但保留尝试计数，启动后仍复核授权。`confirm` 仅在已自行确认结果送达后删除记录。两者只接受 `uncertain` 或 `blocked`，不会删除正在排队或发送的正常记录。恢复授权前重发 `blocked` 仍会被拒绝投递；该记录仍保留但解除顺序屏障，不影响其他消息按各自授权投递。缺少 v2 身份证据的旧 owner 即使执行 `retry` 也不能获得授权；此命令不会补写身份。只能保留记录供人工核对；`confirm` 仍要求已确认送达，不能用来清空未送达结果。

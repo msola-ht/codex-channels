@@ -30,6 +30,7 @@ export async function runCliMenu({ prompts = clackPrompts, runCommand }) {
     if (!options.some((option) => option.value === action)) throw new Error("未知 CLI 菜单操作");
     try {
       if (action === "launch") await runLaunchMenu({ prompts, runCommand });
+      else if (action === "service") await runServiceMenu({ prompts, runCommand });
       else await runCommand([action]);
     } catch (error) {
       reportMenuError(error);
@@ -41,7 +42,7 @@ async function runLaunchMenu({ prompts, runCommand }) {
   const options = [
     { value: "remote", label: "打开 Codex TUI", hint: "连接当前工作区对应的共享 App Server" },
     { value: "webui", label: "启动 WebUI", hint: "前台运行，退出后结束服务" },
-    { value: "start", label: "前台启动核心服务", hint: "App Server 与 Gateway" },
+    { value: "run", label: "前台启动核心服务", hint: "App Server 与 Gateway" },
     { value: "back", label: "返回" },
   ];
   while (true) {
@@ -64,7 +65,7 @@ export async function runServiceMenu({ prompts = clackPrompts, runCommand }) {
     { value: "stop", label: "停止服务" },
     { value: "restart", label: "重启服务" },
     { value: "reload", label: "重新读取 Gateway 配置" },
-    { value: "logs", label: "查看最近日志", hint: "显示最近 100 行；持续跟随请使用 service logs -f" },
+    { value: "logs", label: "查看最近日志", hint: "显示最近 100 行；持续跟随请使用 codexc logs -f" },
     { value: "install", label: "安装后台服务", hint: "生成全部服务定义，启动 App Server 与 Gateway" },
     { value: "uninstall", label: "卸载后台服务", hint: "停止并卸载全部后台服务，保留用户数据" },
     { value: "cancel", label: "返回" },
@@ -82,14 +83,14 @@ export async function runServiceMenu({ prompts = clackPrompts, runCommand }) {
             ? { value: "all", label: "全部后台服务", hint: "App Server、Gateway、已安装 WebUI 与按启用状态选取的 Relay" }
             : { value: "all", label: "核心服务", hint: "App Server、Gateway 及按启用状态选取的 Relay，不含 WebUI" },
           { value: "gateway", label: "Gateway" },
-          { value: "app-server", label: "App Server", hint: "包含受监管的 Provider 实例" },
+          { value: "appserver", label: "App Server", hint: "包含受监管的 Provider 实例" },
           { value: "webui", label: "WebUI" },
           { value: "relay", label: "模型转发", hint: "管理进程；监听开关在 Config → 模型转发监听" },
           { value: "back", label: "返回" },
         ],
       });
       if (prompts.isCancel(target) || target === "back") continue;
-      if (!["all", "gateway", "app-server", "webui", "relay"].includes(target)) throw new Error("未知服务目标");
+      if (!["all", "gateway", "appserver", "webui", "relay"].includes(target)) throw new Error("未知服务目标");
       args.push(target);
       if (action === "logs") args.push("--lines", "100");
     }
@@ -98,7 +99,7 @@ export async function runServiceMenu({ prompts = clackPrompts, runCommand }) {
       if (prompts.isCancel(confirmed) || confirmed !== true) continue;
     }
     try {
-      await runCommand(action === "restart" ? args : ["service", ...args]);
+      await runCommand(action === "uninstall" ? ["uninstall", "--services"] : args);
     } catch (error) {
       reportMenuError(error);
     }

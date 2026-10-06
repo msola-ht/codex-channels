@@ -314,7 +314,7 @@ if (document) {
       "微信运行时",
       weixin.enabled === true
         ? "配置已启用"
-        : "配置未启用；将 weixin.enabled 设为 true 后运行 codexc service reload",
+        : "配置未启用；将 weixin.enabled 设为 true 后运行 codexc reload",
     );
   } else {
     note("微信", "未配置");
@@ -558,7 +558,7 @@ if (process.platform === "darwin") {
     "systemd",
     active.length === units.length
       ? "App Server 与 Gateway 已运行"
-      : `已运行 ${active.length}/${units.length}；可运行 codexc service install 安装用户服务`,
+      : `已运行 ${active.length}/${units.length}；可运行 codexc install 安装用户服务`,
   );
   const uid = process.getuid?.();
   if (uid !== undefined) {
@@ -570,7 +570,7 @@ if (process.platform === "darwin") {
       "systemd linger",
       linger.status === 0 && linger.stdout.trim() === "yes"
         ? "已启用，退出登录后服务可继续运行"
-        : "未启用或无法确认；重新运行 codexc service install，或按安装提示由管理员启用",
+        : "未启用或无法确认；重新运行 codexc install，或按安装提示由管理员启用",
     );
   }
 } else if (process.platform === "win32") {
@@ -588,7 +588,7 @@ if (process.platform === "darwin") {
       "Windows 计划任务",
       status.healthy
         ? "App Server 与 Gateway 已运行"
-        : `已运行 ${status.services.filter((service) => service.running).length}/${status.services.length}；可运行 codexc service install 安装当前用户计划任务`,
+        : `已运行 ${status.services.filter((service) => service.running).length}/${status.services.length}；可运行 codexc install 安装当前用户计划任务`,
     );
   } catch (error) {
     note("Windows 计划任务", `无法查询：${errorMessage(error)}`);

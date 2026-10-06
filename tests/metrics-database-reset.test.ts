@@ -35,7 +35,7 @@ describe("model request metrics database reset", () => {
 
     expect(() => resetMetricsDatabase(environment, {
       gatewayRunning: () => true,
-    })).toThrow(/codexc service stop gateway/u);
+    })).toThrow(/codexc stop gateway/u);
     expect(existsSync(databasePath)).toBe(true);
   });
 

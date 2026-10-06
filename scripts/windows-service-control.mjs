@@ -104,7 +104,7 @@ export async function controlWindowsServices({
     const definition = readDefinition(definitionPath(definitionsDirectory, "gateway"));
     const result = await requestHost(definition.controlPath, { action: "reload" });
     if (result?.version !== 1 || result.ok !== true) {
-      throw new Error("Gateway 尚未运行或无法接收重新加载请求，请先执行 codexc service start gateway");
+      throw new Error("Gateway 尚未运行或无法接收重新加载请求，请先执行 codexc start gateway");
     }
     writeCliMessage("success", "已通知 Gateway 重新读取配置；App Server 配置变化仍需重新安装服务。");
     return;
@@ -195,7 +195,7 @@ async function startDefinitions(target, definitionsDirectory, environment) {
     }
   }
   if (failures.length > 0) {
-    throw new Error(`服务启动部分失败：${failures.join("；")}。请运行 codexc service status。`);
+    throw new Error(`服务启动部分失败：${failures.join("；")}。请运行 codexc status。`);
   }
 }
 
@@ -209,7 +209,7 @@ async function stopDefinitions(target, definitionsDirectory, environment) {
     }
   }
   if (failures.length > 0) {
-    throw new Error(`服务停止部分失败：${failures.join("；")}。请运行 codexc service status。`);
+    throw new Error(`服务停止部分失败：${failures.join("；")}。请运行 codexc status。`);
   }
 }
 
@@ -418,7 +418,7 @@ function readDefinition(path) {
   try {
     definition = JSON.parse(readPrivateFileSync(path, definitionLimitBytes));
   } catch (error) {
-    throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc service install`, { cause: error });
+    throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc install`, { cause: error });
   }
   if (
     definition?.version !== 1
@@ -426,7 +426,7 @@ function readDefinition(path) {
     || typeof definition.pwshBinary !== "string"
     || typeof definition.controlPath !== "string"
   ) {
-    throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc service install`);
+    throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc install`);
   }
   return definition;
 }

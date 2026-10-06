@@ -16,7 +16,7 @@ export async function inspectManagedAccountRuntime(provider, {
   const primarySocketPath = resolvePrimarySocket(environment);
   const inspection = await inspectSupervisor(primarySocketPath);
   if (inspection.status === "incompatible") {
-    const error = new Error("App Server 监管协议不兼容或响应无效；请先运行 codexc restart app-server");
+    const error = new Error("App Server 监管协议不兼容或响应无效；请先运行 codexc restart appserver");
     error.code = "supervisor-incompatible";
     throw error;
   }

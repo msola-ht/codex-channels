@@ -62,7 +62,7 @@ fnm、nvm 等版本管理器时，切换 Node.js 版本也会切换对应的全�
 ```bash
 codexc init
 codexc setup
-codexc service install
+codexc install
 ```
 
 Windows 若 Git 仍报告 `Filename too long`，先在普通 PowerShell 中启用当前用户的 Git 长路径配置，
@@ -113,7 +113,11 @@ codexc update
 安装预检只读校验当前版本及结构，其他版本明确拒绝。更新不迁移、重置或删除数据库，也不提供数据库回退入口。
 App Server 的会话历史不在这些数据库中。
 
-已有受管源码目录时直接使用 `codexc update`，不要重复运行安装器。
+已有受管源码目录且更新器已使用当前扁平命令时，直接使用 `codexc update`，不要重复运行安装器。
+
+从仍使用 `service` 命名空间的旧版本跨越此次命令改版时，不能直接运行旧更新器：它在切换源码后仍会调用已删除的旧命令，导致服务恢复失败。请先按旧版本自身帮助记录并停止运行中的服务，更新所选源码，在该目录执行 `npm run install:global`；安装成功后按原状态依次运行 `codexc start appserver`、`codexc start gateway`、`codexc start relay`、`codexc start webui`，只启动原先运行的目标。程序目录改变时先执行 `codexc install` 重建服务定义。此过程不迁移或删除用户配置、数据库；安装失败时保持服务停止，保留原源码用于排查和重新安装。新版本拒绝旧命令，不提供兼容别名。
+
+若旧更新器已经切换源码后报服务恢复失败，保留其报告的备份目录，按下文切换后失败的恢复步骤完成全局安装，再用上述新命令恢复原先运行的服务。新更新器的停止与恢复操作会在独立进程中加载当时源码目录自己的服务入口和目标映射。
 
 同一版本号下的新提交仍会更新。受管源码没有新提交时，只读校验配置和数据库并按需同步配套 CLI；CLI 无需更新时不停止服务。本地构建包执行相同检查和 CLI 同步，不更新 Gateway 包；安装工作区代码使用 `npm run install:global`。
 从开发仓库执行 `npm run install:global` 不会将其登记为受管 `main` 仓库。该入口（包括内部 `--prepared`）在注册 Gateway 全局命令前检测 Codex CLI：默认 `codex` 缺失或版本不符时通过 npm 同步为 `src/codex-protocol/version.json` 锁定的正式版本，并检查安装后的版本和 PATH，无需初始化或渠道配置。显式 `CODEX_BINARY` 无效或版本不符时明确失败，不替换指定二进制。CLI 无法执行、安装失败或安装后仍不可见时也明确失败。安装不自动登录或启动服务。
@@ -122,11 +126,11 @@ App Server 的会话历史不在这些数据库中。
 
 在需要安装的源码根目录运行 `npm run install:global`（Windows 可用 `npm.cmd run install:global`）。命令自动准备依赖、构建 Gateway/WebUI，再安装当前工作树的构建包；未提交改动也会进入构建。仅执行 `npm run build` 不会刷新全局命令。
 
-已有运行服务时，先从本机终端记录 `codexc service status all` 和 `codexc service status webui` 的状态，停止运行中的 WebUI，再执行 `codexc service stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；安装失败先处理错误，不启动版本未就绪的服务。程序目录或 Node.js 路径改变时用 `codexc service install` 重建服务定义。
+已有运行服务时，先从本机终端记录 `codexc status all` 和 `codexc status webui` 的状态，停止运行中的 WebUI，再执行 `codexc stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；安装失败先处理错误，不启动版本未就绪的服务。程序目录或 Node.js 路径改变时用 `codexc install` 重建服务定义。
 
 此安装路径不拉取 Git，也不自动管理服务。自行选择分支并更新源码后重复执行安装；没有受管仓库时，`codexc update` 只同步配套 CLI 和校验配置、数据库，不更新本地源码或 Gateway 包。
 
-新设备按 `npm run install:global` → `codexc init` → `codexc setup` → `codexc service install` 顺序操作；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。
+新设备按 `npm run install:global` → `codexc init` → `codexc setup` → `codexc install` 顺序操作；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。
 本地构建包的 `codexc update` 会显示检查开始和完成结果；无需更新时明确提示配套 CLI 无需更新、数据库结构有效。
 
 候选源码完成构建和只读预检后，如默认 Codex CLI 缺失或其要求的版本与本机不一致，交互终端会显示当前版本和
@@ -155,4 +159,4 @@ codexc uninstall
 该命令先卸载后台服务，再删除受管 Git 仓库及安装、更新时记录的 `@hegenai/codexc` 全局包。
 `config.toml`、数据库、凭据、日志、输出和 Shell 配置保留；Codex CLI 不会被删除。命令只接受
 当前直接运行的源码目录或带受管标记的源码安装；符号链接及不匹配目录会被拒绝。npm 全局安装使用
-`codexc service uninstall` 和 `npm uninstall -g @hegenai/codexc`。
+`codexc uninstall --services` 和 `npm uninstall -g @hegenai/codexc`。

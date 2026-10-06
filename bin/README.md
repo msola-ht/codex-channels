@@ -23,7 +23,7 @@
   交互终端使用不同颜色并汇总结果；`--json` 输出全部脱敏检查、分类计数与健康状态；Linux 缺少
   `bubblewrap` 时输出安装建议，不改写配置。
 - `security repair`：逐个修复 Windows Codex TOML 配置文件 ACL，不修改沙箱目录权限；Unix 平台提示无需处理。
-- `start`：在前台复用内部 `service-app-server` 监管入口启动 App Server、Provider 统计代理与
+- `run`：在前台复用内部 `service-app-server` 监管入口启动 App Server、Provider 统计代理与
   Gateway；只有监管身份、Provider 拓扑和真实 WebSocket 健康检查全部匹配的现有 App Server
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
@@ -60,9 +60,9 @@
 - `relay`：管理独立模型 API 转发的监听、调用方、Key 和运行状态；边界与操作见[模型 API 转发](../docs/user-guide.md#可选模型-api-转发)。
 - `webui`：启动本机指标查询与受控设置界面；监听参数在读取用户配置前完成校验。
 - `restart [目标]`：统一重启入口，默认全部后台服务。服务管理层预检后依次停止所选服务，再逐项启动并确认就绪；覆盖已安装 WebUI 与按启用状态选取的 Relay，失败中止后续步骤，禁止在 App Server 内自中断。
-- `service`：交互终端无参数时选择操作及明确目标，日志菜单显示最近 100 行；卸载需确认，配置损坏时仍能进入菜单执行诊断恢复操作。非交互终端无参数时显示帮助。安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
+- `install/start/stop/reload/status/logs` 与 `uninstall --services`：顶层后台服务命令；主菜单的“后台服务”分类选择操作及明确目标，日志菜单显示最近 100 行，卸载需确认，配置损坏时仍能进入菜单执行诊断恢复操作。安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
   与 Gateway；启停、状态和日志命令使用
-  `gateway`、`app-server`、`webui`、`relay` 或 `all` 明确目标，菜单重启分派到顶层 `restart`；
+  `gateway`、`appserver`、`webui`、`relay` 或 `all` 明确目标，菜单统一分派到顶层命令；
   `all` 包含 App Server 与 Gateway，启动时纳入已安装且启用的 Relay，停止时先关闭已安装的 Relay；WebUI 单独管理；核心服务安装、启动或重启后按目标等待监管拓扑、
   WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等
   诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务；`status --json`
@@ -80,7 +80,7 @@ Provider 的独立回环统计代理（DS、OpenCode Go 与 CCG 各自的全部�
 用于跨进程互斥和向前台启动器证明精确 Provider 拓扑；它同时集中拒绝已被裸进程占用的 App
 Server Socket。启动主 App Server 与 Provider App Server 前，入口把 `[codex].terminal_identity`
 写入子进程的 `TERM_PROGRAM` / `TERM_PROGRAM_VERSION`，供 Codex 在模型上游 `User-Agent` 中上报
-终端标识；未配置时保持环境原样，由 Codex 自行探测。`codexc service install` 在生成服务定义
+终端标识；未配置时保持环境原样，由 Codex 自行探测。`codexc install` 在生成服务定义
 前、本地更新真正重启核心服务前，若该值未配置且运行命令的终端可探测，则按该终端补入配置并
 提示一次；已配置或探测不到终端时保持配置不变；补入失败只提示原因并继续当前命令。`start`、
 `restart`、`reload`、`stop`、`status`、`logs` 与 `uninstall` 不改写该配置。

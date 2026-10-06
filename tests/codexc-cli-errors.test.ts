@@ -168,7 +168,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       };
     });
 
-    const result = spawnSync(process.execPath, [cli, "start"], {
+    const result = spawnSync(process.execPath, [cli, "run"], {
       cwd: workspace,
       env: environment,
       encoding: "utf8",
@@ -205,7 +205,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       table(document.codex).binary = fakeCodex;
     });
 
-    const result = spawnSync(process.execPath, [cli, "start"], {
+    const result = spawnSync(process.execPath, [cli, "run"], {
       cwd: workspace,
       env: environment,
       encoding: "utf8",

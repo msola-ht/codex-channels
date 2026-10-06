@@ -48,7 +48,6 @@ import {
   desktopAppCommandUsage,
   timezoneCommandUsage,
   cleanupUsage,
-  serviceCommandActions,
   serviceCommandUsage,
   restartCommandUsage,
 } from "../scripts/cli-command-usage.mjs";
@@ -99,11 +98,16 @@ const helpText = {
   webui                        启动指标 WebUI
 
 服务与维护：
-  start                        前台启动核心服务
+  run                          前台运行核心服务
+  install                      安装后台服务并启动核心服务
+  start [目标]                 启动后台服务
+  stop [目标]                  停止后台服务
   restart                      重启全部后台服务（含 WebUI 与已启用 Relay）
-  service                      管理后台服务
+  status [目标]                查看后台服务状态
+  logs [目标]                  查看后台服务日志
+  reload                       重新读取 Gateway 配置
   update                       更新程序与配套 Codex CLI
-  uninstall                    卸载受管源码与全局命令并保留用户数据
+  uninstall [--services]       卸载程序；--services 仅卸载后台服务，均保留用户数据
 
 信息：
   version, -v, --version       显示版本
@@ -127,7 +131,7 @@ const helpText = {
   codexc setup → 项目技能（安装或卸载项目技能）
 
 DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开同一受管 Provider 设置，并预选当前 Provider。`,
-  start: `用法：codexc start
+  run: `用法：codexc run
 
 在前台启动 Codex App Server 与 Gateway。`,
   remote: `${CODEX_REMOTE_USAGE}
@@ -136,28 +140,12 @@ DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开�
 切换模式可用 --profile sf-ds-<账户>、sf-ocg-<账户>、sf-ccg-<账户> 或
 sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。`,
   desktop_app: desktopAppCommandUsage,
-  service: `用法：codexc service [命令]
-
-交互终端无参数时选择操作和目标；非交互终端显示帮助。
-
-  install                      生成全部后台服务定义，并启动 App Server 与 Gateway
-  uninstall                    卸载全部后台服务并保留用户数据
-  start [目标]                 启动 gateway、app-server、webui、relay 或 all
-  stop [目标]                  停止 gateway、app-server、webui、relay 或 all
-  reload                       通知 Gateway 重新读取配置
-  status [目标] [--json]       查看 gateway、app-server、webui、relay 或 all
-  logs [目标] [-f] [-n 行数]   查看后台日志
-
-目标默认值：start/stop/status 为 all，logs 为 gateway。
-此处 all 包含 App Server、Gateway 与按安装及启用状态选取的 Relay，WebUI 单独管理。
-重启请用 codexc restart [目标]，默认重启全部后台服务，包含已安装的 WebUI。`,
-  "service.install": serviceCommandUsage.install,
-  "service.uninstall": serviceCommandUsage.uninstall,
-  "service.start": serviceCommandUsage.start,
-  "service.stop": serviceCommandUsage.stop,
-  "service.reload": serviceCommandUsage.reload,
-  "service.status": serviceCommandUsage.status,
-  "service.logs": serviceCommandUsage.logs,
+  install: serviceCommandUsage.install,
+  start: serviceCommandUsage.start,
+  stop: serviceCommandUsage.stop,
+  reload: serviceCommandUsage.reload,
+  status: serviceCommandUsage.status,
+  logs: serviceCommandUsage.logs,
   config: `用法：codexc config [--json]
 
 打开统一日常配置菜单：Codex 新会话与用户偏好、Gateway 脱敏配置总览、显示设置、系统设置、自动化（计划任务）、
@@ -195,11 +183,13 @@ Git 源码安装检查并构建官方 main 最新提交，校验当前配置、�
 CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CLI，不更新 Gateway 程序包。
 数据库只接受当前 Schema，不迁移或删除数据；关闭 Codex daemon 自动启动，其他用户偏好与模型目录不改写。
 预检失败时不停止服务；更新按原运行状态恢复核心服务和 WebUI，失败报告阶段并尝试恢复。必须从本机终端执行。`,
-  uninstall: `用法：codexc uninstall
+  uninstall: `用法：codexc uninstall [--services]
+
+--services 只停止并卸载后台服务，保留程序和用户数据。
 
 卸载后台服务、受管 Git 源码仓库与对应 npm 全局命令；保留
 config.toml、数据库、凭据、日志、输出和 Shell 配置。直接从 npm Registry 安装的版本使用
-codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
+codexc uninstall --services 和 npm uninstall -g @hegenai/codexc。`,
   metrics: `用法：codexc metrics
 
 无参数时进入查询与导出菜单；交互清理和重置请用 codexc cleanup。直接命令：
@@ -336,11 +326,11 @@ async function executeCommand(command, args) {
       }
       runSetup(args);
       break;
-    case "start":
-      if (showRequestedHelp(args, "start")) {
+    case "run":
+      if (showRequestedHelp(args, "run")) {
         break;
       }
-      requireNoArguments(args, "用法：codexc start");
+      requireNoArguments(args, "用法：codexc run");
       await runForegroundScript(
         "scripts/dev-all.mjs",
         args,
@@ -388,8 +378,14 @@ async function executeCommand(command, args) {
     case "work":
       await (await import("../scripts/workspace-command.mjs")).runWorkspaceCommand(args);
       break;
-    case "service":
-      await handleServiceCommand(args);
+    case "install":
+    case "start":
+    case "stop":
+    case "reload":
+    case "status":
+    case "logs":
+      if (showRequestedHelp(args, command)) break;
+      await (await import("../scripts/service-command.mjs")).runServiceCommand([command, ...args]);
       break;
     case "restart":
       if (showRequestedHelp(args, "restart")) break;
@@ -458,10 +454,15 @@ async function executeCommand(command, args) {
       break;
     }
     case "uninstall":
+      if (showSubcommandHelp(args, "--services", "uninstall")) break;
       if (showRequestedHelp(args, "uninstall")) {
         break;
       }
-      requireNoArguments(args, "用法：codexc uninstall");
+      if (args.length === 1 && args[0] === "--services") {
+        await (await import("../scripts/service-command.mjs")).runServiceCommand(["uninstall"]);
+        break;
+      }
+      requireNoArguments(args, "用法：codexc uninstall [--services]");
       runStandaloneScript("scripts/source-uninstall.mjs", [], serviceControlEnvironment());
       break;
     case "reset-credit":
@@ -537,28 +538,8 @@ function initialize(args) {
   console.log(`配置文件：${result.configPath}`);
   if (result.created) {
     console.log(`默认 Workspace：${result.workspace}`);
-    printCliMessage("note", "请运行 codexc setup 配置通讯渠道，然后运行 codexc service install。");
+    printCliMessage("note", "请运行 codexc setup 配置通讯渠道，然后运行 codexc install。");
   }
-}
-
-async function handleServiceCommand(args) {
-  if (showRequestedHelp(args, "service")) return;
-  if (args.length === 0) {
-    if (!process.stdin.isTTY || !process.stdout.isTTY) console.log(helpText.service);
-    else {
-      const { runServiceMenu } = await import("../scripts/cli-menu.mjs");
-      await runServiceMenu({ runCommand: ([command, ...rest]) => executeCommand(command, rest) });
-    }
-    return;
-  }
-  const [action, ...rest] = args;
-  if (
-    serviceCommandActions.includes(action)
-    && showRequestedHelp(rest, `service.${action}`)
-  ) {
-    return;
-  }
-  await (await import("../scripts/service-command.mjs")).runServiceCommand(args);
 }
 
 function runDoctor(args) {

@@ -75,7 +75,7 @@ export function writeCliRemediationRestartAll(options) {
 export function writeCliRemediationRestartAppServer(options) {
   writeCliMessage(
     "remediation",
-    "运行 codexc restart app-server 后生效；Gateway 将自动重连。",
+    "运行 codexc restart appserver 后生效；Gateway 将自动重连。",
     options,
   );
 }

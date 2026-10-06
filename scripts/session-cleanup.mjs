@@ -168,7 +168,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
 }
 
 async function requireStoppedGateway(configPath) {
-  if (await gatewayOwnerIsActive(configPath)) throw new Error("清理会话前必须先停止 Gateway：codexc service stop gateway");
+  if (await gatewayOwnerIsActive(configPath)) throw new Error("清理会话前必须先停止 Gateway：codexc stop gateway");
 }
 
 function clientFor(thread, clients) {

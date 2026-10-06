@@ -94,7 +94,7 @@ export class NetworkProxyWatcher {
     this.logger.warn(
       "系统代理已变化；Gateway 渠道和 App Server 账户请求仍使用启动时的代理。"
       + "请在所有客户端任务结束后，后台模式执行 codexc restart all，"
-      + "前台模式停止并重新运行 codexc start；不会自动重启共享 App Server",
+      + "前台模式停止并重新运行 codexc run；不会自动重启共享 App Server",
     );
   }
 }

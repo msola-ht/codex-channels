@@ -32,7 +32,7 @@ describe("managed model window setup", () => {
       activationResult: {
         status: "restart",
         target: "app-server",
-        commands: ["codexc restart app-server"],
+        commands: ["codexc restart appserver"],
       },
     });
 

@@ -196,7 +196,7 @@ Surface -> Application/Core <- Codex Client
   permission to execute a command does not itself authorize commits, remote writes, deployment or dependency changes.
 - Public `codexc` commands and subcommands must support both `-h` and `--help`. Keep only documented canonical names; do not add implicit aliases.
   `gateway`, `service-app-server` and `service-model-relay` are internal service-template entry points, excluded from public help.
-- Manage background processes through `codexc service`. For service operations or changes, consult `docs/user-guide.md` for targets, defaults and lifecycle ordering.
+- Manage background processes through `codexc install/start/stop/restart/status/logs/reload` and `codexc uninstall --services`. For service operations or changes, consult `docs/user-guide.md` for targets, defaults and lifecycle ordering.
   Preserve Gateway/App Server independence and the separately managed WebUI; do not infer what `all` includes from its name.
 - Project Codex command presets live in `.codex/rules/default.rules`. They may preauthorize only read-only Git inspections, existing repository verification scripts,
   and the explicitly listed `codexc channel send-image` operation, which sends a local image that has passed shared validation to a bound channel conversation.

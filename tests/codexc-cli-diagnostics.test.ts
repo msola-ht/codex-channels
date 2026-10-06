@@ -45,7 +45,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
 
     const result = spawnSync(
       process.execPath,
-      [cli, "service", "status", "gateway"],
+      [cli, "status", "gateway"],
       { cwd: workspace, env: environment, encoding: "utf8" },
     );
 
@@ -56,7 +56,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
 
     const reload = spawnSync(
       process.execPath,
-      [cli, "service", "reload"],
+      [cli, "reload"],
       { cwd: workspace, env: environment, encoding: "utf8" },
     );
 
@@ -78,7 +78,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
 
     const result = spawnSync(
       process.execPath,
-      [cli, "service", "status", "gateway", "--json"],
+      [cli, "status", "gateway", "--json"],
       {
         cwd: root,
         env: { ...process.env, SYSTEMCTL_BINARY: fakeSystemctl },
@@ -109,7 +109,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     ].join("\n"));
     const inactive = spawnSync(
       process.execPath,
-      [cli, "service", "status", "gateway", "--json"],
+      [cli, "status", "gateway", "--json"],
       {
         cwd: root,
         env: { ...process.env, SYSTEMCTL_BINARY: fakeSystemctl },
@@ -166,7 +166,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     expect(result.stderr).toContain("测试 Gateway 停止失败");
     expect(result.stderr.match(/测试 Gateway 停止失败/g)).toHaveLength(1);
     expect(result.stderr.match(/测试 Gateway 恢复失败/g)).toHaveLength(1);
-    expect(result.stderr).toContain("codexc service start gateway");
+    expect(result.stderr).toContain("codexc start gateway");
     expect(result.stderr.match(/\[失败\]/g)).toHaveLength(3);
     expect(result.stderr).not.toContain("Gateway 停止失败：exit");
   });
@@ -206,11 +206,11 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       ["logs", "gateway", "-n", "1"],
       ["reload"],
       ["stop", "gateway"],
-      ["uninstall"],
+      ["uninstall", "--services"],
     ]) {
       const result = spawnSync(
         process.execPath,
-        [cli, "service", ...args],
+        [cli, ...args],
         { env: environment, encoding: "utf8" },
       );
       expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(0);
@@ -227,7 +227,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     const systemctlCallsBeforeStart = readFileSync(systemctlLog, "utf8");
     const start = spawnSync(
       process.execPath,
-      [cli, "service", "start", "gateway"],
+      [cli, "start", "gateway"],
       { env: environment, encoding: "utf8" },
     );
     expect(start.status).toBe(1);

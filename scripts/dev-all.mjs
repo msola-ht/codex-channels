@@ -156,7 +156,7 @@ async function ensureAppServerTopology({
     if (!sameAppServerTopology(existingSupervisor, topology)) {
       throw new Error(
         "现有 App Server Provider 拓扑与当前配置不一致；"
-        + "请先运行 codexc service stop all，再重试",
+        + "请先运行 codexc stop all，再重试",
       );
     }
     await ensureAppServerProvider(socketPath, existingSupervisor.primaryProvider);

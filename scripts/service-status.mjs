@@ -47,7 +47,7 @@ export function inspectManagedServiceStatus({
   } else if (platform === "win32") {
     return inspectWindowsServices(resolvedTarget, environment, run);
   } else {
-    throw new Error("codexc service status --json 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
+    throw new Error("codexc status --json 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
   }
   return {
     platform: servicePlatform,
@@ -103,7 +103,7 @@ export async function inspectManagedServiceStatusAsync({
     services = parseWindowsServiceResult(result);
     servicePlatform = "windows";
   } else {
-    throw new Error("codexc service status --json 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
+    throw new Error("codexc status --json 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
   }
   return {
     platform: servicePlatform,
@@ -451,7 +451,7 @@ function safeProcessError(result) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv.length !== 3) {
-      throw new Error("用法：codexc service status [gateway|app-server|webui|relay|all] [--json]");
+      throw new Error("用法：codexc status [gateway|appserver|webui|relay|all] [--json]");
     }
     const result = await inspectManagedServiceHealth({ target: process.argv[2] });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

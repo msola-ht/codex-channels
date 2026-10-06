@@ -75,7 +75,7 @@ stop_before_all_restart() {
   stopping_units=$(service_ids all stop)
   for stopping_unit in $stopping_units; do
     if ! stop_unit "$stopping_unit"; then
-      print_status failure "停止服务失败，已中止整体重启：$stopping_unit。请运行 codexc service status。"
+      print_status failure "停止服务失败，已中止整体重启：$stopping_unit。请运行 codexc status。"
       return 1
     fi
   done
@@ -92,7 +92,7 @@ ensure_linger() {
   fi
   if ! "$loginctl_binary" enable-linger "$user_id" 2>/dev/null; then
     print_status failure "无法为当前用户启用 systemd linger，后台服务不能保证在登录前启动。"
-    print_status remediation "请先执行 sudo loginctl enable-linger \"$(id -un)\"，再重新运行 codexc service install。"
+    print_status remediation "请先执行 sudo loginctl enable-linger \"$(id -un)\"，再重新运行 codexc install。"
     return 1
   fi
   linger=$(
@@ -128,7 +128,7 @@ case "$action" in
     for unit in "$@"; do systemctl_user restart "$unit"; done
     print_status note "Codex App Server 与 Gateway systemd 用户服务已安装，启动操作已完成，正在确认就绪状态。"
     print_status note "systemd linger 已启用，未登录时也会随系统启动。"
-    print_status note "WebUI 服务已生成，可执行 codexc service start webui 启动。"
+    print_status note "WebUI 服务已生成，可执行 codexc start webui 启动。"
     ;;
   start)
     target=${2:-all}
@@ -141,7 +141,7 @@ case "$action" in
       fi
     done
     if [ -n "$failed_units" ] && [ "$target" = "all" ]; then
-      print_status failure "服务启动部分失败；失败目标：${failed_units# }。请运行 codexc service status。"
+      print_status failure "服务启动部分失败；失败目标：${failed_units# }。请运行 codexc status。"
       exit 1
     elif [ -n "$failed_units" ]; then
       exit 1
@@ -165,7 +165,7 @@ case "$action" in
       fi
     done
     if [ -n "$failed_units" ] && [ "$target" = "all" ]; then
-      print_status failure "服务停止部分失败；失败目标：${failed_units# }。请运行 codexc service status。"
+      print_status failure "服务停止部分失败；失败目标：${failed_units# }。请运行 codexc status。"
       exit 1
     elif [ -n "$failed_units" ]; then
       exit 1
@@ -181,7 +181,7 @@ case "$action" in
   reload)
     gateway_unit=$(service_ids gateway start)
     if ! systemctl_user is-active --quiet "$gateway_unit"; then
-      print_status failure "Gateway 尚未运行，请先执行 codexc service start。"
+      print_status failure "Gateway 尚未运行，请先执行 codexc start。"
       exit 1
     fi
     systemctl_user kill --kill-whom=main --signal=HUP "$gateway_unit"

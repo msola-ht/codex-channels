@@ -98,8 +98,8 @@ describe("webui server settings and task management", () => {
       "model-relay",
       "webui",
     ]));
-    expect(body.cli.map((entry) => entry.command)).toContain("codexc service status all");
-    expect(body.cli.map((entry) => entry.command)).toContain("codexc service status webui");
+    expect(body.cli.map((entry) => entry.command)).toContain("codexc status all");
+    expect(body.cli.map((entry) => entry.command)).toContain("codexc status webui");
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain("webui-secret");
     expect(serialized).not.toContain("proxy-secret");

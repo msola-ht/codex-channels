@@ -80,7 +80,7 @@ it("renders localized queue states, retry eligibility, missing and error views w
   expect(result.empty).toContain("当前筛选下没有未确认");
   expect(result.cleanupFailed).toContain("投递维护进程关闭未确认");
   expect(result.cleanupFailed).toContain("审计记录写入失败");
-  expect(result.cleanupFailed).not.toContain("codexc service start gateway");
+  expect(result.cleanupFailed).not.toContain("codexc start gateway");
 });
 
 describe("delivery queue hook contracts", () => {

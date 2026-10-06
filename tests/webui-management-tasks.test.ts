@@ -82,11 +82,11 @@ describe("WebUI management tasks", () => {
       operation: "service",
       requiresConfirmation: true,
     });
-    expect(runner.preview({ operation: "service", action: "stop", target: "model-relay" })).toMatchObject({ effects: ["执行 codexc service stop relay"] });
+    expect(runner.preview({ operation: "service", action: "stop", target: "model-relay" })).toMatchObject({ effects: ["执行 codexc stop relay"] });
     expect(runner.preview({ operation: "service", action: "restart", target: "gateway" })).toMatchObject({ effects: ["执行 codexc restart gateway"] });
     expect(runner.preview({ operation: "service", action: "restart", target: "model-relay" })).toMatchObject({ effects: ["执行 codexc restart relay"] });
     expect(runner.preview({ operation: "service", action: "reload" })).toMatchObject({
-      effects: ["执行 codexc service reload"],
+      effects: ["执行 codexc reload"],
       target: null,
     });
     expect(runner.preview({ operation: "metrics", action: "prune", target: "deepseek" })).toMatchObject({
@@ -160,7 +160,16 @@ describe("WebUI management tasks", () => {
     }
   });
 
-  it.each(["gateway", "model-relay"] as const)("executes the canonical restart command for %s", async target => {
+  it.each([
+    [{ operation: "service", action: "restart", target: "gateway" }, "restart gateway"],
+    [{ operation: "service", action: "restart", target: "model-relay" }, "restart relay"],
+    [{ operation: "service", action: "restart", target: "app-server" }, "restart appserver"],
+    [{ operation: "service", action: "start", target: "app-server" }, "start appserver"],
+    [{ operation: "service", action: "stop", target: "app-server" }, "stop appserver"],
+    [{ operation: "service", action: "install" }, "install"],
+    [{ operation: "service", action: "uninstall" }, "uninstall --services"],
+    [{ operation: "service", action: "reload" }, "reload"],
+  ] as const)("executes the canonical service command for %j", async (input, command) => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-webui-restart-"));
     const executable = join(directory, process.platform === "win32" ? "codexc.cmd" : "codexc");
     const capture = join(directory, "args.txt");
@@ -169,11 +178,12 @@ describe("WebUI management tasks", () => {
         ? '@echo off\r\necho %* > "%RESTART_TEST_CAPTURE%"\r\n'
         : '#!/bin/sh\nprintf "%s\\n" "$*" > "$RESTART_TEST_CAPTURE"\n', { mode: 0o700 });
       const runner = new WebuiManagementTaskRunner();
-      const task = runner.start({ operation: "service", action: "restart", target }, {
+      expect(runner.preview(input).effects).toEqual([`执行 codexc ${command}`]);
+      const task = runner.start(input, {
         owner: "restart-owner", environment: { ...process.env, PATH: directory, RESTART_TEST_CAPTURE: capture },
       });
       await vi.waitFor(() => expect(runner.get(task.id, "restart-owner")?.state).toBe("completed"));
-      expect(readFileSync(capture, "utf8").trim()).toBe(`restart ${target === "model-relay" ? "relay" : target}`);
+      expect(readFileSync(capture, "utf8").trim()).toBe(command);
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 });

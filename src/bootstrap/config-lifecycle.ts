@@ -182,7 +182,7 @@ export async function runGatewayProcess(): Promise<void> {
       if (result.action === "reinstall") {
         logger.error(
           { changes: result.changes.map((change) => change.code) },
-          "配置涉及 App Server 服务定义，继续使用现有配置；请执行 codexc service install",
+          "配置涉及 App Server 服务定义，继续使用现有配置；请执行 codexc install",
         );
         return;
       }

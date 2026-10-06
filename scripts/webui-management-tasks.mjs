@@ -31,7 +31,7 @@ export class WebuiManagementTaskRunner {
   preview(input) {
     const normalized = normalizeTaskInput(input);
     const command = normalized.operation === "service"
-      ? `codexc ${normalized.action === "restart" ? "restart" : `service ${normalized.action}`}${normalized.target ? ` ${serviceCommandTarget(normalized.target)}` : ""}`
+      ? `codexc ${serviceTaskArguments(normalized).join(" ")}`
       : normalized.operation === "traffic"
         ? "codexc traffic cleanup --confirm"
         : `codexc metrics ${normalized.action}${normalized.target === undefined ? "" : ` ${normalized.target}`}`;
@@ -168,7 +168,7 @@ export class WebuiManagementTaskRunner {
     task.updatedAt = new Date(this.#now()).toISOString();
     this.#notify(task);
     const args = normalized.operation === "service"
-      ? [...(normalized.action === "restart" ? ["restart"] : ["service", normalized.action]), ...(normalized.target === undefined ? [] : [serviceCommandTarget(normalized.target)])]
+      ? serviceTaskArguments(normalized)
       : normalized.operation === "traffic"
         ? ["traffic", "cleanup", "--confirm"]
         : ["metrics", normalized.action, ...(normalized.target === undefined ? [] : [normalized.target])];
@@ -247,6 +247,11 @@ export class WebuiManagementTaskRunner {
       if (this.#tasks.size < maximumTaskHistory) return;
     }
   }
+}
+
+function serviceTaskArguments(input) {
+  return [input.action, ...(input.action === "uninstall" ? ["--services"]
+    : input.target === undefined ? [] : [serviceCommandTarget(input.target)])];
 }
 
 export function normalizeTaskInput(input) {

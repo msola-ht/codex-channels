@@ -34,7 +34,7 @@ describe("managed model provider default setup", () => {
       activationResult: {
         status: "restart",
         target: "app-server",
-        commands: ["codexc restart app-server"],
+        commands: ["codexc restart appserver"],
       },
     });
 

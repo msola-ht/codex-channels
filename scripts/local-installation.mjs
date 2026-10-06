@@ -5,7 +5,7 @@ import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { appServerSocketAcceptsWebSocket, inspectAppServerSupervisorState, sameAppServerTopology } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
-import { serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
+import { serviceCommandTarget, serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import { loadConfigDocument } from "../dist/config/index.js";
 import { sessionDisplayCacheSchemaVersion } from "../dist/storage/index.js";
 import { validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
@@ -83,7 +83,7 @@ export function inspectCoreServiceInstallation(
   const existingPaths = paths.filter((path) => existsSync(path));
   if (existingPaths.length === 0) return { installed: false };
   if (existingPaths.length !== paths.length) {
-    throw new Error("核心后台服务安装不完整；请先运行 codexc service install");
+    throw new Error("核心后台服务安装不完整；请先运行 codexc install");
   }
   return { installed: true };
 }
@@ -193,9 +193,10 @@ export async function waitForCoreServiceTarget(
     : target === "app-server"
       ? "Codex App Server"
       : "Gateway";
+  const commandTarget = serviceCommandTarget(target);
   throw new Error(
-    `${label} 未能及时就绪；请运行 codexc service status ${target}，`
-    + `并查看 codexc service logs ${target}`,
+    `${label} 未能及时就绪；请运行 codexc status ${commandTarget}，`
+    + `并查看 codexc logs ${commandTarget}`,
   );
 }
 

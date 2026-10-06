@@ -297,7 +297,7 @@ describe("App Server supervisor", () => {
       await expect(ensureAppServerProvider(primarySocketPath, "openai"))
         .rejects.toThrow("请运行 codexc restart all");
       await expect(applyAppServerProviderSettings(primarySocketPath, "openai"))
-        .rejects.toThrow("请运行 codexc restart app-server");
+        .rejects.toThrow("请运行 codexc restart appserver");
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

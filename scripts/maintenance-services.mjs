@@ -1,5 +1,10 @@
 import { inspectManagedServiceStatus } from "./service-status.mjs";
 import { serviceControlEnvironment } from "./runtime-environment.mjs";
+import { serviceCommandTarget } from "../runtime/service-targets.mjs";
+
+function commandTarget(target) {
+  return serviceCommandTarget(target === "relay" ? "model-relay" : target);
+}
 
 export function maintenanceServiceRunning(target) {
   const service = inspectManagedServiceStatus({ target: target === "relay" ? "model-relay" : target,
@@ -12,7 +17,7 @@ export function maintenanceServiceRunning(target) {
 
 export async function runMaintenanceServices({ prompts, targets, run,
   isRunning = maintenanceServiceRunning,
-  runService = async (action, target) => (await import("./service-command.mjs")).runServiceCommand([action, target]),
+  runService = async (action, target) => (await import("./service-command.mjs")).runServiceCommand([action, commandTarget(target)]),
 }) {
   const running = [];
   // Read every state before stopping any service.
@@ -41,7 +46,7 @@ export async function runMaintenanceServices({ prompts, targets, run,
   }
   if (failures.length) throw new AggregateError(
     [...(operationError ? [operationError] : []), ...failures],
-    `维护流程结束，但服务恢复失败；请运行 ${failedTargets.map(target => `codexc service start ${target}`).join("；")}`,
+    `维护流程结束，但服务恢复失败；请运行 ${failedTargets.map(target => `codexc start ${commandTarget(target)}`).join("；")}`,
     { cause: failures[0] },
   );
   if (operationError) throw operationError;

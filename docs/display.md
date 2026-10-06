@@ -315,7 +315,7 @@ Codex 自身也会在工具发现时按退避规则尝试恢复 `codex_apps`，�
 若代理软件在服务之后才写入系统代理，第一次上游连接失败会使发现缓存失效，下一次请求重新读取系统代理，
 这仅覆盖 Provider Proxy 的模型出站连接，不代表整条链路已刷新。Gateway 渠道与 App Server 账户请求
 仍使用启动时的代理。系统代理观察器只记录提示，不自动重启共享进程；代理地址变化后，应等所有客户端
-任务结束，后台模式执行 `codexc restart all`，前台模式停止并重新运行 `codexc start`。
+任务结束，后台模式执行 `codexc restart all`，前台模式停止并重新运行 `codexc run`。
 代理地址未变、只是监听晚启动时，后续请求可继续使用原地址，失败的请求需重新发送。Codex `.env` 或标准环境代理
 保持固定优先级，不受系统代理观察器影响。为避免重复创建模型 Turn，失败的写请求不会由 Gateway 盲目重放。
 
@@ -621,7 +621,7 @@ codexc restart gateway
 下次出现“终端已有结果，渠道迟迟未收到”时，先保留发生时间和渠道，再查看：
 
 ```bash
-codexc service logs gateway -n 500
+codexc logs gateway -n 500
 ```
 
 按 Thread/Turn/Item 找到共享路由记录及“Surface 终态输出已收到”，先检查 `eventBusWaitMs`、`routingMs` 和完成统计准备记录，再按 `deliveryId` 和 `purpose` 查看输出阶段及平台调用：

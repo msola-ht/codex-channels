@@ -91,7 +91,7 @@ contractSuite("real supervised App Server provider", () => {
         chmodSync(managerPath, 0o700);
         start();
         await waitForManagedServiceReadiness("app-server", environment, { timeoutMs: 10_000 });
-        const { stdout } = await execFileAsync(process.execPath, [cli, "restart", "app-server"], { env: environment, cwd: root, timeout: 30_000 });
+        const { stdout } = await execFileAsync(process.execPath, [cli, "restart", "appserver"], { env: environment, cwd: root, timeout: 30_000 });
         expect(stdout).toContain("Codex App Server重启完成");
         expect(operations).toEqual(["stop", "start"]);
         expect(children).toHaveLength(2);

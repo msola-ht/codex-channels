@@ -256,7 +256,7 @@
   修改必须携带并在应用前复核；其他设置的最终提交复用 Gateway Config 的共享写锁
   和锁内原文比较，避免菜单停留期间覆盖其他进程已保存的配置；`applyTerminalIdentityFromEnvironment`
   在 `[codex].terminal_identity` 未配置且运行命令的终端可探测时按该终端补入，供
-  `codexc service install` 与 `codexc update` 复用；`codexc config` 与 WebUI 改用同一探测
+  `codexc install` 与 `codexc update` 复用；`codexc config` 与 WebUI 改用同一探测
   结果预填，由用户确认后写入。
 - `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`、
   `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
@@ -498,7 +498,7 @@
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
   控制脚本实现 linger、Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 使用当前用户计划任务及受管宿主，并校验私有定义与就绪状态。
-- `service-command.mjs` / `service-command.d.mts`：公开 `relay` 目标映射到既有内部 `model-relay` 服务标识，拒绝旧公开目标名称；实现公开 `service` 子命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
+- `service-command.mjs` / `service-command.d.mts`：公开 `appserver`、`relay` 目标映射到内部 `app-server`、`model-relay` 服务标识；实现顶层后台服务命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
   服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
   检查；顶层 `restart` 统一预检、停止与逐项启动就绪，默认包含已安装 WebUI，失败报告剩余步骤并中止。CLI 只保留帮助展示和命令分派。
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
@@ -508,7 +508,7 @@
   App Server 重启动作使用 `restart / app-server`，App Server 时区使用
   `restart / app-server-gateway-webui` 并列出三个服务的重启命令；本模块不承载服务控制。
 - `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一配置写入后的生效提示，区分新会话读取、
-  Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc service install`
+  Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc install`
   重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示；同时重启 App Server、Gateway 和 WebUI 的指令先停止 Gateway，再重启 App Server、启动 Gateway，最后重启 WebUI。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载 App Server、Gateway、WebUI 与可选 Relay 的 launchd 服务；启停、
   状态和日志支持 `gateway`、`app-server`、`webui`、`model-relay`、`all` 内部目标，
@@ -537,7 +537,7 @@
   转交服务宿主，不依赖当前终端目录或用户 Shell 配置。
 - `windows-scheduled-task.ps1`：创建、启动、查询和删除当前用户计划任务；任务通过
   `wscript.exe` 以隐藏窗口运行对应 VBS 启动器，避免服务进程占用可见终端窗口。
-- `windows-log-follow.ps1`：按服务目标跟随读取用户级运行日志，供 `codexc service logs` 使用。
+- `windows-log-follow.ps1`：按服务目标跟随读取用户级运行日志，供 `codexc logs` 使用。
 - `windows-app-server-proxy-probe.mjs`：Windows App Server 代理连接的只读探针，用于确认
   代理端点、初始化握手和 RPC 可达性。
 - `windows-proxy-inbound-limit-probe.mjs`：验证 Windows 代理入口对回环地址和入站连接限制的

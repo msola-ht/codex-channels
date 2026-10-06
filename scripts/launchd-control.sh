@@ -78,7 +78,7 @@ show_logs() {
   fi
   if (( ${#log_files[@]} == 0 )); then
     print_status failure "尚未找到后台日志：$runtime_dir"
-    print_status remediation "请先执行 codexc service start，并检查 codexc service status。"
+    print_status remediation "请先执行 codexc start，并检查 codexc status。"
     return 1
   fi
   if (( follow )); then
@@ -102,7 +102,7 @@ reject_unsupported_jobs() {
     return 0
   fi
   print_status failure "检测到不支持的 launchd Job：${(j:, :)loaded}"
-  print_status remediation "请先手动卸载这些 Job 并删除对应 plist，再重新运行 codexc service install。"
+  print_status remediation "请先手动卸载这些 Job 并删除对应 plist，再重新运行 codexc install。"
   return 1
 }
 
@@ -175,7 +175,7 @@ case "$action" in
       start_job "$label" "$agents_dir/$label.plist"
     done
     print_status note "Codex App Server 与 Gateway 已安装，启动操作已完成，正在确认就绪状态。"
-    print_status note "WebUI 服务已生成，可执行 codexc service start webui 启动。"
+    print_status note "WebUI 服务已生成，可执行 codexc start webui 启动。"
     ;;
   start)
     reject_unsupported_jobs
@@ -189,7 +189,7 @@ case "$action" in
       fi
     done
     if (( ${#failed_labels[@]} > 0 )) && [[ "$target" == "all" ]]; then
-      print_status failure "服务启动部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc service status。"
+      print_status failure "服务启动部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc status。"
       exit 1
     elif (( ${#failed_labels[@]} > 0 )); then
       exit 1
@@ -213,7 +213,7 @@ case "$action" in
       fi
     done
     if (( ${#failed_labels[@]} > 0 )) && [[ "$target" == "all" ]]; then
-      print_status failure "服务停止部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc service status。"
+      print_status failure "服务停止部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc status。"
       exit 1
     elif (( ${#failed_labels[@]} > 0 )); then
       exit 1
@@ -241,14 +241,14 @@ case "$action" in
     reject_unsupported_jobs
     gateway_label=$(service_ids gateway start)
     if ! job_loaded "$gateway_label"; then
-      print_status failure "Gateway 尚未运行，请先执行 codexc service start。"
+      print_status failure "Gateway 尚未运行，请先执行 codexc start。"
       exit 1
     fi
     if launchctl kill SIGHUP "$user_domain/$gateway_label" 2>/dev/null; then
       print_status success "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
     else
       print_status failure "Gateway 当前没有可接收信号的运行进程，未隐式启动服务。"
-      print_status remediation "请先执行 codexc service start gateway，再运行 codexc service reload。"
+      print_status remediation "请先执行 codexc start gateway，再运行 codexc reload。"
       exit 1
     fi
     ;;

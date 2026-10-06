@@ -10,7 +10,7 @@
 - `codex-connect-webui.service.template`：启动指标与低风险设置 WebUI，读取 `[webui]` 配置。
 - `codex-connect-model-relay.service.template`：独立模型 API 进程，使用内部 `service-model-relay` 入口。
 
-模板由 `codexc service install` 调用的服务安装管理接口渲染到 `~/.config/systemd/user`（或 `$XDG_CONFIG_HOME/systemd/user`）。
+模板由 `codexc install` 调用的服务安装管理接口渲染到 `~/.config/systemd/user`（或 `$XDG_CONFIG_HOME/systemd/user`）。
 服务都通过 CLI 服务入口启动，并在每次启动时按 Codex Home 的 `.env`、systemd 用户管理器继承的标准
 代理环境变量和 GNOME 手动代理的顺序解析代理，不把自动发现的地址固化到 unit。安装、启停和
 卸载由 `scripts/systemd-control.sh` 完成；Gateway unit 显式标记为受监管进程，配置要求重启时
@@ -20,7 +20,7 @@
 WebUI 独立于 `all`，安装时只生成 unit 不自动启动。不写目标时，启停和状态默认
 `all`，重启和日志默认 `gateway`。
 
-`codexc service install` 在安装 unit 前检查当前用户的 systemd linger；未启用时先尝试通过
+`codexc install` 在安装 unit 前检查当前用户的 systemd linger；未启用时先尝试通过
 `loginctl enable-linger` 开启并复查。无法启用或复查未生效时，安装在调用 `systemctl --user`
 前失败，并显示需要管理员执行的精确命令。安装成功即表示用户管理器会在系统启动时运行，用户
 尚未登录或退出 SSH 后 App Server 与 Gateway 仍可启动和继续运行。

@@ -30,9 +30,9 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 在交互终端直接运行 `codexc` 打开主菜单，可进入初始化、接入、日常设置、工作区、后台服务、指标、清理、诊断，以及“运行与连接”中的 TUI、WebUI 和前台核心服务启动入口。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 仅显示路径，`timezone` 仅显示当前时区。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。
 
-`codexc service` 无参数时可选择操作和目标。菜单重启统一调用 `codexc restart`，其 `all` 包含已安装的 WebUI。
+在 `codexc` 主菜单选择“后台服务”可选择操作和目标。菜单调用顶层服务命令，`restart all` 包含已安装的 WebUI。
 其他操作的 `all` 包含 App Server 与 Gateway，启动时纳入已安装且启用的 Relay，停止时先关闭已安装 Relay；WebUI 单独选择。
-菜单日志显示最近 100 行，持续跟随仍使用 `codexc service logs <目标> -f`。卸载后台服务需确认。
+菜单日志显示最近 100 行，持续跟随仍使用 `codexc logs <目标> -f`。卸载后台服务需确认。
 
 `codexc work` 菜单区分新建工作区、注册当前目录和注册已有目录；注册前显示实际目录并确认，不创建或删除已有目录。`codexc metrics` 菜单包含会话列表导出和历史额度窗口查询，清理与重置统一使用 `codexc cleanup`。上述操作菜单完成单项后可继续选择；“运行与连接”完成后返回该子菜单，退出后返回主菜单。Setup 和 Config 单项失败会显示错误并返回各自分类菜单，不自动重试写入。
 
@@ -48,7 +48,7 @@ Gateway 配置位于：
 ~/.codex-connect/config.toml
 ```
 
-`codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区和服务操作分别使用 `codexc work`、`codexc service`。配置示例见 [`config.example.toml`](../config.example.toml)。
+`codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 `codexc config` 的“计划任务”直接选择开关；Telegram 消息格式位于“显示设置”，仅在配置 Bot 后显示。显示子项取消或选择“返回上一级”时回到显示设置；在显示设置中选择“返回”才回到 Config。日志等级统一在“高级设置 → 日志等级”选择，`debug` / `trace` 开启调试信息，`info` 恢复标准输出。
 
@@ -328,15 +328,21 @@ Host 租约存在时空闲释放不会停止主实例。`codexc app` 会先通�
 安装、检查和重启：
 
 ```bash
-codexc service install
-codexc service status
+codexc install
+codexc status
 codexc restart               # 等同 restart all，包含已安装的 WebUI
 codexc restart gateway       # 只重启 Gateway
-codexc service logs -n 200
+codexc logs -n 200
 ```
 
-`codexc restart [gateway|app-server|webui|relay|all]` 是唯一重启入口，默认 `all`。
-单独指定目标时要求该后台服务已安装；`app-server` 包含受监管的 Provider 实例。
+公开目标统一为 `gateway|appserver|webui|relay|all`，不接受 `app-server` 或 `model-relay` 作为 CLI 目标。
+日常服务操作直接使用 `codexc <动作>`，不提供 `service` 子命令。
+`codexc run` 在前台运行核心服务；`codexc start [目标]` 启动已安装后台服务。
+`codexc install` 生成服务定义并启动核心服务；`codexc uninstall --services` 仅停止并卸载后台服务，
+`codexc uninstall` 卸载整个受管程序，两者都保留用户数据。`codexc reload` 只通知 Gateway 重读配置。
+
+`codexc restart [gateway|appserver|webui|relay|all]` 是唯一重启入口，默认 `all`。
+单独指定目标时要求该后台服务已安装；`appserver` 包含受监管的 Provider 实例。
 全部重启要求 Gateway 与 App Server 已安装，未安装的 WebUI、Relay 明确提示跳过；
 已安装但未启用的 Relay 只停止，不重新启动。显式 `restart relay` 则重启 Relay 管理进程，监听仍由配置开关控制。
 
@@ -344,10 +350,10 @@ codexc service logs -n 200
 停止顺序为 WebUI → Relay → Gateway → App Server；启动顺序为 App Server → Gateway → Relay → WebUI，
 每项启动后先确认就绪，再启动下一项。WebUI 未显式配置时也检查默认地址的健康端点。
 任一停止、启动或就绪检查失败立即中止，报告已完成、失败和未执行步骤，不自动回滚已完成的启停。
-可用 `codexc service status` 和 `codexc service status webui` 检查状态，排除问题后重试。
+可用 `codexc status` 和 `codexc status webui` 检查状态，排除问题后重试。
 
-`service start/stop/status` 仍默认操作核心服务（含按安装与启用状态选择的 Relay，不含 WebUI），
-`service logs` 默认 Gateway。macOS 普通 `start` 不强制重启已运行的服务。
+`start/stop/status` 默认操作核心服务（含按安装与启用状态选择的 Relay，不含 WebUI），
+`logs` 默认 Gateway。macOS 普通 `start` 不强制重启已运行的服务。
 单独重启 Gateway 不停止共享 App Server；单独重启 App Server 时，仍运行的 Gateway 会按真实断线处理并重连。
 渠道内禁止停止或重启 App Server，全部重启也必须在本机终端执行。
 WebUI 内不执行包含自身的重启任务；请在本机终端运行 `codexc restart webui` 或 `codexc restart all`。
@@ -381,7 +387,7 @@ codexc doctor
 
 安装和更新统一从本机终端执行。本地源码更新后重新执行 `npm run install:global`，该命令不自动停启服务，具体顺序见[本地工作树安装与部署](source-install.md#本地工作树安装与部署)。
 
-官方安装器和本地 `npm run install:global` 在默认 Codex CLI 缺失或版本不符时自动同步项目锁定版本，无需先初始化或配置渠道；随后执行 `codexc init`、`codexc setup`、`codexc service install`。显式 `CODEX_BINARY` 由操作者管理，本地安装遇到版本不符时拒绝替换。
+官方安装器和本地 `npm run install:global` 在默认 Codex CLI 缺失或版本不符时自动同步项目锁定版本，无需先初始化或配置渠道；随后执行 `codexc init`、`codexc setup`、`codexc install`。显式 `CODEX_BINARY` 由操作者管理，本地安装遇到版本不符时拒绝替换。
 更新发现默认 CLI 缺失或版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
 非交互调用会给出精确版本安装命令并退出，不静默安装。
 
@@ -411,7 +417,7 @@ codexc cleanup
 会话归档示例：先停止 Gateway，保留 App Server，预览“主会话不超过 3 轮、整组可查询成员至少空闲 7 天”的候选：
 
 ```bash
-codexc service stop gateway
+codexc stop gateway
 codexc sessions cleanup 3 --idle-days 7
 ```
 
@@ -419,7 +425,7 @@ codexc sessions cleanup 3 --idle-days 7
 
 ```bash
 codexc sessions cleanup 3 --idle-days 7 --confirm
-codexc service start gateway
+codexc start gateway
 ```
 
 交互归档统一从 `codexc cleanup → 归档短会话及子会话` 进入。菜单在 Gateway 运行时先询问是否临时停止，保留 App Server；预览后的归档仍需确认。完成、取消或失败后恢复原先运行的 Gateway，原先停止则保持停止；恢复失败会提示手动启动。前台自行运行的 Gateway 仍须退出，菜单不终止非受管进程。`codexc sessions` 无参数只显示帮助。不指定 `--idle-days` 就没有会话年龄限制。
@@ -437,7 +443,7 @@ codexc uninstall
 
 源码卸载不要求配置文件有效；仍会检查受管安装身份并保留用户配置和数据。
 
-npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall -g @hegenai/codexc`。
+npm 安装版也可以使用 `codexc uninstall --services` 后执行 `npm uninstall -g @hegenai/codexc`。
 
 ## 6. 渠道命令
 
@@ -539,13 +545,13 @@ codexc channel send-image /tmp/screenshot.png --thread <Thread ID>
 ```bash
 codexc doctor
 codexc doctor --json
-codexc service status
-codexc service logs -n 100
+codexc status
+codexc logs -n 100
 ```
 
 常见处理：
 
-- 配置修改未生效：`codexc service reload`。
+- 配置修改未生效：`codexc reload`。
 - 只重启 Gateway：`codexc restart gateway`；共享 App Server 与活动 Thread 会保留。
 - Codex CLI 版本不一致：按 `codexc update` 或错误提示安装精确版本后重试。
 - 飞书无消息：先运行 `codexc doctor`，再检查应用权限、消息事件发布和允许用户。
@@ -566,7 +572,7 @@ model_traffic_retention_days = 30
 ```
 
 ```bash
-codexc restart app-server
+codexc restart appserver
 ```
 
 App Server 发给统计代理的模型调用会写入 `~/.codex-connect/traffic/` 下的 V2 私有 session 目录；
@@ -611,8 +617,8 @@ codexc traffic cleanup --confirm               # 停止全部 App Server 与 Rel
 目录，或传入一个 V2 session 目录。仅支持 V2 session。`codexc traffic -h` 列出全部选项。
 `cleanup` 会预览默认 `traffic/` 或 `--dir` 指定目录中可识别的全部 V2 session，
 未知文件与目录不处理。实际删除只允许当前配置的数据目录下的 `traffic/`；先运行
-`codexc service stop relay` 和 `codexc service stop app-server`，再加 `--confirm`。删除不可恢复，完成后可按需运行
-`codexc service start app-server`，此前启用的 Relay 可按需运行 `codexc service start relay`。
+`codexc stop relay` 和 `codexc stop appserver`，再加 `--confirm`。删除不可恢复，完成后可按需运行
+`codexc start appserver`，此前启用的 Relay 可按需运行 `codexc start relay`。
 
 同一份转储也能在 `codexc webui` 的「转储」页查看：摘要列表与 `codexc traffic` 使用同一套解析，
 点开某条即进入该条的请求参数、实际输出与用量摘要。终态未携带输出时，从已存 trace 的完成条目
@@ -684,7 +690,7 @@ npm test -- tests/session-router.test.ts
 `codexc relay` 管理独立 Relay 的调用方和访问密钥；`status`、`callers` 只读，
 `issue` 签发、`rotate` 轮换、`disable --caller ID` 撤销。新秘密只在保存后显示一次。
 `enable`/`disable` 保存服务开关并确认当前进程生效；进程未运行时明确显示仅保存，
-通过 `codexc service start relay` 启动；停止、重启、状态和日志也使用 `relay` 目标。指标库只接受当前 Schema，新安装直接创建。
+通过 `codexc start relay` 启动；停止、重启、状态和日志也使用 `relay` 目标。指标库只接受当前 Schema，新安装直接创建。
 
 Relay 默认禁用、回环监听；可显式使用 IPv4 局域网监听，跨不可信网络使用自己管理的加密隧道。提供原生 Chat Completions 与 Responses JSON/SSE 和
 受限模型列表，不提供 App Server 的 Agent、Thread、Turn、工具执行或文件访问。
@@ -700,7 +706,7 @@ Responses 只提供同步无状态创建；`store` 可省略或传布尔值，�
 
 手动设置：先备份当前实际使用的配置文件并校验备份，再在已有 `[model_relay]` 段设置 `host = "192.168.1.10"`（替换为服务器的内网地址），或 `host = "0.0.0.0"`。不要重复创建同名 TOML 段。保留现有 Key、并发及其他字段；默认端口为 4119。支持 10/8、172.16/12、192.168/16 的规范 IPv4 地址，IPv6 当前仅支持回环 `::1`。不接受域名、URL 或公网 IP 字面量。
 
-运行中的 Relay 会刷新监听配置；配置无效或绑定失败时停止接收请求，不自动换地址。初次启用使用 `codexc relay enable`，已安装的服务使用 `codexc service start relay`，通过 `codexc relay status` 确认 `configurationValid`、`enabled`、`listening` 均为 true。改变监听地址会取消旧请求，应在空闲时操作。客户端 Base URL 填 `http://192.168.1.10:4119/v1`，API Key 使用已签发的 Relay Key，模型选择该 Key 允许的 ID。
+运行中的 Relay 会刷新监听配置；配置无效或绑定失败时停止接收请求，不自动换地址。初次启用使用 `codexc relay enable`，已安装的服务使用 `codexc start relay`，通过 `codexc relay status` 确认 `configurationValid`、`enabled`、`listening` 均为 true。改变监听地址会取消旧请求，应在空闲时操作。客户端 Base URL 填 `http://192.168.1.10:4119/v1`，API Key 使用已签发的 Relay Key，模型选择该 Key 允许的 ID。
 
 `0.0.0.0` 监听所有 IPv4 网卡，不是客户端地址，也不保证仅内网可达；自行限制防火墙来源，不做公网端口映射。HTTP 中 Key 和正文未加密，跨不可信网络使用加密隧道。此设置不开放 App Server、控制 IPC 或指标 IPC，不改变 WebUI 的监听与管理授权。
 

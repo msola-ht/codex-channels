@@ -53,7 +53,7 @@ codexc restart all
 不会重新回落到 OCG 目录默认窗口。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；更新器不刷新模型目录。
 修改后 Gateway 会自动检测并校验设置文件，只更新受影响且已启用的 Provider 实例；原生客户端
 租约或活动 Thread 会推迟应用，其他 Provider 继续运行。连接、绑定与模型目录恢复后才提示生效，
-失败保留待应用状态。手动运行 `codexc restart app-server` 会重启整个共享服务。
+失败保留待应用状态。手动运行 `codexc restart appserver` 会重启整个共享服务。
 
 聊天中使用 `/model` 选择带 `ocg-<邮箱或手机号>`（无联系方式时回退为 `ocg-<accountId>`）前缀的模型；同账户内切换模型不新建 Thread，
 跨账户切换会保留并解绑当前 Thread，下一条消息以目标账户默认模型新建 Thread（不复制历史），

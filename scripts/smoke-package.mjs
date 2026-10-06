@@ -39,7 +39,7 @@ try {
   const metricsHelp = run(command, ["metrics", "-h"], temporaryDirectory, environment, true).stdout;
   const serviceHelp = run(
     command,
-    ["service", "-h"],
+    ["install", "-h"],
     temporaryDirectory,
     environment,
     true,
@@ -66,7 +66,13 @@ try {
     "channel",
     "webui",
     "start",
-    "service",
+    "run",
+    "install",
+    "stop",
+    "restart",
+    "status",
+    "logs",
+    "reload",
     "update",
     "uninstall",
     "version",
@@ -79,9 +85,7 @@ try {
     || !workspaceHelp.includes("用法：codexc work")
     || !metricsHelp.includes("用法：codexc metrics")
     || !serviceHelp.includes("install")
-    || !serviceHelp.includes("reload")
-    || !serviceHelp.includes("logs")
-    || !serviceTargetHelp.includes("gateway|app-server|webui|relay|all")
+    || !serviceTargetHelp.includes("gateway|appserver|webui|relay|all")
   ) {
     throw new Error("CLI 分级帮助不完整");
   }

@@ -160,20 +160,25 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
         + "# Codex Connect\n"
         + "export PATH=\"$HOME/.codex-connect/.bin:$PATH\"\n",
     );
-    let serviceUninstalls = 0;
+    const serviceCalls = join(root, "service-uninstall.json");
+    mkdirSync(join(checkout, "bin"));
+    writeFileSync(join(checkout, "bin", "codexc.mjs"), [
+      'import { writeFileSync } from "node:fs";',
+      'writeFileSync(process.env.SERVICE_UNINSTALL_CAPTURE, JSON.stringify(process.argv.slice(2)));',
+      'if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(["uninstall", "--services"])) process.exitCode = 1;',
+    ].join("\n"));
     let globalUninstalls = 0;
 
     const result = await uninstallManagedSourceInstallation(
-      { ...process.env, CODEX_CONNECT_HOME: installRoot, HOME: root },
+      { ...process.env, CODEX_CONNECT_HOME: installRoot, HOME: root, SERVICE_UNINSTALL_CAPTURE: serviceCalls },
       {
         projectDir: checkout,
-        uninstallServices: () => { serviceUninstalls += 1; },
         uninstallGlobalPackage: () => { globalUninstalls += 1; },
       },
     );
 
     expect(result).toEqual({ checkout });
-    expect(serviceUninstalls).toBe(1);
+    expect(JSON.parse(readFileSync(serviceCalls, "utf8"))).toEqual(["uninstall", "--services"]);
     expect(globalUninstalls).toBe(1);
     expect(existsSync(checkout)).toBe(false);
     expect(existsSync(launcher)).toBe(true);

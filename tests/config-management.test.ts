@@ -97,12 +97,12 @@ describe("Gateway Config management", () => {
     expect(configActivationResult("reload")).toEqual({
       status: "reload",
       target: "gateway",
-      commands: ["codexc service reload"],
+      commands: ["codexc reload"],
     });
     expect(configActivationResult("reinstall-services")).toEqual({
       status: "reinstall-required",
       target: "services",
-      commands: ["codexc service install"],
+      commands: ["codexc install"],
     });
   });
 
@@ -286,9 +286,9 @@ describe("Gateway Config management", () => {
       activationResult: {
         target: "app-server-gateway-webui",
         commands: [
-          "codexc service stop gateway",
-          "codexc restart app-server",
-          "codexc service start gateway",
+          "codexc stop gateway",
+          "codexc restart appserver",
+          "codexc start gateway",
           "codexc restart webui",
         ],
       },
@@ -344,7 +344,7 @@ describe("Gateway Config management", () => {
       activationResult: {
         status: "restart",
         target: "app-server",
-        commands: ["codexc restart app-server"],
+        commands: ["codexc restart appserver"],
       },
     });
     expect(readGatewayConfig(fixture.configPath).debug).toEqual({

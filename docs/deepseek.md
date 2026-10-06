@@ -190,6 +190,6 @@ codexc doctor
 渠道内不能重启 App Server。需要检查运行状态时使用：
 
 ```bash
-codexc service status all
-codexc service logs all -n 200
+codexc status all
+codexc logs all -n 200
 ```

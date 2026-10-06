@@ -31,8 +31,9 @@ const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 // Public spelling is independent of installed service identifiers and file names.
 const serviceTargetUsage = internalServiceTargetUsage.split("|").map(serviceCommandTarget).join("|");
 function parseServiceTarget(value) {
+  if (value === "appserver") return "app-server";
   if (value === "relay") return "model-relay";
-  if (value !== "model-relay" && internalServiceTargetUsage.split("|").includes(value)) return value;
+  if (value !== "model-relay" && value !== "app-server" && internalServiceTargetUsage.split("|").includes(value)) return value;
   throw new Error(`服务目标必须是 ${serviceTargetUsage.replaceAll("|", "、")}：${value}`);
 }
 
@@ -107,14 +108,14 @@ export async function runRestartCommand(args = []) {
   for (const definition of selected) {
     if (!existsSync(serviceDefinitionPath(platform, definition, runtime.environment))) {
       if (target !== "all" || definition.core) {
-        throw new Error(`${definition.displayName} 后台服务未安装；请先运行 codexc service install。尚未停止任何服务。`);
+        throw new Error(`${definition.displayName} 后台服务未安装；请先运行 codexc install。尚未停止任何服务。`);
       }
       printCliMessage("note", `跳过 ${definition.displayName}：未安装后台服务。`);
       continue;
     }
     const status = await inspectManagedServiceStatusAsync({ target: definition.target, environment: runtime.environment });
     if (platform !== "launchd" && status.services[0]?.loaded !== true) {
-      throw new Error(`${definition.displayName} 服务定义未被服务管理器加载；请运行 codexc service install。尚未停止任何服务。`);
+      throw new Error(`${definition.displayName} 服务定义未被服务管理器加载；请运行 codexc install。尚未停止任何服务。`);
     }
     stopping.push(definition);
   }
@@ -142,7 +143,7 @@ export async function runRestartCommand(args = []) {
       throw new Error(
         `重启中止：${label(step)}失败。\n已完成：${completed.join("；") || "无"}。`
         + `\n未执行：${steps.slice(index + 1).map(label).join("；") || "无"}。`
-        + "\n未自动回滚；请用 codexc service status 和 codexc service status webui 检查状态，排除问题后重试。"
+        + "\n未自动回滚；请用 codexc status 和 codexc status webui 检查状态，排除问题后重试。"
         + `\n原因：${error instanceof Error ? error.message : "服务操作失败"}`,
         { cause: error },
       );
@@ -153,9 +154,8 @@ export async function runRestartCommand(args = []) {
 
 export async function runServiceCommand(args) {
   const [action, ...rest] = args;
-  if (action === "restart") throw new Error("重启入口为 codexc restart [目标]；不再支持 codexc service restart。");
   if (!serviceCommandActions.includes(action)) {
-    throw new Error("用法：codexc service <install|uninstall|start|stop|reload|status|logs>");
+    throw new Error("未知后台服务操作");
   }
   const serviceArgs = parseServiceArguments(action, rest);
   rejectUnsafeAppServerServiceAction(action, serviceArgs, process.env);
@@ -236,7 +236,7 @@ function runServiceController(action, serviceArgs, controlEnvironment) {
       { failureReportedByChild: serviceControllerReportsFailure(action) },
     );
   } else {
-    throw new Error("codexc service 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
+    throw new Error("codexc 后台服务命令当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
   }
 }
 
@@ -328,7 +328,7 @@ function rejectUnsafeAppServerServiceAction(action, serviceArgs, environment) {
   const restartsAppServer = action === "restart"
     && serviceTargetIncludes(target, "app-server");
   if (action === "install" || action === "uninstall" || stopsCoreService || restartsAppServer) {
-    const invocation = ["codexc", ...(action === "restart" ? [] : ["service"]), action, ...serviceArgs].join(" ");
+    const invocation = ["codexc", action, ...(action === "uninstall" ? ["--services"] : serviceArgs.map(serviceCommandTarget))].join(" ");
     throw new Error(
       "不能在 Codex App Server 内执行会中断当前渠道的服务操作；"
       + `请在本机终端运行 ${invocation}。渠道内只允许重启 Gateway 或管理独立的 WebUI 服务。`,

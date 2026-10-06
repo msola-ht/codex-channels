@@ -557,7 +557,7 @@ describe("Codex Connect config menu", () => {
       model_traffic_dump: true,
     });
     expect(output.join("")).toContain("调用详情记录已开启");
-    expect(output.join("")).toContain("codexc restart app-server");
+    expect(output.join("")).toContain("codexc restart appserver");
   });
 
   it("selects the shared debug capture mode without enabling collection", async () => {

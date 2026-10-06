@@ -50,7 +50,7 @@ codex-tui/0.160.0 (<系统与架构>) <终端标识> (codex-tui; 0.160.0)
 定义不提供终端环境，因此缺省上报 `unknown`；原生 TUI 连接到同一个 App Server 时结果相同，因为
 该字段在 App Server 进程而不是客户端进程生成。配置 `[codex].terminal_identity` 后，`codexc`
 启动 App Server 时把终端名与版本写入子进程的 `TERM_PROGRAM` / `TERM_PROGRAM_VERSION`，重启
-App Server 后模型上游 UA 即带该标识。该值由 `codexc config` 或 `codexc service install` 按运行命令的终端探测后写入，也可以直接编辑 TOML。
+App Server 后模型上游 UA 即带该标识。该值由 `codexc config` 或 `codexc install` 按运行命令的终端探测后写入，也可以直接编辑 TOML。
 
 模型数据通路在本机由 `codexc` 的 App Server 服务进程自建回环 Provider Proxy
 （`runtime/app-server-service-runtime.mjs` 通过 `ProviderProxy` 创建并监听回环地址），App Server 子进程通过 `model_provider` 指向该回环
@@ -163,7 +163,7 @@ Provider Proxy，需要 `codexc restart all`；App Server 不会自动重启，�
 终端标识的取值来自运行命令的终端，而不是常驻进程：`codexc config` → 系统设置 →
 “模型上游终端标识” 预填运行该命令的终端探测结果（`TERM_PROGRAM[/版本]` 优先，其次各终端
 专有变量，最后 `TERM`），可编辑后保存，留空则删除 `terminal_identity` 并回到 App Server
-自行探测；`codexc service install` 在生成服务定义前，
+自行探测；`codexc install` 在生成服务定义前，
 于 `terminal_identity` 未配置且能探测到终端时按运行该命令的终端自动补入并打印一行，已配置时
 不覆盖，因此记录下来的值在下一次 App Server 启动时立即生效。补入失败只打印一次失败原因并继续当前命令，不阻塞安装。更新器不改写该设置。其余
 服务命令（`start`、`restart`、`reload`、`stop`、`status`、`logs`、`uninstall`）不改写该配置。
@@ -219,7 +219,7 @@ Provider ID 字符串插值到全局 UA。
 - `runtime/app-server-service-runtime.mjs`：App Server 服务进程启动每个 Provider Proxy 时统一读取
   `[codex].upstream_user_agent`，主代理、按需 Provider 代理和 OpenCode Go 共享代理复用同一值；
   启动主 App Server 与 Provider App Server 前把 `[codex].terminal_identity` 写入子进程的
-  `TERM_PROGRAM` / `TERM_PROGRAM_VERSION`，未配置时保持环境原样；`codexc service install`
+  `TERM_PROGRAM` / `TERM_PROGRAM_VERSION`，未配置时保持环境原样；`codexc install`
   在生成服务定义前，若 `terminal_identity` 未配置且运行命令的
   终端可探测，则由 `scripts/service-command.mjs` 按该终端补入配置；其余服务命令不改写该配置。
 - `scripts/config-management.mjs`、`scripts/config-system-menu.mjs`：通过 `codexc config` 的

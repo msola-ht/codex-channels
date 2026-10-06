@@ -18,7 +18,6 @@ afterEach(() => {
 describe("codexc CLI", { timeout: 15_000 }, () => {
   it.each([
     [[], "交互终端无参数时打开主菜单"],
-    [["service"], "codexc service [命令]"],
     [["sessions"], "交互归档请运行 codexc cleanup"],
     [["metrics"], "交互清理和重置请用 codexc cleanup"],
   ] as const)("shows help without prompting or requiring config for %j", (args, expected) => {
@@ -72,8 +71,8 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["remote", "--workspace", "--profile", "ds-test"], "用法：codexc remote"],
       [["config", "--json", "unexpected"], "用法：codexc config [--json]"],
       [["doctor", "--json", "unexpected"], "用法：codexc doctor [--json]"],
-      [["service", "status", "--json", "gateway"], "用法：codexc service status"],
-      [["service", "status", "gateway", "--json", "unexpected"], "用法：codexc service status"],
+      [["status", "--json", "gateway"], "用法：codexc status"],
+      [["status", "gateway", "--json", "unexpected"], "用法：codexc status"],
       [["metrics", "status", "--json", "unexpected"], "用法：codexc metrics status"],
       [["update", "--unknown"], "用法：codexc update"],
       [["update", "--background"], "用法：codexc update"],
