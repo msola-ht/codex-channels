@@ -28,6 +28,15 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy HTTP metrics", () => {
+  it("waits past raw Chat tool identities and empty deltas until actual tool content", () => {
+    const observer = new ChatGenerationTimingObserver();
+    observer.push({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", type: "function" }] } }] }, 10);
+    observer.push({ choices: [{ delta: { content: "", tool_calls: [{ index: 0, function: { arguments: "" } }] } }] }, 20);
+    expect(observer.firstContentAt).toBeUndefined();
+    observer.push({ choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "lookup" } }] } }] }, 30);
+    observer.push({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "{}" } }] } }] }, 40);
+    expect(observer.firstContentAt).toBe(30);
+  });
   it("uses raw Chat first content and never synthetic converted content as first token", () => {
     const metric = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 0, "http", "response", null, 0);
     observeChatTiming(metric, { submittedAt: 100, responseTimeMs: 20 });

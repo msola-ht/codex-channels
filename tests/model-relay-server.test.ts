@@ -352,6 +352,28 @@ describe("isolated Relay vertical request chain", () => {
       expect(f.metrics[0]?.generationTiming?.toolMs).toBeGreaterThan(0);
     }
   });
+  it.each(["tool", "refusal", "reasoning-details"])("records Relay Chat TTFT after empty preamble for %s", async kind => {
+    const f = await fixture((request, response) => {
+      request.resume(); request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.write(frame({ choices: [{ index: 0, delta: kind === "tool"
+          ? { tool_calls: [{ index: 0, id: "call_1", type: "function" }] }
+          : { role: "assistant", content: "" } }] }));
+        setTimeout(() => {
+          const delta = kind === "tool" ? { tool_calls: [{ index: 0, function: { name: "lookup", arguments: "{}" } }] }
+            : kind === "refusal" ? { refusal: "no" }
+            : { reasoning_details: [{ type: "reasoning.text", text: "thinking" }] };
+          response.end(frame({ choices: [{ index: 0, delta, finish_reason: kind === "tool" ? "tool_calls" : "stop" }],
+            usage: { prompt_tokens: 3, completion_tokens: 2 } }) + "data: [DONE]\n\n");
+        }, 60);
+      });
+    });
+    const result = await f.post({ ...body, stream: true });
+    expect(result.status).toBe(200); await result.text();
+    expect(f.metrics).toHaveLength(1);
+    expect(f.metrics[0]!.firstTokenMs! - f.metrics[0]!.responseTimeMs!).toBeGreaterThan(35);
+    expect(f.metrics[0]).toMatchObject({ status: "completed", outputTokens: 2 });
+  });
   it.each(["chat", "responses"].flatMap(protocol => [0, 1].map(excess => ({ protocol, excess }))))(
     "bounds the final upstream body after defaults and model mapping ($protocol, excess=$excess)", async ({ protocol, excess }) => {
       let upstreamBytes = 0;
