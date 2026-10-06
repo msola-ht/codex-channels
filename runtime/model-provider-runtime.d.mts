@@ -129,7 +129,7 @@ export function readCodexConfigModelOverride(
 
 export function managedProviderDirectory(
   environment: NodeJS.ProcessEnv | undefined,
-  definition: import("./model-provider-definitions.mjs").ModelProviderDefinition,
+  definition: Pick<ModelProviderDefinition, "id" | "storageId">,
 ): string;
 export function managedProviderMarkerPath(
   environment: NodeJS.ProcessEnv,

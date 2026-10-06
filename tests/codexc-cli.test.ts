@@ -59,14 +59,14 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
   it("loads help and version without command implementations or optional SDKs", () => {
     const loader = `export async function resolve(specifier, context, nextResolve) {
       if (["@clack/prompts", "ws", "undici", "grammy", "@larksuiteoapi/node-sdk"].includes(specifier)
-        || /\\/(?:service-command|desktop-app-command|timezone-command|traffic-upgrade|model-relay-command|cli-menu|background-update)\\.mjs$/.test(specifier)) {
+        || /\\/(?:service-command|desktop-app-command|timezone-command|model-relay-command|cli-menu|source-update)\\.mjs$/.test(specifier)) {
         throw new Error("Unexpected command dependency: " + specifier);
       }
       return nextResolve(specifier, context);
     }`;
     const preload = `import { register } from "node:module";
       register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))}, import.meta.url);`;
-    for (const args of [["--help"], ["version"], ["service", "start", "--help"], ["desktop-app", "--help"], ["timezone", "--help"], ["traffic", "upgrade", "--help"], ["update", "--help"], ["update", "status", "--help"]]) {
+    for (const args of [["--help"], ["version"], ["service", "start", "--help"], ["app", "--help"], ["timezone", "--help"], ["traffic", "--help"], ["update", "--help"]]) {
       const output = execFileSync(process.execPath, [
         "--import", "data:text/javascript," + encodeURIComponent(preload), cli, ...args,
       ], { encoding: "utf8", timeout: 10_000 });
@@ -141,13 +141,13 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     const configPath = join(root, "config.toml");
     writeFileSync(configPath, "[broken");
     const env = { ...process.env, CODEX_CONNECT_HOME: root, CODEX_CONNECT_CONFIG_FILE: configPath, CODEX_HOME: join(root, "codex") };
-    const validPaths = [["security", "repair"], ["update"], ["update", "status"], ...["add", "list", "switch", "remove"].map((action) => ["primary-provider", action])];
+    const validPaths = [["security", "repair"], ["update"], ...["add", "list", "switch", "remove"].map((action) => ["primary-provider", action])];
     const invalidPaths = [
-      ["desktop-app", "nonsense"], ["opencode-go", "nonsense", "add"],
+      ["app", "nonsense"], ["app", "open"], ["opencode-go", "nonsense", "add"],
       ["deepseek", "nonsense"], ["ccg", "nonsense"],
       ["primary-provider", "remove", "some-id"],
       ["opencode-go", "account", "add", "some-id"],
-      ["update", "--background"], ["update", "status", "some-id"],
+      ["update", "--background"], ["update", "status"], ["update", "status", "some-id"],
     ];
     const cases = ["-h", "--help"].flatMap((flag) => [
       ...validPaths.map((path) => ({ args: [...path, flag], status: 0 })),
@@ -171,11 +171,11 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["setup", "--help"], "用法：codexc setup"],
       [["start", "-h"], "用法：codexc start"],
       [["remote", "-h"], "用法：codexc remote"],
-      [["desktop-app", "--help"], "用法：codexc desktop-app"],
-      [["desktop-app", "enable", "-h"], "enable [--port 端口]"],
-      [["desktop-app", "disable", "--help"], "disable"],
-      [["desktop-app", "status", "-h"], "status [--json]"],
-      [["desktop-app", "open", "--help"], "open"],
+      [["app", "--help"], "用法：codexc app"],
+      [["app", "enable", "-h"], "enable [--port 端口]"],
+      [["app", "disable", "--help"], "disable"],
+      [["app", "status", "-h"], "status [--json]"],
+      [["app", "-h"], "用法：codexc app"],
       [["work", "-h"], "用法：codexc work"],
       [["work", "list", "--help"], "用法：codexc work list"],
       [["work", "add", "-h"], "用法：codexc work add"],
@@ -196,8 +196,6 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["opencode-go", "account", "default", "--help"], "用法：codexc opencode-go account default"],
       [["opencode-go", "account", "stop", "-h"], "用法：codexc opencode-go account stop"],
       [["update", "--help"], "用法：codexc update"],
-      [["update", "status", "-h"], "用法：codexc update status"],
-      [["update", "status", "--help"], "用法：codexc update status"],
       [["uninstall", "--help"], "用法：codexc uninstall"],
       [["metrics", "-h"], "用法：codexc metrics"],
       [["cleanup", "-h"], "用法：codexc cleanup"],
@@ -267,7 +265,12 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       },
       {
         args: ["update", "--help"],
-        includes: ["数据库升级未完成时不启动服务", "当前数据库基线无迁移写入", "执行目标版本的数据库升级入口"],
+        includes: ["数据库只接受当前 Schema", "预检失败时不停止服务"],
+      },
+      {
+        args: ["uninstall", "--help"],
+        includes: ["保留", "输出和 Shell 配置"],
+        excludes: ["清理旧安装", "Shell PATH"],
       },
       { args: ["doctor", "--help"], includes: ["codexc doctor [--json]"] },
       {
@@ -284,6 +287,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
           ].map((command) => `\n  ${command}`),
         ],
         excludes: [
+          "旧单账户",
           "\n  service install",
           "\n  service restart",
           "\n  gateway",
@@ -324,7 +328,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     }
   });
 
-  it.skipIf(process.platform === "win32")("writes large metrics exports completely without overwriting same-second files", () => {
+  it.skipIf(process.platform === "win32")("writes large metrics exports completely without overwriting previous exports", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-export-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -484,7 +488,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     ]));
   });
 
-  it("does not infer one aggregate provider from truncated report groups", () => {
+  it("retains the total group count when report groups are truncated", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-groups-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");

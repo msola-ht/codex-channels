@@ -1,7 +1,7 @@
 /**
  * Convert the internal activation scope returned by configuration writers into
  * one stable, presentation-neutral result.  Menus and automation can use this
- * object without interpreting legacy strings or composing service commands.
+ * object without parsing presentation text or composing service commands.
  */
 export function configActivationResult(activation) {
   switch (activation) {

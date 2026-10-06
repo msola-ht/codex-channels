@@ -23,15 +23,9 @@ const opencodeGoProviderCapabilities = Object.freeze({
   instanceAdapter: "opencode-go-accounts",
 });
 
-const deepseekProfileName = "sf-deepseek";
-// 仅用于识别待移除的旧单账户 Profile；实际账户 Profile 一律由账户 ID 派生。
-const opencodeGoLegacyProfileName = "sf-opencode-go";
-
 export const deepseekProviderDefinition = Object.freeze({
   id: "deepseek",
   displayName: "DeepSeek",
-  profileName: deepseekProfileName,
-  profileFileName: `${deepseekProfileName}.config.toml`,
   catalogFileName: "models.json",
   catalogManifestFileName: "models.manifest.json",
   managedMarkerFileName: "managed.toml",
@@ -49,8 +43,6 @@ export const opencodeGoProviderDefinition = Object.freeze({
   id: "ocg",
   storageId: "opencode-go",
   displayName: "OpenCode Go",
-  profileName: opencodeGoLegacyProfileName,
-  profileFileName: `${opencodeGoLegacyProfileName}.config.toml`,
   catalogFileName: "models.json",
   catalogManifestFileName: "models.manifest.json",
   managedMarkerFileName: "managed.toml",
@@ -68,8 +60,6 @@ export const opencodeGoProviderDefinition = Object.freeze({
 export const commandCodeProviderDefinition = Object.freeze({
   id: "ccg",
   displayName: "CommandCode Go",
-  profileName: "sf-ccg",
-  profileFileName: "sf-ccg.config.toml",
   catalogFileName: "models.json",
   catalogManifestFileName: "models.manifest.json",
   managedMarkerFileName: "managed.toml",
@@ -87,7 +77,6 @@ export const commandCodeProviderDefinition = Object.freeze({
 
 export const clinePassProviderDefinition = Object.freeze({
   id: "clp", displayName: "Cline Pass",
-  profileName: "sf-clp", profileFileName: "sf-clp.config.toml",
   catalogFileName: "models.json", catalogManifestFileName: "models.manifest.json",
   managedMarkerFileName: "managed.toml", backupDirectoryName: "backup",
   baseUrl: "https://api.cline.bot/api/v1", wireApi: "responses",
@@ -156,10 +145,10 @@ export function expandManagedModelProviderDefinitions(
   environment = process.env,
 ) {
   return Object.freeze(definitions.flatMap((definition) => {
-    assertManagedModelProviderProfile(definition);
     const capabilities = assertManagedModelProviderCapabilities(definition);
     switch (capabilities.instanceAdapter) {
       case "single":
+        assertManagedModelProviderProfile(definition);
         return [definition];
       case "opencode-go-accounts":
         return loadOpencodeGoAccountDefinitions(environment);

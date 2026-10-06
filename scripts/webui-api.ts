@@ -561,7 +561,7 @@ export interface CodexUserSettingInput { kind: string; [key: string]: unknown }
 
 export interface ManagementTask {
   id: string
-  operation: "service" | "metrics" | "traffic" | "update"
+  operation: "service" | "metrics" | "traffic"
   action: string
   target: string | null
   state: "queued" | "running" | "cancelling" | "cancelled" | "completed" | "failed"
@@ -573,7 +573,6 @@ export interface ManagementTask {
 }
 
 export type ManagementTaskInput =
-  | { operation: "update"; action?: "source" }
   | { operation: "service"; action: "install" | "uninstall" }
   | { operation: "service"; action: "reload" }
   | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "model-relay" | "all" }
@@ -783,7 +782,6 @@ export interface ManagementAccountSettingsResponse {
   }
   deepseek: {
     configured: boolean
-    legacyConfigurationPresent: boolean
     accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
 }
@@ -812,7 +810,6 @@ export type ManagementAccountSettingsMutationInput =
       confirmExclusiveConfigChange?: boolean
     }
   | { operation: "deepseek.default" | "deepseek.remove" | "clp.default" | "clp.remove"; accountId: string }
-  | { operation: "deepseek.legacy.remove" }
 
 export interface ManagementAccountSettingsPreview {
   operation: string

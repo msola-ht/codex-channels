@@ -236,7 +236,7 @@ describe("JsonRpcClient", () => {
       .rejects.toThrow("Codex 响应缺少有效 goal objective");
   });
 
-  it("uses CODEX_MODEL only when starting a new thread", async () => {
+  it("uses the configured model default only when starting a new thread", async () => {
     const transport = new FakeTransport();
     const rpc = new JsonRpcClient(transport);
     const client = new CodexAppServerClient(rpc, {

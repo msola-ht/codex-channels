@@ -1,11 +1,13 @@
 import { serviceCommandTarget, serviceTargetUsage as internalServiceTargetUsage } from "../runtime/service-targets.mjs";
 
-export const desktopAppCommandUsage = `用法：codexc desktop-app <enable|disable|status|open>
+export const desktopAppCommandUsage = `用法：codexc app [enable|disable|status]
 
-  enable [--port 端口]   启用 Desktop App 共享连接并重启 App Server 服务
+  不带子命令             启动 Desktop App；首次使用确认后自动启用共享
+  enable [--port 端口]   单独启用共享或指定桥端口，并重启 App Server 服务
   disable                禁用共享连接并重启 App Server 服务
   status [--json]        只读检查 Desktop、配置和连接状态
-  open                   通过共享 App Server 启动 Desktop App`;
+
+日常只需 codexc app。首次启用会重启 App Server，可能中断现有连接与任务；默认不确认。`;
 
 export const timezoneCommandUsage = `用法：codexc timezone [<IANA 时区>|--system] [--json]
       codexc timezone --gateway [<IANA 时区>|--follow-app-server|--system] [--json]
@@ -39,13 +41,6 @@ export const cleanupUsage = `用法：codexc cleanup
 指标清理与重置保留备份；Provider 清理按原状态恢复 Gateway。非受管前台进程仍须自行退出。
 非交互终端只显示帮助。直接命令仍为 sessions cleanup、traffic cleanup、metrics cleanup|prune|reset。`;
 
-export const TRAFFIC_UPGRADE_USAGE = `用法：codexc traffic upgrade --enabled true|false --mode production|debug
-
-显式选择 Codex 与 Relay 共用的采集状态，备份后移除旧 Relay 独立采集配置。
-production 使用现有裁剪参数 3/65536；debug 使用 0/0。身份、凭据和保留天数不变。
-先执行 codexc service stop gateway（前台 Gateway 也须退出），避免旧进程补回已删除字段。
-不会停止、启动或重启服务。回退保留当前凭据和已有转储，不要恢复整份旧配置。
-所有参数必填；支持 -h/--help。`;
 
 export const serviceCommandActions = Object.freeze([
   "install",

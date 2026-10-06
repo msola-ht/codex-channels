@@ -56,7 +56,6 @@ export function opencodeGoAccountBackupDirectory(
 
 export function loadOpencodeGoAccounts(
   environment?: NodeJS.ProcessEnv,
-  options?: { allowMissingDefault?: boolean },
 ): OpencodeGoAccount[];
 export function writeOpencodeGoAccounts(
   environment: NodeJS.ProcessEnv,

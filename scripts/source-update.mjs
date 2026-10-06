@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -11,8 +10,6 @@ import {
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-
-
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { resolveExecutableInvocation, resolveOptionalExecutable } from "../runtime/executable.mjs";
@@ -26,7 +23,7 @@ import {
 import { createPrompter } from "./terminal-prompter.mjs";
 import { serviceControlDefinitions } from "./service-selection.mjs";
 import { inspectManagedServiceStatus } from "./service-status.mjs";
-import { readActiveUpdate, updateRoot, withUpdateLock } from "./background-update-state.mjs";
+import { withPrivateFileLock } from "../runtime/private-file-lock.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
@@ -48,11 +45,11 @@ export function inspectManagedSourceUpdatePlan(
   assertSourceUpdateCaller(environment);
   const checkout = options.projectDir ?? managedSourceCheckout(environment);
   if (!checkout) {
-    return withSourceUpdateRevision({
+    return {
       operation: "source-update",
       managed: false,
       steps: ["inspect"],
-    });
+    };
   }
   const repository = options.repository ?? officialRepository;
   assertManagedRepository(checkout, repository, environment, options.captureCommand);
@@ -71,7 +68,7 @@ export function inspectManagedSourceUpdatePlan(
   ).trim();
   const currentVersion = packageVersion(checkout);
   const updateAvailable = currentCommit !== targetCommit;
-  return withSourceUpdateRevision({
+  return {
     operation: "source-update",
     managed: true,
     checkout,
@@ -93,14 +90,13 @@ export function inspectManagedSourceUpdatePlan(
             "install-codex-cli",
             "switch-source",
             "refresh-command",
-            "upgrade-databases",
             "configure-codex-daemon",
             "restore-services",
             "cleanup",
           ]
         : ["update-installation"]),
     ],
-  });
+  };
 }
 
 export async function updateManagedSourceInstallation(
@@ -111,26 +107,15 @@ export async function updateManagedSourceInstallation(
   let activeStage = "inspect";
   const runStage = async (stage, operation) => {
     activeStage = stage;
-    emitSourceUpdateProgress(options, stage, "started", completedStages);
-    try {
-      const result = await operation();
-      completedStages.push(stage);
-      emitSourceUpdateProgress(options, stage, "completed", completedStages);
-      return result;
-    } catch (error) {
-      emitSourceUpdateProgress(options, stage, "failed", completedStages);
-      throw error;
-    }
+    const result = await operation();
+    completedStages.push(stage);
+    return result;
   };
   let plan;
   try {
     plan = await runStage(
       "inspect",
-      () => {
-        const current = inspectManagedSourceUpdatePlan(environment, options);
-        assertSourceUpdateRevision(options.expectedRevision, current.revision);
-        return current;
-      },
+      () => inspectManagedSourceUpdatePlan(environment, options),
     );
   } catch (error) {
     throw annotateSourceUpdateFailure(error, {
@@ -175,9 +160,8 @@ export async function updateManagedSourceInstallation(
   let switched = false;
   let servicesMayNeedRestore = false;
   let servicesRestored = false;
-  let relayWasRunning = false;
+  let servicesBeforeUpdate = [];
   let backupPath;
-  let databasesReady = true;
   const renamePath = options.renamePath ?? renameSync;
   try {
     writeMessageSafely(writeMessage, "note", "正在克隆 Git main 候选源码。");
@@ -187,6 +171,7 @@ export async function updateManagedSourceInstallation(
       runQuiet(
         "git",
         [
+          "-c", "core.longpaths=true",
           "clone",
           "--quiet",
           "--branch",
@@ -240,17 +225,6 @@ export async function updateManagedSourceInstallation(
       "inspect-candidate",
       () => (options.inspectStaged ?? inspectStagedInstallation)(stagedCheckout, environment),
     );
-    const candidateRequiresServiceInterruption = inspection.services.installed;
-    databasesReady = !inspection.databaseUpdatesRequired;
-    notifySafely(options.onPrepared, withSourceUpdateRevision({
-      ...plan,
-      steps: inspection.services.installed
-        ? plan.steps
-        : plan.steps.filter((stage) => stage !== "stop-services" && stage !== "restore-services"),
-      services: inspection.services,
-      requiresServiceInterruption: candidateRequiresServiceInterruption,
-      targetVersion: candidate.targetVersion,
-    }));
     const preparedCodex = await runStage(
       "prepare-codex-cli",
       () => prepareCodexVersion(
@@ -271,11 +245,11 @@ export async function updateManagedSourceInstallation(
       ),
     );
     if (inspection.services.installed) {
-      relayWasRunning = await (options.inspectRelayRunning ?? inspectRelayRunning)(environment);
+      servicesBeforeUpdate = await (options.inspectServices ?? inspectUpdateServices)(environment);
       servicesMayNeedRestore = true;
       await runStage(
         "stop-services",
-        () => (options.stopServices ?? stopCoreServices)(checkout, environment, options),
+        () => (options.stopServices ?? stopCoreServices)(checkout, environment, options, servicesBeforeUpdate),
       );
     }
     await runStage(
@@ -321,15 +295,11 @@ export async function updateManagedSourceInstallation(
         options,
       ),
     );
-    databasesReady = false;
-    await runStage("upgrade-databases", () =>
-      applyCandidateDatabaseUpdates(checkout, environment, options));
-    databasesReady = true;
     await runStage("configure-codex-daemon", () =>
       disableCandidateDaemonAutoStart(checkout, environment, options));
     if (inspection.services.installed) {
       await runStage("restore-services", () =>
-        (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning));
+        (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate));
       servicesMayNeedRestore = false;
     }
     await runStage("cleanup", () => {
@@ -351,21 +321,12 @@ export async function updateManagedSourceInstallation(
         { cause: error },
       );
     }
-    if (switched && !databasesReady) {
-      throw annotateSourceUpdateFailure(updateError, {
-        stage: activeStage,
-        completedStages,
-        recovery: {
-          services: servicesMayNeedRestore ? "stopped" : "not-needed",
-          source: sourceRecoveryStatus(switched, backupPath),
-          ...(backupPath ? { backupPath } : {}),
-        },
-        recommendation: "数据库升级尚未完成，未启动服务；检查迁移错误和数据库备份，修复后重新运行 codexc update；不要直接回退源码或启动服务",
-      });
-    }
     if (servicesMayNeedRestore) {
       try {
-        await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);
+        if (switched && !completedStages.includes("refresh-command")) {
+          throw new Error("全局程序安装未完成，保留服务停止状态；请从保留的源码完成 npm run install:global 后按原状态启动服务", { cause: error });
+        }
+        await (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate);
         servicesRestored = true;
       } catch (startError) {
         const combinedError = new AggregateError(
@@ -384,8 +345,8 @@ export async function updateManagedSourceInstallation(
             ...(backupPath ? { backupPath } : {}),
           },
           recommendation: switched
-            ? "检查保留的旧源码并手动恢复核心服务"
-            : "修复核心服务后运行 codexc service start all",
+            ? "核对源码与全局程序安装，完成 npm run install:global 后按原运行状态恢复服务"
+            : "修复失败原因并核对 CLI 版本后，按原运行状态恢复服务",
         });
       }
     }
@@ -435,45 +396,6 @@ function assertSourceUpdateCaller(environment) {
     || environment.CODEX_CONNECT_SERVICE_ROLE === "gateway"
   ) {
     throw new Error("不能在运行中的 Codex 服务内执行更新；请在本机终端运行 codexc update");
-  }
-}
-
-function withSourceUpdateRevision(plan) {
-  const document = { ...plan };
-  Reflect.deleteProperty(document, "revision");
-  return {
-    ...document,
-    revision: createHash("sha256")
-      .update(JSON.stringify(document))
-      .digest("hex"),
-  };
-}
-
-function assertSourceUpdateRevision(expected, current) {
-  if (expected === undefined) return;
-  if (typeof expected !== "string" || !/^[0-9a-f]{64}$/u.test(expected)) {
-    throw new Error("源码更新计划修订值无效");
-  }
-  if (expected !== current) {
-    throw new Error("源码更新预检状态已变化，请重新生成更新计划");
-  }
-}
-
-function emitSourceUpdateProgress(options, stage, status, completedStages) {
-  notifySafely(options.onProgress, {
-    operation: "source-update",
-    stage,
-    status,
-    completedStages: [...completedStages],
-  });
-}
-
-function notifySafely(observer, value) {
-  if (!observer) return;
-  try {
-    observer(value);
-  } catch {
-    // 观察者不属于更新事务，不能改变更新结果。
   }
 }
 
@@ -624,6 +546,9 @@ async function prepareCodexVersion(expected, checkout, environment, writeMessage
     return { installRequired: false, validationEnvironment: environment };
   }
   const failure = codexVersionMismatchError(expected, actual);
+  if (environment.CODEX_BINARY?.trim() && environment.CODEX_BINARY.trim() !== "codex") {
+    throw new Error(`CODEX_BINARY 版本不匹配：需要 ${expected}，当前 ${actual || "未知"}；请更新指定二进制后重试`, { cause: failure });
+  }
   if (!options.confirmCodexCliInstall) throw failure;
   const confirmed = await options.confirmCodexCliInstall({
     currentVersion: actual || undefined,
@@ -716,7 +641,7 @@ function installedCodexVersion(environment, captureCommand) {
   const configured = environment.CODEX_BINARY?.trim();
   const executable = configured || "codex";
   if (!captureCommand && !resolveOptionalExecutable(executable, environment)) {
-    if (configured) throw new Error("CODEX_BINARY 指定的可执行文件不存在，请修正后重新运行 codexc update");
+    if (configured && configured !== "codex") throw new Error("CODEX_BINARY 指定的可执行文件不存在，请修正后重新运行 codexc update");
     return "";
   }
   const output = capture(
@@ -843,32 +768,14 @@ async function inspectStagedInstallation(checkout, environment) {
   const moduleUrl = `${pathToFileURL(join(checkout, "scripts", "local-installation.mjs")).href}?staged`;
   const staged = await import(moduleUrl);
   const config = staged.inspectGatewayConfiguration(environment);
-  const databases = staged.inspectDatabaseUpdates(environment);
-  if (typeof databases.required !== "boolean") {
-    throw new Error("候选版本未返回数据库升级预检结果");
-  }
+  staged.inspectDatabases(environment);
   const services = staged.inspectCoreServiceInstallation(environment);
   if (!services.installed && await gatewayOwnerIsActive(config.configPath)) {
     throw new Error(
       "核心后台服务未安装，但检测到前台 Gateway 正在运行；请先按 Ctrl-C 结束后再更新",
     );
   }
-  return { config, services, databaseUpdatesRequired: databases.required };
-}
-
-async function applyCandidateDatabaseUpdates(checkout, environment, options) {
-  run(
-    process.execPath,
-    [
-      "--input-type=module",
-      "--eval",
-      "const candidate = await import(process.argv[1]); await candidate.applyDatabaseUpdates(process.env);",
-      pathToFileURL(join(checkout, "scripts", "local-installation.mjs")).href,
-    ],
-    checkout,
-    environment,
-    options.runCommand,
-  );
+  return { config, services };
 }
 
 function disableCandidateDaemonAutoStart(checkout, environment, options) {
@@ -882,31 +789,33 @@ function disableCandidateDaemonAutoStart(checkout, environment, options) {
     "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc service 管理。");
 }
 
-async function stopCoreServices(checkout, environment, options) {
-  run(
-    process.execPath,
-    [join(checkout, "bin", "codexc.mjs"), "service", "stop", "all"],
-    checkout,
-    environment,
-    options.runCommand,
-  );
-}
-
-function inspectRelayRunning(environment) {
-  const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
-  if (!serviceControlDefinitions(platform, "all", "status", environment).some(service => service.target === "model-relay")) return false;
-  const service = inspectManagedServiceStatus({ environment, target: "model-relay" }).services[0];
-  if (service?.running) return true;
-  if (!service || !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state)) {
-    throw new Error("无法确认更新前 Relay 运行状态；未停止服务");
+async function stopCoreServices(checkout, environment, options, services) {
+  for (const target of ["webui", "model-relay", "gateway", "app-server"]) {
+    if (!services.find(service => service.target === target)?.running) continue;
+    run(process.execPath, [join(checkout, "bin", "codexc.mjs"), "service", "stop", target === "model-relay" ? "relay" : target], checkout, environment, options.runCommand);
   }
-  return false;
 }
 
-async function startCoreServices(checkout, environment, options, relayWasRunning) {
+function inspectUpdateServices(environment) {
+  const services = [...inspectManagedServiceStatus({ environment, target: "all" }).services,
+    ...inspectManagedServiceStatus({ environment, target: "webui" }).services];
+  for (const service of services) {
+    if (!service.running && !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state)) {
+      throw new Error(`无法确认更新前 ${service.target} 运行状态；未停止服务`);
+    }
+  }
+  return services;
+}
+
+async function startCoreServices(checkout, environment, options, services) {
+  // A failed CLI/package switch must not restart services against an unverified installation.
+  assertCodexVersion(codexVersion(checkout), environment, options.captureCommand);
+  await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
   const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
-  const targets = ["app-server", "gateway"];
-  if (relayWasRunning && serviceControlDefinitions(platform, "all", "start", environment).some(service => service.target === "model-relay")) targets.push("relay");
+  const targets = ["app-server", "gateway", "model-relay", "webui"].filter(target =>
+    services.find(service => service.target === target)?.running
+    && (target !== "model-relay" || serviceControlDefinitions(platform, "all", "start", environment).some(service => service.target === target)))
+    .map(target => target === "model-relay" ? "relay" : target);
   for (const target of targets) run(process.execPath,
     [join(checkout, "bin", "codexc.mjs"), "service", "start", target], checkout, environment, options.runCommand);
 }
@@ -1009,14 +918,11 @@ export async function updateInstalledPackage(environment = process.env, options 
   const checkout = options.projectDir ?? packageDir;
   const expected = codexVersion(checkout);
   const writeMessage = options.writeMessage ?? writeCliMessage;
-  writeMessageSafely(writeMessage, "note", "正在检查配套 Codex CLI、当前配置和数据库升级条件。");
+  writeMessageSafely(writeMessage, "note", "正在检查配套 Codex CLI、当前配置和数据库结构。");
   const inspection = await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
   let temporaryDirectory;
   let servicesStopped = false;
-  let serviceStopCompleted = false;
-  let relayWasRunning = false;
-  let databasesReady = !inspection.databaseUpdatesRequired;
-  let packageStage = "install-codex-cli";
+  let servicesBeforeUpdate = [];
   try {
     const prepared = await prepareCodexVersion(expected, checkout, environment, writeMessage, {
       ...options,
@@ -1031,48 +937,28 @@ export async function updateInstalledPackage(environment = process.env, options 
     await (options.validateCodexContract ?? validateCodexContract)(
       checkout, prepared.validationEnvironment, options,
     );
-    if ((prepared.installRequired || inspection.databaseUpdatesRequired) && inspection.services.installed) {
-      relayWasRunning = await (options.inspectRelayRunning ?? inspectRelayRunning)(environment);
+    if (prepared.installRequired && inspection.services.installed) {
+      servicesBeforeUpdate = await (options.inspectServices ?? inspectUpdateServices)(environment);
       servicesStopped = true;
-      packageStage = "stop-services";
-      await (options.stopServices ?? stopCoreServices)(checkout, environment, options);
-      serviceStopCompleted = true;
+      await (options.stopServices ?? stopCoreServices)(checkout, environment, options, servicesBeforeUpdate);
     }
-    packageStage = "install-codex-cli";
     await installPreparedCodexVersion(prepared, expected, checkout, environment, writeMessage, options);
-    if (inspection.databaseUpdatesRequired) {
-      packageStage = "upgrade-databases";
-      await applyCandidateDatabaseUpdates(checkout, environment, options);
-      databasesReady = true;
-    }
-    packageStage = "configure-codex-daemon";
     disableCandidateDaemonAutoStart(checkout, environment, options);
     if (servicesStopped) {
-      await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);
+      await (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate);
       servicesStopped = false;
     }
     writeMessageSafely(
       writeMessage,
       "success",
-      prepared.installRequired || inspection.databaseUpdatesRequired
-        ? `配套 Codex CLI ${expected} 与数据库更新已完成。`
-        : `检查完成：配套 Codex CLI ${expected} 与数据库均无需更新。`,
+      prepared.installRequired
+        ? `配套 Codex CLI ${expected} 更新已完成。`
+        : `检查完成：配套 Codex CLI ${expected} 无需更新，数据库结构有效。`,
     );
   } catch (error) {
-    if (!databasesReady && (servicesStopped || packageStage === "upgrade-databases")) {
-      throw annotateSourceUpdateFailure(error, {
-        stage: packageStage,
-        completedStages: [],
-        recovery: {
-          services: serviceStopCompleted ? "stopped" : servicesStopped ? "unknown" : "not-needed",
-          source: "unchanged",
-        },
-        recommendation: "数据库升级尚未完成，未尝试启动服务；检查迁移错误和数据库备份，修复后重新运行 codexc update",
-      });
-    }
     if (servicesStopped) {
       try {
-        await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);
+        await (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate);
       } catch (restoreError) {
         throw new AggregateError([error, restoreError], "配套 CLI 更新失败，且核心服务恢复失败", { cause: restoreError });
       }
@@ -1112,7 +998,7 @@ async function main() {
   if (!result.changed) {
     writeCliMessage(
       "note",
-      `Git 源码已是 main 最新提交 ${result.commit.slice(0, 12)}（版本 ${result.version}），配套 CLI 与数据库更新检查已完成。`,
+      `Git 源码已是 main 最新提交 ${result.commit.slice(0, 12)}（版本 ${result.version}），配套 CLI 版本与安装状态检查已完成。`,
     );
     return;
   }
@@ -1128,16 +1014,7 @@ if (
 ) {
   try {
     assertSourceUpdateCaller(process.env);
-    if (process.platform === "linux") {
-      await withUpdateLock(updateRoot(process.env), async () => {
-        if (readActiveUpdate(updateRoot(process.env))) {
-          throw new Error("已有后台更新任务，请先查看 codexc update status");
-        }
-        await main();
-      });
-    } else {
-      await main();
-    }
+    await withPrivateFileLock(join(userDataDir(process.env), ".source-update"), main, { label: "程序更新" });
   } catch (error) {
     writeSourceUpdateFailure(error);
     process.exitCode = 1;

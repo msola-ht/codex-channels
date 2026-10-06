@@ -184,10 +184,10 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
-  it("uses normalized request status and literal keyword matching for scoped queries", () => {
+  it("uses recorded request status and literal keyword matching for scoped queries", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
     store.recordBatch([
-      { ...sample(), recordedAtMs: 1_000, responseFormat: "unknown", model: null, inputTokens: null, outputTokens: null, totalTokens: null },
+      { ...sample(), recordedAtMs: 1_000, status: "incomplete", incompleteReason: "response_not_observed", responseFormat: "unknown", model: null, inputTokens: null, outputTokens: null, totalTokens: null },
       { ...sample(), recordedAtMs: 1_000, model: "model_%" },
       { ...sample(), recordedAtMs: 1_000, model: "model-other" },
     ]);

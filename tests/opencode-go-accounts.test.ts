@@ -97,7 +97,7 @@ describe("OpenCode Go account registry", () => {
     ])).toThrow("必须有一个默认账户");
   });
 
-  it("allows only the default-repair path to read a legacy registry without a default", () => {
+  it("rejects a registry without a default", () => {
     const home = fixture();
     const environment = testEnvironment(home);
     const path = opencodeGoAccountsFilePath(environment);
@@ -109,10 +109,6 @@ describe("OpenCode Go account registry", () => {
     ])}\n`, { mode: 0o600 });
 
     expect(() => loadOpencodeGoAccounts(environment)).toThrow("必须有一个默认账户");
-    expect(loadOpencodeGoAccounts(environment, { allowMissingDefault: true })).toEqual([
-      { id: "main", default: false, email: "user@example.com" },
-      { id: "work", default: false, email: "work@example.com" },
-    ]);
   });
 
   it("rejects multiple defaults and duplicate ids", () => {

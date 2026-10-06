@@ -1,6 +1,6 @@
-# User-Agent 自定义设计
+# User-Agent 与客户端身份
 
-本文定义 Codex Connect 对 App Server 客户端身份和模型上游 `User-Agent` 的可配置方案。
+本文定义 Codex Connect 对 App Server 客户端身份和模型上游 `User-Agent` 的配置合同。
 对应配置字段已进入用户级 Gateway 配置 `[codex]`，运行时覆盖已实现（见下文）。
 
 ## 目标
@@ -157,7 +157,7 @@ WebSocket 请求时。内部指标、Thread、Turn 和 App Server 协议版本�
 Provider Proxy，需要 `codexc service restart all`；App Server 不会自动重启，受管 Gateway
 会按既有配置热载机制自行重建连接，前台 Gateway 需手动重启。已有 Thread 的身份与 Provider 归属不改写；App Server 重启后恢复 Thread，后续请求使用新进程身份与出站 UA。回显不出现在聊天渠道。
 
-首期不增加独立 `codexc ua` 命令，也不在 `codexc setup` 的 Provider 页面重复入口。
+当前不增加独立 `codexc ua` 命令，也不在 `codexc setup` 的 Provider 页面重复入口。
 脚本或自动化直接编辑 TOML；交互入口与配置文件使用同一校验和原子写入实现。
 
 终端标识的取值来自运行命令的终端，而不是常驻进程：`codexc config` → 系统设置 →
@@ -191,7 +191,7 @@ WebUI 在“官方 TUI 请求身份”分区提供同一字段，手工填写后
   App Server；受管 Gateway 会按既有配置热载机制自行重建连接，前台 Gateway 需手动重启。
 - 已有 Thread 的持久身份和 Provider 归属不修改；重启后恢复 Thread 时使用新的进程身份与出站 UA。
 
-首期不支持按 Provider 或按账户分别设置 UA。若未来出现明确的上游兼容需求，应在 Provider 注册
+当前不支持按 Provider 或按账户分别设置 UA。若未来出现明确的上游兼容需求，应在 Provider 注册
 边界设计独立覆盖优先级，并先解决同一共享代理承载多个 OpenCode Go 账户时的路由归属；不能把
 Provider ID 字符串插值到全局 UA。
 
@@ -212,7 +212,7 @@ Provider ID 字符串插值到全局 UA。
   避免在 App Server 会话遥测中保留 Gateway 标识。
 - `src/provider-proxy`：由 `runtime/app-server-service-runtime.mjs` 注入可选完整 UA，在 HTTP 和 WebSocket 出站请求头的
   统一函数中覆盖；不修改入站 Header，但把该请求实际发往上游的 UA 一并写入指标记录
-  `model_request_metrics.user_agent`（Schema v13 引入，当前 Schema v27，限长 512），供 WebUI 请求明细逐条展示。
+  `model_request_metrics.user_agent`（限长 512），供 WebUI 请求明细逐条展示。
 - `runtime/terminal-identity.mjs`：按当前锁定 Codex CLI 的探测顺序从进程环境推导终端标识；
   `detectTerminalUserAgentToken` 复现官方取值供 UA 文本预填使用，`detectTerminalIdentity`
   只在结果可作为 `terminal_identity` 记录时返回，探不到终端或只探测到 `dumb` 时返回 `null`。
@@ -240,7 +240,7 @@ Provider ID 字符串插值到全局 UA。
 不修改 Codex `~/.codex/config.toml`、Provider Profile、API Key 文件、数据库 Schema、指标协议或
 Surface 配置。
 
-## 验证计划
+## 验证范围
 
 当前行为由以下配置、代理与真实合同检查覆盖：
 
@@ -256,7 +256,7 @@ Surface 配置。
 - `provider-proxy` 定向测试：缺省时 UA 原样透传；HTTP 与 WebSocket 覆盖仅在配置后生效。
 
 已确认不新增协议方法；默认身份变化只调整 `initialize.clientInfo` 的既有取值，`thread/start`
-去掉 `serviceName` 是本次唯一删除的协议字段，两者都已由真实 App Server 合同测试覆盖。上游 UA
+初始化不发送 `serviceName`；相关行为由真实 App Server 合同测试覆盖。上游 UA
 覆盖仍只改变本地 Provider Proxy 出站 Header，不改入站 Header 或
 Codex `~/.codex/config.toml`。跨连接读取"原生 Codex TUI 的 UA"不在支持范围，原因是锁定协议
 不暴露其他客户端身份，见「当前链路」。

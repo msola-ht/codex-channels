@@ -163,6 +163,7 @@ describe("Codex Connect setup", () => {
       },
       telegramSetup: vi.fn(async () => ({
         action: "configured",
+        activation: "restart-gateway",
         message: "api_key=secret",
         generatedTokens: { deviceToken: "secret" },
       })),
@@ -292,7 +293,7 @@ describe("Codex Connect setup", () => {
     expect(deepseekSetup).toHaveBeenCalledWith({ input, output, prompts, allowBack: true });
   });
 
-  it("adds a stable activation result when a legacy provider setup omits it", async () => {
+  it("projects the explicit provider activation scope into a stable result", async () => {
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
@@ -306,7 +307,7 @@ describe("Codex Connect setup", () => {
       input: { isTTY: true },
       output: { isTTY: true },
       prompts,
-      officialLoginSetup: vi.fn(async () => ({ mode: "official" })),
+      officialLoginSetup: vi.fn(async () => ({ mode: "official", activation: "restart-all" })),
     });
 
     expect(result).toMatchObject({
@@ -318,6 +319,24 @@ describe("Codex Connect setup", () => {
         commands: ["codexc service restart all"],
       },
     });
+  });
+
+  it.each(["listed", "not-running", "in-use", "stopped"])("does not infer a restart for OpenCode Go result %s", async (action) => {
+    const result = await runInteractiveSetup({
+      input: { isTTY: true },
+      output: { isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn()
+          .mockResolvedValueOnce("models")
+          .mockResolvedValueOnce("third_party")
+          .mockResolvedValueOnce("opencode-go"),
+        isCancel: () => false,
+        cancel: vi.fn(),
+      },
+      openCodeGoSetup: vi.fn(async () => ({ action })),
+    });
+    expect(result).toEqual({ action });
   });
 
   it("selects the custom primary Provider setup under models and providers", async () => {

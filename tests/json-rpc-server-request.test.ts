@@ -6,16 +6,12 @@ import { BaseTransport } from "../src/codex-client/transport.js";
 class ServerRequestTransport extends BaseTransport {
   readonly kind = "stdio" as const;
   readonly sent: Array<Record<string, unknown>> = [];
-  failServerResponse = false;
 
   async connect(): Promise<void> {}
   async close(): Promise<void> {}
 
   async send(message: string): Promise<void> {
     const request = JSON.parse(message) as { id?: string | number; method: string };
-    if (this.failServerResponse && request.id === "server-1") {
-      throw new Error("response send failed");
-    }
     this.sent.push(request);
     if (request.method === "initialize") {
       queueMicrotask(() => this.emitMessage(JSON.stringify({

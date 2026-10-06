@@ -62,7 +62,7 @@ describe("primary provider setup menu", () => {
     );
   });
 
-  it("switches and removes candidates from the setup menu", async () => {
+  it("switches candidates from the setup menu", async () => {
     const { createClient, writeUserConfigEdits } = clientFixture({
       config: {
         model_provider: "OpenAI",

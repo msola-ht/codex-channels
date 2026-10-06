@@ -14,7 +14,7 @@ import { stopDetachedTestProcess } from "./support/real-app-server-helpers.js";
 import { appServerModel } from "./support/json-rpc-fixtures.js";
 import {
   deepseekAccountDefinition,
-  opencodeGoProviderDefinition
+  opencodeGoAccountDefinition
 } from "../runtime/model-provider-definitions.mjs";
 import {
   cli,
@@ -91,7 +91,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     writeManagedProviderFixture(
       codexHome,
       home,
-      opencodeGoProviderDefinition,
+      opencodeGoAccountDefinition("main"),
       "switching",
       "sk-service-secret",
     );

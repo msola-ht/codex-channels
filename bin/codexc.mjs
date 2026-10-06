@@ -45,7 +45,6 @@ import {
   TRAFFIC_USAGE,
 } from "../scripts/traffic-command-options.mjs";
 import {
-  TRAFFIC_UPGRADE_USAGE,
   desktopAppCommandUsage,
   timezoneCommandUsage,
   cleanupUsage,
@@ -58,11 +57,6 @@ import {
 } from "../scripts/metrics-command-options.mjs";
 import { configuredEnvironment, serviceControlEnvironment } from "../scripts/runtime-environment.mjs";
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
-import {
-  BACKGROUND_UPDATE_STATUS_USAGE,
-  BACKGROUND_UPDATE_USAGE,
-  parseBackgroundUpdateArgs,
-} from "../scripts/background-update-options.mjs";
 
 const foregroundShutdownTimeoutMs = 5_000;
 const foregroundProcessGroupExitTimeoutMs = 1_000;
@@ -85,11 +79,11 @@ const helpText = {
 
 项目与 Codex：
   remote [参数]                启动共享 App Server 的 Codex TUI
-  desktop-app                 管理 Codex Desktop App 共享连接
+  app                         启动 Codex Desktop App 或管理共享连接
   work                         管理 Workspace（交互菜单或子命令）
   primary-provider             管理第三方主 Provider（新增、列表、切换、删除）
   opencode-go                  管理 OpenCode Go 多账户
-  ccg                          移除 CCG 账户或旧单账户
+  ccg                          移除 CCG 多账户中的指定账户
   deepseek                     管理 DeepSeek 多账户
 
 指标与工具：
@@ -185,25 +179,24 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
   list         列出账户与默认标记
   remove <id>  备份后删除账户 Profile 与注册表项
   default <id> 设置新会话默认账户
-  stop <id>    立即释放该账户的隔离 App Server（空闲可自动重新拉起）
-
-旧单账户：codexc opencode-go legacy remove`,
+  stop <id>    立即释放该账户的隔离 App Server（空闲可自动重新拉起）`,
   "opencode_go.account": `用法：codexc opencode-go account <add|list|remove|default|stop> [id]`,
   "opencode_go.account.add": "用法：codexc opencode-go account add <id>（交互输入邮箱或手机号、API Key）",
   "opencode_go.account.list": "用法：codexc opencode-go account list [--json]",
   "opencode_go.account.remove": "用法：codexc opencode-go account remove <id>",
   "opencode_go.account.default": "用法：codexc opencode-go account default <id>",
   "opencode_go.account.stop": "用法：codexc opencode-go account stop <id>",
-  update: `${BACKGROUND_UPDATE_USAGE}
+  update: `用法：codexc update
 
 Git 源码安装检查并构建官方 main 最新提交，校验当前配置、数据库与配套 Codex CLI 合同后，
-在一个停机窗口更新程序与所需 CLI，执行目标版本的数据库升级入口，再恢复核心服务。
-CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CLI 并执行必要的数据库升级，不更新 Gateway 程序包。
-当前数据库基线无迁移写入；配置与模型目录不改写。数据库升级未完成时不启动服务，其他失败报告阶段并尝试恢复服务。必须从本机终端执行。`,
+在一个停机窗口更新程序与所需 CLI，再恢复核心服务。
+CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CLI，不更新 Gateway 程序包。
+数据库只接受当前 Schema，不迁移或删除数据；关闭 Codex daemon 自动启动，其他用户偏好与模型目录不改写。
+预检失败时不停止服务；更新按原运行状态恢复核心服务和 WebUI，失败报告阶段并尝试恢复。必须从本机终端执行。`,
   uninstall: `用法：codexc uninstall
 
-卸载后台服务、受管 Git 源码仓库与对应 npm 全局命令，并清理旧安装写入的 Shell PATH 配置；保留
-config.toml、数据库、凭据、日志和输出。直接从 npm Registry 安装的版本使用
+卸载后台服务、受管 Git 源码仓库与对应 npm 全局命令；保留
+config.toml、数据库、凭据、日志、输出和 Shell 配置。直接从 npm Registry 安装的版本使用
 codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   metrics: `用法：codexc metrics
 
@@ -215,14 +208,11 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   ${metricsCommandUsage.export.slice("用法：".length)}   请求明细导出
   ${metricsCommandUsage.quota.slice("用法：".length)}   历史额度周期
   codexc metrics status [--json]   指标数据库状态
-  ${metricsCommandUsage.upgrade.slice("用法：".length)}   保留数据升级
-  ${metricsCommandUsage.rollback.slice("用法：".length)}   归档新库并恢复旧库
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
   codexc metrics cleanup [--keep-days 天数] [--max-rows 行数]   按策略备份并清理旧指标
   codexc metrics prune <provider>   备份并清理指定提供商请求指标（按原服务状态恢复）`,
   traffic: TRAFFIC_USAGE,
   "traffic.cleanup": TRAFFIC_CLEANUP_USAGE,
-  "traffic.upgrade": TRAFFIC_UPGRADE_USAGE,
   channel: `用法：codexc channel <send-image>
 
 渠道图片能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地 PNG/JPEG 图片。`,
@@ -255,8 +245,6 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 
 按时间和组合条件列出指标库中有记录的会话及其期间轮数、请求数；默认全部保留历史，写入 ~/.codex-connect/output/<日期>/，
 加 --stdout 输出到标准输出。`,
-  "metrics.upgrade": `${metricsCommandUsage.upgrade}\n仅支持 v20→v21；显式应用前必须停止 Gateway 与 Relay，保留一致性备份。`,
-  "metrics.rollback": `${metricsCommandUsage.rollback}\n先归档 v21，再恢复经摘要验证的 v20；保留当前凭据代次与停用记录。`,
   "metrics.reset": `用法：codexc metrics reset
 
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
@@ -385,11 +373,11 @@ async function executeCommand(command, args) {
         failureReportedByChild: true,
       });
       break;
-    case "desktop-app":
+    case "app":
       if (showRequestedHelp(args, "desktop_app")) {
         break;
       }
-      if (isCommandHelp(args, [[], ["enable"], ["disable"], ["status"], ["open"]], desktopAppCommandUsage)) {
+      if (isCommandHelp(args, [[], ["enable"], ["disable"], ["status"]], desktopAppCommandUsage)) {
         console.log(desktopAppCommandUsage);
         break;
       }
@@ -444,9 +432,8 @@ async function executeCommand(command, args) {
       if (args.some(isHelpArgument)) {
         runStandaloneScript("scripts/ccg-setup.mjs", args);
       } else {
-        if (!(args.length === 2 && args[0] === "legacy" && args[1] === "remove")
-          && !(args.length === 3 && args[0] === "account" && args[1] === "remove")) {
-          throw new Error("用法：codexc ccg account remove <id> 或 codexc ccg legacy remove");
+        if (!(args.length === 3 && args[0] === "account" && args[1] === "remove")) {
+          throw new Error("用法：codexc ccg account remove <id>");
         }
         runScript("scripts/ccg-setup.mjs", args, { failureReportedByChild: true });
       }
@@ -459,16 +446,9 @@ async function executeCommand(command, args) {
       opencodeGoAccount(args);
       break;
     case "update": {
-      const updateOptions = parseBackgroundUpdateArgs(args);
-      if (updateOptions.kind === "help") {
-        console.log(updateOptions.topic === "status" ? BACKGROUND_UPDATE_STATUS_USAGE : helpText.update);
-        break;
-      }
-      if (updateOptions.kind === "interactive") {
-        runScript("scripts/source-update.mjs", [], { failureReportedByChild: true });
-      } else {
-        await (await import("../scripts/background-update.mjs")).runBackgroundUpdateCommand(args);
-      }
+      if (showRequestedHelp(args, "update")) break;
+      requireNoArguments(args, "用法：codexc update");
+      runScript("scripts/source-update.mjs", [], { failureReportedByChild: true });
       break;
     }
     case "uninstall":
@@ -501,16 +481,11 @@ async function executeCommand(command, args) {
       });
       break;
     case "traffic":
-      if (showRequestedHelp(args, "traffic") || showSubcommandHelp(args, "cleanup", "traffic.cleanup") || showSubcommandHelp(args, "upgrade", "traffic.upgrade")) break;
+      if (showRequestedHelp(args, "traffic") || showSubcommandHelp(args, "cleanup", "traffic.cleanup")) break;
       if (args.some(isHelpArgument)) throw new Error(TRAFFIC_USAGE);
       if (args[0] === "cleanup") {
         parseTrafficCleanupArgs(args.slice(1));
         runStandaloneScript("scripts/traffic-cleanup.mjs", args.slice(1));
-        break;
-      }
-      if (args[0] === "upgrade") {
-        const { upgradeTrafficCapture, parseTrafficUpgradeArgs } = await import("../scripts/traffic-upgrade.mjs");
-        console.log(JSON.stringify(await upgradeTrafficCapture(parseTrafficUpgradeArgs(args.slice(1))), null, 2));
         break;
       }
       parseTrafficCommandArgs(args);
@@ -598,17 +573,9 @@ function runDoctor(args) {
 
 function opencodeGoAccount(args) {
   isCommandHelp(args, [
-    [], ["account"], ["legacy"], ["legacy", "remove"],
+    [], ["account"],
     ...["add", "list", "remove", "default", "stop"].map((action) => ["account", action]),
   ], helpText.opencode_go);
-  if (args[0] === "legacy") {
-    if (args.some(isHelpArgument)) runStandaloneScript("scripts/opencode-go-setup.mjs", args);
-    else {
-      if (args.length !== 2 || args[1] !== "remove") throw new Error("用法：codexc opencode-go legacy remove");
-      runScript("scripts/opencode-go-setup.mjs", args, { failureReportedByChild: true });
-    }
-    return;
-  }
   if (showRequestedHelp(args, "opencode_go")) {
     return;
   }
@@ -830,8 +797,6 @@ async function metrics(args) {
     showSubcommandHelp(args, "turns", "metrics.turns") ||
     showSubcommandHelp(args, "threads", "metrics.threads") ||
     showSubcommandHelp(args, "status", "metrics.status") ||
-    showSubcommandHelp(args, "upgrade", "metrics.upgrade") ||
-    showSubcommandHelp(args, "rollback", "metrics.rollback") ||
     showSubcommandHelp(args, "reset", "metrics.reset") ||
     showSubcommandHelp(args, "cleanup", "metrics.cleanup") ||
     showSubcommandHelp(args, "prune", "metrics.prune") ||
@@ -846,8 +811,6 @@ async function metrics(args) {
       turns: "metrics.turns",
       threads: "metrics.threads",
       status: "metrics.status",
-      upgrade: "metrics.upgrade",
-      rollback: "metrics.rollback",
       reset: "metrics.reset",
       cleanup: "metrics.cleanup",
       prune: "metrics.prune",
@@ -882,7 +845,7 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "upgrade", "rollback", "reset", "cleanup", "prune", "report", "export", "quota"])
+    !new Set(["run", "turns", "threads", "status", "reset", "cleanup", "prune", "report", "export", "quota"])
       .has(subcommand)
   ) {
     throw new Error("用法：codexc metrics <run|turns|threads|status|reset|cleanup|prune|report|export|quota>");

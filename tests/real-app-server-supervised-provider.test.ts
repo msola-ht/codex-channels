@@ -371,6 +371,7 @@ contractSuite("real supervised App Server provider", () => {
       mkdirSync(workspace, { recursive: true, mode: 0o700 });
       writeFileSync(join(codexHome, "config.toml"), [
         'model = "gpt-5.6-terra"',
+        'model_provider = "thirdparty"',
         "",
         "[model_providers.thirdparty]",
         'name = "Contract Responses Provider"',

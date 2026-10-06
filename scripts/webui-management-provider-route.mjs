@@ -274,16 +274,8 @@ export async function sendAccountSnapshots(environment, response, openMetricsSto
     const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
     const snapshots = storedSnapshots
       .filter((snapshot) => {
-        if (snapshot.provider === "clp") return false;
+        if (["deepseek", "ocg", "ccg", "clp"].includes(snapshot.provider)) return false;
         if (snapshot.provider.startsWith("clp-")) return clineAccounts === null || metadataByProvider.has(snapshot.provider);
-        const legacyRegistry = snapshot.provider === "deepseek"
-          ? dsAccounts
-          : snapshot.provider === "ocg"
-            ? ocgAccounts
-            : snapshot.provider === "ccg"
-              ? ccgAccounts
-              : null;
-        if (legacyRegistry !== null) return legacyRegistry.length === 0;
         const registry = snapshot.provider.startsWith("ds-")
           ? dsAccounts
           : snapshot.provider.startsWith("ocg-")
@@ -297,8 +289,7 @@ export async function sendAccountSnapshots(environment, response, openMetricsSto
         const account = metadataByProvider.get(snapshot.provider);
         return {
           ...snapshot,
-          displayName: account?.displayName
-            ?? (snapshot.provider === "deepseek" ? "DeepSeek" : snapshot.provider),
+          displayName: account?.displayName ?? snapshot.provider,
           default: account?.default ?? false,
         };
       });

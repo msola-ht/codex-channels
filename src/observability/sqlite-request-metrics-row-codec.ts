@@ -156,13 +156,6 @@ export interface ErrorGroupRow {
 }
 
 export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
-  const responseNotObserved = row.operation === "response"
-    && row.status === "completed"
-    && row.response_format === "unknown"
-    && row.model === null
-    && row.input_tokens === null
-    && row.output_tokens === null
-    && row.total_tokens === null;
   return {
     id: row.id,
     source: row.source, callerId: row.caller_id, keyId: row.key_id,
@@ -189,14 +182,12 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     serviceTier: row.service_tier,
     requestServiceTier: row.request_service_tier,
     reasoningEffort: row.reasoning_effort,
-    status: responseNotObserved ? "incomplete" : row.status,
+    status: row.status,
     httpStatus: row.http_status,
     errorType: row.error_type,
     errorCode: row.error_code,
     errorMessage: row.error_message,
-    incompleteReason: responseNotObserved
-      ? "response_not_observed"
-      : row.incomplete_reason,
+    incompleteReason: row.incomplete_reason,
     inputTokens: row.input_tokens,
     cachedInputTokens: row.cached_input_tokens,
     outputTokens: row.output_tokens,

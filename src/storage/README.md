@@ -23,7 +23,7 @@ Conversation。空闲 Thread 的跨渠道接管在同一个 SQLite 事务中移�
 Actor 清理和解绑由存储实现原子完成。存储公开枚举已知 Conversation；`/new` 或跨 Provider
 `/model` 暂时解除 Thread 绑定时，授权身份与 Workspace 仍可用于安全的渠道生命周期通知。
 
-Schema v6 保留前台、后台绑定及 `conversation_idle_state`，新增 `conversation_model_preferences`。
+Schema v6 保存前台、后台绑定、`conversation_idle_state` 和 `conversation_model_preferences`。
 偏好按 Conversation 保存精确 Provider、模型、思考等级和服务层级，不包含凭据或历史。
 解绑与偏好、强制新建标记在同一事务写入；重新绑定、撤权及接管会清理对应偏好，后台变化不覆盖前台偏好。
 `conversation_idle_state` 按 `surface + accountId + conversationId` 保存最近一次可观测输入或
@@ -31,9 +31,9 @@ Schema v6 保留前台、后台绑定及 `conversation_idle_state`，新增 `con
 事务中原子写入，常规活动以一分钟粒度写库，
 强制新建标记会立即写库，确保 Gateway 重启后普通消息仍不会自动接续已释放的旧 Thread。
 撤权导致所有绑定时也会原子写入强制新建标记，重新授权后的普通消息仍从新会话开始。
-当前只接受 Schema v6，初始化只创建新库；本模块不提供旧版本迁移，也不删除 App Server Thread。v5 → v6 的备份、事务升级和失败恢复由 `scripts/local-installation.mjs` 协调，其他旧版本拒绝。
+当前只接受 Schema v6，初始化只创建新库；不提供旧版本迁移，也不删除 App Server Thread。安装预检与运行时均拒绝其他版本。
 
-存储实现必须保持可替换。新增字段应只服务于绑定恢复或必要偏好；持久化格式变化必须明确当前数据的重建或升级方式，不能静默兼容未知 Schema，也不能读取或复制 `~/.codex/sessions`。
+存储实现必须保持可替换。字段只服务于绑定恢复或必要偏好；不支持的格式保留原数据并明确报错。涉及用户数据的处置须先明确备份、失败恢复和回滚方案并取得相应授权，不能自动删除数据库，也不能读取或复制 `~/.codex/sessions`。
 
 会话展示缓存位于 Gateway 数据目录的 `session-display-cache.sqlite3`。它只缓存由 App Server
 `thread/list` 和 `thread/turns/list` 产生的状态、筛选元数据及轮数，用于 `/r` 和清理预览避免重复读取

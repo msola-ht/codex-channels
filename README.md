@@ -36,8 +36,8 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 ```
 
 源码安装的目录、更新、代理和 Windows 处理见[`源码安装与更新`](docs/source-install.md)。
-本地开发源码执行 `npm run install:global` 时会补装缺失的配套 Codex CLI，随后运行 `codexc init`、`codexc setup`、`codexc service install`。已有 CLI 的版本同步使用 `codexc update`。
-Linux systemd 用户服务可通过 `codexc update --background --source <目录>` 部署本机源码，使用 `codexc update status` 查看结果；先全局安装包含此入口的新版本 CLI。流程与恢复说明见[本机源码后台部署](docs/source-install.md#本机源码后台部署)。
+官方安装器与本地 `npm run install:global` 都会将缺失或版本不符的默认 Codex CLI 同步为项目锁定版本，随后运行 `codexc init`、`codexc setup`、`codexc service install`。
+安装和更新统一从本机终端执行。官方受管仓库用 `codexc update` 更新；本地工作树更新后重新运行 `npm run install:global`，服务停启见[本地工作树安装与部署](docs/source-install.md#本地工作树安装与部署)。
 
 ## 常用入口
 
@@ -57,9 +57,9 @@ codexc relay status          # 查询可选模型 API 转发进程
 codexc traffic               # 查看模型请求与响应转储
 codexc reset-credit list     # 查询 OpenAI 可用重置券；use 交互确认使用
 codexc webui                 # 启动本地指标与设置 WebUI
-codexc update                # 更新受管源码、同步配套 CLI 并检查数据库升级
+codexc update                # 更新受管源码、同步配套 CLI 并校验当前数据库
 codexc remote                # 连接 Gateway 共享的原生 TUI
-codexc desktop-app status    # 检查 Desktop App 共享连接与 macOS 内置工具 Host（预览）
+codexc app      # 启动共享 Desktop App；首次确认后自动启用（预览）
 ```
 
 首次接入使用 `setup`，日常设置使用 `config`，数据维护使用 `cleanup`。清理菜单的五项操作、服务启停要求和会话归档示例见[本机清理与归档](docs/user-guide.md#本机清理与归档)。在聊天渠道发送 `/help` 查看可用命令。
@@ -81,7 +81,7 @@ Codex 用户配置：
 共享代理通过 `codexc config → 网络代理` 设置，保存在 `~/.codex/.env`，见[代理设置](docs/user-guide.md#代理与权限)。
 
 配置示例见[`config.example.toml`](config.example.toml)。不要把 Token、Cookie 或 Authorization Header 写入日志或提交到仓库。
-DS、OCG、CCG、CLP 支持多账户，在 `codexc setup → 模型与提供商` 中管理。旧单账户需要先确认移除再重新添加，更新器不执行账户迁移；具体命令见下面的提供商文档。
+DS、OCG、CCG、CLP 使用当前多账户结构，在 `codexc setup → 模型与提供商` 中添加和管理；具体命令见下面的提供商文档。
 
 ## 专题文档
 
@@ -95,11 +95,10 @@ DS、OCG、CCG、CLP 支持多账户，在 `codexc setup → 模型与提供商`
 - [OpenCode Go](docs/opencode-go.md)
 - [CCG（CommandCode）](docs/ccg.md)
 - [CLP（Cline Pass）](docs/cline-pass.md)
-- [Provider 模型 API 转发：原生 Chat/Responses、提供商接入、调用方密钥与指标升级](docs/provider-api-relay-development.md)
-- [Relay 只读 Codex 登录转发设计（设计稿，尚未实施）](docs/relay-codex-auth-development.md)
+- [Provider 模型 API 转发：原生 Chat/Responses、提供商接入、调用方密钥与指标](docs/provider-api-relay-development.md)
 - [Provider 接入指南](docs/provider-integration-guide.md)
 - [官方协议与源码索引](docs/index.md)
-- [Codex Desktop App 共享 App Server 实施方案](docs/codex-desktop-app-development.md)
+- [Codex Desktop App 共享 App Server](docs/codex-desktop-app-development.md)
 - [渠道图片输入与支持范围](docs/user-guide.md#正常发图与图片引用)
 - [项目文档索引](index.md)
 

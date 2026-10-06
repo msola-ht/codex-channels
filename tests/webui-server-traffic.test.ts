@@ -778,7 +778,7 @@ describe("webui traffic V2 API", () => {
     const legacyServer = await startServer(legacy.environment);
     const unavailable = await getJson<TrafficErrorBody>(`${legacyServer.origin}/api/v1/traffic`);
     expect(unavailable.status).toBe(503);
-    expect(unavailable.body.error.code).toBe("traffic_legacy_format");
+    expect(unavailable.body.error.code).toBe("traffic_unavailable");
 
     const fixture = createFixture();
     writeSession(fixture.trafficDir, "openai", "2026-09-17T00-00-00-000Z", [httpInteraction(1)]);

@@ -14,7 +14,7 @@ import { GatewaySettingsCard } from "@/components/settings/gateway-settings-card
 import { WorkspaceSettingsCard } from "@/components/settings/workspace-settings-card"
 import { WebuiDataSettingsCard } from "@/components/settings/webui-data-settings-card"
 import { ManagedServices, RecentManagementTasks } from "@/components/settings/managed-services"
-import { ManagementTaskControls } from "@/components/settings/management-task-controls"
+import { ManagementTaskControls, ManagementTaskConfirmationDialog } from "@/components/settings/management-task-controls"
 import { SettingsError, LoadingSettingsCard } from "@/components/settings/settings-feedback"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
@@ -81,7 +81,7 @@ export function DataSettingsPage() {
     </GatewaySettingsSection>
     {providers.error && <SettingsError message={translateApiErrorCode(t, providers.errorCode)} retry={reloadProviders} />}
     <TaskErrors tasks={tasks} />
-    <ManagementTaskControls tasks={tasks} section="data" providerIds={[...(providers.data?.primary.id ? [providers.data.primary.id] : []), ...(providers.data?.providers.map(provider => provider.id) ?? [])]} />
+    <ManagementTaskControls tasks={tasks} providerIds={[...(providers.data?.primary.id ? [providers.data.primary.id] : []), ...(providers.data?.providers.map(provider => provider.id) ?? [])]} />
     {tasks.tasks.length > 0 && <RecentManagementTasks tasks={tasks} />}
     <SettingsCliCommands scope="data" summary={summary} />
   </SettingsPageFrame>
@@ -102,7 +102,7 @@ export function ServiceSettingsPage() {
       <CardHeader><CardTitle>{t("navigation.services")}</CardTitle><CardDescription>{t("navigation.servicesHint")}</CardDescription></CardHeader>
       <CardContent><ManagedServices services={{ ...services.data, entries: services.data.entries.filter(service => service.target !== "model-relay") }} tasks={tasks} showTasks={false} /></CardContent>
     </Card>}
-    <ManagementTaskControls tasks={tasks} section="services" />
+    <ManagementTaskConfirmationDialog tasks={tasks} />
     {tasks.tasks.length > 0 && <RecentManagementTasks tasks={tasks} />}
     <SettingsCliCommands scope="services" summary={summary} />
   </SettingsPageFrame>

@@ -4,8 +4,6 @@ import {
   mkdtempSync,
   rmSync,
   statSync,
-  utimesSync,
-  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,83 +21,6 @@ afterEach(() => {
 });
 
 describe("request metrics database lock", () => {
-  it("recovers an old incomplete metrics database lock", () => {
-    const directory = temporaryDirectory();
-    const path = join(directory, "request-metrics.sqlite3");
-    const lockPath = `${path}.lock`;
-    writeFileSync(lockPath, "{", { mode: 0o600 });
-    const old = new Date(Date.now() - 60_000);
-    utimesSync(lockPath, old, old);
-
-    const lock = acquireRequestMetricsDatabaseLock(path);
-    lock.release();
-
-    expect(existsSync(lockPath)).toBe(false);
-  });
-
-  it("keeps a recent incomplete metrics database lock fail-closed", () => {
-    const directory = temporaryDirectory();
-    const path = join(directory, "request-metrics.sqlite3");
-    const lockPath = `${path}.lock`;
-    writeFileSync(lockPath, "{", { mode: 0o600 });
-
-    expect(() => acquireRequestMetricsDatabaseLock(path)).toThrow(/正在使用/u);
-    expect(existsSync(lockPath)).toBe(true);
-  });
-
-  it.runIf(process.platform === "linux")(
-    "recovers a legacy lock from before the current boot when its PID was reused",
-    () => {
-      const directory = temporaryDirectory();
-      const path = join(directory, "request-metrics.sqlite3");
-      const lockPath = `${path}.lock`;
-      writeFileSync(
-        lockPath,
-        `${JSON.stringify({ pid: process.pid, token: "stale-owner" })}\n`,
-        { mode: 0o600 },
-      );
-      const beforeCurrentBoot = new Date(0);
-      utimesSync(lockPath, beforeCurrentBoot, beforeCurrentBoot);
-
-      const lock = acquireRequestMetricsDatabaseLock(path);
-      lock.release();
-
-      expect(existsSync(lockPath)).toBe(false);
-    },
-  );
-
-  it("keeps a current-boot legacy lock with a live PID fail-closed", () => {
-    const directory = temporaryDirectory();
-    const path = join(directory, "request-metrics.sqlite3");
-    const lockPath = `${path}.lock`;
-    writeFileSync(
-      lockPath,
-      `${JSON.stringify({ pid: process.pid, token: "live-legacy-owner" })}\n`,
-      { mode: 0o600 },
-    );
-
-    expect(() => acquireRequestMetricsDatabaseLock(path)).toThrow(/正在使用/u);
-    expect(existsSync(lockPath)).toBe(true);
-  });
-
-  it.runIf(process.platform !== "linux")(
-    "keeps an old legacy lock with a live PID fail-closed outside Linux",
-    () => {
-      const directory = temporaryDirectory();
-      const path = join(directory, "request-metrics.sqlite3");
-      const lockPath = `${path}.lock`;
-      writeFileSync(
-        lockPath,
-        `${JSON.stringify({ pid: process.pid, token: "live-legacy-owner" })}\n`,
-        { mode: 0o600 },
-      );
-      const old = new Date(0);
-      utimesSync(lockPath, old, old);
-
-      expect(() => acquireRequestMetricsDatabaseLock(path)).toThrow(/正在使用/u);
-      expect(existsSync(lockPath)).toBe(true);
-    },
-  );
 
   it.skipIf(process.platform === "win32")("keeps a lock held by the current process lifetime fail-closed", () => {
     const directory = temporaryDirectory();

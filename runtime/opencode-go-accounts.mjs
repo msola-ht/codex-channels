@@ -144,7 +144,6 @@ export function opencodeGoAccountBackupDirectory(environment, accountId) {
 
 export function loadOpencodeGoAccounts(
   environment = process.env,
-  { allowMissingDefault = false } = {},
 ) {
   const path = opencodeGoAccountsFilePath(environment);
   if (!existsSync(path)) return [];
@@ -180,7 +179,7 @@ export function loadOpencodeGoAccounts(
       ...(phone === undefined ? {} : { phone }),
     });
   }
-  assertManagedProviderDefaultAccount(accounts, "OpenCode Go", { allowMissingDefault });
+  assertManagedProviderDefaultAccount(accounts, "OpenCode Go");
   assertUniqueOpencodeGoApiKeyEnvironmentKeys(accounts);
   return accounts;
 }

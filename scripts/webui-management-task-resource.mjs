@@ -8,12 +8,11 @@ import { loadServiceStatusSummary } from "./webui-service-status.mjs"
 export function normalizeTaskRequestShape(input) {
   const shape = { operation: input?.operation }
   if (input?.action !== undefined) shape.action = input.action
-  else if (input?.operation === "update") shape.action = "source"
   if (input?.target !== undefined) shape.target = input.target
   return shape
 }
 
-export async function managementTaskResourceState(normalized, environment, serviceStatusCache, sourceVersion, createError = defaultError) {
+export async function managementTaskResourceState(normalized, environment, serviceStatusCache, createError = defaultError) {
   if (normalized.operation === "metrics") {
     try {
       const status = inspectMetricsDatabase(environment)
@@ -77,7 +76,6 @@ export async function managementTaskResourceState(normalized, environment, servi
         dumps: {
           bytes: preview.bytes,
           labels: preview.labels,
-          legacyFiles: preview.legacyFiles,
           resources: preview.resources,
           v2Sessions: preview.v2Sessions,
         },
@@ -86,11 +84,7 @@ export async function managementTaskResourceState(normalized, environment, servi
       throw createError(503, "task_resource_unavailable", "调用记录状态暂不可用，请稍后重试")
     }
   }
-  return {
-    operation: normalized.operation,
-    action: normalized.action,
-    sourceVersion,
-  }
+  throw createError(400, "invalid_task", "任务类型无效")
 }
 
 function defaultError(_status, _code, message) {

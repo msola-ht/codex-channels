@@ -1,7 +1,6 @@
 import { writeFileSync,
   chmodSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -38,7 +37,6 @@ vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
 import {
   applyCcgConfiguration,
   ccgSetupPaths,
-  removeLegacyCcgAccount,
   removeCcgConfiguration,
   runCcgSetup, runCcgAccountCli,
   setCcgDefaultAccount,
@@ -346,36 +344,6 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     expect(loadManagedModelProviderSettings(options.environment)).toEqual([
       expect.objectContaining({ provider: "ccg-main", mode: "switching" }),
     ]);
-  });
-
-  it.each(["switching", "exclusive"] as const)("removes the legacy %s CCG provider only after confirmation", async (mode) => {
-    const options = fixture();
-    await applyCcgConfiguration({ ...options.input, mode, confirmExclusiveConfigChange: mode === "exclusive" }, options);
-    const providerDirectory = dirname(options.paths.catalog);
-    const legacyBackup = join(providerDirectory, "backup", "config.json");
-    const legacyProfile = join(options.environment.CODEX_HOME, "sf-ccg.config.toml");
-    const legacyMarker = join(providerDirectory, "managed.toml");
-    const profile = readFileSync(mode === "exclusive" ? options.paths.config : options.paths.profile, "utf8").replaceAll("ccg-main", "ccg");
-    const backup = readFileSync(options.paths.backup);
-    if (existsSync(options.paths.profile)) rmSync(options.paths.profile);
-    rmSync(options.paths.marker);
-    rmSync(options.paths.registry);
-    mkdirSync(dirname(legacyBackup), { recursive: true });
-    if (mode === "switching") writePrivateFileAtomicSync(legacyProfile, profile);
-    writePrivateFileAtomicSync(legacyMarker, `version = 1\nprovider = "ccg"\nmode = "${mode}"\n`);
-    if (mode === "exclusive") writePrivateFileAtomicSync(options.paths.config, profile);
-    writePrivateFileAtomicSync(legacyBackup, backup);
-
-    await expect(removeLegacyCcgAccount({
-      confirmRemove: false,
-    }, options)).rejects.toThrow("明确确认");
-    await removeLegacyCcgAccount({ confirmRemove: true }, options);
-
-    expect(loadCcgAccounts(options.environment)).toEqual([]);
-    expect(existsSync(legacyBackup)).toBe(true);
-    expect(parse(readFileSync(options.paths.config, "utf8"))).toEqual({ model: "gpt-5.5" });
-    expect(existsSync(legacyProfile)).toBe(false);
-    expect(existsSync(legacyMarker)).toBe(false);
   });
 
   it("exposes account removal through the CCG CLI and keeps cancellation read-only", async () => {

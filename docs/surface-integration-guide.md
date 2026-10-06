@@ -171,8 +171,9 @@ src/surfaces/<surface>/
 
 ```text
 BuiltInSurfacePlugin
-├── Telegram -> 1 个默认账号实例
+├── Telegram -> 0 或 1 个默认账号实例
 ├── 飞书 -> 0 或 1 个配置账号实例
+├── 微信 -> 0 或 1 个配置账号实例
 └── 新渠道 -> 0 到多个配置账号实例
 ```
 
@@ -300,7 +301,7 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 
 ## 存储与安全
 
-- 不改变当前 SQLite Schema，除非新渠道确实需要恢复绑定之外的最小字段，并先单独评审迁移方案。
+- 不改变当前 SQLite Schema，除非新渠道确实需要恢复绑定之外的最小字段，并先单独评审当前结构与失败关闭行为。
 - 由操作者明确输入、属于静态应用配置的 Bot Token、App Secret 等平台凭据保存在权限受限的统一
   `config.toml`，不得复制到 SQLite、日志、服务定义或其他平台文件。扫码登录、OAuth 或其他平台
   授权流程签发的账号 Token 不属于静态应用配置；需要跨重启使用时必须保存到项目规定的 macOS
@@ -377,7 +378,7 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 
 开发阶段运行受影响的定向测试与 `npm run docs:check`；普通提交由 pre-commit 执行一次按范围选择的 `verify:commit`，PR CI 使用 `verify:ci` 完整回归，不提前重复。
 
-并同步更新根 README 文档索引、`src/README.md`、`src/surfaces/README.md`、新渠道目录 README、
+并同步更新`index.md` 文档索引、`src/README.md`、`src/surfaces/README.md`、新渠道目录 README、
 测试索引、配置示例与公开 Setup/Doctor 说明。
 
 ## 禁止模式

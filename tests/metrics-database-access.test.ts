@@ -75,7 +75,9 @@ describe("model request metrics database access", () => {
     `], { cwd: process.cwd(), encoding: "utf8", env: environment });
     expect(result.status).toBe(0);
     expect(result.stdout).not.toContain("metrics reset");
-    expect(result.stdout).toContain([20, 21, 22, 23, 24, 25, 26].includes(version) ? `--from ${version} --to 27` : "勿删除数据库");
+    expect(result.stdout).toContain("仅支持当前 Schema");
+    expect(result.stdout).toContain("勿删除数据库");
+    expect(result.stdout).not.toContain("metrics upgrade");
     const database = new DatabaseSync(databasePath, { readOnly: true });
     expect(database.prepare("SELECT value FROM schema_metadata WHERE name='schema_version'").get()?.value).toBe(version);
     expect(database.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get()?.count).toBe(1); database.close();
@@ -190,7 +192,8 @@ describe("model request metrics database access", () => {
       ...metricSample(),
       responseFormat: "unknown",
       model: null,
-      status: "completed",
+      status: "incomplete",
+      incompleteReason: "response_not_observed",
       inputTokens: null,
       cachedInputTokens: null,
       outputTokens: null,

@@ -24,12 +24,6 @@ export function applyCcgConfiguration(input: {
   model: string;
   activation: "restart-all";
 }>;
-export function hasLegacyCcgConfiguration(environment?: NodeJS.ProcessEnv): boolean;
-export function removeLegacyCcgAccount(input?: { confirmRemove?: boolean }, options?: ManagedAccountRuntimeOptions): Promise<{
-  action: "legacy-removed";
-  runtime: "stopped" | "not-running";
-  activation: "restart-all";
-}>;
 export function setCcgDefaultAccount(accountId: string, options?: {
   environment?: NodeJS.ProcessEnv;
 }): Promise<{ action: "default-set"; accountId: string; activation: "restart-all" }>;
@@ -40,13 +34,7 @@ export function runCcgSetup(options?: {
   prompts?: unknown;
   fetchImpl?: typeof fetch;
   downloadCatalog?: (fetchImpl: typeof fetch) => Promise<{ catalog: CcgCatalog }>;
-  action?: "add" | "legacy-remove" | "reconfigure" | "settings" | "default" | "remove";
+  action?: "add" | "reconfigure" | "settings" | "default" | "remove";
   accountId?: string;
 }): Promise<unknown>;
 export function runCcgAccountCli(args: string[], options?: Parameters<typeof runCcgSetup>[0]): Promise<unknown>;
-
-export function previewLegacyCcgRemoval(options?: ManagedAccountRuntimeOptions): Promise<{
-  operation: "legacy-remove"; account: { provider: "ccg" }; files: string[];
-  effects: { stopsRunningAppServer: boolean; restoresInitialConfig: boolean; preservesPrivateBackup: true; historyThreadsBecomeUnavailable: true };
-  activation: "restart-all";
-}>;

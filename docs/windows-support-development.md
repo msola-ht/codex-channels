@@ -15,7 +15,7 @@ App Server 合同与发布候选的渠道/Provider 验收仍未闭环。公开�
   UDS；Unix 继续使用原有私有 Socket 合同。
 - 开发中的 Desktop App 桥只绑定回环地址并要求私有随机令牌，每个连接仍通过
   `WindowsProxyTransport` 接入同一私有 UDS；它不把 App Server 改为 TCP 监听，也不替换固定
-  Transport。公开 `desktop-app` 命令只读查询当前用户 `OpenAI.Codex` 包和兼容入口，`open` 直接
+  Transport。公开 `app` 命令只读查询当前用户 `OpenAI.Codex` 包和兼容入口，`codexc app` 直接
   创建只继承本次共享端点的包内 Desktop 子进程，不写持久环境。macOS 已确认该方案可以共享
   Thread，受管 Host 也已通过真实启动验证并把 Desktop 私有 `CODEX_APP_TOOLS_PIPE_PATH` 传给
   外部 App Server；Windows 不能沿用 macOS 的会话与内置 `codex_app` MCP 结果推断工具兼容。
@@ -54,7 +54,9 @@ npm ci --ignore-scripts --prefix webui
 npm run build
 npm run check
 npm run docs:check
-PowerShell 脚本语法
+PowerShell 脚本语法（包含根目录 install.ps1）
+首次安装 Codex 版本同步、安装失败及 PATH 冲突的隔离命令合同
+服务宿主提前退出、控制端点失败及资源回收合同
 codexc 与 service 帮助冒烟
 Desktop 包检查与启动、回环桥网络行为、Windows Proxy 超时清理合同
 选定的 Transport、服务、可执行文件兼容性测试
@@ -83,7 +85,7 @@ Desktop 包检查与启动、回环桥网络行为、Windows Proxy 超时清理�
 ## 失败与回滚
 
 - Windows 专属实现失败时应停止对应入口并保留用户数据，不得回退到更宽松的 IPC 或凭据方案。
-- 新的持久化格式必须走项目既有版本与升级流程；Windows 支持本身不构成新增 Schema 的理由。
+- 持久化仅接受当前 Schema；Windows 支持不引入数据迁移，也不构成新增 Schema 的理由。
 - 安装或更新失败必须保留可执行的恢复说明；不能以删除配置、数据库或凭据作为自动恢复手段。
 - 固定版本上游无法提供可共享且有安全边界的 Transport，或实现要求复制 App Server 状态机时，
   停止扩大实现并重新审查设计。

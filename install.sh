@@ -121,8 +121,18 @@ if (!/^\d+\.\d+\.\d+$/u.test(version)) process.exit(1);
 process.stdout.write(version);
 ' "$staging/repository/src/codex-protocol/version.json")"
 codex_command="$(command -v codex 2>/dev/null || true)"
-if [ -z "$codex_command" ]; then
-  note "未检测到 Codex CLI，正在安装 @openai/codex@$version"
+codex_version=""
+if [ -n "$codex_command" ]; then
+  codex_output="$("$codex_command" --version 2>/dev/null)" || fail "Codex CLI 无法执行，请修复当前命令后重新安装"
+  codex_version="$(printf '%s\n' "$codex_output" | awk '{ print $NF }')"
+  codex_version="${codex_version#v}"
+fi
+if [ "$codex_version" != "$version" ]; then
+  if [ -z "$codex_command" ]; then
+    note "未检测到 Codex CLI，正在安装 @openai/codex@$version"
+  else
+    note "Codex CLI 当前 ${codex_version:-未知}，正在同步为项目锁定版本 $version"
+  fi
   npm install --global --no-audit --no-fund "@openai/codex@$version" \
     || fail "Codex CLI 安装失败；请检查 npm 全局目录权限"
   codex_command="$(command -v codex 2>/dev/null || true)"
@@ -130,7 +140,8 @@ if [ -z "$codex_command" ]; then
     || fail "Codex CLI 已安装到 $npm_global_prefix/bin，但该目录不在 PATH；请加入 PATH 后重新运行"
   success "Codex CLI $version 已安装。"
 fi
-codex_version="$($codex_command --version 2>/dev/null | awk '{ print $NF }')"
+codex_output="$("$codex_command" --version 2>/dev/null)" || fail "Codex CLI 安装后无法执行，请检查 PATH"
+codex_version="$(printf '%s\n' "$codex_output" | awk '{ print $NF }')"
 codex_version="${codex_version#v}"
 [ "$codex_version" = "$version" ] \
   || fail "Codex CLI 版本不匹配：main 需要 ${version}，当前 ${codex_version:-未知}"
@@ -196,8 +207,6 @@ npm install --global --ignore-scripts --loglevel=error --no-audit --no-fund "$pa
 [ -x "$global_launcher" ] \
   || fail "npm 全局命令入口不存在：$global_launcher"
 completed=true
-node "$checkout/scripts/source-shell-path.mjs" remove \
-  || note "旧 Shell PATH 配置清理失败；可手工删除 Codex Connect 配置块。"
 
 rm -rf "$staging"
 staging=""

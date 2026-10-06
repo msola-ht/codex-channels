@@ -19,7 +19,7 @@ describe("RequestMetricsQueryAdapter", () => {
     expect(threadTurnCount).toHaveBeenCalledWith("thread-1");
   });
 
-  it("maps request metrics without leaking Store pricing rows", () => {
+  it("maps stored request metrics into query results", () => {
     const aggregate = vi.fn(() => ({
       startAtMs: 1,
       endAtMs: 2,

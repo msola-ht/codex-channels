@@ -20,7 +20,7 @@ afterEach(() => {
 
 describe("state database inspection", () => {
   it("rejects a current version whose required structure is incomplete", () => {
-    const home = mkdtempSync(join(tmpdir(), "codexc-state-upgrade-"));
+    const home = mkdtempSync(join(tmpdir(), "codexc-state-inspect-"));
     temporaryDirectories.push(home);
     const environment = {
       ...process.env,
@@ -43,7 +43,7 @@ describe("state database inspection", () => {
   });
 
   it("fails state structure validation when the scheduled task schema is unknown", () => {
-    const home = mkdtempSync(join(tmpdir(), "codexc-state-upgrade-"));
+    const home = mkdtempSync(join(tmpdir(), "codexc-state-inspect-"));
     temporaryDirectories.push(home);
     const environment = {
       ...process.env,

@@ -30,9 +30,9 @@ it("keeps settings fields and maintenance actions in their owning pages", () => 
       const network=render(h(WebuiDataSettingsCard,{management,section:'network'}));
       const stale=render(h(GatewaySettingsCard,{management:{...management,error:'stale'},section:'display'}));
       const tasks={tasks:[],loading:false,error:null,saving:false,pendingPreview:null};
-      const maintenance=Object.fromEntries(['data','services'].map(section=>[section,render(h(ManagementTaskControls,{tasks,section}))]));
-      const pruneEmpty=render(h(ManagementTaskControls,{tasks,section:'data',providerIds:[]}));
-      const pruneCustom=render(h(ManagementTaskControls,{tasks,section:'data',providerIds:['custom-main']}));
+      const maintenance=render(h(ManagementTaskControls,{tasks}));
+      const pruneEmpty=render(h(ManagementTaskControls,{tasks,providerIds:[]}));
+      const pruneCustom=render(h(ManagementTaskControls,{tasks,providerIds:['custom-main']}));
       const sidebarPreferences=Object.fromEntries([['closed','sidebar_state=false'],['open','sidebar_state=true'],['missing',''],['invalid','sidebar_state=invalid']].map(([key,cookie])=>{
         globalThis.document={cookie};
         try {return [key,render(h(AppSidebarProvider,null,h(AppSidebar)))];}
@@ -58,7 +58,7 @@ it("keeps settings fields and maintenance actions in their owning pages", () => 
     sidebarPreferences: Record<string, string>;
     pruneEmpty: string; pruneCustom: string; described: string; channelEnglish: string; cliError: string; cliReady: string;
     gateway: Record<string, string>; data: string; network: string; stale: string;
-    maintenance: Record<string, string>; sidebars: Record<string, string>; paths: string[];
+    maintenance: string; sidebars: Record<string, string>; paths: string[];
     nestedSidebars: Record<string, string>;
     groups: { id: string; children: {to: string}[] }[];
   };
@@ -127,10 +127,8 @@ it("keeps settings fields and maintenance actions in their owning pages", () => 
   expect(result.network).toContain("proxy-http_proxy");
   expect(result.network).not.toContain("metrics-retention-days");
   expect(result.stale).toMatch(/<button[^>]*disabled/u);
-  expect(result.maintenance.services).toContain("更新源码");
-  expect(result.maintenance.services).not.toContain("清理指标库");
-  expect(result.maintenance.data).toContain("清理指标库");
-  expect(result.maintenance.data).not.toContain("更新源码");
+  expect(result.maintenance).toContain("清理指标库");
+  expect(result.maintenance).not.toContain("更新源码");
   expect(new Set(result.paths).size).toBe(result.paths.length);
   for (const group of result.groups) {
     const html = result.sidebars[group.id]!;

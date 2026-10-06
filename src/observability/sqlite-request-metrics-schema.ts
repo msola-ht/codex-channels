@@ -4,7 +4,7 @@ import { modelRequestMetricsSchemaVersion } from "./request-metrics-database.js"
 
 const schemaVersion = modelRequestMetricsSchemaVersion;
 
-export const metricStorageV20Columns = [
+export const metricStorageColumns = [
   "provider", "transport", "response_format", "operation", "thread_id", "turn_id",
   "model", "service_tier", "reasoning_effort", "status", "http_status", "error_type",
   "error_code", "error_message", "incomplete_reason", "input_tokens",
@@ -16,17 +16,12 @@ export const metricStorageV20Columns = [
   "traffic_label", "traffic_session", "traffic_interaction",
   "total_duration_ms",
   "request_service_tier",
-] as const;
-
-export const metricStorageV23Columns = [...metricStorageV20Columns,
   "source", "caller_id", "key_id", "credential_generation", "relay_request_id", "delivery_status",
+  "response_usage_amount", "upstream_provider", "upstream_attempt_count", "model_attempt_count", "finish_reason", "error_stage", "upstream_error_code", "upstream_error_type", "upstream_http_status", "quota_observed_at_ms",
 ] as const;
-export const metricStorageV24Columns = [...metricStorageV23Columns, "response_usage_amount"] as const;
-export const metricStorageV25Columns = [...metricStorageV24Columns, "upstream_provider", "upstream_attempt_count", "model_attempt_count", "finish_reason", "error_stage", "upstream_error_code", "upstream_error_type", "upstream_http_status"] as const;
-export const metricStorageColumns = [...metricStorageV25Columns, "quota_observed_at_ms"] as const;
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
 
-export const modelRequestMetricsV20TableSql = `
+const baseMetricsTableSql = `
   CREATE TABLE model_request_metrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider TEXT NOT NULL,
@@ -85,7 +80,7 @@ export const modelRequestMetricsV20TableSql = `
   );
 `;
 
-const relayIdentityV21Check = `
+const relayIdentityCheck = `
   (source = 'owned' AND caller_id IS NULL AND key_id IS NULL
     AND credential_generation IS NULL AND relay_request_id IS NULL AND delivery_status IS NULL)
   OR
@@ -99,27 +94,14 @@ const relayIdentityV21Check = `
     AND credential_generation BETWEEN 1 AND 9007199254740991
     AND relay_request_id IS NOT NULL AND length(relay_request_id) = 36
     AND delivery_status IS NOT NULL AND delivery_status IN ('finished', 'disconnected', 'failed')
-    AND traffic_label IS NULL AND traffic_session IS NULL AND traffic_interaction IS NULL)
+    AND (traffic_label IS NULL OR traffic_label IN ('relay.chat', 'relay.responses')))
 `;
-const relayIdentityV22Check = relayIdentityV21Check.replace(
-  "AND traffic_label IS NULL AND traffic_session IS NULL AND traffic_interaction IS NULL",
-  "AND (traffic_label IS NULL OR traffic_label = 'relay.chat')",
-);
-const relayIdentityCheck = relayIdentityV22Check.replace("traffic_label = 'relay.chat'", "traffic_label IN ('relay.chat', 'relay.responses')");
 export const relayMetricColumnDefinitions = [
   "source TEXT NOT NULL DEFAULT 'owned' CHECK (source IN ('owned', 'relay'))",
   "caller_id TEXT", "key_id TEXT", "credential_generation INTEGER", "relay_request_id TEXT",
   `delivery_status TEXT CHECK (${relayIdentityCheck})`,
 ] as const;
-export const modelRequestMetricsV23TableSql = modelRequestMetricsV20TableSql.replace(
-  "    CHECK (", `    ${relayMetricColumnDefinitions.join(",\n    ")},\n    CHECK (`,
-);
-export const modelRequestMetricsV22TableSql = modelRequestMetricsV23TableSql.replace(relayIdentityCheck, relayIdentityV22Check);
-export const modelRequestMetricsV21TableSql = modelRequestMetricsV23TableSql.replace(relayIdentityCheck, relayIdentityV21Check);
 export const responseUsageAmountColumn = "response_usage_amount TEXT CHECK (response_usage_amount IS NULL OR (typeof(response_usage_amount) = 'text' AND length(response_usage_amount) BETWEEN 1 AND 128))";
-export const modelRequestMetricsV24TableSql = modelRequestMetricsV23TableSql.replace(
-  "    CHECK (", `    ${responseUsageAmountColumn},\n    CHECK (`,
-);
 export const requestDiagnosticColumnDefinitions = [
   "upstream_provider TEXT CHECK (upstream_provider IS NULL OR (typeof(upstream_provider) = 'text' AND length(upstream_provider) BETWEEN 1 AND 256 AND upstream_provider NOT GLOB '*[^a-zA-Z0-9_.:/-]*'))",
   "upstream_attempt_count INTEGER CHECK (upstream_attempt_count IS NULL OR (typeof(upstream_attempt_count) = 'integer' AND upstream_attempt_count BETWEEN 0 AND 9007199254740991))",
@@ -130,12 +112,9 @@ export const requestDiagnosticColumnDefinitions = [
   "upstream_error_type TEXT CHECK (upstream_error_type IS NULL OR (typeof(upstream_error_type) = 'text' AND length(upstream_error_type) BETWEEN 1 AND 256 AND upstream_error_type NOT GLOB '*[^a-zA-Z0-9_.:/-]*'))",
   "upstream_http_status INTEGER CHECK (upstream_http_status IS NULL OR (typeof(upstream_http_status) = 'integer' AND upstream_http_status BETWEEN 400 AND 599))",
 ] as const;
-export const modelRequestMetricsV25TableSql = modelRequestMetricsV24TableSql.replace(
-  "    CHECK (", `    ${requestDiagnosticColumnDefinitions.join(",\n    ")},\n    CHECK (`,
-);
 export const quotaObservedAtColumn = "quota_observed_at_ms INTEGER CHECK (quota_observed_at_ms IS NULL OR (typeof(quota_observed_at_ms) = 'integer' AND quota_observed_at_ms BETWEEN 0 AND 9007199254740991))";
-export const modelRequestMetricsTableSql = modelRequestMetricsV25TableSql.replace(
-  "    CHECK (", `    ${quotaObservedAtColumn},\n    CHECK (`,
+export const modelRequestMetricsTableSql = baseMetricsTableSql.replace(
+  "    CHECK (", `    ${[...relayMetricColumnDefinitions, responseUsageAmountColumn, ...requestDiagnosticColumnDefinitions, quotaObservedAtColumn].join(",\n    ")},\n    CHECK (`,
 );
 export const relayMetricIndexesSql = `
   CREATE UNIQUE INDEX model_request_metrics_relay_request
@@ -144,16 +123,14 @@ export const relayMetricIndexesSql = `
     ON model_request_metrics(source, caller_id, recorded_at_ms);
 `;
 
-export const modelRequestMetricsV20IndexesSql = `
+export const modelRequestMetricsIndexesSql = `
   CREATE INDEX model_request_metrics_recorded_at
     ON model_request_metrics (recorded_at_ms);
   CREATE INDEX model_request_metrics_thread_turn
     ON model_request_metrics (thread_id, turn_id, id);
   CREATE INDEX model_request_metrics_provider_model
     ON model_request_metrics (provider, model, id);
-`;
-
-export const modelRequestMetricsIndexesSql = modelRequestMetricsV20IndexesSql + relayMetricIndexesSql;
+` + relayMetricIndexesSql;
 
 export const schemaMetadataSql = `
   CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -234,9 +211,8 @@ export class ModelRequestMetricsSchemaError extends Error {
     const detail = options?.cause === undefined
       ? `版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
       : `Schema ${actualVersion} 结构不完整。`;
-    const remedy = [20, 21, 22, 23, 24, 25, 26].includes(actualVersion) ? `codexc metrics upgrade --from ${actualVersion} --to 27 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
     super(
-      `模型请求指标数据库${detail}请运行 ${remedy}`,
+      `模型请求指标数据库${detail}仅支持当前 Schema；请停止服务并核对数据库版本及备份，勿删除数据库。`,
       options,
     );
     this.name = "ModelRequestMetricsSchemaError";

@@ -131,7 +131,8 @@ function ensureCodexCli() {
   const metadata = JSON.parse(readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"));
   const expected = /^codex-cli (\d+\.\d+\.\d+)$/u.exec(metadata.codexCli)?.[1];
   if (!expected) throw new Error("源码协议元数据缺少正式 Codex CLI 版本");
-  const configured = process.env.CODEX_BINARY?.trim();
+  const selected = process.env.CODEX_BINARY?.trim();
+  const configured = selected === "codex" ? undefined : selected;
   const command = configured || "codex";
   let executable = resolveOptionalExecutable(command);
   let installed = false;
@@ -153,7 +154,18 @@ function ensureCodexCli() {
   const actual = result.stdout.trim().split(/\s+/u).at(-1)?.replace(/^v/u, "");
   if (actual !== expected) {
     if (installed) throw new Error(`Codex CLI 安装版本不匹配：需要 ${expected}，当前 ${actual || "未知"}`);
-    console.log(`保留已有 Codex CLI ${actual || "未知"}；Gateway 需要 ${expected}，完成渠道配置后运行 codexc update 确认同步版本。`);
+    if (configured) throw new Error(`CODEX_BINARY 版本不匹配：需要 ${expected}，当前 ${actual || "未知"}；请更新指定文件后重试`);
+    console.log(`Codex CLI 当前 ${actual || "未知"}，正在同步为项目锁定版本 ${expected}`);
+    if (run("npm", ["install", "--global", "--no-audit", "--no-fund", `@openai/codex@${expected}`]) !== 0) {
+      throw new Error("Codex CLI 版本同步失败；请检查 npm 全局目录权限后重试 npm run install:global");
+    }
+    const refreshed = resolveOptionalExecutable("codex");
+    if (!refreshed) throw new Error("Codex CLI 安装后仍不在 PATH，请修正 PATH 后重试");
+    const check = resolveExecutableInvocation(refreshed, ["--version"]);
+    const verified = spawnSync(check.file, check.args, { encoding: "utf8", windowsVerbatimArguments: check.windowsVerbatimArguments });
+    if (verified.error || verified.status !== 0 || verified.stdout.trim().split(/\s+/u).at(-1)?.replace(/^v/u, "") !== expected) {
+      throw new Error(`Codex CLI 同步后版本仍不匹配：需要 ${expected}；请检查 PATH 中的同名命令`);
+    }
   } else {
     console.log(`Codex CLI ${expected} 检测通过；首次使用继续运行 codexc init、codexc setup、codexc service install。`);
   }

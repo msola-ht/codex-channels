@@ -31,12 +31,12 @@ function sectionContent(body, section) {
     .trim();
 }
 
-function hasMeaningfulContent(content, allowExplicitNone) {
+function hasMeaningfulContent(content) {
   if (!content || placeholderPattern.test(content)) {
     return false;
   }
   if (explicitNonePattern.test(content)) {
-    return allowExplicitNone;
+    return false;
   }
   return content.length >= minimumSectionLength;
 }
@@ -50,15 +50,15 @@ export function checkPullRequestDescription(event) {
   const body = pullRequest.body || "";
   const presentSections = commonSections.filter((section) => sectionContent(body, section) !== undefined);
   const missing = presentSections.filter((section) => (
-    !hasMeaningfulContent(sectionContent(body, section), true)
+    !hasMeaningfulContent(sectionContent(body, section))
   ));
-  if (!presentSections.some((section) => hasMeaningfulContent(sectionContent(body, section), false))) {
+  if (!presentSections.some((section) => hasMeaningfulContent(sectionContent(body, section)))) {
     missing.push("至少一个有具体内容的新增、修复或改动章节");
   }
 
   if (upgradeTitlePattern.test(pullRequest.title || "")) {
     missing.push(...upgradeSections.filter((section) => (
-      !hasMeaningfulContent(sectionContent(body, section), false)
+      !hasMeaningfulContent(sectionContent(body, section))
     )));
   }
 

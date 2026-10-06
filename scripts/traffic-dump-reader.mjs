@@ -16,22 +16,16 @@ import { callTiming, createModelEvidenceCollector, createOutputCollector, failur
 
 const manifestName = "manifest.json";
 const interactionFileName = "interactions.jsonl";
-const legacyDumpFilePattern = /^[A-Za-z0-9._-]+-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[1-9]\d*\.jsonl$/u;
 
 export function listDumpFiles(directory) {
   return dumpCatalog(directory).files;
 }
 
 export function dumpCatalog(directory) {
-  if (!existsSync(directory)) return { files: [], labels: [], sessions: [], legacyFiles: [] };
+  if (!existsSync(directory)) return { files: [], labels: [], sessions: [] };
   const sessions = [];
-  const legacyFiles = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    if (entry.isFile() && legacyDumpFilePattern.test(entry.name)) {
-      legacyFiles.push(path);
-      continue;
-    }
     if (!entry.isDirectory()) continue;
     const manifest = readManifest(path);
     if (manifest === undefined) continue;
@@ -53,7 +47,7 @@ export function dumpCatalog(directory) {
     .sort((left, right) => right.latestAtMs - left.latestAtMs
       || (left.label < right.label ? -1 : left.label > right.label ? 1 : 0));
   return {
-    files: sessions.map((entry) => entry.path), labels, legacyFiles,
+    files: sessions.map((entry) => entry.path), labels,
     sessions: sessions.map(({ label, session, createdAtMs }) => ({ label, session, createdAtMs })),
   };
 }

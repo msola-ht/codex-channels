@@ -29,6 +29,22 @@ afterEach(() => {
 });
 
 describe("Provider proxy metrics channel", () => {
+  it.each(["reasoningEffort", "userAgent", "errorMessage", "weeklyQuota", "quotaWindows"] as const)("rejects records missing required nullable field %s", async field => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-required-metrics-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "m.sock");
+    const received: ProviderProxyMetrics[] = [];
+    const server = new ProviderProxyMetricsServer(socketPath, value => { received.push(value); });
+    await server.start();
+    try {
+      const incomplete = { ...metrics() } as Partial<ProviderProxyMetrics>;
+      delete incomplete[field];
+      await sendProviderProxyMetrics(socketPath, incomplete as ProviderProxyMetrics);
+      await sendProviderProxyMetrics(socketPath, metrics());
+      expect(received).toHaveLength(1);
+      expect(received[0]).toEqual(metrics());
+    } finally { await server.close(); }
+  });
   it("validates quota observation times and leaves missing historical times unknown", async () => {
     const directory = mkdtempSync(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "codexc-qo-"));
     temporaryDirectories.push(directory);
@@ -125,7 +141,7 @@ describe("Provider proxy metrics channel", () => {
     expect(existsSync(socketPath)).toBe(false);
   });
 
-  it("normalizes missing, malformed and overlong reasoning effort to null", async () => {
+  it("normalizes malformed reasoning effort and rejects missing or overlong fields", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-effort-"));
     temporaryDirectories.push(directory);
     const socketPath = join(directory, "metrics.sock");
@@ -154,8 +170,6 @@ describe("Provider proxy metrics channel", () => {
     expect(received.map(({ reasoningEffort }) => reasoningEffort)).toEqual([
       "medium",
       null,
-      null,
-      null,
     ]);
     await server.close();
   });
@@ -168,25 +182,6 @@ describe("Provider proxy metrics channel", () => {
       join(directory, "missing.sock"),
       metrics(),
     )).resolves.toBeUndefined();
-  });
-
-  it("accepts rolling-upgrade metrics without a weekly quota snapshot", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-legacy-"));
-    temporaryDirectories.push(directory);
-    const socketPath = join(directory, "metrics.sock");
-    let resolveMetrics: (metrics: ProviderProxyMetrics) => void = () => undefined;
-    const received = new Promise<ProviderProxyMetrics>((resolve) => {
-      resolveMetrics = resolve;
-    });
-    const server = new ProviderProxyMetricsServer(socketPath, resolveMetrics);
-    await server.start();
-    const legacy = { ...metrics() } as Partial<ProviderProxyMetrics>;
-    delete legacy.weeklyQuota;
-
-    await sendProviderProxyMetrics(socketPath, legacy as ProviderProxyMetrics);
-
-    await expect(received).resolves.toMatchObject({ weeklyQuota: null });
-    await server.close();
   });
 
   it("forwards quota window snapshots and tolerates their absence", async () => {
@@ -211,25 +206,6 @@ describe("Provider proxy metrics channel", () => {
     await sendProviderProxyMetrics(socketPath, withWindows);
 
     await expect(received).resolves.toEqual(withWindows);
-    await server.close();
-  });
-
-  it("accepts legacy metrics without a quota window snapshot", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "codexc-mq-legacy-"));
-    temporaryDirectories.push(directory);
-    const socketPath = join(directory, "metrics.sock");
-    let resolveMetrics: (metrics: ProviderProxyMetrics) => void = () => undefined;
-    const received = new Promise<ProviderProxyMetrics>((resolve) => {
-      resolveMetrics = resolve;
-    });
-    const server = new ProviderProxyMetricsServer(socketPath, resolveMetrics);
-    await server.start();
-    const legacy = { ...metrics() } as Partial<ProviderProxyMetrics>;
-    delete legacy.quotaWindows;
-
-    await sendProviderProxyMetrics(socketPath, legacy as ProviderProxyMetrics);
-
-    await expect(received).resolves.toMatchObject({ quotaWindows: null });
     await server.close();
   });
 

@@ -32,19 +32,16 @@ export class WebuiManagementTaskRunner {
     const normalized = normalizeTaskInput(input);
     const command = normalized.operation === "service"
       ? `codexc service ${normalized.action}${normalized.target ? ` ${serviceCommandTarget(normalized.target)}` : ""}`
-      : normalized.operation === "update"
-        ? "codexc update"
-        : normalized.operation === "traffic"
-          ? "codexc traffic cleanup --confirm"
-          : `codexc metrics ${normalized.action}${normalized.target === undefined ? "" : ` ${normalized.target}`}`;
+      : normalized.operation === "traffic"
+        ? "codexc traffic cleanup --confirm"
+        : `codexc metrics ${normalized.action}${normalized.target === undefined ? "" : ` ${normalized.target}`}`;
     const metrics = normalized.operation === "metrics";
-    const service = normalized.operation === "service";
     const traffic = normalized.operation === "traffic";
     return {
       operation: normalized.operation,
       action: normalized.action,
       target: normalized.target ?? null,
-      effects: [service || metrics || traffic ? `执行 ${command}` : "执行 codexc update（独立更新子进程）"],
+      effects: [`执行 ${command}`],
       preconditions: traffic
         ? ["全部 App Server 与 Relay 必须已停止"]
         : metrics && metricsRequireStoppedGateway.has(normalized.action)
@@ -56,18 +53,14 @@ export class WebuiManagementTaskRunner {
         ? normalized.action === "prune"
           ? "操作前备份本地指标库；失败时保留备份并尝试恢复原服务状态"
           : "操作前保留指标数据库备份；失败时保留备份并重试"
-        : service
-          ? "服务管理器失败时任务标记失败，不自动扩大操作范围"
-          : "更新子进程负责备份、版本切换和服务恢复；失败时保留恢复信息",
+        : "服务管理器失败时任务标记失败，不自动扩大操作范围",
       activation: traffic
         ? "不会自动启动已停止的 App Server"
         : metrics && normalized.action === "prune"
         ? "按操作前状态恢复 Gateway"
         : metrics
           ? "不会自动启动已停止的 Gateway"
-          : service
-            ? "由服务管理器直接应用"
-            : "按更新流程决定是否重启服务",
+          : "由服务管理器直接应用",
       requiresConfirmation: true,
     };
   }
@@ -176,11 +169,9 @@ export class WebuiManagementTaskRunner {
     this.#notify(task);
     const args = normalized.operation === "service"
       ? ["service", normalized.action, ...(normalized.target === undefined ? [] : [serviceCommandTarget(normalized.target)])]
-      : normalized.operation === "update"
-        ? ["update"]
-        : normalized.operation === "traffic"
-          ? ["traffic", "cleanup", "--confirm"]
-          : ["metrics", normalized.action, ...(normalized.target === undefined ? [] : [normalized.target])];
+      : normalized.operation === "traffic"
+        ? ["traffic", "cleanup", "--confirm"]
+        : ["metrics", normalized.action, ...(normalized.target === undefined ? [] : [normalized.target])];
     const invocation = resolveExecutableInvocation("codexc", args, environment);
     await new Promise((resolve) => {
       const child = spawn(invocation.file, invocation.args, {
@@ -283,9 +274,6 @@ export function normalizeTaskInput(input) {
     if (input.action !== "cleanup") throw new Error("调用记录维护动作无效");
     if (input.target !== undefined) throw new Error("调用记录清理不接受目标");
     return { operation: "traffic", action: "cleanup", target: undefined };
-  }
-  if (input.operation === "update" && (input.action === undefined || input.action === "source")) {
-    return { operation: "update", action: "source", target: undefined };
   }
   throw new Error("任务类型无效");
 }

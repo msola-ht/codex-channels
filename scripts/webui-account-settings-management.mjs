@@ -3,9 +3,6 @@ import { previewClinePassConfiguration, applyClinePassConfiguration, previewClin
 import {
   applyDeepseekAccountConfiguration,
   previewDeepseekAccountConfiguration,
-  hasLegacyDeepseekConfiguration,
-  previewLegacyDeepseekRemoval,
-  removeLegacyDeepseekAccount,
   removeDeepseekAccount,
   previewDeepseekAccountRemoval,
   setDeepseekDefaultAccount,
@@ -66,7 +63,6 @@ export async function loadAccountSettingsResource(
       },
       deepseek: {
         configured: dsAccounts.length > 0,
-        legacyConfigurationPresent: hasLegacyDeepseekConfiguration(environment),
         accounts: dsAccounts.map((account) => {
           const provider = providers.find((entry) => entry.provider === deepseekProviderId(account.id));
           return { ...account, mode: provider?.mode ?? null, model: provider?.model ?? null };
@@ -119,8 +115,6 @@ export function normalizeAccountSettingsMutation(input) {
           ? {}
           : { confirmExclusiveConfigChange: input.confirmExclusiveConfigChange }),
       };
-    case "deepseek.legacy.remove":
-      return { operation: input.operation };
     case "clp.default":
     case "clp.remove":
     case "deepseek.default":
@@ -150,8 +144,6 @@ export async function previewAccountSettingsMutation(input, environment) {
         return await previewClinePassRemoval(input.accountId, { environment });
       case "deepseek.configure":
         return previewDeepseekAccountConfiguration(input, { environment });
-      case "deepseek.legacy.remove":
-        return await previewLegacyDeepseekRemoval({ environment });
       case "deepseek.remove":
         return await previewDeepseekAccountRemoval(input.accountId, { environment });
       case "deepseek.default": {
@@ -186,8 +178,6 @@ export async function applyAccountSettingsMutation(input, environment) {
         return await removeClinePassConfiguration(accountSettingsApplyInput(input), { environment });
       case "deepseek.configure":
         return await applyDeepseekAccountConfiguration(accountSettingsApplyInput(input), { environment });
-      case "deepseek.legacy.remove":
-        return await removeLegacyDeepseekAccount(accountSettingsApplyInput(input), { environment });
       case "deepseek.default":
         return await setDeepseekDefaultAccount(input.accountId, { environment });
       case "deepseek.remove":
@@ -213,8 +203,6 @@ export function accountSettingsApplyInput(input) {
       return input.mode === "exclusive"
         ? { ...input, confirmExclusiveConfigChange: true }
         : input;
-    case "deepseek.legacy.remove":
-      return { ...input, confirmRemove: true };
     case "clp.remove":
     case "deepseek.remove":
       return { ...input, confirmRemove: true };

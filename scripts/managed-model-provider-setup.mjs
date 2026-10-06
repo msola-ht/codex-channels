@@ -29,23 +29,6 @@ export class ManagedModelProviderSetupError extends Error {
   }
 }
 
-export function createManagedProviderRestorePreview(definition, {
-  removesManagedAccounts = false,
-} = {}) {
-  return {
-    operation: "restore",
-    provider: { id: definition.id, name: definition.displayName },
-    effects: {
-      restoresInitialConfig: true,
-      removesManagedCatalog: true,
-      restoresExternalAgentConfig: true,
-      removesManagedAccounts,
-    },
-    confirmation: { required: true, field: "confirmRestore" },
-    activation: "restart-all",
-  };
-}
-
 export function createSwitchingProviderProfile(definition, {
   apiKey,
   catalogPath,

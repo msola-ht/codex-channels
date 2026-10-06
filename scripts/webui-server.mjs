@@ -400,10 +400,7 @@ async function routeManagement(environment, url, request, response, state, token
     configPath: resolveGatewayConfigPath(environment),
     openMetricsStore,
   })) return;
-  if (await routeTaskManagement({
-    ...routeContext,
-    gatewayVersion: SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null,
-  })) return;
+  if (await routeTaskManagement(routeContext)) return;
   if (await routeRelayManagement({ ...routeContext, openMetricsStore })) return;
   if (await routeDeliveryManagement(routeContext)) return;
   if (await routeGatewaySettingsManagement({ ...routeContext, consumeHighRisk })) return;
@@ -532,7 +529,7 @@ function openMetricsStore(environment, endAtMs = Date.now()) {
     if (error instanceof MetricsDatabaseAccessError) {
       throw new ApiError(503, error.code, error.code === "metrics_database_unavailable"
         ? "指标数据库尚未创建，请先运行 Gateway 收集模型请求"
-        : "指标数据库版本或结构不兼容，请核对版本及备份，并按显式升级流程处理，勿删除数据库");
+        : "指标数据库版本或结构不兼容，仅支持当前 Schema；请核对版本及备份，勿删除数据库");
     }
     throw error;
   }

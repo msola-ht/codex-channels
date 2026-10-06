@@ -88,7 +88,8 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
 
     expect(result.status).not.toBe(0);
     expect(existsSync(join(home, ".codex-connect", "codex-channels"))).toBe(false);
-    expect(existsSync(join(home, ".codex-connect", ".bin", "codexc"))).toBe(false);
+    expect(existsSync(join(root, "npm-global", "bin", "codexc"))).toBe(false);
+    expect(existsSync(join(root, "npm-global", "lib", "node_modules", "@hegenai", "codexc"))).toBe(false);
   });
 
   it("replaces an existing global npm package with the built main source", () => {
@@ -171,17 +172,26 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
       },
     );
 
-    expect(result).toEqual({ checkout, launcher });
+    expect(result).toEqual({ checkout });
     expect(serviceUninstalls).toBe(1);
     expect(globalUninstalls).toBe(1);
     expect(existsSync(checkout)).toBe(false);
-    expect(existsSync(launcher)).toBe(false);
+    expect(existsSync(launcher)).toBe(true);
     expect(readFileSync(config, "utf8")).toBe(configContent);
     expect(readFileSync(database, "utf8")).toBe("preserved");
-    expect(readFileSync(profile, "utf8")).toBe('export PATH="/custom/bin:$PATH"\n');
+    expect(readFileSync(profile, "utf8")).toContain("# Codex Connect");
   });
 
-  it("refuses to remove an unrelated command entry", async () => {
+  it.each(["0.146.0", "0.148.0"])("synchronizes an existing CLI %s to the locked version during fresh installation", (version) => {
+    const root = temporaryDirectory("codexc-source-version-sync-");
+    const repository = createFixtureRepository(root);
+    const result = runInstaller(root, repository, join(root, "home"), { codexVersion: version });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(`Codex CLI 当前 ${version}，正在同步为项目锁定版本 0.147.0`);
+    expect(result.stdout).toContain("Codex CLI 0.147.0 已安装");
+  }, 30_000);
+
+  it("leaves unrelated command entries untouched", async () => {
     const root = temporaryDirectory("codexc-source-uninstall-unsafe-");
     const installRoot = join(root, ".codex-connect");
     const checkout = join(installRoot, "codex-channels");
@@ -196,40 +206,13 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
       {
         projectDir: checkout,
         uninstallServices: () => { serviceUninstalls += 1; },
-      },
-    )).rejects.toThrow("命令入口不属于当前源码安装");
-
-    expect(serviceUninstalls).toBe(0);
-    expect(existsSync(checkout)).toBe(true);
-    expect(readFileSync(launcher, "utf8")).toContain("unrelated-command");
-  });
-
-  it("removes the legacy visible source launcher", async () => {
-    const root = temporaryDirectory("codexc-source-uninstall-legacy-");
-    const installRoot = join(root, ".codex-connect");
-    const checkout = join(installRoot, "codex-channels");
-    const legacyLauncher = join(installRoot, "bin", "codexc");
-    const globalPackage = join(root, "npm-global", "@hegenai", "codexc");
-    runGit(root, ["init", "--quiet", checkout]);
-    mkdirSync(resolve(legacyLauncher, ".."), { recursive: true });
-    mkdirSync(globalPackage, { recursive: true });
-    writeFileSync(
-      legacyLauncher,
-      `#!/bin/sh\nexec node "${checkout}/bin/codexc.mjs" "$@"\n`,
-    );
-
-    await uninstallManagedSourceInstallation(
-      { ...process.env, CODEX_CONNECT_HOME: installRoot },
-      {
-        projectDir: globalPackage,
         uninstallGlobalPackage: () => undefined,
-        uninstallServices: () => undefined,
       },
-    );
+    )).resolves.toEqual({ checkout });
 
+    expect(serviceUninstalls).toBe(1);
     expect(existsSync(checkout)).toBe(false);
-    expect(existsSync(legacyLauncher)).toBe(false);
-    expect(existsSync(join(installRoot, "bin"))).toBe(false);
+    expect(readFileSync(launcher, "utf8")).toContain("unrelated-command");
   });
 
   it("allows the installed global package to uninstall its marked source checkout", async () => {
@@ -253,54 +236,6 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
     );
 
     expect(globalUninstalls).toBe(1);
-    expect(existsSync(checkout)).toBe(false);
-  });
-
-  it("recognizes a clean official legacy checkout and uninstalls the active package prefix", async () => {
-    const root = temporaryDirectory("codexc-source-uninstall-official-legacy-");
-    const installRoot = join(root, ".codex-connect");
-    const checkout = join(installRoot, "codex-channels");
-    const globalPrefix = join(root, "homebrew");
-    const globalPackage = join(
-      globalPrefix,
-      "lib",
-      "node_modules",
-      "@hegenai",
-      "codexc",
-    );
-    mkdirSync(globalPackage, { recursive: true });
-    writeFileSync(join(globalPackage, "package.json"), JSON.stringify({
-      name: "@hegenai/codexc",
-      version: "0.147.0",
-    }));
-    runGit(root, ["init", "--quiet", checkout]);
-    runGit(checkout, ["branch", "-M", "main"]);
-    runGit(checkout, ["config", "user.email", "source-uninstall@example.invalid"]);
-    runGit(checkout, ["config", "user.name", "Source Uninstall Test"]);
-    runGit(checkout, [
-      "remote",
-      "add",
-      "origin",
-      "https://github.com/msola-ht/codex-channels.git",
-    ]);
-    writeFileSync(join(checkout, "package.json"), JSON.stringify({
-      name: "@hegenai/codexc",
-      version: "0.147.0",
-    }));
-    runGit(checkout, ["add", "."]);
-    runGit(checkout, ["commit", "--quiet", "-m", "fixture"]);
-    const removedPrefixes: string[][] = [];
-
-    await uninstallManagedSourceInstallation(
-      { ...process.env, CODEX_CONNECT_HOME: installRoot },
-      {
-        projectDir: globalPackage,
-        uninstallGlobalPackage: (prefixes) => { removedPrefixes.push(prefixes); },
-        uninstallServices: () => undefined,
-      },
-    );
-
-    expect(removedPrefixes).toEqual([[globalPrefix]]);
     expect(existsSync(checkout)).toBe(false);
   });
 
@@ -380,7 +315,7 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
         uninstallGlobalPackage: () => undefined,
         uninstallServices: () => undefined,
       },
-    )).rejects.toThrow("存在未提交修改");
+    )).rejects.toThrow("源码目录与当前 codexc 不一致");
 
     expect(existsSync(join(checkout, "local-change.txt"))).toBe(true);
   });
@@ -432,10 +367,6 @@ function createFixtureRepository(
         + "writeFileSync('dist/main.js', '');\n",
   );
   writeFileSync(join(repository, "scripts", "check.mjs"), "\n");
-  copyFileSync(
-    resolve("scripts/source-shell-path.mjs"),
-    join(repository, "scripts", "source-shell-path.mjs"),
-  );
   writeFileSync(join(repository, "webui", "package.json"), JSON.stringify({
     name: "codexc-webui-fixture",
     version: "0.147.0",
@@ -465,16 +396,17 @@ function runInstaller(
   root: string,
   repository: string,
   home: string,
-  options: { codexInstalled?: boolean; shell?: string } = {},
+  options: { codexInstalled?: boolean; codexVersion?: string; shell?: string } = {},
 ) {
   const fakeBin = join(root, "fake-bin");
   mkdirSync(fakeBin, { recursive: true });
   writeFileSync(join(fakeBin, "bwrap"), `#!${process.execPath}\nconsole.log('--perms');\n`, { mode: 0o755 });
   const codex = join(fakeBin, "codex");
   if (options.codexInstalled !== false) {
-    writeFileSync(codex, fakeCodexScript(true));
+    writeFileSync(codex, fakeCodexScript(true).replaceAll("0.147.0", options.codexVersion ?? "0.147.0"));
     chmodSync(codex, 0o755);
-  } else {
+  }
+  if (options.codexInstalled === false || options.codexVersion) {
     symlinkSync(process.execPath, join(fakeBin, "node"));
     const realNpm = execFileSync("which", ["npm"], { encoding: "utf8" }).trim();
     const npm = join(fakeBin, "npm");
@@ -584,9 +516,9 @@ describe.skipIf(process.platform === "win32")("local source install Codex bootst
       expect(result.status, result.stderr).toBe(success ? 0 : 1);
       expect(calls.some((args) => args[0] === "pack")).toBe(success);
       expect(calls.filter((args) => args.includes("@openai/codex@0.156.1"))).toHaveLength(
-        ["missing", "install-failed", "path-missing", "wrong-installed"].includes(mode) ? 1 : 0,
+        ["missing", "mismatch", "install-failed", "path-missing", "wrong-installed"].includes(mode) ? 1 : 0,
       );
-      if (mode === "mismatch") expect(result.stdout).toContain("保留已有 Codex CLI 0.155.0");
+      if (mode === "mismatch") expect(result.stdout).toContain("正在同步为项目锁定版本 0.156.1");
       if (mode === "path-missing") expect(result.stderr).toContain("PATH");
       if (mode === "explicit-missing") expect(result.stderr).toContain("CODEX_BINARY");
       expect(existsSync(join(root, ".codex-connect"))).toBe(false);

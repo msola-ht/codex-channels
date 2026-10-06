@@ -19,7 +19,7 @@ Gateway，以刷新进程时区或渠道启动卡配置。
 不能静默采用更宽松的权限、目录或网络默认值。Windows 使用 PowerShell 7 `pwsh` 与 .NET SID/ACL
 校验表达等价结果，不读取没有安全意义的 POSIX mode；新建配置先收紧父目录，已有配置只校验、不
 静默接管其他 Owner。
-运行配置中的安全凭据目录固定由配置文件父目录派生，与可自定义的 SQLite 数据库路径相互独立。
+运行配置中的 `credentialsDirectory` 由配置文件父目录派生，供微信等凭据存储使用；飞书用户 OAuth 凭据由 Bootstrap 单独放在状态数据库父目录的 `credentials/feishu` 下，具体边界见飞书模块 README。
 默认字段补齐只添加当前严格 Schema 已声明的缺失默认值，不覆盖已有配置，不补渠道凭据、身份或
 允许名单，也不处理未知字段或不受支持的版本。运行语义校验失败、文件发生并发修改或原子写回失败时
 不得修改原配置，并以配置错误失败关闭。
@@ -82,7 +82,7 @@ Thread 的 Server Request。变化需要重启 Gateway，不需要重装或重�
 不需要重启 App Server。全局空闲释放每 60 秒复检一次，会在关闭 Client 后停止监管入口中未被租约
 占用的运行实例（含主实例和仅由 `codexc remote` 启动的实例）；服务进程保持运行，后续使用按需启动。
 
-自定义 Thread 分区管理入口已移除。旧配置中的 `[thread_sections]` 段属于不支持字段，需手动删除后再启动 Gateway。
+Thread 分区使用当前固定分区与置顶设置；严格 Schema 拒绝 `[thread_sections]` 等未定义字段。
 
 `[[workspaces]]` 除 `id`、`name`、`cwd` 外支持可选的工作区权限：`sandbox`（
 `read-only` / `workspace-write` / `danger-full-access`）、`approval_policy`（
@@ -106,8 +106,8 @@ Workspace 上配置。
 Gateway 设置，并提供不显示凭据、令牌或代理值的配置总览。Codex 设置入口不依赖 Gateway 配置已经
 初始化或可解析；选择 Gateway 设置时仍会明确报告对应配置错误。需要重建渠道连接的变化在后台 Gateway 运行时自动重启，未运行时在下次
 启动生效，前台进程需重新启动；
-显式网络代理会改变 App Server 服务环境，因此保存后必须运行 `codexc service install` 重新生成
-服务定义。Codex 官方与第三方 Provider 配置仍由 `codexc setup` 管理。
+显式网络代理写入 Codex `.env`，保存后按激活提示运行 `codexc service restart all`，运行时重新读取
+代理配置，无需重建服务定义。Codex 官方与第三方 Provider 配置仍由 `codexc setup` 管理。
 
 飞书配置表当前只定义私聊 Surface 所需的 `enabled`、`app_id`、`app_secret` 和
 `allowed_open_ids`。整表缺失或 `enabled = false` 时运行配置不包含飞书账号；启用时四项必须

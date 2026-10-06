@@ -422,6 +422,8 @@ describe("Gateway Config management", () => {
 
   it("rejects an invalid protocol in a shared proxy batch without partially writing valid fields", () => {
     const fixture = createFixture();
+    writeCodexProxySettings({ http_proxy: "http://localhost:7890", no_proxy: "localhost" }, fixture.environment);
+    const proxyBefore = readCodexProxySnapshot(fixture.environment);
     const settings = loadGatewaySettings(fixture.environment);
     const before = readFileSync(fixture.configPath, "utf8");
     expect(() => updateGatewaySetting({
@@ -434,6 +436,7 @@ describe("Gateway Config management", () => {
     }, { environment: fixture.environment, expectedRevision: settings.revision }))
       .toThrow("ALL_PROXY 不支持此代理协议或缺少主机");
     expect(readFileSync(fixture.configPath, "utf8")).toBe(before);
+    expect(readCodexProxySnapshot(fixture.environment)).toEqual(proxyBefore);
   });
 
   it("returns stable field and code information for invalid input", () => {

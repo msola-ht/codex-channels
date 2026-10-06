@@ -180,7 +180,7 @@ describe("WebUI 状态与关联范围展示", () => {
             const {WebuiManagementTaskRunner}=await import("../scripts/webui-management-tasks.mjs");
             const preview=new WebuiManagementTaskRunner({now:()=>1000}).preview({operation:"traffic",action:"cleanup"});
             for(const [running,relayRunning] of [[true,false],[false,false],[false,true]]) {
-              const tasks={saving:false,loading:false,pendingPreview:{input:{operation:"traffic",action:"cleanup"},preview:{...preview,resource:{dumps:{bytes:1024,v2Sessions:2,legacyFiles:3},appServer:{running},modelRelay:{running:relayRunning}}}},confirm(){throw Error("must not confirm during render")},cancelPending(){throw Error("must not cancel during render")}};
+              const tasks={saving:false,loading:false,pendingPreview:{input:{operation:"traffic",action:"cleanup"},preview:{...preview,resource:{dumps:{bytes:1024,v2Sessions:2},appServer:{running},modelRelay:{running:relayRunning}}}},confirm(){throw Error("must not confirm during render")},cancelPending(){throw Error("must not cancel during render")}};
               html.push(renderMarkup(h(LanguageContext.Provider,{value:{language:"en",setLanguage(){}}},h(ManagementTaskConfirmationDialog,{tasks}))));
             }
             return html;
@@ -251,7 +251,7 @@ describe("WebUI 状态与关联范围展示", () => {
         expect(html[index]).toContain("All App Servers and Relay must be stopped");
         expect(html[index]).toContain("This cannot be undone");
         expect(html[index]).toContain("codexc traffic cleanup --confirm");
-        expect(html[index]).toContain("2 V2 batches and 3 legacy files");
+        expect(html[index]).toContain("2 V2 batches");
         expect(html[index]).toContain("<button>Cancel</button>");
       }
       expect(html[6]).toContain('<button disabled="">Confirm execution</button>');

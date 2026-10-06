@@ -148,7 +148,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $files = Get-ChildItem -LiteralPath 'scripts' -Filter '*.ps1' -File
+          $files = @((Get-Item -LiteralPath 'install.ps1')) + @(Get-ChildItem -LiteralPath 'scripts' -Filter '*.ps1' -File)
           foreach ($file in $files) {
             $tokens = $null
             $errors = $null
@@ -178,6 +178,9 @@ jobs:
           tests/windows-proxy-transport.test.ts
           tests/systemd-install.test.ts
           tests/executable.test.ts
+          tests/windows-source-install.test.ts
+          tests/windows-service-host.test.ts
+          tests/windows-service-control.test.ts
 
       - name: Windows Desktop compatibility tests
         run: >-

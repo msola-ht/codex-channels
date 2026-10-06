@@ -1,7 +1,4 @@
-import { existsSync, closeSync, openSync } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { securePrivateFileSync } from "../runtime/private-file.mjs";
-import { GatewayOwner } from "../runtime/gateway-owner.mjs";
+import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { stateDatabaseSchemaVersion as currentSchemaVersion } from "../dist/storage/index.js";
 
@@ -48,9 +45,9 @@ export function inspectStateDatabase(environment = process.env) {
   try {
     const row = database.prepare("PRAGMA user_version").get();
     const schemaVersion = Number(row?.user_version);
-    if (schemaVersion === currentSchemaVersion || schemaVersion === 5) {
+    if (schemaVersion === currentSchemaVersion) {
       validateStateTables(database, Object.keys(requiredStateColumns));
-      if (schemaVersion === currentSchemaVersion) validatePreferenceTable(database);
+      validatePreferenceTable(database);
     }
     return {
       compatible: schemaVersion === currentSchemaVersion,
@@ -107,72 +104,6 @@ function validateStateTables(database, tables) {
       throw new Error(`状态数据库结构不完整：${table} 缺少 ${missing.join("、")}`);
     }
   }
-}
-
-export function inspectStateDatabaseUpgrade(environment = process.env) {
-  const status = inspectStateDatabase(environment);
-  if (status.exists && !status.compatible && status.schemaVersion !== 5) {
-    throw new Error(`状态数据库 Schema ${status.schemaVersion ?? "unknown"} 不兼容，需要 ${currentSchemaVersion}；仅支持 v5 → v6 升级`);
-  }
-  if (status.scheduledTasks?.exists && !status.scheduledTasks.compatible) {
-    throw new Error(`计划任务数据库 Schema ${status.scheduledTasks.schemaVersion ?? "unknown"} 不兼容，需要 ${status.scheduledTasks.targetSchemaVersion}`);
-  }
-  return status;
-}
-
-export async function upgradeStateDatabase(environment = process.env) {
-  const status = inspectStateDatabaseUpgrade(environment);
-  if (!status.exists || status.compatible) return;
-  const { configPath } = requireUserConfig(environment);
-  const owner = new GatewayOwner(configPath);
-  try {
-    await owner.start();
-  } catch (error) {
-    throw new Error("升级状态数据库前必须停止 Gateway，且独占锁必须可用", { cause: error });
-  }
-  let database;
-  try {
-    database = new DatabaseSync(status.databasePath);
-  } catch (error) {
-    await owner.close();
-    throw error;
-  }
-  let backupPath;
-  let transaction = false;
-  try {
-    database.exec("PRAGMA busy_timeout = 5000");
-    const version = Number(database.prepare("PRAGMA user_version").get()?.user_version);
-    if (version !== 5) throw new Error("状态数据库版本在预检后发生变化，请重新运行升级");
-    validateStateTables(database, Object.keys(requiredStateColumns));
-    backupPath = `${status.databasePath}.v5-backup-${randomUUID()}`;
-    closeSync(openSync(backupPath, "wx", 0o600));
-    securePrivateFileSync(backupPath);
-    database.prepare("VACUUM INTO ?").run(backupPath);
-    database.exec("BEGIN IMMEDIATE");
-    transaction = true;
-    database.exec(`CREATE TABLE conversation_model_preferences (
-      surface TEXT NOT NULL CHECK (length(surface) > 0),
-      account_id TEXT NOT NULL CHECK (length(account_id) > 0),
-      conversation_id TEXT NOT NULL,
-      model TEXT NOT NULL CHECK (length(model) > 0),
-      model_provider TEXT NOT NULL CHECK (length(model_provider) > 0),
-      effort TEXT,
-      service_tier TEXT,
-      PRIMARY KEY (surface, account_id, conversation_id)
-    ) STRICT`);
-    validatePreferenceTable(database);
-    if (database.prepare("PRAGMA integrity_check").get()?.integrity_check !== "ok") {
-      throw new Error("状态数据库完整性检查失败");
-    }
-    database.exec("PRAGMA user_version = 6; COMMIT");
-    transaction = false;
-  } catch (error) {
-    if (transaction) database.exec("ROLLBACK");
-    throw new Error(`状态数据库升级失败，未启动服务。${backupPath ? `备份位置：${backupPath}。` : ""}保留原库并修复后重试；回退须同时恢复 v5 数据库和旧源码。`, { cause: error });
-  } finally {
-    try { database.close(); } finally { await owner.close(); }
-  }
-  validateStateDatabaseStructure(environment);
 }
 
 function validatePreferenceTable(database) {

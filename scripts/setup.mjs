@@ -85,7 +85,7 @@ export async function runSetup({
             weixinSetup,
           });
           if (isBackResult(result)) continue;
-          const enriched = enrichSetupResult(result, "restart-gateway");
+          const enriched = enrichSetupResult(result);
           emitSetupResult(onResult, "channels", enriched);
           if (stayOnMenu) continue;
           return enriched;
@@ -175,7 +175,7 @@ async function runModelSetup({
         officialLoginSetup,
       });
       if (isBackResult(result)) continue;
-      return enrichSetupResult(result, "restart-all");
+      return result;
     }
     if (category === "third_party") {
       const result = await runThirdPartyModelSetup({
@@ -191,7 +191,7 @@ async function runModelSetup({
         customPrimarySetup,
       });
       if (isBackResult(result)) continue;
-      return enrichSetupResult(result, "restart-all");
+      return result;
     }
     throw new Error(`未知模型与提供商设置：${String(category)}`);
   }
@@ -224,7 +224,7 @@ async function runOfficialModelSetup({
       throw new Error(`未知官方设置：${String(module)}`);
     }
     if (isBackResult(result)) continue;
-    return enrichSetupResult(result, "restart-all");
+    return result;
   }
 }
 
@@ -310,7 +310,7 @@ async function runThirdPartyModelSetup({
       throw new Error(`未知第三方设置：${String(module)}`);
     }
     if (isBackResult(result)) continue;
-    return enrichSetupResult(result, setupFallbackActivation(module, result));
+    return result;
   }
 }
 
@@ -376,36 +376,18 @@ function emitSetupResult(onResult, category, result, event = "result") {
   }));
 }
 
-function enrichSetupResult(value, fallbackActivation) {
+function enrichSetupResult(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   if (value.activationResult !== undefined) {
     return value;
   }
-  const activation = typeof value.activation === "string"
-    ? value.activation
-    : fallbackActivation;
+  const activation = value.activation;
   if (typeof activation !== "string") return value;
   return {
     ...value,
     activation,
     activationResult: configActivationResult(activation),
   };
-}
-
-function setupFallbackActivation(module, result) {
-  if (module === "opencode-go" && ["listed", "not-running", "in-use"].includes(result?.action)) {
-    return undefined;
-  }
-  if (module === "opencode-go" && result?.action === "model-settings") {
-    return "restart-app-server";
-  }
-  return {
-    custom_primary: "restart-all",
-    deepseek: "restart-all",
-    ccg: "restart-all",
-    "opencode-go": "restart-all",
-    provider_default: "restart-app-server",
-  }[module];
 }
 
 function isDirectExecution(moduleUrl, argvPath) {

@@ -50,13 +50,13 @@ export function verificationScope(changes) {
   return {
     package: paths.some(path => gateInputs.has(path) || packageFiles.has(path)
       || /^(?:bin|launchd|systemd)\//u.test(path)
-      || /^scripts\/(?:install|source-install|source-update|update|background-update|windows-service|service-install|local-installation|local-source-deployment|runtime-config|workspace-config)/u.test(path)
+      || /^scripts\/(?:install|source-install|source-update|update|windows-service|service-install|local-installation|runtime-config|workspace-config)/u.test(path)
       || /^tests\/(?:.*(?:install|package|prepare)|source-update).*\.(?:ts|mjs)$/u.test(path)),
     appServer: paths.some(path => gateInputs.has(path) || appServerModules.some(prefix => path.startsWith(prefix))
       || path === "package.json" || path === "package-lock.json"
       || path === "src/main.ts" || path === "src/version.json"
       || /^(?:runtime|bin|launchd|systemd)\//u.test(path)
-      || /^scripts\/(?:.*(?:app-server|protocol|codex|service|model-provider)|sync-gateway-version|local-installation|local-source-deployment)/u.test(path)
+      || /^scripts\/(?:.*(?:app-server|protocol|codex|service|model-provider)|sync-gateway-version|local-installation)/u.test(path)
       || /^tests\/(?:real-app-server|support\/real-app-server|fixtures\/)/u.test(path)
       || path === "config.example.toml"),
   };

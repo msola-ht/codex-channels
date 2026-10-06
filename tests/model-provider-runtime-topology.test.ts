@@ -1,5 +1,4 @@
 import {
-  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -104,11 +103,6 @@ describe("model provider App Server topology", () => {
       { provider: "ocg-main", mode: "switching" },
     ]);
 
-    writeFileSync(join(environment.CODEX_HOME!, "fixture-agent.toml"), 'model = ' + JSON.stringify("deepseek-flash") + '\nmodel_reasoning_effort = ' + JSON.stringify("high") + '\n', { mode: 0o600 });
-    expect(readFileSync(join(environment.CODEX_HOME!, "fixture-agent.toml"), "utf8"))
-      .not.toContain("model_provider");
-    expect(readFileSync(join(environment.CODEX_HOME!, "fixture-agent.toml"), "utf8"))
-      .not.toContain("request_max_retries");
   });
 
   it("uses OpenAI as primary and exposes DeepSeek as an auxiliary switching server", async () => {
@@ -134,10 +128,7 @@ describe("model provider App Server topology", () => {
     ].join("\n"), { mode: 0o600 });
     const environment = testEnvironment(codexHome);
 
-    expect(loadConfiguredCustomPrimaryModelProvider(environment)).toEqual({
-      id: "thirdparty",
-      baseUrl: "https://proxy.example.test/v1",
-    });
+    expect(loadConfiguredCustomPrimaryModelProvider(environment)).toBeUndefined();
     expect(loadPrimaryModelProvider(environment)).toBe("openai");
     expect(resolveAppServerRuntime(
       { codex: { socket_path: "runtime/codex.sock" } },

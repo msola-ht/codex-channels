@@ -55,8 +55,6 @@ export function metricsFilterOptions(options) {
 }
 
 export const metricsCommandUsage = Object.freeze({
-  upgrade: "用法：codexc metrics upgrade --from 20|21|22|23|24|25|26 --to 27 [--apply]",
-  rollback: "用法：codexc metrics rollback --from 27 --to 20|21|22|23|24|25|26 --backup PATH --sha256 HASH --apply",
   run: "用法：codexc metrics run <Thread ID> [--format markdown|json|csv] [--stdout]",
   turns: `用法：codexc metrics turns <Thread ID> ${rangeUsage} ${filtersUsage} [--turn ID] [--format markdown|json|csv] [--stdout]`,
   threads: `用法：codexc metrics threads ${rangeUsage} ${filtersUsage} [--thread ID] [--turn ID] [--format markdown|json|csv] [--stdout]`,
@@ -106,8 +104,8 @@ export function parseMetricsOptions(args, allowed) {
 }
 
 export function validateMetricsCommandArgs(subcommand, args) {
-  if (subcommand === "upgrade" || subcommand === "rollback") {
-    parseMetricsUpgradeOptions(subcommand, args); return;
+  if (!["run", "turns", "threads", "report", "export", "quota", "cleanup", "prune", "status", "reset"].includes(subcommand)) {
+    throw new Error(`未知指标命令：${subcommand}`);
   }
   const withoutStdout = args.filter((argument) => argument !== "--stdout");
   if (subcommand === "run") {
@@ -174,21 +172,6 @@ export function validateMetricsCommandArgs(subcommand, args) {
   if (subcommand === "reset" && args.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);
   }
-}
-
-export function parseMetricsUpgradeOptions(command, args) {
-  const options = { apply: false };
-  for (let index = 0; index < args.length; index++) {
-    const flag = args[index];
-    if (flag === "--apply" && !options.apply) { options.apply = true; continue; }
-    if (!["--from", "--to", ...(command === "rollback" ? ["--backup", "--sha256"] : [])].includes(flag)) throw new Error(metricsCommandUsage[command]);
-    const key = flag.slice(2), value = args[++index];
-    if (options[key] !== undefined || !value || value.startsWith("--")) throw new Error(metricsCommandUsage[command]);
-    options[key] = value;
-  }
-  if ((command === "upgrade" ? !["20", "21", "22", "23", "24", "25", "26"].includes(options.from) || options.to !== "27" : options.from !== "27" || !["20", "21", "22", "23", "24", "25", "26"].includes(options.to))
-    || command === "rollback" && (!options.apply || !options.backup || !/^[a-f0-9]{64}$/u.test(options.sha256 ?? ""))) throw new Error(metricsCommandUsage[command]);
-  return options;
 }
 
 export function parseCleanupOptions(args) {

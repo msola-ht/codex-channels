@@ -1,6 +1,5 @@
 export interface SourceUninstallResult {
   checkout: string;
-  launcher: string;
 }
 
 export interface SourceUninstallOptions {

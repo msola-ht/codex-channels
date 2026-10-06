@@ -153,18 +153,18 @@ it("reads per-key usage across rotations without blocking management when metric
     record(now, "failed", "boundary-key", 1, "boundary");
     record(now - 500, "failed", "translation-key", 1, "other-caller");
     store.record({ ...sample(), source: "relay", threadId: null, turnId: null, deliveryStatus: "finished",
-      callerId: "normalized", keyId: "normalized-key",
+      callerId: "usage-missing", keyId: "usage-missing-key",
       credentialGeneration: 1, relayRequestId: randomUUID(), requestStartedAtMs: now,
       status: "completed", responseFormat: "unknown", model: null,
       inputTokens: null, outputTokens: null, totalTokens: null });
     expect(store.relayCallerUsage([], now - day, now)).toEqual([]);
     expect(store.relayCallerUsage([
       { callerId: "old-caller", keyId: "old-key" }, { callerId: "boundary", keyId: "boundary-key" },
-      { callerId: "normalized", keyId: "normalized-key" },
+      { callerId: "usage-missing", keyId: "usage-missing-key" },
     ], now - day, now)).toEqual(expect.arrayContaining([
       { callerId: "old-caller", keyId: "old-key", lastRequestAtMs: now - 2 * day, requestCount: 0, unsuccessfulRequestCount: 0 },
       { callerId: "boundary", keyId: "boundary-key", lastRequestAtMs: now, requestCount: 2, unsuccessfulRequestCount: 1 },
-      { callerId: "normalized", keyId: "normalized-key", lastRequestAtMs: now, requestCount: 1, unsuccessfulRequestCount: 1 },
+      { callerId: "usage-missing", keyId: "usage-missing-key", lastRequestAtMs: now, requestCount: 1, unsuccessfulRequestCount: 0 },
     ]));
     expect(store.relayCallerUsage([{ callerId: "translation", keyId: "translation-key" }], now - day, now)).toEqual([
       { callerId: "translation", keyId: "translation-key", lastRequestAtMs: now - 1000, requestCount: 4, unsuccessfulRequestCount: 3 },

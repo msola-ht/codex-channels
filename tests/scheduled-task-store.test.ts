@@ -57,7 +57,7 @@ describe("SqliteScheduledTaskStore", () => {
 
   it("rejects a v1 database without migrating its tasks", () => {
     const { path } = databasePath();
-    createV1Database(path, base, true);
+    createV1Database(path, base);
     expect(() => new SqliteScheduledTaskStore(path)).toThrow(/Schema 不受支持/u);
     const database = new DatabaseSync(path, { readOnly: true });
     expect(database.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
@@ -474,8 +474,6 @@ describe("SqliteScheduledTaskStore", () => {
 function createV1Database(
   path: string,
   anchorAt: number,
-  withRun = false,
-  intervalHours = 1,
 ): void {
   const db = new DatabaseSync(path);
   db.exec(`
@@ -551,16 +549,14 @@ function createV1Database(
   `).run(
     "v1-task", "每隔一小时", "active", anchorAt, anchorAt,
     "telegram", "default", "conversation-1", "actor-1", "workspace-1", "read",
-    "hourly", JSON.stringify({ type: "hourly", intervalHours, anchorAt }), "UTC",
+    "hourly", JSON.stringify({ type: "hourly", intervalHours: 1, anchorAt }), "UTC",
     anchorAt, anchorAt + 60 * 60_000,
     null, null, null, null, "read-only", "never", null,
   );
-  if (withRun) {
-    db.prepare(`
-      INSERT INTO runs (run_id, task_id, scheduled_for, state)
-      VALUES (?, ?, ?, ?)
-    `).run("v1-run", "v1-task", anchorAt, "completed");
-  }
+  db.prepare(`
+    INSERT INTO runs (run_id, task_id, scheduled_for, state)
+    VALUES (?, ?, ?, ?)
+  `).run("v1-run", "v1-task", anchorAt, "completed");
   db.close();
   if (process.platform === "win32") securePrivateFileSync(path);
   else chmodSync(path, 0o600);

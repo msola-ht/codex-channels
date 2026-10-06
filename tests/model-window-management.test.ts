@@ -98,14 +98,28 @@ describe("model window management", () => {
     }
   });
 
-  it("applies the window globally across all providers", async () => {
-    const writeWindow = vi.fn(() => ({
-      model: "deepseek-v4-flash",
-      windowPercent: 40,
-      contextWindow: 419_430,
-      providers: ["deepseek", "opencode-go"],
-      overridden: [],
-    }));
+  it("applies the window globally across all providers inside the management lock", async () => {
+    let locked = false;
+    let lockCalls = 0;
+    const withFileLock = async <T>(_path: string, operation: () => T | Promise<T>): Promise<T> => {
+      lockCalls += 1;
+      locked = true;
+      try {
+        return await operation();
+      } finally {
+        locked = false;
+      }
+    };
+    const writeWindow = vi.fn(() => {
+      expect(locked).toBe(true);
+      return {
+        model: "deepseek-v4-flash",
+        windowPercent: 40,
+        contextWindow: 419_430,
+        providers: ["deepseek", "opencode-go"],
+        overridden: [],
+      };
+    });
     const result = await applyModelWindowChange({
       model: "deepseek-v4-flash",
       windowPercent: 40,
@@ -113,7 +127,7 @@ describe("model window management", () => {
       environment: {},
       loadWindow: () => windowModels(),
       writeWindow,
-      withFileLock: withoutFileLock,
+      withFileLock,
     });
     expect(result).toMatchObject({
       action: "updated",
@@ -126,26 +140,8 @@ describe("model window management", () => {
       windowPercent: 40,
       environment: {},
     });
-  });
-
-  it("wraps the global write in a provider management transaction", async () => {
-    const writeWindow = vi.fn(() => ({
-      model: "deepseek-v4-flash",
-      windowPercent: 40,
-      contextWindow: 419_430,
-      providers: ["deepseek", "opencode-go"],
-      overridden: [],
-    }));
-    await applyModelWindowChange({
-      model: "deepseek-v4-flash",
-      windowPercent: 40,
-    }, {
-      environment: {},
-      loadWindow: () => windowModels(),
-      writeWindow,
-      withFileLock: withoutFileLock,
-    });
     expect(writeWindow).toHaveBeenCalledTimes(1);
+    expect(lockCalls).toBe(1);
   });
 
   it("fails closed when a provider has not been configured", () => {
@@ -211,8 +207,3 @@ function windowModels() {
     },
   ];
 }
-
-const withoutFileLock = async <T>(
-  _path: string,
-  operation: () => T | Promise<T>,
-): Promise<T> => operation();

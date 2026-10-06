@@ -141,14 +141,25 @@ describe("webui server settings and task management", () => {
       } catch { if (!controller.signal.aborted) throw new Error("任务通知意外断开"); }
     })();
     try {
+      for (const input of [{ operation: "update" }, { operation: "update", action: "source" }]) {
+        const rejected = await fetch(`${origin}/api/v1/management/tasks/preview`, {
+          method: "POST", headers, body: JSON.stringify(input),
+        });
+        expect(rejected.status).toBe(400);
+      }
       const preview = await fetch(`${origin}/api/v1/management/tasks/preview`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ operation: "update" }),
+        body: JSON.stringify({ operation: "service", action: "reload" }),
       });
       expect(preview.status).toBe(200);
       const previewBody = await preview.json() as { confirmationToken: string };
-      const startBody = { operation: "update", confirmationToken: previewBody.confirmationToken };
+      const startBody = { operation: "service", action: "reload", confirmationToken: previewBody.confirmationToken };
+      const rejectedStart = await fetch(`${origin}/api/v1/management/tasks`, {
+        method: "POST", headers,
+        body: JSON.stringify({ operation: "update", action: "source", confirmationToken: previewBody.confirmationToken }),
+      });
+      expect(rejectedStart.status).toBe(400);
       const started = await fetch(`${origin}/api/v1/management/tasks`, {
         method: "POST",
         headers,
@@ -227,7 +238,7 @@ describe("webui server settings and task management", () => {
         operation: "traffic",
         action: "cleanup",
         resource: {
-          dumps: { bytes: 0, labels: 0, legacyFiles: 0, v2Sessions: 0 },
+          dumps: { bytes: 0, labels: 0, v2Sessions: 0 },
         },
       },
       confirmationToken: expect.any(String),

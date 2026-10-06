@@ -28,32 +28,43 @@ export async function runWindowsServiceHost(definitionPath) {
     throw new Error("Windows 服务宿主只支持 Windows");
   }
   const definition = readDefinition(definitionPath);
-  const stdout = openPrivateLog(definition.stdoutLog);
-  const stderr = openPrivateLog(definition.stderrLog);
-  const child = spawn(definition.nodeBinary, definition.arguments, {
-    cwd: definition.workingDirectory,
-    env: { ...process.env, ...definition.environment },
-    stdio: ["ignore", stdout, stderr, "ipc"],
-    windowsHide: true,
-  });
+  let stdout;
+  let stderr;
+  let child;
+  let server;
+  let cleanupSignals;
   let stopping = false;
   let stopPromise;
+  let reportStopFailure;
+  const stopFailure = new Promise((resolveFailure) => { reportStopFailure = resolveFailure; });
+  let operationError;
+  const cleanupErrors = [];
   const stop = () => {
-    stopPromise ??= stopChild(child).finally(() => {
-      stopping = true;
-    });
+    stopping = true;
+    stopPromise ??= stopChild(child);
+    // Signal and IPC callbacks cannot await, but the owner below observes failure.
+    void stopPromise.catch((error) => reportStopFailure({ error }));
     return stopPromise;
   };
-  const server = new PrivateIpcServer(definition.controlPath, (socket) => {
-    handleControlConnection(socket, definition, child, stop);
-  });
-  const cleanupSignals = installProcessSignalHandlers({
-    SIGINT: () => void stop(),
-    SIGTERM: () => void stop(),
-  });
   try {
+    stdout = openPrivateLog(definition.stdoutLog);
+    stderr = openPrivateLog(definition.stderrLog);
+    child = spawn(definition.nodeBinary, definition.arguments, {
+      cwd: definition.workingDirectory,
+      env: { ...process.env, ...definition.environment },
+      stdio: ["ignore", stdout, stderr, "ipc"],
+      windowsHide: true,
+    });
+    const resultPromise = childResult(child);
+    server = new PrivateIpcServer(definition.controlPath, (socket) => {
+      handleControlConnection(socket, definition, child, stop);
+    });
+    cleanupSignals = installProcessSignalHandlers({
+      SIGINT: () => void stop(),
+      SIGTERM: () => void stop(),
+    });
     await server.start(`${definition.displayName} Windows 服务宿主已在运行`);
-    const result = await childResult(child);
+    const result = await Promise.race([resultPromise, stopFailure]);
     if (stopPromise) await stopPromise;
     if (result.error) throw result.error;
     if (!stopping && (result.code !== 0 || result.signal)) {
@@ -61,12 +72,25 @@ export async function runWindowsServiceHost(definitionPath) {
         `${definition.displayName} 意外退出：${result.signal ? `signal=${result.signal}` : `exit=${result.code ?? 1}`}`,
       );
     }
+  } catch (error) {
+    operationError = error;
   } finally {
-    cleanupSignals();
-    await server.close();
-    closeSync(stdout);
-    closeSync(stderr);
+    cleanupSignals?.();
+    try { if (childProcessIsRunning(child)) await stop(); }
+    catch (error) { cleanupErrors.push(error); }
+    try { await server?.close(); }
+    catch (error) { cleanupErrors.push(error); }
+    for (const descriptor of [stdout, stderr]) {
+      try { if (descriptor !== undefined) closeSync(descriptor); }
+      catch (error) { cleanupErrors.push(error); }
+    }
   }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError([
+      ...(operationError === undefined ? [] : [operationError]), ...cleanupErrors,
+    ], "Windows 服务宿主失败且资源清理未完成", { cause: operationError ?? cleanupErrors[0] });
+  }
+  if (operationError !== undefined) throw operationError;
 }
 
 function handleControlConnection(socket, definition, child, stop) {
@@ -162,7 +186,8 @@ function childExitedWithin(child, timeoutMs) {
 
 function openPrivateLog(path) {
   const descriptor = openSync(path, "a", 0o600);
-  securePrivateFileSync(path);
+  try { securePrivateFileSync(path); }
+  catch (error) { closeSync(descriptor); throw error; }
   return descriptor;
 }
 

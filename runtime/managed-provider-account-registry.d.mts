@@ -17,6 +17,5 @@ export function assertManagedProviderDefaultAccount(
   providerLabel: string,
   options?: {
     allowEmpty?: boolean;
-    allowMissingDefault?: boolean;
   },
 ): void;

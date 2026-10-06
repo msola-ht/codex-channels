@@ -3,10 +3,11 @@ import { createServer } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
+import { createHook } from "node:async_hooks";
 
 import WebSocket, { WebSocketServer } from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DesktopAppBridge,
@@ -28,6 +29,198 @@ afterEach(async () => {
 });
 
 describe("Codex Desktop App bridge", () => {
+  it("delivers messages arriving as the downstream sender becomes idle", async () => {
+    const port = await reservePort();
+    const transport = new FakeTransport();
+    const bridge = new DesktopAppBridge({ port, token, createTransport: () => transport,
+      acquireLease: async () => ({ close: async () => {} }) });
+    bridges.push(bridge);
+    await bridge.start();
+    const socket = await connectBridge(port);
+    sockets.push(socket);
+    const received: string[] = [];
+    socket.on("message", data => received.push(data.toString()));
+    const send = WebSocket.prototype.send;
+    const spy = vi.spyOn(WebSocket.prototype, "send").mockImplementation(function (this: WebSocket, data, ...args) {
+      const callback = args.at(-1);
+      if (typeof data !== "string" || !data.startsWith("first:") || typeof callback !== "function") {
+        return Reflect.apply(send, this, [data, ...args]);
+      }
+      const depth = Number(data.slice("first:".length));
+      return Reflect.apply(send, this, [data, ...args.slice(0, -1), (error?: Error) => {
+        callback(error);
+        let next = Promise.resolve();
+        for (let step = 0; step < depth; step++) next = next.then(() => {});
+        void next.then(() => transport.emitMessage(`second:${depth}`));
+      }]);
+    });
+    try {
+      for (let depth = 0; depth < 12; depth++) {
+        transport.emitMessage(`first:${depth}`);
+        await waitUntil(() => received.length === (depth + 1) * 2);
+        expect(received.slice(-2)).toEqual([`first:${depth}`, `second:${depth}`]);
+      }
+    } finally { spy.mockRestore(); }
+  });
+
+  it("does not accumulate unresolved async waits over a long-lived connection", async () => {
+    const port = await reservePort();
+    const transport = new FakeTransport();
+    const bridge = new DesktopAppBridge({ port, token, createTransport: () => transport,
+      acquireLease: async () => ({ close: async () => {} }) });
+    bridges.push(bridge);
+    await bridge.start();
+    const socket = await connectBridge(port);
+    sockets.push(socket);
+    const pending = new Set<number>();
+    const hook = createHook({
+      init: (id, type) => { if (type === "PROMISE") pending.add(id); },
+      promiseResolve: id => { pending.delete(id); },
+      destroy: id => { pending.delete(id); },
+    });
+    const sendBatch = async (count: number) => {
+      for (let index = 0; index < count; index++) {
+        const delivered = nextMessage(socket);
+        transport.emitMessage("notification");
+        await delivered;
+      }
+      await new Promise<void>(resolve => setImmediate(resolve));
+    };
+    hook.enable();
+    try {
+      await sendBatch(32);
+      const baseline = pending.size;
+      await sendBatch(256);
+      // Allow fixed async test/transport overhead, but no growth per message.
+      expect(pending.size).toBeLessThanOrEqual(baseline + 8);
+    } finally { hook.disable(); }
+  });
+
+  it("bounds shutdown while still cleaning a lease that arrives after the deadline", async () => {
+    const port = await reservePort();
+    let release!: (lease: { close(): Promise<void> }) => void;
+    let started = false;
+    let closed = false;
+    const lease = new Promise<{ close(): Promise<void> }>(resolve => { release = resolve; });
+    const bridge = new DesktopAppBridge({ port, token, createTransport: () => new FakeTransport(),
+      acquireLease: () => { started = true; return lease; } });
+    await bridge.start();
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/codex-app-server?token=${token}`);
+    socket.on("error", () => {});
+    sockets.push(socket);
+    await waitUntil(() => started);
+    try {
+      await expect(bridge.close()).rejects.toThrow("关闭超时");
+    } finally {
+      release({ close: async () => { closed = true; } });
+      await waitUntil(() => closed);
+    }
+  }, 8_000);
+
+  it("reports lease cleanup failure while still closing the upstream transport", async () => {
+    const port = await reservePort();
+    const transport = new FakeTransport();
+    const bridge = new DesktopAppBridge({ port, token, createTransport: () => transport,
+      acquireLease: async () => ({ close: async () => { throw new Error("lease close failed"); } }) });
+    await bridge.start();
+    const socket = await connectBridge(port);
+    sockets.push(socket);
+    await expect(bridge.close()).rejects.toThrow("资源清理失败");
+    expect(transport.closed).toBe(true);
+  });
+
+  it("bounds downstream bursts and releases the connection", async () => {
+    const port = await reservePort();
+    const transport = new FakeTransport();
+    const bridge = new DesktopAppBridge({ port, token, createTransport: () => transport,
+      acquireLease: async () => ({ close: async () => {} }) });
+    bridges.push(bridge);
+    await bridge.start();
+    const socket = await connectBridge(port);
+    sockets.push(socket);
+    const closed = nextClose(socket);
+    for (let index = 0; index < 130; index++) transport.emitMessage("queued");
+    await expect(closed).resolves.toBe(1013);
+    await bridge.close();
+    expect(transport.closed).toBe(true);
+  });
+
+  it.skipIf(process.platform === "win32").each(["input-error", "output-error", "blocked-output"])(
+    "cleans up the macOS stdio proxy on %s", async scenario => {
+      const directory = mkdtempSync("/tmp/cdsp-");
+      temporaryDirectories.push(directory);
+      const socketPath = join(directory, "a.sock");
+      const server = createHttpServer();
+      const webSocketServer = new WebSocketServer({ noServer: true });
+      server.on("upgrade", (request, socket, head) => {
+        webSocketServer.handleUpgrade(request, socket, head, ws => webSocketServer.emit("connection", ws));
+      });
+      await new Promise<void>(resolve => server.listen(socketPath, resolve));
+      const input = new PassThrough();
+      const output = new Writable({ write(_chunk, _encoding, callback) {
+        if (scenario !== "blocked-output") callback();
+      } });
+      const connected = new Promise<WebSocket>(resolve => webSocketServer.once("connection", resolve));
+      const proxy = proxyDesktopAppStdioToUnixSocket({ socketPath, input, output });
+      const outcome = expect(proxy).rejects.toThrow(scenario === "blocked-output" ? "超时" : "fixture stream failure");
+      const upstream = await connected;
+      try {
+        // Wait for the client-side handshake before injecting stream failures.
+        input.write('{}\n');
+        await new Promise<void>(resolve => upstream.once("message", () => resolve()));
+        if (scenario === "blocked-output") {
+          upstream.send('{"result":true}');
+          upstream.close();
+        } else (scenario === "input-error" ? input : output).emit("error", new Error("fixture stream failure"));
+        await outcome;
+        expect(input.listenerCount("data")).toBe(0);
+        expect(output.listenerCount("error")).toBe(0);
+      } finally {
+        upstream.terminate();
+        input.destroy();
+        output.destroy();
+        await new Promise<void>(resolve => webSocketServer.close(() => resolve()));
+        await new Promise<void>(resolve => server.close(() => resolve()));
+      }
+    }, 8_000,
+  );
+
+  it("closes an overloaded connection and releases its lease without waiting for a stuck send", async () => {
+    const port = await reservePort();
+    let sends = 0;
+    const transport = new FakeTransport(async () => { sends++; await new Promise<void>(() => {}); });
+    let leaseCloses = 0;
+    const bridge = new DesktopAppBridge({ port, token, createTransport: () => transport,
+      acquireLease: async () => ({ close: async () => { leaseCloses++; } }) });
+    bridges.push(bridge);
+    await bridge.start();
+    const socket = await connectBridge(port);
+    sockets.push(socket);
+    const closed = nextClose(socket);
+    for (let index = 0; index < 130; index++) socket.send("queued");
+    await expect(closed).resolves.toBe(1013);
+    await bridge.close();
+    expect(transport.closed).toBe(true);
+    expect(leaseCloses).toBe(1);
+    expect(sends).toBeLessThanOrEqual(1);
+  });
+
+  it("closes when an upstream send never completes", async () => {
+    const port = await reservePort();
+    const transport = new FakeTransport(async () => { await new Promise<void>(() => {}); });
+    const bridge = new DesktopAppBridge({ port, token, createTransport: () => transport,
+      acquireLease: async () => ({ close: async () => {} }) });
+    bridges.push(bridge);
+    await bridge.start();
+    const socket = await connectBridge(port);
+    sockets.push(socket);
+    const closed = nextClose(socket);
+    socket.send("blocked");
+    await expect(closed).resolves.toBe(1013);
+    await bridge.close();
+    expect(transport.closed).toBe(true);
+  }, 8_000);
+
   it("rejects non-OpenAI primary Providers before opening a listener", async () => {
     await expect(startDesktopAppBridge({
       port: await reservePort(),

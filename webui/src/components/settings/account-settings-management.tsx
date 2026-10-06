@@ -70,7 +70,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
     { accessorKey: "mode", header: t("modelManagement.mode"), cell: ({ row }) => t(row.original.mode === "exclusive" ? "modelManagement.exclusive" : "modelManagement.switching") },
     { accessorKey: "default", header: t("modelManagement.default"), cell: ({ row }) => row.original.default ? <Badge variant="secondary">{t("modelManagement.default")}</Badge> : "—" },
     { id: "actions", header: t("modelManagement.actions"), cell: ({ row: { original: row } }) => <div className="flex flex-wrap gap-2">
-      <Button variant="outline" size="sm" disabled={disabled || (row.platform === "deepseek" && settings.deepseek.legacyConfigurationPresent)} onClick={() => open(row.platform, row)}>{t("modelManagement.edit")}</Button>
+      <Button variant="outline" size="sm" disabled={disabled} onClick={() => open(row.platform, row)}>{t("modelManagement.edit")}</Button>
       <Button variant="outline" size="sm" disabled={disabled || row.default} onClick={() => action(row, "default")}>{t("modelManagement.setDefault")}</Button>
       {row.platform === "opencodeGo" && <Button variant="outline" size="sm" disabled={disabled} onClick={() => void management.mutate({ operation: "opencode.account.stop", accountId: row.id })}>{t("modelManagement.stop")}</Button>}
       <Button variant="destructive" size="sm" disabled={disabled} onClick={() => action(row, "remove")}>{t("modelManagement.remove")}</Button>
@@ -79,9 +79,8 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   return <>
     <div className="flex flex-wrap items-center gap-2">
       <Select items={[{ value: "all", label: t("modelManagement.allPlatforms") }, ...Object.entries(platforms).map(([value, label]) => ({ value, label }))]} value={filter} onValueChange={value => { if (value !== null) setFilter(value) }}><SelectTrigger aria-label={t("modelManagement.platform")}><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="all">{t("modelManagement.allPlatforms")}</SelectItem>{Object.entries(platforms).map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectGroup></SelectContent></Select>
-      {(Object.keys(platforms) as Platform[]).map(platform => <Button key={platform} variant="outline" disabled={disabled || (platform === "deepseek" && settings.deepseek.legacyConfigurationPresent)} onClick={() => open(platform)}>{t("modelManagement.addAccount", { platform: platforms[platform] })}</Button>)}
+      {(Object.keys(platforms) as Platform[]).map(platform => <Button key={platform} variant="outline" disabled={disabled} onClick={() => open(platform)}>{t("modelManagement.addAccount", { platform: platforms[platform] })}</Button>)}
     </div>
-    {settings.deepseek.legacyConfigurationPresent && <Alert><AlertDescription>{t("modelManagement.legacyHint")}<Button variant="destructive" size="sm" disabled={disabled} onClick={() => void management.mutate({ operation: "deepseek.legacy.remove" })}>{t("modelManagement.removeLegacy")}</Button></AlertDescription></Alert>}
     <DataTable title={t("modelManagement.accounts")} description={() => t("modelManagement.credentialsHint")} data={rows.filter(row => filter === "all" || row.platform === filter)} columns={columns} getRowId={row => `${row.platform}:${row.id}`} storageKey="codex-webui:model-accounts-v1" pagination={{ mode: "client", defaultSorting: [], defaultPageSize: 10 }} />
     <Dialog open={editor !== null} onOpenChange={value => { if (!value && !management.busy && pending === null) close() }}>
       <DialogContent closeLabel={t("modelManagement.cancel")} className="max-h-[85dvh] overflow-y-auto" showCloseButton={!management.busy && pending === null}>
@@ -131,7 +130,6 @@ export function AccountSettingsConfirmationDialog({
   const removing = pending.input.operation === "opencode.account.remove"
     || pending.input.operation === "clp.remove"
     || pending.input.operation === "deepseek.remove"
-    || pending.input.operation === "deepseek.legacy.remove"
   const stopping = pending.input.operation === "opencode.account.stop"
   const destructive = stopping || removing
   return <ManagementConfirmationDialog open saving={saving} loading={loading} title={removing ? t("accountConfirmation.removeTitle") : t("accountConfirmation.changeTitle")} description={removing ? t("accountConfirmation.removeDescription") : stopping ? t("accountConfirmation.stopDescription") : t("accountConfirmation.changeDescription")} confirmVariant={destructive ? "destructive" : "default"} confirmLabel={removing ? t("accountConfirmation.confirmRemove") : stopping ? t("accountConfirmation.confirmStop") : t("accountConfirmation.confirmWrite")} onConfirm={onConfirm} onCancel={onCancel}>

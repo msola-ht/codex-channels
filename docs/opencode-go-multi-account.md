@@ -6,7 +6,7 @@ Codex Connect 支持在一个 Gateway 内配置多个 OpenCode Go 账户。每�
 
 当前配置和常用命令见 [`OpenCode Go 使用说明`](opencode-go.md)，第三方 Provider 的通用约束见
 [`第三方模型 Provider 接入指南`](provider-integration-guide.md)。本文只说明多账户的实现边界、
-生命周期和兼容行为。
+生命周期和当前数据格式。
 
 ## Provider 与 Thread 语义
 
@@ -65,7 +65,7 @@ codexc opencode-go account stop <id>
 `list --json` 输出账户 ID、邮箱或手机号（若有）、展示名、默认标记、Provider ID 与运行模式，不包含 API Key 或 Profile 路径。
 
 - `add` 下载或复用共享模型目录，写入账户 Profile、管理标记与注册表；失败时按写入前快照回滚；
-- `remove` 先停止账户实例并备份 Profile 与管理标记，再删除注册项和受管文件；任何删除步骤失败
+- `codexc opencode-go account remove <accountId>` 先预览确认，停止账户实例并备份 Profile 与管理标记，再删除注册项和受管文件；任何删除步骤失败
   都按删除前快照回滚；存在 Remote TUI
   租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；删除最后一个账户时
   同时清理共享模型目录，若该账户是固定模式还会恢复安装前的 Codex 主配置；
@@ -75,21 +75,14 @@ codexc opencode-go account stop <id>
 - 删除账户后，该账户历史 Thread 因 Provider 不再存在而不可恢复，CLI 会要求明确确认。
 
 注册表非空时必须有且只有一个默认账户。删除默认账户且仍有其他账户时必须先运行 `default`，删除
-流程不会按目录顺序自动提升。旧版注册表若没有默认标记，正常运行会失败关闭，但 `default` 命令可
-读取该状态并写回一个明确默认账户。
+流程不会按目录顺序自动提升。缺少默认标记的注册表在所有入口均明确拒绝。
 
 同一时刻只允许一个固定主 Provider，一个固定 OCG 账户可以与其他切换账户共存。账户从切换模式进入
 固定模式时，以当时 `config.toml` 建立账户级恢复基线并归档旧基线；固定模式内重新配置不覆盖该基线。
 删除固定账户或把它改回切换模式时，仅恢复该 Provider 管理的主配置字段，保留之后产生的
 其他用户设置。
 
-启动和更新均不再迁移旧账户、改写 Provider 身份或移动 Profile。
-有 ID 的账户（包括旧注册账户）统一使用 `codexc opencode-go account remove <accountId>`；
-没有 ID 的旧单账户使用 `codexc opencode-go legacy remove`，也可在 Setup 选择移除旧单账户。
-命令先预览并要求确认，再停止对应实例并清理配置；保留其他账户、备份和历史统计。
-固定模式只恢复受管主配置字段，不恢复或删除无关子代理；删除最后一个账户清理共享模型目录。
-移除后再使用明确账户 ID 重新添加。更新器不检查或清理 Provider 旧账户配置。
-仍引用旧 Provider 的历史 Thread 不保证可恢复。
+只接受当前多账户格式。账户删除保留其他账户、备份和历史统计，不恢复或删除无关子代理。
 
 ## 共享统计代理
 

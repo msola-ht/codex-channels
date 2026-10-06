@@ -1,29 +1,22 @@
-# Thread Queue 与 Revert 设计
+# Thread Queue 与 Revert
 
-本文定义 Codex CLI `0.148.0` 引入、并在当前锁定 `0.160.0` 复核的实验 `thread/queue/*`、`thread/queue/changed`、
-`thread/revert`、`thread/reverted` 以及 Revert 所需分页历史查询在 Gateway 中的采用方案。
-它是实施合同；当前项目已完成第一阶段原生 Queue 替换，并已接入第二阶段分页历史与 Revert。
+本文定义锁定 Codex CLI `0.160.0` 的实验 `thread/queue/*`、`thread/queue/changed`、
+`thread/revert`、`thread/reverted` 以及 Revert 所需分页历史查询在 Gateway 中的使用合同。
+当前实现使用原生 Queue、分页历史与 Revert，以下定义授权和状态协调合同。
 Queue/Revert 联合真实合同仍是条件门禁：
 条件式真实 App Server 合同需在设置 `RUN_CODEX_CONTRACT=1` 后运行；未具备该环境时不得
-把跳过的真实合同伪报为通过。完成 Revert 验收项并更新 [`Codex 协议支持矩阵`](index.md) 后，
-才能对三个 Surface 宣布 Revert 可用。
+把跳过的真实合同伪报为通过。三个 Surface 的当前支持范围和验证入口以
+[`Codex 协议支持矩阵`](index.md) 为准，功能变化须同步复核真实合同。
 
 当前 Queue 条件式真实合同覆盖握手、100/101 容量、CRUD、25/100 分页、活动 busy、指定条目
 启动、中断保留、自动派发以及 App Server 重启后的冷恢复；跳过条件合同不计为通过。
 
-## 已完成的实施顺序
+## 当前实现约束
 
-App Server 已成为待提交用户消息和 Thread 历史的唯一事实来源，Gateway 原有平行内存队列已移除。
-以下记录当时的两个实施阶段，不是待执行计划：
+App Server 是待提交用户消息和 Thread 历史的唯一事实来源。Gateway 不保存平行消息队列。
+新 Thread 使用分页历史；Revert 通过显式确认和执行前复核协调历史、活动 Turn 与原生 Queue。
 
-1. 先完整接入原生 Thread Queue，并删除现有 `queuedFollowUps`、完成事件派发和失败清空逻辑。
-2. 再让新建 Thread 使用分页历史，接入分页 Turn 查询和带显式确认的 Revert。
 
-当时将 Queue 替换与 Revert 分开实施和审查：前者替换既有公开能力，后者改变新建 Thread 的历史模式并增加破坏性写操作。后续变更仍需分别核对影响与回滚边界。
-
-### Revert 实施定稿
-
-第二阶段 Revert 已接入；以下保留当前实现约束，不重新实施或改写已接入的 Queue：
 
 - Gateway 新建的 Thread 一律显式发送 `historyMode: "paginated"`；Resume、Fork 和 Provider 路由
   只采用 App Server 返回的实际 `historyMode`。既有 `legacy` Thread 仍可正常使用，但 `/revert`
@@ -135,14 +128,8 @@ Queue 依赖 App Server 的本地 SQLite 状态库。固定版本默认 Thread S
 - `codex-client/notification-adapter.ts` 与组合根：校验 `thread/queue/changed.threadId`，只触发选择快照和 Revert 确认失效，不同步读取 Queue，也不阻塞 App Server Reader。
 - `surfaces/conversation-session-command-format.ts` 与三个 Surface：只负责规范命令和平台文案，不保存 Queue 镜像。
 
-必须删除以下旧实现及其只针对内存语义的测试：
-
-- `ConversationService.queuedFollowUps`。
-- `handleTurnCompleted` 的下一 Turn 启动逻辑。
-- `maximumQueuedFollowUpsPerConversation = 10`。
-- “Gateway 重启会清空”和“启动失败会清空整个队列”的文案与测试。
-
-这些内容应替换为共享端口合同测试，不能保留两套逻辑以兼容旧行为。
+Queue 测试使用共享端口合同；容量、持久化、自动派发和失败结果以 App Server 为准，
+不增加 Gateway 内存队列、完成回调重放或失败清空逻辑。
 
 ## Revert 原生合同
 
@@ -263,32 +250,19 @@ Queue 是对现有 `/queue` 的完整替换，实施后默认可用，不另设�
 出现协议已采用但三渠道行为因本机配置分裂的状态。若实施审查认为仍需灰度，应先修改本决策，
 而不是在代码中静默加入开关。
 
-## 提交与验证链路
+## 验证链路
 
-### PR 1：原生 Queue 替换
+定向单元测试覆盖六个 Queue 请求、只有 list 可重试、容量与分页、权限、五分钟一次性确认、
+并发 reorder/Revert 拒绝和状态失效。创建与写入失败必须断言没有自动重试。
 
-1. 受控协议导出、Queue Port、适配器和 Provider 路由。
-2. 六个 Queue 请求的 Client 单元测试，确认只有 list 可重试。
-3. Application 命令、100 条容量、25 条分页、安全摘要和并发 reorder 失败。
-4. 删除旧内存队列、完成监听和旧文案。
-5. 三 Surface 命令、帮助和展示同步。
-6. 把 `notification-adapter.test.ts` 中 Queue 通知的负向断言替换为只失效选择快照的正向合同。
-7. 真实 App Server 合同：实验握手、100/101 容量、CRUD、四页分页、自动派发、活动 busy、指定非队首启动、中断保留、Gateway/App Server 重启和冷 Thread 恢复。
+真实 App Server 合同覆盖 Queue 实验握手、100/101 容量、CRUD、四页分页、自动派发、活动 busy、
+指定条目启动、中断保留、重启和冷恢复；Revert 覆盖空闲与活动 Turn、未知 Turn、重启持久、
+不支持的历史模式/路径拒绝和下一 Turn 上下文排除已删除历史。联合合同确认 Queue 保序、
+Revert 不自动启动队列，显式启动后才继续派发。隔离 Mock Responses 不调用真实模型账户。
 
-### PR 2：分页历史与 Revert
+相关实现变更按项目门禁执行静态、协议及真实合同检查；提交由 pre-commit 运行 scoped
+`verify:commit`，不手动重复执行。条件合同未实际运行须明确标为未验证。
 
-1. 新 Thread 显式 `historyMode: paginated`，稳定快照区分 legacy/paginated。
-2. Turn 分页摘要、Provider 路由和 legacy 失败关闭。
-3. `/revert` 列表、预览、五分钟一次性确认和执行前并发复核。
-4. `turn/completed: interrupted` 与 `thread/reverted` 状态校正。
-5. 从 `module-boundaries.test.ts` 的未支持清单中只移除实际采用的 `thread/turns/list`，并把 `notification-adapter.test.ts` 的 Revert 负向断言替换为正向状态失效合同；`thread/items/list` 和其他实验方法继续禁止。
-6. 真实合同：空闲回退、活动 Turn 回退、未知 Turn、重启持久、旧 path 拒绝、下一 Turn 上下文排除已删除历史。
-7. Queue 与 Revert 联合合同：使用本机 Mock Responses 与真实 App Server 验证 Queue 条目在 Revert
-   后保留原顺序、不会自动启动，并在显式启动后继续按序派发。
-
-两个 PR 都必须执行定向单元测试、`npm run check`、`npm run lint`、`npm run docs:check`、协议检查
-和真实 App Server 合同；提交门禁再统一运行 `npm run verify:commit`。Queue/Revert 的创建和写入
-失败测试必须同时断言没有自动重试。
 
 ## 完成标准与停止条件
 

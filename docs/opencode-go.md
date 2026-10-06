@@ -32,17 +32,12 @@ codexc opencode-go account stop <id>     # 立即释放该账户隔离 App Serve
 `~/.codex/config.toml`。同一时刻只允许一个固定主 Provider；一个 OCG 账户处于固定模式时，其他
 OCG 账户仍可保留切换模式。切换账户每次进入固定模式都会以当时主配置更新该账户的恢复基线，旧基线
 按 UUID 归档；固定模式内重新配置继续使用本次进入时的基线。账户基线缺失时明确报错，不读取共享旧备份代替。
-Setup 恢复首次配置前状态只接受字段完整的当前备份，缺少目录归属字段的旧备份会在恢复前报错。
 如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
 会明确拒绝，不会覆盖用户配置。
 
-启动和更新均不再迁移旧账户、改写 Provider 身份或移动 Profile。
-有 ID 的账户（包括旧注册账户）统一使用 `codexc opencode-go account remove <accountId>`；
-没有 ID 的旧单账户使用 `codexc opencode-go legacy remove`，也可在 Setup 选择移除旧单账户。
+仅支持当前多账户格式，删除账户使用 `codexc opencode-go account remove <accountId>`。
 命令先预览并要求确认，再停止对应实例并清理配置；保留其他账户、备份和历史统计。
 固定模式只恢复受管主配置字段，不恢复或删除无关子代理；删除最后一个账户清理共享模型目录。
-移除后再使用明确账户 ID 重新添加。更新器不检查或清理 Provider 旧账户配置。
-仍引用旧 Provider 的历史 Thread 不保证可恢复。
 
 配置完成后运行：
 
@@ -104,8 +99,7 @@ Telegram 菜单因订阅状态变化而改变时，旧按钮会提示重新发�
 WebUI 区分此状态与普通刷新失败，并提供经过预览确认的本地账户删除入口，
 详见[WebUI 账户展示](webui.md)。
 本地 Token 与官方窗口使用同一周期口径：统计代理在每个模型请求发生时把官方三个窗口的
-`resetsAt` 快照写入指标记录（Schema v9 新增 `quota_windows` 列；当前指标库 Schema v27 另保存子代理
-运行级父子 Turn 关联）。5 小时滚动窗口的 `resetsAt` 会随实时查询漂移，读取时只按当前
+`resetsAt` 快照写入指标记录的 `quota_windows`。5 小时滚动窗口的 `resetsAt` 会随实时查询漂移，读取时只按当前
 `resetsAt` 反推的五小时范围和请求开始时间归集，不把重置秒数当作固定周期 ID。7 天和月度窗口
 优先按记录的固定周期快照归属 Token；快照缺失，或快照的重置时间不晚于请求开始时间（请求开始时
 缓存已过期）时，按请求开始时间归集。请求开始时仍有效但属于其他固定周期的快照继续排除，避免

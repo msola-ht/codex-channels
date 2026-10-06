@@ -902,7 +902,7 @@ describe("Codex Connect config menu", () => {
     expect(select).not.toHaveBeenCalled();
   });
 
-  it("sets workspace sandbox and approval policy through the menu", async () => {
+  it("sets workspace sandbox through the menu", async () => {
     const fixture = createFixture();
     const output: string[] = [];
     const prompts = {
@@ -1071,7 +1071,7 @@ describe("Codex Connect config menu", () => {
     );
   });
 
-  it("sets or clears the default model through the system settings", async () => {
+  it("sets the default model through the system settings", async () => {
     const fixture = createFixture();
     const output: string[] = [];
     const prompts = {

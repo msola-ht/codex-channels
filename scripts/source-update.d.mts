@@ -19,14 +19,12 @@ export type SourceUpdateStage =
   | "stop-services"
   | "switch-source"
   | "refresh-command"
-  | "upgrade-databases"
   | "configure-codex-daemon"
   | "restore-services"
   | "cleanup";
 
 export interface SourceUpdatePlan {
   operation: "source-update";
-  revision: string;
   managed: boolean;
   checkout?: string;
   currentCommit?: string;
@@ -34,19 +32,6 @@ export interface SourceUpdatePlan {
   targetCommit?: string;
   updateAvailable?: boolean;
   steps: SourceUpdateStage[];
-}
-
-export interface PreparedSourceUpdatePlan extends SourceUpdatePlan {
-  requiresServiceInterruption: boolean;
-  services: { installed: boolean };
-  targetVersion: string;
-}
-
-export interface SourceUpdateProgress {
-  operation: "source-update";
-  stage: SourceUpdateStage;
-  status: "started" | "completed" | "failed";
-  completedStages: SourceUpdateStage[];
 }
 
 export interface SourceUpdateFailure {
@@ -63,7 +48,6 @@ export interface SourceUpdateFailure {
 }
 
 export interface SourceUpdateOptions {
-  expectedRevision?: string;
   projectDir?: string;
   repository?: string;
   captureCommand?: (
@@ -106,18 +90,19 @@ export interface SourceUpdateOptions {
   inspectStaged?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
-  ) => Promise<{ services: { installed: boolean }; databaseUpdatesRequired: boolean }>;
+  ) => Promise<{ services: { installed: boolean } }>;
   stopServices?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
     options: SourceUpdateOptions,
+    services: readonly { target: string; running: boolean }[],
   ) => Promise<void> | void;
-  inspectRelayRunning?: (environment: NodeJS.ProcessEnv) => Promise<boolean> | boolean;
+  inspectServices?: (environment: NodeJS.ProcessEnv) => Promise<{ target: string; running: boolean }[]> | { target: string; running: boolean }[];
   startServices?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
     options: SourceUpdateOptions,
-    relayWasRunning: boolean,
+    services: readonly { target: string; running: boolean }[],
   ) => Promise<void> | void;
   installGlobalPackage?: (
     checkout: string,
@@ -125,8 +110,6 @@ export interface SourceUpdateOptions {
     options: SourceUpdateOptions,
   ) => Promise<void> | void;
   renamePath?: (oldPath: string, newPath: string) => void;
-  onPrepared?: (plan: PreparedSourceUpdatePlan) => void;
-  onProgress?: (progress: SourceUpdateProgress) => void;
 }
 
 export function managedSourceCheckout(

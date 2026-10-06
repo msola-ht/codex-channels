@@ -11,37 +11,20 @@
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换、网页搜索能力与运行统计。
 - [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行与官方目录模型。
 - [`docs/cline-pass.md`](docs/cline-pass.md)：CLP 配置、Chat 转换边界与用量。
-- [`docs/ccg.md`](docs/ccg.md)：CCG 多账户接入、共享模型目录、旧单账户移除、额度查询与固定/切换模式。
+- [`docs/ccg.md`](docs/ccg.md)：CCG 多账户接入、共享模型目录、额度查询与固定/切换模式。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
 - [`docs/source-install.md`](docs/source-install.md)：Linux/macOS 与 Windows PowerShell Git 源码安装、目录、更新和失败边界。
 
-## 发行记录
-
-- [`docs/releases/v0.155.1.md`](docs/releases/v0.155.1.md)：对应 `codex-cli 0.155.1` 的
-  正式发布准备、用户可见改动、兼容边界与验证范围。
-- [`docs/releases/v0.154.0.md`](docs/releases/v0.154.0.md)：对应 `codex-cli 0.154.0` 的
-  `v0.154.0` 正式发行说明、用户可见改动、兼容边界与验证范围。
-- [`docs/releases/v0.153.4.md`](docs/releases/v0.153.4.md)：对应 `codex-cli 0.153.4` 的
-  `v0.153.4` 正式发行说明、用户可见改动、兼容边界与验证范围。
-- [`docs/releases/v0.150.1.md`](docs/releases/v0.150.1.md)：对应 `codex-cli 0.150.1` 的
-  `v0.150.1` 正式发行说明、用户可见改动、兼容边界与验证状态。
-- [`docs/releases/v0.148.0-fix1.md`](docs/releases/v0.148.0-fix1.md)：`v0.148.0-fix1` npm 修复预览版
-  的改动、安装、验证和回滚说明。
-- [`docs/releases/v0.148.0-fix2.md`](docs/releases/v0.148.0-fix2.md)：修复 `-fixN` 源码更新失败的
-  `v0.148.0-fix2` npm 热修预览版说明。
-
 ## 协议与设计
 
-- [`docs/webui-frontend-review.md`](docs/webui-frontend-review.md)：WebUI 前端组件规范、模块解耦、状态管理与重复实现的全面审查、关联修复及验证记录。
-- [`docs/module-lightweight-review.md`](docs/module-lightweight-review.md)：模块轻量化的链路分析、改前审查、优化、改后审查修复及验证记录。
 - [`docs/delivery.md`](docs/delivery.md)：关键结果投递箱的容量、状态、离线核对与备份恢复。
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：本机管理写接口的 Bearer 认证、Origin、修订、防重放、任务与审计边界。
 - [`docs/windows-support-development.md`](docs/windows-support-development.md)：Windows 开发预览的
   当前边界、实现入口、验证范围与正式发布门槛。
 - [`docs/codex-desktop-app-development.md`](docs/codex-desktop-app-development.md)：Codex Desktop App
-  与 Gateway 共享主 OpenAI App Server 的桥接架构、实机限制、跨平台边界与下一阶段决策。
+  与 Gateway 共享主 OpenAI App Server 的桥接架构、安全合同、跨平台边界与实机验收限制。
 - [`docs/index.md`](docs/index.md)：Codex 协议基线、支持矩阵和实现入口。
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信验收状态。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：飞书与微信上游源码基线。
@@ -50,19 +33,19 @@
   不采用原因、重新评估条件与基线升级影响。
 - [`docs/codex-daemon-review.md`](docs/codex-daemon-review.md)：原生 daemon 的链路审查、隔离实测、轻量化收益及生产替换条件。
 - [`docs/codex-image-fileid-probe.md`](docs/codex-image-fileid-probe.md)：原生图片引用的离线与在线脱敏证据、夹具、复现步骤及验收限制。
-- [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：Codex 0.148.0
-  原生 Thread Queue 替换方案、分页历史与 Revert 的实施边界和验收链路。
-- [`docs/thread-usage-development.md`](docs/thread-usage-development.md)：Codex 0.148.0
+- [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：原生 Thread Queue、
+  分页历史与 Revert 的授权边界和验收链路。
+- [`docs/thread-usage-development.md`](docs/thread-usage-development.md)：
   OpenAI Thread 官方估算合入现有 `/usage` 的数据口径、降级、模块与验证边界。
 - [`docs/scheduled-tasks-development.md`](docs/scheduled-tasks-development.md)：计划任务的宿主调度、
-  App Server 执行边界、持久化、安全状态机、分阶段实现与验收方案。
+  App Server 执行边界、持久化、安全状态机与验收范围。
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道指南。
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
   Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
 - [`docs/provider-api-relay-development.md`](docs/provider-api-relay-development.md)：Provider 模型 API
-  当前转发合同：独立服务、原生 Chat/Responses、提供商接入、鉴权与队列、指标与转储、升级回退及验收边界。
+  当前转发合同：独立服务、原生 Chat/Responses、提供商接入、鉴权与队列、指标与转储、数据格式及验收边界。
 - [`docs/relay-codex-auth-development.md`](docs/relay-codex-auth-development.md)：Model Relay 只读
-  复用本机 Codex 登录态的转发设计、WSS 上游、头部对齐、受控边界与分阶段实施。
+  复用本机 Codex 登录态的转发设计（未实施）、WSS 上游、头部对齐及待决边界。
 - [`docs/user-agent-customization.md`](docs/user-agent-customization.md)：默认官方 TUI 客户端
   身份、App Server 上报终端标识与模型上游 User-Agent 覆盖的配置、生命周期、安全边界和验证方案。
 - [`docs/model-timezone.md`](docs/model-timezone.md)：模型请求里 environment context 的时区与日期
@@ -76,6 +59,7 @@
 ## 源码与运行
 
 - [`src/README.md`](src/README.md)：源码模块与边界。
+- [`webui/README.md`](webui/README.md)：WebUI 前端模块、组件约定与开发入口。
 - [`src/delivery/README.md`](src/delivery/README.md)：独立持久投递模块及公开接口。
 - [`src/model-api/README.md`](src/model-api/README.md)：纯模型 API 消息与流式转换模块。
 - [`src/model-relay/README.md`](src/model-relay/README.md)：独立模型 API 的身份、准入与撤销模块。

@@ -2,13 +2,10 @@ import { spawnSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
-  readFileSync,
-  readdirSync,
   realpathSync,
-  rmdirSync,
   rmSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
@@ -19,9 +16,6 @@ import {
   inferNpmGlobalPrefix,
   readManagedNpmPrefixes,
 } from "./source-install-metadata.mjs";
-import { removeLegacySourceShellPaths } from "./source-shell-path.mjs";
-
-const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 
 export async function uninstallManagedSourceInstallation(
   environment = process.env,
@@ -30,33 +24,21 @@ export async function uninstallManagedSourceInstallation(
   const projectDir = options.projectDir ?? packageDir;
   const installRoot = userDataDir(environment);
   const checkout = join(installRoot, "codex-channels");
-  const launcher = join(installRoot, ".bin", "codexc");
-  const legacyLauncher = join(installRoot, "bin", "codexc");
-  const launchers = [launcher, legacyLauncher];
-  assertManagedSourceInstallation(checkout, launchers, projectDir, environment);
+  assertManagedSourceInstallation(checkout, projectDir, environment);
   const npmPrefixes = new Set(readManagedNpmPrefixes(checkout, environment));
   const activePrefix = inferNpmGlobalPrefix(projectDir);
   if (activePrefix) npmPrefixes.add(activePrefix);
 
   await (options.uninstallServices ?? uninstallServices)(checkout, environment);
-  for (const commandEntry of launchers) {
-    if (existsSync(commandEntry)) rmSync(commandEntry);
-  }
-  for (const launcherDirectory of new Set(launchers.map((entry) => dirname(entry)))) {
-    if (existsSync(launcherDirectory) && readdirSync(launcherDirectory).length === 0) {
-      rmdirSync(launcherDirectory);
-    }
-  }
-  removeLegacySourceShellPaths(environment);
   await (options.uninstallGlobalPackage ?? uninstallGlobalPackage)(
     [...npmPrefixes],
     environment,
   );
   rmSync(checkout, { recursive: true });
-  return { checkout, launcher };
+  return { checkout };
 }
 
-function assertManagedSourceInstallation(checkout, launchers, projectDir, environment) {
+function assertManagedSourceInstallation(checkout, projectDir, environment) {
   if (!existsSync(checkout) || !existsSync(join(checkout, ".git"))) {
     throw new Error(
       "当前不是受管 Git 源码安装；npm 全局版请先运行 codexc service uninstall，再执行 npm uninstall -g @hegenai/codexc",
@@ -66,54 +48,12 @@ function assertManagedSourceInstallation(checkout, launchers, projectDir, enviro
     throw new Error(`源码目录与当前 codexc 不一致，拒绝删除：${checkout}`);
   }
   const runsFromCheckout = realpathSync(checkout) === realpathSync(projectDir);
-  let hasManagedLauncher = false;
-  for (const launcher of launchers) {
-    if (!existsSync(launcher)) continue;
-    const stat = lstatSync(launcher);
-    const content = stat.isFile() && !stat.isSymbolicLink()
-      ? readFileSync(launcher, "utf8")
-      : "";
-    if (
-      !content.includes('"$CODEX_CONNECT_HOME/codex-channels/bin/codexc.mjs"')
-      && !content.includes(`${checkout}/bin/codexc.mjs`)
-    ) {
-      throw new Error(`命令入口不属于当前源码安装，拒绝删除：${launcher}`);
-    }
-    hasManagedLauncher = true;
-  }
   if (
     !runsFromCheckout
-    && !hasManagedLauncher
     && !hasManagedSourceMarker(checkout, environment)
-    && !isCleanOfficialLegacyCheckout(checkout, environment)
   ) {
     throw new Error(`源码目录与当前 codexc 不一致，拒绝删除：${checkout}`);
   }
-}
-
-function isCleanOfficialLegacyCheckout(checkout, environment) {
-  let metadata;
-  try {
-    metadata = JSON.parse(readFileSync(join(checkout, "package.json"), "utf8"));
-  } catch {
-    return false;
-  }
-  if (metadata.name !== "@hegenai/codexc") return false;
-  const origin = gitOutput(checkout, ["remote", "get-url", "origin"], environment);
-  if (origin !== officialRepository) return false;
-  const branch = gitOutput(checkout, ["branch", "--show-current"], environment);
-  if (branch !== "main") return false;
-  const dirty = gitOutput(checkout, ["status", "--porcelain"], environment);
-  if (dirty) {
-    throw new Error(`源码仓库存在未提交修改，拒绝删除：${checkout}`);
-  }
-  return true;
-}
-
-function gitOutput(checkout, args, environment) {
-  const result = spawnSync("git", args, { cwd: checkout, env: environment, encoding: "utf8" });
-  if (result.error) throw result.error;
-  return result.status === 0 ? result.stdout.trim() : "";
 }
 
 function hasManagedSourceMarker(checkout, environment) {
@@ -176,7 +116,7 @@ function uninstallServices(checkout, environment) {
 async function main() {
   const result = await uninstallManagedSourceInstallation();
   writeCliMessage("success", `Git 源码与 npm 全局命令已删除：${result.checkout}`);
-  writeCliMessage("note", "用户配置、数据库、凭据、日志与输出均已保留；旧 Shell PATH 配置已清理。");
+  writeCliMessage("note", "用户配置、数据库、凭据、日志、输出与 Shell 配置均已保留。");
 }
 
 if (

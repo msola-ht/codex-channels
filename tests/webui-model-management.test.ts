@@ -22,7 +22,7 @@ it("separates model settings from general preferences and renders model submenus
       const base={loading:false,error:null,actionError:null,saving:false,busy:false,pendingSetting:null,pendingPreview:null,refetch(){},clearError(){}};
       const codex={...base,codexSettings:{provider:'openai',defaultsEditable:true,defaults:{model:'test-model',reasoningEffort:'medium',fastEnabled:true},compact:{contextWindow:10000,autoCompactPercent:80},permissions:{editable:true},models:[{model:'test-model',displayName:'Test model',defaultReasoningEffort:'medium',reasoningEfforts:[{effort:'medium'}]}]}};
       const providers={...base,settings:{defaults:{},managedProviders:[{id:'ds-main',displayName:'DeepSeek',model:'test-model',reasoningEffort:'medium',models:[{id:'test-model',displayName:'Test model',reasoningEfforts:[{effort:'medium'}]}]}],modelWindow:[{id:'test-model',displayName:'Test model',providers:['ds-main'],contextWindow:10000,maxContextWindow:20000,windowPercent:50}],customProviders:{fixedCandidates:[],switchingProviders:[],backupCandidates:[]}}};
-      const accounts={...base,settings:{opencodeGo:{accounts:[]},deepseek:{accounts:[{id:'main',model:'test-model',mode:'switching',default:true}],legacyConfigurationPresent:false},clinePass:{accounts:[]}}};
+      const accounts={...base,settings:{opencodeGo:{accounts:[]},deepseek:{accounts:[{id:'main',model:'test-model',mode:'switching',default:true}]},clinePass:{accounts:[]}}};
       const general=render(h(AppServerSettingsCard,{management:codex}));
       const permissions=render(h(AppServerSettingsCard,{management:codex,section:"permissions"}));
       const models=render(h(AppServerSettingsCard,{management:codex,section:'models'}));

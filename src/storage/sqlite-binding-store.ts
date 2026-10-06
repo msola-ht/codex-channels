@@ -593,7 +593,7 @@ export class SqliteBindingStore implements BindingStore {
     }
     if (row.user_version !== 0) {
       throw new Error(
-        `状态数据库版本不兼容：当前 ${row.user_version}，Gateway 需要 ${schemaVersion}。请通过 codexc update 显式升级状态数据库；不要删除数据库`,
+        `状态数据库版本不兼容：当前 ${row.user_version}，Gateway 需要 ${schemaVersion}。仅支持当前 Schema；请核对数据库版本及备份，不要删除数据库`,
       );
     }
     this.database.exec("BEGIN IMMEDIATE");

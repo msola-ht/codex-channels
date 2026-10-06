@@ -71,7 +71,8 @@ describe("managed Provider capability registry", () => {
 
   it("uses one canonical Profile name for CLI selection and the profile file", () => {
     for (const definition of [
-      ...managedModelProviderDefinitions,
+      deepseekAccountDefinition("main"),
+      clinePassAccountDefinition("main"),
       ccgAccountDefinition("main"),
       opencodeGoAccountDefinition("lunare"),
     ]) {
@@ -111,6 +112,7 @@ describe("managed Provider capability registry", () => {
       id: "future-provider",
       profileName: "sf-future-provider",
       profileFileName: "sf-other.config.toml",
+      capabilities: { accountAdapter: "none", instanceAdapter: "single" },
     } as unknown as typeof deepseekProviderDefinition;
     expect(() => expandManagedModelProviderDefinitions([futureProvider], process.env))
       .toThrow("受管 Provider Profile 定义无效：future-provider");
@@ -134,6 +136,8 @@ describe("managed Provider capability registry", () => {
     const futureProvider = {
       ...deepseekProviderDefinition,
       id: "future-provider",
+      profileName: "sf-future-provider",
+      profileFileName: "sf-future-provider.config.toml",
       capabilities: {
         ...deepseekProviderDefinition.capabilities,
         instanceAdapter: "single",
@@ -152,13 +156,13 @@ describe("managed Provider capability registry", () => {
 
   it("supports a managed Provider without account or catalog update adapters", () => {
     const futureProvider = {
-      ...deepseekProviderDefinition,
+      ...deepseekAccountDefinition("main"),
       id: "future-provider",
       capabilities: {
         ...deepseekProviderDefinition.capabilities,
         accountAdapter: "none",
       },
-    } as unknown as typeof deepseekProviderDefinition;
+    } as unknown as ReturnType<typeof deepseekAccountDefinition>;
 
     expect(assertManagedModelProviderCapabilities(futureProvider)).toMatchObject({
       accountAdapter: "none",

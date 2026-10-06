@@ -14,7 +14,7 @@ const maintenanceActions = [
   ["reset", "managementUi.metricsReset"],
 ] as const
 
-export function ManagementTaskControls({ tasks, providerIds = [], section = "data" }: { tasks: ManagementTaskController; providerIds?: string[]; section?: "data" | "services" }) {
+export function ManagementTaskControls({ tasks, providerIds = [] }: { tasks: ManagementTaskController; providerIds?: string[] }) {
   const { t } = useTranslation()
   const providerOptions = [...new Set(providerIds.filter((providerId) => providerId.length > 0))]
   const [editedPruneProvider, setPruneProvider] = useState<string | null>(null)
@@ -25,17 +25,16 @@ export function ManagementTaskControls({ tasks, providerIds = [], section = "dat
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t(section === "data" ? "navigation.data" : "navigation.services")}</CardTitle>
-        <CardDescription>{t(section === "data" ? "navigation.dataHint" : "navigation.servicesHint")}</CardDescription>
+        <CardTitle>{t("navigation.data")}</CardTitle>
+        <CardDescription>{t("navigation.dataHint")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 text-sm">
         <div className="flex flex-wrap gap-2">
-          {section === "services" && <Button variant="outline" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "update" })}>{t("managementUi.updateSource")}</Button>}
-          {section === "data" && maintenanceActions.map(([action, label]) => (
+          {maintenanceActions.map(([action, label]) => (
             <Button key={action} variant="destructive" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "metrics", action })}>{t(label)}</Button>
           ))}
         </div>
-        {section === "data" && <FieldGroup className="gap-0">
+        <FieldGroup className="gap-0">
           <Field orientation="responsive" data-disabled={disabled}>
             <FieldLabel htmlFor="management-prune-provider" className="text-muted-foreground">{t("managementUi.pruneProvider")}</FieldLabel>
             <FieldContent className="flex-row items-center gap-2">
@@ -60,7 +59,7 @@ export function ManagementTaskControls({ tasks, providerIds = [], section = "dat
               </Button>
             </FieldContent>
           </Field>
-        </FieldGroup>}
+        </FieldGroup>
       </CardContent>
       <ManagementTaskConfirmationDialog tasks={tasks} />
     </Card>
@@ -75,14 +74,12 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
   // 翻译已知受控预览文案；未知内容保留原值，避免丢失确认信息。
   const previewText = (value: string) => {
     if (value === "执行 codexc traffic cleanup --confirm") return t("traffic.cleanupEffect", { command: "codexc traffic cleanup --confirm" })
-    if (value === "执行 codexc update（独立更新子进程）") return t("managementUi.executeUpdate")
     if (value.startsWith("执行 codexc ")) return t("managementUi.executeCommand", { command: value.slice(3) })
     const known = {
       "Gateway 必须已停止，且指标 Socket 不可用": "managementUi.metricsStoppedRequired",
       "操作前备份本地指标库；失败时保留备份并尝试恢复原服务状态": "managementUi.pruneRecovery",
       "操作前保留指标数据库备份；失败时保留备份并重试": "managementUi.metricsRecovery",
       "服务管理器失败时任务标记失败，不自动扩大操作范围": "managementUi.serviceRecovery",
-      "更新子进程负责备份、版本切换和服务恢复；失败时保留恢复信息": "managementUi.updateRecovery",
     } as const
     if (Object.hasOwn(known, value)) return t(known[value as keyof typeof known])
     if (value === "全部 App Server 与 Relay 必须已停止") return t("traffic.cleanupStoppedRequired")
@@ -106,7 +103,7 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
     <p className="whitespace-pre-line">{description.join("\n") || pending.input.operation}</p>
     {traffic === null ? null : <p className="mt-2 text-muted-foreground">
       {t(traffic.writersRunning ? "traffic.cleanupResourceRunning" : "traffic.cleanupResourceStopped", {
-        sessions: traffic.v2Sessions, files: traffic.legacyFiles, size: formatBytes(traffic.bytes),
+        sessions: traffic.v2Sessions, size: formatBytes(traffic.bytes),
       })}
     </p>}
   </ManagementConfirmationDialog>
@@ -115,22 +112,19 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
 function trafficCleanupResource(value: unknown): {
   writersRunning: boolean
   bytes: number
-  legacyFiles: number
   v2Sessions: number
 } | null {
   if (value === null || typeof value !== "object" || !("dumps" in value)) return null
   const dumps = value.dumps
   if (dumps === null || typeof dumps !== "object") return null
   const bytes = "bytes" in dumps ? dumps.bytes : undefined
-  const legacyFiles = "legacyFiles" in dumps ? dumps.legacyFiles : undefined
   const v2Sessions = "v2Sessions" in dumps ? dumps.v2Sessions : undefined
-  if (typeof bytes !== "number" || typeof legacyFiles !== "number" || typeof v2Sessions !== "number") return null
+  if (typeof bytes !== "number" || typeof v2Sessions !== "number") return null
   const appServer = "appServer" in value ? value.appServer : null
   const relay = "modelRelay" in value ? value.modelRelay : null
   return {
     writersRunning: [appServer, relay].some(service => service !== null && typeof service === "object" && "running" in service && service.running === true),
     bytes,
-    legacyFiles,
     v2Sessions,
   }
 }

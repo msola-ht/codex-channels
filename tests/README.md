@@ -8,8 +8,8 @@
 - 新行为优先扩展最接近实现边界的现有测试文件，避免为同一公开行为建立重复套件。
 - 测试断言面向公开结果、稳定领域类型和明确失败行为，不复制内部实现步骤。
 - 新增用例须填补具体覆盖缺口；现有测试已证明结果时，不为同义断言另建套件。受本次修改影响的重复覆盖可合并，但不能仅为减少数量删除安全、恢复或失败路径验证。
-- 已删除配置或命令只在当前严格 Schema、升级清理或失败关闭仍需要保证时保留回归测试。
-- 模型名、版本号和历史字段只在目录基线、迁移或协议合同中作为业务事实；普通夹具使用不依赖产品目录的值。
+- 已删除配置或命令只在当前严格 Schema 或失败关闭仍需要保证时保留回归测试。
+- 模型名、版本号和历史字段只在目录基线或协议合同中作为业务事实；普通夹具使用不依赖产品目录的值。
 - 协议、Transport 或共享 App Server 行为变化必须包含真实 App Server 合同，不能只依赖 Mock。
 - 不在测试索引中逐项复制断言；具体覆盖以测试文件和实现模块 README 为准。
 
@@ -31,6 +31,8 @@ CLI 用例按领域直接保存在 `codexc-cli*.test.ts`；`codexc-cli-test-fixt
 - `persistent-output-faults.test.ts`：持久投递的隔离进程崩溃切点与持续积压资源验证，依赖当前 `dist/`；SIGKILL 切点仅在非 Windows 环境执行。
 - `delivery-control.test.ts`、`delivery-queue-reader.test.ts`、`webui-delivery-management.test.ts`、`webui-delivery-page.test.ts`、`webui-delivery-events.test.ts`：投递箱只读分页、在线管理 IPC、在线/离线确认重试和双语队列展示边界。
 - `windows-service-control.test.ts`：Windows 服务重启的停止失败隔离与显式停止合同。
+- `windows-service-host.test.ts`：Windows 服务子进程启动、控制端点失败与资源回收合同。
+- `windows-source-install.test.ts`：在 Windows PowerShell 7 中执行安装器的 Codex 版本同步函数，以隔离命令覆盖缺失、版本差异、安装失败和 PATH 冲突。
 - CLI、WebUI、安装、服务和更新脚本：公开命令、管理接口、构建产物、跨平台服务模板与升级失败行为。
 - `webui-logs.test.ts`、`webui-logs-page.test.ts`：服务日志参数、鉴权、限量读取、脱敏、平台来源、双语展示和失败边界。
 - `webui-component-contracts.test.ts`：公共组件方向、字段错误关联、详情入口焦点目标与 Token 展示边界；SSR 与事件夹具不替代真实浏览器交互验证。
@@ -71,19 +73,20 @@ HTML 报告写入被 Git 忽略的 `coverage/`。项目记录覆盖情况，但�
 API 使用受控夹具，浏览器拒绝未声明的网络请求；不会连接当前用户 Gateway、账户或服务。
 它补充 SSR/模拟 Hook 无法证明的取消、键盘、焦点与卸载行为，不替代读屏、视觉或性能验收。
 
-浏览器工具不进入项目依赖或常规 `verify:commit`。按需使用已安装的 Playwright，或复用以下临时安装方式：
+浏览器工具不进入项目依赖或常规 `verify:commit`。优先复用已安装的 Playwright 和浏览器缓存；确需临时安装时，在磁盘临时目录创建独立目录：
 
 ```bash
-npm install --prefix /tmp/codexc-browser-review --no-audit --no-fund playwright@1.63.0
-PLAYWRIGHT_BROWSERS_PATH=/tmp/codexc-browser-review/browsers /tmp/codexc-browser-review/node_modules/.bin/playwright install chromium
-PLAYWRIGHT_BROWSERS_PATH=/tmp/codexc-browser-review/browsers node tests/browser/webui-contracts.mjs /tmp/codexc-browser-review/node_modules/playwright/index.mjs
+browser_tools_dir=$(mktemp -d /var/tmp/codexc-browser-review.XXXXXX)
+npm install --prefix "$browser_tools_dir" --no-audit --no-fund playwright@1.63.0
+"$browser_tools_dir/node_modules/.bin/playwright" install chromium
+node tests/browser/webui-contracts.mjs "$browser_tools_dir/node_modules/playwright/index.mjs"
 ```
 
 脚本首个参数为 Playwright 模块路径，省略时使用通常的 `import("playwright")`。
 依赖只保存在指定临时目录；删除该目录即可移除工具，不需要修改项目包文件。
 浏览器没有安装、启动失败或任一合同失败都会返回失败，不计为跳过或通过。
 Linux 环境还需 Chromium 运行库及可用字体；精简容器可能只有浏览器文件而缺少这些依赖。
-本次使用临时解压库与独立字体配置的执行记录见 [前端关联修复记录](../docs/webui-frontend-review.md#修复后的整合验证)。
+截图等仓库内产物放在 `output/playwright/`；结束后关闭浏览器和本地服务，仅清理本次创建的临时目录。组件约定见 [WebUI 模块说明](../webui/README.md)。
 
 ## 真实 App Server 合同
 

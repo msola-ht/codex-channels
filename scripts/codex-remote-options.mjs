@@ -244,37 +244,26 @@ function reservedManagedProfileArgument(args, index) {
     profile = argument.slice(2);
   }
   return profile === "sf-custom"
-    || profile === "sf-deepseek"
     || profile?.startsWith("sf-ds-")
     || profile?.startsWith("sf-custom-")
-    || profile === "sf-opencode-go"
-    || profile?.startsWith("sf-opencode-go-")
     || profile === "sf-ocg"
     || profile?.startsWith("sf-ocg-")
     || profile === "sf-clp"
     || profile?.startsWith("sf-clp-")
-    || profile === "sf-ccg"
     || profile?.startsWith("sf-ccg-")
     ? profile
     : undefined;
 }
 
 function reservedManagedProfileMessage(profile) {
-  if (profile === "sf-deepseek") return "旧 DeepSeek 单账户 Profile 已停用，请先运行 codexc deepseek legacy remove 并重新添加账户，再使用 --profile sf-ds-<账户>";
   if (profile === "sf-custom") {
     return "Codex Profile sf-custom 是内部保留名称；固定模式请直接使用 codexc remote";
   }
   if (profile.startsWith("sf-custom-")) {
     return `Codex Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应 Provider`;
   }
-  if (profile === "sf-opencode-go" || profile.startsWith("sf-opencode-go-")) {
-    return `OpenCode Go Profile ${profile} 已废弃；请使用 --profile sf-ocg-<账户>`;
-  }
   if (profile === "sf-ocg" || profile.startsWith("sf-ocg-")) {
     return `OpenCode Go Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应账户`;
-  }
-  if (profile === "sf-ccg") {
-    return "旧 CCG 单账户 Profile 已停用，请先运行 codexc ccg legacy remove 并重新添加账户，再使用 --profile sf-ccg-<账户>";
   }
   if (profile.startsWith("sf-ccg-")) {
     return `CCG Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应账户`;
