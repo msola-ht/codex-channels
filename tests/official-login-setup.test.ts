@@ -53,7 +53,7 @@ describe("official login setup", () => {
       activationResult: {
         status: "restart",
         target: "all",
-        commands: ["codexc service restart all"],
+        commands: ["codexc restart all"],
       },
     });
     expect(runLogin).toHaveBeenCalledWith({

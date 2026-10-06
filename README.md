@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/instal
 codexc init
 codexc setup
 codexc work add
-codexc service install
+codexc install
 codexc doctor
 ```
 
@@ -36,8 +36,9 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 ```
 
 源码安装的目录、更新、代理和 Windows 处理见[`源码安装与更新`](docs/source-install.md)。
-官方安装器与本地 `npm run install:global` 都会将缺失或版本不符的默认 Codex CLI 同步为项目锁定版本，随后运行 `codexc init`、`codexc setup`、`codexc service install`。
+官方安装器与本地 `npm run install:global` 都会将缺失或版本不符的默认 Codex CLI 同步为项目锁定版本，随后运行 `codexc init`、`codexc setup`、`codexc install`。
 安装和更新统一从本机终端执行。官方受管仓库用 `codexc update` 更新；本地工作树更新后重新运行 `npm run install:global`，服务停启见[本地工作树安装与部署](docs/source-install.md#本地工作树安装与部署)。
+仍使用 `service` 命名空间的旧版需先按[源码安装与更新说明](docs/source-install.md)手动安装新版本，不能直接用旧更新器跨越此次命令改版。
 
 ## 常用入口
 
@@ -48,9 +49,12 @@ codexc config                # Codex 新会话偏好与 Gateway 日常设置
 codexc cleanup               # 统一交互归档会话、清理转储和维护指标
 codexc timezone              # App Server 与 WebUI 时区；--gateway 设置网关时区
 codexc work                  # 新建或注册已有工作区、管理权限
-codexc service               # 交互选择服务操作和目标
-codexc service status        # 查看服务状态
-codexc service restart all   # 重启 Gateway、全部 App Server 及已安装且启用的 Relay
+codexc                       # 主菜单 → 后台服务
+codexc run                   # 前台运行核心服务
+codexc start                 # 启动全部后台服务，含已安装 WebUI 与已启用 Relay
+codexc status                # 查看全部后台服务状态
+codexc restart               # 重启全部后台服务：Gateway、App Server、WebUI、已启用 Relay
+codexc restart gateway       # 只重启 Gateway
 codexc doctor                # 只读诊断
 codexc metrics               # 查询和导出本机模型请求指标
 codexc relay status          # 查询可选模型 API 转发进程

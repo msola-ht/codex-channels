@@ -313,7 +313,7 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     throw invalid(
       "fixed-candidate-must-be-backed-up",
       "mode",
-      "自定义切换模式不修改主配置；请先运行 codexc primary-provider switch openai 将主配置候选移入私有备份，再重新编辑",
+      "自定义切换模式不修改主配置；请先运行 codexc provider switch openai 将主配置候选移入私有备份，再重新编辑",
     );
   }
   if (mode === "exclusive") {

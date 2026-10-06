@@ -29,7 +29,7 @@ export function printStatus(result, { json = false, output = process.stdout } = 
   console.log(`兼容：${result.compatible ? "是" : "否"}`);
   console.log(`记录：${result.count ?? "无法读取"}`);
   if (!result.compatible) {
-    console.log("处理：停止 Gateway 后运行 codexc metrics reset");
+    console.log("处理：停止 Gateway 后运行 codexc cleanup metrics reset");
   }
 }
 

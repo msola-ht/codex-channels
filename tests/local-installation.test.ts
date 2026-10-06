@@ -106,6 +106,13 @@ describe("local installation inspection", () => {
     }, "win32")).toEqual({ installed: true });
   });
 
+  it.each(["app-server", "gateway", "all"] as const)("uses public targets in %s readiness failure hints", async target => {
+    const { environment } = fixture();
+    const commandTarget = target === "app-server" ? "appserver" : target;
+    await expect(waitForCoreServiceTarget(target, environment, { timeoutMs: 0 }))
+      .rejects.toThrow(`请运行 codexc status ${commandTarget}，并查看 codexc logs ${commandTarget}`);
+  });
+
   it("requires matching App Server topology and stable Gateway health", async () => {
     const { configPath, dataDir, environment } = fixture();
     const descriptor = resolveAppServerRuntime(
@@ -178,7 +185,7 @@ describe("local installation inspection", () => {
       socketHealthy: async () => true,
       stableMs: 0,
       timeoutMs: 1_000,
-    })).rejects.toThrow("codexc service restart all");
+    })).rejects.toThrow("codexc restart all");
   });
 
   it("checks only the requested core service target", async () => {
@@ -249,7 +256,7 @@ describe("local installation inspection", () => {
       stableMs: 200,
       timeoutMs: 300,
     })).rejects.toThrow(
-      /Gateway 未能及时就绪.*service status gateway.*service logs gateway/u,
+      /Gateway 未能及时就绪.*codexc status gateway.*codexc logs gateway/u,
     );
   });
 

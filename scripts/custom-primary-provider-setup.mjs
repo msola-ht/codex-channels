@@ -262,7 +262,7 @@ export async function runCustomPrimaryProviderSetup({
   }
   if (mode === "switching" && fixedProviderFromConfig) {
     throw new Error(
-      "自定义切换模式不修改主配置；请先运行 codexc primary-provider switch openai 将主配置候选移入私有备份，再重新编辑",
+      "自定义切换模式不修改主配置；请先运行 codexc provider switch openai 将主配置候选移入私有备份，再重新编辑",
     );
   }
   if (mode === "exclusive") {

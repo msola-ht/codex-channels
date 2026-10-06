@@ -261,8 +261,8 @@ describe("codexc timezone", () => {
     });
     expect(loadGatewaySettings(fixture.environment).system.appServerTimezone)
       .toBe("America/Los_Angeles");
-    expect(saved.text()).toContain("codexc service restart app-server");
-    expect(saved.text()).toContain("codexc service start gateway");
+    expect(saved.text()).toContain("codexc restart appserver");
+    expect(saved.text()).toContain("codexc start gateway");
     expect(saved.text()).toContain("直接运行的网关需重新执行原启动命令");
 
     const cleared = captureOutput();
@@ -273,7 +273,7 @@ describe("codexc timezone", () => {
     expect(readGatewayConfig(fixture.configPath).codex ?? {})
       .not.toHaveProperty("timezone");
     expect(cleared.text()).toContain("已恢复系统时区");
-    expect(cleared.text()).toContain("codexc service start gateway");
+    expect(cleared.text()).toContain("codexc start gateway");
   });
 
   it("reports the current value in non-interactive terminals", async () => {

@@ -444,7 +444,7 @@ describe("OpenCode Go account CLI", () => {
 
     expect(output.write).toHaveBeenCalledWith("默认 OpenCode Go 账户已设置为 b。\n");
     expect(output.write).toHaveBeenCalledWith(
-      "[提示] 配置已保存。请重启 Gateway 与 App Server：codexc service restart all\n",
+      "[提示] 配置已保存。请重启全部后台服务（含已安装 WebUI，Relay 按启用状态启动）：codexc restart all\n",
     );
   });
 

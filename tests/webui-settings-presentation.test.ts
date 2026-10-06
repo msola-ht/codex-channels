@@ -19,12 +19,14 @@ describe("WebUI 状态与关联范围展示", () => {
         const {TooltipProvider}=await server.ssrLoadModule("/src/components/ui/tooltip.tsx");
         const {QueryFilters}=await server.ssrLoadModule("/src/components/metrics/query-filters.tsx");
         const {ProviderSettingsManagement}=await server.ssrLoadModule("/src/components/settings/provider-settings-management.tsx");
+        const {ManagedServices}=await server.ssrLoadModule("/src/components/settings/managed-services.tsx");
+        const managed=renderToStaticMarkup(h(ManagedServices,{services:{platform:"systemd",entries:[{target:"webui",name:"WebUI",running:true,loaded:true,state:"running",version:null,pid:null,recentError:null}]},tasks:{tasks:[],loading:false,error:null,saving:false,pendingPreview:null}}));
         const zero=renderToStaticMarkup(h(ServerTimeContext.Provider,{value:{nowMs:1000,receivedAtMs:Date.now(),timeZone:"UTC"}},h(DeepseekBalanceCards,{accounts:[{provider:"ds-main",account:"main",displayName:"DeepSeek",default:true,available:false,observedAtMs:1000,balances:[{currency:"CNY",totalBalance:"0.00",grantedBalance:"0.00",toppedUpBalance:"0.00"}]}],refreshControls:{}})));
         const filter=renderToStaticMarkup(h(TooltipProvider,null,h(QueryFilters,{query:{range:"all",threadId:"scoped-thread",turnId:"scoped-turn"},onChange(){},showThreadFilters:false})));
         const settings={defaults:{},managedProviders:[],modelWindow:[],customProviders:{fixedCandidates:[],switchingProviders:[],backupCandidates:[]}};
         const stale=renderToStaticMarkup(h(ProviderSettingsManagement,{section:"providers",management:{settings,loading:false,error:"snapshot-load-failed",busy:false,pendingPreview:null,actionError:null,refetch(){},clearError(){}}}));
         const button=[...stale.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)].find(match=>match[0].includes("切回官方 OpenAI"))?.[0] ?? "";
-        console.log(JSON.stringify({zero,filter,stale,button}));
+        console.log(JSON.stringify({zero,filter,stale,button,managed}));
       } finally { await server.close(); }
     `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
     const result = JSON.parse(output) as Record<string, string>;
@@ -36,6 +38,9 @@ describe("WebUI 状态与关联范围展示", () => {
     expect(result.filter).toContain('aria-label="清除轮次筛选"');
     expect(result.stale).toContain("snapshot-load-failed");
     expect(result.button).toMatch(/\sdisabled(?:=|\s|>)/u);
+    expect(result.managed).toContain("codexc uninstall --services");
+    expect(result.managed).toContain("codexc stop webui");
+    expect(result.managed).not.toMatch(/<button\b[^>]*>[^<]*(停止|重启|卸载)/u);
   }, 30_000);
 
   it("设置、模型和渠道文案双语渲染且保留配置及用户数据", () => {
@@ -250,7 +255,7 @@ describe("WebUI 状态与关联范围展示", () => {
         expect(html[index]).not.toMatch(/[\u4e00-\u9fff]/u);
         expect(html[index]).toContain("All App Servers and Relay must be stopped");
         expect(html[index]).toContain("This cannot be undone");
-        expect(html[index]).toContain("codexc traffic cleanup --confirm");
+        expect(html[index]).toContain("codexc cleanup traffic --confirm");
         expect(html[index]).toContain("2 V2 batches");
         expect(html[index]).toContain("<button>Cancel</button>");
       }

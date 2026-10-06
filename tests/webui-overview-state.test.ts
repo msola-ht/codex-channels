@@ -66,11 +66,26 @@ describe("服务端时区展示与日期标签", () => {
   it("preserves server hourly buckets without turning them into daily rows", () => {
     setServerTimeZone("America/New_York");
     const hourly = [
-      { hour: "2026-09-18 00:00", requestCount: 1, inputTokens: 10, cachedInputTokens: null, outputTokens: 2 },
-      { hour: "2026-09-18 01:00", requestCount: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
+      { hour: "2026-09-18 00:00", requestCount: 1, inputTokens: 10, cachedInputTokens: null, outputTokens: 2,
+        cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 1 } },
+      { hour: "2026-09-18 01:00", requestCount: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+        cacheUsage: { inputTokens: 0, cachedInputTokens: 0, missingRequestCount: 0 } },
     ];
     const rows = usageTrendRows({ granularity: "hour", hourly, generatedAt: "", range: { name: "today", startAtMs: 0, endAtMs: 1 } });
-    expect(rows).toEqual(hourly.map(({ hour, ...usage }) => ({ period: hour, ...usage })));
+    expect(rows).toEqual([
+      { period: "2026-09-18 00:00", requestCount: 1, inputTokens: 10, cachedInputTokens: null, outputTokens: 2 },
+      { period: "2026-09-18 01:00", requestCount: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
+    ]);
+  });
+
+  it.each(["day", "hour"] as const)("shows known cached usage in %s buckets even when the complete total is unknown", (granularity) => {
+    const usage = { requestCount: 2, inputTokens: 300, cachedInputTokens: null, outputTokens: 20,
+      cacheUsage: { inputTokens: 100, cachedInputTokens: 80, missingRequestCount: 1 } };
+    const base = { generatedAt: "", range: { name: "all", startAtMs: 0, endAtMs: Date.parse("2026-09-18T12:00:00Z") } };
+    const rows = usageTrendRows(granularity === "hour"
+      ? { ...base, granularity, hourly: [{ hour: "2026-09-18 00:00", ...usage }] }
+      : { ...base, granularity, daily: [{ day: "2026-09-18", ...usage }] });
+    expect(rows[0]).toMatchObject({ inputTokens: 300, cachedInputTokens: 80, outputTokens: 20 });
   });
   it("keeps Shanghai midnight in the same day for the trend and heatmap", () => {
     setServerTimeZone("Asia/Shanghai");

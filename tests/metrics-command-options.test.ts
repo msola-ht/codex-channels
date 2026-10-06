@@ -168,9 +168,9 @@ describe("metrics command options", () => {
     expect(() => validateMetricsCommandArgs("prune", ["OpenAI"])).not.toThrow();
     expect(() => validateMetricsCommandArgs("prune", ["opencode-go-main"])).not.toThrow();
     expect(() => validateMetricsCommandArgs("prune", ["provider with spaces"]))
-      .toThrow("codexc metrics prune <provider>");
+      .toThrow("codexc cleanup metrics prune <provider>");
     expect(() => validateMetricsCommandArgs("prune", ["OpenAI/legacy"]))
-      .toThrow("codexc metrics prune <provider>");
+      .toThrow("codexc cleanup metrics prune <provider>");
   });
 
   it("accepts a configured custom primary Provider for prune", () => {

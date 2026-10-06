@@ -40,7 +40,7 @@ describe("Debug setup", () => {
           activationResult: {
             status: "restart",
             target: "gateway",
-            commands: ["codexc service restart gateway"],
+            commands: ["codexc restart gateway"],
           },
         }
       : {

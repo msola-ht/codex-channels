@@ -21,6 +21,7 @@ describe("service target query", () => {
       const directory = platform === "systemd" ? join(home, ".config", "systemd", "user") : join(home, "Library", "LaunchAgents");
       mkdirSync(directory, { recursive: true });
       writeFileSync(join(directory, platform === "systemd" ? "codex-connect-model-relay.service" : "com.hegenai.codex-model-relay.plist"), "fixture");
+      writeFileSync(join(directory, platform === "systemd" ? "codex-connect-webui.service" : "com.hegenai.codex-webui.plist"), "fixture");
       const configPath = join(home, "config.toml"); writeFileSync(configPath, "broken = [");
       const log = join(home, "manager.log");
       const environment = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, ".config"),
@@ -33,6 +34,8 @@ describe("service target query", () => {
         run: (() => ({ pid: 42, output: [], signal: null, status: 0,
           stdout: platform === "systemd" ? "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=42\n" : "state = running\npid = 42\n", stderr: "" })) as unknown as typeof spawnSync });
       expect(json.services.map(service => service.target)).toContain("model-relay");
+      expect(json.services.map(service => service.target)).toContain("webui");
+      expect(readFileSync(log, "utf8")).toContain("webui");
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
   it("starts only an installed enabled Relay and stops it before Gateway even when configuration is invalid", () => {
@@ -49,8 +52,12 @@ describe("service target query", () => {
       expect(query("status")).toContain("codex-connect-model-relay.service");
       document.model_relay = { enabled: true }; writeGatewayConfig(environment.CODEX_CONNECT_CONFIG_FILE, document);
       expect(query("start").at(-1)).toBe("codex-connect-model-relay.service");
+      writeFileSync(join(directory, "codex-connect-webui.service"), "fixture");
+      expect(query("start")).toEqual(["codex-connect-app-server.service", "codex-connect-gateway.service", "codex-connect-model-relay.service", "codex-connect-webui.service"]);
+      expect(query("install")).not.toContain("codex-connect-webui.service");
+      expect(query("install-stop")).toEqual(["codex-connect-model-relay.service", "codex-connect-gateway.service", "codex-connect-app-server.service"]);
       writeFileSync(environment.CODEX_CONNECT_CONFIG_FILE, "broken = [");
-      expect(query("stop")[0]).toBe("codex-connect-model-relay.service");
+      expect(query("stop")).toEqual(["codex-connect-webui.service", "codex-connect-model-relay.service", "codex-connect-gateway.service", "codex-connect-app-server.service"]);
       expect(query("status")).toContain("codex-connect-model-relay.service");
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
@@ -77,7 +84,7 @@ describe("service target query", () => {
       { encoding: "utf8" },
     );
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("服务选择必须是 start、stop 或 status");
+    expect(result.stderr).toContain("未知服务选择操作");
     expect(result.stdout).toBe("");
   });
 });

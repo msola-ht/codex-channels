@@ -152,7 +152,7 @@ try {
   if (-not (Test-Path -LiteralPath (Join-Path $npmPrefix 'codexc.cmd'))) { throw "npm 全局命令入口不存在：$npmPrefix\codexc.cmd" }
   $completed = $true
   Write-Output "[成功] Codex Connect Git 源码已安装：$checkout"
-  Write-Output '[提示] 下一步：codexc init && codexc setup && codexc service install'
+  Write-Output '[提示] 下一步：codexc init && codexc setup && codexc install'
 } finally {
   if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
   if (-not $completed -and (Test-Path -LiteralPath $checkout)) { Remove-Item -LiteralPath $checkout -Recurse -Force }

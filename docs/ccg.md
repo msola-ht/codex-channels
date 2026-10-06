@@ -13,7 +13,7 @@ CCG 是 CommandCode 的受管 Responses Provider，支持在同一 Gateway 中�
 1. 选择切换模式或固定模式。
 2. 填写账户 ID 并输入该账户的 CommandCode API Key。
 3. 首个账户从 DS 官方下载完整模型目录并生成共享 CCG 目录；后续账户直接复用该目录，再分别选择默认模型。
-4. 运行 `codexc service restart all`，之后通过渠道 `/model` 选择 CCG 模型。
+4. 运行 `codexc restart all`，之后通过渠道 `/model` 选择 CCG 模型。
 
 目录以 DS 官方 `models.json` 完整内容为基础，保留 Flash、Pro，并复制 Flash 的全部字段，
 仅修改 `slug` 和 `display_name`，增加 `DeepSeek V4.1 Flash`。DS 自身的目录保持原样。
@@ -29,7 +29,7 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 同一目录中引用某模型的账户 Profile 同步该模型的默认思考等级；选择其他模型的账户保留各自模型等级。
 新目录不再包含账户默认模型时明确失败。
 
-账户移除命令为 `codexc ccg account remove <id>`，确认后移除该账户 Key 和运行配置，保留安装前备份及历史统计。
+账户移除命令为 `codexc provider ccg remove <id>`，确认后移除该账户 Key 和运行配置，保留安装前备份及历史统计。
 固定模式恢复原有主配置字段；Remote TUI 正在使用时须先退出。
 仅支持当前多账户格式。
 

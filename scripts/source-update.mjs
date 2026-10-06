@@ -786,19 +786,18 @@ function disableCandidateDaemonAutoStart(checkout, environment, options) {
     pathToFileURL(join(checkout, "scripts", "codex-user-config.mjs")).href,
   ], checkout, environment, options.runCommand);
   writeMessageSafely(options.writeMessage ?? writeCliMessage, "note",
-    "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc service 管理。");
+    "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc 管理。");
 }
 
 async function stopCoreServices(checkout, environment, options, services) {
   for (const target of ["webui", "model-relay", "gateway", "app-server"]) {
     if (!services.find(service => service.target === target)?.running) continue;
-    run(process.execPath, [join(checkout, "bin", "codexc.mjs"), "service", "stop", target === "model-relay" ? "relay" : target], checkout, environment, options.runCommand);
+    runCheckoutService(checkout, "stop", target, environment, options);
   }
 }
 
 function inspectUpdateServices(environment) {
-  const services = [...inspectManagedServiceStatus({ environment, target: "all" }).services,
-    ...inspectManagedServiceStatus({ environment, target: "webui" }).services];
+  const services = inspectManagedServiceStatus({ environment, target: "all" }).services;
   for (const service of services) {
     if (!service.running && !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state)) {
       throw new Error(`无法确认更新前 ${service.target} 运行状态；未停止服务`);
@@ -814,10 +813,22 @@ async function startCoreServices(checkout, environment, options, services) {
   const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
   const targets = ["app-server", "gateway", "model-relay", "webui"].filter(target =>
     services.find(service => service.target === target)?.running
-    && (target !== "model-relay" || serviceControlDefinitions(platform, "all", "start", environment).some(service => service.target === target)))
-    .map(target => target === "model-relay" ? "relay" : target);
-  for (const target of targets) run(process.execPath,
-    [join(checkout, "bin", "codexc.mjs"), "service", "start", target], checkout, environment, options.runCommand);
+    && (target !== "model-relay" || serviceControlDefinitions(platform, "all", "start", environment).some(service => service.target === target)));
+  for (const target of targets) runCheckoutService(checkout, "start", target, environment, options);
+}
+
+function runCheckoutService(checkout, action, target, environment, options) {
+  // Load both the command and its target mapping from the active checkout in a fresh process.
+  // The updater itself can still be running code loaded before the source switch.
+  run(process.execPath, [
+    "--input-type=module", "--eval",
+    "const { runServiceCommand } = await import(process.argv[1]); "
+      + "const { serviceCommandTarget } = await import(process.argv[2]); "
+      + "await runServiceCommand([process.argv[3], serviceCommandTarget(process.argv[4])]);",
+    pathToFileURL(join(checkout, "scripts", "service-command.mjs")).href,
+    pathToFileURL(join(checkout, "runtime", "service-targets.mjs")).href,
+    action, target,
+  ], checkout, environment, options.runCommand);
 }
 
 export function packageVersion(checkout) {

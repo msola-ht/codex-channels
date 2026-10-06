@@ -60,7 +60,7 @@
 - `channel-send-image.mjs`：`codexc channel send-image` 的实现，把本地图片复制到
   `data/channel-outbox/pending/` 并写入 manifest；由 Gateway 轮询后按 Thread 绑定
   会话发送并归档，详见 `docs/channel-image.md`。
-- `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc sessions cleanup`，通过
+- `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc cleanup sessions`，通过
   App Server 枚举多 Provider/Workspace，按主会话真实轮数和整组可查询成员的空闲条件预览；所属 Provider 读取状态，后代参与绑定、活动、固定与 Workspace 检查，确认后每个父会话只发一次官方归档并核验结果。
 - `cli-command-usage.mjs`：共享纯帮助文案与服务动作目录，不加载命令执行实现。
 - `cli-help.mjs`：校验公开命令的精确帮助路径，拒绝未知子命令和多余参数。
@@ -128,7 +128,7 @@
 - `setup.mjs`：使用 `@clack/prompts` 提供接入类别菜单和脱敏总览，并把“模型与提供商”“通讯渠道”
   和“项目技能”流程委派给具体适配器；总览与具体流程在选中后按需加载，注入回调优先。模型与提供商下分 OpenAI 官方
   登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级；配置写入后的激活结果由
-  `config-activation-result.mjs` 提供统一状态和目标定义，只转换子模块显式返回的激活范围，不为查询或取消操作推断重启。公开 CLI 的 `codexc setup --json` 将交互提示
+  `config-activation-result.mjs` 提供统一状态和目标定义，只转换子模块显式返回的激活范围，不为查询或取消操作推断重启。公开 CLI 的 `codexc setup --jsonl` 将交互提示
   写入终端 stderr，并按每行一个事件把脱敏结果或错误写入 stdout；输入或提示输出不连接终端时明确拒绝，操作失败后可继续选择。默认 `codexc setup` 保持纯交互文本输出。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
@@ -179,7 +179,7 @@
 - `primary-provider-config-transaction.mjs` / `primary-provider-config-transaction.d.mts`：统一自定义
   Provider 固定模式写入事务；切换与新增/编辑共同复用 Profile 移除、Codex 配置版本写入、响应丢失
   只读确认和安全回滚，避免两条管理链路复制高风险事务逻辑。
-- `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc primary-provider` 的
+- `primary-provider-cli.mjs` / `primary-provider-cli.d.mts`：`codexc provider` 的
   list / add / switch / remove / recover 子命令；`list --json` 复用统一 Provider 管理状态并返回不含凭据的稳定主实例与候选摘要；
   switch / remove 复用 Provider 管理接口并负责中文确认与结果渲染；所有 switch（含恢复官方、从备份恢复、
   切换 Provider 转固定）都会先经二次确认，并提示将改写主配置的 model_provider / model；命令行 switch
@@ -194,7 +194,7 @@
   切换 Provider 可由精确 `remove` 命令清理。删除切换 Provider 时同时清理同 ID 私有备份；Profile
   或注册项已经删除但备份无法安全清理时显示部分成功，不恢复已删除的切换配置。从第三方切回官方时清除第三方顶层模型，已在官方
   模式时保留官方模型。
-- `primary-provider-usage.mjs`：`codexc primary-provider` 的规范帮助文案，供脚本与入口帮助共用，
+- `primary-provider-usage.mjs`：`codexc provider` 的规范帮助文案，供脚本与入口帮助共用，
   避免两份文案漂移。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → OpenAI 官方 → 登录并恢复官方”；运行
   `codex login --device-auth` 完成官方登录（打开终端显示的链接并输入验证码），并通过
@@ -256,7 +256,7 @@
   修改必须携带并在应用前复核；其他设置的最终提交复用 Gateway Config 的共享写锁
   和锁内原文比较，避免菜单停留期间覆盖其他进程已保存的配置；`applyTerminalIdentityFromEnvironment`
   在 `[codex].terminal_identity` 未配置且运行命令的终端可探测时按该终端补入，供
-  `codexc service install` 与 `codexc update` 复用；`codexc config` 与 WebUI 改用同一探测
+  `codexc install` 与 `codexc update` 复用；`codexc config` 与 WebUI 改用同一探测
   结果预填，由用户确认后写入。
 - `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`、
   `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
@@ -284,13 +284,13 @@
   覆盖高风险确认、Origin、限速、请求上限、安全响应头和脱敏审计；WebUI 管理路由复用其中的请求约束、
   限速和审计原语，配置了 WebUI 令牌时直接使用 Bearer 令牌认证。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 高级设置选择完整日志等级，不改写显示设置或凭据。
-- `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、默认账户及 `codexc ccg account remove` 删除入口；账户隔离 Key/Profile/App Server 并共享目录与统计代理，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
+- `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、默认账户及 `codexc provider ccg remove` 删除入口；账户隔离 Key/Profile/App Server 并共享目录与统计代理，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录，保留原模型并复制 Flash 增加 V4.1；模型 ID 与显示名来自根目录 `provider-model-catalog.json`。
 - `managed-provider-files.mjs` / `managed-provider-files.d.mts`：OCG 与 CCG 共用的私有文件读取、写入、快照、逐文件并发复核和失败回滚。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。
 - `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，收紧无效 verbosity/摘要声明，保留其他能力与窗口设置；仅提供目录构建、能力修正接口，不导入账户菜单或管理事务。
 - `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 多账户配置、默认账户与删除事务。
-- `deepseek-account-setup.mjs` / `deepseek-account-setup.d.mts`：DS Setup 菜单与 `codexc deepseek account` 入口，复用管理事务和既有模型设置菜单。
+- `deepseek-account-setup.mjs` / `deepseek-account-setup.d.mts`：DS Setup 菜单与 `codexc provider deepseek` 入口，复用管理事务和既有模型设置菜单。
 - `deepseek-catalog-baseline.json`：保存人工对照 DeepSeek 官方 Codex 安装脚本审查后的模型完整指纹、
   上下文、输入模态、思考等级、搜索、并行工具和最低客户端版本；`digest` 是模型条目紧凑 JSON 的
   SHA-256。该文件只作为审查留档，运行时开放哪些模型以 Setup 下载的官方目录为准。
@@ -307,7 +307,7 @@
   账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、每个账户进入固定模式时的恢复基线更新与旧基线归档、Key 写入、切换/固定模式配置和多文件事务回滚；同一家可保留一个固定账户与其他切换账户。
   生成模型目录时继承已配置 Provider 的同名模型全局窗口占比，避免新账户回落到 OCG 默认值。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
-  （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；`list --json`
+  （add/list/remove/default/stop，供 `codexc provider opencode-go` 调用）与 Setup 菜单；`list --json`
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
   从同一受审查来源生成共享模型目录；重复配置时保留仍受支持的
   默认模型与逐模型设置。
@@ -441,7 +441,7 @@
 - `traffic-command-options.mjs` / `traffic-command-options.d.mts`：集中解析并预检 `codexc traffic` 的
   转储目录、逻辑调用编号、正文长度、关键字、跟随与清理参数，使顶层 CLI 在读取配置前拒绝非法输入，
   并向顶层帮助导出规范用法行。
-- `traffic-cleanup.mjs` / `traffic-cleanup.d.mts`：实现并声明 `codexc traffic cleanup`；默认只预览
+- `traffic-cleanup.mjs` / `traffic-cleanup.d.mts`：实现并声明 `codexc cleanup traffic`；默认只预览
   已识别的 V2 session，确认全部 App Server 与 Relay 已停止后才按 `--confirm` 永久删除，
   未识别文件与目录保持不变。
 - `traffic-command.mjs`：`codexc traffic` 的实现，把 V2 逻辑调用索引与正文引用渲染成人可读文本；
@@ -498,9 +498,9 @@
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
   控制脚本实现 linger、Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 使用当前用户计划任务及受管宿主，并校验私有定义与就绪状态。
-- `service-command.mjs`：公开 `relay` 目标映射到既有内部 `model-relay` 服务标识，拒绝旧公开目标名称；实现公开 `service` 子命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
+- `service-command.mjs` / `service-command.d.mts`：公开 `appserver`、`relay` 目标映射到内部 `app-server`、`model-relay` 服务标识；实现顶层后台服务命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
   服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
-  检查。CLI 只保留帮助展示和命令分派。
+  检查；顶层 `restart` 统一预检、停止与逐项启动就绪，默认包含已安装 WebUI，失败报告剩余步骤并中止。CLI 只保留帮助展示和命令分派。
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
   稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用；Codex 用户偏好使用
   `next-thread / codex`、`next-tui / codex` 和 `next-thread-and-tui / codex` 分别表示新 Thread、
@@ -508,12 +508,12 @@
   App Server 重启动作使用 `restart / app-server`，App Server 时区使用
   `restart / app-server-gateway-webui` 并列出三个服务的重启命令；本模块不承载服务控制。
 - `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一配置写入后的生效提示，区分新会话读取、
-  Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc service install`
+  Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc install`
   重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示；同时重启 App Server、Gateway 和 WebUI 的指令先停止 Gateway，再重启 App Server、启动 Gateway，最后重启 WebUI。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载 App Server、Gateway、WebUI 与可选 Relay 的 launchd 服务；启停、
-  重启、状态和日志支持 `gateway`、`app-server`、`webui`、`relay`、`all` 目标，
-  WebUI 独立不并入 `all`，
-  普通启动不强制终止已运行的进程，日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
+  状态和日志支持 `gateway`、`app-server`、`webui`、`model-relay`、`all` 内部目标，
+  已安装的 WebUI 纳入 `all`，安装动作仍只启动核心服务与已启用 Relay，
+  普通启动不强制终止已运行的进程，重启由服务命令层组合单目标停止与启动；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
@@ -526,9 +526,9 @@
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载 App Server、Gateway、WebUI 与可选 Relay 的 systemd 用户服务；
   安装前确保当前用户的 linger 已启用并复查，使用户未登录时也能随系统启动，无法启用则在修改
   unit 状态前失败并显示管理员处理命令；与 launchd 使用相同的目标、服务角色和默认值，WebUI
-  独立不并入 `all`；停止不存在的 Unit 与 launchd 一样按已停止处理，用户数据始终保留。
+  已安装时纳入 `all`；安装动作单独保留 WebUI 停启状态。停止不存在的 Unit 与 launchd 一样按已停止处理，用户数据始终保留。
 - `windows-service-control.mjs` / `windows-service-control.d.mts`：读取用户级 Windows 服务定义，
-  通过计划任务控制脚本执行 App Server、Gateway 和 WebUI 的安装、启停、重启、状态、日志
+  通过计划任务控制脚本执行 App Server、Gateway、WebUI 与 Relay 的安装、启停、状态、日志
   与卸载；
   核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
 - `windows-service-host.mjs` / `windows-service-host.d.mts`：计划任务启动的 Windows 服务宿主，按 JSON 定义启动并监管单个
@@ -537,7 +537,7 @@
   转交服务宿主，不依赖当前终端目录或用户 Shell 配置。
 - `windows-scheduled-task.ps1`：创建、启动、查询和删除当前用户计划任务；任务通过
   `wscript.exe` 以隐藏窗口运行对应 VBS 启动器，避免服务进程占用可见终端窗口。
-- `windows-log-follow.ps1`：按服务目标跟随读取用户级运行日志，供 `codexc service logs` 使用。
+- `windows-log-follow.ps1`：按服务目标跟随读取用户级运行日志，供 `codexc logs` 使用。
 - `windows-app-server-proxy-probe.mjs`：Windows App Server 代理连接的只读探针，用于确认
   代理端点、初始化握手和 RPC 可达性。
 - `windows-proxy-inbound-limit-probe.mjs`：验证 Windows 代理入口对回环地址和入站连接限制的
@@ -545,7 +545,7 @@
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。
 
-`session-cleanup.mjs` 实现 `codexc sessions cleanup`：Gateway 停止时通过 App Server 枚举全部
+`session-cleanup.mjs` 实现 `codexc cleanup sessions`：Gateway 停止时通过 App Server 枚举全部
 Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决定资格。后代通过 `ancestorThreadId`
 查询未归档与已归档成员，执行前重新检查会话组及绑定；仅在交互终端 `--confirm` 确认后向父会话
 发送一次官方归档。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。
@@ -560,6 +560,6 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 - `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 与队列 SSE 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
 - `webui-queue-events.mjs`：账户快照、请求指标、Relay、渠道投递与管理任务共用的鉴权后 SSE 转接、订阅总量限制及 WebUI 关闭清理；通知不携带指标、队列或任务内容。
 - `webui-management-delivery-route.mjs`：渠道投递箱鉴权 SSE 变化通知、只读分页查询、按需限定内容预览及单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，在线操作通过投递私有 IPC 交给 Gateway 单写者，确认未发送命令且 Gateway 不可连接时才使用 Journal 维护模式独占锁，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览及只读批量摘要认证解密后仅返回显式展示字段，摘要批次消耗读取配额，批量操作在同一事务中复核全部修订。
-- `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
+- `service-selection.mjs` / `service-selection.d.mts`：统一三平台服务定义路径，将已安装的可选 WebUI、Relay 纳入 all，启动 Relay 时另要求配置启用；安装动作排除 WebUI，服务顺序由 Runtime 服务目录定义。
 
 指标库只接受当前 Schema。查询与导出支持 `--source owned|relay`、`--caller ID`。

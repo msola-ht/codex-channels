@@ -10,9 +10,9 @@ const { controlWindowsServices } = await import("../scripts/windows-service-cont
 const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
 afterEach(() => { Object.defineProperty(process, "platform", platform); vi.clearAllMocks(); });
 
-it.each(["model-relay", "gateway"])("aborts restart when %s cannot stop, without touching subsequent services", async failedTarget => {
+it.each(["model-relay", "gateway"])("reports a single-target stop failure for %s to the restart orchestrator", async failedTarget => {
   Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
-  mocks.services = ["model-relay", "gateway", "app-server"].map(target => serviceDefinitions.find(value => value.target === target)!);
+  mocks.services = [serviceDefinitions.find(value => value.target === failedTarget)!];
   const failedIndex = mocks.services.findIndex(value => value.target === failedTarget);
   const calls: string[] = [];
   mocks.spawnSync.mockImplementation((_binary: string, args: string[]) => {
@@ -21,8 +21,8 @@ it.each(["model-relay", "gateway"])("aborts restart when %s cannot stop, without
     calls.push(`${action}:${task}`);
     return { status: task === mocks.services[failedIndex]!.windows ? 9 : 0, stdout: "", stderr: "fixture failure" };
   });
-  await expect(controlWindowsServices({ action: "restart", target: "all", definitionsDirectory: "/fixture", environment: {} }))
-    .rejects.toThrow(`已中止重启：${failedTarget}`);
+  await expect(controlWindowsServices({ action: "stop", target: failedTarget as "model-relay" | "gateway", definitionsDirectory: "/fixture", environment: {} }))
+    .rejects.toThrow("服务停止部分失败");
   expect(calls).toEqual(mocks.services.slice(0, failedIndex + 1).map(value => `stop:${value.windows}`));
 });
 

@@ -180,7 +180,7 @@
 - `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号、
   按温和终止、强制终止和有限终态等待关闭单个子进程；Windows 对调用方精确持有的 PID 使用系统
   `taskkill.exe /T` 终止该子进程树，避免批处理 Shim 退出后遗留 Codex 后代，且不扫描或结束其他 Codex
-  进程；前台 `codexc start` 的父子 Node 进程先通过仅父子可用的 IPC 请求正常关闭 Gateway、Supervisor
+  进程；前台 `codexc run` 的父子 Node 进程先通过仅父子可用的 IPC 请求正常关闭 Gateway、Supervisor
   和私有端点，超时或 IPC 不可用时才回到精确 PID 树终止；多个 Windows Console 信号处理器并发终止
   同一进程树时，以精确 PID 已不存在作为完成结果；
   同时解释同步子进程的启动错误、退出码和终止信号，并成对安装或移除进程信号监听。App Server 服务
@@ -244,7 +244,7 @@
 - `model-relay-service.mjs` / `model-relay-service.d.mts`：独立进程组合与生命周期、材料刷新/撤销、共享网络出口选择和可选 V2 Relay 转储 owner；未变化配置不重复发布准入策略，代理连接池跟随全局并发上限；复用全局 debug 开关、裁剪模式和保留天数；不复用 App Server 的代理实例。
   服务诊断通过 `dist/observability/index.js` 的安全 Logger 输出服务、模块、事件和受限错误字段，不输出原始异常正文。
 
-公开服务命令通过 `service-targets.mjs` 的 `serviceCommandTarget` 将内部 `model-relay` 标识显示为 `relay`；平台服务标识和已有定义文件保持稳定。
+公开服务命令通过 `service-targets.mjs` 的 `serviceCommandTarget` 将内部 `model-relay`、`app-server` 标识显示为 `relay`、`appserver`；平台服务标识和已有定义文件保持稳定。目录中的 `all` 覆盖全部目标，必需服务检查通过 `core` 属性明确筛选。
 
 - `cline-relay-catalog.mjs` / `cline-relay-catalog.d.mts`：独立 Cline 转发模型文件的严格校验、只读快照与思考能力投影；不读取 Codex 模型目录。
 

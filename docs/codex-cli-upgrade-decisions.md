@@ -39,7 +39,7 @@ JSON 转义表示，合计超过 3000 UTF-8 字节即中止。审批绑定 Threa
 
 | 能力与用途 | 决策与理由 |
 | --- | --- |
-| CLI 与后台包独立运行、更新 | 原生 daemon 有生命周期轻量化收益，但当前暂缓接入；独立安装早已存在，`0.157.0` 改变符合条件的交互 CLI 默认启动方式。当前仍由项目 Supervisor 和 `codexc service` 监管；显式 `--remote` 为权威目标，不并行引入第二个所有者。原生支持 `update --from-cli` 固定版本，接入须先解决配置、代理与自动续做边界 |
+| CLI 与后台包独立运行、更新 | 原生 daemon 有生命周期轻量化收益，但当前暂缓接入；独立安装早已存在，`0.157.0` 改变符合条件的交互 CLI 默认启动方式。当前仍由项目 Supervisor 和 `codexc` 后台服务命令监管；显式 `--remote` 为权威目标，不并行引入第二个所有者。原生支持 `update --from-cli` 固定版本，接入须先解决配置、代理与自动续做边界 |
 | 上游 Provider gateway OAuth | 新增三个 RPC 与通知，但不是本项目 Gateway/CLP 登录。本次不导出、不新增登录 UI、不设置 `explicitGatewayOauth`；该初始化开关会持续影响共享进程授权策略，未来接入需另审查连接顺序、登录归属和取消 |
 | 历史 Item 锚点查询 | 不接入 `thread/items/list`；保留当前分页 Turn 历史和 Revert |
 | 定向 MCP 服务、应用账户资源 | 可选 `serverName`、`target` 暂不传；新增 `httpOrigin` 不整包透传，现有健康摘要与资源读取保持受控 |
@@ -96,7 +96,7 @@ Linux 隔离合同不替代 macOS/Windows 实机、真实渠道 stdin 审批、�
 | Plugin 市场管理 | 上游已有 `plugin/install`、`plugin/uninstall` 等实际 RPC；本次内部 API 改名未改变这些公开名称 | 属于本项目明确未接入，不是上游缺接口；保留开发中已安装查询与 mention。新增管理须完成来源、安装范围、授权和生命周期合同 |
 | `disabledPluginIds` | 可保存 Thread 禁用列表；固定版协议明确说明尚不据此过滤 Plugin 能力 | 不提供“禁用即可阻止执行”的开关；现有写请求省略该字段，避免清空其他客户端保存的值，待上游落实过滤语义后重评 |
 | Realtime 与持续语音 | 上游有实验性的会话启动、音频输入、输出及事件协议 | 本项目缺持续媒体传输、取消、断线恢复和交互合同；明确未接入。已有一次性音频输入保持支持 |
-| 官方 daemon | 上游已有跨平台实现，生命周期仍属实验协议 | 本项目继续由 `codexc service` 监管；不同时管理第二套 App Server 生命周期，未来替换需独立设计和验收 |
+| 官方 daemon | 上游已有跨平台实现，生命周期仍属实验协议 | 本项目继续由 `codexc` 后台服务命令监管；不同时管理第二套 App Server 生命周期，未来替换需独立设计和验收 |
 | 全屏 TUI、主题、搜索复制、Mermaid/公式、原生用量与 Worktree | 属于原生客户端体验，是否可用仍取决于对应平台和账户 | 随配套 CLI 使用；本次不在 Gateway/WebUI 重做，不能统称为“上游未实现”或“本次漏接” |
 | 删除的 `thread/rollback` | 上游移除的旧方法，本项目原本没有调用 | 更新生成类型即可；继续采用分页历史与 `thread/revert`，不因此接入 `thread/items/list` |
 

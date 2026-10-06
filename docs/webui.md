@@ -83,20 +83,22 @@ SSH 隧道建议统一使用 `127.0.0.1`，不要用服务器公网 IP、Tailsca
 
 ## 后台服务
 
-WebUI 是独立后台服务，不并入 `all`：`codexc service install` 只生成服务单元并启动 App Server
+WebUI 是独立后台服务，已安装时纳入 `start/stop/restart/status/logs all`。
+`codexc install` 只生成服务单元并启动 App Server
 与 Gateway，需要后台常驻时单独管理：
 
 ```bash
-codexc service start webui       # 启动
-codexc service status webui      # 查看状态
-codexc service logs webui -n 100 # 查看日志
-codexc service restart webui     # 重启
-codexc service stop webui        # 停止
+codexc start webui       # 启动
+codexc status webui      # 查看状态
+codexc logs webui -n 100 # 查看日志
+codexc restart webui             # 重启
+codexc stop webui        # 停止
 ```
 
 - Linux 使用 systemd 用户服务 `codex-connect-webui.service`，macOS 使用 launchd
-  `com.hegenai.codex-webui`；`codexc service uninstall` 会一并卸载；
+  `com.hegenai.codex-webui`；`codexc uninstall --services` 会一并卸载；
 - 服务单元固定运行 `codexc webui`，host/port/token 全部来自 `config.toml` 的 `[webui]` 段；
+- WebUI 自身重启和全部重启需要在本机终端执行，以免停止当前管理任务；管理 API 在预览与执行时均拒绝这两类自中断任务；
 - 指标库只接受当前 Schema；不兼容时 API 明确报错，不迁移或删除数据库，见[源码安装与更新](source-install.md#更新)。
 
 ## 页面与 API
@@ -169,6 +171,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 
 请求明细第一页通过 SSE 接收 Gateway 指标成功落库通知，合并变化后按当前筛选和排序重新读取，每次读取完成后至少间隔 2 秒，无变化不查询。通知只代表已有可读取的指标，不把仍在上游运行的请求提前当作完成记录；进行中请求仍从 Relay 请求队列查看。浏览后续页时暂停自动读取，保留变化并在返回第一页时补查；可随时手动刷新。隐藏页面或离线时断开，恢复后补查，离开页面取消订阅。Gateway 停止或通知不可用时显示重连状态，历史指标仍可手动读取。通知使用独立私有 IPC，不连接或唤醒 App Server；首次启用需更新并重启 Gateway 与 WebUI，不修改指标数据库 Schema。
 请求明细、调用列表及两处详情展示“首 Token”“速度”和“请求耗时”。请求耗时保留单次请求从提交上游到终态的总时长；缺失保持未知，零毫秒正常显示。采集在上游接收点在线完成，经指标 IPC 落库；关闭转储仍正常采集，请求列表与导出不读取转储补算。
+WebSocket 请求在首次连接失败或断开时结束指标观测，结束时间与转储保持同一边界；关闭握手期间迟到的上游内容或终态不再补写首 Token、用量或成功状态。断开前已观测到的终态保持原结果。
 “首 Token”读取 `firstTokenMs`，从实际提交上游请求计到首个非空思考、正文、拒绝文本或工具参数内容事件；状态、额度和仅有用量的事件不算首 Token，也不以首包或完成事件填补缺失值。非流式 JSON 仅在完整解析并确认实际内容后观测，不推算流式首字。`responseTimeMs` 仍保留原始首事件时间供 API/JSON/CSV 诊断，不再作为页面或卡片的性能展示项。
 Chat 原生与转换链路共用非空内容判定：正文、明文思考（含无签名 `reasoning_details`）、拒绝文本和函数名称/参数可计时，工具 ID、索引、类型和空参数不可计时；转换器不支持的内容仍按转换合同拒绝，不因计时判定而放宽。Responses 的内容 `.done`、内容块及输出条目 `.done` 首次携带已支持的非空内容时也可计时，`response.completed/failed/incomplete`、错误、Chat `finish_reason` 和 `[DONE]` 不兜底。未支持的事件或模态不据名称推断内容。
 “速度”是请求平均输出速度，用总输出 Token 除以从提交上游到收到终态的请求耗时，展示为 `56.8 /s`。包含请求等待、思考、正文、工具参数、阶段间空档和网络接收，不含请求外的工具执行，也不是模型纯生成速度。总输出已经包含推理，不重复累加。增量可能集中到达，隐藏思考 Item 也可能在计算结束后才发布，因此不能用首末增量或 Item 接收间隔作完整输出量的分母；这些区间仅保留作诊断。
@@ -237,7 +240,9 @@ WebSocket 帧位于默认收起的“原始事件”，不再与逻辑响应混�
 多个批次时缺少 `session` 返回 400，避免重启后的重复编号串读。非法或无来源的取值分别返回 400 与 404。仅支持 V2 session；
 请求不来自回环地址时返回 503。响应里的 `enabled` 表示
 `[debug].model_traffic_dump` 当前是否开启，以及 `model_traffic_retention_days` 的自动保留天数。长驻
-App Server 约每 24 小时在完整逻辑调用之间轮转 writer session，并在新批次建立时再次清理。清空按钮
+App Server 约每 24 小时在完整逻辑调用之间轮转 writer session，并在新批次建立时再次清理。
+保留天数用于判定历史批次是否过期，仍在写入的批次受保护；容量限制或手动清理可能更早删除其他历史批次。
+设为 `0` 仅关闭按时间清理，容量限制仍生效。指标保留与转储独立，历史指标中的关联不能保证原始报文仍存在。清空按钮
 复用管理任务的一次性确认流程，预览 V2 批次数与占用；实际执行要求全部 App Server 与 Relay 已停止。
 控制台、请求、错误、会话和每轮明细共用时间选择器：今天、昨天、最近 7 天、最近 30 天、
 全部历史、自定义日期。今天为服务端本地当天 00:00 至当前时刻，昨天为前一完整自然日，
@@ -340,6 +345,7 @@ OpenAI 周额度读取当前快照，不随所选历史日期回退。账户余�
 `K`、`M`、`B` 英文紧凑单位：Token 的 `K` / `M` 最多保留两位小数、`B` 最多保留三位小数，
 汇总请求数最多保留两位小数；明细表请求数仍显示精确整数。
 四张卡片下方显示活动热力图和用量趋势图；活动热力图固定展示最近 90 天。控制台默认最近 30 天，顶部时间范围统一切换汇总卡片、趋势图、Provider 和错误汇总。
+趋势图的日、小时缓存曲线使用各时间段 `cacheUsage` 中已知样本的缓存合计；部分请求缺失缓存字段不会隐藏其他请求的已知缓存量，全部缺失时保持未知并断开曲线，明确返回零或没有请求的时间段显示零。原有 `cachedInputTokens` 仍保留完整性语义。
 顶部四张统计卡按标题、数值、补充说明纵向排列，说明放在数值下方。账户、图表和 Provider 卡片的说明放在标题下方，账户刷新按钮使用标题栏右侧的操作区；配额百分比与错误失败率等短数值保留在标题右侧。未配置、暂无记录等空状态放在卡片正文，不重复占用副标题。账户标题统一使用 DeepSeek、OpenCode Go、CommandCode Go、Cline Pass 全名，账户名以标签显示在名称旁；快照缺少账户标识时保留配置展示名称用于区分账户，不据此推断删除等操作的目标。
 账户区域在宽屏使用两列网格，每个账户独立占位，同一行卡片自动等高、边框对齐；窄屏使用单列。
 控制台账户内的 OCG、Cline Pass 配额按 5 小时、7 天、月度三个紧凑卡片横向排列；CCG 按剩余额度、5 小时、7 天展示，仅显示上游实际返回的配额窗口。
@@ -379,7 +385,7 @@ OCG 官方接口明确返回 HTTP 403、`EntitlementError` 和 `OpenCode Go subs
 Thread 将不可恢复，不会取消或续订官方订阅；不会根据错误状态自动删除账户。
 无订阅状态及确认时间由 Gateway 保存到共享快照，页面重开与服务重启后仍可读取；普通刷新失败
 只提示本次查询异常，不恢复旧额度。成功取得新额度后更新状态。删除成功立即移除对应卡片，
-再独立同步列表；同步失败不撤销删除成功提示，并保留运行服务所需的 `codexc service restart all` 提示。
+再独立同步列表；同步失败不撤销删除成功提示，并保留运行服务所需的 `codexc restart all` 提示。
 删除与列表同步按完整 Provider ID 隔离；删除 `ocg-main` 不影响同名的 `ds-main` 或 `ccg-main`。
 账户快照使用指标数据库表与 JSON 字段，`subscription-required` 表示无有效订阅。
 历史快照按指标保留期限清理，但每个账户源的最新确认状态继续保留；保留期限到达不会将无订阅账户恢复为可选。

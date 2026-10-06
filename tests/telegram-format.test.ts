@@ -171,7 +171,7 @@ describe("formatWorkspacesAdded", () => {
       "reinstall-required",
       [{ code: "codex.socket", scope: "global" }],
       "Gateway 配置尚未应用",
-      "codexc service install",
+      "codexc install",
     ],
     [
       "reload-failed",

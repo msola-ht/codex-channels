@@ -707,7 +707,8 @@ export class ProviderProxy {
       const receivedAtMonotonicMs = performance.now();
       const receivedAtMs = Date.now();
       let completedMetrics: MetricsState | undefined;
-      if (!isBinary && activeMetrics) {
+      // A peer failure already ended the call; late frames remain trace-only.
+      if (!isBinary && activeMetrics && failureType === undefined) {
         const currentMetrics = activeMetrics;
         const text = rawDataText(data);
         const observed = inspectResponseEvent(text, "", currentMetrics.firstTokenMs === undefined);
@@ -750,6 +751,7 @@ export class ProviderProxy {
       else if (peer.readyState === WebSocket.CONNECTING) peer.terminate();
     };
     let failureType: "websocket_closed" | "client_disconnected" | undefined;
+    let failureAtMs: number;
     let failureAtMonotonicMs: number;
     const noteFailureType = (
       type: "websocket_closed" | "client_disconnected",
@@ -757,6 +759,7 @@ export class ProviderProxy {
     ): void => {
       if (failureType !== undefined) return;
       failureType = type;
+      failureAtMs = Date.now();
       failureAtMonotonicMs = at;
     };
     client.on("close", (code, reason) => {
@@ -789,14 +792,14 @@ export class ProviderProxy {
       if (!activeMetrics) return;
       const reasonType = websocketCloseErrorType(reason);
       if (reasonType) {
-        markMetricsFailed(activeMetrics, "websocket_closed", Date.now(), undefined, failureAtMonotonicMs);
+        markMetricsFailed(activeMetrics, "websocket_closed", failureAtMs, undefined, failureAtMonotonicMs);
         activeMetrics.errorType = reasonType;
         activeMetrics.errorMessage = boundedMessage(reason.toString("utf8"));
       } else {
         markMetricsFailed(
           activeMetrics,
           failureType ?? "websocket_closed",
-          Date.now(),
+          failureAtMs,
           undefined,
           failureAtMonotonicMs,
         );

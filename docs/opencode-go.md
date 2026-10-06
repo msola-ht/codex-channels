@@ -14,12 +14,12 @@ ID 已由 [OCG 公开模型目录](https://opencode.ai/zen/go/v1/models) 确认�
 运行 `codexc setup`，依次选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方”，或直接使用账户命令：
 
 ```bash
-codexc opencode-go account add <id>      # 新增账户（交互输入邮箱或手机号、Key）
-codexc opencode-go account list          # 列出账户与默认标记
-codexc opencode-go account list --json   # 以 JSON 输出账户状态（不含凭据）
-codexc opencode-go account remove <id>   # 备份后删除账户
-codexc opencode-go account default <id>  # 设置新会话默认账户
-codexc opencode-go account stop <id>     # 立即释放该账户隔离 App Server
+codexc provider opencode-go add <id>      # 新增账户（交互输入邮箱或手机号、Key）
+codexc provider opencode-go list          # 列出账户与默认标记
+codexc provider opencode-go list --json   # 以 JSON 输出账户状态（不含凭据）
+codexc provider opencode-go remove <id>   # 备份后删除账户
+codexc provider opencode-go default <id>  # 设置新会话默认账户
+codexc provider opencode-go release <id>     # 立即释放该账户隔离 App Server
 ```
 
 首次和后续添加都必须输入账户 ID。Provider 使用 `ocg-<accountId>` 命名，所有账户（包括首个和
@@ -35,14 +35,14 @@ OCG 账户仍可保留切换模式。切换账户每次进入固定模式都会�
 如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
 会明确拒绝，不会覆盖用户配置。
 
-仅支持当前多账户格式，删除账户使用 `codexc opencode-go account remove <accountId>`。
+仅支持当前多账户格式，删除账户使用 `codexc provider opencode-go remove <accountId>`。
 命令先预览并要求确认，再停止对应实例并清理配置；保留其他账户、备份和历史统计。
 固定模式只恢复受管主配置字段，不恢复或删除无关子代理；删除最后一个账户清理共享模型目录。
 
 配置完成后运行：
 
 ```bash
-codexc service restart all
+codexc restart all
 ```
 
 初次配置默认使用官方目录的默认模型 `deepseek-flash`。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方 →
@@ -53,7 +53,7 @@ codexc service restart all
 不会重新回落到 OCG 目录默认窗口。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；更新器不刷新模型目录。
 修改后 Gateway 会自动检测并校验设置文件，只更新受影响且已启用的 Provider 实例；原生客户端
 租约或活动 Thread 会推迟应用，其他 Provider 继续运行。连接、绑定与模型目录恢复后才提示生效，
-失败保留待应用状态。手动运行 `codexc service restart app-server` 会重启整个共享服务。
+失败保留待应用状态。手动运行 `codexc restart appserver` 会重启整个共享服务。
 
 聊天中使用 `/model` 选择带 `ocg-<邮箱或手机号>`（无联系方式时回退为 `ocg-<accountId>`）前缀的模型；同账户内切换模型不新建 Thread，
 跨账户切换会保留并解绑当前 Thread，下一条消息以目标账户默认模型新建 Thread（不复制历史），
@@ -75,7 +75,7 @@ Gateway 的全局空闲策略统一关闭已连接的 Provider Client：当没�
 关闭不发送该通知。该操作不按账户类型区分；再次选择账户、恢复 Thread 或使用对应 Remote TUI 时，
 Supervisor 会按需重新启动实例。
 `codexc remote` 仍通过 Supervisor 租约保持其 App Server 进程可用；
-`codexc opencode-go account stop <id>` 继续用于手动停止账户隔离 App Server。统计代理始终共享一个。
+`codexc provider opencode-go release <id>` 继续用于手动停止账户隔离 App Server。统计代理始终共享一个。
 
 ## 协议与模型范围
 

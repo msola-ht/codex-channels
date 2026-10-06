@@ -21,10 +21,10 @@ describe("配置激活结果文案", () => {
       status: "restart",
       target: "app-server-gateway-webui",
       commands: [
-        "codexc service stop gateway",
-        "codexc service restart app-server",
-        "codexc service start gateway",
-        "codexc service restart webui",
+        "codexc stop gateway",
+        "codexc restart appserver",
+        "codexc start gateway",
+        "codexc restart webui",
       ],
     });
     const output: string[] = [];
@@ -43,7 +43,7 @@ describe("配置激活结果文案", () => {
       configActivationResult("reinstall-services"),
     );
 
-    expect(output.join("")).toContain("codexc service install");
+    expect(output.join("")).toContain("codexc install");
   });
 
   it("为 Gateway 热加载输出公开命令", () => {
@@ -54,7 +54,7 @@ describe("配置激活结果文案", () => {
       configActivationResult("reload"),
     );
 
-    expect(output.join("")).toContain("codexc service reload");
-    expect(output.join("")).not.toContain("codexc service reload gateway");
+    expect(output.join("")).toContain("codexc reload");
+    expect(output.join("")).not.toContain("codexc reload gateway");
   });
 });

@@ -209,7 +209,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       table(document.telegram).allowed_user_ids = [123456];
     });
 
-    const child = spawn(process.execPath, [cli, "start"], {
+    const child = spawn(process.execPath, [cli, "run"], {
       cwd: root,
       env: environment,
       stdio: ["ignore", "pipe", "pipe"],
@@ -328,7 +328,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     try {
       const failure = await execFileAsync(
         process.execPath,
-        [cli, "start"],
+        [cli, "run"],
         { cwd: root, env: environment, encoding: "utf8" },
       ).then(
         () => undefined,
@@ -380,7 +380,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     try {
       const failure = await execFileAsync(
         process.execPath,
-        [cli, "start"],
+        [cli, "run"],
         { cwd: root, env: environment, encoding: "utf8" },
       ).then(
         () => undefined,
@@ -556,7 +556,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
 
     const failure = await execFileAsync(
       process.execPath,
-      [cli, "start"],
+      [cli, "run"],
       { cwd: root, env: environment, encoding: "utf8", timeout: 10_000 },
     ).then(
       () => undefined,

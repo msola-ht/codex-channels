@@ -105,7 +105,7 @@ describe("Weixin setup", () => {
       activationResult: {
         status: "restart",
         target: "gateway",
-        commands: ["codexc service restart gateway"],
+        commands: ["codexc restart gateway"],
       },
     });
     expect(store.set).toHaveBeenCalledWith({

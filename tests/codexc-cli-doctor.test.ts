@@ -61,7 +61,7 @@ if (process.platform === "win32") {
     };
     const outputs = new Map<string, string>();
     await forEachWithConcurrency([[], ["--json"]], 2, async (args) => {
-      const { stdout } = await execFileAsync(process.execPath, [cli, "config", ...args], options);
+      const { stdout } = await execFileAsync(process.execPath, [cli, "config", "paths", ...args], options);
       outputs.set(args.join(" "), stdout);
     });
 
@@ -100,7 +100,7 @@ if (process.platform === "win32") {
     });
 
     const parsed = readGatewayConfig(configPath);
-    const jsonOutput = execFileSync(process.execPath, [cli, "config", "--json"], {
+    const jsonOutput = execFileSync(process.execPath, [cli, "config", "paths", "--json"], {
       env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: configPath },
       encoding: "utf8",
     });
@@ -493,7 +493,7 @@ if (process.platform === "win32") {
       );
       expect(unmanaged.status).toBe(1);
       expect(unmanaged.stdout).toContain("[失败] App Server 监管");
-      expect(unmanaged.stdout).toContain("codexc service restart all");
+      expect(unmanaged.stdout).toContain("codexc restart all");
 
       await supervisorOwner.start();
       const { stdout } = await execFileAsync(

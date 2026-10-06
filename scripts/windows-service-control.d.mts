@@ -1,12 +1,13 @@
 import type { ManagedServiceStatus } from "./service-status.mjs";
+import type { ServiceTarget } from "../runtime/service-targets.mjs";
 
 export function windowsServiceDefinitionsDirectory(
   environment?: NodeJS.ProcessEnv,
 ): string;
 
 export function controlWindowsServices(options: {
-  action: "preflight" | "install" | "uninstall" | "start" | "stop" | "reload" | "restart" | "status" | "logs";
-  target?: "gateway" | "app-server" | "webui" | "all";
+  action: "preflight" | "install" | "uninstall" | "start" | "stop" | "reload" | "status" | "logs";
+  target?: ServiceTarget;
   definitionsDirectory?: string;
   environment?: NodeJS.ProcessEnv;
   follow?: boolean;
@@ -15,7 +16,7 @@ export function controlWindowsServices(options: {
 }): Promise<ManagedServiceStatus | void>;
 
 export function inspectWindowsServiceStatus(options?: {
-  target?: "gateway" | "app-server" | "webui" | "all";
+  target?: ServiceTarget;
   definitionsDirectory?: string;
   environment?: NodeJS.ProcessEnv;
 }): Promise<ManagedServiceStatus>;

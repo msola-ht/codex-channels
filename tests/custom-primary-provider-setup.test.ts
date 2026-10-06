@@ -207,7 +207,7 @@ describe("custom primary Provider setup", () => {
       activationResult: {
         status: "restart",
         target: "all",
-        commands: ["codexc service restart all"],
+        commands: ["codexc restart all"],
       },
     });
 
@@ -703,7 +703,7 @@ describe("custom primary Provider setup", () => {
       activationResult: {
         status: "restart",
         target: "all",
-        commands: ["codexc service restart all"],
+        commands: ["codexc restart all"],
       },
     });
 
@@ -791,7 +791,7 @@ describe("custom primary Provider setup", () => {
       activationResult: {
         status: "restart",
         target: "all",
-        commands: ["codexc service restart all"],
+        commands: ["codexc restart all"],
       },
     });
 
@@ -827,7 +827,7 @@ describe("custom primary Provider setup", () => {
       activationResult: {
         status: "restart",
         target: "all",
-        commands: ["codexc service restart all"],
+        commands: ["codexc restart all"],
       },
     });
 
@@ -875,7 +875,7 @@ describe("custom primary Provider setup", () => {
       activationResult: {
         status: "restart",
         target: "all",
-        commands: ["codexc service restart all"],
+        commands: ["codexc restart all"],
       },
     });
 

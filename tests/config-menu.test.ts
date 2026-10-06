@@ -64,12 +64,12 @@ describe("Codex Connect config menu", () => {
     expect(readFileSync(fixture.configPath, "utf8")).toBe("[broken");
   });
 
-  it("shows paths without prompting when stdin is redirected and stdout is a terminal", async () => {
+  it("shows help without prompting when stdin is redirected and stdout is a terminal", async () => {
     const select = vi.fn();
     await expect(runConfig({
       input: { isTTY: false }, output: { isTTY: true, write: vi.fn() },
       prompts: { select },
-    })).resolves.toMatchObject({ action: "paths" });
+    })).resolves.toBeUndefined();
     expect(select).not.toHaveBeenCalled();
   });
 
@@ -78,6 +78,7 @@ describe("Codex Connect config menu", () => {
     const output: string[] = [];
 
     const result = await runConfig({
+      paths: true,
       input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: false },
@@ -318,7 +319,7 @@ describe("Codex Connect config menu", () => {
 
     expect(result).toEqual({ field: "https_proxy", configured: true, configPath: join(fixture.environment.CODEX_HOME!, ".env"), activation: "restart-all", activationResult: configActivationResult("restart-all") });
     expect(readCodexProxySettings(fixture.environment)).toMatchObject({ https_proxy: proxy });
-    expect(output.join("")).toContain("codexc service restart all");
+    expect(output.join("")).toContain("codexc restart all");
     expect(output.join("")).not.toContain("proxy-secret");
   });
 
@@ -401,7 +402,7 @@ describe("Codex Connect config menu", () => {
     );
     expect(readFileSync(fixture.configPath, "utf8")).toBe(gatewayBefore);
     if (process.platform !== "win32") expect(statSync(configPath).mode & 0o777).toBe(0o600);
-    expect(output.join("")).toContain("codexc service restart all");
+    expect(output.join("")).toContain("codexc restart all");
     expect(output.join("")).not.toContain("proxy-secret");
   });
 
@@ -557,7 +558,7 @@ describe("Codex Connect config menu", () => {
       model_traffic_dump: true,
     });
     expect(output.join("")).toContain("调用详情记录已开启");
-    expect(output.join("")).toContain("codexc service restart app-server");
+    expect(output.join("")).toContain("codexc restart appserver");
   });
 
   it("selects the shared debug capture mode without enabling collection", async () => {

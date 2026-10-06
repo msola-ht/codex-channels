@@ -165,7 +165,13 @@ jobs:
       - name: CLI help smoke check
         run: |
           node bin/codexc.mjs --help
-          node bin/codexc.mjs service --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($command in @('install', 'start', 'stop', 'restart', 'status', 'logs', 'reload', 'uninstall')) {
+            foreach ($help in @('-h', '--help')) {
+              node bin/codexc.mjs $command $help
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
 
       - name: Windows compatibility tests
         # GitHub-hosted Windows runners own TEMP as BUILTIN\Administrators;

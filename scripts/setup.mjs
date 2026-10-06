@@ -27,7 +27,7 @@ export async function runSetup({
   onResult,
 } = {}) {
   if (!input.isTTY || !output.isTTY) {
-    throw new Error("Setup 需要交互终端；请将标准输入和提示输出连接终端。--json 仅改变结果输出格式。");
+    throw new Error("Setup 需要交互终端；请将标准输入和提示输出连接终端。--jsonl 仅改变结果输出格式。");
   }
   prompts.intro("Codex Connect Setup");
   while (true) {
@@ -433,9 +433,9 @@ function sanitizeSetupText(value) {
 
 if (isDirectExecution(import.meta.url, process.argv[1])) {
   const args = process.argv.slice(2);
-  const json = args.length === 1 && args[0] === "--json";
+  const json = args.length === 1 && args[0] === "--jsonl";
   if (args.length > 0 && !json) {
-    writeCliMessage("failure", "用法：codexc setup [--json]");
+    writeCliMessage("failure", "用法：codexc setup [--jsonl]");
     process.exitCode = 1;
   } else {
     const output = json ? process.stderr : process.stdout;

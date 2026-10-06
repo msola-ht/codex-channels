@@ -5,7 +5,7 @@ import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { appServerSocketAcceptsWebSocket, inspectAppServerSupervisorState, sameAppServerTopology } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
-import { serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
+import { serviceCommandTarget, serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import { loadConfigDocument } from "../dist/config/index.js";
 import { sessionDisplayCacheSchemaVersion } from "../dist/storage/index.js";
 import { validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
@@ -67,7 +67,7 @@ export function inspectCoreServiceInstallation(
     environment,
     platform,
   );
-  const paths = serviceDefinitionsForTarget("all").flatMap((definition) => {
+  const paths = serviceDefinitionsForTarget("all").filter(definition => definition.core).flatMap((definition) => {
     const definitionPath = join(
       definitionsDirectory,
       platform === "darwin"
@@ -83,7 +83,7 @@ export function inspectCoreServiceInstallation(
   const existingPaths = paths.filter((path) => existsSync(path));
   if (existingPaths.length === 0) return { installed: false };
   if (existingPaths.length !== paths.length) {
-    throw new Error("核心后台服务安装不完整；请先运行 codexc service install");
+    throw new Error("核心后台服务安装不完整；请先运行 codexc install");
   }
   return { installed: true };
 }
@@ -161,7 +161,7 @@ export async function waitForCoreServiceTarget(
       }
       if (protocolMismatch) {
         throw new Error(
-          "App Server 监管协议版本不匹配；请运行 codexc service restart all 后重试",
+          "App Server 监管协议版本不匹配；请运行 codexc restart all 后重试",
         );
       }
       const topologyMatches = sameAppServerTopology(supervisor, descriptor.topology);
@@ -193,9 +193,10 @@ export async function waitForCoreServiceTarget(
     : target === "app-server"
       ? "Codex App Server"
       : "Gateway";
+  const commandTarget = serviceCommandTarget(target);
   throw new Error(
-    `${label} 未能及时就绪；请运行 codexc service status ${target}，`
-    + `并查看 codexc service logs ${target}`,
+    `${label} 未能及时就绪；请运行 codexc status ${commandTarget}，`
+    + `并查看 codexc logs ${commandTarget}`,
   );
 }
 

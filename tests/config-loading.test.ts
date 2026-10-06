@@ -69,7 +69,8 @@ describe("Config lazy loading", () => {
       result = runIsolatedConfig(`
         writeFileSync(configPath, "[broken");
         assert.equal((await runConfig({ environment, json: true, prompts: null, output })).exists, true);
-        assert.equal((await runConfig({ environment, input: { isTTY: false }, output })).action, "paths");
+        assert.equal(await runConfig({ environment, input: { isTTY: false }, output }), undefined);
+        assert.equal((await runConfig({ environment, paths: true, input: { isTTY: false }, output })).action, "paths");
         await runConfig({ environment, input, output, prompts: promptsFor(["paths", "cancel"]) });
         console.log("paths passed");
 

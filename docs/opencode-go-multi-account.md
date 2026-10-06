@@ -54,18 +54,18 @@ Profile 保存该账户的 Key、Provider 配置、模型目录、默认模型�
 ## CLI 与原子性
 
 ```bash
-codexc opencode-go account add <id>
-codexc opencode-go account list
-codexc opencode-go account list --json
-codexc opencode-go account remove <id>
-codexc opencode-go account default <id>
-codexc opencode-go account stop <id>
+codexc provider opencode-go add <id>
+codexc provider opencode-go list
+codexc provider opencode-go list --json
+codexc provider opencode-go remove <id>
+codexc provider opencode-go default <id>
+codexc provider opencode-go release <id>
 ```
 
 `list --json` 输出账户 ID、邮箱或手机号（若有）、展示名、默认标记、Provider ID 与运行模式，不包含 API Key 或 Profile 路径。
 
 - `add` 下载或复用共享模型目录，写入账户 Profile、管理标记与注册表；失败时按写入前快照回滚；
-- `codexc opencode-go account remove <accountId>` 先预览确认，停止账户实例并备份 Profile 与管理标记，再删除注册项和受管文件；任何删除步骤失败
+- `codexc provider opencode-go remove <accountId>` 先预览确认，停止账户实例并备份 Profile 与管理标记，再删除注册项和受管文件；任何删除步骤失败
   都按删除前快照回滚；存在 Remote TUI
   租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；删除最后一个账户时
   同时清理共享模型目录，若该账户是固定模式还会恢复安装前的 Codex 主配置；
@@ -91,7 +91,7 @@ App Server 从自己的进程环境注入。
 
 账户 App Server 的 `base_url` 指向共享代理并带 `/go/<accountId>` 前缀。代理转发时剥离前缀，
 按账户选择指标 Socket，使指标库中的 `provider` 保持为对应账户 Provider id。因此现有 Provider
-过滤和 `codexc metrics prune ocg-<accountId>` 无需新增请求指标表；账户快照保存在本机指标库中。
+过滤和 `codexc cleanup metrics prune ocg-<accountId>` 无需新增请求指标表；账户快照保存在本机指标库中。
 
 ## App Server 生命周期
 

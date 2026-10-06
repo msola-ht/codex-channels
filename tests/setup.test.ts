@@ -185,7 +185,7 @@ describe("Codex Connect setup", () => {
           activationResult: {
             status: "restart",
             target: "gateway",
-            commands: ["codexc service restart gateway"],
+            commands: ["codexc restart gateway"],
           },
         },
       },
@@ -196,7 +196,7 @@ describe("Codex Connect setup", () => {
   it("rejects redirected input with a structured JSON error", () => {
     const child = spawnSync(
       process.execPath,
-      [resolve("scripts/setup.mjs"), "--json"],
+      [resolve("scripts/setup.mjs"), "--jsonl"],
       {
         cwd: process.cwd(),
         env: { ...process.env, NO_COLOR: "1" },
@@ -316,7 +316,7 @@ describe("Codex Connect setup", () => {
       activationResult: {
         status: "restart",
         target: "all",
-        commands: ["codexc service restart all"],
+        commands: ["codexc restart all"],
       },
     });
   });

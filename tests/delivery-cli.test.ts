@@ -79,7 +79,7 @@ it("lists safe metadata and rejects concurrent maintenance", () => {
     const conflict = run("delivery", "status");
     expect(conflict.status).toBe(1);
     expect(conflict.stderr).toContain("投递箱正被其他进程占用");
-    expect(conflict.stderr).toContain("codexc service stop gateway");
+    expect(conflict.stderr).toContain("codexc stop gateway");
     expect(store.execute({ type: "summary" })).toMatchObject({ records: 1, uncertain: 1 });
   } finally { store.close(); }
   const listed = run("delivery", "list");

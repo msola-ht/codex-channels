@@ -183,23 +183,6 @@ describe("launchd installer", () => {
     const stopCalls = readFileSync(launchctlLog, "utf8");
     execFileSync("/bin/zsh", [script, "start"], { env: environment, encoding: "utf8" });
     writeFileSync(launchctlLog, "");
-    const restarted = execFileSync("/bin/zsh", [script, "restart"], { env: environment, encoding: "utf8" });
-    const restartCalls = readFileSync(launchctlLog, "utf8");
-    writeFileSync(launchctlLog, "");
-    const appServerRestarted = execFileSync(
-      "/bin/zsh",
-      [script, "restart", "app-server"],
-      { env: environment, encoding: "utf8" },
-    );
-    const appServerRestartCalls = readFileSync(launchctlLog, "utf8");
-    writeFileSync(launchctlLog, "");
-    const allRestarted = execFileSync(
-      "/bin/zsh",
-      [script, "restart", "all"],
-      { env: environment, encoding: "utf8" },
-    );
-    const allRestartCalls = readFileSync(launchctlLog, "utf8");
-    writeFileSync(launchctlLog, "");
     const reloaded = execFileSync("/bin/zsh", [script, "reload"], { env: environment, encoding: "utf8" });
     const reloadCalls = readFileSync(launchctlLog, "utf8");
     writeFileSync(launchctlLog, "");
@@ -226,31 +209,10 @@ describe("launchd installer", () => {
     expect(started).toContain("启动操作已完成，正在确认就绪状态");
     expect(started).toContain("[提示]");
     expect(stopped).toContain("已停止");
-    expect(restarted).toContain("Gateway 重启操作已完成");
-    expect(restarted).toContain("App Server 保持运行");
     expect(startCalls).toContain("bootstrap");
     expect(startCalls).toContain("kickstart gui/");
     expect(startCalls).not.toContain("kickstart -k");
     expect(stopCalls).toContain("bootout");
-    expect(restartCalls).not.toContain("bootout");
-    expect(restartCalls).not.toContain("bootstrap");
-    expect(restartCalls).toContain("kickstart -k");
-    expect(restartCalls).toContain("com.hegenai.codex-gateway");
-    expect(restartCalls).not.toContain("com.hegenai.codex-app-server");
-    expect(appServerRestarted).toContain("Codex App Server 重启操作已完成");
-    expect(appServerRestartCalls).toContain("com.hegenai.codex-app-server");
-    expect(appServerRestartCalls).not.toContain("com.hegenai.codex-gateway");
-    expect(allRestarted).toContain("Codex App Server 与 Gateway 重启操作已完成");
-    expect(allRestartCalls).toContain("com.hegenai.codex-app-server");
-    expect(allRestartCalls).toContain("com.hegenai.codex-gateway");
-    const restartOrder = allRestartCalls.split("\n").filter(line => /^(bootout|kickstart) /u.test(line))
-      .map(line => line.replace(/gui\/\d+\//u, "gui/UID/"));
-    expect(restartOrder).toEqual([
-      "bootout gui/UID/com.hegenai.codex-gateway",
-      "bootout gui/UID/com.hegenai.codex-app-server",
-      "kickstart -k gui/UID/com.hegenai.codex-app-server",
-      "kickstart -k gui/UID/com.hegenai.codex-gateway",
-    ]);
     expect(reloaded).toContain("重新读取配置");
     expect(reloadCalls).toContain("kill SIGHUP");
     expect(reloadCalls).toContain("com.hegenai.codex-gateway");

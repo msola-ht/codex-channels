@@ -155,11 +155,11 @@ fi
 
 print_next_steps() {
   if [ "$codex_logged_in" = true ]; then
-    printf '%s\n' "下一步：codexc init && codexc setup && codexc service install"
+    printf '%s\n' "下一步：codexc init && codexc setup && codexc install"
   else
     printf '%s\n' "下一步：codex login status"
     printf '%s\n' "如未登录：codex login"
-    printf '%s\n' "登录后执行：codexc init && codexc setup && codexc service install"
+    printf '%s\n' "登录后执行：codexc init && codexc setup && codexc install"
   fi
 }
 

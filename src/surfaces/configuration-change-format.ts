@@ -62,7 +62,7 @@ export function formatSurfaceConfigurationChange(
         "Gateway 配置尚未应用",
         ...(changes ? [`需要重装服务：${changes}`] : []),
         "请在本机执行：",
-        "- codexc service install",
+        "- codexc install",
       ].join("\n"));
     case "reload-failed":
       return toStructuredMarkdownList([

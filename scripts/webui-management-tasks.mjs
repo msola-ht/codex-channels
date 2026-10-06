@@ -31,10 +31,10 @@ export class WebuiManagementTaskRunner {
   preview(input) {
     const normalized = normalizeTaskInput(input);
     const command = normalized.operation === "service"
-      ? `codexc service ${normalized.action}${normalized.target ? ` ${serviceCommandTarget(normalized.target)}` : ""}`
+      ? `codexc ${serviceTaskArguments(normalized).join(" ")}`
       : normalized.operation === "traffic"
-        ? "codexc traffic cleanup --confirm"
-        : `codexc metrics ${normalized.action}${normalized.target === undefined ? "" : ` ${normalized.target}`}`;
+        ? "codexc cleanup traffic --confirm"
+        : `codexc ${metricsTaskArguments(normalized).join(" ")}`;
     const metrics = normalized.operation === "metrics";
     const traffic = normalized.operation === "traffic";
     return {
@@ -168,10 +168,10 @@ export class WebuiManagementTaskRunner {
     task.updatedAt = new Date(this.#now()).toISOString();
     this.#notify(task);
     const args = normalized.operation === "service"
-      ? ["service", normalized.action, ...(normalized.target === undefined ? [] : [serviceCommandTarget(normalized.target)])]
+      ? serviceTaskArguments(normalized)
       : normalized.operation === "traffic"
-        ? ["traffic", "cleanup", "--confirm"]
-        : ["metrics", normalized.action, ...(normalized.target === undefined ? [] : [normalized.target])];
+        ? ["cleanup", "traffic", "--confirm"]
+        : metricsTaskArguments(normalized);
     const invocation = resolveExecutableInvocation("codexc", args, environment);
     await new Promise((resolve) => {
       const child = spawn(invocation.file, invocation.args, {
@@ -249,16 +249,29 @@ export class WebuiManagementTaskRunner {
   }
 }
 
+function metricsTaskArguments(input) {
+  return ["cleanup", "metrics", ...(input.action === "cleanup" ? [] : [input.action]), ...(input.target === undefined ? [] : [input.target])];
+}
+
+function serviceTaskArguments(input) {
+  return [input.action, ...(input.action === "uninstall" ? ["--services"]
+    : input.target === undefined ? [] : [serviceCommandTarget(input.target)])];
+}
+
 export function normalizeTaskInput(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("任务输入必须是对象");
   if (input.operation === "service") {
     if (!serviceActions.has(input.action)) throw new Error("服务任务动作无效");
-    if (["install", "uninstall"].includes(input.action)) return { operation: "service", action: input.action, target: undefined };
+    if (input.action === "uninstall") throw new Error("此操作会停止当前 WebUI 管理任务，请在本机终端执行 codexc uninstall --services");
+    if (input.action === "install") return { operation: "service", action: input.action, target: undefined };
     if (input.action === "reload") {
       if (input.target !== undefined) throw new Error("服务重载不接受服务目标");
       return { operation: "service", action: input.action, target: undefined };
     }
     if (!targets.has(input.target)) throw new Error("服务任务目标无效");
+    if (["restart", "stop"].includes(input.action) && (input.target === "all" || input.target === "webui")) {
+      throw new Error(`此操作会停止当前 WebUI 管理任务，请在本机终端执行 codexc ${input.action} ${input.target}`);
+    }
     return { operation: "service", action: input.action, target: input.target };
   }
   if (input.operation === "metrics") {

@@ -91,8 +91,8 @@ describe("network proxy discovery", async () => {
     await watcher.checkNow();
     await watcher.checkNow();
     expect(warn).toHaveBeenCalledOnce();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("codexc service restart all"));
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("codexc start"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("codexc restart all"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("codexc run"));
     await watcher.stop();
     systemProxy = {};
     await watcher.checkNow();

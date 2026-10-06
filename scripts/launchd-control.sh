@@ -66,7 +66,7 @@ show_logs() {
       [[ -f "$runtime_dir/codex-app-server.error.log" ]] && log_files+=("$runtime_dir/codex-app-server.error.log")
     fi
   fi
-  if [[ "$service" == "webui" ]]; then
+  if [[ "$service" == "webui" || "$service" == "all" ]]; then
     [[ -f "$runtime_dir/webui.log" ]] && log_files+=("$runtime_dir/webui.log")
     if [[ ! -f "$runtime_dir/webui.log" || "$runtime_dir/webui.error.log" -nt "$runtime_dir/webui.log" ]]; then
       [[ -f "$runtime_dir/webui.error.log" ]] && log_files+=("$runtime_dir/webui.error.log")
@@ -78,7 +78,7 @@ show_logs() {
   fi
   if (( ${#log_files[@]} == 0 )); then
     print_status failure "尚未找到后台日志：$runtime_dir"
-    print_status remediation "请先执行 codexc service start，并检查 codexc service status。"
+    print_status remediation "请先执行 codexc start，并检查 codexc status。"
     return 1
   fi
   if (( follow )); then
@@ -102,7 +102,7 @@ reject_unsupported_jobs() {
     return 0
   fi
   print_status failure "检测到不支持的 launchd Job：${(j:, :)loaded}"
-  print_status remediation "请先手动卸载这些 Job 并删除对应 plist，再重新运行 codexc service install。"
+  print_status remediation "请先手动卸载这些 Job 并删除对应 plist，再重新运行 codexc install。"
   return 1
 }
 
@@ -148,11 +148,7 @@ start_job() {
   local label="$1"
   local plist="$2"
   ensure_loaded "$label" "$plist" || return $?
-  if [[ "${3:-start}" == "restart" ]]; then
-    launchctl kickstart -k "$user_domain/$label"
-  else
-    launchctl kickstart "$user_domain/$label"
-  fi
+  launchctl kickstart "$user_domain/$label"
 }
 
 require_target() {
@@ -172,14 +168,14 @@ case "$action" in
     ;;
   install)
     reject_unsupported_jobs
-    labels=$(service_ids all stop)
+    labels=$(service_ids all install-stop)
     for label in ${(f)labels}; do stop_job "$label"; done
-    labels=$(service_ids all start)
+    labels=$(service_ids all install)
     for label in ${(f)labels}; do
       start_job "$label" "$agents_dir/$label.plist"
     done
     print_status note "Codex App Server 与 Gateway 已安装，启动操作已完成，正在确认就绪状态。"
-    print_status note "WebUI 服务已生成，可执行 codexc service start webui 启动。"
+    print_status note "WebUI 服务已生成，可执行 codexc start webui 启动。"
     ;;
   start)
     reject_unsupported_jobs
@@ -193,7 +189,7 @@ case "$action" in
       fi
     done
     if (( ${#failed_labels[@]} > 0 )) && [[ "$target" == "all" ]]; then
-      print_status failure "服务启动部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc service status。"
+      print_status failure "服务启动部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc status。"
       exit 1
     elif (( ${#failed_labels[@]} > 0 )); then
       exit 1
@@ -217,7 +213,7 @@ case "$action" in
       fi
     done
     if (( ${#failed_labels[@]} > 0 )) && [[ "$target" == "all" ]]; then
-      print_status failure "服务停止部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc service status。"
+      print_status failure "服务停止部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc status。"
       exit 1
     elif (( ${#failed_labels[@]} > 0 )); then
       exit 1
@@ -231,62 +227,26 @@ case "$action" in
     esac
     ;;
   uninstall)
-    core_labels=$(service_ids all stop)
-    webui_label=$(service_ids webui stop)
-    relay_label=$(service_ids model-relay stop)
-    for label in "$relay_label" ${(f)core_labels} "$webui_label"; do
+    labels=$(service_ids all uninstall)
+    for label in ${(f)labels}; do
       stop_job "$label"
       /bin/rm -f "$agents_dir/$label.plist"
     done
     print_status success "Codex App Server、Gateway 与 WebUI launchd 服务已卸载。"
     print_status note "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
-  restart)
-    reject_unsupported_jobs
-    target="${2:-gateway}"
-    require_target "$target"
-    labels=$(service_ids "$target" start)
-    if [[ "$target" == "all" ]]; then
-      stopping_labels=$(service_ids all stop)
-      for stopping_label in ${(f)stopping_labels}; do
-        if ! stop_job "$stopping_label"; then
-          print_status failure "停止服务失败，已中止整体重启：$stopping_label。请运行 codexc service status。"
-          exit 1
-        fi
-      done
-    fi
-    failed_labels=()
-    for label in ${(f)labels}; do
-      if ! start_job "$label" "$agents_dir/$label.plist" restart; then
-        failed_labels+=("$label")
-      fi
-    done
-    if (( ${#failed_labels[@]} > 0 )) && [[ "$target" == "all" ]]; then
-      print_status failure "服务重启部分失败；失败目标：${(j:, :)failed_labels}。请运行 codexc service status。"
-      exit 1
-    elif (( ${#failed_labels[@]} > 0 )); then
-      exit 1
-    fi
-    case "$target" in
-      gateway) print_status note "Gateway 重启操作已完成，正在确认就绪状态；Codex App Server 保持运行。" ;;
-      app-server) print_status note "Codex App Server 重启操作已完成，正在确认就绪状态；Gateway 将自动重连。" ;;
-      webui) print_status success "WebUI 已重启。" ;;
-      model-relay) print_status success "Model Relay 已重启。" ;;
-      all) print_status note "Codex App Server 与 Gateway 重启操作已完成，正在确认就绪状态。" ;;
-    esac
-    ;;
   reload)
     reject_unsupported_jobs
     gateway_label=$(service_ids gateway start)
     if ! job_loaded "$gateway_label"; then
-      print_status failure "Gateway 尚未运行，请先执行 codexc service start。"
+      print_status failure "Gateway 尚未运行，请先执行 codexc start。"
       exit 1
     fi
     if launchctl kill SIGHUP "$user_domain/$gateway_label" 2>/dev/null; then
       print_status success "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
     else
       print_status failure "Gateway 当前没有可接收信号的运行进程，未隐式启动服务。"
-      print_status remediation "请先执行 codexc service start gateway，再运行 codexc service reload。"
+      print_status remediation "请先执行 codexc start gateway，再运行 codexc reload。"
       exit 1
     fi
     ;;
@@ -308,7 +268,7 @@ case "$action" in
     show_logs "$@"
     ;;
   *)
-    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|model-relay|all]"
+    print_status failure "用法：$0 {install|uninstall|reload|start|stop|status|logs} [gateway|app-server|webui|model-relay|all]"
     exit 2
     ;;
 esac

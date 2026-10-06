@@ -243,7 +243,7 @@ PR 把 `package.json`、锁文件、`src/version.json` 和 README 的 `main` 开
 ```bash
 codexc update
 codexc doctor
-codexc service status
+codexc status
 ```
 
 `codexc update` 的停止、重建、配套 CLI 同步和重启行为以[源码安装与更新](source-install.md)为准。

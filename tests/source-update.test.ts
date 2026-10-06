@@ -147,18 +147,36 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     const directory = process.platform === "darwin" ? join(fixture.environment.HOME, "Library", "LaunchAgents") : join(fixture.environment.HOME, ".config", "systemd", "user");
     mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, process.platform === "darwin" ? "com.hegenai.codex-model-relay.plist" : "codex-connect-model-relay.service"), "fixture");
-    const calls: string[][] = [];
+    const serviceCalls = join(fixture.installRoot, "service-calls.jsonl");
+    mkdirSync(join(fixture.checkout, "runtime"), { recursive: true });
+    mkdirSync(join(fixture.checkout, "scripts"), { recursive: true });
+    const writeServiceAdapter = (phase: string) => {
+      writeFileSync(join(fixture.checkout, "runtime", "service-targets.mjs"),
+        `export const serviceCommandTarget = target => ${JSON.stringify(phase)} + ':' + target;`);
+      writeFileSync(join(fixture.checkout, "scripts", "service-command.mjs"),
+        `import { appendFileSync } from 'node:fs';
+export async function runServiceCommand(args) {
+  if (!args[1].startsWith(${JSON.stringify(`${phase}:`)})) throw new Error('stale target mapping');
+  appendFileSync(${JSON.stringify(serviceCalls)}, JSON.stringify(args) + '\\n');
+}`);
+    };
+    writeServiceAdapter("before");
     await updateInstalledPackage({ ...fixture.environment, CODEX_CONNECT_CONFIG_FILE: config, XDG_CONFIG_HOME: join(fixture.environment.HOME, ".config") }, {
       projectDir: fixture.checkout, inspectStaged: async () => ({ services: { installed: true } }),
       inspectServices: () => [{ target: "app-server", running: core }, { target: "gateway", running: core },
         { target: "webui", running: webui }, { target: "model-relay", running }], confirmCodexCliInstall: () => true,
       installCodexCliForValidation: version => writeFakeCodex(join(fixture.installRoot, "candidate"), version),
-      validateCodexContract: () => {}, installCodexCli: version => { writeFakeCodex(fixture.codex, version); },
-      runCommand: (_command, args) => { calls.push(args); },
+      validateCodexContract: () => {}, installCodexCli: version => {
+        writeFakeCodex(fixture.codex, version);
+        writeServiceAdapter("after");
+      },
+      runCommand: (command, args, options) => {
+        execFileSync(command, args, { cwd: options.cwd as string, env: options.environment as NodeJS.ProcessEnv, stdio: "ignore" });
+      },
     });
-    expect(calls.filter(args => args[1] === "service").map(args => args.slice(2))).toEqual([
-      ...(webui ? [["stop", "webui"]] : []), ...(running ? [["stop", "relay"]] : []), ...(core ? [["stop", "gateway"], ["stop", "app-server"]] : []),
-      ...(core ? [["start", "app-server"], ["start", "gateway"]] : []), ...(running ? [["start", "relay"]] : []), ...(webui ? [["start", "webui"]] : []),
+    expect(core || webui || running ? readFileSync(serviceCalls, "utf8").trim().split("\n").map(line => JSON.parse(line)) : []).toEqual([
+      ...(webui ? [["stop", "before:webui"]] : []), ...(running ? [["stop", "before:model-relay"]] : []), ...(core ? [["stop", "before:gateway"], ["stop", "before:app-server"]] : []),
+      ...(core ? [["start", "after:app-server"], ["start", "after:gateway"]] : []), ...(running ? [["start", "after:model-relay"]] : []), ...(webui ? [["start", "after:webui"]] : []),
     ]);
   });
 
@@ -291,7 +309,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     expect(calls).toEqual(["validate"]);
     expect(messages).toEqual([
       ["note", "正在检查配套 Codex CLI、当前配置和数据库结构。"],
-      ["note", "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc service 管理。"],
+      ["note", "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc 管理。"],
       ["success", "检查完成：配套 Codex CLI 0.147.0 无需更新，数据库结构有效。"],
     ]);
   });
@@ -399,7 +417,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       ["note", "正在核对候选版本的 Codex 公开合同。"],
       ["note", "候选源码已通过校验，准备切换。"],
       ["note", "源码命令已刷新到 npm 全局安装。"],
-      ["note", "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc service 管理。"],
+      ["note", "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc 管理。"],
     ]);
   });
 

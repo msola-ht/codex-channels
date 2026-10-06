@@ -43,7 +43,7 @@ export function windowsServiceDefinitionsDirectory(environment = process.env) {
 
 export async function controlWindowsServices({
   action,
-  target = action === "restart" || action === "logs" ? "gateway" : "all",
+  target = action === "logs" ? "gateway" : "all",
   definitionsDirectory = windowsServiceDefinitionsDirectory(),
   environment = process.env,
   follow = false,
@@ -64,16 +64,13 @@ export async function controlWindowsServices({
       const value = readDefinition(file);
       runTaskPrimitive("register", definition.windows, environment, file, value.pwshBinary);
     }
-    await startDefinitions("all", definitionsDirectory, environment);
+    await startDefinitions("all", definitionsDirectory, environment, "install");
     writeCliMessage("note", "Codex App Server 与 Gateway Windows 计划任务已安装并启动，正在确认就绪状态。");
     writeCliMessage("note", "WebUI 计划任务已生成，可按需单独启动。");
     return;
   }
   if (action === "uninstall") {
-    for (const definition of [
-      ...serviceDefinitionsForTarget("all", "stop"),
-      ...serviceDefinitions.filter((candidate) => !candidate.core),
-    ]) {
+    for (const definition of serviceDefinitionsForTarget("all", "stop")) {
       await stopDefinition(definition, definitionsDirectory, environment);
       runTaskPrimitive("unregister", definition.windows, environment);
       const file = definitionPath(definitionsDirectory, definition.target);
@@ -100,17 +97,11 @@ export async function controlWindowsServices({
     printLifecycleResult("stop", parsedTarget);
     return;
   }
-  if (action === "restart") {
-    await stopDefinitions(parsedTarget, definitionsDirectory, environment, true);
-    await startDefinitions(parsedTarget, definitionsDirectory, environment);
-    printLifecycleResult("restart", parsedTarget);
-    return;
-  }
   if (action === "reload") {
     const definition = readDefinition(definitionPath(definitionsDirectory, "gateway"));
     const result = await requestHost(definition.controlPath, { action: "reload" });
     if (result?.version !== 1 || result.ok !== true) {
-      throw new Error("Gateway 尚未运行或无法接收重新加载请求，请先执行 codexc service start gateway");
+      throw new Error("Gateway 尚未运行或无法接收重新加载请求，请先执行 codexc start gateway");
     }
     writeCliMessage("success", "已通知 Gateway 重新读取配置；App Server 配置变化仍需重新安装服务。");
     return;
@@ -175,9 +166,9 @@ export async function inspectWindowsServiceStatus({
   };
 }
 
-async function startDefinitions(target, definitionsDirectory, environment) {
+async function startDefinitions(target, definitionsDirectory, environment, selection = "start") {
   const failures = [];
-  for (const service of serviceControlDefinitions("windows", target, "start", environment, definitionsDirectory)) {
+  for (const service of serviceControlDefinitions("windows", target, selection, environment, definitionsDirectory)) {
     try {
       const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
       const host = await inspectHost(definition.controlPath);
@@ -201,22 +192,21 @@ async function startDefinitions(target, definitionsDirectory, environment) {
     }
   }
   if (failures.length > 0) {
-    throw new Error(`服务启动部分失败：${failures.join("；")}。请运行 codexc service status。`);
+    throw new Error(`服务启动部分失败：${failures.join("；")}。请运行 codexc status。`);
   }
 }
 
-async function stopDefinitions(target, definitionsDirectory, environment, failFast = false) {
+async function stopDefinitions(target, definitionsDirectory, environment) {
   const failures = [];
   for (const definition of serviceControlDefinitions("windows", target, "stop", environment, definitionsDirectory)) {
     try {
       await stopDefinition(definition, definitionsDirectory, environment);
     } catch (error) {
-      if (failFast) throw new Error(`停止服务失败，已中止重启：${definition.target}。请运行 codexc service status。`, { cause: error });
       failures.push(`${definition.target}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   if (failures.length > 0) {
-    throw new Error(`服务停止部分失败：${failures.join("；")}。请运行 codexc service status。`);
+    throw new Error(`服务停止部分失败：${failures.join("；")}。请运行 codexc status。`);
   }
 }
 
@@ -386,7 +376,7 @@ async function waitForHost(controlPath, expected, timeoutMs, throwOnTimeout = tr
 
 function showLogs(target, definitionsDirectory, environment, { follow, lines }) {
   const paths = [];
-  for (const service of serviceDefinitionsForTarget(target)) {
+  for (const service of serviceControlDefinitions("windows", target, "status", environment, definitionsDirectory)) {
     const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
     for (const path of [definition.stdoutLog, definition.stderrLog]) {
       if (existsSync(path)) paths.push(path);
@@ -425,7 +415,7 @@ function readDefinition(path) {
   try {
     definition = JSON.parse(readPrivateFileSync(path, definitionLimitBytes));
   } catch (error) {
-    throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc service install`, { cause: error });
+    throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc install`, { cause: error });
   }
   if (
     definition?.version !== 1
@@ -433,7 +423,7 @@ function readDefinition(path) {
     || typeof definition.pwshBinary !== "string"
     || typeof definition.controlPath !== "string"
   ) {
-    throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc service install`);
+    throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc install`);
   }
   return definition;
 }
@@ -446,8 +436,8 @@ function printLifecycleResult(action, target) {
   const label = target === "all"
     ? "Codex App Server 与 Gateway"
     : serviceDefinitions.find((service) => service.target === target)?.displayName ?? target;
-  const verb = action === "start" ? "已启动" : action === "stop" ? "已停止" : "已重启";
-  writeCliMessage(action === "start" || action === "restart" ? "note" : "success", `${label}${verb}。`);
+  const verb = action === "start" ? "已启动" : "已停止";
+  writeCliMessage(action === "start" ? "note" : "success", `${label}${verb}。`);
 }
 
 function tailLines(value, count) {

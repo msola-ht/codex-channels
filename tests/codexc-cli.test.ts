@@ -66,7 +66,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     }`;
     const preload = `import { register } from "node:module";
       register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))}, import.meta.url);`;
-    for (const args of [["--help"], ["version"], ["service", "start", "--help"], ["app", "--help"], ["timezone", "--help"], ["traffic", "--help"], ["update", "--help"]]) {
+    for (const args of [["--help"], ["version"], ["restart", "--help"], ["start", "--help"], ["app", "--help"], ["timezone", "--help"], ["traffic", "--help"], ["update", "--help"]]) {
       const output = execFileSync(process.execPath, [
         "--import", "data:text/javascript," + encodeURIComponent(preload), cli, ...args,
       ], { encoding: "utf8", timeout: 10_000 });
@@ -141,12 +141,12 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     const configPath = join(root, "config.toml");
     writeFileSync(configPath, "[broken");
     const env = { ...process.env, CODEX_CONNECT_HOME: root, CODEX_CONNECT_CONFIG_FILE: configPath, CODEX_HOME: join(root, "codex") };
-    const validPaths = [["security", "repair"], ["update"], ...["add", "list", "switch", "remove"].map((action) => ["primary-provider", action])];
+    const validPaths = [["security", "repair"], ["update"], ...["add", "list", "switch", "remove"].map((action) => ["provider", action])];
     const invalidPaths = [
       ["app", "nonsense"], ["app", "open"], ["opencode-go", "nonsense", "add"],
       ["deepseek", "nonsense"], ["ccg", "nonsense"],
-      ["primary-provider", "remove", "some-id"],
-      ["opencode-go", "account", "add", "some-id"],
+      ["provider", "remove", "some-id"],
+      ["provider", "opencode-go", "add", "some-id"],
       ["update", "--background"], ["update", "status"], ["update", "status", "some-id"],
     ];
     const cases = ["-h", "--help"].flatMap((flag) => [
@@ -169,7 +169,9 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     const cases = [
       [["init", "-h"], "用法：codexc init"],
       [["setup", "--help"], "用法：codexc setup"],
+      [["run", "-h"], "用法：codexc run"],
       [["start", "-h"], "用法：codexc start"],
+      [["restart", "-h"], "用法：codexc restart"],
       [["remote", "-h"], "用法：codexc remote"],
       [["app", "--help"], "用法：codexc app"],
       [["app", "enable", "-h"], "enable [--port 端口]"],
@@ -180,21 +182,20 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["work", "list", "--help"], "用法：codexc work list"],
       [["work", "add", "-h"], "用法：codexc work add"],
       [["work", "remove", "--help"], "用法：codexc work remove"],
-      [["service", "-h"], "用法：codexc service"],
-      [["service", "install", "-h"], "用法：codexc service install"],
-      [["service", "uninstall", "--help"], "用法：codexc service uninstall"],
-      [["service", "reload", "-h"], "用法：codexc service reload"],
+      [["install", "-h"], "用法：codexc install"],
+      [["uninstall", "--services", "--help"], "--services 只停止并卸载后台服务"],
+      [["reload", "-h"], "用法：codexc reload"],
       [["config", "-h"], "用法：codexc config"],
       [["timezone", "-h"], "用法：codexc timezone"],
       [["doctor", "--help"], "用法：codexc doctor"],
-      [["primary-provider", "-h"], "用法：codexc primary-provider"],
-      [["opencode-go", "-h"], "用法：codexc opencode-go"],
-      [["opencode-go", "account", "--help"], "用法：codexc opencode-go account"],
-      [["opencode-go", "account", "add", "-h"], "用法：codexc opencode-go account add"],
-      [["opencode-go", "account", "list", "--help"], "用法：codexc opencode-go account list"],
-      [["opencode-go", "account", "remove", "-h"], "用法：codexc opencode-go account remove"],
-      [["opencode-go", "account", "default", "--help"], "用法：codexc opencode-go account default"],
-      [["opencode-go", "account", "stop", "-h"], "用法：codexc opencode-go account stop"],
+      [["provider", "-h"], "用法：codexc provider"],
+      [["provider", "opencode-go", "-h"], "用法：codexc provider opencode-go"],
+      [["provider", "opencode-go", "--help"], "用法：codexc provider opencode-go"],
+      [["provider", "opencode-go", "add", "-h"], "用法：codexc provider opencode-go add"],
+      [["provider", "opencode-go", "list", "--help"], "用法：codexc provider opencode-go list"],
+      [["provider", "opencode-go", "remove", "-h"], "用法：codexc provider opencode-go remove"],
+      [["provider", "opencode-go", "default", "--help"], "用法：codexc provider opencode-go default"],
+      [["provider", "opencode-go", "release", "-h"], "用法：codexc provider opencode-go release"],
       [["update", "--help"], "用法：codexc update"],
       [["uninstall", "--help"], "用法：codexc uninstall"],
       [["metrics", "-h"], "用法：codexc metrics"],
@@ -205,16 +206,16 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["metrics", "run", "--help"], "用法：codexc metrics run"],
       [["metrics", "turns", "--help"], "用法：codexc metrics turns"],
       [["metrics", "threads", "--help"], "用法：codexc metrics threads"],
-      [["metrics", "reset", "-h"], "用法：codexc metrics reset"],
-      [["metrics", "cleanup", "--help"], "用法：codexc metrics cleanup"],
-      [["metrics", "prune", "--help"], "用法：codexc metrics prune"],
+      [["cleanup", "metrics", "reset", "-h"], "用法：codexc cleanup metrics reset"],
+      [["cleanup", "metrics", "--help"], "用法：codexc cleanup metrics"],
+      [["cleanup", "metrics", "prune", "--help"], "用法：codexc cleanup metrics prune"],
       [["metrics", "report", "-h"], "用法：codexc metrics report"],
       [["metrics", "export", "--help"], "用法：codexc metrics export"],
       [["metrics", "quota", "--help"], "用法：codexc metrics quota"],
       [["channel", "-h"], "用法：codexc channel"],
       [["channel", "send-image", "--help"], "用法：codexc channel send-image"],
       [["traffic", "-h"], "用法：codexc traffic"],
-      [["traffic", "cleanup", "--help"], "用法：codexc traffic cleanup"],
+      [["cleanup", "traffic", "--help"], "用法：codexc cleanup traffic"],
       [["webui", "-h"], "用法：codexc webui"],
       [["version", "-h"], "用法：codexc version"],
     ] as const;
@@ -222,7 +223,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     const detailedCases = [
       {
         args: ["config", "--help"],
-        includes: ["codexc config [--json]", "脱敏配置总览", "网络代理"],
+        includes: ["codexc config [paths [--json]]", "脱敏配置总览", "网络代理"],
         excludes: ["Thread 分区管理员"],
       },
       {
@@ -242,16 +243,9 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
         includes: ["--stdout"],
       })),
       {
-        args: ["service", "--help"],
+        args: ["start", "--help"],
         includes: [
-          "all 只包含 App Server 与 Gateway",
-          "status [目标] [--json]",
-          "生成全部后台服务定义，并启动 App Server 与 Gateway",
-          "卸载全部后台服务并保留用户数据",
-          "uninstall",
-          "reload",
-          "logs",
-          "保留用户数据",
+          "默认 all", "已安装 WebUI", "前台运行使用 codexc run",
         ],
       },
       {
@@ -278,12 +272,12 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
         includes: [
           "version, -v, --version",
           "uninstall",
-          "卸载受管源码与全局命令并保留用户数据",
+          "--services 仅卸载后台服务",
           "配置 Provider、通讯渠道与项目技能",
           ...[
             "init", "setup", "config", "doctor", "remote", "work",
-            "primary-provider", "opencode-go", "metrics", "channel", "webui",
-            "start", "service", "update", "version",
+            "provider", "metrics", "channel", "webui",
+            "run", "install", "start", "stop", "restart", "status", "logs", "reload", "update", "version",
           ].map((command) => `\n  ${command}`),
         ],
         excludes: [

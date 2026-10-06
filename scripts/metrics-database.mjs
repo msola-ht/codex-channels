@@ -19,7 +19,7 @@ import {
   ForwardedChildSignalError,
   ReportedChildExitError,
 } from "../runtime/process-lifecycle.mjs";
-import { serviceIdentifiers } from "../runtime/service-targets.mjs";
+import { serviceCommandTarget, serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
   acquireRequestMetricsDatabaseLock,
 } from "../dist/observability/index.js";
@@ -85,7 +85,7 @@ export function resetMetricsDatabase(
     gatewayRunning()
     || runtime.metricsSocketPaths.some(metricsSocketIsActive)
   ) {
-    throw new Error("Gateway 仍在运行；请先执行 codexc service stop gateway，再重试");
+    throw new Error("Gateway 仍在运行；请先执行 codexc stop gateway，再重试");
   }
 
   const databasePath = runtime.databasePath;
@@ -208,7 +208,7 @@ export function cleanupMetricsDatabase(environment = process.env, options = {}) 
   const gatewayRunning = options.gatewayRunning ?? (() => isGatewayRunning(environment));
   if (gatewayRunning() || runtime.metricsSocketPaths.some(metricsSocketIsActive)) {
     throw new Error(
-      "Gateway 仍在运行；请先执行 codexc service stop gateway，或使用 --restart-gateway 自动停止并重启",
+      "Gateway 仍在运行；请先执行 codexc stop gateway，或使用 --restart-gateway 自动停止并重启",
     );
   }
   const databasePath = requireCompatibleMetricsDatabase(environment);
@@ -280,7 +280,7 @@ export function cleanupMetricsDatabaseWithGatewayRestart(
     startGateway();
   } catch (error) {
     throw new AggregateError(operationError ? [operationError, error] : [error],
-      "指标清理流程结束，但 Gateway 恢复失败；请运行 codexc service start gateway", { cause: error });
+      "指标清理流程结束，但 Gateway 恢复失败；请运行 codexc start gateway", { cause: error });
   }
   if (operationError) throw operationError;
   return result;
@@ -365,7 +365,7 @@ function errorMessage(error) {
 
 function assertPruneProvider(provider) {
   if (!isPrunableMetricsProviderId(provider)) {
-    throw new Error("用法：codexc metrics prune <provider>");
+    throw new Error("用法：codexc cleanup metrics prune <provider>");
   }
 }
 
@@ -373,7 +373,7 @@ function runGatewayServiceAction(action, environment) {
   const cli = resolve(import.meta.dirname, "../bin/codexc.mjs");
   const result = spawnSync(
     process.execPath,
-    [cli, "service", action, "gateway"],
+    [cli, action, "gateway"],
     { env: environment, stdio: "inherit" },
   );
   assertSynchronousChildSuccess(result, { failureReportedByChild: true });
@@ -383,7 +383,7 @@ function runServiceAction(target, action, environment) {
   const cli = resolve(import.meta.dirname, "../bin/codexc.mjs");
   const result = spawnSync(
     process.execPath,
-    [cli, "service", action, target],
+    [cli, action, serviceCommandTarget(target)],
     { env: environment, stdio: "inherit" },
   );
   assertSynchronousChildSuccess(result, { failureReportedByChild: true });
@@ -597,7 +597,7 @@ if (
       printMetricsTurns(readMetricsTurns(process.env, options.threadId, options), options.format);
     } else {
       throw new Error(
-        "用法：codexc metrics <status|run|threads|turns|report|export|quota|reset|cleanup|prune>",
+        "查询：codexc metrics <status|run|threads|turns|report|export|quota>；维护：codexc cleanup metrics [prune|reset]",
       );
     }
   } catch (error) {

@@ -315,7 +315,7 @@ Codex 自身也会在工具发现时按退避规则尝试恢复 `codex_apps`，�
 若代理软件在服务之后才写入系统代理，第一次上游连接失败会使发现缓存失效，下一次请求重新读取系统代理，
 这仅覆盖 Provider Proxy 的模型出站连接，不代表整条链路已刷新。Gateway 渠道与 App Server 账户请求
 仍使用启动时的代理。系统代理观察器只记录提示，不自动重启共享进程；代理地址变化后，应等所有客户端
-任务结束，后台模式执行 `codexc service restart all`，前台模式停止并重新运行 `codexc start`。
+任务结束，后台模式执行 `codexc restart all`，前台模式停止并重新运行 `codexc run`。
 代理地址未变、只是监听晚启动时，后续请求可继续使用原地址，失败的请求需重新发送。Codex `.env` 或标准环境代理
 保持固定优先级，不受系统代理观察器影响。为避免重复创建模型 Turn，失败的写请求不会由 Gateway 盲目重放。
 
@@ -367,7 +367,7 @@ Telegram 使用内联按钮，微信显示可输入的 `/effort` 选项。飞书
 `/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话都优先显示本机指标/缓存中的 Turn 轮数；
 打开列表不会等待 `thread/turns/list` 历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn
 统计；本地没有记录时暂不显示猜测值。需要完整官方历史计数时，清理命令仍会按候选读取。
-本机批量归档使用 `codexc sessions cleanup <最大轮数>`：先预览，交互终端追加 `--confirm` 后再次列出候选并确认。
+本机批量归档使用 `codexc cleanup sessions <最大轮数>`：先预览，交互终端追加 `--confirm` 后再次列出候选并确认。
 按主会话真实 Turn 数筛选，超过上限即停止计数，不使用展示缓存；可用 `--idle-days <天数>` 要求整组可查询成员均达到空闲条件。
 派生子孙会话随父会话由官方归档，Fork 会话独立筛选。预览列出主会话的 Provider、Workspace、轮数及未归档/已归档后代数，数量仅代表可查询成员，不承诺列出官方内部全部代理。
 执行前需停止 Gateway；Provider 不可连接或主目录扫描失败时中止。可查询成员包含活动、固定、渠道当前/后台绑定、未配置 Workspace 或无法读取状态时跳过整组；单组历史读取失败不阻断其他组。计划任务主会话不进入候选。
@@ -582,7 +582,7 @@ Token 总计。
 修改后只需重启 Gateway：
 
 ```bash
-codexc service restart gateway
+codexc restart gateway
 ```
 
 调试日志只记录受约束的类型、阶段、耗时和结果，不记录消息正文、请求参数、上游响应、凭据或
@@ -621,7 +621,7 @@ codexc service restart gateway
 下次出现“终端已有结果，渠道迟迟未收到”时，先保留发生时间和渠道，再查看：
 
 ```bash
-codexc service logs gateway -n 500
+codexc logs gateway -n 500
 ```
 
 按 Thread/Turn/Item 找到共享路由记录及“Surface 终态输出已收到”，先检查 `eventBusWaitMs`、`routingMs` 和完成统计准备记录，再按 `deliveryId` 和 `purpose` 查看输出阶段及平台调用：

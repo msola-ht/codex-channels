@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { runMaintenanceServices, type MaintenanceTarget } from "../scripts/maintenance-services.mjs";
+import { runServiceCommand } from "../scripts/service-command.mjs";
+
+vi.mock("../scripts/service-command.mjs", () => ({ runServiceCommand: vi.fn(async () => {}) }));
 
 function fixture() {
   return {
@@ -12,6 +15,16 @@ function fixture() {
 }
 
 describe("maintenance service lifecycle", () => {
+  it("maps maintenance targets to canonical CLI targets through the default adapter", async () => {
+    const { prompts, targets, isRunning, run } = fixture();
+    isRunning.mockResolvedValue(true);
+    await runMaintenanceServices({ prompts, targets, isRunning, run });
+    expect(vi.mocked(runServiceCommand).mock.calls).toEqual([
+      [["stop", "gateway"]], [["stop", "relay"]], [["stop", "appserver"]],
+      [["start", "appserver"]], [["start", "relay"]], [["start", "gateway"]],
+    ]);
+  });
+
   it("restores only running services in reverse order", async () => {
     const options = fixture();
     expect(await runMaintenanceServices(options)).toBe("done");
@@ -37,7 +50,7 @@ describe("maintenance service lifecycle", () => {
     options.runService.mockImplementation(async action => { if (action === "start") throw recoveryError; });
     await expect(runMaintenanceServices(options)).rejects.toMatchObject({
       errors: [operationError, recoveryError, recoveryError],
-      message: expect.stringContaining("codexc service start app-server；codexc service start gateway"),
+      message: expect.stringContaining("codexc start appserver；codexc start gateway"),
     });
     expect(options.runService).toHaveBeenLastCalledWith("start", "gateway");
   });

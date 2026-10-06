@@ -226,6 +226,7 @@ export class RequestMetricsQueryService {
       const hour = `${day} ${String(index).padStart(2, "0")}:00`;
       return rowsByHour.get(hour) ?? {
         hour, requestCount: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+        cacheUsage: { inputTokens: 0, cachedInputTokens: 0, missingRequestCount: 0 },
       };
     });
     return { granularity: "hour" as const, hourly };

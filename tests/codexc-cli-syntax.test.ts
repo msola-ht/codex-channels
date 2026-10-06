@@ -17,9 +17,25 @@ afterEach(() => {
 
 describe("codexc CLI", { timeout: 15_000 }, () => {
   it.each([
+    ["sessions", "cleanup", "3"], ["traffic", "cleanup"],
+    ["metrics", "cleanup"], ["metrics", "prune", "openai"], ["metrics", "reset"],
+    ["primary-provider", "list"], ["deepseek", "account", "list"],
+    ["opencode-go", "account", "list"], ["ccg", "account", "remove", "fixture"],
+    ["provider", "opencode-go", "stop", "fixture"], ["config", "--json"], ["setup", "--json"],
+  ])("rejects removed command spelling %j before changing user data", (...args) => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-removed-command-"));
+    temporaryDirectories.push(root);
+    const home = join(root, "uninitialized");
+    const result = spawnSync(process.execPath, [cli, ...args], {
+      encoding: "utf8", env: { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_CONFIG_FILE: "" },
+    });
+    expect(result.status).toBe(1);
+    expect(existsSync(home)).toBe(false);
+  });
+
+  it.each([
     [[], "交互终端无参数时打开主菜单"],
-    [["service"], "codexc service [命令]"],
-    [["sessions"], "交互归档请运行 codexc cleanup"],
+    [["cleanup"], "归档短会话及子会话"],
     [["metrics"], "交互清理和重置请用 codexc cleanup"],
   ] as const)("shows help without prompting or requiring config for %j", (args, expected) => {
     const root = mkdtempSync(join(tmpdir(), "codexc-menu-no-tty-"));
@@ -34,7 +50,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
   });
 
 
-  it.each([{ args: [] }, { args: ["--json"] }])("rejects noninteractive setup $args before initializing user data", ({ args }) => {
+  it.each([{ args: [] }, { args: ["--jsonl"] }])("rejects noninteractive setup $args before initializing user data", ({ args }) => {
     const root = mkdtempSync(join(tmpdir(), "codexc-setup-no-tty-"));
     temporaryDirectories.push(root);
     const home = join(root, "uninitialized");
@@ -70,10 +86,10 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["metrics", "upgrade"], "用法：codexc metrics"],
       [["remote", "--workspace"], "用法：codexc remote"],
       [["remote", "--workspace", "--profile", "ds-test"], "用法：codexc remote"],
-      [["config", "--json", "unexpected"], "用法：codexc config [--json]"],
+      [["config", "paths", "--json", "unexpected"], "用法：codexc config [paths [--json]]"],
       [["doctor", "--json", "unexpected"], "用法：codexc doctor [--json]"],
-      [["service", "status", "--json", "gateway"], "用法：codexc service status"],
-      [["service", "status", "gateway", "--json", "unexpected"], "用法：codexc service status"],
+      [["status", "--json", "gateway"], "用法：codexc status"],
+      [["status", "gateway", "--json", "unexpected"], "用法：codexc status"],
       [["metrics", "status", "--json", "unexpected"], "用法：codexc metrics status"],
       [["update", "--unknown"], "用法：codexc update"],
       [["update", "--background"], "用法：codexc update"],
@@ -93,12 +109,12 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["metrics", "report", "--help", "unexpected"], "用法：codexc metrics report"],
       [["metrics", "report", "--range", "invalid"], "--range 只支持"],
       [["metrics", "report", "--group", "invalid"], "--group 只支持"],
-      [["metrics", "cleanup", "--before", "invalid"], "日期必须使用 YYYY-MM-DD 格式"],
+      [["cleanup", "metrics", "--before", "invalid"], "日期必须使用 YYYY-MM-DD 格式"],
       [["traffic", "--unknown"], "未知参数：--unknown"],
       [["traffic", "--list", "--all"], "--list 与 --all 不能同时使用"],
       [["traffic", "--exchange", "abc"], "--exchange 需要正整数值"],
       [["traffic", "--dir"], "--dir 缺少值"],
-      [["traffic", "cleanup", "--all"], "未知清理参数：--all"],
+      [["cleanup", "traffic", "--all"], "未知清理参数：--all"],
     ] as const;
     await forEachWithConcurrency(cases, 8, async ([args, expected]) => {
       const result = await runCliProcess(args, {

@@ -24,7 +24,7 @@ switch ($Action) {
     }
     $definition = Get-Content -LiteralPath $DefinitionPath -Raw -Encoding utf8 | ConvertFrom-Json
     if (-not $definition.vbsLauncherPath) {
-      throw '服务定义缺少隐藏启动器路径；请运行 codexc service install'
+      throw '服务定义缺少隐藏启动器路径；请运行 codexc install'
     }
     $quotedVbsLauncher = '"' + $definition.vbsLauncherPath.Replace('"', '\"') + '"'
     $wscriptBinary = Join-Path $env:SystemRoot 'System32\wscript.exe'

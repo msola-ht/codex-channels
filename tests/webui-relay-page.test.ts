@@ -352,6 +352,15 @@ describe("Relay queue and service presentation", () => {
     expect(result.stopped).toContain("启动");
     expect(result.stopped).not.toMatch(/>重启<|>停止</u);
   });
+
+  it("directs WebUI stop and restart to the terminal in both languages without self-interrupting buttons", () => {
+    expect(fixture.services.webuiZh).toContain("请在本机终端运行 codexc restart webui");
+    expect(fixture.services.webuiEn).toContain("In the server terminal, run codexc restart webui");
+    expect(fixture.services.webuiZh).toContain("codexc stop webui");
+    expect(fixture.services.webuiEn).toContain("codexc stop webui");
+    expect(fixture.services.webuiZh).not.toMatch(/>(重启|停止)</u);
+    expect(fixture.services.webuiEn).not.toMatch(/>(Restart|Stop)</u);
+  });
 });
 
 function renderRelayQueueAndServiceFixture() {
@@ -390,23 +399,23 @@ function renderRelayQueueAndServiceFixture() {
       }
       async function renderServiceScenario() {
         const {ManagedServices} = await server.ssrLoadModule('/src/components/settings/managed-services.tsx');
-        const services = {platform:'systemd',entries:['gateway','model-relay'].map(target => ({target,name:target,loaded:true,running:true,state:'running',pid:123,version:'test',recentError:null}))};
+        const services = {platform:'systemd',entries:['gateway','model-relay','webui'].map(target => ({target,name:target,loaded:true,running:true,state:'running',pid:123,version:'test',recentError:null}))};
         const tasks = {loading:false,error:null,saving:false,pendingPreview:null,tasks:[{id:'other',operation:'service',action:'restart',target:'gateway',state:'completed'},{id:'relay',operation:'service',action:'restart',target:'model-relay',state:'completed'}]};
-        const render = () => renderToStaticMarkup(h(MemoryRouter,null,h(LanguageContext.Provider,{value:{language:'zh',setLanguage:()=>{}}},h(ManagedServices,{services,tasks,scope:'model-relay'}))));
+        const render = (scope='model-relay',language='zh') => renderToStaticMarkup(h(MemoryRouter,null,h(LanguageContext.Provider,{value:{language,setLanguage:()=>{}}},h(ManagedServices,{services,tasks,scope}))));
         const running = render();
         tasks.tasks[0].state = 'running';
         const busy = render();
         tasks.tasks[0].state = 'completed';
         services.entries[1].running = false;
         const stopped = render();
-        return {running,busy,stopped};
+        return {running,busy,stopped,webuiZh:render('webui'),webuiEn:render('webui','en')};
       }
       console.log(JSON.stringify({queue:await renderQueueScenario(),services:await renderServiceScenario()}));
     } finally {await server.close();}
   `;
   return JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
     cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL",
-  })) as { queue: Record<string, string>; services: { running: string; busy: string; stopped: string } };
+  })) as { queue: Record<string, string>; services: { running: string; busy: string; stopped: string; webuiZh: string; webuiEn: string } };
 }
 
 it("shows a read-only provider model catalog with refresh errors and no policy controls", () => {

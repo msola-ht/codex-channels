@@ -41,7 +41,7 @@ export async function uninstallManagedSourceInstallation(
 function assertManagedSourceInstallation(checkout, projectDir, environment) {
   if (!existsSync(checkout) || !existsSync(join(checkout, ".git"))) {
     throw new Error(
-      "当前不是受管 Git 源码安装；npm 全局版请先运行 codexc service uninstall，再执行 npm uninstall -g @hegenai/codexc",
+      "当前不是受管 Git 源码安装；npm 全局版请先运行 codexc uninstall --services，再执行 npm uninstall -g @hegenai/codexc",
     );
   }
   if (lstatSync(checkout).isSymbolicLink()) {
@@ -104,7 +104,7 @@ function uninstallGlobalPackage(prefixes, environment) {
 function uninstallServices(checkout, environment) {
   const result = spawnSync(
     process.execPath,
-    [join(checkout, "bin", "codexc.mjs"), "service", "uninstall"],
+    [join(checkout, "bin", "codexc.mjs"), "uninstall", "--services"],
     { cwd: checkout, env: environment, stdio: "inherit" },
   );
   if (result.error) throw result.error;

@@ -72,10 +72,10 @@ stop_unit() {
 }
 
 stop_before_all_restart() {
-  stopping_units=$(service_ids all stop)
+  stopping_units=$(service_ids all install-stop)
   for stopping_unit in $stopping_units; do
     if ! stop_unit "$stopping_unit"; then
-      print_status failure "停止服务失败，已中止整体重启：$stopping_unit。请运行 codexc service status。"
+      print_status failure "停止服务失败，已中止整体重启：$stopping_unit。请运行 codexc status。"
       return 1
     fi
   done
@@ -92,7 +92,7 @@ ensure_linger() {
   fi
   if ! "$loginctl_binary" enable-linger "$user_id" 2>/dev/null; then
     print_status failure "无法为当前用户启用 systemd linger，后台服务不能保证在登录前启动。"
-    print_status remediation "请先执行 sudo loginctl enable-linger \"$(id -un)\"，再重新运行 codexc service install。"
+    print_status remediation "请先执行 sudo loginctl enable-linger \"$(id -un)\"，再重新运行 codexc install。"
     return 1
   fi
   linger=$(
@@ -121,14 +121,14 @@ case "$action" in
   install)
     ensure_linger
     systemctl_user daemon-reload
-    resolved_units=$(service_ids all start)
+    resolved_units=$(service_ids all install)
     set -- $resolved_units
     systemctl_user enable "$@"
     stop_before_all_restart
     for unit in "$@"; do systemctl_user restart "$unit"; done
     print_status note "Codex App Server 与 Gateway systemd 用户服务已安装，启动操作已完成，正在确认就绪状态。"
     print_status note "systemd linger 已启用，未登录时也会随系统启动。"
-    print_status note "WebUI 服务已生成，可执行 codexc service start webui 启动。"
+    print_status note "WebUI 服务已生成，可执行 codexc start webui 启动。"
     ;;
   start)
     target=${2:-all}
@@ -141,7 +141,7 @@ case "$action" in
       fi
     done
     if [ -n "$failed_units" ] && [ "$target" = "all" ]; then
-      print_status failure "服务启动部分失败；失败目标：${failed_units# }。请运行 codexc service status。"
+      print_status failure "服务启动部分失败；失败目标：${failed_units# }。请运行 codexc status。"
       exit 1
     elif [ -n "$failed_units" ]; then
       exit 1
@@ -165,7 +165,7 @@ case "$action" in
       fi
     done
     if [ -n "$failed_units" ] && [ "$target" = "all" ]; then
-      print_status failure "服务停止部分失败；失败目标：${failed_units# }。请运行 codexc service status。"
+      print_status failure "服务停止部分失败；失败目标：${failed_units# }。请运行 codexc status。"
       exit 1
     elif [ -n "$failed_units" ]; then
       exit 1
@@ -178,37 +178,10 @@ case "$action" in
       all) print_status success "Codex App Server 与 Gateway 已停止。" ;;
     esac
     ;;
-  restart)
-    target=${2:-gateway}
-    require_target "$target"
-    resolved_units=$(service_ids "$target" start)
-    if [ "$target" = "all" ]; then
-      stop_before_all_restart
-    fi
-    failed_units=""
-    for unit in $resolved_units; do
-      if ! systemctl_user restart "$unit"; then
-        failed_units="$failed_units $unit"
-      fi
-    done
-    if [ -n "$failed_units" ] && [ "$target" = "all" ]; then
-      print_status failure "服务重启部分失败；失败目标：${failed_units# }。请运行 codexc service status。"
-      exit 1
-    elif [ -n "$failed_units" ]; then
-      exit 1
-    fi
-    case "$target" in
-      gateway) print_status note "Gateway 重启操作已完成，正在确认就绪状态；Codex App Server 保持运行。" ;;
-      app-server) print_status note "Codex App Server 重启操作已完成，正在确认就绪状态；Gateway 将自动重连。" ;;
-      webui) print_status success "WebUI 已重启。" ;;
-      model-relay) print_status success "Model Relay 已重启。" ;;
-      all) print_status note "Codex App Server 与 Gateway 重启操作已完成，正在确认就绪状态。" ;;
-    esac
-    ;;
   reload)
     gateway_unit=$(service_ids gateway start)
     if ! systemctl_user is-active --quiet "$gateway_unit"; then
-      print_status failure "Gateway 尚未运行，请先执行 codexc service start。"
+      print_status failure "Gateway 尚未运行，请先执行 codexc start。"
       exit 1
     fi
     systemctl_user kill --kill-whom=main --signal=HUP "$gateway_unit"
@@ -233,10 +206,8 @@ case "$action" in
     show_logs "$@"
     ;;
   uninstall)
-    resolved_units=$(service_ids all stop)
-    webui_unit=$(service_ids webui stop)
-    relay_unit=$(service_ids model-relay stop)
-    set -- $resolved_units "$webui_unit" "$relay_unit"
+    resolved_units=$(service_ids all uninstall)
+    set -- $resolved_units
     if ! systemctl_user disable --now "$@"; then
       print_status failure "systemd 服务未能停止或禁用，已保留服务定义以便排查。"
       exit 1
@@ -248,7 +219,7 @@ case "$action" in
     print_status note "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   *)
-    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|model-relay|all]"
+    print_status failure "用法：$0 {install|uninstall|reload|start|stop|status|logs} [gateway|app-server|webui|model-relay|all]"
     exit 2
     ;;
 esac

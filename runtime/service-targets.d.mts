@@ -28,4 +28,4 @@ export function serviceIdentifiers(
   order?: "start" | "stop",
 ): string[];
 
-export function serviceCommandTarget(target: ServiceTarget): "gateway" | "app-server" | "webui" | "relay" | "all";
+export function serviceCommandTarget(target: ServiceTarget): "gateway" | "appserver" | "webui" | "relay" | "all";

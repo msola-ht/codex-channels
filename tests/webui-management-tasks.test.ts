@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -67,6 +67,11 @@ describe("WebUI management tasks", () => {
     expect(() => normalizeTaskInput({ operation: "update", action: "source" })).toThrow("任务类型无效");
     expect(() => normalizeTaskInput({ operation: "service", action: "exec", target: "gateway" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "service", action: "reload", target: "gateway" })).toThrow("服务重载不接受服务目标");
+    for (const target of ["webui", "all"]) {
+      expect(() => normalizeTaskInput({ operation: "service", action: "restart", target })).toThrow(`请在本机终端执行 codexc restart ${target}`);
+      expect(() => normalizeTaskInput({ operation: "service", action: "stop", target })).toThrow(`请在本机终端执行 codexc stop ${target}`);
+    }
+    expect(() => normalizeTaskInput({ operation: "service", action: "uninstall" })).toThrow("codexc uninstall --services");
     expect(() => normalizeTaskInput({ operation: "metrics", action: "shell" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "metrics", action: "prune" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "metrics", action: "cleanup", target: "deepseek" })).toThrow();
@@ -75,18 +80,20 @@ describe("WebUI management tasks", () => {
 
   it("returns an explicit confirmation preview", () => {
     const runner = new WebuiManagementTaskRunner();
-    expect(runner.preview({ operation: "service", action: "stop", target: "webui" })).toMatchObject({
+    expect(runner.preview({ operation: "service", action: "stop", target: "gateway" })).toMatchObject({
       operation: "service",
       requiresConfirmation: true,
     });
-    expect(runner.preview({ operation: "service", action: "stop", target: "model-relay" })).toMatchObject({ effects: ["执行 codexc service stop relay"] });
+    expect(runner.preview({ operation: "service", action: "stop", target: "model-relay" })).toMatchObject({ effects: ["执行 codexc stop relay"] });
+    expect(runner.preview({ operation: "service", action: "restart", target: "gateway" })).toMatchObject({ effects: ["执行 codexc restart gateway"] });
+    expect(runner.preview({ operation: "service", action: "restart", target: "model-relay" })).toMatchObject({ effects: ["执行 codexc restart relay"] });
     expect(runner.preview({ operation: "service", action: "reload" })).toMatchObject({
-      effects: ["执行 codexc service reload"],
+      effects: ["执行 codexc reload"],
       target: null,
     });
     expect(runner.preview({ operation: "metrics", action: "prune", target: "deepseek" })).toMatchObject({
       target: "deepseek",
-      effects: ["执行 codexc metrics prune deepseek"],
+      effects: ["执行 codexc cleanup metrics prune deepseek"],
       preconditions: [],
       activation: "按操作前状态恢复 Gateway",
     });
@@ -95,7 +102,7 @@ describe("WebUI management tasks", () => {
       recovery: expect.stringContaining("指标数据库备份"),
     });
     expect(runner.preview({ operation: "traffic", action: "cleanup" })).toMatchObject({
-      effects: ["执行 codexc traffic cleanup --confirm"],
+      effects: ["执行 codexc cleanup traffic --confirm"],
       preconditions: ["全部 App Server 与 Relay 必须已停止"],
       recovery: expect.stringContaining("无法恢复"),
     });
@@ -153,5 +160,35 @@ describe("WebUI management tasks", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it.each([
+    [{ operation: "service", action: "restart", target: "gateway" }, "restart gateway"],
+    [{ operation: "service", action: "restart", target: "model-relay" }, "restart relay"],
+    [{ operation: "service", action: "restart", target: "app-server" }, "restart appserver"],
+    [{ operation: "service", action: "start", target: "app-server" }, "start appserver"],
+    [{ operation: "service", action: "stop", target: "app-server" }, "stop appserver"],
+    [{ operation: "service", action: "install" }, "install"],
+    [{ operation: "metrics", action: "cleanup" }, "cleanup metrics"],
+    [{ operation: "metrics", action: "prune", target: "openai" }, "cleanup metrics prune openai"],
+    [{ operation: "metrics", action: "reset" }, "cleanup metrics reset"],
+    [{ operation: "traffic", action: "cleanup" }, "cleanup traffic --confirm"],
+    [{ operation: "service", action: "reload" }, "reload"],
+  ] as const)("executes the canonical service command for %j", async (input, command) => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-webui-restart-"));
+    const executable = join(directory, process.platform === "win32" ? "codexc.cmd" : "codexc");
+    const capture = join(directory, "args.txt");
+    try {
+      writeFileSync(executable, process.platform === "win32"
+        ? '@echo off\r\necho %* > "%RESTART_TEST_CAPTURE%"\r\n'
+        : '#!/bin/sh\nprintf "%s\\n" "$*" > "$RESTART_TEST_CAPTURE"\n', { mode: 0o700 });
+      const runner = new WebuiManagementTaskRunner();
+      expect(runner.preview(input).effects).toEqual([`执行 codexc ${command}`]);
+      const task = runner.start(input, {
+        owner: "restart-owner", environment: { ...process.env, PATH: directory, RESTART_TEST_CAPTURE: capture },
+      });
+      await vi.waitFor(() => expect(runner.get(task.id, "restart-owner")?.state).toBe("completed"));
+      expect(readFileSync(capture, "utf8").trim()).toBe(command);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 });

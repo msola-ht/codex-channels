@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -18,7 +18,11 @@ import {
   readAppServerProviderSettingsFingerprint,
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
-import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { initializeUserData } from "../scripts/runtime-config.mjs";
+import { waitForManagedServiceReadiness } from "../scripts/service-command.mjs";
+import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
+import { cli, execFileAsync } from "./codexc-cli-test-fixture.js";
 import { stopManagedAccountForRemoval } from "../scripts/managed-provider-account-runtime.mjs";
 import { providerAppServerSocketPath, writeCustomPrimaryProviderSwitchingProfile } from "../runtime/model-provider-runtime.mjs";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
@@ -34,6 +38,78 @@ const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 
 contractSuite("real supervised App Server provider", () => {
+    it.skipIf(process.platform !== "linux")("restarts a real isolated App Server through the unified CLI and reconnects", async () => {
+      const root = mkdtempSync(join(tmpdir(), "restart-real-"));
+      const managerPath = join(root, "systemctl.mjs");
+      const environment = { ...process.env, HOME: root, CODEX_HOME: join(root, "codex"),
+        CODEX_CONNECT_HOME: root, CODEX_CONNECT_CONFIG_FILE: join(root, "config.toml"),
+        CODEX_CONNECT_SERVICE_ROLE: "", XDG_CONFIG_HOME: join(root, "config"), SYSTEMCTL_BINARY: managerPath };
+      mkdirSync(environment.CODEX_HOME, { mode: 0o700 });
+      initializeUserData({ environment, cwd: root });
+      const document = readGatewayConfig(environment.CODEX_CONNECT_CONFIG_FILE);
+      document.telegram = { bot_token: "fixture", allowed_user_ids: [1] };
+      writeGatewayConfig(environment.CODEX_CONNECT_CONFIG_FILE, document);
+      const definitionDirectory = join(environment.XDG_CONFIG_HOME, "systemd", "user");
+      mkdirSync(definitionDirectory, { recursive: true });
+      writeFileSync(join(definitionDirectory, "codex-connect-app-server.service"), "fixture");
+      const children: ReturnType<typeof spawn>[] = [];
+      let diagnostics = "";
+      const start = () => {
+        const child = spawn(process.execPath, [cli, "service-app-server"], {
+          env: environment, cwd: root, detached: true, stdio: ["ignore", "ignore", "pipe"],
+        });
+        child.stderr?.on("data", chunk => { diagnostics = appendDiagnostic(diagnostics, String(chunk)); });
+        children.push(child);
+      };
+      const operations: string[] = [];
+      const manager = createServer(async (request, response) => {
+        try {
+          if (request.url === "/stop") {
+            operations.push("stop");
+            await stopDetachedTestProcess(children.at(-1)!, 10_000);
+          } else if (request.url === "/start") {
+            operations.push("start");
+            start();
+          } else { response.writeHead(400); response.end(); return; }
+          response.end("ok");
+        } catch { response.writeHead(500); response.end("fixture control failure"); }
+      });
+      let client: CodexAppServerClient | undefined;
+      try {
+        await new Promise<void>(resolveListen => manager.listen(0, "127.0.0.1", resolveListen));
+        const address = manager.address();
+        if (!address || typeof address === "string") throw new Error("Expected HTTP manager address");
+        writeFileSync(managerPath, [
+          `#!${process.execPath}`,
+          'const action = process.argv[3];',
+          'if (action === "show") console.log("LoadState=loaded\\nActiveState=active\\nSubState=running");',
+          'else if (action === "stop" || action === "start") {',
+          `  const response = await fetch("http://127.0.0.1:${address.port}/" + action, {method:"POST"});`,
+          '  if (!response.ok) process.exitCode = 1;',
+          '}',
+        ].join("\n"));
+        chmodSync(managerPath, 0o700);
+        start();
+        await waitForManagedServiceReadiness("app-server", environment, { timeoutMs: 10_000 });
+        const { stdout } = await execFileAsync(process.execPath, [cli, "restart", "appserver"], { env: environment, cwd: root, timeout: 30_000 });
+        expect(stdout).toContain("Codex App Server重启完成");
+        expect(operations).toEqual(["stop", "start"]);
+        expect(children).toHaveLength(2);
+        expect(children[0]!.exitCode !== null || children[0]!.signalCode !== null).toBe(true);
+        expect(children[1]!.pid).not.toBe(children[0]!.pid);
+        const descriptor = resolveAppServerRuntime(document, root, environment);
+        client = new CodexAppServerClient(new JsonRpcClient(new UnixWebSocketTransport(descriptor.primarySocketPath)), { sandbox: "read-only" });
+        await expect(client.connect()).resolves.toHaveProperty("userAgent");
+      } catch (error) {
+        throw new Error(appServerFailure(error instanceof Error ? error.message : "restart failed", diagnostics), { cause: error });
+      } finally {
+        await client?.close();
+        for (const child of children) await stopDetachedTestProcess(child, 10_000);
+        if (manager.listening) await new Promise<void>((resolveClose, reject) => manager.close(error => error ? reject(error) : resolveClose()));
+        rmSync(root, { recursive: true, force: true });
+      }
+    }, 45_000);
+
     it.each(["switching", "exclusive"] as const)("applies DS settings only to an idle unleased instance in %s mode", async (mode) => {
       const home = await configuredHome(mode);
       const environment = { ...process.env, ...testEnvironment(home) };

@@ -370,7 +370,7 @@ async function readInitialConfig(path) {
 }
 
 export async function runCcgAccountCli(args, options = {}) {
-  const usage = "用法：codexc ccg account remove <id>";
+  const usage = "用法：codexc provider ccg remove <id>";
   if (isCommandHelp(args, [[], ["account"], ["account", "remove"]], usage)) {
     (options.output ?? process.stdout).write(`${usage}\n`);
     return;

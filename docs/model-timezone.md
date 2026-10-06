@@ -60,7 +60,7 @@ codexc timezone --gateway --follow-app-server # 删除独立设置，恢复默�
 codexc timezone --gateway --system            # 独立使用系统时区
 codexc timezone --gateway Asia/Shanghai       # 自定义时区
 codexc timezone --gateway --json              # 只读查看网关时区设置
-codexc service restart gateway               # 重启后生效
+codexc restart gateway               # 重启后生效
 ```
 
 网关在创建应用组件前应用解析后的时区，启动卡“网关时区”显示实际采用的时区。无效或 Node.js

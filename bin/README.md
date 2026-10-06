@@ -16,14 +16,14 @@
 - `init`、`setup`、`config`：初始化用户目录；通过 Setup 接入 Provider、通讯渠道和项目技能；
   Setup 和 Config 操作失败后保留分类菜单；通过 Config 统一管理 Codex 新会话与用户偏好，以及 Gateway 的操作详情、计划更新、调试模式、
   审批超时、Sandbox、默认工作区、模型覆盖、WebUI、指标、Telegram 消息格式和配置路径。
-  `setup` 在初始化前校验交互终端；`setup --json` 使用终端 stderr 提示并以 JSON Lines 输出脱敏事件；`config` 在非交互终端直接显示用户级
-  `.codex-connect` 配置路径，`config --json` 只输出路径与文件存在状态，不读取或输出配置正文。
+  `setup` 在初始化前校验交互终端；`setup --jsonl` 使用终端 stderr 提示并以 JSON Lines 输出脱敏事件；`config` 在非交互终端显示帮助。
+  `config paths [--json]` 只输出路径与文件存在状态，不读取或输出配置正文。
 - `doctor`：诊断当前 TOML 配置、安装、Linux `bubblewrap` 沙箱前置条件、主 App Server 与已配置
   Provider App Server 的监管拓扑、实际版本和连通性；完成全部检测后按领域只展示失败、提示与处理建议，
   交互终端使用不同颜色并汇总结果；`--json` 输出全部脱敏检查、分类计数与健康状态；Linux 缺少
   `bubblewrap` 时输出安装建议，不改写配置。
 - `security repair`：逐个修复 Windows Codex TOML 配置文件 ACL，不修改沙箱目录权限；Unix 平台提示无需处理。
-- `start`：在前台复用内部 `service-app-server` 监管入口启动 App Server、Provider 统计代理与
+- `run`：在前台复用内部 `service-app-server` 监管入口启动 App Server、Provider 统计代理与
   Gateway；只有监管身份、Provider 拓扑和真实 WebSocket 健康检查全部匹配的现有 App Server
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
@@ -39,11 +39,11 @@
   Windows 仍只承诺未实机验收的会话共享预览。
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；菜单区分新建目录、注册当前目录和注册已有目录；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
-- `sessions`：无子命令时显示帮助，交互归档集中在 `cleanup`；使用 `sessions cleanup <最大轮数>` 直接预览或确认归档旧会话。
+- `cleanup sessions <最大轮数>`：直接预览或确认归档旧会话；无参数 `cleanup` 提供交互入口。转储与指标维护分别使用 `cleanup traffic`、`cleanup metrics [prune|reset]`，原领域命令只负责查询。
 - `cleanup`：统一交互选择会话归档、转储删除、旧指标清理、Provider 指标清理与指标库重置；复用各自执行入口与服务状态检查，完成或取消单项后返回菜单，非交互终端只显示帮助。
-- `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
-- `deepseek account remove <id>`、`opencode-go account remove <id>`、`ccg account remove <id>`：确认后移除对应账户，保留备份与历史统计；只支持当前多账户格式。
-- `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；新增账户必须输入邮箱或手机号二选一，联系方式只用于本机展示；Key 只写入
+- `provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。受管账户按 `provider deepseek/opencode-go/ccg` 分派，各家只开放实际支持的操作。
+- `provider deepseek remove <id>`、`provider opencode-go remove <id>`、`provider ccg remove <id>`：确认后移除对应账户，保留备份与历史统计；只支持当前多账户格式。
+- `provider opencode-go`：新增、列出、删除、设置默认或释放 OpenCode Go 账户实例；`release` 不禁用账户，后续请求可重新拉起。新增账户必须输入邮箱或手机号二选一，联系方式只用于本机展示；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
   释放对应隔离实例。
 - `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令，再恢复核心服务。数据库只读校验当前 Schema，不迁移或清空数据；流程见[源码安装与更新](../docs/source-install.md)。用户设置和 Provider 模型目录不改写。npm 安装仅同步配套 CLI 并校验数据库，不更新 Gateway 包。
@@ -59,10 +59,11 @@
   发送回对应会话；见 `docs/channel-image.md`。
 - `relay`：管理独立模型 API 转发的监听、调用方、Key 和运行状态；边界与操作见[模型 API 转发](../docs/user-guide.md#可选模型-api-转发)。
 - `webui`：启动本机指标查询与受控设置界面；监听参数在读取用户配置前完成校验。
-- `service`：交互终端无参数时选择操作及明确目标，日志菜单显示最近 100 行；卸载需确认，配置损坏时仍能进入菜单执行诊断恢复操作。非交互终端无参数时显示帮助。安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
-  与 Gateway；启停、重启、状态和日志命令使用
-  `gateway`、`app-server`、`webui`、`relay` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
-  `all` 包含 App Server 与 Gateway，启动时纳入已安装且启用的 Relay，停止时先关闭已安装的 Relay；WebUI 单独管理；核心服务安装、启动或重启后按目标等待监管拓扑、
+- `restart [目标]`：统一重启入口，默认全部后台服务。服务管理层预检后依次停止所选服务，再逐项启动并确认就绪；覆盖已安装 WebUI 与按启用状态选取的 Relay，失败中止后续步骤，禁止在 App Server 内自中断。
+- `install/start/stop/reload/status/logs` 与 `uninstall --services`：顶层后台服务命令；主菜单的“后台服务”分类选择操作及明确目标，日志菜单显示最近 100 行，卸载需确认，配置损坏时仍能进入菜单执行诊断恢复操作。安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
+  与 Gateway；启停、状态和日志命令使用
+  `gateway`、`appserver`、`webui`、`relay` 或 `all` 明确目标，菜单统一分派到顶层命令；
+  `all` 包含 App Server、Gateway、已安装 WebUI 与 Relay，启动 Relay 要求已启用；停止按 WebUI、Relay、Gateway、App Server 顺序；核心服务安装、启动或重启后按目标等待监管拓扑、
   WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等
   诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务；`status --json`
   把 macOS launchd、Linux systemd 与 Windows 用户级计划任务归一为同一状态结构，服务异常时仍输出
@@ -79,7 +80,7 @@ Provider 的独立回环统计代理（DS、OpenCode Go 与 CCG 各自的全部�
 用于跨进程互斥和向前台启动器证明精确 Provider 拓扑；它同时集中拒绝已被裸进程占用的 App
 Server Socket。启动主 App Server 与 Provider App Server 前，入口把 `[codex].terminal_identity`
 写入子进程的 `TERM_PROGRAM` / `TERM_PROGRAM_VERSION`，供 Codex 在模型上游 `User-Agent` 中上报
-终端标识；未配置时保持环境原样，由 Codex 自行探测。`codexc service install` 在生成服务定义
+终端标识；未配置时保持环境原样，由 Codex 自行探测。`codexc install` 在生成服务定义
 前、本地更新真正重启核心服务前，若该值未配置且运行命令的终端可探测，则按该终端补入配置并
 提示一次；已配置或探测不到终端时保持配置不变；补入失败只提示原因并继续当前命令。`start`、
 `restart`、`reload`、`stop`、`status`、`logs` 与 `uninstall` 不改写该配置。

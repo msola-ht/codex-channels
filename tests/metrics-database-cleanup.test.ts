@@ -358,7 +358,7 @@ describe("model request metrics database cleanup and pruning", () => {
       localDatabasePath: databasePath,
       stopGateway: () => undefined,
       startGateway: () => undefined,
-    })).toThrow("codexc metrics prune <provider>");
+    })).toThrow("codexc cleanup metrics prune <provider>");
   });
 
 });

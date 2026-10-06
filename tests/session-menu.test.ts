@@ -63,7 +63,7 @@ describe("session menu", () => {
     options.runCleanup.mockRejectedValueOnce(cleanupError);
     options.runService.mockResolvedValueOnce(undefined).mockRejectedValueOnce(startError);
     await expect(runSessionCleanupMenu(options)).rejects.toMatchObject({ errors: [cleanupError, startError],
-      message: expect.stringContaining("codexc service start gateway") });
+      message: expect.stringContaining("codexc start gateway") });
   });
 
   it("does not proceed when service status cannot be read", async () => {
