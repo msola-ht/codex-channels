@@ -114,6 +114,81 @@ describe("ModelTrafficDump V2", () => {
     expect(detail.response.callTiming.totalMs).toBe(metrics[0]?.totalDurationMs);
   });
 
+  it.each([
+    { earlyContent: false, lateTerminal: false },
+    { earlyContent: true, lateTerminal: false },
+    { earlyContent: false, lateTerminal: true },
+    { earlyContent: true, lateTerminal: true },
+  ])("keeps disconnected metrics aligned with the dump despite late upstream frames ($earlyContent/$lateTerminal)", async ({ earlyContent, lateTerminal }) => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-disconnected-timing-"));
+    temporaryDirectories.push(directory);
+    const metrics: ProviderProxyMetrics[] = [];
+    const server = createServer();
+    const sockets = new WebSocketServer({ server });
+    let upstream: WebSocket | undefined;
+    sockets.on("connection", socket => {
+      upstream = socket;
+      socket.on("message", () => {
+        // Delay the close handshake while allowing already-produced upstream frames to arrive.
+        socket.pause();
+        socket.send(JSON.stringify({ type: "response.created", response: { id: "response-before-close" } }));
+        if (earlyContent) socket.send(JSON.stringify({ type: "response.output_text.delta", delta: "before close" }));
+        socket.send(JSON.stringify({ type: "response.in_progress" }));
+      });
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: async () => {
+      for (const socket of sockets.clients) socket.terminate();
+      await new Promise<void>(resolve => sockets.close(() => resolve()));
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    } });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (server.address() as AddressInfo).port,
+      upstreamProtocol: "http", trafficDump: { directory, label: "openai", inputItems: 0 },
+      onMetrics: metric => { metrics.push(metric); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    await new Promise<void>((resolve, reject) => {
+      client.once("open", () => client.send(JSON.stringify({ type: "response.create", model: "fixture" })));
+      client.on("message", data => {
+        if ((JSON.parse(data.toString()) as { type: string }).type === "response.in_progress") client.terminate();
+      });
+      client.once("close", () => resolve());
+      client.once("error", reject);
+    });
+    // The persisted close record proves the proxy observed the disconnect before the late frame.
+    await vi.waitFor(async () => {
+      const paths = listDumpFiles(directory);
+      expect(paths).toHaveLength(1);
+      const entry = await readDumpExchange(paths, 1);
+      expect(entry?.response?.errorScope).toBe("websocket_client_closed");
+    });
+    const lateFrameAtMs = Date.now();
+    upstream!.send(JSON.stringify(lateTerminal
+      ? { type: "response.completed", response: { id: "late-after-close", status: "completed", usage: { input_tokens: 10, output_tokens: 3, total_tokens: 13 } } }
+      : { type: "response.output_text.delta", delta: "late-after-close" }));
+    await vi.waitFor(() => {
+      const session = listDumpFiles(directory)[0]!;
+      expect(readdirSync(session).filter(name => /^trace-\d+\.jsonl$/u.test(name))
+        .some(name => readFileSync(join(session, name), "utf8").includes("late-after-close"))).toBe(true);
+    });
+    upstream!.resume();
+    await vi.waitFor(() => expect(metrics).toHaveLength(1));
+    await proxy.close();
+    const detail = await describeDumpExchange(listDumpFiles(directory), 1);
+    const metric = metrics[0]!;
+    expect(metric).toMatchObject({ status: "failed", errorType: "client_disconnected", inputTokens: null, outputTokens: null,
+      traffic: { label: detail.label, session: detail.session, interaction: detail.id } });
+    expect(metric.responseCompletedAtMs).toBeLessThanOrEqual(lateFrameAtMs);
+    expect(detail.response).toMatchObject({ state: "incomplete", errorScope: "websocket_client_closed" });
+    expect(metric.totalDurationMs).toBe(detail.response.callTiming.totalMs);
+    expect(metric.firstTokenMs).toBe(detail.response.firstTokenMs);
+    if (earlyContent) expect(metric.firstTokenMs).toBeLessThanOrEqual(metric.totalDurationMs!);
+    else expect(metric.firstTokenMs).toBeUndefined();
+  });
+
   it("indexes the Chat upstream provider reported by diagnostics", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-chat-upstream-"));
     temporaryDirectories.push(directory);

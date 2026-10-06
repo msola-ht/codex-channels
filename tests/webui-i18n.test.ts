@@ -671,7 +671,8 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.trafficPageEn).toContain("Recorded session");
     expect(result.trafficPageEn).toContain("openai · All 1 retained sessions");
     expect(result.trafficPageEn).toContain("Request records (1)");
-    expect(result.trafficPageEn).toContain("Automatic retention: 30 days");
+    expect(result.trafficPageEn).toContain("Time-based retention: 30 days");
+    expect(result.trafficPageEn).toContain("Size limits still apply when time-based cleanup is off.");
     expect(result.trafficPageEn).toContain("Per page");
     expect(result.trafficPageDisabledEn).toContain("Traffic recording is currently disabled");
     expect(result.trafficPageDisabledEn).toContain("[debug].model_traffic_dump</code>");
