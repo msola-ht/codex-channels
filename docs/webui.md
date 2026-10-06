@@ -83,7 +83,7 @@ SSH 隧道建议统一使用 `127.0.0.1`，不要用服务器公网 IP、Tailsca
 
 ## 后台服务
 
-WebUI 是独立后台服务，不并入 `start/stop/status all`，但已安装时纳入 `codexc restart all`。
+WebUI 是独立后台服务，已安装时纳入 `start/stop/restart/status/logs all`。
 `codexc install` 只生成服务单元并启动 App Server
 与 Gateway，需要后台常驻时单独管理：
 

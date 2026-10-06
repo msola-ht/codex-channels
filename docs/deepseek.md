@@ -10,11 +10,11 @@ DS 不另造 `deepseek-v4.1-flash` 模型 ID。
 也可在 WebUI 账户设置中操作，或使用以下命令：
 
 ```bash
-codexc deepseek account add work           # 新增账户，交互输入模式和 Key
-codexc deepseek account reconfigure work   # 重新配置已有账户
-codexc deepseek account list --json        # 列出账户与默认标记，不包含 Key
-codexc deepseek account default work       # 选择默认账户
-codexc deepseek account remove personal    # 确认后删除账户配置
+codexc provider deepseek add work           # 新增账户，交互输入模式和 Key
+codexc provider deepseek reconfigure work   # 重新配置已有账户
+codexc provider deepseek list --json        # 列出账户与默认标记，不包含 Key
+codexc provider deepseek default work       # 选择默认账户
+codexc provider deepseek remove personal    # 确认后删除账户配置
 codexc restart all                 # 应用配置变化
 ```
 
@@ -98,7 +98,7 @@ Gateway 对 DS 官方、OCG、CCG、CLP 四个受管 DeepSeek 入口统一关闭
 DS 目录生成时明确设置 `support_verbosity: false`、`default_verbosity: null`、
 `supports_reasoning_summary_parameter: false` 和 `default_reasoning_summary: "none"`，
 移除锁定 Codex 已不使用的 `supports_reasoning_summaries` 声明。保留完整思考正文、工具能力与提示词。
-已有账户可通过 Setup 的“重新配置账户”或 `codexc deepseek account reconfigure <账户>` 应用；
+已有账户可通过 Setup 的“重新配置账户”或 `codexc provider deepseek reconfigure <账户>` 应用；
 复用本地目录，不重新下载，不重置模型、思考等级或上下文设置。共享目录会惠及同机所有 DS 账户，
 写入失败按现有配置事务恢复原文件；完成后重启 App Server 生效。启动、Doctor 和源码更新器不隐式改写目录。
 

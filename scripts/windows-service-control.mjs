@@ -64,16 +64,13 @@ export async function controlWindowsServices({
       const value = readDefinition(file);
       runTaskPrimitive("register", definition.windows, environment, file, value.pwshBinary);
     }
-    await startDefinitions("all", definitionsDirectory, environment);
+    await startDefinitions("all", definitionsDirectory, environment, "install");
     writeCliMessage("note", "Codex App Server 与 Gateway Windows 计划任务已安装并启动，正在确认就绪状态。");
     writeCliMessage("note", "WebUI 计划任务已生成，可按需单独启动。");
     return;
   }
   if (action === "uninstall") {
-    for (const definition of [
-      ...serviceDefinitionsForTarget("all", "stop"),
-      ...serviceDefinitions.filter((candidate) => !candidate.core),
-    ]) {
+    for (const definition of serviceDefinitionsForTarget("all", "stop")) {
       await stopDefinition(definition, definitionsDirectory, environment);
       runTaskPrimitive("unregister", definition.windows, environment);
       const file = definitionPath(definitionsDirectory, definition.target);
@@ -169,9 +166,9 @@ export async function inspectWindowsServiceStatus({
   };
 }
 
-async function startDefinitions(target, definitionsDirectory, environment) {
+async function startDefinitions(target, definitionsDirectory, environment, selection = "start") {
   const failures = [];
-  for (const service of serviceControlDefinitions("windows", target, "start", environment, definitionsDirectory)) {
+  for (const service of serviceControlDefinitions("windows", target, selection, environment, definitionsDirectory)) {
     try {
       const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
       const host = await inspectHost(definition.controlPath);
@@ -379,7 +376,7 @@ async function waitForHost(controlPath, expected, timeoutMs, throwOnTimeout = tr
 
 function showLogs(target, definitionsDirectory, environment, { follow, lines }) {
   const paths = [];
-  for (const service of serviceDefinitionsForTarget(target)) {
+  for (const service of serviceControlDefinitions("windows", target, "status", environment, definitionsDirectory)) {
     const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
     for (const path of [definition.stdoutLog, definition.stderrLog]) {
       if (existsSync(path)) paths.push(path);

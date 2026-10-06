@@ -158,7 +158,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
 
     const result = spawnSync(
       process.execPath,
-      [cli, "metrics", "cleanup", "--restart-gateway"],
+      [cli, "cleanup", "metrics", "--restart-gateway"],
       { cwd: workspace, env: environment, encoding: "utf8" },
     );
 

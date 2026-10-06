@@ -72,7 +72,7 @@ stop_unit() {
 }
 
 stop_before_all_restart() {
-  stopping_units=$(service_ids all stop)
+  stopping_units=$(service_ids all install-stop)
   for stopping_unit in $stopping_units; do
     if ! stop_unit "$stopping_unit"; then
       print_status failure "停止服务失败，已中止整体重启：$stopping_unit。请运行 codexc status。"
@@ -121,7 +121,7 @@ case "$action" in
   install)
     ensure_linger
     systemctl_user daemon-reload
-    resolved_units=$(service_ids all start)
+    resolved_units=$(service_ids all install)
     set -- $resolved_units
     systemctl_user enable "$@"
     stop_before_all_restart
@@ -206,10 +206,8 @@ case "$action" in
     show_logs "$@"
     ;;
   uninstall)
-    resolved_units=$(service_ids all stop)
-    webui_unit=$(service_ids webui stop)
-    relay_unit=$(service_ids model-relay stop)
-    set -- $resolved_units "$webui_unit" "$relay_unit"
+    resolved_units=$(service_ids all uninstall)
+    set -- $resolved_units
     if ! systemctl_user disable --now "$@"; then
       print_status failure "systemd 服务未能停止或禁用，已保留服务定义以便排查。"
       exit 1

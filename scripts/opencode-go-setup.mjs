@@ -310,7 +310,7 @@ export async function stopOpencodeGoAccount(accountId, {
 }
 
 export async function runOpencodeGoAccountCli(args, options = {}) {
-  const usage = "用法：codexc opencode-go account <add|list|remove|default|stop> [id]";
+  const usage = "用法：codexc provider opencode-go <add|list|remove|default|release> [id]";
   if (isCommandHelp(args, [[], ["account"], ["account", "add"], ["account", "list"], ["account", "remove"], ["account", "default"], ["account", "stop"]], usage)) {
     (options.output ?? process.stdout).write(`${usage}\n`);
     return;
@@ -318,12 +318,12 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
   const [command, action, id, ...extra] = args;
   if (command !== "account" || !["add", "list", "remove", "default", "stop"].includes(action)) {
     throw new Error(
-      "用法：codexc opencode-go account <add|list|remove|default|stop> [id]",
+      usage,
     );
   }
   if (action === "list") {
     if (id !== undefined && id !== "--json" || extra.length > 0) {
-      throw new Error("用法：codexc opencode-go account list [--json]");
+      throw new Error("用法：codexc provider opencode-go list [--json]");
     }
     printOpencodeGoAccounts(
       options.environment ?? process.env,
@@ -334,7 +334,7 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
   }
   if (id === undefined || extra.length > 0 || (action === "add" && !options.prompter && !process.stdin.isTTY)) {
     throw new Error(
-      `用法：codexc opencode-go account ${action} <id>`,
+      `用法：codexc provider opencode-go ${action === "stop" ? "release" : action} <id>`,
     );
   }
   if (action === "add") {
@@ -390,7 +390,7 @@ function createPrompter(prompts, { accounts = [], allowBack, hasModelSettings, h
           { value: "account-add", label: "添加账户" },
           { value: "list", label: "列出账户" },
           { value: "account-default", label: "设置默认账户" },
-          { value: "account-stop", label: "停止账户 App Server" },
+          { value: "account-stop", label: "释放账户 App Server 实例（可自动重新拉起）" },
           { value: "account-remove", label: "删除账户" },
         );
       }

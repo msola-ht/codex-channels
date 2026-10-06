@@ -350,7 +350,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     }
   }, 15_000);
 
-  linuxIt("manages WebUI as an independent service target outside all", async () => {
+  linuxIt("includes installed WebUI in all and waits for its readiness", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-service-webui-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -376,18 +376,16 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       join(home, "config.toml"),
       environment,
     );
-
+    const webui = await startWebuiReadinessFixture(join(home, "config.toml"));
+    const definitions = join(environment.XDG_CONFIG_HOME, "systemd", "user");
+    mkdirSync(definitions, { recursive: true });
+    writeFileSync(join(definitions, "codex-connect-webui.service"), "fixture");
     try {
-      const webui = await startWebuiReadinessFixture(join(home, "config.toml"));
-      try {
         await execFileAsync(
         process.execPath,
         [cli, "start", "webui"],
         { env: environment, encoding: "utf8" },
       );
-      } finally {
-        await new Promise<void>((resolve, reject) => webui.close(error => error ? reject(error) : resolve()));
-      }
       expect(readFileSync(systemctlLog, "utf8")).toContain(
         "--user start codex-connect-webui.service",
       );
@@ -398,11 +396,13 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
         [cli, "start", "all"],
         { env: environment, encoding: "utf8" },
       );
-      expect(allStdout).toContain("Codex App Server 与 Gateway 已就绪");
+      expect(allStdout).toContain("全部已选后台服务已就绪");
       const log = readFileSync(systemctlLog, "utf8");
       expect(log).toContain("codex-connect-app-server.service");
       expect(log).toContain("codex-connect-gateway.service");
-      expect(log).not.toContain("codex-connect-webui.service");
+      expect(log).toContain("codex-connect-webui.service");
+      expect(log.indexOf("start codex-connect-app-server.service")).toBeLessThan(log.indexOf("start codex-connect-gateway.service"));
+      expect(log.indexOf("start codex-connect-gateway.service")).toBeLessThan(log.indexOf("start codex-connect-webui.service"));
 
       writeFileSync(systemctlLog, "");
       const { stdout: defaultStartStdout } = await execFileAsync(
@@ -410,12 +410,13 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
         [cli, "start"],
         { env: environment, encoding: "utf8" },
       );
-      expect(defaultStartStdout).toContain("Codex App Server 与 Gateway 已就绪");
+      expect(defaultStartStdout).toContain("全部已选后台服务已就绪");
       const defaultStartLog = readFileSync(systemctlLog, "utf8");
       expect(defaultStartLog).toContain("codex-connect-app-server.service");
       expect(defaultStartLog).toContain("codex-connect-gateway.service");
 
     } finally {
+      await new Promise<void>((resolve, reject) => webui.close(error => error ? reject(error) : resolve()));
       await readiness.close();
     }
   }, 15_000);

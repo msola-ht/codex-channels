@@ -46,7 +46,7 @@ import {
   assertPrivateFileAccessSync,
 } from "../runtime/private-file.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { serviceIdentifiers } from "../runtime/service-targets.mjs";
+import { serviceDefinitions } from "../runtime/service-targets.mjs";
 import {
   protectForCurrentWindowsUserSync,
   unprotectForCurrentWindowsUserSync,
@@ -528,7 +528,7 @@ setSection("系统服务");
 if (process.platform === "darwin") {
   const uid = process.getuid?.();
   const domain = `gui/${uid}`;
-  const labels = serviceIdentifiers("launchd");
+  const labels = serviceDefinitions.filter(definition => definition.core).map(definition => definition.launchd);
   const unsupportedLabels = ["com.msola.codex-app-server", "com.msola.codex-gateway"];
   const loaded = labels.filter((label) =>
     spawnSync("launchctl", ["print", `${domain}/${label}`], { stdio: "ignore" }).status === 0,
@@ -550,7 +550,7 @@ if (process.platform === "darwin") {
       : `已加载 ${loaded.length}/${labels.length}；前台运行模式可忽略`,
   );
 } else if (process.platform === "linux") {
-  const units = serviceIdentifiers("systemd");
+  const units = serviceDefinitions.filter(definition => definition.core).map(definition => definition.systemd);
   const active = units.filter((unit) =>
     spawnSync("systemctl", ["--user", "is-active", "--quiet", unit], { stdio: "ignore", timeout: 3_000 }).status === 0,
   );

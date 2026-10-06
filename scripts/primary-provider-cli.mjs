@@ -126,8 +126,8 @@ export async function listPrimaryProviders({
     }
   }
   output.write(
-    "\n设为固定主 Provider：codexc primary-provider switch <Provider ID>；"
-    + "新增：codexc primary-provider add；编辑：codexc setup 中选择自定义第三方 → 编辑。\n",
+    "\n设为固定主 Provider：codexc provider switch <Provider ID>；"
+    + "新增：codexc provider add；编辑：codexc setup 中选择自定义第三方 → 编辑。\n",
   );
 }
 
@@ -496,14 +496,14 @@ export async function runPrimaryProviderCli(
   if (subcommand === "list") {
     const json = rest.length === 1 && rest[0] === "--json";
     if (rest.length > 0 && !json) {
-      throw new Error("用法：codexc primary-provider list [--json]");
+      throw new Error("用法：codexc provider list [--json]");
     }
     await listPrimaryProviders({ environment, output, createClient, json });
     return;
   }
   if (subcommand === "recover") {
     const [id, action, yes] = rest;
-    if (!id || !["keep", "rollback"].includes(action) || rest.length > 3 || (yes !== undefined && yes !== "--yes")) throw new Error("用法：codexc primary-provider recover <Provider ID> <keep|rollback> [--yes]");
+    if (!id || !["keep", "rollback"].includes(action) || rest.length > 3 || (yes !== undefined && yes !== "--yes")) throw new Error("用法：codexc provider recover <Provider ID> <keep|rollback> [--yes]");
     if (yes !== "--yes") {
       const confirmed = await prompts.confirm({ message: `恢复 ${id} 模型目录（如有上下文联动事务，将同时恢复关联的 DS、RS、CLP 目录及 Profile）：${action === "keep" ? "保留新目录" : "回滚上一目录"}？请先停止对应服务并核对配置。`, initialValue: false });
       if (prompts.isCancel(confirmed) || confirmed !== true) return;
@@ -514,7 +514,7 @@ export async function runPrimaryProviderCli(
   }
   if (subcommand === "add") {
     if (rest.length > 1 || (rest[0] !== undefined && rest[0] !== "--custom-models")) {
-      throw new Error("用法：codexc primary-provider add [--custom-models]");
+      throw new Error("用法：codexc provider add [--custom-models]");
     }
     await addPrimaryProvider({ environment, output, prompts, createClient, catalogKind: args[1] === "--custom-models" ? "custom" : "official" });
     return;
@@ -527,7 +527,7 @@ export async function runPrimaryProviderCli(
       || positional.length > 2
       || (positional[0] === "openai" && positional.length !== 1)
     ) {
-      throw new Error("用法：codexc primary-provider switch <Provider ID> [模型] [--yes]");
+      throw new Error("用法：codexc provider switch <Provider ID> [模型] [--yes]");
     }
     await switchPrimaryProvider(positional[0], positional[1], {
       environment,
@@ -540,7 +540,7 @@ export async function runPrimaryProviderCli(
   }
   if (subcommand === "remove") {
     if (rest.length !== 1) {
-      throw new Error("用法：codexc primary-provider remove <Provider ID>");
+      throw new Error("用法：codexc provider remove <Provider ID>");
     }
     await removePrimaryProvider(rest[0], { environment, output, createClient });
     return;

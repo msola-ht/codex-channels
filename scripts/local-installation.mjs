@@ -67,7 +67,7 @@ export function inspectCoreServiceInstallation(
     environment,
     platform,
   );
-  const paths = serviceDefinitionsForTarget("all").flatMap((definition) => {
+  const paths = serviceDefinitionsForTarget("all").filter(definition => definition.core).flatMap((definition) => {
     const definitionPath = join(
       definitionsDirectory,
       platform === "darwin"

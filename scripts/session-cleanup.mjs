@@ -17,7 +17,7 @@ import { readWorkspaceConfig } from "./workspace-config.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 import { SqliteSessionDisplayCache } from "../dist/storage/index.js";
 
-const usage = `用法：codexc sessions cleanup <最大轮数> [--idle-days <天数>] [--confirm]
+const usage = `用法：codexc cleanup sessions <最大轮数> [--idle-days <天数>] [--confirm]
 
 默认只预览，不归档。加 --confirm 才会归档符合条件的旧会话。
 执行前必须停止 Gateway；App Server 保持运行。清理覆盖配置中的全部 Workspace 和 Provider。
@@ -98,7 +98,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     for (const item of skipped) output.log("跳过：" + item.id + " · " + item.reason);
     output.log("父会话及派生后代由官方一起归档；后代数量仅含可查询成员。操作不是整组原子事务，请勿同时操作候选会话。");
     if (!confirm || candidates.length === 0) {
-      if (!confirm) output.log("确认执行：codexc sessions cleanup " + maxTurns
+      if (!confirm) output.log("确认执行：codexc cleanup sessions " + maxTurns
         + (idleDays === null ? "" : " --idle-days " + idleDays) + " --confirm（仅限交互终端）");
       return { maxTurns, idleDays, candidates, skipped, results };
     }

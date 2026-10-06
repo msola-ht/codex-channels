@@ -38,7 +38,7 @@ export async function runMetricsSettings({
   });
   output.write(`本地指标保留策略已更新：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-  output.write("需要立即清理时运行 codexc metrics cleanup。\n");
+  output.write("需要立即清理时运行 codexc cleanup metrics。\n");
   return {
     storage: { retention_days: next.retentionDays, max_rows: next.maxRows },
     configPath: result.configPath,

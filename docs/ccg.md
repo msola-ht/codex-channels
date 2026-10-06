@@ -29,7 +29,7 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 同一目录中引用某模型的账户 Profile 同步该模型的默认思考等级；选择其他模型的账户保留各自模型等级。
 新目录不再包含账户默认模型时明确失败。
 
-账户移除命令为 `codexc ccg account remove <id>`，确认后移除该账户 Key 和运行配置，保留安装前备份及历史统计。
+账户移除命令为 `codexc provider ccg remove <id>`，确认后移除该账户 Key 和运行配置，保留安装前备份及历史统计。
 固定模式恢复原有主配置字段；Remote TUI 正在使用时须先退出。
 仅支持当前多账户格式。
 

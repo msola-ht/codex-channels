@@ -100,7 +100,7 @@ Workspace 上配置。
 `metrics.storage.retention_days` 与 `metrics.storage.max_rows` 控制独立请求指标库的自动清理，
 默认分别为 365 天和 1,000,000 行，允许范围为 1–3650 天、1,000–10,000,000 行；达到任一上限
 后删除最旧记录。变化需要重启 Gateway，不改变 SQLite Schema；手工立即清理使用
-`codexc metrics cleanup`，该命令先创建私有备份。
+`codexc cleanup metrics`，该命令先创建私有备份。
 
 `codexc config` 统一管理 Codex 新会话与用户偏好，以及以上严格 Schema 已支持且适合日常操作的
 Gateway 设置，并提供不显示凭据、令牌或代理值的配置总览。Codex 设置入口不依赖 Gateway 配置已经

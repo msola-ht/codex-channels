@@ -29,8 +29,8 @@ export const serviceDefinitions = Object.freeze([
     windows: "Codex Connect WebUI",
     core: false,
     helpOrder: 2,
-    startOrder: 0,
-    stopOrder: 0,
+    startOrder: 3,
+    stopOrder: -2,
   }),
   Object.freeze({
     target: "model-relay", displayName: "Model Relay",
@@ -63,7 +63,7 @@ export function serviceTargetIncludes(target, expected) {
   const parsed = parseServiceTarget(target);
   return parsed === expected
     || (parsed === "all" && serviceDefinitions.some((item) =>
-      item.core && item.target === expected));
+      item.target === expected));
 }
 
 export function serviceDefinitionsForTarget(target, order = "start") {
@@ -72,7 +72,7 @@ export function serviceDefinitionsForTarget(target, order = "start") {
     throw new Error(`服务顺序必须是 start 或 stop：${order}`);
   }
   const selected = parsed === "all"
-    ? serviceDefinitions.filter((definition) => definition.core)
+    ? serviceDefinitions
     : serviceDefinitions.filter((definition) => definition.target === parsed);
   const orderKey = order === "stop" ? "stopOrder" : "startOrder";
   return [...selected].sort((left, right) => left[orderKey] - right[orderKey]);

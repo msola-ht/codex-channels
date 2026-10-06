@@ -353,11 +353,13 @@ describe("Relay queue and service presentation", () => {
     expect(result.stopped).not.toMatch(/>重启<|>停止</u);
   });
 
-  it("directs WebUI restart to the terminal in both languages without a self-restart button", () => {
+  it("directs WebUI stop and restart to the terminal in both languages without self-interrupting buttons", () => {
     expect(fixture.services.webuiZh).toContain("请在本机终端运行 codexc restart webui");
-    expect(fixture.services.webuiEn).toContain("Run codexc restart webui in the server terminal");
-    expect(fixture.services.webuiZh).not.toMatch(/>重启</u);
-    expect(fixture.services.webuiEn).not.toMatch(/>Restart</u);
+    expect(fixture.services.webuiEn).toContain("In the server terminal, run codexc restart webui");
+    expect(fixture.services.webuiZh).toContain("codexc stop webui");
+    expect(fixture.services.webuiEn).toContain("codexc stop webui");
+    expect(fixture.services.webuiZh).not.toMatch(/>(重启|停止)</u);
+    expect(fixture.services.webuiEn).not.toMatch(/>(Restart|Stop)</u);
   });
 });
 

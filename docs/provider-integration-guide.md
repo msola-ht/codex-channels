@@ -190,13 +190,13 @@ stream_max_retries = 0
 
 可配置多个自定义主 Provider 候选块，但同一时刻只激活一个：`model_provider` 显式选中时激活
 该候选，显式配置为 `openai` 或未配置时使用官方 OpenAI。配置自定义主 Provider 时不能同时设置顶层 `openai_base_url`。通过
-`codexc primary-provider` 的
+`codexc provider` 的
 `list` / `add` / `switch` / `remove` 管理候选与激活状态。`list --json` 提供稳定的脚本输出，包含当前
 主实例、固定候选、切换 Provider 与备份候选摘要，不包含 API Key 或其他认证字段。
-`codexc primary-provider switch openai` 不运行登录直接切回官方 OpenAI（执行前会二次确认，并提示
+`codexc provider switch openai` 不运行登录直接切回官方 OpenAI（执行前会二次确认，并提示
 将把 `model_provider` 写回 `openai`；从自定义切回且未指定模型时会清空顶层 `model`），官方凭据保留；切回时自定义候选块移入
 `~/.codex-connect/private/primary-providers.json`（0600）并从 config 清理，之后
-`codexc primary-provider switch <ID>` 会从备份自动恢复（同样先二次确认，并提示改写主配置的
+`codexc provider switch <ID>` 会从备份自动恢复（同样先二次确认，并提示改写主配置的
 `model_provider` / `model`）。命令行 `switch` 传 `--yes` 可跳过该确认（仅命令行，Setup 菜单仍会确认）。
 `codexc setup` 的“官方 → 登录并恢复官方”
 会运行 `codex login --device-auth`（打开终端显示的链接并输入验证码）并执行相同的备份与清理。
@@ -212,7 +212,7 @@ stream_max_retries = 0
 设置 `requires_openai_auth = false`，完全不依赖官方 auth.json，官方登录状态不受切换影响。
 主配置选中官方 `openai` 时，管理状态会检查 `CODEX_HOME/auth.json`（默认
 `~/.codex/auth.json`）；未检测到该鉴权文件按 OpenAI 官方未登录处理，WebUI Provider 状态不把
-官方 OpenAI 作为主 Provider 展示，Setup 总览与 `codexc primary-provider list` 标注“未登录”，
+官方 OpenAI 作为主 Provider 展示，Setup 总览与 `codexc provider list` 标注“未登录”，
 会话 `/model` 不列出官方 OpenAI 模型，只有第三方模型可继续选择。
 渠道启动通知同时标注“OpenAI 官方未登录”并给出 `codex login` 或 `/model` 的选择提示；已有官方
 Thread 不自动迁移 Provider，若 Turn 返回结构化 `unauthorized`，完成卡片按 OpenAI 官方与其他
@@ -284,14 +284,14 @@ Codex 内置保留 ID。固定模式通过 Codex 的 `config/batchWrite` 原子�
 共存，受管固定模式必须先恢复官方模式。写入后仍需运行
 `codexc restart all` 生效。Codex 兼容 Provider 入口只接受上述直接 API Key 字段，不接受额外
 Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍是主配置候选，需先运行
-`codexc primary-provider switch openai` 将候选移入私有备份，再编辑为切换模式；Setup 不会留下
+`codexc provider switch openai` 将候选移入私有备份，再编辑为切换模式；Setup 不会留下
 同名主配置块和切换 Profile。
 
 ## 7. 自定义 Responses Provider
 
 `codexc setup → 模型与提供商 → 第三方 Provider → 自定义第三方` 与
-`codexc primary-provider add --custom-models` 提供相同的新增入口；编辑、列表、切换、删除复用
-`primary-provider` 管理链路。WebUI 的 Provider 设置中选择“自定义 Responses Provider”。
+`codexc provider add --custom-models` 提供相同的新增入口；编辑、列表、切换、删除复用
+`provider` 管理链路。WebUI 的 Provider 设置中选择“自定义 Responses Provider”。
 此类型使用 `rs-` 开头的 Provider ID（其后 1-61 位 ASCII 字母、数字、`-` 或 `_`），
 以便模型目录缺失时明确报错，不回退到官方目录。显示名称禁止使用上游具有特殊语义的 `OpenAI`，
 避免启用官方专用协议能力。已有 Codex 兼容 Provider 不自动转换或迁移。
@@ -314,7 +314,7 @@ CLI 新增或编辑时分别询问是否导入官方 Codex、DeepSeek 模型，�
 `sf-custom-rs-<标识符>` Profile，并由现有监管服务启动。渠道 `/model` 从各自真实 App Server
 获取目录，跨 Provider 选择仍在新 Thread 生效；已有 Thread 不迁移。切回官方后保留候选和自定义目录，
 再次启用候选时使用目录记录的默认模型；删除 Provider 成功且凭据备份清理成功后才清理模型目录和私有恢复快照。
-清理中断留下孤立目录时，可再次执行 `codexc primary-provider remove <Provider ID>` 按原 ID 清理残留。
+清理中断留下孤立目录时，可再次执行 `codexc provider remove <Provider ID>` 按原 ID 清理残留。
 
 ### 自定义 Provider 的 WS 检测
 
@@ -339,8 +339,8 @@ DS/RS 窗口联动在写入前将本次全局设置涉及的 DS、OCG、CCG 目�
 先停止服务、核对或恢复私有快照中的配置，再明确选择目录恢复方向：
 
 ```bash
-codexc primary-provider recover rs-example rollback
-codexc primary-provider recover rs-example keep
+codexc provider recover rs-example rollback
+codexc provider recover rs-example keep
 ```
 
 `rollback` 使用上一目录；首次创建没有上一目录时删除未完成目录。`keep` 保留新目录。

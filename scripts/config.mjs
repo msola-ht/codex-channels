@@ -16,6 +16,7 @@ export async function runConfig({
   environment = process.env,
   input = process.stdin,
   json = false,
+  paths = false,
   output = process.stdout,
   prompts = clackPrompts,
   writeConfig = writeGatewayConfig,
@@ -28,10 +29,14 @@ export async function runConfig({
     output.write(`${JSON.stringify(result, null, 2)}\n`);
     return { action: "paths", ...result };
   }
-  if (!prompts) throw new Error("Config 菜单缺少交互实现");
-  if (!input.isTTY || !output.isTTY) {
+  if (paths) {
     output.write(`用户目录：${dataDir}\n配置文件：${configPath}\n`);
     return { action: "paths", configPath, dataDir };
+  }
+  if (!prompts) throw new Error("Config 菜单缺少交互实现");
+  if (!input.isTTY || !output.isTTY) {
+    output.write("用法：codexc config [paths [--json]]\n交互设置需要终端；查询配置路径使用 codexc config paths。\n");
+    return undefined;
   }
   prompts.intro("Codex Connect Config");
   while (true) {
@@ -147,13 +152,15 @@ if (
   && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
   const args = process.argv.slice(2);
-  const json = args.length === 1 && args[0] === "--json";
-  if (!(args.length === 0 || json)) {
-    writeCliMessage("failure", "用法：codexc config [--json]");
+  const paths = args[0] === "paths";
+  const json = paths && args.length === 2 && args[1] === "--json";
+  if (!(args.length === 0 || (paths && args.length === 1) || json)) {
+    writeCliMessage("failure", "用法：codexc config [paths [--json]]");
     process.exitCode = 1;
   } else {
     runConfig({
       json,
+      paths,
       stayOnMenu: true,
     }).catch((error) => {
       writeCliMessage("failure", error instanceof Error ? error.message : String(error));

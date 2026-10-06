@@ -61,6 +61,8 @@ try {
     "doctor",
     "remote",
     "work",
+    "provider",
+    "cleanup",
     "metrics",
     "relay",
     "channel",
@@ -90,6 +92,11 @@ try {
     throw new Error("CLI 分级帮助不完整");
   }
   const installedPackage = join(temporaryDirectory, "node_modules", "@hegenai", "codexc");
+  for (const args of [["provider", "deepseek"], ["provider", "opencode-go", "release"], ["provider", "ccg", "remove"],
+    ["cleanup", "sessions"], ["cleanup", "traffic"], ["cleanup", "metrics"], ["config", "paths"]]) {
+    const output = run(command, [...args, "--help"], temporaryDirectory, environment, true).stdout;
+    if (!output.includes("用法：codexc")) throw new Error(`安装后的命令帮助不可用：${args.join(" ")}`);
+  }
   // CLI help is handled before loading Setup; exercise its installed import graph too.
   run(process.execPath, ["--input-type=module", "-e", `
     import { pathToFileURL } from "node:url";

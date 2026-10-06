@@ -55,7 +55,7 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
 
 export async function runDeepseekAccountCli(args, options = {}) {
   const [command, action, ...rest] = args;
-  const usage = "用法：codexc deepseek account <add|list|reconfigure|remove|default> [id]（list 支持 --json）";
+  const usage = "用法：codexc provider deepseek <add|list|reconfigure|remove|default> [id]（list 支持 --json）";
   if (isCommandHelp(args, [[], ["account"], ["account", "add"], ["account", "list"], ["account", "reconfigure"], ["account", "remove"], ["account", "default"]], usage)) {
     (options.output ?? process.stdout).write(`${usage}\n`);
     return;

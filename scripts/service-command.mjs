@@ -23,7 +23,7 @@ import {
   serviceControlEnvironment,
 } from "./runtime-environment.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
-import { serviceDefinitionPath, waitForSelectedRelay } from "./service-selection.mjs";
+import { serviceControlDefinitions, serviceDefinitionPath, waitForSelectedRelay } from "./service-selection.mjs";
 import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
 
 const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
@@ -200,6 +200,16 @@ export async function runServiceCommand(args) {
   const controlEnvironment = serviceActionAllowsInvalidConfig(action)
     ? serviceControlEnvironment()
     : configuredEnvironment().environment;
+  if (action === "start" && serviceArgs[0] === "all") {
+    const platform = { linux: "systemd", darwin: "launchd", win32: "windows" }[process.platform];
+    if (!platform) throw new Error("不支持的后台服务平台");
+    for (const definition of serviceControlDefinitions(platform, "all", "start", controlEnvironment)) {
+      runServiceController("start", [definition.target], controlEnvironment);
+      await waitForServiceReadiness(definition.target, controlEnvironment);
+    }
+    printCliMessage("success", "全部已选后台服务已就绪。");
+    return;
+  }
   runServiceController(action, serviceArgs, controlEnvironment);
   if (action === "start") await waitForServiceReadiness(serviceArgs[0], controlEnvironment);
 }

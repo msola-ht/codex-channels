@@ -10,7 +10,7 @@ export function serviceDefinitionPath(
 export function serviceControlDefinitions(
   platform: ServicePlatform,
   target: ServiceTarget,
-  order?: "start" | "stop" | "status",
+  order?: "start" | "stop" | "status" | "install" | "install-stop" | "uninstall",
   environment?: NodeJS.ProcessEnv,
   definitionsDirectory?: string,
 ): ServiceDefinition[];

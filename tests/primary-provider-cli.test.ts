@@ -1240,7 +1240,7 @@ describe("primary provider CLI", () => {
         select: vi.fn(),
       },
       createClient,
-    })).rejects.toThrow("用法：codexc primary-provider switch <Provider ID> [模型] [--yes]");
+    })).rejects.toThrow("用法：codexc provider switch <Provider ID> [模型] [--yes]");
   });
 
   it("rejects switch when --yes is not the last argument", async () => {
@@ -1260,6 +1260,6 @@ describe("primary provider CLI", () => {
         select: vi.fn(),
       },
       createClient,
-    })).rejects.toThrow("用法：codexc primary-provider switch <Provider ID> [模型] [--yes]");
+    })).rejects.toThrow("用法：codexc provider switch <Provider ID> [模型] [--yes]");
   });
 });

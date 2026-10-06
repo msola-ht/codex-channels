@@ -361,7 +361,7 @@ async function buildSwitchPlan(
     throw invalid(
       "provider-not-found",
       "providerId",
-      `未找到自定义主 Provider：${normalizedId}；可用 codexc primary-provider list 查看候选`,
+      `未找到自定义主 Provider：${normalizedId}；可用 codexc provider list 查看候选`,
     );
   }
   const backup = switching === undefined && !candidateIds.includes(normalizedId)
@@ -484,7 +484,7 @@ async function buildRemovalPlan(
     throw invalid(
       "provider-not-found",
       "providerId",
-      `未找到自定义主 Provider：${normalizedId}；可用 codexc primary-provider list 查看候选`,
+      `未找到自定义主 Provider：${normalizedId}；可用 codexc provider list 查看候选`,
     );
   }
   const state = switching !== undefined ? "switching" : configured ? "configured" : "backup";

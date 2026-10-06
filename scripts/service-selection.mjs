@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readGatewayConfig, validateGatewayConfigDocument } from "../runtime/gateway-config.mjs";
-import { serviceDefinitions, serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
+import { serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import { locateUserConfig } from "./runtime-config.mjs";
 import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
@@ -15,19 +15,20 @@ export function serviceDefinitionPath(platform, definition, environment = proces
   throw new Error(`不支持的服务平台：${platform}`);
 }
 
-/** Optional Relay joins all only when installed; starting also requires explicit enablement. */
+/** All includes installed optional services; installation preserves WebUI's running state. */
 export function serviceControlDefinitions(platform, target, order = "start", environment = process.env, definitionsDirectory) {
-  const selected = serviceDefinitionsForTarget(target, order === "stop" ? "stop" : "start");
-  if (target !== "all") return selected;
-  const relay = serviceDefinitions.find(value => value.target === "model-relay");
-  const definitionPath = serviceDefinitionPath(platform, relay, environment, definitionsDirectory);
-  if (!existsSync(definitionPath)) return selected;
-  if (order === "start") {
-    const { configPath } = locateUserConfig(environment);
-    const document = validateGatewayConfigDocument(readGatewayConfig(configPath));
-    if (document.model_relay?.enabled !== true) return selected;
-  }
-  return order === "stop" ? [relay, ...selected] : [...selected, relay];
+  const selected = serviceDefinitionsForTarget(target, ["stop", "install-stop", "uninstall"].includes(order) ? "stop" : "start");
+  if (target !== "all" || order === "uninstall") return selected;
+  return selected.filter(definition => {
+    if (definition.core) return true;
+    if (definition.target === "webui" && (order === "install" || order === "install-stop")) return false;
+    if (!existsSync(serviceDefinitionPath(platform, definition, environment, definitionsDirectory))) return false;
+    if (definition.target === "model-relay" && (order === "start" || order === "install")) {
+      const { configPath } = locateUserConfig(environment);
+      return validateGatewayConfigDocument(readGatewayConfig(configPath)).model_relay?.enabled === true;
+    }
+    return true;
+  });
 }
 
 export function serviceSnapshotHealthy(services, target, environment = process.env) {

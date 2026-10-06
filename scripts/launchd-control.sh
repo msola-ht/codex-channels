@@ -66,7 +66,7 @@ show_logs() {
       [[ -f "$runtime_dir/codex-app-server.error.log" ]] && log_files+=("$runtime_dir/codex-app-server.error.log")
     fi
   fi
-  if [[ "$service" == "webui" ]]; then
+  if [[ "$service" == "webui" || "$service" == "all" ]]; then
     [[ -f "$runtime_dir/webui.log" ]] && log_files+=("$runtime_dir/webui.log")
     if [[ ! -f "$runtime_dir/webui.log" || "$runtime_dir/webui.error.log" -nt "$runtime_dir/webui.log" ]]; then
       [[ -f "$runtime_dir/webui.error.log" ]] && log_files+=("$runtime_dir/webui.error.log")
@@ -168,9 +168,9 @@ case "$action" in
     ;;
   install)
     reject_unsupported_jobs
-    labels=$(service_ids all stop)
+    labels=$(service_ids all install-stop)
     for label in ${(f)labels}; do stop_job "$label"; done
-    labels=$(service_ids all start)
+    labels=$(service_ids all install)
     for label in ${(f)labels}; do
       start_job "$label" "$agents_dir/$label.plist"
     done
@@ -227,10 +227,8 @@ case "$action" in
     esac
     ;;
   uninstall)
-    core_labels=$(service_ids all stop)
-    webui_label=$(service_ids webui stop)
-    relay_label=$(service_ids model-relay stop)
-    for label in "$relay_label" ${(f)core_labels} "$webui_label"; do
+    labels=$(service_ids all uninstall)
+    for label in ${(f)labels}; do
       stop_job "$label"
       /bin/rm -f "$agents_dir/$label.plist"
     done

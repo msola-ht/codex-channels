@@ -51,8 +51,8 @@ codexc timezone              # App Server 与 WebUI 时区；--gateway 设置网
 codexc work                  # 新建或注册已有工作区、管理权限
 codexc                       # 主菜单 → 后台服务
 codexc run                   # 前台运行核心服务
-codexc start                 # 启动已安装的核心后台服务
-codexc status                # 查看核心后台服务状态
+codexc start                 # 启动全部后台服务，含已安装 WebUI 与已启用 Relay
+codexc status                # 查看全部后台服务状态
 codexc restart               # 重启全部后台服务：Gateway、App Server、WebUI、已启用 Relay
 codexc restart gateway       # 只重启 Gateway
 codexc doctor                # 只读诊断

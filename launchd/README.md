@@ -20,8 +20,8 @@ App Server 与全部私有 WebSocket 就绪，避免登录或开机并发加载�
 不得终止共享 App Server。
 
 日常管理使用 `codexc start/stop/restart/status/logs`。目标为 `gateway`、`appserver`、
-`webui`、`relay` 或 `all`；WebUI 安装时只生成 plist 不自动启动，已安装时纳入重启的 `all`，
-其余操作仍单独管理。不写目标时，启停、重启和状态默认 `all`，日志默认 `gateway`。
+`webui`、`relay` 或 `all`；WebUI 安装时只生成 plist 不自动启动，已安装时纳入各操作的 `all`。
+不写目标时，启停、重启和状态默认 `all`，日志默认 `gateway`。
 
 验证模板：
 

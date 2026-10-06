@@ -365,7 +365,7 @@ function errorMessage(error) {
 
 function assertPruneProvider(provider) {
   if (!isPrunableMetricsProviderId(provider)) {
-    throw new Error("用法：codexc metrics prune <provider>");
+    throw new Error("用法：codexc cleanup metrics prune <provider>");
   }
 }
 
@@ -597,7 +597,7 @@ if (
       printMetricsTurns(readMetricsTurns(process.env, options.threadId, options), options.format);
     } else {
       throw new Error(
-        "用法：codexc metrics <status|run|threads|turns|report|export|quota|reset|cleanup|prune>",
+        "查询：codexc metrics <status|run|threads|turns|report|export|quota>；维护：codexc cleanup metrics [prune|reset]",
       );
     }
   } catch (error) {

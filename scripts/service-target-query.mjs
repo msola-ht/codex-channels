@@ -11,7 +11,7 @@ if (
     "用法：service-target-query.mjs <systemd|launchd> <gateway|app-server|webui|model-relay|all> [start|stop|status]",
   );
 }
-if (order !== undefined && !["start", "stop", "status"].includes(order)) throw new Error("服务选择必须是 start、stop 或 status");
+if (order !== undefined && !["start", "stop", "status", "install", "install-stop", "uninstall"].includes(order)) throw new Error("未知服务选择操作");
 const identifiers = serviceControlDefinitions(platform, target, order).map(service => service[platform]);
 for (const identifier of identifiers) {
   console.log(identifier);

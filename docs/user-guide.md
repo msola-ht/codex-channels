@@ -28,10 +28,10 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 ## 3. 初始化与配置
 
-在交互终端直接运行 `codexc` 打开主菜单，可进入初始化、接入、日常设置、工作区、后台服务、指标、清理、诊断，以及“运行与连接”中的 TUI、WebUI 和前台核心服务启动入口。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 仅显示路径，`timezone` 仅显示当前时区。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。
+在交互终端直接运行 `codexc` 打开主菜单，可进入初始化、接入、日常设置、工作区、后台服务、指标、清理、诊断，以及“运行与连接”中的 TUI、WebUI 和前台核心服务启动入口。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 显示帮助，`timezone` 仅显示当前时区。配置路径查询明确使用 `codexc config paths [--json]`，终端与管道中的行为一致。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。
 
 在 `codexc` 主菜单选择“后台服务”可选择操作和目标。菜单调用顶层服务命令，`restart all` 包含已安装的 WebUI。
-其他操作的 `all` 包含 App Server 与 Gateway，启动时纳入已安装且启用的 Relay，停止时先关闭已安装 Relay；WebUI 单独选择。
+启停、状态和日志的 `all` 同样包含 App Server、Gateway、已安装的 WebUI 与 Relay；启动 Relay 要求已启用。启动逐项等待就绪，停止顺序为 WebUI、Relay、Gateway、App Server。
 菜单日志显示最近 100 行，持续跟随仍使用 `codexc logs <目标> -f`。卸载后台服务需确认。
 
 `codexc work` 菜单区分新建工作区、注册当前目录和注册已有目录；注册前显示实际目录并确认，不创建或删除已有目录。`codexc metrics` 菜单包含会话列表导出和历史额度窗口查询，清理与重置统一使用 `codexc cleanup`。上述操作菜单完成单项后可继续选择；“运行与连接”完成后返回该子菜单，退出后返回主菜单。Setup 和 Config 单项失败会显示错误并返回各自分类菜单，不自动重试写入。
@@ -52,7 +52,9 @@ Gateway 配置位于：
 
 `codexc config` 的“计划任务”直接选择开关；Telegram 消息格式位于“显示设置”，仅在配置 Bot 后显示。显示子项取消或选择“返回上一级”时回到显示设置；在显示设置中选择“返回”才回到 Config。日志等级统一在“高级设置 → 日志等级”选择，`debug` / `trace` 开启调试信息，`info` 恢复标准输出。
 
-`codexc setup` 要求标准输入与提示输出均连接终端；不满足时在初始化用户目录前报错。`setup --json` 仍需交互输入及终端 stderr，stdout 输出脱敏 JSON Lines，适合将操作结果重定向到文件，不是无人值守配置接口。
+`codexc setup` 要求标准输入与提示输出均连接终端；不满足时在初始化用户目录前报错。`setup --jsonl` 仍需交互输入及终端 stderr，stdout 输出脱敏 JSON Lines，适合将操作结果重定向到文件，不是无人值守配置接口。
+
+命令只接受当前入口：Provider 管理集中为 `codexc provider`，受管账户使用 `provider deepseek`、`provider opencode-go`、`provider ccg`；各家的可用操作以子命令帮助为准。OpenCode Go 的 `release` 只释放实例，后续请求可重新拉起，不禁用账户。会话归档、转储删除与指标维护集中为 `cleanup sessions`、`cleanup traffic`、`cleanup metrics`（含 `prune`、`reset`）。旧独立 Provider 命令、`sessions`、原领域下的清理命令、`setup --json` 和 `config --json` 均被移除，没有兼容别名。脚本读取配置路径使用 `config paths --json`；诊断使用 `doctor --json`。
 
 Setup 仅按具体操作返回的激活范围提示重启。列出账户、停止账户等操作不会因经过模型菜单而附加“重启全部服务”；需要重启的配置修改会返回对应服务目标，Setup 不自动执行重启。
 
@@ -224,8 +226,8 @@ codexc work list [--json]
 
 ```bash
 codexc setup
-codexc primary-provider list [--json]
-codexc primary-provider switch <Provider ID> [模型] [--yes]
+codexc provider list [--json]
+codexc provider switch <Provider ID> [模型] [--yes]
 ```
 
 `primary-provider switch` 会把主实例切换到目标 Provider，执行前会二次确认，并提示将改写
@@ -352,11 +354,11 @@ codexc logs -n 200
 任一停止、启动或就绪检查失败立即中止，报告已完成、失败和未执行步骤，不自动回滚已完成的启停。
 可用 `codexc status` 和 `codexc status webui` 检查状态，排除问题后重试。
 
-`start/stop/status` 默认操作核心服务（含按安装与启用状态选择的 Relay，不含 WebUI），
+`start/stop/status` 默认操作全部后台服务（含已安装 WebUI 及按安装与启用状态选择的 Relay），
 `logs` 默认 Gateway。macOS 普通 `start` 不强制重启已运行的服务。
 单独重启 Gateway 不停止共享 App Server；单独重启 App Server 时，仍运行的 Gateway 会按真实断线处理并重连。
 渠道内禁止停止或重启 App Server，全部重启也必须在本机终端执行。
-WebUI 内不执行包含自身的重启任务；请在本机终端运行 `codexc restart webui` 或 `codexc restart all`。
+WebUI 内不执行包含自身的停止、重启或卸载任务；请在本机终端运行对应的 `codexc stop/restart webui`、`codexc stop/restart all` 或 `codexc uninstall --services`。
 
 受管第三方 Provider 的模型目录、Profile 或管理标记变化会自动校验，并仅应用到当前 Gateway
 已启用且受影响的 Provider。原生 TUI/Desktop 租约或该实例的权威活动 Thread 会推迟应用；
@@ -405,12 +407,12 @@ codexc cleanup
 
 | 维护项目 | 直接命令 | 执行条件与结果 |
 | --- | --- | --- |
-| 归档短会话及子会话 | `codexc sessions cleanup <最大轮数>` | 停止 Gateway、保留 App Server；预览并确认后归档 |
-| 删除请求与响应转储 | `codexc traffic cleanup` | 先预览，确认删除需停止全部 App Server 与 Relay；永久删除当前配置目录下全部转储 |
-| 清理旧指标 | `codexc metrics cleanup --restart-gateway` | 备份清理；显式 `--restart-gateway` 会停止后启动 Gateway（原先停止也会启动），交互菜单则按原状态恢复 |
+| 归档短会话及子会话 | `codexc cleanup sessions <最大轮数>` | 停止 Gateway、保留 App Server；预览并确认后归档 |
+| 删除请求与响应转储 | `codexc cleanup traffic` | 先预览，确认删除需停止全部 App Server 与 Relay；永久删除当前配置目录下全部转储 |
+| 清理旧指标 | `codexc cleanup metrics --restart-gateway` | 备份清理；显式 `--restart-gateway` 会停止后启动 Gateway（原先停止也会启动），交互菜单则按原状态恢复 |
 | 核对未确认渠道结果 | `codexc delivery status` / `codexc delivery list` | 先停止 Gateway；明确重发、确认送达与停写备份见[投递箱运维](delivery.md) |
-| 清理指定 Provider 的指标 | `codexc metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
-| 重置整个指标库 | `codexc metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
+| 清理指定 Provider 的指标 | `codexc cleanup metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
+| 重置整个指标库 | `codexc cleanup metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
 
 `codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。会话归档、旧指标清理和指标库重置会在确认后临停运行中的 Gateway；转储删除先预览并确认，再询问临停 Gateway、Relay 和 App Server。结束、取消或失败后按原状态恢复，原先停止的服务不会被启动；恢复失败会报告具体服务和手动启动命令。底层命令仍检查实际进程已退出，不终止前台自行运行的进程。执行失败会报告错误并返回清理菜单。
 
@@ -418,17 +420,17 @@ codexc cleanup
 
 ```bash
 codexc stop gateway
-codexc sessions cleanup 3 --idle-days 7
+codexc cleanup sessions 3 --idle-days 7
 ```
 
 核对后在交互终端执行，命令会重新扫描并再次询问确认：
 
 ```bash
-codexc sessions cleanup 3 --idle-days 7 --confirm
+codexc cleanup sessions 3 --idle-days 7 --confirm
 codexc start gateway
 ```
 
-交互归档统一从 `codexc cleanup → 归档短会话及子会话` 进入。菜单在 Gateway 运行时先询问是否临时停止，保留 App Server；预览后的归档仍需确认。完成、取消或失败后恢复原先运行的 Gateway，原先停止则保持停止；恢复失败会提示手动启动。前台自行运行的 Gateway 仍须退出，菜单不终止非受管进程。`codexc sessions` 无参数只显示帮助。不指定 `--idle-days` 就没有会话年龄限制。
+交互归档统一从 `codexc cleanup → 归档短会话及子会话` 进入。菜单在 Gateway 运行时先询问是否临时停止，保留 App Server；预览后的归档仍需确认。完成、取消或失败后恢复原先运行的 Gateway，原先停止则保持停止；恢复失败会提示手动启动。前台自行运行的 Gateway 仍须退出，菜单不终止非受管进程。`codexc cleanup sessions` 无参数显示用法。不指定 `--idle-days` 就没有会话年龄限制。
 轮数阈值只计算主会话，子孙轮数不累加；派生子孙随官方归档，Fork 独立筛选。
 活动、固定、渠道绑定或状态无法确认的成员会使整组跳过。归档保留历史，不是永久删除；
 官方操作可能部分成功，执行期间不要在其他客户端操作候选会话。完整筛选及核验口径见[展示说明](display.md)。
@@ -465,7 +467,7 @@ npm 安装版也可以使用 `codexc uninstall --services` 后执行 `npm uninst
 恢复时如果历史目录或实际权限与工作区不一致，会解除该绑定；下一条普通消息在当前工作区新建会话。
 `/model` 选择 OpenAI 模型会关闭下一轮的 Fast，并同步保存为 Codex 用户默认值，避免 `all` 重启后
 重新开启；需要时可用 `/fast on` 再打开。选择第三方模型不修改 OpenAI 的 Fast 默认值。
-`/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话会优先显示本机指标/缓存中的 Turn 轮数；打开列表不等待历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn 统计；本地没有记录时不会猜测数量。需要完整官方历史计数时，`codexc sessions cleanup` 仍会按候选读取。
+`/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话会优先显示本机指标/缓存中的 Turn 轮数；打开列表不等待历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn 统计；本地没有记录时不会猜测数量。需要完整官方历史计数时，`codexc cleanup sessions` 仍会按候选读取。
 
 计划任务是 Gateway 自有功能，不是 App Server 原生计划 RPC。启用方式和确认语法见 [`计划任务开发设计`](scheduled-tasks-development.md)。
 
@@ -607,8 +609,8 @@ codexc traffic --exchange 12                   # 展开某次调用的一条请�
 codexc traffic --all --grep deepseek-flash     # 只显示匹配关键字的逻辑调用并展开正文
 codexc traffic --exchange 12 --max-bytes 2000  # 限制每段正文的显示长度
 codexc traffic --follow                        # 从现有文件末尾开始持续输出新写入的记录，按 Ctrl-C 停止
-codexc traffic cleanup                         # 预览全部可清理转储，不删除
-codexc traffic cleanup --confirm               # 停止全部 App Server 与 Relay 后永久删除预览范围
+codexc cleanup traffic                         # 预览全部可清理转储，不删除
+codexc cleanup traffic --confirm               # 停止全部 App Server 与 Relay 后永久删除预览范围
 ```
 
 摘要行包含调用编号、时间、请求路径或 WebSocket URL、线程、轮次、模型和终态；详情固定分为“请求”

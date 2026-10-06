@@ -64,12 +64,12 @@ describe("Codex Connect config menu", () => {
     expect(readFileSync(fixture.configPath, "utf8")).toBe("[broken");
   });
 
-  it("shows paths without prompting when stdin is redirected and stdout is a terminal", async () => {
+  it("shows help without prompting when stdin is redirected and stdout is a terminal", async () => {
     const select = vi.fn();
     await expect(runConfig({
       input: { isTTY: false }, output: { isTTY: true, write: vi.fn() },
       prompts: { select },
-    })).resolves.toMatchObject({ action: "paths" });
+    })).resolves.toBeUndefined();
     expect(select).not.toHaveBeenCalled();
   });
 
@@ -78,6 +78,7 @@ describe("Codex Connect config menu", () => {
     const output: string[] = [];
 
     const result = await runConfig({
+      paths: true,
       input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: false },

@@ -196,7 +196,7 @@ describe("Codex Connect setup", () => {
   it("rejects redirected input with a structured JSON error", () => {
     const child = spawnSync(
       process.execPath,
-      [resolve("scripts/setup.mjs"), "--json"],
+      [resolve("scripts/setup.mjs"), "--jsonl"],
       {
         cwd: process.cwd(),
         env: { ...process.env, NO_COLOR: "1" },

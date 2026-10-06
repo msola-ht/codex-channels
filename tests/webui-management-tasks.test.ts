@@ -69,7 +69,9 @@ describe("WebUI management tasks", () => {
     expect(() => normalizeTaskInput({ operation: "service", action: "reload", target: "gateway" })).toThrow("服务重载不接受服务目标");
     for (const target of ["webui", "all"]) {
       expect(() => normalizeTaskInput({ operation: "service", action: "restart", target })).toThrow(`请在本机终端执行 codexc restart ${target}`);
+      expect(() => normalizeTaskInput({ operation: "service", action: "stop", target })).toThrow(`请在本机终端执行 codexc stop ${target}`);
     }
+    expect(() => normalizeTaskInput({ operation: "service", action: "uninstall" })).toThrow("codexc uninstall --services");
     expect(() => normalizeTaskInput({ operation: "metrics", action: "shell" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "metrics", action: "prune" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "metrics", action: "cleanup", target: "deepseek" })).toThrow();
@@ -78,7 +80,7 @@ describe("WebUI management tasks", () => {
 
   it("returns an explicit confirmation preview", () => {
     const runner = new WebuiManagementTaskRunner();
-    expect(runner.preview({ operation: "service", action: "stop", target: "webui" })).toMatchObject({
+    expect(runner.preview({ operation: "service", action: "stop", target: "gateway" })).toMatchObject({
       operation: "service",
       requiresConfirmation: true,
     });
@@ -91,7 +93,7 @@ describe("WebUI management tasks", () => {
     });
     expect(runner.preview({ operation: "metrics", action: "prune", target: "deepseek" })).toMatchObject({
       target: "deepseek",
-      effects: ["执行 codexc metrics prune deepseek"],
+      effects: ["执行 codexc cleanup metrics prune deepseek"],
       preconditions: [],
       activation: "按操作前状态恢复 Gateway",
     });
@@ -100,7 +102,7 @@ describe("WebUI management tasks", () => {
       recovery: expect.stringContaining("指标数据库备份"),
     });
     expect(runner.preview({ operation: "traffic", action: "cleanup" })).toMatchObject({
-      effects: ["执行 codexc traffic cleanup --confirm"],
+      effects: ["执行 codexc cleanup traffic --confirm"],
       preconditions: ["全部 App Server 与 Relay 必须已停止"],
       recovery: expect.stringContaining("无法恢复"),
     });
@@ -167,7 +169,10 @@ describe("WebUI management tasks", () => {
     [{ operation: "service", action: "start", target: "app-server" }, "start appserver"],
     [{ operation: "service", action: "stop", target: "app-server" }, "stop appserver"],
     [{ operation: "service", action: "install" }, "install"],
-    [{ operation: "service", action: "uninstall" }, "uninstall --services"],
+    [{ operation: "metrics", action: "cleanup" }, "cleanup metrics"],
+    [{ operation: "metrics", action: "prune", target: "openai" }, "cleanup metrics prune openai"],
+    [{ operation: "metrics", action: "reset" }, "cleanup metrics reset"],
+    [{ operation: "traffic", action: "cleanup" }, "cleanup traffic --confirm"],
     [{ operation: "service", action: "reload" }, "reload"],
   ] as const)("executes the canonical service command for %j", async (input, command) => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-webui-restart-"));

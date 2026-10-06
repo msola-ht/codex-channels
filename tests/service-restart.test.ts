@@ -27,7 +27,7 @@ vi.mock("../scripts/runtime-environment.mjs", async () => ({
 vi.mock("../scripts/service-selection.mjs", async () => ({
   ...await vi.importActual("../scripts/service-selection.mjs"), waitForSelectedRelay: mocks.waitRelay,
 }));
-const { runRestartCommand } = await import("../scripts/service-command.mjs");
+const { runRestartCommand, runServiceCommand } = await import("../scripts/service-command.mjs");
 const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
 let root: string;
 
@@ -81,6 +81,22 @@ function install(platform: "linux" | "darwin" | "win32", targets = serviceDefini
 }
 
 describe.each(["linux", "darwin", "win32"] as const)("%s restart orchestration", platform => {
+  it("starts all selected services in dependency order and waits between starts", async () => {
+    install(platform);
+    await runServiceCommand(["start", "all"]);
+    expect(mocks.events).toEqual([
+      "start:app-server", "ready:app-server", "start:gateway", "ready:gateway",
+      "start:model-relay", "ready:model-relay", "start:webui", "ready:webui",
+    ]);
+  });
+
+  it("does not start later services after a readiness failure", async () => {
+    install(platform);
+    mocks.waitCore.mockRejectedValueOnce(new Error("not ready"));
+    await expect(runServiceCommand(["start", "all"])).rejects.toThrow("not ready");
+    expect(mocks.events).toEqual(["start:app-server"]);
+  });
+
   it("distinguishes an unloaded launchd job from missing registered services", async () => {
     install(platform);
     mocks.inspect.mockResolvedValue({ services: [{ loaded: false }] });

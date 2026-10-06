@@ -16,9 +16,9 @@
 卸载由 `scripts/systemd-control.sh` 完成；Gateway unit 显式标记为受监管进程，配置要求重启时
 由 systemd 自动拉起。Gateway 启动前会等待受监管的 App Server 与全部私有 WebSocket 就绪，
 避免开机并发启动时抢跑；Gateway 的日常重启不会停止共享 App Server。
-启停、重启、状态和日志可选择 `gateway`、`app-server`、`webui`、`relay` 或 `all`；
-WebUI 独立于 `all`，安装时只生成 unit 不自动启动。不写目标时，启停和状态默认
-`all`，重启和日志默认 `gateway`。
+启停、重启、状态和日志可选择 `gateway`、`appserver`、`webui`、`relay` 或 `all`；
+已安装 WebUI 纳入 `all`，安装时只生成 unit 不自动启动。不写目标时，启停、重启和状态默认
+`all`，日志默认 `gateway`。
 
 `codexc install` 在安装 unit 前检查当前用户的 systemd linger；未启用时先尝试通过
 `loginctl enable-linger` 开启并复查。无法启用或复查未生效时，安装在调用 `systemctl --user`

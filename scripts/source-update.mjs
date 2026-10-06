@@ -797,8 +797,7 @@ async function stopCoreServices(checkout, environment, options, services) {
 }
 
 function inspectUpdateServices(environment) {
-  const services = [...inspectManagedServiceStatus({ environment, target: "all" }).services,
-    ...inspectManagedServiceStatus({ environment, target: "webui" }).services];
+  const services = inspectManagedServiceStatus({ environment, target: "all" }).services;
   for (const service of services) {
     if (!service.running && !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state)) {
       throw new Error(`无法确认更新前 ${service.target} 运行状态；未停止服务`);

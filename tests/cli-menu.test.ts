@@ -55,7 +55,7 @@ describe("service menu", () => {
       [["status", "all"]], [["restart", "webui"]], [["logs", "gateway", "--lines", "100"]], [["reload"]],
     ]);
     expect(prompts.select.mock.calls[1]?.[0]).toMatchObject({
-      options: expect.arrayContaining([expect.objectContaining({ value: "all", hint: expect.stringContaining("不含 WebUI") })]),
+      options: expect.arrayContaining([expect.objectContaining({ value: "all", hint: expect.stringContaining("已安装 WebUI") })]),
     });
   });
 

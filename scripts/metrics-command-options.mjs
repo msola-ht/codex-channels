@@ -159,7 +159,7 @@ export function validateMetricsCommandArgs(subcommand, args) {
   }
   if (subcommand === "prune") {
     if (args.length !== 1 || !isPrunableMetricsProviderId(args[0])) {
-      throw new Error("用法：codexc metrics prune <provider>");
+      throw new Error("用法：codexc cleanup metrics prune <provider>");
     }
     return;
   }
@@ -170,7 +170,7 @@ export function validateMetricsCommandArgs(subcommand, args) {
     throw new Error("用法：codexc metrics status [--json]");
   }
   if (subcommand === "reset" && args.length > 0) {
-    throw new Error(`用法：codexc metrics ${subcommand}`);
+    throw new Error("用法：codexc cleanup metrics reset");
   }
 }
 
