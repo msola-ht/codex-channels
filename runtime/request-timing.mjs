@@ -27,5 +27,5 @@ export function generationSpeed(value) {
 
 export function formatGenerationSpeed(value) {
   const speed = generationSpeed(value);
-  return speed === null ? "—" : `${speed.toFixed(1)} tokens/s`;
+  return speed === null ? "—" : `${speed.toFixed(1)} /s`;
 }

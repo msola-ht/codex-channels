@@ -630,10 +630,12 @@ export function createTurnCompletedPresentation(
       label: "上下文压缩",
       value: formatCompactMetricsValue(
         event.timing.compact,
+        { concise: !debug, currentModel: event.model },
       ),
     });
   }
   runFields.push({ label: "本轮耗时", value: event.durationMs === undefined ? "未提供" : formatElapsedDuration(event.durationMs) });
+  runFields.push(...performanceFields(event.timing?.performance));
   if (event.taskAggregate) {
     const task = event.taskAggregate;
     const taskFields: LifecyclePresentationField[] = [
@@ -709,10 +711,19 @@ export function createTurnCompletedPresentation(
   if (event.sessionAggregate?.responseUsage?.amount != null) {
     sessionFields.push({ label: "OpenAI Credits", value: formatResponseUsage(event.sessionAggregate?.responseUsage) });
   }
+  if (event.sessionAggregate?.compact) {
+    sessionFields.push({
+      label: "压缩请求",
+      value: formatCompactMetricsValue(event.sessionAggregate.compact, { concise: !debug, currentModel: event.model }),
+    });
+  }
   sessionFields.push({
     label: "总耗时",
     value: formatSessionExecutionTiming(event),
   });
+  if (event.sessionAggregate) {
+    sessionFields.push(...performanceFields(event.sessionAggregate.performance));
+  }
   const sections = [
     ...(sessionFields.length > 0
       ? [{ title: "当前会话", fields: sessionFields }]
@@ -850,6 +861,17 @@ function turnStatusLabel(
     inProgress: "运行中",
   } as const;
   return labels[status];
+}
+
+function performanceFields(
+  performance: TurnTaskMetricsSummary["performance"],
+): LifecyclePresentationField[] {
+  return [
+    { label: "响应", value: performance?.averageResponseTimeMs == null ? "—"
+      : formatElapsedDuration(performance.averageResponseTimeMs) },
+    { label: "速度", value: performance?.generationTokensPerSecond == null ? "—"
+      : `${performance.generationTokensPerSecond.toFixed(1)} /s` },
+  ];
 }
 
 function requestOutcomeFields(summary: TurnTaskMetricsSummary): LifecyclePresentationField[] {

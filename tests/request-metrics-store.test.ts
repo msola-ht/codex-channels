@@ -26,6 +26,76 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("keeps performance unknown when no valid samples exist", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    try {
+      store.record({ ...sample(), responseTimeMs: null, generationTiming: null });
+      const expected = { requestCount: 1, responseSampleCount: 0, averageResponseTimeMs: null, generationTokensPerSecond: null };
+      expect(store.threadTurnSummary("thread-1", "turn-1")?.performance).toEqual(expected);
+      expect(store.threadSummary("thread-1").threadAggregate?.performance).toEqual(expected);
+    } finally { store.close(); }
+  });
+  it("aggregates session performance across turns and descendants without compaction or unrelated threads", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    try {
+      const request = { ...sample(), responseTimeMs: 100, outputTokens: 100,
+        generationTiming: { reasoningMs: 0, textMs: 1000, toolMs: 0, totalMs: 1000 } };
+      store.record(request);
+      store.record({ ...request, turnId: "turn-2", responseTimeMs: 300, outputTokens: 300 });
+      store.recordSubagentThread({ agentThreadId: "child", parentThreadId: "thread-1", parentTurnId: "turn-1", agentPath: "/root/child" });
+      store.record({ ...request, threadId: "child", responseTimeMs: 500, outputTokens: 500 });
+      store.record({ ...sample(), operation: "compact" });
+      store.record({ ...sample(), threadId: "unrelated" });
+      expect(store.threadSummary("thread-1").threadAggregate?.performance).toEqual({
+        requestCount: 3, responseSampleCount: 3, averageResponseTimeMs: 300, generationTokensPerSecond: 300,
+      });
+      store.record({ ...sample(), turnId: "old-turn" });
+      expect(store.threadSummary("thread-1").threadAggregate?.performance).toEqual({
+        requestCount: 4, responseSampleCount: 3, averageResponseTimeMs: 300, generationTokensPerSecond: 300,
+      });
+    } finally { store.close(); }
+  });
+  it.each([
+    { outputTokens: 0 },
+    { outputTokens: null },
+    { generationTiming: null },
+    { generationTiming: { reasoningMs: 0, textMs: 0, toolMs: 0, totalMs: 0 } },
+    { status: "failed" as const },
+    { status: "incomplete" as const },
+  ])("excludes unusable requests from both speed numerator and denominator: %j", (override) => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    try {
+      const request = { ...sample(), responseTimeMs: 0, outputTokens: 100,
+        generationTiming: { reasoningMs: 0, textMs: 1000, toolMs: 0, totalMs: 1000 } };
+      store.record(request);
+      store.record({ ...request, outputTokens: 900, ...override });
+      expect(store.threadTurnSummary("thread-1", "turn-1")?.performance).toEqual({
+        requestCount: 2, responseSampleCount: 2, averageResponseTimeMs: 0, generationTokensPerSecond: 100,
+      });
+      expect(store.threadSummary("thread-1")?.latestTurn?.performance?.generationTokensPerSecond).toBe(100);
+    } finally { store.close(); }
+  });
+  it("rebuilds weighted turn performance from persisted requests and excludes other scopes", () => {
+    const path = join(temporaryDirectory(), "metrics.sqlite3");
+    let store = new SqliteModelRequestMetricsStore(path);
+    try {
+      store.record({ ...sample(), responseTimeMs: 100, outputTokens: 100,
+        generationTiming: { reasoningMs: 0, textMs: 1000, toolMs: 0, totalMs: 1000 } });
+      store.record({ ...sample(), responseTimeMs: 300, outputTokens: 900,
+        generationTiming: { reasoningMs: 2000, textMs: 0, toolMs: 1000, totalMs: 3000 } });
+      store.record({ ...sample(), operation: "compact" });
+      store.record({ ...sample(), threadId: "child" });
+      store.record({ ...sample(), turnId: "other" });
+      store.close(); store = new SqliteModelRequestMetricsStore(path);
+      expect(store.threadTurnSummary("thread-1", "turn-1")?.performance).toEqual({
+        requestCount: 2, responseSampleCount: 2, averageResponseTimeMs: 200, generationTokensPerSecond: 250,
+      });
+      store.record({ ...sample(), outputTokens: null });
+      expect(store.threadTurnSummary("thread-1", "turn-1")?.performance).toEqual({
+        requestCount: 3, responseSampleCount: 2, averageResponseTimeMs: 200, generationTokensPerSecond: 250,
+      });
+    } finally { store.close(); }
+  });
   it("persists request diagnostic facts without traffic and rejects unsafe diagnostic values", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
     const facts = { upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2, finishReason: "stop",

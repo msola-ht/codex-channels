@@ -218,7 +218,7 @@ export function printMetricsExport(result, format) {
       console.log("本时间范围没有请求记录。");
       return;
     }
-    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存 | 输出 | 响应时间 | 生成速度 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |");
+    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存 | 输出 | 响应 | 速度 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |");
     console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
       console.log(

@@ -1,4 +1,5 @@
 import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
+import type { RequestTimingSummary } from "../../runtime/request-timing.mjs";
 import { summarizeResponseUsage } from "./response-usage-summary.js";
 import type {
   RequestInterruptionSummary,
@@ -458,11 +459,13 @@ export class SqliteRequestMetricsQueries {
         interruptionSummary: this.turnInterruptionSummary(threadId, latestTurn!.turn_id),
         durationMs: this.turnExecutionDuration(threadId, latestTurn!.turn_id),
         responseUsage: this.turnResponseUsage(threadId, latestTurn!.turn_id),
+        performance: this.turnPerformance(threadId, latestTurn!.turn_id),
       },
       threadAggregate: threadAggregate.request_count === 0
         ? null
         : {
           ...toStoredThreadAggregate(threadAggregate),
+          performance: this.scopedPerformance(scopeSql, [threadId]),
           interruptionSummary: this.queryInterruptionSummary(scopeSql, [threadId]),
           responseUsage: this.scopedResponseUsage(scopeSql, [threadId]),
         },
@@ -556,7 +559,30 @@ export class SqliteRequestMetricsQueries {
       interruptionSummary: this.turnInterruptionSummary(threadId, turnId),
       durationMs: this.turnExecutionDuration(threadId, turnId),
       responseUsage: this.turnResponseUsage(threadId, turnId),
+      performance: this.turnPerformance(threadId, turnId),
     };
+  }
+
+  private turnPerformance(threadId: string, turnId: string): RequestTimingSummary {
+    return this.scopedPerformance(`WITH scoped AS (
+      SELECT * FROM model_request_metrics WHERE thread_id = ? AND turn_id = ?
+    )`, [threadId, turnId]);
+  }
+
+  private scopedPerformance(scopeSql: string, parameters: SQLInputValue[]): RequestTimingSummary {
+    return this.reader.prepare(`${scopeSql}, performance_samples AS (
+      SELECT response_time_ms, output_tokens,
+        json_extract(generation_timing, '$.totalMs') AS generation_ms,
+        status = 'completed' AND output_tokens > 0
+          AND json_extract(generation_timing, '$.totalMs') > 0 AS valid_speed
+      FROM scoped WHERE source = 'owned' AND operation = 'response'
+    )
+      SELECT COUNT(*) AS requestCount, COUNT(response_time_ms) AS responseSampleCount,
+        AVG(response_time_ms) AS averageResponseTimeMs,
+        1000.0 * SUM(output_tokens) FILTER (WHERE valid_speed)
+          / SUM(generation_ms) FILTER (WHERE valid_speed) AS generationTokensPerSecond
+      FROM performance_samples
+    `).get(...parameters) as unknown as RequestTimingSummary;
   }
 
   private scopedResponseUsage(scopeSql: string, parameters: SQLInputValue[]): ResponseUsageSummary | null {

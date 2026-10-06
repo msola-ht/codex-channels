@@ -132,7 +132,7 @@ WebUI 控制台在 DeepSeek 余额卡旁按账户分别展示官方配额窗口�
   直接清理共享模型目录，固定模式还会恢复安装前的 Codex 主配置。删除后重启 Gateway 会自动解绑已删除账户的
   外部会话；该会话下一条消息会新建 Thread。
 - 运行统计与 DeepSeek 一致：完成卡片展示请求结果、Token、缓存与压缩摘要，并在官方
-  `Turn.durationMs` 可用时显示本轮总耗时；不展示模型请求聚合耗时或首段回复延迟，不显示 TPS；
+  `Turn.durationMs` 可用时显示本轮总耗时；响应和速度按[完成汇报](display.md#完成汇报)的本轮汇总口径展示；
   `/usage` 展示官方配额窗口与本机 Token 用量，见上文。
 
 官方来源：[`OpenCode Go`](https://opencode.ai/docs/go/)。

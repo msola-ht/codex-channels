@@ -304,10 +304,30 @@ export function formatCompactMetricsValue(
     inputTokens: number;
     outputTokens: number;
   },
+  options: { concise?: boolean; currentModel?: string | undefined } = {},
 ): string {
   const model = compact.hasMixedModels
     ? "混合模型"
     : compact.model ?? "模型未知";
+  if (options.concise) {
+    const parts = [`${formatRequestCount(compact.requestCount)} 次`];
+    if (compact.hasMixedModels || !compact.model || compact.model !== options.currentModel) {
+      parts.push(model);
+    }
+    parts.push(`${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token`);
+    if (compact.requestOutcomes) {
+      for (const [label, count] of [
+        ["客户端中断", compact.requestOutcomes.interrupted],
+        ["其他失败", compact.requestOutcomes.failed],
+        ["未完整观测", compact.requestOutcomes.incomplete],
+      ] as const) {
+        if (count > 0) parts.push(`${label} ${formatRequestCount(count)}`);
+      }
+    } else if (compact.unsuccessfulRequestCount > 0) {
+      parts.push(`未完成 ${formatRequestCount(compact.unsuccessfulRequestCount)} 次（结果分类未提供）`);
+    }
+    return parts.join(" · ");
+  }
   const outcomes = compact.requestOutcomes
     ? ` · ${formatRequestOutcomes(compact.requestOutcomes)}`
     : compact.unsuccessfulRequestCount > 0

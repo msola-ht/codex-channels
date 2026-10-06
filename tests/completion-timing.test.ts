@@ -4,6 +4,11 @@ import { mergeCompletionTiming } from "../src/bootstrap/completion-timing.js";
 import type { StoredTurnRequestMetricsSummary } from "../src/observability/index.js";
 
 describe("mergeCompletionTiming", () => {
+  it("restores turn performance and clears unavailable persisted values", () => {
+    const performance = { requestCount: 2, responseSampleCount: 2, averageResponseTimeMs: 200, generationTokensPerSecond: 250 };
+    expect(mergeCompletionTiming(turnSummary({ performance }), "turn-1", undefined)?.performance).toEqual(performance);
+    expect(mergeCompletionTiming(turnSummary({}), "turn-1", { performance })).not.toHaveProperty("performance");
+  });
   it("restores persisted exact response usage after restart and clears stale totals", () => {
     const responseUsage = { amount: "0.30000000000000000001", observedRequestCount: 2, missingRequestCount: 1 };
     expect(mergeCompletionTiming(turnSummary({ responseUsage }), "turn-1", undefined)?.responseUsage).toEqual(responseUsage);

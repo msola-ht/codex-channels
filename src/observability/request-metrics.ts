@@ -1,4 +1,4 @@
-import type { GenerationTiming } from "../../runtime/request-timing.mjs";
+import type { GenerationTiming, RequestTimingSummary } from "../../runtime/request-timing.mjs";
 export type ModelRequestTransport = "http" | "websocket";
 export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
@@ -173,6 +173,7 @@ export interface ResponseUsageSummary {
 }
 
 export interface StoredTurnRequestMetricsSummary {
+  performance?: RequestTimingSummary;
   requestOutcomes: RequestOutcomeCounts;
   interruptionSummary: RequestInterruptionSummary;
   durationMs?: number | null;
@@ -193,6 +194,7 @@ export interface StoredTurnRequestMetricsSummary {
 }
 
 export interface StoredThreadRequestMetricsAggregate {
+  performance?: RequestTimingSummary;
   requestOutcomes: RequestOutcomeCounts;
   interruptionSummary: RequestInterruptionSummary;
   responseUsage?: ResponseUsageSummary | null;

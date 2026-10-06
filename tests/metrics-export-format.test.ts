@@ -90,7 +90,8 @@ describe("metrics export display helpers", () => {
     });
   });
   it.each([
-    [0, "0 ms"], [0.125, "0.13 ms"], [672, "672 ms"], [999.994, "999.99 ms"],
+    [0, "0 ms"], [0.125, "0 ms"], [0.5, "1 ms"], [672, "672 ms"], [952.07, "952 ms"],
+    [999.49, "999 ms"], [999.5, "1 s"], [999.994, "1 s"],
     [999.999, "1 s"], [1000, "1 s"], [1250, "1.25 s"], [59994, "59.99 s"],
     [59995, "1 min"], [60000, "1 min"], [65000, "1 min 5 s"],
     [3599500, "1 h"], [3661000, "1 h 1 min"],
@@ -146,9 +147,8 @@ describe("metrics export display helpers", () => {
     expect(headerCells).not.toContain("端到端 Token/s");
     expect(cells(markdownLines[headerIndex + 1]!)).toHaveLength(headerCells.length);
     expect(cells(markdownLines[headerIndex + 2]!)).toHaveLength(headerCells.length);
-    expect(markdown).toContain("响应时间");
-    expect(markdown).toContain("生成速度");
-    expect(markdown).toContain("5 ms | 200.0 tokens/s | requested | echoed");
+    expect(markdown).toContain("| 响应 | 速度 |");
+    expect(markdown).toContain("5 ms | 200.0 /s | requested | echoed");
     expect(values[headings.indexOf("responseTimeMs")]).toBe("5");
     expect(values[headings.indexOf("generationSpeed")]).toBe("200");
     expect(markdown).toContain("openai / session-2 / #23");

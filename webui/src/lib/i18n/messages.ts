@@ -937,9 +937,9 @@ const zh = {
     "tableDescription": "共 {total} 条匹配 · 当前页 {count} 条 · 第 {page} 页",
     "reasoningColumn": "推理输出",
     "errorColumn": "错误",
-    "firstColumn": "响应时间",
+    "firstColumn": "响应",
     "firstHint": "提交上游请求至首个有效上游事件；可能是状态或额度信息，不代表正文开始。非流式请求在完整响应解析后观测。",
-    "speedColumn": "生成速度",
+    "speedColumn": "速度",
     "speedHint": "总输出 Token ÷ 观测生成时长，包含思考、正文和工具参数，不含工具执行。区间或用量不完整时显示 —；受网络缓冲影响。",
     "durationColumn": "请求耗时",
     "viewTraffic": "查看调用详情"
@@ -2131,9 +2131,9 @@ const en: Messages = {
     "tableDescription": "Matching records: {total} · This page: {count} · Page {page}",
     "reasoningColumn": "Reasoning output",
     "errorColumn": "Error",
-    "firstColumn": "Response time",
+    "firstColumn": "Response",
     "firstHint": "From upstream submission to the first valid upstream event, including status or quota events. Not the start of text output. Non-streaming responses are observed after full parsing.",
-    "speedColumn": "Generation speed",
+    "speedColumn": "Speed",
     "speedHint": "Total output tokens divided by observed generation time, including reasoning, text and tool arguments, excluding tool execution. Missing intervals or usage show —. Network buffering affects this value.",
     "durationColumn": "Request duration",
     "viewTraffic": "View traffic detail"

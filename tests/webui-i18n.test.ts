@@ -601,8 +601,8 @@ describe("WebUI 界面文案语言切换", () => {
   it("请求明细的表头、提示、空状态与页面文案覆盖英文", () => {
     expect(result.requestsTableEn).toContain("Records");
     expect(result.requestsTableEn).toContain("Matching records: 1 · This page: 1 · Page 1");
-    expect(result.requestsTableEn).toContain(">Response time<");
-    expect(result.requestsTableEn).toContain(">Generation speed<");
+    expect(result.requestsTableEn).toContain(">Response<");
+    expect(result.requestsTableEn).toContain(">Speed<");
     expect(result.requestsTableEn).toContain("including reasoning, text and tool arguments, excluding tool execution");
     expect(result.requestsTableEn).toContain("View request");
     expect(result.requestsTableEn).not.toContain("Not linked");
@@ -645,8 +645,8 @@ describe("WebUI 界面文案语言切换", () => {
   it("调用列表与详情的表格、提示、空状态与失败覆盖英文", () => {
     expect(result.trafficTableEn).not.toContain("Turn State characters");
     expect(result.trafficTableEn).toContain("Started at");
-    expect(result.trafficTableEn).toContain(">Response time<");
-    expect(result.trafficTableEn).toContain(">Generation speed<");
+    expect(result.trafficTableEn).toContain(">Response<");
+    expect(result.trafficTableEn).toContain(">Speed<");
     expect(result.trafficTableEn).toContain("including reasoning, text and tool arguments, excluding tool execution");
     expect(result.trafficTableEn).toContain("Model request");
     expect(result.trafficTableEn).toContain("Completed");

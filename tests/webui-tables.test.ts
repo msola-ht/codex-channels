@@ -1322,7 +1322,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.threadTimingMissing).not.toContain("2 min");
     expect(headers(markup.requests!)).toEqual([
       "记录时间", "提供商", "模型", "思考", "状态", "输入", "命中率", "输出",
-      "响应时间", "生成速度", "来源", "请求详情",
+      "响应", "速度", "来源", "请求详情",
     ]);
     expect(markup.requests).not.toContain("未关联");
     expect(markup.requests).toContain("查看请求");
@@ -1456,7 +1456,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.inputToken).not.toContain("50.0%");
     expect(markup.outputToken).toContain('aria-description="推理输出：5; 非推理输出：5"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
-    for (const label of ["响应时间", "生成速度", "请求详情"]) {
+    for (const label of ["响应", "速度", "请求详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
   });
@@ -1542,12 +1542,12 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration with compact response-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["开始时间", "提供商", "客户端", "模型", "思考", "协议", "状态", "响应时间", "生成速度", "类型"]);
+    expect(headers(markup.traffic!)).toEqual(["开始时间", "提供商", "客户端", "模型", "思考", "协议", "状态", "响应", "速度", "类型"]);
     expect(markup.traffic).toContain("WorkBuddy");
     expect(markup.traffic).toContain("客户端");
     expect(markup.traffic).toContain("Responses");
     expect(markup.traffic).toContain("25 ms");
-    expect(markup.traffic).toContain("200.0 tokens/s");
+    expect(markup.traffic).toContain("200.0 /s");
     expect(markup.traffic).not.toContain("Turn State 字符数");
     expect(markup.traffic).not.toContain("加载中…");
     expect(markup.traffic).not.toContain("#7");
@@ -1562,7 +1562,7 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("distinguishes zero response latency from an unrecorded value", () => {
-    const cell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf("响应时间")]?.[1];
+    const cell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf("响应")]?.[1];
     expect(cell(markup.trafficFirstZero!)).toBe("0 ms");
     expect(cell(markup.trafficFirstMissing!)).toBe("—");
   });
@@ -1572,7 +1572,7 @@ describe("WebUI metrics table presentation", () => {
     const titles = [...html.matchAll(/data-slot="card-title"[^>]*>(.*?)<\/div>/g)].map(match => match[1]);
     expect(titles.slice(1)).toEqual(["响应", "请求", "诊断信息"]);
     expect(html).toContain('aria-label="调用概览"');
-    for (const text of ["响应时间", "生成速度", "1.55 s", "50.0 tokens/s", "输入 Token", "输出 Token", "缓存 500", "其中推理 50", "visible-answer"]) expect(html).toContain(text);
+    for (const text of ["响应", "速度", "1.55 s", "50.0 /s", "输入 Token", "输出 Token", "缓存 500", "其中推理 50", "visible-answer"]) expect(html).toContain(text);
     for (const text of ["hidden-batch", "request-body", "old-trace-body", "详细耗时", "逐条用量归因"]) expect(html).not.toContain(text);
     expect(markup.pendingCall).toContain("未记录终态");
     expect(markup.pendingCall).not.toContain("进行中");
@@ -1589,9 +1589,9 @@ describe("WebUI metrics table presentation", () => {
     expect(markup["errorSummary-authentication"]).toContain("上游认证失败，请检查 API Key。");
     expect(markup["errorSummary-unknown"]).toContain("现有记录不足以确定具体原因");
     for (const category of ["prewarm", "models"]) {
-      expect(markup['call-' + category]).not.toContain("响应时间");
+      expect(markup['call-' + category]).not.toContain('>响应</span>');
       expect(markup['call-' + category]).not.toContain("输入 Token");
-      expect(markup['call-' + category]).not.toContain("生成速度");
+      expect(markup['call-' + category]).not.toContain("速度");
     }
   });
 
