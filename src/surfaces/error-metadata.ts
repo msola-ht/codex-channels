@@ -153,6 +153,9 @@ function imageFailureMetadata(error: UserFacingError): Record<string, string> {
     httpStatus: /^[1-5][0-9]{2}$/,
     elapsedMs: /^[0-9]{1,10}$/,
     stageElapsedMs: /^[0-9]{1,10}$/,
+    host: /^(?=.{1,253}$)[a-zA-Z0-9.-]+$/,
+    attempt: /^[1-5]$/,
+    clientRequestId: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     diagnosticId: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
   };
   return Object.fromEntries(Object.entries(patterns).flatMap(([key, pattern]) => {

@@ -75,6 +75,7 @@ API Key、第三方 Provider 和独立自定义 OpenAI 后端保留内联图片�
 上传原图跳过官方本地缩放，见图片决策中的限制。
 通过稳定 `getAuthStatus` 和受控 `account/read.workspaceRouting` 读取同一 App Server 的认证与路由，
 不读取磁盘凭据；实现见 [`image-reference-upload.ts`](../src/codex-client/image-reference-upload.ts)。
+字节 PUT 参照锁定版本 `codex-api/src/files.rs` 与 `files_retry_tests.rs`，共享 5 分钟预算、最多 5 次尝试；创建文件及 Turn 提交不随字节重试重放。阶段限时与脱敏错误说明见用户指南及展示文档。
 账户路由、令牌读取、编号转发、分页历史保留与后端拒绝由
 [`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts) 覆盖；
 上传和取消见 [`image-reference-upload.test.ts`](../tests/image-reference-upload.test.ts)。

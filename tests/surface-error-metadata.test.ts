@@ -89,6 +89,7 @@ it("only exposes allowlisted image diagnostics", () => {
   const metadata = surfaceErrorMetadata(new UserFacingError("image.reference.failed", "图片发送失败", {
     stage: "file-transfer", reason: "network", networkCode: "ECONNRESET", elapsedMs: "1000",
     httpStatus: "secret", diagnosticId: "secret", responseBody: "secret", token: "secret",
+    host: "https://blob.example/?signature=secret", attempt: "6", clientRequestId: "secret",
   }));
   expect(metadata).toMatchObject({ imageUploadStage: "file-transfer", imageUploadReason: "network",
     imageUploadNetworkCode: "ECONNRESET", imageUploadElapsedMs: "1000" });
