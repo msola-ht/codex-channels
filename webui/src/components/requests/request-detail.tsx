@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router"
+import { formatGenerationSpeed } from "../../../../runtime/request-timing.mjs"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -39,8 +40,9 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     [t("metrics.output"), formatCount(record.outputTokens)],
     [t("requests.reasoningColumn"), formatCount(record.reasoningOutputTokens)],
     [t("overview.totalTokens"), formatCount(record.totalTokens)],
-    [t("requests.firstColumn"), record.firstTokenMs === null ? null : formatElapsedDuration(record.firstTokenMs)],
-    [t("requests.durationColumn"), record.totalDurationMs === null ? null : formatElapsedDuration(record.totalDurationMs)],
+    [t("requests.firstColumn"), record.firstTokenMs == null ? null : formatElapsedDuration(record.firstTokenMs)],
+    [t("requests.speedColumn"), formatGenerationSpeed(record)],
+    [t("requests.durationColumn"), record.totalDurationMs == null ? null : formatElapsedDuration(record.totalDurationMs)],
     [t("requestDetail.reasoningEffort"), record.reasoningEffort],
     [t("requestDetail.requestTier"), record.requestServiceTier],
     [t("requestDetail.responseTier"), record.serviceTier],

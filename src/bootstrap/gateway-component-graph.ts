@@ -1006,6 +1006,8 @@ export abstract class GatewayComponentGraph {
           if (aggregate === null) return undefined;
           return {
             responseUsage: aggregate.responseUsage ?? null,
+            performance: aggregate.performance,
+            compact: aggregate.compact,
             requestOutcomes: aggregate.requestOutcomes,
             interruptionSummary: aggregate.interruptionSummary,
             requestCount: aggregate.requestCount,

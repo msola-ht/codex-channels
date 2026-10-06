@@ -110,6 +110,12 @@ export interface ResponseUsageSummary {
 }
 
 export interface TurnOutputTiming {
+  performance?: {
+    requestCount: number;
+    firstTokenSampleCount: number;
+    averageFirstTokenMs: number | null;
+    generationTokensPerSecond: number | null;
+  };
   responseUsage?: ResponseUsageSummary;
   /** 本轮首个有效 OpenAI 上游 TTFT 样本，不累计。 */
   upstreamTtftMs?: number;
@@ -129,6 +135,8 @@ export interface TurnOutputTiming {
 }
 
 export interface TurnTaskMetricsSummary {
+  performance?: TurnOutputTiming["performance"];
+  compact?: CompactRequestMetricsSummary | null;
   requestOutcomes: RequestOutcomeCounts;
   interruptionSummary: RequestInterruptionSummary;
   responseUsage?: ResponseUsageSummary | null;

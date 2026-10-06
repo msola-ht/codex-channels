@@ -938,9 +938,10 @@ const zh = {
     "reasoningColumn": "推理输出",
     "errorColumn": "错误",
     "firstColumn": "首 Token",
-    "firstHint": "提交发送至收到首段非空内容，含思考、正文或工具参数。",
+    "firstHint": "提交上游请求至首个非空内容事件，包含思考、正文或工具参数；不包含状态、额度事件，不一定是正文首字。未观测到内容时显示 —。",
+    "speedColumn": "速度",
+    "speedHint": "请求平均输出速度：总输出 Token ÷ 提交上游至终态的请求耗时。包含等待、思考、正文、工具参数和网络接收，不含请求外的工具执行；不是模型纯生成速度。未完成、输出量或总耗时无效时显示 —，不依赖生成区间或首 Token。",
     "durationColumn": "请求耗时",
-    "durationHint": "提交发送至请求完成或失败；不含发送前准备和客户端显示。",
     "viewTraffic": "查看调用详情"
   },
   errorList: {
@@ -1101,8 +1102,6 @@ const zh = {
     "traceRange": "当前 {from}–{to} / {total} 条",
     "truncatedInline": "（已截断）",
     "traceItemTitle": "事件正文",
-    "firstTokenHint": "提交发送至收到首段非空内容，含思考、正文或工具参数；缺失不补算。",
-    "durationHint": "提交发送至请求结束；不含发送前准备和客户端显示。",
     "cachedTokens": "缓存 {count} · {rate}",
     "reasoningTokens": "其中推理 {count}",
     "responseIncomplete": "响应不完整",
@@ -2133,9 +2132,10 @@ const en: Messages = {
     "reasoningColumn": "Reasoning output",
     "errorColumn": "Error",
     "firstColumn": "First token",
-    "firstHint": "From submitting to the first non-empty content, including reasoning, message text or tool arguments.",
+    "firstHint": "From upstream submission to the first nonempty reasoning, text or tool-argument event; excludes status and quota events. Not necessarily the first visible text. Missing content observations show —.",
+    "speedColumn": "Speed",
+    "speedHint": "Average request output rate: total output tokens divided by time from upstream submission to completion, including waiting, reasoning, text, tool arguments and network reception, excluding tool execution outside the request. Not pure model generation speed. Unfinished requests or invalid output counts or total durations show —; independent of generation intervals and first token.",
     "durationColumn": "Request duration",
-    "durationHint": "From submitting to request completion or failure; excludes preparation before sending and client rendering.",
     "viewTraffic": "View traffic detail"
   },
   errorList: {
@@ -2296,8 +2296,6 @@ const en: Messages = {
     "traceRange": "Showing {from}–{to} of {total}",
     "truncatedInline": "(truncated)",
     "traceItemTitle": "Event body",
-    "firstTokenHint": "From submitting to the first non-empty content, including reasoning, message text or tool arguments; missing values are not estimated.",
-    "durationHint": "From submitting to the end of the request; excludes preparation before sending and client rendering.",
     "cachedTokens": "Cached {count} · {rate}",
     "reasoningTokens": "Reasoning {count}",
     "responseIncomplete": "Incomplete response",

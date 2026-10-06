@@ -166,10 +166,10 @@ export class ModelTrafficDump {
 /** 单次 HTTP 交换或 WebSocket 连接；V2 索引按逻辑模型调用记录请求与终态响应。 */
 export class ModelTrafficExchange {
   callTiming: TrafficCallTiming | undefined;
-  private requestMetrics: { firstTokenMs?: number; totalDurationMs?: number } | undefined;
+  private requestMetrics: Pick<ProviderProxyMetrics, "firstTokenMs" | "totalDurationMs" | "responseTimeMs" | "generationTiming"> & { outputTokens?: number | null } | undefined;
 
   /** 复用代理观测，不从可裁剪或缓冲后的 trace 反推首 Token 时间。 */
-  observeRequestMetrics(metrics: Pick<ProviderProxyMetrics, "firstTokenMs" | "totalDurationMs" | "traffic">): void {
+  observeRequestMetrics(metrics: Pick<ProviderProxyMetrics, "firstTokenMs" | "totalDurationMs" | "traffic" | "responseTimeMs" | "generationTiming"> & { outputTokens?: number | null }): void {
     this.requestMetrics = metrics;
     const interaction = this.transport === "http"
       ? this.httpInteractionId : this.activeWebSocket?.id;
@@ -560,6 +560,9 @@ export class ModelTrafficExchange {
       ...(this.callTiming === undefined ? {} : { callTiming: this.callTiming.finish(endedAtMonotonicMs, this.requestMetrics?.firstTokenMs, this.requestMetrics?.totalDurationMs) }),
       ...(terminal === undefined ? {} : { eventType: terminal.type }),
       ...(this.requestMetrics?.firstTokenMs === undefined ? {} : { firstTokenMs: this.requestMetrics.firstTokenMs }),
+      ...(this.requestMetrics?.responseTimeMs === undefined ? {} : { responseTimeMs: this.requestMetrics.responseTimeMs }),
+      ...(this.requestMetrics?.generationTiming === undefined ? {} : { generationTiming: this.requestMetrics.generationTiming }),
+      ...(this.requestMetrics?.outputTokens == null ? {} : { outputTokens: this.requestMetrics.outputTokens }),
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
       payload,
@@ -593,6 +596,9 @@ export class ModelTrafficExchange {
       durationMs: Date.now() - active.startedAtMs,
       ...(this.callTiming === undefined ? {} : { callTiming: this.callTiming.finish(endedAtMonotonicMs, this.requestMetrics?.firstTokenMs, this.requestMetrics?.totalDurationMs) }),
       ...(this.requestMetrics?.firstTokenMs === undefined ? {} : { firstTokenMs: this.requestMetrics.firstTokenMs }),
+      ...(this.requestMetrics?.responseTimeMs === undefined ? {} : { responseTimeMs: this.requestMetrics.responseTimeMs }),
+      ...(this.requestMetrics?.generationTiming === undefined ? {} : { generationTiming: this.requestMetrics.generationTiming }),
+      ...(this.requestMetrics?.outputTokens == null ? {} : { outputTokens: this.requestMetrics.outputTokens }),
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
       payload: payloadOf(compacted === undefined

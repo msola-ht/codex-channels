@@ -1,5 +1,5 @@
 export function formatElapsedDuration(durationMs: number): string {
-  const milliseconds = Math.round(durationMs * 100) / 100;
+  const milliseconds = Math.round(durationMs);
   if (milliseconds < 1_000) return `${milliseconds} ms`;
   const seconds = Math.round(durationMs / 10) / 100;
   if (seconds < 60) return `${seconds} s`;

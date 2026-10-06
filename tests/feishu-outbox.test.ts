@@ -11,7 +11,7 @@ import {
 import { completed, delta, operationUpdated, target, turnCompleted } from "./support/feishu-outbox-fixtures.js";
 
 
-const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- 本轮耗时：未提供\n\n### 当前会话\n- Session：测试会话\n- Session ID：thread-1\n- 总耗时：未提供";
+const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n### 当前会话\n- Session：测试会话\n- Session ID：thread-1\n- 总耗时：未提供";
 
 const cardMethods = {
   sendCard: async () => "om_card",

@@ -98,6 +98,15 @@ describe("Provider proxy metrics channel", () => {
       expect(received.map((value) => value.firstTokenMs)).toEqual([0, 12.5]);
       expect(received[0]).toMatchObject({ requestModel: "requested", responseModel: "echoed" });
       received.length = 0;
+      const generationTiming = { reasoningMs: 10, textMs: 20, toolMs: 30, totalMs: 60 };
+      await sendProviderProxyMetrics(socketPath, { ...metrics(), timingBasis: "submitted", responseTimeMs: 5, generationTiming, totalDurationMs: 100 });
+      for (const invalid of [{ responseTimeMs: -1 }, { responseTimeMs: "5" }, { generationTiming: { ...generationTiming, totalMs: 1 } },
+        { generationTiming: { ...generationTiming, textMs: -1 } }, { generationTiming: { ...generationTiming, extra: 1 } }]) {
+        await sendProviderProxyMetrics(socketPath, { ...metrics(), timingBasis: "submitted", ...invalid } as ProviderProxyMetrics);
+      }
+      expect(received).toHaveLength(1);
+      expect(received[0]).toMatchObject({ responseTimeMs: 5, generationTiming });
+      received.length = 0;
       for (const value of [0, 1234.5, -1, "123", null]) {
         await sendProviderProxyMetrics(socketPath, { ...metrics(), timingBasis: "submitted", totalDurationMs: value } as ProviderProxyMetrics);
       }

@@ -1,4 +1,5 @@
 import { validModelRequestDiagnostics } from "./chat-diagnostics.js";
+import { validRequestTiming } from "../../runtime/request-timing.mjs";
 import { createConnection, type Socket } from "node:net";
 
 import {
@@ -149,9 +150,9 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
   }
   const record = parsed as Record<string, unknown>;
   if (
-    !validModelRequestDiagnostics(record)
+    !validModelRequestDiagnostics(record) || !validRequestTiming(record)
     || Object.hasOwn(record, "firstContentMs")
-    || ((record.firstTokenMs !== undefined || record.totalDurationMs !== undefined)
+    || ((record.firstTokenMs !== undefined || record.totalDurationMs !== undefined || record.responseTimeMs !== undefined || record.generationTiming !== undefined)
       && record.timingBasis !== "submitted")
     || (record.timingBasis !== undefined && record.timingBasis !== "submitted")
     || !oneOf(record.transport, ["http", "websocket"])

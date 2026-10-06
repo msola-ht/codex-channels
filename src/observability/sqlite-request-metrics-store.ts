@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { validRequestTiming } from "../../runtime/request-timing.mjs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { SqliteQuotaQueries } from "./sqlite-quota-queries.js";
@@ -283,6 +284,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       !Number.isSafeInteger(sample.quotaObservedAtMs) || sample.quotaObservedAtMs < 0
       || (sample.weeklyQuota == null && !sample.quotaWindows?.length)
     )) throw new Error("额度快照采集时间无效");
+    if (!validRequestTiming(sample)) throw new Error("请求生成计时无效");
     const recordedAtMs = sample.recordedAtMs ?? Date.now();
     this.insert!.run(
       sample.provider,
@@ -337,6 +339,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       sample.upstreamErrorType ?? null,
       sample.upstreamHttpStatus ?? null,
       sample.quotaObservedAtMs ?? null,
+      sample.responseTimeMs ?? null,
+      sample.generationTiming == null ? null : JSON.stringify(sample.generationTiming),
     );
     return recordedAtMs;
   }

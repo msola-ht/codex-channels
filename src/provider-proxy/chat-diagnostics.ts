@@ -1,5 +1,6 @@
 /** Bounded, allowlisted upstream facts; never collect content, credentials or error bodies. */
 import { randomUUID } from "node:crypto";
+import type { UpstreamTiming } from "./response-metrics-observer.js";
 
 export const chatDiagnosticsHeader = "x-codexc-chat-observer";
 type Fields = Record<string, string | number | boolean>;
@@ -132,7 +133,7 @@ export class ChatDiagnostics {
   snapshot(): ChatDiagnosticSnapshot { return { fields: { ...this.fields }, truncated: this.truncated }; }
 }
 
-export interface ChatDiagnosticSnapshot { fields: Fields; truncated: boolean }
+export interface ChatDiagnosticSnapshot { fields: Fields; truncated: boolean; timing?: UpstreamTiming }
 
 /** Request-scoped in-process delivery; HTTP carries only an unguessable correlation ID. */
 export class ChatDiagnosticsChannel {

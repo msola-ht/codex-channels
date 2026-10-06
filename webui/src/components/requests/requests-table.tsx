@@ -1,4 +1,5 @@
 import * as React from "react"
+import { formatGenerationSpeed } from "../../../../runtime/request-timing.mjs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -106,7 +107,8 @@ export function RequestsTable({
     output: t("metrics.output"),
     reasoningOutput: t("requests.reasoningColumn"),
     firstContent: t("requests.firstColumn"),
-    totalDuration: t("requests.durationColumn"),
+    generationSpeed: t("requests.speedColumn"),
+    duration: t("requests.durationColumn"),
     traffic: t("requestDetail.title"),
   }
 
@@ -234,9 +236,14 @@ export function RequestsTable({
       ),
     },
     {
-      id: "totalDuration",
-      accessorFn: (record) => record.totalDurationMs,
-      header: ({ column }) => <SortableHeader column={column} hint={t("requests.durationHint")}>{t("metrics.durationColumn")}</SortableHeader>,
+      id: "generationSpeed",
+      enableSorting: false,
+      header: () => <TableHint hint={t("requests.speedHint")}>{t("requests.speedColumn")}</TableHint>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatGenerationSpeed(row.original)}</span>,
+    },
+    {
+      id: "duration", enableSorting: false,
+      header: t("requests.durationColumn"),
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
@@ -326,13 +333,13 @@ export function RequestsTable({
     },
   ], [t, language, openRequest])
 
-  const order = ["time", "provider", "model", "reasoningEffort", "status", "input", "cacheHitRate", "output", "firstContent", "totalDuration", "source", "traffic"]
+  const order = ["time", "provider", "model", "reasoningEffort", "status", "input", "cacheHitRate", "output", "firstContent", "generationSpeed", "duration", "source", "traffic"]
   const orderedColumns = [...columns].sort((a, b) => (order.includes(a.id!) ? order.indexOf(a.id!) : order.length) - (order.includes(b.id!) ? order.indexOf(b.id!) : order.length))
 
   return (
     <>
     <DataTable
-      numericColumnIds={["input", "cacheHitRate", "output", "firstContent", "totalDuration", "http", "reasoningOutput"]}
+      numericColumnIds={["input", "cacheHitRate", "output", "firstContent", "generationSpeed", "duration", "http", "reasoningOutput"]}
       loading={loading}
       title={t("requests.tableTitle")}
       description={() => t("requests.tableDescription", { total, count: records.length, page: pageNumber })}

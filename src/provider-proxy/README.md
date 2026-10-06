@@ -16,9 +16,9 @@
   OpenCode Go、CCG 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
   Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 只在本地读取、原样转发，Hop-by-hop Header 不透传；
-  转发 SSE 或 WebSocket 响应时，从提交发送起计首 Token 与总耗时；两种传输共用非空内容白名单，
-  包含思考、正文、拒绝文本和工具参数，不计空事件与状态事件。
-  此后普通增量只扫描事件类型并立即透传，不等待指标处理；创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
+  转发 SSE 或 WebSocket 响应时，从提交发送起计响应时间、首内容与总耗时，并持续观察生成区间；两种传输共用非空内容白名单，
+  首内容白名单包含思考、正文、拒绝文本和工具参数，不计空事件与状态事件；响应时间则可由上游状态或额度事件触发。
+  普通增量持续提取有界计时元数据，不保存内容、不等待指标投递；创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
   出站 `response.create` 提前记录有界的模型、服务层级与 `reasoning.effort`，完成事件再刷新最终
   模型、服务层级、状态及输入/缓存/输出/推理 Token Usage，因此提前断线的失败
   指标仍可归入请求模型；HTTP
@@ -65,14 +65,14 @@
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
   平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID
   同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录。
-  `firstTokenMs` 与 `totalDurationMs` 从同一提交发送时刻计时，不含发送前路由、解析与 WS 连接等待；HTTP 提交后发生的连接等待计入耗时；
-  前者到首段非空内容的接收回调入口，后者到首次终态或结束/失败。未提交发送不伪造耗时。
+  `responseTimeMs`、`firstTokenMs` 与 `totalDurationMs` 从提交上游发送时刻计时，不含发送前路由、解析与 WS 连接等待；HTTP 提交后发生的连接等待计入耗时；Chat 桥以真实上游提交起点替换本地转发起点。
+  `responseTimeMs` 到首个有效上游事件，`firstTokenMs` 到首段非空内容的接收回调入口，`totalDurationMs` 到首次终态或结束/失败。未提交发送不伪造耗时。
   指标通过 `timingBasis: "submitted"` 标记新起点，IPC 拒绝无标记的旧计时；指标独立于调用记录传递；调用索引复用同一观测，不从 trace 反推，不表示客户端显示时间。
   HTTP 有界扫描请求模型，WebSocket 读取出站模型，终态模型另存为 `responseModel`，不以请求模型补齐响应回显。
   HTTP JSON/SSE 与 WebSocket 共用终态提取 `usage_metadata.amount`，以可空 `responseUsageAmount`
   传递有界非负十进制字符串；保留精度和零值，缺失或畸形值为 null，不采集任意 metadata、换算单位或推断费用。
   两种传输同时采集出站 `service_tier` 为 `requestServiceTier`，不受响应层级覆盖，缺失为空；沿用指标 IPC 入库且不依赖调用转储。
-  首 Token 观测后普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
+  生成计时持续观察有界 Responses 事件；错误消息、标识符和
   `User-Agent` 继续执行既有限长与字符约束。
 - `traffic-call-timing.ts`：记录单次调用从提交发送起的单调时钟耗时；只写调用响应索引，不进入指标 IPC 或数据库。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
@@ -114,6 +114,8 @@
 - `direct-responses.ts`：原生 Responses JSON/SSE 交付，复用 HTTP 生命周期和 Responses 指标归约；非流式通过共享白名单识别首个非空输出，观测时间为整包解析校验后；保留事件、用量、终态与扩展字段，不生成 Chat DONE，断流不伪造成功；独立诊断回调仅提交有证据的错误阶段与内层错误，不推断 Chat 专属路由或结束原因。
 - `cline-pass-routing.ts`：CLP 专属出站副本投影，固定 `providerOptions.gateway.only` 为 `deepseek`，保留其他对象字段并拒绝畸形容器；桥与 Relay 共用，不处理网络或重试。
 - `direct-chat.ts`：单次直接 Chat JSON/SSE 协议处理，复用公共 HTTP 生命周期；识别 CLP 显式成功的单层 JSON 包装后复用响应校验，可向注入的有界采集器提交已解析 Chat 报文；另经独立诊断回调提交受限请求指标摘要，关闭转储仍采集。
+
+- `generation-timing.ts`：有界原生 Responses 与原始 Chat 生成区间观察器，不保留内容；区间完整时提供思考、正文、工具与并集毫秒摘要。Chat 在转换前采集，经已有请求级进程内通道传回指标，不依赖转储或改变转换器工具校验。共享 `runtime/request-timing.mjs` 负责入库前校验与显示速度计算。
 
 模块只依赖 Node 内置 HTTP/HTTPS 与共享私有 IPC 能力，不接触平台 SDK、数据库或协议生成类型；
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标组合到

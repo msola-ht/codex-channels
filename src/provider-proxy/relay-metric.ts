@@ -1,5 +1,6 @@
 import type { ModelRequestDiagnostics } from "./chat-diagnostics.js";
 import type { DirectChatUsage } from "../model-api/index.js";
+import type { GenerationTiming } from "../../runtime/request-timing.mjs";
 
 export interface RelayMetric extends DirectChatUsage, ModelRequestDiagnostics {
   source: "relay";
@@ -21,6 +22,8 @@ export interface RelayMetric extends DirectChatUsage, ModelRequestDiagnostics {
   responseCompletedAtMs: number;
   totalDurationMs: number;
   firstTokenMs?: number;
+  responseTimeMs?: number;
+  generationTiming?: GenerationTiming;
   httpStatus?: number;
   errorCode?: string;
 }

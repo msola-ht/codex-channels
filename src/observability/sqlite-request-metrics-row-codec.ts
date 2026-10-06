@@ -1,3 +1,4 @@
+import { validGenerationTiming } from "../../runtime/request-timing.mjs";
 import type {
   RequestOutcomeCounts,
   StoredCacheUsage,
@@ -60,6 +61,8 @@ export interface MetricRow {
   user_agent: string | null;
   upstream_ttft_ms: number | null;
   first_token_ms: number | null;
+  response_time_ms: number | null;
+  generation_timing: string | null;
   total_duration_ms: number | null;
   request_model: string | null;
   response_model: string | null;
@@ -156,6 +159,8 @@ export interface ErrorGroupRow {
 }
 
 export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
+  const generationTiming: unknown = row.generation_timing == null ? null : JSON.parse(row.generation_timing);
+  if (generationTiming !== null && !validGenerationTiming(generationTiming)) throw new Error("请求生成计时无效");
   return {
     id: row.id,
     source: row.source, callerId: row.caller_id, keyId: row.key_id,
@@ -170,6 +175,8 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     userAgent: row.user_agent,
     upstreamTtftMs: row.upstream_ttft_ms,
     firstTokenMs: row.first_token_ms,
+    responseTimeMs: row.response_time_ms,
+    generationTiming,
     totalDurationMs: row.total_duration_ms,
     requestModel: row.request_model,
     responseModel: row.response_model,

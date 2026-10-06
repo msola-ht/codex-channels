@@ -8,6 +8,8 @@ import { createServer, request as httpRequest } from "node:http";
 import { afterEach, expect, it, vi } from "vitest";
 import { ChatCompletionsBridge, ProviderProxy, chatBridgeRequestTimeoutMs } from "../src/provider-proxy/index.js";
 import type { ProviderProxyMetrics } from "../src/provider-proxy/index.js";
+import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
+import { generationSpeed } from "../runtime/request-timing.mjs";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); cleanups.length = 0; });
@@ -33,6 +35,50 @@ async function fixture(reply: string | ((request: unknown) => string), status = 
 }
 const body = { model: "fixture", stream: true, input: [{ role: "user", content: "hello" }] };
 const frame = (delta: unknown, finish_reason: string | null = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\r\n\r\n`;
+it.each([false, true])("persists raw Chat timing and request throughput with backpressure (%s)", async blocked => {
+  const directory = mkdtempSync(join(tmpdir(), "chat-timing-"));
+  const store = new SqliteModelRequestMetricsStore(join(directory, "metrics.sqlite3"));
+  cleanups.push(async () => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const server = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => { void (async () => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.flushHeaders();
+      const values = [frame({ role: "assistant" }), frame({ reasoning_content: "a".repeat(blocked ? 131072 : 1) }), frame({ reasoning_content: "b" }),
+        frame({ tool_calls: [{ index: 0, id: "call", type: "function", function: { name: "run", arguments: "{" } }] }),
+        frame({ tool_calls: [{ index: 0, function: { arguments: "}" } }] }, "tool_calls")];
+      for (const value of values) { await new Promise(resolve => setTimeout(resolve, 25)); response.write(value); }
+      response.end('data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20,"completion_tokens_details":{"reasoning_tokens":5}}}\n\ndata: [DONE]\n\n');
+    })(); });
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const address = server.address(); if (!address || typeof address === "string") throw new Error("No listener");
+  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http" });
+  await bridge.start(); cleanups.push(() => bridge.close());
+  const proxy = new ProviderProxy("127.0.0.1:0", { ...bridge.proxyOptions(), onMetrics: metric => store.recordBatch([{ ...metric, provider: "fixture" }]) });
+  await proxy.start(); cleanups.push(() => proxy.close());
+  const response = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: JSON.stringify({ ...body,
+    tools: [{ type: "function", name: "run", parameters: { type: "object" } }],
+  }) });
+  const text = await response.text();
+  expect(text).toContain("response.function_call_arguments.done");
+  expect(text).not.toContain("response.function_call_arguments.delta");
+  const saved = store.recent(1)[0]!;
+  expect(saved.traffic).toBeNull();
+  expect(saved.responseTimeMs).toBeGreaterThan(0);
+  expect(saved.firstTokenMs).toBeGreaterThanOrEqual(saved.responseTimeMs!);
+  expect(saved.firstTokenMs).toBeLessThan(saved.totalDurationMs!);
+  if (blocked) {
+    expect(saved.generationTiming).toBeNull();
+    expect(generationSpeed(saved)).toBeCloseTo(saved.outputTokens! * 1000 / saved.totalDurationMs!);
+  } else {
+    expect(saved.generationTiming?.reasoningMs).toBeGreaterThan(0);
+    expect(saved.generationTiming?.toolMs).toBeGreaterThan(0);
+    expect(saved.generationTiming?.totalMs).toBeLessThan(saved.totalDurationMs!);
+    expect(generationSpeed(saved)).toBeGreaterThan(0);
+  }
+});
 it.each([false, true])("pins only the CLP bridge to DeepSeek (clinePass=%s)", async clinePass => {
   const { bridge, received } = await fixture(frame({ content: "ok" }, "stop") + "data: [DONE]\n\n", 200, { clinePass });
   const response = await fetch(`http://${bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
@@ -147,13 +193,18 @@ it("classifies a non-streaming upstream success without reading its body", async
 it.each([
   ["client", false], ["service", false], ["client", true], ["service", true],
 ] as const)("cancels upstream work when %s disconnects through proxy=%s", async (owner, throughProxy) => {
+  const directory = mkdtempSync(join(tmpdir(), "chat-disconnect-timing-"));
+  const store = new SqliteModelRequestMetricsStore(join(directory, "metrics.sqlite3"));
+  cleanups.push(async () => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   let upstreamClosed!: () => void;
   const closed = new Promise<void>(resolve => { upstreamClosed = resolve; });
   const server = createServer((request, response) => {
     request.resume();
     request.on("end", () => {
       response.writeHead(200, { "content-type": "text/event-stream" });
-      response.write(frame({ content: "waiting" }));
+      response.write(frame({ role: "assistant" }));
+      const timer = setTimeout(() => response.write(frame({ content: "waiting" })), 25);
+      response.on("close", () => clearTimeout(timer));
       response.on("close", upstreamClosed);
     });
   });
@@ -162,15 +213,34 @@ it.each([
   const address = server.address(); if (!address || typeof address === "string") throw new Error("No listener");
   const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http" });
   await bridge.start(); cleanups.push(() => bridge.close());
-  const proxy = new ProviderProxy("127.0.0.1:0", bridge.proxyOptions());
+  const proxy = new ProviderProxy("127.0.0.1:0", { ...bridge.proxyOptions(),
+    onMetrics: metric => { store.recordBatch([{ ...metric, provider: "fixture" }]); },
+  });
   if (throughProxy) { await proxy.start(); cleanups.push(() => proxy.close()); }
   const controller = new AbortController();
   const result = await fetch(`http://${throughProxy ? proxy.address() : bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body), signal: controller.signal });
-  const pending = result.text().catch(() => "aborted");
+  const reader = result.body!.getReader();
+  const decoder = new TextDecoder();
+  let received = "";
+  while (!received.includes("response.output_text.delta")) {
+    const next = await reader.read();
+    if (next.done) throw new Error("Response ended before output");
+    received += decoder.decode(next.value, { stream: true });
+  }
+  const pending = (async () => { while (!(await reader.read()).done) { /* Drain until cancellation. */ } })().catch(() => {});
   if (owner === "client") controller.abort();
   else { if (throughProxy) await proxy.close(); await bridge.close(); }
   await closed;
   await pending;
+  if (throughProxy) {
+    await vi.waitFor(() => expect(store.recent(1)).toHaveLength(1));
+    const saved = store.recent(1)[0]!;
+    expect(saved.status).toBe("failed");
+    expect(saved.responseTimeMs).toBeGreaterThanOrEqual(0);
+    expect(saved.firstTokenMs).toBeGreaterThan(saved.responseTimeMs!);
+    expect(saved.generationTiming).toBeNull();
+    expect(saved.traffic).toBeNull();
+  }
 });
 
 it("round-trips a namespaced tool exceeding Chat name length through HTTP", async () => {
@@ -277,6 +347,8 @@ it.each([400, 401, 402, 403, 404, 429, 500, 502, 503])("keeps request IDs and sa
   await proxy.close();cleanups.pop();
   const detail = await describeDumpExchange(listDumpFiles(root), 1);
   expect(detail.chatDiagnostics.fields).toMatchObject({ requestId: "fixture-request-id", httpStatus: status, "upstreamError.code": status, "error.stage": "http", "error.retryable": [429, 500, 502, 503].includes(status) });
+  expect(detail.response?.responseTimeMs).toBeGreaterThanOrEqual(0);
+  expect(detail.response?.generationTiming).toBeUndefined();
   expect(JSON.stringify(detail)).not.toContain("credential");
 });
 

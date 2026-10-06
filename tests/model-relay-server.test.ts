@@ -71,6 +71,31 @@ describe("native Responses relay", () => {
   const post = (relay: ModelRelayServer, value: unknown) => fetch(`${relay.address()}/v1/responses`, {
     method: "POST", headers: { authorization, "content-type": "application/json" }, body: JSON.stringify(wireRequest(value, serverProviders.get(relay))),
   });
+  it.each([false, true])("collects native Responses timing and suppresses speed under backpressure (%s)", async blocked => {
+    const initialText = "he".repeat(blocked ? 131072 : 1);
+    const content = [{ type: "output_text", text: `${initialText}llo` }];
+    const f = await fixture((request, response) => {
+      request.resume(); request.on("end", () => { void (async () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        const events = [
+          { type: "response.created", response: { id: "resp_fixture", status: "in_progress" } },
+          { type: "response.output_item.added", item: { id: "message", type: "message" } },
+          { type: "response.output_text.delta", item_id: "message", delta: initialText },
+          { type: "response.output_text.delta", item_id: "message", delta: "llo" },
+          { type: "response.output_item.done", item: { id: "message", type: "message", content } },
+          { type: "response.completed", response: { ...responseValue(), output: [{ id: "message", type: "message", content }] } },
+        ];
+        for (const event of events) { response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`); await new Promise(resolve => setTimeout(resolve, 20)); }
+        response.end();
+      })(); });
+    });
+    const result = await post(f.relay, { ...input, stream: true });
+    expect(result.status).toBe(200); await result.text();
+    expect(f.metrics[0]?.traffic).toBeUndefined();
+    expect(f.metrics[0]?.responseTimeMs).toBeGreaterThanOrEqual(0);
+    if (blocked) expect(f.metrics[0]?.generationTiming).toBeUndefined();
+    else expect(f.metrics[0]?.generationTiming?.textMs).toBeGreaterThan(0);
+  });
   it.each(["ds-fixture", "rs-fixture"])("scopes ignored lifecycle fields to the authenticated provider (%s)", async provider => {
     const policy = config(); policy.accounts = [{ provider }]; policy.callers[0]!.provider = provider;
     let received: unknown;
@@ -288,6 +313,45 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
 }
 
 describe("isolated Relay vertical request chain", () => {
+  it.each([
+    { protocol: "chat", payload: { error: { code: "server_error", message: "PRIVATE" } } },
+    { protocol: "chat", payload: { success: true, data: { error: { code: "server_error", message: "PRIVATE" } } } },
+    { protocol: "chat", payload: { success: false, data: null } },
+    { protocol: "responses", payload: { error: { code: "server_error", message: "PRIVATE" } } },
+  ])("records non-streaming error response time without generation (%j)", async ({ protocol, payload }) => {
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(payload)));
+    const response = protocol === "chat" ? await f.post({ ...body, stream: false }) : await fetch(`${f.relay.address()}/v1/responses`, {
+      method: "POST", headers: { authorization, "content-type": "application/json" },
+      body: JSON.stringify(wireRequest({ model: body.model, input: "hello", stream: false })),
+    });
+    expect(response.status).toBe(502);
+    expect(await response.text()).not.toContain("PRIVATE");
+    await vi.waitFor(() => expect(f.metrics).toHaveLength(1));
+    expect(f.metrics[0]?.responseTimeMs).toBeGreaterThanOrEqual(0);
+    expect(f.metrics[0]?.generationTiming).toBeUndefined();
+  });
+  it.each([false, true])("collects raw Chat timing and suppresses speed under backpressure (%s)", async blocked => {
+    const f = await fixture((request, response) => {
+      request.resume(); request.on("end", () => { void (async () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        const deltas = [{ reasoning_content: "a".repeat(blocked ? 131072 : 1) }, { reasoning_content: "b" },
+          { tool_calls: [{ index: 0, id: "call", type: "function", function: { name: "run", arguments: "{" } }] },
+          { tool_calls: [{ index: 0, function: { arguments: "}" } }] }];
+        for (const delta of deltas) { response.write(frame({ id: "reply", choices: [{ index: 0, delta }] })); await new Promise(resolve => setTimeout(resolve, 20)); }
+        response.end(frame({ id: "reply", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 10, completion_tokens: 20, completion_tokens_details: { reasoning_tokens: 5 } } }) + "data: [DONE]\n\n");
+      })(); });
+    });
+    const result = await f.post({ ...body, stream: true });
+    expect(result.status).toBe(200); await result.text();
+    expect(f.metrics).toHaveLength(1);
+    expect(f.metrics[0]?.traffic).toBeUndefined();
+    expect(f.metrics[0]?.responseTimeMs).toBeGreaterThanOrEqual(0);
+    if (blocked) expect(f.metrics[0]?.generationTiming).toBeUndefined();
+    else {
+      expect(f.metrics[0]?.generationTiming?.reasoningMs).toBeGreaterThan(0);
+      expect(f.metrics[0]?.generationTiming?.toolMs).toBeGreaterThan(0);
+    }
+  });
   it.each(["chat", "responses"].flatMap(protocol => [0, 1].map(excess => ({ protocol, excess }))))(
     "bounds the final upstream body after defaults and model mapping ($protocol, excess=$excess)", async ({ protocol, excess }) => {
       let upstreamBytes = 0;
@@ -419,6 +483,9 @@ describe("isolated Relay vertical request chain", () => {
       expect(error).toMatchObject({ error: { code: upstreamStatus === 429 ? "rate_limit" : "server_error", phase: "upstream", upstream_status: upstreamStatus, upstream_attempted: true } });
       expect(JSON.stringify(error)).not.toContain("PRIVATE");
       expect(f.calls()).toBe(1); expect(f.metrics).toHaveLength(1);
+      if (json) expect(f.metrics[0]?.responseTimeMs).toBeGreaterThanOrEqual(0);
+      else expect(f.metrics[0]?.responseTimeMs).toBeUndefined();
+      expect(f.metrics[0]?.generationTiming).toBeUndefined();
     });
 
   it("records upstream stream failure identifiers separately from the public error", async () => {
@@ -431,6 +498,8 @@ describe("isolated Relay vertical request chain", () => {
     const reply = await response.text();
     expect(reply).toContain("chat_upstream_error"); expect(reply).not.toContain("PRIVATE");
     await vi.waitFor(() => expect(f.metrics).toHaveLength(1));
+    expect(f.metrics[0]?.responseTimeMs).toBeGreaterThanOrEqual(0);
+    expect(f.metrics[0]?.generationTiming).toBeUndefined();
     await dump.close();
     const ref = f.metrics[0]!.traffic!;
     const detail = await describeDumpExchange([join(directory, `relay.chat-${ref.session}`)], ref.interaction);

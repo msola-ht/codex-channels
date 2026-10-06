@@ -28,6 +28,12 @@ describe("Relay metric confirmation semantics", () => {
       const requestModel = `${"p".repeat(64)}/${"m".repeat(200)}`;
       expect(await sendRelayMetrics(path, { ...envelope, sample: { ...sample, requestModel } }, AbortSignal.timeout(2000))).toMatchObject({ result: "accepted" });
       expect(receive).toHaveBeenLastCalledWith(expect.objectContaining({ requestModel }), expect.any(AbortSignal));
+      const timing = { responseTimeMs: 0.1, generationTiming: { reasoningMs: 0.2, textMs: 0.1, toolMs: 0.3, totalMs: 0.6 } };
+      expect(await sendRelayMetrics(path, { ...envelope, sample: { ...sample, ...timing } }, AbortSignal.timeout(2000))).toMatchObject({ result: "accepted" });
+      expect(receive).toHaveBeenLastCalledWith(expect.objectContaining(timing), expect.any(AbortSignal));
+      for (const invalid of [{ responseTimeMs: -1 }, { responseTimeMs: 2 }, { generationTiming: { ...timing.generationTiming, toolMs: -1 } }]) {
+        expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, ...invalid } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
+      }
       for (const invalid of [{ requestModel: `${requestModel}x` }, { responseModel: "m".repeat(201) }]) {
         expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, ...invalid } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
       }
@@ -54,7 +60,7 @@ describe("Relay metric confirmation semantics", () => {
         socket.once("connect", () => socket.write("{")); socket.once("close", resolve);
       });
       expect(Date.now() - started).toBeLessThan(2500);
-      expect(receive).toHaveBeenCalledTimes(2);
+      expect(receive).toHaveBeenCalledTimes(3);
     } finally { await server.close(); rmSync(root, { recursive: true, force: true }); }
   });
   it.each([

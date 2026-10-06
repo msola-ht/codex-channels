@@ -47,7 +47,15 @@ Relay 目录下载器读取 [Cline 官方模型文件](https://github.com/cline/
 下载入口为 `runtime/cline-relay-catalog-update.mjs`，共用读取入口为 `runtime/cline-relay-catalog.mjs`，验证见 `tests/cline-relay-catalog.test.ts`、
 `tests/webui-relay-management.test.ts`；更新和回退见[Relay 模型设置](provider-api-relay-development.md#clp-转发模型目录与设置)。
 
+### CPAMP 指标展示参考
+
+经用户授权保留 `upstream/CPA-Manager-Plus`，来源为 [seakee/CPA-Manager-Plus](https://github.com/seakee/CPA-Manager-Plus)，
+固定提交 `fb3e8f501f47a29b0fa66a5bf31f0f36739750d3`，许可证 MIT。仅供首 Token、请求耗时与 TPS 展示口径对照，
+不导入运行时代码、不安装或运行上游依赖、不自动更新。指标公式及回归用例见
+`apps/web/src/features/monitoring/model/eventRows.ts` 和相邻 `eventRows.test.ts`；首 Token 采集需同时核对实际 CPA 后端版本。
+
 ## 查阅顺序
+
 
 1. 先读取本页和对应 Surface 的资料索引。
 2. 检查目标本地仓库的 HEAD 是否等于上表基线。

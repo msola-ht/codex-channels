@@ -41,6 +41,8 @@ import {
   markMetricsFailed,
   observeResponseEvent,
   observeRequestSubmitted,
+  observeChatTiming,
+  invalidateGenerationTiming,
   parseJsonPayload,
   websocketCloseErrorType,
   weeklyQuotaFromEvent,
@@ -358,8 +360,9 @@ export class ProviderProxy {
       ? httpRequest
       : httpsRequest;
     const diagnosticObserver = this.chatDiagnostics?.subscribe(snapshot => {
+      if (snapshot.timing) observeChatTiming(metrics, snapshot.timing);
       Object.assign(metrics, modelRequestDiagnostics(snapshot));
-      exchange?.write({ kind: "chat_diagnostics", ...snapshot });
+      exchange?.write({ kind: "chat_diagnostics", fields: snapshot.fields, truncated: snapshot.truncated });
     });
     response.once("close", () => diagnosticObserver?.close());
     const upstreamHeaders = forwardedRequestHeaders(request.headers, upstreamTarget.host, upstreamTarget.port, this.upstreamUserAgent);
@@ -404,6 +407,7 @@ export class ProviderProxy {
         const completed = metricsObserver.observeChunk(chunk, receivedAtMs, receivedAtMonotonicMs);
         if (!completed) {
           if (!response.write(chunk)) {
+            invalidateGenerationTiming(metrics);
             upstreamResponse.pause();
             response.once("drain", () => upstreamResponse.resume());
           }

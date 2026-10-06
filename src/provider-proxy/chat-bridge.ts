@@ -7,8 +7,10 @@ import { ChatToResponses, ModelConversionError, responsesToChat } from "../model
 import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "./chat-diagnostics.js";
 import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
 import type { ProviderProxyOptions } from "./proxy.js";
-import { readChatBody, readChatFrames, waitForChatOperation, writeChatData } from "./chat-io.js";
+import { readChatBody, readModelFrames, waitForChatOperation, writeChatData } from "./chat-io.js";
 import { pinClinePassRouting } from "./cline-pass-routing.js";
+import { ChatGenerationTimingObserver } from "./generation-timing.js";
+import type { UpstreamTiming } from "./response-metrics-observer.js";
 
 /**
  * 桥负责单次请求预算；外层代理额外保留终态发送时间，避免先截断结构化错误。
@@ -69,7 +71,17 @@ export class ChatCompletionsBridge {
     const abort = (): void => { controller.abort(); };
     response.once("close", abort);
     const diagnostics = new ChatDiagnostics();
-    const publishDiagnostics = (): void => this.diagnostics.publish(request.headers[chatDiagnosticsHeader], diagnostics.snapshot());
+    const generation = new ChatGenerationTimingObserver();
+    let generationBlocked = false;
+    let timing: UpstreamTiming | undefined;
+    let usage: Record<string, unknown> | undefined;
+    const publishDiagnostics = (): void => this.diagnostics.publish(request.headers[chatDiagnosticsHeader], { ...diagnostics.snapshot(), ...(timing ? { timing } : {}) });
+    const observeFirstResponse = (at: number): void => {
+      if (!timing || timing.responseTimeMs !== undefined) return;
+      timing.responseTimeMs = at - timing.submittedAt;
+      // Publish before downstream output: a disconnect closes the proxy subscription.
+      publishDiagnostics();
+    };
     try {
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new ModelConversionError("Compressed model requests are unsupported");
       const payloadBody = await readChatBody(request, controller.signal, 16 * 1024 * 1024);
@@ -90,6 +102,7 @@ export class ChatCompletionsBridge {
         method: "POST", headers, signal: controller.signal,
       });
       const ready = once(upstreamRequest, "response");
+      timing = { submittedAt: performance.now() };
       upstreamRequest.end(payload);
       const [incoming] = await ready as [IncomingMessage];
       diagnostics.header(incoming.headers["x-request-id"]);
@@ -97,7 +110,10 @@ export class ChatCompletionsBridge {
       publishDiagnostics();
       if (incoming.statusCode !== 200) {
         status = incoming.statusCode && incoming.statusCode >= 400 ? incoming.statusCode : 502;
-        throw await readChatHttpError(incoming, { value: value => diagnostics.push(value), invalid: () => {} });
+        throw await readChatHttpError(incoming, { value: value => {
+          diagnostics.push(value);
+          if (chatStreamError(value)) observeFirstResponse(performance.now());
+        }, invalid: () => {} });
       }
       if (!incoming.headers["content-type"]?.startsWith("text/event-stream")) {
         // 200 但不是 SSE：上游没有按流式合同返回，按服务异常归类且不读取正文。
@@ -109,23 +125,37 @@ export class ChatCompletionsBridge {
       const emit = async (events: Record<string, unknown>[]): Promise<void> => {
         for (const event of events) {
           if (controller.signal.aborted) throw new Error("aborted");
-          await writeChatData(response, `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`, controller.signal);
+          await writeChatData(response, `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`, controller.signal, () => { generationBlocked = true; });
         }
       };
       await emit(converter.start());
       let done = false;
-      for await (const data of readChatFrames(incoming, controller.signal, {
+      for await (const { data, receivedAt } of readModelFrames(incoming, controller.signal, {
         frameBytes: Infinity, bufferBytes: Infinity, totalBytes: Infinity, bufferCharacters: 2 * 1024 * 1024,
       })) {
         if (data === "[DONE]") { done = true; break; }
         const chunk: unknown = JSON.parse(data);
         diagnostics.push(chunk);
         const upstreamError = chatStreamError(chunk);
-        if (upstreamError) throw upstreamError;
-        await emit(converter.push(chunk));
+        if (upstreamError) { observeFirstResponse(receivedAt); throw upstreamError; }
+        const events = converter.push(chunk);
+        observeFirstResponse(receivedAt);
+        generation.push(chunk, receivedAt);
+        if (timing.firstTokenMs === undefined && generation.firstContentAt !== undefined) {
+          timing.firstTokenMs = generation.firstContentAt - timing.submittedAt;
+          publishDiagnostics();
+        }
+        if (chunk && typeof chunk === "object" && "usage" in chunk && chunk.usage && typeof chunk.usage === "object") usage = chunk.usage as Record<string, unknown>;
+        await emit(events);
       }
       if (!done) throw new ModelConversionError("Chat stream disconnected before DONE");
       const terminal = converter.finish();
+      timing.totalDurationMs = performance.now() - timing.submittedAt;
+      const details = usage?.completion_tokens_details as { reasoning_tokens?: number } | undefined;
+      if (!generationBlocked && terminal.some(event => event.type === "response.completed")) {
+        const measured = generation.finish(usage?.completion_tokens as number | undefined, details?.reasoning_tokens);
+        if (measured) timing.generationTiming = measured;
+      }
       publishDiagnostics();
       await emit(terminal);
       response.end();

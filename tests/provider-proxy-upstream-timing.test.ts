@@ -137,7 +137,7 @@ describe("OpenAI upstream TTFT", () => {
       expect(clock).not.toHaveBeenCalled();
     } finally { clock.mockRestore(); }
   });
-  it("measures independent request clocks and ignores lifecycle events", () => {
+  it("keeps independent first-content clocks while parsing later generation deltas", () => {
     const clock = vi.spyOn(performance, "now").mockReturnValue(100);
     try {
       const first = state();
@@ -159,7 +159,8 @@ describe("OpenAI upstream TTFT", () => {
       clock.mockReturnValue(209);
       push(second, "response.reasoning_summary_text.delta", "thinking");
       expect(second.firstTokenMs).toBe(9);
-      expect(inspectResponseEvent('{"type":"response.output_text.delta","delta":"later"}').event).toBeUndefined();
+      expect(inspectResponseEvent('{"type":"response.output_text.delta","delta":"later"}').event)
+        .toEqual({ type: "response.output_text.delta", delta: "later" });
     } finally { clock.mockRestore(); }
   });
 
