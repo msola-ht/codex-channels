@@ -849,7 +849,7 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
       { id: "codex-setup", label: "Provider 接入", command: "codexc setup", detail: "进入 Provider 与模型接入设置" },
       { id: "channels", label: "通讯渠道", command: "codexc setup", detail: "菜单路径：通讯渠道" },
       { id: "metrics-storage", label: "指标存储", command: "codexc config", detail: "菜单路径：指标存储" },
-      { id: "service-status", label: "查看核心服务状态", command: "codexc status all", detail: "查看 Gateway 与 App Server 状态" },
+      { id: "service-status", label: "查看全部后台服务状态", command: "codexc status all", detail: "查看 App Server、Gateway、已安装 Relay 与 WebUI 状态" },
       { id: "service-webui", label: "查看 WebUI 状态", command: "codexc status webui", detail: "查看 WebUI 服务状态" },
       { id: "service-restart", label: "重启全部后台服务", command: "codexc restart all", detail: "重启 Gateway、App Server、已安装 WebUI 和已启用 Relay" },
     ],

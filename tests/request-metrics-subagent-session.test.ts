@@ -45,6 +45,11 @@ describe("request metrics subagent session aggregation", () => {
       expect(store.threadList({ ...scope, mainThreadsOnly: true }).threads.find(thread => thread.threadId === "root"))
         .toMatchObject({ subagentUsage: { inputTokens: 300, cachedInputTokens: null, cacheUsage } });
       expect(store.daily(scope).every(row => row.cachedInputTokens === null)).toBe(true);
+      for (const rows of [store.daily(scope), store.hourly(scope)]) {
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ cachedInputTokens: null,
+          cacheUsage: { inputTokens: 200, cachedInputTokens: 100, missingRequestCount: 3 } });
+      }
       expect(store.aggregate({ ...scope, dimension: "global", threadId: "child" }).aggregate)
         .toMatchObject({ ...paired, cacheUsage });
       expect(store.threadTurnSummary("observed", "paired")).toMatchObject({

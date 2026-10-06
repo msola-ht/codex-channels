@@ -29,6 +29,7 @@ function fillDays(rows: DailyUsageRow[], startDay: number, days: number): DailyU
     const day = new Date(startDay + index * calendarDayMs).toISOString().slice(0, 10)
     return rowsByDay.get(day) ?? {
       day, requestCount: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+      cacheUsage: { inputTokens: 0, cachedInputTokens: 0, missingRequestCount: 0 },
     }
   })
 }
@@ -48,9 +49,9 @@ export function usageTrendRows(trend: UsageTrendResponse): UsageTrendRow[] {
 export function toUsageTrend(rows: (DailyUsageRow | HourlyUsageRow)[]): UsageTrendRow[] {
   return rows.map((row) => {
     const inputTokens = Math.max(0, row.inputTokens)
-    const cachedInputTokens = row.cachedInputTokens === null
+    const cachedInputTokens = row.cacheUsage.cachedInputTokens === null
       ? null
-      : Math.min(Math.max(0, row.cachedInputTokens), inputTokens)
+      : Math.min(Math.max(0, row.cacheUsage.cachedInputTokens), inputTokens)
     const outputTokens = Math.max(0, row.outputTokens)
     return {
       period: "hour" in row ? row.hour : row.day,

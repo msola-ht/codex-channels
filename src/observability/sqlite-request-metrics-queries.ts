@@ -288,6 +288,7 @@ export class SqliteRequestMetricsQueries {
     const rows = this.reader.prepare(`
       SELECT
         strftime(?, recorded_at_ms / 1000, 'unixepoch', 'localtime') AS period,
+        ${cacheUsageSql},
         COUNT(*) AS request_count,
         SUM(input_tokens) AS input_tokens,
         SUM(cached_input_tokens) AS cached_input_tokens,
@@ -299,7 +300,7 @@ export class SqliteRequestMetricsQueries {
         AND recorded_at_ms < ?
       GROUP BY period
       ORDER BY period ASC
-    `).all(format, query.startAtMs, query.endAtMs) as Array<{
+    `).all(format, query.startAtMs, query.endAtMs) as unknown as Array<CacheUsageRow & {
       period: string;
       request_count: number;
       input_tokens: number | null;
@@ -310,6 +311,7 @@ export class SqliteRequestMetricsQueries {
     }>;
     return rows.map((row) => ({
       period: row.period,
+      cacheUsage: toStoredCacheUsage(row),
       requestCount: row.request_count,
       inputTokens: row.input_tokens ?? 0,
       cachedInputTokens: row.input_token_count === row.request_count

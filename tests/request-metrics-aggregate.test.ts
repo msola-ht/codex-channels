@@ -11,6 +11,21 @@ const directories: string[] = [];
 afterEach(() => { vi.useRealTimers(); for (const directory of directories.splice(0)) rmSync(directory, { force: true, recursive: true }); });
 
 describe("request metrics aggregate reports", () => {
+  it.each([null, 0])("preserves unknown versus explicit zero cache in daily and hourly buckets (%s)", (cachedInputTokens) => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "request-metrics.sqlite3"));
+    const now = Date.now();
+    try {
+      store.recordBatch([{ ...sample(), recordedAtMs: now, inputTokens: 100, cachedInputTokens }]);
+      const scope = { startAtMs: now - 1, endAtMs: now + 1 };
+      for (const rows of [store.daily(scope), store.hourly(scope)]) {
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.cacheUsage).toEqual({ cachedInputTokens,
+          inputTokens: cachedInputTokens === null ? 0 : 100,
+          missingRequestCount: cachedInputTokens === null ? 1 : 0 });
+      }
+    } finally { store.close(); }
+  });
+
   it("sorts failure columns by actual failures before pagination, excluding interruptions and incomplete requests", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "request-metrics.sqlite3"));
     const now = Date.now();

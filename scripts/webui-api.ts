@@ -161,6 +161,7 @@ export interface OverviewResponse {
 
 export interface DailyUsageRow {
   day: string
+  cacheUsage: CacheUsage
   requestCount: number
   inputTokens: number
   cachedInputTokens: number | null

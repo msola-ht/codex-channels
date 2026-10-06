@@ -360,6 +360,7 @@ export interface StoredModelRequestMetricsReport {
 
 export interface StoredModelRequestMetricsDailyRow {
   day: string;
+  cacheUsage: StoredCacheUsage;
   requestCount: number;
   inputTokens: number;
   cachedInputTokens: number | null;
