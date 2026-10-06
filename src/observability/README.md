@@ -23,7 +23,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   `responseUsageAmount` 保存上游单次响应用量原始十进制字符串，供明细和 JSON/CSV 导出读取；
   历史或上游未提供时为 null；完成卡片的 OpenAI 汇总使用精确十进制求和及缺失请求计数，不换算费用、不保存任意上游 metadata。
   新采集指标以请求归属、模型、状态、Token、错误分类与额度快照为主，不包含价格快照或请求/响应正文；
-  `firstTokenMs` 保留代理单请求首 Token 延迟，`upstreamTtftMs` 独立保留 OpenAI 轮次首 Token 统计，
+  `responseTimeMs` 与 `generationTiming` 保留在线观测响应时间和生成区间；`firstTokenMs` 保留内部首内容诊断，`upstreamTtftMs` 独立保留 OpenAI 轮次首 Token 统计，
   `requestModel` 与 `responseModel` 分别保留请求和响应回显名称；可空 `traffic` 只保存转储标签、实际批次与调用编号，不包含正文或文件路径。
 - `response-usage-summary.ts`：流式精确汇总 OpenAI 单次用量文本与采集覆盖数量，供 Turn、任务和会话查询使用；不以浮点数累计或把缺失值当零。
 - `request-metrics-query-service.ts`：在只读 Store 之上统一滚动时间范围、本地今天/昨天、自定义日期、请求筛选、聚合维度以及
@@ -43,7 +43,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
 - `sqlite-quota-queries.ts`：封装周额度估算、最新额度与历史窗口归约；通过 Store 的同一连接和受跟踪迭代器读取，不创建连接或事务，不承担 Store 关闭及 Schema 生命周期。
 - `sqlite-request-metrics-queries.ts`：请求分页、错误统计、日/小时汇总、Thread/Turn 聚合、Relay 调用方与 Key 的批量使用摘要及同步游标读取；通过 Store 的读取与关闭检查端口执行，SQL 和行映射不介入写入、事务或数据库生命周期。内部 Thread ID 校验同时供 Store 写入使用。
   Thread 列表额外返回同筛选范围的 `totalTokens`、自身缓存与后代输入/缓存/输出分项，以及按请求去重的 `treeAggregate`，支持总计 Token 排序；缓存是输入子集，不重复累加，自身与后代分别判断缓存完整性。自身 `cacheUsage` 与后代 `subagentUsage.cacheUsage` 分别保留输入和缓存均已观测的缓存样本及缺失请求数，供部分采集时展示已知缓存；完整缓存合计仍在任意请求缺失时返回 null。WebUI 主会话查询允许只有后代匹配的根入选。普通 Thread 查询仍保留自身有匹配记录的行集合，自身聚合与 Turn 查询口径不变；不新增持久化汇总或 Schema 字段。
-- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v27 建库 SQL、存储列定义、版本错误和
+- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v28 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 持有初始化事务，仅创建新库，明确拒绝不支持的版本或结构。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、
   逐请求上游 `User-Agent` 和额度快照写入独立 `request-metrics.sqlite3`。新采集请求不解析上游时间戳；
@@ -51,7 +51,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   `traffic_label`、`traffic_session`、`traffic_interaction` 全部为空或共同定位一次转储调用。
   可空 `total_duration_ms` 保存提交发送至首次模型终态或结束/失败的单调时钟耗时，支持明细排序与导出，不聚合为 Turn 耗时。
   可空 `quota_observed_at_ms` 保存额度快照的本机采集时间，未观测时为空。
-  数据库使用严格 Schema v27、Unix `0600` / Windows 当前 SID 私有文件权限，
+  数据库使用严格 Schema v28、Unix `0600` / Windows 当前 SID 私有文件权限，
   可空 `request_service_tier` 独立保留出站请求层级。
   只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为
@@ -64,7 +64,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   每条记录保存提供商、模型、思考等级、服务层级、状态与错误类型；路由层在
   Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
   请求明细读取时直接从输入与缓存 Token 计算未缓存 Token 和缓存命中率，不保存派生列。
-  请求首 Token 与总耗时均从提交发送计时；不计算 TPS，不把请求计时聚合为整轮耗时。
+  响应时间与总耗时从提交上游发送计时；生成区间保存思考、正文、工具参数与去重并集时长，查询方按总输出计算单次观测生成速度，不把请求计时聚合为整轮耗时。采集和入库不依赖转储开关。
   `first_token_ms` 使用提交发送起点，只接受当前 Schema。
   内部读取限制为每次
   最多 500 条；精确 Thread 查询把
@@ -128,7 +128,7 @@ WebUI 还通过同一只读 Store 的 `daily()` / `hourly()` 按系统本地日�
 查询服务 `trend()` 为今天、昨天和自定义单日返回补零的小时统计，其他范围返回日统计。
 热力图固定展示含今天的最近 90 天，趋势图跟随控制台汇总范围；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
-HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v27，不提供历史版本迁移。
+HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v28，不提供历史版本迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
 `warn` 输出，避免关闭调试后形成历史数据断档或隐藏采集故障。
 

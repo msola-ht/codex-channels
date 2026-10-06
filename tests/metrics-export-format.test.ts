@@ -106,6 +106,7 @@ describe("metrics export display helpers", () => {
       records: [{ recordedAtMs: 100, quotaObservedAtMs: 0,
         weeklyQuota: { limitId: "codex", usedPercentMillionths: 1_000_000, resetsAt: 2_000_000_000, planType: "plus" },
         firstTokenMs: 12.5, totalDurationMs: 1234.5, upstreamTtftMs: 672,
+        responseTimeMs: 5, outputTokens: 100, generationTiming: { reasoningMs: 100, textMs: 100, toolMs: 300, totalMs: 500 },
         responseUsageAmount: "0.12345678901234567890", upstreamProvider: "deepseek", finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit", upstreamErrorType: "rate_limit_error",
         requestModel: "requested", responseModel: "echoed", operation: "response",
         requestServiceTier: "priority", serviceTier: "default",
@@ -145,8 +146,11 @@ describe("metrics export display helpers", () => {
     expect(headerCells).not.toContain("端到端 Token/s");
     expect(cells(markdownLines[headerIndex + 1]!)).toHaveLength(headerCells.length);
     expect(cells(markdownLines[headerIndex + 2]!)).toHaveLength(headerCells.length);
-    expect(markdown).toContain("首 Token");
-    expect(markdown).toContain("12.5 ms | 1.23 s | requested | echoed");
+    expect(markdown).toContain("响应时间");
+    expect(markdown).toContain("生成速度");
+    expect(markdown).toContain("5 ms | 200.0 tokens/s | requested | echoed");
+    expect(values[headings.indexOf("responseTimeMs")]).toBe("5");
+    expect(values[headings.indexOf("generationSpeed")]).toBe("200");
     expect(markdown).toContain("openai / session-2 / #23");
   });
   it("keeps local time output stable", () => {

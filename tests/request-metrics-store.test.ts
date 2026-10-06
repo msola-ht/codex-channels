@@ -123,10 +123,12 @@ describe("SqliteModelRequestMetricsStore", () => {
     `, join(directory, "metrics.sqlite3")], { cwd: process.cwd(), stdio: "pipe", timeout: 15000 });
   });
 
-  it("persists submitted timing without deriving request or generation speeds", () => {
+  it("persists response and generation intervals independently of dumps without storing derived speeds", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
-    store.recordBatch([{ ...sample(), firstTokenMs: 200, totalDurationMs: 1000 }]);
-    expect(store.recent(1)[0]).toMatchObject({ firstTokenMs: 200, totalDurationMs: 1000 });
+    const generationTiming = { reasoningMs: 100, textMs: 200, toolMs: 300, totalMs: 600 };
+    store.recordBatch([{ ...sample(), firstTokenMs: 200, totalDurationMs: 1000, responseTimeMs: 30, generationTiming }]);
+    expect(store.recent(1)[0]).toMatchObject({ firstTokenMs: 200, totalDurationMs: 1000, responseTimeMs: 30, generationTiming });
+    expect(() => store.recordBatch([{ ...sample(), totalDurationMs: 10, generationTiming }])).toThrow("请求生成计时无效");
     expect(store.recent(1)[0]).not.toHaveProperty("tokensPerSecond");
     expect(store.recent(1)[0]).not.toHaveProperty("generationTokensPerSecond");
     store.close();

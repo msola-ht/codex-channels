@@ -1,4 +1,5 @@
 export type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
+import type { GenerationTiming } from "../runtime/request-timing.mjs"
 import type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 export type RangeName =
@@ -312,6 +313,8 @@ export interface RequestRecord {
   totalDurationMs: number | null
   traffic: { label: string; session: string; interaction: number } | null
   firstTokenMs: number | null
+  responseTimeMs?: number | null
+  generationTiming?: GenerationTiming | null
   requestModel: string | null
   responseModel: string | null
   responseUsageAmount?: string | null
@@ -987,6 +990,9 @@ export interface TrafficExchangeSummary {
   durationMs?: number
   /** 与调用详情同源的响应索引首 Token 延迟；缺失表示未记录或不适用。 */
   firstTokenMs?: number
+  responseTimeMs?: number
+  generationTiming?: GenerationTiming
+  outputTokens?: number | null
   hasError: boolean
   requestModel?: string
   responseModels: string[]
@@ -1105,6 +1111,9 @@ export interface TrafficExchangeDetail {
     outputTruncated: boolean
     outputSource: "terminal" | "trace"
     firstTokenMs?: number
+    responseTimeMs?: number
+    generationTiming?: GenerationTiming
+    outputTokens?: number | null
   } | null
   tracePage: {
     offset: number

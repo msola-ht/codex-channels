@@ -3,13 +3,20 @@ import type { IncomingHttpHeaders } from "node:http";
 import { ModelConversionError, type DirectResponsesRequest, type DirectChatUsage } from "../model-api/index.js";
 import { parseDirectModelJson, validateDirectModelResponse, withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
 import { readChatBody, readModelFrames } from "./chat-io.js";
-import { chatUpstreamError } from "./chat-errors.js";
-import { createMetricsState, hasResponseOutputContent, observeJsonResponse, observeResponseEvent } from "./response-metrics-observer.js";
+import { chatStreamError, chatUpstreamError } from "./chat-errors.js";
+import { createMetricsState, hasResponseOutputContent, observeJsonResponse, observeResponseEvent, observeRequestSubmitted, observeResponseReceived } from "./response-metrics-observer.js";
+import type { GenerationTiming } from "../../runtime/request-timing.mjs";
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
 
 /** Uses the same Responses usage reducer as owned model traffic, without App Server state. */
 export class DirectResponsesObserver {
-  private readonly metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, Date.now(), "http", "response", null, performance.now());
+  private readonly metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, Date.now(), "http", "response", null);
+  submitted(at: number): void { observeRequestSubmitted(this.metrics, at); }
+  receivedError(at: number): void { observeResponseReceived(this.metrics, at); }
+  get timing(): { responseTimeMs?: number; generationTiming?: GenerationTiming } {
+    return { ...(this.metrics.responseTimeMs === undefined ? {} : { responseTimeMs: this.metrics.responseTimeMs }),
+      ...(this.metrics.generationTiming === undefined ? {} : { generationTiming: this.metrics.generationTiming }) };
+  }
   private jsonContent = false;
   private responseId: string | undefined;
   get status(): "completed" | "failed" | "incomplete" | "unknown" { return this.metrics.status; }
@@ -19,10 +26,13 @@ export class DirectResponsesObserver {
     return Object.fromEntries(["inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"]
       .flatMap(key => { const value = this.metrics[key as keyof typeof this.metrics]; return typeof value === "number" ? [[key, value]] : []; }));
   }
-  observe(value: Record<string, unknown>, stream: boolean): boolean {
+  observe(value: Record<string, unknown>, stream: boolean, receivedAt = performance.now()): boolean {
     const type = value.type;
     if (stream && (typeof type !== "string" || !/^[a-zA-Z0-9_.-]{1,160}$/u.test(type))) throw new ModelConversionError("Invalid Responses event type");
-    if (stream && type === "error") throw chatUpstreamError(value.error ?? value);
+    if (stream && type === "error") {
+      observeResponseEvent(this.metrics, type, value, Date.now(), receivedAt);
+      throw chatUpstreamError(value.error ?? value);
+    }
     const terminal = stream ? ["response.completed", "response.failed", "response.incomplete"].includes(String(type)) : true;
     const response = stream ? value.response : value;
     if (terminal || stream && type === "response.created") {
@@ -35,8 +45,8 @@ export class DirectResponsesObserver {
         throw new ModelConversionError("Invalid Responses terminal object");
       }
     }
-    if (stream) return observeResponseEvent(this.metrics, String(type), value, Date.now(), performance.now());
-    const terminalObserved = observeJsonResponse(this.metrics, value, Date.now());
+    if (stream) return observeResponseEvent(this.metrics, String(type), value, Date.now(), receivedAt);
+    const terminalObserved = observeJsonResponse(this.metrics, value, Date.now(), receivedAt);
     this.jsonContent = terminalObserved && hasResponseOutputContent(value);
     return terminalObserved;
   }
@@ -70,16 +80,20 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
     await withDirectModelResponse({ body: call.request, path: "/responses", target: call.target, signal: call.signal,
       ...(call.clientHeaders ? { clientHeaders: call.clientHeaders } : {}), recheck: () => call.recheck(),
       transformed: operation => call.capture?.transformed?.(operation),
-      submitted: (ua, headers, path) => { call.submitted(ua); call.capture?.submitted(call.request, headers, path); },
+      submitted: (ua, headers, path) => { call.observer.submitted(performance.now()); call.submitted(ua); call.capture?.submitted(call.request, headers, path); },
     }, async incoming => {
       call.headers(incoming.statusCode ?? 502); call.capture?.head(incoming.statusCode ?? 502, incoming.headers);
       await validateDirectModelResponse(incoming, call.request.stream, {
-        value: (value, stream) => { diagnostics.push(value); call.capture?.value(value, stream); },
+        value: (value, stream) => {
+          if (chatStreamError(value)) call.observer.receivedError(performance.now());
+          diagnostics.push(value); call.capture?.value(value, stream);
+        },
         invalid: count => call.capture?.invalid(count),
       });
       if (call.request.stream) errorStage = "stream";
       if (!call.request.stream) {
         const value = parse(await readChatBody(incoming, call.signal, 8 * 1024 * 1024), call.capture);
+        if (chatStreamError(value)) call.observer.receivedError(performance.now());
         diagnostics.push(value);
         call.capture?.value(value, false);
         if (!call.observer.observe(value, false)) throw new ModelConversionError("Responses JSON has no terminal state");
@@ -93,7 +107,7 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
         if (event && event !== value.type) throw new ModelConversionError("Responses SSE event does not match its payload");
         diagnostics.push(value.type === "error" ? value : value.response);
         call.capture?.value(value, true);
-        const terminal = call.observer.observe(value, true);
+        const terminal = call.observer.observe(value, true, frame.receivedAt);
         if (call.observer.status === "failed") diagnostics.error("upstream_failure", errorStage, false);
         if (call.observer.hasContent) call.content();
         if (terminal) call.capture?.done(call.observer.status === "unknown" ? "incomplete" : call.observer.status);

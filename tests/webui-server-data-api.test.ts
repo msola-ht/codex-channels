@@ -547,9 +547,11 @@ describe("webui server data API", () => {
   });
   it("returns persisted TTFT in request details and export with missing values left null", async () => {
     const fixture = createFixture();
+    const generationTiming = { reasoningMs: 100, textMs: 200, toolMs: 300, totalMs: 600 };
     const traffic = { label: "openai", session: "2026-09-19T00-00-00-000Z-2", interaction: 4 };
     recordSample(fixture.databasePath, {
       ...metricSample(), provider: "openai", upstreamTtftMs: 569.25,
+      responseTimeMs: 10, generationTiming,
       requestServiceTier: "priority", serviceTier: "default",
       upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2, finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit_exceeded", upstreamErrorType: "rate_limit_error", upstreamHttpStatus: 429, responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, outputTokens: 1_000, requestModel: "requested", responseModel: "echoed", traffic,
     });
@@ -561,10 +563,12 @@ describe("webui server data API", () => {
       const body = await response.json() as { records: Array<{ provider: string; upstreamTtftMs: number | null }> };
       expect(body.records.find((row) => row.provider === "openai")?.upstreamTtftMs).toBe(569.25);
       expect(body.records.find((row) => row.provider === "openai")).toMatchObject({
+        responseTimeMs: 10, generationTiming,
         upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2, finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit_exceeded", upstreamErrorType: "rate_limit_error", upstreamHttpStatus: 429, responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
         requestServiceTier: "priority", serviceTier: "default",
       });
       expect(body.records.find((row) => row.provider === "deepseek")).toMatchObject({
+        responseTimeMs: null, generationTiming: null,
         responseUsageAmount: null, firstTokenMs: null, totalDurationMs: null, requestModel: null, responseModel: null, traffic: null,
         requestServiceTier: null,
       });

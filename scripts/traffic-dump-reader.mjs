@@ -1,3 +1,4 @@
+import { validRequestTiming } from "../runtime/request-timing.mjs";
 import {
   closeSync,
   createReadStream,
@@ -192,6 +193,7 @@ export async function describeDumpExchange(
       bytes: interaction.response.bytes ?? interaction.response.payload?.bytes,
       durationMs: callTiming(interaction.response.callTiming)?.totalMs,
       firstTokenMs: interaction.response.firstTokenMs,
+      ...outputTimingOf(interaction.response),
       callTiming: callTiming(interaction.response.callTiming),
       eventType: interaction.response.eventType,
       errorScope: interaction.response.errorScope,
@@ -399,6 +401,7 @@ function summaryOf(interaction, body, includeMetadata = true) {
     status: response?.status,
     durationMs: callTiming(response?.callTiming)?.totalMs,
     ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
+    ...outputTimingOf(response),
     hasError: response?.state === "failed" || response?.state === "incomplete",
   };
 }
@@ -413,6 +416,15 @@ function upstreamProviderOf(response) {
 function firstTokenMsOf(response) {
   const value = response?.firstTokenMs;
   return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function outputTimingOf(response) {
+  if (!response || !validRequestTiming(response)) return {};
+  return {
+    ...(response.responseTimeMs == null ? {} : { responseTimeMs: response.responseTimeMs }),
+    ...(response.generationTiming == null ? {} : { generationTiming: response.generationTiming }),
+    ...(Number.isSafeInteger(response.outputTokens) && response.outputTokens >= 0 ? { outputTokens: response.outputTokens } : {}),
+  };
 }
 
 function readPayload(directory, payload, maxBytes, allowUnavailable = false) {

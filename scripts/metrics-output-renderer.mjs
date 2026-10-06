@@ -1,3 +1,4 @@
+import { formatGenerationSpeed, generationSpeed } from "../runtime/request-timing.mjs";
 import {
   csvCell,
   formatElapsedDuration,
@@ -217,7 +218,7 @@ export function printMetricsExport(result, format) {
       console.log("本时间范围没有请求记录。");
       return;
     }
-    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存 | 输出 | 首 Token | 请求耗时 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |");
+    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存 | 输出 | 响应时间 | 生成速度 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |");
     console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
       console.log(
@@ -231,8 +232,8 @@ export function printMetricsExport(result, format) {
           markdownCell(record.inputTokens == null ? "未观测" : formatTokenCount(record.inputTokens)),
           markdownCell(record.cachedInputTokens == null ? "未观测" : formatTokenCount(record.cachedInputTokens)),
           markdownCell(record.outputTokens == null ? "未观测" : formatTokenCount(record.outputTokens)),
-          markdownCell(record.firstTokenMs == null ? "—" : formatElapsedDuration(record.firstTokenMs)),
-          markdownCell(record.totalDurationMs == null ? "—" : formatElapsedDuration(record.totalDurationMs)),
+          markdownCell(record.responseTimeMs == null ? "—" : formatElapsedDuration(record.responseTimeMs)),
+          markdownCell(formatGenerationSpeed(record)),
           markdownCell(record.requestModel ?? "未知"),
           markdownCell(record.responseModel ?? "未回显"),
           markdownCell(record.traffic == null ? "未关联"
@@ -596,6 +597,12 @@ function csvColumns() {
   return [
     ...["source", "callerId", "keyId", "credentialGeneration", "relayRequestId", "deliveryStatus"].map(key => [key, record => record[key]]),
     ["firstTokenMs", (record) => record.firstTokenMs],
+    ["responseTimeMs", (record) => record.responseTimeMs],
+    ["generationSpeed", (record) => generationSpeed(record)],
+    ["generationTimeMs", (record) => record.generationTiming?.totalMs],
+    ["reasoningTimeMs", (record) => record.generationTiming?.reasoningMs],
+    ["textTimeMs", (record) => record.generationTiming?.textMs],
+    ["toolTimeMs", (record) => record.generationTiming?.toolMs],
     ["totalDurationMs", (record) => record.totalDurationMs],
     ["upstreamTtftMs", (record) => record.upstreamTtftMs],
     ["responseUsageAmount", (record) => record.responseUsageAmount],

@@ -40,10 +40,13 @@ export function readChatBody(request: IncomingMessage, signal: AbortSignal, maxi
   });
 }
 
-export async function writeChatData(response: ServerResponse, data: string, signal: AbortSignal): Promise<void> {
+export async function writeChatData(response: ServerResponse, data: string, signal: AbortSignal, backpressure?: () => void): Promise<void> {
   signal.throwIfAborted();
   if (response.destroyed) throw new Error("Response disconnected");
-  if (!response.write(data)) await once(response, "drain", { signal });
+  if (!response.write(data)) {
+    backpressure?.();
+    await once(response, "drain", { signal });
+  }
 }
 
 export interface ChatStreamBounds {
@@ -55,11 +58,12 @@ export interface ChatStreamBounds {
 }
 
 /** Pull-based decoding keeps downstream backpressure attached to the upstream reader. */
-export async function* readModelFrames(incoming: IncomingMessage, signal: AbortSignal, bounds: ChatStreamBounds): AsyncGenerator<{ data: string; raw: string }> {
+export async function* readModelFrames(incoming: IncomingMessage, signal: AbortSignal, bounds: ChatStreamBounds): AsyncGenerator<{ data: string; raw: string; receivedAt: number }> {
   const decoder = new StringDecoder("utf8");
   let buffer = "";
   let total = 0;
   for await (const value of incoming) {
+    const receivedAt = performance.now();
     signal.throwIfAborted();
     const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value as string);
     total += chunk.length;
@@ -75,14 +79,10 @@ export async function* readModelFrames(incoming: IncomingMessage, signal: AbortS
       const data = frame.split(/\r?\n/u).filter(line => line.startsWith("data:"))
         .map(line => line.slice(5).replace(/^ /u, "")).join("\n");
       if (data === "[DONE]" && /(?:^|\r?\n)data:/u.test(buffer)) throw new ModelConversionError("Chat data follows DONE");
-      if (data) yield { data, raw: frame };
+      if (data) yield { data, raw: frame, receivedAt };
     }
     if (Buffer.byteLength(buffer) > bounds.frameBytes) throw new ModelConversionError("Chat frame exceeds size limit");
   }
   buffer += decoder.end();
   if (buffer.trim()) throw new ModelConversionError("Chat stream has an incomplete frame");
-}
-
-export async function* readChatFrames(incoming: IncomingMessage, signal: AbortSignal, bounds: ChatStreamBounds): AsyncGenerator<string> {
-  for await (const frame of readModelFrames(incoming, signal, bounds)) yield frame.data;
 }

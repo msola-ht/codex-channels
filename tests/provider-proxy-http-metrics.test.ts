@@ -6,7 +6,9 @@ import {
 import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createMetricsState, observeJsonResponse, observeResponseEvent, HttpResponseMetricsObserver } from "../src/provider-proxy/response-metrics-observer.js";
+import { createMetricsState, observeJsonResponse, observeResponseEvent, HttpResponseMetricsObserver, invalidateGenerationTiming, observeChatTiming } from "../src/provider-proxy/response-metrics-observer.js";
+import { generationSpeed } from "../runtime/request-timing.mjs";
+import { ChatGenerationTimingObserver } from "../src/provider-proxy/generation-timing.js";
 
 import {
   ProviderProxy,
@@ -26,6 +28,120 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy HTTP metrics", () => {
+  it.each(["sse", "websocket"] as const)("measures upstream response and complete mixed generation without a dump (%s)", format => {
+    const metric = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 0, format === "sse" ? "http" : "websocket", "response", null, 0);
+    const http = new HttpResponseMetricsObserver(metric);
+    const send = (at: number, type: string, fields: Record<string, unknown> = {}) => {
+      const event = { type, ...fields };
+      if (format === "sse") http.observeChunk(Buffer.from(sse(type, event)), at, at);
+      else observeResponseEvent(metric, type, event, at, at);
+    };
+    send(393, "codex.rate_limits");
+    send(1713, "response.output_item.added", { item: { id: "r", type: "reasoning" } });
+    send(5276, "response.output_item.done", { item: { id: "r", type: "reasoning" } });
+    send(5276, "response.output_item.added", { item: { id: "m", type: "message" } });
+    send(5277, "response.output_text.delta", { item_id: "m", delta: "a" });
+    send(6804, "response.output_text.delta", { item_id: "m", delta: "b" });
+    send(6947, "response.output_item.done", { item: { id: "m", type: "message" } });
+    send(6953, "response.output_item.added", { item: { id: "t", type: "custom_tool_call" } });
+    send(6954, "response.custom_tool_call_input.delta", { item_id: "t", delta: "a" });
+    send(20221, "response.custom_tool_call_input.delta", { item_id: "t", delta: "b" });
+    send(20315, "response.output_item.done", { item: { id: "t", type: "custom_tool_call" } });
+    send(20460, "response.completed", { response: { status: "completed", output: [], usage: { output_tokens: 813, output_tokens_details: { reasoning_tokens: 96 } } } });
+    expect(metric).toMatchObject({ responseTimeMs: 393, totalDurationMs: 20460,
+      generationTiming: { reasoningMs: 3563, textMs: 1527, toolMs: 13267, totalMs: 18357 } });
+    expect(generationSpeed(metric)).toBeCloseTo(44.288, 2);
+  });
+
+  it.each(["single", "missing-done", "missing-part", "hidden-reasoning", "unknown-item", "failed", "backpressure"])("does not invent a generation speed for %s", failure => {
+    const metric = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 0, "websocket", "response", null, 0);
+    const send = (at: number, type: string, fields: Record<string, unknown>) => observeResponseEvent(metric, type, { type, ...fields }, at, at);
+    send(10, "response.output_item.added", { item: { id: "m", type: failure === "unknown-item" ? "image_generation_call" : "message" } });
+    send(20, "response.output_text.delta", { item_id: "m", delta: "a" });
+    if (failure === "backpressure") invalidateGenerationTiming(metric);
+    if (failure !== "single") send(30, "response.output_text.delta", { item_id: "m", delta: "b" });
+    if (failure !== "missing-done") send(40, "response.output_item.done", { item: { id: "m", type: "message",
+      ...(failure === "missing-part" ? { content: [{ type: "output_text", text: "ab" }, { type: "output_text", text: "unobserved" }] } : {}) } });
+    send(50, failure === "failed" ? "response.failed" : "response.completed", { response: { status: failure === "failed" ? "failed" : "completed", usage: { output_tokens: 10, output_tokens_details: { reasoning_tokens: failure === "hidden-reasoning" ? 2 : 0 } } } });
+    expect(metric.generationTiming).toBeUndefined();
+    expect(generationSpeed(metric)).toBeNull();
+  });
+
+  it("does not restore a blocked proxy generation interval from Chat diagnostics", () => {
+    const metric = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 0, "http", "response", null, 0);
+    invalidateGenerationTiming(metric);
+    observeChatTiming(metric, { submittedAt: 0, responseTimeMs: 10, generationTiming: { reasoningMs: 0, textMs: 20, toolMs: 0, totalMs: 20 } });
+    expect(metric.responseTimeMs).toBe(10);
+    expect(metric.generationTiming).toBeUndefined();
+  });
+
+  it("uses raw Chat intervals and unions parallel tools without charging waits", () => {
+    const observer = new ChatGenerationTimingObserver();
+    const push = (at: number, delta: unknown) => observer.push({ choices: [{ delta }] }, at);
+    push(100, { reasoning_content: "a" }); push(200, { reasoning_content: "b" });
+    push(500, { content: "a" }); push(600, { content: "b" });
+    const tools = (argumentsValue: string) => ({ tool_calls: [0, 1].map(index => ({ index, function: { arguments: argumentsValue } })) });
+    push(900, tools("{")); push(1200, tools("}"));
+    expect(observer.finish(100, 20)).toEqual({ reasoningMs: 100, textMs: 100, toolMs: 300, totalMs: 500 });
+  });
+
+  it("does not turn coalesced Chat frames into a microsecond generation interval", () => {
+    const observer = new ChatGenerationTimingObserver();
+    observer.push({ choices: [{ delta: { content: "a" } }] }, 100);
+    observer.push({ choices: [{ delta: { content: "b" } }] }, 100);
+    expect(observer.finish(2, 0)).toBeUndefined();
+  });
+
+  it("retains interleaved parallel Chat tool intervals and unions their overlap", () => {
+    const observer = new ChatGenerationTimingObserver();
+    const push = (index: number, at: number) => observer.push({ choices: [{ delta: { tool_calls: [{ index, function: { arguments: "x" } }] } }] }, at);
+    push(0, 100); push(1, 200); push(0, 300); push(1, 400);
+    expect(observer.finish(10, 0)).toEqual({ reasoningMs: 0, textMs: 0, toolMs: 300, totalMs: 300 });
+  });
+
+  it("uses plaintext reasoning deltas rather than its delayed item close", () => {
+    const metric = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 0, "websocket", "response", null, 0);
+    const send = (at: number, type: string, fields: Record<string, unknown>) => observeResponseEvent(metric, type, { type, ...fields }, at, at);
+    send(10, "response.output_item.added", { item: { id: "r", type: "reasoning" } });
+    send(20, "response.reasoning_text.delta", { item_id: "r", delta: "a" });
+    send(40, "response.reasoning_text.delta", { item_id: "r", delta: "b" });
+    send(200, "response.output_item.done", { item: { id: "r", type: "reasoning" } });
+    send(220, "response.completed", { response: { status: "completed", usage: { output_tokens: 10, output_tokens_details: { reasoning_tokens: 10 } } } });
+    expect(metric.generationTiming).toEqual({ reasoningMs: 20, textMs: 0, toolMs: 0, totalMs: 20 });
+  });
+  it.each([false, true])("handles native HTTP backpressure without changing successful delivery (%s)", async blocked => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => { void (async () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        const events = [
+          { type: "response.output_item.added", item: { id: "m", type: "message" } },
+          { type: "response.output_text.delta", item_id: "m", delta: "a".repeat(blocked ? 131072 : 1) },
+          { type: "response.output_text.delta", item_id: "m", delta: "b" },
+          { type: "response.output_item.done", item: { id: "m", type: "message" } },
+          { type: "response.completed", response: { status: "completed", usage: { output_tokens: 2 } } },
+        ];
+        for (const event of events) {
+          response.write(sse(event.type, event));
+          await new Promise(resolve => setTimeout(resolve, 15));
+        }
+        response.end();
+      })(); });
+    });
+    await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: () => new Promise<void>(resolve => upstream.close(() => resolve())) });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: "127.0.0.1",
+      upstreamPort: (upstream.address() as AddressInfo).port, upstreamProtocol: "http", onMetrics: metric => { metrics.push(metric); } });
+    await proxy.start(); openServers.push(proxy);
+    const response = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: "{}" });
+    expect(await response.text()).toContain("response.completed");
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]?.status).toBe("completed");
+    expect(metrics[0]?.responseTimeMs).toBeGreaterThanOrEqual(0);
+    if (blocked) expect(metrics[0]?.generationTiming).toBeUndefined();
+    else expect(metrics[0]?.generationTiming?.textMs).toBeGreaterThan(0);
+  });
   it("keeps header quota observation times when concurrent requests finish in reverse order", async () => {
     const responses: ServerResponse[] = [];
     const upstream = createServer((request, response) => {

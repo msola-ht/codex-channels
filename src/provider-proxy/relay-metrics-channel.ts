@@ -2,13 +2,14 @@ import { validModelRequestDiagnostics, modelRequestDiagnosticKeys } from "./chat
 import type { Socket } from "node:net";
 import { requestPrivateIpcJson, PrivateIpcServer } from "../../runtime/private-ipc.mjs";
 import type { RelayMetric } from "./relay-metric.js";
+import { validRequestTiming } from "../../runtime/request-timing.mjs";
 
 export interface RelayMetricEnvelope { version: 1; providerId: string; relayRequestId: string; sample: RelayMetric }
 export type RelayMetricRejection = "invalid_sample" | "unknown_provider" | "queue_full" | "closing" | "unsupported_version";
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const identity = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 const sampleKeys = [...modelRequestDiagnosticKeys, "traffic", "source", "threadId", "turnId", "relayRequestId", "callerId", "keyId", "credentialGeneration", "provider", "requestModel", "userAgent",
-  "responseModel", "responseFormat", "status", "deliveryStatus", "requestStartedAtMs", "responseCompletedAtMs", "totalDurationMs", "firstTokenMs",
+  "responseModel", "responseFormat", "status", "deliveryStatus", "requestStartedAtMs", "responseCompletedAtMs", "totalDurationMs", "firstTokenMs", "responseTimeMs", "generationTiming",
   "httpStatus", "errorCode", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"];
 
 export class RelayMetricsServer {
@@ -68,7 +69,7 @@ function validSample(value: unknown, provider: unknown, requestId: unknown): val
   try {
     const sample = record(value);
     if (Buffer.byteLength(JSON.stringify(sample)) > 16 * 1024 || Object.keys(sample).some(key => !sampleKeys.includes(key))) return false;
-    if (!validModelRequestDiagnostics(sample) || sample.source !== "relay" || sample.threadId !== null || sample.turnId !== null || sample.relayRequestId !== requestId
+    if (!validModelRequestDiagnostics(sample) || !validRequestTiming(sample) || sample.source !== "relay" || sample.threadId !== null || sample.turnId !== null || sample.relayRequestId !== requestId
       || typeof provider !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(provider) || sample.provider !== provider
       || typeof sample.callerId !== "string" || !identity.test(sample.callerId) || typeof sample.keyId !== "string" || !identity.test(sample.keyId)
       || !Number.isSafeInteger(sample.credentialGeneration) || Number(sample.credentialGeneration) < 1

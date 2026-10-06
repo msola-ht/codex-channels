@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react"
+import { formatGenerationSpeed } from "../../../../runtime/request-timing.mjs"
 import { ChevronLeftIcon, ChevronRightIcon, CopyIcon } from "lucide-react"
 import { TrafficParameterComparison, TrafficRequestContent } from "@/components/traffic/traffic-request-content"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -249,8 +250,8 @@ function CallSummary({ detail }: { detail: TrafficExchangeDetail }) {
     ? `${(usage.cachedTokens / usage.inputTokens * 100).toFixed(1)}%` : "—"
   const elapsed = (value: number | undefined) => value === undefined ? "—" : formatElapsedDuration(value)
   return <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-    {isModel ? <SummaryMetric label={<TableHint hint={t("traffic.firstTokenHint")}>{t("requests.firstColumn")}</TableHint>} value={elapsed(detail.response?.firstTokenMs)} /> : null}
-    <SummaryMetric label={<TableHint hint={t("traffic.durationHint")}>{t("requests.durationColumn")}</TableHint>} value={elapsed(detail.response?.callTiming?.totalMs)} />
+    {isModel ? <SummaryMetric label={<TableHint hint={t("requests.firstHint")}>{t("requests.firstColumn")}</TableHint>} value={elapsed(detail.response?.responseTimeMs)} /> : null}
+    {isModel ? <SummaryMetric label={<TableHint hint={t("requests.speedHint")}>{t("requests.speedColumn")}</TableHint>} value={formatGenerationSpeed(detail.response)} /> : null}
     {isModel ? <>
       <SummaryMetric label={t("metrics.input")} value={usage?.inputTokens?.toLocaleString() ?? "—"} description={usage?.cachedTokens === undefined ? undefined : t("traffic.cachedTokens", { count: usage.cachedTokens.toLocaleString(), rate })} />
       <SummaryMetric label={t("metrics.output")} value={usage?.outputTokens?.toLocaleString() ?? "—"} description={usage?.reasoningTokens === undefined ? undefined : t("traffic.reasoningTokens", { count: usage.reasoningTokens.toLocaleString() })} />

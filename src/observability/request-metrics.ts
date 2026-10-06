@@ -1,3 +1,4 @@
+import type { GenerationTiming } from "../../runtime/request-timing.mjs";
 export type ModelRequestTransport = "http" | "websocket";
 export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
@@ -62,6 +63,8 @@ export interface ModelRequestMetricSample {
   responseCompletedAtMs: number;
   upstreamTtftMs?: number | null;
   firstTokenMs?: number | null;
+  responseTimeMs?: number | null;
+  generationTiming?: GenerationTiming | null;
   totalDurationMs?: number | null;
   requestModel?: string | null;
   responseModel?: string | null;

@@ -21,7 +21,7 @@ export interface DirectChatCapture {
   value(value: unknown, stream: boolean): void;
   invalid(bytes: number): void;
   done(status?: "completed" | "failed" | "incomplete"): void;
-  finish(delivery: "finished" | "disconnected" | "failed", errorCode?: string, firstTokenMs?: number, responseModel?: string): ProviderProxyMetrics["traffic"];
+  finish(delivery: "finished" | "disconnected" | "failed", errorCode?: string, firstTokenMs?: number, responseModel?: string, timing?: Pick<ProviderProxyMetrics, "responseTimeMs" | "generationTiming"> & { outputTokens?: number }): ProviderProxyMetrics["traffic"];
 }
 
 /** One Relay owner, all accounts share the same V2 disk and pending-write budgets. */
@@ -178,7 +178,7 @@ export class RelayTrafficDump {
         }),
         invalid: count => safe(() => { upstream.invalid(count); }),
         done: (status = "completed") => safe(() => { complete = true; modelStatus = status; completedAt = performance.now(); if (streaming && protocol === "chat") upstream.value(undefined, true); }),
-        finish: (delivery, errorCode, firstTokenMs, responseModel) => {
+        finish: (delivery, errorCode, firstTokenMs, responseModel, timing) => {
           if (finished) return undefined;
           safe(() => {
             if (!requestSaved) return;
@@ -191,7 +191,7 @@ export class RelayTrafficDump {
               ...(debug ? { debug: { version: 1,
                 delivered: { status: deliveredStatus, headers: deliveredHeaders.headers, headersTruncated: deliveredHeaders.truncated,
                   payload: delivered!.finish(), state: deliveredStatus === undefined ? "not_started" : delivery }, transformations: [...responseChanges] } } : {}),
-              responseModels: responseModel === undefined ? [] : [responseModel],
+              ...timing, responseModels: responseModel === undefined ? [] : [responseModel],
               state: modelStatus, deliveryStatus: delivery, error: errorCode,
               errorScope: complete ? undefined : "upstream_response", bytes: upstream.bytes,
               payload,

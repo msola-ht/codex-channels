@@ -122,6 +122,7 @@ const record = {
   status: "completed", requestModel: "model-test", responseModel: "model-test", traffic: null,
   userAgent: "fixture-client", operation: "response", httpStatus: 200, inputTokens: 100, cachedInputTokens: 50,
   outputTokens: 20, reasoningOutputTokens: 5, totalTokens: 120, cacheHitRate: 0.5, firstTokenMs: 100,
+  responseTimeMs: 39, generationTiming: { reasoningMs: 100, textMs: 200, toolMs: 100, totalMs: 400 },
   totalDurationMs: 1000, errorType: null, errorCode: null, errorMessage: null,
 }
 

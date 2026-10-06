@@ -1,6 +1,8 @@
 import type { IncomingHttpHeaders } from "node:http";
 import type { ModelRequestDiagnostics } from "./chat-diagnostics.js";
 import { StringDecoder } from "node:string_decoder";
+import type { GenerationTiming } from "../../runtime/request-timing.mjs";
+import { GenerationTimingObserver } from "./generation-timing.js";
 
 const maximumJsonMetadataBytes = 1_048_576;
 const maximumSseMetadataLineCharacters = 1_048_576;
@@ -56,7 +58,9 @@ export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
   upstreamTtftMs?: number;
   /** 提交发送至首段非空文本增量（含思考与工具参数）；不是客户端显示时间。 */
   firstTokenMs?: number;
-  /** IPC 中明确区分旧的入口计时。 */
+  responseTimeMs?: number;
+  generationTiming?: GenerationTiming;
+  /** IPC 中声明单调计时采用实际提交发送起点。 */
   timingBasis?: "submitted";
   /** 提交发送至首个终态或结束/失败；单调时钟，不含发送前准备。 */
   totalDurationMs?: number;
@@ -85,6 +89,31 @@ export interface MetricsState extends ProviderProxyMetrics {
 
 const timingByMetrics = new WeakMap<MetricsState, { responseId: string; ttftMs?: number }>();
 const requestClocks = new WeakMap<MetricsState, number>();
+const generationObservers = new WeakMap<MetricsState, GenerationTimingObserver>();
+const convertedMetrics = new WeakSet<MetricsState>();
+const blockedGeneration = new WeakSet<MetricsState>();
+
+/** Downstream waits make subsequent upstream receipt intervals unreliable. */
+export function invalidateGenerationTiming(metrics: MetricsState): void {
+  blockedGeneration.add(metrics);
+  delete metrics.generationTiming;
+}
+
+export interface UpstreamTiming {
+  submittedAt: number;
+  responseTimeMs?: number;
+  generationTiming?: GenerationTiming;
+  totalDurationMs?: number;
+}
+
+/** Only the in-process Chat bridge can replace synthetic-event timing. */
+export function observeChatTiming(metrics: MetricsState, timing: UpstreamTiming): void {
+  convertedMetrics.add(metrics);
+  requestClocks.set(metrics, timing.submittedAt);
+  if (timing.responseTimeMs !== undefined) metrics.responseTimeMs = timing.responseTimeMs;
+  if (timing.generationTiming !== undefined && !blockedGeneration.has(metrics)) metrics.generationTiming = timing.generationTiming;
+  if (timing.totalDurationMs !== undefined) metrics.totalDurationMs = timing.totalDurationMs;
+}
 
 export function createMetricsState(
   metadata: ResponseMetricsMetadata,
@@ -129,6 +158,11 @@ export function createMetricsState(
 /** 仅在实际提交给出站传输时调用；提交前的 WS 连接等待和路由准备不计时。 */
 export function observeRequestSubmitted(metrics: MetricsState, at: number): void {
   if (!requestClocks.has(metrics)) requestClocks.set(metrics, at);
+}
+
+export function observeResponseReceived(metrics: MetricsState, at: number): void {
+  const started = requestClocks.get(metrics);
+  if (started !== undefined && at >= started) metrics.responseTimeMs ??= at - started;
 }
 
 function observeTotalDuration(metrics: MetricsState, at: number): void {
@@ -222,6 +256,16 @@ export function observeResponseEvent(
   receivedAtMs: number,
   receivedAtMonotonicMs: number,
 ): boolean {
+  if (!convertedMetrics.has(metrics) && requestClocks.has(metrics)) {
+    if (event && type) observeResponseReceived(metrics, receivedAtMonotonicMs);
+    if (!blockedGeneration.has(metrics) && metrics.operation === "response" && (type.startsWith("response.") || type === "error")) {
+      let observer = generationObservers.get(metrics);
+      if (!observer) { observer = new GenerationTimingObserver(); generationObservers.set(metrics, observer); }
+      observer.observe(type, event, receivedAtMonotonicMs);
+      if (observer.result) metrics.generationTiming = observer.result;
+    }
+  }
+  if (["response.failed", "response.incomplete", "error"].includes(type)) delete metrics.generationTiming;
   if (metrics.firstTokenMs === undefined && startsFirstToken(type, event)) {
     const started = requestClocks.get(metrics);
     if (started !== undefined) metrics.firstTokenMs = receivedAtMonotonicMs - started;
@@ -320,8 +364,10 @@ export function observeJsonResponse(
   metrics: MetricsState,
   response: Record<string, unknown> | undefined,
   receivedAtMs: number,
+  receivedAtMonotonicMs = performance.now(),
 ): boolean {
   if (!response) return false;
+  observeResponseReceived(metrics, receivedAtMonotonicMs);
   const status = response.status;
   const eventType = status === "completed"
     ? "response.completed"
@@ -378,6 +424,7 @@ export class HttpResponseMetricsObserver {
             this.metrics,
             parseJsonPayload(Buffer.concat(this.jsonChunks).toString("utf8")),
             receivedAtMs,
+            receivedAtMonotonicMs,
           )
         : false;
     finalizeHttpStatus(this.metrics, receivedAtMs);
@@ -523,7 +570,7 @@ export function inspectResponseEvent(
 ): { type: string; event: Record<string, unknown> | undefined } {
   const scannedType = responseEventType(payload);
   const candidateType = fallbackType || scannedType;
-  if (collectFirstContent) {
+  if (collectFirstContent || candidateType.startsWith("response.") || candidateType === "codex.response.metadata") {
     const event = parseJsonPayload(payload);
     return { type: boundedString(event?.type) ?? fallbackType, event };
   }

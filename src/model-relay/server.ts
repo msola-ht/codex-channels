@@ -122,6 +122,8 @@ export class ModelRelayServer {
     let submittedAt: number | undefined;
     let completedAt: number | undefined;
     let firstTokenMs: number | undefined;
+    let outputTiming: Pick<RelayMetric, "responseTimeMs" | "generationTiming"> = {};
+    let generationBlocked = false;
     let httpStatus: number | undefined;
     let userAgent: string | null = null;
     let errorCode: string | undefined;
@@ -228,7 +230,7 @@ export class ModelRelayServer {
       if (inbound && typeof inbound === "object" && !("stream" in inbound)) capture?.transformed?.("stream_defaulted");
       if (protocol === "responses" && inbound && typeof inbound === "object" && !("store" in inbound)) capture?.transformed?.("store_defaulted");
       inbound = undefined;
-      const call = { diagnostics: (summary: ModelRequestDiagnostics) => { diagnostics = summary; }, ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
+      const call = { timing: (value: typeof outputTiming) => { outputTiming = value; }, diagnostics: (summary: ModelRequestDiagnostics) => { diagnostics = summary; }, ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
         recheck: () => { lease!.check(requestModel); prepared.recheck(); },
         submitted: (ua: string | null) => { userAgent = ua; started = performance.now(); submittedAt = Date.now(); },
         headers: (status: number) => { httpStatus = status; },
@@ -241,7 +243,7 @@ export class ModelRelayServer {
               if (Buffer.byteLength(frame) > 1024 * 1024) throw new ModelConversionError("Model delivery frame exceeds size limit");
               if (!response.headersSent) response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
               capture?.delivered?.(value, true, response.statusCode, response.getHeaders());
-              await writeChatData(response, frame, signal);
+              await writeChatData(response, frame, signal, () => { if (!terminal) generationBlocked = true; });
             }
             if (terminal) {
               if (protocol === "chat") capture?.delivered?.(undefined, true, response.statusCode, response.getHeaders());
@@ -300,7 +302,11 @@ export class ModelRelayServer {
       if (this.requests.delete(relayRequestId)) this.options.queueChanged?.();
       clearTimeout(totalTimer); response.off("close", disconnected); controller.abort(); this.active.delete(controller);
       if (observer.status === "failed") errorCode ??= "upstream_response_failed";
-      const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs, observer.responseModel);
+      if (observer instanceof DirectResponsesObserver) outputTiming = observer.timing;
+      if (generationBlocked) delete outputTiming.generationTiming;
+      const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs, observer.responseModel, {
+        ...outputTiming, ...(observer.usage.outputTokens === undefined ? {} : { outputTokens: observer.usage.outputTokens }),
+      });
       if (lease && started !== undefined) {
         const ended = completedAt ?? performance.now();
         const metric: RelayMetric = { ...diagnostics, source: "relay", threadId: null, turnId: null, relayRequestId,
@@ -309,7 +315,7 @@ export class ModelRelayServer {
           provider: provider!, requestModel, ...(userAgent === null ? {} : { userAgent }), responseFormat: stream ? "sse" : "json",
           status: observer.status === "unknown" ? "failed" : observer.status, deliveryStatus,
           requestStartedAtMs: submittedAt!, responseCompletedAtMs: submittedAt! + (ended - started), totalDurationMs: ended - started,
-          ...observer.usage, ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
+          ...observer.usage, ...outputTiming, ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
           ...(observer.responseModel === undefined ? {} : { responseModel: observer.responseModel }),
           ...(httpStatus === undefined ? {} : { httpStatus }), ...(errorCode === undefined ? {} : { errorCode }) };
         try { this.options.enqueueMetric(metric); } catch { this.metricFailures = Math.min(Number.MAX_SAFE_INTEGER, this.metricFailures + 1); }

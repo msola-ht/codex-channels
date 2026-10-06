@@ -510,13 +510,13 @@ describe("WebUI metrics table presentation", () => {
         const record = { ...common, status: "failed", requestModel: "model-test", responseModel: "model-other",
           traffic: null, userAgent: "fixture-client", operation: "response", httpStatus: 502,
           errorType: "upstream_error", errorCode: "fixture_error", errorMessage: "fixture failure",
-          firstTokenMs: 100, totalDurationMs: 1000, upstreamTtftMs: null, cacheHitRate: 0.5 };
+          firstTokenMs: 100, responseTimeMs: 25, generationTiming: { reasoningMs: 100, textMs: 200, toolMs: 300, totalMs: 600 }, totalDurationMs: 1000, upstreamTtftMs: null, cacheHitRate: 0.5 };
         const render = (component, props, language = "zh", entry = "/") => renderToStaticMarkup(h(MemoryRouter, { initialEntries: [entry] },
           h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(TooltipProvider, null,
             h(ServerTimeContext.Provider, { value: globalThis.fixtureServerClock ?? { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" } }, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props))))));
         const requestProps = { ...pagination, records: [{ ...record, id: 42 }], filter: "", total: 1 };
         const exchange = { protocol: "responses", reasoningEffort: "high", clientName: "WorkBuddy", id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
-          state: "completed", firstTokenMs: 100, durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
+          state: "completed", firstTokenMs: 100, responseTimeMs: 25, outputTokens: 120, generationTiming: { reasoningMs: 100, textMs: 200, toolMs: 300, totalMs: 600 }, durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
         const detail = { ...exchange, transport: "http", modelEvidence: { serverModels: [], safetyModels: [], turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }], truncated: false },
           parameterComparison: [], request: { headers: {}, body: "request-body", parameters: {},
             content: { instructions: null, input: [], tools: [] } }, response: null,
@@ -580,8 +580,8 @@ describe("WebUI metrics table presentation", () => {
           outputToken: render(OutputTokenTooltip, { outputTokens: 10, reasoningOutputTokens: 5 }),
           summaryLoading: render(QuerySummary, { aggregate: null, range: { name: "all" }, loading: true }),
           traffic: render(TrafficTable, { exchanges: [exchange], onOpen: noop }),
-          trafficFirstZero: render(TrafficTable, { exchanges: [{ ...exchange, firstTokenMs: 0 }], onOpen: noop }),
-          trafficFirstMissing: render(TrafficTable, { exchanges: [{ ...exchange, firstTokenMs: undefined }], onOpen: noop }),
+          trafficFirstZero: render(TrafficTable, { exchanges: [{ ...exchange, responseTimeMs: 0 }], onOpen: noop }),
+          trafficFirstMissing: render(TrafficTable, { exchanges: [{ ...exchange, responseTimeMs: undefined }], onOpen: noop }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
           relayDebug: render(TrafficDetail, { detail: { ...detail, debug: {
@@ -605,7 +605,7 @@ describe("WebUI metrics table presentation", () => {
           requestMissingModels: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: null, model: null } }),
           requestResponseOnly: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: "response-only-model" } }),
           requestDetailLinked: render(RequestDetail, { record: { ...record, traffic: {label:"clp",session:"batch",interaction:7} } }, "zh", "/requests?range=7d&offset=50"),
-          requestDetailZero: render(RequestDetail, { record: { ...record, inputTokens:0,cachedInputTokens:0,outputTokens:0,totalTokens:0,firstTokenMs:0,totalDurationMs:0,cacheHitRate:null,errorMessage:null,errorType:null,errorCode:null } }),
+          requestDetailZero: render(RequestDetail, { record: { ...record, inputTokens:0,cachedInputTokens:0,outputTokens:0,totalTokens:0,responseTimeMs:0,totalDurationMs:0,cacheHitRate:null,errorMessage:null,errorType:null,errorCode:null } }),
           requestsClp: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModel: "hidden-response-model", upstreamProvider: "deepseek" }] }),
           trafficClp: render(TrafficTable, { exchanges: [{ ...exchange, label: "clp", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["hidden-response-model"], upstreamProvider: "deepseek" }], onOpen: noop }),
           trafficRelayClp: render(TrafficTable, { exchanges: [{ ...exchange, label: "relay.chat", account: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["deepseek/deepseek-v4.1-flash"], upstreamProvider: "deepseek" }], onOpen: noop }),
@@ -625,7 +625,7 @@ describe("WebUI metrics table presentation", () => {
           requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek", upstreamAttemptCount: 3 }] }),
           trafficUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "deepseek" }], onOpen: noop }),
           loading: render(RequestsTable, { ...requestProps, loading: true }),
-          ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "totalDuration", desc: false }] }),
+          ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "output", desc: false }] }),
           threads: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null,
             parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination }),
           threadsEn: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null,
@@ -925,7 +925,8 @@ describe("WebUI metrics table presentation", () => {
         const { TrafficContent } = await server.ssrLoadModule("/src/components/traffic/traffic-content.tsx");
         result.truncatedContent = render(TrafficContent, { title: "片段", text: '{"partial":', json: true, truncated: true });
         globalThis.fixtureDisclosureOpen = false;
-        const completedDetail = { ...detail, response: { ...response, callTiming: { totalMs: 9500 }, firstTokenMs: 1550,
+        const completedDetail = { ...detail, response: { ...response, callTiming: { totalMs: 9500 }, responseTimeMs: 1550,
+          outputTokens: 200, generationTiming: { reasoningMs: 1000, textMs: 2000, toolMs: 1000, totalMs: 4000 },
           usage: { inputTokens: 1000, cachedTokens: 500, outputTokens: 200, reasoningTokens: 50 },
           output: [{ type: "message", text: "visible-answer" }] } };
         result.structuredCall = render(TrafficDetail, { detail: completedDetail, provider: "openai", session: "hidden-batch", onRetry: noop, onTracePageChange: noop });
@@ -1321,7 +1322,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.threadTimingMissing).not.toContain("2 min");
     expect(headers(markup.requests!)).toEqual([
       "记录时间", "提供商", "模型", "思考", "状态", "输入", "命中率", "输出",
-      "首 Token", "耗时", "来源", "请求详情",
+      "响应时间", "生成速度", "来源", "请求详情",
     ]);
     expect(markup.requests).not.toContain("未关联");
     expect(markup.requests).toContain("查看请求");
@@ -1430,7 +1431,7 @@ describe("WebUI metrics table presentation", () => {
     const ascendingHeaders = [...markup.ascending!.matchAll(/<th\b[^>]*>[\s\S]*?<\/th>/g)]
       .map((match) => match[0]);
     const timeIndex = headers(markup.requests!).indexOf("记录时间");
-    const speedIndex = headers(markup.ascending!).indexOf("耗时");
+    const speedIndex = headers(markup.ascending!).indexOf("输出");
     const statusIndex = headers(markup.requests!).indexOf("状态");
     expect(timeIndex).toBeGreaterThanOrEqual(0);
     expect(speedIndex).toBeGreaterThanOrEqual(0);
@@ -1455,7 +1456,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.inputToken).not.toContain("50.0%");
     expect(markup.outputToken).toContain('aria-description="推理输出：5; 非推理输出：5"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
-    for (const label of ["首 Token", "耗时", "请求详情"]) {
+    for (const label of ["响应时间", "生成速度", "请求详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
   });
@@ -1541,11 +1542,12 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration with compact response-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["开始时间", "提供商", "客户端", "模型", "思考", "协议", "状态", "首 Token", "耗时", "类型"]);
+    expect(headers(markup.traffic!)).toEqual(["开始时间", "提供商", "客户端", "模型", "思考", "协议", "状态", "响应时间", "生成速度", "类型"]);
     expect(markup.traffic).toContain("WorkBuddy");
     expect(markup.traffic).toContain("客户端");
     expect(markup.traffic).toContain("Responses");
-    expect(markup.traffic).toContain("100 ms");
+    expect(markup.traffic).toContain("25 ms");
+    expect(markup.traffic).toContain("200.0 tokens/s");
     expect(markup.traffic).not.toContain("Turn State 字符数");
     expect(markup.traffic).not.toContain("加载中…");
     expect(markup.traffic).not.toContain("#7");
@@ -1559,8 +1561,8 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.trafficLoading).not.toContain("的调用明细");
   });
 
-  it("distinguishes zero first-token latency from an unrecorded value", () => {
-    const cell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf("首 Token")]?.[1];
+  it("distinguishes zero response latency from an unrecorded value", () => {
+    const cell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf("响应时间")]?.[1];
     expect(cell(markup.trafficFirstZero!)).toBe("0 ms");
     expect(cell(markup.trafficFirstMissing!)).toBe("—");
   });
@@ -1570,7 +1572,7 @@ describe("WebUI metrics table presentation", () => {
     const titles = [...html.matchAll(/data-slot="card-title"[^>]*>(.*?)<\/div>/g)].map(match => match[1]);
     expect(titles.slice(1)).toEqual(["响应", "请求", "诊断信息"]);
     expect(html).toContain('aria-label="调用概览"');
-    for (const text of ["首 Token", "请求耗时", "1.55 s", "9.5 s", "输入 Token", "输出 Token", "缓存 500", "其中推理 50", "visible-answer"]) expect(html).toContain(text);
+    for (const text of ["响应时间", "生成速度", "1.55 s", "50.0 tokens/s", "输入 Token", "输出 Token", "缓存 500", "其中推理 50", "visible-answer"]) expect(html).toContain(text);
     for (const text of ["hidden-batch", "request-body", "old-trace-body", "详细耗时", "逐条用量归因"]) expect(html).not.toContain(text);
     expect(markup.pendingCall).toContain("未记录终态");
     expect(markup.pendingCall).not.toContain("进行中");
@@ -1587,9 +1589,9 @@ describe("WebUI metrics table presentation", () => {
     expect(markup["errorSummary-authentication"]).toContain("上游认证失败，请检查 API Key。");
     expect(markup["errorSummary-unknown"]).toContain("现有记录不足以确定具体原因");
     for (const category of ["prewarm", "models"]) {
-      expect(markup['call-' + category]).not.toContain("首 Token");
+      expect(markup['call-' + category]).not.toContain("响应时间");
       expect(markup['call-' + category]).not.toContain("输入 Token");
-      expect(markup['call-' + category]).toContain("请求耗时");
+      expect(markup['call-' + category]).not.toContain("生成速度");
     }
   });
 
