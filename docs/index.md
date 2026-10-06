@@ -394,7 +394,7 @@ Provider Proxy 独立采集请求与响应模型、出站 `request_service_tier`
 精确关联调用；CLI 与 WebUI 复用读取器，不按历史时间猜配、不推算未观测字段，也不增加 App Server RPC。
 计时由 `traffic-call-timing.ts` 记录，V2 响应索引使用 `callTiming.basis: "submitted"`；
 请求总耗时不作为官方 Turn 耗时。验证覆盖 HTTP/WS metrics、traffic dump、Store、导出和 WebUI 表格测试。
-生成区间由 `generation-timing.ts` 在原始上游事件处采集；Chat 转换通过请求级进程内通道传递转换前时间，不依赖转储。原生 Responses 的 item 生命周期、文本/推理增量与终态用量依据锁定源 `codex-rs/codex-api/src/sse/responses.rs` 及相邻测试；不依赖可选的逐 item token 归因字段。
+生成区间由 `generation-timing.ts` 在原始上游事件处采集，仅作诊断；展示速度使用提交至终态的请求总耗时，不要求生成区间或首 Token 完整，避免集中到达的增量或隐藏思考 Item 放大速度。首 Token 读取已落库的首非空内容时间，不以首事件或终态补算。Chat 转换通过请求级进程内通道传递转换前时间，不依赖转储。原生 Responses 的 item 生命周期、文本/推理增量与终态用量依据锁定源 `codex-rs/codex-api/src/sse/responses.rs` 及相邻测试；不依赖可选的逐 item token 归因字段。
 
 `response_usage_amount` 从 HTTP JSON/SSE 与 WebSocket 终态 `response.usage_metadata.amount` 提取，
 保留十进制原值和零值，缺失为 NULL，不换算美元或当作最终账单。依据锁定官方

@@ -250,7 +250,7 @@ describe("traffic command V2 rendering", () => {
     expect(result.stdout).toContain("安全缓冲候选不表示已经切换");
     expect(result.stdout).not.toContain("本次调用（单调时钟）");
     expect(result.stdout).not.toContain("上游轮次统计");
-    expect(result.stdout).toContain("响应时间：未提供");
+    expect(result.stdout).toContain("首 Token：未提供");
     expect(result.stdout).toContain("生成速度：—");
   });
 

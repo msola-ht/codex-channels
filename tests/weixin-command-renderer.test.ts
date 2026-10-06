@@ -384,7 +384,7 @@ describe("Weixin command renderer", () => {
     expect(rendered).toContain("Git 分支：feature/weixin-surface");
     expect(rendered).toContain("本轮耗时：1 min 5 s");
     expect(rendered).not.toContain("延迟");
-    expect(rendered).toContain("响应：—");
+    expect(rendered).toContain("首 Token：—");
     expect(rendered).toContain("速度：—");
   });
 });

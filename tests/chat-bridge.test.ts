@@ -35,7 +35,7 @@ async function fixture(reply: string | ((request: unknown) => string), status = 
 }
 const body = { model: "fixture", stream: true, input: [{ role: "user", content: "hello" }] };
 const frame = (delta: unknown, finish_reason: string | null = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\r\n\r\n`;
-it.each([false, true])("persists raw Chat timing without inventing speed under backpressure (%s)", async blocked => {
+it.each([false, true])("persists raw Chat timing and request throughput with backpressure (%s)", async blocked => {
   const directory = mkdtempSync(join(tmpdir(), "chat-timing-"));
   const store = new SqliteModelRequestMetricsStore(join(directory, "metrics.sqlite3"));
   cleanups.push(async () => { store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -67,9 +67,11 @@ it.each([false, true])("persists raw Chat timing without inventing speed under b
   const saved = store.recent(1)[0]!;
   expect(saved.traffic).toBeNull();
   expect(saved.responseTimeMs).toBeGreaterThan(0);
+  expect(saved.firstTokenMs).toBeGreaterThanOrEqual(saved.responseTimeMs!);
+  expect(saved.firstTokenMs).toBeLessThan(saved.totalDurationMs!);
   if (blocked) {
     expect(saved.generationTiming).toBeNull();
-    expect(generationSpeed(saved)).toBeNull();
+    expect(generationSpeed(saved)).toBeCloseTo(saved.outputTokens! * 1000 / saved.totalDurationMs!);
   } else {
     expect(saved.generationTiming?.reasoningMs).toBeGreaterThan(0);
     expect(saved.generationTiming?.toolMs).toBeGreaterThan(0);

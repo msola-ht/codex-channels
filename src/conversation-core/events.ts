@@ -112,8 +112,8 @@ export interface ResponseUsageSummary {
 export interface TurnOutputTiming {
   performance?: {
     requestCount: number;
-    responseSampleCount: number;
-    averageResponseTimeMs: number | null;
+    firstTokenSampleCount: number;
+    averageFirstTokenMs: number | null;
     generationTokensPerSecond: number | null;
   };
   responseUsage?: ResponseUsageSummary;

@@ -57,10 +57,13 @@ export function TrafficTable({
                 </>
     } },
     { id: "first", enableSorting: false, header: () => <><TableHint hint={t("requests.firstHint")}>{t("requests.firstColumn")}</TableHint></>, cell: ({ row: { original: exchange } }) => {
-      return <>{exchange.responseTimeMs == null ? "—" : formatElapsedDuration(exchange.responseTimeMs)}</>
+      return <>{exchange.firstTokenMs == null ? "—" : formatElapsedDuration(exchange.firstTokenMs)}</>
     } },
-    { id: "duration", enableSorting: false, header: () => <TableHint hint={t("requests.speedHint")}>{t("requests.speedColumn")}</TableHint>, cell: ({ row: { original: exchange } }) => {
-      return <>{formatGenerationSpeed(exchange)}</>
+    { id: "generationSpeed", enableSorting: false, header: () => <TableHint hint={t("requests.speedHint")}>{t("requests.speedColumn")}</TableHint>, cell: ({ row: { original: exchange } }) => {
+      return <>{formatGenerationSpeed({ ...exchange, status: exchange.state, totalDurationMs: exchange.durationMs })}</>
+    } },
+    { id: "duration", enableSorting: false, header: t("requests.durationColumn"), cell: ({ row: { original: exchange } }) => {
+      return <>{exchange.durationMs == null ? "—" : formatElapsedDuration(exchange.durationMs)}</>
     } },
     { id: "type", enableSorting: false, header: () => <>{t("metrics.type")}</>, cell: ({ row: { original: exchange } }) => {
       return <>{exchange.category === "models" ? t("traffic.categoryModels")
@@ -73,8 +76,8 @@ export function TrafficTable({
   return <DataTable title={t("traffic.listTitle", { count: pagination.mode === "server" ? pagination.serverTotal ?? exchanges.length : exchanges.length })}
     description={() => description} data={exchanges} columns={columns} loading={loading}
     storageKey="codex-webui:traffic-table-v2" defaultColumnVisibility={{ request: false }} getRowId={trafficCallKey} onRowClick={onOpen}
-    columnLabels={{time: t("traffic.startedAt"), provider: t("metrics.provider"), client: t("traffic.client"), model: t("metrics.model"), reasoningEffort: t("metrics.reasoningEffort"), protocol: t("traffic.protocol"), status: t("filters.status"), first: t("requests.firstColumn"), duration: t("requests.speedColumn"), type: t("metrics.type"), request: t("metrics.requests")}}
-    numericColumnIds={["first", "duration"]} emptyText={t("traffic.empty")} pagination={pagination} />
+    columnLabels={{time: t("traffic.startedAt"), provider: t("metrics.provider"), client: t("traffic.client"), model: t("metrics.model"), reasoningEffort: t("metrics.reasoningEffort"), protocol: t("traffic.protocol"), status: t("filters.status"), first: t("requests.firstColumn"), generationSpeed: t("requests.speedColumn"), duration: t("requests.durationColumn"), type: t("metrics.type"), request: t("metrics.requests")}}
+    numericColumnIds={["first", "generationSpeed", "duration"]} emptyText={t("traffic.empty")} pagination={pagination} />
 }
 
 function stateLabel(t: Translate, state: TrafficExchangeSummary["state"]): string {

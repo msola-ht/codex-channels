@@ -81,6 +81,7 @@ export class GenerationTimingObserver {
 
 /** Observes validated Chat chunks before conversion buffers or rewrites tool calls. */
 export class ChatGenerationTimingObserver {
+  firstContentAt: number | undefined;
   private readonly intervals: Record<Kind, Interval[]> = { reasoning: [], text: [], tool: [] };
   private active = new Map<string, Interval>();
   private invalid = false;
@@ -93,6 +94,7 @@ export class ChatGenerationTimingObserver {
     if (!delta) return;
     const keys = new Set<string>();
     const mark = (kind: Kind, key: string): void => {
+      this.firstContentAt ??= at;
       keys.add(key);
       const interval = this.active.get(key);
       if (interval) { if (at < interval[1]) this.invalid = true; interval[1] = at; }

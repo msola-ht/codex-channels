@@ -7,11 +7,11 @@ export interface GenerationTiming {
 }
 export interface RequestTimingSummary {
   requestCount: number;
-  responseSampleCount: number;
-  averageResponseTimeMs: number | null;
+  firstTokenSampleCount: number;
+  averageFirstTokenMs: number | null;
   generationTokensPerSecond: number | null;
 }
 export function validGenerationTiming(value: unknown): value is GenerationTiming;
 export function validRequestTiming(value: { responseTimeMs?: unknown; generationTiming?: unknown; totalDurationMs?: unknown }): boolean;
-export function generationSpeed(value: { outputTokens?: number | null; generationTiming?: GenerationTiming | null } | null | undefined): number | null;
+export function generationSpeed(value: { status?: string; outputTokens?: number | null; totalDurationMs?: number | null } | null | undefined): number | null;
 export function formatGenerationSpeed(value: Parameters<typeof generationSpeed>[0]): string;

@@ -867,8 +867,8 @@ function performanceFields(
   performance: TurnTaskMetricsSummary["performance"],
 ): LifecyclePresentationField[] {
   return [
-    { label: "响应", value: performance?.averageResponseTimeMs == null ? "—"
-      : formatElapsedDuration(performance.averageResponseTimeMs) },
+    { label: "首 Token", value: performance?.averageFirstTokenMs == null ? "—"
+      : formatElapsedDuration(performance.averageFirstTokenMs) },
     { label: "速度", value: performance?.generationTokensPerSecond == null ? "—"
       : `${performance.generationTokensPerSecond.toFixed(1)} /s` },
   ];

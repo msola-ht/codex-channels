@@ -5,7 +5,7 @@ import type { StoredTurnRequestMetricsSummary } from "../src/observability/index
 
 describe("mergeCompletionTiming", () => {
   it("restores turn performance and clears unavailable persisted values", () => {
-    const performance = { requestCount: 2, responseSampleCount: 2, averageResponseTimeMs: 200, generationTokensPerSecond: 250 };
+    const performance = { requestCount: 2, firstTokenSampleCount: 2, averageFirstTokenMs: 200, generationTokensPerSecond: 250 };
     expect(mergeCompletionTiming(turnSummary({ performance }), "turn-1", undefined)?.performance).toEqual(performance);
     expect(mergeCompletionTiming(turnSummary({}), "turn-1", { performance })).not.toHaveProperty("performance");
   });

@@ -8,9 +8,25 @@ import {
   isRecord,
 } from "../scripts/metrics-export-format.mjs";
 import { formatElapsedDuration } from "../src/surfaces/elapsed-duration.js";
+import { generationSpeed } from "../runtime/request-timing.mjs";
 import { formatElapsedDuration as formatWebuiDuration } from "../webui/src/lib/format.js";
 
 describe("metrics export display helpers", () => {
+  it.each([
+    [85, 4390.58, 812.587365, 19.36],
+    [19, 3495.05, 36.138991, 5.44],
+    [31, 3188.22, 3.620824, 9.72],
+  ])("does not turn compressed event intervals into model speed (%i tokens)", (outputTokens, totalDurationMs, intervalMs, expected) => {
+    const sample = { status: "completed", outputTokens, responseTimeMs: 350, totalDurationMs,
+      generationTiming: { reasoningMs: 0, textMs: 0, toolMs: intervalMs, totalMs: intervalMs } };
+    expect(generationSpeed(sample)).toBeCloseTo(expected, 2);
+  });
+  it("uses complete request usage without requiring first-token or generation intervals", () => {
+    expect(generationSpeed({ status: "completed", outputTokens: 100, totalDurationMs: 2000 })).toBe(50);
+    expect(generationSpeed({ status: "failed", outputTokens: 100, totalDurationMs: 2000 })).toBeNull();
+    expect(generationSpeed({ status: "completed", outputTokens: 100, totalDurationMs: 0 })).toBeNull();
+    expect(generationSpeed({ status: "completed", outputTokens: 100 })).toBeNull();
+  });
   it("separates interrupted requests across CLI summaries and retains raw error status in CSV", () => {
     const rendered = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", `
       import { printMetricsRun, printMetricsReport, printMetricsTurns, printMetricsThreads, printMetricsExport } from './scripts/metrics-output-renderer.mjs';
@@ -104,7 +120,7 @@ describe("metrics export display helpers", () => {
   it("exports request latency and echoed model independently of turn timing", () => {
     const result = {
       generatedAt: "2026-09-19T00:00:00Z", range: { name: "all" }, weeklyQuota: null,
-      records: [{ recordedAtMs: 100, quotaObservedAtMs: 0,
+      records: [{ recordedAtMs: 100, quotaObservedAtMs: 0, status: "completed",
         weeklyQuota: { limitId: "codex", usedPercentMillionths: 1_000_000, resetsAt: 2_000_000_000, planType: "plus" },
         firstTokenMs: 12.5, totalDurationMs: 1234.5, upstreamTtftMs: 672,
         responseTimeMs: 5, outputTokens: 100, generationTiming: { reasoningMs: 100, textMs: 100, toolMs: 300, totalMs: 500 },
@@ -147,10 +163,10 @@ describe("metrics export display helpers", () => {
     expect(headerCells).not.toContain("端到端 Token/s");
     expect(cells(markdownLines[headerIndex + 1]!)).toHaveLength(headerCells.length);
     expect(cells(markdownLines[headerIndex + 2]!)).toHaveLength(headerCells.length);
-    expect(markdown).toContain("| 响应 | 速度 |");
-    expect(markdown).toContain("5 ms | 200.0 /s | requested | echoed");
+    expect(markdown).toContain("| 首 Token | 速度 |");
+    expect(markdown).toContain("13 ms | 81.0 /s | requested | echoed");
     expect(values[headings.indexOf("responseTimeMs")]).toBe("5");
-    expect(values[headings.indexOf("generationSpeed")]).toBe("200");
+    expect(Number(values[headings.indexOf("generationSpeed")])).toBeCloseTo(81.004, 3);
     expect(markdown).toContain("openai / session-2 / #23");
   });
   it("keeps local time output stable", () => {

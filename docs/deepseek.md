@@ -142,7 +142,7 @@ Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Pr
 
 - `/status` 的 Token、有效上下文窗口、缓存和压缩次数来自当前 Thread，不代表账户余额。
 - Turn 完成摘要按同一 Turn 的全部模型请求聚合请求结果、Token、缓存命中与压缩摘要，并在官方
-  `Turn.durationMs` 可用时显示本轮总耗时；另显示已落库请求的平均响应时间和按总输出量计算的生成速度，
+  `Turn.durationMs` 可用时显示本轮总耗时；另显示已落库请求的平均首 Token 时间和请求平均输出速度，
   样本范围与缺失处理统一见[完成汇报](display.md#完成汇报)，不从转储补算。
 - 官方返回的推理 Token 计数仍与所有 Provider 一样展示；指标库不保存推理正文；显式开启的模型调用转储可能保存原始内容，详见[转储说明](user-guide.md#模型请求转储)。
 - OpenAI Fast 和周限不会显示在 DeepSeek Thread 上。

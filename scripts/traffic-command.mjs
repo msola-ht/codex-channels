@@ -178,8 +178,8 @@ function renderDetail(detail) {
   } else {
     lines.push("", `响应：${stateLabel(detail.response.state)}`
       + (detail.response.status === null ? "" : ` HTTP ${detail.response.status}`));
-    lines.push(`响应时间：${detail.response.responseTimeMs === undefined ? "未提供" : formatElapsedDuration(detail.response.responseTimeMs)}`);
-    lines.push(`生成速度：${formatGenerationSpeed(detail.response)}`);
+    lines.push(`首 Token：${detail.response.firstTokenMs === undefined ? "未提供" : formatElapsedDuration(detail.response.firstTokenMs)}`);
+    lines.push(`生成速度：${formatGenerationSpeed({ ...detail.response, status: detail.response?.state, totalDurationMs: detail.response?.durationMs })}`);
     if (detail.response.failureStage !== undefined) lines.push(`失败阶段：${detail.response.failureStage}`);
     lines.push(...headerLines(detail.response.headers), "", "终态正文：", indent(pretty(detail.response.body)));
     if (detail.response.bodyTruncated) lines.push("（终态正文展示已截断）");

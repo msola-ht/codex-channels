@@ -141,6 +141,10 @@ export class ChatCompletionsBridge {
         const events = converter.push(chunk);
         observeFirstResponse(receivedAt);
         generation.push(chunk, receivedAt);
+        if (timing.firstTokenMs === undefined && generation.firstContentAt !== undefined) {
+          timing.firstTokenMs = generation.firstContentAt - timing.submittedAt;
+          publishDiagnostics();
+        }
         if (chunk && typeof chunk === "object" && "usage" in chunk && chunk.usage && typeof chunk.usage === "object") usage = chunk.usage as Record<string, unknown>;
         await emit(events);
       }

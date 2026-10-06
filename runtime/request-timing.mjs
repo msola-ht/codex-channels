@@ -16,12 +16,12 @@ export function validRequestTiming(value) {
       && (value.generationTiming == null || value.generationTiming.totalMs <= value.totalDurationMs)));
 }
 
-/** A missing interval is never replaced with total request time. */
+/** Observed request throughput; event bursts do not measure server generation time. */
 export function generationSpeed(value) {
-  const timing = value?.generationTiming;
-  if (!validGenerationTiming(timing) || timing.totalMs <= 0
+  if (value?.status !== "completed"
+    || !duration(value.totalDurationMs) || value.totalDurationMs <= 0
     || !Number.isSafeInteger(value.outputTokens) || value.outputTokens <= 0) return null;
-  const speed = value.outputTokens / (timing.totalMs / 1000);
+  const speed = value.outputTokens / (value.totalDurationMs / 1000);
   return Number.isFinite(speed) ? speed : null;
 }
 

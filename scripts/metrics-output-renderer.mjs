@@ -218,7 +218,7 @@ export function printMetricsExport(result, format) {
       console.log("本时间范围没有请求记录。");
       return;
     }
-    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存 | 输出 | 响应 | 速度 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |");
+    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存 | 输出 | 首 Token | 速度 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |");
     console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
       console.log(
@@ -232,7 +232,7 @@ export function printMetricsExport(result, format) {
           markdownCell(record.inputTokens == null ? "未观测" : formatTokenCount(record.inputTokens)),
           markdownCell(record.cachedInputTokens == null ? "未观测" : formatTokenCount(record.cachedInputTokens)),
           markdownCell(record.outputTokens == null ? "未观测" : formatTokenCount(record.outputTokens)),
-          markdownCell(record.responseTimeMs == null ? "—" : formatElapsedDuration(record.responseTimeMs)),
+          markdownCell(record.firstTokenMs == null ? "—" : formatElapsedDuration(record.firstTokenMs)),
           markdownCell(formatGenerationSpeed(record)),
           markdownCell(record.requestModel ?? "未知"),
           markdownCell(record.responseModel ?? "未回显"),

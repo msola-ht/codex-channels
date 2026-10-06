@@ -250,8 +250,9 @@ function CallSummary({ detail }: { detail: TrafficExchangeDetail }) {
     ? `${(usage.cachedTokens / usage.inputTokens * 100).toFixed(1)}%` : "—"
   const elapsed = (value: number | undefined) => value === undefined ? "—" : formatElapsedDuration(value)
   return <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-    {isModel ? <SummaryMetric label={<TableHint hint={t("requests.firstHint")}>{t("requests.firstColumn")}</TableHint>} value={elapsed(detail.response?.responseTimeMs)} /> : null}
-    {isModel ? <SummaryMetric label={<TableHint hint={t("requests.speedHint")}>{t("requests.speedColumn")}</TableHint>} value={formatGenerationSpeed(detail.response)} /> : null}
+    {isModel ? <SummaryMetric label={<TableHint hint={t("requests.firstHint")}>{t("requests.firstColumn")}</TableHint>} value={elapsed(detail.response?.firstTokenMs)} /> : null}
+    {isModel ? <SummaryMetric label={<TableHint hint={t("requests.speedHint")}>{t("requests.speedColumn")}</TableHint>} value={formatGenerationSpeed({ ...detail.response, status: detail.response?.state, totalDurationMs: detail.response?.durationMs })} /> : null}
+    <SummaryMetric label={t("requests.durationColumn")} value={elapsed(detail.response?.durationMs)} />
     {isModel ? <>
       <SummaryMetric label={t("metrics.input")} value={usage?.inputTokens?.toLocaleString() ?? "—"} description={usage?.cachedTokens === undefined ? undefined : t("traffic.cachedTokens", { count: usage.cachedTokens.toLocaleString(), rate })} />
       <SummaryMetric label={t("metrics.output")} value={usage?.outputTokens?.toLocaleString() ?? "—"} description={usage?.reasoningTokens === undefined ? undefined : t("traffic.reasoningTokens", { count: usage.reasoningTokens.toLocaleString() })} />

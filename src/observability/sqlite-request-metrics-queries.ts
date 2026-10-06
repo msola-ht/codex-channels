@@ -571,16 +571,16 @@ export class SqliteRequestMetricsQueries {
 
   private scopedPerformance(scopeSql: string, parameters: SQLInputValue[]): RequestTimingSummary {
     return this.reader.prepare(`${scopeSql}, performance_samples AS (
-      SELECT response_time_ms, output_tokens,
-        json_extract(generation_timing, '$.totalMs') AS generation_ms,
+      SELECT first_token_ms, output_tokens,
+        total_duration_ms AS request_duration_ms,
         status = 'completed' AND output_tokens > 0
-          AND json_extract(generation_timing, '$.totalMs') > 0 AS valid_speed
+          AND total_duration_ms > 0 AS valid_speed
       FROM scoped WHERE source = 'owned' AND operation = 'response'
     )
-      SELECT COUNT(*) AS requestCount, COUNT(response_time_ms) AS responseSampleCount,
-        AVG(response_time_ms) AS averageResponseTimeMs,
+      SELECT COUNT(*) AS requestCount, COUNT(first_token_ms) AS firstTokenSampleCount,
+        AVG(first_token_ms) AS averageFirstTokenMs,
         1000.0 * SUM(output_tokens) FILTER (WHERE valid_speed)
-          / SUM(generation_ms) FILTER (WHERE valid_speed) AS generationTokensPerSecond
+          / SUM(request_duration_ms) FILTER (WHERE valid_speed) AS generationTokensPerSecond
       FROM performance_samples
     `).get(...parameters) as unknown as RequestTimingSummary;
   }

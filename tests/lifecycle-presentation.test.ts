@@ -19,21 +19,21 @@ describe("shared Surface lifecycle presentation", () => {
     const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
       type: "turn.completed", target: { surface, accountId: "a", conversationId: "c" },
       threadId: "t", turnId: "turn", status: "completed", model: "test-model", contextCompactionCount: 14,
-      timing: { performance: { requestCount: 1, responseSampleCount: 1, averageResponseTimeMs: 100, generationTokensPerSecond: 50 } },
+      timing: { performance: { requestCount: 1, firstTokenSampleCount: 1, averageFirstTokenMs: 100, generationTokensPerSecond: 50 } },
       sessionAggregate: {
         requestOutcomes: { completed: 3, interrupted: 0, failed: 0, incomplete: 0 },
         interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
         requestCount: 3, unsuccessfulRequestCount: 0, inputTokens: 1000, cachedInputTokens: 900, outputTokens: 100, reasoningOutputTokens: 0,
-        performance: { requestCount: 3, responseSampleCount: 2, averageResponseTimeMs: 200.4, generationTokensPerSecond: null },
+        performance: { requestCount: 3, firstTokenSampleCount: 2, averageFirstTokenMs: 200.4, generationTokensPerSecond: null },
         compact: { model: "test-model", hasMixedModels: false, requestCount: 2, unsuccessfulRequestCount: 0,
           inputTokens: 2000, cachedInputTokens: 0, outputTokens: 100,
           requestOutcomes: { completed: 2, interrupted: 0, failed: 0, incomplete: 0 } },
       },
     }));
     const [run, session] = rendered.split("当前会话：");
-    expect(run).toContain("响应：100 ms\n");
+    expect(run).toContain("首 Token：100 ms\n");
     expect(run).toContain("速度：50.0 /s");
-    expect(session).toContain("响应：200 ms\n");
+    expect(session).toContain("首 Token：200 ms\n");
     expect(session).toContain("速度：—");
     expect(session).toContain("上下文压缩：14 次");
     expect(session).toContain("压缩请求：2 次 · 2.1 K Token");
@@ -66,13 +66,13 @@ describe("shared Surface lifecycle presentation", () => {
   it.each(["feishu", "telegram", "weixin"])("shows weighted turn performance in %s completion", surface => {
     const event = { type: "turn.completed" as const, target: { surface, accountId: "a", conversationId: "c" },
       threadId: "t", turnId: "turn", status: "completed" as const,
-      timing: { performance: { requestCount: 3, responseSampleCount: 2, averageResponseTimeMs: 952.07, generationTokensPerSecond: null } } };
+      timing: { performance: { requestCount: 3, firstTokenSampleCount: 2, averageFirstTokenMs: 952.07, generationTokensPerSecond: null } } };
     const incomplete = renderPlainLifecyclePresentation(createTurnCompletedPresentation(event));
-    expect(incomplete).toContain("响应：952 ms\n");
+    expect(incomplete).toContain("首 Token：952 ms\n");
     expect(incomplete).toContain("速度：—");
     const complete = renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
-      timing: { performance: { requestCount: 2, responseSampleCount: 2, averageResponseTimeMs: 0, generationTokensPerSecond: 250 } } }));
-    expect(complete).toContain("响应：0 ms\n");
+      timing: { performance: { requestCount: 2, firstTokenSampleCount: 2, averageFirstTokenMs: 0, generationTokensPerSecond: 250 } } }));
+    expect(complete).toContain("首 Token：0 ms\n");
     expect(complete).toContain("速度：250.0 /s");
   });
   it.each([
@@ -101,7 +101,7 @@ describe("shared Surface lifecycle presentation", () => {
         outputTokens: 1_000, reasoningOutputTokens: 0 },
     }));
     expect(rendered).not.toContain("Token/s");
-    expect(rendered).toContain("响应：—");
+    expect(rendered).toContain("首 Token：—");
     expect(rendered).toContain("速度：—");
     expect(rendered).toContain("总耗时：17 min 51 s");
     expect(rendered).not.toContain("本次运行：");
@@ -712,7 +712,7 @@ describe("shared Surface lifecycle presentation", () => {
       "提供商：OpenAI 官方",
       "最近请求缓存命中率：75.00%",
       "本轮耗时：1 min 5 s",
-      "响应：—",
+      "首 Token：—",
       "速度：—",
       "",
       "当前会话：",

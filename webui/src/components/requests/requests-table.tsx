@@ -108,6 +108,7 @@ export function RequestsTable({
     reasoningOutput: t("requests.reasoningColumn"),
     firstContent: t("requests.firstColumn"),
     generationSpeed: t("requests.speedColumn"),
+    duration: t("requests.durationColumn"),
     traffic: t("requestDetail.title"),
   }
 
@@ -224,13 +225,13 @@ export function RequestsTable({
     },
     {
       id: "firstContent",
-      accessorFn: (record) => record.responseTimeMs,
+      accessorFn: (record) => record.firstTokenMs,
       enableSorting: false,
       header: () => <TableHint hint={t("requests.firstHint")}>{t("requests.firstColumn")}</TableHint>,
       cell: ({ row }) => (
         <span className="tabular-nums">
-          {row.original.responseTimeMs == null ? "—"
-            : formatElapsedDuration(row.original.responseTimeMs)}
+          {row.original.firstTokenMs == null ? "—"
+            : formatElapsedDuration(row.original.firstTokenMs)}
         </span>
       ),
     },
@@ -239,6 +240,11 @@ export function RequestsTable({
       enableSorting: false,
       header: () => <TableHint hint={t("requests.speedHint")}>{t("requests.speedColumn")}</TableHint>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatGenerationSpeed(row.original)}</span>,
+    },
+    {
+      id: "duration", enableSorting: false,
+      header: t("requests.durationColumn"),
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
       id: "traffic", header: t("requestDetail.title"), enableSorting: false, enableHiding: false,
@@ -327,13 +333,13 @@ export function RequestsTable({
     },
   ], [t, language, openRequest])
 
-  const order = ["time", "provider", "model", "reasoningEffort", "status", "input", "cacheHitRate", "output", "firstContent", "generationSpeed", "source", "traffic"]
+  const order = ["time", "provider", "model", "reasoningEffort", "status", "input", "cacheHitRate", "output", "firstContent", "generationSpeed", "duration", "source", "traffic"]
   const orderedColumns = [...columns].sort((a, b) => (order.includes(a.id!) ? order.indexOf(a.id!) : order.length) - (order.includes(b.id!) ? order.indexOf(b.id!) : order.length))
 
   return (
     <>
     <DataTable
-      numericColumnIds={["input", "cacheHitRate", "output", "firstContent", "generationSpeed", "http", "reasoningOutput"]}
+      numericColumnIds={["input", "cacheHitRate", "output", "firstContent", "generationSpeed", "duration", "http", "reasoningOutput"]}
       loading={loading}
       title={t("requests.tableTitle")}
       description={() => t("requests.tableDescription", { total, count: records.length, page: pageNumber })}

@@ -28,6 +28,15 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy HTTP metrics", () => {
+  it("uses raw Chat first content and never synthetic converted content as first token", () => {
+    const metric = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 0, "http", "response", null, 0);
+    observeChatTiming(metric, { submittedAt: 100, responseTimeMs: 20 });
+    observeResponseEvent(metric, "response.output_text.delta", { delta: "synthetic" }, 1000, 1000);
+    expect(metric.firstTokenMs).toBeUndefined();
+    observeChatTiming(metric, { submittedAt: 100, responseTimeMs: 20, firstTokenMs: 70 });
+    observeResponseEvent(metric, "response.function_call_arguments.done", { arguments: "{}" }, 2000, 2000);
+    expect(metric.firstTokenMs).toBe(70);
+  });
   it.each(["sse", "websocket"] as const)("measures upstream response and complete mixed generation without a dump (%s)", format => {
     const metric = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 0, format === "sse" ? "http" : "websocket", "response", null, 0);
     const http = new HttpResponseMetricsObserver(metric);
@@ -50,10 +59,10 @@ describe("ProviderProxy HTTP metrics", () => {
     send(20460, "response.completed", { response: { status: "completed", output: [], usage: { output_tokens: 813, output_tokens_details: { reasoning_tokens: 96 } } } });
     expect(metric).toMatchObject({ responseTimeMs: 393, totalDurationMs: 20460,
       generationTiming: { reasoningMs: 3563, textMs: 1527, toolMs: 13267, totalMs: 18357 } });
-    expect(generationSpeed(metric)).toBeCloseTo(44.288, 2);
+    expect(generationSpeed(metric)).toBeCloseTo(39.736, 2);
   });
 
-  it.each(["single", "missing-done", "missing-part", "hidden-reasoning", "unknown-item", "failed", "backpressure"])("does not invent a generation speed for %s", failure => {
+  it.each(["single", "missing-done", "missing-part", "hidden-reasoning", "unknown-item", "failed", "backpressure"])("keeps incomplete generation intervals separate from whole-request speed for %s", failure => {
     const metric = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 0, "websocket", "response", null, 0);
     const send = (at: number, type: string, fields: Record<string, unknown>) => observeResponseEvent(metric, type, { type, ...fields }, at, at);
     send(10, "response.output_item.added", { item: { id: "m", type: failure === "unknown-item" ? "image_generation_call" : "message" } });
@@ -64,7 +73,8 @@ describe("ProviderProxy HTTP metrics", () => {
       ...(failure === "missing-part" ? { content: [{ type: "output_text", text: "ab" }, { type: "output_text", text: "unobserved" }] } : {}) } });
     send(50, failure === "failed" ? "response.failed" : "response.completed", { response: { status: failure === "failed" ? "failed" : "completed", usage: { output_tokens: 10, output_tokens_details: { reasoning_tokens: failure === "hidden-reasoning" ? 2 : 0 } } } });
     expect(metric.generationTiming).toBeUndefined();
-    expect(generationSpeed(metric)).toBeNull();
+    if (failure === "failed") expect(generationSpeed(metric)).toBeNull();
+    else expect(generationSpeed(metric)).toBeCloseTo(metric.outputTokens! * 1000 / metric.totalDurationMs!);
   });
 
   it("does not restore a blocked proxy generation interval from Chat diagnostics", () => {

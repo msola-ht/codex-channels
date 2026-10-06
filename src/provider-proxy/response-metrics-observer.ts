@@ -101,6 +101,7 @@ export function invalidateGenerationTiming(metrics: MetricsState): void {
 
 export interface UpstreamTiming {
   submittedAt: number;
+  firstTokenMs?: number;
   responseTimeMs?: number;
   generationTiming?: GenerationTiming;
   totalDurationMs?: number;
@@ -110,6 +111,7 @@ export interface UpstreamTiming {
 export function observeChatTiming(metrics: MetricsState, timing: UpstreamTiming): void {
   convertedMetrics.add(metrics);
   requestClocks.set(metrics, timing.submittedAt);
+  if (timing.firstTokenMs !== undefined) metrics.firstTokenMs = timing.firstTokenMs;
   if (timing.responseTimeMs !== undefined) metrics.responseTimeMs = timing.responseTimeMs;
   if (timing.generationTiming !== undefined && !blockedGeneration.has(metrics)) metrics.generationTiming = timing.generationTiming;
   if (timing.totalDurationMs !== undefined) metrics.totalDurationMs = timing.totalDurationMs;
@@ -266,7 +268,7 @@ export function observeResponseEvent(
     }
   }
   if (["response.failed", "response.incomplete", "error"].includes(type)) delete metrics.generationTiming;
-  if (metrics.firstTokenMs === undefined && startsFirstToken(type, event)) {
+  if (!convertedMetrics.has(metrics) && metrics.firstTokenMs === undefined && startsFirstToken(type, event)) {
     const started = requestClocks.get(metrics);
     if (started !== undefined) metrics.firstTokenMs = receivedAtMonotonicMs - started;
   }
