@@ -48,6 +48,10 @@ Gateway 配置位于：
 ~/.codex-connect/config.toml
 ```
 
+首次运行 `codexc init` 会创建默认工作区 `~/.codex-connect/workspace`，并将其初始化为 Git 仓库，
+不自动创建提交；已有 `.git` 会保留。Git 不可用或初始化失败时明确报错，并且不写入新配置，
+修复后可重新运行。配置已存在时，重复运行保留现有配置和仓库，不为已有工作区补建仓库。
+
 `codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 `codexc config` 的“计划任务”直接选择开关；Telegram 消息格式位于“显示设置”，仅在配置 Bot 后显示。显示子项取消或选择“返回上一级”时回到显示设置；在显示设置中选择“返回”才回到 Config。日志等级统一在“高级设置 → 日志等级”选择，`debug` / `trace` 开启调试信息，`info` 恢复标准输出。
