@@ -592,6 +592,9 @@ export function inspectResponseEvent(
 
 function startsFirstToken(type: string, event: Record<string, unknown> | undefined): boolean {
   if (!event) return false;
+  if (type === "response.output_item.done") return hasResponseOutputContent({ output: [event.item] });
+  if (type === "response.content_part.done") return hasResponseOutputContent({ output: [{ type: "message", content: [event.part] }] });
+  if (type === "response.reasoning_summary_part.done") return hasResponseOutputContent({ output: [{ type: "reasoning", summary: [event.part] }] });
   const field = firstTokenEventFields[type];
   return field !== undefined && typeof event[field] === "string" && event[field].length > 0;
 }
@@ -599,18 +602,19 @@ function startsFirstToken(type: string, event: Record<string, unknown> | undefin
 /** Native JSON has no deltas: inspect only recognized output content, never status or usage. */
 export function hasResponseOutputContent(value: Record<string, unknown>): boolean {
   const nonempty = (text: unknown): boolean => typeof text === "string" && text.length > 0;
+  const hasTextPart = (parts: unknown, type: string): boolean => Array.isArray(parts) && parts.some(value => {
+    const part = asRecord(value);
+    return part?.type === type && nonempty(type === "refusal" ? part.refusal : part.text);
+  });
   return Array.isArray(value.output) && value.output.some((entry: unknown) => {
     const item = asRecord(entry);
     if (!item) return false;
     if (item.type === "function_call") return nonempty(item.arguments);
     if (item.type === "custom_tool_call") return nonempty(item.input);
-    const parts = item.type === "message" ? item.content
-      : item.type === "reasoning" ? [...(Array.isArray(item.content) ? item.content as unknown[] : []), ...(Array.isArray(item.summary) ? item.summary as unknown[] : [])] : [];
-    return Array.isArray(parts) && parts.some((value: unknown) => {
-      const part = asRecord(value);
-      return part !== undefined && (["output_text", "reasoning_text", "summary_text"].includes(String(part.type))
-        ? nonempty(part.text) : part.type === "refusal" && nonempty(part.refusal));
-    });
+    if (item.type === "message") return hasTextPart(item.content, "output_text") || hasTextPart(item.content, "refusal");
+    if (item.type === "reasoning") return hasTextPart(item.content, "reasoning_text")
+      || hasTextPart(item.content, "text") || hasTextPart(item.summary, "summary_text");
+    return false;
   });
 }
 

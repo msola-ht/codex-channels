@@ -41,6 +41,14 @@ describe("OpenAI upstream TTFT", () => {
     { type: "response.reasoning_text.delta", delta: "thinking" },
     { type: "response.refusal.delta", delta: "no" },
     { type: "response.custom_tool_call_input.delta", delta: "command" },
+    { type: "response.content_part.done", part: { type: "output_text", text: "answer" } },
+    { type: "response.content_part.done", part: { type: "refusal", refusal: "no" } },
+    { type: "response.reasoning_summary_part.done", part: { type: "summary_text", text: "thinking" } },
+    { type: "response.output_item.done", item: { type: "message", content: [{ type: "output_text", text: "answer" }] } },
+    { type: "response.output_item.done", item: { type: "function_call", arguments: "{}" } },
+    { type: "response.output_item.done", item: { type: "reasoning", summary: [{ type: "summary_text", text: "thinking" }] } },
+    { type: "response.output_item.done", item: { type: "reasoning", content: [{ type: "text", text: "thinking" }] } },
+    { type: "response.output_item.done", item: { type: "reasoning", content: [{ type: "reasoning_text", text: "thinking" }] } },
   ])("measures HTTP and WS token events with nonempty content: $type", (event) => {
     for (const transport of ["http", "websocket"] as const) {
       const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, transport, "response", null, 100);
@@ -67,6 +75,13 @@ describe("OpenAI upstream TTFT", () => {
     { type: "codex.response.metadata" },
     { type: "response.metadata", metadata: { type: "safety_buffering", retry_model: "model-b" } },
     { type: "responsesapi.websocket_timing" },
+    { type: "response.output_item.done", item: { type: "function_call", id: "call", name: "lookup", arguments: "" } },
+    { type: "response.output_item.done", item: { type: "reasoning", encrypted_content: "secret", summary: [] } },
+    { type: "response.content_part.done", part: { type: "output_text", text: "" } },
+    { type: "response.reasoning_summary_part.done", part: { type: "summary_text", text: "" } },
+    { type: "response.reasoning_summary_part.done", part: { type: "output_text", text: "wrong part type" } },
+    { type: "response.content_part.done", part: { type: "summary_text", text: "wrong part type" } },
+    { type: "response.output_item.done", item: { type: "reasoning", summary: [{ type: "output_text", text: "wrong part type" }] } },
   ])("excludes preamble, errors and out-of-band metadata: $type", (event) => {
     for (const transport of ["http", "websocket"] as const) {
       const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, transport, "response", null, 100);

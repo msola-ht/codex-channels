@@ -27,7 +27,7 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 ## 模型转发实现参考
 
 经用户授权保留 `upstream/CLIProxyAPI`，来源为 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)，
-固定提交 `d33f63f8e3d98428440ebca5a5b6a981a61ff71e`，许可证 MIT。该第三方实现不是 CLP 官方合同，
+固定正式版 `v8.0.16`，提交 `a2976eb8a303f11b4ea5177bce9f9ff752634dfc`，许可证 MIT。该第三方实现不是 CLP 官方合同，
 不导入运行时代码、不运行安装脚本，不自动更新；目录沿用 `upstream/` 忽略规则。
 重点参考 `sdk/api/handlers/openai/openai_handlers.go`、
 `internal/translator/openai/openai/chat-completions/openai_openai_request.go` 及其测试、
@@ -35,7 +35,8 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 Chat→Chat 转换保留请求字段；长度字段归一化由模型配置显式控制，不据此推断 CLP 支持全部字段。
 
 首次准备可执行 `git clone https://github.com/router-for-me/CLIProxyAPI.git upstream/CLIProxyAPI`，
-随后 `git -C upstream/CLIProxyAPI checkout d33f63f8e3d98428440ebca5a5b6a981a61ff71e`。
+随后 `git -C upstream/CLIProxyAPI checkout a2976eb8a303f11b4ea5177bce9f9ff752634dfc`。
+TTFT 参考 `internal/runtime/executor/helps/responses_ttft_helpers.go`、`chat_ttft_helpers.go` 和 `usage_helpers.go`；本次版本更新的 Chat/Responses 内容事件判定未变。CPA 的终态及首包兜底不等于本项目的严格首内容口径，不能直接作为本地支持合同。
 
 ## Cline 模型目录来源
 

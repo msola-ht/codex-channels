@@ -1,9 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { ChatToResponses, responsesToChat } from "../src/model-api/index.js";
+import { ChatToResponses, DirectChatResponse, hasChatOutputContent, responsesToChat } from "../src/model-api/index.js";
 
 const request = (input: unknown) => ({ model: "fixture", stream: true, input });
 const chunk = (delta: unknown, finish_reason: string | null = null) => ({ choices: [{ index: 0, delta, finish_reason }] });
 const detail = (text: string) => ({ type: "reasoning.text", text, format: "unknown", index: 0 });
+
+it.each([
+  [{ role: "assistant", content: "" }, false],
+  [{ tool_calls: [{ index: 0, id: "call_1", type: "function" }] }, false],
+  [{ tool_calls: [{ index: 0, function: { name: "", arguments: "" } }] }, false],
+  [{ tool_calls: [{ index: 0, function: { name: "lookup" } }] }, true],
+  [{ tool_calls: [{ index: 0, function: { arguments: "{}" } }] }, true],
+  [{ reasoning: "thinking" }, true],
+  [{ reasoning_content: "thinking" }, true],
+  [{ reasoning_details: [detail("thinking")] }, true],
+  [{ reasoning_details: [{ ...detail(""), signature: "signature" }] }, false],
+  [{ reasoning_details: [{ ...detail("text"), signature: "signature" }] }, false],
+  [{ refusal: "no" }, true],
+  [{ content: "answer" }, true],
+])("observes only substantive Chat content: %j", (message, expected) => {
+  expect(hasChatOutputContent(message)).toBe(expected);
+  for (const stream of [true, false]) {
+    const observer = new DirectChatResponse();
+    observer.push({ choices: [{ index: 0, ...(stream ? { delta: message } : { message }), finish_reason: stream ? null : "stop" }] }, stream);
+    expect(observer.hasContent).toBe(expected);
+  }
+});
+
+it("does not invent Chat content at finish or from usage", () => {
+  const observer = new DirectChatResponse();
+  observer.push({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { completion_tokens: 10 } }, true);
+  observer.finish();
+  expect(observer.hasContent).toBe(false);
+});
 
 it.each([true, false])("converts plaintext reasoning details once (mirrored: %s)", mirrored => {
   const converter = new ChatToResponses("r", "fixture");

@@ -1,4 +1,5 @@
 import type { GenerationTiming } from "../../runtime/request-timing.mjs";
+import { hasChatOutputContent } from "../model-api/index.js";
 
 type Kind = "reasoning" | "text" | "tool";
 type Interval = [number, number];
@@ -92,9 +93,9 @@ export class ChatGenerationTimingObserver {
     if (!Array.isArray(choices) || choices.length > 1) { this.invalid = true; return; }
     const delta = object(object(choices[0])?.delta);
     if (!delta) return;
+    if (hasChatOutputContent(delta)) this.firstContentAt ??= at;
     const keys = new Set<string>();
     const mark = (kind: Kind, key: string): void => {
-      this.firstContentAt ??= at;
       keys.add(key);
       const interval = this.active.get(key);
       if (interval) { if (at < interval[1]) this.invalid = true; interval[1] = at; }

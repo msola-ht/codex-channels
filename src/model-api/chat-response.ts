@@ -96,20 +96,19 @@ export class DirectChatResponse {
         if (!usageTrailer) fail();
         return;
       }
-      for (const key of ["content", "reasoning", "reasoning_content"] as const) {
+      for (const key of ["content", "reasoning", "reasoning_content", "refusal"] as const) {
         if (message[key] != null) {
           const text = string(message[key]);
           this.contentBytes += Buffer.byteLength(text);
           if (this.contentBytes > 32 * 1024 * 1024) fail();
-          if (text.length) this.contentObserved = true;
         }
       }
       part = "tools";
       if (message.tool_calls !== undefined) {
         if (!Array.isArray(message.tool_calls) || message.tool_calls.length > 64) fail();
         for (const [position, entry] of message.tool_calls.entries()) this.readCall(entry, stream ? undefined : position);
-        if (message.tool_calls.length) this.contentObserved = true;
       }
+      this.contentObserved ||= hasChatOutputContent(message);
       part = "finish";
       if (choice.finish_reason != null) {
         if (typeof choice.finish_reason !== "string" || !["stop", "tool_calls", "length", "content_filter", "insufficient_system_resource", "aborted"].includes(choice.finish_reason)) fail();
@@ -178,6 +177,26 @@ export class DirectChatResponse {
       this.usage[key] = Number(count);
     }
   }
+}
+
+/** Content only: tool IDs, role, signatures and terminal metadata are not output. */
+export function hasChatOutputContent(value: unknown): boolean {
+  const record = (value: unknown): Record<string, unknown> | undefined =>
+    value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  const message = record(value);
+  if (!message) return false;
+  const nonempty = (value: unknown): boolean => typeof value === "string" && value.length > 0;
+  if (["content", "reasoning", "reasoning_content", "refusal"].some(key => nonempty(message[key]))) return true;
+  if (Array.isArray(message.reasoning_details) && message.reasoning_details.some(value => {
+    const detail = record(value);
+    return detail?.type === "reasoning.text" && detail.signature == null && detail.data == null && nonempty(detail.text);
+  })) return true;
+  return Array.isArray(message.tool_calls) && message.tool_calls.some(value => {
+    const call = record(value);
+    if (call?.type !== undefined && call.type !== "function") return false;
+    const fn = record(call?.function);
+    return nonempty(fn?.name) || nonempty(fn?.arguments);
+  });
 }
 
 function boundedString(value: unknown, max: number): string {
