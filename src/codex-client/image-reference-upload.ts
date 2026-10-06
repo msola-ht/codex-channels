@@ -44,7 +44,7 @@ export class ImageReferenceUpload {
     this.pending.set(threadId, pending);
     let dispatched = false;
     const dispatch = (prepared: UserInput[]) => {
-      signal.throwIfAborted();
+      pending.signal.throwIfAborted();
       this.pending.delete(threadId);
       dispatched = true;
       // Once dispatched, a write must receive its result; aborting the local RPC
@@ -58,7 +58,7 @@ export class ImageReferenceUpload {
       const modelRoute = await this.modelRoute(thread.thread.cwd, pending);
       if (modelRoute === null) return await dispatch(input);
       stage(pending, "account-check");
-      const account = await this.account(signal);
+      const account = await this.account(pending.signal);
       if (account.account?.type === "apiKey" || !account.requiresOpenaiAuth) {
         return await dispatch(input);
       }
@@ -68,10 +68,10 @@ export class ImageReferenceUpload {
         throw failure("当前账户要求区域路由约束，模型代理尚未验证相同约束，已停止图片上传。");
       }
       stage(pending, "auth-read");
-      const token = await this.token(signal);
+      const token = await this.token(pending.signal);
       pending.identity = { route, token };
       stage(pending, "account-check");
-      await this.assertAccount(route, token, signal);
+      await this.assertAccount(route, token, pending.signal);
       const headers: Record<string, string> = {
         authorization: `Bearer ${token}`,
         "chatgpt-account-id": route.chatgptAccountId,
@@ -98,17 +98,17 @@ export class ImageReferenceUpload {
         converted.push({ type: "image", fileId, ...(item.detail ? { detail: item.detail } : {}) });
       }
       stage(pending, "account-recheck");
-      await this.assertAccount(route, token, signal);
+      await this.assertAccount(route, token, pending.signal);
       const currentModelRoute = await this.modelRoute(thread.thread.cwd, pending);
       if (currentModelRoute?.endpoint !== modelRoute.endpoint || currentModelRoute.origin !== route.backendOrigin) {
         throw failure("模型后端已变化，请重新发送图片。");
       }
       await pending.validation;
-      signal.throwIfAborted();
+      pending.signal.throwIfAborted();
       return await dispatch(converted);
     } catch (error) {
       if (dispatched) throw error;
-      const reason: unknown = signal.aborted ? signal.reason : error;
+      const reason: unknown = pending.signal.aborted ? pending.signal.reason : error;
       const classified = classifyFailure(reason, pending.stage);
       throw new UserFacingError("image.reference.failed", classified.message, {
         ...classified.details,
@@ -116,9 +116,11 @@ export class ImageReferenceUpload {
         elapsedMs: String(Math.max(0, Math.round(performance.now() - pending.startedAt))),
         stageElapsedMs: classified.details.stageElapsedMs ?? String(Math.max(0, Math.round(performance.now() - pending.stageStartedAt))),
         diagnosticId: pending.diagnosticId,
+        ...pending.transferDiagnostics,
       });
     } finally {
       if (this.pending.get(threadId) === pending) this.pending.delete(threadId);
+      controller.abort();
     }
   }
 
@@ -130,10 +132,12 @@ export class ImageReferenceUpload {
     if (pending.validation) return;
     pending.validation = (async () => {
       const startedAt = performance.now();
+      // Notifications may span upload stages; never inherit an expiring phase clock.
+      const signal = AbortSignal.any([pending.controller.signal, AbortSignal.timeout(60_000)]);
       try {
-        while (pending.dirty && !pending.signal.aborted) {
+        while (pending.dirty && !signal.aborted) {
           pending.dirty = false;
-          await this.assertAccount(pending.identity!.route, pending.identity!.token, pending.signal);
+          await this.assertAccount(pending.identity!.route, pending.identity!.token, signal);
         }
       } catch (error) {
         const classified = classifyFailure(error, "account-recheck");
@@ -147,10 +151,9 @@ export class ImageReferenceUpload {
   }
 
   private async modelRoute(cwd: string, pending: PendingUpload): Promise<{ endpoint: string; origin: string } | null> {
-    const { signal } = pending;
     stage(pending, "model-config");
     const response = await this.rpc.request<ConfigReadResponse>({ method: "config/read", params: { cwd, includeLayers: false } },
-      { retryOverload: true, signal });
+      { retryOverload: true, signal: pending.signal });
     const base = response.config.openai_base_url;
     if (typeof base !== "string") throw failure("无法确认当前 App Server 的模型代理地址。");
     const endpoint = new URL(base);
@@ -160,7 +163,7 @@ export class ImageReferenceUpload {
       || endpoint.pathname !== "/" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) return null;
     stage(pending, "model-route");
     const result = await this.localFetch(new URL("/_codexc/image-upload-route", endpoint), {
-      method: "GET", redirect: "error", signal,
+      method: "GET", redirect: "error", signal: pending.signal,
     });
     const inspected = await this.readJson(result);
     if (inspected.supported === false && inspected.backendOrigin === null) return null;
@@ -193,12 +196,12 @@ export class ImageReferenceUpload {
   }
 
   private async upload(origin: string, headers: Record<string, string>, bytes: Buffer, extension: string, pending: PendingUpload): Promise<string> {
-    const { signal } = pending;
     stage(pending, "file-create");
+    delete pending.transferDiagnostics;
     const base = `${origin}/backend-api/files`;
     const created = await this.json(base, headers, {
       file_name: `image.${extension}`, file_size: bytes.length, use_case: "codex",
-    }, signal);
+    }, pending.signal);
     if (typeof created.file_id !== "string" || !/^[A-Za-z0-9_-]{1,256}$/.test(created.file_id)
       || typeof created.upload_url !== "string") throw failure("图片上传服务返回无效编号或地址。", "invalid-response");
     let uploadUrl: URL;
@@ -211,22 +214,50 @@ export class ImageReferenceUpload {
       throw failure("图片上传服务返回不安全地址。", "invalid-response");
     }
     stage(pending, "file-transfer");
-    const put = await this.fetchImpl(uploadUrl, {
-      method: "PUT", redirect: "error", signal,
-      headers: { "x-ms-blob-type": "BlockBlob", "x-ms-client-request-id": randomUUID(),
-        "content-length": String(bytes.length) },
-      body: new Uint8Array(bytes),
-    });
-    await put.body?.cancel().catch(() => undefined);
-    if (!put.ok) throw httpFailure(put.status);
+    await this.transfer(uploadUrl, bytes, pending);
     stage(pending, "file-finalize");
     const deadline = Date.now() + 30_000;
     for (;;) {
-      const finalized = await this.json(`${base}/${created.file_id}/uploaded`, headers, {}, signal);
+      const finalized = await this.json(`${base}/${created.file_id}/uploaded`, headers, {}, pending.signal);
       if (finalized.status === "success" && typeof finalized.download_url === "string") return created.file_id;
       if (finalized.status !== "retry") throw failure("图片上传完成确认响应无效。", "invalid-response");
       if (Date.now() >= deadline) throw failure("图片上传尚未完成，请稍后重新发送。");
-      await delay(250, undefined, { signal });
+      await delay(250, undefined, { signal: pending.signal });
+    }
+  }
+
+  private async transfer(url: URL, bytes: Buffer, pending: PendingUpload): Promise<void> {
+    const { signal } = pending;
+    const deadline = performance.now() + 300_000;
+    // Replay only the same blob PUT, never file creation or Turn submission.
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      signal.throwIfAborted();
+      const clientRequestId = randomUUID();
+      pending.transferDiagnostics = { host: url.hostname, attempt: String(attempt), clientRequestId };
+      let retryAfter: number | undefined;
+      let retryable: boolean;
+      let error: unknown;
+      try {
+        const response = await this.fetchImpl(url, {
+          method: "PUT", redirect: "error", signal,
+          headers: { "x-ms-blob-type": "BlockBlob", "x-ms-client-request-id": clientRequestId,
+            "content-length": String(bytes.length) },
+          body: new Uint8Array(bytes),
+        });
+        await response.body?.cancel().catch(() => undefined);
+        if (response.ok) return;
+        error = httpFailure(response.status);
+        retryable = [502, 503, 504].includes(response.status);
+        retryAfter = uploadRetryAfter(response.headers);
+      } catch (caught) {
+        error = caught;
+        const code = safeNetworkCode(caught);
+        retryable = code !== undefined && !["CERT_HAS_EXPIRED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE"].includes(code);
+      }
+      signal.throwIfAborted();
+      const wait = retryAfter ?? Math.floor(125 * 2 ** (attempt - 1) * (0.9 + Math.random() * 0.2));
+      if (!retryable || attempt === 5 || wait >= deadline - performance.now()) throw error;
+      await delay(wait, undefined, { signal });
     }
   }
 
@@ -272,6 +303,7 @@ interface PendingUpload {
   diagnosticId: string;
   dirty: boolean;
   validation?: Promise<void>;
+  transferDiagnostics?: { host: string; attempt: string; clientRequestId: string };
 }
 
 type Routing = NonNullable<GetAccountResponse["workspaceRouting"]>;
@@ -300,8 +332,21 @@ const stageLabels = {
 type UploadStage = keyof typeof stageLabels;
 
 function stage(pending: PendingUpload, value: UploadStage): void {
+  pending.signal.throwIfAborted();
   pending.stage = value;
   pending.stageStartedAt = performance.now();
+  pending.signal = AbortSignal.any([pending.controller.signal,
+    AbortSignal.timeout(value === "file-transfer" ? 300_000 : value === "file-finalize" ? 30_000 : 60_000)]);
+}
+
+function uploadRetryAfter(headers: Headers): number | undefined {
+  const milliseconds = headers.get("x-ms-retry-after-ms");
+  if (milliseconds !== null && /^\d+$/.test(milliseconds)) return Number(milliseconds);
+  const value = headers.get("retry-after");
+  if (value === null) return undefined;
+  if (/^\d+$/.test(value)) return Number(value) * 1000;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
 }
 
 function httpFailure(status: number): UserFacingError {
@@ -324,7 +369,7 @@ function classifyFailure(error: unknown, currentStage: UploadStage): UserFacingE
     return new UserFacingError("image.reference.failed", `${label}失败（HTTP ${status}）；${hint}。`, error.details);
   }
   if (error instanceof Error && error.name === "TimeoutError") {
-    return failure("图片上传已超时，请稍后重新发送。", "timeout");
+    return failure(`${label}已超时，请稍后重新发送。`, "timeout");
   }
   if (error instanceof JsonRpcError) {
     return new UserFacingError("image.reference.failed", `${label}失败：App Server 请求失败，请检查服务状态。`,
@@ -334,8 +379,12 @@ function classifyFailure(error: unknown, currentStage: UploadStage): UserFacingE
   const networkCode = safeNetworkCode(error);
   if (networkCode) {
     const timeout = ["UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "ETIMEDOUT"].includes(networkCode);
+    const description = networkCode === "UND_ERR_CONNECT_TIMEOUT" ? "建立连接超时"
+      : networkCode === "UND_ERR_HEADERS_TIMEOUT" ? "等待响应头超时"
+      : networkCode === "UND_ERR_BODY_TIMEOUT" ? "读取响应内容超时"
+      : timeout ? "网络请求超时" : "网络连接失败";
     return new UserFacingError("image.reference.failed",
-      `${label}${timeout ? "连接或响应超时" : "网络连接失败"}；${currentStage === "model-route"
+      `${label}${description}；${currentStage === "model-route"
         ? "请检查 App Server 的本地模型代理" : "请检查网络或代理后重试"}。`,
       { reason: timeout ? "network-timeout" : "network", networkCode });
   }

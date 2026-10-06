@@ -27,6 +27,7 @@ class ImageTransport extends FakeTransport {
     this.emitMessage(JSON.stringify({ id, error: { code: -32600, message: "fixture submission rejection" } }));
   }
   accountChanged(): void { this.emitMessage(JSON.stringify({ method: "account/updated", params: {} })); }
+  respondAccount(id: number): void { this.emitMessage(JSON.stringify({ id, result: this.accountResult })); }
 }
 const clients: CodexAppServerClient[] = [];
 afterEach(async () => { await Promise.all(clients.splice(0).map(client => client.close())); vi.restoreAllMocks(); });
@@ -48,6 +49,142 @@ async function fixture() {
 }
 
 describe("official image reference upload", () => {
+  it.each([502, 503, 504, "UND_ERR_CONNECT_TIMEOUT"])("replays only identical blob bytes after %s", async failure => {
+    const { client, transport, fetchImpl, requests } = await fixture();
+    const original = fetchImpl.getMockImplementation()!;
+    const puts: RequestInit[] = [];
+    fetchImpl.mockImplementation(async (url, init) => {
+      if (init?.method === "PUT") {
+        puts.push(init);
+        if (puts.length === 1) {
+          if (typeof failure === "string") throw new TypeError("secret", { cause: { code: failure } });
+          return new Response(null, { status: failure, headers: { "x-ms-retry-after-ms": "0", "retry-after": "301" } });
+        }
+      }
+      return original(url, init);
+    });
+    await client.startTurn("thread-1", input, "message", "/tmp");
+    expect(puts).toHaveLength(2);
+    expect(puts[0]!.body).toEqual(puts[1]!.body);
+    expect(puts[0]!.signal).toBe(puts[1]!.signal);
+    expect(new Headers(puts[0]!.headers).get("x-ms-client-request-id"))
+      .not.toBe(new Headers(puts[1]!.headers).get("x-ms-client-request-id"));
+    expect(puts.every(put => !new Headers(put.headers).has("authorization"))).toBe(true);
+    expect(requests.filter(request => request.init.method === "POST")).toHaveLength(2);
+    expect(transport.sent.filter(request => request.method === "turn/start")).toHaveLength(1);
+  });
+
+  it.each([403, 409, 429, 500, "CERT_HAS_EXPIRED"])("does not retry permanent blob failure %s", async failure => {
+    const { client, fetchImpl } = await fixture();
+    fetchImpl.mockResolvedValueOnce(Response.json({ file_id: "file_fixture", upload_url: "https://blob.example.test/image?signature=secret" }));
+    if (typeof failure === "number") fetchImpl.mockResolvedValueOnce(new Response(null, { status: failure }));
+    else fetchImpl.mockRejectedValueOnce(new TypeError("secret", { cause: { code: failure } }));
+    await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({ code: "image.reference.failed" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["x-ms-retry-after-ms", "retry-after", "http-date"])("does not shorten server %s beyond the upload budget", async header => {
+    const { client, fetchImpl } = await fixture();
+    fetchImpl.mockResolvedValueOnce(Response.json({ file_id: "file_fixture", upload_url: "https://blob.example.test/image" }))
+      .mockResolvedValueOnce(new Response(null, { status: 503, headers: {
+        [header === "http-date" ? "retry-after" : header]: header === "http-date" ? new Date(Date.now() + 310_000).toUTCString()
+          : header === "retry-after" ? "301" : "301000",
+      } }));
+    await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({ details: { httpStatus: "503", attempt: "1" } });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses a shared five-minute blob budget and stops without finalize when it expires", async () => {
+    const deadline = new AbortController();
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => ms === 300_000 ? deadline.signal : timeout(ms));
+    const { client, fetchImpl, transport } = await fixture();
+    fetchImpl.mockResolvedValueOnce(Response.json({ file_id: "file_fixture", upload_url: "https://blob.example.test/image" }))
+      .mockImplementationOnce(async () => { deadline.abort(new DOMException("secret", "TimeoutError")); throw new Error("secret"); });
+    await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({
+      message: "传输图片已超时，请稍后重新发送。", details: { reason: "timeout", attempt: "1" },
+    });
+    expect(spy).toHaveBeenCalledWith(300_000);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(transport.sent.some(request => request.method === "turn/start")).toBe(false);
+  });
+
+  it.each(["stop", "close", "account-change"])("cancels during blob retry backoff on %s without replay or finalize", async kind => {
+    const { client, fetchImpl, transport } = await fixture();
+    fetchImpl.mockResolvedValueOnce(Response.json({ file_id: "file_fixture", upload_url: "https://blob.example.test/image" }))
+      .mockImplementationOnce(async () => {
+        setTimeout(() => {
+          if (kind === "stop") client.cancelPendingInput("thread-1");
+          else if (kind === "close") void client.close();
+          else { transport.token = "changed-token"; transport.accountChanged(); }
+        }, 10);
+        return new Response(null, { status: 503, headers: { "retry-after": "10" } });
+      });
+    await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({
+      details: { reason: kind === "stop" ? "cancelled" : kind === "close" ? "disconnected" : "validation", attempt: "1" },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let the completed preparation deadline cancel blob transfer", async () => {
+    const preparationDeadlines: AbortController[] = [];
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => {
+      if (ms !== 60_000) return timeout(ms);
+      const controller = new AbortController(); preparationDeadlines.push(controller); return controller.signal;
+    });
+    const { client, fetchImpl } = await fixture();
+    const original = fetchImpl.getMockImplementation()!;
+    fetchImpl.mockImplementation(async (url, init) => {
+      if (init?.method === "PUT") {
+        preparationDeadlines.forEach(controller => controller.abort(new DOMException("expired", "TimeoutError")));
+        expect(init.signal!.aborted).toBe(false);
+      }
+      return original(url, init);
+    });
+    await client.startTurn("thread-1", input, "message", "/tmp");
+  });
+
+  it("exhausts five transient HTTP attempts without creating another file or finalizing", async () => {
+    const { client, fetchImpl, transport } = await fixture();
+    fetchImpl.mockResolvedValueOnce(Response.json({ file_id: "file_fixture", upload_url: "https://blob.example.test/image" }))
+      .mockResolvedValue(new Response(null, { status: 502, headers: { "retry-after": "0" } }));
+    await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({ details: { attempt: "5", httpStatus: "502" } });
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
+    expect(transport.sent.some(request => request.method === "turn/start")).toBe(false);
+  });
+
+  it("does not cancel an account recheck when an already completed transfer deadline expires", async () => {
+    const transferDeadline = new AbortController();
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => ms === 300_000 ? transferDeadline.signal : timeout(ms));
+    const { client, fetchImpl, transport } = await fixture();
+    const send = transport.send.bind(transport);
+    let holdAccount = false;
+    let heldId: number | undefined;
+    vi.spyOn(transport, "send").mockImplementation(async message => {
+      const request = JSON.parse(message) as { id: number; method: string };
+      if (holdAccount && request.method === "account/read") {
+        holdAccount = false; heldId = request.id; return;
+      }
+      await send(message);
+    });
+    const original = fetchImpl.getMockImplementation()!;
+    fetchImpl.mockImplementation(async (url, init) => {
+      if (init?.method === "PUT") {
+        holdAccount = true; transport.accountChanged();
+        await vi.waitFor(() => expect(heldId).toBeDefined());
+      }
+      if (String(url).endsWith("/uploaded")) {
+        transferDeadline.abort(new DOMException("expired", "TimeoutError"));
+        transport.respondAccount(heldId!);
+      }
+      return original(url, init);
+    });
+    await client.startTurn("thread-1", input, "message", "/tmp");
+    expect(transport.sent.filter(request => request.method === "turn/start")).toHaveLength(1);
+  });
+
   it.each(["start", "steer"])("uploads using current routing and submits a fileId through %s", async mode => {
     const { client, transport, requests } = await fixture();
     if (mode === "start") await client.startTurn("thread-1", input, "message", "/tmp");
@@ -227,7 +364,18 @@ describe("official image reference upload", () => {
 
 
 describe("image failure diagnostics", () => {
-  it.each(["model-route", "file-create", "file-transfer", "file-finalize"])("retains %s network failures without secrets or retries", async stage => {
+  it.each([
+    ["UND_ERR_CONNECT_TIMEOUT", "建立连接超时"],
+    ["UND_ERR_HEADERS_TIMEOUT", "等待响应头超时"],
+    ["UND_ERR_BODY_TIMEOUT", "读取响应内容超时"],
+  ])("distinguishes %s in the user-facing message", async (code, text) => {
+    const { client, fetchImpl } = await fixture();
+    fetchImpl.mockRejectedValueOnce(new TypeError("secret", { cause: { code } }));
+    await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({
+      message: `创建图片文件${text}；请检查网络或代理后重试。`,
+    });
+  });
+  it.each(["model-route", "file-create", "file-transfer", "file-finalize"])("retains %s network failures without secrets and retries only blob transfer", async stage => {
     const { client, transport, fetchImpl, localFetch } = await fixture();
     const failure = new TypeError("https://blob.example.test/?signature=secret", {
       cause: Object.assign(new Error("Bearer fixture-access-token"), { code: "UND_ERR_CONNECT_TIMEOUT" }),
@@ -248,7 +396,11 @@ describe("image failure diagnostics", () => {
     expect(surfaceErrorMetadata(error)).toMatchObject({ imageUploadStage: stage, imageUploadNetworkCode: "UND_ERR_CONNECT_TIMEOUT" });
     expect((error as Error).cause).toBeUndefined();
     expect(JSON.stringify(error)).not.toMatch(/secret|fixture-access-token/);
-    expect(fetchImpl).toHaveBeenCalledTimes(["model-route", "file-create", "file-transfer", "file-finalize"].indexOf(stage));
+    expect(fetchImpl).toHaveBeenCalledTimes(stage === "file-transfer" ? 6 : ["model-route", "file-create", "file-transfer", "file-finalize"].indexOf(stage));
+    if (stage === "file-transfer") expect(surfaceErrorMetadata(error)).toMatchObject({
+      imageUploadHost: "blob.example.test", imageUploadAttempt: "5",
+      imageUploadClientRequestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    });
     expect(transport.sent.some(request => request.method === "turn/start")).toBe(false);
   });
 
@@ -290,7 +442,7 @@ describe("image failure diagnostics", () => {
       throw new Error("secret");
     });
     await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({
-      message: "图片上传已超时，请稍后重新发送。", details: { reason: "timeout" },
+      message: "创建图片文件已超时，请稍后重新发送。", details: { reason: "timeout" },
     });
   });
 

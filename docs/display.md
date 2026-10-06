@@ -614,6 +614,7 @@ codexc service restart gateway
 `imageUploadElapsedMs` 和 `imageUploadStageElapsedMs`，与当前渠道的输入标识关联。
 阶段区分会话读取、模型配置、本地模型代理、账户与凭据校验、图片校验、文件创建、字节传输和完成确认；
 有对应证据时记录白名单内的 `imageUploadNetworkCode`、`imageUploadHttpStatus` 或 `imageUploadRpcCode`。
+字节传输另记录 `imageUploadHost`、`imageUploadAttempt` 和 `imageUploadClientRequestId`，只保留目标主机、尝试次数和本地请求标识，不保留 URL 路径或签名查询串。连接、响应头和响应体超时分别提示；目标主机不证明请求实际使用了哪条代理路径。
 这些字段不包含原始异常、凭据、签名 URL 或响应正文。微信在发送用户错误提示前也记录图片失败，
 不因错误已被处理而丢失诊断。上传耗时不包含后续 Turn 提交等待。
 
