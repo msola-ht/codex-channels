@@ -498,9 +498,9 @@
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
   控制脚本实现 linger、Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 使用当前用户计划任务及受管宿主，并校验私有定义与就绪状态。
-- `service-command.mjs`：公开 `relay` 目标映射到既有内部 `model-relay` 服务标识，拒绝旧公开目标名称；实现公开 `service` 子命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
+- `service-command.mjs` / `service-command.d.mts`：公开 `relay` 目标映射到既有内部 `model-relay` 服务标识，拒绝旧公开目标名称；实现公开 `service` 子命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
   服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
-  检查。CLI 只保留帮助展示和命令分派。
+  检查；顶层 `restart` 统一预检、停止与逐项启动就绪，默认包含已安装 WebUI，失败报告剩余步骤并中止。CLI 只保留帮助展示和命令分派。
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
   稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用；Codex 用户偏好使用
   `next-thread / codex`、`next-tui / codex` 和 `next-thread-and-tui / codex` 分别表示新 Thread、
@@ -511,9 +511,9 @@
   Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc service install`
   重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示；同时重启 App Server、Gateway 和 WebUI 的指令先停止 Gateway，再重启 App Server、启动 Gateway，最后重启 WebUI。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载 App Server、Gateway、WebUI 与可选 Relay 的 launchd 服务；启停、
-  重启、状态和日志支持 `gateway`、`app-server`、`webui`、`relay`、`all` 目标，
+  状态和日志支持 `gateway`、`app-server`、`webui`、`model-relay`、`all` 内部目标，
   WebUI 独立不并入 `all`，
-  普通启动不强制终止已运行的进程，日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
+  普通启动不强制终止已运行的进程，重启由服务命令层组合单目标停止与启动；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
@@ -528,7 +528,7 @@
   unit 状态前失败并显示管理员处理命令；与 launchd 使用相同的目标、服务角色和默认值，WebUI
   独立不并入 `all`；停止不存在的 Unit 与 launchd 一样按已停止处理，用户数据始终保留。
 - `windows-service-control.mjs` / `windows-service-control.d.mts`：读取用户级 Windows 服务定义，
-  通过计划任务控制脚本执行 App Server、Gateway 和 WebUI 的安装、启停、重启、状态、日志
+  通过计划任务控制脚本执行 App Server、Gateway、WebUI 与 Relay 的安装、启停、状态、日志
   与卸载；
   核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
 - `windows-service-host.mjs` / `windows-service-host.d.mts`：计划任务启动的 Windows 服务宿主，按 JSON 定义启动并监管单个
@@ -560,6 +560,6 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 - `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 与队列 SSE 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
 - `webui-queue-events.mjs`：账户快照、请求指标、Relay、渠道投递与管理任务共用的鉴权后 SSE 转接、订阅总量限制及 WebUI 关闭清理；通知不携带指标、队列或任务内容。
 - `webui-management-delivery-route.mjs`：渠道投递箱鉴权 SSE 变化通知、只读分页查询、按需限定内容预览及单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，在线操作通过投递私有 IPC 交给 Gateway 单写者，确认未发送命令且 Gateway 不可连接时才使用 Journal 维护模式独占锁，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览及只读批量摘要认证解密后仅返回显式展示字段，摘要批次消耗读取配额，批量操作在同一事务中复核全部修订。
-- `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
+- `service-selection.mjs` / `service-selection.d.mts`：统一三平台服务定义路径，将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
 
 指标库只接受当前 Schema。查询与导出支持 `--source owned|relay`、`--caller ID`。

@@ -50,6 +50,7 @@ import {
   cleanupUsage,
   serviceCommandActions,
   serviceCommandUsage,
+  restartCommandUsage,
 } from "../scripts/cli-command-usage.mjs";
 import {
   metricsCommandUsage,
@@ -99,6 +100,7 @@ const helpText = {
 
 服务与维护：
   start                        前台启动核心服务
+  restart                      重启全部后台服务（含 WebUI 与已启用 Relay）
   service                      管理后台服务
   update                       更新程序与配套 Codex CLI
   uninstall                    卸载受管源码与全局命令并保留用户数据
@@ -107,6 +109,7 @@ const helpText = {
   version, -v, --version       显示版本
 
 运行 codexc <命令> -h 查看详细用法。`,
+  restart: restartCommandUsage,
   init: `用法：codexc init
 
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
@@ -139,21 +142,20 @@ sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profi
 
   install                      生成全部后台服务定义，并启动 App Server 与 Gateway
   uninstall                    卸载全部后台服务并保留用户数据
-  start [目标]                 启动 gateway、app-server、webui 或 all
-  stop [目标]                  停止 gateway、app-server、webui 或 all
+  start [目标]                 启动 gateway、app-server、webui、relay 或 all
+  stop [目标]                  停止 gateway、app-server、webui、relay 或 all
   reload                       通知 Gateway 重新读取配置
-  restart [目标]               重启 gateway、app-server、webui 或 all
-  status [目标] [--json]       查看 gateway、app-server、webui 或 all
+  status [目标] [--json]       查看 gateway、app-server、webui、relay 或 all
   logs [目标] [-f] [-n 行数]   查看后台日志
 
-目标默认值：start/stop/status 为 all，restart/logs 为 gateway。
-all 只包含 App Server 与 Gateway；WebUI 需单独指定。`,
+目标默认值：start/stop/status 为 all，logs 为 gateway。
+此处 all 包含 App Server、Gateway 与按安装及启用状态选取的 Relay，WebUI 单独管理。
+重启请用 codexc restart [目标]，默认重启全部后台服务，包含已安装的 WebUI。`,
   "service.install": serviceCommandUsage.install,
   "service.uninstall": serviceCommandUsage.uninstall,
   "service.start": serviceCommandUsage.start,
   "service.stop": serviceCommandUsage.stop,
   "service.reload": serviceCommandUsage.reload,
-  "service.restart": serviceCommandUsage.restart,
   "service.status": serviceCommandUsage.status,
   "service.logs": serviceCommandUsage.logs,
   config: `用法：codexc config [--json]
@@ -389,6 +391,10 @@ async function executeCommand(command, args) {
     case "service":
       await handleServiceCommand(args);
       break;
+    case "restart":
+      if (showRequestedHelp(args, "restart")) break;
+      await (await import("../scripts/service-command.mjs")).runRestartCommand(args);
+      break;
     case "config":
       if (showRequestedHelp(args, "config")) {
         break;
@@ -541,8 +547,7 @@ async function handleServiceCommand(args) {
     if (!process.stdin.isTTY || !process.stdout.isTTY) console.log(helpText.service);
     else {
       const { runServiceMenu } = await import("../scripts/cli-menu.mjs");
-      const { runServiceCommand } = await import("../scripts/service-command.mjs");
-      await runServiceMenu({ runCommand: runServiceCommand });
+      await runServiceMenu({ runCommand: ([command, ...rest]) => executeCommand(command, rest) });
     }
     return;
   }

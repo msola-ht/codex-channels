@@ -59,9 +59,10 @@
   发送回对应会话；见 `docs/channel-image.md`。
 - `relay`：管理独立模型 API 转发的监听、调用方、Key 和运行状态；边界与操作见[模型 API 转发](../docs/user-guide.md#可选模型-api-转发)。
 - `webui`：启动本机指标查询与受控设置界面；监听参数在读取用户配置前完成校验。
+- `restart [目标]`：统一重启入口，默认全部后台服务。服务管理层预检后依次停止所选服务，再逐项启动并确认就绪；覆盖已安装 WebUI 与按启用状态选取的 Relay，失败中止后续步骤，禁止在 App Server 内自中断。
 - `service`：交互终端无参数时选择操作及明确目标，日志菜单显示最近 100 行；卸载需确认，配置损坏时仍能进入菜单执行诊断恢复操作。非交互终端无参数时显示帮助。安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
-  与 Gateway；启停、重启、状态和日志命令使用
-  `gateway`、`app-server`、`webui`、`relay` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
+  与 Gateway；启停、状态和日志命令使用
+  `gateway`、`app-server`、`webui`、`relay` 或 `all` 明确目标，菜单重启分派到顶层 `restart`；
   `all` 包含 App Server 与 Gateway，启动时纳入已安装且启用的 Relay，停止时先关闭已安装的 Relay；WebUI 单独管理；核心服务安装、启动或重启后按目标等待监管拓扑、
   WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等
   诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务；`status --json`

@@ -23,7 +23,7 @@ import {
 } from "../runtime/gateway-config.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
 import { locateUserConfig, requireUserConfig } from "./runtime-config.mjs";
-import { runServiceCommand } from "./service-command.mjs";
+import { runRestartCommand } from "./service-command.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 
 const defaultBridgePort = 47_821;
@@ -47,7 +47,7 @@ export async function runDesktopAppCommand(args, options = {}) {
   const inspectDesktopApp = options.inspectDesktopApp
     ?? (() => inspectDesktopAppForPlatform(platform, environment));
   const restartAppServer = options.restartAppServer
-    ?? (() => runServiceCommand(["restart", "app-server"]));
+    ?? (() => runRestartCommand(["app-server"]));
   const probeBridge = options.probeBridge ?? probeDesktopAppBridge;
   const inspectSupervisorState = options.inspectSupervisorState
     ?? inspectAppServerSupervisorState;
@@ -172,7 +172,7 @@ export async function runDesktopAppCommand(args, options = {}) {
       const token = readDesktopAppBridgeToken(located.dataDir);
       const endpoint = privateBridgeEndpoint(desktopConfig.port, token);
       if (!await probeBridge(endpoint)) {
-        throw new Error("Codex Desktop App 桥未就绪，请运行 codexc service restart app-server");
+        throw new Error("Codex Desktop App 桥未就绪，请运行 codexc restart app-server");
       }
       await openDesktop(app.path, endpoint);
     }
@@ -230,7 +230,7 @@ async function assertMacDesktopAppHostReady(primarySocketPath, inspectSupervisor
     || inspection.topology.desktopAppHostProtocolVersion !== 1
   ) {
     throw new Error(
-      "App Server 服务不支持当前 Desktop Host；请运行 codexc service restart app-server 后重试",
+      "App Server 服务不支持当前 Desktop Host；请运行 codexc restart app-server 后重试",
     );
   }
   return inspection.topology;

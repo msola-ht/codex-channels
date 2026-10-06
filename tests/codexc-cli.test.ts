@@ -66,7 +66,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     }`;
     const preload = `import { register } from "node:module";
       register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))}, import.meta.url);`;
-    for (const args of [["--help"], ["version"], ["service", "start", "--help"], ["app", "--help"], ["timezone", "--help"], ["traffic", "--help"], ["update", "--help"]]) {
+    for (const args of [["--help"], ["version"], ["restart", "--help"], ["service", "start", "--help"], ["app", "--help"], ["timezone", "--help"], ["traffic", "--help"], ["update", "--help"]]) {
       const output = execFileSync(process.execPath, [
         "--import", "data:text/javascript," + encodeURIComponent(preload), cli, ...args,
       ], { encoding: "utf8", timeout: 10_000 });
@@ -170,6 +170,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       [["init", "-h"], "用法：codexc init"],
       [["setup", "--help"], "用法：codexc setup"],
       [["start", "-h"], "用法：codexc start"],
+      [["restart", "-h"], "用法：codexc restart"],
       [["remote", "-h"], "用法：codexc remote"],
       [["app", "--help"], "用法：codexc app"],
       [["app", "enable", "-h"], "enable [--port 端口]"],
@@ -244,7 +245,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       {
         args: ["service", "--help"],
         includes: [
-          "all 只包含 App Server 与 Gateway",
+          "此处 all 包含 App Server、Gateway 与按安装及启用状态选取的 Relay",
           "status [目标] [--json]",
           "生成全部后台服务定义，并启动 App Server 与 Gateway",
           "卸载全部后台服务并保留用户数据",
@@ -283,7 +284,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
           ...[
             "init", "setup", "config", "doctor", "remote", "work",
             "primary-provider", "opencode-go", "metrics", "channel", "webui",
-            "start", "service", "update", "version",
+            "start", "restart", "service", "update", "version",
           ].map((command) => `\n  ${command}`),
         ],
         excludes: [

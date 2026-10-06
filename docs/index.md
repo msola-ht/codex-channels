@@ -377,7 +377,7 @@ Unix 公开端点通过独占硬链接发布，绑定名保留至监听关闭，
 按需启动。不经 `codexc remote` 直连共享 Socket 的客户端不持有租约，空闲释放不会为其保留实例。
 该通知只针对渠道会话空闲自动解除触发的全局释放轮次，其他原因导致的无绑定关闭不广播。
 没有监管入口时，Gateway 仍可连接独立运行的 App Server，但不会按需启停该进程。确保与释放遇到旧版
-监管协议响应时失败关闭，并提示运行 `codexc service restart all`。
+监管协议响应时失败关闭，并提示运行 `codexc restart all`。
 
 本项目不在本地计算或估算模型价格与费用：Gateway 不抓取价格目录、不刷新汇率，也不保存价格
 快照；DeepSeek 与 OpenCode Go 的官方价格基线、`ModelPricingResolver` 与价格展示字段均已删除。

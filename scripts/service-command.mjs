@@ -1,17 +1,19 @@
-import { serviceCommandActions, serviceCommandUsage } from "./cli-command-usage.mjs";
+import { restartCommandUsage, serviceCommandActions, serviceCommandUsage } from "./cli-command-usage.mjs";
 export { serviceCommandActions, serviceCommandUsage } from "./cli-command-usage.mjs";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import { runAppServerService } from "../runtime/app-server-service-runtime.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { readGatewayConfig, validateGatewayConfigDocument, validateWebuiConfigDocument } from "../runtime/gateway-config.mjs";
 import { runGatewayService } from "../runtime/gateway-service-runtime.mjs";
 import { assertSynchronousChildSuccess } from "../runtime/process-lifecycle.mjs";
 import {
   defaultServiceTarget,
   serviceTargetIncludes,
   serviceCommandTarget,
+  serviceDefinitions,
   serviceTargetUsage as internalServiceTargetUsage,
 } from "../runtime/service-targets.mjs";
 import { applyTerminalIdentityFromEnvironment } from "./config-management.mjs";
@@ -21,7 +23,8 @@ import {
   serviceControlEnvironment,
 } from "./runtime-environment.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
-import { waitForSelectedRelay } from "./service-selection.mjs";
+import { serviceDefinitionPath, waitForSelectedRelay } from "./service-selection.mjs";
+import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
 
 const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 
@@ -86,10 +89,73 @@ function recordInstalledTerminalIdentity(environment) {
   printCliMessage("note", `已按当前终端记录模型上游终端标识：${terminalIdentity}`);
 }
 
+export async function runRestartCommand(args = []) {
+  if (args.length > 1) throw new Error(restartCommandUsage);
+  const target = parseServiceTarget(args[0] ?? "all");
+  rejectUnsafeAppServerServiceAction("restart", [target], process.env);
+  const runtime = configuredEnvironment();
+  const document = validateGatewayConfigDocument(runtime.document);
+  const platform = { linux: "systemd", darwin: "launchd", win32: "windows" }[process.platform];
+  if (!platform) throw new Error("codexc restart 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
+  if (serviceTargetIncludes(target, "gateway") || serviceTargetIncludes(target, "app-server")) {
+    const { loadConfigDocument } = await import("../dist/config/index.js");
+    loadConfigDocument(readFileSync(runtime.configPath, "utf8"), dirname(runtime.configPath), { environment: runtime.environment });
+  }
+  const selected = (target === "all" ? ["webui", "model-relay", "gateway", "app-server"] : [target])
+    .map(value => serviceDefinitions.find(definition => definition.target === value));
+  const stopping = [];
+  for (const definition of selected) {
+    if (!existsSync(serviceDefinitionPath(platform, definition, runtime.environment))) {
+      if (target !== "all" || definition.core) {
+        throw new Error(`${definition.displayName} 后台服务未安装；请先运行 codexc service install。尚未停止任何服务。`);
+      }
+      printCliMessage("note", `跳过 ${definition.displayName}：未安装后台服务。`);
+      continue;
+    }
+    const status = await inspectManagedServiceStatusAsync({ target: definition.target, environment: runtime.environment });
+    if (platform !== "launchd" && status.services[0]?.loaded !== true) {
+      throw new Error(`${definition.displayName} 服务定义未被服务管理器加载；请运行 codexc service install。尚未停止任何服务。`);
+    }
+    stopping.push(definition);
+  }
+  if (platform === "launchd") runServiceController("check-install", [], runtime.environment);
+  const starting = [...stopping].reverse().filter(definition => {
+    if (target === "all" && definition.target === "model-relay" && document.model_relay?.enabled !== true) {
+      printCliMessage("note", "Model Relay 未启用：仅停止，不重新启动。");
+      return false;
+    }
+    return true;
+  });
+  const steps = [
+    ...stopping.map(definition => ({ action: "stop", definition })),
+    ...starting.map(definition => ({ action: "start", definition })),
+  ];
+  const label = step => `${step.action === "stop" ? "停止" : "启动并确认就绪"} ${step.definition.displayName}`;
+  const completed = [];
+  for (const [index, step] of steps.entries()) {
+    printCliMessage("note", label(step));
+    try {
+      runServiceController(step.action, [step.definition.target], runtime.environment);
+      if (step.action === "start") await waitForServiceReadiness(step.definition.target, runtime.environment);
+      completed.push(label(step));
+    } catch (error) {
+      throw new Error(
+        `重启中止：${label(step)}失败。\n已完成：${completed.join("；") || "无"}。`
+        + `\n未执行：${steps.slice(index + 1).map(label).join("；") || "无"}。`
+        + "\n未自动回滚；请用 codexc service status 和 codexc service status webui 检查状态，排除问题后重试。"
+        + `\n原因：${error instanceof Error ? error.message : "服务操作失败"}`,
+        { cause: error },
+      );
+    }
+  }
+  printCliMessage("success", `${target === "all" ? "全部已选后台服务" : stopping[0].displayName}重启完成。`);
+}
+
 export async function runServiceCommand(args) {
   const [action, ...rest] = args;
+  if (action === "restart") throw new Error("重启入口为 codexc restart [目标]；不再支持 codexc service restart。");
   if (!serviceCommandActions.includes(action)) {
-    throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status|logs>");
+    throw new Error("用法：codexc service <install|uninstall|start|stop|reload|status|logs>");
   }
   const serviceArgs = parseServiceArguments(action, rest);
   rejectUnsafeAppServerServiceAction(action, serviceArgs, process.env);
@@ -134,6 +200,11 @@ export async function runServiceCommand(args) {
   const controlEnvironment = serviceActionAllowsInvalidConfig(action)
     ? serviceControlEnvironment()
     : configuredEnvironment().environment;
+  runServiceController(action, serviceArgs, controlEnvironment);
+  if (action === "start") await waitForServiceReadiness(serviceArgs[0], controlEnvironment);
+}
+
+function runServiceController(action, serviceArgs, controlEnvironment) {
   if (process.platform === "darwin") {
     runSynchronous(
       "/bin/zsh",
@@ -167,17 +238,17 @@ export async function runServiceCommand(args) {
   } else {
     throw new Error("codexc service 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
   }
-  const readinessTarget = coreServiceReadinessTarget(action, serviceArgs);
-  if (action === "start" || action === "restart") await waitForSelectedRelay(serviceArgs[0], controlEnvironment);
+}
+
+async function waitForServiceReadiness(target, environment) {
+  const readinessTarget = target === "gateway" || target === "app-server" || target === "all" ? target : undefined;
+  await waitForSelectedRelay(target, environment);
   if (readinessTarget) {
-    await waitForManagedServiceReadiness(readinessTarget);
+    await waitForManagedServiceReadiness(readinessTarget, environment);
     printCliMessage("success", coreServiceReadyMessage(readinessTarget));
-  } else if (action === "start" || action === "restart") {
-    const httpTarget = serviceArgs[0] === "webui" ? "webui" : undefined;
-    if (httpTarget !== undefined) {
-      await waitForHttpServiceReadiness(httpTarget, controlEnvironment);
-      printCliMessage("success", "WebUI 已就绪。");
-    }
+  } else if (target === "webui") {
+    await waitForHttpServiceReadiness(environment);
+    printCliMessage("success", "WebUI 已就绪。");
   }
 }
 
@@ -189,15 +260,6 @@ function serviceActionAllowsInvalidConfig(action) {
   return new Set(["uninstall", "stop", "reload", "status", "logs"]).has(action);
 }
 
-function coreServiceReadinessTarget(action, serviceArgs) {
-  if (action === "install") return "all";
-  if (action !== "start" && action !== "restart") return undefined;
-  const target = serviceArgs[0];
-  return target === "gateway" || target === "app-server" || target === "all"
-    ? target
-    : undefined;
-}
-
 export async function waitForManagedServiceReadiness(
   target,
   environment = process.env,
@@ -207,12 +269,11 @@ export async function waitForManagedServiceReadiness(
   await waitForCoreServiceTarget(target, environment, options);
 }
 
-async function waitForHttpServiceReadiness(target, environment) {
+async function waitForHttpServiceReadiness(environment) {
   const configPath = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   if (!configPath) throw new Error("缺少 Gateway 配置路径，无法确认服务就绪");
   const document = readGatewayConfig(configPath);
-  const section = document.webui;
-  if (section === undefined) return;
+  const section = validateWebuiConfigDocument(document);
   const host = section?.host === "0.0.0.0" ? "127.0.0.1" : section?.host;
   const port = section?.port;
   if (typeof host !== "string" || !Number.isInteger(port)) {
@@ -267,7 +328,7 @@ function rejectUnsafeAppServerServiceAction(action, serviceArgs, environment) {
   const restartsAppServer = action === "restart"
     && serviceTargetIncludes(target, "app-server");
   if (action === "install" || action === "uninstall" || stopsCoreService || restartsAppServer) {
-    const invocation = ["codexc", "service", action, ...serviceArgs].join(" ");
+    const invocation = ["codexc", ...(action === "restart" ? [] : ["service"]), action, ...serviceArgs].join(" ");
     throw new Error(
       "不能在 Codex App Server 内执行会中断当前渠道的服务操作；"
       + `请在本机终端运行 ${invocation}。渠道内只允许重启 Gateway 或管理独立的 WebUI 服务。`,

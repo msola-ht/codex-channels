@@ -178,7 +178,7 @@ describe("local installation inspection", () => {
       socketHealthy: async () => true,
       stableMs: 0,
       timeoutMs: 1_000,
-    })).rejects.toThrow("codexc service restart all");
+    })).rejects.toThrow("codexc restart all");
   });
 
   it("checks only the requested core service target", async () => {

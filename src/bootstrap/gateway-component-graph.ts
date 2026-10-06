@@ -318,7 +318,7 @@ export abstract class GatewayComponentGraph {
             if (supervisor.status === "missing") return;
             if (supervisor.status === "incompatible") {
               throw new Error(
-                "App Server 监管协议版本不匹配；请运行 codexc service restart all 后重试",
+                "App Server 监管协议版本不匹配；请运行 codexc restart all 后重试",
               );
             }
           }
@@ -784,7 +784,7 @@ export abstract class GatewayComponentGraph {
             this.logger.warn(
               { provider },
               "App Server 监管协议版本不匹配，跳过空闲停止；"
-              + "请运行 codexc service restart all 后重试",
+              + "请运行 codexc restart all 后重试",
             );
           }
           return;

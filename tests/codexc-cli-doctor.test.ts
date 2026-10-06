@@ -493,7 +493,7 @@ if (process.platform === "win32") {
       );
       expect(unmanaged.status).toBe(1);
       expect(unmanaged.stdout).toContain("[失败] App Server 监管");
-      expect(unmanaged.stdout).toContain("codexc service restart all");
+      expect(unmanaged.stdout).toContain("codexc restart all");
 
       await supervisorOwner.start();
       const { stdout } = await execFileAsync(

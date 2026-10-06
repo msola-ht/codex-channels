@@ -7,16 +7,20 @@ import { locateUserConfig } from "./runtime-config.mjs";
 import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 
+export function serviceDefinitionPath(platform, definition, environment = process.env, definitionsDirectory) {
+  const home = environment.HOME || environment.USERPROFILE || homedir();
+  if (platform === "systemd") return join(environment.XDG_CONFIG_HOME || join(home, ".config"), "systemd", "user", definition.systemd);
+  if (platform === "launchd") return join(home, "Library", "LaunchAgents", `${definition.launchd}.plist`);
+  if (platform === "windows") return join(definitionsDirectory ?? join(environment.CODEX_CONNECT_HOME || join(home, ".codex-connect"), "services"), `${definition.target}.json`);
+  throw new Error(`不支持的服务平台：${platform}`);
+}
+
 /** Optional Relay joins all only when installed; starting also requires explicit enablement. */
 export function serviceControlDefinitions(platform, target, order = "start", environment = process.env, definitionsDirectory) {
   const selected = serviceDefinitionsForTarget(target, order === "stop" ? "stop" : "start");
   if (target !== "all") return selected;
   const relay = serviceDefinitions.find(value => value.target === "model-relay");
-  const home = environment.HOME || environment.USERPROFILE || homedir();
-  const definitionPath = platform === "systemd"
-    ? join(environment.XDG_CONFIG_HOME || join(home, ".config"), "systemd", "user", relay.systemd)
-    : platform === "launchd" ? join(home, "Library", "LaunchAgents", `${relay.launchd}.plist`)
-      : join(definitionsDirectory ?? join(environment.CODEX_CONNECT_HOME || join(home, ".codex-connect"), "services"), "model-relay.json");
+  const definitionPath = serviceDefinitionPath(platform, relay, environment, definitionsDirectory);
   if (!existsSync(definitionPath)) return selected;
   if (order === "start") {
     const { configPath } = locateUserConfig(environment);

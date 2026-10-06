@@ -384,13 +384,13 @@ if (document) {
       ? "已自定义"
       : `默认（codex-tui / ${requiredAppServerVersion}）`,
     "默认即为官方 TUI 身份并跟随 Codex CLI 升级；需要覆盖时运行 codexc config → 系统设置 → "
-      + "一键设为官方 TUI 身份，之后运行 codexc service restart all",
+      + "一键设为官方 TUI 身份，之后运行 codexc restart all",
   );
   note(
     "模型上游 User-Agent",
     stringValue(codex.upstream_user_agent) ? "已自定义" : "默认（App Server 生成的官方 TUI UA）",
     "默认由 App Server 按当前锁定版本生成并跟随升级；需要覆盖时运行 codexc config → 系统设置 → "
-      + "一键设为官方 TUI 身份，之后运行 codexc service restart all",
+      + "一键设为官方 TUI 身份，之后运行 codexc restart all",
   );
 
   const updatePlan = readCodexPlanSetting(process.env);
@@ -492,14 +492,14 @@ async function checkAppServerSupervisor(socketPath, expectedTopology) {
         : "监管身份缺失、无效或 Provider 拓扑与当前配置不一致",
       matches
         ? undefined
-        : "运行 codexc service restart all；如仍失败，先停止裸 App Server 后重试",
+        : "运行 codexc restart all；如仍失败，先停止裸 App Server 后重试",
     );
   } catch (error) {
     record(
       "App Server 监管",
       false,
       errorMessage(error),
-      "运行 codexc service restart all；如仍失败，先停止裸 App Server 后重试",
+      "运行 codexc restart all；如仍失败，先停止裸 App Server 后重试",
     );
   }
 }
@@ -773,7 +773,7 @@ function checkOpenAiProxy() {
       || proxyEnvironment.HTTPS_PROXY
       || proxyEnvironment.ALL_PROXY,
     );
-    const remediation = "运行 codexc config 在 Codex .env 中设置 HTTPS_PROXY，然后运行 codexc service restart all";
+    const remediation = "运行 codexc config 在 Codex .env 中设置 HTTPS_PROXY，然后运行 codexc restart all";
     const windowsDiscoveryNote = process.platform === "win32"
       ? "；Windows 系统代理未自动读取，使用 Codex .env 或标准代理环境变量"
       : "";

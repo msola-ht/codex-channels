@@ -559,7 +559,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.consoleEnSyncError).toContain("Account snapshot sync failed:");
     expect(result.consoleEnSyncError).toContain("Could not complete the request. Try again.");
     expect(result.consoleEnRemoved).toContain("Local account ocg-main was removed.");
-    expect(result.consoleEnRemoved).toContain("Run codexc service restart all");
+    expect(result.consoleEnRemoved).toContain("Run codexc restart all");
     expect(result.consoleEnSubscription).toContain("No active subscription");
     expect(result.consoleEnSubscription).toContain("no active subscription");
     expect(result.consoleEnSubscription).toContain("Remove local account");
@@ -772,7 +772,7 @@ describe("WebUI 界面文案语言切换", () => {
         const {PendingSettingDialog}=await server.ssrLoadModule("/src/components/settings/settings-controls.tsx");
         const {SettingsError}=await server.ssrLoadModule("/src/components/settings/settings-feedback.tsx");
         const options={load:async()=>{throw Error("fixture must isolate snapshot loads")},revisionOf:snapshot=>snapshot.revision,currentValue:snapshot=>snapshot.value,
-          preview:async()=>{previews++;if(cause)throw cause;return {value:"model-after",activation:{status:"restart",target:"all",commands:["codexc service restart all"]},confirmationToken:"fixture-token"}},
+          preview:async()=>{previews++;if(cause)throw cause;return {value:"model-after",activation:{status:"restart",target:"all",commands:["codexc restart all"]},confirmationToken:"fixture-token"}},
           update:async()=>{updates++;throw updateCause??Error("must not apply while switching languages")}};
         const read=language=>{globalThis.fixtureLanguage=language;cursor=0;return useVersionedSettingsManagement(options)};
         const label={key:"modelManagement.channelModel"};
@@ -872,7 +872,7 @@ describe("WebUI 界面文案语言切换", () => {
     for (const html of state.confirmations) {
       expect(html).toContain("model-before");
       expect(html).toContain("model-after");
-      expect(html).toContain("codexc service restart all");
+      expect(html).toContain("codexc restart all");
     }
     expect(state.previewRequests).toEqual({ previews: 1, updates: 0, refetches: 0 });
     expect(state.errorRequests).toEqual({ previews: 3, updates: 0, refetches: 0 });

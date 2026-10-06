@@ -22,9 +22,9 @@ describe("配置激活结果文案", () => {
       target: "app-server-gateway-webui",
       commands: [
         "codexc service stop gateway",
-        "codexc service restart app-server",
+        "codexc restart app-server",
         "codexc service start gateway",
-        "codexc service restart webui",
+        "codexc restart webui",
       ],
     });
     const output: string[] = [];

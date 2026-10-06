@@ -13,7 +13,7 @@ CCG 是 CommandCode 的受管 Responses Provider，支持在同一 Gateway 中�
 1. 选择切换模式或固定模式。
 2. 填写账户 ID 并输入该账户的 CommandCode API Key。
 3. 首个账户从 DS 官方下载完整模型目录并生成共享 CCG 目录；后续账户直接复用该目录，再分别选择默认模型。
-4. 运行 `codexc service restart all`，之后通过渠道 `/model` 选择 CCG 模型。
+4. 运行 `codexc restart all`，之后通过渠道 `/model` 选择 CCG 模型。
 
 目录以 DS 官方 `models.json` 完整内容为基础，保留 Flash、Pro，并复制 Flash 的全部字段，
 仅修改 `slug` 和 `display_name`，增加 `DeepSeek V4.1 Flash`。DS 自身的目录保持原样。

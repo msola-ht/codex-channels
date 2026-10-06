@@ -25,13 +25,13 @@ export function writeGatewayConfigActivationNotice(
 
 function activationNotice(activation) {
   if (activation.target === "webui") {
-    return "配置已保存。WebUI 配置将在重启服务后生效：codexc service restart webui；CLI 参数优先于本配置。";
+    return "配置已保存。WebUI 配置将在重启服务后生效：codexc restart webui；CLI 参数优先于本配置。";
   }
   if (activation.target === "all") {
-    return "配置已保存。请重启 Gateway 与 App Server：codexc service restart all";
+    return "配置已保存。请重启全部后台服务（含已安装 WebUI，Relay 按启用状态启动）：codexc restart all";
   }
   if (activation.target === "app-server") {
-    return "配置已保存。请重启 App Server：codexc service restart app-server";
+    return "配置已保存。请重启 App Server：codexc restart app-server";
   }
   if (activation.target === "app-server-gateway-webui") {
     return "配置已保存。App Server、Gateway 与 WebUI 均需重启。请按顺序执行："

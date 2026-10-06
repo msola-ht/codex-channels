@@ -178,33 +178,6 @@ case "$action" in
       all) print_status success "Codex App Server 与 Gateway 已停止。" ;;
     esac
     ;;
-  restart)
-    target=${2:-gateway}
-    require_target "$target"
-    resolved_units=$(service_ids "$target" start)
-    if [ "$target" = "all" ]; then
-      stop_before_all_restart
-    fi
-    failed_units=""
-    for unit in $resolved_units; do
-      if ! systemctl_user restart "$unit"; then
-        failed_units="$failed_units $unit"
-      fi
-    done
-    if [ -n "$failed_units" ] && [ "$target" = "all" ]; then
-      print_status failure "服务重启部分失败；失败目标：${failed_units# }。请运行 codexc service status。"
-      exit 1
-    elif [ -n "$failed_units" ]; then
-      exit 1
-    fi
-    case "$target" in
-      gateway) print_status note "Gateway 重启操作已完成，正在确认就绪状态；Codex App Server 保持运行。" ;;
-      app-server) print_status note "Codex App Server 重启操作已完成，正在确认就绪状态；Gateway 将自动重连。" ;;
-      webui) print_status success "WebUI 已重启。" ;;
-      model-relay) print_status success "Model Relay 已重启。" ;;
-      all) print_status note "Codex App Server 与 Gateway 重启操作已完成，正在确认就绪状态。" ;;
-    esac
-    ;;
   reload)
     gateway_unit=$(service_ids gateway start)
     if ! systemctl_user is-active --quiet "$gateway_unit"; then
@@ -248,7 +221,7 @@ case "$action" in
     print_status note "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   *)
-    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|model-relay|all]"
+    print_status failure "用法：$0 {install|uninstall|reload|start|stop|status|logs} [gateway|app-server|webui|model-relay|all]"
     exit 2
     ;;
 esac

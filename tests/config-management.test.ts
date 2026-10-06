@@ -159,7 +159,7 @@ describe("Gateway Config management", () => {
       activationResult: {
         status: "restart",
         target: "gateway",
-        commands: ["codexc service restart gateway"],
+        commands: ["codexc restart gateway"],
       },
       previousRevision: settings.revision,
     });
@@ -287,9 +287,9 @@ describe("Gateway Config management", () => {
         target: "app-server-gateway-webui",
         commands: [
           "codexc service stop gateway",
-          "codexc service restart app-server",
+          "codexc restart app-server",
           "codexc service start gateway",
-          "codexc service restart webui",
+          "codexc restart webui",
         ],
       },
     });
@@ -344,7 +344,7 @@ describe("Gateway Config management", () => {
       activationResult: {
         status: "restart",
         target: "app-server",
-        commands: ["codexc service restart app-server"],
+        commands: ["codexc restart app-server"],
       },
     });
     expect(readGatewayConfig(fixture.configPath).debug).toEqual({

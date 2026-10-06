@@ -154,7 +154,7 @@ WebSocket 请求时。内部指标、Thread、Turn 和 App Server 协议版本�
 身份或 UA 仍可直接编辑 TOML。
 
 保存显式覆盖后由统一配置激活通知提示：该设置同时改变 Gateway 客户端连接与 App Server 出站
-Provider Proxy，需要 `codexc service restart all`；App Server 不会自动重启，受管 Gateway
+Provider Proxy，需要 `codexc restart all`；App Server 不会自动重启，受管 Gateway
 会按既有配置热载机制自行重建连接，前台 Gateway 需手动重启。已有 Thread 的身份与 Provider 归属不改写；App Server 重启后恢复 Thread，后续请求使用新进程身份与出站 UA。回显不出现在聊天渠道。
 
 当前不增加独立 `codexc ua` 命令，也不在 `codexc setup` 的 Provider 页面重复入口。
@@ -181,11 +181,11 @@ WebUI 在“官方 TUI 请求身份”分区提供同一字段，手工填写后
   App Server 进程级 originator 或 UA 后缀。
 - 完整上游 UA 由每个受管 Provider Proxy 在构造出站请求时覆盖。
 - `terminal_identity` 只在 App Server 服务进程启动子进程时写入环境，进程内终端探测只解析一次，
-  因此修改后必须重启 App Server（受管服务下即 `codexc service restart all` 中的 App Server 目标）。
+  因此修改后必须重启 App Server（受管服务下即 `codexc restart all` 中的 App Server 目标）。
 - 主 Provider、DeepSeek、OpenCode Go 多账户、自定义 Provider 和原生子代理使用同一全局值。
-- 默认身份随 Codex CLI 升级自动变化，只需重启 `codexc service restart all` 即可生效；显式覆盖任一
-  字段后运行 `codexc service restart all`，同时应用 Gateway 身份与上游 UA；仅运行
-  `codexc service restart gateway` 不会重建 Provider Proxy，只重启
+- 默认身份随 Codex CLI 升级自动变化，只需重启 `codexc restart all` 即可生效；显式覆盖任一
+  字段后运行 `codexc restart all`，同时应用 Gateway 身份与上游 UA；仅运行
+  `codexc restart gateway` 不会重建 Provider Proxy，只重启
   App Server 时 Gateway 身份依赖受管自动重载或前台手动重启。
 - 重启 App Server 会结束其进程中的活动请求，因此 Setup 保存后只提示命令，不自动重启
   App Server；受管 Gateway 会按既有配置热载机制自行重建连接，前台 Gateway 需手动重启。
@@ -225,7 +225,7 @@ Provider ID 字符串插值到全局 UA。
 - `scripts/config-management.mjs`、`scripts/config-system-menu.mjs`：通过 `codexc config` 的
   「系统设置 → 一键设为官方 TUI 身份」用当前系统与终端信息生成官方格式 `User-Agent`，
   在单次受 revision 保护的原子写入中同时保存 `codex-tui` 客户端身份与上游 UA，给出
-  `codexc service restart all` 提示；该入口只写显式覆盖，默认身份不依赖它，也不再提供单项目
+  `codexc restart all` 提示；该入口只写显式覆盖，默认身份不依赖它，也不再提供单项目
   编辑入口；「系统设置 → 模型上游终端标识」用同一写入接口单独保存 `terminal_identity`，预填
   运行命令的终端探测结果并允许编辑，留空即删除该字段。设置读取接口在 `officialTuiIdentity`
   下额外返回派生默认值（`defaults`），供 CLI 与 WebUI 显示未配置时实际生效的身份，界面不把

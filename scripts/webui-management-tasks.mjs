@@ -31,7 +31,7 @@ export class WebuiManagementTaskRunner {
   preview(input) {
     const normalized = normalizeTaskInput(input);
     const command = normalized.operation === "service"
-      ? `codexc service ${normalized.action}${normalized.target ? ` ${serviceCommandTarget(normalized.target)}` : ""}`
+      ? `codexc ${normalized.action === "restart" ? "restart" : `service ${normalized.action}`}${normalized.target ? ` ${serviceCommandTarget(normalized.target)}` : ""}`
       : normalized.operation === "traffic"
         ? "codexc traffic cleanup --confirm"
         : `codexc metrics ${normalized.action}${normalized.target === undefined ? "" : ` ${normalized.target}`}`;
@@ -168,7 +168,7 @@ export class WebuiManagementTaskRunner {
     task.updatedAt = new Date(this.#now()).toISOString();
     this.#notify(task);
     const args = normalized.operation === "service"
-      ? ["service", normalized.action, ...(normalized.target === undefined ? [] : [serviceCommandTarget(normalized.target)])]
+      ? [...(normalized.action === "restart" ? ["restart"] : ["service", normalized.action]), ...(normalized.target === undefined ? [] : [serviceCommandTarget(normalized.target)])]
       : normalized.operation === "traffic"
         ? ["traffic", "cleanup", "--confirm"]
         : ["metrics", normalized.action, ...(normalized.target === undefined ? [] : [normalized.target])];
@@ -259,6 +259,9 @@ export function normalizeTaskInput(input) {
       return { operation: "service", action: input.action, target: undefined };
     }
     if (!targets.has(input.target)) throw new Error("服务任务目标无效");
+    if (input.action === "restart" && (input.target === "all" || input.target === "webui")) {
+      throw new Error(`此操作会停止当前 WebUI 管理任务，请在本机终端执行 codexc restart ${input.target}`);
+    }
     return { operation: "service", action: input.action, target: input.target };
   }
   if (input.operation === "metrics") {

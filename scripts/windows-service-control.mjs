@@ -43,7 +43,7 @@ export function windowsServiceDefinitionsDirectory(environment = process.env) {
 
 export async function controlWindowsServices({
   action,
-  target = action === "restart" || action === "logs" ? "gateway" : "all",
+  target = action === "logs" ? "gateway" : "all",
   definitionsDirectory = windowsServiceDefinitionsDirectory(),
   environment = process.env,
   follow = false,
@@ -98,12 +98,6 @@ export async function controlWindowsServices({
   if (action === "stop") {
     await stopDefinitions(parsedTarget, definitionsDirectory, environment);
     printLifecycleResult("stop", parsedTarget);
-    return;
-  }
-  if (action === "restart") {
-    await stopDefinitions(parsedTarget, definitionsDirectory, environment, true);
-    await startDefinitions(parsedTarget, definitionsDirectory, environment);
-    printLifecycleResult("restart", parsedTarget);
     return;
   }
   if (action === "reload") {
@@ -205,13 +199,12 @@ async function startDefinitions(target, definitionsDirectory, environment) {
   }
 }
 
-async function stopDefinitions(target, definitionsDirectory, environment, failFast = false) {
+async function stopDefinitions(target, definitionsDirectory, environment) {
   const failures = [];
   for (const definition of serviceControlDefinitions("windows", target, "stop", environment, definitionsDirectory)) {
     try {
       await stopDefinition(definition, definitionsDirectory, environment);
     } catch (error) {
-      if (failFast) throw new Error(`停止服务失败，已中止重启：${definition.target}。请运行 codexc service status。`, { cause: error });
       failures.push(`${definition.target}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -446,8 +439,8 @@ function printLifecycleResult(action, target) {
   const label = target === "all"
     ? "Codex App Server 与 Gateway"
     : serviceDefinitions.find((service) => service.target === target)?.displayName ?? target;
-  const verb = action === "start" ? "已启动" : action === "stop" ? "已停止" : "已重启";
-  writeCliMessage(action === "start" || action === "restart" ? "note" : "success", `${label}${verb}。`);
+  const verb = action === "start" ? "已启动" : "已停止";
+  writeCliMessage(action === "start" ? "note" : "success", `${label}${verb}。`);
 }
 
 function tailLines(value, count) {

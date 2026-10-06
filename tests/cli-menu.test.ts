@@ -52,7 +52,7 @@ describe("service menu", () => {
     const runCommand = vi.fn();
     await runServiceMenu({ prompts, runCommand });
     expect(runCommand.mock.calls).toEqual([
-      [["status", "all"]], [["restart", "webui"]], [["logs", "gateway", "--lines", "100"]], [["reload"]],
+      [["service", "status", "all"]], [["restart", "webui"]], [["service", "logs", "gateway", "--lines", "100"]], [["service", "reload"]],
     ]);
     expect(prompts.select.mock.calls[1]?.[0]).toMatchObject({
       options: expect.arrayContaining([expect.objectContaining({ value: "all", hint: expect.stringContaining("不含 WebUI") })]),
@@ -63,7 +63,7 @@ describe("service menu", () => {
     const prompts = fixture(["stop", "back", "uninstall", "uninstall", "cancel"], [false, true]);
     const runCommand = vi.fn();
     await runServiceMenu({ prompts, runCommand });
-    expect(runCommand).toHaveBeenCalledExactlyOnceWith(["uninstall"]);
+    expect(runCommand).toHaveBeenCalledExactlyOnceWith(["service", "uninstall"]);
     expect(prompts.confirm.mock.calls[0]?.[0]).toMatchObject({ initialValue: false });
   });
 

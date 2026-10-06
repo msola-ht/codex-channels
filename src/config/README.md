@@ -106,7 +106,7 @@ Workspace 上配置。
 Gateway 设置，并提供不显示凭据、令牌或代理值的配置总览。Codex 设置入口不依赖 Gateway 配置已经
 初始化或可解析；选择 Gateway 设置时仍会明确报告对应配置错误。需要重建渠道连接的变化在后台 Gateway 运行时自动重启，未运行时在下次
 启动生效，前台进程需重新启动；
-显式网络代理写入 Codex `.env`，保存后按激活提示运行 `codexc service restart all`，运行时重新读取
+显式网络代理写入 Codex `.env`，保存后按激活提示运行 `codexc restart all`，运行时重新读取
 代理配置，无需重建服务定义。Codex 官方与第三方 Provider 配置仍由 `codexc setup` 管理。
 
 飞书配置表当前只定义私聊 Surface 所需的 `enabled`、`app_id`、`app_secret` 和

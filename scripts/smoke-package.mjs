@@ -46,7 +46,7 @@ try {
   ).stdout;
   const serviceTargetHelp = run(
     command,
-    ["service", "restart", "-h"],
+    ["restart", "-h"],
     temporaryDirectory,
     environment,
     true,

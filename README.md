@@ -50,7 +50,8 @@ codexc timezone              # App Server 与 WebUI 时区；--gateway 设置网
 codexc work                  # 新建或注册已有工作区、管理权限
 codexc service               # 交互选择服务操作和目标
 codexc service status        # 查看服务状态
-codexc service restart all   # 重启 Gateway、全部 App Server 及已安装且启用的 Relay
+codexc restart               # 重启全部后台服务：Gateway、App Server、WebUI、已启用 Relay
+codexc restart gateway       # 只重启 Gateway
 codexc doctor                # 只读诊断
 codexc metrics               # 查询和导出本机模型请求指标
 codexc relay status          # 查询可选模型 API 转发进程

@@ -147,7 +147,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 ```bash
 npm run install:global
-codexc service restart all
+codexc restart all
 codexc doctor
 ```
 
@@ -235,7 +235,7 @@ Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_u
 `openai`、`ollama`、`lmstudio`、`amazon-bedrock`、DeepSeek 保留命名空间 `deepseek` / `ds-*`、OpenCode Go 保留命名空间
 `ocg` / `ocg-*`、CCG 保留命名空间 `ccg` / `ccg-*`、CLP 保留命名空间 `clp` / `clp-*`，或其他项目受管 Provider ID。`opencode-go` 是当前管理命令与磁盘目录名称。
 
-修改后运行 `codexc service restart all`。若上游不支持 Responses WebSocket，必须保留
+修改后运行 `codexc restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。
 Gateway 管理的 DeepSeek、OpenCode Go 与自定义 Provider 统一使用一次 HTTP 失败重试、零次流
 断开重连，即首次 HTTP 请求失败后最多再试一次，避免 Codex 默认请求重试和流重连相乘；已有配置
@@ -282,7 +282,7 @@ Codex 内置保留 ID。固定模式通过 Codex 的 `config/batchWrite` 原子�
 明确显示 Key 明文写入的 0600 配置位置。Key 输入不显示不回显；自定义固定模式不能保留其他自定义
 切换 Profile，从切换模式改为固定模式前必须先删除其他自定义切换 Provider；受管切换 Provider 可以
 共存，受管固定模式必须先恢复官方模式。写入后仍需运行
-`codexc service restart all` 生效。Codex 兼容 Provider 入口只接受上述直接 API Key 字段，不接受额外
+`codexc restart all` 生效。Codex 兼容 Provider 入口只接受上述直接 API Key 字段，不接受额外
 Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍是主配置候选，需先运行
 `codexc primary-provider switch openai` 将候选移入私有备份，再编辑为切换模式；Setup 不会留下
 同名主配置块和切换 Profile。
@@ -345,7 +345,7 @@ codexc primary-provider recover rs-example keep
 
 `rollback` 使用上一目录；首次创建没有上一目录时删除未完成目录。`keep` 保留新目录。
 恢复会校验所选目录与当前配置的模型、路径及思考等级，并核对 Profile 与注册表是否一致、运行时能否加载；缺失注册项或 Profile 时须先恢复对应配置，不能仅保留目录。冲突时保留未完成标记并拒绝完成，不覆盖用户后来修改的配置。首次创建前主配置不存在时，可以回滚到无主配置、无模型目录的原始状态；配置损坏或权限错误不能按文件不存在处理。
-可在自定义 Responses Provider 交互菜单中执行同一恢复流程。完成后运行 `codexc service restart all`。
+可在自定义 Responses Provider 交互菜单中执行同一恢复流程。完成后运行 `codexc restart all`。
 
 ## 关联文档
 

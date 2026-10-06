@@ -83,20 +83,22 @@ SSH 隧道建议统一使用 `127.0.0.1`，不要用服务器公网 IP、Tailsca
 
 ## 后台服务
 
-WebUI 是独立后台服务，不并入 `all`：`codexc service install` 只生成服务单元并启动 App Server
+WebUI 是独立后台服务，不并入 `service start/stop/status all`，但已安装时纳入 `codexc restart all`。
+`codexc service install` 只生成服务单元并启动 App Server
 与 Gateway，需要后台常驻时单独管理：
 
 ```bash
 codexc service start webui       # 启动
 codexc service status webui      # 查看状态
 codexc service logs webui -n 100 # 查看日志
-codexc service restart webui     # 重启
+codexc restart webui             # 重启
 codexc service stop webui        # 停止
 ```
 
 - Linux 使用 systemd 用户服务 `codex-connect-webui.service`，macOS 使用 launchd
   `com.hegenai.codex-webui`；`codexc service uninstall` 会一并卸载；
 - 服务单元固定运行 `codexc webui`，host/port/token 全部来自 `config.toml` 的 `[webui]` 段；
+- WebUI 自身重启和全部重启需要在本机终端执行，以免停止当前管理任务；管理 API 在预览与执行时均拒绝这两类自中断任务；
 - 指标库只接受当前 Schema；不兼容时 API 明确报错，不迁移或删除数据库，见[源码安装与更新](source-install.md#更新)。
 
 ## 页面与 API
@@ -379,7 +381,7 @@ OCG 官方接口明确返回 HTTP 403、`EntitlementError` 和 `OpenCode Go subs
 Thread 将不可恢复，不会取消或续订官方订阅；不会根据错误状态自动删除账户。
 无订阅状态及确认时间由 Gateway 保存到共享快照，页面重开与服务重启后仍可读取；普通刷新失败
 只提示本次查询异常，不恢复旧额度。成功取得新额度后更新状态。删除成功立即移除对应卡片，
-再独立同步列表；同步失败不撤销删除成功提示，并保留运行服务所需的 `codexc service restart all` 提示。
+再独立同步列表；同步失败不撤销删除成功提示，并保留运行服务所需的 `codexc restart all` 提示。
 删除与列表同步按完整 Provider ID 隔离；删除 `ocg-main` 不影响同名的 `ds-main` 或 `ccg-main`。
 账户快照使用指标数据库表与 JSON 字段，`subscription-required` 表示无有效订阅。
 历史快照按指标保留期限清理，但每个账户源的最新确认状态继续保留；保留期限到达不会将无订阅账户恢复为可选。

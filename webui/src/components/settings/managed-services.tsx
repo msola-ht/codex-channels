@@ -38,12 +38,13 @@ export function ManagedServices({ services, tasks, scope, showTasks = true }: { 
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={service.running ? "secondary" : "destructive"}>{t(serviceStatusKey(service))}</Badge>
-              <Button variant="outline" size="sm" disabled={taskBusy} onClick={() => void tasks.run({ operation: "service", action: service.running ? "restart" : "start", target: service.target })}>{t(service.running ? "managementUi.restart" : "managementUi.start")}</Button>
+              {service.target !== "webui" || !service.running ? <Button variant="outline" size="sm" disabled={taskBusy} onClick={() => void tasks.run({ operation: "service", action: service.running ? "restart" : "start", target: service.target })}>{t(service.running ? "managementUi.restart" : "managementUi.start")}</Button> : null}
               {service.target === "gateway" ? <Button variant="outline" size="sm" disabled={taskBusy} onClick={() => void tasks.run({ operation: "service", action: "reload" })}>{t("managementUi.reload")}</Button> : null}
               {service.running ? <Button variant="destructive" size="sm" disabled={taskBusy} onClick={() => void tasks.run({ operation: "service", action: "stop", target: service.target })}>{t("modelManagement.stop")}</Button> : null}
             </div>
           </div>
           {!service.running && service.recentError !== null ? <Alert variant="destructive"><AlertDescription>{t("managementUi.serviceRecentError")}</AlertDescription></Alert> : null}
+          {service.target === "webui" && service.running ? <Alert><AlertDescription>{t("managementUi.webuiRestartTerminal", { command: "codexc restart webui" })}</AlertDescription></Alert> : null}
         </div>
       </div>
     ))}

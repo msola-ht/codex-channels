@@ -216,7 +216,7 @@ describe("Feishu setup", () => {
       activationResult: {
         status: "restart",
         target: "gateway",
-        commands: ["codexc service restart gateway"],
+        commands: ["codexc restart gateway"],
       },
     });
     expect(renderedOutput).toContain("选择新建应用或已有应用");

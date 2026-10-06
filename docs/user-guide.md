@@ -30,7 +30,9 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 在交互终端直接运行 `codexc` 打开主菜单，可进入初始化、接入、日常设置、工作区、后台服务、指标、清理、诊断，以及“运行与连接”中的 TUI、WebUI 和前台核心服务启动入口。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 仅显示路径，`timezone` 仅显示当前时区。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。
 
-`codexc service` 无参数时可选择操作和目标；`all` 包含 App Server 与 Gateway，启动时纳入已安装且启用的 Relay，停止时先关闭已安装 Relay；WebUI 单独选择。菜单日志显示最近 100 行，持续跟随仍使用 `codexc service logs <目标> -f`。卸载后台服务需确认。
+`codexc service` 无参数时可选择操作和目标。菜单重启统一调用 `codexc restart`，其 `all` 包含已安装的 WebUI。
+其他操作的 `all` 包含 App Server 与 Gateway，启动时纳入已安装且启用的 Relay，停止时先关闭已安装 Relay；WebUI 单独选择。
+菜单日志显示最近 100 行，持续跟随仍使用 `codexc service logs <目标> -f`。卸载后台服务需确认。
 
 `codexc work` 菜单区分新建工作区、注册当前目录和注册已有目录；注册前显示实际目录并确认，不创建或删除已有目录。`codexc metrics` 菜单包含会话列表导出和历史额度窗口查询，清理与重置统一使用 `codexc cleanup`。上述操作菜单完成单项后可继续选择；“运行与连接”完成后返回该子菜单，退出后返回主菜单。Setup 和 Config 单项失败会显示错误并返回各自分类菜单，不自动重试写入。
 
@@ -196,7 +198,7 @@ NO_PROXY="localhost,127.0.0.1"
 ```
 
 Codex、Gateway 渠道和模型统计代理共用该文件；修改后在任务结束时执行
-`codexc service restart all`，独立 Codex 进程也需重新启动。Gateway 只读取四个代理变量，
+`codexc restart all`，独立 Codex 进程也需重新启动。Gateway 只读取四个代理变量，
 不把文件中的其他变量注入自身环境。代理值使用字面值，美元符号使用单引号包围或反斜杠转义，
 不支持代理值中的变量插值。原有注释、其他设置和未修改字段会保留。
 `ALL_PROXY` 可保存 SOCKS5 地址，但必须同时在此文件配置 HTTP(S) 协议的 `HTTP_PROXY`，
@@ -328,11 +330,27 @@ Host 租约存在时空闲释放不会停止主实例。`codexc app` 会先通�
 ```bash
 codexc service install
 codexc service status
-codexc service restart all
+codexc restart               # 等同 restart all，包含已安装的 WebUI
+codexc restart gateway       # 只重启 Gateway
 codexc service logs -n 200
 ```
 
-默认情况下 `start`、`stop`、`status` 操作全部核心服务；`restart`、`logs` 默认只操作 Gateway。App Server 与 Gateway 是独立目标，渠道内禁止停止或重启 App Server。整体重启先停止已安装的 Relay、Gateway，再停止 App Server，随后按 App Server、Gateway、已安装且启用的 Relay 顺序启动，避免正常整体重启生成断开通知；Linux 重新安装服务也使用这一停止顺序。整体重启中任一停止失败即中止，不继续停止后续依赖或启动服务。macOS 普通 `start` 不强制重启已运行的服务。单独重启 Gateway 不停止共享 App Server；单独重启 App Server 时，仍运行的 Gateway 会按真实断线处理并重连。
+`codexc restart [gateway|app-server|webui|relay|all]` 是唯一重启入口，默认 `all`。
+单独指定目标时要求该后台服务已安装；`app-server` 包含受监管的 Provider 实例。
+全部重启要求 Gateway 与 App Server 已安装，未安装的 WebUI、Relay 明确提示跳过；
+已安装但未启用的 Relay 只停止，不重新启动。显式 `restart relay` 则重启 Relay 管理进程，监听仍由配置开关控制。
+
+重启先检查配置、所选服务定义和服务管理器状态，全部预检通过后才停服。
+停止顺序为 WebUI → Relay → Gateway → App Server；启动顺序为 App Server → Gateway → Relay → WebUI，
+每项启动后先确认就绪，再启动下一项。WebUI 未显式配置时也检查默认地址的健康端点。
+任一停止、启动或就绪检查失败立即中止，报告已完成、失败和未执行步骤，不自动回滚已完成的启停。
+可用 `codexc service status` 和 `codexc service status webui` 检查状态，排除问题后重试。
+
+`service start/stop/status` 仍默认操作核心服务（含按安装与启用状态选择的 Relay，不含 WebUI），
+`service logs` 默认 Gateway。macOS 普通 `start` 不强制重启已运行的服务。
+单独重启 Gateway 不停止共享 App Server；单独重启 App Server 时，仍运行的 Gateway 会按真实断线处理并重连。
+渠道内禁止停止或重启 App Server，全部重启也必须在本机终端执行。
+WebUI 内不执行包含自身的重启任务；请在本机终端运行 `codexc restart webui` 或 `codexc restart all`。
 
 受管第三方 Provider 的模型目录、Profile 或管理标记变化会自动校验，并仅应用到当前 Gateway
 已启用且受影响的 Provider。原生 TUI/Desktop 租约或该实例的权威活动 Thread 会推迟应用；
@@ -528,7 +546,7 @@ codexc service logs -n 100
 常见处理：
 
 - 配置修改未生效：`codexc service reload`。
-- 只重启 Gateway：`codexc service restart`；共享 App Server 与活动 Thread 会保留。
+- 只重启 Gateway：`codexc restart gateway`；共享 App Server 与活动 Thread 会保留。
 - Codex CLI 版本不一致：按 `codexc update` 或错误提示安装精确版本后重试。
 - 飞书无消息：先运行 `codexc doctor`，再检查应用权限、消息事件发布和允许用户。
 - Windows ACL 失败：运行 `codexc security repair`，再运行 `codexc doctor`。
@@ -548,7 +566,7 @@ model_traffic_retention_days = 30
 ```
 
 ```bash
-codexc service restart app-server
+codexc restart app-server
 ```
 
 App Server 发给统计代理的模型调用会写入 `~/.codex-connect/traffic/` 下的 V2 私有 session 目录；

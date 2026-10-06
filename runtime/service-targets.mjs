@@ -56,7 +56,7 @@ export function parseServiceTarget(value) {
 }
 
 export function defaultServiceTarget(action) {
-  return action === "restart" || action === "logs" ? "gateway" : "all";
+  return action === "logs" ? "gateway" : "all";
 }
 
 export function serviceTargetIncludes(target, expected) {

@@ -78,7 +78,9 @@ export async function runServiceMenu({ prompts = clackPrompts, runCommand }) {
       const target = await prompts.select({
         message: "选择服务目标", showInstructions: false,
         options: [
-          { value: "all", label: "核心服务", hint: "App Server、Gateway 及按启用状态选取的 Relay，不含 WebUI" },
+          action === "restart"
+            ? { value: "all", label: "全部后台服务", hint: "App Server、Gateway、已安装 WebUI 与按启用状态选取的 Relay" }
+            : { value: "all", label: "核心服务", hint: "App Server、Gateway 及按启用状态选取的 Relay，不含 WebUI" },
           { value: "gateway", label: "Gateway" },
           { value: "app-server", label: "App Server", hint: "包含受监管的 Provider 实例" },
           { value: "webui", label: "WebUI" },
@@ -96,7 +98,7 @@ export async function runServiceMenu({ prompts = clackPrompts, runCommand }) {
       if (prompts.isCancel(confirmed) || confirmed !== true) continue;
     }
     try {
-      await runCommand(args);
+      await runCommand(action === "restart" ? args : ["service", ...args]);
     } catch (error) {
       reportMenuError(error);
     }

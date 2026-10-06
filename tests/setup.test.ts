@@ -185,7 +185,7 @@ describe("Codex Connect setup", () => {
           activationResult: {
             status: "restart",
             target: "gateway",
-            commands: ["codexc service restart gateway"],
+            commands: ["codexc restart gateway"],
           },
         },
       },
@@ -316,7 +316,7 @@ describe("Codex Connect setup", () => {
       activationResult: {
         status: "restart",
         target: "all",
-        commands: ["codexc service restart all"],
+        commands: ["codexc restart all"],
       },
     });
   });

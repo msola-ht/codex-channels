@@ -318,7 +318,7 @@ describe("Codex Connect config menu", () => {
 
     expect(result).toEqual({ field: "https_proxy", configured: true, configPath: join(fixture.environment.CODEX_HOME!, ".env"), activation: "restart-all", activationResult: configActivationResult("restart-all") });
     expect(readCodexProxySettings(fixture.environment)).toMatchObject({ https_proxy: proxy });
-    expect(output.join("")).toContain("codexc service restart all");
+    expect(output.join("")).toContain("codexc restart all");
     expect(output.join("")).not.toContain("proxy-secret");
   });
 
@@ -401,7 +401,7 @@ describe("Codex Connect config menu", () => {
     );
     expect(readFileSync(fixture.configPath, "utf8")).toBe(gatewayBefore);
     if (process.platform !== "win32") expect(statSync(configPath).mode & 0o777).toBe(0o600);
-    expect(output.join("")).toContain("codexc service restart all");
+    expect(output.join("")).toContain("codexc restart all");
     expect(output.join("")).not.toContain("proxy-secret");
   });
 
@@ -557,7 +557,7 @@ describe("Codex Connect config menu", () => {
       model_traffic_dump: true,
     });
     expect(output.join("")).toContain("调用详情记录已开启");
-    expect(output.join("")).toContain("codexc service restart app-server");
+    expect(output.join("")).toContain("codexc restart app-server");
   });
 
   it("selects the shared debug capture mode without enabling collection", async () => {

@@ -15,7 +15,7 @@ codexc deepseek account reconfigure work   # 重新配置已有账户
 codexc deepseek account list --json        # 列出账户与默认标记，不包含 Key
 codexc deepseek account default work       # 选择默认账户
 codexc deepseek account remove personal    # 确认后删除账户配置
-codexc service restart all                 # 应用配置变化
+codexc restart all                 # 应用配置变化
 ```
 
 账户 ID 必须由用户填写，使用 1–32 位小写字母、数字、`-` 或 `_`，不自动创建 `main`。
@@ -183,7 +183,7 @@ Gateway 停止或重启时计时指标可能丢失，但模型请求不会因此
 完成安装、更新 API Key、切换模式或恢复后，从本机终端运行：
 
 ```bash
-codexc service restart all
+codexc restart all
 codexc doctor
 ```
 

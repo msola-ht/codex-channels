@@ -137,7 +137,7 @@ describe("account CLI activation", () => {
       prompts: { isCancel: () => false }, output: { write: (value: string) => { chunks.push(value); } } };
     const result = family === "ds" ? await runDeepseekSetup(options) : await runCcgSetup(options);
     expect(result).toMatchObject({ activation: "restart-all" });
-    expect(chunks.join("")).toContain("codexc service restart all");
+    expect(chunks.join("")).toContain("codexc restart all");
     expect(chunks.join("")).not.toContain("会自动重新读取配置");
   });
 });

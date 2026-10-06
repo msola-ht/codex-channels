@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -67,6 +67,9 @@ describe("WebUI management tasks", () => {
     expect(() => normalizeTaskInput({ operation: "update", action: "source" })).toThrow("任务类型无效");
     expect(() => normalizeTaskInput({ operation: "service", action: "exec", target: "gateway" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "service", action: "reload", target: "gateway" })).toThrow("服务重载不接受服务目标");
+    for (const target of ["webui", "all"]) {
+      expect(() => normalizeTaskInput({ operation: "service", action: "restart", target })).toThrow(`请在本机终端执行 codexc restart ${target}`);
+    }
     expect(() => normalizeTaskInput({ operation: "metrics", action: "shell" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "metrics", action: "prune" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "metrics", action: "cleanup", target: "deepseek" })).toThrow();
@@ -80,6 +83,8 @@ describe("WebUI management tasks", () => {
       requiresConfirmation: true,
     });
     expect(runner.preview({ operation: "service", action: "stop", target: "model-relay" })).toMatchObject({ effects: ["执行 codexc service stop relay"] });
+    expect(runner.preview({ operation: "service", action: "restart", target: "gateway" })).toMatchObject({ effects: ["执行 codexc restart gateway"] });
+    expect(runner.preview({ operation: "service", action: "restart", target: "model-relay" })).toMatchObject({ effects: ["执行 codexc restart relay"] });
     expect(runner.preview({ operation: "service", action: "reload" })).toMatchObject({
       effects: ["执行 codexc service reload"],
       target: null,
@@ -153,5 +158,22 @@ describe("WebUI management tasks", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it.each(["gateway", "model-relay"] as const)("executes the canonical restart command for %s", async target => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-webui-restart-"));
+    const executable = join(directory, process.platform === "win32" ? "codexc.cmd" : "codexc");
+    const capture = join(directory, "args.txt");
+    try {
+      writeFileSync(executable, process.platform === "win32"
+        ? '@echo off\r\necho %* > "%RESTART_TEST_CAPTURE%"\r\n'
+        : '#!/bin/sh\nprintf "%s\\n" "$*" > "$RESTART_TEST_CAPTURE"\n', { mode: 0o700 });
+      const runner = new WebuiManagementTaskRunner();
+      const task = runner.start({ operation: "service", action: "restart", target }, {
+        owner: "restart-owner", environment: { ...process.env, PATH: directory, RESTART_TEST_CAPTURE: capture },
+      });
+      await vi.waitFor(() => expect(runner.get(task.id, "restart-owner")?.state).toBe("completed"));
+      expect(readFileSync(capture, "utf8").trim()).toBe(`restart ${target === "model-relay" ? "relay" : target}`);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 });

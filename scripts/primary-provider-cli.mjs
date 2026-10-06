@@ -509,7 +509,7 @@ export async function runPrimaryProviderCli(
       if (prompts.isCancel(confirmed) || confirmed !== true) return;
     }
     await recoverResponsesProviderCatalog(id, action, environment);
-    output.write(`已恢复 ${id} 模型目录，请运行 codexc service restart all。\n`);
+    output.write(`已恢复 ${id} 模型目录，请运行 codexc restart all。\n`);
     return;
   }
   if (subcommand === "add") {

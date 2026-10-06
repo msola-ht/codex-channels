@@ -17,6 +17,26 @@ import { cli, execFileAsync, mkdtempSync } from "./codexc-cli-test-fixture.js";
 const linuxIt = process.platform === "linux" ? it : it.skip;
 const temporaryDirectories: string[] = [];
 
+function writeServiceDefinitions(root: string, targets = ["gateway", "app-server", "webui", "model-relay"]): void {
+  const directory = join(root, "config", "systemd", "user");
+  mkdirSync(directory, { recursive: true });
+  for (const target of targets) writeFileSync(join(directory, `codex-connect-${target}.service`), "fixture");
+}
+
+async function startWebuiReadinessFixture(configPath: string): Promise<ReturnType<typeof createServer>> {
+  const server = createServer((request, response) => {
+    response.writeHead(request.url === "/api/v1/health" ? 200 : 404);
+    response.end("{}");
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected HTTP address");
+  const document = readGatewayConfig(configPath);
+  document.webui = { host: "127.0.0.1", port: address.port };
+  writeGatewayConfig(configPath, document);
+  return server;
+}
+
 async function startManagedServiceReadinessFixture(
   configPath: string,
   environment: NodeJS.ProcessEnv,
@@ -78,8 +98,77 @@ afterEach(() => {
 });
 
 describe("codexc CLI", { timeout: 15_000 }, () => {
+  it("documents restart and rejects arguments or self-interruption before service changes", () => {
+    for (const flag of ["-h", "--help"]) {
+      const help = execFileSync(process.execPath, [cli, "restart", flag], { encoding: "utf8" });
+      expect(help).toContain("用法：codexc restart");
+      expect(help).toContain("WebUI");
+      expect(help).toContain("Relay");
+    }
+    const invalid = spawnSync(process.execPath, [cli, "restart", "all", "extra"], { encoding: "utf8" });
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toContain("用法：codexc restart");
+    const guarded = spawnSync(process.execPath, [cli, "restart"], {
+      encoding: "utf8", env: { ...process.env, CODEX_CONNECT_SERVICE_ROLE: "app-server" },
+    });
+    expect(guarded.status).toBe(1);
+    expect(guarded.stderr).toContain("不能在 Codex App Server 内执行");
+    for (const args of [["service", "restart"], ["service", "restart", "--help"], ["restart", "model-relay"]]) {
+      const rejected = spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });
+      expect(rejected.status).toBe(1);
+      expect(rejected.stderr).toMatch(/重启入口为|服务目标必须是/u);
+    }
+  });
+
+  linuxIt("restarts core services between WebUI stop and start and aborts on stop failures", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-restart-"));
+    temporaryDirectories.push(root);
+    const manager = join(root, "systemctl");
+    const log = join(root, "manager.log");
+    writeFileSync(manager, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$SERVICE_TEST_LOG"\nif [ "$2" = "show" ]; then printf "LoadState=loaded\\nActiveState=inactive\\nSubState=dead\\nMainPID=0\\n"; fi\nif [ "$2" = "stop" ] && [ "$3" = "$FAIL_STOP_UNIT" ]; then exit 1; fi\n');
+    chmodSync(manager, 0o755);
+    const configPath = join(root, "config.toml");
+    const environment = { ...process.env, HOME: root, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: root,
+      CODEX_CONNECT_CONFIG_FILE: configPath, CODEX_CONNECT_SERVICE_ROLE: "", SYSTEMCTL_BINARY: manager,
+      XDG_CONFIG_HOME: join(root, "config"), SERVICE_TEST_LOG: log };
+    execFileSync(process.execPath, [cli, "init"], { env: environment, cwd: root });
+    writeServiceDefinitions(root);
+    const config = readGatewayConfig(configPath);
+    config.telegram = { bot_token: "fixture", allowed_user_ids: [1] };
+    writeGatewayConfig(configPath, config);
+    const webui = await startWebuiReadinessFixture(configPath);
+    const readiness = await startManagedServiceReadinessFixture(configPath, environment);
+    const units = ["webui", "model-relay", "gateway", "app-server"];
+    const stops = units.map(unit => `--user stop codex-connect-${unit}.service`);
+    const operations = (): string[] => readFileSync(log, "utf8").trim().split("\n")
+      .filter(line => /^--user (?:stop|start|restart) /u.test(line));
+    try {
+      const { stdout } = await execFileAsync(process.execPath, [cli, "restart"], { env: environment, cwd: root });
+      expect(stdout).toContain("全部已选后台服务重启完成");
+      expect(operations()).toEqual([...stops,
+        "--user start codex-connect-app-server.service",
+        "--user start codex-connect-gateway.service",
+        "--user start codex-connect-webui.service",
+      ]);
+      for (const [index, unit] of units.entries()) {
+        writeFileSync(log, "");
+        await expect(execFileAsync(process.execPath, [cli, "restart"], {
+          env: { ...environment, FAIL_STOP_UNIT: `codex-connect-${unit}.service` }, cwd: root,
+        })).rejects.toThrow();
+        expect(operations()).toEqual(stops.slice(0, index + 1));
+      }
+      writeFileSync(log, "");
+      writeFileSync(configPath, "broken = [");
+      await expect(execFileAsync(process.execPath, [cli, "restart"], { env: environment, cwd: root })).rejects.toThrow();
+      expect(readFileSync(log, "utf8")).toBe("");
+    } finally {
+      await new Promise<void>((resolve, reject) => webui.close(error => error ? reject(error) : resolve()));
+      await readiness.close();
+    }
+  });
+
   it("documents canonical service targets and rejects retired spelling for non-start actions", () => {
-    for (const action of ["start", "stop", "restart", "status", "logs"]) {
+    for (const action of ["start", "stop", "status", "logs"]) {
       for (const flag of ["-h", "--help"]) {
         const help = execFileSync(process.execPath, [cli, "service", action, flag], { encoding: "utf8" });
         expect(help).toContain(`用法：codexc service ${action}`);
@@ -152,7 +241,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     );
     const invalidTarget = spawnSync(
       process.execPath,
-      [cli, "service", "restart", "unknown"],
+      [cli, "restart", "unknown"],
       { encoding: "utf8" },
     );
 
@@ -177,7 +266,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     mkdirSync(workspace);
     writeFileSync(
       fakeSystemctl,
-      "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"\n",
+      "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"\nif [ \"$2\" = show ]; then printf 'LoadState=loaded\\n'; fi\n",
     );
     chmodSync(fakeSystemctl, 0o755);
     writeFileSync(
@@ -208,13 +297,18 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     ]) {
       const result = spawnSync(
         process.execPath,
-        [cli, "service", ...args],
+        [cli, ...(args[0] === "restart" ? [] : ["service"]), ...args],
         { cwd: workspace, env: environment, encoding: "utf8" },
       );
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("不能在 Codex App Server 内执行会中断当前渠道的服务操作");
     }
     expect(existsSync(systemctlLog) ? readFileSync(systemctlLog, "utf8") : "").toBe("");
+
+    writeServiceDefinitions(root, ["gateway"]);
+    const config = readGatewayConfig(join(home, "config.toml"));
+    config.telegram = { bot_token: "fixture", allowed_user_ids: [1] };
+    writeGatewayConfig(join(home, "config.toml"), config);
 
     const readiness = await startManagedServiceReadinessFixture(
       join(home, "config.toml"),
@@ -223,7 +317,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     try {
       const { stdout } = await execFileAsync(
         process.execPath,
-        [cli, "service", "restart", "gateway"],
+        [cli, "restart", "gateway"],
         {
           cwd: workspace,
           env: {
@@ -236,7 +330,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       );
       expect(stdout).toContain("Gateway 已就绪；Codex App Server 保持运行");
       expect(readFileSync(systemctlLog, "utf8")).toContain(
-        "--user restart codex-connect-gateway.service",
+        "--user start codex-connect-gateway.service",
       );
       expect(readFileSync(systemctlLog, "utf8")).not.toContain(
         "codex-connect-app-server.service",
@@ -274,12 +368,16 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     );
 
     try {
-      const start = spawnSync(
+      const webui = await startWebuiReadinessFixture(join(home, "config.toml"));
+      try {
+        await execFileAsync(
         process.execPath,
         [cli, "service", "start", "webui"],
         { env: environment, encoding: "utf8" },
       );
-      expect(start.status).toBe(0);
+      } finally {
+        await new Promise<void>((resolve, reject) => webui.close(error => error ? reject(error) : resolve()));
+      }
       expect(readFileSync(systemctlLog, "utf8")).toContain(
         "--user start codex-connect-webui.service",
       );
@@ -307,16 +405,6 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       expect(defaultStartLog).toContain("codex-connect-app-server.service");
       expect(defaultStartLog).toContain("codex-connect-gateway.service");
 
-      writeFileSync(systemctlLog, "");
-      const { stdout: defaultRestartStdout } = await execFileAsync(
-        process.execPath,
-        [cli, "service", "restart"],
-        { env: environment, encoding: "utf8" },
-      );
-      expect(defaultRestartStdout).toContain("Gateway 已就绪；Codex App Server 保持运行");
-      const defaultRestartLog = readFileSync(systemctlLog, "utf8");
-      expect(defaultRestartLog).toContain("codex-connect-gateway.service");
-      expect(defaultRestartLog).not.toContain("codex-connect-app-server.service");
     } finally {
       await readiness.close();
     }

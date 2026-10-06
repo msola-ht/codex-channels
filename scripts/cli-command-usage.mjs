@@ -48,12 +48,18 @@ export const serviceCommandActions = Object.freeze([
   "start",
   "stop",
   "reload",
-  "restart",
   "status",
   "logs",
 ]);
 
 const serviceTargetUsage = internalServiceTargetUsage.split("|").map(serviceCommandTarget).join("|");
+
+export const restartCommandUsage = `用法：codexc restart [${serviceTargetUsage}]
+
+默认 all：重启 Gateway、全部 App Server、已安装的 WebUI，以及已安装且启用的 Relay。
+预检通过后按 WebUI、Relay、Gateway、App Server 顺序停止，再按相反顺序逐项启动并确认就绪。
+未安装的可选服务会跳过；已安装但未启用的 Relay 只停止。单独指定目标时要求已安装。
+失败即中止后续步骤，不自动回滚。App Server 与 all 必须在本机终端执行。`;
 
 export const serviceCommandUsage = Object.freeze({
   install: "用法：codexc service install",
@@ -61,7 +67,6 @@ export const serviceCommandUsage = Object.freeze({
   start: `用法：codexc service start [${serviceTargetUsage}]`,
   stop: `用法：codexc service stop [${serviceTargetUsage}]`,
   reload: "用法：codexc service reload",
-  restart: `用法：codexc service restart [${serviceTargetUsage}]`,
   status: `用法：codexc service status [${serviceTargetUsage}] [--json]`,
   logs: `用法：codexc service logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]`,
 });
