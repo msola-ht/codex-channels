@@ -343,37 +343,48 @@ describe("InteractionRouter", () => {
   });
 
   it("delivers only one interaction at a time within the same Conversation", async () => {
+    vi.useFakeTimers();
     const interaction = new ControlledInteraction();
     const router = new InteractionRouter();
     router.register("telegram", "default", interaction);
-    const firstRequest = approvalInteractionRequest({
-      requestId: "request-first",
-    });
-    const secondRequest = approvalInteractionRequest({
-      requestId: "request-second",
-    });
+    try {
+      const firstRequest = approvalInteractionRequest({
+        requestId: "request-first",
+      });
+      const secondRequest = approvalInteractionRequest({
+        requestId: "request-second",
+      });
 
-    const first = router.request(target, firstRequest);
-    const second = router.request(target, secondRequest);
+      const first = router.request(target, firstRequest);
+      const second = router.request(target, secondRequest);
 
-    expect(interaction.requests).toEqual([firstRequest]);
-    interaction.resolveNext({
-      type: "approval",
-      approved: true,
-      scope: "once",
-    });
-    await expect(first).resolves.toEqual({
-      type: "approval",
-      approved: true,
-      scope: "once",
-    });
-    expect(interaction.requests).toEqual([firstRequest, secondRequest]);
+      expect(interaction.requests).toEqual([firstRequest]);
+      const queuedWaitMs = 2;
+      await vi.advanceTimersByTimeAsync(queuedWaitMs);
+      interaction.resolveNext({
+        type: "approval",
+        approved: true,
+        scope: "once",
+      });
+      await expect(first).resolves.toEqual({
+        type: "approval",
+        approved: true,
+        scope: "once",
+      });
+      expect(interaction.requests).toEqual([
+        firstRequest,
+        { ...secondRequest, expiresInMs: secondRequest.expiresInMs - queuedWaitMs },
+      ]);
 
-    interaction.resolveNext({ type: "approval", approved: false });
-    await expect(second).resolves.toEqual({
-      type: "approval",
-      approved: false,
-    });
+      interaction.resolveNext({ type: "approval", approved: false });
+      await expect(second).resolves.toEqual({
+        type: "approval",
+        approved: false,
+      });
+    } finally {
+      router.cancelAll();
+      vi.useRealTimers();
+    }
   });
 
   it("does not deliver a queued interaction after another client resolves it", async () => {
