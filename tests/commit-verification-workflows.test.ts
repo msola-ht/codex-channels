@@ -17,17 +17,19 @@ const workflows = [
 
 describe("commit verification workflows", () => {
   it.skipIf(process.platform === "win32").each([
-    { failure: "", status: 0 },
-    { failure: "run check", status: 17 },
-    { failure: "run build -- --noCheck", status: 17 },
-    { failure: "vitest", status: 17 },
-  ])("checks types before emitting and stops dependent stages on $failure", ({ failure, status }) => {
+    ...[true, false].flatMap(ci => [
+      { ci, failure: "", status: 0 },
+      { ci, failure: "run check", status: 17 },
+      { ci, failure: "run build -- --noCheck", status: 17 },
+      { ci, failure: "vitest", status: 17 },
+    ]),
+  ])("checks types before emitting and stops dependent stages on $failure (CI: $ci)", ({ ci, failure, status }) => {
     const directory = mkdtempSync(join(tmpdir(), "commit-gate-"));
     try {
-      for (const child of ["scripts", "runtime", "bin", "webui", "node_modules/vitest"]) {
+      for (const child of ["scripts", "runtime", "bin", "webui", "src/delivery", "node_modules/vitest", "node_modules/eslint/bin"]) {
         mkdirSync(join(directory, child), { recursive: true });
       }
-      for (const file of ["scripts/verify-commit.mjs", "scripts/verification-scope.mjs", "scripts/run-upgrade-validation.mjs", "runtime/executable.mjs"]) {
+      for (const file of ["scripts/verify-commit.mjs", "scripts/verification-scope.mjs", "runtime/executable.mjs"]) {
         copyFileSync(join(process.cwd(), file), join(directory, file));
       }
       const recorder = `
@@ -40,8 +42,11 @@ if (command === process.env.VERIFY_FAIL) process.exit(17);
         writeFileSync(join(directory, "bin", command), `#!/usr/bin/env node\n${recorder}`, { mode: 0o755 });
       }
       writeFileSync(join(directory, "node_modules/vitest/vitest.mjs"), recorder);
+      writeFileSync(join(directory, "node_modules/eslint/bin/eslint.js"), recorder);
+      writeFileSync(join(directory, "src/delivery/example.ts"), "export const value = 1;");
+      writeFileSync(join(directory, "changes"), "M\0src/delivery/example.ts\0");
       const eventsFile = join(directory, "events");
-      const result = spawnSync(process.execPath, ["scripts/verify-commit.mjs", "--ci"], {
+      const result = spawnSync(process.execPath, ["scripts/verify-commit.mjs", ...(ci ? ["--ci"] : ["--changes-file", "changes"])], {
         cwd: directory,
         encoding: "utf8",
         env: {
@@ -168,7 +173,8 @@ if (command === process.env.VERIFY_FAIL) process.exit(17);
     expect(packageDocument.scripts["test:package"]).toContain("smoke-source-prepare.mjs");
     const ciPlan = createVerificationPlan([], { ci: true });
     expect(ciPlan.checks.some((check: { name: string }) => /安装|合同/u.test(check.name))).toBe(false);
-    expect(verification).toContain("test:package:tarball-prepared");
+    const packagePlan = createVerificationPlan([{ status: "M", path: "package.json" }]);
+    expect(packagePlan.checks.some((check: { name: string }) => /安装|合同/u.test(check.name))).toBe(false);
     expect(verification).not.toContain('args: ["run", "test:package:prepared"]');
   });
 
@@ -188,41 +194,47 @@ if (command === process.env.VERIFY_FAIL) process.exit(17);
   it("keeps documentation checks small and unrelated suites out of test-only commits", () => {
     const docsPlan = createVerificationPlan([{ status: "M", path: "docs/display.md" }]);
     expect(docsPlan.checks.map((check: { name: string }) => check.name)).toEqual(["文档与索引"]);
-    const testPlan = createVerificationPlan([{ status: "A", path: "tests/new-behavior.test.ts" }]);
+    const testPlan = createVerificationPlan([{ status: "M", path: "tests/commit-verification-workflows.test.ts" }]);
     const testCheck = testPlan.checks.find((check: { name: string }) => check.name === "受影响测试");
-    expect(testCheck.args).toContain(resolve("tests/new-behavior.test.ts"));
+    expect(testCheck.args).toContain(resolve("tests/commit-verification-workflows.test.ts"));
     expect(testCheck.args).not.toContain(resolve("tests/codexc-cli-doctor.test.ts"));
   });
 
-  it("includes dynamic readers, their helper consumers and compiled inputs", () => {
+  it("keeps compiled inputs without adding unrelated dynamic readers or helper consumers", () => {
     const root = mkdtempSync(join(tmpdir(), "commit-related-"));
     try {
       mkdirSync(join(root, "tests/support"), { recursive: true });
+      mkdirSync(join(root, "src/delivery"), { recursive: true });
+      writeFileSync(join(root, "src/delivery/queue.ts"), "export const value = 2;");
       writeFileSync(join(root, "tests/cli.test.ts"), 'import { spawnSync } from "node:child_process";');
       writeFileSync(join(root, "tests/support/files.ts"), 'import { readFile } from "node:fs/promises";');
       writeFileSync(join(root, "tests/dynamic.test.ts"), "await import(modulePath);");
       writeFileSync(join(root, "tests/ordinary.test.ts"), 'import { expect } from "vitest";');
       const plan = createVerificationPlan([{ status: "M", path: "src/delivery/queue.ts" }], { root });
       const related = plan.checks.find((check: { name: string }) => check.name === "受影响测试");
-      for (const path of ["src/delivery/queue.ts", "dist/delivery/queue.js", "tests/cli.test.ts", "tests/support/files.ts", "tests/dynamic.test.ts"]) {
+      for (const path of ["src/delivery/queue.ts", "dist/delivery/queue.js"]) {
         expect(related.args).toContain(join(root, path));
       }
-      expect(related.args).not.toContain(join(root, "tests/ordinary.test.ts"));
+      for (const path of ["tests/cli.test.ts", "tests/support/files.ts", "tests/dynamic.test.ts", "tests/ordinary.test.ts"]) {
+        expect(related.args).not.toContain(join(root, path));
+      }
       const names = plan.checks.map((check: { name: string }) => check.name);
       expect(names.indexOf("Gateway 构建")).toBeLessThan(names.indexOf("受影响测试"));
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  it("selects real consumers of dynamically launched test fixtures", () => {
+  it("leaves dynamically launched fixtures and specialized contracts to CI", () => {
     const path = "tests/fixtures/mcp-tool-approval-server.mjs";
     const plan = createVerificationPlan([{ status: "M", path }]);
     const related = plan.checks.find((check: { name: string }) => check.name === "受影响测试");
-    expect(related.args).toContain(resolve("tests/real-app-server-isolated-state.test.ts"));
+    expect(related.args).toContain(resolve(path));
+    expect(related.args).not.toContain(resolve("tests/real-app-server-isolated-state.test.ts"));
     expect(verificationScope([{ status: "M", path }]).appServer).toBe(true);
-    expect(plan.checks.some((check: { name: string }) => check.name === "真实 App Server 合同")).toBe(true);
+    expect(plan.checks.some((check: { name: string }) => check.name === "真实 App Server 合同")).toBe(false);
+    expect(plan.reason).toContain("PR CI");
   });
 
-  it.skipIf(process.platform === "win32")("executes graph, compiled and implicit helper boundaries without unrelated suites", () => {
+  it.skipIf(process.platform === "win32")("executes direct source, compiled and helper consumers and accepts no related tests", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "commit-vitest-related-")));
     try {
       for (const path of ["tests/support", "src/delivery", "dist/delivery"]) mkdirSync(join(root, path), { recursive: true });
@@ -236,19 +248,50 @@ if (command === process.env.VERIFY_FAIL) process.exit(17);
       writeFileSync(join(root, "tests/support/files.ts"), 'import { existsSync } from "node:fs"; export const value = existsSync(process.cwd()) ? 2 : 0;');
       writeFileSync(join(root, "tests/helper.test.ts"), `import { value } from "./support/files.ts"; ${assertion}`);
       writeFileSync(join(root, "tests/cli.test.ts"), `import { spawnSync } from "node:child_process"; const value = spawnSync(process.execPath, ["-e", "process.exit(0)"]).status === 0 ? 2 : 0; ${assertion}`);
+      writeFileSync(join(root, "src/delivery/unused.ts"), "export const value = 2;");
       writeFileSync(join(root, "tests/unrelated.test.ts"), 'import { it } from "vitest"; it("unrelated", () => { throw new Error("must not select unrelated suite"); });');
-      const plan = createVerificationPlan([{ status: "M", path: "src/delivery/queue.ts" }], { root });
-      const test = plan.checks.find((check: { name: string }) => check.name === "受影响测试");
-      const result = spawnSync(test.command, test.args, { cwd: root, encoding: "utf8" });
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(stripVTControlCharacters(result.stdout)).toMatch(/Test Files\s+4 passed/u);
+      for (const [path, expected] of [
+        ["src/delivery/queue.ts", /Test Files\s+2 passed/u],
+        ["tests/support/files.ts", /Test Files\s+1 passed/u],
+        ["src/delivery/unused.ts", /No test files found/u],
+      ] as const) {
+        const plan = createVerificationPlan([{ status: "M", path }], { root });
+        const test = plan.checks.find((check: { name: string }) => check.name === "受影响测试");
+        const result = spawnSync(test.command, test.args, { cwd: root, encoding: "utf8" });
+        expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+        expect(stripVTControlCharacters(`${result.stdout}\n${result.stderr}`)).toMatch(expected);
+      }
+      const failurePlan = createVerificationPlan([{ status: "M", path: "tests/unrelated.test.ts" }], { root });
+      const failureCheck = failurePlan.checks.find((check: { name: string }) => check.name === "受影响测试");
+      const failure = spawnSync(failureCheck.command, failureCheck.args, { cwd: root, encoding: "utf8" });
+      expect(failure.status).toBe(1);
+      expect(`${failure.stdout}\n${failure.stderr}`).toContain("must not select unrelated suite");
     } finally { rmSync(root, { recursive: true, force: true }); }
   }, 15_000);
 
-  it.each(["D\0src/example.ts\0", "A\0unknown-input.json\0"])("falls back conservatively for %s", output => {
+  it.each(["D\0src/example.ts\0", "D\0tests/deleted.test.ts\0", "A\0unknown-input.json\0"])("reports the CI coverage boundary for %s", output => {
     const plan = createVerificationPlan(parseChangedFiles(output));
-    expect(plan.checks.some((check: { name: string }) => check.name === "完整测试")).toBe(true);
-    expect(plan.reason).toContain("保守");
+    expect(plan.checks.map((check: { name: string }) => check.name)).toContain("类型与版本");
+    expect(plan.checks.map((check: { name: string }) => check.name)).toContain("Gateway 构建");
+    expect(plan.checks.some((check: { name: string }) => /测试/u.test(check.name))).toBe(false);
+    expect(plan.reason).toContain("PR CI 执行完整回归");
+    expect(plan.reason).toContain("本地测试未执行");
+  });
+
+  it("still selects existing changed tests alongside deleted or shared configuration inputs", () => {
+    const plan = createVerificationPlan([
+      { status: "D", path: "src/deleted.ts" },
+      { status: "M", path: "package.json" },
+      { status: "M", path: "tests/commit-verification-workflows.test.ts" },
+    ]);
+    const related = plan.checks.find((check: { name: string }) => check.name === "受影响测试");
+    expect(related.args).toContain(resolve("tests/commit-verification-workflows.test.ts"));
+    expect(related.args).not.toContain(resolve("src/deleted.ts"));
+    expect(related.args).not.toContain(resolve("package.json"));
+    expect(plan.checks.some((check: { name: string }) => /完整测试|安装|合同/u.test(check.name))).toBe(false);
+    expect(plan.reason).toContain("PR CI 执行完整回归");
+    const ciPlan = createVerificationPlan([], { ci: true });
+    expect(ciPlan.checks.some((check: { name: string }) => check.name === "完整测试")).toBe(true);
   });
 
   it("classifies specialized checks across additions, deletions, and renamed old/new paths", () => {
@@ -259,12 +302,11 @@ if (command === process.env.VERIFY_FAIL) process.exit(17);
     expect(() => parseChangedFiles("M\0")).toThrow();
     expect(() => parseChangedFiles("R100\0old\0new\0")).toThrow();
     const packagePlan = createVerificationPlan([{ status: "M", path: "package.json" }]);
-    expect(packagePlan.checks.filter((check: { name: string }) => /安装冒烟/u.test(check.name))).toHaveLength(1);
+    expect(packagePlan.checks.filter((check: { name: string }) => /安装冒烟/u.test(check.name))).toHaveLength(0);
     expect(packagePlan.checks.some((check: { name: string }) => check.name === "干净源码安装冒烟")).toBe(false);
     const protocolPlan = createVerificationPlan([{ status: "D", path: "src/codex-protocol/generated/Example.ts" }]);
-    const contract = protocolPlan.checks.find((check: { name: string }) => check.name === "真实 App Server 合同");
-    expect(contract.environment.RUN_CODEX_CONTRACT).toBe("1");
-    expect(contract.args).toContain("tests/real-app-server-reset-credits.test.ts");
+    expect(protocolPlan.checks.some((check: { name: string }) => check.name === "真实 App Server 合同")).toBe(false);
+    expect(verificationScope([{ status: "D", path: "src/codex-protocol/generated/Example.ts" }]).appServer).toBe(true);
   });
 
   it.each([

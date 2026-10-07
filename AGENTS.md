@@ -215,10 +215,18 @@ Surface -> Application/Core <- Codex Client
 - During development, choose targeted tests, `check`, `lint` or `docs:check` according to impact, reusing valid verification evidence;
   do not default to full tests, builds, packaging or installation smoke tests. Commit and CI gates still run through their own entry points.
   Add specialized checks when their corresponding boundaries change, such as protocol, Transport, service templates or package installation.
+- Documentation, comments and agent-rule edits normally need only diff review and applicable documentation checks, not builds or runtime tests.
+  For code changes, start with the smallest existing suite covering the changed behavior; use static checks for type, lint or dependency-boundary risks.
+  These are alternatives selected by impact, not a checklist to run together. Pure moves and behavior-preserving refactors do not automatically require full regression.
 - Select checks for changed behavior, relevant failure paths and integration risks. Repeat a successful check only when its inputs or environment changed,
   or a concrete unresolved concern requires it; entering review or delivery alone does not require another validation round.
+  Batch related test files in one invocation. After a correction, rerun the failed or newly affected checks, not every previously successful check.
+  When a commit is requested and the change is ready, let the required Hook perform its checks instead of manually duplicating them immediately beforehand;
+  earlier focused runs remain appropriate for diagnosis. Do not reproduce the full CI suite locally merely because a push or review is next.
 - Build requirements depend on test inputs. Tests loading source directly may run alone; CLI, installation or integration tests reading `dist/` must use current build output.
-  `npm test -- <test-file>` already builds; do not add another build.
+  For source-only tests, use `npx --no-install vitest run --config vitest.config.ts <test-files>` without a build.
+  `npm test -- <test-files>` already builds; use it when fresh build output is required and do not add another build.
+  If the required build output is already current, run the selected tests directly. Never reuse stale artifacts.
 - Authorized development includes relevant local verification using disposable fixtures and fixing failures caused by the requested change, without approval at every step.
   For integration operations touching the user's current App Server, account, specific Thread or service state, check actual effects and existing authorization.
   Do not extend isolated-test authorization to live environments.
@@ -231,10 +239,13 @@ Surface -> Application/Core <- Codex Client
   Honor `--ignore-scripts`, including in CI. Before a normal local commit, repair a missing or unusable hook with `npm run hooks:install`.
   Manual runs are allowed when changing CI or gates, explicitly requested, or needed to diagnose a failure independently.
   Never bypass gates with `--no-verify` or reduced checks.
-- Local commits run necessary static checks and affected tests; PR CI runs full regression through `npm run verify:ci`.
-  Test selection must account for runtime-loaded code and compiled artifacts, not only static imports; uncertain impact requires a conservative fallback.
-  Installation smoke checks run for installation, packaging or npm lifecycle changes, and for releases and CLI upgrades, rather than every ordinary commit.
-  CI runs real App Server contracts for relevant protocol, lifecycle or contract changes; manual CI dispatch retains full specialized verification.
+- Local commits run necessary static checks and directly affected tests through a lightweight gate; PR CI runs full regression through `npm run verify:ci`.
+  Include changed source and corresponding compiled paths in dependency selection, but do not add every dynamic reader or subprocess test to each commit.
+  Broad dynamic integration coverage and inputs whose impact cannot be resolved by the dependency graph belong to full PR CI;
+  no selected local tests does not mean those behaviors were verified. Deletions and shared configuration changes do not automatically trigger full local regression.
+  Installation smoke and real App Server contract stages run in CI for their relevant scopes, rather than in the ordinary commit Hook;
+  manual CI dispatch retains full specialized verification. Focused local integration diagnosis remains appropriate for the actual change.
+  Run full local regression only for a concrete diagnostic need, an explicit request, or release/upgrade requirements, and explain the reason first.
   Only after a full type check succeeds may verification emit fresh artifacts with `--noCheck`; standalone `npm test` and `npm run build` retain full type checking.
   Clean-source global installation remains required in full `npm run test:package`, explicitly authorized source releases and Codex CLI upgrade validation.
 - When changing check scripts, Git hooks or CI, keep `verify:commit`, `verify:ci`, `.githooks/pre-commit`, GitHub Actions and affected script indexes and workflow documentation consistent.
@@ -244,10 +255,12 @@ Surface -> Application/Core <- Codex Client
 - When changing tests, use the relevant coverage and fixture guidance in [`tests/README.md`](tests/README.md).
   Keep fixtures isolated; do not change production behavior or weaken security boundaries merely to make a fixture pass.
 - For failed CI, inspect each failed job and its first actionable error; compare runtime versions, platform, paths and lifecycle behavior before editing.
-  Reproduce with isolated fixtures where possible and add focused regression coverage. Do not replace diagnosis with blind reruns, skipped tests or weaker checks.
+  Reproduce with isolated fixtures where possible and add focused regression coverage only if existing coverage cannot catch the defect.
+  Do not replace diagnosis with blind reruns, skipped tests or weaker checks.
   Local verification and remote CI are separate evidence: report the exact commit and remaining failed/pending jobs, and never describe a PR as fully verified until its current required checks pass.
 - Changes to protocol semantics, Transport behavior or shared App Server lifecycle/state handling require real App Server smoke verification covering the change.
-  Extend existing contracts if insufficient; mocks alone are not enough. Presentation or internal changes over unchanged contracts do not trigger this requirement by association.
+  Extend existing contracts if insufficient; mocks alone are not enough. These contracts may run in the required PR CI stage instead of the local commit Hook;
+  report them as pending until that stage succeeds. Presentation or internal changes over unchanged contracts do not trigger this requirement by association.
 - If required verification cannot run, report the missing checks, reasons and executable follow-up checks in the delivery.
 
 ## Linux Browser Verification

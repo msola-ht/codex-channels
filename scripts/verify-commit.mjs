@@ -1,11 +1,10 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
 
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
-import { defaultUpgradeValidationStages } from "./run-upgrade-validation.mjs";
 import { changedFiles, parseChangedFiles, verificationScope } from "./verification-scope.mjs";
 
 const checkTypes = { name: "类型与版本", command: "npm", args: ["run", "check"] };
@@ -60,40 +59,28 @@ export function createVerificationPlan(changes, { ci = false, root = process.cwd
   let reason = "仅文档变更，无需执行测试";
   if (code.length) {
     checks.push(gatewayBuild);
-    const fallback = changes.some(change => change.status === "D" && !change.path.endsWith(".md"))
+    const requiresCi = changes.some(change => change.status === "D" && !change.path.endsWith(".md"))
       || code.length > 100 || code.some(path => !/^(?:src|tests|bin|runtime|scripts|webui)\/.*\.(?:ts|tsx|js|jsx|mjs)$/u.test(path));
-    if (fallback) {
-      reason = "删除、共享配置或无法静态确定影响的输入变更，保守执行完整测试";
-      checks.push(allTests());
-    } else {
-      reason = "依赖图选择受影响测试，并补充动态文件读取、CLI/子进程和 dist 边界";
+    reason = requiresCi
+      ? "删除、共享配置或无法可靠界定影响：本地静态检查及直接相关测试；PR CI 执行完整回归"
+      : "本地静态检查及依赖图直接相关测试（含 dist 消费者）；动态文件读取、CLI/子进程集成由 PR CI 完整回归覆盖";
+    const inputs = relatedInputs(code, root);
+    if (inputs.length) {
       checks.push({ name: "受影响测试", command: process.execPath, args: [
-        "node_modules/vitest/vitest.mjs", "related", "--run", "--config", "vitest.config.ts",
-        ...relatedInputs(code, root),
+        "node_modules/vitest/vitest.mjs", "related", "--run", "--passWithNoTests", "--config", "vitest.config.ts",
+        ...inputs,
       ] });
-    }
+    } else reason += "；无可用于依赖图选择的现存代码输入，本地测试未执行";
   }
-  if (scope.package) checks.push(
-    { name: "npm tarball 安装冒烟", command: "npm", args: ["run", "test:package:tarball-prepared"] },
-  );
-  if (scope.appServer) checks.push(defaultUpgradeValidationStages.find(stage => stage.id === "contract-tests"));
   return { reason, checks };
 }
 
 function relatedInputs(paths, root) {
-  const inputs = new Set(paths.map(path => resolve(root, path)));
-  for (const path of paths.filter(path => path.startsWith("src/") && path.endsWith(".ts"))) {
+  const existingCode = paths.filter(path => /^(?:src|tests|bin|runtime|scripts|webui)\/.*\.(?:ts|tsx|js|jsx|mjs)$/u.test(path)
+    && existsSync(join(root, path)));
+  const inputs = new Set(existingCode.map(path => resolve(root, path)));
+  for (const path of existingCode.filter(path => path.startsWith("src/") && path.endsWith(".ts"))) {
     inputs.add(resolve(root, "dist", path.slice(4).replace(/\.ts$/u, ".js")));
-  }
-  // A test can spawn an entry point or inspect a file without importing it.
-  // Include those tests/helpers as graph inputs rather than maintaining a growing
-  // mapping of command, test and module names. Helper consumers follow the graph.
-  if (paths.some(path => !/^tests\/.*\.test\.ts$/u.test(path))) {
-    for (const entry of readdirSync(join(root, "tests"), { recursive: true })) {
-      if (!/\.(?:ts|mjs|js)$/u.test(entry)) continue;
-      const path = resolve(root, "tests", entry);
-      if (/node:(?:fs|child_process)|\bcreateRequire\b|import\s*\(\s*[^"'\s]/u.test(readFileSync(path, "utf8"))) inputs.add(path);
-    }
   }
   return [...inputs];
 }

@@ -435,11 +435,13 @@
 - `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置。
 - `webui-i18n.mjs`：静态读取 WebUI 中英文文案字典，检查键与占位符，并按 Git 基线输出包含术语表的增量翻译任务 JSON；不执行字典代码、不调用翻译服务、不写回译文。
 - `verification-scope.mjs`：集中定义本地提交与 CI 专项的改动范围分类；CI 按 base 到 head 的完整差异选择安装及 App Server 合同检查。
-- `verify-commit.mjs`：本地 `verify:commit` 按改动范围执行静态检查和受影响测试，`verify:ci` 执行完整回归，
+- `verify-commit.mjs`：本地 `verify:commit` 按改动范围执行必要静态检查和依赖图直接相关测试，`verify:ci` 执行完整回归，
+  源码同时映射到 `dist/` 输入，未匹配测试时允许跳过；动态文件读取、CLI/子进程集成及共享配置、删除的完整影响交由 PR CI 覆盖，
+  本地日志明确说明这一边界。安装与真实 App Server 专项由 CI 按相关改动执行，不纳入普通提交。
   输出选中范围、每个阶段及全部检查的累计耗时。类型检查使用 TypeScript 原生增量缓存，仍覆盖源码与测试及其依赖；
   缓存位于 `node_modules/.cache/codexc/check.tsbuildinfo`，可删除后重建，不缓存后续版本和边界检查。
   需要构建产物时，在完整类型检查成功后才清理并构建 Gateway，使用 `--noCheck` 避免重复类型分析；
-  测试与按需执行的 tarball 安装冒烟复用这一份新产物。独立 `npm test` 和 `npm run build` 保留完整类型检查。
+  测试复用这一份新产物。独立 `npm test` 和 `npm run build` 保留完整类型检查。
   干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
 - `config-backup.mjs`：调用方持有配置锁并验证目标后，执行私有备份、同步及逐字节校验，再原子保存，可传递完整文件容量上限；供 Relay 管理等配置写入使用。

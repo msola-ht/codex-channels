@@ -50,8 +50,11 @@ GitHub Actions 分别对根目录和 `webui` 使用 `npm ci --ignore-scripts`，
 hook 配置；随后直接调用 `npm run verify:ci`。本地 `npm ci`、`npm install` 或
 `npm run hooks:install` 则启用仓库内 `.githooks/pre-commit`。
 
-本地 Hook 使用 `verify:commit`，按本次提交范围执行静态检查与受影响测试，不固定执行完整回归。
-范围选择由 `scripts/verification-scope.mjs` 统一定义；动态加载、读取构建产物及无法可靠判断的影响需要保守处理。
+本地 Hook 使用 `verify:commit`，按本次提交范围执行必要静态检查和依赖图直接相关测试。
+源码输入同时映射到 `dist/`，保留直接导入构建产物的测试；无相关测试时允许跳过。
+提交阶段不扫描并补入全部动态文件读取、CLI/子进程测试，也不执行完整回归、安装冒烟或真实 App Server 专项。
+共享配置、删除及其他无法可靠界定的影响在本地日志中明确交由 PR CI 完整回归覆盖，不能将本地结果称为完整验证。
+范围分类仍由 `scripts/verification-scope.mjs` 统一定义，CI 的完整回归和专项范围保持独立。
 CI 的专项范围使用 PR base 到 head 的完整差异，包含新增、删除和重命名，不只检查最后一次提交。
 安装专项与真实 App Server 合同没有相关变化时不执行；手动触发 CI 时两项均执行。
 合同 Job 保留原有名称，无相关变化时明确输出无需执行的原因，不将未执行的合同描述为测试通过。

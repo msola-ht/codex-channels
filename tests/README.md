@@ -47,8 +47,10 @@ CLI 用例按领域直接保存在 `codexc-cli*.test.ts`；`codexc-cli-test-fixt
 npm test -- tests/session-router.test.ts
 ```
 
-本地提交由 Hook 调用 `npm run verify:commit`，按改动范围选择检查与测试；PR CI 使用
-`npm run verify:ci` 执行完整回归。安装冒烟和真实 App Server 合同按相关改动触发，手动 CI 执行完整专项验证。
+本地提交由 Hook 调用 `npm run verify:commit`，选择必要静态检查和依赖图直接相关测试；源码同时映射到
+`dist/` 输入，无相关测试时允许跳过。动态文件读取、CLI/子进程集成及配置、删除的完整影响交由 PR CI
+使用 `npm run verify:ci` 执行完整回归，本地结果不代表完整回归通过。
+安装冒烟和真实 App Server 合同在 CI 按相关改动触发，手动 CI 执行完整专项验证。
 已有有效结果可以复用，进入审查或交付阶段不要求重新跑一轮。具体范围选择见[验证流程](../.github/workflows/README.md)。
 
 需要完整测试时运行：
