@@ -23,9 +23,10 @@
   主实例租约存在时拒绝会触发子进程切换的启动；打开 Desktop 前释放临时租约。
   macOS 的具体构建实机验收边界见 `docs/codex-desktop-app-development.md`，Windows 尚未实机验收。
 - `desktop-app-proxy.mjs`：只由 macOS Desktop 的 `CODEX_CLI_PATH` 启动；解析并受控传递 Desktop
-  内置插件的布尔启用值，把动态工具 Pipe 通过私有 Supervisor 租约交给服务，再把 Desktop JSONL
-  stdio 逐条转换为 WebSocket 文本帧并连接现有私有 UDS，
-  自身退出时只释放租约和 Proxy，不终止共享 App Server。
+  内置插件的布尔启用值；无插件配置时不获取租约，直接连接共享主实例，带配置时把动态工具 Pipe
+  通过私有 Supervisor Host 租约交给服务，显式 `false` 仍走 Host 租约路径。把 Desktop JSONL
+  stdio 逐条转换为 WebSocket 文本帧并连接现有私有 UDS，自身退出时清理 Proxy 和持有的租约，
+  不终止共享 App Server。
 - `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
 - `source-update.mjs` / `source-update.d.mts`：从本机终端更新受管官方 `main`；跨平台独占锁阻止并发更新，候选克隆启用长路径支持。先构建并只读检查配置、数据库结构和精确 CLI 合同，CLI 不匹配时确认后同步。记录 App Server、Gateway、Relay、WebUI 状态，按依赖顺序停服；刷新源码与全局命令后，只恢复原本运行的服务，Relay 还须保持启用。恢复前再次校验 CLI 版本和配置、数据库，失败保留阶段及必要备份。无新提交或本地构建包只同步配套 CLI，不更新 Gateway 包；关闭 daemon 自动启动，其他用户偏好和模型目录不变。

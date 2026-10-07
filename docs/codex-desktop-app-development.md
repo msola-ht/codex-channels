@@ -120,9 +120,13 @@ Desktop 生成、删除、重写或缓存业务消息。macOS Proxy 只在 JSONL
 
 两个平台的每个转发方向最多保留 128 条、合计 128 MiB 的消息，包含正在发送的消息；macOS 未完成的 JSONL 行也限制为 128 MiB。单次发送等待最多 5 秒，容量或超时失败明确终止当前连接，不丢弃消息后继续会话、不自动重放写请求。Windows 桥以 `1013` 通知转发不可用并释放 Transport 与租约；macOS Proxy 返回失败并清理输入监听。恢复连接仍由 Desktop 或操作者处理。
 
-两条平台路径都在连接期间持有主 Provider 租约，空闲释放不能终止主实例。macOS 最后一个 Host
-租约关闭时只清除服务内存中的临时 Pipe 附加状态，不终止共享主实例；Windows 桥连接关闭时释放
-上游 Transport 与租约。App Server 服务关闭时停止接受新连接并有限等待现有生命周期操作。
+Windows 桥在连接期间持有主 Provider 租约；macOS 带内置工具插件配置的连接持有 Desktop Host
+租约。这些租约存在时，空闲释放不能终止主实例。macOS 未携带插件配置的普通连接直接代理到
+共享主实例，不获取租约，也不负责恢复已释放的实例或阻止空闲释放；`codexc app` 的启动预检
+会先通过临时租约恢复实例，并在打开 Desktop 前释放该租约。显式关闭插件的 `false` 配置仍走
+Host 租约路径。macOS 最后一个 Host 租约关闭时只清除服务内存中的临时 Pipe 附加状态，不终止
+共享主实例；Windows 桥连接关闭时释放上游 Transport 与租约。App Server 服务关闭时停止接受
+新连接并有限等待现有生命周期操作。
 
 macOS Host 附加在主 Provider 的串行生命周期操作中恢复已释放的受管实例，再查询权威活动状态，
 切换前重查普通租约与请求取消；发现外来实例、活动任务或租约占用时拒绝接管。该检查不构成对
@@ -300,8 +304,8 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
 - `scripts/desktop-app-command.mjs` 与声明文件：平台化兼容探测、配置事务、服务控制、状态与单次环境
   启动；macOS 不读取桥令牌或探测桥端口。
 - `scripts/desktop-app-proxy.mjs`：macOS Desktop 的受管 CLI 入口；只接受 App Server 启动调用，
-  获取 Desktop Host 租约后在标准输入输出与主 App Server Unix WebSocket 之间转换文本消息，不
-  解析 JSON-RPC 业务字段。
+  无内置工具插件配置时直接连接共享主实例，带配置时先获取 Desktop Host 租约；在标准输入输出
+  与主 App Server Unix WebSocket 之间转换文本消息，不解析 JSON-RPC 业务字段。
 - `runtime/desktop-app-host.mjs` 与声明文件：校验 Desktop 动态 Pipe、签名 Node 和精确 Codex 原生
   可执行文件，并用签名 Node 托管主 App Server 子进程；动态 Pipe 状态只保存在服务内存中。
 - `runtime/app-server-supervisor.mjs` 与声明文件：增加有界、独立能力版本化的 macOS Desktop Host
