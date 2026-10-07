@@ -66,6 +66,41 @@ Setup 仅按具体操作返回的激活范围提示重启。列出账户、停�
 
 Telegram、飞书和微信至少启用一个。Telegram 需要 Bot Token 和允许用户；飞书需要应用凭据和允许的 `open_id`；微信需要扫码凭据、账号和允许用户，Setup 最终确认保存时会直接启用消息接收。
 
+### 审批方式：手动审批与自动审查（Auto-review）
+
+Codex 默认审批方式入口为 `codexc config → Codex 新会话与用户偏好 → Codex 默认审批方式`，或 WebUI
+`设置 → 工作区与权限 → Codex 权限与工具`。选择自动审查保存 Codex 用户层 `approvals_reviewer = "auto_review"`，选择手动审批保存
+`approvals_reviewer = "user"`。保存前须明确确认；WebUI 还要求预览产生的一次性确认令牌，并检查
+当前用户配置修订。此操作只修改默认审批方式，沙盒、审批策略和网络权限继续独立设置。
+
+Auto-review 由 Codex 审核需要审批的操作，并按其政策批准或拒绝；它不会把每项请求自动批准。
+页面显示的是全局用户偏好，未设置时保留继承状态；上游无覆盖时默认由用户审批。新建 Thread
+由 App Server 合并配置，Profile、项目配置、显式参数和组织策略可能覆盖该偏好。
+已经加载的 Thread 及恢复的历史会话保留自身审批方式，不随默认值切换；受管 Provider 独立实例
+仍以各自有效配置为准。无需为了此偏好重启 Gateway。
+
+已有值不属于 `user` 或 `auto_review`、组织要求限制任一审批方式、组织禁用 Auto-review 或
+策略读取不可用时，审批方式选择只读并拒绝写入，不把旧名 `guardian_subagent` 当作可编辑别名。
+附加审批策略读取失败、超时或返回无效数据时，仅 Codex 默认审批方式只读，其他 Codex 用户设置仍可读取和修改。
+此入口不接入实验 Auto-review 生命周期通知，渠道里的常规审批仍按现有协议处理。
+
+飞书、Telegram 和微信可用 `/autoreview` 查询当前已绑定会话的实际审批方式，
+用 `/autoreview on` 开启当前会话自动审查，或 `/autoreview off` 切回手动审批。
+设置用于当前会话后续轮次；切换时须无运行任务或待处理交互。未绑定会话时只提示创建或恢复会话，
+不会为配置操作创建 Thread。无法识别实际审批方式或旧值 `guardian_subagent` 时只读。
+飞书命令中心的当前状态面板、当前会话审批方式面板和 Telegram `/autoreview` 查询结果提供当前会话按钮；按钮绑定原 Thread、Conversation 和用户，
+五分钟内有效且只能提交一次，切换会话后须重新查询。只有 App Server 权威设置确认后才报告已切换；
+未确认时不会自动重试，应重新用 `/autoreview` 核对实际状态。
+
+飞书、Telegram 和微信可用 `/workspaceperm` 查询当前工作区的默认审批方式；
+`/workspaceperm autoreview on` 开启自动审查，`off` 选择手动审批，`clear` 删除工作区覆盖。
+该覆盖对新建、分叉、卸载后恢复的会话生效；已加载会话保留实际审批方式，须用 `/autoreview` 修改当前会话。
+`clear` 只移除工作区覆盖；新会话跟随 Codex 默认，恢复历史会话可能保留其已保存设置，因此并非每次 `/resume` 都会继承新的默认值。
+当前会话的实际审批方式仍由 `/status` 及启动、完成卡片展示。
+飞书命令中心与 Telegram `/workspaceperm` 查询结果提供标明“工作区默认”的三种选择按钮，微信使用同一组文本命令。
+按钮限时、一次性并绑定原工作区与当前用户；切换工作区后须重新查询。WebUI 的「工作区与权限」
+同样支持自动审查、手动审批、跟随 Codex 默认，复用权限设置预览、配置版本校验和高风险确认。
+
 ### 计划相关设置
 
 在 `codexc config → Codex 新会话与用户偏好 → 计划清单工具` 中控制上游 `update_plan` 工具，默认关闭：
@@ -459,6 +494,8 @@ npm 安装版也可以使用 `codexc uninstall --services` 后执行 `npm uninst
 - Workspace：`/workspace`、`/workspaceperm`
 - 运行：`/status`、`/stop`、`/queue`、`/revert`、`/compact`、`/fork`、`/review`、`/release`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
+- 工作区审批审核：`/workspaceperm autoreview <on|off|clear>`
+- 当前会话审批审核：`/autoreview [on|off]`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`
 - 帮助：`/help`、`/whoami`

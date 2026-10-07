@@ -41,6 +41,7 @@ export {
 export {
   formatConversationWorkspaces,
   formatConversationWorkspacePermissions,
+  formatConversationAutoReview,
   formatConversationPermissions,
   formatConversationArtifacts,
   formatConversationCollaborationMode,

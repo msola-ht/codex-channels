@@ -40,6 +40,7 @@ export function formatSurfaceUserFacingError(
     case "conversation.missing":
       return "当前还没有 Codex Session";
     case "conversation.busy":
+      if (error.details.reason === "pending-interaction") return "当前会话有待处理交互，请先完成或取消后再切换审批方式";
       return "当前任务运行中，请先使用 /stop 停止当前任务";
     case "delivery.overloaded":
       if (error.details.reason === "global-capacity") return "投递箱全局容量达到暂停阈值，暂不能保存更多执行结果；请使用 codexc delivery status 核对占用并处理积压";
@@ -164,9 +165,21 @@ export function formatSurfaceUserFacingError(
     case "workspace.selector.not-found":
       return "找不到指定 Workspace";
     case "workspace.permission.usage":
-      return "用法：/workspaceperm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>]";
+      return error.details.reason === "stale-selection"
+        ? "工作区审批按钮已失效或工作区已变化，请重新发送 /workspaceperm"
+        : "用法：/workspaceperm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|autoreview <on|off|clear>|profile <Profile ID|clear>]";
     case "workspace.permission.conflict":
       return "permissions 与 sandbox 互斥，不能同时配置；请先清除其中一项";
+    case "autoreview.usage":
+      return "用法：/autoreview [on|off]；只切换当前会话后续轮次的审批方式";
+    case "autoreview.unavailable":
+      return "当前会话无法切换审批方式；请先用 /autoreview 核对 App Server 的实际状态";
+    case "autoreview.stale-selection":
+      return "当前会话审批按钮已失效或会话已变化，请重新发送 /autoreview";
+    case "autoreview.update-failed":
+      return "当前会话审批方式更新请求未成功；请用 /autoreview 核对实际状态后再决定是否重试";
+    case "autoreview.update-unconfirmed":
+      return "尚未确认当前会话审批方式更新结果；请求不会自动重试，请用 /autoreview 核对实际状态";
     case "workspace.permission.unavailable":
       return "当前 Gateway 不支持修改工作区权限";
     case "model.current.missing":

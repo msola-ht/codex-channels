@@ -6,6 +6,7 @@ import { ConversationCore } from "../src/conversation-core/core.js";
 import {
   gatewayUserMessageClientIdPrefix,
   type OutputEvent,
+  type ThreadApprovalsReviewer,
 } from "../src/conversation-core/events.js";
 import { EventBus } from "../src/event-bus/event-bus.js";
 import type { ConversationRoutingPort } from "../src/conversation-core/routing-port.js";
@@ -15,6 +16,28 @@ import {
 } from "./conversation-core-test-fixture.js";
 
 describe("ConversationCore lifecycle", () => {
+  it("uses current authoritative Thread reviewer for start and completion, including background Turns", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", event => { events.push(event); });
+    const target = { surface: "telegram", accountId: "a", conversationId: "c" };
+    let approvalsReviewer: ThreadApprovalsReviewer = "auto_review";
+    const core = new ConversationCore({
+      allBindings: () => [{ target, threadId: "background" }],
+      targetForThread: () => target, isBackgroundThread: () => true,
+      modelSettingsForThread: () => ({ model: "test-model", effort: null, serviceTier: null, approvalsReviewer }),
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+    core.markTurnStarted(target, "background", "turn");
+    approvalsReviewer = "user";
+    core.handle({ type: "turn.completed", threadId: "background", turnId: "turn", status: "completed", error: null });
+    await output.drain();
+    expect(events.find(event => event.type === "turn.started"))
+      .toMatchObject({ approvalsReviewer: "auto_review", background: true });
+    expect(events.find(event => event.type === "turn.completed"))
+      .toMatchObject({ approvalsReviewer: "user", background: true });
+    await output.close();
+  });
   it("drops unbound activity without treating a valid background Turn as foreground", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const target = { surface: "feishu" as const, accountId: "default", conversationId: "100" };

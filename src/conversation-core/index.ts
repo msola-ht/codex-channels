@@ -17,6 +17,7 @@ export type {
   TurnTaskMetricsSummary,
   ResponseUsageSummary,
   ThreadGoal,
+  ThreadApprovalsReviewer,
   ThreadTokenUsage,
   TokenUsageBreakdown,
   TurnArtifacts,

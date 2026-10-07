@@ -23,6 +23,65 @@ const target: ConversationTarget = {
 };
 
 describe("Feishu command center", () => {
+  it("caps current Thread selection validity at five minutes", async () => {
+    let now = 1;
+    const fixture = createFixture({ now: () => now });
+    await fixture.center.openResponse(target, "ou_actor", { title: "当前会话审批", choices: [
+      { label: "开启", action: "thread-autoreview-select", input: "on thread" },
+    ] });
+    now += 5 * 60_000;
+    expect(fixture.center.handleCardAction(cardAction(fixture.cards[0]!, "thread-autoreview-select"))).toBe("invalid");
+    expect(fixture.execute).not.toHaveBeenCalled();
+    await fixture.center.close();
+  });
+  it("binds current Thread selections to the Actor, Conversation, Thread and one-time expiry", async () => {
+    let now = 1;
+    const fixture = createFixture({ now: () => now, tokenTtlMs: 100 });
+    const response = { title: "当前会话审批", choices: [
+      { label: "开启", action: "thread-autoreview-select" as const, input: "on original-thread" },
+      { label: "手动", action: "thread-autoreview-select" as const, input: "off original-thread" },
+    ] };
+    await fixture.center.openResponse(target, "ou_actor", response);
+    const action = cardAction(fixture.cards[0]!, "thread-autoreview-select");
+    expect(fixture.center.handleCardAction({ ...action, actorOpenId: "ou_other" })).toBe("invalid");
+    expect(fixture.center.handleCardAction({ ...action, chatId: "oc_other" })).toBe("invalid");
+    expect(fixture.center.handleCardAction({ ...action, value: { ...action.value, codexc_command_input: "on new-thread" } })).toBe("invalid");
+    expect(fixture.center.handleCardAction({ ...action, value: { ...action.value, codexc_command: "workspace-autoreview-select" } })).toBe("invalid");
+    expect(fixture.center.handleCardAction(action)).toBe("accepted");
+    expect(fixture.center.handleCardAction(action)).toBe("invalid");
+    await settle();
+    expect(fixture.execute).toHaveBeenCalledWith(target, "thread-autoreview-select", "ou_actor", "on original-thread");
+    await fixture.center.openResponse(target, "ou_actor", response);
+    now += 101;
+    expect(fixture.center.handleCardAction(cardAction(fixture.cards[1]!, "thread-autoreview-select"))).toBe("invalid");
+    expect(fixture.execute).toHaveBeenCalledOnce();
+    await fixture.center.close();
+  });
+  it("binds Workspace Auto-review selections to the original card, Actor and Workspace and consumes the token", async () => {
+    let now = 1;
+    const fixture = createFixture({ now: () => now, tokenTtlMs: 100 });
+    const response = {
+      title: "Auto-review",
+      choices: [
+        { label: "开启", action: "workspace-autoreview-select" as const, input: "on original-workspace" },
+        { label: "手动", action: "workspace-autoreview-select" as const, input: "off original-workspace" },
+      ],
+    };
+    await fixture.center.openResponse(target, "ou_actor", response);
+    const action = cardAction(fixture.cards[0]!, "workspace-autoreview-select");
+    expect(fixture.center.handleCardAction({ ...action, actorOpenId: "ou_other" })).toBe("invalid");
+    expect(fixture.center.handleCardAction({ ...action, chatId: "oc_other" })).toBe("invalid");
+    expect(fixture.center.handleCardAction({ ...action, value: { ...action.value, codexc_command_input: "on new-workspace" } })).toBe("invalid");
+    expect(fixture.center.handleCardAction(action)).toBe("accepted");
+    expect(fixture.center.handleCardAction(action)).toBe("invalid");
+    await settle();
+    expect(fixture.execute).toHaveBeenCalledWith(target, "workspace-autoreview-select", "ou_actor", "on original-workspace");
+    await fixture.center.openResponse(target, "ou_actor", response);
+    now += 101;
+    expect(fixture.center.handleCardAction(cardAction(fixture.cards[1]!, "workspace-autoreview-select"))).toBe("invalid");
+    expect(fixture.execute).toHaveBeenCalledOnce();
+    await fixture.center.close();
+  });
   it("uses one bot menu event to open the categorized command center", () => {
     expect(feishuCommandMenuEventKey).toBe("codexc_home");
   });
@@ -86,6 +145,10 @@ describe("Feishu command center", () => {
     expect(JSON.stringify(categorized.card)).toContain("会话操作");
     expect(JSON.stringify(categorized.card)).toContain("能力与集成");
     expect(JSON.stringify(categorized.card)).toContain("当前内容");
+    expect(collectCardActions(categorized.card)).toContainEqual(expect.objectContaining({
+      text: { tag: "plain_text", content: "权限查询" },
+      value: expect.objectContaining({ codexc_command: "permissions" }),
+    }));
     const visibleSharedCommands = new Set(
       [fixture.cards[0]!, categorized].flatMap(({ card }) =>
         collectCardActions(card).flatMap((action) => {

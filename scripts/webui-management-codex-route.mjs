@@ -10,7 +10,7 @@ import {
   ManagementSecurityError,
 } from "./management-security.mjs";
 
-const highRiskCodexSettingKinds = new Set(["permissions", "tool-access"]);
+const highRiskCodexSettingKinds = new Set(["permissions", "tool-access", "approvals-reviewer"]);
 
 export async function routeCodexSettingsManagement({
   environment,

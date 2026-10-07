@@ -104,6 +104,33 @@ try {
     const detail = row.getByRole("link", { name: "root-browser", exact: true })
     assert.equal((await detail.getAttribute("href")).includes("sort="), false)
   })
+  await run("Auto-review: preview, cancel, translated confirmation and saved readback", "reviewer", async page => {
+    const reviewer = page.getByRole("combobox", { name: "Codex default approval mode", exact: true })
+    assert.equal(await reviewer.innerText(), "Manual approval")
+    await reviewer.click()
+    await page.getByRole("option", { name: "Auto-review", exact: true }).click()
+    const dialog = page.getByRole("alertdialog")
+    await dialog.waitFor()
+    assert.match(await dialog.innerText(), /Codex default approval mode/)
+    assert.equal(await page.evaluate(() => window.__contract.changed), 0)
+    assert.deepEqual(await page.evaluate(() => window.__contract.previews[0].setting), { kind: "approvals-reviewer", value: "auto_review" })
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+    assert.equal(await reviewer.innerText(), "Manual approval")
+    await reviewer.click()
+    await page.getByRole("option", { name: "Auto-review", exact: true }).click()
+    await dialog.waitFor()
+    // Switch locale without dismissing or submitting the pending operation.
+    await page.evaluate(() => [...document.querySelectorAll("button")].find(button => button.textContent === "Switch language").click())
+    assert.match(await dialog.innerText(), /Codex 默认审批方式/)
+    assert.equal(await page.evaluate(() => window.__contract.changed), 0)
+    await dialog.getByRole("button", { name: "确认写入", exact: true }).click()
+    await dialog.waitFor({ state: "hidden" })
+    await page.waitForFunction(() => window.__contract.changed === 1)
+    assert.match(await page.getByRole("combobox", { name: "Codex 默认审批方式", exact: true }).innerText(), /Auto-review/)
+    assert.deepEqual(await page.evaluate(() => window.__contract.requests.find(request => request.method === "PATCH").body), {
+      revision: "reviewer-1", setting: { kind: "approvals-reviewer", value: "auto_review" }, confirmationToken: "reviewer-confirmation",
+    })
+  })
   await run("Settings: refreshed unedited fields invalidate old errors while preserving edited drafts", "settings", async page => {
     const contextWindow = page.locator("#codex-context-window")
     const percent = page.locator("#codex-compact-percent")

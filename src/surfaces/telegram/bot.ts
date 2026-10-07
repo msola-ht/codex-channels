@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import { TextAttachmentStore, textAttachmentBody } from "../text-attachment-store.js";
 import { Bot, type Context } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -8,6 +9,7 @@ import {
   conversationCommandNames,
   listProviders,
   type ConversationCommandExecutor,
+  type ConversationCommandResult,
   type ConversationCommandName,
   type ConversationExtensionUseCases,
   type ConversationSessionUseCases,
@@ -31,6 +33,7 @@ import {
   conversationCommandHelpLines,
 } from "../conversation-command-help.js";
 import { formatConversationScheduledConfirmation } from "../conversation-scheduled-task-command-format.js";
+import { formatConversationAutoReview, formatConversationWorkspacePermissions } from "../conversation-workspace-status-command-format.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatOperationFailure,
@@ -49,6 +52,8 @@ import {
 } from "./format.js";
 import {
   renderTelegramCommandResult,
+  autoReviewKeyboard,
+  threadAutoReviewKeyboard,
   scheduledTaskConfirmationKeyboard,
   formatTelegramThreadQueueDeleteConfirmation,
   formatTelegramThreadQueueItemAction,
@@ -59,6 +64,7 @@ import {
   threadQueueDeleteConfirmationKeyboard,
   threadQueueItemKeyboard,
   workspacePermissionFieldKeyboard,
+  workspacePermissionKeyboard,
   workspacePermissionPrompt,
   telegramWorkspaceSwitchToken,
 } from "./command-renderer.js";
@@ -179,6 +185,11 @@ export class TelegramSurface {
   private readonly inputs: SurfaceInputCoalescer;
   private readonly pluginTaskPrompts: TelegramPluginTaskPrompts;
   private readonly now: () => number;
+  private readonly autoReviewSelections = new Map<string, {
+    target: ConversationTarget;
+    actorId: string;
+    expiresAt: number;
+  } & ({ scope: "workspace"; workspaceId: string } | { scope: "thread"; threadId: string })>();
   private readonly debugEnabled: boolean;
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
@@ -351,6 +362,7 @@ export class TelegramSurface {
       this.imageStore.close();
       this.audioStore.close();
       this.pluginTaskPrompts.clear();
+      this.autoReviewSelections.clear();
       await this.interactions.close();
       await this.outbox.close();
       await lifecycleStop;
@@ -422,6 +434,47 @@ export class TelegramSurface {
       const cancelledInteraction = this.interactions.stopForChat(String(context.chat.id));
       await this.executeCommand(context, "stop");
       if (cancelledInteraction) await context.reply(interactionStoppedText);
+    });
+    this.bot.callbackQuery(/^ar:(on|off|clear):([A-Za-z0-9_-]{24})$/, async (context) => {
+      const token = context.match[2]!;
+      const pending = this.autoReviewSelections.get(token);
+      const callbackTarget = target(context);
+      if (!pending
+        || pending.scope !== "workspace"
+        || pending.expiresAt <= this.now()
+        || pending.actorId !== String(context.from?.id ?? "")
+        || pending.target.conversationId !== callbackTarget.conversationId
+        || pending.target.accountId !== callbackTarget.accountId
+      ) {
+        throw new UserFacingError("workspace.permission.usage", "工作区审批按钮已失效，请重新发送 /workspaceperm", { reason: "stale-selection" });
+      }
+      this.autoReviewSelections.delete(token);
+      await context.answerCallbackQuery({ text: "正在修改工作区默认审批方式" });
+      await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
+      const result = await this.commands.selectWorkspaceAutoReview(callbackTarget, {
+        workspaceId: pending.workspaceId,
+        value: context.match[1] === "on" ? "auto_review" : context.match[1] === "off" ? "user" : null,
+      });
+      await renderTelegramCommandResult(context, result);
+    });
+    this.bot.callbackQuery(/^tar:(on|off):([A-Za-z0-9_-]{24})$/, async (context) => {
+      const token = context.match[2]!;
+      const pending = this.autoReviewSelections.get(token);
+      const callbackTarget = target(context);
+      if (!pending || pending.scope !== "thread" || pending.expiresAt <= this.now()
+        || pending.actorId !== String(context.from?.id ?? "")
+        || pending.target.conversationId !== callbackTarget.conversationId
+        || pending.target.accountId !== callbackTarget.accountId
+      ) throw new UserFacingError("autoreview.stale-selection", "当前会话审批按钮已失效");
+      this.autoReviewSelections.delete(token);
+      await context.answerCallbackQuery({ text: "正在修改当前会话审批方式" });
+      const result = await this.commands.selectAutoReview(callbackTarget, {
+        threadId: pending.threadId,
+        enabled: context.match[1] === "on",
+      });
+      try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
+      catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "当前会话审批按钮清理失败"); }
+      await renderTelegramCommandResult(context, result);
     });
     this.bot.callbackQuery(/^ws:([A-Za-z0-9_-]{43})$/, async (context) => {
       const workspace = this.service.listWorkspaces().find(
@@ -1176,10 +1229,79 @@ export class TelegramSurface {
       commandArguments(context),
       context.from ? String(context.from.id) : undefined,
     );
+    if (result.kind === "workspace-permissions") {
+      await this.renderWorkspacePermissionsResult(context, result);
+      return;
+    }
+    if (result.kind === "auto-review") {
+      await this.renderAutoReviewResult(context, result);
+      return;
+    }
     await renderTelegramCommandResult(
       context,
       result,
     );
+  }
+
+  private async renderWorkspacePermissionsResult(
+    context: Context,
+    result: Extract<ConversationCommandResult, { kind: "workspace-permissions" }>,
+  ): Promise<void> {
+    let token: string | undefined;
+    if (context.from) {
+      for (const [key, selection] of this.autoReviewSelections) {
+        if (selection.expiresAt <= this.now()) this.autoReviewSelections.delete(key);
+      }
+      while (this.autoReviewSelections.size >= 100) {
+        this.autoReviewSelections.delete(this.autoReviewSelections.keys().next().value!);
+      }
+      token = randomBytes(18).toString("base64url");
+      this.autoReviewSelections.set(token, {
+        scope: "workspace",
+        target: target(context),
+        actorId: String(context.from.id),
+        workspaceId: result.workspace.id,
+        expiresAt: this.now() + 5 * 60_000,
+      });
+    }
+    try {
+      await replyTelegramPanel(context, formatConversationWorkspacePermissions(result), {
+        inline_keyboard: [
+          ...workspacePermissionKeyboard().inline_keyboard,
+          ...(token ? autoReviewKeyboard(token).inline_keyboard : []),
+        ],
+      });
+    } catch (error) {
+      if (token) this.autoReviewSelections.delete(token);
+      throw error;
+    }
+  }
+
+  private async renderAutoReviewResult(
+    context: Context,
+    result: Extract<ConversationCommandResult, { kind: "auto-review" }>,
+  ): Promise<void> {
+    const { threadId, reviewer } = result.state;
+    let token: string | undefined;
+    if (context.from && threadId !== null && (reviewer === "user" || reviewer === "auto_review")) {
+      for (const [key, selection] of this.autoReviewSelections) {
+        if (selection.expiresAt <= this.now()) this.autoReviewSelections.delete(key);
+      }
+      while (this.autoReviewSelections.size >= 100) {
+        this.autoReviewSelections.delete(this.autoReviewSelections.keys().next().value!);
+      }
+      token = randomBytes(18).toString("base64url");
+      this.autoReviewSelections.set(token, {
+        scope: "thread", target: target(context), actorId: String(context.from.id),
+        threadId, expiresAt: this.now() + 5 * 60_000,
+      });
+    }
+    try {
+      await replyTelegramPanel(context, formatConversationAutoReview(result), token ? threadAutoReviewKeyboard(token) : undefined);
+    } catch (error) {
+      if (token) this.autoReviewSelections.delete(token);
+      throw error;
+    }
   }
 
   private async authorize(context: Context, next: () => Promise<void>): Promise<void> {

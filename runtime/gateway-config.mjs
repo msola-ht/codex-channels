@@ -38,6 +38,7 @@ const workspaceSchema = z.strictObject({
   cwd: z.string().trim().min(1),
   sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
   approval_policy: z.enum(["untrusted", "on-request", "never"]).optional(),
+  approvals_reviewer: z.enum(["user", "auto_review"]).optional(),
   permissions: z.string().trim().min(1).max(128).optional(),
 }).superRefine((workspace, context) => {
   if (workspace.sandbox !== undefined && workspace.permissions !== undefined) {

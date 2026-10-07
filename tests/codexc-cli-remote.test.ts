@@ -79,6 +79,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       firstWorkspace.approval_policy = "on-request";
       secondWorkspace.sandbox = "read-only";
       secondWorkspace.approval_policy = "never";
+      secondWorkspace.approvals_reviewer = "auto_review";
       configuredNestedWorkspace.sandbox = "danger-full-access";
       configuredNestedWorkspace.approval_policy = "on-request";
     });
@@ -150,6 +151,8 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       "read-only",
       "--ask-for-approval",
       "never",
+      "-c",
+      'approvals_reviewer="auto_review"',
       "resume",
     ]);
     expect(JSON.parse(readFileSync(overriddenCapture, "utf8"))).toEqual([
@@ -197,9 +200,25 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       "--ask-for-approval",
       "never",
       "-c",
+      'approvals_reviewer="auto_review"',
+      "-c",
       "sandbox_workspace_write.network_access=true",
       "resume",
     ]);
+    for (const [index, reviewerArgs] of [
+      ["-c", 'approvals_reviewer="user"'],
+      ['--config=approvals_reviewer="user"'],
+      ['-capprovals_reviewer="user"'],
+      ["--approve-for-me"],
+    ].entries()) {
+      const overrideCapture = join(root, `reviewer-override-${index}.json`);
+      execFileSync(process.execPath, [cli, "remote", "--workspace", "second-project", ...reviewerArgs, "resume"], {
+        cwd: first, env: { ...environment, CODEX_TEST_CAPTURE: overrideCapture },
+      });
+      const captured = JSON.parse(readFileSync(overrideCapture, "utf8")) as string[];
+      expect(captured).not.toContain('approvals_reviewer="auto_review"');
+      expect(captured.slice(-reviewerArgs.length - 1)).toEqual([...reviewerArgs, "resume"]);
+    }
   });
 
   it("fails closed when a remote Workspace uses the retired untrusted CLI policy", () => {

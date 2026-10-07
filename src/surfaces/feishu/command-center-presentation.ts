@@ -17,6 +17,8 @@ import {
 } from "../conversation-session-command-format.js";
 import {
   formatConversationPermissions,
+  formatConversationAutoReview,
+  formatConversationWorkspacePermissions,
   formatConversationStatus,
 } from "../conversation-workspace-status-command-format.js";
 import { formatCodexProviderLabel, scopedModelDisplayName } from "../provider-format.js";
@@ -597,20 +599,29 @@ export function renderCommandCenterChoices(
   if (action === "status" && result.kind === "status") {
     return {
       title: "Codex 状态",
-      description: [
-        stripMarkdownHeading(formatConversationStatus(result.status)),
-        "",
-        "关联操作：",
-        "- 模型设置",
-        "- 工作区",
-        "- 权限查询",
-      ].join("\n"),
+      description: stripMarkdownHeading(formatConversationStatus(result.status)),
       descriptionFormat: "markdown",
       choices: [
         { label: "模型设置", action: "model", input: "" },
         { label: "工作区", action: "workspace", input: "" },
         { label: "权限查询", action: "permissions", input: "" },
+        { label: "当前会话审批方式", action: "autoreview", input: "" },
       ],
+    };
+  }
+  if (action === "autoreview" && result.kind === "auto-review") {
+    const { threadId, reviewer } = result.state;
+    return {
+      title: "当前会话审批方式",
+      description: formatConversationAutoReview(result),
+      descriptionFormat: "markdown",
+      choices: threadId !== null && (reviewer === "user" || reviewer === "auto_review")
+        ? (["on", "off"] as const).map(value => ({
+          label: value === "on" ? "当前会话：自动审查" : "当前会话：手动审批",
+          action: "thread-autoreview-select" as const,
+          input: `${value} ${threadId}`,
+        }))
+        : [],
     };
   }
   if (
@@ -619,9 +630,14 @@ export function renderCommandCenterChoices(
   ) {
     return {
       title: "工作区权限",
-      description: `当前权限：\n${workspacePermissionSummary(result.workspace)}`,
+      description: formatConversationWorkspacePermissions(result),
       descriptionFormat: "markdown",
       choices: [
+        ...(["on", "off", "clear"] as const).map((value) => ({
+          label: value === "on" ? "工作区默认：自动审查" : value === "off" ? "工作区默认：手动审批" : "工作区默认：跟随 Codex 默认",
+          action: "workspace-autoreview-select" as const,
+          input: `${value} ${result.workspace.id}`,
+        })),
         {
           label: `沙箱：${workspacePermissionLabel(
             "sandbox",
@@ -841,20 +857,6 @@ export function renderWorkspacePermissionFieldChoices(
       },
     ],
   };
-}
-
-function workspacePermissionSummary(
-  workspace: Extract<
-    ConversationCommandResult,
-    { kind: "workspace-permissions" }
-  >["workspace"],
-): string {
-  return [
-    `- 沙箱：${workspacePermissionLabel("sandbox", workspace.sandbox)}`,
-    `- 审批：${workspacePermissionLabel("approval", workspace.approvalPolicy)}`,
-    `- Profile：${workspace.permissions ?? "未配置"}`,
-    "- 网络：跟随 Codex 用户默认设置",
-  ].join("\n");
 }
 
 function workspacePermissionLabel(

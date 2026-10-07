@@ -684,6 +684,10 @@ export abstract class GatewayComponentGraph {
           );
         },
       },
+      {
+        updateThreadApprovalsReviewer: (threadId, reviewer) =>
+          this.updateThreadApprovalsReviewer(threadId, reviewer),
+      },
     );
     this.conversations = service;
     service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);
@@ -1162,6 +1166,20 @@ export abstract class GatewayComponentGraph {
         ),
     );
     this.bindingRestoreCoordinator();
+  }
+
+  private async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review"): Promise<void> {
+    await this.codex.updateThreadApprovalsReviewer(threadId, reviewer);
+    // RPC confirmation observes notifications before the asynchronous inbound
+    // consumers reduce them. Wait for the shared reducer before Application
+    // reads the actual reviewer or the next command checks a same-value no-op.
+    try {
+      if (this.stopping) throw new Error("Gateway 正在停止");
+      await this.inbound.drain();
+      if (this.stopping) throw new Error("Gateway 正在停止");
+    } catch {
+      throw new UserFacingError("autoreview.update-unconfirmed", "会话审批方式更新结果尚未确认，请重新查询状态");
+    }
   }
 
   private bindingRestoreCoordinator(): BindingRestoreCoordinator {

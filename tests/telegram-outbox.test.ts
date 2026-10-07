@@ -9,7 +9,7 @@ import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
 import { TelegramInteractionPort } from "../src/surfaces/telegram/interactions.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
-const turnStartedPanel = "<b>已开始处理。</b>";
+const turnStartedPanel = "<b>已开始处理。</b>\n\n• <b>审批方式：</b>未知";
 const turnCompletedTitle = "<b>本次运行 · 已完成</b>";
 const turnCompletedPanel = [
   turnCompletedTitle,
@@ -21,6 +21,7 @@ const turnCompletedPanel = [
   "<b>当前会话</b>",
   "• <b>Session：</b>测试会话",
   "• <b>Session ID：</b>thread-1",
+  "• <b>审批方式：</b>未知",
   "• <b>总耗时：</b>未提供",
 ].join("\n");
 
@@ -483,11 +484,12 @@ describe("TelegramOutbox", () => {
     outbox.handle({
       ...turnStarted(),
       identity: { kind: "plugin", name: "GitHub" },
+      approvalsReviewer: "auto_review",
     });
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["<b>已使用 GitHub Plugin 开始处理。</b>"]);
+    expect(api.sent).toEqual(["<b>已使用 GitHub Plugin 开始处理。</b>\n\n• <b>审批方式：</b>自动审查（Auto-review）"]);
   });
 
   it("streams the thinking status as a panel updated in place", async () => {
@@ -893,6 +895,7 @@ describe("TelegramOutbox", () => {
         "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
+        "• <b>审批方式：</b>未知",
         "• <b>总耗时：</b>未提供",
       ].join("\n"),
     ]);
@@ -1792,6 +1795,7 @@ describe("TelegramOutbox", () => {
         "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
+        "• <b>审批方式：</b>未知",
         "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
         "• <b>上下文压缩：</b>2 次",
         "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
@@ -1831,6 +1835,7 @@ describe("TelegramOutbox", () => {
         "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
+        "• <b>审批方式：</b>未知",
         "• <b>Git 分支：</b>feature/weixin-surface",
         "• <b>总耗时：</b>未提供",
       ].join("\n"),

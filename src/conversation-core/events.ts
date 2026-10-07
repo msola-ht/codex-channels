@@ -1,5 +1,6 @@
 export type SurfaceId = string;
 export type MessagePhase = "commentary" | "final_answer";
+export type ThreadApprovalsReviewer = "user" | "auto_review" | "guardian_subagent";
 export type TurnStatus = "completed" | "interrupted" | "failed" | "inProgress";
 export type TurnErrorCode = "misalignmentPolicyViolation" | "usageLimitExceeded" | "unauthorized";
 export type TurnPlanStepStatus = "pending" | "inProgress" | "completed";
@@ -290,7 +291,7 @@ export interface AsyncUserQuestion {
 }
 
 export type OutputEvent =
-  | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; identity?: TurnStartIdentity; background?: boolean }
+  | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; approvalsReviewer?: ThreadApprovalsReviewer | null; identity?: TurnStartIdentity; background?: boolean }
   | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; background?: boolean }
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }
   | { type: "text.completed"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }
@@ -299,7 +300,7 @@ export type OutputEvent =
   | { type: "subagent.spawned"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean; /** Read-time Thread configuration, not startup execution telemetry. */ modelProvider?: string | null; model?: string | null; reasoningEffort?: string | null }
   | { type: "subagent.contacted"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean; /** Read-time Thread configuration, not per-turn execution telemetry. */ modelProvider?: string | null; model?: string | null; reasoningEffort?: string | null }
   | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; status: SubagentTerminalStatus; metricsStatus: "available" | "empty" | "unavailable"; model: string | null; modelProvider: string | null; reasoningEffort: string | null; requestCount: number; unsuccessfulRequestCount: number; inputTokens: number; cachedInputTokens: number | null; outputTokens: number; reasoningOutputTokens: number; upstreamTtftMs?: number }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; sessionName?: string | null; turnId: string; status: TurnStatus; error?: string; errorCode?: TurnErrorCode; missingFinalResponse?: true; durationMs?: number; sessionDurationMs?: number | undefined; sessionTiming?: { knownDurationMs: number | null; missingTurnCount: number; historyComplete: boolean } | undefined; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; accountStatus?: CompletionAccountStatus; goal?: ThreadGoal; contextCompactionCount?: number; taskAggregate?: TurnTaskMetricsSummary; sessionAggregate?: TurnTaskMetricsSummary; workspaceId?: string; workspaceName?: string; gitBranch?: string | undefined; background?: boolean }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; sessionName?: string | null; turnId: string; status: TurnStatus; error?: string; errorCode?: TurnErrorCode; missingFinalResponse?: true; durationMs?: number; sessionDurationMs?: number | undefined; sessionTiming?: { knownDurationMs: number | null; missingTurnCount: number; historyComplete: boolean } | undefined; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; approvalsReviewer?: ThreadApprovalsReviewer | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; accountStatus?: CompletionAccountStatus; goal?: ThreadGoal; contextCompactionCount?: number; taskAggregate?: TurnTaskMetricsSummary; sessionAggregate?: TurnTaskMetricsSummary; workspaceId?: string; workspaceName?: string; gitBranch?: string | undefined; background?: boolean }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
   | { type: "thread.name"; target: ConversationTarget; threadId: string; name: string | null; background?: boolean }
   | { type: "thread.availability"; target: ConversationTarget; threadId: string; availability: "occupied" | "available"; background?: boolean }

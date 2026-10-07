@@ -73,6 +73,7 @@ export interface GatewaySettings {
     name: string;
     sandbox: "read-only" | "workspace-write" | "danger-full-access" | null;
     approvalPolicy: "untrusted" | "on-request" | "never" | null;
+    approvalsReviewer: "user" | "auto_review" | null;
     permissions: string | null;
   }>;
   channels: Array<{
@@ -137,6 +138,7 @@ export type GatewaySettingInput =
       update:
         | { kind: "sandbox"; value: "read-only" | "workspace-write" | "danger-full-access" | null }
         | { kind: "approval"; value: "untrusted" | "on-request" | "never" | null }
+        | { kind: "approvals-reviewer"; value: "user" | "auto_review" | null }
         | { kind: "permissions"; value: string | null };
     };
 

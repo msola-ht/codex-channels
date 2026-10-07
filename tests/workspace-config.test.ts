@@ -77,6 +77,7 @@ describe("Workspace configuration", () => {
         name: "Main",
         cwd: main,
         approval_policy: "never",
+        approvals_reviewer: "auto_review",
         permissions: ":workspace",
       },
       {
@@ -101,6 +102,7 @@ describe("Workspace configuration", () => {
       name: "Main",
       cwd: realpathSync(main),
       approval_policy: "never",
+      approvals_reviewer: "auto_review",
       permissions: ":workspace",
     });
 
@@ -118,6 +120,7 @@ describe("Workspace configuration", () => {
       name: "Main",
       cwd: realpathSync(main),
       approval_policy: "never",
+      approvals_reviewer: "auto_review",
       permissions: ":workspace",
     });
   });
@@ -398,6 +401,7 @@ function writeWorkspaceFixture(
     cwd: string;
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
     approval_policy?: "untrusted" | "on-request" | "never";
+    approvals_reviewer?: "user" | "auto_review";
     permissions?: string;
   }>,
   defaultWorkspace: string,

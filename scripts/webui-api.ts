@@ -497,7 +497,7 @@ export interface ManagementSettingsResponse {
       terminalIdentity: string | null
       defaults: { name: string; version: string }
     }
-    workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null }>
+    workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null; approvalsReviewer: string | null }>
   }
   automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled">
   advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel" | "pluginApiEnabled">
@@ -554,6 +554,11 @@ export interface CodexUserSettingsResponse {
     sandboxMode: "read-only" | "workspace-write" | null
     approvalPolicy: "on-request" | "never" | null
     networkAccess: boolean | null
+  }
+  approvalsReviewer: {
+    value: "user" | "auto_review" | null
+    editable: boolean
+    reason?: string
   }
   compact: {
     contextWindow: number | null

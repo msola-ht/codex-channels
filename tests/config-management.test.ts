@@ -548,6 +548,31 @@ describe("Gateway Config management", () => {
     expect(JSON.stringify(updated)).not.toContain("private-webui-token");
   });
 
+  it("updates and clears Workspace reviewer through the revision-checked permission transaction", () => {
+    const fixture = createFixture();
+    let settings = loadGatewaySettings(fixture.environment);
+    const workspaceId = settings.workspaces[0]!.id;
+    expect(settings.workspaces[0]!.approvalsReviewer).toBeNull();
+    for (const value of ["auto_review", "user", null] as const) {
+      const result = updateGatewaySetting({
+        kind: "workspace.permissions", workspaceId,
+        update: { kind: "approvals-reviewer", value },
+      }, { environment: fixture.environment, expectedRevision: settings.revision });
+      expect(result.activation).toBe("reload");
+      expect(result.value).toMatchObject({ id: workspaceId, approvalsReviewer: value });
+      settings = loadGatewaySettings(fixture.environment);
+      expect(settings.workspaces[0]!.approvalsReviewer).toBe(value);
+    }
+    expect((readGatewayConfig(settings.configPath).workspaces as Array<Record<string, unknown>>)[0]).not.toHaveProperty("approvals_reviewer");
+    const previous = readFileSync(settings.configPath, "utf8");
+    expect(() => updateGatewaySetting({
+      kind: "workspace.permissions", workspaceId,
+      update: { kind: "approvals-reviewer", value: "unknown" as "user" },
+    }, { environment: fixture.environment, expectedRevision: settings.revision }))
+      .toThrow(expect.objectContaining({ code: "invalid-choice", field: "update.value" }));
+    expect(readFileSync(settings.configPath, "utf8")).toBe(previous);
+  });
+
   it("updates Workspace permissions and returns a stable conflict", () => {
     const fixture = createFixture();
     let settings = loadGatewaySettings(fixture.environment);

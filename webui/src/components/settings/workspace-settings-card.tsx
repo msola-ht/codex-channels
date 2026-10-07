@@ -54,6 +54,17 @@ export function WorkspaceSettingsCard({ management }: { management: GatewaySetti
               update: { kind: "permissions", value: value || null },
             }, { key: "settingsFields.workspaceProfile", params: { name: workspace.name } })}
           />
+          <ManagedSelect
+            label={t("settingsFields.workspaceDefaultApprovalsReviewer")}
+            value={workspace.approvalsReviewer ?? "__clear__"}
+            options={[["__clear__", t("settingsFields.followCodexDefault")], ["user", t("settingsFields.manualReview")], ["auto_review", t("settingsFields.autoReview")]]}
+            description={t("settingsFields.workspaceAutoReviewHint")}
+            disabled={disabled}
+            onChange={(value) => void management.previewSetting("workspace.permissions", {
+              workspaceId: workspace.id,
+              update: { kind: "approvals-reviewer", value: value === "__clear__" ? null : value },
+            }, { key: "settingsFields.workspaceApprovalsReviewer", params: { name: workspace.name } })}
+          />
         </FieldGroup>
       </section>)}
     </CardContent>

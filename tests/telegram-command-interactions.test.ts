@@ -27,6 +27,157 @@ afterEach(() => {
 });
 
 describe("Telegram command interactions", () => {
+  it("reports unconfirmed Thread updates safely and consumes the selection without retry", async () => {
+    const updateAutoReview = vi.fn(async () => { throw new UserFacingError("autoreview.update-unconfirmed", "secret-upstream-response"); });
+    const { surface, output, apiPayloads, sentTexts } = createSurface(vi.fn(), vi.fn(), {
+      autoReview: () => ({ threadId: "thread", reviewer: "user", updated: false }), updateAutoReview,
+    });
+    try {
+      await surface.bot.handleUpdate({ update_id: 1, message: {
+        message_id: 1, date: 1, chat: telegramChat(), from: telegramUser(), text: "/autoreview",
+        entities: [{ type: "bot_command", offset: 0, length: 11 }],
+      } });
+      const markup = apiPayloads.find(entry => entry.method === "sendMessage")!.payload.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> };
+      const data = markup.inline_keyboard[0]![0]!.callback_data;
+      const callback = (id: number) => surface.bot.handleUpdate({ update_id: id, callback_query: {
+        id: String(id), from: telegramUser(), chat_instance: "chat", data,
+        message: { message_id: 99, date: 1, chat: telegramChat(), text: "Auto-review" },
+      } });
+      await callback(2);
+      expect(sentTexts.at(-1)).toContain("尚未确认");
+      expect(sentTexts.join("\n")).not.toContain("secret");
+      expect(sentTexts.join("\n")).not.toContain("已切换");
+      await callback(3);
+      expect(updateAutoReview).toHaveBeenCalledOnce();
+      expect(sentTexts.at(-1)).toContain("按钮已失效");
+    } finally { await surface.stop(); await output.close(); }
+  });
+  it("binds current Thread choices to Thread, Actor, Conversation and one-time expiry without mixing Workspace tokens", async () => {
+    let now = 1;
+    const autoReview = vi.fn(() => ({ threadId: "original-thread", reviewer: "user" as const, updated: false }));
+    const updateAutoReview = vi.fn(async () => ({ threadId: "original-thread", reviewer: "auto_review" as const, updated: true }));
+    const updateWorkspacePermissions = vi.fn();
+    const { surface, output, apiPayloads, sentTexts } = createSurface(vi.fn(), vi.fn(), { autoReview, updateAutoReview, updateWorkspacePermissions }, vi.fn(), vi.fn(), () => now);
+    const query = (id: number) => surface.bot.handleUpdate({ update_id: id, message: {
+      message_id: id, date: 1, chat: telegramChat(), from: telegramUser(), text: "/autoreview",
+      entities: [{ type: "bot_command", offset: 0, length: 11 }],
+    } });
+    const callback = (id: number, data: string, chatId = 100, actorId = 123) => surface.bot.handleUpdate({ update_id: id, callback_query: {
+      id: String(id), from: { ...telegramUser(), id: actorId }, chat_instance: "chat", data,
+      message: { message_id: 99, date: 1, chat: { ...telegramChat(), id: chatId }, text: "Auto-review" },
+    } });
+    const lastData = () => {
+      const markup = apiPayloads.filter(entry => entry.method === "sendMessage" && entry.payload.reply_markup).at(-1)!.payload.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> };
+      return markup.inline_keyboard[0]![0]!.callback_data;
+    };
+    try {
+      await query(1);
+      const data = lastData();
+      expect(data).toMatch(/^tar:on:[A-Za-z0-9_-]{24}$/);
+      await callback(2, data, 101);
+      await callback(3, data, 100, 124);
+      await callback(4, data.replace("tar:", "ar:"));
+      expect(updateAutoReview).not.toHaveBeenCalled();
+      expect(updateWorkspacePermissions).not.toHaveBeenCalled();
+      await callback(5, data);
+      expect(updateAutoReview).toHaveBeenCalledWith({ surface: "telegram", accountId: "default", conversationId: "100" }, true, "original-thread");
+      expect(sentTexts.at(-1)).toContain("已切换当前会话审批方式");
+      await callback(6, data);
+      expect(updateAutoReview).toHaveBeenCalledOnce();
+      expect(sentTexts.at(-1)).toContain("按钮已失效");
+      await query(7);
+      const expired = lastData();
+      now += 5 * 60_000;
+      await callback(8, expired);
+      expect(updateAutoReview).toHaveBeenCalledOnce();
+      expect(sentTexts.at(-1)).toContain("按钮已失效");
+    } finally { await surface.stop(); await output.close(); }
+  });
+  it.each([null, "guardian_subagent"] as const)("keeps current Thread reviewer %s query-only", async reviewer => {
+    const { surface, output, apiPayloads, sentTexts } = createSurface(vi.fn(), vi.fn(), { autoReview: () => ({ threadId: "thread", reviewer, updated: false }) });
+    try {
+      await surface.bot.handleUpdate({ update_id: 1, message: {
+        message_id: 1, date: 1, chat: telegramChat(), from: telegramUser(), text: "/autoreview",
+        entities: [{ type: "bot_command", offset: 0, length: 11 }],
+      } });
+      expect(sentTexts.at(-1)).toContain("只读");
+      expect(apiPayloads.find(entry => entry.method === "sendMessage")!.payload.reply_markup).toBeUndefined();
+    } finally { await surface.stop(); await output.close(); }
+  });
+  it("binds Workspace Auto-review choices to the original Workspace and consumes each choice once", async () => {
+    const workspace = { id: "original-workspace", name: "Main", cwd: "/workspace", approvalsReviewer: "user" as const };
+    const updateWorkspacePermissions = vi.fn(async () => workspace);
+    const { surface, output, apiPayloads, sentTexts } = createSurface(vi.fn(), vi.fn(), {
+      status: () => conversationStatus({ workspaceId: workspace.id }), listWorkspaces: () => [workspace], updateWorkspacePermissions,
+    });
+    const callback = (updateId: number, data: string, chatId = 100, actorId = 123) => surface.bot.handleUpdate({
+      update_id: updateId, callback_query: {
+        id: String(updateId), from: { ...telegramUser(), id: actorId }, chat_instance: "chat",
+        data, message: { message_id: 99, date: 1, chat: { ...telegramChat(), id: chatId }, text: "Auto-review" },
+      },
+    });
+    try {
+      await surface.bot.handleUpdate({ update_id: 1, message: {
+        message_id: 1, date: 1, chat: telegramChat(), from: telegramUser(), text: "/workspaceperm",
+        entities: [{ type: "bot_command", offset: 0, length: 14 }],
+      } });
+      const markup = apiPayloads.find(entry => entry.method === "sendMessage")!.payload.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> };
+      const data = markup.inline_keyboard[1]![0]!.callback_data;
+      expect(data).toMatch(/^ar:on:[A-Za-z0-9_-]{24}$/);
+      await callback(2, data, 101);
+      await callback(3, data, 100, 124);
+      expect(updateWorkspacePermissions).not.toHaveBeenCalled();
+      workspace.id = "switched-workspace";
+      await callback(4, data);
+      expect(updateWorkspacePermissions).toHaveBeenCalledWith(
+        { surface: "telegram", accountId: "default", conversationId: "100" }, { kind: "approvals-reviewer", value: "auto_review" }, "original-workspace",
+      );
+      expect(sentTexts.at(-1)).toContain("已修改工作区默认审批方式");
+      await callback(5, data);
+      expect(updateWorkspacePermissions).toHaveBeenCalledOnce();
+      expect(sentTexts.at(-1)).toContain("按钮已失效");
+    } finally {
+      await surface.stop();
+      await output.close();
+    }
+  });
+
+  it("expires Workspace choices and permits settings without a bound Thread", async () => {
+    let now = 1;
+    const workspace = { id: "main", name: "Main", cwd: "/workspace" };
+    const updateWorkspacePermissions = vi.fn(async () => workspace);
+    const { surface, output, apiPayloads, sentTexts } = createSurface(vi.fn(), vi.fn(), {
+      status: () => conversationStatus(), listWorkspaces: () => [workspace], updateWorkspacePermissions,
+    }, vi.fn(), vi.fn(), () => now);
+    const query = (id: number) => surface.bot.handleUpdate({ update_id: id, message: {
+      message_id: id, date: 1, chat: telegramChat(), from: telegramUser(), text: "/workspaceperm",
+      entities: [{ type: "bot_command", offset: 0, length: 14 }],
+    } });
+    try {
+      await query(1);
+      const markup = apiPayloads.find(entry => entry.method === "sendMessage")!.payload.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> };
+      now += 5 * 60_000;
+      await surface.bot.handleUpdate({ update_id: 2, callback_query: {
+        id: "2", from: telegramUser(), chat_instance: "chat", data: markup.inline_keyboard[1]![0]!.callback_data,
+        message: { message_id: 99, date: 1, chat: telegramChat(), text: "Auto-review" },
+      } });
+      expect(updateWorkspacePermissions).not.toHaveBeenCalled();
+      expect(sentTexts.at(-1)).toContain("按钮已失效");
+      await query(3);
+      const refreshed = apiPayloads.filter(entry => entry.method === "sendMessage").at(-1)!.payload.reply_markup as typeof markup;
+      expect(refreshed.inline_keyboard[1]).toHaveLength(3);
+      expect(sentTexts.at(-1)).toContain("工作区默认审批方式：");
+      expect(sentTexts.at(-1)).toContain("跟随 Codex 默认");
+      await surface.bot.handleUpdate({ update_id: 4, callback_query: {
+        id: "4", from: telegramUser(), chat_instance: "chat", data: refreshed.inline_keyboard[1]![2]!.callback_data,
+        message: { message_id: 100, date: 1, chat: telegramChat(), text: "Workspace permissions" },
+      } });
+      expect(updateWorkspacePermissions).toHaveBeenCalledWith(expect.anything(), { kind: "approvals-reviewer", value: null }, "main");
+    } finally {
+      await surface.stop();
+      await output.close();
+    }
+  });
   it("interrupts the Turn even when stop also cancels an interaction", async () => {
     const stop = vi.fn(async () => true);
     const { surface, output } = createSurface(vi.fn(), vi.fn(), { stop });

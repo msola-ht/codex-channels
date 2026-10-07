@@ -395,6 +395,15 @@ describe("Gateway config reload", () => {
     });
   });
 
+  it.each(["auto_review", "user"] as const)("hot reloads when only Workspace reviewer changes to %s", (approvalsReviewer) => {
+    const current = config();
+    expect(classifyConfigReload(current, config({
+      workspaces: [{ ...mainWorkspace, approvalsReviewer }],
+    }))).toEqual({ action: "reload", changes: [{ code: "workspace.registry", scope: "global" }] });
+    expect(classifyConfigReload(config({ workspaces: [{ ...mainWorkspace, approvalsReviewer }] }), current))
+      .toEqual({ action: "reload", changes: [{ code: "workspace.registry", scope: "global" }] });
+  });
+
   it("hot reloads when only workspace permissions change", () => {
     const current = config();
 

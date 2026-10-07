@@ -24,7 +24,10 @@
   启动账户预热绑定应用关闭信号，按账户记录安全失败分类，在指标存储关闭前最多等待 5 秒；
   迟到的用量与额度结果均禁止写入。把同一 Client 的
   原生 Thread Queue 与分页历史/Revert 端口注入 Application，并把 Queue changed、Thread reverted 通知
-  仅用于失效短期选择快照和校正 Core 派生状态；提供连接启动、订阅恢复与组件关闭原语，重连委托给 `gateway-reconnect-coordinator.ts`，
+  仅用于失效短期选择快照和校正 Core 派生状态；当前 Thread 审批设置窄端口先等待 Client 的 RPC 与合法通知确认，
+  再以现有入站总线的有界排空等待共享归约完成，供 Application 复核绑定和最新实际审批方式；
+  排空失败单独回报结果尚未确认，不乐观修改 Router 缓存。
+  提供连接启动、订阅恢复与组件关闭原语，重连委托给 `gateway-reconnect-coordinator.ts`，
   并通过 Client 适配器把稳定事件交给 Application 的 `ConversationEventCoordinator` 按序协调 Core，Thread 状态交给 `session-routing`，把
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；

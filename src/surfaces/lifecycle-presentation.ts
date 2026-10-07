@@ -7,6 +7,7 @@ import type {
   OutputEvent,
   ResponseUsageSummary,
   ThreadGoal,
+  ThreadApprovalsReviewer,
   TurnErrorCode,
   TurnStartIdentity,
   TurnTaskMetricsSummary,
@@ -19,6 +20,7 @@ import {
   formatRemainingRateLimitWindow,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { formatThreadApprovalsReviewer } from "./conversation-workspace-status-command-format.js";
 import {
   formatElapsedDuration,
 } from "./elapsed-duration.js";
@@ -94,6 +96,7 @@ type StartupStatus = Pick<
   | "modelProvider"
   | "effort"
   | "serviceTier"
+  | "approvalsReviewer"
   | "modelPending"
   | "effortPending"
   | "fastModePending"
@@ -200,6 +203,7 @@ export function createStartupPresentation(
             label: "协作模式",
             value: `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
           },
+          { label: "审批方式", value: formatThreadApprovalsReviewer(status.approvalsReviewer) },
         ],
       },
       ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
@@ -238,6 +242,7 @@ function openAiConnectivityFields(
 export function createTurnStartedPresentation(
   backgroundThreadId?: string,
   identity?: TurnStartIdentity,
+  approvalsReviewer?: ThreadApprovalsReviewer | null,
 ): LifecyclePresentation {
   return {
     title: identity
@@ -245,9 +250,10 @@ export function createTurnStartedPresentation(
       : backgroundThreadId
         ? "后台任务继续处理中。"
         : "已开始处理。",
-    fields: backgroundThreadId
-      ? [{ label: "Session ID", value: backgroundThreadId }]
-      : [],
+    fields: [
+      ...(backgroundThreadId ? [{ label: "Session ID", value: backgroundThreadId }] : []),
+      { label: "审批方式", value: formatThreadApprovalsReviewer(approvalsReviewer) },
+    ],
   };
 }
 
@@ -436,6 +442,7 @@ export function createTurnCompletedPresentation(
       : []),
     { label: "Session", value: event.sessionName ?? "未命名" },
     { label: "Session ID", value: event.threadId },
+    { label: "审批方式", value: formatThreadApprovalsReviewer(event.approvalsReviewer) },
   ];
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];

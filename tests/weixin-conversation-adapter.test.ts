@@ -72,6 +72,20 @@ afterAll(() => {
 });
 
 describe("WeixinConversationAdapter", () => {
+  it("queries and switches the current Thread with shared canonical text commands", async () => {
+    const notifyText = vi.fn<(target: ConversationTarget, text: string) => boolean>(() => true);
+    const autoReview = vi.fn(() => ({ threadId: "thread", reviewer: "user" as const, updated: false }));
+    const updateAutoReview = vi.fn(async () => ({ threadId: "thread", reviewer: "auto_review" as const, updated: true }));
+    const submit = vi.fn();
+    const adapter = new WeixinConversationAdapter(serviceFixture({ submit, autoReview, updateAutoReview }), { notifyText });
+    await adapter.handle({ ...message, text: "/autoreview" });
+    await adapter.handle({ ...message, text: "/autoreview on" });
+    expect(autoReview).toHaveBeenCalledWith(target);
+    expect(updateAutoReview).toHaveBeenCalledWith(target, true);
+    expect(notifyText.mock.calls.at(-1)?.[1]).toContain("当前会话后续轮次");
+    expect(submit).not.toHaveBeenCalled();
+    await adapter.close();
+  });
   it("touches activity before handling platform-local commands", async () => {
     const touchActivity = vi.fn();
     const notifyText = vi.fn(() => true);
@@ -731,6 +745,54 @@ describe("WeixinConversationAdapter", () => {
       target,
       expect.stringContaining("**微信 Doctor**\n- Bot 凭据：可用"),
     );
+  });
+
+  it("routes Auto-review query and explicit text selections without starting a Turn", async () => {
+    const submit = vi.fn();
+    const workspace = { id: "main", name: "Main", cwd: "/workspace" };
+    const listWorkspaces = vi.fn(() => [workspace]);
+    const updateWorkspacePermissions = vi.fn<NonNullable<ConversationMethodOverrides["updateWorkspacePermissions"]>>(
+      async (_target, update) => ({
+        ...workspace,
+        ...(update.kind === "approvals-reviewer" && update.value !== null
+          ? { approvalsReviewer: update.value }
+          : {}),
+      }),
+    );
+    const notifyText = vi.fn(() => true);
+    const adapter = new WeixinConversationAdapter(serviceFixture({ submit, status: () => conversationStatus(), listWorkspaces, updateWorkspacePermissions }), { notifyText });
+    await adapter.handle({ ...message, text: "/workspaceperm" });
+    await adapter.handle({ ...message, text: "/workspaceperm autoreview on" });
+    await adapter.handle({ ...message, text: "/workspaceperm autoreview off" });
+    await adapter.handle({ ...message, text: "/workspaceperm autoreview clear" });
+    expect(listWorkspaces).toHaveBeenCalled();
+    expect(updateWorkspacePermissions).toHaveBeenNthCalledWith(1, target, { kind: "approvals-reviewer", value: "auto_review" });
+    expect(updateWorkspacePermissions).toHaveBeenNthCalledWith(2, target, { kind: "approvals-reviewer", value: "user" });
+    expect(updateWorkspacePermissions).toHaveBeenNthCalledWith(3, target, { kind: "approvals-reviewer", value: null });
+    expect(submit).not.toHaveBeenCalled();
+    expect(notifyText).toHaveBeenCalledWith(target, expect.stringContaining("工作区默认审批方式"));
+    expect(notifyText).toHaveBeenNthCalledWith(2, target, [
+      "**已修改工作区默认审批方式**",
+      "- Workspace：Main",
+      "  - 工作区默认审批方式：自动审查（Auto-review）",
+      "",
+      "- 已加载会话保持原值，用 /autoreview 修改当前会话。",
+    ].join("\n"));
+    expect(notifyText).toHaveBeenNthCalledWith(3, target, [
+      "**已修改工作区默认审批方式**",
+      "- Workspace：Main",
+      "  - 工作区默认审批方式：手动审批",
+      "",
+      "- 已加载会话保持原值，用 /autoreview 修改当前会话。",
+    ].join("\n"));
+    expect(notifyText).toHaveBeenNthCalledWith(4, target, [
+      "**已清除工作区默认审批方式覆盖**",
+      "- Workspace：Main",
+      "  - 工作区默认审批方式：跟随 Codex 默认",
+      "",
+      "- 已加载会话保持原值，用 /autoreview 修改当前会话。",
+      "- 已移除工作区覆盖；新会话跟随 Codex 默认，恢复历史会话可能保留其已保存设置。",
+    ].join("\n"));
   });
 
   it("uses the shared service for commands beyond the initial basic set", async () => {

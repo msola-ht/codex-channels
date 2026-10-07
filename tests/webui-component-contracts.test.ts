@@ -19,6 +19,7 @@ describe("WebUI component interaction contracts", () => {
             return code.replace("useState } from", "useState as realUseState } from") + stateHook;
           }
           if (id.endsWith("/src/components/ui/button.tsx")) return code.replace("function Button({", "function RealButton({") + " import { createElement as fixtureElement } from 'react'; function Button(props) { globalThis.fixtureButtons.push(props); return fixtureElement(RealButton, props); }";
+          if (id.endsWith("/src/components/settings/settings-controls.tsx")) return code.replace("export function ManagedSelect(", "function FixtureManagedSelect(") + " import { createElement as fixtureSelectElement } from 'react'; export function ManagedSelect(props) { globalThis.fixtureSelects.push(props); return fixtureSelectElement(FixtureManagedSelect, props); }";
           if (id.endsWith("/src/components/ui/input.tsx")) return code.replace("function Input({", "function RealInput({") + " function Input(props) { globalThis.fixtureInputs[props.id] = props; return React.createElement(RealInput, props); }";
           if (id.endsWith("/src/components/ui/sheet.tsx")) return code.replace("function SheetContent({", "function RealSheetContent({") + " function SheetContent(props) { globalThis.fixtureSheetContent = props; return React.createElement(RealSheetContent, props); }";
         },
@@ -29,6 +30,7 @@ describe("WebUI component interaction contracts", () => {
         const { Tabs, TabsList, TabsTrigger, TabsContent } = await server.ssrLoadModule("/src/components/ui/tabs.tsx");
         const { ToolAccessSettings } = await server.ssrLoadModule("/src/components/settings/tool-access-settings.tsx");
         const { AppServerSettingsCard } = await server.ssrLoadModule("/src/components/settings/app-server-settings-card.tsx");
+        const { WorkspaceSettingsCard } = await server.ssrLoadModule("/src/components/settings/workspace-settings-card.tsx");
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
         const { OutputTokenTooltip } = await server.ssrLoadModule("/src/components/metrics/token-tooltip.tsx");
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
@@ -40,6 +42,7 @@ describe("WebUI component interaction contracts", () => {
           globalThis.fixtureStateCursor = 0;
           globalThis.fixtureButtons = [];
           globalThis.fixtureInputs = {};
+          globalThis.fixtureSelects = [];
           return renderToStaticMarkup(h(MemoryRouter, null, h(LanguageContext.Provider, { value: { language: "zh", setLanguage: noop } }, h(TooltipProvider, null, element))));
         };
         const change = (id, value) => globalThis.fixtureInputs[id].onChange({ target: { value } });
@@ -92,6 +95,25 @@ describe("WebUI component interaction contracts", () => {
         management.loading = true;
         output.toolDisabled = render(tool());
         management.loading = false;
+
+        const workspacePreviews = [];
+        const workspaceManagement = { loading: false, error: null, saving: false, pendingSetting: null, lastAppliedSetting: null,
+          managedSettings: { system: { workspaces: [{ id: "original-workspace", name: "Main", sandbox: null, approvalPolicy: null, permissions: null, approvalsReviewer: null }] } },
+          previewSetting: (...args) => workspacePreviews.push(args),
+        };
+        output.workspaceDefault = render(h(WorkspaceSettingsCard, { management: workspaceManagement }));
+        const reviewer = globalThis.fixtureSelects.find(select => select.label === "工作区默认审批方式");
+        output.workspaceOptions = JSON.stringify(reviewer.options);
+        output.workspaceDefaultValue = reviewer.value;
+        reviewer.onChange("auto_review"); reviewer.onChange("user"); reviewer.onChange("__clear__");
+        output.workspacePreviews = JSON.stringify(workspacePreviews);
+        workspaceManagement.pendingSetting = {};
+        render(h(WorkspaceSettingsCard, { management: workspaceManagement }));
+        output.workspacePendingDisabled = String(globalThis.fixtureSelects.find(select => select.label === "工作区默认审批方式").disabled);
+        workspaceManagement.pendingSetting = null;
+        workspaceManagement.managedSettings.system.workspaces[0].approvalsReviewer = "auto_review";
+        render(h(WorkspaceSettingsCard, { management: workspaceManagement }));
+        output.workspaceReviewerValue = globalThis.fixtureSelects.find(select => select.label === "工作区默认审批方式").value;
 
         reset();
         const compact = () => h(AppServerSettingsCard, { management, section: "context" });
@@ -166,6 +188,16 @@ describe("WebUI component interaction contracts", () => {
     expect(result.fast).toContain('data-size="sm"');
     expect(result.reasoningOverflow).toContain('aria-description="推理输出：20; 非推理输出：0"');
     expect(result.reasoningMissingTotal).toContain('aria-description="推理输出：20; 非推理输出：—"');
+  });
+
+  it("previews each Workspace approval reviewer choice with the original Workspace identity", () => {
+    expect(result.workspaceDefaultValue).toBe("__clear__");
+    expect(JSON.parse(result.workspaceOptions!)).toEqual([["__clear__", "跟随 Codex 默认"], ["user", "手动审批"], ["auto_review", "Auto-review（自动审查）"]]);
+    expect(JSON.parse(result.workspacePreviews!)).toEqual(["auto_review", "user", null].map(value => ["workspace.permissions", { workspaceId: "original-workspace", update: { kind: "approvals-reviewer", value } }, { key: "settingsFields.workspaceApprovalsReviewer", params: { name: "Main" } }]));
+    expect(result.workspacePendingDisabled).toBe("true");
+    expect(result.workspaceReviewerValue).toBe("auto_review");
+    expect(result.workspaceDefault).toContain("卸载后恢复");
+    expect(result.workspaceDefault).toContain("已加载会话保留实际审批方式");
   });
 
   it("associates tool JSON errors with the input and clears errors while editing", () => {

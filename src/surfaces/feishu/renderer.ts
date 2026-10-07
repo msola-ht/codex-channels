@@ -122,6 +122,7 @@ export function renderFeishuOutput(
         createTurnStartedPresentation(
           event.background ? event.threadId : undefined,
           event.identity,
+          event.approvalsReviewer,
         ),
       );
     case "turn.reasoning":

@@ -30,6 +30,8 @@ const feishuLocalCommandActions = [
   "review-custom",
   "sessions-search",
   "archived-search",
+  "workspace-autoreview-select",
+  "thread-autoreview-select",
 ] as const;
 
 export type FeishuCommandCenterAction =
@@ -190,6 +192,9 @@ export class FeishuCommandCenter {
               : []
           ))
         : undefined,
+      "choices" in response && response.choices.some(choice => choice.action === "thread-autoreview-select")
+        ? Math.min(this.tokenTtlMs, 5 * 60_000)
+        : this.tokenTtlMs,
     );
   }
 
@@ -200,6 +205,7 @@ export class FeishuCommandCenter {
     form?: FeishuCommandCenterForm,
     consumeOnUse = false,
     acceptedStates: ReadonlyMap<string, FeishuCommandAcceptedState> = new Map(),
+    tokenTtlMs = this.tokenTtlMs,
   ): Promise<void> {
     if (
       this.closed
@@ -210,6 +216,7 @@ export class FeishuCommandCenter {
     this.prune();
     const token = randomBytes(18).toString("base64url");
     const card = render(token);
+    const expiresAt = this.now() + tokenTtlMs;
     const messageId = await this.outbox.deliverCard(
       target.conversationId,
       card,
@@ -221,7 +228,7 @@ export class FeishuCommandCenter {
       target,
       actorId,
       messageId,
-      expiresAt: this.now() + this.tokenTtlMs,
+      expiresAt,
       allowedSelections: collectCommandSelections(card, token),
       acceptedStates,
       ...(form ? { form } : {}),
@@ -712,7 +719,8 @@ function renderFeishuCategorizedCommandsCard(
       sectionTitle("当前内容"),
       actionRow(token, [
         ["工作区权限", "workspaceperm", "default"],
-        ["权限", "permissions", "default"],
+        ["当前会话审批方式", "autoreview", "default"],
+        ["权限查询", "permissions", "default"],
         ["Diff", "diff", "default"],
         ["Review", "review", "default"],
       ]),
@@ -869,6 +877,8 @@ function commandCenterActionConsumesToken(
   input: string,
 ): boolean {
   return directStateChangingActions.has(action)
+    || action === "workspace-autoreview-select"
+    || action === "thread-autoreview-select"
     || (
       action === "queue"
       && /^(?:start|delete)\s+/u.test(input)

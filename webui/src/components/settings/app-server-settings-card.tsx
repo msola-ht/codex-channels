@@ -47,6 +47,13 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
   const effortOptions = selected?.reasoningEfforts.map((item) => [item.effort, item.effort]) ?? []
   const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null
   const officialDisabled = busy || !settings.defaultsEditable
+  const reviewerHint: MessageKey = settings.approvalsReviewer?.editable
+    ? "settingsFields.autoReviewHint"
+    : settings.approvalsReviewer?.reason === "managed-policy"
+      ? "settingsFields.autoReviewManaged"
+      : settings.approvalsReviewer?.reason === "unsupported-value"
+        ? "settingsFields.autoReviewUnsupported"
+        : "settingsFields.autoReviewUnavailable"
 
   const saveCompact = () => {
     const parsedWindow = contextWindow.trim() === "" ? null : Number(contextWindow)
@@ -102,6 +109,7 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
           <ManagedSelect label={t("settingsFields.autoRecap")} value={String(settings.defaults.autoRecapEnabled)} options={[["false", t("settingsFields.off")], ["true", t("settingsFields.on")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "auto-recap", enabled: value === "true" }, { key: "settingsFields.autoRecap" })} />
           </>}
           {section === "permissions" && <>
+          <ManagedSelect label={t("settingsFields.approvalsReviewer")} value={settings.approvalsReviewer.value ?? ""} placeholder={t("settingsFields.approvalsReviewerUnset")} options={[["user", t("settingsFields.manualReview")], ["auto_review", t("settingsFields.autoReview")]]} disabled={busy || !settings.approvalsReviewer.editable} description={t(reviewerHint)} onChange={(value) => void management.previewSetting({ kind: "approvals-reviewer", value }, { key: "settingsFields.approvalsReviewer" })} />
           <ManagedSelect label="Sandbox" value={settings.permissions.sandboxMode ?? "read-only"} options={[["read-only", t("settingsFields.readOnly")], ["workspace-write", t("settingsFields.workspaceWrite")]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: value, approvalPolicy: settings.permissions.approvalPolicy ?? "on-request", networkAccess: settings.permissions.networkAccess ?? false }, { key: "settingsFields.sandbox" })} />
           <ManagedSelect label={t("settingsFields.approvalPolicy")} value={settings.permissions.approvalPolicy ?? "on-request"} options={[["on-request", t("settingsFields.onRequest")], ["never", t("settingsFields.never")]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: settings.permissions.sandboxMode ?? "read-only", approvalPolicy: value, networkAccess: settings.permissions.networkAccess ?? false }, { key: "settingsFields.approvalPolicy" })} />
           <ManagedSelect label={t("settingsFields.networkAccess")} value={String(settings.permissions.networkAccess ?? false)} options={[["true", t("settingsFields.allowed")], ["false", t("settingsFields.denied")]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: settings.permissions.sandboxMode ?? "read-only", approvalPolicy: settings.permissions.approvalPolicy ?? "on-request", networkAccess: value === "true" }, { key: "settingsFields.networkAccess" })} />

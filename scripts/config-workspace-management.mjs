@@ -13,6 +13,7 @@ export function projectWorkspaceSettings(document) {
       name: stringValue(entry.name) || stringValue(entry.id),
       sandbox: sandboxValue(entry.sandbox),
       approvalPolicy: approvalValue(entry.approval_policy),
+      approvalsReviewer: ["user", "auto_review"].includes(entry.approvals_reviewer) ? entry.approvals_reviewer : null,
       permissions: optionalString(entry.permissions),
     }));
 }
@@ -55,6 +56,12 @@ function normalizeUpdate(update) {
       throw invalidSetting("update.value", "invalid-choice", "Workspace 审批策略无效");
     }
     return { kind: "approval", value: update.value };
+  }
+  if (update.kind === "approvals-reviewer") {
+    if (update.value !== null && !["user", "auto_review"].includes(update.value)) {
+      throw invalidSetting("update.value", "invalid-choice", "Workspace 审批审查方式无效");
+    }
+    return { kind: "approvals-reviewer", value: update.value };
   }
   if (update.kind === "permissions") {
     const value = update.value === null ? null : optionalString(update.value);

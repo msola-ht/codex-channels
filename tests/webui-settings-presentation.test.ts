@@ -53,6 +53,7 @@ describe("WebUI 状态与关联范围展示", () => {
         const {LanguageContext}=await server.ssrLoadModule("/src/hooks/language-context.ts");
         const {GatewaySettingsCard}=await server.ssrLoadModule("/src/components/settings/gateway-settings-card.tsx");
         const {AppServerSettingsCard}=await server.ssrLoadModule("/src/components/settings/app-server-settings-card.tsx");
+        const {WorkspaceSettingsCard}=await server.ssrLoadModule("/src/components/settings/workspace-settings-card.tsx");
         const {ProviderSettingsManagement}=await server.ssrLoadModule("/src/components/settings/provider-settings-management.tsx");
         const {ProviderStatusCard,ChannelStatusCard}=await server.ssrLoadModule("/src/components/settings/provider-channel-status.tsx");
         const {ToolAccessSettings}=await server.ssrLoadModule("/src/components/settings/tool-access-settings.tsx");
@@ -76,6 +77,8 @@ describe("WebUI 状态与关联范围展示", () => {
           return [key,{
             gateway:Object.fromEntries(["general","permissions","network","data","display"].map(section=>[section,render(GatewaySettingsCard,{management:{...shared,managedSettings},section,upstreamAgent:{data:{effectiveUserAgent:"fixture-agent/1",recentRequestUserAgent:"fixture-agent/1",source:"override"},error:null,loading:false}},language)])),
             codex:Object.fromEntries(["general","models","context"].map(section=>[section,render(AppServerSettingsCard,{management:{...shared,codexSettings},section},language)])),
+            reviewers:Object.fromEntries([null,"user","auto_review"].map(value=>[String(value),render(AppServerSettingsCard,{management:{...shared,codexSettings:{...codexSettings,approvalsReviewer:{value,editable:true},permissions:{editable:true},toolSettings:{mergedAvailable:true,fields:[]}}},section:"permissions"},language)])),
+            workspace:render(WorkspaceSettingsCard,{management:{...shared,managedSettings}},language),
             provider:Object.fromEntries(["providers","models","context"].map(section=>[section,render(ProviderSettingsManagement,{management:{...shared,settings},section},language)])),
             tools:Object.fromEntries(toolFields.map(field=>[field.path.join("."),render(ToolAccessSettings,{management:{...shared,codexSettings:{...codexSettings,toolSettings:{mergedAvailable:true,fields:[field]}}}},language)])),
             status:render(ProviderStatusCard,{state:providerState},language),
@@ -90,8 +93,8 @@ describe("WebUI 状态与关联范围展示", () => {
       } finally {await server.close();}
     `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000, maxBuffer: 2 * 1024 * 1024 });
     type Presentation = {
-      gateway: Record<string, string>; codex: Record<string, string>; provider: Record<string, string>; tools: Record<string, string>;
-      status: string; channels: string; emptyChannels: string; unconfigured: string;
+      gateway: Record<string, string>; codex: Record<string, string>; reviewers: Record<string, string>; provider: Record<string, string>; tools: Record<string, string>;
+      status: string; channels: string; emptyChannels: string; unconfigured: string; workspace: string;
     };
     const { presentation, userData, translatedChannel, unchanged } = JSON.parse(output) as {
       presentation: Record<"zh" | "en" | "zhAgain", Presentation>;
@@ -101,8 +104,8 @@ describe("WebUI 状态与关联范围展示", () => {
     expect(presentation.zhAgain).toEqual(presentation.zh);
     const english = presentation.en;
     for (const html of [
-      ...Object.values(english.gateway), ...Object.values(english.codex), ...Object.values(english.provider), ...Object.values(english.tools),
-      english.status, english.channels, english.emptyChannels, english.unconfigured,
+      ...Object.values(english.gateway), ...Object.values(english.codex), ...Object.values(english.reviewers), ...Object.values(english.provider), ...Object.values(english.tools),
+      english.status, english.channels, english.emptyChannels, english.unconfigured, english.workspace,
     ]) {
       expect(html).not.toMatch(/[\u4e00-\u9fff]/u);
       expect(html).not.toMatch(/\b(?:settingsFields|settingsUi|managementUi|modelManagement|channelSettings)\.[A-Za-z]/u);
@@ -128,6 +131,19 @@ describe("WebUI 状态与关联范围展示", () => {
     }
     expect(presentation.zh.unconfigured).toContain("未配置");
     expect(english.unconfigured).toContain("Not configured");
+    expect(presentation.zh.workspace).toContain("工作区默认审批方式");
+    expect(english.workspace).toContain("Workspace default approval mode");
+    expect(presentation.zh.reviewers.null).toContain("Codex 默认审批方式");
+    expect(presentation.zh.reviewers.null).toContain("未设置");
+    expect(presentation.zh.reviewers.user).toContain("手动审批");
+    expect(presentation.zh.reviewers.auto_review).toContain("Auto-review（自动审查）");
+    expect(english.reviewers.null).toContain("Codex default approval mode");
+    expect(english.reviewers.null).toContain("Not set");
+    expect(english.reviewers.user).toContain("Manual approval");
+    expect(english.reviewers.auto_review).toContain("Auto-review");
+    expect(english.reviewers.user).not.toContain("Not set");
+    expect(english.workspace).toContain("Follow Codex default");
+    expect(english.workspace).toContain("Loaded sessions keep their actual reviewer");
     expect(presentation.zh.channels).toContain("已启用");
     expect(english.channels).toContain("Enabled");
     expect(english.channels).toContain("Configured, disabled");

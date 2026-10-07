@@ -168,6 +168,7 @@ export class FakeTransport extends BaseTransport {
   configModel: unknown = "gpt-test";
   configReasoningEffort: unknown = "high";
   configLayers: unknown = null;
+  configRequirements: unknown = null;
   accountUsageResult: Record<string, unknown> = {
     summary: {
       lifetimeTokens: null,
@@ -486,6 +487,10 @@ export class FakeTransport extends BaseTransport {
           }),
         ),
       );
+    } else if (decoded.method === "configRequirements/read") {
+      queueMicrotask(() => this.emitMessage(JSON.stringify({
+        id: decoded.id, result: { requirements: this.configRequirements },
+      })));
     } else if (decoded.method === "config/read") {
       queueMicrotask(() =>
         this.emitMessage(

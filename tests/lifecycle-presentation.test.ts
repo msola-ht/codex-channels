@@ -15,6 +15,28 @@ import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-f
 import gatewayMetadata from "../src/version.json" with { type: "json" };
 
 describe("shared Surface lifecycle presentation", () => {
+  it.each([
+    ["user", "手动审批"], ["auto_review", "自动审查（Auto-review）"],
+    ["guardian_subagent", "自动审查（guardian_subagent）"], [null, "未知"], [undefined, "未知"],
+  ] as const)("shows actual reviewer %s in startup, Turn start and completion for every Surface", (approvalsReviewer, label) => {
+    const startup = renderPlainLifecyclePresentation(createStartupPresentation(
+      [{ id: "main", name: "Main", cwd: "/workspace" }],
+      { workspaceId: "main", threadId: "thread", model: "test-model", effort: null,
+        serviceTier: null, ...(approvalsReviewer === undefined ? {} : { approvalsReviewer }), modelPending: false, effortPending: false,
+        fastModePending: false, collaborationMode: "default", collaborationModePending: false },
+      { platform: "linux", architecture: "x64", gatewayVersion: "test-version", nodeVersion: "v24",
+        transport: "Unix WebSocket", codexUpstreamUserAgent: null },
+    ));
+    expect(startup).toContain(`审批方式：${label}`);
+    expect(renderPlainLifecyclePresentation(createTurnStartedPresentation(undefined, undefined, approvalsReviewer)))
+      .toContain(`审批方式：${label}`);
+    for (const surface of ["feishu", "telegram", "weixin"]) {
+      expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({
+        type: "turn.completed", target: { surface, accountId: "a", conversationId: "c" },
+        threadId: "thread", turnId: "turn", status: "completed", ...(approvalsReviewer === undefined ? {} : { approvalsReviewer }),
+      }))).toContain(`审批方式：${label}`);
+    }
+  });
   it.each(["feishu", "telegram", "weixin"] as const)("shows %s session performance and concise compaction separately from the current turn", surface => {
     const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
       type: "turn.completed", target: { surface, accountId: "a", conversationId: "c" },
@@ -105,7 +127,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("速度：—");
     expect(rendered).toContain("总耗时：17 min 51 s");
     expect(rendered).not.toContain("本次运行：");
-    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\n请求结果：完成 3 · 中断 0 · 失败 0 · 不完整 0\nToken：1.1 K");
+    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n审批方式：未知\n模型请求：3 次\n请求结果：完成 3 · 中断 0 · 失败 0 · 不完整 0\nToken：1.1 K");
     expect(rendered).not.toContain("会话统计（含子代理）");
     expect(rendered).not.toContain("上游轮次首 Token");
   });
@@ -545,6 +567,7 @@ describe("shared Surface lifecycle presentation", () => {
       "思考等级：medium",
       "Fast 模式：开启",
       "协作模式：Default",
+      "审批方式：未知",
       "",
       "账户状态：",
       "周限：剩余 63%",
@@ -651,13 +674,13 @@ describe("shared Surface lifecycle presentation", () => {
   it("uses one Turn start and completion field order", () => {
     expect(renderPlainLifecyclePresentation(
       createTurnStartedPresentation(),
-    )).toBe("已开始处理。");
+    )).toBe("已开始处理。\n\n审批方式：未知");
     expect(renderPlainLifecyclePresentation(
       createTurnStartedPresentation(undefined, {
         kind: "plugin",
         name: "GitHub",
       }),
-    )).toBe("已使用 GitHub Plugin 开始处理。");
+    )).toBe("已使用 GitHub Plugin 开始处理。\n\n审批方式：未知");
 
     const rendered = renderPlainLifecyclePresentation(
       createTurnCompletedPresentation({
@@ -719,6 +742,7 @@ describe("shared Surface lifecycle presentation", () => {
       "当前工作区：Main (main)",
       "Session：统一生命周期",
       "Session ID：thread-1",
+      "审批方式：未知",
       "上下文：10 K / 100 K（10%）",
       "上下文压缩：2 次",
       "Goal：进行中 · 12.5 K / 100 K",

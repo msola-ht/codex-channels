@@ -4,6 +4,26 @@ import { UserFacingError } from "../src/conversation-core/index.js";
 import { formatTelegramUserFacingError } from "../src/surfaces/telegram/user-error-renderer.js";
 
 describe("Telegram user error renderer", () => {
+  it("explains pending interactions without claiming a Turn is running", () => {
+    const rendered = formatTelegramUserFacingError(new UserFacingError("conversation.busy", "secret", { reason: "pending-interaction" }));
+    expect(rendered).toContain("待处理交互");
+    expect(rendered).not.toContain("任务运行中");
+  });
+  it.each([
+    ["autoreview.usage", "/autoreview [on|off]"],
+    ["autoreview.unavailable", "无法切换"],
+    ["autoreview.stale-selection", "会话已变化"],
+    ["autoreview.update-failed", "核对实际状态"],
+    ["autoreview.update-unconfirmed", "尚未确认"],
+  ] as const)("safely explains %s without claiming an unconfirmed write succeeded", (code, expected) => {
+    const rendered = formatTelegramUserFacingError(new UserFacingError(code, "secret-upstream-error"));
+    expect(rendered).toContain(expected);
+    expect(rendered).not.toContain("secret");
+    expect(rendered).not.toContain("已切换");
+  });
+  it("renders Workspace selection expiry without disclosing internal error text", () => {
+    expect(formatTelegramUserFacingError(new UserFacingError("workspace.permission.usage", "secret-upstream-error", { reason: "stale-selection" }))).toBe("工作区审批按钮已失效或工作区已变化，请重新发送 /workspaceperm");
+  });
   it("renders platform syntax from an error code instead of the internal fallback", () => {
     const error = new UserFacingError(
       "fast.usage",

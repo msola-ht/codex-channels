@@ -3,6 +3,7 @@ import {
   conversationTargetKey,
   type ConversationTarget,
   type RoutedWorkspace,
+  type ThreadApprovalsReviewer,
 } from "../conversation-core/index.js";
 import type { Workspace, WorkspaceRegistry } from "../policy/index.js";
 import type {
@@ -26,6 +27,7 @@ export interface ThreadModelSettings {
   modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
+  approvalsReviewer?: ThreadApprovalsReviewer | null;
   collaborationMode: "default" | "plan";
 }
 
@@ -92,6 +94,9 @@ export class SessionRouter {
       ...(workspace.permissions === undefined
         ? {}
         : { permissions: workspace.permissions }),
+      ...(workspace.approvalsReviewer === undefined
+        ? {}
+        : { approvalsReviewer: workspace.approvalsReviewer }),
     };
   }
 
@@ -270,6 +275,7 @@ export class SessionRouter {
     if (this.bindings.getByThread(threadId)) {
       const current = this.modelSettingsByThread.get(threadId);
       this.modelSettingsByThread.set(threadId, {
+        ...(current?.approvalsReviewer === undefined ? {} : { approvalsReviewer: current.approvalsReviewer }),
         ...settings,
         ...(settings.modelProvider
           ? { modelProvider: settings.modelProvider }
@@ -322,7 +328,7 @@ export class SessionRouter {
             false,
             isCurrent,
           );
-          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode);
+          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
           this.namesByThread.set(resumed.thread.id, resumed.thread.name);
           this.contextCompactionItemIdsByThread.set(
             resumed.thread.id,
@@ -441,7 +447,7 @@ export class SessionRouter {
               "conversation.busy", "历史会话已有运行中的任务，请显式恢复会话",
             ));
           }
-          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode);
+          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
           this.namesByThread.set(resumed.thread.id, resumed.thread.name);
           this.contextCompactionItemIdsByThread.set(
             resumed.thread.id,
@@ -463,7 +469,7 @@ export class SessionRouter {
         ? { dynamicTools: this.dynamicTools }
         : {}),
     });
-    this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier);
+    this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier, "default", started.approvalsReviewer);
     this.namesByThread.set(started.thread.id, started.thread.name);
     this.contextCompactionItemIdsByThread.set(
       started.thread.id,
@@ -568,6 +574,8 @@ export class SessionRouter {
       session.modelProvider,
       session.reasoningEffort,
       session.serviceTier,
+      "default",
+      session.approvalsReviewer,
     );
     this.namesByThread.set(session.thread.id, session.thread.name);
     this.contextCompactionItemIdsByThread.set(
@@ -649,7 +657,7 @@ export class SessionRouter {
       await this.cleanupFailedResume(threadId, failure);
     }
     if (previousUnsubscribed && current) this.contextCompactionItemIdsByThread.delete(current.threadId);
-    this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode);
+    this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
     this.namesByThread.set(resumed.thread.id, resumed.thread.name);
     this.contextCompactionItemIdsByThread.set(
       resumed.thread.id,
@@ -676,6 +684,9 @@ export class SessionRouter {
     }
     const threadId = thread.id;
     const requested = { ...this.workspacePermissions(workspace), ...options };
+    // A loaded Thread retains its current reviewer. Only loading persisted
+    // history can apply the Workspace default without mutating a live session.
+    if (thread.status.type !== "notLoaded") delete requested.approvalsReviewer;
     const session = await this.codex.resumeThread(threadId, workspace.cwd, requested);
     if (isCurrent && !isCurrent()) {
       await this.cleanupFailedResume(threadId, new SupersededRestoreError(), this.bindings.getByThread(threadId) !== undefined);
@@ -855,7 +866,7 @@ export class SessionRouter {
           const workspace = this.workspaces.require(expected.workspaceId);
           const resumed = await this.resumeInWorkspace(snapshot, workspace, {}, false,
             () => ownsBinding() && condition.canRestore());
-          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode);
+          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
           this.namesByThread.set(resumed.thread.id, resumed.thread.name);
           this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
           condition.restored(resumed.thread);
@@ -962,7 +973,7 @@ export class SessionRouter {
       await this.cleanupFailedResume(forked.thread.id, failure);
     }
     this.contextCompactionItemIdsByThread.delete(current.threadId);
-    this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier);
+    this.captureModelSettings(forked.thread.id, forked.model, forked.modelProvider, forked.reasoningEffort, forked.serviceTier, "default", forked.approvalsReviewer);
     this.namesByThread.set(forked.thread.id, forked.thread.name);
     this.contextCompactionItemIdsByThread.set(forked.thread.id, forked.contextCompactionItemIds);
     this.clearForceNew(target, Date.now());
@@ -1135,6 +1146,7 @@ export class SessionRouter {
     effort: string | null,
     serviceTier: string | null | undefined,
     collaborationMode: ThreadModelSettings["collaborationMode"] = "default",
+    approvalsReviewer: ThreadApprovalsReviewer | null = null,
   ): void {
     this.modelSettingsByThread.set(threadId, {
       model,
@@ -1142,6 +1154,7 @@ export class SessionRouter {
       effort,
       serviceTier: serviceTier ?? null,
       collaborationMode,
+      approvalsReviewer,
     });
   }
 }

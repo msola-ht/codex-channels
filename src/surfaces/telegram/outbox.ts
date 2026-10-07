@@ -264,6 +264,7 @@ export class TelegramOutbox {
                 createTurnStartedPresentation(
                   event.background ? event.threadId : undefined,
                   event.identity,
+                  event.approvalsReviewer,
                 ),
               ),
               this.replyTargets.get(chatId, this.turnKey(event.threadId, event.turnId)),

@@ -102,6 +102,7 @@ describe("Notification adapter", () => {
           model: "gpt-5.6-sol",
           effort: "high",
           serviceTier: "priority",
+          approvalsReviewer: "auto_review",
           collaborationMode: { mode: "plan", settings: {} },
         },
       },
@@ -112,6 +113,7 @@ describe("Notification adapter", () => {
         model: "gpt-5.6-sol",
         effort: "high",
         serviceTier: "priority",
+        approvalsReviewer: "auto_review",
         collaborationMode: "plan",
       },
     });
@@ -136,9 +138,20 @@ describe("Notification adapter", () => {
         model: "gpt-5.6-sol",
         effort: null,
         serviceTier: null,
+        approvalsReviewer: null,
         collaborationMode: "default",
       },
     });
+  });
+
+  it.each([
+    ["user", "user"], ["auto_review", "auto_review"],
+    ["guardian_subagent", "guardian_subagent"], ["future_reviewer", null], [undefined, null],
+  ])("maps reviewer %s without inferring manual approval", (approvalsReviewer, expected) => {
+    expect(toThreadStateEvent({ method: "thread/settings/updated", params: {
+      threadId: "thread-1", threadSettings: { model: "test-model", effort: null, serviceTier: null,
+        collaborationMode: { mode: "default" }, approvalsReviewer },
+    } })).toMatchObject({ settings: { approvalsReviewer: expected } });
   });
 
   it("maps Thread lifecycle notifications without protocol envelopes", () => {

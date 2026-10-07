@@ -11,7 +11,9 @@ import {
   estimateWeeklyLimit,
   type RequestMetricsQueryPort,
 } from "../src/application/request-metrics-port.js";
-import type { TurnExecutionPort } from "../src/application/turn-port.js";
+import type { ThreadApprovalsReviewerPort, TurnExecutionPort } from "../src/application/turn-port.js";
+import { GatewayApplication } from "../src/bootstrap/app.js";
+import { CodexAppServerClient, JsonRpcClient, toThreadStateEvent, type RpcNotification } from "../src/codex-client/index.js";
 import {
   ConversationCore,
   type ConversationRoutingPort,
@@ -19,9 +21,10 @@ import {
 } from "../src/conversation-core/index.js";
 import { EventBus } from "../src/event-bus/index.js";
 import { SessionRouter } from "../src/session-routing/router.js";
-import type { ThreadLifecyclePort, ThreadSession, ThreadStartOptions } from "../src/session-routing/index.js";
+import { ThreadStateSynchronizer, type ThreadLifecyclePort, type ThreadSession, type ThreadStartOptions } from "../src/session-routing/index.js";
 import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
 import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
+import { FakeTransport } from "./support/json-rpc-fixtures.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 const main = { id: "main", name: "Main", cwd: "/workspace/main" };
@@ -116,6 +119,213 @@ function defaultProviderConversation(providers: string[]) {
   } as unknown as ConversationCore, models, queryPort());
   return { service, router, models, startThread, startTurn };
 }
+
+describe("ConversationService Workspace Auto-review", () => {
+  function fixture() {
+    const { router, models, startThread } = defaultProviderConversation(["deepseek"]);
+    const activeTurn = vi.fn(() => undefined as string | undefined);
+    const updateWorkspacePermissions = vi.fn(async () => main);
+    const service = new ConversationService(
+      turnPort(), router, { activeTurn } as unknown as ConversationCore, models, queryPort(),
+      undefined, undefined, undefined, undefined, undefined, { updateWorkspacePermissions },
+    );
+    return { service, router, startThread, updateWorkspacePermissions, activeTurn };
+  }
+
+  it("updates the Workspace without creating or changing a loaded or active Thread", async () => {
+    const { service, router, startThread, updateWorkspacePermissions, activeTurn } = fixture();
+    await service.updateWorkspacePermissions(target, { kind: "approvals-reviewer", value: "auto_review" }, "main");
+    expect(startThread).not.toHaveBeenCalled();
+    await router.ensure(target);
+    router.updateModelSettings("thread-0", { model: "gpt-main", effort: null, serviceTier: null, collaborationMode: "default", approvalsReviewer: "auto_review" });
+    activeTurn.mockReturnValue("turn-1");
+    await service.updateWorkspacePermissions(target, { kind: "approvals-reviewer", value: "user" }, "main");
+    await service.updateWorkspacePermissions(target, { kind: "approvals-reviewer", value: null }, "main");
+    expect(updateWorkspacePermissions).toHaveBeenCalledTimes(3);
+    expect(updateWorkspacePermissions).toHaveBeenLastCalledWith("main", { kind: "approvals-reviewer", value: null });
+    expect(router.current(target)?.threadId).toBe("thread-0");
+    expect(router.modelSettingsForThread("thread-0")?.approvalsReviewer).toBe("auto_review");
+    expect(startThread).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a button bound to a different Workspace before writing", async () => {
+    const { service, updateWorkspacePermissions } = fixture();
+    await expect(service.updateWorkspacePermissions(target, { kind: "approvals-reviewer", value: "user" }, "old-workspace"))
+      .rejects.toMatchObject({ code: "workspace.permission.usage", details: { reason: "stale-selection" } });
+    expect(updateWorkspacePermissions).not.toHaveBeenCalled();
+  });
+});
+
+describe("ConversationService current Thread Auto-review", () => {
+  function fixture(reviewerPort?: ThreadApprovalsReviewerPort) {
+    const { router, models, startThread } = defaultProviderConversation(["deepseek"]);
+    const activeTurn = vi.fn(() => undefined as string | undefined);
+    const hasPendingInteraction = vi.fn(() => false);
+    const updateThreadApprovalsReviewer = vi.fn(async (_threadId: string, approvalsReviewer: "user" | "auto_review") => {
+      router.updateModelSettings("thread-0", { model: "gpt-main", effort: null, serviceTier: null, collaborationMode: "default", approvalsReviewer });
+    });
+    const service = new ConversationService(turnPort(), router, { activeTurn } as unknown as ConversationCore,
+      models, queryPort(), undefined, undefined,
+      { hasPendingInteraction, notifyTransferred: () => undefined },
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, reviewerPort ?? { updateThreadApprovalsReviewer });
+    const setReviewer = (approvalsReviewer: "user" | "auto_review" | "guardian_subagent" | null) =>
+      router.updateModelSettings("thread-0", { model: "gpt-main", effort: null, serviceTier: null, collaborationMode: "default", approvalsReviewer });
+    return { service, router, startThread, activeTurn, hasPendingInteraction, updateThreadApprovalsReviewer, setReviewer };
+  }
+
+  it("queries without creating a Thread and rejects an unbound write", async () => {
+    const { service, startThread, updateThreadApprovalsReviewer } = fixture();
+    expect(service.autoReview(target)).toEqual({ threadId: null, reviewer: null, updated: false });
+    await expect(service.updateAutoReview(target, true)).rejects.toMatchObject({ code: "conversation.missing" });
+    expect(startThread).not.toHaveBeenCalled();
+    expect(updateThreadApprovalsReviewer).not.toHaveBeenCalled();
+  });
+
+  it("short-circuits confirmed same values and returns only notification-confirmed writes without optimistic cache mutation", async () => {
+    const { service, router, setReviewer, updateThreadApprovalsReviewer } = fixture();
+    await router.ensure(target);
+    setReviewer("auto_review");
+    await expect(service.updateAutoReview(target, true, "thread-0")).resolves.toEqual({ threadId: "thread-0", reviewer: "auto_review", updated: false });
+    expect(updateThreadApprovalsReviewer).not.toHaveBeenCalled();
+    await expect(service.updateAutoReview(target, false, "thread-0")).resolves.toEqual({ threadId: "thread-0", reviewer: "user", updated: true });
+    expect(updateThreadApprovalsReviewer).toHaveBeenCalledWith("thread-0", "user");
+    expect(router.modelSettingsForThread("thread-0")?.approvalsReviewer).toBe("user");
+  });
+
+  it("rejects stale buttons, active Turns, pending interactions and non-writable actual reviewers before RPC", async () => {
+    const { service, router, setReviewer, activeTurn, hasPendingInteraction, updateThreadApprovalsReviewer } = fixture();
+    await router.ensure(target);
+    setReviewer("user");
+    await expect(service.updateAutoReview(target, true, "old-thread")).rejects.toMatchObject({ code: "autoreview.stale-selection" });
+    activeTurn.mockReturnValue("turn-1");
+    await expect(service.updateAutoReview(target, true)).rejects.toMatchObject({ code: "conversation.busy" });
+    activeTurn.mockReturnValue(undefined);
+    hasPendingInteraction.mockReturnValue(true);
+    await expect(service.updateAutoReview(target, true)).rejects.toMatchObject({ code: "conversation.busy" });
+    hasPendingInteraction.mockReturnValue(false);
+    for (const reviewer of [null, "guardian_subagent"] as const) {
+      setReviewer(reviewer);
+      expect(service.autoReview(target).reviewer).toBe(reviewer);
+      await expect(service.updateAutoReview(target, true)).rejects.toMatchObject({ code: "autoreview.unavailable" });
+    }
+    expect(updateThreadApprovalsReviewer).not.toHaveBeenCalled();
+  });
+
+  it("keeps the old reviewer on failure and hides arbitrary upstream errors", async () => {
+    const { service, router, setReviewer, updateThreadApprovalsReviewer } = fixture();
+    await router.ensure(target);
+    setReviewer("user");
+    updateThreadApprovalsReviewer.mockRejectedValueOnce(new Error("secret upstream body"));
+    await expect(service.updateAutoReview(target, true)).rejects.toMatchObject({ code: "autoreview.update-failed" });
+    expect(service.autoReview(target)).toEqual({ threadId: "thread-0", reviewer: "user", updated: false });
+  });
+
+  it("keeps cached reviewer unchanged while waiting and rejects a binding invalidated by an authoritative lifecycle event", async () => {
+    const { service, router, setReviewer, updateThreadApprovalsReviewer } = fixture();
+    await router.ensure(target);
+    setReviewer("user");
+    let finish!: () => void;
+    updateThreadApprovalsReviewer.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    const pending = service.updateAutoReview(target, true, "thread-0");
+    const rejected = expect(pending).rejects.toMatchObject({ code: "autoreview.stale-selection" });
+    await vi.waitFor(() => expect(updateThreadApprovalsReviewer).toHaveBeenCalledOnce());
+    expect(service.autoReview(target).reviewer).toBe("user");
+    router.forgetThread("thread-0");
+    finish();
+    await rejected;
+    expect(router.current(target)).toBeUndefined();
+  });
+
+  it("returns the latest authoritative reviewer when another client overrides the confirmed setting before result delivery", async () => {
+    const { service, router, setReviewer, updateThreadApprovalsReviewer } = fixture();
+    await router.ensure(target);
+    setReviewer("user");
+    updateThreadApprovalsReviewer.mockImplementationOnce(async () => {
+      setReviewer("auto_review");
+      setReviewer("guardian_subagent");
+    });
+    await expect(service.updateAutoReview(target, true)).resolves.toEqual({ threadId: "thread-0", reviewer: "guardian_subagent", updated: true });
+  });
+
+  it.each(["success", "override", "invalidated", "timeout", "shutdown"])("waits for real inbound reduction after Client confirmation under notification backlog (%s)", async scenario => {
+    const transport = new FakeTransport();
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+    const inbound = new EventBus<RpcNotification>(pino({ level: "silent" }));
+    // Use the production composition-root adapter without starting services,
+    // opening live sockets or creating a production database.
+    const port = Object.assign(Object.create(GatewayApplication.prototype), { codex: client, inbound, stopping: false }) as ThreadApprovalsReviewerPort & { stopping: boolean };
+    const { service, router, setReviewer } = fixture(port);
+    const synchronizer = new ThreadStateSynchronizer(router);
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    let reduced = 0;
+    inbound.subscribe("conversation-core", async notification => {
+      if (notification.method === "item/agentMessage/delta") await blocked;
+      const event = toThreadStateEvent(notification);
+      if (event) { synchronizer.handle(event); reduced++; }
+    });
+    const remove = client.onNotification(notification => inbound.publish(notification, true));
+    let clientConfirmed = false;
+    const originalUpdate = client.updateThreadApprovalsReviewer.bind(client);
+    vi.spyOn(client, "updateThreadApprovalsReviewer").mockImplementation(async (...args) => {
+      await originalUpdate(...args);
+      clientConfirmed = true;
+    });
+    const notifyReviewer = (approvalsReviewer: string) => transport.receive({
+      method: "thread/settings/updated", params: { threadId: "thread-0", threadSettings: {
+        model: "gpt-main", effort: null, serviceTier: null,
+        collaborationMode: { mode: "default" }, approvalsReviewer,
+      } },
+    });
+    await client.connect();
+    const send = vi.spyOn(transport, "send").mockImplementation(async message => {
+      const request = JSON.parse(message) as { id: number; params: { approvalsReviewer: string } };
+      for (let index = 0; index < 20; index++) {
+        transport.receive({ method: "item/agentMessage/delta", params: { threadId: "thread-0", turnId: "turn-0", itemId: "item-0", delta: "text" } });
+      }
+      notifyReviewer(request.params.approvalsReviewer);
+      transport.receive({ id: request.id, result: {} });
+    });
+    try {
+      await router.ensure(target);
+      setReviewer("user");
+      if (scenario === "timeout") vi.useFakeTimers();
+      let delivered = false;
+      const pending = service.updateAutoReview(target, true, "thread-0");
+      void pending.then(() => { delivered = true; }, () => { delivered = true; });
+      const result = scenario === "invalidated"
+        ? expect(pending).rejects.toMatchObject({ code: "autoreview.stale-selection" })
+        : scenario === "timeout" || scenario === "shutdown"
+          ? expect(pending).rejects.toMatchObject({ code: "autoreview.update-unconfirmed" })
+          : expect(pending).resolves.toEqual({ threadId: "thread-0", reviewer: scenario === "override" ? "guardian_subagent" : "auto_review", updated: true });
+      await vi.waitFor(() => expect(clientConfirmed).toBe(true));
+      expect(reduced).toBe(0);
+      expect(service.autoReview(target).reviewer).toBe("user");
+      expect(delivered).toBe(false);
+      if (scenario === "override") notifyReviewer("guardian_subagent");
+      if (scenario === "invalidated") transport.receive({ method: "thread/archived", params: { threadId: "thread-0" } });
+      if (scenario === "shutdown") port.stopping = true;
+      if (scenario === "timeout") await vi.advanceTimersByTimeAsync(5_000);
+      else release();
+      await result;
+      if (scenario === "success") {
+        expect(service.autoReview(target).reviewer).toBe("auto_review");
+        await expect(service.updateAutoReview(target, false)).resolves.toEqual({ threadId: "thread-0", reviewer: "user", updated: true });
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(service.autoReview(target).reviewer).toBe("user");
+      }
+    } finally {
+      release();
+      vi.useRealTimers();
+      await inbound.drain();
+      remove();
+      send.mockRestore();
+      await client.close();
+      await inbound.close({ requireDrained: true });
+    }
+  });
+});
 
 describe("ConversationService model selection", () => {
   it("keeps the Provider switch notice until the target Thread is created, then clears it before the next Turn", async () => {
@@ -698,6 +908,7 @@ describe("ConversationService model selection", () => {
           if (!authorized) throw new Error("Workspace access revoked");
           return workspace;
         },
+        modelSettingsForThread: () => ({ approvalsReviewer: "auto_review" }),
       } as unknown as SessionRouter,
       {
         activeTurn: () => undefined,
@@ -714,6 +925,7 @@ describe("ConversationService model selection", () => {
     );
 
     expect(service.status(target)).not.toHaveProperty("gitBranch");
+    expect(service.status(target).approvalsReviewer).toBe("auto_review");
     expect(currentGitBranch).not.toHaveBeenCalled();
     expect(await service.statusForDisplay(target)).toMatchObject({
       threadId: "thread-1",

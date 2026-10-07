@@ -11,6 +11,17 @@ import type { SessionRouter, ThreadSession, ThreadSnapshot } from "../src/sessio
 const cwd = "/workspace";
 
 describe("ProviderRoutingClient", () => {
+  it("updates reviewer only through the owning Provider", async () => {
+    const openai = client();
+    const deepseek = client();
+    const routed = routing(openai, deepseek);
+    routed.onNotification(() => undefined);
+    deepseek.emitNotification({ method: "thread/settings/updated", params: { threadId: "third-thread", threadSettings: { approvalsReviewer: "user" } } });
+    await routed.updateThreadApprovalsReviewer("third-thread", "auto_review");
+    expect(deepseek.updateThreadApprovalsReviewer).toHaveBeenCalledWith("third-thread", "auto_review");
+    expect(openai.updateThreadApprovalsReviewer).not.toHaveBeenCalled();
+    await routed.close();
+  });
   it("设置应用后的连接与普通请求共用握手，不重置已经建立的新连接", async () => {
     const openai = client();
     let finish!: (value: ReturnType<typeof initializeResponse>) => void;
@@ -1382,6 +1393,7 @@ function client() {
     listModels: vi.fn(),
     lunaReserveModel: vi.fn(),
     updateLunaReserveThreadSettings: vi.fn(),
+    updateThreadApprovalsReviewer: vi.fn(),
     writeDefaultFastMode: vi.fn(),
     readDefaultReasoningEffort: vi.fn(),
     readDefaultServiceTier: vi.fn(),

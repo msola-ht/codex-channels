@@ -7,7 +7,8 @@ import type {
 export type WorkspacePermissionUpdate =
   | { kind: "sandbox"; value: WorkspaceSandboxMode | null }
   | { kind: "approval"; value: WorkspaceApprovalPolicy | null }
-  | { kind: "permissions"; value: string | null };
+  | { kind: "permissions"; value: string | null }
+  | { kind: "approvals-reviewer"; value: "user" | "auto_review" | null };
 
 export interface WorkspacePermissionPort {
   updateWorkspacePermissions(

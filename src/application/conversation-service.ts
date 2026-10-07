@@ -54,6 +54,7 @@ import {
   type RateLimitSnapshot,
   type SurfaceId,
   type ThreadGoal,
+  type ThreadApprovalsReviewer,
   type ThreadTokenUsage,
   type TurnStartIdentity,
   type TurnArtifacts,
@@ -67,6 +68,7 @@ import type {
 import type {
   ReviewTarget,
   TurnExecutionPort,
+  ThreadApprovalsReviewerPort,
   TurnInput,
 } from "./turn-port.js";
 import type {
@@ -193,6 +195,7 @@ export interface ConversationStatus {
   modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
+  approvalsReviewer?: ThreadApprovalsReviewer | null;
   modelPending: boolean;
   effortPending: boolean;
   fastModePending: boolean;
@@ -202,6 +205,12 @@ export interface ConversationStatus {
   contextCompactionCount?: number;
   tokenUsage?: ThreadTokenUsage;
   weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>;
+}
+
+export interface ConversationAutoReviewState {
+  threadId: string | null;
+  reviewer: ThreadApprovalsReviewer | null;
+  updated: boolean;
 }
 
 /** Stable Turn and user-input lifecycle boundary. */
@@ -294,6 +303,8 @@ export interface ConversationQueueRevertUseCases {
 
 /** Stable Session, Workspace and local project boundary. */
 export interface ConversationSessionUseCases {
+  autoReview(target: ConversationTarget): ConversationAutoReviewState;
+  updateAutoReview(target: ConversationTarget, enabled: boolean, expectedThreadId?: string): Promise<ConversationAutoReviewState>;
   listSessions(
     target: ConversationTarget,
     options?: ConversationSessionQuery,
@@ -314,6 +325,7 @@ export interface ConversationSessionUseCases {
   updateWorkspacePermissions(
     target: ConversationTarget,
     update: WorkspacePermissionUpdate,
+    expectedWorkspaceId?: string,
   ): Promise<Workspace>;
   releaseThread(
     target: ConversationTarget,
@@ -383,6 +395,7 @@ export class ConversationService implements
       LunaReserveServiceOptions,
       "router" | "models" | "collaborationModes" | "activity" | "locks"
     >,
+    private readonly threadApprovalsReviewer?: ThreadApprovalsReviewerPort,
   ) {
     this.sessionQueries = new ConversationSessionQueryService(
       router, threadHistory, requestMetricsQuery, sessionDisplayCache,
@@ -1138,6 +1151,7 @@ export class ConversationService implements
   updateWorkspacePermissions(
     target: ConversationTarget,
     update: WorkspacePermissionUpdate,
+    expectedWorkspaceId?: string,
   ): Promise<Workspace> {
     if (!this.workspacePermissions) {
       throw new UserFacingError(
@@ -1147,10 +1161,58 @@ export class ConversationService implements
     }
     return this.locked(target, () => {
       const workspaceId = this.router.workspace(target).id;
+      if (expectedWorkspaceId !== undefined && workspaceId !== expectedWorkspaceId) {
+        throw new UserFacingError(
+          "workspace.permission.usage",
+          "当前工作区已变化，请重新发送 /workspaceperm",
+          { reason: "stale-selection" },
+        );
+      }
       return this.workspacePermissions!.updateWorkspacePermissions(
         workspaceId,
         update,
       );
+    });
+  }
+
+  autoReview(target: ConversationTarget): ConversationAutoReviewState {
+    const threadId = this.router.current(target)?.threadId ?? null;
+    return { threadId, reviewer: threadId ? this.router.modelSettingsForThread(threadId)?.approvalsReviewer ?? null : null, updated: false };
+  }
+
+  updateAutoReview(target: ConversationTarget, enabled: boolean, expectedThreadId?: string): Promise<ConversationAutoReviewState> {
+    return this.locked(target, async () => {
+      const state = this.autoReview(target);
+      if (expectedThreadId !== undefined && expectedThreadId !== state.threadId) {
+        throw new UserFacingError("autoreview.stale-selection", "当前会话已变化，请重新发送 /autoreview");
+      }
+      if (!state.threadId) throw new UserFacingError("conversation.missing", "当前没有已绑定的会话");
+      this.requireIdle(target);
+      if (this.transfers?.hasPendingInteraction(state.threadId)) {
+        throw new UserFacingError("conversation.busy", "当前会话有待处理审批，请先处理审批", { reason: "pending-interaction" });
+      }
+      if (state.reviewer !== "user" && state.reviewer !== "auto_review") {
+        throw new UserFacingError("autoreview.unavailable", "当前会话审批方式不可修改，请重新查询状态");
+      }
+      const reviewer = enabled ? "auto_review" : "user";
+      if (state.reviewer === reviewer) return state;
+      if (!this.threadApprovalsReviewer) throw new UserFacingError("autoreview.unavailable", "当前 Gateway 不支持修改会话审批方式");
+      try {
+        await this.threadApprovalsReviewer.updateThreadApprovalsReviewer(state.threadId, reviewer);
+      } catch (error) {
+        if (error instanceof UserFacingError && (error.code === "autoreview.update-failed" || error.code === "autoreview.update-unconfirmed")) throw error;
+        throw new UserFacingError("autoreview.update-failed", "会话审批方式更新失败，请重新查询状态");
+      }
+      // The injected port waits for both Client confirmation and shared inbound
+      // reduction. Read the latest actual state, including concurrent overrides.
+      const confirmed = this.autoReview(target);
+      if (confirmed.threadId !== state.threadId) {
+        throw new UserFacingError("autoreview.stale-selection", "当前会话已变化，请重新发送 /autoreview");
+      }
+      if (confirmed.reviewer === null) {
+        throw new UserFacingError("autoreview.update-unconfirmed", "会话审批方式更新结果尚未确认，请重新查询状态");
+      }
+      return { ...confirmed, updated: true };
     });
   }
 
@@ -1479,6 +1541,9 @@ export class ConversationService implements
       ...(model.modelProvider ? { modelProvider: model.modelProvider } : {}),
       effort: model.effort,
       serviceTier: model.serviceTier,
+      approvalsReviewer: binding
+        ? this.router.modelSettingsForThread(binding.threadId)?.approvalsReviewer ?? null
+        : null,
       modelPending: model.modelPending,
       effortPending: model.effortPending,
       fastModePending: model.serviceTierPending,

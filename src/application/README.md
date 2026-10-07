@@ -7,6 +7,9 @@
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
   按钮模型选择通过 `selectModel` 接受精确 Provider 与模型身份，不重新解释为文本选择器。
+  `/workspaceperm autoreview on|off|clear` 修改 Workspace 默认审批方式；`selectWorkspaceAutoReview` 的结构化按钮固定原 Workspace ID，防止旧菜单修改新工作区。
+  工作区权限修改结果同时携带已确认的 Workspace 与本次结构化更新，Surface 据更新类型呈现对应的生效范围。
+  `/autoreview [on|off]` 查询或修改当前 Thread 实际审批方式；`selectAutoReview` 的按钮固定原 Thread ID，由会话用例在锁内复核。
   会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider；
   存在原 Thread 时，新会话结果同时携带原 Thread ID，供三个 Surface 像自动解除占用提示一样
   展示可复制的 `恢复会话：/r <Thread ID>`。
@@ -27,6 +30,8 @@
   Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   普通 `status` 不执行 Git IO，展示入口 `statusForDisplay` 通过组合根注入的异步只读端口取得当前 Workspace Git 分支；完成卡仅调用 `workspaceGitBranch`，不连带查询模型与账户状态；
   `/stop` 同时取消当前 Thread 尚未提交的图片准备；已提交 Turn 继续使用官方中断。
+  Workspace 权限更新只写配置；结构化 Auto-review 选择在 Conversation 锁内核对原 Workspace ID，拒绝过期按钮，不改变已加载 Thread 的实际审批方式。
+  当前 Thread Auto-review 写入则在同一锁内要求已有绑定、空闲且无待处理交互，未知或 Guardian 实际值只读；已确认的相同值不写。等待 Client 的权威通知确认后再核对绑定，返回 Router 的实际值，不创建 Thread、启动 Turn 或乐观修改缓存。
   所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；
   通过 Core 跟踪恢复期间的 Turn 通知，在绑定成功后恢复仍有效的活动状态。
   恢复已由其他渠道绑定的空闲 Thread 时，同时锁定新旧 Conversation，确认双方无活动 Turn、
@@ -125,6 +130,7 @@
   有界列表、预览和一次性确认结果，不保存完整历史或工作区文件状态。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
   统一的 Goal 稳定状态类型；
+  `ThreadApprovalsReviewerPort` 单独定义已加载 Thread 审批方式更新，只有 `user` / `auto_review` 可写；组合根注入的端口在官方确认与共享入站归约完成后返回，Application 再复核绑定与最新实际值。
   输入只允许文本、PNG/JPEG/WebP/非动画 GIF Base64 Data URL 图片、绝对本地音频路径、已由 Client 从当前 Workspace
   `skills/list` 解析的 Skill 引用，以及受开发中开关约束的 Plugin mention；Data URL 仅允许内联
   受支持的 `data:image/*;base64,...`，音频路径不代表当前模型可用，必须先通过模型目录能力检查。

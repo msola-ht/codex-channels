@@ -38,10 +38,11 @@ export interface CodexDefaultSettingsClient extends CodexUserConfigClientLifecyc
 }
 
 export interface CodexUserConfigTransactionClient extends CodexUserConfigClientLifecycle {
-  readUserConfigSnapshot(): Promise<{
+  readUserConfigSnapshot(options?: { includeApprovalsReviewerPolicy?: boolean }): Promise<{
     config: Record<string, CodexUserConfigValue | undefined>;
     version: string;
     toolConfig?: Record<string, CodexUserConfigValue | undefined>;
+    approvalsReviewerPolicy?: { allowedReviewers: string[] | null; autoReviewDisabled: boolean };
   }>;
   writeUserConfigEdits(
     edits: CodexUserConfigEdit[],

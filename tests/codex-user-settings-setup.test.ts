@@ -4,6 +4,53 @@ import { runCodexUserSettingsSetup } from "../scripts/codex-user-settings-setup.
 import type { CodexUserSettingsState } from "../scripts/codex-user-settings-management.mjs";
 
 describe("Codex user settings setup", () => {
+  it.each([
+    { value: null, hint: "当前：未设置" },
+    { value: "user" as const, hint: "当前：手动审批" },
+    { value: "auto_review" as const, hint: "当前：自动审查" },
+  ])("distinguishes the Codex default approval preference: $value", async ({ value, hint }) => {
+    const select = vi.fn(async () => "back");
+    const updateSetting = vi.fn();
+    await runCodexUserSettingsSetup({
+      environment: {}, output: { write: () => undefined }, updateSetting,
+      loadSettings: async () => ({ ...settingsState(), approvalsReviewer: { value, editable: true } }),
+      prompts: { select, confirm: vi.fn(), isCancel: () => false },
+    });
+    expect(select).toHaveBeenCalledWith(expect.objectContaining({ options: expect.arrayContaining([
+      expect.objectContaining({ value: "approvals-reviewer", label: "Codex 默认审批方式", hint }),
+    ]) }));
+    expect(updateSetting).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("writes Auto-review only after explicit confirmation: %s", async (confirmed) => {
+    const updateSetting = vi.fn(async () => ({ kind: "approvals-reviewer" as const, previousVersion: "version-1", value: { value: "auto_review" }, activation: "next-thread" as const }));
+    await runCodexUserSettingsSetup({
+      environment: {}, output: { write: () => undefined }, loadSettings: async () => settingsState(), updateSetting,
+      prompts: { select: vi.fn().mockResolvedValueOnce("approvals-reviewer").mockResolvedValueOnce("auto_review"), confirm: async () => confirmed, isCancel: () => false },
+    });
+    if (confirmed) expect(updateSetting).toHaveBeenCalledWith({ kind: "approvals-reviewer", value: "auto_review" }, expect.objectContaining({ expectedVersion: "version-1" }));
+    else expect(updateSetting).not.toHaveBeenCalled();
+  });
+
+  it.each(["managed-policy", "unavailable"] as const)("does not prompt or write a read-only reviewer setting: %s", async (reason) => {
+    const updateSetting = vi.fn();
+    const confirm = vi.fn();
+    const select = vi.fn(async () => "approvals-reviewer");
+    const write = vi.fn();
+    await runCodexUserSettingsSetup({
+      environment: {}, output: { write }, updateSetting,
+      loadSettings: async () => ({ ...settingsState(), approvalsReviewer: { value: null, editable: false, reason } }),
+      prompts: { select, confirm, isCancel: () => false },
+    });
+    expect(select).toHaveBeenCalledOnce();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(updateSetting).not.toHaveBeenCalled();
+    if (reason === "unavailable") {
+      expect(write).toHaveBeenCalledWith(expect.stringContaining("审批策略暂不可用"));
+      expect(write).toHaveBeenCalledWith(expect.stringContaining("其他 Codex 用户设置仍可使用"));
+    }
+  });
+
   it.each(["subagents", "back"])("opens optional subagent setup only on explicit selection: %s", async (section) => {
     const subagentsSetup = vi.fn(async () => ({ action: "back" as const }));
     const updateSetting = vi.fn();
@@ -20,6 +67,21 @@ describe("Codex user settings setup", () => {
       expect(subagentsSetup).not.toHaveBeenCalled();
     }
     expect(updateSetting).not.toHaveBeenCalled();
+  });
+
+  it("allows other menu settings while the reviewer policy is unavailable", async () => {
+    const updateSetting = vi.fn(async () => ({ kind: "fast" as const, previousVersion: "version-1", value: { enabled: true }, activation: "next-thread" as const }));
+    const select = vi.fn().mockResolvedValueOnce("fast").mockResolvedValueOnce(true);
+    await runCodexUserSettingsSetup({
+      environment: {}, output: { write: () => undefined }, updateSetting,
+      loadSettings: async () => ({ ...settingsState(), approvalsReviewer: { value: "user", editable: false, reason: "unavailable" } }),
+      prompts: { select, confirm: async () => true, isCancel: () => false },
+    });
+    expect(select).toHaveBeenCalledWith(expect.objectContaining({ options: expect.arrayContaining([
+      expect.objectContaining({ value: "approvals-reviewer", hint: "当前：只读，审批策略暂不可用" }),
+      expect.objectContaining({ value: "fast" }),
+    ]) }));
+    expect(updateSetting).toHaveBeenCalledWith({ kind: "fast", enabled: true }, expect.objectContaining({ expectedVersion: "version-1" }));
   });
 
   it.each([
@@ -244,6 +306,7 @@ describe("Codex user settings setup", () => {
       "update-plan",
       "auto-recap",
       "permissions",
+      "approvals-reviewer",
       "tool-access",
       "back",
     ]);
@@ -385,6 +448,7 @@ describe("Codex user settings setup", () => {
 
 function settingsState(): CodexUserSettingsState {
   return {
+    approvalsReviewer: { value: null, editable: true },
     toolSettings: { mergedAvailable: false, fields: [] },
     version: "version-1",
     provider: "openai",

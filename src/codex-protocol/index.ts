@@ -19,6 +19,7 @@ export type { ThreadTurnsListResponse } from "./generated/v2/ThreadTurnsListResp
 export type { Turn } from "./generated/v2/Turn.js";
 export type { ConfigReadParams } from "./generated/v2/ConfigReadParams.js";
 export type { ConfigReadResponse } from "./generated/v2/ConfigReadResponse.js";
+export type { ConfigRequirementsReadResponse } from "./generated/v2/ConfigRequirementsReadResponse.js";
 export type {
   CollaborationModeListResponse,
 } from "./generated/v2/CollaborationModeListResponse.js";
@@ -34,6 +35,8 @@ export type {
   ThreadMetadataUpdateResponse,
 } from "./generated/v2/ThreadMetadataUpdateResponse.js";
 export type { ThreadReadResponse } from "./generated/v2/ThreadReadResponse.js";
+export type { ThreadSettingsUpdateParams } from "./generated/v2/ThreadSettingsUpdateParams.js";
+export type { ThreadSettingsUpdateResponse } from "./generated/v2/ThreadSettingsUpdateResponse.js";
 export type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.js";
 export type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
 export type { DynamicToolSpec } from "./generated/v2/DynamicToolSpec.js";

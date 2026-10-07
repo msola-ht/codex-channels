@@ -117,7 +117,7 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
   )
 }
 
-export function ManagedSelect({ label, value, options, disabled, onChange, description }: { description?: string; label: string; value: string; options: string[][]; disabled: boolean; onChange: (value: string) => void }) {
+export function ManagedSelect({ label, value, options, disabled, onChange, description, placeholder }: { description?: string; placeholder?: string; label: string; value: string; options: string[][]; disabled: boolean; onChange: (value: string) => void }) {
   const { t } = useTranslation()
   const selectId = useId()
   const nonEmptyOptions = options.filter(([option]) => option !== "")
@@ -125,8 +125,8 @@ export function ManagedSelect({ label, value, options, disabled, onChange, descr
   const labelContent = <FieldLabel className="text-muted-foreground" htmlFor={selectId}>{label}</FieldLabel>
   return <Field orientation="responsive" data-disabled={disabled}>
     {description ? <FieldContent className="min-w-0">{labelContent}<FieldDescription id={`${selectId}-description`}>{description}</FieldDescription></FieldContent> : labelContent}
-    <Select items={[{ value: null, label: t("settingsUi.notConfigured") }, ...effectiveOptions.map(([value, label]) => ({ value, label }))]} value={value || null} disabled={disabled} onValueChange={next => { if (next !== null) onChange(next) }}>
-      <SelectTrigger id={selectId} aria-describedby={description ? `${selectId}-description` : undefined} size="sm" className="w-full sm:w-[160px]"><SelectValue placeholder={value === "" ? t("settingsUi.notConfigured") : undefined} /></SelectTrigger>
+    <Select items={[{ value: null, label: placeholder ?? t("settingsUi.notConfigured") }, ...effectiveOptions.map(([value, label]) => ({ value, label }))]} value={value || null} disabled={disabled} onValueChange={next => { if (next !== null) onChange(next) }}>
+      <SelectTrigger id={selectId} aria-describedby={description ? `${selectId}-description` : undefined} size="sm" className="w-full sm:w-[160px]"><SelectValue placeholder={value === "" ? placeholder ?? t("settingsUi.notConfigured") : undefined} /></SelectTrigger>
       {effectiveOptions.length > 0 ? <SelectContent><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectGroup></SelectContent> : null}
     </Select>
   </Field>

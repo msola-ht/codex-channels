@@ -121,6 +121,10 @@ cwd = "/absolute/path/to/project"
 sandbox = "workspace-write"
 # 审批：untrusted / on-request / never
 approval_policy = "on-request"
+# Auto-review（可选）：auto_review 自动审批 / user 手动审批。
+# 不配置时新建 Thread 跟随 Codex 默认；历史恢复保留 Codex 持久设置。
+# 显式覆盖对新建、分叉及卸载后恢复生效；已加载 Thread 保留实际 reviewer。
+# approvals_reviewer = "auto_review"
 # 权限 Profile（App Server 命名 profile，例如 :read-only、:workspace、:danger-full-access 或项目自定义）。
 # 设置了 permissions 后不能再设置 sandbox。
 # permissions = ":workspace"

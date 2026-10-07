@@ -341,6 +341,11 @@ export function parseWorkspacePermissionCommand(
       return { kind: "approval", value };
     }
   }
+  if (field === "autoreview") {
+    if (value === "clear") return { kind: "approvals-reviewer", value: null };
+    if (value === "on") return { kind: "approvals-reviewer", value: "auto_review" };
+    if (value === "off") return { kind: "approvals-reviewer", value: "user" };
+  }
   if (field === "profile") {
     if (value === "clear") return { kind: "permissions", value: null };
     if (value.length > 0 && value.length <= 128) {
@@ -349,7 +354,7 @@ export function parseWorkspacePermissionCommand(
   }
   throw new UserFacingError(
     "workspace.permission.usage",
-    "用法：/workspaceperm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>]",
+    "用法：/workspaceperm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>|autoreview <on|off|clear>]",
   );
 }
 

@@ -21,7 +21,7 @@ import { withOutputExecutionAdmission } from "../src/bootstrap/output-execution-
 import { PersistentInteractionPort } from "../src/bootstrap/persistent-interaction-port.js";
 import { EventBus } from "../src/event-bus/index.js";
 import type { OutputEvent } from "../src/conversation-core/index.js";
-import { ProviderRoutingClient } from "../src/codex-client/index.js";
+import { ProviderRoutingClient, StdioTransport } from "../src/codex-client/index.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createSharedCodexUserConfigClient, disableCodexDaemonAutoStart, updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
@@ -37,6 +37,7 @@ import { SessionRouter, type ThreadLifecyclePort } from "../src/session-routing/
 import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
 import { WorkspaceRegistry } from "../src/policy/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
+import type { ThreadStartResponse } from "../src/codex-protocol/index.js";
 import {
   handleApprovalServerRequest,
   toConversationInputEvent,
@@ -1440,6 +1441,115 @@ contractSuite("isolated Codex App Server state contract", () => {
         { keyPath: "model", value: before.config.model ?? null }]);
     }
   }, 15_000);
+
+  it("round-trips Auto-review user preferences", async () => {
+    const original = await ownerClient.readUserConfigSnapshot();
+    const createClient = async () => ({
+      connect: async () => undefined,
+      close: async () => undefined,
+      readUserConfigSnapshot: ownerClient.readUserConfigSnapshot.bind(ownerClient),
+      writeUserConfigEdits: ownerClient.writeUserConfigEdits.bind(ownerClient),
+      listModels: async () => [],
+      readDefaultModelSettings: ownerClient.readDefaultModelSettings.bind(ownerClient),
+      writeDefaultModelSettings: ownerClient.writeDefaultModelSettings.bind(ownerClient),
+    });
+    const dependencies = { createClient, primaryProvider: () => "contract" };
+    try {
+      for (const value of ["auto_review", "user"] as const) {
+        const before = await loadCodexUserSettings(dependencies);
+        expect(before.approvalsReviewer.editable).toBe(true);
+        await updateCodexUserSetting({ kind: "approvals-reviewer", value }, { ...dependencies, expectedVersion: before.version });
+        const after = await peerClient.readUserConfigSnapshot();
+        expect(after.config).toEqual({ ...original.config, approvals_reviewer: value });
+        const visible = await loadCodexUserSettings(dependencies);
+        expect(visible.approvalsReviewer).toEqual({ value, editable: true });
+        const started = await ownerRpc.request<ThreadStartResponse>({ method: "thread/start", params: { cwd: workdir, ephemeral: true, approvalPolicy: "on-request", sandbox: "read-only" } });
+        expect(started.approvalsReviewer).toBe(value);
+        await ownerClient.unsubscribeThread(started.thread.id);
+      }
+    } finally {
+      const current = await ownerClient.readUserConfigSnapshot();
+      await ownerClient.writeUserConfigEdits([{ keyPath: "approvals_reviewer", value: original.config.approvals_reviewer ?? null }], { expectedVersion: current.version });
+    }
+    expect((await peerClient.readUserConfigSnapshot()).config).toEqual(original.config);
+  }, 15_000);
+
+  it("enforces managed reviewer restrictions from an isolated cloud requirements bundle", async () => {
+    const directory = mkdtempSync(join(testRuntime, "managed-reviewer-"));
+    const accountId = "123e4567-e89b-42d3-a456-426614174000";
+    const bundleRequests: Array<string | undefined> = [];
+    const backend = createServer((request, response) => {
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/backend-api/wham/config/bundle") {
+        bundleRequests.push(request.headers["chatgpt-account-id"] as string | undefined);
+        // The locked upstream workspace_routing.rs contract supplies managed
+        // requirements through this release-supported backend endpoint.
+        response.end(JSON.stringify({ requirements_toml: { enterprise_managed: [{
+          id: "reviewer-policy", name: "Contract reviewer policy",
+          contents: 'allowed_approvals_reviewers = ["user"]\n',
+        }] } }));
+        return;
+      }
+      if (request.url?.startsWith("/backend-api/wham/accounts/check")) {
+        response.end(JSON.stringify({ accounts: [{ id: accountId,
+          workspace_backend_origin: "https://chatgpt.com", account_routing_override: "NO_CONSTRAINT",
+        }] }));
+        return;
+      }
+      response.writeHead(404);
+      response.end(JSON.stringify({ error: "unknown isolated fixture endpoint" }));
+    });
+    let client: CodexAppServerClient | undefined;
+    try {
+      await new Promise<void>((resolveListen, rejectListen) => {
+        backend.once("error", rejectListen);
+        backend.listen(0, "127.0.0.1", resolveListen);
+      });
+      const address = backend.address();
+      if (!address || typeof address === "string") throw new Error("受管策略合同无法创建本机 HTTP 夹具");
+      const origin = `http://127.0.0.1:${address.port}`;
+      const payload = Buffer.from(JSON.stringify({ email: "fixture@example.test", "https://api.openai.com/auth": {
+        chatgpt_account_id: accountId, chatgpt_plan_type: "enterprise", chatgpt_user_id: "fixture-user",
+      } })).toString("base64url");
+      writeFileSync(join(directory, "auth.json"), JSON.stringify({ auth_mode: "chatgpt", tokens: {
+        id_token: `eyJhbGciOiJub25lIn0.${payload}.fixture`, access_token: "fixture-access-token",
+        refresh_token: "fixture-refresh-token", account_id: accountId,
+      }, last_refresh: new Date().toISOString() }), { mode: 0o600 });
+      writeFileSync(join(directory, "config.toml"),
+        `chatgpt_base_url = "${origin}/backend-api"\ncli_auth_credentials_store = "file"\napprovals_reviewer = "user"\n`,
+        { mode: 0o600 });
+      client = new CodexAppServerClient(new JsonRpcClient(new StdioTransport({
+        codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: directory,
+        environment: { PATH: process.env.PATH, CODEX_HOME: directory,
+          CODEX_REFRESH_TOKEN_URL_OVERRIDE: `${origin}/oauth/token` },
+      })), { sandbox: "read-only" });
+      await client.connect();
+      const managedClient = client;
+      const dependencies = { createClient: async () => ({
+        connect: async () => undefined, close: async () => undefined,
+        readUserConfigSnapshot: managedClient.readUserConfigSnapshot.bind(managedClient),
+        writeUserConfigEdits: managedClient.writeUserConfigEdits.bind(managedClient),
+        listModels: async () => [],
+        readDefaultModelSettings: managedClient.readDefaultModelSettings.bind(managedClient),
+        writeDefaultModelSettings: managedClient.writeDefaultModelSettings.bind(managedClient),
+      }), primaryProvider: () => "contract" };
+      const beforePolicy = await client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: true });
+      expect(beforePolicy.approvalsReviewerPolicy).toEqual({ allowedReviewers: ["user"], autoReviewDisabled: false });
+      expect(bundleRequests.length).toBeGreaterThan(0);
+      expect(bundleRequests.every(id => id === accountId)).toBe(true);
+      const restricted = await loadCodexUserSettings(dependencies);
+      expect(restricted.approvalsReviewer).toEqual({ value: "user", editable: false, reason: "managed-policy" });
+      await expect(updateCodexUserSetting({ kind: "approvals-reviewer", value: "auto_review" }, { ...dependencies, expectedVersion: restricted.version })).rejects.toMatchObject({ code: "approvals-reviewer-managed-policy" });
+      const afterPolicy = await client.readUserConfigSnapshot();
+      expect(afterPolicy.config).toEqual(beforePolicy.config);
+      expect(afterPolicy.version).toBe(beforePolicy.version);
+    } finally {
+      await client?.close();
+      backend.closeAllConnections();
+      await new Promise<void>(resolveClose => backend.close(() => resolveClose()));
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it("round-trips native tool policies and quoted keys through versioned config", async () => {
     const before = await ownerClient.readUserConfigSnapshot();

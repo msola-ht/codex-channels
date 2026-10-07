@@ -164,6 +164,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
           createTurnStartedPresentation(
             event.background ? event.threadId : undefined,
             event.identity,
+            event.approvalsReviewer,
           ),
         ),
         true,

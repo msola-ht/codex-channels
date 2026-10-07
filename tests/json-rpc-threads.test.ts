@@ -4,7 +4,123 @@ import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { appServerThread, FakeTransport, pinnedThreadSection } from "./support/json-rpc-fixtures.js";
 
+function reviewerSettings(approvalsReviewer: string) {
+  return { model: "gpt-test", effort: null, serviceTier: null, collaborationMode: { mode: "default" }, approvalsReviewer };
+}
+
 describe("JsonRpcClient threads", () => {
+    it("ignores incomplete settings and requires the latest same-Thread reviewer when notifications precede the acknowledgement", async () => {
+      const transport = new FakeTransport();
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      await client.connect();
+      let requestId = 0;
+      const send = vi.spyOn(transport, "send").mockImplementation(async message => {
+        requestId = (JSON.parse(message) as { id: number }).id;
+      });
+      let complete = false;
+      const pending = client.updateThreadApprovalsReviewer("thread-1", "auto_review").then(() => { complete = true; });
+      const notify = (threadSettings: unknown) => transport.receive({ method: "thread/settings/updated", params: { threadId: "thread-1", threadSettings } });
+      notify(reviewerSettings("auto_review"));
+      notify(reviewerSettings("user"));
+      transport.receive({ id: requestId, result: {} });
+      await Promise.resolve();
+      expect(complete).toBe(false);
+      notify({ approvalsReviewer: "auto_review" });
+      await Promise.resolve();
+      expect(complete).toBe(false);
+      notify(reviewerSettings("auto_review"));
+      await pending;
+      expect(complete).toBe(true);
+      send.mockRestore();
+      await client.close();
+    });
+    it.each(["notification-first", "response-first"])("confirms reviewer changes only after matching notification and RPC success (%s)", async (order) => {
+      const transport = new FakeTransport();
+      const rpc = new JsonRpcClient(transport);
+      const client = new CodexAppServerClient(rpc, { sandbox: "read-only" });
+      await client.connect();
+      let requestId = 0;
+      const send = vi.spyOn(transport, "send").mockImplementation(async message => {
+        const request = JSON.parse(message) as { id: number; method: string; params: unknown };
+        expect(request).toMatchObject({ method: "thread/settings/update", params: { threadId: "thread-1", approvalsReviewer: "auto_review" } });
+        requestId = request.id;
+      });
+      let complete = false;
+      const pending = client.updateThreadApprovalsReviewer("thread-1", "auto_review").then(() => { complete = true; });
+      const notify = (threadId: string, approvalsReviewer: string) => transport.receive({ method: "thread/settings/updated", params: { threadId, threadSettings: reviewerSettings(approvalsReviewer) } });
+      notify("other", "auto_review");
+      notify("thread-1", "user");
+      await Promise.resolve();
+      expect(complete).toBe(false);
+      if (order === "notification-first") notify("thread-1", "auto_review");
+      else transport.receive({ id: requestId, result: {} });
+      await Promise.resolve();
+      expect(complete).toBe(false);
+      if (order === "notification-first") transport.receive({ id: requestId, result: {} });
+      else notify("thread-1", "auto_review");
+      await pending;
+      expect(complete).toBe(true);
+      expect(send).toHaveBeenCalledOnce();
+      send.mockRestore();
+      await client.close();
+    });
+
+    it("rejects an RPC failure even after a matching notification, without retry or raw error exposure", async () => {
+      const transport = new FakeTransport();
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      await client.connect();
+      const send = vi.spyOn(transport, "send").mockImplementation(async message => {
+        const request = JSON.parse(message) as { id: number };
+        transport.receive({ method: "thread/settings/updated", params: { threadId: "thread-1", threadSettings: reviewerSettings("user") } });
+        transport.receive({ id: request.id, error: { code: -32001, message: "secret response" } });
+      });
+      try {
+        await expect(client.updateThreadApprovalsReviewer("thread-1", "user")).rejects.toMatchObject({ code: "autoreview.update-failed", message: "会话审批方式更新失败，请重新查询状态" });
+        expect(send).toHaveBeenCalledOnce();
+      } finally { send.mockRestore(); await client.close(); }
+    });
+
+    it.each(["timeout", "disconnect", "close", "thread/closed", "thread/archived", "thread/deleted"])("cleans reviewer observers, request and deadline on %s after queued acknowledgement", async reason => {
+      const transport = new FakeTransport();
+      const rpc = new JsonRpcClient(transport);
+      const client = new CodexAppServerClient(rpc, { sandbox: "read-only" });
+      await client.connect();
+      const removeNotification = vi.fn();
+      const original = rpc.onNotification.bind(rpc);
+      vi.spyOn(rpc, "onNotification").mockImplementation(handler => {
+        const remove = original(handler);
+        return () => { removeNotification(); remove(); };
+      });
+      vi.useFakeTimers();
+      try {
+        const pending = client.updateThreadApprovalsReviewer("thread-1", "user");
+        const rejected = expect(pending).rejects.toMatchObject({ code: "autoreview.update-unconfirmed" });
+        await Promise.resolve();
+        await Promise.resolve();
+        if (reason === "timeout") await vi.advanceTimersByTimeAsync(10_000);
+        else if (reason === "disconnect") transport.disconnect(new Error("secret disconnect"));
+        else if (reason.startsWith("thread/")) transport.receive({ method: reason, params: { threadId: "thread-1" } });
+        else await client.close();
+        await rejected;
+        expect(removeNotification).toHaveBeenCalledOnce();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally { vi.useRealTimers(); vi.restoreAllMocks(); await client.close(); }
+    });
+
+    it("cleans the still-pending RPC when the reviewer deadline expires without an acknowledgement", async () => {
+      const transport = new FakeTransport();
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      await client.connect();
+      const send = vi.spyOn(transport, "send").mockResolvedValue();
+      vi.useFakeTimers();
+      try {
+        const pending = expect(client.updateThreadApprovalsReviewer("thread-1", "user")).rejects.toMatchObject({ code: "autoreview.update-unconfirmed" });
+        await vi.advanceTimersByTimeAsync(10_000);
+        await pending;
+        expect(send).toHaveBeenCalledOnce();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally { vi.useRealTimers(); send.mockRestore(); await client.close(); }
+    });
     it("reads nullable official Thread model configuration", async () => {
       const transport = new FakeTransport();
       transport.threadReadData = appServerThread({ model: "child-model", reasoningEffort: "high" });
@@ -186,6 +302,48 @@ describe("JsonRpcClient threads", () => {
       await client.connect();
       expect((await client.resumeThread("thread-1", "/tmp/project")).collaborationMode).toBe(mode);
       await client.close();
+    });
+
+    it.each([
+      ["user", "user"], ["auto_review", "auto_review"],
+      ["guardian_subagent", "guardian_subagent"], ["future_reviewer", null], [undefined, null],
+    ])("reads the actual reviewer %s from resume", async (approvalsReviewer, expected) => {
+      const transport = new FakeTransport();
+      transport.resumeSettings = { approvalsReviewer };
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      try {
+        await client.connect();
+        expect((await client.resumeThread("thread-1", "/tmp/project")).approvalsReviewer).toBe(expected);
+      } finally { await client.close(); }
+    });
+
+    it.each([undefined, "user", "auto_review"] as const)("encodes only an explicit Workspace reviewer %s for Thread lifecycle requests", async (approvalsReviewer) => {
+      const transport = new FakeTransport();
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      try {
+        await client.connect();
+        const options = approvalsReviewer === undefined ? {} : { approvalsReviewer };
+        await client.startThread("/tmp/project", options);
+        await client.resumeThread("thread-1", "/tmp/project", options);
+        await client.forkThread("thread-1", "/tmp/project", options);
+        for (const method of ["thread/start", "thread/resume", "thread/fork"]) {
+          const params = transport.sent.find(message => message.method === method)?.params;
+          if (approvalsReviewer === undefined) expect(params).not.toHaveProperty("approvalsReviewer");
+          else expect(params).toHaveProperty("approvalsReviewer", approvalsReviewer);
+        }
+      } finally { await client.close(); }
+    });
+
+    it("confirms a requested Workspace reviewer against the actual resume response", async () => {
+      const transport = new FakeTransport();
+      transport.resumeSettings = { approvalsReviewer: "user" };
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      try {
+        await client.connect();
+        expect((await client.resumeThread("thread-1", "/tmp/project", { approvalsReviewer: "auto_review" })).settingsMatch).toBe(false);
+        expect((await client.resumeThread("thread-1", "/tmp/project", { approvalsReviewer: "user" })).settingsMatch).toBe(true);
+        expect((await client.resumeThread("thread-1", "/tmp/project")).settingsMatch).toBe(true);
+      } finally { await client.close(); }
     });
 
     it.each([null, undefined, { mode: "unknown" }])("rejects invalid resume collaboration mode %j", async (collaborationMode) => {

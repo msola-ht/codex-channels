@@ -24,6 +24,7 @@ function currentValue(settings: CodexUserSettingsResponse, setting: CodexUserSet
   }
   if (setting.kind === "defaults") return { model: settings.defaults.model, reasoningEffort: settings.defaults.reasoningEffort }
   if (setting.kind === "fast") return { enabled: settings.defaults.fastEnabled }
+  if (setting.kind === "approvals-reviewer") return { value: settings.approvalsReviewer.value }
   if (setting.kind === "permissions") return {
     sandboxMode: settings.permissions.sandboxMode ?? "read-only",
     approvalPolicy: settings.permissions.approvalPolicy ?? "on-request",

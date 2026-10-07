@@ -13,6 +13,7 @@ export type WorkspaceApprovalPolicy =
 export interface WorkspacePermissions {
   readonly sandbox?: WorkspaceSandboxMode;
   readonly approvalPolicy?: WorkspaceApprovalPolicy;
+  readonly approvalsReviewer?: "user" | "auto_review";
   readonly permissions?: string;
 }
 
@@ -54,6 +55,9 @@ export class WorkspaceRegistry {
         ...(workspace.approvalPolicy === undefined
           ? {}
           : { approvalPolicy: workspace.approvalPolicy }),
+        ...(workspace.approvalsReviewer === undefined
+          ? {}
+          : { approvalsReviewer: workspace.approvalsReviewer }),
         ...(workspace.permissions === undefined
           ? {}
           : { permissions: workspace.permissions }),

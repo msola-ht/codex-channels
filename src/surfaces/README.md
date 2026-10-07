@@ -19,6 +19,13 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
 
 当前实现：
 
+三渠道统一通过 `/workspaceperm autoreview <on|off|clear>` 管理工作区审批方式覆盖。飞书、Telegram
+按钮绑定原 Workspace、Actor 和限时一次性令牌，提交结构化选择，由 Application 在锁内复核工作区；
+微信复用同一文本语法。设置与 Thread 实际状态分开展示，`/status` 和生命周期卡片取 App Server 实际值。
+`/autoreview [on|off]` 查询或切换当前已绑定 Thread，统一结果由共享格式化器呈现；飞书命令中心与
+Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌，并与工作区选择区分作用域。
+平台只提交结构化选择，Application 在锁内复核 Thread 与空闲状态，确认权威设置后才返回更新成功。
+
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片、一次性音频、UTF-8 文本文件和生命周期。
 - [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本、PNG/JPEG/WebP/非动画 GIF、一次性音频与 UTF-8 文本文件到
   Application 的窄 Adapter、富文本最终回复、纯文本安全提示、有界输出队列、私聊交互卡片、平台权限中心、

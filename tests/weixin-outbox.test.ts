@@ -22,8 +22,8 @@ const target = {
   accountId,
   conversationId: actorId,
 } as const;
-const turnCompletedText = "**本次运行 · 已完成**\n\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 总耗时：未提供";
-const turnStoppedText = "**本次运行 · 已停止**\n\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 总耗时：未提供";
+const turnCompletedText = "**本次运行 · 已完成**\n\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 审批方式：未知\n- 总耗时：未提供";
+const turnStoppedText = "**本次运行 · 已停止**\n\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 审批方式：未知\n- 总耗时：未提供";
 
 describe("WeixinOutbox", () => {
   it.each(["short answer", "完整回答".repeat(6_000)])("retains and confirms unphased completed text (%#)", async (text) => {
@@ -93,7 +93,7 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "已开始处理。",
+      "已开始处理。\n\n审批方式：未知",
       "final reply",
       turnCompletedText,
     ]);
@@ -254,11 +254,12 @@ describe("WeixinOutbox", () => {
     outbox.handle({
       ...turnStarted(),
       identity: { kind: "plugin", name: "GitHub" },
+      approvalsReviewer: "auto_review",
     });
     await outbox.close();
 
     expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
-      text: "已使用 GitHub Plugin 开始处理。",
+      text: "已使用 GitHub Plugin 开始处理。\n\n审批方式：自动审查（Auto-review）",
     }));
   });
 
@@ -401,7 +402,7 @@ describe("WeixinOutbox", () => {
         + "- 错误：受控错误\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n"
         + "**当前会话**\n"
         + "- Session：测试会话\n"
-        + "- Session ID：thread\n- 总耗时：未提供",
+        + "- Session ID：thread\n- 审批方式：未知\n- 总耗时：未提供",
     ]);
   });
 

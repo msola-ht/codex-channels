@@ -10,7 +10,7 @@
   避免绑定时漏掉活动 Turn 或重新激活已结束的 Turn；异步问题由 Bootstrap 在同一入站链路协调，
   活动状态查询以当前绑定为准，清除已解绑或转移归属的活动缓存；没有前台绑定时不把后台任务当作当前任务；
   Core 不重复发布问题正文、不标记最终答复；Turn 完成事件原样携带 Client 已校验的官方
-  `durationMs` 与 Router 已确认的 Workspace、`modelProvider`；普通前台用户 Turn 在官方成功终态前
+  `durationMs` 与 Router 已确认的 Workspace、`modelProvider`；Turn 启动和完成事件携带 Router 从权威响应或设置通知取得的实际审批审查方式，未知时不推断手动审批；普通前台用户 Turn 在官方成功终态前
   未产生非空最终回复时附加稳定诊断标记，手动压缩和后台 Turn 不参与该判断；结构化
   `misalignmentPolicyViolation`、Luna Reserve 触发所需的 `usageLimitExceeded` 与登录或刷新令牌
   失效的 `unauthorized` 只以窄分类传递到完成事件并由共享 Surface 展示层生成固定提示；模型代理提供时，Core 把稳定请求统计输入

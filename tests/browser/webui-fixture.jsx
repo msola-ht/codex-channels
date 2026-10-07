@@ -16,6 +16,7 @@ import { useApi } from "@/hooks/use-api"
 import { useResetCredits } from "@/hooks/use-reset-credits"
 import { useQueueEvents } from "@/hooks/use-queue-events"
 import { useRelayCatalog } from "@/hooks/use-relay-catalog"
+import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
 import { setServerTimeZone } from "@/lib/format"
 import "@/index.css"
 
@@ -24,10 +25,30 @@ import "@/index.css"
 const scenario = new URLSearchParams(location.search).get("case")
 const contract = window.__contract = { requests: [], queries: [], subscriptions: [], previews: [], changed: 0, cancelled: 0, catalogRefreshes: 0, catalogSuccesses: 0, status: 503, unexpected: [] }
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } })
+const reviewerSettings = {
+  version: "reviewer-1", provider: "openai", models: [], defaults: {}, compact: {}, defaultsEditable: true,
+  permissions: { editable: true, sandboxMode: "workspace-write", approvalPolicy: "on-request", networkAccess: false, defaultPermissions: null },
+  approvalsReviewer: { value: "user", editable: true }, toolSettings: { mergedAvailable: true, fields: [] },
+}
 window.fetch = (input, init = {}) => {
   const url = typeof input === "string" ? input : input.url
   const entry = { url, signal: init.signal }
   contract.requests.push(entry)
+  if (scenario === "reviewer" && url.startsWith("/api/v1/management/codex/settings")) {
+    if (!init.method || init.method === "GET") return Promise.resolve(json(reviewerSettings))
+    const body = JSON.parse(init.body)
+    entry.body = body
+    entry.method = init.method
+    const preview = { revision: reviewerSettings.version, value: { value: body.setting.value }, activation: { status: "next-thread", target: "codex", commands: [] } }
+    if (url.endsWith("/preview")) {
+      contract.previews.push(body)
+      return Promise.resolve(json({ ...preview, confirmationRequired: true, confirmationToken: "reviewer-confirmation" }))
+    }
+    if (body.revision !== reviewerSettings.version || body.confirmationToken !== "reviewer-confirmation") return Promise.resolve(json({ error: { code: "management.confirmation-invalid" } }, 409))
+    reviewerSettings.approvalsReviewer.value = body.setting.value
+    reviewerSettings.version = `reviewer-${++contract.changed + 1}`
+    return Promise.resolve(json({ ...preview, revision: reviewerSettings.version }))
+  }
   if (url === "/api/v1/time") return Promise.resolve(json({ nowMs: 1700000000000, timeZone: "UTC" }))
   if (url === "/api/v1/management/accounts/openai/reset-credits") return Promise.resolve(json({ accountId: "fixture-account", availableCount: "0", credits: [] }))
   if (url === "/api/v1/management/accounts/refresh") return new Promise(resolve => { entry.resolve = () => resolve(json({ accounts: [] })) })
@@ -60,6 +81,19 @@ function SettingsFixture() {
     codexSettings: { models: [], defaults: {}, compact: { contextWindow, autoCompactPercent: null }, defaultsEditable: true } }
   return <><button onClick={() => setContextWindow(1000)}>Refresh server snapshot</button>
     <AppServerSettingsCard management={management} section="context" /></>
+}
+
+function ReviewerSettings() {
+  const management = useCodexSettingsManagement()
+  return <AppServerSettingsCard management={management} section="permissions" />
+}
+
+function ReviewerFixture() {
+  const [language, setLanguage] = useState("en")
+  return <LanguageContext.Provider value={{ language, setLanguage }}>
+    <button onClick={() => setLanguage(language === "en" ? "zh" : "en")}>Switch language</button>
+    <ReviewerSettings />
+  </LanguageContext.Provider>
 }
 
 function ApiFixture() {
@@ -164,7 +198,7 @@ function BoundaryFixture() {
 }
 
 const fixtures = { auth: AuthFixture, api: ApiFixture, reset: ResetFixture, tabs: TabsFixture,
-  requests: RequestsFixture, threads: ThreadsFixture, confirmation: ConfirmationFixture, boundary: BoundaryFixture, queue: QueueFixture, catalog: CatalogFixture, settings: SettingsFixture }
+  requests: RequestsFixture, threads: ThreadsFixture, confirmation: ConfirmationFixture, boundary: BoundaryFixture, queue: QueueFixture, catalog: CatalogFixture, settings: SettingsFixture, reviewer: ReviewerFixture }
 const Fixture = fixtures[scenario]
 createRoot(document.getElementById("root")).render(<StrictMode>{scenario === "app" ? <App /> :
   <LanguageContext.Provider value={{ language: "en", setLanguage: noop }}><TooltipProvider><HashRouter>

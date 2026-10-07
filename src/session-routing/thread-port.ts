@@ -1,3 +1,5 @@
+import type { ThreadApprovalsReviewer } from "../conversation-core/index.js";
+
 export type ThreadStatus =
   | { type: "notLoaded" }
   | { type: "idle" }
@@ -44,6 +46,8 @@ export interface ThreadSession {
   modelProvider?: string;
   reasoningEffort: string | null;
   serviceTier: string | null;
+  /** Actual Thread reviewer returned by App Server; absent or null means unknown. */
+  approvalsReviewer?: ThreadApprovalsReviewer | null;
   contextCompactionItemIds: readonly string[];
 }
 
@@ -73,6 +77,7 @@ export interface ThreadStartOptions {
   threadSource?: "automation";
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy?: "untrusted" | "on-request" | "never";
+  approvalsReviewer?: "user" | "auto_review";
   permissions?: string;
   /** Create an in-memory thread that is omitted from durable thread listings. */
   ephemeral?: boolean;

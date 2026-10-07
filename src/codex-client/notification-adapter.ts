@@ -26,6 +26,7 @@ import {
   toOperationUpdate,
 } from "./operation-adapter.js";
 import { toThreadGoal } from "./turn-adapter.js";
+import { toThreadApprovalsReviewer } from "./thread-adapter.js";
 
 type RoutingNotification = Extract<
   ServerNotification,
@@ -269,6 +270,7 @@ function toThreadSettingsUpdatedEvent(
       effort: effort.value,
       serviceTier: serviceTier.value,
       collaborationMode,
+      approvalsReviewer: toThreadApprovalsReviewer(settings?.approvalsReviewer),
     },
   };
 }

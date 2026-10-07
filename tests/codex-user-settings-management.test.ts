@@ -86,6 +86,7 @@ describe("Codex user settings management", () => {
       provider: "openai",
       toolSettings: expect.objectContaining({ mergedAvailable: false }),
       defaultsEditable: true,
+      approvalsReviewer: { value: null, editable: true },
       models: [projectedModel()],
       defaults: {
         model: "gpt-test",
@@ -113,6 +114,65 @@ describe("Codex user settings management", () => {
       },
     });
     expect(client.close).toHaveBeenCalledOnce();
+  });
+
+  it.each(["user", "auto_review"] as const)("previews and saves only the reviewer preference: %s", async (value) => {
+    const client = settingsClient({ approvals_reviewer: "user", sandbox_mode: "read-only", approval_policy: "on-request" });
+    const options = { expectedVersion: "version-1", createClient: async () => client, primaryProvider: () => "contract" };
+    await expect(previewCodexUserSetting({ kind: "approvals-reviewer", value }, options)).resolves.toMatchObject({ value: { value }, activation: "next-thread" });
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+    await updateCodexUserSetting({ kind: "approvals-reviewer", value }, options);
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([{ keyPath: "approvals_reviewer", value }], { expectedVersion: "version-1" });
+    expect(client.listModels).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { configured: "guardian_subagent", policy: { allowedReviewers: null, autoReviewDisabled: false }, reason: "unsupported-value" },
+    { configured: "future-value", policy: { allowedReviewers: null, autoReviewDisabled: false }, reason: "unsupported-value" },
+    { configured: "user", policy: { allowedReviewers: ["user"], autoReviewDisabled: false }, reason: "managed-policy" },
+    { configured: "user", policy: { allowedReviewers: null, autoReviewDisabled: true }, reason: "managed-policy" },
+    { configured: "user", policy: undefined, reason: "unavailable" },
+  ])("fails closed for reviewer settings with $reason", async ({ configured, policy, reason }) => {
+    const client = settingsClient({ approvals_reviewer: configured });
+    vi.mocked(client.readUserConfigSnapshot).mockResolvedValue({ config: { approvals_reviewer: configured }, version: "version-1", ...(policy === undefined ? {} : { approvalsReviewerPolicy: policy }) });
+    const options = { expectedVersion: "version-1", createClient: async () => client, primaryProvider: () => "contract" };
+    expect((await loadCodexUserSettings(options)).approvalsReviewer).toMatchObject({ editable: false, reason });
+    await expect(updateCodexUserSetting({ kind: "approvals-reviewer", value: "auto_review" }, options)).rejects.toMatchObject({ code: `approvals-reviewer-${reason}` });
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported reviewer inputs without normalizing aliases", async () => {
+    const client = settingsClient({});
+    await expect(updateCodexUserSetting({ kind: "approvals-reviewer", value: "guardian_subagent" } as never, {
+      expectedVersion: "version-1", createClient: async () => client, primaryProvider: () => "contract",
+    })).rejects.toMatchObject({ code: "invalid-approvals-reviewer", field: "value" });
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+  });
+
+  it("keeps unrelated settings available when reviewer policy is unavailable", async () => {
+    const config = { approvals_reviewer: "auto_review", model: "gpt-test", service_tier: "default" };
+    const client = settingsClient(config);
+    vi.mocked(client.readUserConfigSnapshot).mockResolvedValue({ config, version: "version-1" });
+    const options = { expectedVersion: "version-1", createClient: async () => client, primaryProvider: () => "openai" };
+    const state = await loadCodexUserSettings(options);
+    expect(state).toMatchObject({
+      version: "version-1", defaultsEditable: true,
+      defaults: { model: "gpt-test", fastEnabled: false },
+      approvalsReviewer: { value: "auto_review", editable: false, reason: "unavailable" },
+    });
+    for (const change of [previewCodexUserSetting, updateCodexUserSetting]) {
+      await expect(change({ kind: "approvals-reviewer", value: "user" }, options))
+        .rejects.toMatchObject({ code: "approvals-reviewer-unavailable" });
+    }
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+    await expect(previewCodexUserSetting({ kind: "fast", enabled: true }, options))
+      .resolves.toMatchObject({ value: { enabled: true } });
+    await updateCodexUserSetting({ kind: "fast", enabled: true }, options);
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: "service_tier", value: "fast" },
+    ], { expectedVersion: "version-1" });
+    expect(vi.mocked(client.readUserConfigSnapshot).mock.calls.slice(-2))
+      .toEqual([[{ includeApprovalsReviewerPolicy: false }], [{ includeApprovalsReviewerPolicy: false }]]);
   });
 
   it("writes model and reasoning defaults in one versioned transaction", async () => {
@@ -514,7 +574,7 @@ function settingsClient(
   return {
     connect: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
-    readUserConfigSnapshot: vi.fn(async () => ({ config, version: "version-1" })),
+    readUserConfigSnapshot: vi.fn(async () => ({ config, version: "version-1", approvalsReviewerPolicy: { allowedReviewers: null, autoReviewDisabled: false } })),
     listModels: vi.fn(async () => [modelOption()]),
     writeUserConfigEdits: vi.fn(async () => undefined),
     readDefaultModelSettings: vi.fn(),

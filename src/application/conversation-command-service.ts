@@ -29,6 +29,7 @@ import type {
 } from "./conversation-service.js";
 import type { ThreadGoal } from "./turn-port.js";
 import type { ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
+import type { WorkspacePermissionUpdate } from "./workspace-permission-port.js";
 import {
   parseScheduledTaskOperation,
 } from "./scheduled-task-command.js";
@@ -60,6 +61,7 @@ export const conversationCommandNames = [
   "status",
   "workspace",
   "workspaceperm",
+  "autoreview",
   "stop",
   "queue",
   "revert",
@@ -108,6 +110,7 @@ export function isConversationCommandName(value: string): value is ConversationC
 }
 
 export type ConversationCommandResult =
+  | { kind: "auto-review"; state: ReturnType<ConversationCommandUseCases["autoReview"]> }
   | { kind: "reset-credit"; result: ConversationResetCreditResult }
   | { kind: "outcome"; outcome: ConversationCommandOutcome }
   | {
@@ -247,6 +250,7 @@ export type ConversationCommandOutcome =
   | {
       type: "workspace.permissions-updated";
       workspace: Awaited<ReturnType<ConversationCommandUseCases["updateWorkspacePermissions"]>>;
+      update: WorkspacePermissionUpdate;
     }
   | { type: "turn.stop-requested"; stopped: boolean }
   | {
@@ -325,6 +329,8 @@ function modelSelectionResult(state: ModelSelectionState): ConversationCommandRe
 }
 
 export interface ConversationCommandExecutor {
+  selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }): Promise<ConversationCommandResult>;
+  selectWorkspaceAutoReview(target: ConversationTarget, selection: { workspaceId: string; value: "user" | "auto_review" | null }): Promise<ConversationCommandResult>;
   selectModel(target: ConversationTarget, selection: ModelSelectionIdentity): Promise<ConversationCommandResult>;
   execute(
     target: ConversationTarget,
@@ -349,6 +355,20 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     return modelSelectionResult(await this.conversations.selectModel(target, selection));
   }
 
+  async selectWorkspaceAutoReview(target: ConversationTarget, selection: { workspaceId: string; value: "user" | "auto_review" | null }): Promise<ConversationCommandResult> {
+    this.conversations.touchActivity?.(target);
+    const update: WorkspacePermissionUpdate = { kind: "approvals-reviewer", value: selection.value };
+    const workspace = await this.conversations.updateWorkspacePermissions(
+      target, update, selection.workspaceId,
+    );
+    return { kind: "outcome", outcome: { type: "workspace.permissions-updated", workspace, update } };
+  }
+
+  async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }): Promise<ConversationCommandResult> {
+    this.conversations.touchActivity?.(target);
+    return { kind: "auto-review", state: await this.conversations.updateAutoReview(target, selection.enabled, selection.threadId) };
+  }
+
   async execute(
     target: ConversationTarget,
     command: ConversationCommandName,
@@ -358,6 +378,13 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
     switch (command) {
+      case "autoreview": {
+        if (!argumentsText) return { kind: "auto-review", state: this.conversations.autoReview(target) };
+        if (argumentsText !== "on" && argumentsText !== "off") {
+          throw new UserFacingError("autoreview.usage", "用法：/autoreview [on|off]");
+        }
+        return { kind: "auto-review", state: await this.conversations.updateAutoReview(target, argumentsText === "on") };
+      }
       case "resume": {
         if (argumentsText) {
           const resumed = await this.conversations.resume(target, argumentsText);
@@ -501,7 +528,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
         );
         return {
           kind: "outcome",
-          outcome: { type: "workspace.permissions-updated", workspace: updated },
+          outcome: { type: "workspace.permissions-updated", workspace: updated, update },
         };
       }
       case "stop": {
