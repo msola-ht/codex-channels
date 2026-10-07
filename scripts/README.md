@@ -219,6 +219,7 @@
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
 - `codex-subagents-setup.mjs` / `codex-subagents-setup.d.mts`：Config 中显式选择的子代理规则与配置入口，
   预览后按选择写入 Codex Home 的 `AGENTS.md` 托管规则段和主配置；主配置复用版本化 `config/batchWrite`。
+  规则模板只管理协作、模型分工、单轮生命周期及交接，完成要求继承当前全局和项目规则；
   安装、更新和核心默认值配置均不自动应用该预设。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
   默认模型与思考等级的无终端校验、预览与执行接口；写默认模型时保留模型目录中已有的上下文窗口，
@@ -403,7 +404,7 @@
   `message_id` 精度；`sequence --live` 只在内存把首轮游标传给第二轮并比较重放数量和游标推进；
   `replay --live` 再次复用首轮游标，判断第二批消息是否重放及返回游标是否一致；
   不输出或保存正文、完整身份、Token、上下文令牌和游标。
-- 微信 `*-contract-probe.mjs` 保留当时 `v2.4.6` 的隔离探测基线，不能作为当前运行时 `v2.4.9` 已完成实渠道验收的证据；更新探针前按上游索引核对合同，执行真实发送仍需明确授权。
+- 微信 `*-contract-probe.mjs` 是冻结的历史资产，保留当时 `v2.4.6` 的隔离探测基线，不扩张、不维护；其结果不能作为功能验证或完成证据。整批删除须明确点名授权，执行真实发送仍需明确授权。
 - `weixin-send-contract-probe.mjs`：显式 `reply --live` 后从一条已授权完成态微信文本中仅在
   内存取得回复目标和 `context_token`，按固定 `v2.4.6` 合同发送一条短文本；不接受命令行
   Token、用户 ID 或正文；`sequence --live` 使用同一上下文连续发送两条固定短文本，第二条
