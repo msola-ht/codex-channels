@@ -117,7 +117,6 @@ describe("Feishu output renderer", () => {
       "- 思考等级：medium",
       "- Fast 模式：开启",
       "- 协作模式：Default",
-      "- 审批方式：未知",
       "",
       "### 账户状态",
       "- 周限：剩余 63%",
@@ -477,7 +476,6 @@ describe("Feishu output renderer", () => {
       "- 当前工作区：Main (main)",
       "- Session：渲染测试",
       "- Session ID：thread-1",
-      "- 审批方式：未知",
       "- 上下文：100 / 200（50%）",
       "- 上下文压缩：2 次",
       "- Git 分支：feature/weixin-surface",
@@ -954,7 +952,7 @@ describe("Feishu output renderer", () => {
     expect(renderFeishuOutput(criticalEvents[2]!)).toBeNull();
     expect(progressEvents.some(isCriticalOutputEvent)).toBe(false);
     expect(progressEvents.map((event) => renderFeishuOutput(event))).toEqual([
-      "## 已开始处理。\n\n- 审批方式：未知",
+      "## 已开始处理。",
       null,
       null,
     ]);

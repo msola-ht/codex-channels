@@ -28,7 +28,7 @@ describe("conversation workspace and status command formatting", () => {
     expect(formatConversationAutoReview({ kind: "auto-review", state: { threadId: null, reviewer: null, updated: false } })).toContain("当前未绑定");
   });
   it.each([
-    ["user", "手动审批"], ["auto_review", "自动审查（Auto-review）"], [undefined, "跟随 Codex 默认"],
+    ["user", "手动审批"], ["auto_review", "自动审批"], [undefined, "跟随 Codex 默认"],
   ] as const)("shows Workspace reviewer %s separately from Thread status", (approvalsReviewer, label) => {
     const rendered = formatConversationWorkspacePermissions({ kind: "workspace-permissions", workspace: { id: "main", name: "Main", cwd: "/workspace", ...(approvalsReviewer ? { approvalsReviewer } : {}) } });
     expect(rendered).toContain(`工作区默认审批方式：${label}`);
@@ -39,15 +39,17 @@ describe("conversation workspace and status command formatting", () => {
     expect(rendered).not.toContain("对新建或恢复的 Session 生效");
   });
   it.each([
-    ["user", "手动审批"], ["auto_review", "自动审查（Auto-review）"],
-    ["guardian_subagent", "自动审查（guardian_subagent）"], [null, "未知"],
-  ] as const)("shows reviewer %s from current Thread settings in status", (approvalsReviewer, label) => {
-    expect(formatConversationStatus({
+    ["user", undefined], ["auto_review", "自动审批"],
+    ["guardian_subagent", "自动审批"], [null, undefined], [undefined, undefined],
+  ] as const)("shows reviewer %s in status only when automatic approval is enabled", (approvalsReviewer, label) => {
+    const rendered = formatConversationStatus({
       threadId: "thread", workspaceId: "main", workspaceName: "Main", cwd: "/workspace",
-      model: "test-model", effort: null, serviceTier: null, approvalsReviewer,
+      model: "test-model", effort: null, serviceTier: null, ...(approvalsReviewer === undefined ? {} : { approvalsReviewer }),
       modelPending: false, effortPending: false, fastModePending: false,
       collaborationMode: "default", collaborationModePending: false,
-    })).toContain(`审批方式：${label}`);
+    });
+    if (label === undefined) expect(rendered).not.toContain("审批方式：");
+    else expect(rendered).toContain(`审批方式：${label}`);
   });
   it("shows configured workspace permissions in the workspace list", () => {
     const rendered = formatConversationWorkspaces({

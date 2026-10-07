@@ -22,7 +22,7 @@ export function formatConversationWorkspaces(
     ...result.workspaces.flatMap((workspace, index) => [
       `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
       workspace.cwd,
-      ...workspacePermissionLines(workspace),
+      ...workspacePermissionLines(workspace, false),
     ]),
     "",
     "切换：/workspace <序号、ID 或名称>",
@@ -65,7 +65,7 @@ export function formatConversationAutoReview(
     `审批方式：${formatThreadApprovalsReviewer(reviewer)}`,
     ...(reviewer === "user" || reviewer === "auto_review"
       ? [
-        "切换：/autoreview on（自动审查）或 /autoreview off（手动审批）",
+        "切换：/autoreview on（自动审批）或 /autoreview off（手动审批）",
         "设置用于当前会话后续轮次；切换时须无运行任务或待处理交互。",
       ]
       : ["当前审批方式只读，暂不支持切换。"]),
@@ -74,6 +74,7 @@ export function formatConversationAutoReview(
 
 export function workspacePermissionLines(
   workspace: Extract<ConversationCommandResult, { kind: "workspaces" }>["workspaces"][number],
+  showInactiveApprovalsReviewer = true,
 ): string[] {
   const lines: string[] = [];
   if (workspace.sandbox !== undefined) {
@@ -85,7 +86,9 @@ export function workspacePermissionLines(
   if (workspace.permissions !== undefined) {
     lines.push(`  - 权限 Profile：${workspace.permissions}`);
   }
-  lines.push(`  - 工作区默认审批方式：${workspace.approvalsReviewer === undefined ? "跟随 Codex 默认" : formatThreadApprovalsReviewer(workspace.approvalsReviewer)}`);
+  if (showInactiveApprovalsReviewer || isAutoApprovalReviewer(workspace.approvalsReviewer)) {
+    lines.push(`  - 工作区默认审批方式：${workspace.approvalsReviewer === undefined ? "跟随 Codex 默认" : formatThreadApprovalsReviewer(workspace.approvalsReviewer)}`);
+  }
   return lines;
 }
 
@@ -120,7 +123,9 @@ export function formatConversationPermissions(
           `当前 Workspace：${result.workspace.name}（${result.workspace.id}）`,
           `- 沙箱：${result.workspace.sandbox ?? "跟随 Gateway 默认"}`,
           `- 审批：${result.workspace.approvalPolicy ?? "跟随默认"}`,
-          `- 工作区默认审批方式：${result.workspace.approvalsReviewer === undefined ? "跟随 Codex 默认" : formatThreadApprovalsReviewer(result.workspace.approvalsReviewer)}`,
+          ...(isAutoApprovalReviewer(result.workspace.approvalsReviewer)
+            ? [`- 工作区默认审批方式：${formatThreadApprovalsReviewer(result.workspace.approvalsReviewer)}`]
+            : []),
           `- Profile：${result.workspace.permissions ?? "未配置"}`,
         ]
       : [
@@ -173,11 +178,15 @@ export function formatConversationGoal(
     : "当前 Session 没有 Goal。使用 /goal set <目标> 设置。";
 }
 
+export function isAutoApprovalReviewer(reviewer: ThreadApprovalsReviewer | null | undefined): boolean {
+  return reviewer === "auto_review" || reviewer === "guardian_subagent";
+}
+
 export function formatThreadApprovalsReviewer(reviewer: ThreadApprovalsReviewer | null | undefined): string {
   switch (reviewer) {
     case "user": return "手动审批";
-    case "auto_review": return "自动审查（Auto-review）";
-    case "guardian_subagent": return "自动审查（guardian_subagent）";
+    case "auto_review":
+    case "guardian_subagent": return "自动审批";
     default: return "未知";
   }
 }
@@ -199,7 +208,9 @@ export function formatConversationStatus(status: ConversationStatus): string {
       ? [`Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`]
       : []),
     `协作模式：${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`,
-    `审批方式：${formatThreadApprovalsReviewer(status.approvalsReviewer)}`,
+    ...(isAutoApprovalReviewer(status.approvalsReviewer)
+      ? [`审批方式：${formatThreadApprovalsReviewer(status.approvalsReviewer)}`]
+      : []),
   ];
   if (status.contextCompactionCount !== undefined) {
     lines.push(`上下文压缩：${status.contextCompactionCount} 次`);

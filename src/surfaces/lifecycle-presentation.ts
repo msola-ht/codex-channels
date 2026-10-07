@@ -20,7 +20,7 @@ import {
   formatRemainingRateLimitWindow,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
-import { formatThreadApprovalsReviewer } from "./conversation-workspace-status-command-format.js";
+import { isAutoApprovalReviewer } from "./conversation-workspace-status-command-format.js";
 import {
   formatElapsedDuration,
 } from "./elapsed-duration.js";
@@ -46,9 +46,15 @@ export interface LifecyclePresentation {
   footer?: { label: string; value: string };
 }
 
+export function isHiddenAutoApprovalReview(event: OutputEvent): boolean {
+  return event.type === "autoApprovalReview.updated"
+    && (event.phase !== "completed" || event.status === "inProgress");
+}
+
 export function createAutoApprovalReviewPresentation(
   event: Extract<OutputEvent, { type: "autoApprovalReview.updated" }>,
-): LifecyclePresentation {
+): LifecyclePresentation | null {
+  if (isHiddenAutoApprovalReview(event)) return null;
   const status = {
     inProgress: "审查中",
     approved: "已通过",
@@ -56,10 +62,34 @@ export function createAutoApprovalReviewPresentation(
     timedOut: "已超时",
     aborted: "已中止",
   }[event.status];
+  const details = event.details;
+  const action = details?.action;
+  const actionLabels = {
+    command: "执行命令",
+    execve: "启动程序",
+    writeStdin: "向运行中的命令输入内容",
+    applyPatch: "修改文件",
+    networkAccess: "访问网络",
+    mcpToolCall: "调用 MCP 工具",
+    requestPermissions: "申请额外权限",
+  } as const;
+  const levels = { unknown: "未知", low: "低", medium: "中", high: "高", critical: "极高" } as const;
   return {
-    title: event.phase === "started" ? "自动审查开始" : "自动审查完成",
+    title: "自动审批完成",
     fields: [
       { label: "状态", value: status },
+      ...(action ? [{ label: "审查内容", value: actionLabels[action.kind] }] : []),
+      ...(action?.kind === "applyPatch" && action.fileCount !== undefined
+        ? [{ label: "涉及文件", value: `${action.fileCount} 个` }]
+        : []),
+      ...(action?.kind === "networkAccess" && action.protocol
+        ? [{ label: "网络协议", value: { http: "HTTP", https: "HTTPS", socks5Tcp: "SOCKS5 TCP", socks5Udp: "SOCKS5 UDP" }[action.protocol] }]
+        : []),
+      ...(action?.kind === "networkAccess" && action.port !== undefined
+        ? [{ label: "目标端口", value: String(action.port) }]
+        : []),
+      ...(details?.riskLevel ? [{ label: "风险等级", value: levels[details.riskLevel] }] : []),
+      ...(details?.userAuthorization ? [{ label: "用户授权评估", value: levels[details.userAuthorization] }] : []),
       ...(event.sourceThreadId !== event.threadId ? [{ label: "来源", value: "子代理" }] : []),
       ...(event.background ? [{ label: "任务", value: `后台任务 · ${event.threadId.slice(0, 12)}` }] : []),
     ],
@@ -223,7 +253,9 @@ export function createStartupPresentation(
             label: "协作模式",
             value: `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
           },
-          { label: "审批方式", value: formatThreadApprovalsReviewer(status.approvalsReviewer) },
+          ...(isAutoApprovalReviewer(status.approvalsReviewer)
+            ? [{ label: "审批方式", value: "自动审批" }]
+            : []),
         ],
       },
       ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
@@ -272,7 +304,9 @@ export function createTurnStartedPresentation(
         : "已开始处理。",
     fields: [
       ...(backgroundThreadId ? [{ label: "Session ID", value: backgroundThreadId }] : []),
-      { label: "审批方式", value: formatThreadApprovalsReviewer(approvalsReviewer) },
+      ...(isAutoApprovalReviewer(approvalsReviewer)
+        ? [{ label: "审批方式", value: "自动审批" }]
+        : []),
     ],
   };
 }
@@ -462,7 +496,9 @@ export function createTurnCompletedPresentation(
       : []),
     { label: "Session", value: event.sessionName ?? "未命名" },
     { label: "Session ID", value: event.threadId },
-    { label: "审批方式", value: formatThreadApprovalsReviewer(event.approvalsReviewer) },
+    ...(isAutoApprovalReviewer(event.approvalsReviewer)
+      ? [{ label: "审批方式", value: "自动审批" }]
+      : []),
   ];
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];
@@ -663,10 +699,10 @@ export function createTurnCompletedPresentation(
   }
   runFields.push({ label: "本轮耗时", value: event.durationMs === undefined ? "未提供" : formatElapsedDuration(event.durationMs) });
   runFields.push(...performanceFields(event.timing?.performance));
-  if (event.autoApprovalReview) {
+  if (isAutoApprovalReviewer(event.approvalsReviewer) && event.autoApprovalReview) {
     runFields.push(autoApprovalReviewField(event.autoApprovalReview));
   }
-  if (event.sessionAutoApprovalReview) {
+  if (isAutoApprovalReviewer(event.approvalsReviewer) && event.sessionAutoApprovalReview) {
     sessionFields.push(autoApprovalReviewField(event.sessionAutoApprovalReview));
   }
   if (event.taskAggregate) {
@@ -799,7 +835,7 @@ function autoApprovalReviewField(
     ["中止", review.aborted], ["进行中", review.inProgress], ["结果未知", review.unknown],
   ] as const;
   return {
-    label: "自动审查",
+    label: "自动审批",
     value: review.coverage === "complete"
       ? `${review.total} 次（含子代理）`
       : review.coverage === "partial"

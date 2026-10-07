@@ -32,10 +32,14 @@
   受控导出并由真实 App Server 合同覆盖。设置入口仅用于只读策略判断，不采用
   `config/read` 的合并审批字段。另允许消费 `item/autoApprovalReview/started|completed`
   的最小身份、状态及决策来源投影，用于本轮任务及当前会话递归统计 agent 来源的各结果次数和采集覆盖，
-  以及按已授权 Thread 绑定向三个渠道展示审查开始和 agent 来源的 approved、denied、timedOut、aborted 终态；
+  以及按已授权 Thread 绑定向三个渠道仅展示 agent 来源的 approved、denied、timedOut、aborted 完成结果；
+  完成通知额外允许投影七种官方 action 的固定类别、文件数量、网络协议白名单及合法端口，
+  以及 review 的风险与用户授权等级枚举；未知或畸形摘要字段在 Client 边界省略。
   子代理通知仅沿已确认的精确父子 Turn 关系路由，不从工作区、最近会话或联系消息推断归属。
   方法没有实验标记，但其 payload 在锁定版标记 UNSTABLE，两个通知类型必须受控导出并由真实合同覆盖。
-  不记录 action、rationale 或命令，不消费 `autoApprovalReview/strictReviewRequired`，不扩大协商。
+  不传播原始 action、rationale、命令、参数、路径、stdin、host/target、权限理由或 MCP 名称；
+  指标与 StateStore 不增加审查正文，现有持久投递日志只保存安全摘要，details 可选且不改变结构版本。
+  不消费 `autoApprovalReview/strictReviewRequired`，不扩大协商。
   开发中 Plugin 调试只允许在 `[experimental].plugin_api` 开启时使用稳定 `plugin/installed` 查询已安装项，
   并通过 `turn/start` / `turn/steer` 的官方 `mention` 输入调用；开关默认关闭且必须在 Doctor、
   命令输出和文档中标明开发中，只支持 OpenAI Thread。不得借这些例外或开发中入口接入、暴露其他
@@ -414,7 +418,7 @@ Unix 公开端点通过独占硬链接发布，绑定名保留至监听关闭，
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |
-| 本轮任务与当前会话自动审查统计及渠道状态 | `item/autoApprovalReview/started`、`item/autoApprovalReview/completed`（方法无实验标记，payload UNSTABLE）；受控 `ItemGuardianApprovalReviewStartedNotification` / `ItemGuardianApprovalReviewCompletedNotification` | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 仅投影身份、阶段、状态与 agent 来源的批准标志，接受 approved、denied、timedOut、aborted 四种 agent 来源终态；[`auto-approval-review-tracker.ts`](../src/bootstrap/auto-approval-review-tracker.ts) 采集全部归属 Provider 的轮次，指标库以 Thread/Turn/review ID 去重，按精确 `subagent_turns` 递归统计，完成卡在投递前读取本轮及会话快照。独立的 [`auto-approval-review-notifications.ts`](../src/bootstrap/auto-approval-review-notifications.ts) 按已授权绑定及精确父子 Turn 归属向三渠道发布开始与四种终态，经共享关键投递路径发送；无动作、命令、理由或人工审批按钮，换绑、断线、未知归属不跨会话转发。断线、重启、缺少开始、未完成子轮、待完成审查与归属裁剪不能返回完整零次；迟到审查留在原 Turn。验证见 [`auto-approval-review-metrics.test.ts`](../tests/auto-approval-review-metrics.test.ts)、[`auto-approval-review-notifications.test.ts`](../tests/auto-approval-review-notifications.test.ts)、三渠道 Outbox 与共享投递策略测试，以及真实合同 [`real-app-server-responses-provider.test.ts`](../tests/real-app-server-responses-provider.test.ts)。官方依据为锁定 [`item.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/v2/item.rs)、[`common.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/common.rs) 与 [`bespoke_event_handling.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/bespoke_event_handling.rs)。缓存直接放行、用户手动批准及其他来源的终态不计入审查次数；不从缺失的历史审查重建。 |
+| 本轮任务与当前会话自动审查统计及渠道完成结果 | `item/autoApprovalReview/started`、`item/autoApprovalReview/completed`（方法无实验标记，payload UNSTABLE）；受控 `ItemGuardianApprovalReviewStartedNotification` / `ItemGuardianApprovalReviewCompletedNotification` | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 投影身份、阶段、状态与 agent 来源的批准标志，接受 approved、denied、timedOut、aborted 四种 agent 来源终态；仅终态额外投影七种 action 固定类别、文件数量、网络协议与合法端口，以及风险和用户授权等级，不复制上游文本。未知或畸形摘要字段省略。 [`auto-approval-review-tracker.ts`](../src/bootstrap/auto-approval-review-tracker.ts) 继续采集开始与完成事件及全部归属 Provider 的轮次，指标库以 Thread/Turn/review ID 去重，按精确 `subagent_turns` 递归统计，完成卡在投递前读取本轮及会话快照。独立的 [`auto-approval-review-notifications.ts`](../src/bootstrap/auto-approval-review-notifications.ts) 按已授权绑定及精确父子 Turn 归属向三渠道每次仅发布一张完成结果卡，经共享关键投递路径发送；不发布或补发开始通知，无人工审批按钮，换绑、断线、未知归属不跨会话转发。指标与 StateStore 不增加审查正文，持久投递日志仅保存安全摘要，可选 details 沿用现有结构版本。断线、重启、缺少开始、未完成子轮、待完成审查与归属裁剪不能返回完整零次；迟到审查留在原 Turn。相关验证见 [`auto-approval-review-metrics.test.ts`](../tests/auto-approval-review-metrics.test.ts)、[`auto-approval-review-notifications.test.ts`](../tests/auto-approval-review-notifications.test.ts)、三渠道 Outbox 与共享投递策略测试，以及真实合同 [`real-app-server-responses-provider.test.ts`](../tests/real-app-server-responses-provider.test.ts)。渠道实际收卡效果仍需通过真实会话确认。官方依据为锁定 [`item.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/v2/item.rs)、[`item_builders.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/item_builders.rs)、[`common.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/common.rs) 与 [`bespoke_event_handling.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/bespoke_event_handling.rs)。缓存直接放行、用户手动批准及其他来源的终态不计入审查次数；不从缺失的历史审查重建。 |
 
 完成卡分别查询本轮任务和当前会话累计，包含精确关联子代理；总数分为通过、拒绝、超时、中止、进行中和历史结果未知，不把未区分的旧终态当作拒绝。Provider 请求指标仅将官方 `thread_source=guardian_review` 且父 Thread/Turn 完整的审查请求归到父任务；缺少父身份时保留无会话的全局用量，不生成独立用户会话、不改变普通子代理分类。
 

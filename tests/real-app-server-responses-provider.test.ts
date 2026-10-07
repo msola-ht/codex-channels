@@ -125,6 +125,9 @@ describe("real custom Responses provider", () => {
           }
           if (notification.method === "turn/started" || notification.method === "turn/completed") {
             const params = notification.params as { threadId: string; turn: { id: string } };
+            if (notification.method === "turn/started") {
+              notifications.observeParentRun(params.threadId, params.turn.id);
+            }
             metricsStore!.observeAutoApprovalTurn(params.threadId, params.turn.id, "fixture",
               notification.method === "turn/started" ? "started" : "completed");
           }
@@ -173,20 +176,25 @@ describe("real custom Responses provider", () => {
         expect(reviewStarted).toMatchObject({ threadId: thread.id, turnId: turn.id, targetItemId: callId,
           review: { status: "inProgress" }, action: { type: "command", command: expect.stringContaining(command), cwd: root } });
         expect(reviewStarted.reviewId).not.toBe("");
+        const expectedDetails = { action: { kind: "command" },
+          riskLevel: outcome === "allow" ? "low" : "high",
+          userAuthorization: outcome === "allow" ? "high" : "unknown" };
         expect(reviewCompleted).toMatchObject({ threadId: thread.id, turnId: turn.id, targetItemId: callId,
           reviewId: reviewStarted.reviewId, startedAtMs: reviewStarted.startedAtMs, decisionSource: "agent",
-          review: { status: outcome === "allow" ? "approved" : "denied", rationale: "fixture" },
+          review: { status: outcome === "allow" ? "approved" : "denied", rationale: "fixture",
+            riskLevel: expectedDetails.riskLevel, userAuthorization: expectedDetails.userAuthorization },
           action: reviewStarted.action });
         expect(reviewCompleted.completedAtMs).toBeGreaterThanOrEqual(reviewStarted.startedAtMs);
         expect(projectedReviews).toEqual([
           { threadId: thread.id, turnId: turn.id, reviewId: reviewStarted.reviewId, phase: "started", status: "inProgress", approved: false },
-          { threadId: thread.id, turnId: turn.id, reviewId: reviewStarted.reviewId, phase: "completed", status: outcome === "allow" ? "approved" : "denied", approved: outcome === "allow" },
+          { threadId: thread.id, turnId: turn.id, reviewId: reviewStarted.reviewId, phase: "completed", status: outcome === "allow" ? "approved" : "denied", approved: outcome === "allow", details: expectedDetails },
         ]);
-        expect(channelReviews).toEqual(projectedReviews.map(value => ({
+        expect(channelReviews).toEqual([{
           type: "autoApprovalReview.updated", target: { surface: "telegram", accountId: "fixture", conversationId: "fixture-chat" },
           threadId: thread.id, turnId: turn.id, sourceThreadId: thread.id, sourceTurnId: turn.id,
-          reviewId: value.reviewId, phase: value.phase, status: value.status,
-        })));
+          reviewId: reviewStarted.reviewId, phase: "completed", status: outcome === "allow" ? "approved" : "denied",
+          details: expectedDetails,
+        }]);
         expect(JSON.stringify(channelReviews)).not.toContain(command);
         expect(channelReviews.some(event => "action" in event || "rationale" in event)).toBe(false);
         expect(metricsStore.taskAutoApprovalReviewSummary(thread.id, turn.id)).toEqual(expect.objectContaining({

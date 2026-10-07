@@ -18,6 +18,7 @@ import type { SurfaceOutputPort } from "../types.js";
 import {
   createTurnStartedPresentation,
   createAutoApprovalReviewPresentation,
+  isHiddenAutoApprovalReview,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
@@ -145,6 +146,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
     if (this.closed || !this.matches(event.target)) throw new Error("可靠输出目标无效或已关闭");
+    signal.throwIfAborted();
+    if (isHiddenAutoApprovalReview(event)) return;
     if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
     await captureDelivery(() => {
       this.handle(event);
@@ -273,11 +276,13 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   private render(event: OutputEvent): string | null {
     switch (event.type) {
-      case "autoApprovalReview.updated":
-        return formatWeixinCommandText(
-          renderPlainLifecyclePresentation(createAutoApprovalReviewPresentation(event)),
+      case "autoApprovalReview.updated": {
+        const presentation = createAutoApprovalReviewPresentation(event);
+        return presentation ? formatWeixinCommandText(
+          renderPlainLifecyclePresentation(presentation),
           { structuredFields: true },
-        );
+        ) : null;
+      }
       case "operation.updated":
         return this.compactionNotices.accept(event, DeliveryReceipt.current() !== undefined);
       case "text.completed":

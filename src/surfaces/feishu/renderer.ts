@@ -118,8 +118,10 @@ export function renderFeishuOutput(
   ) => number | null,
 ): string | null {
   switch (event.type) {
-    case "autoApprovalReview.updated":
-      return renderFeishuLifecyclePresentation(createAutoApprovalReviewPresentation(event));
+    case "autoApprovalReview.updated": {
+      const presentation = createAutoApprovalReviewPresentation(event);
+      return presentation ? renderFeishuLifecyclePresentation(presentation) : null;
+    }
     case "turn.started":
       return renderFeishuLifecyclePresentation(
         createTurnStartedPresentation(

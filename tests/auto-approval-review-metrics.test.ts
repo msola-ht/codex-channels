@@ -115,6 +115,7 @@ describe("automatic approval review metrics", () => {
     const publish = vi.fn();
     const notifications = new AutoApprovalReviewNotifications({ targetForThread: () => ({ surface: "telegram", accountId: "default", conversationId: "chat" }),
       providerForThread: () => "openai", isBackgroundThread: () => false, publish, unroutable: vi.fn() });
+    notifications.observeParentRun("root", "turn");
     const write = vi.spyOn(store, "recordAutoApprovalReview").mockImplementationOnce(() => { throw new Error("unavailable"); });
     const notification = { method: "item/autoApprovalReview/completed", params: {
       threadId: "root", turnId: "turn", reviewId: "failure", decisionSource: "agent", review: { status: "approved" },

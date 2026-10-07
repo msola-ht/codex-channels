@@ -33,7 +33,7 @@ describe("Feishu command adapter", () => {
       await adapter.handle({ ...message, text: "/autoreview" });
       expect(openResponse).toHaveBeenCalledWith(message.target, message.actorId, expect.objectContaining({
         title: "当前会话审批方式", choices: [
-          { label: "当前会话：自动审查", action: "thread-autoreview-select", input: "on original-thread" },
+          { label: "当前会话：自动审批", action: "thread-autoreview-select", input: "on original-thread" },
           { label: "当前会话：手动审批", action: "thread-autoreview-select", input: "off original-thread" },
         ],
       }));
@@ -57,9 +57,9 @@ describe("Feishu command adapter", () => {
     try {
       await adapter.handle({ ...message, text: "/workspaceperm" });
       const response = openResponse.mock.calls[0] as unknown as [unknown, unknown, { description: string; choices: Array<{ action: string; input: string }> }];
-      expect(response[2].description).toContain("工作区默认审批方式：自动审查（Auto-review）");
+      expect(response[2].description).toContain("工作区默认审批方式：自动审批");
       expect(response[2].choices.slice(0, 3)).toEqual([
-        { label: "工作区默认：自动审查", action: "workspace-autoreview-select", input: "on original-workspace" },
+        { label: "工作区默认：自动审批", action: "workspace-autoreview-select", input: "on original-workspace" },
         { label: "工作区默认：手动审批", action: "workspace-autoreview-select", input: "off original-workspace" },
         { label: "工作区默认：跟随 Codex 默认", action: "workspace-autoreview-select", input: "clear original-workspace" },
       ]);
@@ -717,8 +717,8 @@ describe("Feishu command adapter", () => {
         { label: "当前会话审批方式", action: "autoreview", input: "" },
       ]),
     });
-    expect(response).toMatchObject({ description: expect.stringContaining("审批方式：") });
     if (response === undefined || "kind" in response) throw new Error("预期返回状态面板");
+    expect(response.description).not.toContain("审批方式：");
     expect(response.description).not.toContain("关联操作");
     expect(response.description).not.toContain("权限查询");
     await fixture.outbox.close();
@@ -1556,7 +1556,6 @@ describe("Feishu command adapter", () => {
         "- 思考等级：medium",
         "- Fast 模式：开启",
         "- 协作模式：Default",
-        "- 审批方式：未知",
         "",
         "- 当前 Session 用量：等待 App Server 推送统计",
       ].join("\n"),

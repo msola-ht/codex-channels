@@ -27,7 +27,7 @@
   终态与 Usage 指标转换为稳定输入，Core 按 Thread/Turn 累计每个已确认请求；上下文压缩还按操作
   类型归约模型与 Token 摘要，供完成卡片单列。
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP OAuth 类型，以及
-  自动审查窄状态通知（保留审查来源及授权路由身份），
+  自动审查窄状态通知（保留审查来源及授权路由身份）及公开的 `AutoApprovalReviewDetails` 完成摘要类型；摘要只含固定动作类别、文件数量、网络协议和端口、风险与用户授权等级，不含上游文本。输出事件的 details 可选，新通知生产路径只发布完成结果，
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定；`turn.reasoning`
   输出只携带“思考中…”状态、每段独立耗时与最终标记，不携带摘要或原始思维链内容；同一 Thread
   开始新 Turn 时会结束并释放旧 Turn 遗留的推理段定时器。

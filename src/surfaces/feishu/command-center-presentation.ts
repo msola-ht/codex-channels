@@ -617,7 +617,7 @@ export function renderCommandCenterChoices(
       descriptionFormat: "markdown",
       choices: threadId !== null && (reviewer === "user" || reviewer === "auto_review")
         ? (["on", "off"] as const).map(value => ({
-          label: value === "on" ? "当前会话：自动审查" : "当前会话：手动审批",
+          label: value === "on" ? "当前会话：自动审批" : "当前会话：手动审批",
           action: "thread-autoreview-select" as const,
           input: `${value} ${threadId}`,
         }))
@@ -634,7 +634,7 @@ export function renderCommandCenterChoices(
       descriptionFormat: "markdown",
       choices: [
         ...(["on", "off", "clear"] as const).map((value) => ({
-          label: value === "on" ? "工作区默认：自动审查" : value === "off" ? "工作区默认：手动审批" : "工作区默认：跟随 Codex 默认",
+          label: value === "on" ? "工作区默认：自动审批" : value === "off" ? "工作区默认：手动审批" : "工作区默认：跟随 Codex 默认",
           action: "workspace-autoreview-select" as const,
           input: `${value} ${result.workspace.id}`,
         })),

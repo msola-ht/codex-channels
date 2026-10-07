@@ -774,7 +774,7 @@ describe("WeixinConversationAdapter", () => {
     expect(notifyText).toHaveBeenNthCalledWith(2, target, [
       "**已修改工作区默认审批方式**",
       "- Workspace：Main",
-      "  - 工作区默认审批方式：自动审查（Auto-review）",
+      "  - 工作区默认审批方式：自动审批",
       "",
       "- 已加载会话保持原值，用 /autoreview 修改当前会话。",
     ].join("\n"));

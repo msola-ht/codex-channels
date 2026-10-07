@@ -1129,9 +1129,7 @@ export abstract class GatewayComponentGraph {
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
-        if ((coreEvent.type === "item.subagentActivity" && coreEvent.kind === "started")
-          || (coreEvent.type === "item.operation.updated" && coreEvent.operation.kind === "subagent"
-            && coreEvent.operation.action === "followup_task" && coreEvent.operation.status === "running")) {
+        if (coreEvent.type === "turn.started") {
           this.autoApprovalReviewNotifications.observeParentRun(coreEvent.threadId, coreEvent.turnId);
         }
         if (coreEvent.type === "turn.completed" || coreEvent.type === "thread.reverted") {

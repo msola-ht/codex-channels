@@ -11,7 +11,7 @@ import {
 import { completed, delta, operationUpdated, target, turnCompleted } from "./support/feishu-outbox-fixtures.js";
 
 
-const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n### 当前会话\n- Session：测试会话\n- Session ID：thread-1\n- 审批方式：未知\n- 总耗时：未提供";
+const turnCompletedMarkdown = "## 本次运行 · 已完成\n\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n### 当前会话\n- Session：测试会话\n- Session ID：thread-1\n- 总耗时：未提供";
 
 const cardMethods = {
   sendCard: async () => "om_card",
@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
-  it.each(["approved", "denied", "timedOut", "aborted"] as const)("delivers auto-review start and %s without interactive approvals", async status => {
+  it.each(["approved", "denied", "timedOut", "aborted"] as const)("hides auto-review start and delivers only %s without interactive approvals", async status => {
     const sendMarkdownCard = vi.fn<(chat: string, markdown: string) => Promise<string>>(async () => "om_review");
     const sendCard = vi.fn(cardMethods.sendCard);
     const outbox = new FeishuOutbox(target.accountId, {
@@ -44,8 +44,8 @@ describe("Feishu outbox", () => {
         outbox.handle(event);
       }
       await outbox.close();
-      expect(sendMarkdownCard.mock.calls.map(call => call[1])).toEqual(["## 自动审查开始\n\n- 状态：审查中",
-        `## 自动审查完成\n\n- 状态：${{ approved: "已通过", denied: "已拒绝", timedOut: "已超时", aborted: "已中止" }[status]}`]);
+      expect(sendMarkdownCard.mock.calls.map(call => call[1])).toEqual([
+        `## 自动审批完成\n\n- 状态：${{ approved: "已通过", denied: "已拒绝", timedOut: "已超时", aborted: "已中止" }[status]}`]);
       expect(sendCard).not.toHaveBeenCalled();
     } finally { await outbox.close(); }
   });
@@ -303,7 +303,7 @@ describe("Feishu outbox", () => {
 
     expect(replies).toEqual([{
       messageId: "om_origin",
-      markdown: "## 已使用 GitHub Plugin 开始处理。\n\n- 审批方式：未知",
+      markdown: "## 已使用 GitHub Plugin 开始处理。",
     }]);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ schema: "2.0" });

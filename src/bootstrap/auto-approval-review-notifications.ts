@@ -12,6 +12,7 @@ interface ReviewRoute {
   threadId: string;
   turnId: string;
   target: ConversationTarget;
+  provider: string;
 }
 
 const observationTtlMs = 60_000;
@@ -20,7 +21,7 @@ const maximumRelations = 512;
 const maximumSent = 2_048;
 const runKey = (threadId: string, turnId: string) => JSON.stringify([threadId, turnId]);
 
-/** Only routes safe status facts; neither metrics persistence nor platform I/O owns this path. */
+/** Only routes safe completion facts; neither metrics persistence nor platform I/O owns this path. */
 export class AutoApprovalReviewNotifications {
   private readonly parents = new Map<string, (ParentRun & { owner?: ReviewRoute }) | null>();
   private readonly origins = new Map<string, { threadId: string; turnId: string; owner?: ReviewRoute }>();
@@ -36,16 +37,12 @@ export class AutoApprovalReviewNotifications {
   }) {}
 
   handle(review: AutoApprovalReviewEvent): void {
+    // A review may start midway through an older Turn; it cannot establish that Turn's binding.
+    this.observeRun(review.threadId, review.turnId, false);
+    if (review.phase !== "completed") return;
     this.prune();
     const key = JSON.stringify([review.threadId, review.turnId, review.reviewId, review.phase]);
-    const completedKey = JSON.stringify([review.threadId, review.turnId, review.reviewId, "completed"]);
-    if (review.phase === "started" && (this.sent.has(completedKey) || this.pending.has(completedKey))) return;
     if (this.sent.has(key) || this.pending.has(key)) return;
-    if (review.phase === "completed") {
-      const startedKey = JSON.stringify([review.threadId, review.turnId, review.reviewId, "started"]);
-      const started = this.pending.get(startedKey);
-      if (started && this.deliver(started.review, startedKey)) this.pending.delete(startedKey);
-    }
     if (this.deliver(review, key)) return;
     this.options.unroutable(review.threadId, review.turnId, "awaiting-attribution");
     this.pending.set(key, { review, expiresAt: Date.now() + observationTtlMs });
@@ -57,10 +54,15 @@ export class AutoApprovalReviewNotifications {
     }
   }
 
+  /** Only turn.started may establish ownership; activity within an existing Turn cannot. */
   observeParentRun(threadId: string, turnId: string): void {
+    this.observeRun(threadId, turnId, true);
+  }
+
+  private observeRun(threadId: string, turnId: string, captureCurrentBinding: boolean): void {
     const key = runKey(threadId, turnId);
     if (this.origins.has(key)) return;
-    const owner = this.route({ threadId, turnId });
+    const owner = this.route({ threadId, turnId }, captureCurrentBinding);
     this.origins.set(key, { threadId, turnId, ...(owner ? { owner } : {}) });
     while (this.origins.size > maximumRelations) {
       const oldest = this.origins.keys().next().value!;
@@ -85,7 +87,7 @@ export class AutoApprovalReviewNotifications {
       return;
     }
     const owner = previous?.owner ?? this.origins.get(runKey(details.parentThreadId, details.parentTurnId))?.owner
-      ?? this.route({ threadId: details.parentThreadId, turnId: details.parentTurnId }, false);
+      ?? this.route({ threadId: details.parentThreadId, turnId: details.parentTurnId });
     this.parents.set(key, { ...details, ...(owner ? { owner } : {}) });
     while (this.parents.size > maximumRelations) {
       const oldest = this.parents.keys().next().value!;
@@ -112,44 +114,50 @@ export class AutoApprovalReviewNotifications {
     for (const [key, origin] of this.origins) {
       if (provider === undefined || this.options.providerForThread(origin.threadId) === provider) this.origins.delete(key);
     }
-    // Keep recent sent phases through reconnects to suppress duplicate notifications.
+    // Keep recent sent completions through reconnects to suppress duplicate notifications.
   }
 
-  private route(review: Pick<AutoApprovalReviewEvent, "threadId" | "turnId">, allowDirect = true): ReviewRoute | undefined {
+  private route(review: Pick<AutoApprovalReviewEvent, "threadId" | "turnId">, captureCurrentBinding = false): ReviewRoute | undefined {
     const provider = this.options.providerForThread(review.threadId);
     if (!provider) return undefined;
     let threadId = review.threadId;
     let turnId = review.turnId;
     const visited = new Set<string>();
     while (!visited.has(runKey(threadId, turnId))) {
-      visited.add(runKey(threadId, turnId));
+      const key = runKey(threadId, turnId);
+      visited.add(key);
       if (this.options.providerForThread(threadId) !== provider) return undefined;
-      const target = allowDirect ? this.options.targetForThread(threadId) : undefined;
-      if (target) return { threadId, turnId, target: { ...target } };
-      const parent = this.parents.get(runKey(threadId, turnId));
-      if (!parent) return undefined;
-      if (parent.owner) {
-        const current = this.options.targetForThread(parent.owner.threadId);
-        if (!current || current.surface !== parent.owner.target.surface || current.accountId !== parent.owner.target.accountId
-          || current.conversationId !== parent.owner.target.conversationId
-          || this.options.providerForThread(parent.owner.threadId) !== provider) return undefined;
-        return parent.owner;
+      const parent = this.parents.get(key);
+      if (parent === null) return undefined;
+      const origin = this.origins.get(key);
+      const owner = origin?.owner ?? parent?.owner;
+      if (owner) {
+        const current = this.options.targetForThread(owner.threadId);
+        if (!current || current.surface !== owner.target.surface || current.accountId !== owner.target.accountId
+          || current.conversationId !== owner.target.conversationId || owner.provider !== provider
+          || this.options.providerForThread(owner.threadId) !== owner.provider) return undefined;
+        return owner;
       }
+      // Only turn.started may capture a binding, never mid-Turn activity, a review or late attribution.
+      const target = captureCurrentBinding && !origin ? this.options.targetForThread(threadId) : undefined;
+      if (target) return { threadId, turnId, target: { ...target }, provider };
+      if (!parent) return undefined;
       threadId = parent.parentThreadId;
       turnId = parent.parentTurnId;
-      allowDirect = false;
+      captureCurrentBinding = false;
     }
     return undefined;
   }
 
   private deliver(review: AutoApprovalReviewEvent, key: string): boolean {
-    if (review.phase === "started" && this.sent.has(JSON.stringify([review.threadId, review.turnId, review.reviewId, "completed"]))) return true;
+    if (review.phase !== "completed") return true;
     const route = this.route(review);
     if (!route) return false;
     try { this.options.publish({
-      type: "autoApprovalReview.updated", ...route,
+      type: "autoApprovalReview.updated", threadId: route.threadId, turnId: route.turnId, target: route.target,
       sourceThreadId: review.threadId, sourceTurnId: review.turnId,
       reviewId: review.reviewId, phase: review.phase, status: review.status,
+      ...(review.details ? { details: review.details } : {}),
       ...(this.options.isBackgroundThread(route.threadId) ? { background: true } : {}),
     }); } catch {
       this.options.unroutable(review.threadId, review.turnId, "publish-failed");

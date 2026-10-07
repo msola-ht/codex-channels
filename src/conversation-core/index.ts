@@ -5,6 +5,7 @@ export type {
   CompletionAccountStatus,
   AsyncUserQuestion,
   AuthMode,
+  AutoApprovalReviewDetails,
   GoalStatus,
   McpServerStartupFailureReason,
   McpServerStartupState,

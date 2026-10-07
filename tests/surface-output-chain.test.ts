@@ -64,7 +64,7 @@ it.concurrent("fences new execution but persists every accepted inbound result b
   } finally { await manager.stop(); await inbound.close(); await output.close(); }
 });
 
-it.concurrent.for(["telegram", "feishu"] as const)("confirms auto-review phases through the %s persistent output chain", async (platform, { expect }) => {
+it.concurrent.for(["telegram", "feishu"] as const)("acknowledges a legacy auto-review start and sends only completion through the %s persistent output chain", async (platform, { expect }) => {
   const f = await fixture(false, platform);
   const notifications = new AutoApprovalReviewNotifications({
     targetForThread: threadId => threadId === "thread" ? f.target : undefined,
@@ -72,13 +72,18 @@ it.concurrent.for(["telegram", "feishu"] as const)("confirms auto-review phases 
     publish: event => f.output.publish(event, true), unroutable: vi.fn(),
   });
   try {
+    notifications.observeParentRun("thread", "turn");
+    f.output.publish({ type: "autoApprovalReview.updated", target: f.target, threadId: "thread", turnId: "turn",
+      sourceThreadId: "thread", sourceTurnId: "turn", reviewId: "legacy-review", phase: "started", status: "inProgress" }, true);
     for (const phase of ["started", "completed"] as const) notifications.handle({ threadId: "thread", turnId: "turn", reviewId: "review",
       phase, status: phase === "started" ? "inProgress" : "denied", approved: false });
     await f.manager.waitForPersistentOutput(f.target, AbortSignal.timeout(3000));
-    expect(f.rendered.map(event => event.type)).toEqual(["autoApprovalReview.updated", "autoApprovalReview.updated"]);
-    expect(f.sent).toHaveLength(2);
-    expect(f.sent[0]).toContain("审查中"); expect(f.sent[1]).toContain("已拒绝");
-    expect(f.checkpoints.map(value => value.state)).toEqual(["started", "confirmed", "started", "confirmed"]);
+    expect(f.rendered.map(event => [event.type, "phase" in event ? event.phase : undefined])).toEqual([
+      ["autoApprovalReview.updated", "started"], ["autoApprovalReview.updated", "completed"],
+    ]);
+    expect(f.sent).toHaveLength(1);
+    expect(f.sent[0]).toContain("自动审批完成"); expect(f.sent[0]).toContain("已拒绝");
+    expect(f.checkpoints.map(value => value.state)).toEqual(["started", "confirmed"]);
     expect(f.faults).toEqual([]);
   } finally { await f.close(); }
   const journal = new SqliteDeliveryJournal(f.directory);
@@ -105,7 +110,7 @@ it.concurrent.for(["telegram", "feishu", "weixin"] as const)("renders persisted 
     tracker.handleNotification({ method: "item/autoApprovalReview/completed", params: { threadId, turnId, reviewId: `review-${status}`, decisionSource: "agent", targetItemId: `item-${status}`,
       review: { status, riskLevel: "low", riskScore: 1, rationale: "fixture" } } });
   }
-  const completion: OutputEvent = { target, type: "turn.completed", threadId: "thread", turnId: "turn", status: "completed" };
+  const completion: OutputEvent = { target, type: "turn.completed", threadId: "thread", turnId: "turn", status: "completed", approvalsReviewer: "auto_review" };
   const journalDirectory = join(directory, "journal");
   const journal = new SqliteDeliveryJournal(journalDirectory);
   try {
@@ -149,8 +154,8 @@ it.concurrent.for(["telegram", "feishu", "weixin"] as const)("renders persisted 
     expect(rendered[0]).toMatchObject({ autoApprovalReview: { total: 4, approved: 1, denied: 1, timedOut: 1, aborted: 1 },
       sessionAutoApprovalReview: { total: 5, approved: 2, denied: 1, timedOut: 1, aborted: 1 } });
     const [run, session] = sent.join("\n").replace(/<[^>]*>/g, "").replace(/\*\*/g, "").split("当前会话");
-    expect(run).toContain("自动审查：4 次（含子代理）");
-    expect(session).toContain("自动审查：5 次（含子代理）");
+    expect(run).toContain("自动审批：4 次（含子代理）");
+    expect(session).toContain("自动审批：5 次（含子代理）");
     for (const section of [run, session]) {
       for (const label of ["通过", "拒绝", "超时", "中止"]) expect(section).toContain(`${label}：`);
     }
@@ -599,7 +604,7 @@ it.concurrent.for([false, true])("degrades a persistent completion's optional en
     gitBranch: async () => { throw new Error("PRIVATE OPTIONAL LOOKUP FAILURE"); },
     autoApprovalReview: () => ({ approved: 2, denied: 1, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 3, coverage: "complete" }),
   });
-  const completion: OutputEvent = { ...base, type: "turn.completed", status: "completed", timing: { modelRequestCount: 7 } };
+  const completion: OutputEvent = { ...base, type: "turn.completed", status: "completed", approvalsReviewer: "auto_review", timing: { modelRequestCount: 7 } };
   try {
     f.output.publish(completion, true);
     await f.manager.waitForPersistentOutput(f.target, AbortSignal.timeout(3_000));
@@ -607,7 +612,7 @@ it.concurrent.for([false, true])("degrades a persistent completion's optional en
       autoApprovalReview: { approved: 2, denied: 1, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 3, coverage: "complete" },
     }));
     expect(f.sent).toHaveLength(1);
-    expect(f.sent[0]?.replace(/<[^>]*>/g, "")).toContain("自动审查：3 次（含子代理）");
+    expect(f.sent[0]?.replace(/<[^>]*>/g, "")).toContain("自动审批：3 次（含子代理）");
     expect(f.checkpoints.map((checkpoint) => checkpoint.state)).toEqual(failure ? ["started"] : ["started", "confirmed"]);
     if (failure) await vi.waitFor(() => expect(f.faults).toEqual(["delivery-uncertain"]));
     expect(f.faults).toEqual(failure ? ["delivery-uncertain"] : []);

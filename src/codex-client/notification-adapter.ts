@@ -1,5 +1,6 @@
 import type {
   AuthMode,
+  AutoApprovalReviewDetails,
   ConversationInputEvent,
   McpServerStartupFailureReason,
   McpServerStartupState,
@@ -110,7 +111,7 @@ const coreMethods = {
   reverted: "thread/reverted",
 } as const satisfies Record<string, CoreNotification["method"]>;
 
-/** Safe status and metrics projection of the controlled, unstable official review payload. */
+/** Safe status, metrics and completed-detail projection of the controlled, unstable review payload. */
 export interface AutoApprovalReviewEvent {
   threadId: string;
   turnId: string;
@@ -118,6 +119,7 @@ export interface AutoApprovalReviewEvent {
   phase: "started" | "completed";
   status: "inProgress" | "approved" | "denied" | "timedOut" | "aborted";
   approved: boolean;
+  details?: AutoApprovalReviewDetails;
 }
 
 export function toAutoApprovalReviewEvent(notification: RpcNotification): AutoApprovalReviewEvent | undefined {
@@ -136,8 +138,62 @@ export function toAutoApprovalReviewEvent(notification: RpcNotification): AutoAp
   if (!threadId || !turnId || !reviewId || (!completed && status !== "inProgress")
     || (completed && (params?.decisionSource !== "agent"
       || (status !== "approved" && status !== "denied" && status !== "timedOut" && status !== "aborted")))) return undefined;
+  const details = completed ? toAutoApprovalReviewDetails(params?.action, review) : undefined;
   return { threadId, turnId, reviewId, phase: completed ? "completed" : "started", status,
-    approved: completed && params?.decisionSource === "agent" && status === "approved" };
+    approved: completed && params?.decisionSource === "agent" && status === "approved",
+    ...(details ? { details } : {}) };
+}
+
+function toAutoApprovalReviewDetails(
+  actionValue: unknown,
+  review: Record<string, unknown> | undefined,
+): AutoApprovalReviewDetails | undefined {
+  const details: AutoApprovalReviewDetails = {};
+  const action = toAutoApprovalReviewAction(actionValue);
+  if (action) details.action = action;
+  const riskLevel = review?.riskLevel;
+  if (riskLevel === "low" || riskLevel === "medium" || riskLevel === "high" || riskLevel === "critical") {
+    details.riskLevel = riskLevel satisfies ItemGuardianApprovalReviewCompletedNotification["review"]["riskLevel"];
+  }
+  const userAuthorization = review?.userAuthorization;
+  if (userAuthorization === "unknown" || userAuthorization === "low"
+    || userAuthorization === "medium" || userAuthorization === "high") {
+    details.userAuthorization = userAuthorization satisfies ItemGuardianApprovalReviewCompletedNotification["review"]["userAuthorization"];
+  }
+  return details.action || details.riskLevel || details.userAuthorization ? details : undefined;
+}
+
+/** Construct only allowlisted fields; upstream text never leaves the Client boundary. */
+function toAutoApprovalReviewAction(value: unknown): AutoApprovalReviewDetails["action"] {
+  const action = asRecord(value);
+  const kind = action?.type;
+  switch (kind) {
+    case "command":
+    case "execve":
+    case "writeStdin":
+    case "mcpToolCall":
+    case "requestPermissions":
+      return { kind: kind satisfies ItemGuardianApprovalReviewCompletedNotification["action"]["type"] };
+    case "applyPatch": {
+      const files = action?.files;
+      // Bound element inspection; oversized or malformed lists retain only the action category.
+      const fileCount = Array.isArray(files) && files.length <= 1_024
+        && files.every((file: unknown) => typeof file === "string") ? files.length : undefined;
+      return { kind, ...(fileCount !== undefined ? { fileCount } : {}) };
+    }
+    case "networkAccess": {
+      const protocol = action?.protocol;
+      const port = action?.port;
+      return {
+        kind,
+        ...(protocol === "http" || protocol === "https" || protocol === "socks5Tcp" || protocol === "socks5Udp"
+          ? { protocol: protocol satisfies Extract<ItemGuardianApprovalReviewCompletedNotification["action"], { type: "networkAccess" }>["protocol"] } : {}),
+        ...(typeof port === "number" && Number.isInteger(port) && port >= 0 && port <= 65_535 ? { port } : {}),
+      };
+    }
+    default:
+      return undefined;
+  }
 }
 
 export function toThreadStateEvent(

@@ -1,6 +1,14 @@
 export type SurfaceId = string;
 export type MessagePhase = "commentary" | "final_answer";
 export type ThreadApprovalsReviewer = "user" | "auto_review" | "guardian_subagent";
+export interface AutoApprovalReviewDetails {
+  action?:
+    | { kind: "command" | "execve" | "writeStdin" | "mcpToolCall" | "requestPermissions" }
+    | { kind: "applyPatch"; fileCount?: number }
+    | { kind: "networkAccess"; protocol?: "http" | "https" | "socks5Tcp" | "socks5Udp"; port?: number };
+  riskLevel?: "low" | "medium" | "high" | "critical";
+  userAuthorization?: "unknown" | "low" | "medium" | "high";
+}
 export interface AutoApprovalReviewCounts {
   approved: number;
   denied: number;
@@ -301,7 +309,7 @@ export interface AsyncUserQuestion {
 }
 
 export type OutputEvent =
-  | { type: "autoApprovalReview.updated"; target: ConversationTarget; threadId: string; turnId: string; sourceThreadId: string; sourceTurnId: string; reviewId: string; phase: "started" | "completed"; status: "inProgress" | "approved" | "denied" | "timedOut" | "aborted"; background?: boolean }
+  | { type: "autoApprovalReview.updated"; target: ConversationTarget; threadId: string; turnId: string; sourceThreadId: string; sourceTurnId: string; reviewId: string; phase: "started" | "completed"; status: "inProgress" | "approved" | "denied" | "timedOut" | "aborted"; details?: AutoApprovalReviewDetails; background?: boolean }
   | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; approvalsReviewer?: ThreadApprovalsReviewer | null; identity?: TurnStartIdentity; background?: boolean }
   | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; background?: boolean }
   | { type: "text.delta"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; phase?: MessagePhase | null; background?: boolean }

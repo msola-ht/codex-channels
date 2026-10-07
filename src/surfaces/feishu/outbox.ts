@@ -1,6 +1,7 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
 import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
 import { isPersistentOutput } from "../persistent-output.js";
+import { isHiddenAutoApprovalReview } from "../lifecycle-presentation.js";
 import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { FeishuTextStreams } from "./text-streams.js";
 import type { Logger } from "pino";
@@ -207,6 +208,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
   async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
     if (this.closed || event.target.surface !== "feishu"
       || event.target.accountId !== this.accountId) throw new Error("可靠输出目标无效或已关闭");
+    signal.throwIfAborted();
+    if (isHiddenAutoApprovalReview(event)) return;
     if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
     await captureDelivery(() => {
       void this.handle(event);
