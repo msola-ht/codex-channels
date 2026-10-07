@@ -91,6 +91,7 @@ export const terminalIdentityPattern: RegExp;
 export const timezonePattern: RegExp;
 export function tomlErrorSummary(error: unknown): string;
 export function validateGatewayConfigDocument(document: unknown): GatewayConfigDocument;
+export function validateGatewayConfigStructureDocument(document: unknown): GatewayConfigDocument;
 export function validateCodexConfigDocument(document: unknown): GatewayConfigDocument["codex"];
 export function validateGatewayProcessConfigDocument(document: unknown): { timezone?: string };
 export function validateWebuiConfigDocument(

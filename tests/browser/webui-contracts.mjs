@@ -255,7 +255,7 @@ try {
     await page.getByRole("table").waitFor()
     assert.equal(await page.getByRole("cell", { name: "model-test", exact: true }).count(), 1)
     await page.getByRole("button", { name: "Externally disable recording", exact: true }).click()
-    await page.getByText("Fixture requests", { exact: true }).waitFor()
+    await page.getByText("Fixture requests", { exact: true }).waitFor({ timeout: 15000 })
     assert.equal(await sidebarTraffic.count(), 0)
     await page.waitForFunction(() => window.__contract.requests.filter(entry => entry.url.startsWith("/api/v1/traffic/events")).every(entry => entry.signal.aborted))
   })

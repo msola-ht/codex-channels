@@ -254,7 +254,7 @@ const trafficVisibilityExchange = {
 }
 function TrafficVisibilityFixture() {
   const summary = useApi(fetchModelTrafficSettings, [], { retainDataOnError: false })
-  useApiPolling(summary.refetch, summary.loading, true)
+  useApiPolling(summary.refetch, summary.loading, true, 10_000)
   const refresh = (enabled, failed = false, hold = false) => {
     contract.trafficEnabled = enabled
     contract.failSummary = failed

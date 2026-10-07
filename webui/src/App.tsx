@@ -139,7 +139,7 @@ function Layout() {
   const [consoleRange, setConsoleRange] = useState<MetricsRangeQuery>({ range: "30d" })
   const time = useServerTime()
   const settings = useApi(fetchModelTrafficSettings, [], { retainDataOnError: false })
-  useApiPolling(settings.refetch, settings.loading, true)
+  useApiPolling(settings.refetch, settings.loading, true, 10_000)
 
   if (time.data === null) {
     return <div className="flex flex-col gap-3 p-4">

@@ -11,7 +11,7 @@
 
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
-- `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置，并提供复用同一
+- `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置；只读设置入口复用完整当前版本和结构 Schema，不要求 Gateway 启动前至少启用一个渠道，原启动校验仍保留该前置条件。提供复用同一
   子 Schema 的严格 `[codex]`、`[gateway]` 局部校验；网关时区接受 `system` 或 Node.js 支持的 IANA 名称。
   在保留已有注释的前提下合并缺失的 Schema 安全默认值，
   所有基于已读取文档的写入在同一同步配置文件锁内复核原文后再执行私有文件原子替换；需要同时
@@ -219,6 +219,7 @@
   适配器，单次调用超过 2 秒即终止并拒绝操作；原子写入前同时收紧父目录，严格私有路径关闭继承，只允许当前 SID、SYSTEM 和
   Administrators 完全控制；状态库、任务库、指标库、媒体、渠道输出和受管备份复用同一合同；
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
+  异步配置读取额外只读校验父目录，检测读取期间变化；Windows 在同一次异步调用中持有禁止写入和替换的只读文件句柄并检查文件、父目录 ACL，不修复权限、不缓存校验结果，支持取消及有界读取。
 - `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器；只从 stdin 读取固定 JSON 请求，通过 .NET
   ACL 类型设置或校验 Owner、访问规则、继承、文件类型与 reparse point，并返回结构化结果，不解析
   本地化命令输出。
