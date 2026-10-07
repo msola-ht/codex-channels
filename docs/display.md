@@ -62,7 +62,7 @@ WebUI、CLI 人类可读输出、转储详情和渠道的耗时展示统一为�
 
 启动通知、Turn 启动卡、完成卡和 `/status` 都显示当前 Session 的“审批方式”。该值来自 App Server
 的 Thread 启动、恢复或分叉响应及 `thread/settings/updated` 权威设置：`user` 显示“手动审批”，
-`auto_review` 显示“自动审查（Auto-review）”，上游兼容值 `guardian_subagent` 显示“自动审查（guardian_subagent）”。
+`auto_review` 显示“自动审查（Auto-review）”，上游旧值 `guardian_subagent` 显示“自动审查（guardian_subagent）”。
 尚未绑定、未取得或无法识别时显示“未知”，不使用全局 Codex 用户设置推断已有 Thread。
 Codex 默认审批方式修改只设置新会话默认值；当前会话显示仍以 App Server 的实际设置为准。
 `/autoreview` 查询当前会话审批方式，`/autoreview on|off` 为当前会话后续轮次切换自动审查或手动审批。
@@ -87,7 +87,7 @@ Codex 默认审批方式修改只设置新会话默认值；当前会话显示�
 关系转发到仍有授权的父会话，并标明“来源：子代理”；缺少归属时保留有界短期等待并记录不可路由状态，
 不向其他会话广播。通知等待和去重只存在于进程内，不重放 Gateway 停止期间未观察到的审查事件。
 
-飞书、Telegram 和微信完成卡的“本次运行”和“当前会话”均展示“自动审查”：前者统计本轮任务，
+飞书、Telegram 和微信完成卡的标题下本轮指标和“当前会话”分区均展示“自动审查”：前者统计本轮任务，
 后者累计当前 Session 在指标保留范围内的各轮；两者都递归包含按精确父子运行关系关联的子代理。
 总数按 Thread、Turn、Review ID 去重，分列非零的通过、拒绝、超时、中止、进行中及结果未知。
 规则或缓存直接放行、手动审批不计入；没有明确分类的历史非通过结果显示“结果未知”，不能推为拒绝。

@@ -82,7 +82,9 @@ Auto-review 由 Codex 审核需要审批的操作，并按其政策批准或拒�
 已有值不属于 `user` 或 `auto_review`、组织要求限制任一审批方式、组织禁用 Auto-review 或
 策略读取不可用时，审批方式选择只读并拒绝写入，不把旧名 `guardian_subagent` 当作可编辑别名。
 附加审批策略读取失败、超时或返回无效数据时，仅 Codex 默认审批方式只读，其他 Codex 用户设置仍可读取和修改。
-此入口不接入实验 Auto-review 生命周期通知，渠道里的常规审批仍按现有协议处理。
+飞书、Telegram 和微信会显示自动审查的开始及通过、拒绝、超时或中止状态。完成卡另列本轮任务和
+当前会话的自动审查次数及结果分类，递归包含已确认归属的子代理；断线或历史缺失时明确显示已记录、
+至少或未知。状态通知和计数只报告 App Server 的审查结果，具体口径见[渠道展示](display.md#完成汇报)。
 
 飞书、Telegram 和微信可用 `/autoreview` 查询当前已绑定会话的实际审批方式，
 用 `/autoreview on` 开启当前会话自动审查，或 `/autoreview off` 切回手动审批。
@@ -100,6 +102,8 @@ Auto-review 由 Codex 审核需要审批的操作，并按其政策批准或拒�
 飞书命令中心与 Telegram `/workspaceperm` 查询结果提供标明“工作区默认”的三种选择按钮，微信使用同一组文本命令。
 按钮限时、一次性并绑定原工作区与当前用户；切换工作区后须重新查询。WebUI 的「工作区与权限」
 同样支持自动审查、手动审批、跟随 Codex 默认，复用权限设置预览、配置版本校验和高风险确认。
+本机可通过 `codexc work` 的工作区权限菜单设置同一覆盖，配置字段为
+`[[workspaces]].approvals_reviewer`，仅接受 `auto_review` 或 `user`，删除该字段即跟随 Codex 默认。
 
 ### 计划相关设置
 
@@ -249,7 +253,7 @@ Codex、Gateway 渠道和模型统计代理共用该文件；修改后在任务�
 不补读系统代理；仅有 `NO_PROXY` 时仍允许自动发现。Windows 不读取 WinINET/WinHTTP。
 不支持旧 TOML `[network]`，更新器不会迁移或修改代理配置。
 
-Workspace 只能从已登记项目中选择，并可分别设置 Sandbox、审批策略或 Permission Profile；不会接受聊天用户提交的任意绝对路径。
+Workspace 只能从已登记项目中选择，并可分别设置 Sandbox、审批策略、Permission Profile 和默认审批方式；不会接受聊天用户提交的任意绝对路径。默认审批方式与当前会话实际设置的区别见[审批方式](#审批方式手动审批与自动审查auto-review)。
 
 ## 4. Workspace、Provider 与终端
 
@@ -288,6 +292,8 @@ codexc remote --profile sf-ds-<账户> resume
 直接运行 `codex` 会创建独立 TUI，不共享 Gateway Thread；需要共享会话时使用 `codexc remote`。跨 Provider 切换会创建目标 Provider 的新 Thread，不复制原 Provider 历史。
 直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，空闲释放可能停止对应实例；
 共享 App Server 的 TUI 请统一使用 `codexc remote`。
+`codexc remote` 会按当前目录或显式 `--workspace` 选中的工作区传递权限及可选 `approvals_reviewer`；
+显式传给 Codex 的 `-c approvals_reviewer=...` 或 `--approve-for-me` 优先于工作区默认审批方式。
 
 ### Codex Desktop App 共享（macOS / Windows 预览）
 
@@ -494,8 +500,8 @@ npm 安装版也可以使用 `codexc uninstall --services` 后执行 `npm uninst
 - Workspace：`/workspace`、`/workspaceperm`
 - 运行：`/status`、`/stop`、`/queue`、`/revert`、`/compact`、`/fork`、`/review`、`/release`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
-- 工作区审批审核：`/workspaceperm autoreview <on|off|clear>`
-- 当前会话审批审核：`/autoreview [on|off]`
+- 工作区审批方式：`/workspaceperm autoreview <on|off|clear>`
+- 当前会话审批方式：`/autoreview [on|off]`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`
 - 帮助：`/help`、`/whoami`

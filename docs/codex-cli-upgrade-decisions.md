@@ -44,7 +44,7 @@ JSON 转义表示，合计超过 3000 UTF-8 字节即中止。审批绑定 Threa
 | 历史 Item 锚点查询 | 不接入 `thread/items/list`；保留当前分页 Turn 历史和 Revert |
 | 定向 MCP 服务、应用账户资源 | 可选 `serverName`、`target` 暂不传；新增 `httpOrigin` 不整包透传，现有健康摘要与资源读取保持受控 |
 | 远程执行环境 bearer token、Realtime 新字段 | 未接入能力，不增加凭据保存、远程执行或实时语音入口 |
-| 无项目会话、即时中断、Guardian 扩展 | 不扩大渠道 Workspace 权限，不增加自动审批；TUI 专属体验随 CLI 使用 |
+| 无项目会话、即时中断与其他 Guardian 扩展 | 保持渠道 Workspace 授权和现有中断合同；Auto-review 设置及状态统计的已采用范围见下节，`autoApprovalReview/strictReviewRequired` 等额外能力仍不接入；TUI 专属体验随 CLI 使用 |
 | 上游上传重试与超时 | Gateway 图片引用上传是独立 HTTP 链路，不能宣称自动获得该修复；保留账户/路由核验、60 秒总超时、取消和禁止盲目写重试 |
 
 daemon 的固定源码、完整调用链、双实例与持久 Thread 恢复实测，以及生产替换验收条件见
@@ -64,6 +64,7 @@ Linux 隔离合同不替代 macOS/Windows 实机、真实渠道 stdin 审批、�
 
 | 上游变化 | 本次决定与收益 | 验证与限制 |
 | --- | --- | --- |
+| Auto-review 审批方式与审查状态 | 支持 Codex 用户默认、Workspace 覆盖和当前 Thread 的显式选择；展示实际审批方式、实时审查状态及本轮/会话递归分类计数，审查模型请求归入明确的触发任务 | 稳定设置字段及受控实验策略/状态投影，真实 App Server 合同覆盖；历史缺失不补推，未知状态只读，设置与人工批准不混用。协议和验证入口见[支持矩阵](index.md#当前支持矩阵)，渠道实机范围见[验收矩阵](channel-acceptance-matrix.md) |
 | 恢复响应增加实际协作模式 | 从稳定 `thread/resume.collaborationMode` 恢复 Default/Plan，显式接续、自动接续和重连不再固定为 Default | Client/Router 定向测试与真实 App Server 恢复合同；缺失或未知模式明确拒绝 |
 | 模型人格停用 | 移除 CLI/WebUI 人格选择和偏好写字段，避免无效设置；其他偏好保存保留原配置值 | 偏好投影、预览与事务测试；旧人格写请求明确报错，不迁移用户配置 |
 | 图片支持文件引用 | 共享 Queue 与历史把 URL/fileId 图片都裁剪为不可编辑的图片摘要 | Surface 提供受限 Data URL；OpenAI ChatGPT 由 Client 上传后使用官方 fileId，API Key 与第三方保留内联路径，详见下节 |
