@@ -202,6 +202,13 @@ export class FeishuConversationAdapter {
           message.actorId,
         );
         if (cancelledInteraction) this.notifyText(message.target.conversationId, interactionStoppedText);
+        if ((result.kind === "workspace-permissions" || result.kind === "auto-review") && this.commandCenter) {
+          const response = renderCommandCenterChoices(result.kind === "auto-review" ? "autoreview" : "workspaceperm", result);
+          if (response) {
+            await this.commandCenter.openResponse(message.target, message.actorId, response);
+            return;
+          }
+        }
         if ((result.kind === "reset-credit" || result.kind === "limits") && this.commandCenter) {
           const response = renderCommandCenterChoices("limits", result);
           if (response) { await this.commandCenter.openResponse(message.target, message.actorId, response); return; }
@@ -341,6 +348,30 @@ export class FeishuConversationAdapter {
     try {
       if (action === "help") {
         this.notifyMarkdown(target.conversationId, renderFeishuHelp());
+        return;
+      }
+      if (action === "workspace-autoreview-select") {
+        const match = /^(on|off|clear) (\S{1,200})$/u.exec(input);
+        if (!match) {
+          throw new UserFacingError("workspace.permission.usage", "工作区审批按钮已失效，请重新发送 /workspaceperm", { reason: "stale-selection" });
+        }
+        const result = await this.commands.selectWorkspaceAutoReview(target, {
+          workspaceId: match[2]!,
+          value: match[1] === "on" ? "auto_review" : match[1] === "off" ? "user" : null,
+        });
+        const rendered = renderFeishuCommandResult(result);
+        if (rendered !== null) this.notifyMarkdown(target.conversationId, rendered);
+        return;
+      }
+      if (action === "thread-autoreview-select") {
+        const match = /^(on|off) (\S{1,200})$/u.exec(input);
+        if (!match) throw new UserFacingError("autoreview.stale-selection", "当前会话审批按钮已失效");
+        const result = await this.commands.selectAutoReview(target, {
+          threadId: match[2]!,
+          enabled: match[1] === "on",
+        });
+        const rendered = renderFeishuCommandResult(result);
+        if (rendered !== null) this.notifyMarkdown(target.conversationId, rendered);
         return;
       }
       if (action === "whoami") {

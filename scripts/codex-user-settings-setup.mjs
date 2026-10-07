@@ -95,6 +95,15 @@ export async function runCodexUserSettingsSetup({
         label: "沙盒、审批与网络",
         hint: permissionHint(settings.permissions),
       },
+      {
+        value: "approvals-reviewer",
+        label: "Codex 默认审批方式",
+        hint: settings.approvalsReviewer.editable
+          ? settings.approvalsReviewer.value === "auto_review" ? "当前：自动审查" : settings.approvalsReviewer.value === "user" ? "当前：手动审批" : "当前：未设置"
+          : settings.approvalsReviewer.reason === "unavailable"
+            ? "当前：只读，审批策略暂不可用"
+            : "当前：只读，检查配置或组织策略",
+      },
       { value: "tool-access", label: "电脑、浏览器与 MCP", hint: "查看合并配置，管理原生访问策略与已有 MCP 参数" },
       ...(settings.defaultsEditable ? [{ value: "subagents", label: "子代理规则与配置（可选）", hint: "预览并选择写入全局规则、Codex 主配置；不默认启用" }] : []),
       { value: "back", label: "返回", hint: "返回设置类别" },
@@ -176,7 +185,40 @@ export async function runCodexUserSettingsSetup({
       primaryProvider,
     });
   }
+  if (section === "approvals-reviewer") {
+    return runApprovalsReviewerSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
+  }
   throw new Error(`未知 Codex 新会话与用户偏好：${String(section)}`);
+}
+
+async function runApprovalsReviewerSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
+  if (!settings.approvalsReviewer.editable) {
+    output.write(settings.approvalsReviewer.reason === "unavailable"
+      ? "Codex 默认审批方式的审批策略暂不可用，此设置只读；其他 Codex 用户设置仍可使用。请检查 App Server 状态后重新读取。\n"
+      : "当前 Codex 默认审批方式不可修改，请检查未知配置值、组织策略或 App Server 状态。\n");
+    return { action: "back" };
+  }
+  output.write("自动审查由 Codex Auto-review 审查需要审批的操作；沙盒、审批策略与组织限制仍然适用。此处保存 Codex 默认审批方式的用户偏好，新会话是否继承由 App Server、Profile 和显式参数决定，已有会话不会切换。\n");
+  const value = await prompts.select({
+    message: "选择 Codex 默认审批方式",
+    initialValue: settings.approvalsReviewer.value ?? "user",
+    options: [
+      { value: "user", label: "手动审批", hint: "由用户审查审批请求" },
+      { value: "auto_review", label: "自动审查", hint: "由 Codex Auto-review 审查审批请求" },
+    ],
+  });
+  if (prompts.isCancel(value)) return { action: "back" };
+  const confirmed = await prompts.confirm({
+    message: `保存 Codex 默认审批方式为${value === "auto_review" ? "自动审查" : "手动审批"}？`,
+    initialValue: false,
+  });
+  if (prompts.isCancel(confirmed) || confirmed !== true) return { action: "back" };
+  const result = await updateSetting({ kind: "approvals-reviewer", value }, {
+    environment, expectedVersion: settings.version, createClient, primaryProvider,
+  });
+  output.write(`Codex 默认审批方式已设为${value === "auto_review" ? "自动审查" : "手动审批"}。\n`);
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  return result;
 }
 
 async function runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {

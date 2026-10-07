@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
+  parseRequestMetricsFilters,
 } from "../src/observability/index.js";
 import { sample } from "./request-metrics-fixtures.js";
 
@@ -26,6 +27,45 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("persists review purpose and distinct identities without a dump, retaining unknown rows and exact filtering after reopen", () => {
+    const path = join(temporaryDirectory(), "metrics.sqlite3");
+    let store = new SqliteModelRequestMetricsStore(path);
+    const identities = { requestPurpose: "autoApprovalReview" as const,
+      reviewerThreadId: "reviewer", reviewerTurnId: "review-turn" };
+    const scope = { startAtMs: 0, endAtMs: Date.now() + 1000, limit: 10 };
+    try {
+      store.record({ ...sample(), ...identities });
+      store.record({ ...sample(), ...identities, threadId: null, turnId: null, reviewerTurnId: null });
+      store.record(sample());
+      store.close();
+      store = new SqliteModelRequestMetricsStore(path, Date.now(), { readOnly: true });
+      expect(store.count()).toBe(3);
+      const rows = store.requestRowsAfter(0, 10);
+      expect(rows[0]).toMatchObject({ ...identities, threadId: "thread-1", turnId: "turn-1", traffic: null });
+      expect(rows[1]).toMatchObject({ ...identities, threadId: null, turnId: null, reviewerTurnId: null, traffic: null });
+      expect(rows[2]).toMatchObject({ requestPurpose: null, reviewerThreadId: null, reviewerTurnId: null });
+      const filters = parseRequestMetricsFilters({ requestPurpose: "autoApprovalReview" });
+      expect(store.page({ ...scope, ...filters }).matchedTotal).toBe(2);
+      expect(store.page({ ...scope, ...filters, threadId: "thread-1", turnId: "turn-1" }).matchedTotal).toBe(1);
+      expect(store.page(scope).matchedTotal).toBe(3);
+      for (const value of [null, "ordinary", "guardian", "", 1]) {
+        expect(() => parseRequestMetricsFilters({ requestPurpose: value })).toThrow(/requestPurpose/u);
+        expect(() => store.page({ ...scope, requestPurpose: value } as never)).toThrow(/requestPurpose/u);
+      }
+    } finally { store.close(); }
+  });
+  it("rejects unsupported or unsafe reviewer facts instead of storing inferred identity", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const review = { ...sample(), requestPurpose: "autoApprovalReview" as const,
+      reviewerThreadId: "reviewer", reviewerTurnId: "review-turn" };
+    try {
+      for (const invalid of [{ requestPurpose: null }, { requestPurpose: "guardian" },
+        { reviewerThreadId: "\t" }, { reviewerTurnId: "x".repeat(129) }, { turnId: null }]) {
+        expect(() => store.record({ ...review, ...invalid } as never)).toThrow(/自动审查/u);
+      }
+      expect(store.count()).toBe(0);
+    } finally { store.close(); }
+  });
   it("uses full request durations for burst-delivered output in turn and session rates", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
     try {

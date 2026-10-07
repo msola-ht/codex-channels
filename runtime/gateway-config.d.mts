@@ -79,6 +79,7 @@ export interface GatewayConfigDocument {
     cwd: string;
     sandbox?: "read-only" | "workspace-write" | "danger-full-access";
     approval_policy?: "untrusted" | "on-request" | "never";
+    approvals_reviewer?: "user" | "auto_review";
     permissions?: string;
   }>;
 }

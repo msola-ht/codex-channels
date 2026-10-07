@@ -25,6 +25,15 @@ export function applyWorkspacePermissionUpdate(entry, update) {
         entry.approval_policy = update.value;
       }
       break;
+    case "approvals-reviewer":
+      if (update.value === null) {
+        delete entry.approvals_reviewer;
+      } else if (update.value === "user" || update.value === "auto_review") {
+        entry.approvals_reviewer = update.value;
+      } else {
+        throw new Error("Workspace 审批审查方式无效");
+      }
+      break;
     case "permissions":
       if (update.value === null) {
         delete entry.permissions;

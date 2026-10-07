@@ -59,6 +59,11 @@ export async function runWorkspaceSettings({
           label: "权限 Profile",
           hint: `当前：${entry.permissions ?? "未配置"}`,
         },
+        {
+          value: "approvals_reviewer",
+          label: "工作区默认审批方式",
+          hint: `当前：${entry.approvalsReviewer === "auto_review" ? "自动审查" : entry.approvalsReviewer === "user" ? "手动审批" : "跟随 Codex 默认"}`,
+        },
         { value: "back", label: "返回", hint: "返回上一层" },
       ],
     });
@@ -100,6 +105,22 @@ export async function runWorkspaceSettings({
         throw new Error(`未知审批策略：${String(selected)}`);
       }
       update = { kind: "approval", value: selected === "clear" ? null : selected };
+    } else if (field === "approvals_reviewer") {
+      const selected = await prompts.select({
+        message: "选择工作区默认审批方式",
+        showInstructions: false,
+        initialValue: entry.approvalsReviewer ?? "clear",
+        options: [
+          { value: "auto_review", label: "自动审查", hint: "由 Codex Auto-review 审查审批请求" },
+          { value: "user", label: "手动审批", hint: "由用户审查审批请求" },
+          { value: "clear", label: "跟随 Codex 默认", hint: "清除 Workspace 覆盖；历史恢复保留 Codex 持久设置" },
+        ],
+      });
+      if (prompts.isCancel(selected)) continue;
+      if (selected !== "clear" && selected !== "user" && selected !== "auto_review") {
+        throw new Error(`未知工作区默认审批方式：${String(selected)}`);
+      }
+      update = { kind: "approvals-reviewer", value: selected === "clear" ? null : selected };
     } else if (field === "permissions") {
       const selected = await prompts.text({
         message: "权限 Profile（留空清除；例如 :read-only、:workspace、:danger-full-access）",
@@ -134,12 +155,13 @@ export async function runWorkspaceSettings({
     const updated = result.value;
     output.write(
       `已更新 ${entry.name ?? entry.id} 的权限：${result.configPath}\n`
-        + "权限热加载后对新建或恢复的 Thread 生效，不改变已绑定 Thread。\n",
+        + "权限热加载后对新建、分叉或卸载后恢复的 Thread 生效；Auto-review 不改变已加载 Thread，清除覆盖后历史恢复保留 Codex 持久设置。\n",
     );
     return {
       workspaceId: String(entry.id),
       sandbox: updated.sandbox ?? undefined,
       approvalPolicy: updated.approvalPolicy ?? undefined,
+      approvalsReviewer: updated.approvalsReviewer ?? undefined,
       permissions: updated.permissions ?? undefined,
       configPath: result.configPath,
     };

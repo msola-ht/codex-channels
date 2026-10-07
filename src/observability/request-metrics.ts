@@ -39,6 +39,10 @@ export interface ModelRequestMetricSample {
   operation: ModelRequestOperation;
   threadId: string | null;
   turnId: string | null;
+  /** 仅官方 guardian 请求有明确用途；历史缺失为未知，不推为普通请求。 */
+  requestPurpose?: "autoApprovalReview" | null;
+  reviewerThreadId?: string | null;
+  reviewerTurnId?: string | null;
   model: string | null;
   serviceTier: string | null;
   /** 出站请求层级；历史未采集时为空，不从响应推断。 */
@@ -309,6 +313,7 @@ export type ModelRequestMetricsAggregationDimension =
   | "model";
 
 export interface ModelRequestMetricsFilters {
+  requestPurpose?: "autoApprovalReview";
   source?: "owned" | "relay";
   callerId?: string;
   threadId?: string;
@@ -493,6 +498,31 @@ export interface TurnExecutionStore {
   invalidateThreadExecutions(threadId: string, clearDurations?: boolean): void;
   turnExecutionDuration(threadId: string, turnId: string): number | null;
   sessionExecutionDuration(threadId: string, throughTurnId?: string): number | null;
+}
+
+/** Counts observed official agent decisions; coverage describes the query-time snapshot. */
+export interface AutoApprovalReviewSummary {
+  approved: number;
+  denied: number;
+  timedOut: number;
+  aborted: number;
+  inProgress: number;
+  unknown: number;
+  total: number;
+  coverage: "complete" | "partial" | "unknown";
+}
+
+export interface AutoApprovalReviewStore {
+  observeAutoApprovalTurn(threadId: string, turnId: string, provider: string, phase: "started" | "completed"): void;
+  recordAutoApprovalReview(event: {
+    threadId: string; turnId: string; reviewId: string;
+    phase: "started" | "completed"; status: "inProgress" | "approved" | "denied" | "timedOut" | "aborted";
+  }, provider: string): void;
+  invalidateAutoApprovalCoverage(provider?: string): void;
+  taskAutoApprovalReviewSummary(threadId: string, turnId: string,
+    pendingParentTurns?: readonly { threadId: string; turnId: string }[]): AutoApprovalReviewSummary;
+  sessionAutoApprovalReviewSummary(threadId: string,
+    pendingParentTurns?: readonly { threadId: string; turnId: string }[]): AutoApprovalReviewSummary;
 }
 
 export interface SessionExecutionTiming {

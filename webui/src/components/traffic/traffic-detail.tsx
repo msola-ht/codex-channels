@@ -44,6 +44,7 @@ export function TrafficDetail({
 }) {
   const { t } = useTranslation()
   const finalProvider = detail.upstreamProvider ?? detail.chatDiagnostics?.fields["routing.finalProvider"]
+  const autoReview = detail.requestPurpose === "autoApprovalReview"
   const [copyState, setCopyState] = useState<"idle" | "pending" | "copied" | "failed">("idle")
   const copyReference = async () => {
     setCopyState("pending")
@@ -61,6 +62,7 @@ export function TrafficDetail({
           <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
             <TrafficModel provider={["relay.chat", "relay.responses"].includes(provider) ? detail.account : provider} request={detail.requestModel} responses={detail.responseModels} upstream={typeof finalProvider === "string" ? finalProvider : undefined} />
             <Badge variant="outline">{detail.category === "models" ? t("traffic.categoryModels") : detail.category === "prewarm" ? t("traffic.categoryPrewarm") : t("traffic.categoryRequest")}</Badge>
+            {autoReview ? <Badge variant="outline">{t("requestPurpose.autoApprovalReview")}</Badge> : null}
           </CardTitle>
           <CardDescription className="flex min-w-0 flex-wrap items-center gap-2">
             <span>{formatTime(detail.startedAtMs)} · {provider}</span>
@@ -68,7 +70,17 @@ export function TrafficDetail({
           </CardDescription>
           <CardAction><StateBadge state={detail.state} /></CardAction>
         </CardHeader>
-        <CardContent><CallSummary detail={detail} /></CardContent>
+        <CardContent className="flex flex-col gap-4">
+          <dl className="grid min-w-0 gap-3 text-sm sm:grid-cols-2">
+            {[
+              [t("requestPurpose.label"), autoReview ? t("requestPurpose.autoApprovalReview") : null],
+              [t(autoReview ? "requestPurpose.ownerThread" : "traffic.fieldThread"), detail.threadId],
+              [t(autoReview ? "requestPurpose.ownerTurn" : "traffic.fieldTurn"), detail.turnId],
+              ...(autoReview ? [[t("requestPurpose.reviewerThread"), detail.reviewerThreadId], [t("requestPurpose.reviewerTurn"), detail.reviewerTurnId]] : []),
+            ].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-muted-foreground">{label}</dt><dd className="break-all">{value ?? "—"}</dd></div>)}
+          </dl>
+          <CallSummary detail={detail} />
+        </CardContent>
       </Card>
       {traceLoading ? <p role="status" className="text-sm text-muted-foreground">{t("traffic.refreshingTrace")}</p> : null}
       {detail.response === null ? (
@@ -167,7 +179,7 @@ export function TrafficDetail({
         <CardContent className="flex min-w-0 flex-col gap-3">
           <TrafficDisclosure title={t("traffic.recordInfoTitle")}>
             <dl className="grid min-w-0 gap-3 text-sm sm:grid-cols-2">
-              {[[t("traffic.provider"), provider], [t("traffic.fieldSession"), session], [t("traffic.fieldCallId"), `#${detail.id}`], [t("traffic.fieldThread"), detail.threadId], [t("traffic.fieldTurn"), detail.turnId], [t("traffic.fieldRequestKind"), detail.requestKind], [t("traffic.fieldTransport"), requestLabel(detail)]].map(([label, value]) => (
+              {[[t("traffic.provider"), provider], [t("traffic.fieldSession"), session], [t("traffic.fieldCallId"), `#${detail.id}`], [t("traffic.fieldRequestKind"), detail.requestKind], [t("traffic.fieldTransport"), requestLabel(detail)]].map(([label, value]) => (
                 <div key={label} className="min-w-0"><dt className="text-muted-foreground">{label}</dt><dd className="break-all">{value ?? "—"}</dd></div>
               ))}
             </dl>

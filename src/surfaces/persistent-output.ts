@@ -11,7 +11,7 @@ import { securePrivateDirectorySync, securePrivateFileSync } from "../../runtime
 export function isPersistentOutput(event: OutputEvent, display: OperationUpdateDisplay = "full"): boolean {
   if (resolveSurfaceDelivery(event.target.surface, event).disposition === "ignore") return false;
   switch (event.type) {
-    case "text.completed": case "turn.completed": case "subagent.completed":
+    case "text.completed": case "turn.completed": case "subagent.completed": case "autoApprovalReview.updated":
     case "turn.started": case "subagent.spawned": case "subagent.contacted":
     case "connection.lost": case "connection.restored": case "thread.availability": case "thread.name":
     case "mcp.oauth.completed": case "warning": case "conversation.idle.released": return true;

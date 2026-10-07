@@ -41,7 +41,7 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `message.empty` | 消息不能为空 | 空消息提交 |
 | `conversation.name.invalid` | 会话名称必须为 1–64 个字符 | 重命名会话时名称长度非法 |
 | `conversation.missing` | 当前还没有 Codex Thread | 无绑定会话时执行需要 Thread 的命令 |
-| `conversation.busy` | 当前任务运行中，请先使用 /stop 停止当前任务 | 任务运行中提交新消息或切换会话 |
+| `conversation.busy` | 当前任务运行中，请先使用 /stop 停止当前任务；切换审批方式时若有待处理交互，提示先完成或取消 | 任务运行中提交新消息、切换会话或审批方式；审批方式切换仍有待处理交互 |
 | `delivery.overloaded` | 投递存储容量不足或不可用，已暂停新执行 | 在本机使用 `codexc delivery` 核对未确认投递，见[投递箱恢复](delivery.md) |
 | `conversation.background-limit` | 后台任务数量达到上限 | 后台 Thread 超过允许数量 |
 | `conversation.background-queued` | 当前任务仍有下一 Turn 排队消息，暂不能切换会话 | 切换会话时存在排队输入 |
@@ -103,9 +103,19 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `workspace.selector.required` | /workspace 用法提示 | 未提供 Workspace 选择参数 |
 | `workspace.selector.ambiguous` | Workspace 选择不唯一 | 选择器匹配多个 Workspace |
 | `workspace.selector.not-found` | 找不到指定 Workspace | 选择器无匹配 |
-| `workspace.permission.usage` | /workspaceperm 用法提示 | 参数格式错误 |
+| `workspace.permission.usage` | /workspaceperm 用法提示；旧按钮提示重新发送 /workspaceperm | 参数格式错误，或工作区审批按钮失效、原工作区已变化 |
 | `workspace.permission.conflict` | permissions 与 sandbox 互斥，不能同时配置；请先清除其中一项 | 同时配置 permissions 与 sandbox |
 | `workspace.permission.unavailable` | 当前 Gateway 不支持修改工作区权限 | Gateway 未装配权限修改能力 |
+
+### 当前会话审批方式
+
+| 错误码 | 用户提示 | 典型触发 |
+| --- | --- | --- |
+| `autoreview.usage` | 用法：/autoreview [on\|off]；只切换当前会话后续轮次的审批方式 | 参数格式错误 |
+| `autoreview.unavailable` | 当前会话无法切换审批方式；请先用 /autoreview 核对 App Server 的实际状态 | 更新端口不可用，实际审批方式未知或为只读的 `guardian_subagent` |
+| `autoreview.stale-selection` | 当前会话审批按钮已失效或会话已变化，请重新发送 /autoreview | 按钮过期、已使用或原 Thread 绑定已变化 |
+| `autoreview.update-failed` | 当前会话审批方式更新请求未成功；请用 /autoreview 核对实际状态后再决定是否重试 | RPC 拒绝或更新请求失败，不自动重试 |
+| `autoreview.update-unconfirmed` | 尚未确认当前会话审批方式更新结果；请求不会自动重试，请用 /autoreview 核对实际状态 | 未取得匹配的权威设置通知，或确认期间连接中断、Thread 失效、实际设置不可确认；不能推断已成功或未修改 |
 
 ### 目标、队列与指标
 

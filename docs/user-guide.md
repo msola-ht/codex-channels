@@ -48,6 +48,10 @@ Gateway 配置位于：
 ~/.codex-connect/config.toml
 ```
 
+首次运行 `codexc init` 会创建默认工作区 `~/.codex-connect/workspace`，并将其初始化为 Git 仓库，
+不自动创建提交；已有 `.git` 会保留。Git 不可用或初始化失败时明确报错，并且不写入新配置，
+修复后可重新运行。配置已存在时，重复运行保留现有配置和仓库，不为已有工作区补建仓库。
+
 `codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 `codexc config` 的“计划任务”直接选择开关；Telegram 消息格式位于“显示设置”，仅在配置 Bot 后显示。显示子项取消或选择“返回上一级”时回到显示设置；在显示设置中选择“返回”才回到 Config。日志等级统一在“高级设置 → 日志等级”选择，`debug` / `trace` 开启调试信息，`info` 恢复标准输出。
@@ -61,6 +65,45 @@ Setup 仅按具体操作返回的激活范围提示重启。列出账户、停�
 `codexc timezone` 设置模型可见时区，WebUI 同步跟随；网关默认也跟随，可用 `codexc timezone --gateway` 选择系统或自定义时区，细节见[`模型可见时区`](model-timezone.md)。
 
 Telegram、飞书和微信至少启用一个。Telegram 需要 Bot Token 和允许用户；飞书需要应用凭据和允许的 `open_id`；微信需要扫码凭据、账号和允许用户，Setup 最终确认保存时会直接启用消息接收。
+
+### 审批方式：手动审批与自动审查（Auto-review）
+
+Codex 默认审批方式入口为 `codexc config → Codex 新会话与用户偏好 → Codex 默认审批方式`，或 WebUI
+`设置 → 工作区与权限 → Codex 权限与工具`。选择自动审查保存 Codex 用户层 `approvals_reviewer = "auto_review"`，选择手动审批保存
+`approvals_reviewer = "user"`。保存前须明确确认；WebUI 还要求预览产生的一次性确认令牌，并检查
+当前用户配置修订。此操作只修改默认审批方式，沙盒、审批策略和网络权限继续独立设置。
+
+Auto-review 由 Codex 审核需要审批的操作，并按其政策批准或拒绝；它不会把每项请求自动批准。
+页面显示的是全局用户偏好，未设置时保留继承状态；上游无覆盖时默认由用户审批。新建 Thread
+由 App Server 合并配置，Profile、项目配置、显式参数和组织策略可能覆盖该偏好。
+已经加载的 Thread 及恢复的历史会话保留自身审批方式，不随默认值切换；受管 Provider 独立实例
+仍以各自有效配置为准。无需为了此偏好重启 Gateway。
+
+已有值不属于 `user` 或 `auto_review`、组织要求限制任一审批方式、组织禁用 Auto-review 或
+策略读取不可用时，审批方式选择只读并拒绝写入，不把旧名 `guardian_subagent` 当作可编辑别名。
+附加审批策略读取失败、超时或返回无效数据时，仅 Codex 默认审批方式只读，其他 Codex 用户设置仍可读取和修改。
+飞书、Telegram 和微信会显示自动审查的开始及通过、拒绝、超时或中止状态。完成卡另列本轮任务和
+当前会话的自动审查次数及结果分类，递归包含已确认归属的子代理；断线或历史缺失时明确显示已记录、
+至少或未知。状态通知和计数只报告 App Server 的审查结果，具体口径见[渠道展示](display.md#完成汇报)。
+
+飞书、Telegram 和微信可用 `/autoreview` 查询当前已绑定会话的实际审批方式，
+用 `/autoreview on` 开启当前会话自动审查，或 `/autoreview off` 切回手动审批。
+设置用于当前会话后续轮次；切换时须无运行任务或待处理交互。未绑定会话时只提示创建或恢复会话，
+不会为配置操作创建 Thread。无法识别实际审批方式或旧值 `guardian_subagent` 时只读。
+飞书命令中心的当前状态面板、当前会话审批方式面板和 Telegram `/autoreview` 查询结果提供当前会话按钮；按钮绑定原 Thread、Conversation 和用户，
+五分钟内有效且只能提交一次，切换会话后须重新查询。只有 App Server 权威设置确认后才报告已切换；
+未确认时不会自动重试，应重新用 `/autoreview` 核对实际状态。
+
+飞书、Telegram 和微信可用 `/workspaceperm` 查询当前工作区的默认审批方式；
+`/workspaceperm autoreview on` 开启自动审查，`off` 选择手动审批，`clear` 删除工作区覆盖。
+该覆盖对新建、分叉、卸载后恢复的会话生效；已加载会话保留实际审批方式，须用 `/autoreview` 修改当前会话。
+`clear` 只移除工作区覆盖；新会话跟随 Codex 默认，恢复历史会话可能保留其已保存设置，因此并非每次 `/resume` 都会继承新的默认值。
+当前会话的实际审批方式仍由 `/status` 及启动、完成卡片展示。
+飞书命令中心与 Telegram `/workspaceperm` 查询结果提供标明“工作区默认”的三种选择按钮，微信使用同一组文本命令。
+按钮限时、一次性并绑定原工作区与当前用户；切换工作区后须重新查询。WebUI 的「工作区与权限」
+同样支持自动审查、手动审批、跟随 Codex 默认，复用权限设置预览、配置版本校验和高风险确认。
+本机可通过 `codexc work` 的工作区权限菜单设置同一覆盖，配置字段为
+`[[workspaces]].approvals_reviewer`，仅接受 `auto_review` 或 `user`，删除该字段即跟随 Codex 默认。
 
 ### 计划相关设置
 
@@ -210,7 +253,7 @@ Codex、Gateway 渠道和模型统计代理共用该文件；修改后在任务�
 不补读系统代理；仅有 `NO_PROXY` 时仍允许自动发现。Windows 不读取 WinINET/WinHTTP。
 不支持旧 TOML `[network]`，更新器不会迁移或修改代理配置。
 
-Workspace 只能从已登记项目中选择，并可分别设置 Sandbox、审批策略或 Permission Profile；不会接受聊天用户提交的任意绝对路径。
+Workspace 只能从已登记项目中选择，并可分别设置 Sandbox、审批策略、Permission Profile 和默认审批方式；不会接受聊天用户提交的任意绝对路径。默认审批方式与当前会话实际设置的区别见[审批方式](#审批方式手动审批与自动审查auto-review)。
 
 ## 4. Workspace、Provider 与终端
 
@@ -249,6 +292,8 @@ codexc remote --profile sf-ds-<账户> resume
 直接运行 `codex` 会创建独立 TUI，不共享 Gateway Thread；需要共享会话时使用 `codexc remote`。跨 Provider 切换会创建目标 Provider 的新 Thread，不复制原 Provider 历史。
 直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，空闲释放可能停止对应实例；
 共享 App Server 的 TUI 请统一使用 `codexc remote`。
+`codexc remote` 会按当前目录或显式 `--workspace` 选中的工作区传递权限及可选 `approvals_reviewer`；
+显式传给 Codex 的 `-c approvals_reviewer=...` 或 `--approve-for-me` 优先于工作区默认审批方式。
 
 ### Codex Desktop App 共享（macOS / Windows 预览）
 
@@ -455,6 +500,8 @@ npm 安装版也可以使用 `codexc uninstall --services` 后执行 `npm uninst
 - Workspace：`/workspace`、`/workspaceperm`
 - 运行：`/status`、`/stop`、`/queue`、`/revert`、`/compact`、`/fork`、`/review`、`/release`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
+- 工作区审批方式：`/workspaceperm autoreview <on|off|clear>`
+- 当前会话审批方式：`/autoreview [on|off]`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`
 - 帮助：`/help`、`/whoami`

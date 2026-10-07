@@ -1,3 +1,5 @@
+import { autoReviewMetadata } from "../runtime/auto-review-metadata.mjs";
+
 /** Protocol of the recorded model endpoint, independent of Provider capabilities or stream mode. */
 export function requestProtocol(request) {
   if (!["http", "websocket"].includes(request?.transport) || request.transport === "http" && request.method !== "POST") return undefined;
@@ -51,14 +53,20 @@ export function requestClientName(request) {
 }
 
 /** 从转储的原始字段投影展示信息；不改写终态，也不把推导结果写回磁盘。 */
-export function requestMetadata(body) {
+export function requestMetadata(body, headers) {
   const client = body?.client_metadata;
   const raw = client?.["x-codex-turn-metadata"];
   const metadata = typeof raw === "string" ? parseObject(raw) : raw;
+  // HTTP 身份来自当前请求头；WS 身份只来自当前逻辑调用，不继承握手。
+  const reviewRaw = headers?.["x-codex-turn-metadata"];
+  const reviewValue = Array.isArray(reviewRaw) ? reviewRaw[0] : reviewRaw;
+  const review = autoReviewMetadata(headers === undefined ? metadata
+    : typeof reviewValue === "string" ? parseObject(reviewValue) : reviewValue);
   return {
     requestKind: stringValue(metadata?.request_kind),
     threadId: stringValue(metadata?.thread_id) ?? stringValue(client?.thread_id),
     turnId: stringValue(metadata?.turn_id) ?? stringValue(client?.turn_id),
+    ...review,
   };
 }
 

@@ -8,10 +8,16 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { loadGatewaySettings } from "../scripts/config-management.mjs";
+import type { CodexUserConfigClient } from "../scripts/codex-user-config.mjs";
+import {
+  loadCodexUserSettings,
+  previewCodexUserSetting,
+  updateCodexUserSetting,
+} from "../scripts/codex-user-settings-management.mjs";
 import {
   cleanupWebuiTestFixtures,
   createWebuiTestFixture,
@@ -40,6 +46,35 @@ function startServer(
 }
 
 describe("webui server settings and task management", () => {
+  it("previews Workspace reviewers without writing and requires versioned one-time confirmation", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const url = `${origin}/api/v1/management/settings`;
+    const headers = { authorization: "Bearer webui-token", origin: managementOrigin, "content-type": "application/json" };
+    for (const value of ["auto_review", "user", null]) {
+      const current = await (await fetch(url, { headers })).json() as { revision: string; system: { workspaces: Array<{ id: string; approvalsReviewer: string | null }> } };
+      const workspace = current.system.workspaces[0]!;
+      const setting = { kind: "workspace.permissions", value: { workspaceId: workspace.id, update: { kind: "approvals-reviewer", value } } };
+      const body = { revision: current.revision, setting };
+      const denied = await fetch(url, { method: "PATCH", headers, body: JSON.stringify(body) });
+      expect(denied.status).toBe(409);
+      const preview = await fetch(`${url}/preview`, { method: "POST", headers, body: JSON.stringify(body) });
+      expect(preview.status, await preview.clone().text()).toBe(200);
+      const confirmation = await preview.json() as { confirmationRequired: boolean; confirmationToken: string };
+      expect(confirmation.confirmationRequired).toBe(true);
+      expect(loadGatewaySettings(fixture.environment).workspaces[0]!.approvalsReviewer).toBe(workspace.approvalsReviewer);
+      const confirmed = { ...body, confirmationToken: confirmation.confirmationToken };
+      const saved = await fetch(url, { method: "PATCH", headers, body: JSON.stringify(confirmed) });
+      expect(saved.status, await saved.clone().text()).toBe(200);
+      expect(loadGatewaySettings(fixture.environment).workspaces[0]!.approvalsReviewer).toBe(value);
+      const fresh = await (await fetch(url, { headers })).json() as typeof current;
+      expect(fresh.system.workspaces[0]!.approvalsReviewer).toBe(value);
+      const replay = await fetch(url, { method: "PATCH", headers, body: JSON.stringify(confirmed) });
+      expect(replay.status).toBe(409);
+    }
+  });
+
   it("keeps shared proxy previews read-only and writes dotenv only after confirmation", async () => {
     const fixture = createFixture();
     const managementOrigin = "http://127.0.0.1:0";
@@ -384,12 +419,14 @@ describe("webui server settings and task management", () => {
     expect(await response.json()).toMatchObject({ error: { code: "setting_not_allowed" } });
   });
 
-  it.each(["tool-access", "permissions"])("requires a one-time confirmation before changing %s", async (kind) => {
+  it.each(["tool-access", "permissions", "approvals-reviewer"])("requires a one-time confirmation before changing %s", async (kind) => {
     const fixture = createFixture();
-    const setting = { kind, path: ["computer_use", "default_app_access"], value: "allow" };
+    const setting = kind === "approvals-reviewer"
+      ? { kind, value: "auto_review" }
+      : { kind, path: ["computer_use", "default_app_access"], value: "allow" };
     const revision = `sha256:${"a".repeat(64)}`;
     let writes = 0;
-    const result = { kind, previousVersion: revision, value: { path: setting.path, value: "allow" }, activation: "next-thread" as const };
+    const result = { kind, previousVersion: revision, value: { ...(setting.path === undefined ? {} : { path: setting.path }), value: setting.value }, activation: "next-thread" as const };
     const managementOrigin = "http://127.0.0.1:0";
     const { origin } = await startServer(fixture.environment, undefined, {
       token: "webui-token", managementOrigin,
@@ -443,6 +480,52 @@ describe("webui server settings and task management", () => {
     const update = await fetch(`${origin}/api/v1/management/codex/settings`, { method: "PATCH", headers: { ...headers, origin: "http://127.0.0.1:0", "content-type": "application/json" }, body: JSON.stringify({ revision: "codex-v1", setting: { kind: "fast", enabled: true } }) });
     expect(update.status).toBe(200);
     expect((await update.json()).revision).toBe("codex-v2");
+  });
+
+  it("keeps Codex settings readable and unrelated writes available when reviewer policy is unavailable", async () => {
+    const fixture = createFixture();
+    let version = "codex-v1";
+    const config = { approvals_reviewer: "auto_review", model: "gpt-test", service_tier: "default" };
+    const client: CodexUserConfigClient = {
+      connect: async () => undefined,
+      close: async () => undefined,
+      readUserConfigSnapshot: async () => ({ config, version }),
+      listModels: async () => [],
+      writeUserConfigEdits: vi.fn(async () => { config.service_tier = "fast"; version = "codex-v2"; }),
+      readDefaultModelSettings: async () => ({ model: "gpt-test", effort: "medium" }),
+      writeDefaultModelSettings: async () => undefined,
+    };
+    const dependencies = { createClient: async () => client, primaryProvider: () => "openai" };
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, {
+      token: "webui-token", managementOrigin,
+      loadCodexSettings: (options) => loadCodexUserSettings({ ...options, ...dependencies }),
+      previewCodexSetting: (input, options) => previewCodexUserSetting(input as Parameters<typeof previewCodexUserSetting>[0], { ...options, ...dependencies }),
+      updateCodexSetting: (input, options) => updateCodexUserSetting(input as Parameters<typeof updateCodexUserSetting>[0], { ...options, ...dependencies }),
+    });
+    const url = `${origin}/api/v1/management/codex/settings`;
+    const headers = { authorization: "Bearer webui-token", origin: managementOrigin, "content-type": "application/json" };
+    const read = await fetch(url, { headers });
+    expect(read.status).toBe(200);
+    expect(await read.json()).toMatchObject({
+      version, defaults: { model: "gpt-test", fastEnabled: false },
+      approvalsReviewer: { value: "auto_review", editable: false, reason: "unavailable" },
+    });
+    const reviewerBody = JSON.stringify({ revision: version, setting: { kind: "approvals-reviewer", value: "user" } });
+    for (const [path, method] of [[`${url}/preview`, "POST"], [url, "PATCH"]] as const) {
+      const denied = await fetch(path, { method, headers, body: reviewerBody });
+      expect(denied.status).toBe(400);
+      expect(await denied.json()).toMatchObject({ error: { code: "approvals-reviewer-unavailable" } });
+    }
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+    const body = JSON.stringify({ revision: version, setting: { kind: "fast", enabled: true } });
+    const preview = await fetch(`${url}/preview`, { method: "POST", headers, body });
+    expect(preview.status).toBe(200);
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+    const saved = await fetch(url, { method: "PATCH", headers, body });
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({ revision: "codex-v2", value: { enabled: true } });
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([{ keyPath: "service_tier", value: "fast" }], { expectedVersion: "codex-v1" });
   });
 
   it("returns one complete redacted configuration snapshot for the settings page", async () => {

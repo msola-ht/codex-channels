@@ -42,12 +42,14 @@ import type {
   ThreadRevertResult,
   LunaReservePort,
   LunaReserveThreadSettings,
+  ThreadApprovalsReviewerPort,
 } from "../application/index.js";
 import type {
   ConsumeAccountRateLimitResetCreditParams,
   ConsumeAccountRateLimitResetCreditResponse,
   ConfigReadParams,
   ConfigReadResponse,
+  ConfigRequirementsReadResponse,
   CollaborationModeListResponse,
   GetAccountParams,
   GetAccountResponse,
@@ -75,6 +77,8 @@ import type {
   ThreadLoadedListResponse,
   ThreadMetadataUpdateResponse,
   ThreadReadResponse,
+  ThreadSettingsUpdateParams,
+  ThreadSettingsUpdateResponse,
   ThreadQueueAddResponse,
   ThreadQueueAddParams,
   ThreadQueueDeleteResponse,
@@ -110,8 +114,10 @@ import type {
   ThreadStartOptions,
   ThreadSnapshot,
 } from "../session-routing/index.js";
-import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
+import { JsonRpcClient, JsonRpcError, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
+import { UserFacingError } from "../conversation-core/index.js";
 import { ImageReferenceUpload } from "./image-reference-upload.js";
+import { toThreadStateEvent } from "./notification-adapter.js";
 import {
   PINNED_THREAD_SECTION_ID,
   toThreadSession,
@@ -178,10 +184,12 @@ export class CodexAppServerClient implements
   PluginQueryPort,
   PermissionQueryPort,
   ThreadQueuePort,
-  ThreadHistoryPort
+  ThreadHistoryPort,
+  ThreadApprovalsReviewerPort
 {
   private readonly imageUpload: ImageReferenceUpload | undefined;
   private readonly fileChanges = new FileChangeApprovalContext();
+  private readonly pendingReviewerUpdates = new Set<() => void>();
 
   constructor(
     private readonly rpc: JsonRpcClient,
@@ -202,11 +210,13 @@ export class CodexAppServerClient implements
   }
 
   reconnect(): Promise<InitializeResponse> {
+    for (const cancel of this.pendingReviewerUpdates) cancel();
     this.fileChanges.clear();
     return this.rpc.reconnect();
   }
 
   close(): Promise<void> {
+    for (const cancel of this.pendingReviewerUpdates) cancel();
     this.fileChanges.clear();
     this.imageUpload?.cancelAll();
     return this.rpc.close();
@@ -350,6 +360,7 @@ export class CodexAppServerClient implements
         cwd,
         historyMode: "paginated",
         approvalPolicy: options.approvalPolicy ?? "on-request",
+        ...(options.approvalsReviewer === undefined ? {} : { approvalsReviewer: options.approvalsReviewer }),
         ...(options.permissions !== undefined
           ? { permissions: options.permissions }
           : { sandbox: options.sandbox ?? this.defaults.sandbox }),
@@ -410,6 +421,7 @@ export class CodexAppServerClient implements
     const settings = {
       cwd,
       approvalPolicy: options.approvalPolicy ?? "on-request",
+      ...(options.approvalsReviewer === undefined ? {} : { approvalsReviewer: options.approvalsReviewer }),
       ...(options.permissions !== undefined
         ? { permissions: options.permissions }
         : { sandbox: options.sandbox ?? this.defaults.sandbox }),
@@ -803,10 +815,11 @@ export class CodexAppServerClient implements
     }, { retryOverload: false });
   }
 
-  async readUserConfigSnapshot(): Promise<{
+  async readUserConfigSnapshot(options: { includeApprovalsReviewerPolicy?: boolean } = {}): Promise<{
     config: Record<string, JsonValue | undefined>;
     version: string;
     toolConfig: Record<string, JsonValue | undefined>;
+    approvalsReviewerPolicy?: { allowedReviewers: string[] | null; autoReviewDisabled: boolean };
   }> {
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
@@ -828,6 +841,35 @@ export class CodexAppServerClient implements
     if (userLayer.version.trim() === "") {
       throw new Error("Codex 响应缺少用户配置版本");
     }
+    let approvalsReviewerPolicy;
+    if (options.includeApprovalsReviewerPolicy) {
+      try {
+        const { requirements } = await this.rpc.request<ConfigRequirementsReadResponse>({
+          method: "configRequirements/read",
+          params: undefined,
+        }, { retryOverload: true });
+        if (requirements === undefined || (requirements !== null
+          && (typeof requirements !== "object" || Array.isArray(requirements)
+            || requirements.allowedApprovalsReviewers === undefined
+            || (requirements.allowedApprovalsReviewers !== null && (!Array.isArray(requirements.allowedApprovalsReviewers)
+              || !requirements.allowedApprovalsReviewers.every(value => typeof value === "string")))
+            || requirements.featureRequirements === undefined
+            || (requirements.featureRequirements !== null && (typeof requirements.featureRequirements !== "object"
+              || Array.isArray(requirements.featureRequirements)
+              || !Object.values(requirements.featureRequirements).every(value => typeof value === "boolean")))))) {
+          throw new Error("Codex 响应缺少有效审批策略要求");
+        }
+        approvalsReviewerPolicy = {
+          allowedReviewers: requirements?.allowedApprovalsReviewers ?? null,
+          autoReviewDisabled: requirements?.featureRequirements?.auto_review === false
+            || requirements?.featureRequirements?.guardian_approval === false,
+        };
+      } catch {
+        // The optional policy is unavailable; retain the valid user snapshot.
+        // Settings projection exposes this as read-only and rejects writes.
+        approvalsReviewerPolicy = undefined;
+      }
+    }
     return {
       config: userLayer.config,
       version: userLayer.version,
@@ -837,6 +879,7 @@ export class CodexAppServerClient implements
         mcp_servers: response.config.mcp_servers,
         plugins: response.config.plugins,
       },
+      ...(approvalsReviewerPolicy === undefined ? {} : { approvalsReviewerPolicy }),
     };
   }
 
@@ -851,6 +894,7 @@ export class CodexAppServerClient implements
         threadId,
         cwd,
         approvalPolicy: options.approvalPolicy ?? "on-request",
+        ...(options.approvalsReviewer === undefined ? {} : { approvalsReviewer: options.approvalsReviewer }),
         ...(options.permissions !== undefined
           ? { permissions: options.permissions }
           : { sandbox: options.sandbox ?? this.defaults.sandbox }),
@@ -1076,6 +1120,54 @@ export class CodexAppServerClient implements
         },
       },
     }, { retryOverload: false });
+  }
+
+  async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review"): Promise<void> {
+    const controller = new AbortController();
+    let acknowledged = false;
+    let observed = false;
+    let settled = false;
+    let removeNotification = () => {};
+    let removeDisconnect = () => {};
+    let timer: NodeJS.Timeout | undefined;
+    let cancel = () => {};
+    const unconfirmed = () => new UserFacingError("autoreview.update-unconfirmed", "会话审批方式更新结果尚未确认，请重新查询状态");
+    await new Promise<void>((resolve, reject) => {
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        removeNotification();
+        removeDisconnect();
+        this.pendingReviewerUpdates.delete(cancel);
+        if (error) { controller.abort(error); reject(error); }
+        else resolve();
+      };
+      cancel = () => finish(unconfirmed());
+      this.pendingReviewerUpdates.add(cancel);
+      removeNotification = this.rpc.onNotification(notification => {
+        const event = toThreadStateEvent(notification);
+        if (!event || event.threadId !== threadId) return;
+        if (event.type === "thread.closed" || event.type === "thread.archived" || event.type === "thread.deleted") {
+          cancel();
+          return;
+        }
+        if (event.type !== "thread.settings.updated") return;
+        observed = event.settings.approvalsReviewer === reviewer;
+        if (acknowledged && observed) finish();
+      });
+      removeDisconnect = this.rpc.onDisconnect(cancel);
+      timer = setTimeout(cancel, 10_000);
+      void this.rpc.request<ThreadSettingsUpdateResponse>({
+        method: "thread/settings/update",
+        params: { threadId, approvalsReviewer: reviewer } satisfies ThreadSettingsUpdateParams,
+      }, { retryOverload: false, signal: controller.signal }).then(() => {
+        acknowledged = true;
+        if (observed) finish();
+      }, error => finish(error instanceof JsonRpcError
+        ? new UserFacingError("autoreview.update-failed", "会话审批方式更新失败，请重新查询状态")
+        : unconfirmed()));
+    });
   }
 
   async listPermissionProfiles(cwd: string): Promise<PermissionProfileOption[]> {

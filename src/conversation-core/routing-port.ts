@@ -1,4 +1,4 @@
-import type { ConversationTarget } from "./events.js";
+import type { ConversationTarget, ThreadApprovalsReviewer } from "./events.js";
 
 export interface RoutedThread {
   target: ConversationTarget;
@@ -10,6 +10,7 @@ export interface RoutedThreadModelSettings {
   modelProvider?: string;
   effort: string | null;
   serviceTier: string | null;
+  approvalsReviewer?: ThreadApprovalsReviewer | null;
 }
 
 export interface RoutedWorkspace {

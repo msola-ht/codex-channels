@@ -472,6 +472,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       (signal) => event.type === "subagent.spawned"
           || event.type === "subagent.contacted"
           || event.type === "subagent.completed"
+          || event.type === "autoApprovalReview.updated"
           || event.type === "account.updated"
           || event.type === "account.rateLimits.updated"
           || event.type === "mcp.oauth.completed"

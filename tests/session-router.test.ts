@@ -708,7 +708,7 @@ describe("SessionRouter", () => {
     expect(store.get(target)).toBeUndefined();
   });
 
-  it("passes workspace permissions to startThread and resumeThread", async () => {
+  it("passes Workspace permissions and reviewer to start, unloaded resume and fork", async () => {
     const store = new MemoryBindingStore();
     const entitledRegistry = new WorkspaceRegistry([
       {
@@ -717,13 +717,15 @@ describe("SessionRouter", () => {
         cwd: "/workspace",
         sandbox: "workspace-write",
         approvalPolicy: "never",
+        approvalsReviewer: "auto_review",
       },
       { id: "other", name: "Other", cwd: "/other" },
     ], "main");
     const started: unknown[] = [];
     const resumed: unknown[] = [];
+    const forked: unknown[] = [];
     const client = threadPort({
-      readThread: async (id) => thread(id, { type: "idle" }),
+      readThread: async (id) => thread(id, { type: "notLoaded" }),
       listThreads: async () => [],
       startThread: async (cwd, options) => {
         started.push({ cwd, options });
@@ -735,22 +737,72 @@ describe("SessionRouter", () => {
           cwd, approvalPolicy: "never", sandbox: "workspace-write", permissions: null,
         } });
       },
+      forkThread: async (threadId, cwd, options) => {
+        forked.push({ threadId, cwd, options });
+        return session(thread("forked", { type: "idle" }));
+      },
       unsubscribeThread: async () => {},
     });
     const router = new SessionRouter(client, store, entitledRegistry);
 
     await router.ensure(target);
     await router.resume(target, "existing");
+    await router.fork(target);
 
     expect(started).toEqual([{
       cwd: "/workspace",
-      options: { sandbox: "workspace-write", approvalPolicy: "never" },
+      options: { sandbox: "workspace-write", approvalPolicy: "never", approvalsReviewer: "auto_review" },
     }]);
     expect(resumed).toEqual([{
       threadId: "existing",
       cwd: "/workspace",
-      options: { sandbox: "workspace-write", approvalPolicy: "never" },
+      options: { sandbox: "workspace-write", approvalPolicy: "never", approvalsReviewer: "auto_review" },
     }]);
+    expect(forked).toEqual([{
+      threadId: "existing", cwd: "/workspace",
+      options: { sandbox: "workspace-write", approvalPolicy: "never", approvalsReviewer: "auto_review" },
+    }]);
+  });
+
+  it.each(["idle", "active"] as const)("preserves the actual reviewer of an already loaded %s Thread on registry reload and resume", async (status) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "loaded", sessionId: "loaded" });
+    const workspaces = new WorkspaceRegistry([{ id: "main", name: "Main", cwd: "/workspace", approvalsReviewer: "user" }], "main");
+    const snapshot = { ...thread("loaded", { type: status }), activeTurnId: status === "active" ? "running" : null };
+    const resumeThread = vi.fn(async () => session(snapshot, { approvalsReviewer: "user" }));
+    const router = new SessionRouter(threadPort({ resumeThread, readThread: async () => snapshot }), store, workspaces);
+    workspaces.replace([{ id: "main", name: "Main", cwd: "/workspace", approvalsReviewer: "auto_review" }], "main");
+    expect(await router.restoreSubscriptions()).toEqual([]);
+    expect(resumeThread).toHaveBeenCalledWith("loaded", "/workspace", {});
+    expect(router.modelSettings(target)?.approvalsReviewer).toBe("user");
+    expect(router.current(target)?.threadId).toBe("loaded");
+  });
+
+  it("isolates reviewer defaults per Workspace and omits a cleared override", async () => {
+    const store = new MemoryBindingStore();
+    const workspaces = new WorkspaceRegistry([
+      { id: "main", name: "Main", cwd: "/workspace", approvalsReviewer: "auto_review" },
+      { id: "other", name: "Other", cwd: "/other", approvalsReviewer: "user" },
+    ], "main");
+    const started: Array<{ cwd: string; options: unknown }> = [];
+    const router = new SessionRouter(threadPort({
+      listThreads: async () => [],
+      startThread: async (cwd, options) => {
+        started.push({ cwd, options });
+        return session({ ...thread(`new-${started.length}`, { type: "idle" }), cwd });
+      }, unsubscribeThread: async () => {},
+    }), store, workspaces);
+    await router.ensure(target);
+    await router.selectWorkspace(target, "other");
+    await router.ensure(target);
+    workspaces.replace([{ id: "main", name: "Main", cwd: "/workspace" }, { id: "other", name: "Other", cwd: "/other" }], "main");
+    await router.newSession(target);
+    await router.ensure(target);
+    expect(started).toEqual([
+      { cwd: "/workspace", options: { approvalsReviewer: "auto_review" } },
+      { cwd: "/other", options: { approvalsReviewer: "user" } },
+      { cwd: "/other", options: {} },
+    ]);
   });
 
   it("attaches dynamic tools to foreground threads and strips them from automation threads", async () => {
@@ -1140,6 +1192,7 @@ describe("SessionRouter", () => {
         return session(thread(threadId, { type: "idle" }), {
           reasoningEffort: "high",
           serviceTier: "fast",
+          approvalsReviewer: "auto_review",
         });
       },
     });
@@ -1155,6 +1208,7 @@ describe("SessionRouter", () => {
       effort: "high",
       serviceTier: "fast",
       collaborationMode: "default",
+      approvalsReviewer: "auto_review",
     });
 
     router.updateModelSettings("idle", {
@@ -1169,6 +1223,7 @@ describe("SessionRouter", () => {
       effort: "xhigh",
       serviceTier: "default",
       collaborationMode: "plan",
+      approvalsReviewer: "auto_review",
     });
   });
 
@@ -1371,6 +1426,7 @@ describe("SessionRouter", () => {
       effort: "medium",
       serviceTier: "default",
       collaborationMode: "default",
+      approvalsReviewer: null,
     });
   });
 
@@ -1385,6 +1441,7 @@ describe("SessionRouter", () => {
           reasoningEffort: "high",
           serviceTier: "priority",
           contextCompactionItemIds: ["compact-1", "compact-2"],
+          approvalsReviewer: "user",
         });
       },
     });
@@ -1402,6 +1459,7 @@ describe("SessionRouter", () => {
       effort: "high",
       serviceTier: "priority",
       collaborationMode: "default",
+      approvalsReviewer: "user",
     });
     expect(router.contextCompactionItemIdsForThread("bound"))
       .toEqual(["compact-1", "compact-2"]);

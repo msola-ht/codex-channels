@@ -34,6 +34,7 @@ import {
 } from "./conversation-scheduled-task-command-format.js";
 import {
   formatConversationArtifacts,
+  formatConversationAutoReview,
   formatConversationCollaborationMode,
   formatConversationGoal,
   formatConversationPermissions,
@@ -73,6 +74,8 @@ export function renderConversationCommandResult(
       return formatConversationWorkspaces(result);
     case "workspace-permissions":
       return formatConversationWorkspacePermissions(result);
+    case "auto-review":
+      return formatConversationAutoReview(result);
     case "models":
       return formatConversationModels(result);
     case "collaboration-mode":

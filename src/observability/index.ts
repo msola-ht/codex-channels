@@ -8,6 +8,8 @@ export type {
   RequestInterruptionSummary,
   TurnExecutionMetric,
   TurnExecutionStore,
+  AutoApprovalReviewStore,
+  AutoApprovalReviewSummary,
   SessionExecutionTiming,
   ModelRequestMetricSample,
   ModelRequestMetricsAggregationDimension,

@@ -1,6 +1,7 @@
 import type {
   GoalStatus,
   ThreadGoal,
+  ThreadApprovalsReviewer,
 } from "../conversation-core/index.js";
 
 export type TurnInput =
@@ -42,6 +43,15 @@ export interface ReviewStarted extends TurnStarted {
 }
 
 export type { GoalStatus, ThreadGoal };
+
+/**
+ * Changes only the loaded Thread's reviewer, without starting a Turn.
+ * The application-facing port resolves after authoritative confirmation has
+ * reached the shared routing reducer; it never optimistically writes state.
+ */
+export interface ThreadApprovalsReviewerPort {
+  updateThreadApprovalsReviewer(threadId: string, reviewer: Extract<ThreadApprovalsReviewer, "user" | "auto_review">): Promise<void>;
+}
 
 export interface TurnExecutionPort {
   /** Cancels client-side preparation before an App Server Turn exists. */

@@ -1,5 +1,7 @@
 # Config
 
+Workspace 的可选 `approvals_reviewer` 严格接受 `user` 或 `auto_review`，映射为 `approvalsReviewer`；缺省保持缺省，不由配置补全写入。该字段通过既有 Workspace Registry 热加载更新，只作为新建、分叉及未加载 Thread 恢复的参数；已加载会话保持 App Server 返回的实际 reviewer。
+
 本目录负责把共享运行时已完成结构校验的 TOML 文档转换为 Gateway 运行配置。
 其中 `codexTimezone` 保留已有 `codex.timezone` 配置，供渠道启动卡展示，不修改 Gateway 进程时区。
 `gatewayTimezone` 是解析后的网关时区：缺省使用 `codex.timezone`，`gateway.timezone = "system"`

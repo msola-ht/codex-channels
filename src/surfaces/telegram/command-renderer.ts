@@ -160,6 +160,23 @@ export function workspacePermissionKeyboard(): InlineKeyboardMarkup {
   };
 }
 
+export function autoReviewKeyboard(token: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[
+      { text: "工作区默认：自动审查", callback_data: `ar:on:${token}` },
+      { text: "工作区默认：手动审批", callback_data: `ar:off:${token}` },
+      { text: "工作区默认：跟随 Codex 默认", callback_data: `ar:clear:${token}` },
+    ]],
+  };
+}
+
+export function threadAutoReviewKeyboard(token: string): InlineKeyboardMarkup {
+  return { inline_keyboard: [[
+    { text: "当前会话：自动审查", callback_data: `tar:on:${token}` },
+    { text: "当前会话：手动审批", callback_data: `tar:off:${token}` },
+  ]] };
+}
+
 export function workspaceSelectionKeyboard(
   result: Extract<ConversationCommandResult, { kind: "workspaces" }>,
 ): InlineKeyboardMarkup | undefined {

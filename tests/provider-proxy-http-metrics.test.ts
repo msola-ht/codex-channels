@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMetricsState, observeJsonResponse, observeResponseEvent, HttpResponseMetricsObserver, invalidateGenerationTiming, observeChatTiming } from "../src/provider-proxy/response-metrics-observer.js";
 import { generationSpeed } from "../runtime/request-timing.mjs";
+import { autoReviewMetadata } from "../runtime/auto-review-metadata.mjs";
 import { ChatGenerationTimingObserver } from "../src/provider-proxy/generation-timing.js";
 
 import {
@@ -28,6 +29,68 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy HTTP metrics", () => {
+  it("bounds raw reviewer identities independently and never classifies a name as guardian source", () => {
+    const review = { thread_source: "guardian_review", parent_thread_id: "parent", parent_turn_id: "turn",
+      thread_id: "x".repeat(128), turn_id: "review-turn" };
+    expect(autoReviewMetadata(review)).toEqual({ requestPurpose: "autoApprovalReview", threadId: "parent", turnId: "turn",
+      reviewerThreadId: "x".repeat(128), reviewerTurnId: "review-turn" });
+    for (const thread_id of [undefined, null, " ", 1, "x".repeat(129)]) {
+      expect(autoReviewMetadata({ ...review, thread_id })).toMatchObject({ threadId: "parent", turnId: "turn",
+        reviewerThreadId: null, reviewerTurnId: "review-turn" });
+    }
+    expect(autoReviewMetadata({ ...review, turn_id: "\t" })).toMatchObject({ reviewerThreadId: "x".repeat(128), reviewerTurnId: null });
+    for (const value of [null, [], { agent_name: "guardian" }, { ...review, thread_source: "cli" }]) {
+      expect(autoReviewMetadata(value)).toBeUndefined();
+    }
+  });
+  it("attributes only official guardian review requests to their exact parent task", async () => {
+    const observedMetadata: unknown[] = [];
+    const upstream = createServer((request, response) => {
+      observedMetadata.push(JSON.parse(String(request.headers["x-codex-turn-metadata"])));
+      request.resume();
+      request.on("end", () => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+        status: "completed", usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
+      })));
+    });
+    await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: () => new Promise<void>(resolve => upstream.close(() => resolve())) });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (upstream.address() as AddressInfo).port,
+      upstreamProtocol: "http", onMetrics: metric => { metrics.push(metric); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const base = { thread_id: "review-thread", turn_id: "review-turn",
+      parent_thread_id: "parent-thread", parent_turn_id: "parent-turn" };
+    const cases = [
+      { ...base, thread_source: "guardian_review" },
+      { ...base, thread_source: "guardian_review", parent_turn_id: undefined },
+      { ...base, thread_source: "guardian_review", parent_thread_id: " " },
+      { ...base, thread_source: "guardian_review", parent_turn_id: "x".repeat(129) },
+      { ...base, thread_source: "guardian_review", parent_turn_id: 1 },
+      { ...base, thread_source: "cli", agent_name: "guardian", subagent_kind: "thread_spawn" },
+      { ...base, subagent_kind: "guardian" },
+    ];
+    for (const metadata of cases) {
+      const response = await fetch(`http://${proxy.address()}/responses`, { method: "POST",
+        headers: { "content-type": "application/json", "x-codex-turn-metadata": JSON.stringify(metadata) },
+        body: JSON.stringify({ model: "fixture-model" }) });
+      await response.text();
+    }
+    await vi.waitFor(() => expect(metrics).toHaveLength(cases.length));
+    expect(metrics.map(({ threadId, turnId, requestPurpose }) => ({ threadId, turnId, requestPurpose }))).toEqual([
+      { threadId: "parent-thread", turnId: "parent-turn", requestPurpose: "autoApprovalReview" },
+      ...Array.from({ length: 4 }, () => ({ threadId: null, turnId: null, requestPurpose: "autoApprovalReview" })),
+      ...Array.from({ length: 2 }, () => ({ threadId: "review-thread", turnId: "review-turn", requestPurpose: undefined })),
+    ]);
+    expect(metrics.every(metric => metric.totalTokens === 12)).toBe(true);
+    expect(metrics.slice(0, 5).every(metric => metric.reviewerThreadId === "review-thread"
+      && metric.reviewerTurnId === "review-turn" && metric.traffic === undefined)).toBe(true);
+    expect(metrics.slice(5).every(metric => metric.reviewerThreadId === undefined && metric.reviewerTurnId === undefined)).toBe(true);
+    expect(observedMetadata).toEqual(cases.map(value => JSON.parse(JSON.stringify(value))));
+  });
+
   it("waits past raw Chat tool identities and empty deltas until actual tool content", () => {
     const observer = new ChatGenerationTimingObserver();
     observer.push({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", type: "function" }] } }] }, 10);

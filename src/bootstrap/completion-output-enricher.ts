@@ -13,6 +13,8 @@ import type {
 const completionEnrichmentTimeoutMs = 250;
 
 export interface CompletionOutputEnricherOptions {
+  autoApprovalReview?(threadId: string, turnId: string): Extract<OutputEvent, { type: "turn.completed" }>["autoApprovalReview"];
+  sessionAutoApprovalReview?(threadId: string): Extract<OutputEvent, { type: "turn.completed" }>["sessionAutoApprovalReview"];
   subagentMetadata?(agentThreadId: string, signal: AbortSignal): Promise<{
     id: string;
     parentThreadId?: string | null;
@@ -116,6 +118,20 @@ export class CompletionOutputEnricher {
     const accountStatus = await accountStatusResult;
     const gitBranch = await gitBranchResult;
     let execution: ReturnType<NonNullable<CompletionOutputEnricherOptions["executionTiming"]>> | undefined;
+    let autoApprovalReview: Extract<OutputEvent, { type: "turn.completed" }>["autoApprovalReview"];
+    try {
+      autoApprovalReview = this.options.autoApprovalReview?.(event.threadId, event.turnId);
+    } catch {
+      autoApprovalReview = { approved: 0, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 0, coverage: "unknown" };
+      this.logger.warn({ threadId: event.threadId, turnId: event.turnId }, "完成卡自动审查统计读取失败");
+    }
+    let sessionAutoApprovalReview: typeof autoApprovalReview;
+    try {
+      sessionAutoApprovalReview = this.options.sessionAutoApprovalReview?.(event.threadId);
+    } catch {
+      sessionAutoApprovalReview = { approved: 0, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 0, coverage: "unknown" };
+      this.logger.warn({ threadId: event.threadId }, "完成卡会话自动审查统计读取失败");
+    }
     try {
       execution = this.options.executionTiming?.(event.threadId, event.turnId);
     } catch {
@@ -123,6 +139,8 @@ export class CompletionOutputEnricher {
     }
     return {
       ...event,
+      ...(autoApprovalReview === undefined ? {} : { autoApprovalReview }),
+      ...(sessionAutoApprovalReview === undefined ? {} : { sessionAutoApprovalReview }),
       ...(accountStatus === undefined ? {} : { accountStatus }),
       ...(gitBranch ? { gitBranch } : {}),
       ...(timing === undefined ? {} : { timing }),
@@ -154,6 +172,9 @@ export class CompletionOutputEnricher {
         () => { deadline.abort(); return undefined; },
       );
       return signal.aborted ? undefined : branch;
+    } catch {
+      this.logger.warn({ threadId: event.threadId, turnId: event.turnId }, "完成卡 Git 分支读取失败");
+      return undefined;
     } finally {
       signal.removeEventListener("abort", cancel);
       deadline.abort();

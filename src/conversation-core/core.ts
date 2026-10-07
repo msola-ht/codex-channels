@@ -109,6 +109,7 @@ export class ConversationCore {
       target,
       threadId,
       turnId,
+      approvalsReviewer: this.router.modelSettingsForThread(threadId)?.approvalsReviewer ?? null,
       ...(identity ? { identity } : {}),
       ...(this.isBackgroundThread(threadId) ? { background: true } : {}),
     });
@@ -513,6 +514,7 @@ export class ConversationCore {
                 modelProvider: modelSettings.modelProvider ?? "openai",
                 effort: modelSettings.effort,
                 serviceTier: modelSettings.serviceTier,
+                approvalsReviewer: modelSettings.approvalsReviewer ?? null,
               }
             : {}),
           ...(weeklyLimit ? { weeklyLimit } : {}),

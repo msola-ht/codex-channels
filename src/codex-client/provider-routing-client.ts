@@ -42,6 +42,7 @@ type ProviderClientMethod =
   | "listModels"
   | "lunaReserveModel"
   | "updateLunaReserveThreadSettings"
+  | "updateThreadApprovalsReviewer"
   | "writeDefaultFastMode"
   | "readDefaultReasoningEffort"
   | "readDefaultServiceTier"
@@ -771,6 +772,12 @@ export class ProviderRoutingClient {
       args[0],
       (client) => client.updateLunaReserveThreadSettings(...args),
     );
+  }
+
+  updateThreadApprovalsReviewer(
+    ...args: Parameters<ProviderClientInstance["updateThreadApprovalsReviewer"]>
+  ): ReturnType<ProviderClientInstance["updateThreadApprovalsReviewer"]> {
+    return this.callForThread(args[0], client => client.updateThreadApprovalsReviewer(...args));
   }
 
   listPermissionProfiles(

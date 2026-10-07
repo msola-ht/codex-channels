@@ -5,6 +5,7 @@ import { projectToolSettings, toolSettingEdits } from "./codex-tool-settings.mjs
 
 const sandboxModes = new Set(["read-only", "workspace-write"]);
 const approvalPolicies = new Set(supportedPublicApprovalPolicies);
+const approvalsReviewers = new Set(["user", "auto_review"]);
 const webSearchModes = new Set(["live", "indexed", "cached", "disabled"]);
 const reasoningSummaries = new Set(["auto", "concise", "detailed", "none"]);
 const verbosities = new Set(["low", "medium", "high"]);
@@ -29,7 +30,7 @@ export async function loadCodexUserSettings({
   try {
     await client.connect();
     const [snapshot, models] = await Promise.all([
-      client.readUserConfigSnapshot(),
+      client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: true }),
       provider === "openai" ? client.listModels() : Promise.resolve([]),
     ]);
     return projectSettings(snapshot, provider, models);
@@ -58,7 +59,7 @@ export async function updateCodexUserSetting(
   try {
     await client.connect();
     const [snapshot, models] = await Promise.all([
-      client.readUserConfigSnapshot(),
+      client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer" }),
       ["all", "defaults", "preferences"].includes(input?.kind)
         ? client.listModels()
         : Promise.resolve([]),
@@ -69,6 +70,7 @@ export async function updateCodexUserSetting(
     const { edits, value } = createEdits(input, {
       config: snapshot.config,
       toolConfig: snapshot.toolConfig,
+      approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,
       provider,
       models,
     });
@@ -117,7 +119,7 @@ export async function previewCodexUserSetting(
   try {
     await client.connect();
     const [snapshot, models] = await Promise.all([
-      client.readUserConfigSnapshot(),
+      client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer" }),
       ["all", "defaults", "preferences"].includes(input?.kind)
         ? client.listModels()
         : Promise.resolve([]),
@@ -128,6 +130,7 @@ export async function previewCodexUserSetting(
     const { value } = createEdits(input, {
       config: snapshot.config,
       toolConfig: snapshot.toolConfig,
+      approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,
       provider,
       models,
     });
@@ -184,6 +187,7 @@ function projectSettings(snapshot, provider, rawModels) {
     toolSettings: projectToolSettings(config, snapshot.toolConfig),
     provider,
     defaultsEditable: provider === "openai",
+    approvalsReviewer: projectApprovalsReviewer(config, snapshot.approvalsReviewerPolicy),
     models,
     defaults: {
       model: selectedModel?.model ?? optionalString(config.model),
@@ -229,7 +233,7 @@ function compactPercent(config) {
   return Math.round(Math.min(100, autoCompactLimit * 100 / contextWindow));
 }
 
-function createEdits(input, { config, toolConfig, provider, models }) {
+function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, provider, models }) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("input", "invalid-input", "Codex 用户设置输入必须是对象");
   }
@@ -245,6 +249,8 @@ function createEdits(input, { config, toolConfig, provider, models }) {
       return fastEdits(input, provider, config, models);
     case "permissions":
       return permissionEdits(input, config);
+    case "approvals-reviewer":
+      return approvalsReviewerEdits(input, config, approvalsReviewerPolicy);
     case "web-search":
       return webSearchEdits(input);
     case "update-plan":
@@ -258,6 +264,38 @@ function createEdits(input, { config, toolConfig, provider, models }) {
     default:
       throw invalid("kind", "unknown-setting", `未知 Codex 用户设置：${String(input.kind)}`);
   }
+}
+
+function projectApprovalsReviewer(config, policy) {
+  const configured = record(config).approvals_reviewer;
+  const value = approvalsReviewers.has(configured) ? configured : null;
+  if (configured !== undefined && !approvalsReviewers.has(configured)) {
+    return { value, editable: false, reason: "unsupported-value" };
+  }
+  if (!policy || typeof policy.autoReviewDisabled !== "boolean"
+    || (policy.allowedReviewers !== null && (!Array.isArray(policy.allowedReviewers)
+      || policy.allowedReviewers.some((reviewer) => !approvalsReviewers.has(reviewer))))) {
+    return { value, editable: false, reason: "unavailable" };
+  }
+  if (policy.autoReviewDisabled || (policy.allowedReviewers !== null
+    && ![...approvalsReviewers].every((reviewer) => policy.allowedReviewers.includes(reviewer)))) {
+    return { value, editable: false, reason: "managed-policy" };
+  }
+  return { value, editable: true };
+}
+
+function approvalsReviewerEdits(input, config, policy) {
+  if (!approvalsReviewers.has(input.value)) {
+    throw invalid("value", "invalid-approvals-reviewer", "审批审核人必须是 user 或 auto_review");
+  }
+  const current = projectApprovalsReviewer(config, policy);
+  if (!current.editable) {
+    throw invalid("value", `approvals-reviewer-${current.reason}`, "当前 Auto-review 设置不可修改，请检查 Codex 配置与组织策略");
+  }
+  return {
+    edits: [{ keyPath: "approvals_reviewer", value: input.value }],
+    value: { value: input.value },
+  };
 }
 
 function allEdits(input, provider, config, models) {

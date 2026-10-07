@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { observeServerClock, observeServerTimeResync } from "../webui/src/lib/server-time.js";
 import { resolveDashboardData } from "../webui/src/lib/overview-state.js";
-import { formatTimestamp, formatClockTime, formatCalendarDay, formatFailureRate, formatSuccessRate, formatTime, formatTimeZoneLabel, setServerTimeZone } from "../webui/src/lib/format.js";
+import { formatTimestamp, formatRequestTime, formatClockTime, formatCalendarDay, formatFailureRate, formatSuccessRate, formatTime, formatTimeZoneLabel, setServerTimeZone } from "../webui/src/lib/format.js";
 import { fillDailyRange, fillRecentDays, usageTrendRows } from "../webui/src/lib/trend.js";
 import type { OverviewResponse } from "../scripts/webui-api.js";
 
@@ -93,6 +93,7 @@ describe("服务端时区展示与日期标签", () => {
     const endAtMs = Date.parse("2026-09-18T03:00:00Z");
     expect(formatTime(startAtMs)).toBe("2026-09-18 00:00");
     expect(formatTimestamp(startAtMs + 1234)).toBe("2026-09-18 00:00:01.234");
+    expect(formatRequestTime(startAtMs + 1234)).toBe("09-18 00:00:01");
     expect(formatCalendarDay(startAtMs)).toBe("2026-09-18");
     expect(formatTimeZoneLabel(startAtMs)).toBe("Asia/Shanghai（UTC+08:00）");
     expect(fillDailyRange([], { name: "today", startAtMs, endAtMs }).map((row) => row.day)).toEqual(["2026-09-18"]);

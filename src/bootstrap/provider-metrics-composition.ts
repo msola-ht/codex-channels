@@ -68,13 +68,14 @@ export class ProviderMetricsComposition {
   private handle(provider: string, metrics: ProviderProxyMetrics): void {
     // 此指标只接受 OpenAI 通道；其他 Provider 不借同名字段声明该统计口径。
     if (provider !== "openai") delete metrics.upstreamTtftMs;
+    const sample = { ...metrics };
     try {
       this.options.writer.enqueue({
         provider,
-        ...metrics,
+        ...sample,
         reasoningEffort:
           metrics.reasoningEffort
-          ?? (metrics.threadId === null
+          ?? (metrics.requestPurpose === "autoApprovalReview" || metrics.threadId === null
             ? null
             : this.options.resolveModelSettings?.(metrics.threadId)?.effort ?? null),
       });
@@ -85,7 +86,7 @@ export class ProviderMetricsComposition {
     if (!event) {
       this.options.logger.debug(
         { provider },
-        "模型统计代理指标缺少 Thread 或 Turn 关联，未归约完成卡片统计",
+        "模型统计代理指标未归约到用户轮次执行状态",
       );
       return;
     }
@@ -101,7 +102,8 @@ export function toModelTimingEvent(
   metrics: ProviderProxyMetrics,
 ): ModelTimingEvent | undefined {
   if (
-    metrics.threadId === null
+    metrics.requestPurpose === "autoApprovalReview"
+    || metrics.threadId === null
     || metrics.turnId === null
   ) {
     return undefined;

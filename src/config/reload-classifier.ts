@@ -257,6 +257,7 @@ function sameWorkspaces(
       && candidate.cwd === workspace.cwd
       && candidate.sandbox === workspace.sandbox
       && candidate.approvalPolicy === workspace.approvalPolicy
+      && candidate.approvalsReviewer === workspace.approvalsReviewer
       && candidate.permissions === workspace.permissions;
   });
 }

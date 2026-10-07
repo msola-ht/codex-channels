@@ -656,7 +656,7 @@ function options(
       modelState: vi.fn(),
       listPlugins: vi.fn(),
     },
-    commands: { execute: vi.fn(), selectModel: vi.fn() },
+    commands: { execute: vi.fn(), selectModel: vi.fn(), selectWorkspaceAutoReview: vi.fn(), selectAutoReview: vi.fn() },
     bindings,
     logger: pino({ level: "silent" }),
     gatewayVersion: "0.146.0",

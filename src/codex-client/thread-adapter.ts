@@ -13,6 +13,7 @@ import type {
   ThreadSource,
   ThreadStatus,
 } from "../session-routing/index.js";
+import type { ThreadApprovalsReviewer } from "../conversation-core/index.js";
 
 type ThreadSessionResponse =
   | ThreadStartResponse
@@ -105,13 +106,20 @@ export function toThreadSession(response: ThreadSessionResponse): ThreadSession 
     modelProvider: response.modelProvider,
     reasoningEffort: response.reasoningEffort,
     serviceTier: response.serviceTier,
+    approvalsReviewer: toThreadApprovalsReviewer(response.approvalsReviewer),
     contextCompactionItemIds: contextCompactionItemIds(response.thread),
   };
 }
 
+export function toThreadApprovalsReviewer(value: unknown): ThreadApprovalsReviewer | null {
+  return value === "user" || value === "auto_review" || value === "guardian_subagent"
+    ? value
+    : null;
+}
+
 export function toThreadResumeSession(
   response: ThreadResumeResponse,
-  requested: { cwd: string; approvalPolicy: string; sandbox?: string; permissions?: string },
+  requested: { cwd: string; approvalPolicy: string; sandbox?: string; permissions?: string; approvalsReviewer?: "user" | "auto_review" },
 ): ThreadResumeSession {
   requireString(response.cwd, "resume cwd");
   const collaborationMode = response.collaborationMode?.mode;
@@ -129,6 +137,7 @@ export function toThreadResumeSession(
     collaborationMode,
     settingsMatch: response.cwd === requested.cwd
       && response.approvalPolicy === requested.approvalPolicy
+      && (requested.approvalsReviewer === undefined || response.approvalsReviewer === requested.approvalsReviewer)
       && (requested.permissions !== undefined
         ? response.activePermissionProfile?.id === requested.permissions
         : sandboxModes[response.sandbox.type] === requested.sandbox),

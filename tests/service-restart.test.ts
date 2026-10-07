@@ -13,7 +13,15 @@ const mocks = vi.hoisted(() => ({
   control: vi.fn(), inspect: vi.fn(), waitCore: vi.fn(), waitRelay: vi.fn(), fetch: vi.fn(),
   events: [] as string[],
 }));
-vi.mock("node:child_process", async () => ({ ...await vi.importActual<typeof import("node:child_process")>("node:child_process"), spawnSync: mocks.control }));
+vi.mock("node:child_process", async () => {
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  return {
+    ...actual,
+    spawnSync: (...args: Parameters<typeof actual.spawnSync>) => args[0] === "git"
+      ? actual.spawnSync(...args)
+      : mocks.control(...args),
+  };
+});
 vi.mock("../scripts/service-status.mjs", () => ({ inspectManagedServiceStatusAsync: mocks.inspect }));
 vi.mock("../scripts/local-installation.mjs", () => ({ waitForCoreServiceTarget: mocks.waitCore }));
 vi.mock("../runtime/cli-presentation.mjs", () => ({ writeCliMessage: vi.fn() }));

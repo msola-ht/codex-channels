@@ -301,7 +301,7 @@ describe("Gateway config.toml", () => {
     })).toThrow("Telegram 启用时必须配置 allowed_user_ids");
   });
 
-  it("loads per-workspace permissions and maps approval_policy to camelCase", () => {
+  it.each(["user", "auto_review"] as const)("loads per-workspace permissions and maps the %s reviewer to camelCase", (approvalsReviewer) => {
     const root = mkdtempSync(join(tmpdir(), "codex-gateway-config-"));
     const workspace = join(root, "workspace");
     mkdirSync(workspace, { recursive: true });
@@ -313,6 +313,7 @@ describe("Gateway config.toml", () => {
         cwd: workspace,
         sandbox: "danger-full-access",
         approval_policy: "never",
+        approvals_reviewer: approvalsReviewer,
       }],
     });
 
@@ -326,7 +327,21 @@ describe("Gateway config.toml", () => {
       cwd: realpathSync(workspace),
       sandbox: "danger-full-access",
       approvalPolicy: "never",
+      approvalsReviewer,
     }]);
+  });
+
+  it("leaves Workspace reviewer absent by default and rejects unsupported values", () => {
+    const fixture = createFixture();
+    const document = validateGatewayConfigDocument(readGatewayConfig(fixture.configPath));
+    expect(document.workspaces[0]).not.toHaveProperty("approvals_reviewer");
+    expect(loadRuntimeConfig({ CODEX_CONNECT_CONFIG_FILE: fixture.configPath }).config.workspaces[0])
+      .not.toHaveProperty("approvalsReviewer");
+    for (const approvals_reviewer of [null, "guardian_subagent", "auto", true]) {
+      expect(() => validateGatewayConfigDocument({
+        ...document, workspaces: [{ ...document.workspaces[0], approvals_reviewer }],
+      })).toThrow(/approvals_reviewer/u);
+    }
   });
 
   it("rejects a workspace that combines sandbox with a permission profile", () => {

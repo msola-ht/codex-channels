@@ -26,7 +26,7 @@
   并发关闭及重连前清理共用 Transport 关闭任务，旧失败不清理替代连接。通过 `extensions` 显式声明已实现的 `openai/form`。
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned、运行状态、更新时间/最近活跃时间、来源（含稳定的
   `automation` 任务来源）、运行 Turn、
-  上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；Thread 的当前模型及思考设置供子代理开始和继续通知只读展示，不等同实际请求遥测；
+  上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；启动、恢复与分叉响应的实际 `approvalsReviewer` 用于会话审批方式展示，缺失或未知值映射为未知，不从全局配置推断；Thread 的当前模型及思考设置供子代理开始和继续通知只读展示，不等同实际请求遥测；
   恢复结果保留响应的实际 Default/Plan 模式、目录和权限，以及与请求配置的一致性，供 Router 在绑定前校验；
   缺少必需字段时失败关闭。`parentThreadId` 只映射官方派生关系；`listThreadDescendants` 以明确祖先查询所有来源及指定归档状态，不用父目录截断后代，供本机归档预览和核验。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
@@ -78,6 +78,7 @@
   生命周期字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
   只识别 `misalignmentPolicyViolation`、Luna Reserve 触发所需的 `usageLimitExceeded` 与登录或刷新令牌失效的 `unauthorized` 结构化错误分类，Turn、warning 和 MCP 错误在此统一脱敏并限长，
   残缺或无关通知不进入业务模块。
+  另将受控 `item/autoApprovalReview/started|completed` 裁剪为 Thread、Turn、review ID、阶段、状态和 agent 来源的批准标志，供 Bootstrap 写入指标及发布窄渠道状态；不传递 action、rationale 或命令，非法来源和终态明确排除。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，保留 MCP Tool Item 的
   `readOnlyHint` 能力提示，把多代理工具调用的 `interrupted` 归为失败，并在离开 Client 边界前
   清洗命令、查询及上游错误中的敏感文本；`commandExecution.commandActions` 非空、全部为
@@ -100,11 +101,15 @@
 - `protocol-info.ts`：集中公开 App Server 客户端标识、受支持的 Codex CLI 版本和 Gateway 显示版本，
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
 - `client.ts`：Thread 搜索/归档/固定、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill、
+  Workspace 的可选 `approvalsReviewer` 通过稳定 `thread/start`、`thread/resume`、`thread/fork` 参数传递；省略时保留 Codex 默认或历史持久设置，恢复响应核对明确请求的 reviewer。
+  当前 Thread 审批方式通过 `updateThreadApprovalsReviewer` 更新；请求前注册合法设置通知观察器，等待 RPC 成功和最新同 Thread 同目标通知，超时、断线、关闭或 Thread 失效清理等待和请求，不启动 Turn、不重试设置写入。
   `account/read` 当前认证路由、账户与 Thread 用量及用户级配置
   读取等 App Server 方法的类型化封装；按 Workspace 读取有效思考等级与服务层级，模型、思考等级、服务层级默认值和受控 agents 设置统一通过
   同一个 `config/batchWrite` 用户配置事务写入，受控的读改写流程从原始用户层取得版本并通过
-  `expectedVersion` 拒绝并发覆盖；MCP 概览按 Thread 使用
-  `toolsAndAuthOnly` 分页，详情使用 `full`；`config/mcpServer/reload` 不自动重试，成功只表示已加载 Thread
+  `expectedVersion` 拒绝并发覆盖；用户设置读取可显式附加稳定 `configRequirements/read`，
+  仅投影受控实验 `allowedApprovalsReviewers` 和稳定 `featureRequirements` 中的 Auto-review
+  审批人及功能限制，不返回完整受管配置；策略读取失败或畸形时保留有效用户快照，省略审批策略投影，由设置入口显示不可用并拒绝该字段写入。
+  MCP 概览按 Thread 使用 `toolsAndAuthOnly` 分页，详情使用 `full`；`config/mcpServer/reload` 不自动重试，成功只表示已加载 Thread
   刷新了 MCP 配置，远端连接结果仍由后续运行状态查询确认；MCP 概览、刷新与账户额度读取接受调用方取消信号，
   截止时间到达会清理 Pending Request，不代表撤销服务端已接收的刷新。OAuth 不自动重试并消费
   官方登录完成通知，资源读取保持只读；Permission
@@ -171,8 +176,8 @@ Notification 适配只返回当前支持的稳定事件；未知或畸形通知�
 Server Request 适配只把已校验的稳定请求交给 Approval；Approval 不接触生成协议或 RPC 信封，
 响应类型与请求不一致时失败关闭。
 当前精确协议基线要求 initialize 协商实验 API，App Server 才会发送已生成并受控导出的
-`thread/settings/updated`；该通知用于同步共享 Thread 的模型、思考等级、服务层级和
-Default/Plan 协作模式。Client 仅按[受控协议边界](../../docs/index.md#受控协议边界)采用 Plan、Queue、Revert、计划任务动态工具和图片上传账户路由等明确列出的字段与请求，并映射到业务窄类型；生成类型不自动开放其他实验能力。启用这些能力
+`thread/settings/updated`；该通知用于同步共享 Thread 的模型、思考等级、服务层级、实际审批审查方式和
+Default/Plan 协作模式；其中 `approvalsReviewer` 是稳定字段。Client 仅按[受控协议边界](../../docs/index.md#受控协议边界)采用 Plan、Queue、Revert、计划任务动态工具、图片上传账户路由和 Auto-review 策略读取及审查状态投影六类明确列出的受控例外，并映射到业务窄类型；生成类型不自动开放其他实验能力。启用这些能力
 同时出现的实验审批字段必须在 `approval` 边界显式展示或默认拒绝，不能静默扩大授权。
 
 固定协议的一次性 `localAudio` 已由 Application 的封闭 `TurnInput` 受控接入；Surface 只能提交

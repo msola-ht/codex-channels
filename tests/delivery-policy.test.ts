@@ -57,6 +57,8 @@ describe("live output coalescing boundaries", () => {
  * 新增事件类型时本文件会编译失败，避免投递策略悄悄落后于协议。
  */
 const eventsByType = {
+  "autoApprovalReview.updated": { type: "autoApprovalReview.updated", target, threadId: "thread", turnId: "turn",
+    sourceThreadId: "thread", sourceTurnId: "turn", reviewId: "review", phase: "completed", status: "approved" },
   "turn.started": { type: "turn.started", target, threadId: "thread", turnId: "turn" },
   "user.message": {
     type: "user.message",
@@ -242,6 +244,7 @@ describe("resolveSurfaceDelivery", () => {
       .sort();
     expect(delivered).toEqual(
       [
+        "autoApprovalReview.updated",
         "conversation.idle.released",
         "text.completed",
         "turn.completed",
@@ -336,6 +339,7 @@ describe("resolveSurfaceDelivery", () => {
 describe("isSheddableBacklogEvent", () => {
   it("never sheds results, errors or completion notices", () => {
     const retained = [
+      "autoApprovalReview.updated",
       "text.completed",
       "operation.updated",
       "subagent.completed",

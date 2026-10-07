@@ -1373,6 +1373,11 @@ function metricsScopeSql(query: ModelRequestMetricsScope, selectThreadRoot = fal
   validateMetricsTimeRange(query);
   const conditions = ["recorded_at_ms >= ?", "recorded_at_ms < ?"];
   const params: Array<string | number> = [query.startAtMs, query.endAtMs];
+  if (query.requestPurpose !== undefined) {
+    if (query.requestPurpose !== "autoApprovalReview") throw new Error("requestPurpose 筛选值无效");
+    conditions.push("request_purpose = ?");
+    params.push(query.requestPurpose);
+  }
   for (const [key, column] of [
     ["threadId", "thread_id"], ["turnId", "turn_id"],
     ["model", "model"], ["source", "source"], ["callerId", "caller_id"],

@@ -299,6 +299,9 @@ function parseWorkspaceConfig(document) {
       ...(workspace.approval_policy === undefined
         ? {}
         : { approval_policy: workspace.approval_policy }),
+      ...(workspace.approvals_reviewer === undefined
+        ? {}
+        : { approvals_reviewer: workspace.approvals_reviewer }),
       ...(workspace.permissions === undefined
         ? {}
         : { permissions: workspace.permissions }),

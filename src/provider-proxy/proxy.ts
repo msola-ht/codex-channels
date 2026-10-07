@@ -1,4 +1,5 @@
 import { modelRequestDiagnostics, chatDiagnosticsHeader, type ChatDiagnosticsChannel } from "./chat-diagnostics.js";
+import { autoReviewMetadata } from "../../runtime/auto-review-metadata.mjs";
 import {
   createServer,
   request as httpRequest,
@@ -119,6 +120,9 @@ interface TurnMetadata {
   threadId: string | null;
   turnId: string | null;
   operation: ProviderProxyMetrics["operation"];
+  requestPurpose?: "autoApprovalReview" | null;
+  reviewerThreadId?: string | null;
+  reviewerTurnId?: string | null;
 }
 
 export class ProviderProxy {
@@ -994,10 +998,12 @@ function parseTurnMetadata(value: string | string[] | undefined): TurnMetadata {
 
 function parseTurnMetadataObject(value: unknown): TurnMetadata {
   const parsed = asRecord(value);
+  const review = autoReviewMetadata(parsed);
   return {
     threadId: nonEmptyString(parsed?.thread_id),
     turnId: nonEmptyString(parsed?.turn_id),
     operation: parsed?.request_kind === "compaction" ? "compact" : "response",
+    ...review,
   };
 }
 

@@ -101,6 +101,7 @@ describe("Codex official defaults setup", () => {
 
 function settingsState(): CodexUserSettingsState {
   return {
+    approvalsReviewer: { value: null, editable: true },
     toolSettings: { mergedAvailable: false, fields: [] },
     version: "version-1",
     provider: "openai",

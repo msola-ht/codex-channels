@@ -20,7 +20,7 @@ it("separates model settings from general preferences and renders model submenus
       const {modelNavItems}=await server.ssrLoadModule('/src/lib/navigation.ts');
       const render=(element,language='zh',path='/models/accounts')=>renderToStaticMarkup(h(MemoryRouter,{initialEntries:[path]},h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(TooltipProvider,null,element))));
       const base={loading:false,error:null,actionError:null,saving:false,busy:false,pendingSetting:null,pendingPreview:null,refetch(){},clearError(){}};
-      const codex={...base,codexSettings:{provider:'openai',defaultsEditable:true,defaults:{model:'test-model',reasoningEffort:'medium',fastEnabled:true},compact:{contextWindow:10000,autoCompactPercent:80},permissions:{editable:true},models:[{model:'test-model',displayName:'Test model',defaultReasoningEffort:'medium',reasoningEfforts:[{effort:'medium'}]}]}};
+      const codex={...base,codexSettings:{provider:'openai',defaultsEditable:true,approvalsReviewer:{value:null,editable:true},defaults:{model:'test-model',reasoningEffort:'medium',fastEnabled:true},compact:{contextWindow:10000,autoCompactPercent:80},permissions:{editable:true},models:[{model:'test-model',displayName:'Test model',defaultReasoningEffort:'medium',reasoningEfforts:[{effort:'medium'}]}]}};
       const providers={...base,settings:{defaults:{},managedProviders:[{id:'ds-main',displayName:'DeepSeek',model:'test-model',reasoningEffort:'medium',models:[{id:'test-model',displayName:'Test model',reasoningEfforts:[{effort:'medium'}]}]}],modelWindow:[{id:'test-model',displayName:'Test model',providers:['ds-main'],contextWindow:10000,maxContextWindow:20000,windowPercent:50}],customProviders:{fixedCandidates:[],switchingProviders:[],backupCandidates:[]}}};
       const accounts={...base,settings:{opencodeGo:{accounts:[]},deepseek:{accounts:[{id:'main',model:'test-model',mode:'switching',default:true}]},clinePass:{accounts:[]}}};
       const general=render(h(AppServerSettingsCard,{management:codex}));
@@ -41,6 +41,8 @@ it("separates model settings from general preferences and renders model submenus
   })) as Record<string, string> & {paths: string[]};
   expect(result.general).not.toContain("Sandbox");
   expect(result.permissions).toContain("Sandbox");
+  expect(result.permissions).toContain("Codex 默认审批方式");
+  expect(result.permissions).toContain("未设置");
   expect(result.permissions).not.toContain("Plan 思考等级");
   expect(result.general).toContain("Plan 思考等级");
   expect(result.general).not.toContain("codex-context-window");

@@ -6,11 +6,27 @@ import type {
 import {
   formatWeixinCommandText,
   renderWeixinCommandResult,
+  renderWeixinHelp,
   renderWeixinStartupNotification,
   renderWeixinTurnCompleted,
 } from "../src/surfaces/weixin/index.js";
 
 describe("Weixin command renderer", () => {
+  it("offers a current Thread command separately from Workspace defaults", () => {
+    expect(renderWeixinHelp()).toContain("/autoreview [on|off]");
+    expect(renderWeixinCommandResult({ kind: "auto-review", state: { threadId: "thread", reviewer: "user", updated: false } })).toContain("/autoreview on");
+    const changed = renderWeixinCommandResult({ kind: "auto-review", state: { threadId: "thread", reviewer: "auto_review", updated: true } });
+    expect(changed).toContain("当前会话后续轮次");
+    expect(changed).toContain("已切换当前会话审批方式");
+  });
+  it("provides Workspace Auto-review text choices and the default scope", () => {
+    expect(renderWeixinHelp()).toContain("/workspaceperm autoreview <on|off|clear>");
+    const rendered = renderWeixinCommandResult({ kind: "workspace-permissions", workspace: { id: "main", name: "Main", cwd: "/workspace" } });
+    expect(rendered).toContain("工作区默认审批方式：跟随 Codex 默认");
+    expect(rendered).toContain("/workspaceperm autoreview <on|off|clear>");
+    expect(rendered).toContain("已加载会话保持原值");
+    expect(rendered).toContain("/autoreview 修改当前会话");
+  });
   it("asks for a reasoning effort after model selection", () => {
     const rendered = renderWeixinCommandResult({
       kind: "models",

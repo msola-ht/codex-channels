@@ -8,7 +8,8 @@
 
 - `runtime-config.mjs` / `runtime-config.d.mts`：解析并声明用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断和
   独立项目命令提供不修改配置权限的必需/可选路径定位，可选定位只把文件不存在视为未初始化，
-  但显式指定的配置文件缺失及其他文件系统错误仍失败；启动与写入流程显式收紧目录和配置文件权限。
+  但显式指定的配置文件缺失及其他文件系统错误仍失败；首次创建配置前初始化默认 Workspace 的 Git 仓库，
+  保留已有 `.git` 且不创建提交，初始化失败不写入配置；启动与写入流程显式收紧目录和配置文件权限。
 - `runtime-environment.mjs`：在已定位的用户配置上统一装配 Gateway、App Server 与管理脚本使用的
   `CODEX_CONNECT_HOME`、配置路径、Codex 可执行文件和代理环境；同时保留未合并系统代理的环境，供
   前台监管与 Gateway 服务子进程自行解析，避免自动发现结果变成固定环境覆盖。需要在配置损坏时仍可运行的服务恢复
@@ -210,7 +211,8 @@
   第三方固定模式不开放官方默认模型、思考等级和 Fast；已有 `default_permissions` 时不混写传统 Sandbox 字段。
 - `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc config` 的“Codex 新会话与用户偏好”
   适配器，只负责选择、预览和中文结果；可单独设置计划清单工具、TUI 空闲总结、Plan 思考等级、推理摘要（未配置时默认 `none`）、输出详细程度、
-  更新检查和历史保存；第三方 Provider 的模型与凭据继续留在 Provider Setup。
+  更新检查、历史保存与 Auto-review 审批审核人；Auto-review 单独显式确认，受管限制或未知值拒绝修改。
+  第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
 - `codex-subagents-setup.mjs` / `codex-subagents-setup.d.mts`：Config 中显式选择的子代理规则与配置入口，
@@ -277,7 +279,7 @@
   IANA 名称设置自定义时区，`--follow-app-server` 删除独立设置；修改后提示重启网关。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
-- `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；
+- `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略、Permission Profile 与 Auto-review 默认审查方式；
   保持 Sandbox 与 Permission Profile 互斥，并只写回被选择的 Workspace 配置。
 - `management-access.mjs`、`management-confirmations.mjs`、`management-audit.mjs`、
   `management-security.mjs` / `management-security.d.mts`：本机管理适配器复用的无 HTTP 安全基础，
@@ -361,7 +363,7 @@
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下识别
   与原生 Codex 及磁盘文件相同的 `sf-*` Provider Profile 名称，选择对应隔离实例并供 Remote TUI
   完成第三方 Provider 认证；同时按当前目录或显式
-  `--workspace` 解析有效 Sandbox、审批策略与 Permission Profile，第三方 Profile 不复制权限，
+  `--workspace` 解析有效 Sandbox、审批策略、Permission Profile 与可选审批审查方式，第三方 Profile 不复制权限，
   用户显式传给 Codex 的权限参数优先，未受管的个人 Profile 也沿用匹配的 Workspace 权限；
   Workspace 的 `untrusted` 保留给 App Server Thread，但在没有显式审批覆盖时拒绝映射为固定版 CLI
   已退役的公开参数，不静默改成更宽松策略；

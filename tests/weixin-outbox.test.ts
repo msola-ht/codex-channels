@@ -22,10 +22,27 @@ const target = {
   accountId,
   conversationId: actorId,
 } as const;
-const turnCompletedText = "**本次运行 · 已完成**\n\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 总耗时：未提供";
-const turnStoppedText = "**本次运行 · 已停止**\n\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 总耗时：未提供";
+const turnCompletedText = "**本次运行 · 已完成**\n\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 审批方式：未知\n- 总耗时：未提供";
+const turnStoppedText = "**本次运行 · 已停止**\n\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread\n- 审批方式：未知\n- 总耗时：未提供";
 
 describe("WeixinOutbox", () => {
+  it.each(["approved", "denied", "timedOut", "aborted"] as const)("delivers auto-review start and %s through the reliable reply-window path", async status => {
+    const { outbox, sendText } = outboxFixture();
+    const base = { type: "autoApprovalReview.updated", target, threadId: "thread", turnId: "turn",
+      sourceThreadId: "thread", sourceTurnId: "turn", reviewId: "review" } as const;
+    const checkpoints: string[] = [];
+    try {
+      for (const event of [{ ...base, phase: "started", status: "inProgress" }, { ...base, phase: "completed", status }] as const) {
+        expect(outbox.retains(event)).toBe(true);
+        await outbox.deliver(event, new AbortController().signal, async value => { checkpoints.push(value.state); });
+      }
+      expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
+        "自动审查开始\n\n- 状态：审查中",
+        `自动审查完成\n\n- 状态：${{ approved: "已通过", denied: "已拒绝", timedOut: "已超时", aborted: "已中止" }[status]}`,
+      ]);
+      expect(checkpoints).toEqual(["started", "confirmed", "started", "confirmed"]);
+    } finally { await outbox.close(); }
+  });
   it.each(["short answer", "完整回答".repeat(6_000)])("retains and confirms unphased completed text (%#)", async (text) => {
     const { outbox, sendText, sendFile } = outboxFixture();
     const event = completed(null, text);
@@ -93,7 +110,7 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "已开始处理。",
+      "已开始处理。\n\n审批方式：未知",
       "final reply",
       turnCompletedText,
     ]);
@@ -254,11 +271,12 @@ describe("WeixinOutbox", () => {
     outbox.handle({
       ...turnStarted(),
       identity: { kind: "plugin", name: "GitHub" },
+      approvalsReviewer: "auto_review",
     });
     await outbox.close();
 
     expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
-      text: "已使用 GitHub Plugin 开始处理。",
+      text: "已使用 GitHub Plugin 开始处理。\n\n审批方式：自动审查（Auto-review）",
     }));
   });
 
@@ -401,7 +419,7 @@ describe("WeixinOutbox", () => {
         + "- 错误：受控错误\n- 本轮耗时：未提供\n- 首 Token：—\n- 速度：—\n\n"
         + "**当前会话**\n"
         + "- Session：测试会话\n"
-        + "- Session ID：thread\n- 总耗时：未提供",
+        + "- Session ID：thread\n- 审批方式：未知\n- 总耗时：未提供",
     ]);
   });
 

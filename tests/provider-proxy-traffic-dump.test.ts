@@ -44,6 +44,135 @@ afterEach(async () => {
 });
 
 describe("ModelTrafficDump V2", () => {
+  it.each(["http", "websocket"].flatMap(transport => [false, true].map(parentPresent => ({ transport, parentPresent }))))(
+    "links $transport guardian metrics to the original dump with parentPresent=$parentPresent",
+    async ({ transport, parentPresent }) => {
+      const directory = mkdtempSync(join(tmpdir(), "codexc-guardian-traffic-"));
+      temporaryDirectories.push(directory);
+      const metadata = {
+        request_kind: "turn", thread_source: "guardian_review",
+        thread_id: "reviewer-thread", turn_id: "reviewer-turn",
+        parent_thread_id: "parent-thread",
+        ...(parentPresent ? { parent_turn_id: "parent-turn" } : {}),
+      };
+      const metadataText = JSON.stringify(metadata);
+      const body = {
+        ...(transport === "websocket" ? { type: "response.create", client_metadata: {
+          thread_id: "reviewer-thread", turn_id: "reviewer-turn", "x-codex-turn-metadata": metadataText,
+        } } : {}),
+        model: "guardian-fixture", input: ["original reviewer request"],
+      };
+      const terminal = { type: "response.completed", response: {
+        id: "guardian-response", status: "completed", model: "guardian-fixture", output: [],
+        usage: { input_tokens: 9, output_tokens: 2, total_tokens: 11 },
+      } };
+      const metrics: ProviderProxyMetrics[] = [];
+      const upstreamRequests: string[] = [];
+      const server = createServer((request, response) => {
+        expect(request.headers["x-codex-turn-metadata"]).toBe(metadataText);
+        request.on("data", chunk => { upstreamRequests.push(String(chunk)); });
+        request.on("end", () => {
+          response.writeHead(200, { "content-type": "text/event-stream" });
+          response.end(`data: ${JSON.stringify(terminal)}\n\n`);
+        });
+      });
+      const sockets = new WebSocketServer({ server });
+      sockets.on("connection", socket => socket.on("message", data => {
+        upstreamRequests.push(data.toString());
+        socket.send(JSON.stringify(terminal));
+      }));
+      await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+      openServers.push({ close: async () => {
+        for (const socket of sockets.clients) socket.terminate();
+        await new Promise<void>(resolve => sockets.close(() => resolve()));
+        server.closeAllConnections();
+        await new Promise<void>(resolve => server.close(() => resolve()));
+      } });
+      const proxy = new ProviderProxy("127.0.0.1:0", {
+        upstreamHost: "127.0.0.1", upstreamPort: (server.address() as AddressInfo).port,
+        upstreamProtocol: "http", trafficDump: { directory, label: "openai" },
+        onMetrics: metric => { metrics.push(metric); },
+      });
+      await proxy.start();
+      openServers.push(proxy);
+      if (transport === "http") {
+        await (await fetch(`http://${proxy.address()}/responses`, {
+          method: "POST", headers: { "x-codex-turn-metadata": metadataText }, body: JSON.stringify(body),
+        })).text();
+      } else {
+        const client = new WebSocket(`ws://${proxy.address()}/responses`, { headers: {
+          "x-codex-turn-metadata": JSON.stringify({ ...metadata, parent_thread_id: "handshake-thread", parent_turn_id: "handshake-turn" }),
+        } });
+        await new Promise<void>((resolve, reject) => {
+          client.once("open", () => client.send(JSON.stringify(body)));
+          client.once("message", () => client.close());
+          client.once("close", () => resolve());
+          client.once("error", reject);
+        });
+      }
+      await vi.waitFor(() => expect(metrics).toHaveLength(1));
+      await proxy.close();
+      expect(JSON.parse(upstreamRequests.join(""))).toEqual(body);
+      const paths = listDumpFiles(directory);
+      expect(paths).toHaveLength(1);
+      const indexBefore = readFileSync(join(paths[0]!, "interactions.jsonl"), "utf8");
+      const original = await readDumpExchange(paths, 1);
+      expect(original.request).toMatchObject({ threadId: "reviewer-thread", turnId: "reviewer-turn" });
+      const expected = {
+        requestPurpose: "autoApprovalReview",
+        threadId: parentPresent ? "parent-thread" : null,
+        turnId: parentPresent ? "parent-turn" : null,
+        reviewerThreadId: "reviewer-thread", reviewerTurnId: "reviewer-turn",
+      };
+      for (const options of [{}, { limit: 1, newestFirst: true }]) {
+        expect((await summarizeDumpFiles(paths, options)).exchanges).toMatchObject([expected]);
+      }
+      const detail = await describeDumpExchange(paths, 1);
+      expect(detail).toMatchObject(expected);
+      expect(JSON.parse(detail.request.body)).toEqual(body);
+      expect(metrics[0]).toMatchObject({
+        requestPurpose: expected.requestPurpose, threadId: expected.threadId, turnId: expected.turnId,
+        inputTokens: 9, outputTokens: 2,
+        traffic: { label: detail.label, session: detail.session, interaction: detail.id },
+      });
+      if (transport === "http") expect(detail.request.headers["x-codex-turn-metadata"]).toBe(metadataText);
+      else expect(JSON.parse(detail.request.body).client_metadata["x-codex-turn-metadata"]).toBe(metadataText);
+      expect(readFileSync(join(paths[0]!, "interactions.jsonl"), "utf8")).toBe(indexBefore);
+    },
+  );
+
+  it.each(["http", "websocket"])("uses only retained metadata when %s payloads are unavailable", async transport => {
+    const { directory, dump } = fixture();
+    const metadata = { thread_source: "guardian_review", thread_id: "reviewer-thread", turn_id: "reviewer-turn",
+      parent_thread_id: "parent-thread", parent_turn_id: "parent-turn" };
+    const headers = { "x-codex-turn-metadata": JSON.stringify(metadata) };
+    if (transport === "http") {
+      const exchange = dump.beginHttpExchange({ headers, method: "POST", path: "/responses", startedAtMs: Date.now() });
+      exchange.requestChunk(textFrame({ model: "fixture" }));
+      exchange.requestEnd();
+      exchange.responseEnd();
+    } else {
+      const exchange = dump.beginWebSocketExchange({ headers, startedAtMs: Date.now(), url: "wss://example.test/responses" });
+      exchange.webSocketFrame("client", textFrame({ type: "response.create", model: "fixture", client_metadata: {
+        "x-codex-turn-metadata": JSON.stringify(metadata),
+      } }), false);
+      exchange.webSocketClose("upstream", 1000, Buffer.alloc(0));
+    }
+    await dump.close();
+    const paths = listDumpFiles(directory);
+    for (const file of readdirSync(paths[0]!).filter(name => /^payload-[1-9][0-9]*\.bin$/u.test(name))) {
+      rmSync(join(paths[0]!, file));
+    }
+    const summary = (await summarizeDumpFiles(paths, { limit: 1 })).exchanges[0];
+    if (transport === "http") expect(summary).toMatchObject({ requestPurpose: "autoApprovalReview",
+      threadId: "parent-thread", turnId: "parent-turn", reviewerThreadId: "reviewer-thread", reviewerTurnId: "reviewer-turn" });
+    else {
+      expect(summary).toMatchObject({ threadId: "reviewer-thread", turnId: "reviewer-turn" });
+      expect(summary).not.toHaveProperty("requestPurpose");
+      expect(summary).not.toHaveProperty("reviewerThreadId");
+    }
+  });
+
   it.each([false, true])("preserves only valid first-token values in summaries (paged=%s)", async (paged) => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-first-token-summary-"));
     temporaryDirectories.push(directory);
@@ -608,7 +737,9 @@ describe("ModelTrafficDump V2", () => {
   it("uses per-call WebSocket metadata instead of the prewarm handshake", async () => {
     const { directory, dump } = fixture();
     const exchange = dump.beginWebSocketExchange({
-      headers: { "x-codex-turn-metadata": JSON.stringify({ request_kind: "prewarm" }) },
+      headers: { "x-codex-turn-metadata": JSON.stringify({ request_kind: "prewarm", thread_source: "guardian_review",
+        thread_id: "handshake-reviewer", turn_id: "handshake-reviewer-turn",
+        parent_thread_id: "handshake-parent", parent_turn_id: "handshake-parent-turn" }) },
       startedAtMs: Date.now(), url: "wss://example.test/responses",
     });
     exchange.webSocketFrame("client", textFrame({
@@ -623,6 +754,10 @@ describe("ModelTrafficDump V2", () => {
     expect(readIndex(listDumpFiles(directory)[0]!)[0]).toMatchObject({
       requestKind: "turn", turnId: "turn-current", threadId: "thread-current",
     });
+    const summary = (await summarizeDumpFiles(listDumpFiles(directory), { limit: 1 })).exchanges[0];
+    expect(summary).toMatchObject({ requestKind: "turn", turnId: "turn-current", threadId: "thread-current" });
+    expect(summary).not.toHaveProperty("requestPurpose");
+    expect((await describeDumpExchange(listDumpFiles(directory), 1))).not.toHaveProperty("requestPurpose");
   });
 
   it("does not reuse a previous WebSocket response model after the next call closes", async () => {

@@ -14,11 +14,13 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
   const { t, language } = useTranslation()
   const location = useLocation()
   const interrupted = isClientInterruption(record)
+  const autoReview = record.requestPurpose === "autoApprovalReview"
   const formatCount = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString(language === "zh" ? "zh-CN" : "en-US")
   const uncached = record.inputTokens === null || record.cachedInputTokens === null
     ? null : Math.max(0, record.inputTokens - record.cachedInputTokens)
   const fields = [
     [t("requests.recordedAt"), `${formatTimestamp(record.recordedAtMs)} · ${getServerTimeZone()}`],
+    [t("requestPurpose.label"), autoReview ? t("requestPurpose.autoApprovalReview") : null],
     [t("metrics.provider"), record.provider],
     [t("metrics.recordedStatus"), record.status],
     [t("requestDetail.upstreamProvider"), record.upstreamProvider],
@@ -56,12 +58,14 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     [t("filters.delivery"), record.deliveryStatus === "finished" ? t("filters.deliveryFinished")
       : record.deliveryStatus === "disconnected" ? t("filters.deliveryDisconnected")
         : record.deliveryStatus === "failed" ? t("filters.deliveryFailed") : null],
-    [t("requestDetail.threadId"), record.threadId],
-    [t("requestDetail.turnId"), record.turnId],
+    [t(autoReview ? "requestPurpose.ownerThread" : "requestDetail.threadId"), record.threadId],
+    [t(autoReview ? "requestPurpose.ownerTurn" : "requestDetail.turnId"), record.turnId],
+    ...(autoReview ? [[t("requestPurpose.reviewerThread"), record.reviewerThreadId], [t("requestPurpose.reviewerTurn"), record.reviewerTurnId]] : []),
     [t("requestDetail.requestId"), record.relayRequestId],
     ["User-Agent", record.userAgent],
   ] as const
   return <div className="flex flex-col gap-4">
+    {autoReview ? <Badge variant="outline">{t("requestPurpose.autoApprovalReview")}</Badge> : null}
     {record.source === "relay" ? <RelayRequestStatus record={record} /> : interrupted ? <Badge variant="secondary">{t("metrics.interrupted")}</Badge> : <StatusBadge status={record.status} />}
     {record.errorType || record.errorCode || record.errorMessage ? <div className="flex flex-col gap-1 break-words" role="note">
       <p>{interrupted ? t("metrics.clientInterruption") : formatErrorType(record.errorType ?? record.errorCode, language)}</p>

@@ -25,6 +25,7 @@ interface WorkspaceToml {
   cwd: string;
   sandbox?: string;
   approval_policy?: string;
+  approvals_reviewer?: "user" | "auto_review";
   permissions?: string;
 }
 
@@ -85,6 +86,9 @@ export class TomlWorkspacePermissionWriter
         cwd: entry.cwd,
         ...(sandbox === undefined ? {} : { sandbox }),
         ...(approvalPolicy === undefined ? {} : { approvalPolicy }),
+        ...(entry.approvals_reviewer === undefined
+          ? {}
+          : { approvalsReviewer: entry.approvals_reviewer }),
         ...(entry.permissions === undefined
           ? {}
           : { permissions: entry.permissions }),

@@ -99,6 +99,7 @@ export interface ConfiguredWorkspace {
   cwd: string;
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy?: "untrusted" | "on-request" | "never";
+  approvalsReviewer?: "user" | "auto_review";
   permissions?: string;
 }
 
@@ -338,6 +339,9 @@ function validateWorkspaces(
       ...(workspace.approval_policy === undefined
         ? {}
         : { approvalPolicy: workspace.approval_policy }),
+      ...(workspace.approvals_reviewer === undefined
+        ? {}
+        : { approvalsReviewer: workspace.approvals_reviewer }),
       ...(workspace.permissions === undefined
         ? {}
         : { permissions: workspace.permissions }),

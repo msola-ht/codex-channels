@@ -34,6 +34,7 @@ interface WorkspaceTable {
   name: string;
   sandbox?: string;
   approval_policy?: string;
+  approvals_reviewer?: string;
   permissions?: string;
 }
 
@@ -901,6 +902,35 @@ describe("Codex Connect config menu", () => {
       inputIsTTY: false, outputIsTTY: true, output: { write: vi.fn() }, prompts: { select },
     });
     expect(select).not.toHaveBeenCalled();
+  });
+
+  it.each(["auto_review", "user", "clear"])("sets Workspace Auto-review to %s through the existing permissions menu", async (value) => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    (document as unknown as ConfigWithWorkspaces).workspaces[0]!.approvals_reviewer = "auto_review";
+    writeGatewayConfig(fixture.configPath, document);
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(), cancel: vi.fn(), isCancel: () => false,
+      select: vi.fn().mockResolvedValueOnce("permissions")
+        .mockResolvedValueOnce("approvals_reviewer").mockResolvedValueOnce(value)
+        .mockResolvedValueOnce("cancel"),
+    };
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir, environment: fixture.environment,
+      inputIsTTY: true, outputIsTTY: true, output: { write: (text: string) => output.push(text) }, prompts,
+    });
+    const updated = (readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces).workspaces[0];
+    if (value === "clear") expect(updated).not.toHaveProperty("approvals_reviewer");
+    else expect(updated).toHaveProperty("approvals_reviewer", value);
+    expect(prompts.select).toHaveBeenCalledWith(expect.objectContaining({ options: expect.arrayContaining([
+      expect.objectContaining({ value: "approvals_reviewer", label: "工作区默认审批方式", hint: "当前：自动审查" }),
+    ]) }));
+    expect(prompts.select).toHaveBeenCalledWith(expect.objectContaining({
+      message: "选择工作区默认审批方式",
+      options: expect.arrayContaining([expect.objectContaining({ value: "auto_review", label: "自动审查" })]),
+    }));
+    expect(output.join("")).toContain("不改变已加载 Thread");
   });
 
   it("sets workspace sandbox through the menu", async () => {

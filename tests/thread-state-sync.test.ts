@@ -57,6 +57,7 @@ describe("ThreadStateSynchronizer", () => {
         model: "gpt-5.6-sol",
         effort: "high",
         serviceTier: "priority",
+        approvalsReviewer: "auto_review",
         collaborationMode: "plan",
       },
     });
@@ -65,8 +66,21 @@ describe("ThreadStateSynchronizer", () => {
       model: "gpt-5.6-sol",
       effort: "high",
       serviceTier: "priority",
+      approvalsReviewer: "auto_review",
       collaborationMode: "plan",
     });
+  });
+
+  it("preserves the confirmed reviewer across local model changes and clears it on an unknown authoritative value", () => {
+    const router = createBoundRouter();
+    const settings = { model: "test-model", effort: null, serviceTier: null, collaborationMode: "default" as const };
+    router.updateModelSettings("thread-1", { ...settings, approvalsReviewer: "auto_review" });
+    router.updateModelSettings("thread-1", { ...settings, model: "next-model" });
+    expect(router.modelSettings(target)?.approvalsReviewer).toBe("auto_review");
+    new ThreadStateSynchronizer(router).handle({
+      type: "thread.settings.updated", threadId: "thread-1", settings: { ...settings, approvalsReviewer: null },
+    });
+    expect(router.modelSettings(target)?.approvalsReviewer).toBeNull();
   });
 
   it("preserves the Provider when settings notifications omit the immutable field", () => {

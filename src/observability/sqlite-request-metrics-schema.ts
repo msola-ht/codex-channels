@@ -19,6 +19,7 @@ export const metricStorageColumns = [
   "source", "caller_id", "key_id", "credential_generation", "relay_request_id", "delivery_status",
   "response_usage_amount", "upstream_provider", "upstream_attempt_count", "model_attempt_count", "finish_reason", "error_stage", "upstream_error_code", "upstream_error_type", "upstream_http_status", "quota_observed_at_ms",
   "response_time_ms", "generation_timing",
+  "request_purpose", "reviewer_thread_id", "reviewer_turn_id",
 ] as const;
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
 
@@ -114,10 +115,24 @@ export const requestDiagnosticColumnDefinitions = [
   "upstream_http_status INTEGER CHECK (upstream_http_status IS NULL OR (typeof(upstream_http_status) = 'integer' AND upstream_http_status BETWEEN 400 AND 599))",
 ] as const;
 export const quotaObservedAtColumn = "quota_observed_at_ms INTEGER CHECK (quota_observed_at_ms IS NULL OR (typeof(quota_observed_at_ms) = 'integer' AND quota_observed_at_ms BETWEEN 0 AND 9007199254740991))";
+export const autoReviewRequestColumnDefinitions = [
+  "request_purpose TEXT CHECK (request_purpose IS NULL OR request_purpose = 'autoApprovalReview')",
+  "reviewer_thread_id TEXT CHECK (reviewer_thread_id IS NULL OR (typeof(reviewer_thread_id) = 'text' AND length(trim(reviewer_thread_id)) > 0 AND length(reviewer_thread_id) <= 128))",
+  `reviewer_turn_id TEXT CHECK (
+    (reviewer_turn_id IS NULL OR (typeof(reviewer_turn_id) = 'text' AND length(trim(reviewer_turn_id)) > 0 AND length(reviewer_turn_id) <= 128))
+    AND ((request_purpose IS NULL AND reviewer_thread_id IS NULL AND reviewer_turn_id IS NULL)
+      OR (request_purpose IS NOT NULL AND request_purpose = 'autoApprovalReview' AND source = 'owned'
+        AND ((thread_id IS NULL AND turn_id IS NULL)
+          OR (thread_id IS NOT NULL AND turn_id IS NOT NULL
+            AND length(trim(thread_id)) > 0 AND length(thread_id) <= 128
+            AND length(trim(turn_id)) > 0 AND length(turn_id) <= 128))))
+  )`,
+] as const;
 export const modelRequestMetricsTableSql = baseMetricsTableSql.replace(
   "    CHECK (", `    ${[...relayMetricColumnDefinitions, responseUsageAmountColumn, ...requestDiagnosticColumnDefinitions, quotaObservedAtColumn,
     "response_time_ms REAL CHECK (response_time_ms IS NULL OR response_time_ms >= 0)",
     "generation_timing TEXT CHECK (generation_timing IS NULL OR json_valid(generation_timing))",
+    ...autoReviewRequestColumnDefinitions,
   ].join(",\n    ")},\n    CHECK (`,
 );
 export const relayMetricIndexesSql = `
@@ -161,6 +176,35 @@ export const turnExecutionSchemaSql = `
   CREATE INDEX turn_execution_metrics_retention ON turn_execution_metrics (recorded_at_ms);
 `;
 
+export const autoApprovalReviewSchemaSql = `
+  CREATE TABLE auto_approval_review_turns (
+    thread_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    started INTEGER NOT NULL CHECK (started IN (0, 1)),
+    completed INTEGER NOT NULL CHECK (completed IN (0, 1)),
+    continuous INTEGER NOT NULL CHECK (continuous IN (0, 1)),
+    recorded_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, turn_id)
+  );
+  CREATE TABLE auto_approval_reviews (
+    thread_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    review_id TEXT NOT NULL,
+    completed INTEGER NOT NULL CHECK (completed IN (0, 1)),
+    approved INTEGER NOT NULL CHECK (approved IN (0, 1) AND approved <= completed),
+    status TEXT NOT NULL CHECK (
+      (status = 'inProgress' AND completed = 0 AND approved = 0)
+      OR (status = 'approved' AND completed = 1 AND approved = 1)
+      OR (status IN ('denied', 'timedOut', 'aborted', 'unknown') AND completed = 1 AND approved = 0)
+    ),
+    recorded_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, turn_id, review_id)
+  );
+  CREATE INDEX auto_approval_review_turns_retention ON auto_approval_review_turns (recorded_at_ms);
+  CREATE INDEX auto_approval_reviews_retention ON auto_approval_reviews (recorded_at_ms);
+`;
+
 export const initialSchemaSql = `
   CREATE TABLE account_sources (
     source_id TEXT PRIMARY KEY,
@@ -201,6 +245,7 @@ export const initialSchemaSql = `
   ${modelRequestMetricsTableSql}
   ${modelRequestMetricsIndexesSql}
   ${turnExecutionSchemaSql}
+  ${autoApprovalReviewSchemaSql}
   INSERT INTO schema_metadata (name, value) VALUES ('schema_version', ${schemaVersion});
 `;
 
@@ -284,7 +329,7 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
     `).all();
     const tableSql = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'model_request_metrics'").get()?.sql;
     const normalize = (text: string): string => text.replace(/\s+/gu, " ").trim();
-    for (const statement of turnExecutionSchemaSql.split(";").filter(sql => sql.trim())) {
+    for (const statement of (turnExecutionSchemaSql + autoApprovalReviewSchemaSql).split(";").filter(sql => sql.trim())) {
       const name = /CREATE (?:TABLE|INDEX) (\w+)/u.exec(statement)?.[1];
       const actual = database.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name!)?.sql;
       if (typeof actual !== "string" || normalize(actual) !== normalize(statement)) throw new Error("轮次耗时 Schema 结构不匹配");
@@ -294,6 +339,9 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
     }
     if (!normalize(tableSql).includes(normalize(quotaObservedAtColumn))) {
       throw new Error("额度快照时间约束缺失");
+    }
+    for (const definition of autoReviewRequestColumnDefinitions) {
+      if (!normalize(tableSql).includes(normalize(definition))) throw new Error("自动审查请求身份约束缺失");
     }
     const relayIndex = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'model_request_metrics_relay_request'").get()?.sql;
     if (typeof relayIndex !== "string" || normalize(relayIndex) !== normalize(relayMetricIndexesSql.split(";")[0]!)) {

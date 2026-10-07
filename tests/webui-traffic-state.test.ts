@@ -1,8 +1,35 @@
 import { describe, expect, it } from "vitest";
 import { canReuseTrafficSummary, resolveTrafficData, resolveTrafficDetailSnapshot, trafficCallKey, trafficDetailPath } from "../webui/src/lib/traffic-state.js";
 import { modelNameComparison } from "../runtime/model-name-comparison.mjs";
+import { metricsLink, metricsQueryParams } from "../webui/src/lib/metrics-query.js";
 
 describe("traffic request ownership", () => {
+  it("keeps request purpose in request navigation and export parameters without leaking it to other metrics pages", () => {
+    const query = { range: "all" as const, requestPurpose: "autoApprovalReview" as const, offset: 50, limit: 10 };
+    expect(new URLSearchParams(metricsQueryParams(query)).get("requestPurpose")).toBe("autoApprovalReview");
+    expect(new URL(metricsLink("/requests", query), "http://fixture").searchParams.get("requestPurpose")).toBe("autoApprovalReview");
+    for (const path of ["/threads", "/threads/owner-thread", "/errors"]) {
+      expect(new URL(metricsLink(path, query), "http://fixture").searchParams.has("requestPurpose")).toBe(false);
+    }
+    const script = String.raw`
+      import fs from "node:fs"; import ts from "typescript"; import assert from "node:assert/strict";
+      let params=new URLSearchParams("range=all&requestPurpose=autoApprovalReview&offset=50&limit=10");
+      const imports={react:{useEffect(){},useMemo:fn=>fn()},
+        "react-router":{useSearchParams:()=>[params,fn=>{params=fn(params);}]},
+        "@/hooks/use-api":{},"@/lib/api":{}};
+      const code=ts.transpileModule(fs.readFileSync("webui/src/hooks/use-metrics-query.ts","utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+      const exports={};new Function("require","exports",code)(id=>imports[id],exports);
+      let view=exports.useMetricsQuery("all","time",true);
+      assert.equal(view.query.requestPurpose,"autoApprovalReview");assert.equal(view.query.offset,50);
+      view.update({requestPurpose:undefined});assert.equal(params.has("offset"),false);assert.equal(params.has("requestPurpose"),false);
+      params=new URLSearchParams("requestPurpose=autoApprovalReview&offset=50");
+      view=exports.useMetricsQuery("all");assert.equal(view.query.requestPurpose,undefined);
+      view.update({offset:100},false);assert.equal(params.has("requestPurpose"),false);assert.equal(params.get("offset"),"100");
+      params=new URLSearchParams("requestPurpose=unsupported-purpose");
+      assert.equal(exports.useMetricsQuery("all","time",true).query.requestPurpose,"unsupported-purpose");
+    `;
+    expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" })).not.toThrow();
+  });
   it("clears copy feedback when content changes and ignores late clipboard results", () => {
     const script = String.raw`
       import fs from "node:fs"; import ts from "typescript"; import assert from "node:assert/strict";

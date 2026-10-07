@@ -12,9 +12,13 @@ import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
 import { withOutputExecutionAdmission } from "../src/bootstrap/output-execution-admission.js";
 import type { TurnExecutionPort, ThreadQueuePort } from "../src/application/index.js";
 import { SubagentCompletionTracker } from "../src/bootstrap/subagent-completion-tracker.js";
+import { AutoApprovalReviewNotifications } from "../src/bootstrap/auto-approval-review-notifications.js";
+import { AutoApprovalReviewTracker } from "../src/bootstrap/auto-approval-review-tracker.js";
 import { GatewayComponentGraph } from "../src/bootstrap/gateway-component-graph.js";
+import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import { FeishuOutbox } from "../src/surfaces/feishu/outbox.js";
 import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
+import { WeixinOutbox, WeixinReplyContextStore } from "../src/surfaces/weixin/index.js";
 import type { FeishuMessagePort } from "../src/surfaces/feishu/outbox-message-port.js";
 import type { DeliveryCheckpoint } from "../src/surfaces/delivery-receipt.js";
 import type { SurfaceAdapter } from "../src/surfaces/index.js";
@@ -45,6 +49,7 @@ it.concurrent("fences new execution but persists every accepted inbound result b
     bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
     channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
     turnExecution: { stop: async () => { expect(reduced).toBe(100); } },
+    autoApprovalReviewNotifications: { reset: vi.fn() },
     inbound, output, codex: { close }, bindings: { close }, logger,
   });
   try {
@@ -57,6 +62,104 @@ it.concurrent("fences new execution but persists every accepted inbound result b
     try { expect(journal.execute({ type: "summary" })).toMatchObject({ records: 100, pending: 100 }); }
     finally { journal.close(); }
   } finally { await manager.stop(); await inbound.close(); await output.close(); }
+});
+
+it.concurrent.for(["telegram", "feishu"] as const)("confirms auto-review phases through the %s persistent output chain", async (platform, { expect }) => {
+  const f = await fixture(false, platform);
+  const notifications = new AutoApprovalReviewNotifications({
+    targetForThread: threadId => threadId === "thread" ? f.target : undefined,
+    providerForThread: () => "fixture", isBackgroundThread: () => false,
+    publish: event => f.output.publish(event, true), unroutable: vi.fn(),
+  });
+  try {
+    for (const phase of ["started", "completed"] as const) notifications.handle({ threadId: "thread", turnId: "turn", reviewId: "review",
+      phase, status: phase === "started" ? "inProgress" : "denied", approved: false });
+    await f.manager.waitForPersistentOutput(f.target, AbortSignal.timeout(3000));
+    expect(f.rendered.map(event => event.type)).toEqual(["autoApprovalReview.updated", "autoApprovalReview.updated"]);
+    expect(f.sent).toHaveLength(2);
+    expect(f.sent[0]).toContain("审查中"); expect(f.sent[1]).toContain("已拒绝");
+    expect(f.checkpoints.map(value => value.state)).toEqual(["started", "confirmed", "started", "confirmed"]);
+    expect(f.faults).toEqual([]);
+  } finally { await f.close(); }
+  const journal = new SqliteDeliveryJournal(f.directory);
+  try { expect(journal.execute({ type: "summary" })).toMatchObject({ records: 0 }); }
+  finally { journal.close(); }
+});
+
+it.concurrent.for(["telegram", "feishu", "weixin"] as const)("renders persisted recursive review outcomes in %s task and session completion sections", async (platform, { expect }) => {
+  const directory = mkdtempSync(join(tmpdir(), "codexc-review-completion-chain-")); directories.push(directory);
+  const target = { surface: platform, accountId: "fixture@im.bot", conversationId: "actor@im.wechat" };
+  const metrics = new SqliteModelRequestMetricsStore(join(directory, "metrics.sqlite3"));
+  const tracker = new AutoApprovalReviewTracker(metrics, () => "openai", () => { throw new Error("unexpected metric failure"); });
+  const runs = [["thread", "turn"], ["child", "child-turn"], ["grand", "grand-turn"], ["thread", "prior-turn"]] as const;
+  for (const [threadId, turnId] of runs) {
+    tracker.handleNotification({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+    tracker.handleNotification({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+  }
+  metrics.recordSubagentTurn({ parentThreadId: "thread", parentTurnId: "turn", agentThreadId: "child", agentTurnId: "child-turn", agentPath: "/root/child" });
+  metrics.recordSubagentTurn({ parentThreadId: "child", parentTurnId: "child-turn", agentThreadId: "grand", agentTurnId: "grand-turn", agentPath: "/root/child/grand" });
+  for (const [threadId, turnId, status] of [
+    ["thread", "turn", "approved"], ["child", "child-turn", "denied"], ["grand", "grand-turn", "timedOut"],
+    ["grand", "grand-turn", "aborted"], ["thread", "prior-turn", "approved"],
+  ] as const) {
+    tracker.handleNotification({ method: "item/autoApprovalReview/completed", params: { threadId, turnId, reviewId: `review-${status}`, decisionSource: "agent", targetItemId: `item-${status}`,
+      review: { status, riskLevel: "low", riskScore: 1, rationale: "fixture" } } });
+  }
+  const completion: OutputEvent = { target, type: "turn.completed", threadId: "thread", turnId: "turn", status: "completed" };
+  const journalDirectory = join(directory, "journal");
+  const journal = new SqliteDeliveryJournal(journalDirectory);
+  try {
+    journal.execute({ type: "submit", value: { id: "completion", account: surfaceAccountKey(platform, target.accountId),
+      conversation: conversationTargetKey(target), payload: JSON.stringify({ version: 1, event: completion, owner: "actor" }) } });
+  } finally { journal.close(); }
+  const sent: string[] = [];
+  const send = async (_chat: string, text: string) => { sent.push(text); return String(sent.length); };
+  const contexts = new WeixinReplyContextStore(target.accountId);
+  if (platform === "weixin") contexts.remember(target, target.conversationId, "fixture-context");
+  const outbox = platform === "telegram"
+    ? new TelegramOutbox({ sendMessage: async (chat: string, text: string) => ({ message_id: Number(await send(chat, text)) }),
+      editMessageText: async () => true, sendChatAction: async () => true } as unknown as Api, logger, undefined, { accountId: target.accountId })
+    : platform === "feishu"
+      ? new FeishuOutbox(target.accountId, { sendText: async (chat, text) => { await send(chat, text); }, sendPost: async () => {},
+        sendMarkdownCard: send, sendCard: async () => "card", updateCard: async () => {}, createStreamingCard: async () => ({ cardId: "card", messageId: "message" }),
+        updateStreamingCard: async () => {}, finishStreamingCard: async () => {} }, logger)
+      : new WeixinOutbox(target.accountId, { sendText: async ({ text }) => { sent.push(text); } }, contexts, { isAllowed: () => true }, logger);
+  const checkpoints: DeliveryCheckpoint[] = [];
+  const rendered: OutputEvent[] = [];
+  const surface: SurfaceAdapter = { surface: platform, accountId: target.accountId,
+    output: { retains: event => outbox.retains(event), handle: event => outbox.handle(event),
+      deliver: (event, signal, checkpoint) => { rendered.push(event); return outbox.deliver(event, signal, async value => {
+        checkpoints.push(value); await checkpoint(value);
+      }); } },
+    interactions: { request: async () => ({ type: "approval", approved: false }) },
+    start: async () => {}, stop: () => outbox.close(), deliverConfigurationChange: async () => {},
+  };
+  const output = new EventBus<OutputEvent>(logger);
+  const faults: string[] = [];
+  const manager = new SurfaceManager([surface], output, logger, undefined, {
+    autoApprovalReview: (threadId, turnId) => tracker.summary(threadId, turnId),
+    sessionAutoApprovalReview: threadId => metrics.sessionAutoApprovalReviewSummary(threadId),
+    persistence: { directory: journalDirectory, workerUrl: new URL("../dist/delivery/worker.js", import.meta.url),
+      owner: () => "actor", authorized: () => true, fault: code => { faults.push(code); } },
+  });
+  try {
+    await manager.start();
+    await manager.waitForPersistentOutput(target, AbortSignal.timeout(3000));
+    expect(rendered).toHaveLength(1);
+    expect(rendered[0]).toMatchObject({ autoApprovalReview: { total: 4, approved: 1, denied: 1, timedOut: 1, aborted: 1 },
+      sessionAutoApprovalReview: { total: 5, approved: 2, denied: 1, timedOut: 1, aborted: 1 } });
+    const [run, session] = sent.join("\n").replace(/<[^>]*>/g, "").replace(/\*\*/g, "").split("当前会话");
+    expect(run).toContain("自动审查：4 次（含子代理）");
+    expect(session).toContain("自动审查：5 次（含子代理）");
+    for (const section of [run, session]) {
+      for (const label of ["通过", "拒绝", "超时", "中止"]) expect(section).toContain(`${label}：`);
+    }
+    expect(checkpoints.map(value => value.state)).toEqual(["started", "confirmed"]);
+    expect(faults).toEqual([]);
+  } finally { await manager.stop(); await output.close(); metrics.close(); }
+  const reopened = new SqliteDeliveryJournal(journalDirectory);
+  try { expect(reopened.execute({ type: "summary" })).toMatchObject({ records: 0 }); }
+  finally { reopened.close(); }
 });
 
 it.concurrent.for(["queued", "settling", "checkpoint"] as const)("persists derived subagent completion during shutdown (%s)", { timeout: 15_000 }, async (stage, { expect }) => {
@@ -85,6 +188,7 @@ it.concurrent.for(["queued", "settling", "checkpoint"] as const)("persists deriv
     bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
     channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
     turnExecution: { stop: close },
+    autoApprovalReviewNotifications: { reset: vi.fn() },
     subagentCompletion: tracker, inbound, output, codex: { close }, bindings: { close }, logger,
   });
   try {
@@ -432,7 +536,7 @@ it.concurrent.for([false, true])("releases a suspended account's snapshots witho
 
 async function fixture(block = false, platform: "telegram" | "feishu" = "telegram", failFirst = false, failAnswer = false, existingDirectory?: string,
   options: { trackCards?: boolean; telegramEdit?: (...args: unknown[]) => Promise<unknown>; telegramFormat?: "html" | "rich"; feishu?: Partial<FeishuMessagePort>;
-    gitBranch?: ConstructorParameters<typeof SurfaceManager>[3] } = {}) {
+    gitBranch?: ConstructorParameters<typeof SurfaceManager>[3]; autoApprovalReview?: NonNullable<ConstructorParameters<typeof SurfaceManager>[4]>["autoApprovalReview"] } = {}) {
   const target = { surface: platform, accountId: "default", conversationId: "chat" };
   const directory = existingDirectory ?? mkdtempSync(join(tmpdir(), "codexc-state-chain-"));
   if (!existingDirectory) directories.push(directory);
@@ -481,6 +585,7 @@ async function fixture(block = false, platform: "telegram" | "feishu" = "telegra
     start: async () => {}, stop: () => outbox.close(), deliverConfigurationChange: async () => {},
   };
   const manager = new SurfaceManager([surface], output, logger, options.gitBranch, {
+    ...(options.autoApprovalReview ? { autoApprovalReview: options.autoApprovalReview } : {}),
     persistence: { directory, workerUrl: new URL("../dist/delivery/worker.js", import.meta.url),
       owner: () => "actor", authorized: () => authorized, fault: (code) => { faults.push(code); } },
   });
@@ -492,13 +597,17 @@ async function fixture(block = false, platform: "telegram" | "feishu" = "telegra
 it.concurrent.for([false, true])("degrades a persistent completion's optional enrichment and preserves real send failure (failure=%s)", async (failure, { expect }) => {
   const f = await fixture(false, "telegram", failure, false, undefined, {
     gitBranch: async () => { throw new Error("PRIVATE OPTIONAL LOOKUP FAILURE"); },
+    autoApprovalReview: () => ({ approved: 2, denied: 1, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 3, coverage: "complete" }),
   });
   const completion: OutputEvent = { ...base, type: "turn.completed", status: "completed", timing: { modelRequestCount: 7 } };
   try {
     f.output.publish(completion, true);
     await f.manager.waitForPersistentOutput(f.target, AbortSignal.timeout(3_000));
-    expect(f.rendered).toContainEqual(completion);
+    expect(f.rendered).toContainEqual(expect.objectContaining({ ...completion,
+      autoApprovalReview: { approved: 2, denied: 1, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 3, coverage: "complete" },
+    }));
     expect(f.sent).toHaveLength(1);
+    expect(f.sent[0]?.replace(/<[^>]*>/g, "")).toContain("自动审查：3 次（含子代理）");
     expect(f.checkpoints.map((checkpoint) => checkpoint.state)).toEqual(failure ? ["started"] : ["started", "confirmed"]);
     if (failure) await vi.waitFor(() => expect(f.faults).toEqual(["delivery-uncertain"]));
     expect(f.faults).toEqual(failure ? ["delivery-uncertain"] : []);

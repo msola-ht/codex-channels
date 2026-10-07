@@ -138,6 +138,19 @@ export function sendProviderProxyMetrics(
   });
 }
 
+function validAutoReviewIdentity(record: Record<string, unknown>): boolean {
+  const validIdentity = (value: unknown): boolean => value === undefined || value === null
+    || (typeof value === "string" && value.trim().length > 0 && value.length <= 128);
+  if (!validIdentity(record.reviewerThreadId) || !validIdentity(record.reviewerTurnId)) return false;
+  if (record.requestPurpose === undefined || record.requestPurpose === null) {
+    return record.reviewerThreadId == null && record.reviewerTurnId == null;
+  }
+  return record.requestPurpose === "autoApprovalReview"
+    && ((record.threadId === null && record.turnId === null)
+      || (typeof record.threadId === "string" && typeof record.turnId === "string"
+        && validIdentity(record.threadId) && validIdentity(record.turnId)));
+}
+
 function parseMetrics(value: string): ProviderProxyMetrics | undefined {
   let parsed: unknown;
   try {
@@ -160,6 +173,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !oneOf(record.operation, ["response", "compact"])
     || !nullableString(record.threadId)
     || !nullableString(record.turnId)
+    || !validAutoReviewIdentity(record)
     || !nullableString(record.model)
     || (record.requestModel !== undefined && !nullableString(record.requestModel))
     || (record.responseModel !== undefined && !nullableString(record.responseModel))

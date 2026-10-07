@@ -9,7 +9,7 @@ import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
 import { TelegramInteractionPort } from "../src/surfaces/telegram/interactions.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
-const turnStartedPanel = "<b>已开始处理。</b>";
+const turnStartedPanel = "<b>已开始处理。</b>\n\n• <b>审批方式：</b>未知";
 const turnCompletedTitle = "<b>本次运行 · 已完成</b>";
 const turnCompletedPanel = [
   turnCompletedTitle,
@@ -21,6 +21,7 @@ const turnCompletedPanel = [
   "<b>当前会话</b>",
   "• <b>Session：</b>测试会话",
   "• <b>Session ID：</b>thread-1",
+  "• <b>审批方式：</b>未知",
   "• <b>总耗时：</b>未提供",
 ].join("\n");
 
@@ -147,6 +148,22 @@ afterEach(() => {
 });
 
 describe("TelegramOutbox", () => {
+  it.each(["approved", "denied", "timedOut", "aborted"] as const)("delivers auto-review start and %s without approval buttons", async status => {
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(api as unknown as Api, pino({ level: "silent" }));
+    const base = { type: "autoApprovalReview.updated", target, threadId: "thread", turnId: "turn",
+      sourceThreadId: "thread", sourceTurnId: "turn", reviewId: "review" } as const;
+    try {
+      for (const event of [{ ...base, phase: "started", status: "inProgress" }, { ...base, phase: "completed", status }] as const) {
+        expect(outbox.retains(event)).toBe(true);
+        outbox.handle(event);
+      }
+      await drain();
+      expect(api.sent).toEqual(["<b>自动审查开始</b>\n\n• <b>状态：</b>审查中",
+        `<b>自动审查完成</b>\n\n• <b>状态：</b>${{ approved: "已通过", denied: "已拒绝", timedOut: "已超时", aborted: "已中止" }[status]}`]);
+      expect(JSON.stringify(api.sendOptions)).not.toContain("reply_markup");
+    } finally { await outbox.close(); }
+  });
   it.each(["full", "compact", "hidden"] as const)("delivers compaction start before completion without timer merging in %s mode", async (display) => {
     const api = new FakeTelegramApi();
     const outbox = new TelegramOutbox(api as unknown as Api, pino({ level: "silent" }), undefined, { operationUpdateDisplay: display });
@@ -483,11 +500,12 @@ describe("TelegramOutbox", () => {
     outbox.handle({
       ...turnStarted(),
       identity: { kind: "plugin", name: "GitHub" },
+      approvalsReviewer: "auto_review",
     });
     await settle();
     await outbox.close();
 
-    expect(api.sent).toEqual(["<b>已使用 GitHub Plugin 开始处理。</b>"]);
+    expect(api.sent).toEqual(["<b>已使用 GitHub Plugin 开始处理。</b>\n\n• <b>审批方式：</b>自动审查（Auto-review）"]);
   });
 
   it("streams the thinking status as a panel updated in place", async () => {
@@ -893,6 +911,7 @@ describe("TelegramOutbox", () => {
         "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
+        "• <b>审批方式：</b>未知",
         "• <b>总耗时：</b>未提供",
       ].join("\n"),
     ]);
@@ -1792,6 +1811,7 @@ describe("TelegramOutbox", () => {
         "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
+        "• <b>审批方式：</b>未知",
         "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
         "• <b>上下文压缩：</b>2 次",
         "• <b>Goal：</b>进行中 · 12.5 K / 100 K",
@@ -1831,6 +1851,7 @@ describe("TelegramOutbox", () => {
         "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
+        "• <b>审批方式：</b>未知",
         "• <b>Git 分支：</b>feature/weixin-surface",
         "• <b>总耗时：</b>未提供",
       ].join("\n"),

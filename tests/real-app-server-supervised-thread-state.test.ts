@@ -7,17 +7,19 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
-import { toConversationInputEvent } from "../src/codex-client/index.js";
+import { toConversationInputEvent, toThreadStateEvent } from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
+import { secureTestDirectory } from "./support/windows-fixtures.js";
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 
 contractSuite("real supervised App Server thread-state", () => {
-    it("runs paginated history, active-turn Revert and preserved Queue against local Responses", async () => {
+    it("runs confirmed reviewer updates, paginated history, active-turn Revert and preserved Queue against local Responses", async () => {
       const testRuntime = mkdtempSync(join(tmpdir(), "codex-revert-contract-"));
+      secureTestDirectory(testRuntime);
       const codexHome = join(testRuntime, "codex-home");
       const workspace = join(testRuntime, "workspace");
       const socketPath = join(testRuntime, "codex-app-server.sock");
@@ -70,6 +72,8 @@ contractSuite("real supervised App Server thread-state", () => {
       writeFileSync(join(codexHome, "config.toml"), [
         'model = "revert-contract-model"',
         'model_provider = "revert-contract"',
+        'approvals_reviewer = "auto_review"',
+        "thread_unload_delay_secs = 0",
         "",
         "[model_providers.revert-contract]",
         'name = "Revert Contract Provider"',
@@ -99,6 +103,7 @@ contractSuite("real supervised App Server thread-state", () => {
       let threadId: string | undefined;
       const completedStatuses = new Map<string, string>();
       const revertedThreadIds: string[] = [];
+      const observedReviewers: Array<string | null | undefined> = [];
       let removeNotification: (() => void) | undefined;
       const completeResponse = (responseId: string): void => {
         const response = [...apiServerResponses.entries()]
@@ -142,15 +147,21 @@ contractSuite("real supervised App Server thread-state", () => {
             ? undefined
             : new Error(appServerFailure("Revert 合同 App Server 启动失败", stderr)),
         );
+        const rpc = new JsonRpcClient(new UnixWebSocketTransport(socketPath));
         client = new CodexAppServerClient(
-          new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+          rpc,
           { sandbox: "workspace-write" },
         );
         await client.connect();
         const started = await client.startThread(workspace);
         threadId = started.thread.id;
         expect(started.thread.historyMode).toBe("paginated");
+        expect(started.approvalsReviewer).toBe("auto_review");
         removeNotification = client.onNotification((notification) => {
+          const state = toThreadStateEvent(notification);
+          if (state?.type === "thread.settings.updated" && state.threadId === threadId) {
+            observedReviewers.push(state.settings.approvalsReviewer);
+          }
           const event = toConversationInputEvent(notification);
           if (event?.type === "turn.completed") {
             completedStatuses.set(event.turnId, event.status);
@@ -159,6 +170,29 @@ contractSuite("real supervised App Server thread-state", () => {
         });
 
         const firstTurnId = await startCompletedTurn("first revert turn", 0);
+        expect((await client.resumeThread(threadId, workspace)).approvalsReviewer).toBe("auto_review");
+        const turnsBeforeReviewerUpdate = await client.listThreadTurns(threadId);
+        await client.updateThreadApprovalsReviewer(threadId, "user");
+        expect(observedReviewers).toContain("user");
+        expect(await client.listThreadTurns(threadId)).toEqual(turnsBeforeReviewerUpdate);
+        expect((await client.resumeThread(threadId, workspace)).approvalsReviewer).toBe("user");
+        const manual = await client.startThread(workspace, { approvalsReviewer: "user", ephemeral: true });
+        expect(manual.approvalsReviewer).toBe("user");
+        await client.unsubscribeThread(manual.thread.id);
+        const forked = await client.forkThread(threadId, workspace, { approvalsReviewer: "auto_review" });
+        expect(forked.approvalsReviewer).toBe("auto_review");
+        await client.unsubscribeThread(forked.thread.id);
+        const loaded = await client.resumeThread(threadId, workspace, { approvalsReviewer: "auto_review" });
+        expect(loaded.approvalsReviewer).toBe("user");
+        expect(loaded.settingsMatch).toBe(false);
+        for (const approvalsReviewer of ["auto_review", "user"] as const) {
+          await client.unsubscribeThread(threadId);
+          await expect.poll(async () => (await client!.readThread(threadId!)).status.type, { timeout: 5_000 }).toBe("notLoaded");
+          const resumed = await client.resumeThread(threadId, workspace, { approvalsReviewer });
+          expect(resumed.approvalsReviewer).toBe(approvalsReviewer);
+          expect(resumed.settingsMatch).toBe(true);
+        }
+        expect((await client.resumeThread(threadId, workspace)).approvalsReviewer).toBe("user");
         const secondTurnId = await startCompletedTurn("second revert turn", 1);
         const listed = await client.listThreadTurns(threadId, { limit: 25 });
         expect(listed.turns.map((turn) => turn.id)).toEqual([secondTurnId, firstTurnId]);

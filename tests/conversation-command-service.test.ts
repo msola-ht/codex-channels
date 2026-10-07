@@ -63,6 +63,49 @@ function installedPlugin(
 }
 
 describe("ConversationCommandService", () => {
+  it("queries Workspace permissions and applies explicit Auto-review text and Workspace-bound button choices", async () => {
+    const workspace = { id: "main", name: "Main", cwd: "/workspace" };
+    const updateWorkspacePermissions = vi.fn(async () => workspace);
+    const commands = new ConversationCommandService({
+      status: () => conversationStatus({ workspaceId: "main" }),
+      listWorkspaces: () => [workspace], updateWorkspacePermissions,
+    });
+    await expect(commands.execute(target, "workspaceperm")).resolves.toEqual({ kind: "workspace-permissions", workspace });
+    expect(updateWorkspacePermissions).not.toHaveBeenCalled();
+    for (const [input, value] of [["on", "auto_review"], ["off", "user"], ["clear", null]] as const) {
+      await expect(commands.execute(target, "workspaceperm", `autoreview ${input}`)).resolves.toEqual({
+        kind: "outcome", outcome: { type: "workspace.permissions-updated", workspace, update: { kind: "approvals-reviewer", value } },
+      });
+      expect(updateWorkspacePermissions).toHaveBeenLastCalledWith(target, { kind: "approvals-reviewer", value });
+      await expect(commands.selectWorkspaceAutoReview(target, { workspaceId: "main", value })).resolves.toEqual({
+        kind: "outcome", outcome: { type: "workspace.permissions-updated", workspace, update: { kind: "approvals-reviewer", value } },
+      });
+      expect(updateWorkspacePermissions).toHaveBeenLastCalledWith(target, { kind: "approvals-reviewer", value }, "main");
+    }
+    for (const value of ["", "true", "auto_review", "guardian_subagent", "on off"]) {
+      await expect(commands.execute(target, "workspaceperm", `autoreview ${value}`)).rejects.toMatchObject({ code: "workspace.permission.usage" });
+    }
+    expect(isConversationCommandName("autoreview")).toBe(true);
+    expect(updateWorkspacePermissions).toHaveBeenCalledTimes(6);
+  });
+  it("queries and updates only the current Thread reviewer with exact syntax and button identity", async () => {
+    const state = { threadId: "thread-1", reviewer: "auto_review" as const, updated: false };
+    const autoReview = vi.fn(() => state);
+    const updateAutoReview = vi.fn(async () => ({ ...state, updated: true }));
+    const commands = new ConversationCommandService({ autoReview, updateAutoReview });
+    await expect(commands.execute(target, "autoreview")).resolves.toEqual({ kind: "auto-review", state });
+    expect(updateAutoReview).not.toHaveBeenCalled();
+    await commands.execute(target, "autoreview", "on");
+    expect(updateAutoReview).toHaveBeenLastCalledWith(target, true);
+    await commands.execute(target, "autoreview", "off");
+    expect(updateAutoReview).toHaveBeenLastCalledWith(target, false);
+    await commands.selectAutoReview(target, { threadId: "original-thread", enabled: false });
+    expect(updateAutoReview).toHaveBeenLastCalledWith(target, false, "original-thread");
+    for (const input of ["clear", "true", "auto_review", "guardian_subagent", "on off"]) {
+      await expect(commands.execute(target, "autoreview", input)).rejects.toMatchObject({ code: "autoreview.usage" });
+    }
+    expect(updateAutoReview).toHaveBeenCalledTimes(3);
+  });
   it("preserves internal whitespace and newlines in Queue text", () => {
     expect(parseThreadQueueOperation("add first line\n\n  second line  ")).toEqual({
       type: "add",
@@ -277,6 +320,7 @@ describe("ConversationCommandService", () => {
       outcome: {
         type: "workspace.permissions-updated",
         workspace: { ...workspace, approvalPolicy: "never" },
+        update: { kind: "approval", value: "never" },
       },
     });
     expect(updateWorkspacePermissions).toHaveBeenCalledWith(target, {
@@ -1163,6 +1207,7 @@ describe("ConversationCommandService", () => {
         pageCount: 1,
         totalTaskCount: 0,
       })),
+      autoReview: vi.fn(() => ({ threadId: null, reviewer: null, updated: false })),
     };
     const commands = new ConversationCommandService(
       service,
@@ -1180,6 +1225,7 @@ describe("ConversationCommandService", () => {
       ["status", "", "statusForDisplay"],
       ["workspace", "main", "selectWorkspace"],
       ["workspaceperm", "approval never", "updateWorkspacePermissions"],
+      ["autoreview", "", "autoReview"],
       ["stop", "", "stop"],
       ["queue", "add follow up", "queueAdd"],
       ["revert", "list", "revertList"],

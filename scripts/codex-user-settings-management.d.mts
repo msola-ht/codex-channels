@@ -15,6 +15,7 @@ export type CodexUserSettingInput =
     }
   | { kind: "defaults"; model: string; reasoningEffort: string }
   | { kind: "fast"; enabled: boolean }
+  | { kind: "approvals-reviewer"; value: "user" | "auto_review" }
   | { kind: "web-search"; mode: "live" | "indexed" | "cached" | "disabled" }
   | { kind: "update-plan"; enabled: boolean }
   | { kind: "auto-recap"; enabled: boolean }
@@ -43,6 +44,11 @@ export interface CodexUserSettingsState {
   version: string;
   provider: string;
   defaultsEditable: boolean;
+  approvalsReviewer: {
+    value: "user" | "auto_review" | null;
+    editable: boolean;
+    reason?: "unsupported-value" | "managed-policy" | "unavailable";
+  };
   models: Array<{
     model: string;
     displayName: string;

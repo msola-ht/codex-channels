@@ -233,6 +233,19 @@ export function cleanupMetricsDatabase(environment = process.env, options = {}) 
       SELECT rowid FROM turn_execution_metrics ORDER BY recorded_at_ms DESC, rowid DESC LIMIT -1 OFFSET ?
     )`).run(maxRows);
     database.exec("DELETE FROM thread_execution_state WHERE thread_id NOT IN (SELECT thread_id FROM turn_execution_metrics)");
+    database.prepare(`UPDATE auto_approval_review_turns SET continuous = 0
+      WHERE (thread_id, turn_id) IN (SELECT thread_id, turn_id FROM auto_approval_reviews
+        WHERE recorded_at_ms < ? OR rowid IN (SELECT rowid FROM auto_approval_reviews
+          ORDER BY recorded_at_ms DESC, rowid DESC LIMIT -1 OFFSET ?))
+    `).run(Math.max(0, beforeMs), maxRows);
+    for (const table of ["auto_approval_reviews", "auto_approval_review_turns"]) {
+      database.prepare(`DELETE FROM ${table} WHERE recorded_at_ms < ?
+        OR rowid IN (SELECT rowid FROM ${table} ORDER BY recorded_at_ms DESC, rowid DESC LIMIT -1 OFFSET ?)
+      `).run(Math.max(0, beforeMs), maxRows);
+    }
+    database.exec(`DELETE FROM auto_approval_reviews WHERE (thread_id, turn_id) NOT IN (
+      SELECT thread_id, turn_id FROM auto_approval_review_turns
+    )`);
     database.exec("COMMIT");
     if (options.vacuum === true) database.exec("VACUUM");
     const remaining = Number(database.prepare(
@@ -341,6 +354,10 @@ function deleteProviderRows(databasePath, table, provider, allowVacuum) {
     database.exec("PRAGMA busy_timeout = 10000;");
     database.exec("BEGIN IMMEDIATE");
     if (table === "model_request_metrics") {
+      database.prepare(`DELETE FROM auto_approval_reviews WHERE (thread_id, turn_id) IN (
+        SELECT thread_id, turn_id FROM auto_approval_review_turns WHERE provider = ?
+      )`).run(provider);
+      database.prepare("DELETE FROM auto_approval_review_turns WHERE provider = ?").run(provider);
       database.prepare(`DELETE FROM turn_execution_metrics WHERE thread_id IN (
         SELECT thread_id FROM thread_execution_state WHERE provider = ?
       )`).run(provider);

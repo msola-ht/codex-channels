@@ -147,6 +147,7 @@ function workspacePermissionArguments(workspace, passthrough) {
   const overrides = explicitPermissionOverrides(passthrough);
   const permissions = stringValue(workspace?.permissions);
   const approvalPolicy = stringValue(workspace?.approval_policy);
+  const approvalsReviewer = stringValue(workspace?.approvals_reviewer);
   if (!overrides.approval && approvalPolicy === "untrusted") {
     throw new Error(
       "Workspace 审批策略 untrusted 不能传给 Codex CLI 0.150.1；"
@@ -166,18 +167,23 @@ function workspacePermissionArguments(workspace, passthrough) {
       : approvalPolicy
         ? ["--ask-for-approval", approvalPolicy]
         : []),
+    ...(overrides.reviewer || !approvalsReviewer
+      ? []
+      : ["-c", `approvals_reviewer=${JSON.stringify(approvalsReviewer)}`]),
   ];
 }
 
 function explicitPermissionOverrides(args) {
   let sandbox = false;
   let approval = false;
+  let reviewer = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--") break;
     if (["--approve-for-me", "--dangerously-bypass-approvals-and-sandbox"].includes(argument)) {
       sandbox = true;
       approval = true;
+      if (argument === "--approve-for-me") reviewer = true;
       continue;
     }
     if (argument === "--sandbox" || argument === "-s") {
@@ -212,8 +218,9 @@ function explicitPermissionOverrides(args) {
       sandbox = true;
     }
     if (key === "approval_policy") approval = true;
+    if (key === "approvals_reviewer") reviewer = true;
   }
-  return { sandbox, approval };
+  return { sandbox, approval, reviewer };
 }
 
 function table(value) {

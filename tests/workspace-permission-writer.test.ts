@@ -1,6 +1,7 @@
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,6 +22,25 @@ afterEach(() => {
 });
 
 describe("TomlWorkspacePermissionWriter", () => {
+  it("sets and clears an independent Workspace reviewer while preserving the previous file on invalid input", async () => {
+    const fixture = createFixture();
+    const writer = new TomlWorkspacePermissionWriter(fixture.configPath);
+    expect(workspaceEntry(fixture.configPath)).not.toHaveProperty("approvals_reviewer");
+    await writer.updateWorkspacePermissions("codex-connect", { kind: "sandbox", value: "read-only" });
+    await expect(writer.updateWorkspacePermissions("codex-connect", { kind: "approvals-reviewer", value: "auto_review" }))
+      .resolves.toMatchObject({ approvalsReviewer: "auto_review", sandbox: "read-only" });
+    await writer.updateWorkspacePermissions("codex-connect", { kind: "sandbox", value: null });
+    await writer.updateWorkspacePermissions("codex-connect", { kind: "permissions", value: ":read-only" });
+    await expect(writer.updateWorkspacePermissions("codex-connect", { kind: "approvals-reviewer", value: "user" }))
+      .resolves.toMatchObject({ approvalsReviewer: "user", permissions: ":read-only" });
+    const previous = readFileSync(fixture.configPath, "utf8");
+    await expect(writer.updateWorkspacePermissions("codex-connect", {
+      kind: "approvals-reviewer", value: "guardian_subagent" as "user",
+    })).rejects.toThrow("审批审查方式无效");
+    expect(readFileSync(fixture.configPath, "utf8")).toBe(previous);
+    await writer.updateWorkspacePermissions("codex-connect", { kind: "approvals-reviewer", value: null });
+    expect(workspaceEntry(fixture.configPath)).not.toHaveProperty("approvals_reviewer");
+  });
   it("writes sandbox and approval policy back to the configuration", async () => {
     const fixture = createFixture();
     const writer = new TomlWorkspacePermissionWriter(fixture.configPath);

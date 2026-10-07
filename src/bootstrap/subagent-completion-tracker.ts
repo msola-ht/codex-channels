@@ -81,6 +81,7 @@ export interface SubagentCompletionTrackerOptions {
     parentTurnId: string;
     agentPath: string;
   }) => void;
+  onRunAttributionIncomplete?: () => void;
   publish: (event: SubagentCompletedEvent) => void;
   settleDelayMs?: number;
   onReadError?: (error: unknown, agentThreadId: string) => void;
@@ -100,6 +101,14 @@ export class SubagentCompletionTracker {
   private readonly pendingActivities = new Map<string, PendingActivity>();
   private readonly pendingCompletions = new Map<string, PendingCompletion>();
   private readonly pendingParentRuns = new Map<string, PendingParentRun>();
+  private readonly metricParents = new Map<string, { parentThreadId: string; parentTurnId: string; agentPath: string; expiresAtMs: number; followupStart?: number }>();
+  private readonly attributedMetricParents = new Set<string>();
+  private readonly metricTurns = new Map<string, { turnId: string; expiresAtMs: number; sequence: number; started: boolean }>();
+  private readonly metricFollowupStarts = new Map<string, number>();
+  private metricSequence = 0;
+  private readonly metricPaths = new Map<string, string>();
+  private readonly observedMetricTurns = new Set<string>();
+  private readonly observedMetricActivities = new Set<string>();
   private readonly observedFollowupOperations = new Set<string>();
   private closed = false;
   private readonly detached = new Set<ActiveSubagent>();
@@ -113,9 +122,44 @@ export class SubagentCompletionTracker {
     );
   }
 
+  pendingParentTurns(): { threadId: string; turnId: string }[] {
+    return [...this.pendingParentRuns.values()].map(run => ({ threadId: run.parentThreadId, turnId: run.parentTurnId }));
+  }
+
+  resetRunAttribution(isAffected: (threadId: string) => boolean = () => true): void {
+    const affectedChildren = new Set<string>();
+    for (const [threadId, parent] of this.metricParents) {
+      if (!isAffected(threadId) && !isAffected(parent.parentThreadId)) continue;
+      affectedChildren.add(threadId);
+      this.metricParents.delete(threadId);
+    }
+    const affected = (threadId: string) => affectedChildren.has(threadId) || isAffected(threadId);
+    for (const entries of [this.metricTurns, this.metricPaths]) {
+      for (const threadId of entries.keys()) if (affected(threadId)) entries.delete(threadId);
+    }
+    for (const key of this.metricFollowupStarts.keys()) {
+      if (affected(key.split("\u0000")[0]!)) this.metricFollowupStarts.delete(key);
+    }
+    for (const observed of [this.observedMetricActivities, this.observedMetricTurns]) {
+      for (const key of observed) if (affected(key.split("\u0000")[0]!)) observed.delete(key);
+    }
+    for (const key of this.attributedMetricParents) {
+      const [parentThreadId, , agentThreadId] = key.split("\u0000");
+      if (affected(parentThreadId!) || affected(agentThreadId!)) this.attributedMetricParents.delete(key);
+    }
+    this.options.onRunAttributionIncomplete?.();
+  }
+
   handle(event: OutputEvent): void {
     if (this.closed || this.drainTask) return;
     if (event.type === "subagent.spawned") {
+      const metricKey = `${event.threadId}\u0000${event.turnId}\u0000${event.agentThreadId}`;
+      if (!this.attributedMetricParents.has(metricKey)) {
+        this.metricParents.set(event.agentThreadId, { parentThreadId: event.threadId, parentTurnId: event.turnId,
+          agentPath: event.agentPath, expiresAtMs: Date.now() + pendingTerminalTtlMs });
+        this.tryRecordMetricRun(event.agentThreadId);
+        this.trimMetricObservations();
+      }
       this.rememberParentRun(event);
       if (!this.active.has(event.agentThreadId)) this.register(event);
       return;
@@ -160,6 +204,7 @@ export class SubagentCompletionTracker {
   }
 
   handleInput(event: ConversationInputEvent): void {
+    this.observeMetricRun(event);
     if (this.closed || this.drainTask) return;
     if (event.type === "turn.started") {
       const entry = this.active.get(event.threadId);
@@ -205,6 +250,111 @@ export class SubagentCompletionTracker {
         this.forgetParentRun(event);
         this.markNativeCompletion(event);
       }
+    }
+  }
+
+  /** Attribution also runs for descendants that have no channel binding or output. */
+  private observeMetricRun(event: ConversationInputEvent): void {
+    if (this.closed || this.drainTask) return;
+    this.metricSequence += 1;
+    for (const [threadId, pending] of this.metricParents) {
+      if (pending.expiresAtMs > Date.now()) continue;
+      this.metricParents.delete(threadId);
+      this.options.onRunAttributionIncomplete?.();
+    }
+    for (const [threadId, pending] of this.metricTurns) {
+      if (pending.expiresAtMs > Date.now()) continue;
+      this.metricTurns.delete(threadId);
+      if (this.metricParents.has(threadId)) this.options.onRunAttributionIncomplete?.();
+    }
+    let agentThreadId: string;
+    if (event.type === "turn.started" || event.type === "turn.completed") {
+      agentThreadId = event.threadId;
+      const key = `${agentThreadId}\u0000${event.turnId}`;
+      if (this.observedMetricTurns.has(key)) return;
+      const previous = this.metricTurns.get(agentThreadId);
+      if (previous && previous.turnId !== event.turnId && this.metricParents.has(agentThreadId)) this.options.onRunAttributionIncomplete?.();
+      this.metricTurns.set(agentThreadId, { turnId: event.turnId, expiresAtMs: Date.now() + pendingTerminalTtlMs,
+        sequence: previous?.turnId === event.turnId ? previous.sequence : this.metricSequence,
+        started: event.type === "turn.started" || (previous?.turnId === event.turnId && previous.started) });
+    } else if (event.type === "item.subagentActivity" && (event.kind === "started" || event.kind === "interacted")) {
+      const key = `${event.threadId}\u0000${event.turnId}\u0000${event.itemId}`;
+      if (this.observedMetricActivities.has(key)) return;
+      this.observedMetricActivities.add(key);
+      agentThreadId = event.agentThreadId;
+      this.metricPaths.set(agentThreadId, event.agentPath);
+      const existing = this.metricParents.get(agentThreadId);
+      if (event.kind === "started" || (existing?.parentThreadId === event.threadId && existing.parentTurnId === event.turnId)) {
+        this.metricParents.set(agentThreadId, { parentThreadId: event.threadId, parentTurnId: event.turnId,
+          agentPath: event.agentPath, expiresAtMs: Date.now() + pendingTerminalTtlMs,
+          ...(existing?.followupStart === undefined ? {} : { followupStart: existing.followupStart }) });
+      }
+    } else if (event.type === "item.operation.updated" && event.operation.kind === "subagent"
+      && event.operation.action === "followup_task") {
+      const operationKey = `${event.threadId}\u0000${event.turnId}\u0000${event.operation.itemId}`;
+      if (event.operation.status === "running") {
+        this.metricFollowupStarts.set(operationKey, this.metricSequence);
+        this.trimMetricObservations();
+        return;
+      }
+      if (event.operation.status !== "completed") return;
+      const operationStart = this.metricFollowupStarts.get(operationKey);
+      this.metricFollowupStarts.delete(operationKey);
+      if (operationStart === undefined) {
+        this.options.onRunAttributionIncomplete?.();
+        return;
+      }
+      for (const receiver of event.operation.receiverThreadIds ?? []) {
+        const candidate = this.metricTurns.get(receiver);
+        // A prior terminal or unrelated running turn cannot belong to this followup.
+        if (candidate && (!candidate.started || operationStart === undefined || candidate.sequence <= operationStart)) {
+          this.metricTurns.delete(receiver);
+          this.options.onRunAttributionIncomplete?.();
+        }
+        this.metricParents.set(receiver, { parentThreadId: event.threadId, parentTurnId: event.turnId,
+          agentPath: this.metricPaths.get(receiver) ?? this.active.get(receiver)?.agentPath ?? "", expiresAtMs: Date.now() + pendingTerminalTtlMs,
+          followupStart: operationStart });
+        this.tryRecordMetricRun(receiver);
+      }
+      this.trimMetricObservations();
+      return;
+    } else if (event.type === "item.subagentActivity" && (event.kind === "completed" || event.kind === "interrupted")) {
+      if (this.metricParents.delete(event.agentThreadId)) this.options.onRunAttributionIncomplete?.();
+      return;
+    } else return;
+    this.tryRecordMetricRun(agentThreadId);
+    this.trimMetricObservations();
+  }
+
+  private tryRecordMetricRun(agentThreadId: string): void {
+    const parent = this.metricParents.get(agentThreadId);
+    const turn = this.metricTurns.get(agentThreadId);
+    if (parent?.followupStart !== undefined && (!turn?.started || turn.sequence <= parent.followupStart)) return;
+    if (parent?.agentPath && turn) {
+      this.recordMetricRun({ parentThreadId: parent.parentThreadId, parentTurnId: parent.parentTurnId,
+        agentPath: parent.agentPath, agentThreadId, agentTurnId: turn.turnId });
+      this.metricParents.delete(agentThreadId);
+      this.metricTurns.delete(agentThreadId);
+    }
+  }
+
+  private trimMetricObservations(): void {
+    for (const pending of [this.metricParents, this.metricTurns, this.metricPaths]) {
+      while (pending.size > maxPendingTerminals) {
+        const threadId = pending.keys().next().value!;
+        pending.delete(threadId);
+        if (pending === this.metricParents || this.metricParents.has(threadId)) this.options.onRunAttributionIncomplete?.();
+      }
+    }
+    for (const observed of [this.observedMetricTurns, this.observedMetricActivities, this.attributedMetricParents]) {
+      while (observed.size > maxObservedFollowupOperations) {
+        observed.delete(observed.values().next().value!);
+        this.options.onRunAttributionIncomplete?.();
+      }
+    }
+    while (this.metricFollowupStarts.size > maxPendingTerminals) {
+      this.metricFollowupStarts.delete(this.metricFollowupStarts.keys().next().value!);
+      this.options.onRunAttributionIncomplete?.();
     }
   }
 
@@ -275,6 +425,13 @@ export class SubagentCompletionTracker {
     this.pendingActivities.clear();
     this.pendingCompletions.clear();
     this.pendingParentRuns.clear();
+    this.metricParents.clear();
+    this.attributedMetricParents.clear();
+    this.metricTurns.clear();
+    this.metricPaths.clear();
+    this.metricFollowupStarts.clear();
+    this.observedMetricTurns.clear();
+    this.observedMetricActivities.clear();
     this.observedFollowupOperations.clear();
   }
 
@@ -482,13 +639,14 @@ export class SubagentCompletionTracker {
       entry.terminalTurnId = agentTurnId;
       this.schedule(agentThreadId, entry);
     }
-    this.options.onRunStarted?.({
-      agentThreadId,
-      agentTurnId,
-      parentThreadId: entry.parentThreadId,
-      parentTurnId: entry.parentTurnId,
-      agentPath: entry.agentPath,
-    });
+  }
+
+  private recordMetricRun(details: Parameters<NonNullable<SubagentCompletionTrackerOptions["onRunStarted"]>>[0]): void {
+    const key = `${details.agentThreadId}\u0000${details.agentTurnId}`;
+    if (this.observedMetricTurns.has(key)) return;
+    this.observedMetricTurns.add(key);
+    this.attributedMetricParents.add(`${details.parentThreadId}\u0000${details.parentTurnId}\u0000${details.agentThreadId}`);
+    this.options.onRunStarted?.(details);
   }
 
   private rememberPendingStart(agentThreadId: string, turnId: string): void {

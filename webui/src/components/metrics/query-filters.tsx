@@ -17,7 +17,7 @@ import { RangeSelector } from "@/components/metrics/range-selector"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { useMetricsProviders } from "@/hooks/use-metrics-query"
 
-export function QueryFilters(props: { query: MetricsQuery; onChange: (query: Partial<MetricsQuery>) => void; threadId?: string; showThreadFilters?: boolean; revision?: unknown }) {
+export function QueryFilters(props: { query: MetricsQuery; onChange: (query: Partial<MetricsQuery>) => void; threadId?: string; showThreadFilters?: boolean; showRequestPurpose?: boolean; revision?: unknown }) {
   const { t } = useTranslation()
   const providers = useMetricsProviders(props.revision)
   // 路由前进/后退和逐层跳转时重建草稿；翻页不影响已填写的筛选。
@@ -28,7 +28,7 @@ export function QueryFilters(props: { query: MetricsQuery; onChange: (query: Par
   </>
 }
 
-function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true, providers, providersLoading, providersError }: { query: MetricsQuery; onChange: (query: Partial<MetricsQuery>) => void; threadId?: string; showThreadFilters?: boolean; providers: string[]; providersLoading: boolean; providersError: string | null }) {
+function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true, showRequestPurpose = false, providers, providersLoading, providersError }: { query: MetricsQuery; onChange: (query: Partial<MetricsQuery>) => void; threadId?: string; showThreadFilters?: boolean; showRequestPurpose?: boolean; providers: string[]; providersLoading: boolean; providersError: string | null }) {
   const { t } = useTranslation()
   const id = useId()
   const [draft, setDraft] = useState(query)
@@ -46,7 +46,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
     ["callerId", t("filters.caller")],
   ] as Array<["threadId" | "turnId" | "model" | "callerId", string]>
   const scopedFields = !showThreadFilters ? (["threadId", "turnId"] as const).filter((key) => Boolean(query[key])) : []
-  const filterCount = [range !== "all", selectedProviders.length > 0, ...textFields.map(([key]) => Boolean(draft[key]?.trim())), Boolean(draft.source), Boolean(draft.operation), Boolean(draft.status)].filter(Boolean).length + scopedFields.length
+  const filterCount = [range !== "all", selectedProviders.length > 0, ...textFields.map(([key]) => Boolean(draft[key]?.trim())), Boolean(draft.source), Boolean(draft.operation), Boolean(draft.status), showRequestPurpose && Boolean(draft.requestPurpose)].filter(Boolean).length + scopedFields.length
   const apply = () => {
       if (range === null) { setOpen(true); return }
       if (range === "custom" && (!draft.from || !draft.to || draft.from > draft.to)) {
@@ -61,6 +61,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
         operation: draft.operation || undefined,
         status: draft.status || undefined,
         source: draft.source || undefined,
+        requestPurpose: showRequestPurpose ? draft.requestPurpose || undefined : undefined,
         provider: selectedProviders.length === 0 ? undefined : selectedProviders,
         filter: draft.filter?.trim() || undefined,
       }
@@ -70,7 +71,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
       setOpen(false)
   }
   const reset = () => {
-    const cleared: MetricsQuery = { range: "all", from: undefined, to: undefined, threadId: undefined, turnId: undefined, provider: undefined, model: undefined, operation: undefined, status: undefined, filter: undefined, source: undefined, callerId: undefined }
+    const cleared: MetricsQuery = { range: "all", from: undefined, to: undefined, threadId: undefined, turnId: undefined, provider: undefined, model: undefined, operation: undefined, status: undefined, filter: undefined, source: undefined, callerId: undefined, requestPurpose: undefined }
     setDraft(cleared)
     setRange("all")
     setDateError(false)
@@ -127,6 +128,15 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
         {textFields.map(([key, label]) => (
           <Field key={key}><FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel><Input id={`${id}-${key}`} value={draft[key] ?? ""} maxLength={128} placeholder={t("common.all")} onChange={(event) => set(key, event.target.value)} /></Field>
         ))}
+        {showRequestPurpose ? <Field>
+          <FieldLabel htmlFor={`${id}-purpose`}>{t("requestPurpose.label")}</FieldLabel>
+          <Select items={[{ value: "all", label: t("common.all") }, { value: "autoApprovalReview", label: t("requestPurpose.autoApprovalReview") }]} value={draft.requestPurpose || "all"} onValueChange={(value) => {
+            if (value === "all" || value === "autoApprovalReview") setDraft(previous => ({ ...previous, requestPurpose: value === "all" ? undefined : value }))
+          }}>
+            <SelectTrigger id={`${id}-purpose`}><SelectValue /></SelectTrigger>
+            <SelectContent><SelectGroup><SelectItem value="all">{t("common.all")}</SelectItem><SelectItem value="autoApprovalReview">{t("requestPurpose.autoApprovalReview")}</SelectItem></SelectGroup></SelectContent>
+          </Select>
+        </Field> : null}
         {([
           ["source", t("filters.source"), [["owned", t("filters.owned")], ["relay", t("filters.relay")]]],
           ["operation", t("filters.operation"), [["response", t("filters.response")], ["compact", t("metrics.compact")]]],

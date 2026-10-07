@@ -3,6 +3,7 @@
 本目录保存 npm CLI 与已编译 Gateway 必须直接共享的稳定 JavaScript 模块，不承载会话业务。
 
 - `request-timing.mjs` / `request-timing.d.mts`：指标 IPC、存储、CLI 与 WebUI 共用的生成区间校验和观测速度计算；无 I/O、不依赖调试转储。
+- `auto-review-metadata.mjs` / `auto-review-metadata.d.mts`：Provider 指标与转储读取共用的自动审查来源、父任务及原始审查身份投影；只接受明确的 `guardian_review` 来源和有界标识，不读取文件或推断缺失归属。
 
 - `openai-credentials.mjs` / `openai-credentials.d.mts`：有界读取当前 Codex Home 登录缓存，仅在账户 ID 与官方额度账户一致时返回 `last_refresh` 凭证刷新时间；不返回凭据、不刷新登录、不读取订阅日期。
 

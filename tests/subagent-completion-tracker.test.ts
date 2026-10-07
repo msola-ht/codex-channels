@@ -12,6 +12,11 @@ const target = {
   conversationId: "conversation-1",
 };
 
+function observeFollowup(tracker: SubagentCompletionTracker, status: "running" | "completed") {
+  tracker.handleInput({ type: "item.operation.updated", threadId: "parent-1", turnId: "turn-2",
+    operation: { itemId: "followup-2", kind: "subagent", action: "followup_task", status, receiverThreadIds: ["agent-1"] } });
+}
+
 function summary() {
   return {
     threadId: "agent-1",
@@ -523,6 +528,8 @@ describe("SubagentCompletionTracker", () => {
       error: null,
     });
     tracker.handleInput(completedActivity());
+    observeFollowup(tracker, "running");
+    observeFollowup(tracker, "completed");
     tracker.handle(contacted());
     tracker.handleInput({
       type: "turn.started",
@@ -665,6 +672,7 @@ describe("SubagentCompletionTracker", () => {
       threadId: "agent-1",
       turnId: "agent-turn-1",
     });
+    observeFollowup(tracker, "running");
     tracker.handleInput({
       type: "turn.started",
       threadId: "agent-1",
@@ -679,6 +687,7 @@ describe("SubagentCompletionTracker", () => {
     });
     tracker.handleInput(completedActivity());
     tracker.handle(contacted());
+    observeFollowup(tracker, "completed");
     tracker.handleInput({
       type: "turn.completed",
       threadId: "agent-1",
@@ -769,6 +778,8 @@ describe("SubagentCompletionTracker", () => {
       threadId: "agent-1",
       turnId: "agent-turn-1",
     });
+    observeFollowup(tracker, "running");
+    observeFollowup(tracker, "completed");
     tracker.handle(contacted());
     tracker.handleInput({
       type: "turn.started",

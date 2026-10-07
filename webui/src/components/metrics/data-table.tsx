@@ -191,11 +191,12 @@ function SortableHeader<TData extends RowData>({
   const button = (
     <Button
       variant="ghost"
-      size="sm"
-      className="-ml-2 h-7 gap-1 px-1.5 text-muted-foreground hover:text-foreground"
+      size="default"
+      data-slot="sortable-header"
+      className="h-7 gap-1 border-0 px-0 has-data-[icon=inline-end]:pr-0 text-muted-foreground hover:text-foreground"
       onClick={column.getToggleSortingHandler()}
     >
-      {children}
+      <span>{children}</span>
       {sorted === "asc" ? (
         <ArrowUpIcon data-icon="inline-end" />
       ) : sorted === "desc" ? (
@@ -478,15 +479,15 @@ export function DataTable<TData extends RowData>({
                     <TableHead
                       key={header.id}
                       colSpan={header.colSpan}
-                      className={cn("h-9", numericColumnIds.includes(header.column.id) && "text-right [&_button]:ml-0 [&_button]:-mr-2")}
+                      className={cn("h-9", numericColumnIds.includes(header.column.id) && "text-right")}
                       aria-sort={header.column.getCanSort()
                         ? header.column.getIsSorted() === "asc" ? "ascending"
                           : header.column.getIsSorted() === "desc" ? "descending" : "none"
                         : undefined}
                     >
-                      {header.isPlaceholder ? null : (
-                        <table.FlexRender header={header} />
-                      )}
+                      <div className={cn("flex h-7 items-center", numericColumnIds.includes(header.column.id) && "justify-end [&_[data-slot=sortable-header]]:flex-row-reverse")}>
+                        {header.isPlaceholder ? null : <table.FlexRender header={header} />}
+                      </div>
                     </TableHead>
                   ))}
                 </TableRow>

@@ -22,5 +22,6 @@ export function metricsLink(path: string, query: MetricsQuery, scope: Partial<Me
   delete next.limit
   delete next.sort
   delete next.direction
+  if (path !== "/requests") delete next.requestPurpose
   return `${path}?${metricsQueryParams(next)}`
 }

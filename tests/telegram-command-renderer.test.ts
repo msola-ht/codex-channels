@@ -3,6 +3,8 @@ import type { Context } from "grammy";
 
 import {
   modelEffortKeyboard,
+  autoReviewKeyboard,
+  threadAutoReviewKeyboard,
   modelProviderSelectionKeyboard,
   modelSelectionKeyboard,
   renderTelegramCommandResult,
@@ -15,6 +17,21 @@ import {
 import { formatRuntimeMcpStatusUpdate } from "../src/surfaces/runtime-status-format.js";
 
 describe("Telegram command renderer", () => {
+  it("uses compact explicit Auto-review choices within the Telegram callback limit", () => {
+    const buttons = autoReviewKeyboard("a".repeat(24)).inline_keyboard.flat();
+    expect(buttons.map(button => button.text)).toEqual(["工作区默认：自动审查", "工作区默认：手动审批", "工作区默认：跟随 Codex 默认"]);
+    expect(buttons.map(button => (button as { callback_data: string }).callback_data)).toEqual([
+      `ar:on:${"a".repeat(24)}`, `ar:off:${"a".repeat(24)}`, `ar:clear:${"a".repeat(24)}`,
+    ]);
+    expect(buttons.every(button => Buffer.byteLength((button as { callback_data: string }).callback_data) <= 64)).toBe(true);
+  });
+  it("distinguishes current Thread choices and preserves callback identity", () => {
+    const buttons = threadAutoReviewKeyboard("thread-token").inline_keyboard.flat();
+    expect(buttons.map(button => button.text)).toEqual(["当前会话：自动审查", "当前会话：手动审批"]);
+    expect(buttons.map(button => (button as { callback_data: string }).callback_data)).toEqual([
+      "tar:on:thread-token", "tar:off:thread-token",
+    ]);
+  });
   it("renders reasoning-effort buttons after model selection", async () => {
     const result = {
       kind: "models" as const,

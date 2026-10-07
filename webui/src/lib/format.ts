@@ -1,5 +1,11 @@
-import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord } from "./types"
+import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
 import type { Translate } from "./i18n/messages"
+
+export function requestMethodDisplay(record: RequestRecord | TrafficExchangeSummary, t: Translate): { label: string; variant: "secondary" | "outline" } {
+  if (record.requestPurpose === "autoApprovalReview") return { label: t("requestMethod.review"), variant: "secondary" }
+  if (("operation" in record && record.operation === "compact") || ("requestKind" in record && record.requestKind === "compaction")) return { label: t("requestMethod.compact"), variant: "secondary" }
+  return { label: record.transport === "websocket" ? "wss" : record.transport === "http" ? "http" : "—", variant: "outline" }
+}
 
 /** 调用转储使用 clp，请求指标使用精确账户 Provider clp-<id>。 */
 export function isClinePassProvider(provider: string | null | undefined): boolean {
@@ -87,9 +93,9 @@ export function formatTime(value: number | null | undefined, timeZone = getServe
   return `${formatCalendarDay(value, timeZone)} ${time}`
 }
 
-/** Request lists distinguish calls within the same minute; full precision remains in details. */
+/** Request lists omit the year but retain seconds; full precision remains in details. */
 export function formatRequestTime(value: number): string {
-  return formatTimestamp(value).slice(0, -4)
+  return formatTimestamp(value).slice(5, -4)
 }
 
 /** Detail timestamps retain seconds and milliseconds in the server time zone. */

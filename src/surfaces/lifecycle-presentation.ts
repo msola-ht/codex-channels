@@ -7,6 +7,7 @@ import type {
   OutputEvent,
   ResponseUsageSummary,
   ThreadGoal,
+  ThreadApprovalsReviewer,
   TurnErrorCode,
   TurnStartIdentity,
   TurnTaskMetricsSummary,
@@ -19,6 +20,7 @@ import {
   formatRemainingRateLimitWindow,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { formatThreadApprovalsReviewer } from "./conversation-workspace-status-command-format.js";
 import {
   formatElapsedDuration,
 } from "./elapsed-duration.js";
@@ -42,6 +44,26 @@ export interface LifecyclePresentation {
   fields: readonly LifecyclePresentationField[];
   sections?: readonly LifecyclePresentationSection[];
   footer?: { label: string; value: string };
+}
+
+export function createAutoApprovalReviewPresentation(
+  event: Extract<OutputEvent, { type: "autoApprovalReview.updated" }>,
+): LifecyclePresentation {
+  const status = {
+    inProgress: "审查中",
+    approved: "已通过",
+    denied: "已拒绝",
+    timedOut: "已超时",
+    aborted: "已中止",
+  }[event.status];
+  return {
+    title: event.phase === "started" ? "自动审查开始" : "自动审查完成",
+    fields: [
+      { label: "状态", value: status },
+      ...(event.sourceThreadId !== event.threadId ? [{ label: "来源", value: "子代理" }] : []),
+      ...(event.background ? [{ label: "任务", value: `后台任务 · ${event.threadId.slice(0, 12)}` }] : []),
+    ],
+  };
 }
 
 export interface LifecyclePresentationLeafField {
@@ -94,6 +116,7 @@ type StartupStatus = Pick<
   | "modelProvider"
   | "effort"
   | "serviceTier"
+  | "approvalsReviewer"
   | "modelPending"
   | "effortPending"
   | "fastModePending"
@@ -200,6 +223,7 @@ export function createStartupPresentation(
             label: "协作模式",
             value: `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
           },
+          { label: "审批方式", value: formatThreadApprovalsReviewer(status.approvalsReviewer) },
         ],
       },
       ...(usesOpenAiAccount(status.modelProvider) && status.weeklyLimit
@@ -238,6 +262,7 @@ function openAiConnectivityFields(
 export function createTurnStartedPresentation(
   backgroundThreadId?: string,
   identity?: TurnStartIdentity,
+  approvalsReviewer?: ThreadApprovalsReviewer | null,
 ): LifecyclePresentation {
   return {
     title: identity
@@ -245,9 +270,10 @@ export function createTurnStartedPresentation(
       : backgroundThreadId
         ? "后台任务继续处理中。"
         : "已开始处理。",
-    fields: backgroundThreadId
-      ? [{ label: "Session ID", value: backgroundThreadId }]
-      : [],
+    fields: [
+      ...(backgroundThreadId ? [{ label: "Session ID", value: backgroundThreadId }] : []),
+      { label: "审批方式", value: formatThreadApprovalsReviewer(approvalsReviewer) },
+    ],
   };
 }
 
@@ -436,6 +462,7 @@ export function createTurnCompletedPresentation(
       : []),
     { label: "Session", value: event.sessionName ?? "未命名" },
     { label: "Session ID", value: event.threadId },
+    { label: "审批方式", value: formatThreadApprovalsReviewer(event.approvalsReviewer) },
   ];
   const runFields: LifecyclePresentationField[] = [];
   const accountFields: LifecyclePresentationField[] = [];
@@ -636,6 +663,12 @@ export function createTurnCompletedPresentation(
   }
   runFields.push({ label: "本轮耗时", value: event.durationMs === undefined ? "未提供" : formatElapsedDuration(event.durationMs) });
   runFields.push(...performanceFields(event.timing?.performance));
+  if (event.autoApprovalReview) {
+    runFields.push(autoApprovalReviewField(event.autoApprovalReview));
+  }
+  if (event.sessionAutoApprovalReview) {
+    sessionFields.push(autoApprovalReviewField(event.sessionAutoApprovalReview));
+  }
   if (event.taskAggregate) {
     const task = event.taskAggregate;
     const taskFields: LifecyclePresentationField[] = [
@@ -756,6 +789,26 @@ export function renderPlainLifecyclePresentation(
       ? ["", `${presentation.footer.label}：${presentation.footer.value}`]
       : []),
   ].join("\n");
+}
+
+function autoApprovalReviewField(
+  review: NonNullable<Extract<OutputEvent, { type: "turn.completed" }>["autoApprovalReview"]>,
+): LifecyclePresentationField {
+  const outcomes = [
+    ["通过", review.approved], ["拒绝", review.denied], ["超时", review.timedOut],
+    ["中止", review.aborted], ["进行中", review.inProgress], ["结果未知", review.unknown],
+  ] as const;
+  return {
+    label: "自动审查",
+    value: review.coverage === "complete"
+      ? `${review.total} 次（含子代理）`
+      : review.coverage === "partial"
+        ? `已记录 ${review.total} 次（含子代理）`
+        : review.total > 0
+          ? `至少 ${review.total} 次（含子代理）`
+          : "未知（含子代理）",
+    subfields: outcomes.filter(([, count]) => count > 0).map(([label, count]) => ({ label, value: `${count} 次` })),
+  };
 }
 
 export function renderStructuredLifecyclePresentation(

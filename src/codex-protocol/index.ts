@@ -7,6 +7,8 @@ export type { InitializeResponse } from "./generated/InitializeResponse.js";
 export type { RequestId } from "./generated/RequestId.js";
 export type { JsonValue } from "./generated/serde_json/JsonValue.js";
 export type { ServerNotification } from "./generated/ServerNotification.js";
+export type { ItemGuardianApprovalReviewStartedNotification } from "./generated/v2/ItemGuardianApprovalReviewStartedNotification.js";
+export type { ItemGuardianApprovalReviewCompletedNotification } from "./generated/v2/ItemGuardianApprovalReviewCompletedNotification.js";
 export type { ServerRequest } from "./generated/ServerRequest.js";
 export type { CodexErrorInfo } from "./generated/v2/CodexErrorInfo.js";
 export type { Thread } from "./generated/v2/Thread.js";
@@ -19,6 +21,7 @@ export type { ThreadTurnsListResponse } from "./generated/v2/ThreadTurnsListResp
 export type { Turn } from "./generated/v2/Turn.js";
 export type { ConfigReadParams } from "./generated/v2/ConfigReadParams.js";
 export type { ConfigReadResponse } from "./generated/v2/ConfigReadResponse.js";
+export type { ConfigRequirementsReadResponse } from "./generated/v2/ConfigRequirementsReadResponse.js";
 export type {
   CollaborationModeListResponse,
 } from "./generated/v2/CollaborationModeListResponse.js";
@@ -34,6 +37,8 @@ export type {
   ThreadMetadataUpdateResponse,
 } from "./generated/v2/ThreadMetadataUpdateResponse.js";
 export type { ThreadReadResponse } from "./generated/v2/ThreadReadResponse.js";
+export type { ThreadSettingsUpdateParams } from "./generated/v2/ThreadSettingsUpdateParams.js";
+export type { ThreadSettingsUpdateResponse } from "./generated/v2/ThreadSettingsUpdateResponse.js";
 export type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.js";
 export type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
 export type { DynamicToolSpec } from "./generated/v2/DynamicToolSpec.js";

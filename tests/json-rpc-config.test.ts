@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
@@ -204,6 +204,71 @@ describe("JsonRpcClient config", () => {
         .toEqual({ includeLayers: true });
       expect(transport.sent.find((message) => message.method === "config/batchWrite")?.params)
         .toMatchObject({ expectedVersion: "sha256:current" });
+    });
+
+    it.each([
+      null,
+      { allowedApprovalsReviewers: null, featureRequirements: null },
+      { allowedApprovalsReviewers: ["user"], featureRequirements: { auto_review: false } },
+      { allowedApprovalsReviewers: null, featureRequirements: { guardian_approval: false } },
+    ])(
+      "reads managed reviewer requirements only when explicitly requested: %j", async (requirements) => {
+        const transport = new FakeTransport();
+        transport.configLayers = [{ name: { type: "user", file: "/tmp/config.toml", profile: null }, version: "v1", config: {}, disabledReason: null }];
+        transport.configRequirements = requirements;
+        const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+        await client.connect();
+        const ordinary = await client.readUserConfigSnapshot();
+        expect(ordinary).not.toHaveProperty("approvalsReviewerPolicy");
+        expect(transport.sent.some((message) => message.method === "configRequirements/read")).toBe(false);
+        const settings = await client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: true });
+        expect(settings.approvalsReviewerPolicy).toEqual({
+          allowedReviewers: requirements?.allowedApprovalsReviewers ?? null,
+          autoReviewDisabled: requirements?.featureRequirements?.auto_review === false
+            || requirements?.featureRequirements?.guardian_approval === false,
+        });
+        expect(transport.sent.filter((message) => message.method === "configRequirements/read")).toHaveLength(1);
+        await client.close();
+      },
+    );
+
+    it.each([
+      { name: "RPC error", error: true },
+      { name: "RPC timeout", timeout: true },
+      { name: "missing result", result: null },
+      { name: "missing requirements", result: {} },
+      { name: "array requirements", result: { requirements: [] } },
+      { name: "missing allowed reviewers", result: { requirements: { featureRequirements: null } } },
+      { name: "missing feature requirements", result: { requirements: { allowedApprovalsReviewers: null } } },
+      { name: "invalid allowed reviewers", result: { requirements: { allowedApprovalsReviewers: "user", featureRequirements: null } } },
+      { name: "invalid allowed reviewer item", result: { requirements: { allowedApprovalsReviewers: [1], featureRequirements: null } } },
+      { name: "array feature requirements", result: { requirements: { allowedApprovalsReviewers: null, featureRequirements: [] } } },
+      { name: "invalid feature value", result: { requirements: { allowedApprovalsReviewers: null, featureRequirements: { auto_review: "false" } } } },
+    ])("preserves a successful user snapshot when reviewer policy has $name", async (failure) => {
+      const transport = new FakeTransport();
+      const config = { approvals_reviewer: "auto_review", model: "gpt-test", service_tier: "default" };
+      transport.configLayers = [{ name: { type: "user", file: "/tmp/config.toml", profile: null }, version: "v1", config, disabledReason: null }];
+      const send = transport.send.bind(transport);
+      vi.spyOn(transport, "send").mockImplementation(async (message) => {
+        const request = JSON.parse(message) as { id: number; method?: string };
+        if (request.method !== "configRequirements/read") return send(message);
+        transport.sent.push(request);
+        if ("timeout" in failure) return;
+        transport.receive("error" in failure
+          ? { id: request.id, error: { code: -32603, message: "policy unavailable" } }
+          : { id: request.id, result: failure.result });
+      });
+      const client = new CodexAppServerClient(new JsonRpcClient(transport, 25), { sandbox: "read-only" });
+      try {
+        await client.connect();
+        const snapshot = await client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: true });
+        expect(snapshot).toMatchObject({ config, version: "v1", toolConfig: expect.any(Object) });
+        expect(snapshot).not.toHaveProperty("approvalsReviewerPolicy");
+        expect(transport.sent.filter((message) => message.method === "configRequirements/read")).toHaveLength(1);
+        await expect(client.readUserConfigSnapshot()).resolves.toMatchObject({ config, version: "v1" });
+      } finally {
+        await client.close();
+      }
     });
 
     it("reads the default model and reasoning effort through the App Server config API", async () => {
