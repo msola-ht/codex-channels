@@ -9,7 +9,10 @@ import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
-import { inspectAppServerSupervisorState } from "../runtime/app-server-supervisor.mjs";
+import {
+  acquireAppServerProviderLease,
+  inspectAppServerSupervisorState,
+} from "../runtime/app-server-supervisor.mjs";
 import { macDesktopAppPluginEnabledConfigKey } from "../runtime/desktop-app-host.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import {
@@ -58,7 +61,7 @@ export async function runDesktopAppCommand(args, options = {}) {
   const located = parsed.action === "status"
     ? locateUserConfig(environment)
     : requireUserConfig(environment);
-  const document = readGatewayConfig(located.configPath);
+  const document = validateGatewayConfigDocument(readGatewayConfig(located.configPath));
   const codex = table(document.codex);
   const runtimeEnvironment = {
     ...environment,
@@ -148,23 +151,46 @@ export async function runDesktopAppCommand(args, options = {}) {
       }
       const inspectActiveThreads = options.inspectActiveThreads
         ?? inspectMacDesktopAppActiveThreads;
-      let activeThreadCount;
+      const acquireProviderLease = options.acquireProviderLease
+        ?? acquireAppServerProviderLease;
+      let lease;
       try {
-        activeThreadCount = await inspectActiveThreads({
-          socketPath: appServer.primarySocketPath,
-          codexBinary: runtimeEnvironment.CODEX_BINARY,
-        });
-      } catch (error) {
+        lease = await acquireProviderLease(appServer.primarySocketPath, appServer.primaryProvider);
+      } catch {
         throw new Error(
-          "无法确认主 OpenAI App Server 当前是否空闲；已取消启动",
-          { cause: error },
+          "无法恢复并保护主 OpenAI App Server 以完成启动检查；已取消启动",
         );
       }
-      if (activeThreadCount > 0) {
-        throw new Error(
-          `主 OpenAI App Server 当前有 ${activeThreadCount} 个活动 Thread；`
-          + "请等待 Turn 完成后重试",
-        );
+      let leaseReleaseFailed = false;
+      try {
+        let activeThreadCount;
+        try {
+          activeThreadCount = await inspectActiveThreads({
+            socketPath: appServer.primarySocketPath,
+            codexBinary: runtimeEnvironment.CODEX_BINARY,
+          });
+        } catch (error) {
+          if (error instanceof DesktopAppPreflightError) throw error;
+          throw new DesktopAppPreflightError("activity");
+        }
+        if (!Number.isSafeInteger(activeThreadCount) || activeThreadCount < 0) {
+          throw new DesktopAppPreflightError("activity");
+        }
+        if (activeThreadCount > 0) {
+          throw new Error(
+            `主 OpenAI App Server 当前有 ${activeThreadCount} 个活动 Thread；`
+            + "请等待 Turn 完成后重试",
+          );
+        }
+      } finally {
+        try {
+          await lease.close();
+        } catch {
+          leaseReleaseFailed = true;
+        }
+      }
+      if (leaseReleaseFailed) {
+        throw new Error("无法释放启动检查的主 App Server 租约；已取消启动");
       }
       writeMessage("note", "已确认当前没有活动 Turn；启动时会短暂重启主 App Server。");
       await openDesktop(app.path, "");
@@ -224,7 +250,12 @@ async function confirmDesktopAppEnable() {
 }
 
 async function assertMacDesktopAppHostReady(primarySocketPath, inspectSupervisorState) {
-  const inspection = await inspectSupervisorState(primarySocketPath);
+  let inspection;
+  try {
+    inspection = await inspectSupervisorState(primarySocketPath);
+  } catch {
+    throw new Error("无法读取 App Server 受管入口状态；已取消启动");
+  }
   if (
     inspection.status !== "ready"
     || inspection.topology.desktopAppHostProtocolVersion !== 1
@@ -256,11 +287,27 @@ async function inspectMacDesktopAppActiveThreads({ socketPath, codexBinary }) {
     ),
     { sandbox: "read-only" },
   );
-  await client.connect();
   try {
-    return await client.countActiveLoadedThreads();
+    await client.connect();
+  } catch {
+    throw new DesktopAppPreflightError("initialize");
+  }
+  try {
+    try {
+      return await client.countActiveLoadedThreads();
+    } catch {
+      throw new DesktopAppPreflightError("activity");
+    }
   } finally {
     await client.close();
+  }
+}
+
+class DesktopAppPreflightError extends Error {
+  constructor(stage) {
+    super(stage === "initialize"
+      ? "无法完成主 OpenAI App Server 的连接初始化；已取消启动"
+      : "无法读取主 OpenAI App Server 活动 Thread 状态，无法确认当前是否空闲；已取消启动");
   }
 }
 
@@ -339,21 +386,22 @@ export function inspectWindowsDesktopApp({
   }
   const executablePath = stringValue(installation.executablePath);
   const resourcePath = stringValue(installation.resourcePath);
+  const running = typeof installation.running === "boolean" ? installation.running : null;
   if (!executablePath || !regularFile(executablePath)) {
-    return desktopAppFailure(null, "OpenAI.Codex 包内未找到正式 Desktop 可执行文件");
+    return desktopAppFailure(null, "OpenAI.Codex 包内未找到正式 Desktop 可执行文件", running);
   }
   let compatible;
   try {
     compatible = Boolean(resourcePath)
       && fileContainsMarker(resourcePath, compatibilityMarker);
   } catch {
-    return desktopAppFailure(executablePath, "无法读取 OpenAI.Codex Desktop 资源");
+    return desktopAppFailure(executablePath, "无法读取 OpenAI.Codex Desktop 资源", running);
   }
   return {
     installed: true,
     path: executablePath,
     version: stringValue(installation.version) || null,
-    running: typeof installation.running === "boolean" ? installation.running : null,
+    running,
     compatible,
     reason: compatible ? null : "当前 Desktop 构建缺少共享 App Server 兼容入口",
   };
@@ -460,6 +508,7 @@ async function readDesktopAppStatus({
   let bridgeReady = false;
   let toolHostSupported = false;
   let toolHostAttached = false;
+  let primaryInstanceState = "unknown";
   if (
     platform === "win32"
     && desktopConfig?.enabled === true
@@ -473,15 +522,20 @@ async function readDesktopAppStatus({
       tokenReady = false;
     }
   }
-  if (platform === "darwin" && desktopConfig?.enabled === true) {
+  if (supported) {
     try {
       const inspection = await inspectSupervisorState(primarySocketPath);
-      toolHostSupported = inspection.status === "ready"
-        && inspection.topology.desktopAppHostProtocolVersion === 1;
-      toolHostAttached = toolHostSupported
-        && inspection.topology.desktopAppAttached === true;
+      if (inspection.status === "ready" && inspection.topology.primaryProvider === primaryProvider) {
+        const topology = inspection.topology;
+        if (topology.runningProviders.includes(primaryProvider)) primaryInstanceState = "running";
+        else if (topology.releasedProviders.includes(primaryProvider)) primaryInstanceState = "released";
+        if (platform === "darwin" && desktopConfig?.enabled === true) {
+          toolHostSupported = topology.desktopAppHostProtocolVersion === 1;
+          toolHostAttached = toolHostSupported && topology.desktopAppAttached === true;
+        }
+      }
     } catch {
-      toolHostAttached = false;
+      // 无法读取现有拓扑时保留 unknown，不启动或恢复实例。
     }
   }
   return {
@@ -500,6 +554,7 @@ async function readDesktopAppStatus({
       ? `ws://127.0.0.1:${desktopConfig.port}${bridgePath}`
       : null,
     primaryProvider,
+    primaryInstanceState,
     tokenReady,
     bridgeReady,
     toolHostSupported,
@@ -542,12 +597,17 @@ function writeDesktopAppStatus(status, writeMessage) {
       }`);
     }
   }
+  if (status.supported) {
+    const states = { running: "运行中", released: "已释放（下次连接时恢复）", unknown: "未知" };
+    writeMessage("note", `主 App Server 实例：${states[status.primaryInstanceState]}`);
+  }
 }
 
 function writeDesktopAppConfig(configPath, next) {
   const document = readGatewayConfig(configPath);
+  validateGatewayConfigDocument(document);
   const codex = table(document.codex);
-  const previous = desktopAppConfig(codex.desktop_app);
+  const previous = codex.desktop_app;
   if (next === undefined) {
     delete codex.desktop_app;
   } else {
@@ -569,8 +629,9 @@ async function rollbackDesktopAppConfig({
   let rollbackError;
   try {
     const document = readGatewayConfig(configPath);
+    const validated = validateGatewayConfigDocument(document);
     const codex = table(document.codex);
-    const current = desktopAppConfig(codex.desktop_app);
+    const current = desktopAppConfig(validated.codex.desktop_app);
     if (JSON.stringify(current) !== JSON.stringify(applied)) {
       throw new Error("config.toml 在 Desktop App 配置回滚前已发生变化");
     }
@@ -617,12 +678,12 @@ function unsupportedDesktopApp() {
   };
 }
 
-function desktopAppFailure(path, reason) {
+function desktopAppFailure(path, reason, running = null) {
   return {
     installed: true,
     path,
     version: null,
-    running: false,
+    running,
     compatible: false,
     reason,
   };
@@ -689,7 +750,7 @@ function macApplicationStatus(appPath) {
     "end run",
     appPath,
   ], { encoding: "utf8", maxBuffer: 1_048_576 });
-  if (result.error) throw result.error;
+  if (result.error) return null;
   if (result.status !== 0) return null;
   const status = result.stdout.trim();
   if (status === "true") return true;

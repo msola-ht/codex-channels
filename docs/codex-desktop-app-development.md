@@ -124,6 +124,12 @@ Desktop 生成、删除、重写或缓存业务消息。macOS Proxy 只在 JSONL
 租约关闭时只清除服务内存中的临时 Pipe 附加状态，不终止共享主实例；Windows 桥连接关闭时释放
 上游 Transport 与租约。App Server 服务关闭时停止接受新连接并有限等待现有生命周期操作。
 
+macOS Host 附加在主 Provider 的串行生命周期操作中恢复已释放的受管实例，再查询权威活动状态，
+切换前重查普通租约与请求取消；发现外来实例、活动任务或租约占用时拒绝接管。该检查不构成对
+所有外部客户端启动 Turn 的原子锁。可信 Host 与原生 Codex 使用专属进程组，退出超时后的强制
+终止覆盖该组，不影响其他服务。签名校验实际验证签名有效性、可信锚与 OpenAI 身份；Proxy
+连接前复用统一私有 Socket 校验，并连接经验证的物理目标。
+
 ## 配置与私有状态
 
 在用户唯一配置 `~/.codex-connect/config.toml` 的 `[codex]` 下增加严格子表：
@@ -176,7 +182,7 @@ codexc app status [--json]
 
 ### `enable`
 
-1. 检查平台为 macOS 或 Windows、主 Provider 为 `openai`、Desktop 已安装且当前未运行。
+1. 验证原始配置的当前版本与 Schema，再检查平台为 macOS 或 Windows、主 Provider 为 `openai`、Desktop 已安装且当前未运行。
 2. macOS 检查强制 CLI、CLI 路径、工具 Pipe 和内置插件配置标记；Windows 检查 WebSocket 入口。
 3. Windows 创建或验证私有桥令牌；macOS 不创建令牌。原子写入 `[codex.desktop_app]` 并保留其余
    TOML 注释和字段。
@@ -186,7 +192,7 @@ codexc app status [--json]
 
 ### `disable`
 
-1. 要求 Desktop 已关闭。
+1. 验证原始配置，并要求 Desktop 已关闭；资源读取失败不代表进程已退出，无法确认运行状态时拒绝操作。
 2. 移除整个 `[codex.desktop_app]` 子表并重启 App Server 服务；Windows 同时关闭桥。
 3. 不修改当前用户或系统级环境，不删除 Thread、配置文件、令牌文件或 App Server Socket。
 
@@ -194,7 +200,8 @@ codexc app status [--json]
 
 只读报告以下结构化事实：平台是否支持、Desktop 是否安装和运行、兼容入口是否存在、配置是否启用、
 主 Provider 是否为 OpenAI、App Server 服务状态，以及下一步动作。macOS 另报告受管 Host 协议
-能力与当前租约状态；Windows 报告桥端口是否可连接。两个平台都只报告采用单次启动环境，不尝试
+能力与当前租约状态，另以 `primaryInstanceState` 报告主实例 `running`、`released` 或 `unknown`，
+不通过查询唤醒实例；`running` 字段仍表示 Desktop 进程。Windows 报告桥端口是否可连接。两个平台都只报告采用单次启动环境，不尝试
 读取运行中 Desktop 的进程环境。只有 Windows JSON 输出不带查询参数的回环 URL。
 
 ### `codexc app`
@@ -203,12 +210,14 @@ codexc app status [--json]
   确认后复用 `enable` 的配置、就绪检查与失败回滚流程，然后启动 App；取消则不修改配置或服务。
   非交互调用必须先显式执行 `enable`。已启用时直接进入启动检查，不重复启用或重启服务。
 - 启用成功后若启动检查或 App 启动失败，保留已生效的共享配置，排除问题后可再次执行 `codexc app`。
-- 只在配置、平台兼容探测与对应服务路径就绪时启动 Desktop。
+- 先验证原始配置，再进行平台兼容探测和服务检查；不能通过覆盖 Desktop 子表来接受未知字段或不支持的配置版本。
 - Desktop 已运行时拒绝，提示先完全退出；不强制结束用户进程。
-- macOS 在启动前先拒绝仍由 `codexc remote` 持有的主实例租约，再通过官方
-  `thread/loaded/list` 分页枚举全部已加载的持久及临时 Thread，并逐项使用 `thread/read` 读取状态；
+- macOS 在启动前先拒绝仍由 `codexc remote` 持有的主实例租约，再获取临时 Provider 租约，
+  按需恢复空闲释放的主实例，并防止预检期间再次释放；通过官方 `thread/loaded/list`
+  分页枚举全部已加载的持久及临时 Thread，并逐项使用 `thread/read` 读取状态；
   存在活动 Thread 或无法完成只读检查时拒绝启动，不进入
-  会短暂替换主 App Server 子进程的 Pipe 附加阶段。Windows 不执行该检查，因为其桥接不替换子进程。
+  会短暂替换主 App Server 子进程的 Pipe 附加阶段。所有路径都关闭临时租约，且必须在打开 Desktop
+  之前完成，以免阻止后续 Host 附加。Windows 不执行该检查，因为其桥接不替换子进程。
 - macOS 使用 `/usr/bin/open --env CODEX_APP_SERVER_FORCE_CLI=1 --env CODEX_CLI_PATH=<受管入口>
   -a ChatGPT` 启动，并传入随包资源与签名 Node 路径。受管入口只接受 Desktop 实际提供的工具 Pipe
   和内置插件布尔启用值；不使用 `launchctl setenv`，也不连接回环桥。

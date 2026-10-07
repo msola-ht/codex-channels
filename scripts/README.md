@@ -18,10 +18,10 @@
   参数、只读状态、macOS ChatGPT Bundle 与 Windows 当前用户 `OpenAI.Codex` 包兼容探测、配置
   写入与回滚、App Server 服务重启、Windows 受认证桥就绪探测和单次环境启动；状态不输出桥令牌，两个
   平台均明确标为预览。macOS 启动时改用受管 stdio Proxy，不再依赖桥端口或令牌，并单独报告受管
-  入口能力及内置工具 Host 是否已附加；启动前通过主 App Server 的官方已加载 Thread 清单和逐项状态
-  读取检查持久及临时会话，并在活动 Turn 或 `codexc remote` 主实例租约存在时拒绝会触发子进程切换的启动；
-  Thread 双向共享、签名 Host 隔离、正式受管启动与 App Server 重启恢复已通过 macOS 实机测试。
-  Windows 尚未实机验收。
+  入口能力及内置工具 Host 是否已附加；启动前持有临时 Provider 租约，按需恢复已释放的实例，
+  通过官方已加载 Thread 清单和逐项状态读取检查持久及临时会话，并在活动 Turn 或 `codexc remote`
+  主实例租约存在时拒绝会触发子进程切换的启动；打开 Desktop 前释放临时租约。
+  macOS 的具体构建实机验收边界见 `docs/codex-desktop-app-development.md`，Windows 尚未实机验收。
 - `desktop-app-proxy.mjs`：只由 macOS Desktop 的 `CODEX_CLI_PATH` 启动；解析并受控传递 Desktop
   内置插件的布尔启用值，把动态工具 Pipe 通过私有 Supervisor 租约交给服务，再把 Desktop JSONL
   stdio 逐条转换为 WebSocket 文本帧并连接现有私有 UDS，

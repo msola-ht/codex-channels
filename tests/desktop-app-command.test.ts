@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,7 @@ import {
   parseMacDesktopAppToolsEnabled,
 } from "../runtime/desktop-app-host.mjs";
 import {
+  inspectMacDesktopApp,
   runDesktopAppCommand,
 } from "../scripts/desktop-app-command.mjs";
 
@@ -33,6 +34,7 @@ describe("desktop-app command", () => {
       platform,
       inspectDesktopApp: platform === "darwin" ? compatibleStoppedApp : compatibleStoppedWindowsApp,
       inspectSupervisorState: readyDesktopHostSupervisor,
+      acquireProviderLease: async () => ({ close: async () => undefined }),
       inspectActiveThreads: async () => 0,
       confirmEnable: async () => { events.push("confirm"); return true; },
       restartAppServer: async () => { events.push("restart"); },
@@ -199,6 +201,7 @@ describe("desktop-app command", () => {
       inspectDesktopApp: compatibleStoppedApp,
       inspectSupervisorState: readyDesktopHostSupervisor,
       inspectActiveThreads: async () => 0,
+      acquireProviderLease: async () => ({ close: async () => undefined }),
       probeBridge: async () => {
         bridgeProbed = true;
         return true;
@@ -214,9 +217,10 @@ describe("desktop-app command", () => {
     expect(bridgeProbed).toBe(false);
   });
 
-  it("refuses to open the macOS app while the primary App Server has an active Thread", async () => {
+  it("refuses to open the macOS app while the primary App Server has an active Thread and releases its lease", async () => {
     const fixture = createFixture({ enabled: true, port: 49_203 });
     let opened = false;
+    let closes = 0;
 
     await expect(runDesktopAppCommand([], {
       environment: fixture.environment,
@@ -224,31 +228,238 @@ describe("desktop-app command", () => {
       inspectDesktopApp: compatibleStoppedApp,
       inspectSupervisorState: readyDesktopHostSupervisor,
       inspectActiveThreads: async () => 2,
+      acquireProviderLease: async () => ({ close: async () => { closes += 1; } }),
       openDesktop: () => { opened = true; },
       writeMessage: () => undefined,
     })).rejects.toThrow("当前有 2 个活动 Thread");
 
     expect(opened).toBe(false);
+    expect(closes).toBe(1);
   });
 
   it("fails closed when the macOS active Thread check is unavailable", async () => {
     const fixture = createFixture({ enabled: true, port: 49_203 });
     let opened = false;
+    let closes = 0;
 
+    const result = runDesktopAppCommand([], {
+      environment: fixture.environment,
+      platform: "darwin",
+      inspectDesktopApp: compatibleStoppedApp,
+      inspectSupervisorState: readyDesktopHostSupervisor,
+      inspectActiveThreads: async () => { throw new Error("private-token"); },
+      acquireProviderLease: async () => ({ close: async () => { closes += 1; } }),
+      openDesktop: () => { opened = true; },
+      writeMessage: () => undefined,
+    });
+    await expect(result).rejects.toThrow("无法读取主 OpenAI App Server 活动 Thread 状态");
+    await expect(result).rejects.not.toHaveProperty("cause");
+
+    expect(opened).toBe(false);
+    expect(closes).toBe(1);
+  });
+
+  it("restores and leases a released primary before checking activity, then releases before launch", async () => {
+    const fixture = createFixture({ enabled: true, port: 49_203 });
+    const events: string[] = [];
+    let closed = false;
+    await runDesktopAppCommand([], {
+      environment: fixture.environment,
+      platform: "darwin",
+      inspectDesktopApp: compatibleStoppedApp,
+      inspectSupervisorState: async () => ({
+        ...await readyDesktopHostSupervisor(),
+        topology: {
+          ...(await readyDesktopHostSupervisor()).topology,
+          runningProviders: [],
+          releasedProviders: ["openai"],
+        },
+      }),
+      acquireProviderLease: async (socketPath, provider) => {
+        expect(socketPath).toBe(join(fixture.root, "app-server.sock"));
+        expect(provider).toBe("openai");
+        events.push("restore-and-lease");
+        return { close: async () => { events.push("release"); closed = true; } };
+      },
+      inspectActiveThreads: async () => { events.push("activity"); expect(closed).toBe(false); return 0; },
+      openDesktop: async () => { expect(closed).toBe(true); events.push("open"); },
+      writeMessage: () => undefined,
+    });
+    expect(events).toEqual(["restore-and-lease", "activity", "release", "open"]);
+  });
+
+  it.each(["invalid-count", "launch-failure"])(
+    "releases the preflight lease when %s cancels launch", async (failure) => {
+      const fixture = createFixture({ enabled: true, port: 49_203 });
+      let closed = false;
+      let closes = 0;
+      let opened = false;
+      await expect(runDesktopAppCommand([], {
+        environment: fixture.environment,
+        platform: "darwin",
+        inspectDesktopApp: compatibleStoppedApp,
+        inspectSupervisorState: readyDesktopHostSupervisor,
+        acquireProviderLease: async () => ({ close: async () => { closed = true; closes += 1; } }),
+        inspectActiveThreads: async () => failure === "invalid-count" ? NaN : 0,
+        openDesktop: async () => { expect(closed).toBe(true); opened = true; throw new Error("launch failed"); },
+        writeMessage: () => undefined,
+      })).rejects.toThrow();
+      expect(closes).toBe(1);
+      expect(opened).toBe(failure === "launch-failure");
+    },
+  );
+
+  it("rejects unknown fields added before the configuration write without replacing their table", async () => {
+    const fixture = createFixture({ enabled: true, port: 49_203 });
+    let restarts = 0;
+    await expect(runDesktopAppCommand(["enable"], {
+      environment: fixture.environment,
+      platform: "darwin",
+      inspectDesktopApp: () => {
+        const document = readGatewayConfig(fixture.configPath);
+        Object.assign((document.codex as { desktop_app: object }).desktop_app, { unexpected: true });
+        writeGatewayConfig(fixture.configPath, document);
+        return compatibleStoppedApp();
+      },
+      restartAppServer: async () => { restarts += 1; },
+      writeMessage: () => undefined,
+    })).rejects.toThrow("unexpected");
+    expect(restarts).toBe(0);
+    expect(readGatewayConfig(fixture.configPath).codex).toMatchObject({
+      desktop_app: { enabled: true, port: 49_203, unexpected: true },
+    });
+  });
+
+  it.each(["acquire", "close"])("reports a safe %s failure and never launches", async (failure) => {
+    const fixture = createFixture({ enabled: true, port: 49_203 });
+    let activityInspected = false;
+    let opened = false;
+    const result = runDesktopAppCommand([], {
+      environment: fixture.environment,
+      platform: "darwin",
+      inspectDesktopApp: compatibleStoppedApp,
+      inspectSupervisorState: readyDesktopHostSupervisor,
+      acquireProviderLease: async () => {
+        if (failure === "acquire") throw new Error("private-token");
+        return { close: async () => { throw new Error("private-token"); } };
+      },
+      inspectActiveThreads: async () => { activityInspected = true; return 0; },
+      openDesktop: () => { opened = true; },
+      writeMessage: () => undefined,
+    });
+    await expect(result).rejects.toThrow(failure === "acquire" ? "无法恢复并保护" : "无法释放启动检查");
+    await expect(result).rejects.not.toHaveProperty("cause");
+    expect(activityInspected).toBe(failure === "close");
+    expect(opened).toBe(false);
+  });
+
+  it("reports initialization failure distinctly and releases its preflight lease", async () => {
+    const fixture = createFixture({ enabled: true, port: 49_203 });
+    let closes = 0;
     await expect(runDesktopAppCommand([], {
       environment: fixture.environment,
       platform: "darwin",
       inspectDesktopApp: compatibleStoppedApp,
       inspectSupervisorState: readyDesktopHostSupervisor,
-      inspectActiveThreads: async () => { throw new Error("socket unavailable"); },
-      openDesktop: () => { opened = true; },
+      acquireProviderLease: async () => ({ close: async () => { closes += 1; } }),
       writeMessage: () => undefined,
-    })).rejects.toThrow("无法确认主 OpenAI App Server 当前是否空闲");
-
-    expect(opened).toBe(false);
+    })).rejects.toThrow("无法完成主 OpenAI App Server 的连接初始化");
+    expect(closes).toBe(1);
   });
 
-  it("refuses to open the macOS app while codexc remote holds the primary lease", async () => {
+  it.each(["version", "unknown-desktop", "unknown-codex"])(
+    "rejects invalid %s configuration before inspection, mutation or launch", async (invalid) => {
+      const fixture = createFixture({ enabled: true, port: 49_203 });
+      const document = readGatewayConfig(fixture.configPath);
+      if (invalid === "version") document.version = 2;
+      else if (invalid === "unknown-codex") Object.assign(document.codex as object, { unexpected: true });
+      else Object.assign((document.codex as { desktop_app: object }).desktop_app, { unexpected: true });
+      writeGatewayConfig(fixture.configPath, document);
+      const before = readFileSync(fixture.configPath, "utf8");
+      for (const args of [[], ["enable"], ["disable"], ["status", "--json"]]) {
+        await expect(runDesktopAppCommand(args, {
+          environment: fixture.environment,
+          platform: "darwin",
+          inspectDesktopApp: () => { throw new Error("should not inspect Desktop"); },
+        })).rejects.toThrow(invalid === "version" ? "version" : "unexpected");
+      }
+      expect(readFileSync(fixture.configPath, "utf8")).toBe(before);
+    },
+  );
+
+  it("uses the schema default port and preserves omitted defaults and comments through rollback", async () => {
+    const fixture = createFixture({ enabled: true, port: 49_203 });
+    const document = readGatewayConfig(fixture.configPath);
+    delete (document.codex as { desktop_app: { port?: number } }).desktop_app.port;
+    writeGatewayConfig(fixture.configPath, document);
+    writeFileSync(fixture.configPath, `${readFileSync(fixture.configPath, "utf8")}\n# retain Desktop configuration comments\n`);
+    const before = readFileSync(fixture.configPath, "utf8");
+    const status = await runDesktopAppCommand(["status", "--json"], {
+      environment: fixture.environment,
+      platform: "win32",
+      inspectDesktopApp: compatibleStoppedWindowsApp,
+      inspectSupervisorState: async () => ({ status: "missing" }),
+      output: { write: () => true },
+    });
+    expect(status).toMatchObject({ configured: true, port: 47_821 });
+    expect(readFileSync(fixture.configPath, "utf8")).toBe(before);
+    let restarts = 0;
+    await expect(runDesktopAppCommand(["enable", "--port", "49206"], {
+      environment: fixture.environment,
+      platform: "win32",
+      inspectDesktopApp: compatibleStoppedWindowsApp,
+      restartAppServer: async () => { restarts += 1; if (restarts === 1) throw new Error("restart failed"); },
+      writeMessage: () => undefined,
+    })).rejects.toThrow("restart failed");
+    expect(restarts).toBe(2);
+    expect(readGatewayConfig(fixture.configPath).codex).toMatchObject({ desktop_app: { enabled: true } });
+    expect((readGatewayConfig(fixture.configPath).codex as { desktop_app: object }).desktop_app).not.toHaveProperty("port");
+    expect(readFileSync(fixture.configPath, "utf8")).toContain("# retain Desktop configuration comments");
+  });
+
+  it("retains unknown running status when macOS Desktop resources cannot be read", async () => {
+    const fixture = createFixture({ enabled: true, port: 49_203 });
+    const appPath = join(fixture.root, "ChatGPT.app");
+    mkdirSync(appPath);
+    const app = inspectMacDesktopApp({ candidates: [appPath] });
+    expect(app).toMatchObject({ installed: true, compatible: false, running: null });
+    await expect(runDesktopAppCommand(["disable"], {
+      environment: fixture.environment,
+      platform: "darwin",
+      inspectDesktopApp: () => app,
+    })).rejects.toThrow("无法确认 ChatGPT Desktop App 是否已退出");
+    expect(readGatewayConfig(fixture.configPath).codex).toHaveProperty("desktop_app");
+  });
+
+  it.each(["running", "released", "unknown"])("reports primary instance %s without restoring it", async (state) => {
+    const fixture = createFixture({ enabled: true, port: 49_203 });
+    const messages: string[] = [];
+    const before = readFileSync(fixture.configPath, "utf8");
+    const status = await runDesktopAppCommand(["status"], {
+      environment: fixture.environment,
+      platform: "darwin",
+      inspectDesktopApp: compatibleStoppedApp,
+      inspectSupervisorState: async () => {
+        if (state === "unknown") throw new Error("private-token");
+        const inspection = await readyDesktopHostSupervisor();
+        return { ...inspection, topology: {
+          ...inspection.topology,
+          runningProviders: state === "running" ? ["openai"] : [],
+          releasedProviders: state === "released" ? ["openai"] : [],
+        } };
+      },
+      acquireProviderLease: async () => { throw new Error("must not restore"); },
+      restartAppServer: async () => { throw new Error("must not restart"); },
+      writeMessage: (_kind, message) => { messages.push(message); },
+    });
+    expect(status.primaryInstanceState).toBe(state);
+    expect(messages.some((message) => message.startsWith("主 App Server 实例："))).toBe(true);
+    expect(messages.join("\n")).not.toContain("private-token");
+    expect(JSON.stringify(status)).not.toContain("private-token");
+    expect(readFileSync(fixture.configPath, "utf8")).toBe(before);
+  });
+
+  it.each([false, true])("refuses to open the macOS app while the primary lease is held and Host attached is %s", async (attached) => {
     const fixture = createFixture({ enabled: true, port: 49_203 });
     let activityInspected = false;
     let opened = false;
@@ -262,6 +473,7 @@ describe("desktop-app command", () => {
         topology: {
           ...(await readyDesktopHostSupervisor()).topology,
           leasedProviders: ["openai"],
+          desktopAppAttached: attached,
         },
       }),
       inspectActiveThreads: async () => {
@@ -270,7 +482,7 @@ describe("desktop-app command", () => {
       },
       openDesktop: () => { opened = true; },
       writeMessage: () => undefined,
-    })).rejects.toThrow("正由 codexc remote 使用");
+    })).rejects.toThrow(attached ? "Host 租约尚未释放" : "正由 codexc remote 使用");
 
     expect(activityInspected).toBe(false);
     expect(opened).toBe(false);

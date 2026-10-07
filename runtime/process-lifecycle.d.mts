@@ -27,6 +27,8 @@ export function assertSynchronousChildSuccess(
 export function childProcessIsRunning(
   child: Pick<ChildProcess, "exitCode" | "signalCode"> | undefined,
 ): boolean;
+/** Register a Unix child spawned with detached:true as a dedicated group leader. */
+export function registerChildProcessGroup(child: ChildProcess): void;
 export function signalChildProcesses(
   children: Array<Pick<ChildProcess, "pid" | "exitCode" | "signalCode" | "kill">>,
   signal: NodeJS.Signals,

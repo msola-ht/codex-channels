@@ -1,6 +1,6 @@
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
@@ -29,6 +29,29 @@ afterEach(async () => {
 });
 
 describe("Codex Desktop App bridge", () => {
+  it.skipIf(process.platform === "win32").each(["directory", "link"])(
+    "rejects an unsafe macOS proxy socket %s before connecting", async scenario => {
+      const directory = mkdtempSync("/tmp/cdsp-");
+      temporaryDirectories.push(directory);
+      const socketPath = join(directory, "a.sock");
+      const server = createServer();
+      let connections = 0;
+      server.on("connection", socket => { connections++; socket.destroy(); });
+      const physical = scenario === "link" ? join(directory, "other.sock") : socketPath;
+      await new Promise<void>(resolve => server.listen(physical, resolve));
+      if (scenario === "directory") chmodSync(directory, 0o755);
+      else symlinkSync(physical, socketPath);
+      try {
+        await expect(proxyDesktopAppStdioToUnixSocket({ socketPath })).rejects.toThrow(
+          scenario === "directory" ? "父目录权限不安全" : "链接目标",
+        );
+        expect(connections).toBe(0);
+      } finally {
+        await new Promise<void>(resolve => server.close(() => resolve()));
+      }
+    },
+  );
+
   it("delivers messages arriving as the downstream sender becomes idle", async () => {
     const port = await reservePort();
     const transport = new FakeTransport();

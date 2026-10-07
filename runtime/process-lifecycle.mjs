@@ -1,6 +1,17 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
+// Only children spawned as detached process-group leaders may be registered.
+// Callers check that the leader is still running before signaling its group.
+const childProcessGroups = new WeakSet();
+
+export function registerChildProcessGroup(child) {
+  if (process.platform === "win32") {
+    throw new Error("独立子进程组只支持 Unix");
+  }
+  childProcessGroups.add(child);
+}
+
 export class ReportedChildExitError extends Error {
   constructor(exitCode, message = `子命令执行失败：exit=${exitCode}`) {
     super(message);
@@ -51,7 +62,7 @@ export function signalChildProcesses(children, signal) {
       }
       continue;
     }
-    child.kill(signal);
+    signalChildProcess(child, signal);
   }
 }
 
@@ -68,18 +79,31 @@ export async function terminateChildProcess(child, {
       throw new Error("子进程在强制终止后仍未退出");
     }
   } else {
-    child.kill("SIGTERM");
+    signalChildProcess(child, "SIGTERM");
   }
   if (await childExitedWithin(child, gracePeriodMs)) return;
   if (childProcessIsRunning(child)) {
     if (process.platform === "win32") {
       signalWindowsProcessTree(child, true);
     } else {
-      child.kill("SIGKILL");
+      signalChildProcess(child, "SIGKILL");
     }
   }
   if (await childExitedWithin(child, forcePeriodMs)) return;
   throw new Error("子进程在强制终止后仍未退出");
+}
+
+function signalChildProcess(child, signal) {
+  if (!childProcessGroups.has(child) || child.pid === undefined) {
+    return child.kill(signal);
+  }
+  try {
+    process.kill(-child.pid, signal);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    throw error;
+  }
 }
 
 export function installProcessSignalHandlers(handlers, source = process) {
