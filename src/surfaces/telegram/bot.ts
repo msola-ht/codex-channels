@@ -168,6 +168,10 @@ export function createTelegramSurface(
   );
 }
 
+type AutoReviewSelectionScope =
+  | { scope: "workspace"; workspaceId: string }
+  | { scope: "thread"; threadId: string };
+
 export class TelegramSurface {
   readonly surface = "telegram" as const;
   readonly accountId = telegramDefaultAccountId;
@@ -189,7 +193,7 @@ export class TelegramSurface {
     target: ConversationTarget;
     actorId: string;
     expiresAt: number;
-  } & ({ scope: "workspace"; workspaceId: string } | { scope: "thread"; threadId: string })>();
+  } & AutoReviewSelectionScope>();
   private readonly debugEnabled: boolean;
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
@@ -1243,27 +1247,35 @@ export class TelegramSurface {
     );
   }
 
+  private registerAutoReviewSelection(
+    context: Context,
+    scope: AutoReviewSelectionScope,
+  ): string | undefined {
+    if (!context.from) return undefined;
+    for (const [key, selection] of this.autoReviewSelections) {
+      if (selection.expiresAt <= this.now()) this.autoReviewSelections.delete(key);
+    }
+    while (this.autoReviewSelections.size >= 100) {
+      this.autoReviewSelections.delete(this.autoReviewSelections.keys().next().value!);
+    }
+    const token = randomBytes(18).toString("base64url");
+    this.autoReviewSelections.set(token, {
+      ...scope,
+      target: target(context),
+      actorId: String(context.from.id),
+      expiresAt: this.now() + 5 * 60_000,
+    });
+    return token;
+  }
+
   private async renderWorkspacePermissionsResult(
     context: Context,
     result: Extract<ConversationCommandResult, { kind: "workspace-permissions" }>,
   ): Promise<void> {
-    let token: string | undefined;
-    if (context.from) {
-      for (const [key, selection] of this.autoReviewSelections) {
-        if (selection.expiresAt <= this.now()) this.autoReviewSelections.delete(key);
-      }
-      while (this.autoReviewSelections.size >= 100) {
-        this.autoReviewSelections.delete(this.autoReviewSelections.keys().next().value!);
-      }
-      token = randomBytes(18).toString("base64url");
-      this.autoReviewSelections.set(token, {
-        scope: "workspace",
-        target: target(context),
-        actorId: String(context.from.id),
-        workspaceId: result.workspace.id,
-        expiresAt: this.now() + 5 * 60_000,
-      });
-    }
+    const token = this.registerAutoReviewSelection(context, {
+      scope: "workspace",
+      workspaceId: result.workspace.id,
+    });
     try {
       await replyTelegramPanel(context, formatConversationWorkspacePermissions(result), {
         inline_keyboard: [
@@ -1283,17 +1295,10 @@ export class TelegramSurface {
   ): Promise<void> {
     const { threadId, reviewer } = result.state;
     let token: string | undefined;
-    if (context.from && threadId !== null && (reviewer === "user" || reviewer === "auto_review")) {
-      for (const [key, selection] of this.autoReviewSelections) {
-        if (selection.expiresAt <= this.now()) this.autoReviewSelections.delete(key);
-      }
-      while (this.autoReviewSelections.size >= 100) {
-        this.autoReviewSelections.delete(this.autoReviewSelections.keys().next().value!);
-      }
-      token = randomBytes(18).toString("base64url");
-      this.autoReviewSelections.set(token, {
-        scope: "thread", target: target(context), actorId: String(context.from.id),
-        threadId, expiresAt: this.now() + 5 * 60_000,
+    if (threadId !== null && (reviewer === "user" || reviewer === "auto_review")) {
+      token = this.registerAutoReviewSelection(context, {
+        scope: "thread",
+        threadId,
       });
     }
     try {
