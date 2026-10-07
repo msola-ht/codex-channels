@@ -541,8 +541,6 @@
 - `windows-log-follow.ps1`：按服务目标跟随读取用户级运行日志，供 `codexc logs` 使用。
 - `windows-app-server-proxy-probe.mjs`：Windows App Server 代理连接的只读探针，用于确认
   代理端点、初始化握手和 RPC 可达性。
-- `windows-proxy-inbound-limit-probe.mjs`：验证 Windows 代理入口对回环地址和入站连接限制的
-  只读探针，不修改系统或服务配置。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。
 

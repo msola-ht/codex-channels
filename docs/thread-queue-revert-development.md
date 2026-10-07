@@ -3,20 +3,14 @@
 本文定义锁定 Codex CLI `0.160.0` 的实验 `thread/queue/*`、`thread/queue/changed`、
 `thread/revert`、`thread/reverted` 以及 Revert 所需分页历史查询在 Gateway 中的使用合同。
 当前实现使用原生 Queue、分页历史与 Revert，以下定义授权和状态协调合同。
-Queue/Revert 联合真实合同仍是条件门禁：
-条件式真实 App Server 合同需在设置 `RUN_CODEX_CONTRACT=1` 后运行；未具备该环境时不得
-把跳过的真实合同伪报为通过。三个 Surface 的当前支持范围和验证入口以
-[`Codex 协议支持矩阵`](index.md) 为准，功能变化须同步复核真实合同。
-
-当前 Queue 条件式真实合同覆盖握手、100/101 容量、CRUD、25/100 分页、活动 busy、指定条目
-启动、中断保留、自动派发以及 App Server 重启后的冷恢复；跳过条件合同不计为通过。
+三个 Surface 的当前支持范围和静态检查入口以
+[`Codex 协议支持矩阵`](index.md) 为准。功能变化须对照锁定的官方源码复核协议语义；
+队列容量、分页、自动派发及重启恢复等运行行为按需人工验收，不以静态检查通过代替。
 
 ## 当前实现约束
 
 App Server 是待提交用户消息和 Thread 历史的唯一事实来源。Gateway 不保存平行消息队列。
 新 Thread 使用分页历史；Revert 通过显式确认和执行前复核协调历史、活动 Turn 与原生 Queue。
-
-
 
 - Gateway 新建的 Thread 一律显式发送 `historyMode: "paginated"`；Resume、Fork 和 Provider 路由
   只采用 App Server 返回的实际 `historyMode`。既有 `legacy` Thread 仍可正常使用，但 `/revert`
