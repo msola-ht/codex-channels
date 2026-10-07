@@ -70,7 +70,7 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
   };
 }
 
-function defaultProviderConversation(providers: string[]) {
+function defaultProviderConversation(providers: string[], autoReviewPolicy?: { primaryProvider: string; supportedProviders: ReadonlySet<string> }) {
   const sessions = new Map<string, ThreadSession>();
   const startThread = vi.fn(async (_cwd: string, options: ThreadStartOptions = {}): Promise<ThreadSession> => {
     const id = `thread-${sessions.size}`;
@@ -96,7 +96,7 @@ function defaultProviderConversation(providers: string[]) {
       return forked;
     },
   } as unknown as ThreadLifecyclePort;
-  const router = new SessionRouter(lifecycle, new MemoryBindingStore(), new WorkspaceRegistry([main], main.id));
+  const router = new SessionRouter(lifecycle, new MemoryBindingStore(), new WorkspaceRegistry([main], main.id), [], undefined, autoReviewPolicy);
   const models = new ModelSelectionService({
     listModels: async () => [], writeDefaultFastMode: async () => undefined,
     readDefaultReasoningEffort: async () => "high", readDefaultServiceTier: async () => null,
@@ -121,8 +121,8 @@ function defaultProviderConversation(providers: string[]) {
 }
 
 describe("ConversationService Workspace Auto-review", () => {
-  function fixture() {
-    const { router, models, startThread } = defaultProviderConversation(["deepseek"]);
+  function fixture(supportedProviders?: ReadonlySet<string>) {
+    const { router, models, startThread } = defaultProviderConversation(["deepseek"], supportedProviders === undefined ? undefined : { primaryProvider: "openai", supportedProviders });
     const activeTurn = vi.fn(() => undefined as string | undefined);
     const updateWorkspacePermissions = vi.fn(async () => main);
     const service = new ConversationService(
@@ -131,6 +131,19 @@ describe("ConversationService Workspace Auto-review", () => {
     );
     return { service, router, startThread, updateWorkspacePermissions, activeTurn };
   }
+
+  it("requires an eligible configured Provider to enable a Workspace default and keeps off and clear available", async () => {
+    const { service, updateWorkspacePermissions } = fixture(new Set());
+    await expect(service.updateWorkspacePermissions(target, { kind: "approvals-reviewer", value: "auto_review" }))
+      .rejects.toMatchObject({ code: "autoreview.provider-unsupported" });
+    expect(updateWorkspacePermissions).not.toHaveBeenCalled();
+    await service.updateWorkspacePermissions(target, { kind: "approvals-reviewer", value: "user" });
+    await service.updateWorkspacePermissions(target, { kind: "approvals-reviewer", value: null });
+    expect(updateWorkspacePermissions).toHaveBeenCalledTimes(2);
+    const eligible = fixture(new Set(["compatible"]));
+    await eligible.service.updateWorkspacePermissions(target, { kind: "approvals-reviewer", value: "auto_review" });
+    expect(eligible.updateWorkspacePermissions).toHaveBeenCalledOnce();
+  });
 
   it("updates the Workspace without creating or changing a loaded or active Thread", async () => {
     const { service, router, startThread, updateWorkspacePermissions, activeTurn } = fixture();
@@ -157,8 +170,8 @@ describe("ConversationService Workspace Auto-review", () => {
 });
 
 describe("ConversationService current Thread Auto-review", () => {
-  function fixture(reviewerPort?: ThreadApprovalsReviewerPort) {
-    const { router, models, startThread } = defaultProviderConversation(["deepseek"]);
+  function fixture(reviewerPort?: ThreadApprovalsReviewerPort, supportedProviders?: ReadonlySet<string>) {
+    const { router, models, startThread } = defaultProviderConversation(["deepseek"], supportedProviders === undefined ? undefined : { primaryProvider: "openai", supportedProviders });
     const activeTurn = vi.fn(() => undefined as string | undefined);
     const hasPendingInteraction = vi.fn(() => false);
     const updateThreadApprovalsReviewer = vi.fn(async (_threadId: string, approvalsReviewer: "user" | "auto_review") => {
@@ -173,6 +186,16 @@ describe("ConversationService current Thread Auto-review", () => {
       router.updateModelSettings("thread-0", { model: "gpt-main", effort: null, serviceTier: null, collaborationMode: "default", approvalsReviewer });
     return { service, router, startThread, activeTurn, hasPendingInteraction, updateThreadApprovalsReviewer, setReviewer };
   }
+
+  it("rejects on for an unsupported actual Thread Provider even when already enabled, but permits query and off", async () => {
+    const { service, router, setReviewer, updateThreadApprovalsReviewer } = fixture(undefined, new Set(["openai"]));
+    await router.ensure(target, { modelProvider: "deepseek" });
+    setReviewer("auto_review");
+    expect(service.autoReview(target).reviewer).toBe("auto_review");
+    await expect(service.updateAutoReview(target, true)).rejects.toMatchObject({ code: "autoreview.provider-unsupported" });
+    expect(updateThreadApprovalsReviewer).not.toHaveBeenCalled();
+    await expect(service.updateAutoReview(target, false)).resolves.toMatchObject({ reviewer: "user", updated: true });
+  });
 
   it("queries without creating a Thread and rejects an unbound write", async () => {
     const { service, startThread, updateThreadApprovalsReviewer } = fixture();

@@ -9,6 +9,8 @@ export type UserFacingErrorCode =
   | "conversation.busy"
   | "autoreview.usage"
   | "autoreview.unavailable"
+  | "autoreview.provider-unsupported"
+  | "autoreview.execution-blocked"
   | "autoreview.stale-selection"
   | "autoreview.update-failed"
   | "autoreview.update-unconfirmed"

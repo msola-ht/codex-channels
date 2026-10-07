@@ -2,6 +2,7 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../../runtime/gateway-config.mjs";
+import { loadAutoReviewProviderPolicy } from "../../runtime/auto-review-provider-policy.mjs";
 import {
   applyWorkspacePermissionUpdate,
   WorkspacePermissionConflictError,
@@ -36,13 +37,19 @@ interface ConfigToml {
 export class TomlWorkspacePermissionWriter
   implements WorkspacePermissionPort
 {
-  constructor(private readonly configPath: string) {}
+  constructor(
+    private readonly configPath: string,
+    private readonly hasAutoReviewProvider: () => boolean = () => loadAutoReviewProviderPolicy().supportedProviders.size > 0,
+  ) {}
 
   updateWorkspacePermissions(
     workspaceId: string,
     update: WorkspacePermissionUpdate,
   ): Promise<Workspace> {
     try {
+      if (update.kind === "approvals-reviewer" && update.value === "auto_review" && !this.hasAutoReviewProvider()) {
+        throw new UserFacingError("autoreview.provider-unsupported", "当前配置没有支持自动审查的 Provider，不能开启工作区默认自动审查");
+      }
       const document = readGatewayConfig(
         this.configPath,
       ) as unknown as ConfigToml;

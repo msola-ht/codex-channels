@@ -22,6 +22,17 @@ afterEach(() => {
 });
 
 describe("TomlWorkspacePermissionWriter", () => {
+  it("rejects enabling with no eligible Provider without changing the file, while off and clear remain available", async () => {
+    const fixture = createFixture();
+    const writer = new TomlWorkspacePermissionWriter(fixture.configPath, () => false);
+    const previous = readFileSync(fixture.configPath, "utf8");
+    await expect(writer.updateWorkspacePermissions("codex-connect", { kind: "approvals-reviewer", value: "auto_review" }))
+      .rejects.toMatchObject({ code: "autoreview.provider-unsupported" });
+    expect(readFileSync(fixture.configPath, "utf8")).toBe(previous);
+    await writer.updateWorkspacePermissions("codex-connect", { kind: "approvals-reviewer", value: "user" });
+    await writer.updateWorkspacePermissions("codex-connect", { kind: "approvals-reviewer", value: null });
+    expect(workspaceEntry(fixture.configPath)).not.toHaveProperty("approvals_reviewer");
+  });
   it("sets and clears an independent Workspace reviewer while preserving the previous file on invalid input", async () => {
     const fixture = createFixture();
     const writer = new TomlWorkspacePermissionWriter(fixture.configPath);

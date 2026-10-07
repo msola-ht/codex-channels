@@ -505,7 +505,7 @@ export interface ManagementSettingsResponse {
       terminalIdentity: string | null
       defaults: { name: string; version: string }
     }
-    workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null; approvalsReviewer: string | null }>
+    workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null; approvalsReviewer: string | null; canEnableAutoReview?: boolean; autoReviewUnavailableReason?: "provider-config-unavailable" | null }>
   }
   automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled">
   advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel" | "pluginApiEnabled">
@@ -566,6 +566,8 @@ export interface CodexUserSettingsResponse {
   approvalsReviewer: {
     value: "user" | "auto_review" | null
     editable: boolean
+    canEnableAutoReview?: boolean
+    autoReviewUnavailableReason?: "provider-config-unavailable" | null
     reason?: string
   }
   compact: {

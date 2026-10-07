@@ -4,12 +4,23 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import pino from "pino";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { toConversationInputEvent, toThreadStateEvent } from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
+import { GatewayApplication } from "../src/bootstrap/app.js";
+import { withOutputExecutionAdmission } from "../src/bootstrap/output-execution-admission.js";
+import { ConversationService, type ConversationQueryPort } from "../src/application/conversation-service.js";
+import { ModelSelectionService } from "../src/application/model-selection-service.js";
+import type { ThreadApprovalsReviewerPort } from "../src/application/turn-port.js";
+import { ConversationCore, type OutputEvent } from "../src/conversation-core/index.js";
+import { EventBus } from "../src/event-bus/index.js";
+import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
+import { WorkspaceRegistry } from "../src/policy/index.js";
+import { SessionRouter, ThreadStateSynchronizer } from "../src/session-routing/index.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
 import { secureTestDirectory } from "./support/windows-fixtures.js";
 
@@ -17,7 +28,7 @@ const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 
 contractSuite("real supervised App Server thread-state", () => {
-    it("runs confirmed reviewer updates, paginated history, active-turn Revert and preserved Queue against local Responses", async () => {
+    it("runs confirmed reviewer updates, restored task management, paginated history, active-turn Revert and preserved Queue against local Responses", async () => {
       const testRuntime = mkdtempSync(join(tmpdir(), "codex-revert-contract-"));
       secureTestDirectory(testRuntime);
       const codexHome = join(testRuntime, "codex-home");
@@ -105,6 +116,9 @@ contractSuite("real supervised App Server thread-state", () => {
       const revertedThreadIds: string[] = [];
       const observedReviewers: Array<string | null | undefined> = [];
       let removeNotification: (() => void) | undefined;
+      let removeGateNotification: (() => void) | undefined;
+      let gateInbound: EventBus<Parameters<typeof toThreadStateEvent>[0]> | undefined;
+      let gateOutput: EventBus<OutputEvent> | undefined;
       const completeResponse = (responseId: string): void => {
         const response = [...apiServerResponses.entries()]
           .find(([, id]) => id === responseId)?.[0];
@@ -193,6 +207,58 @@ contractSuite("real supervised App Server thread-state", () => {
           expect(resumed.settingsMatch).toBe(true);
         }
         expect((await client.resumeThread(threadId, workspace)).approvalsReviewer).toBe("user");
+        const bindings = new MemoryBindingStore();
+        const workspaces = new WorkspaceRegistry([{ id: "contract", name: "Contract", cwd: workspace, approvalsReviewer: "auto_review" }], "contract");
+        const router = new SessionRouter(client, bindings, workspaces, [], undefined, {
+          primaryProvider: "revert-contract", supportedProviders: new Set(),
+        });
+        const gatewayTarget = { surface: "telegram" as const, accountId: "contract", conversationId: "contract" };
+        let synchronizer = new ThreadStateSynchronizer(router);
+        gateOutput = new EventBus<OutputEvent>(pino({ level: "silent" }));
+        let restoredCore = new ConversationCore(router, gateOutput);
+        gateInbound = new EventBus(pino({ level: "silent" }));
+        gateInbound.subscribe("routing", notification => {
+          const state = toThreadStateEvent(notification);
+          if (state) synchronizer.handle(state);
+          const input = toConversationInputEvent(notification);
+          if (input) restoredCore.handle(input);
+        });
+        removeGateNotification = client.onNotification(notification => gateInbound!.publish(notification, true));
+        const admission = Object.assign(Object.create(GatewayApplication.prototype), {
+          codex: client, inbound: gateInbound, bindings, workspaces, router,
+          interactions: { hasPendingForThread: () => false }, stopping: false,
+          core: restoredCore,
+        }) as ThreadApprovalsReviewerPort & {
+          admitThreadApprovalsReviewer(id: string): Promise<void>;
+          router: SessionRouter;
+          core: Pick<ConversationCore, "activeTurnForThread">;
+        };
+        await client.updateThreadApprovalsReviewer(threadId, "auto_review");
+        const unchangedHistory = await client.listThreadTurns(threadId);
+        await router.resume(gatewayTarget, threadId);
+        expect(router.modelSettingsForThread(threadId)?.approvalsReviewer).toBe("auto_review");
+        await admission.admitThreadApprovalsReviewer(threadId);
+        expect(router.modelSettingsForThread(threadId)?.approvalsReviewer).toBe("user");
+        expect(await client.listThreadTurns(threadId)).toEqual(unchangedHistory);
+        await client.updateThreadApprovalsReviewer(threadId, "auto_review");
+        await client.unsubscribeThread(threadId);
+        await expect.poll(async () => (await client!.readThread(threadId!)).status.type, { timeout: 5_000 }).toBe("notLoaded");
+        await router.resume(gatewayTarget, threadId);
+        expect(router.modelSettingsForThread(threadId)?.approvalsReviewer).toBe("user");
+        expect((await client.resumeThread(threadId, workspace)).approvalsReviewer).toBe("user");
+        const gatewayFork = await router.fork(gatewayTarget);
+        expect((await client.resumeThread(gatewayFork.threadId, workspace)).approvalsReviewer).toBe("user");
+        await router.resume(gatewayTarget, threadId);
+        const background = await router.startBackground(gatewayTarget, { approvalPolicy: "never" });
+        expect(background.session.approvalsReviewer).toBe("user");
+        await client.unsubscribeThread(background.binding.threadId);
+        // A settings write bypassing Gateway is received through the real shared
+        // notification reducer, then confirmed back to user before admission.
+        await client.updateThreadApprovalsReviewer(threadId, "auto_review");
+        await admission.admitThreadApprovalsReviewer(threadId);
+        expect(router.modelSettingsForThread(threadId)?.approvalsReviewer).toBe("user");
+        expect((await client.resumeThread(threadId, workspace)).approvalsReviewer).toBe("user");
+        expect(await client.listThreadTurns(threadId)).toEqual(unchangedHistory);
         const secondTurnId = await startCompletedTurn("second revert turn", 1);
         const listed = await client.listThreadTurns(threadId, { limit: 25 });
         expect(listed.turns.map((turn) => turn.id)).toEqual([secondTurnId, firstTurnId]);
@@ -205,6 +271,12 @@ contractSuite("real supervised App Server thread-state", () => {
           workspace,
         );
         await waitFor(() => responseIds.length > 2, 5_000);
+        await client.updateThreadApprovalsReviewer(threadId, "auto_review");
+        await expect(admission.admitThreadApprovalsReviewer(threadId)).rejects.toMatchObject({ code: "autoreview.execution-blocked" });
+        expect((await client.readThread(threadId)).status.type).toBe("active");
+        expect(completedStatuses.has(active.turnId)).toBe(false);
+        expect((await client.resumeThread(threadId, workspace)).approvalsReviewer).toBe("auto_review");
+        await client.updateThreadApprovalsReviewer(threadId, "user");
         const queuedFirst = await client.addQueueItem(
           threadId,
           "queued first after revert",
@@ -253,7 +325,61 @@ contractSuite("real supervised App Server thread-state", () => {
         expect((await client.listThreadTurns(threadId, { limit: 25 })).turns.map((turn) => turn.id))
           .toEqual([firstTurnId]);
         await expect(client.revertThread(threadId, "missing-turn")).rejects.toThrow("turn not found");
+
+        // Restore a running unsupported Thread into fresh Router/Core state,
+        // as on Gateway restart. Resume restores management independently of
+        // whether another Gateway input can pass the execution gate.
+        await client.updateThreadApprovalsReviewer(threadId, "auto_review");
+        const recoveringTurn = await client.startTurn(threadId,
+          [{ type: "text", text: "running task during Gateway recovery" }],
+          "codex_connect:reviewer-recovery", workspace);
+        await waitFor(() => responseIds.length > 5, 5_000);
+        await client.unsubscribeThread(threadId);
+        expect((await client.readThread(threadId)).status.type).toBe("active");
+        const managementRouter = new SessionRouter(client, bindings, workspaces, [], undefined, {
+          primaryProvider: "revert-contract", supportedProviders: new Set(),
+        });
+        restoredCore = new ConversationCore(managementRouter, gateOutput);
+        synchronizer = new ThreadStateSynchronizer(managementRouter);
+        admission.router = managementRouter;
+        admission.core = restoredCore;
+        const execution = withOutputExecutionAdmission(client,
+          id => admission.admitThreadApprovalsReviewer(id));
+        const service = new ConversationService(execution, managementRouter, restoredCore,
+          new ModelSelectionService(client, managementRouter), {} as ConversationQueryPort,
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+          undefined, admission);
+        const restoreRunningBinding = () => managementRouter.restoreSubscriptions(
+          (_target, binding) => binding.threadId === threadId, (binding, snapshot) => {
+            if (snapshot.activeTurnId) restoredCore.markTurnStarted(binding.target, snapshot.id, snapshot.activeTurnId);
+          });
+        expect(await restoreRunningBinding()).toEqual([]);
+        expect(service.autoReview(gatewayTarget)).toEqual({ threadId, reviewer: "auto_review", updated: false });
+        expect(restoredCore.activeTurn(gatewayTarget)?.turnId).toBe(recoveringTurn.turnId);
+        await expect(service.updateAutoReview(gatewayTarget, false)).rejects.toMatchObject({ code: "conversation.busy" });
+        await expect(execution.steerTurn(threadId, recoveringTurn.turnId,
+          [{ type: "text", text: "must remain blocked" }], "codex_connect:blocked-recovery"))
+          .rejects.toMatchObject({ code: "autoreview.execution-blocked" });
+        expect((await client.resumeThread(threadId, workspace)).approvalsReviewer).toBe("auto_review");
+        expect(completedStatuses.has(recoveringTurn.turnId)).toBe(false);
+        expect(await service.stop(gatewayTarget)).toBe(true);
+        await waitFor(() => completedStatuses.get(recoveringTurn.turnId) === "interrupted", 5_000);
+        await gateInbound.drain();
+        expect(restoredCore.activeTurn(gatewayTarget)).toBeUndefined();
+        // Failure to confirm an idle convergence blocks execution, while a
+        // later management restore still captures the actual setting.
+        vi.spyOn(admission, "updateThreadApprovalsReviewer").mockRejectedValueOnce(new Error("isolated confirmation failure"));
+        await expect(admission.admitThreadApprovalsReviewer(threadId))
+          .rejects.toMatchObject({ code: "autoreview.execution-blocked" });
+        expect(await restoreRunningBinding()).toEqual([]);
+        expect(service.autoReview(gatewayTarget).reviewer).toBe("auto_review");
+        expect(await service.updateAutoReview(gatewayTarget, false)).toEqual({ threadId, reviewer: "user", updated: true });
+        expect((await client.resumeThread(threadId, workspace)).approvalsReviewer).toBe("user");
       } finally {
+        removeGateNotification?.();
+        await gateInbound?.close().catch(() => undefined);
+        await gateOutput?.close().catch(() => undefined);
         removeNotification?.();
         if (threadId) {
           await client?.unsubscribeThread(threadId).catch(() => undefined);

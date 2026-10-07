@@ -98,13 +98,14 @@ describe("WebUI component interaction contracts", () => {
 
         const workspacePreviews = [];
         const workspaceManagement = { loading: false, error: null, saving: false, pendingSetting: null, lastAppliedSetting: null,
-          managedSettings: { system: { workspaces: [{ id: "original-workspace", name: "Main", sandbox: null, approvalPolicy: null, permissions: null, approvalsReviewer: null }] } },
+          managedSettings: { system: { workspaces: [{ id: "original-workspace", name: "Main", sandbox: null, approvalPolicy: null, permissions: null, approvalsReviewer: null, canEnableAutoReview: true, autoReviewUnavailableReason: null }] } },
           previewSetting: (...args) => workspacePreviews.push(args),
         };
         output.workspaceDefault = render(h(WorkspaceSettingsCard, { management: workspaceManagement }));
         const reviewer = globalThis.fixtureSelects.find(select => select.label === "工作区默认审批方式");
         output.workspaceOptions = JSON.stringify(reviewer.options);
         output.workspaceDefaultValue = reviewer.value;
+        output.workspaceDisabledValues = JSON.stringify(reviewer.disabledValues);
         reviewer.onChange("auto_review"); reviewer.onChange("user"); reviewer.onChange("__clear__");
         output.workspacePreviews = JSON.stringify(workspacePreviews);
         workspaceManagement.pendingSetting = {};
@@ -114,6 +115,15 @@ describe("WebUI component interaction contracts", () => {
         workspaceManagement.managedSettings.system.workspaces[0].approvalsReviewer = "auto_review";
         render(h(WorkspaceSettingsCard, { management: workspaceManagement }));
         output.workspaceReviewerValue = globalThis.fixtureSelects.find(select => select.label === "工作区默认审批方式").value;
+        for (const [state, reason] of [["Unsupported", null], ["Unavailable", "provider-config-unavailable"]]) {
+          Object.assign(workspaceManagement.managedSettings.system.workspaces[0], { canEnableAutoReview: false, autoReviewUnavailableReason: reason });
+          workspacePreviews.length = 0;
+          render(h(WorkspaceSettingsCard, { management: workspaceManagement }));
+          const restrictedReviewer = globalThis.fixtureSelects.find(select => select.label === "工作区默认审批方式");
+          output["workspace" + state] = JSON.stringify({ value: restrictedReviewer.value, disabled: restrictedReviewer.disabled, disabledValues: restrictedReviewer.disabledValues, options: restrictedReviewer.options });
+          restrictedReviewer.onChange("user"); restrictedReviewer.onChange("__clear__");
+          output["workspace" + state + "Previews"] = JSON.stringify(workspacePreviews);
+        }
 
         reset();
         const compact = () => h(AppServerSettingsCard, { management, section: "context" });
@@ -192,12 +202,18 @@ describe("WebUI component interaction contracts", () => {
 
   it("previews each Workspace approval reviewer choice with the original Workspace identity", () => {
     expect(result.workspaceDefaultValue).toBe("__clear__");
+    expect(JSON.parse(result.workspaceDisabledValues!)).toEqual([]);
     expect(JSON.parse(result.workspaceOptions!)).toEqual([["__clear__", "跟随 Codex 默认"], ["user", "手动审批"], ["auto_review", "Auto-review（自动审查）"]]);
     expect(JSON.parse(result.workspacePreviews!)).toEqual(["auto_review", "user", null].map(value => ["workspace.permissions", { workspaceId: "original-workspace", update: { kind: "approvals-reviewer", value } }, { key: "settingsFields.workspaceApprovalsReviewer", params: { name: "Main" } }]));
     expect(result.workspacePendingDisabled).toBe("true");
     expect(result.workspaceReviewerValue).toBe("auto_review");
     expect(result.workspaceDefault).toContain("卸载后恢复");
     expect(result.workspaceDefault).toContain("已加载会话保留实际审批方式");
+  });
+
+  it.each(["Unsupported", "Unavailable"])("disables only enabling Auto-review for a Provider that is %s", state => {
+    expect(JSON.parse(result[`workspace${state}`]!)).toEqual({ value: "auto_review", disabled: false, disabledValues: ["auto_review"], options: JSON.parse(result.workspaceOptions!) });
+    expect(JSON.parse(result[`workspace${state}Previews`]!)).toEqual(["user", null].map(value => ["workspace.permissions", { workspaceId: "original-workspace", update: { kind: "approvals-reviewer", value } }, { key: "settingsFields.workspaceApprovalsReviewer", params: { name: "Main" } }]));
   });
 
   it("associates tool JSON errors with the input and clears errors while editing", () => {

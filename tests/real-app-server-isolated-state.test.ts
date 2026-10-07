@@ -1453,7 +1453,9 @@ contractSuite("isolated Codex App Server state contract", () => {
       readDefaultModelSettings: ownerClient.readDefaultModelSettings.bind(ownerClient),
       writeDefaultModelSettings: ownerClient.writeDefaultModelSettings.bind(ownerClient),
     });
-    const dependencies = { createClient, primaryProvider: () => "contract" };
+    const dependencies = { createClient, primaryProvider: () => "contract",
+      autoReviewProviderPolicy: () => ({ primarySupported: true, supportedProviders: new Set(["contract"]) }),
+    };
     try {
       for (const value of ["auto_review", "user"] as const) {
         const before = await loadCodexUserSettings(dependencies);
@@ -1462,7 +1464,8 @@ contractSuite("isolated Codex App Server state contract", () => {
         const after = await peerClient.readUserConfigSnapshot();
         expect(after.config).toEqual({ ...original.config, approvals_reviewer: value });
         const visible = await loadCodexUserSettings(dependencies);
-        expect(visible.approvalsReviewer).toEqual({ value, editable: true });
+        expect(visible.approvalsReviewer).toEqual({ value, editable: true,
+          canEnableAutoReview: true, autoReviewUnavailableReason: null });
         const started = await ownerRpc.request<ThreadStartResponse>({ method: "thread/start", params: { cwd: workdir, ephemeral: true, approvalPolicy: "on-request", sandbox: "read-only" } });
         expect(started.approvalsReviewer).toBe(value);
         await ownerClient.unsubscribeThread(started.thread.id);
@@ -1532,13 +1535,16 @@ contractSuite("isolated Codex App Server state contract", () => {
         listModels: async () => [],
         readDefaultModelSettings: managedClient.readDefaultModelSettings.bind(managedClient),
         writeDefaultModelSettings: managedClient.writeDefaultModelSettings.bind(managedClient),
-      }), primaryProvider: () => "contract" };
+      }), primaryProvider: () => "contract",
+      autoReviewProviderPolicy: () => ({ primarySupported: true, supportedProviders: new Set(["contract"]) }),
+      };
       const beforePolicy = await client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: true });
       expect(beforePolicy.approvalsReviewerPolicy).toEqual({ allowedReviewers: ["user"], autoReviewDisabled: false });
       expect(bundleRequests.length).toBeGreaterThan(0);
       expect(bundleRequests.every(id => id === accountId)).toBe(true);
       const restricted = await loadCodexUserSettings(dependencies);
-      expect(restricted.approvalsReviewer).toEqual({ value: "user", editable: false, reason: "managed-policy" });
+      expect(restricted.approvalsReviewer).toEqual({ value: "user", editable: false, reason: "managed-policy",
+        canEnableAutoReview: true, autoReviewUnavailableReason: null });
       await expect(updateCodexUserSetting({ kind: "approvals-reviewer", value: "auto_review" }, { ...dependencies, expectedVersion: restricted.version })).rejects.toMatchObject({ code: "approvals-reviewer-managed-policy" });
       const afterPolicy = await client.readUserConfigSnapshot();
       expect(afterPolicy.config).toEqual(beforePolicy.config);

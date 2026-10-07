@@ -499,6 +499,13 @@ Codex 与 Provider 配置读取使用已有主 App Server 的短连接，读取�
 策略读取不可用、已有值不受支持或受管 requirements 限制时只读，未知值不显示为手动审批。
 新 Thread 仍受 Profile、项目配置、显式参数与组织策略约束，已加载或恢复的会话不随默认审批方式切换。
 完整范围见[审批方式：手动审批与自动审查（Auto-review）](user-guide.md#审批方式手动审批与自动审查auto-review)。
+
+自动审查仅允许官方 OpenAI 与使用官方模型目录的 Codex 兼容 Provider。Codex 默认审批方式
+按当前主 Provider 判断开启权限，Workspace 默认按是否存在允许的 Provider 判断；不支持时
+禁用自动审查选项并说明原因，查询、选择手动审批及清除工作区覆盖仍保留。服务端在预览与应用时
+复核准入，已有偏好不会使不支持的 Provider 绕过实际会话执行门禁。
+Provider 资格读取失败时单独显示自动审查能力不可用并禁止开启；Gateway 设置查询、工作区
+手动审批、清除覆盖及其他权限设置仍可用，不因该资格读取失败而使整页失效。
 渠道当前会话的显式切换使用 `/autoreview on|off`，查询使用 `/autoreview`；WebUI 全局与工作区入口继续管理各自默认设置。
 
 Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOME/auth.json`；未检测到鉴权文件

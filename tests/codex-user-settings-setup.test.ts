@@ -4,6 +4,17 @@ import { runCodexUserSettingsSetup } from "../scripts/codex-user-settings-setup.
 import type { CodexUserSettingsState } from "../scripts/codex-user-settings-management.mjs";
 
 describe("Codex user settings setup", () => {
+  it.each([null, "provider-config-unavailable"] as const)("keeps manual review available when primary qualification is %s", async (autoReviewUnavailableReason) => {
+    const select = vi.fn().mockResolvedValueOnce("approvals-reviewer").mockResolvedValueOnce("user");
+    const updateSetting = vi.fn(async () => ({ kind: "approvals-reviewer" as const, previousVersion: "version-1", value: { value: "user" }, activation: "next-thread" as const }));
+    await runCodexUserSettingsSetup({
+      environment: {}, output: { write: () => undefined }, updateSetting,
+      loadSettings: async () => ({ ...settingsState(), approvalsReviewer: { value: "auto_review", editable: true, canEnableAutoReview: false, autoReviewUnavailableReason } }),
+      prompts: { select, confirm: async () => true, isCancel: () => false },
+    });
+    expect(select.mock.calls[1]![0]).toMatchObject({ initialValue: "user", options: [{ value: "user", label: "手动审批", hint: "由用户审查审批请求" }] });
+    expect(updateSetting).toHaveBeenCalledWith({ kind: "approvals-reviewer", value: "user" }, expect.objectContaining({ expectedVersion: "version-1" }));
+  });
   it.each([
     { value: null, hint: "当前：未设置" },
     { value: "user" as const, hint: "当前：手动审批" },
@@ -448,7 +459,7 @@ describe("Codex user settings setup", () => {
 
 function settingsState(): CodexUserSettingsState {
   return {
-    approvalsReviewer: { value: null, editable: true },
+    approvalsReviewer: { value: null, editable: true, canEnableAutoReview: true },
     toolSettings: { mergedAvailable: false, fields: [] },
     version: "version-1",
     provider: "openai",

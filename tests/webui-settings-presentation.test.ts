@@ -78,7 +78,11 @@ describe("WebUI 状态与关联范围展示", () => {
             gateway:Object.fromEntries(["general","permissions","network","data","display"].map(section=>[section,render(GatewaySettingsCard,{management:{...shared,managedSettings},section,upstreamAgent:{data:{effectiveUserAgent:"fixture-agent/1",recentRequestUserAgent:"fixture-agent/1",source:"override"},error:null,loading:false}},language)])),
             codex:Object.fromEntries(["general","models","context"].map(section=>[section,render(AppServerSettingsCard,{management:{...shared,codexSettings},section},language)])),
             reviewers:Object.fromEntries([null,"user","auto_review"].map(value=>[String(value),render(AppServerSettingsCard,{management:{...shared,codexSettings:{...codexSettings,approvalsReviewer:{value,editable:true},permissions:{editable:true},toolSettings:{mergedAvailable:true,fields:[]}}},section:"permissions"},language)])),
-            workspace:render(WorkspaceSettingsCard,{management:{...shared,managedSettings}},language),
+            workspace:render(WorkspaceSettingsCard,{management:{...shared,managedSettings:{...managedSettings,system:{...managedSettings.system,workspaces:managedSettings.system.workspaces.map(workspace=>({...workspace,canEnableAutoReview:true}))}}}},language),
+            workspaceUnsupported:render(WorkspaceSettingsCard,{management:{...shared,managedSettings:{...managedSettings,system:{...managedSettings.system,workspaces:managedSettings.system.workspaces.map(workspace=>({...workspace,approvalsReviewer:"auto_review",canEnableAutoReview:false}))}}}},language),
+            reviewerUnsupported:render(AppServerSettingsCard,{management:{...shared,codexSettings:{...codexSettings,approvalsReviewer:{value:"auto_review",editable:true,canEnableAutoReview:false},permissions:{editable:true},toolSettings:{mergedAvailable:true,fields:[]}}},section:"permissions"},language),
+            workspaceUnavailable:render(WorkspaceSettingsCard,{management:{...shared,managedSettings:{...managedSettings,system:{...managedSettings.system,workspaces:managedSettings.system.workspaces.map(workspace=>({...workspace,canEnableAutoReview:false,autoReviewUnavailableReason:"provider-config-unavailable"}))}}}},language),
+            reviewerUnavailable:render(AppServerSettingsCard,{management:{...shared,codexSettings:{...codexSettings,approvalsReviewer:{value:"auto_review",editable:true,canEnableAutoReview:false,autoReviewUnavailableReason:"provider-config-unavailable"},permissions:{editable:true},toolSettings:{mergedAvailable:true,fields:[]}}},section:"permissions"},language),
             provider:Object.fromEntries(["providers","models","context"].map(section=>[section,render(ProviderSettingsManagement,{management:{...shared,settings},section},language)])),
             tools:Object.fromEntries(toolFields.map(field=>[field.path.join("."),render(ToolAccessSettings,{management:{...shared,codexSettings:{...codexSettings,toolSettings:{mergedAvailable:true,fields:[field]}}}},language)])),
             status:render(ProviderStatusCard,{state:providerState},language),
@@ -94,7 +98,7 @@ describe("WebUI 状态与关联范围展示", () => {
     `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000, maxBuffer: 2 * 1024 * 1024 });
     type Presentation = {
       gateway: Record<string, string>; codex: Record<string, string>; reviewers: Record<string, string>; provider: Record<string, string>; tools: Record<string, string>;
-      status: string; channels: string; emptyChannels: string; unconfigured: string; workspace: string;
+      status: string; channels: string; emptyChannels: string; unconfigured: string; workspace: string; workspaceUnsupported: string; reviewerUnsupported: string; workspaceUnavailable: string; reviewerUnavailable: string;
     };
     const { presentation, userData, translatedChannel, unchanged } = JSON.parse(output) as {
       presentation: Record<"zh" | "en" | "zhAgain", Presentation>;
@@ -105,7 +109,7 @@ describe("WebUI 状态与关联范围展示", () => {
     const english = presentation.en;
     for (const html of [
       ...Object.values(english.gateway), ...Object.values(english.codex), ...Object.values(english.reviewers), ...Object.values(english.provider), ...Object.values(english.tools),
-      english.status, english.channels, english.emptyChannels, english.unconfigured, english.workspace,
+      english.status, english.channels, english.emptyChannels, english.unconfigured, english.workspace, english.workspaceUnsupported, english.reviewerUnsupported, english.workspaceUnavailable, english.reviewerUnavailable,
     ]) {
       expect(html).not.toMatch(/[\u4e00-\u9fff]/u);
       expect(html).not.toMatch(/\b(?:settingsFields|settingsUi|managementUi|modelManagement|channelSettings)\.[A-Za-z]/u);
@@ -144,6 +148,16 @@ describe("WebUI 状态与关联范围展示", () => {
     expect(english.reviewers.user).not.toContain("Not set");
     expect(english.workspace).toContain("Follow Codex default");
     expect(english.workspace).toContain("Loaded sessions keep their actual reviewer");
+    expect(english.workspaceUnsupported).toContain("You can select manual review or clear the override");
+    expect(presentation.zh.workspaceUnsupported).toContain("可以选择手动审批或清除覆盖");
+    expect(english.reviewerUnsupported).toContain("The primary Provider cannot enable Auto-review");
+    expect(presentation.zh.reviewerUnsupported).toContain("可以改为手动审批");
+    expect(english.workspaceUnavailable).toContain("Provider configuration could not be read safely");
+    expect(english.workspaceUnavailable).toContain("Other Gateway settings remain editable");
+    expect(presentation.zh.workspaceUnavailable).toContain("可以选择手动审批或清除工作区覆盖");
+    expect(english.reviewerUnavailable).toContain("You can select manual review");
+    expect(presentation.zh.reviewerUnavailable).toContain("无法安全读取提供商配置");
+    expect(english.reviewerUnsupported).toContain('data-disabled="false"');
     expect(presentation.zh.channels).toContain("已启用");
     expect(english.channels).toContain("Enabled");
     expect(english.channels).toContain("Configured, disabled");

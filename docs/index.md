@@ -285,6 +285,18 @@ HTTP 429/5xx 与传输失败继续使用剩余预算，路径与其他响应错�
 [`json-rpc-account.test.ts`](../tests/json-rpc-account.test.ts)、[`json-rpc-mcp.test.ts`](../tests/json-rpc-mcp.test.ts)
 和包含失败连接重建、健康连接复用的真实合同 [`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts)。
 
+下列 Auto-review 入口共用 [`auto-review-provider-policy.mjs`](../runtime/auto-review-provider-policy.mjs)
+的 Provider 分类：只允许官方 OpenAI 和使用官方模型目录的 Codex 兼容 Provider，固定模式的
+`openai` 路由别名不为独立模型目录授予支持。用户默认按主 Provider、Workspace 默认按已配置的
+可用类别判断是否允许开启；当前 Thread 开启及执行按实际 Provider 判断。
+[`router.ts`](../src/session-routing/router.ts) 对不支持的 Provider 在新建、未加载恢复和分叉时
+明确请求 `user`；已加载恢复保留实际审批方式、活动 Turn 和订阅，不在恢复阶段执行审批收敛。
+[`gateway-component-graph.ts`](../src/bootstrap/gateway-component-graph.ts) 在共享执行入口复核
+实际设置，需关闭自动审查时等待 RPC、设置通知和归约完成，不确认则拒绝新执行，保留查询与停止。
+这不增加协议能力，也不修改官方目录或持久化格式。分类验证见
+[`auto-review-provider-policy.test.ts`](../tests/auto-review-provider-policy.test.ts)，生命周期组合验证
+复用 `session-router.test.ts` 与 `real-app-server-supervised-thread-state.test.ts`。
+
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |
 | Codex Auto-review 用户偏好 | 稳定 `config/read`、`configRequirements/read`、`config/batchWrite`；受控实验 `configRequirements/read.allowedApprovalsReviewers` | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs) 投影并单独写入用户层 `approvals_reviewer = "user"` 或 `"auto_review"`；[`client.ts`](../src/codex-client/client.ts) 只在该设置读取时检查受管 requirements。CLI 与 WebUI 显式确认并校验用户层修订；未知现值、受管限制和不可用的策略读取失败关闭。验证见 `codex-user-settings-management.test.ts`、`codex-user-settings-setup.test.ts`、`json-rpc-config.test.ts` 和 `real-app-server-isolated-state.test.ts`。审查生命周期通知及统计通过下表独立的状态投影链路处理。 |

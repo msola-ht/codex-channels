@@ -47,6 +47,8 @@ export interface CodexUserSettingsState {
   approvalsReviewer: {
     value: "user" | "auto_review" | null;
     editable: boolean;
+    canEnableAutoReview?: boolean;
+    autoReviewUnavailableReason?: "provider-config-unavailable" | null;
     reason?: "unsupported-value" | "managed-policy" | "unavailable";
   };
   models: Array<{
@@ -93,6 +95,7 @@ export interface CodexUserSettingsDependencies {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CodexUserConfigClient>;
   primaryProvider?: (environment: NodeJS.ProcessEnv) => string;
+  autoReviewProviderPolicy?: typeof import("../runtime/auto-review-provider-policy.mjs").loadAutoReviewProviderPolicy;
 }
 
 export type CodexUserSettingActivation =

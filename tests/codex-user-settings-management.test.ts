@@ -10,7 +10,46 @@ import {
   updateCodexUserSetting,
 } from "../scripts/codex-user-settings-management.mjs";
 
+vi.mock("../runtime/auto-review-provider-policy.mjs", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../runtime/auto-review-provider-policy.mjs")>(),
+  loadAutoReviewProviderPolicy: () => ({ primarySupported: true, supportedProviders: new Set(["openai"]) }),
+}));
+
 describe("Codex user settings management", () => {
+  it.each([previewCodexUserSetting, updateCodexUserSetting])("isolates unavailable qualification while preserving the existing strict primary Provider read", async (change) => {
+    const client = settingsClient({ approvals_reviewer: "auto_review" });
+    const options = {
+      expectedVersion: "version-1", createClient: async () => client, primaryProvider: () => "openai",
+      autoReviewProviderPolicy: vi.fn(() => { throw new Error("private-provider-config-content"); }),
+    };
+    expect((await loadCodexUserSettings(options)).approvalsReviewer).toMatchObject({
+      value: "auto_review", editable: true, canEnableAutoReview: false, autoReviewUnavailableReason: "provider-config-unavailable",
+    });
+    await expect(change({ kind: "approvals-reviewer", value: "auto_review" }, options)).rejects.toMatchObject({
+      code: "auto-review-provider-unavailable", field: "value",
+    });
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+    options.autoReviewProviderPolicy.mockClear();
+    await expect(change({ kind: "approvals-reviewer", value: "user" }, options)).resolves.toMatchObject({ value: { value: "user" } });
+    expect(options.autoReviewProviderPolicy).not.toHaveBeenCalled();
+    await expect(loadCodexUserSettings({ ...options, primaryProvider: () => { throw new Error("strict primary read failed"); } })).rejects.toThrow("strict primary read failed");
+    await expect(change({ kind: "approvals-reviewer", value: "auto_review" }, {
+      ...options, primaryProvider: () => { throw new Error("private-provider-config-content"); },
+    })).rejects.toMatchObject({ code: "auto-review-provider-unavailable", field: "value" });
+  });
+  it.each([previewCodexUserSetting, updateCodexUserSetting])("blocks enabling on an unsupported primary while preserving query and manual review", async (change) => {
+    const client = settingsClient({ approvals_reviewer: "auto_review" });
+    const options = {
+      expectedVersion: "version-1", createClient: async () => client, primaryProvider: () => "openai",
+      autoReviewProviderPolicy: () => ({ primarySupported: false, supportedProviders: new Set(["compatible-switching"]) }),
+    };
+    expect((await loadCodexUserSettings(options)).approvalsReviewer).toMatchObject({
+      value: "auto_review", editable: true, canEnableAutoReview: false,
+    });
+    await expect(change({ kind: "approvals-reviewer", value: "auto_review" }, options)).rejects.toMatchObject({ code: "auto-review-provider-unsupported", field: "value" });
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+    await expect(change({ kind: "approvals-reviewer", value: "user" }, options)).resolves.toMatchObject({ value: { value: "user" } });
+  });
   it.each([previewCodexUserSetting, updateCodexUserSetting])("rejects retired personality writes before config mutation", async (change) => {
     const client = settingsClient({ personality: "friendly" });
     const input = { kind: "preferences", personality: "pragmatic" } as unknown as Parameters<typeof change>[0];
@@ -86,7 +125,7 @@ describe("Codex user settings management", () => {
       provider: "openai",
       toolSettings: expect.objectContaining({ mergedAvailable: false }),
       defaultsEditable: true,
-      approvalsReviewer: { value: null, editable: true },
+      approvalsReviewer: { value: null, editable: true, canEnableAutoReview: true, autoReviewUnavailableReason: null },
       models: [projectedModel()],
       defaults: {
         model: "gpt-test",

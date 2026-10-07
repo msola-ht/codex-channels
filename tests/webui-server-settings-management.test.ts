@@ -18,6 +18,7 @@ import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config
 import { loadGatewaySettings } from "../scripts/config-management.mjs";
 import * as configManagement from "../scripts/config-management.mjs";
 import * as privateFile from "../runtime/private-file.mjs";
+import { finishResponsesModelCatalogWrite, writeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 // @ts-expect-error JavaScript helper intentionally has no declaration file.
 import * as serviceStatus from "../scripts/webui-service-status.mjs";
 import type { CodexUserConfigClient } from "../scripts/codex-user-config.mjs";
@@ -57,6 +58,95 @@ function startServer(
 }
 
 describe("webui server settings and task management", () => {
+  it("keeps Gateway management available with malformed Codex Provider config and rechecks enabling after preview", async () => {
+    const fixture = createFixture();
+    fixture.environment.CODEX_HOME = join(fixture.home, "codex-unavailable");
+    mkdirSync(fixture.environment.CODEX_HOME, { recursive: true, mode: 0o700 });
+    const codexPath = join(fixture.environment.CODEX_HOME, "config.toml");
+    writeFileSync(codexPath, "", { mode: 0o600 });
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin, token: "webui-token" });
+    const url = `${origin}/api/v1/management/settings`;
+    const headers = { authorization: "Bearer webui-token", origin: managementOrigin, "content-type": "application/json" };
+    const current = loadGatewaySettings(fixture.environment);
+    const workspaceId = current.workspaces[0]!.id;
+    const body = { revision: current.revision, setting: { kind: "workspace.permissions", value: { workspaceId, update: { kind: "approvals-reviewer", value: "auto_review" } } } };
+    const allowed = await fetch(`${url}/preview`, { method: "POST", headers, body: JSON.stringify(body) });
+    expect(allowed.status).toBe(200);
+    const confirmation = await allowed.json() as { confirmationToken: string };
+    writeFileSync(codexPath, 'model_provider = "private-unclosed', { mode: 0o600 });
+    const settingsResponse = await fetch(url, { headers });
+    expect(settingsResponse.status).toBe(200);
+    expect(await settingsResponse.json()).toMatchObject({ system: { workspaces: [{ canEnableAutoReview: false, autoReviewUnavailableReason: "provider-config-unavailable" }] } });
+    const before = readFileSync(join(fixture.home, "config.toml"), "utf8");
+    for (const [path, method, payload] of [
+      [url, "PATCH", { ...body, confirmationToken: confirmation.confirmationToken }],
+      [`${url}/preview`, "POST", body],
+    ] as const) {
+      const rejected = await fetch(path, { method, headers, body: JSON.stringify(payload) });
+      expect(rejected.status).toBe(400);
+      const failure = await rejected.text();
+      expect(JSON.parse(failure)).toMatchObject({ error: { code: "workspace-auto-review-provider-unavailable" } });
+      expect(failure).not.toContain("private-unclosed");
+    }
+    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(before);
+    for (const update of [
+      { kind: "approvals-reviewer", value: "user" },
+      { kind: "approvals-reviewer", value: null },
+      { kind: "sandbox", value: "read-only" },
+    ]) {
+      const revision = loadGatewaySettings(fixture.environment).revision;
+      const change = { revision, setting: { kind: "workspace.permissions", value: { workspaceId, update } } };
+      const preview = await fetch(`${url}/preview`, { method: "POST", headers, body: JSON.stringify(change) });
+      expect(preview.status).toBe(200);
+      const token = await preview.json() as { confirmationToken: string };
+      const saved = await fetch(url, { method: "PATCH", headers, body: JSON.stringify({ ...change, confirmationToken: token.confirmationToken }) });
+      expect(saved.status).toBe(200);
+    }
+    expect(loadGatewaySettings(fixture.environment).workspaces[0]).toMatchObject({ approvalsReviewer: null, sandbox: "read-only" });
+  });
+  it("rechecks Workspace Provider support after preview and allows manual review and clearing on RS", async () => {
+    const fixture = createFixture();
+    fixture.environment.CODEX_HOME = join(fixture.home, "codex-policy");
+    mkdirSync(fixture.environment.CODEX_HOME, { recursive: true, mode: 0o700 });
+    const catalog = writeResponsesModelCatalog(fixture.environment, "rs-fixture", [{
+      id: "fixture-model", name: "Fixture", contextWindow: 32768, reasoningEfforts: ["high"], defaultReasoningEffort: "high", supportsImages: false,
+    }], "fixture-model");
+    finishResponsesModelCatalogWrite(catalog);
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+    const url = `${origin}/api/v1/management/settings`;
+    const headers = { origin: managementOrigin, "content-type": "application/json" };
+    const current = await (await fetch(url)).json() as { revision: string; system: { workspaces: Array<{ id: string; canEnableAutoReview: boolean }> } };
+    const workspaceId = current.system.workspaces[0]!.id;
+    expect(current.system.workspaces[0]!.canEnableAutoReview).toBe(true);
+    const body = { revision: current.revision, setting: { kind: "workspace.permissions", value: { workspaceId, update: { kind: "approvals-reviewer", value: "auto_review" } } } };
+    const preview = await fetch(`${url}/preview`, { method: "POST", headers, body: JSON.stringify(body) });
+    expect(preview.status).toBe(200);
+    const confirmation = await preview.json() as { confirmationToken: string };
+    writeFileSync(join(fixture.environment.CODEX_HOME, "config.toml"), [
+      'model_provider = "rs-fixture"', 'model = "fixture-model"', `model_catalog_json = ${JSON.stringify(catalog.path)}`,
+      '[model_providers.rs-fixture]', 'base_url = "https://fixture.invalid/v1"', 'wire_api = "responses"',
+    ].join("\n"), { mode: 0o600 });
+    const before = readFileSync(join(fixture.home, "config.toml"), "utf8");
+    const rejected = await fetch(url, { method: "PATCH", headers, body: JSON.stringify({ ...body, confirmationToken: confirmation.confirmationToken }) });
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({ error: { code: "workspace-auto-review-provider-unsupported" } });
+    const rejectedPreview = await fetch(`${url}/preview`, { method: "POST", headers, body: JSON.stringify(body) });
+    expect(rejectedPreview.status).toBe(400);
+    expect(readFileSync(join(fixture.home, "config.toml"), "utf8")).toBe(before);
+    expect(loadGatewaySettings(fixture.environment).workspaces[0]!.canEnableAutoReview).toBe(false);
+    for (const value of ["user", null]) {
+      const revision = loadGatewaySettings(fixture.environment).revision;
+      const change = { revision, setting: { kind: "workspace.permissions", value: { workspaceId, update: { kind: "approvals-reviewer", value } } } };
+      const allowed = await fetch(`${url}/preview`, { method: "POST", headers, body: JSON.stringify(change) });
+      expect(allowed.status).toBe(200);
+      const token = await allowed.json() as { confirmationToken: string };
+      const saved = await fetch(url, { method: "PATCH", headers, body: JSON.stringify({ ...change, confirmationToken: token.confirmationToken }) });
+      expect(saved.status).toBe(200);
+      expect(loadGatewaySettings(fixture.environment).workspaces[0]!.approvalsReviewer).toBe(value);
+    }
+  });
   it("previews Workspace reviewers without writing and requires versioned one-time confirmation", async () => {
     const fixture = createFixture();
     const managementOrigin = "http://127.0.0.1:0";

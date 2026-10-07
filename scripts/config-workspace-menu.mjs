@@ -106,12 +106,17 @@ export async function runWorkspaceSettings({
       }
       update = { kind: "approval", value: selected === "clear" ? null : selected };
     } else if (field === "approvals_reviewer") {
+      if (entry.canEnableAutoReview !== true) {
+        output.write(entry.autoReviewUnavailableReason === "provider-config-unavailable"
+          ? "无法安全读取 Provider 配置，暂时不能开启 Auto-review；可以选择手动审批或清除工作区覆盖。\n"
+          : "当前没有支持 Auto-review 的 Provider；可以选择手动审批或清除工作区覆盖。\n");
+      }
       const selected = await prompts.select({
         message: "选择工作区默认审批方式",
         showInstructions: false,
-        initialValue: entry.approvalsReviewer ?? "clear",
+        initialValue: entry.canEnableAutoReview === true ? entry.approvalsReviewer ?? "clear" : "clear",
         options: [
-          { value: "auto_review", label: "自动审查", hint: "由 Codex Auto-review 审查审批请求" },
+          ...(entry.canEnableAutoReview === true ? [{ value: "auto_review", label: "自动审查", hint: "由 Codex Auto-review 审查审批请求" }] : []),
           { value: "user", label: "手动审批", hint: "由用户审查审批请求" },
           { value: "clear", label: "跟随 Codex 默认", hint: "清除 Workspace 覆盖；历史恢复保留 Codex 持久设置" },
         ],

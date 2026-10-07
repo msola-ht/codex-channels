@@ -71,6 +71,68 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
 }
 
 describe("SessionRouter", () => {
+  it.each(["deepseek", "clp-main", "ccg-main", "ocg-main", "rs-private"])("forces user for %s new, unloaded and forked Threads", async provider => {
+    const workspace = new WorkspaceRegistry([{ id: "main", name: "Main", cwd: "/workspace", approvalsReviewer: "auto_review" }], "main");
+    const store = new MemoryBindingStore();
+    const started = { ...thread("new", { type: "idle" }), modelProvider: provider };
+    const historical = { ...thread("history", { type: "notLoaded" }), modelProvider: provider };
+    const startThread = vi.fn(async () => session(started, { modelProvider: provider, approvalsReviewer: "user" }));
+    const resumeThread = vi.fn(async () => session({ ...historical, status: { type: "idle" } }, { modelProvider: provider, approvalsReviewer: "user" }));
+    const forkThread = vi.fn(async () => session({ ...started, id: "fork" }, { modelProvider: provider, approvalsReviewer: "user" }));
+    const router = new SessionRouter(threadPort({ startThread, resumeThread, forkThread, listThreads: async () => [],
+      readThread: async () => historical, unsubscribeThread: async () => undefined,
+    }), store, workspace, [], undefined, { primaryProvider: provider, supportedProviders: new Set(["openai", "compatible"]) });
+    await router.ensure(target, { modelProvider: provider });
+    expect(startThread).toHaveBeenCalledWith("/workspace", expect.objectContaining({ approvalsReviewer: "user" }));
+    await router.fork(target);
+    expect(forkThread).toHaveBeenCalledWith("new", "/workspace", expect.objectContaining({ approvalsReviewer: "user" }));
+    await router.resume(target, "history");
+    expect(resumeThread).toHaveBeenCalledWith("history", "/workspace", expect.objectContaining({ approvalsReviewer: "user" }));
+  });
+
+  it("preserves the actual loaded unsupported reviewer for management without changing settings", async () => {
+    const snapshot = { ...thread("history", { type: "idle" }), modelProvider: "deepseek" };
+    const resumeThread = vi.fn(async () => session(snapshot, { modelProvider: "deepseek", approvalsReviewer: "auto_review" }));
+    const router = new SessionRouter(threadPort({ readThread: async () => snapshot, resumeThread }),
+      new MemoryBindingStore(), registry, [], undefined, { primaryProvider: "deepseek", supportedProviders: new Set() });
+    await router.resume(target, "history");
+    expect(resumeThread).toHaveBeenCalledWith("history", "/workspace", {});
+    expect(resumeThread).toHaveBeenCalledOnce();
+    expect(router.current(target)?.threadId).toBe("history");
+    expect(router.modelSettingsForThread("history")?.approvalsReviewer).toBe("auto_review");
+  });
+
+  it("uses the actual fork source Provider when a restored binding has no settings projection", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "history", sessionId: "history" });
+    const snapshot = { ...thread("history", { type: "idle" }), modelProvider: "deepseek" };
+    const forkThread = vi.fn(async () => session({ ...snapshot, id: "fork" }, { modelProvider: "deepseek", approvalsReviewer: "user" }));
+    const router = new SessionRouter(threadPort({ readThread: async () => snapshot, forkThread, unsubscribeThread: async () => undefined }),
+      store, registry, [], undefined, { primaryProvider: "openai", supportedProviders: new Set(["openai"]) });
+    await router.fork(target);
+    expect(forkThread).toHaveBeenCalledWith("history", "/workspace", { approvalsReviewer: "user" });
+  });
+
+  it.each(["active", "unknown", "guardian"])("restores management of an unsupported loaded reviewer without optimistic changes (%s)", async scenario => {
+    const snapshot = { ...thread("history", scenario === "active" ? { type: "active" } : { type: "idle" }),
+      modelProvider: "deepseek", activeTurnId: scenario === "active" ? "turn" : null };
+    const approvalsReviewer = scenario === "unknown" ? null : scenario === "guardian" ? "guardian_subagent" : "auto_review";
+    const resumeThread = vi.fn(async () => session(snapshot, { modelProvider: "deepseek", approvalsReviewer }));
+    const unsubscribeThread = vi.fn(async () => undefined);
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "history", sessionId: "history" });
+    const router = new SessionRouter(threadPort({ readThread: async () => snapshot, resumeThread, unsubscribeThread }),
+      store, registry, [], undefined, { primaryProvider: "deepseek", supportedProviders: new Set() });
+    const onRestored = vi.fn();
+    expect(await router.restoreSubscriptions(() => true, onRestored)).toEqual([]);
+    expect(onRestored).toHaveBeenCalledWith(router.current(target), snapshot);
+    expect(router.modelSettingsForThread("history")?.approvalsReviewer).toBe(approvalsReviewer);
+    await router.resume(target, "history");
+    expect(router.current(target)?.threadId).toBe("history");
+    expect(router.modelSettingsForThread("history")?.approvalsReviewer).toBe(approvalsReviewer);
+    expect(unsubscribeThread).not.toHaveBeenCalled();
+  });
+
   it("does not unsubscribe an idle scan superseded while waiting for a Thread lifecycle operation", async () => {
     const store = new MemoryBindingStore();
     const binding = { target, workspaceId: "main", threadId: "idle", sessionId: "idle" };

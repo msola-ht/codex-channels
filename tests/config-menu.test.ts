@@ -24,6 +24,7 @@ import { runNetworkSettings } from "../scripts/config-advanced-menu.mjs";
 import { readCodexProxySettings, writeCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { configActivationResult } from "../scripts/config-activation-result.mjs";
+import * as autoReviewProviderPolicy from "../runtime/auto-review-provider-policy.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runWorkspaceCommand } from "../scripts/workspace-command.mjs";
 
@@ -902,6 +903,37 @@ describe("Codex Connect config menu", () => {
       inputIsTTY: false, outputIsTTY: true, output: { write: vi.fn() }, prompts: { select },
     });
     expect(select).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["user", "unsupported"], ["clear", "unsupported"],
+    ["user", "unavailable"], ["clear", "unavailable"],
+  ])("keeps Workspace %s available while hiding Auto-review when qualification is %s", async (value, qualification) => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    (document as unknown as ConfigWithWorkspaces).workspaces[0]!.approvals_reviewer = "auto_review";
+    writeGatewayConfig(fixture.configPath, document);
+    const policy = vi.spyOn(autoReviewProviderPolicy, "loadAutoReviewProviderPolicy").mockImplementation(() => {
+      if (qualification === "unavailable") throw new Error("private-provider-config-content");
+      return { primarySupported: false, supportedProviders: new Set() };
+    });
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(), cancel: vi.fn(), isCancel: () => false,
+      select: vi.fn().mockResolvedValueOnce("permissions").mockResolvedValueOnce("approvals_reviewer").mockResolvedValueOnce(value).mockResolvedValueOnce("cancel"),
+    };
+    try {
+      await runWorkspaceCommand([], { cwd: fixture.dataDir, environment: fixture.environment, inputIsTTY: true, outputIsTTY: true, output: { write: (text: string) => output.push(text) }, prompts });
+      const choices = prompts.select.mock.calls.find(([input]) => input.message === "选择工作区默认审批方式")![0];
+      expect(choices.options).toEqual([
+        expect.objectContaining({ value: "user" }), expect.objectContaining({ value: "clear" }),
+      ]);
+      const updated = (readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces).workspaces[0]!;
+      if (value === "clear") expect(updated).not.toHaveProperty("approvals_reviewer");
+      else expect(updated.approvals_reviewer).toBe("user");
+      if (qualification === "unavailable") expect(output.join("")).toContain("无法安全读取 Provider 配置");
+      expect(output.join("")).not.toContain("private-provider-config-content");
+    } finally { policy.mockRestore(); }
   });
 
   it.each(["auto_review", "user", "clear"])("sets Workspace Auto-review to %s through the existing permissions menu", async (value) => {

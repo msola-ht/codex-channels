@@ -4,6 +4,7 @@
 
 - `request-timing.mjs` / `request-timing.d.mts`：指标 IPC、存储、CLI 与 WebUI 共用的生成区间校验和观测速度计算；无 I/O、不依赖调试转储。
 - `auto-review-metadata.mjs` / `auto-review-metadata.d.mts`：Provider 指标与转储读取共用的自动审查来源、父任务及原始审查身份投影；只接受明确的 `guardian_review` 来源和有界标识，不读取文件或推断缺失归属。
+- `auto-review-provider-policy.mjs` / `auto-review-provider-policy.d.mts`：按已验证的 Provider 模型目录来源统一判定自动审查准入；只允许官方 OpenAI 和复用官方模型目录的自定义 Provider，供设置入口与会话执行门禁共用，不根据模型名称或认证方式推断支持。严格读取用于执行门禁；管理设置投影将读取失败标记为不可用及安全原因，只限制开启，不阻断其他设置或关闭、清除覆盖。
 
 - `openai-credentials.mjs` / `openai-credentials.d.mts`：有界读取当前 Codex Home 登录缓存，仅在账户 ID 与官方额度账户一致时返回 `last_refresh` 凭证刷新时间；不返回凭据、不刷新登录、不读取订阅日期。
 

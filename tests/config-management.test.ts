@@ -23,6 +23,7 @@ import {
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
+import { finishResponsesModelCatalogWrite, writeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 
 const roots: string[] = [];
 
@@ -31,6 +32,72 @@ afterEach(() => {
 });
 
 describe("Gateway Config management", () => {
+  it("isolates unreadable Auto-review qualification from Gateway settings and disabling or clearing overrides", () => {
+    const fixture = createFixture();
+    mkdirSync(fixture.environment.CODEX_HOME, { recursive: true, mode: 0o700 });
+    const document = readGatewayConfig(fixture.configPath);
+    (document.workspaces as Array<Record<string, string>>)[0]!.approvals_reviewer = "auto_review";
+    writeGatewayConfig(fixture.configPath, document);
+    writeFileSync(join(fixture.environment.CODEX_HOME, "config.toml"), 'model_provider = "private-unclosed', { mode: 0o600 });
+    let settings = loadGatewaySettings(fixture.environment);
+    const workspaceId = settings.workspaces[0]!.id;
+    expect(settings.workspaces[0]).toMatchObject({
+      approvalsReviewer: "auto_review", canEnableAutoReview: false, autoReviewUnavailableReason: "provider-config-unavailable",
+    });
+    const before = readFileSync(fixture.configPath, "utf8");
+    expect(() => updateGatewaySetting({ kind: "workspace.permissions", workspaceId, update: { kind: "approvals-reviewer", value: "auto_review" } }, {
+      environment: fixture.environment, expectedRevision: settings.revision,
+    })).toThrow(expect.objectContaining({ code: "workspace-auto-review-provider-unavailable", field: "update.value" }));
+    expect(readFileSync(fixture.configPath, "utf8")).toBe(before);
+    for (const update of [
+      { kind: "approvals-reviewer", value: "user" },
+      { kind: "approvals-reviewer", value: null },
+      { kind: "sandbox", value: "read-only" },
+      { kind: "approval", value: "on-request" },
+      { kind: "sandbox", value: null },
+      { kind: "permissions", value: "fixture-profile" },
+    ] as const) {
+      const unavailableLoader = () => { throw new Error("qualification must not be read for this change"); };
+      updateGatewaySetting({ kind: "workspace.permissions", workspaceId, update }, {
+        environment: fixture.environment, expectedRevision: settings.revision, autoReviewProviderPolicy: unavailableLoader,
+      });
+      settings = loadGatewaySettings(fixture.environment);
+    }
+    expect(settings.workspaces[0]).toMatchObject({ approvalsReviewer: null, sandbox: null, approvalPolicy: "on-request", permissions: "fixture-profile" });
+    updateGatewaySetting({ kind: "display.reasoning", value: true }, { environment: fixture.environment, expectedRevision: settings.revision });
+    expect(loadGatewaySettings(fixture.environment).display.reasoningEnabled).toBe(true);
+  });
+  it("checks actual primary catalog classification before saving Workspace Auto-review", () => {
+    const fixture = createFixture();
+    mkdirSync(fixture.environment.CODEX_HOME, { recursive: true, mode: 0o700 });
+    const catalog = writeResponsesModelCatalog(fixture.environment, "rs-fixture", [{
+      id: "fixture-model", name: "Fixture", contextWindow: 32768, reasoningEfforts: ["high"], defaultReasoningEffort: "high", supportsImages: false,
+    }], "fixture-model");
+    finishResponsesModelCatalogWrite(catalog);
+    const codexPath = join(fixture.environment.CODEX_HOME, "config.toml");
+    writeFileSync(codexPath, [
+      'model_provider = "rs-fixture"', 'model = "fixture-model"', `model_catalog_json = ${JSON.stringify(catalog.path)}`,
+      '[model_providers.rs-fixture]', 'base_url = "https://fixture.invalid/v1"', 'wire_api = "responses"',
+    ].join("\n"), { mode: 0o600 });
+    let settings = loadGatewaySettings(fixture.environment);
+    const workspaceId = settings.workspaces[0]!.id;
+    expect(settings.workspaces[0]!.canEnableAutoReview).toBe(false);
+    const before = readFileSync(settings.configPath, "utf8");
+    expect(() => updateGatewaySetting({ kind: "workspace.permissions", workspaceId, update: { kind: "approvals-reviewer", value: "auto_review" } }, {
+      environment: fixture.environment, expectedRevision: settings.revision,
+    })).toThrow(expect.objectContaining({ code: "workspace-auto-review-provider-unsupported" }));
+    expect(readFileSync(settings.configPath, "utf8")).toBe(before);
+    for (const value of ["user", null] as const) {
+      updateGatewaySetting({ kind: "workspace.permissions", workspaceId, update: { kind: "approvals-reviewer", value } }, { environment: fixture.environment, expectedRevision: settings.revision });
+      settings = loadGatewaySettings(fixture.environment);
+      expect(settings.workspaces[0]!.approvalsReviewer).toBe(value);
+    }
+    writeFileSync(codexPath, 'model_provider = "compatible"\n[model_providers.compatible]\nbase_url = "https://fixture.invalid/v1"\nwire_api = "responses"\n', { mode: 0o600 });
+    settings = loadGatewaySettings(fixture.environment);
+    expect(settings.workspaces[0]!.canEnableAutoReview).toBe(true);
+    expect(updateGatewaySetting({ kind: "workspace.permissions", workspaceId, update: { kind: "approvals-reviewer", value: "auto_review" } }, { environment: fixture.environment, expectedRevision: settings.revision }).value)
+      .toMatchObject({ approvalsReviewer: "auto_review" });
+  });
   it.each([false, true])("rejects a competing proxy snapshot with existing file=%s", (existing) => {
     const fixture = createFixture();
     if (existing) writeCodexProxySettings({ no_proxy: "localhost" }, fixture.environment);
