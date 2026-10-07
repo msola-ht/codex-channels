@@ -12,6 +12,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { loadGatewaySettings } from "../scripts/config-management.mjs";
+// @ts-expect-error JavaScript helper intentionally has no declaration file.
+import * as serviceStatus from "../scripts/webui-service-status.mjs";
 import type { CodexUserConfigClient } from "../scripts/codex-user-config.mjs";
 import {
   loadCodexUserSettings,
@@ -95,6 +97,30 @@ describe("webui server settings and task management", () => {
     expect(saved.status).toBe(200);
     expect(readCodexProxySettings(fixture.environment)).toEqual({ https_proxy: "http://localhost:7897" });
     expect(readGatewayConfig(join(fixture.home, "config.toml"))).not.toHaveProperty("network");
+  });
+
+  it("reads traffic recording configuration without probing services or requiring management access", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const { origin } = await startServer(fixture.environment, undefined, { token: "webui-token" });
+    const url = `${origin}/api/v1/settings/traffic`;
+    const headers = { authorization: "Bearer webui-token", origin: "https://remote.example" };
+    const probes = vi.spyOn(serviceStatus, "loadServiceStatusSummary");
+    try {
+      expect((await fetch(url)).status).toBe(401);
+      expect((await fetch(url, { method: "POST", headers })).status).toBe(405);
+      for (const enabled of [false, true, false]) {
+        const document = readGatewayConfig(configPath);
+        document.debug = { model_traffic_dump: enabled };
+        writeGatewayConfig(configPath, document);
+        const response = await fetch(url, { headers });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ modelTrafficDumpEnabled: enabled });
+      }
+      expect(probes).not.toHaveBeenCalled();
+    } finally {
+      probes.mockRestore();
+    }
   });
 
   it("returns a redacted settings summary", async () => {
@@ -665,14 +691,16 @@ describe("webui server settings and task management", () => {
       CODEX_CONNECT_CONFIG_FILE: "",
     });
 
-    const response = await fetch(`${origin}/api/v1/settings/summary`);
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "configuration_unavailable",
-        message: "Gateway 尚未初始化，请先运行 codexc init",
-      },
-    });
+    for (const endpoint of ["summary", "traffic"]) {
+      const response = await fetch(`${origin}/api/v1/settings/${endpoint}`);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "configuration_unavailable",
+          message: "Gateway 尚未初始化，请先运行 codexc init",
+        },
+      });
+    }
   });
 
 });

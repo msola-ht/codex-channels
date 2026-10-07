@@ -64,6 +64,9 @@ describe("WebUI 界面文案语言切换", () => {
     trafficDetailNoResponseEn: string;
     trafficPageEn: string;
     trafficPageDisabledEn: string;
+    trafficPageLoadingEn: string;
+    trafficPageFailedEn: string;
+    trafficNavigationHidden: string;
     trafficPageLimitedEn: string;
     trafficDetailPageEn: string;
   };
@@ -84,7 +87,7 @@ describe("WebUI 界面文案语言切换", () => {
           if (id.endsWith("/src/hooks/use-requests.ts")) return "export function useRequests() { return globalThis.fixtureRequests; }";
           if (id.endsWith("/src/hooks/use-errors.ts")) return "export function useErrors() { return globalThis.fixtureErrors; }";
           if (id.endsWith("/src/hooks/use-metrics-export.ts")) return "export function useMetricsExport() { return globalThis.fixtureExport; }";
-          if (id.endsWith("/src/hooks/use-traffic.ts")) return "export function useTrafficExchanges() { return globalThis.fixtureTrafficList; } export function useTrafficExchange() { return globalThis.fixtureTrafficDetail; }";
+          if (id.endsWith("/src/hooks/use-traffic.ts")) return "function guard() { if (globalThis.fixtureSummary && (globalThis.fixtureSummary.loading || globalThis.fixtureSummary.error || !globalThis.fixtureSummary.data?.modelTrafficDumpEnabled)) throw Error('Hidden traffic must not mount its hooks'); } export function useTrafficExchanges() { guard(); return globalThis.fixtureTrafficList; } export function useTrafficExchange() { guard(); return globalThis.fixtureTrafficDetail; }";
           if (id.endsWith("/src/hooks/use-traffic-query.ts")) return "export const trafficPageSizeOptions = [10, 20, 50]; export function useTrafficQuery() { return globalThis.fixtureTrafficQuery; }";
           if (id.endsWith("/src/hooks/use-management-tasks.ts")) return "export function useManagementTasks() { return globalThis.fixtureManagementTasks; } export function useManagementTaskRefresh() {}";
           if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
@@ -120,6 +123,7 @@ describe("WebUI 界面文案语言切换", () => {
         setServerTimeZone("UTC");
         const { LanguageProvider } = await server.ssrLoadModule("/src/hooks/language-provider.tsx");
         const { AppSidebar } = await server.ssrLoadModule("/src/components/layout/app-sidebar.tsx");
+        const { ModelTrafficSettingsContext } = await server.ssrLoadModule("/src/hooks/use-model-traffic-settings.ts");
         const { SidebarProvider } = await server.ssrLoadModule("/src/components/ui/sidebar.tsx");
         function LanguageProbe() { return h("span", null, useLanguage().language); }
         const restore = (getItem) => {
@@ -135,7 +139,8 @@ describe("WebUI 界面文案语言切换", () => {
           typeof value === "string" ? [[prefix+key, value]] : Object.entries(flatten(value, prefix+key+"."))));
         const zh = flatten(messages.zh), en = flatten(messages.en);
         const render = (component, props, language) => renderToStaticMarkup(
-          h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(MemoryRouter, null, h(TooltipProvider, null, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props)))));
+          h(ModelTrafficSettingsContext.Provider, { value: globalThis.fixtureSummary ?? { data: { modelTrafficDumpEnabled: true }, loading: false, error: null, refetch: noop } },
+          h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(MemoryRouter, null, h(TooltipProvider, null, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props))))));
         const clock = { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" };
         const rangeQueries = [
           ...["24h", "90d", "all"].map(value => ({ value, query: { range: value } })),
@@ -326,8 +331,14 @@ describe("WebUI 界面文案语言切换", () => {
         globalThis.fixtureTrafficList = { data: trafficListBase, loading: false, refreshing: false, notificationStatus: "live", error: null, errorCode: null,
           refetch: noop };
         const trafficPageEn = render(TrafficPage, {}, "en");
-        globalThis.fixtureTrafficList = { ...globalThis.fixtureTrafficList, data: { ...trafficListBase, enabled: false } };
+        globalThis.fixtureSummary = { data: { modelTrafficDumpEnabled: false }, loading: false, error: null, refetch: noop };
         const trafficPageDisabledEn = render(TrafficPage, {}, "en");
+        const trafficNavigationHidden = render(SidebarProvider, { children: h(AppSidebar) }, "en");
+        globalThis.fixtureSummary = { ...globalThis.fixtureSummary, loading: true };
+        const trafficPageLoadingEn = render(TrafficPage, {}, "en");
+        globalThis.fixtureSummary = { ...globalThis.fixtureSummary, loading: false, error: "private-settings-error", errorCode: "unknown" };
+        const trafficPageFailedEn = render(TrafficPage, {}, "en");
+        delete globalThis.fixtureSummary;
         globalThis.fixtureTrafficList = { ...globalThis.fixtureTrafficList, data: { ...trafficListBase, total: 5 } };
         const trafficPageLimitedEn = render(TrafficPage, {}, "en");
         globalThis.fixtureTrafficQuery = { query: { id: 7, limit: 50, offset: 0, traceOffset: 0 }, update: noop };
@@ -407,6 +418,9 @@ describe("WebUI 界面文案语言切换", () => {
           trafficDetailNoResponseEn,
           trafficPageEn,
           trafficPageDisabledEn,
+          trafficPageLoadingEn,
+          trafficPageFailedEn,
+          trafficNavigationHidden,
           trafficPageLimitedEn,
           trafficDetailPageEn,
         }));
@@ -674,9 +688,6 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.trafficPageEn).toContain("Time-based retention: 30 days");
     expect(result.trafficPageEn).toContain("Size limits still apply when time-based cleanup is off.");
     expect(result.trafficPageEn).toContain("Per page");
-    expect(result.trafficPageDisabledEn).toContain("Traffic recording is currently disabled");
-    expect(result.trafficPageDisabledEn).toContain("[debug].model_traffic_dump</code>");
-    expect(result.trafficPageDisabledEn).toContain("off, no new records are written");
     expect(result.trafficPageLimitedEn).toContain("Traffic pagination limit reached");
     expect(result.trafficPageLimitedEn).toContain("codexc traffic</code> to view them");
     expect(result.trafficDetailPageEn).toContain("Call detail");
@@ -685,6 +696,18 @@ describe("WebUI 界面文案语言切换", () => {
     for (const html of [result.trafficPageEn, result.trafficPageDisabledEn, result.trafficPageLimitedEn, result.trafficDetailPageEn]) {
       expect(html).not.toMatch(/[\u4e00-\u9fff]/u);
     }
+  });
+
+  it("does not mount traffic reads or show navigation until settings confirm recording is enabled", () => {
+    for (const html of [result.trafficPageDisabledEn, result.trafficPageLoadingEn, result.trafficPageFailedEn]) {
+      expect(html).not.toContain("model_traffic_dump");
+      expect(html).not.toContain("model-test");
+      expect(html).not.toContain("private-settings-error");
+    }
+    expect(result.trafficPageDisabledEn).toBe("");
+    expect(result.trafficNavigationHidden).not.toContain('href="/traffic"');
+    expect(result.enNavigation).toContain('href="/traffic"');
+    expect(result.trafficPageFailedEn).toContain("Retry");
   });
 
   it("导出失败保留网络与超时分类，并按当前语言翻译", () => {

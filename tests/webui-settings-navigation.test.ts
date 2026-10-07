@@ -136,7 +136,10 @@ it("keeps settings fields and maintenance actions in their owning pages", () => 
     expect(html).not.toContain("/api/v1");
     expect(html).not.toContain('aria-haspopup="menu"');
     expect(html).toContain("Codex WebUI");
-    for (const child of group.children) expect(html).toContain(`href="${child.to}"`);
+    for (const child of group.children) {
+      if (child.to === "/traffic") expect(html).not.toContain('href="/traffic"');
+      else expect(html).toContain(`href="${child.to}"`);
+    }
     const parentButtons = [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/gu)]
       .filter(match => match[1]!.includes('data-sidebar="menu-button"') && match[2]!.includes('data-expanded='));
     expect(parentButtons).toHaveLength(result.groups.length);

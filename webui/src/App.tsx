@@ -26,6 +26,9 @@ import { Toaster } from "@/components/ui/toast"
 import { LanguageProvider } from "@/hooks/language-provider"
 import { useTranslation } from "@/hooks/use-translation"
 import { ServerTimeContext, useServerTime } from "@/hooks/use-server-time"
+import { useApi, useApiPolling } from "@/hooks/use-api"
+import { ModelTrafficSettingsContext } from "@/hooks/use-model-traffic-settings"
+import { fetchModelTrafficSettings } from "@/lib/api"
 import type { Translate } from "@/lib/i18n/messages"
 import { observeServerClock, type ServerClockSnapshot } from "@/lib/server-time"
 import { formatClockTime, formatTimeZoneLabel } from "@/lib/format"
@@ -135,6 +138,8 @@ function Layout() {
   const { t, language, setLanguage } = useTranslation()
   const [consoleRange, setConsoleRange] = useState<MetricsRangeQuery>({ range: "30d" })
   const time = useServerTime()
+  const settings = useApi(fetchModelTrafficSettings, [], { retainDataOnError: false })
+  useApiPolling(settings.refetch, settings.loading, true)
 
   if (time.data === null) {
     return <div className="flex flex-col gap-3 p-4">
@@ -148,6 +153,7 @@ function Layout() {
 
   return (
     <ServerTimeContext.Provider value={time.data}>
+      <ModelTrafficSettingsContext.Provider value={settings}>
       <AppSidebarProvider>
         <AppSidebar />
         <SidebarInset className="min-w-0">
@@ -208,6 +214,7 @@ function Layout() {
           </div>
         </SidebarInset>
       </AppSidebarProvider>
+      </ModelTrafficSettingsContext.Provider>
     </ServerTimeContext.Provider>
   )
 }

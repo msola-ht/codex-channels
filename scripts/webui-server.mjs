@@ -511,6 +511,11 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
     await handleSettingsSummary(environment, response, serviceStatusCache);
     return;
   }
+  if (apiPath === "/settings/traffic") {
+    const gateway = loadAvailableGatewaySettings(environment);
+    sendJson(response, 200, { modelTrafficDumpEnabled: gateway.system.modelTrafficDumpEnabled });
+    return;
+  }
   if (apiPath === "/health") {
     sendJson(response, 200, { ok: true, service: "webui" });
     return;
@@ -794,18 +799,16 @@ async function handleErrors(environment, url, response) {
   }
 }
 
-async function handleSettingsSummary(environment, response, serviceStatusCache) {
+function loadAvailableGatewaySettings(environment) {
   const { configPath } = resolveWebuiSettings({ environment });
   if (!existsSync(configPath)) {
-    sendJson(response, 503, {
-      error: {
-        code: "configuration_unavailable",
-        message: "Gateway 尚未初始化，请先运行 codexc init",
-      },
-    });
-    return;
+    throw new ApiError(503, "configuration_unavailable", "Gateway 尚未初始化，请先运行 codexc init");
   }
-  const gateway = loadGatewaySettings(environment);
+  return loadGatewaySettings(environment);
+}
+
+async function handleSettingsSummary(environment, response, serviceStatusCache) {
+  const gateway = loadAvailableGatewaySettings(environment);
   const serviceResults = await loadServiceStatusSummary(environment, serviceStatusCache);
   const platform = serviceResults.find((result) => result.platform !== null)?.platform ?? null;
   const entries = serviceResults.map((result) => result.entry);
