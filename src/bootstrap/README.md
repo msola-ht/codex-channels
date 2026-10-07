@@ -69,7 +69,7 @@
   若当前 Turn 已部分延迟写入，按持久化汇总校正请求状态与
   可选用量字段。
 - `auto-approval-review-tracker.ts`：在有界展示队列之前采集所有已归属 Provider 的官方审查与轮次通知，包括未绑定渠道的后代；仅写入最小指标事实。断线使观测覆盖失效，写入失败可观测并保守降级；完成卡通过窄读取端口获取当前轮递归任务快照和当前会话累计快照。
-- `auto-approval-review-notifications.ts`：独立于指标写入，每次仅发布审查完成结果，不补发开始通知；仅 `turn.started` 可记录直接会话归属，审查开始、子代理活动与继续操作不能捕获当前绑定。按已记录的授权归属及既有精确父子 Turn 关系路由，完成时复核原会话与 Provider，保留来源身份、Client 已校验的固定动作类别与枚举数值摘要，有界等待和去重，断线只清理对应 Provider 的归属及等待。无归属、淘汰与输出失败可观测，不传播原始动作或理由。指标采集仍消费开始和完成事件；StateStore 不增加正文，持久投递沿用当前结构版本并只保存安全摘要，历史事件可缺省 details。
+- `auto-approval-review-notifications.ts`：独立于指标写入，每次仅发布审查完成结果，不补发开始通知；仅 `turn.started` 可记录直接会话归属，审查开始、子代理活动与继续操作不能捕获当前绑定。按已记录的授权归属及既有精确父子 Turn 关系路由，完成时复核原会话与 Provider，保留来源身份、Client 校验的固定动作类别、文件数量、网络协议与端口，以及经凭据脱敏、控制字符清理并各按最多 320 字符截断的 operation、cwd、rationale，并投影 durationMs。Client 保留 ASCII 标点；execve program 与 argv 逐参数脱敏后再格式化。operation 摘要按 action 类别取 command、execve program 与 argv、文件列表、network host（不含完整 target URL）、MCP server/tool 或权限申请 reason；不展示 stdin 正文，不采集风险与用户授权字段。保持有界等待和去重，断线只清理对应 Provider 的归属及等待。无归属、淘汰与输出失败可观测；Core 与投递摘要保持有界纯文本，经现有加密投递箱暂存，平台富文本转义由 Surface 负责。指标采集仍消费开始和完成事件；StateStore 与指标库不增加审查正文、schema 或指标字段，持久投递沿用当前结构版本，历史事件可缺省 details。
 - `turn-execution-tracker.ts`：将官方轮次耗时幂等写入指标库；单队列、有界分页补齐历史，
   绑定恢复与 Revert 后重新同步，丢弃与实时事件冲突的快照；完整性以指标库为准，内存只记录当前连接的有界观测集合。
   清理后再次完成与写入失败触发补齐；同一五秒预算内最多三次尝试，失效与成功均通知读取方刷新。

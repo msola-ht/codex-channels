@@ -25,6 +25,7 @@ import type {
 import type { ThreadStateEvent } from "../session-routing/index.js";
 import type { RpcNotification } from "./json-rpc.js";
 import {
+  redactCommandArguments,
   sanitizeOperationText,
   toOperationUpdate,
 } from "./operation-adapter.js";
@@ -138,7 +139,7 @@ export function toAutoApprovalReviewEvent(notification: RpcNotification): AutoAp
   if (!threadId || !turnId || !reviewId || (!completed && status !== "inProgress")
     || (completed && (params?.decisionSource !== "agent"
       || (status !== "approved" && status !== "denied" && status !== "timedOut" && status !== "aborted")))) return undefined;
-  const details = completed ? toAutoApprovalReviewDetails(params?.action, review) : undefined;
+  const details = completed ? toAutoApprovalReviewDetails(params?.action, review, params?.startedAtMs, params?.completedAtMs) : undefined;
   return { threadId, turnId, reviewId, phase: completed ? "completed" : "started", status,
     approved: completed && params?.decisionSource === "agent" && status === "approved",
     ...(details ? { details } : {}) };
@@ -147,23 +148,59 @@ export function toAutoApprovalReviewEvent(notification: RpcNotification): AutoAp
 function toAutoApprovalReviewDetails(
   actionValue: unknown,
   review: Record<string, unknown> | undefined,
+  startedAtMs: unknown,
+  completedAtMs: unknown,
 ): AutoApprovalReviewDetails | undefined {
   const details: AutoApprovalReviewDetails = {};
   const action = toAutoApprovalReviewAction(actionValue);
   if (action) details.action = action;
-  const riskLevel = review?.riskLevel;
-  if (riskLevel === "low" || riskLevel === "medium" || riskLevel === "high" || riskLevel === "critical") {
-    details.riskLevel = riskLevel satisfies ItemGuardianApprovalReviewCompletedNotification["review"]["riskLevel"];
+  const raw = asRecord(actionValue);
+  if (action && raw) {
+    let operation: unknown;
+    switch (action.kind) {
+      case "command": operation = raw.command; break;
+      case "execve":
+        if (typeof raw.program === "string" && Array.isArray(raw.argv) && raw.argv.length <= 1_024
+          && raw.argv.every((arg: unknown) => typeof arg === "string")) {
+          operation = redactCommandArguments([raw.program, ...raw.argv])
+            .map((arg: string) => /\s|["'\\]/u.test(arg) ? JSON.stringify(arg) : arg).join(" ");
+        }
+        break;
+      case "applyPatch":
+        if (action.fileCount !== undefined) operation = (raw.files as string[]).join(" · ");
+        break;
+      case "networkAccess": operation = raw.host; break;
+      case "mcpToolCall":
+        if (typeof raw.server === "string" && typeof raw.toolName === "string") {
+          operation = `${raw.server} / ${raw.toolName}`;
+        }
+        break;
+      case "requestPermissions": operation = raw.reason; break;
+      case "writeStdin": break;
+    }
+    const summary = reviewText(operation);
+    const cwd = reviewText(raw.cwd);
+    if (summary) details.operation = summary;
+    if (cwd) details.cwd = cwd;
   }
-  const userAuthorization = review?.userAuthorization;
-  if (userAuthorization === "unknown" || userAuthorization === "low"
-    || userAuthorization === "medium" || userAuthorization === "high") {
-    details.userAuthorization = userAuthorization satisfies ItemGuardianApprovalReviewCompletedNotification["review"]["userAuthorization"];
+  const rationale = reviewText(review?.rationale);
+  if (rationale) details.rationale = rationale;
+  if (typeof startedAtMs === "number" && Number.isSafeInteger(startedAtMs) && startedAtMs >= 0
+    && typeof completedAtMs === "number" && Number.isSafeInteger(completedAtMs) && completedAtMs >= startedAtMs) {
+    details.durationMs = completedAtMs - startedAtMs;
   }
-  return details.action || details.riskLevel || details.userAuthorization ? details : undefined;
+  return Object.keys(details).length ? details : undefined;
 }
 
-/** Construct only allowlisted fields; upstream text never leaves the Client boundary. */
+/** Bound and redact selected text before it enters channel output or durable delivery. */
+function reviewText(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return sanitizeOperationText(value)
+    .replace(/[\p{Cc}\p{Cf}]/gu, " ")
+    .trim() || undefined;
+}
+
+/** Construct only allowlisted action fields. */
 function toAutoApprovalReviewAction(value: unknown): AutoApprovalReviewDetails["action"] {
   const action = asRecord(value);
   const kind = action?.type;

@@ -73,7 +73,6 @@ export function createAutoApprovalReviewPresentation(
     mcpToolCall: "调用 MCP 工具",
     requestPermissions: "申请额外权限",
   } as const;
-  const levels = { unknown: "未知", low: "低", medium: "中", high: "高", critical: "极高" } as const;
   return {
     title: "自动审批完成",
     fields: [
@@ -88,8 +87,10 @@ export function createAutoApprovalReviewPresentation(
       ...(action?.kind === "networkAccess" && action.port !== undefined
         ? [{ label: "目标端口", value: String(action.port) }]
         : []),
-      ...(details?.riskLevel ? [{ label: "风险等级", value: levels[details.riskLevel] }] : []),
-      ...(details?.userAuthorization ? [{ label: "用户授权评估", value: levels[details.userAuthorization] }] : []),
+      ...(details?.operation ? [{ label: "操作详情", value: details.operation, literal: true }] : []),
+      ...(details?.cwd ? [{ label: "工作目录", value: details.cwd, literal: true }] : []),
+      ...(details?.rationale ? [{ label: "审查理由", value: details.rationale, literal: true }] : []),
+      ...(details?.durationMs !== undefined ? [{ label: "审查耗时", value: formatElapsedDuration(details.durationMs) }] : []),
       ...(event.sourceThreadId !== event.threadId ? [{ label: "来源", value: "子代理" }] : []),
       ...(event.background ? [{ label: "任务", value: `后台任务 · ${event.threadId.slice(0, 12)}` }] : []),
     ],
@@ -99,6 +100,8 @@ export function createAutoApprovalReviewPresentation(
 export interface LifecyclePresentationLeafField {
   label: string;
   value: string;
+  /** Preserve text in plain output; escape formatting only for Markdown surfaces. */
+  literal?: boolean;
   subfields?: readonly LifecyclePresentationLeafField[];
 }
 
@@ -849,33 +852,38 @@ function autoApprovalReviewField(
 
 export function renderStructuredLifecyclePresentation(
   presentation: LifecyclePresentation,
+  escapeLiterals = true,
 ): string {
   return toStructuredMarkdownList([
     presentation.title,
     ...(presentation.fields.length > 0
-      ? ["", ...presentation.fields.map(formatStructuredField)]
+      ? ["", ...presentation.fields.map((field) => formatStructuredField(field, escapeLiterals))]
       : []),
     ...(presentation.sections ?? []).flatMap((section) => [
       "",
       `${section.title}：`,
-      ...section.fields.map(formatStructuredField),
+      ...section.fields.map((field) => formatStructuredField(field, escapeLiterals)),
     ]),
   ].join("\n"));
 }
 
-function formatStructuredField(field: LifecyclePresentationField): string {
+function formatStructuredField(field: LifecyclePresentationField, escapeLiterals: boolean): string {
   if ("title" in field) {
     return [
       `- **${field.title}**${field.value === undefined ? "" : `：${field.value}`}`,
       ...field.fields.flatMap((subfield) =>
-        formatStructuredField(subfield).split("\n").map((line) => `  ${line}`)),
+        formatStructuredField(subfield, escapeLiterals).split("\n").map((line) => `  ${line}`)),
     ].join("\n");
   }
   return [
-    `- ${field.label}：${field.value}`,
+    `- ${field.label}：${field.literal && escapeLiterals ? escapeLifecycleLiteral(field.value) : field.value}`,
     ...(field.subfields ?? []).map((subfield) =>
       `  - ${subfield.label}：${subfield.value}`),
   ].join("\n");
+}
+
+function escapeLifecycleLiteral(value: string): string {
+  return value.replace(/[\\`*_~[\]()<>#+\-.!|{}]/gu, "\\$&");
 }
 
 function formatField(field: LifecyclePresentationField): string {

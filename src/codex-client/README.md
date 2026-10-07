@@ -78,7 +78,7 @@
   生命周期字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
   只识别 `misalignmentPolicyViolation`、Luna Reserve 触发所需的 `usageLimitExceeded` 与登录或刷新令牌失效的 `unauthorized` 结构化错误分类，Turn、warning 和 MCP 错误在此统一脱敏并限长，
   残缺或无关通知不进入业务模块。
-  另将受控 `item/autoApprovalReview/started|completed` 裁剪为 Thread、Turn、review ID、阶段、状态和 agent 来源的批准标志，供 Bootstrap 继续采集开始与完成指标。仅 agent 完成事件附加 `AutoApprovalReviewDetails`：七种官方动作的固定类别、最多 1,024 个字符串条目的文件数量、白名单网络协议与 u16 端口，以及风险和用户授权等级枚举；未知或畸形摘要字段省略，超大文件列表只保留动作类别。不传递原始 action、rationale、命令、参数、路径、stdin、host/target、权限理由或 MCP 名称，非法来源和终态明确排除。
+  另将受控 `item/autoApprovalReview/started|completed` 裁剪为 Thread、Turn、review ID、阶段、状态和 agent 来源的批准标志，供 Bootstrap 继续采集开始与完成指标。仅 agent 完成事件附加 `AutoApprovalReviewDetails`：七种官方动作类别、最多 1,024 个字符串条目的文件数量、白名单网络协议与 u16 端口；按动作提取操作与工作目录、审查理由，经共享凭据脱敏、控制字符清理及 320 字符限长后传递，execve 参数按原始边界脱敏后才格式化；保留文本标点，由 Surface 处理富文本呈现。合法起止时间投影为耗时，不采集风险与授权等级。未知或畸形摘要字段省略，超大文件列表只保留动作类别，不传递 stdin 正文或完整网络 target URL，非法来源和终态明确排除。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，保留 MCP Tool Item 的
   `readOnlyHint` 能力提示，把多代理工具调用的 `interrupted` 归为失败，并在离开 Client 边界前
   清洗命令、查询及上游错误中的敏感文本；`commandExecution.commandActions` 非空、全部为

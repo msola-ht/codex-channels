@@ -6,8 +6,10 @@ export interface AutoApprovalReviewDetails {
     | { kind: "command" | "execve" | "writeStdin" | "mcpToolCall" | "requestPermissions" }
     | { kind: "applyPatch"; fileCount?: number }
     | { kind: "networkAccess"; protocol?: "http" | "https" | "socks5Tcp" | "socks5Udp"; port?: number };
-  riskLevel?: "low" | "medium" | "high" | "critical";
-  userAuthorization?: "unknown" | "low" | "medium" | "high";
+  operation?: string;
+  cwd?: string;
+  rationale?: string;
+  durationMs?: number;
 }
 export interface AutoApprovalReviewCounts {
   approved: number;
