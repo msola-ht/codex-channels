@@ -8,6 +8,7 @@ import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config
 import {
   macDesktopAppPluginEnabledConfigKey,
   parseMacDesktopAppToolsEnabled,
+  readMacDesktopAppToolsEnabled,
 } from "../runtime/desktop-app-host.mjs";
 import {
   inspectMacDesktopApp,
@@ -504,6 +505,27 @@ describe("desktop-app command", () => {
       `${macDesktopAppPluginEnabledConfigKey}=true`,
       "-c",
       `${macDesktopAppPluginEnabledConfigKey}=false`,
+    ])).toThrow("无效的内置工具配置");
+  });
+
+  it("treats the plain App Server launch as an attachment-free Desktop connection", () => {
+    expect(readMacDesktopAppToolsEnabled([
+      "-c",
+      "features.code_mode_host=true",
+      "app-server",
+      "--analytics-default-enabled",
+    ])).toBeUndefined();
+    expect(readMacDesktopAppToolsEnabled([
+      "-c",
+      "features.code_mode_host=true",
+      "app-server",
+      "--analytics-default-enabled",
+      "-c",
+      `${macDesktopAppPluginEnabledConfigKey}=true`,
+    ])).toBe(true);
+    expect(() => readMacDesktopAppToolsEnabled([
+      "-c",
+      `${macDesktopAppPluginEnabledConfigKey}=maybe`,
     ])).toThrow("无效的内置工具配置");
   });
 

@@ -22,6 +22,10 @@ export function validateMacDesktopAppAttachment(options: {
 
 export function parseMacDesktopAppToolsEnabled(args: readonly string[]): boolean;
 
+export function readMacDesktopAppToolsEnabled(
+  args: readonly string[],
+): boolean | undefined;
+
 export function spawnMacDesktopHostedCodex(
   attachment: MacDesktopAppAttachment,
   args: readonly string[],

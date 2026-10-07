@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { acquireMacDesktopAppHostLease } from "../runtime/app-server-supervisor.mjs";
 import { proxyDesktopAppStdioToUnixSocket } from "../runtime/desktop-app-bridge.mjs";
-import { parseMacDesktopAppToolsEnabled } from "../runtime/desktop-app-host.mjs";
+import { readMacDesktopAppToolsEnabled } from "../runtime/desktop-app-host.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
@@ -21,10 +21,9 @@ async function runDesktopAppProxy() {
   if (process.platform !== "darwin" || !desktopArguments.includes("app-server")) {
     throw new Error("Codex Desktop App 受管入口只接受 macOS App Server 连接");
   }
-  const toolsEnabled = parseMacDesktopAppToolsEnabled(desktopArguments);
-  const pipePath = requiredEnvironmentValue("CODEX_APP_TOOLS_PIPE_PATH");
-  const resourcesPath = resolve(requiredEnvironmentValue("CODEX_ELECTRON_RESOURCES_PATH"));
-  const appPath = dirname(dirname(resourcesPath));
+  const attachment = readDesktopAppAttachment(
+    readMacDesktopAppToolsEnabled(desktopArguments),
+  );
   const located = requireUserConfig(process.env);
   const document = readGatewayConfig(located.configPath);
   const codex = table(document.codex);
@@ -39,11 +38,22 @@ async function runDesktopAppProxy() {
     throw new Error("Codex Desktop App 共享未启用或主 Provider 不是 OpenAI");
   }
 
+  // The Desktop opens its plain App Server connection before it spawns the
+  // built-in tools host, and that launch carries neither the tools plugin
+  // override nor the tools pipe. Proxy it to the shared App Server directly so
+  // the Desktop can still read its configuration requirements.
+  if (attachment === null) {
+    await proxyDesktopAppStdioToUnixSocket({
+      socketPath: appServer.primarySocketPath,
+    });
+    return;
+  }
+
   const lease = await acquireMacDesktopAppHostLease(appServer.primarySocketPath, {
     provider: appServer.primaryProvider,
-    pipePath,
-    appPath,
-    toolsEnabled,
+    pipePath: attachment.pipePath,
+    appPath: attachment.appPath,
+    toolsEnabled: attachment.toolsEnabled,
   });
   try {
     await proxyDesktopAppStdioToUnixSocket({
@@ -52,6 +62,17 @@ async function runDesktopAppProxy() {
   } finally {
     await lease.close();
   }
+}
+
+function readDesktopAppAttachment(toolsEnabled) {
+  if (toolsEnabled === undefined) return null;
+  const pipePath = requiredEnvironmentValue("CODEX_APP_TOOLS_PIPE_PATH");
+  const resourcesPath = resolve(requiredEnvironmentValue("CODEX_ELECTRON_RESOURCES_PATH"));
+  return {
+    toolsEnabled,
+    pipePath,
+    appPath: dirname(dirname(resourcesPath)),
+  };
 }
 
 function requiredEnvironmentValue(name) {
