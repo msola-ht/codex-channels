@@ -38,28 +38,47 @@ describe("shared Surface lifecycle presentation", () => {
     }
   });
   it.each([
-    [{ approved: 3, coverage: "complete" }, "3 次（含子代理）"],
-    [{ approved: 0, coverage: "complete" }, "0 次（含子代理）"],
-    [{ approved: 3, coverage: "partial" }, "已记录 3 次（含子代理；统计不完整）"],
-    [{ approved: 0, coverage: "partial" }, "已记录 0 次（含子代理；统计不完整）"],
-    [{ approved: 3, coverage: "unknown" }, "至少 3 次（含子代理；统计不完整）"],
-    [{ approved: 0, coverage: "unknown" }, "未知（含子代理；统计不完整）"],
+    [{ total: 3, coverage: "complete" }, "3 次（含子代理）"],
+    [{ total: 0, coverage: "complete" }, "0 次（含子代理）"],
+    [{ total: 3, coverage: "partial" }, "已记录 3 次（含子代理）"],
+    [{ total: 0, coverage: "partial" }, "已记录 0 次（含子代理）"],
+    [{ total: 3, coverage: "unknown" }, "至少 3 次（含子代理）"],
+    [{ total: 0, coverage: "unknown" }, "未知（含子代理）"],
     [undefined, undefined],
   ] as const)("shows recorded automatic approval review coverage %j in every Surface", (autoApprovalReview, expected) => {
     for (const surface of ["feishu", "telegram", "weixin"]) {
       const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
         type: "turn.completed", target: { surface, accountId: "a", conversationId: "c" },
         threadId: "thread", turnId: "turn", status: "completed",
-        ...(autoApprovalReview === undefined ? {} : { autoApprovalReview }),
+        ...(autoApprovalReview === undefined ? {} : { autoApprovalReview: {
+          approved: autoApprovalReview.total, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, ...autoApprovalReview,
+        } }),
       }));
       const [run, session] = rendered.split("当前会话：");
       if (expected === undefined) {
-        expect(run).not.toContain("自动审查通过：");
+        expect(run).not.toContain("自动审查：");
       } else {
-        expect(run).toContain(`自动审查通过：${expected}`);
+        expect(run).toContain(`自动审查：${expected}`);
       }
-      expect(session).not.toContain("自动审查通过：");
+      expect(session).not.toContain("自动审查：");
     }
+  });
+  it.each(["feishu", "telegram", "weixin"] as const)("separates %s current task and session review outcomes without reporting unknown as zero", surface => {
+    const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
+      type: "turn.completed", target: { surface, accountId: "a", conversationId: "c" },
+      threadId: "thread", turnId: "turn", status: "completed",
+      autoApprovalReview: { approved: 1, denied: 2, timedOut: 3, aborted: 4, inProgress: 5, unknown: 6, total: 21, coverage: "partial" },
+      sessionAutoApprovalReview: { approved: 10, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 1, total: 11, coverage: "partial" },
+    }));
+    const [run, session] = rendered.split("当前会话：");
+    expect(run).toContain("自动审查：已记录 21 次（含子代理）");
+    for (const [label, count] of [["通过", 1], ["拒绝", 2], ["超时", 3], ["中止", 4], ["进行中", 5], ["结果未知", 6]]) {
+      expect(run).toContain(`  ${label}：${count} 次`);
+    }
+    expect(session).toContain("自动审查：已记录 11 次（含子代理）");
+    expect(session).toContain("  通过：10 次");
+    expect(session).toContain("  结果未知：1 次");
+    expect(session).not.toContain("拒绝：");
   });
   it.each(["feishu", "telegram", "weixin"] as const)("shows %s session performance and concise compaction separately from the current turn", surface => {
     const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({

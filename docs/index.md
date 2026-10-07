@@ -31,7 +31,7 @@
   结合稳定 `featureRequirements` 检查全局开关的受管限制；通过 `ConfigRequirementsReadResponse`
   受控导出并由真实 App Server 合同覆盖。设置入口仅用于只读策略判断，不采用
   `config/read` 的合并审批字段。另允许消费 `item/autoApprovalReview/started|completed`
-  的最小身份、状态及决策来源投影，用于本轮任务递归统计 agent 来源的 approved 次数和采集覆盖，
+  的最小身份、状态及决策来源投影，用于本轮任务及当前会话递归统计 agent 来源的各结果次数和采集覆盖，
   以及按已授权 Thread 绑定向三个渠道展示审查开始和 agent 来源的 approved、denied、timedOut、aborted 终态；
   子代理通知仅沿已确认的精确父子 Turn 关系路由，不从工作区、最近会话或联系消息推断归属。
   方法没有实验标记，但其 payload 在锁定版标记 UNSTABLE，两个通知类型必须受控导出并由真实合同覆盖。
@@ -404,7 +404,9 @@ Unix 公开端点通过独占硬链接发布，绑定名保留至监听关闭，
 | --- | --- | --- |
 | 本轮任务自动审查统计及渠道状态 | `item/autoApprovalReview/started`、`item/autoApprovalReview/completed`（方法无实验标记，payload UNSTABLE）；受控 `ItemGuardianApprovalReviewStartedNotification` / `ItemGuardianApprovalReviewCompletedNotification` | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 仅投影身份、阶段、状态与 agent 来源的 approved；[`auto-approval-review-tracker.ts`](../src/bootstrap/auto-approval-review-tracker.ts) 采集全部归属 Provider 的轮次，指标库以 Thread/Turn/review ID 去重，按精确 `subagent_turns` 递归统计，完成卡在投递前读取快照。独立的 [`auto-approval-review-notifications.ts`](../src/bootstrap/auto-approval-review-notifications.ts) 按已授权绑定及精确父子 Turn 归属向三渠道发布开始与四种终态，经共享关键投递路径发送；无动作、命令、理由或人工审批按钮，换绑、断线、未知归属不跨会话转发。断线、重启、缺少开始、未完成子轮、待完成审查与归属裁剪不能返回完整零次；迟到审查留在原 Turn。验证见 [`auto-approval-review-metrics.test.ts`](../tests/auto-approval-review-metrics.test.ts)、[`auto-approval-review-notifications.test.ts`](../tests/auto-approval-review-notifications.test.ts)、三渠道 Outbox 与共享投递策略测试，以及真实合同 [`real-app-server-responses-provider.test.ts`](../tests/real-app-server-responses-provider.test.ts)。官方依据为锁定 [`item.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/v2/item.rs)、[`common.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/common.rs) 与 [`bespoke_event_handling.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/bespoke_event_handling.rs)。缓存直接放行、用户手动批准及其他终态不计通过次数；不从缺失的历史审查重建。 |
 
-指标只接受当前 Schema v29，首次安装直接建库，不迁移或重解释历史格式。字段、时间口径、
+完成卡分别查询本轮任务和当前会话累计，包含精确关联子代理；总数分为通过、拒绝、超时、中止、进行中和历史结果未知，不把未区分的旧终态当作拒绝。Provider 请求指标仅将官方 `thread_source=guardian_review` 且父 Thread/Turn 完整的审查请求归到父任务；缺少父身份时保留无会话的全局用量，不生成独立用户会话、不改变普通子代理分类。
+
+指标只接受当前 Schema v30，首次安装直接建库，不迁移或重解释历史格式。字段、时间口径、
 权限和只读查询合同见 [Observability](../src/observability/README.md)；安装检查见[源码安装与更新](source-install.md)。
 
 Provider Proxy 独立采集请求与响应模型、出站 `request_service_tier`、响应时间、生成区间、首内容和总耗时、

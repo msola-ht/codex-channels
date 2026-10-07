@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("request metrics schema", () => {
-  it.each([19, 27, 28, 99])("fails closed for metrics schema %s without rewriting history", (version) => {
+  it.each([19, 27, 28, 29, 99])("fails closed for metrics schema %s without rewriting history", (version) => {
     const directory = temporaryDirectory();
     const path = join(directory, "request-metrics.sqlite3");
     const database = new DatabaseSync(path);

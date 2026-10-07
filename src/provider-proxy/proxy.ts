@@ -119,6 +119,7 @@ interface TurnMetadata {
   threadId: string | null;
   turnId: string | null;
   operation: ProviderProxyMetrics["operation"];
+  requestPurpose?: "autoApprovalReview";
 }
 
 export class ProviderProxy {
@@ -994,11 +995,28 @@ function parseTurnMetadata(value: string | string[] | undefined): TurnMetadata {
 
 function parseTurnMetadataObject(value: unknown): TurnMetadata {
   const parsed = asRecord(value);
+  // Core owns this source and the parent identities in the locked metadata
+  // contract. Reviewer names and ordinary subagent labels are not classifiers.
+  const autoApprovalReview = parsed?.thread_source === "guardian_review";
+  const parentThreadId = boundedIdentity(parsed?.parent_thread_id);
+  const parentTurnId = boundedIdentity(parsed?.parent_turn_id);
+  const associatedReview = parentThreadId !== null && parentTurnId !== null;
   return {
-    threadId: nonEmptyString(parsed?.thread_id),
-    turnId: nonEmptyString(parsed?.turn_id),
+    threadId: autoApprovalReview
+      ? associatedReview ? parentThreadId : null
+      : nonEmptyString(parsed?.thread_id),
+    turnId: autoApprovalReview
+      ? associatedReview ? parentTurnId : null
+      : nonEmptyString(parsed?.turn_id),
     operation: parsed?.request_kind === "compaction" ? "compact" : "response",
+    ...(autoApprovalReview ? { requestPurpose: "autoApprovalReview" as const } : {}),
   };
+}
+
+function boundedIdentity(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 128
+    ? value
+    : null;
 }
 
 function nonEmptyString(value: unknown): string | null {

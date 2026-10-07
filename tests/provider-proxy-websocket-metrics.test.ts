@@ -19,6 +19,46 @@ afterEach(async () => {
   }
 });
 describe("ProviderProxy WebSocket metrics", () => {
+  it("attributes guardian review usage through per-call metadata without changing upstream identities", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    const forwarded: unknown[] = [];
+    upstreamWebSocket.on("connection", socket => socket.on("message", data => {
+      forwarded.push(JSON.parse(data.toString()));
+      socket.send(JSON.stringify({ type: "response.completed", response: { status: "completed", model: "review-model",
+        usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } } }));
+    }));
+    await new Promise<void>(resolve => upstreamServer.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: async () => {
+      for (const client of upstreamWebSocket.clients) client.terminate();
+      await new Promise<void>(resolve => upstreamWebSocket.close(() => resolve()));
+      await new Promise<void>(resolve => upstreamServer.close(() => resolve()));
+    } });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (upstreamServer.address() as AddressInfo).port,
+      upstreamProtocol: "http", onMetrics: metric => { metrics.push(metric); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const metadata = { thread_source: "guardian_review", thread_id: "reviewer", turn_id: "review-turn",
+      parent_thread_id: "task-thread", parent_turn_id: "task-turn" };
+    const message = { type: "response.create", model: "review-model",
+      client_metadata: { "x-codex-turn-metadata": JSON.stringify(metadata) } };
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        client.on("open", () => client.send(JSON.stringify(message)));
+        client.on("message", () => resolve());
+        client.on("error", reject);
+      });
+      await vi.waitFor(() => expect(metrics).toHaveLength(1));
+      expect(metrics[0]).toMatchObject({ threadId: "task-thread", turnId: "task-turn",
+        requestPurpose: "autoApprovalReview", model: "review-model", totalTokens: 12 });
+      expect(forwarded).toEqual([message]);
+    } finally { client.close(); }
+  });
+
   it("pairs the last valid quota event with its receive time and preserves it through invalid events", async () => {
     const upstreamServer = createServer();
     const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });

@@ -87,10 +87,23 @@ describe("real custom Responses provider", () => {
       const metricsPath = join(root, "metrics.sqlite3");
       let metricsStore: SqliteModelRequestMetricsStore | undefined;
       let rpc: JsonRpcClient | undefined;
+      let proxy: ProviderProxy | undefined;
+      const requestMetrics: ProviderProxyMetrics[] = [];
       try {
         await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
         const address = backend.address();
         if (!address || typeof address === "string") throw new Error("Missing fixture listener");
+        metricsStore = new SqliteModelRequestMetricsStore(metricsPath);
+        proxy = new ProviderProxy("127.0.0.1:0", {
+          upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http",
+          onMetrics: metric => {
+            requestMetrics.push(metric);
+            const sample = { ...metric };
+            delete sample.requestPurpose;
+            metricsStore!.record({ provider: "fixture", ...sample });
+          },
+        });
+        await proxy.start();
         const catalogPath = join(environment.CODEX_HOME, "fixture-models.json");
         writePrivateFileAtomicSync(catalogPath, JSON.stringify(createResponsesModelCatalog([{
           id: "fixture-model", name: "Auto-review fixture", contextWindow: 64000,
@@ -100,11 +113,10 @@ describe("real custom Responses provider", () => {
           model: "fixture-model", model_provider: "fixture", model_catalog_json: catalogPath,
           approval_policy: "on-request", approvals_reviewer: "auto_review", web_search: "disabled",
           features: { guardian_approval: true, guardianv2: { enabled: false } },
-          model_providers: { fixture: { name: "Auto-review fixture", base_url: `http://127.0.0.1:${address.port}`,
+          model_providers: { fixture: { name: "Auto-review fixture", base_url: `http://${proxy.address()}`,
             wire_api: "responses", requires_openai_auth: false, supports_websockets: false,
             request_max_retries: 0, stream_max_retries: 0 } },
         }));
-        metricsStore = new SqliteModelRequestMetricsStore(metricsPath);
         rpc = new JsonRpcClient(new StdioTransport({ codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: root, environment }), 15000);
         rpc.onNotification(notification => {
           const projected = toAutoApprovalReviewEvent(notification);
@@ -140,6 +152,17 @@ describe("real custom Responses provider", () => {
         expect(privilegedRequests).toEqual([]);
         expect(reviewerRequests).toHaveLength(1);
         expect(parentRequests).toHaveLength(2);
+        await waitFor(() => requestMetrics.length === 3, 5000);
+        expect(requestMetrics.filter(metric => metric.requestPurpose === "autoApprovalReview"))
+          .toEqual([expect.objectContaining({ threadId: thread.id, turnId: turn.id })]);
+        expect(requestMetrics.every(metric => metric.threadId === thread.id && metric.turnId === turn.id)).toBe(true);
+        const sessions = metricsStore.threadList({ mainThreadsOnly: true, limit: 20,
+          startAtMs: 0, endAtMs: Date.now() + 1000 });
+        expect(sessions.threads).toEqual([expect.objectContaining({ threadId: thread.id,
+          turnCount: 1, requestCount: 3, inputTokens: 3, outputTokens: 3, directSubagentCount: 0 })]);
+        expect(sessions.matchedTotal).toBe(1);
+        expect(metricsStore.threadTurnSummary(thread.id, turn.id)).toMatchObject({ requestCount: 3,
+          inputTokens: 3, outputTokens: 3 });
         expect(started).toHaveLength(1);
         expect(completed).toHaveLength(1);
         const reviewStarted = started[0]!;
@@ -163,9 +186,9 @@ describe("real custom Responses provider", () => {
         })));
         expect(JSON.stringify(channelReviews)).not.toContain(command);
         expect(channelReviews.some(event => "action" in event || "rationale" in event)).toBe(false);
-        expect(metricsStore.taskAutoApprovalReviewSummary(thread.id, turn.id)).toEqual({
+        expect(metricsStore.taskAutoApprovalReviewSummary(thread.id, turn.id)).toEqual(expect.objectContaining({
           approved: outcome === "allow" ? 1 : 0, coverage: "complete",
-        });
+        }));
         const toolOutput = parentRequests[1]?.input.find(item => item.type === "function_call_output" && item.call_id === callId);
         expect(toolOutput).toBeDefined();
         const resultPath = join(root, "auto-review-result");
@@ -179,11 +202,12 @@ describe("real custom Responses provider", () => {
         await rpc.close();
         metricsStore.close();
         metricsStore = new SqliteModelRequestMetricsStore(metricsPath);
-        expect(metricsStore.taskAutoApprovalReviewSummary(thread.id, turn.id)).toEqual({
+        expect(metricsStore.taskAutoApprovalReviewSummary(thread.id, turn.id)).toEqual(expect.objectContaining({
           approved: outcome === "allow" ? 1 : 0, coverage: "partial",
-        });
+        }));
       } finally {
         await rpc?.close();
+        await proxy?.close();
         metricsStore?.close();
         backend.closeAllConnections();
         await new Promise<void>(resolve => backend.close(() => resolve()));

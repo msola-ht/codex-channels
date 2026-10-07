@@ -1005,6 +1005,7 @@ export abstract class GatewayComponentGraph {
           };
         },
         autoApprovalReview: (threadId, turnId) => this.autoApprovalReview.summary(threadId, turnId, this.subagentCompletion.pendingParentTurns()),
+        sessionAutoApprovalReview: (threadId) => this.autoApprovalReview.sessionSummary(threadId, this.subagentCompletion.pendingParentTurns()),
         taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
           let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;

@@ -42,7 +42,7 @@ describe("model request metrics database cleanup and pruning", () => {
     store.replaceThreadExecutions("thread-1", "openai", [{ turnId: "turn-1", durationMs: 71_000, recordedAtMs: Date.now() }]);
     store.observeAutoApprovalTurn("thread-1", "turn-1", "openai", "started");
     store.observeAutoApprovalTurn("thread-1", "turn-1", "openai", "completed");
-    store.recordAutoApprovalReview({ threadId: "thread-1", turnId: "turn-1", reviewId: "review", phase: "completed", approved: true }, "openai");
+    store.recordAutoApprovalReview({ threadId: "thread-1", turnId: "turn-1", reviewId: "review", phase: "completed", status: "approved" }, "openai");
     store.close();
 
     const result = cleanupMetricsDatabase(environment, {
@@ -55,10 +55,18 @@ describe("model request metrics database cleanup and pruning", () => {
     expect(existsSync(result.backupPath)).toBe(true);
     const cleared = new SqliteModelRequestMetricsStore(databasePath, undefined, { readOnly: true });
     expect(cleared.sessionExecutionDuration("thread-1")).toBeNull();
-    expect(cleared.taskAutoApprovalReviewSummary("thread-1", "turn-1")).toEqual({ approved: 0, coverage: "unknown" }); cleared.close();
+    expect(cleared.taskAutoApprovalReviewSummary("thread-1", "turn-1")).toEqual({
+      approved: 0, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0,
+      total: 0, coverage: "unknown",
+    });
+    cleared.close();
     const backup = new SqliteModelRequestMetricsStore(result.backupPath, undefined, { readOnly: true });
     expect(backup.sessionExecutionDuration("thread-1")).toBe(71_000);
-    expect(backup.taskAutoApprovalReviewSummary("thread-1", "turn-1")).toEqual({ approved: 1, coverage: "complete" }); backup.close();
+    expect(backup.taskAutoApprovalReviewSummary("thread-1", "turn-1")).toEqual({
+      approved: 1, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0,
+      total: 1, coverage: "complete",
+    });
+    backup.close();
   });
 
   it.runIf(process.platform === "linux")(
@@ -138,7 +146,7 @@ describe("model request metrics database cleanup and pruning", () => {
     store.replaceThreadExecutions("deepseek-thread", "deepseek", [{ turnId: "one", durationMs: 2, recordedAtMs: Date.now() }]);
     for (const provider of ["openai", "deepseek"]) {
       store.observeAutoApprovalTurn(`${provider}-thread`, "one", provider, "started");
-      store.recordAutoApprovalReview({ threadId: `${provider}-thread`, turnId: "one", reviewId: "review", phase: "completed", approved: true }, provider);
+      store.recordAutoApprovalReview({ threadId: `${provider}-thread`, turnId: "one", reviewId: "review", phase: "completed", status: "approved" }, provider);
     }
     store.close();
 

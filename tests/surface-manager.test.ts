@@ -1523,7 +1523,7 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
-  it("delivers an unenriched completion card when enrichment itself fails", async () => {
+  it("preserves completion review statistics when the optional Git branch lookup fails", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: OutputEvent[] = [];
     const warnings: string[] = [];
@@ -1547,6 +1547,9 @@ describe("SurfaceManager", () => {
       () => {
         throw new Error("Authorization: secret");
       },
+      {
+        autoApprovalReview: () => ({ approved: 2, denied: 1, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 3, coverage: "complete" }),
+      },
     );
     await manager.start();
 
@@ -1563,11 +1566,13 @@ describe("SurfaceManager", () => {
     });
     await flushEventBus();
 
-    expect(warnings).toContain("Turn 完成统计富化失败，改用未富化输出");
-    expect(metadata).toContainEqual(expect.objectContaining({ errorChain: ["Error"] }));
+    expect(warnings.some(message => message.includes("Git") && message.includes("失败"))).toBe(true);
+    expect(warnings).not.toContain("Turn 完成统计富化失败，改用未富化输出");
     expect(JSON.stringify(metadata)).not.toContain("secret");
     expect(received).toEqual([
-      expect.objectContaining({ type: "turn.completed", turnId: "turn-1" }),
+      expect.objectContaining({ type: "turn.completed", turnId: "turn-1",
+        autoApprovalReview: { approved: 2, denied: 1, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 3, coverage: "complete" },
+      }),
     ]);
     expect(received[0]).not.toHaveProperty("gitBranch");
     await manager.stop();

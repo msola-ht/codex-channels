@@ -58,4 +58,10 @@ export class AutoApprovalReviewTracker {
     return this.failedObservation && summary.coverage === "complete"
       ? { ...summary, coverage: "partial" } : summary;
   }
+
+  sessionSummary(threadId: string, pendingParentTurns?: readonly { threadId: string; turnId: string }[]): AutoApprovalReviewSummary {
+    const summary = this.store.sessionAutoApprovalReviewSummary(threadId, pendingParentTurns);
+    return this.failedObservation && summary.coverage === "complete"
+      ? { ...summary, coverage: "partial" } : summary;
+  }
 }

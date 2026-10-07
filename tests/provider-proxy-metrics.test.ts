@@ -29,6 +29,20 @@ afterEach(() => {
 });
 
 describe("Provider proxy metrics channel", () => {
+  it("accepts the internal review purpose and rejects unsupported classifications", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-review-purpose-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "m.sock");
+    const received: ProviderProxyMetrics[] = [];
+    const server = new ProviderProxyMetricsServer(socketPath, metric => { received.push(metric); });
+    await server.start();
+    try {
+      for (const requestPurpose of ["autoApprovalReview", "guardian", null, 1]) {
+        await sendProviderProxyMetrics(socketPath, { ...metrics(), requestPurpose } as ProviderProxyMetrics);
+      }
+      expect(received).toEqual([{ ...metrics(), requestPurpose: "autoApprovalReview" }]);
+    } finally { await server.close(); }
+  });
   it.each(["reasoningEffort", "userAgent", "errorMessage", "weeklyQuota", "quotaWindows"] as const)("rejects records missing required nullable field %s", async field => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-required-metrics-"));
     temporaryDirectories.push(directory);

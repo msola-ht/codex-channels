@@ -454,6 +454,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
     return new SqliteAutoApprovalReviewMetrics(this.database).taskAutoApprovalReviewSummary(...args);
   }
 
+  sessionAutoApprovalReviewSummary(...args: Parameters<AutoApprovalReviewStore["sessionAutoApprovalReviewSummary"]>) {
+    this.requireOpen();
+    return new SqliteAutoApprovalReviewMetrics(this.database).sessionAutoApprovalReviewSummary(...args);
+  }
+
   private requireReviewWrite(): void {
     this.requireOpen();
     if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");

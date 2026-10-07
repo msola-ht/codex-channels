@@ -27,6 +27,36 @@ afterEach(() => {
 });
 
 describe("ProviderMetricsComposition", () => {
+  it.each([null, "low"] as const)("persists reviewer usage with actual effort %s without inheriting parent settings or updating execution state", async (reasoningEffort) => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-review-metrics-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "m.sock");
+    const enqueue = vi.fn();
+    const onModelTiming = vi.fn();
+    const resolveModelSettings = vi.fn(() => ({
+      model: "parent-model",
+      modelProvider: "openai",
+      effort: "high" as const,
+      serviceTier: "default" as const,
+      collaborationMode: "default" as const,
+    }));
+    const composition = new ProviderMetricsComposition({
+      providers: ["openai"], socketPath: () => socketPath,
+      writer: { enqueue, close: async () => undefined },
+      resolveModelSettings,
+      onModelTiming, logger: pino({ level: "silent" }),
+    });
+    await composition.start();
+    try {
+      const reviewer = { ...metrics(), reasoningEffort, requestPurpose: "autoApprovalReview" as const };
+      await sendProviderProxyMetrics(socketPath, reviewer);
+      await vi.waitFor(() => expect(enqueue).toHaveBeenCalledOnce());
+      expect(enqueue).toHaveBeenCalledWith({ provider: "openai", ...metrics(), reasoningEffort, quotaObservedAtMs: null });
+      expect(resolveModelSettings).not.toHaveBeenCalled();
+      expect(onModelTiming).not.toHaveBeenCalled();
+      expect(toModelTimingEvent({ ...reviewer, status: "failed", upstreamTtftMs: 1 })).toBeUndefined();
+    } finally { await composition.close(); }
+  });
   it.each(["openai", "deepseek"])("forwards TTFT only from the OpenAI channel: %s", async (provider) => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-composition-"));
     temporaryDirectories.push(directory);

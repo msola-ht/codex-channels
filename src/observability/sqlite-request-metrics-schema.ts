@@ -178,6 +178,11 @@ export const autoApprovalReviewSchemaSql = `
     review_id TEXT NOT NULL,
     completed INTEGER NOT NULL CHECK (completed IN (0, 1)),
     approved INTEGER NOT NULL CHECK (approved IN (0, 1) AND approved <= completed),
+    status TEXT NOT NULL CHECK (
+      (status = 'inProgress' AND completed = 0 AND approved = 0)
+      OR (status = 'approved' AND completed = 1 AND approved = 1)
+      OR (status IN ('denied', 'timedOut', 'aborted', 'unknown') AND completed = 1 AND approved = 0)
+    ),
     recorded_at_ms INTEGER NOT NULL,
     PRIMARY KEY (thread_id, turn_id, review_id)
   );

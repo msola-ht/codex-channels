@@ -664,17 +664,10 @@ export function createTurnCompletedPresentation(
   runFields.push({ label: "本轮耗时", value: event.durationMs === undefined ? "未提供" : formatElapsedDuration(event.durationMs) });
   runFields.push(...performanceFields(event.timing?.performance));
   if (event.autoApprovalReview) {
-    const review = event.autoApprovalReview;
-    runFields.push({
-      label: "自动审查通过",
-      value: review.coverage === "complete"
-        ? `${review.approved} 次（含子代理）`
-        : review.coverage === "partial"
-          ? `已记录 ${review.approved} 次（含子代理；统计不完整）`
-          : review.approved > 0
-            ? `至少 ${review.approved} 次（含子代理；统计不完整）`
-            : "未知（含子代理；统计不完整）",
-    });
+    runFields.push(autoApprovalReviewField(event.autoApprovalReview));
+  }
+  if (event.sessionAutoApprovalReview) {
+    sessionFields.push(autoApprovalReviewField(event.sessionAutoApprovalReview));
   }
   if (event.taskAggregate) {
     const task = event.taskAggregate;
@@ -796,6 +789,26 @@ export function renderPlainLifecyclePresentation(
       ? ["", `${presentation.footer.label}：${presentation.footer.value}`]
       : []),
   ].join("\n");
+}
+
+function autoApprovalReviewField(
+  review: NonNullable<Extract<OutputEvent, { type: "turn.completed" }>["autoApprovalReview"]>,
+): LifecyclePresentationField {
+  const outcomes = [
+    ["通过", review.approved], ["拒绝", review.denied], ["超时", review.timedOut],
+    ["中止", review.aborted], ["进行中", review.inProgress], ["结果未知", review.unknown],
+  ] as const;
+  return {
+    label: "自动审查",
+    value: review.coverage === "complete"
+      ? `${review.total} 次（含子代理）`
+      : review.coverage === "partial"
+        ? `已记录 ${review.total} 次（含子代理）`
+        : review.total > 0
+          ? `至少 ${review.total} 次（含子代理）`
+          : "未知（含子代理）",
+    subfields: outcomes.filter(([, count]) => count > 0).map(([label, count]) => ({ label, value: `${count} 次` })),
+  };
 }
 
 export function renderStructuredLifecyclePresentation(

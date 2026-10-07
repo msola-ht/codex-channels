@@ -160,6 +160,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !oneOf(record.operation, ["response", "compact"])
     || !nullableString(record.threadId)
     || !nullableString(record.turnId)
+    || (record.requestPurpose !== undefined && record.requestPurpose !== "autoApprovalReview")
     || !nullableString(record.model)
     || (record.requestModel !== undefined && !nullableString(record.requestModel))
     || (record.responseModel !== undefined && !nullableString(record.responseModel))

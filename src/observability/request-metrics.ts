@@ -498,6 +498,12 @@ export interface TurnExecutionStore {
 /** Counts observed official agent decisions; coverage describes the query-time snapshot. */
 export interface AutoApprovalReviewSummary {
   approved: number;
+  denied: number;
+  timedOut: number;
+  aborted: number;
+  inProgress: number;
+  unknown: number;
+  total: number;
   coverage: "complete" | "partial" | "unknown";
 }
 
@@ -505,10 +511,12 @@ export interface AutoApprovalReviewStore {
   observeAutoApprovalTurn(threadId: string, turnId: string, provider: string, phase: "started" | "completed"): void;
   recordAutoApprovalReview(event: {
     threadId: string; turnId: string; reviewId: string;
-    phase: "started" | "completed"; approved: boolean;
+    phase: "started" | "completed"; status: "inProgress" | "approved" | "denied" | "timedOut" | "aborted";
   }, provider: string): void;
   invalidateAutoApprovalCoverage(provider?: string): void;
   taskAutoApprovalReviewSummary(threadId: string, turnId: string,
+    pendingParentTurns?: readonly { threadId: string; turnId: string }[]): AutoApprovalReviewSummary;
+  sessionAutoApprovalReviewSummary(threadId: string,
     pendingParentTurns?: readonly { threadId: string; turnId: string }[]): AutoApprovalReviewSummary;
 }
 

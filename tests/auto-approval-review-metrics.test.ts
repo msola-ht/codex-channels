@@ -30,29 +30,63 @@ function closedTurn(store: SqliteModelRequestMetricsStore, threadId: string, tur
   store.observeAutoApprovalTurn(threadId, turnId, "openai", "completed");
 }
 function approved(store: SqliteModelRequestMetricsStore, threadId: string, turnId: string, reviewId = "review") {
-  store.recordAutoApprovalReview({ threadId, turnId, reviewId, phase: "completed", approved: true }, "openai");
+  store.recordAutoApprovalReview({ threadId, turnId, reviewId, phase: "completed", status: "approved" }, "openai");
+}
+function counts(approved: number, coverage: "complete" | "partial" | "unknown") {
+  return { approved, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: approved, coverage };
 }
 function link(store: SqliteModelRequestMetricsStore, parentThreadId: string, parentTurnId: string, agentThreadId: string, agentTurnId: string) {
   store.recordSubagentTurn({ parentThreadId, parentTurnId, agentThreadId, agentTurnId, agentPath: "/root/agent" });
 }
 
 describe("automatic approval review metrics", () => {
+  it("persists distinct terminal results and separates task from session totals", () => {
+    const { store, path } = fixture();
+    expect(store.sessionAutoApprovalReviewSummary("empty")).toEqual(counts(0, "unknown"));
+    for (const [threadId, turnId] of [["root", "old"], ["root", "now"], ["child", "one"], ["child", "other"]]) {
+      closedTurn(store, threadId!, turnId!);
+    }
+    approved(store, "root", "old");
+    link(store, "root", "now", "child", "one");
+    for (const status of ["approved", "denied", "timedOut", "aborted"] as const) {
+      store.recordAutoApprovalReview({ threadId: "child", turnId: "one", reviewId: status, phase: "completed", status }, "openai");
+      store.recordAutoApprovalReview({ threadId: "child", turnId: "one", reviewId: status, phase: "completed", status }, "openai");
+    }
+    approved(store, "child", "other");
+    const task = { approved: 1, denied: 1, timedOut: 1, aborted: 1, inProgress: 0, unknown: 0, total: 4, coverage: "complete" };
+    expect(store.taskAutoApprovalReviewSummary("root", "now")).toEqual(task);
+    expect(store.sessionAutoApprovalReviewSummary("root")).toEqual({ ...task, approved: 2, total: 5 });
+    store.recordAutoApprovalReview({ threadId: "child", turnId: "one", reviewId: "denied", phase: "completed", status: "approved" }, "openai");
+    expect(store.taskAutoApprovalReviewSummary("root", "now")).toEqual(task);
+    store.recordAutoApprovalReview({ threadId: "root", turnId: "now", reviewId: "pending", phase: "started", status: "inProgress" }, "openai");
+    const database = new DatabaseSync(path);
+    database.prepare(`INSERT INTO auto_approval_reviews
+      (thread_id, turn_id, review_id, completed, approved, status, recorded_at_ms)
+      VALUES ('root', 'old', 'legacy', 1, 0, 'unknown', ?)`).run(Date.now());
+    database.close();
+    expect(store.sessionAutoApprovalReviewSummary("root")).toEqual({ ...task, approved: 2, inProgress: 1, unknown: 1, total: 7, coverage: "partial" });
+    expect(store.taskAutoApprovalReviewSummary("root", "now")).toEqual({ ...task, inProgress: 1, total: 5, coverage: "partial" });
+    store.close();
+    const reopened = new SqliteModelRequestMetricsStore(path); stores.push(reopened);
+    expect(reopened.sessionAutoApprovalReviewSummary("root")).toEqual({ ...task, approved: 2, inProgress: 1, unknown: 1, total: 7, coverage: "partial" });
+  });
+
   it("deduplicates reviews, keeps starts pending and preserves approvals across restart and readonly access", () => {
     const { store, path } = fixture();
-    expect(store.taskAutoApprovalReviewSummary("root", "turn")).toEqual({ approved: 0, coverage: "unknown" });
+    expect(store.taskAutoApprovalReviewSummary("root", "turn")).toEqual(counts(0, "unknown"));
     closedTurn(store, "root", "turn");
-    expect(store.taskAutoApprovalReviewSummary("root", "turn")).toEqual({ approved: 0, coverage: "complete" });
-    store.recordAutoApprovalReview({ threadId: "root", turnId: "turn", reviewId: "review", phase: "started", approved: false }, "openai");
+    expect(store.taskAutoApprovalReviewSummary("root", "turn")).toEqual(counts(0, "complete"));
+    store.recordAutoApprovalReview({ threadId: "root", turnId: "turn", reviewId: "review", phase: "started", status: "inProgress" }, "openai");
     expect(store.taskAutoApprovalReviewSummary("root", "turn").coverage).toBe("partial");
     approved(store, "root", "turn"); approved(store, "root", "turn");
-    store.recordAutoApprovalReview({ threadId: "root", turnId: "turn", reviewId: "review", phase: "started", approved: false }, "openai");
-    expect(store.taskAutoApprovalReviewSummary("root", "turn")).toEqual({ approved: 1, coverage: "complete" });
+    store.recordAutoApprovalReview({ threadId: "root", turnId: "turn", reviewId: "review", phase: "started", status: "inProgress" }, "openai");
+    expect(store.taskAutoApprovalReviewSummary("root", "turn")).toEqual(counts(1, "complete"));
     store.close();
     const reader = new SqliteModelRequestMetricsStore(path, Date.now(), { readOnly: true }); stores.push(reader);
     expect(reader.taskAutoApprovalReviewSummary("root", "turn").coverage).toBe("complete");
     expect(() => approved(reader, "root", "turn")).toThrow(/只读/u); reader.close();
     const reopened = new SqliteModelRequestMetricsStore(path); stores.push(reopened);
-    expect(reopened.taskAutoApprovalReviewSummary("root", "turn")).toEqual({ approved: 1, coverage: "partial" });
+    expect(reopened.taskAutoApprovalReviewSummary("root", "turn")).toEqual(counts(1, "partial"));
   });
 
   it("recursively includes late exact mappings, cycles and reused Threads without crossing parent Turns", () => {
@@ -62,8 +96,8 @@ describe("automatic approval review metrics", () => {
     }
     link(store, "root", "a", "child", "c1"); link(store, "root", "b", "child", "c2");
     link(store, "child", "c1", "grand", "g"); link(store, "grand", "g", "root", "a");
-    expect(store.taskAutoApprovalReviewSummary("root", "a")).toEqual({ approved: 3, coverage: "complete" });
-    expect(store.taskAutoApprovalReviewSummary("root", "b")).toEqual({ approved: 2, coverage: "complete" });
+    expect(store.taskAutoApprovalReviewSummary("root", "a")).toEqual(counts(3, "complete"));
+    expect(store.taskAutoApprovalReviewSummary("root", "b")).toEqual(counts(2, "complete"));
     expect(store.taskAutoApprovalReviewSummary("root", "a", [{ threadId: "child", turnId: "c1" }]).coverage).toBe("partial");
     expect(store.taskAutoApprovalReviewSummary("root", "a", [{ threadId: "root", turnId: "b" }]).coverage).toBe("complete");
     link(store, "child", "c1", "running", "run");
@@ -75,7 +109,7 @@ describe("automatic approval review metrics", () => {
 
   it("degrades missing starts, disconnects and write failures without losing known approvals", () => {
     const { store } = fixture(); approved(store, "unobserved", "turn");
-    expect(store.taskAutoApprovalReviewSummary("unobserved", "turn")).toEqual({ approved: 1, coverage: "partial" });
+    expect(store.taskAutoApprovalReviewSummary("unobserved", "turn")).toEqual(counts(1, "partial"));
     closedTurn(store, "root", "turn");
     const failed = vi.fn(); const tracker = new AutoApprovalReviewTracker(store, () => "openai", failed);
     const publish = vi.fn();
@@ -100,7 +134,7 @@ describe("automatic approval review metrics", () => {
       threadId: "root", turnId: "turn", reviewId: "unknown-provider", decisionSource: "agent", review: { status: "approved" },
     } });
     const reader = new SqliteModelRequestMetricsStore(path, Date.now(), { readOnly: true }); stores.push(reader);
-    expect(reader.taskAutoApprovalReviewSummary("root", "turn")).toEqual({ approved: 1, coverage: "partial" });
+    expect(reader.taskAutoApprovalReviewSummary("root", "turn")).toEqual(counts(1, "partial"));
   });
 
   it("attributes unbound grandchildren and reused child runs with both arrival orders", () => {
@@ -126,7 +160,7 @@ describe("automatic approval review metrics", () => {
     approved(store, "root", "a", "old"); approved(store, "root", "a", "new"); link(store, "root", "a", "child", "c");
     const database = new DatabaseSync(path); database.exec("UPDATE subagent_turns SET recorded_at_ms = 0"); database.close();
     for (let index = 0; index < 100; index++) store.observeAutoApprovalTurn("root", "a", "openai", "completed");
-    expect(store.taskAutoApprovalReviewSummary("root", "a")).toEqual({ approved: 1, coverage: "partial" });
+    expect(store.taskAutoApprovalReviewSummary("root", "a")).toEqual(counts(1, "partial"));
   });
 
   it("attributes only explicit followup tasks and never message-only interactions", () => {
@@ -212,7 +246,7 @@ describe("automatic approval review metrics", () => {
     const warn = vi.fn(); const logger = { warn } as unknown as Logger;
     const event = { type: "turn.completed" as const, target: { surface: "test", accountId: "a", conversationId: "c" },
       threadId: "root", turnId: "turn", status: "completed" as const };
-    const enricher = new CompletionOutputEnricher(logger, undefined, { autoApprovalReview: () => ({ approved: 2, coverage: "partial" }) });
+    const enricher = new CompletionOutputEnricher(logger, undefined, { autoApprovalReview: () => counts(2, "partial") });
     expect(await enricher.enrich(event)).toMatchObject({ autoApprovalReview: { approved: 2, coverage: "partial" } });
     const broken = new CompletionOutputEnricher(logger, undefined, { autoApprovalReview: () => { throw new Error("unavailable"); } });
     expect(await broken.enrich(event)).toMatchObject({ autoApprovalReview: { approved: 0, coverage: "unknown" } });
