@@ -148,6 +148,22 @@ afterEach(() => {
 });
 
 describe("TelegramOutbox", () => {
+  it.each(["approved", "denied", "timedOut", "aborted"] as const)("delivers auto-review start and %s without approval buttons", async status => {
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(api as unknown as Api, pino({ level: "silent" }));
+    const base = { type: "autoApprovalReview.updated", target, threadId: "thread", turnId: "turn",
+      sourceThreadId: "thread", sourceTurnId: "turn", reviewId: "review" } as const;
+    try {
+      for (const event of [{ ...base, phase: "started", status: "inProgress" }, { ...base, phase: "completed", status }] as const) {
+        expect(outbox.retains(event)).toBe(true);
+        outbox.handle(event);
+      }
+      await drain();
+      expect(api.sent).toEqual(["<b>自动审查开始</b>\n\n• <b>状态：</b>审查中",
+        `<b>自动审查完成</b>\n\n• <b>状态：</b>${{ approved: "已通过", denied: "已拒绝", timedOut: "已超时", aborted: "已中止" }[status]}`]);
+      expect(JSON.stringify(api.sendOptions)).not.toContain("reply_markup");
+    } finally { await outbox.close(); }
+  });
   it.each(["full", "compact", "hidden"] as const)("delivers compaction start before completion without timer merging in %s mode", async (display) => {
     const api = new FakeTelegramApi();
     const outbox = new TelegramOutbox(api as unknown as Api, pino({ level: "silent" }), undefined, { operationUpdateDisplay: display });

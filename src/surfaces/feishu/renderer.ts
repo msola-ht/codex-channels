@@ -20,6 +20,7 @@ import {
 import { formatSurfaceConfigurationChange } from "../configuration-change-format.js";
 import {
   createStartupPresentation,
+  createAutoApprovalReviewPresentation,
   createSubagentContactedPresentation,
   createSubagentCompletedPresentation,
   createSubagentStartedPresentation,
@@ -117,6 +118,8 @@ export function renderFeishuOutput(
   ) => number | null,
 ): string | null {
   switch (event.type) {
+    case "autoApprovalReview.updated":
+      return renderFeishuLifecyclePresentation(createAutoApprovalReviewPresentation(event));
     case "turn.started":
       return renderFeishuLifecyclePresentation(
         createTurnStartedPresentation(

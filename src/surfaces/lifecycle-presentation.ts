@@ -46,6 +46,26 @@ export interface LifecyclePresentation {
   footer?: { label: string; value: string };
 }
 
+export function createAutoApprovalReviewPresentation(
+  event: Extract<OutputEvent, { type: "autoApprovalReview.updated" }>,
+): LifecyclePresentation {
+  const status = {
+    inProgress: "审查中",
+    approved: "已通过",
+    denied: "已拒绝",
+    timedOut: "已超时",
+    aborted: "已中止",
+  }[event.status];
+  return {
+    title: event.phase === "started" ? "自动审查开始" : "自动审查完成",
+    fields: [
+      { label: "状态", value: status },
+      ...(event.sourceThreadId !== event.threadId ? [{ label: "来源", value: "子代理" }] : []),
+      ...(event.background ? [{ label: "任务", value: `后台任务 · ${event.threadId.slice(0, 12)}` }] : []),
+    ],
+  };
+}
+
 export interface LifecyclePresentationLeafField {
   label: string;
   value: string;
@@ -643,6 +663,19 @@ export function createTurnCompletedPresentation(
   }
   runFields.push({ label: "本轮耗时", value: event.durationMs === undefined ? "未提供" : formatElapsedDuration(event.durationMs) });
   runFields.push(...performanceFields(event.timing?.performance));
+  if (event.autoApprovalReview) {
+    const review = event.autoApprovalReview;
+    runFields.push({
+      label: "自动审查通过",
+      value: review.coverage === "complete"
+        ? `${review.approved} 次（含子代理）`
+        : review.coverage === "partial"
+          ? `已记录 ${review.approved} 次（含子代理；统计不完整）`
+          : review.approved > 0
+            ? `至少 ${review.approved} 次（含子代理；统计不完整）`
+            : "未知（含子代理；统计不完整）",
+    });
+  }
   if (event.taskAggregate) {
     const task = event.taskAggregate;
     const taskFields: LifecyclePresentationField[] = [

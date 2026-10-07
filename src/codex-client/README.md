@@ -78,6 +78,7 @@
   生命周期字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
   只识别 `misalignmentPolicyViolation`、Luna Reserve 触发所需的 `usageLimitExceeded` 与登录或刷新令牌失效的 `unauthorized` 结构化错误分类，Turn、warning 和 MCP 错误在此统一脱敏并限长，
   残缺或无关通知不进入业务模块。
+  另将受控 `item/autoApprovalReview/started|completed` 裁剪为 Thread、Turn、review ID、阶段、状态和 agent 来源的批准标志，供 Bootstrap 写入指标及发布窄渠道状态；不传递 action、rationale 或命令，非法来源和终态明确排除。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，保留 MCP Tool Item 的
   `readOnlyHint` 能力提示，把多代理工具调用的 `interrupted` 归为失败，并在离开 Client 边界前
   清洗命令、查询及上游错误中的敏感文本；`commandExecution.commandActions` 非空、全部为

@@ -29,6 +29,7 @@ import { ContextCompactionNotices, isExecutionOperation, shouldDisplayOperation 
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
   createSubagentContactedPresentation,
+  createAutoApprovalReviewPresentation,
   createSubagentStartedPresentation,
   createTurnCompletedPresentation,
   createTurnReasoningPresentation,
@@ -474,6 +475,15 @@ export class TelegramOutbox {
           ).then(() => undefined),
           false,
         );
+        return;
+      case "autoApprovalReview.updated":
+        this.enqueue(chatId, (signal) => this.sendPanel(
+          chatId,
+          renderTelegramLifecyclePresentation(createAutoApprovalReviewPresentation(event)),
+          undefined,
+          true,
+          signal,
+        ).then(() => undefined), true);
         return;
       case "subagent.completed":
         this.enqueue(

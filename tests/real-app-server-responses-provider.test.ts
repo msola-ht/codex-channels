@@ -2,7 +2,7 @@ import { normalizeDeepseekCatalogCapabilities } from "../scripts/deepseek-setup.
 import {validateModelCatalogWithCodex} from "../scripts/model-catalog-validation.mjs";
 import { loadResponsesModelTemplates, responsesModelTemplatesFromCatalog } from "../scripts/responses-model-templates.mjs";
 import { createServer } from "node:http";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { stringify } from "smol-toml";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,8 +14,12 @@ import type { SessionRouter } from "../src/session-routing/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
+import { toAutoApprovalReviewEvent, type AutoApprovalReviewEvent } from "../src/codex-client/index.js";
+import { AutoApprovalReviewNotifications } from "../src/bootstrap/auto-approval-review-notifications.js";
+import type { OutputEvent } from "../src/conversation-core/index.js";
+import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import { ProviderProxy, type ProviderProxyMetrics } from "../src/provider-proxy/index.js";
-import type { ModelListResponse, ThreadStartResponse, TurnStartResponse, ConfigReadResponse } from "../src/codex-protocol/index.js";
+import type { ModelListResponse, ThreadStartResponse, TurnStartResponse, ConfigReadResponse, ServerNotification } from "../src/codex-protocol/index.js";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createResponsesModelCatalog, writeResponsesModelCatalog, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { writeCustomPrimaryProviderSwitchingProfile, loadConfiguredCustomSwitchingModelProviders, loadManagedProviderAppServers } from "../runtime/model-provider-runtime.mjs";
@@ -26,6 +30,168 @@ import { waitFor } from "./support/real-app-server-helpers.js";
 
 const contract = process.env.RUN_CODEX_CONTRACT === "1" ? it : it.skip;
 describe("real custom Responses provider", () => {
+  for (const outcome of ["allow", "deny"] as const) {
+    contract(`emits real agent auto-review lifecycle and enforces ${outcome}`, async () => {
+      const root = mkdtempSync(join(tmpdir(), "responses-auto-review-"));
+      const environment = { ...process.env, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };
+      type RequestBody = {
+        model: string;
+        client_metadata?: Record<string, string>;
+        input: Array<{ type: string; call_id?: string; output?: unknown }>;
+      };
+      const parentRequests: RequestBody[] = [];
+      const reviewerRequests: RequestBody[] = [];
+      const command = "printf auto-review-executed > auto-review-result";
+      const callId = `auto-review-${outcome}-command`;
+      const backend = createServer((request, response) => {
+        const chunks: Buffer[] = [];
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          if (request.url !== "/responses" || request.method !== "POST") { response.writeHead(404).end(); return; }
+          const body = JSON.parse(Buffer.concat(chunks).toString()) as RequestBody;
+          const guardian = body.client_metadata?.["x-openai-subagent"] === "guardian";
+          (guardian ? reviewerRequests : parentRequests).push(body);
+          const id = guardian ? `review-${outcome}` : `parent-${parentRequests.length}`;
+          const assessment = JSON.stringify({ risk_level: outcome === "allow" ? "low" : "high",
+            user_authorization: outcome === "allow" ? "high" : "unknown", outcome, rationale: "fixture" });
+          const item = !guardian && parentRequests.length === 1
+            ? { type: "function_call", id: callId, call_id: callId, name: "exec_command",
+              arguments: JSON.stringify({ cmd: command, login: false, max_output_tokens: 100,
+                sandbox_permissions: "require_escalated", justification: "Run the isolated contract fixture command" }) }
+            : { type: "message", role: "assistant", id: `message-${id}`,
+              content: [{ type: "output_text", text: guardian ? assessment : "Auto-review fixture complete" }] };
+          response.writeHead(200, { "content-type": "text/event-stream" });
+          for (const event of [{ type: "response.created", response: { id } },
+            { type: "response.output_item.done", item }, completedResponseEvent(id)]) {
+            response.write(`data: ${JSON.stringify(event)}\n\n`);
+          }
+          response.end();
+        });
+      });
+      type ReviewStarted = Extract<ServerNotification, { method: "item/autoApprovalReview/started" }>["params"];
+      type ReviewCompleted = Extract<ServerNotification, { method: "item/autoApprovalReview/completed" }>["params"];
+      const started: ReviewStarted[] = [];
+      const completed: ReviewCompleted[] = [];
+      const turns: Array<{ id: string; status: string }> = [];
+      const privilegedRequests: string[] = [];
+      const projectedReviews: AutoApprovalReviewEvent[] = [];
+      const channelReviews: OutputEvent[] = [];
+      let boundThreadId: string | undefined;
+      const notifications = new AutoApprovalReviewNotifications({
+        targetForThread: threadId => threadId === boundThreadId
+          ? { surface: "telegram", accountId: "fixture", conversationId: "fixture-chat" } : undefined,
+        isBackgroundThread: () => false, providerForThread: () => "fixture",
+        publish: event => { channelReviews.push(event); },
+        unroutable: () => { throw new Error("Unexpected unroutable auto-review"); },
+      });
+      const metricsPath = join(root, "metrics.sqlite3");
+      let metricsStore: SqliteModelRequestMetricsStore | undefined;
+      let rpc: JsonRpcClient | undefined;
+      try {
+        await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
+        const address = backend.address();
+        if (!address || typeof address === "string") throw new Error("Missing fixture listener");
+        const catalogPath = join(environment.CODEX_HOME, "fixture-models.json");
+        writePrivateFileAtomicSync(catalogPath, JSON.stringify(createResponsesModelCatalog([{
+          id: "fixture-model", name: "Auto-review fixture", contextWindow: 64000,
+          reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false,
+        }], "fixture-model")));
+        writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), stringify({
+          model: "fixture-model", model_provider: "fixture", model_catalog_json: catalogPath,
+          approval_policy: "on-request", approvals_reviewer: "auto_review", web_search: "disabled",
+          features: { guardian_approval: true, guardianv2: { enabled: false } },
+          model_providers: { fixture: { name: "Auto-review fixture", base_url: `http://127.0.0.1:${address.port}`,
+            wire_api: "responses", requires_openai_auth: false, supports_websockets: false,
+            request_max_retries: 0, stream_max_retries: 0 } },
+        }));
+        metricsStore = new SqliteModelRequestMetricsStore(metricsPath);
+        rpc = new JsonRpcClient(new StdioTransport({ codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: root, environment }), 15000);
+        rpc.onNotification(notification => {
+          const projected = toAutoApprovalReviewEvent(notification);
+          if (projected) {
+            projectedReviews.push(projected);
+            notifications.handle(projected);
+            metricsStore!.recordAutoApprovalReview(projected, "fixture");
+          }
+          if (notification.method === "turn/started" || notification.method === "turn/completed") {
+            const params = notification.params as { threadId: string; turn: { id: string } };
+            metricsStore!.observeAutoApprovalTurn(params.threadId, params.turn.id, "fixture",
+              notification.method === "turn/started" ? "started" : "completed");
+          }
+          if (notification.method === "item/autoApprovalReview/started") started.push(notification.params as ReviewStarted);
+          if (notification.method === "item/autoApprovalReview/completed") completed.push(notification.params as ReviewCompleted);
+          if (notification.method === "turn/completed") turns.push((notification.params as { turn: { id: string; status: string } }).turn);
+        });
+        rpc.setServerRequestHandler(async request => {
+          privilegedRequests.push(request.method);
+          throw new Error("Unexpected privileged request");
+        });
+        await rpc.connect();
+        const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: {
+          cwd: root, model: "fixture-model", modelProvider: "fixture", sandbox: "read-only",
+          approvalPolicy: "on-request", approvalsReviewer: "auto_review", ephemeral: true,
+        } });
+        boundThreadId = thread.id;
+        const { turn } = await rpc.request<TurnStartResponse>({ method: "turn/start", params: {
+          threadId: thread.id, input: [{ type: "text", text: "Run the isolated fixture command", text_elements: [] }],
+        } });
+        await waitFor(() => turns.some(value => value.id === turn.id), 15000);
+        expect(turns).toContainEqual(expect.objectContaining({ id: turn.id, status: "completed" }));
+        expect(privilegedRequests).toEqual([]);
+        expect(reviewerRequests).toHaveLength(1);
+        expect(parentRequests).toHaveLength(2);
+        expect(started).toHaveLength(1);
+        expect(completed).toHaveLength(1);
+        const reviewStarted = started[0]!;
+        const reviewCompleted = completed[0]!;
+        expect(reviewStarted).toMatchObject({ threadId: thread.id, turnId: turn.id, targetItemId: callId,
+          review: { status: "inProgress" }, action: { type: "command", command: expect.stringContaining(command), cwd: root } });
+        expect(reviewStarted.reviewId).not.toBe("");
+        expect(reviewCompleted).toMatchObject({ threadId: thread.id, turnId: turn.id, targetItemId: callId,
+          reviewId: reviewStarted.reviewId, startedAtMs: reviewStarted.startedAtMs, decisionSource: "agent",
+          review: { status: outcome === "allow" ? "approved" : "denied", rationale: "fixture" },
+          action: reviewStarted.action });
+        expect(reviewCompleted.completedAtMs).toBeGreaterThanOrEqual(reviewStarted.startedAtMs);
+        expect(projectedReviews).toEqual([
+          { threadId: thread.id, turnId: turn.id, reviewId: reviewStarted.reviewId, phase: "started", status: "inProgress", approved: false },
+          { threadId: thread.id, turnId: turn.id, reviewId: reviewStarted.reviewId, phase: "completed", status: outcome === "allow" ? "approved" : "denied", approved: outcome === "allow" },
+        ]);
+        expect(channelReviews).toEqual(projectedReviews.map(value => ({
+          type: "autoApprovalReview.updated", target: { surface: "telegram", accountId: "fixture", conversationId: "fixture-chat" },
+          threadId: thread.id, turnId: turn.id, sourceThreadId: thread.id, sourceTurnId: turn.id,
+          reviewId: value.reviewId, phase: value.phase, status: value.status,
+        })));
+        expect(JSON.stringify(channelReviews)).not.toContain(command);
+        expect(channelReviews.some(event => "action" in event || "rationale" in event)).toBe(false);
+        expect(metricsStore.taskAutoApprovalReviewSummary(thread.id, turn.id)).toEqual({
+          approved: outcome === "allow" ? 1 : 0, coverage: "complete",
+        });
+        const toolOutput = parentRequests[1]?.input.find(item => item.type === "function_call_output" && item.call_id === callId);
+        expect(toolOutput).toBeDefined();
+        const resultPath = join(root, "auto-review-result");
+        if (outcome === "allow") {
+          expect(readFileSync(resultPath, "utf8")).toBe("auto-review-executed");
+          expect(toolOutput?.output).toEqual(expect.stringContaining("Process exited with code 0"));
+        } else {
+          expect(existsSync(resultPath)).toBe(false);
+          expect(toolOutput?.output).toEqual(expect.stringMatching(/reject|denied/iu));
+        }
+        await rpc.close();
+        metricsStore.close();
+        metricsStore = new SqliteModelRequestMetricsStore(metricsPath);
+        expect(metricsStore.taskAutoApprovalReviewSummary(thread.id, turn.id)).toEqual({
+          approved: outcome === "allow" ? 1 : 0, coverage: "partial",
+        });
+      } finally {
+        await rpc?.close();
+        metricsStore?.close();
+        backend.closeAllConnections();
+        await new Promise<void>(resolve => backend.close(() => resolve()));
+        rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
+    }, 30000);
+  }
+
   contract("completes a real WebSocket turn when upstream closes before metrics acknowledgement", async () => {
     const root = mkdtempSync(join(tmpdir(), "responses-ws-contract-"));
     const environment = { ...process.env, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };

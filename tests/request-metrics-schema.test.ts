@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("request metrics schema", () => {
-  it.each([19, 27, 99])("fails closed for metrics schema %s without rewriting history", (version) => {
+  it.each([19, 27, 28, 99])("fails closed for metrics schema %s without rewriting history", (version) => {
     const directory = temporaryDirectory();
     const path = join(directory, "request-metrics.sqlite3");
     const database = new DatabaseSync(path);
@@ -60,6 +60,17 @@ describe("request metrics schema", () => {
     `).get();
     inspection.close();
     expect(modelTable).toBeUndefined();
+  });
+
+  it("rejects incomplete review tables without recreating them", () => {
+    const path = join(temporaryDirectory(), "request-metrics.sqlite3");
+    const store = new SqliteModelRequestMetricsStore(path); store.close();
+    const database = new DatabaseSync(path);
+    database.exec("DROP TABLE auto_approval_reviews"); database.close();
+    expect(() => new SqliteModelRequestMetricsStore(path)).toThrow(/结构不完整/u);
+    const preserved = new DatabaseSync(path, { readOnly: true });
+    expect(preserved.prepare("SELECT name FROM sqlite_master WHERE name = 'auto_approval_reviews'").get()).toBeUndefined();
+    preserved.close();
   });
 });
 

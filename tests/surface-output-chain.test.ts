@@ -12,6 +12,7 @@ import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
 import { withOutputExecutionAdmission } from "../src/bootstrap/output-execution-admission.js";
 import type { TurnExecutionPort, ThreadQueuePort } from "../src/application/index.js";
 import { SubagentCompletionTracker } from "../src/bootstrap/subagent-completion-tracker.js";
+import { AutoApprovalReviewNotifications } from "../src/bootstrap/auto-approval-review-notifications.js";
 import { GatewayComponentGraph } from "../src/bootstrap/gateway-component-graph.js";
 import { FeishuOutbox } from "../src/surfaces/feishu/outbox.js";
 import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
@@ -45,6 +46,7 @@ it.concurrent("fences new execution but persists every accepted inbound result b
     bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
     channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
     turnExecution: { stop: async () => { expect(reduced).toBe(100); } },
+    autoApprovalReviewNotifications: { reset: vi.fn() },
     inbound, output, codex: { close }, bindings: { close }, logger,
   });
   try {
@@ -57,6 +59,28 @@ it.concurrent("fences new execution but persists every accepted inbound result b
     try { expect(journal.execute({ type: "summary" })).toMatchObject({ records: 100, pending: 100 }); }
     finally { journal.close(); }
   } finally { await manager.stop(); await inbound.close(); await output.close(); }
+});
+
+it.concurrent.for(["telegram", "feishu"] as const)("confirms auto-review phases through the %s persistent output chain", async (platform, { expect }) => {
+  const f = await fixture(false, platform);
+  const notifications = new AutoApprovalReviewNotifications({
+    targetForThread: threadId => threadId === "thread" ? f.target : undefined,
+    providerForThread: () => "fixture", isBackgroundThread: () => false,
+    publish: event => f.output.publish(event, true), unroutable: vi.fn(),
+  });
+  try {
+    for (const phase of ["started", "completed"] as const) notifications.handle({ threadId: "thread", turnId: "turn", reviewId: "review",
+      phase, status: phase === "started" ? "inProgress" : "denied", approved: false });
+    await f.manager.waitForPersistentOutput(f.target, AbortSignal.timeout(3000));
+    expect(f.rendered.map(event => event.type)).toEqual(["autoApprovalReview.updated", "autoApprovalReview.updated"]);
+    expect(f.sent).toHaveLength(2);
+    expect(f.sent[0]).toContain("审查中"); expect(f.sent[1]).toContain("已拒绝");
+    expect(f.checkpoints.map(value => value.state)).toEqual(["started", "confirmed", "started", "confirmed"]);
+    expect(f.faults).toEqual([]);
+  } finally { await f.close(); }
+  const journal = new SqliteDeliveryJournal(f.directory);
+  try { expect(journal.execute({ type: "summary" })).toMatchObject({ records: 0 }); }
+  finally { journal.close(); }
 });
 
 it.concurrent.for(["queued", "settling", "checkpoint"] as const)("persists derived subagent completion during shutdown (%s)", { timeout: 15_000 }, async (stage, { expect }) => {
@@ -85,6 +109,7 @@ it.concurrent.for(["queued", "settling", "checkpoint"] as const)("persists deriv
     bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
     channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
     turnExecution: { stop: close },
+    autoApprovalReviewNotifications: { reset: vi.fn() },
     subagentCompletion: tracker, inbound, output, codex: { close }, bindings: { close }, logger,
   });
   try {

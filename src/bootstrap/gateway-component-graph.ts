@@ -68,6 +68,7 @@ import {
   loadManagedModelOptions,
   JsonRpcClient,
   supportedCodexCliVersion,
+  toAutoApprovalReviewEvent,
   toConversationInputEvent,
   toThreadQueueChangedEvent,
   toThreadStateEvent,
@@ -146,6 +147,8 @@ import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
 import { completionAccountStatus } from "./completion-account-status.js";
 import { mergeCompletionTiming } from "./completion-timing.js";
 import { TurnExecutionTracker } from "./turn-execution-tracker.js";
+import { AutoApprovalReviewTracker } from "./auto-approval-review-tracker.js";
+import { AutoApprovalReviewNotifications } from "./auto-approval-review-notifications.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server-request.js";
@@ -162,6 +165,8 @@ export abstract class GatewayComponentGraph {
   private readonly transport: CodexTransport;
   private readonly codex: ProviderRoutingClient;
   private readonly turnExecution: TurnExecutionTracker;
+  private readonly autoApprovalReview: AutoApprovalReviewTracker;
+  private readonly autoApprovalReviewNotifications: AutoApprovalReviewNotifications;
   private readonly primaryProvider: string;
   private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
@@ -392,6 +397,18 @@ export abstract class GatewayComponentGraph {
     this.turnExecution = new TurnExecutionTracker(this.codex, metricsStore,
       () => this.metricsEvents?.changed(),
       (error, threadId) => logger.warn({ module: "metrics", event: "turn_timing.sync_failed", err: error, threadId }, "轮次耗时记录或同步失败"));
+    this.autoApprovalReview = new AutoApprovalReviewTracker(metricsStore,
+      (threadId) => this.codex.knownProvider(threadId),
+      (error, threadId) => logger.warn({ module: "metrics", event: "auto_review.write_failed", err: error, threadId }, "自动审查统计记录失败，统计覆盖不完整"));
+    this.autoApprovalReviewNotifications = new AutoApprovalReviewNotifications({
+      targetForThread: (threadId) => this.router.targetForThread(threadId),
+      isBackgroundThread: (threadId) => this.router.isBackgroundThread(threadId),
+      providerForThread: (threadId) => this.codex.knownProvider(threadId),
+      publish: (event) => this.output.publish(event, true),
+      unroutable: (threadId, turnId, reason) => logger.warn(
+        { event: "auto_review.notification_unroutable", threadId, turnId, reason },
+        "自动审查通知未向渠道发送"),
+    });
     const metricsWriter = new BufferedModelRequestMetricsWriter(
       metricsStore,
       (error) => logger.error({ module: "metrics", event: "request_metrics.write_failed", err: error }, "模型请求指标后台写入失败"),
@@ -472,9 +489,11 @@ export abstract class GatewayComponentGraph {
       waitForMetrics: (agentThreadId, agentTurnId) =>
         metricsWriter.waitForCurrentWrites(agentThreadId, agentTurnId),
       onRunStarted: (details) => {
+        this.autoApprovalReviewNotifications.recordRun(details);
         try {
           metricsStore.recordSubagentTurn(details);
         } catch (error) {
+          this.autoApprovalReview.markIncomplete();
           logger.warn(
             {
               err: error,
@@ -486,6 +505,10 @@ export abstract class GatewayComponentGraph {
             "子代理运行指标归属写入失败",
           );
         }
+      },
+      onRunAttributionIncomplete: () => {
+        this.autoApprovalReview.markIncomplete();
+        logger.warn({ module: "metrics", event: "subagent.attribution_incomplete" }, "子代理轮次归属观测不完整，自动审查统计降级");
       },
       publish: (event) => {
         this.output.publish(event, isCriticalOutputEvent(event));
@@ -981,6 +1004,7 @@ export abstract class GatewayComponentGraph {
             sessionTiming,
           };
         },
+        autoApprovalReview: (threadId, turnId) => this.autoApprovalReview.summary(threadId, turnId, this.subagentCompletion.pendingParentTurns()),
         taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
           let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
@@ -1088,12 +1112,19 @@ export abstract class GatewayComponentGraph {
       },
     });
     this.inbound.subscribe("conversation-core", (notification) => {
+      const autoReview = toAutoApprovalReviewEvent(notification);
+      if (autoReview) this.autoApprovalReviewNotifications.handle(autoReview);
       const queueChanged = toThreadQueueChangedEvent(notification);
       if (queueChanged) {
         conversationEvents.queueChanged(queueChanged.threadId);
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
+        if ((coreEvent.type === "item.subagentActivity" && coreEvent.kind === "started")
+          || (coreEvent.type === "item.operation.updated" && coreEvent.operation.kind === "subagent"
+            && coreEvent.operation.action === "followup_task" && coreEvent.operation.status === "running")) {
+          this.autoApprovalReviewNotifications.observeParentRun(coreEvent.threadId, coreEvent.turnId);
+        }
         if (coreEvent.type === "turn.completed" || coreEvent.type === "thread.reverted") {
           const timingProvider = this.codex.knownProvider(coreEvent.threadId);
           if (timingProvider) this.turnExecution.handle(coreEvent, timingProvider);
@@ -1128,6 +1159,7 @@ export abstract class GatewayComponentGraph {
       if (
         !coreEvent
         && !threadStateEvent
+        && !autoReview
         && notification.method !== "serverRequest/resolved"
         && !isHighFrequencyNotification(notification.method)
       ) {
@@ -1435,6 +1467,8 @@ export abstract class GatewayComponentGraph {
       await this.relayMetrics?.apply(true);
       this.requireRunning();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
+        // Persist minimal facts before bounded asynchronous presentation queues.
+        this.autoApprovalReview.handleNotification(notification);
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
@@ -1442,6 +1476,9 @@ export abstract class GatewayComponentGraph {
           .filter((binding) => this.codex.knownProvider(binding.threadId) === provider)
           .map((binding) => binding.threadId)));
         this.turnExecution.reset(provider);
+        this.autoApprovalReview.reset(provider);
+        this.autoApprovalReviewNotifications.reset(provider);
+        this.subagentCompletion.resetRunAttribution((threadId) => this.codex.knownProvider(threadId) === provider);
         if (this.providersApplyingSettings.has(provider)) {
           this.settingsDisconnects.set(provider, error);
           return;
@@ -1677,6 +1714,7 @@ export abstract class GatewayComponentGraph {
       ["Derived Output Inputs", () => this.output.drain()],
       ["Turn Execution Metrics", () => this.turnExecution.stop()],
       ["Subagent Terminals", () => this.subagentCompletion?.drain()],
+      ["Auto-review Notifications", () => this.autoApprovalReviewNotifications.reset()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Account Snapshot Warmup", async () => {
         if (this.accountWarmupTask && !(await waitAtMost(this.accountWarmupTask, 5_000))) {

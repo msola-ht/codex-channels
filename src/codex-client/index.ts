@@ -41,6 +41,8 @@ export {
   toConversationInputEvent,
   toThreadQueueChangedEvent,
   toThreadStateEvent,
+  toAutoApprovalReviewEvent,
+  type AutoApprovalReviewEvent,
 } from "./notification-adapter.js";
 export {
   sanitizeOperationText,

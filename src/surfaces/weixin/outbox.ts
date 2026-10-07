@@ -17,6 +17,7 @@ import { surfaceErrorMetadata } from "../error-metadata.js";
 import type { SurfaceOutputPort } from "../types.js";
 import {
   createTurnStartedPresentation,
+  createAutoApprovalReviewPresentation,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
@@ -272,6 +273,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   private render(event: OutputEvent): string | null {
     switch (event.type) {
+      case "autoApprovalReview.updated":
+        return formatWeixinCommandText(
+          renderPlainLifecyclePresentation(createAutoApprovalReviewPresentation(event)),
+          { structuredFields: true },
+        );
       case "operation.updated":
         return this.compactionNotices.accept(event, DeliveryReceipt.current() !== undefined);
       case "text.completed":

@@ -161,6 +161,30 @@ export const turnExecutionSchemaSql = `
   CREATE INDEX turn_execution_metrics_retention ON turn_execution_metrics (recorded_at_ms);
 `;
 
+export const autoApprovalReviewSchemaSql = `
+  CREATE TABLE auto_approval_review_turns (
+    thread_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    started INTEGER NOT NULL CHECK (started IN (0, 1)),
+    completed INTEGER NOT NULL CHECK (completed IN (0, 1)),
+    continuous INTEGER NOT NULL CHECK (continuous IN (0, 1)),
+    recorded_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, turn_id)
+  );
+  CREATE TABLE auto_approval_reviews (
+    thread_id TEXT NOT NULL,
+    turn_id TEXT NOT NULL,
+    review_id TEXT NOT NULL,
+    completed INTEGER NOT NULL CHECK (completed IN (0, 1)),
+    approved INTEGER NOT NULL CHECK (approved IN (0, 1) AND approved <= completed),
+    recorded_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, turn_id, review_id)
+  );
+  CREATE INDEX auto_approval_review_turns_retention ON auto_approval_review_turns (recorded_at_ms);
+  CREATE INDEX auto_approval_reviews_retention ON auto_approval_reviews (recorded_at_ms);
+`;
+
 export const initialSchemaSql = `
   CREATE TABLE account_sources (
     source_id TEXT PRIMARY KEY,
@@ -201,6 +225,7 @@ export const initialSchemaSql = `
   ${modelRequestMetricsTableSql}
   ${modelRequestMetricsIndexesSql}
   ${turnExecutionSchemaSql}
+  ${autoApprovalReviewSchemaSql}
   INSERT INTO schema_metadata (name, value) VALUES ('schema_version', ${schemaVersion});
 `;
 
@@ -284,7 +309,7 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
     `).all();
     const tableSql = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'model_request_metrics'").get()?.sql;
     const normalize = (text: string): string => text.replace(/\s+/gu, " ").trim();
-    for (const statement of turnExecutionSchemaSql.split(";").filter(sql => sql.trim())) {
+    for (const statement of (turnExecutionSchemaSql + autoApprovalReviewSchemaSql).split(";").filter(sql => sql.trim())) {
       const name = /CREATE (?:TABLE|INDEX) (\w+)/u.exec(statement)?.[1];
       const actual = database.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name!)?.sql;
       if (typeof actual !== "string" || normalize(actual) !== normalize(statement)) throw new Error("轮次耗时 Schema 结构不匹配");

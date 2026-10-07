@@ -3,6 +3,7 @@ import { validRequestTiming } from "../../runtime/request-timing.mjs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { SqliteQuotaQueries } from "./sqlite-quota-queries.js";
+import { SqliteAutoApprovalReviewMetrics } from "./sqlite-auto-approval-review-metrics.js";
 import { SqliteRequestMetricsQueries, validateThreadId } from "./sqlite-request-metrics-queries.js";
 
 import {
@@ -25,6 +26,7 @@ import {
 
 import type {
   TurnExecutionMetric,
+  AutoApprovalReviewStore,
   TurnExecutionStore,
   SessionExecutionTiming,
   ModelRequestMetricSample,
@@ -59,7 +61,7 @@ const defaultRetentionDays = 365;
 const defaultMaximumRows = 1_000_000;
 const cleanupInterval = 100;
 
-export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore, TurnExecutionStore {
+export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore, TurnExecutionStore, AutoApprovalReviewStore {
   private readonly database: DatabaseSync;
   private readonly queries = new SqliteRequestMetricsQueries({
     prepare: (sql) => this.database.prepare(sql),
@@ -124,6 +126,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
         PRAGMA synchronous = NORMAL;
       `);
       this.initializeSchema();
+      // A new writer cannot establish continuity with the previous process.
+      new SqliteAutoApprovalReviewMetrics(this.database).invalidateAutoApprovalCoverage();
       this.insert = this.database.prepare(`
         INSERT INTO model_request_metrics (
           ${metricStorageColumnsSql}
@@ -428,6 +432,38 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
     return this.queries.recent(limit);
   }
 
+  observeAutoApprovalTurn(...args: Parameters<AutoApprovalReviewStore["observeAutoApprovalTurn"]>): void {
+    this.requireReviewWrite();
+    new SqliteAutoApprovalReviewMetrics(this.database).observeAutoApprovalTurn(...args);
+    this.reviewWriteCompleted();
+  }
+
+  recordAutoApprovalReview(...args: Parameters<AutoApprovalReviewStore["recordAutoApprovalReview"]>): void {
+    this.requireReviewWrite();
+    new SqliteAutoApprovalReviewMetrics(this.database).recordAutoApprovalReview(...args);
+    this.reviewWriteCompleted();
+  }
+
+  invalidateAutoApprovalCoverage(provider?: string): void {
+    this.requireReviewWrite();
+    new SqliteAutoApprovalReviewMetrics(this.database).invalidateAutoApprovalCoverage(provider);
+  }
+
+  taskAutoApprovalReviewSummary(...args: Parameters<AutoApprovalReviewStore["taskAutoApprovalReviewSummary"]>) {
+    this.requireOpen();
+    return new SqliteAutoApprovalReviewMetrics(this.database).taskAutoApprovalReviewSummary(...args);
+  }
+
+  private requireReviewWrite(): void {
+    this.requireOpen();
+    if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
+  }
+
+  private reviewWriteCompleted(): void {
+    this.recordsSinceCleanup += 1;
+    if (this.recordsSinceCleanup >= cleanupInterval) this.cleanup(Date.now());
+  }
+
   relayCallerUsage(callers: readonly { callerId: string; keyId: string }[], startAtMs: number, endAtMs: number) {
     return this.queries.relayCallerUsage(callers, startAtMs, endAtMs);
   }
@@ -699,6 +735,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
     this.requireOpen();
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      new SqliteAutoApprovalReviewMetrics(this.database).cleanup(Math.max(0, nowMs - this.retentionMs), this.maximumRows);
       this.database.prepare("DELETE FROM turn_execution_metrics WHERE recorded_at_ms < ?").run(Math.max(0, nowMs - this.retentionMs));
       this.database.prepare(`DELETE FROM turn_execution_metrics WHERE rowid IN (
         SELECT rowid FROM turn_execution_metrics ORDER BY recorded_at_ms DESC, rowid DESC LIMIT -1 OFFSET ?
@@ -707,9 +744,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       this.database.prepare(`
         DELETE FROM model_request_metrics WHERE recorded_at_ms < ?
       `).run(Math.max(0, nowMs - this.retentionMs));
-      this.database.prepare(`
+      const removedRelations = this.database.prepare(`
         DELETE FROM subagent_turns WHERE recorded_at_ms < ?
       `).run(Math.max(0, nowMs - this.retentionMs));
+      if (removedRelations.changes > 0) new SqliteAutoApprovalReviewMetrics(this.database).invalidateAutoApprovalCoverage();
       this.cleanupAccountSnapshots(nowMs);
       // 行数裁剪按 id 上界一次定位，避免 ORDER BY ... OFFSET 在每次清理时
       // 对主键做全表倒扫；id 出现空洞时只会更早清掉最旧记录，不会删掉更新的记录。

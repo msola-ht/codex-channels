@@ -30,6 +30,25 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
+  it.each(["approved", "denied", "timedOut", "aborted"] as const)("delivers auto-review start and %s without interactive approvals", async status => {
+    const sendMarkdownCard = vi.fn<(chat: string, markdown: string) => Promise<string>>(async () => "om_review");
+    const sendCard = vi.fn(cardMethods.sendCard);
+    const outbox = new FeishuOutbox(target.accountId, {
+      ...cardMethods, sendCard, sendMarkdownCard, sendText: async () => {}, sendPost: async () => {},
+    }, pino({ level: "silent" }));
+    const base = { type: "autoApprovalReview.updated", target, threadId: "thread", turnId: "turn",
+      sourceThreadId: "thread", sourceTurnId: "turn", reviewId: "review" } as const;
+    try {
+      for (const event of [{ ...base, phase: "started", status: "inProgress" }, { ...base, phase: "completed", status }] as const) {
+        expect(outbox.retains(event)).toBe(true);
+        outbox.handle(event);
+      }
+      await outbox.close();
+      expect(sendMarkdownCard.mock.calls.map(call => call[1])).toEqual(["## 自动审查开始\n\n- 状态：审查中",
+        `## 自动审查完成\n\n- 状态：${{ approved: "已通过", denied: "已拒绝", timedOut: "已超时", aborted: "已中止" }[status]}`]);
+      expect(sendCard).not.toHaveBeenCalled();
+    } finally { await outbox.close(); }
+  });
   it.each([false, true])("settles completion independently of a retained final after disconnect (unknown=%s)", async (unknown) => {
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => { release = resolve; });

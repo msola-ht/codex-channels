@@ -13,6 +13,7 @@ import type {
 const completionEnrichmentTimeoutMs = 250;
 
 export interface CompletionOutputEnricherOptions {
+  autoApprovalReview?(threadId: string, turnId: string): Extract<OutputEvent, { type: "turn.completed" }>["autoApprovalReview"];
   subagentMetadata?(agentThreadId: string, signal: AbortSignal): Promise<{
     id: string;
     parentThreadId?: string | null;
@@ -116,6 +117,13 @@ export class CompletionOutputEnricher {
     const accountStatus = await accountStatusResult;
     const gitBranch = await gitBranchResult;
     let execution: ReturnType<NonNullable<CompletionOutputEnricherOptions["executionTiming"]>> | undefined;
+    let autoApprovalReview: Extract<OutputEvent, { type: "turn.completed" }>["autoApprovalReview"];
+    try {
+      autoApprovalReview = this.options.autoApprovalReview?.(event.threadId, event.turnId);
+    } catch {
+      autoApprovalReview = { approved: 0, coverage: "unknown" };
+      this.logger.warn({ threadId: event.threadId, turnId: event.turnId }, "完成卡自动审查统计读取失败");
+    }
     try {
       execution = this.options.executionTiming?.(event.threadId, event.turnId);
     } catch {
@@ -123,6 +131,7 @@ export class CompletionOutputEnricher {
     }
     return {
       ...event,
+      ...(autoApprovalReview === undefined ? {} : { autoApprovalReview }),
       ...(accountStatus === undefined ? {} : { accountStatus }),
       ...(gitBranch ? { gitBranch } : {}),
       ...(timing === undefined ? {} : { timing }),

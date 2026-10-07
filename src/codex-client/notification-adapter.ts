@@ -18,6 +18,8 @@ import type {
   ThreadGoal as ProtocolThreadGoal,
   ThreadRevertedNotification,
   CodexErrorInfo,
+  ItemGuardianApprovalReviewStartedNotification,
+  ItemGuardianApprovalReviewCompletedNotification,
 } from "../codex-protocol/index.js";
 import type { ThreadStateEvent } from "../session-routing/index.js";
 import type { RpcNotification } from "./json-rpc.js";
@@ -107,6 +109,36 @@ const coreMethods = {
   warning: "warning",
   reverted: "thread/reverted",
 } as const satisfies Record<string, CoreNotification["method"]>;
+
+/** Safe status and metrics projection of the controlled, unstable official review payload. */
+export interface AutoApprovalReviewEvent {
+  threadId: string;
+  turnId: string;
+  reviewId: string;
+  phase: "started" | "completed";
+  status: "inProgress" | "approved" | "denied" | "timedOut" | "aborted";
+  approved: boolean;
+}
+
+export function toAutoApprovalReviewEvent(notification: RpcNotification): AutoApprovalReviewEvent | undefined {
+  if (notification.method !== "item/autoApprovalReview/started"
+    && notification.method !== "item/autoApprovalReview/completed") return undefined;
+  const params = asRecord(notification.params) as Partial<ItemGuardianApprovalReviewStartedNotification
+    & ItemGuardianApprovalReviewCompletedNotification> | undefined;
+  const threadId = nonEmptyString(params?.threadId);
+  const turnId = nonEmptyString(params?.turnId);
+  const reviewId = nonEmptyString(params?.reviewId);
+  const review = asRecord(params?.review);
+  const completed = notification.method === "item/autoApprovalReview/completed";
+  const status = review?.status;
+  if (status !== "inProgress" && status !== "approved" && status !== "denied"
+    && status !== "timedOut" && status !== "aborted") return undefined;
+  if (!threadId || !turnId || !reviewId || (!completed && status !== "inProgress")
+    || (completed && (params?.decisionSource !== "agent"
+      || (status !== "approved" && status !== "denied" && status !== "timedOut" && status !== "aborted")))) return undefined;
+  return { threadId, turnId, reviewId, phase: completed ? "completed" : "started", status,
+    approved: completed && params?.decisionSource === "agent" && status === "approved" };
+}
 
 export function toThreadStateEvent(
   notification: RpcNotification,

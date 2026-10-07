@@ -495,6 +495,23 @@ export interface TurnExecutionStore {
   sessionExecutionDuration(threadId: string, throughTurnId?: string): number | null;
 }
 
+/** Counts observed official agent decisions; coverage describes the query-time snapshot. */
+export interface AutoApprovalReviewSummary {
+  approved: number;
+  coverage: "complete" | "partial" | "unknown";
+}
+
+export interface AutoApprovalReviewStore {
+  observeAutoApprovalTurn(threadId: string, turnId: string, provider: string, phase: "started" | "completed"): void;
+  recordAutoApprovalReview(event: {
+    threadId: string; turnId: string; reviewId: string;
+    phase: "started" | "completed"; approved: boolean;
+  }, provider: string): void;
+  invalidateAutoApprovalCoverage(provider?: string): void;
+  taskAutoApprovalReviewSummary(threadId: string, turnId: string,
+    pendingParentTurns?: readonly { threadId: string; turnId: string }[]): AutoApprovalReviewSummary;
+}
+
 export interface SessionExecutionTiming {
   knownDurationMs: number | null;
   missingTurnCount: number;

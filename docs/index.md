@@ -27,10 +27,15 @@
   图片引用上传只允许额外读取 `account/read.workspaceRouting`，用于核对当前 ChatGPT 账户、
   后端与路由约束；通过官方 `getAuthStatus` 获取当前可导出的令牌，不读取磁盘凭据。
   该字段必须使用受控生成类型并由真实 App Server 合同覆盖，不得用于其他账户或路由功能。
-  Auto-review 用户设置只允许额外读取实验 `configRequirements/read.allowedApprovalsReviewers`，
+  Auto-review 只允许额外读取实验 `configRequirements/read.allowedApprovalsReviewers`，
   结合稳定 `featureRequirements` 检查全局开关的受管限制；通过 `ConfigRequirementsReadResponse`
-  受控导出并由真实 App Server 合同覆盖。该依赖仅限设置入口的只读策略判断，不采用
-  `config/read` 的合并审批字段，不新增实验能力协商或 Auto-review 生命周期通知。
+  受控导出并由真实 App Server 合同覆盖。设置入口仅用于只读策略判断，不采用
+  `config/read` 的合并审批字段。另允许消费 `item/autoApprovalReview/started|completed`
+  的最小身份、状态及决策来源投影，用于本轮任务递归统计 agent 来源的 approved 次数和采集覆盖，
+  以及按已授权 Thread 绑定向三个渠道展示审查开始和 agent 来源的 approved、denied、timedOut、aborted 终态；
+  子代理通知仅沿已确认的精确父子 Turn 关系路由，不从工作区、最近会话或联系消息推断归属。
+  方法没有实验标记，但其 payload 在锁定版标记 UNSTABLE，两个通知类型必须受控导出并由真实合同覆盖。
+  不记录 action、rationale 或命令，不消费 `autoApprovalReview/strictReviewRequired`，不扩大协商。
   开发中 Plugin 调试只允许在 `[experimental].plugin_api` 开启时使用稳定 `plugin/installed` 查询已安装项，
   并通过 `turn/start` / `turn/steer` 的官方 `mention` 输入调用；开关默认关闭且必须在 Doctor、
   命令输出和文档中标明开发中，只支持 OpenAI Thread。不得借这些例外或开发中入口接入、暴露其他
@@ -52,7 +57,7 @@
 | 85 | App Server 发给客户端的 Notification 方法 | [`ServerNotification.ts`](../src/codex-protocol/generated/ServerNotification.ts) |
 | 11 | App Server 发给客户端、需要回应的 Request 方法 | [`ServerRequest.ts`](../src/codex-protocol/generated/ServerRequest.ts) |
 | 1 | 客户端发给 App Server 的 Notification，即 `initialized` | [`ClientNotification.ts`](../src/codex-protocol/generated/ClientNotification.ts) |
-| 75 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
+| 77 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
 | 47 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
 | 5 | 本项目显式协调的 Server Request 类型 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`bootstrap/scheduled-task-tool-request.ts`](../src/bootstrap/scheduled-task-tool-request.ts) |
 | 18 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
@@ -395,7 +400,11 @@ Unix 公开端点通过独占硬链接发布，绑定名保留至监听关闭，
 窗口与本机 Token，不展示价格或费用。
 按需启动、初始化与模型列表流程由 Codex 0.160.0 真实 App Server 合同测试覆盖。
 
-指标只接受当前 Schema v28，首次安装直接建库，不迁移或重解释历史格式。字段、时间口径、
+| 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
+| --- | --- | --- |
+| 本轮任务自动审查统计及渠道状态 | `item/autoApprovalReview/started`、`item/autoApprovalReview/completed`（方法无实验标记，payload UNSTABLE）；受控 `ItemGuardianApprovalReviewStartedNotification` / `ItemGuardianApprovalReviewCompletedNotification` | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts) 仅投影身份、阶段、状态与 agent 来源的 approved；[`auto-approval-review-tracker.ts`](../src/bootstrap/auto-approval-review-tracker.ts) 采集全部归属 Provider 的轮次，指标库以 Thread/Turn/review ID 去重，按精确 `subagent_turns` 递归统计，完成卡在投递前读取快照。独立的 [`auto-approval-review-notifications.ts`](../src/bootstrap/auto-approval-review-notifications.ts) 按已授权绑定及精确父子 Turn 归属向三渠道发布开始与四种终态，经共享关键投递路径发送；无动作、命令、理由或人工审批按钮，换绑、断线、未知归属不跨会话转发。断线、重启、缺少开始、未完成子轮、待完成审查与归属裁剪不能返回完整零次；迟到审查留在原 Turn。验证见 [`auto-approval-review-metrics.test.ts`](../tests/auto-approval-review-metrics.test.ts)、[`auto-approval-review-notifications.test.ts`](../tests/auto-approval-review-notifications.test.ts)、三渠道 Outbox 与共享投递策略测试，以及真实合同 [`real-app-server-responses-provider.test.ts`](../tests/real-app-server-responses-provider.test.ts)。官方依据为锁定 [`item.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/v2/item.rs)、[`common.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/common.rs) 与 [`bespoke_event_handling.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/bespoke_event_handling.rs)。缓存直接放行、用户手动批准及其他终态不计通过次数；不从缺失的历史审查重建。 |
+
+指标只接受当前 Schema v29，首次安装直接建库，不迁移或重解释历史格式。字段、时间口径、
 权限和只读查询合同见 [Observability](../src/observability/README.md)；安装检查见[源码安装与更新](source-install.md)。
 
 Provider Proxy 独立采集请求与响应模型、出站 `request_service_tier`、响应时间、生成区间、首内容和总耗时、

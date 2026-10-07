@@ -23,6 +23,7 @@ export interface SurfaceDeliveryDecision {
 const weixinWindowEventTypes: ReadonlySet<OutputEvent["type"]> = new Set<OutputEvent["type"]>([
   "turn.started",
   "turn.completed",
+  "autoApprovalReview.updated",
   "conversation.idle.released",
   "warning",
   "text.completed",
@@ -30,7 +31,7 @@ const weixinWindowEventTypes: ReadonlySet<OutputEvent["type"]> = new Set<OutputE
 
 /**
  * 微信单次回复窗口预算：只让生命周期、终态和全局空闲通知占用主动发送配额。
- * 压缩开始与完成属于生命周期；推理、计划、其他操作、子代理、连接、账户、额度、MCP 状态和 CLI/TUI 输入镜像都不占用。
+ * 压缩与自动审查开始和完成属于生命周期；推理、计划、其他操作、子代理、连接、账户、额度、MCP 状态和 CLI/TUI 输入镜像都不占用。
  */
 export function isWeixinWindowEvent(event: OutputEvent): boolean {
   if (event.type === "operation.updated" && event.operation.kind === "contextCompaction") return true;
