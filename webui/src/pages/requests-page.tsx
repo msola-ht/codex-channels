@@ -13,7 +13,7 @@ import { translateApiError, translateApiErrorCode } from "@/lib/i18n/translate"
 
 export function RequestsPage() {
   const { t } = useTranslation()
-  const state = useMetricsQuery("30d")
+  const state = useMetricsQuery("30d", "time", true)
   const { query, update, sorting, onSortingChange } = state
   const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt } = useRequests(query)
   const exporter = useMetricsExport(query)
@@ -30,7 +30,7 @@ export function RequestsPage() {
           </Button>
         </div>
       </div>
-      <QueryFilters query={query} onChange={update} showThreadFilters={false} revision={data} />
+      <QueryFilters query={query} onChange={update} showThreadFilters={false} showRequestPurpose revision={data} />
       <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={refreshing} />
       <ErrorBanner error={exporter.failed ? translateApiErrorCode(t, exporter.errorCode) : null} onRetry={() => void exporter.download()} pending={exporter.pending || refreshing || error !== null} />
       {error !== null ? null : data === null ? <PageSkeleton rows={8} /> : (

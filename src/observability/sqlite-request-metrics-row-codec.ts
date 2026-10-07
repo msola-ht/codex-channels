@@ -24,6 +24,9 @@ export interface MetricRow {
   operation: "response" | "compact";
   thread_id: string | null;
   turn_id: string | null;
+  request_purpose: "autoApprovalReview" | null;
+  reviewer_thread_id: string | null;
+  reviewer_turn_id: string | null;
   model: string | null;
   service_tier: string | null;
   request_service_tier: string | null;
@@ -188,6 +191,9 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     model: row.model,
     serviceTier: row.service_tier,
     requestServiceTier: row.request_service_tier,
+    requestPurpose: row.request_purpose,
+    reviewerThreadId: row.reviewer_thread_id,
+    reviewerTurnId: row.reviewer_turn_id,
     reasoningEffort: row.reasoning_effort,
     status: row.status,
     httpStatus: row.http_status,

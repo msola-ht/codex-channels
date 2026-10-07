@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMetricsState, observeJsonResponse, observeResponseEvent, HttpResponseMetricsObserver, invalidateGenerationTiming, observeChatTiming } from "../src/provider-proxy/response-metrics-observer.js";
 import { generationSpeed } from "../runtime/request-timing.mjs";
+import { autoReviewMetadata } from "../runtime/auto-review-metadata.mjs";
 import { ChatGenerationTimingObserver } from "../src/provider-proxy/generation-timing.js";
 
 import {
@@ -28,6 +29,20 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy HTTP metrics", () => {
+  it("bounds raw reviewer identities independently and never classifies a name as guardian source", () => {
+    const review = { thread_source: "guardian_review", parent_thread_id: "parent", parent_turn_id: "turn",
+      thread_id: "x".repeat(128), turn_id: "review-turn" };
+    expect(autoReviewMetadata(review)).toEqual({ requestPurpose: "autoApprovalReview", threadId: "parent", turnId: "turn",
+      reviewerThreadId: "x".repeat(128), reviewerTurnId: "review-turn" });
+    for (const thread_id of [undefined, null, " ", 1, "x".repeat(129)]) {
+      expect(autoReviewMetadata({ ...review, thread_id })).toMatchObject({ threadId: "parent", turnId: "turn",
+        reviewerThreadId: null, reviewerTurnId: "review-turn" });
+    }
+    expect(autoReviewMetadata({ ...review, turn_id: "\t" })).toMatchObject({ reviewerThreadId: "x".repeat(128), reviewerTurnId: null });
+    for (const value of [null, [], { agent_name: "guardian" }, { ...review, thread_source: "cli" }]) {
+      expect(autoReviewMetadata(value)).toBeUndefined();
+    }
+  });
   it("attributes only official guardian review requests to their exact parent task", async () => {
     const observedMetadata: unknown[] = [];
     const upstream = createServer((request, response) => {
@@ -70,6 +85,9 @@ describe("ProviderProxy HTTP metrics", () => {
       ...Array.from({ length: 2 }, () => ({ threadId: "review-thread", turnId: "review-turn", requestPurpose: undefined })),
     ]);
     expect(metrics.every(metric => metric.totalTokens === 12)).toBe(true);
+    expect(metrics.slice(0, 5).every(metric => metric.reviewerThreadId === "review-thread"
+      && metric.reviewerTurnId === "review-turn" && metric.traffic === undefined)).toBe(true);
+    expect(metrics.slice(5).every(metric => metric.reviewerThreadId === undefined && metric.reviewerTurnId === undefined)).toBe(true);
     expect(observedMetadata).toEqual(cases.map(value => JSON.parse(JSON.stringify(value))));
   });
 

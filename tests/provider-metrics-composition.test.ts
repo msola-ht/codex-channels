@@ -48,10 +48,11 @@ describe("ProviderMetricsComposition", () => {
     });
     await composition.start();
     try {
-      const reviewer = { ...metrics(), reasoningEffort, requestPurpose: "autoApprovalReview" as const };
+      const reviewer = { ...metrics(), reasoningEffort, requestPurpose: "autoApprovalReview" as const,
+        reviewerThreadId: "reviewer", reviewerTurnId: "review-turn" };
       await sendProviderProxyMetrics(socketPath, reviewer);
       await vi.waitFor(() => expect(enqueue).toHaveBeenCalledOnce());
-      expect(enqueue).toHaveBeenCalledWith({ provider: "openai", ...metrics(), reasoningEffort, quotaObservedAtMs: null });
+      expect(enqueue).toHaveBeenCalledWith({ provider: "openai", ...reviewer, quotaObservedAtMs: null });
       expect(resolveModelSettings).not.toHaveBeenCalled();
       expect(onModelTiming).not.toHaveBeenCalled();
       expect(toModelTimingEvent({ ...reviewer, status: "failed", upstreamTtftMs: 1 })).toBeUndefined();

@@ -1,5 +1,6 @@
 // Optional real-browser contracts. No project dependency or live Gateway required.
 // PLAYWRIGHT_BROWSERS_PATH=/path/to/browsers node tests/browser/webui-contracts.mjs /path/to/playwright/index.mjs
+// An optional second argument selects one fixture case for targeted verification.
 import assert from "node:assert/strict"
 import { createRequire } from "node:module"
 import { dirname, resolve } from "node:path"
@@ -35,6 +36,7 @@ try {
   const origin = `http://127.0.0.1:${server.httpServer.address().port}`
   browser = await chromium.launch({ headless: true })
   async function run(name, scenario, action, setup) {
+    if (process.argv[3] && process.argv[3] !== scenario) return
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
     const page = await context.newPage()
     page.setDefaultTimeout(10000)
@@ -53,7 +55,7 @@ try {
     try {
       await page.addInitScript(() => { try { localStorage.setItem("codex-webui:language", "en") } catch { /* Deliberately unavailable in the storage-failure fixture. */ } })
       if (setup) await setup(page)
-      await page.goto(`${origin}/__contracts?case=${scenario}${scenario === "app" ? "#/threads/%zz" : ""}`)
+      await page.goto(`${origin}/__contracts?case=${scenario}${scenario === "app" ? "#/threads/%zz" : scenario === "request-purpose" ? "#/requests?range=all&offset=50&limit=10" : ""}`)
       // Wait for initial modules, styles and fonts before exercising real input.
       await page.waitForLoadState("networkidle")
       await page.waitForFunction(() => !!window.__contract)
@@ -266,6 +268,83 @@ try {
     await page.getByRole("tabpanel").filter({ hasText: "Second panel" }).waitFor()
     assert.equal(await page.getByRole("tab", { name: "Second", exact: true }).getAttribute("aria-selected"), "true")
   })
+  await run("Request purpose: apply/reset clear pagination; export and dump navigation preserve purpose", "request-purpose", async page => {
+    await page.getByRole("button", { name: "Filter", exact: true }).click()
+    await page.getByRole("combobox", { name: "Request purpose", exact: true }).click()
+    await page.getByRole("option", { name: "Automatic approval review", exact: true }).click()
+    await page.getByRole("dialog").getByRole("button", { name: "Apply", exact: true }).click()
+    await page.waitForFunction(() => location.hash.includes("requestPurpose=autoApprovalReview") && !location.hash.includes("offset="))
+    const download = page.waitForEvent("download")
+    await page.getByRole("button", { name: "Export fixture" }).click()
+    await download
+    const exportUrl = await page.evaluate(() => window.__contract.requests.find(request => request.url.includes("requests/export?")).url)
+    assert.equal(new URL(exportUrl, "http://fixture").searchParams.get("requestPurpose"), "autoApprovalReview")
+    await page.getByRole("button", { name: "View request", exact: true }).click()
+    const detail = page.getByRole("dialog")
+    await detail.waitFor()
+    for (const text of ["Owning thread", "owner-thread", "Owning turn", "owner-turn", "Original reviewer thread", "reviewer-thread", "Original reviewer turn", "reviewer-turn"]) assert.ok((await detail.innerText()).includes(text))
+    await detail.getByRole("button", { name: "View traffic detail" }).click()
+    const returnPath = await page.getByTestId("requests-return").innerText()
+    assert.equal(new URL(returnPath, "http://fixture").searchParams.get("requestPurpose"), "autoApprovalReview")
+    await page.goBack()
+    await page.getByRole("button", { name: "Reset", exact: true }).click()
+    await page.waitForFunction(() => !location.hash.includes("requestPurpose=") && !location.hash.includes("offset="))
+  })
+  await run("Request and traffic tables: shared column order, aligned headers and numeric cells, keyboard detail entry", "table-alignment", async page => {
+    const expected = [
+      ["Recorded at", "Provider", "Method", "Model", "Reasoning", "Status", "Input", "Cache hit", "Output", "First token", "Speed", "Request duration", "Source", "Detail"],
+      ["Started at", "Provider", "Method", "Model", "Reasoning", "Status", "First token", "Speed", "Request duration", "Client", "Protocol", "Type", "Detail"],
+    ]
+    const tables = page.getByRole("table")
+    assert.equal(await tables.count(), 2)
+    for (let i = 0; i < 2; i++) assert.deepEqual(await tables.nth(i).getByRole("columnheader").allTextContents(), expected[i])
+    const validateAlignment = async () => {
+      const differences = await page.evaluate(() => Array.from(document.querySelectorAll("table")).flatMap(table => {
+        const range = document.createRange()
+        const textRect = element => {
+          const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+          let node
+          while ((node = walker.nextNode())) {
+            if (node.textContent.trim()) { range.selectNodeContents(node); return range.getBoundingClientRect() }
+          }
+        }
+        const firstHeader = textRect(table.querySelector("th"))
+        const headerCenter = (firstHeader.top + firstHeader.bottom) / 2
+        return Array.from(table.querySelectorAll("th")).flatMap((header, index) => {
+          const head = textRect(header)
+          const numeric = getComputedStyle(header).textAlign === "right"
+          const edge = numeric ? "right" : "left"
+          const expectedEdge = header.getBoundingClientRect()[edge] + (numeric ? -8 : 8)
+          const result = [{ column: header.textContent, kind: "header", delta: Math.abs(head[edge] - expectedEdge) }]
+          result.push({ column: header.textContent, kind: "header baseline", delta: Math.abs((head.top + head.bottom) / 2 - headerCenter) })
+          for (const row of table.querySelectorAll("tbody tr")) {
+            const cell = row.children[index]
+            const rect = numeric ? textRect(cell) : (cell.querySelector('[data-slot="badge"]')?.getBoundingClientRect() ?? textRect(cell))
+            result.push({ column: header.textContent, kind: "cell", delta: Math.abs(rect[edge] - expectedEdge) })
+          }
+          return result
+        })
+      }))
+      assert.deepEqual(differences.filter(entry => entry.delta > 1), [])
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+    }
+    await validateAlignment()
+    const time = tables.nth(0).getByRole("columnheader").first()
+    assert.equal(await time.getAttribute("aria-sort"), "descending")
+    await time.getByRole("button").click()
+    assert.equal(await time.getAttribute("aria-sort"), "ascending")
+    await validateAlignment()
+    await page.setViewportSize({ width: 1024, height: 1000 })
+    await validateAlignment()
+    const detail = tables.nth(1).getByRole("row").nth(1).getByRole("button").last()
+    await detail.focus()
+    await page.keyboard.press("Enter")
+    assert.equal(await page.evaluate(() => window.__contract.opened), 0)
+    await page.addInitScript(() => localStorage.setItem("codex-webui:traffic-table-v2:columns", JSON.stringify({ detail: false, provider: false })))
+    await page.reload()
+    assert.equal(await tables.nth(1).getByRole("columnheader", { name: "Detail", exact: true }).count(), 1)
+    assert.equal(await tables.nth(1).getByRole("columnheader", { name: "Provider", exact: true }).count(), 0)
+  })
   await run("RequestsTable: stored hidden detail column remains keyboard accessible; Sheet Escape restores focus", "requests", async page => {
     const opener = page.getByRole("button", { name: "View request", exact: true })
     await opener.focus()
@@ -273,7 +352,7 @@ try {
     await page.getByRole("dialog", { name: "Request detail" }).waitFor()
     await page.keyboard.press("Escape")
     await page.getByRole("dialog", { name: "Request detail" }).waitFor({ state: "hidden" })
-    await page.waitForFunction(() => document.activeElement?.textContent === "View request")
+    await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "View request")
   }, async page => {
     await page.addInitScript(() => localStorage.setItem("codex-webui:requests-table-state-v5:columns", JSON.stringify({ traffic: false, provider: false })))
   })
@@ -310,6 +389,7 @@ try {
     assert.equal(await back.getAttribute("href"), "#/")
     assert.equal((await page.locator("body").innerText()).includes("private-fixture-exception"), false)
   })
+  assert.ok(passed.length > 0, `No browser contracts matched fixture case: ${process.argv[3]}`)
   console.log(`\n${passed.length} real-browser contracts passed (Chromium, React StrictMode, isolated mocked API).`)
 } finally {
   await browser?.close()

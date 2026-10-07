@@ -34,8 +34,10 @@ export interface ProviderProxyMetrics extends ModelRequestDiagnostics {
   operation: "response" | "compact";
   threadId: string | null;
   turnId: string | null;
-  /** 内部审查请求归属触发任务；仅供 IPC 防止更新用户轮次执行状态，不持久化。 */
-  requestPurpose?: "autoApprovalReview";
+  /** 官方自动审查用途与原始 reviewer 身份，独立于转储开关。 */
+  requestPurpose?: "autoApprovalReview" | null;
+  reviewerThreadId?: string | null;
+  reviewerTurnId?: string | null;
   model: string | null;
   serviceTier: string | null;
   /** 出站请求层级；响应不得覆盖。 */
@@ -83,7 +85,9 @@ export interface ResponseMetricsMetadata {
   threadId: string | null;
   turnId: string | null;
   operation: ProviderProxyMetrics["operation"];
-  requestPurpose?: "autoApprovalReview";
+  requestPurpose?: "autoApprovalReview" | null;
+  reviewerThreadId?: string | null;
+  reviewerTurnId?: string | null;
 }
 
 export interface MetricsState extends ProviderProxyMetrics {

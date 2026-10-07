@@ -98,9 +98,7 @@ describe("real custom Responses provider", () => {
           upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http",
           onMetrics: metric => {
             requestMetrics.push(metric);
-            const sample = { ...metric };
-            delete sample.requestPurpose;
-            metricsStore!.record({ provider: "fixture", ...sample });
+            metricsStore!.record({ provider: "fixture", ...metric });
           },
         });
         await proxy.start();
@@ -156,6 +154,11 @@ describe("real custom Responses provider", () => {
         expect(requestMetrics.filter(metric => metric.requestPurpose === "autoApprovalReview"))
           .toEqual([expect.objectContaining({ threadId: thread.id, turnId: turn.id })]);
         expect(requestMetrics.every(metric => metric.threadId === thread.id && metric.turnId === turn.id)).toBe(true);
+        expect(metricsStore.page({ requestPurpose: "autoApprovalReview", limit: 20,
+          startAtMs: 0, endAtMs: Date.now() + 1000 }).records).toEqual([
+          expect.objectContaining({ requestPurpose: "autoApprovalReview", threadId: thread.id, turnId: turn.id,
+            reviewerThreadId: expect.any(String), reviewerTurnId: expect.any(String) }),
+        ]);
         const sessions = metricsStore.threadList({ mainThreadsOnly: true, limit: 20,
           startAtMs: 0, endAtMs: Date.now() + 1000 });
         expect(sessions.threads).toEqual([expect.objectContaining({ threadId: thread.id,

@@ -69,7 +69,6 @@ export class ProviderMetricsComposition {
     // 此指标只接受 OpenAI 通道；其他 Provider 不借同名字段声明该统计口径。
     if (provider !== "openai") delete metrics.upstreamTtftMs;
     const sample = { ...metrics };
-    delete sample.requestPurpose;
     try {
       this.options.writer.enqueue({
         provider,

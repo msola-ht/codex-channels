@@ -136,6 +136,10 @@ export function parseRequestMetricsFilters(input: Record<string, unknown>): Mode
     if (input.operation !== "response" && input.operation !== "compact") throw new Error("operation 只支持 response、compact");
     filters.operation = input.operation;
   }
+  if (input.requestPurpose !== undefined) {
+    if (input.requestPurpose !== "autoApprovalReview") throw new Error("requestPurpose 只支持 autoApprovalReview");
+    filters.requestPurpose = input.requestPurpose;
+  }
   if (input.source !== undefined) {
     if (input.source !== "owned" && input.source !== "relay") throw new Error("source 只支持 owned、relay");
     filters.source = input.source;

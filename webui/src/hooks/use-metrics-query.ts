@@ -33,11 +33,12 @@ export function useMetricsProviders(revision: unknown = null) {
   return { ...state, data: state.data?.value ?? null, refreshing: state.loading, loading: state.loading && state.data === null }
 }
 
-export function useMetricsQuery(defaultRange: RangeName, defaultSort = "time") {
+export function useMetricsQuery(defaultRange: RangeName, defaultSort = "time", showRequestPurpose = false) {
   const [params, setParams] = useSearchParams()
   const encoded = params.toString()
   const query = useMemo(() => {
     const search = new URLSearchParams(encoded)
+    if (!showRequestPurpose) search.delete("requestPurpose")
     const values = Object.fromEntries(search)
     return {
       ...values,
@@ -48,11 +49,12 @@ export function useMetricsQuery(defaultRange: RangeName, defaultSort = "time") {
       sort: values.sort ?? defaultSort,
       direction: values.direction ?? "desc",
     } as MetricsQuery & { offset: number; limit: number; sort: string; direction: "asc" | "desc" }
-  }, [encoded, defaultRange, defaultSort])
+  }, [encoded, defaultRange, defaultSort, showRequestPurpose])
 
   const update = (changes: Partial<MetricsQuery>, resetPage = true) => {
     setParams((previous) => {
       const next = new URLSearchParams(previous)
+      if (!showRequestPurpose) next.delete("requestPurpose")
       if (resetPage) next.delete("offset")
       for (const [key, value] of Object.entries(changes)) {
         next.delete(key)

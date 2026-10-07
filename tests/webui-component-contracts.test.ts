@@ -158,7 +158,7 @@ describe("WebUI component interaction contracts", () => {
         reset();
         const record = { id: 7, provider: "openai", recordedAtMs: 1000, inputTokens: 10, cachedInputTokens: null, outputTokens: 10, reasoningOutputTokens: null, cacheHitRate: null, source: "codex", status: "completed", firstTokenMs: null, totalDurationMs: null };
         render(h(RequestsTable, { records: [record], pageNumber: 1, pageSize: 10, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop, filter: "", total: 1 }));
-        const detailButton = globalThis.fixtureButtons.find(button => button.children === "查看请求");
+        const detailButton = globalThis.fixtureButtons.find(button => button.children === "查看" && button["aria-label"] === "查看请求");
         const trigger = { isConnected: true };
         let stopped = false;
         detailButton.onClick({ currentTarget: trigger, stopPropagation: () => { stopped = true; } });

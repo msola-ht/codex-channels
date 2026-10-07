@@ -126,6 +126,7 @@ describe("metrics export display helpers", () => {
         responseTimeMs: 5, outputTokens: 100, generationTiming: { reasoningMs: 100, textMs: 100, toolMs: 300, totalMs: 500 },
         responseUsageAmount: "0.12345678901234567890", upstreamProvider: "deepseek", finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit", upstreamErrorType: "rate_limit_error",
         requestModel: "requested", responseModel: "echoed", operation: "response",
+        requestPurpose: "autoApprovalReview", reviewerThreadId: "reviewer", reviewerTurnId: "review-turn",
         requestServiceTier: "priority", serviceTier: "default",
         traffic: { label: "openai", session: "session-2", interaction: 23 } }],
     };
@@ -149,6 +150,7 @@ describe("metrics export display helpers", () => {
     const values = valueLine!.split(",");
     for (const [field, value] of Object.entries({ quotaObservedAtMs: "0", weeklyQuotaObservedAtMs: "0", upstreamProvider: "deepseek", finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit", upstreamErrorType: "rate_limit_error", responseUsageAmount: "0.12345678901234567890", firstTokenMs: "12.5", totalDurationMs: "1234.5", upstreamTtftMs: "672", requestModel: "requested", responseModel: "echoed",
       requestServiceTier: "priority", serviceTier: "default",
+      requestPurpose: "autoApprovalReview", reviewerThreadId: "reviewer", reviewerTurnId: "review-turn",
       trafficLabel: "openai", trafficSession: "session-2", trafficInteraction: "23" })) {
       expect(values[headings.indexOf(field)]).toBe(value);
     }

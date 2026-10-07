@@ -54,7 +54,8 @@ describe("ProviderProxy WebSocket metrics", () => {
       });
       await vi.waitFor(() => expect(metrics).toHaveLength(1));
       expect(metrics[0]).toMatchObject({ threadId: "task-thread", turnId: "task-turn",
-        requestPurpose: "autoApprovalReview", model: "review-model", totalTokens: 12 });
+        requestPurpose: "autoApprovalReview", reviewerThreadId: "reviewer", reviewerTurnId: "review-turn",
+        model: "review-model", totalTokens: 12 });
       expect(forwarded).toEqual([message]);
     } finally { client.close(); }
   });

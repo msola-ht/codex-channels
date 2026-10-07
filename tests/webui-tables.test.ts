@@ -9,6 +9,53 @@ import { sample } from "./request-metrics-fixtures.js";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
+  it("labels automatic review separately from model status and keeps owning and reviewer identities distinct in both languages", () => {
+    const field = (html: string, label: string) => html.match(new RegExp(`<dt[^>]*>${label}</dt><dd[^>]*>([^<]*)</dd>`, "u"))?.[1];
+    for (const [suffix, purpose, ownerThread, ownerTurn, reviewerThread, reviewerTurn] of [
+      ["", "自动审查", "归属会话", "归属轮次", "原始审查会话", "原始审查轮次"],
+      ["En", "Automatic approval review", "Owning thread", "Owning turn", "Original reviewer thread", "Original reviewer turn"],
+    ]) {
+      for (const name of ["autoReviewRequestDetail", "autoReviewTrafficDetail"]) {
+        expect(markup[name + suffix]).toContain(purpose);
+        expect(markup[name + suffix]).not.toMatch(/审批通过|已批准|Approved|Approval granted/u);
+      }
+      for (const name of ["autoReviewRequestDetail", "autoReviewTrafficDetail"]) {
+        expect(field(markup[name + suffix]!, ownerThread!)).toBe("owner-thread");
+        expect(field(markup[name + suffix]!, ownerTurn!)).toBe("owner-turn");
+        expect(field(markup[name + suffix]!, reviewerThread!)).toBe("reviewer-thread");
+        expect(field(markup[name + suffix]!, reviewerTurn!)).toBe("reviewer-turn");
+      }
+    }
+    for (const name of ["requests", "traffic"]) {
+      const cell = [...markup[name]!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)][headers(markup[name]!).indexOf("方式")]?.[1]?.replace(/<[^>]*>/gu, "");
+      expect(cell).toBe("—");
+      expect(markup[name]).not.toContain("普通请求");
+    }
+    expect(markup.autoReviewMissingOwner).toContain("reviewer-thread");
+    expect(field(markup.autoReviewMissingOwner!, "归属会话")).toBe("—");
+    expect(field(markup.autoReviewMissingOwner!, "归属轮次")).toBe("—");
+  });
+  it("shows one short method label for review, compaction or recorded transport in both tables and languages", () => {
+    for (const [language, header, review, compact] of [["zh", "方式", "审查", "压缩"], ["en", "Method", "Review", "Compact"]]) {
+      for (const table of ["requests", "traffic"]) {
+        for (const [variant, expected] of [["reviewCompact", review], ["reviewHttp", review], ["compactWs", compact], ["compactHttp", compact], ["websocket", "wss"], ["http", "http"], ["missing", "—"], ["unknown", "—"]]) {
+          const html = markup[`${table}-method-${variant}-${language}`]!;
+          const labels = headers(html);
+          expect(labels).toContain(header);
+          expect(labels).not.toContain(language === "zh" ? "请求用途" : "Request purpose");
+          const cell = [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gu)][labels.indexOf(header!)]?.[1];
+          expect(cell?.replace(/<[^>]*>/gu, "")).toBe(expected);
+          expect(cell?.match(/data-slot="badge"/gu)).toHaveLength(1);
+          if (table === "requests") {
+            expect(labels).toContain(language === "zh" ? "详情" : "Detail");
+            expect(html).toMatch(language === "zh"
+              ? /<button\b[^>]*aria-label="查看请求"[^>]*>查看<\/button>/u
+              : /<button\b[^>]*aria-label="View request"[^>]*>View<\/button>/u);
+          }
+        }
+      }
+    }
+  });
   it("shows recorded reasoning effort immediately after model in every request metrics table", () => {
     const tables = ["requests", "errors", "threads", "turns", "traffic", "subagentsRelated", "allSubagents"];
     for (const table of tables) {
@@ -522,6 +569,7 @@ describe("WebUI metrics table presentation", () => {
             content: { instructions: null, input: [], tools: [] } }, response: null,
           tracePage: { offset: 0, total: 101, previousOffset: null, nextOffset: 100 },
           trace: [{ atMs: 1000, kind: "fixture-event", text: "old-trace-body", truncated: false }] };
+        const reviewIdentity = { requestPurpose: "autoApprovalReview", threadId: "owner-thread", turnId: "owner-turn", reviewerThreadId: "reviewer-thread", reviewerTurnId: "reviewer-turn" };
         const quotaWindow = (windowId, label, usedPercent) => ({ windowId, label, usedPercent, resetsAt: null, status: null });
         const quotaAccount = { account: "main", provider: "fixture", displayName: "额度测试", default: true,
           available: true, observedAtMs: Date.now(), subscriptionRequired: false };
@@ -594,6 +642,11 @@ describe("WebUI metrics table presentation", () => {
           retry: render(ErrorBanner, { error: "fixture failure", onRetry: noop }),
           retryPending: render(ErrorBanner, { error: "fixture failure", onRetry: noop, pending: true }),
           requests: render(RequestsTable, requestProps),
+          autoReviewRequestDetail: render(RequestDetail, { record: { ...record, ...reviewIdentity, status: "completed" } }),
+          autoReviewRequestDetailEn: render(RequestDetail, { record: { ...record, ...reviewIdentity, status: "completed" } }, "en"),
+          autoReviewTrafficDetail: render(TrafficDetail, { detail: { ...detail, ...reviewIdentity }, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          autoReviewTrafficDetailEn: render(TrafficDetail, { detail: { ...detail, ...reviewIdentity }, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }, "en"),
+          autoReviewMissingOwner: render(RequestDetail, { record: { ...record, ...reviewIdentity, threadId: null, turnId: null } }),
           requestDetail: render(RequestDetail, { record: { ...record, totalTokens: 120, transport: "http", responseFormat: "sse", reasoningEffort: "high", requestServiceTier: "priority", serviceTier: "default" } }),
           requestDetailEnglish: render(RequestDetail, { record }, "en"),
           requestDiagnostics: render(RequestDetail, { record: { ...record, upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2,
@@ -956,9 +1009,28 @@ describe("WebUI metrics table presentation", () => {
           state: "completed", status: null, usage: null, headers: {}, body: "", outputTruncated: true,
           output: [{ type: "message", text: "complete visible message" }],
         } }, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop });
+        for (const language of ["zh", "en"]) {
+          for (const [variant, fields] of Object.entries({
+            reviewCompact: { ...reviewIdentity, operation: "compact", requestKind: "compaction", transport: "websocket" },
+            reviewHttp: { ...reviewIdentity, transport: "http" },
+            compactWs: { operation: "compact", requestKind: "compaction", transport: "websocket" },
+            compactHttp: { operation: "compact", requestKind: "compaction", transport: "http" },
+            websocket: { transport: "websocket" },
+            http: { transport: "http" },
+            missing: { transport: undefined },
+            unknown: { transport: "unknown" },
+          })) {
+            const requestFields = { ...fields };
+            delete requestFields.requestKind;
+            const trafficFields = { ...fields };
+            delete trafficFields.operation;
+            result["requests-method-" + variant + "-" + language] = render(RequestsTable, { ...requestProps, records: [{ ...record, ...requestFields }] }, language);
+            result["traffic-method-" + variant + "-" + language] = render(TrafficTable, { exchanges: [{ ...exchange, ...trafficFields }], onOpen: noop }, language);
+          }
+        }
         globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ ua: true, error: true }) : null };
         result.preferences = render(RequestsTable, requestProps);
-        globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ traffic: false, time: false, provider: false, ua: true }) : null };
+        globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ traffic: false, detail: false, time: false, provider: false, ua: true }) : null };
         globalThis.fixtureCaptureTable = true;
         result.requestsHiddenDetail = render(RequestsTable, requestProps);
         result.requestsDetailVisibility = JSON.stringify({ visible: globalThis.fixtureTable.getColumn("traffic").getIsVisible(), canHide: globalThis.fixtureTable.getColumn("traffic").getCanHide() });
@@ -966,6 +1038,7 @@ describe("WebUI metrics table presentation", () => {
         result.requestsDetailAfterHide = String(globalThis.fixtureTable.getColumn("traffic").getIsVisible());
         result.trafficHiddenDetail = render(TrafficTable, { exchanges: [exchange], onOpen: noop });
         result.trafficDetailVisibility = JSON.stringify({ visible: globalThis.fixtureTable.getColumn("time").getIsVisible(), canHide: globalThis.fixtureTable.getColumn("time").getCanHide() });
+        result.trafficActionVisibility = JSON.stringify({ visible: globalThis.fixtureTable.getColumn("detail").getIsVisible(), canHide: globalThis.fixtureTable.getColumn("detail").getCanHide() });
         globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ nested_value: false, Action: false, optional: false }) : null };
         result.requiredGroupedColumns = render(DataTable, { title: "Required", storageKey: "fixture-required", pagination: { mode: "none" },
           columns: [{ id: "group", header: "Group", columns: [{ accessorKey: "nested.value", header: "Value", enableHiding: false }, { header: "Action", enableHiding: false, cell: () => h("button", { type: "button" }, "Open") }, { id: "optional", header: "Optional" }] }], data: [{ nested: { value: "required-cell" } }] });
@@ -1321,8 +1394,8 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.threadTimingPartialEn).not.toContain("Thread known duration");
     expect(markup.threadTimingMissing).not.toContain("2 min");
     expect(headers(markup.requests!)).toEqual([
-      "记录时间", "提供商", "模型", "思考", "状态", "输入", "命中率", "输出",
-      "首 Token", "速度", "请求耗时", "来源", "请求详情",
+      "记录时间", "提供商", "方式", "模型", "思考", "状态", "输入", "命中率", "输出",
+      "首 Token", "速度", "请求耗时", "来源", "详情",
     ]);
     expect(markup.requests).not.toContain("未关联");
     expect(markup.requests).toContain("查看请求");
@@ -1456,7 +1529,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.inputToken).not.toContain("50.0%");
     expect(markup.outputToken).toContain('aria-description="推理输出：5; 非推理输出：5"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
-    for (const label of ["首 Token", "速度", "请求详情"]) {
+    for (const label of ["首 Token", "速度", "详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
   });
@@ -1478,15 +1551,17 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("keeps native detail buttons available despite old hidden-column preferences", () => {
-    for (const key of ["requestsDetailVisibility", "trafficDetailVisibility"]) {
+    for (const key of ["requestsDetailVisibility", "trafficDetailVisibility", "trafficActionVisibility"]) {
       expect(JSON.parse(markup[key]!)).toEqual({ visible: true, canHide: false });
     }
     expect(markup.requestsDetailAfterHide).toBe("true");
-    expect(headers(markup.requestsHiddenDetail!)).toContain("请求详情");
+    expect(headers(markup.requestsHiddenDetail!)).toContain("详情");
     expect(headers(markup.requestsHiddenDetail!)).toContain("User-Agent");
+    expect(headers(markup.requestsHiddenDetail!).at(-1)).toBe("详情");
     expect(headers(markup.requestsHiddenDetail!)).not.toContain("提供商");
-    expect(markup.requestsHiddenDetail).toMatch(/<button\b[^>]*type="button"[^>]*>查看请求<\/button>/u);
+    expect(markup.requestsHiddenDetail).toMatch(/<button\b[^>]*type="button"[^>]*>查看<\/button>/u);
     expect(headers(markup.trafficHiddenDetail!)).toContain("开始时间");
+    expect(headers(markup.trafficHiddenDetail!).at(-1)).toBe("详情");
     expect(headers(markup.trafficHiddenDetail!)).not.toContain("提供商");
     expect(markup.trafficHiddenDetail).toMatch(/<button\b[^>]*aria-label="[^"]*的调用明细"/u);
     expect(markup.requiredGroupedColumns).toContain("required-cell");
@@ -1542,7 +1617,7 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration with compact response-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["开始时间", "提供商", "客户端", "模型", "思考", "协议", "状态", "首 Token", "速度", "请求耗时", "类型"]);
+    expect(headers(markup.traffic!)).toEqual(["开始时间", "提供商", "方式", "模型", "思考", "状态", "首 Token", "速度", "请求耗时", "客户端", "协议", "类型", "详情"]);
     expect(markup.traffic).toContain("WorkBuddy");
     expect(markup.traffic).toContain("客户端");
     expect(markup.traffic).toContain("Responses");

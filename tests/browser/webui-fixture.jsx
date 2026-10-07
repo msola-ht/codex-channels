@@ -1,10 +1,13 @@
 import { StrictMode, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { HashRouter } from "react-router"
+import { HashRouter, Routes, Route, useLocation } from "react-router"
 import App from "@/App"
 import { AuthGate } from "@/components/layout/auth-gate"
 import { PageErrorBoundary } from "@/components/layout/page-recovery"
 import { RequestsTable } from "@/components/requests/requests-table"
+import { TrafficTable } from "@/components/traffic/traffic-table"
+import { QueryFilters } from "@/components/metrics/query-filters"
+import { useMetricsExport } from "@/hooks/use-metrics-export"
 import { ThreadTable } from "@/components/threads/thread-table"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
 import { ManagementConfirmationDialog } from "@/components/settings/settings-controls"
@@ -50,6 +53,8 @@ window.fetch = (input, init = {}) => {
     return Promise.resolve(json({ ...preview, revision: reviewerSettings.version }))
   }
   if (url === "/api/v1/time") return Promise.resolve(json({ nowMs: 1700000000000, timeZone: "UTC" }))
+  if (scenario === "request-purpose" && url === "/api/v1/providers") return Promise.resolve(json({ providers: ["openai"] }))
+  if (scenario === "request-purpose" && url.startsWith("/api/v1/requests/export?")) return Promise.resolve(json({ filters: Object.fromEntries(new URL(url, location.origin).searchParams), records: [] }))
   if (url === "/api/v1/management/accounts/openai/reset-credits") return Promise.resolve(json({ accountId: "fixture-account", availableCount: "0", credits: [] }))
   if (url === "/api/v1/management/accounts/refresh") return new Promise(resolve => { entry.resolve = () => resolve(json({ accounts: [] })) })
   if (url === "/api/v1/management/relay/catalog/update") return new Promise(resolve => {
@@ -166,6 +171,51 @@ function RequestsFixture() {
     sorting={[]} onSortingChange={noop} filter="" total={1} />
 }
 
+function TableAlignmentFixture() {
+  const [sorting, setSorting] = useState([{ id: "time", desc: true }])
+  const records = [
+    { ...record, id: "alignment-review", requestPurpose: "autoApprovalReview", reasoningEffort: "high" },
+    { ...record, id: "alignment-compact", operation: "compact", reasoningEffort: "medium", totalDurationMs: 3900, firstTokenMs: null },
+    { ...record, id: "alignment-websocket", transport: "websocket", reasoningEffort: "low", outputTokens: 1200 },
+    { ...record, id: "alignment-http", transport: "http", reasoningEffort: "none", outputTokens: null, firstTokenMs: 0 },
+  ]
+  const exchanges = records.map((entry, index) => ({
+    ...entry, label: "openai", session: "alignment", interaction: index, startedAtMs: entry.recordedAtMs,
+    state: "completed", status: 200, protocol: "responses", clientName: "Codex CLI", category: "request",
+    responseModels: [entry.model], durationMs: entry.totalDurationMs,
+  }))
+  return <div className="flex flex-col gap-6 p-6">
+    <div className="flex min-w-0" style={{ height: 380 }}><RequestsTable records={records} pageNumber={1} hasPrevious={false} hasNext={false}
+      onPrevious={noop} onNext={noop} pageSize={10} onPageSizeChange={noop}
+      sorting={sorting} onSortingChange={setSorting} filter="" total={records.length} /></div>
+    <div className="flex min-w-0" style={{ height: 380 }}><TrafficTable exchanges={exchanges} onOpen={(exchange) => { contract.opened = exchange.interaction }}
+      pagination={{ mode: "none" }} description="" /></div>
+  </div>
+}
+
+function RequestPurposeList() {
+  const { query, update, sorting, onSortingChange } = useMetricsQuery("all", "time", true)
+  const exporter = useMetricsExport(query)
+  return <>
+    <QueryFilters query={query} onChange={update} showThreadFilters={false} showRequestPurpose />
+    <button onClick={() => void exporter.download()}>Export fixture</button>
+    <RequestsTable records={[{ ...record, requestPurpose: "autoApprovalReview", threadId: "owner-thread", turnId: "owner-turn",
+      reviewerThreadId: "reviewer-thread", reviewerTurnId: "reviewer-turn", traffic: { label: "openai", session: "batch", interaction: 7 } }]}
+      pageNumber={Math.floor(query.offset / query.limit) + 1} hasPrevious={query.offset > 0} hasNext={false}
+      onPrevious={() => update({ offset: 0 }, false)} onNext={noop} pageSize={query.limit} onPageSizeChange={limit => update({ limit })}
+      sorting={sorting} onSortingChange={onSortingChange} filter="" total={1} />
+  </>
+}
+
+function TrafficReturnFixture() {
+  const location = useLocation()
+  return <output data-testid="requests-return">{location.state?.requestsReturnTo ?? "missing"}</output>
+}
+
+function RequestPurposeFixture() {
+  return <Routes><Route path="/requests" element={<RequestPurposeList />} /><Route path="/traffic" element={<TrafficReturnFixture />} /></Routes>
+}
+
 function ThreadsFixture() {
   const { query, pagination } = useMetricsQuery("all", "last")
   const [partial, setPartial] = useState(false)
@@ -197,10 +247,10 @@ function BoundaryFixture() {
     <PageErrorBoundary>{failed ? <ThrowingPage /> : <p>Healthy page</p>}</PageErrorBoundary></>
 }
 
-const fixtures = { auth: AuthFixture, api: ApiFixture, reset: ResetFixture, tabs: TabsFixture,
-  requests: RequestsFixture, threads: ThreadsFixture, confirmation: ConfirmationFixture, boundary: BoundaryFixture, queue: QueueFixture, catalog: CatalogFixture, settings: SettingsFixture, reviewer: ReviewerFixture }
+const fixtures = { auth: AuthFixture, api: ApiFixture, reset: ResetFixture, tabs: TabsFixture, "request-purpose": RequestPurposeFixture,
+  requests: RequestsFixture, "table-alignment": TableAlignmentFixture, threads: ThreadsFixture, confirmation: ConfirmationFixture, boundary: BoundaryFixture, queue: QueueFixture, catalog: CatalogFixture, settings: SettingsFixture, reviewer: ReviewerFixture }
 const Fixture = fixtures[scenario]
 createRoot(document.getElementById("root")).render(<StrictMode>{scenario === "app" ? <App /> :
-  <LanguageContext.Provider value={{ language: "en", setLanguage: noop }}><TooltipProvider><HashRouter>
+  <LanguageContext.Provider value={{ language: new URLSearchParams(location.search).get("language") === "zh" ? "zh" : "en", setLanguage: noop }}><TooltipProvider><HashRouter>
     <Fixture />
   </HashRouter></TooltipProvider></LanguageContext.Provider>}</StrictMode>)

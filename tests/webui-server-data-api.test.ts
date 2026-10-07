@@ -62,6 +62,28 @@ function writeCallIndex(
 }
 
 describe("webui server data API", () => {
+  it("filters and exports persisted review facts without classifying unknown requests as ordinary", async () => {
+    const fixture = createFixture();
+    const identities = { requestPurpose: "autoApprovalReview" as const,
+      reviewerThreadId: "reviewer", reviewerTurnId: "review-turn" };
+    recordSample(fixture.databasePath, { ...metricSample(), ...identities });
+    recordSample(fixture.databasePath, metricSample());
+    const { origin } = await startServer(fixture.environment);
+    for (const path of ["requests", "requests/export"]) {
+      const response = await fetch(`${origin}/api/v1/${path}?range=all&requestPurpose=autoApprovalReview`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ total: 1, records: [{ ...identities, traffic: null }] });
+    }
+    const all = await fetch(`${origin}/api/v1/requests?range=all`);
+    expect(await all.json()).toMatchObject({ total: 2, records: expect.arrayContaining([
+      expect.objectContaining({ requestPurpose: null, reviewerThreadId: null, reviewerTurnId: null }),
+    ]) });
+    for (const purpose of ["ordinary", "guardian", "null", ""]) {
+      const response = await fetch(`${origin}/api/v1/requests?range=all&requestPurpose=${purpose}`);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "invalid_filter" } });
+    }
+  });
   it("returns paired cache coverage without inventing a complete rate for complementary missing fields", async () => {
     const fixture = createFixture();
     const store = new SqliteModelRequestMetricsStore(fixture.databasePath);

@@ -31,6 +31,7 @@ import {
   formatElapsedDuration,
   formatErrorType,
   formatRequestTime,
+  requestMethodDisplay,
   formatTimestamp,
   getServerTimeZone,
   formatTokens,
@@ -91,6 +92,7 @@ export function RequestsTable({
   }, [])
   const columnLabels: Record<string, string> = {
     source: t("filters.source"),
+    requestPurpose: t("requestMethod.label"),
     caller: t("filters.caller"),
     delivery: t("filters.delivery"),
     time: t("requests.recordedAt"),
@@ -109,10 +111,17 @@ export function RequestsTable({
     firstContent: t("requests.firstColumn"),
     generationSpeed: t("requests.speedColumn"),
     duration: t("requests.durationColumn"),
-    traffic: t("requestDetail.title"),
+    traffic: t("requests.detailColumn"),
   }
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
+    {
+      id: "requestPurpose", enableSorting: false, header: t("requestMethod.label"),
+      cell: ({ row }) => {
+        const method = requestMethodDisplay(row.original, t)
+        return <Badge variant={method.variant}>{method.label}</Badge>
+      },
+    },
     {
       id: "source", enableSorting: false, header: t("filters.source"),
       cell: ({ row }) => <div className="flex flex-col gap-1">
@@ -247,21 +256,17 @@ export function RequestsTable({
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
-      id: "traffic", header: t("requestDetail.title"), enableSorting: false, enableHiding: false,
-      cell: ({ row }) => <Button variant="link" size="sm" onClick={(event) => {
+      id: "traffic", header: t("requests.detailColumn"), enableSorting: false, enableHiding: false,
+      cell: ({ row }) => <Button variant="link" size="sm" className="border-0 px-0" aria-label={t("requestDetail.open")} onClick={(event) => {
         event.stopPropagation()
         openRequest(row.original, event.currentTarget)
-      }}>{t("requestDetail.open")}</Button>,
+      }}>{t("requests.viewDetail")}</Button>,
     },
     {
       id: "ua",
       accessorFn: (record) => record.userAgent ?? "",
       enableSorting: false,
-      header: () => (
-        <span className="-ml-2 inline-flex h-7 items-center px-1.5 text-muted-foreground">
-          User-Agent
-        </span>
-      ),
+      header: "User-Agent",
       cell: ({ row }) => {
         const userAgent = row.original.userAgent
         if (!userAgent) return <span className="text-muted-foreground">—</span>
@@ -333,7 +338,7 @@ export function RequestsTable({
     },
   ], [t, language, openRequest])
 
-  const order = ["time", "provider", "model", "reasoningEffort", "status", "input", "cacheHitRate", "output", "firstContent", "generationSpeed", "duration", "source", "traffic"]
+  const order = ["time", "provider", "requestPurpose", "model", "reasoningEffort", "status", "input", "cacheHitRate", "output", "reasoningOutput", "firstContent", "generationSpeed", "duration", "source", "caller", "delivery", "ua", "operation", "http", "error", "traffic"]
   const orderedColumns = [...columns].sort((a, b) => (order.includes(a.id!) ? order.indexOf(a.id!) : order.length) - (order.includes(b.id!) ? order.indexOf(b.id!) : order.length))
 
   return (

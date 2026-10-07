@@ -12,6 +12,7 @@ export interface Range<Name extends string = RangeName> {
 }
 
 export interface MetricsQuery {
+  requestPurpose?: "autoApprovalReview"
   source?: "owned" | "relay"
   callerId?: string
   range?: RangeName
@@ -294,6 +295,9 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  requestPurpose?: "autoApprovalReview" | null
+  reviewerThreadId?: string | null
+  reviewerTurnId?: string | null
   upstreamProvider?: string | null
   upstreamAttemptCount?: number | null
   modelAttemptCount?: number | null
@@ -971,6 +975,9 @@ export interface TrafficLabel {
 }
 
 export interface TrafficExchangeSummary {
+  requestPurpose?: "autoApprovalReview" | null
+  reviewerThreadId?: string | null
+  reviewerTurnId?: string | null
   /** 已保存请求正文中的思考等级；缺失时不推断默认值。 */
   reasoningEffort?: string
   /** 从已记录 User-Agent 识别的客户端自报名称，并非已验证身份。 */
@@ -987,8 +994,8 @@ export interface TrafficExchangeSummary {
   method?: string
   path?: string
   url?: string
-  threadId?: string
-  turnId?: string
+  threadId?: string | null
+  turnId?: string | null
   requestKind?: string
   category: "models" | "prewarm" | "model"
   status?: number
@@ -1033,6 +1040,9 @@ export interface TrafficDebugStage {
 }
 
 export interface TrafficExchangeDetail {
+  requestPurpose?: "autoApprovalReview" | null
+  reviewerThreadId?: string | null
+  reviewerTurnId?: string | null
   debug?: { inbound: TrafficDebugStage; delivered: TrafficDebugStage | null; transformations: Array<"headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "provider_routing_pinned" | "json_unwrapped"> }
 
   chatDiagnostics?: { fields: Record<string, string | number | boolean>; truncated: boolean }
@@ -1050,8 +1060,8 @@ export interface TrafficExchangeDetail {
   startedAtMs: number
   account?: string
   transport: "http" | "websocket"
-  threadId?: string
-  turnId?: string
+  threadId?: string | null
+  turnId?: string | null
   requestKind?: string
   category: "models" | "prewarm" | "model"
   requestModel?: string

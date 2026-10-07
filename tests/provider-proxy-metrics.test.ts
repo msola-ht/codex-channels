@@ -40,7 +40,26 @@ describe("Provider proxy metrics channel", () => {
       for (const requestPurpose of ["autoApprovalReview", "guardian", null, 1]) {
         await sendProviderProxyMetrics(socketPath, { ...metrics(), requestPurpose } as ProviderProxyMetrics);
       }
-      expect(received).toEqual([{ ...metrics(), requestPurpose: "autoApprovalReview" }]);
+      expect(received).toEqual([{ ...metrics(), requestPurpose: "autoApprovalReview" }, { ...metrics(), requestPurpose: null }]);
+    } finally { await server.close(); }
+  });
+  it("preserves bounded reviewer identities through IPC and rejects unclassified or partial attribution", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-review-id-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "m.sock");
+    const received: ProviderProxyMetrics[] = [];
+    const server = new ProviderProxyMetricsServer(socketPath, metric => { received.push(metric); });
+    await server.start();
+    const review = { ...metrics(), requestPurpose: "autoApprovalReview" as const,
+      reviewerThreadId: "reviewer", reviewerTurnId: "review-turn" };
+    try {
+      await sendProviderProxyMetrics(socketPath, review);
+      await sendProviderProxyMetrics(socketPath, { ...review, threadId: null, turnId: null, reviewerTurnId: null });
+      for (const invalid of [{ requestPurpose: null }, { requestPurpose: undefined },
+        { reviewerThreadId: " " }, { reviewerTurnId: "x".repeat(129) }, { turnId: null }]) {
+        await sendProviderProxyMetrics(socketPath, { ...review, ...invalid } as ProviderProxyMetrics);
+      }
+      expect(received).toEqual([review, { ...review, threadId: null, turnId: null, reviewerTurnId: null }]);
     } finally { await server.close(); }
   });
   it.each(["reasoningEffort", "userAgent", "errorMessage", "weeklyQuota", "quotaWindows"] as const)("rejects records missing required nullable field %s", async field => {

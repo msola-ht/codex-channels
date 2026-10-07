@@ -48,8 +48,9 @@
   `request_kind=compaction` 操作标记和不计指标的 `request_kind=prewarm`。
   官方 `thread_source=guardian_review` 的自动审查请求以完整、受限的 `parent_thread_id` / `parent_turn_id`
   归入触发任务，每次请求及用量仍只采集一次；缺任一父身份时保留无 Thread/Turn 的全局指标，不能创建独立用户会话。
-  不以 reviewer 名称或普通子代理标签判断，不改出站元数据；IPC 的临时 `requestPurpose=autoApprovalReview`
-  只阻止该请求更新用户轮次的执行状态，不进入数据库。其他来源保持原 Thread/Turn 归属。
+  不以 reviewer 名称或普通子代理标签判断，不改出站元数据；与转储读取共用 Runtime 的纯元数据投影。
+  IPC 的 `requestPurpose=autoApprovalReview` 与原始 `reviewerThreadId` / `reviewerTurnId` 进入指标库，
+  缺失保持未知；审查请求仍不得更新用户轮次执行状态或继承父 Thread 的思考等级。其他来源保持原 Thread/Turn 归属。
   SSE 单行使用 1,048,576 字符上限，非流式 JSON Responses 使用 1 MiB 临时上限解析相同元数据，
   正文和响应 ID 不进入指标；HTTP 请求正文不截取 `reasoning.effort`，普通 Thread 由组合层按
   Thread 设置回退；原生子代理复用父线程 Provider 线路，不设角色专用路径或配置值注入；

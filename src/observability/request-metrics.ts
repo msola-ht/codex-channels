@@ -39,6 +39,10 @@ export interface ModelRequestMetricSample {
   operation: ModelRequestOperation;
   threadId: string | null;
   turnId: string | null;
+  /** 仅官方 guardian 请求有明确用途；历史缺失为未知，不推为普通请求。 */
+  requestPurpose?: "autoApprovalReview" | null;
+  reviewerThreadId?: string | null;
+  reviewerTurnId?: string | null;
   model: string | null;
   serviceTier: string | null;
   /** 出站请求层级；历史未采集时为空，不从响应推断。 */
@@ -309,6 +313,7 @@ export type ModelRequestMetricsAggregationDimension =
   | "model";
 
 export interface ModelRequestMetricsFilters {
+  requestPurpose?: "autoApprovalReview";
   source?: "owned" | "relay";
   callerId?: string;
   threadId?: string;

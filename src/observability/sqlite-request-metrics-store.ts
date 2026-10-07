@@ -276,6 +276,17 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
   }
 
   private insertSample(sample: ModelRequestMetricSample): number {
+    const validReviewIdentity = (value: string | null | undefined): boolean => value == null
+      || (typeof value === "string" && value.trim().length > 0 && value.length <= 128);
+    if (!validReviewIdentity(sample.reviewerThreadId) || !validReviewIdentity(sample.reviewerTurnId)
+      || (sample.requestPurpose == null && (sample.reviewerThreadId != null || sample.reviewerTurnId != null))
+      || (sample.requestPurpose != null && (sample.requestPurpose !== "autoApprovalReview"
+        || sample.source === "relay"
+        || !((sample.threadId === null && sample.turnId === null)
+          || (sample.threadId !== null && sample.turnId !== null
+            && validReviewIdentity(sample.threadId) && validReviewIdentity(sample.turnId)))))) {
+      throw new Error("自动审查请求身份无效");
+    }
     if (sample.source === "relay" && (typeof sample.relayRequestId !== "string"
       || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(sample.relayRequestId))) {
       throw new Error("Relay 指标请求 ID 无效");
@@ -345,6 +356,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       sample.quotaObservedAtMs ?? null,
       sample.responseTimeMs ?? null,
       sample.generationTiming == null ? null : JSON.stringify(sample.generationTiming),
+      sample.requestPurpose ?? null,
+      sample.reviewerThreadId ?? null,
+      sample.reviewerTurnId ?? null,
     );
     return recordedAtMs;
   }

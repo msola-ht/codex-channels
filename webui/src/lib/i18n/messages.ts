@@ -602,6 +602,19 @@ const zh = {
     }
   },
   capture: { mode: "调用记录模式", production: "生产", debug: "调试", scope: "Codex 与 Relay 共用。Relay 刷新配置后用于新请求；Codex 需重启 App Server。调试仍会脱敏并限制容量。" },
+  requestMethod: {
+    label: "方式",
+    review: "审查",
+    compact: "压缩",
+  },
+  requestPurpose: {
+    label: "请求用途",
+    autoApprovalReview: "自动审查",
+    ownerThread: "归属会话",
+    ownerTurn: "归属轮次",
+    reviewerThread: "原始审查会话",
+    reviewerTurn: "原始审查轮次",
+  },
   filters: {
     "source": "来源",
     "caller": "调用方",
@@ -940,6 +953,8 @@ const zh = {
   requestDetail: {"upstreamProvider": "实际上游提供商", "upstreamAttemptCount": "提供商尝试次数", "modelAttemptCount": "模型尝试次数", "finishReason": "结束原因", "errorStage": "错误阶段", "upstreamErrorCode": "内层上游错误码", "upstreamErrorType": "内层上游错误类型", "upstreamHttpStatus": "内层上游 HTTP 状态", "attemptHint": "上游报告的尝试次数，不代表切换次数。", "attemptBadge": "尝试 {count} 次", "httpStage": "HTTP 阶段", "streamStage": "流式阶段", "title": "请求详情", "open": "查看请求", "description": "当前所选指标记录的快照；无需开启调用采集。", "recordedModel": "记录模型", "requestModel": "请求模型", "responseModel": "响应模型", "reasoningEffort": "思考等级", "requestTier": "请求服务层级", "responseTier": "响应服务层级", "transport": "传输方式", "responseFormat": "响应格式", "callerId": "调用方 ID", "cached": "缓存", "uncached": "无缓存", "threadId": "会话 ID", "turnId": "轮次 ID", "requestId": "Relay 请求 ID", "back": "返回请求明细", "deliverySummary": "交付：{value}"},
   requests: {
     recordedAt: "记录时间",
+    detailColumn: "详情",
+    viewDetail: "查看",
     historyUpdatesPaused: "浏览历史页时暂停自动更新",
     "noTrafficReason": "没有转储关联，原因未记录；不能据此判断当时是否开启采集。已有转储也可能因保留期限或手动清理而不可用。",
     "relayReasons": {"disconnected": "客户端连接已断开", "revoked": "请求因撤销或关闭被取消", "timeout": "请求或上游响应超时", "rateLimited": "上游限流", "invalidResponse": "上游响应格式不符合协议", "authentication": "上游认证失败", "payment": "上游额度不足", "permission": "上游权限不足", "context": "输入超过上下文限制", "filtered": "上游内容过滤", "rejected": "上游拒绝请求", "upstreamFailed": "上游调用失败", "requestFailed": "请求失败，原因未细分", "deliveryFailed": "响应交付失败", "incomplete": "上游生成未完整结束"},
@@ -1809,6 +1824,19 @@ const en: Messages = {
     }
   },
   capture: { mode: "Capture mode", production: "Production", debug: "Debug", scope: "Shared by Codex and Relay. Relay applies refreshed settings to new requests; Codex requires an App Server restart. Debug capture still redacts data and enforces size limits." },
+  requestMethod: {
+    label: "Method",
+    review: "Review",
+    compact: "Compact",
+  },
+  requestPurpose: {
+    label: "Request purpose",
+    autoApprovalReview: "Automatic approval review",
+    ownerThread: "Owning thread",
+    ownerTurn: "Owning turn",
+    reviewerThread: "Original reviewer thread",
+    reviewerTurn: "Original reviewer turn",
+  },
   filters: {
     "source": "Source",
     "caller": "Caller",
@@ -2147,6 +2175,8 @@ const en: Messages = {
   requestDetail: {"upstreamProvider": "Actual upstream provider", "upstreamAttemptCount": "Provider attempts", "modelAttemptCount": "Model attempts", "finishReason": "Finish reason", "errorStage": "Error stage", "upstreamErrorCode": "Inner upstream error code", "upstreamErrorType": "Inner upstream error type", "upstreamHttpStatus": "Inner upstream HTTP status", "attemptHint": "Attempts reported by the upstream; this is not a count of provider switches.", "attemptBadge": "Attempts: {count}", "httpStage": "HTTP phase", "streamStage": "Streaming phase", "title": "Request detail", "open": "View request", "description": "Snapshot of the selected metrics record; traffic capture is not required.", "recordedModel": "Recorded model", "requestModel": "Request model", "responseModel": "Response model", "reasoningEffort": "Reasoning effort", "requestTier": "Request service tier", "responseTier": "Response service tier", "transport": "Transport", "responseFormat": "Response format", "callerId": "Caller ID", "cached": "Cached", "uncached": "Uncached", "threadId": "Thread ID", "turnId": "Turn ID", "requestId": "Relay request ID", "back": "Back to requests", "deliverySummary": "Delivery: {value}"},
   requests: {
     recordedAt: "Recorded at",
+    detailColumn: "Detail",
+    viewDetail: "View",
     historyUpdatesPaused: "Automatic updates paused on history pages",
     "noTrafficReason": "No dump reference; the reason was not recorded. This does not indicate whether capture was enabled then. Existing dumps may also become unavailable through retention or manual cleanup.",
     "relayReasons": {"disconnected": "Client disconnected", "revoked": "Cancelled by revocation or shutdown", "timeout": "Request or upstream timed out", "rateLimited": "Upstream rate limited", "invalidResponse": "Invalid upstream response format", "authentication": "Upstream authentication failed", "payment": "Upstream quota exhausted", "permission": "Upstream permission denied", "context": "Context limit exceeded", "filtered": "Upstream content filter", "rejected": "Upstream rejected the request", "upstreamFailed": "Upstream call failed", "requestFailed": "Request failed; reason not classified", "deliveryFailed": "Response delivery failed", "incomplete": "Upstream generation ended incomplete"},

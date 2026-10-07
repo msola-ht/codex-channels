@@ -367,7 +367,9 @@ function summaryOf(interaction, body, includeMetadata = true) {
   const request = interaction.request;
   const response = interaction.response;
   const relay = ["relay.chat", "relay.responses"].includes(labelOf(interaction.directory));
-  const metadata = relay || !includeMetadata ? {} : requestMetadata(body);
+  const projectedMetadata = relay ? {} : requestMetadata(body, request.transport === "http" ? request.headers ?? {} : undefined);
+  // V2 索引仍保留原始 reviewer 身份；即便摘要已含索引字段，也必须用已存元数据投影父任务。
+  const metadata = includeMetadata || projectedMetadata.requestPurpose !== undefined ? projectedMetadata : {};
   const requestKind = relay ? undefined : metadata.requestKind ?? (includeMetadata && body?.generate === false ? "prewarm" : request.requestKind);
   const firstTokenMs = firstTokenMsOf(response);
   const clientName = requestClientName(request);
@@ -392,6 +394,11 @@ function summaryOf(interaction, body, includeMetadata = true) {
     ...(request.requestModel === undefined ? {} : { requestModel: request.requestModel }),
     ...(metadata.threadId === undefined ? {} : { threadId: metadata.threadId }),
     ...(metadata.turnId === undefined ? {} : { turnId: metadata.turnId }),
+    ...(metadata.requestPurpose === undefined ? {} : {
+      requestPurpose: metadata.requestPurpose,
+      reviewerThreadId: metadata.reviewerThreadId,
+      reviewerTurnId: metadata.reviewerTurnId,
+    }),
     ...(requestKind === undefined ? {} : { requestKind }),
     category: request.method === "GET" && request.path?.split("?")[0] === "/models"
       ? "models" : requestKind === "prewarm" ? "prewarm" : "model",
