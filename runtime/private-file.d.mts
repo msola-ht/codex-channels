@@ -3,6 +3,11 @@ export function readPrivateFileSync(
   maximumBytes?: number,
 ): string;
 
+export function readPrivateConfigFile(
+  path: string,
+  options?: { signal?: AbortSignal },
+): Promise<string>;
+
 export function writePrivateFileAtomicSync(
   path: string,
   content: string | Uint8Array,

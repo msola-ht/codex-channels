@@ -10,7 +10,7 @@ function Get-Request {
     Throw-InvalidAcl '缺少 ACL 请求'
   }
   $request = $raw | ConvertFrom-Json
-  if ($request.operation -notin @('secure', 'verify')) {
+  if ($request.operation -notin @('secure', 'verify', 'read-config')) {
     Throw-InvalidAcl 'ACL 操作无效'
   }
   if ($request.kind -notin @('file', 'directory', 'parent-directory')) {
@@ -21,6 +21,9 @@ function Get-Request {
   }
   if ($request.operation -eq 'secure' -and $request.kind -eq 'parent-directory') {
     Throw-InvalidAcl '父目录只支持校验'
+  }
+  if ($request.operation -eq 'read-config' -and $request.kind -ne 'file') {
+    Throw-InvalidAcl '配置读取只支持普通文件'
   }
   return $request
 }
@@ -146,6 +149,23 @@ function Assert-PrivateAcl($Item, [string]$Kind, $ExpectedSids) {
 $request = Get-Request
 $item = Get-PathItem $request.path $request.kind
 $expectedSids = Get-ExpectedSids
+if ($request.operation -eq 'read-config') {
+  # Hold the file against writes and atomic replacement while checking both ACLs
+  # and reading. Never repair permissions on this read-only path.
+  $stream = [System.IO.File]::Open($request.path, [System.IO.FileMode]::Open,
+    [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+  try {
+    $item = Get-PathItem $request.path 'file'
+    $parent = Get-PathItem ([System.IO.Path]::GetDirectoryName($item.FullName)) 'parent-directory'
+    Assert-PrivateAcl $parent 'parent-directory' $expectedSids
+    Assert-PrivateAcl $item 'file' $expectedSids
+    if ($stream.Length -gt 1048576) { Throw-InvalidAcl '私有配置超过读取上限' }
+    $reader = [System.IO.StreamReader]::new($stream, [System.Text.UTF8Encoding]::new($false, $true))
+    try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    @{ ok = $true; content = $content } | ConvertTo-Json -Compress
+  } finally { $stream.Dispose() }
+  exit 0
+}
 if ($request.operation -eq 'secure') {
   Set-PrivateAcl $item $request.kind $expectedSids
   $item = Get-PathItem $request.path $request.kind

@@ -626,7 +626,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     confirmProviderSettings(provider, snapshot);
     return { applied: true, changed: true };
   };
-  const attachDesktopApp = async ({ appPath, pipePath, toolsEnabled }) => {
+  const attachDesktopApp = async ({ appPath, pipePath, toolsEnabled }, signal, canAttach) => {
     if (
       process.platform !== "darwin"
       || validatedCodex.desktop_app?.enabled !== true
@@ -641,25 +641,64 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       codexBinary: runtime.environment.CODEX_BINARY,
       environment: runtime.environment,
     });
-    if (desktopAppAttachment?.key === nextAttachment.key) {
+    await instanceLaunches.get(primaryProvider);
+    signal.throwIfAborted();
+    const ensureManagedPrimaryInstance = async () => {
+      if (!childrenByProvider.has(primaryProvider)
+        && await appServerSocketAcceptsWebSocket(socketPath)) {
+        throw new Error("主 OpenAI App Server 不受当前服务监管");
+      }
       await ensureInstance(primaryProvider);
+      if (!childProcessIsRunning(childrenByProvider.get(primaryProvider))) {
+        throw new Error("主 OpenAI App Server 不受当前服务监管");
+      }
+      supervisorOwner.markRunning(primaryProvider);
+    };
+    // An idle release is still managed: restore the child before querying its
+    // authoritative state. Never take over a live socket owned by another process.
+    await ensureManagedPrimaryInstance();
+    signal.throwIfAborted();
+    if (desktopAppAttachment?.key === nextAttachment.key) {
+      if (!canAttach()) throw new Error("主 OpenAI App Server 正被其他客户端租约占用");
       return;
     }
-    await instanceLaunches.get(primaryProvider);
+    const { CodexAppServerClient, createAppServerTransport, JsonRpcClient } = await import("../dist/codex-client/index.js");
+    signal.throwIfAborted();
+    const client = new CodexAppServerClient(new JsonRpcClient(createAppServerTransport(
+      { kind: "local-app-server", socketPath },
+      { codexBinary: runtime.environment.CODEX_BINARY, connectTimeoutMs: 3_000 },
+    ), 5_000), { sandbox: "read-only" });
+    const cancel = () => { void client.close().catch(() => undefined); };
+    signal.addEventListener("abort", cancel, { once: true });
+    try {
+      await client.connect();
+      signal.throwIfAborted();
+      if (await client.countActiveLoadedThreads() > 0) {
+        throw new Error("主 OpenAI App Server 仍有活动任务，不能附加 Desktop Host");
+      }
+    } finally {
+      signal.removeEventListener("abort", cancel);
+      await client.close();
+    }
+    // Pending Remote leases are registered before their queued ensure. Check
+    // again after the RPC read; this does not freeze Turns from external clients.
+    if (!canAttach()) throw new Error("主 OpenAI App Server 正被其他客户端租约占用");
+    signal.throwIfAborted();
     const previousAttachment = desktopAppAttachment;
     const released = await releaseInstance(primaryProvider);
     if (!released) {
       throw new Error("主 OpenAI App Server 不受当前服务监管");
     }
+    supervisorOwner.markReleased(primaryProvider);
     desktopAppAttachment = nextAttachment;
     try {
-      await ensureInstance(primaryProvider);
+      await ensureManagedPrimaryInstance();
     } catch (error) {
       desktopAppAttachment = previousAttachment;
       let recoveryError;
       try {
         await releaseInstance(primaryProvider);
-        await ensureInstance(primaryProvider);
+        await ensureManagedPrimaryInstance();
       } catch (recoveryFailure) {
         recoveryError = recoveryFailure;
       }

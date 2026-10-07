@@ -134,6 +134,9 @@ export class AppServerSupervisorOwner {
         return;
       }
       socket.setTimeout(20_000, () => socket.destroy());
+      const controller = new AbortController();
+      const cancel = () => controller.abort(new Error("Desktop Host 附加已取消"));
+      socket.once("close", cancel);
       const attachmentKey = JSON.stringify([
         request.appPath,
         request.pipePath,
@@ -157,9 +160,12 @@ export class AppServerSupervisorOwner {
       };
       socket.once("close", removeLease);
       try {
+        const canAttach = () => {
+          controller.signal.throwIfAborted();
+          return (this.#providerLeases.get(request.provider)?.size ?? 0) === 0;
+        };
         await this.#runProviderOperation(request.provider, async () => {
-          if (socket.destroyed) return;
-          if ((this.#providerLeases.get(request.provider)?.size ?? 0) > 0) {
+          if (!canAttach()) {
             throw new Error("主 OpenAI App Server 正被其他客户端租约占用");
           }
           if (
@@ -172,7 +178,7 @@ export class AppServerSupervisorOwner {
             appPath: request.appPath,
             pipePath: request.pipePath,
             toolsEnabled: request.toolsEnabled,
-          });
+          }, controller.signal, canAttach);
           if (socket.destroyed) {
             await this.#detachDesktopApp?.();
             return;
@@ -200,6 +206,8 @@ export class AppServerSupervisorOwner {
           provider: request.provider,
           error: error instanceof Error ? error.message.slice(0, 512) : "Desktop Host 附加失败",
         })}\n`);
+      } finally {
+        socket.removeListener("close", cancel);
       }
       return;
     }

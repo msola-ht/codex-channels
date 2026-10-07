@@ -388,6 +388,10 @@ export interface ErrorsResponse {
   aggregate: Aggregate | null
 }
 
+export interface ModelTrafficSettingsResponse {
+  modelTrafficDumpEnabled: boolean
+}
+
 export interface SettingsSummaryResponse {
   observedAt: string
   revision: string

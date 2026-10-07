@@ -11,7 +11,7 @@
 
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
-- `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置，并提供复用同一
+- `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置；只读设置入口复用完整当前版本和结构 Schema，不要求 Gateway 启动前至少启用一个渠道，原启动校验仍保留该前置条件。提供复用同一
   子 Schema 的严格 `[codex]`、`[gateway]` 局部校验；网关时区接受 `system` 或 Node.js 支持的 IANA 名称。
   在保留已有注释的前提下合并缺失的 Schema 安全默认值，
   所有基于已读取文档的写入在同一同步配置文件锁内复核原文后再执行私有文件原子替换；需要同时
@@ -98,10 +98,12 @@
   提供只绑定 `127.0.0.1` 的受令牌保护 WebSocket 桥；每个下游连接复用现有跨平台 App Server
   Transport 与主 Provider 租约，只转发有序文本帧，不解析 JSON-RPC 或保存会话状态。Windows
   仍在锁定 Codex CLI 的裸字节 `app-server proxy --sock` 之上建立 WebSocket 并连接私有 UDS；同一
-  模块还供 macOS 受管入口把 Desktop JSONL stdio 与 Unix WebSocket 文本帧按消息边界双向转换。
+  模块还供 macOS 受管入口把 Desktop JSONL stdio 与 Unix WebSocket 文本帧按消息边界双向转换，
+  连接前复用统一私有 Socket 校验，并使用校验后的物理目标。
 - `desktop-app-host.mjs` / `desktop-app-host.d.mts`：只在 macOS Desktop Host 租约附加时校验当前
   用户私有工具 Pipe、正式 ChatGPT Bundle 的 OpenAI 签名 Node、项目锁定版本的 OpenAI 签名
-  Codex 原生可执行文件，并用签名 Node 托管原主 App Server；只接受 Desktop 明确传入的内置插件
+  Codex 原生可执行文件，实际验证签名有效性及可信身份，并用签名 Node 托管原主 App Server；
+  Host 与原生子进程使用专属进程组，终止信号和超时强杀覆盖该组。只接受 Desktop 明确传入的内置插件
   布尔启用值，动态 Pipe 与附加状态不落盘。
 - `terminal-identity.mjs`：按当前锁定 Codex CLI 的终端探测顺序从进程环境推导模型上游
   `User-Agent` 的终端标识（`TERM_PROGRAM[/版本]` 优先，其次各终端专有变量，最后 `TERM`），
@@ -179,7 +181,8 @@
   label、Windows 计划任务名称、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor
   复用。
 - `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号、
-  按温和终止、强制终止和有限终态等待关闭单个子进程；Windows 对调用方精确持有的 PID 使用系统
+  按温和终止、强制终止和有限终态等待关闭单个子进程；显式注册的 Unix 独立进程组用于 Desktop
+  Host 及其原生子进程的共同终止，其他子进程仍按原 PID 处理。Windows 对调用方精确持有的 PID 使用系统
   `taskkill.exe /T` 终止该子进程树，避免批处理 Shim 退出后遗留 Codex 后代，且不扫描或结束其他 Codex
   进程；前台 `codexc run` 的父子 Node 进程先通过仅父子可用的 IPC 请求正常关闭 Gateway、Supervisor
   和私有端点，超时或 IPC 不可用时才回到精确 PID 树终止；多个 Windows Console 信号处理器并发终止
@@ -219,6 +222,7 @@
   适配器，单次调用超过 2 秒即终止并拒绝操作；原子写入前同时收紧父目录，严格私有路径关闭继承，只允许当前 SID、SYSTEM 和
   Administrators 完全控制；状态库、任务库、指标库、媒体、渠道输出和受管备份复用同一合同；
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
+  异步配置读取额外只读校验父目录，检测读取期间变化；Windows 在同一次异步调用中持有禁止写入和替换的只读文件句柄并检查文件、父目录 ACL，不修复权限、不缓存校验结果，支持取消及有界读取。
 - `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器；只从 stdin 读取固定 JSON 请求，通过 .NET
   ACL 类型设置或校验 Owner、访问规则、继承、文件类型与 reparse point，并返回结构化结果，不解析
   本地化命令输出。

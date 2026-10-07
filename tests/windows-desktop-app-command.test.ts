@@ -87,4 +87,32 @@ describe("Windows Desktop App command", () => {
     expect(launched?.options.env).not.toHaveProperty("codex_app_server_ws_url");
     expect(child.unrefCalls).toBe(1);
   });
+
+  it.each([true, false, null])("preserves detected running status %s when package resources are unavailable", (running) => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-desktop-windows-"));
+    temporaryDirectories.push(root);
+    const executablePath = join(root, "ChatGPT.exe");
+    writeFileSync(executablePath, "desktop");
+    expect(inspectWindowsDesktopApp({
+      inspectInstallation: () => ({
+        installed: true,
+        executablePath,
+        resourcePath: join(root, "missing.asar"),
+        running,
+      }),
+    })).toMatchObject({ installed: true, compatible: false, running });
+    expect(inspectWindowsDesktopApp({
+      inspectInstallation: () => ({
+        installed: true,
+        executablePath: join(root, "missing.exe"),
+        running,
+      }),
+    })).toMatchObject({ installed: true, compatible: false, running });
+  });
+
+  it("uses unknown running status when installation inspection fails", () => {
+    expect(inspectWindowsDesktopApp({
+      inspectInstallation: () => { throw new Error("private-token"); },
+    })).toMatchObject({ installed: false, running: null, compatible: false });
+  });
 });

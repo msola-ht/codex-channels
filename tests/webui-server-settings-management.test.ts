@@ -1,8 +1,12 @@
 import { readCodexProxySettings, writeCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
+import * as childProcess from "node:child_process";
+import * as filesystem from "node:fs/promises";
 import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,6 +16,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { loadGatewaySettings } from "../scripts/config-management.mjs";
+import * as configManagement from "../scripts/config-management.mjs";
+import * as privateFile from "../runtime/private-file.mjs";
+// @ts-expect-error JavaScript helper intentionally has no declaration file.
+import * as serviceStatus from "../scripts/webui-service-status.mjs";
 import type { CodexUserConfigClient } from "../scripts/codex-user-config.mjs";
 import {
   loadCodexUserSettings,
@@ -28,6 +36,9 @@ import {
 
 const temporaryDirectories: string[] = [];
 const servers: WebuiTestServer[] = [];
+
+vi.mock("node:child_process", { spy: true });
+vi.mock("node:fs/promises", { spy: true });
 
 afterEach(async () => {
   await cleanupWebuiTestFixtures(servers, temporaryDirectories);
@@ -95,6 +106,163 @@ describe("webui server settings and task management", () => {
     expect(saved.status).toBe(200);
     expect(readCodexProxySettings(fixture.environment)).toEqual({ https_proxy: "http://localhost:7897" });
     expect(readGatewayConfig(join(fixture.home, "config.toml"))).not.toHaveProperty("network");
+  });
+
+  it("reads traffic recording configuration without probing services or requiring management access", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const { origin } = await startServer(fixture.environment, undefined, { token: "webui-token" });
+    const url = `${origin}/api/v1/settings/traffic`;
+    const headers = { authorization: "Bearer webui-token", origin: "https://remote.example" };
+    const probes = vi.spyOn(serviceStatus, "loadServiceStatusSummary");
+    const completeSettings = vi.spyOn(configManagement, "loadGatewaySettings");
+    const repairDirectory = vi.spyOn(privateFile, "securePrivateDirectorySync");
+    const repairFile = vi.spyOn(privateFile, "securePrivateFileSync");
+    const synchronous = vi.spyOn(childProcess, "spawnSync");
+    const asynchronous = vi.spyOn(childProcess, "execFile");
+    try {
+      expect((await fetch(url)).status).toBe(401);
+      expect((await fetch(url, { method: "POST", headers })).status).toBe(405);
+      for (const enabled of [false, true, false]) {
+        const document = readGatewayConfig(configPath);
+        document.debug = { model_traffic_dump: enabled };
+        writeGatewayConfig(configPath, document);
+        repairDirectory.mockClear();
+        repairFile.mockClear();
+        synchronous.mockClear();
+        asynchronous.mockClear();
+        const response = await fetch(url, { headers });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ modelTrafficDumpEnabled: enabled });
+        expect(repairDirectory).not.toHaveBeenCalled();
+        expect(repairFile).not.toHaveBeenCalled();
+        expect(synchronous).not.toHaveBeenCalled();
+        if (process.platform === "win32") expect(asynchronous).toHaveBeenCalledOnce();
+      }
+      expect(probes).not.toHaveBeenCalled();
+      expect(completeSettings).not.toHaveBeenCalled();
+    } finally {
+      probes.mockRestore();
+      completeSettings.mockRestore();
+      repairDirectory.mockRestore();
+      repairFile.mockRestore();
+      synchronous.mockRestore();
+      asynchronous.mockRestore();
+    }
+  });
+
+  it("rejects invalid current configuration without exposing its contents or stale enablement", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const { origin } = await startServer(fixture.environment);
+    const url = `${origin}/api/v1/settings/traffic`;
+    const document = readGatewayConfig(configPath);
+    document.debug = { model_traffic_dump: true };
+    writeGatewayConfig(configPath, document);
+    expect(await (await fetch(url)).json()).toEqual({ modelTrafficDumpEnabled: true });
+    const before = readFileSync(configPath, "utf8");
+    for (const invalid of [before.replace("version = 1", "version = 2"),
+      before.replace("model_traffic_dump = true", 'model_traffic_dump = "secret-value"'),
+      `${before}\n[unsupported]\nvalue = "secret-value"\n`]) {
+      writeFileSync(configPath, invalid);
+      const response = await fetch(url);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: {
+        code: "configuration_unavailable",
+        message: "Gateway 配置不可用，请检查配置格式和私有文件权限",
+      } });
+      expect(readFileSync(configPath, "utf8")).toBe(invalid);
+    }
+    writeFileSync(configPath, before);
+    expect(await (await fetch(url)).json()).toEqual({ modelTrafficDumpEnabled: true });
+  });
+
+  it.skipIf(process.platform === "win32")("refuses unsafe config permissions without repairing them", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const { origin } = await startServer(fixture.environment);
+    chmodSync(configPath, 0o644);
+    expect((await fetch(`${origin}/api/v1/settings/traffic`)).status).toBe(503);
+    expect(statSync(configPath).mode & 0o777).toBe(0o644);
+    chmodSync(configPath, 0o600);
+    chmodSync(fixture.home, 0o722);
+    expect((await fetch(`${origin}/api/v1/settings/traffic`)).status).toBe(503);
+    expect(statSync(fixture.home).mode & 0o777).toBe(0o722);
+    chmodSync(fixture.home, 0o700);
+    expect((await fetch(`${origin}/api/v1/settings/traffic`)).status).toBe(200);
+  });
+
+  it("coalesces only in-flight reads, keeps the listener responsive and cancels abandoned reads", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+    let finish: ((value: string) => void) | undefined;
+    let signal: AbortSignal | undefined;
+    const read = vi.spyOn(privateFile, "readPrivateConfigFile").mockImplementation((_path, options) => {
+      signal = options?.signal;
+      return new Promise((resolve, reject) => {
+        finish = resolve;
+        signal?.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+      });
+    });
+    try {
+      const controllers = [new AbortController(), new AbortController()];
+      const requests = controllers.map(controller => fetch(`${origin}/api/v1/settings/traffic`, { signal: controller.signal }).catch(() => null));
+      await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+      expect((await fetch(`${origin}/api/v1/time`)).status).toBe(200);
+      expect((await fetch(`${origin}/api/v1/health`)).status).toBe(200);
+      controllers[0]!.abort();
+      await requests[0];
+      expect(signal?.aborted).toBe(false);
+      finish!(readFileSync(join(fixture.home, "config.toml"), "utf8"));
+      expect(await (await requests[1])!.json()).toEqual({ modelTrafficDumpEnabled: false });
+      const controller = new AbortController();
+      const abandoned = fetch(`${origin}/api/v1/settings/traffic`, { signal: controller.signal }).catch(() => null);
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+      controller.abort();
+      await abandoned;
+      await vi.waitFor(() => expect(signal?.aborted).toBe(true));
+    } finally { read.mockRestore(); }
+  });
+
+  it.skipIf(process.platform === "win32")("starts a fresh read when a subscriber returns before cancellation finishes", async () => {
+    const fixture = createFixture();
+    const { origin, server } = await startServer(fixture.environment);
+    const actualOpen = filesystem.open;
+    let release: (() => void) | undefined;
+    const open = vi.spyOn(filesystem, "open").mockImplementationOnce(async (...args) => {
+      await new Promise<void>(resolve => { release = resolve; });
+      return actualOpen(...args);
+    });
+    const read = vi.spyOn(privateFile, "readPrivateConfigFile");
+    const controllers = [new AbortController(), new AbortController()];
+    const requests: Array<Promise<Response | null>> = [];
+    let arrived = false;
+    const received = () => { arrived = true; };
+    try {
+      requests.push(fetch(`${origin}/api/v1/settings/traffic`, { signal: controllers[0]!.signal }).catch(() => null));
+      await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+      const oldSignal = read.mock.calls[0]![1]?.signal;
+      controllers[0]!.abort();
+      await requests[0];
+      await vi.waitFor(() => expect(oldSignal?.aborted).toBe(true));
+      server.once("request", received);
+      requests.push(fetch(`${origin}/api/v1/settings/traffic`, { signal: controllers[1]!.signal }).catch(() => null));
+      await vi.waitFor(() => expect(arrived).toBe(true));
+      expect(read).toHaveBeenCalledOnce();
+      release!();
+      const response = await requests[1];
+      expect(response?.status).toBe(200);
+      expect(await response!.json()).toEqual({ modelTrafficDumpEnabled: false });
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(read.mock.calls[1]![1]?.signal?.aborted).toBe(false);
+    } finally {
+      release?.();
+      controllers.forEach(controller => controller.abort());
+      await Promise.all(requests);
+      server.off("request", received);
+      read.mockRestore();
+      open.mockRestore();
+    }
   });
 
   it("returns a redacted settings summary", async () => {
@@ -665,14 +833,16 @@ describe("webui server settings and task management", () => {
       CODEX_CONNECT_CONFIG_FILE: "",
     });
 
-    const response = await fetch(`${origin}/api/v1/settings/summary`);
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "configuration_unavailable",
-        message: "Gateway 尚未初始化，请先运行 codexc init",
-      },
-    });
+    for (const endpoint of ["summary", "traffic"]) {
+      const response = await fetch(`${origin}/api/v1/settings/${endpoint}`);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "configuration_unavailable",
+          message: "Gateway 尚未初始化，请先运行 codexc init",
+        },
+      });
+    }
   });
 
 });

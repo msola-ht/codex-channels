@@ -17,6 +17,7 @@ export interface DesktopAppCommandOptions {
   confirmEnable?: () => boolean | Promise<boolean>;
   probeBridge?: (endpoint: string) => Promise<boolean>;
   inspectSupervisorState?: typeof import("../runtime/app-server-supervisor.mjs").inspectAppServerSupervisorState;
+  acquireProviderLease?: typeof import("../runtime/app-server-supervisor.mjs").acquireAppServerProviderLease;
   inspectActiveThreads?: (options: {
     socketPath: string;
     codexBinary: string;

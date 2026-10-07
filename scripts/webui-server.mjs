@@ -20,8 +20,11 @@ import {
 } from "./webui-command-options.mjs";
 import {
   readGatewayConfig,
+  parseGatewayConfig,
+  validateGatewayConfigStructureDocument,
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
+import { readPrivateConfigFile } from "../runtime/private-file.mjs";
 import { requestGatewayAccountRefresh, requestGatewayResetCredits } from "../runtime/gateway-account-refresh.mjs";
 import { modelRelayConfigSchema } from "../runtime/model-relay-config.mjs";
 import {
@@ -147,6 +150,7 @@ export function createWebuiServer({
     );
   }
   const serviceStatusCache = { expiresAtMs: 0, value: null, pending: null };
+  const trafficSettingsRead = { pending: null, controller: null, responses: new Set() };
   const providerStateCache = { expiresAtMs: 0, value: null, pending: null };
   const management = createManagementState(
     environment,
@@ -168,8 +172,9 @@ export function createWebuiServer({
     resetGatewayCredits,
   );
   const server = createServer((request, response) => {
-    handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response);
+    handleRequest(environment, staticDir, host, token, serviceStatusCache, trafficSettingsRead, management, request, response);
   });
+  server.on("close", () => trafficSettingsRead.controller?.abort());
   return { host, server, staticDir, token, closeNotifications: () => closeQueueStreams(management) };
 }
 
@@ -191,7 +196,7 @@ export function resolveWebuiSettings({
   };
 }
 
-async function handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response) {
+async function handleRequest(environment, staticDir, host, token, serviceStatusCache, trafficSettingsRead, management, request, response) {
   let managementRequest = false;
   try {
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -230,7 +235,7 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         openQueueStream(management, response, (signal, send) => watchQueueChanges(path(resolveGatewayConfigPath(environment)), signal, send));
         return;
       }
-      await routeApi(environment, url, request, response, serviceStatusCache);
+      await routeApi(environment, url, request, response, serviceStatusCache, trafficSettingsRead);
       return;
     }
     serveStatic(staticDir, url.pathname, response);
@@ -439,7 +444,7 @@ function readJsonMetadata(path) {
   }
 }
 
-async function routeApi(environment, url, request, response, serviceStatusCache) {
+async function routeApi(environment, url, request, response, serviceStatusCache, trafficSettingsRead) {
   const path = url.pathname;
   if (!path.startsWith(`${API_PREFIX}/`)) {
     throw new ApiError(404, "not_found", `未知 API：${path}`);
@@ -509,6 +514,10 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
   }
   if (apiPath === "/settings/summary") {
     await handleSettingsSummary(environment, response, serviceStatusCache);
+    return;
+  }
+  if (apiPath === "/settings/traffic") {
+    await handleTrafficSettings(environment, response, trafficSettingsRead);
     return;
   }
   if (apiPath === "/health") {
@@ -794,18 +803,54 @@ async function handleErrors(environment, url, response) {
   }
 }
 
-async function handleSettingsSummary(environment, response, serviceStatusCache) {
+function loadAvailableGatewaySettings(environment) {
   const { configPath } = resolveWebuiSettings({ environment });
   if (!existsSync(configPath)) {
-    sendJson(response, 503, {
-      error: {
-        code: "configuration_unavailable",
-        message: "Gateway 尚未初始化，请先运行 codexc init",
-      },
-    });
-    return;
+    throw new ApiError(503, "configuration_unavailable", "Gateway 尚未初始化，请先运行 codexc init");
   }
-  const gateway = loadGatewaySettings(environment);
+  return loadGatewaySettings(environment);
+}
+
+async function handleTrafficSettings(environment, response, state) {
+  const configPath = resolveGatewayConfigPath(environment);
+  if (!existsSync(configPath)) {
+    throw new ApiError(503, "configuration_unavailable", "Gateway 尚未初始化，请先运行 codexc init");
+  }
+  state.responses.add(response);
+  const disconnected = () => {
+    state.responses.delete(response);
+    if (state.responses.size === 0) state.controller?.abort();
+  };
+  response.once("close", disconnected);
+  try {
+    // Let an abandoned read release its resources before starting another one.
+    while (state.pending !== null && state.controller?.signal.aborted) {
+      await state.pending.catch(() => {});
+    }
+    if (response.destroyed) return;
+    // Share only a current read, never a cached value or permission decision.
+    if (state.pending === null) {
+      state.controller = new AbortController();
+      state.pending = readPrivateConfigFile(configPath, { signal: state.controller.signal })
+        .then(content => {
+          const document = validateGatewayConfigStructureDocument(parseGatewayConfig(content));
+          return { modelTrafficDumpEnabled: document.debug?.model_traffic_dump === true };
+        }).finally(() => { state.pending = null; state.controller = null; });
+    }
+    const settings = await state.pending;
+    if (!response.destroyed) sendJson(response, 200, settings);
+  } catch {
+    if (!response.destroyed) {
+      throw new ApiError(503, "configuration_unavailable", "Gateway 配置不可用，请检查配置格式和私有文件权限");
+    }
+  } finally {
+    response.off("close", disconnected);
+    state.responses.delete(response);
+  }
+}
+
+async function handleSettingsSummary(environment, response, serviceStatusCache) {
+  const gateway = loadAvailableGatewaySettings(environment);
   const serviceResults = await loadServiceStatusSummary(environment, serviceStatusCache);
   const platform = serviceResults.find((result) => result.platform !== null)?.platform ?? null;
   const entries = serviceResults.map((result) => result.entry);

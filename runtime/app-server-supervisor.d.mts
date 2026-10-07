@@ -53,7 +53,7 @@ export class AppServerSupervisorOwner {
         appPath: string;
         pipePath: string;
         toolsEnabled: boolean;
-      }) => Promise<void>;
+      }, signal: AbortSignal, canAttach: () => boolean) => Promise<void>;
       detachDesktopApp?: () => Promise<void>;
     },
   );

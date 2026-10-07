@@ -14,6 +14,7 @@ import type {
   MetricsProvidersResponse,
   RequestsResponse,
   SettingsSummaryResponse,
+  ModelTrafficSettingsResponse,
   ManagementSettingsResponse,
   ManagementServicesResponse,
   ManagementProvidersResponse,
@@ -289,6 +290,10 @@ export function fetchErrors(
 
 export function fetchSettingsSummary(signal?: AbortSignal): Promise<SettingsSummaryResponse> {
   return getJson<SettingsSummaryResponse>(`${API_PREFIX}/settings/summary`, signal)
+}
+
+export function fetchModelTrafficSettings(signal?: AbortSignal): Promise<ModelTrafficSettingsResponse> {
+  return getJson<ModelTrafficSettingsResponse>(`${API_PREFIX}/settings/traffic`, signal)
 }
 
 export function fetchManagementServices(signal?: AbortSignal): Promise<ManagementServicesResponse> {

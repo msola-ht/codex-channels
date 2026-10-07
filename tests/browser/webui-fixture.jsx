@@ -1,11 +1,16 @@
 import { StrictMode, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { HashRouter, Routes, Route, useLocation } from "react-router"
+import { HashRouter, Link, Routes, Route, useLocation } from "react-router"
 import App from "@/App"
 import { AuthGate } from "@/components/layout/auth-gate"
 import { PageErrorBoundary } from "@/components/layout/page-recovery"
 import { RequestsTable } from "@/components/requests/requests-table"
 import { TrafficTable } from "@/components/traffic/traffic-table"
+import { RequestDetail } from "@/components/requests/request-detail"
+import { TrafficPage } from "@/pages/traffic-page"
+import { AppSidebar, AppSidebarProvider } from "@/components/layout/app-sidebar"
+import { ModelTrafficSettingsContext } from "@/hooks/use-model-traffic-settings"
+import { fetchModelTrafficSettings } from "@/lib/api"
 import { QueryFilters } from "@/components/metrics/query-filters"
 import { useMetricsExport } from "@/hooks/use-metrics-export"
 import { ThreadTable } from "@/components/threads/thread-table"
@@ -15,7 +20,7 @@ import { AppServerSettingsCard } from "@/components/settings/app-server-settings
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LanguageContext } from "@/hooks/language-context"
-import { useApi } from "@/hooks/use-api"
+import { useApi, useApiPolling } from "@/hooks/use-api"
 import { useResetCredits } from "@/hooks/use-reset-credits"
 import { useQueueEvents } from "@/hooks/use-queue-events"
 import { useRelayCatalog } from "@/hooks/use-relay-catalog"
@@ -37,6 +42,27 @@ window.fetch = (input, init = {}) => {
   const url = typeof input === "string" ? input : input.url
   const entry = { url, signal: init.signal }
   contract.requests.push(entry)
+  if (scenario === "traffic-visibility") {
+    if (url === "/api/v1/settings/traffic") {
+      const respond = () => json(contract.failSummary ? { error: { code: "unknown" } } : {
+        modelTrafficDumpEnabled: contract.trafficEnabled === true,
+      }, contract.failSummary ? 503 : 200)
+      if (contract.holdSummary) return new Promise(resolve => { entry.resolve = () => resolve(respond()) })
+      return Promise.resolve(respond())
+    }
+    if (url === "/api/v1/management/tasks") return Promise.resolve(json({ tasks: [] }))
+    if (url.startsWith("/api/v1/traffic/events") || url === "/api/v1/management/tasks/events") {
+      return Promise.resolve(new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"type":"heartbeat"}\n\n'))
+        init.signal.addEventListener("abort", () => controller.close(), { once: true })
+      } }), { headers: { "content-type": "text/event-stream" } }))
+    }
+    if (url.startsWith("/api/v1/traffic/exchange?")) return Promise.resolve(json({ label: "openai", session: "batch", exchange: trafficVisibilityExchange }))
+    if (url.startsWith("/api/v1/traffic?")) return Promise.resolve(json({ enabled: true, retentionDays: 3,
+      labels: [{ label: "openai", sessions: 1 }], label: null, session: null, sessions: [{ session: "batch", createdAtMs: 1700000000000 }],
+      exchanges: [trafficVisibilityExchange], total: 1, nextOffset: null, maximumOffset: 50000 }))
+  }
+  if (scenario === "app" && url === "/api/v1/settings/traffic") return Promise.resolve(json({ modelTrafficDumpEnabled: false }))
   if (scenario === "reviewer" && url.startsWith("/api/v1/management/codex/settings")) {
     if (!init.method || init.method === "GET") return Promise.resolve(json(reviewerSettings))
     const body = JSON.parse(init.body)
@@ -213,7 +239,41 @@ function TrafficReturnFixture() {
 }
 
 function RequestPurposeFixture() {
-  return <Routes><Route path="/requests" element={<RequestPurposeList />} /><Route path="/traffic" element={<TrafficReturnFixture />} /></Routes>
+  return <ModelTrafficSettingsContext.Provider value={{ data: { modelTrafficDumpEnabled: true }, loading: false, error: null }}>
+    <Routes><Route path="/requests" element={<RequestPurposeList />} /><Route path="/traffic" element={<TrafficReturnFixture />} /></Routes>
+  </ModelTrafficSettingsContext.Provider>
+}
+
+const trafficVisibilityExchange = {
+  ...record, id: 7, label: "openai", session: "batch", category: "model", protocol: "responses", transport: "http",
+  startedAtMs: 1700000000000, state: "completed", durationMs: 1000, hasError: false, responseModels: ["model-test"],
+  parameterComparison: [], modelEvidence: { serverModels: [], safetyModels: [], turnStateLengths: [], truncated: false },
+  request: { headers: {}, body: "retained-request-body", parameters: {}, content: { instructions: null, input: [], tools: [] } },
+  response: { status: 200, state: "completed", headers: {}, body: "retained-response-body", output: [{ type: "message", text: "retained-answer" }] },
+  trace: [], tracePage: { offset: 0, total: 0, previousOffset: null, nextOffset: null },
+}
+function TrafficVisibilityFixture() {
+  const summary = useApi(fetchModelTrafficSettings, [], { retainDataOnError: false })
+  useApiPolling(summary.refetch, summary.loading, true, 10_000)
+  const refresh = (enabled, failed = false, hold = false) => {
+    contract.trafficEnabled = enabled
+    contract.failSummary = failed
+    contract.holdSummary = hold
+    summary.refetch()
+  }
+  return <ModelTrafficSettingsContext.Provider value={summary}>
+    <AppSidebarProvider><AppSidebar /><div className="min-w-0 flex-1">
+    <div className="flex flex-wrap gap-2"><button onClick={() => refresh(true)}>Enable recording</button>
+      <button onClick={() => refresh(false)}>Disable recording</button>
+      <button onClick={() => { contract.trafficEnabled = false }}>Externally disable recording</button>
+      <button onClick={() => refresh(true, true)}>Fail settings refresh</button>
+      <button onClick={() => refresh(true, false, true)}>Delay settings refresh</button>
+      <Link to="/traffic">Open list</Link><Link to="/traffic?label=openai&exchangeSession=batch&id=7">Open detail</Link></div>
+      <Routes><Route path="/traffic" element={<TrafficPage />} /><Route path="*" element={<>
+        <p>Fixture requests</p><RequestDetail record={{ ...record, traffic: { label: "openai", session: "batch", interaction: 7 } }} />
+      </>} /></Routes>
+    </div></AppSidebarProvider>
+  </ModelTrafficSettingsContext.Provider>
 }
 
 function ThreadsFixture() {
@@ -247,7 +307,7 @@ function BoundaryFixture() {
     <PageErrorBoundary>{failed ? <ThrowingPage /> : <p>Healthy page</p>}</PageErrorBoundary></>
 }
 
-const fixtures = { auth: AuthFixture, api: ApiFixture, reset: ResetFixture, tabs: TabsFixture, "request-purpose": RequestPurposeFixture,
+const fixtures = { auth: AuthFixture, api: ApiFixture, reset: ResetFixture, tabs: TabsFixture, "request-purpose": RequestPurposeFixture, "traffic-visibility": TrafficVisibilityFixture,
   requests: RequestsFixture, "table-alignment": TableAlignmentFixture, threads: ThreadsFixture, confirmation: ConfirmationFixture, boundary: BoundaryFixture, queue: QueueFixture, catalog: CatalogFixture, settings: SettingsFixture, reviewer: ReviewerFixture }
 const Fixture = fixtures[scenario]
 createRoot(document.getElementById("root")).render(<StrictMode>{scenario === "app" ? <App /> :

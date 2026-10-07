@@ -28,7 +28,6 @@ afterEach(() => {
 
 describe("App Server supervisor", () => {
   const unixIt = process.platform === "win32" ? it.skip : it;
-  const darwinIt = process.platform === "darwin" ? it : it.skip;
   it("applies only the selected Provider and defers leased or active instances", async () => {
     const root = mkdtempSync(join(unixSocketTmpdir, "sup-"));
     temporaryDirectories.push(root);
@@ -413,7 +412,9 @@ describe("App Server supervisor", () => {
     await owner.close();
   });
 
-  darwinIt("holds the primary Provider until the last Desktop Host lease detaches", async () => {
+  unixIt("holds the primary Provider until the last Desktop Host lease detaches", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
     const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-desktop-"));
     temporaryDirectories.push(runtimeDir);
     const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
@@ -435,15 +436,15 @@ describe("App Server supervisor", () => {
         return true;
       },
     });
-    await owner.start();
-    const lease = await acquireMacDesktopAppHostLease(primarySocketPath, {
-      provider: "openai",
-      appPath: "/Applications/ChatGPT.app",
-      pipePath: "/tmp/codex-app-tools.sock",
-      toolsEnabled: true,
-    });
-
+    let lease;
     try {
+      await owner.start();
+      lease = await acquireMacDesktopAppHostLease(primarySocketPath, {
+        provider: "openai",
+        appPath: "/Applications/ChatGPT.app",
+        pipePath: "/tmp/codex-app-tools.sock",
+        toolsEnabled: true,
+      });
       expect(attached).toEqual([{
         appPath: "/Applications/ChatGPT.app",
         pipePath: "/tmp/codex-app-tools.sock",
@@ -468,7 +469,106 @@ describe("App Server supervisor", () => {
         .resolves.toEqual({ released: true, reason: "released" });
       expect(released).toEqual(["openai"]);
     } finally {
+      await lease?.close();
       await owner.close();
+      Object.defineProperty(process, "platform", platform);
+    }
+  });
+
+  unixIt("rejects a Host takeover when a new Remote lease arrives during its check", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
+    const root = mkdtempSync(join(unixSocketTmpdir, "sup-host-"));
+    temporaryDirectories.push(root);
+    const primary = join(root, "s.sock");
+    let enter!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let attached = false;
+    const owner = new AppServerSupervisorOwner(primary, {
+      primaryProvider: "openai", managedProviders: [], socketPaths: [primary],
+    }, {
+      ensureProvider: async () => undefined,
+      attachDesktopApp: async (_attachment, _signal, canAttach) => {
+        enter();
+        await gate;
+        if (!canAttach()) throw new Error("主 OpenAI App Server 正被其他客户端租约占用");
+        attached = true;
+      },
+      detachDesktopApp: async () => undefined,
+    });
+    let lease;
+    let hostRequest;
+    try {
+      await owner.start();
+      hostRequest = acquireMacDesktopAppHostLease(primary, {
+        provider: "openai", appPath: "/Applications/Codex.app",
+        pipePath: "/tmp/host-pipe", toolsEnabled: true,
+      }).catch(error => error);
+      await entered;
+      const acquiring = acquireAppServerProviderLease(primary, "openai");
+      await vi.waitFor(async () => {
+        expect((await inspectAppServerSupervisor(primary))?.leasedProviders).toEqual(["openai"]);
+      });
+      release();
+      expect(await hostRequest).toEqual(expect.objectContaining({ message: expect.stringContaining("租约占用") }));
+      lease = await acquiring;
+      expect(attached).toBe(false);
+      expect((await inspectAppServerSupervisor(primary))?.desktopAppAttached).toBe(false);
+    } finally {
+      release();
+      await hostRequest;
+      await lease?.close();
+      await owner.close();
+      Object.defineProperty(process, "platform", platform);
+    }
+  });
+
+  unixIt.each(["caller", "owner"])("cancels Host preparation when the %s closes", async ending => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
+    const root = mkdtempSync(join(unixSocketTmpdir, "sup-host-"));
+    temporaryDirectories.push(root);
+    const primary = join(root, "s.sock");
+    let entered = false;
+    let cancelled = false;
+    const owner = new AppServerSupervisorOwner(primary, {
+      primaryProvider: "openai", managedProviders: [], socketPaths: [primary],
+    }, {
+      attachDesktopApp: async (_attachment, signal) => {
+        entered = true;
+        await new Promise<void>(resolve => signal.addEventListener("abort", () => {
+          cancelled = true;
+          resolve();
+        }, { once: true }));
+        signal.throwIfAborted();
+      },
+      detachDesktopApp: async () => undefined,
+    });
+    try {
+      await owner.start();
+      const caller = createConnection(appServerSupervisorSocketPath(primary));
+      caller.on("error", () => undefined);
+      try {
+        caller.once("connect", () => caller.write(`${JSON.stringify({
+          action: "leaseDesktopApp", desktopAppHostProtocolVersion: 1,
+          provider: "openai", appPath: "/Applications/Codex.app",
+          pipePath: "/tmp/host-pipe", toolsEnabled: true,
+        })}\n`));
+        await vi.waitFor(() => expect(entered).toBe(true));
+        if (ending === "caller") caller.destroy();
+        else await owner.close();
+        await vi.waitFor(() => expect(cancelled).toBe(true));
+        if (ending === "caller") {
+          expect((await inspectAppServerSupervisor(primary))?.desktopAppAttached).toBe(false);
+        }
+      } finally {
+        caller.destroy();
+      }
+    } finally {
+      await owner.close();
+      Object.defineProperty(process, "platform", platform);
     }
   });
 

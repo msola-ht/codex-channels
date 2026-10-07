@@ -40,6 +40,7 @@ export type {
   RequestSortKey,
   RequestsResponse,
   SettingsSummaryResponse,
+  ModelTrafficSettingsResponse,
   ManagementSettingsResponse,
   ManagementServicesResponse,
   ManagementProvidersResponse,

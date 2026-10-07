@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/metrics/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { RelayRequestStatus } from "@/components/requests/relay-request-status"
 import { useTranslation } from "@/hooks/use-translation"
+import { useModelTrafficDumpEnabled } from "@/hooks/use-model-traffic-settings"
 import { formatElapsedDuration, formatErrorMessage, formatErrorType, formatTimestamp, getServerTimeZone, isClientInterruption } from "@/lib/format"
 import { trafficDetailPath } from "@/lib/traffic-state"
 import type { RequestRecord } from "@/lib/types"
@@ -12,6 +13,7 @@ import type { RequestRecord } from "@/lib/types"
 /** Uses the selected metrics snapshot only; capture is optional and never fetched here. */
 export function RequestDetail({ record }: { record: RequestRecord }) {
   const { t, language } = useTranslation()
+  const trafficEnabled = useModelTrafficDumpEnabled()
   const location = useLocation()
   const interrupted = isClientInterruption(record)
   const autoReview = record.requestPurpose === "autoApprovalReview"
@@ -77,7 +79,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
         <dt className="text-muted-foreground">{label}</dt><dd className="min-w-0 whitespace-pre-wrap break-all tabular-nums">{value ?? "—"}</dd>
       </div>)}
     </dl>
-    {record.traffic === null ? <p className="text-sm text-muted-foreground">{t("requests.noTrafficReason")}</p>
+    {!trafficEnabled ? null : record.traffic === null ? <p className="text-sm text-muted-foreground">{t("requests.noTrafficReason")}</p>
       : <Button variant="outline" render={<Link to={trafficDetailPath(record.traffic)}
         state={{ requestsReturnTo: `${location.pathname}${location.search}` }} />} nativeButton={false}>{t("requests.viewTraffic")}</Button>}
   </div>

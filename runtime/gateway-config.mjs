@@ -208,7 +208,7 @@ const gatewaySchema = z.strictObject({
   ]).optional(),
 });
 
-const gatewayDocumentSchema = z.strictObject({
+const gatewayConfigStructureSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
   telegram: telegramSchema.optional(),
@@ -255,7 +255,9 @@ const gatewayDocumentSchema = z.strictObject({
     storage: { retention_days: 365, max_rows: 1_000_000 },
   }),
   workspaces: z.array(workspaceSchema).min(1),
-}).superRefine((value, context) => {
+});
+
+const gatewayDocumentSchema = gatewayConfigStructureSchema.superRefine((value, context) => {
   if (
     !value.telegram?.bot_token?.trim()
     && value.feishu?.enabled !== true
@@ -294,6 +296,15 @@ export function tomlErrorSummary(error) {
 
 export function validateGatewayConfigDocument(document) {
   const parsed = gatewayDocumentSchema.safeParse(document);
+  if (!parsed.success) {
+    throw new Error(z.prettifyError(parsed.error));
+  }
+  return parsed.data;
+}
+
+/** Read-only settings do not require Gateway's channel startup prerequisite. */
+export function validateGatewayConfigStructureDocument(document) {
+  const parsed = gatewayConfigStructureSchema.safeParse(document);
   if (!parsed.success) {
     throw new Error(z.prettifyError(parsed.error));
   }

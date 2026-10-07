@@ -1117,11 +1117,11 @@ function isFeishuRateLimitCode(code: number): boolean {
   return code === 99991400;
 }
 
-function validateBusinessResponse(response: unknown): void {
+function validateBusinessResponse(response: unknown, headers?: unknown): void {
   if (response !== null && typeof response === "object" && "code" in response
     && typeof response.code === "number" && response.code !== 0) {
     throw new FeishuMessageError(isFeishuRateLimitCode(response.code) ? "rate-limited" : "invalid-response",
-      "飞书 API 返回业务错误", feishuApiDiagnostics({ response: { data: response } }));
+      "飞书 API 返回业务错误", feishuApiDiagnostics({ response: { data: response, headers } }));
   }
 }
 
@@ -1184,7 +1184,7 @@ const redactedSdkLogger: Logger = {
 const defaultMessageDependencies: FeishuMessageClientDependencies = {
   sendTimeoutMs: 15_000,
   createSdkClient: (options, sendTimeoutMs) => {
-    const client = createSdkClient(options, sendTimeoutMs);
+    const client = createSdkClient(options, sendTimeoutMs, withFeishuResponseDiagnostics(defaultHttpInstance));
     return {
       createMessage: (payload) => client.im.v1.message.create(payload),
       createFile: (payload) => client.im.v1.file.create(payload),
@@ -1202,6 +1202,26 @@ const defaultMessageDependencies: FeishuMessageClientDependencies = {
     };
   },
 };
+
+function withFeishuResponseDiagnostics(base: HttpInstance): HttpInstance {
+  return {
+    ...base,
+    request: async <T, R = T, D = unknown>(value: HttpRequestOptions<D>): Promise<R> => {
+      // Downloads already request headers and the SDK consumes their stream envelope.
+      if (value.$return_headers || (value.responseType !== undefined && value.responseType !== "json")) {
+        return base.request<T, R, D>(value);
+      }
+      // Generated JSON methods do not forward $return_headers from their options.
+      // Inspect at the HTTP boundary, retaining only validated failure diagnostics.
+      const response = await base.request<unknown, { data: R; headers: unknown }, D>({
+        ...value,
+        $return_headers: true,
+      });
+      validateBusinessResponse(response.data, response.headers);
+      return response.data;
+    },
+  };
+}
 
 function streamingSummary(value: string): string {
   const normalized = value.replace(/\s+/gu, " ").trim();
@@ -1224,6 +1244,7 @@ function streamingSummary(value: string): string {
 function createSdkClient(
   options: FeishuMessageClientOptions,
   timeoutMs: number,
+  httpInstance: HttpInstance = defaultHttpInstance,
 ): Client {
   return new Client({
     appId: options.appId,
@@ -1234,7 +1255,7 @@ function createSdkClient(
     loggerLevel: LoggerLevel.error,
     source: "codexc",
     httpInstance: applyFeishuHttpPolicy(
-      defaultHttpInstance,
+      httpInstance,
       timeoutMs,
       options.httpAgent,
       options.disableEnvironmentProxy,

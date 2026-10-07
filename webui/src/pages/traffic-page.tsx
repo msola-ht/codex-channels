@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router"
+import { Link, Navigate, useLocation } from "react-router"
 import { RefreshCwIcon } from "lucide-react"
 import { useId } from "react"
 
@@ -24,10 +24,21 @@ import { useTrafficExchange, useTrafficExchanges } from "@/hooks/use-traffic"
 import { useManagementTasks } from "@/hooks/use-management-tasks"
 import { trafficPageSizeOptions, useTrafficQuery } from "@/hooks/use-traffic-query"
 import { useTranslation } from "@/hooks/use-translation"
+import { useModelTrafficDumpEnabled, useModelTrafficSettings } from "@/hooks/use-model-traffic-settings"
 import { formatTime } from "@/lib/format"
 import { translateApiError } from "@/lib/i18n/translate"
 
 export function TrafficPage() {
+  const summary = useModelTrafficSettings()
+  const enabled = useModelTrafficDumpEnabled()
+  const { t } = useTranslation()
+  if (summary.loading && summary.data === null) return <PageSkeleton rows={6} />
+  if (summary.error !== null) return <ErrorBanner error={translateApiError(t, summary.error, summary.errorCode)} onRetry={summary.refetch} />
+  if (!enabled) return <Navigate to="/requests" replace />
+  return <EnabledTrafficPage />
+}
+
+function EnabledTrafficPage() {
   const { t } = useTranslation()
   const location = useLocation()
   const returnPath = location.state?.requestsReturnTo

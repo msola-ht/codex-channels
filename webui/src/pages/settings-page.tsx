@@ -4,6 +4,7 @@ import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-managemen
 import { useApi, type UseApiState } from "@/hooks/use-api"
 import { useManagementTasks, useManagementTaskRefresh } from "@/hooks/use-management-tasks"
 import { useTranslation } from "@/hooks/use-translation"
+import { useModelTrafficSettings } from "@/hooks/use-model-traffic-settings"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { fetchManagementProviders, fetchManagementServices, fetchUpstreamUserAgent, fetchSettingsSummary } from "@/lib/api"
 import { SettingsPageFrame } from "@/components/settings/settings-page-frame"
@@ -67,15 +68,17 @@ export function DataSettingsPage() {
   const { t } = useTranslation()
   const summary = useApi(fetchSettingsSummary, [])
   const reloadSummary = summary.refetch
+  const reloadTrafficSettings = useModelTrafficSettings().refetch
+  const refreshTrafficSettings = useCallback(() => { reloadSummary(); reloadTrafficSettings() }, [reloadSummary, reloadTrafficSettings])
   const gateway = useSettingsManagement()
   const providers = useApi(fetchManagementProviders, [])
   const tasks = useManagementTasks()
   const reloadGateway = gateway.refetch, reloadProviders = providers.refetch, reloadTasks = tasks.refetch
   const refreshSettings = useCallback(() => { reloadGateway(); reloadProviders() }, [reloadGateway, reloadProviders])
-  const refresh = useCallback(() => { refreshSettings(); reloadTasks(); reloadSummary() }, [refreshSettings, reloadTasks, reloadSummary])
+  const refresh = useCallback(() => { refreshSettings(); reloadTasks(); refreshTrafficSettings() }, [refreshSettings, reloadTasks, refreshTrafficSettings])
   useManagementTaskRefresh(tasks, refreshSettings)
   return <SettingsPageFrame title="navigation.data" busy={gatewayBusy(gateway) || providers.loading || tasksBusy(tasks) || summary.loading} refresh={refresh}>
-    <GatewaySettingsSection management={gateway}>
+    <GatewaySettingsSection management={gateway} onChanged={refreshTrafficSettings}>
       <GatewaySettingsCard management={gateway} section="data" />
       <WebuiDataSettingsCard management={gateway} section="data" />
     </GatewaySettingsSection>

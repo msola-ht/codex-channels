@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveExecutable } from "./executable.mjs";
+import { registerChildProcessGroup } from "./process-lifecycle.mjs";
 
 const openAiTeamIdentifier = "2DC432GLL2";
 const desktopAppName = "ChatGPT.app";
@@ -15,11 +16,16 @@ const hostSource = `
   const [command, ...args] = process.argv.slice(1);
   const child = spawn(command, args, { env: process.env, stdio: "inherit" });
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-    process.on(signal, () => child.kill(signal));
+    // Supervisor signals our dedicated group, including the native child.
+    // Keep the signed parent alive until the child exits without a second signal.
+    process.on(signal, () => {});
   }
   child.on("error", (error) => { console.error(error.message); process.exit(1); });
   child.on("exit", (code, signal) => {
-    if (signal) process.kill(process.pid, signal);
+    if (signal) {
+      process.removeAllListeners(signal);
+      process.kill(process.pid, signal);
+    }
     else process.exit(code ?? 1);
   });
 `;
@@ -112,13 +118,17 @@ export function spawnMacDesktopHostedCodex(
   options,
   spawnProcess = spawn,
 ) {
-  return spawnProcess(attachment.nodePath, [
+  if (process.platform === "win32") {
+    throw new Error("Codex Desktop App 可信 Host 只支持 Unix 进程组");
+  }
+  const child = spawnProcess(attachment.nodePath, [
     "-e",
     hostSource,
     attachment.nativeCodexPath,
     ...args,
   ], {
     ...options,
+    detached: true,
     env: {
       ...options.env,
       CODEX_APP_TOOLS_PIPE_PATH: attachment.pipePath,
@@ -128,6 +138,8 @@ export function spawnMacDesktopHostedCodex(
       CODEX_CLI_PATH: attachment.nativeCodexPath,
     },
   });
+  registerChildProcessGroup(child);
+  return child;
 }
 
 function resolveNativeCodexExecutable(codexBinary, environment) {
@@ -165,10 +177,20 @@ function assertSignedExecutable(path, identifier) {
   if (!status?.isFile() || status.isSymbolicLink()) {
     throw new Error(`Desktop 可信可执行文件无效：${identifier}`);
   }
+  const requirement = `anchor apple generic and identifier "${identifier}"`
+    + ` and certificate leaf[subject.OU] = "${openAiTeamIdentifier}"`;
+  const verification = spawnSync(
+    "/usr/bin/codesign",
+    ["--verify", "--strict", `-R=${requirement}`, path],
+    { encoding: "utf8", maxBuffer: 1_048_576, timeout: 5_000, killSignal: "SIGKILL" },
+  );
+  if (verification.error || verification.status !== 0) {
+    throw new Error(`Desktop 可信可执行文件签名验证失败：${identifier}`);
+  }
   const result = spawnSync(
     "/usr/bin/codesign",
     ["-dv", "--verbose=4", path],
-    { encoding: "utf8", maxBuffer: 1_048_576, timeout: 5_000 },
+    { encoding: "utf8", maxBuffer: 1_048_576, timeout: 5_000, killSignal: "SIGKILL" },
   );
   const details = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   if (
@@ -187,6 +209,7 @@ function assertCodexVersion(nativeCodexPath, environment) {
     env: environment,
     maxBuffer: 1_048_576,
     timeout: 5_000,
+    killSignal: "SIGKILL",
   });
   if (result.error || result.status !== 0 || result.stdout.trim() !== expectedCodexVersion) {
     throw new Error(`Desktop 可信 Host 需要 ${expectedCodexVersion}`);

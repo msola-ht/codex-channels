@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import type { Readable } from "node:stream";
+import pino, { type Logger } from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppType, Client, defaultHttpInstance, type HttpInstance, type HttpRequestOptions } from "@larksuiteoapi/node-sdk";
 
@@ -9,6 +10,69 @@ import { runFeishuSdkRequest } from "../src/surfaces/feishu/sdk-request-context.
 afterEach(() => vi.restoreAllMocks());
 
 describe("Feishu HTTP policy", () => {
+  it.each([
+    [undefined, "20261007123456ABCDEF0123456789AB", "20261007123456ABCDEF0123456789AB"],
+    ["PRIVATE invalid body ID", "20261007123456ABCDEF0123456789AB", "20261007123456ABCDEF0123456789AB"],
+    ["20261007123456ABCDEF0123456789CD", "20261007123456ABCDEF0123456789AB", "20261007123456ABCDEF0123456789CD"],
+    ["PRIVATE invalid body ID", "SECRET invalid header ID", undefined],
+  ])("captures safe production CardKit diagnostics for body ID %s and header ID %s", async (bodyId, headerId, expectedId) => {
+    const logs: Array<Record<string, unknown>> = [];
+    const logger = pino({ level: "warn" }, { write(line) { logs.push(JSON.parse(line)); } });
+    await withProductionMessageApi({
+      body: { code: 300308, msg: "PRIVATE response message", error: { log_id: bodyId },
+        data: { message_id: "must-not-confirm" } },
+      headers: { "x-tt-logid": headerId, "set-cookie": "SECRET cookie", "authorization": "SECRET authorization" },
+    }, logger, async (client) => {
+      const failure = await client.finishStreamingCard("7355372766134157313", 2, "PRIVATE input")
+        .then(() => { throw new Error("expected CardKit rejection"); }, (error: unknown) => error);
+      expect(failure).toMatchObject({ code: "invalid-response", diagnostics: {
+        platformCode: 300308, ...(expectedId === undefined ? {} : { platformRequestId: expectedId }),
+      } });
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toMatchObject({ stage: "api", operation: "finishStreamingCard", outcome: "failed",
+        platformCode: 300308 });
+      expect(logs[0]).not.toHaveProperty("httpStatus");
+      if (expectedId === undefined) {
+        expect(logs[0]).not.toHaveProperty("platformRequestId");
+        expect(failure).toHaveProperty("diagnostics", { platformCode: 300308 });
+      } else {
+        expect(logs[0]).toHaveProperty("platformRequestId", expectedId);
+      }
+      expect(JSON.stringify({ logs, failure })).not.toMatch(/PRIVATE|SECRET|must-not-confirm|cookie|authorization/u);
+    });
+  });
+
+  it("preserves successful production message and CardKit response bodies", async () => {
+    await withProductionMessageApi({
+      body: { code: 0, data: { message_id: "om_success", card_id: "7355372766134157313" } },
+      headers: { "x-tt-logid": "20261007123456ABCDEF0123456789AB" },
+    }, undefined, async (client) => {
+      await expect(client.sendCard("oc_chat", {
+        schema: "2.0", config: { update_multi: true, wide_screen_mode: true },
+        header: { template: "blue", title: { tag: "plain_text", content: "fixture" } },
+        body: { elements: [] },
+      })).resolves.toBe("om_success");
+      await expect(client.createStreamingCard("oc_chat", "body")).resolves.toEqual({
+        cardId: "7355372766134157313", messageId: "om_success",
+      });
+      await expect(client.updateStreamingCard("7355372766134157313", "body", 1)).resolves.toBeUndefined();
+      await expect(client.finishStreamingCard("7355372766134157313", 2, "body")).resolves.toBeUndefined();
+    });
+  });
+
+  it("preserves the production SDK download envelope and stream", async () => {
+    await withProductionMessageApi({
+      body: "download fixture", contentType: "application/octet-stream",
+      headers: { "content-length": "16", "x-tt-logid": "20261007123456ABCDEF0123456789AB" },
+    }, undefined, async (client) => {
+      const resource = await client.downloadImage("om_source", "img_fixture");
+      expect(resource.contentLength).toBe(16);
+      const chunks: Buffer[] = [];
+      for await (const chunk of resource.stream) chunks.push(Buffer.from(chunk));
+      expect(Buffer.concat(chunks).toString()).toBe("download fixture");
+    });
+  });
+
   it("applies timeout, cancellation, and the selected proxy agent", async () => {
     const request = vi.fn<(options: unknown) => Promise<unknown>>(async () => ({}));
     const agent = {};
@@ -235,3 +299,40 @@ function messageClient(sdk: Client, sendTimeoutMs = 1_000): FeishuMessageClient 
 }
 
 async function tick(): Promise<void> { await new Promise((resolve) => setImmediate(resolve)); }
+
+let productionAppId = 0;
+
+async function withProductionMessageApi(
+  result: { body: unknown; headers?: Record<string, string>; contentType?: string },
+  logger: Logger | undefined,
+  run: (client: FeishuMessageClient) => Promise<void>,
+): Promise<void> {
+  const server = createServer((request, response) => {
+    response.setHeader("Content-Type", "application/json");
+    if (request.url!.includes("tenant_access_token")) {
+      response.end(JSON.stringify({ code: 0, tenant_access_token: "SECRET fixture token", expire: 3600 }));
+      return;
+    }
+    for (const [key, value] of Object.entries(result.headers ?? {})) response.setHeader(key, value);
+    response.setHeader("Content-Type", result.contentType ?? "application/json");
+    response.end(result.contentType ? String(result.body) : JSON.stringify(result.body));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing loopback address");
+  const localUrl = (url: string) => `http://127.0.0.1:${address.port}${new URL(url).pathname}`;
+  const baseRequest = defaultHttpInstance.request.bind(defaultHttpInstance);
+  const basePost = defaultHttpInstance.post.bind(defaultHttpInstance);
+  vi.spyOn(defaultHttpInstance, "request").mockImplementation((options) => baseRequest({ ...options, url: localUrl(options.url!) }));
+  vi.spyOn(defaultHttpInstance, "post").mockImplementation((url, data, options) => basePost(localUrl(url), data, options));
+  try {
+    await run(new FeishuMessageClient({
+      appId: `cli_${(++productionAppId).toString(16).padStart(16, "0")}`,
+      appSecret: "SECRET fixture credential", disableEnvironmentProxy: true,
+      ...(logger === undefined ? {} : { logger }),
+    }));
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+}

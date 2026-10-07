@@ -40,10 +40,11 @@ export function feishuApiDiagnostics(error: unknown): FeishuApiDiagnostics {
   const body = object(response.data);
   const httpStatus = response.status;
   const platformCode = body.code;
-  const requestId = object(body.error).log_id ?? object(response.headers)["x-tt-logid"];
+  const requestId = [object(body.error).log_id, object(response.headers)["x-tt-logid"]]
+    .find((value): value is string => typeof value === "string" && /^[a-fA-F0-9]{16,64}$/u.test(value));
   return {
     ...(typeof httpStatus === "number" && Number.isInteger(httpStatus) && httpStatus >= 100 && httpStatus <= 599 ? { httpStatus } : {}),
     ...(typeof platformCode === "number" && Number.isSafeInteger(platformCode) && platformCode > 0 ? { platformCode } : {}),
-    ...(typeof requestId === "string" && /^[a-fA-F0-9]{16,64}$/u.test(requestId) ? { platformRequestId: requestId } : {}),
+    ...(requestId === undefined ? {} : { platformRequestId: requestId }),
   };
 }

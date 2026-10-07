@@ -130,6 +130,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 请求明细变化通知 | — | `GET /api/v1/metrics/events`（鉴权 SSE，仅通知变化或心跳） |
 | 账户快照变化通知 | — | `GET /api/v1/accounts/events`（鉴权 SSE，成功保存后通知，不主动查额度） |
 | 调用转储变化通知 | — | `GET /api/v1/traffic/events`（回环限定、鉴权 SSE，按提供商及批次通知变化） |
+| 调用采集开关 | — | `GET /api/v1/settings/traffic`（沿用只读 API 鉴权，仅返回配置中的 `modelTrafficDumpEnabled`，不探测服务或扫描转储目录） |
 | 请求导出 | 请求页按钮 | `GET /api/v1/requests/export`（同样的筛选条件，导出全部匹配请求为 JSON） |
 | 调用详情 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（逻辑调用摘要，默认 100、每页上限 500、响应返回 `maximumOffset=50000`；达到 offset 上限且仍有更早记录时页面会明确提示缩小批次范围）、`GET /api/v1/traffic/exchange?id=&label=&session=&traceOffset=`（请求、终态响应及可选 trace 分页）、管理任务 `traffic:cleanup`（预览确认后清空） |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
@@ -160,6 +161,11 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 
 请求、错误、会话、每轮明细、全部及关联子代理、调用列表和 Relay 请求队列表，在模型右侧默认显示独立“思考”列（英文 `Reasoning`），可通过列设置隐藏。显示已记录的原值（如 `high`、`medium`、`none`），未知等级原样保留，缺失显示“—”，不从模型、推理输出 Token 或默认设置推断，不提供等级排序。会话、轮次和子代理使用与该行模型、提供商相同的最后入库请求；汇总卡和提供商聚合不指定单一等级。调用列表与详情共同从已有正文投影 Responses 的 `reasoning.effort`；Chat 使用 `reasoning_effort`，未提供该字段时保留已支持的 `reasoning.effort` 投影。只对当前页请求正文做有界读取，正文未保存、已清理、字节范围不可用或无法解析时显示“—”，非法正文引用仍明确报错，不修改历史转储。Relay 队列展示已验证入站请求的等级，不表示后续 Key 策略处理结果；尚未解析或等级形状不可展示时显示“—”。
 
+仅当 `[debug].model_traffic_dump` 开启时，WebUI 才显示调用详情导航及请求明细的关联入口，并展示和加载转储列表与明细。
+采集开关首次加载中或读取失败时先隐藏入口，不加载转储数据或订阅转储变化；关闭时直接访问 `#/traffic`（包括明细地址）会返回请求页。
+在数据设置页确认开关后或手动刷新设置时，入口立即重新读取共享快照；页面可见时，通过 `GET /api/v1/settings/traffic` 按读取完成后的 10 秒间隔刷新开关，以发现 CLI 等外部修改，发现延迟约为 10 秒加请求耗时。开关读取只读校验配置文件、父目录权限及完整当前版本和结构 Schema，不要求 Gateway 已启用渠道，不修复权限、不缓存权限判断或读取代理、版本元数据；Windows 每轮合并为一次有界异步 PowerShell ACL 校验和读取，并发查询共用在途读取，最后一个查询断开时取消。完整设置摘要由设置页按需读取，开关轮询不探测服务或扫描转储目录。
+后台刷新沿用已确认的开关值，避免反复卸载转储页面；确认关闭或读取失败后取消转储读取和变化订阅。
+关闭采集不删除历史转储，重新开启后仍可访问保留的历史批次，CLI 的历史读取不受 WebUI 显示规则影响。
 调用详情页读取用户数据目录 `traffic/` 下全局 `[debug].model_traffic_dump` 生成的 V2 session，默认展示全部
 采集来源的全部保留批次，按请求开始时间倒序分页；选定采集来源后，“记录批次”可筛选单个 writer session，
 重启产生新批次不会隐藏仍保留的旧记录。提供商、批次筛选、选中的逻辑调用、页码与每页条数

@@ -20,6 +20,7 @@ import {
 import { navigation, type NavGroup } from "@/lib/navigation"
 import { useSidebar } from "@/components/ui/sidebar-context"
 import { useTranslation } from "@/hooks/use-translation"
+import { useModelTrafficDumpEnabled } from "@/hooks/use-model-traffic-settings"
 
 export function AppSidebarProvider({ children }: { children: ReactNode }) {
   const [defaultOpen] = useState(() => {
@@ -89,7 +90,9 @@ function NavigationGroup({ item }: { item: NavGroup }) {
   const { pathname } = useLocation()
   const { state, setOpen, isMobile, setOpenMobile } = useSidebar()
   const { t } = useTranslation()
-  const active = item.children.some(child => isNavigationActive(child.to, pathname))
+  const trafficEnabled = useModelTrafficDumpEnabled()
+  const children = item.children.filter(child => child.to !== "/traffic" || trafficEnabled)
+  const active = children.some(child => isNavigationActive(child.to, pathname))
   const [expandedOverride, setExpanded] = useState<boolean | null>(null)
   const expanded = expandedOverride ?? (active || (!isMobile && item.id !== "settings"))
   const iconMode = !isMobile && state === "collapsed"
@@ -104,7 +107,7 @@ function NavigationGroup({ item }: { item: NavGroup }) {
       <ChevronRight aria-hidden="true" data-expanded={visibleExpanded} className="ml-auto transition-transform duration-200 motion-reduce:transition-none data-[expanded=true]:rotate-90 group-data-[collapsible=icon]:hidden" />
     </CollapsibleTrigger>
     <CollapsibleContent><SidebarMenuSub>
-      {item.children.map(item => <SidebarMenuSubItem key={item.to}><SidebarMenuSubButton render={item.to === "/threads" || item.to === "/subagents"
+      {children.map(item => <SidebarMenuSubItem key={item.to}><SidebarMenuSubButton render={item.to === "/threads" || item.to === "/subagents"
         ? <Link to={item.to} aria-current={isNavigationActive(item.to, pathname) ? "page" : undefined} onClick={() => setOpenMobile(false)} />
         : <NavLink to={item.to} onClick={() => setOpenMobile(false)} />} isActive={isNavigationActive(item.to, pathname)}>{t(item.labelKey)}</SidebarMenuSubButton></SidebarMenuSubItem>)}
     </SidebarMenuSub></CollapsibleContent>

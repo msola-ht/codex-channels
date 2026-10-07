@@ -6,6 +6,7 @@ import { join } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
 
 import { executableInvocation } from "./executable.mjs";
+import { inspectAppServerUnixSocket } from "./app-server-unix-socket.mjs";
 import {
   acquireAppServerProviderLease,
 } from "./app-server-supervisor.mjs";
@@ -103,11 +104,15 @@ export async function proxyDesktopAppStdioToUnixSocket({
   if (!Number.isInteger(connectTimeoutMs) || connectTimeoutMs < 1) {
     throw new Error("Codex Desktop App Proxy 连接超时必须是正整数");
   }
+  const endpoint = inspectAppServerUnixSocket(socketPath);
+  if (!endpoint?.available) {
+    throw new Error("Codex Desktop App Proxy 的 Unix Socket 不可用");
+  }
   const socket = new WebSocket("ws://localhost/", {
     perMessageDeflate: false,
     handshakeTimeout: connectTimeoutMs,
     maxPayload: maximumPayloadBytes,
-    createConnection: () => createConnection(socketPath),
+    createConnection: () => createConnection(endpoint.path),
   });
   await waitForWebSocketOpen(socket, connectTimeoutMs);
 

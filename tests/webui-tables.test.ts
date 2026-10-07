@@ -442,6 +442,8 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.requestDetailEnglish).toContain("No dump reference");
     expect(markup.requestDetailEnglish).toContain("Request model");
     expect(markup.requestDetailLinked).toContain('/traffic?label=clp&amp;exchangeSession=batch&amp;id=7');
+    expect(markup.requestDetailHidden).not.toContain('href="/traffic');
+    expect(markup.requestDetailHidden).toContain("请求模型");
     expect(markup.requestDetailZero).toContain("0 ms");
     expect(markup.requestDetailZero).not.toContain("NaN");
     expect(markup.requests).toContain("1970-01-01 00:00:01");
@@ -558,9 +560,11 @@ describe("WebUI metrics table presentation", () => {
           traffic: null, userAgent: "fixture-client", operation: "response", httpStatus: 502,
           errorType: "upstream_error", errorCode: "fixture_error", errorMessage: "fixture failure",
           firstTokenMs: 100, responseTimeMs: 25, generationTiming: { reasoningMs: 100, textMs: 200, toolMs: 300, totalMs: 600 }, totalDurationMs: 1000, upstreamTtftMs: null, cacheHitRate: 0.5 };
-        const render = (component, props, language = "zh", entry = "/") => renderToStaticMarkup(h(MemoryRouter, { initialEntries: [entry] },
+        const { ModelTrafficSettingsContext } = await server.ssrLoadModule("/src/hooks/use-model-traffic-settings.ts");
+        const render = (component, props, language = "zh", entry = "/", trafficEnabled = true) => renderToStaticMarkup(h(ModelTrafficSettingsContext.Provider,
+          { value: { data: { modelTrafficDumpEnabled: trafficEnabled }, loading: false, error: null } }, h(MemoryRouter, { initialEntries: [entry] },
           h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(TooltipProvider, null,
-            h(ServerTimeContext.Provider, { value: globalThis.fixtureServerClock ?? { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" } }, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props))))));
+            h(ServerTimeContext.Provider, { value: globalThis.fixtureServerClock ?? { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" } }, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props)))))));
         const requestProps = { ...pagination, records: [{ ...record, id: 42 }], filter: "", total: 1 };
         const exchange = { protocol: "responses", reasoningEffort: "high", clientName: "WorkBuddy", id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
           state: "completed", firstTokenMs: 100, responseTimeMs: 25, outputTokens: 120, generationTiming: { reasoningMs: 100, textMs: 200, toolMs: 300, totalMs: 600 }, durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
@@ -658,6 +662,7 @@ describe("WebUI metrics table presentation", () => {
           requestMissingModels: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: null, model: null } }),
           requestResponseOnly: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: "response-only-model" } }),
           requestDetailLinked: render(RequestDetail, { record: { ...record, traffic: {label:"clp",session:"batch",interaction:7} } }, "zh", "/requests?range=7d&offset=50"),
+          requestDetailHidden: render(RequestDetail, { record: { ...record, traffic: {label:"clp",session:"batch",interaction:7} } }, "zh", "/requests", false),
           requestDetailZero: render(RequestDetail, { record: { ...record, inputTokens:0,cachedInputTokens:0,outputTokens:0,totalTokens:0,responseTimeMs:0,totalDurationMs:0,cacheHitRate:null,errorMessage:null,errorType:null,errorCode:null } }),
           requestsClp: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModel: "hidden-response-model", upstreamProvider: "deepseek" }] }),
           trafficClp: render(TrafficTable, { exchanges: [{ ...exchange, label: "clp", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["hidden-response-model"], upstreamProvider: "deepseek" }], onOpen: noop }),

@@ -20,7 +20,12 @@ import {
   proxyDesktopAppStdioToUnixSocket,
   startDesktopAppBridge,
 } from "../runtime/desktop-app-bridge.mjs";
-import { inspectAppServerSupervisor } from "../runtime/app-server-supervisor.mjs";
+import {
+  acquireAppServerProviderLease,
+  ensureAppServerProvider,
+  inspectAppServerSupervisor,
+  releaseAppServerProvider,
+} from "../runtime/app-server-supervisor.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { readPrivateFileSync } from "../runtime/private-file.mjs";
 import {
@@ -99,6 +104,7 @@ contractSuite("real Codex Desktop App bridge", () => {
     let second: RawBridgeClient | undefined;
     let bridge: Awaited<ReturnType<typeof startDesktopAppBridge>> | undefined;
     let activityClient: CodexAppServerClient | undefined;
+    let launchLease: Awaited<ReturnType<typeof acquireAppServerProviderLease>> | undefined;
     let threadId: string | undefined;
     try {
       const tokenPath = desktopAppBridgeTokenPath(testRuntime);
@@ -118,6 +124,17 @@ contractSuite("real Codex Desktop App bridge", () => {
               `${stdout}\n${stderr}`,
             )),
       );
+      await ensureAppServerProvider(socketPath, "openai");
+      await expect(releaseAppServerProvider(socketPath, "openai")).resolves.toEqual({
+        released: true, reason: "released",
+      });
+      await expect(inspectAppServerSupervisor(socketPath)).resolves.toMatchObject({
+        releasedProviders: ["openai"], runningProviders: [],
+      });
+      launchLease = await acquireAppServerProviderLease(socketPath, "openai");
+      await expect(releaseAppServerProvider(socketPath, "openai")).resolves.toEqual({
+        released: false, reason: "leased",
+      });
       activityClient = new CodexAppServerClient(
         new JsonRpcClient(
           createAppServerTransport(
@@ -135,6 +152,9 @@ contractSuite("real Codex Desktop App bridge", () => {
       await expect(activityClient.countActiveLoadedThreads()).resolves.toBe(0);
       await activityClient.close();
       activityClient = undefined;
+      await launchLease.close();
+      launchLease = undefined;
+      await waitForSupervisorLeases(socketPath, 5_000);
       if (process.platform !== "darwin" && process.platform !== "win32") {
         expect(existsSync(tokenPath)).toBe(false);
         bridge = await startDesktopAppBridge({
@@ -222,6 +242,7 @@ contractSuite("real Codex Desktop App bridge", () => {
       await first?.close().catch(() => undefined);
       await second?.close().catch(() => undefined);
       await activityClient?.close().catch(() => undefined);
+      await launchLease?.close().catch(() => undefined);
       await bridge?.close().catch(() => undefined);
       if (service.exitCode === null && service.signalCode === null) {
         await stopDetachedTestProcess(service, 10_000);
