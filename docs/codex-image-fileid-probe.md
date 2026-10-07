@@ -40,9 +40,7 @@ Telegram、微信、其他账户、区域路由、其他模型、编号过期及
 
 ## 离线观测
 
-以下为初始真实 App Server 探测；转发、分页历史、后续纯文本 Turn 复用和后端拒绝已纳入
-[`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts)
-的 `forwards image fileId` 合同，其余仍为一次性观测。模拟后端不读取图片。
+以下为初始真实 App Server 的一次性探测观测；模拟后端不读取图片。
 
 | 检查 | 观测 |
 | --- | --- |

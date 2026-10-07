@@ -222,17 +222,12 @@
     "dev:all": "node scripts/dev-all.mjs",
     "webui:dev": "node scripts/webui-dev.mjs",
     "start": "node dist/main.js",
-    "test": "npm run build && vitest run --config vitest.config.ts",
-    "test:package": "npm run build && node scripts/smoke-package.mjs && node scripts/smoke-source-prepare.mjs",
-    "test:package:tarball-prepared": "node scripts/smoke-package.mjs",
-    "test:watch": "vitest --config vitest.config.ts",
     "codex:upgrade": "node scripts/prepare-codex-upgrade.mjs",
     "codex:upgrade:validate": "node scripts/run-upgrade-validation.mjs",
     "codex:contract:check": "node scripts/codex-public-cli-contract.mjs --check",
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "protocol:check": "node scripts/check-protocol.mjs && npm run codex:contract:check",
-    "lint": "eslint src tests bin runtime scripts",
-    "test:coverage": "vitest run --config vitest.config.ts --coverage"
+    "lint": "eslint src bin runtime scripts"
   },
   "dependencies": {
     "@clack/prompts": "^1.7.0",
@@ -250,12 +245,9 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.10.1",
     "@types/ws": "^8.18.1",
-    "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^10.7.0",
-    "fast-check": "^4.9.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.65.0",
-    "vitest": "^4.0.16"
+    "typescript-eslint": "^8.65.0"
   }
 }

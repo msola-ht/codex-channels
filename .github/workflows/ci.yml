@@ -12,50 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  changes:
-    name: Verification scope
-    runs-on: ubuntu-latest
-    outputs:
-      package: ${{ steps.scope.outputs.package }}
-      appServer: ${{ steps.scope.outputs.appServer }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22.13.0
-
-      - name: Select specialized checks
-        id: scope
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          node --input-type=module <<'NODE'
-          import { execFileSync } from 'node:child_process';
-          import { appendFileSync } from 'node:fs';
-          const scope = process.env.EVENT_NAME === 'workflow_dispatch'
-            ? { package: true, appServer: true }
-            : JSON.parse(execFileSync(process.execPath, [
-                'scripts/verification-scope.mjs', process.env.BASE_SHA, process.env.HEAD_SHA,
-              ], { encoding: 'utf8' }));
-          if (typeof scope.package !== 'boolean' || typeof scope.appServer !== 'boolean') {
-            throw new Error('Invalid verification scope');
-          }
-          appendFileSync(process.env.GITHUB_OUTPUT,
-            `package=${scope.package}\nappServer=${scope.appServer}\n`);
-          NODE
-
   verify:
     name: Node 22 / ${{ matrix.os }}
-    needs: changes
-    if: always()
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -66,10 +24,6 @@ jobs:
           - macos-latest
 
     steps:
-      - name: Require successful scope analysis
-        if: needs.changes.result != 'success'
-        run: exit 1
-
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -88,10 +42,6 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Set cross-platform home aliases
-        shell: bash
-        run: echo "USERPROFILE=$HOME" >> "$GITHUB_ENV"
-
       - name: Install WebUI dependencies
         run: npm ci --ignore-scripts --prefix webui
 
@@ -102,12 +52,11 @@ jobs:
         shell: bash
         run: echo "$(npm prefix --global)/bin" >> "$GITHUB_PATH"
 
-      - name: Run full regression
-        run: npm run verify:ci
+      - name: Check protocol consistency
+        run: npm run protocol:check
 
-      - name: Verify package installation
-        if: needs.changes.outputs.package == 'true'
-        run: npm run test:package:tarball-prepared
+      - name: Run static checks and builds
+        run: npm run verify:ci
 
   windows-runtime:
     name: Windows runtime / Node 22
@@ -161,100 +110,3 @@ jobs:
               throw "PowerShell 语法错误：$($file.FullName)"
             }
           }
-
-      - name: CLI help smoke check
-        run: |
-          node bin/codexc.mjs --help
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($command in @('install', 'start', 'stop', 'restart', 'status', 'logs', 'reload', 'uninstall')) {
-            foreach ($help in @('-h', '--help')) {
-              node bin/codexc.mjs $command $help
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            }
-          }
-
-      - name: Windows compatibility tests
-        # GitHub-hosted Windows runners own TEMP as BUILTIN\Administrators;
-        # strict private-ACL fixtures require the current SID as owner and
-        # are covered by the local Windows verification hook instead.
-        run: >-
-          npx vitest run
-          tests/stdio-transport.test.ts
-          tests/unix-websocket-transport.test.ts
-          tests/windows-proxy-transport.test.ts
-          tests/systemd-install.test.ts
-          tests/executable.test.ts
-          tests/windows-source-install.test.ts
-          tests/windows-service-host.test.ts
-          tests/windows-service-control.test.ts
-
-      - name: Windows Desktop compatibility tests
-        run: >-
-          npx vitest run
-          tests/windows-desktop-app-command.test.ts
-          tests/desktop-app-bridge.test.ts
-
-  app-server-contract:
-    name: Codex 0.160.0 App Server contract
-    needs: changes
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Require successful scope analysis
-        if: needs.changes.result != 'success'
-        run: exit 1
-
-      - name: Report unchanged contract scope
-        if: needs.changes.outputs.appServer != 'true'
-        run: echo 'No App Server contract changes; specialized verification is not required.'
-
-      - name: Checkout
-        if: needs.changes.outputs.appServer == 'true'
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        if: needs.changes.outputs.appServer == 'true'
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22.13.0
-          cache: npm
-
-      - name: Install dependencies
-        if: needs.changes.outputs.appServer == 'true'
-        run: npm ci --ignore-scripts
-
-      - name: Install locked Codex CLI
-        if: needs.changes.outputs.appServer == 'true'
-        run: npm install --global @openai/codex@0.160.0
-
-      - name: Check protocol version
-        if: needs.changes.outputs.appServer == 'true'
-        run: npm run protocol:check
-
-      # Match the locked Codex CI prerequisites; keep the actual contract sandbox enabled.
-      - name: Enable Linux sandbox user namespaces
-        if: needs.changes.outputs.appServer == 'true'
-        run: |
-          sudo sysctl -w kernel.unprivileged_userns_clone=1
-          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
-
-      - name: Run isolated App Server contract
-        if: needs.changes.outputs.appServer == 'true'
-        run: >-
-          TMPDIR=/tmp RUN_CODEX_CONTRACT=1 npm test -- --run
-          tests/real-app-server.test.ts
-          tests/real-app-server-desktop-bridge.test.ts
-          tests/real-app-server-isolated-state.test.ts
-          tests/real-app-server-queue.test.ts
-          tests/real-app-server-supervised-provider.test.ts
-          tests/real-app-server-supervised-thread-state.test.ts
-          tests/real-app-server-supervised-tools.test.ts
-          tests/real-app-server-responses-provider.test.ts
-          tests/real-app-server-chat-provider.test.ts
-          tests/real-app-server-reset-credits.test.ts

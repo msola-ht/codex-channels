@@ -74,8 +74,8 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 有效 Credits 对象内缺失或为 `null` 的余额项按官方 CLI 视为零，总余额先求和再保留两位小数。
 
 这些账户端点未列在公开的 [CommandCode Provider 文档](https://commandcode.ai/docs/provider) 中；本次
-实现按官方 `command-code` CLI 1.62.1 的调用方式适配。当前没有可用 API Key，尚未执行真实账户请求，
-只完成了凭据选择、组织与个人账户分支、Credits 和窗口响应的本地合同测试。上游调整 Alpha 接口后，
+实现按官方 `command-code` CLI 1.62.1 的调用方式适配。当前没有可用 API Key，尚未执行真实账户请求。
+上游调整 Alpha 接口后，
 查询会明确失败，不影响模型请求和本地 `/metrics`。
 
 CCG 复用现有按需启动、Provider 路由、模型设置及本地请求指标。每个账户拥有独立 App Server、
@@ -84,6 +84,4 @@ CCG 复用现有按需启动、Provider 路由、模型设置及本地请求指�
 `managed-provider-files.mjs`；账户行为与目录适配保留各自实现。
 账户 Credits 与额度窗口按账户查询；本地 Token 与请求指标按 `ccg-<账户>` 隔离。
 
-本地配置、模型目录、运行参数和回滚由 [`ccg-setup.test.ts`](../tests/ccg-setup.test.ts) 验证，账户响应
-归约由 [`ccg-account-adapter.test.ts`](../tests/ccg-account-adapter.test.ts) 验证。
 实际付费请求、上游工具调用与压缩仍需使用账户 Key 完成联调，文件能力声明不代表这些合同已通过。

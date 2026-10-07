@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
 
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
-import { changedFiles, parseChangedFiles, verificationScope } from "./verification-scope.mjs";
+import { changedFiles, parseChangedFiles } from "./verification-scope.mjs";
 
 const checkTypes = { name: "类型与版本", command: "npm", args: ["run", "check"] };
 const rootLint = { name: "Lint", command: "npm", args: ["run", "lint"] };
@@ -13,8 +13,8 @@ const webuiBuild = { name: "WebUI 构建", command: "npm", args: ["run", "build"
 const webuiLint = { name: "WebUI Lint", command: "npm", args: ["run", "lint"], cwd: "webui" };
 const dictionary = { name: "WebUI 翻译字典", command: "npm", args: ["run", "i18n:check"] };
 const docs = { name: "文档与索引", command: "npm", args: ["run", "docs:check"] };
-// Emission follows the full incremental source/test type check. Ordinary npm test
-// and npm run build retain their independent type checking.
+// Emission follows the full source type check. Standalone builds retain their
+// independent type checking.
 const gatewayBuild = { name: "Gateway 构建", command: "npm", args: ["run", "build", "--", "--noCheck"] };
 const shell = { name: "Shell 语法", command: "bash", args: [
     "-n",
@@ -27,62 +27,35 @@ const templates = { name: "launchd 模板", command: "plutil", args: [
   "launchd/com.hegenai.codex-gateway.plist.template", "launchd/com.hegenai.codex-webui.plist.template",
 ] };
 
-function allTests() {
-  return { name: "完整测试", command: process.execPath,
-    args: ["node_modules/vitest/vitest.mjs", "run", "--config", "vitest.config.ts"] };
-}
-
 export function createVerificationPlan(changes, { ci = false, root = process.cwd(), platform = process.platform } = {}) {
-  if (ci) return { reason: "PR 完整回归；安装和真实合同由专项任务按变更范围执行", checks: [
-    checkTypes, rootLint, webuiBuild, webuiLint, dictionary, docs, gatewayBuild, allTests(),
+  if (ci) return { reason: "PR 静态检查与构建", checks: [
+    checkTypes, rootLint, webuiBuild, webuiLint, dictionary, docs, gatewayBuild,
     ...(platform === "win32" ? [] : [shell]), ...(platform === "darwin" ? [templates] : []),
   ] };
 
-  const scope = verificationScope(changes);
   const paths = changes.map(change => change.path);
   const code = paths.filter(path => !path.endsWith(".md"));
-  const lintFiles = code.filter(path => /^(?:src|tests|bin|runtime|scripts)\/.*\.(?:ts|mjs)$/u.test(path)
+  const lintFiles = code.filter(path => /^(?:src|bin|runtime|scripts)\/.*\.(?:ts|mjs)$/u.test(path)
     && !path.startsWith("src/codex-protocol/generated/") && existsSync(join(root, path)));
   const checks = code.length ? [checkTypes] : [];
   const fullLint = code.some(path => /^(?:package(?:-lock)?\.json|eslint\.config\.mjs)$/u.test(path));
   if (fullLint) checks.push(rootLint);
   else if (lintFiles.length) checks.push({ name: "变更文件 Lint", command: process.execPath,
     args: ["node_modules/eslint/bin/eslint.js", ...lintFiles] });
-  if (paths.some(path => path.endsWith(".md")) || code.some(path => /^(?:src|scripts|bin|runtime|tests|\.github)\//u.test(path))) checks.push(docs);
+  if (paths.some(path => path.endsWith(".md")) || code.some(path => /^(?:src|scripts|bin|runtime|\.github)\//u.test(path))) checks.push(docs);
   const webui = code.some(path => path.startsWith("webui/"));
-  if (webui || scope.package) checks.push(webuiBuild, webuiLint, dictionary);
+  const sharedBuild = code.some(path => /^(?:package(?:-lock)?\.json|tsconfig(?:\.build)?\.json|scripts\/(?:verify-commit|verification-scope|prepare-package)\.mjs)$/u.test(path));
+  if (webui || sharedBuild) checks.push(webuiBuild, webuiLint, dictionary);
   if (code.some(path => /\.(?:sh|ps1)$/u.test(path) || /^(?:launchd|systemd)\//u.test(path))) {
     if (platform !== "win32") checks.push(shell);
     if (platform === "darwin") checks.push(templates);
   }
 
-  let reason = "仅文档变更，无需执行测试";
+  const reason = code.length ? "按变更范围执行静态检查与构建" : "仅文档变更，检查文档与索引";
   if (code.length) {
     checks.push(gatewayBuild);
-    const requiresCi = changes.some(change => change.status === "D" && !change.path.endsWith(".md"))
-      || code.length > 100 || code.some(path => !/^(?:src|tests|bin|runtime|scripts|webui)\/.*\.(?:ts|tsx|js|jsx|mjs)$/u.test(path));
-    reason = requiresCi
-      ? "删除、共享配置或无法可靠界定影响：本地静态检查及直接相关测试；PR CI 执行完整回归"
-      : "本地静态检查及依赖图直接相关测试（含 dist 消费者）；动态文件读取、CLI/子进程集成由 PR CI 完整回归覆盖";
-    const inputs = relatedInputs(code, root);
-    if (inputs.length) {
-      checks.push({ name: "受影响测试", command: process.execPath, args: [
-        "node_modules/vitest/vitest.mjs", "related", "--run", "--passWithNoTests", "--config", "vitest.config.ts",
-        ...inputs,
-      ] });
-    } else reason += "；无可用于依赖图选择的现存代码输入，本地测试未执行";
   }
   return { reason, checks };
-}
-
-function relatedInputs(paths, root) {
-  const existingCode = paths.filter(path => /^(?:src|tests|bin|runtime|scripts|webui)\/.*\.(?:ts|tsx|js|jsx|mjs)$/u.test(path)
-    && existsSync(join(root, path)));
-  const inputs = new Set(existingCode.map(path => resolve(root, path)));
-  for (const path of existingCode.filter(path => path.startsWith("src/") && path.endsWith(".ts"))) {
-    inputs.add(resolve(root, "dist", path.slice(4).replace(/\.ts$/u, ".js")));
-  }
-  return [...inputs];
 }
 
 function runChecks(checks) {

@@ -58,17 +58,6 @@ jobs:
           node scripts/resolve-codex-release.mjs "$TARGET_VERSION" 2>&1 \
             | tee "$REPORT_DIRECTORY/logs/resolve.log"
 
-      # Real tool contracts require the same Linux sandbox prerequisites as upstream Codex CI.
-      - name: Enable Linux sandbox user namespaces
-        if: >-
-          steps.release.outcome == 'success' &&
-          steps.release.outputs.upgrade_available == 'true'
-        run: |
-          sudo sysctl -w kernel.unprivileged_userns_clone=1
-          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
-
       - name: Install released Codex CLI
         id: install
         if: >-
@@ -232,7 +221,7 @@ jobs:
           PR_BODY: |
             这是由 Codex 正式版升级工作流生成的 Draft PR。
 
-            自动阶段已经完成协议生成、类型检查、Lint、完整测试、真实 App Server 合同、构建和打包验证。完整 Patch、协议影响、结构化结果与逐阶段日志保存在本次运行的 Artifact 中。
+            自动阶段已经完成协议生成与静态一致性检查、类型检查、Lint 和构建。完整 Patch、协议影响、结构化结果与逐阶段日志保存在本次运行的 Artifact 中。
 
             官方发布说明：${{ needs.preview.outputs.release_url }}
 
@@ -262,7 +251,7 @@ jobs:
 
             ## 风险与验证
 
-            待 Codex 写明安全边界、兼容风险、定向测试、真实合同和完整门禁结果。
+            待 Codex 写明安全边界、兼容风险、静态检查与构建结果，以及需要人工确认的运行时行为。
 
             合并前仍需由 Codex：
 
@@ -270,7 +259,7 @@ jobs:
             - 对照固定版本官方源码和测试审查协议语义；
             - 修复业务枚举、通知、Server Request 与安全边界适配；
             - 把新增、修复、改动及上述四个升级专属占位章节替换为本项目的实际结论；
-            - 更新 `docs/index.md`、`docs/codex-cli-upgrade-decisions.md`、README、CI 锁定版本及相关测试；
+            - 更新 `docs/index.md`、`docs/codex-cli-upgrade-decisions.md`、README 和 CI 锁定版本；
             - 运行 `npm run verify:commit` 并审查最终差异。
 
             占位内容未替换时，统一 PR 描述门禁会阻止 Ready PR 通过。本工作流不会自动转为 Ready、合并、发布或部署。

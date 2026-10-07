@@ -24,7 +24,7 @@
 - 不以官方浮动 `main` 替代固定标签；
 - 不采用 OpenClaw 的 Channel、会话、授权或路由实现；
 - MIT 许可证不自动证明线上后端允许任意第三方客户端；API 使用约束变化时必须停止并重新评审；
-- 上游基线变化时先更新 [`upstream-sources.md`](upstream-sources.md)，再修改实现与测试。
+- 上游基线变化时先更新 [`upstream-sources.md`](upstream-sources.md)，再修改实现。
 
 `v2.4.9` 的适配范围是无损消息 ID、`svr_id` 文本引用和可校验的局部引用。引用只在授权后
 查询现有进程内缓存；标题保留为摘要，不能遮盖可用正文。缓存每条最多保留 8000 字符，选取
@@ -62,7 +62,7 @@ Outbox 不再各自维护允许列表。
 - `display.reasoning` 只对 Telegram 和飞书生效；微信不发送“思考中…”状态。
 - 微信 Outbox 与组合根不再接收操作、计划、推理展示参数，也不主动启动输入状态。
 - 若要恢复任一过程展示，必须先确认官方回复窗口预算和渠道可安全承载多条主动消息，再同时更新
-  本页、`src/config/README.md`、模块 README、`delivery-policy.ts` 与测试。
+  本页、`src/config/README.md`、模块 README 与 `delivery-policy.ts`。
 
 ## 不引入第二个 Gateway
 
@@ -134,7 +134,7 @@ Policy / Application / Core / Approval / Routing
 
 1. 先确认本地 `upstream/openclaw-weixin` 与固定基线一致。
 2. 查阅固定源码和现有合同探针，不从官方 `main` 猜测协议。
-3. 更新模块 README、实现和最接近边界的测试。
+3. 更新模块 README 与实现。
 4. 真实平台结论只更新 [`channel-acceptance-matrix.md`](channel-acceptance-matrix.md)。
-5. 运行定向测试、`npm run docs:check` 和受影响的提交门禁。
+5. 运行相关静态检查、`npm run docs:check` 和受影响的提交门禁。
 6. 未经用户明确要求，不执行真实扫码、发送平台消息、提交、推送、发布或部署。

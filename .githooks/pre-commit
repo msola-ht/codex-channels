@@ -7,7 +7,7 @@ verification_changes="$(mktemp)"
 trap 'rm -f "$verification_changes"' EXIT HUP INT TERM
 git diff --cached --name-status --no-renames -z > "$verification_changes"
 
-# 测试子仓库不得继承当前提交的索引或仓库位置。
+# 验证子进程不得继承当前提交的临时索引或仓库位置。
 unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
 repository_root="$(git rev-parse --show-toplevel)"

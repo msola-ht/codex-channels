@@ -6,7 +6,7 @@
 
 当前模块架构已经支持升级：`codex-protocol` 保存版本专属生成类型和受控导出，
 `codex-client` 集中处理协议请求与通知，其他业务模块只依赖公开类型。升级通常不需要新增模块或
-兼容旧协议；需要做的是重新生成协议，然后由 Codex 逐层审查受影响的公开类型、实现和测试。
+兼容旧协议；需要做的是重新生成协议，然后由 Codex 逐层审查受影响的公开类型和实现。
 
 ## 1. 准备目标 CLI
 
@@ -57,12 +57,12 @@ GitHub Actions `Codex upgrade proposal` 每日检查一次，也可以手动触�
 - `summary.md`：版本、文件数量和协议目录数量摘要。
 - `logs/resolve.log`、`logs/install.log`、`logs/generation.log`：官方 Release 解析、目标 CLI
   安装和协议生成过程。
-- `logs/*.log`：协议、类型、Lint、测试、真实合同、构建和打包的逐阶段日志。
+- `logs/*.log`：协议、类型、Lint 和构建的逐阶段日志。
 
 同一摘要会显示在 GitHub Actions Job Summary。生成与验证 Job 保持只读；全部自动检查成功后，
 独立提案 Job 才申请 `contents: write` 和 `pull-requests: write`，把已验证 Patch 应用到自动化
 分支并创建 Draft PR。已有同版本开放提案时不重复创建。Draft PR 不自动转为 Ready、合并、发布
-或部署，仍需 Codex 完成协议语义、业务实现、稳定文档、CI 锁定版本和测试适配。协议生成或验证
+或部署，仍需 Codex 完成协议语义、业务实现、稳定文档与 CI 锁定版本适配。协议生成或验证
 失败时不会创建 PR，但仍上传报告和日志，随后把工作流标为失败。
 
 仓库的 Settings → Actions → General 必须允许 GitHub Actions 创建 Pull Request，同时继续把
@@ -117,19 +117,18 @@ Codex 应按以下顺序处理，操作者不需要人工阅读协议文件：
    生成类型数量。
 7. 审查 `src/codex-protocol/index.ts` 的受控导出，再沿实际差异检查 `codex-client`、
    `conversation-core`、`approval`、`session-routing` 和其他受影响模块。
-8. 先解决类型和现有测试的阻塞点，再验证运行时行为；每解决一层都重新运行最接近的定向测试，
-   不能只修复第一个编译错误就宣告完成。
+8. 先解决类型和实现的阻塞点，再按实际变更核对运行时行为，不能只修复第一个编译错误就宣告完成。
 9. 新增的 Notification 可以在明确安全时记录并忽略；新增的 Server Request 必须明确处理或
    安全拒绝，不能悬挂。写请求不能因升级而获得盲目重试或更宽权限。
 10. 不为旧 CLI 保留兼容层，不通过扩大模块依赖白名单、审批权限、网络权限或文件权限绕过失败。
 11. 更新 `docs/index.md` 的版本、协议数字、固定版本链接、支持矩阵和实现映射；在
    `docs/codex-cli-upgrade-decisions.md` 更新当前取舍与基线影响，不追加重复的逐版本清单；
-   本次变更与验证结果记录在升级 PR 和对应发布说明中，并更新所有受影响 README 与测试索引。
-12. 增加或调整单元测试；协议、Transport 或共享 App Server 行为变化时补充真实合同测试。
+   本次变更与验证结果记录在升级 PR 和对应发布说明中，并更新所有受影响 README。
+12. 协议、Transport 或共享 App Server 行为变化时，记录源码核对与所需人工验证的范围和结果。
 13. 运行本页完整验证，重新审查规则文件、文档索引和最终 Git 差异；未经用户明确要求不提交、
     推送、发布或重建服务。
 
-若类型生成没有业务差异，Codex 仍需确认版本、文档索引和真实合同，而不是仅凭 TypeScript
+若类型生成没有业务差异，Codex 仍需确认版本、文档索引和行为边界，而不是仅凭 TypeScript
 编译通过判定升级完成。
 
 ## 3. 完成验证
@@ -141,14 +140,11 @@ upgrade_report_dir="$(mktemp -d /tmp/codexc-upgrade-validation.XXXXXX)"
 npm run codex:upgrade:validate -- "$upgrade_report_dir"
 ```
 
-该入口执行协议、类型与版本、Lint、Gateway/WebUI 构建、完整测试、当前全部隔离真实 App Server
-合同、tarball 安装和干净源码全局安装验证。真实合同包含 Desktop 桥、自定义 Responses/Chat
-Provider 和重置券，范围与 [CI 隔离合同清单](../tests/README.md#真实-app-server-合同)一致。
-完整测试、真实合同与 tarball 检查复用同一份当前工作树构建；干净源码安装独立验证。
+该入口执行协议、类型与版本、Lint 和 Gateway/WebUI 构建。
 单项失败会保留日志并继续其他可执行阶段，最后返回失败；前置失败导致的跳过不算通过。
 
 统一升级验证会跳过稳定版文档检查，也不等同于 `verify:commit`。适配完成后补齐以下检查，
-无需再手动重复类型检查、完整测试、构建或打包：
+无需再手动重复类型检查与构建：
 
 ```bash
 npm run docs:check
@@ -166,11 +162,8 @@ plutil -lint \
   launchd/com.hegenai.codex-webui.plist.template
 ```
 
-非 Windows 升级验证使用短临时根 `/tmp`，避免 macOS 默认临时目录使真实合同的 Unix Socket
-超过 `SUN_LEN`；各合同仍创建独立随机子目录。
-
-真实合同测试需要目标版本 Codex CLI，但不调用模型。获得提交授权后，正常提交仍由 pre-commit
-hook 执行按范围选择的 `verify:commit`，PR CI 执行完整 `verify:ci`；升级所需完整合同和安装验证不能由本地快速检查替代。全部检查通过并经差异审查后，才可以按用户
+获得提交授权后，正常提交由 pre-commit hook 执行按范围选择的 `verify:commit`，PR CI
+执行完整静态检查与构建的 `verify:ci`。全部检查通过并经差异审查后，才可以按用户
 明确指示提交、推送、重新全局安装并重建服务。
 
 升级 PR 转为 Ready 或合并前，把自动提案的通用描述更新为实际审查结果，至少写明：
@@ -180,7 +173,7 @@ hook 执行按范围选择的 `verify:commit`，PR CI 执行完整 `verify:ci`�
 - `本次不采用`：写明未导出、未调用或未加入支持矩阵的上游能力，以及不采用原因；没有项目需求、
   仅生成了类型、属于 TUI/其他宿主或会扩大安全边界，都应明确说明。
 - 上述每项能力都先用一句非协议术语解释用途，确保不熟悉上游实现的人也能判断是否需要。
-- `风险与验证`：写明安全与兼容风险、本地完整门禁、真实 App Server 合同和 PR CI 结果。
+- `风险与验证`：写明安全与兼容风险、本地静态检查与构建、人工验证范围和 PR CI 结果。
 - 同步 [`Codex CLI 升级决策`](codex-cli-upgrade-decisions.md)的当前范围和重新评估条件。
 - 合并只更新开发基线，不创建 Tag、GitHub Release 或部署服务。项目不再发布 npm 包。
 
@@ -210,7 +203,7 @@ hook 执行按范围选择的 `verify:commit`，PR CI 执行完整 `verify:ci`�
 
 项目不再发布新的 Gateway npm 包。根目录 `package.json` 设置 `private: true`，仓库不提供
 npm 发布工作流、Trusted Publishing 或 npm dist-tag 操作。npm 仍用于依赖安装、本地打包、
-全局命令注册和安装官方 Codex CLI；不要因此删除源码安装链路或 tarball 冒烟验证。
+全局命令注册和安装官方 Codex CLI；源码安装链路继续保留。
 已发布的 npm 包、Tag 和历史发行说明保持原样；历史说明中的 npm 发布步骤不再适用于后续版本。
 
 日常交付通过官方 `main` 源码与 `codexc update` 完成，无需为每次合并创建 Tag 或 Release。
@@ -219,7 +212,7 @@ npm 发布工作流、Trusted Publishing 或 npm dist-tag 操作。npm 仍用于
 1. 确认 `main` 与远端同步、工作区干净，待发行提交已通过 PR CI 的完整 `verify:ci` 和本节要求的发布验证。
 2. 校验 `package.json`、锁文件、`src/version.json`、生成协议与 CI 的版本基线一致；保持 README
    的当前源码基线准确。受控的 `-fixN` / `-rc.N` 后缀继续对应同一正式 Codex CLI 基础版本。
-3. 运行 `npm run test:package`，验证本地 tarball 安装与干净源码全局安装。不得执行 npm 发布。
+3. 确认发布改动的静态检查、构建和人工验收记录完整。不得执行 npm 发布。
 4. 审查用户可见改动、风险、验证和安装边界后，在该提交创建新的 `v<版本>` Tag；不得移动旧 Tag。
 5. 经授权推送 Tag 并创建对应 GitHub Release。`-rc.N` 标记为 Pre-release，说明中明确该版本是
    源码快照；默认安装器及 `codexc update` 跟随 `main`，不会自动选择此 Tag。不要提供 npm 安装命令。
@@ -256,5 +249,5 @@ codexc status
 
 - 脚本在生成前失败：修正它报告的 CLI 版本、工作区或参数问题后重试。
 - 脚本在生成后失败：不要再次生成或手工回退；让 Codex 检查当前差异和失败命令。
-- 目标版本删除或改变现有协议：直接修改当前实现并升级测试，不增加旧协议兼容层。
+- 目标版本删除或改变现有协议：直接修改当前实现，不增加旧协议兼容层。
 - 官方文档与生成类型不同：以目标 CLI 生成类型作为字段事实，以同版本官方源码和测试确认行为。

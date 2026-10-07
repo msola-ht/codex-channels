@@ -150,7 +150,6 @@ CI 只校验字典，不自动生成、翻译或回写文案；本地差异报�
 ```bash
 npm run i18n:check
 npm run --silent i18n:report -- --base main > /tmp/webui-i18n-report.json
-npm test -- tests/webui-i18n-tool.test.ts tests/webui-i18n.test.ts
 ```
 
 `--base` 必须是本地可解析的 Git 提交或引用。第一次引入字典时，基线文件不存在会将所有源键列为新增；
@@ -160,8 +159,7 @@ npm test -- tests/webui-i18n-tool.test.ts tests/webui-i18n.test.ts
 保留前后中文和英文值，以及 `needsTranslation` / `needsReview`。中文变化即使已有英文也标记待复核；
 报告不能判断译文质量，不能把英文“存在”视为翻译已完成。结构问题单列在 `issues`，由检查命令阻止提交。
 
-本地已验证静态提取不执行字典代码、缺失键、占位符差异、中文更新但英文未变、
-新增/删除键、首次引入字典和无效 Git 基线。报告仅供本地按需审查。
+报告仅供本地按需审查。
 
 ### 实现约定
 
@@ -171,7 +169,7 @@ npm test -- tests/webui-i18n-tool.test.ts tests/webui-i18n.test.ts
 - 字典位于 [`messages.ts`](src/lib/i18n/messages.ts)，中文为键结构基准，英文通过类型检查
   保持同一结构。组件使用 [`useTranslation`](src/hooks/use-translation.ts)，按业务区域组织键。
 - 文案优先使用完整句子与 `{name}` 占位符，避免拼接会因语言顺序不同而失效的片段。
-  当前数量说明采用不依赖英语单复数词形的表达；后续出现复数需求时同时补齐规则与测试。
+  当前数量说明采用不依赖英语单复数词形的表达；后续出现复数需求时补齐规则并核对展示。
   当前取值函数不支持 ICU 或自动复数选择，不得将这些能力视为已实现。
 - 动态键必须来自明确的类型或映射，例如导航、日期范围和错误码。静态扫描未识别的键应人工核对，
   不能仅凭扫描结果判断其无用。未知内部错误使用本地化通用提示，不把原始异常直接当作翻译文案。
@@ -199,17 +197,14 @@ npm test -- tests/webui-i18n-tool.test.ts tests/webui-i18n.test.ts
 针对性验证入口：
 
 ```bash
-npm test -- tests/webui-i18n.test.ts tests/webui-tables.test.ts tests/webui-settings-presentation.test.ts
+npm run i18n:check
 npm --prefix webui run build
 npm --prefix webui run lint
 npm run docs:check
 ```
 
-[`webui-i18n.test.ts`](../tests/webui-i18n.test.ts)覆盖字典与占位符一致性、语言偏好读取、导航及 Threads
-渲染和错误翻译。其他两组测试覆盖共享表格与设置展示回归。
-测试通过不等同于完成浏览器布局验收；实际交互和视觉检查应单独记录结果。
-真实 React StrictMode、取消与键盘/焦点合同见[浏览器测试入口](../tests/README.md#webui-真实浏览器合同)，使用隔离夹具及临时浏览器工具，不连接当前用户服务。
-普通提交通过现有提交钩子执行完整 `verify:commit`，开发阶段按实际改动选择检查，不重复运行全量门禁。
+实际交互、键盘焦点和视觉检查单独记录结果。
+普通提交通过现有提交钩子执行按范围选择的 `verify:commit`，开发阶段按实际改动选择检查，不重复运行全量门禁。
 
 `components/settings/relay-provider-models.tsx` 按提供商显示只读模型目录弹窗与目录更新入口。
 `components/settings/relay-key-models.tsx` 在 Key 编辑弹窗按提供商分组勾选模型，可跨多个提供商；独立目录更新不扩大 Key 权限。

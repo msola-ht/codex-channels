@@ -383,9 +383,9 @@
   Profile 使用的 `-c/--config`）的存在性、别名、参数形状和枚举值，校验根级和所有 Profile 用户
   设置审批值与快照一致；升级时刷新受控快照并按新增、删除、签名变化
   和枚举变化生成独立影响报告，不把 App Server 内部枚举误当成公开 CLI 合同。
-- `run-upgrade-validation.mjs`：为正式升级提案独立运行协议、类型、Lint、测试、
-  真实合同、Gateway/WebUI 构建和打包检查；单项失败后继续其他阶段，并保存逐项日志和结构化结果。预览阶段不
-  改稳定版文档，因此明确跳过文档索引检查；测试与真实合同复用一次成功的 Gateway 构建，tarball 安装复用 Gateway/WebUI 产物，前置构建失败时跳过依赖检查并保留失败结果，干净源码安装独立执行。
+- `run-upgrade-validation.mjs`：为正式升级提案独立运行协议、类型、Lint 与
+  Gateway/WebUI 构建；单项失败后继续其他阶段，并保存逐项日志和结构化结果。预览阶段不
+  改稳定版文档，因此明确跳过文档索引检查。
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
   二进制安全 Patch，并分别比较 `HEAD` 生成协议的 RPC/顶层字段结构和受控公开 CLI 合同，合并
   逐阶段结果；生成或验证失败且没有差异时仍会输出报告。
@@ -428,21 +428,19 @@
   媒体正文、上传地址、参数、key、Token、游标或完整身份，不注册常驻 Surface。
 - `check-gateway-version.mjs`：校验 npm 包与 Gateway 运行时版本一致，并要求正式版本、`-rc.N`
   候选版或 `-fixN` 修复版使用与 Codex CLI 协议相同的基础版本。
-- `check-runtime-boundaries.mjs`：校验 `runtime <- scripts <- bin` 的目录依赖方向，并要求三者访问已编译
-  `src` 能力时只使用按调用方列明的精确入口；该检查由 `npm run check` 执行。
+- `check-runtime-boundaries.mjs`：静态校验源码模块允许依赖、公开入口、循环、Surface 隔离、协议受控导出
+  与未支持 API 约束；同时校验 `runtime <- scripts <- bin` 的目录依赖方向，并要求三者访问已编译
+  `src` 能力时只使用按调用方列明的精确入口。该检查由 `npm run check` 执行。
 - `check-docs.mjs`：校验项目 Markdown 本地链接、根 `index.md` 文档索引、源码模块索引、协议数字和相关目录
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
 - `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置。
 - `webui-i18n.mjs`：静态读取 WebUI 中英文文案字典，检查键与占位符，并按 Git 基线输出包含术语表的增量翻译任务 JSON；不执行字典代码、不调用翻译服务、不写回译文。
-- `verification-scope.mjs`：集中定义本地提交与 CI 专项的改动范围分类；CI 按 base 到 head 的完整差异选择安装及 App Server 合同检查。
-- `verify-commit.mjs`：本地 `verify:commit` 按改动范围执行必要静态检查和依赖图直接相关测试，`verify:ci` 执行完整回归，
-  源码同时映射到 `dist/` 输入，未匹配测试时允许跳过；动态文件读取、CLI/子进程集成及共享配置、删除的完整影响交由 PR CI 覆盖，
-  本地日志明确说明这一边界。安装与真实 App Server 专项由 CI 按相关改动执行，不纳入普通提交。
-  输出选中范围、每个阶段及全部检查的累计耗时。类型检查使用 TypeScript 原生增量缓存，仍覆盖源码与测试及其依赖；
+- `verification-scope.mjs`：读取本地提交或指定 Git 基线的改动文件，供检查入口选择静态检查范围。
+- `verify-commit.mjs`：本地 `verify:commit` 按改动范围执行必要静态检查与构建，`verify:ci` 执行完整静态检查与构建。
+  输出选中范围、每个阶段及全部检查的累计耗时。类型检查使用 TypeScript 原生增量缓存，覆盖源码及其依赖；
   缓存位于 `node_modules/.cache/codexc/check.tsbuildinfo`，可删除后重建，不缓存后续版本和边界检查。
   需要构建产物时，在完整类型检查成功后才清理并构建 Gateway，使用 `--noCheck` 避免重复类型分析；
-  测试复用这一份新产物。独立 `npm test` 和 `npm run build` 保留完整类型检查。
-  干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
+  独立 `npm run build` 保留完整类型检查。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
 - `config-backup.mjs`：调用方持有配置锁并验证目标后，执行私有备份、同步及逐字节校验，再原子保存，可传递完整文件容量上限；供 Relay 管理等配置写入使用。
 - `traffic-command-options.mjs` / `traffic-command-options.d.mts`：集中解析并预检 `codexc traffic` 的
@@ -477,10 +475,6 @@
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。
 - `prepare-package.mjs`：源码仓库安装或 npm 打包前按 lockfile 补齐缺失的本地构建依赖、
   启用仓库 Git hooks、构建源码，并验证已安装包包含运行入口；显式 `--ignore-scripts` 时不执行准备，兼容仍调用 prepare 的 npm 版本。
-- `smoke-source-prepare.mjs`：在不含 `node_modules` 和 `dist` 的临时源码副本中验证显式源码
-  全局安装命令会完成构建、保留模型目录与启动网络策略资源并生成 `codexc` 入口；失败时保留 stdout 与 stderr。
-- `smoke-package.mjs`：生成实际 tarball，在隔离目录安装，验证 WebUI 前端产物，并执行公开的
-  `codexc` 入口与配置预检，并加载安装后的 Setup 模块，检查其传递依赖是否完整打包。安装目录和依赖树每次重建，下载缓存沿用 npm 配置，避免重复下载；干净源码安装仍使用独立缓存。
 - `sync-gateway-version.mjs`：升级 Codex CLI 协议时把 `package.json`、锁文件和 Gateway 运行时
   版本重置为新的正式基础版本；Gateway 候选发行和修复发行可分别在该基础版本后使用受控的
   `-rc.N` 或 `-fixN` 后缀。任一后缀 Tag 发布并核验后，`main` 必须通过独立 PR 恢复无后缀基础

@@ -44,7 +44,7 @@ Storage 和 Surface 不复制实现。固定模式仍只有一个由基础配置
 Client 把 Thread 路由通知与 Turn、Item、Goal、Token、账户、额度、MCP 和 warning 等通知转换为
 稳定事件；`conversation-core` 不解析原始协议。Client 同样解码和编码五类 Server Request，
 `approval` 只拥有稳定请求、授权语义和用户决定。生产源码只有 Client 导入生成协议，
-Bootstrap 通过 Client 读取版本并向 Surface 注入纯字符串；受控协议导出和模块依赖测试会阻止
+Bootstrap 通过 Client 读取版本并向 Surface 注入纯字符串；受控协议导出和模块依赖静态检查会阻止
 协议或具体 Client 再次泄漏。Storage、Policy、Event Bus、Observability、Config、Surface 和
 Bootstrap 的当前边界分别以本索引中的模块 README 为准。
 

@@ -88,7 +88,7 @@ Server Socket。启动主 App Server 与 Provider App Server 前，入口把 `[c
 所有公开命令和子命令都支持 `-h` / `--help`；`gateway`、`service-app-server` 与 `service-model-relay` 仅作为服务模板的
 内部进程入口，不出现在公开命令列表。CLI 只负责参数校验、环境装配和进程分发，不保存
 Conversation、Thread 或审批状态。新增用户命令时应复用现有应用能力或脚本，并同步更新根目录
-README 和 CLI 测试。
+README。
 
 公开命令的操作状态统一使用 `[成功]`、`[失败]`、`[提示]` 和 `[处理]`，Doctor 检查项另用
 `[通过]`；着色只作用于这些状态标签。路径、标识符、结构化输出、列表和日志保持原始格式，避免

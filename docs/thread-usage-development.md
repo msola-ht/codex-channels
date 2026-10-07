@@ -166,7 +166,7 @@ OpenAI 且存在当前 Thread 时，账户摘要和 Thread 估算是两个独立
 ### `surfaces`
 
 - 三个 Surface 继续共用 `conversation-command-format.ts` 的结构化结果格式化，不分别实现估算逻辑。
-- `/help`、命令菜单和公开语法不变；只需更新 `/usage` 的说明文字和展示合同测试。
+- `/help`、命令菜单和公开语法不变；只需更新 `/usage` 的说明文字。
 - 分组和提示在共享 Formatter 中有界生成，平台 Renderer 只负责既有 Markdown/卡片转换。
 
 ### `observability` 与存储
@@ -204,7 +204,7 @@ Thread 的结果递归包含子代理。首期必须按“当前精确 Thread �
 6. 真实 App Server 合同：在条件式 `RUN_CODEX_INTEGRATION=1` 环境验证精确 0.160.0 接受规范
    `threadId`、非法 ID 失败关闭，以及认证环境允许时返回 `unavailable` 或匹配请求 ID 的结构化结果；
    未配置 ChatGPT 认证或计费路由时必须明确记为跳过/不可用，不能伪报成功结果。
-7. 定向测试通过后运行 `npm run check`、`npm run lint`、`npm run docs:check` 和协议检查；提交时由
+7. 按改动运行 `npm run check`、`npm run lint`、`npm run docs:check` 和协议检查；提交时由
    pre-commit 统一运行 `npm run verify:commit`。
 
 ## 完成标准与停止条件
@@ -215,7 +215,7 @@ Thread 的结果递归包含子代理。首期必须按“当前精确 Thread �
 - Thread 查询不可用或失败不破坏账户摘要；第三方 Provider 没有额外 OpenAI 请求。
 - 官方估算与本地 `/metrics` 口径、子代理范围和结算延迟均明确展示。
 - 没有新增持久化字段、后台轮询、第二套账本或跨 Provider 估算。
-- 协议支持矩阵、模块 README、展示文档和测试与实现一致。
+- 协议支持矩阵、模块 README、展示文档与实现一致。
 
 遇到以下任一情况停止实施并重新审查：
 

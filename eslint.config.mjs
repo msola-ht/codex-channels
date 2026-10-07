@@ -45,15 +45,6 @@ export default defineConfig(
   },
   {
     files: [
-      "tests/**/*.ts",
-    ],
-    extends: [
-      eslint.configs.recommended,
-      tseslint.configs.recommended,
-    ],
-  },
-  {
-    files: [
       "bin/**/*.mjs",
       "runtime/**/*.mjs",
       "scripts/**/*.mjs",

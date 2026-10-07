@@ -13,7 +13,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 持续模型增量使用 CardKit 2.0 原生流式卡片；Codex 原生 `imageGeneration` 完成以及
 `codexc channel send-image` 提交的图片都只读取经共享安全边界校验的 PNG/JPEG，
 通过官方图片上传和私聊图片消息接口顺序发送；
-这些路径均有对应实现与测试。真实平台验收状态统一见
+这些路径均有对应实现。真实平台验收状态统一见
 [`通讯渠道验收矩阵`](../../../docs/channel-acceptance-matrix.md)。
 
 ## 文件索引
@@ -363,7 +363,7 @@ Bootstrap 只重新建立本账号长连接；最终停止先切断新事件，�
 Bootstrap 从现有绑定中选择仍有授权 Actor 的 Chat 作为配置通知
 收件人；持久通知等待平台实际发送完成，没有已知安全会话时不广播。
 
-本模块已有严格 TOML/运行配置、变更分类、Bootstrap 显式组合和对应离线测试。真实平台结论只在
+本模块已有严格 TOML/运行配置、变更分类、Bootstrap 显式组合。真实平台结论只在
 [`通讯渠道验收矩阵`](../../../docs/channel-acceptance-matrix.md) 维护；一级 `surfaces`
 入口只转出窄工厂，不得导出 SDK 类型，也不得在 Core 中引入飞书类型。群聊已记录为后续需求但
 当前不开发，也不更新为公开支持。

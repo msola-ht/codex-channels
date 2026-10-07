@@ -26,9 +26,7 @@ App Server 合同与发布候选的渠道/Provider 验收仍未闭环。公开�
   Windows 安全记录边界，不写入 TOML、日志或业务数据库。
 - `install.ps1`、源码更新、当前用户计划任务服务和 PowerShell 服务宿主已经接入统一 CLI；服务
   不要求管理员权限，也不得改变 Unix 服务语义。
-- GitHub Windows Job 当前执行依赖安装、构建、类型检查、文档检查、PowerShell 语法、CLI 帮助
-  和一组兼容性测试。托管 Runner 的临时目录归属不满足严格私有 ACL 夹具，因此相关合同仍需在
-  当前用户拥有临时目录的 Windows 环境验证。
+- GitHub Windows Job 当前执行依赖安装、构建、类型检查、文档检查和 PowerShell 语法检查。
 
 实现入口见 [`runtime/README.md`](../runtime/README.md)、
 [`scripts/README.md`](../scripts/README.md)和
@@ -55,24 +53,17 @@ npm run build
 npm run check
 npm run docs:check
 PowerShell 脚本语法（包含根目录 install.ps1）
-首次安装 Codex 版本同步、安装失败及 PATH 冲突的隔离命令合同
-服务宿主提前退出、控制端点失败及资源回收合同
-codexc 与 service 帮助冒烟
-Desktop 包检查与启动、回环桥网络行为、Windows Proxy 超时清理合同
-选定的 Transport、服务、可执行文件兼容性测试
 ```
 
-这些检查证明当前提交可在托管 Windows Runner 构建并通过选定合同，不等于完整测试、安装、服务
-恢复或真实渠道验收已经通过。
+这些检查证明当前提交可在托管 Windows Runner 构建，安装、服务恢复与真实渠道行为仍需实机验收。
 
 ## 正式支持门槛
 
 以下项目全部完成后，才能移除 `Preview` 标识并在发行说明中声明 Windows 正式支持：
 
-1. Windows 生产与测试 Lint、完整可运行测试、构建和 npm tarball 安装冒烟进入必过门禁；平台
-   专属跳过必须有对应 Windows 合同，不能用整套跳过制造绿色结果。
-2. 安装项目锁定版本 Codex CLI，运行真实 App Server 初始化、共享 Thread、Provider 隔离、
-   Remote TUI、审批、中断、消息上限与关闭清理合同。
+1. Windows 静态检查与构建通过，发布候选的源码安装经实机确认。
+2. 安装项目锁定版本 Codex CLI，在实机核对 App Server 初始化、共享 Thread、Provider 隔离、
+   Remote TUI、审批、中断、消息上限与关闭清理。
 3. 使用两个普通 Windows 用户验证 IPC、配置、数据库、凭据、媒体和备份的跨用户读取与替换拒绝；
    提权终端不得改变受管文件或服务的用户归属。
 4. 在干净普通用户环境验证源码安装、更新、失败恢复、计划任务启停、异常重启、系统重启、日志、

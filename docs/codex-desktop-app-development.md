@@ -33,7 +33,7 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 - Windows 使用当前用户包探测、受认证回环桥与隔离启动环境，仍为开发预览，未完成实机双向验收。
 - 2026-09-16/17 的 macOS 历史实测覆盖 Thread 双向共享、内置工具启动与 App Server 重启恢复；
   实测 CLI 为 0.154.0、ChatGPT 为 `26.908.70816`。这些结果不是当前 CLI 0.160.0 或任意新 App 构建的验收。
-- 自动化桥接、协议和命令测试不能替代打包 Desktop 的工具 Pipe、签名链或 Windows 实机验证。
+- 打包 Desktop 的工具 Pipe、签名链和 Windows 支持需各自完成实机验证。
   当前缺口与停止条件见下文，不宣称全平台正式支持。
 
 
@@ -258,9 +258,7 @@ codexc app status [--json]
 | 签名 Host 隔离合同 | 通过 | 受管 stdio Proxy 连接同一 UDS，`codex_app` 0.1.0 返回 38 个工具且无错误 |
 | 完整 macOS Desktop 受管入口 | 通过 | 源码部署后的启动、双向接续和服务重启恢复已实测；仍须使用 `codexc app` 注入单次启动环境 |
 
-自动化真实 App Server 合同只能证明两个普通 App Server Client 通过桥共享 Thread，不能模拟打包
-Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周期。后续验收必须把这部分列为独立
-实机门槛，不能再用双 Client 合同替代。
+打包 Desktop 创建的私有工具 Pipe、代码签名校验和内置 MCP 生命周期需作为独立实机门槛验收。
 
 ## 平台实现
 
@@ -316,7 +314,7 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
 - `bin/codexc.mjs`：公开命令、帮助与路由。
 - `runtime/README.md`、`scripts/README.md`、`bin/README.md`：新增文件与公开入口索引。
 - `README.md` 与 `docs/user-guide.md`：只写用户操作、当前限制和排障，不复制内部桥协议。
-- `docs/index.md`：记录共享 App Server 行为、官方基线、实现映射与真实合同。
+- `docs/index.md`：记录共享 App Server 行为、官方基线与实现映射。
 - `docs/windows-support-development.md`：记录受认证桥不替换固定 UDS Transport，以及 Windows 实机
   验收状态。
 
@@ -344,14 +342,13 @@ Supervisor 只接受当前用户、主 Provider `openai`、已启用配置、同
 2. 非法路径、缺失或错误令牌、第五个并发连接、二进制帧和非 OpenAI 主 Provider均失败关闭。
 3. Desktop 与渠道能够双向发现并继续对方创建的空闲 Thread，且看到同一 Thread ID 与 Turn 结果。
 4. 活动 Thread 不发生双写；审批仍由发起 Turn 的客户端处理。
-5. Provider 指标、主实例监管、空闲释放、`codexc remote` 和 Gateway 重启恢复合同保持通过。
+5. Provider 指标、主实例监管、空闲释放、`codexc remote` 和 Gateway 重启恢复按原有边界工作。
 6. 服务停止、macOS Host 租约关闭、桥连接断开和 Windows Proxy 退出后没有遗留监听、租约或子进程；
    失效 Pipe 不得用于后续主实例启动。
 7. 日志、状态、错误、JSON、配置与平台消息中均不出现桥令牌或完整 URL。
 8. macOS 与 Windows 各自在真实 Desktop 上通过；任一平台未通过时必须单独标为预览或不支持，
    不能宣称全平台完成。
-9. Desktop 随包提供的 `codex_app` MCP 在共享模式下保持可用；`bridgeReady`、Thread 双向共享或
-   自动化双 Client 合同均不能替代该项实机验证。
+9. Desktop 随包提供的 `codex_app` MCP 在共享模式下通过实机验证。
 10. macOS 受管路径必须继续使用项目锁定的 Codex CLI 0.160.0；不得以 Desktop 随包的预发布 CLI
     替换协议事实来源，也不得让动态 Pipe、完整启动环境或工具消息进入日志与状态输出。
 

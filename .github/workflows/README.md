@@ -5,26 +5,19 @@
 ## 文件
 
 - `ci.yml`：在 Pull Request 和手动触发时，使用 Ubuntu 与 macOS、Node.js 22.13.0 执行
-  `npm run verify:ci` 完整回归，并使用 Windows latest 执行独立的构建、类型、文档、
-  PowerShell 语法和 CLI 帮助冒烟。Windows Job 不运行 Unix 专属服务检查。Branch Protection 要求 PR 的当前
+  `npm run verify:ci` 静态检查与构建，并使用 Windows latest 执行独立的构建、类型、文档和
+  PowerShell 语法检查。Windows Job 不运行 Unix 专属服务检查。Branch Protection 要求 PR 的当前
   merge ref 通过全部门禁并禁止直接写入 `main`，因此 push 不再重复运行同一检查。检查覆盖提交
-  差异、类型和版本、生产与测试 Lint、文档链接和索引、全量测试、Shell
+  差异、类型和版本、生产 Lint、文档链接和索引、Shell
   及平台模板检查；WebUI 字典检查通过 `npm run i18n:check` 校验键与占位符。
   CI 只校验已有字典，不生成翻译报告、调用翻译服务或自动写回译文；差异报告可在本地按需运行 `npm run i18n:report`。
-  类型检查使用 TypeScript 原生增量缓存跟踪源码、测试及其依赖，版本与边界检查每次执行；完整类型检查通过后，
-  Gateway 清理旧产物并以 `--noCheck` 构建，避免重复类型分析。全量测试和按需执行的 tarball 冒烟复用该次构建产物，
-  独立 `npm test`、`npm run build` 仍执行完整类型检查。tarball 冒烟只在安装、打包、生命周期等相关路径变化时执行，
-  使用新的临时安装目录；干净源码安装保留在升级、发布及显式完整打包验证中。日志记录各阶段和总耗时。
-  独立的 App Server 合同任务只在协议、运行时和相关合同路径变化时安装锁定的 Codex CLI 0.160.0，检查协议版本与生成类型，并使用隔离
-  `CODEX_HOME` 验证 Fast 默认值的跨客户端读取和新 Thread 状态。真实工具合同需要 Linux user namespace；
-  合同 Job 与升级预览 Job 参照锁定版 [Codex CI 设置](https://github.com/openai/codex/blob/rust-v0.160.0/.github/actions/setup-ci/action.yml)，
-  在临时 Ubuntu Runner 启用 `kernel.unprivileged_userns_clone`，并在该项存在时关闭
-  `kernel.apparmor_restrict_unprivileged_userns`。这是运行器准备，不关闭 Codex 文件或网络沙箱，
-  不修改用户服务、生产配置或 GitHub Token 权限。
+  类型检查使用 TypeScript 原生增量缓存跟踪源码及其依赖，版本与边界检查每次执行；完整类型检查通过后，
+  Gateway 清理旧产物并以 `--noCheck` 构建，避免重复类型分析。独立 `npm run build` 仍执行完整类型检查。
+  Ubuntu 与 macOS 安装锁定的 Codex CLI 0.160.0，静态核对协议版本与生成类型。日志记录各阶段和总耗时。
 - `codex-upgrade-preview.yml`：每日及手动检查 `openai/codex` 正式发行版本；版本留空时使用
   最新正式 Release。项目已经同步时跳过，发现更新时安装对应 npm CLI、生成协议与版本
-  差异，在安装根目录与 WebUI 锁定依赖后独立运行协议、类型、Lint、全量测试、真实合同、Gateway/WebUI
-  构建和打包检查；当前工作树构建成功后供测试与 tarball 安装复用，前置失败明确跳过依赖项，干净源码安装独立验证。把逐项结果写入 Job
+  差异，在安装根目录与 WebUI 锁定依赖后独立运行协议、类型、Lint 与 Gateway/WebUI
+  构建。把逐项结果写入 Job
   Summary，并上传结构化结果、逐阶段日志、协议结构影响、清单、统计、完整 Patch 和摘要
   Artifact。单项失败不阻止其他检查，最终仍把任务标为失败。该工作流拒绝 Draft、Pre-release
   和降级；自动检查全部通过时，独立的最小写权限 Job 将已验证 Patch 提交到自动化分支并创建
@@ -35,12 +28,11 @@
   至少在新增、修复、改动之一说明具体变化，无内容分类可省略，保留章节不得为空或仅有占位。正式 Codex CLI 升级 PR 还必须写清
   对本项目的收益、本次采用、本次不采用及风险与验证。Job 名 `Project benefits and tradeoffs`
   为兼容 main 的现有 Branch Protection 保留。
-项目不再发布 npm 包，也不提供 Tag 触发的发布工作流。`package.json` 设置 `private: true`；npm 仍用于依赖安装、源码构建和本地 tarball 安装验证。历史 Tag 和 npm 包保持不变。GitHub Release 如需创建，按[升级与发布指南](../../docs/codex-cli-upgrade.md)取得明确授权后手动处理。
+项目不再发布 npm 包，也不提供 Tag 触发的发布工作流。`package.json` 设置 `private: true`；npm 仍用于依赖安装与源码构建。历史 Tag 和 npm 包保持不变。GitHub Release 如需创建，按[升级与发布指南](../../docs/codex-cli-upgrade.md)取得明确授权后手动处理。
 
 除 Codex 正式升级的 Draft PR Job 外，工作流只申请 `contents: read`，
 Checkout 不保留写入凭据。Draft PR Job 单独申请 `contents: write` 和 `pull-requests: write`，
-只用于推送对应自动化分支和创建提案。隔离 App Server 合同测试不读取 Runner
-登录态、不调用模型；依赖账号、模型列表或指定 fixture Thread 的完整真实集成测试仍只在本机按需执行。
+只用于推送对应自动化分支和创建提案。
 
 仓库 Settings → Actions → General 需要允许 GitHub Actions 创建 Pull Request；默认工作流权限
 继续保持只读。自动提案使用仓库 `GITHUB_TOKEN`，不保存长期 PAT。
@@ -50,16 +42,8 @@ GitHub Actions 分别对根目录和 `webui` 使用 `npm ci --ignore-scripts`，
 hook 配置；随后直接调用 `npm run verify:ci`。本地 `npm ci`、`npm install` 或
 `npm run hooks:install` 则启用仓库内 `.githooks/pre-commit`。
 
-本地 Hook 使用 `verify:commit`，按本次提交范围执行必要静态检查和依赖图直接相关测试。
-源码输入同时映射到 `dist/`，保留直接导入构建产物的测试；无相关测试时允许跳过。
-提交阶段不扫描并补入全部动态文件读取、CLI/子进程测试，也不执行完整回归、安装冒烟或真实 App Server 专项。
-共享配置、删除及其他无法可靠界定的影响在本地日志中明确交由 PR CI 完整回归覆盖，不能将本地结果称为完整验证。
-范围分类仍由 `scripts/verification-scope.mjs` 统一定义，CI 的完整回归和专项范围保持独立。
-CI 的专项范围使用 PR base 到 head 的完整差异，包含新增、删除和重命名，不只检查最后一次提交。
-安装专项与真实 App Server 合同没有相关变化时不执行；手动触发 CI 时两项均执行。
-合同 Job 保留原有名称，无相关变化时明确输出无需执行的原因，不将未执行的合同描述为测试通过。
-范围分析失败时，现有完整回归和合同 Job 明确失败，不能因依赖失败而跳过原有必需检查。
-升级验证仍由独立升级入口执行全部合同和两类安装检查。
+本地 Hook 使用 `verify:commit`，按本次提交范围执行必要静态检查与构建。
+改动文件由 `scripts/verification-scope.mjs` 读取，PR CI 通过 `verify:ci` 执行完整静态检查与构建。
 
 项目不维护独立基础版本号；`@hegenai/codexc`、Gateway 和发布 Tag 使用锁定的 Codex CLI
 正式发行版本，候选版和修复版只允许增加受控的 `-rc.N` 或 `-fixN` 后缀。升级提案只认
@@ -67,13 +51,10 @@ CI 的专项范围使用 PR base 到 head 的完整差异，包含新增、删�
 `rust-v<版本>`；生成后仍由 Codex 按 `docs/codex-cli-upgrade.md` 审查和适配。升级时必须
 同时审查 Artifact 的 `public-cli-impact.md` 与 `protocol-impact.md`，前者报告本项目实际转发参数
 及枚举值的新增、删除和变化，后者报告 App Server 生成协议结构；两者不能互相替代。完成升级时必须
-同步更新 `ci.yml` 中 App Server 合同任务安装的 Codex CLI 精确版本。自动提案阶段不修改稳定版
+同步更新 `ci.yml` 中协议检查使用的 Codex CLI 精确版本。自动提案阶段不修改稳定版
 文档，因此将文档索引检查记录为跳过；正式适配后补齐升级指南要求的文档等检查，本地提交运行
-`npm run verify:commit`，PR 由 `npm run verify:ci` 完成完整回归。
+`npm run verify:commit`，PR 由 `npm run verify:ci` 完成完整静态检查与构建。
 
-真实 App Server 合同还覆盖自定义 Responses Provider：两个独立模型目录、配置读取、模型选择与函数工具往返；升级验证复用同一合同。Cline Pass 的隔离 Chat 合同也进入两份执行清单，覆盖工具往返与正文/推理流式条目归属。
-两份清单均包含账户与重置券合同：通过隔离模拟账户和本地 HTTP 服务验证显式额度查询的凭证刷新时间、重置券读取及幂等消费，不使用真实用户凭证或消耗真实重置券。
+Windows Job 的 PowerShell 语法检查包含根目录 `install.ps1`。
 
-Windows Job 的 PowerShell 语法检查包含根目录 `install.ps1`。CLI 帮助冒烟逐项检查顶层服务命令的 `-h` 与 `--help`，任一失败立即终止。选定合同还执行安装器版本同步与失败场景、服务宿主启动/回收及控制器停止失败测试；这些隔离合同不替代真实 Windows 安装和 Desktop 实机验收。
-
-跨平台故障排查遵循根目录 AGENTS.md 的验证规则：安装/打包路径使用工作流锁定的 Node.js 及配套 npm 复现；已准备产物的打包阶段不得隐式重建。Unix socket 夹具在 macOS 使用短 `/tmp` 路径，保持目录权限和清理。必须区分本地验证与当前 PR 提交的远端检查结果，不以重跑、跳过或降低门禁代替定位。
+跨平台故障排查使用工作流锁定的 Node.js 及配套 npm 复现。必须区分本地验证与当前 PR 提交的远端检查结果，不以重跑、跳过或降低门禁代替定位。

@@ -5,13 +5,13 @@
 本指南规定如何在当前 TypeScript 模块化单体中新增通讯渠道。
 目标是通过新增真实 Surface 持续验证现有边界，而不是复制已有渠道、建立插件框架或再次重构核心。
 
-新增渠道应形成一个可独立装配、测试和停止的平台模块，同时继续共享 Application、Conversation
+新增渠道应形成一个可独立装配、验证和停止的平台模块，同时继续共享 Application、Conversation
 Core、Approval、Policy、Session Routing、Storage 和 Event Bus。App Server 仍是 Thread、
 Turn、Item、Goal 和历史的唯一事实来源。
 
 本文区分三类内容：固定架构、模块边界、安全要求和禁止模式是必须遵守的约束；带有具体类型或
 方法名的内容描述当前公开合同；目录拆分和分阶段顺序是实施建议，可以按真实渠道需求裁剪。若新增
-Surface 证明当前公开合同不足，应先单独评审合同、依赖方向和测试变更，再同步更新本指南，不能让
+Surface 证明当前公开合同不足，应先单独评审合同和依赖方向变更，再同步更新本指南，不能让
 平台模块通过内部导入或复制核心逻辑绕过合同。
 
 具体平台设计必须继续服从本指南。当前飞书的组合工厂、身份、输入队列、配置和停止条件见
@@ -52,7 +52,7 @@ Surface -> Application/Core <- Codex Client
 - `storage` 只保存恢复绑定所需的最小状态，不保存消息正文、平台回调原文或完整历史。
 
 不要为新渠道改变上述方向，也不要扩大
-[`tests/module-boundaries.test.ts`](../tests/module-boundaries.test.ts) 的白名单来绕过边界。
+[`check-runtime-boundaries.mjs`](../scripts/check-runtime-boundaries.mjs) 的白名单来绕过边界。
 
 ### Codex 能力门禁
 
@@ -371,15 +371,12 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 - 热加载、重启、重装和配置事件确认语义。
 - 其他 Surface 引起进程重启或重装时，当前 Surface 收到不泄露私有原因的通用通知。
 - 敏感字段、平台错误和未知内部异常不进入日志或外部消息。
-- `module-boundaries.test.ts` 继续通过，不新增协议或具体 Client 泄漏。
+- 模块依赖静态检查通过，不新增协议或具体 Client 泄漏。
 
-平台 SDK 的 Mock 测试只验证 Surface 边界；Application、Core、Approval 和 Routing 继续使用各自
-现有测试。条件允许时增加平台测试租户或沙箱集成测试，但不得依赖真实模型调用完成常规提交门禁。
-
-开发阶段运行受影响的定向测试与 `npm run docs:check`；普通提交由 pre-commit 执行一次按范围选择的 `verify:commit`，PR CI 使用 `verify:ci` 完整回归，不提前重复。
+开发阶段运行受影响的静态检查与 `npm run docs:check`；普通提交由 pre-commit 执行一次按范围选择的 `verify:commit`，PR CI 使用 `verify:ci` 完整静态检查与构建，不提前重复。
 
 并同步更新`index.md` 文档索引、`src/README.md`、`src/surfaces/README.md`、新渠道目录 README、
-测试索引、配置示例与公开 Setup/Doctor 说明。
+配置示例与公开 Setup/Doctor 说明。
 
 ## 禁止模式
 
@@ -389,7 +386,7 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 - 用全局事件广播替代按 `surface + accountId` 的精确路由。
 - 为平台 SDK 类型建立跨模块“公共 DTO”镜像。
 - 为尚未接入的平台建立动态插件系统、自动发现、外部插件 API 或兼容层。
-- 为通过测试扩大模块依赖白名单。
+- 为通过检查扩大模块依赖白名单。
 - 因两个平台命名相似就提前抽取公共渲染器、Bot 基类或万能消息模型。
 - 让 Setup、Doctor、配置热加载或服务管理出现平台专属顶层入口。
 
@@ -403,5 +400,5 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 4. 禁用时保留绑定并停止恢复订阅，撤权时只清理对应 Actor。
 5. 平台网络不会阻塞 App Server Reader，关闭与失败路径有界。
 6. 不新增协议泄漏、平行会话状态或平台专属核心分支。
-7. 文档、索引、配置示例和相关测试与实现一致。
+7. 文档、索引和配置示例与实现一致。
 8. `npm run verify:commit` 全部通过。
