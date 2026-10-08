@@ -26,13 +26,14 @@ import { managedProviderDirectory, managedProviderMarkerPath, readManagedMarker 
 import { readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
 
 const protocolVersion = 5;
-const desktopAppHostProtocolVersion = 1;
+const desktopAppHostProtocolVersion = 2;
+const desktopAppProviderProtocolVersion = 1;
 const providerSettingsProtocolVersion = 1;
 const providerSettingsTimeoutMs = 30_000;
 const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 4_096;
 const connectionTimeoutMs = 1_000;
-const providerIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
+const providerIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 
 export class AppServerSupervisorOwner {
   #server;
@@ -46,18 +47,21 @@ export class AppServerSupervisorOwner {
   #providerSettingsSnapshot;
   #attachDesktopApp;
   #detachDesktopApp;
+  #desktopAppProviderSelectionEnabled;
   #topology;
   #runningProviders = new Set();
   #releasedProviders = new Set();
   #providerLeases = new Map();
   #desktopAppLeases = new Set();
   #desktopAppAttachmentKey;
+  #desktopAppProvider;
+  #desktopAppOperation = Promise.resolve();
   #providerOperations = new Map();
 
   constructor(
     primarySocketPath,
     topology,
-    { ensureProvider, releaseProvider, applyProviderSettings, providerSettingsSnapshot, attachDesktopApp, detachDesktopApp } = {},
+    { ensureProvider, releaseProvider, applyProviderSettings, providerSettingsSnapshot, attachDesktopApp, detachDesktopApp, desktopAppProviderSelectionEnabled = false } = {},
   ) {
     this.#socketPath = appServerSupervisorSocketPath(primarySocketPath);
     this.#topology = topology;
@@ -67,6 +71,7 @@ export class AppServerSupervisorOwner {
     this.#providerSettingsSnapshot = providerSettingsSnapshot;
     this.#attachDesktopApp = attachDesktopApp;
     this.#detachDesktopApp = detachDesktopApp;
+    this.#desktopAppProviderSelectionEnabled = desktopAppProviderSelectionEnabled;
     const listener = (socket) => {
       this.#sockets.add(socket);
       const chunks = [];
@@ -108,10 +113,12 @@ export class AppServerSupervisorOwner {
         runningProviders: [...this.#runningProviders],
         releasedProviders: [...this.#releasedProviders],
         leasedProviders: this.#leasedProviders(),
+        ...(this.#desktopAppProviderSelectionEnabled ? { desktopAppProviderProtocolVersion } : {}),
         ...(process.platform === "darwin" && this.#attachDesktopApp && this.#detachDesktopApp
           ? { desktopAppHostProtocolVersion }
           : {}),
         desktopAppAttached: this.#desktopAppLeases.size > 0,
+        ...(this.#desktopAppLeases.size > 0 ? { desktopAppProvider: this.#desktopAppProvider } : {}),
       })}\n`);
       return;
     }
@@ -119,7 +126,9 @@ export class AppServerSupervisorOwner {
       if (
         process.platform !== "darwin"
         || request.desktopAppHostProtocolVersion !== desktopAppHostProtocolVersion
-        || request.provider !== this.#topology.primaryProvider
+        || this.#topology.primaryProvider !== "openai"
+        || typeof request.provider !== "string"
+        || !providerIds(this.#topology).includes(request.provider)
         || typeof request.pipePath !== "string"
         || request.pipePath.length === 0
         || request.pipePath.length > 1_024
@@ -138,6 +147,7 @@ export class AppServerSupervisorOwner {
       const cancel = () => controller.abort(new Error("Desktop Host 附加已取消"));
       socket.once("close", cancel);
       const attachmentKey = JSON.stringify([
+        request.provider,
         request.appPath,
         request.pipePath,
         request.toolsEnabled,
@@ -145,10 +155,13 @@ export class AppServerSupervisorOwner {
       const removeLease = () => {
         if (!this.#desktopAppLeases.delete(socket)) return;
         if (this.#desktopAppLeases.size > 0 || !this.#detachDesktopApp) return;
-        this.#desktopAppAttachmentKey = undefined;
-        void this.#runProviderOperation(request.provider, async () => {
-          if (this.#desktopAppLeases.size === 0) await this.#detachDesktopApp();
-        }).catch((error) => {
+        void this.#runDesktopAppOperation(() => this.#runProviderOperation(request.provider, async () => {
+          if (this.#desktopAppLeases.size === 0) {
+            await this.#detachDesktopApp();
+            this.#desktopAppAttachmentKey = undefined;
+            this.#desktopAppProvider = undefined;
+          }
+        })).catch((error) => {
           if (!this.#closing) {
             console.error(
               `Codex Desktop App Host 租约清理失败：${
@@ -164,9 +177,9 @@ export class AppServerSupervisorOwner {
           controller.signal.throwIfAborted();
           return (this.#providerLeases.get(request.provider)?.size ?? 0) === 0;
         };
-        await this.#runProviderOperation(request.provider, async () => {
+        await this.#runDesktopAppOperation(() => this.#runProviderOperation(request.provider, async () => {
           if (!canAttach()) {
-            throw new Error("主 OpenAI App Server 正被其他客户端租约占用");
+            throw new Error("目标 App Server 正被其他客户端租约占用");
           }
           if (
             this.#desktopAppLeases.size > 0
@@ -175,19 +188,21 @@ export class AppServerSupervisorOwner {
             throw new Error("另一个 Codex Desktop App Host 租约仍在使用中");
           }
           await this.#attachDesktopApp({
+            provider: request.provider,
             appPath: request.appPath,
             pipePath: request.pipePath,
             toolsEnabled: request.toolsEnabled,
           }, controller.signal, canAttach);
           if (socket.destroyed) {
-            await this.#detachDesktopApp?.();
+            if (this.#desktopAppLeases.size === 0) await this.#detachDesktopApp?.();
             return;
           }
           this.#desktopAppLeases.add(socket);
           this.#desktopAppAttachmentKey = attachmentKey;
+          this.#desktopAppProvider = request.provider;
           this.#releasedProviders.delete(request.provider);
           this.#runningProviders.add(request.provider);
-        });
+        }));
         if (socket.destroyed) return;
         socket.setTimeout(0);
         socket.resume();
@@ -215,6 +230,7 @@ export class AppServerSupervisorOwner {
       if (
         typeof request.provider !== "string"
         || !providerIdPattern.test(request.provider)
+        || !providerIds(this.#topology).includes(request.provider)
         || !this.#ensureProvider
       ) {
         socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
@@ -294,6 +310,7 @@ export class AppServerSupervisorOwner {
       if (
         typeof request.provider !== "string"
         || !providerIdPattern.test(request.provider)
+        || !providerIds(this.#topology).includes(request.provider)
         || !this.#releaseProvider
       ) {
         socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
@@ -355,6 +372,7 @@ export class AppServerSupervisorOwner {
       request?.action !== "ensureProvider"
       || typeof request.provider !== "string"
       || !providerIdPattern.test(request.provider)
+      || !providerIds(this.#topology).includes(request.provider)
       || !this.#ensureProvider
     ) {
       socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
@@ -399,17 +417,23 @@ export class AppServerSupervisorOwner {
     return current;
   }
 
+  #runDesktopAppOperation(operation) {
+    const current = this.#desktopAppOperation.catch(() => undefined).then(operation);
+    this.#desktopAppOperation = current;
+    return current;
+  }
+
   #hasProviderLease(provider) {
     return (this.#providerLeases.get(provider)?.size ?? 0) > 0
       || (
-        provider === this.#topology.primaryProvider
+        provider === this.#desktopAppProvider
         && this.#desktopAppLeases.size > 0
       );
   }
 
   #leasedProviders() {
     const providers = new Set(this.#providerLeases.keys());
-    if (this.#desktopAppLeases.size > 0) providers.add(this.#topology.primaryProvider);
+    if (this.#desktopAppLeases.size > 0) providers.add(this.#desktopAppProvider);
     return [...providers];
   }
 
@@ -446,6 +470,7 @@ export class AppServerSupervisorOwner {
   async #closeInternal() {
     for (const socket of this.#sockets) socket.destroy();
     await this.#server.close();
+    await Promise.allSettled([this.#desktopAppOperation]);
     await Promise.allSettled([...this.#providerOperations.values()]);
   }
 }
@@ -897,10 +922,14 @@ function parseTopology(response) {
       value.desktopAppHostProtocolVersion !== undefined
       && value.desktopAppHostProtocolVersion !== desktopAppHostProtocolVersion
     )
+    || (value.desktopAppProviderProtocolVersion !== undefined
+      && value.desktopAppProviderProtocolVersion !== desktopAppProviderProtocolVersion)
     || (
       value.desktopAppAttached !== undefined
       && typeof value.desktopAppAttached !== "boolean"
     )
+    || (value.desktopAppProvider !== undefined
+      && (!providerIds(value).includes(value.desktopAppProvider) || value.desktopAppAttached !== true))
   ) {
     return undefined;
   }

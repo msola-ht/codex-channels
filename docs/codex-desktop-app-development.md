@@ -3,8 +3,9 @@
 ## 当前结论
 
 目标不是接入 Codex Remote Control，也不是让手机或另一台设备通过配对码控制本机。目标是让同一
-台电脑上的 Codex Desktop App 与 `codex-channels` 同时连接本项目监管的同一个主 OpenAI App
-Server，使 Desktop、渠道和 `codexc remote` 看到同一份 Thread、Turn、Item 与实时通知。
+台电脑上的 Codex Desktop App 与 `codex-channels` 同时连接本项目监管的同一个 App Server。
+默认连接主 OpenAI 实例；切换模式可在启动时指定已配置的 Provider 隔离实例，使 Desktop、渠道和
+`codexc remote` 共享该实例的 Thread、Turn、Item 与实时通知。
 
 当前锁定的 Codex CLI 0.160.1 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
 包含未公开的 WebSocket 与强制 CLI 启动入口。macOS 使用强制 CLI 与受管 stdio Proxy，Windows
@@ -19,18 +20,28 @@ ID、二维码和移动端不进入本方案。
 Codex CLI 0.154.0 由 Desktop 随包的 OpenAI 签名 Node 托管时，同一 Pipe 成功启动
 `codex_app` 0.1.0，并返回 38 个工具且无工具发现错误。这证明共享 App Server 不需要改由 Desktop
 所有，也不需要修改应用包、伪造签名或增加 Pipe Relay；macOS 受管 stdio Proxy 动态交付 Pipe，
-并只重启现有主 App Server 子进程以切换可信父进程链。
+并只重启选中的 App Server 子进程以切换可信父进程链。
 
 实现保留现有 App Server 服务、Provider 代理、指标采集、私有 UDS、Supervisor 和
 `codexc remote` 架构。macOS Desktop 的 JSONL stdio 连接由受管 Proxy 转换为 WebSocket 文本帧，
 再连接现有私有 UDS；Windows
-在主 OpenAI App Server 前使用仅监听回环地址、带随机令牌的 WebSocket 桥。两条路径都不解析
+在选中的 App Server 前使用仅监听回环地址、带随机令牌的 WebSocket 桥。两条路径都不解析
 JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件。
 
 ## 实现与验收状态
 
 - macOS 已验收，操作者于 2026-10-07 确认；使用受管 stdio Proxy、私有 Supervisor Host 租约、签名校验与主实例串行切换。
 - Windows 使用当前用户包探测、受认证回环桥与隔离启动环境，仍为开发预览，未完成实机双向验收。
+- 启动时选择 Provider 隔离实例是新增能力，尚未完成 macOS 或 Windows 实机验收；下述主 OpenAI
+  实例的历史验收不覆盖第三方模型目录、会话继续或内置工具兼容性。
+- 本次 Linux 隔离观察使用真实 0.160.1 App Server，完成回环桥 → Supervisor 租约 →
+  `initialize` / `config/read`：缺省目标持有 OpenAI 租约，显式 `demo` 读取到 `model_provider=demo`
+  并只持有该实例租约；持租约时释放被拒绝，断开后租约清空。未知目标返回 HTTP 400，重复目标、
+  未知参数和错误令牌返回 HTTP 401。未调用模型；该观察不覆盖 Windows Transport 或桌面 UI。
+- 冷启动修复的隔离观察在目标启动前加入 3.4 秒受控等待：约 3.65 秒后进入桌面启动边界，
+  经真实桥完成 0.160.1 `initialize` / `config/read` 并读到 `model_provider=demo`。
+  桌面连接关闭但启动回调未返回时临时租约仍保护目标；命令成功、受控桌面启动失败和桥不可用后
+  租约均清空。该观察替代了 Windows 桌面启动边界，不代表 Windows App 或 Windows Proxy 已实测。
 - 2026-09-16/17 的 macOS 历史实测覆盖 Thread 双向共享、内置工具启动与 App Server 重启恢复；
   实测 CLI 为 0.154.0、ChatGPT 为 `26.908.70816`。这些结果不是当前 CLI 0.160.1 或任意新 App 构建的验收。
 - 本次操作者确认未附新的 CLI 与 Desktop 构建号，保留已有版本记录，不据此声明特定新版本组合已重测。
@@ -81,12 +92,12 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 
 ### 目标
 
-1. Desktop、Gateway 与 `codexc remote` 共享主 OpenAI App Server 的 Thread 和实时状态。
+1. Desktop、Gateway 与 `codexc remote` 共享选中 Provider App Server 的 Thread 和实时状态。
 2. Desktop 新建或继续的空闲 Thread 可被渠道发现和继续；渠道新建或继续的 Thread 可在 Desktop
    中读取和继续。
-3. macOS 与 Windows 使用相同的命令语义并连接同一主 App Server；macOS 使用受管 stdio/UDS，
+3. macOS 与 Windows 使用相同的命令语义并连接选中的 App Server；macOS 使用受管 stdio/UDS，
    Windows 使用受认证回环桥，平台连接边界保持明确分离。
-4. 保留现有 OpenAI Provider 代理、上游指标、Supervisor、私有 UDS 与服务生命周期。
+4. 保留现有 Provider 代理、凭据隔离、上游指标、Supervisor、私有 UDS 与服务生命周期。
 5. App Server 服务重启时关闭当前 Desktop 连接；Desktop 通过自身重连或重新打开恢复，不产生
    第二套会话状态。
 6. 完整兼容验收不能让 Desktop 随包提供的内置 MCP 从可用退化为失败；会话共享与 Desktop 工具
@@ -95,8 +106,9 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 ### 非目标
 
 - 不接入 Remote Control、移动端、二维码、配对码或云端 Environment。
-- 不让 Desktop 连接第三方主 Provider 或按需 Provider 隔离实例；首期只支持主 Provider 为
-  `openai`。
+- 不支持第三方主 Provider；主 Provider 仍必须为 `openai`，第三方仅通过切换模式的已配置隔离实例连接。
+- 不在 Desktop 模型选择器中合并不同 Provider 的模型，不在一次连接内按模型重路由。
+  切换 Provider 必须完全退出 Desktop，再用 `codexc app --provider <ID>` 启动。
 - 不复制 Desktop UI，不让渠道模拟 Desktop 的审批界面，不跨连接转发审批决定。
 - 不支持两端同时向同一活动 Thread 写入。App Server 的活动状态仍是唯一依据；发现活动 Turn 时
   另一端只能观察、排队或等待完成。
@@ -107,7 +119,7 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 
 ```text
 macOS Desktop ─ JSONL stdio ─ 受管 Proxy ─ WebSocket/UDS ─┐
-                                                          ├─ 主 OpenAI App Server
+                                                          ├─ 选中 Provider App Server
 Windows Desktop ─ token WebSocket ─ 回环桥 ─ UDS ─────────┘          ▲
                                                               │
                                                 Gateway / codexc remote
@@ -120,15 +132,19 @@ Desktop 生成、删除、重写或缓存业务消息。macOS Proxy 只在 JSONL
 
 两个平台的每个转发方向最多保留 128 条、合计 128 MiB 的消息，包含正在发送的消息；macOS 未完成的 JSONL 行也限制为 128 MiB。单次发送等待最多 5 秒，容量或超时失败明确终止当前连接，不丢弃消息后继续会话、不自动重放写请求。Windows 桥以 `1013` 通知转发不可用并释放 Transport 与租约；macOS Proxy 返回失败并清理输入监听。恢复连接仍由 Desktop 或操作者处理。
 
-Windows 桥在连接期间持有主 Provider 租约；macOS 带内置工具插件配置的连接持有 Desktop Host
-租约。这些租约存在时，空闲释放不能终止主实例。macOS 未携带插件配置的普通连接直接代理到
-共享主实例，不获取租约，也不负责恢复已释放的实例或阻止空闲释放；`codexc app` 的启动预检
+Windows 桥在连接期间持有选中 Provider 租约；macOS 带内置工具插件配置的连接持有 Desktop Host
+租约。这些租约存在时，空闲释放不能终止目标实例。macOS 未携带插件配置的普通连接直接代理到
+目标实例，不持有长期租约，也不阻止空闲释放；`codexc app` 的启动预检
 会先通过临时租约恢复实例，并在打开 Desktop 前释放该租约。显式关闭插件的 `false` 配置仍走
 Host 租约路径。macOS 最后一个 Host 租约关闭时只清除服务内存中的临时 Pipe 附加状态，不终止
-共享主实例；Windows 桥连接关闭时释放上游 Transport 与租约。App Server 服务关闭时停止接受
+共享实例；Windows 桥连接关闭时释放上游 Transport 与租约。App Server 服务关闭时停止接受
 新连接并有限等待现有生命周期操作。
 
-macOS Host 附加在主 Provider 的串行生命周期操作中恢复已释放的受管实例，再查询权威活动状态，
+桌面退出不会清除已运行子进程的启动环境。旧实例会保留原 Host/Pipe 直到正常空闲释放或后续
+受控重启，切到另一实例也不强制中断旧实例任务；不能据租约释放宣称旧实例内置工具仍可用。
+后续重新启动该实例时不会复用已清除的临时附加状态。
+
+macOS Host 附加串行处理全局 Desktop 目标和目标 Provider 的生命周期，恢复已释放的受管实例，再查询权威活动状态，
 切换前重查普通租约与请求取消；发现外来实例、活动任务或租约占用时拒绝接管。该检查不构成对
 所有外部客户端启动 Turn 的原子锁。可信 Host 与原生 Codex 使用专属进程组，退出超时后的强制
 终止覆盖该组，不影响其他服务。签名校验实际验证签名有效性、可信锚与 OpenAI 身份；Proxy
@@ -161,12 +177,14 @@ Windows 首次启用时在 Gateway 数据目录创建 `credentials/desktop-app-b
   异常或平台消息。
 
 Windows 使用独立的私有凭据文件，不改变 StateStore、指标库或计划任务数据库 Schema。
+本次 Provider 选择不持久化只描述 `codexc app` 启动行为。各实例仍使用共享 Codex Home；
+Desktop 经上游配置 RPC 保存设置时可能写入共享用户配置，而非 Provider 私有 Profile，须纳入实机验收。
 
 ## Windows 回环桥安全边界
 
 1. HTTP Server 只绑定 `127.0.0.1`，只接受精确路径 `/codex-app-server` 的 WebSocket Upgrade。
-2. Upgrade 必须携带精确查询参数 `token`；使用恒定时间比较验证。缺失、重复、格式无效或不匹配
-   均返回通用 `401` 后关闭，不进入 App Server。
+2. Upgrade 必须携带精确查询参数 `token`；使用恒定时间比较验证。可选 `provider` 只能选择已配置
+   的实例，缺省为主实例。重复或未知参数、无效令牌或未配置 Provider 均拒绝，不进入 App Server。
 3. 不接受 HTTP 业务请求、CORS、浏览器 Cookie、代理转发头、子协议或远端绑定。
 4. 日志只记录启动、关闭、连接数量、平台和稳定错误类别，不记录 URL、请求头、帧内容或令牌。
 5. 每个方向串行发送，保持单连接消息顺序；任一方向错误或关闭时关闭另一方向并释放全部资源。
@@ -178,10 +196,10 @@ Windows 使用独立的私有凭据文件，不改变 StateStore、指标库或�
 公开命令 `codexc app`，日常统一使用 `codexc app`，所有层级支持 `-h` / `--help`：
 
 ```text
-codexc app
+codexc app [--provider <Provider ID>]
 codexc app enable [--port <1-65535>]
 codexc app disable
-codexc app status [--json]
+codexc app status [--provider <Provider ID>] [--json]
 ```
 
 ### `enable`
@@ -191,7 +209,8 @@ codexc app status [--json]
 3. Windows 创建或验证私有桥令牌；macOS 不创建令牌。原子写入 `[codex.desktop_app]` 并保留其余
    TOML 注释和字段。
 4. 不写当前用户或系统级持久环境；平台连接参数只由 `codexc app` 注入本次 Desktop 子进程。
-5. 重启 App Server 服务；Windows 继续等待桥就绪，macOS 只依赖 Supervisor 和私有 UDS。
+5. 重启 App Server 服务；Windows 先通过临时主 Provider 租约等待实例就绪，再检查桥连接并释放
+   临时租约；macOS 只依赖 Supervisor 和私有 UDS。
 6. 任一步失败时按修改前快照恢复配置；令牌文件可保留。
 
 ### `disable`
@@ -205,35 +224,50 @@ codexc app status [--json]
 只读报告以下结构化事实：平台是否支持、Desktop 是否安装和运行、兼容入口是否存在、配置是否启用、
 主 Provider 是否为 OpenAI、App Server 服务状态，以及下一步动作。macOS 另报告受管 Host 协议
 能力与当前租约状态，另以 `primaryInstanceState` 报告主实例 `running`、`released` 或 `unknown`，
-不通过查询唤醒实例；`running` 字段仍表示 Desktop 进程。Windows 报告桥端口是否可连接。两个平台都只报告采用单次启动环境，不尝试
+`provider` / `providerInstanceState` 报告指定目标，`desktopAppProvider` 报告当前 macOS Host 租约所属实例。
+不通过查询唤醒实例；`running` 字段仍表示 Desktop 进程。Windows 状态不建立桥连接，避免获取租约
+时恢复实例；共享已启用且令牌可读取时 `bridgeReady` 为 `null`，表示未探测，启动命令才实际检查桥连接。两个平台都只报告采用单次启动环境，不尝试
 读取运行中 Desktop 的进程环境。只有 Windows JSON 输出不带查询参数的回环 URL。
 
 ### `codexc app`
 
+- `--provider` 接受切换模式下配置的精确 Provider ID（包含账户隔离 ID），缺省连接主 OpenAI。
+  参数仅对本次启动生效，不写入 TOML、Desktop 配置或系统环境；普通模型名称和任意 Socket 路径均不接受。
+  选择其他实例不重启整个服务，macOS 需要替换子进程时只处理目标实例。
+  旧服务不支持 Provider 选择能力时拒绝启动并提示重启服务，不静默连接主实例。
 - 尚未启用时，在本机交互终端提示启用共享会重启 App Server、可能中断连接与任务，默认拒绝。
   确认后复用 `enable` 的配置、就绪检查与失败回滚流程，然后启动 App；取消则不修改配置或服务。
   非交互调用必须先显式执行 `enable`。已启用时直接进入启动检查，不重复启用或重启服务。
 - 启用成功后若启动检查或 App 启动失败，保留已生效的共享配置，排除问题后可再次执行 `codexc app`。
 - 先验证原始配置，再进行平台兼容探测和服务检查；不能通过覆盖 Desktop 子表来接受未知字段或不支持的配置版本。
 - Desktop 已运行时拒绝，提示先完全退出；不强制结束用户进程。
-- macOS 在启动前先拒绝仍由 `codexc remote` 持有的主实例租约，再获取临时 Provider 租约，
-  按需恢复空闲释放的主实例，并防止预检期间再次释放；通过官方 `thread/loaded/list`
+- macOS 在启动前先拒绝仍由 `codexc remote` 持有的目标实例租约，再获取临时 Provider 租约，
+  按需恢复空闲释放的目标实例，并防止预检期间再次释放；通过官方 `thread/loaded/list`
   分页枚举全部已加载的持久及临时 Thread，并逐项使用 `thread/read` 读取状态；
   存在活动 Thread 或无法完成只读检查时拒绝启动，不进入
-  会短暂替换主 App Server 子进程的 Pipe 附加阶段。所有路径都关闭临时租约，且必须在打开 Desktop
+  会短暂替换目标 App Server 子进程的 Pipe 附加阶段。所有路径都关闭临时租约，且必须在打开 Desktop
   之前完成，以免阻止后续 Host 附加。Windows 不执行该检查，因为其桥接不替换子进程。
 - macOS 使用 `/usr/bin/open --env CODEX_APP_SERVER_FORCE_CLI=1 --env CODEX_CLI_PATH=<受管入口>
-  -a ChatGPT` 启动，并传入随包资源与签名 Node 路径。受管入口只接受 Desktop 实际提供的工具 Pipe
+  -a ChatGPT` 启动，并传入随包资源、签名 Node 路径和 `CODEX_CONNECT_DESKTOP_PROVIDER`。受管入口只接受 Desktop 实际提供的工具 Pipe
   和内置插件布尔启用值；不使用 `launchctl setenv`，也不连接回环桥。
 - Windows 通过 PowerShell 7 查询当前用户 `OpenAI.Codex` 包，限定包内已验证的
   `app\ChatGPT.exe` 或 `app\Codex.exe`，然后使用直接子进程创建且只修改子进程环境副本；不把
   私有 URL 放入命令行，不委托给已运行的 Explorer，也不写注册表级用户环境。
+- Windows 启动前先获取目标 Provider 的临时租约，按 Supervisor 的有界等待恢复实例，随后才
+  检查桥并启动桌面；临时租约覆盖该过程，成功或失败后均释放。桥自身的连接租约独立持有。
+  桥探测外层等待为 30 秒，覆盖内部最长 15 秒的租约获取及 10 秒的 Windows Proxy 连接阶段，
+  不再用 3 秒探测截断正常启动。实例启动失败与桥连接失败分别报告，不自动重启整套服务。
 - Windows 实机合同未证明包内可执行文件可靠继承环境并保持运行前，不把该平台标为正式支持，也
   不要求注销或重启系统作为成功条件。
 
 ## Thread、Turn 与审批语义
 
 - App Server 仍是唯一事实来源。Desktop、Gateway 和 TUI 各自建立连接并独立订阅 Thread。
+- 连接期间目标 Socket 固定，模型目录来自目标 App Server，不拼接其他实例的模型；本项目不复制
+  历史、不重写 Thread 的 Provider。Socket 选择不是 RPC 层的 Provider 强制隔离：锁定上游允许
+  `thread/list` 显式请求多个 Provider，`thread/resume` 也可能沿用历史的 Provider。Desktop
+  是否会从缓存恢复其他 Provider 的 Thread、传入模型覆盖，以及第三方是否能使用内置工具，均须实机确认。
+  使用时应在目标实例新建会话，不以连接参数推断历史会话已转换 Provider。
 - Desktop 创建、恢复、归档、改名或更新 Thread 后，Gateway 只根据官方通知和后续
   `thread/list` / `thread/read` 观察结果，不从桥连接事件推断业务状态。
 - 渠道自动接续仍执行现有来源、Workspace、活动状态和绑定独占检查；桥不绕过这些检查。
@@ -269,7 +303,7 @@ codexc app status [--json]
 - `open --env` 改为同时设置 `CODEX_APP_SERVER_FORCE_CLI=1` 和受管 `CODEX_CLI_PATH`。受管入口把
   Desktop 的 JSONL stdio 逐条转换为 WebSocket 文本帧并连接现有私有 UDS，同时把动态工具 Pipe
   通过当前用户私有 Supervisor
-  连接交给服务；Desktop 提供的内置插件布尔启用值原样受控应用到共享主实例。该平台不启动回环
+  连接交给服务；Desktop 提供的内置插件布尔启用值原样受控应用到目标实例。该平台不启动回环
   桥，不创建桥令牌，也不解析 JSON-RPC 业务消息。
 - 用户从 Dock 直接重新启动时不会经过受管入口，可能回到 Desktop 私有 App Server；`status` 的 `toolHostAttached` 仅报告当前工具 Host 租约，不能证明任意 Desktop 进程的环境；需通过 `codexc app` 启动。
 
@@ -302,12 +336,12 @@ codexc app status [--json]
 - `scripts/desktop-app-command.mjs` 与声明文件：平台化兼容探测、配置事务、服务控制、状态与单次环境
   启动；macOS 不读取桥令牌或探测桥端口。
 - `scripts/desktop-app-proxy.mjs`：macOS Desktop 的受管 CLI 入口；只接受 App Server 启动调用，
-  无内置工具插件配置时直接连接共享主实例，带配置时先获取 Desktop Host 租约；在标准输入输出
-  与主 App Server Unix WebSocket 之间转换文本消息，不解析 JSON-RPC 业务字段。
+  校验本次启动的 Provider，无内置工具插件配置时连接目标实例，带配置时先获取 Desktop Host 租约；在标准输入输出
+  与目标 App Server Unix WebSocket 之间转换文本消息，不解析 JSON-RPC 业务字段。
 - `runtime/desktop-app-host.mjs` 与声明文件：校验 Desktop 动态 Pipe、签名 Node 和精确 Codex 原生
-  可执行文件，并用签名 Node 托管主 App Server 子进程；动态 Pipe 状态只保存在服务内存中。
+  可执行文件，并用签名 Node 托管目标 App Server 子进程；动态 Pipe 状态只保存在服务内存中。
 - `runtime/app-server-supervisor.mjs` 与声明文件：增加有界、独立能力版本化的 macOS Desktop Host
-  租约，串行切换主 App Server 子进程并等待原私有 UDS 恢复就绪；租约阻止空闲释放，最后一个租约
+  租约，串行切换目标 App Server 子进程并等待原私有 UDS 恢复就绪；租约阻止空闲释放，最后一个租约
   关闭后清除未来启动使用的临时附加状态。
 - `scripts/windows-desktop-app-inspect.ps1`：只读查询当前用户安装包、固定包内可执行文件和同路径
   进程状态，不读取或修改其他用户与应用目录。
@@ -320,12 +354,12 @@ codexc app status [--json]
 
 ## macOS 工具 Host 生命周期
 
-Supervisor 只接受当前用户、主 Provider `openai`、已启用配置、同属当前用户的 Unix Socket Pipe，
+Supervisor 只接受当前用户、已配置的目标 Provider、已启用配置、同属当前用户的 Unix Socket Pipe，
 以及正式 ChatGPT Bundle 内固定的 OpenAI 签名 Node。Codex 原生可执行文件须匹配项目锁定 CLI
 版本并属于 OpenAI Team；这不是 Desktop App 版本白名单，App 通过实际入口和签名探测。
 
-首次附加与不同 Pipe 的切换串行重启主 App Server 子进程，等待原 UDS 恢复后才返回成功。
-同一 Pipe 重连不重复切换。启动命令先检查主实例租约和全部已加载 Thread，活动或状态未知时
+首次附加与不同 Pipe 的切换串行重启目标 App Server 子进程，等待原 UDS 恢复后才返回成功。
+同一 Provider、同一 Pipe 重连不重复切换，另一个目标仍持有 Host 租约时拒绝附加。启动命令先检查目标实例租约和全部已加载 Thread，活动或状态未知时
 失败关闭；切换会短暂断连，Gateway、Desktop 与终端依赖各自重连逻辑恢复。
 
 动态 Pipe、Bundle 路径与附加状态只保存在进程内。服务重启先按普通模式就绪，Desktop 重新启动
@@ -343,8 +377,8 @@ Supervisor 只接受当前用户、主 Provider `openai`、已启用配置、同
 3. Desktop 与渠道能够双向发现并继续对方创建的空闲 Thread，且看到同一 Thread ID 与 Turn 结果。
 4. 活动 Thread 不发生双写；审批仍由发起 Turn 的客户端处理。
 5. Provider 指标、主实例监管、空闲释放、`codexc remote` 和 Gateway 重启恢复按原有边界工作。
-6. 服务停止、macOS Host 租约关闭、桥连接断开和 Windows Proxy 退出后没有遗留监听、租约或子进程；
-   失效 Pipe 不得用于后续主实例启动。
+6. 服务停止、桥连接断开和 Windows Proxy 退出后清理其所属监听、租约和转发子进程；macOS Host
+   租约关闭时保留仍运行的共享实例，按前述空闲释放策略管理。失效 Pipe 不得用于后续实例启动。
 7. 日志、状态、错误、JSON、配置与平台消息中均不出现桥令牌或完整 URL。
 8. macOS 与 Windows 各自在真实 Desktop 上通过；任一平台未通过时必须单独标为预览或不支持，
    不能宣称全平台完成。
@@ -380,6 +414,6 @@ Supervisor 只接受当前用户、主 Provider `openai`、已启用配置、同
 
 ## 私有入口变化时的处置
 
-macOS 当前采用 OpenAI 签名 Node 托管共享主 App Server、受管 stdio Proxy 交付动态 Pipe 的路径。
+macOS 当前采用 OpenAI 签名 Node 托管选中 App Server、受管 stdio Proxy 交付动态 Pipe 的路径。
 若官方私有入口或签名信任链发生变化，停止启用并等待明确的上游合同；不伪造签名、不修改应用包，
 也不自动降级成缺失内置工具的“完整兼容”模式。Windows 仍须单独实机验收。

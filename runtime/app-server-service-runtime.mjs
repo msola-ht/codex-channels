@@ -369,12 +369,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         await prepareAppServerSocketPaths([socketPath]);
         settingsSnapshots.delete(provider);
         const snapshot = prepareProviderSettings(provider);
+        const attachment = desktopAppAttachment?.provider === provider ? desktopAppAttachment : undefined;
         const primaryAppServerArguments = [
           ...primaryArguments,
-          ...(desktopAppAttachment
+          ...(attachment
             ? [
                 "-c",
-                `${macDesktopAppPluginEnabledConfigKey}=${desktopAppAttachment.toolsEnabled}`,
+                `${macDesktopAppPluginEnabledConfigKey}=${attachment.toolsEnabled}`,
               ]
             : []),
           "app-server",
@@ -386,9 +387,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           env: primaryChildEnvironment,
           cwd: defaultWorkspace.cwd,
         };
-        const child = desktopAppAttachment
+        const child = attachment
           ? spawnMacDesktopHostedCodex(
-              desktopAppAttachment,
+              attachment,
               primaryAppServerArguments,
               primarySpawnOptions,
             )
@@ -469,19 +470,25 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           provider,
           providerBaseUrl,
         );
-        child = spawnCodexProcess(runtime.environment.CODEX_BINARY, [
+        const attachment = desktopAppAttachment?.provider === provider ? desktopAppAttachment : undefined;
+        const managedAppServerArguments = [
           ...argumentsList,
+          ...(attachment ? ["-c", `${macDesktopAppPluginEnabledConfigKey}=${attachment.toolsEnabled}`] : []),
           "app-server",
           "--listen",
           `unix://${managed.socketPath}`,
-        ], {
+        ];
+        const managedSpawnOptions = {
           stdio: "inherit",
           env: {
             ...withoutManagedProviderApiKeys(runtime.environment),
             ...managed.runtime.childEnvironment,
           },
           cwd: defaultWorkspace.cwd,
-        }, runtime.environment);
+        };
+        child = attachment
+          ? spawnMacDesktopHostedCodex(attachment, managedAppServerArguments, managedSpawnOptions)
+          : spawnCodexProcess(runtime.environment.CODEX_BINARY, managedAppServerArguments, managedSpawnOptions, runtime.environment);
         children.push(child);
         childrenByProvider.set(provider, child);
         await waitForAppServer(
@@ -626,7 +633,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     confirmProviderSettings(provider, snapshot);
     return { applied: true, changed: true };
   };
-  const attachDesktopApp = async ({ appPath, pipePath, toolsEnabled }, signal, canAttach) => {
+  const attachDesktopApp = async ({ provider, appPath, pipePath, toolsEnabled }, signal, canAttach) => {
     if (
       process.platform !== "darwin"
       || validatedCodex.desktop_app?.enabled !== true
@@ -634,38 +641,43 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     ) {
       throw new Error("macOS Codex Desktop App 共享未启用");
     }
-    const nextAttachment = validateMacDesktopAppAttachment({
+    const managed = managedByProvider.get(provider);
+    if (provider !== primaryProvider && !managed) {
+      throw new Error("Desktop 目标 Provider 未配置独立 App Server");
+    }
+    const targetSocket = provider === primaryProvider ? socketPath : managed.socketPath;
+    const nextAttachment = { ...validateMacDesktopAppAttachment({
       appPath,
       pipePath,
       toolsEnabled,
       codexBinary: runtime.environment.CODEX_BINARY,
       environment: runtime.environment,
-    });
-    await instanceLaunches.get(primaryProvider);
+    }), provider };
+    await instanceLaunches.get(provider);
     signal.throwIfAborted();
-    const ensureManagedPrimaryInstance = async () => {
-      if (!childrenByProvider.has(primaryProvider)
-        && await appServerSocketAcceptsWebSocket(socketPath)) {
-        throw new Error("主 OpenAI App Server 不受当前服务监管");
+    const ensureManagedTargetInstance = async () => {
+      if (!childrenByProvider.has(provider)
+        && await appServerSocketAcceptsWebSocket(targetSocket)) {
+        throw new Error("Desktop 目标 App Server 不受当前服务监管");
       }
-      await ensureInstance(primaryProvider);
-      if (!childProcessIsRunning(childrenByProvider.get(primaryProvider))) {
-        throw new Error("主 OpenAI App Server 不受当前服务监管");
+      await ensureInstance(provider);
+      if (!childProcessIsRunning(childrenByProvider.get(provider))) {
+        throw new Error("Desktop 目标 App Server 不受当前服务监管");
       }
-      supervisorOwner.markRunning(primaryProvider);
+      supervisorOwner.markRunning(provider);
     };
     // An idle release is still managed: restore the child before querying its
     // authoritative state. Never take over a live socket owned by another process.
-    await ensureManagedPrimaryInstance();
+    await ensureManagedTargetInstance();
     signal.throwIfAborted();
-    if (desktopAppAttachment?.key === nextAttachment.key) {
-      if (!canAttach()) throw new Error("主 OpenAI App Server 正被其他客户端租约占用");
+    if (desktopAppAttachment?.provider === provider && desktopAppAttachment.key === nextAttachment.key) {
+      if (!canAttach()) throw new Error("Desktop 目标 App Server 正被其他客户端租约占用");
       return;
     }
     const { CodexAppServerClient, createAppServerTransport, JsonRpcClient } = await import("../dist/codex-client/index.js");
     signal.throwIfAborted();
     const client = new CodexAppServerClient(new JsonRpcClient(createAppServerTransport(
-      { kind: "local-app-server", socketPath },
+      { kind: "local-app-server", socketPath: targetSocket },
       { codexBinary: runtime.environment.CODEX_BINARY, connectTimeoutMs: 3_000 },
     ), 5_000), { sandbox: "read-only" });
     const cancel = () => { void client.close().catch(() => undefined); };
@@ -674,7 +686,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       await client.connect();
       signal.throwIfAborted();
       if (await client.countActiveLoadedThreads() > 0) {
-        throw new Error("主 OpenAI App Server 仍有活动任务，不能附加 Desktop Host");
+        throw new Error("Desktop 目标 App Server 仍有活动任务，不能附加 Desktop Host");
       }
     } finally {
       signal.removeEventListener("abort", cancel);
@@ -682,30 +694,32 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     }
     // Pending Remote leases are registered before their queued ensure. Check
     // again after the RPC read; this does not freeze Turns from external clients.
-    if (!canAttach()) throw new Error("主 OpenAI App Server 正被其他客户端租约占用");
+    if (!canAttach()) throw new Error("Desktop 目标 App Server 正被其他客户端租约占用");
     signal.throwIfAborted();
     const previousAttachment = desktopAppAttachment;
-    const released = await releaseInstance(primaryProvider);
-    if (!released) {
-      throw new Error("主 OpenAI App Server 不受当前服务监管");
-    }
-    supervisorOwner.markReleased(primaryProvider);
-    desktopAppAttachment = nextAttachment;
     try {
-      await ensureManagedPrimaryInstance();
+      const released = await releaseInstance(provider);
+      if (!released) {
+        throw new Error("Desktop 目标 App Server 不受当前服务监管");
+      }
+      supervisorOwner.markReleased(provider);
+      if (!canAttach()) throw new Error("Desktop 目标 App Server 正被其他客户端租约占用");
+      signal.throwIfAborted();
+      desktopAppAttachment = nextAttachment;
+      await ensureManagedTargetInstance();
     } catch (error) {
       desktopAppAttachment = previousAttachment;
       let recoveryError;
       try {
-        await releaseInstance(primaryProvider);
-        await ensureManagedPrimaryInstance();
+        await releaseInstance(provider);
+        await ensureManagedTargetInstance();
       } catch (recoveryFailure) {
         recoveryError = recoveryFailure;
       }
       if (recoveryError) {
         throw new AggregateError(
           [error, recoveryError],
-          "Desktop Host 附加失败，且主 App Server 未能恢复",
+          "Desktop Host 附加失败，且目标 App Server 未能恢复",
           { cause: error },
         );
       }
@@ -807,6 +821,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         providerSettingsSnapshot: provider => settingsSnapshots.get(provider),
         attachDesktopApp,
         detachDesktopApp,
+        desktopAppProviderSelectionEnabled: validatedCodex.desktop_app?.enabled === true
+          && primaryProvider === "openai",
       },
     );
     await supervisorOwner.start();
@@ -829,6 +845,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         port: validatedCodex.desktop_app.port,
         socketPath,
         primaryProvider,
+        providerSocketPaths: Object.fromEntries([...managedByProvider]
+          .map(([provider, managed]) => [provider, managed.socketPath])),
         codexBinary: runtime.environment.CODEX_BINARY,
         dataDir: runtime.dataDir,
         onEvent: (event) => {

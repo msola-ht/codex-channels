@@ -322,19 +322,26 @@ codexc remote --profile sf-ds-<账户> resume
 
 ### Codex Desktop App 共享（macOS / Windows 预览）
 
-同一台 Mac 或 Windows 电脑上的 ChatGPT Desktop App 可以连接主 OpenAI App Server。macOS 使用
+同一台 Mac 或 Windows 电脑上的 ChatGPT Desktop App 默认连接主 OpenAI App Server，也可在启动时
+选择切换模式下已配置的 Provider 隔离实例。macOS 使用
 受管 stdio Proxy 连接现有私有 UDS；Windows 使用受认证的本机回环桥。启用前必须完全退出
 ChatGPT App，并确保主 Provider 是 OpenAI、App Server 后台服务已经安装；Windows 还需要
 PowerShell 7 和当前用户安装的 `OpenAI.Codex` 包：
 
 ```bash
 codexc app
+codexc app --provider <Provider-ID>
 ```
 
 首次运行会询问是否启用共享，并说明重启 App Server 可能中断现有连接与任务；默认拒绝。
 确认后自动启用共享并启动 App，取消则不修改配置或服务。以后每次都使用同一命令启动，
 不再询问或执行启用步骤；从 Dock 或开始菜单直接打开不会继承本次共享端点。
-需要诊断时使用 `codexc app status`；非交互启用或指定 Windows 桥端口时，
+`--provider` 使用已配置的精确 Provider ID；省略时仍连接 OpenAI，不记住上次选择，也不修改用户配置。
+切换目标前必须完全退出 Desktop，再执行对应命令。一次桌面连接固定到一个 Provider 的实例，
+本项目不会合并不同 Provider 的模型或转移会话历史。上游恢复历史可能沿用历史 Provider，
+桌面缓存和模型覆盖仍待实机验证；应在目标实例新建会话，不能认为旧会话已转换 Provider。选择目标不重启整个服务；
+macOS 需要附加工具 Host 时只短暂重启目标实例。旧服务缺少选择能力时会提示先重启服务。
+需要诊断时使用 `codexc app status [--provider <Provider-ID>]`；非交互启用或指定 Windows 桥端口时，
 使用 `codexc app enable [--port <端口>]`，再执行 `codexc app`。
 关闭功能前同样先完全退出 App，再执行：
 
@@ -344,27 +351,31 @@ codexc app disable
 
 `status --json` 保持脱敏。Windows 只输出不带令牌的回环地址；macOS 的 `port`、`endpoint`、
 `tokenReady` 和 `bridgeReady` 不参与连接并返回空值或 `false`，另以 `toolHostSupported` 报告当前
-App Server 服务是否支持受管入口。`toolHostAttached` 只在 Desktop 已交付当前工具 Pipe 且 Host
+App Server 服务是否支持受管入口。`toolHostAttached` 只在查询目标对应的 Desktop 已交付当前工具 Pipe 且 Host
 租约仍连接时为 `true`。`running` 指桌面 App 进程；`primaryInstanceState` 另报告主 App Server
-实例的 `running`、`released` 或 `unknown` 状态。状态查询不会唤醒已释放的实例。
-共享功能只支持主 OpenAI App Server，不接入
-Remote Control、手机配对或第三方 Provider。Desktop 的连接环境属于未公开兼容入口，当前功能是
+实例的 `running`、`released` 或 `unknown` 状态；`provider` 和 `providerInstanceState` 报告查询目标，
+`desktopAppProvider` 报告 macOS 当前 Host 租约所属实例。状态查询不会唤醒已释放的实例。
+Windows 状态不建立桥连接；共享启用且令牌可读取时 `bridgeReady: null` 表示未探测，实际连接检查在启动时执行。
+共享功能要求主 Provider 为 OpenAI，第三方通过切换模式的隔离实例接入；不接入
+Remote Control 或手机配对。Desktop 的连接环境属于未公开兼容入口，当前功能是
 预览；构建不兼容时命令会拒绝启用。
 
-Desktop 的 macOS 平台已由操作者确认验收，Windows 尚未验收；版本记录与范围见
+主 OpenAI 实例的 macOS 路径已由操作者确认验收，Windows 尚未验收；新增 Provider 选择在两个平台均未实机验收。
+版本记录与范围见
 [Desktop 验收状态](codex-desktop-app-development.md#实现与验收状态)。
 macOS 上使用 ChatGPT `26.908.70816` 的既有实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
 Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
-私有 UDS，并在首次附加当前工具 Pipe 时短暂重启主 App Server 子进程，以 OpenAI 签名的 Desktop
+私有 UDS，并在首次附加当前工具 Pipe 时短暂重启目标 App Server 子进程，以 OpenAI 签名的 Desktop
 Node 托管项目锁定的 Codex CLI；开发基线为 0.160.1，既有私有 Pipe 与签名链实机验收使用 0.154.0，
-升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到共享主实例，
-Host 租约存在时空闲释放不会停止主实例。主实例已空闲释放时，`codexc app` 会先获取临时租约，
+升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到目标实例，
+Host 租约存在时空闲释放不会停止目标实例。目标实例已空闲释放时，`codexc app` 会先获取临时租约，
 按需恢复实例并保护启动预检，再通过 App Server 的官方 `thread/loaded/list` 和 `thread/read`
 检查全部已加载的持久及临时 Thread；临时租约会在打开 Desktop 前释放。发现活动 Thread、
-`codexc remote` 主实例租约，或无法完成
+`codexc remote` 目标实例租约，或无法完成
 只读状态检查时都会拒绝启动，不会进入子进程切换。隔离实测已经确认该进程链可启动 `codex_app`。
 macOS 已有验收结论；由于连接环境属于未公开兼容入口，功能仍保留预览定位，后续构建变化需按实际影响复核。
-Windows 只查询当前用户的正式安装包，并直接创建带单次环境的包内 Desktop 子进程，
+Windows 先以临时 Provider 租约等待目标实例就绪，再检查桥并启动桌面，成功或失败后释放临时租约。
+启动失败时会区分实例未就绪和桥连接失败，不自动重启服务。它只查询当前用户的正式安装包，并直接创建带单次环境的包内 Desktop 子进程，
 不写当前用户或系统级持久环境；Windows 的会话双向互通及内置工具兼容均尚未实机验收，不能据此
 视为正式平台支持。
 

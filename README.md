@@ -64,6 +64,7 @@ codexc webui                 # 启动本地指标与设置 WebUI
 codexc update                # 更新受管源码、同步配套 CLI 并校验当前数据库
 codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc app      # 启动共享 Desktop App；首次确认后自动启用（预览）
+codexc app --provider <Provider-ID> # 本次连接已配置的隔离实例；切换前退出 Desktop（预览）
 ```
 
 首次接入使用 `setup`，日常设置使用 `config`，数据维护使用 `cleanup`。清理菜单的五项操作、服务启停要求和会话归档示例见[本机清理与归档](docs/user-guide.md#本机清理与归档)。在聊天渠道发送 `/help` 查看可用命令。

@@ -15,15 +15,16 @@
   前台监管与 Gateway 服务子进程自行解析，避免自动发现结果变成固定环境覆盖。需要在配置损坏时仍可运行的服务恢复
   命令使用独立的最小控制环境。
 - `desktop-app-command.mjs` / `desktop-app-command.d.mts`：实现公开 `codexc app` 的严格
-  参数、只读状态、macOS ChatGPT Bundle 与 Windows 当前用户 `OpenAI.Codex` 包兼容探测、配置
-  写入与回滚、App Server 服务重启、Windows 受认证桥就绪探测和单次环境启动；状态不输出桥令牌，两个
+  参数、单次启动 Provider 选择、只读状态、macOS ChatGPT Bundle 与 Windows 当前用户 `OpenAI.Codex` 包兼容探测、配置
+  写入与回滚、App Server 服务重启、Windows 目标实例临时租约、受认证桥就绪探测和单次环境启动；Windows
+  租约覆盖探测与启动并在所有结果下释放，状态不输出桥令牌，两个
   平台均明确标为预览。macOS 启动时改用受管 stdio Proxy，不再依赖桥端口或令牌，并单独报告受管
   入口能力及内置工具 Host 是否已附加；启动前持有临时 Provider 租约，按需恢复已释放的实例，
   通过官方已加载 Thread 清单和逐项状态读取检查持久及临时会话，并在活动 Turn 或 `codexc remote`
-  主实例租约存在时拒绝会触发子进程切换的启动；打开 Desktop 前释放临时租约。
+  目标实例租约存在时拒绝会触发子进程切换的启动；打开 Desktop 前释放临时租约。
   macOS 的具体构建实机验收边界见 `docs/codex-desktop-app-development.md`，Windows 尚未实机验收。
 - `desktop-app-proxy.mjs`：只由 macOS Desktop 的 `CODEX_CLI_PATH` 启动；解析并受控传递 Desktop
-  内置插件的布尔启用值；无插件配置时不获取租约，直接连接共享主实例，带配置时把动态工具 Pipe
+  内置插件的布尔启用值和本次 Provider；无插件配置时恢复目标实例但不持有长期租约，带配置时把动态工具 Pipe
   通过私有 Supervisor Host 租约交给服务，显式 `false` 仍走 Host 租约路径。把 Desktop JSONL
   stdio 逐条转换为 WebSocket 文本帧并连接现有私有 UDS，自身退出时清理 Proxy 和持有的租约，
   不终止共享 App Server。

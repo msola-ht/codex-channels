@@ -1,12 +1,17 @@
 import { serviceCommandTarget, serviceTargetUsage as internalServiceTargetUsage } from "../runtime/service-targets.mjs";
 
-export const desktopAppCommandUsage = `用法：codexc app [enable|disable|status]
+export const desktopAppCommandUsage = `用法：codexc app [--provider <Provider ID>]
+      codexc app enable [--port <端口>]
+      codexc app disable
+      codexc app status [--provider <Provider ID>] [--json]
 
   不带子命令             启动 Desktop App；首次使用确认后自动启用共享
+  --provider Provider ID  仅本次启动选择已配置的完整 Provider ID；省略时使用主 OpenAI
   enable [--port 端口]   单独启用共享或指定桥端口，并重启 App Server 服务
   disable                禁用共享连接并重启 App Server 服务
-  status [--json]        只读检查 Desktop、配置和连接状态
+  status                 只读检查 Desktop、配置和所选 Provider 连接状态
 
+启动前须完全退出 Desktop；Provider 选择不保存，不修改聊天渠道或原生 TUI 绑定。
 日常只需 codexc app。首次启用会重启 App Server，可能中断现有连接与任务；默认不确认。`;
 
 export const timezoneCommandUsage = `用法：codexc timezone [<IANA 时区>|--system] [--json]

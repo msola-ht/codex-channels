@@ -19,6 +19,7 @@ import { terminateChildProcess } from "./process-lifecycle.mjs";
 const bridgeHost = "127.0.0.1";
 const bridgePath = "/codex-app-server";
 const bridgeTokenPattern = /^[A-Za-z0-9_-]{43}$/u;
+const providerIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 const maximumConnections = 4;
 const maximumPayloadBytes = 128 * 1024 * 1024;
 const maximumQueuedMessages = 128;
@@ -55,15 +56,26 @@ export async function startDesktopAppBridge({
   port,
   socketPath,
   primaryProvider,
+  providerSocketPaths = {},
   codexBinary,
   dataDir,
   token,
   createTransport,
-  acquireLease = () => acquireAppServerProviderLease(socketPath, primaryProvider),
+  acquireLease = (provider) => acquireAppServerProviderLease(socketPath, provider),
   onEvent = () => undefined,
 }) {
   if (primaryProvider !== "openai") {
     throw new Error("Codex Desktop App 共享只支持 OpenAI 主 Provider");
+  }
+  const socketPaths = new Map([[primaryProvider, socketPath]]);
+  for (const [provider, targetSocketPath] of Object.entries(providerSocketPaths)) {
+    if (!providerIdPattern.test(provider)
+      || typeof targetSocketPath !== "string" || targetSocketPath.length === 0
+      || targetSocketPath.includes("\0")
+      || (provider === primaryProvider && targetSocketPath !== socketPath)) {
+      throw new Error("Codex Desktop App Provider Socket 映射无效");
+    }
+    socketPaths.set(provider, targetSocketPath);
   }
   const bridgeToken = token ?? loadOrCreateDesktopAppBridgeToken(dataDir);
   let transportFactory = createTransport;
@@ -71,8 +83,8 @@ export async function startDesktopAppBridge({
     const { createAppServerTransport } = await import(
       "../dist/codex-client/index.js"
     );
-    transportFactory = () => createAppServerTransport(
-      { kind: "local-app-server", socketPath },
+    transportFactory = (provider) => createAppServerTransport(
+      { kind: "local-app-server", socketPath: socketPaths.get(provider) },
       {
         codexBinary,
         createCodexProcessInvocation: (args) =>
@@ -84,6 +96,8 @@ export async function startDesktopAppBridge({
   const bridge = new DesktopAppBridge({
     port,
     token: bridgeToken,
+    primaryProvider,
+    providers: [...socketPaths.keys()],
     createTransport: transportFactory,
     acquireLease,
     onEvent,
@@ -179,6 +193,8 @@ export async function proxyDesktopAppStdioToUnixSocket({
 export class DesktopAppBridge {
   #port;
   #token;
+  #primaryProvider;
+  #providers;
   #createTransport;
   #acquireLease;
   #onEvent;
@@ -190,7 +206,7 @@ export class DesktopAppBridge {
   #closing = false;
   #closePromise;
 
-  constructor({ port, token, createTransport, acquireLease, onEvent = () => undefined }) {
+  constructor({ port, token, primaryProvider = "openai", providers = [primaryProvider], createTransport, acquireLease, onEvent = () => undefined }) {
     if (!Number.isInteger(port) || port < 1 || port > 65_535) {
       throw new Error("Codex Desktop App 桥端口必须是 1..65535 的整数");
     }
@@ -202,6 +218,13 @@ export class DesktopAppBridge {
     }
     this.#port = port;
     this.#token = token;
+    if (primaryProvider !== "openai" || !Array.isArray(providers)
+      || !providers.includes(primaryProvider)
+      || providers.some(provider => typeof provider !== "string" || !providerIdPattern.test(provider))) {
+      throw new Error("Codex Desktop App Provider 列表无效");
+    }
+    this.#primaryProvider = primaryProvider;
+    this.#providers = new Set(providers);
     this.#createTransport = createTransport;
     this.#acquireLease = acquireLease;
     this.#onEvent = onEvent;
@@ -263,10 +286,15 @@ export class DesktopAppBridge {
       this.#onEvent({ type: "rejected", reason: "protocol" });
       return;
     }
-    const token = authenticatedToken(request.url, this.#token);
-    if (token === undefined) {
+    const selection = authenticatedProvider(request.url, this.#token, this.#primaryProvider);
+    if (selection === undefined) {
       rejectUpgrade(socket, 401, "Unauthorized");
       this.#onEvent({ type: "rejected", reason: "authentication" });
+      return;
+    }
+    if (!this.#providers.has(selection.provider)) {
+      rejectUpgrade(socket, 400, "Bad Request");
+      this.#onEvent({ type: "rejected", reason: "provider" });
       return;
     }
     if (this.#pending.size + this.#sessions.size >= maximumConnections) {
@@ -276,6 +304,7 @@ export class DesktopAppBridge {
     }
     const attempt = {
       socket,
+      provider: selection.provider,
       transport: undefined,
       lease: undefined,
       transportClosed: false,
@@ -291,9 +320,9 @@ export class DesktopAppBridge {
   async #acceptUpgrade(attempt, request, head) {
     let handedOff = false;
     try {
-      attempt.lease = await this.#acquireLease();
+      attempt.lease = await this.#acquireLease(attempt.provider);
       if (this.#closing || attempt.socket.destroyed) return;
-      attempt.transport = await this.#createTransport();
+      attempt.transport = await this.#createTransport(attempt.provider);
       await attempt.transport.connect();
       if (this.#closing || attempt.socket.destroyed) return;
       this.#webSocketServer.handleUpgrade(
@@ -530,7 +559,7 @@ function readDesktopLines(input, onLine, onFailure, onEnd) {
   };
 }
 
-function authenticatedToken(requestUrl, expectedToken) {
+function authenticatedProvider(requestUrl, expectedToken, primaryProvider) {
   let parsed;
   try {
     parsed = new URL(requestUrl ?? "", `http://${bridgeHost}`);
@@ -539,15 +568,18 @@ function authenticatedToken(requestUrl, expectedToken) {
   }
   if (parsed.pathname !== bridgePath) return undefined;
   const tokens = parsed.searchParams.getAll("token");
+  const providers = parsed.searchParams.getAll("provider");
   if (
-    [...parsed.searchParams.keys()].length !== 1
+    [...parsed.searchParams.keys()].some(key => key !== "token" && key !== "provider")
     || tokens.length !== 1
+    || providers.length > 1
+    || (providers.length === 1 && !providerIdPattern.test(providers[0]))
     || !bridgeTokenPattern.test(tokens[0])
   ) return undefined;
   const actual = Buffer.from(tokens[0], "utf8");
   const expected = Buffer.from(expectedToken, "utf8");
   return actual.length === expected.length && timingSafeEqual(actual, expected)
-    ? tokens[0]
+    ? { provider: providers[0] ?? primaryProvider }
     : undefined;
 }
 

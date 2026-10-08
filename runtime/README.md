@@ -97,13 +97,13 @@
   `codex_app_server_daemon` 握手，不改变 App Server 进程级 originator 或 UA 后缀。
 - `desktop-app-bridge.mjs` / `desktop-app-bridge.d.mts`：在 Windows 功能显式启用时，为 Codex Desktop App
   提供只绑定 `127.0.0.1` 的受令牌保护 WebSocket 桥；每个下游连接复用现有跨平台 App Server
-  Transport 与主 Provider 租约，只转发有序文本帧，不解析 JSON-RPC 或保存会话状态。Windows
+  Transport 与目标 Provider 租约，认证后只允许选择配置内的实例，只转发有序文本帧，不解析 JSON-RPC 或保存会话状态。Windows
   仍在锁定 Codex CLI 的裸字节 `app-server proxy --sock` 之上建立 WebSocket 并连接私有 UDS；同一
   模块还供 macOS 受管入口把 Desktop JSONL stdio 与 Unix WebSocket 文本帧按消息边界双向转换，
   连接前复用统一私有 Socket 校验，并使用校验后的物理目标。
 - `desktop-app-host.mjs` / `desktop-app-host.d.mts`：只在 macOS Desktop Host 租约附加时校验当前
   用户私有工具 Pipe、正式 ChatGPT Bundle 的 OpenAI 签名 Node、项目锁定版本的 OpenAI 签名
-  Codex 原生可执行文件，实际验证签名有效性及可信身份，并用签名 Node 托管原主 App Server；
+  Codex 原生可执行文件，实际验证签名有效性及可信身份，并用签名 Node 托管选中的 App Server；
   Host 与原生子进程使用专属进程组，终止信号和超时强杀覆盖该组。只接受 Desktop 明确传入的内置插件
   布尔启用值，动态 Pipe 与附加状态不落盘。
 - `terminal-identity.mjs`：按当前锁定 Codex CLI 的终端探测顺序从进程环境推导模型上游
@@ -148,7 +148,7 @@
   各平台监听与端点清理统一委托 `private-ipc.mjs`；关闭仍先销毁租约连接，再等待在途 Provider 操作，关闭后拒绝重启同一 Owner。
   对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供主 App Server 与受控 Provider 的按需
   启动、释放与 Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`），
-  并为 macOS Desktop 受管 stdio Proxy 提供带独立能力版本的可信 Host 租约；该租约阻止主实例被
+  并为 macOS Desktop 受管 stdio Proxy 提供带独立能力版本的可信 Host 租约；全局串行附加到选中的 Provider，该租约阻止目标实例被
   空闲释放，最后一个租约关闭后清除未来启动所用的临时 Pipe 附加状态；
   拓扑同时区分已配置、运行中、主动释放和持有租约的实例。租约由私有 Socket 连接持有，断开时自动撤销，
   存在租约时拒绝释放；同一实例的启动、释放与租约获取串行执行，释放结果明确区分已释放、

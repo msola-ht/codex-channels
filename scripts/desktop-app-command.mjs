@@ -54,6 +54,8 @@ export async function runDesktopAppCommand(args, options = {}) {
   const probeBridge = options.probeBridge ?? probeDesktopAppBridge;
   const inspectSupervisorState = options.inspectSupervisorState
     ?? inspectAppServerSupervisorState;
+  const acquireProviderLease = options.acquireProviderLease
+    ?? acquireAppServerProviderLease;
   const openDesktop = options.openDesktop
     ?? (platform === "win32"
       ? (path, endpoint) => openWindowsDesktopApp(path, endpoint, { environment })
@@ -70,6 +72,8 @@ export async function runDesktopAppCommand(args, options = {}) {
     CODEX_BINARY: stringValue(codex.binary) || "codex",
   };
   const appServer = resolveAppServerRuntime(document, located.dataDir, runtimeEnvironment);
+  const selectedProvider = parsed.provider ?? appServer.primaryProvider;
+  const selectedSocketPath = resolveDesktopAppSocketPath(appServer, selectedProvider);
   let desktopConfig = desktopAppConfig(codex.desktop_app);
   const supported = platform === "darwin" || platform === "win32";
   const app = supported
@@ -84,8 +88,8 @@ export async function runDesktopAppCommand(args, options = {}) {
       desktopConfig,
       primaryProvider: appServer.primaryProvider,
       primarySocketPath: appServer.primarySocketPath,
+      selectedProvider,
       dataDir: located.dataDir,
-      probeBridge,
       inspectSupervisorState,
     });
     if (parsed.json) {
@@ -108,6 +112,32 @@ export async function runDesktopAppCommand(args, options = {}) {
       : "无法确认 ChatGPT Desktop App 是否已退出");
   }
 
+  async function withWindowsStartupLease(provider, operation) {
+    let lease;
+    try {
+      lease = await acquireProviderLease(appServer.primarySocketPath, provider);
+    } catch {
+      throw new Error(`Provider ${provider} 的 App Server 未能就绪；请查看 App Server 服务状态与日志`);
+    }
+    let operationFailed = false;
+    let operationError;
+    try {
+      await operation();
+    } catch (error) {
+      operationFailed = true;
+      operationError = error;
+    }
+    try {
+      await lease.close();
+    } catch {
+      if (operationFailed) {
+        throw new AggregateError([operationError], `Provider ${provider} 的启动检查或桌面启动失败，且临时租约未能释放`);
+      }
+      throw new Error(`无法释放 Provider ${provider} 的启动检查租约；请检查 App Server 服务状态`);
+    }
+    if (operationFailed) throw operationError;
+  }
+
   async function enableSharing(port) {
     const token = platform === "darwin" ? undefined : loadOrCreateDesktopAppBridgeToken(located.dataDir);
     const applied = { enabled: true, port };
@@ -116,8 +146,13 @@ export async function runDesktopAppCommand(args, options = {}) {
       await restartAppServer();
       if (platform === "darwin") {
         await assertMacDesktopAppHostReady(appServer.primarySocketPath, inspectSupervisorState);
-      } else if (token !== undefined && !await probeBridge(privateBridgeEndpoint(port, token))) {
-        throw new Error("Codex Desktop App 桥在服务重启后未就绪");
+      } else if (token !== undefined) {
+        await assertDesktopAppProviderSelectionReady(appServer.primarySocketPath, inspectSupervisorState);
+        await withWindowsStartupLease(appServer.primaryProvider, async () => {
+          if (!await probeBridge(privateBridgeEndpoint(port, token, appServer.primaryProvider))) {
+            throw new Error("Codex Desktop App 桥在服务重启后未就绪");
+          }
+        });
       }
     } catch (error) {
       await rollbackDesktopAppConfig({ configPath: located.configPath, previous, applied, restartAppServer, cause: error });
@@ -142,23 +177,22 @@ export async function runDesktopAppCommand(args, options = {}) {
         appServer.primarySocketPath,
         inspectSupervisorState,
       );
-      if (topology.leasedProviders.includes(appServer.primaryProvider)) {
+      if (topology.desktopAppAttached === true) {
+        throw new Error("现有 Codex Desktop App Host 租约尚未释放；请稍后重试");
+      }
+      if (topology.leasedProviders.includes(selectedProvider)) {
         throw new Error(
-          topology.desktopAppAttached === true
-            ? "现有 Codex Desktop App Host 租约尚未释放；请稍后重试"
-            : "主 OpenAI App Server 正由 codexc remote 使用；请退出 Remote TUI 后重试",
+          `Provider ${selectedProvider} 的 App Server 正由原生客户端租约保护；请退出相关客户端后重试`,
         );
       }
       const inspectActiveThreads = options.inspectActiveThreads
         ?? inspectMacDesktopAppActiveThreads;
-      const acquireProviderLease = options.acquireProviderLease
-        ?? acquireAppServerProviderLease;
       let lease;
       try {
-        lease = await acquireProviderLease(appServer.primarySocketPath, appServer.primaryProvider);
+        lease = await acquireProviderLease(appServer.primarySocketPath, selectedProvider);
       } catch {
         throw new Error(
-          "无法恢复并保护主 OpenAI App Server 以完成启动检查；已取消启动",
+          `无法恢复并保护 Provider ${selectedProvider} 的 App Server 以完成启动检查；已取消启动`,
         );
       }
       let leaseReleaseFailed = false;
@@ -166,7 +200,7 @@ export async function runDesktopAppCommand(args, options = {}) {
         let activeThreadCount;
         try {
           activeThreadCount = await inspectActiveThreads({
-            socketPath: appServer.primarySocketPath,
+            socketPath: selectedSocketPath,
             codexBinary: runtimeEnvironment.CODEX_BINARY,
           });
         } catch (error) {
@@ -178,7 +212,7 @@ export async function runDesktopAppCommand(args, options = {}) {
         }
         if (activeThreadCount > 0) {
           throw new Error(
-            `主 OpenAI App Server 当前有 ${activeThreadCount} 个活动 Thread；`
+            `Provider ${selectedProvider} 的 App Server 当前有 ${activeThreadCount} 个活动 Thread；`
             + "请等待 Turn 完成后重试",
           );
         }
@@ -190,20 +224,23 @@ export async function runDesktopAppCommand(args, options = {}) {
         }
       }
       if (leaseReleaseFailed) {
-        throw new Error("无法释放启动检查的主 App Server 租约；已取消启动");
+        throw new Error(`无法释放 Provider ${selectedProvider} 的启动检查租约；已取消启动`);
       }
-      writeMessage("note", "已确认当前没有活动 Turn；启动时会短暂重启主 App Server。");
-      await openDesktop(app.path, "");
+      writeMessage("note", `已确认 Provider ${selectedProvider} 当前没有活动 Turn；启动时会短暂重启该 Provider 的 App Server。`);
+      await openDesktop(app.path, "", selectedProvider);
     } else {
+      await assertDesktopAppProviderSelectionReady(appServer.primarySocketPath, inspectSupervisorState);
       const token = readDesktopAppBridgeToken(located.dataDir);
-      const endpoint = privateBridgeEndpoint(desktopConfig.port, token);
-      if (!await probeBridge(endpoint)) {
-        throw new Error("Codex Desktop App 桥未就绪，请运行 codexc restart appserver");
-      }
-      await openDesktop(app.path, endpoint);
+      const endpoint = privateBridgeEndpoint(desktopConfig.port, token, selectedProvider);
+      await withWindowsStartupLease(selectedProvider, async () => {
+        if (!await probeBridge(endpoint)) {
+          throw new Error(`Provider ${selectedProvider} 已就绪，但 Desktop App 桥连接失败；请检查桥配置与 App Server 服务日志`);
+        }
+        await openDesktop(app.path, endpoint, selectedProvider);
+      });
     }
-    writeMessage("success", "ChatGPT Desktop App 已通过共享 App Server 启动。");
-    return { action: "open", opened: true };
+    writeMessage("success", `ChatGPT Desktop App 已通过 Provider ${selectedProvider} 的共享 App Server 启动；本次选择不保存。`);
+    return { action: "open", opened: true, provider: selectedProvider };
   }
 
   if (parsed.action === "enable") {
@@ -258,13 +295,26 @@ async function assertMacDesktopAppHostReady(primarySocketPath, inspectSupervisor
   }
   if (
     inspection.status !== "ready"
-    || inspection.topology.desktopAppHostProtocolVersion !== 1
+    || inspection.topology.desktopAppHostProtocolVersion !== 2
+    || inspection.topology.desktopAppProviderProtocolVersion !== 1
   ) {
     throw new Error(
       "App Server 服务不支持当前 Desktop Host；请运行 codexc restart appserver 后重试",
     );
   }
   return inspection.topology;
+}
+
+async function assertDesktopAppProviderSelectionReady(primarySocketPath, inspectSupervisorState) {
+  let inspection;
+  try {
+    inspection = await inspectSupervisorState(primarySocketPath);
+  } catch {
+    throw new Error("无法读取 App Server 受管入口状态；已取消启动");
+  }
+  if (inspection.status !== "ready" || inspection.topology.desktopAppProviderProtocolVersion !== 1) {
+    throw new Error("App Server 服务不支持当前 Desktop Provider 选择；请运行 codexc restart appserver 后重试");
+  }
 }
 
 async function inspectMacDesktopAppActiveThreads({ socketPath, codexBinary }) {
@@ -306,8 +356,8 @@ async function inspectMacDesktopAppActiveThreads({ socketPath, codexBinary }) {
 class DesktopAppPreflightError extends Error {
   constructor(stage) {
     super(stage === "initialize"
-      ? "无法完成主 OpenAI App Server 的连接初始化；已取消启动"
-      : "无法读取主 OpenAI App Server 活动 Thread 状态，无法确认当前是否空闲；已取消启动");
+      ? "无法完成所选 App Server 的连接初始化；已取消启动"
+      : "无法读取所选 App Server 活动 Thread 状态，无法确认当前是否空闲；已取消启动");
   }
 }
 
@@ -474,9 +524,24 @@ export function openWindowsDesktopApp(
 function parseDesktopAppArgs(args) {
   if (args.length === 0) return { action: "open" };
   const [action, ...rest] = args;
-  if (action === "status") {
-    if (rest.length === 0) return { action, json: false };
-    if (rest.length === 1 && rest[0] === "--json") return { action, json: true };
+  if (action === "status" || action === "--provider") {
+    const parsed = { action: action === "status" ? "status" : "open" };
+    const flags = action === "status" ? rest : args;
+    for (let index = 0; index < flags.length; index += 1) {
+      if (flags[index] === "--json" && parsed.action === "status" && parsed.json !== true) {
+        parsed.json = true;
+      } else if (flags[index] === "--provider" && parsed.provider === undefined) {
+        const provider = flags[index + 1];
+        if (typeof provider !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(provider)) {
+          throw new Error("--provider 必须指定已配置的完整 Provider ID");
+        }
+        parsed.provider = provider;
+        index += 1;
+      } else {
+        throw new Error(desktopAppCommandUsage);
+      }
+    }
+    return parsed;
   }
   if (action === "enable") {
     if (rest.length === 0) return { action };
@@ -500,28 +565,18 @@ async function readDesktopAppStatus({
   desktopConfig,
   primaryProvider,
   primarySocketPath,
+  selectedProvider,
   dataDir,
-  probeBridge,
   inspectSupervisorState,
 }) {
   let tokenReady = false;
   let bridgeReady = false;
   let toolHostSupported = false;
   let toolHostAttached = false;
+  let providerSelectionSupported = false;
+  let desktopAppProvider = null;
   let primaryInstanceState = "unknown";
-  if (
-    platform === "win32"
-    && desktopConfig?.enabled === true
-    && primaryProvider === "openai"
-  ) {
-    try {
-      const token = readDesktopAppBridgeToken(dataDir);
-      tokenReady = true;
-      bridgeReady = await probeBridge(privateBridgeEndpoint(desktopConfig.port, token));
-    } catch {
-      tokenReady = false;
-    }
-  }
+  let providerInstanceState = "unknown";
   if (supported) {
     try {
       const inspection = await inspectSupervisorState(primarySocketPath);
@@ -529,13 +584,29 @@ async function readDesktopAppStatus({
         const topology = inspection.topology;
         if (topology.runningProviders.includes(primaryProvider)) primaryInstanceState = "running";
         else if (topology.releasedProviders.includes(primaryProvider)) primaryInstanceState = "released";
+        if (topology.runningProviders.includes(selectedProvider)) providerInstanceState = "running";
+        else if (topology.releasedProviders.includes(selectedProvider)) providerInstanceState = "released";
+        providerSelectionSupported = topology.desktopAppProviderProtocolVersion === 1;
+        desktopAppProvider = topology.desktopAppProvider ?? null;
         if (platform === "darwin" && desktopConfig?.enabled === true) {
-          toolHostSupported = topology.desktopAppHostProtocolVersion === 1;
-          toolHostAttached = toolHostSupported && topology.desktopAppAttached === true;
+          toolHostSupported = topology.desktopAppHostProtocolVersion === 2 && providerSelectionSupported;
+          toolHostAttached = toolHostSupported && topology.desktopAppAttached === true
+            && desktopAppProvider === selectedProvider;
         }
       }
     } catch {
       // 无法读取现有拓扑时保留 unknown，不启动或恢复实例。
+    }
+  }
+  if (platform === "win32" && desktopConfig?.enabled === true && primaryProvider === "openai") {
+    try {
+      const token = readDesktopAppBridgeToken(dataDir);
+      tokenReady = typeof token === "string" && token.length > 0;
+      // A bridge handshake acquires a lease and may restore a released instance.
+      // Status stays read-only, so connectivity is checked only during launch.
+      bridgeReady = null;
+    } catch {
+      tokenReady = false;
     }
   }
   return {
@@ -555,6 +626,10 @@ async function readDesktopAppStatus({
       : null,
     primaryProvider,
     primaryInstanceState,
+    provider: selectedProvider,
+    providerInstanceState,
+    providerSelectionSupported,
+    desktopAppProvider,
     tokenReady,
     bridgeReady,
     toolHostSupported,
@@ -592,14 +667,19 @@ function writeDesktopAppStatus(status, writeMessage) {
         status.toolHostAttached ? "attached" : "not-attached"
       }`);
     } else {
-      writeMessage(status.bridgeReady ? "success" : "failure", `共享桥：${
-        status.bridgeReady ? "ready" : "not-ready"
+      writeMessage(status.bridgeReady === null ? "note" : status.bridgeReady ? "success" : "failure", `共享桥：${
+        status.bridgeReady === null ? "not-checked（只读状态不建立桥连接）"
+          : status.bridgeReady ? "ready" : "not-ready"
       }`);
     }
   }
+  writeMessage("note", `本次目标 Provider：${status.provider}（不保存选择）`);
   if (status.supported) {
     const states = { running: "运行中", released: "已释放（下次连接时恢复）", unknown: "未知" };
-    writeMessage("note", `主 App Server 实例：${states[status.primaryInstanceState]}`);
+    writeMessage("note", `目标 App Server 实例：${states[status.providerInstanceState]}`);
+    if (status.desktopAppProvider !== null) {
+      writeMessage("note", `当前 Desktop Host Provider：${status.desktopAppProvider}`);
+    }
   }
 }
 
@@ -758,7 +838,7 @@ function macApplicationStatus(appPath) {
   return null;
 }
 
-function openMacDesktopApp(path) {
+function openMacDesktopApp(path, _endpoint, provider) {
   const resourcesPath = join(path, "Contents", "Resources");
   const nodePath = join(resourcesPath, "cua_node", "bin", "node");
   const result = spawnSync(
@@ -766,6 +846,8 @@ function openMacDesktopApp(path) {
     [
       "--env",
       "CODEX_APP_SERVER_FORCE_CLI=1",
+      "--env",
+      `CODEX_CONNECT_DESKTOP_PROVIDER=${provider}`,
       "--env",
       `CODEX_CLI_PATH=${desktopAppProxyPath}`,
       "--env",
@@ -812,7 +894,9 @@ function regularFile(path) {
   }
 }
 
-function probeDesktopAppBridge(endpoint, timeoutMs = 3_000) {
+// The bridge acquires its own lease (15s) before opening the Windows Proxy
+// Transport (10s). Keep this outer deadline longer than those bounded stages.
+function probeDesktopAppBridge(endpoint, timeoutMs = 30_000) {
   return new Promise((resolvePromise) => {
     const socket = new WebSocket(endpoint, {
       perMessageDeflate: false,
@@ -838,8 +922,19 @@ function probeDesktopAppBridge(endpoint, timeoutMs = 3_000) {
   });
 }
 
-function privateBridgeEndpoint(port, token) {
-  return `ws://127.0.0.1:${port}${bridgePath}?token=${encodeURIComponent(token)}`;
+function privateBridgeEndpoint(port, token, provider) {
+  const target = provider === undefined ? "" : `&provider=${encodeURIComponent(provider)}`;
+  return `ws://127.0.0.1:${port}${bridgePath}?token=${encodeURIComponent(token)}${target}`;
+}
+
+function resolveDesktopAppSocketPath(appServer, provider) {
+  if (provider === appServer.primaryProvider) return appServer.primarySocketPath;
+  const index = appServer.managedProviders.findIndex((entry) => entry.provider === provider);
+  const socketPath = index < 0 ? undefined : appServer.socketPaths[index + 1];
+  if (typeof socketPath !== "string" || socketPath.length === 0) {
+    throw new Error("Desktop Provider 未配置；请使用完整、已配置的 Provider ID");
+  }
+  return socketPath;
 }
 
 function table(value) {

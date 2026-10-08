@@ -117,9 +117,13 @@ DS 目录生成时明确设置 `support_verbosity: false`、`default_verbosity: 
 
 切换模式由同一个后台服务监管 OpenAI 主 App Server 和各账户隔离的 App Server。服务启动时只
 启动主实例；原生子代理复用父线程所在 Provider 实例。首次选择 DeepSeek 模型、
-恢复其 Thread 或使用 DeepSeek Remote TUI 时，监管入口才读取并校验私有 Profile，按需启动隔离
+恢复其 Thread、使用 DeepSeek Remote TUI 或通过 `codexc app --provider <Provider-ID>` 启动桌面时，监管入口才读取并校验私有 Profile，按需启动隔离
 App Server。该账户 API Key 只进入需要它的 App Server 子进程环境，不进入命令行、服务定义或
 日志；其他 Provider 的 Key 不会随之注入。
+
+桌面入口要求主 Provider 仍为 OpenAI，参数使用账户对应的精确 Provider ID；切换前必须完全退出桌面。
+本次连接只使用目标实例，不在桌面内跨 Provider 切换或复制会话历史。第三方桌面路径仍待实机验收，
+具体边界见 [Desktop 共享说明](codex-desktop-app-development.md)。
 
 Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review、Goal、MCP 和审批请求。
 跨 Provider 不能原地修改正在使用的 Thread，因此 `/model` 的跨 Provider 选择会：
