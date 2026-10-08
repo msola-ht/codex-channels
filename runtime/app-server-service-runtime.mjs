@@ -405,7 +405,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     // as well as the authoritative sources used by the routes and settings IPC.
     aggregateGuard = new AggregateMaterialGuard([...material.files, {
       path: join(runtime.dataDir, "runtime", "aggregate-models.json"), maximumBytes: 8_388_608,
-      digest: createHash("sha256").update(`${JSON.stringify(material.catalog)}\n`).digest("hex"),
+      digest: createHash("sha256").update(`${JSON.stringify(material.catalog, null, 2)}\n`).digest("hex"),
     }]);
     const token = randomBytes(32).toString("hex");
     const urls = new Map();

@@ -163,7 +163,7 @@ export function loadAggregateModelMaterial(environment, expectedMembers) {
 
 export function aggregateLaunchArguments(material, dataDir, baseUrl) {
   const catalogPath = join(dataDir, "runtime", "aggregate-models.json");
-  const content = `${JSON.stringify(material.catalog)}\n`;
+  const content = `${JSON.stringify(material.catalog, null, 2)}\n`;
   if (Buffer.byteLength(content) > 8_388_608) throw new Error("聚合模型目录超过 8 MiB");
   writePrivateFileAtomicSync(catalogPath, content);
   const settings = {
