@@ -1046,6 +1046,10 @@ export interface TrafficDebugStage {
 }
 
 export interface TrafficExchangeDetail {
+  continuation?: {
+    scope: "same_writer_thread_turn"
+    next: { id: number; startedAtMs: number; gapMs: number; state: "completed" | "failed" | "incomplete" | "pending"; agentMessageObserved: boolean } | null
+  }
   requestPurpose?: "autoApprovalReview" | null
   reviewerThreadId?: string | null
   reviewerTurnId?: string | null
@@ -1116,6 +1120,7 @@ export interface TrafficExchangeDetail {
     } | null
     eventType?: string
     errorScope?: string
+    websocketClose?: { peer: "client"; code: number; atMs: number }
     error?: string
     storedBytes?: number
     responseId?: string

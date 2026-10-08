@@ -30,6 +30,7 @@ export function TrafficDetail({
   provider,
   session,
   onTracePageChange,
+  onOpenContinuation,
   traceLoading = false,
   traceError = false,
   onRetry,
@@ -38,6 +39,7 @@ export function TrafficDetail({
   provider: string
   session: string
   onTracePageChange: (offset: number) => void
+  onOpenContinuation: (id: number) => void
   traceLoading?: boolean
   traceError?: boolean
   onRetry: () => void
@@ -102,6 +104,20 @@ export function TrafficDetail({
                   ? t("filters.deliveryDisconnected") : t("filters.deliveryFailed")}</AlertDescription>
             </Alert> : null}
             <ResponseFailure response={detail.response} diagnostics={detail.chatDiagnostics} />
+            {detail.continuation === undefined ? null : <Alert>
+              <AlertTitle>{t("traffic.continuationTitle")}</AlertTitle>
+              <AlertDescription>
+                {detail.continuation.next === null ? <p>{t("traffic.continuationMissing")}</p> : <>
+                  <p>{t("traffic.continuationFound", { id: detail.continuation.next.id, gap: formatElapsedDuration(detail.continuation.next.gapMs) })}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StateBadge state={detail.continuation.next.state} />
+                    <Button variant="outline" size="sm" onClick={() => { if (detail.continuation?.next) onOpenContinuation(detail.continuation.next.id) }}>{t("traffic.continuationOpen")}</Button>
+                  </div>
+                  {detail.continuation.next.agentMessageObserved ? <p>{t("traffic.continuationAgentMessage")}</p> : null}
+                </>}
+                <p>{t("traffic.continuationScope")}</p>
+              </AlertDescription>
+            </Alert>}
             {detail.response.output.map((item, index) => (
               <TrafficContent key={index} title={outputLabel(t, item)} text={item.text} />
             ))}
@@ -304,7 +320,8 @@ function ResponseFailure({ response, diagnostics }: { response: NonNullable<Traf
   return <Alert variant="destructive">
     <AlertTitle>{response.state === "incomplete" ? t("traffic.responseIncomplete") : t("traffic.requestFailed")}</AlertTitle>
     <AlertDescription className="min-w-0">
-      <p>{t(`traffic.failureReasons.${reason}`)}</p>
+      <p>{response.errorScope === "websocket_client_closed" && reason === "unknown" ? t("traffic.clientClosedExplanation") : t(`traffic.failureReasons.${reason}`)}</p>
+      {response.websocketClose === undefined ? null : <p>{t("traffic.clientCloseCode", { code: response.websocketClose.code })}</p>}
       {facts.filter(([, value]) => value !== undefined).map(([label, value]) => <p key={String(label)} className="break-all">{label}: {String(value)}</p>)}
       {response.failureStage === undefined ? null : <p>{t("traffic.failureStage", { stage: response.failureStage })}</p>}
       {response.failure === undefined && response.error === undefined && response.errorScope === undefined
@@ -320,7 +337,7 @@ function hasResponseDiagnostics(response: NonNullable<TrafficExchangeDetail["res
 
 function ResponseErrorDetails({ response }: { response: NonNullable<TrafficExchangeDetail["response"]> }) {
   const { t } = useTranslation()
-  return <TrafficContent title={t("traffic.rawDiagnosticsTitle")} text={JSON.stringify({ stage: response.failureStage, reason: response.failure, scope: response.errorScope, error: response.error }, null, 2)} json />
+  return <TrafficContent title={t("traffic.rawDiagnosticsTitle")} text={JSON.stringify({ stage: response.failureStage, reason: response.failure, scope: response.errorScope, error: response.error, websocketClose: response.websocketClose }, null, 2)} json />
 }
 
 function outputLabel(t: Translate, item: NonNullable<TrafficExchangeDetail["response"]>["output"][number]): string {

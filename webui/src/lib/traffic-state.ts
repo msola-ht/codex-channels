@@ -18,8 +18,10 @@ export function trafficCallKey(reference: { label: string; session: string; id: 
 }
 
 /** 进行中的摘要必须重新读取，不能只合并新事件页。 */
-export function canReuseTrafficSummary(value: { state: string; response: object | null }): boolean {
-  return value.response !== null && ["completed", "failed", "incomplete"].includes(value.state)
+export function canReuseTrafficSummary(value: { state: string; response: { errorScope?: string } | null }): boolean {
+  // 后续调用及连接关闭 trace 可以晚于当前终态落盘，必须刷新关联诊断。
+  return value.response !== null && value.response.errorScope !== "websocket_client_closed"
+    && ["completed", "failed", "incomplete"].includes(value.state)
 }
 
 /** 只使用采集端保存的精确定位符，不按时间、模型或 Thread/Turn 猜配。 */
