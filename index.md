@@ -72,7 +72,8 @@
 
 ## 工程约束
 
-- [`AGENTS.md`](AGENTS.md)：项目开发约束。
+- [`AGENTS.md`](AGENTS.md)：常驻项目边界、安全与交付约束，以及按任务触发的规则入口。
+- [`docs/development-rules.md`](docs/development-rules.md)：按需读取的协议、存储、授权、服务、验证与发布开发规则。
 - [`.githooks/README.md`](.githooks/README.md)：提交前检查。
 - [`.github/workflows/README.md`](.github/workflows/README.md)：CI 与升级提案工作流。
 - [`.codex/rules/default.rules`](.codex/rules/default.rules)：项目安全命令预设。
