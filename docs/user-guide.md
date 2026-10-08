@@ -510,6 +510,8 @@ WebUI 内不执行包含自身的停止、重启或卸载任务；请在本机�
 Linux 使用 systemd 用户服务；Windows 使用当前用户计划任务和隐藏的 PowerShell 7 进程，不需要管理员权限。
 Windows 计划任务的 `Ready` 表示等待启动；未检测到运行中的服务宿主时，`codexc status` 显示 `stopped`，不将任务的 `Ready` 当作服务就绪。
 Windows 启动时，计划任务宿主等待 15 秒，App Server 应用就绪另行等待 60 秒，以覆盖配置、ACL 和实例初始化；监管确认主实例运行后再检查连接。应用等待超时会报告最后等待阶段，后续服务仍不会提前启动。
+Windows ACL 检查在当前命令进程内复用 PowerShell，每次仍重新检查实际权限。计划任务状态批量读取；服务按依赖顺序启动并保留就绪检查。`doctor` 文本模式立即显示标题及检测阶段，`--json` 仍仅在完成后输出一份 JSON。
+
 Windows 私有配置 ACL 修复：
 
 Gateway 创建渠道前会初始化并收紧媒体暂存根目录 `uploads`，再由各渠道初始化自己的子目录。

@@ -142,9 +142,10 @@ export async function inspectWindowsServiceStatus({
   environment = process.env,
 } = {}) {
   const parsedTarget = parseServiceTarget(target);
-  const services = [];
-  for (const service of serviceControlDefinitions("windows", parsedTarget, "status", environment, definitionsDirectory)) {
-    const task = queryTask(service.windows, environment);
+  const definitions = serviceControlDefinitions("windows", parsedTarget, "status", environment, definitionsDirectory);
+  const tasks = queryTasks(definitions.map((service) => service.windows), environment);
+  const services = await Promise.all(definitions.map(async (service) => {
+    const task = tasks.get(service.windows);
     const file = definitionPath(definitionsDirectory, service.target);
     let host;
     if (existsSync(file)) {
@@ -154,7 +155,7 @@ export async function inspectWindowsServiceStatus({
     const running = task.exists && host?.version === 1 && host.running === true;
     // ScheduledTasks Ready means eligible to start, not a ready service host.
     const taskState = String(task.state ?? "unknown").toLowerCase();
-    services.push({
+    return {
       target: service.target,
       name: service.displayName,
       identifier: service.windows,
@@ -164,8 +165,8 @@ export async function inspectWindowsServiceStatus({
         ? running ? "running" : taskState === "ready" ? "stopped" : taskState
         : "missing",
       pid: running && Number.isSafeInteger(host.childPid) ? host.childPid : null,
-    });
-  }
+    };
+  }));
   return {
     platform: "windows",
     target: parsedTarget,
@@ -175,8 +176,8 @@ export async function inspectWindowsServiceStatus({
 }
 
 async function startDefinitions(target, definitionsDirectory, environment, selection = "start") {
-  const failures = [];
-  for (const service of serviceControlDefinitions("windows", target, selection, environment, definitionsDirectory)) {
+  const selected = serviceControlDefinitions("windows", target, selection, environment, definitionsDirectory);
+  for (const [index, service] of selected.entries()) {
     try {
       const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
       const host = await inspectHost(definition.controlPath);
@@ -184,38 +185,34 @@ async function startDefinitions(target, definitionsDirectory, environment, selec
         if (service.target === "app-server") await waitForAppServer(definition.socketPath);
         continue;
       }
-      const task = queryTask(service.windows, environment);
-      if (task.exists && String(task.state).toLowerCase() === "running") {
-        await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
-        if (service.target === "app-server") await waitForAppServer(definition.socketPath);
-        continue;
-      }
+      // The primitive checks the exact task's live state before starting it.
       runTaskPrimitive("start", service.windows, environment, undefined, definition.pwshBinary);
       await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
       if (service.target === "app-server") {
         await waitForAppServer(definition.socketPath);
       }
     } catch (error) {
-      failures.push(`${service.target}: ${error instanceof Error ? error.message : String(error)}`);
+      throw lifecycleFailure("启动", selected, index, error);
     }
-  }
-  if (failures.length > 0) {
-    throw new Error(`服务启动部分失败：${failures.join("；")}。请运行 codexc status。`);
   }
 }
 
 async function stopDefinitions(target, definitionsDirectory, environment, selection = "stop") {
-  const failures = [];
-  for (const definition of serviceControlDefinitions("windows", target, selection, environment, definitionsDirectory)) {
+  const selected = serviceControlDefinitions("windows", target, selection, environment, definitionsDirectory);
+  for (const [index, definition] of selected.entries()) {
     try {
       await stopDefinition(definition, definitionsDirectory, environment);
     } catch (error) {
-      failures.push(`${definition.target}: ${error instanceof Error ? error.message : String(error)}`);
+      throw lifecycleFailure("停止", selected, index, error);
     }
   }
-  if (failures.length > 0) {
-    throw new Error(`服务停止部分失败：${failures.join("；")}。请运行 codexc status。`);
-  }
+}
+
+function lifecycleFailure(action, selected, index, error) {
+  const completed = selected.slice(0, index).map((service) => service.displayName).join("、") || "无";
+  const pending = selected.slice(index + 1).map((service) => service.displayName).join("、") || "无";
+  const detail = error instanceof Error ? error.message : String(error);
+  return new Error(`服务${action}中止：已完成 ${completed}；失败 ${selected[index].displayName}：${detail}；未执行 ${pending}。请运行 codexc status。`, { cause: error });
 }
 
 async function waitForAppServer(socketPath) {
@@ -273,11 +270,11 @@ function preflight(environment) {
     "-NoProfile",
     "-NonInteractive",
     "-Command",
-    "Get-Command Get-ScheduledTask,Register-ScheduledTask,Start-ScheduledTask,Stop-ScheduledTask,Unregister-ScheduledTask -ErrorAction Stop | Out-Null",
+    "$ErrorActionPreference = 'Stop'; Get-Command Register-ScheduledTask,New-ScheduledTaskAction,New-ScheduledTaskTrigger,New-ScheduledTaskPrincipal,New-ScheduledTaskSettingsSet -ErrorAction Stop | Out-Null; $scheduler = New-Object -ComObject Schedule.Service; $scheduler.Connect(); $scheduler.GetFolder('\\') | Out-Null",
   ], { env: environment, stdio: "ignore", windowsHide: true });
   if (result.error) throw result.error;
   if (result.status !== 0) {
-    throw new Error("PowerShell ScheduledTasks 模块不可用，无法管理 Windows 后台服务");
+    throw new Error("PowerShell ScheduledTasks 模块或本机任务调度器不可用，无法管理 Windows 后台服务");
   }
 }
 
@@ -293,8 +290,9 @@ function runTaskPrimitive(action, taskName, environment, definition, preferredPw
     join(packageDir, "scripts", "windows-scheduled-task.ps1"),
     "-Action",
     action,
-    "-TaskName",
-    taskName,
+    ...(Array.isArray(taskName)
+      ? ["-TaskNamesJson", JSON.stringify(taskName)]
+      : ["-TaskName", taskName]),
     ...(definition ? ["-DefinitionPath", definition] : []),
   ];
   const result = spawnSync(pwsh, args, {
@@ -310,14 +308,30 @@ function runTaskPrimitive(action, taskName, environment, definition, preferredPw
   return String(result.stdout ?? "").trim();
 }
 
-function queryTask(taskName, environment) {
-  const output = runTaskPrimitive("query", taskName, environment);
+function queryTasks(taskNames, environment) {
+  if (taskNames.length === 0) return new Map();
+  const output = runTaskPrimitive("query", taskNames, environment);
   const json = output.split(/\r?\n/u).findLast((line) => line.trim().startsWith("{"));
-  if (!json) throw new Error(`Windows 计划任务状态无效：${taskName}`);
+  const invalid = () => new Error("Windows 计划任务批量状态无效");
+  if (!json) throw invalid();
   try {
-    return JSON.parse(json);
+    const result = JSON.parse(json);
+    if (!Array.isArray(result.tasks) || result.tasks.length !== taskNames.length) throw invalid();
+    const tasks = new Map();
+    for (const task of result.tasks) {
+      if (
+        !task || !taskNames.includes(task.taskName) || tasks.has(task.taskName)
+        || typeof task.exists !== "boolean"
+        || (task.exists
+          ? !["Unknown", "Disabled", "Queued", "Ready", "Running"].includes(task.state)
+            || !Number.isSafeInteger(task.lastTaskResult)
+          : task.state !== "missing" || task.lastTaskResult !== null)
+      ) throw invalid();
+      tasks.set(task.taskName, task);
+    }
+    return tasks;
   } catch (error) {
-    throw new Error(`Windows 计划任务状态无效：${taskName}`, { cause: error });
+    throw new Error("Windows 计划任务批量状态无效", { cause: error });
   }
 }
 

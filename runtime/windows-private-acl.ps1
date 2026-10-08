@@ -1,3 +1,5 @@
+param([switch]$Persistent)
+
 $ErrorActionPreference = 'Stop'
 
 # Node sends and decodes this private JSON protocol as UTF-8. Do not inherit a
@@ -11,8 +13,7 @@ function Throw-InvalidAcl([string]$Message) {
   throw $aclError
 }
 
-function Get-Request {
-  $raw = [Console]::In.ReadToEnd()
+function Get-Request([string]$raw) {
   if ([string]::IsNullOrWhiteSpace($raw)) {
     Throw-InvalidAcl '缺少 ACL 请求'
   }
@@ -206,13 +207,14 @@ function Test-UserOnlyDirectoryAcl($Item, $UserSid) {
     -and -not $rule.IsInherited
 }
 
+function Invoke-AclRequest([string]$raw) {
 $request = $null
 $aclMutex = $null
 $aclMutexHeld = $false
 $repairStream = $null
 $stage = 'request'
 try {
-  $request = Get-Request
+  $request = Get-Request $raw
   if ($request.operation -in @('secure', 'repair')) {
     $stage = 'lock'
     # Serialize detection and mutation across Gateway, service and setup processes.
@@ -254,8 +256,7 @@ try {
     if (-not (Test-UserOnlyDirectoryAcl $item $expectedSids[0])) {
       Throw-InvalidAcl 'Socket 目录必须仅允许当前 SID 访问'
     }
-    @{ ok = $true } | ConvertTo-Json -Compress
-    exit 0
+    return @{ ok = $true }
   }
   if ($request.operation -eq 'read-config') {
     $stage = 'read-config'
@@ -273,9 +274,8 @@ try {
       if ($stream.Length -gt $request.maximumBytes) { Throw-InvalidAcl '私有配置超过读取上限' }
       $reader = [System.IO.StreamReader]::new($stream, [System.Text.UTF8Encoding]::new($false, $true))
       try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
-      @{ ok = $true; content = $content } | ConvertTo-Json -Compress
+      return @{ ok = $true; content = $content }
     } finally { $stream.Dispose() }
-    exit 0
   }
   if ($request.operation -in @('secure', 'repair')) {
     $stage = 'secure'
@@ -284,14 +284,25 @@ try {
   }
   $stage = 'verify'
   Assert-PrivateAcl $item $request.kind $expectedSids
-  @{ ok = $true } | ConvertTo-Json -Compress
+  return @{ ok = $true }
 } catch {
   # Do not return exception messages: PowerShell/.NET may include file contents.
-  @{ ok = $false; stage = $stage; reason = $_.Exception.Data['codexcAclReason'] } |
-    ConvertTo-Json -Compress
-  exit 1
+  return @{ ok = $false; stage = $stage; reason = $_.Exception.Data['codexcAclReason'] }
 } finally {
   if ($null -ne $repairStream) { $repairStream.Dispose() }
   if ($aclMutexHeld) { $aclMutex.ReleaseMutex() }
   if ($null -ne $aclMutex) { $aclMutex.Dispose() }
+}
+}
+
+if ($Persistent) {
+  while ($null -ne ($line = [Console]::In.ReadLine())) {
+    $response = Invoke-AclRequest $line
+    [Console]::Out.WriteLine(($response | ConvertTo-Json -Compress))
+    [Console]::Out.Flush()
+  }
+} else {
+  $response = Invoke-AclRequest ([Console]::In.ReadToEnd())
+  $response | ConvertTo-Json -Compress
+  if (-not $response.ok) { exit 1 }
 }

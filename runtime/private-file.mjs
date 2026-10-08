@@ -21,12 +21,13 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { execFile, spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveExecutableInvocation } from "./executable.mjs";
 import { codexHomePath } from "./codex-home.mjs";
+
+import { invokeWindowsAcl, invokeWindowsAclSync } from "./windows-acl-bridge.mjs";
 
 const defaultMaximumPrivateFileBytes = 1_048_576;
 
@@ -45,27 +46,17 @@ export async function readPrivateConfigFile(path, { signal, maximumBytes = defau
   signal?.throwIfAborted();
   if (process.platform === "win32") {
     const invocation = windowsPrivatePathInvocation();
-    const result = await new Promise((resolve, reject) => {
-      const child = execFile(invocation.file, invocation.args, {
-        encoding: "utf8", maxBuffer: 8 * maximumBytes,
-        timeout: 2000, killSignal: "SIGKILL", windowsHide: true,
-        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-      }, (error, stdout) => {
-        signal?.removeEventListener("abort", cancel);
-        if (signal?.aborted) reject(signal.reason);
-        else if (error) reject(windowsPrivatePathProcessError(error, error.code, stdout, path, "file", "read-config"));
-        else resolve(stdout);
-      });
-      const cancel = () => child.kill("SIGKILL");
-      signal?.addEventListener("abort", cancel, { once: true });
-      if (signal?.aborted) cancel();
-      // A failed spawn may close stdin before this request is written.
-      child.stdin.on("error", () => {});
-      child.stdin.end(JSON.stringify({ operation: "read-config", kind: "file", path, maximumBytes }));
-    });
+    let result;
+    try {
+      result = await invokeWindowsAcl(invocation, { operation: "read-config", kind: "file", path, maximumBytes }, 1024 + 8 * maximumBytes, signal);
+    } catch (error) {
+      signal?.throwIfAborted();
+      throw windowsPrivatePathProcessError(error, error.code, "", path, "file", "read-config");
+    }
     signal?.throwIfAborted();
     let response;
     try { response = JSON.parse(result); } catch { throw new Error("Windows 私有配置读取结果无效"); }
+    if (response?.ok === false) throw windowsPrivatePathProcessError(undefined, 1, result, path, "file", "read-config");
     if (response?.ok !== true || typeof response.content !== "string"
       || Buffer.byteLength(response.content, "utf8") > maximumBytes) {
       throw new Error("Windows 私有配置读取结果无效");
@@ -243,28 +234,16 @@ function assertWindowsPrivatePathSync(path, kind, operation = "verify") {
   const before = lstatSync(path);
   if (before.isSymbolicLink()) throw new Error("私有路径不能是符号链接");
   const invocation = windowsPrivatePathInvocation();
-  const result = spawnSync(
-    invocation.file,
-    invocation.args,
-    {
-      input: JSON.stringify({ operation, kind, path }),
-      encoding: "utf8",
-      maxBuffer: 1_048_576,
-      timeout: 2000,
-      killSignal: "SIGKILL",
-      windowsHide: true,
-      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-    },
-  );
-  if (result.error || result.status !== 0) {
-    throw windowsPrivatePathProcessError(result.error, result.status, result.stdout, path, kind, operation);
-  }
+  let result;
+  try { result = invokeWindowsAclSync(invocation, { operation, kind, path }, 1_048_576); }
+  catch (error) { throw windowsPrivatePathProcessError(error, error.code, "", path, kind, operation); }
   let response;
   try {
-    response = JSON.parse(result.stdout.trim());
+    response = JSON.parse(result.trim());
   } catch {
     throw new WindowsPrivatePathError("Windows 私有路径 ACL 检查返回无效");
   }
+  if (response?.ok === false) throw windowsPrivatePathProcessError(undefined, 1, result, path, kind, operation);
   if (response?.ok !== true) throw new WindowsPrivatePathError("Windows 私有路径 ACL 校验未通过");
 }
 
@@ -304,6 +283,9 @@ function windowsPrivatePathProcessError(error, status, stdout, path, kind, opera
   }
   if (error?.code === "ETIMEDOUT" || error?.killed === true) {
     return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查超过 2 秒，已终止；尚不能判定 ACL 是否有效${context}`);
+  }
+  if (error?.code === "EBUSY") {
+    return new WindowsPrivatePathError(`Windows ACL 检查请求繁忙，请稍后重试${context}`);
   }
   if (error && typeof error.code === "string") {
     return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查无法启动，请检查 PowerShell 7（pwsh）${context}`);

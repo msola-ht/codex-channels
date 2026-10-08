@@ -3,18 +3,68 @@ param(
   [ValidateSet('register', 'start', 'stop', 'unregister', 'query')]
   [string]$Action,
 
-  [Parameter(Mandatory = $true)]
   [string]$TaskName,
+
+  [string]$TaskNamesJson,
 
   [string]$DefinitionPath
 )
 
 $ErrorActionPreference = 'Stop'
 
-function Get-ExactTask {
-  Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue |
-    Where-Object { $_.TaskName -eq $TaskName } |
-    Select-Object -First 1
+if ($TaskNamesJson) {
+  if ($Action -ne 'query' -or $TaskName) {
+    throw '批量计划任务名称仅适用于查询，且不能与 TaskName 同时提供'
+  }
+  $taskNames = ConvertFrom-Json -InputObject $TaskNamesJson -NoEnumerate
+  if ($taskNames -isnot [array] -or $taskNames.Count -eq 0) {
+    throw '批量计划任务名称必须为非空 JSON 数组'
+  }
+} else {
+  $taskNames = @($TaskName)
+}
+foreach ($name in $taskNames) {
+  if ($name -isnot [string] -or [string]::IsNullOrWhiteSpace($name) -or $name -match '[\\/\x00]') {
+    throw '计划任务名称必须为根目录下的完整名称'
+  }
+}
+if (@($taskNames | Select-Object -Unique).Count -ne $taskNames.Count) {
+  throw '批量计划任务名称不能重复'
+}
+
+if ($Action -ne 'register') {
+  # Local computer and current token only; do not enumerate or match wildcards.
+  $scheduler = New-Object -ComObject Schedule.Service
+  $scheduler.Connect()
+  $taskFolder = $scheduler.GetFolder('\')
+}
+
+function Get-ExactTask([string]$Name) {
+  try {
+    return $taskFolder.GetTask($Name)
+  } catch {
+    $exception = $_.Exception
+    while ($exception.InnerException) { $exception = $exception.InnerException }
+    # Only ERROR_FILE_NOT_FOUND means absent; access/transport failures propagate.
+    if ($exception.HResult -eq -2147024894) { return $null }
+    throw
+  }
+}
+
+function Get-TaskStatus([string]$Name) {
+  $task = Get-ExactTask $Name
+  if (-not $task) {
+    return @{ taskName = $Name; exists = $false; state = 'missing'; lastTaskResult = $null }
+  }
+  $states = @('Unknown', 'Disabled', 'Queued', 'Ready', 'Running')
+  $state = [int]$task.State
+  if ($state -lt 0 -or $state -ge $states.Count) { throw '计划任务状态无效' }
+  return @{
+    taskName = $Name
+    exists = $true
+    state = $states[$state]
+    lastTaskResult = [int64]$task.LastTaskResult
+  }
 }
 
 switch ($Action) {
@@ -65,34 +115,30 @@ switch ($Action) {
     Register-ScheduledTask @registration | Out-Null
   }
   'start' {
-    $task = Get-ExactTask
+    $task = Get-ExactTask $TaskName
     if (-not $task) { throw "计划任务不存在：$TaskName" }
-    Start-ScheduledTask -InputObject $task
+    if ([int]$task.State -ne 4) { $task.Run($null) | Out-Null }
   }
   'stop' {
-    $task = Get-ExactTask
-    if ($task -and $task.State -ne 'Ready') {
-      Stop-ScheduledTask -InputObject $task
+    $task = Get-ExactTask $TaskName
+    if ($task -and [int]$task.State -ne 3) {
+      $task.Stop(0)
     }
   }
   'unregister' {
-    $task = Get-ExactTask
+    $task = Get-ExactTask $TaskName
     if ($task) {
-      Unregister-ScheduledTask -InputObject $task -Confirm:$false
+      $taskFolder.DeleteTask($TaskName, 0)
     }
   }
   'query' {
-    $task = Get-ExactTask
-    if (-not $task) {
-      @{ exists = $false; state = 'missing'; lastTaskResult = $null } |
-        ConvertTo-Json -Compress
-      break
+    if ($TaskNamesJson) {
+      $statuses = @($taskNames | ForEach-Object { Get-TaskStatus $_ })
+      @{ tasks = $statuses } | ConvertTo-Json -Depth 3 -Compress
+    } else {
+      $status = Get-TaskStatus $TaskName
+      $status.Remove('taskName')
+      $status | ConvertTo-Json -Compress
     }
-    $info = Get-ScheduledTaskInfo -InputObject $task
-    @{
-      exists = $true
-      state = [string]$task.State
-      lastTaskResult = [int64]$info.LastTaskResult
-    } | ConvertTo-Json -Compress
   }
 }

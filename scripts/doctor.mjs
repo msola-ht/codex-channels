@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 
 import { parse } from "smol-toml";
 
-import { createDoctorReport, renderDoctorText } from "./doctor-output.mjs";
+import { createDoctorReport, createDoctorTextRenderer } from "./doctor-output.mjs";
 import {
   executableInvocation,
   resolveExecutable,
@@ -50,10 +50,6 @@ import {
   protectForCurrentWindowsUserSync,
   unprotectForCurrentWindowsUserSync,
 } from "../runtime/windows-dpapi.mjs";
-import {
-  inspectFeishuApplicationConfiguration,
-  validateFeishuApplication,
-} from "./feishu-application.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
 import { inspectManagedServiceHealth } from "./service-status.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
@@ -64,6 +60,8 @@ const jsonOutput = process.argv.length === 3 && process.argv[2] === "--json";
 if (!(process.argv.length === 2 || jsonOutput)) {
   throw new Error("用法：codexc doctor [--json]");
 }
+const textRenderer = jsonOutput ? undefined : createDoctorTextRenderer();
+if (textRenderer) process.stdout.write("Codex Connect Doctor\n");
 const packageMetadata = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
 const protocolMetadata = JSON.parse(
   readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"),
@@ -188,6 +186,10 @@ if (document) {
         : "feishu.allowed_open_ids 未配置或格式无效",
     );
     try {
+      const {
+        inspectFeishuApplicationConfiguration,
+        validateFeishuApplication,
+      } = await import("./feishu-application.mjs");
       await validateFeishuApplication({ appId, appSecret });
       record("飞书应用", true, "凭据与 Bot 身份验证通过（敏感内容已隐藏）");
       try {
@@ -436,37 +438,47 @@ if (document) {
   const observedTopology = appServerTopology
     ? await checkAppServerSupervisor(socketPath, appServerTopology)
     : undefined;
-  if (
-    appServerTopology
-    && observedTopology?.releasedProviders.includes(appServerTopology.primaryProvider)
-  ) {
-    record(
-      "Codex App Server",
-      true,
-      "已因空闲释放停止；下次消息或 TUI 使用时会按需启动（本次未执行 initialize 核验）",
-    );
-  } else {
-    await checkAppServer("Codex App Server", socketPath, codexBinary ?? codexCommand);
-  }
-  for (let index = 0; index < managedProviders.length; index += 1) {
-    const managedProvider = managedProviders[index];
-    await checkOptionalAppServer(
+  const appServerChecks = [async (recordCheck) => {
+    if (
+      appServerTopology
+      && observedTopology?.releasedProviders.includes(appServerTopology.primaryProvider)
+    ) {
+      recordCheck(
+        "Codex App Server",
+        true,
+        "已因空闲释放停止；下次消息或 TUI 使用时会按需启动（本次未执行 initialize 核验）",
+      );
+    } else {
+      await checkAppServer("Codex App Server", socketPath, codexBinary ?? codexCommand, recordCheck);
+    }
+  }, ...managedProviders.map((managedProvider, index) => (recordCheck) =>
+    checkOptionalAppServer(
       `${managedProvider.provider} App Server`,
       appServerTopology.socketPaths[index + 1],
       codexBinary ?? codexCommand,
-    );
+      recordCheck,
+    ))];
+  // Each connection is independent. Preserve configured report order even when
+  // an unavailable Provider takes longer than another connection.
+  const appServerResults = await Promise.all(appServerChecks.map(async (check) => {
+    const results = [];
+    await check((...values) => results.push(values));
+    return results;
+  }));
+  for (const results of appServerResults) {
+    for (const values of results) record(...values);
   }
 }
 
-async function checkOptionalAppServer(label, socketPath, codexBinary) {
+async function checkOptionalAppServer(label, socketPath, codexBinary, recordCheck) {
   const available = process.platform === "win32"
     ? await appServerSocketAcceptsWebSocket(socketPath)
     : existsSync(socketPath);
   if (!available) {
-    record(label, true, "已配置；首次选择该 Provider 或恢复其会话时按需启动");
+    recordCheck(label, true, "已配置；首次选择该 Provider 或恢复其会话时按需启动");
     return;
   }
-  await checkAppServer(label, socketPath, codexBinary);
+  await checkAppServer(label, socketPath, codexBinary, recordCheck);
 }
 
 async function checkAppServerSupervisor(socketPath, expectedTopology) {
@@ -494,23 +506,23 @@ async function checkAppServerSupervisor(socketPath, expectedTopology) {
   }
 }
 
-async function checkAppServer(label, socketPath, codexBinary) {
+async function checkAppServer(label, socketPath, codexBinary, recordCheck) {
   if (process.platform !== "win32" && !existsSync(socketPath)) {
-    record(label, false, `Socket 不存在：${socketPath}`);
+    recordCheck(label, false, `Socket 不存在：${socketPath}`);
     return;
   }
   try {
     assertAppServerSocketPathSupported(socketPath);
     const appServerUserAgent = await initializeAppServer(socketPath, codexBinary);
-    record(label, true, `initialize 握手通过：${socketPath}`);
+    recordCheck(label, true, `initialize 握手通过：${socketPath}`);
     const actualVersion = appServerVersion(appServerUserAgent);
-    record(
+    recordCheck(
       label === "Codex App Server" ? "App Server 版本" : `${label} 版本`,
       actualVersion === requiredAppServerVersion,
       `${actualVersion ?? "无法识别"}（要求 ${requiredAppServerVersion}）`,
     );
   } catch (error) {
-    record(label, false, `连接失败：${errorMessage(error)}`);
+    recordCheck(label, false, `连接失败：${errorMessage(error)}`);
   }
 }
 
@@ -590,25 +602,30 @@ if (process.platform === "darwin") {
 const report = createDoctorReport(checks);
 process.stdout.write(jsonOutput
   ? `${JSON.stringify(report, null, 2)}\n`
-  : renderDoctorText(report));
+  : textRenderer.renderSummary(report));
 process.exitCode = report.healthy ? 0 : 1;
 
 function setSection(section) {
   checkSection = section;
+  if (textRenderer) process.stderr.write(`正在检查：${section}\n`);
 }
 
 function record(name, passed, detail, remediation) {
-  checks.push({
+  const check = {
     section: checkSection,
     kind: passed ? "success" : "failure",
     name,
     detail,
     remediation,
-  });
+  };
+  checks.push(check);
+  if (textRenderer) process.stdout.write(textRenderer.renderCheck(check));
 }
 
 function note(name, detail, remediation) {
-  checks.push({ section: checkSection, kind: "note", name, detail, remediation });
+  const check = { section: checkSection, kind: "note", name, detail, remediation };
+  checks.push(check);
+  if (textRenderer) process.stdout.write(textRenderer.renderCheck(check));
 }
 
 function checkPrivateDirectory(name, path, remediation) {
