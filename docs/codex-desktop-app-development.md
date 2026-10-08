@@ -205,7 +205,7 @@ Desktop 经上游配置 RPC 保存设置时可能写入共享用户配置，而�
 Host 生命周期按需启动一个实例。
 普通会话清理通过官方跨 Provider 列表发现历史，遇到聚合会话后才连接聚合实例；聚合配置
 不满足启动条件时明确跳过对应会话组，不让未使用聚合的普通清理在扫描前失败。
-Remote 通过 `--provider codexc-aggregate` 取得实例租约，不能同时指定 Profile；启动时从该实例
+Remote 通过 `--provider agg` 取得实例租约，不能同时指定 Profile；启动时从该实例
 读取默认模型与思考等级。渠道模型目录注册同一个 Provider，聚合内部切换保留 Thread，
 持久化绑定恢复仍按该 Provider 路由。聚合纳入 Gateway 账户空闲回收，活动与租约阻止提前释放；
 退出 Desktop 不承诺立即停止实例。聚合没有单一账户额度，账户查询明确不支持且不写虚拟快照；
@@ -285,7 +285,9 @@ codexc app status [--provider <Provider ID>] [--json]
 ### `codexc app`
 
 - `--provider` 接受切换模式下配置的精确 Provider ID（包含账户隔离 ID），以及主 OpenAI 且
-  DS/CLP 均有切换账户时派生的 `codexc-aggregate`，缺省连接主 OpenAI。
+  DS/CLP 均有切换账户时的保留选择值 `agg`，缺省连接主 OpenAI。
+  `agg` 仅在公开命令解析时映射为内部 `codexc-aggregate`；命令不接受长 ID，状态 JSON、Thread、租约与绑定仍使用内部 ID。
+  Desktop 启动、状态查询和 Remote 均支持 `-p` 作为 `--provider` 简写；Remote Profile 使用 `--profile`。
   参数仅对本次启动生效，不写入 TOML、Desktop 配置或系统环境；普通模型名称和任意 Socket 路径均不接受。
   选择其他实例不重启整个服务，macOS 需要替换子进程时只处理目标实例。
   旧服务不支持 Provider 选择能力时拒绝启动并提示重启服务，不静默连接主实例。

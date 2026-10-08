@@ -73,6 +73,10 @@ export async function runDesktopAppCommand(args, options = {}) {
     CODEX_BINARY: stringValue(codex.binary) || "codex",
   };
   const appServer = resolveAppServerRuntime(document, located.dataDir, runtimeEnvironment);
+  if (parsed.provider === aggregateProviderId
+    && appServer.managedProviders.some(({ provider }) => provider === "agg")) {
+    throw new Error("agg 与已配置的自定义 Provider ID 冲突，已取消桌面选择；该自定义 Provider 请使用 codexc remote --profile sf-custom-agg");
+  }
   const selectedProvider = parsed.provider ?? appServer.primaryProvider;
   const selectedSocketPath = resolveDesktopAppSocketPath(appServer, selectedProvider);
   let desktopConfig = desktopAppConfig(codex.desktop_app);
@@ -525,18 +529,21 @@ export function openWindowsDesktopApp(
 function parseDesktopAppArgs(args) {
   if (args.length === 0) return { action: "open" };
   const [action, ...rest] = args;
-  if (action === "status" || action === "--provider") {
+  if (action === "status" || action === "--provider" || action === "-p") {
     const parsed = { action: action === "status" ? "status" : "open" };
     const flags = action === "status" ? rest : args;
     for (let index = 0; index < flags.length; index += 1) {
       if (flags[index] === "--json" && parsed.action === "status" && parsed.json !== true) {
         parsed.json = true;
-      } else if (flags[index] === "--provider" && parsed.provider === undefined) {
+      } else if ((flags[index] === "--provider" || flags[index] === "-p") && parsed.provider === undefined) {
         const provider = flags[index + 1];
         if (typeof provider !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(provider)) {
           throw new Error("--provider 必须指定已配置的完整 Provider ID");
         }
-        parsed.provider = provider;
+        if (provider === aggregateProviderId) {
+          throw new Error("聚合模式的命令选择值为 agg，请使用 --provider agg");
+        }
+        parsed.provider = provider === "agg" ? aggregateProviderId : provider;
         index += 1;
       } else {
         throw new Error(desktopAppCommandUsage);

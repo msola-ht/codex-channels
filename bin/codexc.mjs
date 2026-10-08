@@ -135,9 +135,10 @@ DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开�
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
 切换模式可用 --profile sf-ds-<账户>、sf-ocg-<账户>、sf-ccg-<账户> 或
 sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。
-DS 官方和 CLP 均有切换账户且主 Provider 为 OpenAI 时，可用 --provider codexc-aggregate
+DS 官方和 CLP 均有切换账户且主 Provider 为 OpenAI 时，可用 --provider agg 或 -p agg
 连接聚合实例；不能与 --profile 同用。聚合从服务端读取默认模型，审批 reviewer 使用 user，
-显式 auto_review 会被拒绝。终端退出时释放该实例租约。`,
+显式 auto_review 会被拒绝。终端退出时释放该实例租约。
+-p 用于 Provider 选择；Profile 请使用 --profile。`,
   desktop_app: desktopAppCommandUsage,
   install: serviceCommandUsage.install,
   start: serviceCommandUsage.start,
