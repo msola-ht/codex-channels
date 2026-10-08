@@ -62,7 +62,9 @@
   主配置不进入材料监听和出站指纹，仅在材料加载、启动或应用时校验全局窗口与 Provider 冲突。
   设置刷新与出站复核共用同一摘要实现及私有文件读取校验。只写可重建、无密钥的运行时 `aggregate-models.json`，不改账户或存储契约。
 - `aggregate-material-guard.mjs`：聚合实例拥有的有界工作线程；按去重文件清单校验私有权限与材料摘要，
-  避免 Windows ACL 子进程阻塞模型转发和 Supervisor。取消等待不释放尚未完成的队列槽，实例释放时关闭线程。
+  避免 Windows ACL 子进程阻塞模型转发和 Supervisor。最多保留 16 项，每次只派发一项并从执行开始计时；
+  排队取消释放该槽，执行取消保留槽直至完成。超时或线程故障拒绝该代等待，确认线程退出后由下一次请求
+  按原材料快照重建并重新复核，不复用成功结果；实例释放时永久关闭，旧代消息不能确认新请求。
 - `ccg-accounts.mjs` / `ccg-accounts.d.mts`：CCG 账户注册表、默认账户、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ccg-<账户>`，共用 CCG 目录与统计代理。
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
   （`accounts.json`）、账户目录与管理标记；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于本机展示。

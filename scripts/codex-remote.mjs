@@ -120,7 +120,7 @@ async function runRemoteCli() {
     }
     const modelArguments = selectedProvider === undefined
       ? []
-      : await aggregateModelArguments(socketPath, configuredBinary);
+      : await aggregateModelArguments(socketPath, configuredBinary, passthrough);
     const invocation = resolveExecutableInvocation(configuredBinary, [
       "--remote",
       `unix://${socketPath}`,
@@ -288,7 +288,7 @@ function assertAggregateProviderArguments(args) {
   }
 }
 
-async function aggregateModelArguments(socketPath, codexBinary) {
+async function aggregateModelArguments(socketPath, codexBinary, passthrough) {
   const { CodexAppServerClient, JsonRpcClient, createAppServerTransport } = await import("../dist/codex-client/index.js");
   const client = new CodexAppServerClient(new JsonRpcClient(
     createAppServerTransport({ kind: "local-app-server", socketPath }, { codexBinary, connectTimeoutMs: 3_000 }),
@@ -299,19 +299,57 @@ async function aggregateModelArguments(socketPath, codexBinary) {
       client.readDefaultModelSettings(),
       client.listModels(),
     ]);
-    const selectedModel = models.find((candidate) => model === null ? candidate.isDefault : candidate.model === model);
-    if (!selectedModel) throw new Error("聚合 App Server 未返回目录中的默认模型；请重启 App Server 服务");
+    const defaultModel = models.find((candidate) => model === null ? candidate.isDefault : candidate.model === model);
+    if (!defaultModel) throw new Error("聚合 App Server 未返回目录中的默认模型；请重启 App Server 服务");
+    const overrides = aggregateModelOverrides(passthrough);
+    const selectedModel = overrides.model === undefined
+      ? defaultModel
+      : models.find((candidate) => candidate.model === overrides.model);
+    if (!selectedModel) throw new Error("指定模型不在聚合目录中；请使用目录中的精确模型 ID");
+    const selectedEffort = selectedModel.model === defaultModel.model
+      ? effort ?? selectedModel.defaultReasoningEffort
+      : selectedModel.defaultReasoningEffort;
     // Remote reads its catalog from the server, but local config wins for these
     // launch settings. Project the server defaults instead of inventing a Profile.
     return [
       "-c", `model=${JSON.stringify(selectedModel.model)}`,
-      "-c", `model_reasoning_effort=${JSON.stringify(effort ?? selectedModel.defaultReasoningEffort)}`,
+      ...(overrides.effort ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(selectedEffort)}`]),
       "-c", "service_tier=\"default\"",
       "-c", "web_search=\"disabled\"",
     ];
   } finally {
     await client.close();
   }
+}
+
+function aggregateModelOverrides(args) {
+  let cliModel;
+  let configModel;
+  let effort = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--") break;
+    const override = configOverrideArgument(args, index);
+    if (override) {
+      index += override.consumed - 1;
+      if (override.key === "model") configModel = override.value;
+      if (override.key === "model_reasoning_effort") effort = true;
+      continue;
+    }
+    if (argument === "--model" || argument === "-m") {
+      cliModel = args[index + 1];
+      index += 1;
+    } else if (argument.startsWith("--model=")) {
+      cliModel = argument.slice("--model=".length);
+    } else if (argument.startsWith("-m=")) {
+      cliModel = argument.slice(3);
+    } else if (/^-m[^-]/u.test(argument)) {
+      cliModel = argument.slice(2);
+    }
+  }
+  // Config overrides are applied in order, then the CLI model wins regardless
+  // of argument order (locked Codex Config::from_config: model.or(cfg.model)).
+  return { model: cliModel ?? configModel, effort };
 }
 
 function table(value) {
