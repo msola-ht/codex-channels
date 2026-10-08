@@ -21,7 +21,8 @@ export function resolveAppServerRuntime(document, dataDir, environment = process
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, dataDir);
   const managedProviders = loadManagedProviderAppServers(environment);
   const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders(environment);
-  const aggregateMembers = aggregateProviderMembers(loadPrimaryModelProvider(environment), [
+  const primaryProvider = loadPrimaryModelProvider(environment);
+  const aggregateMembers = aggregateProviderMembers(primaryProvider, [
     ...managedProviders, ...customSwitchingProviders,
   ]);
   if (customSwitchingProviders.some(entry => entry.provider === aggregateProviderId)) {
@@ -37,7 +38,6 @@ export function resolveAppServerRuntime(document, dataDir, environment = process
   for (const socketPath of managedSocketPaths) {
     assertAppServerSocketPathSupported(socketPath);
   }
-  const primaryProvider = loadPrimaryModelProvider(environment);
   const socketPaths = [
     primarySocketPath,
     ...managedSocketPaths,

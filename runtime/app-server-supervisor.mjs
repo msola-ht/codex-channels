@@ -489,7 +489,11 @@ export async function inspectAppServerSupervisor(primarySocketPath) {
 
 export async function inspectAppServerSupervisorState(primarySocketPath) {
   const socketPath = appServerSupervisorSocketPath(primarySocketPath);
-  const status = assertSafeSupervisorSocket(socketPath);
+  // Windows createPrivateIpcConnection validates the descriptor immediately before
+  // use. Do not spawn PowerShell a second time just to check existence here.
+  const status = process.platform === "win32"
+    ? lstatSync(socketPath, { throwIfNoEntry: false })
+    : assertSafeSupervisorSocket(socketPath);
   if (!status) return { status: "missing" };
   const topology = parseTopology(
     await readSupervisorResponse(socketPath, { action: "inspect" }),

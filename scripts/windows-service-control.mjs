@@ -28,6 +28,8 @@ import { serviceControlDefinitions, serviceSnapshotHealthy } from "./service-sel
 
 const definitionLimitBytes = 64 * 1024;
 const hostStartTimeoutMs = 15_000;
+// A running task host precedes configuration/ACL checks and App Server startup.
+const appServerStartTimeoutMs = 60_000;
 // The host allows 10s for graceful IPC stop, then up to 6s for tree termination.
 const hostStopTimeoutMs = 20_000;
 const pollIntervalMs = 100;
@@ -220,38 +222,31 @@ async function waitForAppServer(socketPath) {
   if (typeof socketPath !== "string" || socketPath.length === 0) {
     throw new Error("Windows App Server 服务定义缺少 Socket 路径；请运行 codexc install");
   }
-  const deadline = Date.now() + hostStartTimeoutMs;
+  const deadline = Date.now() + appServerStartTimeoutMs;
+  let lastStage = "等待监管入口";
   while (Date.now() < deadline) {
-    if (await appServerSocketAcceptsWebSocket(socketPath)) {
-      await waitForAppServerSupervisor(socketPath, deadline);
-      return;
-    }
+    let state;
     try {
-      const state = await inspectAppServerSupervisorState(socketPath);
-      if (
-        state.status === "ready"
-        && state.topology.releasedProviders.includes(state.topology.primaryProvider)
-      ) {
-        return;
+      state = await inspectAppServerSupervisorState(socketPath);
+    } catch {
+      // Do not expose descriptor contents or bypass its private-path validation.
+      lastStage = "监管入口权限校验或读取未通过";
+    }
+    if (state?.status === "ready") {
+      const { topology } = state;
+      if (topology.releasedProviders.includes(topology.primaryProvider)) return;
+      if (topology.runningProviders.includes(topology.primaryProvider)) {
+        lastStage = "主实例已运行，等待 App Server 连接";
+        if (await appServerSocketAcceptsWebSocket(socketPath)) return;
+      } else {
+        lastStage = "监管已就绪，等待主实例启动";
       }
-    } catch {
-      // The descriptor may be absent or mid-write while App Server finishes startup.
+    } else if (state) {
+      lastStage = state.status === "missing" ? "等待监管入口创建" : "监管入口未返回有效状态";
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, pollIntervalMs));
   }
-  throw new Error(`等待 Codex App Server 就绪超时：${socketPath}`);
-}
-
-async function waitForAppServerSupervisor(socketPath, deadline) {
-  while (Date.now() < deadline) {
-    try {
-      if ((await inspectAppServerSupervisorState(socketPath)).status === "ready") return;
-    } catch {
-      // The descriptor may be absent or mid-write while App Server finishes startup.
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, pollIntervalMs));
-  }
-  throw new Error(`等待 App Server 监管入口就绪超时：${socketPath}`);
+  throw new Error(`等待 Codex App Server 就绪超时（应用启动等待 ${appServerStartTimeoutMs / 1_000} 秒；${lastStage}）：${socketPath}`);
 }
 
 async function stopDefinition(service, definitionsDirectory, environment) {

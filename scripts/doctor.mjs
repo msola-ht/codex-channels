@@ -32,7 +32,6 @@ import {
   validateGatewayConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import {
-  loadConfiguredCustomSwitchingModelProviders,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
   validateConfiguredModelProviders,
@@ -413,8 +412,8 @@ if (document) {
   let appServerTopology;
   let managedProviders = [];
   try {
-    const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders(process.env);
-    for (const customSwitchingProvider of customSwitchingProviders) {
+    const descriptor = resolveAppServerRuntime(document, dataDir, process.env);
+    for (const customSwitchingProvider of descriptor.customSwitchingProviders) {
       record(
         `${customSwitchingProvider.provider} 模型提供商配置`,
         true,
@@ -429,18 +428,17 @@ if (document) {
         `${configuredProvider.provider} ${configuredProvider.mode === "switching" ? "切换" : "固定"}模式有效`,
       );
     }
-    const descriptor = resolveAppServerRuntime(document, dataDir, process.env);
     managedProviders = descriptor.managedProviders;
     appServerTopology = descriptor.topology;
   } catch (error) {
     record("模型提供商配置", false, errorMessage(error));
   }
-  if (appServerTopology) {
-    await checkAppServerSupervisor(socketPath, appServerTopology);
-  }
+  const observedTopology = appServerTopology
+    ? await checkAppServerSupervisor(socketPath, appServerTopology)
+    : undefined;
   if (
     appServerTopology
-    && await primaryAppServerReleased(socketPath, appServerTopology.primaryProvider)
+    && observedTopology?.releasedProviders.includes(appServerTopology.primaryProvider)
   ) {
     record(
       "Codex App Server",
@@ -471,15 +469,6 @@ async function checkOptionalAppServer(label, socketPath, codexBinary) {
   await checkAppServer(label, socketPath, codexBinary);
 }
 
-async function primaryAppServerReleased(socketPath, primaryProvider) {
-  try {
-    const topology = await inspectAppServerSupervisor(socketPath);
-    return topology?.releasedProviders.includes(primaryProvider) === true;
-  } catch {
-    return false;
-  }
-}
-
 async function checkAppServerSupervisor(socketPath, expectedTopology) {
   try {
     const actualTopology = await inspectAppServerSupervisor(socketPath);
@@ -494,6 +483,7 @@ async function checkAppServerSupervisor(socketPath, expectedTopology) {
         ? undefined
         : "运行 codexc restart all；如仍失败，先停止裸 App Server 后重试",
     );
+    return matches ? actualTopology : undefined;
   } catch (error) {
     record(
       "App Server 监管",

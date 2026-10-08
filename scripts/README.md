@@ -499,6 +499,7 @@
   `getupdates`，不显示 Token、`context_token` 或游标；
   主 Unix WebSocket、已配置 Provider 的切换或固定配置、实际模型目录、Provider Socket、
   监管身份与 Provider 拓扑、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，
+  同一次诊断复用已解析的自定义 Provider 拓扑和同次监管检查的空闲释放状态，不缓存跨命令的 ACL 结果；
   `--json` 输出完整脱敏检查数组、分类计数与健康状态；不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
 - `service-install-context.mjs` / `service-install-context.d.mts`：systemd 与 launchd 安装器共用的配置、
@@ -543,6 +544,7 @@
   与卸载；
   核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
   App Server 启动等待向共享检查入口传入主 Socket 路径，由该入口统一派生监管地址；实例已空闲释放时也检查同一监管入口。
+  计划任务宿主启动等待 15 秒，App Server 应用就绪独立等待 60 秒；监管确认主实例运行后才启动连接探测，超时报告最后等待阶段。
 - `windows-service-host.mjs` / `windows-service-host.d.mts`：计划任务启动的 Windows 服务宿主，按 JSON 定义启动并监管单个
   Node 服务进程，转发控制请求并把标准输出、错误输出写入用户级运行日志。
 - `windows-service-launcher.ps1`：Windows 计划任务调用的 PowerShell 启动器，设置受控环境后
