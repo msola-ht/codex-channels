@@ -158,7 +158,8 @@ export async function describeDumpExchange(
   if (interaction.response?.capture === "redacted_upstream_chat" || nativeResponses && responseBody === undefined) {
     output.consume({ kind: "response_body", encoding: "utf8", text: responsePayload.text });
   }
-  const trace = await readTrace(directory, id, traceOffset, maxTracePageSize, maxSectionBytes, output);
+  const trace = await readTrace(directory, id, traceOffset, maxTracePageSize, maxSectionBytes, output, interaction);
+  const continuation = await readContinuation(interaction);
   const collected = output.result();
   // Read existing V2 dumps using their explicit terminal payload; never rewrite archived data.
   if (terminalResponse && interaction.response.state === "completed") {
@@ -169,6 +170,7 @@ export async function describeDumpExchange(
     ...debugDetail(interaction, maxSectionBytes),
     modelEvidence: models.result(),
     chatDiagnostics: trace.chatDiagnostics,
+    continuation,
     parameterComparison: parameterComparison(requestBody, responseBody),
     request: {
       headers: interaction.request.headers ?? {},
@@ -197,6 +199,7 @@ export async function describeDumpExchange(
       callTiming: callTiming(interaction.response.callTiming),
       eventType: interaction.response.eventType,
       errorScope: interaction.response.errorScope,
+      websocketClose: trace.websocketClose,
       failureStage: failureStage(interaction.response, responseBody),
       error: interaction.response.error,
       capture: interaction.response.capture,
@@ -208,6 +211,43 @@ export async function describeDumpExchange(
     },
     trace: trace.items,
     tracePage: trace.page,
+  };
+}
+
+/** 只关联同一 writer 中的原始 Thread/Turn，不使用审查请求投影后的父身份。 */
+async function readContinuation(interaction) {
+  const { request, response, directory } = interaction;
+  if (request.transport !== "websocket" || request.requestKind !== "turn"
+    || response?.state !== "incomplete" || response.errorScope !== "websocket_client_closed") return undefined;
+  const validIdentity = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/u.test(value);
+  if (!validIdentity(request.threadId) || !validIdentity(request.turnId)
+    || !Number.isFinite(response.ts)) return undefined;
+  let next;
+  // 保留一个候选，不读取其他请求正文；缺失身份时不按时间或模型猜配。
+  await forEachDumpRecord([directory], record => {
+    if (record.kind === "request" && Number.isSafeInteger(record.id) && record.id > request.id
+      && record.transport === "websocket" && record.requestKind === "turn"
+      && record.threadId === request.threadId && record.turnId === request.turnId
+      && record.account === request.account && record.url === request.url
+      && Number.isFinite(record.startedAtMs) && record.startedAtMs >= response.ts
+      && (next === undefined || record.id < next.request.id)) next = { request: record };
+    if (record.kind === "response" && next?.request.id === record.id) next.response = record;
+  });
+  if (next === undefined) return { scope: "same_writer_thread_turn", next: null };
+  // 只报告已保留输入中存在代理消息，不推断“新增”、重试或取消原因。
+  const payload = readPayload(directory, next.request.payload, 1_048_576, true);
+  const body = parseJson(payload.text);
+  const agentMessageObserved = Array.isArray(body?.input)
+    && body.input.some(item => item?.type === "agent_message");
+  return {
+    scope: "same_writer_thread_turn",
+    next: {
+      id: next.request.id,
+      startedAtMs: next.request.startedAtMs,
+      gapMs: next.request.startedAtMs - response.ts,
+      state: ["completed", "failed", "incomplete"].includes(next.response?.state) ? next.response.state : "pending",
+      agentMessageObserved,
+    },
   };
 }
 
@@ -505,12 +545,20 @@ async function* traceRecords(directory) {
   }
 }
 
-async function readTrace(directory, id, offset, limit, maxBytes, output) {
+async function readTrace(directory, id, offset, limit, maxBytes, output, interaction) {
   const items = [];
   let chatDiagnostics;
+  let websocketClose;
   let remaining = maxBytes;
   let total = 0;
   for await (const record of traceRecords(directory)) {
+    if (websocketClose === undefined && interaction?.response?.errorScope === "websocket_client_closed"
+      && record?.kind === "websocket_close" && record.peer === "client"
+      && Number.isSafeInteger(interaction.request.connection) && record.connection === interaction.request.connection
+      && record.ts >= interaction.request.startedAtMs && record.ts <= interaction.response.ts
+      && Number.isInteger(record.code) && record.code >= 1000 && record.code <= 4999) {
+      websocketClose = { peer: "client", code: record.code, atMs: record.ts };
+    }
     if (record?.interaction !== id) continue;
     if (record.kind === "chat_diagnostics" && record.fields && typeof record.fields === "object" && !Array.isArray(record.fields)) {
       chatDiagnostics = { fields: record.fields, truncated: record.truncated === true };
@@ -529,6 +577,7 @@ async function readTrace(directory, id, offset, limit, maxBytes, output) {
   return {
     items,
     chatDiagnostics,
+    websocketClose,
     page: {
       offset,
       total,

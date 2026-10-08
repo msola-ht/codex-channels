@@ -109,6 +109,7 @@ function EnabledTrafficPage() {
                 traceError={detail.error !== null}
                 onRetry={detail.refetch}
                 onTracePageChange={(traceOffset) => update({ traceOffset, exchangeLabel: detailView.label, exchangeSession: detailView.session })}
+                onOpenContinuation={(id) => update({ id, exchangeLabel: detailView.label, exchangeSession: detailView.session, traceOffset: null })}
               />
             )}
       </div>

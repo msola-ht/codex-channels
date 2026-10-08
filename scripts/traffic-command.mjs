@@ -181,6 +181,14 @@ function renderDetail(detail) {
     lines.push(`首 Token：${detail.response.firstTokenMs === undefined ? "未提供" : formatElapsedDuration(detail.response.firstTokenMs)}`);
     lines.push(`生成速度：${formatGenerationSpeed({ ...detail.response, status: detail.response?.state, totalDurationMs: detail.response?.durationMs })}`);
     if (detail.response.failureStage !== undefined) lines.push(`失败阶段：${detail.response.failureStage}`);
+    if (detail.response.websocketClose !== undefined) lines.push(`客户端 WebSocket 关闭码：${detail.response.websocketClose.code}`);
+    if (detail.continuation !== undefined) {
+      const next = detail.continuation.next;
+      lines.push(next === null ? "同轮后续调用：当前批次尚未观察到"
+        : `同轮后续调用：#${next.id} · ${stateLabel(next.state)} · 断开后 ${formatElapsedDuration(next.gapMs)}`);
+      if (next?.agentMessageObserved) lines.push("后续请求保留输入中含代理消息；不证明消息为新增或触发了本次断开。");
+      lines.push("关联仅限当前批次的相同原始 Thread/Turn；后续状态不改变本次响应状态，也不代表整轮任务结果。");
+    }
     lines.push(...headerLines(detail.response.headers), "", "终态正文：", indent(pretty(detail.response.body)));
     if (detail.response.bodyTruncated) lines.push("（终态正文展示已截断）");
     const usage = detail.response.usage;
