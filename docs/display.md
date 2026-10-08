@@ -121,7 +121,7 @@ Core 和投递路径保留经处理的有界纯文本。Telegram 在 HTML 面板
   当前会话同样显示“首 Token”和“速度”，沿用会话 Token 的递归范围，包含子代理的普通模型请求；均值、加权速度和缺失处理与本轮一致。历史缺失首 Token 不补算，不妨碍完整输出量与总耗时样本参与速度统计。
   会话的“上下文压缩”保留 App Server 次数；落库的“压缩请求”另列次数与 Token，复用本轮的模型去重和非零异常展示，二者统计来源不同，不相加。
   `/metrics`、子代理完成卡不显示速度或上游首 Token。请求明细与调用详情的列头为“首 Token”“速度”和“请求耗时”，具体见[WebUI 请求明细](webui.md)。本地观测的 `firstTokenMs` 与上游原始 `upstreamTtftMs` 不混用。
-  当前锁定 Codex 0.160.0 的首轮 `generate=false` WebSocket 预热不属于模型推理，
+  当前锁定 Codex 0.160.1 的首轮 `generate=false` WebSocket 预热不属于模型推理，
   不计入请求数或 Token。Turn 完成前会等待当前 Thread 与 Turn 已入队的指标写入，并从本地指标库重建本轮统计；因此 Gateway
   在长 Turn 中途重启后，完成卡片仍包含重启前后的本次用量，会话累计也包含本轮已经落库的请求。等待有总预算，
   指标库拥堵或不可用时按当前可用值生成卡片并记录告警，避免一个慢指标库阻塞其他 Surface 与 Conversation 的输出投递。
@@ -168,7 +168,7 @@ Core 和投递路径保留经处理的有界纯文本。Telegram 在 HTML 面板
 
 OpenAI `/usage` 先展示账户活动摘要；当前账户选择和 Conversation 实际绑定都属于 OpenAI 时，
 在同一回复追加“当前 Thread 官方估算”区块。待生效的第三方 Provider 选择仍按既有规则决定
-`/usage` 的账户来源，不会为其查询当前 OpenAI Thread。官方估算按当前锁定的 0.160.0 App Server 活动
+`/usage` 的账户来源，不会为其查询当前 OpenAI Thread。官方估算按当前锁定的 0.160.1 App Server 活动
 账户读取，只覆盖精确当前 Thread，不递归或合计子代理，也不写入本地指标库。
 
 - Credits 和可选美元费用按百万分之一整数单位转换为有界小数；缺少美元值时不显示费用行。
@@ -259,7 +259,7 @@ JSON 中的 `requestOutcomes` 提供四类精确计数；`unsuccessfulRequestCou
 统计代理把 `/responses` 上的上下文压缩（remote compaction v2）保留为
 `compact` 操作：其请求与 Token 继续计入总计，同时在完成卡片、会话指标和全局/提供商/
 模型汇总中单列压缩次数、实际请求模型与 Token。这里的模型是代理实际观测到的请求模型。
-当前锁定的 Codex CLI 0.160.0 没有独立压缩模型配置；常规压缩复用 Turn 模型，模型切换兼容压缩
+当前锁定的 Codex CLI 0.160.1 没有独立压缩模型配置；常规压缩复用 Turn 模型，模型切换兼容压缩
 可能先使用上一模型，并在受支持的失败条件下回退当前模型。
 
 完成卡片的模型/提供商之下会单列「自动压缩：X%」。受管第三方 Provider 只配置模型目录里的

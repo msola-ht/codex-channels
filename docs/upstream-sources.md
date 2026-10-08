@@ -15,7 +15,7 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 
 | 用途 | 本地目录 | 来源仓库 | 当前基线 |
 | --- | --- | --- | --- |
-| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex-0.160.0` | `openai/codex` | `rust-v0.160.0`，提交 `a956835d020762cb2b570053af06f643a11c0ecc` |
+| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex-0.160.1` | `openai/codex` | `rust-v0.160.1`，提交 `d27764b82f7118f674371e6d6e76271d9d606edb` |
 | 微信 ClawBot HTTP、消息和媒体合同 | `upstream/openclaw-weixin` | `Tencent/openclaw-weixin` | `v2.4.9`，提交 `43675b66551d12d6853155a7869a50fb12a18a1e` |
 | 飞书官方 Node SDK | `upstream/larksuite-node-sdk` | `larksuite/node-sdk` | `@larksuiteoapi/node-sdk@1.74.0`，提交 `394c83092395a51402ee408b751d7f9fb05f5518` |
 | 飞书官方 OpenClaw 插件参考 | `upstream/openclaw-lark` | `larksuite/openclaw-lark` | 提交 `dde0be3680d6fd5443cab426c8f4b3216266346a` |
@@ -72,7 +72,7 @@ Relay 目录下载器读取 [Cline 官方模型文件](https://github.com/cline/
 新工作区没有 `upstream/` 时，按当前锁定基线显式克隆：
 
 ```text
-git clone --depth 1 --branch rust-v0.160.0 https://github.com/openai/codex.git upstream/openai-codex-0.160.0
+git clone --depth 1 --branch rust-v0.160.1 https://github.com/openai/codex.git upstream/openai-codex-0.160.1
 git clone --branch v2.4.9 https://github.com/Tencent/openclaw-weixin.git upstream/openclaw-weixin
 git clone https://github.com/larksuite/node-sdk.git upstream/larksuite-node-sdk
 git -C upstream/larksuite-node-sdk checkout 394c83092395a51402ee408b751d7f9fb05f5518

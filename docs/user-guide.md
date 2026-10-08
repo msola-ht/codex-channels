@@ -207,7 +207,7 @@ auto_recap = false
 
 Codex 0.156.1 已停用模型人格：CLI 与 WebUI 不再提供人格选择，保存其他偏好不会改写配置中已有的 `personality`。
 
-在 `codexc config → Codex 新会话与用户偏好 → 其他用户偏好` 中选择推理摘要。开发基线 0.160.0
+在 `codexc config → Codex 新会话与用户偏好 → 其他用户偏好` 中选择推理摘要。开发基线 0.160.1
 在尚未配置时预选“关闭”，与配套 CLI 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
 不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
 检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`。
@@ -349,19 +349,20 @@ App Server 服务是否支持受管入口。`toolHostAttached` 只在 Desktop �
 Remote Control、手机配对或第三方 Provider。Desktop 的连接环境属于未公开兼容入口，当前功能是
 预览；构建不兼容时命令会拒绝启用。
 
-macOS 上使用 ChatGPT `26.908.70816` 的实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
+Desktop 的 macOS 平台已由操作者确认验收，Windows 尚未验收；版本记录与范围见
+[Desktop 验收状态](codex-desktop-app-development.md#实现与验收状态)。
+macOS 上使用 ChatGPT `26.908.70816` 的既有实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
 Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
 私有 UDS，并在首次附加当前工具 Pipe 时短暂重启主 App Server 子进程，以 OpenAI 签名的 Desktop
-Node 托管项目锁定的 Codex CLI；开发基线为 0.160.0，既有私有 Pipe 与签名链实机验收使用 0.154.0，
+Node 托管项目锁定的 Codex CLI；开发基线为 0.160.1，既有私有 Pipe 与签名链实机验收使用 0.154.0，
 升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到共享主实例，
 Host 租约存在时空闲释放不会停止主实例。主实例已空闲释放时，`codexc app` 会先获取临时租约，
 按需恢复实例并保护启动预检，再通过 App Server 的官方 `thread/loaded/list` 和 `thread/read`
 检查全部已加载的持久及临时 Thread；临时租约会在打开 Desktop 前释放。发现活动 Thread、
 `codexc remote` 主实例租约，或无法完成
-只读状态检查时都会拒绝启动，不会进入子进程切换。隔离实测已经确认该进程链可启动 `codex_app`，
-服务重启恢复和退出重开仍需按
-当前 Desktop 构建完成实机复核，因此支持级别
-继续是预览。Windows 只查询当前用户的正式安装包，并直接创建带单次环境的包内 Desktop 子进程，
+只读状态检查时都会拒绝启动，不会进入子进程切换。隔离实测已经确认该进程链可启动 `codex_app`。
+macOS 已有验收结论；由于连接环境属于未公开兼容入口，功能仍保留预览定位，后续构建变化需按实际影响复核。
+Windows 只查询当前用户的正式安装包，并直接创建带单次环境的包内 Desktop 子进程，
 不写当前用户或系统级持久环境；Windows 的会话双向互通及内置工具兼容均尚未实机验收，不能据此
 视为正式平台支持。
 

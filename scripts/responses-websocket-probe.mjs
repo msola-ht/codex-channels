@@ -4,7 +4,7 @@ import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { createRefreshableHttpProxySelector } from "../runtime/network-proxy.mjs";
 import { validProviderBaseUrl } from "../runtime/model-provider-runtime.mjs";
 
-// Codex rust-v0.160.0: core/src/client.rs and codex-api/src/common.rs.
+// Codex rust-v0.160.1: core/src/client.rs and codex-api/src/common.rs.
 export async function probeResponsesWebSocket({baseUrl, apiKey, model, reasoningEffort = "none", mode = "prewarm", environment = process.env, signal, timeoutMs = 15000}) {
   if (!["prewarm", "generate"].includes(mode)) throw new Error("WS 检测模式无效");
   const endpoint = new URL(validProviderBaseUrl(baseUrl, "WS 检测"));

@@ -102,7 +102,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   普通 `/responses` 上由受控元数据标记的 remote compaction v2
   以 `operation = 'compact'` 独立分类，但其请求、Usage 与额度快照仍参与汇总、异常报告、
   会话指标和周额度估算；Turn、Thread 及时间范围聚合还从相同明细派生独立压缩摘要，不新增或
-  复制持久化数据。当前锁定 Codex 0.160.0 的 `request_kind=prewarm` 是 `generate=false` 的 WebSocket
+  复制持久化数据。当前锁定 Codex 0.160.1 的 `request_kind=prewarm` 是 `generate=false` 的 WebSocket
   连接预热而非模型推理，Provider Proxy 不将其写入本指标库，因此不会扩大请求、Token 或
   错误率分母。所有合计仍在 SQLite 内完成，不把缺失缓存字段当成零。期间汇总与 Thread 列表额外返回 `cacheUsage`，
   包含输入及缓存字段均已提供的样本对应的缓存和输入合计，以及缺失任一字段的请求数；
