@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
-import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
+import { securePrivateDirectorySync, writePrivateFileAtomic } from "../runtime/private-file.mjs";
 
 export async function validateModelCatalogWithCodex(catalog, environment = process.env) {
   const maximumBytes = 2 * 1024 * 1024;
@@ -11,6 +11,7 @@ export async function validateModelCatalogWithCodex(catalog, environment = proce
   if (Buffer.byteLength(content) > maximumBytes) throw new Error("模型目录不能超过 2 MiB");
   const directory = await mkdtemp(join(tmpdir(), "codexc-model-catalog-"));
   try {
+    securePrivateDirectorySync(directory);
     const path = join(directory, "models.json");
     await writePrivateFileAtomic(path, content);
     const validationEnvironment = { ...environment, CODEX_HOME: directory };

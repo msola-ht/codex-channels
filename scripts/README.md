@@ -159,7 +159,7 @@
 - `responses-model-templates.mjs` / `responses-model-templates.d.mts`：读取官方 Codex、DeepSeek 模板，交互勾选并映射平台模型 ID；两类均复制基础模型能力并独立保留最大上下文，不导入工具元数据。DeepSeek 另保留 `model_messages.instructions_template` 提示词；官方 Codex 模板不导入源指令。
 - `responses-websocket-probe.mjs` / `responses-websocket-probe.d.mts`：按锁定 Codex 协议探测第三方 Responses WS 握手、预热及可选文字请求；复用代理，限制超时与响应大小，取消时释放连接，不保存凭据或原始响应。
 - `responses-websocket-setup.mjs` / `responses-websocket-setup.d.mts`：新增、编辑自定义 Provider 时选择自动检测或手动 WS 开关，模型请求须确认可能计费，结果只进入最终保存预览。
-- `model-catalog-validation.mjs` / `model-catalog-validation.d.mts`：RS 与 CCG 共用的保存前 Codex 模型目录合同校验，使用隔离临时目录，限制运行时间并清理临时文件。
+- `model-catalog-validation.mjs` / `model-catalog-validation.d.mts`：Provider 保存前的 Codex 模型目录合同校验；先将自身新建的隔离临时目录设为私有，再写入目录数据，限制运行时间并清理临时文件，不修改系统 TEMP 根目录权限。
 - `responses-model-setup.mjs` / `responses-model-setup.d.mts`：交互收集自定义 Responses 模型能力并选择启用列表；新建非 DS 定义显式使用通用编程提示词，已有自定义指令保持。
 - `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义 Responses 共用的 1–64 个模型多选、预览确认与默认模型保护。
 - `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG 共享目录的手填模型、DS 模板更新、启用选择和备份事务；保护所有账户默认值，目录变化不修改账户凭据。
@@ -295,7 +295,7 @@
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 高级设置选择完整日志等级，不改写显示设置或凭据。
 - `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、默认账户及 `codexc provider ccg remove` 删除入口；账户隔离 Key/Profile/App Server 并共享目录与统计代理，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录，保留原模型并复制 Flash 增加 V4.1；模型 ID 与显示名来自根目录 `provider-model-catalog.json`。
-- `managed-provider-files.mjs` / `managed-provider-files.d.mts`：OCG 与 CCG 共用的私有文件读取、写入、快照、逐文件并发复核和失败回滚。
+- `managed-provider-files.mjs` / `managed-provider-files.d.mts`：Provider 文件事务必须提供当前运行环境；统一访问器绑定文件归属，快照携带内存中的读取与写入闭包，并发复核、更新及回滚复用同一策略。调用方不再标记共享文件，未纳入快照的更新明确拒绝；不改变持久化备份格式。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。
 - `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，收紧无效 verbosity/摘要声明，保留其他能力与窗口设置；仅提供目录构建、能力修正接口，不导入账户菜单或管理事务。
 - `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 多账户配置、默认账户与删除事务。

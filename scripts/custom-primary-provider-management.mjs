@@ -3,7 +3,8 @@ import { readOfficialModelCatalog } from "../runtime/model-provider-official-cat
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { readPrivateFileSync, writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { createResponsesModelCatalog, resolveResponsesTemplateContexts, isResponsesProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { isIP } from "node:net";
 import { isDeepStrictEqual } from "node:util";
@@ -124,22 +125,23 @@ async function applySavePlan(input, plan, options) {
   if (!isDeepStrictEqual(plan.models, resolveResponsesTemplateContexts(plan.models,environment))) throw invalid("stale-preview","catalog","DS 模板上下文已变化，请重新预览");
   if (JSON.stringify(createResponsesModelCatalog(plan.models, plan.provider.model)) !== plan.validatedCatalog) throw invalid("stale-preview", "catalog", "模型目录已变化，请重新预览并校验");
   const configPath = join(codexHomePath(environment), "config.toml");
-  const beforeConfig = existsSync(configPath) ? readPrivateFileSync(configPath) : undefined;
+  const read = createProviderFileReader(environment);
+  const beforeConfig = existsSync(configPath) ? read(configPath) : undefined;
   const profilePath = customPrimaryProviderProfilePath(environment, plan.provider.id);
-  const beforeProfile = existsSync(profilePath) ? readPrivateFileSync(profilePath) : undefined;
+  const beforeProfile = existsSync(profilePath) ? read(profilePath) : undefined;
   const backupPaths = [configPath, customPrimaryProviderProfilePath(environment, plan.provider.id), customSwitchingProviderRegistryPath(environment)];
   const transaction = writeResponsesModelCatalog(environment, plan.provider.id, plan.models, plan.provider.model, plan.catalogRevision);
   try {
     writePrivateFileAtomicSync(responsesProviderBackupPath(environment, plan.provider.id), JSON.stringify({
       schemaVersion: 1,
-      files: backupPaths.map(path => ({ path, content: existsSync(path) ? readPrivateFileSync(path) : null })),
+      files: backupPaths.map(path => ({ path, content: existsSync(path) ? read(path) : null })),
     }));
     const result = await withResponsesModelCatalogWrite(transaction, () => applyConnectionSavePlan(input, plan, options));
     finishResponsesModelCatalogWrite(transaction);
     return result;
   } catch (error) {
-    const afterConfig = existsSync(configPath) ? readPrivateFileSync(configPath) : undefined;
-    const afterProfile = existsSync(profilePath) ? readPrivateFileSync(profilePath) : undefined;
+    const afterConfig = existsSync(configPath) ? read(configPath) : undefined;
+    const afterProfile = existsSync(profilePath) ? read(profilePath) : undefined;
     if (beforeConfig === afterConfig && (afterProfile === beforeProfile || (plan.switchingProvider && afterProfile === undefined))) {
       finishResponsesModelCatalogWrite(transaction, true);
       if (plan.switchingProvider && !existsSync(customPrimaryProviderProfilePath(environment, plan.provider.id))) {

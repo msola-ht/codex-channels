@@ -298,8 +298,10 @@ export async function inspectManagedServiceHealth(options = {}) {
   }));
   return {
     ...status,
-    healthy: services.every((service) => {
-      if (!service.running) return false;
+    healthy: status.healthy && services.every((service) => {
+      // The base snapshot already distinguishes disabled optional services from
+      // required stopped services. Add reachability without discarding that policy.
+      if (!service.running) return true;
       return service.rpcReachable === null || service.rpcReachable === true;
     }),
     services,

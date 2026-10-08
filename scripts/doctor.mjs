@@ -42,6 +42,7 @@ import {
 } from "../runtime/network-proxy.mjs";
 import {
   assertPrivateDirectoryAccessSync,
+  assertCodexConfigAccessSync,
   assertPrivateFileAccessSync,
 } from "../runtime/private-file.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
@@ -657,7 +658,14 @@ function checkCodexHomePrivatePaths() {
   }
   for (const entry of entries) {
     if (entry.isFile() && entry.name.endsWith(".toml")) {
-      checkPrivateFile(`Codex 配置权限：${entry.name}`, join(home, entry.name));
+      if (entry.name === "config.toml") {
+        try {
+          assertCodexConfigAccessSync(join(home, entry.name));
+          record("Codex 共享配置完整性", true, "所有者与写入权限有效；保留上游读取权限，不代表机密性校验");
+        } catch (error) {
+          record("Codex 共享配置完整性", false, errorMessage(error), "检查配置文件及父目录所有者和写入权限");
+        }
+      } else checkPrivateFile(`Codex 配置权限：${entry.name}`, join(home, entry.name));
     }
   }
 }

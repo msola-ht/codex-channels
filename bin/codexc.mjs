@@ -32,6 +32,7 @@ import {
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
   repairWindowsPrivateFileSync,
+  assertCodexConfigAccessSync,
 } from "../runtime/private-file.mjs";
 import {
   CODEX_REMOTE_USAGE,
@@ -159,7 +160,7 @@ sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profi
 Linux 缺少 bubblewrap 时输出安装建议。`,
   security: `用法：codexc security repair
 
-修复 Windows Codex Home 顶层 TOML 配置文件的 ACL，仅保留当前用户、SYSTEM 和 Administrators 完全控制。
+修复 Windows Codex Home 顶层私有 TOML 的 ACL；主 config.toml 完整性有效时保留上游读取权限。
 管理员所有的文件仅在当前用户已有完全控制且无拒绝规则时恢复为当前用户所有；不接管其他用户文件。
 不修改配置内容或 Codex 沙箱目录权限，其他平台明确提示无需处理。`,
   provider: `${primaryProviderUsage}\n\n受管账户：\n  codexc provider deepseek <add|list|reconfigure|remove|default> [id]\n  codexc provider opencode-go <add|list|remove|default|release> [id]\n  codexc provider ccg remove <id>\n\n各家只开放已有能力；CCG 新增与设置使用 codexc setup。release 释放账户 App Server 实例，后续请求可重新拉起，不禁用账户。`,
@@ -689,10 +690,16 @@ function security(args) {
   const files = readdirSync(home, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
     .map((entry) => join(home, entry.name));
+  let repaired = 0;
   for (const file of files) {
+    if (file === join(home, "config.toml")) {
+      try { assertCodexConfigAccessSync(file); continue; }
+      catch { /* Explicit repair may tighten an unsafe shared configuration. */ }
+    }
     if (statSync(file).isFile()) repairWindowsPrivateFileSync(file);
+    repaired += 1;
   }
-  printCliMessage("success", `Windows 私有 TOML 文件 ACL 已修复：${home}（${files.length} 个文件）`);
+  printCliMessage("success", `Windows TOML 权限处理完成：${home}（检查 ${files.length} 个文件，修复 ${repaired} 个；有效的主配置读取权限保留）`);
 }
 
 function sendForegroundStopMessage(child, signal) {

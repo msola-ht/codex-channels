@@ -38,7 +38,7 @@ export async function updateManagedProviderModels(provider, { environment = proc
       join(codexHomePath(environment), "config.toml"),
       provider === "ccg" ? ccgAccountsFilePath(environment) : opencodeGoAccountsFilePath(environment),
       ...definitions.flatMap(entry => [managedProviderMarkerPath(environment, entry), join(codexHomePath(environment), entry.profileFileName)]),
-    ]);
+    ], environment);
     const original = snapshots.find(entry => entry.path === catalogPath)?.content;
     const manifest = snapshots.find(entry => entry.path === manifestPath)?.content;
     if (!original || !manifest) throw new Error("共享模型目录或来源文件缺失，请先恢复文件");

@@ -2,14 +2,6 @@ import { clinePassAccountMarkerPath, clinePassAccountsFilePath, isClinePassAccou
 import { createHash } from "node:crypto";
 import { writeResponsesContextFollowers, clinePassFollowsDeepseekContext } from "./responses-context-sync.mjs";
 import { assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-} from "node:fs";
 import { join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
@@ -26,6 +18,8 @@ import { opencodeGoAccountMarkerPath, opencodeGoAccountsFilePath } from "./openc
 import { deepseekAccountMarkerPath, deepseekAccountsFilePath } from "./deepseek-accounts.mjs";
 import { ccgAccountMarkerPath, ccgAccountsFilePath } from "./ccg-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
+import { createProviderFileReader, readCodexConfigFile } from "./provider-file-access.mjs";
+export { readCodexConfigFile } from "./provider-file-access.mjs";
 
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
@@ -198,6 +192,7 @@ export function writeManagedModelProviderProfileDefault(
   );
   const profile = readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
+    environment,
     reasoningEffortPolicy: "ignore",
     tolerateMissingModel: true,
   });
@@ -214,6 +209,7 @@ export function writeManagedModelProviderProfileDefault(
     new Map([[profilePath, stringify(document)]]), new Map([[profile.catalogPath,previousCatalog],[profilePath,previousProfile]]),model);
   readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
+    environment,
     reasoningEffortPolicy: "mirror",
   });
   return { provider: definition.id, ...settings, mode: marker.mode };
@@ -439,6 +435,7 @@ export function loadManagedProviderProfileFor(
     definition.catalogFileName,
   );
   const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
+    environment,
     ...(requireLaunchConfig
       ? {
           expectedCatalogPath,
@@ -464,6 +461,7 @@ export function loadManagedProviderProfiles(environment, { requireLaunchConfig =
       definition.catalogFileName,
     );
     const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
+      environment,
       ...(requireLaunchConfig
         ? {
             expectedCatalogPath,
@@ -495,6 +493,7 @@ export function loadConfiguredProviderProfile(
   const profile = readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
     reasoningEffortPolicy: marker.mode === "switching" ? "mirror" : "absent",
+    environment,
     tolerateMissingModel,
   });
   if (!tolerateMissingModel) {
@@ -518,11 +517,12 @@ export function loadConfiguredManagedProviderCredentials(provider, environment =
   const paths = [clinePassAccountsFilePath(environment), managedProviderMarkerPath(environment, definition), profilePath];
   const fingerprint = () => {
     const hash = createHash("sha256");
-    for (const path of paths) hash.update(JSON.stringify([path, readPrivateFile(path, maximumConfigBytes)]));
+    const read = createProviderFileReader(environment);
+    for (const path of paths) hash.update(JSON.stringify([path, read(path, maximumConfigBytes)]));
     return hash.digest("hex");
   };
   const before = fingerprint();
-  const profile = readProviderProfile(profilePath, descriptor, { requireSelection: false });
+  const profile = readProviderProfile(profilePath, descriptor, { requireSelection: false, environment });
   if (fingerprint() !== before || !findManagedProviderDefinition(environment, provider)
     || readManagedMarker(environment, definition)?.mode !== marker.mode) throw new Error("Relay CLP account changed during read");
   return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, paths,
@@ -546,7 +546,8 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
     join(directory, definition.catalogFileName), join(directory, definition.catalogManifestFileName)];
   const fingerprint = () => {
     const hash = createHash("sha256");
-    for (const path of paths) hash.update(JSON.stringify([path, readPrivateFile(path, maximumCatalogBytes)]));
+    const read = createProviderFileReader(environment);
+    for (const path of paths) hash.update(JSON.stringify([path, read(path, maximumCatalogBytes)]));
     return hash.digest("hex");
   };
   const before = fingerprint();
@@ -574,11 +575,12 @@ export function readProviderProfile(
     expectedCatalogPath,
     reasoningEffortPolicy = "absent",
     tolerateMissingModel = false,
+    environment,
   } = {},
 ) {
   let document;
   try {
-    document = record(parse(readPrivateFile(path)));
+    document = record(parse(createProviderFileReader(environment)(path, maximumConfigBytes)));
   } catch (error) {
     if (error?.code === "ENOENT") throw error;
     // TOML 解析错误可能包含带 API Key 的原始配置行，不能作为 cause 暴露。
@@ -672,25 +674,6 @@ function reasoningEffortMismatch(document, selectedModel, reasoningEffortPolicy)
 
 export function readPrivateFile(path, maximumBytes = maximumConfigBytes) {
   return readPrivateFileSync(path, maximumBytes);
-}
-
-export function readCodexConfigFile(path) {
-  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-  const descriptor = openSync(realpathSync(path), constants.O_RDONLY | noFollow);
-  try {
-    const metadata = fstatSync(descriptor);
-    const currentUid = process.getuid?.();
-    if (
-      !metadata.isFile()
-      || metadata.size > maximumConfigBytes
-      || (currentUid !== undefined && metadata.uid !== currentUid)
-    ) {
-      throw new Error("Codex 配置文件权限、类型或大小无效");
-    }
-    return readFileSync(descriptor, "utf8");
-  } finally {
-    closeSync(descriptor);
-  }
 }
 
 function validateModelCatalog(path, definition, model = definition.defaultModel) {

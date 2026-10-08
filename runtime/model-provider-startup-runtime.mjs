@@ -217,7 +217,7 @@ export function loadOpencodeGoAccountCredentialFor(provider, environment = proce
     return readProviderProfile(
       configPath,
       providerDescriptor(definition),
-      { requireSelection: false },
+      { requireSelection: false, environment },
     ).apiKey;
   }
   const managed = loadManagedProviderProfileFor(environment, definition);

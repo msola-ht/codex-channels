@@ -18,10 +18,10 @@ function Get-Request([string]$raw) {
     Throw-InvalidAcl '缺少 ACL 请求'
   }
   $request = $raw | ConvertFrom-Json
-  if ($request.operation -notin @('secure', 'verify', 'read-config', 'repair')) {
+  if ($request.operation -notin @('secure', 'verify', 'read-config', 'repair', 'replace-config')) {
     Throw-InvalidAcl 'ACL 操作无效'
   }
-  if ($request.kind -notin @('file', 'directory', 'parent-directory', 'socket-directory')) {
+  if ($request.kind -notin @('file', 'codex-config', 'directory', 'parent-directory', 'socket-directory')) {
     Throw-InvalidAcl 'ACL 路径类型无效'
   }
   if ([string]::IsNullOrWhiteSpace($request.path)) {
@@ -30,7 +30,10 @@ function Get-Request([string]$raw) {
   if ($request.operation -eq 'secure' -and $request.kind -eq 'parent-directory') {
     Throw-InvalidAcl '父目录只支持校验'
   }
-  if ($request.operation -eq 'read-config' -and $request.kind -ne 'file') {
+  if ($request.kind -eq 'codex-config' -and $request.operation -notin @('verify', 'read-config', 'replace-config')) {
+    Throw-InvalidAcl '共享 Codex 配置只支持校验、读取和原子替换'
+  }
+  if ($request.operation -eq 'read-config' -and $request.kind -notin @('file', 'codex-config')) {
     Throw-InvalidAcl '配置读取只支持普通文件'
   }
   if ($request.operation -eq 'read-config') {
@@ -40,12 +43,17 @@ function Get-Request([string]$raw) {
     if ($request.maximumBytes -isnot [long] -and $request.maximumBytes -isnot [int]) {
       Throw-InvalidAcl '私有配置读取上限无效'
     }
-    if ($request.maximumBytes -lt 1 -or $request.maximumBytes -gt 2097152) {
+    if ($request.maximumBytes -lt 1 -or $request.maximumBytes -gt 16777216) {
       Throw-InvalidAcl '私有配置读取上限无效'
     }
   }
   if ($request.operation -eq 'repair' -and $request.kind -ne 'file') {
     Throw-InvalidAcl '权限修复只支持普通文件'
+  }
+  if ($request.operation -eq 'replace-config' -and
+      ($request.kind -ne 'codex-config' -or [string]::IsNullOrWhiteSpace($request.destination) -or
+        [string]::IsNullOrWhiteSpace($request.recoveryDirectory))) {
+    Throw-InvalidAcl 'ACL 路径无效'
   }
   return $request
 }
@@ -55,10 +63,10 @@ function Get-PathItem([string]$Path, [string]$Kind) {
   if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
     Throw-InvalidAcl '私有路径不能是重解析点'
   }
-  if ($Kind -eq 'file' -and $item.PSIsContainer) {
+  if ($Kind -in @('file', 'codex-config') -and $item.PSIsContainer) {
     Throw-InvalidAcl '私有路径必须是普通文件'
   }
-  if ($Kind -ne 'file' -and -not $item.PSIsContainer) {
+  if ($Kind -notin @('file', 'codex-config') -and -not $item.PSIsContainer) {
     Throw-InvalidAcl '私有路径必须是目录'
   }
   return $item
@@ -136,7 +144,7 @@ function Set-PrivateAcl($Item, [string]$Kind, $ExpectedSids, [bool]$RepairOwner 
 }
 
 function Assert-PrivateAcl($Item, [string]$Kind, $ExpectedSids) {
-  if ($Kind -ne 'file' -and (Test-UserOnlyDirectoryAcl $Item $ExpectedSids[0])) {
+  if ($Kind -notin @('file', 'codex-config') -and (Test-UserOnlyDirectoryAcl $Item $ExpectedSids[0])) {
     $ExpectedSids = @($ExpectedSids[0])
   }
   $security = [System.IO.FileSystemAclExtensions]::GetAccessControl(
@@ -178,7 +186,8 @@ function Assert-PrivateAcl($Item, [string]$Kind, $ExpectedSids) {
       $expected[$sid] = $true
       continue
     }
-    if ($Kind -ne 'parent-directory' -or ($rule.FileSystemRights -band $dangerousRights) -ne 0) {
+    # Upstream config inherits sandbox read ACLs; this proves integrity, not secrecy.
+    if ($Kind -notin @('parent-directory', 'codex-config') -or ($rule.FileSystemRights -band $dangerousRights) -ne 0) {
       Throw-InvalidAcl '其他主体具有不安全的私有路径访问权限'
     }
   }
@@ -187,7 +196,7 @@ function Assert-PrivateAcl($Item, [string]$Kind, $ExpectedSids) {
       Throw-InvalidAcl '私有路径缺少受信任 SID 权限'
     }
   }
-  if ($Kind -ne 'parent-directory' -and -not $security.AreAccessRulesProtected) {
+  if ($Kind -notin @('parent-directory', 'codex-config') -and -not $security.AreAccessRulesProtected) {
     Throw-InvalidAcl '私有路径仍继承父目录权限'
   }
 }
@@ -237,9 +246,45 @@ try {
     $item = Get-PathItem $request.path 'file'
   }
   $expectedSids = Get-ExpectedSids
+  if ($request.operation -eq 'replace-config') {
+    # ReplaceFile preserves the destination DACL, including inherited ACEs.
+    Assert-PrivateAcl $item 'file' $expectedSids
+    $stage = 'verify-parent'
+    $parent = Get-PathItem ([System.IO.Path]::GetDirectoryName($request.destination)) 'parent-directory'
+    Assert-PrivateAcl $parent 'parent-directory' $expectedSids
+    $template = $null
+    $retainTemplate = $false
+    $recovery = Get-PathItem $request.recoveryDirectory 'directory'
+    Assert-PrivateAcl $recovery 'directory' $expectedSids
+    $backup = Join-Path $recovery.FullName 'original'
+    try {
+      if ([System.IO.File]::Exists($request.destination)) {
+        $source = Get-PathItem $request.destination 'codex-config'
+      } else {
+        # Create an empty inheritance template in the actual destination parent.
+        $template = $item.FullName + '.replacement'
+        $empty = [System.IO.File]::Open($template, [System.IO.FileMode]::CreateNew)
+        $empty.Dispose()
+        $source = Get-PathItem $template 'codex-config'
+      }
+      $stage = 'verify'
+      Assert-PrivateAcl $source 'codex-config' $expectedSids
+      $stage = 'secure'
+      # ReplaceFile may partially succeed before reporting failure. Retain any
+      # remaining template once replacement starts; the caller knows this path.
+      $retainTemplate = $true
+      [System.IO.File]::Replace($item.FullName, $source.FullName, $backup, $false)
+      if ($null -ne $template) { [System.IO.File]::Move($template, $request.destination) }
+      Assert-PrivateAcl (Get-PathItem $request.destination 'codex-config') 'codex-config' $expectedSids
+      [System.IO.File]::Delete($backup)
+      return @{ ok = $true }
+    } finally {
+      if ($null -ne $template -and -not $retainTemplate) { [System.IO.File]::Delete($template) }
+    }
+  }
   # Codex 0.160.1 requires exactly one inheritable user ACE on its socket directory.
   # Other writers sharing that directory must preserve this stronger ACL.
-  if ($request.kind -ne 'file' -and (Test-UserOnlyDirectoryAcl $item $expectedSids[0])) {
+  if ($request.kind -notin @('file', 'codex-config') -and (Test-UserOnlyDirectoryAcl $item $expectedSids[0])) {
     $expectedSids = @($expectedSids[0])
   }
   if ($request.kind -eq 'socket-directory') {
@@ -265,12 +310,12 @@ try {
     $stream = [System.IO.File]::Open($request.path, [System.IO.FileMode]::Open,
       [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
     try {
-      $item = Get-PathItem $request.path 'file'
+      $item = Get-PathItem $request.path $request.kind
       $stage = 'verify-parent'
       $parent = Get-PathItem ([System.IO.Path]::GetDirectoryName($item.FullName)) 'parent-directory'
       Assert-PrivateAcl $parent 'parent-directory' $expectedSids
       $stage = 'read-config'
-      Assert-PrivateAcl $item 'file' $expectedSids
+      Assert-PrivateAcl $item $request.kind $expectedSids
       if ($stream.Length -gt $request.maximumBytes) { Throw-InvalidAcl '私有配置超过读取上限' }
       $reader = [System.IO.StreamReader]::new($stream, [System.Text.UTF8Encoding]::new($false, $true))
       try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
@@ -284,6 +329,11 @@ try {
   }
   $stage = 'verify'
   Assert-PrivateAcl $item $request.kind $expectedSids
+  if ($request.kind -eq 'codex-config') {
+    $stage = 'verify-parent'
+    $parent = Get-PathItem ([System.IO.Path]::GetDirectoryName($item.FullName)) 'parent-directory'
+    Assert-PrivateAcl $parent 'parent-directory' $expectedSids
+  }
   return @{ ok = $true }
 } catch {
   # Do not return exception messages: PowerShell/.NET may include file contents.

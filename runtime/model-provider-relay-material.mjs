@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { codexHomePath } from "./codex-home.mjs";
 import { loadManagedModelProviderDefinitions } from "./model-provider-definitions.mjs";
 import { loadConfiguredManagedProviderMaterial, loadConfiguredManagedProviderCredentials } from "./model-provider-managed-runtime.mjs";
+import { createProviderFileReader } from "./provider-file-access.mjs";
 import { loadCustomSwitchingProviderIds, loadConfiguredCustomSwitchingModelProviders,
   customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath,
   loadConfiguredCustomPrimaryModelProvider, loadConfiguredCustomPrimaryRelayProfile } from "./model-provider-custom-runtime.mjs";
@@ -46,11 +47,13 @@ function loadBaseRelayProviderMaterial(provider, environment) {
     throw new Error("Relay requires a registered Provider with independently managed API credentials");
   }
   const catalogPath = isResponsesProvider(provider) ? responsesProviderCatalogPath(environment, provider) : customOfficialModelCatalogPath(environment);
+  const configPath = join(codexHomePath(environment), "config.toml");
   const paths = [...(switching ? [customSwitchingProviderRegistryPath(environment), customPrimaryProviderProfilePath(environment, provider)] : []),
-    join(codexHomePath(environment), "config.toml"), catalogPath];
+    configPath, catalogPath];
   const fingerprint = () => {
     const hash = createHash("sha256");
-    for (const path of paths) hash.update(JSON.stringify([path, readPrivateFileSync(path, 8 * 1024 * 1024)]));
+    const read = createProviderFileReader(environment);
+    for (const path of paths) hash.update(JSON.stringify([path, read(path, 8 * 1024 * 1024)]));
     return hash.digest("hex");
   };
   const revision = fingerprint();

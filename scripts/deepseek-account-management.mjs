@@ -16,7 +16,7 @@ import {
   loadManagedModelProviderSettings, loadPrimaryModelProvider,
   managedProviderDirectory,
 } from "../runtime/model-provider-runtime.mjs";
-import { readPrivateFileSync } from "../runtime/private-file.mjs";
+import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { applyProviderFileUpdates, snapshotProviderFiles } from "./managed-provider-files.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, resolveManagedCatalogModel, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
@@ -37,8 +37,8 @@ export function deepseekAccountPaths(environment, accountId) {
   };
 }
 
-function readToml(path) {
-  try { return parse(readPrivateFileSync(path, 2_097_152)); }
+function readToml(path, environment) {
+  try { return parse(createProviderFileReader(environment)(path, 2_097_152)); }
   catch (error) {
     if (error?.code === "ENOENT") return {};
     // TOML 解析错误可能包含凭据，不携带原始 cause。
@@ -47,10 +47,10 @@ function readToml(path) {
   }
 }
 
-function readBackup(path) {
+function readBackup(path, environment) {
   if (!existsSync(path)) return undefined;
   let value;
-  try { value = JSON.parse(readPrivateFileSync(path)); }
+  try { value = JSON.parse(createProviderFileReader(environment)(path)); }
   catch { throw new Error("DeepSeek 安装备份无法安全读取"); }
   if (!value?.config || typeof value.config !== "object" || Array.isArray(value.config)) {
     throw new Error("DeepSeek 安装备份无效");
@@ -93,28 +93,28 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
     if (!isManagedProviderApiKeyValid(definition, input.apiKey)) throw new Error("DeepSeek API Key 无效");
     if (preview.mode === "exclusive" && input.confirmExclusiveConfigChange !== true) throw new Error("固定模式必须明确确认");
     const paths = deepseekAccountPaths(environment, input.accountId);
-    const snapshots = snapshotProviderFiles(Object.values(paths));
+    const snapshots = snapshotProviderFiles(Object.values(paths), environment);
     const accounts = loadDeepseekAccounts(environment);
     const providers = loadManagedModelProviderSettings(environment);
     const previous = providers.find((provider) => provider.provider === definition.id);
     if (input.reconfigure && !previous) throw new Error("DeepSeek 账户配置不完整，请先恢复缺失文件");
-    const current = readToml(paths.config);
+    const current = readToml(paths.config, environment);
     if (!previous && (hasProviderBaseConfig(current, definition) || existsSync(paths.profile) || existsSync(paths.marker))) throw new Error("DeepSeek 账户配置路径已被占用");
-    const backup = readBackup(paths.backup);
+    const backup = readBackup(paths.backup, environment);
     if (previous && !backup) throw new Error("DeepSeek 账户初始备份缺失");
     const entersExclusiveMode = previous?.mode === "switching" && preview.mode === "exclusive";
     const initial = previous && !entersExclusiveMode ? backup : { config: current };
     const updates = new Map();
     if ((!previous || entersExclusiveMode) && backup) {
       const archive = join(dirname(paths.backup), `config-${randomUUID()}.json`);
-      const [snapshot] = snapshotProviderFiles([archive]);
+      const [snapshot] = snapshotProviderFiles([archive], environment);
       if (snapshot.content !== undefined) throw new Error("DeepSeek 备份归档路径已被占用");
       snapshots.push(snapshot);
       updates.set(archive, snapshots.find((item) => item.path === paths.backup).content);
     }
     let catalog;
     if (existsSync(paths.catalog)) {
-      const previousCatalog = JSON.parse(readPrivateFileSync(paths.catalog, 2_097_152));
+      const previousCatalog = JSON.parse(createProviderFileReader(environment)(paths.catalog, 2_097_152));
       catalog = normalizeDeepseekCatalogCapabilities(previousCatalog);
       if (JSON.stringify(catalog) !== JSON.stringify(previousCatalog)) {
         updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
@@ -146,7 +146,7 @@ export async function setDeepseekDefaultAccount(accountId, { environment = proce
     const accounts = loadDeepseekAccounts(environment);
     if (!accounts.some((account) => account.id === accountId)) throw new Error("DeepSeek 账户不存在");
     const path = deepseekAccountsFilePath(environment);
-    await applyProviderFileUpdates(new Map([[path, `${JSON.stringify(accounts.map((account) => ({ ...account, default: account.id === accountId })))}\n`]]), snapshotProviderFiles([path]));
+    await applyProviderFileUpdates(new Map([[path, `${JSON.stringify(accounts.map((account) => ({ ...account, default: account.id === accountId })))}\n`]]), snapshotProviderFiles([path], environment));
     return { action: "default-set", accountId, activation: "restart-all" };
   });
 }
@@ -160,7 +160,7 @@ function deepseekAccountRemovalPlan(accountId, environment) {
   if (!configured) throw new Error("DeepSeek 账户配置不完整，请先恢复缺失文件");
   const remaining = accounts.filter((account) => account.id !== accountId);
   if (remaining.length > 0 && !remaining.some((account) => account.default)) throw new Error("请先选择其他默认账户");
-  const snapshots = snapshotProviderFiles(Object.values(paths));
+  const snapshots = snapshotProviderFiles(Object.values(paths), environment);
   const updates = new Map([[paths.profile, undefined], [paths.marker, undefined], [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining)}\n`]]);
   if (remaining.length === 0) {
     assertNoResponsesContextFollowers(environment,"删除最后一个 DS 账户");
@@ -168,9 +168,9 @@ function deepseekAccountRemovalPlan(accountId, environment) {
     updates.set(paths.manifest, undefined);
   }
   if (configured.mode === "exclusive") {
-    const initial = readBackup(paths.backup);
+    const initial = readBackup(paths.backup, environment);
     if (!initial) throw new Error("DeepSeek 账户初始备份缺失");
-    updates.set(paths.config, stringify(restoreProviderBaseConfig(readToml(paths.config), initial.config, definition)));
+    updates.set(paths.config, stringify(restoreProviderBaseConfig(readToml(paths.config, environment), initial.config, definition)));
   }
   return { definition, updates, snapshots, restoresInitialConfig: configured.mode === "exclusive" };
 }

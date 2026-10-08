@@ -85,6 +85,7 @@
 - `model-provider-runtime.mjs` / `model-provider-runtime.d.mts`：保留受控模型 Provider 运行时的稳定
   导出门面与 TypeScript 接口；`readManagedMarker` 提供单个 Provider 管理标记的只读查询，不读取其他账户注册表。门面不承载具体读取、写入或启动逻辑。
 - `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录读取；提供原生协议集合、目录输入能力、CLP 独立转发目录与模型覆盖与思考声明、依赖路径和修订摘要，不读取 OAuth 或创建 App Server。
+  受管及自定义 Provider 材料复用 `provider-file-access` 的文件归属判断，指纹不自行选择 ACL 策略。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile；
   管理每个受管 Provider 的独立模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
@@ -231,20 +232,23 @@
 - `connect-home.mjs` / `connect-home.d.mts`：统一解析 Gateway 数据目录（`CODEX_CONNECT_HOME`
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup 与 Runtime 复用。
+- `provider-file-access.mjs` / `provider-file-access.d.mts`：在创建访问器时绑定当前环境的 Codex Home，精确规范化匹配唯一共享主配置；其他路径（包括同名备份）保持严格私有。Provider 的读取、指纹、事务写入和回滚使用同一访问器，不由业务入口选择权限标记；不改变磁盘路径或格式。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
   文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，
   避免路径校验后被符号链接替换；Windows 使用解析后的 PowerShell 7 `pwsh` 调用结构化 SID/ACL
-  适配器，单次调用超过 2 秒即终止并拒绝操作；原子写入前同时收紧父目录，严格私有路径关闭继承，只允许当前 SID、SYSTEM 和
+  适配器，单次调用超过 2 秒即终止并拒绝操作；Windows 原子写入使用先收紧权限的临时子目录，已有父目录只校验所有者与写入权限，不移除上游沙箱读取权限；严格私有文件关闭继承，只允许当前 SID、SYSTEM 和
   Administrators 完全控制；状态库、任务库、指标库、媒体、渠道输出和受管备份复用同一合同；
   App Server Socket 目录通过 `secureAppServerSocketDirectorySync` 将已受信任目录收紧为锁定 CLI 要求的单条当前 SID 可继承完全控制权限；其他目录写入与父目录读取接受并保留此更严格权限，不向 Socket 目录重新添加 SYSTEM/Administrators。
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
+  `readCodexConfigFileSync` / `assertCodexConfigAccessSync` 对共享主配置校验当前用户所有权及写入完整性，允许上游继承的只读访问，不声称主配置机密性；Provider Profile、凭据、备份仍要求严格私有。普通设置不增加 RPC 后 ACL 修复事务。
+  Provider 原文事务通过 `writeCodexConfigFileAtomic` 写共享主配置：Windows 在目标同目录先创建空文件并设私有 ACL，再写内容，使用原生替换保留已有 DACL；新配置继承已校验父目录的 ACL。替换失败保留恢复目录中的原文件及尚存临时文件，报告路径，不盲目清理未确认结果。普通私有写入不使用此合同。
   `WindowsPrivatePathError` 区分 ACL 检查超时、输出超限、进程启动失败和检查进程失败，附有界路径及操作类型；结构化拒绝只展示允许列表内的原因和阶段，不透传原始 PowerShell 异常或输出；服务定义读取保留该诊断。
   `repairWindowsPrivateFileSync` 仅供显式 `security repair` 使用：管理员所有的普通文件须有当前 SID 完全控制且无拒绝规则，才能恢复当前用户所有权；常规读取和写入不放宽所有者校验。
-  Codex Home 顶层 TOML 的所有者、继承和访问规则拒绝会附带修复命令；目录、进程故障与修复操作自身失败不误报同一建议。
-  异步配置读取额外只读校验父目录，检测读取期间变化；Windows 在同一次异步调用中持有禁止写入和替换的只读文件句柄并检查文件、父目录 ACL，不修复权限、不缓存校验结果，支持取消及有界读取。默认读取上限仍为 1 MiB，CLP 模型目录可显式选择不超过 2 MiB 的上限，两平台使用同一字节限制。
+  Codex Home 顶层严格私有 TOML 的所有者、继承和访问规则拒绝会附带修复命令；共享主配置由 Doctor 提示检查文件及父目录的所有者和写入权限，目录、进程故障与修复操作自身失败不误报文件修复建议。
+  Windows 同步及异步读取均在同一只读文件句柄内校验文件、父目录 ACL 并读取，禁止在途写入和替换，不修复权限、不缓存结论。默认上限 1 MiB；异步目录读取最多 2 MiB，同步调用保留既有恢复记录所需的最多 16 MiB。异步取消在句柄释放后完成。
 - `windows-acl-bridge.mjs`：进程内复用隐藏的 PowerShell ACL 适配器，通过 worker 和私有管道支持同步及异步调用；不缓存 ACL 结论。最多 16 个待处理请求，每个请求含排队最多 2 秒，超时、输出超限或进程退出后销毁该实例，下次重新建立。取消排队请求只移除本项；取消在途读取则丢弃结果，等本次读取关闭句柄后释放槽位，保留原期限，不中断其他请求。
-- `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器；stdin/stdout 明确使用 UTF-8，不继承控制台代码页；只读取固定 JSON 请求，通过 .NET
+- `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器，支持逐行请求及单次调用；stdin/stdout 明确使用 UTF-8，不继承控制台代码页；只读取固定 JSON 请求，通过 .NET
   ACL 类型设置或校验 Owner、访问规则、继承、文件类型与 reparse point，并返回结构化结果，不解析
   本地化命令输出。写操作按绝对路径使用有界命名 Mutex 串行化 ACL 识别与更新，避免并发写入重新放宽 Socket 目录权限。
 - `private-file-lock.mjs` / `private-file-lock.d.mts`：为跨越异步配置事务的私有文件更新提供

@@ -692,11 +692,15 @@ export function renderCommandCenterChoices(
           "请先选择提供商，再选择该提供商下的模型。",
         ].join("\n"),
         descriptionFormat: "markdown",
-        choices: providers.map((provider) => ({
-          label: `${provider === current ? "✓ " : ""}${formatCodexProviderLabel(provider)} · ${result.state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`,
-          action: "model",
-          input: provider,
-        })),
+        choices: providers.map((provider) => {
+          const availableCount = result.state.models.filter((model) =>
+            (model.provider ?? "openai") === provider && model.available !== false).length;
+          return {
+            label: `${provider === current ? "✓ " : ""}${formatCodexProviderLabel(provider)} · ${availableCount > 0 ? `${availableCount} 个模型` : "暂不可用"}`,
+            action: "model",
+            input: provider,
+          };
+        }),
       };
     }
     return {

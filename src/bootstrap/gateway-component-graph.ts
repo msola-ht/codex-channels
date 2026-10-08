@@ -281,8 +281,14 @@ export abstract class GatewayComponentGraph {
       if (fingerprint !== readAppServerProviderSettingsFingerprint(provider)) throw new Error("Provider 模型目录在读取期间发生变化");
       return { fingerprint, models };
     };
-    const unavailableModels = providerDefinitions.filter((definition) => !configuredProviders.has(definition.id))
-      .flatMap((definition) => loadManagedModelOptions(managedProviderDirectory(process.env, definition), false, definition));
+    const unavailableModels: ModelOption[] = this.managedSettingsProviders.map((provider) => ({
+      provider, id: provider, model: provider,
+      displayName: providerDefinitions.find((definition) => definition.id === provider)?.displayName ?? provider,
+      isDefault: true, available: false,
+      unavailableReason: "模型目录尚未确认，请检查对应 App Server 后重试",
+      supportedReasoningEfforts: [], defaultReasoningEffort: "none",
+      inputModalities: [], serviceTiers: [], defaultServiceTier: null,
+    }));
     const codexBinary = resolveExecutable(effectiveCodexBinary(config.codexBinary));
     const createCodexProcessInvocation = (args: readonly string[]) =>
       executableInvocation(codexBinary, args);

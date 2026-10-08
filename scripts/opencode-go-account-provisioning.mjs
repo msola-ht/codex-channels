@@ -183,7 +183,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   ];
   let snapshots;
   try {
-    snapshots = snapshotProviderFiles(transactionPaths);
+    snapshots = snapshotProviderFiles(transactionPaths, environment);
   } catch (error) {
     throw normalize("operation-failed", "action", error);
   }
@@ -192,9 +192,9 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     await assertProviderFileSnapshots(guards);
     mkdirSync(plan.paths.accountDirectory, { recursive: true, mode: 0o700 });
     mkdirSync(plan.paths.backupDirectory, { recursive: true, mode: 0o700 });
-    const currentConfig = await readTomlFile(plan.paths.configPath);
+    const currentConfig = await readTomlFile(plan.paths.configPath, environment);
     const accountBaseline = existsSync(exclusiveBaselinePath)
-      ? await readTomlFile(exclusiveBaselinePath)
+      ? await readTomlFile(exclusiveBaselinePath, environment)
       : undefined;
     if (previousMode === "exclusive" && accountBaseline === undefined) {
       throw new Error("OpenCode Go 固定账户恢复基线缺失");
@@ -215,7 +215,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     const profileContent = profile === undefined ? undefined : stringify(profile);
     const catalogContent = `${JSON.stringify(managedCatalog, null, 2)}\n`;
     if (archivedBaselinePath !== undefined) {
-      const previousBaseline = await readOptionalProviderFile(exclusiveBaselinePath);
+      const previousBaseline = await readOptionalProviderFile(exclusiveBaselinePath, environment);
       if (previousBaseline === undefined) throw new Error("OpenCode Go 固定账户恢复基线缺失");
       await writePrivateFileAtomic(archivedBaselinePath, previousBaseline);
       guards = refreshProviderFileSnapshot(guards, archivedBaselinePath);
@@ -233,16 +233,18 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       catalogState.manifest === undefined
         ? undefined
         : `${JSON.stringify(catalogState.manifest, null, 2)}\n`,
+      environment,
     );
     guards = refreshProviderFileSnapshot(guards, plan.paths.manifestPath);
     await assertProviderFileSnapshots(guards);
     await replaceOptionalProviderFile(
       plan.paths.configPath,
       Object.keys(nextConfig).length === 0 ? undefined : stringify(nextConfig),
+      environment,
     );
     guards = refreshProviderFileSnapshot(guards, plan.paths.configPath);
     await assertProviderFileSnapshots(guards);
-    await replaceOptionalProviderFile(plan.paths.profilePath, profileContent);
+    await replaceOptionalProviderFile(plan.paths.profilePath, profileContent, environment);
     guards = refreshProviderFileSnapshot(guards, plan.paths.profilePath);
     await assertProviderFileSnapshots(guards);
     writeOpencodeGoAccountMarker(environment, accountId, mode);
@@ -446,8 +448,8 @@ function publicPaths(paths) {
   };
 }
 
-async function readTomlFile(path) {
-  const content = await readOptionalProviderFile(path);
+async function readTomlFile(path, environment) {
+  const content = await readOptionalProviderFile(path, environment);
   if (content === undefined) return {};
   try {
     return parse(content.toString("utf8"));
@@ -457,7 +459,7 @@ async function readTomlFile(path) {
 }
 
 async function assertProfileOwnership(paths, accountId, environment) {
-  const profile = await readOptionalProviderFile(paths.profilePath);
+  const profile = await readOptionalProviderFile(paths.profilePath, environment);
   const marker = readOpencodeGoAccountMarker(environment, accountId);
   if (profile === undefined && marker === undefined) return;
   if (marker === undefined) {
