@@ -13,7 +13,7 @@
   CI 只校验已有字典，不生成翻译报告、调用翻译服务或自动写回译文；差异报告可在本地按需运行 `npm run i18n:report`。
   类型检查使用 TypeScript 原生增量缓存跟踪源码及其依赖，版本与边界检查每次执行；完整类型检查通过后，
   Gateway 清理旧产物并以 `--noCheck` 构建，避免重复类型分析。独立 `npm run build` 仍执行完整类型检查。
-  Ubuntu 与 macOS 安装锁定的 Codex CLI 0.160.0，静态核对协议版本与生成类型。日志记录各阶段和总耗时。
+  Ubuntu 与 macOS 安装锁定的 Codex CLI 0.160.1，静态核对协议版本与生成类型。日志记录各阶段和总耗时。
 - `codex-upgrade-preview.yml`：每日及手动检查 `openai/codex` 正式发行版本；版本留空时使用
   最新正式 Release。项目已经同步时跳过，发现更新时安装对应 npm CLI、生成协议与版本
   差异，在安装根目录与 WebUI 锁定依赖后独立运行协议、类型、Lint 与 Gateway/WebUI

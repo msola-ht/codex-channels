@@ -626,8 +626,8 @@ const zh = {
     "relay": "转发",
     "delivery": "交付",
     "deliveryFinished": "已交付",
-    "deliveryDisconnected": "客户端断开",
-    "deliveryFailed": "交付失败",
+    "deliveryDisconnected": "已断开",
+    "deliveryFailed": "失败",
     "range": "时间范围",
     "rangeLabel": "时间范围：{range}",
     "from": "开始日期",
@@ -647,7 +647,7 @@ const zh = {
     "status": "状态",
     "completed": "完成",
     "failed": "失败",
-    "incomplete": "未完整观测",
+    "incomplete": "未完整",
     "unknown": "未知"
   },
   ranges: {
@@ -688,10 +688,10 @@ const zh = {
     "compact": "压缩",
     "last": "最后记录",
     "failures": "失败",
-    "interrupted": "客户端中断",
-    "incompleteObservation": "未完整观测",
+    "interrupted": "中断",
+    "incompleteObservation": "未完整",
     "recordedStatus": "原始请求状态",
-    "requestOutcomes": "完成 {completed} · 客户端中断 {interrupted} · 其他失败 {failed} · 未完整观测 {incomplete}",
+    "requestOutcomes": "完成 {completed} · 中断 {interrupted} · 失败 {failed} · 未完整 {incomplete}",
     "interruptionEvidence": "中断后同轮有成功请求 {completed} · 未观测到同轮后续成功 {unobserved} · 用量未完整观测 {usage}。",
     "clientInterruption": "客户端中断；当前记录无法确定断开原因。",
     "times": "{count} 次",
@@ -985,9 +985,9 @@ const zh = {
     "threadColumn": "会话 / 轮次"
   },
   status: {
-    "completed": "成功",
+    "completed": "完成",
     "failed": "失败",
-    "incomplete": "未完成"
+    "incomplete": "未完整"
   },
   modelComparison: {
     "requestOnly": "请求：{name}",
@@ -1014,7 +1014,7 @@ const zh = {
     debugNote: "同一次调用的四个阶段。普通头与关联 ID 保留，凭据、URL 中的秘密和 CSP nonce 已脱敏；交付完成表示本地 HTTP 写入完成，不证明客户端已处理。",
     debugHeadersTruncated: "部分请求头或响应头超过记录上限，已省略。",
     debugChanges: "实际处理记录",
-    debugState: { finished: "交付完成", disconnected: "客户端断开", failed: "交付失败", not_started: "尚未开始交付" },
+    debugState: { finished: "已交付", disconnected: "已断开", failed: "失败", not_started: "未交付" },
     debugChange: { headers_filtered: "已过滤跳级头、客户端凭据或保留身份头", headers_overridden: "已设置上游凭据与传输头", stream_defaulted: "客户端未指定 stream，已补入 false", store_defaulted: "客户端未指定 store，已补入 false", provider_routing_pinned: "已将 CLP 上游限定为 DeepSeek", json_unwrapped: "已解包 CLP JSON 响应" },
 
     "relayRetentionNote": "Relay 自动保留：{value}；新采集时清理过期非活动批次。",
@@ -1048,8 +1048,8 @@ const zh = {
     "empty": "没有调用记录",
     "stateCompleted": "完成",
     "stateFailed": "失败",
-    "stateIncomplete": "不完整",
-    "statePending": "未记录终态",
+    "stateIncomplete": "未完整",
+    "statePending": "未记录",
     "copyRaw": "复制原文",
     "wrap": "自动换行",
     "format": "格式化",

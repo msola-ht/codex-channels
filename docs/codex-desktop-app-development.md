@@ -6,7 +6,7 @@
 台电脑上的 Codex Desktop App 与 `codex-channels` 同时连接本项目监管的同一个主 OpenAI App
 Server，使 Desktop、渠道和 `codexc remote` 看到同一份 Thread、Turn、Item 与实时通知。
 
-当前锁定的 Codex CLI 0.160.0 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
+当前锁定的 Codex CLI 0.160.1 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
 包含未公开的 WebSocket 与强制 CLI 启动入口。macOS 使用强制 CLI 与受管 stdio Proxy，Windows
 继续使用 `CODEX_APP_SERVER_WS_URL`。这些入口不属于公开稳定合同，因此功能必须默认关闭、严格做
 平台兼容探测，并在入口消失或行为改变时失败关闭。官方 Remote Control 的云端配对、Environment
@@ -29,21 +29,21 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 
 ## 实现与验收状态
 
-- macOS 使用受管 stdio Proxy、私有 Supervisor Host 租约、签名校验与主实例串行切换。
+- macOS 已验收，操作者于 2026-10-07 确认；使用受管 stdio Proxy、私有 Supervisor Host 租约、签名校验与主实例串行切换。
 - Windows 使用当前用户包探测、受认证回环桥与隔离启动环境，仍为开发预览，未完成实机双向验收。
 - 2026-09-16/17 的 macOS 历史实测覆盖 Thread 双向共享、内置工具启动与 App Server 重启恢复；
-  实测 CLI 为 0.154.0、ChatGPT 为 `26.908.70816`。这些结果不是当前 CLI 0.160.0 或任意新 App 构建的验收。
-- 打包 Desktop 的工具 Pipe、签名链和 Windows 支持需各自完成实机验证。
-  当前缺口与停止条件见下文，不宣称全平台正式支持。
+  实测 CLI 为 0.154.0、ChatGPT 为 `26.908.70816`。这些结果不是当前 CLI 0.160.1 或任意新 App 构建的验收。
+- 本次操作者确认未附新的 CLI 与 Desktop 构建号，保留已有版本记录，不据此声明特定新版本组合已重测。
+  Windows 尚未验收；平台验收结论分别记录，不宣称全平台正式支持。
 
 
 ## 事实基线
 
 ### 官方锁定版本
 
-- 项目固定 `codex-cli 0.160.0`，协议与实现仍以 [`Codex 协议索引`](index.md)和
-  `upstream/openai-codex-0.160.0` 的 `rust-v0.160.0` 锁定源码为准。下文 0.154.0 的实机结果是历史验收，
-  不代表 0.160.0 已完成打包 Desktop 私有工具 Pipe 与签名链的实机复核。
+- 项目固定 `codex-cli 0.160.1`，协议与实现仍以 [`Codex 协议索引`](index.md)和
+  `upstream/openai-codex-0.160.1` 的 `rust-v0.160.1` 锁定源码为准。下文 0.154.0 的实机结果是历史验收，
+  不代表 0.160.1 已完成打包 Desktop 私有工具 Pipe 与签名链的实机复核。
 - 官方远程客户端以 WebSocket 连接 App Server；每个连接独立执行一次
   `initialize` / `initialized`。
 - Unix 客户端可以直接通过 WebSocket-over-UDS 连接。官方
@@ -69,7 +69,7 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
   已通过真实 Pipe 验证。因此修复必须同时满足动态环境交付和可信父进程链，不能只补变量或转发
   Socket。
 - Desktop 随包 Codex 为 `0.154.0-alpha.6.2`，与项目锁定协议基线不同，不能成为共享主 App
-  Server。实施只能继续运行项目解析出的精确 Codex CLI 0.160.0 原生可执行文件；Desktop 随包内容
+  Server。实施只能继续运行项目解析出的精确 Codex CLI 0.160.1 原生可执行文件；Desktop 随包内容
   只提供同一 OpenAI Team 签名的 Node 托管进程和 MCP 资源。
 - 这些变量没有公开稳定文档。支持结论只能按经过真实验收的 Desktop 版本与平台记录，不能把
   “安装包中存在字符串”解释为完成兼容。
@@ -349,7 +349,7 @@ Supervisor 只接受当前用户、主 Provider `openai`、已启用配置、同
 8. macOS 与 Windows 各自在真实 Desktop 上通过；任一平台未通过时必须单独标为预览或不支持，
    不能宣称全平台完成。
 9. Desktop 随包提供的 `codex_app` MCP 在共享模式下通过实机验证。
-10. macOS 受管路径必须继续使用项目锁定的 Codex CLI 0.160.0；不得以 Desktop 随包的预发布 CLI
+10. macOS 受管路径必须继续使用项目锁定的 Codex CLI 0.160.1；不得以 Desktop 随包的预发布 CLI
     替换协议事实来源，也不得让动态 Pipe、完整启动环境或工具消息进入日志与状态输出。
 
 ## 失败与回滚
