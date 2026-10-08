@@ -2,6 +2,7 @@ import * as clackPrompts from "@clack/prompts";
 import { loadClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
 import { clinePassProviderDefinition as definition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
 import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
+import { promptEnabledProviderModels } from "./provider-model-selection.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import {
@@ -58,28 +59,8 @@ function writeCatalogExclusions(output, excludedModels) {
 }
 
 async function promptEnabledModels(prompts, output, { models, enabledModels, requiredModels }) {
-  if (requiredModels.some(id => !models.some(model => model.id === id))) throw new Error("官方目录已不支持账户当前默认模型；请先调整默认模型，原目录未修改");
-  let initialValues = enabledModels.filter(id => models.some(model => model.id === id));
-  while (true) {
-    const selected = await prompts.multiselect({
-      message: "选择启用的 CLP 模型（空格勾选，回车确认；全部 CLP 账户及聚合共用）",
-      options: models.map(model => ({ value: model.id, label: `${model.name}（${model.id}）`, hint: `${requiredModels.includes(model.id) ? "账户默认，须保留；" : ""}默认思考 ${model.reasoningEffort}${model.reasoningEffort === "none" ? "（关闭）" : ""}` })),
-      initialValues, required: true,
-    });
-    if (prompts.isCancel(selected)) return undefined;
-    if (!Array.isArray(selected) || selected.length === 0) { output.write("至少需要启用一个模型。\n"); continue; }
-    if (selected.length > 64) { output.write("最多启用 64 个模型，请减少勾选项。\n"); initialValues = selected; continue; }
-    if (requiredModels.some(id => !selected.includes(id))) {
-      output.write("不能停用账户当前默认模型；请先修改默认模型。已为你重新勾选必需项。\n");
-      initialValues = [...new Set([...selected, ...requiredModels])];
-      continue;
-    }
-    output.write(`将启用 ${selected.length} 个模型：\n${selected.map(id => `  ${id}`).join("\n")}\n未勾选的模型不会出现在 CLP 或聚合目录中；更新时会保留原目录备份。\n`);
-    if (requiredModels.length === 0) {
-      const defaultModel = selected.includes(definition.defaultModel) ? definition.defaultModel : models.find(model => selected.includes(model.id)).id;
-      output.write(`新账户默认模型：${defaultModel}。\n`);
-    }
-    const confirmed = await prompts.confirm({ message: "保存这些模型？", initialValue: true });
-    return confirmed === true ? selected : undefined;
-  }
+  return promptEnabledProviderModels(prompts, output, {
+    models, enabledModels, requiredModels, label: "CLP（全部账户共享）",
+    defaultModelWhenUnrequired: definition.defaultModel,
+  });
 }

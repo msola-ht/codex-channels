@@ -52,8 +52,9 @@
   保留共享目录及当前账户，watcher 只为实际账户监听 Profile 和管理标记，再按 Provider ID 合并并去重路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，共用 DS 目录。
 - `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，共享模型目录和 Chat 转换代理。
-- `cline-pass-model-guard.mjs` / `cline-pass-model-guard.d.mts`：CLP Chat 桥每次出站前异步复核共享 Codex 目录中的模型成员身份；不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。
-- `cline-pass-coding-instructions.mjs`：项目维护的非 Flash CLP 通用编程提示词，生成共享模型目录时写入；不声明模型身份、不授予权限或工具能力，不依赖 DS 下载。
+- `provider-model-guard.mjs` / `provider-model-guard.d.mts`：CLP Chat 桥、OCG/CCG 与自定义 Responses 代理共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。
+  自定义 Responses 注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和全局上下文同步标记；任一未完成事务均拒绝出站，不复用管理事务内部的读取豁免。
+- `third-party-coding-instructions.mjs`：非 Flash CLP、新增 OCG/CCG 手填模型与新增非 DS 自定义 Responses 模型共用的编程提示词；显式写入模型定义，不改变既有目录缺省值，不声明模型身份或授予工具权限，不依赖 DS 下载。
 - `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
   拓扑成员、模型 slug、目录与启动参数；保留各模型元数据，拒绝主配置的全局窗口覆盖，复核账户与
   目录快照；公开源文件清单与内容指纹供安全刷新使用，只写可重建、无密钥的运行时 `aggregate-models.json`，不改账户或存储契约。

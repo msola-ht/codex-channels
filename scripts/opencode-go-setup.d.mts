@@ -20,6 +20,7 @@ export function runOpenCodeGoSetup(options?: {
   }>;
   prompts?: {
     select(options: unknown): Promise<unknown>;
+    multiselect?(options: unknown): Promise<unknown>;
     text(options: unknown): Promise<unknown>;
     password(options: unknown): Promise<unknown>;
     confirm(options: unknown): Promise<unknown>;
@@ -33,6 +34,7 @@ export function runOpenCodeGoSetup(options?: {
   | { action: "default-set" }
   | { action: "stopped" | "not-running" | "in-use"; accountId: string }
   | { action: "listed" }
+  | { action: "catalog-updated"; activation: "restart-all"; models: string[] }
   | undefined
 >;
 

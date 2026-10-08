@@ -303,7 +303,10 @@ export async function runCustomPrimaryProviderSetup({
 
   const imported = custom ? await promptResponsesModelImport(prompts, previousCatalog?.definitions, loadModelTemplates) : [];
   if (imported === undefined) return { action: allowBack ? "back" : "cancel" };
-  const definitions = [...new Map([...(previousCatalog?.definitions ?? []), ...imported].map(entry => [entry.id, entry])).values()];
+  const definitions = [...new Map([...(previousCatalog?.definitions ?? []), ...imported.map(entry => {
+    const previous = previousCatalog?.definitions.find(model => model.id === entry.id);
+    return previous?.instructions === undefined ? entry : { ...entry, instructions: previous.instructions };
+  })].map(entry => [entry.id, entry])).values()];
   let selectedModel;
   if (imported.length > 0) {
     selectedModel = await prompts.select({
@@ -332,7 +335,7 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error(`模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`);
   }
 
-  const models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id)) : undefined;
+  const models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id), output) : undefined;
   if (custom && models === undefined) return { action: allowBack ? "back" : "cancel" };
 
   const canPreserveCurrentBearerToken = hasCurrentBearerToken

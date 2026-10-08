@@ -11,6 +11,7 @@ import {
 } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { Duplex } from "node:stream";
+import { once } from "node:events";
 import { StringDecoder } from "node:string_decoder";
 
 import WebSocket, {
@@ -55,6 +56,7 @@ import {
 import { ModelTrafficDump } from "./traffic-dump.js";
 import type { TrafficCallTiming } from "./traffic-call-timing.js";
 import { createTopLevelStringFieldScanner, scanTopLevelStringField } from "./traffic-dump-content.js";
+import { ChatBodyTooLargeError, readModelBody, waitForChatOperation } from "./chat-io.js";
 
 export type {
   ProviderProxyMetrics,
@@ -104,6 +106,8 @@ export interface ProviderProxyOptions {
     label: string;
   };
   resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream | Promise<ProviderProxyUpstream>;
+  /** Re-read this provider's enabled model catalogue before sending Responses requests. */
+  isModelEnabled?: (model: string, signal: AbortSignal) => Promise<boolean>;
   timeoutMs?: number;
   quotaWindowsProvider?: (
     accountId?: string,
@@ -127,10 +131,12 @@ interface TurnMetadata {
 
 export class ProviderProxy {
   private readonly server: Server;
-  private readonly websocketServer = new WebSocketServer({ noServer: true });
+  private readonly websocketServer: WebSocketServer;
   private readonly upstreamAgent: Agent | undefined;
   private readonly defaultUpstream: ProviderProxyUpstream;
   private readonly resolveUpstream: ProviderProxyOptions["resolveUpstream"];
+  private readonly isModelEnabled: ProviderProxyOptions["isModelEnabled"];
+  private readonly modelAuthorizations = new Set<AbortController>();
   private readonly pendingUpgrades = new Set<Duplex>();
   private readonly accountIds: readonly string[] | undefined;
   private readonly defaultAccountId: string | undefined;
@@ -161,6 +167,9 @@ export class ProviderProxy {
   private stopped = false;
 
   constructor(private readonly listenAddress: string, options: ProviderProxyOptions) {
+    this.websocketServer = new WebSocketServer({ noServer: true,
+      ...(options.isModelEnabled ? { maxPayload: 16 * 1024 * 1024 } : {}),
+    });
     this.upstreamAgent = options.upstreamAgent;
     this.defaultUpstream = {
       host: options.upstreamHost,
@@ -171,6 +180,7 @@ export class ProviderProxy {
         : { basePath: options.upstreamBasePath }),
     };
     this.resolveUpstream = options.resolveUpstream;
+    this.isModelEnabled = options.isModelEnabled;
     this.accountIds = options.accountIds;
     this.defaultAccountId = options.defaultAccountId;
     this.upstreamUserAgent = options.upstreamUserAgent;
@@ -246,6 +256,7 @@ export class ProviderProxy {
   async close(): Promise<void> {
     if (!this.started || this.stopped) return;
     this.stopped = true;
+    for (const controller of this.modelAuthorizations) controller.abort();
     for (const socket of this.pendingUpgrades) socket.destroy();
     const quotaRefreshes = [...this.quotaRefreshByAccount.values()];
     for (const refresh of quotaRefreshes) refresh.controller.abort();
@@ -330,6 +341,12 @@ export class ProviderProxy {
     }
     request.removeListener("error", onPendingError);
     if (this.stopped || response.destroyed) return;
+    // Resolve the route before the final catalogue check so a slow resolver
+    // cannot retain an authorization for a model disabled while it was waiting.
+    const authorizedBody = this.isModelEnabled && route.kind === "response"
+      ? await this.authorizeHttpModel(request, response)
+      : undefined;
+    if (authorizedBody === null || this.stopped || response.destroyed) return;
     const turnMetadata = parseTurnMetadata(
       request.headers["x-codex-turn-metadata"],
     );
@@ -495,27 +512,81 @@ export class ProviderProxy {
         upstream.destroy();
       }
     });
-    request.on("data", (chunk: Buffer) => {
+    const observeRequestChunk = (chunk: Buffer): void => {
       const text = requestModelDecoder.write(chunk);
       scanTopLevelStringField(requestModelScanner, text);
       scanTopLevelStringField(requestTierScanner, text);
       metrics.requestModel = boundedString(requestModelScanner.value);
       metrics.requestServiceTier = boundedString(requestTierScanner.value);
       exchange?.requestChunk(chunk);
-    });
-    request.on("end", () => {
+    };
+    const observeRequestEnd = (): void => {
       const text = requestModelDecoder.end();
       scanTopLevelStringField(requestModelScanner, text);
       scanTopLevelStringField(requestTierScanner, text);
       metrics.requestModel = boundedString(requestModelScanner.value);
       metrics.requestServiceTier = boundedString(requestTierScanner.value);
       exchange?.requestEnd();
-    });
+    };
+    if (authorizedBody === undefined) {
+      request.on("data", observeRequestChunk);
+      request.on("end", observeRequestEnd);
+    } else {
+      observeRequestChunk(authorizedBody);
+      observeRequestEnd();
+    }
     const submittedAt = performance.now();
     observeRequestSubmitted(metrics, submittedAt);
     exchange?.callTiming?.submitted(submittedAt);
     upstream.flushHeaders();
-    request.pipe(upstream);
+    if (authorizedBody === undefined) request.pipe(upstream);
+    else upstream.end(authorizedBody);
+  }
+
+  private async authorizeHttpModel(request: IncomingMessage, response: ServerResponse): Promise<Buffer | null> {
+    const reject = (status: number, type: string, message: string): null => {
+      if (!response.destroyed && !response.headersSent) {
+        response.writeHead(status, { "content-type": "application/json", "connection": "close" });
+        response.end(JSON.stringify({ error: { type, message } }));
+      }
+      return null;
+    };
+    if (this.stopped || this.modelAuthorizations.size >= 16) {
+      return reject(503, "provider_catalog_unavailable", "模型目录复核暂时不可用，请稍后重试。");
+    }
+    if (request.headers["content-encoding"] !== undefined && request.headers["content-encoding"] !== "identity") {
+      return reject(400, "provider_model_request_invalid", "模型请求不支持压缩正文。");
+    }
+    const controller = new AbortController();
+    this.modelAuthorizations.add(controller);
+    const disconnected = (): void => controller.abort();
+    response.once("close", disconnected);
+    let timer = setTimeout(() => controller.abort(), 30_000);
+    let checkingCatalog = false;
+    try {
+      const body = await readModelBody(request, controller.signal, 16 * 1024 * 1024);
+      clearTimeout(timer);
+      const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+      const model = asRecord(parsed)?.model;
+      if (typeof model !== "string" || !model.length) {
+        return reject(400, "provider_model_request_invalid", "模型请求必须包含明确的 model ID。");
+      }
+      checkingCatalog = true;
+      timer = setTimeout(() => controller.abort(), 15_000);
+      const enabled = await waitForChatOperation(this.isModelEnabled!(model, controller.signal), controller.signal);
+      controller.signal.throwIfAborted();
+      if (!enabled) return reject(409, "provider_model_disabled", "该模型已停用或不在当前目录中，请重新选择已启用的模型。");
+      return body;
+    } catch (error) {
+      if (response.destroyed || this.stopped) return null;
+      if (checkingCatalog) return reject(503, "provider_catalog_unavailable", "模型目录暂时无法安全读取，请检查目录后重试。");
+      return reject(error instanceof ChatBodyTooLargeError ? 413 : controller.signal.aborted ? 408 : 400,
+        "provider_model_request_invalid", "模型请求正文无效、超过 16 MiB 或上传超时。");
+    } finally {
+      clearTimeout(timer);
+      response.off("close", disconnected);
+      this.modelAuthorizations.delete(controller);
+    }
   }
 
   private async handleWebSocketUpgrade(
@@ -630,8 +701,12 @@ export class ProviderProxy {
       });
     };
 
-    client.on("message", (data, isBinary) => {
-      const receivedAtMonotonicMs = performance.now();
+    const forwardClientMessage = (data: RawData, isBinary: boolean, receivedAtMonotonicMs: number): void => {
+      if (this.isModelEnabled && upstream.readyState === WebSocket.CONNECTING
+        && (pending.length >= 16 || pending.reduce((bytes, message) => bytes + rawDataBytes(message.data), rawDataBytes(data)) > 16 * 1024 * 1024)) {
+        rejectModelFrame(503, "provider_catalog_unavailable", "模型上游连接等待队列已满，请稍后重试。");
+        return;
+      }
       exchange?.webSocketFrame("client", data, isBinary, receivedAtMonotonicMs);
       const inspected = recordsResponseMetrics
         ? inspectClientWebSocketMessage(data, isBinary)
@@ -664,6 +739,87 @@ export class ProviderProxy {
       } else if (upstream.readyState === WebSocket.CONNECTING) {
         pending.push({ data, isBinary, timing: callTiming, metrics: activeMetrics });
       }
+    };
+    let authorizing = Promise.resolve();
+    let queuedAuthorizationBytes = 0;
+    let queuedAuthorizationFrames = 0;
+    let authorizationRejected = false;
+    const authorizationController = new AbortController();
+    client.once("close", () => authorizationController.abort());
+    upstream.once("close", () => authorizationController.abort());
+    const rejectModelFrame = (status: number, type: string, message: string): void => {
+      if (authorizationRejected) return;
+      authorizationRejected = true;
+      authorizationController.abort();
+      upstream.terminate();
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ type: "error", status, error: { type, message } }), error => {
+          if (error) client.terminate();
+          else client.close(1008, "Model authorization failed");
+        });
+      }
+    };
+    client.on("message", (data, isBinary) => {
+      const receivedAtMonotonicMs = performance.now();
+      if (!this.isModelEnabled || !recordsResponseMetrics) {
+        forwardClientMessage(data, isBinary, receivedAtMonotonicMs);
+        return;
+      }
+      if (authorizationRejected || authorizationController.signal.aborted) return;
+      const bytes = rawDataBytes(data);
+      if (isBinary || bytes > 16 * 1024 * 1024) {
+        rejectModelFrame(400, "provider_model_request_invalid", "模型请求必须为不超过 16 MiB 的 JSON 文本帧。");
+        return;
+      }
+      queuedAuthorizationBytes += bytes;
+      queuedAuthorizationFrames += 1;
+      if (queuedAuthorizationBytes > 16 * 1024 * 1024 || queuedAuthorizationFrames > 16) {
+        rejectModelFrame(503, "provider_catalog_unavailable", "模型目录复核队列已满，请稍后重试。");
+        return;
+      }
+      authorizing = authorizing.then(async () => {
+        if (authorizationRejected || authorizationController.signal.aborted) return;
+        let parsed: unknown;
+        try { parsed = JSON.parse(rawDataText(data)); }
+        catch {
+          rejectModelFrame(400, "provider_model_request_invalid", "模型请求不是有效 JSON。");
+          return;
+        }
+        const source = asRecord(parsed);
+        if (source?.type !== "response.create" || typeof source.model !== "string" || !source.model.length) {
+          rejectModelFrame(400, "provider_model_request_invalid", "模型请求必须包含明确的 response.create 和 model ID。");
+          return;
+        }
+        if (this.modelAuthorizations.size >= 16) {
+          rejectModelFrame(503, "provider_catalog_unavailable", "模型目录复核暂时不可用，请稍后重试。");
+          return;
+        }
+        const controller = new AbortController();
+        this.modelAuthorizations.add(controller);
+        const signal = AbortSignal.any([controller.signal, authorizationController.signal, AbortSignal.timeout(15_000)]);
+        try {
+          // A queued frame must be authorized after the connection is usable,
+          // not before a potentially slow upstream handshake.
+          if (upstream.readyState === WebSocket.CONNECTING) await once(upstream, "open", { signal });
+          if (upstream.readyState !== WebSocket.OPEN) throw new Error("Model upstream is closed");
+          const enabled = await waitForChatOperation(this.isModelEnabled!(source.model, signal), signal);
+          signal.throwIfAborted();
+          if (!enabled) {
+            rejectModelFrame(409, "provider_model_disabled", "该模型已停用或不在当前目录中，请重新选择已启用的模型。");
+            return;
+          }
+          forwardClientMessage(data, isBinary, receivedAtMonotonicMs);
+        } finally {
+          this.modelAuthorizations.delete(controller);
+        }
+      }).catch(() => {
+        if (!authorizationController.signal.aborted) {
+          rejectModelFrame(503, "provider_catalog_unavailable", "模型目录暂时无法安全读取，请检查目录后重试。");
+        }
+      }).finally(() => {
+        queuedAuthorizationBytes -= bytes;
+        queuedAuthorizationFrames -= 1;
+      });
     });
     upstream.on("open", () => {
       for (const message of pending.splice(0)) {
@@ -968,6 +1124,13 @@ function rawDataText(data: RawData): string {
   if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
   if (Array.isArray(data)) return Buffer.concat(data).toString("utf8");
   return data.toString("utf8");
+}
+
+function rawDataBytes(data: RawData | string): number {
+  if (typeof data === "string") return Buffer.byteLength(data);
+  if (data instanceof ArrayBuffer) return data.byteLength;
+  if (Array.isArray(data)) return data.reduce((size, chunk) => size + chunk.length, 0);
+  return data.length;
 }
 
 function writeUpstreamHead(response: ServerResponse, upstream: IncomingMessage): void {

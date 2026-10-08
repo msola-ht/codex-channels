@@ -51,6 +51,7 @@ import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
 import { createCcgCatalog } from "./provider-model-catalog.mjs";
+import { runManagedProviderModelSetup } from "./managed-provider-model-management.mjs";
 
 const maximumCatalogBytes = 2 * 1024 * 1024;
 
@@ -264,6 +265,7 @@ export async function runCcgSetup({
       ...(accounts.length === 0 ? [] : [
         { value: "reconfigure", label: "重新配置账户" },
         { value: "settings", label: "修改默认模型与思考等级" },
+        { value: "catalog", label: "管理共享模型（添加／启用／更新）" },
         { value: "default", label: "设置默认账户" },
         { value: "remove", label: "删除账户" },
       ]),
@@ -271,6 +273,7 @@ export async function runCcgSetup({
     ],
   });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (action === "catalog") return runManagedProviderModelSetup("ccg", { environment, prompts, output, downloadCatalog });
   const accountId = requestedAccountId ?? (action === "add"
     ? await promptManagedAccountId(prompts, accounts)
     : await prompts.select({

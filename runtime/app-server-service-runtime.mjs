@@ -1,5 +1,5 @@
 import { loadClinePassAccounts, clinePassProviderId } from "./cline-pass-accounts.mjs";
-import { isResponsesProvider, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
+import { isResponsesProvider, responsesProviderCatalogPath, parseResponsesModelCatalog, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArguments, loadAggregateModelMaterial,
   readAggregateProviderSettingsFingerprint } from "./aggregate-model-provider.mjs";
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
-import { ClinePassModelGuard } from "./cline-pass-model-guard.mjs";
+import { ProviderModelGuard } from "./provider-model-guard.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -32,6 +32,7 @@ import {
 } from "./gateway-config.mjs";
 import {
   loadManagedModelProviderDefinitions,
+  isManagedProviderModelValid,
   opencodeGoProviderDefinition,
   sharedManagedProviderDefinition,
 } from "./model-provider-definitions.mjs";
@@ -181,20 +182,31 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     const metricsProvider = proxyProviderIds.get(provider) ?? provider;
     const definition = providerDefinitions.get(provider) ?? sharedManagedProviderDefinition(provider);
     let bridge;
-    let clinePassGuard;
+    const guardedDefinition = definition && ["ocg", "opencode-go", "ccg", "clp"].includes(definition.storageId ?? definition.id)
+      ? definition : undefined;
+    const modelGuard = guardedDefinition
+      ? new ProviderModelGuard(join(managedProviderDirectory(runtime.environment, guardedDefinition),
+        guardedDefinition.catalogFileName), model => isManagedProviderModelValid(guardedDefinition, model))
+      : isResponsesProvider(metricsProvider)
+        ? new ProviderModelGuard(responsesProviderCatalogPath(runtime.environment, metricsProvider), model =>
+          typeof model === "string" && model.trim() === model && model.length > 0 && model.length <= 200 && !/\p{Cc}/u.test(model), {
+          parseCatalog: parseResponsesModelCatalog,
+          blockedPaths: [
+            `${responsesProviderCatalogPath(runtime.environment, metricsProvider)}.pending`,
+            responsesContextSyncPath(runtime.environment),
+          ],
+        })
+        : undefined;
     if (definition?.upstreamWireApi === "chat_completions") {
       const clinePass = definition.storageId === "clp" || definition.id === "clp";
-      if (clinePass) clinePassGuard = new ClinePassModelGuard(join(
-        managedProviderDirectory(runtime.environment, definition), definition.catalogFileName,
-      ));
       bridge = new ChatCompletionsBridge({ ...options,
         clinePass,
-        ...(clinePassGuard ? { isClinePassModelEnabled: (model, signal) => clinePassGuard.isEnabled(model, signal) } : {}),
+        ...(modelGuard ? { isClinePassModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
         onError: () => proxySelector.invalidate(),
         ...(validatedCodex.upstream_user_agent ? { upstreamUserAgent: validatedCodex.upstream_user_agent } : {}),
       });
       try { await bridge.start(); }
-      catch (error) { await clinePassGuard?.close(); throw error; }
+      catch (error) { await modelGuard?.close(); throw error; }
       options = bridge.proxyOptions();
     }
     const optionsWithUserAgent = {
@@ -228,6 +240,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     });
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
+      ...(!bridge && modelGuard ? { isModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
       ...(opencodeGo
         ? {
             accountIds: goAccountIds.length === 0 ? undefined : goAccountIds,
@@ -271,14 +284,14 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       },
     });
     try { await modelProxy.start(); } catch (error) {
-      try { await bridge?.close(); } finally { await clinePassGuard?.close(); }
+      try { await bridge?.close(); } finally { await modelGuard?.close(); }
       throw error;
     }
     const proxyRuntime = {
       baseUrl: `http://${modelProxy.address()}`,
-      proxy: bridge ? { close: async () => {
+      proxy: bridge || modelGuard ? { close: async () => {
         try { await modelProxy.close(); } finally {
-          try { await bridge.close(); } finally { await clinePassGuard?.close(); }
+          try { await bridge?.close(); } finally { await modelGuard?.close(); }
         }
       } } : modelProxy,
     };

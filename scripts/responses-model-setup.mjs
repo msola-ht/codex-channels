@@ -1,27 +1,24 @@
 import { validateResponsesModels } from "../runtime/model-provider-responses-catalog.mjs";
+import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-instructions.mjs";
+import { promptEnabledProviderModels } from "./provider-model-selection.mjs";
 
-export async function promptResponsesModels(prompts, defaultModel, previous = [], importedIds = []) {
+export async function promptResponsesModels(prompts, defaultModel, previous = [], importedIds = [], output = process.stdout) {
   const ids = [defaultModel, ...previous.map((entry) => entry.id).filter((id) => id !== defaultModel)];
   const models = [];
   for (let index = 0; index < ids.length; index++) {
     const id = ids[index];
     const old = previous.find((entry) => entry.id === id);
-    let keep = true;
-    if (index > 0 && old) {
-      keep = await prompts.confirm({ message: `保留模型 ${id}？`, initialValue: true });
-      if (prompts.isCancel(keep)) return undefined;
-    }
     let template = old?.template;
-    if (keep && template?.source === "deepseek" && !importedIds.includes(id)) {
+    if (template?.source === "deepseek" && !importedIds.includes(id)) {
       const followContext = await prompts.confirm({message: `${id} 跟随 DS 模型 ${template.model} 的上下文？`, initialValue: template.followContext});
       if (prompts.isCancel(followContext)) return undefined;
       template = {...template, followContext: followContext === true};
     }
-    let configure = keep;
-    if (keep && importedIds.includes(id)) {
+    let configure = true;
+    if (importedIds.includes(id)) {
       configure = await prompts.confirm({ message: `调整 ${id} 的模板能力参数？`, initialValue: false });
       if (prompts.isCancel(configure)) return undefined;
-      if (!configure) models.push({...structuredClone(old), ...(template ? {template} : {})});
+      if (!configure) models.push(withNewModelInstructions({...structuredClone(old), ...(template ? {template} : {})}, true));
     }
     if (configure) {
       const name = await prompts.text({ message: `${id} 显示名称`, initialValue: old?.name ?? id });
@@ -36,7 +33,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       if (prompts.isCancel(defaultReasoning)) return undefined;
       const images = await prompts.confirm({ message: `${id} 是否支持图片输入？`, initialValue: old?.supportsImages ?? false });
       if (prompts.isCancel(images)) return undefined;
-      models.push({ ...structuredClone(old), id, name: String(name), contextWindow: Number(context), reasoningEfforts, defaultReasoningEffort: defaultReasoning, supportsImages: images, ...(template ? {template} : {}) });
+      models.push(withNewModelInstructions({ ...structuredClone(old), id, name: String(name), contextWindow: Number(context), reasoningEfforts, defaultReasoningEffort: defaultReasoning, supportsImages: images, ...(template ? {template} : {}) }, old === undefined || importedIds.includes(id)));
     }
     if (index === ids.length - 1 && ids.length < 64) {
       const add = await prompts.confirm({ message: "继续添加模型？", initialValue: false });
@@ -48,5 +45,21 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       }
     }
   }
-  return validateResponsesModels(models, defaultModel);
+  // Validate candidate capabilities individually; the 64-model limit applies
+  // after selection, so a full catalogue can replace an old model in one edit.
+  const validated = models.map(model => validateResponsesModels([model], model.id)[0]);
+  const enabledModels = await promptEnabledProviderModels(prompts, output, {
+    models: validated.map(model => ({id: model.id, name: model.name, reasoningEffort: model.defaultReasoningEffort ?? "none"})),
+    enabledModels: validated.map(model => model.id),
+    requiredModels: [defaultModel],
+    label: "自定义 Responses",
+  });
+  return enabledModels === undefined ? undefined : validateResponsesModels(validated.filter(model => enabledModels.includes(model.id)), defaultModel);
+}
+
+function withNewModelInstructions(model, isNewDefinition) {
+  if (isNewDefinition && model.template?.source !== "deepseek" && model.instructions === undefined) {
+    return {...model, instructions: thirdPartyCodingInstructions};
+  }
+  return model;
 }

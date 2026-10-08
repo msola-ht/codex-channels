@@ -89,6 +89,16 @@ export function createResponsesModelCatalog(definitions, defaultModel) {
   return catalog;
 }
 
+/** Validate the on-disk contract independently of filesystem access. */
+export function parseResponsesModelCatalog(content) {
+  let parsed;
+  try { parsed = JSON.parse(content); } catch { throw new Error("Responses 模型目录不是有效 JSON"); }
+  if (parsed?.schemaVersion !== 4 || Object.keys(parsed).some((key) => !["schemaVersion", "defaultModel", "definitions", "models"].includes(key))) throw new Error("Responses 模型目录版本或字段不受支持（仅支持版本 4）；请先保留配置与模型目录完整备份，再重新配置");
+  const expected = createResponsesModelCatalog(parsed.definitions, parsed.defaultModel);
+  if (JSON.stringify(parsed) !== JSON.stringify(expected)) throw new Error("Responses 模型目录与模型定义不一致，请重新生成");
+  return expected;
+}
+
 export function readResponsesModelCatalog(environment, id) {
   assertResponsesContextSyncComplete(environment);
   const path = responsesProviderCatalogPath(environment, id);
@@ -97,11 +107,7 @@ export function readResponsesModelCatalog(environment, id) {
   try { content = readPrivateFileSync(path, maximumBytes); } catch {
     throw new Error(`Responses Provider ${id} 模型目录缺失或无法安全读取`);
   }
-  let parsed;
-  try { parsed = JSON.parse(content); } catch { throw new Error("Responses 模型目录不是有效 JSON"); }
-  if (parsed?.schemaVersion !== 4 || Object.keys(parsed).some((key) => !["schemaVersion", "defaultModel", "definitions", "models"].includes(key))) throw new Error("Responses 模型目录版本或字段不受支持（仅支持版本 4）；请先保留配置与模型目录完整备份，再重新配置");
-  const expected = createResponsesModelCatalog(parsed.definitions, parsed.defaultModel);
-  if (JSON.stringify(parsed) !== JSON.stringify(expected)) throw new Error("Responses 模型目录与模型定义不一致，请重新生成");
+  const expected = parseResponsesModelCatalog(content);
   return { ...expected, path, content, revision: createHash("sha256").update(content).digest("hex") };
 }
 

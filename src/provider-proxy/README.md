@@ -127,7 +127,7 @@
 - `traffic-dump-headers.ts`：Codex/Relay 全模式共用的纯头脱敏函数及 Relay 有界采集，保留普通请求/响应头和关联 ID，仅遮蔽凭据类值、URL 秘密与 CSP nonce，限制字段与整体大小，不修改出站头。
 - `relay-dump-payload.ts`：Relay JSON/SSE 的共享脱敏与有界合并写入，供上游及客户端交付阶段复用。
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。
-- `chat-io.ts`：Chat 桥和直接 Chat 共同使用的正文读取、取消等待、拉取式 SSE 分帧与下游背压。
+- `chat-io.ts`：Chat 桥和直接 Chat 共同使用的正文读取、取消等待、拉取式 SSE 分帧与下游背压；`readModelBody` 供启用名单复核保留原始 Buffer，`readChatBody` 保持文本返回。
 - `direct-model-http.ts`：直接模型请求共用的 HTTP 出站生命周期、响应状态/Content-Type 校验与安全 JSON 解码，保留普通应用请求头并复用跳级头清理，覆盖凭据和传输头、剔除 Cookie/伪造身份；同步出站复核、实际 UA 观测、首包/空闲超时、取消和关闭清理，不负责协议转换、重试或指标发送。
 - `direct-responses.ts`：原生 Responses JSON/SSE 交付，复用 HTTP 生命周期和 Responses 指标归约；非流式通过共享白名单识别首个非空输出，观测时间为整包解析校验后；保留事件、用量、终态与扩展字段，不生成 Chat DONE，断流不伪造成功；独立诊断回调仅提交有证据的错误阶段与内层错误，不推断 Chat 专属路由或结束原因。
 - `cline-pass-routing.ts`：CLP 专属出站副本投影，仅对精确 Flash 模型固定 `providerOptions.gateway.only` 为 `deepseek`，保留其他对象字段并拒绝畸形容器；其他模型保持原请求。桥与 Relay 共用，不处理网络或重试。
@@ -161,6 +161,10 @@ HTTP 生成失败交互索引，WebSocket 仅保留握手 trace，不伪造 `res
 `chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码；HTTP 错误可携带经验证的 Retry-After，供原生 Relay 交付，不自动重试。
 
 受管 CLP 桥在真正发起 HTTP 请求前调用 Runtime 注入的当前模型目录复核；停用或未知模型返回 `409 clp_model_disabled`，缺少复核器或无法安全读取目录返回 `503 clp_catalog_unavailable`，使用固定中文提示并阻止上游请求。共享账户与聚合经过同一检查，已提交请求不强行中断；非 CLP 桥和 Relay 独立目录不受影响。
+
+自定义 `rs-*` 的 Runtime 守卫还复用配置读取器的版本 4 和完整目录一致性校验，并拒绝目录 `.pending` 与全局上下文同步未完成状态；HTTP/WS 复用相同回调，不把合法 slug 单独视为有效目录。
+
+OCG/CCG 和自定义 `rs-*` 由 Runtime 向 `ProviderProxy` 注入同源目录复核。HTTP 在路由解析后、有界读取正文并复核模型再提交原始字节；Responses WS 每个 `response.create` 在连接可用后、发送前按顺序复核。停用返回 `409 provider_model_disabled`，目录不可用返回 `503 provider_catalog_unavailable`；WS 包装为 error 后关闭连接，已提交请求不撤回。HTTP 正文上限 16 MiB、上传预算 30 秒，目录复核预算 15 秒；全代理最多 16 项授权准备，WS 单帧与连接队列各限制 16 MiB、队列最多 16 帧。官方 OpenAI、DS 与独立 Relay 保持原处理，不推断无目录提供商的模型授权。
 
 `chat-bridge.ts` 按 Runtime 的受管 CLP 身份映射模型思考参数，并仅对精确 Flash 模型限定 DeepSeek 上游；其他 Chat Provider 不注入。它管理 Chat HTTP 连接、SSE 分帧、背压、取消和有限超时，通过 `model-api/index.ts` 调用纯转换模块。转换覆盖 Responses 的 `function`、`namespace`、自由格式 `custom` 工具与执行位置为 `client` 的 `tool_search`（含其结果带回的工具声明）；未映射的顶层工具声明及其 `tool_choice` 原样交给上游判断，不为它们注册客户端执行身份；回程不支持的工具调用仍明确失败。`text.format` 的 `json_schema` 映射为 Chat `response_format`，`text.verbosity` 校验后忽略。
 Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 服务生命周期；转换后的 Responses 事件复用现有指标采集。桥在收到上游响应头前不写回任何字节，桥的单次请求预算默认 300 秒（见 `chatBridgeRequestTimeoutMs`），覆盖正文接收、路由等待及上游处理。正文接收超时返回 408 `request_timeout` 并关闭未完成的请求连接；上游阶段超时返回 `upstream_timeout`。面向桥的统计代理在此预算上额外预留 5 秒用于终态发送，避免先按空闲超时截断并丢失桥的错误分类。

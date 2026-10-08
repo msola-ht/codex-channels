@@ -32,6 +32,7 @@ import {
 } from "../runtime/private-file.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import { createOpencodeGoCatalog } from "./provider-model-catalog.mjs";
+import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import {
   createManagedProviderConfiguration,
   createManagedProviderCatalog,
@@ -145,14 +146,15 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   }
   let managedCatalog;
   try {
-    managedCatalog = createManagedProviderCatalog(
+    managedCatalog = plan.downloadsCatalog ? createManagedProviderCatalog(
       catalogState.catalog,
       definition,
       {
         previousModels: previous?.models,
         modelWindowPercentByModel: windowPercentByModel,
       },
-    );
+    ) : catalogState.catalog;
+    await validateModelCatalogWithCodex(managedCatalog, environment);
   } catch (error) {
     throw normalize("catalog-invalid", "catalog", error);
   }
@@ -388,7 +390,7 @@ async function buildPlan(
     reconfigure,
     previousMode,
     paths,
-    downloadsCatalog: existing !== undefined || !existsSync(paths.catalogPath),
+    downloadsCatalog: !existsSync(paths.catalogPath),
     updatesExternalAgent: false,
   };
 }

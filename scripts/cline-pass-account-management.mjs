@@ -9,7 +9,8 @@ import { createManagedProviderMarker } from "../runtime/model-provider-profile.m
 import { downloadDeepseekCatalog, createManagedDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
 import { loadResponsesModelTemplates, responsesModelTemplatesFromCatalog } from "./responses-model-templates.mjs";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
-import { clinePassCodingInstructions } from "../runtime/cline-pass-coding-instructions.mjs";
+import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-instructions.mjs";
+import { validateEnabledModelSelection } from "./provider-model-selection.mjs";
 import { clineRelayCatalogSchema, clineRelayReasoningEfforts, clineRelayInputModalities } from "../runtime/cline-relay-catalog.mjs";
 import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
 import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider, withPreservedManagedModelCatalogSettings } from "../runtime/model-provider-runtime.mjs";
@@ -52,7 +53,7 @@ function projectClinePassModels(source) {
       reasoningEfforts: efforts,
       defaultReasoningEffort: efforts.includes("high") ? "high" : efforts[0],
       supportsImages: modalities.includes("image"), applyPatchToolType: "freeform", supportsSearchTool: true,
-      instructions: clinePassCodingInstructions,
+      instructions: thirdPartyCodingInstructions,
     });
   }
   if (models.length === 0) throw new Error("Cline 官方目录没有可接入 Codex 的模型，未修改本地目录");
@@ -92,10 +93,7 @@ async function selectClinePassModels(models, providers, selectModels) {
   };
   const selected = selectModels ? await selectModels(selection) : providers.length ? enabledModels : models.map(model => model.id);
   if (selected === undefined) return undefined;
-  if (!Array.isArray(selected) || selected.length === 0 || selected.length > 64 || new Set(selected).size !== selected.length
-    || selected.some(id => !models.some(model => model.id === id))) throw new Error("请选择 1–64 个有效且不重复的 CLP 模型");
-  if (requiredModels.some(id => !selected.includes(id))) throw new Error("不能停用账户当前默认模型；请先修改账户默认模型，再调整启用列表");
-  return selected;
+  return validateEnabledModelSelection(selected, { models, requiredModels });
 }
 
 export function previewClinePassConfiguration(input, { environment = process.env } = {}) {

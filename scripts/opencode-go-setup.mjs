@@ -31,6 +31,7 @@ import {
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
+import { runManagedProviderModelSetup } from "./managed-provider-model-management.mjs";
 
 class OpenCodeGoSetupCancelled extends Error {}
 
@@ -66,6 +67,7 @@ export async function runOpenCodeGoSetup({
         prompts,
       });
     }
+    if (action === "catalog") return runManagedProviderModelSetup("ocg", { environment, prompts, output, downloadCatalog });
     if (action === "account-add") {
       const accountId = await prompt.accountId();
       const contact = await prompt.contact();
@@ -404,6 +406,7 @@ function createPrompter(prompts, { accounts = [], allowBack, hasModelSettings, h
       );
       if (hasModelSettings) {
         options.push({ value: "model-settings", label: "修改模型设置（思考等级）" });
+        options.push({ value: "catalog", label: "管理共享模型（添加／启用／更新）" });
       }
       if (allowBack) options.push({ value: "back", label: "返回上一级" });
       const value = await prompts.select({ message: "OpenCode Go Provider", options });
