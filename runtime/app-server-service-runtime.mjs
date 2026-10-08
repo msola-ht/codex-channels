@@ -2,9 +2,10 @@ import { loadClinePassAccounts, clinePassProviderId } from "./cline-pass-account
 import { isResponsesProvider, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArguments, loadAggregateModelMaterial } from "./aggregate-model-provider.mjs";
+import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArguments, loadAggregateModelMaterial,
+  readAggregateProviderSettingsFingerprint } from "./aggregate-model-provider.mjs";
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -169,10 +170,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     upstreamAgentsByProxyUrl.set(proxyUrl, agent);
     return agent;
   };
+  const proxyProviderIds = new Map();
+  const proxyTargetSignatures = new Map();
   const providerProxyRuntimes = new ProviderProxyRuntimeRegistry(async (
     provider,
     options,
   ) => {
+    const metricsProvider = proxyProviderIds.get(provider) ?? provider;
     const definition = providerDefinitions.get(provider) ?? sharedManagedProviderDefinition(provider);
     let bridge;
     if (definition?.upstreamWireApi === "chat_completions") {
@@ -197,7 +201,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               inputItems: validatedDebug.model_traffic_input_items,
               itemMaxBytes: validatedDebug.model_traffic_item_max_bytes,
               retentionDays: validatedDebug.model_traffic_retention_days,
-              label: provider,
+              label: metricsProvider,
             },
           }),
     };
@@ -245,7 +249,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               ? managedAccountProxyOptions(ccgAccounts, ccgProviderId, "CCG")
               : {
                 onMetrics: (metrics) => sendProviderProxyMetrics(
-                  providerMetricsSocketPath(socketPath, provider),
+                  providerMetricsSocketPath(socketPath, metricsProvider),
                   metrics,
                 ),
               }),
@@ -269,9 +273,26 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     );
     return proxyRuntime;
   });
-  const startProviderProxy = (provider, options) =>
-    providerProxyRuntimes.ensure(provider, options);
+  const proxyTargetSignature = options => JSON.stringify([
+    options.upstreamHost, options.upstreamPort ?? null,
+    options.upstreamProtocol ?? "https", options.upstreamBasePath ?? "/",
+  ]);
+  const startProviderProxy = (provider, options) => {
+    if (!proxyTargetSignatures.has(provider)) proxyTargetSignatures.set(provider, proxyTargetSignature(options));
+    return providerProxyRuntimes.ensure(provider, options).catch(error => {
+      if (!providerProxyRuntimes.get(provider)) {
+        proxyTargetSignatures.delete(provider);
+        proxyProviderIds.delete(provider);
+      }
+      throw error;
+    });
+  };
   const closeProviderProxy = async (proxy) => {
+    for (const key of proxyTargetSignatures.keys()) {
+      if (providerProxyRuntimes.get(key)?.proxy !== proxy) continue;
+      proxyTargetSignatures.delete(key);
+      proxyProviderIds.delete(key);
+    }
     providerProxyRuntimes.remove(proxy);
     await proxy.close();
   };
@@ -325,14 +346,20 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     provider.provider,
     { runtime: provider, socketPath: managedSocketPaths[index] },
   ]));
+  const providerSettingsFingerprint = provider => provider === aggregateProviderId
+    ? readAggregateProviderSettingsFingerprint(runtime.environment, appServerRuntime.aggregateMembers)
+    : readAppServerProviderSettingsFingerprint(provider, runtime.environment);
   const prepareProviderSettings = (provider) => {
-    if (!providerDefinitions.has(provider)) return undefined;
-    const fingerprint = readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+    const aggregate = provider === aggregateProviderId;
+    if (!providerDefinitions.has(provider) && !aggregate) return undefined;
+    const fingerprint = providerSettingsFingerprint(provider);
     validateConfiguredModelProviders(runtime.environment);
     const next = resolveAppServerRuntime(runtime.document, runtime.dataDir, runtime.environment);
-    const defaultModel = loadManagedModelProviderSettings(runtime.environment)
-      .find(value => value.provider === provider)?.model ?? null;
-    if (readAppServerProviderSettingsFingerprint(provider, runtime.environment) !== fingerprint) {
+    const aggregateMaterial = aggregate
+      ? loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers) : undefined;
+    const defaultModel = aggregate ? aggregateMaterial.defaultModel
+      : loadManagedModelProviderSettings(runtime.environment).find(value => value.provider === provider)?.model ?? null;
+    if (providerSettingsFingerprint(provider) !== fingerprint || aggregateMaterial && aggregateMaterial.fingerprint !== fingerprint) {
       throw new Error("Provider 设置在读取期间发生变化");
     }
     if (JSON.stringify(next.topology) !== JSON.stringify(appServerRuntime.topology)) {
@@ -341,12 +368,12 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     const managed = managedByProvider.get(provider);
     const material = next.managedProviders.find(value => value.provider === provider);
     if (managed && !material) throw new Error("Provider 启动材料不可用");
-    if (managed) managed.runtime = material;
+    if (managed && !aggregate) managed.runtime = material;
     return { fingerprint, defaultModel };
   };
   const confirmProviderSettings = (provider, snapshot) => {
     if (!snapshot) return;
-    if (readAppServerProviderSettingsFingerprint(provider, runtime.environment) !== snapshot.fingerprint) {
+    if (providerSettingsFingerprint(provider) !== snapshot.fingerprint) {
       throw new Error("Provider 设置在应用期间发生变化");
     }
     settingsSnapshots.set(provider, snapshot);
@@ -362,33 +389,57 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     aggregateGuard = undefined;
     const results = await Promise.allSettled([current?.close(), guard?.close()]);
     for (const key of aggregateProxyKeys) providerProxyRuntimes.removeUser(key, aggregateProviderId);
+    const orphanedProxies = [...aggregateProxyKeys].filter(key => !providerProxyIsInUse(key))
+      .map(key => providerProxyRuntimes.get(key)?.proxy).filter(Boolean);
     aggregateProxyKeys.clear();
-    const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
+    const proxyResults = await Promise.allSettled(orphanedProxies.map(proxy => closeProviderProxy(proxy)));
+    const errors = [...results, ...proxyResults].filter(result => result.status === "rejected").map(result => result.reason);
     if (errors.length) throw new AggregateError(errors, "聚合模型资源未能完全关闭");
   };
-  const prepareAggregateRuntime = async () => {
+  const prepareAggregateRuntime = async (snapshot) => {
     const material = loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers);
-    aggregateGuard = new AggregateMaterialGuard(material.files);
+    if (material.fingerprint !== snapshot.fingerprint || material.defaultModel !== snapshot.defaultModel) {
+      throw new Error("聚合设置在启动材料读取期间发生变化");
+    }
+    // The App Server reads the derived catalogue, so guard its exact launch bytes
+    // as well as the authoritative sources used by the routes and settings IPC.
+    aggregateGuard = new AggregateMaterialGuard([...material.files, {
+      path: join(runtime.dataDir, "runtime", "aggregate-models.json"), maximumBytes: 8_388_608,
+      digest: createHash("sha256").update(`${JSON.stringify(material.catalog)}\n`).digest("hex"),
+    }]);
     const token = randomBytes(32).toString("hex");
     const urls = new Map();
     for (const profile of material.profiles) {
-      const key = sharedProviderProxyKey(profile.provider);
+      let key = sharedProviderProxyKey(profile.provider);
+      const options = await proxyOptionsForUrl(new URL(profile.baseUrl));
+      const signature = proxyTargetSignature(options);
+      // A live standalone custom instance can retain its original upstream.
+      // The new aggregate snapshot gets a separate proxy with the same metrics owner.
+      if (!providerDefinitions.has(profile.provider)
+        && (customSwitchingProvidersById.get(profile.provider)?.baseUrl !== profile.baseUrl
+          || proxyTargetSignatures.has(key) && proxyTargetSignatures.get(key) !== signature)) {
+        key = `${profile.provider}@${createHash("sha256").update(signature).digest("hex")}`;
+        proxyProviderIds.set(key, profile.provider);
+      }
       providerProxyRuntimes.addUser(key, aggregateProviderId);
       aggregateProxyKeys.add(key);
-      const started = await startProviderProxy(key, await proxyOptionsForUrl(new URL(profile.baseUrl)));
-      urls.set(profile.provider, `${started.baseUrl}/go/${proxyAccountId(profile.provider)}`);
+      const started = await startProviderProxy(key, options);
+      const accountId = proxyAccountId(profile.provider);
+      urls.set(profile.provider, accountId === undefined ? started.baseUrl : `${started.baseUrl}/go/${accountId}`);
     }
-    await aggregateGuard.check();
     const guard = aggregateGuard;
     aggregateProxy = new AggregateModelProxy({ token, assertCurrent: signal => guard.check(signal),
       routes: new Map([...material.routes].map(([slug, route]) => [slug, {
         model: route.model, apiKey: route.apiKey, baseUrl: urls.get(route.provider),
-        timeoutMs: route.provider.startsWith("clp-") ? chatBridgeRequestTimeoutMs + 10_000 : 65_000,
+        timeoutMs: providerDefinitions.get(route.provider)?.upstreamWireApi === "chat_completions"
+          ? chatBridgeRequestTimeoutMs + 10_000 : 65_000,
       }])),
     });
     await aggregateProxy.start();
     const baseUrl = `http://${aggregateProxy.address()}`;
-    return { baseUrl, arguments: aggregateLaunchArguments(material, runtime.dataDir, baseUrl),
+    const argumentsList = aggregateLaunchArguments(material, runtime.dataDir, baseUrl);
+    await guard.check();
+    return { baseUrl, arguments: argumentsList,
       childEnvironment: { [aggregateTokenEnvironmentKey]: token } };
   };
   const children = [];
@@ -496,7 +547,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       let proxy;
       let child;
       try {
-        const startedProxy = aggregate ? await prepareAggregateRuntime() : await startProviderProxy(
+        settingsSnapshots.delete(provider);
+        const snapshot = prepareProviderSettings(provider);
+        const startedProxy = aggregate ? await prepareAggregateRuntime(snapshot) : await startProviderProxy(
           proxyKey,
           isGoProvider(provider)
             ? await goProxyOptions()
@@ -506,8 +559,6 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         );
         proxy = startedProxy.proxy;
         if (aggregate) managed.runtime = { provider, arguments: startedProxy.arguments, childEnvironment: startedProxy.childEnvironment };
-        settingsSnapshots.delete(provider);
-        const snapshot = prepareProviderSettings(provider);
         const providerBaseUrl = proxyAccountId(provider) !== undefined
           ? `${startedProxy.baseUrl}/go/${proxyAccountId(provider)}`
           : startedProxy.baseUrl;
@@ -543,6 +594,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           provider,
           "模型 Provider App Server",
         );
+        if (aggregate) await aggregateGuard.check();
         confirmProviderSettings(provider, snapshot);
         settingsRecoveryRequired.delete(provider);
         watchChild(child);
@@ -634,8 +686,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     signal.throwIfAborted();
     // Managed settings may change launch material, never the host's socket topology.
     // Account addition/removal and primary-provider changes require explicit service management.
-    if (!providerDefinitions.has(provider)) throw new Error("Provider 不支持受管设置应用");
-    const fingerprint = readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+    if (!providerDefinitions.has(provider) && provider !== aggregateProviderId) throw new Error("Provider 不支持受管设置应用");
+    const fingerprint = providerSettingsFingerprint(provider);
     if (!settingsRecoveryRequired.has(provider) && settingsSnapshots.get(provider)?.fingerprint === fingerprint) {
       return { applied: true, changed: false };
     }

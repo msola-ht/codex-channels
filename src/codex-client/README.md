@@ -48,6 +48,8 @@
   `CODEX_HOME` 的受管模型目录；目录里声明什么就开放什么，相同模型 ID 仍按 Provider 独立映射；
   已开放模型的 `text/image/audio` 输入能力从目录严格校验后映射，未知、重复或缺少文字能力时失败关闭。
   CCG 使用从 DS 基础内容生成的独立本地目录，保留含命名空间的上游模型 ID。
+  `parseAggregateModelOptions` 复用纯目录裁剪并显式校验聚合命名空间，不读取源文件或启动服务。
+  聚合保留源模型的不透明 ID 和无思考等级语义，按 API 可用性与 picker 可见性筛选，保持空闲目录与 `model/list` 一致。
 - `account-adapter.ts`：把 `account/read` 的当前认证类型裁剪为 API、ChatGPT 或无需 OpenAI 认证的
   启动探测路由，不读取或传播凭据；把账户 Token 用量、单桶或多桶额度、重置券数量与到期时间、账户 ID、普通用量权限及
   有界 Luna Reserve 授权摘要映射为 Application

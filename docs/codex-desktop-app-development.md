@@ -6,8 +6,8 @@
 台电脑上的 Codex Desktop App 与 `codex-channels` 同时连接本项目监管的同一个 App Server。
 默认连接主 OpenAI 实例；切换模式可在启动时指定已配置的 Provider 隔离实例，使 Desktop、渠道和
 `codexc remote` 共享该实例的 Thread、Turn、Item 与实时通知。
-主 Provider 为 OpenAI 且 DS/CLP 均有切换账户时，还派生按需启动的虚拟 Provider
-`codexc-aggregate`，把全部 DS/CLP 切换账户模型提供给同一个 Desktop 模型选择器。
+至少有两个 API Key 切换提供商时，还派生按需启动的虚拟 Provider
+`codexc-aggregate`，把这些成员的模型提供给同一个模型选择器；Desktop 共享另要求主 Provider 为 OpenAI。
 
 当前锁定的 Codex CLI 0.160.1 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
 包含未公开的 WebSocket 与强制 CLI 启动入口。macOS 使用强制 CLI 与受管 stdio Proxy，Windows
@@ -36,7 +36,7 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 - Windows 使用当前用户包探测、受认证回环桥与隔离启动环境，仍为开发预览，未完成实机双向验收。
 - 启动时选择 Provider 隔离实例是新增能力，尚未完成 macOS 或 Windows 实机验收；下述主 OpenAI
   实例的历史验收不覆盖第三方模型目录、会话继续或内置工具兼容性。
-- DS/CLP 聚合模式复用同一个受监管 App Server 与工具 Host；聚合 Thread 的跨模型历史兼容及
+- 聚合模式复用同一个受监管 App Server 与工具 Host；聚合 Thread 的跨模型历史兼容及
   Desktop 内置工具尚未完成实机观察。现有主实例验收不覆盖此路径。
 - Linux 隔离观察使用真实 CLI 0.160.1、聚合 HTTP 出口、原 ProviderProxy 和 CLP Chat 桥，
   上游为本地可控服务而非真实账户。同一 Thread 完成 DS→CLP→DS，后续请求保留前轮历史，
@@ -44,6 +44,11 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
   设置不同目录窗口后，三轮实际有效窗口依次为 996147、124518、996147；服务入口另完成
   按需启动、私有 UDS 的 `config/read` / `model/list`、持租约拒绝释放及关租约后释放。
   这些观察不代表真实 DS/CLP 响应兼容性或 macOS/Windows Desktop UI 已完成验收。
+- 聚合扩展后的 Linux 隔离观察使用两个自定义 Responses 提供商，无 DS/CLP 成员；真实 CLI
+  在同一 Thread 完成两次模型切换，并把带中文、冒号的原模型 ID 与正确账户认证传至本地上游。
+  实际设置 watcher 在持租约时推迟更新，释放后确认新增模型；源窗口从 64,000 更新为 128,000，
+  更新上游路径后恢复同一 Thread 的第三轮请求到达新路径，保留前两轮历史。该观察覆盖 Runtime、
+  watcher 与模型目录读取，不代表外部聊天渠道或 Desktop UI 已完成实机验收。
 - 本次 Linux 隔离观察使用真实 0.160.1 App Server，完成回环桥 → Supervisor 租约 →
   `initialize` / `config/read`：缺省目标持有 OpenAI 租约，显式 `demo` 读取到 `model_provider=demo`
   并只持有该实例租约；持租约时释放被拒绝，断开后租约清空。未知目标返回 HTTP 400，重复目标、
@@ -122,8 +127,8 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 
 - 不接入 Remote Control、移动端、二维码、配对码或云端 Environment。
 - 不支持第三方主 Provider；主 Provider 仍必须为 `openai`，第三方通过切换模式的已配置账户实例
-  或 DS/CLP 聚合实例连接。
-- 聚合范围只包含 DS/CLP 切换账户，不合并 OpenAI、其他 Provider 或独立 Relay 目录。
+  或聚合实例连接。
+- 聚合范围包含 DS、CLP、OCG、CCG 和自定义 API Key 切换提供商，不合并官方 OAuth 主账户或独立 Relay 目录。
   更换 App Server 实例必须完全退出 Desktop，再用 `codexc app --provider <ID>` 启动；
   聚合实例内已加载模型间切换无需退出。
 - 不复制 Desktop UI，不让渠道模拟 Desktop 的审批界面，不跨连接转发审批决定。
@@ -197,9 +202,9 @@ Windows 使用独立的私有凭据文件，不改变 StateStore、指标库或�
 本次 Provider 选择不持久化只描述 `codexc app` 启动行为。各实例仍使用共享 Codex Home；
 Desktop 经上游配置 RPC 保存设置时可能写入共享用户配置，而非 Provider 私有 Profile，须纳入实机验收。
 
-### DS/CLP 聚合模型目录
+### 聚合模型目录
 
-聚合拓扑由 OpenAI 主 Provider 与当前 DS/CLP 切换账户派生，不增加账户或 TOML 配置字段。
+聚合拓扑由至少两个当前 API Key 切换提供商派生，允许同类多个账户，不增加账户或 TOML 配置字段。
 `desktop_app.enabled` 仍控制 Desktop 共享；首次选择聚合时沿用既有启用确认流程。服务启动时
 不启动聚合 App Server，选择 `codexc-aggregate` 后复用现有 Supervisor、私有 UDS 和 macOS
 Host 生命周期按需启动一个实例。
@@ -209,7 +214,7 @@ Remote 通过 `--provider agg` 取得实例租约，不能同时指定 Profile�
 读取默认模型与思考等级。渠道模型目录注册同一个 Provider，聚合内部切换保留 Thread，
 持久化绑定恢复仍按该 Provider 路由。聚合纳入 Gateway 账户空闲回收，活动与租约阻止提前释放；
 退出 Desktop 不承诺立即停止实例。聚合没有单一账户额度，账户查询明确不支持且不写虚拟快照；
-模型请求指标保留实际 DS/CLP 账户，不重复生成聚合 Provider 错误样本。
+模型请求指标保留实际成员账户，不重复生成聚合 Provider 错误样本。
 
 聚合从各账户受管目录保留模型能力、上下文、压缩阈值、提示词与思考设置，显示名加
 `Provider ID · 模型名称`，精确 slug 使用 `<Provider ID>/<原模型 slug>`。例如：
@@ -217,16 +222,19 @@ Remote 通过 `--provider agg` 取得实例租约，不能同时指定 Profile�
 - `ds-main/deepseek-flash`
 - `clp-main/cline-pass/deepseek-v4.1-flash`
 
-目录包含当前全部 DS/CLP 切换账户，账户内模型不另造别名。聚合 HTTP 代理按精确 slug 白名单
+目录包含当前全部受管及自定义 API Key 切换提供商，账户内模型不另造别名。聚合 HTTP 代理按精确 slug 白名单
 还原原模型 ID，路由至原 ProviderProxy；CLP 继续通过现有 Chat 桥转换。每次请求用目标账户
 真实 Key 替换本地随机认证令牌，不维护对话历史。聚合关闭模型 API WebSocket、网页搜索及
 自动重试；审批 reviewer 使用 `user`，Remote 拒绝显式 `auto_review`；独立 Relay 不接入聚合路由。
 
 唯一新增磁盘材料为 `<dataDir>/runtime/aggregate-models.json`，它是无密钥、可重建的派生目录；
-账户注册表、私有 Profile、Gateway TOML 和数据库格式均不变。目录在实例启动时加载，账户、
-Key 或模型设置变化后，快照校验拒绝后续出站请求并要求重启 App Server 服务，不热刷新列表。
+账户注册表、私有 Profile、Gateway TOML 和数据库格式均不变。源目录仍由各提供商拥有。
+Gateway watcher 检测现有成员的 Key、配置与目录变化，复用 Supervisor 的设置应用接口，
+待活动 Thread 与租约释放后安全重建聚合实例并确认新目录。等待期间旧快照拒绝后续出站请求。
+空闲实例使用确认过的本地派生目录更新渠道菜单，不因浏览目录启动 App Server；运行中的实例通过 `model/list` 确认。
+增删聚合成员属于拓扑变更，仍须重启 App Server 与 Gateway；Gateway 未运行时需手动重启 App Server 才能刷新。
 每请求的私有文件与 ACL 复核由有界工作线程执行，共享目录去重；等待支持取消与 15 秒截止时间。
-首包和空闲预算分别为 DS 65 秒、CLP 310 秒，响应总预算独立为 600 秒。
+首包和空闲预算为 CLP 310 秒、其他成员 65 秒，响应总预算独立为 600 秒。
 安装新代码后的旧服务也须按常规重启才能加载聚合能力。
 
 为避免全局设置压平模型窗口，聚合启动拒绝 Codex 主 `config.toml` 顶层的
@@ -324,7 +332,7 @@ codexc app status [--provider <Provider ID>] [--json]
   `thread/list` 显式请求多个 Provider，`thread/resume` 也可能沿用历史的 Provider。Desktop
   是否会从缓存恢复其他 Provider 的 Thread、传入模型覆盖，以及第三方是否能使用内置工具，均须实机确认。
   使用时应在目标实例新建会话，不以连接参数推断历史会话已转换 Provider。
-- 聚合实例的目录由 DS/CLP 账户目录派生，在上游仍归属同一个 `codexc-aggregate` Provider。
+- 聚合实例的目录由各成员提供商目录派生，在上游仍归属同一个 `codexc-aggregate` Provider。
   旧单账户 Thread 不迁移，必须新建聚合 Thread 再用；目录内模型切换的实现依据不证明历史中的
   reasoning 或工具内容跨模型兼容，尚无该路径及聚合 Desktop 内置工具的实机验收。
 - Desktop 创建、恢复、归档、改名或更新 Thread 后，Gateway 只根据官方通知和后续
@@ -391,7 +399,7 @@ codexc app status [--provider <Provider ID>] [--json]
   边界转换。
 - `runtime/app-server-service-runtime.mjs`：macOS 装配受管 Host，Windows 在配置启用且主 Provider
   为 OpenAI 时装配桥，并纳入 App Server 服务关闭顺序。
-- `runtime/aggregate-model-provider.mjs`：派生 DS/CLP 聚合成员、目录与启动参数，拒绝全局窗口覆盖，
+- `runtime/aggregate-model-provider.mjs`：派生 API Key 切换提供商的聚合成员、目录与启动参数，拒绝全局窗口覆盖，
   对账户和模型材料做快照复核，只写无密钥的运行时目录。
 - `runtime/aggregate-material-guard.mjs`：在有界工作线程中复核私有材料与 ACL，取消、截止时间及关闭由服务持有。
 - `src/provider-proxy/aggregate-proxy.ts`：对精确聚合模型 ID 执行本地认证、白名单 HTTP 路由和账户

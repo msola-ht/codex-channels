@@ -105,6 +105,7 @@ export async function runGatewayProcess(): Promise<void> {
   const providerSettingsWatcher = new ProviderSettingsWatcher({
     logger,
     configuredProviders: application.managedSettingsProviders,
+    aggregateMembers: application.aggregateSettingsMembers,
     applyProviderSettings: (provider, signal) => application.applyProviderSettings(provider, signal),
     refreshProviderModels: (provider, signal) => application.refreshProviderModels(provider, signal),
     onStateChange: (change) =>

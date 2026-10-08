@@ -1,14 +1,26 @@
 import { createHash } from "node:crypto";
+import { lstatSync } from "node:fs";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import { readPrivateFileSync } from "./private-file.mjs";
+import { readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
 
 // Only immutable paths and hashes cross this boundary; never account credentials.
 if (!isMainThread && workerData?.kind === "aggregate-material-guard") {
   parentPort.on("message", ({ id }) => {
     let ok = false;
     try {
-      ok = workerData.files.every(file => createHash("sha256")
-        .update(readPrivateFileSync(file.path, file.maximumBytes)).digest("hex") === file.digest);
+      ok = workerData.files.every(file => {
+        let digest;
+        try {
+          lstatSync(file.path);
+          digest = createHash("sha256").update(file.readMode === "codex-config"
+            ? readCodexConfigFile(file.path) : readPrivateFileSync(file.path, file.maximumBytes)).digest("hex");
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+          digest = null;
+        }
+        return digest === file.digest;
+      });
     } catch { /* Changed, missing or no longer private material fails closed. */ }
     parentPort.postMessage({ id, ok });
   });
@@ -34,7 +46,7 @@ export class AggregateMaterialGuard {
       this.#pending.delete(result.id);
       entry.cleanup();
       if (result.ok === true && !this.#closed) entry.resolve();
-      else entry.reject(new Error("聚合账户或目录已变化，请重启 App Server 服务"));
+      else entry.reject(new Error("聚合账户或目录已变化，等待安全应用设置后重试"));
     });
     this.#worker.on("error", () => { void this.close().catch(() => undefined); });
     this.#worker.on("exit", () => { void this.close().catch(() => undefined); });

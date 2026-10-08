@@ -65,7 +65,7 @@ codexc update                # 更新受管源码、同步配套 CLI 并校验�
 codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc app      # 启动共享 Desktop App；首次确认后自动启用（预览）
 codexc app --provider <Provider-ID> # 本次连接已配置的隔离实例；切换前退出 Desktop（预览）
-codexc app --provider agg # DS/CLP 切换账户聚合到同一桌面模型目录（预览）
+codexc app --provider agg # API Key 切换提供商聚合到同一桌面模型目录（预览）
 codexc remote --provider agg # 终端使用相同聚合目录；渠道从 /model 选择
 ```
 

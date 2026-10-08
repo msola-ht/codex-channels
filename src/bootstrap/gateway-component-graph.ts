@@ -57,7 +57,11 @@ import {
   opencodeGoAccountIdFromProvider,
 } from "../../runtime/opencode-go-accounts.mjs";
 import { resolveDefaultManagedProvider } from "../../runtime/managed-provider-account-routing.mjs";
-import { aggregateProviderId, aggregateProviderMembers } from "../../runtime/aggregate-model-provider.mjs";
+import {
+  aggregateProviderId,
+  aggregateProviderMembers,
+  loadAggregateModelMaterial,
+} from "../../runtime/aggregate-model-provider.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
@@ -68,6 +72,7 @@ import {
   handleApprovalServerRequest,
   JsonRpcError,
   loadManagedModelOptions,
+  parseAggregateModelOptions,
   JsonRpcClient,
   supportedCodexCliVersion,
   toAutoApprovalReviewEvent,
@@ -188,6 +193,7 @@ export abstract class GatewayComponentGraph {
   private readonly providerModelSnapshots = new Map<string, ModelOption[]>();
   private readonly captureProviderModels: (provider: string) => { fingerprint: string; models: ModelOption[] };
   readonly managedSettingsProviders: readonly string[];
+  readonly aggregateSettingsMembers: readonly string[];
   private readonly providerSettingsAbort = new AbortController();
   private readonly providersApplyingSettings = new Set<string>();
   private readonly pendingProviderSettings = new Set<string>();
@@ -243,7 +249,11 @@ export abstract class GatewayComponentGraph {
       ? undefined
       : new TomlWorkspacePermissionWriter(configPath, () => autoReviewPolicy.supportedProviders.size > 0);
     const managedProviders = loadManagedModelProviders();
-    const aggregateEnabled = aggregateProviderMembers(primaryProvider, managedProviders).length > 0;
+    this.aggregateSettingsMembers = aggregateProviderMembers(primaryProvider, [
+      ...managedProviders,
+      ...customSwitchingProviders,
+    ]);
+    const aggregateEnabled = this.aggregateSettingsMembers.length > 0;
     const switchingProviderIds = [
       ...managedProviders.map(({ provider }) => provider),
       ...customSwitchingProviders.map(({ provider }) => provider),
@@ -254,10 +264,16 @@ export abstract class GatewayComponentGraph {
       primaryProvider,
       ...managedProviders.map(({ provider }) => provider),
     ]);
-    this.managedSettingsProviders = providerDefinitions
-      .map((definition) => definition.id)
-      .filter((provider) => configuredProviders.has(provider));
+    this.managedSettingsProviders = [
+      ...providerDefinitions.map((definition) => definition.id)
+        .filter((provider) => configuredProviders.has(provider)),
+      ...(aggregateEnabled ? [aggregateProviderId] : []),
+    ];
     this.captureProviderModels = (provider) => {
+      if (provider === aggregateProviderId) {
+        const material = loadAggregateModelMaterial(process.env, [...this.aggregateSettingsMembers]);
+        return { fingerprint: material.fingerprint, models: parseAggregateModelOptions(material.catalog) };
+      }
       const definition = providerDefinitions.find((entry) => entry.id === provider);
       if (!definition) throw new Error("Provider 模型目录定义不存在");
       const fingerprint = readAppServerProviderSettingsFingerprint(provider);
@@ -603,7 +619,6 @@ export abstract class GatewayComponentGraph {
           displayName: provider.name,
           defaultModel: provider.model,
         })),
-        ...(aggregateEnabled ? [{ provider: aggregateProviderId, displayName: "DS + CLP" }] : []),
       ],
     );
     this.modelSelection = models;

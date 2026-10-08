@@ -102,7 +102,7 @@ async function runRemoteCli() {
   }
   if (selectedProvider !== undefined) {
     if (!appServer.managedProviders.some(({ provider }) => provider === selectedProvider)) {
-      throw new Error("聚合实例尚不可用；需要 OpenAI 主 Provider，以及已配置的 DS 与 CLP 切换账户");
+      throw new Error("聚合实例尚不可用；需要至少两个已配置的 API Key 切换提供商");
     }
     socketPath = providerAppServerSocketPath(primarySocketPath, selectedProvider);
     leaseProvider = selectedProvider;

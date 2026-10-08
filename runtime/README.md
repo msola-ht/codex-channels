@@ -52,9 +52,9 @@
   保留共享目录及当前账户，watcher 只为实际账户监听 Profile 和管理标记，再按 Provider ID 合并并去重路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，共用 DS 目录。
 - `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，共享模型目录和 Chat 转换代理。
-- `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：从 OpenAI 主实例下的 DS/CLP 切换账户派生 `codexc-aggregate`
+- `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
   拓扑成员、模型 slug、目录与启动参数；保留各模型元数据，拒绝主配置的全局窗口覆盖，复核账户与
-  目录快照，只写可重建、无密钥的运行时 `aggregate-models.json`，不改账户或存储契约。
+  目录快照；公开源文件清单与内容指纹供安全刷新使用，只写可重建、无密钥的运行时 `aggregate-models.json`，不改账户或存储契约。
 - `aggregate-material-guard.mjs`：聚合实例拥有的有界工作线程；按去重文件清单校验私有权限与内容摘要，
   避免 Windows ACL 子进程阻塞模型转发和 Supervisor。取消等待不释放尚未完成的队列槽，实例释放时关闭线程。
 - `ccg-accounts.mjs` / `ccg-accounts.d.mts`：CCG 账户注册表、默认账户、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ccg-<账户>`，共用 CCG 目录与统计代理。

@@ -15,6 +15,8 @@ interface ManagedCatalogDefinition {
 
 // Provider 注册与受控模型范围由 Bootstrap/Runtime 校验；目录允许单层命名空间。
 const modelSlugPattern = /^(?:[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u;
+// The member model ID is an opaque JSON field, not a URL path segment.
+const aggregateModelSlugPattern = /^[a-zA-Z0-9_-]{1,64}\/[^\p{Cc}]{1,200}$/u;
 
 export function loadManagedModelOptions(
   providerDirectory: string,
@@ -33,13 +35,36 @@ export function loadManagedModelOptions(
       { cause: error },
     );
   }
+  return parseModelOptions(parsed, definition, catalogPath, modelSlugPattern);
+}
+
+/** Map confirmed aggregate material without starting an App Server to read its catalog. */
+export function parseAggregateModelOptions(catalog: unknown): ModelOption[] {
+  return parseModelOptions(catalog, {
+    id: "codexc-aggregate",
+    displayName: "聚合提供商",
+    catalogFileName: "aggregate-models.json",
+  }, "聚合模型目录", aggregateModelSlugPattern, true);
+}
+
+function parseModelOptions(
+  parsed: unknown,
+  definition: ManagedCatalogDefinition,
+  catalogPath: string,
+  slugPattern: RegExp,
+  aggregate = false,
+): ModelOption[] {
   const models = record(parsed).models;
   if (!Array.isArray(models)) {
     throw new Error(`${definition.displayName} 模型目录缺少 models：${catalogPath}`);
   }
   return models.flatMap((candidate) => {
     const model = record(candidate);
-    if (typeof model.slug !== "string" || !modelSlugPattern.test(model.slug)) {
+    // Aggregate authentication is API-key based. Match upstream model/list's
+    // API availability and picker visibility, including while the instance sleeps.
+    if (aggregate && (model.visibility !== "list" || model.supported_in_api !== true)) return [];
+    if (typeof model.slug !== "string" || !slugPattern.test(model.slug)
+      || aggregate && model.slug.slice(model.slug.indexOf("/") + 1).trim() !== model.slug.slice(model.slug.indexOf("/") + 1)) {
       throw new Error(`${definition.displayName} 模型目录包含无效模型名：${catalogPath}`);
     }
     const levels = Array.isArray(model.supported_reasoning_levels)
@@ -51,13 +76,17 @@ export function loadManagedModelOptions(
         ? [{ effort: level.effort, description: level.description }]
         : [];
     });
-    if (efforts.length === 0) {
+    if (aggregate && (!Array.isArray(model.supported_reasoning_levels) || efforts.length !== levels.length)) {
+      throw new Error(`${definition.displayName} 模型目录包含无效思考等级：${catalogPath}`);
+    }
+    if (efforts.length === 0 && !aggregate) {
       throw new Error(`${definition.displayName} 模型目录缺少思考等级：${catalogPath}`);
     }
     const slug = model.slug;
     const defaultReasoningEffort = typeof model.default_reasoning_level === "string"
       ? model.default_reasoning_level
-      : definition.defaultReasoningEffort;
+      // Locked upstream ModelInfo -> ModelPreset maps an absent effort to None.
+      : aggregate && model.default_reasoning_level == null ? "none" : definition.defaultReasoningEffort;
     if (typeof defaultReasoningEffort !== "string") {
       throw new Error(`${definition.displayName} 模型目录缺少默认思考等级：${catalogPath}`);
     }

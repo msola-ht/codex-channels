@@ -6,6 +6,10 @@ import type { Logger } from "pino";
 
 import { codexHomePath } from "../../runtime/codex-home.mjs";
 import {
+  aggregateProviderId,
+  readAggregateProviderSettingsFingerprint,
+} from "../../runtime/aggregate-model-provider.mjs";
+import {
   loadManagedModelProviderDefinitions,
   loadManagedModelProviderWatcherDefinitions,
 } from "../../runtime/model-provider-definitions.mjs";
@@ -20,6 +24,7 @@ export interface ProviderSettingsWatcherOptions {
   logger: Logger;
   applyProviderSettings: (provider: string, signal: AbortSignal) => Promise<boolean>;
   configuredProviders?: readonly string[];
+  aggregateMembers?: readonly string[];
   refreshProviderModels: (provider: string, signal: AbortSignal) => void | Promise<void>;
   onStateChange?: (change: ProviderSettingsStateChange) => void;
   environment?: NodeJS.ProcessEnv;
@@ -46,6 +51,7 @@ export interface ProviderSettingsStateChange {
 interface ManagedProviderFiles {
   provider: string;
   paths: string[];
+  settingsFingerprint?: () => string;
 }
 
 const defaultPollIntervalMs = 2_000;
@@ -130,6 +136,15 @@ export class ProviderSettingsWatcher {
       }
       filesByProvider.set(definition.id, files);
     }
+    if (visibleProviderIds.has(aggregateProviderId)) {
+      const members = [...(options.aggregateMembers ?? [])];
+      if (members.length < 2) throw new Error("聚合设置监听需要至少两个已配置切换 Provider");
+      filesByProvider.set(aggregateProviderId, {
+        provider: aggregateProviderId,
+        paths: [],
+        settingsFingerprint: () => readAggregateProviderSettingsFingerprint(this.environment, members),
+      });
+    }
     this.filesByProvider = [...filesByProvider.values()];
     this.visibleProviderIds = visibleProviderIds;
   }
@@ -180,8 +195,7 @@ export class ProviderSettingsWatcher {
     }
     if (this.initialized && !sameFingerprints(this.fingerprints, nextFingerprints)) {
       const providers = this.filesByProvider
-        .filter(({ paths }) => paths.some((path) =>
-          this.fingerprints.get(path) !== nextFingerprints.get(path)))
+        .filter((files) => providerFilesChanged(files, this.fingerprints, nextFingerprints))
         .map(({ provider }) => provider)
         .filter((provider) => this.visibleProviderIds.has(provider));
       if (providers.length === 0) {
@@ -256,13 +270,13 @@ export class ProviderSettingsWatcher {
         if (this.stopping) return;
         const current = this.tryReadFingerprints();
         if (!current || this.filesByProvider.some((files) => files.provider === provider
-          && files.paths.some((path) => current.get(path) !== this.fingerprints.get(path)))) continue;
+          && providerFilesChanged(files, this.fingerprints, current))) continue;
         if (this.pendingProviders.get(provider) !== generation) continue;
         await this.refreshProviderModels(provider, this.cancellation.signal);
         if (this.stopping) return;
         const confirmed = this.tryReadFingerprints();
         if (!confirmed || this.filesByProvider.some((files) => files.provider === provider
-          && files.paths.some((path) => confirmed.get(path) !== this.fingerprints.get(path)))) {
+          && providerFilesChanged(files, this.fingerprints, confirmed))) {
           void this.checkNow();
           continue;
         }
@@ -341,13 +355,24 @@ export class ProviderSettingsWatcher {
 
   private readFingerprints(): Map<string, string> {
     const fingerprints = new Map<string, string>();
-    for (const { paths } of this.filesByProvider) {
+    for (const { provider, paths, settingsFingerprint } of this.filesByProvider) {
       for (const path of paths) {
         fingerprints.set(path, readFileFingerprint(path));
       }
+      if (settingsFingerprint) fingerprints.set(`provider:${provider}`, settingsFingerprint());
     }
     return fingerprints;
   }
+}
+
+function providerFilesChanged(
+  files: ManagedProviderFiles,
+  current: ReadonlyMap<string, string>,
+  next: ReadonlyMap<string, string>,
+): boolean {
+  return files.paths.some((path) => current.get(path) !== next.get(path))
+    || (files.settingsFingerprint !== undefined
+      && current.get(`provider:${files.provider}`) !== next.get(`provider:${files.provider}`));
 }
 
 function readFileFingerprint(path: string): string {

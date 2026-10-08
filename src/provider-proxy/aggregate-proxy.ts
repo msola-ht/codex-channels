@@ -61,8 +61,10 @@ export class AggregateModelProxy {
     this.authenticationDigest = digest(`Bearer ${options.token}`);
     this.assertCurrent = options.assertCurrent;
     for (const [slug, route] of options.routes) {
-      if (!/^[\x21-\x7e]{1,1024}$/u.test(slug) || !/^[a-zA-Z0-9_-]+\/[^\s?#\\]+$/u.test(slug)
-        || !/^[\x21-\x7e]{1,512}$/u.test(route.model)
+      if (!/^[a-zA-Z0-9_-]{1,64}\/[^\p{Cc}]{1,200}$/u.test(slug)
+        || typeof route.model !== "string" || route.model.length < 1 || route.model.length > 200
+        || /\p{Cc}/u.test(route.model) || route.model.trim() !== route.model
+        || slug.slice(slug.indexOf("/") + 1) !== route.model
         || !/^[\x21-\x7e]{1,16384}$/u.test(route.apiKey)) throw new Error("聚合模型代理路由无效。");
       const match = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})(\/go\/[a-zA-Z0-9_-]{1,128})?\/?$/u.exec(route.baseUrl);
       const port = Number(match?.[1]);
@@ -176,7 +178,7 @@ export class AggregateModelProxy {
         if (pending !== undefined) await waitForChatOperation(pending, signal);
       } catch {
         signal.throwIfAborted();
-        throw new AggregateRequestError(409, "aggregate_snapshot_changed", "模型账户或目录已变更，请重启聚合模型实例。");
+        throw new AggregateRequestError(409, "aggregate_snapshot_changed", "模型账户或目录已变更，请等待聚合设置安全应用；Gateway 未运行时需重启 App Server。");
       }
       signal.throwIfAborted();
       clearTimeout(snapshotTimer);

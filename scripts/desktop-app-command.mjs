@@ -941,7 +941,7 @@ function resolveDesktopAppSocketPath(appServer, provider) {
   const socketPath = index < 0 ? undefined : appServer.socketPaths[index + 1];
   if (typeof socketPath !== "string" || socketPath.length === 0) {
     if (provider === aggregateProviderId) {
-      throw new Error("聚合模式要求主 Provider 为 OpenAI，并且 DS 官方和 CLP 均有已配置的切换模式账户");
+      throw new Error("聚合模式需要至少两个已配置的 API Key 切换提供商；Desktop 共享另要求主 Provider 为 OpenAI");
     }
     throw new Error("Desktop Provider 未配置；请使用完整、已配置的 Provider ID");
   }

@@ -21,7 +21,9 @@ export function resolveAppServerRuntime(document, dataDir, environment = process
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, dataDir);
   const managedProviders = loadManagedProviderAppServers(environment);
   const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders(environment);
-  const aggregateMembers = aggregateProviderMembers(loadPrimaryModelProvider(environment), managedProviders);
+  const aggregateMembers = aggregateProviderMembers(loadPrimaryModelProvider(environment), [
+    ...managedProviders, ...customSwitchingProviders,
+  ]);
   if (customSwitchingProviders.some(entry => entry.provider === aggregateProviderId)) {
     throw new Error("codexc-aggregate 为聚合模式保留的 Provider ID");
   }
