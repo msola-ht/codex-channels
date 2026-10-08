@@ -32,8 +32,10 @@
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；
   对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态；按 Setup 管理
-  标记装配主 Client 与可选 Provider Client，并通过 Provider 路由复用其余业务模块；按已启用
-  Provider 装配模型指标组件，不持有模型转发数据通路；通过 `request-metrics-query-adapter.ts`
+  标记装配主 Client 与可选 Provider Client，并通过 Provider 路由复用其余业务模块；沿用 Runtime 中
+  至少两个 API Key 切换提供商的派生条件装配 `codexc-aggregate` Client；聚合源变更复用设置 watcher、活动/租约门禁与确认快照刷新目录，运行中通过 `model/list` 确认，空闲时使用已确认的本地派生目录而不启动实例；
+  聚合 Thread、恢复、订阅、审批与空闲释放沿用共享协调器，人工审批能力不因聚合扩展；请求指标仍只接收真实成员账户的样本，聚合不增加指标 Socket 或账户适配器。
+  按已启用 Provider 装配模型指标组件，不持有模型转发数据通路；通过 `request-metrics-query-adapter.ts`
   把同一指标库的精确 Thread 查询映射为 Application `/metrics` 窄端口，并为 OpenAI `/limits`
   提供当前周窗口的精确 Provider 聚合；
   同时拥有请求指标与账户快照的独立私有通知端点，指标批次或账户快照成功保存后发送对应失效通知，关闭时先停止指标写入再释放订阅端点；通知不调用 App Server。
@@ -165,6 +167,8 @@
   该 IPC 根据受控账户查询原因生成固定文案，不透传内部异常 message；按 Provider 记录阶段、分类、
   耗时和受控状态码，主动取消不记录为上游失败；快照等未知本地异常按内部故障处理。
 - `provider-settings-watcher.ts`：监听当前 Gateway 已启用的受管 Provider 模型目录、Profile 与管理标记；
+  聚合使用 Runtime 提供的第三方成员材料指纹捕获成员配置、目录及源路径变化，复用同一待应用流程；
+  主 Codex 配置不参与聚合变化监听，必要的主配置校验留在材料加载与实例启动／应用边界。
   校验后逐 Provider 调用监管设置应用端口，原生 TUI/Desktop 租约或权威活动 Thread 保留待应用状态。
   组合根在同一 Provider RPC 准入入口排空请求并阻止新请求；监管重新派生启动材料并只更新目标实例，
   连接与绑定恢复复用既有协调器；设置恢复期间再次意外断线必须重新握手，主动释放或关闭会取消设置等待者。

@@ -22,7 +22,7 @@ export interface DesktopAppCommandOptions {
     socketPath: string;
     codexBinary: string;
   }) => Promise<number>;
-  openDesktop?: (path: string, endpoint: string) => void | Promise<void>;
+  openDesktop?: (path: string, endpoint: string, provider: string) => void | Promise<void>;
 }
 
 export const desktopAppCommandUsage: string;

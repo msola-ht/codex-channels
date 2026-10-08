@@ -13,8 +13,10 @@ export interface InspectedAppServerTopology {
   runningProviders: string[];
   releasedProviders: string[];
   leasedProviders: string[];
-  desktopAppHostProtocolVersion?: 1;
+  desktopAppHostProtocolVersion?: 2;
+  desktopAppProviderProtocolVersion?: 1;
   desktopAppAttached?: boolean;
+  desktopAppProvider?: string;
 }
 
 export interface AppServerProviderLease {
@@ -50,11 +52,13 @@ export class AppServerSupervisorOwner {
       applyProviderSettings?: (provider: string, signal: AbortSignal, canApply: () => boolean) => Promise<AppServerProviderSettingsResult>;
       providerSettingsSnapshot?: (provider: string) => AppServerProviderSettingsSnapshot | undefined;
       attachDesktopApp?: (attachment: {
+        provider: string;
         appPath: string;
         pipePath: string;
         toolsEnabled: boolean;
       }, signal: AbortSignal, canAttach: () => boolean) => Promise<void>;
       detachDesktopApp?: () => Promise<void>;
+      desktopAppProviderSelectionEnabled?: boolean;
     },
   );
   start(): Promise<void>;

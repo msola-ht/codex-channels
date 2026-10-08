@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 
 import { createAppServerTransport, CodexAppServerClient, JsonRpcClient } from "../dist/codex-client/index.js";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
+import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
 import { ensureAppServerProvider } from "../runtime/app-server-supervisor.mjs";
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { effectiveCodexBinary, executableInvocation, resolveExecutable } from "../runtime/executable.mjs";
@@ -49,7 +50,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
         socketPath: runtime.managedSocketPaths[index], provider: provider.provider,
       })),
     ];
-    for (const { socketPath, provider } of socketEntries) {
+    const connectProvider = async ({ socketPath, provider }) => {
       await ensureAppServerProvider(runtime.primarySocketPath, provider);
       const transport = createAppServerTransport({ kind: "local-app-server", socketPath }, {
         codexBinary,
@@ -65,12 +66,25 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
         throw new Error("Provider " + provider + " 无法连接，已拒绝不完整扫描", { cause: error });
       }
       clients.set(provider, client);
+    };
+    for (const entry of socketEntries) {
+      if (entry.provider !== aggregateProviderId) await connectProvider(entry);
     }
+    // thread/list explicitly includes every Provider in the shared Codex Home.
+    // Do not start an unused virtual instance merely to discover its history.
+    let aggregateConnection;
+    const ensureClient = async (provider) => {
+      if (provider !== aggregateProviderId || clients.has(provider)) return;
+      const entry = socketEntries.find(value => value.provider === provider);
+      if (!entry) return; // clientFor reports an unavailable historical Provider.
+      aggregateConnection ??= connectProvider(entry);
+      await aggregateConnection;
+    };
     const context = {
-      clients, workspaces, databasePath, maxTurns,
+      clients, ensureClient, workspaces, databasePath, maxTurns,
       idleCutoff: idleDays === null ? null : Math.floor(Date.now() / 1000) - idleDays * 86_400,
     };
-    output.log("正在扫描主会话（" + clients.size + " 个 Provider，" + workspaces.length + " 个 Workspace）…");
+    output.log("正在扫描主会话（已连接 " + clients.size + " 个 Provider，" + workspaces.length + " 个 Workspace；聚合会话按需连接）…");
     const roots = new Map();
     for (const client of clients.values()) {
       for (const workspace of workspaces) {
@@ -177,7 +191,8 @@ function clientFor(thread, clients) {
   return client;
 }
 
-async function readOwnedThread(thread, clients) {
+async function readOwnedThread(thread, clients, ensureClient) {
+  await ensureClient(thread.modelProvider);
   const current = await clientFor(thread, clients).readThread(thread.id);
   if (current.modelProvider !== thread.modelProvider) throw new Error("会话 Provider 已变化");
   return current;
@@ -201,14 +216,14 @@ function requireUnbound(members, bound) {
 }
 
 async function inspectCandidate(listed, context) {
-  const { clients, workspaces, databasePath, maxTurns, idleCutoff } = context;
-  const thread = await readOwnedThread(listed, clients);
+  const { clients, ensureClient, workspaces, databasePath, maxTurns, idleCutoff } = context;
+  const thread = await readOwnedThread(listed, clients, ensureClient);
   if (thread.parentThreadId || thread.source === "automation") throw new Error("不是可清理的交互主会话");
   const client = clientFor(thread, clients);
   const members = [{ thread, archived: false }];
   const children = await readDescendants(client, thread.id);
   for (const child of children) {
-    members.push({ thread: await readOwnedThread(child.thread, clients), archived: child.archived });
+    members.push({ thread: await readOwnedThread(child.thread, clients, ensureClient), archived: child.archived });
   }
   for (const { thread: member } of members) {
     if (!workspaces.some((workspace) => workspace.cwd === member.cwd)) throw new Error("会话组包含未配置 Workspace：" + member.id);

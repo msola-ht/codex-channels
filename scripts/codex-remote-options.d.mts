@@ -19,4 +19,5 @@ export function parseCodexRemoteOptions(
   passthrough: string[];
   workspaceId: string | undefined;
   selectedProfile: string | undefined;
+  selectedProvider: "codexc-aggregate" | undefined;
 };

@@ -32,6 +32,7 @@ import {
   formatCompactMetricsValue,
 } from "./metrics-format.js";
 import { missingFinalResponseText } from "./output-copy.js";
+import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 import {
   formatCacheHitRate,
   formatRequestCount,
@@ -241,8 +242,8 @@ export function createStartupPresentation(
             value: formatCodexProviderLabel(status.modelProvider),
           },
           {
-            label: "思考等级",
-            value: `${status.effort ?? "模型默认"}${pendingSuffix(status.effortPending)}`,
+            label: reasoningEffortSettingName(status.effort),
+            value: `${formatReasoningEffort(status.effort)}${pendingSuffix(status.effortPending)}`,
           },
           ...(supportsFastMode(status.modelProvider)
             ? [{
@@ -355,7 +356,7 @@ export function createSubagentStartedPresentation(
     fields: [
       { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
       { label: "模型设置", value: event.model ?? "未提供" },
-      { label: "思考强度", value: event.reasoningEffort ?? "未提供" },
+      { label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort, "未提供") },
     ],
   };
 }
@@ -368,7 +369,7 @@ export function createSubagentContactedPresentation(
     fields: [
       { label: "提供商", value: event.modelProvider ? formatCodexProviderLabel(event.modelProvider) : "未提供" },
       { label: "模型设置", value: event.model ?? "未提供" },
-      { label: "思考强度", value: event.reasoningEffort ?? "未提供" },
+      { label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort, "未提供") },
     ],
   };
 }
@@ -388,7 +389,7 @@ export function createSubagentCompletedPresentation(
     });
   }
   if (event.reasoningEffort) {
-    fields.push({ label: "思考等级", value: event.reasoningEffort });
+    fields.push({ label: reasoningEffortSettingName(event.reasoningEffort), value: formatReasoningEffort(event.reasoningEffort) });
   }
   if (event.metricsStatus === "unavailable") {
     fields.push({ label: "统计", value: "暂不可用" });
@@ -551,8 +552,8 @@ export function createTurnCompletedPresentation(
     runFields.push({
       label: "模型",
       value: supportsFastMode(event.modelProvider)
-        ? `${event.model} · ${event.effort ?? "模型默认"} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`
-        : `${event.model} · ${event.effort ?? "模型默认"}`,
+        ? `${event.model} · ${formatReasoningEffort(event.effort)} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`
+        : `${event.model} · ${formatReasoningEffort(event.effort)}`,
     });
     runFields.push({
       label: "提供商",

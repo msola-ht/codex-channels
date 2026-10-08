@@ -47,11 +47,24 @@
   查询 Credits 与 5 小时/7 天窗口；模型 ID
   支持上游命名空间，凭据按 Bearer 格式校验。
   `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 DS、OpenCode
-  Go、CCG 与 CLP 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>`、`ccg-<账户>` 与 `clp-<账户>` 实例；能力元数据声明实例展开与账户能力。CLP 显式声明 Chat 上游，各账户共享服务拥有的本地转换桥；账户实例继承共享定义，共享代理键不在展开结果中，`sharedManagedProviderDefinition` 是回退到基础定义的唯一入口；CLP 的合法模型即共享目录生成的默认模型；
+  Go、CCG 与 CLP 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>`、`ccg-<账户>` 与 `clp-<账户>` 实例；能力元数据声明实例展开与账户能力。CLP 显式声明 Chat 上游，各账户共享服务拥有的本地转换桥；账户实例继承共享定义，共享代理键不在展开结果中，`sharedManagedProviderDefinition` 是回退到基础定义的唯一入口；CLP 接受合法 `cline-pass/` 模型 ID，并按共享目录校验成员身份；
   共享定义只描述目录与能力，不包含单账户 Profile；`loadManagedModelProviderWatcherDefinitions`
   保留共享目录及当前账户，watcher 只为实际账户监听 Profile 和管理标记，再按 Provider ID 合并并去重路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，共用 DS 目录。
 - `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，共享模型目录和 Chat 转换代理。
+- `provider-model-guard.mjs` / `provider-model-guard.d.mts`：CLP Chat 桥、OCG/CCG 与自定义 Responses 代理共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。
+  CLP 在同一次目录读取中取得模型的思考选项，出站同时验证启用名单和思考能力，不为能力检查重复执行 ACL 读取。
+  自定义 Responses 注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和全局上下文同步标记；任一未完成事务均拒绝出站，不复用管理事务内部的读取豁免。
+- `third-party-coding-instructions.mjs`：非 Flash CLP、新增 OCG/CCG 手填模型与新增非 DS 自定义 Responses 模型共用的编程提示词；显式写入模型定义，不改变既有目录缺省值，不声明模型身份或授予工具权限，不依赖 DS 下载。
+- `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
+  拓扑成员、模型 slug、目录与启动参数；保留各模型元数据，拒绝主配置的全局窗口覆盖，复核账户与
+  目录快照；公开第三方账户、Profile、目录及事务状态的源文件清单与内容指纹供安全刷新使用。
+  主配置不进入材料监听和出站指纹，仅在材料加载、启动或应用时校验全局窗口与 Provider 冲突。
+  设置刷新与出站复核共用同一摘要实现及私有文件读取校验。只写可重建、无密钥的运行时 `aggregate-models.json`，不改账户或存储契约。
+- `aggregate-material-guard.mjs`：聚合实例拥有的有界工作线程；按去重文件清单校验私有权限与材料摘要，
+  避免 Windows ACL 子进程阻塞模型转发和 Supervisor。最多保留 16 项，每次只派发一项并从执行开始计时；
+  排队取消释放该槽，执行取消保留槽直至完成。超时或线程故障拒绝该代等待，确认线程退出后由下一次请求
+  按原材料快照重建并重新复核，不复用成功结果；实例释放时永久关闭，旧代消息不能确认新请求。
 - `ccg-accounts.mjs` / `ccg-accounts.d.mts`：CCG 账户注册表、默认账户、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ccg-<账户>`，共用 CCG 目录与统计代理。
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
   （`accounts.json`）、账户目录与管理标记；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于本机展示。
@@ -97,15 +110,16 @@
   `codex_app_server_daemon` 握手，不改变 App Server 进程级 originator 或 UA 后缀。
 - `desktop-app-bridge.mjs` / `desktop-app-bridge.d.mts`：在 Windows 功能显式启用时，为 Codex Desktop App
   提供只绑定 `127.0.0.1` 的受令牌保护 WebSocket 桥；每个下游连接复用现有跨平台 App Server
-  Transport 与主 Provider 租约，只转发有序文本帧，不解析 JSON-RPC 或保存会话状态。Windows
+  Transport 与目标 Provider 租约，认证后只允许选择配置内的实例，只转发有序文本帧，不解析 JSON-RPC 或保存会话状态。Windows
   仍在锁定 Codex CLI 的裸字节 `app-server proxy --sock` 之上建立 WebSocket 并连接私有 UDS；同一
   模块还供 macOS 受管入口把 Desktop JSONL stdio 与 Unix WebSocket 文本帧按消息边界双向转换，
   连接前复用统一私有 Socket 校验，并使用校验后的物理目标。
 - `desktop-app-host.mjs` / `desktop-app-host.d.mts`：只在 macOS Desktop Host 租约附加时校验当前
   用户私有工具 Pipe、正式 ChatGPT Bundle 的 OpenAI 签名 Node、项目锁定版本的 OpenAI 签名
-  Codex 原生可执行文件，实际验证签名有效性及可信身份，并用签名 Node 托管原主 App Server；
+  Codex 原生可执行文件，实际验证签名有效性及可信身份，并用签名 Node 托管选中的 App Server；
   Host 与原生子进程使用专属进程组，终止信号和超时强杀覆盖该组。只接受 Desktop 明确传入的内置插件
   布尔启用值，动态 Pipe 与附加状态不落盘。
+  签名与私有路径校验不等于 Desktop 已接受进程祖先链，Host 附加状态不表示 MCP 工具就绪。
 - `terminal-identity.mjs`：按当前锁定 Codex CLI 的终端探测顺序从进程环境推导模型上游
   `User-Agent` 的终端标识（`TERM_PROGRAM[/版本]` 优先，其次各终端专有变量，最后 `TERM`），
   只读环境、不执行子进程；`detectTerminalUserAgentToken` 复现官方取值，供“一键设为官方 TUI
@@ -148,7 +162,7 @@
   各平台监听与端点清理统一委托 `private-ipc.mjs`；关闭仍先销毁租约连接，再等待在途 Provider 操作，关闭后拒绝重启同一 Owner。
   对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供主 App Server 与受控 Provider 的按需
   启动、释放与 Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`），
-  并为 macOS Desktop 受管 stdio Proxy 提供带独立能力版本的可信 Host 租约；该租约阻止主实例被
+  并为 macOS Desktop 受管 stdio Proxy 提供带独立能力版本的可信 Host 租约；全局串行附加到选中的 Provider，该租约阻止目标实例被
   空闲释放，最后一个租约关闭后清除未来启动所用的临时 Pipe 附加状态；
   拓扑同时区分已配置、运行中、主动释放和持有租约的实例。租约由私有 Socket 连接持有，断开时自动撤销，
   存在租约时拒绝释放；同一实例的启动、释放与租约获取串行执行，释放结果明确区分已释放、
@@ -222,11 +236,15 @@
   避免路径校验后被符号链接替换；Windows 使用解析后的 PowerShell 7 `pwsh` 调用结构化 SID/ACL
   适配器，单次调用超过 2 秒即终止并拒绝操作；原子写入前同时收紧父目录，严格私有路径关闭继承，只允许当前 SID、SYSTEM 和
   Administrators 完全控制；状态库、任务库、指标库、媒体、渠道输出和受管备份复用同一合同；
+  App Server Socket 目录通过 `secureAppServerSocketDirectorySync` 将已受信任目录收紧为锁定 CLI 要求的单条当前 SID 可继承完全控制权限；其他目录写入与父目录读取接受并保留此更严格权限，不向 Socket 目录重新添加 SYSTEM/Administrators。
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
-  异步配置读取额外只读校验父目录，检测读取期间变化；Windows 在同一次异步调用中持有禁止写入和替换的只读文件句柄并检查文件、父目录 ACL，不修复权限、不缓存校验结果，支持取消及有界读取。
-- `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器；只从 stdin 读取固定 JSON 请求，通过 .NET
+  `WindowsPrivatePathError` 区分 ACL 检查超时、输出超限、进程启动失败和检查进程失败，附有界路径及操作类型；结构化拒绝只展示允许列表内的原因和阶段，不透传原始 PowerShell 异常或输出；服务定义读取保留该诊断。
+  `repairWindowsPrivateFileSync` 仅供显式 `security repair` 使用：管理员所有的普通文件须有当前 SID 完全控制且无拒绝规则，才能恢复当前用户所有权；常规读取和写入不放宽所有者校验。
+  Codex Home 顶层 TOML 的所有者、继承和访问规则拒绝会附带修复命令；目录、进程故障与修复操作自身失败不误报同一建议。
+  异步配置读取额外只读校验父目录，检测读取期间变化；Windows 在同一次异步调用中持有禁止写入和替换的只读文件句柄并检查文件、父目录 ACL，不修复权限、不缓存校验结果，支持取消及有界读取。默认读取上限仍为 1 MiB，CLP 模型目录可显式选择不超过 2 MiB 的上限，两平台使用同一字节限制。
+- `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器；stdin/stdout 明确使用 UTF-8，不继承控制台代码页；只读取固定 JSON 请求，通过 .NET
   ACL 类型设置或校验 Owner、访问规则、继承、文件类型与 reparse point，并返回结构化结果，不解析
-  本地化命令输出。
+  本地化命令输出。写操作按绝对路径使用有界命名 Mutex 串行化 ACL 识别与更新，避免并发写入重新放宽 Socket 目录权限。
 - `private-file-lock.mjs` / `private-file-lock.d.mts`：为跨越异步配置事务的私有文件更新提供
   PID 所有权、陈旧锁回收和替换锁保护，锁目录与锁文件同样使用当前平台私有权限，供 Provider 管理与
   微信配置/凭据事务串行写入。

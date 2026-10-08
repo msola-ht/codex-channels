@@ -16,7 +16,11 @@ export function waitForChatOperation<T>(pending: Promise<T>, signal: AbortSignal
 }
 
 /** Pause an unfinished upload on error so the owner can still send a safe HTTP response. */
-export function readChatBody(request: IncomingMessage, signal: AbortSignal, maximumBytes: number): Promise<string> {
+export async function readChatBody(request: IncomingMessage, signal: AbortSignal, maximumBytes: number): Promise<string> {
+  return (await readModelBody(request, signal, maximumBytes)).toString("utf8");
+}
+
+export function readModelBody(request: IncomingMessage, signal: AbortSignal, maximumBytes: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -28,7 +32,7 @@ export function readChatBody(request: IncomingMessage, signal: AbortSignal, maxi
       cleanup(); request.pause(); chunks.length = 0; reject(reason instanceof Error ? reason : new Error("Request cancelled"));
     };
     const abort = (): void => error(signal.reason);
-    const end = (): void => { cleanup(); resolve(Buffer.concat(chunks).toString("utf8")); };
+    const end = (): void => { cleanup(); resolve(Buffer.concat(chunks)); };
     const data = (chunk: Buffer): void => {
       size += chunk.length;
       if (size > maximumBytes) error(new ChatBodyTooLargeError("Model request exceeds size limit"));

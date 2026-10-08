@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { createServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { ChatToResponses, ModelConversionError, responsesToChat } from "../model-api/index.js";
+import { ChatToResponses, ModelConversionError, clinePassChatReasoningControl, responsesToChat } from "../model-api/index.js";
 import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "./chat-diagnostics.js";
 import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
 import type { ProviderProxyOptions } from "./proxy.js";
@@ -24,7 +24,10 @@ export class ChatCompletionsBridge {
   private readonly active = new Set<AbortController>();
   private readonly server = createServer((request, response) => { void this.handle(request, response); });
   private readonly requestTimeoutMs: number;
-  constructor(private readonly options: ProviderProxyOptions & { clinePass?: boolean }) {
+  constructor(private readonly options: ProviderProxyOptions & {
+    clinePass?: boolean;
+    readClinePassModelCapabilities?: (model: string, signal: AbortSignal) => Promise<{ reasoningEfforts: readonly string[] } | undefined>;
+  }) {
     this.requestTimeoutMs = options.timeoutMs ?? chatBridgeRequestTimeoutMs;
   }
   async start(): Promise<void> {
@@ -86,16 +89,41 @@ export class ChatCompletionsBridge {
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new ModelConversionError("Compressed model requests are unsupported");
       const payloadBody = await readChatBody(request, controller.signal, 16 * 1024 * 1024);
       receivingBody = false;
-      const { request: body, toolNames } = responsesToChat(JSON.parse(payloadBody) as unknown);
+      const source: unknown = JSON.parse(payloadBody);
+      const requestedModel = source && typeof source === "object" && "model" in source ? source.model : undefined;
+      let modelCapabilities: { reasoningEfforts: readonly string[] } | undefined;
       status = 502;
       const upstream = this.options.resolveUpstream
         ? await waitForChatOperation(Promise.resolve(this.options.resolveUpstream(request.headers)), controller.signal)
         : { host: this.options.upstreamHost, port: this.options.upstreamPort, protocol: this.options.upstreamProtocol, basePath: this.options.upstreamBasePath, agent: this.options.upstreamAgent };
       if (controller.signal.aborted) throw new Error("aborted");
-      const payload = JSON.stringify(this.options.clinePass ? pinClinePassRouting(body) : body);
+      // Check the requested model before capability-dependent conversion: a resumed
+      // disabled model may carry Codex fallback controls that this bridge rejects.
+      if (this.options.clinePass && typeof requestedModel === "string" && requestedModel.length > 0) {
+        try {
+          if (!this.options.readClinePassModelCapabilities) throw new Error("CLP catalog guard is unavailable");
+          modelCapabilities = await waitForChatOperation(this.options.readClinePassModelCapabilities(requestedModel, controller.signal), controller.signal);
+        } catch {
+          status = 503;
+          throw new ChatUpstreamError("clp_catalog_unavailable", "CLP 模型目录暂时无法安全读取，请检查目录后重新选择已启用的模型。", false);
+        }
+        if (!modelCapabilities) {
+          status = 409;
+          throw new ChatUpstreamError("clp_model_disabled", "该 CLP 模型已停用或不在当前目录中，请重新选择已启用的模型。", false);
+        }
+      }
+      if (controller.signal.aborted) throw new Error("aborted");
+      status = 400;
+      const { request: body, toolNames } = responsesToChat(source, modelCapabilities?.reasoningEfforts);
+      const { reasoning, ...parameters } = body;
+      const outbound = this.options.clinePass && reasoning
+        ? { ...parameters, ...clinePassChatReasoningControl(body.model, reasoning.effort) }
+        : body;
+      const payload = JSON.stringify(this.options.clinePass ? pinClinePassRouting(outbound) : outbound);
       const headers: Record<string, string> = { "content-type": "application/json", accept: "text/event-stream", "content-length": String(Buffer.byteLength(payload)) };
       if (typeof request.headers.authorization === "string") headers.authorization = request.headers.authorization;
       if (this.options.upstreamUserAgent) headers["user-agent"] = this.options.upstreamUserAgent;
+      status = 502;
       const upstreamRequest = (upstream.protocol === "http" ? httpRequest : httpsRequest)({
         hostname: upstream.host, port: upstream.port, agent: upstream.agent,
         path: `${upstream.basePath?.replace(/\/$/u, "") ?? ""}/chat/completions`,

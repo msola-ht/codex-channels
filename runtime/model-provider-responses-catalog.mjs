@@ -24,7 +24,7 @@ export function responsesProviderCatalogPath(environment, id) {
   return join(providerStorageRoot(environment), "responses", id, "models.json");
 }
 
-export function validateResponsesModels(values, defaultModel) {
+export function validateResponsesModels(values, defaultModel, { allowReasoningToggle = false } = {}) {
   if (!Array.isArray(values) || values.length < 1 || values.length > 64) {
     throw new Error("自定义模型目录必须包含 1-64 个模型");
   }
@@ -40,7 +40,7 @@ export function validateResponsesModels(values, defaultModel) {
     }
     if (typeof name !== "string" || name.trim() === "" || name.length > 120 || /\p{Cc}/u.test(name)) throw new Error("自定义模型显示名称无效");
     if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > 100_000_000) throw new Error("模型上下文窗口必须为 1024-100000000 的整数");
-    if (!Array.isArray(reasoningEfforts) || reasoningEfforts.some((effort) => !efforts.has(effort)) || new Set(reasoningEfforts).size !== reasoningEfforts.length) throw new Error("模型思考等级无效或重复");
+    if (!Array.isArray(reasoningEfforts) || reasoningEfforts.some((effort) => !efforts.has(effort) && !(allowReasoningToggle && effort === "enabled")) || new Set(reasoningEfforts).size !== reasoningEfforts.length) throw new Error("模型思考等级无效或重复");
     if (reasoningEfforts.length === 0 ? defaultReasoningEffort !== null : !reasoningEfforts.includes(defaultReasoningEffort)) throw new Error("默认思考等级必须属于模型声明的等级；不支持时必须为 null");
     if (typeof supportsImages !== "boolean") throw new Error("模型图片能力必须为布尔值");
     if (applyPatchToolType !== undefined && applyPatchToolType !== "freeform") throw new Error("模型 apply_patch 工具类型无效");
@@ -61,8 +61,9 @@ export function validateResponsesModels(values, defaultModel) {
   return models;
 }
 
-export function createResponsesModelCatalog(definitions, defaultModel) {
-  const validated = validateResponsesModels(definitions, defaultModel);
+/** CLP alone opts into its model-defined toggle; persisted Responses catalogs stay strict. */
+export function createResponsesModelCatalog(definitions, defaultModel, { allowReasoningToggle = false } = {}) {
+  const validated = validateResponsesModels(definitions, defaultModel, { allowReasoningToggle });
   const catalog = {
     schemaVersion: 4,
     defaultModel,
@@ -70,7 +71,9 @@ export function createResponsesModelCatalog(definitions, defaultModel) {
     models: validated.map((model, index) => ({
       slug: model.id, display_name: model.name, description: "User-configured Responses model",
       default_reasoning_level: model.defaultReasoningEffort,
-      supported_reasoning_levels: model.reasoningEfforts.map((effort) => ({ effort, description: effort })),
+      supported_reasoning_levels: model.reasoningEfforts.map((effort) => ({ effort,
+        description: model.reasoningEfforts.includes("enabled") && effort === "none" ? "关闭思考"
+          : effort === "enabled" ? "开启思考，使用模型默认强度" : effort })),
       shell_type: "unified_exec", visibility: "list", supported_in_api: true,
       priority: model.id === defaultModel ? 0 : index + 1,
       availability_nux: null, upgrade: null,
@@ -89,6 +92,16 @@ export function createResponsesModelCatalog(definitions, defaultModel) {
   return catalog;
 }
 
+/** Validate the on-disk contract independently of filesystem access. */
+export function parseResponsesModelCatalog(content) {
+  let parsed;
+  try { parsed = JSON.parse(content); } catch { throw new Error("Responses 模型目录不是有效 JSON"); }
+  if (parsed?.schemaVersion !== 4 || Object.keys(parsed).some((key) => !["schemaVersion", "defaultModel", "definitions", "models"].includes(key))) throw new Error("Responses 模型目录版本或字段不受支持（仅支持版本 4）；请先保留配置与模型目录完整备份，再重新配置");
+  const expected = createResponsesModelCatalog(parsed.definitions, parsed.defaultModel);
+  if (JSON.stringify(parsed) !== JSON.stringify(expected)) throw new Error("Responses 模型目录与模型定义不一致，请重新生成");
+  return expected;
+}
+
 export function readResponsesModelCatalog(environment, id) {
   assertResponsesContextSyncComplete(environment);
   const path = responsesProviderCatalogPath(environment, id);
@@ -97,11 +110,7 @@ export function readResponsesModelCatalog(environment, id) {
   try { content = readPrivateFileSync(path, maximumBytes); } catch {
     throw new Error(`Responses Provider ${id} 模型目录缺失或无法安全读取`);
   }
-  let parsed;
-  try { parsed = JSON.parse(content); } catch { throw new Error("Responses 模型目录不是有效 JSON"); }
-  if (parsed?.schemaVersion !== 4 || Object.keys(parsed).some((key) => !["schemaVersion", "defaultModel", "definitions", "models"].includes(key))) throw new Error("Responses 模型目录版本或字段不受支持（仅支持版本 4）；请先保留配置与模型目录完整备份，再重新配置");
-  const expected = createResponsesModelCatalog(parsed.definitions, parsed.defaultModel);
-  if (JSON.stringify(parsed) !== JSON.stringify(expected)) throw new Error("Responses 模型目录与模型定义不一致，请重新生成");
+  const expected = parseResponsesModelCatalog(content);
   return { ...expected, path, content, revision: createHash("sha256").update(content).digest("hex") };
 }
 

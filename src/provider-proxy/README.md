@@ -5,6 +5,19 @@
 
 ## 文件
 
+- `aggregate-proxy.ts`：单 App Server 的无状态 HTTP 聚合模型出口；以精确 `provider/model` slug
+  选择主进程授权快照中的已启动本地 ProviderProxy（可带 `/go/<账户>`），出站改为真实模型和账户认证，
+  Provider 前缀后的模型 ID 按源目录契约作为不透明 JSON 字段保留，不按 URL 路径解释。
+  保留 Codex Thread/Turn 指标关联头。只监听 `127.0.0.1` 随机端口并接受认证的 POST `/responses`，
+  拒绝 WebSocket、压缩正文和远端响应状态引用；正文限制 16 MiB，强制 `store=false`。
+  不读取账户或目录文件，不直接访问真实上游，不重试或回退；发送前调用可选 `assertCurrent(signal)`
+  复核快照，支持可取消的异步复核，变更返回 409 并提示等待安全应用或在 Gateway 未运行时重启。上传预算独立为 30 秒；
+  快照复核预算独立为 15 秒；完成复核后，首包和双向空闲使用路由 `timeoutMs`，默认 310 秒，
+  接受 1 至 600000 毫秒的整数。运行时为 DS 预留 65 秒，为 CLP 在桥的 300 秒和统计代理的
+  5 秒终态宽限外再预留 5 秒；响应另有 600 秒总预算，持续输出不会因超过空闲时限被截断。
+  整个请求上界为上传、复核与响应总预算之和，不因流式活动无限延长。
+  异步快照复核不是文件状态与网络提交的原子操作；完成后复核取消状态才提交本地请求。
+  原样交付状态码和 JSON/SSE 正文，过滤跳级头和响应凭据头，取消、断流及关闭清理连接。
 - `proxy.ts`：HTTP/SSE 与 WebSocket 转发、背压和连接生命周期协调。监听自动分配的回环地址，把精确
   `/responses` 与只读 `/models` 路径转发到上游；官方 OpenAI
   主代理提供只读 `GET /_codexc/image-upload-route`，通过正在运行的路由解析器核验默认
@@ -114,10 +127,10 @@
 - `traffic-dump-headers.ts`：Codex/Relay 全模式共用的纯头脱敏函数及 Relay 有界采集，保留普通请求/响应头和关联 ID，仅遮蔽凭据类值、URL 秘密与 CSP nonce，限制字段与整体大小，不修改出站头。
 - `relay-dump-payload.ts`：Relay JSON/SSE 的共享脱敏与有界合并写入，供上游及客户端交付阶段复用。
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。
-- `chat-io.ts`：Chat 桥和直接 Chat 共同使用的正文读取、取消等待、拉取式 SSE 分帧与下游背压。
+- `chat-io.ts`：Chat 桥和直接 Chat 共同使用的正文读取、取消等待、拉取式 SSE 分帧与下游背压；`readModelBody` 供启用名单复核保留原始 Buffer，`readChatBody` 保持文本返回。
 - `direct-model-http.ts`：直接模型请求共用的 HTTP 出站生命周期、响应状态/Content-Type 校验与安全 JSON 解码，保留普通应用请求头并复用跳级头清理，覆盖凭据和传输头、剔除 Cookie/伪造身份；同步出站复核、实际 UA 观测、首包/空闲超时、取消和关闭清理，不负责协议转换、重试或指标发送。
 - `direct-responses.ts`：原生 Responses JSON/SSE 交付，复用 HTTP 生命周期和 Responses 指标归约；非流式通过共享白名单识别首个非空输出，观测时间为整包解析校验后；保留事件、用量、终态与扩展字段，不生成 Chat DONE，断流不伪造成功；独立诊断回调仅提交有证据的错误阶段与内层错误，不推断 Chat 专属路由或结束原因。
-- `cline-pass-routing.ts`：CLP 专属出站副本投影，固定 `providerOptions.gateway.only` 为 `deepseek`，保留其他对象字段并拒绝畸形容器；桥与 Relay 共用，不处理网络或重试。
+- `cline-pass-routing.ts`：CLP 专属出站副本投影，仅对精确 Flash 模型固定 `providerOptions.gateway.only` 为 `deepseek`，保留其他对象字段并拒绝畸形容器；其他模型保持原请求。桥与 Relay 共用，不处理网络或重试。
 - `direct-chat.ts`：单次直接 Chat JSON/SSE 协议处理，复用公共 HTTP 生命周期；识别 CLP 显式成功的单层 JSON 包装后复用响应校验，可向注入的有界采集器提交已解析 Chat 报文；另经独立诊断回调提交受限请求指标摘要，关闭转储仍采集。
 
 - `generation-timing.ts`：有界原生 Responses 与原始 Chat 生成区间观察器，不保留内容；区间完整时提供思考、正文、工具与并集毫秒摘要。Chat 在转换前采集，经已有请求级进程内通道传回指标，不依赖转储或改变转换器工具校验。共享 `runtime/request-timing.mjs` 负责入库前校验与显示速度计算。
@@ -147,7 +160,14 @@ HTTP 生成失败交互索引，WebSocket 仅保留握手 trace，不伪造 `res
 
 `chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码；HTTP 错误可携带经验证的 Retry-After，供原生 Relay 交付，不自动重试。
 
-`chat-bridge.ts` 按 Runtime 的受管 CLP 身份在转换后限定 DeepSeek 上游；其他 Chat Provider 不注入。它管理 Chat HTTP 连接、SSE 分帧、背压、取消和有限超时，通过 `model-api/index.ts` 调用纯转换模块。转换覆盖 Responses 的 `function`、`namespace`、自由格式 `custom` 工具与执行位置为 `client` 的 `tool_search`（含其结果带回的工具声明）；未映射的顶层工具声明及其 `tool_choice` 原样交给上游判断，不为它们注册客户端执行身份；回程不支持的工具调用仍明确失败。`text.format` 的 `json_schema` 映射为 Chat `response_format`，`text.verbosity` 校验后忽略。
+受管 CLP 桥在真正发起 HTTP 请求前调用 Runtime 注入的当前模型目录复核；停用或未知模型返回 `409 clp_model_disabled`，缺少复核器或无法安全读取目录返回 `503 clp_catalog_unavailable`，使用固定中文提示并阻止上游请求。共享账户与聚合经过同一检查，已提交请求不强行中断；非 CLP 桥和 Relay 独立目录不受影响。
+
+自定义 `rs-*` 的 Runtime 守卫还复用配置读取器的版本 4 和完整目录一致性校验，并拒绝目录 `.pending` 与全局上下文同步未完成状态；HTTP/WS 复用相同回调，不把合法 slug 单独视为有效目录。
+
+OCG/CCG 和自定义 `rs-*` 由 Runtime 向 `ProviderProxy` 注入同源目录复核。HTTP 在路由解析后、有界读取正文并复核模型再提交原始字节；Responses WS 每个 `response.create` 在连接可用后、发送前按顺序复核。停用返回 `409 provider_model_disabled`，目录不可用返回 `503 provider_catalog_unavailable`；WS 包装为 error 后关闭连接，已提交请求不撤回。HTTP 正文上限 16 MiB、上传预算 30 秒，目录复核预算 15 秒；全代理最多 16 项授权准备，WS 单帧与连接队列各限制 16 MiB、队列最多 16 帧。官方 OpenAI、DS 与独立 Relay 保持原处理，不推断无目录提供商的模型授权。
+
+`chat-bridge.ts` 按 Runtime 的受管 CLP 身份映射模型思考参数，并仅对精确 Flash 模型限定 DeepSeek 上游；其他 Chat Provider 不注入。它管理 Chat HTTP 连接、SSE 分帧、背压、取消和有限超时，通过 `model-api/index.ts` 调用纯转换模块。转换覆盖 Responses 的 `function`、`namespace`、自由格式 `custom` 工具与执行位置为 `client` 的 `tool_search`（含其结果带回的工具声明）；未映射的顶层工具声明及其 `tool_choice` 原样交给上游判断，不为它们注册客户端执行身份；回程不支持的工具调用仍明确失败。`text.format` 的 `json_schema` 映射为 Chat `response_format`，`text.verbosity` 校验后忽略。
+受管 CLP 通过同次启用目录读取取得思考选项，所有显式选项须属于当前模型；只有声明开关的目录允许 `enabled`，出站转换为 `reasoning.enabled=true`。未知选项在出站前拒绝，目录不可读时失败关闭；直接 Chat/Responses Relay 保留自己的参数合同，不套用此目录或转换。
 Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 服务生命周期；转换后的 Responses 事件复用现有指标采集。桥在收到上游响应头前不写回任何字节，桥的单次请求预算默认 300 秒（见 `chatBridgeRequestTimeoutMs`），覆盖正文接收、路由等待及上游处理。正文接收超时返回 408 `request_timeout` 并关闭未完成的请求连接；上游阶段超时返回 `upstream_timeout`。面向桥的统计代理在此预算上额外预留 5 秒用于终态发送，避免先按空闲超时截断并丢失桥的错误分类。
 
 - `relay-traffic-dump.ts`：Relay Chat/Responses JSON/SSE 脱敏采集，复用 V2 存储与 ChatDiagnostics 白名单采集；JSON（含成功包装）读取 message、SSE 读取 delta 中的上游诊断，终态按同一 interaction 写入既有 chat_diagnostics 与 upstreamProvider，缺失不推断；所有账户共享容量和待写预算，按协议使用 relay.chat/relay.responses 标签，共享两协议容量和待写预算；`prepare(signal)` 在取消边界内异步初始化容量，服务组合层在其后复核全局采集设置；`setRetentionDays` 使用全局保留天数，`open(provider, signal, debug)` 在取消边界内等待首次初始化；共享存储报告实际接受的写入量，在途调用单独预留预算；后台单任务清理历史并保护活动及新建批次，整理期间继续采集；有限关闭，采集失败不影响模型交付；`diagnostics()` 提供当前 owner 状态、活动数与容量跳过累计，不推断历史未采集原因。

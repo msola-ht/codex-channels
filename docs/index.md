@@ -498,8 +498,9 @@ Provider 文档未列出该接口。
 | --- | --- |
 | CLI、运行中 App Server 和生成协议是否一致 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`protocol-info.ts`](../src/codex-client/protocol-info.ts)、[`doctor.mjs`](../scripts/doctor.mjs) |
 | Unix WebSocket 如何连接并对齐原生 128 MiB 消息上限 | [`codex-client/`](../src/codex-client/README.md) |
-| Windows Proxy 如何连接并在静默握手时有界清理 | [`windows-proxy-transport.ts`](../src/codex-client/windows-proxy-transport.ts) |
-| 开发中的 Desktop App 如何共享主 OpenAI App Server | [`Codex Desktop App 共享 App Server 实施方案`](codex-desktop-app-development.md)、[`desktop-app-bridge.mjs`](../runtime/desktop-app-bridge.mjs)、[`desktop-app-host.mjs`](../runtime/desktop-app-host.mjs)、[`desktop-app-command.mjs`](../scripts/desktop-app-command.mjs)、[`desktop-app-proxy.mjs`](../scripts/desktop-app-proxy.mjs)；macOS `codexc app` 在 Pipe 附加前复用官方 `thread/loaded/list` 与 `thread/read` 检查全部已加载的持久及临时 Thread，并拒绝活动 Thread 或 Remote TUI 租约；受管入口的 Thread 双向共享、App Server 重启恢复与内置 `codex_app` 启动已通过实机测试；Windows 尚未实机验收 |
+| Windows Proxy 如何连接并在静默握手时有界清理 | [`windows-proxy-transport.ts`](../src/codex-client/windows-proxy-transport.ts)；Socket 目录由 [`app-server-supervisor.mjs`](../runtime/app-server-supervisor.mjs) 和 [`windows-private-acl.ps1`](../runtime/windows-private-acl.ps1) 对齐锁定版本 [`windows_socket_validation.rs`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/uds/src/windows_socket_validation.rs) 的单条当前用户 OICI 完全控制 ACL；通用私有目录写入保留该更严格权限，不重新添加其他主体 |
+| Desktop App 如何选择共享 App Server | [`Codex Desktop App 共享 App Server 实施方案`](codex-desktop-app-development.md)、[`desktop-app-bridge.mjs`](../runtime/desktop-app-bridge.mjs)、[`desktop-app-host.mjs`](../runtime/desktop-app-host.mjs)、[`desktop-app-command.mjs`](../scripts/desktop-app-command.mjs)、[`desktop-app-proxy.mjs`](../scripts/desktop-app-proxy.mjs)；`codexc app --provider` 将本次连接固定到已配置实例。macOS 在 Pipe 附加前复用官方 `thread/loaded/list` 与 `thread/read` 检查目标实例全部已加载的持久及临时 Thread，并拒绝活动 Thread 或 Remote TUI 租约；主 OpenAI 路径已有实机验收，新增 Provider 选择在两平台均待实机验收，Windows 整体仍为预览 |
+| Desktop、Remote 与渠道如何共用聚合目录 | [`aggregate-model-provider.mjs`](../runtime/aggregate-model-provider.mjs)、[`aggregate-material-guard.mjs`](../runtime/aggregate-material-guard.mjs)、[`aggregate-proxy.ts`](../src/provider-proxy/aggregate-proxy.ts)；至少两个已配置的 API Key 切换提供商派生按需 `codexc-aggregate`，包含受管与自定义成员，使用单个 App Server 与现有 Supervisor/Host；Desktop 和 Remote 使用 `--provider agg`，渠道经 `/model` 选择。精确 `<Provider ID>/<模型 slug>` 经 HTTP 路由到原 ProviderProxy/CLP 桥，每请求替换账户 Key，指标保留真实账户。只派生无密钥运行时目录，不新增 RPC；Gateway 监听源指纹，复用活动/租约门禁安全重建实例并确认目录，等待期间旧快照拒绝出站；拓扑变化仍须重启服务。锁定 0.160.1 [`step_settings.rs`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/session/step_settings.rs) 的 `apply_update` 重读模型元数据，[`provider.rs`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/model-provider/src/provider.rs) 使用静态目录；真实 CLI 与本地可控模型服务已观察跨模型历史、工具结果和渠道绑定恢复，真实云端、外部渠道发送及 Desktop 工具仍待实机验收 |
 | JSON-RPC 如何分流和清理请求 | [`json-rpc.ts`](../src/codex-client/json-rpc.ts)；通知不附加本地统计计时，请求超时与诊断耗时保持独立 |
 | Turn、Review 和 Goal 如何隔离官方协议 | [`turn-port.ts`](../src/application/turn-port.ts)、[`turn-adapter.ts`](../src/codex-client/turn-adapter.ts) |
 | Thread/Turn/Item 如何适配并归约 | [`notification-adapter.ts`](../src/codex-client/notification-adapter.ts)、[`input-events.ts`](../src/conversation-core/input-events.ts)、[`core.ts`](../src/conversation-core/core.ts) |
@@ -565,6 +566,7 @@ Config 文案说明：协议索引中的“Codex 用户设置”“一键配置�
 ### CLP Chat 转换
 
 CLP 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider 路由，不增加 RPC。
+共享 Codex 目录由 [`cline-pass-account-management.mjs`](../scripts/cline-pass-account-management.mjs) 从 Cline 官方元数据生成；仅 Flash 复用 DS 模板与上下文，其余模型独立声明能力。桥接受七种普通思考等级；目录声明开关时额外使用 `enabled`，基于锁定 Codex `protocol/src/openai_models.rs` 的 `ReasoningEffort::Custom` 和 `ReasoningEffortPreset`，沿用目录、模型选择及 Turn 既有字段，不新增 RPC。Flash 保留 `reasoning.effort`，其他 CLP 模型普通等级使用 `reasoning_effort`，关闭/开启使用 `reasoning.enabled=false/true`；出站选项必须属于当前启用目录。真实云端新增模型仍需分别验收。
 未映射的顶层工具声明及其 `tool_choice` 原样交给 CLP，不注册本地执行身份；不宣称支持托管工具的执行或回程。声明形态依据锁定源码 `tools/src/tool_spec.rs`、`tool_spec_tests.rs` 和 `core/tests/suite/web_search.rs`。
 账户用量由 [`cline-pass-account-adapter.ts`](../src/bootstrap/cline-pass-account-adapter.ts) 查询 Cline 官方套餐额度接口，复用账户快照和窗口展示；
 [`cline-pass-setup.mjs`](../scripts/cline-pass-setup.mjs) 按账户创建受管 Profile，注册表和默认账户复用共享校验与路由，模型目录和 Chat 代理在账户间共享；
@@ -573,7 +575,7 @@ CLP 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider 路由
 依据锁定官方 `core/src/client.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs` 的请求、条目和事件合同，
 接受文本、用户内联图片、函数与自由格式工具、客户端 `tool_search`；工具结果里的内联图片不放进 Chat `tool` 消息，转成该组工具结果之后紧随的一条 `user` 消息图片段，并用相同的调用 ID 与图片序号标记关联原 `tool` 文本位置和图片；自由格式语法保留在 Chat 工具说明，CLP 模型目录声明 `apply_patch_tool_type: freeform` 与 `supports_search_tool`，检索结果按锁定 `tools/src/tool_search.rs` 的命名空间和 `defer_loading` 形态显式加载。`reasoning_content` 通过 `reasoning.content` 原文往返，Cline `reasoning` 通过摘要往返。图片沿用稳定 `UserInput.image` 与模型目录 `input_modalities`，不伪造加密推理或远程压缩语义；不完整终态保留已生成文本并拒绝执行部分工具调用。Chat 上游诊断通过请求级进程内回调写独立调用记录，不增加协议事件；HTTP 与流内错误经 [`chat-errors.ts`](../src/provider-proxy/chat-errors.ts) 映射为固定文案和白名单分类，`context_length_exceeded` 沿用锁定上游 SSE 的上下文错误语义。用户边界见 [`CLP`](cline-pass.md)。
 原生 Responses 推理回传
-DS 官方、OCG、CCG、CLP 四个受管 DeepSeek 入口的内置网页搜索在启动参数中关闭；固定与切换模式由
+DS 官方、OCG、CCG、CLP 四类受管入口的内置网页搜索在启动参数中关闭；固定与切换模式由
 [`app-server-service-runtime.mjs`](../runtime/app-server-service-runtime.mjs)、
 [`model-provider-startup-runtime.mjs`](../runtime/model-provider-startup-runtime.mjs) 统一消费 Provider 定义；
 来源和边界见 [DeepSeek](deepseek.md#网页搜索)。

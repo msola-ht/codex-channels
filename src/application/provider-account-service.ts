@@ -41,9 +41,8 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     signal?.throwIfAborted();
     const adapter = this.adapters.get(modelProvider);
     if (!adapter) {
-      const result = { kind: "unsupported" as const, provider: modelProvider };
-      this.persist(result, result);
-      return result;
+      // 未注册的聚合或自定义 Provider 没有独立账户，不创建占位账户快照。
+      return { kind: "unsupported", provider: modelProvider };
     }
     const accountUsage = adapter.provider === "openai"
       ? adapter.accountUsage(signal)

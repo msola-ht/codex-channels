@@ -15,15 +15,16 @@
   前台监管与 Gateway 服务子进程自行解析，避免自动发现结果变成固定环境覆盖。需要在配置损坏时仍可运行的服务恢复
   命令使用独立的最小控制环境。
 - `desktop-app-command.mjs` / `desktop-app-command.d.mts`：实现公开 `codexc app` 的严格
-  参数、只读状态、macOS ChatGPT Bundle 与 Windows 当前用户 `OpenAI.Codex` 包兼容探测、配置
-  写入与回滚、App Server 服务重启、Windows 受认证桥就绪探测和单次环境启动；状态不输出桥令牌，两个
+  参数、单次启动 Provider 选择、只读状态、macOS ChatGPT Bundle 与 Windows 当前用户 `OpenAI.Codex` 包兼容探测、配置
+  写入与回滚、App Server 服务重启、Windows 目标实例临时租约、受认证桥就绪探测和单次环境启动；Windows
+  租约覆盖探测与启动并在所有结果下释放，状态不输出桥令牌，两个
   平台均明确标为预览。macOS 启动时改用受管 stdio Proxy，不再依赖桥端口或令牌，并单独报告受管
-  入口能力及内置工具 Host 是否已附加；启动前持有临时 Provider 租约，按需恢复已释放的实例，
+  入口能力及内置工具 Host 是否已附加，明确这些状态不代表 MCP 工具就绪；启动前持有临时 Provider 租约，按需恢复已释放的实例，
   通过官方已加载 Thread 清单和逐项状态读取检查持久及临时会话，并在活动 Turn 或 `codexc remote`
-  主实例租约存在时拒绝会触发子进程切换的启动；打开 Desktop 前释放临时租约。
+  目标实例租约存在时拒绝会触发子进程切换的启动；打开 Desktop 前释放临时租约。
   macOS 的具体构建实机验收边界见 `docs/codex-desktop-app-development.md`，Windows 尚未实机验收。
 - `desktop-app-proxy.mjs`：只由 macOS Desktop 的 `CODEX_CLI_PATH` 启动；解析并受控传递 Desktop
-  内置插件的布尔启用值；无插件配置时不获取租约，直接连接共享主实例，带配置时把动态工具 Pipe
+  内置插件的布尔启用值和本次 Provider；无插件配置时恢复目标实例但不持有长期租约，带配置时把动态工具 Pipe
   通过私有 Supervisor Host 租约交给服务，显式 `false` 仍走 Host 租约路径。把 Desktop JSONL
   stdio 逐条转换为 WebSocket 文本帧并连接现有私有 UDS，自身退出时清理 Proxy 和持有的租约，
   不终止共享 App Server。
@@ -159,7 +160,9 @@
 - `responses-websocket-probe.mjs` / `responses-websocket-probe.d.mts`：按锁定 Codex 协议探测第三方 Responses WS 握手、预热及可选文字请求；复用代理，限制超时与响应大小，取消时释放连接，不保存凭据或原始响应。
 - `responses-websocket-setup.mjs` / `responses-websocket-setup.d.mts`：新增、编辑自定义 Provider 时选择自动检测或手动 WS 开关，模型请求须确认可能计费，结果只进入最终保存预览。
 - `model-catalog-validation.mjs` / `model-catalog-validation.d.mts`：RS 与 CCG 共用的保存前 Codex 模型目录合同校验，使用隔离临时目录，限制运行时间并清理临时文件。
-- `responses-model-setup.mjs` / `responses-model-setup.d.mts`：交互收集自定义 Responses 模型列表与能力。
+- `responses-model-setup.mjs` / `responses-model-setup.d.mts`：交互收集自定义 Responses 模型能力并选择启用列表；新建非 DS 定义显式使用通用编程提示词，已有自定义指令保持。
+- `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义 Responses 共用的 1–64 个模型多选、预览确认与默认模型保护。
+- `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG 共享目录的手填模型、DS 模板更新、启用选择和备份事务；保护所有账户默认值，目录变化不修改账户凭据。
 - `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内校验当前配置，完成未结束的模型目录保存或回滚目录备份。
 - `custom-primary-provider-management.mjs` / `custom-primary-provider-management.d.mts`：提供自定义主
   Provider 新增与编辑的无终端校验、脱敏预览和执行接口；用 `preserve` / `replace` 明确表达 Key
@@ -360,7 +363,8 @@
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
-  `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数；受管 Provider 只使用与磁盘文件及
+  `codexc remote` 自有的 Workspace、聚合 Provider 与受管 Provider Profile 参数；聚合只接受
+  `--provider agg` 或 `-p agg`，与任何 Profile 互斥，重复选择失败关闭；`-p <Profile>` 复用 `--profile <Profile>` 的校验与实例路由，`agg` 保留给聚合选择；受管 Provider 只使用与磁盘文件及
   原生 Codex 一致的 `sf-*` 规范名称，旧的无前缀名称只返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
   无显式 Profile 且官方未登录时解析唯一第三方 Profile；候选全部为同一家 DS、OCG、CCG 或 CLP 账户时使用注册表默认账户，
   其他多个候选要求明确选择，不修改主配置。
@@ -369,6 +373,12 @@
   完成第三方 Provider 认证；同时按当前目录或显式
   `--workspace` 解析有效 Sandbox、审批策略、Permission Profile 与可选审批审查方式，第三方 Profile 不复制权限，
   用户显式传给 Codex 的权限参数优先，未受管的个人 Profile 也沿用匹配的 Workspace 权限；
+  聚合选择复用共享 Runtime 拓扑与 Supervisor 按需租约，不生成磁盘 Profile；启动前通过已有
+  Codex Client 读取服务端默认模型与目录，投影启动设置，避免本地 OpenAI 默认模型覆盖聚合目录。
+  透传 `-m`/`--model` 或 `-c model=...` 选择目录内精确模型时，按 Codex 的最终模型优先级使用目标模型的默认思考等级；
+  服务端默认模型保留服务端思考等级，显式 `-c model_reasoning_effort=...` 优先，并尊重 `--` 参数边界。
+  聚合目录和 Provider 不允许由透传参数替换，自动审查准入复用共享 Provider Policy，默认使用
+  `user`；显式 `--approve-for-me`（及原生别名）或 `approvals_reviewer=auto_review` 明确拒绝；
   Workspace 的 `untrusted` 保留给 App Server Thread，但在没有显式审批覆盖时拒绝映射为固定版 CLI
   已退役的公开参数，不静默改成更宽松策略；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
@@ -470,7 +480,7 @@
 - `install-global-source.mjs`：显式准备干净源码、自动执行 webui 子项目依赖安装与前端构建
   （`webui/dist`），再生成临时 npm tarball 并通过禁用隐式生命周期脚本的 npm 全局安装；安装结果
   不链接或依赖源码目录，并避免 npm 12 脚本策略跳过构建；源码更新可用内部 `--prepared` 复用已
-  验证的 Gateway/WebUI 构建结果，避免重复构建。注册全局 Gateway 前按协议元数据同步缺失或版本不符的默认 Codex CLI；显式二进制无效或版本不符时失败关闭，不依赖渠道配置。
+  验证的 Gateway/WebUI 构建结果，避免重复构建。注册全局 Gateway 前按协议元数据同步缺失或版本不符的默认 Codex CLI；CLI 安装显式包含平台可选依赖，执行失败与版本不符分别报告。显式二进制无效或版本不符时失败关闭，不依赖渠道配置。
 - `webui-dev.mjs`：仓库根目录 `npm run webui:dev` 的一键开发入口，并行启动
   `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。
@@ -491,6 +501,7 @@
   `getupdates`，不显示 Token、`context_token` 或游标；
   主 Unix WebSocket、已配置 Provider 的切换或固定配置、实际模型目录、Provider Socket、
   监管身份与 Provider 拓扑、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，
+  同一次诊断复用已解析的自定义 Provider 拓扑和同次监管检查的空闲释放状态，不缓存跨命令的 ACL 结果；
   `--json` 输出完整脱敏检查数组、分类计数与健康状态；不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
 - `service-install-context.mjs` / `service-install-context.d.mts`：systemd 与 launchd 安装器共用的配置、
@@ -500,6 +511,7 @@
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
   控制脚本实现 linger、Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 使用当前用户计划任务及受管宿主，并校验私有定义与就绪状态。
+  Windows 定义包含解析后的 App Server Socket，缺失时拒绝跳过就绪检查；预检通过私有文件边界读取旧 JSON/VBS 快照，安装激活先停止核心服务与 Relay 再启动，保留 WebUI 运行状态。首次或旧定义不完整的安装在激活失败后保留新定义供诊断，完整旧定义恢复失败时保留原始阶段与两层错误。
 - `service-command.mjs` / `service-command.d.mts`：公开 `appserver`、`relay` 目标映射到内部 `app-server`、`model-relay` 服务标识；实现顶层后台服务命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
   服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
   检查；顶层 `restart` 统一预检、停止与逐项启动就绪，默认包含已安装 WebUI，失败报告剩余步骤并中止。CLI 只保留帮助展示和命令分派。
@@ -533,6 +545,8 @@
   通过计划任务控制脚本执行 App Server、Gateway、WebUI 与 Relay 的安装、启停、状态、日志
   与卸载；
   核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
+  App Server 启动等待向共享检查入口传入主 Socket 路径，由该入口统一派生监管地址；实例已空闲释放时也检查同一监管入口。
+  计划任务宿主启动等待 15 秒，App Server 应用就绪独立等待 60 秒；监管确认主实例运行后才启动连接探测，超时报告最后等待阶段。
 - `windows-service-host.mjs` / `windows-service-host.d.mts`：计划任务启动的 Windows 服务宿主，按 JSON 定义启动并监管单个
   Node 服务进程，转发控制请求并把标准输出、错误输出写入用户级运行日志。
 - `windows-service-launcher.ps1`：Windows 计划任务调用的 PowerShell 启动器，设置受控环境后
@@ -550,8 +564,8 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 查询未归档与已归档成员，执行前重新检查会话组及绑定；仅在交互终端 `--confirm` 确认后向父会话
 发送一次官方归档。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。
 
-- `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户交互菜单、输入与确认，委托账户管理模块执行后显示激活提示。
-- `cline-pass-account-management.mjs` / `cline-pass-account-management.d.mts`：CLI/WebUI 共用的 CLP 固定/切换配置、默认账户与移除预览及私有写入事务；共享 DS Flash 模板与统一上下文设置，不依赖终端交互。
+- `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户交互菜单、模型多选、名单预览与确认；保留账户默认模型，委托账户管理模块执行后显示激活提示。
+- `cline-pass-account-management.mjs` / `cline-pass-account-management.d.mts`：CLI/WebUI 共用的 CLP 固定/切换配置、默认账户与移除预览及私有写入事务；从 Cline 官方元数据投影多模型目录，CLI 显式更新时备份与保留账户默认值，仅 Flash 跟随 DS 模板与上下文，不依赖终端交互。
 
 - `model-relay-listen-menu.mjs`：CLI 与 Config 一级菜单共用的监听交互入口，关闭/本机/局域网/指定 IP，保存前确认和配置修订检查，不自动安装或启动服务。
 - `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑改绑/轮换/停用/删除、中文用途名称及每 Key 多提供商模型授权，不提供旧格式转换命令。

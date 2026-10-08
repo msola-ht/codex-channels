@@ -11,14 +11,13 @@ import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { resolveExecutable } from "../runtime/executable.mjs";
 import {
   appServerSocketAcceptsWebSocket,
-  appServerSupervisorSocketPath,
   inspectAppServerSupervisorState,
 } from "../runtime/app-server-supervisor.mjs";
 import {
   createPrivateIpcConnection,
   privateIpcEndpointExists,
 } from "../runtime/private-ipc.mjs";
-import { readPrivateFileSync } from "../runtime/private-file.mjs";
+import { readPrivateFileSync, WindowsPrivatePathError } from "../runtime/private-file.mjs";
 import {
   parseServiceTarget,
   serviceDefinitions,
@@ -29,6 +28,8 @@ import { serviceControlDefinitions, serviceSnapshotHealthy } from "./service-sel
 
 const definitionLimitBytes = 64 * 1024;
 const hostStartTimeoutMs = 15_000;
+// A running task host precedes configuration/ACL checks and App Server startup.
+const appServerStartTimeoutMs = 60_000;
 // The host allows 10s for graceful IPC stop, then up to 6s for tree termination.
 const hostStopTimeoutMs = 20_000;
 const pollIntervalMs = 100;
@@ -59,6 +60,11 @@ export async function controlWindowsServices({
   }
   if (action === "install") {
     preflight(environment);
+    // Validate every new definition before stopping any running service.
+    for (const definition of serviceDefinitions) {
+      readDefinition(definitionPath(definitionsDirectory, definition.target));
+    }
+    await stopDefinitions("all", definitionsDirectory, environment, "install-stop");
     for (const definition of serviceDefinitions) {
       const file = definitionPath(definitionsDirectory, definition.target);
       const value = readDefinition(file);
@@ -146,6 +152,8 @@ export async function inspectWindowsServiceStatus({
       host = await inspectHost(definition.controlPath);
     }
     const running = task.exists && host?.version === 1 && host.running === true;
+    // ScheduledTasks Ready means eligible to start, not a ready service host.
+    const taskState = String(task.state ?? "unknown").toLowerCase();
     services.push({
       target: service.target,
       name: service.displayName,
@@ -153,7 +161,7 @@ export async function inspectWindowsServiceStatus({
       loaded: task.exists,
       running,
       state: task.exists
-        ? running ? "running" : String(task.state ?? "unknown").toLowerCase()
+        ? running ? "running" : taskState === "ready" ? "stopped" : taskState
         : "missing",
       pid: running && Number.isSafeInteger(host.childPid) ? host.childPid : null,
     });
@@ -196,9 +204,9 @@ async function startDefinitions(target, definitionsDirectory, environment, selec
   }
 }
 
-async function stopDefinitions(target, definitionsDirectory, environment) {
+async function stopDefinitions(target, definitionsDirectory, environment, selection = "stop") {
   const failures = [];
-  for (const definition of serviceControlDefinitions("windows", target, "stop", environment, definitionsDirectory)) {
+  for (const definition of serviceControlDefinitions("windows", target, selection, environment, definitionsDirectory)) {
     try {
       await stopDefinition(definition, definitionsDirectory, environment);
     } catch (error) {
@@ -211,41 +219,34 @@ async function stopDefinitions(target, definitionsDirectory, environment) {
 }
 
 async function waitForAppServer(socketPath) {
-  if (typeof socketPath !== "string" || socketPath.length === 0) return;
-  const deadline = Date.now() + hostStartTimeoutMs;
+  if (typeof socketPath !== "string" || socketPath.length === 0) {
+    throw new Error("Windows App Server 服务定义缺少 Socket 路径；请运行 codexc install");
+  }
+  const deadline = Date.now() + appServerStartTimeoutMs;
+  let lastStage = "等待监管入口";
   while (Date.now() < deadline) {
-    if (await appServerSocketAcceptsWebSocket(socketPath)) {
-      await waitForAppServerSupervisor(appServerSupervisorSocketPath(socketPath), deadline);
-      return;
-    }
+    let state;
     try {
-      const state = await inspectAppServerSupervisorState(
-        appServerSupervisorSocketPath(socketPath),
-      );
-      if (
-        state.status === "ready"
-        && state.topology.releasedProviders.includes(state.topology.primaryProvider)
-      ) {
-        return;
+      state = await inspectAppServerSupervisorState(socketPath);
+    } catch {
+      // Do not expose descriptor contents or bypass its private-path validation.
+      lastStage = "监管入口权限校验或读取未通过";
+    }
+    if (state?.status === "ready") {
+      const { topology } = state;
+      if (topology.releasedProviders.includes(topology.primaryProvider)) return;
+      if (topology.runningProviders.includes(topology.primaryProvider)) {
+        lastStage = "主实例已运行，等待 App Server 连接";
+        if (await appServerSocketAcceptsWebSocket(socketPath)) return;
+      } else {
+        lastStage = "监管已就绪，等待主实例启动";
       }
-    } catch {
-      // The descriptor may be absent or mid-write while App Server finishes startup.
+    } else if (state) {
+      lastStage = state.status === "missing" ? "等待监管入口创建" : "监管入口未返回有效状态";
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, pollIntervalMs));
   }
-  throw new Error(`等待 Codex App Server 就绪超时：${socketPath}`);
-}
-
-async function waitForAppServerSupervisor(socketPath, deadline) {
-  while (Date.now() < deadline) {
-    try {
-      if ((await inspectAppServerSupervisorState(socketPath)).status === "ready") return;
-    } catch {
-      // The descriptor may be absent or mid-write while App Server finishes startup.
-    }
-    await new Promise((resolveWait) => setTimeout(resolveWait, pollIntervalMs));
-  }
-  throw new Error(`等待 App Server 监管入口就绪超时：${socketPath}`);
+  throw new Error(`等待 Codex App Server 就绪超时（应用启动等待 ${appServerStartTimeoutMs / 1_000} 秒；${lastStage}）：${socketPath}`);
 }
 
 async function stopDefinition(service, definitionsDirectory, environment) {
@@ -415,6 +416,9 @@ function readDefinition(path) {
   try {
     definition = JSON.parse(readPrivateFileSync(path, definitionLimitBytes));
   } catch (error) {
+    if (error instanceof WindowsPrivatePathError) {
+      throw new Error(`Windows 服务定义无法安全读取：${path}；${error.message}`, { cause: error });
+    }
     throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc install`, { cause: error });
   }
   if (
@@ -422,6 +426,8 @@ function readDefinition(path) {
     || typeof definition.taskName !== "string"
     || typeof definition.pwshBinary !== "string"
     || typeof definition.controlPath !== "string"
+    || (definition.target === "app-server"
+      && (typeof definition.socketPath !== "string" || definition.socketPath.length === 0))
   ) {
     throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc install`);
   }

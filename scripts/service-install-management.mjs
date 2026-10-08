@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 
 import { loadRuntimeConfig } from "../dist/config/index.js";
 import {
+  readPrivateFileSync,
   securePrivateDirectorySync,
   writePrivateFileAtomicSync,
 } from "../runtime/private-file.mjs";
@@ -113,7 +114,7 @@ export function writeServiceDefinitions(
 async function executePlan(plan, environment, options) {
   assertFreshPlan(plan, environment, options);
   const completedStages = [];
-  const definitionSnapshot = captureDefinitionSnapshot(plan);
+  let definitionSnapshot;
   let writeStarted = false;
   let activationStarted = false;
   const executeStage = async (stage, operation) => {
@@ -130,8 +131,10 @@ async function executePlan(plan, environment, options) {
 
   await executeStage("validate-config", () =>
     (options.validateConfig ?? loadRuntimeConfig)(environment));
-  await executeStage("preflight", () =>
-    (options.preflight ?? defaultPreflight)(plan, environment, options));
+  await executeStage("preflight", async () => {
+    await (options.preflight ?? defaultPreflight)(plan, environment, options);
+    definitionSnapshot = captureDefinitionSnapshot(plan);
+  });
   try {
     writeStarted = true;
     await executeStage("write-definitions", () => writeDefinitions(plan, options));
@@ -146,18 +149,32 @@ async function executePlan(plan, environment, options) {
       ));
   } catch (error) {
     if (writeStarted) {
+      // Registered Windows tasks still point at these files. Without a complete
+      // prior definition set, deleting new files cannot restore an installation.
+      if (plan.serviceManager === "windows" && activationStarted
+        && definitionSnapshot.some(entry => !entry.exists)) {
+        throw new ServiceInstallManagementError(
+          error.code,
+          error.stage,
+          `${error.message}；安装前没有完整的 Windows 服务定义，已保留本次定义，请检查服务状态和日志后重试`,
+          { completedStages, recovery: "inspect-services" },
+          { cause: error },
+        );
+      }
+      let rollbackStage = "服务定义恢复";
       try {
         restoreDefinitionSnapshot(definitionSnapshot, options);
         if (activationStarted) {
+          rollbackStage = "旧服务重新激活";
           await (options.rollbackCore ?? defaultActivateCore)(plan, environment, options);
         }
       } catch (restoreError) {
         throw new ServiceInstallManagementError(
           "rollback-failed",
-          "write-definitions",
-          "服务安装失败，且旧服务定义恢复失败",
-          { completedStages, recovery: "manual-restore", cause: restoreError },
-          { cause: error },
+          error.stage,
+          `${error.message}；${rollbackStage}也失败，请检查服务状态和日志`,
+          { completedStages, recovery: "manual-restore" },
+          { cause: new AggregateError([error, restoreError], "服务安装及恢复失败") },
         );
       }
     }
@@ -178,11 +195,16 @@ function captureDefinitionSnapshot(plan) {
       ? [JSON.parse(file.content).vbsLauncherPath]
       : []),
   ]);
-  return paths.map((path) => ({
-    path,
-    exists: existsSync(path),
-    content: existsSync(path) ? readFileSync(path) : null,
-  }));
+  return paths.map((path) => {
+    const exists = lstatSync(path, { throwIfNoEntry: false }) !== undefined;
+    return {
+      path,
+      exists,
+      content: !exists ? null : plan.serviceManager === "windows"
+        ? readPrivateFileSync(path, 64 * 1024)
+        : readFileSync(path),
+    };
+  });
 }
 
 function restoreDefinitionSnapshot(snapshot, options) {
@@ -433,7 +455,7 @@ function renderWindowsDefinition(service, identifier, context, projectDir) {
     environment,
     controlPath: join(context.runtimeDir, `windows-service-${service.target}.sock`),
     ...(service.target === "app-server"
-      ? { socketPath: context.runtime.primarySocketPath }
+      ? { socketPath: context.socketPath }
       : {}),
     stdoutLog: join(context.runtimeDir, `${logBase}.log`),
     stderrLog: join(context.runtimeDir, `${logBase}.error.log`),

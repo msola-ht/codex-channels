@@ -18,7 +18,9 @@
   Token 与压缩摘要，以及组合层从指标库恢复的单次响应用量汇总与缺失计数；上游 `upstreamTtftMs` 仅保留内部原始统计。统计摘要不计算模型请求聚合耗时、
   本地首段回复延迟或 TPS；完成卡展示官方整轮耗时，以及组合层从官方历史恢复的会话累计执行耗时；
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
-  不污染最终完成状态，Thread 与全局 warning 分开路由；MCP OAuth 完成结果按 Thread 精确投递，
+  不污染最终完成状态，Thread 与全局 warning 分开路由；MCP 状态通知按 Provider、Thread 与服务去重，
+  重试的 `starting` 不清除持续故障指纹，错误内容或原因变化仍通知，官方 `ready` 只在故障后通知恢复；
+  MCP OAuth 完成结果按 Thread 精确投递，
   无 Thread 的结果只广播给相同 Provider 的会话。
 - `turn-timing-accumulator.ts`：按单个 Turn 累加模型请求结果、Token 与压缩摘要；不追踪文本增量时间，
   不路由 Thread、不发布事件、不读取数据库或 Provider 配置。

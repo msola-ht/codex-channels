@@ -13,6 +13,7 @@ import { formatRemainingRateLimitWindow, formatTimezoneLine } from "./account-fo
 import { formatCodexProviderLabel, supportsFastMode } from "./provider-format.js";
 import { formatCacheHitRate, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
 export function formatConversationWorkspaces(
   result: Extract<ConversationCommandResult, { kind: "workspaces" }>,
@@ -203,7 +204,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `Git 分支：${status.gitBranch ?? "未检测到"}`,
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `提供商：${formatCodexProviderLabel(status.modelProvider)}`,
-    `思考等级：${status.effort ?? "模型默认"}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
+    `${reasoningEffortSettingName(status.effort)}：${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     ...(supportsFastMode(status.modelProvider)
       ? [`Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`]
       : []),

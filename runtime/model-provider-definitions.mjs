@@ -97,8 +97,14 @@ export function isManagedProviderApiKeyValid(definition, apiKey) {
 }
 
 export function isManagedProviderModelValid(definition, model) {
-  // CLP 的共享目录只生成一个模型，因此该 Provider 的合法模型就是定义自带的默认模型。
-  if ((definition.storageId ?? definition.id) === "clp") return model === definition.defaultModel;
+  if ((definition.storageId ?? definition.id) === "clp") {
+    return typeof model === "string"
+      && model.length <= 200
+      && model.startsWith("cline-pass/")
+      && model.slice("cline-pass/".length).trim().length > 0
+      && model.trim() === model
+      && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(model);
+  }
   return typeof model === "string" && ((definition.storageId ?? definition.id) === "ccg"
     ? /^(?:[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u.test(model)
     : /^[a-z0-9][a-z0-9._-]{0,119}$/u.test(model));

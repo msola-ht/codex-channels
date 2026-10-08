@@ -14,6 +14,7 @@ import {
 } from "../../application/index.js";
 import { formatCodexProviderLabel, scopedModelDisplayName } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
+import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import {
   formatConversationPlugins,
@@ -208,7 +209,7 @@ export function modelEffortKeyboard(
   const token = telegramModelSelectionToken(result.state);
   return {
     inline_keyboard: model.supportedReasoningEfforts.map((option, index) => [{
-      text: `${option.effort === result.state.effort ? "✓ " : ""}${option.effort}`,
+      text: `${option.effort === result.state.effort ? "✓ " : ""}${formatReasoningEffort(option.effort)}`,
       callback_data: `me:${index + 1}:${token}`,
     }]),
   };
@@ -224,7 +225,7 @@ function modelProviderSelectionText(
     && (model.provider ?? "openai") === current);
   return toStructuredMarkdownList([
     `当前模型：${result.state.model}（Provider：${formatCodexProviderLabel(current)}）`,
-    `思考等级：${result.state.effort ?? "模型默认"}`,
+    `${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort)}`,
     ...(currentModel && fastServiceTierId(currentModel)
       ? [`Fast 模式：${isFastServiceTier(result.state.serviceTier, currentModel) ? "开启" : "关闭"}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
       : []),

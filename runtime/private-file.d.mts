@@ -1,3 +1,7 @@
+export class WindowsPrivatePathError extends Error {
+  constructor(message: string);
+}
+
 export function readPrivateFileSync(
   path: string,
   maximumBytes?: number,
@@ -5,7 +9,7 @@ export function readPrivateFileSync(
 
 export function readPrivateConfigFile(
   path: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; maximumBytes?: number },
 ): Promise<string>;
 
 export function writePrivateFileAtomicSync(
@@ -19,8 +23,10 @@ export function writePrivateFileAtomic(
 ): Promise<void>;
 
 export function securePrivateFileSync(path: string): void;
+export function repairWindowsPrivateFileSync(path: string): void;
 
 export function securePrivateDirectorySync(path: string): void;
+export function secureAppServerSocketDirectorySync(path: string): void;
 
 export function assertPrivateDirectoryAccessSync(path: string): void;
 

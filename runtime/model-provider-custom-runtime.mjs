@@ -23,7 +23,7 @@ import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.
 
 const maximumConfigBytes = 1_048_576;
 export const customPrimaryProviderProfileName = "sf-custom";
-const builtInModelProviderIds = new Set(["openai", "ollama", "lmstudio", "amazon-bedrock"]);
+const builtInModelProviderIds = new Set(["openai", "ollama", "lmstudio", "amazon-bedrock", "codexc-aggregate"]);
 const customProviderIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 const customSwitchingRegistryMaximumBytes = 262_144;
 const customSwitchingDefaultReasoningEffort = "medium";

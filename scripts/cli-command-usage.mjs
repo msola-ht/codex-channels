@@ -1,12 +1,21 @@
 import { serviceCommandTarget, serviceTargetUsage as internalServiceTargetUsage } from "../runtime/service-targets.mjs";
 
-export const desktopAppCommandUsage = `用法：codexc app [enable|disable|status]
+export const desktopAppCommandUsage = `用法：codexc app [--provider <Provider ID>]
+      codexc app enable [--port <端口>]
+      codexc app disable
+      codexc app status [--provider <Provider ID>] [--json]
 
   不带子命令             启动 Desktop App；首次使用确认后自动启用共享
+  -p, --provider ID     仅本次选择完整 Provider ID 或 agg；省略时使用主 OpenAI
   enable [--port 端口]   单独启用共享或指定桥端口，并重启 App Server 服务
   disable                禁用共享连接并重启 App Server 服务
-  status [--json]        只读检查 Desktop、配置和连接状态
+  status                 只读检查 Desktop、配置和所选 Provider 连接状态
 
+主 Provider 为 OpenAI，且至少有两个 API Key 切换提供商时，可用：
+  codexc app --provider agg
+聚合目录包含 DS、CLP、OCG、CCG 和自定义切换提供商的模型，已加载模型间切换无需退出 Desktop。
+更换实例前须完全退出 Desktop；Provider 选择不保存，不修改聊天渠道或原生 TUI 绑定。
+安装新代码或增删聚合成员后须重启服务；Gateway 运行时自动检测成员目录变更，待活动和租约释放后刷新聚合实例。
 日常只需 codexc app。首次启用会重启 App Server，可能中断现有连接与任务；默认不确认。`;
 
 export const timezoneCommandUsage = `用法：codexc timezone [<IANA 时区>|--system] [--json]

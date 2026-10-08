@@ -1,4 +1,5 @@
 import { isAbsolute, join, resolve } from "node:path";
+import { aggregateProviderId, aggregateProviderMembers } from "./aggregate-model-provider.mjs";
 
 import {
   loadConfiguredCustomSwitchingModelProviders,
@@ -20,16 +21,23 @@ export function resolveAppServerRuntime(document, dataDir, environment = process
   const primarySocketPath = resolvePrimaryAppServerSocketPath(document, dataDir);
   const managedProviders = loadManagedProviderAppServers(environment);
   const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders(environment);
+  const primaryProvider = loadPrimaryModelProvider(environment);
+  const aggregateMembers = aggregateProviderMembers(primaryProvider, [
+    ...managedProviders, ...customSwitchingProviders,
+  ]);
+  if (customSwitchingProviders.some(entry => entry.provider === aggregateProviderId)) {
+    throw new Error("codexc-aggregate 为聚合模式保留的 Provider ID");
+  }
   const isolatedProviders = [
     ...managedProviders,
     ...customSwitchingProviders,
+    ...(aggregateMembers.length ? [{ provider: aggregateProviderId, arguments: [], childEnvironment: {} }] : []),
   ];
   const managedSocketPaths = isolatedProviders.map(({ provider }) =>
     providerAppServerSocketPath(primarySocketPath, provider));
   for (const socketPath of managedSocketPaths) {
     assertAppServerSocketPathSupported(socketPath);
   }
-  const primaryProvider = loadPrimaryModelProvider(environment);
   const socketPaths = [
     primarySocketPath,
     ...managedSocketPaths,
@@ -39,6 +47,7 @@ export function resolveAppServerRuntime(document, dataDir, environment = process
     primaryProvider,
     managedProviders: isolatedProviders,
     customSwitchingProviders,
+    aggregateMembers,
     managedSocketPaths,
     socketPaths,
     topology: {

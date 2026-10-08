@@ -24,7 +24,7 @@ export function writeResponsesContextFollowers(updates, environment, originals =
   const cline = readClineContextFollower(environment);
   if (cline && windows.has("deepseek-flash")) {
     const contextWindow = windows.get("deepseek-flash");
-    const model = cline.catalog.models[0];
+    const model = cline.model;
     if (model.context_window !== contextWindow) {
       if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > model.max_context_window) throw new Error("DS 上下文超出 CLP 模型窗口，请重新配置 CLP");
       model.context_window = contextWindow;
@@ -133,7 +133,7 @@ function allowedPath(path,environment) {
 export function listResponsesContextFollowers(environment, model) {
   const directory=join(providerStorageRoot(environment),"responses");
   const cline = model === undefined || model === "deepseek-flash" ? readClineContextFollower(environment) : undefined;
-  const managed = cline ? loadClinePassAccounts(environment).map(account => ({providerId:clinePassProviderId(account.id),model:"cline-pass/deepseek-v4.1-flash",contextWindow:cline.catalog.models[0].context_window})) : [];
+  const managed = cline ? loadClinePassAccounts(environment).map(account => ({providerId:clinePassProviderId(account.id),model:"cline-pass/deepseek-v4.1-flash",contextWindow:cline.model.context_window})) : [];
   return [...managed, ...(existsSync(directory) ? readdirSync(directory,{withFileTypes:true}) : []).filter(entry=>isResponsesProvider(entry.name)).flatMap(entry=>{
     if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error("RS 模型目录类型无效");
     const path=responsesProviderCatalogPath(environment,entry.name);
@@ -154,11 +154,15 @@ function readClineContextFollower(environment) {
   let catalog, content;
   try { content = readPrivateFileSync(path, maximumBytes); catalog = JSON.parse(content); }
   catch { throw new Error("CLP 模型目录无法安全读取"); }
-  if (!Array.isArray(catalog.models) || catalog.models.length !== 1
-    || catalog.models[0].slug !== "cline-pass/deepseek-v4.1-flash"
-    || !Number.isSafeInteger(catalog.models[0].context_window)
-    || !Number.isSafeInteger(catalog.models[0].max_context_window)) throw new Error("CLP 上下文跟随目录无效");
-  return {path, content, catalog};
+  const models = Array.isArray(catalog.models)
+    ? catalog.models.filter(model => model?.slug === "cline-pass/deepseek-v4.1-flash")
+    : [];
+  if (Array.isArray(catalog.models) && models.length === 0) return undefined;
+  const [model] = models;
+  if (models.length !== 1
+    || !Number.isSafeInteger(model.context_window)
+    || !Number.isSafeInteger(model.max_context_window)) throw new Error("CLP 上下文跟随目录无效");
+  return {path, content, catalog, model};
 }
 
 export function clinePassFollowsDeepseekContext(environment) {

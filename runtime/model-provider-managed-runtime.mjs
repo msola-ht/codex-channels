@@ -105,7 +105,8 @@ export function loadManagedModelWindow(environment = process.env) {
   const bySlug = new Map();
   for (const provider of providers) {
     for (const model of provider.models ?? []) {
-      const slug = clineFollows && isClinePassAccountProvider(provider.provider) ? "deepseek-flash" : model.model;
+      const slug = clineFollows && isClinePassAccountProvider(provider.provider)
+        && model.model === "cline-pass/deepseek-v4.1-flash" ? "deepseek-flash" : model.model;
       if (typeof slug !== "string" || slug === "") continue;
       const percent = model.windowPercent;
       const existing = bySlug.get(slug);
@@ -549,7 +550,6 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
     return hash.digest("hex");
   };
   const before = fingerprint();
-  if (isClinePassAccountProvider(provider) && !clinePassFollowsDeepseekContext(environment)) throw new Error("Relay CLP 模型来源无效");
   const profile = loadConfiguredProviderProfile(environment, definition);
   if (!profile) throw new Error("Relay Provider 已撤销");
   const settings = loadModelCatalogSettings(profile.catalogPath, definition);

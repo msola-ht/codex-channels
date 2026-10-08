@@ -14,7 +14,7 @@ export type DesktopAppBridgeEvent =
   | { type: "started"; port: number }
   | { type: "stopped" }
   | { type: "connected" | "disconnected"; connections: number }
-  | { type: "rejected"; reason: "authentication" | "capacity" | "protocol" }
+  | { type: "rejected"; reason: "authentication" | "capacity" | "protocol" | "provider" }
   | {
     type: "connection-error";
     stage: "upstream" | "upstream-send" | "downstream-send";
@@ -24,11 +24,12 @@ export interface DesktopAppBridgeOptions {
   port: number;
   socketPath: string;
   primaryProvider: string;
+  providerSocketPaths?: Readonly<Record<string, string>>;
   codexBinary: string;
   dataDir: string;
   token?: string;
-  createTransport?: () => DesktopAppBridgeTransport | Promise<DesktopAppBridgeTransport>;
-  acquireLease?: () => DesktopAppBridgeLease | Promise<DesktopAppBridgeLease>;
+  createTransport?: (provider: string) => DesktopAppBridgeTransport | Promise<DesktopAppBridgeTransport>;
+  acquireLease?: (provider: string) => DesktopAppBridgeLease | Promise<DesktopAppBridgeLease>;
   onEvent?: (event: DesktopAppBridgeEvent) => void;
 }
 
@@ -47,6 +48,8 @@ export class DesktopAppBridge {
     token: string;
     createTransport: NonNullable<DesktopAppBridgeOptions["createTransport"]>;
     acquireLease: NonNullable<DesktopAppBridgeOptions["acquireLease"]>;
+    primaryProvider?: string;
+    providers?: string[];
   });
   start(): Promise<void>;
   address(): { host: "127.0.0.1"; port: number; path: "/codex-app-server" } | undefined;

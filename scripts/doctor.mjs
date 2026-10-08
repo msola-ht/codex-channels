@@ -32,7 +32,6 @@ import {
   validateGatewayConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import {
-  loadConfiguredCustomSwitchingModelProviders,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
   validateConfiguredModelProviders,
@@ -413,8 +412,8 @@ if (document) {
   let appServerTopology;
   let managedProviders = [];
   try {
-    const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders(process.env);
-    for (const customSwitchingProvider of customSwitchingProviders) {
+    const descriptor = resolveAppServerRuntime(document, dataDir, process.env);
+    for (const customSwitchingProvider of descriptor.customSwitchingProviders) {
       record(
         `${customSwitchingProvider.provider} 模型提供商配置`,
         true,
@@ -429,18 +428,17 @@ if (document) {
         `${configuredProvider.provider} ${configuredProvider.mode === "switching" ? "切换" : "固定"}模式有效`,
       );
     }
-    const descriptor = resolveAppServerRuntime(document, dataDir, process.env);
     managedProviders = descriptor.managedProviders;
     appServerTopology = descriptor.topology;
   } catch (error) {
     record("模型提供商配置", false, errorMessage(error));
   }
-  if (appServerTopology) {
-    await checkAppServerSupervisor(socketPath, appServerTopology);
-  }
+  const observedTopology = appServerTopology
+    ? await checkAppServerSupervisor(socketPath, appServerTopology)
+    : undefined;
   if (
     appServerTopology
-    && await primaryAppServerReleased(socketPath, appServerTopology.primaryProvider)
+    && observedTopology?.releasedProviders.includes(appServerTopology.primaryProvider)
   ) {
     record(
       "Codex App Server",
@@ -471,15 +469,6 @@ async function checkOptionalAppServer(label, socketPath, codexBinary) {
   await checkAppServer(label, socketPath, codexBinary);
 }
 
-async function primaryAppServerReleased(socketPath, primaryProvider) {
-  try {
-    const topology = await inspectAppServerSupervisor(socketPath);
-    return topology?.releasedProviders.includes(primaryProvider) === true;
-  } catch {
-    return false;
-  }
-}
-
 async function checkAppServerSupervisor(socketPath, expectedTopology) {
   try {
     const actualTopology = await inspectAppServerSupervisor(socketPath);
@@ -494,6 +483,7 @@ async function checkAppServerSupervisor(socketPath, expectedTopology) {
         ? undefined
         : "运行 codexc restart all；如仍失败，先停止裸 App Server 后重试",
     );
+    return matches ? actualTopology : undefined;
   } catch (error) {
     record(
       "App Server 监管",
@@ -645,23 +635,23 @@ function checkCodexHomePrivatePaths() {
   try {
     entries = readdirSync(home, { withFileTypes: true });
   } catch (error) {
-    record("Codex 私有配置权限", false, errorMessage(error), "运行 codexc security repair");
+    record("Codex 私有配置权限", false, errorMessage(error), "检查 Codex Home 目录访问权限；security repair 只修复目录内的 TOML 文件");
     return;
   }
   for (const entry of entries) {
     if (entry.isFile() && entry.name.endsWith(".toml")) {
-      checkPrivateFile(`Codex 配置权限：${entry.name}`, join(home, entry.name), "运行 codexc security repair");
+      checkPrivateFile(`Codex 配置权限：${entry.name}`, join(home, entry.name));
     }
   }
 }
 
-function checkPrivateFile(name, path, remediation) {
+function checkPrivateFile(name, path) {
   if (process.platform === "win32") {
     try {
       assertPrivateFileAccessSync(path);
       record(name, true, "当前 SID 私有 ACL 有效");
     } catch (error) {
-      record(name, false, errorMessage(error), remediation);
+      record(name, false, errorMessage(error));
     }
     return;
   }

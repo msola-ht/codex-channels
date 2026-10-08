@@ -10,8 +10,9 @@ import {
 import { hasCodexAuthFile } from "../runtime/codex-home.mjs";
 import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
 import { resolveDefaultManagedProvider } from "../runtime/managed-provider-account-routing.mjs";
+import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
 
-export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [Codex 参数...]";
+export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [--provider agg | -p agg | --profile Profile | -p Profile] [Codex 参数...]";
 
 export function parseCodexRemoteOptions(
   args,
@@ -33,15 +34,22 @@ export function parseCodexRemoteOptions(
     ...configuredManagedProfileDefinitions,
   ];
   assertManagedProfileDefinitions(managedProfileDefinitions);
+  args = [...args];
   const passthrough = [];
   let workspaceId;
   let selectedProfile;
+  let selectedProvider;
   let hasUnmanagedProfile = false;
   for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
+    let argument = args[index];
     if (argument === "--") {
       passthrough.push(...args.slice(index));
       break;
+    }
+    // Keep native Profile shorthand; only the documented agg selector is special.
+    if (argument === "-p" && args[index + 1] !== "agg") {
+      argument = "--profile";
+      args[index] = argument;
     }
     if (argument === "--workspace") {
       if (workspaceId !== undefined) throw new Error("只能指定一个 --workspace");
@@ -53,6 +61,24 @@ export function parseCodexRemoteOptions(
     }
     if (argument.startsWith("--workspace=")) {
       throw new Error(CODEX_REMOTE_USAGE);
+    }
+    if (argument === "--provider" || argument === "-p") {
+      if (selectedProvider !== undefined) throw new Error("只能指定一个 --provider");
+      if (selectedProfile !== undefined || hasUnmanagedProfile) {
+        throw new Error("--provider 不能与 --profile 同时使用");
+      }
+      const provider = args[index + 1];
+      if (provider !== "agg") {
+        throw new Error("codexc remote --provider 仅支持 agg；单独账户请使用规范 --profile");
+      }
+      selectedProvider = aggregateProviderId;
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--provider=") || /^-p./u.test(argument)) throw new Error(CODEX_REMOTE_USAGE);
+    const profile = codexProfileArgument(args, index);
+    if (profile && selectedProvider !== undefined) {
+      throw new Error("--provider 不能与 --profile 同时使用");
     }
     const profileArgument = managedProfileArgument(args, index, managedProfileDefinitions);
     if (profileArgument) {
@@ -85,18 +111,22 @@ export function parseCodexRemoteOptions(
     if (reservedProfile) {
       throw new Error(reservedManagedProfileMessage(reservedProfile));
     }
-    if (codexProfileArgument(args, index)) {
+    if (profile) {
       if (selectedProfile !== undefined) {
         throw new Error("受管模型 Provider --profile 不能与其他 --profile 同时使用");
       }
+      if (hasUnmanagedProfile) throw new Error("只能指定一个 --profile");
       hasUnmanagedProfile = true;
+      passthrough.push(...args.slice(index, index + profile.consumed));
+      index += profile.consumed - 1;
+      continue;
     }
     passthrough.push(argument);
   }
-  if (selectedProfile === undefined && !hasUnmanagedProfile && selectDefaultProfile) {
+  if (selectedProvider === undefined && selectedProfile === undefined && !hasUnmanagedProfile && selectDefaultProfile) {
     selectedProfile = selectDefaultProfile();
   }
-  return { passthrough, workspaceId, selectedProfile };
+  return { passthrough, workspaceId, selectedProfile, selectedProvider };
 }
 
 export function defaultCodexRemoteProfile(environment = process.env) {
@@ -134,12 +164,12 @@ function customProviderIdArgument(args, index, definitions) {
   const argument = args[index];
   for (const { providerId, profileName } of definitions) {
     if (
-      (argument === "--profile" || argument === "-p")
+      argument === "--profile"
       && args[index + 1] === providerId
     ) {
       return { providerId, profileName };
     }
-    if ([`--profile=${providerId}`, `-p=${providerId}`, `-p${providerId}`].includes(argument)) {
+    if (argument === `--profile=${providerId}`) {
       return { providerId, profileName };
     }
   }
@@ -163,13 +193,14 @@ function assertManagedProfileDefinitions(definitions) {
 
 function codexProfileArgument(args, index) {
   const argument = args[index];
-  if (argument === "--profile" || argument === "-p") {
-    return typeof args[index + 1] === "string" ? { consumed: 2 } : undefined;
+  if (argument === "--profile") {
+    if (!args[index + 1] || args[index + 1].startsWith("-")) throw new Error(CODEX_REMOTE_USAGE);
+    return { consumed: 2 };
   }
-  if (argument.startsWith("--profile=") || argument.startsWith("-p=")) {
+  if (argument.startsWith("--profile=")) {
+    if (argument.endsWith("=")) throw new Error(CODEX_REMOTE_USAGE);
     return { consumed: 1 };
   }
-  if (/^-p[^-]/u.test(argument)) return { consumed: 1 };
   return undefined;
 }
 
@@ -177,12 +208,12 @@ function managedProfileArgument(args, index, definitions) {
   const argument = args[index];
   for (const { profileName: profile } of definitions) {
     if (
-      (argument === "--profile" || argument === "-p")
+      argument === "--profile"
       && args[index + 1] === profile
     ) {
       return { profile, consumed: 2 };
     }
-    if ([`--profile=${profile}`, `-p=${profile}`, `-p${profile}`].includes(argument)) {
+    if (argument === `--profile=${profile}`) {
       return { profile, consumed: 1 };
     }
   }
@@ -201,15 +232,12 @@ function oldManagedProfileArgument(args, index, definitions) {
       continue;
     }
     if (
-      (argument === "--profile" || argument === "-p")
+      argument === "--profile"
       && args[index + 1] === profileName
     ) {
       return { profileName, canonicalProfileName };
     }
-    if (
-      [`--profile=${profileName}`, `-p=${profileName}`, `-p${profileName}`]
-        .includes(argument)
-    ) {
+    if (argument === `--profile=${profileName}`) {
       return { profileName, canonicalProfileName };
     }
   }
@@ -234,14 +262,11 @@ function nonCanonicalManagedProfileName(definition) {
 function reservedManagedProfileArgument(args, index) {
   const argument = args[index];
   let profile;
-  if (argument === "--profile" || argument === "-p") {
+  if (argument === "--profile") {
     profile = args[index + 1];
   } else if (argument.startsWith("--profile=")) {
     profile = argument.slice("--profile=".length);
-  } else if (argument.startsWith("-p=")) {
-    profile = argument.slice("-p=".length);
-  } else if (/^-p[^-]/u.test(argument)) {
-    profile = argument.slice(2);
+
   }
   return profile === "sf-custom"
     || profile?.startsWith("sf-ds-")

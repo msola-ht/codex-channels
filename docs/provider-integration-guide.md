@@ -68,9 +68,17 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
   基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；
 - 目录按 Provider 隔离；同名模型（如两个 Provider 都提供 `deepseek-flash`）是独立选项，
  模型 key 为 `provider + model`；
-- 可选模型以各 Provider 生成的模型目录为准：OCG/CCG 以 DS 完整目录为基础，复制 Flash 内容增加 V4.1，并按 Provider 映射模型 ID；目录不再声明的旧模型名不会出现在 `/model` 与 Setup 选项中；
+- 可选模型以各 Provider 生成的模型目录为准：OCG/CCG 初始以 DS 完整目录为基础，复制 Flash 内容增加 V4.1，并按 Provider 映射模型 ID；配置后可通过共享模型管理显式添加上游支持的 Responses 模型和选择启用列表。新增模型的准确 ID 与能力必须确认，不把 Cline 专属路由或 Chat 参数复制给其他提供商；
 - 默认模型写入 Profile 后，Profile 顶层 `model_reasoning_effort` 必须镜像目录默认值，
   运行时校验不一致即失败关闭。
+
+模型选择复用 `scripts/provider-model-selection.mjs`，保护默认模型并限制启用数量；OCG/CCG 共享目录事务复用 `scripts/managed-provider-model-management.mjs`。CLP 保留官方候选目录下载与 Chat 能力映射，自定义 Responses 保留模板 ID 映射与版本 4 定义格式。通用提示词由 `runtime/third-party-coding-instructions.mjs` 提供，显式写入新定义；不得直接替换版本 4 生成器缺省值，否则既有目录的逐字段一致性校验会失败。
+
+自定义 Responses 的设置向导在能力填写后统一多选启用模型，当前默认模型必须保留；停用即从本次保存的 `definitions/models` 移除。模板更新保留已有自定义提示词。目录写入继续使用现有备份及未完成事务恢复机制；不自动迁移或重写既有数据。
+
+自定义 Responses 出站复核与配置加载共用版本 4、允许字段及定义／生成目录一致性校验。目录 `.pending` 或全局 DS/RS 上下文同步标记存在时，普通 HTTP 和 Responses WS 均拒绝新请求；读取前后检查标记，目录或事务不可用统一返回 `503 provider_catalog_unavailable`。恢复有效目录并完成事务后，下一次请求重新复核，不缓存失败或成功名单。
+
+OCG/CCG 与自定义 `rs-*` 的普通代理及聚合下游均在发送前复核当前目录：HTTP 和 Responses WS 拒绝未知／已停用模型，旧会话不自动换模型。HTTP 错误为 `409 provider_model_disabled` 或目录不可用的 `503 provider_catalog_unavailable`；WS 返回对应 error 后关闭连接。CLP 保留专属错误码，独立 Relay 沿用自己的授权。名单约束即时读取，目录展示与能力仍按原服务刷新流程应用。
 
 ### 3.3 本地价格
 

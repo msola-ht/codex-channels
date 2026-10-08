@@ -18,6 +18,7 @@ import {
 import { workspacePermissionLines } from "./conversation-workspace-status-command-format.js";
 import { formatDisplayedProvider } from "./provider-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
 export function formatConversationCommandOutcome(
   outcome: ConversationCommandOutcome,
@@ -231,7 +232,7 @@ export function formatConversationCommandOutcome(
         `计划：${formatSchedule(outcome.task.schedule, outcome.task.timezone)}`,
         `下次运行：${formatScheduledAt(outcome.task.nextRunAt)}`,
         `模型：${formatDisplayedProvider(outcome.task.modelProvider)}/${outcome.task.model ?? "默认"}`,
-        `思考等级：${outcome.task.reasoningEffort ?? "默认"}`,
+        `${reasoningEffortSettingName(outcome.task.reasoningEffort)}：${formatReasoningEffort(outcome.task.reasoningEffort, "默认")}`,
       ].join("\n"));
     case "scheduled-task.run-requested":
     case "scheduled-task.retry-requested":

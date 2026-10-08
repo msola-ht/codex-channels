@@ -541,7 +541,7 @@ function assertManagedRepository(checkout, repository, environment, captureComma
 }
 
 async function prepareCodexVersion(expected, checkout, environment, writeMessage, options) {
-  const actual = installedCodexVersion(environment, options.captureCommand);
+  const actual = installedCodexVersion(environment, options.captureCommand, expected);
   if (actual === expected) {
     return { installRequired: false, validationEnvironment: environment };
   }
@@ -577,6 +577,7 @@ async function prepareCodexVersion(expected, checkout, environment, writeMessage
   const installed = installedCodexVersion(
     validationEnvironment,
     options.captureCommand,
+    expected,
   );
   if (installed !== expected) {
     throw codexVersionMismatchError(expected, installed);
@@ -608,7 +609,7 @@ async function installPreparedCodexVersion(
   } catch (error) {
     throw codexInstallFailureError(expected, error);
   }
-  const installed = installedCodexVersion(environment, options.captureCommand);
+  const installed = installedCodexVersion(environment, options.captureCommand, expected);
   if (installed !== expected) {
     throw codexVersionMismatchError(expected, installed);
   }
@@ -620,7 +621,7 @@ async function installPreparedCodexVersion(
 }
 
 export function assertCodexVersion(expected, environment, captureCommand) {
-  const actual = installedCodexVersion(environment, captureCommand);
+  const actual = installedCodexVersion(environment, captureCommand, expected);
   if (actual !== expected) throw codexVersionMismatchError(expected, actual);
 }
 
@@ -637,20 +638,26 @@ export function validateCodexContract(checkout, environment, options) {
   );
 }
 
-function installedCodexVersion(environment, captureCommand) {
+function installedCodexVersion(environment, captureCommand, expected) {
   const configured = environment.CODEX_BINARY?.trim();
   const executable = configured || "codex";
   if (!captureCommand && !resolveOptionalExecutable(executable, environment)) {
     if (configured && configured !== "codex") throw new Error("CODEX_BINARY 指定的可执行文件不存在，请修正后重新运行 codexc update");
     return "";
   }
-  const output = capture(
-    executable,
-    ["--version"],
-    process.cwd(),
-    environment,
-    captureCommand,
-  ).trim();
+  let output;
+  try {
+    output = capture(executable, ["--version"], process.cwd(), environment, captureCommand).trim();
+  } catch (cause) {
+    const missingPackage = /Missing optional dependency (@openai\/codex-(?:darwin|linux|win32)-(?:arm64|x64))\b/u.exec(errorMessage(cause))?.[1];
+    const error = new Error(missingPackage
+      ? `Codex CLI 缺少平台原生依赖 ${missingPackage}，无法执行版本检查；这不是版本号不匹配`
+      : "Codex CLI 无法执行版本检查；请检查可执行文件与安装完整性");
+    codexVersionMismatchRemediations.set(error, configured && configured !== "codex"
+      ? ["CODEX_BINARY 指向的 CLI 由操作者管理，请修复该安装后重新运行 codexc update"]
+      : [`npm install -g --include=optional @openai/codex@${expected}`, "确认 codex --version 输出锁定版本后重新运行 codexc update"]);
+    throw error;
+  }
   return output.split(/\s+/u).at(-1)?.replace(/^v/u, "") ?? "";
 }
 
@@ -659,7 +666,7 @@ function codexVersionMismatchError(expected, actual) {
     `Codex CLI 版本不匹配：需要 ${expected}，当前 ${actual || "未知"}`,
   );
   codexVersionMismatchRemediations.set(error, [
-    `npm install -g @openai/codex@${expected}`,
+    `npm install -g --include=optional @openai/codex@${expected}`,
     "安装完成后重新运行 codexc update",
   ]);
   return error;
@@ -671,7 +678,7 @@ function codexInstallFailureError(expected, cause) {
     { cause },
   );
   codexVersionMismatchRemediations.set(error, [
-    `npm install -g @openai/codex@${expected}`,
+    `npm install -g --include=optional @openai/codex@${expected}`,
     "安装完成后重新运行 codexc update",
   ]);
   return error;
@@ -696,6 +703,7 @@ function installCodexCliForValidation(
       prefix,
       "--no-save",
       "--no-package-lock",
+      "--include=optional",
       "--no-audit",
       "--no-fund",
       `@openai/codex@${version}`,
@@ -719,7 +727,7 @@ function installCodexCliForValidation(
 function installCodexCli(version, checkout, environment, options) {
   run(
     process.platform === "win32" ? "npm.cmd" : "npm",
-    ["install", "-g", `@openai/codex@${version}`],
+    ["install", "-g", "--include=optional", `@openai/codex@${version}`],
     checkout,
     environment,
     options.runCommand,

@@ -6,8 +6,11 @@ import type { ManagedModelProviderId } from "./model-provider-definitions.mjs";
 export interface AppServerRuntimeDescriptor {
   primarySocketPath: string;
   primaryProvider: "openai" | ManagedModelProviderId;
-  managedProviders: Array<ManagedProviderAppServerRuntime | ConfiguredCustomSwitchingModelProvider>;
+  managedProviders: Array<ManagedProviderAppServerRuntime | ConfiguredCustomSwitchingModelProvider | {
+    provider: "codexc-aggregate"; arguments: string[]; childEnvironment: Record<string, string>;
+  }>;
   customSwitchingProviders: ConfiguredCustomSwitchingModelProvider[];
+  aggregateMembers: string[];
   managedSocketPaths: string[];
   socketPaths: string[];
   topology: {

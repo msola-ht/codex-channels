@@ -117,9 +117,21 @@ DS 目录生成时明确设置 `support_verbosity: false`、`default_verbosity: 
 
 切换模式由同一个后台服务监管 OpenAI 主 App Server 和各账户隔离的 App Server。服务启动时只
 启动主实例；原生子代理复用父线程所在 Provider 实例。首次选择 DeepSeek 模型、
-恢复其 Thread 或使用 DeepSeek Remote TUI 时，监管入口才读取并校验私有 Profile，按需启动隔离
+恢复其 Thread、使用 DeepSeek Remote TUI 或通过 `codexc app --provider <Provider-ID>` 启动桌面时，监管入口才读取并校验私有 Profile，按需启动隔离
 App Server。该账户 API Key 只进入需要它的 App Server 子进程环境，不进入命令行、服务定义或
 日志；其他 Provider 的 Key 不会随之注入。
+
+桌面入口要求主 Provider 仍为 OpenAI，单账户入口使用账户对应的精确 Provider ID；更换实例前必须完全退出桌面。
+单账户连接只使用目标实例；跨实例切换仍须退出桌面。主 Provider 为 OpenAI 且至少有两个 API Key
+切换提供商时，也可用 `codexc app --provider agg`，在同一桌面模型目录选择 DS、CLP、OCG、CCG
+及自定义切换提供商的模型。DS 的精确聚合模型 ID 形如 `ds-main/deepseek-flash`，显示名称包含账户 Provider ID。
+聚合不迁移单账户历史，须在聚合实例新建 Thread；已加载模型间切换无需退出桌面。安装新代码或
+增删成员后须重启相关服务；现有成员的 Key、模型目录变更由运行中的 Gateway 检测，待活动和租约释放后安全刷新，等待期间旧聚合快照拒绝后续出站请求。
+聚合关闭网页搜索、模型 API WebSocket 和自动重试，不影响 DS 单账户或独立 Relay 的原有路径。
+终端使用 `codexc remote --provider agg`，渠道通过 `/model` 的“聚合提供商”目录选择；
+聚合 Thread 内切换模型保留历史，账户额度查询不合并，模型请求指标归属真实账户。
+第三方桌面及聚合跨模型历史、工具路径仍待实机验收，
+具体边界见 [Desktop 共享说明](codex-desktop-app-development.md)。
 
 Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review、Goal、MCP 和审批请求。
 跨 Provider 不能原地修改正在使用的 Thread，因此 `/model` 的跨 Provider 选择会：

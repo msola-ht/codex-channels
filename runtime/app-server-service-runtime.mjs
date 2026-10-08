@@ -1,8 +1,13 @@
 import { loadClinePassAccounts, clinePassProviderId } from "./cline-pass-accounts.mjs";
-import { isResponsesProvider, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
+import { isResponsesProvider, responsesProviderCatalogPath, parseResponsesModelCatalog, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { spawn } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
+import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArguments, loadAggregateModelMaterial,
+  readAggregateProviderSettingsFingerprint } from "./aggregate-model-provider.mjs";
+import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
+import { ProviderModelGuard } from "./provider-model-guard.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -27,6 +32,7 @@ import {
 } from "./gateway-config.mjs";
 import {
   loadManagedModelProviderDefinitions,
+  isManagedProviderModelValid,
   opencodeGoProviderDefinition,
   sharedManagedProviderDefinition,
 } from "./model-provider-definitions.mjs";
@@ -34,6 +40,7 @@ import {
   loadConfiguredCustomPrimaryModelProvider,
   loadOpenAiBaseUrl,
   loadManagedModelProviderSettings,
+  managedProviderDirectory,
   readManagedMarker,
   providerMetricsSocketPath,
   validateConfiguredModelProviders,
@@ -142,7 +149,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   );
   const {
     ProviderProxy,
+    AggregateModelProxy,
     ChatCompletionsBridge,
+    chatBridgeRequestTimeoutMs,
     pruneModelTrafficDumpSessions,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
@@ -164,19 +173,40 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     upstreamAgentsByProxyUrl.set(proxyUrl, agent);
     return agent;
   };
+  const proxyProviderIds = new Map();
+  const proxyTargetSignatures = new Map();
   const providerProxyRuntimes = new ProviderProxyRuntimeRegistry(async (
     provider,
     options,
   ) => {
+    const metricsProvider = proxyProviderIds.get(provider) ?? provider;
     const definition = providerDefinitions.get(provider) ?? sharedManagedProviderDefinition(provider);
     let bridge;
+    const guardedDefinition = definition && ["ocg", "opencode-go", "ccg", "clp"].includes(definition.storageId ?? definition.id)
+      ? definition : undefined;
+    const modelGuard = guardedDefinition
+      ? new ProviderModelGuard(join(managedProviderDirectory(runtime.environment, guardedDefinition),
+        guardedDefinition.catalogFileName), model => isManagedProviderModelValid(guardedDefinition, model))
+      : isResponsesProvider(metricsProvider)
+        ? new ProviderModelGuard(responsesProviderCatalogPath(runtime.environment, metricsProvider), model =>
+          typeof model === "string" && model.trim() === model && model.length > 0 && model.length <= 200 && !/\p{Cc}/u.test(model), {
+          parseCatalog: parseResponsesModelCatalog,
+          blockedPaths: [
+            `${responsesProviderCatalogPath(runtime.environment, metricsProvider)}.pending`,
+            responsesContextSyncPath(runtime.environment),
+          ],
+        })
+        : undefined;
     if (definition?.upstreamWireApi === "chat_completions") {
+      const clinePass = definition.storageId === "clp" || definition.id === "clp";
       bridge = new ChatCompletionsBridge({ ...options,
-        clinePass: definition.storageId === "clp" || definition.id === "clp",
+        clinePass,
+        ...(modelGuard ? { readClinePassModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) } : {}),
         onError: () => proxySelector.invalidate(),
         ...(validatedCodex.upstream_user_agent ? { upstreamUserAgent: validatedCodex.upstream_user_agent } : {}),
       });
-      await bridge.start();
+      try { await bridge.start(); }
+      catch (error) { await modelGuard?.close(); throw error; }
       options = bridge.proxyOptions();
     }
     const optionsWithUserAgent = {
@@ -192,7 +222,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               inputItems: validatedDebug.model_traffic_input_items,
               itemMaxBytes: validatedDebug.model_traffic_item_max_bytes,
               retentionDays: validatedDebug.model_traffic_retention_days,
-              label: provider,
+              label: metricsProvider,
             },
           }),
     };
@@ -210,6 +240,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     });
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
+      ...(!bridge && modelGuard ? { isModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
       ...(opencodeGo
         ? {
             accountIds: goAccountIds.length === 0 ? undefined : goAccountIds,
@@ -240,7 +271,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               ? managedAccountProxyOptions(ccgAccounts, ccgProviderId, "CCG")
               : {
                 onMetrics: (metrics) => sendProviderProxyMetrics(
-                  providerMetricsSocketPath(socketPath, provider),
+                  providerMetricsSocketPath(socketPath, metricsProvider),
                   metrics,
                 ),
               }),
@@ -252,11 +283,16 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         );
       },
     });
-    try { await modelProxy.start(); } catch (error) { await bridge?.close(); throw error; }
+    try { await modelProxy.start(); } catch (error) {
+      try { await bridge?.close(); } finally { await modelGuard?.close(); }
+      throw error;
+    }
     const proxyRuntime = {
       baseUrl: `http://${modelProxy.address()}`,
-      proxy: bridge ? { close: async () => {
-        try { await modelProxy.close(); } finally { await bridge.close(); }
+      proxy: bridge || modelGuard ? { close: async () => {
+        try { await modelProxy.close(); } finally {
+          try { await bridge?.close(); } finally { await modelGuard?.close(); }
+        }
       } } : modelProxy,
     };
     console.log(
@@ -264,9 +300,26 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     );
     return proxyRuntime;
   });
-  const startProviderProxy = (provider, options) =>
-    providerProxyRuntimes.ensure(provider, options);
+  const proxyTargetSignature = options => JSON.stringify([
+    options.upstreamHost, options.upstreamPort ?? null,
+    options.upstreamProtocol ?? "https", options.upstreamBasePath ?? "/",
+  ]);
+  const startProviderProxy = (provider, options) => {
+    if (!proxyTargetSignatures.has(provider)) proxyTargetSignatures.set(provider, proxyTargetSignature(options));
+    return providerProxyRuntimes.ensure(provider, options).catch(error => {
+      if (!providerProxyRuntimes.get(provider)) {
+        proxyTargetSignatures.delete(provider);
+        proxyProviderIds.delete(provider);
+      }
+      throw error;
+    });
+  };
   const closeProviderProxy = async (proxy) => {
+    for (const key of proxyTargetSignatures.keys()) {
+      if (providerProxyRuntimes.get(key)?.proxy !== proxy) continue;
+      proxyTargetSignatures.delete(key);
+      proxyProviderIds.delete(key);
+    }
     providerProxyRuntimes.remove(proxy);
     await proxy.close();
   };
@@ -320,14 +373,20 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     provider.provider,
     { runtime: provider, socketPath: managedSocketPaths[index] },
   ]));
+  const providerSettingsFingerprint = provider => provider === aggregateProviderId
+    ? readAggregateProviderSettingsFingerprint(runtime.environment, appServerRuntime.aggregateMembers)
+    : readAppServerProviderSettingsFingerprint(provider, runtime.environment);
   const prepareProviderSettings = (provider) => {
-    if (!providerDefinitions.has(provider)) return undefined;
-    const fingerprint = readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+    const aggregate = provider === aggregateProviderId;
+    if (!providerDefinitions.has(provider) && !aggregate) return undefined;
+    const fingerprint = providerSettingsFingerprint(provider);
     validateConfiguredModelProviders(runtime.environment);
     const next = resolveAppServerRuntime(runtime.document, runtime.dataDir, runtime.environment);
-    const defaultModel = loadManagedModelProviderSettings(runtime.environment)
-      .find(value => value.provider === provider)?.model ?? null;
-    if (readAppServerProviderSettingsFingerprint(provider, runtime.environment) !== fingerprint) {
+    const aggregateMaterial = aggregate
+      ? loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers) : undefined;
+    const defaultModel = aggregate ? aggregateMaterial.defaultModel
+      : loadManagedModelProviderSettings(runtime.environment).find(value => value.provider === provider)?.model ?? null;
+    if (providerSettingsFingerprint(provider) !== fingerprint || aggregateMaterial && aggregateMaterial.fingerprint !== fingerprint) {
       throw new Error("Provider 设置在读取期间发生变化");
     }
     if (JSON.stringify(next.topology) !== JSON.stringify(appServerRuntime.topology)) {
@@ -336,17 +395,80 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     const managed = managedByProvider.get(provider);
     const material = next.managedProviders.find(value => value.provider === provider);
     if (managed && !material) throw new Error("Provider 启动材料不可用");
-    if (managed) managed.runtime = material;
+    if (managed && !aggregate) managed.runtime = material;
     return { fingerprint, defaultModel };
   };
   const confirmProviderSettings = (provider, snapshot) => {
     if (!snapshot) return;
-    if (readAppServerProviderSettingsFingerprint(provider, runtime.environment) !== snapshot.fingerprint) {
+    if (providerSettingsFingerprint(provider) !== snapshot.fingerprint) {
       throw new Error("Provider 设置在应用期间发生变化");
     }
     settingsSnapshots.set(provider, snapshot);
   };
   const instanceLaunches = new Map();
+  let aggregateProxy;
+  let aggregateGuard;
+  const aggregateProxyKeys = new Set();
+  const closeAggregateProxy = async () => {
+    const current = aggregateProxy;
+    const guard = aggregateGuard;
+    aggregateProxy = undefined;
+    aggregateGuard = undefined;
+    const results = await Promise.allSettled([current?.close(), guard?.close()]);
+    for (const key of aggregateProxyKeys) providerProxyRuntimes.removeUser(key, aggregateProviderId);
+    const orphanedProxies = [...aggregateProxyKeys].filter(key => !providerProxyIsInUse(key))
+      .map(key => providerProxyRuntimes.get(key)?.proxy).filter(Boolean);
+    aggregateProxyKeys.clear();
+    const proxyResults = await Promise.allSettled(orphanedProxies.map(proxy => closeProviderProxy(proxy)));
+    const errors = [...results, ...proxyResults].filter(result => result.status === "rejected").map(result => result.reason);
+    if (errors.length) throw new AggregateError(errors, "聚合模型资源未能完全关闭");
+  };
+  const prepareAggregateRuntime = async (snapshot) => {
+    const material = loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers);
+    if (material.fingerprint !== snapshot.fingerprint || material.defaultModel !== snapshot.defaultModel) {
+      throw new Error("聚合设置在启动材料读取期间发生变化");
+    }
+    // The App Server reads the derived catalogue, so guard its exact launch bytes
+    // as well as the authoritative sources used by the routes and settings IPC.
+    aggregateGuard = new AggregateMaterialGuard([...material.files, {
+      path: join(runtime.dataDir, "runtime", "aggregate-models.json"), maximumBytes: 8_388_608,
+      digest: createHash("sha256").update(`${JSON.stringify(material.catalog, null, 2)}\n`).digest("hex"),
+    }]);
+    const token = randomBytes(32).toString("hex");
+    const urls = new Map();
+    for (const profile of material.profiles) {
+      let key = sharedProviderProxyKey(profile.provider);
+      const options = await proxyOptionsForUrl(new URL(profile.baseUrl));
+      const signature = proxyTargetSignature(options);
+      // A live standalone custom instance can retain its original upstream.
+      // The new aggregate snapshot gets a separate proxy with the same metrics owner.
+      if (!providerDefinitions.has(profile.provider)
+        && (customSwitchingProvidersById.get(profile.provider)?.baseUrl !== profile.baseUrl
+          || proxyTargetSignatures.has(key) && proxyTargetSignatures.get(key) !== signature)) {
+        key = `${profile.provider}@${createHash("sha256").update(signature).digest("hex")}`;
+        proxyProviderIds.set(key, profile.provider);
+      }
+      providerProxyRuntimes.addUser(key, aggregateProviderId);
+      aggregateProxyKeys.add(key);
+      const started = await startProviderProxy(key, options);
+      const accountId = proxyAccountId(profile.provider);
+      urls.set(profile.provider, accountId === undefined ? started.baseUrl : `${started.baseUrl}/go/${accountId}`);
+    }
+    const guard = aggregateGuard;
+    aggregateProxy = new AggregateModelProxy({ token, assertCurrent: signal => guard.check(signal),
+      routes: new Map([...material.routes].map(([slug, route]) => [slug, {
+        model: route.model, apiKey: route.apiKey, baseUrl: urls.get(route.provider),
+        timeoutMs: providerDefinitions.get(route.provider)?.upstreamWireApi === "chat_completions"
+          ? chatBridgeRequestTimeoutMs + 10_000 : 65_000,
+      }])),
+    });
+    await aggregateProxy.start();
+    const baseUrl = `http://${aggregateProxy.address()}`;
+    const argumentsList = aggregateLaunchArguments(material, runtime.dataDir, baseUrl);
+    await guard.check();
+    return { baseUrl, arguments: argumentsList,
+      childEnvironment: { [aggregateTokenEnvironmentKey]: token } };
+  };
   const children = [];
   const childrenByProvider = new Map();
   const providerProxyIsInUse = (proxyKey) =>
@@ -369,12 +491,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         await prepareAppServerSocketPaths([socketPath]);
         settingsSnapshots.delete(provider);
         const snapshot = prepareProviderSettings(provider);
+        const attachment = desktopAppAttachment?.provider === provider ? desktopAppAttachment : undefined;
         const primaryAppServerArguments = [
           ...primaryArguments,
-          ...(desktopAppAttachment
+          ...(attachment
             ? [
                 "-c",
-                `${macDesktopAppPluginEnabledConfigKey}=${desktopAppAttachment.toolsEnabled}`,
+                `${macDesktopAppPluginEnabledConfigKey}=${attachment.toolsEnabled}`,
               ]
             : []),
           "app-server",
@@ -386,9 +509,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           env: primaryChildEnvironment,
           cwd: defaultWorkspace.cwd,
         };
-        const child = desktopAppAttachment
+        const child = attachment
           ? spawnMacDesktopHostedCodex(
-              desktopAppAttachment,
+              attachment,
               primaryAppServerArguments,
               primarySpawnOptions,
             )
@@ -435,7 +558,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       const managed = managedByProvider.get(provider);
       const definition = providerDefinitions.get(provider);
       const customDefinition = customSwitchingProvidersById.get(provider);
-      if (!managed || (!definition && !customDefinition) || !managed.socketPath) {
+      const aggregate = provider === aggregateProviderId;
+      if (!managed || (!definition && !customDefinition && !aggregate) || !managed.socketPath) {
         throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
       }
       const runningChild = childrenByProvider.get(provider);
@@ -446,11 +570,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       if (await appServerSocketAcceptsWebSocket(managed.socketPath)) return;
       await prepareAppServerSocketPaths([managed.socketPath]);
       const proxyKey = sharedProviderProxyKey(provider);
-      providerProxyRuntimes.addUser(proxyKey, provider);
+      if (!aggregate) providerProxyRuntimes.addUser(proxyKey, provider);
       let proxy;
       let child;
       try {
-        const startedProxy = await startProviderProxy(
+        settingsSnapshots.delete(provider);
+        const snapshot = prepareProviderSettings(provider);
+        const startedProxy = aggregate ? await prepareAggregateRuntime(snapshot) : await startProviderProxy(
           proxyKey,
           isGoProvider(provider)
             ? await goProxyOptions()
@@ -459,29 +585,34 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               )),
         );
         proxy = startedProxy.proxy;
-        settingsSnapshots.delete(provider);
-        const snapshot = prepareProviderSettings(provider);
+        if (aggregate) managed.runtime = { provider, arguments: startedProxy.arguments, childEnvironment: startedProxy.childEnvironment };
         const providerBaseUrl = proxyAccountId(provider) !== undefined
           ? `${startedProxy.baseUrl}/go/${proxyAccountId(provider)}`
           : startedProxy.baseUrl;
-        const argumentsList = withProviderBaseUrl(
+        const argumentsList = aggregate ? managed.runtime.arguments : withProviderBaseUrl(
           managed.runtime.arguments,
           provider,
           providerBaseUrl,
         );
-        child = spawnCodexProcess(runtime.environment.CODEX_BINARY, [
+        const attachment = desktopAppAttachment?.provider === provider ? desktopAppAttachment : undefined;
+        const managedAppServerArguments = [
           ...argumentsList,
+          ...(attachment ? ["-c", `${macDesktopAppPluginEnabledConfigKey}=${attachment.toolsEnabled}`] : []),
           "app-server",
           "--listen",
           `unix://${managed.socketPath}`,
-        ], {
+        ];
+        const managedSpawnOptions = {
           stdio: "inherit",
           env: {
             ...withoutManagedProviderApiKeys(runtime.environment),
             ...managed.runtime.childEnvironment,
           },
           cwd: defaultWorkspace.cwd,
-        }, runtime.environment);
+        };
+        child = attachment
+          ? spawnMacDesktopHostedCodex(attachment, managedAppServerArguments, managedSpawnOptions)
+          : spawnCodexProcess(runtime.environment.CODEX_BINARY, managedAppServerArguments, managedSpawnOptions, runtime.environment);
         children.push(child);
         childrenByProvider.set(provider, child);
         await waitForAppServer(
@@ -490,6 +621,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           provider,
           "模型 Provider App Server",
         );
+        if (aggregate) await aggregateGuard.check();
         confirmProviderSettings(provider, snapshot);
         settingsRecoveryRequired.delete(provider);
         watchChild(child);
@@ -519,6 +651,10 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           } catch (proxyError) {
             cleanupError ??= proxyError;
           }
+        }
+        if (aggregate) {
+          try { await closeAggregateProxy(); }
+          catch (proxyError) { cleanupError ??= proxyError; }
         }
         if (cleanupError) {
           throw new Error(
@@ -551,6 +687,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       throw error;
     }
     childrenByProvider.delete(provider);
+    if (provider === aggregateProviderId) await closeAggregateProxy();
     // The baseline belongs to the terminated instance, even if proxy cleanup fails.
     settingsSnapshots.delete(provider);
     if (provider !== primaryProvider) {
@@ -576,8 +713,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     signal.throwIfAborted();
     // Managed settings may change launch material, never the host's socket topology.
     // Account addition/removal and primary-provider changes require explicit service management.
-    if (!providerDefinitions.has(provider)) throw new Error("Provider 不支持受管设置应用");
-    const fingerprint = readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+    if (!providerDefinitions.has(provider) && provider !== aggregateProviderId) throw new Error("Provider 不支持受管设置应用");
+    const fingerprint = providerSettingsFingerprint(provider);
     if (!settingsRecoveryRequired.has(provider) && settingsSnapshots.get(provider)?.fingerprint === fingerprint) {
       return { applied: true, changed: false };
     }
@@ -626,7 +763,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     confirmProviderSettings(provider, snapshot);
     return { applied: true, changed: true };
   };
-  const attachDesktopApp = async ({ appPath, pipePath, toolsEnabled }, signal, canAttach) => {
+  const attachDesktopApp = async ({ provider, appPath, pipePath, toolsEnabled }, signal, canAttach) => {
     if (
       process.platform !== "darwin"
       || validatedCodex.desktop_app?.enabled !== true
@@ -634,38 +771,43 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     ) {
       throw new Error("macOS Codex Desktop App 共享未启用");
     }
-    const nextAttachment = validateMacDesktopAppAttachment({
+    const managed = managedByProvider.get(provider);
+    if (provider !== primaryProvider && !managed) {
+      throw new Error("Desktop 目标 Provider 未配置独立 App Server");
+    }
+    const targetSocket = provider === primaryProvider ? socketPath : managed.socketPath;
+    const nextAttachment = { ...validateMacDesktopAppAttachment({
       appPath,
       pipePath,
       toolsEnabled,
       codexBinary: runtime.environment.CODEX_BINARY,
       environment: runtime.environment,
-    });
-    await instanceLaunches.get(primaryProvider);
+    }), provider };
+    await instanceLaunches.get(provider);
     signal.throwIfAborted();
-    const ensureManagedPrimaryInstance = async () => {
-      if (!childrenByProvider.has(primaryProvider)
-        && await appServerSocketAcceptsWebSocket(socketPath)) {
-        throw new Error("主 OpenAI App Server 不受当前服务监管");
+    const ensureManagedTargetInstance = async () => {
+      if (!childrenByProvider.has(provider)
+        && await appServerSocketAcceptsWebSocket(targetSocket)) {
+        throw new Error("Desktop 目标 App Server 不受当前服务监管");
       }
-      await ensureInstance(primaryProvider);
-      if (!childProcessIsRunning(childrenByProvider.get(primaryProvider))) {
-        throw new Error("主 OpenAI App Server 不受当前服务监管");
+      await ensureInstance(provider);
+      if (!childProcessIsRunning(childrenByProvider.get(provider))) {
+        throw new Error("Desktop 目标 App Server 不受当前服务监管");
       }
-      supervisorOwner.markRunning(primaryProvider);
+      supervisorOwner.markRunning(provider);
     };
     // An idle release is still managed: restore the child before querying its
     // authoritative state. Never take over a live socket owned by another process.
-    await ensureManagedPrimaryInstance();
+    await ensureManagedTargetInstance();
     signal.throwIfAborted();
-    if (desktopAppAttachment?.key === nextAttachment.key) {
-      if (!canAttach()) throw new Error("主 OpenAI App Server 正被其他客户端租约占用");
+    if (desktopAppAttachment?.provider === provider && desktopAppAttachment.key === nextAttachment.key) {
+      if (!canAttach()) throw new Error("Desktop 目标 App Server 正被其他客户端租约占用");
       return;
     }
     const { CodexAppServerClient, createAppServerTransport, JsonRpcClient } = await import("../dist/codex-client/index.js");
     signal.throwIfAborted();
     const client = new CodexAppServerClient(new JsonRpcClient(createAppServerTransport(
-      { kind: "local-app-server", socketPath },
+      { kind: "local-app-server", socketPath: targetSocket },
       { codexBinary: runtime.environment.CODEX_BINARY, connectTimeoutMs: 3_000 },
     ), 5_000), { sandbox: "read-only" });
     const cancel = () => { void client.close().catch(() => undefined); };
@@ -674,7 +816,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       await client.connect();
       signal.throwIfAborted();
       if (await client.countActiveLoadedThreads() > 0) {
-        throw new Error("主 OpenAI App Server 仍有活动任务，不能附加 Desktop Host");
+        throw new Error("Desktop 目标 App Server 仍有活动任务，不能附加 Desktop Host");
       }
     } finally {
       signal.removeEventListener("abort", cancel);
@@ -682,30 +824,32 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     }
     // Pending Remote leases are registered before their queued ensure. Check
     // again after the RPC read; this does not freeze Turns from external clients.
-    if (!canAttach()) throw new Error("主 OpenAI App Server 正被其他客户端租约占用");
+    if (!canAttach()) throw new Error("Desktop 目标 App Server 正被其他客户端租约占用");
     signal.throwIfAborted();
     const previousAttachment = desktopAppAttachment;
-    const released = await releaseInstance(primaryProvider);
-    if (!released) {
-      throw new Error("主 OpenAI App Server 不受当前服务监管");
-    }
-    supervisorOwner.markReleased(primaryProvider);
-    desktopAppAttachment = nextAttachment;
     try {
-      await ensureManagedPrimaryInstance();
+      const released = await releaseInstance(provider);
+      if (!released) {
+        throw new Error("Desktop 目标 App Server 不受当前服务监管");
+      }
+      supervisorOwner.markReleased(provider);
+      if (!canAttach()) throw new Error("Desktop 目标 App Server 正被其他客户端租约占用");
+      signal.throwIfAborted();
+      desktopAppAttachment = nextAttachment;
+      await ensureManagedTargetInstance();
     } catch (error) {
       desktopAppAttachment = previousAttachment;
       let recoveryError;
       try {
-        await releaseInstance(primaryProvider);
-        await ensureManagedPrimaryInstance();
+        await releaseInstance(provider);
+        await ensureManagedTargetInstance();
       } catch (recoveryFailure) {
         recoveryError = recoveryFailure;
       }
       if (recoveryError) {
         throw new AggregateError(
           [error, recoveryError],
-          "Desktop Host 附加失败，且主 App Server 未能恢复",
+          "Desktop Host 附加失败，且目标 App Server 未能恢复",
           { cause: error },
         );
       }
@@ -790,6 +934,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       await proxySelector.close();
       await desktopAppBridge?.close();
       await supervisorOwner?.close();
+      await closeAggregateProxy();
       await Promise.all(
         providerProxyRuntimes.values().map(({ proxy }) => proxy.close()),
       );
@@ -807,6 +952,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         providerSettingsSnapshot: provider => settingsSnapshots.get(provider),
         attachDesktopApp,
         detachDesktopApp,
+        desktopAppProviderSelectionEnabled: validatedCodex.desktop_app?.enabled === true
+          && primaryProvider === "openai",
       },
     );
     await supervisorOwner.start();
@@ -829,6 +976,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         port: validatedCodex.desktop_app.port,
         socketPath,
         primaryProvider,
+        providerSocketPaths: Object.fromEntries([...managedByProvider]
+          .map(([provider, managed]) => [provider, managed.socketPath])),
         codexBinary: runtime.environment.CODEX_BINARY,
         dataDir: runtime.dataDir,
         onEvent: (event) => {
@@ -845,6 +994,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     await proxySelector.close();
     await desktopAppBridge?.close();
     await supervisorOwner?.close();
+    await closeAggregateProxy();
     await Promise.all(
       providerProxyRuntimes.values().map(({ proxy }) => proxy.close()),
     );

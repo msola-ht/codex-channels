@@ -49,6 +49,7 @@
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
   独立 RS 切换 Provider 经模型端口读取对应 App Server 目录，官方兼容目录与独立目录分别装配；默认选择保留精确 Provider 和平台模型 ID；总览隔离各 RS 的读取故障，定向操作只查询目标 RS，故障条目不参与能力选择。
+  独立目录可从 `model/list` 的默认标记读取默认模型，聚合目录保留含多级路径的完整模型 ID；同一聚合 Provider 内模型选择仍只覆盖下一 Turn，保留当前 Thread。
   官方未登录时为未绑定会话解析唯一第三方，或组合根明确提供的同类账户默认 Provider，并使用其
   Profile 默认模型供状态、菜单与建线程复用；
   受管 Provider 设置应用后按精确 Provider 替换已确认的补充模型目录与默认标记，保留其他 Provider 的目录、已绑定模型及待生效的明确选择；
@@ -93,7 +94,7 @@
 - `conversation-reset-credit-service.ts`：`/limits reset` 的分页查询、预览和确认归属，绑定 Actor、Conversation、Workspace 与当前 Thread，复用共用重置券服务并在消费前复核授权。
 - `openai-reset-credit-service.ts`：OpenAI 重置券查询、短期选券确认与单次消费；复核账户/券修订、过期及并发，消费结果与额度刷新分离，不保存凭据或自动重试写操作。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
-  App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
+  App Server 账户查询，未注册的聚合或自定义 Provider 返回不支持，不创建占位账户快照，不回退到 OpenAI。
   OpenAI 额度可在快照保存后附加由组合根提供的凭证刷新时间，仅供展示，不写入官方账户快照。
   手动额度查询与启动预热直接读取官方额度，不主动刷新登录凭据；凭证刷新时间只读取已有值，不由查询时间生成。
   账户用量、额度、单账户刷新和启动预热可携带取消信号，取消后的结果不写入快照。启动预热按

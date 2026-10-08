@@ -322,19 +322,69 @@ codexc remote --profile sf-ds-<账户> resume
 
 ### Codex Desktop App 共享（macOS / Windows 预览）
 
-同一台 Mac 或 Windows 电脑上的 ChatGPT Desktop App 可以连接主 OpenAI App Server。macOS 使用
+同一台 Mac 或 Windows 电脑上的 ChatGPT Desktop App 默认连接主 OpenAI App Server，也可在启动时
+选择切换模式下已配置的 Provider 隔离实例。macOS 使用
 受管 stdio Proxy 连接现有私有 UDS；Windows 使用受认证的本机回环桥。启用前必须完全退出
 ChatGPT App，并确保主 Provider 是 OpenAI、App Server 后台服务已经安装；Windows 还需要
 PowerShell 7 和当前用户安装的 `OpenAI.Codex` 包：
 
 ```bash
 codexc app
+codexc app --provider <Provider-ID>
+codexc app --provider agg
 ```
 
 首次运行会询问是否启用共享，并说明重启 App Server 可能中断现有连接与任务；默认拒绝。
 确认后自动启用共享并启动 App，取消则不修改配置或服务。以后每次都使用同一命令启动，
 不再询问或执行启用步骤；从 Dock 或开始菜单直接打开不会继承本次共享端点。
-需要诊断时使用 `codexc app status`；非交互启用或指定 Windows 桥端口时，
+`--provider` 使用已配置的精确 Provider ID，聚合模式使用保留选择值 `agg`；省略时仍连接 OpenAI，
+不记住上次选择，也不修改用户配置。切换 App Server 实例前必须完全退出 Desktop，再执行对应命令。
+一次桌面连接固定到一个实例；聚合实例中的已加载模型可在 Desktop 模型选择器中切换，无需退出 App。
+本项目不转移会话历史。上游恢复历史可能沿用历史 Provider，
+桌面缓存和模型覆盖仍待实机验证；应在目标实例新建会话，不能认为旧会话已转换 Provider。选择目标不重启整个服务；
+macOS 需要附加工具 Host 时只短暂重启目标实例。旧服务缺少选择能力时会提示先重启服务。
+
+当至少有两个已配置的 API Key 切换提供商时，服务自动派生按需启动的
+`codexc-aggregate`。公开命令只接受 `--provider agg`，不接受内部长 ID；状态 JSON、Thread 与绑定
+仍使用 `codexc-aggregate`，无需迁移已有会话。无需添加同名账户或修改 Provider 配置；首次使用仍走上面的共享启用确认流程。
+若已有 ID 为 `agg` 的自定义切换 Provider，桌面选择明确报冲突；该自定义 Provider 仍可通过 `codexc remote --profile sf-custom-agg` 访问。
+聚合成员包含 DS、CLP、OCG、CCG 和自定义切换提供商，不包含官方 OAuth 主账户；多个同类账户也可以聚合。
+Desktop 共享仍要求主 Provider 为 OpenAI。执行 `codexc app --provider agg` 后，同一模型目录包含这些成员的模型，
+显示名称为 `Provider ID · 模型名称`。例如账户均名为 `main` 时，精确模型 ID 分别是
+`ds-main/deepseek-flash` 和 `clp-main/cline-pass/deepseek-v4.1-flash`。
+聚合使用一个 App Server 和现有工具 Host，各请求按选择的模型送至对应账户；网页搜索、模型 API
+WebSocket 和自动重试关闭，独立 Relay 保持其原有模型目录和路由。
+
+安装新代码后，旧 App Server 服务须按常规执行 `codexc restart appserver` 才能加载聚合能力；
+Gateway 运行时会检测现有成员的 Key、配置和模型目录变更，并在活动 Thread 与客户端租约均允许时重建聚合实例、更新渠道模型菜单。
+因此修改 DS 模型文件也会更新聚合目录；有活动或租约时先等待，快照变化后旧实例拒绝后续出站请求。
+关闭占用的 Remote/Desktop 客户端并等待活动结束后可完成刷新；Gateway 未运行时需重启 App Server。
+退出 Desktop 本身不会创建模型更新，只会释放租约、允许已有更新应用。Codex 主配置
+`~/.codex/config.toml` 不属于聚合模型材料，不参与聚合设置监听或出站材料指纹校验。
+聚合监听第三方账户注册、Profile、凭据、模型目录及其事务状态；主配置中的窗口覆盖与 Provider
+冲突仍在材料加载、启动或应用时校验。主配置修改不会由聚合机制自动刷新；需按对应设置的生效方式
+处理，要求重启 App Server 的配置仍须显式重启。
+新增、移除切换成员属于拓扑变更，仍须重启 App Server 和 Gateway。生成文件保存在
+`<dataDir>/runtime/aggregate-models.json`，是可重建的派生目录；应修改各提供商的源目录，不要直接编辑它。
+聚合拒绝 Codex 主 `config.toml` 中全局 `model_context_window` 和 `model_auto_compact_token_limit`，
+请先移除这两个覆盖，让每个模型采用自身目录设置；项目级同名配置仍可能覆盖目录值，使用前应检查。
+请在聚合实例新建 Thread，旧单账户 Thread 不会迁移。本地可控上游已观察同一 Thread 跨模型
+继续历史与命令工具结果回程；另已观察自定义提供商间切换及目录刷新后的同一 Thread 继续。真实云端提供商及 Desktop 内置工具仍待实机验收。
+终端使用 `codexc remote --provider agg`，不能同时指定 `--profile`；也可简写为 `codexc remote -p agg`。
+Desktop 启动和 `app status` 同样支持 `-p agg`。
+Remote 的 `-p agg` 选择聚合实例，`-p <Profile>` 等同 `--profile <Profile>`，例如 `codexc remote -p sf-ds-main`；未配置的受管 Profile 会明确拒绝。
+Desktop 的 `-p` 仍表示 Provider ID；两种命令均不允许重复或冲突选择。
+启动时读取聚合服务端的默认模型与思考等级。使用 `-m`/`--model` 或 `-c model=...` 选择其他目录模型时，
+自动采用目标模型的默认思考等级；`-m`/`--model` 优先于 `-c model=...`，重复配置覆盖以最后一项为准。
+显式 `-c model_reasoning_effort=...` 优先；`--` 后的内容只作为原生 Codex 输入，不参与模型或思考等级选择。
+渠道通过 `/model` 的“聚合提供商”目录选择同一组精确模型 ID，
+在聚合 Thread 内换模型保留历史；从单账户切入聚合则创建新 Thread。聚合审批 reviewer 固定为
+`user`，Remote 拒绝显式 `auto_review`。聚合 `/account`、`/limits` 明确返回不支持，
+请求指标仍按真实成员账户记录，不生成虚拟账户快照。
+会话清理只在发现聚合会话后才连接该实例，无法连接时明确跳过对应会话组。聚合纳入 Supervisor
+与账户空闲回收；Remote 退出释放租约，其他客户端租约或活动仍可阻止回收，退出 Desktop 不保证立即停止实例。
+
+需要诊断时使用 `codexc app status [--provider <Provider-ID>]`；非交互启用或指定 Windows 桥端口时，
 使用 `codexc app enable [--port <端口>]`，再执行 `codexc app`。
 关闭功能前同样先完全退出 App，再执行：
 
@@ -344,27 +394,36 @@ codexc app disable
 
 `status --json` 保持脱敏。Windows 只输出不带令牌的回环地址；macOS 的 `port`、`endpoint`、
 `tokenReady` 和 `bridgeReady` 不参与连接并返回空值或 `false`，另以 `toolHostSupported` 报告当前
-App Server 服务是否支持受管入口。`toolHostAttached` 只在 Desktop 已交付当前工具 Pipe 且 Host
+App Server 服务是否支持受管入口。`toolHostAttached` 只在查询目标对应的 Desktop 已交付当前工具 Pipe 且 Host
 租约仍连接时为 `true`。`running` 指桌面 App 进程；`primaryInstanceState` 另报告主 App Server
-实例的 `running`、`released` 或 `unknown` 状态。状态查询不会唤醒已释放的实例。
-共享功能只支持主 OpenAI App Server，不接入
-Remote Control、手机配对或第三方 Provider。Desktop 的连接环境属于未公开兼容入口，当前功能是
+实例的 `running`、`released` 或 `unknown` 状态；`provider` 和 `providerInstanceState` 报告查询目标，
+`desktopAppProvider` 报告 macOS 当前 Host 租约所属实例。状态查询不会唤醒已释放的实例。
+Windows 状态不建立桥连接；共享启用且令牌可读取时 `bridgeReady: null` 表示未探测，实际连接检查在启动时执行。
+`compatible` 仅表示启动入口探测通过，`toolHostAttached` 不表示 `codex_app` MCP 已就绪。
+内置工具仍按 Desktop 传入的工具开关启用，不根据模型 Provider 或登录状态推断工具可用性。
+如果 Desktop 日志出现 `dynamic_app_tools_peer_rejected reason=untrusted-process-ancestry`，
+表示工具 Pipe 拒绝了进程祖先链，重复启用共享不能修复。当前 `26.1002.52244` 的聚合共享路径
+已观察到这一故障，内置工具不可用；详见 [Desktop 验收状态](codex-desktop-app-development.md#实现与验收状态)。
+共享功能要求主 Provider 为 OpenAI，第三方通过切换模式的账户实例或聚合实例接入；不接入
+Remote Control 或手机配对。Desktop 的连接环境属于未公开兼容入口，当前功能是
 预览；构建不兼容时命令会拒绝启用。
 
-Desktop 的 macOS 平台已由操作者确认验收，Windows 尚未验收；版本记录与范围见
+主 OpenAI 实例的 macOS 路径已由操作者确认验收，Windows 尚未验收；新增 Provider 选择在两个平台均未实机验收。
+版本记录与范围见
 [Desktop 验收状态](codex-desktop-app-development.md#实现与验收状态)。
 macOS 上使用 ChatGPT `26.908.70816` 的既有实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
 Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
-私有 UDS，并在首次附加当前工具 Pipe 时短暂重启主 App Server 子进程，以 OpenAI 签名的 Desktop
+私有 UDS，并在首次附加当前工具 Pipe 时短暂重启目标 App Server 子进程，以 OpenAI 签名的 Desktop
 Node 托管项目锁定的 Codex CLI；开发基线为 0.160.1，既有私有 Pipe 与签名链实机验收使用 0.154.0，
-升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到共享主实例，
-Host 租约存在时空闲释放不会停止主实例。主实例已空闲释放时，`codexc app` 会先获取临时租约，
+升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到目标实例，
+Host 租约存在时空闲释放不会停止目标实例。目标实例已空闲释放时，`codexc app` 会先获取临时租约，
 按需恢复实例并保护启动预检，再通过 App Server 的官方 `thread/loaded/list` 和 `thread/read`
 检查全部已加载的持久及临时 Thread；临时租约会在打开 Desktop 前释放。发现活动 Thread、
-`codexc remote` 主实例租约，或无法完成
+`codexc remote` 目标实例租约，或无法完成
 只读状态检查时都会拒绝启动，不会进入子进程切换。隔离实测已经确认该进程链可启动 `codex_app`。
 macOS 已有验收结论；由于连接环境属于未公开兼容入口，功能仍保留预览定位，后续构建变化需按实际影响复核。
-Windows 只查询当前用户的正式安装包，并直接创建带单次环境的包内 Desktop 子进程，
+Windows 先以临时 Provider 租约等待目标实例就绪，再检查桥并启动桌面，成功或失败后释放临时租约。
+启动失败时会区分实例未就绪和桥连接失败，不自动重启服务。它只查询当前用户的正式安装包，并直接创建带单次环境的包内 Desktop 子进程，
 不写当前用户或系统级持久环境；Windows 的会话双向互通及内置工具兼容均尚未实机验收，不能据此
 视为正式平台支持。
 
@@ -448,11 +507,23 @@ WebUI 内不执行包含自身的停止、重启或卸载任务；请在本机�
 实例，但已停止的 Gateway 不再刷新或发送成功提示。监管端未提供当前所需的定向应用能力时，操作明确失败并提示
 重启 App Server 服务后重试，不自动改为整体重启。账户增删或 Provider 拓扑变化仍需显式管理服务。
 
-Linux 使用 systemd 用户服务；Windows 使用当前用户计划任务和隐藏的 PowerShell 7 进程，不需要管理员权限。Windows 私有配置 ACL 修复：
+Linux 使用 systemd 用户服务；Windows 使用当前用户计划任务和隐藏的 PowerShell 7 进程，不需要管理员权限。
+Windows 计划任务的 `Ready` 表示等待启动；未检测到运行中的服务宿主时，`codexc status` 显示 `stopped`，不将任务的 `Ready` 当作服务就绪。
+Windows 启动时，计划任务宿主等待 15 秒，App Server 应用就绪另行等待 60 秒，以覆盖配置、ACL 和实例初始化；监管确认主实例运行后再检查连接。应用等待超时会报告最后等待阶段，后续服务仍不会提前启动。
+Windows 私有配置 ACL 修复：
 
 ```powershell
 codexc security repair
 ```
+
+该命令只处理当前 Codex Home 顶层的普通 `.toml` 文件，不修改配置内容。修复后关闭 ACL 继承，
+仅保留当前用户、SYSTEM 与 Administrators 完全控制。若文件归 Administrators 所有，只有当前用户
+已有完全控制权限且文件不含拒绝规则时，才把所有者恢复为当前用户；其他用户所有的文件明确拒绝。
+使用普通用户终端执行即可；无权限或不满足条件时保留失败信息，不自动提权。
+修复逐文件执行，后续文件失败不会撤销此前已成功收紧的权限，处理失败原因后可以重新执行。
+日常启动和 Doctor 校验不会自动接管文件。修复后运行 `codexc doctor`，再重试启动服务。
+启动或读取 Codex Home 顶层 TOML 时，若发现所有者、继承或访问规则不符合要求，错误会直接提示
+`codexc security repair`。超时、PowerShell 缺失、目录权限问题及修复命令自身失败不重复给出这条建议。
 
 源码安装的日常升级统一使用：
 
@@ -632,6 +703,7 @@ codexc logs -n 100
 - 配置修改未生效：`codexc reload`。
 - 只重启 Gateway：`codexc restart gateway`；共享 App Server 与活动 Thread 会保留。
 - Codex CLI 版本不一致：按 `codexc update` 或错误提示安装精确版本后重试。
+- Codex CLI 报 `Missing optional dependency`：平台原生包缺失，按提示带 `--include=optional` 重装项目锁定版本，先确认 `codex --version` 成功；不要把该错误当作版本号或 PATH 冲突。见[源码安装与更新](source-install.md#本地工作树安装与部署)。
 - 飞书无消息：先运行 `codexc doctor`，再检查应用权限、消息事件发布和允许用户。
 - Windows ACL 失败：运行 `codexc security repair`，再运行 `codexc doctor`。
 - 日志需要脱敏后再分享；不要分享 Token、Cookie、Authorization Header 或完整命令工作内容。

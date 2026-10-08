@@ -87,6 +87,8 @@
     "scripts/launchd-control.sh",
     "scripts/local-installation.mjs",
     "scripts/managed-model-provider-setup.mjs",
+    "scripts/managed-provider-model-management.mjs",
+    "scripts/provider-model-selection.mjs",
     "scripts/managed-provider-files.mjs",
     "scripts/managed-provider-account-runtime.mjs",
     "scripts/provider-model-catalog.mjs",

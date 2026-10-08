@@ -34,7 +34,7 @@ export function runCcgSetup(options?: {
   prompts?: unknown;
   fetchImpl?: typeof fetch;
   downloadCatalog?: (fetchImpl: typeof fetch) => Promise<{ catalog: CcgCatalog }>;
-  action?: "add" | "reconfigure" | "settings" | "default" | "remove";
+  action?: "add" | "reconfigure" | "settings" | "catalog" | "default" | "remove";
   accountId?: string;
 }): Promise<unknown>;
 export function runCcgAccountCli(args: string[], options?: Parameters<typeof runCcgSetup>[0]): Promise<unknown>;
