@@ -13,7 +13,7 @@ function Get-Request {
   if ($request.operation -notin @('secure', 'verify', 'read-config')) {
     Throw-InvalidAcl 'ACL 操作无效'
   }
-  if ($request.kind -notin @('file', 'directory', 'parent-directory')) {
+  if ($request.kind -notin @('file', 'directory', 'parent-directory', 'socket-directory')) {
     Throw-InvalidAcl 'ACL 路径类型无效'
   }
   if ([string]::IsNullOrWhiteSpace($request.path)) {
@@ -93,6 +93,9 @@ function Set-PrivateAcl($Item, [string]$Kind, $ExpectedSids) {
 }
 
 function Assert-PrivateAcl($Item, [string]$Kind, $ExpectedSids) {
+  if ($Kind -ne 'file' -and (Test-UserOnlyDirectoryAcl $Item $ExpectedSids[0])) {
+    $ExpectedSids = @($ExpectedSids[0])
+  }
   $security = [System.IO.FileSystemAclExtensions]::GetAccessControl(
     $Item,
     [System.Security.AccessControl.AccessControlSections]::Owner `
@@ -146,29 +149,81 @@ function Assert-PrivateAcl($Item, [string]$Kind, $ExpectedSids) {
   }
 }
 
+function Test-UserOnlyDirectoryAcl($Item, $UserSid) {
+  $security = [System.IO.FileSystemAclExtensions]::GetAccessControl($Item,
+    [System.Security.AccessControl.AccessControlSections]::Owner -bor [System.Security.AccessControl.AccessControlSections]::Access)
+  $rules = @($security.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+  if ($rules.Count -ne 1 -or -not $security.AreAccessRulesProtected) { return $false }
+  $rule = $rules[0]
+  return $security.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -eq $UserSid.Value `
+    -and $rule.IdentityReference.Value -eq $UserSid.Value `
+    -and $rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow `
+    -and $rule.FileSystemRights -eq [System.Security.AccessControl.FileSystemRights]::FullControl `
+    -and $rule.InheritanceFlags -eq ([System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit) `
+    -and $rule.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None `
+    -and -not $rule.IsInherited
+}
+
 $request = Get-Request
-$item = Get-PathItem $request.path $request.kind
-$expectedSids = Get-ExpectedSids
-if ($request.operation -eq 'read-config') {
-  # Hold the file against writes and atomic replacement while checking both ACLs
-  # and reading. Never repair permissions on this read-only path.
-  $stream = [System.IO.File]::Open($request.path, [System.IO.FileMode]::Open,
-    [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-  try {
-    $item = Get-PathItem $request.path 'file'
-    $parent = Get-PathItem ([System.IO.Path]::GetDirectoryName($item.FullName)) 'parent-directory'
-    Assert-PrivateAcl $parent 'parent-directory' $expectedSids
-    Assert-PrivateAcl $item 'file' $expectedSids
-    if ($stream.Length -gt 1048576) { Throw-InvalidAcl '私有配置超过读取上限' }
-    $reader = [System.IO.StreamReader]::new($stream, [System.Text.UTF8Encoding]::new($false, $true))
-    try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
-    @{ ok = $true; content = $content } | ConvertTo-Json -Compress
-  } finally { $stream.Dispose() }
-  exit 0
-}
-if ($request.operation -eq 'secure') {
-  Set-PrivateAcl $item $request.kind $expectedSids
+$aclMutex = $null
+$aclMutexHeld = $false
+try {
+  if ($request.operation -eq 'secure') {
+    # Serialize detection and mutation across Gateway, service and setup processes.
+    $identity = [System.IO.Path]::GetFullPath($request.path).ToUpperInvariant()
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try { $hash = [System.BitConverter]::ToString($hasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($identity))).Replace('-', '') }
+    finally { $hasher.Dispose() }
+    $aclMutex = [System.Threading.Mutex]::new($false, ('Local\codexc-private-acl-' + $hash))
+    try { $aclMutexHeld = $aclMutex.WaitOne(500) }
+    catch [System.Threading.AbandonedMutexException] { $aclMutexHeld = $true }
+    if (-not $aclMutexHeld) { Throw-InvalidAcl '私有路径 ACL 正由其他进程更新，请重试' }
+  }
   $item = Get-PathItem $request.path $request.kind
+  $expectedSids = Get-ExpectedSids
+  # Codex 0.160.1 requires exactly one inheritable user ACE on its socket directory.
+  # Other writers sharing that directory must preserve this stronger ACL.
+  if ($request.kind -ne 'file' -and (Test-UserOnlyDirectoryAcl $item $expectedSids[0])) {
+    $expectedSids = @($expectedSids[0])
+  }
+  if ($request.kind -eq 'socket-directory') {
+    if ($request.operation -eq 'secure') {
+      # Tighten only an already trusted directory; never take ownership or accept
+      # unrelated principals merely because the current process can change its ACL.
+      Assert-PrivateAcl $item 'directory' $expectedSids
+      Set-PrivateAcl $item 'directory' @($expectedSids[0])
+      $item = Get-PathItem $request.path 'socket-directory'
+    }
+    if (-not (Test-UserOnlyDirectoryAcl $item $expectedSids[0])) {
+      Throw-InvalidAcl 'Socket 目录必须仅允许当前 SID 访问'
+    }
+    @{ ok = $true } | ConvertTo-Json -Compress
+    exit 0
+  }
+  if ($request.operation -eq 'read-config') {
+    # Hold the file against writes and atomic replacement while checking both ACLs
+    # and reading. Never repair permissions on this read-only path.
+    $stream = [System.IO.File]::Open($request.path, [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+      $item = Get-PathItem $request.path 'file'
+      $parent = Get-PathItem ([System.IO.Path]::GetDirectoryName($item.FullName)) 'parent-directory'
+      Assert-PrivateAcl $parent 'parent-directory' $expectedSids
+      Assert-PrivateAcl $item 'file' $expectedSids
+      if ($stream.Length -gt 1048576) { Throw-InvalidAcl '私有配置超过读取上限' }
+      $reader = [System.IO.StreamReader]::new($stream, [System.Text.UTF8Encoding]::new($false, $true))
+      try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
+      @{ ok = $true; content = $content } | ConvertTo-Json -Compress
+    } finally { $stream.Dispose() }
+    exit 0
+  }
+  if ($request.operation -eq 'secure') {
+    Set-PrivateAcl $item $request.kind $expectedSids
+    $item = Get-PathItem $request.path $request.kind
+  }
+  Assert-PrivateAcl $item $request.kind $expectedSids
+  @{ ok = $true } | ConvertTo-Json -Compress
+} finally {
+  if ($aclMutexHeld) { $aclMutex.ReleaseMutex() }
+  if ($null -ne $aclMutex) { $aclMutex.Dispose() }
 }
-Assert-PrivateAcl $item $request.kind $expectedSids
-@{ ok = $true } | ConvertTo-Json -Compress

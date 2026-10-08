@@ -18,7 +18,7 @@ import {
   createPrivateIpcConnection,
   privateIpcEndpointExists,
 } from "../runtime/private-ipc.mjs";
-import { readPrivateFileSync } from "../runtime/private-file.mjs";
+import { readPrivateFileSync, WindowsPrivatePathError } from "../runtime/private-file.mjs";
 import {
   parseServiceTarget,
   serviceDefinitions,
@@ -59,6 +59,11 @@ export async function controlWindowsServices({
   }
   if (action === "install") {
     preflight(environment);
+    // Validate every new definition before stopping any running service.
+    for (const definition of serviceDefinitions) {
+      readDefinition(definitionPath(definitionsDirectory, definition.target));
+    }
+    await stopDefinitions("all", definitionsDirectory, environment, "install-stop");
     for (const definition of serviceDefinitions) {
       const file = definitionPath(definitionsDirectory, definition.target);
       const value = readDefinition(file);
@@ -196,9 +201,9 @@ async function startDefinitions(target, definitionsDirectory, environment, selec
   }
 }
 
-async function stopDefinitions(target, definitionsDirectory, environment) {
+async function stopDefinitions(target, definitionsDirectory, environment, selection = "stop") {
   const failures = [];
-  for (const definition of serviceControlDefinitions("windows", target, "stop", environment, definitionsDirectory)) {
+  for (const definition of serviceControlDefinitions("windows", target, selection, environment, definitionsDirectory)) {
     try {
       await stopDefinition(definition, definitionsDirectory, environment);
     } catch (error) {
@@ -211,7 +216,9 @@ async function stopDefinitions(target, definitionsDirectory, environment) {
 }
 
 async function waitForAppServer(socketPath) {
-  if (typeof socketPath !== "string" || socketPath.length === 0) return;
+  if (typeof socketPath !== "string" || socketPath.length === 0) {
+    throw new Error("Windows App Server 服务定义缺少 Socket 路径；请运行 codexc install");
+  }
   const deadline = Date.now() + hostStartTimeoutMs;
   while (Date.now() < deadline) {
     if (await appServerSocketAcceptsWebSocket(socketPath)) {
@@ -415,6 +422,9 @@ function readDefinition(path) {
   try {
     definition = JSON.parse(readPrivateFileSync(path, definitionLimitBytes));
   } catch (error) {
+    if (error instanceof WindowsPrivatePathError) {
+      throw new Error(`Windows 服务定义无法安全读取：${path}；${error.message}`, { cause: error });
+    }
     throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc install`, { cause: error });
   }
   if (
@@ -422,6 +432,8 @@ function readDefinition(path) {
     || typeof definition.taskName !== "string"
     || typeof definition.pwshBinary !== "string"
     || typeof definition.controlPath !== "string"
+    || (definition.target === "app-server"
+      && (typeof definition.socketPath !== "string" || definition.socketPath.length === 0))
   ) {
     throw new Error(`Windows 服务定义缺失或无效：${path}；请运行 codexc install`);
   }

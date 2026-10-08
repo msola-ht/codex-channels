@@ -29,6 +29,13 @@ import { resolveExecutableInvocation } from "./executable.mjs";
 
 const defaultMaximumPrivateFileBytes = 1_048_576;
 
+export class WindowsPrivatePathError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "WindowsPrivatePathError";
+  }
+}
+
 /** Read current configuration without repairing permissions or caching ACL results. */
 export async function readPrivateConfigFile(path, { signal } = {}) {
   signal?.throwIfAborted();
@@ -41,7 +48,8 @@ export async function readPrivateConfigFile(path, { signal } = {}) {
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       }, (error, stdout) => {
         signal?.removeEventListener("abort", cancel);
-        if (error) reject(new Error("Windows 私有配置读取失败"));
+        if (signal?.aborted) reject(signal.reason);
+        else if (error) reject(windowsPrivatePathProcessError(error, error.code));
         else resolve(stdout);
       });
       const cancel = () => child.kill("SIGKILL");
@@ -183,6 +191,15 @@ export function securePrivateDirectorySync(path) {
   chmodSync(path, 0o700);
 }
 
+/** Tighten a trusted Windows socket directory to the locked Codex user-only ACL. */
+export function secureAppServerSocketDirectorySync(path) {
+  if (process.platform === "win32") {
+    assertWindowsPrivatePathSync(path, "socket-directory", "secure");
+    return;
+  }
+  chmodSync(path, 0o700);
+}
+
 export function assertPrivateDirectoryAccessSync(path) {
   if (process.platform === "win32") {
     assertWindowsPrivatePathSync(path, "directory");
@@ -230,15 +247,26 @@ function assertWindowsPrivatePathSync(path, kind, operation = "verify") {
     },
   );
   if (result.error || result.status !== 0) {
-    throw new Error("Windows 私有路径 ACL 无效");
+    throw windowsPrivatePathProcessError(result.error, result.status);
   }
   let response;
   try {
     response = JSON.parse(result.stdout.trim());
   } catch {
-    throw new Error("Windows 私有路径 ACL 检查返回无效");
+    throw new WindowsPrivatePathError("Windows 私有路径 ACL 检查返回无效");
   }
-  if (response?.ok !== true) throw new Error("Windows 私有路径 ACL 无效");
+  if (response?.ok !== true) throw new WindowsPrivatePathError("Windows 私有路径 ACL 校验未通过");
+}
+
+function windowsPrivatePathProcessError(error, status) {
+  if (error?.code === "ETIMEDOUT" || error?.killed === true) {
+    return new WindowsPrivatePathError("Windows 私有路径 ACL 检查超过 2 秒，已终止；尚不能判定 ACL 是否有效");
+  }
+  if (error && typeof error.code === "string") {
+    return new WindowsPrivatePathError("Windows 私有路径 ACL 检查无法启动，请检查 PowerShell 7（pwsh）");
+  }
+  const exit = Number.isInteger(status) ? status : "未知";
+  return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查进程失败（exit=${exit}）；可能是脚本执行或权限校验失败`);
 }
 
 function windowsPrivatePathInvocation() {
@@ -248,7 +276,7 @@ function windowsPrivatePathInvocation() {
       join(dirname(fileURLToPath(import.meta.url)), "windows-private-acl.ps1"),
     ]);
   } catch {
-    throw new Error("Windows 私有路径 ACL 检查需要 PowerShell 7（pwsh）");
+    throw new WindowsPrivatePathError("Windows 私有路径 ACL 检查需要 PowerShell 7（pwsh）");
   }
 }
 

@@ -17,6 +17,7 @@ import {
   assertPrivateDirectoryAccessSync,
   readPrivateFileSync,
   securePrivateDirectorySync,
+  secureAppServerSocketDirectorySync,
 } from "./private-file.mjs";
 import { terminateChildProcess } from "./process-lifecycle.mjs";
 import { inspectAppServerUnixSocket } from "./app-server-unix-socket.mjs";
@@ -807,8 +808,10 @@ export function sameAppServerTopology(actual, expected) {
 export async function prepareAppServerSocketPaths(socketPaths) {
   if (process.platform === "win32") {
     for (const directory of new Set(socketPaths.map((socketPath) => dirname(socketPath)))) {
+      const existing = lstatSync(directory, { throwIfNoEntry: false });
       mkdirSync(directory, { recursive: true, mode: 0o700 });
-      securePrivateDirectorySync(directory);
+      if (!existing) securePrivateDirectorySync(directory);
+      secureAppServerSocketDirectorySync(directory);
     }
   }
   const occupied = await Promise.all(
