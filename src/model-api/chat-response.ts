@@ -27,6 +27,12 @@ export interface DirectChatUsage {
   totalTokens?: number;
 }
 type FinishReason = "stop" | "tool_calls" | "length" | "content_filter" | "insufficient_system_resource" | "aborted";
+/** CLP may repeat its terminal on an empty assistant usage frame. */
+export function isChatUsageTrailer(message: Record<string, unknown>, finishReason: unknown, previousReason: string, usage: unknown): boolean {
+  return usage != null && finishReason === previousReason
+    && Object.entries(message).every(([key, value]) => key === "role" ? value === "assistant"
+      : key === "content" && (value === "" || value === null));
+}
 interface ToolCall { id: string; name: string; arguments: string | undefined }
 
 /** Single owner of Chat terminal state and usage. Contains no HTTP or metrics submission. */
@@ -90,9 +96,7 @@ export class DirectChatResponse {
       if (this.reason !== undefined && (choice.finish_reason != null || Object.keys(message).length > 0)) {
         // Some CLP models repeat their finish reason on the final usage-only frame.
         // Accept only an unchanged terminal and an explicitly empty assistant delta.
-        const usageTrailer = stream && chunk.usage != null && choice.finish_reason === this.reason
-          && Object.entries(message).every(([key, value]) => key === "role" ? value === "assistant"
-            : key === "content" && (value === "" || value === null));
+        const usageTrailer = stream && isChatUsageTrailer(message, choice.finish_reason, this.reason, chunk.usage);
         if (!usageTrailer) fail();
         return;
       }

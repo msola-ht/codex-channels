@@ -24,3 +24,4 @@ Chat 返回的 `reasoning` 和无签名 `reasoning_details` 明文以独立摘�
 `reasoning_content` 通过 Responses `reasoning.content` 中的 `reasoning_text` 内容块和对应流事件保留，在工具续跑及后续用户轮次原文回传为 `reasoning_content`；完整正文存在时不以摘要替代或重复拼接。
 同一增量的重复文本只保留一次，冲突或带签名的推理明确拒绝，绝不伪装成加密内容或补造推理占位文本。缓存计数缺失保持缺失。
 流必须具有明确结束原因；长度截断和内容过滤映射为 incomplete，并收尾保留已生成文本，不发布部分工具调用，上游错误和断流不得生成 completed。
+直接 Chat 与 Chat→Responses 共用 CLP 用量尾帧判定：已有结束原因后，仅接受带有效用量、相同结束原因和空 assistant delta（仅允许 assistant role 与空或 null content）的重复终态；不重复输出正文。新增正文、工具调用、推理字段或不同结束原因仍拒绝。

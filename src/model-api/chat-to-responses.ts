@@ -1,4 +1,5 @@
 import type { ChatToolIdentity } from "./responses-to-chat.js";
+import { isChatUsageTrailer } from "./chat-response.js";
 import { array, customToolInput, ModelConversionError, object, string, toolArguments, toolSearchArguments } from "./validation.js";
 import type { JsonObject } from "./validation.js";
 
@@ -33,6 +34,7 @@ export class ChatToResponses {
     const choice = object(choices[0]);
     if (choice.index !== 0 || choice.error != null) throw new ModelConversionError("Invalid Chat choice");
     const delta = object(choice.delta);
+    if (this.finishReason && isChatUsageTrailer(delta, choice.finish_reason, this.finishReason, chunk.usage)) return [];
     if (this.finishReason && Object.keys(delta).length) throw new ModelConversionError("Chat delta after finish reason");
     if (delta.refusal != null) throw new ModelConversionError("Unsupported Chat content");
     const events: JsonObject[] = [];
