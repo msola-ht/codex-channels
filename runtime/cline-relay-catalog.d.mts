@@ -9,6 +9,7 @@ export type ClineRelayCatalogSnapshot = { status: "ready"; catalog: ClineRelayCa
 export function clineRelayCatalogPath(environment: NodeJS.ProcessEnv): string;
 export function readClineRelayCatalog(environment?: NodeJS.ProcessEnv): ClineRelayCatalogSnapshot;
 export function clineRelayReasoningEfforts(model: ClineRelayModel): RelayReasoningEffort[];
+export function clinePassReasoningEfforts(model: ClineRelayModel): Array<RelayReasoningEffort | "enabled">;
 export function clineRelayInputModalities(model: ClineRelayModel): string[];
 export const clineRelayCatalogSchema: import("zod").ZodType<ClineRelayCatalog>;
 export const clineRelayModelSchema: import("zod").ZodType<ClineRelayModel>;

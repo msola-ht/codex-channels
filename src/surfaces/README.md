@@ -180,6 +180,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 到期时间合并服务端返回的明细；`null` 到期时间明确显示为“无到期时间”，明细少于可用数量时标出
 未返回明细的剩余张数。
 `provider-format.ts` 统一已知 Provider 显示名、命令中的 Provider 文案及限定 Provider 后的模型显示名前缀裁剪，并对后续 Provider 标识做有界展示。
+`reasoning-effort-format.ts` 统一模型菜单、状态与运行结果的思考设置文案；目录声明 `enabled` 时使用思考模式选择，`enabled` / `none` 分别显示开启/关闭思考，其余等级原样显示，提交给 Application 的控制值保持不变。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。
 `conversation-command-format.ts` 只汇总稳定导出；纯格式化实现分别位于

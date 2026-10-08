@@ -23,6 +23,7 @@ import { formatElapsedSeconds } from "./elapsed-duration.js";
 import { formatCodexProviderLabel, formatDisplayedProvider } from "./provider-format.js";
 import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
 const maximumThreadUsageGroups = 8;
 
@@ -34,6 +35,7 @@ export function formatConversationModels(
     model.model === state.model
     && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
   const fast = isFastServiceTier(state.serviceTier, current) ? "开启" : "关闭";
+  const effortName = reasoningEffortSettingName(state.effort, current);
   const providerSwitchNotice = state.providerPending
     ? ["提供商切换将在下一条消息中创建新 Session；当前 Session 会保留，可通过 /resume 恢复。", ""]
     : [];
@@ -54,21 +56,21 @@ export function formatConversationModels(
   if (result.view === "effort") {
     return toStructuredMarkdownList([
       formatModelStateLine(state),
-      `当前思考等级：${state.effort ?? current?.defaultReasoningEffort ?? "模型默认"}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
+      `当前${effortName}：${formatReasoningEffort(state.effort ?? current?.defaultReasoningEffort)}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
       ...(current && fastServiceTierId(current)
         ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
         : []),
       "",
       ...providerSwitchNotice,
       ...(result.nextSelection === "effort"
-        ? ["模型已选择，请继续选择思考等级。", ""]
+        ? [`模型已选择，请继续选择${effortName}。`, ""]
         : []),
       ...formatCurrentModelNotices(current),
       "",
-      "可用思考等级：",
+      `可用${effortName}：`,
       ...(current?.supportedReasoningEfforts ?? []).map(
         (option, index) =>
-          `${index + 1}. ${option.effort}${option.effort === state.effort ? " ← 当前" : ""} · ${option.description}`,
+          `${index + 1}. ${formatReasoningEffort(option.effort)}${option.effort === state.effort ? " ← 当前" : ""} · ${option.description}`,
       ),
       "",
       "切换：/effort <序号或档位>",
@@ -85,7 +87,7 @@ export function formatConversationModels(
     const currentProvider = state.modelProvider;
     return toStructuredMarkdownList([
       formatModelStateLine(state),
-      `思考等级：${state.effort ?? "模型默认"}`,
+      `${effortName}：${formatReasoningEffort(state.effort)}`,
       ...(current && fastServiceTierId(current)
         ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
         : []),
@@ -101,7 +103,7 @@ export function formatConversationModels(
   }
   return toStructuredMarkdownList([
     formatModelStateLine(state),
-    `思考等级：${state.effort ?? "模型默认"}`,
+    `${effortName}：${formatReasoningEffort(state.effort)}`,
     ...(current && fastServiceTierId(current)
       ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
       : []),
@@ -281,7 +283,7 @@ function appendThreadUsage(
   const visibleGroups = threadUsage.groups.slice(0, maximumThreadUsageGroups);
   lines.push(
     ...visibleGroups.map((group) =>
-      `${group.model ?? "其他"} · ${group.reasoningEffort ?? "其他"} · ${group.speed ?? "其他"}`
+      `${group.model ?? "其他"} · ${formatReasoningEffort(group.reasoningEffort, "其他")} · ${group.speed ?? "其他"}`
       + `：${formatMicros(group.estimatedUsageCreditsMicros)} Credits`),
   );
   if (threadUsage.groups.length > visibleGroups.length) {

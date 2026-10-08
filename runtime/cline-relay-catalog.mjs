@@ -38,6 +38,14 @@ export function clineRelayReasoningEfforts(model) {
   return level.options.filter(value => values.has(value));
 }
 
+/** Codex supports a model-defined effort for Cline's explicit thinking toggle. */
+export function clinePassReasoningEfforts(model) {
+  const efforts = clineRelayReasoningEfforts(model);
+  return model.reasoningOptions?.some(option => option.type === "toggle")
+    ? ["none", "enabled", ...efforts.filter(effort => effort !== "none")]
+    : efforts;
+}
+
 /** Cline compacts ordinary language inputs into capabilities; audio stays in modalities. */
 export function clineRelayInputModalities(model) {
   if (model.modalities) return model.modalities.input.filter(value => ["text", "image", "audio", "video", "pdf"].includes(value));

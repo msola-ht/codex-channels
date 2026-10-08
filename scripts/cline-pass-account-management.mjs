@@ -11,7 +11,7 @@ import { loadResponsesModelTemplates, responsesModelTemplatesFromCatalog } from 
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-instructions.mjs";
 import { validateEnabledModelSelection } from "./provider-model-selection.mjs";
-import { clineRelayCatalogSchema, clineRelayReasoningEfforts, clineRelayInputModalities } from "../runtime/cline-relay-catalog.mjs";
+import { clineRelayCatalogSchema, clinePassReasoningEfforts, clineRelayInputModalities } from "../runtime/cline-relay-catalog.mjs";
 import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
 import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider, withPreservedManagedModelCatalogSettings } from "../runtime/model-provider-runtime.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
@@ -38,14 +38,15 @@ function projectClinePassModels(source) {
   const catalog = clineRelayCatalogSchema.parse(source);
   const models = [], excludedModels = [];
   for (const model of catalog.models) {
-    const efforts = clineRelayReasoningEfforts(model);
+    const efforts = clinePassReasoningEfforts(model);
     const modalities = clineRelayInputModalities(model);
     let reason;
     if (!model.id.startsWith("cline-pass/") || model.id.length <= "cline-pass/".length) reason = "不是 Cline Pass 模型";
     else if (!Number.isSafeInteger(model.contextWindow) || model.contextWindow < 1024 || model.contextWindow > 100_000_000) reason = "缺少有效上下文窗口";
     else if (!model.capabilities?.includes("tools") || !modalities.includes("text")) reason = "未声明文本和工具能力";
     else if (model.modalities && !model.modalities.output.includes("text")) reason = "未声明文本输出";
-    else if (efforts.length === 0) reason = "未声明可映射的思考等级或关闭开关";
+    else if (efforts.length === 0) reason = model.reasoningOptions?.some(option => option.type === "budget_tokens")
+      ? "仅声明 token 预算，Codex 暂不支持映射" : "未声明可映射的思考等级或开关";
     if (reason) { excludedModels.push({ model: model.id, reason }); continue; }
     models.push({
       id: model.id, name: model.name ?? model.id,
@@ -80,7 +81,7 @@ export function createClinePassCatalog(templates, source, enabledModels) {
     models[models.findIndex(model => model.id === flash.id)] = flash;
   }
   const defaultModel = models.find(model => model.id === definition.defaultModel)?.id ?? models[0]?.id;
-  return { models: createResponsesModelCatalog(models, defaultModel).models };
+  return { models: createResponsesModelCatalog(models, defaultModel, { allowReasoningToggle: true }).models };
 }
 
 async function selectClinePassModels(models, providers, selectModels) {

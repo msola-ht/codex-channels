@@ -22,6 +22,7 @@ import {
   formatConversationStatus,
 } from "../conversation-workspace-status-command-format.js";
 import { formatCodexProviderLabel, scopedModelDisplayName } from "../provider-format.js";
+import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import type {
   FeishuCommandCenterAction,
   FeishuCommandCenterChoices,
@@ -442,7 +443,7 @@ export function renderCommandCenterChoices(
         `- Workspace：${escapeFeishuCardMarkdown(task.workspaceId)}`,
         `- Provider：${escapeFeishuCardMarkdown(formatCodexProviderLabel(task.modelProvider))}`,
         `- 模型：${escapeFeishuCardMarkdown(task.model ?? "默认")}`,
-        `- 思考等级：${escapeFeishuCardMarkdown(task.reasoningEffort ?? "默认")}`,
+        `- ${reasoningEffortSettingName(task.reasoningEffort)}：${escapeFeishuCardMarkdown(formatReasoningEffort(task.reasoningEffort, "默认"))}`,
         `- Sandbox：${escapeFeishuCardMarkdown(task.sandbox)}`,
         `- 权限 Profile：${escapeFeishuCardMarkdown(task.permissions ?? "未配置")}`,
         "- 网络：沿用 Workspace 当前权限",
@@ -683,7 +684,7 @@ export function renderCommandCenterChoices(
           "当前模型",
           `- 模型：${result.state.model}`,
           `- Provider：${formatCodexProviderLabel(result.state.modelProvider)}`,
-          `- 思考等级：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
+          `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
           ...(currentModel && fastServiceTierId(currentModel)
             ? [`- Fast 模式：${isFastServiceTier(result.state.serviceTier, currentModel) ? "开启" : "关闭"}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
             : []),
@@ -722,16 +723,16 @@ export function renderCommandCenterChoices(
       return undefined;
     }
     return {
-      title: "选择思考等级",
+      title: `选择${reasoningEffortSettingName(result.state.effort, currentModel)}`,
       description: [
         "当前设置",
         `- 模型：${result.state.model}`,
-        `- 思考等级：${result.state.effort ?? currentModel?.defaultReasoningEffort ?? "模型默认"}`,
+        `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
       ].join("\n"),
       descriptionFormat: "markdown",
       choices: efforts.map(
         (option) => ({
-          label: `${option.effort === result.state.effort ? "✓ " : ""}${option.effort}`,
+          label: `${option.effort === result.state.effort ? "✓ " : ""}${formatReasoningEffort(option.effort)}`,
           action: "effort",
           input: option.effort,
         }),

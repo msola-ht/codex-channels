@@ -26,7 +26,7 @@ export class ChatCompletionsBridge {
   private readonly requestTimeoutMs: number;
   constructor(private readonly options: ProviderProxyOptions & {
     clinePass?: boolean;
-    isClinePassModelEnabled?: (model: string, signal: AbortSignal) => Promise<boolean>;
+    readClinePassModelCapabilities?: (model: string, signal: AbortSignal) => Promise<{ reasoningEfforts: readonly string[] } | undefined>;
   }) {
     this.requestTimeoutMs = options.timeoutMs ?? chatBridgeRequestTimeoutMs;
   }
@@ -91,6 +91,7 @@ export class ChatCompletionsBridge {
       receivingBody = false;
       const source: unknown = JSON.parse(payloadBody);
       const requestedModel = source && typeof source === "object" && "model" in source ? source.model : undefined;
+      let modelCapabilities: { reasoningEfforts: readonly string[] } | undefined;
       status = 502;
       const upstream = this.options.resolveUpstream
         ? await waitForChatOperation(Promise.resolve(this.options.resolveUpstream(request.headers)), controller.signal)
@@ -99,22 +100,21 @@ export class ChatCompletionsBridge {
       // Check the requested model before capability-dependent conversion: a resumed
       // disabled model may carry Codex fallback controls that this bridge rejects.
       if (this.options.clinePass && typeof requestedModel === "string" && requestedModel.length > 0) {
-        let enabled: boolean;
         try {
-          if (!this.options.isClinePassModelEnabled) throw new Error("CLP catalog guard is unavailable");
-          enabled = await waitForChatOperation(this.options.isClinePassModelEnabled(requestedModel, controller.signal), controller.signal);
+          if (!this.options.readClinePassModelCapabilities) throw new Error("CLP catalog guard is unavailable");
+          modelCapabilities = await waitForChatOperation(this.options.readClinePassModelCapabilities(requestedModel, controller.signal), controller.signal);
         } catch {
           status = 503;
           throw new ChatUpstreamError("clp_catalog_unavailable", "CLP 模型目录暂时无法安全读取，请检查目录后重新选择已启用的模型。", false);
         }
-        if (!enabled) {
+        if (!modelCapabilities) {
           status = 409;
           throw new ChatUpstreamError("clp_model_disabled", "该 CLP 模型已停用或不在当前目录中，请重新选择已启用的模型。", false);
         }
       }
       if (controller.signal.aborted) throw new Error("aborted");
       status = 400;
-      const { request: body, toolNames } = responsesToChat(source);
+      const { request: body, toolNames } = responsesToChat(source, modelCapabilities?.reasoningEfforts);
       const { reasoning, ...parameters } = body;
       const outbound = this.options.clinePass && reasoning
         ? { ...parameters, ...clinePassChatReasoningControl(body.model, reasoning.effort) }

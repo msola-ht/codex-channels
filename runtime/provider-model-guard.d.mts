@@ -4,5 +4,6 @@ export class ProviderModelGuard {
     blockedPaths?: readonly string[];
   });
   isEnabled(model: string, signal?: AbortSignal): Promise<boolean>;
+  modelCapabilities(model: string, signal?: AbortSignal): Promise<{ reasoningEfforts: string[] } | undefined>;
   close(): Promise<void>;
 }

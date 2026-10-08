@@ -33,7 +33,7 @@ export class ProviderModelGuard {
     return content;
   }
 
-  async isEnabled(model, signal) {
+  async #readModel(model, signal) {
     if (this.#controller.signal.aborted || this.#pending.size >= 16) {
       throw new Error("Provider 模型目录复核不可用");
     }
@@ -70,7 +70,23 @@ export class ProviderModelGuard {
       }
       enabled.add(entry.slug);
     }
-    return enabled.has(model);
+    return catalog.models.find(entry => entry.slug === model);
+  }
+
+  async isEnabled(model, signal) {
+    return (await this.#readModel(model, signal)) !== undefined;
+  }
+
+  async modelCapabilities(model, signal) {
+    const entry = await this.#readModel(model, signal);
+    if (!entry) return undefined;
+    const levels = entry.supported_reasoning_levels;
+    if (!Array.isArray(levels) || levels.length > 16
+      || levels.some(level => !level || typeof level.effort !== "string" || level.effort.length === 0 || level.effort.length > 64)
+      || new Set(levels.map(level => level.effort)).size !== levels.length) {
+      throw new Error("Provider 模型思考能力目录无效");
+    }
+    return { reasoningEfforts: levels.map(level => level.effort) };
   }
 
   async close() {

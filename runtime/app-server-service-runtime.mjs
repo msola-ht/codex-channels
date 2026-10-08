@@ -201,7 +201,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       const clinePass = definition.storageId === "clp" || definition.id === "clp";
       bridge = new ChatCompletionsBridge({ ...options,
         clinePass,
-        ...(modelGuard ? { isClinePassModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
+        ...(modelGuard ? { readClinePassModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) } : {}),
         onError: () => proxySelector.invalidate(),
         ...(validatedCodex.upstream_user_agent ? { upstreamUserAgent: validatedCodex.upstream_user_agent } : {}),
       });

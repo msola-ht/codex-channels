@@ -5,6 +5,7 @@ import type {
 
 import { formatDisplayedProvider } from "./provider-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
 export function formatConversationScheduledTasks(
   result: Extract<ConversationCommandResult, { kind: "scheduled-tasks" }>,
@@ -81,7 +82,7 @@ export function formatConversationScheduledConfirmation(
     `计划：${formatSchedule(preview.task.schedule, preview.task.timezone)}`,
     `Workspace：${preview.task.workspaceId}`,
     `模型：${formatDisplayedProvider(preview.task.modelProvider)}/${preview.task.model ?? "默认"}`,
-    `思考等级：${preview.task.reasoningEffort ?? "默认"}`,
+    `${reasoningEffortSettingName(preview.task.reasoningEffort)}：${formatReasoningEffort(preview.task.reasoningEffort, "默认")}`,
     `下次运行：${formatScheduledAt(preview.task.nextRunAt)}`,
     `Sandbox：${preview.task.sandbox}`,
     `权限 Profile：${preview.task.permissions ?? "未配置"}`,

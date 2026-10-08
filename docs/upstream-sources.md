@@ -45,6 +45,7 @@ Relay 与 CLP Codex 目录共用下载器读取 [Cline 官方模型文件](https
 同时核对该提交的 `catalog-cline-recommended.ts`、`scripts/generate-models.ts` 和共享 `reasoning-options.ts`；输入类型映射核对同一提交的 `providers/model-capabilities.ts` 与 `catalog/catalog-live.ts`。
 思考参数映射另核对同一提交 `providers/routing/portable-reasoning.ts`、`providers/routing/anthropic-compatible.ts`、`providers/routing/provider-option-rules.ts`、`providers/vendors/cline.ts` 及相邻测试；Cline/Cline Pass 共用 `cline` SDK 适配器，通用关闭为 `reasoning.enabled=false`。锁定依赖 `@ai-sdk/openai-compatible@3.0.37` 的 [Chat 出站映射](https://github.com/vercel/ai/blob/%40ai-sdk%2Fopenai-compatible%403.0.37/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts)将指定等级序列化为 `reasoning_effort`。本项目保留已实测的精确 DeepSeek 关闭字段，不据此复制其他原生提供商适配器。
 此处是可由用户显式更新的模型元数据，不是 Codex 协议基线；每次下载记录实际 SHA，不加载上游代码。
+开关启用语义另核对本机目录记录的提交 `cd80a20e96481f5f5d413789f6847accf846487b`：`providers/routing/provider-option-rules.ts` 的 Cline 规则调用 `providers/routing/anthropic-compatible.ts` 中的 `buildGatewayReasoningOptions`，保留显式 `enabled: true/false`。目录中的 `toggle` 投影为 Codex `none/enabled`，不虚构上游思考等级；该投影不更改独立 Relay 的参数保留合同。
 下载入口为 `runtime/cline-relay-catalog-update.mjs`，共用读取入口为 `runtime/cline-relay-catalog.mjs`；
 Relay 更新和回退见[Relay 模型设置](provider-api-relay-development.md#clp-转发模型目录与设置)；CLP Codex 目录由独立的[共享目录更新入口](cline-pass.md)显式生成，双方不隐式覆盖彼此目录。
 

@@ -10,6 +10,7 @@ import {
 } from "../application/index.js";
 import type { UserFacingError } from "../conversation-core/index.js";
 import { gatewayRequestFailedText } from "./output-copy.js";
+import { formatReasoningEffort } from "./reasoning-effort-format.js";
 
 export function formatSurfaceUserFacingError(
   error: UserFacingError,
@@ -214,7 +215,10 @@ export function formatSurfaceUserFacingError(
       return "模型已变化，请重新发送 /model 选择";
     case "effort.unsupported": {
       const options = error.details.options;
-      return `当前模型不支持该思考等级，可选：${Array.isArray(options) ? options.join("、") : "无"}`;
+      const choices = Array.isArray(options)
+        ? options.map((option: unknown) => typeof option === "string" ? formatReasoningEffort(option) : option).join("、")
+        : "无";
+      return `当前模型不支持该思考设置，可选：${choices}`;
     }
     case "fast.usage":
       return "用法：/fast [on|off|status]";

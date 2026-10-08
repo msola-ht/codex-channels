@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { RelayReasoningEffort } from "./chat-request.js";
+import type { ChatReasoningEffort } from "./chat-request.js";
 import { array, ModelConversionError, object, string, toolSearchArguments } from "./validation.js";
 import type { JsonObject } from "./validation.js";
 
@@ -31,13 +31,13 @@ export interface ChatRequest {
   tool_choice?: unknown;
   parallel_tool_calls?: boolean;
   max_completion_tokens?: number;
-  reasoning?: { effort: RelayReasoningEffort };
+  reasoning?: { effort: ChatReasoningEffort };
   response_format?: JsonObject;
 }
 
 /** Stateless conversion: the caller supplies complete Responses input on every request. */
 export interface ChatToolIdentity { name: string; namespace?: string; kind: ChatToolKind }
-export function responsesToChat(value: unknown): { request: ChatRequest; toolNames: ReadonlyMap<string, ChatToolIdentity> } {
+export function responsesToChat(value: unknown, supportedReasoningEfforts?: readonly string[]): { request: ChatRequest; toolNames: ReadonlyMap<string, ChatToolIdentity> } {
   const source = object(value);
   const allowed = new Set(["model", "instructions", "input", "tools", "tool_choice", "parallel_tool_calls", "stream", "stream_options", "store", "include", "reasoning", "text", "service_tier", "prompt_cache_key", "client_metadata", "max_output_tokens"]);
   if (Object.keys(source).some(key => !allowed.has(key))) throw new ModelConversionError("Unsupported Responses request field");
@@ -59,7 +59,9 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
     const effort = reasoning.effort;
     if (effort != null) {
       if (effort !== "none" && effort !== "minimal" && effort !== "low" && effort !== "medium"
-        && effort !== "high" && effort !== "xhigh" && effort !== "max") throw new ModelConversionError("Unsupported Chat reasoning effort");
+        && effort !== "high" && effort !== "xhigh" && effort !== "max"
+        && !(effort === "enabled" && supportedReasoningEfforts?.includes("enabled"))) throw new ModelConversionError("Unsupported Chat reasoning effort");
+      if (supportedReasoningEfforts && !supportedReasoningEfforts.includes(effort)) throw new ModelConversionError("Reasoning option is not supported by this model");
       reasoningControl = { effort };
     }
   }

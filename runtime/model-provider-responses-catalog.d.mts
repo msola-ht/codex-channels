@@ -13,8 +13,8 @@ export interface ResponsesModelDefinition {
 }
 export function isResponsesProvider(id: unknown): boolean;
 export function responsesProviderCatalogPath(environment: NodeJS.ProcessEnv | undefined, id: string): string;
-export function validateResponsesModels(values: unknown, defaultModel: string): ResponsesModelDefinition[];
-export function createResponsesModelCatalog(definitions: ResponsesModelDefinition[], defaultModel: string): {
+export function validateResponsesModels(values: unknown, defaultModel: string, options?: { allowReasoningToggle?: boolean }): ResponsesModelDefinition[];
+export function createResponsesModelCatalog(definitions: ResponsesModelDefinition[], defaultModel: string, options?: { allowReasoningToggle?: boolean }): {
   schemaVersion: number; defaultModel: string; definitions: ResponsesModelDefinition[]; models: Record<string, unknown>[];
 };
 export function readResponsesModelCatalog(environment: NodeJS.ProcessEnv | undefined, id: string): ReturnType<typeof createResponsesModelCatalog> & { path: string; content: string; revision: string };
