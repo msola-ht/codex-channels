@@ -495,9 +495,14 @@ export async function inspectAppServerSupervisorState(primarySocketPath) {
     ? lstatSync(socketPath, { throwIfNoEntry: false })
     : assertSafeSupervisorSocket(socketPath);
   if (!status) return { status: "missing" };
-  const topology = parseTopology(
-    await readSupervisorResponse(socketPath, { action: "inspect" }),
-  );
+  const response = await readSupervisorResponse(socketPath, { action: "inspect" });
+  // A timeout or connection failure establishes no protocol version. Let the
+  // readiness owner retry within its existing startup budget instead of
+  // reporting a version mismatch and aborting installation immediately.
+  if (response === undefined || response.trim().length === 0) {
+    throw new Error("App Server 监管连接失败或未返回响应");
+  }
+  const topology = parseTopology(response);
   return topology === undefined
     ? { status: "incompatible" }
     : { status: "ready", topology };

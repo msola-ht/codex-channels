@@ -1,3 +1,4 @@
+import { lstatSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -8,6 +9,7 @@ import {
   type GatewayConfig,
 } from "../config/index.js";
 import { selectHttpProxyUrl } from "../../runtime/network-proxy.mjs";
+import { securePrivateDirectorySync } from "../../runtime/private-file.mjs";
 import {
   type ConversationTarget,
 } from "../conversation-core/index.js";
@@ -61,6 +63,23 @@ export function createSurfaceModules(
   options: SurfacePluginContext,
   plugins: readonly BuiltInSurfacePlugin[],
 ): SurfaceRuntimeModule[] {
+  if (plugins.length > 0) {
+    const uploadsDirectory = join(dirname(options.config.stateDatabasePath), "uploads");
+    try {
+      mkdirSync(uploadsDirectory, { mode: 0o700 });
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) {
+        throw error;
+      }
+    }
+    const metadata = lstatSync(uploadsDirectory);
+    const currentUid = process.getuid?.();
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()
+      || (currentUid !== undefined && metadata.uid !== currentUid)) {
+      throw new Error("媒体暂存目录类型或所有者无效");
+    }
+    securePrivateDirectorySync(uploadsDirectory);
+  }
   return composeBuiltInSurfacePlugins(plugins, options);
 }
 

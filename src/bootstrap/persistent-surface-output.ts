@@ -1,6 +1,6 @@
 import { DeliveryControlServer } from "../../runtime/delivery-control.mjs";
 import { randomUUID } from "node:crypto";
-import { DeliveryCoordinator, DeliveryJournal, DeliveryError } from "../delivery/index.js";
+import { DeliveryCoordinator, DeliveryJournal, DeliveryError, type DeliveryFailure } from "../delivery/index.js";
 import type { ConversationTarget, OutputEvent } from "../conversation-core/index.js";
 import { conversationTargetKey, surfaceAccountKey } from "../conversation-core/index.js";
 import { mayReleaseUncertainOutputBarrier, decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, withPersistentDeliveryDiagnostics, type DeliveryCheckpoint } from "../surfaces/index.js";
@@ -11,7 +11,7 @@ export interface PersistentSurfaceOutputOptions {
   authorized(event: OutputEvent, owner: string): boolean;
   accounts(): string[];
   deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, liveOrder?: number): Promise<void>;
-  fault(code: string, account?: string, persistentDeliveryId?: string): void;
+  fault(code: string, account?: string, persistentDeliveryId?: string, failure?: DeliveryFailure): void;
   changed?(): void;
   workerUrl?: URL;
 }
@@ -31,7 +31,7 @@ export class PersistentSurfaceOutput {
   constructor(private readonly options: PersistentSurfaceOutputOptions) {
     this.journal = new DeliveryJournal(options.directory, {
       ...(options.workerUrl ? { workerUrl: options.workerUrl } : {}),
-      onFailure: () => options.fault("storage"),
+      onFailure: (failure) => options.fault("storage", undefined, undefined, failure),
     });
     this.coordinator = new DeliveryCoordinator(this.journal, {
       accounts: () => options.accounts(),
@@ -57,7 +57,7 @@ export class PersistentSurfaceOutput {
           }
         }, () => options.authorized(payload.event, payload.owner), liveOrder)));
       },
-      fault: (code, account, id) => options.fault(code, account, id),
+      fault: (code, account, id) => options.fault(code, account, id, code === "storage" ? this.journal.failure : undefined),
       changed: () => this.notifyIdleWaiters(),
     });
     this.control = new DeliveryControlServer(options.directory, async (entries, action) => {

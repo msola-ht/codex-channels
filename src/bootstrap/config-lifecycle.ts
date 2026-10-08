@@ -42,6 +42,8 @@ const providerSettingsAction: Record<
   failed: "provider-settings-failed",
 };
 
+const shutdownTimeoutMs = 30_000;
+
 export async function runGatewayProcess(): Promise<void> {
   const runtime = loadRuntimeConfig();
   const config = runtime.config;
@@ -69,6 +71,7 @@ export async function runGatewayProcess(): Promise<void> {
       logger,
       surfacePlugins,
       runtime.configPath,
+      () => stop(1),
     );
   } catch (error) {
     await gatewayOwner.close();
@@ -101,6 +104,7 @@ export async function runGatewayProcess(): Promise<void> {
   let reloading = false;
   let reloadPending = false;
   let reloadTimer: NodeJS.Timeout | undefined;
+  let accountRefreshStartup: Promise<void> | undefined;
 
   const providerSettingsWatcher = new ProviderSettingsWatcher({
     logger,
@@ -136,25 +140,36 @@ export async function runGatewayProcess(): Promise<void> {
     process.removeListener("message", controlFromParent);
     return Promise.all([providersStopped, networkStopped]).then(() => undefined);
   };
+  const closeAccountRefresh = async (): Promise<void> => {
+    // IPC startup can still publish its endpoint after an early close.
+    await accountRefreshStartup?.catch(() => undefined);
+    await accountRefresh.close();
+  };
   const stop = (exitCode = 0): void => {
     if (stopping) {
       return;
     }
     stopping = true;
     gatewayOwner.markNotReady();
+    // A stuck startup or component close must not leave a stopped Gateway
+    // advertised as a live service. Only this Gateway process is terminated.
+    const deadline = setTimeout(() => {
+      logger.error({ timeoutMs: shutdownTimeoutMs }, "Gateway 停止等待超时，进程将以故障状态退出");
+      process.exit(1);
+    }, shutdownTimeoutMs);
     const watchersStopped = stopWatching();
-    void accountRefresh
-      .close()
-      .catch((error) => logger.error({ err: error }, "Gateway 账户刷新 IPC 关闭失败"))
-      .then(() => application.stop())
-      .catch((error) => logger.error({ err: error }, "Gateway 停止失败"))
+    void Promise.all([
+      watchersStopped.catch((error) => logger.error({ err: error }, "Gateway 配置监听关闭失败")),
+      closeAccountRefresh().catch((error) => logger.error({ err: error }, "Gateway 账户刷新 IPC 关闭失败")),
+      application.stop().catch((error) => logger.error({ err: error }, "Gateway 停止失败")),
+    ])
       .finally(async () => {
-        await watchersStopped;
         try {
           await gatewayOwner.close();
         } catch (error) {
           logger.error({ err: error }, "Gateway 所有权 Socket 关闭失败");
         }
+        clearTimeout(deadline);
         process.exit(exitCode);
       });
   };
@@ -266,10 +281,13 @@ export async function runGatewayProcess(): Promise<void> {
 
   try {
     await application.start();
-    await accountRefresh.start();
+    if (stopping) return;
+    accountRefreshStartup = accountRefresh.start();
+    await accountRefreshStartup;
   } catch (error) {
+    if (stopping) return;
     await stopWatching();
-    await accountRefresh.close().catch(() => undefined);
+    await closeAccountRefresh().catch(() => undefined);
     await application.stop().catch(() => undefined);
     await gatewayOwner.close();
     throw error;

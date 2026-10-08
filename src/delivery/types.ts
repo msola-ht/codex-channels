@@ -69,9 +69,16 @@ export interface DeliveryQueueSnapshot {
 
 export type DeliveryErrorCode = "capacity" | "account-capacity" | "record-too-large" | "storage" | "closed" | "mailbox-full" | "conflict";
 
+/** Bounded local diagnostics; never contains paths, payloads or exception messages. */
+export interface DeliveryFailure {
+  phase: "startup" | "request" | "worker";
+  reason: "timeout" | "acl" | "sqlite" | "conflict" | "storage" | "worker-error" | "worker-exit" | "message";
+  operation?: JournalCommand["type"];
+}
+
 export class DeliveryError extends Error {
-  constructor(readonly code: DeliveryErrorCode) {
-    super(`可靠投递失败：${code}`);
+  constructor(readonly code: DeliveryErrorCode, options?: ErrorOptions) {
+    super(`可靠投递失败：${code}`, options);
     this.name = "DeliveryError";
   }
 }
@@ -97,4 +104,4 @@ export type JournalResult = number | boolean | DeliveryRecord | DeliveryQueueEnt
 export interface WorkerRequest { id: number; command: JournalCommand }
 export type WorkerReply =
   | { id: number; ok: true; result: JournalResult }
-  | { id: number; ok: false; code: DeliveryErrorCode };
+  | { id: number; ok: false; code: DeliveryErrorCode; failure?: DeliveryFailure };

@@ -159,6 +159,7 @@
   Relay 指标与控制查询共用单次 JSON 请求生命周期：调用方指定回应字节上限、绝对截止时间及可选取消信号，
   统一关闭连接和清理等待，不重试；业务版本、关联 ID、确认结果和持久化含义由调用方验证。
 - `app-server-supervisor.mjs`：以当前用户私有 IPC 持有 App Server 监管入口互斥锁，
+  监管检查将无响应或连接失败作为不可用错误交给启动等待重试，不将其误报为协议不兼容；已收到但不合法的响应仍拒绝使用。
   各平台监听与端点清理统一委托 `private-ipc.mjs`；关闭仍先销毁租约连接，再等待在途 Provider 操作，关闭后拒绝重启同一 Owner。
   对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供主 App Server 与受控 Provider 的按需
   启动、释放与 Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`），

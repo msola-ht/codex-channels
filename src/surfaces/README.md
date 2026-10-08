@@ -264,6 +264,8 @@ Skill、Plugin 与子代理新建 Turn 时由统一 `turn.started` 生命周期�
 ACL 私有暂存和一小时清理由
 `managed-audio-store.ts` 复用。两者通过内部 `managed-media-store.ts` 统一私有目录生命周期、
 有界流落盘、临时文件清理和过期清理；各自的格式白名单、限制、保留时间和公开接口保持独立。
+组合根在创建渠道前收紧共享 `uploads` 根目录；媒体暂存器启动时拒绝符号链接、非目录和非当前用户所有的目录，
+再收紧渠道目录权限，Windows 继续由共享 ACL 辅助函数验证当前 SID 所有权并关闭权限继承。
 Application 只接收绝对本地路径；
 平台仍各自负责取得受信下载流。所有输入在调用 Application 前必须构造
 `SurfaceAccessContext` 并通过对应访问策略。

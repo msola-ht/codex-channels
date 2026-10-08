@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
+import { lstat, mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -54,6 +54,12 @@ export class ManagedMediaStore<MimeType extends string> {
       throw new Error(this.options.closedMessage);
     }
     await mkdir(this.options.directory, { recursive: true, mode: 0o700 });
+    const metadata = await lstat(this.options.directory);
+    const currentUid = process.getuid?.();
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()
+      || (currentUid !== undefined && metadata.uid !== currentUid)) {
+      throw new Error("媒体暂存目录类型或所有者无效");
+    }
     securePrivateDirectorySync(this.options.directory);
     await this.secureExistingFiles();
     await this.cleanupExpired().catch((error: unknown) => {

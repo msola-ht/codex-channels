@@ -150,6 +150,7 @@ export class ProviderSettingsWatcher {
   }
 
   start(): void {
+    if (this.stopping || this.timer) return;
     this.fingerprints = this.tryReadFingerprints() ?? new Map<string, string>();
     // The supervisor owns the applied baseline, so a Gateway rebuild cannot lose pending changes.
     for (const provider of this.visibleProviderIds) this.pendingProviders.set(provider, 0);

@@ -1007,8 +1007,8 @@ export abstract class GatewayComponentGraph {
           workerUrl: new URL(import.meta.url.endsWith(".ts") ? "../../dist/delivery/worker.js" : "../delivery/worker.js", import.meta.url),
           owner: (event) => this.outputOwner(event),
           authorized: (event, owner) => this.outputAuthorized(event, owner),
-          fault: (code, account, persistentDeliveryId) => {
-            logger.error({ code, account, persistentDeliveryId }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
+          fault: (code, account, persistentDeliveryId, failure) => {
+            logger.error({ code, account, persistentDeliveryId, ...(failure ? { deliveryFailure: failure } : {}) }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
             if (code === "delivery-uncertain" || code === "authorization-changed") return;
             if (account && code !== "storage" && code !== "capacity" && code !== "mailbox-full") this.surfaceManager.suspendPersistentAccount(account);
             else void this.requestStop().catch(() => logger.error("可靠投递故障后的 Gateway 清理失败"));
@@ -1528,8 +1528,11 @@ export abstract class GatewayComponentGraph {
       await this.surfaceManager.preparePersistence();
       this.requireRunning();
       await this.providerMetrics.start();
+      this.requireRunning();
       await this.metricsEvents?.start();
+      this.requireRunning();
       await this.accountSnapshotEvents?.start();
+      this.requireRunning();
       // IPC lifetime follows the writer, not the HTTP admission switch. It must
       // already exist for first enablement and drain terminal metrics on disable.
       await this.relayMetrics?.apply(true);
