@@ -287,7 +287,7 @@ codexc app status [--provider <Provider ID>] [--json]
 - `--provider` 接受切换模式下配置的精确 Provider ID（包含账户隔离 ID），以及主 OpenAI 且
   DS/CLP 均有切换账户时的保留选择值 `agg`，缺省连接主 OpenAI。
   `agg` 仅在公开命令解析时映射为内部 `codexc-aggregate`；命令不接受长 ID，状态 JSON、Thread、租约与绑定仍使用内部 ID。
-  Desktop 启动、状态查询和 Remote 均支持 `-p` 作为 `--provider` 简写；Remote Profile 使用 `--profile`。
+  Desktop 启动和状态查询支持 `-p` 作为 `--provider` 简写；Remote 的 `-p agg` 选择聚合实例，`-p <Profile>` 等同 `--profile <Profile>`。
   参数仅对本次启动生效，不写入 TOML、Desktop 配置或系统环境；普通模型名称和任意 Socket 路径均不接受。
   选择其他实例不重启整个服务，macOS 需要替换子进程时只处理目标实例。
   旧服务不支持 Provider 选择能力时拒绝启动并提示重启服务，不静默连接主实例。

@@ -362,7 +362,8 @@ WebSocket 和自动重试关闭，独立 Relay 保持其原有模型目录和路
 继续历史与命令工具结果回程；真实 DS/CLP 账户及 Desktop 内置工具仍待实机验收。
 终端使用 `codexc remote --provider agg`，不能同时指定 `--profile`；也可简写为 `codexc remote -p agg`。
 Desktop 启动和 `app status` 同样支持 `-p agg`。
-`-p` 在 codexc 命令中只表示 Provider；原生 Profile 请使用 `--profile`。
+Remote 的 `-p agg` 选择聚合实例，`-p <Profile>` 等同 `--profile <Profile>`，例如 `codexc remote -p sf-ds-main`；未配置的受管 Profile 会明确拒绝。
+Desktop 的 `-p` 仍表示 Provider ID；两种命令均不允许重复或冲突选择。
 启动时读取聚合服务端的默认模型与思考等级。渠道通过 `/model` 的“聚合提供商”目录选择同一组精确模型 ID，
 在聚合 Thread 内换模型保留历史；从单账户切入聚合则创建新 Thread。聚合审批 reviewer 固定为
 `user`，Remote 拒绝显式 `auto_review`。聚合 `/account`、`/limits` 明确返回不支持，
@@ -488,7 +489,9 @@ WebUI 内不执行包含自身的停止、重启或卸载任务；请在本机�
 实例，但已停止的 Gateway 不再刷新或发送成功提示。监管端未提供当前所需的定向应用能力时，操作明确失败并提示
 重启 App Server 服务后重试，不自动改为整体重启。账户增删或 Provider 拓扑变化仍需显式管理服务。
 
-Linux 使用 systemd 用户服务；Windows 使用当前用户计划任务和隐藏的 PowerShell 7 进程，不需要管理员权限。Windows 私有配置 ACL 修复：
+Linux 使用 systemd 用户服务；Windows 使用当前用户计划任务和隐藏的 PowerShell 7 进程，不需要管理员权限。
+Windows 计划任务的 `Ready` 表示等待启动；未检测到运行中的服务宿主时，`codexc status` 显示 `stopped`，不将任务的 `Ready` 当作服务就绪。
+Windows 私有配置 ACL 修复：
 
 ```powershell
 codexc security repair

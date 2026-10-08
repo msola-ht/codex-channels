@@ -12,7 +12,7 @@ import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.m
 import { resolveDefaultManagedProvider } from "../runtime/managed-provider-account-routing.mjs";
 import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
 
-export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [--provider agg | -p agg | --profile Profile] [Codex 参数...]";
+export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [--provider agg | -p agg | --profile Profile | -p Profile] [Codex 参数...]";
 
 export function parseCodexRemoteOptions(
   args,
@@ -34,16 +34,22 @@ export function parseCodexRemoteOptions(
     ...configuredManagedProfileDefinitions,
   ];
   assertManagedProfileDefinitions(managedProfileDefinitions);
+  args = [...args];
   const passthrough = [];
   let workspaceId;
   let selectedProfile;
   let selectedProvider;
   let hasUnmanagedProfile = false;
   for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
+    let argument = args[index];
     if (argument === "--") {
       passthrough.push(...args.slice(index));
       break;
+    }
+    // Keep native Profile shorthand; only the documented agg selector is special.
+    if (argument === "-p" && args[index + 1] !== "agg") {
+      argument = "--profile";
+      args[index] = argument;
     }
     if (argument === "--workspace") {
       if (workspaceId !== undefined) throw new Error("只能指定一个 --workspace");

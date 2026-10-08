@@ -138,7 +138,7 @@ sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profi
 DS 官方和 CLP 均有切换账户且主 Provider 为 OpenAI 时，可用 --provider agg 或 -p agg
 连接聚合实例；不能与 --profile 同用。聚合从服务端读取默认模型，审批 reviewer 使用 user，
 显式 auto_review 会被拒绝。终端退出时释放该实例租约。
--p 用于 Provider 选择；Profile 请使用 --profile。`,
+-p agg 选择聚合实例；-p <Profile> 等同 --profile <Profile>，例如 -p sf-ds-main。`,
   desktop_app: desktopAppCommandUsage,
   install: serviceCommandUsage.install,
   start: serviceCommandUsage.start,

@@ -1,7 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
 function Throw-InvalidAcl([string]$Message) {
-  throw [System.InvalidOperationException]::new($Message)
+  $aclError = [System.InvalidOperationException]::new($Message)
+  $aclError.Data['codexcAclReason'] = $Message
+  throw $aclError
 }
 
 function Get-Request {
@@ -164,11 +166,14 @@ function Test-UserOnlyDirectoryAcl($Item, $UserSid) {
     -and -not $rule.IsInherited
 }
 
-$request = Get-Request
+$request = $null
 $aclMutex = $null
 $aclMutexHeld = $false
+$stage = 'request'
 try {
+  $request = Get-Request
   if ($request.operation -eq 'secure') {
+    $stage = 'lock'
     # Serialize detection and mutation across Gateway, service and setup processes.
     $identity = [System.IO.Path]::GetFullPath($request.path).ToUpperInvariant()
     $hasher = [System.Security.Cryptography.SHA256]::Create()
@@ -179,6 +184,7 @@ try {
     catch [System.Threading.AbandonedMutexException] { $aclMutexHeld = $true }
     if (-not $aclMutexHeld) { Throw-InvalidAcl '私有路径 ACL 正由其他进程更新，请重试' }
   }
+  $stage = 'inspect'
   $item = Get-PathItem $request.path $request.kind
   $expectedSids = Get-ExpectedSids
   # Codex 0.160.1 requires exactly one inheritable user ACE on its socket directory.
@@ -190,10 +196,13 @@ try {
     if ($request.operation -eq 'secure') {
       # Tighten only an already trusted directory; never take ownership or accept
       # unrelated principals merely because the current process can change its ACL.
+      $stage = 'verify'
       Assert-PrivateAcl $item 'directory' $expectedSids
+      $stage = 'secure'
       Set-PrivateAcl $item 'directory' @($expectedSids[0])
       $item = Get-PathItem $request.path 'socket-directory'
     }
+    $stage = 'verify'
     if (-not (Test-UserOnlyDirectoryAcl $item $expectedSids[0])) {
       Throw-InvalidAcl 'Socket 目录必须仅允许当前 SID 访问'
     }
@@ -201,6 +210,7 @@ try {
     exit 0
   }
   if ($request.operation -eq 'read-config') {
+    $stage = 'read-config'
     # Hold the file against writes and atomic replacement while checking both ACLs
     # and reading. Never repair permissions on this read-only path.
     $stream = [System.IO.File]::Open($request.path, [System.IO.FileMode]::Open,
@@ -218,11 +228,18 @@ try {
     exit 0
   }
   if ($request.operation -eq 'secure') {
+    $stage = 'secure'
     Set-PrivateAcl $item $request.kind $expectedSids
     $item = Get-PathItem $request.path $request.kind
   }
+  $stage = 'verify'
   Assert-PrivateAcl $item $request.kind $expectedSids
   @{ ok = $true } | ConvertTo-Json -Compress
+} catch {
+  # Do not return exception messages: PowerShell/.NET may include file contents.
+  @{ ok = $false; stage = $stage; reason = $_.Exception.Data['codexcAclReason'] } |
+    ConvertTo-Json -Compress
+  exit 1
 } finally {
   if ($aclMutexHeld) { $aclMutex.ReleaseMutex() }
   if ($null -ne $aclMutex) { $aclMutex.Dispose() }

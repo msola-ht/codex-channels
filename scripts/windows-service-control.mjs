@@ -151,6 +151,8 @@ export async function inspectWindowsServiceStatus({
       host = await inspectHost(definition.controlPath);
     }
     const running = task.exists && host?.version === 1 && host.running === true;
+    // ScheduledTasks Ready means eligible to start, not a ready service host.
+    const taskState = String(task.state ?? "unknown").toLowerCase();
     services.push({
       target: service.target,
       name: service.displayName,
@@ -158,7 +160,7 @@ export async function inspectWindowsServiceStatus({
       loaded: task.exists,
       running,
       state: task.exists
-        ? running ? "running" : String(task.state ?? "unknown").toLowerCase()
+        ? running ? "running" : taskState === "ready" ? "stopped" : taskState
         : "missing",
       pid: running && Number.isSafeInteger(host.childPid) ? host.childPid : null,
     });

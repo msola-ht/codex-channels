@@ -49,7 +49,7 @@ export async function readPrivateConfigFile(path, { signal } = {}) {
       }, (error, stdout) => {
         signal?.removeEventListener("abort", cancel);
         if (signal?.aborted) reject(signal.reason);
-        else if (error) reject(windowsPrivatePathProcessError(error, error.code));
+        else if (error) reject(windowsPrivatePathProcessError(error, error.code, stdout, path, "file", "read-config"));
         else resolve(stdout);
       });
       const cancel = () => child.kill("SIGKILL");
@@ -247,7 +247,7 @@ function assertWindowsPrivatePathSync(path, kind, operation = "verify") {
     },
   );
   if (result.error || result.status !== 0) {
-    throw windowsPrivatePathProcessError(result.error, result.status);
+    throw windowsPrivatePathProcessError(result.error, result.status, result.stdout, path, kind, operation);
   }
   let response;
   try {
@@ -258,15 +258,36 @@ function assertWindowsPrivatePathSync(path, kind, operation = "verify") {
   if (response?.ok !== true) throw new WindowsPrivatePathError("Windows 私有路径 ACL 校验未通过");
 }
 
-function windowsPrivatePathProcessError(error, status) {
+function windowsPrivatePathProcessError(error, status, stdout, path, kind, operation) {
+  const context = `（${operation}/${kind}；路径=${JSON.stringify(path).slice(0, 320)}）`;
+  let response;
+  try { response = JSON.parse(stdout); } catch { /* Process startup or script parsing may produce no JSON. */ }
+  const reasons = new Set([
+    "缺少 ACL 请求", "ACL 操作无效", "ACL 路径类型无效", "ACL 路径无效",
+    "父目录只支持校验", "配置读取只支持普通文件", "私有路径不能是重解析点",
+    "私有路径必须是普通文件", "私有路径必须是目录", "私有路径必须由当前 SID 拥有",
+    "受信任 SID 缺少完全控制权限", "其他主体具有不安全的私有路径访问权限",
+    "私有路径缺少受信任 SID 权限", "私有路径仍继承父目录权限",
+    "私有路径 ACL 正由其他进程更新，请重试", "Socket 目录必须仅允许当前 SID 访问",
+    "私有配置超过读取上限",
+  ]);
+  if ((!error || typeof error.code === "number") && status === 1 && response?.ok === false) {
+    const stage = ["request", "lock", "inspect", "secure", "verify", "read-config"].includes(response.stage)
+      ? response.stage : "unknown";
+    const reason = reasons.has(response.reason) ? response.reason : "系统权限操作失败";
+    return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查失败：${reason}；阶段=${stage}${context}`);
+  }
+  if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" || error?.code === "ENOBUFS") {
+    return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查输出超过上限${context}`);
+  }
   if (error?.code === "ETIMEDOUT" || error?.killed === true) {
-    return new WindowsPrivatePathError("Windows 私有路径 ACL 检查超过 2 秒，已终止；尚不能判定 ACL 是否有效");
+    return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查超过 2 秒，已终止；尚不能判定 ACL 是否有效${context}`);
   }
   if (error && typeof error.code === "string") {
-    return new WindowsPrivatePathError("Windows 私有路径 ACL 检查无法启动，请检查 PowerShell 7（pwsh）");
+    return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查无法启动，请检查 PowerShell 7（pwsh）${context}`);
   }
   const exit = Number.isInteger(status) ? status : "未知";
-  return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查进程失败（exit=${exit}）；可能是脚本执行或权限校验失败`);
+  return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查进程失败（exit=${exit}）；可能是脚本执行或权限校验失败${context}`);
 }
 
 function windowsPrivatePathInvocation() {

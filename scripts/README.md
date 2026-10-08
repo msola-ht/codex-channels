@@ -362,7 +362,7 @@
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
   `codexc remote` 自有的 Workspace、聚合 Provider 与受管 Provider Profile 参数；聚合只接受
-  `--provider agg` 或 `-p agg`，与任何 Profile 互斥，重复选择失败关闭；`-p` 不再透传为原生 Profile，Profile 使用 `--profile`；受管 Provider 只使用与磁盘文件及
+  `--provider agg` 或 `-p agg`，与任何 Profile 互斥，重复选择失败关闭；`-p <Profile>` 复用 `--profile <Profile>` 的校验与实例路由，`agg` 保留给聚合选择；受管 Provider 只使用与磁盘文件及
   原生 Codex 一致的 `sf-*` 规范名称，旧的无前缀名称只返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
   无显式 Profile 且官方未登录时解析唯一第三方 Profile；候选全部为同一家 DS、OCG、CCG 或 CLP 账户时使用注册表默认账户，
   其他多个候选要求明确选择，不修改主配置。
