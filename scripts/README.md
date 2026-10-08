@@ -471,7 +471,7 @@
 - `install-global-source.mjs`：显式准备干净源码、自动执行 webui 子项目依赖安装与前端构建
   （`webui/dist`），再生成临时 npm tarball 并通过禁用隐式生命周期脚本的 npm 全局安装；安装结果
   不链接或依赖源码目录，并避免 npm 12 脚本策略跳过构建；源码更新可用内部 `--prepared` 复用已
-  验证的 Gateway/WebUI 构建结果，避免重复构建。注册全局 Gateway 前按协议元数据同步缺失或版本不符的默认 Codex CLI；显式二进制无效或版本不符时失败关闭，不依赖渠道配置。
+  验证的 Gateway/WebUI 构建结果，避免重复构建。注册全局 Gateway 前按协议元数据同步缺失或版本不符的默认 Codex CLI；CLI 安装显式包含平台可选依赖，执行失败与版本不符分别报告。显式二进制无效或版本不符时失败关闭，不依赖渠道配置。
 - `webui-dev.mjs`：仓库根目录 `npm run webui:dev` 的一键开发入口，并行启动
   `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。

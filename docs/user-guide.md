@@ -643,6 +643,7 @@ codexc logs -n 100
 - 配置修改未生效：`codexc reload`。
 - 只重启 Gateway：`codexc restart gateway`；共享 App Server 与活动 Thread 会保留。
 - Codex CLI 版本不一致：按 `codexc update` 或错误提示安装精确版本后重试。
+- Codex CLI 报 `Missing optional dependency`：平台原生包缺失，按提示带 `--include=optional` 重装项目锁定版本，先确认 `codex --version` 成功；不要把该错误当作版本号或 PATH 冲突。见[源码安装与更新](source-install.md#本地工作树安装与部署)。
 - 飞书无消息：先运行 `codexc doctor`，再检查应用权限、消息事件发布和允许用户。
 - Windows ACL 失败：运行 `codexc security repair`，再运行 `codexc doctor`。
 - 日志需要脱敏后再分享；不要分享 Token、Cookie、Authorization Header 或完整命令工作内容。

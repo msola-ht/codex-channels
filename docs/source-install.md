@@ -122,6 +122,13 @@ App Server 的会话历史不在这些数据库中。
 同一版本号下的新提交仍会更新。受管源码没有新提交时，只读校验配置和数据库并按需同步配套 CLI；CLI 无需更新时不停止服务。本地构建包执行相同检查和 CLI 同步，不更新 Gateway 包；安装工作区代码使用 `npm run install:global`。
 从开发仓库执行 `npm run install:global` 不会将其登记为受管 `main` 仓库。该入口（包括内部 `--prepared`）在注册 Gateway 全局命令前检测 Codex CLI：默认 `codex` 缺失或版本不符时通过 npm 同步为 `src/codex-protocol/version.json` 锁定的正式版本，并检查安装后的版本和 PATH，无需初始化或渠道配置。显式 `CODEX_BINARY` 无效或版本不符时明确失败，不替换指定二进制。CLI 无法执行、安装失败或安装后仍不可见时也明确失败。安装不自动登录或启动服务。
 
+本地源码安装与 `codexc update` 的 CLI 候选／全局安装显式使用 `--include=optional`，因为官方 npm
+入口依赖当前平台的原生可选包。`Missing optional dependency @openai/codex-…` 表示安装不完整，
+不等同于可执行 CLI 的版本不符；命令分别报告这两种情况。已损坏的 CLI 不自动覆盖，默认入口提示
+用错误中给出的锁定版本执行 `npm install --global --include=optional @openai/codex@<版本>`，
+确认 `codex --version` 成功后重试。显式指定的自定义 `CODEX_BINARY` 仍由操作者修复。
+如果重装后仍缺包，需要检查 npm 安装日志、平台架构和源配置，不能仅凭 npm 返回成功认定原生包完整。
+
 ### 本地工作树安装与部署
 
 在需要安装的源码根目录运行 `npm run install:global`（Windows 可用 `npm.cmd run install:global`）。命令自动准备依赖、构建 Gateway/WebUI，再安装当前工作树的构建包；未提交改动也会进入构建。仅执行 `npm run build` 不会刷新全局命令。
