@@ -361,7 +361,8 @@
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
-  `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数；受管 Provider 只使用与磁盘文件及
+  `codexc remote` 自有的 Workspace、聚合 Provider 与受管 Provider Profile 参数；聚合只接受
+  `--provider codexc-aggregate`，与任何 Profile 互斥，重复选择失败关闭；受管 Provider 只使用与磁盘文件及
   原生 Codex 一致的 `sf-*` 规范名称，旧的无前缀名称只返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
   无显式 Profile 且官方未登录时解析唯一第三方 Profile；候选全部为同一家 DS、OCG、CCG 或 CLP 账户时使用注册表默认账户，
   其他多个候选要求明确选择，不修改主配置。
@@ -370,6 +371,10 @@
   完成第三方 Provider 认证；同时按当前目录或显式
   `--workspace` 解析有效 Sandbox、审批策略、Permission Profile 与可选审批审查方式，第三方 Profile 不复制权限，
   用户显式传给 Codex 的权限参数优先，未受管的个人 Profile 也沿用匹配的 Workspace 权限；
+  聚合选择复用共享 Runtime 拓扑与 Supervisor 按需租约，不生成磁盘 Profile；启动前通过已有
+  Codex Client 读取服务端默认模型与目录，投影启动设置，避免本地 OpenAI 默认模型覆盖聚合目录。
+  聚合目录和 Provider 不允许由透传参数替换，自动审查准入复用共享 Provider Policy，默认使用
+  `user`；显式 `--approve-for-me`（及原生别名）或 `approvals_reviewer=auto_review` 明确拒绝；
   Workspace 的 `untrusted` 保留给 App Server Thread，但在没有显式审批覆盖时拒绝映射为固定版 CLI
   已退役的公开参数，不静默改成更宽松策略；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。

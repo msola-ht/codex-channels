@@ -331,16 +331,41 @@ PowerShell 7 和当前用户安装的 `OpenAI.Codex` 包：
 ```bash
 codexc app
 codexc app --provider <Provider-ID>
+codexc app --provider codexc-aggregate
 ```
 
 首次运行会询问是否启用共享，并说明重启 App Server 可能中断现有连接与任务；默认拒绝。
 确认后自动启用共享并启动 App，取消则不修改配置或服务。以后每次都使用同一命令启动，
 不再询问或执行启用步骤；从 Dock 或开始菜单直接打开不会继承本次共享端点。
-`--provider` 使用已配置的精确 Provider ID；省略时仍连接 OpenAI，不记住上次选择，也不修改用户配置。
-切换目标前必须完全退出 Desktop，再执行对应命令。一次桌面连接固定到一个 Provider 的实例，
-本项目不会合并不同 Provider 的模型或转移会话历史。上游恢复历史可能沿用历史 Provider，
+`--provider` 使用已配置的精确 Provider ID，或满足下面前提时派生的 `codexc-aggregate`；省略时仍连接 OpenAI，
+不记住上次选择，也不修改用户配置。切换 App Server 实例前必须完全退出 Desktop，再执行对应命令。
+一次桌面连接固定到一个实例；聚合实例中的已加载模型可在 Desktop 模型选择器中切换，无需退出 App。
+本项目不转移会话历史。上游恢复历史可能沿用历史 Provider，
 桌面缓存和模型覆盖仍待实机验证；应在目标实例新建会话，不能认为旧会话已转换 Provider。选择目标不重启整个服务；
 macOS 需要附加工具 Host 时只短暂重启目标实例。旧服务缺少选择能力时会提示先重启服务。
+
+当主 Provider 为 OpenAI，且 DeepSeek 和 CLP 均已配置切换模式账户时，服务自动派生按需启动的
+`codexc-aggregate`。无需添加同名账户或修改 Provider 配置；首次使用仍走上面的共享启用确认流程。
+执行 `codexc app --provider codexc-aggregate` 后，同一模型目录包含当前全部 DS 与 CLP 切换账户，
+显示名称为 `Provider ID · 模型名称`。例如账户均名为 `main` 时，精确模型 ID 分别是
+`ds-main/deepseek-flash` 和 `clp-main/cline-pass/deepseek-v4.1-flash`。
+聚合使用一个 App Server 和现有工具 Host，各请求按选择的模型送至对应账户；网页搜索、模型 API
+WebSocket 和自动重试关闭，独立 Relay 保持其原有模型目录和路由。
+
+安装新代码后，旧 App Server 服务须按常规执行 `codexc restart app-server` 才能加载聚合能力；
+账户、Key 或模型目录变更后也须重启该服务。运行中的聚合目录不热刷新，快照变化会拒绝后续出站请求。
+聚合拒绝 Codex 主 `config.toml` 中全局 `model_context_window` 和 `model_auto_compact_token_limit`，
+请先移除这两个覆盖，让每个模型采用自身目录设置；项目级同名配置仍可能覆盖目录值，使用前应检查。
+请在聚合实例新建 Thread，旧单账户 Thread 不会迁移。本地可控上游已观察同一 Thread 跨模型
+继续历史与命令工具结果回程；真实 DS/CLP 账户及 Desktop 内置工具仍待实机验收。
+终端使用 `codexc remote --provider codexc-aggregate`，不能同时指定 `--profile`；启动时读取聚合
+服务端的默认模型与思考等级。渠道通过 `/model` 的 `DS + CLP` 目录选择同一组精确模型 ID，
+在聚合 Thread 内换模型保留历史；从单账户切入聚合则创建新 Thread。聚合审批 reviewer 固定为
+`user`，Remote 拒绝显式 `auto_review`。聚合 `/account`、`/limits` 明确返回不支持，
+请求指标仍按真实 DS/CLP 账户记录，不生成虚拟账户快照。
+会话清理只在发现聚合会话后才连接该实例，无法连接时明确跳过对应会话组。聚合纳入 Supervisor
+与账户空闲回收；Remote 退出释放租约，其他客户端租约或活动仍可阻止回收，退出 Desktop 不保证立即停止实例。
+
 需要诊断时使用 `codexc app status [--provider <Provider-ID>]`；非交互启用或指定 Windows 桥端口时，
 使用 `codexc app enable [--port <端口>]`，再执行 `codexc app`。
 关闭功能前同样先完全退出 App，再执行：
@@ -356,7 +381,7 @@ App Server 服务是否支持受管入口。`toolHostAttached` 只在查询目�
 实例的 `running`、`released` 或 `unknown` 状态；`provider` 和 `providerInstanceState` 报告查询目标，
 `desktopAppProvider` 报告 macOS 当前 Host 租约所属实例。状态查询不会唤醒已释放的实例。
 Windows 状态不建立桥连接；共享启用且令牌可读取时 `bridgeReady: null` 表示未探测，实际连接检查在启动时执行。
-共享功能要求主 Provider 为 OpenAI，第三方通过切换模式的隔离实例接入；不接入
+共享功能要求主 Provider 为 OpenAI，第三方通过切换模式的账户实例或 DS/CLP 聚合实例接入；不接入
 Remote Control 或手机配对。Desktop 的连接环境属于未公开兼容入口，当前功能是
 预览；构建不兼容时命令会拒绝启用。
 

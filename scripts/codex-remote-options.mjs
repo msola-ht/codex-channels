@@ -11,7 +11,7 @@ import { hasCodexAuthFile } from "../runtime/codex-home.mjs";
 import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
 import { resolveDefaultManagedProvider } from "../runtime/managed-provider-account-routing.mjs";
 
-export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [Codex 参数...]";
+export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [--provider codexc-aggregate | --profile Profile] [Codex 参数...]";
 
 export function parseCodexRemoteOptions(
   args,
@@ -36,6 +36,7 @@ export function parseCodexRemoteOptions(
   const passthrough = [];
   let workspaceId;
   let selectedProfile;
+  let selectedProvider;
   let hasUnmanagedProfile = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -53,6 +54,24 @@ export function parseCodexRemoteOptions(
     }
     if (argument.startsWith("--workspace=")) {
       throw new Error(CODEX_REMOTE_USAGE);
+    }
+    if (argument === "--provider") {
+      if (selectedProvider !== undefined) throw new Error("只能指定一个 --provider");
+      if (selectedProfile !== undefined || hasUnmanagedProfile) {
+        throw new Error("--provider 不能与 --profile 同时使用");
+      }
+      const provider = args[index + 1];
+      if (provider !== "codexc-aggregate") {
+        throw new Error("codexc remote --provider 仅支持 codexc-aggregate；单独账户请使用规范 --profile");
+      }
+      selectedProvider = provider;
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--provider=")) throw new Error(CODEX_REMOTE_USAGE);
+    const profile = codexProfileArgument(args, index);
+    if (profile && selectedProvider !== undefined) {
+      throw new Error("--provider 不能与 --profile 同时使用");
     }
     const profileArgument = managedProfileArgument(args, index, managedProfileDefinitions);
     if (profileArgument) {
@@ -85,18 +104,22 @@ export function parseCodexRemoteOptions(
     if (reservedProfile) {
       throw new Error(reservedManagedProfileMessage(reservedProfile));
     }
-    if (codexProfileArgument(args, index)) {
+    if (profile) {
       if (selectedProfile !== undefined) {
         throw new Error("受管模型 Provider --profile 不能与其他 --profile 同时使用");
       }
+      if (hasUnmanagedProfile) throw new Error("只能指定一个 --profile");
       hasUnmanagedProfile = true;
+      passthrough.push(...args.slice(index, index + profile.consumed));
+      index += profile.consumed - 1;
+      continue;
     }
     passthrough.push(argument);
   }
-  if (selectedProfile === undefined && !hasUnmanagedProfile && selectDefaultProfile) {
+  if (selectedProvider === undefined && selectedProfile === undefined && !hasUnmanagedProfile && selectDefaultProfile) {
     selectedProfile = selectDefaultProfile();
   }
-  return { passthrough, workspaceId, selectedProfile };
+  return { passthrough, workspaceId, selectedProfile, selectedProvider };
 }
 
 export function defaultCodexRemoteProfile(environment = process.env) {
@@ -164,9 +187,11 @@ function assertManagedProfileDefinitions(definitions) {
 function codexProfileArgument(args, index) {
   const argument = args[index];
   if (argument === "--profile" || argument === "-p") {
-    return typeof args[index + 1] === "string" ? { consumed: 2 } : undefined;
+    if (!args[index + 1] || args[index + 1].startsWith("-")) throw new Error(CODEX_REMOTE_USAGE);
+    return { consumed: 2 };
   }
   if (argument.startsWith("--profile=") || argument.startsWith("-p=")) {
+    if (argument.endsWith("=")) throw new Error(CODEX_REMOTE_USAGE);
     return { consumed: 1 };
   }
   if (/^-p[^-]/u.test(argument)) return { consumed: 1 };

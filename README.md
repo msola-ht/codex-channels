@@ -65,9 +65,12 @@ codexc update                # 更新受管源码、同步配套 CLI 并校验�
 codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc app      # 启动共享 Desktop App；首次确认后自动启用（预览）
 codexc app --provider <Provider-ID> # 本次连接已配置的隔离实例；切换前退出 Desktop（预览）
+codexc app --provider codexc-aggregate # DS/CLP 切换账户聚合到同一桌面模型目录（预览）
+codexc remote --provider codexc-aggregate # 终端使用相同聚合目录；渠道从 /model 选择
 ```
 
 首次接入使用 `setup`，日常设置使用 `config`，数据维护使用 `cleanup`。清理菜单的五项操作、服务启停要求和会话归档示例见[本机清理与归档](docs/user-guide.md#本机清理与归档)。在聊天渠道发送 `/help` 查看可用命令。
+Desktop 聚合模式的账户前提、重启要求和会话限制见 [Desktop 共享说明](docs/user-guide.md#codex-desktop-app-共享macos--windows-预览)。
 
 ## 配置位置
 

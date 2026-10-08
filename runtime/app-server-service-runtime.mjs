@@ -2,7 +2,10 @@ import { loadClinePassAccounts, clinePassProviderId } from "./cline-pass-account
 import { isResponsesProvider, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
+import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArguments, loadAggregateModelMaterial } from "./aggregate-model-provider.mjs";
+import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -142,7 +145,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   );
   const {
     ProviderProxy,
+    AggregateModelProxy,
     ChatCompletionsBridge,
+    chatBridgeRequestTimeoutMs,
     pruneModelTrafficDumpSessions,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
@@ -347,6 +352,45 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     settingsSnapshots.set(provider, snapshot);
   };
   const instanceLaunches = new Map();
+  let aggregateProxy;
+  let aggregateGuard;
+  const aggregateProxyKeys = new Set();
+  const closeAggregateProxy = async () => {
+    const current = aggregateProxy;
+    const guard = aggregateGuard;
+    aggregateProxy = undefined;
+    aggregateGuard = undefined;
+    const results = await Promise.allSettled([current?.close(), guard?.close()]);
+    for (const key of aggregateProxyKeys) providerProxyRuntimes.removeUser(key, aggregateProviderId);
+    aggregateProxyKeys.clear();
+    const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
+    if (errors.length) throw new AggregateError(errors, "聚合模型资源未能完全关闭");
+  };
+  const prepareAggregateRuntime = async () => {
+    const material = loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers);
+    aggregateGuard = new AggregateMaterialGuard(material.files);
+    const token = randomBytes(32).toString("hex");
+    const urls = new Map();
+    for (const profile of material.profiles) {
+      const key = sharedProviderProxyKey(profile.provider);
+      providerProxyRuntimes.addUser(key, aggregateProviderId);
+      aggregateProxyKeys.add(key);
+      const started = await startProviderProxy(key, await proxyOptionsForUrl(new URL(profile.baseUrl)));
+      urls.set(profile.provider, `${started.baseUrl}/go/${proxyAccountId(profile.provider)}`);
+    }
+    await aggregateGuard.check();
+    const guard = aggregateGuard;
+    aggregateProxy = new AggregateModelProxy({ token, assertCurrent: signal => guard.check(signal),
+      routes: new Map([...material.routes].map(([slug, route]) => [slug, {
+        model: route.model, apiKey: route.apiKey, baseUrl: urls.get(route.provider),
+        timeoutMs: route.provider.startsWith("clp-") ? chatBridgeRequestTimeoutMs + 10_000 : 65_000,
+      }])),
+    });
+    await aggregateProxy.start();
+    const baseUrl = `http://${aggregateProxy.address()}`;
+    return { baseUrl, arguments: aggregateLaunchArguments(material, runtime.dataDir, baseUrl),
+      childEnvironment: { [aggregateTokenEnvironmentKey]: token } };
+  };
   const children = [];
   const childrenByProvider = new Map();
   const providerProxyIsInUse = (proxyKey) =>
@@ -436,7 +480,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       const managed = managedByProvider.get(provider);
       const definition = providerDefinitions.get(provider);
       const customDefinition = customSwitchingProvidersById.get(provider);
-      if (!managed || (!definition && !customDefinition) || !managed.socketPath) {
+      const aggregate = provider === aggregateProviderId;
+      if (!managed || (!definition && !customDefinition && !aggregate) || !managed.socketPath) {
         throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
       }
       const runningChild = childrenByProvider.get(provider);
@@ -447,11 +492,11 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       if (await appServerSocketAcceptsWebSocket(managed.socketPath)) return;
       await prepareAppServerSocketPaths([managed.socketPath]);
       const proxyKey = sharedProviderProxyKey(provider);
-      providerProxyRuntimes.addUser(proxyKey, provider);
+      if (!aggregate) providerProxyRuntimes.addUser(proxyKey, provider);
       let proxy;
       let child;
       try {
-        const startedProxy = await startProviderProxy(
+        const startedProxy = aggregate ? await prepareAggregateRuntime() : await startProviderProxy(
           proxyKey,
           isGoProvider(provider)
             ? await goProxyOptions()
@@ -460,12 +505,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               )),
         );
         proxy = startedProxy.proxy;
+        if (aggregate) managed.runtime = { provider, arguments: startedProxy.arguments, childEnvironment: startedProxy.childEnvironment };
         settingsSnapshots.delete(provider);
         const snapshot = prepareProviderSettings(provider);
         const providerBaseUrl = proxyAccountId(provider) !== undefined
           ? `${startedProxy.baseUrl}/go/${proxyAccountId(provider)}`
           : startedProxy.baseUrl;
-        const argumentsList = withProviderBaseUrl(
+        const argumentsList = aggregate ? managed.runtime.arguments : withProviderBaseUrl(
           managed.runtime.arguments,
           provider,
           providerBaseUrl,
@@ -527,6 +573,10 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
             cleanupError ??= proxyError;
           }
         }
+        if (aggregate) {
+          try { await closeAggregateProxy(); }
+          catch (proxyError) { cleanupError ??= proxyError; }
+        }
         if (cleanupError) {
           throw new Error(
             `模型 Provider App Server 启动失败且资源未能完全清理：${provider}`,
@@ -558,6 +608,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       throw error;
     }
     childrenByProvider.delete(provider);
+    if (provider === aggregateProviderId) await closeAggregateProxy();
     // The baseline belongs to the terminated instance, even if proxy cleanup fails.
     settingsSnapshots.delete(provider);
     if (provider !== primaryProvider) {
@@ -804,6 +855,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       await proxySelector.close();
       await desktopAppBridge?.close();
       await supervisorOwner?.close();
+      await closeAggregateProxy();
       await Promise.all(
         providerProxyRuntimes.values().map(({ proxy }) => proxy.close()),
       );
@@ -863,6 +915,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     await proxySelector.close();
     await desktopAppBridge?.close();
     await supervisorOwner?.close();
+    await closeAggregateProxy();
     await Promise.all(
       providerProxyRuntimes.values().map(({ proxy }) => proxy.close()),
     );

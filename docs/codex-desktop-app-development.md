@@ -6,6 +6,8 @@
 台电脑上的 Codex Desktop App 与 `codex-channels` 同时连接本项目监管的同一个 App Server。
 默认连接主 OpenAI 实例；切换模式可在启动时指定已配置的 Provider 隔离实例，使 Desktop、渠道和
 `codexc remote` 共享该实例的 Thread、Turn、Item 与实时通知。
+主 Provider 为 OpenAI 且 DS/CLP 均有切换账户时，还派生按需启动的虚拟 Provider
+`codexc-aggregate`，把全部 DS/CLP 切换账户模型提供给同一个 Desktop 模型选择器。
 
 当前锁定的 Codex CLI 0.160.1 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
 包含未公开的 WebSocket 与强制 CLI 启动入口。macOS 使用强制 CLI 与受管 stdio Proxy，Windows
@@ -34,6 +36,14 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 - Windows 使用当前用户包探测、受认证回环桥与隔离启动环境，仍为开发预览，未完成实机双向验收。
 - 启动时选择 Provider 隔离实例是新增能力，尚未完成 macOS 或 Windows 实机验收；下述主 OpenAI
   实例的历史验收不覆盖第三方模型目录、会话继续或内置工具兼容性。
+- DS/CLP 聚合模式复用同一个受监管 App Server 与工具 Host；聚合 Thread 的跨模型历史兼容及
+  Desktop 内置工具尚未完成实机观察。现有主实例验收不覆盖此路径。
+- Linux 隔离观察使用真实 CLI 0.160.1、聚合 HTTP 出口、原 ProviderProxy 和 CLP Chat 桥，
+  上游为本地可控服务而非真实账户。同一 Thread 完成 DS→CLP→DS，后续请求保留前轮历史，
+  两家均完成 `pwd` 工具调用及结果回程，指标保留 Thread/Turn 和实际账户。
+  设置不同目录窗口后，三轮实际有效窗口依次为 996147、124518、996147；服务入口另完成
+  按需启动、私有 UDS 的 `config/read` / `model/list`、持租约拒绝释放及关租约后释放。
+  这些观察不代表真实 DS/CLP 响应兼容性或 macOS/Windows Desktop UI 已完成验收。
 - 本次 Linux 隔离观察使用真实 0.160.1 App Server，完成回环桥 → Supervisor 租约 →
   `initialize` / `config/read`：缺省目标持有 OpenAI 租约，显式 `demo` 读取到 `model_provider=demo`
   并只持有该实例租约；持租约时释放被拒绝，断开后租约清空。未知目标返回 HTTP 400，重复目标、
@@ -63,6 +73,11 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
   裸中继。
 - 官方 `app-server daemon` 是实验性生命周期工具，会自行选择二进制、环境、控制 Socket 与更新
   方式。它不能代替本项目现有的 Provider 代理、指标采集和 Supervisor，因此本轮不采用。
+- 锁定源码 [`core/src/session/step_settings.rs`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/session/step_settings.rs)
+  的 `apply_update` 在模型改变时重新解析 `ModelInfo`，构成同 Provider 目录内换模型采用模型元数据
+  的实现依据；[`model-provider/src/provider.rs`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/model-provider/src/provider.rs)
+  对自定义目录使用 `StaticModelsManager`，不能据此承诺运行中目录热刷新。这些源码依据不替代
+  Desktop 跨模型历史与工具的实机验收。
 
 ### Desktop 兼容入口
 
@@ -106,9 +121,11 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 ### 非目标
 
 - 不接入 Remote Control、移动端、二维码、配对码或云端 Environment。
-- 不支持第三方主 Provider；主 Provider 仍必须为 `openai`，第三方仅通过切换模式的已配置隔离实例连接。
-- 不在 Desktop 模型选择器中合并不同 Provider 的模型，不在一次连接内按模型重路由。
-  切换 Provider 必须完全退出 Desktop，再用 `codexc app --provider <ID>` 启动。
+- 不支持第三方主 Provider；主 Provider 仍必须为 `openai`，第三方通过切换模式的已配置账户实例
+  或 DS/CLP 聚合实例连接。
+- 聚合范围只包含 DS/CLP 切换账户，不合并 OpenAI、其他 Provider 或独立 Relay 目录。
+  更换 App Server 实例必须完全退出 Desktop，再用 `codexc app --provider <ID>` 启动；
+  聚合实例内已加载模型间切换无需退出。
 - 不复制 Desktop UI，不让渠道模拟 Desktop 的审批界面，不跨连接转发审批决定。
 - 不支持两端同时向同一活动 Thread 写入。App Server 的活动状态仍是唯一依据；发现活动 Turn 时
   另一端只能观察、排队或等待完成。
@@ -180,6 +197,42 @@ Windows 使用独立的私有凭据文件，不改变 StateStore、指标库或�
 本次 Provider 选择不持久化只描述 `codexc app` 启动行为。各实例仍使用共享 Codex Home；
 Desktop 经上游配置 RPC 保存设置时可能写入共享用户配置，而非 Provider 私有 Profile，须纳入实机验收。
 
+### DS/CLP 聚合模型目录
+
+聚合拓扑由 OpenAI 主 Provider 与当前 DS/CLP 切换账户派生，不增加账户或 TOML 配置字段。
+`desktop_app.enabled` 仍控制 Desktop 共享；首次选择聚合时沿用既有启用确认流程。服务启动时
+不启动聚合 App Server，选择 `codexc-aggregate` 后复用现有 Supervisor、私有 UDS 和 macOS
+Host 生命周期按需启动一个实例。
+普通会话清理通过官方跨 Provider 列表发现历史，遇到聚合会话后才连接聚合实例；聚合配置
+不满足启动条件时明确跳过对应会话组，不让未使用聚合的普通清理在扫描前失败。
+Remote 通过 `--provider codexc-aggregate` 取得实例租约，不能同时指定 Profile；启动时从该实例
+读取默认模型与思考等级。渠道模型目录注册同一个 Provider，聚合内部切换保留 Thread，
+持久化绑定恢复仍按该 Provider 路由。聚合纳入 Gateway 账户空闲回收，活动与租约阻止提前释放；
+退出 Desktop 不承诺立即停止实例。聚合没有单一账户额度，账户查询明确不支持且不写虚拟快照；
+模型请求指标保留实际 DS/CLP 账户，不重复生成聚合 Provider 错误样本。
+
+聚合从各账户受管目录保留模型能力、上下文、压缩阈值、提示词与思考设置，显示名加
+`Provider ID · 模型名称`，精确 slug 使用 `<Provider ID>/<原模型 slug>`。例如：
+
+- `ds-main/deepseek-flash`
+- `clp-main/cline-pass/deepseek-v4.1-flash`
+
+目录包含当前全部 DS/CLP 切换账户，账户内模型不另造别名。聚合 HTTP 代理按精确 slug 白名单
+还原原模型 ID，路由至原 ProviderProxy；CLP 继续通过现有 Chat 桥转换。每次请求用目标账户
+真实 Key 替换本地随机认证令牌，不维护对话历史。聚合关闭模型 API WebSocket、网页搜索及
+自动重试；审批 reviewer 使用 `user`，Remote 拒绝显式 `auto_review`；独立 Relay 不接入聚合路由。
+
+唯一新增磁盘材料为 `<dataDir>/runtime/aggregate-models.json`，它是无密钥、可重建的派生目录；
+账户注册表、私有 Profile、Gateway TOML 和数据库格式均不变。目录在实例启动时加载，账户、
+Key 或模型设置变化后，快照校验拒绝后续出站请求并要求重启 App Server 服务，不热刷新列表。
+每请求的私有文件与 ACL 复核由有界工作线程执行，共享目录去重；等待支持取消与 15 秒截止时间。
+首包和空闲预算分别为 DS 65 秒、CLP 310 秒，响应总预算独立为 600 秒。
+安装新代码后的旧服务也须按常规重启才能加载聚合能力。
+
+为避免全局设置压平模型窗口，聚合启动拒绝 Codex 主 `config.toml` 顶层的
+`model_context_window` 和 `model_auto_compact_token_limit`。项目级同名配置仍可能覆盖模型目录值，
+使用前须检查。该边界不表示所有层级的上游配置覆盖均已由聚合实例消除。
+
 ## Windows 回环桥安全边界
 
 1. HTTP Server 只绑定 `127.0.0.1`，只接受精确路径 `/codex-app-server` 的 WebSocket Upgrade。
@@ -231,7 +284,8 @@ codexc app status [--provider <Provider ID>] [--json]
 
 ### `codexc app`
 
-- `--provider` 接受切换模式下配置的精确 Provider ID（包含账户隔离 ID），缺省连接主 OpenAI。
+- `--provider` 接受切换模式下配置的精确 Provider ID（包含账户隔离 ID），以及主 OpenAI 且
+  DS/CLP 均有切换账户时派生的 `codexc-aggregate`，缺省连接主 OpenAI。
   参数仅对本次启动生效，不写入 TOML、Desktop 配置或系统环境；普通模型名称和任意 Socket 路径均不接受。
   选择其他实例不重启整个服务，macOS 需要替换子进程时只处理目标实例。
   旧服务不支持 Provider 选择能力时拒绝启动并提示重启服务，不静默连接主实例。
@@ -268,6 +322,9 @@ codexc app status [--provider <Provider ID>] [--json]
   `thread/list` 显式请求多个 Provider，`thread/resume` 也可能沿用历史的 Provider。Desktop
   是否会从缓存恢复其他 Provider 的 Thread、传入模型覆盖，以及第三方是否能使用内置工具，均须实机确认。
   使用时应在目标实例新建会话，不以连接参数推断历史会话已转换 Provider。
+- 聚合实例的目录由 DS/CLP 账户目录派生，在上游仍归属同一个 `codexc-aggregate` Provider。
+  旧单账户 Thread 不迁移，必须新建聚合 Thread 再用；目录内模型切换的实现依据不证明历史中的
+  reasoning 或工具内容跨模型兼容，尚无该路径及聚合 Desktop 内置工具的实机验收。
 - Desktop 创建、恢复、归档、改名或更新 Thread 后，Gateway 只根据官方通知和后续
   `thread/list` / `thread/read` 观察结果，不从桥连接事件推断业务状态。
 - 渠道自动接续仍执行现有来源、Workspace、活动状态和绑定独占检查；桥不绕过这些检查。
@@ -332,6 +389,11 @@ codexc app status [--provider <Provider ID>] [--json]
   边界转换。
 - `runtime/app-server-service-runtime.mjs`：macOS 装配受管 Host，Windows 在配置启用且主 Provider
   为 OpenAI 时装配桥，并纳入 App Server 服务关闭顺序。
+- `runtime/aggregate-model-provider.mjs`：派生 DS/CLP 聚合成员、目录与启动参数，拒绝全局窗口覆盖，
+  对账户和模型材料做快照复核，只写无密钥的运行时目录。
+- `runtime/aggregate-material-guard.mjs`：在有界工作线程中复核私有材料与 ACL，取消、截止时间及关闭由服务持有。
+- `src/provider-proxy/aggregate-proxy.ts`：对精确聚合模型 ID 执行本地认证、白名单 HTTP 路由和账户
+  Key 替换，复用原 ProviderProxy 与 CLP Chat 桥，不承载 App Server RPC 或历史。
 - `runtime/gateway-config.mjs` 与声明文件：严格 `[codex.desktop_app]` Schema 和安全默认值。
 - `scripts/desktop-app-command.mjs` 与声明文件：平台化兼容探测、配置事务、服务控制、状态与单次环境
   启动；macOS 不读取桥令牌或探测桥端口。

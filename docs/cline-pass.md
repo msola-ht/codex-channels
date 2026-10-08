@@ -19,6 +19,17 @@ Key 使用现有私有文件机制保存，不写入 Gateway TOML 或命令行�
 仅支持当前多账户结构。遇到不支持的管理标记或 Profile 会明确拒绝读取，不自动删除数据。
 配置写入复用受管事务和失败回滚，不迁移已有 Provider 数据或数据库。
 
+主 Provider 为 OpenAI，且 DS 与 CLP 均有切换账户时，可使用 `codexc app --provider codexc-aggregate`。
+该按需实例的桌面目录包含当前全部 DS/CLP 切换账户；CLP 的精确模型 ID 形如
+`clp-main/cline-pass/deepseek-v4.1-flash`，显示名称包含账户 Provider ID。已加载模型间切换无需退出
+Desktop，更换 App Server 实例仍须完全退出。聚合请求复用现有 CLP Chat 桥，每次用目标账户真实 Key
+替换本地令牌；关闭网页搜索、模型 API WebSocket 和自动重试，不改变独立 Relay 的目录及路由。
+终端也可用 `codexc remote --provider codexc-aggregate`，渠道从 `/model` 的 `DS + CLP` 目录选择；
+同一聚合 Thread 内切换保留历史，账户额度查询不合并，请求指标按真实账户记录。
+安装新代码或变更账户、Key、模型目录后须重启 App Server 服务；聚合目录不热刷新，快照变化后拒绝
+后续出站。旧单账户 Thread 不迁移，请在聚合实例新建 Thread；聚合跨模型历史和 Desktop 工具尚未
+完成实机观察。窗口覆盖与共享前提见 [Desktop 共享说明](user-guide.md#codex-desktop-app-共享macos--windows-预览)。
+
 ## Chat 转换边界
 
 锁定 Codex 仅支持 Responses。App Server 仍配置 `wire_api = "responses"`，服务拥有的本地回环代理

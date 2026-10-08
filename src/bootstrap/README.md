@@ -32,8 +32,10 @@
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；
   对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态；按 Setup 管理
-  标记装配主 Client 与可选 Provider Client，并通过 Provider 路由复用其余业务模块；按已启用
-  Provider 装配模型指标组件，不持有模型转发数据通路；通过 `request-metrics-query-adapter.ts`
+  标记装配主 Client 与可选 Provider Client，并通过 Provider 路由复用其余业务模块；按 Runtime 中启用
+  DS 与 CLP 的同一派生条件装配 `codexc-aggregate` Client，由其 `model/list` 提供保留完整模型 ID 的独立目录；
+  聚合 Thread、恢复、订阅、审批与空闲释放沿用共享协调器，人工审批能力不因聚合扩展；请求指标仍只接收真实成员账户的样本，聚合不增加指标 Socket 或账户适配器。
+  按已启用 Provider 装配模型指标组件，不持有模型转发数据通路；通过 `request-metrics-query-adapter.ts`
   把同一指标库的精确 Thread 查询映射为 Application `/metrics` 窄端口，并为 OpenAI `/limits`
   提供当前周窗口的精确 Provider 聚合；
   同时拥有请求指标与账户快照的独立私有通知端点，指标批次或账户快照成功保存后发送对应失效通知，关闭时先停止指标写入再释放订阅端点；通知不调用 App Server。

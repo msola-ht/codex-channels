@@ -43,12 +43,19 @@ export interface OfficialModelCatalogProvider {
   defaultModel: string;
 }
 
+export interface IndependentModelCatalogProvider {
+  provider: string;
+  displayName: string;
+  defaultModel?: string;
+}
+
 const standardServiceTierRequestValue = "default";
 
 export class ModelSelectionService {
   private readonly pendingByConversation = new Map<string, TurnOverrides>();
   private readonly pendingProviderSwitches = new Set<string>();
   private readonly providerFilterByConversation = new Map<string, string>();
+  private readonly independentCatalogDefaults = new Map<string, string>();
 
   constructor(
     private readonly codex: ModelSelectionPort,
@@ -60,7 +67,7 @@ export class ModelSelectionService {
     private readonly openaiAuthenticated: () => boolean = () => true,
     private readonly providersWithoutSubscription: () => ReadonlySet<string> = () => new Set(),
     private readonly defaultThirdPartyProvider?: string,
-    private readonly independentCatalogProviders: readonly OfficialModelCatalogProvider[] = [],
+    private readonly independentCatalogProviders: readonly IndependentModelCatalogProvider[] = [],
   ) {}
 
   updateSupplementaryModels(models: readonly ModelOption[], provider?: string): void {
@@ -539,6 +546,7 @@ export class ModelSelectionService {
       : providers.length === 1 ? providers[0] : undefined;
     if (provider === undefined) return undefined;
     const model = [...this.officialCatalogProviders, ...this.independentCatalogProviders].find((entry) => entry.provider === provider)?.defaultModel
+      ?? this.independentCatalogDefaults.get(provider)
       ?? this.supplementaryModels.find((entry) => entry.provider === provider && entry.isDefault)?.model;
     if (!model) {
       throw new UserFacingError("model.provider.default-missing", "提供商默认模型未配置", { provider });
@@ -649,14 +657,20 @@ export class ModelSelectionService {
           if (!this.codex.listModelsForProvider) throw new Error("Provider catalog port unavailable");
           const models = await this.codex.listModelsForProvider(provider.provider);
           if (!models.some(model => model.available !== false)) throw new Error("Provider catalog empty");
+          const defaultModel = provider.defaultModel
+            ?? models.find(model => model.isDefault && model.available !== false)?.model;
+          if (defaultModel === undefined) this.independentCatalogDefaults.delete(provider.provider);
+          else this.independentCatalogDefaults.set(provider.provider, defaultModel);
           return models.map(model => ({
             ...withoutProviderUpgrade(model), provider: provider.provider,
-            isDefault: model.model === provider.defaultModel,
+            isDefault: model.model === defaultModel,
           }));
         } catch {
+          this.independentCatalogDefaults.delete(provider.provider);
           // Only expose configured identity; never invent capabilities or disclose upstream errors.
           return [{
-            provider: provider.provider, id: provider.defaultModel, model: provider.defaultModel,
+            provider: provider.provider, id: provider.defaultModel ?? provider.provider,
+            model: provider.defaultModel ?? provider.provider,
             displayName: provider.displayName, isDefault: true, available: false,
             unavailableReason: "模型目录暂不可用，请检查对应 App Server 后重试",
             supportedReasoningEfforts: [], defaultReasoningEffort: "none",

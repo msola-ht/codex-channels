@@ -121,8 +121,16 @@ DS 目录生成时明确设置 `support_verbosity: false`、`default_verbosity: 
 App Server。该账户 API Key 只进入需要它的 App Server 子进程环境，不进入命令行、服务定义或
 日志；其他 Provider 的 Key 不会随之注入。
 
-桌面入口要求主 Provider 仍为 OpenAI，参数使用账户对应的精确 Provider ID；切换前必须完全退出桌面。
-本次连接只使用目标实例，不在桌面内跨 Provider 切换或复制会话历史。第三方桌面路径仍待实机验收，
+桌面入口要求主 Provider 仍为 OpenAI，单账户入口使用账户对应的精确 Provider ID；更换实例前必须完全退出桌面。
+单账户连接只使用目标实例；跨实例切换仍须退出桌面。主 Provider 为 OpenAI 且同时存在 DS 与 CLP
+切换账户时，也可用 `codexc app --provider codexc-aggregate`，在同一桌面模型目录选择全部 DS/CLP
+切换账户模型。DS 的精确聚合模型 ID 形如 `ds-main/deepseek-flash`，显示名称包含账户 Provider ID。
+聚合不迁移单账户历史，须在聚合实例新建 Thread；已加载模型间切换无需退出桌面。安装新代码或
+变更账户、Key、模型目录后须重启 App Server 服务，聚合快照变化会拒绝后续出站请求，不热刷新目录。
+聚合关闭网页搜索、模型 API WebSocket 和自动重试，不影响 DS 单账户或独立 Relay 的原有路径。
+终端使用 `codexc remote --provider codexc-aggregate`，渠道通过 `/model` 的 `DS + CLP` 目录选择；
+聚合 Thread 内切换模型保留历史，账户额度查询不合并，模型请求指标归属真实账户。
+第三方桌面及聚合跨模型历史、工具路径仍待实机验收，
 具体边界见 [Desktop 共享说明](codex-desktop-app-development.md)。
 
 Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review、Goal、MCP 和审批请求。

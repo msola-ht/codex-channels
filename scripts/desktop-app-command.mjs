@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
+import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
 import {
   acquireAppServerProviderLease,
   inspectAppServerSupervisorState,
@@ -932,6 +933,9 @@ function resolveDesktopAppSocketPath(appServer, provider) {
   const index = appServer.managedProviders.findIndex((entry) => entry.provider === provider);
   const socketPath = index < 0 ? undefined : appServer.socketPaths[index + 1];
   if (typeof socketPath !== "string" || socketPath.length === 0) {
+    if (provider === aggregateProviderId) {
+      throw new Error("聚合模式要求主 Provider 为 OpenAI，并且 DS 官方和 CLP 均有已配置的切换模式账户");
+    }
     throw new Error("Desktop Provider 未配置；请使用完整、已配置的 Provider ID");
   }
   return socketPath;

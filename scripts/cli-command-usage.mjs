@@ -6,12 +6,16 @@ export const desktopAppCommandUsage = `用法：codexc app [--provider <Provider
       codexc app status [--provider <Provider ID>] [--json]
 
   不带子命令             启动 Desktop App；首次使用确认后自动启用共享
-  --provider Provider ID  仅本次启动选择已配置的完整 Provider ID；省略时使用主 OpenAI
+  --provider Provider ID  仅本次选择完整 Provider ID；省略时使用主 OpenAI
   enable [--port 端口]   单独启用共享或指定桥端口，并重启 App Server 服务
   disable                禁用共享连接并重启 App Server 服务
   status                 只读检查 Desktop、配置和所选 Provider 连接状态
 
-启动前须完全退出 Desktop；Provider 选择不保存，不修改聊天渠道或原生 TUI 绑定。
+主 Provider 为 OpenAI，且 DS 与 CLP 均有切换账户时，可用：
+  codexc app --provider codexc-aggregate
+聚合目录包含全部 DS/CLP 切换账户，已加载模型间切换无需退出 Desktop。
+更换实例前须完全退出 Desktop；Provider 选择不保存，不修改聊天渠道或原生 TUI 绑定。
+安装新代码或变更账户、模型目录后须重启 App Server；聚合目录不热刷新。
 日常只需 codexc app。首次启用会重启 App Server，可能中断现有连接与任务；默认不确认。`;
 
 export const timezoneCommandUsage = `用法：codexc timezone [<IANA 时区>|--system] [--json]

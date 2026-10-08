@@ -57,6 +57,7 @@ import {
   opencodeGoAccountIdFromProvider,
 } from "../../runtime/opencode-go-accounts.mjs";
 import { resolveDefaultManagedProvider } from "../../runtime/managed-provider-account-routing.mjs";
+import { aggregateProviderId, aggregateProviderMembers } from "../../runtime/aggregate-model-provider.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
@@ -242,6 +243,7 @@ export abstract class GatewayComponentGraph {
       ? undefined
       : new TomlWorkspacePermissionWriter(configPath, () => autoReviewPolicy.supportedProviders.size > 0);
     const managedProviders = loadManagedModelProviders();
+    const aggregateEnabled = aggregateProviderMembers(primaryProvider, managedProviders).length > 0;
     const switchingProviderIds = [
       ...managedProviders.map(({ provider }) => provider),
       ...customSwitchingProviders.map(({ provider }) => provider),
@@ -312,6 +314,15 @@ export abstract class GatewayComponentGraph {
         providerAppServerSocketPath(config.codexSocketPath, customSwitchingProvider.provider),
       );
       clients.set(customSwitchingProvider.provider, new CodexAppServerClient(
+        new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
+        { sandbox: config.codexSandbox },
+      ));
+    }
+    if (aggregateEnabled) {
+      const providerTransport = createTransport(
+        providerAppServerSocketPath(config.codexSocketPath, aggregateProviderId),
+      );
+      clients.set(aggregateProviderId, new CodexAppServerClient(
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
         { sandbox: config.codexSandbox },
       ));
@@ -435,6 +446,8 @@ export abstract class GatewayComponentGraph {
       error: unknown,
       structuredErrorCode?: TurnErrorCode,
     ): void => {
+      // 聚合请求由实际成员代理记账，Thread 级失败没有可靠账户归属，不能再生成聚合请求样本。
+      if (provider === aggregateProviderId) return;
       try {
         enqueueTurnErrorMetric(
           metricsWriter,
@@ -584,11 +597,14 @@ export abstract class GatewayComponentGraph {
           && "kind" in snapshot.usage && snapshot.usage.kind === "subscription-required")
         .map((snapshot) => snapshot.provider)),
       defaultThirdPartyProvider,
-      customSwitchingProviders.filter((provider) => provider.catalogSource.kind === "custom").map((provider) => ({
-        provider: provider.provider,
-        displayName: provider.name,
-        defaultModel: provider.model,
-      })),
+      [
+        ...customSwitchingProviders.filter((provider) => provider.catalogSource.kind === "custom").map((provider) => ({
+          provider: provider.provider,
+          displayName: provider.name,
+          defaultModel: provider.model,
+        })),
+        ...(aggregateEnabled ? [{ provider: aggregateProviderId, displayName: "DS + CLP" }] : []),
+      ],
     );
     this.modelSelection = models;
     const collaborationModes = new CollaborationModeSelectionService(
