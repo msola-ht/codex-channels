@@ -9,6 +9,7 @@ import { createManagedProviderMarker } from "../runtime/model-provider-profile.m
 import { downloadDeepseekCatalog, createManagedDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
 import { loadResponsesModelTemplates, responsesModelTemplatesFromCatalog } from "./responses-model-templates.mjs";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { clinePassCodingInstructions } from "../runtime/cline-pass-coding-instructions.mjs";
 import { clineRelayCatalogSchema, clineRelayReasoningEfforts, clineRelayInputModalities } from "../runtime/cline-relay-catalog.mjs";
 import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
 import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider, withPreservedManagedModelCatalogSettings } from "../runtime/model-provider-runtime.mjs";
@@ -51,6 +52,7 @@ function projectClinePassModels(source) {
       reasoningEfforts: efforts,
       defaultReasoningEffort: efforts.includes("high") ? "high" : efforts[0],
       supportsImages: modalities.includes("image"), applyPatchToolType: "freeform", supportsSearchTool: true,
+      instructions: clinePassCodingInstructions,
     });
   }
   if (models.length === 0) throw new Error("Cline 官方目录没有可接入 Codex 的模型，未修改本地目录");

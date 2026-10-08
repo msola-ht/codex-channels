@@ -45,6 +45,10 @@ Desktop，更换 App Server 实例仍须完全退出。聚合请求复用现有 
 
 ## Chat 转换边界
 
+非 Flash 的 CLP 模型使用项目内 `runtime/cline-pass-coding-instructions.mjs` 维护的通用编程提示词，通过目录的 `model_messages.instructions_template` 加载。内容覆盖任务范围、上下文延续、仓库规则、工具使用、权限、用户数据保护、验证与交付；不声明具体模型身份，不强制新增测试、委派或提交，工具与能力仍以实际环境和模型目录为准。它参考 DS 模板的协作主题独立编写，不在运行时读取或下载 DS 提示词。精确 Flash 仍使用 DS 模板，其他自定义 Responses 模型的默认提示词不受影响。
+
+新建共享目录时采用当前提示词；已有账户需在 CLP 菜单执行“选择启用模型／更新共享目录”，沿用目录备份与激活流程。更新代码或重新配置 Key 不会覆盖现有目录；旧会话是否采用新的基础提示词还取决于客户端的会话恢复行为，不能只凭目录已更新就认定生效。Chat 桥仅转换请求中实际携带的指令，不再次追加这份提示词。
+
 锁定 Codex 仅支持 Responses。App Server 仍配置 `wire_api = "responses"`，服务拥有的本地回环代理
 把完整请求转换后发送至 `https://api.cline.bot/api/v1/chat/completions`，再把 Chat SSE 转换回 Responses。
 Gateway 重启不会终止该桥或共享 App Server。转换逻辑独立在 `src/model-api`，可以供其他 Chat Provider 复用。
