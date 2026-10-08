@@ -39,21 +39,7 @@ prefix_rule(
 )
 
 prefix_rule(
-    pattern = ["npm", "test"],
-    decision = "allow",
-    justification = "Run this project's test suite",
-    match = [
-        "npm test",
-        "npm test -- --run tests/example.test.ts",
-    ],
-    not_match = [
-        "npm install",
-        "npm publish",
-    ],
-)
-
-prefix_rule(
-    pattern = ["npm", "run", ["build", "check", "docs:check", "lint", "protocol:check", "test:coverage", "test:package", "verify:commit"]],
+    pattern = ["npm", "run", ["build", "check", "docs:check", "lint", "protocol:check", "verify:commit"]],
     decision = "allow",
     justification = "Run a version-controlled project verification script",
     match = [
@@ -62,8 +48,6 @@ prefix_rule(
         "npm run docs:check",
         "npm run lint",
         "npm run protocol:check",
-        "npm run test:coverage",
-        "npm run test:package",
         "npm run verify:commit",
     ],
     not_match = [

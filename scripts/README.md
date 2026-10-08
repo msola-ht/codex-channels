@@ -23,9 +23,10 @@
   主实例租约存在时拒绝会触发子进程切换的启动；打开 Desktop 前释放临时租约。
   macOS 的具体构建实机验收边界见 `docs/codex-desktop-app-development.md`，Windows 尚未实机验收。
 - `desktop-app-proxy.mjs`：只由 macOS Desktop 的 `CODEX_CLI_PATH` 启动；解析并受控传递 Desktop
-  内置插件的布尔启用值，把动态工具 Pipe 通过私有 Supervisor 租约交给服务，再把 Desktop JSONL
-  stdio 逐条转换为 WebSocket 文本帧并连接现有私有 UDS，
-  自身退出时只释放租约和 Proxy，不终止共享 App Server。
+  内置插件的布尔启用值；无插件配置时不获取租约，直接连接共享主实例，带配置时把动态工具 Pipe
+  通过私有 Supervisor Host 租约交给服务，显式 `false` 仍走 Host 租约路径。把 Desktop JSONL
+  stdio 逐条转换为 WebSocket 文本帧并连接现有私有 UDS，自身退出时清理 Proxy 和持有的租约，
+  不终止共享 App Server。
 - `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
 - `source-update.mjs` / `source-update.d.mts`：从本机终端更新受管官方 `main`；跨平台独占锁阻止并发更新，候选克隆启用长路径支持。先构建并只读检查配置、数据库结构和精确 CLI 合同，CLI 不匹配时确认后同步。记录 App Server、Gateway、Relay、WebUI 状态，按依赖顺序停服；刷新源码与全局命令后，只恢复原本运行的服务，Relay 还须保持启用。恢复前再次校验 CLI 版本和配置、数据库，失败保留阶段及必要备份。无新提交或本地构建包只同步配套 CLI，不更新 Gateway 包；关闭 daemon 自动启动，其他用户偏好和模型目录不变。
@@ -209,6 +210,7 @@
   一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入核心默认值；Fast 仅作为
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
   第三方固定模式不开放官方默认模型、思考等级和 Fast；已有 `default_permissions` 时不混写传统 Sandbox 字段。
+  全局 Auto-review 默认值仅允许官方 OpenAI 主实例或复用官方模型目录的 Codex 兼容主实例开启；其他主实例仍可关闭，组织策略限制继续适用。
 - `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc config` 的“Codex 新会话与用户偏好”
   适配器，只负责选择、预览和中文结果；可单独设置计划清单工具、TUI 空闲总结、Plan 思考等级、推理摘要（未配置时默认 `none`）、输出详细程度、
   更新检查、历史保存与 Auto-review 审批审核人；Auto-review 单独显式确认，受管限制或未知值拒绝修改。
@@ -217,6 +219,7 @@
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
 - `codex-subagents-setup.mjs` / `codex-subagents-setup.d.mts`：Config 中显式选择的子代理规则与配置入口，
   预览后按选择写入 Codex Home 的 `AGENTS.md` 托管规则段和主配置；主配置复用版本化 `config/batchWrite`。
+  规则模板只管理协作、模型分工、单轮生命周期及交接，完成要求继承当前全局和项目规则；
   安装、更新和核心默认值配置均不自动应用该预设。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
   默认模型与思考等级的无终端校验、预览与执行接口；写默认模型时保留模型目录中已有的上下文窗口，
@@ -263,6 +266,7 @@
 - `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`、
   `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
   的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
+  Workspace 默认审批方式跨 Provider 共享，保存自动审查要求至少存在一个受支持 Provider；CLI 与 WebUI 共用写入门禁，关闭与清除仍可使用。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理、日志等级与
   开发中的 Plugin API；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；
@@ -380,9 +384,9 @@
   Profile 使用的 `-c/--config`）的存在性、别名、参数形状和枚举值，校验根级和所有 Profile 用户
   设置审批值与快照一致；升级时刷新受控快照并按新增、删除、签名变化
   和枚举变化生成独立影响报告，不把 App Server 内部枚举误当成公开 CLI 合同。
-- `run-upgrade-validation.mjs`：为正式升级提案独立运行协议、类型、Lint、测试、
-  真实合同、Gateway/WebUI 构建和打包检查；单项失败后继续其他阶段，并保存逐项日志和结构化结果。预览阶段不
-  改稳定版文档，因此明确跳过文档索引检查；测试与真实合同复用一次成功的 Gateway 构建，tarball 安装复用 Gateway/WebUI 产物，前置构建失败时跳过依赖检查并保留失败结果，干净源码安装独立执行。
+- `run-upgrade-validation.mjs`：为正式升级提案独立运行协议、类型、Lint 与
+  Gateway/WebUI 构建；单项失败后继续其他阶段，并保存逐项日志和结构化结果。预览阶段不
+  改稳定版文档，因此明确跳过文档索引检查。
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
   二进制安全 Patch，并分别比较 `HEAD` 生成协议的 RPC/顶层字段结构和受控公开 CLI 合同，合并
   逐阶段结果；生成或验证失败且没有差异时仍会输出报告。
@@ -400,7 +404,7 @@
   `message_id` 精度；`sequence --live` 只在内存把首轮游标传给第二轮并比较重放数量和游标推进；
   `replay --live` 再次复用首轮游标，判断第二批消息是否重放及返回游标是否一致；
   不输出或保存正文、完整身份、Token、上下文令牌和游标。
-- 微信 `*-contract-probe.mjs` 保留当时 `v2.4.6` 的隔离探测基线，不能作为当前运行时 `v2.4.9` 已完成实渠道验收的证据；更新探针前按上游索引核对合同，执行真实发送仍需明确授权。
+- 微信 `*-contract-probe.mjs` 是冻结的历史资产，保留当时 `v2.4.6` 的隔离探测基线，不扩张、不维护；其结果不能作为功能验证或完成证据。整批删除须明确点名授权，执行真实发送仍需明确授权。
 - `weixin-send-contract-probe.mjs`：显式 `reply --live` 后从一条已授权完成态微信文本中仅在
   内存取得回复目标和 `context_token`，按固定 `v2.4.6` 合同发送一条短文本；不接受命令行
   Token、用户 ID 或正文；`sequence --live` 使用同一上下文连续发送两条固定短文本，第二条
@@ -425,19 +429,19 @@
   媒体正文、上传地址、参数、key、Token、游标或完整身份，不注册常驻 Surface。
 - `check-gateway-version.mjs`：校验 npm 包与 Gateway 运行时版本一致，并要求正式版本、`-rc.N`
   候选版或 `-fixN` 修复版使用与 Codex CLI 协议相同的基础版本。
-- `check-runtime-boundaries.mjs`：校验 `runtime <- scripts <- bin` 的目录依赖方向，并要求三者访问已编译
-  `src` 能力时只使用按调用方列明的精确入口；该检查由 `npm run check` 执行。
+- `check-runtime-boundaries.mjs`：静态校验源码模块允许依赖、公开入口、循环、Surface 隔离、协议受控导出
+  与未支持 API 约束；同时校验 `runtime <- scripts <- bin` 的目录依赖方向，并要求三者访问已编译
+  `src` 能力时只使用按调用方列明的精确入口。该检查由 `npm run check` 执行。
 - `check-docs.mjs`：校验项目 Markdown 本地链接、根 `index.md` 文档索引、源码模块索引、协议数字和相关目录
   文件索引，并拒绝已移除的文档名称；常规项目文档检查排除 `.codex/skills/**` 附带的技能参考资料。
 - `install-git-hooks.mjs`：只为当前源码仓库设置 `.githooks`，不修改用户全局 Git 配置。
 - `webui-i18n.mjs`：静态读取 WebUI 中英文文案字典，检查键与占位符，并按 Git 基线输出包含术语表的增量翻译任务 JSON；不执行字典代码、不调用翻译服务、不写回译文。
-- `verification-scope.mjs`：集中定义本地提交与 CI 专项的改动范围分类；CI 按 base 到 head 的完整差异选择安装及 App Server 合同检查。
-- `verify-commit.mjs`：本地 `verify:commit` 按改动范围执行静态检查和受影响测试，`verify:ci` 执行完整回归，
-  输出选中范围、每个阶段及全部检查的累计耗时。类型检查使用 TypeScript 原生增量缓存，仍覆盖源码与测试及其依赖；
+- `verification-scope.mjs`：读取本地提交或指定 Git 基线的改动文件，供检查入口选择静态检查范围。
+- `verify-commit.mjs`：本地 `verify:commit` 按改动范围执行必要静态检查与构建，`verify:ci` 执行完整静态检查与构建。
+  输出选中范围、每个阶段及全部检查的累计耗时。类型检查使用 TypeScript 原生增量缓存，覆盖源码及其依赖；
   缓存位于 `node_modules/.cache/codexc/check.tsbuildinfo`，可删除后重建，不缓存后续版本和边界检查。
   需要构建产物时，在完整类型检查成功后才清理并构建 Gateway，使用 `--noCheck` 避免重复类型分析；
-  测试与按需执行的 tarball 安装冒烟复用这一份新产物。独立 `npm test` 和 `npm run build` 保留完整类型检查。
-  干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
+  独立 `npm run build` 保留完整类型检查。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
 - `config-backup.mjs`：调用方持有配置锁并验证目标后，执行私有备份、同步及逐字节校验，再原子保存，可传递完整文件容量上限；供 Relay 管理等配置写入使用。
 - `traffic-command-options.mjs` / `traffic-command-options.d.mts`：集中解析并预检 `codexc traffic` 的
@@ -472,10 +476,6 @@
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。
 - `prepare-package.mjs`：源码仓库安装或 npm 打包前按 lockfile 补齐缺失的本地构建依赖、
   启用仓库 Git hooks、构建源码，并验证已安装包包含运行入口；显式 `--ignore-scripts` 时不执行准备，兼容仍调用 prepare 的 npm 版本。
-- `smoke-source-prepare.mjs`：在不含 `node_modules` 和 `dist` 的临时源码副本中验证显式源码
-  全局安装命令会完成构建、保留模型目录与启动网络策略资源并生成 `codexc` 入口；失败时保留 stdout 与 stderr。
-- `smoke-package.mjs`：生成实际 tarball，在隔离目录安装，验证 WebUI 前端产物，并执行公开的
-  `codexc` 入口与配置预检，并加载安装后的 Setup 模块，检查其传递依赖是否完整打包。安装目录和依赖树每次重建，下载缓存沿用 npm 配置，避免重复下载；干净源码安装仍使用独立缓存。
 - `sync-gateway-version.mjs`：升级 Codex CLI 协议时把 `package.json`、锁文件和 Gateway 运行时
   版本重置为新的正式基础版本；Gateway 候选发行和修复发行可分别在该基础版本后使用受控的
   `-rc.N` 或 `-fixN` 后缀。任一后缀 Tag 发布并核验后，`main` 必须通过独立 PR 恢复无后缀基础
@@ -542,8 +542,6 @@
 - `windows-log-follow.ps1`：按服务目标跟随读取用户级运行日志，供 `codexc logs` 使用。
 - `windows-app-server-proxy-probe.mjs`：Windows App Server 代理连接的只读探针，用于确认
   代理端点、初始化握手和 RPC 可达性。
-- `windows-proxy-inbound-limit-probe.mjs`：验证 Windows 代理入口对回环地址和入站连接限制的
-  只读探针，不修改系统或服务配置。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。
 

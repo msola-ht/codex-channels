@@ -3,20 +3,14 @@
 本文定义锁定 Codex CLI `0.160.0` 的实验 `thread/queue/*`、`thread/queue/changed`、
 `thread/revert`、`thread/reverted` 以及 Revert 所需分页历史查询在 Gateway 中的使用合同。
 当前实现使用原生 Queue、分页历史与 Revert，以下定义授权和状态协调合同。
-Queue/Revert 联合真实合同仍是条件门禁：
-条件式真实 App Server 合同需在设置 `RUN_CODEX_CONTRACT=1` 后运行；未具备该环境时不得
-把跳过的真实合同伪报为通过。三个 Surface 的当前支持范围和验证入口以
-[`Codex 协议支持矩阵`](index.md) 为准，功能变化须同步复核真实合同。
-
-当前 Queue 条件式真实合同覆盖握手、100/101 容量、CRUD、25/100 分页、活动 busy、指定条目
-启动、中断保留、自动派发以及 App Server 重启后的冷恢复；跳过条件合同不计为通过。
+三个 Surface 的当前支持范围和静态检查入口以
+[`Codex 协议支持矩阵`](index.md) 为准。功能变化须对照锁定的官方源码复核协议语义；
+队列容量、分页、自动派发及重启恢复等运行行为按需人工验收，不以静态检查通过代替。
 
 ## 当前实现约束
 
 App Server 是待提交用户消息和 Thread 历史的唯一事实来源。Gateway 不保存平行消息队列。
 新 Thread 使用分页历史；Revert 通过显式确认和执行前复核协调历史、活动 Turn 与原生 Queue。
-
-
 
 - Gateway 新建的 Thread 一律显式发送 `historyMode: "paginated"`；Resume、Fork 和 Provider 路由
   只采用 App Server 返回的实际 `historyMode`。既有 `legacy` Thread 仍可正常使用，但 `/revert`
@@ -40,7 +34,7 @@ App Server 是待提交用户消息和 Thread 历史的唯一事实来源。Gate
   不得用有界展示预览计算摘要，否则预览截断可能隐藏并发变化。
 - 真实合同使用临时 `CODEX_HOME`、真实锁定版 App Server 和本机 Mock Responses SSE 服务，
   不调用用户账户或真实模型。实测确认 Queue 条目在 Revert 后按原顺序保留，但不会由 Revert
-  自动启动；用户显式 `/queue start` 后按队列顺序继续派发。条件测试未实际运行时不能伪报为通过。
+  自动启动；用户显式 `/queue start` 后按队列顺序继续派发。
 
 ## 固定事实来源
 
@@ -108,7 +102,7 @@ Queue 依赖 App Server 的本地 SQLite 状态库。固定版本默认 Thread S
 ```
 
 不同时保留 `/queue <描述>` 作为隐式别名。实现 PR 必须同步根 README、`/help`、三渠道菜单、
-错误文案和命令测试。`list` 只在 Conversation 内存中保留有界、五分钟有效的“序号到条目 ID”
+错误文案。`list` 只在 Conversation 内存中保留有界、五分钟有效的“序号到条目 ID”
 选择快照，不保存消息正文；`thread/queue/changed` 使快照失效。数字选择器没有有效快照时要求先
 重新执行 `list`，完整 ID 则始终针对最新权威列表复核。跨客户端修改使条目或 reorder 全排列
 失效时返回刷新提示，不猜测用户原意。
@@ -128,7 +122,7 @@ Queue 依赖 App Server 的本地 SQLite 状态库。固定版本默认 Thread S
 - `codex-client/notification-adapter.ts` 与组合根：校验 `thread/queue/changed.threadId`，只触发选择快照和 Revert 确认失效，不同步读取 Queue，也不阻塞 App Server Reader。
 - `surfaces/conversation-session-command-format.ts` 与三个 Surface：只负责规范命令和平台文案，不保存 Queue 镜像。
 
-Queue 测试使用共享端口合同；容量、持久化、自动派发和失败结果以 App Server 为准，
+Queue 容量、持久化、自动派发和失败结果以 App Server 为准，
 不增加 Gateway 内存队列、完成回调重放或失败清空逻辑。
 
 ## Revert 原生合同
@@ -252,28 +246,20 @@ Queue 是对现有 `/queue` 的完整替换，实施后默认可用，不另设�
 
 ## 验证链路
 
-定向单元测试覆盖六个 Queue 请求、只有 list 可重试、容量与分页、权限、五分钟一次性确认、
-并发 reorder/Revert 拒绝和状态失效。创建与写入失败必须断言没有自动重试。
-
-真实 App Server 合同覆盖 Queue 实验握手、100/101 容量、CRUD、四页分页、自动派发、活动 busy、
-指定条目启动、中断保留、重启和冷恢复；Revert 覆盖空闲与活动 Turn、未知 Turn、重启持久、
-不支持的历史模式/路径拒绝和下一 Turn 上下文排除已删除历史。联合合同确认 Queue 保序、
-Revert 不自动启动队列，显式启动后才继续派发。隔离 Mock Responses 不调用真实模型账户。
-
-相关实现变更按项目门禁执行静态、协议及真实合同检查；提交由 pre-commit 运行 scoped
-`verify:commit`，不手动重复执行。条件合同未实际运行须明确标为未验证。
+相关实现变更按项目门禁执行静态检查与构建，并核对锁定版本的 Queue/Revert 行为。
+提交由 pre-commit 运行按范围选择的 `verify:commit`，不手动重复执行。
 
 
 ## 完成标准与停止条件
 
 ### Queue 阶段完成标准
 
-Queue 是否已采用只按本节判断，不以前置完成尚未实施的 Revert 或 Queue/Revert 联合合同为条件：
+Queue 是否已采用只按本节判断，不以前置完成尚未实施的 Revert 为条件：
 
 - 旧 Gateway Queue 已完全删除，生产代码不存在第二套消息正文队列。
-- 原生六个 Queue 请求、100 条容量和 25/100 分页均有本地与真实合同覆盖。
+- 原生六个 Queue 请求、100 条容量和 25/100 分页与锁定协议一致。
 - Gateway/App Server 重启、冷恢复、多 Provider 和跨客户端修改不会丢失或串用 Queue。
-- `docs/index.md`、根 README、模块 README、三个 Surface 帮助和 Queue 测试描述与实现一致。
+- `docs/index.md`、根 README、模块 README 与三个 Surface 帮助和实现一致。
 
 ### Revert 阶段完成标准
 
@@ -282,12 +268,12 @@ Revert 仍需单独满足以下条件，完成前保持失败关闭：
 - 新建 Thread 使用 paginated；legacy Thread 明确拒绝 Revert，且没有隐式迁移。
 - Revert 具有一次性确认、执行前复核、活动 Turn 中断处理和“不会恢复文件”提示。
 - Queue/Revert 联合行为已在当前锁定版真实 App Server 上复核。
-- `docs/index.md`、根 README、模块 README、三个 Surface 帮助和 Revert 测试描述与实现一致。
+- `docs/index.md`、根 README、模块 README 与三个 Surface 帮助和实现一致。
 
 遇到以下任一情况必须停止实施并重新审查设计：
 
 - 真实 App Server 没有本地 Queue Store，或部署配置无法稳定提供 SQLite 状态库。
 - 第三方 Provider App Server 对 Queue/Revert 的合同与 OpenAI 主实例不同。
 - paginated 历史破坏现有 Resume、Fork、后台 Thread、Goal、审批或 Remote TUI 共享行为。
-- Revert 与 Queue 联合测试出现未记录的自动派发、条目丢失或顺序变化。
+- Revert 与 Queue 联合行为出现未记录的自动派发、条目丢失或顺序变化。
 - 为实现功能需要读取 Codex 内部会话文件、把正文写入 Gateway StateStore，或绕过现有 Actor/Workspace 授权。

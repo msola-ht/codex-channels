@@ -45,8 +45,8 @@ Relay 目录下载器读取 [Cline 官方模型文件](https://github.com/cline/
 同时核对该提交的 `catalog-cline-recommended.ts`、`scripts/generate-models.ts` 和共享 `reasoning-options.ts`；输入类型映射核对同一提交的 `providers/model-capabilities.ts` 与 `catalog/catalog-live.ts`。
 思考参数映射另核对同一提交 `providers/routing/portable-reasoning.ts`、`providers/routing/anthropic-compatible.ts`、`providers/routing/provider-option-rules.ts`、`providers/vendors/cline.ts` 及相邻测试；Cline/Cline Pass 共用 `cline` SDK 适配器，通用关闭为 `reasoning.enabled=false`。锁定依赖 `@ai-sdk/openai-compatible@3.0.37` 的 [Chat 出站映射](https://github.com/vercel/ai/blob/%40ai-sdk%2Fopenai-compatible%403.0.37/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts)将指定等级序列化为 `reasoning_effort`。本项目保留已实测的精确 DeepSeek 关闭字段，不据此复制其他原生提供商适配器。
 此处是可由用户显式更新的模型元数据，不是 Codex 协议基线；每次下载记录实际 SHA，不加载上游代码。
-下载入口为 `runtime/cline-relay-catalog-update.mjs`，共用读取入口为 `runtime/cline-relay-catalog.mjs`，验证见 `tests/cline-relay-catalog.test.ts`、
-`tests/webui-relay-management.test.ts`；更新和回退见[Relay 模型设置](provider-api-relay-development.md#clp-转发模型目录与设置)。
+下载入口为 `runtime/cline-relay-catalog-update.mjs`，共用读取入口为 `runtime/cline-relay-catalog.mjs`；
+更新和回退见[Relay 模型设置](provider-api-relay-development.md#clp-转发模型目录与设置)。
 
 ### CPAMP 指标展示参考
 
@@ -61,7 +61,7 @@ Relay 目录下载器读取 [Cline 官方模型文件](https://github.com/cline/
 1. 先读取本页和对应 Surface 的资料索引。
 2. 检查目标本地仓库的 HEAD 是否等于上表基线。
 3. 优先用 `rg`、`sed` 和仓库内测试查找固定版本行为。
-4. 再核对本项目的公开接口、实现与测试。
+4. 再核对本项目的公开接口与实现。
 5. 只有本地资料缺失、需要动态开放平台文档或准备升级时才联网。
 
 本地仓库存在且基线正确时，不应为了相同源码内容调用网页搜索。不得从本地上游仓库导入运行时代码
@@ -89,7 +89,7 @@ git -C upstream/openclaw-lark checkout dde0be3680d6fd5443cab426c8f4b3216266346a
 1. 在目标上游仓库执行 `git fetch --tags origin`。
 2. 比较当前锁定提交与候选 Tag/Commit，审查源码、类型和测试差异。
 3. 在隔离分支完成本项目适配和真实合同验证。
-4. 同步更新本页、对应 Surface 资料索引、实现、测试和公开支持说明。
+4. 同步更新本页、对应 Surface 资料索引、实现和公开支持说明。
 5. 验证通过后再把本地上游仓库切到新的固定提交。
 
 上游仓库保持只读，不在其中创建项目补丁、提交或向官方远端推送。需要借鉴实现时应在

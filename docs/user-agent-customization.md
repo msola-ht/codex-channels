@@ -242,21 +242,11 @@ Surface 配置。
 
 ## 验证范围
 
-当前行为由以下配置、代理与真实合同检查覆盖：
-
-- `npm run check`：类型与版本一致性，覆盖 `GatewayConfig`、`ClientInfo` 注入签名和
-  Provider Proxy 选项类型。
-- 配置定向测试：`config`、`config-management`、`config-menu`、`runtime-config` 验证 Schema、
-  原子写入与 `codexc config` 菜单回归。
-- 终端标识定向检查：非法 `terminal_identity` 在保存前被 Schema 拒绝；配置后启动的 App Server
-  子进程带 `TERM_PROGRAM`，模型上游 UA 的终端标识随之变化。
-- `json-rpc` 定向测试：缺省身份为 `codex-tui` 与当前锁定 Codex CLI 版本，标题为 `null`，
-  `thread/start` 不携带 `serviceName`。
-- 真实 App Server 合同测试：`initialize.userAgent` 以 `codex-tui/` 开头。
-- `provider-proxy` 定向测试：缺省时 UA 原样透传；HTTP 与 WebSocket 覆盖仅在配置后生效。
+`npm run check` 校验类型与版本一致性，包括 `GatewayConfig`、`ClientInfo` 注入签名和
+Provider Proxy 选项类型。
 
 已确认不新增协议方法；默认身份变化只调整 `initialize.clientInfo` 的既有取值，`thread/start`
-初始化不发送 `serviceName`；相关行为由真实 App Server 合同测试覆盖。上游 UA
+初始化不发送 `serviceName`。上游 UA
 覆盖仍只改变本地 Provider Proxy 出站 Header，不改入站 Header 或
 Codex `~/.codex/config.toml`。跨连接读取"原生 Codex TUI 的 UA"不在支持范围，原因是锁定协议
 不暴露其他客户端身份，见「当前链路」。
@@ -274,4 +264,4 @@ Codex `~/.codex/config.toml`。跨连接读取"原生 Codex TUI 的 UA"不在支
   多客户端下同样确定。
 - 非法值在服务启动或交互保存前明确拒绝，不降级到默认值。
 - 实际出站 UA 经限长后进入指标库，供本机 WebUI 核对；不在普通日志、渠道消息或 PR 验证产物中输出完整自定义值。
-- 文档、配置示例、Setup 提示、模块 README 和测试在实现提交中同步更新。
+- 文档、配置示例、Setup 提示和模块 README 在实现提交中同步更新。

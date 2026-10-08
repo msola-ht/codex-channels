@@ -88,7 +88,12 @@ export function validateMacDesktopAppAttachment({
   });
 }
 
-export function parseMacDesktopAppToolsEnabled(args) {
+/**
+ * Reads the Desktop tools plugin override from the App Server launch arguments.
+ * Returns `undefined` when the Desktop did not request the built-in tools host,
+ * which happens for the plain App Server connection the Desktop spawns first.
+ */
+export function readMacDesktopAppToolsEnabled(args) {
   let toolsEnabled;
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] !== "-c") continue;
@@ -106,6 +111,11 @@ export function parseMacDesktopAppToolsEnabled(args) {
     }
     toolsEnabled = parsed;
   }
+  return toolsEnabled;
+}
+
+export function parseMacDesktopAppToolsEnabled(args) {
+  const toolsEnabled = readMacDesktopAppToolsEnabled(args);
   if (toolsEnabled === undefined) {
     throw new Error("Codex Desktop App 未提供内置工具插件配置");
   }

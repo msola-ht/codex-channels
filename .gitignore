@@ -8,11 +8,9 @@ config.toml
 node_modules/
 upstream/
 
-# Build, test and tool output
+# Build and tool output
 dist/
-coverage/
 *.tsbuildinfo
-.vitest/
 .npm/
 .pnpm-store/
 .turbo/

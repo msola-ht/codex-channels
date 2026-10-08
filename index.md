@@ -67,7 +67,6 @@
 - [`bin/README.md`](bin/README.md)：npm CLI 入口。
 - [`runtime/README.md`](runtime/README.md)：CLI 与 Gateway 共享运行时。
 - [`scripts/README.md`](scripts/README.md)：配置、构建、验证和服务脚本。
-- [`tests/README.md`](tests/README.md)：测试范围与集成验证。
 - [`launchd/README.md`](launchd/README.md)：macOS 服务模板与控制。
 - [`systemd/README.md`](systemd/README.md)：Linux 用户服务模板与控制。
 

@@ -142,7 +142,8 @@ export function renderTelegramLifecyclePresentation(
   presentation: LifecyclePresentation,
 ): string {
   const { footer, ...rest } = presentation;
-  const body = renderStructuredLifecyclePresentation(rest);
+  // sendPanel performs HTML escaping; Markdown escapes would become visible text.
+  const body = renderStructuredLifecyclePresentation(rest, false);
   return footer === undefined
     ? body
     : `${body}\n\n${footer.label}：${footer.value}`;

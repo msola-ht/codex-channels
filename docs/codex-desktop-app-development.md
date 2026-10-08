@@ -33,7 +33,7 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 - Windows 使用当前用户包探测、受认证回环桥与隔离启动环境，仍为开发预览，未完成实机双向验收。
 - 2026-09-16/17 的 macOS 历史实测覆盖 Thread 双向共享、内置工具启动与 App Server 重启恢复；
   实测 CLI 为 0.154.0、ChatGPT 为 `26.908.70816`。这些结果不是当前 CLI 0.160.0 或任意新 App 构建的验收。
-- 自动化桥接、协议和命令测试不能替代打包 Desktop 的工具 Pipe、签名链或 Windows 实机验证。
+- 打包 Desktop 的工具 Pipe、签名链和 Windows 支持需各自完成实机验证。
   当前缺口与停止条件见下文，不宣称全平台正式支持。
 
 
@@ -120,9 +120,13 @@ Desktop 生成、删除、重写或缓存业务消息。macOS Proxy 只在 JSONL
 
 两个平台的每个转发方向最多保留 128 条、合计 128 MiB 的消息，包含正在发送的消息；macOS 未完成的 JSONL 行也限制为 128 MiB。单次发送等待最多 5 秒，容量或超时失败明确终止当前连接，不丢弃消息后继续会话、不自动重放写请求。Windows 桥以 `1013` 通知转发不可用并释放 Transport 与租约；macOS Proxy 返回失败并清理输入监听。恢复连接仍由 Desktop 或操作者处理。
 
-两条平台路径都在连接期间持有主 Provider 租约，空闲释放不能终止主实例。macOS 最后一个 Host
-租约关闭时只清除服务内存中的临时 Pipe 附加状态，不终止共享主实例；Windows 桥连接关闭时释放
-上游 Transport 与租约。App Server 服务关闭时停止接受新连接并有限等待现有生命周期操作。
+Windows 桥在连接期间持有主 Provider 租约；macOS 带内置工具插件配置的连接持有 Desktop Host
+租约。这些租约存在时，空闲释放不能终止主实例。macOS 未携带插件配置的普通连接直接代理到
+共享主实例，不获取租约，也不负责恢复已释放的实例或阻止空闲释放；`codexc app` 的启动预检
+会先通过临时租约恢复实例，并在打开 Desktop 前释放该租约。显式关闭插件的 `false` 配置仍走
+Host 租约路径。macOS 最后一个 Host 租约关闭时只清除服务内存中的临时 Pipe 附加状态，不终止
+共享主实例；Windows 桥连接关闭时释放上游 Transport 与租约。App Server 服务关闭时停止接受
+新连接并有限等待现有生命周期操作。
 
 macOS Host 附加在主 Provider 的串行生命周期操作中恢复已释放的受管实例，再查询权威活动状态，
 切换前重查普通租约与请求取消；发现外来实例、活动任务或租约占用时拒绝接管。该检查不构成对
@@ -254,9 +258,7 @@ codexc app status [--json]
 | 签名 Host 隔离合同 | 通过 | 受管 stdio Proxy 连接同一 UDS，`codex_app` 0.1.0 返回 38 个工具且无错误 |
 | 完整 macOS Desktop 受管入口 | 通过 | 源码部署后的启动、双向接续和服务重启恢复已实测；仍须使用 `codexc app` 注入单次启动环境 |
 
-自动化真实 App Server 合同只能证明两个普通 App Server Client 通过桥共享 Thread，不能模拟打包
-Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周期。后续验收必须把这部分列为独立
-实机门槛，不能再用双 Client 合同替代。
+打包 Desktop 创建的私有工具 Pipe、代码签名校验和内置 MCP 生命周期需作为独立实机门槛验收。
 
 ## 平台实现
 
@@ -300,8 +302,8 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
 - `scripts/desktop-app-command.mjs` 与声明文件：平台化兼容探测、配置事务、服务控制、状态与单次环境
   启动；macOS 不读取桥令牌或探测桥端口。
 - `scripts/desktop-app-proxy.mjs`：macOS Desktop 的受管 CLI 入口；只接受 App Server 启动调用，
-  获取 Desktop Host 租约后在标准输入输出与主 App Server Unix WebSocket 之间转换文本消息，不
-  解析 JSON-RPC 业务字段。
+  无内置工具插件配置时直接连接共享主实例，带配置时先获取 Desktop Host 租约；在标准输入输出
+  与主 App Server Unix WebSocket 之间转换文本消息，不解析 JSON-RPC 业务字段。
 - `runtime/desktop-app-host.mjs` 与声明文件：校验 Desktop 动态 Pipe、签名 Node 和精确 Codex 原生
   可执行文件，并用签名 Node 托管主 App Server 子进程；动态 Pipe 状态只保存在服务内存中。
 - `runtime/app-server-supervisor.mjs` 与声明文件：增加有界、独立能力版本化的 macOS Desktop Host
@@ -312,7 +314,7 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
 - `bin/codexc.mjs`：公开命令、帮助与路由。
 - `runtime/README.md`、`scripts/README.md`、`bin/README.md`：新增文件与公开入口索引。
 - `README.md` 与 `docs/user-guide.md`：只写用户操作、当前限制和排障，不复制内部桥协议。
-- `docs/index.md`：记录共享 App Server 行为、官方基线、实现映射与真实合同。
+- `docs/index.md`：记录共享 App Server 行为、官方基线与实现映射。
 - `docs/windows-support-development.md`：记录受认证桥不替换固定 UDS Transport，以及 Windows 实机
   验收状态。
 
@@ -340,14 +342,13 @@ Supervisor 只接受当前用户、主 Provider `openai`、已启用配置、同
 2. 非法路径、缺失或错误令牌、第五个并发连接、二进制帧和非 OpenAI 主 Provider均失败关闭。
 3. Desktop 与渠道能够双向发现并继续对方创建的空闲 Thread，且看到同一 Thread ID 与 Turn 结果。
 4. 活动 Thread 不发生双写；审批仍由发起 Turn 的客户端处理。
-5. Provider 指标、主实例监管、空闲释放、`codexc remote` 和 Gateway 重启恢复合同保持通过。
+5. Provider 指标、主实例监管、空闲释放、`codexc remote` 和 Gateway 重启恢复按原有边界工作。
 6. 服务停止、macOS Host 租约关闭、桥连接断开和 Windows Proxy 退出后没有遗留监听、租约或子进程；
    失效 Pipe 不得用于后续主实例启动。
 7. 日志、状态、错误、JSON、配置与平台消息中均不出现桥令牌或完整 URL。
 8. macOS 与 Windows 各自在真实 Desktop 上通过；任一平台未通过时必须单独标为预览或不支持，
    不能宣称全平台完成。
-9. Desktop 随包提供的 `codex_app` MCP 在共享模式下保持可用；`bridgeReady`、Thread 双向共享或
-   自动化双 Client 合同均不能替代该项实机验证。
+9. Desktop 随包提供的 `codex_app` MCP 在共享模式下通过实机验证。
 10. macOS 受管路径必须继续使用项目锁定的 Codex CLI 0.160.0；不得以 Desktop 随包的预发布 CLI
     替换协议事实来源，也不得让动态 Pipe、完整启动环境或工具消息进入日志与状态输出。
 

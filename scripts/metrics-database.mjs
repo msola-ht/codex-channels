@@ -139,7 +139,7 @@ export function pruneProviderMetrics(provider, environment = process.env, option
     ?? (() => runServiceAction("gateway", "start", environment));
 
   // Maintenance must restore the state that existed before the operation.
-  // Test/in-process callers can provide explicit state; the CLI queries the
+  // In-process callers can provide explicit state; the CLI queries the
   // managed service status before stopping anything.
   const gatewayWasRunning = options.gatewayRunning
     ?? (options.stopGateway !== undefined || options.startGateway !== undefined

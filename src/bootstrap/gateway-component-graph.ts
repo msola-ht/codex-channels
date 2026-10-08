@@ -8,6 +8,7 @@ import { GatewayReconnectCoordinator } from "./gateway-reconnect-coordinator.js"
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { StartupNetworkRecovery } from "./startup-network-recovery.js";
 import { withOutputExecutionAdmission } from "./output-execution-admission.js";
+import { resolveAutoReviewProviderPolicy } from "../../runtime/auto-review-provider-policy.mjs";
 import { PersistentInteractionPort } from "./persistent-interaction-port.js";
 import { RelayMetricsComposition, createRelayMetricAuthorization } from "./relay-metrics-composition.js";
 import { modelRelayPaths } from "../../runtime/model-relay-paths.mjs";
@@ -229,12 +230,17 @@ export abstract class GatewayComponentGraph {
     logger = logger.child({ module: "gateway" });
     this.logger = logger;
     verifyCodexVersion(config);
-    this.workspacePermissions = configPath === undefined
-      ? undefined
-      : new TomlWorkspacePermissionWriter(configPath);
     const primaryProvider = loadPrimaryModelProvider();
     const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider();
     const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders();
+    const autoReviewPolicy = resolveAutoReviewProviderPolicy({
+      primaryProvider,
+      ...(customPrimaryProvider === undefined ? {} : { customPrimaryProvider }),
+      customSwitchingProviders,
+    });
+    this.workspacePermissions = configPath === undefined
+      ? undefined
+      : new TomlWorkspacePermissionWriter(configPath, () => autoReviewPolicy.supportedProviders.size > 0);
     const managedProviders = loadManagedModelProviders();
     const switchingProviderIds = [
       ...managedProviders.map(({ provider }) => provider),
@@ -381,6 +387,7 @@ export abstract class GatewayComponentGraph {
           );
         });
       },
+      { primaryProvider: customPrimaryProvider?.id ?? primaryProvider, supportedProviders: autoReviewPolicy.supportedProviders },
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
@@ -632,10 +639,11 @@ export abstract class GatewayComponentGraph {
         catch (error) { logger.warn({ err: error }, "账户快照已保存，但变化通知失败"); }
       },
     }, readOpenAiCredentialRefreshTime);
-    const execution = withOutputExecutionAdmission(this.codex, (threadId) => {
+    const execution = withOutputExecutionAdmission(this.codex, async (threadId) => {
       const target = this.bindings.getByThread(threadId)?.target;
       const reason = target ? this.surfaceManager.executionBlockReason(target) : "unavailable";
       if (reason) throw new UserFacingError("delivery.overloaded", "投递存储容量不足或不可用，已暂停新执行", { reason });
+      await this.admitThreadApprovalsReviewer(threadId);
     });
     const service = new ConversationService(
       execution,
@@ -1121,9 +1129,7 @@ export abstract class GatewayComponentGraph {
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
-        if ((coreEvent.type === "item.subagentActivity" && coreEvent.kind === "started")
-          || (coreEvent.type === "item.operation.updated" && coreEvent.operation.kind === "subagent"
-            && coreEvent.operation.action === "followup_task" && coreEvent.operation.status === "running")) {
+        if (coreEvent.type === "turn.started") {
           this.autoApprovalReviewNotifications.observeParentRun(coreEvent.threadId, coreEvent.turnId);
         }
         if (coreEvent.type === "turn.completed" || coreEvent.type === "thread.reverted") {
@@ -1212,6 +1218,36 @@ export abstract class GatewayComponentGraph {
       if (this.stopping) throw new Error("Gateway 正在停止");
     } catch {
       throw new UserFacingError("autoreview.update-unconfirmed", "会话审批方式更新结果尚未确认，请重新查询状态");
+    }
+  }
+
+  private async admitThreadApprovalsReviewer(threadId: string): Promise<void> {
+    const blocked = (): UserFacingError => new UserFacingError(
+      "autoreview.execution-blocked", "当前会话的实际审批方式无法安全确认，已拒绝新输入，请查询 /autoreview 并关闭不受支持的自动审查",
+    );
+    try {
+      // Settings notifications from other clients share this reducer. Reuse its
+      // actual projection instead of creating another settings cache or resuming
+      // the Thread before every execution.
+      if (this.stopping) throw blocked();
+      await this.inbound.drain();
+      const binding = this.bindings.getByThread(threadId);
+      const settings = this.router.modelSettingsForThread(threadId);
+      if (!binding || !settings?.modelProvider || this.stopping || this.bindingRestore?.isRestoring(threadId)) throw blocked();
+      if (this.router.isAutoReviewSupported(settings.modelProvider)) return;
+      if (settings.approvalsReviewer === "user") return;
+      if (settings.approvalsReviewer !== "auto_review") throw blocked();
+      const snapshot = await this.codex.readThread(threadId);
+      const workspace = this.workspaces.get(binding.workspaceId);
+      if (snapshot.id !== threadId || snapshot.status.type !== "idle" || snapshot.activeTurnId !== null
+        || snapshot.modelProvider !== settings.modelProvider || snapshot.cwd !== workspace?.cwd
+        || this.bindings.getByThread(threadId) !== binding || this.interactions.hasPendingForThread(threadId)) throw blocked();
+      await this.updateThreadApprovalsReviewer(threadId, "user");
+      if (this.bindings.getByThread(threadId) !== binding
+        || this.core.activeTurnForThread(threadId)
+        || this.router.modelSettingsForThread(threadId)?.approvalsReviewer !== "user") throw blocked();
+    } catch {
+      throw blocked();
     }
   }
 

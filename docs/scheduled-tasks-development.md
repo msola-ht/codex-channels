@@ -316,7 +316,7 @@ WebUI 接入 Run 与指标关联，只能根据 Run 的 Thread ID 查询现有�
 - `src/application/scheduled-task-service.ts`：拥有平台无关的创建预览、确认、列表、启停、手动运行、
   Run 查询和执行结果类型。
 
-新增一级模块前必须同步 `src/README.md` 与 `tests/module-boundaries.test.ts`。依赖方向固定为：
+新增一级模块前必须同步 `src/README.md` 与 `scripts/check-runtime-boundaries.mjs`。依赖方向固定为：
 
 ```text
 Surface -> Application -> Scheduled Tasks
@@ -380,14 +380,13 @@ enabled = false
 - Actor/Workspace/Provider/模型重新授权与撤权后的失败关闭。
 - 无人值守审批、用户输入、额外权限与 MCP elicitation 全部安全拒绝。
 - 前台 Thread 不变、计划 Thread 独占、后台完成释放、重启订阅恢复和多 Provider 路由。
-- 前台 `thread/start.dynamicTools` 注册与 `item/tool/call` 完整往返真实 App Server 合同，
+- 前台 `thread/start.dynamicTools` 注册与 `item/tool/call` 完整往返，
   以及参数校验、唯一 Actor 解析和现有命令渲染复用。
 - 三 Surface 命令、确认、按钮令牌、输出顺序、超时隔离和敏感信息清洗。
-- 真实锁定版 App Server 合同使用临时 `CODEX_HOME` 和 Mock Responses，不调用真实账户或模型。
 
-每个 PR 先运行改动直接相关的定向测试、`npm run check`、`npm run lint` 和 `npm run docs:check`；提交
-门禁由 pre-commit 统一运行 `npm run verify:commit`。协议或真实 App Server 行为变化必须保留条件式
-真实合同，未设置合同环境而跳过时不能报告为通过。
+每个 PR 先运行改动直接相关的类型、Lint 或文档检查；提交
+门禁由 pre-commit 统一运行 `npm run verify:commit`。协议或真实 App Server 行为变化应核对锁定版本
+源码与实际行为，并明确记录未验证的范围。
 
 ## 完成标准与停止条件
 

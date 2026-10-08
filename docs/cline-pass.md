@@ -107,16 +107,11 @@ WebUI 调用详情在响应区直接展示错误摘要及已记录的上游错�
 
 - [Cline Chat API](https://docs.cline.bot/api/chat-completions)：认证、消息、函数工具、流和用量。
 - [CLP](https://docs.cline.bot/getting-started/clinepass)：套餐和模型入口。
-- `tests/model-api.test.ts`：消息、并行工具、缓存和失败语义。
-- `tests/real-app-server-chat-provider.test.ts`：真实锁定 App Server 通过隔离 Chat 上游完成工具闭环。
-
-本地合同测试使用临时 Codex Home 与假上游，不消耗套餐额度；不等同于 Cline 线上模型验收。
 
 2026-09-25（UTC）线上验收：`cline-pass/deepseek-v4.1-flash` 经本地转换桥和统计代理完成文本、
 推理历史回传、两个带命名空间的并行函数调用和结果续写。输入、输出、推理及缓存 Token 字段均正常转换；
 首次短请求返回缓存计数 0；随后部署后的 8 次线上请求均成功，实际缓存命中及工具调用续写已确认。首次隔离验收未修改运行中的服务或用户配置。
 同日通过临时 Codex Home 中的真实 App Server、转换桥和 Cline 线上模型验证内联 PNG 识图，模型正确识别图片颜色并正常完成。
-隔离合同测试覆盖图片历史在函数调用后的续写请求中保留。
 同日线上接口验证 `none`、`low`、`high`、`max` 均正常完成，`none` 返回 0 推理 Token，其余等级返回推理，非法等级返回流内错误。
 真实 App Server 经转换桥连接 Cline 的完整链路也验证了默认 `high` 产生推理，以及同一 Thread 切换 `none` 后不再产生推理。
 

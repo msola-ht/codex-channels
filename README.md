@@ -112,14 +112,16 @@ DS、OCG、CCG、CLP 使用当前多账户结构，在 `codexc setup → 模型�
 git clone https://github.com/msola-ht/codex-channels.git
 cd codex-channels
 npm ci
-# 按改动选择相关测试；此处以会话路由为例
-npm test -- tests/session-router.test.ts
+# 按改动选择类型、Lint 或文档检查
+npm run check
 ```
 
-本地提交自动执行按改动范围选择的检查；PR CI 执行完整回归。需要在本地复现完整 CI 回归时运行
-`npm run verify:ci`。验证入口与专项检查见[测试说明](tests/README.md)和[CI 流程](.github/workflows/README.md)。
+本地提交自动执行按改动范围选择的静态检查与构建；PR CI 执行跨平台静态检查与构建。
+完整检查入口为 `npm run verify:ci`，具体范围见[CI 流程](.github/workflows/README.md)。
+本项目不新增或维护自动化测试。交付须记录具体反例尝试及实际输出，并观察至少一条真实用户路径；
+无法观察的行为须明确说明。测试结果、静态检查与构建均不能替代这些行为证据。
 
-协议升级、上游参考仓库和真实 App Server 合同必须遵循[`上游源码维护规则`](docs/upstream-sources.md)与[`Codex CLI 升级流程`](docs/codex-cli-upgrade.md)。
+协议升级和上游参考仓库必须遵循[`上游源码维护规则`](docs/upstream-sources.md)与[`Codex CLI 升级流程`](docs/codex-cli-upgrade.md)。
 
 ## License
 

@@ -81,11 +81,3 @@ codexc restart gateway               # 重启后生效
 - 原生 TUI 的本地显示仍使用系统时区，可能与模型看到的日期相差一天。
 - 只改变“声明的时区”，不改变请求真实发生的时间；长期作息与声明时区不一致时，活跃时间模式仍
   可能体现真实位置。
-
-## 验证
-
-- `tests/config-management.test.ts`：`system.app-server-timezone` 的写入与清除。
-- `tests/timezone-command.test.ts`：`codexc timezone` 的参数校验、写入、清除与非交互输出。
-- `tests/app-server-service-runtime.test.ts`：App Server 子进程环境只在配置后带上 `TZ`。
-- `tests/webui-server-access.test.ts`：WebUI 服务进程只在配置后把 `TZ` 改为配置值。
-- `tests/codexc-cli-syntax.test.ts`：`codexc timezone --help` 的公开帮助入口。

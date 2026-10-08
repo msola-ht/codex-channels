@@ -112,7 +112,6 @@ function checkRootIndex() {
     "runtime/README.md",
     "launchd/README.md",
     "systemd/README.md",
-    "tests/README.md",
     ".githooks/README.md",
     ".github/workflows/README.md",
   ]) {

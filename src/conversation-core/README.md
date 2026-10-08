@@ -27,7 +27,7 @@
   终态与 Usage 指标转换为稳定输入，Core 按 Thread/Turn 累计每个已确认请求；上下文压缩还按操作
   类型归约模型与 Token 摘要，供完成卡片单列。
 - `events.ts`：定义 Conversation 目标、稳定 Token、Plan、Goal、Turn、额度、账户和 MCP OAuth 类型，以及
-  自动审查窄状态通知（保留审查来源及授权路由身份），
+  自动审查窄状态通知（保留审查来源及授权路由身份）及公开的 `AutoApprovalReviewDetails` 完成摘要类型；摘要含固定动作类别、文件数量、网络协议和端口，以及经 Client 凭据脱敏、控制字符清理并各按最多 320 字符截断的 operation、cwd、rationale，并带 durationMs；Client 保留 ASCII 标点，execve program 与 argv 逐参数脱敏后再格式化。operation 按 action 类别摘要 command、execve program 与 argv、文件列表、network host、MCP server/tool 或权限申请 reason，不含 stdin 正文或完整 network target URL，不采集风险与用户授权字段。Core 归约及输出保留处理后的有界纯文本，平台富文本转义由 Surface 负责。输出事件的 details 可选，新通知生产路径只发布完成结果，
   输出事件、Turn 产物、操作状态、OpenAI 账户归属判定和关键事件判定；`turn.reasoning`
   输出只携带“思考中…”状态、每段独立耗时与最终标记，不携带摘要或原始思维链内容；同一 Thread
   开始新 Turn 时会结束并释放旧 Turn 遗留的推理段定时器。

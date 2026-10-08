@@ -16,7 +16,7 @@
 - `windows-proxy-transport.ts`：在 Windows 启动并拥有固定版 `codex app-server proxy --sock`
   子进程，把其双向 stdio 包装为标准 WebSocket Transport；复用 128 MiB 消息边界，握手使用独立
   有界超时并清理静默 Proxy，关闭 Gateway Client 时只终止对应 Proxy，不终止独立 App Server。
-- `stdio-transport.ts`：用于受控开发和测试场景的 stdio Transport。
+- `stdio-transport.ts`：用于受控开发场景的 stdio Transport。
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；通知不附加本地接收时间戳。
   初始化期间
@@ -78,7 +78,7 @@
   生命周期字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
   只识别 `misalignmentPolicyViolation`、Luna Reserve 触发所需的 `usageLimitExceeded` 与登录或刷新令牌失效的 `unauthorized` 结构化错误分类，Turn、warning 和 MCP 错误在此统一脱敏并限长，
   残缺或无关通知不进入业务模块。
-  另将受控 `item/autoApprovalReview/started|completed` 裁剪为 Thread、Turn、review ID、阶段、状态和 agent 来源的批准标志，供 Bootstrap 写入指标及发布窄渠道状态；不传递 action、rationale 或命令，非法来源和终态明确排除。
+  另将受控 `item/autoApprovalReview/started|completed` 裁剪为 Thread、Turn、review ID、阶段、状态和 agent 来源的批准标志，供 Bootstrap 继续采集开始与完成指标。仅 agent 完成事件附加 `AutoApprovalReviewDetails`：七种官方动作类别、最多 1,024 个字符串条目的文件数量、白名单网络协议与 u16 端口；按动作提取操作与工作目录、审查理由，经共享凭据脱敏、控制字符清理及 320 字符限长后传递，execve 参数按原始边界脱敏后才格式化；保留文本标点，由 Surface 处理富文本呈现。合法起止时间投影为耗时，不采集风险与授权等级。未知或畸形摘要字段省略，超大文件列表只保留动作类别，不传递 stdin 正文或完整网络 target URL，非法来源和终态明确排除。
 - `operation-adapter.ts`：把官方 Item 转换为安全、简洁的操作摘要，保留 MCP Tool Item 的
   `readOnlyHint` 能力提示，把多代理工具调用的 `interrupted` 归为失败，并在离开 Client 边界前
   清洗命令、查询及上游错误中的敏感文本；`commandExecution.commandActions` 非空、全部为

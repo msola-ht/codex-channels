@@ -307,35 +307,74 @@ export function sanitizeOperationText(value: string): string {
   return truncate(redactCredentialText(value), 320);
 }
 
+const credentialOption = /^(?:--(?:token|secret|password|passwd|api[-_]key|access[-_]key|cookie|authorization|user)|-u)$/i;
+// Shell tokens may concatenate quoted and unquoted pieces or escape quotes.
+const credentialValue = String.raw`(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\\.|[^\s;|&"'\\])+`;
+const credentialPatterns = {
+  bearer: new RegExp(`(authorization\\s*:\\s*(?:bearer|basic)\\s+)(${credentialValue})`, "gi"),
+  authorization: new RegExp(`(authorization\\s*:\\s*)(?!(?:bearer|basic)\\b)(${credentialValue})`, "gi"),
+  assignment: new RegExp(`(\\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|COOKIE)[A-Z0-9_]*\\s*=\\s*)(${credentialValue})`, "gi"),
+  field: new RegExp(`(\\b(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|cookie)\\s*:\\s*)(${credentialValue})`, "gi"),
+  positional: new RegExp(`((?:^|[\\s'"])(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|cookie)\\s+)(${credentialValue})`, "gi"),
+  option: new RegExp(`(--(?:token|secret|password|passwd|api[-_]key|access[-_]key|cookie|authorization|user)(?:=|\\s+))(${credentialValue})`, "gi"),
+  curlUser: new RegExp(`((?:^|\\s)-u(?:\\s+|(?=[^\\s;|&])))(${credentialValue})`, "gi"),
+};
+
+/** Redact separate credential values while their argv boundaries are still available. */
+export function redactCommandArguments(argv: readonly string[]): string[] {
+  let redactNext = false;
+  return argv.map((argument) => {
+    if (redactNext) {
+      redactNext = false;
+      return "[REDACTED]";
+    }
+    redactNext = credentialOption.test(argument);
+    const assignment = /^(--(?:token|secret|password|passwd|api[-_]key|access[-_]key|cookie|authorization|user)=|[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|COOKIE)[A-Z0-9_]*=)/i.exec(argument);
+    if (assignment) return `${assignment[1]}[REDACTED]`;
+    if (/^-u.+/s.test(argument)) return "-u[REDACTED]";
+    const header = /^(authorization\s*:\s*(?:(?:bearer|basic)\s+)?|(?:set-)?cookie\s*:\s*)/i.exec(argument);
+    if (header) return `${header[1]}[REDACTED]`;
+    return redactCredentialText(argument);
+  });
+}
+
 export function redactCredentialText(value: string): string {
   return value
       .replace(
-        /(authorization\s*:\s*(?:bearer|basic)\s+)([^\s'";]+)/gi,
+        /("[^"\r\n]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|authorization|cookie)[^"\r\n]*"\s*:\s*)"(?:\\.|[^"\\])*"/gi,
+        '$1"[REDACTED]"',
+      )
+      .replace(
+        /(\\"[^"\r\n]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|authorization|cookie)[^"\r\n]*\\"\s*:\s*)\\"(?:\\\\.|[^"\\]|\\(?!"))*\\"/gi,
+        '$1\\"[REDACTED]\\"',
+      )
+      .replace(
+        credentialPatterns.bearer,
         "$1[REDACTED]",
       )
       .replace(
-        /(authorization\s*:\s*)(?!(?:bearer|basic)\b)([^\s'";]+)/gi,
+        credentialPatterns.authorization,
         "$1[REDACTED]",
       )
       .replace(/((?:set-)?cookie\s*:\s*)([^\r\n]+)/gi, "$1[REDACTED]")
       .replace(
-        /(\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|COOKIE)[A-Z0-9_]*\s*=\s*)("[^"]*"|'[^']*'|[^\s;]+)/gi,
+        credentialPatterns.assignment,
         "$1[REDACTED]",
       )
       .replace(
-        /(\b(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|cookie)\s*:\s*)([^\s'";]+)/gi,
+        credentialPatterns.field,
         "$1[REDACTED]",
       )
       .replace(
-        /((?:^|[\s'"])(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|cookie)\s+)("[^"]*"|'[^']*'|[^\s;]+)/gi,
+        credentialPatterns.positional,
         "$1[REDACTED]",
       )
       .replace(
-        /(--(?:token|secret|password|passwd|api-key|cookie|authorization)(?:=|\s+))("[^"]*"|'[^']*'|[^\s;]+)/gi,
+        credentialPatterns.option,
         "$1[REDACTED]",
       )
       .replace(/(\/bot)\d{6,}:[A-Za-z0-9_-]{20,}/g, "$1[REDACTED]")
-      .replace(/((?:^|\s)-u\s+)([^\s;]+)/gi, "$1[REDACTED]")
+      .replace(credentialPatterns.curlUser, "$1[REDACTED]")
       .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/]+:)([^\s@/]+)(@)/gi, "$1[REDACTED]$3");
 }
 

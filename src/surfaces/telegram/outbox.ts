@@ -30,6 +30,7 @@ import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
   createSubagentContactedPresentation,
   createAutoApprovalReviewPresentation,
+  isHiddenAutoApprovalReview,
   createSubagentStartedPresentation,
   createTurnCompletedPresentation,
   createTurnReasoningPresentation,
@@ -241,7 +242,7 @@ export class TelegramOutbox {
     signal.throwIfAborted();
     // Existing journal records may contain deliberately hidden, empty commentary.
     // This explicit presentation decision is not evidence that a platform send occurred.
-    if (isEmptyCommentary(event)) return;
+    if (isEmptyCommentary(event) || isHiddenAutoApprovalReview(event)) return;
     if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
     await captureDelivery(() => {
       void this.handle(event);
@@ -476,15 +477,18 @@ export class TelegramOutbox {
           false,
         );
         return;
-      case "autoApprovalReview.updated":
+      case "autoApprovalReview.updated": {
+        const presentation = createAutoApprovalReviewPresentation(event);
+        if (!presentation) return;
         this.enqueue(chatId, (signal) => this.sendPanel(
           chatId,
-          renderTelegramLifecyclePresentation(createAutoApprovalReviewPresentation(event)),
+          renderTelegramLifecyclePresentation(presentation),
           undefined,
           true,
           signal,
         ).then(() => undefined), true);
         return;
+      }
       case "subagent.completed":
         this.enqueue(
           chatId,

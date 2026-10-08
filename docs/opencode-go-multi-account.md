@@ -119,12 +119,6 @@ Gateway 空闲释放终止。再次选择账户、恢复 Thread 或启动 Remote
 - WebUI 为所有已配置账户分别展示用量卡；
 - 额度耗尽时展示当前账户状态，但 Gateway 不主动切换账户或拦截请求；
 
-## 主要验证边界
-
-测试覆盖账户注册表、CLI 原子写入和回滚、共享代理路径与分账户指标、Provider 路由、
-账户用量适配、按需启动、全局 Provider Client 空闲关闭、Remote TUI 租约，以及 Supervisor 的运行中、
-显式释放和租约状态。
-
 ## 关联文档
 
 - [`docs/opencode-go.md`](opencode-go.md)：用户配置、模型和额度说明；

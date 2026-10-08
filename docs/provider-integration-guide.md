@@ -114,16 +114,16 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 文件权限 `0600`，目录 `0700`，符号链接与越权读取失败关闭；
 - `codexc setup` 菜单同步加入入口。
 
-### 3.7 测试
+### 3.7 验证边界
 
 至少覆盖：
 
-- 定义与文件布局（`model-provider-managed-runtime.test.ts` 风格）；
-- Profile 镜像校验与失败关闭（`model-provider-runtime.test.ts` 风格）；
+- 定义与文件布局；
+- Profile 镜像校验与失败关闭；
 - 账户适配器：余额或用量窗口、本机 Token 统计、窗口边界、窗口快照归属与缺失回退；
 - Setup：新增、更新、恢复、回滚；
 - 生命周期：60 秒全局空闲宽限判定、自动解除后的关闭前通知、关闭后按需重连；
-- 协议与真实 App Server 合同测试只在 Transport 或共享行为变化时新增。
+- Transport 或共享行为变化时核对锁定版本协议与实际运行行为。
 
 ### 3.8 文档
 
@@ -143,7 +143,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 ## 5. 验收流程
 
-开发时先运行受影响的定向检查；普通提交由 pre-commit 执行按范围选择的 `verify:commit`，PR CI 使用 `verify:ci` 完整回归，不提前重复。下列源码安装、服务重启及线上检查只用于已获授权的部署验收：
+开发时先运行受影响的静态检查与构建；普通提交由 pre-commit 执行按范围选择的 `verify:commit`，PR CI 使用 `verify:ci` 完整静态检查与构建，不提前重复。下列源码安装、服务重启及线上检查只用于已获授权的部署验收：
 
 ```bash
 npm run install:global
