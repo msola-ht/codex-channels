@@ -700,8 +700,11 @@ export function createTurnCompletedPresentation(
       ),
     });
   }
-  runFields.push({ label: "本轮耗时", value: event.durationMs === undefined ? "未提供" : formatElapsedDuration(event.durationMs) });
-  runFields.push(...performanceFields(event.timing?.performance));
+  runFields.push({
+    title: "本轮耗时",
+    value: event.durationMs === undefined ? "未提供" : formatElapsedDuration(event.durationMs),
+    fields: performanceFields(event.timing?.performance),
+  });
   if (isAutoApprovalReviewer(event.approvalsReviewer) && event.autoApprovalReview) {
     runFields.push(autoApprovalReviewField(event.autoApprovalReview));
   }
@@ -790,12 +793,10 @@ export function createTurnCompletedPresentation(
     });
   }
   sessionFields.push({
-    label: "总耗时",
+    title: "总耗时",
     value: formatSessionExecutionTiming(event),
+    fields: event.sessionAggregate ? performanceFields(event.sessionAggregate.performance) : [],
   });
-  if (event.sessionAggregate) {
-    sessionFields.push(...performanceFields(event.sessionAggregate.performance));
-  }
   const sections = [
     ...(sessionFields.length > 0
       ? [{ title: "当前会话", fields: sessionFields }]
