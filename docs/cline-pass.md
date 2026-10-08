@@ -24,7 +24,7 @@ Key 使用现有私有文件机制保存，不写入 Gateway TOML 或命令行�
 `clp-main/cline-pass/deepseek-v4.1-flash`，显示名称包含账户 Provider ID。已加载模型间切换无需退出
 Desktop，更换 App Server 实例仍须完全退出。聚合请求复用现有 CLP Chat 桥，每次用目标账户真实 Key
 替换本地令牌；关闭网页搜索、模型 API WebSocket 和自动重试，不改变独立 Relay 的目录及路由。
-终端也可用 `codexc remote --provider agg`，渠道从 `/model` 的 `DS + CLP` 目录选择；
+终端也可用 `codexc remote --provider agg`，渠道从 `/model` 的“聚合提供商”目录选择；
 同一聚合 Thread 内切换保留历史，账户额度查询不合并，请求指标按真实账户记录。
 安装新代码或变更账户、Key、模型目录后须重启 App Server 服务；聚合目录不热刷新，快照变化后拒绝
 后续出站。旧单账户 Thread 不迁移，请在聚合实例新建 Thread；聚合跨模型历史和 Desktop 工具尚未

@@ -128,7 +128,7 @@ App Server。该账户 API Key 只进入需要它的 App Server 子进程环境�
 聚合不迁移单账户历史，须在聚合实例新建 Thread；已加载模型间切换无需退出桌面。安装新代码或
 变更账户、Key、模型目录后须重启 App Server 服务，聚合快照变化会拒绝后续出站请求，不热刷新目录。
 聚合关闭网页搜索、模型 API WebSocket 和自动重试，不影响 DS 单账户或独立 Relay 的原有路径。
-终端使用 `codexc remote --provider agg`，渠道通过 `/model` 的 `DS + CLP` 目录选择；
+终端使用 `codexc remote --provider agg`，渠道通过 `/model` 的“聚合提供商”目录选择；
 聚合 Thread 内切换模型保留历史，账户额度查询不合并，模型请求指标归属真实账户。
 第三方桌面及聚合跨模型历史、工具路径仍待实机验收，
 具体边界见 [Desktop 共享说明](codex-desktop-app-development.md)。
