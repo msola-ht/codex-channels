@@ -244,7 +244,8 @@ export async function runDesktopAppCommand(args, options = {}) {
         await openDesktop(app.path, endpoint, selectedProvider);
       });
     }
-    writeMessage("success", `ChatGPT Desktop App 已通过 Provider ${selectedProvider} 的共享 App Server 启动；本次选择不保存。`);
+    writeMessage("success", `已发送 ChatGPT Desktop App 启动请求，目标为 Provider ${selectedProvider} 的共享 App Server；本次选择不保存。`);
+    writeMessage("note", "启动请求成功不代表 Desktop 已连接或内置 MCP 工具已就绪；请检查 App 内状态。");
     return { action: "open", opened: true, provider: selectedProvider };
   }
 
@@ -653,7 +654,7 @@ function writeDesktopAppStatus(status, writeMessage) {
     : `Desktop：未安装；${status.compatibilityReason}`);
   if (status.installed) {
     writeMessage(status.compatible ? "success" : "failure", status.compatible
-      ? "兼容入口：可用"
+      ? "兼容入口：可用（仅启动入口检查，不代表内置工具可用）"
       : `兼容入口：不可用；${status.compatibilityReason}`);
     writeMessage("note", `运行状态：${
       status.running === null ? "unknown" : status.running ? "running" : "stopped"
@@ -671,8 +672,8 @@ function writeDesktopAppStatus(status, writeMessage) {
       writeMessage(status.toolHostSupported ? "success" : "failure", `受管入口：${
         status.toolHostSupported ? "ready" : "not-ready"
       }`);
-      writeMessage(status.toolHostAttached ? "success" : "note", `内置工具 Host：${
-        status.toolHostAttached ? "attached" : "not-attached"
+      writeMessage("note", `内置工具 Host：${
+        status.toolHostAttached ? "attached（租约已连接，MCP 工具就绪状态未验证）" : "not-attached"
       }`);
     } else {
       writeMessage(status.bridgeReady === null ? "note" : status.bridgeReady ? "success" : "failure", `共享桥：${

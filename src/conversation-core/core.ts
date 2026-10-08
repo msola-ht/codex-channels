@@ -596,6 +596,10 @@ export class ConversationCore {
         return;
       }
       case "mcp.status.updated": {
+        // Retrying startup does not resolve the last failure or invalidate its notice.
+        if (event.status === "starting") {
+          return;
+        }
         const key = `${event.modelProvider ?? "global"}:${event.threadId ?? "global"}:${event.name}`;
         const fingerprint =
           `${event.status}:${event.error ?? ""}:${event.failureReason ?? ""}`;

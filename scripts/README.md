@@ -19,7 +19,7 @@
   写入与回滚、App Server 服务重启、Windows 目标实例临时租约、受认证桥就绪探测和单次环境启动；Windows
   租约覆盖探测与启动并在所有结果下释放，状态不输出桥令牌，两个
   平台均明确标为预览。macOS 启动时改用受管 stdio Proxy，不再依赖桥端口或令牌，并单独报告受管
-  入口能力及内置工具 Host 是否已附加；启动前持有临时 Provider 租约，按需恢复已释放的实例，
+  入口能力及内置工具 Host 是否已附加，明确这些状态不代表 MCP 工具就绪；启动前持有临时 Provider 租约，按需恢复已释放的实例，
   通过官方已加载 Thread 清单和逐项状态读取检查持久及临时会话，并在活动 Turn 或 `codexc remote`
   目标实例租约存在时拒绝会触发子进程切换的启动；打开 Desktop 前释放临时租约。
   macOS 的具体构建实机验收边界见 `docs/codex-desktop-app-development.md`，Windows 尚未实机验收。

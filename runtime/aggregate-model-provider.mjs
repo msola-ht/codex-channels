@@ -31,7 +31,6 @@ export function aggregateProviderMembers(primaryProvider, providers) {
 /** Source paths only: safe for watchers, with no credential material returned. */
 export function aggregateProviderMaterialFiles(environment, expectedMembers) {
   const paths = new Map([
-    [join(codexHomePath(environment), "config.toml"), 1_048_576],
     [deepseekAccountsFilePath(environment), 1_048_576],
     [clinePassAccountsFilePath(environment), 1_048_576],
     [ccgAccountsFilePath(environment), 1_048_576],
@@ -60,13 +59,14 @@ export function aggregateProviderMaterialFiles(environment, expectedMembers) {
   return [...paths].map(([path, maximumBytes]) => ({ path, maximumBytes }));
 }
 
-function materialFileDigest(file) {
+/** Shared by settings snapshots and the request-time worker; returns no source text. */
+export function readAggregateMaterialFileDigest(file) {
   try {
     // Check absence before Windows ACL verification, which intentionally reports
     // unsafe/missing private paths with a structured ACL error rather than ENOENT.
     lstatSync(file.path);
-    return createHash("sha256").update(file.readMode === "codex-config"
-      ? readCodexConfigFile(file.path) : readPrivateFileSync(file.path, file.maximumBytes)).digest("hex");
+    const content = readPrivateFileSync(file.path, file.maximumBytes);
+    return createHash("sha256").update(content).digest("hex");
   } catch (error) {
     if (error?.code === "ENOENT") return null;
     // eslint-disable-next-line preserve-caught-error
@@ -75,10 +75,8 @@ function materialFileDigest(file) {
 }
 
 function materialFiles(environment, expectedMembers) {
-  const configPath = join(codexHomePath(environment), "config.toml");
-  return aggregateProviderMaterialFiles(environment, expectedMembers).map(file => ({
-    ...file, ...(file.path === configPath ? { readMode: "codex-config" } : {}),
-  })).map(file => ({ ...file, digest: materialFileDigest(file) }));
+  return aggregateProviderMaterialFiles(environment, expectedMembers)
+    .map(file => ({ ...file, digest: readAggregateMaterialFileDigest(file) }));
 }
 
 function materialFingerprint(expectedMembers, files) {
@@ -93,6 +91,8 @@ export function loadAggregateModelMaterial(environment, expectedMembers) {
   assertResponsesContextSyncComplete(environment);
   const files = materialFiles(environment, expectedMembers);
   const fingerprint = materialFingerprint(expectedMembers, files);
+  // Main configuration is an instance validation input, not third-party model
+  // material. Read it when loading/applying material, never in its change digest.
   let config;
   try { config = parse(readCodexConfigFile(join(codexHomePath(environment), "config.toml"))); }
   catch (error) {

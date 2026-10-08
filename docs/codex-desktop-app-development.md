@@ -32,6 +32,13 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 
 ## 实现与验收状态
 
+- 2026-10-08 的 macOS ChatGPT `26.1002.52244` 聚合实例实机日志确认：共享连接和 Host
+  租约附加成功，但 Desktop 工具 Pipe 返回 `untrusted-process-ancestry`，随后 `codex_app`
+  MCP 启动报 `Codex app tools pipe closed` / `write EPIPE`。当前签名 Host 路径未通过该次
+  进程祖先链校验；日志没有确定被拒绝的具体祖先进程，也不能证明所有构建均存在同一问题。
+  `compatible` 只验证入口标记，`toolHostAttached` 只表示租约连接，二者均不是工具可用性验收。
+  本地缺少该 Desktop 构建及 macOS 环境，尚未验证可接受的替代启动链；不能以关闭通知或重试
+  代替工具修复，也不绕过 Desktop 的信任校验。以下历史成功记录不覆盖本次失败组合。
 - macOS 已验收，操作者于 2026-10-07 确认；使用受管 stdio Proxy、私有 Supervisor Host 租约、签名校验与主实例串行切换。
 - Windows 使用当前用户包探测、受认证回环桥与隔离启动环境，仍为开发预览，未完成实机双向验收。
 - 启动时选择 Provider 隔离实例是新增能力，尚未完成 macOS 或 Windows 实机验收；下述主 OpenAI
@@ -231,6 +238,7 @@ Remote 通过 `--provider agg` 取得实例租约，不能同时指定 Profile�
 账户注册表、私有 Profile、Gateway TOML 和数据库格式均不变。源目录仍由各提供商拥有。
 Gateway watcher 检测现有成员的 Key、配置与目录变化，复用 Supervisor 的设置应用接口，
 待活动 Thread 与租约释放后安全重建聚合实例并确认新目录。等待期间旧快照拒绝后续出站请求。
+主 `config.toml` 不参与聚合监听与逐请求材料复核，仅在材料加载、启动或应用时校验窗口与 Provider 冲突。
 空闲实例使用确认过的本地派生目录更新渠道菜单，不因浏览目录启动 App Server；运行中的实例通过 `model/list` 确认。
 增删聚合成员属于拓扑变更，仍须重启 App Server 与 Gateway；Gateway 未运行时需手动重启 App Server 才能刷新。
 每请求的私有文件与 ACL 复核由有界工作线程执行，共享目录去重；等待支持取消与 15 秒截止时间。
@@ -480,11 +488,22 @@ Supervisor 只接受当前用户、已配置的目标 Provider、已启用配置
    App Server 无法在保持锁定 CLI、Provider 代理、指标、Supervisor 和私有 UDS 的同时使用内置
    工具。
 
-原第 7 项阻碍已被隔离实测解除：可信托管不改变 App Server 所有权或协议版本，且无需 Pipe Relay、
-签名绕过和应用包修改。若正式用户路径不能复现同一签名链、需要 Desktop 预发布 CLI，或服务重启后
-不能恢复，则重新触发该停止条件并保留当前会话共享预览。
+第 7 项曾在旧版本隔离实测中解除；该记录不代表后续 Desktop 构建的祖先链校验必然通过。
+2026-10-08 的 `26.1002.52244` 聚合实例用户路径出现明确的祖先链拒绝，重新触发内置工具
+兼容路径的停止条件；保留会话共享预览，但不宣称该组合内置工具可用。不得以 Pipe Relay、
+签名绕过、应用包修改或替换为 Desktop 预发布 CLI 规避；恢复实现前须确认上游接受的启动合同。
 
 ## 私有入口变化时的处置
+
+2026-10-08 上游核查：锁定的 `rust-v0.160.1` 开源源码未包含 Desktop 的
+`dynamic_app_tools_peer_rejected` / `untrusted-process-ancestry` 校验实现。
+[上游 Issue #47425](https://github.com/openai/codex/issues/47425) 报告了共享 daemon 已连接、
+但 `codex_app` Pipe 因进程身份链被拒绝的相似问题；核查时仍开放且没有评论。
+该报告中的旧版本临时启动链不是维护者确认的支持合同，不能直接用于当前 Desktop 构建。
+[Issue #48786](https://github.com/openai/codex/issues/48786) 则在 Remote SSH 浏览器 Pipe 上
+报告相同的 `untrusted-process-ancestry` 原因，即便相关可执行文件都有 OpenAI 签名；这是另一条
+工具路径的旁证，不是当前 `codex_app` 故障的直接复现或修复。
+按这两个精确错误／环境变量检索公开 PR 未找到对应修复；这不证明上游私有实现没有变化。
 
 macOS 当前采用 OpenAI 签名 Node 托管选中 App Server、受管 stdio Proxy 交付动态 Pipe 的路径。
 若官方私有入口或签名信任链发生变化，停止启用并等待明确的上游合同；不伪造签名、不修改应用包，

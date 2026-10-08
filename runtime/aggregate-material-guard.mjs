@@ -1,26 +1,12 @@
-import { createHash } from "node:crypto";
-import { lstatSync } from "node:fs";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
-import { readPrivateFileSync } from "./private-file.mjs";
-import { readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
+import { readAggregateMaterialFileDigest } from "./aggregate-model-provider.mjs";
 
 // Only immutable paths and hashes cross this boundary; never account credentials.
 if (!isMainThread && workerData?.kind === "aggregate-material-guard") {
   parentPort.on("message", ({ id }) => {
     let ok = false;
     try {
-      ok = workerData.files.every(file => {
-        let digest;
-        try {
-          lstatSync(file.path);
-          digest = createHash("sha256").update(file.readMode === "codex-config"
-            ? readCodexConfigFile(file.path) : readPrivateFileSync(file.path, file.maximumBytes)).digest("hex");
-        } catch (error) {
-          if (error?.code !== "ENOENT") throw error;
-          digest = null;
-        }
-        return digest === file.digest;
-      });
+      ok = workerData.files.every(file => readAggregateMaterialFileDigest(file) === file.digest);
     } catch { /* Changed, missing or no longer private material fails closed. */ }
     parentPort.postMessage({ id, ok });
   });

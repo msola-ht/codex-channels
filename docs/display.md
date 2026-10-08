@@ -546,7 +546,9 @@ MCP Server 详情在 App Server 返回非空、长度受限且符合固定上游
 通过 `/skill`、`/plugin` 或 `/agents` 新建 Turn 时，三个渠道只使用统一的 Turn 生命周期确认，
 并在同一条确认中保留具体 Skill、Plugin 或子代理名称，不再额外发送一条扩展启动结果；追加到活动
 Turn 时没有新的 Turn 启动事件，因此继续显示明确的追加确认。MCP Server 的首次 `starting` /
-`ready` 状态不主动展示；`failed`、`cancelled` 以及异常后恢复为 `ready` 仍会通知。飞书把当前
+`ready` 状态不主动展示；`failed`、`cancelled` 以及异常后恢复为 `ready` 仍会通知。
+同一 Provider、Thread 与 MCP Server 的相同持续故障不会因中间的 `starting` 重试而重复通知；
+故障原因变化仍会通知，恢复后再次失败也会重新通知。飞书把当前
 Turn 的启动回复直接登记为 Thread 状态消息，后续 `active` 不再创建第二张卡，`idle` 原地更新
 这张回复并保留扩展身份。
 

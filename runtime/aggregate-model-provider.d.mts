@@ -9,7 +9,6 @@ export interface AggregateMaterialFile {
   path: string;
   maximumBytes: number;
   digest: string | null;
-  readMode?: "codex-config";
 }
 export interface AggregateModelMaterial {
   catalog: { models: Record<string, unknown>[] };
@@ -23,4 +22,5 @@ export interface AggregateModelMaterial {
 export function loadAggregateModelMaterial(environment: NodeJS.ProcessEnv, expectedMembers: string[]): AggregateModelMaterial;
 export function aggregateProviderMaterialFiles(environment: NodeJS.ProcessEnv, expectedMembers: readonly string[]): { path: string; maximumBytes: number }[];
 export function readAggregateProviderSettingsFingerprint(environment: NodeJS.ProcessEnv, expectedMembers: readonly string[]): string;
+export function readAggregateMaterialFileDigest(file: Omit<AggregateMaterialFile, "digest">): string | null;
 export function aggregateLaunchArguments(material: AggregateModelMaterial, dataDir: string, baseUrl: string): string[];

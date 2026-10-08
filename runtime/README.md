@@ -58,8 +58,10 @@
 - `third-party-coding-instructions.mjs`：非 Flash CLP、新增 OCG/CCG 手填模型与新增非 DS 自定义 Responses 模型共用的编程提示词；显式写入模型定义，不改变既有目录缺省值，不声明模型身份或授予工具权限，不依赖 DS 下载。
 - `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
   拓扑成员、模型 slug、目录与启动参数；保留各模型元数据，拒绝主配置的全局窗口覆盖，复核账户与
-  目录快照；公开源文件清单与内容指纹供安全刷新使用，只写可重建、无密钥的运行时 `aggregate-models.json`，不改账户或存储契约。
-- `aggregate-material-guard.mjs`：聚合实例拥有的有界工作线程；按去重文件清单校验私有权限与内容摘要，
+  目录快照；公开第三方账户、Profile、目录及事务状态的源文件清单与内容指纹供安全刷新使用。
+  主配置不进入材料监听和出站指纹，仅在材料加载、启动或应用时校验全局窗口与 Provider 冲突。
+  设置刷新与出站复核共用同一摘要实现及私有文件读取校验。只写可重建、无密钥的运行时 `aggregate-models.json`，不改账户或存储契约。
+- `aggregate-material-guard.mjs`：聚合实例拥有的有界工作线程；按去重文件清单校验私有权限与材料摘要，
   避免 Windows ACL 子进程阻塞模型转发和 Supervisor。取消等待不释放尚未完成的队列槽，实例释放时关闭线程。
 - `ccg-accounts.mjs` / `ccg-accounts.d.mts`：CCG 账户注册表、默认账户、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ccg-<账户>`，共用 CCG 目录与统计代理。
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
@@ -115,6 +117,7 @@
   Codex 原生可执行文件，实际验证签名有效性及可信身份，并用签名 Node 托管选中的 App Server；
   Host 与原生子进程使用专属进程组，终止信号和超时强杀覆盖该组。只接受 Desktop 明确传入的内置插件
   布尔启用值，动态 Pipe 与附加状态不落盘。
+  签名与私有路径校验不等于 Desktop 已接受进程祖先链，Host 附加状态不表示 MCP 工具就绪。
 - `terminal-identity.mjs`：按当前锁定 Codex CLI 的终端探测顺序从进程环境推导模型上游
   `User-Agent` 的终端标识（`TERM_PROGRAM[/版本]` 优先，其次各终端专有变量，最后 `TERM`），
   只读环境、不执行子进程；`detectTerminalUserAgentToken` 复现官方取值，供“一键设为官方 TUI

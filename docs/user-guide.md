@@ -359,6 +359,11 @@ WebSocket 和自动重试关闭，独立 Relay 保持其原有模型目录和路
 Gateway 运行时会检测现有成员的 Key、配置和模型目录变更，并在活动 Thread 与客户端租约均允许时重建聚合实例、更新渠道模型菜单。
 因此修改 DS 模型文件也会更新聚合目录；有活动或租约时先等待，快照变化后旧实例拒绝后续出站请求。
 关闭占用的 Remote/Desktop 客户端并等待活动结束后可完成刷新；Gateway 未运行时需重启 App Server。
+退出 Desktop 本身不会创建模型更新，只会释放租约、允许已有更新应用。Codex 主配置
+`~/.codex/config.toml` 不属于聚合模型材料，不参与聚合设置监听或出站材料指纹校验。
+聚合监听第三方账户注册、Profile、凭据、模型目录及其事务状态；主配置中的窗口覆盖与 Provider
+冲突仍在材料加载、启动或应用时校验。主配置修改不会由聚合机制自动刷新；需按对应设置的生效方式
+处理，要求重启 App Server 的配置仍须显式重启。
 新增、移除切换成员属于拓扑变更，仍须重启 App Server 和 Gateway。生成文件保存在
 `<dataDir>/runtime/aggregate-models.json`，是可重建的派生目录；应修改各提供商的源目录，不要直接编辑它。
 聚合拒绝 Codex 主 `config.toml` 中全局 `model_context_window` 和 `model_auto_compact_token_limit`，
@@ -391,6 +396,11 @@ App Server 服务是否支持受管入口。`toolHostAttached` 只在查询目�
 实例的 `running`、`released` 或 `unknown` 状态；`provider` 和 `providerInstanceState` 报告查询目标，
 `desktopAppProvider` 报告 macOS 当前 Host 租约所属实例。状态查询不会唤醒已释放的实例。
 Windows 状态不建立桥连接；共享启用且令牌可读取时 `bridgeReady: null` 表示未探测，实际连接检查在启动时执行。
+`compatible` 仅表示启动入口探测通过，`toolHostAttached` 不表示 `codex_app` MCP 已就绪。
+内置工具仍按 Desktop 传入的工具开关启用，不根据模型 Provider 或登录状态推断工具可用性。
+如果 Desktop 日志出现 `dynamic_app_tools_peer_rejected reason=untrusted-process-ancestry`，
+表示工具 Pipe 拒绝了进程祖先链，重复启用共享不能修复。当前 `26.1002.52244` 的聚合共享路径
+已观察到这一故障，内置工具不可用；详见 [Desktop 验收状态](codex-desktop-app-development.md#实现与验收状态)。
 共享功能要求主 Provider 为 OpenAI，第三方通过切换模式的账户实例或聚合实例接入；不接入
 Remote Control 或手机配对。Desktop 的连接环境属于未公开兼容入口，当前功能是
 预览；构建不兼容时命令会拒绝启用。
