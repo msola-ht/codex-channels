@@ -22,7 +22,7 @@
   Provider App Server 的监管拓扑、实际版本和连通性；完成全部检测后按领域只展示失败、提示与处理建议，
   交互终端使用不同颜色并汇总结果；`--json` 输出全部脱敏检查、分类计数与健康状态；Linux 缺少
   `bubblewrap` 时输出安装建议，不改写配置。
-- `security repair`：逐个修复 Windows Codex TOML 配置文件 ACL，不修改沙箱目录权限；Unix 平台提示无需处理。
+- `security repair`：逐个修复 Windows Codex Home 顶层普通 TOML 文件 ACL；显式调用窄修复入口，仅在当前用户已有完全控制且无拒绝规则时接管 Administrators 所有的文件，不接管其他用户文件、不修改沙箱目录权限；Unix 平台提示无需处理。
 - `run`：在前台复用内部 `service-app-server` 监管入口启动 App Server、Provider 统计代理与
   Gateway；只有监管身份、Provider 拓扑和真实 WebSocket 健康检查全部匹配的现有 App Server
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管

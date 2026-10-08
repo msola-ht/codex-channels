@@ -645,23 +645,23 @@ function checkCodexHomePrivatePaths() {
   try {
     entries = readdirSync(home, { withFileTypes: true });
   } catch (error) {
-    record("Codex 私有配置权限", false, errorMessage(error), "运行 codexc security repair");
+    record("Codex 私有配置权限", false, errorMessage(error), "检查 Codex Home 目录访问权限；security repair 只修复目录内的 TOML 文件");
     return;
   }
   for (const entry of entries) {
     if (entry.isFile() && entry.name.endsWith(".toml")) {
-      checkPrivateFile(`Codex 配置权限：${entry.name}`, join(home, entry.name), "运行 codexc security repair");
+      checkPrivateFile(`Codex 配置权限：${entry.name}`, join(home, entry.name));
     }
   }
 }
 
-function checkPrivateFile(name, path, remediation) {
+function checkPrivateFile(name, path) {
   if (process.platform === "win32") {
     try {
       assertPrivateFileAccessSync(path);
       record(name, true, "当前 SID 私有 ACL 有效");
     } catch (error) {
-      record(name, false, errorMessage(error), remediation);
+      record(name, false, errorMessage(error));
     }
     return;
   }

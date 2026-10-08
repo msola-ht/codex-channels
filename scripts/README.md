@@ -540,6 +540,7 @@
   通过计划任务控制脚本执行 App Server、Gateway、WebUI 与 Relay 的安装、启停、状态、日志
   与卸载；
   核心服务状态同时检查监管进程存活、RPC 可达性及服务定义完整性。
+  App Server 启动等待向共享检查入口传入主 Socket 路径，由该入口统一派生监管地址；实例已空闲释放时也检查同一监管入口。
 - `windows-service-host.mjs` / `windows-service-host.d.mts`：计划任务启动的 Windows 服务宿主，按 JSON 定义启动并监管单个
   Node 服务进程，转发控制请求并把标准输出、错误输出写入用户级运行日志。
 - `windows-service-launcher.ps1`：Windows 计划任务调用的 PowerShell 启动器，设置受控环境后

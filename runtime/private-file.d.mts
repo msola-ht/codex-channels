@@ -23,6 +23,7 @@ export function writePrivateFileAtomic(
 ): Promise<void>;
 
 export function securePrivateFileSync(path: string): void;
+export function repairWindowsPrivateFileSync(path: string): void;
 
 export function securePrivateDirectorySync(path: string): void;
 export function secureAppServerSocketDirectorySync(path: string): void;

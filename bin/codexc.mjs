@@ -31,7 +31,7 @@ import {
 } from "../scripts/runtime-config.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
-  securePrivateFileSync,
+  repairWindowsPrivateFileSync,
 } from "../runtime/private-file.mjs";
 import {
   CODEX_REMOTE_USAGE,
@@ -135,7 +135,7 @@ DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开�
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
 切换模式可用 --profile sf-ds-<账户>、sf-ocg-<账户>、sf-ccg-<账户> 或
 sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。
-DS 官方和 CLP 均有切换账户且主 Provider 为 OpenAI 时，可用 --provider agg 或 -p agg
+至少两个 API Key 切换提供商已配置时，可用 --provider agg 或 -p agg
 连接聚合实例；不能与 --profile 同用。聚合从服务端读取默认模型，审批 reviewer 使用 user，
 显式 auto_review 会被拒绝。终端退出时释放该实例租约。
 -p agg 选择聚合实例；-p <Profile> 等同 --profile <Profile>，例如 -p sf-ds-main。`,
@@ -159,7 +159,9 @@ DS 官方和 CLP 均有切换账户且主 Provider 为 OpenAI 时，可用 --pro
 Linux 缺少 bubblewrap 时输出安装建议。`,
   security: `用法：codexc security repair
 
-修复 Windows Codex 私有 TOML 配置文件的 ACL；不修改 Codex 沙箱目录权限，其他平台明确提示无需处理。`,
+修复 Windows Codex Home 顶层 TOML 配置文件的 ACL，仅保留当前用户、SYSTEM 和 Administrators 完全控制。
+管理员所有的文件仅在当前用户已有完全控制且无拒绝规则时恢复为当前用户所有；不接管其他用户文件。
+不修改配置内容或 Codex 沙箱目录权限，其他平台明确提示无需处理。`,
   provider: `${primaryProviderUsage}\n\n受管账户：\n  codexc provider deepseek <add|list|reconfigure|remove|default> [id]\n  codexc provider opencode-go <add|list|remove|default|release> [id]\n  codexc provider ccg remove <id>\n\n各家只开放已有能力；CCG 新增与设置使用 codexc setup。release 释放账户 App Server 实例，后续请求可重新拉起，不禁用账户。`,
   update: `用法：codexc update
 
@@ -688,7 +690,7 @@ function security(args) {
     .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
     .map((entry) => join(home, entry.name));
   for (const file of files) {
-    if (statSync(file).isFile()) securePrivateFileSync(file);
+    if (statSync(file).isFile()) repairWindowsPrivateFileSync(file);
   }
   printCliMessage("success", `Windows 私有 TOML 文件 ACL 已修复：${home}（${files.length} 个文件）`);
 }

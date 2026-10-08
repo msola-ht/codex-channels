@@ -11,7 +11,6 @@ import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { resolveExecutable } from "../runtime/executable.mjs";
 import {
   appServerSocketAcceptsWebSocket,
-  appServerSupervisorSocketPath,
   inspectAppServerSupervisorState,
 } from "../runtime/app-server-supervisor.mjs";
 import {
@@ -224,13 +223,11 @@ async function waitForAppServer(socketPath) {
   const deadline = Date.now() + hostStartTimeoutMs;
   while (Date.now() < deadline) {
     if (await appServerSocketAcceptsWebSocket(socketPath)) {
-      await waitForAppServerSupervisor(appServerSupervisorSocketPath(socketPath), deadline);
+      await waitForAppServerSupervisor(socketPath, deadline);
       return;
     }
     try {
-      const state = await inspectAppServerSupervisorState(
-        appServerSupervisorSocketPath(socketPath),
-      );
+      const state = await inspectAppServerSupervisorState(socketPath);
       if (
         state.status === "ready"
         && state.topology.releasedProviders.includes(state.topology.primaryProvider)

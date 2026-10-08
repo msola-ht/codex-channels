@@ -22,10 +22,11 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { execFile, spawnSync } from "node:child_process";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveExecutableInvocation } from "./executable.mjs";
+import { codexHomePath } from "./codex-home.mjs";
 
 const defaultMaximumPrivateFileBytes = 1_048_576;
 
@@ -175,6 +176,12 @@ export async function writePrivateFileAtomic(path, content) {
   }
 }
 
+/** Explicit user repair only; normal readers/writers must never reclaim ownership. */
+export function repairWindowsPrivateFileSync(path) {
+  if (process.platform !== "win32") throw new Error("定向 ACL 修复只支持 Windows");
+  assertWindowsPrivatePathSync(path, "file", "repair");
+}
+
 export function securePrivateFileSync(path) {
   if (process.platform === "win32") {
     assertWindowsPrivatePathSync(path, "file", "secure");
@@ -270,12 +277,24 @@ function windowsPrivatePathProcessError(error, status, stdout, path, kind, opera
     "私有路径缺少受信任 SID 权限", "私有路径仍继承父目录权限",
     "私有路径 ACL 正由其他进程更新，请重试", "Socket 目录必须仅允许当前 SID 访问",
     "私有配置超过读取上限",
+    "权限修复只支持普通文件", "管理员所有文件含拒绝规则，无法定向修复",
+    "管理员所有文件缺少当前 SID 完全控制权限，无法定向修复",
   ]);
   if ((!error || typeof error.code === "number") && status === 1 && response?.ok === false) {
-    const stage = ["request", "lock", "inspect", "secure", "verify", "read-config"].includes(response.stage)
+    const stage = ["request", "lock", "inspect", "secure", "verify", "verify-parent", "read-config"].includes(response.stage)
       ? response.stage : "unknown";
     const reason = reasons.has(response.reason) ? response.reason : "系统权限操作失败";
-    return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查失败：${reason}；阶段=${stage}${context}`);
+    const repairableReason = [
+      "私有路径必须由当前 SID 拥有", "受信任 SID 缺少完全控制权限",
+      "其他主体具有不安全的私有路径访问权限", "私有路径缺少受信任 SID 权限",
+      "私有路径仍继承父目录权限",
+    ].includes(reason);
+    const repairHint = operation !== "repair" && stage !== "verify-parent" && kind === "file" && repairableReason
+      && path.endsWith(".toml")
+      && dirname(resolve(path)).toLowerCase() === codexHomePath().toLowerCase()
+      ? "；请在当前用户的普通终端运行 codexc security repair，成功后重试原命令"
+      : "";
+    return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查失败：${reason}；阶段=${stage}${context}${repairHint}`);
   }
   if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" || error?.code === "ENOBUFS") {
     return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查输出超过上限${context}`);
