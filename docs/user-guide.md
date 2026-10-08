@@ -352,7 +352,7 @@ macOS 需要附加工具 Host 时只短暂重启目标实例。旧服务缺少�
 聚合使用一个 App Server 和现有工具 Host，各请求按选择的模型送至对应账户；网页搜索、模型 API
 WebSocket 和自动重试关闭，独立 Relay 保持其原有模型目录和路由。
 
-安装新代码后，旧 App Server 服务须按常规执行 `codexc restart app-server` 才能加载聚合能力；
+安装新代码后，旧 App Server 服务须按常规执行 `codexc restart appserver` 才能加载聚合能力；
 账户、Key 或模型目录变更后也须重启该服务。运行中的聚合目录不热刷新，快照变化会拒绝后续出站请求。
 聚合拒绝 Codex 主 `config.toml` 中全局 `model_context_window` 和 `model_auto_compact_token_limit`，
 请先移除这两个覆盖，让每个模型采用自身目录设置；项目级同名配置仍可能覆盖目录值，使用前应检查。
