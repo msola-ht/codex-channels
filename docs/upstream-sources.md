@@ -40,13 +40,13 @@ TTFT 参考 `internal/runtime/executor/helps/responses_ttft_helpers.go`、`chat_
 
 ## Cline 模型目录来源
 
-Relay 目录下载器读取 [Cline 官方模型文件](https://github.com/cline/cline/blob/c269dbb7f97256d53d4aedabb6c245b9ec54b1b6/sdk/packages/llms/src/catalog/catalog.generated.ts)，
+Relay 与 CLP Codex 目录共用下载器读取 [Cline 官方模型文件](https://github.com/cline/cline/blob/c269dbb7f97256d53d4aedabb6c245b9ec54b1b6/sdk/packages/llms/src/catalog/catalog.generated.ts)，
 首次解析格式审查基线为 `c269dbb7f97256d53d4aedabb6c245b9ec54b1b6`，未建立本地源码仓库。
 同时核对该提交的 `catalog-cline-recommended.ts`、`scripts/generate-models.ts` 和共享 `reasoning-options.ts`；输入类型映射核对同一提交的 `providers/model-capabilities.ts` 与 `catalog/catalog-live.ts`。
 思考参数映射另核对同一提交 `providers/routing/portable-reasoning.ts`、`providers/routing/anthropic-compatible.ts`、`providers/routing/provider-option-rules.ts`、`providers/vendors/cline.ts` 及相邻测试；Cline/Cline Pass 共用 `cline` SDK 适配器，通用关闭为 `reasoning.enabled=false`。锁定依赖 `@ai-sdk/openai-compatible@3.0.37` 的 [Chat 出站映射](https://github.com/vercel/ai/blob/%40ai-sdk%2Fopenai-compatible%403.0.37/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts)将指定等级序列化为 `reasoning_effort`。本项目保留已实测的精确 DeepSeek 关闭字段，不据此复制其他原生提供商适配器。
 此处是可由用户显式更新的模型元数据，不是 Codex 协议基线；每次下载记录实际 SHA，不加载上游代码。
 下载入口为 `runtime/cline-relay-catalog-update.mjs`，共用读取入口为 `runtime/cline-relay-catalog.mjs`；
-更新和回退见[Relay 模型设置](provider-api-relay-development.md#clp-转发模型目录与设置)。
+Relay 更新和回退见[Relay 模型设置](provider-api-relay-development.md#clp-转发模型目录与设置)；CLP Codex 目录由独立的[共享目录更新入口](cline-pass.md)显式生成，双方不隐式覆盖彼此目录。
 
 ### CPAMP 指标展示参考
 

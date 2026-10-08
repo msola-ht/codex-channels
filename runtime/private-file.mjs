@@ -38,13 +38,16 @@ export class WindowsPrivatePathError extends Error {
 }
 
 /** Read current configuration without repairing permissions or caching ACL results. */
-export async function readPrivateConfigFile(path, { signal } = {}) {
+export async function readPrivateConfigFile(path, { signal, maximumBytes = defaultMaximumPrivateFileBytes } = {}) {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 2_097_152) {
+    throw new Error("私有配置读取上限无效");
+  }
   signal?.throwIfAborted();
   if (process.platform === "win32") {
     const invocation = windowsPrivatePathInvocation();
     const result = await new Promise((resolve, reject) => {
       const child = execFile(invocation.file, invocation.args, {
-        encoding: "utf8", maxBuffer: 8 * defaultMaximumPrivateFileBytes,
+        encoding: "utf8", maxBuffer: 8 * maximumBytes,
         timeout: 2000, killSignal: "SIGKILL", windowsHide: true,
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       }, (error, stdout) => {
@@ -58,13 +61,13 @@ export async function readPrivateConfigFile(path, { signal } = {}) {
       if (signal?.aborted) cancel();
       // A failed spawn may close stdin before this request is written.
       child.stdin.on("error", () => {});
-      child.stdin.end(JSON.stringify({ operation: "read-config", kind: "file", path }));
+      child.stdin.end(JSON.stringify({ operation: "read-config", kind: "file", path, maximumBytes }));
     });
     signal?.throwIfAborted();
     let response;
     try { response = JSON.parse(result); } catch { throw new Error("Windows 私有配置读取结果无效"); }
     if (response?.ok !== true || typeof response.content !== "string"
-      || Buffer.byteLength(response.content, "utf8") > defaultMaximumPrivateFileBytes) {
+      || Buffer.byteLength(response.content, "utf8") > maximumBytes) {
       throw new Error("Windows 私有配置读取结果无效");
     }
     return response.content;
@@ -81,12 +84,12 @@ export async function readPrivateConfigFile(path, { signal } = {}) {
   const descriptor = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0));
   try {
     const before = await descriptor.stat();
-    if (!before.isFile() || before.size > defaultMaximumPrivateFileBytes
+    if (!before.isFile() || before.size > maximumBytes
       || (before.mode & 0o077) !== 0
       || (process.getuid !== undefined && before.uid !== process.getuid())) {
       throw new Error("私有配置权限、类型或大小无效");
     }
-    const buffer = Buffer.alloc(defaultMaximumPrivateFileBytes + 1);
+    const buffer = Buffer.alloc(maximumBytes + 1);
     let length = 0;
     while (length < buffer.length) {
       signal?.throwIfAborted();
@@ -94,7 +97,7 @@ export async function readPrivateConfigFile(path, { signal } = {}) {
       if (bytesRead === 0) break;
       length += bytesRead;
     }
-    if (length > defaultMaximumPrivateFileBytes) throw new Error("私有配置超过读取上限");
+    if (length > maximumBytes) throw new Error("私有配置超过读取上限");
     const content = buffer.subarray(0, length).toString("utf8");
     const after = await descriptor.stat();
     const current = await lstat(path);
@@ -102,7 +105,7 @@ export async function readPrivateConfigFile(path, { signal } = {}) {
     if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs
       || current.isSymbolicLink() || current.dev !== before.dev || current.ino !== before.ino
       || currentParent.dev !== parent.dev || currentParent.ino !== parent.ino
-      || Buffer.byteLength(content, "utf8") > defaultMaximumPrivateFileBytes) {
+      || Buffer.byteLength(content, "utf8") > maximumBytes) {
       throw new Error("私有配置在读取期间发生变化");
     }
     signal?.throwIfAborted();

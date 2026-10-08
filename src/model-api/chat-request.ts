@@ -1,5 +1,5 @@
-import type { RelayModelCapability } from "../../runtime/chat-reasoning.mjs";
-export type { RelayModelCapability } from "../../runtime/chat-reasoning.mjs";
+import type { RelayModelCapability, RelayReasoningEffort } from "../../runtime/chat-reasoning.mjs";
+export type { RelayModelCapability, RelayReasoningEffort } from "../../runtime/chat-reasoning.mjs";
 import { supportsChatReasoningOff } from "../../runtime/chat-reasoning.mjs";
 import { ModelConversionError } from "./validation.js";
 import { assertNoNestedReasoningControls, isRequestObject, reasoningControlFields, validateDirectModel, validateDirectStream } from "./direct-request.js";
@@ -50,6 +50,13 @@ export function applyChatReasoningPolicy(request: DirectChatRequest, provider: s
   const result: DirectChatRequest = { ...request };
   for (const field of reasoningControlFields) delete result[field];
   if (provider.startsWith("ds-")) result.reasoning_effort = "none";
-  else result.reasoning = knownOff ? { effort: "none" } : { enabled: false };
+  else Object.assign(result, clinePassChatReasoningControl(request.model, "none"));
   return result;
+}
+
+/** Shared CLP wire mapping; exact Flash retains its verified DeepSeek control. */
+export function clinePassChatReasoningControl(model: string, effort: RelayReasoningEffort):
+  { reasoning: { effort: RelayReasoningEffort } | { enabled: false } } | { reasoning_effort: RelayReasoningEffort } {
+  if (model === "cline-pass/deepseek-v4.1-flash") return { reasoning: { effort } };
+  return effort === "none" ? { reasoning: { enabled: false } } : { reasoning_effort: effort };
 }

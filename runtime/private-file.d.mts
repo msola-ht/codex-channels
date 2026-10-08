@@ -9,7 +9,7 @@ export function readPrivateFileSync(
 
 export function readPrivateConfigFile(
   path: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; maximumBytes?: number },
 ): Promise<string>;
 
 export function writePrivateFileAtomicSync(

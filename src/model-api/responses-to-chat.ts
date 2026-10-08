@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { RelayReasoningEffort } from "./chat-request.js";
 import { array, ModelConversionError, object, string, toolSearchArguments } from "./validation.js";
 import type { JsonObject } from "./validation.js";
 
@@ -30,7 +31,7 @@ export interface ChatRequest {
   tool_choice?: unknown;
   parallel_tool_calls?: boolean;
   max_completion_tokens?: number;
-  reasoning?: { effort: "none" | "low" | "high" | "max" };
+  reasoning?: { effort: RelayReasoningEffort };
   response_format?: JsonObject;
 }
 
@@ -57,7 +58,8 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
       || (reasoning.summary != null && reasoning.summary !== "none")) throw new ModelConversionError("Reasoning controls are unsupported by this Chat adapter");
     const effort = reasoning.effort;
     if (effort != null) {
-      if (effort !== "none" && effort !== "low" && effort !== "high" && effort !== "max") throw new ModelConversionError("Unsupported Chat reasoning effort");
+      if (effort !== "none" && effort !== "minimal" && effort !== "low" && effort !== "medium"
+        && effort !== "high" && effort !== "xhigh" && effort !== "max") throw new ModelConversionError("Unsupported Chat reasoning effort");
       reasoningControl = { effort };
     }
   }

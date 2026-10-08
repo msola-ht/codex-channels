@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArguments, loadAggregateModelMaterial,
   readAggregateProviderSettingsFingerprint } from "./aggregate-model-provider.mjs";
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
+import { ClinePassModelGuard } from "./cline-pass-model-guard.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -38,6 +39,7 @@ import {
   loadConfiguredCustomPrimaryModelProvider,
   loadOpenAiBaseUrl,
   loadManagedModelProviderSettings,
+  managedProviderDirectory,
   readManagedMarker,
   providerMetricsSocketPath,
   validateConfiguredModelProviders,
@@ -179,13 +181,20 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     const metricsProvider = proxyProviderIds.get(provider) ?? provider;
     const definition = providerDefinitions.get(provider) ?? sharedManagedProviderDefinition(provider);
     let bridge;
+    let clinePassGuard;
     if (definition?.upstreamWireApi === "chat_completions") {
+      const clinePass = definition.storageId === "clp" || definition.id === "clp";
+      if (clinePass) clinePassGuard = new ClinePassModelGuard(join(
+        managedProviderDirectory(runtime.environment, definition), definition.catalogFileName,
+      ));
       bridge = new ChatCompletionsBridge({ ...options,
-        clinePass: definition.storageId === "clp" || definition.id === "clp",
+        clinePass,
+        ...(clinePassGuard ? { isClinePassModelEnabled: (model, signal) => clinePassGuard.isEnabled(model, signal) } : {}),
         onError: () => proxySelector.invalidate(),
         ...(validatedCodex.upstream_user_agent ? { upstreamUserAgent: validatedCodex.upstream_user_agent } : {}),
       });
-      await bridge.start();
+      try { await bridge.start(); }
+      catch (error) { await clinePassGuard?.close(); throw error; }
       options = bridge.proxyOptions();
     }
     const optionsWithUserAgent = {
@@ -261,11 +270,16 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         );
       },
     });
-    try { await modelProxy.start(); } catch (error) { await bridge?.close(); throw error; }
+    try { await modelProxy.start(); } catch (error) {
+      try { await bridge?.close(); } finally { await clinePassGuard?.close(); }
+      throw error;
+    }
     const proxyRuntime = {
       baseUrl: `http://${modelProxy.address()}`,
       proxy: bridge ? { close: async () => {
-        try { await modelProxy.close(); } finally { await bridge.close(); }
+        try { await modelProxy.close(); } finally {
+          try { await bridge.close(); } finally { await clinePassGuard?.close(); }
+        }
       } } : modelProxy,
     };
     console.log(

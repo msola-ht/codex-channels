@@ -32,6 +32,17 @@ function Get-Request {
   if ($request.operation -eq 'read-config' -and $request.kind -ne 'file') {
     Throw-InvalidAcl '配置读取只支持普通文件'
   }
+  if ($request.operation -eq 'read-config') {
+    if ($request.PSObject.Properties.Name -notcontains 'maximumBytes') {
+      $request | Add-Member -NotePropertyName maximumBytes -NotePropertyValue 1048576
+    }
+    if ($request.maximumBytes -isnot [long] -and $request.maximumBytes -isnot [int]) {
+      Throw-InvalidAcl '私有配置读取上限无效'
+    }
+    if ($request.maximumBytes -lt 1 -or $request.maximumBytes -gt 2097152) {
+      Throw-InvalidAcl '私有配置读取上限无效'
+    }
+  }
   if ($request.operation -eq 'repair' -and $request.kind -ne 'file') {
     Throw-InvalidAcl '权限修复只支持普通文件'
   }
@@ -259,7 +270,7 @@ try {
       Assert-PrivateAcl $parent 'parent-directory' $expectedSids
       $stage = 'read-config'
       Assert-PrivateAcl $item 'file' $expectedSids
-      if ($stream.Length -gt 1048576) { Throw-InvalidAcl '私有配置超过读取上限' }
+      if ($stream.Length -gt $request.maximumBytes) { Throw-InvalidAcl '私有配置超过读取上限' }
       $reader = [System.IO.StreamReader]::new($stream, [System.Text.UTF8Encoding]::new($false, $true))
       try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
       @{ ok = $true; content = $content } | ConvertTo-Json -Compress

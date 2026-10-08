@@ -566,6 +566,7 @@ Config 文案说明：协议索引中的“Codex 用户设置”“一键配置�
 ### CLP Chat 转换
 
 CLP 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider 路由，不增加 RPC。
+共享 Codex 目录由 [`cline-pass-account-management.mjs`](../scripts/cline-pass-account-management.mjs) 从 Cline 官方元数据生成；仅 Flash 复用 DS 模板与上下文，其余模型独立声明能力。桥接受锁定 Codex 的七种普通思考等级，Flash 保留 `reasoning.effort`，其他 CLP 模型按官方 Chat 映射使用 `reasoning_effort` 或 `reasoning.enabled=false`；可选范围以模型目录为准。生产桥的回环 HTTP 路径已观察完成输出与非法等级拒绝，真实云端新增模型仍需分别验收。
 未映射的顶层工具声明及其 `tool_choice` 原样交给 CLP，不注册本地执行身份；不宣称支持托管工具的执行或回程。声明形态依据锁定源码 `tools/src/tool_spec.rs`、`tool_spec_tests.rs` 和 `core/tests/suite/web_search.rs`。
 账户用量由 [`cline-pass-account-adapter.ts`](../src/bootstrap/cline-pass-account-adapter.ts) 查询 Cline 官方套餐额度接口，复用账户快照和窗口展示；
 [`cline-pass-setup.mjs`](../scripts/cline-pass-setup.mjs) 按账户创建受管 Profile，注册表和默认账户复用共享校验与路由，模型目录和 Chat 代理在账户间共享；
@@ -574,7 +575,7 @@ CLP 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider 路由
 依据锁定官方 `core/src/client.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs` 的请求、条目和事件合同，
 接受文本、用户内联图片、函数与自由格式工具、客户端 `tool_search`；工具结果里的内联图片不放进 Chat `tool` 消息，转成该组工具结果之后紧随的一条 `user` 消息图片段，并用相同的调用 ID 与图片序号标记关联原 `tool` 文本位置和图片；自由格式语法保留在 Chat 工具说明，CLP 模型目录声明 `apply_patch_tool_type: freeform` 与 `supports_search_tool`，检索结果按锁定 `tools/src/tool_search.rs` 的命名空间和 `defer_loading` 形态显式加载。`reasoning_content` 通过 `reasoning.content` 原文往返，Cline `reasoning` 通过摘要往返。图片沿用稳定 `UserInput.image` 与模型目录 `input_modalities`，不伪造加密推理或远程压缩语义；不完整终态保留已生成文本并拒绝执行部分工具调用。Chat 上游诊断通过请求级进程内回调写独立调用记录，不增加协议事件；HTTP 与流内错误经 [`chat-errors.ts`](../src/provider-proxy/chat-errors.ts) 映射为固定文案和白名单分类，`context_length_exceeded` 沿用锁定上游 SSE 的上下文错误语义。用户边界见 [`CLP`](cline-pass.md)。
 原生 Responses 推理回传
-DS 官方、OCG、CCG、CLP 四个受管 DeepSeek 入口的内置网页搜索在启动参数中关闭；固定与切换模式由
+DS 官方、OCG、CCG、CLP 四类受管入口的内置网页搜索在启动参数中关闭；固定与切换模式由
 [`app-server-service-runtime.mjs`](../runtime/app-server-service-runtime.mjs)、
 [`model-provider-startup-runtime.mjs`](../runtime/model-provider-startup-runtime.mjs) 统一消费 Provider 定义；
 来源和边界见 [DeepSeek](deepseek.md#网页搜索)。
