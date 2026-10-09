@@ -47,8 +47,8 @@
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
   释放对应隔离实例。
 - `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令，再恢复核心服务。数据库只读校验当前 Schema，不迁移或清空数据；流程见[源码安装与更新](../docs/source-install.md)。用户设置和 Provider 模型目录不改写。npm 安装仅同步配套 CLI 并校验数据库，不更新 Gateway 包。
-- `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令，
-  保留用户配置、数据库、凭据、日志、输出和 Shell 配置。Registry 安装交给 npm 卸载。
+- `uninstall`：自动识别当前受管源码、本地构建包或 npm 全局安装；先卸载后台服务，再卸载对应 npm 全局命令，仅在精确来源与受管标记匹配时删除仓库，
+  保留普通工作树、缺少来源记录的旧安装源码，以及用户配置、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置。
 - `reset-credit`：通过 Gateway 查询 OpenAI 重置券，交互选券、预览后默认拒绝消费；明确确认才提交，非交互终端仅支持查询。
 - `metrics`：交互菜单提供运行、会话明细、会话列表、聚合、请求明细、历史额度窗口和数据库状态；清理与重置交互集中在 `cleanup`，直接维护子命令保留；`status --json` 返回稳定的路径、Schema
   兼容性与记录数；数据库只接受当前 Schema，`update` 不执行数据库迁移。

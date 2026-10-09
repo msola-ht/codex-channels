@@ -208,10 +208,68 @@ case "$action" in
   uninstall)
     resolved_units=$(service_ids all uninstall)
     set -- $resolved_units
-    if ! systemctl_user disable --now "$@"; then
-      print_status failure "systemd 服务未能停止或禁用，已保留服务定义以便排查。"
-      exit 1
-    fi
+    stopping_units=""
+    disabling_units=""
+    for unit in "$@"; do
+      if ! unit_state=$(systemctl_user show "$unit" --property=LoadState --property=ActiveState); then
+        print_status failure "无法确认 systemd 服务状态，未执行停止或卸载：$unit。已保留服务定义以便排查。"
+        exit 1
+      fi
+      load_state=""
+      active_state=""
+      state_valid=1
+      while IFS= read -r property; do
+        case "$property" in
+          LoadState=?*)
+            if [ -n "$load_state" ]; then state_valid=0; fi
+            load_state=${property#LoadState=}
+            ;;
+          ActiveState=?*)
+            if [ -n "$active_state" ]; then state_valid=0; fi
+            active_state=${property#ActiveState=}
+            ;;
+          *) state_valid=0 ;;
+        esac
+      done <<EOF
+$unit_state
+EOF
+      case "$load_state" in
+        stub|loaded|not-found|bad-setting|error|merged|masked) ;;
+        *) state_valid=0 ;;
+      esac
+      case "$active_state" in
+        active|reloading|refreshing|inactive|failed|activating|deactivating|maintenance) ;;
+        *) state_valid=0 ;;
+      esac
+      if [ "$state_valid" -ne 1 ]; then
+        print_status failure "systemd 服务状态查询不完整，未执行停止或卸载：$unit。已保留服务定义以便排查。"
+        exit 1
+      fi
+      if [ "$load_state" != "not-found" ]; then
+        stopping_units="$stopping_units $unit"
+        disabling_units="$disabling_units $unit"
+      else
+        case "$active_state" in
+          inactive|failed) ;;
+          *) stopping_units="$stopping_units $unit" ;;
+        esac
+        if [ -e "$units_dir/$unit" ] || [ -L "$units_dir/$unit" ]; then
+          disabling_units="$disabling_units $unit"
+        fi
+      fi
+    done
+    for unit in $stopping_units; do
+      if ! systemctl_user stop "$unit"; then
+        print_status failure "systemd 服务未能停止：$unit。已保留全部服务定义以便排查。"
+        exit 1
+      fi
+    done
+    for unit in $disabling_units; do
+      if ! systemctl_user disable "$unit"; then
+        print_status failure "systemd 服务未能禁用：$unit。已保留全部服务定义以便排查。"
+        exit 1
+      fi
+    done
     for unit in "$@"; do rm -f "$units_dir/$unit"; done
     systemctl_user daemon-reload
     systemctl_user reset-failed "$@" 2>/dev/null || true

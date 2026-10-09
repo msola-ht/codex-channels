@@ -34,8 +34,8 @@
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
 - `source-update.mjs` / `source-update.d.mts`：从本机终端更新受管官方 `main`；跨平台独占锁阻止并发更新，候选克隆启用长路径支持。先构建并只读检查配置、数据库结构和精确 CLI 合同，CLI 不匹配时确认后同步。记录 App Server、Gateway、Relay、WebUI 状态，按依赖顺序停服；刷新源码与全局命令后，只恢复原本运行的服务，Relay 还须保持启用。恢复前再次校验 CLI 版本和配置、数据库，失败保留阶段及必要备份。无新提交或本地构建包只同步配套 CLI，不更新 Gateway 包；关闭 daemon 自动启动，其他用户偏好和模型目录不变。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
-  prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
-- `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程与受管源码目录归属后，先卸载后台服务，再删除 Git 仓库及已记录和当前包所属 npm prefix 中的全局命令；拒绝符号链接或不匹配路径，保留配置、数据库、凭据、日志、输出和 Shell 配置。
+  prefix，并在已安装包记录精确源码来源，从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
+- `source-uninstall.mjs` / `source-uninstall.d.mts`：统一识别受管源码、本地工作树构建包与 npm 全局包，先卸载后台服务，再卸载当前包及来源匹配的已记录包；只有路径、来源与受管标记均匹配才删除仓库。拒绝符号链接、身份冲突和执行中替换，保留普通工作树和用户数据。
 - `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装；`inspectDatabases` 只读校验当前 Schema，拒绝其他版本，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定；仅在监管拓扑匹配且实例已运行时连接 Socket，空闲释放状态不启动 Proxy 探测，不匹配或尚未启动的实例继续等待。
 - `state-database.mjs`：提供状态库与计划任务库的只读版本/结构检查，只接受当前 Schema。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
@@ -82,7 +82,7 @@
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的 HTTP 服务、共享 API 类型与管理路由组合入口；
-  服务入口同时接收终端信号与父进程 `codexc-stop`，统一关闭 HTTP 监听和通知连接；Windows CLI 包装层异步转发停止消息。
+  服务入口同时接收终端信号与父进程 `codexc-stop`，统一关闭 HTTP 监听、通知连接与尚未发送请求的浏览器预连接；活动请求按共享停止预算收尾，超时记录错误并以非零状态退出。Windows CLI 包装层异步转发停止消息。
   主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
   `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
@@ -556,7 +556,8 @@
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载 App Server、Gateway、WebUI 与可选 Relay 的 systemd 用户服务；
   安装前确保当前用户的 linger 已启用并复查，使用户未登录时也能随系统启动，无法启用则在修改
   unit 状态前失败并显示管理员处理命令；与 launchd 使用相同的目标、服务角色和默认值，WebUI
-  已安装时纳入 `all`；安装动作单独保留 WebUI 停启状态。停止不存在的 Unit 与 launchd 一样按已停止处理，用户数据始终保留。
+  已安装时纳入 `all`；安装动作单独保留 WebUI 停启状态。停止不存在的 Unit 与 launchd 一样按已停止处理；
+  卸载先完整查询全部目标，只跳过已确认不存在且未运行的 Unit，定义缺失但仍运行时仍先停止；管理器故障、查询不完整或停止/禁用失败时保留全部服务定义，用户数据始终保留。
 - `windows-service-control.mjs` / `windows-service-control.d.mts`：读取用户级 Windows 服务定义，
   通过计划任务控制脚本执行 App Server、Gateway、WebUI 与 Relay 的安装、启停、状态、日志
   与卸载；

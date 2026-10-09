@@ -62,6 +62,7 @@ codexc traffic               # 查看模型请求与响应转储
 codexc reset-credit list     # 查询 OpenAI 可用重置券；use 交互确认使用
 codexc webui                 # 启动本地指标与设置 WebUI
 codexc update                # 更新受管源码、同步配套 CLI 并校验当前数据库
+codexc uninstall             # 自动识别并卸载当前程序，保留用户数据
 codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc remote -p ds-main     # 用已配置的完整 Provider ID 连接隔离实例
 codexc app      # 启动共享 Desktop App；首次确认后自动启用（预览）

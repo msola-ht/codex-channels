@@ -149,6 +149,7 @@ try {
   $packEntry = @($packJson | ConvertFrom-Json)[0]
   if (-not $packEntry.filename) { throw 'npm pack 未返回 tarball 文件名' }
   Invoke-Checked $npm @('install', '--global', '--ignore-scripts', '--loglevel=error', '--no-audit', '--no-fund', (Join-Path $packageDirectory $packEntry.filename)) $checkout
+  Invoke-Checked $node @((Join-Path $checkout 'scripts\source-install-metadata.mjs'), 'record', $checkout, $npmPrefix) $checkout
   if (-not (Test-Path -LiteralPath (Join-Path $npmPrefix 'codexc.cmd'))) { throw "npm 全局命令入口不存在：$npmPrefix\codexc.cmd" }
   $completed = $true
   Write-Output "[成功] Codex Connect Git 源码已安装：$checkout"

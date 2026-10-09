@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { resolveExecutableInvocation, resolveOptionalExecutable } from "../runtime/executable.mjs";
 import { packageDir } from "./package-path.mjs";
 import { ensureSandboxDependencies } from "./sandbox-dependencies.mjs";
+import { currentNpmGlobalPrefix, recordInstalledSourceMetadata } from "./source-install-metadata.mjs";
 
 const sourceConfig = join(packageDir, "tsconfig.build.json");
 const webuiDir = join(packageDir, "webui");
@@ -26,18 +27,22 @@ if (prepared === 0 && webuiBuilt === 0) {
   if (!alreadyPrepared) assertPreparedBuild();
   ensureCodexCli();
   ensureSandboxDependencies();
+  const prefix = currentNpmGlobalPrefix();
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-install-"));
   try {
     const tarballPath = packSource(temporaryDirectory);
     process.exitCode = runQuiet("npm", [
       "install",
       "--global",
+      "--prefix",
+      prefix,
       "--ignore-scripts",
       "--loglevel=error",
       "--no-audit",
       "--no-fund",
       tarballPath,
     ]);
+    if (process.exitCode === 0) recordInstalledSourceMetadata(packageDir, prefix);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }

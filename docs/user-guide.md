@@ -486,7 +486,7 @@ codexc logs -n 200
 日常服务操作直接使用 `codexc <动作>`，不提供 `service` 子命令。
 `codexc run` 在前台运行核心服务；`codexc start [目标]` 启动已安装后台服务。
 `codexc install` 生成服务定义并启动核心服务；`codexc uninstall --services` 仅停止并卸载后台服务，
-`codexc uninstall` 卸载整个受管程序，两者都保留用户数据。`codexc reload` 只通知 Gateway 重读配置。
+`codexc uninstall` 自动识别并卸载当前程序，受管源码来源匹配时也删除仓库；两者都保留用户数据。`codexc reload` 只通知 Gateway 重读配置。
 Windows 重载成功表示 Gateway 已接受重读请求，不代表配置应用已经完成；若提示“重新加载结果未确认”，
 应先核对服务日志与实际配置状态，不能据此认定请求没有执行。尚未接受的重载请求会在截止或连接断开时取消。
 
@@ -513,6 +513,7 @@ Windows 启动前会检查服务定义所用的 PowerShell、原生构建产物�
 单独重启 Gateway 不停止共享 App Server；单独重启 App Server 时，仍运行的 Gateway 会按真实断线处理并重连。
 渠道内禁止停止或重启 App Server，全部重启也必须在本机终端执行。
 WebUI 内不执行包含自身的停止、重启或卸载任务；请在本机终端运行对应的 `codexc stop/restart webui`、`codexc stop/restart all` 或 `codexc uninstall --services`。
+浏览器开着 WebUI 时也可以从终端重启：停止时主动关闭实时通知、空闲 HTTP 连接及尚未发送请求的浏览器预连接；正在处理的请求最多等待 30 秒，超时会在 WebUI 日志中记录错误并以非零状态退出。本项修复更新程序后即可使用，不需要重新生成服务定义。
 
 受管第三方 Provider 的模型目录、Profile 或管理标记变化会自动校验，并仅应用到当前 Gateway
 已启用且受影响的 Provider。原生 TUI/Desktop 租约或该实例的权威活动 Thread 会推迟应用；
@@ -630,9 +631,9 @@ codexc start gateway
 codexc uninstall
 ```
 
-源码卸载不要求配置文件有效；仍会检查受管安装身份并保留用户配置和数据。
-
-npm 安装版也可以使用 `codexc uninstall --services` 后执行 `npm uninstall -g @hegenai/codexc`。
+卸载不要求配置文件有效，自动处理官方受管源码、本地工作树构建包和 npm Registry 全局包，先卸载服务，再卸载当前全局命令。
+只有源码来源记录与受管目录精确匹配才删除受管仓库；本地工作树和缺少来源记录的旧安装源码保留，身份未知或冲突时拒绝卸载。
+用户配置、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置均保留。无需另行执行 `npm uninstall`；仅卸载后台服务用 `codexc uninstall --services`。
 
 ## 6. 渠道命令
 

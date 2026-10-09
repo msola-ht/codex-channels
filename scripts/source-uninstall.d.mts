@@ -1,11 +1,12 @@
 export interface SourceUninstallResult {
-  checkout: string;
+  checkout?: string;
+  prefixes: string[];
 }
 
 export interface SourceUninstallOptions {
   projectDir?: string;
   uninstallServices?: (
-    checkout: string,
+    projectDir: string,
     environment: NodeJS.ProcessEnv,
   ) => Promise<void> | void;
   uninstallGlobalPackage?: (
@@ -14,7 +15,7 @@ export interface SourceUninstallOptions {
   ) => Promise<void> | void;
 }
 
-export function uninstallManagedSourceInstallation(
+export function uninstallInstallation(
   environment?: NodeJS.ProcessEnv,
   options?: SourceUninstallOptions,
 ): Promise<SourceUninstallResult>;
