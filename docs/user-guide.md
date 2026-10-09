@@ -482,6 +482,8 @@ Windows 重载成功表示 Gateway 已接受重读请求，不代表配置应用
 
 Windows 安装时若显式设置了 `CODEX_HOME`，该路径必须是已存在的目录，安装器会将规范化后的路径写入四个服务定义。更换目录后需要在设置了新值的终端重新运行 `codexc install`；已有定义不会被后台自动改写，安装失败沿用既有定义备份和恢复流程。
 
+macOS 和 Linux 的服务定义为停止预留 50 秒，覆盖内部收尾预算；Linux 首次停止信号只发给服务主进程，由它协调子进程收尾，超时后由 systemd 清理剩余进程。已有安装仅更新程序并重启不会刷新服务定义；升级到包含这些模板变更的版本后，需在本机终端执行一次 `codexc install` 重新生成并激活定义。这会重启核心服务，请先安排停机窗口并记录各服务状态。macOS 已运行的 WebUI 还需执行 `codexc restart webui` 加载新 plist；首次卸载仍使用旧 Job 的期限。
+
 Windows 启动前会检查服务定义所用的 PowerShell、原生构建产物、Node、CLI 入口及工作目录。缺失或不匹配时先返回修复提示，不启动任务；服务进程启动后的故障仍可能在宿主等待超时后报告。此时显示的“最近一次任务结果”不保证来自本次启动，请结合 `codexc logs` 判断。
 
 `codexc restart [gateway|appserver|webui|relay|all]` 是唯一重启入口，默认 `all`。

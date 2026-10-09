@@ -47,6 +47,7 @@ export function validateCustomPrimaryModelProviderId(
   id: unknown,
   environment?: NodeJS.ProcessEnv,
 ): string | null;
+export function assertCustomPrimaryProviderAuthentication(provider: Record<string, unknown>): void;
 export function listCustomPrimaryProviderCandidates(
   providers: Record<string, unknown> | undefined,
 ): string[];

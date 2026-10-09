@@ -98,6 +98,7 @@
   Provider 块与 Key 不进入主配置。
   固定模式使用不可变的当前用户私有凭据版本，主配置只引用独立 `env_key`；提供凭据读取、创建及显式删除端口，
   校验 Provider、Origin、版本与文件私有性，拒绝旧主配置明文凭据启动。配置写入结果未知时保留新旧凭据供实际引用选择。
+  `assertCustomPrimaryProviderAuthentication` 由切换计划和运行时共同消费，在切换写入前拒绝不支持的认证字段。
 - `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
@@ -219,7 +220,7 @@
   入口收到退出信号后停止监管请求、等待已开始的
   Provider 操作，并对全部子进程执行有限终止。可标记失败已由子命令展示，避免嵌套 CLI 重复报错。
   具体关闭超时和资源清理仍由各生命周期所有者决定。
-- `shutdown-budget.mjs` / `shutdown-budget.d.mts`：共享 Gateway 与 App Server 监管进程的 30 秒关闭截止、包含 IPC 交付的子服务 35 秒正常退出等待、外层 50 秒回收等待；计划任务停止另有 20 秒确认期限。外层不得在内层允许的正常清理期限内提前强制终止，内部直接入口也不能无限等待启动或资源清理。
+- `shutdown-budget.mjs` / `shutdown-budget.d.mts`：共享 Gateway 与 App Server 监管进程的 30 秒关闭截止、包含 IPC 交付的子服务 35 秒正常退出等待、外层 50 秒回收等待；同一外层预算以秒供 launchd `ExitTimeOut`、systemd `TimeoutStopSec` 与 launchd 卸载确认消费，计划任务停止另有 20 秒确认期限。外层不得在内层允许的正常清理期限内提前强制终止，内部直接入口也不能无限等待启动或资源清理。
 - `owned-process.mjs` / `owned-process.d.mts` / `windows-owned-process.ps1` / `windows-native.cs`：Windows 受管 Codex、状态查询及维护命令的原生 Job 宿主；使用现有 PowerShell 7 在构建阶段生成 DLL，无新增包依赖。通过创建属性原子绑定不可脱离的 Job，再恢复挂起子进程；helper 核对真实父 PID 与创建时间并持有父进程句柄，父调用者或根进程退出时终止并确认 Job 清空，helper 异常退出由内核关闭 Job 回收后代。计划任务启动器复用独立外层 Job 并显式传递工作目录。Proxy 在启动前校验当前用户独占 Socket 目录，通过句柄相对打开固定完整祖先目录并拒绝重解析点及非本地盘路径；额外创建 delete-on-close guard，防止最终目录原地转换，直到连接进程退出。基础 ACL/Doctor 检查不创建 guard，不对最终空目录承诺同等原地转换防护。
 - `windows-native-load.ps1`：Job、ACL 与计划任务启动器共用的原生 DLL 加载入口，校验 `dist/windows-native` 内清单的版本、PowerShell 主次版本、.NET 主版本及源码和 DLL 的 SHA-256；从校验后的字节加载，不锁住安装目录内的 DLL。缺失、不匹配或加载失败时明确要求重新构建/安装，不在日常命令中编译或写入缓存。哈希用于产物一致性检查，不替代包目录的权限保护。
 - `provider-credential-policy.mjs` / `provider-credential-policy.d.mts`：在固定、切换和聚合 App Server 启动边界，为凭据生成本次进程专用的随机环境名，并通过官方 `shell_environment_policy.set` 将工具 shell 中的同名值覆盖为空；模型认证仍从 App Server 环境读取。保留已有环境过滤规则，不修改磁盘配置，不能据此宣称同一用户或所有插件工具均无法访问宿主凭据。

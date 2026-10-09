@@ -319,10 +319,11 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 同名主配置块和切换 Profile。
 
 固定凭据文件使用严格的版本 1 合同：`schemaVersion`、`providerId`、上游 `origin` 和 `apiKey` 四个字段；
-不支持的版本、Provider 或 Origin 不匹配、非私有文件均拒绝读取，不回退到进程中同名变量。每次显式固定保存或切换
-先创建新的不可变凭据版本，再提交 `config/batchWrite`；旧版本保持不变。明确确认配置未引用新版本时仅删除本次新文件，
+不支持的版本、Provider 或 Origin 不匹配、非私有文件均拒绝读取，不回退到进程中同名变量。新增或替换固定 Key，以及将明文凭据或切换 Profile 转为固定模式时，
+先创建新的不可变凭据版本，再提交 `config/batchWrite`；旧版本保持不变。普通切换及备份恢复保留完整 Provider 配置、已有 `env_key` 引用和 `requires_openai_auth` 标志，不强制 OAuth 或无认证 Provider 提供独立 Key。已声明的 `env_key` 缺失时仍拒绝切换，不回退其他认证方式。明确确认配置未引用新版本时仅删除本次新文件，
 响应丢失且无法确认时保留新旧版本，由实际主配置的 `env_key` 决定读取哪份，不自动重试或覆盖旧 Key。
 切回官方时备份候选的凭据引用也保留；显式删除 Provider 时才删除该 Provider 已验证归属的凭据版本。
+切换预览、执行和备份恢复共用运行时的认证校验；`auth`、`gateway_oauth`、`aws` 和 `env_http_headers` 不受自定义固定模式支持，写入前明确拒绝，保留原主配置、备份和凭据。普通非认证 `http_headers` 仍保留。
 凭据版本损坏或无法安全读取时保留文件，并以 `credential-cleanup-failed` 报告 Provider 已删除但凭据清理未完成。
 备份应同时保留主配置、`private/primary-providers.json` 与该 Provider 的 `primary-credentials` 目录；恢复时一并还原，
 不要只恢复主配置引用而丢掉对应 Key。回退到旧 Gateway 前应恢复操作前的完整备份；新 Gateway 不会替用户生成旧明文合同。

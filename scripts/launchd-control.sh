@@ -108,8 +108,12 @@ reject_unsupported_jobs() {
 
 wait_until_unloaded() {
   local label="$1"
-  local attempt
-  for attempt in {1..50}; do
+  local stop_timeout_seconds
+  stop_timeout_seconds=$("${NODE_BINARY:-node}" --input-type=module -e \
+    'import { pathToFileURL } from "node:url"; const { serviceStopTimeoutSeconds } = await import(pathToFileURL(process.argv[1]).href); console.log(serviceStopTimeoutSeconds);' \
+    "$script_dir/../runtime/shutdown-budget.mjs") || return $?
+  local deadline=$(( SECONDS + stop_timeout_seconds ))
+  while (( SECONDS < deadline )); do
     if ! job_loaded "$label"; then
       return 0
     fi

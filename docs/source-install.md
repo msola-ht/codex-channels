@@ -137,7 +137,7 @@ Windows 构建使用现有 PowerShell 7 提前编译原生 Job/目录保护 DLL�
 
 若命令报告“Windows 原生组件无法加载，尚未检查文件 ACL”，请按提示重新构建或安装；这表示组件或宿主环境不匹配，运行 `codexc security repair` 不能修复该构建问题。
 
-已有运行服务时，先从本机终端记录 `codexc status all` 和 `codexc status webui` 的状态，停止运行中的 WebUI，再执行 `codexc stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；安装失败先处理错误，不启动版本未就绪的服务。程序目录或 Node.js 路径改变时用 `codexc install` 重建服务定义。
+已有运行服务时，先从本机终端记录 `codexc status all` 和 `codexc status webui` 的状态，停止运行中的 WebUI，再执行 `codexc stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；安装失败先处理错误，不启动版本未就绪的服务。程序目录、Node.js 路径或服务模板改变时用 `codexc install` 重建并激活服务定义；该命令会启动核心服务。macOS/Linux 的 50 秒停止期限及 Linux 的有序子进程收尾设置属于模板变更，仅更新程序和重启不能将它们写入已有定义。
 
 此安装路径不拉取 Git，也不自动管理服务。自行选择分支并更新源码后重复执行安装；没有受管仓库时，`codexc update` 只同步配套 CLI 和校验配置、数据库，不更新本地源码或 Gateway 包。
 

@@ -273,11 +273,11 @@ export function customPrimaryProviderProfilePath(environment = process.env, prov
   );
 }
 
-function assertCustomPrimaryProviderAuthentication(provider) {
+export function assertCustomPrimaryProviderAuthentication(provider) {
   assertProviderHasNoPlaintextCredentials(provider);
   if (provider.auth !== undefined || provider.gateway_oauth !== undefined
     || provider.aws !== undefined || provider.env_http_headers !== undefined) {
-    throw new Error("自定义固定 Provider 只支持 env_key 独立 API 凭据；其他认证配置已保留，请显式重新配置 Provider");
+    throw new Error("自定义固定 Provider 不支持 auth、gateway_oauth、aws 或 env_http_headers；请显式重新配置 Provider，原配置保持不变");
   }
 }
 

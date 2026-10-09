@@ -14,6 +14,8 @@ Environment="CODEX_CONNECT_GATEWAY_SUPERVISED=1"
 Environment="CODEX_BINARY=__CODEX_BINARY_ENV__"
 Environment="PATH=__SYSTEMD_PATH__"
 UMask=0077
+KillMode=mixed
+TimeoutStopSec=__STOP_TIMEOUT_SECONDS__s
 Restart=always
 RestartSec=5
 

@@ -16,8 +16,9 @@ import {
   customPrimaryProviderCredentialEnvironmentKey,
   readCustomPrimaryProviderApiKey,
   removeCustomPrimaryProviderCredentials,
+  assertCustomPrimaryProviderAuthentication,
 } from "../runtime/model-provider-runtime.mjs";
-import { modelProviderBlockEdits } from "../runtime/model-provider-profile.mjs";
+import { thirdPartyProviderRequestMaxRetries, thirdPartyProviderStreamMaxRetries } from "../runtime/model-provider-profile.mjs";
 import {
   createCodexUserConfigClient,
   readCodexUserConfigSnapshot,
@@ -370,12 +371,28 @@ async function buildSwitchPlan(
   const provider = source === "switching" ? {
     name: switching.name,
     base_url: switching.baseUrl,
+    wire_api: "responses",
+    requires_openai_auth: false,
+    request_max_retries: thirdPartyProviderRequestMaxRetries,
+    stream_max_retries: thirdPartyProviderStreamMaxRetries,
     experimental_bearer_token: switching.apiKey,
     supports_websockets: switching.supportsWebsockets,
   } : source === "configured" ? configured : backup;
-  const apiKey = readCustomPrimaryProviderApiKey(normalizedId, provider, environment);
-  if (apiKey === undefined) throw invalid("api-key-replacement-required", "providerId", "该 Provider 没有可用的独立 API Key，请先编辑 Provider");
-  const environmentKey = customPrimaryProviderCredentialEnvironmentKey(normalizedId);
+  let credential;
+  const targetProvider = { ...provider };
+  if (provider.env_key !== undefined || provider.experimental_bearer_token !== undefined) {
+    const apiKey = readCustomPrimaryProviderApiKey(normalizedId, provider, environment);
+    if (apiKey === undefined) throw invalid("api-key-replacement-required", "providerId", "该 Provider 没有可用的独立 API Key，请先编辑 Provider");
+    // Existing references retain rotation and account semantics. Only explicit
+    // plaintext/Profile conversion needs a new private credential version.
+    if (provider.experimental_bearer_token !== undefined) {
+      const environmentKey = customPrimaryProviderCredentialEnvironmentKey(normalizedId);
+      credential = { providerId: normalizedId, baseUrl: provider.base_url, apiKey, environmentKey };
+      targetProvider.env_key = environmentKey;
+      delete targetProvider.experimental_bearer_token;
+    }
+  }
+  assertCustomPrimaryProviderAuthentication(targetProvider);
   const custom = isResponsesProvider(normalizedId) ? responsesModelSettings(environment, normalizedId, normalizedModel ?? switching?.model) : undefined;
   const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
   return {
@@ -390,10 +407,9 @@ async function buildSwitchPlan(
     expectedVersion: snapshot.version,
     profileToRemove: switching === undefined ? undefined : normalizedId,
     backupCandidateToRemove: normalizedId,
-    credential: { providerId: normalizedId, baseUrl: provider.base_url, apiKey, environmentKey },
+    credential,
     edits: [
-      ...modelProviderBlockEdits(normalizedId, { ...provider, env_key: environmentKey,
-        experimental_bearer_token: undefined, requires_openai_auth: false }),
+      { keyPath: `model_providers.${normalizedId}`, value: targetProvider },
       ...(removesTopLevelBaseUrl
         ? [{ keyPath: "openai_base_url", value: null }]
         : []),

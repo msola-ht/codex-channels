@@ -18,6 +18,7 @@ export {
 export {
   customPrimaryProviderProfileName,
   validateCustomPrimaryModelProviderId,
+  assertCustomPrimaryProviderAuthentication,
   listCustomPrimaryProviderCandidates,
   primaryProviderBackupPath,
   readPrimaryProviderBackup,
