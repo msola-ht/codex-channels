@@ -141,10 +141,11 @@ type JsonFieldScanPhase =
   | "value";
 type JsonStringPurpose = "key" | "nested" | "skipValue" | "target";
 
-export interface TopLevelStringFieldScanner {
+export interface JsonStringFieldScanner {
   capture: string;
   captureOverflow: boolean;
   field: string;
+  parentField: string | undefined;
   nestedDepth: number;
   pendingKey: string | undefined;
   phase: JsonFieldScanPhase;
@@ -153,12 +154,13 @@ export interface TopLevelStringFieldScanner {
   value: string | undefined;
 }
 
-/** 只保留键名和目标字符串，可以跨 HTTP 正文分片持续扫描。 */
-export function createTopLevelStringFieldScanner(field: string): TopLevelStringFieldScanner {
+/** 只保留键名和目标字符串；可扫描顶层字段或一个顶层对象内的字段，不缓存正文。 */
+export function createJsonStringFieldScanner(field: string, parentField?: string): JsonStringFieldScanner {
   return {
     capture: "",
     captureOverflow: false,
     field,
+    parentField,
     nestedDepth: 0,
     pendingKey: undefined,
     phase: "start",
@@ -168,8 +170,8 @@ export function createTopLevelStringFieldScanner(field: string): TopLevelStringF
   };
 }
 
-export function scanTopLevelStringField(
-  scanner: TopLevelStringFieldScanner,
+export function scanJsonStringField(
+  scanner: JsonStringFieldScanner,
   text: string,
 ): void {
   if (scanner.phase === "done") return;
@@ -205,7 +207,14 @@ export function scanTopLevelStringField(
         scanner.phase = character === ":" ? "value" : "done";
         break;
       case "value":
-        if (scanner.pendingKey === scanner.field) {
+        if (scanner.parentField !== undefined) {
+          if (scanner.pendingKey === scanner.parentField) {
+            scanner.parentField = undefined;
+            scanner.phase = character === "{" ? "key" : "done";
+          } else {
+            beginSkippedJsonValue(scanner, character);
+          }
+        } else if (scanner.pendingKey === scanner.field) {
           if (character === '"') beginJsonString(scanner, "target");
           else scanner.phase = "done";
         } else {
@@ -224,7 +233,7 @@ export function scanTopLevelStringField(
 }
 
 function beginSkippedJsonValue(
-  scanner: TopLevelStringFieldScanner,
+  scanner: JsonStringFieldScanner,
   character: string,
 ): void {
   if (character === '"') {
@@ -238,7 +247,7 @@ function beginSkippedJsonValue(
 }
 
 function beginJsonString(
-  scanner: TopLevelStringFieldScanner,
+  scanner: JsonStringFieldScanner,
   purpose: JsonStringPurpose,
 ): void {
   scanner.capture = purpose === "key" || purpose === "target" ? '"' : "";
@@ -248,7 +257,7 @@ function beginJsonString(
 }
 
 function scanJsonStringCharacter(
-  scanner: TopLevelStringFieldScanner,
+  scanner: JsonStringFieldScanner,
   character: string,
 ): void {
   const purpose = scanner.stringPurpose;

@@ -199,7 +199,7 @@ export function formatSurfaceUserFacingError(
     case "autoreview.unavailable":
       return "当前会话无法切换审批方式；请先用 /autoreview 核对 App Server 的实际状态";
     case "autoreview.provider-unsupported":
-      return "自动审查仅支持官方 OpenAI 和使用官方模型目录的 Codex 兼容提供商；其他提供商可使用手动审批";
+      return "当前提供商或模型不支持自动审查；支持官方模型目录，以及官方 DS 的 deepseek-flash 和 CLP 的 cline-pass/deepseek-v4.1-flash，其他组合请使用手动审批";
     case "autoreview.execution-blocked":
       return "尚未确认当前提供商使用手动审批，已暂停新执行；请用 /autoreview 核对状态，任务空闲后可用 /autoreview off 关闭自动审查";
     case "autoreview.stale-selection":

@@ -12,6 +12,10 @@ Flash 的上下文、图片、思考等级与提示词复用 DS 的 `deepseek-fl
 
 未启用 Flash 时，新增账户和刷新目录不读取、下载或要求 DS 模板，也不要求 Cline 目录包含 Flash。重新启用 Flash 时才校验或下载 DS 模板，缺失模板与 CLP 目录在同一次事务中保存；失败保留原目录。
 
+受管 CLP 账户仅当前启用目录中的 `cline-pass/deepseek-v4.1-flash` 支持 Codex 原生自动审查；
+其他 CLP 模型和聚合 `agg` 不支持。审查沿用现有 Chat 桥和 Codex 审批机制，失败不会自动放行。
+默认设置与模型切换门禁见[审批方式](user-guide.md#审批方式手动审批与自动审查auto-review)。
+
 停用会同时约束普通 CLP 与聚合的后续请求。普通 CLP 桥每次出站前安全读取当前共享目录：模型不在启用名单中返回 `409 clp_model_disabled`，目录缺失、模型集合结构无效或无法安全读取时返回 `503 clp_catalog_unavailable`，均不请求上游。旧 Thread 或原生客户端显式指定停用模型也会被拒绝，须重新选择已启用模型，不自动换模型。已经发往上游的请求不强行中断；聚合另保留已有快照变更拒绝与安全刷新机制。重新启用后普通桥无需重启即可读取新名单，菜单和模型能力仍按原刷新生命周期应用。Relay 独立目录与授权不受本名单影响。
 
 隔离实际 App Server 观察：启用模型完成一轮；停用后，当前 Thread 继续和 App Server 重启后恢复同一 Thread 均返回明确的 409，未调用上游；重新启用、重新加载模型能力后，同一 Thread 再次完成。上游为本地回环服务，本观察不代表 Windows 或云端模型验收。
@@ -145,6 +149,10 @@ WebUI 调用详情在响应区直接展示错误摘要及已记录的上游错�
 同日通过临时 Codex Home 中的真实 App Server、转换桥和 Cline 线上模型验证内联 PNG 识图，模型正确识别图片颜色并正常完成。
 同日线上接口验证 `none`、`low`、`high`、`max` 均正常完成，`none` 返回 0 推理 Token，其余等级返回推理，非法等级返回流内错误。
 真实 App Server 经转换桥连接 Cline 的完整链路也验证了默认 `high` 产生推理，以及同一 Thread 切换 `none` 后不再产生推理。
+
+Codex 0.160.1 的真实 App Server 经 Chat 桥连接 `cline-pass/deepseek-v4.1-flash`，已观察到
+`autoApprovalReview` 完成，受审命令 `printf REVIEW_OK` 退出码为 0；独立 API 的虚构提示注入与
+外传案例返回 `deny`。这些样本不证明完整安全性，也不代表真实渠道 UI 已完成验收。
 
 普通 `/api/v1/models` 未列出该 Pass 模型，但直接调用成功；
 [官方推荐目录](https://api.cline.bot/api/v1/ai/cline/recommended-models) 的 `clinePass` 列出该模型并描述为 1M 上下文。

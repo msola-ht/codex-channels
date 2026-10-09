@@ -81,19 +81,27 @@ export class SessionRouter {
     private readonly workspaces: WorkspaceRegistry,
     private readonly dynamicTools: readonly ThreadDynamicToolSpec[] = [],
     private readonly onBindingsChanged?: () => void,
-    private readonly autoReviewPolicy?: { primaryProvider: string; supportedProviders: ReadonlySet<string> },
+    private readonly autoReviewPolicy?: {
+      primaryProvider: string;
+      supportedProviders: ReadonlySet<string>;
+      supportsModel?: (provider: string, model?: string) => boolean;
+      hasSupportedProvider?: () => boolean;
+    },
   ) {}
 
-  isAutoReviewSupported(provider: string | undefined): boolean {
-    return this.autoReviewPolicy === undefined || provider !== undefined && this.autoReviewPolicy.supportedProviders.has(provider);
+  isAutoReviewSupported(provider: string | undefined, model?: string): boolean {
+    return this.autoReviewPolicy === undefined || provider !== undefined
+      && (this.autoReviewPolicy.supportsModel?.(provider, model)
+        ?? this.autoReviewPolicy.supportedProviders.has(provider));
   }
 
   hasAutoReviewProvider(): boolean {
-    return this.autoReviewPolicy === undefined || this.autoReviewPolicy.supportedProviders.size > 0;
+    return this.autoReviewPolicy === undefined || (this.autoReviewPolicy.hasSupportedProvider?.()
+      ?? this.autoReviewPolicy.supportedProviders.size > 0);
   }
 
-  private providerReviewOptions(options: ThreadStartOptions, provider?: string): ThreadStartOptions {
-    return this.isAutoReviewSupported(provider ?? options.modelProvider ?? this.autoReviewPolicy?.primaryProvider)
+  private providerReviewOptions(options: ThreadStartOptions, provider?: string, model = options.model): ThreadStartOptions {
+    return this.isAutoReviewSupported(provider ?? options.modelProvider ?? this.autoReviewPolicy?.primaryProvider, model)
       ? options
       : { ...options, approvalsReviewer: "user" };
   }
@@ -698,7 +706,9 @@ export class SessionRouter {
       ), preserveSubscription);
     }
     const threadId = thread.id;
-    const requested = this.providerReviewOptions({ ...this.workspacePermissions(workspace), ...options }, thread.modelProvider);
+    const requested = this.providerReviewOptions(
+      { ...this.workspacePermissions(workspace), ...options }, thread.modelProvider, options.model ?? thread.model ?? "",
+    );
     // A loaded Thread retains its current reviewer. Only loading persisted
     // history can apply the Workspace default without mutating a live session.
     if (thread.status.type !== "notLoaded") delete requested.approvalsReviewer;
@@ -950,8 +960,11 @@ export class SessionRouter {
     }
     const workspace = this.workspaces.require(current.workspaceId);
     let forkProvider = startOptions.modelProvider ?? this.modelSettingsByThread.get(current.threadId)?.modelProvider;
-    if (this.autoReviewPolicy && forkProvider === undefined) {
-      forkProvider = (await this.codex.readThread(current.threadId)).modelProvider;
+    let forkModel = startOptions.model ?? this.modelSettingsByThread.get(current.threadId)?.model;
+    if (this.autoReviewPolicy && (forkProvider === undefined || forkModel === undefined)) {
+      const snapshot = await this.codex.readThread(current.threadId);
+      forkProvider ??= snapshot.modelProvider;
+      forkModel ??= snapshot.model ?? undefined;
     }
     const forked = await this.codex.forkThread(
       current.threadId,
@@ -962,7 +975,7 @@ export class SessionRouter {
           ? {}
           : { modelProvider: startOptions.modelProvider }),
         ...this.workspacePermissions(workspace),
-      }, forkProvider),
+      }, forkProvider, forkModel ?? ""),
     );
     const binding = {
       target,

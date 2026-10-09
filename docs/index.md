@@ -276,13 +276,17 @@ HTTP 429/5xx 与传输失败继续使用剩余预算，路径与其他响应错�
 正常网络启动只观察窗口内迟到的失败通知；Gateway 停止会取消探测、额度读取与刷新请求的等待。
 
 下列 Auto-review 入口共用 [`auto-review-provider-policy.mjs`](../runtime/auto-review-provider-policy.mjs)
-的 Provider 分类：只允许官方 OpenAI 和使用官方模型目录的 Codex 兼容 Provider，固定模式的
-`openai` 路由别名不为独立模型目录授予支持。用户默认按主 Provider、Workspace 默认按已配置的
-可用类别判断是否允许开启；当前 Thread 开启及执行按实际 Provider 判断。
-[`router.ts`](../src/session-routing/router.ts) 对不支持的 Provider 在新建、未加载恢复和分叉时
+的 Provider 与模型策略：官方 OpenAI 和使用官方模型目录的 Codex 兼容自定义 Provider 保留支持，
+受管官方 DS 仅当前目录中的 `deepseek-flash`、CLP 仅 `cline-pass/deepseek-v4.1-flash` 支持，聚合 `agg` 不支持。
+固定模式的 `openai` 路由别名不为独立模型目录授予支持。用户默认按主 Provider 及受管默认模型、
+Workspace 默认按是否存在支持组合判断；当前 Thread 开启按实际 Provider 与模型判断。
+[`router.ts`](../src/session-routing/router.ts) 按请求或历史模型对不支持的组合在新建、未加载恢复和分叉时
 明确请求 `user`；已加载恢复保留实际审批方式、活动 Turn 和订阅，不在恢复阶段执行审批收敛。
 [`gateway-component-graph.ts`](../src/bootstrap/gateway-component-graph.ts) 在共享执行入口复核
-实际设置，需关闭自动审查时等待 RPC、设置通知和归约完成，不确认则拒绝新执行，保留查询与停止。
+实际设置及本次模型覆盖（含协作模式模型），需关闭自动审查时确认空闲并等待 RPC、设置通知和归约完成，
+不确认则拒绝新执行，保留查询与停止。Remote 启动复用同一策略检查目标 Provider 和显式或受管默认模型，
+不支持时拒绝显式自动审查，新建会话继承默认改用 `user`；DS/CLP 固定传入准入时的模型，不允许透传替换 Profile、Provider 或目录。
+Remote 恢复与继承式分叉保留历史实际模型和审批方式，原生客户端内模型改动也不受 Gateway 控制，不能把启动检查当作历史会话的执行门禁。
 这不增加协议能力，也不修改官方目录或持久化格式。
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口 |

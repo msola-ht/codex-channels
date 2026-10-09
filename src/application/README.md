@@ -12,7 +12,7 @@
   按钮模型选择通过 `selectModel` 接受精确 Provider 与模型身份，不重新解释为文本选择器。
   `/workspaceperm autoreview on|off|clear` 修改 Workspace 默认审批方式；`selectWorkspaceAutoReview` 的结构化按钮固定原 Workspace ID，防止旧菜单修改新工作区。
   工作区权限修改结果同时携带已确认的 Workspace 与本次结构化更新，Surface 据更新类型呈现对应的生效范围。
-  `/autoreview [on|off]` 查询或修改当前 Thread 实际审批方式；开启前按实际 Thread Provider 检查组合根注入的自动审查能力，工作区默认开启要求至少一个可用 Provider；`selectAutoReview` 的按钮固定原 Thread ID，由会话用例在锁内复核。
+  `/autoreview [on|off]` 查询或修改当前 Thread 实际审批方式；开启前按实际 Thread Provider 与模型检查组合根注入的自动审查能力，工作区默认开启要求至少一个受支持的 Provider 与模型组合；`selectAutoReview` 的按钮固定原 Thread ID，由会话用例在锁内复核。
   会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider；
   存在原 Thread 时，新会话结果同时携带原 Thread ID，供三个 Surface 像自动解除占用提示一样
   展示可复制的 `恢复会话：/r <Thread ID>`。

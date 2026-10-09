@@ -32,7 +32,7 @@ export function applyWorkspaceSetting(document, input, autoReviewCapability = { 
     throw invalidSetting("update.value", "workspace-auto-review-provider-unavailable", "无法安全读取 Provider 配置，暂时不能开启 Auto-review；可以选择手动审批或清除工作区覆盖");
   }
   if (update.kind === "approvals-reviewer" && update.value === "auto_review" && autoReviewCapability.canEnableAutoReview !== true) {
-    throw invalidSetting("update.value", "workspace-auto-review-provider-unsupported", "没有支持 Auto-review 的 Provider；仅支持官方 OpenAI 或复用官方模型目录的 Codex 兼容 Provider");
+    throw invalidSetting("update.value", "workspace-auto-review-provider-unsupported", "没有支持 Auto-review 的提供商和模型组合；支持官方模型目录，以及官方 DS 的 deepseek-flash 和 CLP 的 cline-pass/deepseek-v4.1-flash");
   }
   try {
     applyWorkspacePermissionUpdate(entry, update);

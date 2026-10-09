@@ -211,7 +211,7 @@ async function runApprovalsReviewerSetting({ environment, output, prompts, setti
   if (settings.approvalsReviewer.canEnableAutoReview !== true) {
     output.write(settings.approvalsReviewer.autoReviewUnavailableReason === "provider-config-unavailable"
       ? "无法安全读取 Provider 配置，暂时不能开启 Auto-review；可以选择手动审批。\n"
-      : "当前主 Provider 不支持开启自动审查；可以改为手动审批。仅官方 OpenAI 或复用官方模型目录的 Codex 兼容 Provider 支持 Auto-review。\n");
+      : "当前主提供商或默认模型不支持开启自动审查；可以改为手动审批。支持官方模型目录，以及官方 DS 的 deepseek-flash 和 CLP 的 cline-pass/deepseek-v4.1-flash。\n");
   }
   const value = await prompts.select({
     message: "选择 Codex 默认审批方式",

@@ -65,8 +65,9 @@
   IPC 的 `requestPurpose=autoApprovalReview` 与原始 `reviewerThreadId` / `reviewerTurnId` 进入指标库，
   缺失保持未知；审查请求仍不得更新用户轮次执行状态或继承父 Thread 的思考等级。其他来源保持原 Thread/Turn 归属。
   SSE 单行使用 1,048,576 字符上限，非流式 JSON Responses 使用 1 MiB 临时上限解析相同元数据，
-  正文和响应 ID 不进入指标；HTTP 请求正文不截取 `reasoning.effort`，普通 Thread 由组合层按
-  Thread 设置回退；原生子代理复用父线程 Provider 线路，不设角色专用路径或配置值注入；
+  正文和响应 ID 不进入指标；HTTP 请求通过有界流式字段扫描采集实际 `reasoning.effort`，不缓存完整正文，
+  不依赖转储。请求未提供有效值时，普通 Thread 由组合层按 Thread 设置回退；自动审查保持未知，
+  不继承父任务等级，也不回填历史空值。原生子代理复用父线程 Provider 线路，不设角色专用路径或配置值注入；
   超限或畸形响应只保留基础 HTTP 状态与错误分类。上游模型、服务层级及错误标识符只接受受限字符，
   不能把控制字符带入指标展示。WebSocket 在完成事件投递前先解除活动指标引用，
   避免紧随其后的关闭事件重复写入。

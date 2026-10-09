@@ -323,7 +323,7 @@ function approvalsReviewerEdits(input, config, policy, canEnableAutoReview) {
     throw invalid("value", `approvals-reviewer-${current.reason}`, "当前 Auto-review 设置不可修改，请检查 Codex 配置与组织策略");
   }
   if (input.value === "auto_review" && canEnableAutoReview !== true) {
-    throw invalid("value", "auto-review-provider-unsupported", "当前主 Provider 不支持 Auto-review；仅支持官方 OpenAI 或复用官方模型目录的 Codex 兼容 Provider");
+    throw invalid("value", "auto-review-provider-unsupported", "当前主提供商或默认模型不支持 Auto-review；支持官方模型目录，以及官方 DS 的 deepseek-flash 和 CLP 的 cline-pass/deepseek-v4.1-flash");
   }
   return {
     edits: [{ keyPath: "approvals_reviewer", value: input.value }],

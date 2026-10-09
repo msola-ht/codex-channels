@@ -1,6 +1,9 @@
 export interface AutoReviewProviderPolicy {
   primarySupported: boolean;
   supportedProviders: ReadonlySet<string>;
+  /** Absent entries retain the existing official catalog model scope. */
+  supportedModels: ReadonlyMap<string, ReadonlySet<string>>;
+  defaultModels: ReadonlyMap<string, string>;
 }
 
 export function resolveAutoReviewProviderPolicy(options: {
@@ -10,7 +13,19 @@ export function resolveAutoReviewProviderPolicy(options: {
     provider: string;
     catalogSource: { kind: "official" } | { kind: "custom"; path: string };
   }[];
+  /** Validated registered settings from loadManagedModelProviderSettings. */
+  managedProviders?: readonly {
+    provider: string;
+    model: string;
+    models: readonly { model: string }[];
+  }[];
 }): AutoReviewProviderPolicy;
+
+export function isAutoReviewModelSupported(
+  policy: AutoReviewProviderPolicy,
+  provider: string,
+  model?: string,
+): boolean;
 
 export function loadAutoReviewProviderPolicy(
   environment?: NodeJS.ProcessEnv,

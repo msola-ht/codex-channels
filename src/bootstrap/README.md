@@ -7,7 +7,7 @@
 - `index.ts`：向进程入口公开 `GatewayApplication`、计划任务执行/恢复端口、进程生命周期入口和安全的 Gateway 所有权错误。
 - `persistent-surface-output.ts`：在总线发布时取得原目标归属，按有界窗口异步生成快照并提交独立 Delivery；恢复时复核当前授权，通过 Surface 可等待端口记录实际平台确认；对未知或授权失效的持久结果注入仅解除顺序屏障的策略，保留记录和额度；同时拥有投递管理私有 IPC 的启动与关闭，将在线修订操作交给 Coordinator；进程内登记实时到达序号供输入镜像排序，序号不进入持久载荷，提交拒绝或开始投递时释放对应登记。
 - `persistent-interaction-port.ts`：审批和问题先等待同 Conversation 的前序持久结果；等待纳入原交互期限，等待前后及接受答复前复核交互归属，取消立即释放所有权并拒绝迟到结果，不保存交互正文。
-- `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前等待组合根的投递容量与 Provider 审批方式门禁，统一覆盖普通输入、扩展调用、Review 和计划任务；门禁复用归约后的实际设置，不支持自动审查的 Provider 已使用人工审批时直接放行，仍使用自动审查时须确认空闲并等待审批更新归约为人工方式；保留停止、查询与 Queue 删除能力，不修改协议字段。
+- `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前等待组合根的投递容量与 Provider、模型审批方式门禁，统一覆盖普通输入、扩展调用、Review 和计划任务；门禁复用归约后的实际设置及本次 Turn 模型覆盖（含协作模式模型），不支持自动审查的组合已使用人工审批时直接放行，仍使用自动审查时须确认空闲并等待审批更新归约为人工方式；保留停止、查询与 Queue 删除能力，不修改协议字段。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，避免输出积压导致旧问题重新登记；拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
 - `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限；异步预检返回后及 Thread 创建后再次复核当前授权、取消、Workspace 与投递准入，撤权时释放新建后台绑定而不启动 Turn。临时容量拒绝不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
 - `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态；确认离线终态后通过组合层向原 Conversation 发布恢复通知，再释放后台绑定。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
@@ -98,7 +98,7 @@
   再调用 `drain`，以共享 5 秒期限结算已确认终态（含分离的旧轮次），指标超时按不可用输出；
   迟到结算不重复发布，不为仍运行的子代理伪造终态，持久接收入口在结算后才关闭。
 - `workspace-permission-writer.ts`：把渠道 `/workspaceperm` 的工作区权限更新写回
-  `config.toml` 并校验 `permissions` 与 `sandbox` 互斥；默认自动审查开启要求共享 Provider 策略中存在支持项，文件变化由配置监听热加载。
+  `config.toml` 并校验 `permissions` 与 `sandbox` 互斥；默认自动审查开启要求共享 Provider 与模型策略中存在支持组合，文件变化由配置监听热加载。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、窄会话能力与共享命令执行器上下文及运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：在组件图构造前按已验证配置异步加载 Telegram、飞书和微信内置插件，再同步创建渠道；创建渠道前初始化共享 `uploads` 根并收紧私有权限，拒绝符号链接或非当前用户所有的根，无渠道插件时不创建目录。把组合根创建的共享命令执行器注入各端，并保留各平台访问策略、

@@ -55,7 +55,7 @@ import {
 } from "./response-metrics-observer.js";
 import { ModelTrafficDump } from "./traffic-dump.js";
 import type { TrafficCallTiming } from "./traffic-call-timing.js";
-import { createTopLevelStringFieldScanner, scanTopLevelStringField } from "./traffic-dump-content.js";
+import { createJsonStringFieldScanner, scanJsonStringField } from "./traffic-dump-content.js";
 import { ChatBodyTooLargeError, readModelBody, waitForChatOperation } from "./chat-io.js";
 
 export type {
@@ -366,8 +366,9 @@ export class ProviderProxy {
       startedAtMonotonicMs,
     });
     exchange?.observeRequestMetrics(metrics);
-    const requestModelScanner = createTopLevelStringFieldScanner("model");
-    const requestTierScanner = createTopLevelStringFieldScanner("service_tier");
+    const requestModelScanner = createJsonStringFieldScanner("model");
+    const requestTierScanner = createJsonStringFieldScanner("service_tier");
+    const requestEffortScanner = createJsonStringFieldScanner("effort", "reasoning");
     const requestModelDecoder = new StringDecoder("utf8");
     const recordsResponseMetrics = route.kind === "response";
     let metricsDelivery: Promise<void> | undefined;
@@ -514,18 +515,22 @@ export class ProviderProxy {
     });
     const observeRequestChunk = (chunk: Buffer): void => {
       const text = requestModelDecoder.write(chunk);
-      scanTopLevelStringField(requestModelScanner, text);
-      scanTopLevelStringField(requestTierScanner, text);
+      scanJsonStringField(requestModelScanner, text);
+      scanJsonStringField(requestTierScanner, text);
+      scanJsonStringField(requestEffortScanner, text);
       metrics.requestModel = boundedString(requestModelScanner.value);
       metrics.requestServiceTier = boundedString(requestTierScanner.value);
+      metrics.reasoningEffort = boundedString(requestEffortScanner.value);
       exchange?.requestChunk(chunk);
     };
     const observeRequestEnd = (): void => {
       const text = requestModelDecoder.end();
-      scanTopLevelStringField(requestModelScanner, text);
-      scanTopLevelStringField(requestTierScanner, text);
+      scanJsonStringField(requestModelScanner, text);
+      scanJsonStringField(requestTierScanner, text);
+      scanJsonStringField(requestEffortScanner, text);
       metrics.requestModel = boundedString(requestModelScanner.value);
       metrics.requestServiceTier = boundedString(requestTierScanner.value);
+      metrics.reasoningEffort = boundedString(requestEffortScanner.value);
       exchange?.requestEnd();
     };
     if (authorizedBody === undefined) {
