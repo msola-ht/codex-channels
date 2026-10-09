@@ -16,7 +16,9 @@ const rules = `${startMarker}
 - Global and project rules apply independently of delegation. This section governs cooperation only and cannot override their safety, authorization or delivery requirements. With subagents disabled or unused, the main agent completes the same required work; no task may depend on enabling delegation.
 - Only the main agent may delegate. Proactively delegate bounded independent work when expected benefit exceeds coordination cost and capacity permits; respect requests to work without subagents. No mandatory pipeline or extra review stage. Delegation changes neither authorization nor completion requirements.
 - Use \`fork_turns="none"\` and a self-contained brief: goal, inputs, evidence, working directory, file ownership, dependencies, relevant contacts and expected outputs. Include necessary original passages of applicable instructions, not entire unrelated rule sets or only paths. Explicitly state: "Do not spawn, invoke, or request any new subagents."
-- Select model and effort explicitly: planning, design and independent review → \`gpt-6-astra\`/\`high\`; implementation, execution and failure diagnosis → \`gpt-6.1-sol\`/\`high\`; retrieval, factual summaries and simple low-risk tasks → \`gpt-6-luna\`/\`high\`. Use Sol for substantive code changes. Use only these models, with effort at most \`high\`; if unavailable, report it and let the main agent handle feasible work without silently substituting a model.
+- Dispatch with explicit \`model\` and \`reasoning_effort\` while the session accepts the official GPT set: planning, design and independent review → \`gpt-6-astra\`/\`high\`; implementation, execution and failure diagnosis → \`gpt-6.1-sol\`/\`high\`; retrieval, factual summaries and simple low-risk tasks → \`gpt-6-luna\`/\`high\`, effort at most \`high\`, Sol for substantive code changes.
+- When the session does not accept that set — the current provider model catalog or the list the spawn tool reports lacks those models — omit both \`model\` and \`reasoning_effort\` so the subagent inherits the model and reasoning effort of the current conversation; never substitute a model from the reported list and never guess a model name.
+- If \`spawn_agent\` fails with \`Unknown model ... for spawn_agent\`, this conversation has no official GPT model set: re-issue the same spawn with \`model\` and \`reasoning_effort\` omitted so it inherits the current conversation's values, say so when reporting back, and dispatch every later subagent in this conversation the same way.
 - Each subagent owns its bounded assignment through investigation, implementation where assigned, correction, self-review and collection of asynchronous results. Return outputs, applicable evidence, changed files and remaining limitations; starting a job is not completion.
 - Use each subagent for one turn only. Do not reuse, restart, append tasks or call \`followup_task\`. Later work belongs to the main agent or a new agent. Before handoff, recover outputs and job handles, stop conflicting work and transfer file/job ownership explicitly.
 - Keep one writer per file and preserve existing changes. During the initial assignment, exchange only facts needed to resolve blockers, shared decisions or dependencies; messages must not expand scope or reactivate ended agents. Give one consolidated completion report.
@@ -27,8 +29,6 @@ ${endMarker}`;
 const preset = [
   { keyPath: "features.multi_agent_v2.enabled", value: true },
   { keyPath: "features.multi_agent_v2.default_wait_timeout_ms", value: 600_000 },
-  { keyPath: "agents.default_subagent_model", value: "gpt-6.1-sol" },
-  { keyPath: "agents.default_subagent_reasoning_effort", value: "high" },
 ];
 
 export async function runCodexSubagentsSetup({
