@@ -26,7 +26,8 @@ import {
 } from "../runtime/process-lifecycle.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
-import { defaultCodexRemoteProfile, parseCodexRemoteOptions } from "./codex-remote-options.mjs";
+import { parseCodexRemoteOptions } from "./codex-remote-options.mjs";
+import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
@@ -51,7 +52,6 @@ async function runRemoteCli() {
   const { passthrough, selectedProfile, selectedProvider, workspaceId } = parseCodexRemoteOptions(
     process.argv.slice(2),
     {
-      selectDefaultProfile: defaultCodexRemoteProfile,
       customSwitchingProfiles: customSwitchingProviders.map(
         ({ provider, profileName }) => ({
           providerId: provider,
@@ -86,6 +86,10 @@ async function runRemoteCli() {
     : [
     ...loadManagedModelProviderDefinitions(process.env),
     ].find(({ profileName }) => profileName === selectedProfile);
+  if (selectedProvider !== undefined && selectedProvider !== appServer.primaryProvider
+    && selectedProvider !== aggregateProviderId && selectedDefinition?.id !== selectedProvider) {
+    throw new Error("目标提供商配置已变化或不可用，请重新选择 Provider");
+  }
   if (selectedProfile !== undefined && selectedDefinition === undefined) {
     throw new Error(`模型 Provider Profile ${selectedProfile} 已不再可用`);
   }
@@ -101,7 +105,7 @@ async function runRemoteCli() {
     socketPath = providerAppServerSocketPath(primarySocketPath, managedProvider.provider);
     leaseProvider = managedProvider.provider;
   }
-  if (selectedProvider !== undefined) {
+  if (selectedProvider === aggregateProviderId) {
     if (!appServer.managedProviders.some(({ provider }) => provider === selectedProvider)) {
       throw new Error("聚合实例尚不可用；需要至少两个已配置的 API Key 切换提供商");
     }
@@ -111,15 +115,15 @@ async function runRemoteCli() {
   }
   const permissionArguments = workspacePermissionArguments(workspace, passthrough);
   const configuredBinary = stringValue(codex.binary) || "codex";
-  const supervisorActive = selectedDefinition !== undefined || selectedProvider !== undefined
+  const supervisorActive = selectedDefinition !== undefined || selectedProvider === aggregateProviderId
     || await inspectAppServerSupervisor(primarySocketPath) !== undefined;
   try {
     if (supervisorActive) {
       providerLease = await acquireAppServerProviderLease(primarySocketPath, leaseProvider);
     }
-    const modelArguments = selectedProvider === undefined
-      ? []
-      : await aggregateModelArguments(socketPath, configuredBinary, passthrough);
+    const modelArguments = selectedProvider === aggregateProviderId
+      ? await aggregateModelArguments(socketPath, configuredBinary, passthrough)
+      : [];
     const invocation = resolveExecutableInvocation(configuredBinary, [
       "--remote",
       `unix://${socketPath}`,

@@ -61,8 +61,11 @@ codexc restart all
 仍存在的旧 Thread 可通过 `/resume` 恢复；已删除账户或无法映射到现有 Provider 的旧 Thread 不保证可恢复。终端共享会话使用：
 
 ```bash
-codexc remote --profile sf-ocg-<账户>              # 任一已配置账户
+codexc remote -p ocg-<账户>              # 任一已配置的切换账户
 ```
+
+Desktop 使用 `codexc app -p ocg-<账户>`。两个入口也接受已登记的 `sf-ocg-<账户>` Profile 名，
+Remote 保留 `--profile sf-ocg-<账户>`；两个入口默认连接主实例，不采用渠道的默认账户选择。
 
 所有 OpenCode Go 账户共享同一个统计代理（不随账户数量增长）；每个账户的隔离 App Server 按需
 启动。服务启动时只登记配置，首次选择对应账户模型、恢复对应 Thread 或使用对应 Remote TUI 时，

@@ -17,7 +17,7 @@
   前台监管与 Gateway 服务子进程自行解析，避免自动发现结果变成固定环境覆盖。需要在配置损坏时仍可运行的服务恢复
   命令使用独立的最小控制环境。
 - `desktop-app-command.mjs` / `desktop-app-command.d.mts`：实现公开 `codexc app` 的严格
-  参数、单次启动 Provider 选择、只读状态、macOS ChatGPT Bundle 与 Windows 当前用户 `OpenAI.Codex` 包兼容探测、配置
+  参数、通过 `provider-selection.mjs` 统一映射的单次启动 Provider 选择、只读状态、macOS ChatGPT Bundle 与 Windows 当前用户 `OpenAI.Codex` 包兼容探测、配置
   写入与回滚、App Server 服务重启、Windows 目标实例临时租约、受认证桥就绪探测和单次环境启动；Windows
   租约覆盖探测与启动并在所有结果下释放，状态不输出桥令牌，两个
   平台均明确标为预览。macOS 启动时改用受管 stdio Proxy，不再依赖桥端口或令牌，并单独报告受管
@@ -370,14 +370,17 @@
   随后再启动 Gateway。只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
+- `provider-selection.mjs` / `provider-selection.d.mts`：Remote 与 Desktop 共用的纯 Provider 选择映射；
+  配置读取由默认参数提供，可注入已读取的定义。完整 Provider ID 与已登记的规范 `sf-*` Profile 名精确匹配，
+  不剥除前缀推测目标；`agg` / `sf-agg` 映射到内部 `codexc-aggregate`，内部 ID 输入拒绝，
+  任一聚合选择值与 Provider 或 Profile 重名时两种聚合选择均拒绝。返回 Provider 与可选规范 Profile，不修改配置。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
-  `codexc remote` 自有的 Workspace、聚合 Provider 与受管 Provider Profile 参数；聚合只接受
-  `--provider agg` 或 `-p agg`，与任何 Profile 互斥，重复选择失败关闭；`-p <Profile>` 复用 `--profile <Profile>` 的校验与实例路由，`agg` 保留给聚合选择；受管 Provider 只使用与磁盘文件及
-  原生 Codex 一致的 `sf-*` 规范名称，旧的无前缀名称只返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
-  无显式 Profile 且官方未登录时解析唯一第三方 Profile；候选全部为同一家 DS、OCG、CCG 或 CLP 账户时使用注册表默认账户，
-  其他多个候选要求明确选择，不修改主配置。
-- `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下识别
-  与原生 Codex 及磁盘文件相同的 `sf-*` Provider Profile 名称，选择对应隔离实例并供 Remote TUI
+  `codexc remote` 自有的 Workspace、Provider 与 Profile 参数；`-p` / `--provider` 使用共享选择映射，
+  与 `--profile` 互斥，重复选择失败关闭。`--profile` 保留原生个人 Profile 与已登记规范受管 Profile；
+  旧受管 Profile 名返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
+  不根据 OpenAI 登录状态自动选择第三方，不修改主配置。
+- `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；未显式选择时连接主实例，
+  显式 Provider 通过共享映射选择相应 Socket 和规范 `sf-*` Profile，连接对应隔离实例并供 Remote TUI
   完成第三方 Provider 认证；同时按当前目录或显式
   `--workspace` 解析有效 Sandbox、审批策略、Permission Profile 与可选审批审查方式，第三方 Profile 不复制权限，
   用户显式传给 Codex 的权限参数优先；个人 Profile 也沿用匹配的 Workspace 权限；

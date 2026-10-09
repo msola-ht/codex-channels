@@ -1,11 +1,11 @@
 export const CODEX_REMOTE_USAGE: string;
-export function defaultCodexRemoteProfile(environment?: NodeJS.ProcessEnv): string | undefined;
 
 export function parseCodexRemoteOptions(
   args: readonly string[],
   options?: {
     environment?: NodeJS.ProcessEnv;
-    selectDefaultProfile?: () => string | undefined;
+    primaryProvider?: string;
+    customPrimaryProvider?: { id: string } | null;
     managedProfileDefinitions?: ReadonlyArray<{
       id: string;
       profileName: string;
@@ -19,5 +19,5 @@ export function parseCodexRemoteOptions(
   passthrough: string[];
   workspaceId: string | undefined;
   selectedProfile: string | undefined;
-  selectedProvider: "codexc-aggregate" | undefined;
+  selectedProvider: string | undefined;
 };

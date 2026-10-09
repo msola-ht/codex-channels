@@ -303,8 +303,21 @@ DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSe
 ```bash
 codexc remote
 codexc remote resume
-codexc remote --profile sf-ds-<账户> resume
+codexc remote -p ds-main resume
+codexc remote --profile personal
 ```
+
+`codexc remote` 与 `codexc app` 的 `-p` / `--provider` 使用同一选择规则：接受已配置的完整
+Provider ID（如 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`my-provider`），或注册表中精确登记的
+规范 `sf-*` Profile 名称（如 `sf-ds-main`、`sf-custom-my-provider`）。推荐使用完整 Provider ID；
+只匹配已登记的名称，不通过任意剥除 `sf-` 前缀推测目标。未配置、歧义或重复选择均明确拒绝。
+两个入口默认都连接主实例，不根据 OpenAI 登录状态自动选择第三方，也不沿用上次选择；
+Remote 显式指定受管 `--profile` 时仍连接对应实例。
+渠道未绑定会话的默认选择仍按登录状态、可选 Provider 和账户注册表执行，详见
+[Provider 默认选择](provider-integration-guide.md#6-用户配置的主-provider)。
+Remote 的 `--profile` 继续支持原生个人 Profile 和已登记的规范受管 Profile，如
+`codexc remote --profile sf-ds-main`；`-p` / `--provider` 与 `--profile` 互斥。
+底层 `sf-*` Profile 文件名保持不变；`--` 后的参数原样传给原生 Codex，不参与 Gateway 选择。
 
 直接运行 `codex` 会创建独立 TUI，不共享 Gateway Thread；需要共享会话时使用 `codexc remote`。跨 Provider 切换会创建目标 Provider 的新 Thread，不复制原 Provider 历史。
 直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，空闲释放可能停止对应实例；
@@ -326,14 +339,14 @@ PowerShell 7 和当前用户安装的 `OpenAI.Codex` 包：
 
 ```bash
 codexc app
-codexc app --provider <Provider-ID>
+codexc app -p ds-main
 codexc app --provider agg
 ```
 
 首次运行会询问是否启用共享，并说明重启 App Server 可能中断现有连接与任务；默认拒绝。
 确认后自动启用共享并启动 App，取消则不修改配置或服务。以后每次都使用同一命令启动，
 不再询问或执行启用步骤；从 Dock 或开始菜单直接打开不会继承本次共享端点。
-`--provider` 使用已配置的精确 Provider ID，聚合模式使用保留选择值 `agg`；省略时仍连接 OpenAI，
+`-p` / `--provider` 接受上面的完整 Provider ID 或已登记的规范 `sf-*` Profile 名称；省略时连接主 OpenAI 实例，
 不记住上次选择，也不修改用户配置。切换 App Server 实例前必须完全退出 Desktop，再执行对应命令。
 一次桌面连接固定到一个实例；聚合实例中的已加载模型可在 Desktop 模型选择器中切换，无需退出 App。
 本项目不转移会话历史。上游恢复历史可能沿用历史 Provider，
@@ -341,9 +354,12 @@ codexc app --provider agg
 macOS 需要附加工具 Host 时只短暂重启目标实例。旧服务缺少选择能力时会提示先重启服务。
 
 当至少有两个已配置的 API Key 切换提供商时，服务自动派生按需启动的
-`codexc-aggregate`。公开命令只接受 `--provider agg`，不接受内部长 ID；状态 JSON、Thread 与绑定
+`codexc-aggregate`。两个公开入口都接受 `-p agg` / `--provider agg` 或 `-p sf-agg` / `--provider sf-agg`，
+不接受内部 ID `codexc-aggregate`；状态 JSON、Thread 与绑定
 仍使用 `codexc-aggregate`，无需迁移已有会话。无需添加同名账户或修改 Provider 配置；首次使用仍走上面的共享启用确认流程。
-若已有 ID 为 `agg` 的自定义切换 Provider，桌面选择明确报冲突；该自定义 Provider 仍可通过 `codexc remote --profile sf-custom-agg` 访问。
+若任一已登记的 Provider ID 或 Profile 名与 `agg` / `sf-agg` 重名，两种聚合选择均明确报冲突；
+ID 为 `agg` 的自定义切换 Provider 可明确使用 `codexc remote -p sf-custom-agg` 或
+`codexc app -p sf-custom-agg`，Remote 也可使用 `--profile sf-custom-agg`。
 聚合成员包含 DS、CLP、OCG、CCG 和自定义切换提供商，不包含官方 OAuth 主账户；多个同类账户也可以聚合。
 Desktop 共享仍要求主 Provider 为 OpenAI。执行 `codexc app --provider agg` 后，同一模型目录包含这些成员的模型，
 显示名称为 `Provider ID · 模型名称`。例如账户均名为 `main` 时，精确模型 ID 分别是
@@ -368,8 +384,8 @@ Gateway 运行时会检测现有成员的 Key、配置和模型目录变更，�
 继续历史与命令工具结果回程；另已观察自定义提供商间切换及目录刷新后的同一 Thread 继续。真实云端提供商及 Desktop 内置工具仍待实机验收。
 终端使用 `codexc remote --provider agg`，不能同时指定 `--profile`；也可简写为 `codexc remote -p agg`。
 Desktop 启动和 `app status` 同样支持 `-p agg`。
-Remote 的 `-p agg` 选择聚合实例，`-p <Profile>` 等同 `--profile <Profile>`，例如 `codexc remote -p sf-ds-main`；未配置的受管 Profile 会明确拒绝。
-Desktop 的 `-p` 仍表示 Provider ID；两种命令均不允许重复或冲突选择。
+Remote、Desktop 启动和 `app status` 的 `-p` / `--provider` 共用完整 Provider ID、已登记的规范
+`sf-*` 名称及 `agg` / `sf-agg` 映射；两种命令均不允许重复或冲突选择。
 启动时读取聚合服务端的默认模型与思考等级。使用 `-m`/`--model` 或 `-c model=...` 选择其他目录模型时，
 自动采用目标模型的默认思考等级；`-m`/`--model` 优先于 `-c model=...`，重复配置覆盖以最后一项为准。
 显式 `-c model_reasoning_effort=...` 优先；`--` 后的内容只作为原生 Codex 输入，不参与模型或思考等级选择。

@@ -31,6 +31,7 @@ import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.
 import { locateUserConfig, requireUserConfig } from "./runtime-config.mjs";
 import { runRestartCommand } from "./service-command.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
+import { resolveProviderSelection } from "./provider-selection.mjs";
 
 const defaultBridgePort = 47_821;
 const compatibilityMarker = Buffer.from("CODEX_APP_SERVER_WS_URL", "utf8");
@@ -75,11 +76,8 @@ export async function runDesktopAppCommand(args, options = {}) {
     CODEX_BINARY: stringValue(codex.binary) || "codex",
   };
   const appServer = resolveAppServerRuntime(document, located.dataDir, runtimeEnvironment);
-  if (parsed.provider === aggregateProviderId
-    && appServer.managedProviders.some(({ provider }) => provider === "agg")) {
-    throw new Error("agg 与已配置的自定义 Provider ID 冲突，已取消桌面选择；该自定义 Provider 请使用 codexc remote --profile sf-custom-agg");
-  }
-  const selectedProvider = parsed.provider ?? appServer.primaryProvider;
+  const selectedProvider = parsed.provider === undefined ? appServer.primaryProvider
+    : resolveProviderSelection(parsed.provider, { environment: runtimeEnvironment }).provider;
   const selectedSocketPath = resolveDesktopAppSocketPath(appServer, selectedProvider);
   let desktopConfig = desktopAppConfig(codex.desktop_app);
   const supported = platform === "darwin" || platform === "win32";
@@ -544,13 +542,10 @@ function parseDesktopAppArgs(args) {
         parsed.json = true;
       } else if ((flags[index] === "--provider" || flags[index] === "-p") && parsed.provider === undefined) {
         const provider = flags[index + 1];
-        if (typeof provider !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(provider)) {
-          throw new Error("--provider 必须指定已配置的完整 Provider ID");
+        if (typeof provider !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(provider)) {
+          throw new Error("-p / --provider 必须指定 Provider ID、已配置的 sf- 名称或 agg");
         }
-        if (provider === aggregateProviderId) {
-          throw new Error("聚合模式的命令选择值为 agg，请使用 --provider agg");
-        }
-        parsed.provider = provider === "agg" ? aggregateProviderId : provider;
+        parsed.provider = provider;
         index += 1;
       } else {
         throw new Error(desktopAppCommandUsage);

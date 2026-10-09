@@ -2,24 +2,20 @@ import {
   loadManagedModelProviderDefinitions,
 } from "../runtime/model-provider-definitions.mjs";
 import {
-  loadConfiguredCustomPrimaryModelProvider,
   loadConfiguredCustomSwitchingModelProviders,
-  loadManagedModelProviders,
-  loadPrimaryModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
-import { hasCodexAuthFile } from "../runtime/codex-home.mjs";
 import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
-import { resolveDefaultManagedProvider } from "../runtime/managed-provider-account-routing.mjs";
-import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
+import { resolveProviderSelection } from "./provider-selection.mjs";
 
-export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [--provider agg | -p agg | --profile Profile | -p Profile] [Codex 参数...]";
+export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [-p Provider-ID | --provider Provider-ID | --profile Profile] [Codex 参数...]\n-p / --provider 接受完整 Provider ID、已配置的规范 sf- 名称，以及 agg / sf-agg；省略时连接主实例。个人 Profile 使用 --profile。";
 
 export function parseCodexRemoteOptions(
   args,
   {
     environment = process.env,
     managedProfileDefinitions: suppliedManagedProfileDefinitions,
-    selectDefaultProfile,
+    primaryProvider,
+    customPrimaryProvider,
     customSwitchingProfiles = loadConfiguredCustomSwitchingModelProviders(environment)
       .map(({ provider, profileName }) => ({
         providerId: provider,
@@ -34,22 +30,16 @@ export function parseCodexRemoteOptions(
     ...configuredManagedProfileDefinitions,
   ];
   assertManagedProfileDefinitions(managedProfileDefinitions);
-  args = [...args];
   const passthrough = [];
   let workspaceId;
   let selectedProfile;
   let selectedProvider;
   let hasUnmanagedProfile = false;
   for (let index = 0; index < args.length; index += 1) {
-    let argument = args[index];
+    const argument = args[index];
     if (argument === "--") {
       passthrough.push(...args.slice(index));
       break;
-    }
-    // Keep native Profile shorthand; only the documented agg selector is special.
-    if (argument === "-p" && args[index + 1] !== "agg") {
-      argument = "--profile";
-      args[index] = argument;
     }
     if (argument === "--workspace") {
       if (workspaceId !== undefined) throw new Error("只能指定一个 --workspace");
@@ -67,11 +57,13 @@ export function parseCodexRemoteOptions(
       if (selectedProfile !== undefined || hasUnmanagedProfile) {
         throw new Error("--provider 不能与 --profile 同时使用");
       }
-      const provider = args[index + 1];
-      if (provider !== "agg") {
-        throw new Error("codexc remote --provider 仅支持 agg；单独账户请使用规范 --profile");
-      }
-      selectedProvider = aggregateProviderId;
+      const selection = resolveProviderSelection(args[index + 1], {
+        environment, primaryProvider, customPrimaryProvider,
+        managedProfileDefinitions: configuredManagedProfileDefinitions,
+        customSwitchingProfiles,
+      });
+      selectedProvider = selection.provider;
+      selectedProfile = selection.profileName;
       index += 1;
       continue;
     }
@@ -123,41 +115,7 @@ export function parseCodexRemoteOptions(
     }
     passthrough.push(argument);
   }
-  if (selectedProvider === undefined && selectedProfile === undefined && !hasUnmanagedProfile && selectDefaultProfile) {
-    selectedProfile = selectDefaultProfile();
-  }
   return { passthrough, workspaceId, selectedProfile, selectedProvider };
-}
-
-export function defaultCodexRemoteProfile(environment = process.env) {
-  if (
-    loadPrimaryModelProvider(environment) !== "openai"
-    || loadConfiguredCustomPrimaryModelProvider(environment) !== undefined
-    || hasCodexAuthFile(environment)
-  ) return undefined;
-  const enabled = new Set(loadManagedModelProviders(environment).map(({ provider }) => provider));
-  const managedProfiles = loadManagedModelProviderDefinitions(environment)
-    .filter(({ id }) => enabled.has(id));
-  const customProfiles = loadConfiguredCustomSwitchingModelProviders(environment);
-  const profiles = [
-    ...managedProfiles.map(({ profileName }) => profileName),
-    ...customProfiles.map(({ profileName }) => profileName),
-  ];
-  if (profiles.length === 0) {
-    throw new Error("OpenAI 官方未登录，请先运行 codex login 或通过 codexc setup 配置第三方提供商");
-  }
-  if (profiles.length > 1) {
-    if (customProfiles.length === 0) {
-      const defaultProvider = resolveDefaultManagedProvider(
-        managedProfiles.map(({ id }) => id),
-        environment,
-      );
-      const defaultProfile = managedProfiles.find(({ id }) => id === defaultProvider)?.profileName;
-      if (defaultProfile !== undefined) return defaultProfile;
-    }
-    throw new Error(`OpenAI 官方未登录，已配置多个第三方提供商；请指定 --profile：${profiles.join("、")}`);
-  }
-  return profiles[0];
 }
 
 function customProviderIdArgument(args, index, definitions) {

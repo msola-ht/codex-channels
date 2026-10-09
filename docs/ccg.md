@@ -47,7 +47,9 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 - 目录来源记录：同目录 `models.manifest.json`。
 
 固定模式会在明确确认后备份并修改 Codex 主配置；切换模式使用独立受管 App Server，
-共享 TUI 入口为 `codexc remote --profile sf-ccg-<账户>`。API Key 保存在对应账户的私有文件（Unix `0600`，Windows 私有 ACL），
+共享 TUI 入口为 `codexc remote -p ccg-<账户>`；Desktop 使用 `codexc app -p ccg-<账户>`。
+两个入口也接受已登记的规范 Profile 名 `sf-ccg-<账户>`，Remote 仍支持 `--profile sf-ccg-<账户>`。
+API Key 保存在对应账户的私有文件（Unix `0600`，Windows 私有 ACL），
 只注入目标 App Server 子进程，不进入命令行参数或 Gateway TOML。
 固定 Key 使用[独立私有版本与主配置 `env_key` 引用](provider-integration-guide.md#4-安全边界)，不写入共享主配置；旧明文配置须明确重新配置账户。
 删除账户会移除其 Profile 和管理标记；固定模式仅恢复相关 Provider 设置，保留备份和其他设置。
@@ -59,8 +61,9 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 原生子代理继承父线程的 Provider，不独立绑定账户；本项目不提供跨 Provider 子代理配置入口。
 已配置 CCG 的原始备份缺失时，重新配置会报错，需先恢复原始备份。
 
-当 OpenAI 官方未登录、已配置的第三方切换实例全部属于 CCG 时，新 Conversation 与未显式指定 Profile 的
-`codexc remote` 使用注册表标记的默认账户；混合配置其他 Provider 时仍需显式选择。
+当 OpenAI 官方未登录、已配置的第三方切换实例全部属于 CCG 时，渠道新 Conversation
+使用注册表标记的默认账户；混合配置其他 Provider 时仍需显式选择。
+`codexc remote` 与 `codexc app` 默认连接主实例，不采用上述渠道默认规则；Remote 的显式受管 `--profile` 仍连接对应账户。
 
 当前 DeepSeek 模型不支持内置网页搜索；固定与切换模式均在受管 App Server 启动参数中关闭，
 不改写基础配置。普通函数工具及 MCP 工具不受影响，见 [网页搜索边界](deepseek.md#网页搜索)。
