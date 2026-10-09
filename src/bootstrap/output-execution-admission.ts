@@ -1,13 +1,13 @@
-import type { ThreadQueuePort, TurnExecutionPort, TurnOverrides } from "../application/index.js";
+import type { ThreadQueuePort, TurnExecutionPort } from "../application/index.js";
 
 /** Gate only new execution/input writes; stop, inspection and Queue deletion stay available. */
 export function withOutputExecutionAdmission(
   port: TurnExecutionPort & ThreadQueuePort,
-  assertAllowed: (threadId: string, overrides?: TurnOverrides) => void | Promise<void>,
+  assertAllowed: (threadId: string) => void | Promise<void>,
 ): TurnExecutionPort & ThreadQueuePort {
   return {
     cancelPendingInput: (id) => port.cancelPendingInput?.(id) ?? false,
-    startTurn: async (...args) => { await assertAllowed(args[0], args[4]); return port.startTurn(...args); },
+    startTurn: async (...args) => { await assertAllowed(args[0]); return port.startTurn(...args); },
     steerTurn: async (...args) => { await assertAllowed(args[0]); return port.steerTurn(...args); },
     compactThread: async (id) => { await assertAllowed(id); return port.compactThread(id); },
     startReview: async (...args) => { await assertAllowed(args[0]); return port.startReview(...args); },

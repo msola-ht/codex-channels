@@ -27,7 +27,6 @@ import {
   applyWorkspaceSetting,
   projectWorkspaceSettings,
 } from "./config-workspace-management.mjs";
-import { autoReviewProviderCapability, loadAutoReviewProviderPolicy } from "../runtime/auto-review-provider-policy.mjs";
 import { detectTerminalIdentity } from "../runtime/terminal-identity.mjs";
 import { packageDir, requireUserConfig } from "./runtime-config.mjs";
 
@@ -118,7 +117,7 @@ export function loadGatewaySettings(environment = process.env) {
     },
     webui: projectWebuiSettings(document),
     metrics: projectMetricsSettings(document),
-    workspaces: projectWorkspaceSettings(document, autoReviewProviderCapability(environment, false, loadAutoReviewProviderPolicy)),
+    workspaces: projectWorkspaceSettings(document),
     channels: gatewayChannelStates(document),
   };
 }
@@ -132,7 +131,6 @@ export function updateGatewaySetting(
     writeConfig = writeGatewayConfig,
     writeProxyConfig = (_path, content, snapshot) => writeCodexProxySnapshot(snapshot, content),
     skipBackup = false,
-    autoReviewProviderPolicy = loadAutoReviewProviderPolicy,
   } = {},
 ) {
   const { configPath } = requireUserConfig(environment);
@@ -173,10 +171,7 @@ export function updateGatewaySetting(
     };
   }
   const originalDocument = structuredClone(document);
-  const autoReviewCapability = input?.kind === "workspace.permissions"
-    && input.update?.kind === "approvals-reviewer" && input.update.value === "auto_review"
-    ? autoReviewProviderCapability(environment, false, autoReviewProviderPolicy) : undefined;
-  const result = applySetting(document, input, autoReviewCapability);
+  const result = applySetting(document, input);
   if (JSON.stringify(document) === JSON.stringify(originalDocument)) {
     return {
       kind: input.kind,
@@ -270,13 +265,13 @@ function displaySettingActivation(document) {
     : "reload";
 }
 
-function applySetting(document, input, autoReviewCapability) {
+function applySetting(document, input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("input", "invalid-input", "设置输入必须是对象");
   }
   const delegated = applyWebuiSetting(document, input)
     ?? applyMetricsSetting(document, input)
-    ?? applyWorkspaceSetting(document, input, autoReviewCapability);
+    ?? applyWorkspaceSetting(document, input);
   if (delegated !== undefined) return delegated;
   switch (input.kind) {
     case "display.operation-updates": {

@@ -58,8 +58,7 @@ export function WorkspaceSettingsCard({ management }: { management: GatewaySetti
             label={t("settingsFields.workspaceDefaultApprovalsReviewer")}
             value={workspace.approvalsReviewer ?? "__clear__"}
             options={[["__clear__", t("settingsFields.followCodexDefault")], ["user", t("settingsFields.manualReview")], ["auto_review", t("settingsFields.autoReview")]]}
-            description={t(workspace.autoReviewUnavailableReason === "provider-config-unavailable" ? "settingsFields.workspaceAutoReviewProviderUnavailable" : workspace.canEnableAutoReview === true ? "settingsFields.workspaceAutoReviewHint" : "settingsFields.workspaceAutoReviewProviderUnsupported")}
-            disabledValues={workspace.canEnableAutoReview === true ? [] : ["auto_review"]}
+            description={t("settingsFields.workspaceAutoReviewHint")}
             disabled={disabled}
             onChange={(value) => void management.previewSetting("workspace.permissions", {
               workspaceId: workspace.id,

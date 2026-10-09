@@ -275,18 +275,12 @@ HTTP 429/5xx 与传输失败继续使用剩余预算，路径与其他响应错�
 健康连接由官方实现复用，恢复仍以 `mcpServer/startupStatus/updated` 为准，不重启共享进程或重放 Turn。
 正常网络启动只观察窗口内迟到的失败通知；Gateway 停止会取消探测、额度读取与刷新请求的等待。
 
-下列 Auto-review 入口共用 [`auto-review-provider-policy.mjs`](../runtime/auto-review-provider-policy.mjs)
-的 Provider 与模型策略：官方 OpenAI 和使用官方模型目录的 Codex 兼容自定义 Provider 保留支持，
-受管官方 DS 仅当前目录中的 `deepseek-flash`、CLP 仅 `cline-pass/deepseek-v4.1-flash` 支持，聚合 `agg` 不支持。
-固定模式的 `openai` 路由别名不为独立模型目录授予支持。用户默认按主 Provider 及受管默认模型、
-Workspace 默认按是否存在支持组合判断；当前 Thread 开启按实际 Provider 与模型判断。
-[`router.ts`](../src/session-routing/router.ts) 按请求或历史模型对不支持的组合在新建、未加载恢复和分叉时
-明确请求 `user`；已加载恢复保留实际审批方式、活动 Turn 和订阅，不在恢复阶段执行审批收敛。
-[`gateway-component-graph.ts`](../src/bootstrap/gateway-component-graph.ts) 在共享执行入口复核
-实际设置及本次模型覆盖（含协作模式模型），需关闭自动审查时确认空闲并等待 RPC、设置通知和归约完成，
-不确认则拒绝新执行，保留查询与停止。Remote 启动复用同一策略检查目标 Provider 和显式或受管默认模型，
-不支持时拒绝显式自动审查，新建会话继承默认改用 `user`；DS/CLP 固定传入准入时的模型，不允许透传替换 Profile、Provider 或目录。
-Remote 恢复与继承式分叉保留历史实际模型和审批方式，原生客户端内模型改动也不受 Gateway 控制，不能把启动检查当作历史会话的执行门禁。
+Auto-review 各入口不按 Provider 或模型白名单限制开启，包括第三方及聚合 Provider。
+用户与 Workspace 默认设置保留输入、配置修订及组织策略校验；当前 Thread 的切换仍须确认绑定、空闲状态、
+无待处理交互及 App Server 权威响应。[`router.ts`](../src/session-routing/router.ts) 按现有权限继承规则传递审批方式，
+已加载恢复保留实际审批方式、活动 Turn 和订阅；执行入口不因第三方身份自动切回 `user`。
+Remote 沿用工作区或显式审批参数，恢复与继承式分叉保留历史实际模型和审批方式。
+审批决定与沙箱仍由 Codex 原生机制处理，开放入口不代表全部远端模型已验证兼容。
 这不增加协议能力，也不修改官方目录或持久化格式。
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口 |

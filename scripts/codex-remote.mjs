@@ -5,9 +5,6 @@ import { parse } from "smol-toml";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
-import { isAutoReviewModelSupported, loadAutoReviewProviderPolicy } from "../runtime/auto-review-provider-policy.mjs";
-import { isDeepseekAccountProvider } from "../runtime/deepseek-accounts.mjs";
-import { isClinePassAccountProvider } from "../runtime/cline-pass-accounts.mjs";
 import {
   acquireAppServerProviderLease,
   inspectAppServerSupervisor,
@@ -15,7 +12,6 @@ import {
 import {
   loadConfiguredCustomSwitchingModelProviders,
   loadManagedModelProviders,
-  loadManagedModelProviderSettings,
   providerAppServerSocketPath,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -113,22 +109,7 @@ async function runRemoteCli() {
     leaseProvider = selectedProvider;
     assertAggregateProviderArguments(passthrough);
   }
-  const overrides = explicitPermissionOverrides(passthrough);
-  let managedModelArguments = [];
-  let selectedModel = overrides.model;
-  if (isDeepseekAccountProvider(leaseProvider) || isClinePassAccountProvider(leaseProvider)) {
-    assertManagedReviewArguments(passthrough);
-    selectedModel ??= loadManagedModelProviderSettings().find(({ provider }) => provider === leaseProvider)?.model;
-    if (!selectedModel) throw new Error("无法确认受管 Provider 的启动模型，请使用 --model 指定当前目录中的模型");
-    // Native CLI model flags win over Profile and project configuration. Pin
-    // the same model used by admission instead of checking a guessed default.
-    managedModelArguments = [
-      "-c", `model_provider=${JSON.stringify(leaseProvider)}`,
-      ...(!overrides.cliModel ? ["--model", selectedModel] : []),
-    ];
-  }
-  const autoReviewSupported = isAutoReviewModelSupported(loadAutoReviewProviderPolicy(), leaseProvider, selectedModel);
-  const permissionArguments = workspacePermissionArguments(workspace, passthrough, autoReviewSupported);
+  const permissionArguments = workspacePermissionArguments(workspace, passthrough);
   const configuredBinary = stringValue(codex.binary) || "codex";
   const supervisorActive = selectedDefinition !== undefined || selectedProvider !== undefined
     || await inspectAppServerSupervisor(primarySocketPath) !== undefined;
@@ -137,7 +118,7 @@ async function runRemoteCli() {
       providerLease = await acquireAppServerProviderLease(primarySocketPath, leaseProvider);
     }
     const modelArguments = selectedProvider === undefined
-      ? managedModelArguments
+      ? []
       : await aggregateModelArguments(socketPath, configuredBinary, passthrough);
     const invocation = resolveExecutableInvocation(configuredBinary, [
       "--remote",
@@ -177,14 +158,11 @@ function workspaceForWorkdir(workspaces, workdir) {
   return selected;
 }
 
-function workspacePermissionArguments(workspace, passthrough, autoReviewSupported) {
+function workspacePermissionArguments(workspace, passthrough) {
   const overrides = explicitPermissionOverrides(passthrough);
   const permissions = stringValue(workspace?.permissions);
   const approvalPolicy = stringValue(workspace?.approval_policy);
-  const approvalsReviewer = autoReviewSupported ? stringValue(workspace?.approvals_reviewer) : "user";
-  if (!autoReviewSupported && overrides.autoReview) {
-    throw new Error("目标提供商或模型不支持 auto_review；请使用手动审批 user，移除 --approve-for-me 或 approvals_reviewer=auto_review");
-  }
+  const approvalsReviewer = stringValue(workspace?.approvals_reviewer);
   if (!overrides.approval && approvalPolicy === "untrusted") {
     throw new Error(
       "Workspace 审批策略 untrusted 不能传给当前 Codex CLI；"
@@ -214,27 +192,14 @@ function explicitPermissionOverrides(args) {
   let sandbox = false;
   let approval = false;
   let reviewer = false;
-  let autoReview = false;
-  let model;
-  let configModel;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--") break;
-    if (argument === "--model" || argument === "-m") {
-      model = args[++index];
-      continue;
-    }
-    if (argument.startsWith("--model=") || /^-m[^-]/u.test(argument)) {
-      model = argument.startsWith("--model=") ? argument.slice("--model=".length)
-        : argument.startsWith("-m=") ? argument.slice(3) : argument.slice(2);
-      continue;
-    }
     if (["--approve-for-me", "--not-so-yolo", "--dangerously-bypass-approvals-and-sandbox", "--yolo"].includes(argument)) {
       sandbox = true;
       approval = true;
       if (["--approve-for-me", "--not-so-yolo"].includes(argument)) {
         reviewer = true;
-        autoReview = true;
       }
       continue;
     }
@@ -259,36 +224,16 @@ function explicitPermissionOverrides(args) {
     const override = configOverrideArgument(args, index);
     if (!override) continue;
     index += override.consumed - 1;
-    const { key, value } = override;
-    if (key === "model") configModel = typeof value === "string" ? value : "";
+    const { key } = override;
     if (key === "sandbox_mode" || key === "default_permissions") {
       sandbox = true;
     }
     if (key === "approval_policy") approval = true;
     if (key === "approvals_reviewer") {
       reviewer = true;
-      autoReview ||= value === "auto_review";
     }
   }
-  return { sandbox, approval, reviewer, autoReview, model: model ?? configModel, cliModel: model !== undefined };
-}
-
-function assertManagedReviewArguments(args) {
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--") break;
-    if (argument === "--profile" || argument.startsWith("--profile=")
-      || argument === "--oss" || argument === "--local-provider" || argument.startsWith("--local-provider=")) {
-      throw new Error("DS/CLP Remote 只支持规范受管 Profile；请用 --model 或 -c model=... 选择模型，不能替换 Profile 或 Provider");
-    }
-    const override = configOverrideArgument(args, index);
-    if (!override) continue;
-    index += override.consumed - 1;
-    if (["profile", "profiles", "model_provider", "model_providers", "model_catalog_json"].includes(override.key)
-      || override.key.startsWith("profiles.") || override.key.startsWith("model_providers.")) {
-      throw new Error("DS/CLP Remote 不能覆盖 Profile、Provider 或模型目录；请使用规范受管 Profile 和顶层模型参数");
-    }
-  }
+  return { sandbox, approval, reviewer };
 }
 
 function configOverrideArgument(args, index) {

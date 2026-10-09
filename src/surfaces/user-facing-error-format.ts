@@ -198,10 +198,6 @@ export function formatSurfaceUserFacingError(
       return "用法：/autoreview [on|off]；只切换当前会话后续轮次的审批方式";
     case "autoreview.unavailable":
       return "当前会话无法切换审批方式；请先用 /autoreview 核对 App Server 的实际状态";
-    case "autoreview.provider-unsupported":
-      return "当前提供商或模型不支持自动审查；支持官方模型目录，以及官方 DS 的 deepseek-flash 和 CLP 的 cline-pass/deepseek-v4.1-flash，其他组合请使用手动审批";
-    case "autoreview.execution-blocked":
-      return "尚未确认当前提供商使用手动审批，已暂停新执行；请用 /autoreview 核对状态，任务空闲后可用 /autoreview off 关闭自动审查";
     case "autoreview.stale-selection":
       return "当前会话审批按钮已失效或会话已变化，请重新发送 /autoreview";
     case "autoreview.update-failed":

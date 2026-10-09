@@ -17,7 +17,7 @@ export function autoReviewModelAlias(provider: string | null | undefined, purpos
   if (purpose !== "autoApprovalReview") return null
   if (isClinePassProvider(provider)) return "clp-auto-review"
   if (provider === "deepseek" || /^ds-[a-z0-9_-]{1,32}$/.test(provider ?? "")) return "deepseek-auto-review"
-  return null
+  return provider && provider !== "openai" ? `${provider}-auto-review` : null
 }
 
 export function formatModelName(model: string | null | undefined, provider: string | null | undefined): string | null {

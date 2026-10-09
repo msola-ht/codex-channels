@@ -208,17 +208,12 @@ async function runApprovalsReviewerSetting({ environment, output, prompts, setti
     return { action: "back" };
   }
   output.write("自动审查由 Codex Auto-review 审查需要审批的操作；沙盒、审批策略与组织限制仍然适用。此处保存 Codex 默认审批方式的用户偏好，新会话是否继承由 App Server、Profile 和显式参数决定，已有会话不会切换。\n");
-  if (settings.approvalsReviewer.canEnableAutoReview !== true) {
-    output.write(settings.approvalsReviewer.autoReviewUnavailableReason === "provider-config-unavailable"
-      ? "无法安全读取 Provider 配置，暂时不能开启 Auto-review；可以选择手动审批。\n"
-      : "当前主提供商或默认模型不支持开启自动审查；可以改为手动审批。支持官方模型目录，以及官方 DS 的 deepseek-flash 和 CLP 的 cline-pass/deepseek-v4.1-flash。\n");
-  }
   const value = await prompts.select({
     message: "选择 Codex 默认审批方式",
-    initialValue: settings.approvalsReviewer.canEnableAutoReview === true ? settings.approvalsReviewer.value ?? "user" : "user",
+    initialValue: settings.approvalsReviewer.value ?? "user",
     options: [
       { value: "user", label: "手动审批", hint: "由用户审查审批请求" },
-      ...(settings.approvalsReviewer.canEnableAutoReview === true ? [{ value: "auto_review", label: "自动审查", hint: "由 Codex Auto-review 审查审批请求" }] : []),
+      { value: "auto_review", label: "自动审查", hint: "由 Codex Auto-review 审查审批请求" },
     ],
   });
   if (prompts.isCancel(value)) return { action: "back" };

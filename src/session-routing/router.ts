@@ -81,30 +81,7 @@ export class SessionRouter {
     private readonly workspaces: WorkspaceRegistry,
     private readonly dynamicTools: readonly ThreadDynamicToolSpec[] = [],
     private readonly onBindingsChanged?: () => void,
-    private readonly autoReviewPolicy?: {
-      primaryProvider: string;
-      supportedProviders: ReadonlySet<string>;
-      supportsModel?: (provider: string, model?: string) => boolean;
-      hasSupportedProvider?: () => boolean;
-    },
   ) {}
-
-  isAutoReviewSupported(provider: string | undefined, model?: string): boolean {
-    return this.autoReviewPolicy === undefined || provider !== undefined
-      && (this.autoReviewPolicy.supportsModel?.(provider, model)
-        ?? this.autoReviewPolicy.supportedProviders.has(provider));
-  }
-
-  hasAutoReviewProvider(): boolean {
-    return this.autoReviewPolicy === undefined || (this.autoReviewPolicy.hasSupportedProvider?.()
-      ?? this.autoReviewPolicy.supportedProviders.size > 0);
-  }
-
-  private providerReviewOptions(options: ThreadStartOptions, provider?: string, model = options.model): ThreadStartOptions {
-    return this.isAutoReviewSupported(provider ?? options.modelProvider ?? this.autoReviewPolicy?.primaryProvider, model)
-      ? options
-      : { ...options, approvalsReviewer: "user" };
-  }
 
   private workspacePermissions(workspace: Workspace): ThreadStartOptions {
     return {
@@ -485,13 +462,13 @@ export class SessionRouter {
       }
     }
 
-    const started = await this.codex.startThread(workspace.cwd, this.providerReviewOptions({
+    const started = await this.codex.startThread(workspace.cwd, {
       ...this.workspacePermissions(workspace),
       ...startOptions,
       ...(this.dynamicTools.length > 0
         ? { dynamicTools: this.dynamicTools }
         : {}),
-    }));
+    });
     this.captureModelSettings(started.thread.id, started.model, started.modelProvider, started.reasoningEffort, started.serviceTier, "default", started.approvalsReviewer);
     this.namesByThread.set(started.thread.id, started.thread.name);
     this.contextCompactionItemIdsByThread.set(
@@ -568,11 +545,11 @@ export class SessionRouter {
     const workspace = workspaceId === undefined
       ? this.workspace(target)
       : this.workspaces.require(workspaceId);
-    const session = await this.codex.startThread(workspace.cwd, this.providerReviewOptions({
+    const session = await this.codex.startThread(workspace.cwd, {
       ...this.workspacePermissions(workspace),
       ...backgroundStartOptions,
       threadSource: "automation",
-    }));
+    });
     if (this.bindings.getByThread(session.thread.id)) {
       throw new UserFacingError(
         "thread.bound",
@@ -706,9 +683,7 @@ export class SessionRouter {
       ), preserveSubscription);
     }
     const threadId = thread.id;
-    const requested = this.providerReviewOptions(
-      { ...this.workspacePermissions(workspace), ...options }, thread.modelProvider, options.model ?? thread.model ?? "",
-    );
+    const requested = { ...this.workspacePermissions(workspace), ...options };
     // A loaded Thread retains its current reviewer. Only loading persisted
     // history can apply the Workspace default without mutating a live session.
     if (thread.status.type !== "notLoaded") delete requested.approvalsReviewer;
@@ -727,9 +702,8 @@ export class SessionRouter {
         "thread.takeover.changed", "恢复后的实际目录、权限或活动状态不符合要求，未切换会话",
       ), true);
     }
-    // Restoration must retain actual settings and active-turn management even
-    // when the reviewer cannot admit new execution. The execution port gates
-    // Gateway inputs separately; query, stop and confirmed off remain usable.
+    // Restore authoritative settings and active-turn management without
+    // changing the reviewer based on Provider or model identity.
     return session;
   }
 
@@ -959,23 +933,16 @@ export class SessionRouter {
       throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
     }
     const workspace = this.workspaces.require(current.workspaceId);
-    let forkProvider = startOptions.modelProvider ?? this.modelSettingsByThread.get(current.threadId)?.modelProvider;
-    let forkModel = startOptions.model ?? this.modelSettingsByThread.get(current.threadId)?.model;
-    if (this.autoReviewPolicy && (forkProvider === undefined || forkModel === undefined)) {
-      const snapshot = await this.codex.readThread(current.threadId);
-      forkProvider ??= snapshot.modelProvider;
-      forkModel ??= snapshot.model ?? undefined;
-    }
     const forked = await this.codex.forkThread(
       current.threadId,
       workspace.cwd,
-      this.providerReviewOptions({
+      {
         ...(startOptions.model === undefined ? {} : { model: startOptions.model }),
         ...(startOptions.modelProvider === undefined
           ? {}
           : { modelProvider: startOptions.modelProvider }),
         ...this.workspacePermissions(workspace),
-      }, forkProvider, forkModel ?? ""),
+      },
     );
     const binding = {
       target,

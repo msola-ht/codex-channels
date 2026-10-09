@@ -277,7 +277,7 @@
 - `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`、
   `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
   的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
-  Workspace 默认审批方式跨 Provider 共享，保存自动审查要求至少存在一个受支持的 Provider 与模型组合；CLI 与 WebUI 共用写入门禁，关闭与清除仍可使用。
+  Workspace 默认审批方式跨 Provider 共享，不按 Provider 或模型设限；CLI 与 WebUI 共用输入、配置修订校验及写入接口。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理、日志等级与
   开发中的 Plugin API；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；
@@ -380,16 +380,14 @@
   与原生 Codex 及磁盘文件相同的 `sf-*` Provider Profile 名称，选择对应隔离实例并供 Remote TUI
   完成第三方 Provider 认证；同时按当前目录或显式
   `--workspace` 解析有效 Sandbox、审批策略、Permission Profile 与可选审批审查方式，第三方 Profile 不复制权限，
-  用户显式传给 Codex 的权限参数优先；非 DS/CLP 入口的个人 Profile 也沿用匹配的 Workspace 权限；
+  用户显式传给 Codex 的权限参数优先；个人 Profile 也沿用匹配的 Workspace 权限；
   聚合选择复用共享 Runtime 拓扑与 Supervisor 按需租约，不生成磁盘 Profile；启动前通过已有
   Codex Client 读取服务端默认模型与目录，投影启动设置，避免本地 OpenAI 默认模型覆盖聚合目录。
   透传 `-m`/`--model` 或 `-c model=...` 选择目录内精确模型时，按 Codex 的最终模型优先级使用目标模型的默认思考等级；
   服务端默认模型保留服务端思考等级，显式 `-c model_reasoning_effort=...` 优先，并尊重 `--` 参数边界。
-  自动审查准入复用共享 Provider 与模型策略，检查目标 Provider、显式模型或受管默认模型；
-  DS/CLP 将准入模型显式传给原生 CLI，避免项目配置覆盖；拒绝个人 Profile、Provider/目录覆盖及本地模型切换参数。
-  不支持时新建会话继承默认改用 `user`，显式 `--approve-for-me`（及原生别名）或 `approvals_reviewer=auto_review` 明确拒绝。
-  Remote 恢复及继承式分叉保留历史实际模型和 reviewer，启动参数不能替代 Gateway 的逐次执行准入。
-  聚合目录和 Provider 不允许由透传参数替换，聚合继续不支持自动审查；
+  自动审查沿用工作区或用户显式设置，不按 Provider 或模型过滤、降级，也不为此固定请求模型。
+  Remote 恢复及继承式分叉保留历史实际模型和 reviewer。
+  聚合目录和 Provider 不允许由透传参数替换；
   Workspace 的 `untrusted` 保留给 App Server Thread，但在没有显式审批覆盖时拒绝映射为固定版 CLI
   已退役的公开参数，不静默改成更宽松策略；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
