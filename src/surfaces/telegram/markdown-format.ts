@@ -16,15 +16,20 @@ function renderMarkdownAsTelegramHtml(markdown: string): string {
   const output: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]!;
-    const fence = line.match(/^```([a-zA-Z0-9_+-]*)\s*$/);
-    if (fence) {
+    const fence = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/u);
+    if (fence && (fence[1]![0] !== "`" || !fence[2]!.includes("`"))) {
+      const marker = fence[1]![0];
+      const fenceLength = fence[1]!.length;
       const code: string[] = [];
       index += 1;
-      while (index < lines.length && !/^```\s*$/.test(lines[index]!)) {
+      while (index < lines.length) {
+        const closing = lines[index]!.match(/^ {0,3}(`{3,}|~{3,})\s*$/u);
+        if (closing && closing[1]![0] === marker && closing[1]!.length >= fenceLength) break;
         code.push(lines[index]!);
         index += 1;
       }
-      const language = fence[1];
+      const info = fence[2]!.trim().split(/\s/u, 1)[0]!;
+      const language = /^[a-zA-Z0-9_+-]+$/u.test(info) ? info : undefined;
       if (
         (!language || language.toLowerCase() === "text")
         && isBotCommandBlock(code)

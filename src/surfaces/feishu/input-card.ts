@@ -4,6 +4,7 @@ import type {
 } from "../../approval/index.js";
 import { interactionProcessedTitle } from "../interaction-copy.js";
 import type { FeishuCardDocument } from "./approval-card.js";
+import { sanitizeFeishuMarkdown } from "./message-content.js";
 
 export type FeishuInputAction =
   | "submit"
@@ -63,6 +64,13 @@ export function renderFeishuInputOutcomeCard(
   const elements = [
     markdown(`**处理结果：** ${escapeMarkdown(outcome)}`),
   ];
+  if (request.type === "user-input" && request.asynchronous) {
+    request.questions.forEach((question, index) => {
+      elements.push(markdown(formatAsyncQuestion(
+        question.header || `问题 ${index + 1}`, question.question,
+      )));
+    });
+  }
   if (
     request.type === "user-input"
     && decision.type === "user-input"
@@ -96,10 +104,12 @@ function renderUserInputCard(
       formElements.push({ tag: "hr" });
     }
     formElements.push(markdown(
-      `**${escapeMarkdown(truncate(
-        question.header || `问题 ${index + 1}`,
-        maximumLabelLength,
-      ))}**\n${escapeMarkdown(truncate(question.question, maximumDisplayLength))}`,
+      request.asynchronous
+        ? formatAsyncQuestion(question.header || `问题 ${index + 1}`, question.question)
+        : `**${escapeMarkdown(truncate(
+          question.header || `问题 ${index + 1}`,
+          maximumLabelLength,
+        ))}**\n${escapeMarkdown(truncate(question.question, maximumDisplayLength))}`,
     ));
     if (question.options.length > 0) {
       formElements.push({
@@ -425,6 +435,52 @@ function markdown(content: string): Record<string, unknown> {
     tag: "markdown",
     content,
   };
+}
+
+function formatAsyncQuestion(header: string, question: string): string {
+  const safeQuestion = sanitizeFeishuMarkdown(question);
+  const notice = "\n\n（问题内容已截断，请让 Codex 分段提供完整内容后再复制代码。）";
+  const body = [...safeQuestion].length <= maximumDisplayLength ? safeQuestion
+    : truncateAsyncQuestion(safeQuestion, maximumDisplayLength - [...notice].length) + notice;
+  return sanitizeFeishuMarkdown(`**${escapeMarkdown(truncate(header, maximumLabelLength))}**\n${body}`);
+}
+
+function truncateAsyncQuestion(text: string, limit: number): string {
+  let body = "";
+  let length = 0;
+  let firstLine = true;
+  let fence: string | undefined;
+  for (const line of text.split("\n")) {
+    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+    const marker = match?.[1];
+    let nextFence = fence;
+    if (marker !== undefined) {
+      if (fence === undefined && !(marker[0] === "`" && match![2]!.includes("`"))) {
+        nextFence = marker;
+      } else if (
+        fence !== undefined && marker[0] === fence[0]
+        && marker.length >= fence.length && match![2]!.trim().length === 0
+      ) {
+        nextFence = undefined;
+      }
+    }
+    const part = `${firstLine ? "" : "\n"}${line}`;
+    firstLine = false;
+    const characters = [...part];
+    const reserve = nextFence === undefined ? 0 : nextFence.length + 1;
+    if (length + characters.length + reserve > limit) {
+      // Keep delimiter lines atomic, including an opening delimiter longer than the preview.
+      if (nextFence === fence) {
+        const available = Math.max(0, limit - length - (fence === undefined ? 0 : fence.length + 1));
+        body += characters.slice(0, available).join("");
+      }
+      break;
+    }
+    body += part;
+    length += characters.length;
+    fence = nextFence;
+  }
+  return fence === undefined ? body : `${body}\n${fence}`;
 }
 
 function escapeMarkdown(value: string): string {

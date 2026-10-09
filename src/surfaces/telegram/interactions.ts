@@ -16,10 +16,13 @@ import { interactionOutcome } from "../interaction-copy.js";
 import { PendingInteractionRegistry, waitForInteractionPreparation } from "../pending-interaction-registry.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import {
+  escapeTelegramHtml,
   formatTelegramExpandableQuotePanelChunks,
   formatTelegramPanelChunks,
   telegramInteractionReplyHeading,
 } from "./html-format.js";
+import { splitTelegramText } from "./format.js";
+import { formatMarkdownAsTelegramHtmlChunks, telegramHtmlToPlainText } from "./markdown-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramAbortSignal } from "./sdk-signal.js";
 
@@ -30,6 +33,7 @@ interface PendingInteraction {
   resolve(decision: InteractionDecision): void;
   timer: NodeJS.Timeout;
   messageId: number;
+  messageIds: Set<number>;
   messageText: string;
   answers: Record<string, string[]>;
   questionIndex: number;
@@ -90,6 +94,7 @@ export class TelegramInteractionPort implements InteractionPort {
       return safeInteractionDecision(request);
     }
     const signal = this.pending.signal(token);
+    const messageIds = new Set<number>();
     const preparation = this.prepareInteraction(
       target,
       request,
@@ -97,6 +102,7 @@ export class TelegramInteractionPort implements InteractionPort {
       chunks,
       keyboard,
       signal,
+      messageIds,
     );
     this.preparations.add(preparation);
     void preparation.then(
@@ -139,6 +145,7 @@ export class TelegramInteractionPort implements InteractionPort {
         resolve,
         timer,
         messageId: message.message_id,
+        messageIds,
         messageText: chunks.at(-1)!,
         answers: {},
         questionIndex: 0,
@@ -160,6 +167,7 @@ export class TelegramInteractionPort implements InteractionPort {
     chunks: string[],
     keyboard: InlineKeyboard | undefined,
     requestSignal: AbortSignal,
+    messageIds: Set<number>,
   ): Promise<Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined> {
     let message: Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined;
     try {
@@ -178,6 +186,8 @@ export class TelegramInteractionPort implements InteractionPort {
             (requestSignal) => this.bot.api.sendMessage(target.conversationId, chunk, options, telegramAbortSignal(requestSignal)),
             signal,
           );
+          messageIds.add(sent.message_id);
+          this.rememberTextReplyMessage(target, request, sent.message_id);
         }
         return sent;
       }, requestSignal);
@@ -202,7 +212,6 @@ export class TelegramInteractionPort implements InteractionPort {
       },
       "Telegram 交互请求已送达",
     );
-    this.rememberTextReplyMessage(target, request, message.message_id);
     if (!this.closed && !requestSignal.aborted) {
       return message;
     }
@@ -253,7 +262,7 @@ export class TelegramInteractionPort implements InteractionPort {
     if (!message?.text || message.text.startsWith("/") || replyId === undefined) return false;
     return this.textReplyMessages.has(`${message.chat.id}:${replyId}`)
       || [...this.pending.entries()].some(([, pending]) =>
-        pending.target.conversationId === String(message.chat.id) && pending.messageId === replyId);
+        pending.target.conversationId === String(message.chat.id) && pending.messageIds.has(replyId));
   }
 
   async handleText(context: Context): Promise<boolean> {
@@ -264,7 +273,7 @@ export class TelegramInteractionPort implements InteractionPort {
     }
     const entry = [...this.pending.entries()].find(([, value]) =>
       value.target.conversationId === String(chatId)
-      && value.messageId === context.message?.reply_to_message?.message_id);
+      && value.messageIds.has(context.message?.reply_to_message?.message_id ?? -1));
     const [token, pending] = entry ?? [];
     if (!pending) {
       const reply = context.message?.reply_to_message;
@@ -283,9 +292,6 @@ export class TelegramInteractionPort implements InteractionPort {
         ));
         return true;
       }
-      return false;
-    }
-    if (context.message?.reply_to_message?.message_id !== pending.messageId) {
       return false;
     }
     if (pending.request.type === "user-input") {
@@ -539,6 +545,8 @@ export class TelegramInteractionPort implements InteractionPort {
     const question = request.questions[questionIndex];
     if (
       !question
+      || context.callbackQuery?.message?.message_id !== pending.messageId
+      || !pending.messageIds.has(pending.messageId)
       || questionIndex !== pending.questionIndex
       || pending.awaitingOther
     ) {
@@ -577,10 +585,10 @@ export class TelegramInteractionPort implements InteractionPort {
         { type: "user-input", answers: pending.answers },
         interactionOutcome.answered,
       );
-      await context.answerCallbackQuery({ text: `已选择：${answer}` });
+      await context.answerCallbackQuery({ text: "已选择" });
       return;
     }
-    await context.answerCallbackQuery({ text: `已选择：${answer}` });
+    await context.answerCallbackQuery({ text: "已选择" });
     await this.tryMoveToUserInputQuestion(
       pending,
       token,
@@ -640,6 +648,7 @@ export class TelegramInteractionPort implements InteractionPort {
     }
     if (this.pending.get(token) !== pending) return;
     const signal = this.pending.signal(token);
+    pending.messageIds.clear();
     await this.updateInteractionMessage(
       pending.target,
       pending.requestId,
@@ -648,7 +657,7 @@ export class TelegramInteractionPort implements InteractionPort {
       outcome,
     );
     if (signal.aborted) return;
-    const { message, messageText } = await this.sendUserInputQuestion(
+    const { message, messageText, messageIds } = await this.sendUserInputQuestion(
       pending.target,
       pending.request,
       token,
@@ -656,12 +665,12 @@ export class TelegramInteractionPort implements InteractionPort {
       awaitingOther,
       signal,
     );
-    this.rememberTextReplyMessage(pending.target, pending.request, message.message_id);
     if (signal.aborted) {
       await this.updateInteractionMessage(pending.target, pending.requestId, message.message_id, messageText, "请求已失效");
       return;
     }
     pending.messageId = message.message_id;
+    pending.messageIds = messageIds;
     pending.messageText = messageText;
     pending.questionIndex = questionIndex;
     pending.awaitingOther = awaitingOther;
@@ -677,8 +686,10 @@ export class TelegramInteractionPort implements InteractionPort {
   ): Promise<{
     message: Awaited<ReturnType<Bot["api"]["sendMessage"]>>;
     messageText: string;
+    messageIds: Set<number>;
   }> {
     const chunks = formatInputChunks(request, questionIndex, awaitingOther);
+    const messageIds = new Set<number>();
     const keyboard = this.keyboard(
       request,
       token,
@@ -710,6 +721,8 @@ export class TelegramInteractionPort implements InteractionPort {
             ),
             signal,
           );
+          messageIds.add(sent.message_id);
+          this.rememberTextReplyMessage(target, request, sent.message_id);
         }
         return sent;
       },
@@ -721,6 +734,7 @@ export class TelegramInteractionPort implements InteractionPort {
     return {
       message,
       messageText: chunks.at(-1)!,
+      messageIds,
     };
   }
 
@@ -781,7 +795,7 @@ export class TelegramInteractionPort implements InteractionPort {
         (requestSignal) => this.bot.api.editMessageText(
           target.conversationId,
           messageId,
-          `${messageText}\n\n处理结果：${outcome}`,
+          `${messageText}\n\n处理结果：${escapeTelegramHtml(limitInteractionOutcome(messageText, outcome))}`,
           {
             parse_mode: "HTML",
             reply_markup: { inline_keyboard: [] },
@@ -816,11 +830,57 @@ function formatInputChunks(
   questionIndex: number,
   awaitingOther = false,
 ): string[] {
-  const chunks = formatTelegramPanelChunks(formatInteraction(request, questionIndex, awaitingOther), 3_600);
+  const chunks = request.type === "user-input" && request.asynchronous
+    ? formatAsynchronousInputChunks(request, questionIndex, awaitingOther)
+    : formatTelegramPanelChunks(formatInteraction(request, questionIndex, awaitingOther), 3_600);
   // Mark every fragment so replies remain identifiable after restart or cache eviction.
   return acceptsTextReply(request)
     ? chunks.map((chunk) => `<b>${telegramInteractionReplyHeading}</b>\n\n${chunk}`)
     : chunks;
+}
+
+function formatAsynchronousInputChunks(
+  request: Extract<InteractionRequest, { type: "user-input" }>,
+  questionIndex: number,
+  awaitingOther: boolean,
+): string[] {
+  const question = request.questions[questionIndex]!;
+  const title = question.header.trim() || `问题 ${questionIndex + 1}`;
+  const instruction = awaitingOther
+    ? "请输入其他内容并回复本消息。"
+    : question.options.length > 0 ? "请选择下方按钮。" : "请回复本消息。";
+  const footer = `${instruction}\n发送 /stop 可停止当前请求。`
+    + (request.questions.some((question) => question.secret)
+      ? "\n\n安全提示：Telegram 回复会保留在聊天记录中，请勿发送密钥、Token 或其他敏感凭据。"
+      : "");
+  // Render metadata literally; only the question body carries Markdown semantics.
+  const sections = [
+    ...splitTelegramText(request.title, 1_750).map((chunk) => `<b>${escapeTelegramHtml(chunk)}</b>`),
+    ...splitTelegramText(`问题 ${questionIndex + 1}/${request.questions.length}：${title}`, 1_750).map(escapeTelegramHtml),
+    ...formatMarkdownAsTelegramHtmlChunks(question.question),
+    escapeTelegramHtml(footer),
+  ];
+  const chunks: string[] = [];
+  for (const section of sections) {
+    const previous = chunks.at(-1);
+    if (previous !== undefined && telegramHtmlToPlainText(`${previous}\n\n${section}`).length <= 3_500) {
+      chunks[chunks.length - 1] = `${previous}\n\n${section}`;
+    } else {
+      chunks.push(section);
+    }
+  }
+  return chunks;
+}
+
+function limitInteractionOutcome(messageText: string, outcome: string): string {
+  const budget = Math.max(0, Math.min(400, 4_096 - telegramHtmlToPlainText(messageText).length - "\n\n处理结果：".length));
+  if (outcome.length <= budget) return outcome;
+  let truncated = "";
+  for (const character of outcome) {
+    if (truncated.length + character.length > budget - 1) break;
+    truncated += character;
+  }
+  return budget > 0 ? `${truncated}…` : "";
 }
 
 function telegramApprovalChoice(

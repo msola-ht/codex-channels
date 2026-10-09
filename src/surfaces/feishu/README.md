@@ -55,7 +55,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
   已在队列中明确相邻的图片可成批处理，普通文本与命令仍沿用既有顺序路径。
 - `idle-release-card.ts`：把渠道会话空闲自动解除通知生成为直接携带 `Session ID` 和
   `/r <Thread ID>` 命令的 CardKit 2.0 卡片。
-- `input-card.ts`：生成 CardKit 2.0 有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片。
+- `input-card.ts`：生成 CardKit 2.0 有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片；异步问题复用 Markdown 安全处理，截断时闭合代码围栏，结果卡片保留有界题干。
   MCP 工具审批分别提供一次批准、上游允许的持久范围、拒绝与取消，拒绝和取消不携带持久范围。
 - `interactions.ts`：维护私聊审批、用户输入和 MCP elicitation 的一次性令牌、Actor 绑定、
   请求去重、过期、取消和跨客户端失效。
