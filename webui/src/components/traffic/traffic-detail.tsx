@@ -62,7 +62,7 @@ export function TrafficDetail({
       <Card size="sm" aria-label={t("traffic.overviewAria")}>
         <CardHeader>
           <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
-            <TrafficModel provider={["relay.chat", "relay.responses"].includes(provider) ? detail.account : provider} request={detail.requestModel} responses={detail.responseModels} upstream={typeof finalProvider === "string" ? finalProvider : undefined} />
+            <TrafficModel provider={["relay.chat", "relay.responses"].includes(provider) ? detail.account : provider} requestPurpose={detail.requestPurpose} request={detail.requestModel} responses={detail.responseModels} upstream={typeof finalProvider === "string" ? finalProvider : undefined} />
             <Badge variant="outline">{detail.category === "models" ? t("traffic.categoryModels") : detail.category === "prewarm" ? t("traffic.categoryPrewarm") : t("traffic.categoryRequest")}</Badge>
             {autoReview ? <Badge variant="outline">{t("requestPurpose.autoApprovalReview")}</Badge> : null}
           </CardTitle>

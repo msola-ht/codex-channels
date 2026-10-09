@@ -24,7 +24,9 @@ Codex Thread 的 `modelProvider` 创建后不可变。因此：
 - 跨账户切换会保留并解绑当前 Thread，下一条消息使用目标账户新建 Thread，不复制历史；
 - `/resume` 按原 `modelProvider` 恢复仍映射到现有账户的历史 Thread，并在需要时拉起对应账户 App Server；已删除账户或无法映射的旧 Thread 不保证可恢复；
 - `/model` 和指标展示使用注册表中的 `ocg-<邮箱或手机号>`，未配置联系方式时回退到 `ocg-<accountId>`；
-- `codexc remote --profile sf-ocg-<accountId>` 连接对应账户。
+- `codexc remote -p ocg-<accountId>` 与 `codexc app -p ocg-<accountId>` 连接对应切换账户；
+  两个入口也接受已登记的规范 `sf-ocg-<accountId>` Profile 名，Remote 保留 `--profile sf-ocg-<accountId>`。
+  两个入口默认连接主实例，不根据官方登录状态或账户默认标记自动选择第三方。
 
 ## 账户文件
 

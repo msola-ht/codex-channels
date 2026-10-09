@@ -5,7 +5,6 @@ import { parse } from "smol-toml";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
-import { loadAutoReviewProviderPolicy } from "../runtime/auto-review-provider-policy.mjs";
 import {
   acquireAppServerProviderLease,
   inspectAppServerSupervisor,
@@ -27,7 +26,8 @@ import {
 } from "../runtime/process-lifecycle.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
-import { defaultCodexRemoteProfile, parseCodexRemoteOptions } from "./codex-remote-options.mjs";
+import { parseCodexRemoteOptions } from "./codex-remote-options.mjs";
+import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
@@ -52,7 +52,6 @@ async function runRemoteCli() {
   const { passthrough, selectedProfile, selectedProvider, workspaceId } = parseCodexRemoteOptions(
     process.argv.slice(2),
     {
-      selectDefaultProfile: defaultCodexRemoteProfile,
       customSwitchingProfiles: customSwitchingProviders.map(
         ({ provider, profileName }) => ({
           providerId: provider,
@@ -87,6 +86,10 @@ async function runRemoteCli() {
     : [
     ...loadManagedModelProviderDefinitions(process.env),
     ].find(({ profileName }) => profileName === selectedProfile);
+  if (selectedProvider !== undefined && selectedProvider !== appServer.primaryProvider
+    && selectedProvider !== aggregateProviderId && selectedDefinition?.id !== selectedProvider) {
+    throw new Error("目标提供商配置已变化或不可用，请重新选择 Provider");
+  }
   if (selectedProfile !== undefined && selectedDefinition === undefined) {
     throw new Error(`模型 Provider Profile ${selectedProfile} 已不再可用`);
   }
@@ -102,7 +105,7 @@ async function runRemoteCli() {
     socketPath = providerAppServerSocketPath(primarySocketPath, managedProvider.provider);
     leaseProvider = managedProvider.provider;
   }
-  if (selectedProvider !== undefined) {
+  if (selectedProvider === aggregateProviderId) {
     if (!appServer.managedProviders.some(({ provider }) => provider === selectedProvider)) {
       throw new Error("聚合实例尚不可用；需要至少两个已配置的 API Key 切换提供商");
     }
@@ -110,19 +113,17 @@ async function runRemoteCli() {
     leaseProvider = selectedProvider;
     assertAggregateProviderArguments(passthrough);
   }
-  const autoReviewSupported = selectedProvider === undefined
-    || loadAutoReviewProviderPolicy().supportedProviders.has(selectedProvider);
-  const permissionArguments = workspacePermissionArguments(workspace, passthrough, autoReviewSupported);
+  const permissionArguments = workspacePermissionArguments(workspace, passthrough);
   const configuredBinary = stringValue(codex.binary) || "codex";
-  const supervisorActive = selectedDefinition !== undefined || selectedProvider !== undefined
+  const supervisorActive = selectedDefinition !== undefined || selectedProvider === aggregateProviderId
     || await inspectAppServerSupervisor(primarySocketPath) !== undefined;
   try {
     if (supervisorActive) {
       providerLease = await acquireAppServerProviderLease(primarySocketPath, leaseProvider);
     }
-    const modelArguments = selectedProvider === undefined
-      ? []
-      : await aggregateModelArguments(socketPath, configuredBinary, passthrough);
+    const modelArguments = selectedProvider === aggregateProviderId
+      ? await aggregateModelArguments(socketPath, configuredBinary, passthrough)
+      : [];
     const invocation = resolveExecutableInvocation(configuredBinary, [
       "--remote",
       `unix://${socketPath}`,
@@ -161,14 +162,11 @@ function workspaceForWorkdir(workspaces, workdir) {
   return selected;
 }
 
-function workspacePermissionArguments(workspace, passthrough, autoReviewSupported) {
+function workspacePermissionArguments(workspace, passthrough) {
   const overrides = explicitPermissionOverrides(passthrough);
   const permissions = stringValue(workspace?.permissions);
   const approvalPolicy = stringValue(workspace?.approval_policy);
-  const approvalsReviewer = autoReviewSupported ? stringValue(workspace?.approvals_reviewer) : "user";
-  if (!autoReviewSupported && overrides.autoReview) {
-    throw new Error("codexc-aggregate 不支持 auto_review；请使用手动审批 user，移除 --approve-for-me 或 approvals_reviewer=auto_review");
-  }
+  const approvalsReviewer = stringValue(workspace?.approvals_reviewer);
   if (!overrides.approval && approvalPolicy === "untrusted") {
     throw new Error(
       "Workspace 审批策略 untrusted 不能传给当前 Codex CLI；"
@@ -198,7 +196,6 @@ function explicitPermissionOverrides(args) {
   let sandbox = false;
   let approval = false;
   let reviewer = false;
-  let autoReview = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--") break;
@@ -207,7 +204,6 @@ function explicitPermissionOverrides(args) {
       approval = true;
       if (["--approve-for-me", "--not-so-yolo"].includes(argument)) {
         reviewer = true;
-        autoReview = true;
       }
       continue;
     }
@@ -232,17 +228,16 @@ function explicitPermissionOverrides(args) {
     const override = configOverrideArgument(args, index);
     if (!override) continue;
     index += override.consumed - 1;
-    const { key, value } = override;
+    const { key } = override;
     if (key === "sandbox_mode" || key === "default_permissions") {
       sandbox = true;
     }
     if (key === "approval_policy") approval = true;
     if (key === "approvals_reviewer") {
       reviewer = true;
-      autoReview ||= value === "auto_review";
     }
   }
-  return { sandbox, approval, reviewer, autoReview };
+  return { sandbox, approval, reviewer };
 }
 
 function configOverrideArgument(args, index) {

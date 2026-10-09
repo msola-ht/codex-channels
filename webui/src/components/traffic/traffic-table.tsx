@@ -49,7 +49,7 @@ export function TrafficTable({
       return <>{exchange.clientName ?? "—"}</>
     } },
     { id: "model", enableSorting: false, header: () => <>{t("metrics.model")}</>, cell: ({ row: { original: exchange } }) => {
-      return <><TrafficModel provider={["relay.chat", "relay.responses"].includes(exchange.label) ? exchange.account : exchange.label} request={exchange.requestModel} responses={exchange.responseModels} upstream={exchange.upstreamProvider} /></>
+      return <><TrafficModel provider={["relay.chat", "relay.responses"].includes(exchange.label) ? exchange.account : exchange.label} requestPurpose={exchange.requestPurpose} request={exchange.requestModel} responses={exchange.responseModels} upstream={exchange.upstreamProvider} /></>
     } },
     { id: "reasoningEffort", enableSorting: false, header: t("metrics.reasoningEffort"), cell: ({ row }) => row.original.reasoningEffort ?? "—" },
     { id: "protocol", enableSorting: false, header: () => <>{t("traffic.protocol")}</>, cell: ({ row: { original: exchange } }) => {

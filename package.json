@@ -47,6 +47,7 @@
     "scripts/codex-defaults-setup.mjs",
     "scripts/codex-public-cli-contract.mjs",
     "scripts/codex-remote-options.mjs",
+    "scripts/provider-selection.mjs",
     "scripts/codex-remote.mjs",
     "scripts/codex-tool-settings.mjs",
     "scripts/codex-user-config.mjs",

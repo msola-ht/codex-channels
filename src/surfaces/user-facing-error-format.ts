@@ -198,10 +198,6 @@ export function formatSurfaceUserFacingError(
       return "用法：/autoreview [on|off]；只切换当前会话后续轮次的审批方式";
     case "autoreview.unavailable":
       return "当前会话无法切换审批方式；请先用 /autoreview 核对 App Server 的实际状态";
-    case "autoreview.provider-unsupported":
-      return "自动审查仅支持官方 OpenAI 和使用官方模型目录的 Codex 兼容提供商；其他提供商可使用手动审批";
-    case "autoreview.execution-blocked":
-      return "尚未确认当前提供商使用手动审批，已暂停新执行；请用 /autoreview 核对状态，任务空闲后可用 /autoreview off 关闭自动审查";
     case "autoreview.stale-selection":
       return "当前会话审批按钮已失效或会话已变化，请重新发送 /autoreview";
     case "autoreview.update-failed":

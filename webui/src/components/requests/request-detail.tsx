@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { RelayRequestStatus } from "@/components/requests/relay-request-status"
 import { useTranslation } from "@/hooks/use-translation"
 import { useModelTrafficDumpEnabled } from "@/hooks/use-model-traffic-settings"
-import { formatElapsedDuration, formatErrorMessage, formatErrorType, formatTimestamp, getServerTimeZone, isClientInterruption } from "@/lib/format"
+import { autoReviewModelAlias, formatElapsedDuration, formatErrorMessage, formatErrorType, formatTimestamp, getServerTimeZone, isClientInterruption } from "@/lib/format"
 import { trafficDetailPath } from "@/lib/traffic-state"
 import type { RequestRecord } from "@/lib/types"
 
@@ -17,6 +17,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
   const location = useLocation()
   const interrupted = isClientInterruption(record)
   const autoReview = record.requestPurpose === "autoApprovalReview"
+  const modelAlias = autoReviewModelAlias(record.provider, record.requestPurpose)
   const formatCount = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString(language === "zh" ? "zh-CN" : "en-US")
   const uncached = record.inputTokens === null || record.cachedInputTokens === null
     ? null : Math.max(0, record.inputTokens - record.cachedInputTokens)
@@ -24,6 +25,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     [t("requests.recordedAt"), `${formatTimestamp(record.recordedAtMs)} · ${getServerTimeZone()}`],
     [t("requestPurpose.label"), autoReview ? t("requestPurpose.autoApprovalReview") : null],
     [t("metrics.provider"), record.provider],
+    ...(modelAlias === null ? [] : [[t("requestPurpose.modelAlias"), modelAlias]]),
     [t("metrics.recordedStatus"), record.status],
     [t("requestDetail.upstreamProvider"), record.upstreamProvider],
     [t("requestDetail.upstreamAttemptCount"), formatCount(record.upstreamAttemptCount)],

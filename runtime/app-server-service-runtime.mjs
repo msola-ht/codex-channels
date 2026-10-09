@@ -275,7 +275,11 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
               inputItems: validatedDebug.model_traffic_input_items,
               itemMaxBytes: validatedDebug.model_traffic_item_max_bytes,
               retentionDays: validatedDebug.model_traffic_retention_days,
-              label: metricsProvider,
+              // Fixed custom Providers use the primary IPC route, but their
+              // persisted capture identity must describe the actual Provider.
+              label: provider === primaryProvider
+                ? customPrimaryProvider?.id ?? metricsProvider
+                : metricsProvider,
             },
           }),
     };

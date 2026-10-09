@@ -1,6 +1,5 @@
 import { loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { acceleratedServiceTierId } from "../runtime/service-tier.mjs";
-import { autoReviewProviderCapability, loadAutoReviewProviderPolicy } from "../runtime/auto-review-provider-policy.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 import { supportedPublicApprovalPolicies } from "./codex-public-cli-contract.mjs";
 import { projectToolSettings, toolSettingEdits } from "./codex-tool-settings.mjs";
@@ -26,10 +25,8 @@ export async function loadCodexUserSettings({
   environment = process.env,
   createClient = createCodexUserConfigClient,
   primaryProvider = loadPrimaryModelProvider,
-  autoReviewProviderPolicy = loadAutoReviewProviderPolicy,
 } = {}) {
   const provider = primaryProvider(environment);
-  const autoReviewCapability = autoReviewProviderCapability(environment, true, autoReviewProviderPolicy);
   const client = await createClient({ environment });
   try {
     await client.connect();
@@ -37,7 +34,7 @@ export async function loadCodexUserSettings({
       client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: true }),
       provider === "openai" ? client.listModels() : Promise.resolve([]),
     ]);
-    return projectSettings(snapshot, provider, models, autoReviewCapability);
+    return projectSettings(snapshot, provider, models);
   } finally {
     await client.close().catch(() => undefined);
   }
@@ -50,13 +47,12 @@ export async function updateCodexUserSetting(
     expectedVersion,
     createClient = createCodexUserConfigClient,
     primaryProvider = loadPrimaryModelProvider,
-    autoReviewProviderPolicy = loadAutoReviewProviderPolicy,
   } = {},
 ) {
   if (typeof expectedVersion !== "string" || expectedVersion.trim() === "") {
     throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
   }
-  const provider = readPrimaryProviderForChange(input, environment, primaryProvider);
+  const provider = primaryProvider(environment);
   if (["all", "defaults", "preferences", "model-compact", "service-tier"].includes(input?.kind)) {
     assertOfficialDefaults(provider);
   }
@@ -78,8 +74,6 @@ export async function updateCodexUserSetting(
       approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,
       provider,
       models,
-      canEnableAutoReview: input?.kind === "approvals-reviewer" && input.value === "auto_review"
-        ? requireAutoReviewProviderCapability(environment, autoReviewProviderPolicy) : false,
     });
     try {
       await client.writeUserConfigEdits(edits, { expectedVersion });
@@ -113,13 +107,12 @@ export async function previewCodexUserSetting(
     expectedVersion,
     createClient = createCodexUserConfigClient,
     primaryProvider = loadPrimaryModelProvider,
-    autoReviewProviderPolicy = loadAutoReviewProviderPolicy,
   } = {},
 ) {
   if (typeof expectedVersion !== "string" || expectedVersion.trim() === "") {
     throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
   }
-  const provider = readPrimaryProviderForChange(input, environment, primaryProvider);
+  const provider = primaryProvider(environment);
   if (["all", "defaults", "preferences", "model-compact", "service-tier"].includes(input?.kind)) {
     assertOfficialDefaults(provider);
   }
@@ -141,8 +134,6 @@ export async function previewCodexUserSetting(
       approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,
       provider,
       models,
-      canEnableAutoReview: input?.kind === "approvals-reviewer" && input.value === "auto_review"
-        ? requireAutoReviewProviderCapability(environment, autoReviewProviderPolicy) : false,
     });
     return {
       kind: input.kind,
@@ -161,26 +152,7 @@ function codexUserSettingActivation(kind) {
   return "next-thread";
 }
 
-function requireAutoReviewProviderCapability(environment, loadPolicy) {
-  const capability = autoReviewProviderCapability(environment, true, loadPolicy);
-  if (capability.autoReviewUnavailableReason !== null) {
-    throw invalid("value", "auto-review-provider-unavailable", "无法安全读取 Provider 配置，暂时不能开启 Auto-review；可以选择手动审批");
-  }
-  return capability.canEnableAutoReview;
-}
-
-function readPrimaryProviderForChange(input, environment, loadProvider) {
-  try {
-    return loadProvider(environment);
-  } catch (error) {
-    if (input?.kind === "approvals-reviewer" && input.value === "auto_review") {
-      throw invalid("value", "auto-review-provider-unavailable", "无法安全读取 Provider 配置，暂时不能开启 Auto-review；可以选择手动审批");
-    }
-    throw error;
-  }
-}
-
-function projectSettings(snapshot, provider, rawModels, autoReviewCapability) {
+function projectSettings(snapshot, provider, rawModels) {
   const config = record(snapshot.config);
   const models = rawModels.filter((model) => model.available !== false).map(projectModel);
   const configuredModel = optionalString(config.model);
@@ -216,7 +188,7 @@ function projectSettings(snapshot, provider, rawModels, autoReviewCapability) {
     toolSettings: projectToolSettings(config, snapshot.toolConfig),
     provider,
     defaultsEditable: provider === "openai",
-    approvalsReviewer: { ...projectApprovalsReviewer(config, snapshot.approvalsReviewerPolicy), ...autoReviewCapability },
+    approvalsReviewer: projectApprovalsReviewer(config, snapshot.approvalsReviewerPolicy),
     models,
     defaults: {
       model: configuredModel ?? selectedModel?.model ?? null,
@@ -263,7 +235,7 @@ function compactPercent(config) {
   return Math.round(Math.min(100, autoCompactLimit * 100 / contextWindow));
 }
 
-function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, provider, models, canEnableAutoReview }) {
+function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, provider, models }) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("input", "invalid-input", "Codex 用户设置输入必须是对象");
   }
@@ -280,7 +252,7 @@ function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, provi
     case "permissions":
       return permissionEdits(input, config);
     case "approvals-reviewer":
-      return approvalsReviewerEdits(input, config, approvalsReviewerPolicy, canEnableAutoReview);
+      return approvalsReviewerEdits(input, config, approvalsReviewerPolicy);
     case "web-search":
       return webSearchEdits(input);
     case "update-plan":
@@ -314,16 +286,13 @@ function projectApprovalsReviewer(config, policy) {
   return { value, editable: true };
 }
 
-function approvalsReviewerEdits(input, config, policy, canEnableAutoReview) {
+function approvalsReviewerEdits(input, config, policy) {
   if (!approvalsReviewers.has(input.value)) {
     throw invalid("value", "invalid-approvals-reviewer", "审批审核人必须是 user 或 auto_review");
   }
   const current = projectApprovalsReviewer(config, policy);
   if (!current.editable) {
     throw invalid("value", `approvals-reviewer-${current.reason}`, "当前 Auto-review 设置不可修改，请检查 Codex 配置与组织策略");
-  }
-  if (input.value === "auto_review" && canEnableAutoReview !== true) {
-    throw invalid("value", "auto-review-provider-unsupported", "当前主 Provider 不支持 Auto-review；仅支持官方 OpenAI 或复用官方模型目录的 Codex 兼容 Provider");
   }
   return {
     edits: [{ keyPath: "approvals_reviewer", value: input.value }],

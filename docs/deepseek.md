@@ -62,11 +62,21 @@ DS 目录从官方安装脚本提取，不执行下载脚本。当前目录为 `
 所有 DS 账户。切换 Profile 同步目录默认思考等级；原生角色独立保存自己的思考等级，目录更新不覆盖角色选择。
 压缩使用上游默认，不写入独立自动压缩阈值。
 
+DS 自动审查不再受本地审批模型白名单限制；模型仍须符合正常目录与路由要求。
+开放选项不代表全部远端模型已验证兼容，审查失败不会自动放行。
+Codex 0.160.1 的真实 App Server 与 DS 线上模型已观察到 `autoApprovalReview` 完成，
+受审命令 `printf REVIEW_OK` 退出码为 0；独立 API 的虚构提示注入与外传案例返回 `deny`。
+这些样本不证明完整安全性，也不代表真实渠道 UI 已完成验收。默认设置见
+[审批方式](user-guide.md#审批方式手动审批与自动审查auto-review)。
+
 切换账户的共享终端入口：
 
 ```bash
-codexc remote --profile sf-ds-personal
+codexc remote -p ds-personal
 ```
+
+Desktop 可用 `codexc app -p ds-personal`。两个入口也接受已登记的 `sf-ds-personal` Profile 名，
+Remote 保留 `--profile sf-ds-personal`；两个入口默认连接主实例，不根据官方登录状态自动选择 DS。
 
 聊天使用 `/model` 选择 `DS <账户>` 下的模型。同账户切模型保持 Thread，跨账户选择会保留并
 解绑旧 Thread，下一条消息在目标账户新建 Thread，不复制历史。每个账户的 App Server 按需启动，

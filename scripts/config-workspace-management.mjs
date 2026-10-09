@@ -4,7 +4,7 @@ import {
 } from "../runtime/workspace-permission.mjs";
 import { invalidSetting } from "./config-management-error.mjs";
 
-export function projectWorkspaceSettings(document, autoReviewCapability = { canEnableAutoReview: false, autoReviewUnavailableReason: null }) {
+export function projectWorkspaceSettings(document) {
   return (Array.isArray(document.workspaces) ? document.workspaces : [])
     .map((entry) => table(entry))
     .filter((entry) => stringValue(entry.id))
@@ -14,12 +14,11 @@ export function projectWorkspaceSettings(document, autoReviewCapability = { canE
       sandbox: sandboxValue(entry.sandbox),
       approvalPolicy: approvalValue(entry.approval_policy),
       approvalsReviewer: ["user", "auto_review"].includes(entry.approvals_reviewer) ? entry.approvals_reviewer : null,
-      ...autoReviewCapability,
       permissions: optionalString(entry.permissions),
     }));
 }
 
-export function applyWorkspaceSetting(document, input, autoReviewCapability = { canEnableAutoReview: false, autoReviewUnavailableReason: null }) {
+export function applyWorkspaceSetting(document, input) {
   if (input.kind !== "workspace.permissions") return undefined;
   const workspaceId = requiredString(input.workspaceId, "workspaceId", "Workspace ID");
   const workspaces = Array.isArray(document.workspaces) ? document.workspaces : [];
@@ -28,12 +27,6 @@ export function applyWorkspaceSetting(document, input, autoReviewCapability = { 
     throw invalidSetting("workspaceId", "unknown-workspace", `找不到 Workspace：${workspaceId}`);
   }
   const update = normalizeUpdate(input.update);
-  if (update.kind === "approvals-reviewer" && update.value === "auto_review" && autoReviewCapability.autoReviewUnavailableReason !== null) {
-    throw invalidSetting("update.value", "workspace-auto-review-provider-unavailable", "无法安全读取 Provider 配置，暂时不能开启 Auto-review；可以选择手动审批或清除工作区覆盖");
-  }
-  if (update.kind === "approvals-reviewer" && update.value === "auto_review" && autoReviewCapability.canEnableAutoReview !== true) {
-    throw invalidSetting("update.value", "workspace-auto-review-provider-unsupported", "没有支持 Auto-review 的 Provider；仅支持官方 OpenAI 或复用官方模型目录的 Codex 兼容 Provider");
-  }
   try {
     applyWorkspacePermissionUpdate(entry, update);
   } catch (error) {
@@ -43,7 +36,7 @@ export function applyWorkspaceSetting(document, input, autoReviewCapability = { 
     throw error;
   }
   return {
-    value: projectWorkspaceSettings(document, autoReviewCapability).find((workspace) => workspace.id === workspaceId),
+    value: projectWorkspaceSettings(document).find((workspace) => workspace.id === workspaceId),
     activation: "reload",
   };
 }

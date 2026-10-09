@@ -12,6 +12,16 @@ export function isClinePassProvider(provider: string | null | undefined): boolea
   return provider === "clp" || /^clp-[a-z0-9_-]{1,32}$/.test(provider ?? "")
 }
 
+/** 审查显示别名只用于呈现，不改写请求、筛选或指标模型。 */
+export function autoReviewModelAlias(provider: string | null | undefined, purpose: string | null | undefined): string | null {
+  if (purpose !== "autoApprovalReview") return null
+  if (isClinePassProvider(provider)) return "clp-auto-review"
+  if (provider === "deepseek" || /^ds-[a-z0-9_-]{1,32}$/.test(provider ?? "")) return "deepseek-auto-review"
+  if (provider === "ocg" || /^ocg-[a-z0-9_-]{1,32}$/.test(provider ?? "")) return "ocg-auto-review"
+  if (provider === "ccg" || /^ccg-[a-z0-9_-]{1,32}$/.test(provider ?? "")) return "ccg-auto-review"
+  return provider && provider !== "openai" ? `${provider}-auto-review` : null
+}
+
 export function formatModelName(model: string | null | undefined, provider: string | null | undefined): string | null {
   return isClinePassProvider(provider) ? model?.replace(/^cline-pass\//, "") ?? null : model ?? null
 }

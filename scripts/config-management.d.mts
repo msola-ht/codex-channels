@@ -74,8 +74,6 @@ export interface GatewaySettings {
     sandbox: "read-only" | "workspace-write" | "danger-full-access" | null;
     approvalPolicy: "untrusted" | "on-request" | "never" | null;
     approvalsReviewer: "user" | "auto_review" | null;
-    canEnableAutoReview: boolean;
-    autoReviewUnavailableReason: "provider-config-unavailable" | null;
     permissions: string | null;
   }>;
   channels: Array<{
@@ -164,7 +162,6 @@ export function updateGatewaySetting(
     writeConfig?: (configPath: string, document: unknown) => void;
     writeProxyConfig?: (configPath: string, content: string, snapshot: import("../runtime/codex-proxy-env.mjs").CodexProxySnapshot) => void;
     skipBackup?: boolean;
-    autoReviewProviderPolicy?: typeof import("../runtime/auto-review-provider-policy.mjs").loadAutoReviewProviderPolicy;
   },
 ): {
   kind: GatewaySettingInput["kind"];

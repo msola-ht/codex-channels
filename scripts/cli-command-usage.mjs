@@ -6,7 +6,7 @@ export const desktopAppCommandUsage = `用法：codexc app [--provider <Provider
       codexc app status [--provider <Provider ID>] [--json]
 
   不带子命令             启动 Desktop App；首次使用确认后自动启用共享
-  -p, --provider ID     仅本次选择完整 Provider ID 或 agg；省略时使用主 OpenAI
+  -p, --provider ID     选择完整 Provider ID 或已配置的 sf- 名称；聚合用 agg / sf-agg，省略连接主实例
   enable [--port 端口]   单独启用共享或指定桥端口，并重启 App Server 服务
   disable                禁用共享连接并重启 App Server 服务
   status                 只读检查 Desktop、配置和所选 Provider 连接状态

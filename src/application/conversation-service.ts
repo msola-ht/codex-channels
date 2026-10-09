@@ -1178,9 +1178,6 @@ export class ConversationService implements
           { reason: "stale-selection" },
         );
       }
-      if (update.kind === "approvals-reviewer" && update.value === "auto_review" && !this.router.hasAutoReviewProvider()) {
-        throw new UserFacingError("autoreview.provider-unsupported", "当前配置没有支持自动审查的 Provider，不能开启工作区默认自动审查");
-      }
       return this.workspacePermissions!.updateWorkspacePermissions(
         workspaceId,
         update,
@@ -1200,9 +1197,6 @@ export class ConversationService implements
         throw new UserFacingError("autoreview.stale-selection", "当前会话已变化，请重新发送 /autoreview");
       }
       if (!state.threadId) throw new UserFacingError("conversation.missing", "当前没有已绑定的会话");
-      if (enabled && !this.router.isAutoReviewSupported(this.router.modelSettingsForThread(state.threadId)?.modelProvider)) {
-        throw new UserFacingError("autoreview.provider-unsupported", "当前会话的 Provider 不支持自动审查，请使用人工审批");
-      }
       this.requireIdle(target);
       if (this.transfers?.hasPendingInteraction(state.threadId)) {
         throw new UserFacingError("conversation.busy", "当前会话有待处理审批，请先处理审批", { reason: "pending-interaction" });

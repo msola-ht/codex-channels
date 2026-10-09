@@ -114,8 +114,6 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | --- | --- | --- |
 | `autoreview.usage` | 用法：/autoreview [on\|off]；只切换当前会话后续轮次的审批方式 | 参数格式错误 |
 | `autoreview.unavailable` | 当前会话无法切换审批方式；请先用 /autoreview 核对 App Server 的实际状态 | 更新端口不可用，实际审批方式未知或为只读的 `guardian_subagent` |
-| `autoreview.provider-unsupported` | 自动审查仅支持官方 OpenAI 和使用官方模型目录的 Codex 兼容提供商；其他提供商可使用手动审批 | 当前 Thread Provider 不支持开启自动审查，或工作区没有可使用自动审查的 Provider |
-| `autoreview.execution-blocked` | 尚未确认当前提供商使用手动审批，已暂停新执行；请用 /autoreview 核对状态，任务空闲后可用 /autoreview off 关闭自动审查 | 不支持自动审查的 Provider 尚未确认使用 `user`，不得继续发送执行请求 |
 | `autoreview.stale-selection` | 当前会话审批按钮已失效或会话已变化，请重新发送 /autoreview | 按钮过期、已使用或原 Thread 绑定已变化 |
 | `autoreview.update-failed` | 当前会话审批方式更新请求未成功；请用 /autoreview 核对实际状态后再决定是否重试 | RPC 拒绝或更新请求失败，不自动重试 |
 | `autoreview.update-unconfirmed` | 尚未确认当前会话审批方式更新结果；请求不会自动重试，请用 /autoreview 核对实际状态 | 未取得匹配的权威设置通知，或确认期间连接中断、Thread 失效、实际设置不可确认；不能推断已成功或未修改 |

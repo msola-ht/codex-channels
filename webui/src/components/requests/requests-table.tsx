@@ -171,6 +171,7 @@ export function RequestsTable({
         <span className="flex items-center gap-2 whitespace-nowrap">
           <TrafficModel
             provider={row.original.provider}
+            requestPurpose={row.original.requestPurpose}
             upstream={row.original.upstreamProvider}
             request={row.original.requestModel}
             responses={row.original.responseModel === null || row.original.responseModel === undefined ? [] : [row.original.responseModel]}

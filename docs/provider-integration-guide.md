@@ -50,7 +50,8 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账�
 
 `profileName` 必须使用项目受管的 `sf-` 前缀，`profileFileName` 必须由
 `${profileName}.config.toml` 派生；`codexc remote`、原生 `codex --profile` 和磁盘文件不得再定义别名。
-注册后自动获得：watcher 目录路径、`codexc remote --profile <profileName>` 规范名称、
+注册后自动获得：watcher 目录路径、Remote / Desktop 的 `-p <Provider ID>` 与 `-p <profileName>` 选择、
+`codexc remote --profile <profileName>` 规范名称、
 文件布局、`/model` 的 Provider 选项、App Server 启动参数。
 Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义展开为运行时注册表；Bootstrap
 按账户适配器创建账户窄适配器，并以精确 Provider ID 登记。未知能力和
@@ -182,7 +183,7 @@ codexc doctor
 
 - `/model` 能看到带新 Provider 前缀的模型，并可按序号选择；
 - 新会话、同 Provider 历史 Thread、跨 Provider 新建 Thread 的模型与思考等级符合预期；
-- `codexc remote --profile sf-<Provider ID>` 能拉起隔离 App Server 并共享会话；
+- `codexc remote -p <Provider ID>` 能拉起隔离 App Server 并共享会话；
 - `/usage` 按账户形态展示余额或配额窗口与本机 Token 用量；
 - 修改默认模型/思考等级后，watcher 校验通过并定向应用到受影响且已启用的 Provider；原生客户端租约或权威活动 Thread 会推迟应用；
   设置应用后 Gateway 同步刷新受管模型目录与默认模型，已有 Thread 和手动选择保持不变；
@@ -247,7 +248,7 @@ Windows 的主配置允许上游沙箱只读访问，其所有权与写入完整
 渠道启动通知同时标注“OpenAI 官方未登录”并给出 `codex login` 或 `/model` 的选择提示；已有官方
 Thread 不自动迁移 Provider，若 Turn 返回结构化 `unauthorized`，完成卡片按 OpenAI 官方与其他
 Provider 分别提示重新登录、改选第三方或更新对应凭据。
-未绑定 Thread 且没有手动选择时，只有一个可选第三方 Provider 就自动使用它的 Profile 默认模型，
+渠道未绑定 Thread 且没有手动选择时，只有一个可选第三方 Provider 就自动使用它的 Profile 默认模型，
 不需要另设 Gateway 默认模型；状态、模型菜单和创建 Thread 使用同一提供商与模型。
 普通消息及 Goal 查询/设置/清除、Review、Compact、Fork 的自动建会话入口均遵循该规则，
 先执行这些命令不会把后续消息绑定回未登录的官方 Provider。
@@ -257,9 +258,13 @@ CCG 或 CLP 时使用该家注册表标记的默认账户，混合其他 Provide
 已有 Thread 保留自身 Provider，不因官方退出登录而自动迁移。
 同一 Provider 内选模型只标记模型待生效；只有实际离开旧 Provider 的 Thread 才提示创建新 Session，
 目标 Thread 建立后该提示消失。
-`codexc remote` 未指定 Profile 且官方未登录时，自动连接唯一已配置的第三方实例；多个同一家 DS、
-OCG、CCG 或 CLP 实例且没有混合其他 Provider 时连接该家默认账户，其他多 Provider 配置明确提示指定 `--profile`。
-显式 Profile 和固定模式仍按原配置执行。
+`codexc remote` 与 `codexc app` 默认都连接主实例，不根据官方登录状态自动选择第三方；Remote 显式受管 `--profile` 仍选择对应实例。
+上述自动选择只用于渠道未绑定会话。两个 CLI 入口的 `-p` / `--provider` 均接受已配置的完整
+Provider ID（推荐 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`my-provider`）和注册表中精确登记的
+规范 `sf-*` Profile 名称，不通过剥除前缀推测别名。`agg` 与 `sf-agg` 都选择聚合实例，
+内部 `codexc-aggregate` 不作为公开选择值；任一保留值与注册 Provider 或 Profile 重名时，两种聚合选择均拒绝。
+自定义 `agg` 可明确使用 `sf-custom-agg`。Remote 的 `--profile` 继续用于个人 Profile 或规范受管 Profile，
+与 `-p` / `--provider` 互斥；`--` 后原样透传。Desktop 仍要求主 Provider 为 OpenAI，并限于 macOS / Windows 预览入口。
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
 和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
 `openai`、`ollama`、`lmstudio`、`amazon-bedrock`、DeepSeek 保留命名空间 `deepseek` / `ds-*`、OpenCode Go 保留命名空间
@@ -285,8 +290,10 @@ Gateway 管理的 DeepSeek、OpenCode Go 与自定义 Provider 统一使用一�
 Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort = "medium"`、服务层级、
 `request_max_retries = 1` 和 `stream_max_retries = 0`；受管 Provider 的新 Profile 也写入同一重试
 边界，主 `~/.codex/config.toml` 保持官方配置。
-`codexc remote --profile sf-custom-<Provider ID>`
-使用与原生 Codex 及磁盘文件相同的 Profile 名称连接该隔离实例；渠道 `/model` 复用 Codex 官方模型目录并以精确自定义 Provider ID 展示同名模型，
+`codexc remote -p <Provider ID>` 或 `codexc app -p <Provider ID>` 连接该隔离实例；
+规范 Profile 名称 `sf-custom-<Provider ID>` 也可传给 `-p` / `--provider`，Remote 还可显式使用
+`--profile sf-custom-<Provider ID>`，与原生 Codex 及磁盘文件的命名保持一致。
+渠道 `/model` 复用 Codex 官方模型目录并以精确自定义 Provider ID 展示同名模型，
 跨 Provider 选择沿用现有新 Thread 路由边界。锁定版 App Server 不接受 `--profile`，后台服务会先
 严格校验每个 Profile，再把非敏感字段转换为 `-c` 启动参数；API Key 只进入目标子进程环境，
 不进入命令行。多个切换模式 Provider 通过私有显式注册表同时保留，并使用独立 Socket 与统计代理。

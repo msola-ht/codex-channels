@@ -138,12 +138,12 @@ DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开�
   remote: `${CODEX_REMOTE_USAGE}
 
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
-切换模式可用 --profile sf-ds-<账户>、sf-ocg-<账户>、sf-ccg-<账户> 或
-sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。
-至少两个 API Key 切换提供商已配置时，可用 --provider agg 或 -p agg
-连接聚合实例；不能与 --profile 同用。聚合从服务端读取默认模型，审批 reviewer 使用 user，
-显式 auto_review 会被拒绝。终端退出时释放该实例租约。
--p agg 选择聚合实例；-p <Profile> 等同 --profile <Profile>，例如 -p sf-ds-main。`,
+与 codexc app 使用相同的 -p / --provider 选择：推荐 -p ds-main、-p clp-main 或 -p 自定义Provider-ID，
+也接受已配置的规范 sf- 名称，例如 -p sf-ds-main。底层 Profile 文件名不变。
+至少两个 API Key 切换提供商已配置时，可用 -p agg 或 -p sf-agg 连接聚合实例，
+默认模型从服务端读取。自动审批沿用工作区或显式设置；终端退出时释放实例租约。
+Provider 选择不能与 --profile 同用；个人 Profile 请显式使用 --profile，-- 后参数原样透传。
+不指定 Provider 或 Profile 时连接主实例，不根据登录状态自动选择第三方。`,
   desktop_app: desktopAppCommandUsage,
   install: serviceCommandUsage.install,
   start: serviceCommandUsage.start,

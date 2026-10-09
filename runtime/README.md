@@ -20,7 +20,6 @@
 - `request-timing.mjs` / `request-timing.d.mts`：指标 IPC、存储、CLI 与 WebUI 共用的生成区间校验和观测速度计算；无 I/O、不依赖调试转储。
 - `service-tier.mjs` / `service-tier.d.mts`：Application、CLI 设置与 WebUI 共用的纯加速档位匹配和展示归一；Fast 仅匹配目录的 `fast`/`priority`，Ultrafast 仅匹配 `ultrafast`，返回原始目录 ID，不包含配置写入、功能开关或生命周期操作。
 - `auto-review-metadata.mjs` / `auto-review-metadata.d.mts`：Provider 指标与转储读取共用的自动审查来源、父任务及原始审查身份投影；只接受明确的 `guardian_review` 来源和有界标识，不读取文件或推断缺失归属。
-- `auto-review-provider-policy.mjs` / `auto-review-provider-policy.d.mts`：按已验证的 Provider 模型目录来源统一判定自动审查准入；只允许官方 OpenAI 和复用官方模型目录的自定义 Provider，供设置入口与会话执行门禁共用，不根据模型名称或认证方式推断支持。严格读取用于执行门禁；管理设置投影将读取失败标记为不可用及安全原因，只限制开启，不阻断其他设置或关闭、清除覆盖。
 
 - `openai-credentials.mjs` / `openai-credentials.d.mts`：有界读取当前 Codex Home 登录缓存，仅在账户 ID 与官方额度账户一致时返回 `last_refresh` 凭证刷新时间；不返回凭据、不刷新登录、不读取订阅日期。
 
@@ -157,6 +156,8 @@
   模型代理。App Server 自身发出的账户额度请求不经过 Provider Proxy；Gateway 的系统代理观察器仅
   提示操作者在所有客户端任务结束后重新启动 Gateway 与 App Server，不自动刷新子进程环境。Codex `.env` 和标准代理环境
   变量仍保持最高优先级。CLI 与脚本只负责准备已校验的运行环境和默认 Workspace。
+  固定自定义 Provider 的转储标签使用真实 Provider ID；指标 IPC 仍使用主实例路由，由 Gateway
+  映射为真实身份。历史转储不按当前配置改标，避免把官方或其他旧来源误认为当前提供商。
   受管 Provider 设置应用只刷新目标实例的启动参数与私有环境；释放运行实例前通过临时 Client
   读取全部已加载 Thread 的权威状态，并复核租约与取消。活动任务、原生租约和读取失败均阻止重启；
   临时 Client 复用共享命令解析和进程回收端口，Windows 的 npm 启动脚本与直接可执行文件采用相同连接流程。

@@ -11,7 +11,7 @@ import {
   SseTerminalCollector,
   bodyBufferLimit,
   compactText,
-  createTopLevelStringFieldScanner,
+  createJsonStringFieldScanner,
   decodeUtf8,
   errorText,
   eventTypeOf,
@@ -25,7 +25,7 @@ import {
   responseModelsOf,
   responseStateOf,
   sanitizedHeaders,
-  scanTopLevelStringField,
+  scanJsonStringField,
   splitBuffer,
   splitText,
 } from "./traffic-dump-content.js";
@@ -185,9 +185,9 @@ export class ModelTrafficExchange {
   private readonly responsePayloadParts: TrafficPayloadPart[] = [];
   private readonly sseTerminal = new SseTerminalCollector();
   private readonly requestModelDecoder = new StringDecoder("utf8");
-  private readonly requestModelScanner = createTopLevelStringFieldScanner("model");
+  private readonly requestModelScanner = createJsonStringFieldScanner("model");
   private readonly responseModelDecoder = new StringDecoder("utf8");
-  private readonly responseModelScanner = createTopLevelStringFieldScanner("model");
+  private readonly responseModelScanner = createJsonStringFieldScanner("model");
   private activeWebSocket: {
     id: number;
     session: TrafficDumpSession;
@@ -290,7 +290,7 @@ export class ModelTrafficExchange {
 
   requestChunk(chunk: Buffer): void {
     this.requestBytes += chunk.length;
-    scanTopLevelStringField(this.requestModelScanner, this.requestModelDecoder.write(chunk));
+    scanJsonStringField(this.requestModelScanner, this.requestModelDecoder.write(chunk));
     this.requestBody.append(chunk);
   }
 
@@ -311,7 +311,7 @@ export class ModelTrafficExchange {
 
   responseChunk(chunk: Buffer): void {
     this.responseBytes += chunk.length;
-    scanTopLevelStringField(this.responseModelScanner, this.responseModelDecoder.write(chunk));
+    scanJsonStringField(this.responseModelScanner, this.responseModelDecoder.write(chunk));
     this.sseTerminal.append(chunk);
     if (this.sseTerminal.sawResponseEvent) this.responseIsSse = true;
     this.responseBody.append(chunk);
@@ -489,14 +489,14 @@ export class ModelTrafficExchange {
   private finishRequestModel(): void {
     if (this.requestModelFinished) return;
     this.requestModelFinished = true;
-    scanTopLevelStringField(this.requestModelScanner, this.requestModelDecoder.end());
+    scanJsonStringField(this.requestModelScanner, this.requestModelDecoder.end());
     this.requestModel = this.requestModelScanner.value;
   }
 
   private finishResponseModel(): void {
     if (this.responseModelFinished) return;
     this.responseModelFinished = true;
-    scanTopLevelStringField(this.responseModelScanner, this.responseModelDecoder.end());
+    scanJsonStringField(this.responseModelScanner, this.responseModelDecoder.end());
     if (this.responseModelScanner.value !== undefined) {
       this.responseModels = [this.responseModelScanner.value];
     }
