@@ -271,7 +271,8 @@ function preflight(environment) {
     "-NonInteractive",
     "-Command",
     "$ErrorActionPreference = 'Stop'; Get-Command Register-ScheduledTask,New-ScheduledTaskAction,New-ScheduledTaskTrigger,New-ScheduledTaskPrincipal,New-ScheduledTaskSettingsSet -ErrorAction Stop | Out-Null; $scheduler = New-Object -ComObject Schedule.Service; $scheduler.Connect(); $scheduler.GetFolder('\\') | Out-Null",
-  ], { env: environment, stdio: "ignore", windowsHide: true });
+  ], { env: environment, stdio: "ignore", windowsHide: true, timeout: 10_000 });
+  if (result.error?.code === "ETIMEDOUT") throw new Error("Windows 计划任务预检超过 10 秒，已终止；未执行服务变更");
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error("PowerShell ScheduledTasks 模块或本机任务调度器不可用，无法管理 Windows 后台服务");
@@ -299,7 +300,18 @@ function runTaskPrimitive(action, taskName, environment, definition, preferredPw
     encoding: "utf8",
     env: environment,
     windowsHide: true,
+    timeout: action === "query" ? 5_000 : 15_000,
   });
+  if (result.error?.code === "ETIMEDOUT") {
+    let observed = "无法确认当前状态";
+    if (action !== "query") {
+      try {
+        const task = queryTasks([taskName], environment).get(taskName);
+        observed = task.exists ? `当前计划任务状态=${task.state}` : "当前计划任务不存在";
+      } catch { /* A failed read cannot establish whether the mutation happened. */ }
+    }
+    throw new Error(`Windows 计划任务操作超时：${action}；${observed}；操作结果未确认，未自动重试。请运行 codexc status 检查服务实际状态`);
+  }
   if (result.error) throw result.error;
   if (result.status !== 0) {
     const detail = firstNonemptyLine(result.stderr) || `exit=${result.status ?? 1}`;

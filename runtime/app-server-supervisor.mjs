@@ -298,7 +298,10 @@ export class AppServerSupervisorOwner {
         });
         if (!controller.signal.aborted) socket.end(`${JSON.stringify({ version: protocolVersion,
           settingsProtocolVersion: providerSettingsProtocolVersion, ok: true, provider: request.provider, ...result })}\n`);
-      } catch {
+      } catch (error) {
+        const code = typeof error?.code === "string" && /^[A-Z][A-Z0-9_]{1,40}$/u.test(error.code)
+          ? error.code : "PROVIDER_SETTINGS_FAILED";
+        console.error(JSON.stringify({ event: "provider-settings-apply-failed", provider: request.provider, code }));
         if (!socket.destroyed) socket.end(`${JSON.stringify({ version: protocolVersion,
           settingsProtocolVersion: providerSettingsProtocolVersion, ok: false, provider: request.provider })}\n`);
       } finally {
@@ -993,16 +996,24 @@ async function windowsAppServerProxyAcceptsWebSocket(socketPath) {
     handshakeTimeout: 1_500,
     createConnection: () => connection,
   });
-  return new Promise((resolveCheck) => {
+  return new Promise((resolveCheck, rejectCheck) => {
     let settled = false;
+    // ProxyDuplex is not a net.Socket: its setTimeout does not run a timer.
+    const timer = setTimeout(() => finish(false), 1_500);
     const finish = (healthy) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       socket.removeAllListeners();
       socket.once("error", () => undefined);
       socket.terminate();
       connection.destroy();
-      void stopProxyChild(child).then(() => resolveCheck(healthy));
+      void stopProxyChild(child).then(() => resolveCheck(healthy), (error) => {
+        // Cleanup failure is observable, but must not keep the checking CLI alive.
+        child.stderr.destroy();
+        child.unref();
+        rejectCheck(error);
+      });
     };
     socket.once("open", () => finish(true));
     socket.once("error", () => finish(false));
@@ -1058,7 +1069,7 @@ class AppServerProxyDuplex extends Duplex {
 }
 
 async function stopProxyChild(child) {
-  if (child.exitCode !== null) return;
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
   child.stdin.end();
   if (await waitForChildExit(child, 1_000)) return;
   await terminateChildProcess(child, { gracePeriodMs: 0, forcePeriodMs: 1_000 });

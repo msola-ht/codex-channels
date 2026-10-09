@@ -1,4 +1,4 @@
-import { execFile, spawnSync } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { closeSync, existsSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import {
   inspectAppServerSupervisor,
 } from "../runtime/app-server-supervisor.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
+import { childProcessIsRunning, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir } from "./package-path.mjs";
@@ -60,7 +61,7 @@ export function inspectManagedServiceStatus({
 export async function inspectManagedServiceStatusAsync({
   environment = process.env,
   platform = process.platform,
-  run = runServiceCommand,
+  run = platform === "win32" ? runWindowsServiceStatusCommand : runServiceCommand,
   target = "all",
   userId = typeof process.getuid === "function" ? process.getuid() : undefined,
 } = {}) {
@@ -231,6 +232,71 @@ const runServiceCommand = async (command, args, options) => {
     }));
   return result;
 };
+
+function runWindowsServiceStatusCommand(command, args, options) {
+  // Allow the 5s task query, up to four 2.1s ACL reads, concurrent 2s host
+  // requests and the optional relay config read to finish before the outer cap.
+  const timeoutMs = 20_000;
+  const maximumBytes = 1_024 * 1_024;
+  return new Promise((resolveResult) => {
+    const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+    const stdout = [];
+    const stderr = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let settled = false;
+    let stopping = false;
+    const finish = (error, status = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveResult({
+        error,
+        status,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+      });
+    };
+    const stop = async (error) => {
+      if (settled || stopping) return;
+      stopping = true;
+      clearTimeout(timer);
+      try {
+        // This PID belongs only to the status query, never a managed service.
+        if (!childProcessIsRunning(child)) {
+          throw new Error("状态查询主进程已退出，无法确认持有管道的后代进程已退出");
+        }
+        await terminateChildProcess(child, { gracePeriodMs: 0, forcePeriodMs: 1_000 });
+        finish(error);
+      } catch (cause) {
+        // Failed cleanup must not leave callers waiting on inherited pipes.
+        child.stdout.destroy();
+        child.stderr.destroy();
+        child.unref();
+        finish(new Error(`Windows 服务状态查询进程树回收失败，退出未确认：pid=${child.pid}`, { cause }));
+      }
+    };
+    const timer = setTimeout(() => {
+      void stop(Object.assign(new Error("Windows 服务状态查询超过 20 秒，已终止查询进程树"), { code: "ETIMEDOUT" }));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      if (stopping) return;
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > maximumBytes) {
+        void stop(Object.assign(new Error("Windows 服务状态查询输出超过上限"), { code: "ENOBUFS" }));
+      } else stdout.push(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      if (stopping) return;
+      stderrBytes += chunk.length;
+      if (stderrBytes > maximumBytes) {
+        void stop(Object.assign(new Error("Windows 服务状态查询错误输出超过上限"), { code: "ENOBUFS" }));
+      } else stderr.push(chunk);
+    });
+    child.once("error", (error) => { if (!stopping) finish(error); });
+    child.once("close", (status) => { if (!stopping) finish(undefined, status); });
+  });
+}
 
 function parseWindowsServiceResult(result) {
   if (result.error) throw result.error;

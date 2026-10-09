@@ -138,6 +138,7 @@
   变量仍保持最高优先级。CLI 与脚本只负责准备已校验的运行环境和默认 Workspace。
   受管 Provider 设置应用只刷新目标实例的启动参数与私有环境；释放运行实例前通过临时 Client
   读取全部已加载 Thread 的权威状态，并复核租约与取消。活动任务、原生租约和读取失败均阻止重启；
+  临时 Client 复用共享命令解析和进程回收端口，Windows 的 npm 启动脚本与直接可执行文件采用相同连接流程。
   已开始释放后完成目标恢复，恢复失败保留重试意图并如实标记未运行；原本未运行实例只刷新材料。
   账户拓扑变化仍要求显式服务管理。
   宿主仅在内存持有管理标记、实际 Profile 与模型目录内容的已应用指纹及该代默认模型；Gateway 重建时可重新核对，
@@ -200,7 +201,7 @@
 - `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号、
   按温和终止、强制终止和有限终态等待关闭单个子进程；显式注册的 Unix 独立进程组用于 Desktop
   Host 及其原生子进程的共同终止，其他子进程仍按原 PID 处理。Windows 对调用方精确持有的 PID 使用系统
-  `taskkill.exe /T` 终止该子进程树，避免批处理 Shim 退出后遗留 Codex 后代，且不扫描或结束其他 Codex
+  `taskkill.exe /T` 终止该子进程树，单次命令最多 2 秒，超时拒绝确认完成；避免批处理 Shim 退出后遗留 Codex 后代，且不扫描或结束其他 Codex
   进程；前台 `codexc run` 的父子 Node 进程先通过仅父子可用的 IPC 请求正常关闭 Gateway、Supervisor
   和私有端点，超时或 IPC 不可用时才回到精确 PID 树终止；多个 Windows Console 信号处理器并发终止
   同一进程树时，以精确 PID 已不存在作为完成结果；
@@ -256,7 +257,7 @@
   微信配置/凭据事务串行写入。
 - `windows-dpapi.mjs` / `windows-dpapi.d.mts` / `windows-dpapi.ps1`：通过 PowerShell 7 调用
   `ProtectedData` 的 `CurrentUser` 作用域保护和解保护小型二进制主密钥；只接受 Base64 JSON stdin/stdout，
-  不把输入或底层异常写入日志。
+  单次调用最多 5 秒，继承调用方明确传入的环境，不把输入或底层异常写入日志。
 - `windows-secure-record.mjs` / `windows-secure-record.d.mts`：Windows 版本化安全凭据记录；每个凭据
   目录持有一个 DPAPI 保护的随机 256-bit 主密钥，记录继续使用随机 IV 的 AES-256-GCM，文件名只含
   记录键摘要，目录和文件同时复用当前 SID 私有 ACL 与原子替换。

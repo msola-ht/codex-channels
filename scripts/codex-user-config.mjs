@@ -85,7 +85,6 @@ export async function createCodexUserConfigClient({
   } = await import("../dist/codex-client/index.js");
   return new CodexAppServerClient(
     new JsonRpcClient(new StdioTransport({
-      codexBinary,
       cwd,
       environment,
       createCodexProcessInvocation: (args) =>
@@ -106,7 +105,6 @@ export async function createSharedCodexUserConfigClient({ environment = process.
   const codexBinary = resolveOptionalExecutable(configuredBinary, environment) ?? configuredBinary;
   const { CodexAppServerClient, JsonRpcClient, createAppServerTransport } = await import("../dist/codex-client/index.js");
   const transport = createAppServerTransport({ kind: "local-app-server", socketPath }, {
-    codexBinary,
     connectTimeoutMs: 3_000,
     createCodexProcessInvocation: (args) => executableInvocation(codexBinary, args, environment),
     terminateCodexProcess: terminateChildProcess,

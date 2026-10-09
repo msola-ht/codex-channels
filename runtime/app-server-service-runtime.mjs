@@ -727,7 +727,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       signal.throwIfAborted();
       const client = new CodexAppServerClient(new JsonRpcClient(createAppServerTransport(
         { kind: "local-app-server", socketPath: targetSocket },
-        { codexBinary: runtime.environment.CODEX_BINARY, connectTimeoutMs: 3_000 },
+        {
+          createCodexProcessInvocation: args => executableInvocation(
+            resolveExecutable(runtime.environment.CODEX_BINARY, runtime.environment), args, runtime.environment,
+          ),
+          terminateCodexProcess: terminateChildProcess,
+          connectTimeoutMs: 3_000,
+        },
       ), 5_000), { sandbox: "read-only" });
       const cancel = () => { void client.close().catch(() => undefined); };
       signal.addEventListener("abort", cancel, { once: true });
@@ -808,7 +814,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     signal.throwIfAborted();
     const client = new CodexAppServerClient(new JsonRpcClient(createAppServerTransport(
       { kind: "local-app-server", socketPath: targetSocket },
-      { codexBinary: runtime.environment.CODEX_BINARY, connectTimeoutMs: 3_000 },
+      {
+        createCodexProcessInvocation: args => executableInvocation(
+          resolveExecutable(runtime.environment.CODEX_BINARY, runtime.environment), args, runtime.environment,
+        ),
+        terminateCodexProcess: terminateChildProcess,
+        connectTimeoutMs: 3_000,
+      },
     ), 5_000), { sandbox: "read-only" });
     const cancel = () => { void client.close().catch(() => undefined); };
     signal.addEventListener("abort", cancel, { once: true });

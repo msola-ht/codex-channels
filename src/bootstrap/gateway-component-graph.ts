@@ -298,7 +298,6 @@ export abstract class GatewayComponentGraph {
         return createAppServerTransport(
           { kind: "local-app-server", socketPath },
           {
-            codexBinary,
             createCodexProcessInvocation,
             terminateCodexProcess: terminateChildProcess,
           },

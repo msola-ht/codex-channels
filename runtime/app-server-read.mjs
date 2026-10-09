@@ -2,7 +2,7 @@ import { createConnection } from "node:net";
 
 import WebSocket from "ws";
 
-import { executableInvocation } from "./executable.mjs";
+import { resolveExecutableInvocation } from "./executable.mjs";
 import { terminateChildProcess } from "./process-lifecycle.mjs";
 
 const defaultTimeoutMs = 3_000;
@@ -35,9 +35,8 @@ export async function readAppServerUserAgent({
   const transport = createAppServerTransport(
     { kind: "local-app-server", socketPath },
     {
-      codexBinary,
       connectTimeoutMs: timeoutMs,
-      createCodexProcessInvocation: (args) => executableInvocation(codexBinary, args),
+      createCodexProcessInvocation: (args) => resolveExecutableInvocation(codexBinary, args),
       terminateCodexProcess: terminateChildProcess,
     },
   );

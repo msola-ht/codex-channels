@@ -155,8 +155,13 @@ function signalWindowsProcessTree(child, force) {
   const result = spawnSync(
     join(systemRoot, "System32", "taskkill.exe"),
     ["/PID", String(child.pid), "/T", ...(force ? ["/F"] : [])],
-    { stdio: "ignore", windowsHide: true },
+    { stdio: "ignore", windowsHide: true, timeout: 2_000 },
   );
+  if (result.error?.code === "ETIMEDOUT") {
+    throw Object.assign(new Error(`Windows 子进程树终止超过 2 秒，尚未确认全部退出：pid=${child.pid}`), {
+      code: "ETIMEDOUT",
+    });
+  }
   if (result.error) throw result.error;
   if (result.status !== 0 && !windowsProcessExists(child.pid)) {
     return true;

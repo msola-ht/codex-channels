@@ -53,7 +53,6 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     const connectProvider = async ({ socketPath, provider }) => {
       await ensureAppServerProvider(runtime.primarySocketPath, provider);
       const transport = createAppServerTransport({ kind: "local-app-server", socketPath }, {
-        codexBinary,
         createCodexProcessInvocation: (values) => executableInvocation(codexBinary, values, environment),
         terminateCodexProcess: terminateChildProcess,
         connectTimeoutMs: 3_000,
