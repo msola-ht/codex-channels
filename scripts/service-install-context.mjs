@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync } from "node:fs";
+import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
@@ -37,6 +37,14 @@ export function resolveServiceInstallContext(
     environment,
   );
   const nodeBinary = realpathSync(nodeExecutable);
+  const configuredCodexHome = stringValue(environment.CODEX_HOME);
+  let codexHome;
+  if (configuredCodexHome) {
+    // Match the locked Codex home-dir resolver: explicit homes must exist and
+    // be directories; freeze their canonical path before service cwd changes.
+    codexHome = realpathSync(configuredCodexHome);
+    if (!statSync(codexHome).isDirectory()) throw new Error("CODEX_HOME 必须指向已存在的目录");
+  }
   const executablePath = uniquePaths([
     dirname(nodeBinary),
     dirname(codexBinary),
@@ -46,6 +54,7 @@ export function resolveServiceInstallContext(
   return {
     cliEntry: join(projectDir, "bin", "codexc.mjs"),
     codexBinary,
+    codexHome,
     executablePath,
     nodeBinary,
     packageDir: projectDir,

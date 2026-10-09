@@ -8,9 +8,8 @@ import type {
 import { BaseTransport } from "./transport.js";
 
 export interface StdioTransportOptions {
-  codexBinary: string;
-  createCodexProcessInvocation?: CreateCodexProcessInvocation;
-  terminateCodexProcess?: TerminateCodexProcess;
+  createCodexProcessInvocation: CreateCodexProcessInvocation;
+  terminateCodexProcess: TerminateCodexProcess;
   cwd: string;
   environment?: NodeJS.ProcessEnv;
   onStderr?: (text: string) => void;
@@ -20,21 +19,22 @@ export class StdioTransport extends BaseTransport {
   readonly kind = "stdio" as const;
   private process: ChildProcessWithoutNullStreams | undefined;
   private lines: Interface | undefined;
+  private closeTask: Promise<void> | undefined;
+  private closing = false;
 
   constructor(private readonly options: StdioTransportOptions) {
     super();
   }
 
   async connect(): Promise<void> {
+    if (this.closeTask) await this.closeTask;
+    if (this.closing && this.process) await this.close();
     if (this.process) {
       return;
     }
+    this.closing = false;
     const args = ["app-server", "--stdio"];
-    const invocation = this.options.createCodexProcessInvocation?.(args) ?? {
-      file: this.options.codexBinary,
-      args,
-      windowsVerbatimArguments: false,
-    };
+    const invocation = this.options.createCodexProcessInvocation(args);
     const child = spawn(invocation.file, invocation.args, {
       cwd: this.options.cwd,
       env: this.options.environment,
@@ -47,10 +47,21 @@ export class StdioTransport extends BaseTransport {
     this.lines.on("line", (line) => { if (this.process === child) this.emitMessage(line); });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => this.options.onStderr?.(chunk));
-    child.on("error", (error) => { if (this.process === child) this.emitClose(error); });
+    child.on("error", (error) => {
+      if (this.process !== child) return;
+      if (child.pid === undefined) {
+        this.process = undefined;
+        this.lines?.close();
+        this.lines = undefined;
+      }
+      if (!this.closing) this.emitClose(error);
+    });
     child.on("exit", (code, signal) => {
       if (this.process !== child) return;
-      this.emitClose(new Error(`Codex App Server 已退出：code=${code} signal=${signal}`));
+      this.process = undefined;
+      this.lines?.close();
+      this.lines = undefined;
+      if (!this.closing) this.emitClose(new Error(`Codex App Server 已退出：code=${code} signal=${signal}`));
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -61,7 +72,7 @@ export class StdioTransport extends BaseTransport {
 
   async send(message: string): Promise<void> {
     const child = this.process;
-    if (!child || child.stdin.destroyed) {
+    if (this.closing || !child || child.stdin.destroyed) {
       throw new Error("Codex stdio Transport 尚未连接");
     }
     await new Promise<void>((resolve, reject) => {
@@ -70,41 +81,25 @@ export class StdioTransport extends BaseTransport {
   }
 
   async close(): Promise<void> {
+    if (this.closeTask) return this.closeTask;
+    this.closing = true;
+    const task = Promise.resolve().then(() => this.closeProcess());
+    this.closeTask = task;
+    try {
+      await task;
+    } finally {
+      if (this.closeTask === task) this.closeTask = undefined;
+    }
+  }
+
+  private async closeProcess(): Promise<void> {
     this.lines?.close();
     this.lines = undefined;
     const child = this.process;
-    this.process = undefined;
-    if (!child || child.exitCode !== null) {
-      return;
-    }
-    if (this.options.terminateCodexProcess) {
+    if (!child) return;
+    if (child.exitCode === null && child.signalCode === null) {
       await this.options.terminateCodexProcess(child);
-      return;
     }
-    child.kill("SIGTERM");
-    await waitForExit(child, 5_000);
-    if (child.exitCode === null) {
-      child.kill("SIGKILL");
-      await waitForExit(child, 1_000);
-    }
+    if (this.process === child) this.process = undefined;
   }
-}
-
-function waitForExit(
-  child: ChildProcessWithoutNullStreams,
-  timeoutMs: number,
-): Promise<void> {
-  if (child.exitCode !== null) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      child.off("exit", onExit);
-      resolve();
-    }, timeoutMs);
-    timeout.unref();
-    const onExit = (): void => {
-      clearTimeout(timeout);
-      resolve();
-    };
-    child.once("exit", onExit);
-  });
 }

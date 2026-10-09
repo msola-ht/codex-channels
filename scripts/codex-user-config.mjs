@@ -2,9 +2,9 @@ import { isDeepStrictEqual } from "node:util";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
-  executableInvocation,
   resolveOptionalExecutable,
 } from "../runtime/executable.mjs";
+import { codexProcessInvocation } from "../runtime/owned-process.mjs";
 import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { readGatewayConfig, validateCodexConfigDocument } from "../runtime/gateway-config.mjs";
@@ -78,6 +78,8 @@ export async function createCodexUserConfigClient({
 } = {}) {
   const configuredBinary = stringValue(environment.CODEX_BINARY) || "codex";
   const codexBinary = resolveOptionalExecutable(configuredBinary, environment) ?? configuredBinary;
+  // Metadata-only config/read, config/batchWrite and model/list do not require Provider credentials.
+  // Keep explicit repair available when a private reference is missing or invalid.
   const {
     CodexAppServerClient,
     JsonRpcClient,
@@ -85,11 +87,10 @@ export async function createCodexUserConfigClient({
   } = await import("../dist/codex-client/index.js");
   return new CodexAppServerClient(
     new JsonRpcClient(new StdioTransport({
-      codexBinary,
       cwd,
       environment,
       createCodexProcessInvocation: (args) =>
-        executableInvocation(codexBinary, args, environment),
+        codexProcessInvocation(codexBinary, args, environment),
       terminateCodexProcess: terminateChildProcess,
     })),
     { sandbox: "read-only" },
@@ -106,9 +107,8 @@ export async function createSharedCodexUserConfigClient({ environment = process.
   const codexBinary = resolveOptionalExecutable(configuredBinary, environment) ?? configuredBinary;
   const { CodexAppServerClient, JsonRpcClient, createAppServerTransport } = await import("../dist/codex-client/index.js");
   const transport = createAppServerTransport({ kind: "local-app-server", socketPath }, {
-    codexBinary,
     connectTimeoutMs: 3_000,
-    createCodexProcessInvocation: (args) => executableInvocation(codexBinary, args, environment),
+    createCodexProcessInvocation: (args) => codexProcessInvocation(codexBinary, args, environment),
     terminateCodexProcess: terminateChildProcess,
   });
   return new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });

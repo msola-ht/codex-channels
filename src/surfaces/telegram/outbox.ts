@@ -30,6 +30,7 @@ import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
   createSubagentContactedPresentation,
   createAutoApprovalReviewPresentation,
+  createHookCompletedPresentation,
   isHiddenAutoApprovalReview,
   createSubagentStartedPresentation,
   createTurnCompletedPresentation,
@@ -476,6 +477,12 @@ export class TelegramOutbox {
           ).then(() => undefined),
           false,
         );
+        return;
+      case "hook.completed":
+        this.enqueue(chatId, (signal) => this.sendPanel(
+          chatId, renderTelegramLifecyclePresentation(createHookCompletedPresentation(event)),
+          undefined, true, signal,
+        ).then(() => undefined), true);
         return;
       case "autoApprovalReview.updated": {
         const presentation = createAutoApprovalReviewPresentation(event);

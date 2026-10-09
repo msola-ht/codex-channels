@@ -209,7 +209,7 @@ export function redactProviderSettingsResult(result) {
               ? { action: result.credential.action }
               : {}),
             ...(result.credential.storedAsPlaintext === true ? { storedAsPlaintext: true } : {}),
-            ...(result.credential.destination === "private-profile" || result.credential.destination === "main-config"
+            ...(result.credential.destination === "private-profile" || result.credential.destination === "private-credential"
               ? { destination: result.credential.destination }
               : {}),
           },

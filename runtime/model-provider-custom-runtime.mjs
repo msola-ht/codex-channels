@@ -1,5 +1,6 @@
 import { isResponsesProvider, responsesModelSettings, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, unlinkSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
@@ -14,12 +15,13 @@ import {
   record,
 } from "./model-provider-managed-runtime.mjs";
 import {
-  modelProviderBlockEdits,
   thirdPartyProviderRequestMaxRetries,
   thirdPartyProviderStreamMaxRetries,
 } from "./model-provider-profile.mjs";
 import { isOpencodeGoProviderNamespace } from "./opencode-go-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
+import { assertProviderHasNoPlaintextCredentials } from "./provider-file-access.mjs";
+import { decodeProviderCredentialDocument, encodeProviderCredentialDocument, maximumProviderCredentialBytes, providerCredentialMatchesIdentity } from "./provider-credential-document.mjs";
 
 const maximumConfigBytes = 1_048_576;
 export const customPrimaryProviderProfileName = "sf-custom";
@@ -27,6 +29,104 @@ const builtInModelProviderIds = new Set(["openai", "ollama", "lmstudio", "amazon
 const customProviderIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 const customSwitchingRegistryMaximumBytes = 262_144;
 const customSwitchingDefaultReasoningEffort = "medium";
+
+export function customPrimaryProviderCredentialEnvironmentKey(provider, version = randomUUID().replaceAll("-", "")) {
+  if (typeof provider !== "string" || !customProviderIdPattern.test(provider) || typeof version !== "string" || !/^[a-f0-9]{32}$/u.test(version)) throw new Error("自定义主 Provider 凭据标识无效");
+  return `CODEX_CONNECT_CUSTOM_${Buffer.from(provider, "utf8").toString("hex").toUpperCase()}_PRIMARY_${version}_API_KEY`;
+}
+
+export function customPrimaryProviderCredentialPath(environment, provider, environmentKey) {
+  const prefix = customPrimaryProviderCredentialEnvironmentKey(provider, "0".repeat(32)).replace(`${"0".repeat(32)}_API_KEY`, "");
+  const version = typeof environmentKey === "string" && environmentKey.startsWith(prefix)
+    ? environmentKey.slice(prefix.length).replace(/_API_KEY$/u, "") : "";
+  if (!/^[a-f0-9]{32}$/u.test(version) || environmentKey !== `${prefix}${version}_API_KEY`) throw new Error("自定义主 Provider 凭据引用无效");
+  return join(providerStorageRoot(environment), "custom", provider, "primary-credentials", `${version}.json`);
+}
+
+function validateCustomApiKey(apiKey) {
+  if (typeof apiKey !== "string" || apiKey.trim() === "" || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) throw new Error("自定义 Provider API Key 缺失或无效");
+  return apiKey;
+}
+
+function readCustomPrimaryCredential(environment, provider, baseUrl, environmentKey) {
+  let credential;
+  try {
+    credential = decodeProviderCredentialDocument(readPrivateFileSync(customPrimaryProviderCredentialPath(environment, provider, environmentKey), maximumProviderCredentialBytes));
+  } catch {
+    throw new Error("自定义主 Provider 私有凭据无法安全读取；请显式编辑 Provider 重新保存 Key");
+  }
+  if (credential === undefined) {
+    throw new Error("自定义主 Provider 私有凭据格式版本不受支持；请显式编辑 Provider 重新保存 Key");
+  }
+  if (!providerCredentialMatchesIdentity(credential, provider, new URL(validProviderBaseUrl(baseUrl, "自定义主 Provider")).origin)) {
+    throw new Error("自定义主 Provider 私有凭据与 Provider 或上游 Origin 不匹配");
+  }
+  return validateCustomApiKey(credential.apiKey);
+}
+
+/** Management may read the old explicit token only for an authorized edit/switch. */
+export function readCustomPrimaryProviderApiKey(provider, block, environment = process.env) {
+  if (block.experimental_bearer_token !== undefined && block.env_key !== undefined) throw new Error("自定义主 Provider 凭据配置存在歧义");
+  if (block.experimental_bearer_token !== undefined) return validateCustomApiKey(block.experimental_bearer_token);
+  if (typeof block.env_key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(block.env_key)) return undefined;
+  if (block.env_key.startsWith("CODEX_CONNECT_CUSTOM_") && block.env_key.includes("_PRIMARY_")) {
+    return readCustomPrimaryCredential(environment, provider, block.base_url, block.env_key);
+  }
+  return environment[block.env_key] === undefined ? undefined : validateCustomApiKey(environment[block.env_key]);
+}
+
+export function writeCustomPrimaryProviderCredential({ providerId, baseUrl, apiKey, environmentKey }, environment = process.env) {
+  const path = customPrimaryProviderCredentialPath(environment, providerId, environmentKey);
+  if (existsSync(path)) throw new Error("自定义主 Provider 凭据版本已存在，拒绝覆盖");
+  const content = encodeProviderCredentialDocument(providerId,
+    new URL(validProviderBaseUrl(baseUrl, "自定义主 Provider")).origin, validateCustomApiKey(apiKey));
+  if (Buffer.byteLength(content) > maximumProviderCredentialBytes) throw new Error("自定义主 Provider 凭据数据超过读取上限");
+  writePrivateFileAtomicSync(path, content);
+}
+
+export function removeCustomPrimaryProviderCredential(environment, provider, environmentKey) {
+  const path = customPrimaryProviderCredentialPath(environment, provider, environmentKey);
+  try { unlinkSync(path); } catch (error) { if (error?.code !== "ENOENT") throw error; }
+}
+
+/** Explicit Provider deletion; preserve unrelated names and validate every owned revision before removal. */
+export function removeCustomPrimaryProviderCredentials(environment, provider) {
+  const key = customPrimaryProviderCredentialEnvironmentKey(provider, "0".repeat(32));
+  const directory = join(providerStorageRoot(environment), "custom", provider, "primary-credentials");
+  let names;
+  try { names = readdirSync(directory); } catch (error) { if (error?.code === "ENOENT") return; throw error; }
+  const owned = names.filter(name => /^[a-f0-9]{32}\.json$/u.test(name));
+  for (const name of owned) {
+    let content;
+    try { content = decodeProviderCredentialDocument(readPrivateFileSync(join(directory, name), maximumProviderCredentialBytes)); } catch { throw new Error("自定义主 Provider 凭据版本无法安全读取，未执行删除"); }
+    if (content === undefined || typeof content.origin !== "string" || !providerCredentialMatchesIdentity(content, provider, content.origin)) throw new Error("自定义主 Provider 凭据版本无效，未执行删除");
+    validateCustomApiKey(content.apiKey);
+  }
+  for (const name of owned) removeCustomPrimaryProviderCredential(environment, provider, key.replace("0".repeat(32), name.slice(0, 32)));
+}
+
+export function loadConfiguredCustomPrimaryCredential(environment = process.env, primary = loadConfiguredCustomPrimaryModelProvider(environment)) {
+  if (!primary) return undefined;
+  const config = readCustomPrimaryCredentialConfig(environment, primary);
+  const provider = record(record(config.model_providers)[primary.id]);
+  if (provider.env_key === undefined) return undefined;
+  const apiKey = readCustomPrimaryProviderApiKey(primary.id, provider, environment);
+  if (apiKey === undefined) throw new Error("自定义主 Provider 缺少可用的 env_key 凭据");
+  return { environmentKey: provider.env_key, apiKey };
+}
+
+function readCustomPrimaryCredentialConfig(environment, primary) {
+  let config;
+  try { config = record(parse(readCodexConfigFile(join(codexHomePath(environment), "config.toml")))); }
+  catch { throw new Error("Codex 主模型 Provider 凭据配置无法安全读取"); }
+  const provider = record(record(config.model_providers)[primary.id]);
+  assertCustomPrimaryProviderAuthentication(provider);
+  if (config.model_provider !== primary.id || provider.experimental_bearer_token !== undefined
+    || typeof provider.base_url !== "string" || validProviderBaseUrl(provider.base_url, "自定义主 Provider") !== primary.baseUrl) {
+    throw new Error("Codex 主模型 Provider 在凭据读取期间发生变化，请重新读取配置");
+  }
+  return config;
+}
 
 function readPrivateFile(path, maximumBytes = maximumConfigBytes) {
   return readPrivateFileSync(path, maximumBytes);
@@ -89,12 +189,6 @@ export function backupPrimaryProviderCandidates(providers, environment = process
   return candidates;
 }
 
-export function restorePrimaryProviderCandidateEdits(id, environment = process.env) {
-  const provider = record(readPrimaryProviderBackup(environment)[id]);
-  if (typeof provider.base_url !== "string") return undefined;
-  return modelProviderBlockEdits(id, provider);
-}
-
 export function removePrimaryProviderBackupCandidate(id, environment = process.env) {
   const backup = readPrimaryProviderBackup(environment);
   if (!Object.prototype.hasOwnProperty.call(backup, id)) return undefined;
@@ -131,6 +225,7 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
     throw new Error(`Codex 主模型 Provider 不受 Gateway 支持：${id}`);
   }
   const provider = record(providers[id]);
+  assertCustomPrimaryProviderAuthentication(provider);
   if (
     typeof document.openai_base_url === "string"
     && document.openai_base_url.trim() !== ""
@@ -179,21 +274,31 @@ export function customPrimaryProviderProfilePath(environment = process.env, prov
   );
 }
 
+export function assertCustomPrimaryProviderAuthentication(provider) {
+  assertProviderHasNoPlaintextCredentials(provider);
+  if (provider.auth !== undefined || provider.gateway_oauth !== undefined
+    || provider.aws !== undefined || provider.env_http_headers !== undefined) {
+    throw new Error("自定义固定 Provider 不支持 auth、gateway_oauth、aws 或 env_http_headers；请显式重新配置 Provider，原配置保持不变");
+  }
+}
+
 /** Independent API material only; never read Codex OAuth/auth.json for Relay. */
 export function loadConfiguredCustomPrimaryRelayProfile(providerId, environment = process.env) {
   const primary = loadConfiguredCustomPrimaryModelProvider(environment);
   if (primary?.id !== providerId) throw new Error("Relay Provider is not the configured custom primary");
-  const document = record(parse(readCodexConfigFile(join(codexHomePath(environment), "config.toml"))));
+  const document = readCustomPrimaryCredentialConfig(environment, primary);
   const provider = record(record(document.model_providers)[providerId]);
+  if (provider.http_headers !== undefined) {
+    throw new Error("Relay 自定义 Provider 不支持额外 HTTP Header；配置已保留，请显式重新配置 Provider");
+  }
   if (provider.requires_openai_auth === true || provider.env_key !== undefined && provider.experimental_bearer_token !== undefined) {
     throw new Error("Relay requires unambiguous independent API credentials");
   }
-  const apiKey = provider.env_key === undefined ? provider.experimental_bearer_token
-    : typeof provider.env_key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(provider.env_key) ? environment[provider.env_key] : undefined;
+  const apiKey = readCustomPrimaryProviderApiKey(providerId, provider, environment);
   if (typeof apiKey !== "string" || !apiKey.length || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) {
     throw new Error("Relay Provider has no usable independent API credentials");
   }
-  return { ...primary, apiKey };
+  return { ...primary, apiKey, apiKeyEnvironmentKey: provider.env_key };
 }
 
 export function customSwitchingProviderRegistryPath(environment = process.env) {
@@ -403,9 +508,7 @@ function configuredCustomSwitchingProfileFromContent(
     throw new Error(`Codex 自定义切换 Provider ${id} 的 stream_max_retries 无效`);
   }
   const apiKey = provider.experimental_bearer_token;
-  if (typeof apiKey !== "string" || apiKey.trim() === "" || /[\r\n]/u.test(apiKey)) {
-    throw new Error(`Codex 自定义切换 Provider ${id} API Key 缺失或无效`);
-  }
+  validateCustomApiKey(apiKey);
   const name = typeof provider.name === "string" && provider.name.trim() !== ""
     ? provider.name.trim()
     : id;
@@ -484,9 +587,7 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
     baseUrl,
     `Codex 自定义切换 Provider ${provider}`,
   );
-  if (typeof apiKey !== "string" || apiKey.trim() === "" || /[\r\n]/u.test(apiKey)) {
-    throw new Error("自定义 Provider API Key 不能为空");
-  }
+  validateCustomApiKey(apiKey);
   if (typeof name !== "string" || name.trim() === "") {
     throw new Error("自定义 Provider 显示名称不能为空");
   }

@@ -12,6 +12,7 @@ import {
 import { assertSynchronousChildSuccess } from "../runtime/process-lifecycle.mjs";
 import { resolveExecutable } from "../runtime/executable.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
+import { serviceStopTimeoutSeconds } from "../runtime/shutdown-budget.mjs";
 import { waitForSelectedRelay } from "./service-selection.mjs";
 import { packageDir } from "./package-path.mjs";
 import {
@@ -420,6 +421,8 @@ function renderWindowsDefinition(service, identifier, context, projectDir) {
     CODEX_CONNECT_HOME: context.runtime.dataDir,
     CODEX_CONNECT_CONFIG_FILE: context.runtime.configPath,
     PATH: [context.executablePath, dirname(context.pwshBinary)].join(delimiter),
+    CODEX_BINARY: context.codexBinary,
+    ...(context.codexHome ? { CODEX_HOME: context.codexHome } : {}),
     ...(service.target === "app-server"
       ? { CODEX_CONNECT_SERVICE_ROLE: "app-server" }
       : {}),
@@ -427,7 +430,6 @@ function renderWindowsDefinition(service, identifier, context, projectDir) {
       ? {
           CODEX_CONNECT_SERVICE_ROLE: "gateway",
           CODEX_CONNECT_GATEWAY_SUPERVISED: "1",
-          CODEX_BINARY: context.codexBinary,
         }
       : {}),
   };
@@ -499,6 +501,7 @@ function renderSystemdTemplate(template, context) {
   const directiveValues = {
     WORKDIR: context.workdir,
     CONFIG_DIR: context.runtime.dataDir,
+    STOP_TIMEOUT_SECONDS: String(serviceStopTimeoutSeconds),
   };
   const environmentValues = {
     CONFIG_DIR_ENV: context.runtime.dataDir,
@@ -527,6 +530,7 @@ function renderLaunchdTemplate(template, context) {
     NODE_BINARY: context.nodeBinary,
     CODEX_BINARY: context.codexBinary,
     LAUNCHD_PATH: context.executablePath,
+    STOP_TIMEOUT_SECONDS: String(serviceStopTimeoutSeconds),
   }, xmlEscape);
 }
 

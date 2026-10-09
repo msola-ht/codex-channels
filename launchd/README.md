@@ -23,10 +23,17 @@ App Server 与全部私有 WebSocket 就绪，避免登录或开机并发加载�
 `webui`、`relay` 或 `all`；WebUI 安装时只生成 plist 不自动启动，已安装时纳入各操作的 `all`。
 不写目标时，启停、重启和状态默认 `all`，日志默认 `gateway`。
 
-验证模板：
+四份 plist 的 `ExitTimeOut` 都从共享停止预算渲染为 50 秒，给内部 30 秒清理及子服务
+35 秒退出等待留出余量；停止控制器在 `bootout` 后也最多等待 50 秒确认 Job 卸载。
+不依赖 macOS 版本各自的默认退出期限。升级源码或全局命令不会重写已安装 plist，
+仅重启也不会加载新模板；需要在本机运行 `codexc install` 重新生成定义并卸载、加载核心 Job。
+该操作会重启核心服务，并只启动已启用的 Relay；WebUI 运行状态保留。
+已加载的 WebUI 需随后执行 `codexc restart webui` 才会加载新 plist，首次卸载仍沿用旧 Job 的期限。
+
+验证安装管理接口已渲染的 plist（模板的整数占位符尚不能直接用于 plist 校验）：
 
 ```bash
-plutil -lint launchd/*.plist.template
+plutil -lint "$HOME/Library/LaunchAgents/"com.hegenai.codex-*.plist
 ```
 
 Relay 默认禁用；`all` 启动仅纳入已安装且启用的 Relay，停止先关闭 Relay，再关闭 Gateway。

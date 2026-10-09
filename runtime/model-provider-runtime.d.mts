@@ -47,6 +47,7 @@ export function validateCustomPrimaryModelProviderId(
   id: unknown,
   environment?: NodeJS.ProcessEnv,
 ): string | null;
+export function assertCustomPrimaryProviderAuthentication(provider: Record<string, unknown>): void;
 export function listCustomPrimaryProviderCandidates(
   providers: Record<string, unknown> | undefined,
 ): string[];
@@ -60,10 +61,6 @@ export function backupPrimaryProviderCandidates(
   providers: Record<string, unknown> | undefined,
   environment?: NodeJS.ProcessEnv,
 ): string[];
-export function restorePrimaryProviderCandidateEdits(
-  id: string,
-  environment?: NodeJS.ProcessEnv,
-): Array<{ keyPath: string; value: unknown }> | undefined;
 export function removePrimaryProviderBackupCandidate(
   id: string,
   environment?: NodeJS.ProcessEnv,
@@ -221,6 +218,13 @@ export interface ConfiguredCustomPrimaryModelProvider {
 }
 
 export const customPrimaryProviderProfileName: "sf-custom";
+export function customPrimaryProviderCredentialEnvironmentKey(provider: string, version?: string): string;
+export function customPrimaryProviderCredentialPath(environment: NodeJS.ProcessEnv | undefined, provider: string, environmentKey: string): string;
+export function readCustomPrimaryProviderApiKey(provider: string, block: Record<string, unknown>, environment?: NodeJS.ProcessEnv): string | undefined;
+export function writeCustomPrimaryProviderCredential(credential: { providerId: string; baseUrl: string; apiKey: string; environmentKey: string }, environment?: NodeJS.ProcessEnv): void;
+export function removeCustomPrimaryProviderCredential(environment: NodeJS.ProcessEnv | undefined, provider: string, environmentKey: string): void;
+export function removeCustomPrimaryProviderCredentials(environment: NodeJS.ProcessEnv | undefined, provider: string): void;
+export function loadConfiguredCustomPrimaryCredential(environment?: NodeJS.ProcessEnv, primary?: ConfiguredCustomPrimaryModelProvider): { environmentKey: string; apiKey: string } | undefined;
 export function customPrimaryProviderProfilePath(
   environment: NodeJS.ProcessEnv | undefined,
   provider: string,
@@ -314,5 +318,7 @@ export function loadConfiguredProviderCredential(
   provider: ManagedModelProviderId,
   environment?: NodeJS.ProcessEnv,
 ): { environmentKey: string; apiKey: string };
+
+export function loadConfiguredManagedPrimaryCredential(environment?: NodeJS.ProcessEnv): { environmentKey: string; apiKey: string } | undefined;
 
 export function listRelayProviderIds(environment?: NodeJS.ProcessEnv): string[];

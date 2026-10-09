@@ -9,6 +9,7 @@ import {
   conversationCommandHelpLines,
 } from "../conversation-command-help.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
+import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 import {
   createStartupPresentation,
   createSubagentCompletedPresentation,
@@ -117,13 +118,14 @@ export function formatWeixinCommandText(
     .replace(/\r\n/gu, "\n")
     .replace(/\n{3,}/gu, "\n\n")
     .split("\n");
-  let fenced = false;
+  let fence: MarkdownFence | undefined;
   return lines.map((line, index) => {
-    if (line.trimStart().startsWith("```")) {
-      fenced = !fenced;
+    const previous = fence;
+    fence = advanceMarkdownFence(fence, line);
+    if (previous || fence) {
       return line;
     }
-    if (!fenced && options.structuredFields === true) {
+    if (options.structuredFields === true) {
       const heading = /^#{1,6}\s+(.+)$/u.exec(line);
       if (heading) {
         return `**${heading[1]}**`;
@@ -146,12 +148,11 @@ export function formatWeixinCommandText(
     }
     const next = lines[index + 1];
     if (
-      fenced
-      || line.length === 0
+      line.length === 0
       || isMarkdownBlockLine(line)
       || next === undefined
       || next.length === 0
-      || next.trimStart().startsWith("```")
+      || advanceMarkdownFence(undefined, next) !== undefined
     ) {
       return line;
     }

@@ -49,6 +49,7 @@ type CoreNotification = Extract<
   {
     method:
       | "turn/started"
+      | "hook/completed"
       | "thread/goal/updated"
       | "thread/goal/cleared"
       | "thread/reverted"
@@ -85,6 +86,7 @@ const routingMethods = {
 } as const satisfies Record<string, RoutingNotification["method"]>;
 
 const coreMethods = {
+  hookCompleted: "hook/completed",
   turnStarted: "turn/started",
   goalUpdated: "thread/goal/updated",
   goalCleared: "thread/goal/cleared",
@@ -278,6 +280,8 @@ export function toConversationInputEvent(
   notification: RpcNotification,
 ): ConversationInputEvent | undefined {
   switch (notification.method) {
+    case coreMethods.hookCompleted:
+      return toHookCompletedEvent(notification.params);
     case coreMethods.turnStarted:
       return toTurnStartedEvent(notification.params);
     case coreMethods.goalUpdated:
@@ -329,6 +333,23 @@ export function toConversationInputEvent(
     default:
       return undefined;
   }
+}
+
+function toHookCompletedEvent(value: unknown): ConversationInputEvent | undefined {
+  type HookRun = Extract<ServerNotification, { method: "hook/completed" }>["params"]["run"];
+  const params = asRecord(value);
+  const threadId = nonEmptyString(params?.threadId);
+  const run = asRecord(params?.run);
+  const id = nonEmptyString(run?.id);
+  const eventName = run?.eventName;
+  const status = run?.status;
+  const events = ["preToolUse", "permissionRequest", "postToolUse", "preCompact", "postCompact",
+    "sessionStart", "sessionEnd", "userPromptSubmit", "subagentStart", "subagentStop", "stop", "interrupt"] as const satisfies readonly HookRun["eventName"][];
+  if (!threadId || !id
+    || typeof eventName !== "string" || !events.some((event) => event === eventName)
+    || (status !== "completed" && status !== "failed" && status !== "blocked" && status !== "stopped")) return undefined;
+  // Raw status messages, hook output and source paths can contain credentials or private data.
+  return { type: "hook.completed", threadId, hook: { id, eventName, status } };
 }
 
 function toThreadNameUpdatedEvent(value: unknown): ConversationInputEvent | undefined {

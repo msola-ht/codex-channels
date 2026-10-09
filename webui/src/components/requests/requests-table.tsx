@@ -13,7 +13,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
-import { FastBadge } from "@/components/metrics/service-tier"
+import { AccelerationBadge } from "@/components/metrics/service-tier"
 import { InputTokenTooltip, OutputTokenTooltip } from "@/components/metrics/token-tooltip"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import { RelayRequestStatus } from "@/components/requests/relay-request-status"
@@ -178,7 +178,7 @@ export function RequestsTable({
           />
           {(row.original.upstreamAttemptCount ?? 0) > 1 ? <Badge variant="secondary" size="sm"
             title={t("requestDetail.attemptHint")}>{t("requestDetail.attemptBadge", { count: row.original.upstreamAttemptCount! })}</Badge> : null}
-          <FastBadge tier={row.original.requestServiceTier} source="request" responseTier={row.original.serviceTier} />
+          <AccelerationBadge tier={row.original.requestServiceTier} source="request" responseTier={row.original.serviceTier} />
         </span>
       ),
     },

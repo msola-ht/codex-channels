@@ -28,6 +28,8 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 ## 3. 初始化与配置
 
+所有 CLI 命令在结束或失败时显示“命令总耗时”，单位为秒并保留两位小数。计时统一写入 stderr，stdout 的 JSON、JSONL、版本号和导出内容不混入计时文本；主菜单每次执行的命令也单独计时。前台服务、日志跟随和交互命令的耗时包含运行及等待输入的时间，在命令返回时显示；强制终止进程时不保证输出。使用单调时钟，从命令分派开始，不包含 Node 加载 CLI 静态模块之前的启动时间。
+
 在交互终端直接运行 `codexc` 打开主菜单，可进入初始化、接入、日常设置、工作区、后台服务、指标、清理、诊断，以及“运行与连接”中的 TUI、WebUI 和前台核心服务启动入口。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 显示帮助，`timezone` 仅显示当前时区。配置路径查询明确使用 `codexc config paths [--json]`，终端与管道中的行为一致。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。
 
 在 `codexc` 主菜单选择“后台服务”可选择操作和目标。菜单调用顶层服务命令，`restart all` 包含已安装的 WebUI。
@@ -244,7 +246,7 @@ Gateway 会在关闭 Client 和停止 App Server 前向所有已知授权渠道�
 非自动解除触发的全局空闲轮次只记录日志，不发送渠道通知。共享 App Server 的原生 TUI 必须通过
 `codexc remote` 启动；直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，可能被停止。
 空闲解除时按渠道会话保存 Provider、模型、思考等级和服务层级；Gateway 重启后直接发送消息仍沿用
-这份偏好新建会话。断开后通过 `/model`、思考等级或 Fast 入口调整设置，会更新保存值。
+这份偏好新建会话。断开后通过 `/model`、思考等级或 `/fast` 速度入口调整设置，会更新保存值。
 恢复时若 Provider、模型或设置已不可用，会要求重新选择，不自动换账户或模型。
 已有绑定仍以 App Server 的 Thread 设置为准；显式恢复同 Provider 历史会话继续沿用渠道偏好，
 跨 Provider 恢复尊重目标 Thread，原生 Queue 存在时清除待生效覆盖。撤权、归档和跨渠道接管
@@ -475,8 +477,17 @@ codexc logs -n 200
 `codexc run` 在前台运行核心服务；`codexc start [目标]` 启动已安装后台服务。
 `codexc install` 生成服务定义并启动核心服务；`codexc uninstall --services` 仅停止并卸载后台服务，
 `codexc uninstall` 卸载整个受管程序，两者都保留用户数据。`codexc reload` 只通知 Gateway 重读配置。
+Windows 重载成功表示 Gateway 已接受重读请求，不代表配置应用已经完成；若提示“重新加载结果未确认”，
+应先核对服务日志与实际配置状态，不能据此认定请求没有执行。尚未接受的重载请求会在截止或连接断开时取消。
+
+Windows 安装时若显式设置了 `CODEX_HOME`，该路径必须是已存在的目录，安装器会将规范化后的路径写入四个服务定义。更换目录后需要在设置了新值的终端重新运行 `codexc install`；已有定义不会被后台自动改写，安装失败沿用既有定义备份和恢复流程。
+
+macOS 和 Linux 的服务定义为停止预留 50 秒，覆盖内部收尾预算；Linux 首次停止信号只发给服务主进程，由它协调子进程收尾，超时后由 systemd 清理剩余进程。已有安装仅更新程序并重启不会刷新服务定义；升级到包含这些模板变更的版本后，需在本机终端执行一次 `codexc install` 重新生成并激活定义。这会重启核心服务，请先安排停机窗口并记录各服务状态。macOS 已运行的 WebUI 还需执行 `codexc restart webui` 加载新 plist；首次卸载仍使用旧 Job 的期限。
+
+Windows 启动前会检查服务定义所用的 PowerShell、原生构建产物、Node、CLI 入口及工作目录。缺失或不匹配时先返回修复提示，不启动任务；服务进程启动后的故障仍可能在宿主等待超时后报告。此时显示的“最近一次任务结果”不保证来自本次启动，请结合 `codexc logs` 判断。
 
 `codexc restart [gateway|appserver|webui|relay|all]` 是唯一重启入口，默认 `all`。
+`start`、`stop`、`restart` 另外为每个服务步骤显示耗时（秒，保留两位小数），失败步骤也显示耗时；启动步骤包含就绪检查。重启还会显示预检耗时。
 单独指定目标时要求该后台服务已安装；`appserver` 包含受监管的 Provider 实例。
 全部重启要求 Gateway 与 App Server 已安装，未安装的 WebUI、Relay 明确提示跳过；
 已安装但未启用的 Relay 只停止，不重新启动。显式 `restart relay` 则重启 Relay 管理进程，监听仍由配置开关控制。
@@ -510,20 +521,41 @@ WebUI 内不执行包含自身的停止、重启或卸载任务；请在本机�
 Linux 使用 systemd 用户服务；Windows 使用当前用户计划任务和隐藏的 PowerShell 7 进程，不需要管理员权限。
 Windows 计划任务的 `Ready` 表示等待启动；未检测到运行中的服务宿主时，`codexc status` 显示 `stopped`，不将任务的 `Ready` 当作服务就绪。
 Windows 启动时，计划任务宿主等待 15 秒，App Server 应用就绪另行等待 60 秒，以覆盖配置、ACL 和实例初始化；监管确认主实例运行后再检查连接。应用等待超时会报告最后等待阶段，后续服务仍不会提前启动。
+Windows 计划任务预检最多 10 秒、查询最多 5 秒、单次变更最多 15 秒。变更超时后只重新查询状态，不自动重做；计划任务状态不代表应用就绪，仍需通过 `codexc status` 确认。DPAPI 操作最多 5 秒，每次进程树终止命令最多 2 秒，超时明确报告结果未确认。
+Gateway 与 App Server 监管进程从进入停止起最多等待 30 秒清理；Windows 宿主与前台包装层给子服务 35 秒（含 IPC 交付），外层最多等待 50 秒完成宿主回收，再按计划任务自身的 20 秒期限确认启动器停止。停止后的新重载会被拒绝；父进程控制 IPC 断开会停止其拥有的服务，不影响普通客户端断开时共享 App Server 的独立运行。正常清理失败以非零状态退出；进程树回收不等于已完成原生 App Server 的活动轮次排空。
+WebUI 和服务操作使用的 Windows 异步状态查询整体预算为 25 秒，包含 Job 宿主、计划任务查询、权限检查和宿主通信，超时后另行有界回收本次查询进程树；回收失败会明确报告退出未确认。App Server 健康检查对静默 Proxy 单独限制握手等待，使用与服务相同的 Codex 程序及环境，清理失败会返回错误。
+Windows 受管 Codex、查询和维护进程由 Job Object 管理，先加入 Job 再运行，包装进程先退出也会回收后代；计划任务停止还需确认外层启动器已停止。IPC 超时属于状态未知，不作为停止成功。私有路径只支持本地盘上的普通目录，拒绝祖先 junction 等重解析点；Proxy 每次连接均校验私有 Socket 目录并固定目录句柄。
+原生 helper 还持有实际调用者的进程句柄，调用者异常退出时也回收其受管子树。Proxy 连接期间，Socket 目录内会有自动删除的 `.codexc-socket-*.guard` 文件，用于阻止空目录原地转换为重解析点；正常关闭或进程退出后由系统清理，不应在连接期间手动删除。只读 Doctor/ACL 检查不会创建该文件。
+WebUI 取消任务失败时保留进程归属，恢复为可再次取消的运行状态并显示错误，继续阻止同一操作者提交重叠任务；不会一直停留在“取消中”或冒充已取消。若进程随后退出但未确认完整回收，则报告失败并要求检查实际状态。
+Gateway 创建渠道前会初始化并收紧媒体暂存根目录 `uploads`，再由各渠道初始化自己的子目录。
+已有目录必须属于当前用户且不是符号链接或重解析点；不满足时拒绝启动，不自动接管所有权。
+
 Windows 私有配置 ACL 修复：
+
+以下修复命令仅处理 Codex Home 顶层 TOML，不是任意数据目录的权限修复入口。
 
 ```powershell
 codexc security repair
 ```
 
-该命令只处理当前 Codex Home 顶层的普通 `.toml` 文件，不修改配置内容。修复后关闭 ACL 继承，
+该命令只处理当前 Codex Home 顶层的普通 `.toml` 文件，不修改配置内容。主 `config.toml` 所有者与写入权限有效时保留上游读取权限并跳过修复；其余需要修复的文件关闭 ACL 继承，
 仅保留当前用户、SYSTEM 与 Administrators 完全控制。若文件归 Administrators 所有，只有当前用户
 已有完全控制权限且文件不含拒绝规则时，才把所有者恢复为当前用户；其他用户所有的文件明确拒绝。
 使用普通用户终端执行即可；无权限或不满足条件时保留失败信息，不自动提权。
 修复逐文件执行，后续文件失败不会撤销此前已成功收紧的权限，处理失败原因后可以重新执行。
 日常启动和 Doctor 校验不会自动接管文件。修复后运行 `codexc doctor`，再重试启动服务。
-启动或读取 Codex Home 顶层 TOML 时，若发现所有者、继承或访问规则不符合要求，错误会直接提示
+启动或读取 Codex Home 顶层 TOML 时，若发现所有者或访问规则不符合对应文件要求，错误会直接提示
 `codexc security repair`。超时、PowerShell 缺失、目录权限问题及修复命令自身失败不重复给出这条建议。
+
+Windows 原生 Codex 会原子替换主配置，沙箱也会为 Codex Home 配置读取权限。Gateway 对共享 `config.toml` 检查所有者和写入完整性，允许只读继承；这不代表文件内容仅当前用户可读。Provider 独立 Profile、凭据、备份及 Gateway 配置仍使用严格私有权限。不要通过递归收紧整个 Codex Home 来修复单个文件，也不要将沙箱组加入通用信任名单。
+
+Provider 配置事务的写入与回滚保留共享主配置已有的 DACL；同名备份仍按私有文件处理。显式指定 Gateway 配置路径时，不因首次保存而收紧已存在的父目录。若共享配置替换结果无法确认，命令会报告保留的恢复目录及可能存放新内容的临时路径；先核对当前配置、恢复目录内的原文件和仍存在的临时文件，不要直接删除目录或反复重试。
+
+Windows ACL 检查在当前命令进程内复用 PowerShell，每次仍重新检查实际权限。计划任务状态批量读取；服务按依赖顺序启动并保留就绪检查。`doctor` 文本模式立即显示标题及检测阶段，`--json` 仍仅在完成后输出一份 JSON。
+
+Windows 的 Gateway、Provider 设置检查、Remote、配置命令及 Desktop 桥接统一使用命令解析与进程树回收接口，支持 npm 安装的 Codex 启动入口。Provider 定向应用失败时，App Server 日志会记录 `provider-settings-apply-failed` 和受控错误代码；重启后的“已安全应用”只确认当前设置，不代表后续热更新路径也已验证。
+
+Provider 添加过程中若报错，不代表账户已经保存；修复原因后需重新完成添加，服务重启不会补做失败的配置事务。已配置但模型目录尚未确认的 Provider 会在渠道模型列表显示“暂不可用”，目录确认成功后再开放真实模型。
 
 源码安装的日常升级统一使用：
 
@@ -603,7 +635,7 @@ npm 安装版也可以使用 `codexc uninstall --services` 后执行 `npm uninst
 - 工作区审批方式：`/workspaceperm autoreview <on|off|clear>`
 - 当前会话审批方式：`/autoreview [on|off]`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
-- 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`
+- 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/hooks`
 - 帮助：`/help`、`/whoami`
 
 `/stop` 会优先中断当前活动 Turn；飞书和 Telegram 同时取消当前待处理交互，原生 Queue 中的排队项保留，可通过 `/queue` 管理。`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。
@@ -612,11 +644,64 @@ npm 安装版也可以使用 `codexc uninstall --services` 后执行 `npm uninst
 `/r` 的完整 ID、短 ID、名称和序号都只在当前工作区查找。恢复其他工作区的历史前，
 请先使用 `/work` 切换到会话所属工作区；恢复不会自动切换工作区或改写历史会话的目录。
 恢复时如果历史目录或实际权限与工作区不一致，会解除该绑定；下一条普通消息在当前工作区新建会话。
-`/model` 选择 OpenAI 模型会关闭下一轮的 Fast，并同步保存为 Codex 用户默认值，避免 `all` 重启后
-重新开启；需要时可用 `/fast on` 再打开。选择第三方模型不修改 OpenAI 的 Fast 默认值。
+`/fast on` 选择 Fast，`/fast ultrafast` 选择独立的 Ultrafast，`/fast off` 回到 Standard，
+`/fast status` 查看当前档位；无参数时在 Standard 与 Fast 之间切换，当前为 Ultrafast 时回到 Standard。
+加速档位必须由 App Server 的当前模型目录明确提供；模型、账号或 Provider 不支持时拒绝开启，不回退为其他档位。
+设置在下一次 Turn 生效；主 Provider 同时保存 Codex 用户级默认值，独立 Provider 不改写主实例默认值。
+飞书加速菜单按模型能力展示可选档位，Telegram 和微信使用相同命令语义。可用性和消耗以账号及上游规则为准；
+目标 Provider 与当前 Workspace 的有效 `features.fast_mode` 关闭时，渠道在写入前拒绝开启 Fast/Ultrafast，仍允许 `/fast off`。Gateway 不替用户打开该功能开关，最终以 App Server 返回状态为准。
+本地 `codexc config → Codex 新会话与用户偏好 → 默认加速档位` 和 WebUI 的 Codex 设置同样提供
+Standard/Fast/Ultrafast；只按当前模型能力提供加速选项，功能开关关闭时仅允许选择 Standard。
+未显式配置时显示“跟随上游默认”，不会把它等同于明确的 Standard。配置入口沿用预览/确认和配置修订检查，
+只影响新建或重新加载的 Thread；渠道 `/fast` 另外设置当前会话的下一 Turn。
+已配置模型不在可用目录中时保留原模型标识并提示先选择有效模型，不借用其他模型的加速能力；
+未配置模型时只采用目录明确标注的默认模型。模型不可用时仍可选择 Standard 退出加速。
+`/model` 选择 OpenAI 模型会关闭下一轮的 Fast/Ultrafast，回到 Standard，并同步保存为 Codex 用户默认值，避免 `all` 重启后
+重新开启；需要时可用 `/fast on` 或 `/fast ultrafast` 再打开。选择第三方模型不修改 OpenAI 的加速默认值。
 `/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话会优先显示本机指标/缓存中的 Turn 轮数；打开列表不等待历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn 统计；本地没有记录时不会猜测数量。需要完整官方历史计数时，`codexc cleanup sessions` 仍会按候选读取。
 
 计划任务是 Gateway 自有功能，不是 App Server 原生计划 RPC。启用方式和确认语法见 [`计划任务开发设计`](scheduled-tasks-development.md)。
+
+### Hook 列表、信任与启停
+
+飞书、Telegram 和微信共用 `/hooks`，按当前 Workspace 查询当前会话所属 Provider 的
+App Server；尚未绑定会话时使用已确定的模型 Provider，无法确定时先用 `/model` 选择。
+飞书、Telegram 提供操作按钮，三个渠道均可使用文本命令：
+
+```text
+/hooks
+/hooks page 2
+/hooks <列表返回的选择编号>
+/hooks trust <选择编号>
+/hooks enable <选择编号>
+/hooks disable <选择编号>
+/hooks confirm <预览返回的确认码>
+```
+
+列表显示来源、触发事件、启用与信任状态；详情展示经过安全处理的审查信息。
+选择编号固定到本次列表，不是可随排序变化重新解释的序号。信任、启用、停用均先生成预览，
+再由同一操作者明确确认；选择与确认五分钟过期，Gateway 重启后失效。
+确认时 Workspace、会话或 Provider 与预览不一致，Hook 定义/状态改变或用户配置版本变化时，需重新审查。
+受管 Hook 只读。仅信息完整的 command Hook 可以在渠道逐项信任；MCP Tool、prompt 和 agent
+处理器的完整输入未由列表接口提供，需在本地审查。命令信息被脱敏或截断、来源不明时，渠道也不提供信任操作，
+请在本地 Codex `/hooks` 审查。微信还会检查命令、匹配条件和来源路径能否原样展示；需要替换 Markdown 符号时不允许渠道信任，手动输入信任或确认命令也不能绕过。已信任的非受管项仍可启停。不能通过此入口注册 Hook、部署脚本或一次性信任全部 Hook。
+
+**信任和启用是独立状态。** 新增或变更的非受管 Hook 需要信任当前定义；信任一个已停用 Hook
+不会替它开启。信任哈希对应配置定义，不覆盖所引用脚本的文件内容。
+这些操作持久写入 Codex Home 的用户配置。项目的主实例和 Provider 隔离实例共用该配置，
+因此会影响其他 Provider 和使用相同 Hook 的会话，并非仅当前聊天的一次授权。
+Gateway 数据库不保存另一份 Hook 定义、脚本或信任状态。
+
+写入后通过官方协议协调已连接及正在连接的实例刷新运行配置，并回读列表核对结果，通常不需要重启。
+每次新建连接或重连时均刷新，覆盖未连接实例及 Gateway 重启后仍存活的独立实例；不会为刷新而启动未使用的 Provider。刷新请求使用空编辑，不复制或重写 Hook 状态。
+某实例刷新请求失败时，结果明确提示“已保存，刷新未确认”及对应 Provider；下一次使用该实例前再次尝试刷新，失败则拒绝继续操作。
+首次连接的刷新失败会先清理本次 Client 连接，清理成功后可重新接入；清理未确认时保持拒绝接入，需检查连接清理错误，不会通过终止共享 App Server 绕过。
+“设置成功”只表示保存、回读状态匹配且协调的刷新请求已返回成功，不保证上游内部所有 Thread 刷新成功，也不表示 Hook 已执行；
+实际运行仍看后续 Hook 完成通知。Hook 状态写入中断或结果不明时不会自动重试，旧选择和确认全部失效，先重新执行 `/hooks` 核对。
+列表警告、配置加载错误与空列表分别提示，不向渠道转发上游原始错误正文。
+
+Windows、macOS、Linux 使用同一管理协议；脚本路径、解释器和会话 Shell 仍由实际 App Server
+环境决定，信任操作不会修正平台不兼容的命令。此入口不改变 Windows 代理或 Unix Socket 生命周期。
 
 ## 7. 指标、WebUI 与图片
 

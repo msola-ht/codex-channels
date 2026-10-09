@@ -12,6 +12,7 @@ import {
   statSync,
 } from "node:fs";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 
 import { isCommandHelp } from "../scripts/cli-help.mjs";
 import { primaryProviderUsage } from "../scripts/primary-provider-usage.mjs";
@@ -19,6 +20,8 @@ import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.
 import {
   assertSynchronousChildSuccess,
   childProcessIsRunning,
+  createChildServiceControl,
+  installServiceControlHandler,
   ForwardedChildSignalError,
   installProcessSignalHandlers,
   ReportedChildExitError,
@@ -32,6 +35,7 @@ import {
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
   repairWindowsPrivateFileSync,
+  assertCodexConfigAccessSync,
 } from "../runtime/private-file.mjs";
 import {
   CODEX_REMOTE_USAGE,
@@ -57,8 +61,9 @@ import {
 } from "../scripts/metrics-command-options.mjs";
 import { configuredEnvironment, serviceControlEnvironment } from "../scripts/runtime-environment.mjs";
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
+import { serviceStopTimeoutMs } from "../runtime/shutdown-budget.mjs";
 
-const foregroundShutdownTimeoutMs = 5_000;
+const foregroundShutdownTimeoutMs = serviceStopTimeoutMs;
 const foregroundProcessGroupExitTimeoutMs = 1_000;
 const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 
@@ -159,7 +164,7 @@ sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profi
 Linux 缺少 bubblewrap 时输出安装建议。`,
   security: `用法：codexc security repair
 
-修复 Windows Codex Home 顶层 TOML 配置文件的 ACL，仅保留当前用户、SYSTEM 和 Administrators 完全控制。
+修复 Windows Codex Home 顶层私有 TOML 的 ACL；主 config.toml 完整性有效时保留上游读取权限。
 管理员所有的文件仅在当前用户已有完全控制且无拒绝规则时恢复为当前用户所有；不接管其他用户文件。
 不修改配置内容或 Codex 沙箱目录权限，其他平台明确提示无需处理。`,
   provider: `${primaryProviderUsage}\n\n受管账户：\n  codexc provider deepseek <add|list|reconfigure|remove|default> [id]\n  codexc provider opencode-go <add|list|remove|default|release> [id]\n  codexc provider ccg remove <id>\n\n各家只开放已有能力；CCG 新增与设置使用 codexc setup。release 释放账户 App Server 实例，后续请求可重新拉起，不禁用账户。`,
@@ -278,6 +283,14 @@ try {
 }
 
 async function executeCommand(command, args) {
+  const startedAt = performance.now();
+  try { await dispatchCommand(command, args); }
+  finally {
+    printCliMessage("note", `命令总耗时 ${((performance.now() - startedAt) / 1000).toFixed(2)} 秒。`, { destination: "stderr" });
+  }
+}
+
+async function dispatchCommand(command, args) {
   switch (command) {
     case undefined:
       printHelp();
@@ -513,7 +526,7 @@ async function executeCommand(command, args) {
         throw new Error(helpText.webui);
       }
       parseWebuiCliArgs(args);
-      runScript("scripts/webui-server.mjs", args, { failureReportedByChild: true });
+      await runForegroundScript("scripts/webui-server.mjs", args, {}, undefined, { useResolvedProxyEnvironment: true });
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
@@ -592,6 +605,7 @@ async function runForegroundScript(
   args,
   additionalEnvironment = {},
   workingDirectory,
+  { useResolvedProxyEnvironment = false } = {},
 ) {
   const runtime = configuredEnvironment();
   const child = spawn(
@@ -601,11 +615,12 @@ async function runForegroundScript(
       stdio: process.platform === "win32"
         ? ["inherit", "inherit", "inherit", "ipc"]
         : "inherit",
-      env: { ...runtime.unresolvedProxyEnvironment, ...additionalEnvironment },
+      env: { ...(useResolvedProxyEnvironment ? runtime.environment : runtime.unresolvedProxyEnvironment), ...additionalEnvironment },
       cwd: workingDirectory ?? runtime.dataDir,
       detached: process.platform !== "win32",
     },
   );
+  const childControl = createChildServiceControl(child);
   let forwardedSignal;
   let shutdownTimer;
   let forcedProcessGroupStop = false;
@@ -622,22 +637,26 @@ async function runForegroundScript(
     if (!childProcessIsRunning(child)) return;
     signalChildProcesses([child], "SIGKILL");
   };
-  const forwardSignal = (signal) => {
+  const forwardSignal = (signal, fromParent = false) => {
     if (forwardedSignal) {
       forceStop();
       return;
     }
-    forwardedSignal = signal;
+    if (!fromParent) forwardedSignal = signal;
     if (childProcessIsRunning(child)) {
-      if (!sendForegroundStopMessage(child, signal)) {
-        signalChildProcesses([child], signal);
-      }
+      void childControl.send("codexc-stop").then((sent) => {
+        if (!sent && childProcessIsRunning(child)) signalChildProcesses([child], signal);
+      });
       shutdownTimer = setTimeout(forceStop, foregroundShutdownTimeoutMs);
       shutdownTimer.unref();
     }
   };
   const forwardTerminate = () => forwardSignal("SIGTERM");
   const forwardInterrupt = () => forwardSignal("SIGINT");
+  const controlFromParent = message => {
+    if (message?.type === "codexc-stop" && !shutdownTimer) forwardSignal("SIGTERM", true);
+  };
+  const cleanupControl = installServiceControlHandler(controlFromParent);
   const cleanupSignals = installProcessSignalHandlers({
     SIGTERM: forwardTerminate,
     SIGINT: forwardInterrupt,
@@ -645,6 +664,8 @@ async function runForegroundScript(
   const cleanup = () => {
     if (shutdownTimer) clearTimeout(shutdownTimer);
     cleanupSignals();
+    cleanupControl();
+    childControl.close();
   };
 
   await new Promise((resolveChild, rejectChild) => {
@@ -689,24 +710,16 @@ function security(args) {
   const files = readdirSync(home, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".toml"))
     .map((entry) => join(home, entry.name));
+  let repaired = 0;
   for (const file of files) {
+    if (file === join(home, "config.toml")) {
+      try { assertCodexConfigAccessSync(file); continue; }
+      catch { /* Explicit repair may tighten an unsafe shared configuration. */ }
+    }
     if (statSync(file).isFile()) repairWindowsPrivateFileSync(file);
+    repaired += 1;
   }
-  printCliMessage("success", `Windows 私有 TOML 文件 ACL 已修复：${home}（${files.length} 个文件）`);
-}
-
-function sendForegroundStopMessage(child, signal) {
-  if (process.platform !== "win32" || !child.connected) return false;
-  try {
-    child.send({ type: "codexc-stop", signal }, (error) => {
-      if (error && childProcessIsRunning(child)) {
-        signalChildProcesses([child], signal);
-      }
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  printCliMessage("success", `Windows TOML 权限处理完成：${home}（检查 ${files.length} 个文件，修复 ${repaired} 个；有效的主配置读取权限保留）`);
 }
 
 async function waitForProcessGroupExit(processGroupId, timeoutMs) {

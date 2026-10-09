@@ -16,6 +16,8 @@ import {
 } from "../../runtime/gateway-account-refresh.mjs";
 import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
+import { installProcessSignalHandlers, installServiceControlHandler } from "../../runtime/process-lifecycle.mjs";
+import { serviceShutdownTimeoutMs } from "../../runtime/shutdown-budget.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { ResetCreditError } from "../application/index.js";
@@ -49,14 +51,47 @@ export async function runGatewayProcess(): Promise<void> {
     process.env.TZ = config.gatewayTimezone;
   }
   const gatewayOwner = new GatewayOwner(runtime.configPath);
-  await gatewayOwner.start();
   const eventQueuePath = configEventQueuePath(dirname(runtime.configPath));
   const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config, { service: "gateway", module: "lifecycle" });
+  let earlyStop = false;
+  let shutdownTimer: NodeJS.Timeout | undefined;
+  const beginShutdownDeadline = (): void => {
+    if (shutdownTimer) return;
+    // Include ownership acquisition and component construction in the budget:
+    // an early stop must stay bounded even before controls.stop is installed.
+    shutdownTimer = setTimeout(() => {
+      logger.error({ timeoutMs: serviceShutdownTimeoutMs }, "Gateway 停止等待超时，进程将以故障状态退出");
+      process.exit(1);
+    }, serviceShutdownTimeoutMs);
+  };
+  const clearShutdownDeadline = (): void => { clearTimeout(shutdownTimer); };
+  const controls: { stop?: () => void; reload?: () => void } = {};
+  let reloadPending = false;
+  const requestStop = (): void => {
+    earlyStop = true;
+    beginShutdownDeadline();
+    controls.stop?.();
+  };
+  const requestReload = (): void => {
+    if (controls.reload) controls.reload();
+    else reloadPending = true;
+  };
+  const cleanupControl = installServiceControlHandler(message => {
+    if (message.type === "codexc-stop") requestStop();
+    else requestReload();
+  });
+  const cleanupSignals = installProcessSignalHandlers({
+    SIGINT: requestStop, SIGTERM: requestStop, SIGHUP: requestReload,
+  });
+  const cleanupHandlers = (): void => { cleanupControl(); cleanupSignals(); };
   let application: GatewayApplication;
   let weixinCredentialChange: (() => Promise<"changed" | "unchanged" | "unavailable">) | undefined;
   try {
+    await gatewayOwner.start();
+    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
     const surfacePlugins = await loadBuiltInSurfacePlugins(config);
+    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
     if (config.weixin) {
       weixinCredentialChange = await createWeixinCredentialChangeCheck(
         createWeixinCredentialStore(join(config.credentialsDirectory, "weixin")),
@@ -64,14 +99,18 @@ export async function runGatewayProcess(): Promise<void> {
         () => logger.warn({ surface: "weixin" }, "微信凭据检查失败；其他渠道继续运行，下次配置重载重新检查"),
       );
     }
+    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
     application = new GatewayApplication(
       config,
       logger,
       surfacePlugins,
       runtime.configPath,
+      () => stop(1),
     );
   } catch (error) {
+    cleanupHandlers();
     await gatewayOwner.close();
+    clearShutdownDeadline();
     throw error;
   }
   const accountRefresh = new GatewayAccountRefreshServer(
@@ -99,32 +138,42 @@ export async function runGatewayProcess(): Promise<void> {
   let stopping = false;
   let started = false;
   let reloading = false;
-  let reloadPending = false;
   let reloadTimer: NodeJS.Timeout | undefined;
+  let accountRefreshStartup: Promise<void> | undefined;
 
-  const providerSettingsWatcher = new ProviderSettingsWatcher({
-    logger,
-    configuredProviders: application.managedSettingsProviders,
-    aggregateMembers: application.aggregateSettingsMembers,
-    applyProviderSettings: (provider, signal) => application.applyProviderSettings(provider, signal),
-    refreshProviderModels: (provider, signal) => application.refreshProviderModels(provider, signal),
-    onStateChange: (change) =>
-      application.notifyProviderSettingsChange(
-        providerSettingsAction[change.kind],
-        change.providers,
-      ),
-    environment: process.env,
-  });
-  const configuredNetwork = readCodexProxySettings(process.env);
-  const networkProxyWatcher = new NetworkProxyWatcher({
-    logger,
-    configured: configuredNetwork,
-    initialProxy: config.networkProxy,
-  });
+  let providerSettingsWatcher: ProviderSettingsWatcher;
+  let networkProxyWatcher: NetworkProxyWatcher;
+  try {
+    providerSettingsWatcher = new ProviderSettingsWatcher({
+      logger,
+      configuredProviders: application.managedSettingsProviders,
+      aggregateMembers: application.aggregateSettingsMembers,
+      applyProviderSettings: (provider, signal) => application.applyProviderSettings(provider, signal),
+      refreshProviderModels: (provider, signal) => application.refreshProviderModels(provider, signal),
+      onStateChange: (change) =>
+        application.notifyProviderSettingsChange(
+          providerSettingsAction[change.kind],
+          change.providers,
+        ),
+      environment: process.env,
+    });
+    const configuredNetwork = readCodexProxySettings(process.env);
+    networkProxyWatcher = new NetworkProxyWatcher({
+      logger,
+      configured: configuredNetwork,
+      initialProxy: config.networkProxy,
+    });
+  } catch (error) {
+    cleanupHandlers();
+    await application.stop().catch(() => undefined);
+    await gatewayOwner.close();
+    clearShutdownDeadline();
+    throw error;
+  }
 
   const stopWatching = (): Promise<void> => {
-    const providersStopped = providerSettingsWatcher.stop();
-    const networkStopped = networkProxyWatcher.stop();
+    const providersStopped = Promise.resolve().then(() => providerSettingsWatcher.stop());
+    const networkStopped = Promise.resolve().then(() => networkProxyWatcher.stop());
     if (reloadTimer) {
       clearTimeout(reloadTimer);
       reloadTimer = undefined;
@@ -132,30 +181,40 @@ export async function runGatewayProcess(): Promise<void> {
     for (const path of watchedPaths) {
       unwatchFile(path);
     }
-    process.removeListener("SIGHUP", scheduleReload);
-    process.removeListener("message", controlFromParent);
+    cleanupHandlers();
     return Promise.all([providersStopped, networkStopped]).then(() => undefined);
+  };
+  const closeAccountRefresh = async (): Promise<void> => {
+    // IPC startup can still publish its endpoint after an early close.
+    await accountRefreshStartup?.catch(() => undefined);
+    await accountRefresh.close();
   };
   const stop = (exitCode = 0): void => {
     if (stopping) {
       return;
     }
     stopping = true;
+    // Only this Gateway process is terminated; the App Server stays shared.
+    beginShutdownDeadline();
     gatewayOwner.markNotReady();
-    const watchersStopped = stopWatching();
-    void accountRefresh
-      .close()
-      .catch((error) => logger.error({ err: error }, "Gateway 账户刷新 IPC 关闭失败"))
-      .then(() => application.stop())
-      .catch((error) => logger.error({ err: error }, "Gateway 停止失败"))
+    let finalExitCode = exitCode;
+    const reportCloseFailure = (error: unknown, message: string): void => {
+      finalExitCode = 1;
+      logger.error({ err: error }, message);
+    };
+    void Promise.all([
+      Promise.resolve().then(stopWatching).catch((error) => reportCloseFailure(error, "Gateway 配置监听关闭失败")),
+      closeAccountRefresh().catch((error) => reportCloseFailure(error, "Gateway 账户刷新 IPC 关闭失败")),
+      Promise.resolve().then(() => application.stop()).catch((error) => reportCloseFailure(error, "Gateway 停止失败")),
+    ])
       .finally(async () => {
-        await watchersStopped;
         try {
           await gatewayOwner.close();
         } catch (error) {
-          logger.error({ err: error }, "Gateway 所有权 Socket 关闭失败");
+          reportCloseFailure(error, "Gateway 所有权 Socket 关闭失败");
         }
-        process.exit(exitCode);
+        clearShutdownDeadline();
+        process.exit(finalExitCode);
       });
   };
   const reload = async (): Promise<void> => {
@@ -249,27 +308,19 @@ export async function runGatewayProcess(): Promise<void> {
     reloadTimer.unref();
   }
 
-  const controlFromParent = (message: unknown): void => {
-    if (
-      typeof message === "object"
-      && message !== null
-      && "type" in message
-    ) {
-      if (message.type === "codexc-stop") stop();
-      if (message.type === "codexc-reload") scheduleReload();
-    }
-  };
-  process.once("SIGINT", () => stop());
-  process.once("SIGTERM", () => stop());
-  process.on("message", controlFromParent);
-  process.on("SIGHUP", scheduleReload);
+  controls.stop = () => stop();
+  controls.reload = scheduleReload;
+  if (earlyStop) { stop(); return; }
 
   try {
     await application.start();
-    await accountRefresh.start();
+    if (stopping) return;
+    accountRefreshStartup = accountRefresh.start();
+    await accountRefreshStartup;
   } catch (error) {
+    if (stopping) return;
     await stopWatching();
-    await accountRefresh.close().catch(() => undefined);
+    await closeAccountRefresh().catch(() => undefined);
     await application.stop().catch(() => undefined);
     await gatewayOwner.close();
     throw error;

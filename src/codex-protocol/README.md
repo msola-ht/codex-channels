@@ -6,7 +6,9 @@
 
 - `index.ts`：只向 `codex-client` 暴露经过审查的最小协议类型集合，包括约束出站消息的
   `ClientRequest`、`ClientNotification`、用户配置编辑值 `JsonValue`、仅用于 Auto-review 受管策略判断的
-  `ConfigRequirementsReadResponse`，当前 Thread 审批方式更新使用的稳定
+  `ConfigRequirementsReadResponse`、Hook 目录使用的稳定
+  `HooksListParams` / `HooksListResponse` / `HookMetadata`、Hook 状态窄写入使用的稳定
+  `ConfigBatchWriteParams`，当前 Thread 审批方式更新使用的稳定
   `ThreadSettingsUpdateParams` / `ThreadSettingsUpdateResponse`，账户用量请求使用的
   `GetAccountTokenUsageParams` 与响应类型、重置券消费 `ConsumeAccountRateLimitResetCreditParams` / `ConsumeAccountRateLimitResetCreditResponse`、包含后代关系查询的 `ThreadListParams`，以及原生 Queue、分页历史、Revert 请求/响应和通知类型；
   其他业务模块不得导入。

@@ -13,12 +13,17 @@ import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { securePrivateDirectorySync } from "../runtime/private-file.mjs";
 import {
   childProcessIsRunning,
+  createChildServiceControl,
   installProcessSignalHandlers,
+  installServiceControlHandler,
   ReportedChildExitError,
-  signalChildProcesses,
+  terminateChildProcess,
 } from "../runtime/process-lifecycle.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir, runtimeConfig } from "./runtime-config.mjs";
+import { serviceGracefulStopTimeoutMs } from "../runtime/shutdown-budget.mjs";
+
+class DevAllStoppedError extends Error {}
 
 await runDevAll().catch((error) => {
   if (!(error instanceof ReportedChildExitError)) {
@@ -42,45 +47,45 @@ async function runDevAll() {
   securePrivateDirectorySync(runtimeDir);
 
   const appServerSupervisors = [];
+  const childControls = new WeakMap();
+  let stopping = false;
+  let stopTask;
+  let gateway;
+  const stop = () => {
+    if (stopTask) return stopTask;
+    stopping = true;
+    stopTask = stopForegroundChildren(
+      [...(gateway ? [gateway] : []), ...appServerSupervisors], childControls,
+    );
+    return stopTask;
+  };
+  const requestStop = () => { void stop().catch(() => undefined); };
+  const cleanupSignals = installProcessSignalHandlers({ SIGINT: requestStop, SIGTERM: requestStop });
+  const onControlMessage = (message) => {
+    if (message?.type === "codexc-stop") requestStop();
+  };
+  const cleanupControl = installServiceControlHandler(onControlMessage);
+
   try {
     await ensureAppServerTopology({
       appServerRuntime,
       appServerSupervisors,
       runtime,
       socketPath,
+      childControls,
+      isStopping: () => stopping,
     });
-  } catch (error) {
-    signalChildProcesses(appServerSupervisors, "SIGTERM");
-    throw error;
-  }
-
-  let stopping = false;
-  let gateway;
-  const stop = () => {
-    if (stopping) return;
-    stopping = true;
-    stopForegroundChildren([...(gateway ? [gateway] : []), ...appServerSupervisors]);
-  };
-  const cleanupSignals = installProcessSignalHandlers({ SIGINT: stop, SIGTERM: stop });
-  const onControlMessage = (message) => {
-    if (message?.type === "codexc-stop") stop();
-  };
-  process.on("message", onControlMessage);
-
-  for (const supervisor of appServerSupervisors) {
-    supervisor.once("exit", (code, signal) => {
-      if (!stopping) {
-        writeCliMessage(
-          "failure",
-          `Codex App Server 意外退出：code=${code} signal=${signal}`,
-        );
-        stop();
-        process.exitCode = 1;
-      }
-    });
-  }
-
-  try {
+    for (const supervisor of appServerSupervisors) {
+      const onExit = (code, signal) => {
+        if (!stopping) {
+          writeCliMessage("failure", `Codex App Server 意外退出：code=${code} signal=${signal}`);
+          requestStop();
+          process.exitCode = 1;
+        }
+      };
+      supervisor.once("exit", onExit);
+      if (!childProcessIsRunning(supervisor)) onExit(supervisor.exitCode, supervisor.signalCode);
+    }
     while (!stopping) {
       gateway = spawn(process.execPath, gatewayEntry, {
         cwd: runtime.dataDir,
@@ -94,14 +99,16 @@ async function runDevAll() {
           CODEX_CONNECT_SERVICE_ROLE: "gateway",
         },
       });
+      childControls.set(gateway, createChildServiceControl(gateway));
       const result = await waitForGateway(gateway);
+      childControls.get(gateway)?.close();
       gateway = undefined;
       if (stopping) break;
       if (result.code === 75) {
         console.log("Gateway 配置需要重建连接，正在保持 App Server 并重启 Gateway...");
         continue;
       }
-      stop();
+      await stop();
       if (result.error) {
         throw new Error(`Gateway 启动失败：${result.error.message}`);
       }
@@ -111,25 +118,44 @@ async function runDevAll() {
         );
       }
     }
+  } catch (error) {
+    if (!(error instanceof DevAllStoppedError)) throw error;
   } finally {
-    cleanupSignals();
-    process.off("message", onControlMessage);
+    try { await stop(); } finally {
+      cleanupSignals();
+      cleanupControl();
+      for (const supervisor of appServerSupervisors) childControls.get(supervisor)?.close();
+      if (gateway) childControls.get(gateway)?.close();
+    }
   }
 }
 
-function stopForegroundChildren(children) {
-  for (const child of children) {
-    if (!childProcessIsRunning(child)) continue;
-    if (process.platform === "win32" && child.connected) {
-      try {
-        child.send({ type: "codexc-stop" });
-        continue;
-      } catch {
-        // Fall through to the exact PID-tree termination path.
+async function stopForegroundChildren(children, childControls) {
+  const results = await Promise.allSettled(children.map(async child => {
+    if (!childProcessIsRunning(child)) return;
+    const deadline = Date.now() + serviceGracefulStopTimeoutMs;
+    try {
+      if (process.platform === "win32" && await childControls.get(child)?.send("codexc-stop")) {
+        await new Promise(resolve => {
+          let timer;
+          const finish = () => {
+            clearTimeout(timer);
+            child.off("exit", finish);
+            resolve();
+          };
+          child.once("exit", finish);
+          timer = setTimeout(finish, Math.max(0, deadline - Date.now()));
+          if (!childProcessIsRunning(child)) finish();
+        });
       }
+    } finally {
+      await terminateChildProcess(child, process.platform === "win32"
+        ? undefined
+        : { gracePeriodMs: serviceGracefulStopTimeoutMs });
     }
-    signalChildProcesses([child], "SIGTERM");
-  }
+  }));
+  const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
+  if (errors.length) throw new AggregateError(errors, "前台服务子进程未能完全停止");
 }
 
 function waitForGateway(child) {
@@ -147,11 +173,18 @@ async function ensureAppServerTopology({
   appServerSupervisors,
   runtime,
   socketPath,
+  childControls,
+  isStopping,
 }) {
+  const assertRunning = () => { if (isStopping()) throw new DevAllStoppedError(); };
+  assertRunning();
+  const document = readGatewayConfig(runtime.configPath);
+  const environment = { ...process.env, CODEX_BINARY: document.codex?.binary ?? process.env.CODEX_BINARY ?? "codex" };
   const topology = appServerRuntime.topology;
   const paths = topology.socketPaths;
   const primaryPath = appServerRuntime.primarySocketPath;
   const existingSupervisor = await inspectAppServerSupervisor(socketPath);
+  assertRunning();
   if (existingSupervisor) {
     if (!sameAppServerTopology(existingSupervisor, topology)) {
       throw new Error(
@@ -160,11 +193,14 @@ async function ensureAppServerTopology({
       );
     }
     await ensureAppServerProvider(socketPath, existingSupervisor.primaryProvider);
-    await waitForSocket(undefined, primaryPath, 10_000);
+    assertRunning();
+    await waitForSocket(undefined, primaryPath, 10_000, environment, isStopping);
+    assertRunning();
     console.log(`检测到现有主 App Server Socket，将直接复用：${primaryPath}`);
     return;
   }
-  const healthy = await Promise.all(paths.map((path) => appServerSocketAcceptsWebSocket(path)));
+  const healthy = await Promise.all(paths.map((path) => appServerSocketAcceptsWebSocket(path, environment)));
+  assertRunning();
   if (healthy.every(Boolean)) {
     throw new Error(
       "现有 App Server 不属于 codexc 统一监管入口；请先停止现有 App Server 后重试",
@@ -191,13 +227,16 @@ async function ensureAppServerTopology({
     },
   );
   appServerSupervisors.push(supervisor);
-  await waitForSocket(supervisor, primaryPath, 10_000);
+  childControls.set(supervisor, createChildServiceControl(supervisor));
+  await waitForSocket(supervisor, primaryPath, 10_000, environment, isStopping);
+  assertRunning();
   console.log("Codex App Server 与模型统计代理已启动。");
 }
 
-async function waitForSocket(child, path, timeoutMs) {
+async function waitForSocket(child, path, timeoutMs, environment, isStopping) {
   const startedAt = Date.now();
-  while (!(await appServerSocketAcceptsWebSocket(path))) {
+  while (!(await appServerSocketAcceptsWebSocket(path, environment))) {
+    if (isStopping()) throw new DevAllStoppedError();
     if (child && (child.exitCode !== null || child.signalCode !== null)) {
       if (child.exitCode === 0 || child.signalCode !== null) {
         throw new Error(
@@ -207,7 +246,6 @@ async function waitForSocket(child, path, timeoutMs) {
       throw new ReportedChildExitError(child.exitCode ?? 1);
     }
     if (Date.now() - startedAt >= timeoutMs) {
-      if (childProcessIsRunning(child)) signalChildProcesses([child], "SIGTERM");
       throw new Error(`等待 Codex App Server WebSocket 就绪超时：${path}`);
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));

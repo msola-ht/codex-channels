@@ -20,6 +20,7 @@ export interface CodexUserConfigModelOption {
     description: string;
   }>;
   defaultReasoningEffort: string;
+  serviceTiers: Array<{ id: string; name: string }>;
   isDefault: boolean;
 }
 

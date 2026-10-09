@@ -28,7 +28,7 @@
 Client 或生成协议。Turn、Review 和 Goal 的执行端口由 `application` 拥有；Goal 的稳定状态类型
 由 `conversation-core` 统一定义，供请求结果和通知归约共同使用，Client 只在适配边界构造官方输入
 和解释响应。模型信息、思考等级和服务层级的稳定类型同样由
-`application` 拥有，Client 负责裁剪官方模型目录并封装 Fast 默认值配置。Provider 账户能力
+`application` 拥有，Client 负责裁剪官方模型目录并封装 Standard/Fast/Ultrafast 默认值配置。Provider 账户能力
 由 Application 的编译期注册窄端口承接：OpenAI 通过 Client 选择官方多桶或兼容单桶响应，
 DeepSeek 由 Bootstrap 具体适配器查询官方余额；未知 Provider 不回退到 OpenAI。直接安装 Skill
 查询也已在 Client 边界完成路径与 Scope 裁剪；显式调用只把

@@ -1,4 +1,9 @@
-import { usesOpenAiAccount } from "../conversation-core/index.js";
+import {
+  fastServiceTierId,
+  isFastServiceTier,
+  ultrafastServiceTierId,
+  type ModelOption,
+} from "../application/index.js";
 import {
   isOpencodeGoProvider,
   opencodeGoProviderDisplayName,
@@ -41,9 +46,20 @@ export function formatCodexProviderLabel(provider?: string): string {
       : formatProviderLabel(provider);
 }
 
-export function supportsFastMode(modelProvider?: string): boolean {
-  return usesOpenAiAccount(modelProvider)
-    || (modelProvider !== undefined && configuredCustomPrimaryProviderIds.has(modelProvider));
+export function formatServiceTier(serviceTier: string | null | undefined, model?: ModelOption): string {
+  if (serviceTier === "ultrafast") return "Ultrafast";
+  if (isFastServiceTier(serviceTier ?? null, model)) return "Fast";
+  if (serviceTier == null || serviceTier === "default") return "Standard";
+  return `未知档位（${boundProviderLabel(serviceTier)}）`;
+}
+
+export function formatModelSpeedSupport(model: ModelOption | undefined): string {
+  if (!model) return "支持情况未知";
+  const speeds = [
+    ...(fastServiceTierId(model) ? ["Fast"] : []),
+    ...(ultrafastServiceTierId(model) ? ["Ultrafast"] : []),
+  ];
+  return speeds.length > 0 ? `支持 ${speeds.join("、")}` : "不支持加速档位";
 }
 
 export function scopedModelDisplayName(displayName: string, provider: string | undefined): string {
@@ -62,4 +78,18 @@ export function scopedModelDisplayName(displayName: string, provider: string | u
 
 export function formatDisplayedProvider(provider: string): string {
   return provider.startsWith("ocg-") ? formatCodexProviderLabel(provider) : provider;
+}
+
+/** 不改变目录排序或选择编号；不可用模型仍保留在原目录中。 */
+export function formatProviderModelSummary(models: readonly ModelOption[], provider: string): string {
+  let available = 0;
+  let unavailable = 0;
+  for (const model of models) {
+    if ((model.provider ?? "openai") !== provider) continue;
+    if (model.available === false) unavailable += 1;
+    else available += 1;
+  }
+  if (available === 0) return `暂不可用（共 ${unavailable} 个模型）`;
+  return unavailable === 0 ? `${available} 个模型`
+    : `${available} 个可用模型 · ${unavailable} 个暂不可用模型`;
 }

@@ -24,6 +24,7 @@ import { surfaceErrorMetadata } from "../error-metadata.js";
 import { formatWeixinCommandText } from "./command-renderer.js";
 import { PendingInteractionRegistry, waitForInteractionPreparation } from "../pending-interaction-registry.js";
 import { sanitizeWeixinMarkdownText } from "./markdown-sanitize.js";
+import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 type ApprovalRequest = Extract<InteractionRequest, { type: "approval" }>;
 type UserInputRequest = Extract<InteractionRequest, { type: "user-input" }>;
@@ -184,23 +185,32 @@ export class WeixinInteractionPort implements InteractionPort {
       this.pending.release(request.requestId, token);
       throw error;
     }
-    const prompt = renderInteractionPrompt(request, token);
-    const promptCharacters = request.type === "user-input"
-      ? request.questions.reduce(
-          (length, _question, index) =>
-            length
-            + renderUserInputPrompt(
-              request,
-              token,
-              index,
-              index === 0,
-            ).reduce(
-              (messageLength, message) => messageLength + message.length,
-              0,
-            ),
-          0,
-        )
-      : prompt.reduce((length, message) => length + message.length, 0);
+    let prompt: readonly string[];
+    let promptCharacters: number;
+    try {
+      prompt = renderInteractionPrompt(request, token);
+      promptCharacters = request.type === "user-input"
+        ? request.questions.reduce(
+            (length, _question, index) =>
+              length
+              + renderUserInputPrompt(
+                request,
+                token,
+                index,
+                index === 0,
+              ).reduce(
+                (messageLength, message) => messageLength + message.length,
+                0,
+              ),
+            0,
+          )
+        : prompt.reduce((length, message) => length + message.length, 0);
+    } catch (error) {
+      this.pending.release(request.requestId, token);
+      if (!(error instanceof WeixinPromptTooLongError)) throw error;
+      await this.notify(target, "交互详情过长，微信端已安全取消本次请求。");
+      return safeInteractionDecision(request);
+    }
     if (
       promptCharacters > maximumPromptCharacters
     ) {
@@ -772,6 +782,9 @@ function renderUserInputPrompt(
   questionIndex: number,
   includeIntroduction: boolean,
 ): readonly string[] {
+  if (request.asynchronous) {
+    return renderAsyncUserInputPrompt(request, token, questionIndex, includeIntroduction);
+  }
   const introduction = [
     sanitizeWeixinMarkdownText(request.title),
     "Codex 正在等待你的回答。每个问题只接受一项答案。",
@@ -807,6 +820,105 @@ function renderUserInputPrompt(
       ].join("\n"),
     ]),
   ];
+}
+
+function renderAsyncUserInputPrompt(
+  request: UserInputRequest,
+  token: string,
+  questionIndex: number,
+  includeIntroduction: boolean,
+): readonly string[] {
+  const question = request.questions[questionIndex]!;
+  const number = questionIndex + 1;
+  const blocks = [
+    ...(includeIntroduction ? [
+      ...splitAsyncPromptMarkdown(request.title),
+      [
+        "任务继续执行，你可以在问题有效期内回答。每个问题只接受一项答案。",
+        `有效期：${Math.max(1, Math.ceil(request.expiresInMs / 1_000))} 秒`,
+      ].join("\n\n"),
+    ] : []),
+    `问题 ${number}/${request.questions.length}：`,
+    ...splitAsyncPromptMarkdown(question.header),
+    ...splitAsyncPromptMarkdown(question.question),
+    ...question.options.flatMap((option, optionIndex) => [
+      `选项 ${optionIndex + 1}：`,
+      ...splitAsyncPromptMarkdown(option),
+      `回答命令：\n\`\`\`text\n/选择 ${token} ${number} ${optionIndex + 1}\n\`\`\``,
+    ]),
+    ...(question.allowOther || question.options.length === 0 ? [[
+      "填写其他内容（复制后替换最后的文字）：",
+      `\`\`\`text\n/填写 ${token} ${number} 在这里输入答案\n\`\`\``,
+    ].join("\n")] : []),
+    `取消本次输入：\n\`\`\`text\n/取消 ${token}\n\`\`\``,
+  ];
+  return packPromptBlocks(blocks);
+}
+
+class WeixinPromptTooLongError extends Error {}
+
+/** 保留原文；每片独立闭合围栏，防止 Outbox 再次切开代码或题干吞入回答命令。 */
+function splitAsyncPromptMarkdown(value: string): string[] {
+  if (value.length > maximumPromptCharacters) throw new WeixinPromptTooLongError();
+  const messages: string[] = [];
+  let fence: MarkdownFence | undefined;
+  let current = "";
+  let prefixLength = 0;
+  const closing = (active: typeof fence): string => active === undefined
+    ? "" : `\n${active.marker}`;
+  const closeCurrent = (): string => fence === undefined ? current
+    : current + (current.endsWith("\n") ? fence.marker : closing(fence));
+  const flush = (): void => {
+    if (current.length > prefixLength) messages.push(closeCurrent());
+    current = fence === undefined ? "" : `${fence.opening}\n`;
+    prefixLength = current.length;
+    if (current.length + closing(fence).length >= maximumPromptMessageCharacters) {
+      throw new WeixinPromptTooLongError();
+    }
+  };
+  for (const line of value.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
+    const nextFence = advanceMarkdownFence(fence, line);
+    if (nextFence !== fence) {
+      if (line.length + closing(nextFence).length > maximumPromptMessageCharacters) {
+        throw new WeixinPromptTooLongError();
+      }
+      if (current.length + line.length + closing(nextFence).length > maximumPromptMessageCharacters) flush();
+      if (current.length + line.length + closing(nextFence).length > maximumPromptMessageCharacters) {
+        throw new WeixinPromptTooLongError();
+      }
+      current += line;
+      fence = nextFence;
+      continue;
+    }
+    const freshPrefixLength = fence === undefined ? 0 : fence.opening.length + 1;
+    if (
+      current.length + line.length + closing(fence).length > maximumPromptMessageCharacters
+      && freshPrefixLength + line.length + closing(fence).length <= maximumPromptMessageCharacters
+    ) {
+      flush();
+    }
+    let remaining = line;
+    while (remaining.length > 0) {
+      let capacity = maximumPromptMessageCharacters - current.length - closing(fence).length;
+      if (capacity <= 0) {
+        flush();
+        continue;
+      }
+      let end = Math.min(remaining.length, capacity);
+      if (end < remaining.length && /[\uD800-\uDBFF]/u.test(remaining[end - 1]!)) end -= 1;
+      if (end === 0) {
+        flush();
+        capacity = maximumPromptMessageCharacters - current.length - closing(fence).length;
+        if (capacity < 2) throw new WeixinPromptTooLongError();
+        continue;
+      }
+      current += remaining.slice(0, end);
+      remaining = remaining.slice(end);
+      if (remaining.length > 0) flush();
+    }
+  }
+  if (current.length > prefixLength) messages.push(closeCurrent());
+  return messages;
 }
 
 function renderElicitationPrompt(

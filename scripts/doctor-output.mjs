@@ -17,23 +17,34 @@ export function createDoctorReport(checks) {
 }
 
 export function renderDoctorText(report) {
-  const lines = ["Codex Connect Doctor"];
+  const renderer = createDoctorTextRenderer();
+  return "Codex Connect Doctor\n"
+    + report.checks.map((check) => renderer.renderCheck(check)).join("")
+    + renderer.renderSummary(report);
+}
+
+export function createDoctorTextRenderer() {
   let renderedSection;
-  for (const check of report.checks) {
-    if (check.kind === "success") continue;
-    if (check.section !== renderedSection) {
-      renderedSection = check.section;
-      lines.push(`\n=== ${renderedSection} ===`);
-    }
-    lines.push(formatCliStatus(check.kind, check.name, check.detail));
-    if (check.remediation) {
-      lines.push(formatCliStatus("remediation", check.name, check.remediation));
-    }
-  }
-  const { success, failure, note } = report.counts;
-  const summary = report.healthy
-    ? `诊断通过：${success} 项通过，${note} 项提示。`
-    : `诊断发现 ${failure} 项问题：${success} 项通过，${note} 项提示。`;
-  lines.push(`\n${colorizeCliText(report.healthy ? "success" : "failure", summary)}`);
-  return `${lines.join("\n")}\n`;
+  return {
+    renderCheck(check) {
+      if (check.kind === "success") return "";
+      const lines = [];
+      if (check.section !== renderedSection) {
+        renderedSection = check.section;
+        lines.push(`\n=== ${renderedSection} ===`);
+      }
+      lines.push(formatCliStatus(check.kind, check.name, check.detail));
+      if (check.remediation) {
+        lines.push(formatCliStatus("remediation", check.name, check.remediation));
+      }
+      return `${lines.join("\n")}\n`;
+    },
+    renderSummary(report) {
+      const { success, failure, note } = report.counts;
+      const summary = report.healthy
+        ? `诊断通过：${success} 项通过，${note} 项提示。`
+        : `诊断发现 ${failure} 项问题：${success} 项通过，${note} 项提示。`;
+      return `\n${colorizeCliText(report.healthy ? "success" : "failure", summary)}\n`;
+    },
+  };
 }

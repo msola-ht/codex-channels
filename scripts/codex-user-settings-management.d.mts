@@ -8,13 +8,13 @@ export type CodexUserSettingInput =
       kind: "all";
       model: string;
       reasoningEffort: string;
-      fastEnabled: boolean;
+      serviceTier: "default" | "fast" | "ultrafast";
       sandboxMode: "read-only" | "workspace-write";
       approvalPolicy: "on-request" | "never";
       networkAccess: boolean;
     }
   | { kind: "defaults"; model: string; reasoningEffort: string }
-  | { kind: "fast"; enabled: boolean }
+  | { kind: "service-tier"; serviceTier: "default" | "fast" | "ultrafast" }
   | { kind: "approvals-reviewer"; value: "user" | "auto_review" }
   | { kind: "web-search"; mode: "live" | "indexed" | "cached" | "disabled" }
   | { kind: "update-plan"; enabled: boolean }
@@ -56,12 +56,14 @@ export interface CodexUserSettingsState {
     displayName: string;
     reasoningEfforts: Array<{ effort: string; description: string }>;
     defaultReasoningEffort: string;
+    serviceTiers: Array<{ id: string; name: string }>;
     isDefault: boolean;
   }>;
   defaults: {
     model: string | null;
     reasoningEffort: string | null;
-    fastEnabled: boolean;
+    serviceTier: string | null;
+    accelerationEnabled: boolean;
     webSearch: "live" | "indexed" | "cached" | "disabled" | null;
     updatePlanEnabled: boolean;
     autoRecapEnabled: boolean;

@@ -16,6 +16,12 @@
 卸载由 `scripts/systemd-control.sh` 完成；Gateway unit 显式标记为受监管进程，配置要求重启时
 由 systemd 自动拉起。Gateway 启动前会等待受监管的 App Server 与全部私有 WebSocket 就绪，
 避免开机并发启动时抢跑；Gateway 的日常重启不会停止共享 App Server。
+四份 unit 的 `TimeoutStopSec` 都从共享停止预算渲染为 50 秒，给内部 30 秒清理及子服务
+35 秒退出等待留出余量；`KillMode=mixed` 先只向主进程发送 SIGTERM，由主进程收尾其子进程，
+超时或主进程退出后的剩余进程仍由 systemd 回收。普通停止等待 systemd 完成停止任务。
+升级源码或全局命令不会重写已安装 unit，仅重启也不会应用新模板；需要在本机运行
+`codexc install` 重新生成定义、执行 `daemon-reload` 并重启核心服务。
+该操作只启动已启用的 Relay；WebUI 运行状态保留，已加载 unit 的停止设置由 `daemon-reload` 刷新。
 启停、重启、状态和日志可选择 `gateway`、`appserver`、`webui`、`relay` 或 `all`；
 已安装 WebUI 纳入 `all`，安装时只生成 unit 不自动启动。不写目标时，启停、重启和状态默认
 `all`，日志默认 `gateway`。

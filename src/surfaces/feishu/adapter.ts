@@ -202,6 +202,15 @@ export class FeishuConversationAdapter {
           message.actorId,
         );
         if (cancelledInteraction) this.notifyText(message.target.conversationId, interactionStoppedText);
+        if (result.kind === "hooks") {
+          const response = renderCommandCenterChoices("hooks", result);
+          if (response && this.commandCenter) {
+            await this.commandCenter.openResponse(message.target, message.actorId, response);
+          } else {
+            this.notifyText(message.target.conversationId, renderFeishuCommandResult(result) ?? "");
+          }
+          return;
+        }
         if ((result.kind === "workspace-permissions" || result.kind === "auto-review") && this.commandCenter) {
           const response = renderCommandCenterChoices(result.kind === "auto-review" ? "autoreview" : "workspaceperm", result);
           if (response) {
@@ -478,6 +487,7 @@ export class FeishuConversationAdapter {
           || action === "archived"
           || (action === "plugin" && result.kind === "plugins")
           || action === "schedule"
+          || action === "hooks"
           || (action === "limits" && result.kind === "reset-credit")
         )
           ? renderCommandCenterChoices(action, result)

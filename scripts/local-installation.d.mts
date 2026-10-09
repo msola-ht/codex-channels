@@ -16,6 +16,7 @@ export interface LocalUpdateEnvironment {
 }
 
 export interface CoreServiceReadinessOptions {
+  signal?: AbortSignal;
   gatewayHealthy?: (configPath: string) => boolean | Promise<boolean>;
   inspectSupervisor?: (socketPath: string) => unknown | Promise<unknown>;
   inspectSupervisorState?: (socketPath: string) =>

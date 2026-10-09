@@ -1,5 +1,5 @@
 import { Worker } from "node:worker_threads";
-import { DeliveryError, type DeliveryLimits, type DeliveryQueueEntry, type DeliveryRecord, type DeliveryState, type DeliverySubmission, type DeliverySummary, type JournalCommand, type JournalResult, type WorkerReply } from "./types.js";
+import { DeliveryError, type DeliveryFailure, type DeliveryLimits, type DeliveryQueueEntry, type DeliveryRecord, type DeliveryState, type DeliverySubmission, type DeliverySummary, type JournalCommand, type JournalResult, type WorkerReply } from "./types.js";
 
 // Keep node:sqlite out of CLI imports that only construct a Worker journal.
 export async function readDeliveryQueue(directory: string, options?: { before?: number; state?: DeliveryState; id?: string }) {
@@ -26,15 +26,19 @@ export class DeliveryJournal {
   private closing = false;
   private failed = false;
   private closePromise: Promise<void> | undefined;
+  private failureDetail: DeliveryFailure | undefined;
   readonly ready: Promise<void>;
+  get failure(): DeliveryFailure | undefined { return this.failureDetail; }
 
   /** Liveness only; callers must still await ready before accepting work. */
   get available(): boolean { return !this.failed && !this.closing; }
 
-  constructor(directory: string, private readonly options: { limits?: DeliveryLimits; workerUrl?: URL; onFailure?(): void; mode?: "runtime" | "maintenance" } = {}) {
+  constructor(directory: string, private readonly options: { limits?: DeliveryLimits; workerUrl?: URL; onFailure?(failure: DeliveryFailure): void; mode?: "runtime" | "maintenance" } = {}) {
     this.worker = new Worker(options.workerUrl ?? new URL("./worker.js", import.meta.url), { workerData: { directory, limits: options.limits, mode: options.mode } });
     this.ready = new Promise<void>((resolve, reject) => {
-      this.pending.set(0, { resolve: () => resolve(), reject, bytes: 0, timer: this.deadline() });
+      // Windows initialization performs multiple bounded ACL subprocess calls.
+      // Give startup its own budget; ordinary journal requests stay at 5 seconds.
+      this.pending.set(0, { resolve: () => resolve(), reject, bytes: 0, timer: this.deadline("startup", undefined, process.platform === "win32" ? 30_000 : 5_000) });
     });
     // Startup failure is also observed by the composition root through ready.
     void this.ready.catch(() => {});
@@ -46,12 +50,13 @@ export class DeliveryJournal {
       this.bytes -= pending.bytes;
       if (reply.ok) pending.resolve(reply.result);
       else {
+        this.failureDetail = reply.failure;
         pending.reject(new DeliveryError(reply.code));
-        if (reply.id === 0) { this.fail(); void this.terminate().catch(() => {}); }
+        if (reply.id === 0) { this.fail(reply.failure); void this.terminate().catch(() => {}); }
       }
     });
-    this.worker.on("error", () => this.fail());
-    this.worker.on("exit", () => { if (this.pending.size > 0 || !this.closing) this.fail(); });
+    this.worker.on("error", () => this.fail({ phase: "worker", reason: "worker-error" }));
+    this.worker.on("exit", () => { if (this.pending.size > 0 || !this.closing) this.fail({ phase: "worker", reason: "worker-exit" }); });
   }
 
   submit(value: DeliverySubmission): Promise<number> { return this.call({ type: "submit", value }) as Promise<number>; }
@@ -102,14 +107,15 @@ export class DeliveryJournal {
     const id = this.nextId++;
     this.bytes += bytes;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, bytes, timer: this.deadline() });
+      this.pending.set(id, { resolve, reject, bytes, timer: this.deadline("request", command.type) });
       try { this.worker.postMessage({ id, command }); }
-      catch { this.fail(); }
+      catch { this.fail({ phase: "request", reason: "message", operation: command.type }); }
     });
   }
 
-  private fail(): void {
+  private fail(failure: DeliveryFailure = { phase: "worker", reason: "storage" }): void {
     const notify = !this.failed && !this.closing;
+    if (!this.failed) this.failureDetail = failure;
     this.failed = true;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
@@ -117,14 +123,14 @@ export class DeliveryJournal {
     }
     this.pending.clear();
     this.bytes = 0;
-    if (notify) this.options.onFailure?.();
+    if (notify) this.options.onFailure?.(failure);
   }
 
-  private deadline(): NodeJS.Timeout {
+  private deadline(phase: DeliveryFailure["phase"], operation?: JournalCommand["type"], timeoutMs = 5_000): NodeJS.Timeout {
     return setTimeout(() => {
-      this.fail();
+      this.fail({ phase, reason: "timeout", ...(operation ? { operation } : {}) });
       void this.terminate().catch(() => {});
-    }, 5_000);
+    }, timeoutMs);
   }
 
   private async terminate(): Promise<void> {

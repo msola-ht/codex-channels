@@ -1,4 +1,5 @@
 import type { ConversationCommandResult } from "../application/index.js";
+import { formatConversationHooks } from "./conversation-hook-command-format.js";
 
 import {
   formatConversationAgents,
@@ -98,6 +99,8 @@ export function renderConversationCommandResult(
       return formatConversationMcpResource(result);
     case "plugins":
       return formatConversationPlugins(result);
+    case "hooks":
+      return formatConversationHooks(result.view);
     case "plugin-health":
       return formatConversationPluginHealth(result);
     case "plugin-detail":

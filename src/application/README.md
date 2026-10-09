@@ -4,6 +4,9 @@
 
 ## 文件
 
+- `hook-port.ts`：定义 Hook 列表、安全审查摘要和精确版本信任/启停的窄端口；不暴露任意配置写入。
+- `conversation-hook-service.ts`：在会话锁内执行 `/hooks` 列表、详情、预览和一次性确认；查询、写入和回读固定到同一 Provider，运行配置刷新由 Client 协调共享配置的实例。选择快照与确认仅在内存保留五分钟，绑定 Actor、渠道会话、Workspace、Thread、Hook key/hash 和配置版本；写入尝试后使各 Provider 的旧交互失效，复核 Surface 的无损审查能力，明确展示部分刷新失败，不把保存成功当作实际执行成功。
+
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
   按钮模型选择通过 `selectModel` 接受精确 Provider 与模型身份，不重新解释为文本选择器。
@@ -48,6 +51,9 @@
 - `thread-revert-service.ts`：维护分页历史选择快照、一次性确认令牌、Queue 指纹与执行前并发复核；
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
+  加速档位的纯目录匹配复用 `runtime/service-tier.mjs`，与 CLI/WebUI 使用相同的 Fast、Ultrafast 能力判断；回到 Standard 不受当前目录项的不可用标记阻断。
+  无 Thread 且无显式档位偏好时从目标 Provider 的 Workspace 有效配置读取服务层级，保留 null，不以目录默认层级推断已启用加速；开启加速前经窄端口核对同一作用域的 `features.fast_mode`，写入前后复核订阅。
+  模型目录明确不可用时，浏览保留目录的不可用原因与未知档位，不为显示档位重新连接故障实例；启用加速仍严格检查目录和有效配置。
   独立 RS 切换 Provider 经模型端口读取对应 App Server 目录，官方兼容目录与独立目录分别装配；默认选择保留精确 Provider 和平台模型 ID；总览隔离各 RS 的读取故障，定向操作只查询目标 RS，故障条目不参与能力选择。
   独立目录可从 `model/list` 的默认标记读取默认模型，聚合目录保留含多级路径的完整模型 ID；同一聚合 Provider 内模型选择仍只覆盖下一 Turn，保留当前 Thread。
   官方未登录时为未绑定会话解析唯一第三方，或组合根明确提供的同类账户默认 Provider，并使用其
@@ -68,10 +74,11 @@
   `modelProvider` 的 Thread；思考等级优先采用目标 Provider App Server 的有效配置，目标模型不支持
   或未配置时才回落其目录默认值，避免把原 Provider 的设置或专属历史发送到不兼容的 API；旧 Thread 保持可恢复；
   含内联图片或本地音频的输入在创建或追加 Turn 前必须分别通过当前模型的 `image` 或 `audio` 能力检查；
-  选择 OpenAI 模型时，先通过模型窄端口保存关闭 Fast 的用户默认层级，再设置下一 Turn 的 Standard
-  覆盖；保存失败不更新选择或解绑旧 Thread，App Server 重启后不再加载旧 Fast 默认值。
-  Fast 只允许当前模型目录明确声明支持时切换，并通过模型窄端口保存用户级默认层级；第三方模型
-  不得借关闭 Fast 改写 OpenAI 默认设置。
+  选择 OpenAI 模型时，先通过模型窄端口保存 Standard 用户默认层级，再设置下一 Turn 的 Standard
+  覆盖；保存失败不更新选择或解绑旧 Thread，App Server 重启后不再加载旧加速默认值。
+  Fast 与 Ultrafast 只允许当前模型目录明确声明支持时开启，Standard 可显式退出已有加速档位；
+  主 Provider 通过模型窄端口保存用户级默认层级，独立 Provider 不改写主配置。
+  无绑定偏好恢复时重新检查档位；选择 OpenAI 模型统一重置 Fast/Ultrafast 为 Standard。
 - `luna-reserve-port.ts`：定义账户额度读取、隐藏 Reserve 模型解析和 Thread 设置更新的窄端口；
   Application 不接收生成协议类型。
 - `luna-reserve-service.ts`：在同一 Conversation 锁内处理最终用量错误后的后端授权切换，并按 Thread
@@ -85,7 +92,7 @@
   模式按 Thread 同步，只在内存保存尚未生效的选择。
 - `model-port.ts`：定义项目拥有的 Provider、`text/image/audio` 输入能力、思考等级、服务层级、
   Codex 多代理运行时与可选模型替代提示，以及
-  Fast 默认值窄端口；CLI Setup 的全局模型默认值不进入会话 Application 边界。
+  Standard/Fast/Ultrafast 默认值窄端口；CLI Setup 的全局模型默认值不进入会话 Application 边界。
   Application 和 Surface 不接收完整官方模型对象。
 - `account-port.ts`：分别定义 OpenAI 账户 Token/额度、当前 Thread 官方估算、账户 ID、普通用量权限、
   Luna Reserve 后端授权摘要、第三方余额、Credits/配额窗口和未支持状态的可辨识结果，

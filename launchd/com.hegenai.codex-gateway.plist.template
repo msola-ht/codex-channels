@@ -34,6 +34,8 @@
   <true/>
   <key>ThrottleInterval</key>
   <integer>5</integer>
+  <key>ExitTimeOut</key>
+  <integer>__STOP_TIMEOUT_SECONDS__</integer>
   <key>StandardOutPath</key>
   <string>__RUNTIME_DIR__/gateway.log</string>
   <key>StandardErrorPath</key>

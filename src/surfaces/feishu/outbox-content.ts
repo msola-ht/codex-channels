@@ -1,6 +1,7 @@
 import { DeliveryReceipt } from "../delivery-receipt.js";
 import { contentTruncatedText } from "../output-copy.js";
 import { encodeFeishuPostContent } from "./message-content.js";
+import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 const maximumFeishuMessageContentBytes = 20_000;
 export const maximumFeishuMessageChunks = 5;
@@ -15,6 +16,14 @@ const maximumFeishuBufferedStreamCharacters =
 export interface BoundedStreamText {
   text: string;
   truncated: boolean;
+}
+
+/** Local layout failure; callers can downgrade without treating it as a platform error. */
+export class FeishuMarkdownSplitError extends Error {
+  constructor() {
+    super("飞书消息分片上限不足以完整展示代码围栏");
+    this.name = "FeishuMarkdownSplitError";
+  }
 }
 
 export function boundedStreamText(value: string): BoundedStreamText {
@@ -68,16 +77,40 @@ export function splitFeishuStreamingContent(
       break;
     }
   }
-  const rawHead = characters.slice(0, end).join("");
-  const rawTail = characters.slice(end).join("");
-  const fenceLanguage = openFenceLanguage(rawHead);
-  if (fenceLanguage === null) {
-    return [rawHead, rawTail];
+  // 围栏行不可切开；关闭预算跟随实际围栏长度，而不是固定三反引号。
+  while (end > 0) {
+    let offset = 0;
+    let fence: MarkdownFence | undefined;
+    let delimiterStart: number | undefined;
+    for (const line of text.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
+      const lineLength = [...line].length;
+      const next = advanceMarkdownFence(fence, line);
+      if (offset < end && offset + lineLength > end && next !== fence) {
+        delimiterStart = offset;
+        break;
+      }
+      if (offset + lineLength > end) break;
+      fence = next;
+      offset += lineLength;
+      if (offset >= end) break;
+    }
+    if (delimiterStart !== undefined) {
+      end = delimiterStart;
+      continue;
+    }
+    const rawHead = characters.slice(0, end).join("");
+    const closing = fence === undefined ? "" : `${rawHead.endsWith("\n") ? "" : "\n"}${fence.marker}`;
+    if (end + [...closing].length > maximumCharacters) {
+      end -= end + [...closing].length - maximumCharacters;
+      continue;
+    }
+    const rawTail = characters.slice(end).join("");
+    const tail = fence === undefined ? rawTail : `${fence.opening}\n${rawTail}`;
+    // Reopening a fence must still consume source content, not reproduce the entire input.
+    if ([...tail].length >= characters.length) throw new FeishuMarkdownSplitError();
+    return [rawHead + closing, tail];
   }
-  return [
-    `${rawHead.endsWith("\n") ? rawHead : `${rawHead}\n`}\`\`\``,
-    `\`\`\`${fenceLanguage}\n${rawTail}`,
-  ];
+  throw new FeishuMarkdownSplitError();
 }
 
 export function splitFeishuMarkdownCards(
@@ -124,38 +157,16 @@ export function splitFeishuPost(
   );
 }
 
-function openFenceLanguage(text: string): string | null {
-  let language: string | null = null;
-  for (const line of text.split("\n")) {
-    const match = /^```([A-Za-z0-9_-]*)\s*$/u.exec(line);
-    if (match) {
-      language = language === null ? (match[1] ?? "") : null;
-    }
-  }
-  return language;
-}
-
 export function appendFeishuStreamingTruncation(
   text: string,
   maximumCharacters = maximumFeishuStreamingElementCharacters,
   truncationNotice = feishuTruncationNotice,
 ): string {
   DeliveryReceipt.current()?.markContentIncomplete();
-  const characters = [...text];
-  const notice = [...truncationNotice];
-  const closingFence = text.endsWith("\n```") ? [..."\n```"] : [];
-  const contentLimit =
-    maximumCharacters
-    - notice.length
-    - closingFence.length;
-  const content = closingFence.length > 0
-    ? characters.slice(0, Math.min(contentLimit, characters.length - 4))
-    : characters.slice(0, contentLimit);
-  return [
-    ...content,
-    ...closingFence,
-    ...notice,
-  ].join("");
+  const contentLimit = maximumCharacters - [...truncationNotice].length;
+  const content = [...text].length <= contentLimit ? text
+    : splitFeishuStreamingContent(text, contentLimit)[0];
+  return content + truncationNotice;
 }
 
 function splitFeishuContent(

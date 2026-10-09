@@ -84,7 +84,8 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `model.input.unsupported` | 当前模型不支持该输入类型 | 其他输入模态不支持 |
 | `effort.unsupported` | 当前模型不支持该思考等级并附可选值 | 思考等级与模型不匹配 |
 | `fast.usage` | /fast 用法提示 | 参数格式错误 |
-| `fast.unsupported` | 当前模型不支持 Fast 模式 | Fast 与模型不兼容 |
+| `fast.unsupported` | 当前模型不支持所选 Fast 或 Ultrafast 档位 | 模型目录未声明该加速档位 |
+| `fast.disabled` | 功能开关关闭，不能启用 Fast/Ultrafast；仍可回到 Standard | 目标 Provider 与 Workspace 的有效 `features.fast_mode` 为 false |
 
 ### 会话、Thread 与 Workspace
 
@@ -131,7 +132,7 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `queue.unavailable` | 当前 App Server 不提供持久队列 | Queue 未装配或状态库不可用 |
 | `queue.empty` | App Server Queue 为空 | 启动时没有可用条目 |
 | `queue.busy` | 当前 Thread 有活动或待触发 Turn，请稍后重试 | 启动条目时 App Server 忙 |
-| `queue.pending-overrides` | Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成 | Queue 与下一 Turn 设置同时待处理 |
+| `queue.pending-overrides` | Queue 与待生效的模型、思考、速度或 Plan 选择不能同时存在；请先让其中一方处理完成 | Queue 与下一 Turn 设置同时待处理 |
 | `queue.full` | App Server Queue 已满，最多 100 条 | 原生 Queue 达到容量 |
 | `queue.snapshot.required` | 请先执行 `/queue list` 刷新数字选择快照 | 数字选择器快照过期 |
 | `queue.item-not-found` | 找不到指定 Queue 条目，请使用完整 ID 或刷新列表 | 条目不存在或列表已变化 |

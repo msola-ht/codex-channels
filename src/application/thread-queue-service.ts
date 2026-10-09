@@ -205,7 +205,7 @@ export class ThreadQueueService {
     if (await this.hasItems(threadId)) {
       throw new UserFacingError(
         "queue.pending-overrides",
-        "Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成",
+        "Queue 与待生效的模型、思考、速度或 Plan 选择不能同时存在；请先让其中一方处理完成",
       );
     }
   }

@@ -22,11 +22,10 @@ codexc provider opencode-go default <id>  # 设置新会话默认账户
 codexc provider opencode-go release <id>     # 立即释放该账户隔离 App Server
 ```
 
-首次和后续添加都必须输入账户 ID。Provider 使用 `ocg-<accountId>` 命名，所有账户（包括首个和
-默认账户）都拥有独立的 0600 私有 Profile
+首次和后续添加都必须输入账户 ID。Provider 使用 `ocg-<accountId>` 命名，切换账户（包括首个和
+默认账户）拥有独立的私有 Profile（Unix `0600`，Windows 私有 ACL）
 `~/.codex/sf-ocg-<accountId>.config.toml`。默认账户只由注册表的 `default: true` 标记决定，不使用
-固定的 `main` ID；Key 只进入该 Profile 与对应 App Server 子进程环境，
-不进入注册表、配置或日志。添加账户时必须输入邮箱或手机号码（二选一）；联系方式只用于本机展示，不参与 CLI Provider 路由。模型目录与管理标记共享
+固定的 `main` ID；切换 Key 只进入该 Profile 与对应 App Server 子进程环境，固定 Key 使用[独立私有版本与主配置 `env_key` 引用](provider-integration-guide.md#4-安全边界)，不进入注册表、共享主配置或日志。添加账户时必须输入邮箱或手机号码（二选一）；联系方式只用于本机展示，不参与 CLI Provider 路由。模型目录与管理标记共享
 `~/.codex-connect/providers/opencode-go/`。首个账户也可通过 Setup 选择保留 OpenAI 默认的
 切换模式，或让原生 Codex 和 Gateway 默认使用 OpenCode Go 的固定模式；固定模式会先备份再修改
 `~/.codex/config.toml`。同一时刻只允许一个固定主 Provider；一个 OCG 账户处于固定模式时，其他

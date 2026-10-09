@@ -1,4 +1,5 @@
 export { ConversationEventCoordinator } from "./conversation-event-coordinator.js";
+export type { HookAction, HookEntry, HookCatalog, HookConfigPort, HookCommandView, HookReviewPolicy } from "./hook-port.js";
 export {
   type AccountMetric,
   type AccountPlanType,
@@ -105,6 +106,7 @@ export {
 export {
   ModelSelectionService,
   fastServiceTierId,
+  ultrafastServiceTierId,
   isFastServiceTier,
   listProviders,
   resolveEffort,

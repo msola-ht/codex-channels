@@ -2,14 +2,6 @@ import { clinePassAccountMarkerPath, clinePassAccountsFilePath, isClinePassAccou
 import { createHash } from "node:crypto";
 import { writeResponsesContextFollowers, clinePassFollowsDeepseekContext } from "./responses-context-sync.mjs";
 import { assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-} from "node:fs";
 import { join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
@@ -26,6 +18,9 @@ import { opencodeGoAccountMarkerPath, opencodeGoAccountsFilePath } from "./openc
 import { deepseekAccountMarkerPath, deepseekAccountsFilePath } from "./deepseek-accounts.mjs";
 import { ccgAccountMarkerPath, ccgAccountsFilePath } from "./ccg-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
+import { assertProviderHasNoPlaintextCredentials, createProviderFileAccess, createProviderFileReader, readCodexConfigFile } from "./provider-file-access.mjs";
+export { readCodexConfigFile } from "./provider-file-access.mjs";
+import { managedPrimaryCredentialPath, readManagedPrimaryCredential } from "./managed-provider-credentials.mjs";
 
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
@@ -83,6 +78,7 @@ export function loadManagedModelProviderSettings(environment = process.env) {
     if (!marker) return [];
     const profile = loadConfiguredProviderProfile(environment, definition, {
       tolerateMissingModel: true,
+      readCredential: false,
     });
     return [{
       provider: definition.id,
@@ -198,6 +194,7 @@ export function writeManagedModelProviderProfileDefault(
   );
   const profile = readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
+    environment,
     reasoningEffortPolicy: "ignore",
     tolerateMissingModel: true,
   });
@@ -214,6 +211,7 @@ export function writeManagedModelProviderProfileDefault(
     new Map([[profilePath, stringify(document)]]), new Map([[profile.catalogPath,previousCatalog],[profilePath,previousProfile]]),model);
   readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
+    environment,
     reasoningEffortPolicy: "mirror",
   });
   return { provider: definition.id, ...settings, mode: marker.mode };
@@ -439,6 +437,7 @@ export function loadManagedProviderProfileFor(
     definition.catalogFileName,
   );
   const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
+    environment,
     ...(requireLaunchConfig
       ? {
           expectedCatalogPath,
@@ -464,6 +463,7 @@ export function loadManagedProviderProfiles(environment, { requireLaunchConfig =
       definition.catalogFileName,
     );
     const profile = readProviderProfile(join(codexHome, descriptor.profileName), descriptor, {
+      environment,
       ...(requireLaunchConfig
         ? {
             expectedCatalogPath,
@@ -481,7 +481,7 @@ export function loadManagedProviderProfiles(environment, { requireLaunchConfig =
 export function loadConfiguredProviderProfile(
   environment,
   definition,
-  { tolerateMissingModel = false } = {},
+  { tolerateMissingModel = false, readCredential = true } = {},
 ) {
   const codexHome = codexHomePath(environment);
   const marker = readManagedMarker(environment, definition);
@@ -495,7 +495,9 @@ export function loadConfiguredProviderProfile(
   const profile = readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
     reasoningEffortPolicy: marker.mode === "switching" ? "mirror" : "absent",
+    environment,
     tolerateMissingModel,
+    readCredential,
   });
   if (!tolerateMissingModel) {
     validateModelCatalog(profile.catalogPath, definition, profile.model);
@@ -516,14 +518,17 @@ export function loadConfiguredManagedProviderCredentials(provider, environment =
   const descriptor = providerDescriptor(definition);
   const profilePath = configuredProfilePath(codexHomePath(environment), descriptor, marker.mode);
   const paths = [clinePassAccountsFilePath(environment), managedProviderMarkerPath(environment, definition), profilePath];
+  const credentialKey = addManagedCredentialMaterialPath(paths, profilePath, environment, definition);
   const fingerprint = () => {
     const hash = createHash("sha256");
-    for (const path of paths) hash.update(JSON.stringify([path, readPrivateFile(path, maximumConfigBytes)]));
+    const read = createProviderFileReader(environment);
+    for (const path of paths) hash.update(JSON.stringify([path, read(path, maximumConfigBytes)]));
     return hash.digest("hex");
   };
   const before = fingerprint();
-  const profile = readProviderProfile(profilePath, descriptor, { requireSelection: false });
-  if (fingerprint() !== before || !findManagedProviderDefinition(environment, provider)
+  const profile = readProviderProfile(profilePath, descriptor, { requireSelection: false, environment });
+  if (profile.apiKeyEnvironmentKey !== (credentialKey ?? definition.apiKeyEnvironmentKey)
+    || fingerprint() !== before || !findManagedProviderDefinition(environment, provider)
     || readManagedMarker(environment, definition)?.mode !== marker.mode) throw new Error("Relay CLP account changed during read");
   return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, paths,
     revision: createHash("sha256").update(JSON.stringify([provider, profile.baseUrl, profile.apiKey])).digest("hex") };
@@ -544,9 +549,11 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
   const paths = [registry(environment), managedProviderMarkerPath(environment, definition),
     configuredProfilePath(codexHomePath(environment), providerDescriptor(definition), marker.mode),
     join(directory, definition.catalogFileName), join(directory, definition.catalogManifestFileName)];
+  const credentialKey = addManagedCredentialMaterialPath(paths, paths[2], environment, definition);
   const fingerprint = () => {
     const hash = createHash("sha256");
-    for (const path of paths) hash.update(JSON.stringify([path, readPrivateFile(path, maximumCatalogBytes)]));
+    const read = createProviderFileReader(environment);
+    for (const path of paths) hash.update(JSON.stringify([path, read(path, maximumCatalogBytes)]));
     return hash.digest("hex");
   };
   const before = fingerprint();
@@ -555,7 +562,8 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
   const settings = loadModelCatalogSettings(profile.catalogPath, definition);
   const models = settings.map(model => model.model);
   const modelInputs = Object.fromEntries(settings.map(model => [model.model, model.inputModalities]));
-  if (fingerprint() !== before) throw new Error("Relay Provider 材料读取期间发生变化");
+  if (profile.apiKeyEnvironmentKey !== (credentialKey ?? definition.apiKeyEnvironmentKey)
+    || fingerprint() !== before) throw new Error("Relay Provider 材料读取期间发生变化");
   if (!findManagedProviderDefinition(environment, provider) || readManagedMarker(environment, definition)?.mode !== marker.mode) {
     throw new Error("Relay Provider 账户或模式读取期间发生变化");
   }
@@ -574,11 +582,15 @@ export function readProviderProfile(
     expectedCatalogPath,
     reasoningEffortPolicy = "absent",
     tolerateMissingModel = false,
+    environment,
+    readCredential = true,
   } = {},
 ) {
   let document;
+  let fileAccess;
   try {
-    document = record(parse(readPrivateFile(path)));
+    fileAccess = createProviderFileAccess(environment);
+    document = record(parse(fileAccess.read(path, maximumConfigBytes)));
   } catch (error) {
     if (error?.code === "ENOENT") throw error;
     // TOML 解析错误可能包含带 API Key 的原始配置行，不能作为 cause 暴露。
@@ -633,9 +645,20 @@ export function readProviderProfile(
   ) {
     throw new Error(`Codex ${descriptor.definition.displayName} 提供商配置无效`);
   }
-  const apiKey = provider.experimental_bearer_token;
+  const isMain = fileAccess.isMainConfig(path);
+  if (readCredential && isMain) assertProviderHasNoPlaintextCredentials(provider);
+  if (readCredential && provider.env_key !== undefined && provider.experimental_bearer_token !== undefined) {
+    throw new Error("受管 Provider 凭据配置存在歧义");
+  }
+  if (readCredential && isMain && provider.experimental_bearer_token !== undefined) {
+    throw new Error("受管固定 Provider 使用不安全的明文凭据；请显式重新配置账户后重启 App Server");
+  }
+  if (readCredential && !isMain && provider.env_key !== undefined) throw new Error("受管切换 Provider 凭据配置无效");
+  const apiKey = !readCredential ? undefined : isMain && provider.env_key !== undefined
+    ? readManagedPrimaryCredential(environment, descriptor.definition, provider.env_key)
+    : provider.experimental_bearer_token;
   if (
-    !isManagedProviderApiKeyValid(descriptor.definition, apiKey)
+    readCredential && !isManagedProviderApiKeyValid(descriptor.definition, apiKey)
   ) {
     throw new Error(`Codex ${descriptor.definition.displayName} API Key 缺失或无效`);
   }
@@ -649,11 +672,20 @@ export function readProviderProfile(
     name: descriptor.id,
     baseUrl: descriptor.baseUrl,
     wireApi: descriptor.wireApi,
-    apiKeyEnvironmentKey: descriptor.definition.apiKeyEnvironmentKey,
+    apiKeyEnvironmentKey: isMain && provider.env_key !== undefined ? provider.env_key : descriptor.definition.apiKeyEnvironmentKey,
     supportsWebsockets: descriptor.definition.supportsWebsockets,
     ...(descriptor.definition.webSearch ? { webSearch: descriptor.definition.webSearch } : {}),
     apiKey,
   };
+}
+
+function addManagedCredentialMaterialPath(paths, profilePath, environment, definition) {
+  let config;
+  try { config = record(parse(createProviderFileReader(environment)(profilePath, maximumConfigBytes))); }
+  catch { throw new Error("受管 Provider 凭据引用无法安全读取"); }
+  const key = record(record(config.model_providers)[definition.id]).env_key;
+  if (key !== undefined) paths.push(managedPrimaryCredentialPath(environment, definition, key));
+  return key;
 }
 
 // 切换模式 Profile 必须镜像所选模型的目录默认思考等级（"mirror"）；
@@ -672,25 +704,6 @@ function reasoningEffortMismatch(document, selectedModel, reasoningEffortPolicy)
 
 export function readPrivateFile(path, maximumBytes = maximumConfigBytes) {
   return readPrivateFileSync(path, maximumBytes);
-}
-
-export function readCodexConfigFile(path) {
-  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-  const descriptor = openSync(realpathSync(path), constants.O_RDONLY | noFollow);
-  try {
-    const metadata = fstatSync(descriptor);
-    const currentUid = process.getuid?.();
-    if (
-      !metadata.isFile()
-      || metadata.size > maximumConfigBytes
-      || (currentUid !== undefined && metadata.uid !== currentUid)
-    ) {
-      throw new Error("Codex 配置文件权限、类型或大小无效");
-    }
-    return readFileSync(descriptor, "utf8");
-  } finally {
-    closeSync(descriptor);
-  }
 }
 
 function validateModelCatalog(path, definition, model = definition.defaultModel) {

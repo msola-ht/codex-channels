@@ -372,8 +372,10 @@ export function materializeGatewayConfigDefaults(configPath, document) {
 export function writeGatewayConfig(configPath, document, { maximumBytes } = {}) {
   if (process.platform === "win32" && !existsSync(configPath)) {
     const parent = dirname(resolve(configPath));
-    mkdirSync(parent, { recursive: true, mode: 0o700 });
-    securePrivateDirectorySync(parent);
+    if (!existsSync(parent)) {
+      mkdirSync(parent, { recursive: true, mode: 0o700 });
+      securePrivateDirectorySync(parent);
+    }
   }
   return withGatewayConfigLock(configPath, () => {
     const generated = stringify(document);

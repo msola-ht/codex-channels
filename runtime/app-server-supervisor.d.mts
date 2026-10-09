@@ -105,5 +105,5 @@ export function sameAppServerTopology(
   actual: InspectedAppServerTopology | undefined,
   expected: AppServerTopology,
 ): boolean;
-export function prepareAppServerSocketPaths(socketPaths: string[]): Promise<void>;
-export function appServerSocketAcceptsWebSocket(socketPath: string): Promise<boolean>;
+export function prepareAppServerSocketPaths(socketPaths: string[], environment?: NodeJS.ProcessEnv): Promise<void>;
+export function appServerSocketAcceptsWebSocket(socketPath: string, environment?: NodeJS.ProcessEnv): Promise<boolean>;

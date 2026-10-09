@@ -2,7 +2,23 @@
 
 本目录保存 npm CLI 与已编译 Gateway 必须直接共享的稳定 JavaScript 模块，不承载会话业务。
 
+## 跨平台边界
+
+修改本目录的共享接口前，按[跨平台变更规则](../docs/development-rules.md#cross-platform-changes)追踪三平台调用方；文件位于 `runtime/` 或调用方最先在 Windows 报错，都不能据此缩小影响范围。
+
+| 责任 | 共享合同 | 平台实现边界 |
+| --- | --- | --- |
+| 进程与 Transport | 调用方持有并回收自己创建的进程；关闭连接不停止共享 App Server；失败保留归属 | `owned-process`、`process-lifecycle` 处理 Windows Job/IPC 与 Unix 信号、已登记进程组；Codex Client 只消费注入端口 |
+| 私有路径 | 在实际使用边界检查受信任路径及文件，不以宽松回退绕过错误 | `private-file`、Socket 运行时分别落实 Unix 所有者/权限/rendezvous 与 Windows ACL/重解析点/目录句柄 |
+| Provider 与凭据 | 配置预览、事务、备份恢复、启动使用同一认证约束；普通切换保留配置语义 | OS 差异限于文件保护和环境变量处理，不能因 Windows 凭据修复改变三平台认证方式；Relay 保持独立凭据边界 |
+| 生命周期 | bootstrap、监管器和服务宿主各自关闭所拥有资源，取消和超时不冒充完成 | `shutdown-budget` 提供共享预算，由前台包装层、Windows 宿主及 Unix 服务模板消费；安装脚本负责定义激活 |
+
+本表划分责任，不扩大平台支持承诺。模块接口变化须核对 `.d.mts`、公开导出和实际调用方；具体启动方式及升级步骤见[用户指南](../docs/user-guide.md)与[源码安装](../docs/source-install.md)。
+
+## 文件
+
 - `request-timing.mjs` / `request-timing.d.mts`：指标 IPC、存储、CLI 与 WebUI 共用的生成区间校验和观测速度计算；无 I/O、不依赖调试转储。
+- `service-tier.mjs` / `service-tier.d.mts`：Application、CLI 设置与 WebUI 共用的纯加速档位匹配和展示归一；Fast 仅匹配目录的 `fast`/`priority`，Ultrafast 仅匹配 `ultrafast`，返回原始目录 ID，不包含配置写入、功能开关或生命周期操作。
 - `auto-review-metadata.mjs` / `auto-review-metadata.d.mts`：Provider 指标与转储读取共用的自动审查来源、父任务及原始审查身份投影；只接受明确的 `guardian_review` 来源和有界标识，不读取文件或推断缺失归属。
 - `auto-review-provider-policy.mjs` / `auto-review-provider-policy.d.mts`：按已验证的 Provider 模型目录来源统一判定自动审查准入；只允许官方 OpenAI 和复用官方模型目录的自定义 Provider，供设置入口与会话执行门禁共用，不根据模型名称或认证方式推断支持。严格读取用于执行门禁；管理设置投影将读取失败标记为不可用及安全原因，只限制开启，不阻断其他设置或关闭、清除覆盖。
 
@@ -77,6 +93,8 @@
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
   config 编辑映射；DeepSeek、OpenCode Go、CCG 与自定义 Provider 共用一次 HTTP 重试、零次流重连的
   故障边界，避免 Codex 默认两层重试相乘；OpenAI 官方 Provider 保持 Codex 原生策略。
+- `managed-provider-credentials.mjs` / `managed-provider-credentials.d.mts`：受管固定 Provider 的不可变版本凭据与 `env_key` 引用，私有 JSON 严格绑定 Provider 和上游 Origin；不写用户文件，保存由账户配置事务负责。运行读取拒绝明文固定配置，设置投影只读模型元数据以支持明确重配；启动环境和 Relay 材料复用同一引用。
+- `provider-credential-document.mjs` / `provider-credential-document.d.mts`：受管与自定义固定 Provider 共用的四字段 Schema v1 凭据编码、结构解析、Provider/Origin 绑定与 16 KiB 读取上限；不访问文件，API Key 校验与文件生命周期仍由 Provider 所属模块负责。
 - `opencode-go-quota-windows.mjs` / `opencode-go-quota-windows.d.mts`：为 OpenCode Go 统计代理
   提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照，以 `{ windows, observedAtMs }` 返回成功采样
   的窗口及本地接收时刻；缓存命中保持原时刻，真实请求成功后才更新。按最早 `resetsAt` 失效前缓存，失败时短时
@@ -85,6 +103,7 @@
 - `model-provider-runtime.mjs` / `model-provider-runtime.d.mts`：保留受控模型 Provider 运行时的稳定
   导出门面与 TypeScript 接口；`readManagedMarker` 提供单个 Provider 管理标记的只读查询，不读取其他账户注册表。门面不承载具体读取、写入或启动逻辑。
 - `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录读取；提供原生协议集合、目录输入能力、CLP 独立转发目录与模型覆盖与思考声明、依赖路径和修订摘要，不读取 OAuth 或创建 App Server。
+  受管及自定义 Provider 材料复用 `provider-file-access` 的文件归属判断，指纹不自行选择 ACL 策略。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile；
   管理每个受管 Provider 的独立模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
@@ -94,6 +113,9 @@
   管理 `sf-custom-<id>` 私有 Profile；按 Provider 类型校验官方或独立 Responses 模型目录，并严格限制为单个目标 Provider
   块和直接 API Key 字段。注册表与 Profile 的增删改共用私有文件锁并支持执行前快照保护，
   Provider 块与 Key 不进入主配置。
+  Gateway 新增或替换的固定 Key 使用不可变的当前用户私有凭据版本，主配置只引用独立 `env_key`；普通切换保留既有环境变量引用、OAuth 或无认证语义。提供私有凭据读取、创建及显式删除端口，
+  校验 Provider、Origin、版本与文件私有性，拒绝旧主配置明文凭据启动。配置写入结果未知时保留新旧凭据供实际引用选择。
+  `assertCustomPrimaryProviderAuthentication` 由切换计划和运行时共同消费，在切换写入前拒绝不支持的认证字段。
 - `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
@@ -137,6 +159,7 @@
   变量仍保持最高优先级。CLI 与脚本只负责准备已校验的运行环境和默认 Workspace。
   受管 Provider 设置应用只刷新目标实例的启动参数与私有环境；释放运行实例前通过临时 Client
   读取全部已加载 Thread 的权威状态，并复核租约与取消。活动任务、原生租约和读取失败均阻止重启；
+  临时 Client 复用共享命令解析和进程回收端口，Windows 的 npm 启动脚本与直接可执行文件采用相同连接流程。
   已开始释放后完成目标恢复，恢复失败保留重试意图并如实标记未运行；原本未运行实例只刷新材料。
   账户拓扑变化仍要求显式服务管理。
   宿主仅在内存持有管理标记、实际 Profile 与模型目录内容的已应用指纹及该代默认模型；Gateway 重建时可重新核对，
@@ -144,7 +167,9 @@
   普通按需启动同样重读并校验目标材料，实例就绪后才确认基线；运行实例不会因 ensure 被自动重启。
   释放子进程即失效其基线，后续原生租约启动采用新材料；释放后调用方取消仍完成恢复并记录实际成功的基线。
 - `gateway-service-runtime.mjs`：持有内部 Gateway 服务子进程及其 reload、终止、退出信号转发；受管服务
-  启动前的 App Server 就绪等待由服务命令脚本注入。
+  启动前的 App Server 就绪等待由服务命令脚本注入，可由停止请求取消；停止后不再创建 Gateway。
+  Windows 子进程保留 IPC，接收端安装控制监听后才转发停止和重新加载消息；重载沿用调用方的绝对截止时间和取消信号，
+  启动等待及下游转发均可撤销，只有最终 Gateway 接受重载后才逐层确认，退出后移除转发监听。
 - `app-server-unix-socket.mjs` / `app-server-unix-socket.d.mts`：校验固定 CLI 的 Unix rendezvous 链接、规范路径 SHA-256、受保护目录及真实 Socket 的权限和属主；Transport 与监管探测共用，连接仅使用校验后的物理路径，失效链接保留时不操作其目标。
 - `private-ipc.mjs` / `private-ipc.d.mts`：为 Gateway Owner、账户操作、Delivery 控制、Relay 控制与指标、
   队列通知、Provider Metrics 和 App Server Supervisor 提供共享的当前用户私有 IPC。
@@ -156,14 +181,17 @@
   异常退出可能留下绑定名及公开端点；公开端点沿既有占用探测恢复，不扫描删除无法证明归属的随机名字。
   Windows 使用默认仅创建用户与管理员可访问的命名管道，并在当前 SID 私有描述文件中保存随机管道名和随机
   认证令牌，连接首帧必须认证，关闭时只删除当前所有者发布的描述文件。
+  公共层从接受连接起管理全部 Socket，包括尚未认证的连接；认证受绝对期限限制，停止监听时统一关闭连接。
   Relay 指标与控制查询共用单次 JSON 请求生命周期：调用方指定回应字节上限、绝对截止时间及可选取消信号，
   统一关闭连接和清理等待，不重试；业务版本、关联 ID、确认结果和持久化含义由调用方验证。
 - `app-server-supervisor.mjs`：以当前用户私有 IPC 持有 App Server 监管入口互斥锁，
+  监管检查将无响应或连接失败作为不可用错误交给启动等待重试，不将其误报为协议不兼容；已收到但不合法的响应仍拒绝使用。
   各平台监听与端点清理统一委托 `private-ipc.mjs`；关闭仍先销毁租约连接，再等待在途 Provider 操作，关闭后拒绝重启同一 Owner。
   对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供主 App Server 与受控 Provider 的按需
   启动、释放与 Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`），
   并为 macOS Desktop 受管 stdio Proxy 提供带独立能力版本的可信 Host 租约；全局串行附加到选中的 Provider，该租约阻止目标实例被
   空闲释放，最后一个租约关闭后清除未来启动所用的临时 Pipe 附加状态；
+  Provider 与 Desktop Host 客户端共用有限租约释放，未收到对端关闭确认时销毁连接并报告失败，不无限等待 CLI 退出。
   拓扑同时区分已配置、运行中、主动释放和持有租约的实例。租约由私有 Socket 连接持有，断开时自动撤销，
   存在租约时拒绝释放；同一实例的启动、释放与租约获取串行执行，释放结果明确区分已释放、
   租约占用和实例未运行，启动、释放与账户删除遇到旧版或无效监管响应时失败关闭并提示重启服务。
@@ -196,9 +224,12 @@
   label、Windows 计划任务名称、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor
   复用。
 - `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号、
+  父子服务 IPC 控制监听就绪握手和有界发送；控制就绪不代表服务业务就绪，停止优先于尚未发送的重载，
+  停止确认表示交付 IPC；重载按请求标识逐层等待最终接收确认，截止或断开撤销未接受的请求，
+  并发请求独立取消且在途数量有上限。停止幂等并拒绝后续重载；仅生成该服务的父进程 IPC 断开也进入停止，普通 App Server 客户端断开不触发此行为。重载确认不代表配置已经应用，确认丢失只能报告结果未确认；
   按温和终止、强制终止和有限终态等待关闭单个子进程；显式注册的 Unix 独立进程组用于 Desktop
   Host 及其原生子进程的共同终止，其他子进程仍按原 PID 处理。Windows 对调用方精确持有的 PID 使用系统
-  `taskkill.exe /T` 终止该子进程树，避免批处理 Shim 退出后遗留 Codex 后代，且不扫描或结束其他 Codex
+  `taskkill.exe /T` 终止该子进程树，单次命令最多 2 秒，超时拒绝确认完成；受管 Codex 子树另由下面的 Job 宿主保证归属，不扫描或结束其他 Codex
   进程；前台 `codexc run` 的父子 Node 进程先通过仅父子可用的 IPC 请求正常关闭 Gateway、Supervisor
   和私有端点，超时或 IPC 不可用时才回到精确 PID 树终止；多个 Windows Console 信号处理器并发终止
   同一进程树时，以精确 PID 已不存在作为完成结果；
@@ -206,6 +237,10 @@
   入口收到退出信号后停止监管请求、等待已开始的
   Provider 操作，并对全部子进程执行有限终止。可标记失败已由子命令展示，避免嵌套 CLI 重复报错。
   具体关闭超时和资源清理仍由各生命周期所有者决定。
+- `shutdown-budget.mjs` / `shutdown-budget.d.mts`：共享 Gateway 与 App Server 监管进程的 30 秒关闭截止、包含 IPC 交付的子服务 35 秒正常退出等待、外层 50 秒回收等待；同一外层预算以秒供 launchd `ExitTimeOut`、systemd `TimeoutStopSec` 与 launchd 卸载确认消费，计划任务停止另有 20 秒确认期限。外层不得在内层允许的正常清理期限内提前强制终止，内部直接入口也不能无限等待启动或资源清理。
+- `owned-process.mjs` / `owned-process.d.mts` / `windows-owned-process.ps1` / `windows-native.cs`：Windows 受管 Codex、状态查询及维护命令的原生 Job 宿主；使用现有 PowerShell 7 在构建阶段生成 DLL，无新增包依赖。通过创建属性原子绑定不可脱离的 Job，再恢复挂起子进程；helper 核对真实父 PID 与创建时间并持有父进程句柄，父调用者或根进程退出时终止并确认 Job 清空，helper 异常退出由内核关闭 Job 回收后代。计划任务启动器复用独立外层 Job 并显式传递工作目录。Proxy 在启动前校验当前用户独占 Socket 目录，通过句柄相对打开固定完整祖先目录并拒绝重解析点及非本地盘路径；额外创建 delete-on-close guard，防止最终目录原地转换，直到连接进程退出。基础 ACL/Doctor 检查不创建 guard，不对最终空目录承诺同等原地转换防护。
+- `windows-native-load.ps1`：Job、ACL 与计划任务启动器共用的原生 DLL 加载入口，校验 `dist/windows-native` 内清单的版本、PowerShell 主次版本、.NET 主版本及源码和 DLL 的 SHA-256；从校验后的字节加载，不锁住安装目录内的 DLL。缺失、不匹配或加载失败时明确要求重新构建/安装，不在日常命令中编译或写入缓存。哈希用于产物一致性检查，不替代包目录的权限保护。
+- `provider-credential-policy.mjs` / `provider-credential-policy.d.mts`：在固定、切换和聚合 App Server 启动边界，为凭据生成本次进程专用的随机环境名，并通过官方 `shell_environment_policy.set` 将工具 shell 中的同名值覆盖为空；模型认证仍从 App Server 环境读取。保留已有环境过滤规则，不修改磁盘配置，不能据此宣称同一用户或所有插件工具均无法访问宿主凭据。
 - `cli-presentation.mjs` / `cli-presentation.d.mts`：集中定义公开 CLI 的成功、失败、提示和处理
   状态标签、颜色、输出流路由和换行，Doctor 检查项另用通过；统一遵守 TTY 与 `NO_COLOR`，
   重定向输出保持纯文本。
@@ -230,27 +265,32 @@
 - `connect-home.mjs` / `connect-home.d.mts`：统一解析 Gateway 数据目录（`CODEX_CONNECT_HOME`
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup 与 Runtime 复用。
+- `provider-file-access.mjs` / `provider-file-access.d.mts`：在创建访问器时绑定当前环境的 Codex Home，通过 `isMainConfig` 精确规范化匹配唯一共享主配置；其他路径（包括同名备份）保持严格私有。Provider 的读取、凭据认证选择、指纹、事务写入和回滚使用同一归属判断，不由业务入口选择权限标记；不改变磁盘路径或格式。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
   文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，
   避免路径校验后被符号链接替换；Windows 使用解析后的 PowerShell 7 `pwsh` 调用结构化 SID/ACL
-  适配器，单次调用超过 2 秒即终止并拒绝操作；原子写入前同时收紧父目录，严格私有路径关闭继承，只允许当前 SID、SYSTEM 和
+  适配器，冷启动调用最多 5 秒、复用调用最多 2 秒，超时终止并拒绝操作；Windows 原子写入使用先收紧权限的临时子目录，已有父目录只校验所有者与写入权限，不移除上游沙箱读取权限；严格私有文件关闭继承，只允许当前 SID、SYSTEM 和
   Administrators 完全控制；状态库、任务库、指标库、媒体、渠道输出和受管备份复用同一合同；
   App Server Socket 目录通过 `secureAppServerSocketDirectorySync` 将已受信任目录收紧为锁定 CLI 要求的单条当前 SID 可继承完全控制权限；其他目录写入与父目录读取接受并保留此更严格权限，不向 Socket 目录重新添加 SYSTEM/Administrators。
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
+  `readCodexConfigFileSync` / `assertCodexConfigAccessSync` 对共享主配置校验当前用户所有权及写入完整性，允许上游继承的只读访问，不声称主配置机密性；Provider Profile、凭据、备份仍要求严格私有。普通设置不增加 RPC 后 ACL 修复事务。
+  Provider 原文事务通过 `writeCodexConfigFileAtomic` 写共享主配置：Windows 在目标同目录先创建空文件并设私有 ACL，再写内容，使用原生替换保留已有 DACL；新配置继承已校验父目录的 ACL。替换失败保留恢复目录中的原文件及尚存临时文件，报告路径，不盲目清理未确认结果。普通私有写入不使用此合同。
   `WindowsPrivatePathError` 区分 ACL 检查超时、输出超限、进程启动失败和检查进程失败，附有界路径及操作类型；结构化拒绝只展示允许列表内的原因和阶段，不透传原始 PowerShell 异常或输出；服务定义读取保留该诊断。
   `repairWindowsPrivateFileSync` 仅供显式 `security repair` 使用：管理员所有的普通文件须有当前 SID 完全控制且无拒绝规则，才能恢复当前用户所有权；常规读取和写入不放宽所有者校验。
-  Codex Home 顶层 TOML 的所有者、继承和访问规则拒绝会附带修复命令；目录、进程故障与修复操作自身失败不误报同一建议。
-  异步配置读取额外只读校验父目录，检测读取期间变化；Windows 在同一次异步调用中持有禁止写入和替换的只读文件句柄并检查文件、父目录 ACL，不修复权限、不缓存校验结果，支持取消及有界读取。默认读取上限仍为 1 MiB，CLP 模型目录可显式选择不超过 2 MiB 的上限，两平台使用同一字节限制。
-- `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器；stdin/stdout 明确使用 UTF-8，不继承控制台代码页；只读取固定 JSON 请求，通过 .NET
+  Codex Home 顶层严格私有 TOML 的所有者、继承和访问规则拒绝会附带修复命令；共享主配置由 Doctor 提示检查文件及父目录的所有者和写入权限，目录、进程故障与修复操作自身失败不误报文件修复建议。
+  Windows 同步及异步读取均在同一只读文件句柄内校验文件、父目录 ACL 并读取，禁止在途写入和替换，不修复权限、不缓存结论。默认上限 1 MiB；异步目录读取最多 2 MiB，同步调用保留既有恢复记录所需的最多 16 MiB。异步取消在句柄释放后完成。
+- `windows-acl-bridge.mjs`：进程内复用隐藏的 PowerShell ACL 适配器，通过 worker 和私有管道支持同步及异步调用；不缓存 ACL 结论。最多 16 个待处理请求，冷启动含 DLL 加载最多 5 秒，复用请求含排队最多 2 秒；每次检查期间固定完整祖先目录，拒绝重解析点及非本地盘路径。超时、输出超限或进程退出后销毁该实例，下次重新建立。取消排队请求只移除本项；取消在途读取则丢弃结果，等本次读取关闭句柄后释放槽位，保留原期限，不中断其他请求。
+- `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器，支持逐行请求及单次调用；stdin/stdout 明确使用 UTF-8，不继承控制台代码页；只读取固定 JSON 请求，通过 .NET
   ACL 类型设置或校验 Owner、访问规则、继承、文件类型与 reparse point，并返回结构化结果，不解析
   本地化命令输出。写操作按绝对路径使用有界命名 Mutex 串行化 ACL 识别与更新，避免并发写入重新放宽 Socket 目录权限。
+  原生 DLL 加载失败使用保留退出码 78，桥接器映射为 `ERR_WINDOWS_NATIVE_LOAD`；等待输出流关闭后分类，避免 stdin 提前断开掩盖原因。公开错误明确要求重新构建/安装，不将组件故障归类为 ACL 不合格，也不传递原始异常或 stderr。
 - `private-file-lock.mjs` / `private-file-lock.d.mts`：为跨越异步配置事务的私有文件更新提供
   PID 所有权、陈旧锁回收和替换锁保护，锁目录与锁文件同样使用当前平台私有权限，供 Provider 管理与
   微信配置/凭据事务串行写入。
 - `windows-dpapi.mjs` / `windows-dpapi.d.mts` / `windows-dpapi.ps1`：通过 PowerShell 7 调用
   `ProtectedData` 的 `CurrentUser` 作用域保护和解保护小型二进制主密钥；只接受 Base64 JSON stdin/stdout，
-  不把输入或底层异常写入日志。
+  单次调用最多 5 秒，继承调用方明确传入的环境，不把输入或底层异常写入日志。
 - `windows-secure-record.mjs` / `windows-secure-record.d.mts`：Windows 版本化安全凭据记录；每个凭据
   目录持有一个 DPAPI 保护的随机 256-bit 主密钥，记录继续使用随机 IV 的 AES-256-GCM，文件名只含
   记录键摘要，目录和文件同时复用当前 SID 私有 ACL 与原子替换。
@@ -263,7 +303,7 @@
 - `model-relay-model-id.mjs` / `model-relay-model-id.d.mts`：公共调用 ID 的解析与目录映射，CLP 对外去掉上游前缀，保留出站精确原始 ID。
 - `model-relay-listen-host.mjs` / `model-relay-listen-host.d.mts`：配置与 HTTP 服务共用的纯监听地址校验，接受回环、RFC1918 IPv4 和显式 IPv4 通配地址，不解析 DNS 或选择网卡。
 - `model-relay-paths.mjs` / `model-relay-paths.d.mts`：按配置路径派生控制与指标端点。
-- `model-relay-material-reader.mjs` / `model-relay-material-worker.mjs`：单 Worker 按固定用途读取 Provider 材料或指标身份快照；串行、可取消、有界，不阻塞调用线程。指标身份准备限时 750 毫秒，不返回凭据或身份哈希。配置两次读取间发生原子替换时丢弃快照并完整重读一次，持续变化或校验失败则拒绝，不延长原有截止时间。
+- `model-relay-material-reader.mjs` / `model-relay-material-worker.mjs`：单 Worker 按固定用途读取 Provider 材料或指标身份快照；串行、可取消、有界，不阻塞调用线程。Provider 材料限时 2 秒，指标身份准备限时 750 毫秒，不返回凭据或身份哈希。同一个绝对截止时间传到 Windows ACL 请求，内层冷启动和排队预算不能超过外层操作剩余时间。配置两次读取间发生原子替换时丢弃快照并完整重读一次，持续变化或校验失败则拒绝，不延长原有截止时间。
 - `model-relay-metrics-authorization.mjs` / `model-relay-metrics-authorization.d.mts`：Gateway 指标身份异步鉴权，最多保留 8 个检查；读取当前配置中的活动/历史身份，校验提供商和已签发代次；取消或关闭后的迟到鉴权结果不得通过。
 - `model-relay-service.mjs` / `model-relay-service.d.mts`：独立进程组合与生命周期、材料刷新/撤销、共享网络出口选择和可选 V2 Relay 转储 owner；未变化配置不重复发布准入策略，代理连接池跟随全局并发上限；复用全局 debug 开关、裁剪模式和保留天数；不复用 App Server 的代理实例。
   服务诊断通过 `dist/observability/index.js` 的安全 Logger 输出服务、模块、事件和受限错误字段，不输出原始异常正文。

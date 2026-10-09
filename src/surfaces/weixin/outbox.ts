@@ -1,4 +1,5 @@
 import { isPersistentOutput } from "../persistent-output.js";
+import { SnapshotDelivery } from "../snapshot-delivery.js";
 import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import type { Logger } from "pino";
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
@@ -18,6 +19,7 @@ import type { SurfaceOutputPort } from "../types.js";
 import {
   createTurnStartedPresentation,
   createAutoApprovalReviewPresentation,
+  createHookCompletedPresentation,
   isHiddenAutoApprovalReview,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
@@ -90,6 +92,7 @@ export interface WeixinOutboxOptions {
 }
 
 export class WeixinOutbox implements SurfaceOutputPort {
+  private readonly snapshots = new SnapshotDelivery();
   private readonly compactionNotices = new ContextCompactionNotices();
   private readonly delivery: ConversationDeliveryQueue;
   private readonly accountId: string;
@@ -138,6 +141,15 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+  }
+
+  deliverSnapshot(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void> {
+    return this.snapshots.run(event, signal, authorized, () => {
+      if (this.closed || !this.matches(event.target) || event.type !== "hook.completed") {
+        throw new Error("状态投递目标无效或已关闭");
+      }
+      withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+    });
   }
 
   retains(event: OutputEvent): boolean {
@@ -276,6 +288,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   private render(event: OutputEvent): string | null {
     switch (event.type) {
+      case "hook.completed":
+        return formatWeixinCommandText(
+          renderPlainLifecyclePresentation(createHookCompletedPresentation(event)),
+          { structuredFields: true },
+        );
       case "autoApprovalReview.updated": {
         const presentation = createAutoApprovalReviewPresentation(event);
         return presentation ? formatWeixinCommandText(

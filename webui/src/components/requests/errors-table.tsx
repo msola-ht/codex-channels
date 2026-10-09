@@ -1,7 +1,7 @@
 import { Link } from "react-router"
 import { DataTable, TableHint, TruncatedText, type DataTableColumn, type DataTableProps } from "@/components/metrics/data-table"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
-import { FastBadge } from "@/components/metrics/service-tier"
+import { AccelerationBadge } from "@/components/metrics/service-tier"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { TrafficModel } from "@/components/traffic/traffic-model"
@@ -22,7 +22,7 @@ export function ErrorsTable({ records, query, loading, pagination }: {
       return <><ProviderBadge provider={record.provider} /></>
     } },
     { id: "model", enableSorting: false, header: t("metrics.model"), cell: ({ row: { original: record } }) => {
-      return <><span className="flex items-center gap-2 whitespace-nowrap"><TrafficModel provider={record.provider} request={record.model} responses={[]} /><FastBadge tier={record.requestServiceTier} source="request" responseTier={record.serviceTier} /></span></>
+      return <><span className="flex items-center gap-2 whitespace-nowrap"><TrafficModel provider={record.provider} request={record.model} responses={[]} /><AccelerationBadge tier={record.requestServiceTier} source="request" responseTier={record.serviceTier} /></span></>
     } },
     { id: "reasoningEffort", enableSorting: false, header: t("metrics.reasoningEffort"), cell: ({ row }) => row.original.reasoningEffort ?? "—" },
     { id: "status", enableSorting: false, header: t("filters.status"), cell: ({ row: { original: record } }) => {

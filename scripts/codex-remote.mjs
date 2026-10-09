@@ -23,8 +23,10 @@ import {
   assertSynchronousChildSuccess,
   ForwardedChildSignalError,
   ReportedChildExitError,
+  terminateChildProcess,
 } from "../runtime/process-lifecycle.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { codexProcessInvocation } from "../runtime/owned-process.mjs";
 import { defaultCodexRemoteProfile, parseCodexRemoteOptions } from "./codex-remote-options.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
@@ -291,7 +293,11 @@ function assertAggregateProviderArguments(args) {
 async function aggregateModelArguments(socketPath, codexBinary, passthrough) {
   const { CodexAppServerClient, JsonRpcClient, createAppServerTransport } = await import("../dist/codex-client/index.js");
   const client = new CodexAppServerClient(new JsonRpcClient(
-    createAppServerTransport({ kind: "local-app-server", socketPath }, { codexBinary, connectTimeoutMs: 3_000 }),
+    createAppServerTransport({ kind: "local-app-server", socketPath }, {
+      createCodexProcessInvocation: args => codexProcessInvocation(codexBinary, args),
+      terminateCodexProcess: terminateChildProcess,
+      connectTimeoutMs: 3_000,
+    }),
   ), { sandbox: "read-only" });
   try {
     await client.connect();

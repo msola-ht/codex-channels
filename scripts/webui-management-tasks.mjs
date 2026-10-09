@@ -5,6 +5,8 @@ import { webuiLogger } from "./webui-logger.mjs";
 
 import { isPrunableMetricsProviderId } from "./metrics-command-options.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { ownedProcessInvocation } from "../runtime/owned-process.mjs";
+import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 
 const targets = new Set(["gateway", "app-server", "webui", "model-relay", "all"]);
 const serviceActions = new Set(["install", "uninstall", "start", "stop", "reload", "restart"]);
@@ -85,7 +87,8 @@ export class WebuiManagementTaskRunner {
       error: null,
       result: null,
       process: null,
-      cancelTimer: null,
+      cancelTask: null,
+      cancelFailed: false,
       auditMetadata,
     };
     this.#tasks.set(id, task);
@@ -146,17 +149,24 @@ export class WebuiManagementTaskRunner {
       task.updatedAt = new Date(this.#now()).toISOString();
       this.#emitTerminal(task, "cancelled", "cancelled", "none");
     } else if (task.state === "running" && task.process) {
-      task.process.kill();
       task.state = "cancelling";
+      task.error = null;
+      task.cancelFailed = false;
       task.updatedAt = new Date(this.#now()).toISOString();
-      task.cancelTimer = setTimeout(() => {
-        if (task.state !== "cancelling" || task.process === null) return;
-        try {
-          task.process.kill("SIGKILL");
-        } catch {
-          // The close/error event will finalize the task when possible.
-        }
-      }, this.#cancellationGraceMs);
+      task.cancelTask = terminateChildProcess(task.process, { gracePeriodMs: this.#cancellationGraceMs })
+        .then(() => true, (error) => {
+          task.cancelFailed = true;
+          if (task.state === "cancelling") {
+            // Retain ownership and block overlapping tasks until the child exits.
+            // Returning to running makes cancellation retryable without inventing success.
+            task.state = "running";
+            task.error = "取消未完成，进程状态尚未确认；可重试取消，请勿重复执行任务";
+            task.updatedAt = new Date(this.#now()).toISOString();
+            this.#notify(task);
+          }
+          webuiLogger.error({ event: "task.cancel_failed", taskId: task.id, err: error }, "管理任务取消未完成");
+          return false;
+        });
       this.#notify(task);
     }
     return publicTask(task);
@@ -172,7 +182,7 @@ export class WebuiManagementTaskRunner {
       : normalized.operation === "traffic"
         ? ["cleanup", "traffic", "--confirm"]
         : metricsTaskArguments(normalized);
-    const invocation = resolveExecutableInvocation("codexc", args, environment);
+    const invocation = ownedProcessInvocation(resolveExecutableInvocation("codexc", args, environment), environment);
     await new Promise((resolve) => {
       const child = spawn(invocation.file, invocation.args, {
         env: environment,
@@ -185,10 +195,7 @@ export class WebuiManagementTaskRunner {
       const finish = (state, error, resultCode, recovery) => {
         if (settled) return;
         settled = true;
-        if (task.cancelTimer !== null) {
-          clearTimeout(task.cancelTimer);
-          task.cancelTimer = null;
-        }
+        task.cancelTask = null;
         task.process = null;
         task.state = state;
         task.error = error === null ? null : sanitizeTaskText(error);
@@ -202,8 +209,13 @@ export class WebuiManagementTaskRunner {
         // paths or environment-specific details that are not actionable here.
         finish("failed", "任务启动失败", "failed", "retry-task");
       });
-      child.once("close", (code) => {
+      child.once("close", async (code) => {
         const cancelled = task.state === "cancelling";
+        if (task.cancelTask) await task.cancelTask;
+        if (task.cancelFailed) {
+          finish("failed", "任务进程已退出，但未确认全部子进程停止；请检查实际状态后再操作", "failed", "none");
+          return;
+        }
         const state = cancelled ? "cancelled" : code === 0 ? "completed" : "failed";
         const error = state === "failed" ? `任务失败（退出码 ${code === null ? "未知" : String(code)}）` : null;
         // Command output is intentionally neither retained nor returned: even
@@ -215,10 +227,7 @@ export class WebuiManagementTaskRunner {
 
   #fail(task, error) {
     if (["completed", "failed", "cancelled"].includes(task.state)) return;
-    if (task.cancelTimer !== null) {
-      clearTimeout(task.cancelTimer);
-      task.cancelTimer = null;
-    }
+    task.cancelTask = null;
     task.process = null;
     task.state = "failed";
     task.error = sanitizeTaskText(error instanceof Error ? error.message : error);

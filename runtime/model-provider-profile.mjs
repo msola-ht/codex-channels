@@ -34,7 +34,7 @@ export function createManagedProviderProfile(definition, {
   };
 }
 
-export function createModelProviderConfig(definition, apiKey) {
+export function createModelProviderConfig(definition, apiKey, environmentKey) {
   assertDefinition(definition);
   return {
     name: definition.id,
@@ -46,7 +46,7 @@ export function createModelProviderConfig(definition, apiKey) {
       : { supports_websockets: definition.supportsWebsockets }),
     request_max_retries: thirdPartyProviderRequestMaxRetries,
     stream_max_retries: thirdPartyProviderStreamMaxRetries,
-    experimental_bearer_token: apiKey,
+    ...(environmentKey === undefined ? { experimental_bearer_token: apiKey } : { env_key: environmentKey }),
   };
 }
 
@@ -62,7 +62,7 @@ export function createCustomPrimaryProviderConfig({
     name,
     base_url: baseUrl,
     wire_api: "responses",
-    requires_openai_auth: auth !== "none" && auth !== "bearer_token",
+    requires_openai_auth: auth !== "none" && auth !== "bearer_token" && auth !== "env_key",
     supports_websockets: supportsWebsockets,
     request_max_retries: thirdPartyProviderRequestMaxRetries,
     stream_max_retries: thirdPartyProviderStreamMaxRetries,

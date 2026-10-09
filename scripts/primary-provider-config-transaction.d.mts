@@ -9,6 +9,7 @@ export function writePrimaryProviderConfigEditsWithProfileRemoval(options: {
   };
   edits: Array<{ keyPath: string; value: unknown }>;
   expectedVersion?: string | number | null;
+  credential?: { providerId: string; baseUrl: string; apiKey: string; environmentKey: string };
   createClient: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CodexUserConfigTransactionClient>;

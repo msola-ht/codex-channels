@@ -17,6 +17,29 @@ export function formatSurfaceUserFacingError(
   surfaceLabel: "Telegram" | "飞书" | "微信",
 ): string {
   switch (error.code) {
+    case "hooks.usage":
+      return "用法：/hooks [page N|列表选择标识|trust <标识>|enable <标识>|disable <标识>|confirm <一次性令牌>]";
+    case "hooks.actor-required":
+    case "hooks.forbidden":
+      return "当前用户身份或工作区授权无法确认，已拒绝 Hook 操作";
+    case "hooks.provider-required":
+      return "当前未确定模型提供商，请先通过 /model 选择提供商";
+    case "hooks.page-invalid":
+      return "Hook 页码无效，请发送 /hooks 返回列表";
+    case "hooks.managed":
+      return "受管理员管理的 Hook 只读，不能在渠道中信任或启停";
+    case "hooks.local-review-required":
+      return "该 Hook 无法在渠道中完整审查，请先在本机核对配置";
+    case "hooks.review-expired":
+      return "Hook 选择、确认或配置已变化或失效，请重新发送 /hooks 并审查详情";
+    case "hooks.read-failed":
+    case "hooks.version-unavailable":
+      return "当前 Hook 配置无法安全读取，请在本机核对配置后重新发送 /hooks";
+    case "hooks.write-unconfirmed":
+      return "Hook 修改结果尚未确认，请先用 /hooks 核对状态，避免重复提交";
+    case "hooks.readback-failed":
+    case "hooks.state-unconfirmed":
+      return "Hook 修改后未能确认实际状态，请使用 /hooks 或在本机核对配置";
     case "reset-credit.failed":
       switch (error.details.reason) {
         case "usage": return resetCreditCommandUsage;
@@ -124,7 +147,7 @@ export function formatSurfaceUserFacingError(
     case "queue.busy":
       return "当前 Session 有活动或待触发 Turn，请稍后重试";
     case "queue.pending-overrides":
-      return "Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成";
+      return "Queue 与待生效的模型、思考、速度或 Plan 选择不能同时存在；请先让其中一方处理完成";
     case "queue.snapshot.required":
       return "数字选择器只对最近五分钟的本会话 Queue 列表有效，请先执行 /queue list";
     case "queue.item-not-found":
@@ -221,9 +244,11 @@ export function formatSurfaceUserFacingError(
       return `当前模型不支持该思考设置，可选：${choices}`;
     }
     case "fast.usage":
-      return "用法：/fast [on|off|status]";
+      return "用法：/fast [on|ultrafast|off|status]";
     case "fast.unsupported":
-      return `当前模型不支持 Fast 模式：${detail(error, "model", "未知")}`;
+      return `当前模型不支持 ${error.details.tier === "Ultrafast" ? "Ultrafast" : "Fast"} 档位：${detail(error, "model", "未知")}`;
+    case "fast.disabled":
+      return "Codex features.fast_mode 已关闭，不能启用 Fast/Ultrafast；仍可用 /fast off 回到 Standard";
     case "provider.account.unavailable":
       return `${detail(error, "provider", "当前提供商")}的账户查询失败，请检查配置或稍后重试`;
     case "collaboration-mode.unsupported":

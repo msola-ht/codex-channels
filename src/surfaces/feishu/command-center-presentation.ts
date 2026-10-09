@@ -1,11 +1,12 @@
 import {
   fastServiceTierId,
-  isFastServiceTier,
+  ultrafastServiceTierId,
   listProviders,
   type ConversationCommandResult,
 } from "../../application/index.js";
 import { UserFacingError } from "../../conversation-core/index.js";
 import { formatConversationResetCredits } from "../conversation-model-account-command-format.js";
+import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import {
   formatDelayMinutes,
   formatScheduledAt,
@@ -21,7 +22,7 @@ import {
   formatConversationWorkspacePermissions,
   formatConversationStatus,
 } from "../conversation-workspace-status-command-format.js";
-import { formatCodexProviderLabel, scopedModelDisplayName } from "../provider-format.js";
+import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, scopedModelDisplayName } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import type {
   FeishuCommandCenterAction,
@@ -348,6 +349,14 @@ export function renderCommandCenterChoices(
   action: FeishuCommandCenterAction,
   result: ConversationCommandResult,
 ): FeishuCommandCenterChoices | undefined {
+  if (action === "hooks" && result.kind === "hooks") {
+    return {
+      title: result.view.confirmation ? "确认 Hook 配置操作" : "Hooks",
+      description: formatConversationHooks(result.view),
+      descriptionFormat: "plain_text",
+      choices: hookCommandChoices(result.view).map(choice => ({ ...choice, action: "hooks" })),
+    };
+  }
   if (action === "limits" && result.kind === "limits" && result.result.kind === "rate-limits") {
     return { title: "OpenAI 额度", description: renderFeishuCommandResult(result) ?? "", descriptionFormat: "markdown",
       choices: [{ label: "查看重置券", action: "limits", input: "reset" }] };
@@ -685,15 +694,13 @@ export function renderCommandCenterChoices(
           `- 模型：${result.state.model}`,
           `- Provider：${formatCodexProviderLabel(result.state.modelProvider)}`,
           `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
-          ...(currentModel && fastServiceTierId(currentModel)
-            ? [`- Fast 模式：${isFastServiceTier(result.state.serviceTier, currentModel) ? "开启" : "关闭"}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
-            : []),
+          `- 速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
           "",
           "请先选择提供商，再选择该提供商下的模型。",
         ].join("\n"),
         descriptionFormat: "markdown",
         choices: providers.map((provider) => ({
-          label: `${provider === current ? "✓ " : ""}${formatCodexProviderLabel(provider)} · ${result.state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`,
+          label: `${provider === current ? "✓ " : ""}${formatCodexProviderLabel(provider)} · ${formatProviderModelSummary(result.state.models, provider)}`,
           action: "model",
           input: provider,
         })),
@@ -704,6 +711,7 @@ export function renderCommandCenterChoices(
       description: [
         "当前设置",
         `- Provider：${formatCodexProviderLabel(result.state.providerFilter)}`,
+        `- 速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
         "",
         "已选择该 Provider，请继续选择模型。选择模型后将继续选择思考等级。",
       ].join("\n"),
@@ -711,7 +719,7 @@ export function renderCommandCenterChoices(
       choices: result.state.models
         .filter((model) => (model.provider ?? "openai") === result.state.providerFilter)
         .map((model) => ({
-        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${scopedModelDisplayName(model.displayName, result.state.providerFilter)}${model.available === false ? "（暂不可用）" : ""}`,
+        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${scopedModelDisplayName(model.displayName, result.state.providerFilter)}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
         action: "model",
         input: model.id,
         })),
@@ -728,6 +736,7 @@ export function renderCommandCenterChoices(
         "当前设置",
         `- 模型：${result.state.model}`,
         `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
+        `- 速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
       ].join("\n"),
       descriptionFormat: "markdown",
       choices: efforts.map(
@@ -740,24 +749,26 @@ export function renderCommandCenterChoices(
     };
   }
   if (action === "fast") {
-    const enabled = isFastServiceTier(
-      result.state.serviceTier,
-      currentModel,
-    );
+    const speed = formatServiceTier(result.state.serviceTier, currentModel);
     return {
-      title: "切换 Fast 模式",
-      description: `当前：${enabled ? "开启" : "关闭"} · ${currentModel && fastServiceTierId(currentModel) ? "当前模型支持 Fast" : "当前模型不支持 Fast"}`,
+      title: "切换速度",
+      description: `当前：${speed}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""} · 当前模型${formatModelSpeedSupport(currentModel)}`,
       choices: [
         {
-          label: `${enabled ? "✓ " : ""}开启`,
-          action: "fast",
-          input: "on",
-        },
-        {
-          label: `${enabled ? "" : "✓ "}关闭`,
+          label: `${speed === "Standard" ? "✓ " : ""}Standard`,
           action: "fast",
           input: "off",
         },
+        ...(currentModel && fastServiceTierId(currentModel) ? [{
+          label: `${speed === "Fast" ? "✓ " : ""}Fast`,
+          action: "fast",
+          input: "on",
+        } as const] : []),
+        ...(currentModel && ultrafastServiceTierId(currentModel) ? [{
+          label: `${speed === "Ultrafast" ? "✓ " : ""}Ultrafast`,
+          action: "fast",
+          input: "ultrafast",
+        } as const] : []),
       ],
     };
   }

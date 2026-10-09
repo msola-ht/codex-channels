@@ -16,6 +16,8 @@ import {
 } from "../runtime/app-server-supervisor.mjs";
 import { macDesktopAppPluginEnabledConfigKey } from "../runtime/desktop-app-host.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { codexProcessInvocation } from "../runtime/owned-process.mjs";
+import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import {
   loadOrCreateDesktopAppBridgeToken,
   readDesktopAppBridgeToken,
@@ -331,7 +333,11 @@ async function inspectMacDesktopAppActiveThreads({ socketPath, codexBinary }) {
   } = await import("../dist/codex-client/index.js");
   const transport = createAppServerTransport(
     { kind: "local-app-server", socketPath },
-    { codexBinary, connectTimeoutMs: 3_000 },
+    {
+      createCodexProcessInvocation: args => codexProcessInvocation(codexBinary, args),
+      terminateCodexProcess: terminateChildProcess,
+      connectTimeoutMs: 3_000,
+    },
   );
   const client = new CodexAppServerClient(
     new JsonRpcClient(

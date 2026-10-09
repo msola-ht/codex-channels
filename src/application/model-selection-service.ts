@@ -1,3 +1,4 @@
+import { acceleratedServiceTierId, normalizeServiceTier } from "../../runtime/service-tier.mjs";
 import {
   UserFacingError,
   conversationTargetKey,
@@ -84,7 +85,7 @@ export class ModelSelectionService {
       filter = undefined;
     }
     const models = await this.listModels(requireSelection ? this.status(target).modelProvider : filter);
-    const state = this.selectionState(target, models, filter);
+    const state = await this.selectionState(target, models, filter);
     if (requireSelection && state.modelProvider === undefined) {
       throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
     }
@@ -127,7 +128,7 @@ export class ModelSelectionService {
     target: ConversationTarget,
     modality: ModelInputModality,
   ): Promise<void> {
-    const current = this.resolveState(target, await this.listModels(this.status(target).modelProvider));
+    const current = await this.resolveState(target, await this.listModels(this.status(target).modelProvider));
     if (current.modelProvider === undefined) {
       throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
     }
@@ -178,19 +179,20 @@ export class ModelSelectionService {
       throw new UserFacingError("model.selection.expired", "模型选项已失效，请重新发送 /model 选择");
     }
     this.requireAvailableModel(selected);
-    const current = this.resolveState(target, models);
+    const current = await this.resolveState(target, models);
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
     const leavesThread = providerChanged && this.router.modelSettings(target) !== undefined;
     const resetOfficialFast = selectedProvider === "openai";
     const selectedFastTier = fastServiceTierId(selected);
+    const selectedUltrafastTier = ultrafastServiceTierId(selected);
     const providerDefaultEffort = providerChanged
       ? await this.codex.readDefaultReasoningEffort(
           this.router.workspace(target).cwd,
           selectedProvider,
         )
       : undefined;
-    const providerDefaultTier = providerChanged && selectedFastTier && !resetOfficialFast
+    const providerDefaultTier = providerChanged && (selectedFastTier || selectedUltrafastTier) && !resetOfficialFast
       ? await this.codex.readDefaultServiceTier(
           this.router.workspace(target).cwd,
           selectedProvider,
@@ -199,7 +201,7 @@ export class ModelSelectionService {
     this.requireSubscribedProvider(selectedProvider);
     if (resetOfficialFast) {
       // 与显式 /fast off 使用同一用户默认值，避免 App Server 重启后重新加载旧 Fast 偏好。
-      await this.codex.writeDefaultFastMode(false);
+      await this.codex.writeDefaultServiceTier("default");
     }
     const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
     const effort = !providerChanged && current.effort && supported.includes(current.effort)
@@ -221,14 +223,18 @@ export class ModelSelectionService {
       ...(resetOfficialFast
         ? { serviceTier: standardServiceTierRequestValue }
         : providerChanged
-        ? selectedFastTier
+        ? selectedFastTier || selectedUltrafastTier
           ? {
-              serviceTier: isFastServiceTier(providerDefaultTier ?? null, selected)
-                ? selectedFastTier
-                : standardServiceTierRequestValue,
+              serviceTier: providerDefaultTier === "ultrafast"
+                ? selectedUltrafastTier ?? standardServiceTierRequestValue
+                : isFastServiceTier(providerDefaultTier ?? null, selected)
+                  ? selectedFastTier ?? standardServiceTierRequestValue
+                  : standardServiceTierRequestValue,
             }
           : {}
-        : currentFast
+        : current.serviceTier === "ultrafast"
+          ? { serviceTier: selectedUltrafastTier ?? standardServiceTierRequestValue }
+          : currentFast
           ? { serviceTier: selectedFastTier ?? standardServiceTierRequestValue }
           : current.serviceTier && current.serviceTier !== standardServiceTierRequestValue
             ? { serviceTier: standardServiceTierRequestValue }
@@ -249,7 +255,7 @@ export class ModelSelectionService {
 
   async selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
     const models = await this.listModels(this.status(target).modelProvider);
-    const current = this.resolveState(target, models);
+    const current = await this.resolveState(target, models);
     const model = findModel(models, current.model, current.modelProvider);
     if (!model) {
       throw new UserFacingError(
@@ -268,29 +274,48 @@ export class ModelSelectionService {
 
   async selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
     const normalized = selector.trim().toLowerCase();
-    if (normalized && !new Set(["on", "off", "status"]).has(normalized)) {
-      throw new UserFacingError("fast.usage", "Fast 模式参数必须是 on、off 或 status");
+    if (normalized && !new Set(["on", "ultrafast", "off", "status"]).has(normalized)) {
+      throw new UserFacingError("fast.usage", "加速参数必须是 on、ultrafast、off 或 status");
     }
     const models = await this.listModels(this.status(target).modelProvider);
-    const current = this.resolveState(target, models);
+    const current = await this.resolveState(target, models);
     const model = findModel(models, current.model, current.modelProvider);
-    if (model) this.requireAvailableModel(model);
     const currentFast = isFastServiceTier(current.serviceTier, model);
     if (normalized === "status") {
       return current;
     }
-    const tierId = model ? fastServiceTierId(model) : undefined;
-    if (!tierId) {
+    const accelerated = currentFast || current.serviceTier === "ultrafast";
+    const requested = normalized || (accelerated ? "off" : "on");
+    if (requested !== "off" && model) this.requireAvailableModel(model);
+    const tierId = model
+      ? requested === "ultrafast" ? ultrafastServiceTierId(model) : fastServiceTierId(model)
+      : undefined;
+    // Standard is always a valid escape from an active tier, even if the catalog changed.
+    if (requested !== "off" && !tierId) {
       throw new UserFacingError(
         "fast.unsupported",
-        `当前模型不支持 Fast 模式：${current.model}`,
-        { model: current.model },
+        `当前模型不支持 ${requested === "ultrafast" ? "Ultrafast" : "Fast"}：${current.model}`,
+        { model: current.model, tier: requested === "ultrafast" ? "Ultrafast" : "Fast" },
       );
     }
-    const enable = normalized ? normalized === "on" : !currentFast;
-    const selectedTier = enable ? tierId : standardServiceTierRequestValue;
-    await this.codex.writeDefaultFastMode(enable);
-    if ((enable && currentFast) || (!enable && !currentFast)) {
+    if (requested !== "off") {
+      const acceleration = await this.codex.readModelAccelerationSettings(
+        this.router.workspace(target).cwd,
+        current.modelProvider ?? this.primaryProvider,
+      );
+      if (!acceleration.enabled) {
+        throw new UserFacingError("fast.disabled", "Codex features.fast_mode 已关闭，不能启用加速档位");
+      }
+    }
+    const selectedTier = requested === "off" ? standardServiceTierRequestValue : tierId!;
+    this.requireSubscribedProvider(current.modelProvider ?? this.primaryProvider);
+    if (current.modelProvider === this.primaryProvider) {
+      await this.codex.writeDefaultServiceTier(
+        requested === "off" ? "default" : requested === "ultrafast" ? "ultrafast" : "fast",
+      );
+    }
+    this.requireSubscribedProvider(current.modelProvider ?? this.primaryProvider);
+    if (current.serviceTier === selectedTier) {
       return current;
     }
     const pending = this.pending(target);
@@ -433,11 +458,11 @@ export class ModelSelectionService {
     };
   }
 
-  private resolveState(
+  private async resolveState(
     target: ConversationTarget,
     models: ModelOption[],
     filter?: string,
-  ): ModelSelectionState {
+  ): Promise<ModelSelectionState> {
     if (models.length === 0) {
       throw new Error("App Server 没有返回可用模型");
     }
@@ -480,6 +505,10 @@ export class ModelSelectionService {
     );
     const catalogModel = provider === undefined ? undefined : findModel(models, model, provider);
     const serviceTierPending = hasServiceTierOverride(pending);
+    const defaultServiceTier = !serviceTierPending && !current && provider !== undefined
+      && catalogModel !== undefined && catalogModel.available !== false
+      ? await this.codex.readDefaultServiceTier(this.router.workspace(target).cwd, provider)
+      : null;
     return {
       models,
       ...(filter === undefined ? {} : { providerFilter: filter }),
@@ -490,7 +519,7 @@ export class ModelSelectionService {
         ? pending?.serviceTier ?? null
         : current
           ? current.serviceTier
-          : catalogModel?.defaultServiceTier ?? null,
+          : defaultServiceTier,
       pending: pending !== undefined,
       modelPending: hasOverride(pending, "model"),
       effortPending: hasOverride(pending, "effort"),
@@ -559,10 +588,10 @@ export class ModelSelectionService {
     return models.filter((model) => !blocked.has(model.provider ?? "openai"));
   }
 
-  private selectionState(target: ConversationTarget, models: ModelOption[], filter?: string): ModelSelectionState {
+  private async selectionState(target: ConversationTarget, models: ModelOption[], filter?: string): Promise<ModelSelectionState> {
     const selectable = this.selectableModels(models);
     return {
-      ...this.resolveState(target, models, filter),
+      ...await this.resolveState(target, models, filter),
       models: filter === undefined ? selectable : filterModelsByProvider(selectable, filter),
     };
   }
@@ -605,7 +634,8 @@ export class ModelSelectionService {
       throw new UserFacingError("model.selection.expired", "保存的思考等级已不可用，请重新发送 /model 选择");
     }
     if (preference.serviceTier && preference.serviceTier !== standardServiceTierRequestValue
-      && preference.serviceTier !== fastServiceTierId(model)) {
+      && preference.serviceTier !== fastServiceTierId(model)
+      && preference.serviceTier !== ultrafastServiceTierId(model)) {
       throw new UserFacingError("model.selection.expired", "保存的服务层级已不可用，请重新发送 /model 选择");
     }
   }
@@ -752,24 +782,19 @@ function modelKey(model: ModelOption): string {
 }
 
 export function fastServiceTierId(model: ModelOption): string | undefined {
-  const tier = model.serviceTiers.find(
-    (candidate) =>
-      candidate.id.toLowerCase() === "fast"
-      || candidate.name.trim().toLowerCase() === "fast",
-  );
-  if (tier) {
-    return tier.id;
-  }
-  return undefined;
+  return acceleratedServiceTierId(model.serviceTiers, "fast");
+}
+
+export function ultrafastServiceTierId(model: ModelOption): string | undefined {
+  return acceleratedServiceTierId(model.serviceTiers, "ultrafast");
 }
 
 export function isFastServiceTier(serviceTier: string | null, model?: ModelOption): boolean {
   if (!serviceTier) {
     return false;
   }
-  const normalized = serviceTier.toLowerCase();
+  const normalized = normalizeServiceTier(serviceTier.toLowerCase());
   return normalized === "fast"
-    || normalized === "priority"
     || (model !== undefined && fastServiceTierId(model) === serviceTier);
 }
 

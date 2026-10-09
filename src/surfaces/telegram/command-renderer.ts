@@ -8,14 +8,13 @@ import type {
   ModelSelectionState,
 } from "../../application/index.js";
 import {
-  fastServiceTierId,
-  isFastServiceTier,
   listProviders,
 } from "../../application/index.js";
-import { formatCodexProviderLabel, scopedModelDisplayName } from "../provider-format.js";
+import { formatCodexProviderLabel, formatProviderModelSummary, formatServiceTier, scopedModelDisplayName } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
+import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import {
   formatConversationPlugins,
 } from "../conversation-extension-command-format.js";
@@ -39,7 +38,7 @@ import {
   formatConversationWorkspaces,
 } from "../conversation-workspace-status-command-format.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
-import { formatStatus } from "./format.js";
+import { formatStatus, splitTelegramText } from "./format.js";
 import { formatTelegramDiffChunks, formatTelegramPanelChunks } from "./html-format.js";
 
 export async function renderTelegramCommandResult(
@@ -121,6 +120,16 @@ export async function renderTelegramCommandResult(
         pluginKeyboard(result),
       );
       return;
+    case "hooks": {
+      const chunks = splitTelegramText(formatConversationHooks(result.view), 3_600);
+      for (const [index, chunk] of chunks.entries()) {
+        await context.reply(chunk, {
+          ...(index === chunks.length - 1 ? { reply_markup: hookKeyboard(result) } : {}),
+          ...(index > 0 ? { disable_notification: true } : {}),
+        });
+      }
+      return;
+    }
     case "reset-credit":
       await replyTelegramPanel(context, formatConversationResetCredits(result, "buttons"),
         resetCreditKeyboard(result, String(context.chat?.id ?? ""), String(context.from?.id ?? "")));
@@ -149,6 +158,17 @@ export async function renderTelegramCommandResult(
   }
   const text = renderConversationCommandResult(result);
   if (text !== null) await replyTelegramPanel(context, text);
+}
+
+export function hookKeyboard(
+  result: Extract<ConversationCommandResult, { kind: "hooks" }>,
+): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: hookCommandChoices(result.view).map(choice => [{
+      text: choice.label,
+      callback_data: `hooks:${choice.input.replace(" ", ":")}`,
+    }]),
+  };
 }
 
 export function workspacePermissionKeyboard(): InlineKeyboardMarkup {
@@ -226,14 +246,12 @@ function modelProviderSelectionText(
   return toStructuredMarkdownList([
     `当前模型：${result.state.model}（Provider：${formatCodexProviderLabel(current)}）`,
     `${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort)}`,
-    ...(currentModel && fastServiceTierId(currentModel)
-      ? [`Fast 模式：${isFastServiceTier(result.state.serviceTier, currentModel) ? "开启" : "关闭"}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
-      : []),
+    `速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
     "",
     `当前 Provider：${formatCodexProviderLabel(current)}`,
-    "可用提供商：",
+    "提供商列表：",
     ...providers.map((provider, index) =>
-      `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === current ? " ← 当前" : ""} · ${result.state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`),
+      `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === current ? " ← 当前" : ""} · ${formatProviderModelSummary(result.state.models, provider)}`),
     "",
     "请先选择提供商，再选择该提供商下的模型；也可输入 /model <提供商序号或 ID>。",
   ].join("\n"));

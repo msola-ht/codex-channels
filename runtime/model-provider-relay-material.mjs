@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { codexHomePath } from "./codex-home.mjs";
 import { loadManagedModelProviderDefinitions } from "./model-provider-definitions.mjs";
 import { loadConfiguredManagedProviderMaterial, loadConfiguredManagedProviderCredentials } from "./model-provider-managed-runtime.mjs";
+import { createProviderFileReader } from "./provider-file-access.mjs";
 import { loadCustomSwitchingProviderIds, loadConfiguredCustomSwitchingModelProviders,
   customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath,
-  loadConfiguredCustomPrimaryModelProvider, loadConfiguredCustomPrimaryRelayProfile } from "./model-provider-custom-runtime.mjs";
+  loadConfiguredCustomPrimaryModelProvider, loadConfiguredCustomPrimaryRelayProfile, customPrimaryProviderCredentialPath } from "./model-provider-custom-runtime.mjs";
+import { parse } from "smol-toml";
 import { customOfficialModelCatalogPath } from "./model-provider-official-catalog.mjs";
 import { isResponsesProvider, readResponsesModelCatalog, responsesProviderCatalogPath,
   assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
@@ -46,17 +48,25 @@ function loadBaseRelayProviderMaterial(provider, environment) {
     throw new Error("Relay requires a registered Provider with independently managed API credentials");
   }
   const catalogPath = isResponsesProvider(provider) ? responsesProviderCatalogPath(environment, provider) : customOfficialModelCatalogPath(environment);
+  const configPath = join(codexHomePath(environment), "config.toml");
+  const primaryBlock = switching ? undefined : parse(createProviderFileReader(environment)(configPath)).model_providers?.[provider];
+  const credentialPath = typeof primaryBlock?.env_key === "string" && primaryBlock.env_key.startsWith("CODEX_CONNECT_CUSTOM_") && primaryBlock.env_key.includes("_PRIMARY_")
+    ? customPrimaryProviderCredentialPath(environment, provider, primaryBlock.env_key) : undefined;
   const paths = [...(switching ? [customSwitchingProviderRegistryPath(environment), customPrimaryProviderProfilePath(environment, provider)] : []),
-    join(codexHomePath(environment), "config.toml"), catalogPath];
+    configPath, ...(credentialPath ? [credentialPath] : []), catalogPath];
   const fingerprint = () => {
     const hash = createHash("sha256");
-    for (const path of paths) hash.update(JSON.stringify([path, readPrivateFileSync(path, 8 * 1024 * 1024)]));
+    const read = createProviderFileReader(environment);
+    for (const path of paths) hash.update(JSON.stringify([path, read(path, 8 * 1024 * 1024)]));
     return hash.digest("hex");
   };
   const revision = fingerprint();
   const profile = switching ? loadConfiguredCustomSwitchingModelProviders(environment, provider)[0]
     : loadConfiguredCustomPrimaryRelayProfile(provider, environment);
   if (!profile) throw new Error("Relay Provider was removed");
+  if (!switching && profile.apiKeyEnvironmentKey !== primaryBlock?.env_key) {
+    throw new Error("Relay Provider credential reference changed during read");
+  }
   const catalog = isResponsesProvider(provider) ? readResponsesModelCatalog(environment, provider)
     : JSON.parse(readPrivateFileSync(catalogPath, 8 * 1024 * 1024));
   const models = catalog.models?.map(value => value.slug);

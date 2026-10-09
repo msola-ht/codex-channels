@@ -5,6 +5,8 @@ import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
 
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { serviceDefinitions } from "../runtime/service-targets.mjs";
+import { serviceStopTimeoutSeconds } from "../runtime/shutdown-budget.mjs";
 import { changedFiles, parseChangedFiles } from "./verification-scope.mjs";
 
 const checkTypes = { name: "类型与版本", command: "npm", args: ["run", "check"] };
@@ -22,15 +24,15 @@ const shell = { name: "Shell 语法", command: "bash", args: [
     "scripts/launchd-control.sh",
     "scripts/systemd-control.sh",
   ] };
-const templates = { name: "launchd 模板", command: "plutil", args: [
-  "-lint", "launchd/com.hegenai.codex-app-server.plist.template",
-  "launchd/com.hegenai.codex-gateway.plist.template", "launchd/com.hegenai.codex-webui.plist.template",
-] };
+const templates = serviceDefinitions.map(service => ({
+  name: `launchd 模板 ${service.target}`, command: "plutil", args: ["-lint", "--", "-"],
+  templatePath: `launchd/${service.launchd}.plist.template`,
+}));
 
 export function createVerificationPlan(changes, { ci = false, root = process.cwd(), platform = process.platform } = {}) {
   if (ci) return { reason: "PR 静态检查与构建", checks: [
     checkTypes, rootLint, webuiBuild, webuiLint, dictionary, docs, gatewayBuild,
-    ...(platform === "win32" ? [] : [shell]), ...(platform === "darwin" ? [templates] : []),
+    ...(platform === "win32" ? [] : [shell]), ...(platform === "darwin" ? templates : []),
   ] };
 
   const paths = changes.map(change => change.path);
@@ -46,9 +48,10 @@ export function createVerificationPlan(changes, { ci = false, root = process.cwd
   const webui = code.some(path => path.startsWith("webui/"));
   const sharedBuild = code.some(path => /^(?:package(?:-lock)?\.json|tsconfig(?:\.build)?\.json|scripts\/(?:verify-commit|verification-scope|prepare-package)\.mjs)$/u.test(path));
   if (webui || sharedBuild) checks.push(webuiBuild, webuiLint, dictionary);
-  if (code.some(path => /\.(?:sh|ps1)$/u.test(path) || /^(?:launchd|systemd)\//u.test(path))) {
+  if (code.some(path => /\.(?:sh|ps1)$/u.test(path) || /^(?:launchd|systemd)\//u.test(path)
+    || /^(?:runtime\/(?:shutdown-budget|service-targets)|scripts\/(?:service-install-management|verify-commit))\.mjs$/u.test(path))) {
     if (platform !== "win32") checks.push(shell);
-    if (platform === "darwin") checks.push(templates);
+    if (platform === "darwin") checks.push(...templates);
   }
 
   const reason = code.length ? "按变更范围执行静态检查与构建" : "仅文档变更，检查文档与索引";
@@ -67,7 +70,9 @@ function runChecks(checks) {
     const result = spawnSync(invocation.file, invocation.args, {
       cwd: check.cwd === undefined ? process.cwd() : join(process.cwd(), check.cwd),
       env: { ...process.env, ...check.environment },
-      stdio: "inherit",
+      stdio: check.templatePath ? ["pipe", "inherit", "inherit"] : "inherit",
+      ...(check.templatePath ? { input: readFileSync(check.templatePath, "utf8")
+        .replaceAll("__STOP_TIMEOUT_SECONDS__", String(serviceStopTimeoutSeconds)) } : {}),
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
     const checkDuration = formatDuration(performance.now() - checkStartedAt);

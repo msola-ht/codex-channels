@@ -131,11 +131,17 @@ App Server 的会话历史不在这些数据库中。
 
 ### 本地工作树安装与部署
 
+升级范围以实际改动为准，不以分支名称或问题发生的平台为准：Provider 认证、私有凭据、配置事务和共享生命周期的修复会影响 Windows、macOS、Linux。升级前核对目标版本的配置合同；涉及固定 Provider 私有凭据时，按[Provider 备份与恢复说明](provider-integration-guide.md)保留主配置、候选备份及对应凭据目录，不要只备份 `config.toml`。Windows 专属原生组件与三平台共享配置变更应分别核对，不能用某一平台的验证结果代替其他平台的部署确认。
+
 在需要安装的源码根目录运行 `npm run install:global`（Windows 可用 `npm.cmd run install:global`）。命令自动准备依赖、构建 Gateway/WebUI，再安装当前工作树的构建包；未提交改动也会进入构建。仅执行 `npm run build` 不会刷新全局命令。
 
-已有运行服务时，先从本机终端记录 `codexc status all` 和 `codexc status webui` 的状态，停止运行中的 WebUI，再执行 `codexc stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；安装失败先处理错误，不启动版本未就绪的服务。程序目录或 Node.js 路径改变时用 `codexc install` 重建服务定义。
+Windows 构建使用现有 PowerShell 7 提前编译原生 Job/目录保护 DLL，并随包安装；日常命令不再重复编译 C#。无需安装额外编译 SDK。运行时校验源码及 DLL 一致性、PowerShell 主次版本和 .NET 主版本；升级 PowerShell 主次版本后需在当前环境重新运行 `npm run install:global`，源码开发运行 `npm run build`。构建产物缺失或不匹配时明确失败，不自动重编译。内部 `--prepared` 只验证已有产物；显式 `--ignore-scripts` 不会生成 DLL，不能据此得到完整 Windows 安装包。
 
-此安装路径不拉取 Git，也不自动管理服务。自行选择分支并更新源码后重复执行安装；没有受管仓库时，`codexc update` 只同步配套 CLI 和校验配置、数据库，不更新本地源码或 Gateway 包。
+若命令报告“Windows 原生组件无法加载，尚未检查文件 ACL”，请按提示重新构建或安装；这表示组件或宿主环境不匹配，运行 `codexc security repair` 不能修复该构建问题。
+
+已有运行服务时，先从本机终端记录 `codexc status all` 和 `codexc status webui` 的状态，停止运行中的 WebUI，再执行 `codexc stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；安装失败先处理错误，不启动版本未就绪的服务。程序目录、Node.js 路径或服务模板改变时用 `codexc install` 重建并激活服务定义；该命令会启动核心服务。macOS/Linux 的 50 秒停止期限及 Linux 的有序子进程收尾设置属于模板变更，仅更新程序和重启不能将它们写入已有定义。
+
+`npm run install:global` 不拉取 Git，也不自动管理服务；上面的 `codexc install` 是另行执行的服务操作。自行选择分支并更新源码后重复执行程序安装；没有受管仓库时，`codexc update` 只同步配套 CLI 和校验配置、数据库，不更新本地源码或 Gateway 包。
 
 新设备按 `npm run install:global` → `codexc init` → `codexc setup` → `codexc install` 顺序操作；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。
 Windows 首次或旧服务定义不完整时，若任务激活或就绪检查失败，会保留本次生成的服务定义并报告原始失败阶段，便于检查状态、日志和重试；不会删除任务引用的定义后再尝试安装不存在的旧服务。已有完整定义的安装继续恢复旧定义；恢复失败时同时保留原始安装错误。

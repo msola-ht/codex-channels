@@ -15,7 +15,7 @@ import { clineRelayCatalogSchema, clinePassReasoningEfforts, clineRelayInputModa
 import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
 import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider, withPreservedManagedModelCatalogSettings } from "../runtime/model-provider-runtime.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
-import { applyProviderFileUpdates, assertProviderFileSnapshots, snapshotProviderFiles } from "./managed-provider-files.mjs";
+import { applyProviderFileUpdates, assertProviderFileSnapshots, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
@@ -125,7 +125,7 @@ export async function applyClinePassConfiguration(input, { environment = process
     const dsDirectory = managedProviderDirectory(environment, deepseekProviderDefinition);
     const dsCatalogPath = join(dsDirectory, deepseekProviderDefinition.catalogFileName);
     const dsManifestPath = join(dsDirectory, deepseekProviderDefinition.catalogManifestFileName);
-    const snapshots = snapshotProviderFiles(Object.values(paths));
+    const snapshots = snapshotProviderFiles(Object.values(paths), environment);
     const content = key => snapshots.find(item => item.path === paths[key]).content?.toString("utf8");
     const current = content("config") === undefined ? {} : parsePrivateConfig(content("config"));
     const previous = loadManagedModelProviderSettings(environment).find(item => item.provider === definition.id);
@@ -146,7 +146,7 @@ export async function applyClinePassConfiguration(input, { environment = process
       if (!selected) return { ...preview, activation: "none", action: "back", excludedModels: [] };
       let templates = [];
       if (selected.includes(definition.defaultModel)) {
-        snapshots.push(...snapshotProviderFiles([dsCatalogPath, dsManifestPath]));
+        snapshots.push(...snapshotProviderFiles([dsCatalogPath, dsManifestPath], environment));
         if (snapshots.find(item => item.path === dsCatalogPath).content === undefined) {
           downloadedDs = createManagedDeepseekCatalog((await downloadCatalog(globalThis.fetch)).catalog);
         } else templates = await loadTemplates("deepseek", environment);
@@ -157,7 +157,7 @@ export async function applyClinePassConfiguration(input, { environment = process
     }
     await validateModelCatalogWithCodex(catalog, environment);
     const initial = previous && !(previous.mode === "switching" && mode === "exclusive") ? backup.config : current;
-    const { config, profile } = createManagedProviderConfiguration(current, initial, definition, {
+    const { config, profile, credential } = createManagedProviderConfiguration(current, initial, definition, {
       mode, previousMode: previous?.mode, apiKey, catalogPath: paths.catalog, catalog,
       model: previous?.model ?? (catalog.models.some(model => model.slug === definition.defaultModel) ? definition.defaultModel : catalog.models[0]?.slug),
     });
@@ -177,10 +177,11 @@ export async function applyClinePassConfiguration(input, { environment = process
     }
     if (content("backup") !== undefined && JSON.stringify(backup.config) !== JSON.stringify(initial)) {
       const archive = `${paths.backup}.${randomUUID()}`;
-      snapshots.push(...snapshotProviderFiles([archive]));
+      snapshots.push(...snapshotProviderFiles([archive], environment));
       updates.set(archive, content("backup"));
     }
     if (mode === "exclusive" || previous?.mode === "exclusive") updates.set(paths.config, stringify(config));
+    stageManagedPrimaryCredential(credential, definition, environment, snapshots, updates);
     await applyProviderFileUpdates(updates, snapshots);
     return { ...preview, action: "configured", excludedModels: downloadedCline ? projectClinePassModels(downloadedCline).excludedModels : [] };
   });
@@ -203,7 +204,7 @@ export async function refreshClinePassCatalog({ environment = process.env, loadT
     const backups = [paths.catalog, paths.manifest].map(path => `${path}.backup`);
     const snapshots = snapshotProviderFiles([
       ...accounts.flatMap(account => Object.values(clinePassSetupPaths(environment, account.id))), ...backups,
-    ]);
+    ], environment);
     const providers = loadManagedModelProviderSettings(environment).filter(provider => accounts.some(account => provider.provider === clinePassAccountDefinition(account.id).id));
     if (providers.length !== accounts.length) throw new Error("CLP 账户配置不完整，未更新模型目录");
     const source = await downloadClineCatalog(environment);
@@ -212,7 +213,7 @@ export async function refreshClinePassCatalog({ environment = process.env, loadT
     if (!selectedModels) return { action: "back", activation: "none", models: [], excludedModels: projected.excludedModels, commit: source.commit };
     let downloadedDs, templates = [];
     if (selectedModels.includes(definition.defaultModel)) {
-      snapshots.push(...snapshotProviderFiles([dsCatalog, dsManifest]));
+      snapshots.push(...snapshotProviderFiles([dsCatalog, dsManifest], environment));
       if (snapshots.find(snapshot => snapshot.path === dsCatalog).content === undefined) {
         downloadedDs = createManagedDeepseekCatalog((await downloadCatalog(globalThis.fetch)).catalog);
       } else templates = await loadTemplates("deepseek", environment);
@@ -260,7 +261,7 @@ function clinePassRemovalPlan(accountId, environment) {
   const paths = clinePassSetupPaths(environment, accountId);
   const previous = loadManagedModelProviderSettings(environment).find(item => item.provider === definition.id);
   if (!previous) throw new Error("CLP 账户配置不完整，请先恢复缺失文件");
-  const snapshots = snapshotProviderFiles(Object.values(paths));
+  const snapshots = snapshotProviderFiles(Object.values(paths), environment);
   const content = key => snapshots.find(item => item.path === paths[key]).content?.toString("utf8");
   const updates = new Map([paths.profile, paths.marker].map(path => [path, undefined]));
   updates.set(paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining)}\n`);
@@ -305,7 +306,7 @@ export async function setClinePassDefaultAccount(accountId, { environment = proc
     const preview = previewClinePassDefaultAccount(accountId, { environment });
     const accounts = loadClinePassAccounts(environment).map(account => ({ ...account, default: account.id === accountId }));
     const path = clinePassAccountsFilePath(environment);
-    await applyProviderFileUpdates(new Map([[path, `${JSON.stringify(validateClinePassAccounts(accounts))}\n`]]), snapshotProviderFiles([path]));
+    await applyProviderFileUpdates(new Map([[path, `${JSON.stringify(validateClinePassAccounts(accounts))}\n`]]), snapshotProviderFiles([path], environment));
     return { ...preview, account: { ...preview.account, default: true }, action: "default-set" };
   });
 }

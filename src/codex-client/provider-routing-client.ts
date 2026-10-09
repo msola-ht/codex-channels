@@ -43,12 +43,17 @@ type ProviderClientMethod =
   | "lunaReserveModel"
   | "updateLunaReserveThreadSettings"
   | "updateThreadApprovalsReviewer"
-  | "writeDefaultFastMode"
+  | "writeDefaultServiceTier"
   | "readDefaultReasoningEffort"
   | "readDefaultServiceTier"
+  | "readModelAccelerationSettings"
   | "forkThread"
   | "startReview"
   | "listSkills"
+  | "listHooks"
+  | "readHookConfigVersion"
+  | "writeHookState"
+  | "refreshHookConfig"
   | "resolveSkill"
   | "listMcpServers"
   | "listMcpServerDetails"
@@ -90,6 +95,9 @@ export class ProviderRoutingClient {
   private closeTask: Promise<void> | undefined;
   private readonly providerAborts = new Map<string, AbortController>();
   private readonly providerCloseTasks = new Map<string, Promise<void>>();
+  private hookConfigRevision = 0;
+  private readonly providerHookRevisions = new Map<string, number>();
+  private readonly providerHookRefreshes = new Map<string, Promise<void>>();
 
   constructor(
     private readonly primaryProvider: string,
@@ -129,6 +137,8 @@ export class ProviderRoutingClient {
     try {
       const responses = await this.untilClosed(() => Promise.all(entries.map(([, client]) => client.connect())));
       this.shutdown.signal.throwIfAborted();
+      await Promise.all(entries.map(([provider, client]) => this.refreshProviderHooks(provider, client, true)));
+      this.shutdown.signal.throwIfAborted();
       return responses[entries.findIndex(([provider]) => provider === this.primaryProvider)]!;
     } catch (error) {
       if (this.shutdown.signal.aborted) throw error;
@@ -156,6 +166,8 @@ export class ProviderRoutingClient {
       const signal = this.providerSignal(canonical);
       await this.untilClosed(async () => { await this.ensureProvider?.(canonical); }, signal);
       const initialized = await this.untilClosed(() => this.clientForProvider(canonical).reconnect(), signal);
+      signal.throwIfAborted();
+      await this.refreshProviderHooks(canonical, this.clientForProvider(canonical), true);
       signal.throwIfAborted();
       this.initializationResponses.set(canonical, initialized);
       return initialized;
@@ -680,10 +692,10 @@ export class ProviderRoutingClient {
     return this.withPrimaryActivity((client) => client.listModels(...args));
   }
 
-  writeDefaultFastMode(
-    ...args: Parameters<ProviderClientInstance["writeDefaultFastMode"]>
-  ): ReturnType<ProviderClientInstance["writeDefaultFastMode"]> {
-    return this.withPrimaryActivity((client) => client.writeDefaultFastMode(...args));
+  writeDefaultServiceTier(
+    ...args: Parameters<ProviderClientInstance["writeDefaultServiceTier"]>
+  ): ReturnType<ProviderClientInstance["writeDefaultServiceTier"]> {
+    return this.withPrimaryActivity((client) => client.writeDefaultServiceTier(...args));
   }
 
   async readDefaultReasoningEffort(
@@ -702,6 +714,53 @@ export class ProviderRoutingClient {
     return this.withProviderActivity(modelProvider, async () =>
       (await this.ensureClient(modelProvider)).readDefaultServiceTier(cwd)
     );
+  }
+
+  async readModelAccelerationSettings(
+    cwd: string,
+    modelProvider = this.primaryProvider,
+  ): ReturnType<ProviderClientInstance["readModelAccelerationSettings"]> {
+    return this.withProviderActivity(modelProvider, async () =>
+      (await this.ensureClient(modelProvider)).readModelAccelerationSettings(cwd)
+    );
+  }
+
+  listHooks(
+    ...args: Parameters<ProviderClientInstance["listHooks"]>
+  ): ReturnType<ProviderClientInstance["listHooks"]> {
+    const [, modelProvider] = args;
+    return this.withProviderActivity(modelProvider, async () =>
+      (await this.ensureClient(modelProvider)).listHooks(...args)
+    );
+  }
+
+  readHookConfigVersion(
+    ...args: Parameters<ProviderClientInstance["readHookConfigVersion"]>
+  ): ReturnType<ProviderClientInstance["readHookConfigVersion"]> {
+    const [modelProvider] = args;
+    return this.withProviderActivity(modelProvider, async () =>
+      (await this.ensureClient(modelProvider)).readHookConfigVersion(...args)
+    );
+  }
+
+  async writeHookState(
+    ...args: Parameters<ProviderClientInstance["writeHookState"]>
+  ): ReturnType<ProviderClientInstance["writeHookState"]> {
+    const [modelProvider] = args;
+    try {
+      await this.withProviderActivity(modelProvider, async () =>
+        (await this.ensureClient(modelProvider)).writeHookState(...args)
+      );
+    } finally {
+      // Even a lost response may have persisted the shared user configuration.
+      // Disconnected instances must refresh before their next admitted operation.
+      this.hookConfigRevision++;
+    }
+    const providers = [...new Set([...this.connectedProviders, ...this.providerConnections.keys()])];
+    const results = await Promise.allSettled(providers.map(provider =>
+      this.withProviderActivity(provider, async () => { await this.ensureClient(provider); })
+    ));
+    return { refreshFailedProviders: providers.filter((_, index) => results[index]!.status === "rejected") };
   }
 
   listSkills(
@@ -810,15 +869,31 @@ export class ProviderRoutingClient {
     if (closing) await closing;
     const signal = this.providerSignal(canonical);
     signal.throwIfAborted();
-    if (this.connectedProviders.has(canonical)) return client;
+    if (this.connectedProviders.has(canonical)) {
+      await this.refreshProviderHooks(canonical, client);
+      signal.throwIfAborted();
+      return client;
+    }
     let connection = this.providerConnections.get(canonical);
     if (!connection) {
       connection = (async () => {
-        await this.untilClosed(async () => { await this.ensureProvider?.(canonical); }, signal);
-        const initialized = await this.untilClosed(() => client.connect(), signal);
-        signal.throwIfAborted();
-        this.initializationResponses.set(canonical, initialized);
-        this.connectedProviders.add(canonical);
+        try {
+          await this.untilClosed(async () => { await this.ensureProvider?.(canonical); }, signal);
+          const initialized = await this.untilClosed(() => client.connect(), signal);
+          signal.throwIfAborted();
+          // Independent App Servers may outlive Gateway and retain older runtime settings.
+          await this.refreshProviderHooks(canonical, client, true);
+          signal.throwIfAborted();
+          this.initializationResponses.set(canonical, initialized);
+          this.connectedProviders.add(canonical);
+        } catch (error) {
+          // Initialization includes runtime refresh. Dispose the admitted connection
+          // before another attempt, without terminating the shared App Server.
+          try { await this.closeProvider(canonical); } catch (cleanupError) {
+            throw new AggregateError([error, cleanupError], "Provider 初始化失败，连接清理未确认", { cause: cleanupError });
+          }
+          throw error;
+        }
       })();
       this.providerConnections.set(canonical, connection);
       connection.finally(() => {
@@ -828,6 +903,26 @@ export class ProviderRoutingClient {
     await connection;
     signal.throwIfAborted();
     return client;
+  }
+
+  private async refreshProviderHooks(provider: string, client: ProviderClientInstance, force = false): Promise<void> {
+    // A failed forced refresh must also block subsequent non-forced admission.
+    if (force) this.providerHookRevisions.set(provider, -1);
+    while (force || (this.providerHookRevisions.get(provider) ?? 0) !== this.hookConfigRevision) {
+      let refresh = this.providerHookRefreshes.get(provider);
+      if (!refresh) {
+        const revision = this.hookConfigRevision;
+        refresh = this.untilClosed(() => client.refreshHookConfig(), this.providerSignal(provider))
+          .then(() => { this.providerHookRevisions.set(provider, revision); });
+        this.providerHookRefreshes.set(provider, refresh);
+        refresh.finally(() => {
+          if (this.providerHookRefreshes.get(provider) === refresh) this.providerHookRefreshes.delete(provider);
+        }).catch(() => undefined);
+      }
+      await refresh;
+      force = false;
+      // A concurrent new write is a new input, not a retry of the prior edit.
+    }
   }
 
   private providerSignal(provider: string): AbortSignal {

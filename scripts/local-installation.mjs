@@ -137,16 +137,20 @@ export async function waitForCoreServiceTarget(
   const inspectSupervisor = options.inspectSupervisor;
   const inspectSupervisorState = options.inspectSupervisorState
     ?? inspectAppServerSupervisorState;
-  const socketHealthy = options.socketHealthy ?? appServerSocketAcceptsWebSocket;
+  const socketHealthy = options.socketHealthy ?? (socketPath => appServerSocketAcceptsWebSocket(socketPath,
+    { ...environment, CODEX_BINARY: document.codex?.binary ?? environment.CODEX_BINARY ?? "codex" }));
   const gatewayHealthy = options.gatewayHealthy ?? gatewayOwnerIsReady;
   const deadline = now() + timeoutMs;
   let healthySince;
   while (now() < deadline) {
+    options.signal?.throwIfAborted();
     let appServerReady = true;
     if (requiresAppServer) {
       let supervisor;
       let primarySocketHealthy = false;
       let protocolMismatch = false;
+      let topologyMatches = false;
+      let primaryReleased = false;
       try {
         if (inspectSupervisor) {
           supervisor = await inspectSupervisor(descriptor.primarySocketPath);
@@ -155,7 +159,16 @@ export async function waitForCoreServiceTarget(
           protocolMismatch = state.status === "incompatible";
           supervisor = state.status === "ready" ? state.topology : undefined;
         }
-        primarySocketHealthy = await socketHealthy(descriptor.primarySocketPath);
+        topologyMatches = sameAppServerTopology(supervisor, descriptor.topology);
+        primaryReleased = topologyMatches && supervisor.releasedProviders.includes(
+          descriptor.topology.primaryProvider,
+        );
+        // A released instance has no endpoint to probe. During startup, wait
+        // for this supervisor to report ownership before spawning a Proxy.
+        if (topologyMatches && !primaryReleased
+          && supervisor.runningProviders.includes(descriptor.topology.primaryProvider)) {
+          primarySocketHealthy = await socketHealthy(descriptor.primarySocketPath);
+        }
       } catch {
         // Windows IPC descriptors can be briefly absent or mid-write while the service starts.
       }
@@ -164,11 +177,7 @@ export async function waitForCoreServiceTarget(
           "App Server 监管协议版本不匹配；请运行 codexc restart all 后重试",
         );
       }
-      const topologyMatches = sameAppServerTopology(supervisor, descriptor.topology);
       // 空闲释放后的主 App Server 是合法状态，服务仍视为就绪；首次使用会按需启动。
-      const primaryReleased = supervisor?.releasedProviders.includes(
-        descriptor.topology.primaryProvider,
-      ) === true;
       appServerReady = topologyMatches && (primarySocketHealthy || primaryReleased);
     }
     let gatewayReady = !requiresGateway;
@@ -179,6 +188,7 @@ export async function waitForCoreServiceTarget(
         // Treat a transient Windows owner descriptor rewrite as not ready yet.
       }
     }
+    options.signal?.throwIfAborted();
     const healthy = appServerReady && gatewayReady;
     if (healthy) {
       healthySince ??= now();

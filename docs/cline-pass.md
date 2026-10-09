@@ -23,6 +23,7 @@ Flash 的上下文、图片、思考等级与提示词复用 DS 的 `deepseek-fl
 生成文件仍在 `providers/clp/models.json`，聚合读取这份目录。运行中的 Gateway 会在活动与租约允许后应用目录变化；未运行 Gateway 时按菜单提示重启服务。安装代码、重新配置 Key 和更新 Relay 目录均不会隐式覆盖已有 Codex 模型目录。现有账户保留原目录，须执行上述显式更新。
 
 切换模式按账户使用 `sf-clp-<账户>.config.toml` Profile 和独立 App Server；固定模式修改 Codex 主配置并保留该账户的初始备份。
+固定 Key 使用[独立私有版本与主配置 `env_key` 引用](provider-integration-guide.md#4-安全边界)，App Server 与独立 Relay 复用同一引用；旧明文配置须明确重新配置账户。
 Key 使用现有私有文件机制保存，不写入 Gateway TOML 或命令行。配置文件位于 Codex Home，目录与管理标记
 位于 `~/.codex-connect/providers/clp/`。配置变更后按 Setup 提示重启服务；切换模式通过
 现有 Provider 选择入口使用 `clp-<账户>`，终端可使用 `codexc remote --profile sf-clp-<账户>`。

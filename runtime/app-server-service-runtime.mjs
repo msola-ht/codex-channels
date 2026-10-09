@@ -25,7 +25,7 @@ import {
   readAppServerProviderSettingsFingerprint,
 } from "./app-server-supervisor.mjs";
 import { writeCliMessage as printCliMessage } from "./cli-presentation.mjs";
-import { executableInvocation, resolveExecutable } from "./executable.mjs";
+import { codexProcessInvocation } from "./owned-process.mjs";
 import {
   validateCodexConfigDocument,
   validateDebugConfigDocument,
@@ -38,6 +38,8 @@ import {
 } from "./model-provider-definitions.mjs";
 import {
   loadConfiguredCustomPrimaryModelProvider,
+  loadConfiguredCustomPrimaryCredential,
+  loadConfiguredManagedPrimaryCredential,
   loadOpenAiBaseUrl,
   loadManagedModelProviderSettings,
   managedProviderDirectory,
@@ -65,13 +67,54 @@ import { createRefreshableHttpProxySelector } from "./network-proxy.mjs";
 import {
   childProcessIsRunning,
   installProcessSignalHandlers,
+  installServiceControlHandler,
   signalChildProcesses,
   terminateChildProcess,
 } from "./process-lifecycle.mjs";
 import { createProxyFetch } from "./proxy-fetch.mjs";
 import { ProviderProxyRuntimeRegistry } from "./provider-proxy-runtime-registry.mjs";
+import { isolateProviderCredential } from "./provider-credential-policy.mjs";
+import { serviceShutdownTimeoutMs } from "./shutdown-budget.mjs";
 
 export async function runAppServerService(runtime, resolveDefaultWorkspace) {
+  const children = [];
+  let closeResources = async () => undefined;
+  let finishStartup;
+  const startupFinished = new Promise(resolve => { finishStartup = resolve; });
+  const lifecycle = forwardChildrenLifecycle(children, async () => {
+    await startupFinished;
+    await closeResources();
+  });
+  let startupError;
+  try {
+    await startAppServerService(runtime, resolveDefaultWorkspace, children, lifecycle,
+      close => { closeResources = close; });
+  } catch (error) {
+    startupError = error;
+  } finally {
+    finishStartup();
+  }
+  if (startupError || lifecycle.closed) {
+    try {
+      await lifecycle.close();
+    } catch (cleanupError) {
+      throw new AggregateError([...(startupError ? [startupError] : []), cleanupError],
+        "App Server 启动失败且资源清理未完成", { cause: cleanupError });
+    }
+    if (startupError && !lifecycle.stopRequested
+      && !(startupError instanceof AppServerStoppedError)) throw startupError;
+  }
+}
+
+class AppServerStoppedError extends Error {
+  constructor() { super("App Server 正在关闭，不能启动 Provider"); }
+}
+
+async function startAppServerService(runtime, resolveDefaultWorkspace, children, lifecycle, registerCloseResources) {
+  const assertRunning = () => {
+    if (lifecycle.closed) throw new AppServerStoppedError();
+  };
+  assertRunning();
   const validatedCodex = validateCodexConfigDocument(runtime.document.codex ?? {});
   const validatedDebug = validateDebugConfigDocument(runtime.document.debug ?? {});
   const trafficDumpDirectory = join(runtime.dataDir, "traffic");
@@ -111,6 +154,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     }
   }
   const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
+  // The proxy and its credential must retain the same configuration until the host restarts.
+  const customPrimaryCredential = customPrimaryProvider === undefined ? undefined
+    : loadConfiguredCustomPrimaryCredential(runtime.environment, customPrimaryProvider);
   const customSwitchingProviderIds = new Set(
     appServerRuntime.customSwitchingProviders.map((provider) => provider.provider),
   );
@@ -155,16 +201,19 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     pruneModelTrafficDumpSessions,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
+  assertRunning();
   const upstreamAgents = new Set();
   const upstreamAgentsByProxyUrl = new Map();
   const proxySelector = createRefreshableHttpProxySelector(
     readCodexProxySettings(runtime.environment),
     process.env,
   );
+  registerCloseResources(() => proxySelector.close());
   let supervisorOwner;
   let desktopAppBridge;
   const upstreamAgentFor = async (upstreamUrl) => {
     const proxyUrl = await proxySelector.select(upstreamUrl);
+    assertRunning();
     if (!proxyUrl) return undefined;
     const existing = upstreamAgentsByProxyUrl.get(proxyUrl);
     if (existing) return existing;
@@ -179,6 +228,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     provider,
     options,
   ) => {
+    assertRunning();
     const metricsProvider = proxyProviderIds.get(provider) ?? provider;
     const definition = providerDefinitions.get(provider) ?? sharedManagedProviderDefinition(provider);
     let bridge;
@@ -205,8 +255,11 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         onError: () => proxySelector.invalidate(),
         ...(validatedCodex.upstream_user_agent ? { upstreamUserAgent: validatedCodex.upstream_user_agent } : {}),
       });
-      try { await bridge.start(); }
-      catch (error) { await modelGuard?.close(); throw error; }
+      try { await bridge.start(); assertRunning(); }
+      catch (error) {
+        try { await bridge.close(); } finally { await modelGuard?.close(); }
+        throw error;
+      }
       options = bridge.proxyOptions();
     }
     const optionsWithUserAgent = {
@@ -305,6 +358,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     options.upstreamProtocol ?? "https", options.upstreamBasePath ?? "/",
   ]);
   const startProviderProxy = (provider, options) => {
+    assertRunning();
     if (!proxyTargetSignatures.has(provider)) proxyTargetSignatures.set(provider, proxyTargetSignature(options));
     return providerProxyRuntimes.ensure(provider, options).catch(error => {
       if (!providerProxyRuntimes.get(provider)) {
@@ -348,6 +402,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     opencodeGoAccountIdFromProvider(provider) !== undefined;
   const proxyOptionsForUrl = async (upstreamUrl) => {
     await proxySelector.validate(upstreamUrl);
+    assertRunning();
     return {
       upstreamHost: upstreamUrl.hostname,
       ...(upstreamUrl.port ? { upstreamPort: Number(upstreamUrl.port) } : {}),
@@ -455,6 +510,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       urls.set(profile.provider, accountId === undefined ? started.baseUrl : `${started.baseUrl}/go/${accountId}`);
     }
     const guard = aggregateGuard;
+    assertRunning();
     aggregateProxy = new AggregateModelProxy({ token, assertCurrent: signal => guard.check(signal),
       routes: new Map([...material.routes].map(([slug, route]) => [slug, {
         model: route.model, apiKey: route.apiKey, baseUrl: urls.get(route.provider),
@@ -469,31 +525,59 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     return { baseUrl, arguments: argumentsList,
       childEnvironment: { [aggregateTokenEnvironmentKey]: token } };
   };
-  const children = [];
   const childrenByProvider = new Map();
   const providerProxyIsInUse = (proxyKey) =>
     providerProxyRuntimes.hasUsers(proxyKey)
     || sharedProviderProxyKey(primaryProvider) === proxyKey;
-  let watchChild;
-  let detachChild;
-  const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment);
+  const { watchChild, detachChild } = lifecycle;
   const ensureInstance = (provider) => {
+    assertRunning();
     const existing = instanceLaunches.get(provider);
     if (existing) return existing;
     const launch = (async () => {
       if (provider === primaryProvider) {
         const runningChild = childrenByProvider.get(provider);
         if (runningChild) {
-          await waitForAppServer(socketPath, runningChild, provider);
+          await waitForAppServer(socketPath, runningChild, provider, runtime.environment);
           return;
         }
-        if (await appServerSocketAcceptsWebSocket(socketPath)) return;
-        await prepareAppServerSocketPaths([socketPath]);
+        if (await appServerSocketAcceptsWebSocket(socketPath, runtime.environment)) return;
+        await prepareAppServerSocketPaths([socketPath], runtime.environment);
         settingsSnapshots.delete(provider);
         const snapshot = prepareProviderSettings(provider);
+        const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment, customPrimaryCredential?.environmentKey);
+        let primaryCredential;
+        if (primaryProvider === "openai") {
+          const currentCustomPrimary = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
+          if (JSON.stringify(currentCustomPrimary) !== JSON.stringify(customPrimaryProvider)) {
+            const message = "自定义固定 Provider 配置已变化；请运行 codexc restart all 后重试";
+            printCliMessage("failure", message);
+            throw new Error(message);
+          }
+          const currentCredential = customPrimaryProvider === undefined ? undefined
+            : loadConfiguredCustomPrimaryCredential(runtime.environment, customPrimaryProvider);
+          if (currentCredential?.environmentKey !== customPrimaryCredential?.environmentKey
+            || currentCredential?.apiKey !== customPrimaryCredential?.apiKey) {
+            const message = "自定义固定 Provider 凭据已变化；请运行 codexc restart all 后重试";
+            printCliMessage("failure", message);
+            throw new Error(message);
+          }
+          primaryCredential = customPrimaryCredential;
+        } else {
+          primaryCredential = loadConfiguredManagedPrimaryCredential(runtime.environment);
+        }
+        const primaryLaunch = isolateProviderCredential(
+          customPrimaryProvider?.id ?? primaryProvider,
+          primaryArguments,
+          primaryChildEnvironment,
+          primaryCredential,
+        );
+        if (snapshot && providerSettingsFingerprint(provider) !== snapshot.fingerprint) {
+          throw new Error("Provider 凭据在启动期间发生变化");
+        }
         const attachment = desktopAppAttachment?.provider === provider ? desktopAppAttachment : undefined;
         const primaryAppServerArguments = [
-          ...primaryArguments,
+          ...primaryLaunch.arguments,
           ...(attachment
             ? [
                 "-c",
@@ -506,9 +590,10 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         ];
         const primarySpawnOptions = {
           stdio: "inherit",
-          env: primaryChildEnvironment,
+          env: primaryLaunch.childEnvironment,
           cwd: defaultWorkspace.cwd,
         };
+        assertRunning();
         const child = attachment
           ? spawnMacDesktopHostedCodex(
               attachment,
@@ -524,7 +609,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         children.push(child);
         childrenByProvider.set(provider, child);
         try {
-          await waitForAppServer(socketPath, child, provider);
+          await waitForAppServer(socketPath, child, provider, runtime.environment);
+          assertRunning();
           confirmProviderSettings(provider, snapshot);
           settingsRecoveryRequired.delete(provider);
           watchChild(child);
@@ -564,11 +650,11 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       }
       const runningChild = childrenByProvider.get(provider);
       if (runningChild) {
-        await waitForAppServer(managed.socketPath, runningChild, provider);
+        await waitForAppServer(managed.socketPath, runningChild, provider, runtime.environment);
         return;
       }
-      if (await appServerSocketAcceptsWebSocket(managed.socketPath)) return;
-      await prepareAppServerSocketPaths([managed.socketPath]);
+      if (await appServerSocketAcceptsWebSocket(managed.socketPath, runtime.environment)) return;
+      await prepareAppServerSocketPaths([managed.socketPath], runtime.environment);
       const proxyKey = sharedProviderProxyKey(provider);
       if (!aggregate) providerProxyRuntimes.addUser(proxyKey, provider);
       let proxy;
@@ -595,8 +681,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           providerBaseUrl,
         );
         const attachment = desktopAppAttachment?.provider === provider ? desktopAppAttachment : undefined;
+        const credentials = Object.entries(managed.runtime.childEnvironment);
+        if (credentials.length !== 1) throw new Error("隔离 App Server 必须使用唯一 Provider 凭据");
+        const [[environmentKey, apiKey]] = credentials;
+        const managedLaunch = isolateProviderCredential(provider, argumentsList,
+          withoutManagedProviderApiKeys(runtime.environment, customPrimaryCredential?.environmentKey), { environmentKey, apiKey });
         const managedAppServerArguments = [
-          ...argumentsList,
+          ...managedLaunch.arguments,
           ...(attachment ? ["-c", `${macDesktopAppPluginEnabledConfigKey}=${attachment.toolsEnabled}`] : []),
           "app-server",
           "--listen",
@@ -604,12 +695,10 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         ];
         const managedSpawnOptions = {
           stdio: "inherit",
-          env: {
-            ...withoutManagedProviderApiKeys(runtime.environment),
-            ...managed.runtime.childEnvironment,
-          },
+          env: managedLaunch.childEnvironment,
           cwd: defaultWorkspace.cwd,
         };
+        assertRunning();
         child = attachment
           ? spawnMacDesktopHostedCodex(attachment, managedAppServerArguments, managedSpawnOptions)
           : spawnCodexProcess(runtime.environment.CODEX_BINARY, managedAppServerArguments, managedSpawnOptions, runtime.environment);
@@ -619,9 +708,11 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           managed.socketPath,
           child,
           provider,
+          runtime.environment,
           "模型 Provider App Server",
         );
         if (aggregate) await aggregateGuard.check();
+        assertRunning();
         confirmProviderSettings(provider, snapshot);
         settingsRecoveryRequired.delete(provider);
         watchChild(child);
@@ -727,7 +818,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       signal.throwIfAborted();
       const client = new CodexAppServerClient(new JsonRpcClient(createAppServerTransport(
         { kind: "local-app-server", socketPath: targetSocket },
-        { codexBinary: runtime.environment.CODEX_BINARY, connectTimeoutMs: 3_000 },
+        {
+          createCodexProcessInvocation: args => codexProcessInvocation(
+            runtime.environment.CODEX_BINARY, args, runtime.environment,
+          ),
+          terminateCodexProcess: terminateChildProcess,
+          connectTimeoutMs: 3_000,
+        },
       ), 5_000), { sandbox: "read-only" });
       const cancel = () => { void client.close().catch(() => undefined); };
       signal.addEventListener("abort", cancel, { once: true });
@@ -739,7 +836,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         signal.removeEventListener("abort", cancel);
         await client.close();
       }
-    } else if (await appServerSocketAcceptsWebSocket(targetSocket)) {
+    } else if (await appServerSocketAcceptsWebSocket(targetSocket, runtime.environment)) {
       throw new Error("拒绝重启未受监管的 App Server");
     }
     // Lease acquisition can race the asynchronous authoritative read. The owner
@@ -787,7 +884,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     signal.throwIfAborted();
     const ensureManagedTargetInstance = async () => {
       if (!childrenByProvider.has(provider)
-        && await appServerSocketAcceptsWebSocket(targetSocket)) {
+        && await appServerSocketAcceptsWebSocket(targetSocket, runtime.environment)) {
         throw new Error("Desktop 目标 App Server 不受当前服务监管");
       }
       await ensureInstance(provider);
@@ -808,7 +905,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     signal.throwIfAborted();
     const client = new CodexAppServerClient(new JsonRpcClient(createAppServerTransport(
       { kind: "local-app-server", socketPath: targetSocket },
-      { codexBinary: runtime.environment.CODEX_BINARY, connectTimeoutMs: 3_000 },
+      {
+        createCodexProcessInvocation: args => codexProcessInvocation(
+          runtime.environment.CODEX_BINARY, args, runtime.environment,
+        ),
+        terminateCodexProcess: terminateChildProcess,
+        connectTimeoutMs: 3_000,
+      },
     ), 5_000), { sandbox: "read-only" });
     const cancel = () => { void client.close().catch(() => undefined); };
     signal.addEventListener("abort", cancel, { once: true });
@@ -862,8 +965,10 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     desktopAppAttachment = undefined;
     console.log("Codex Desktop App 可信 Host 租约已释放");
   };
-  try {
-    await prepareAppServerSocketPaths(appServerRuntime.socketPaths);
+  registerCloseResources(closeResources);
+  {
+    await prepareAppServerSocketPaths(appServerRuntime.socketPaths, runtime.environment);
+    assertRunning();
     if (customPrimaryProvider) {
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         primaryProvider,
@@ -888,7 +993,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         const chatgptUrl = new URL("https://chatgpt.com/backend-api/codex");
         const apiUrl = new URL("https://api.openai.com/v1");
         await proxySelector.validate(chatgptUrl);
+        assertRunning();
         await proxySelector.validate(apiUrl);
+        assertRunning();
         openAiProxyOptions = {
           upstreamHost: apiUrl.hostname,
           upstreamProtocol: "https",
@@ -930,18 +1037,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         primaryBaseUrl,
       );
     }
-    const lifecycle = forwardChildrenLifecycle(children, async () => {
-      await proxySelector.close();
-      await desktopAppBridge?.close();
-      await supervisorOwner?.close();
-      await closeAggregateProxy();
-      await Promise.all(
-        providerProxyRuntimes.values().map(({ proxy }) => proxy.close()),
-      );
-      for (const agent of upstreamAgents) agent.destroy();
-    });
-    watchChild = lifecycle.watchChild;
-    detachChild = lifecycle.detachChild;
+    assertRunning();
     supervisorOwner = new AppServerSupervisorOwner(
       socketPath,
       appServerRuntime.topology,
@@ -957,6 +1053,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       },
     );
     await supervisorOwner.start();
+    assertRunning();
     try {
       pruneModelTrafficDumpSessions({
         directory: trafficDumpDirectory,
@@ -969,9 +1066,11 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       );
     }
     await ensureInstance(primaryProvider);
+    assertRunning();
     supervisorOwner.markRunning(primaryProvider);
     if (validatedCodex.desktop_app?.enabled === true && process.platform === "win32") {
       await ensureInstance(primaryProvider);
+      assertRunning();
       desktopAppBridge = await startDesktopAppBridge({
         port: validatedCodex.desktop_app.port,
         socketPath,
@@ -986,20 +1085,27 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           }
         },
       });
+      assertRunning();
       console.log(
         `Codex Desktop App 桥已启动：127.0.0.1:${validatedCodex.desktop_app.port}`,
       );
     }
-  } catch (error) {
-    await proxySelector.close();
-    await desktopAppBridge?.close();
-    await supervisorOwner?.close();
-    await closeAggregateProxy();
-    await Promise.all(
-      providerProxyRuntimes.values().map(({ proxy }) => proxy.close()),
-    );
-    for (const agent of upstreamAgents) agent.destroy();
-    throw error;
+  }
+
+  async function closeResources() {
+    // Launch continuations can register proxies after their awaited start finishes.
+    // Drain them before taking the resource snapshot used by cleanup.
+    await Promise.allSettled([...instanceLaunches.values()]);
+    const results = await Promise.allSettled([
+      () => proxySelector.close(),
+      () => desktopAppBridge?.close(),
+      () => supervisorOwner?.close(),
+      () => closeAggregateProxy(),
+      ...providerProxyRuntimes.values().map(({ proxy }) => () => proxy.close()),
+      ...[...upstreamAgents].map(agent => () => agent.destroy()),
+    ].map(operation => Promise.resolve().then(operation)));
+    const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
+    if (errors.length) throw new AggregateError(errors, "App Server 资源清理未完成");
   }
 }
 
@@ -1024,7 +1130,7 @@ export function applyAppServerTimezone(environment, timezone) {
   environment.TZ = timezone;
 }
 
-function withoutManagedProviderApiKeys(environment) {
+function withoutManagedProviderApiKeys(environment, customPrimaryEnvironmentKey) {
   const childEnvironment = { ...environment };
   const managedKeys = new Set(
     loadManagedModelProviderDefinitions(environment)
@@ -1032,13 +1138,17 @@ function withoutManagedProviderApiKeys(environment) {
   );
   // 旧版单账户环境变量不属于当前动态定义，仍必须从子进程环境剥离。
   managedKeys.add("CODEX_CONNECT_OPENCODE_GO_API_KEY");
+  if (customPrimaryEnvironmentKey !== undefined) managedKeys.add(customPrimaryEnvironmentKey);
   for (const key of managedKeys) {
     delete childEnvironment[key];
   }
   for (const key of Object.keys(childEnvironment)) {
     if (
-      /^CODEX_CONNECT_OPENCODE_GO(?:_[A-Z0-9_]+)?_API_KEY$/u.test(key)
-      || /^CODEX_CONNECT_CUSTOM_[A-F0-9]+_API_KEY$/u.test(key)
+      process.platform === "win32" && [...managedKeys].some(name => name.toLowerCase() === key.toLowerCase())
+      || /^CODEX_CONNECT_OPENCODE_GO(?:_[A-Z0-9_]+)?_API_KEY$/iu.test(key)
+      || /^CODEX_CONNECT_[A-Z0-9_]+_API_KEY_PRIMARY_[a-f0-9]{32}$/iu.test(key)
+      || /^CODEX_CONNECT_CUSTOM_[A-F0-9]+(?:_PRIMARY_[a-f0-9]{32})?_API_KEY$/iu.test(key)
+      || /^CODEX_CONNECT_MODEL_AUTH_[A-F0-9]{32}_API_KEY$/iu.test(key)
     ) {
       delete childEnvironment[key];
     }
@@ -1047,8 +1157,8 @@ function withoutManagedProviderApiKeys(environment) {
 }
 
 function spawnCodexProcess(codexBinary, args, options, environment) {
-  const invocation = executableInvocation(
-    resolveExecutable(codexBinary, environment),
+  const invocation = codexProcessInvocation(
+    codexBinary,
     args,
     environment,
   );
@@ -1062,6 +1172,7 @@ function waitForAppServer(
   socketPath,
   child,
   provider,
+  environment,
   label = "App Server",
   timeoutMs = 10_000,
 ) {
@@ -1094,8 +1205,11 @@ function waitForAppServer(
       `${label} 启动失败：${provider}（${signal ? `signal=${signal}` : `exit=${code ?? 1}`}）；请查看 App Server 服务日志`,
     ));
     const check = async () => {
+      if (settled) return;
       try {
-        if (await appServerSocketAcceptsWebSocket(socketPath)) {
+        const acceptsWebSocket = await appServerSocketAcceptsWebSocket(socketPath, environment);
+        if (settled) return;
+        if (acceptsWebSocket) {
           succeed();
           return;
         }
@@ -1110,30 +1224,58 @@ function waitForAppServer(
     };
     child.once("error", onError);
     child.once("exit", onExit);
+    if (!childProcessIsRunning(child)) {
+      onExit(child.exitCode, child.signalCode);
+      return;
+    }
     void check();
   });
 }
 
 function forwardChildrenLifecycle(children, closeResources = async () => undefined) {
   let settled = false;
+  let stopRequested = false;
+  let closeTask;
   const watchers = new Map();
-  const forward = (signal) => signalChildProcesses(children, signal);
   let cleanup = () => undefined;
+  const close = (initialSignal) => {
+    if (closeTask) return closeTask;
+    settled = true;
+    const deadline = setTimeout(() => {
+      printCliMessage("failure", "App Server 停止等待超时，监管进程将以故障状态退出");
+      process.exit(1);
+    }, serviceShutdownTimeoutMs);
+    cleanup();
+    for (const [child, watcher] of watchers) {
+      child.off("error", watcher.onError);
+      child.off("exit", watcher.onExit);
+    }
+    watchers.clear();
+    closeTask = Promise.resolve().then(async () => {
+      const results = await Promise.allSettled([
+        Promise.resolve().then(closeResources),
+        ...[...children].map(async (child) => {
+          let signalError;
+          if (initialSignal) {
+            try { signalChildProcesses([child], initialSignal); } catch (error) { signalError = error; }
+          }
+          try { await terminateChildProcess(child); }
+          catch (error) { throw new AggregateError([...(signalError ? [signalError] : []), error], "App Server 子进程清理失败", { cause: error }); }
+          if (signalError) throw signalError;
+        }),
+      ]);
+      const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
+      if (errors.length) throw new AggregateError(errors, "App Server 资源清理未完成");
+    });
+    // A failed cleanup can retain an owned child or an IPC handle. Keep the
+    // deadline armed on failure so direct foreground entry points stay bounded.
+    void closeTask.then(() => clearTimeout(deadline), () => { process.exitCode = 1; });
+    return closeTask;
+  };
   const finish = (code, signal, error, initialSignal = "SIGTERM") => {
     if (settled) return;
-    settled = true;
-    cleanup();
-    if (initialSignal) forward(initialSignal);
     void (async () => {
-      const cleanupResults = await Promise.allSettled([
-        Promise.resolve().then(closeResources),
-      ]);
-      const terminationResults = await Promise.allSettled(
-        [...children].map((child) => terminateChildProcess(child)),
-      );
-      const cleanupFailure = [...cleanupResults, ...terminationResults]
-        .find((result) => result.status === "rejected");
-      if (cleanupFailure?.status === "rejected") throw cleanupFailure.reason;
+      await close(initialSignal);
       if (error) {
         printCliMessage(
           "failure",
@@ -1160,18 +1302,22 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
     });
   };
   const cleanupSignals = installProcessSignalHandlers({
-    SIGTERM: () => finish(null, "SIGTERM", undefined, "SIGTERM"),
-    SIGINT: () => finish(null, "SIGINT", undefined, "SIGINT"),
+    SIGTERM: () => { stopRequested = true; finish(null, "SIGTERM", undefined, "SIGTERM"); },
+    SIGINT: () => { stopRequested = true; finish(null, "SIGINT", undefined, "SIGINT"); },
   });
   const onControlMessage = (message) => {
-    if (message?.type === "codexc-stop") finish(0, null, undefined, null);
+    if (message?.type === "codexc-stop") {
+      stopRequested = true;
+      finish(0, null, undefined, null);
+    }
   };
-  process.on("message", onControlMessage);
+  const cleanupControl = installServiceControlHandler(onControlMessage);
   cleanup = () => {
     cleanupSignals();
-    process.off("message", onControlMessage);
+    cleanupControl();
   };
   const watchChild = (child) => {
+    if (settled) return;
     if (watchers.has(child)) return;
     const onError = (error) => finish(1, null, error);
     const onExit = (code, signal) => finish(code, signal);
@@ -1193,5 +1339,6 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
     if (index >= 0) children.splice(index, 1);
   };
   for (const child of children) watchChild(child);
-  return { watchChild, detachChild };
+  return { watchChild, detachChild, close,
+    get closed() { return settled; }, get stopRequested() { return stopRequested; } };
 }

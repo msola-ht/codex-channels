@@ -11,6 +11,7 @@ import {
 } from "../runtime/private-ipc.mjs";
 import {
   childProcessIsRunning,
+  createChildServiceControl,
   installProcessSignalHandlers,
   terminateChildProcess,
 } from "../runtime/process-lifecycle.mjs";
@@ -18,10 +19,11 @@ import {
   readPrivateFileSync,
   securePrivateFileSync,
 } from "../runtime/private-file.mjs";
+import { serviceGracefulStopTimeoutMs } from "../runtime/shutdown-budget.mjs";
 
 const definitionLimitBytes = 64 * 1024;
 const requestLimitBytes = 1_024;
-const gracefulStopTimeoutMs = 10_000;
+const controlTimeoutMs = 2_000;
 
 export async function runWindowsServiceHost(definitionPath) {
   if (process.platform !== "win32") {
@@ -31,6 +33,7 @@ export async function runWindowsServiceHost(definitionPath) {
   let stdout;
   let stderr;
   let child;
+  let control;
   let server;
   let cleanupSignals;
   let stopping = false;
@@ -41,7 +44,7 @@ export async function runWindowsServiceHost(definitionPath) {
   const cleanupErrors = [];
   const stop = () => {
     stopping = true;
-    stopPromise ??= stopChild(child);
+    stopPromise ??= stopChild(child, control);
     // Signal and IPC callbacks cannot await, but the owner below observes failure.
     void stopPromise.catch((error) => reportStopFailure({ error }));
     return stopPromise;
@@ -56,8 +59,9 @@ export async function runWindowsServiceHost(definitionPath) {
       windowsHide: true,
     });
     const resultPromise = childResult(child);
+    control = createChildServiceControl(child);
     server = new PrivateIpcServer(definition.controlPath, (socket) => {
-      handleControlConnection(socket, definition, child, stop);
+      handleControlConnection(socket, definition, child, control, stop);
     });
     cleanupSignals = installProcessSignalHandlers({
       SIGINT: () => void stop(),
@@ -65,11 +69,11 @@ export async function runWindowsServiceHost(definitionPath) {
     });
     await server.start(`${definition.displayName} Windows 服务宿主已在运行`);
     const result = await Promise.race([resultPromise, stopFailure]);
-    if (stopPromise) await stopPromise;
+    const forcedStop = stopPromise ? await stopPromise : false;
     if (result.error) throw result.error;
-    if (!stopping && (result.code !== 0 || result.signal)) {
+    if ((result.code !== 0 || result.signal) && (!stopping || !forcedStop)) {
       throw new Error(
-        `${definition.displayName} 意外退出：${result.signal ? `signal=${result.signal}` : `exit=${result.code ?? 1}`}`,
+        `${definition.displayName} ${stopping ? "停止时异常退出" : "意外退出"}：${result.signal ? `signal=${result.signal}` : `exit=${result.code ?? 1}`}`,
       );
     }
   } catch (error) {
@@ -80,12 +84,19 @@ export async function runWindowsServiceHost(definitionPath) {
     catch (error) { cleanupErrors.push(error); }
     try { await server?.close(); }
     catch (error) { cleanupErrors.push(error); }
+    control?.close();
     for (const descriptor of [stdout, stderr]) {
       try { if (descriptor !== undefined) closeSync(descriptor); }
       catch (error) { cleanupErrors.push(error); }
     }
   }
   if (cleanupErrors.length > 0) {
+    // The launcher owns this host and its descendants in a Windows Job. Let it
+    // observe failure and close that Job even when direct cleanup was denied.
+    if (childProcessIsRunning(child)) {
+      if (child.connected) child.disconnect();
+      child.unref();
+    }
     throw new AggregateError([
       ...(operationError === undefined ? [] : [operationError]), ...cleanupErrors,
     ], "Windows 服务宿主失败且资源清理未完成", { cause: operationError ?? cleanupErrors[0] });
@@ -93,13 +104,23 @@ export async function runWindowsServiceHost(definitionPath) {
   if (operationError !== undefined) throw operationError;
 }
 
-function handleControlConnection(socket, definition, child, stop) {
+function handleControlConnection(socket, definition, child, control, stop) {
   const chunks = [];
   let bytes = 0;
   let handled = false;
-  socket.on("error", () => undefined);
-  socket.setTimeout(2_000, () => socket.destroy());
-  socket.on("data", (chunk) => {
+  const deadline = Date.now() + controlTimeoutMs;
+  const cancellation = new AbortController();
+  const cancel = () => cancellation.abort();
+  const timer = setTimeout(() => {
+    cancel();
+    socket.destroy();
+  }, controlTimeoutMs);
+  socket.on("error", cancel);
+  socket.once("close", () => {
+    clearTimeout(timer);
+    cancel();
+  });
+  const onData = (chunk) => {
     if (handled) return;
     bytes += chunk.length;
     if (bytes > requestLimitBytes) {
@@ -109,7 +130,10 @@ function handleControlConnection(socket, definition, child, stop) {
     chunks.push(chunk);
     if (!chunk.includes(0x0a)) return;
     handled = true;
-    socket.pause();
+    socket.off("data", onData);
+    // Keep reading so EOF/close can cancel an in-flight reload. Further frames
+    // cannot invoke another command after the first request has been consumed.
+    socket.resume();
     let request;
     try {
       request = JSON.parse(Buffer.concat(chunks).toString("utf8").trim());
@@ -128,8 +152,20 @@ function handleControlConnection(socket, definition, child, stop) {
       return;
     }
     if (request?.action === "reload" && definition.target === "gateway") {
-      const sent = sendControlMessage(child, { type: "codexc-reload" });
-      socket.end(`${JSON.stringify({ version: 1, ok: sent })}\n`);
+      if (!Number.isSafeInteger(request.deadline)
+        || request.deadline <= Date.now() || request.deadline > deadline) {
+        socket.end(`${JSON.stringify({ version: 1, ok: false })}\n`);
+        return;
+      }
+      const respond = (sent) => {
+        if (!socket.destroyed && !cancellation.signal.aborted) {
+          socket.end(`${JSON.stringify({ version: 1, ok: sent })}\n`);
+        }
+      };
+      void control.send("codexc-reload", {
+        deadline: request.deadline,
+        signal: cancellation.signal,
+      }).then(respond, () => respond(false));
       return;
     }
     if (request?.action === "stop") {
@@ -138,28 +174,23 @@ function handleControlConnection(socket, definition, child, stop) {
       return;
     }
     socket.end(`${JSON.stringify({ version: 1, ok: false })}\n`);
-  });
+  };
+  socket.on("data", onData);
   socket.on("end", () => {
+    cancel();
     if (!handled) socket.end();
+    else socket.destroy();
   });
 }
 
-async function stopChild(child) {
-  if (!childProcessIsRunning(child)) return;
-  if (sendControlMessage(child, { type: "codexc-stop" })) {
-    if (await childExitedWithin(child, gracefulStopTimeoutMs)) return;
+async function stopChild(child, control) {
+  if (!childProcessIsRunning(child)) return false;
+  const deadline = Date.now() + serviceGracefulStopTimeoutMs;
+  if (await control.send("codexc-stop")) {
+    if (await childExitedWithin(child, Math.max(0, deadline - Date.now()))) return false;
   }
   await terminateChildProcess(child);
-}
-
-function sendControlMessage(child, message) {
-  if (!child.connected || !childProcessIsRunning(child)) return false;
-  try {
-    child.send(message);
-    return true;
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 function childResult(child) {

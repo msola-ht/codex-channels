@@ -32,9 +32,11 @@ export class ModelRelayMaterialReader {
       this.#terminating = worker.terminate().finally(() => { this.#terminating = undefined; });
     };
     const receive = result => { cleanup(); if (this.#closed || !result.ok) reject(new Error("Relay materials invalid")); else resolve(result); };
-    const timer = setTimeout(failure, this.purpose === "metrics" ? 750 : 2000);
+    const budget = this.purpose === "metrics" ? 750 : 2000;
+    const deadline = Date.now() + budget;
+    const timer = setTimeout(failure, budget);
     worker.once("message", receive); worker.once("error", failure); worker.once("exit", failure);
-    this.#pending = { promise, cancel: failure }; worker.postMessage({ operation: "read" });
+    this.#pending = { promise, cancel: failure }; worker.postMessage({ operation: "read", deadline });
     return promise;
   }
   async close() {

@@ -1,5 +1,6 @@
 import { formatMarkdownAsTelegramHtmlChunks } from "./markdown-format.js";
 import { escapeTelegramHtml } from "./html-format.js";
+import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 const maximumInlineCharacters = 3_500;
 const documentThresholdCharacters = 16_000;
@@ -58,17 +59,18 @@ export function planLongFinalMessage(text: string): LongFinalMessagePlan | undef
 function maximumFencedCodeLines(lines: readonly string[]): number {
   let current = 0;
   let maximum = 0;
-  let insideFence = false;
+  let fence: MarkdownFence | undefined;
   for (const line of lines) {
-    if (/^```/.test(line)) {
-      if (insideFence) {
+    const nextFence = advanceMarkdownFence(fence, line);
+    if (nextFence !== fence) {
+      if (fence) {
         maximum = Math.max(maximum, current);
         current = 0;
       }
-      insideFence = !insideFence;
+      fence = nextFence;
       continue;
     }
-    if (insideFence) {
+    if (fence) {
       current += 1;
     }
   }

@@ -1,5 +1,4 @@
 import {
-  isFastServiceTier,
   lunaReserveModel,
   type ConversationStatus,
 } from "../application/index.js";
@@ -26,7 +25,7 @@ import {
 } from "./elapsed-duration.js";
 import {
   formatCodexProviderLabel,
-  supportsFastMode,
+  formatServiceTier,
 } from "./provider-format.js";
 import {
   formatCompactMetricsValue,
@@ -50,6 +49,19 @@ export interface LifecyclePresentation {
 export function isHiddenAutoApprovalReview(event: OutputEvent): boolean {
   return event.type === "autoApprovalReview.updated"
     && (event.phase !== "completed" || event.status === "inProgress");
+}
+
+export function createHookCompletedPresentation(
+  event: Extract<OutputEvent, { type: "hook.completed" }>,
+): LifecyclePresentation {
+  const status = { completed: "已完成", failed: "执行失败", blocked: "已阻断", stopped: "已停止" }[event.hook.status];
+  return {
+    title: `Codex Hook · ${status}`,
+    fields: [
+      { label: "触发事件", value: event.hook.eventName, literal: true },
+      ...(event.background ? [{ label: "任务", value: `后台任务 · ${event.threadId.slice(0, 12)}` }] : []),
+    ],
+  };
 }
 
 export function createAutoApprovalReviewPresentation(
@@ -245,14 +257,12 @@ export function createStartupPresentation(
             label: reasoningEffortSettingName(status.effort),
             value: `${formatReasoningEffort(status.effort)}${pendingSuffix(status.effortPending)}`,
           },
-          ...(supportsFastMode(status.modelProvider)
-            ? [{
-                label: "Fast 模式",
-                value: `${status.threadId
-                  ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭")
-                  : "未知"}${pendingSuffix(status.fastModePending)}`,
-              }]
-            : []),
+          {
+            label: "速度",
+            value: `${status.threadId || status.fastModePending
+              ? formatServiceTier(status.serviceTier)
+              : "未知"}${pendingSuffix(status.fastModePending)}`,
+          },
           {
             label: "协作模式",
             value: `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
@@ -551,9 +561,7 @@ export function createTurnCompletedPresentation(
   if (event.model) {
     runFields.push({
       label: "模型",
-      value: supportsFastMode(event.modelProvider)
-        ? `${event.model} · ${formatReasoningEffort(event.effort)} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`
-        : `${event.model} · ${formatReasoningEffort(event.effort)}`,
+      value: `${event.model} · ${formatReasoningEffort(event.effort)} · ${formatServiceTier(event.serviceTier)}`,
     });
     runFields.push({
       label: "提供商",

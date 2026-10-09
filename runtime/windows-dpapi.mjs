@@ -44,10 +44,15 @@ function invokeDpapi(operation, value, environment) {
     input: JSON.stringify({ operation, data: value.toString("base64") }),
     encoding: "utf8",
     maxBuffer: maximumDpapiResponseBytes,
+    timeout: 5_000,
+    env: environment,
     windowsHide: true,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
   if (result.error || result.status !== 0) {
+    if (result.error?.code === "ETIMEDOUT") {
+      throw new Error("Windows DPAPI 操作超过 5 秒，已终止；未确认操作结果");
+    }
     throw new Error("Windows DPAPI 操作失败");
   }
   let response;

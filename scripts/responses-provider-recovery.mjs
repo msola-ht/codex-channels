@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parse } from "smol-toml";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
+import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { responsesProviderCatalogPath, readResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import {
@@ -30,8 +31,8 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
     const candidate = action === "rollback" ? previous : current;
     if (action === "keep" && candidate === undefined) throw new Error("新目录尚未写入，请选择 rollback");
     const home = codexHomePath(environment);
-    const config = readOptionalConfig(join(home, "config.toml")) ?? {};
-    const profile = readOptionalConfig(customPrimaryProviderProfilePath(environment, id));
+    const config = readOptionalConfig(join(home, "config.toml"), environment) ?? {};
+    const profile = readOptionalConfig(customPrimaryProviderProfilePath(environment, id), environment);
     const registered = loadCustomSwitchingProviderIds(environment).includes(id);
     if (registered !== (profile !== undefined)) {
       throw new Error("Responses Provider 的 Profile 与注册表不一致，请先恢复对应配置");
@@ -67,10 +68,10 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
   });
 }
 
-function readOptionalConfig(path) {
+function readOptionalConfig(path, environment) {
   let content;
   try {
-    content = readPrivateFileSync(path);
+    content = createProviderFileReader(environment)(path);
   } catch (error) {
     if (error?.code === "ENOENT") return undefined;
     throw error;

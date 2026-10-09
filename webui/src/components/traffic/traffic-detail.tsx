@@ -5,7 +5,7 @@ import { TrafficParameterComparison, TrafficRequestContent } from "@/components/
 import { TrafficModel } from "@/components/traffic/traffic-model"
 import { TrafficContent, TrafficDisclosure } from "@/components/traffic/traffic-content"
 import { TableHint } from "@/components/metrics/data-table"
-import { FastBadge } from "@/components/metrics/service-tier"
+import { AccelerationBadge } from "@/components/metrics/service-tier"
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -131,7 +131,7 @@ export function TrafficDetail({
             ) : null}
             <TrafficDisclosure title={`${t("traffic.responseRawTitle")}${detail.response.bodyTruncated ? t("traffic.truncatedSuffix") : ""}`}>
               <div className="flex min-w-0 flex-col gap-3">
-                <p className="flex items-center gap-2 text-sm">{t("traffic.responseServiceTier", { value: detail.response.serviceTier ?? t("modelComparison.notProvided") })}<FastBadge tier={detail.response.serviceTier} source="response" /></p>
+                <p className="flex items-center gap-2 text-sm">{t("traffic.responseServiceTier", { value: detail.response.serviceTier ?? t("modelComparison.notProvided") })}<AccelerationBadge tier={detail.response.serviceTier} source="response" /></p>
                 {detail.response.responseId === undefined ? null : (
                   <p className="break-all font-mono text-xs text-muted-foreground">{t("traffic.responseId", { id: detail.response.responseId })}</p>
                 )}
@@ -154,7 +154,7 @@ export function TrafficDetail({
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-3 text-sm">
             <span>{t("traffic.reasoningEffort", { value: detail.request.parameters.reasoningEffort ?? t("modelComparison.notProvided") })}</span>
-            <span className="inline-flex items-center gap-2">{t("traffic.requestServiceTier", { value: detail.request.parameters.serviceTier ?? t("modelComparison.notProvided") })}<FastBadge tier={detail.request.parameters.serviceTier} source="request" /></span>
+            <span className="inline-flex items-center gap-2">{t("traffic.requestServiceTier", { value: detail.request.parameters.serviceTier ?? t("modelComparison.notProvided") })}<AccelerationBadge tier={detail.request.parameters.serviceTier} source="request" responseTier={detail.response?.serviceTier} /></span>
             {detail.request.parameters.generate === false ? <Badge variant="outline">{t("traffic.noOutputBadge")}</Badge> : null}
           </div>
           <TrafficRequestContent content={detail.request.content} />

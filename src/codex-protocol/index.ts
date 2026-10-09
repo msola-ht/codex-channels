@@ -21,6 +21,10 @@ export type { ThreadTurnsListResponse } from "./generated/v2/ThreadTurnsListResp
 export type { Turn } from "./generated/v2/Turn.js";
 export type { ConfigReadParams } from "./generated/v2/ConfigReadParams.js";
 export type { ConfigReadResponse } from "./generated/v2/ConfigReadResponse.js";
+export type { ConfigBatchWriteParams } from "./generated/v2/ConfigBatchWriteParams.js";
+export type { HooksListParams } from "./generated/v2/HooksListParams.js";
+export type { HooksListResponse } from "./generated/v2/HooksListResponse.js";
+export type { HookMetadata } from "./generated/v2/HookMetadata.js";
 export type { ConfigRequirementsReadResponse } from "./generated/v2/ConfigRequirementsReadResponse.js";
 export type {
   CollaborationModeListResponse,

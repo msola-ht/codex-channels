@@ -37,7 +37,7 @@ export function createManagedProviderConfiguration(
     catalog: { models: Array<Record<string, unknown>> };
     model: string;
   },
-): { config: Record<string, unknown>; profile: Record<string, unknown> | undefined };
+): { config: Record<string, unknown>; profile: Record<string, unknown> | undefined; credential?: { environmentKey: string; content: string } };
 
 export function resolveManagedCatalogModel(
   catalog: { models?: Array<Record<string, unknown>> },
@@ -49,7 +49,7 @@ export function applyExclusiveProviderConfig(
   current: Record<string, unknown>,
   definition: ModelProviderDefinition,
   options: {
-    apiKey: string;
+    environmentKey: string;
     catalogPath: string;
     model?: string;
   },

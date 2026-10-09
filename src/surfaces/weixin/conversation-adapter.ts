@@ -24,6 +24,7 @@ import {
   gatewayRequestFailedText,
 } from "../output-copy.js";
 import { formatQuotedInput } from "../quoted-input.js";
+import { sanitizeWeixinMarkdownText } from "./markdown-sanitize.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
 import {
   formatWeixinCommandText,
@@ -314,6 +315,18 @@ export class WeixinConversationAdapter {
         result,
       );
       if (rendered === null) {
+        return;
+      }
+      if (result.kind === "hooks") {
+        const sanitized = sanitizeWeixinMarkdownText(rendered);
+        const text = sanitized === rendered ? rendered : [
+          "为避免微信格式解析，Markdown 控制符以全角或替代字符显示；命令展示不能直接复制执行。需核对原文时请使用本地 /hooks。",
+          "",
+          sanitized,
+        ].join("\n");
+        if (!this.outbox.notifyText(message.target, text)) {
+          throw new WeixinOutputQueueError();
+        }
         return;
       }
       this.notifyCommand(

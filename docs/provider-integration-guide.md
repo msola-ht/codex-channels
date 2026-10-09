@@ -141,11 +141,30 @@ OCG/CCG 与自定义 `rs-*` 的普通代理及聚合下游均在发送前复核�
 
 ## 4. 安全边界
 
+DS、OCG、CCG 与 CLP 固定模式的主 `~/.codex/config.toml` 只保存带随机版本的 `env_key`，Key 位于
+`~/.codex-connect/providers/<storage-id>/primary-credentials/<provider-id>/<版本>.json`。
+JSON 使用版本 1，字段限于 `schemaVersion`、`providerId`、`origin`、`apiKey`，私有读取严格核对版本、Provider 和固定上游 Origin；
+Unix 文件/目录分别为 `0600`/`0700`，Windows 使用私有 ACL，主配置可供 Codex 沙盒读取且不包含 Key。
+每次明确重配先写新私有版本，再在同一文件事务内发布引用；旧版本与现有初始备份、归档保留，避免旧引用失效。
+失败时先恢复已有文件再清理新增文件；并发冲突或恢复失败明确报错并保留尚未删除的恢复资料。删除账户保留凭据版本与私有备份。
+
+已有明文固定配置不会被程序更新或启动自动转换；App Server 启动与 Relay 读取均拒绝该配置。
+通过 `codexc setup` 的对应账户“重新配置”，或 WebUI 账户重新配置，输入 Key 并确认保存；设置入口只读模型元数据，旧私有版本缺失或损坏也可明确重配。
+旧备份若含 `experimental_bearer_token`，恢复到共享主配置的操作明确拒绝，保留原文件供人工恢复；
+须先显式配置为私有引用，不把明文备份复制回主配置。代码回退也不能自动改回明文，应保留主配置与对应私有版本，使用支持该引用的版本重新配置。
+
+受管 App Server 在每次启动目标主实例时才将其 Key 注入对应子进程环境，先剥离其他受管/自定义 Key；Relay 独立读取同一私有版本并纳入材料指纹与观察路径。
+固定、切换与聚合实例在启动时改用随机的临时 `env_key` 名称，并在该实例的官方 `shell_environment_policy.set` 中将同名值覆盖为空，防止工具 shell 默认继承认证值；用户已有过滤规则保持不变，磁盘引用不变。此措施不等于隔离同一操作系统用户，也不替代插件各自的权限边界。锁定上游的用户 Hook 与 `notify` 仍继承宿主环境，不受 shell 环境策略控制；只配置可信的 Hook/通知命令，不能将此方案描述成所有子进程均无凭据。
+共享主配置同时拒绝可识别的明文认证 Header（如 `Authorization`、API Key、Cookie），普通非认证 Header 不因此删除；拒绝时保留原文件和恢复材料，不自动清理用户配置。
+Gateway 自定义固定 Provider 的独立 API 凭据入口不接受 `auth`、`gateway_oauth`、`aws` 或 `env_http_headers`；这些上游认证形式不在当前接入合同内。独立 Relay 还拒绝自定义固定 Provider 的额外 `http_headers`，避免静默遗漏出站 Header。已有配置遇到拒绝时保持原样，需显式调整后再启用。
+原生 `codex` 独立启动只读取 `env_key` 指定的环境变量，不会自动打开 Gateway 私有 JSON；没有该变量会由 Codex 报错。
+共享终端路径使用 `codexc remote`，连接已受管启动的 App Server。切换模式继续使用原私有 Profile，不把 Key 写入主配置。
+
 - Provider id 使用受控列表；模型名来自下载的官方目录，目录缺少的模型不开放；
 - base URL 只允许 HTTP(S)，不得包含用户名、密码、查询或片段；
 - 编译期受管 Provider 的 API Key 只进入目标子进程环境或专用私有凭据文件；用户自定义 Provider
-  可按第 6 节显式写入 `0600` Codex 私有配置。两类 Key 都不得进入命令行、Gateway 配置、日志或平台消息；
-- 受管文件必须 `0600`，读取使用 `O_NOFOLLOW` 与属主校验；
+  按第 6 节写入私有 Profile 或独立私有凭据，主配置仅保存 `env_key` 引用。两类 Key 都不得进入命令行、Gateway 配置、日志或平台消息；
+- 受管私有文件在 Unix 使用 `0600`、`O_NOFOLLOW` 与属主校验，在 Windows 使用共享私有 ACL 与重解析点校验；共享主配置采用前述独立合同；
 - 配置或目录校验失败时等待修复，不允许部分启动或隐式回退；
 - 新增 Provider 不得动态加载 npm 包或执行任意代码。
 
@@ -214,10 +233,13 @@ stream_max_retries = 0
 配置写入失败时原备份保持不变，配置已提交但备份清理失败时明确提示部分成功。备份不可安全读取时，
 只允许编辑当前 config 中的候选，切换和删除失败关闭。
 
-`requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；也可以按 Codex 官方配置使用
-`env_key`，或写入 `experimental_bearer_token` 直接使用 API Key（Key 明文保存在 0600 的
-`~/.codex/config.toml`，Codex 官方标注该字段用于程序化使用）。第三方主 API 使用自己的 Key 时
-设置 `requires_openai_auth = false`，完全不依赖官方 auth.json，官方登录状态不受切换影响。
+未声明独立凭据时，`requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；已有 Provider 也可按 Codex 官方配置使用
+`env_key`，普通切换保留该引用。两者共存时，锁定上游优先读取 `env_key`，缺失时不回退官方认证；`requires_openai_auth` 仍影响账户语义，切换不能据此将其清为 `false`。经 Gateway 新增或替换的自定义固定 Key 只把凭据环境变量名称写入主配置，实际 Key 保存在
+`~/.codex-connect/providers/custom/<ID>/primary-credentials/<版本>.json` 的当前用户私有文件中。
+Windows 的主配置允许上游沙箱只读访问，其所有权与写入完整性检查不保证内容机密性，所以不能在其中保存
+`experimental_bearer_token`。已有明文候选仍可列表查看、显式编辑或切回官方，但 Gateway 拒绝启动该固定实例；
+在 `codexc setup` 中编辑并保存，或显式切换该明文候选，会转为私有凭据，启动不会自动迁移或删除原文件。通过 Setup 新建只使用独立 Key 的 Provider 时
+设置 `requires_openai_auth = false`，不依赖官方 auth.json，官方登录状态不受切换影响。
 主配置选中官方 `openai` 时，管理状态会检查 `CODEX_HOME/auth.json`（默认
 `~/.codex/auth.json`）；未检测到该鉴权文件按 OpenAI 官方未登录处理，WebUI Provider 状态不把
 官方 OpenAI 作为主 Provider 展示，Setup 总览与 `codexc provider list` 标注“未登录”，
@@ -278,8 +300,8 @@ Codex 兼容 Provider 不接受用户自定义模型目录、第三方 `models.j
 受管 Provider 流程接入。
 
 可以通过 `codexc setup` 的“模型与提供商 → 第三方 Provider → Codex 兼容”新增或编辑固定、切换模式 Provider：填写上游
-`base_url`，从 URL 主机名派生的 Provider ID 与推荐的 `OpenAI` 中选择，只以直接写入 API Key
-（`experimental_bearer_token`）认证，再选择固定/切换模式、Responses WebSocket，并手工输入上游
+`base_url`，从 URL 主机名派生的 Provider ID 与推荐的 `OpenAI` 中选择，输入独立 API Key，
+再选择固定/切换模式、Responses WebSocket，并手工输入上游
 模型 ID。该 ID 必须存在于 Codex 官方模型目录；Setup 不请求第三方 `/models`，也不生成第三方
 目录、`models.json` 或自定义 `model_catalog_json`；官方目录快照只在服务启动时生成。新增拒绝覆盖
 config 或私有备份中的已有 ID；编辑保持 ID 不变，同一 URL Origin 可留空保留 Key，Origin 变化时必须重新输入，旧 Key
@@ -287,13 +309,31 @@ config 或私有备份中的已有 ID；编辑保持 ID 不变，同一 URL Orig
 选择 `OpenAI` 时固定同名 `name`，允许 Codex 使用远程压缩；上游仍须兼容对应接口。小写 `openai` 是
 Codex 内置保留 ID。固定模式通过 Codex 的 `config/batchWrite` 原子写入用户配置；切换模式不修改
 主配置，而维护逐 Provider 的私有 Profile 和注册表。新增默认推荐切换模式，编辑保持原模式；确认预览
-明确显示 Key 明文写入的 0600 配置位置。Key 输入不显示不回显；自定义固定模式不能保留其他自定义
+明确显示 Key 的私有存储位置。固定模式主配置只保存 `env_key` 引用，切换模式的 Key 明文保存在私有 Profile
+中的 `experimental_bearer_token`；Unix 使用 0600，Windows 使用当前用户私有 ACL。Key 输入不显示不回显；自定义固定模式不能保留其他自定义
 切换 Profile，从切换模式改为固定模式前必须先删除其他自定义切换 Provider；受管切换 Provider 可以
 共存，受管固定模式必须先恢复官方模式。写入后仍需运行
-`codexc restart all` 生效。Codex 兼容 Provider 入口只接受上述直接 API Key 字段，不接受额外
+`codexc restart all` 生效。此处的 Setup 新增/编辑表单只接受独立 API Key，不接受额外
 Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍是主配置候选，需先运行
 `codexc provider switch openai` 将候选移入私有备份，再编辑为切换模式；Setup 不会留下
 同名主配置块和切换 Profile。
+
+固定凭据文件使用严格的版本 1 合同：`schemaVersion`、`providerId`、上游 `origin` 和 `apiKey` 四个字段；
+不支持的版本、Provider 或 Origin 不匹配、非私有文件均拒绝读取，不回退到进程中同名变量。新增或替换固定 Key，以及将明文凭据或切换 Profile 转为固定模式时，
+先创建新的不可变凭据版本，再提交 `config/batchWrite`；旧版本保持不变。普通切换及备份恢复保留完整 Provider 配置、已有 `env_key` 引用和 `requires_openai_auth` 标志，不强制 OAuth 或无认证 Provider 提供独立 Key。已声明的 `env_key` 缺失时仍拒绝切换，不回退其他认证方式。明确确认配置未引用新版本时仅删除本次新文件，
+响应丢失且无法确认时保留新旧版本，由实际主配置的 `env_key` 决定读取哪份，不自动重试或覆盖旧 Key。
+切回官方时备份候选的凭据引用也保留；显式删除 Provider 时才删除该 Provider 已验证归属的凭据版本。
+切换预览、执行和备份恢复共用运行时的认证校验；`auth`、`gateway_oauth`、`aws` 和 `env_http_headers` 不受自定义固定模式支持，写入前明确拒绝，保留原主配置、备份和凭据。普通非认证 `http_headers` 仍保留。
+凭据版本损坏或无法安全读取时保留文件，并以 `credential-cleanup-failed` 报告 Provider 已删除但凭据清理未完成。
+备份应同时保留主配置、`private/primary-providers.json` 与该 Provider 的 `primary-credentials` 目录；恢复时一并还原，
+不要只恢复主配置引用而丢掉对应 Key。回退到旧 Gateway 前应恢复操作前的完整备份；新 Gateway 不会替用户生成旧明文合同。
+
+服务仅把选中固定 Provider 的 Key 注入其 App Server 子进程环境；配置管理临时 Client 只执行配置及模型目录元数据操作，
+无需加载 Key，因此缺失或损坏的私有凭据仍可显式编辑修复。Key 不进入启动参数。`codexc remote` 连接共享实例，无需向 TUI 注入 Key。直接运行官方 `codex` 不会自动读取 Gateway 私有
+JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行启动官方 CLI 执行模型请求，则须在该进程环境中提供主配置 `env_key`
+指定的 Key，并自行管理其环境保密性。
+
+自定义固定 Provider 的代理目标和凭据绑定到同一次服务启动；修改 Provider、上游地址或凭据后，旧服务拒绝按需重建主实例，须执行 `codexc restart all`。空闲释放后恢复也遵守此限制，不会将新 Key 注入旧代理。
 
 ## 7. 自定义 Responses Provider
 
@@ -337,7 +377,7 @@ CLI Setup 的 Codex 兼容 Provider 和自定义 Responses Provider，新增与�
 包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`。模型定义可携带 `template: { source, model, followContext }` 关联。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不再保存完整模板快照，输入旧 `snapshot` 字段会明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联。Codex 读取其中的
 `models`，Gateway 严格核对版本与生成结果；不接受未知字段、重复 ID、任意外部路径或手写的第三方目录。
 模型目录保存为两空格缩进的 JSON，DS 上下文同步也保留该排版。文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。
-WebUI 的 Provider 预览与保存请求上限为 2 MiB，其他管理接口仍为 64 KiB。模型数量上限仍为 64 个。模型目录（定义和生成结果）不得超过 2 MiB，超限在写入前拒绝。上下文不得超过模板原始最大窗口。模型文件不含 Key。Key 仍写入现有私有 Profile／主配置；连接配置的恢复快照单独位于
+WebUI 的 Provider 预览与保存请求上限为 2 MiB，其他管理接口仍为 64 KiB。模型数量上限仍为 64 个。模型目录（定义和生成结果）不得超过 2 MiB，超限在写入前拒绝。上下文不得超过模板原始最大窗口。模型文件不含 Key。Key 写入私有 Profile 或独立私有凭据版本，主配置只含引用；连接配置的恢复快照单独位于
 `~/.codex-connect/private/responses-providers/<Provider ID>.json`（0600，可能含凭据，勿分享）。
 
 预览及直接保存时，先用当前锁定 Codex CLI 的 `debug models` 在隔离临时目录校验最终生成目录；校验失败不写入模型目录、Profile 或主配置，不输出原始错误内容。准备好的预览在保存时复核目录未变更。保存前核对配置版本、Profile 与目录修订，并备份受影响配置；上一目录保存在同目录 `models.json.backup`。

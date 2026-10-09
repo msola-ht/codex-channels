@@ -111,9 +111,9 @@ export class SqliteDeliveryJournal {
         }
         rmdirSync(temporary);
       }
-    } catch {
+    } catch (error) {
       try { database?.close(); } finally { this.writerLock.close(); }
-      throw new DeliveryError("storage");
+      throw error instanceof DeliveryError ? error : new DeliveryError("storage", { cause: error });
     }
   }
 
@@ -216,7 +216,7 @@ export class SqliteDeliveryJournal {
     } catch (error) {
       // SQLITE_FULL may already have rolled the transaction back.
       try { this.database.exec("ROLLBACK"); } catch { /* Preserve the original classified failure. */ }
-      throw error instanceof DeliveryError ? error : new DeliveryError("storage");
+      throw error instanceof DeliveryError ? error : new DeliveryError("storage", { cause: error });
     }
   }
 

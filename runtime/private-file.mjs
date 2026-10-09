@@ -6,27 +6,31 @@ import {
   fstatSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   renameSync,
   rmSync,
+  rmdirSync,
   writeFileSync,
 } from "node:fs";
 import {
   chmod,
   lstat,
   mkdir,
+  mkdtemp,
   open,
   rename,
   rm,
+  rmdir,
   writeFile,
 } from "node:fs/promises";
-import { execFile, spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveExecutableInvocation } from "./executable.mjs";
 import { codexHomePath } from "./codex-home.mjs";
+import { invokeWindowsAcl, invokeWindowsAclSync } from "./windows-acl-bridge.mjs";
 
 const defaultMaximumPrivateFileBytes = 1_048_576;
 
@@ -45,27 +49,17 @@ export async function readPrivateConfigFile(path, { signal, maximumBytes = defau
   signal?.throwIfAborted();
   if (process.platform === "win32") {
     const invocation = windowsPrivatePathInvocation();
-    const result = await new Promise((resolve, reject) => {
-      const child = execFile(invocation.file, invocation.args, {
-        encoding: "utf8", maxBuffer: 8 * maximumBytes,
-        timeout: 2000, killSignal: "SIGKILL", windowsHide: true,
-        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-      }, (error, stdout) => {
-        signal?.removeEventListener("abort", cancel);
-        if (signal?.aborted) reject(signal.reason);
-        else if (error) reject(windowsPrivatePathProcessError(error, error.code, stdout, path, "file", "read-config"));
-        else resolve(stdout);
-      });
-      const cancel = () => child.kill("SIGKILL");
-      signal?.addEventListener("abort", cancel, { once: true });
-      if (signal?.aborted) cancel();
-      // A failed spawn may close stdin before this request is written.
-      child.stdin.on("error", () => {});
-      child.stdin.end(JSON.stringify({ operation: "read-config", kind: "file", path, maximumBytes }));
-    });
+    let result;
+    try {
+      result = await invokeWindowsAcl(invocation, { operation: "read-config", kind: "file", path, maximumBytes }, 1024 + 8 * maximumBytes, signal);
+    } catch (error) {
+      signal?.throwIfAborted();
+      throw windowsPrivatePathProcessError(error, error.code, "", path, "file", "read-config");
+    }
     signal?.throwIfAborted();
     let response;
     try { response = JSON.parse(result); } catch { throw new Error("Windows 私有配置读取结果无效"); }
+    if (response?.ok === false) throw windowsPrivatePathProcessError(undefined, 1, result, path, "file", "read-config");
     if (response?.ok !== true || typeof response.content !== "string"
       || Buffer.byteLength(response.content, "utf8") > maximumBytes) {
       throw new Error("Windows 私有配置读取结果无效");
@@ -120,7 +114,7 @@ export function readPrivateFileSync(
   maximumBytes = defaultMaximumPrivateFileBytes,
 ) {
   if (process.platform === "win32") {
-    assertWindowsPrivatePathSync(path, "file");
+    return readWindowsFileSync(path, "file", maximumBytes);
   }
   const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
   const descriptor = openSync(path, constants.O_RDONLY | noFollow);
@@ -141,41 +135,115 @@ export function readPrivateFileSync(
   }
 }
 
+/** Upstream config is shared with Codex's sandbox: validate integrity, not secrecy. */
+export function readCodexConfigFileSync(path, maximumBytes = defaultMaximumPrivateFileBytes) {
+  if (process.platform !== "win32") return readPrivateFileSync(path, maximumBytes);
+  return readWindowsFileSync(path, "codex-config", maximumBytes);
+}
+
+function readWindowsFileSync(path, kind, maximumBytes) {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 16_777_216) throw new Error("私有配置读取上限无效");
+  // Preserve ENOENT for optional-file callers before invoking the ACL adapter.
+  const metadata = lstatSync(path);
+  if (metadata.isSymbolicLink()) throw new Error("私有路径不能是符号链接");
+  let result;
+  try {
+    result = invokeWindowsAclSync(windowsPrivatePathInvocation(),
+      { operation: "read-config", kind, path, maximumBytes }, 1024 + 8 * maximumBytes);
+  } catch (error) {
+    throw windowsPrivatePathProcessError(error, error.code, "", path, kind, "read-config");
+  }
+  let response;
+  try { response = JSON.parse(result); } catch { throw new WindowsPrivatePathError("Windows 私有配置读取结果无效"); }
+  if (response?.ok === false) throw windowsPrivatePathProcessError(undefined, 1, result, path, kind, "read-config");
+  if (response?.ok !== true || typeof response.content !== "string" || Buffer.byteLength(response.content, "utf8") > maximumBytes) {
+    throw new WindowsPrivatePathError("Windows 私有配置读取结果无效");
+  }
+  return response.content;
+}
+
+export function assertCodexConfigAccessSync(path) {
+  if (process.platform === "win32") assertWindowsPrivatePathSync(path, "codex-config");
+}
+
 export function writePrivateFileAtomicSync(path, content) {
   const parent = dirname(path);
+  let parentExisted = true;
+  try { lstatSync(parent); } catch (error) { if (error.code !== "ENOENT") throw error; parentExisted = false; }
   mkdirSync(parent, { recursive: true, mode: 0o700 });
+  let staging;
   if (process.platform === "win32") {
-    securePrivateDirectorySync(parent);
+    if (parentExisted) assertWindowsPrivatePathSync(parent, "parent-directory");
+    else securePrivateDirectorySync(parent);
+    // Protect an empty staging directory before writing any bytes. Do not strip
+    // sandbox read ACLs from shared parents such as Codex Home.
+    staging = mkdtempSync(join(parent, ".codexc-write-"));
   }
-  const temporaryPath = privateTemporaryPath(path);
+  const temporaryPath = staging ? join(staging, "content") : privateTemporaryPath(path);
   try {
+    if (staging) securePrivateDirectorySync(staging);
     writeFileSync(temporaryPath, content, { mode: 0o600, flag: "wx" });
     securePrivateFileSync(temporaryPath);
     renameSync(temporaryPath, path);
   } catch (error) {
     rmSync(temporaryPath, { force: true });
     throw error;
+  } finally {
+    if (staging) rmdirSync(staging);
   }
 }
 
 export async function writePrivateFileAtomic(path, content) {
+  return writeFileAtomic(path, content, false);
+}
+
+export async function writeCodexConfigFileAtomic(path, content) {
+  return writeFileAtomic(path, content, true);
+}
+
+async function writeFileAtomic(path, content, sharedConfig) {
   const parent = dirname(path);
+  let parentExisted = true;
+  try { await lstat(parent); } catch (error) { if (error.code !== "ENOENT") throw error; parentExisted = false; }
   await mkdir(parent, { recursive: true, mode: 0o700 });
+  let staging;
   if (process.platform === "win32") {
-    securePrivateDirectorySync(parent);
+    if (parentExisted) assertWindowsPrivatePathSync(parent, "parent-directory");
+    else securePrivateDirectorySync(parent);
+    staging = await mkdtemp(join(parent, ".codexc-write-"));
   }
-  const temporaryPath = privateTemporaryPath(path);
+  const sharedWindows = process.platform === "win32" && sharedConfig;
+  // ReplaceFile merges inherited ACLs at the replacement's current parent.
+  // Keep shared replacements beside the destination, private before any content.
+  const temporaryPath = staging && !sharedWindows ? join(staging, "content") : privateTemporaryPath(path);
+  let retainStaging = false;
   try {
-    await writeFile(temporaryPath, content, { mode: 0o600, flag: "wx" });
+    if (staging) securePrivateDirectorySync(staging);
+    if (sharedWindows) {
+      await writeFile(temporaryPath, "", { flag: "wx" });
+      securePrivateFileSync(temporaryPath);
+      await writeFile(temporaryPath, content, { flag: "r+" });
+    } else await writeFile(temporaryPath, content, { mode: 0o600, flag: "wx" });
     if (process.platform === "win32") {
       assertWindowsPrivatePathSync(temporaryPath, "file", "secure");
     } else {
       await chmod(temporaryPath, 0o600);
     }
-    await rename(temporaryPath, path);
+    if (process.platform === "win32" && sharedConfig) {
+      retainStaging = true;
+      assertWindowsPrivatePathSync(temporaryPath, "codex-config", "replace-config", {
+        destination: resolve(path), recoveryDirectory: resolve(staging),
+      });
+      retainStaging = false;
+    } else await rename(temporaryPath, path);
   } catch (error) {
+    if (retainStaging) {
+      throw new WindowsPrivatePathError(`共享配置替换未确认，保留恢复目录 ${staging}；尚存的新内容可能位于 ${temporaryPath} 或 ${temporaryPath}.replacement；${error.message}`);
+    }
     await rm(temporaryPath, { force: true });
     throw error;
+  } finally {
+    if (staging && !retainStaging) await rmdir(staging);
   }
 }
 
@@ -239,37 +307,28 @@ export function assertPrivateConfigAccessSync(configPath) {
   assertWindowsPrivatePathSync(dirname(configPath), "parent-directory");
 }
 
-function assertWindowsPrivatePathSync(path, kind, operation = "verify") {
+function assertWindowsPrivatePathSync(path, kind, operation = "verify", additional = {}) {
   const before = lstatSync(path);
   if (before.isSymbolicLink()) throw new Error("私有路径不能是符号链接");
   const invocation = windowsPrivatePathInvocation();
-  const result = spawnSync(
-    invocation.file,
-    invocation.args,
-    {
-      input: JSON.stringify({ operation, kind, path }),
-      encoding: "utf8",
-      maxBuffer: 1_048_576,
-      timeout: 2000,
-      killSignal: "SIGKILL",
-      windowsHide: true,
-      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-    },
-  );
-  if (result.error || result.status !== 0) {
-    throw windowsPrivatePathProcessError(result.error, result.status, result.stdout, path, kind, operation);
-  }
+  let result;
+  try { result = invokeWindowsAclSync(invocation, { operation, kind, path, ...additional }, 1_048_576); }
+  catch (error) { throw windowsPrivatePathProcessError(error, error.code, "", path, kind, operation); }
   let response;
   try {
-    response = JSON.parse(result.stdout.trim());
+    response = JSON.parse(result.trim());
   } catch {
     throw new WindowsPrivatePathError("Windows 私有路径 ACL 检查返回无效");
   }
+  if (response?.ok === false) throw windowsPrivatePathProcessError(undefined, 1, result, path, kind, operation);
   if (response?.ok !== true) throw new WindowsPrivatePathError("Windows 私有路径 ACL 校验未通过");
 }
 
 function windowsPrivatePathProcessError(error, status, stdout, path, kind, operation) {
   const context = `（${operation}/${kind}；路径=${JSON.stringify(path).slice(0, 320)}）`;
+  if (error?.code === "ERR_WINDOWS_NATIVE_LOAD") {
+    return new WindowsPrivatePathError("Windows 原生组件无法加载，尚未检查文件 ACL；请在当前 PowerShell 7 环境重新运行 npm run install:global；源码开发请运行 npm run build。");
+  }
   let response;
   try { response = JSON.parse(stdout); } catch { /* Process startup or script parsing may produce no JSON. */ }
   const reasons = new Set([
@@ -280,6 +339,8 @@ function windowsPrivatePathProcessError(error, status, stdout, path, kind, opera
     "私有路径缺少受信任 SID 权限", "私有路径仍继承父目录权限",
     "私有路径 ACL 正由其他进程更新，请重试", "Socket 目录必须仅允许当前 SID 访问",
     "私有配置超过读取上限",
+    "私有路径祖先必须为不可替换的本地普通目录",
+    "共享 Codex 配置只支持校验、读取和原子替换",
     "权限修复只支持普通文件", "管理员所有文件含拒绝规则，无法定向修复",
     "管理员所有文件缺少当前 SID 完全控制权限，无法定向修复",
   ]);
@@ -303,7 +364,10 @@ function windowsPrivatePathProcessError(error, status, stdout, path, kind, opera
     return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查输出超过上限${context}`);
   }
   if (error?.code === "ETIMEDOUT" || error?.killed === true) {
-    return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查超过 2 秒，已终止；尚不能判定 ACL 是否有效${context}`);
+    return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查超时，已终止（冷启动最多 5 秒，复用请求最多 2 秒）；尚不能判定 ACL 是否有效${context}`);
+  }
+  if (error?.code === "EBUSY") {
+    return new WindowsPrivatePathError(`Windows ACL 检查请求繁忙，请稍后重试${context}`);
   }
   if (error && typeof error.code === "string") {
     return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查无法启动，请检查 PowerShell 7（pwsh）${context}`);

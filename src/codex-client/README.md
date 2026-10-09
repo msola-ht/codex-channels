@@ -2,12 +2,15 @@
 
 本目录封装 Codex App Server Transport、JSON-RPC 会话和类型化 API，是 Gateway 访问 App Server 的唯一底层入口。
 
+遵循[跨平台变更规则](../../docs/development-rules.md#cross-platform-changes)：Unix UDS 与 Windows 官方 Proxy 是同一本机 App Server 合同的适配方式，不能各自放宽认证、消息边界或生命周期语义。Transport 只拥有本次连接及显式创建的子进程；关闭、连接中取消和回收失败都不得扩大为终止共享 App Server。修改共享 Transport 接口时同时核对 UDS、Proxy、stdio 的调用与关闭路径，具体进程及文件保护由注入的 Runtime 能力承担。
+
 ## 文件
 
 - `app-server-transport.ts`：用平台无关的本机 App Server 端点描述选择 Transport；Unix 保留原生
   WebSocket UDS，Windows 使用官方 Proxy 字节桥接。
 - `codex-process.ts`：定义由组合根注入 Transport 的 Codex 子进程调用与终止形状，使 Windows batch
   shim 解析及精确 PID 树终止留在共享 Runtime，Codex Client 不反向依赖部署基础设施。
+  本机 App Server 与 stdio 连接必须注入启动和回收端口；没有裸命令启动或只结束单个包装进程的回退。
 - `index.ts`：本模块的公开导出入口。
 - `transport.ts`：Transport 接口和公共生命周期基类。
 - `unix-websocket-transport.ts`：连接前校验当前用户私有的父目录和本人所有的真实 Unix Socket，
@@ -16,6 +19,8 @@
 - `windows-proxy-transport.ts`：在 Windows 启动并拥有固定版 `codex app-server proxy --sock`
   子进程，把其双向 stdio 包装为标准 WebSocket Transport；复用 128 MiB 消息边界，握手使用独立
   有界超时并清理静默 Proxy，关闭 Gateway Client 时只终止对应 Proxy，不终止独立 App Server。
+  Proxy 与 stdio 的并发关闭共用清理任务；终止失败保留进程所有权，重新连接不能绕过未完成的清理。
+  Proxy 握手期间关闭会立即取消握手，再等待同一子进程清理，不等待完整连接超时。
 - `stdio-transport.ts`：用于受控开发场景的 stdio Transport。
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；通知不附加本地接收时间戳。
@@ -74,8 +79,15 @@
   并为可调用项生成官方 `plugin://` mention 路径。
 - `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，
   并对必需字段与分页游标失败关闭。
+- `hook-adapter.ts`：把稳定 `hooks/list` 的单 Workspace 目录裁剪为 Application Hook 条目，
+  校验事件、来源、处理器和信任状态，原始 warnings/errors 只返回计数。命令、MCP 工具、matcher
+  与来源路径复用凭据脱敏、控制字符清理和限长；关键展示信息改变、来源未知，以及缺少执行内容的
+  prompt/agent 及缺少输入模板的 MCP Tool 处理器均标记为不可审阅；命令条目同时提供安全整数
+  timeout、async 和 additionalContext spill 阈值。Hook key 仅用于内部精确定位，不作为渠道展示文本。
+  状态写入只允许 trust/enable/disable，通过 `hooks.state` 的 upsert 保留其他 Hook 与状态字段。
 - `notification-adapter.ts`：把当前支持的官方 Notification 转换为 Routing 或 Conversation Core
   拥有的稳定事件；异步 Agent 消息保留 `delivery` 与已校验的问题，按过程消息处理其阶段；
+  `hook/completed` 保留 Thread、运行 ID、已知触发事件及上游终态，不按执行模式额外过滤；忽略 `hook/started`，不转发输出条目、状态自由文本或路径；
   校验 Turn、Item、Diff、Plan、Goal、Token、账户、额度、MCP OAuth 完成、warning 与 Thread
   生命周期字段；`turn/completed` 只接受官方 `Turn.durationMs` 的非负安全整数并转为稳定耗时，
   只识别 `misalignmentPolicyViolation`、Luna Reserve 触发所需的 `usageLimitExceeded` 与登录或刷新令牌失效的 `unauthorized` 结构化错误分类，Turn、warning 和 MCP 错误在此统一脱敏并限长，
@@ -107,8 +119,20 @@
   当前 Thread 审批方式通过 `updateThreadApprovalsReviewer` 更新；请求前注册合法设置通知观察器，等待 RPC 成功和最新同 Thread 同目标通知，超时、断线、关闭或 Thread 失效清理等待和请求，不启动 Turn、不重试设置写入。
   `account/read` 当前认证路由、账户与 Thread 用量及用户级配置
   读取等 App Server 方法的类型化封装；按 Workspace 读取有效思考等级与服务层级，模型、思考等级、服务层级默认值和受控 agents 设置统一通过
-  同一个 `config/batchWrite` 用户配置事务写入，受控的读改写流程从原始用户层取得版本并通过
-  `expectedVersion` 拒绝并发覆盖；用户设置读取可显式附加稳定 `configRequirements/read`，
+  同一个 `config/batchWrite` 用户配置事务写入；`writeDefaultServiceTier` 只接受 Standard 对应的
+  `default`、`fast` 与 `ultrafast`，渠道通过模型目录检查可用性，下一 Turn 覆盖仍走 `turn/start.serviceTier`。
+  `readModelAccelerationSettings` 复用带 Workspace `cwd` 的 `config/read`，只向 Application 返回配置服务层级与 FastMode 是否启用；Provider 路由固定到目标实例，不暴露原始配置。
+  受控的读改写流程从原始用户层取得版本并通过
+  `expectedVersion` 拒绝并发覆盖；Hook 目录和用户层版本通过独立窄端口读取，不把原始配置交给
+  Application。Hook 状态写入携带 `expectedVersion` 和 `reloadUserConfig: true`，不自动重试；
+  Provider 路由使用调用方明确选择的实例和活动边界，不以主实例替代未知 Provider。各实例共用
+  Codex Home；写入后协调已连接及正在连接的实例，以空编辑 `config/batchWrite` 请求刷新，
+  不复制或重写状态。返回失败 Provider，未连接或刷新失败的实例在后续接入操作前刷新，失败关闭；
+  新建连接与重连均刷新，避免 Gateway 重启后丢失失效标记而继续使用独立实例的旧运行配置。
+  首次连接的握手与刷新共同构成初始化；失败时经既有 Provider 关闭路径清理本次连接，
+  清理成功后才允许重新握手，清理未确认时保留所有权并拒绝接入，不终止独立 App Server。
+  不为刷新启动未使用的 Provider，结果未知的写入同样使旧运行配置失效。并发刷新合并，同一次编辑不重试。
+  用户设置读取可显式附加稳定 `configRequirements/read`，
   仅投影受控实验 `allowedApprovalsReviewers` 和稳定 `featureRequirements` 中的 Auto-review
   审批人及功能限制，不返回完整受管配置；策略读取失败或畸形时保留有效用户快照，省略审批策略投影，由设置入口显示不可用并拒绝该字段写入。
   MCP 概览按 Thread 使用 `toolsAndAuthOnly` 分页，详情使用 `full`；`config/mcpServer/reload` 不自动重试，成功只表示已加载 Thread

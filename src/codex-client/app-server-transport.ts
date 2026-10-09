@@ -12,9 +12,8 @@ export interface LocalAppServerEndpoint {
 }
 
 export interface AppServerTransportOptions {
-  codexBinary: string;
-  createCodexProcessInvocation?: CreateCodexProcessInvocation;
-  terminateCodexProcess?: TerminateCodexProcess;
+  createCodexProcessInvocation: CreateCodexProcessInvocation;
+  terminateCodexProcess: TerminateCodexProcess;
   connectTimeoutMs?: number;
   maxPayloadBytes?: number;
   platform?: NodeJS.Platform;
@@ -26,13 +25,8 @@ export function createAppServerTransport(
 ): CodexTransport {
   if ((options.platform ?? process.platform) === "win32") {
     return new WindowsProxyTransport(endpoint.socketPath, {
-      codexBinary: options.codexBinary,
-      ...(options.createCodexProcessInvocation === undefined
-        ? {}
-        : { createCodexProcessInvocation: options.createCodexProcessInvocation }),
-      ...(options.terminateCodexProcess === undefined
-        ? {}
-        : { terminateCodexProcess: options.terminateCodexProcess }),
+      createCodexProcessInvocation: options.createCodexProcessInvocation,
+      terminateCodexProcess: options.terminateCodexProcess,
       ...(options.connectTimeoutMs === undefined
         ? {}
         : { connectTimeoutMs: options.connectTimeoutMs }),

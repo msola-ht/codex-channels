@@ -3,12 +3,13 @@ export { serviceCommandActions, serviceCommandUsage } from "./cli-command-usage.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { performance } from "node:perf_hooks";
 
 import { runAppServerService } from "../runtime/app-server-service-runtime.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
 import { readGatewayConfig, validateGatewayConfigDocument, validateWebuiConfigDocument } from "../runtime/gateway-config.mjs";
 import { runGatewayService } from "../runtime/gateway-service-runtime.mjs";
-import { assertSynchronousChildSuccess } from "../runtime/process-lifecycle.mjs";
+import { assertSynchronousChildSuccess, installServiceControlHandler } from "../runtime/process-lifecycle.mjs";
 import {
   defaultServiceTarget,
   serviceTargetIncludes,
@@ -58,15 +59,26 @@ export async function runAppServerServiceCommand(args) {
 
 export async function runModelRelayServiceCommand(args) {
   if (args.length > 0) throw new Error("内部服务入口不接受参数");
-  const { locateUserConfig } = await import("./runtime-config.mjs");
-  const { startModelRelayService } = await import("../runtime/model-relay-service.mjs");
-  const { configPath } = locateUserConfig(process.env);
   let stop;
-  const stopped = new Promise(resolve => { stop = resolve; });
+  let stopping = false;
+  const stopped = new Promise(resolve => { stop = () => { stopping = true; resolve(); }; });
+  const controlFromParent = message => { if (message?.type === "codexc-stop") stop(); };
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
+  const cleanupControl = installServiceControlHandler(controlFromParent);
   let service;
-  try { service = await startModelRelayService(configPath, process.env); await stopped; }
-  finally { process.off("SIGINT", stop); process.off("SIGTERM", stop); await service?.close(); }
+  try {
+    const { locateUserConfig } = await import("./runtime-config.mjs");
+    const { startModelRelayService } = await import("../runtime/model-relay-service.mjs");
+    if (stopping) return;
+    const { configPath } = locateUserConfig(process.env);
+    service = await startModelRelayService(configPath, process.env);
+    await stopped;
+  }
+  finally {
+    process.off("SIGINT", stop); process.off("SIGTERM", stop);
+    cleanupControl();
+    await service?.close();
+  }
 }
 
 /**
@@ -90,7 +102,26 @@ function recordInstalledTerminalIdentity(environment) {
   printCliMessage("note", `已按当前终端记录模型上游终端标识：${terminalIdentity}`);
 }
 
+function serviceElapsed(startedAt) {
+  return `${((performance.now() - startedAt) / 1000).toFixed(2)} 秒`;
+}
+
+async function timedServiceStep(action, definition, environment) {
+  const label = `${action === "stop" ? "停止" : "启动并确认就绪"} ${definition.displayName}`;
+  const startedAt = performance.now();
+  printCliMessage("note", label);
+  try {
+    await runServiceController(action, [definition.target], environment);
+    if (action === "start") await waitForServiceReadiness(definition.target, environment);
+    printCliMessage("note", `${label}：完成，耗时 ${serviceElapsed(startedAt)}。`);
+  } catch (error) {
+    printCliMessage("failure", `${label}：失败，耗时 ${serviceElapsed(startedAt)}。`);
+    throw error;
+  }
+}
+
 export async function runRestartCommand(args = []) {
+  const startedAt = performance.now();
   if (args.length > 1) throw new Error(restartCommandUsage);
   const target = parseServiceTarget(args[0] ?? "all");
   rejectUnsafeAppServerServiceAction("restart", [target], process.env);
@@ -104,6 +135,12 @@ export async function runRestartCommand(args = []) {
   }
   const selected = (target === "all" ? ["webui", "model-relay", "gateway", "app-server"] : [target])
     .map(value => serviceDefinitions.find(definition => definition.target === value));
+  const windowsStatus = platform === "windows"
+    ? await (await import("./windows-service-control.mjs")).inspectWindowsServiceStatus({
+        target, environment: runtime.environment,
+        definitionsDirectory: join(runtime.dataDir, "services"),
+      })
+    : undefined;
   const stopping = [];
   for (const definition of selected) {
     if (!existsSync(serviceDefinitionPath(platform, definition, runtime.environment))) {
@@ -113,13 +150,13 @@ export async function runRestartCommand(args = []) {
       printCliMessage("note", `跳过 ${definition.displayName}：未安装后台服务。`);
       continue;
     }
-    const status = await inspectManagedServiceStatusAsync({ target: definition.target, environment: runtime.environment });
-    if (platform !== "launchd" && status.services[0]?.loaded !== true) {
+    const status = windowsStatus ?? await inspectManagedServiceStatusAsync({ target: definition.target, environment: runtime.environment });
+    if (platform !== "launchd" && status.services.find(service => service.target === definition.target)?.loaded !== true) {
       throw new Error(`${definition.displayName} 服务定义未被服务管理器加载；请运行 codexc install。尚未停止任何服务。`);
     }
     stopping.push(definition);
   }
-  if (platform === "launchd") runServiceController("check-install", [], runtime.environment);
+  if (platform === "launchd") await runServiceController("check-install", [], runtime.environment);
   const starting = [...stopping].reverse().filter(definition => {
     if (target === "all" && definition.target === "model-relay" && document.model_relay?.enabled !== true) {
       printCliMessage("note", "Model Relay 未启用：仅停止，不重新启动。");
@@ -133,11 +170,10 @@ export async function runRestartCommand(args = []) {
   ];
   const label = step => `${step.action === "stop" ? "停止" : "启动并确认就绪"} ${step.definition.displayName}`;
   const completed = [];
+  printCliMessage("note", `重启预检完成，耗时 ${serviceElapsed(startedAt)}。`);
   for (const [index, step] of steps.entries()) {
-    printCliMessage("note", label(step));
     try {
-      runServiceController(step.action, [step.definition.target], runtime.environment);
-      if (step.action === "start") await waitForServiceReadiness(step.definition.target, runtime.environment);
+      await timedServiceStep(step.action, step.definition, runtime.environment);
       completed.push(label(step));
     } catch (error) {
       throw new Error(
@@ -200,21 +236,39 @@ export async function runServiceCommand(args) {
   const controlEnvironment = serviceActionAllowsInvalidConfig(action)
     ? serviceControlEnvironment()
     : configuredEnvironment().environment;
-  if (action === "start" && serviceArgs[0] === "all") {
+  if (action === "start" || action === "stop") {
     const platform = { linux: "systemd", darwin: "launchd", win32: "windows" }[process.platform];
     if (!platform) throw new Error("不支持的后台服务平台");
-    for (const definition of serviceControlDefinitions(platform, "all", "start", controlEnvironment)) {
-      runServiceController("start", [definition.target], controlEnvironment);
-      await waitForServiceReadiness(definition.target, controlEnvironment);
+    const failures = [];
+    for (const definition of serviceControlDefinitions(platform, serviceArgs[0], action, controlEnvironment)) {
+      try {
+        await timedServiceStep(action, definition, controlEnvironment);
+      } catch (error) {
+        // Unix controllers historically attempt every selected stop before
+        // reporting failure. Timing must not turn this into fail-fast behavior.
+        if (action !== "stop" || serviceArgs[0] !== "all" || platform === "windows") throw error;
+        failures.push({ definition, error });
+      }
     }
-    printCliMessage("success", "全部已选后台服务已就绪。");
+    if (failures.length > 0) throw new AggregateError(
+      failures.map(failure => failure.error),
+      `停止服务失败：${failures.map(failure => failure.definition.displayName).join("、")}；已尝试其余所选服务，请运行 codexc status。`,
+    );
+    if (serviceArgs[0] === "all") printCliMessage("success", action === "start" ? "全部已选后台服务已就绪。" : "全部已选后台服务已停止。");
     return;
   }
-  runServiceController(action, serviceArgs, controlEnvironment);
-  if (action === "start") await waitForServiceReadiness(serviceArgs[0], controlEnvironment);
+  await runServiceController(action, serviceArgs, controlEnvironment);
 }
 
-function runServiceController(action, serviceArgs, controlEnvironment) {
+async function runServiceController(action, serviceArgs, controlEnvironment) {
+  if (process.platform === "win32" && (action === "start" || action === "stop")) {
+    const { controlWindowsServices } = await import("./windows-service-control.mjs");
+    await controlWindowsServices({
+      action, target: serviceArgs[0], environment: controlEnvironment,
+      definitionsDirectory: join(controlEnvironment.CODEX_CONNECT_HOME, "services"),
+    });
+    return;
+  }
   if (process.platform === "darwin") {
     runSynchronous(
       "/bin/zsh",

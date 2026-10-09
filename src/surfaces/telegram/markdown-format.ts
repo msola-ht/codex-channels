@@ -1,4 +1,5 @@
 import { protectTelegramReplyHeading } from "./html-format.js";
+import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 const maximumFormattedMarkdownCharacters = 3_500;
 const markdownBackslashEscapePattern = /\\([\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E])/gu;
@@ -16,15 +17,17 @@ function renderMarkdownAsTelegramHtml(markdown: string): string {
   const output: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]!;
-    const fence = line.match(/^```([a-zA-Z0-9_+-]*)\s*$/);
+    const fence = advanceMarkdownFence(undefined, line);
     if (fence) {
       const code: string[] = [];
       index += 1;
-      while (index < lines.length && !/^```\s*$/.test(lines[index]!)) {
+      while (index < lines.length) {
+        if (advanceMarkdownFence(fence, lines[index]!) === undefined) break;
         code.push(lines[index]!);
         index += 1;
       }
-      const language = fence[1];
+      const info = fence.info.trim().split(/\s/u, 1)[0]!;
+      const language = /^[a-zA-Z0-9_+-]+$/u.test(info) ? info : undefined;
       if (
         (!language || language.toLowerCase() === "text")
         && isBotCommandBlock(code)
@@ -155,28 +158,11 @@ function formatInlineMarkdown(text: string): string {
 
 export function decodeMarkdownBackslashEscapes(markdown: string): string {
   const lines = markdown.split("\n");
-  let fence: { marker: "`" | "~"; length: number } | undefined;
+  let fence: MarkdownFence | undefined;
   return lines.map((line) => {
-    const fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
-    if (fence !== undefined) {
-      if (
-        fenceRun !== null
-        && fenceRun[1]![0] === fence.marker
-        && fenceRun[1]!.length >= fence.length
-        && fenceRun[2]!.trim().length === 0
-      ) {
-        fence = undefined;
-      }
-      return line;
-    }
-    if (fenceRun !== null) {
-      fence = {
-        marker: fenceRun[1]![0] as "`" | "~",
-        length: fenceRun[1]!.length,
-      };
-      return line;
-    }
-    return decodeInlineMarkdownBackslashEscapes(line);
+    const previous = fence;
+    fence = advanceMarkdownFence(fence, line);
+    return previous || fence ? line : decodeInlineMarkdownBackslashEscapes(line);
   }).join("\n");
 }
 

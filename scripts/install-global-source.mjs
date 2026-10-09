@@ -23,6 +23,7 @@ const prepared = alreadyPrepared
   : run(process.execPath, [join(packageDir, "scripts", "prepare-package.mjs")]);
 const webuiBuilt = prepared === 0 && !alreadyPrepared ? buildWebui() : prepared;
 if (prepared === 0 && webuiBuilt === 0) {
+  if (!alreadyPrepared) assertPreparedBuild();
   ensureCodexCli();
   ensureSandboxDependencies();
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-install-"));
@@ -50,6 +51,12 @@ function assertPreparedBuild() {
     || !existsSync(join(webuiDir, "dist", "index.html"))
   ) {
     throw new Error("预构建源码缺少 Gateway 或 WebUI 构建结果");
+  }
+  if (process.platform === "win32" && run("pwsh.exe", [
+    "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+    "-File", join(packageDir, "runtime", "windows-native-load.ps1"),
+  ]) !== 0) {
+    throw new Error("预构建源码的 Windows 原生产物无效；请先运行 npm run build");
   }
   return 0;
 }

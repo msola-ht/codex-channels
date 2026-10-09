@@ -6,6 +6,7 @@ import {
   withManagedModelCatalogSettings,
   withPreservedManagedModelCatalogSettings,
 } from "../runtime/model-provider-runtime.mjs";
+import { createManagedPrimaryCredential } from "../runtime/managed-provider-credentials.mjs";
 
 const managedRootKeys = Object.freeze([
   "model",
@@ -52,9 +53,11 @@ export function createManagedProviderConfiguration(current, initial, definition,
   model,
 }) {
   if (mode === "exclusive") {
+    const credential = createManagedPrimaryCredential(definition, apiKey);
     return {
-      config: applyExclusiveProviderConfig(current, definition, { apiKey, catalogPath, model }),
+      config: applyExclusiveProviderConfig(current, definition, { environmentKey: credential.environmentKey, catalogPath, model }),
       profile: undefined,
+      credential,
     };
   }
   const config = previousMode === "exclusive"
@@ -166,13 +169,17 @@ function record(value) {
 }
 
 export function applyExclusiveProviderConfig(current, definition, {
-  apiKey,
+  environmentKey,
   catalogPath,
   model = definition.defaultModel,
 }) {
   const document = { ...current };
   const modelProviders = { ...table(document.model_providers) };
-  modelProviders[definition.id] = createModelProviderConfig(definition, apiKey);
+  if (typeof environmentKey !== "string" || !environmentKey.startsWith(`${definition.apiKeyEnvironmentKey}_PRIMARY_`)
+    || !/^[a-f0-9]{32}$/u.test(environmentKey.slice(`${definition.apiKeyEnvironmentKey}_PRIMARY_`.length))) {
+    throw new Error("受管固定 Provider 必须使用私有凭据引用");
+  }
+  modelProviders[definition.id] = createModelProviderConfig(definition, undefined, environmentKey);
   document.model_providers = modelProviders;
   if (document.profile === definition.id) delete document.profile;
   const profiles = { ...table(document.profiles) };

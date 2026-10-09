@@ -16,9 +16,8 @@ import { decodeTextMessage } from "./unix-websocket-transport.js";
 const officialRemoteMaxPayloadBytes = 128 * 1024 * 1024;
 
 export interface WindowsProxyTransportOptions {
-  codexBinary: string;
-  createCodexProcessInvocation?: CreateCodexProcessInvocation;
-  terminateCodexProcess?: TerminateCodexProcess;
+  createCodexProcessInvocation: CreateCodexProcessInvocation;
+  terminateCodexProcess: TerminateCodexProcess;
   connectTimeoutMs?: number;
   maxPayloadBytes?: number;
 }
@@ -29,6 +28,7 @@ export class WindowsProxyTransport extends BaseTransport {
   private socket: WebSocket | undefined;
   private connection: ProxyDuplex | undefined;
   private connectTask: Promise<void> | undefined;
+  private closeTask: Promise<void> | undefined;
   private closing = false;
 
   private readonly connectTimeoutMs: number;
@@ -47,11 +47,18 @@ export class WindowsProxyTransport extends BaseTransport {
     if (process.platform !== "win32") {
       throw new Error("Windows Proxy Transport 只支持 Windows");
     }
+    if (this.closeTask) await this.closeTask;
+    if (this.closing && this.process) {
+      throw new Error("Codex Windows Proxy 尚未确认退出，请重试关闭后再连接");
+    }
     if (this.socket?.readyState === WebSocket.OPEN) {
       return;
     }
     if (this.connectTask) {
       return this.connectTask;
+    }
+    if (this.process) {
+      throw new Error("Codex Windows Proxy 尚未确认退出，请重试关闭后再连接");
     }
     this.closing = false;
     const task = this.open();
@@ -67,7 +74,7 @@ export class WindowsProxyTransport extends BaseTransport {
 
   async send(message: string): Promise<void> {
     const socket = this.socket;
-    if (socket?.readyState !== WebSocket.OPEN) {
+    if (this.closing || socket?.readyState !== WebSocket.OPEN) {
       throw new Error("Codex Windows Proxy Transport 尚未连接");
     }
     await new Promise<void>((resolve, reject) => {
@@ -76,7 +83,27 @@ export class WindowsProxyTransport extends BaseTransport {
   }
 
   async close(): Promise<void> {
+    if (this.closeTask) return this.closeTask;
     this.closing = true;
+    // Cancel the handshake immediately; open() retains ownership of its child
+    // cleanup, so close must wait for that cleanup rather than its full timeout.
+    if (this.socket?.readyState === WebSocket.CONNECTING) {
+      this.socket.terminate();
+    }
+    const task = Promise.resolve().then(async () => {
+      // An opening connection owns its cleanup until it settles.
+      await this.connectTask?.catch(() => undefined);
+      await this.closeConnection();
+    });
+    this.closeTask = task;
+    try {
+      await task;
+    } finally {
+      if (this.closeTask === task) this.closeTask = undefined;
+    }
+  }
+
+  private async closeConnection(): Promise<void> {
     const socket = this.socket;
     this.socket = undefined;
     const connection = this.connection;
@@ -97,24 +124,20 @@ export class WindowsProxyTransport extends BaseTransport {
     }
     connection?.destroy();
     const child = this.process;
-    this.process = undefined;
-    if (!child || child.exitCode !== null) {
-      return;
+    if (!child) return;
+    if (child.exitCode === null && child.signalCode === null) {
+      child.stdin.end();
+      const exited = await waitForExit(child, 2_000);
+      if (!exited && child.exitCode === null && child.signalCode === null) {
+        await this.terminate(child);
+      }
     }
-    child.stdin.end();
-    const exited = await waitForExit(child, 2_000);
-    if (!exited && child.exitCode === null) {
-      await this.terminate(child);
-    }
+    if (this.process === child) this.process = undefined;
   }
 
   private async open(): Promise<void> {
     const args = ["app-server", "proxy", "--sock", this.socketPath];
-    const invocation = this.options.createCodexProcessInvocation?.(args) ?? {
-      file: this.options.codexBinary,
-      args,
-      windowsVerbatimArguments: false,
-    };
+    const invocation = this.options.createCodexProcessInvocation(args);
     const child = spawn(
       invocation.file,
       invocation.args,
@@ -224,11 +247,11 @@ export class WindowsProxyTransport extends BaseTransport {
     } catch (error) {
       socket.terminate();
       connection.destroy();
-      if (child.exitCode === null) {
-        await this.terminate(child, { gracePeriodMs: 0, forcePeriodMs: 2_000 });
-      }
       if (this.socket === socket) this.socket = undefined;
       if (this.connection === connection) this.connection = undefined;
+      if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+        await this.terminate(child, { gracePeriodMs: 0, forcePeriodMs: 2_000 });
+      }
       if (this.process === child) this.process = undefined;
       throw error;
     }
@@ -238,12 +261,7 @@ export class WindowsProxyTransport extends BaseTransport {
     child: ChildProcessWithoutNullStreams,
     options?: { gracePeriodMs?: number; forcePeriodMs?: number },
   ): Promise<void> {
-    if (this.options.terminateCodexProcess) {
-      await this.options.terminateCodexProcess(child, options);
-      return;
-    }
-    child.kill("SIGKILL");
-    await waitForExit(child, options?.forcePeriodMs ?? 2_000);
+    await this.options.terminateCodexProcess(child, options);
   }
 }
 

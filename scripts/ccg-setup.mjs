@@ -46,6 +46,7 @@ import {
   applyProviderFileUpdates,
   readOptionalProviderFile,
   snapshotProviderFiles,
+  stageManagedPrimaryCredential,
 } from "./managed-provider-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
@@ -121,7 +122,7 @@ export async function applyCcgConfiguration({
       throw new Error(existing ? "CCG 账户已存在，请选择重新配置" : "CCG 账户不存在");
     }
     const paths = ccgSetupPaths(environment, accountId);
-    const snapshots = snapshotProviderFiles(Object.values(paths));
+    const snapshots = snapshotProviderFiles(Object.values(paths), environment);
     const primary = loadPrimaryModelProvider(environment);
     if (mode === "exclusive" && !["openai", definition.id].includes(primary)) {
       throw new Error(`请先恢复当前固定 Provider：${primary}`);
@@ -129,13 +130,13 @@ export async function applyCcgConfiguration({
     const previous = loadManagedModelProviderSettings(environment)
       .find((item) => item.provider === definition.id);
     if (existing && previous === undefined) throw new Error("CCG 账户配置不完整，请先恢复缺失文件");
-    const current = await readConfig(paths.config);
+    const current = await readConfig(paths.config, environment);
     if (!previous && (hasProviderBaseConfig(current, definition)
-      || await readOptionalProviderFile(paths.profile) !== undefined
-      || await readOptionalProviderFile(paths.marker) !== undefined)) {
+      || await readOptionalProviderFile(paths.profile, environment) !== undefined
+      || await readOptionalProviderFile(paths.marker, environment) !== undefined)) {
       throw new Error("CCG 账户配置路径已被占用，请先处理现有配置");
     }
-    const backup = await readInitialConfig(paths.backup);
+    const backup = await readInitialConfig(paths.backup, environment);
     if (previous && !backup) throw new Error("CCG 账户初始配置备份缺失，请先恢复原始备份");
     const entersExclusiveMode = previous?.mode === "switching" && mode === "exclusive";
     const initial = previous && !entersExclusiveMode ? backup : { config: current };
@@ -154,7 +155,7 @@ export async function applyCcgConfiguration({
       throw new Error("请选择 CCG 模型目录中的模型");
     }
     await validateCcgCatalog(catalog, environment);
-    const { config: nextConfig, profile } = createManagedProviderConfiguration(
+    const { config: nextConfig, profile, credential } = createManagedProviderConfiguration(
       current, initial.config, definition, {
         mode, previousMode: previous?.mode,
         apiKey, catalogPath: paths.catalog, catalog, model: selectedModel,
@@ -163,7 +164,7 @@ export async function applyCcgConfiguration({
     const updates = new Map();
     if ((!previous || entersExclusiveMode) && backup) {
       const archive = join(dirname(paths.backup), `config-${randomUUID()}.json`);
-      const [snapshot] = snapshotProviderFiles([archive]);
+      const [snapshot] = snapshotProviderFiles([archive], environment);
       if (snapshot.content !== undefined) throw new Error("CCG 备份归档路径已被占用");
       snapshots.push(snapshot);
       updates.set(archive, snapshots.find((item) => item.path === paths.backup).content);
@@ -185,6 +186,7 @@ export async function applyCcgConfiguration({
       ? accounts
       : [...accounts, { id: accountId, default: accounts.length === 0 }];
     updates.set(paths.registry, `${JSON.stringify(validateCcgAccounts(nextAccounts), null, 2)}\n`);
+    stageManagedPrimaryCredential(credential, definition, environment, snapshots, updates);
     await applyProviderFileUpdates(updates, snapshots);
     return {
       action: "configured",
@@ -205,7 +207,7 @@ export async function setCcgDefaultAccount(accountId, { environment = process.en
     const updates = new Map([[path, `${JSON.stringify(
       accounts.map((account) => ({ ...account, default: account.id === accountId })), null, 2,
     )}\n`]]);
-    await applyProviderFileUpdates(updates, snapshotProviderFiles([path]));
+    await applyProviderFileUpdates(updates, snapshotProviderFiles([path], environment));
     return { action: "default-set", accountId, activation: "restart-all" };
   });
 }
@@ -225,9 +227,9 @@ export async function removeCcgConfiguration({ accountId, confirmRemove = false 
     const current = loadManagedModelProviderSettings(environment)
       .find((item) => item.provider === definition.id);
     if (current === undefined) throw new Error("CCG 账户配置不完整");
-    const initial = await readInitialConfig(paths.backup);
+    const initial = await readInitialConfig(paths.backup, environment);
     if (!initial) throw new Error("CCG 账户初始配置备份缺失");
-    const snapshots = snapshotProviderFiles(Object.values(paths));
+    const snapshots = snapshotProviderFiles(Object.values(paths), environment);
     const updates = new Map([
       [paths.profile, undefined],
       [paths.marker, undefined],
@@ -239,7 +241,7 @@ export async function removeCcgConfiguration({ accountId, confirmRemove = false 
     }
     if (current.mode === "exclusive") {
       updates.set(paths.config, stringify(restoreProviderBaseConfig(
-        await readConfig(paths.config), initial.config, definition,
+        await readConfig(paths.config, environment), initial.config, definition,
       )));
     }
     const runtime = await stopManagedAccountForRemoval(definition.id, options);
@@ -350,16 +352,16 @@ export async function runCcgSetup({
   return result;
 }
 
-async function readConfig(path) {
-  const content = await readOptionalProviderFile(path);
+async function readConfig(path, environment) {
+  const content = await readOptionalProviderFile(path, environment);
   if (content === undefined) return {};
   try { return parse(content.toString("utf8")); } catch {
     throw new Error("CCG 配置无法安全解析");
   }
 }
 
-async function readInitialConfig(path) {
-  const content = await readOptionalProviderFile(path);
+async function readInitialConfig(path, environment) {
+  const content = await readOptionalProviderFile(path, environment);
   if (content === undefined) return undefined;
   try {
     const value = JSON.parse(content.toString("utf8"));

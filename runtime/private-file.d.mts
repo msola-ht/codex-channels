@@ -23,6 +23,9 @@ export function writePrivateFileAtomic(
 ): Promise<void>;
 
 export function securePrivateFileSync(path: string): void;
+export function readCodexConfigFileSync(path: string, maximumBytes?: number): string;
+export function assertCodexConfigAccessSync(path: string): void;
+export function writeCodexConfigFileAtomic(path: string, content: string | Uint8Array): Promise<void>;
 export function repairWindowsPrivateFileSync(path: string): void;
 
 export function securePrivateDirectorySync(path: string): void;

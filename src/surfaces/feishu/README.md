@@ -27,7 +27,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
   收起的核对面板中。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
 - `command-center-presentation.ts`：将命令结果转换为命令中心选项、输入表单和展示文案；仅接收动作与结果数据，
-  不执行命令或管理交互令牌。
+  不执行命令或管理交互令牌；速度选择复用共享档位展示，Standard 始终可选，Fast、Ultrafast 按当前模型目录提供。
+  Hook 展示复用共享纯文本格式与合法动作列表，卡片使用 `plain_text` 保留不可信字段的字面内容。
 - `command-center.ts`：生成 CardKit 2.0 分类命令中心、帮助、选择与输入卡片，维护有界短期令牌与菜单事件去重，并复用
   Application 的唯一命令目录与执行入口；重置券选券及确认复用选择卡的一次性令牌，
   选择卡和通用输入卡不解析第二套命令语法。
@@ -48,14 +49,14 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容。
 - `operation-format.ts`：把操作状态渲染为包含脱敏详情的静态 CardKit Markdown；Computer Use
   使用可原地更新的开始／终态卡片，不展示 MCP 读写声明标签，其他操作沿用终态展示。
-- `outbox-content.ts`：集中处理 Outbox 的纯文本缓冲、CardKit 字符分片、富文本字节分片与截断标记。
+- `outbox-content.ts`：集中处理 Outbox 的纯文本缓冲、CardKit 字符分片、富文本字节分片与截断标记；围栏识别复用共享纯状态推进，分片按实际围栏长度预留关闭空间且保持分隔行完整。无法消费正文的分片返回明确的本地排版错误，由 Outbox 降级 Post 或保留完整附件发送。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪，保留回复事件的 `parent_id`。
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；不等待独立文字或图片，
   已在队列中明确相邻的图片可成批处理，普通文本与命令仍沿用既有顺序路径。
 - `idle-release-card.ts`：把渠道会话空闲自动解除通知生成为直接携带 `Session ID` 和
   `/r <Thread ID>` 命令的 CardKit 2.0 卡片。
-- `input-card.ts`：生成 CardKit 2.0 有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片。
+- `input-card.ts`：生成 CardKit 2.0 有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片；异步问题复用 Markdown 安全处理，截断时闭合代码围栏，结果卡片保留有界题干。
   MCP 工具审批分别提供一次批准、上游允许的持久范围、拒绝与取消，拒绝和取消不携带持久范围。
 - `interactions.ts`：维护私聊审批、用户输入和 MCP elicitation 的一次性令牌、Actor 绑定、
   请求去重、过期、取消和跨客户端失效。
@@ -72,6 +73,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
   `turn.completed` 结束统计均包含当前 Workspace Git 分支。
 - `message-error.ts`：Client 与 Outbox 共用的结构化消息错误合同，不依赖 SDK；Client 保留原错误类及类型导出。
 - `text-streams.ts`：独占按 Conversation、Thread、Turn 隔离的正文活动流与已完成流、刷新计时器、卡片序号、分卡与终态页脚；共用 Outbox 已绑定关闭信号的消息端口、投递队列和降级发送方法。断线清理使完成缓存立即失效，在途终态不能重新登记旧缓存；无法复用卡片时向当前目标发送完成信息。正文终态失败或取消后释放活动流，不重播正文；结束反馈独立投递，流式结束操作结算后释放原输入回复目标。
+  终态的本地围栏排版错误在有剩余消息预算且 Post 恢复确认成功后正常结算，允许后续完整附件继续；平台错误、恢复失败、结果未知和取消仍传播失败。
 - `outbox-message-port.ts`：定义窄消息端口并统一绑定 Outbox 关闭信号，覆盖正文、分片、回复、媒体与原地更新；关闭期限结束后不再启动平台调用。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口；在内存中按 Turn 关联
   原始输入消息，使开始确认、阶段性最终正文及首张流式卡片原生回复同一输入；回复目标
@@ -169,7 +171,7 @@ UTF-8 限制为 1,024 字节，类型字段限制为 64 字节，时间戳限制
 `menu-event.ts` 只保留菜单事件 ID、App ID、Actor Open ID 和事件 Key。官方菜单事件不提供
 Chat ID；`surface.ts` 只在 Actor 与当前 App 的一个已授权私聊绑定精确匹配时打开命令中心，
 零个或多个候选都失败关闭。`command-center.ts` 的主卡按“常用”“模型与工作区”“更多”展示
-十个动作和一个分类入口；Fast、Goal 和用户明确要求的一键新建会话均复用现有共享命令。
+十个动作和一个分类入口；速度、Goal 和用户明确要求的一键新建会话均复用现有共享命令。
 分类入口打开第二张卡片，按“会话查询”“会话操作”“能力与集成”“当前内容”“飞书”展示会话与集成动作，
 不复用完整文本帮助。会话切换、会话列表、已归档、模型、思考等级、Fast 和工作区会打开
 最多 18 项的选择卡；活动会话选择复用 `resume`，归档会话选择复用 `unarchive`，Fast 首次点击

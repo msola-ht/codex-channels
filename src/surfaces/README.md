@@ -87,6 +87,7 @@ Surface 不再各自维护允许列表或在 `handle` 内散落关键性字面�
 `SurfaceOutputCoalescer` 供出站总线与运行中路由复用：首条快照不合并，后续同段快照可被终态替换，
 终态或同 Conversation 的其他事件结束当前合并段；不同渠道、账号、Conversation、Thread 和 Turn 不串段。
 分段元数据最多保留 1,000 个 Conversation，淘汰只减少合并机会，不复用旧键；故障恢复缓冲仍采用最新状态策略。
+Hook 完成通知按 Thread 与 Hook 运行 ID 使用已有有界内存快照投递，三端发送前重新检查归属，避免持久输出等待期间跳过提示；不落盘。
 `delivery-retry.ts` 为缺少其他恢复路径的渠道提供有界重试：只重试能证明请求未被平台接受的失败
 （显式拒绝、限流、服务端错误），超时与网络中断一律不重试，避免重复气泡；等待有上限，且重试
 保持在单次平台调用粒度，不在分段发送的上层重跑整段逻辑。
@@ -153,7 +154,7 @@ Conversation，旧会话完成不能删除新会话已登记的回复目标。�
 结构化计划，其回复窗口只保留生命周期、终态与全局空闲通知。各渠道只决定完整计划是原地更新还是
 追加紧凑进度。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认、子代理
-开始/继续/完成通知和 Turn 结束汇报；OpenAI 启动传输探测全部失败时，上线通知增加代理检查提醒，
+开始/继续/完成通知、Hook 完成提示和 Turn 结束汇报；Hook 按上游完成通知展示安全状态摘要，经三渠道内存投递，微信将其纳入回复窗口预算，不写入持久输出日志。OpenAI 启动传输探测全部失败时，上线通知增加代理检查提醒，
 官方主路由缺少鉴权时增加未登录提示和 `codex login` 或 `/model` 的操作建议，不显示目标地址或
 底层错误；飞书和微信仍只通知已有安全会话。完成卡片对 `unauthorized` 按 OpenAI 官方与其他
 Provider 分别生成固定凭据提示，不展示上游原文。Turn 完成在正式与调试模式都显示当前
@@ -167,8 +168,8 @@ Provider 分别生成固定凭据提示，不展示上游原文。Turn 完成在
 账户状态在正式和调试模式均显示剩余额度及可用的重置时间、剩余时长；含重置时间时标注时区。子代理完成卡片在值可靠时
 展示思考等级、请求次数和 Token：正式模式保留总计，调试模式才展开缓存与推理 Token 和缓存命中率；
 指标读取失败时只显示“统计暂不可用”。
-原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与
-OpenAI 周限；配置的自定义主模型 Provider 追加“ · 自定义”标识（例如“OpenAI · 自定义”），
+原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示
+OpenAI 周限；速度按实际服务档位统一显示为 Standard、Fast、Ultrafast 或未知档位，不根据 Provider 推测；配置的自定义主模型 Provider 追加“ · 自定义”标识（例如“OpenAI · 自定义”），
 历史无 Turn 指标只在通用明细和时间范围聚合中按稳定 Provider ID 展示；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
@@ -179,13 +180,15 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `conversation-model-account-command-format.ts` 为三个渠道渲染 `/limits reset` 选券预览、确认命令和消费结果，并在 OpenAI `/limits` 中展示重置券可用数量，并按相同
 到期时间合并服务端返回的明细；`null` 到期时间明确显示为“无到期时间”，明细少于可用数量时标出
 未返回明细的剩余张数。
-`provider-format.ts` 统一已知 Provider 显示名、命令中的 Provider 文案及限定 Provider 后的模型显示名前缀裁剪，并对后续 Provider 标识做有界展示。
+`provider-format.ts` 统一已知 Provider 显示名、命令中的 Provider 文案及限定 Provider 后的模型显示名前缀裁剪，并对后续 Provider 标识做有界展示；提供商摘要统一统计可用与暂不可用模型，不改变目录排序或选择编号。同时按实际服务档位格式化速度，并依据当前模型目录展示 Fast、Ultrafast 支持情况，供模型、状态与生命周期展示共用。
+`markdown-fence.ts` 只识别反引号或波浪号围栏、合法开头与匹配结束并推进纯状态；共享列表、渠道命令、问题预览及最终正文复用它，字符预算、分片、截断和转义仍由各渠道负责。
 `reasoning-effort-format.ts` 统一模型菜单、状态与运行结果的思考设置文案；目录声明 `enabled` 时使用思考模式选择，`enabled` / `none` 分别显示开启/关闭思考，其余等级原样显示，提交给 Application 的控制值保持不变。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。
 `conversation-command-format.ts` 只汇总稳定导出；纯格式化实现分别位于
 `conversation-command-help.ts`、`conversation-session-command-format.ts`、
 `conversation-scheduled-task-command-format.ts`、`conversation-extension-command-format.ts`、
+`conversation-hook-command-format.ts`、
 `conversation-model-account-command-format.ts`、`conversation-workspace-status-command-format.ts` 和
 `conversation-command-outcome-format.ts`，按帮助、会话、计划任务、Skill/MCP/Plugin、模型账户、
 Workspace/状态与操作结果分派隔离。它们统一 Telegram、飞书与微信的平台无关命令文案，不导入平台 SDK，
@@ -194,6 +197,10 @@ Workspace/状态与操作结果分派隔离。它们统一 Telegram、飞书与�
 未支持的 Provider 明确说明能力缺失。计划任务确认、列表、运行记录和命令结果格式也通过本目录
 `index.ts` 供 Bootstrap 动态工具回调复用。
 `conversation-command-renderer.ts` 把完整 `ConversationCommandResult` 穷尽映射为共享纯文本结果；
+`conversation-hook-command-format.ts` 只接收 Application 的 Hook 展示快照，集中生成纯文本列表、详情、
+持久配置确认文案和合法操作选项；原样使用 Application 选择标识与确认令牌，不展示内部 Key 或哈希。
+向组合根公开共享文案的保真检查并接收窄文字保真能力；组合根显式组合飞书、Telegram 与微信策略，未知渠道拒绝审查。Application 在列表、预览与确认时复核；微信格式中和会改变审查字段时拒绝信任。结果区分共享配置保存和实例刷新未确认。
+飞书和 Telegram 接入既有鉴权动作路径，微信按相同命令提供文本入口。
 三个渠道复用该映射，Telegram 在自己的交互式渲染器中处理按钮、键盘及专属展示，其余结果统一走共享映射。
 `/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
 提交官方结构化 Skill 输入；Surface 不接收或拼装本机 Skill 路径。
@@ -264,6 +271,8 @@ Skill、Plugin 与子代理新建 Turn 时由统一 `turn.started` 生命周期�
 ACL 私有暂存和一小时清理由
 `managed-audio-store.ts` 复用。两者通过内部 `managed-media-store.ts` 统一私有目录生命周期、
 有界流落盘、临时文件清理和过期清理；各自的格式白名单、限制、保留时间和公开接口保持独立。
+组合根在创建渠道前收紧共享 `uploads` 根目录；媒体暂存器启动时拒绝符号链接、非目录和非当前用户所有的目录，
+再收紧渠道目录权限，Windows 继续由共享 ACL 辅助函数验证当前 SID 所有权并关闭权限继承。
 Application 只接收绝对本地路径；
 平台仍各自负责取得受信下载流。所有输入在调用 Application 前必须构造
 `SurfaceAccessContext` 并通过对应访问策略。

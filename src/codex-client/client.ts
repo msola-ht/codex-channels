@@ -43,6 +43,9 @@ import type {
   LunaReservePort,
   LunaReserveThreadSettings,
   ThreadApprovalsReviewerPort,
+  HookConfigPort,
+  HookCatalog,
+  HookAction,
 } from "../application/index.js";
 import type {
   ConsumeAccountRateLimitResetCreditParams,
@@ -67,6 +70,8 @@ import type {
   PluginInstalledResponse,
   ReviewStartResponse,
   SkillsListResponse,
+  HooksListParams,
+  HooksListResponse,
   ThreadArchiveResponse,
   ThreadDeleteResponse,
   ThreadForkResponse,
@@ -154,6 +159,7 @@ import {
   toInstalledPlugins,
 } from "./plugin-adapter.js";
 import { toPermissionProfilePage } from "./permission-adapter.js";
+import { toHookCatalog, toHookStateWrite } from "./hook-adapter.js";
 import {
   toProtocolQueueText,
   toThreadQueueAddResult,
@@ -185,7 +191,8 @@ export class CodexAppServerClient implements
   PermissionQueryPort,
   ThreadQueuePort,
   ThreadHistoryPort,
-  ThreadApprovalsReviewerPort
+  ThreadApprovalsReviewerPort,
+  HookConfigPort
 {
   private readonly imageUpload: ImageReferenceUpload | undefined;
   private readonly fileChanges = new FileChangeApprovalContext();
@@ -733,10 +740,10 @@ export class CodexAppServerClient implements
     return models;
   }
 
-  async writeDefaultFastMode(enabled: boolean): Promise<void> {
+  async writeDefaultServiceTier(tier: "fast" | "ultrafast" | "default"): Promise<void> {
     await this.writeUserConfigEdits([{
       keyPath: "service_tier",
-      value: enabled ? "fast" : "default",
+      value: tier,
     }]);
   }
 
@@ -784,6 +791,10 @@ export class CodexAppServerClient implements
   }
 
   async readDefaultServiceTier(cwd: string): Promise<string | null> {
+    return (await this.readModelAccelerationSettings(cwd)).serviceTier;
+  }
+
+  async readModelAccelerationSettings(cwd: string): Promise<{ enabled: boolean; serviceTier: string | null }> {
     const params: ConfigReadParams = { cwd, includeLayers: false };
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
@@ -793,7 +804,15 @@ export class CodexAppServerClient implements
     if (serviceTier !== null && typeof serviceTier !== "string") {
       throw new Error("Codex 响应缺少有效 config service_tier");
     }
-    return serviceTier;
+    const features = response.config.features;
+    if (features !== undefined && (features === null || typeof features !== "object" || Array.isArray(features))) {
+      throw new Error("Codex 响应包含无效 config features");
+    }
+    const fastMode = features?.fast_mode;
+    if (fastMode !== undefined && typeof fastMode !== "boolean") {
+      throw new Error("Codex 响应包含无效 config features.fast_mode");
+    }
+    return { serviceTier, enabled: fastMode !== false };
   }
 
   async writeUserConfigEdits(
@@ -838,7 +857,7 @@ export class CodexAppServerClient implements
     ) {
       throw new Error("Codex 响应包含无效用户配置层");
     }
-    if (userLayer.version.trim() === "") {
+    if (typeof userLayer.version !== "string" || userLayer.version.trim() === "") {
       throw new Error("Codex 响应缺少用户配置版本");
     }
     let approvalsReviewerPolicy;
@@ -881,6 +900,42 @@ export class CodexAppServerClient implements
       },
       ...(approvalsReviewerPolicy === undefined ? {} : { approvalsReviewerPolicy }),
     };
+  }
+
+  async listHooks(cwd: string, _modelProvider: string): Promise<HookCatalog> {
+    void _modelProvider;
+    const params: HooksListParams = { cwds: [cwd] };
+    const response = await this.rpc.request<HooksListResponse>({
+      method: "hooks/list",
+      params,
+    }, { retryOverload: true });
+    return toHookCatalog(response, cwd);
+  }
+
+  async readHookConfigVersion(_modelProvider: string): Promise<string> {
+    void _modelProvider;
+    return (await this.readUserConfigSnapshot()).version;
+  }
+
+  async writeHookState(_modelProvider: string, input: {
+    key: string;
+    currentHash: string;
+    action: HookAction;
+    expectedVersion: string;
+  }): Promise<{ refreshFailedProviders: string[] }> {
+    await this.rpc.request({
+      method: "config/batchWrite",
+      params: toHookStateWrite(input),
+    }, { retryOverload: false });
+    return { refreshFailedProviders: [] };
+  }
+
+  /** Empty edits refresh this instance without copying or rewriting Hook state. */
+  async refreshHookConfig(): Promise<void> {
+    await this.rpc.request({
+      method: "config/batchWrite",
+      params: { edits: [], reloadUserConfig: true },
+    }, { retryOverload: false });
   }
 
   async forkThread(

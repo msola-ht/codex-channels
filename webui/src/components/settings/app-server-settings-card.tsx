@@ -1,4 +1,5 @@
 import { useTranslation } from "@/hooks/use-translation"
+import { acceleratedServiceTierId, normalizeServiceTier } from "../../../../runtime/service-tier.mjs"
 import { useEffect, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -17,7 +18,7 @@ import { ToolAccessSettings } from "@/components/settings/tool-access-settings"
 export function AppServerSettingsCard({ management, onChanged, section = "general" }: { management: CodexSettingsController; onChanged?: () => void; section?: "general" | "permissions" | "models" | "context" }) {
   const { t } = useTranslation()
   const settings = management.codexSettings
-  const selectedModel = settings?.models.find((model) => model.model === settings.defaults.model) ?? settings?.models[0]
+  const selectedModel = settings?.models.find((model) => settings.defaults.model === null ? model.isDefault : model.model === settings.defaults.model)
   const [compact, patchCompact, resetCompact] = useSettingsDraft({ contextWindow: settings?.compact.contextWindow == null ? "" : String(settings.compact.contextWindow), compactPercent: settings?.compact.autoCompactPercent == null ? "" : String(settings.compact.autoCompactPercent) })
   const [preferences, patchPreferences, resetPreferences] = useSettingsDraft({
     planEffort: settings?.defaults.planModeReasoningEffort ?? selectedModel?.defaultReasoningEffort ?? "",
@@ -43,10 +44,21 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
   const confirmSetting = async () => {
     if (await management.confirmSetting()) onChanged?.()
   }
-  const selected = settings.models.find((model) => model.model === settings.defaults.model) ?? settings.models[0]
+  const selected = selectedModel
+  const unavailableModel = selected === undefined ? settings.defaults.model : null
+  const modelOptions = settings.models.map((model) => [model.model, model.displayName])
+  if (unavailableModel !== null) modelOptions.unshift([unavailableModel, t("settingsFields.modelUnavailable", { model: unavailableModel })])
   const effortOptions = selected?.reasoningEfforts.map((item) => [item.effort, item.effort]) ?? []
   const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null
   const officialDisabled = busy || !settings.defaultsEditable
+  const serviceTier = settings.defaults.serviceTier === null
+    ? ""
+    : normalizeServiceTier(settings.defaults.serviceTier)
+  const serviceTierOptions = [["default", t("settingsFields.standard")]]
+  if (settings.defaults.accelerationEnabled && selected && acceleratedServiceTierId(selected.serviceTiers, "fast")) serviceTierOptions.push(["fast", t("settingsFields.fast")])
+  if (settings.defaults.accelerationEnabled && selected && acceleratedServiceTierId(selected.serviceTiers, "ultrafast")) serviceTierOptions.push(["ultrafast", t("settingsFields.ultrafast")])
+  const serviceTierUnavailable = serviceTier !== "" && !serviceTierOptions.some(([value]) => value === serviceTier)
+  if (serviceTierUnavailable) serviceTierOptions.push([serviceTier, t("settingsFields.serviceTierUnavailable", { tier: serviceTier === "fast" ? t("settingsFields.fast") : serviceTier === "ultrafast" ? t("settingsFields.ultrafast") : serviceTier })])
   const reviewerHint: MessageKey = settings.approvalsReviewer?.editable
     ? settings.approvalsReviewer.autoReviewUnavailableReason === "provider-config-unavailable"
       ? "settingsFields.autoReviewProviderUnavailable"
@@ -77,8 +89,8 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
   }
 
   const savePreferences = () => {
-    if (planEffort === "") {
-      setLocalError("settingsFields.planEffortUnavailable")
+    if (selected === undefined || planEffort === "") {
+      setLocalError(selected === undefined ? "settingsFields.selectValidModel" : "settingsFields.planEffortUnavailable")
       return
     }
     setLocalError(null)
@@ -101,9 +113,9 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
         {section !== "context" && <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
           <SettingsRow label={t("settingsFields.currentProvider")} value={settings.provider} badge />
           {section === "models" && <>
-          <ManagedSelect label={t("settingsFields.defaultModel")} value={settings.defaults.model ?? ""} options={settings.models.map((model) => [model.model, model.displayName])} disabled={officialDisabled} onChange={(value) => { const model = settings.models.find((candidate) => candidate.model === value); void management.previewSetting({ kind: "defaults", model: value, reasoningEffort: model?.defaultReasoningEffort ?? "medium" }, { key: "settingsFields.defaultModel" }) }} />
-          <ManagedSelect label={t("settingsFields.reasoningEffort")} value={settings.defaults.reasoningEffort ?? ""} options={effortOptions} disabled={officialDisabled || selected === undefined} onChange={(value) => void management.previewSetting({ kind: "defaults", model: selected?.model ?? "", reasoningEffort: value }, { key: "settingsFields.reasoningEffort" })} />
-          <ManagedSelect label="Fast" value={String(settings.defaults.fastEnabled)} options={[["true", t("settingsFields.enabled")], ["false", t("settingsFields.disabled")]]} disabled={officialDisabled} onChange={(value) => void management.previewSetting({ kind: "fast", enabled: value === "true" }, { key: "settingsFields.fast" })} />
+          <ManagedSelect label={t("settingsFields.defaultModel")} value={settings.defaults.model ?? ""} placeholder={t("settingsFields.selectValidModel")} options={modelOptions} disabledValues={unavailableModel !== null ? [unavailableModel] : []} description={selected === undefined ? t("settingsFields.selectValidModel") : undefined} disabled={officialDisabled} onChange={(value) => { const model = settings.models.find((candidate) => candidate.model === value); if (model !== undefined) void management.previewSetting({ kind: "defaults", model: value, reasoningEffort: model.defaultReasoningEffort }, { key: "settingsFields.defaultModel" }) }} />
+          <ManagedSelect label={t("settingsFields.reasoningEffort")} value={settings.defaults.reasoningEffort ?? ""} placeholder={selected === undefined ? t("settingsFields.selectValidModel") : undefined} options={effortOptions} disabled={officialDisabled || selected === undefined} onChange={(value) => { if (selected !== undefined) void management.previewSetting({ kind: "defaults", model: selected.model, reasoningEffort: value }, { key: "settingsFields.reasoningEffort" }) }} />
+          <ManagedSelect label={t("settingsFields.serviceTier")} value={serviceTier} placeholder={t("settingsFields.serviceTierDefault")} options={serviceTierOptions} disabledValues={serviceTierUnavailable ? [serviceTier] : []} description={t(settings.defaults.accelerationEnabled ? "settingsFields.serviceTierHint" : "settingsFields.accelerationDisabled")} disabled={officialDisabled} onChange={(value) => { if (value === "default" || value === "fast" || value === "ultrafast") void management.previewSetting({ kind: "service-tier", serviceTier: value }, { key: "settingsFields.serviceTier" }) }} />
           </>}
           {section === "general" && <>
           <ManagedSelect label={t("settingsFields.webSearch")} value={settings.defaults.webSearch ?? "disabled"} options={[["live", t("settingsFields.live")], ["indexed", t("settingsFields.indexed")], ["cached", t("settingsFields.cached")], ["disabled", t("settingsFields.off")]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "web-search", mode: value }, { key: "settingsFields.webSearch" })} />
@@ -143,13 +155,13 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
         <section className="flex flex-col gap-3">
           <div><h3 className="font-medium">{t("settingsFields.preferences")}</h3><p className="text-xs text-muted-foreground">{t("settingsFields.preferencesHint")}</p></div>
           <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
-            <ManagedSelect label={t("settingsFields.planEffort")} value={planEffort} options={effortOptions} disabled={officialDisabled} onChange={(value) => patchPreferences({ planEffort: value })} />
+            <ManagedSelect label={t("settingsFields.planEffort")} value={planEffort} placeholder={selected === undefined ? t("settingsFields.selectValidModel") : undefined} description={selected === undefined ? t("settingsFields.selectValidModel") : undefined} options={effortOptions} disabled={officialDisabled || selected === undefined} onChange={(value) => patchPreferences({ planEffort: value })} />
             <ManagedSelect label={t("settingsFields.reasoningSummary")} value={reasoningSummary} options={[["auto", t("settingsFields.auto")], ["concise", t("settingsFields.concise")], ["detailed", t("settingsFields.detailed")], ["none", t("settingsFields.summaryNone")]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ reasoningSummary: value })} />
             <ManagedSelect label={t("settingsFields.verbosity")} value={verbosity} options={[["low", t("settingsFields.low")], ["medium", t("settingsFields.medium")], ["high", t("settingsFields.high")]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ verbosity: value })} />
             <ManagedSelect label={t("settingsFields.startupUpdate")} value={startupUpdate} options={[["true", t("settingsFields.on")], ["false", t("settingsFields.off")]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ startupUpdate: value })} />
             <ManagedSelect label={t("settingsFields.historyPersistence")} value={historyPersistence} options={[["save-all", t("settingsFields.save")], ["none", t("settingsFields.doNotSave")]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ historyPersistence: value })} />
           </FieldGroup>
-          <Button className="self-start" variant="outline" disabled={officialDisabled || planEffort === ""} onClick={savePreferences}>{t("settingsFields.savePreferences")}</Button>
+          <Button className="self-start" variant="outline" disabled={officialDisabled || selected === undefined || planEffort === ""} onClick={savePreferences}>{t("settingsFields.savePreferences")}</Button>
         </section>
 
         </>}

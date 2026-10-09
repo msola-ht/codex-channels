@@ -1,5 +1,6 @@
 import type {
   AccountStatus,
+  HookCompletion,
   AsyncUserQuestion,
   McpServerStatus,
   MessagePhase,
@@ -13,6 +14,7 @@ import type {
 } from "./events.js";
 
 export type ConversationInputEvent =
+  | { type: "hook.completed"; threadId: string; hook: HookCompletion }
   | { type: "turn.started"; threadId: string; turnId: string }
   | {
       type: "thread.tokenUsage.updated";

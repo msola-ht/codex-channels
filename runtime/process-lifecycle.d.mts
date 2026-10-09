@@ -1,6 +1,14 @@
 import type { ChildProcess } from "node:child_process";
 import type { EventEmitter } from "node:events";
 
+export function installServiceControlHandler(
+  handler: (message: { type: "codexc-stop" | "codexc-reload"; deadline?: number; signal?: AbortSignal }) => void | boolean | Promise<void | boolean>,
+): () => void;
+export function createChildServiceControl(child: ChildProcess): {
+  send(type: "codexc-stop" | "codexc-reload", options?: { deadline?: number; signal?: AbortSignal }): Promise<boolean>;
+  close(): void;
+};
+
 export class ReportedChildExitError extends Error {
   readonly exitCode: number;
   constructor(exitCode: number, message?: string);

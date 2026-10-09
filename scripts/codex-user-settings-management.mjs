@@ -1,4 +1,5 @@
 import { loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
+import { acceleratedServiceTierId } from "../runtime/service-tier.mjs";
 import { autoReviewProviderCapability, loadAutoReviewProviderPolicy } from "../runtime/auto-review-provider-policy.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 import { supportedPublicApprovalPolicies } from "./codex-public-cli-contract.mjs";
@@ -56,7 +57,7 @@ export async function updateCodexUserSetting(
     throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
   }
   const provider = readPrimaryProviderForChange(input, environment, primaryProvider);
-  if (["all", "defaults", "preferences", "model-compact"].includes(input?.kind)) {
+  if (["all", "defaults", "preferences", "model-compact", "service-tier"].includes(input?.kind)) {
     assertOfficialDefaults(provider);
   }
   const client = await createClient({ environment });
@@ -64,7 +65,7 @@ export async function updateCodexUserSetting(
     await client.connect();
     const [snapshot, models] = await Promise.all([
       client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer" }),
-      ["all", "defaults", "preferences"].includes(input?.kind)
+      ["all", "defaults", "preferences", "service-tier"].includes(input?.kind)
         ? client.listModels()
         : Promise.resolve([]),
     ]);
@@ -119,7 +120,7 @@ export async function previewCodexUserSetting(
     throw invalid("revision", "required-revision", "必须提供有效的 Codex 用户配置修订值");
   }
   const provider = readPrimaryProviderForChange(input, environment, primaryProvider);
-  if (["all", "defaults", "preferences", "model-compact"].includes(input?.kind)) {
+  if (["all", "defaults", "preferences", "model-compact", "service-tier"].includes(input?.kind)) {
     assertOfficialDefaults(provider);
   }
   const client = await createClient({ environment });
@@ -127,7 +128,7 @@ export async function previewCodexUserSetting(
     await client.connect();
     const [snapshot, models] = await Promise.all([
       client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer" }),
-      ["all", "defaults", "preferences"].includes(input?.kind)
+      ["all", "defaults", "preferences", "service-tier"].includes(input?.kind)
         ? client.listModels()
         : Promise.resolve([]),
     ]);
@@ -182,10 +183,10 @@ function readPrimaryProviderForChange(input, environment, loadProvider) {
 function projectSettings(snapshot, provider, rawModels, autoReviewCapability) {
   const config = record(snapshot.config);
   const models = rawModels.filter((model) => model.available !== false).map(projectModel);
-  const selectedModel = models.find((model) => model.model === optionalString(config.model))
-    ?? models.find((model) => model.isDefault)
-    ?? models[0]
-    ?? null;
+  const configuredModel = optionalString(config.model);
+  const selectedModel = configuredModel === null
+    ? models.find((model) => model.isDefault)
+    : models.find((model) => model.model === configuredModel);
   const configuredEffort = optionalString(config.model_reasoning_effort);
   const effort = selectedModel?.reasoningEfforts.some(
     (candidate) => candidate.effort === configuredEffort,
@@ -218,9 +219,10 @@ function projectSettings(snapshot, provider, rawModels, autoReviewCapability) {
     approvalsReviewer: { ...projectApprovalsReviewer(config, snapshot.approvalsReviewerPolicy), ...autoReviewCapability },
     models,
     defaults: {
-      model: selectedModel?.model ?? optionalString(config.model),
+      model: configuredModel ?? selectedModel?.model ?? null,
       reasoningEffort: effort ?? null,
-      fastEnabled: isFastServiceTier(serviceTier),
+      serviceTier,
+      accelerationEnabled: record(config.features).fast_mode !== false,
       webSearch,
       updatePlanEnabled: updatePlan.enabled === true,
       autoRecapEnabled: tui.auto_recap === true,
@@ -272,9 +274,9 @@ function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, provi
       return allEdits(input, provider, config, models);
     case "defaults":
       return defaultEdits(input, provider, models);
-    case "fast":
+    case "service-tier":
       assertOfficialDefaults(provider);
-      return fastEdits(input, provider, config, models);
+      return serviceTierEdit(input.serviceTier, config, models);
     case "permissions":
       return permissionEdits(input, config);
     case "approvals-reviewer":
@@ -332,13 +334,13 @@ function approvalsReviewerEdits(input, config, policy, canEnableAutoReview) {
 function allEdits(input, provider, config, models) {
   assertOfficialDefaults(provider);
   const defaults = defaultEdits(input, provider, models);
-  const fast = fastEdit(input.fastEnabled, "fastEnabled");
+  const tier = serviceTierEdit(input.serviceTier, config, models, defaults.value.model);
   const permissions = permissionEdits(input, config);
   return {
-    edits: [...defaults.edits, ...fast.edits, ...permissions.edits],
+    edits: [...defaults.edits, ...tier.edits, ...permissions.edits],
     value: {
       ...defaults.value,
-      fastEnabled: fast.value.enabled,
+      serviceTier: tier.value.serviceTier,
       ...permissions.value,
     },
   };
@@ -371,10 +373,6 @@ function defaultEdits(input, provider, models) {
     ],
     value: { model, reasoningEffort },
   };
-}
-
-function fastEdits(input) {
-  return fastEdit(input.enabled);
 }
 
 function webSearchEdits(input) {
@@ -482,13 +480,28 @@ function modelCompactEdits(input) {
   };
 }
 
-function fastEdit(enabled, field = "enabled") {
-  if (typeof enabled !== "boolean") {
-    throw invalid(field, "invalid-boolean", "Fast 状态必须是布尔值");
+function serviceTierEdit(serviceTier, config, models, selectedModel = optionalString(config.model)) {
+  if (!["default", "fast", "ultrafast"].includes(serviceTier)) {
+    throw invalid("serviceTier", "invalid-service-tier", "加速档位必须是 default、fast 或 ultrafast");
+  }
+  if (serviceTier !== "default") {
+    if (record(config.features).fast_mode === false) {
+      throw invalid("serviceTier", "acceleration-disabled", "Codex features.fast_mode 已关闭，不能启用加速档位");
+    }
+    const model = selectedModel === null
+      ? models.find((candidate) => candidate.isDefault && candidate.available !== false)
+      : models.find((candidate) => candidate.model === selectedModel && candidate.available !== false);
+    if (!model) {
+      throw invalid("model", "unknown-model", `默认模型不可用：${selectedModel ?? "未指定"}；请先选择有效模型`);
+    }
+    const supported = acceleratedServiceTierId(model.serviceTiers, serviceTier);
+    if (!supported) {
+      throw invalid("serviceTier", "unsupported-service-tier", `模型 ${model.model} 不支持 ${serviceTier === "fast" ? "Fast" : "Ultrafast"}`);
+    }
   }
   return {
-    edits: [{ keyPath: "service_tier", value: enabled ? "fast" : "default" }],
-    value: { enabled },
+    edits: [{ keyPath: "service_tier", value: serviceTier }],
+    value: { serviceTier },
   };
 }
 
@@ -547,14 +560,9 @@ function projectModel(model) {
     displayName: model.displayName,
     reasoningEfforts: model.supportedReasoningEfforts.map((option) => ({ ...option })),
     defaultReasoningEffort: model.defaultReasoningEffort,
+    serviceTiers: model.serviceTiers.map((tier) => ({ ...tier })),
     isDefault: model.isDefault,
   };
-}
-
-function isFastServiceTier(value) {
-  if (value === null) return false;
-  const normalized = value.toLowerCase();
-  return normalized === "fast" || normalized === "priority";
 }
 
 function invalid(field, code, message, options) {

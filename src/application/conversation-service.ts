@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { ConversationHookService } from "./conversation-hook-service.js";
+import type { HookConfigPort, HookCommandView, HookReviewPolicy } from "./hook-port.js";
 import { isAbsolute } from "node:path";
 
 import {
@@ -164,6 +166,7 @@ export interface ConversationIdleReleaseCondition {
 
 export type ConversationQueryPort =
   & AccountQueryPort
+  & HookConfigPort
   & ConversationExtensionQueryPort;
 
 export interface AgentRoleEntry {
@@ -232,6 +235,7 @@ export interface ConversationTurnUseCases {
 
 /** Stable model and installed-extension boundary. */
 export interface ConversationExtensionUseCases {
+  hooks(target: ConversationTarget, input: string, actorId?: string): Promise<HookCommandView>;
   invokeSkill(
     target: ConversationTarget,
     selector: string,
@@ -358,6 +362,7 @@ export class ConversationService implements
   ConversationExtensionUseCases,
   ConversationAccountMetricsUseCases {
   private readonly locks = new ConversationLockCoordinator();
+  private readonly hookUseCases: ConversationHookService;
   private readonly queueUseCases: ThreadQueueService;
   private readonly revertUseCases: ThreadRevertService;
   private readonly extensionQueries: ConversationExtensionQueryService;
@@ -396,7 +401,12 @@ export class ConversationService implements
       "router" | "models" | "collaborationModes" | "activity" | "locks"
     >,
     private readonly threadApprovalsReviewer?: ThreadApprovalsReviewerPort,
+    hookAuthorization?: (target: ConversationTarget, actorId: string) => void,
+    hookReviewPolicy?: HookReviewPolicy,
   ) {
+    this.hookUseCases = new ConversationHookService(this.locks, router, models, queries, hookAuthorization ?? (() => {
+      throw new UserFacingError("hooks.forbidden", "Hook 管理授权不可用");
+    }), hookReviewPolicy);
     this.sessionQueries = new ConversationSessionQueryService(
       router, threadHistory, requestMetricsQuery, sessionDisplayCache,
     );
@@ -1338,6 +1348,10 @@ export class ConversationService implements
 
   modelState(target: ConversationTarget): Promise<ModelSelectionState> {
     return this.extensionQueries.modelState(target);
+  }
+
+  hooks(target: ConversationTarget, input: string, actorId?: string): Promise<HookCommandView> {
+    return this.hookUseCases.execute(target, input, actorId);
   }
 
   clearModelBrowse(target: ConversationTarget): Promise<ModelSelectionState> {

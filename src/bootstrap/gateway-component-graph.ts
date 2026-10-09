@@ -29,6 +29,7 @@ import {
   executableInvocation,
   resolveExecutable,
 } from "../../runtime/executable.mjs";
+import { codexProcessInvocation } from "../../runtime/owned-process.mjs";
 import {
   loadManagedModelProviderDefinitions,
 } from "../../runtime/model-provider-definitions.mjs";
@@ -130,6 +131,8 @@ import {
   SqliteSessionDisplayCache,
 } from "../storage/index.js";
 import {
+  canReviewConversationHook,
+  canPreserveWeixinHookReviewText,
   formatProviderIdleReleaseNotice,
   setConfiguredCustomPrimaryProviderId,
   type SurfaceAdapter,
@@ -281,18 +284,23 @@ export abstract class GatewayComponentGraph {
       if (fingerprint !== readAppServerProviderSettingsFingerprint(provider)) throw new Error("Provider 模型目录在读取期间发生变化");
       return { fingerprint, models };
     };
-    const unavailableModels = providerDefinitions.filter((definition) => !configuredProviders.has(definition.id))
-      .flatMap((definition) => loadManagedModelOptions(managedProviderDirectory(process.env, definition), false, definition));
+    const unavailableModels: ModelOption[] = this.managedSettingsProviders.map((provider) => ({
+      provider, id: provider, model: provider,
+      displayName: providerDefinitions.find((definition) => definition.id === provider)?.displayName ?? provider,
+      isDefault: true, available: false,
+      unavailableReason: "模型目录尚未确认，请检查对应 App Server 后重试",
+      supportedReasoningEfforts: [], defaultReasoningEffort: "none",
+      inputModalities: [], serviceTiers: [], defaultServiceTier: null,
+    }));
     const codexBinary = resolveExecutable(effectiveCodexBinary(config.codexBinary));
     const createCodexProcessInvocation = (args: readonly string[]) =>
-      executableInvocation(codexBinary, args);
+      codexProcessInvocation(codexBinary, args);
     const createTransport = (socketPath: string): CodexTransport =>
       {
         assertAppServerSocketPathSupported(socketPath);
         return createAppServerTransport(
           { kind: "local-app-server", socketPath },
           {
-            codexBinary,
             createCodexProcessInvocation,
             terminateCodexProcess: terminateChildProcess,
           },
@@ -750,6 +758,17 @@ export abstract class GatewayComponentGraph {
         updateThreadApprovalsReviewer: (threadId, reviewer) =>
           this.updateThreadApprovalsReviewer(threadId, reviewer),
       },
+      (target, actorId) => {
+        this.requireRunning();
+        if (!this.accessPolicy(target)?.isAllowed({ target, actorId }) || !this.bindings.actors(target).includes(actorId)) {
+          throw new UserFacingError("hooks.forbidden", "当前用户未获授权管理 Hook");
+        }
+      },
+      (surface, hook) => {
+        if (surface === "weixin") return canReviewConversationHook(hook, canPreserveWeixinHookReviewText);
+        if (surface === "feishu" || surface === "telegram") return canReviewConversationHook(hook, () => true);
+        return false;
+      },
     );
     this.conversations = service;
     service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);
@@ -1007,8 +1026,8 @@ export abstract class GatewayComponentGraph {
           workerUrl: new URL(import.meta.url.endsWith(".ts") ? "../../dist/delivery/worker.js" : "../delivery/worker.js", import.meta.url),
           owner: (event) => this.outputOwner(event),
           authorized: (event, owner) => this.outputAuthorized(event, owner),
-          fault: (code, account, persistentDeliveryId) => {
-            logger.error({ code, account, persistentDeliveryId }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
+          fault: (code, account, persistentDeliveryId, failure) => {
+            logger.error({ code, account, persistentDeliveryId, ...(failure ? { deliveryFailure: failure } : {}) }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
             if (code === "delivery-uncertain" || code === "authorization-changed") return;
             if (account && code !== "storage" && code !== "capacity" && code !== "mailbox-full") this.surfaceManager.suspendPersistentAccount(account);
             else void this.requestStop().catch(() => logger.error("可靠投递故障后的 Gateway 清理失败"));
@@ -1528,8 +1547,11 @@ export abstract class GatewayComponentGraph {
       await this.surfaceManager.preparePersistence();
       this.requireRunning();
       await this.providerMetrics.start();
+      this.requireRunning();
       await this.metricsEvents?.start();
+      this.requireRunning();
       await this.accountSnapshotEvents?.start();
+      this.requireRunning();
       // IPC lifetime follows the writer, not the HTTP admission switch. It must
       // already exist for first enablement and drain terminal metrics on disable.
       await this.relayMetrics?.apply(true);

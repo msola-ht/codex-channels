@@ -649,6 +649,9 @@ export class ConversationCore {
         this.publishForThread(event.threadId, outputEvent);
         return;
       }
+      case "hook.completed":
+        this.publishForThread(event.threadId, event);
+        return;
       case "warning":
         if (event.threadId) {
           this.publishForThread(event.threadId, {

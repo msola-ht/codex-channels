@@ -24,6 +24,7 @@ import {
 import {
   assertProviderFileSnapshots,
   readOptionalProviderFile,
+  replaceOptionalProviderFile,
   removeOptionalProviderFile,
   refreshProviderFileSnapshot,
   restoreProviderFileSnapshots,
@@ -240,14 +241,14 @@ async function applyOpencodeGoAccountRemovalUnlocked(
   const paths = plan.paths;
   try {
     mkdirSync(paths.backupDirectory, { recursive: true, mode: 0o700 });
-    const profile = await readOptionalProviderFile(paths.profilePath);
+    const profile = await readOptionalProviderFile(paths.profilePath, environment);
     if (profile !== undefined) {
       await writePrivateFileAtomic(
         join(paths.backupDirectory, opencodeGoProfileFileName(plan.account.id)),
         profile,
       );
     }
-    const marker = await readOptionalProviderFile(paths.markerPath);
+    const marker = await readOptionalProviderFile(paths.markerPath, environment);
     if (marker !== undefined) {
       await writePrivateFileAtomic(join(paths.backupDirectory, "managed.toml"), marker);
     }
@@ -264,16 +265,16 @@ async function applyOpencodeGoAccountRemovalUnlocked(
       paths.markerPath,
     ];
     if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
-    const snapshots = snapshotProviderFiles(transactionPaths);
+    const snapshots = snapshotProviderFiles(transactionPaths, environment);
     let guards = snapshots;
     try {
       await assertProviderFileSnapshots(guards);
       if (plan.restoresInitialConfig) {
-        const initialConfig = await readOpencodeGoRestoreBaseline(paths);
+        const initialConfig = await readOpencodeGoRestoreBaseline(paths, environment);
         if (initialConfig === undefined) {
           throw new Error("OpenCode Go 固定账户恢复基线缺失");
         }
-        await restoreOpencodeGoBaseConfig(plan, initialConfig);
+        await restoreOpencodeGoBaseConfig(plan, initialConfig, environment);
         guards = refreshProviderFileSnapshot(guards, paths.configPath);
         await assertProviderFileSnapshots(guards);
       }
@@ -412,7 +413,7 @@ async function buildRemovalPlan(
   }
   const mode = marker.mode;
   if (mode === "exclusive") {
-    const initialConfig = await readOpencodeGoRestoreBaseline(paths);
+    const initialConfig = await readOpencodeGoRestoreBaseline(paths, environment);
     if (initialConfig === undefined) {
       throw invalid(
         "backup-unavailable",
@@ -448,7 +449,7 @@ async function applyLastAccountRemovalFiles(
 ) {
   const { paths } = plan;
   const initialConfig = plan.restoresInitialConfig
-    ? await readOpencodeGoRestoreBaseline(paths)
+    ? await readOpencodeGoRestoreBaseline(paths, environment)
     : undefined;
   if (plan.restoresInitialConfig && initialConfig === undefined) {
     throw invalid(
@@ -464,12 +465,12 @@ async function applyLastAccountRemovalFiles(
   ];
   if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
   if (plan.removesManagedCatalog) transactionPaths.push(paths.catalogPath, paths.manifestPath);
-  const snapshots = snapshotProviderFiles(transactionPaths);
+  const snapshots = snapshotProviderFiles(transactionPaths, environment);
   let guards = snapshots;
   try {
     await assertProviderFileSnapshots(guards);
     if (plan.restoresInitialConfig) {
-      await restoreOpencodeGoBaseConfig(plan, initialConfig);
+      await restoreOpencodeGoBaseConfig(plan, initialConfig, environment);
       guards = refreshProviderFileSnapshot(guards, paths.configPath);
       await assertProviderFileSnapshots(guards);
     }
@@ -517,12 +518,12 @@ async function applyLastAccountRemovalFiles(
   };
 }
 
-async function readOpencodeGoRestoreBaseline(paths) {
-  return await readOptionalProviderFile(join(paths.backupDirectory, "config.toml"));
+async function readOpencodeGoRestoreBaseline(paths, environment) {
+  return await readOptionalProviderFile(join(paths.backupDirectory, "config.toml"), environment);
 }
 
-async function restoreOpencodeGoBaseConfig(plan, initialConfig) {
-  const currentConfig = await readOptionalProviderFile(plan.paths.configPath);
+async function restoreOpencodeGoBaseConfig(plan, initialConfig, environment) {
+  const currentConfig = await readOptionalProviderFile(plan.paths.configPath, environment);
   const restored = restoreProviderBaseConfig(
     parseConfig(currentConfig),
     parseConfig(initialConfig),
@@ -537,7 +538,7 @@ async function restoreOpencodeGoBaseConfig(plan, initialConfig) {
       await removeOptionalProviderFile(plan.paths.configPath);
     }
   } else {
-    await writePrivateFileAtomic(plan.paths.configPath, stringify(restored));
+    await replaceOptionalProviderFile(plan.paths.configPath, stringify(restored), environment);
   }
 }
 

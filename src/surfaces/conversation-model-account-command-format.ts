@@ -1,6 +1,4 @@
 import {
-  fastServiceTierId,
-  isFastServiceTier,
   listProviders,
   type AccountMetric,
   type AccountThreadUsage,
@@ -20,7 +18,7 @@ import {
   formatTimeRemaining,
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
-import { formatCodexProviderLabel, formatDisplayedProvider } from "./provider-format.js";
+import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier } from "./provider-format.js";
 import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
@@ -34,7 +32,7 @@ export function formatConversationModels(
   const current = state.models.find((model) =>
     model.model === state.model
     && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
-  const fast = isFastServiceTier(state.serviceTier, current) ? "开启" : "关闭";
+  const speed = `速度：${formatServiceTier(state.serviceTier, current)}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`;
   const effortName = reasoningEffortSettingName(state.effort, current);
   const providerSwitchNotice = state.providerPending
     ? ["提供商切换将在下一条消息中创建新 Session；当前 Session 会保留，可通过 /resume 恢复。", ""]
@@ -47,19 +45,17 @@ export function formatConversationModels(
   if (result.view === "fast") {
     return toStructuredMarkdownList([
       formatModelStateLine(state),
-      `Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
-      `模型支持：${current && fastServiceTierId(current) ? "支持 Fast" : "不支持 Fast"}`,
+      speed,
+      `模型支持：${formatModelSpeedSupport(current)}`,
       "",
-      "切换：/fast [on|off|status]",
+      "切换：/fast [on|ultrafast|off|status]（on：Fast；off：Standard）",
     ].join("\n"));
   }
   if (result.view === "effort") {
     return toStructuredMarkdownList([
       formatModelStateLine(state),
       `当前${effortName}：${formatReasoningEffort(state.effort ?? current?.defaultReasoningEffort)}${state.effortPending ? "（下一次 Turn 生效）" : ""}`,
-      ...(current && fastServiceTierId(current)
-        ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
-        : []),
+      speed,
       "",
       ...providerSwitchNotice,
       ...(result.nextSelection === "effort"
@@ -80,6 +76,7 @@ export function formatConversationModels(
   if (providers.length === 0) {
     return toStructuredMarkdownList([
       formatModelStateLine(state),
+      speed,
       "当前没有可选模型。请检查账户配置与订阅状态；续订后可在 WebUI 或当前账户的 /usage 刷新。",
     ].join("\n"));
   }
@@ -88,14 +85,12 @@ export function formatConversationModels(
     return toStructuredMarkdownList([
       formatModelStateLine(state),
       `${effortName}：${formatReasoningEffort(state.effort)}`,
-      ...(current && fastServiceTierId(current)
-        ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
-        : []),
+      speed,
       "",
       `当前 Provider：${currentProvider === undefined ? "待选择" : formatCodexProviderLabel(currentProvider)}`,
-      "可用提供商：",
+      "提供商列表：",
       ...providers.map((provider, index) =>
-        `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === currentProvider ? " ← 当前" : ""} · ${state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`,
+        `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === currentProvider ? " ← 当前" : ""} · ${formatProviderModelSummary(state.models, provider)}`,
       ),
       "",
       "下一步：/model <提供商序号或 ID>",
@@ -104,9 +99,7 @@ export function formatConversationModels(
   return toStructuredMarkdownList([
     formatModelStateLine(state),
     `${effortName}：${formatReasoningEffort(state.effort)}`,
-    ...(current && fastServiceTierId(current)
-      ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
-      : []),
+    speed,
     ...formatCurrentModelNotices(current),
     "",
     ...providerSwitchNotice,
@@ -114,7 +107,7 @@ export function formatConversationModels(
     `模型列表（${scopedModels.length}）：`,
     ...scopedModels.map(
       (model, index) =>
-        `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""}${fastServiceTierId(model) ? " · 支持 Fast" : ""}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
+        `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
     ),
     "",
     "切换：/model <模型序号、ID 或名称>",
