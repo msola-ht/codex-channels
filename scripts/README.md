@@ -520,6 +520,7 @@
 - `service-command.mjs` / `service-command.d.mts`：公开 `appserver`、`relay` 目标映射到内部 `app-server`、`model-relay` 服务标识；实现顶层后台服务命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
   服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
   检查；顶层 `restart` 统一预检、停止与逐项启动就绪，默认包含已安装 WebUI，失败报告剩余步骤并中止。Windows 重启批量查询全部所选计划任务，启动和停止在当前进程调用同一控制器，复用权限检查宿主，避免每一步重新启动 Node 与 ACL 宿主；不缓存权限结论、不改变服务顺序和就绪检查。Model Relay 内部入口接收父进程 `codexc-stop`，完成资源关闭后退出。CLI 只保留帮助展示和命令分派。
+  `start`、`stop`、`restart` 共用逐服务步骤计时，单调时钟覆盖控制器及启动就绪等待；完成或失败均输出步骤耗时，重启单独报告预检耗时。命令总耗时由 CLI 统一输出。批量目标继续使用共享服务选择与顺序；Windows、启动和重启在首个失败后中止，Linux/macOS 的 `stop all` 保留尝试其余目标后汇总失败的行为。
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
   稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用；Codex 用户偏好使用
   `next-thread / codex`、`next-tui / codex` 和 `next-thread-and-tui / codex` 分别表示新 Thread、

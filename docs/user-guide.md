@@ -28,6 +28,8 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 ## 3. 初始化与配置
 
+所有 CLI 命令在结束或失败时显示“命令总耗时”，单位为秒并保留两位小数。计时统一写入 stderr，stdout 的 JSON、JSONL、版本号和导出内容不混入计时文本；主菜单每次执行的命令也单独计时。前台服务、日志跟随和交互命令的耗时包含运行及等待输入的时间，在命令返回时显示；强制终止进程时不保证输出。使用单调时钟，从命令分派开始，不包含 Node 加载 CLI 静态模块之前的启动时间。
+
 在交互终端直接运行 `codexc` 打开主菜单，可进入初始化、接入、日常设置、工作区、后台服务、指标、清理、诊断，以及“运行与连接”中的 TUI、WebUI 和前台核心服务启动入口。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 显示帮助，`timezone` 仅显示当前时区。配置路径查询明确使用 `codexc config paths [--json]`，终端与管道中的行为一致。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。
 
 在 `codexc` 主菜单选择“后台服务”可选择操作和目标。菜单调用顶层服务命令，`restart all` 包含已安装的 WebUI。
@@ -481,6 +483,7 @@ Windows 安装时若显式设置了 `CODEX_HOME`，该路径必须是已存在�
 Windows 启动前会检查服务定义所用的 PowerShell、原生构建产物、Node、CLI 入口及工作目录。缺失或不匹配时先返回修复提示，不启动任务；服务进程启动后的故障仍可能在宿主等待超时后报告。此时显示的“最近一次任务结果”不保证来自本次启动，请结合 `codexc logs` 判断。
 
 `codexc restart [gateway|appserver|webui|relay|all]` 是唯一重启入口，默认 `all`。
+`start`、`stop`、`restart` 另外为每个服务步骤显示耗时（秒，保留两位小数），失败步骤也显示耗时；启动步骤包含就绪检查。重启还会显示预检耗时。
 单独指定目标时要求该后台服务已安装；`appserver` 包含受监管的 Provider 实例。
 全部重启要求 Gateway 与 App Server 已安装，未安装的 WebUI、Relay 明确提示跳过；
 已安装但未启用的 Relay 只停止，不重新启动。显式 `restart relay` 则重启 Relay 管理进程，监听仍由配置开关控制。

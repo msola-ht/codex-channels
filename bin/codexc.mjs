@@ -12,6 +12,7 @@ import {
   statSync,
 } from "node:fs";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 
 import { isCommandHelp } from "../scripts/cli-help.mjs";
 import { primaryProviderUsage } from "../scripts/primary-provider-usage.mjs";
@@ -279,6 +280,14 @@ try {
 }
 
 async function executeCommand(command, args) {
+  const startedAt = performance.now();
+  try { await dispatchCommand(command, args); }
+  finally {
+    printCliMessage("note", `命令总耗时 ${((performance.now() - startedAt) / 1000).toFixed(2)} 秒。`, { destination: "stderr" });
+  }
+}
+
+async function dispatchCommand(command, args) {
   switch (command) {
     case undefined:
       printHelp();

@@ -3,6 +3,7 @@ export { serviceCommandActions, serviceCommandUsage } from "./cli-command-usage.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { performance } from "node:perf_hooks";
 
 import { runAppServerService } from "../runtime/app-server-service-runtime.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
@@ -96,7 +97,26 @@ function recordInstalledTerminalIdentity(environment) {
   printCliMessage("note", `已按当前终端记录模型上游终端标识：${terminalIdentity}`);
 }
 
+function serviceElapsed(startedAt) {
+  return `${((performance.now() - startedAt) / 1000).toFixed(2)} 秒`;
+}
+
+async function timedServiceStep(action, definition, environment) {
+  const label = `${action === "stop" ? "停止" : "启动并确认就绪"} ${definition.displayName}`;
+  const startedAt = performance.now();
+  printCliMessage("note", label);
+  try {
+    await runServiceController(action, [definition.target], environment);
+    if (action === "start") await waitForServiceReadiness(definition.target, environment);
+    printCliMessage("note", `${label}：完成，耗时 ${serviceElapsed(startedAt)}。`);
+  } catch (error) {
+    printCliMessage("failure", `${label}：失败，耗时 ${serviceElapsed(startedAt)}。`);
+    throw error;
+  }
+}
+
 export async function runRestartCommand(args = []) {
+  const startedAt = performance.now();
   if (args.length > 1) throw new Error(restartCommandUsage);
   const target = parseServiceTarget(args[0] ?? "all");
   rejectUnsafeAppServerServiceAction("restart", [target], process.env);
@@ -145,11 +165,10 @@ export async function runRestartCommand(args = []) {
   ];
   const label = step => `${step.action === "stop" ? "停止" : "启动并确认就绪"} ${step.definition.displayName}`;
   const completed = [];
+  printCliMessage("note", `重启预检完成，耗时 ${serviceElapsed(startedAt)}。`);
   for (const [index, step] of steps.entries()) {
-    printCliMessage("note", label(step));
     try {
-      await runServiceController(step.action, [step.definition.target], runtime.environment);
-      if (step.action === "start") await waitForServiceReadiness(step.definition.target, runtime.environment);
+      await timedServiceStep(step.action, step.definition, runtime.environment);
       completed.push(label(step));
     } catch (error) {
       throw new Error(
@@ -212,18 +231,28 @@ export async function runServiceCommand(args) {
   const controlEnvironment = serviceActionAllowsInvalidConfig(action)
     ? serviceControlEnvironment()
     : configuredEnvironment().environment;
-  if (action === "start" && serviceArgs[0] === "all") {
+  if (action === "start" || action === "stop") {
     const platform = { linux: "systemd", darwin: "launchd", win32: "windows" }[process.platform];
     if (!platform) throw new Error("不支持的后台服务平台");
-    for (const definition of serviceControlDefinitions(platform, "all", "start", controlEnvironment)) {
-      await runServiceController("start", [definition.target], controlEnvironment);
-      await waitForServiceReadiness(definition.target, controlEnvironment);
+    const failures = [];
+    for (const definition of serviceControlDefinitions(platform, serviceArgs[0], action, controlEnvironment)) {
+      try {
+        await timedServiceStep(action, definition, controlEnvironment);
+      } catch (error) {
+        // Unix controllers historically attempt every selected stop before
+        // reporting failure. Timing must not turn this into fail-fast behavior.
+        if (action !== "stop" || serviceArgs[0] !== "all" || platform === "windows") throw error;
+        failures.push({ definition, error });
+      }
     }
-    printCliMessage("success", "全部已选后台服务已就绪。");
+    if (failures.length > 0) throw new AggregateError(
+      failures.map(failure => failure.error),
+      `停止服务失败：${failures.map(failure => failure.definition.displayName).join("、")}；已尝试其余所选服务，请运行 codexc status。`,
+    );
+    if (serviceArgs[0] === "all") printCliMessage("success", action === "start" ? "全部已选后台服务已就绪。" : "全部已选后台服务已停止。");
     return;
   }
   await runServiceController(action, serviceArgs, controlEnvironment);
-  if (action === "start") await waitForServiceReadiness(serviceArgs[0], controlEnvironment);
 }
 
 async function runServiceController(action, serviceArgs, controlEnvironment) {
