@@ -20,6 +20,8 @@ import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.
 import {
   assertSynchronousChildSuccess,
   childProcessIsRunning,
+  createChildServiceControl,
+  installServiceControlHandler,
   ForwardedChildSignalError,
   installProcessSignalHandlers,
   ReportedChildExitError,
@@ -617,6 +619,7 @@ async function runForegroundScript(
       detached: process.platform !== "win32",
     },
   );
+  const childControl = createChildServiceControl(child);
   let forwardedSignal;
   let shutdownTimer;
   let forcedProcessGroupStop = false;
@@ -640,9 +643,9 @@ async function runForegroundScript(
     }
     if (!fromParent) forwardedSignal = signal;
     if (childProcessIsRunning(child)) {
-      if (!sendForegroundStopMessage(child, signal)) {
-        signalChildProcesses([child], signal);
-      }
+      void childControl.send("codexc-stop").then((sent) => {
+        if (!sent && childProcessIsRunning(child)) signalChildProcesses([child], signal);
+      });
       shutdownTimer = setTimeout(forceStop, foregroundShutdownTimeoutMs);
       shutdownTimer.unref();
     }
@@ -652,7 +655,7 @@ async function runForegroundScript(
   const controlFromParent = message => {
     if (message?.type === "codexc-stop" && !shutdownTimer) forwardSignal("SIGTERM", true);
   };
-  process.on("message", controlFromParent);
+  const cleanupControl = installServiceControlHandler(controlFromParent);
   const cleanupSignals = installProcessSignalHandlers({
     SIGTERM: forwardTerminate,
     SIGINT: forwardInterrupt,
@@ -660,7 +663,8 @@ async function runForegroundScript(
   const cleanup = () => {
     if (shutdownTimer) clearTimeout(shutdownTimer);
     cleanupSignals();
-    process.off("message", controlFromParent);
+    cleanupControl();
+    childControl.close();
   };
 
   await new Promise((resolveChild, rejectChild) => {
@@ -715,20 +719,6 @@ function security(args) {
     repaired += 1;
   }
   printCliMessage("success", `Windows TOML 权限处理完成：${home}（检查 ${files.length} 个文件，修复 ${repaired} 个；有效的主配置读取权限保留）`);
-}
-
-function sendForegroundStopMessage(child, signal) {
-  if (process.platform !== "win32" || !child.connected) return false;
-  try {
-    child.send({ type: "codexc-stop", signal }, (error) => {
-      if (error && childProcessIsRunning(child)) {
-        signalChildProcesses([child], signal);
-      }
-    });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function waitForProcessGroupExit(processGroupId, timeoutMs) {

@@ -143,6 +143,7 @@ export async function waitForCoreServiceTarget(
   const deadline = now() + timeoutMs;
   let healthySince;
   while (now() < deadline) {
+    options.signal?.throwIfAborted();
     let appServerReady = true;
     if (requiresAppServer) {
       let supervisor;
@@ -187,6 +188,7 @@ export async function waitForCoreServiceTarget(
         // Treat a transient Windows owner descriptor rewrite as not ready yet.
       }
     }
+    options.signal?.throwIfAborted();
     const healthy = appServerReady && gatewayReady;
     if (healthy) {
       healthySince ??= now();

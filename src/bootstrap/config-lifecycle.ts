@@ -16,6 +16,7 @@ import {
 } from "../../runtime/gateway-account-refresh.mjs";
 import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
+import { installProcessSignalHandlers, installServiceControlHandler } from "../../runtime/process-lifecycle.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { ResetCreditError } from "../application/index.js";
@@ -51,14 +52,35 @@ export async function runGatewayProcess(): Promise<void> {
     process.env.TZ = config.gatewayTimezone;
   }
   const gatewayOwner = new GatewayOwner(runtime.configPath);
-  await gatewayOwner.start();
   const eventQueuePath = configEventQueuePath(dirname(runtime.configPath));
   const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config, { service: "gateway", module: "lifecycle" });
+  let earlyStop = false;
+  const controls: { stop?: () => void; reload?: () => void } = {};
+  let reloadPending = false;
+  const requestStop = (): void => {
+    earlyStop = true;
+    controls.stop?.();
+  };
+  const requestReload = (): void => {
+    if (controls.reload) controls.reload();
+    else reloadPending = true;
+  };
+  const cleanupControl = installServiceControlHandler(message => {
+    if (message.type === "codexc-stop") requestStop();
+    else requestReload();
+  });
+  const cleanupSignals = installProcessSignalHandlers({
+    SIGINT: requestStop, SIGTERM: requestStop, SIGHUP: requestReload,
+  });
+  const cleanupHandlers = (): void => { cleanupControl(); cleanupSignals(); };
   let application: GatewayApplication;
   let weixinCredentialChange: (() => Promise<"changed" | "unchanged" | "unavailable">) | undefined;
   try {
+    await gatewayOwner.start();
+    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); return; }
     const surfacePlugins = await loadBuiltInSurfacePlugins(config);
+    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); return; }
     if (config.weixin) {
       weixinCredentialChange = await createWeixinCredentialChangeCheck(
         createWeixinCredentialStore(join(config.credentialsDirectory, "weixin")),
@@ -66,6 +88,7 @@ export async function runGatewayProcess(): Promise<void> {
         () => logger.warn({ surface: "weixin" }, "微信凭据检查失败；其他渠道继续运行，下次配置重载重新检查"),
       );
     }
+    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); return; }
     application = new GatewayApplication(
       config,
       logger,
@@ -74,6 +97,7 @@ export async function runGatewayProcess(): Promise<void> {
       () => stop(1),
     );
   } catch (error) {
+    cleanupHandlers();
     await gatewayOwner.close();
     throw error;
   }
@@ -102,29 +126,37 @@ export async function runGatewayProcess(): Promise<void> {
   let stopping = false;
   let started = false;
   let reloading = false;
-  let reloadPending = false;
   let reloadTimer: NodeJS.Timeout | undefined;
   let accountRefreshStartup: Promise<void> | undefined;
 
-  const providerSettingsWatcher = new ProviderSettingsWatcher({
-    logger,
-    configuredProviders: application.managedSettingsProviders,
-    aggregateMembers: application.aggregateSettingsMembers,
-    applyProviderSettings: (provider, signal) => application.applyProviderSettings(provider, signal),
-    refreshProviderModels: (provider, signal) => application.refreshProviderModels(provider, signal),
-    onStateChange: (change) =>
-      application.notifyProviderSettingsChange(
-        providerSettingsAction[change.kind],
-        change.providers,
-      ),
-    environment: process.env,
-  });
-  const configuredNetwork = readCodexProxySettings(process.env);
-  const networkProxyWatcher = new NetworkProxyWatcher({
-    logger,
-    configured: configuredNetwork,
-    initialProxy: config.networkProxy,
-  });
+  let providerSettingsWatcher: ProviderSettingsWatcher;
+  let networkProxyWatcher: NetworkProxyWatcher;
+  try {
+    providerSettingsWatcher = new ProviderSettingsWatcher({
+      logger,
+      configuredProviders: application.managedSettingsProviders,
+      aggregateMembers: application.aggregateSettingsMembers,
+      applyProviderSettings: (provider, signal) => application.applyProviderSettings(provider, signal),
+      refreshProviderModels: (provider, signal) => application.refreshProviderModels(provider, signal),
+      onStateChange: (change) =>
+        application.notifyProviderSettingsChange(
+          providerSettingsAction[change.kind],
+          change.providers,
+        ),
+      environment: process.env,
+    });
+    const configuredNetwork = readCodexProxySettings(process.env);
+    networkProxyWatcher = new NetworkProxyWatcher({
+      logger,
+      configured: configuredNetwork,
+      initialProxy: config.networkProxy,
+    });
+  } catch (error) {
+    cleanupHandlers();
+    await application.stop().catch(() => undefined);
+    await gatewayOwner.close();
+    throw error;
+  }
 
   const stopWatching = (): Promise<void> => {
     const providersStopped = providerSettingsWatcher.stop();
@@ -136,8 +168,7 @@ export async function runGatewayProcess(): Promise<void> {
     for (const path of watchedPaths) {
       unwatchFile(path);
     }
-    process.removeListener("SIGHUP", scheduleReload);
-    process.removeListener("message", controlFromParent);
+    cleanupHandlers();
     return Promise.all([providersStopped, networkStopped]).then(() => undefined);
   };
   const closeAccountRefresh = async (): Promise<void> => {
@@ -264,20 +295,9 @@ export async function runGatewayProcess(): Promise<void> {
     reloadTimer.unref();
   }
 
-  const controlFromParent = (message: unknown): void => {
-    if (
-      typeof message === "object"
-      && message !== null
-      && "type" in message
-    ) {
-      if (message.type === "codexc-stop") stop();
-      if (message.type === "codexc-reload") scheduleReload();
-    }
-  };
-  process.once("SIGINT", () => stop());
-  process.once("SIGTERM", () => stop());
-  process.on("message", controlFromParent);
-  process.on("SIGHUP", scheduleReload);
+  controls.stop = () => stop();
+  controls.reload = scheduleReload;
+  if (earlyStop) { stop(); return; }
 
   try {
     await application.start();

@@ -83,7 +83,7 @@ export class AppServerSupervisorOwner {
       socket.on("close", () => this.#sockets.delete(socket));
       socket.on("end", () => socket.end());
       socket.setTimeout(connectionTimeoutMs, () => socket.destroy());
-      socket.on("data", (chunk) => {
+      const onData = (chunk) => {
         bytes += chunk.length;
         if (bytes > maximumRequestBytes) {
           socket.destroy();
@@ -91,9 +91,10 @@ export class AppServerSupervisorOwner {
         }
         chunks.push(chunk);
         if (!chunk.includes(0x0a)) return;
-        socket.pause();
+        socket.removeListener("data", onData);
         void this.#handleRequest(socket, Buffer.concat(chunks).toString("utf8"));
-      });
+      };
+      socket.on("data", onData);
     };
     this.#server = new PrivateIpcServer(this.#socketPath, listener);
   }
@@ -148,6 +149,7 @@ export class AppServerSupervisorOwner {
       socket.setTimeout(20_000, () => socket.destroy());
       const controller = new AbortController();
       const cancel = () => controller.abort(new Error("Desktop Host 附加已取消"));
+      socket.once("end", cancel);
       socket.once("close", cancel);
       const attachmentKey = JSON.stringify([
         request.provider,
@@ -174,6 +176,7 @@ export class AppServerSupervisorOwner {
           }
         });
       };
+      socket.once("end", removeLease);
       socket.once("close", removeLease);
       try {
         const canAttach = () => {
@@ -196,7 +199,7 @@ export class AppServerSupervisorOwner {
             pipePath: request.pipePath,
             toolsEnabled: request.toolsEnabled,
           }, controller.signal, canAttach);
-          if (socket.destroyed) {
+          if (socket.destroyed || controller.signal.aborted) {
             if (this.#desktopAppLeases.size === 0) await this.#detachDesktopApp?.();
             return;
           }
@@ -225,6 +228,7 @@ export class AppServerSupervisorOwner {
           error: error instanceof Error ? error.message.slice(0, 512) : "Desktop Host 附加失败",
         })}\n`);
       } finally {
+        socket.removeListener("end", cancel);
         socket.removeListener("close", cancel);
       }
       return;
@@ -245,8 +249,11 @@ export class AppServerSupervisorOwner {
       this.#providerLeases.set(request.provider, leases);
       const removeLease = () => {
         leases.delete(socket);
-        if (leases.size === 0) this.#providerLeases.delete(request.provider);
+        if (leases.size === 0 && this.#providerLeases.get(request.provider) === leases) {
+          this.#providerLeases.delete(request.provider);
+        }
       };
+      socket.once("end", removeLease);
       socket.once("close", removeLease);
       try {
         await this.#runProviderOperation(request.provider, async () => {
@@ -566,7 +573,7 @@ export async function acquireAppServerProviderLease(primarySocketPath, provider)
     socket.once("connect", () => {
       socket.write(`${JSON.stringify({ action: "leaseProvider", provider })}\n`);
     });
-    socket.on("data", (chunk) => {
+    const onData = (chunk) => {
       response = Buffer.concat([response, chunk]);
       if (response.length > maximumResponseBytes) {
         fail(`模型 Provider 租约响应过大：${provider}`);
@@ -593,25 +600,14 @@ export async function acquireAppServerProviderLease(primarySocketPath, provider)
       }
       settled = true;
       clearTimeout(timer);
-      socket.pause();
+      socket.removeListener("data", onData);
       socket.on("error", () => undefined);
-      let closePromise;
-      resolveLease({
-        close() {
-          closePromise ??= new Promise((resolveClose) => {
-            if (socket.destroyed) {
-              resolveClose();
-              return;
-            }
-            socket.once("close", resolveClose);
-            socket.end();
-          });
-          return closePromise;
-        },
-      });
-    });
+      resolveLease(supervisorLease(socket, `模型 Provider 租约释放未获确认：${provider}`));
+    };
+    socket.on("data", onData);
     socket.once("error", () => fail(`模型 Provider 租约连接失败：${provider}`));
     socket.once("end", () => fail(`模型 Provider 租约连接提前关闭：${provider}`));
+    socket.once("close", () => fail(`模型 Provider 租约连接提前关闭：${provider}`));
   });
 }
 
@@ -649,7 +645,7 @@ export async function acquireMacDesktopAppHostLease(
         toolsEnabled,
       })}\n`);
     });
-    socket.on("data", (chunk) => {
+    const onData = (chunk) => {
       response = Buffer.concat([response, chunk]);
       if (response.length > maximumResponseBytes) {
         fail("Codex Desktop App Host 响应过大");
@@ -683,26 +679,43 @@ export async function acquireMacDesktopAppHostLease(
       }
       settled = true;
       clearTimeout(timer);
-      socket.pause();
+      socket.removeListener("data", onData);
       socket.on("error", () => undefined);
-      let closePromise;
-      resolveLease({
-        close() {
-          closePromise ??= new Promise((resolveClose) => {
-            if (socket.destroyed) {
-              resolveClose();
-              return;
-            }
-            socket.once("close", resolveClose);
-            socket.end();
-          });
-          return closePromise;
-        },
-      });
-    });
+      resolveLease(supervisorLease(socket, "Codex Desktop App Host 租约释放未获确认"));
+    };
+    socket.on("data", onData);
     socket.once("error", () => fail("Codex Desktop App Host 连接失败"));
     socket.once("end", () => fail("Codex Desktop App Host 连接提前关闭"));
+    socket.once("close", () => fail("Codex Desktop App Host 连接提前关闭"));
   });
+}
+
+function supervisorLease(socket, unconfirmedMessage) {
+  let closePromise;
+  return {
+    close() {
+      closePromise ??= new Promise((resolveClose, rejectClose) => {
+        if (socket.closed) {
+          resolveClose();
+          return;
+        }
+        let unconfirmed = false;
+        const timer = setTimeout(() => {
+          unconfirmed = true;
+          socket.destroy();
+        }, connectionTimeoutMs);
+        socket.once("close", () => {
+          clearTimeout(timer);
+          if (unconfirmed) rejectClose(new Error(unconfirmedMessage));
+          else resolveClose();
+        });
+        // Continue reading so the peer's FIN can complete a graceful release.
+        socket.resume();
+        if (!socket.destroyed) socket.end();
+      });
+      return closePromise;
+    },
+  };
 }
 
 export async function releaseAppServerProvider(primarySocketPath, provider) {

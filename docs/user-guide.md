@@ -477,6 +477,8 @@ codexc logs -n 200
 `codexc run` 在前台运行核心服务；`codexc start [目标]` 启动已安装后台服务。
 `codexc install` 生成服务定义并启动核心服务；`codexc uninstall --services` 仅停止并卸载后台服务，
 `codexc uninstall` 卸载整个受管程序，两者都保留用户数据。`codexc reload` 只通知 Gateway 重读配置。
+Windows 重载成功表示 Gateway 已接受重读请求，不代表配置应用已经完成；若提示“重新加载结果未确认”，
+应先核对服务日志与实际配置状态，不能据此认定请求没有执行。尚未接受的重载请求会在截止或连接断开时取消。
 
 Windows 安装时若显式设置了 `CODEX_HOME`，该路径必须是已存在的目录，安装器会将规范化后的路径写入四个服务定义。更换目录后需要在设置了新值的终端重新运行 `codexc install`；已有定义不会被后台自动改写，安装失败沿用既有定义备份和恢复流程。
 

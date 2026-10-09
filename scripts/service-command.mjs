@@ -9,7 +9,7 @@ import { runAppServerService } from "../runtime/app-server-service-runtime.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
 import { readGatewayConfig, validateGatewayConfigDocument, validateWebuiConfigDocument } from "../runtime/gateway-config.mjs";
 import { runGatewayService } from "../runtime/gateway-service-runtime.mjs";
-import { assertSynchronousChildSuccess } from "../runtime/process-lifecycle.mjs";
+import { assertSynchronousChildSuccess, installServiceControlHandler } from "../runtime/process-lifecycle.mjs";
 import {
   defaultServiceTarget,
   serviceTargetIncludes,
@@ -59,19 +59,24 @@ export async function runAppServerServiceCommand(args) {
 
 export async function runModelRelayServiceCommand(args) {
   if (args.length > 0) throw new Error("内部服务入口不接受参数");
-  const { locateUserConfig } = await import("./runtime-config.mjs");
-  const { startModelRelayService } = await import("../runtime/model-relay-service.mjs");
-  const { configPath } = locateUserConfig(process.env);
   let stop;
-  const stopped = new Promise(resolve => { stop = resolve; });
+  let stopping = false;
+  const stopped = new Promise(resolve => { stop = () => { stopping = true; resolve(); }; });
   const controlFromParent = message => { if (message?.type === "codexc-stop") stop(); };
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
-  process.on("message", controlFromParent);
+  const cleanupControl = installServiceControlHandler(controlFromParent);
   let service;
-  try { service = await startModelRelayService(configPath, process.env); await stopped; }
+  try {
+    const { locateUserConfig } = await import("./runtime-config.mjs");
+    const { startModelRelayService } = await import("../runtime/model-relay-service.mjs");
+    if (stopping) return;
+    const { configPath } = locateUserConfig(process.env);
+    service = await startModelRelayService(configPath, process.env);
+    await stopped;
+  }
   finally {
     process.off("SIGINT", stop); process.off("SIGTERM", stop);
-    process.off("message", controlFromParent);
+    cleanupControl();
     await service?.close();
   }
 }

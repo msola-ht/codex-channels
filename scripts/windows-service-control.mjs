@@ -18,6 +18,7 @@ import {
   privateIpcEndpointExists,
 } from "../runtime/private-ipc.mjs";
 import { readPrivateFileSync, WindowsPrivatePathError } from "../runtime/private-file.mjs";
+import { withWindowsAclDeadline } from "../runtime/windows-acl-bridge.mjs";
 import {
   parseServiceTarget,
   serviceDefinitions,
@@ -27,6 +28,8 @@ import { packageDir } from "./package-path.mjs";
 import { serviceControlDefinitions, serviceSnapshotHealthy } from "./service-selection.mjs";
 
 const definitionLimitBytes = 64 * 1024;
+const hostControlTimeoutMs = 2_000;
+const hostResponseLimitBytes = 1_024;
 const hostStartTimeoutMs = 15_000;
 // A running task host precedes configuration/ACL checks and App Server startup.
 const appServerStartTimeoutMs = 60_000;
@@ -105,9 +108,12 @@ export async function controlWindowsServices({
   }
   if (action === "reload") {
     const definition = readDefinition(definitionPath(definitionsDirectory, "gateway"));
-    const result = await requestHost(definition.controlPath, { action: "reload" });
+    const result = await requestHost(definition.controlPath, {
+      action: "reload",
+      deadline: Date.now() + hostControlTimeoutMs,
+    });
     if (result?.version !== 1 || result.ok !== true) {
-      throw new Error("Gateway 尚未运行或无法接收重新加载请求，请先执行 codexc start gateway");
+      throw new Error("Gateway 重新加载结果未确认");
     }
     writeCliMessage("success", "已通知 Gateway 重新读取配置；App Server 配置变化仍需重新安装服务。");
     return;
@@ -382,29 +388,60 @@ async function inspectHost(controlPath) {
 function requestHost(controlPath, request) {
   return new Promise((resolveResponse, rejectResponse) => {
     let socket;
-    try {
-      socket = createPrivateIpcConnection(controlPath);
-    } catch (error) {
-      rejectResponse(error);
-      return;
-    }
+    let timer;
     const chunks = [];
+    let bytes = 0;
     let settled = false;
+    let written = false;
+    const deadline = request.action === "reload"
+      ? request.deadline : Date.now() + hostControlTimeoutMs;
+    const finish = () => {
+      settled = true;
+      clearTimeout(timer);
+      socket?.destroy();
+    };
     const fail = (error) => {
       if (settled) return;
-      settled = true;
-      socket.destroy();
-      rejectResponse(error);
+      finish();
+      rejectResponse(request.action === "reload" && written
+        ? new Error("Gateway 重新加载结果未确认", { cause: error }) : error);
     };
-    socket.setTimeout(2_000, () => fail(new Error("Windows 服务宿主请求超时")));
-    socket.once("connect", () => socket.write(`${JSON.stringify(request)}\n`));
-    socket.on("data", (chunk) => chunks.push(chunk));
+    try {
+      timer = setTimeout(() => fail(new Error("Windows 服务宿主请求超时")), Math.max(0, deadline - Date.now()));
+      socket = withWindowsAclDeadline(deadline, () => createPrivateIpcConnection(controlPath));
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    socket.once("connect", () => {
+      if (settled) return;
+      if (Date.now() >= deadline) {
+        fail(new Error("Windows 服务宿主请求超时"));
+        return;
+      }
+      written = true;
+      socket.write(`${JSON.stringify(request)}\n`);
+    });
+    socket.on("data", (chunk) => {
+      if (settled) return;
+      bytes += chunk.length;
+      if (bytes > hostResponseLimitBytes) {
+        fail(new Error("Windows 服务宿主响应超过大小限制"));
+        return;
+      }
+      chunks.push(chunk);
+    });
     socket.once("error", fail);
+    socket.once("close", () => fail(new Error("Windows 服务宿主连接关闭，响应未确认")));
     socket.once("end", () => {
       if (settled) return;
+      if (Date.now() >= deadline) {
+        fail(new Error("Windows 服务宿主请求超时"));
+        return;
+      }
       try {
         const response = JSON.parse(Buffer.concat(chunks).toString("utf8").trim());
-        settled = true;
+        finish();
         resolveResponse(response);
       } catch (error) {
         fail(new Error("Windows 服务宿主响应无效", { cause: error }));

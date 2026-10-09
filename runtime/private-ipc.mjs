@@ -30,16 +30,14 @@ export class PrivateIpcServer {
   #logicalPath;
   #server;
   #socketIdentity;
-  #boundedSockets = new Set();
+  #sockets = new Set();
 
   constructor(logicalPath, listener, bounds) {
     this.#logicalPath = logicalPath;
     this.#server = createServer({ allowHalfOpen: true }, (socket) => {
-      if (bounds) {
-        this.#boundedSockets.add(socket);
-        const timer = setTimeout(() => socket.destroy(), bounds.connectionTimeoutMs);
-        socket.once("close", () => { clearTimeout(timer); this.#boundedSockets.delete(socket); });
-      }
+      this.#sockets.add(socket);
+      const timer = bounds ? setTimeout(() => socket.destroy(), bounds.connectionTimeoutMs) : undefined;
+      socket.once("close", () => { clearTimeout(timer); this.#sockets.delete(socket); });
       if (process.platform !== "win32") {
         listener(socket);
         return;
@@ -93,7 +91,7 @@ export class PrivateIpcServer {
     try {
       await this.#claimWindowsDescriptor(occupiedMessage);
     } catch (error) {
-      await closeServer(this.#server);
+      await this.close();
       throw error;
     }
   }
@@ -130,8 +128,9 @@ export class PrivateIpcServer {
   }
 
   async close() {
-    for (const socket of this.#boundedSockets) socket.destroy();
-    await closeServer(this.#server);
+    const closing = closeServer(this.#server);
+    for (const socket of this.#sockets) socket.destroy();
+    await closing;
     if (process.platform === "win32") {
       unlinkOwnedWindowsDescriptor(
         this.#logicalPath,
@@ -244,9 +243,24 @@ export function privateIpcAcceptsConnections(logicalPath) {
 
 function authenticateWindowsConnection(socket, expectedToken, listener) {
   let received = Buffer.alloc(0);
-  const fail = () => socket.destroy();
-  socket.setTimeout(connectionTimeoutMs, fail);
+  let settled = false;
+  const fail = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    socket.destroy();
+  };
+  const timer = setTimeout(fail, connectionTimeoutMs);
+  const cleanup = () => {
+    clearTimeout(timer);
+    socket.removeListener("data", onData);
+    socket.removeListener("error", fail);
+    socket.removeListener("end", fail);
+    socket.removeListener("close", onClose);
+  };
+  const onClose = () => { settled = true; cleanup(); };
   const onData = (chunk) => {
+    if (settled) return;
     received = Buffer.concat([received, chunk]);
     const newline = received.indexOf(0x0a);
     if (newline < 0) {
@@ -268,8 +282,8 @@ function authenticateWindowsConnection(socket, expectedToken, listener) {
       fail();
       return;
     }
-    socket.removeListener("data", onData);
-    socket.setTimeout(0);
+    settled = true;
+    cleanup();
     socket.pause();
     const remainder = received.subarray(newline + 1);
     if (remainder.length > 0) socket.unshift(remainder);
@@ -277,6 +291,9 @@ function authenticateWindowsConnection(socket, expectedToken, listener) {
     socket.resume();
   };
   socket.on("data", onData);
+  socket.on("error", fail);
+  socket.once("end", fail);
+  socket.once("close", onClose);
 }
 
 function sameToken(actual, expected) {

@@ -1,5 +1,6 @@
 import { closeQueueStreams, openQueueStream } from "./webui-queue-events.mjs";
 import { watchQueueChanges } from "../runtime/queue-events.mjs";
+import { installServiceControlHandler } from "../runtime/process-lifecycle.mjs";
 import { accountSnapshotEventsPath, metricsEventsPath } from "../runtime/metrics-events.mjs";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -1082,7 +1083,7 @@ function main() {
     };
     process.on("SIGINT", () => shutdown());
     process.on("SIGTERM", () => shutdown());
-    process.on("message", message => {
+    installServiceControlHandler(message => {
       if (message?.type === "codexc-stop") shutdown();
     });
   } catch (error) {
