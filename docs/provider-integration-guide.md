@@ -164,7 +164,7 @@ Gateway 自定义固定 Provider 的独立 API 凭据入口不接受 `auth`、`g
 - base URL 只允许 HTTP(S)，不得包含用户名、密码、查询或片段；
 - 编译期受管 Provider 的 API Key 只进入目标子进程环境或专用私有凭据文件；用户自定义 Provider
   按第 6 节写入私有 Profile 或独立私有凭据，主配置仅保存 `env_key` 引用。两类 Key 都不得进入命令行、Gateway 配置、日志或平台消息；
-- 受管文件必须 `0600`，读取使用 `O_NOFOLLOW` 与属主校验；
+- 受管私有文件在 Unix 使用 `0600`、`O_NOFOLLOW` 与属主校验，在 Windows 使用共享私有 ACL 与重解析点校验；共享主配置采用前述独立合同；
 - 配置或目录校验失败时等待修复，不允许部分启动或隐式回退；
 - 新增 Provider 不得动态加载 npm 包或执行任意代码。
 
@@ -233,13 +233,13 @@ stream_max_retries = 0
 配置写入失败时原备份保持不变，配置已提交但备份清理失败时明确提示部分成功。备份不可安全读取时，
 只允许编辑当前 config 中的候选，切换和删除失败关闭。
 
-`requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；也可以按 Codex 官方配置使用
-`env_key`。Gateway 管理的自定义固定 Provider 只把凭据环境变量名称写入主配置，实际 Key 保存在
+未声明独立凭据时，`requires_openai_auth = true` 使用 Codex 当前 API Key/ChatGPT 认证；已有 Provider 也可按 Codex 官方配置使用
+`env_key`，普通切换保留该引用。两者共存时，锁定上游优先读取 `env_key`，缺失时不回退官方认证；`requires_openai_auth` 仍影响账户语义，切换不能据此将其清为 `false`。经 Gateway 新增或替换的自定义固定 Key 只把凭据环境变量名称写入主配置，实际 Key 保存在
 `~/.codex-connect/providers/custom/<ID>/primary-credentials/<版本>.json` 的当前用户私有文件中。
 Windows 的主配置允许上游沙箱只读访问，其所有权与写入完整性检查不保证内容机密性，所以不能在其中保存
 `experimental_bearer_token`。已有明文候选仍可列表查看、显式编辑或切回官方，但 Gateway 拒绝启动该固定实例；
-在 `codexc setup` 中编辑并保存会显式转为私有凭据，启动不会自动迁移或删除原文件。第三方主 API 使用自己的 Key 时
-设置 `requires_openai_auth = false`，完全不依赖官方 auth.json，官方登录状态不受切换影响。
+在 `codexc setup` 中编辑并保存，或显式切换该明文候选，会转为私有凭据，启动不会自动迁移或删除原文件。通过 Setup 新建只使用独立 Key 的 Provider 时
+设置 `requires_openai_auth = false`，不依赖官方 auth.json，官方登录状态不受切换影响。
 主配置选中官方 `openai` 时，管理状态会检查 `CODEX_HOME/auth.json`（默认
 `~/.codex/auth.json`）；未检测到该鉴权文件按 OpenAI 官方未登录处理，WebUI Provider 状态不把
 官方 OpenAI 作为主 Provider 展示，Setup 总览与 `codexc provider list` 标注“未登录”，
@@ -313,7 +313,7 @@ Codex 内置保留 ID。固定模式通过 Codex 的 `config/batchWrite` 原子�
 中的 `experimental_bearer_token`；Unix 使用 0600，Windows 使用当前用户私有 ACL。Key 输入不显示不回显；自定义固定模式不能保留其他自定义
 切换 Profile，从切换模式改为固定模式前必须先删除其他自定义切换 Provider；受管切换 Provider 可以
 共存，受管固定模式必须先恢复官方模式。写入后仍需运行
-`codexc restart all` 生效。Codex 兼容 Provider 入口只接受独立 API Key，不接受额外
+`codexc restart all` 生效。此处的 Setup 新增/编辑表单只接受独立 API Key，不接受额外
 Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍是主配置候选，需先运行
 `codexc provider switch openai` 将候选移入私有备份，再编辑为切换模式；Setup 不会留下
 同名主配置块和切换 Profile。

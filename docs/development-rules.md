@@ -117,6 +117,8 @@ and remain subject to higher-priority instructions and user authorization.
 - On overload, noncritical intermediate events may be merged or dropped, but approvals, errors, Item completion and Turn completion must never be silently dropped.
 - Platform API timeouts, rate limits or failures must not block App Server Reader.
 - Background tasks need a clear owner, cancellation path, bounded retries and a shutdown wait limit.
+- Register stop handling before the first potentially blocking resource acquisition. Stop during construction, startup or reload must prevent later readiness publication and new work. Internal fatal failures enter the same idempotent close path as external stop; withdraw readiness, close owned listeners/IPC and attempt remaining cleanup even if one resource fails, within the overall shutdown budget.
+- Keep Worker initialization, ordinary request and shutdown budgets distinct. Platform initialization costs may justify a bounded initialization allowance, not a blanket increase to every request or cleanup timeout.
 - Additional input for the next Turn uses the current Thread's App Server Queue. Gateway must not store a second message-body queue.
   Add, list, update, delete, reorder and start through the controlled Queue port; explain App Server persistence semantics when enqueueing.
 - Bind approval state to Thread, the protocol-provided Turn and request identifier. MCP elicitation may use `turnId: null` when no active Turn can be associated,
@@ -132,6 +134,27 @@ and remain subject to higher-priority instructions and user authorization.
   `proposedNetworkPolicyAmendments` and `applyNetworkPolicyAmendment` match exactly and every rule host equals `networkApprovalContext.host`; otherwise fail closed.
   Network session authorization must show its target host. Return only one explicitly selected rule unchanged at a time. Gateway must not merge, infer or broaden network rules.
 
+## Cross-Platform Changes
+
+- Treat changes to shared Runtime, configuration, Provider management, bootstrap, delivery and lifecycle contracts as affecting Windows, macOS and Linux until the call chain establishes a narrower scope. A Windows incident or branch name does not make shared code Windows-only. Document existing public support limits separately from implementation coverage.
+- Before editing, identify the affected entry point, shared contract, OS adapter, resource owner and failure/cleanup path. Keep OS detection, executable resolution, ACLs, native helpers and service-manager commands in their existing Runtime or installation boundaries; do not spread them into Core or Surface business logic. A platform adapter must preserve the same success, failure, cancellation and ownership semantics.
+- A client owns its connection and any Proxy it launches, not the shared App Server. Closing Gateway, a Transport or a temporary configuration client must not terminate an independently supervised App Server. A component may terminate only children it owns, through the injected process-lifecycle capability; retain ownership when cleanup is unconfirmed, and do not reconnect or cancel by forgetting the old process.
+- Review shutdown as a nested chain: application cleanup, child-service wait, wrapper cleanup, service-manager deadline and final state confirmation. Derive shared deadlines from `runtime/shutdown-budget.mjs`; check foreground entry points and all four service templates on both Unix managers when changing them. Windows parent-child IPC and Job ownership are not substitutes for Unix signal forwarding and process-group ownership. A timeout or task-manager state alone does not prove successful cleanup.
+- Provider authentication and configuration transactions are shared behavior. Ordinary switching/restoration must preserve existing `env_key`, `requires_openai_auth` and supported Provider fields. Preview, execution, backup restoration and startup must agree on supported authentication; reject unsupported inputs before writes. Missing declared credentials must not fall back to another auth mode. Keep immutable credential versions, origin binding and uncertain-write recovery intact; Relay must still require its documented independent API credentials. See [Provider integration](provider-integration-guide.md).
+- Preserve platform-specific security guarantees: Unix owner/mode, socket and rendezvous validation; Windows ACL, reparse-point and owned-process guarantees. Do not replace one platform's checks with a successful check on another. Credential isolation must remove the original variable name with the OS's case semantics, preserve user shell filtering rules and keep secrets out of arguments. Tool-shell filtering does not isolate same-user processes or upstream hooks.
+- Updating program files, rendering service definitions, loading definitions and restarting processes are distinct operations. When templates, paths or runtime artifacts change, inspect fresh installation and existing-installation activation/recovery. State explicitly whether `codexc install` is required and how WebUI/Relay state is handled; do not imply an ordinary restart rewrites definitions. Keep deployable instructions in [source installation](source-install.md) and [user guide](user-guide.md), not only module READMEs.
+
+Use the affected rows below to select observations, not as a requirement to run unrelated paths or create tests:
+
+| Changed boundary | Shared behavior to inspect | Platform-specific evidence |
+| --- | --- | --- |
+| Transport / process / IPC | Connect, close during startup, repeated close, cancellation, failed cleanup and ownership of surviving resources | Windows Proxy/helper/Job and IPC; macOS/Linux UDS, signals and owned process groups |
+| Provider / private files | Preview → write → backup/restore → runtime consumption; missing/ambiguous credentials, origin mismatch and rejected inputs without mutation | Windows ACL and environment-name case handling; Unix owner/mode and symlink handling |
+| Service / install / packaging | Fresh definitions, replacement of installed definitions, nested stop budgets, activation failure and preserved service state | Windows tasks/native artifacts; macOS launchd; Linux systemd; pinned CI Node/npm for installation changes |
+| Shared bootstrap / delivery | Reload/stop ordering, in-flight work, persistence ownership and error propagation | Inspect callers on all three OSes even if the shared algorithm has no OS branch |
+
+Follow [Verification](#verification) and the standing evidence rules: do not add or repair tests or guard scripts. Reuse unchanged observations. Report static checks, generated-artifact inspection and actual user-path observations separately for each affected platform. If a target OS or service is unavailable, complete the authorized work and identify the exact unobserved behavior; Windows success, rendered plist/unit files and green CI must not be described as macOS/Linux service verification. No part of this review authorizes deployment, broader access or service restarts.
+
 ## Security
 
 - External users may select only preconfigured Workspaces, never arbitrary absolute working directories.
@@ -140,10 +163,12 @@ and remain subject to higher-priority instructions and user authorization.
   Current CLI rendezvous links may target only the official deterministic destination. Shared Runtime must validate link ownership, canonical path hashes,
   protected directories, and the real socket's type, permissions and owner. Transport and service supervision must not independently relax checks or follow arbitrary links.
 - Unauthenticated App Server must not listen on non-loopback network addresses.
+- Private shared roots belong to the composition layer; consumers validate their actual child directories before enabling staging or uploads. Existing directories require the same type, link, ownership and platform-private-access checks as newly created ones. `mkdir`, `EEXIST` or POSIX mode alone is not proof of privacy on all platforms; use the shared Runtime protection capability.
 - Do not automatically approve commands, file writes, additional filesystem permissions or network permissions by default.
 - Configuration errors must fail closed, never fall back to broader permissions, directories or network defaults.
 - Logs, exceptions and platform messages must not contain Tokens, Cookies, Authorization Headers, sensitive forms or unconstrained upstream responses.
 - External user messages may expose only explicitly designated structured errors; never send unknown internal exceptions verbatim.
+- Across Worker/process boundaries, preserve only defined nonsensitive failure classifications (phase, reason and operation). Do not expose unknown exceptions or erase all actionable context into one generic error; the lifecycle owner decides whether a component degrades or the process stops.
 
 ## Commands and Permission Escalation
 

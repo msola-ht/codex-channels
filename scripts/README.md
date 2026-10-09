@@ -2,6 +2,8 @@
 
 本目录保存 npm CLI 和开发流程调用的 Node.js、Shell 脚本。脚本处理本机配置、构建、协议生成和服务管理，不承载 Gateway 的会话业务逻辑。
 
+涉及 Provider、进程控制或服务安装时遵循[跨平台变更规则](../docs/development-rules.md#cross-platform-changes)。CLI、Setup、WebUI 必须复用同一管理计划与执行合同，平台控制脚本只处理服务管理器差异；预览通过不能代替执行前状态校验，写入成功不能代替运行时可消费或服务就绪。模板变化须同步核对全新安装、既有定义重装、失败恢复及 WebUI/Relay 状态，不能只验证当前主机平台。
+
 ## 配置与 Workspace
 
 - `managed-provider-account-prompt.mjs` / `managed-provider-account-prompt.d.mts`：多账户添加共用预设与自定义 ID 交互。
@@ -452,6 +454,7 @@
 - `webui-i18n.mjs`：静态读取 WebUI 中英文文案字典，检查键与占位符，并按 Git 基线输出包含术语表的增量翻译任务 JSON；不执行字典代码、不调用翻译服务、不写回译文。
 - `verification-scope.mjs`：读取本地提交或指定 Git 基线的改动文件，供检查入口选择静态检查范围。
 - `verify-commit.mjs`：本地 `verify:commit` 按改动范围执行必要静态检查与构建，`verify:ci` 执行完整静态检查与构建。
+  macOS 枚举四类 launchd 模板，替换共享停止预算的整数占位符后通过标准输入交给 `plutil`；预算、服务清单或模板渲染入口变化也触发此检查。模板检查不代替安装和服务运行观察。
   输出选中范围、每个阶段及全部检查的累计耗时。类型检查使用 TypeScript 原生增量缓存，覆盖源码及其依赖；
   缓存位于 `node_modules/.cache/codexc/check.tsbuildinfo`，可删除后重建，不缓存后续版本和边界检查。
   需要构建产物时，在完整类型检查成功后才清理并构建 Gateway，使用 `--noCheck` 避免重复类型分析；

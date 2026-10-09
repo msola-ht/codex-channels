@@ -2,6 +2,8 @@
 
 本目录封装 Codex App Server Transport、JSON-RPC 会话和类型化 API，是 Gateway 访问 App Server 的唯一底层入口。
 
+遵循[跨平台变更规则](../../docs/development-rules.md#cross-platform-changes)：Unix UDS 与 Windows 官方 Proxy 是同一本机 App Server 合同的适配方式，不能各自放宽认证、消息边界或生命周期语义。Transport 只拥有本次连接及显式创建的子进程；关闭、连接中取消和回收失败都不得扩大为终止共享 App Server。修改共享 Transport 接口时同时核对 UDS、Proxy、stdio 的调用与关闭路径，具体进程及文件保护由注入的 Runtime 能力承担。
+
 ## 文件
 
 - `app-server-transport.ts`：用平台无关的本机 App Server 端点描述选择 Transport；Unix 保留原生

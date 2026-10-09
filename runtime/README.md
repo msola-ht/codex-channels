@@ -2,6 +2,21 @@
 
 本目录保存 npm CLI 与已编译 Gateway 必须直接共享的稳定 JavaScript 模块，不承载会话业务。
 
+## 跨平台边界
+
+修改本目录的共享接口前，按[跨平台变更规则](../docs/development-rules.md#cross-platform-changes)追踪三平台调用方；文件位于 `runtime/` 或调用方最先在 Windows 报错，都不能据此缩小影响范围。
+
+| 责任 | 共享合同 | 平台实现边界 |
+| --- | --- | --- |
+| 进程与 Transport | 调用方持有并回收自己创建的进程；关闭连接不停止共享 App Server；失败保留归属 | `owned-process`、`process-lifecycle` 处理 Windows Job/IPC 与 Unix 信号、已登记进程组；Codex Client 只消费注入端口 |
+| 私有路径 | 在实际使用边界检查受信任路径及文件，不以宽松回退绕过错误 | `private-file`、Socket 运行时分别落实 Unix 所有者/权限/rendezvous 与 Windows ACL/重解析点/目录句柄 |
+| Provider 与凭据 | 配置预览、事务、备份恢复、启动使用同一认证约束；普通切换保留配置语义 | OS 差异限于文件保护和环境变量处理，不能因 Windows 凭据修复改变三平台认证方式；Relay 保持独立凭据边界 |
+| 生命周期 | bootstrap、监管器和服务宿主各自关闭所拥有资源，取消和超时不冒充完成 | `shutdown-budget` 提供共享预算，由前台包装层、Windows 宿主及 Unix 服务模板消费；安装脚本负责定义激活 |
+
+本表划分责任，不扩大平台支持承诺。模块接口变化须核对 `.d.mts`、公开导出和实际调用方；具体启动方式及升级步骤见[用户指南](../docs/user-guide.md)与[源码安装](../docs/source-install.md)。
+
+## 文件
+
 - `request-timing.mjs` / `request-timing.d.mts`：指标 IPC、存储、CLI 与 WebUI 共用的生成区间校验和观测速度计算；无 I/O、不依赖调试转储。
 - `auto-review-metadata.mjs` / `auto-review-metadata.d.mts`：Provider 指标与转储读取共用的自动审查来源、父任务及原始审查身份投影；只接受明确的 `guardian_review` 来源和有界标识，不读取文件或推断缺失归属。
 - `auto-review-provider-policy.mjs` / `auto-review-provider-policy.d.mts`：按已验证的 Provider 模型目录来源统一判定自动审查准入；只允许官方 OpenAI 和复用官方模型目录的自定义 Provider，供设置入口与会话执行门禁共用，不根据模型名称或认证方式推断支持。严格读取用于执行门禁；管理设置投影将读取失败标记为不可用及安全原因，只限制开启，不阻断其他设置或关闭、清除覆盖。
@@ -96,7 +111,7 @@
   管理 `sf-custom-<id>` 私有 Profile；按 Provider 类型校验官方或独立 Responses 模型目录，并严格限制为单个目标 Provider
   块和直接 API Key 字段。注册表与 Profile 的增删改共用私有文件锁并支持执行前快照保护，
   Provider 块与 Key 不进入主配置。
-  固定模式使用不可变的当前用户私有凭据版本，主配置只引用独立 `env_key`；提供凭据读取、创建及显式删除端口，
+  Gateway 新增或替换的固定 Key 使用不可变的当前用户私有凭据版本，主配置只引用独立 `env_key`；普通切换保留既有环境变量引用、OAuth 或无认证语义。提供私有凭据读取、创建及显式删除端口，
   校验 Provider、Origin、版本与文件私有性，拒绝旧主配置明文凭据启动。配置写入结果未知时保留新旧凭据供实际引用选择。
   `assertCustomPrimaryProviderAuthentication` 由切换计划和运行时共同消费，在切换写入前拒绝不支持的认证字段。
 - `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的

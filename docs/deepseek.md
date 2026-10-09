@@ -36,7 +36,7 @@ codexc restart all                 # 应用配置变化
 | `~/.codex-connect/providers/deepseek/models.manifest.json` | 目录来源和更新时间 |
 
 切换模式保留 OpenAI 主配置，每个账户使用独立私有 Profile；固定模式在确认后修改 Codex
-主配置，同一时刻只能有一个固定主 Provider。切换账户 Key 保存在 0600 私有 Profile，固定账户使用独立私有版本与主配置 `env_key` 引用，仅进入目标
+主配置，同一时刻只能有一个固定主 Provider。切换账户 Key 保存在私有 Profile（Unix `0600`，Windows 私有 ACL），固定账户使用独立私有版本与主配置 `env_key` 引用，仅进入目标
 App Server 子进程，不进入账户注册表、命令行或日志。
 固定凭据重配、旧配置失败恢复与原生终端边界见[Provider 凭据安全说明](provider-integration-guide.md#4-安全边界)。
 

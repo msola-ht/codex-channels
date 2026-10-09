@@ -9,7 +9,7 @@
   PowerShell 语法检查。Windows Job 不运行 Unix 专属服务检查。Branch Protection 要求 PR 的当前
   merge ref 通过全部门禁并禁止直接写入 `main`，因此 push 不再重复运行同一检查。检查覆盖提交
   差异、类型和版本、生产 Lint、文档链接和索引、Shell
-  及平台模板检查；WebUI 字典检查通过 `npm run i18n:check` 校验键与占位符。
+  及平台模板检查；macOS 通过现有验证入口枚举四类 launchd 模板，替换共享停止预算的整数占位符后交给 `plutil` 校验，不直接将未渲染的整数占位符当作 plist 值。此检查不注册或启动服务。WebUI 字典检查通过 `npm run i18n:check` 校验键与占位符。
   CI 只校验已有字典，不生成翻译报告、调用翻译服务或自动写回译文；差异报告可在本地按需运行 `npm run i18n:report`。
   类型检查使用 TypeScript 原生增量缓存跟踪源码及其依赖，版本与边界检查每次执行；完整类型检查通过后，
   Gateway 清理旧产物并以 `--noCheck` 构建，避免重复类型分析。独立 `npm run build` 仍执行完整类型检查。
