@@ -421,6 +421,7 @@ function renderWindowsDefinition(service, identifier, context, projectDir) {
     CODEX_CONNECT_CONFIG_FILE: context.runtime.configPath,
     PATH: [context.executablePath, dirname(context.pwshBinary)].join(delimiter),
     CODEX_BINARY: context.codexBinary,
+    ...(context.codexHome ? { CODEX_HOME: context.codexHome } : {}),
     ...(service.target === "app-server"
       ? { CODEX_CONNECT_SERVICE_ROLE: "app-server" }
       : {}),

@@ -31,6 +31,10 @@ Windows 沙箱的 [`apply_read_acls` 调用](https://github.com/openai/codex/blo
 因此共享主配置只校验所有权和写入完整性，不能把只读继承直接判成凭据泄漏；该检查也不证明内容机密性。独立 Provider Profile、备份及 Gateway 私有文件仍执行严格私有校验。不得按 `CodexSandboxUsers` 组名全局放行，也不接管上游沙箱账户与凭据管理。
 固定模式自定义 Provider 的 API Key 使用独立私有版本文件，主配置只保存 `env_key`；既有明文配置须经用户显式编辑转换，不能以共享 ACL 检查通过证明密钥安全。Windows 原生目录句柄与 Job 归属分别参考固定版 `windows-sandbox-rs/src/no_reparse_dir.rs`、`utils/pty/src/win/job.rs`；本项目只借鉴语义，不运行或导入上游源码。
 
+`CODEX_HOME` 的解析遵循同一固定提交的 `codex-rs/utils/home-dir/src/lib.rs`：显式路径必须存在且为目录，并规范化；未设置时使用默认路径且不要求预先存在。Windows 服务安装将显式路径保存在服务环境中，防止计划任务与安装终端使用不同目录。
+
+Windows 构建方式参考锁定 Codex 的 `codex-cli/bin/codex.js`：按平台加载预构建程序，系统调用实现位于编译后的 Rust 模块。项目沿用构建阶段生成原生产物、运行时只加载的原则，使用现有 PowerShell 7 编译本项目 C# DLL，不导入上游二进制内部接口。Job 约束仍对照 `codex-rs/utils/pty/src/win/procthreadattr.rs` 的原子 Job 绑定；构建方式调整不放宽进程或目录权限。
+
 ## 模型转发实现参考
 
 经用户授权保留 `upstream/CLIProxyAPI`，来源为 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)，

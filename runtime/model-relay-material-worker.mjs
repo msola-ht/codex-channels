@@ -5,9 +5,18 @@ import { parseGatewayConfig, validateGatewayConfigDocument, validateDebugConfigD
 import { modelRelayConfigSchema, modelRelayConfigDigest } from "./model-relay-config.mjs";
 import { loadConfiguredRelayProviderMaterial, listRelayProviderIds } from "./model-provider-runtime.mjs";
 import { readCodexProxySnapshot } from "./codex-proxy-env.mjs";
+import { withWindowsAclDeadline } from "./windows-acl-bridge.mjs";
 
 if (!parentPort) throw new Error("Internal Relay worker requires a parent");
-parentPort.on("message", () => {
+parentPort.on("message", request => {
+  try {
+    withWindowsAclDeadline(request?.deadline, readMaterials);
+  } catch {
+    parentPort.postMessage({ ok: false });
+  }
+});
+
+function readMaterials() {
   // An atomic save may overlap a read. Discard that snapshot and reread once;
   // malformed/private-file failures still fail closed immediately. Reader deadlines apply.
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -38,4 +47,4 @@ parentPort.on("message", () => {
     } catch { break; }
   }
   parentPort.postMessage({ ok: false });
-});
+}

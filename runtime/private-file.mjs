@@ -326,6 +326,9 @@ function assertWindowsPrivatePathSync(path, kind, operation = "verify", addition
 
 function windowsPrivatePathProcessError(error, status, stdout, path, kind, operation) {
   const context = `（${operation}/${kind}；路径=${JSON.stringify(path).slice(0, 320)}）`;
+  if (error?.code === "ERR_WINDOWS_NATIVE_LOAD") {
+    return new WindowsPrivatePathError("Windows 原生组件无法加载，尚未检查文件 ACL；请在当前 PowerShell 7 环境重新运行 npm run install:global；源码开发请运行 npm run build。");
+  }
   let response;
   try { response = JSON.parse(stdout); } catch { /* Process startup or script parsing may produce no JSON. */ }
   const reasons = new Set([

@@ -1,6 +1,7 @@
 export interface ServiceInstallContext {
   cliEntry: string;
   codexBinary: string;
+  codexHome?: string;
   executablePath: string;
   nodeBinary: string;
   packageDir: string;

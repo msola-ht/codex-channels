@@ -9,7 +9,7 @@ $definition = Get-Content -LiteralPath $DefinitionPath -Raw -Encoding utf8 | Con
 Set-Location -LiteralPath $definition.workingDirectory
 $maximumRestarts = 3
 $restartDelaySeconds = 5
-Add-Type -Path (Join-Path $PSScriptRoot '..\runtime\windows-native.cs')
+. (Join-Path $PSScriptRoot '../runtime/windows-native-load.ps1')
 
 for ($attempt = 0; $attempt -le $maximumRestarts; $attempt += 1) {
   $exitCode = [CodexcWindows.OwnedProcess]::Run($definition.nodeBinary,

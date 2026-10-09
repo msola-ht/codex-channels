@@ -8,12 +8,23 @@ let worker;
 let nextId = 0;
 const pending = new Set();
 const readyWorkers = new WeakSet();
+let operationDeadline;
+
+/** Bound synchronous ACL work by its owning operation's absolute deadline. */
+export function withWindowsAclDeadline(deadline, operation) {
+  if (!Number.isFinite(deadline) || deadline <= Date.now()) throw fail("ETIMEDOUT");
+  const previous = operationDeadline;
+  operationDeadline = previous === undefined ? deadline : Math.min(previous, deadline);
+  try { return operation(); }
+  finally { operationDeadline = previous; }
+}
 
 function fail(code) {
   return Object.assign(new Error("Windows ACL helper failed"), { code });
 }
 
 function request(invocation, input, maximumBytes) {
+  if (operationDeadline !== undefined && operationDeadline <= Date.now()) throw fail("ETIMEDOUT");
   if (pending.size >= maximumPending) throw fail("EBUSY");
   if (!worker) {
     const instance = new Worker(new URL(import.meta.url), {
@@ -32,7 +43,8 @@ function request(invocation, input, maximumBytes) {
   }
   const state = new Int32Array(new SharedArrayBuffer(8));
   const output = new Uint8Array(new SharedArrayBuffer(maximumBytes));
-  const budget = readyWorkers.has(worker) ? timeoutMs : startupTimeoutMs;
+  const maximumBudget = readyWorkers.has(worker) ? timeoutMs : startupTimeoutMs;
+  const budget = operationDeadline === undefined ? maximumBudget : Math.max(0, Math.min(maximumBudget, operationDeadline - Date.now()));
   const entry = { id: ++nextId, state, output, worker, asynchronous: false, budget };
   pending.add(entry);
   worker.postMessage({ id: entry.id, input, state, output, deadline: Date.now() + budget });
@@ -47,7 +59,7 @@ function finish(entry, waitResult) {
     // Do not reuse a helper whose request may still be in flight.
     entry.worker.postMessage({ stop: true });
     if (worker === entry.worker) worker = undefined;
-    throw fail(waitResult === "timed-out" || status === -2 ? "ETIMEDOUT" : status === -3 ? "ENOBUFS" : "EIO");
+    throw fail(waitResult === "timed-out" || status === -2 ? "ETIMEDOUT" : status === -3 ? "ENOBUFS" : status === -5 ? "ERR_WINDOWS_NATIVE_LOAD" : "EIO");
   }
   const length = Atomics.load(entry.state, 1);
   if (length < 0 || length > entry.output.length) throw fail("ENOBUFS");
@@ -126,8 +138,10 @@ if (workerData?.windowsAclBridge === true) {
     child.stdin.write(`${JSON.stringify(current.input)}\n`);
   };
   child.on("error", () => stop(-1));
-  child.on("exit", () => stop(-1));
-  child.stdin.on("error", () => stop(-1));
+  // Wait for closed streams so an early stdin EPIPE cannot mask the reserved
+  // native-loader failure code. Other failures still use bounded request time.
+  child.on("close", (code) => stop(code === 78 ? -5 : -1));
+  child.stdin.on("error", (error) => { if (error.code !== "EPIPE") stop(-1); });
   child.stdout.on("data", (chunk) => {
     if (!current || stopped) { stop(-1); return; }
     length += chunk.length;

@@ -6,7 +6,13 @@ $ErrorActionPreference = 'Stop'
 # Windows console code page, which can corrupt paths or localized ACL reasons.
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-Add-Type -Path (Join-Path $PSScriptRoot 'windows-native.cs')
+try {
+  . (Join-Path $PSScriptRoot 'windows-native-load.ps1')
+} catch {
+  # Reserved bridge exit code: classify a build/host failure without exposing
+  # an exception, a path, or any request contents over stderr.
+  exit 78
+}
 
 function Throw-InvalidAcl([string]$Message) {
   $aclError = [System.InvalidOperationException]::new($Message)

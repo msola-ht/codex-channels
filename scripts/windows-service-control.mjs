@@ -179,15 +179,27 @@ async function startDefinitions(target, definitionsDirectory, environment, selec
   const selected = serviceControlDefinitions("windows", target, selection, environment, definitionsDirectory);
   for (const [index, service] of selected.entries()) {
     try {
-      const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
+      const file = definitionPath(definitionsDirectory, service.target);
+      const definition = readDefinition(file);
       const host = await inspectHost(definition.controlPath);
       if (host?.version === 1 && host.running === true) {
         if (service.target === "app-server") await waitForAppServer(definition.socketPath, { ...environment, ...definition.environment });
         continue;
       }
       // The primitive checks the exact task's live state before starting it.
-      runTaskPrimitive("start", service.windows, environment, undefined, definition.pwshBinary);
-      await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
+      runTaskPrimitive("start", service.windows, environment, file, definition.pwshBinary);
+      try {
+        await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
+      } catch (error) {
+        let taskDetail = "计划任务状态读取失败";
+        try {
+          const task = queryTasks([service.windows], environment).get(service.windows);
+          taskDetail = task.exists
+            ? `当前计划任务状态=${task.state}；最近一次任务结果=${task.lastTaskResult}（不保证属于本次启动）`
+            : "当前计划任务不存在";
+        } catch { /* Preserve the host failure when the diagnostic read fails. */ }
+        throw new Error(`${error.message}；${taskDetail}；请检查 codexc logs`, { cause: error });
+      }
       if (service.target === "app-server") {
         await waitForAppServer(definition.socketPath, { ...environment, ...definition.environment });
       }
@@ -248,8 +260,9 @@ async function waitForAppServer(socketPath, environment) {
 
 async function stopDefinition(service, definitionsDirectory, environment) {
   const file = definitionPath(definitionsDirectory, service.target);
+  let definition;
   if (existsSync(file)) {
-    const definition = readDefinition(file);
+    definition = readDefinition(file);
     try {
       const host = await inspectHost(definition.controlPath);
       if (host?.version === 1) {
@@ -260,16 +273,9 @@ async function stopDefinition(service, definitionsDirectory, environment) {
       // An unavailable host is not proof of exit. Stop the exact scheduled owner.
     }
   }
+  // The primitive stops and confirms the exact task using one scheduler connection.
   runTaskPrimitive("stop", service.windows, environment);
-  const deadline = Date.now() + hostStopTimeoutMs;
-  while (true) {
-    const task = queryTasks([service.windows], environment).get(service.windows);
-    if (!task.exists || task.state === "Ready" || task.state === "Disabled") break;
-    if (Date.now() >= deadline) throw new Error(`计划任务启动器尚未确认停止：${service.windows}`);
-    await new Promise(resolveWait => setTimeout(resolveWait, 250));
-  }
-  if (existsSync(file)) {
-    const definition = readDefinition(file);
+  if (definition) {
     await waitForHost(definition.controlPath, false, hostStopTimeoutMs);
   }
 }
@@ -311,7 +317,8 @@ function runTaskPrimitive(action, taskName, environment, definition, preferredPw
     encoding: "utf8",
     env: environment,
     windowsHide: true,
-    timeout: action === "query" ? 5_000 : 15_000,
+    // Stop has a 20s confirmation budget plus 5s for PowerShell/COM startup.
+    timeout: action === "query" ? 5_000 : action === "stop" ? hostStopTimeoutMs + 5_000 : 15_000,
   });
   if (result.error?.code === "ETIMEDOUT") {
     let observed = "无法确认当前状态";

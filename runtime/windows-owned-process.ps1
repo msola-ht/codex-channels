@@ -1,11 +1,14 @@
 param([Parameter(Mandatory = $true)][string]$Invocation)
 $ErrorActionPreference = 'Stop'
 $guard = $null
+$stage = 'load'
 try {
-  Add-Type -Path (Join-Path $PSScriptRoot 'windows-native.cs')
+  . (Join-Path $PSScriptRoot 'windows-native-load.ps1')
+  $stage = 'invocation'
   $request = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Invocation)) | ConvertFrom-Json
   if (-not [IO.Path]::IsPathFullyQualified($request.file) -or $request.args -isnot [array]) { throw 'Invalid invocation' }
   if ($request.socketPath) {
+    $stage = 'socket-directory'
     $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($request.socketPath))
     $guard = [CodexcWindows.DirectoryGuard]::new($parent)
     $acl = Get-Acl -LiteralPath $parent
@@ -19,11 +22,22 @@ try {
         $rule.InheritanceFlags -ne ([Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit) -or
         $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None) { throw 'Invalid socket ACL' }
   }
+  $stage = 'process'
   $code = [CodexcWindows.OwnedProcess]::Run($request.file, [string[]]$request.args, [bool]$request.windowsVerbatimArguments, (Get-Location).ProviderPath)
   exit $code
 } catch {
   # Do not print invocation arguments, environment or raw exceptions.
-  [Console]::Error.WriteLine('Windows owned process failed: startup, private endpoint validation or job cleanup failed')
+  $failure = $_.Exception
+  $nativeCode = $null
+  while ($null -ne $failure) {
+    if ($failure -is [ComponentModel.Win32Exception]) { $nativeCode = $failure.NativeErrorCode }
+    $failure = $failure.InnerException
+  }
+  $detail = if ($null -ne $nativeCode) { "; win32=$nativeCode" } else { '' }
+  [Console]::Error.WriteLine("Windows owned process failed: stage=$stage$detail")
+  if ($stage -eq 'load') {
+    [Console]::Error.WriteLine('请在当前 PowerShell 7 环境重新运行 npm run install:global；源码开发请运行 npm run build。')
+  }
   exit 1
 } finally {
   if ($null -ne $guard) { $guard.Dispose() }

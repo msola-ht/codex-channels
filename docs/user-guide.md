@@ -476,6 +476,10 @@ codexc logs -n 200
 `codexc install` 生成服务定义并启动核心服务；`codexc uninstall --services` 仅停止并卸载后台服务，
 `codexc uninstall` 卸载整个受管程序，两者都保留用户数据。`codexc reload` 只通知 Gateway 重读配置。
 
+Windows 安装时若显式设置了 `CODEX_HOME`，该路径必须是已存在的目录，安装器会将规范化后的路径写入四个服务定义。更换目录后需要在设置了新值的终端重新运行 `codexc install`；已有定义不会被后台自动改写，安装失败沿用既有定义备份和恢复流程。
+
+Windows 启动前会检查服务定义所用的 PowerShell、原生构建产物、Node、CLI 入口及工作目录。缺失或不匹配时先返回修复提示，不启动任务；服务进程启动后的故障仍可能在宿主等待超时后报告。此时显示的“最近一次任务结果”不保证来自本次启动，请结合 `codexc logs` 判断。
+
 `codexc restart [gateway|appserver|webui|relay|all]` 是唯一重启入口，默认 `all`。
 单独指定目标时要求该后台服务已安装；`appserver` 包含受监管的 Provider 实例。
 全部重启要求 Gateway 与 App Server 已安装，未安装的 WebUI、Relay 明确提示跳过；

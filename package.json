@@ -210,6 +210,7 @@
   "scripts": {
     "prebuild": "node scripts/clean-dist.mjs",
     "build": "tsc -p tsconfig.build.json",
+    "postbuild": "node scripts/build-windows-native.mjs",
     "prepare": "node scripts/prepare-package.mjs",
     "install:global": "node scripts/install-global-source.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
