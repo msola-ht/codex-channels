@@ -27,8 +27,9 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 ## Windows 主配置与沙箱权限
 
 固定 Codex 0.160.1 的 [`write_atomically`](https://github.com/openai/codex/blob/d27764b82f7118f674371e6d6e76271d9d606edb/codex-rs/utils/path-utils/src/lib.rs#L144) 在父目录创建临时文件后替换目标，不复制旧文件 ACL。
-Windows 沙箱的 [`apply_read_acls`](https://github.com/openai/codex/blob/d27764b82f7118f674371e6d6e76271d9d606edb/codex-rs/windows-sandbox-rs/src/setup_provisioning.rs#L653) 配置可继承的读取与执行权限，Codex Home 不在默认敏感目录排除列表中。
+Windows 沙箱的 [`apply_read_acls` 调用](https://github.com/openai/codex/blob/d27764b82f7118f674371e6d6e76271d9d606edb/codex-rs/windows-sandbox-rs/src/setup_provisioning.rs#L677) 配置可继承的读取与执行权限，Codex Home 不在默认敏感目录排除列表中。
 因此共享主配置只校验所有权和写入完整性，不能把只读继承直接判成凭据泄漏；该检查也不证明内容机密性。独立 Provider Profile、备份及 Gateway 私有文件仍执行严格私有校验。不得按 `CodexSandboxUsers` 组名全局放行，也不接管上游沙箱账户与凭据管理。
+固定模式自定义 Provider 的 API Key 使用独立私有版本文件，主配置只保存 `env_key`；既有明文配置须经用户显式编辑转换，不能以共享 ACL 检查通过证明密钥安全。Windows 原生目录句柄与 Job 归属分别参考固定版 `windows-sandbox-rs/src/no_reparse_dir.rs`、`utils/pty/src/win/job.rs`；本项目只借鉴语义，不运行或导入上游源码。
 
 ## 模型转发实现参考
 

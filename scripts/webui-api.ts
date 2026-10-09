@@ -750,7 +750,7 @@ export interface ManagementProviderSettingsPreview {
   credential?: {
     action?: "preserve" | "replace"
     storedAsPlaintext?: true
-    destination?: "private-profile" | "main-config"
+    destination?: "private-profile" | "private-credential"
   }
 }
 

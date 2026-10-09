@@ -2,10 +2,12 @@ import { spawn } from "node:child_process";
 import { Worker, parentPort, workerData } from "node:worker_threads";
 
 const timeoutMs = 2_000;
+const startupTimeoutMs = 5_000;
 const maximumPending = 16;
 let worker;
 let nextId = 0;
 const pending = new Set();
+const readyWorkers = new WeakSet();
 
 function fail(code) {
   return Object.assign(new Error("Windows ACL helper failed"), { code });
@@ -30,9 +32,10 @@ function request(invocation, input, maximumBytes) {
   }
   const state = new Int32Array(new SharedArrayBuffer(8));
   const output = new Uint8Array(new SharedArrayBuffer(maximumBytes));
-  const entry = { id: ++nextId, state, output, worker, asynchronous: false };
+  const budget = readyWorkers.has(worker) ? timeoutMs : startupTimeoutMs;
+  const entry = { id: ++nextId, state, output, worker, asynchronous: false, budget };
   pending.add(entry);
-  worker.postMessage({ id: entry.id, input, state, output, deadline: Date.now() + timeoutMs });
+  worker.postMessage({ id: entry.id, input, state, output, deadline: Date.now() + budget });
   return entry;
 }
 
@@ -48,13 +51,14 @@ function finish(entry, waitResult) {
   }
   const length = Atomics.load(entry.state, 1);
   if (length < 0 || length > entry.output.length) throw fail("ENOBUFS");
+  readyWorkers.add(entry.worker);
   return Buffer.from(entry.output.subarray(0, length)).toString("utf8");
 }
 
 /** Reuse a process, never an ACL verdict. Every request inspects the current path. */
 export function invokeWindowsAclSync(invocation, input, maximumBytes) {
   const entry = request(invocation, input, maximumBytes);
-  return finish(entry, Atomics.wait(entry.state, 0, 0, timeoutMs + 100));
+  return finish(entry, Atomics.wait(entry.state, 0, 0, entry.budget + 100));
 }
 
 export async function invokeWindowsAcl(invocation, input, maximumBytes, signal) {
@@ -66,7 +70,7 @@ export async function invokeWindowsAcl(invocation, input, maximumBytes, signal) 
   signal?.addEventListener("abort", cancel, { once: true });
   if (signal?.aborted) cancel();
   try {
-    const waiting = Atomics.waitAsync(entry.state, 0, 0, timeoutMs + 100);
+    const waiting = Atomics.waitAsync(entry.state, 0, 0, entry.budget + 100);
     const result = finish(entry, await waiting.value);
     signal?.throwIfAborted();
     return result;

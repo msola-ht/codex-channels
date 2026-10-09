@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import WebSocket, { WebSocketServer } from "ws";
 
-import { resolveExecutableInvocation } from "./executable.mjs";
+import { codexProcessInvocation } from "./owned-process.mjs";
 import { inspectAppServerUnixSocket } from "./app-server-unix-socket.mjs";
 import {
   acquireAppServerProviderLease,
@@ -87,7 +87,7 @@ export async function startDesktopAppBridge({
       { kind: "local-app-server", socketPath: socketPaths.get(provider) },
       {
         createCodexProcessInvocation: (args) =>
-          resolveExecutableInvocation(codexBinary, args),
+          codexProcessInvocation(codexBinary, args),
         terminateCodexProcess: terminateChildProcess,
       },
     );

@@ -88,7 +88,7 @@ export async function assertConfiguredAppServersStopped(environment, directory) 
   const runtime = resolveAppServerRuntime(document, located.dataDir, environment);
   const supervisor = await inspectAppServerSupervisorState(runtime.primarySocketPath);
   const occupied = await Promise.all(runtime.socketPaths.map((socketPath) =>
-    appServerSocketAcceptsWebSocket(socketPath)));
+    appServerSocketAcceptsWebSocket(socketPath, { ...environment, CODEX_BINARY: document.codex?.binary ?? environment.CODEX_BINARY ?? "codex" })));
   if (supervisor.status !== "missing" || occupied.some(Boolean)) {
     throw new Error("清理转储前必须先停止全部 App Server：codexc stop appserver");
   }

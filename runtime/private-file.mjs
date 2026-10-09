@@ -336,6 +336,7 @@ function windowsPrivatePathProcessError(error, status, stdout, path, kind, opera
     "私有路径缺少受信任 SID 权限", "私有路径仍继承父目录权限",
     "私有路径 ACL 正由其他进程更新，请重试", "Socket 目录必须仅允许当前 SID 访问",
     "私有配置超过读取上限",
+    "私有路径祖先必须为不可替换的本地普通目录",
     "共享 Codex 配置只支持校验、读取和原子替换",
     "权限修复只支持普通文件", "管理员所有文件含拒绝规则，无法定向修复",
     "管理员所有文件缺少当前 SID 完全控制权限，无法定向修复",
@@ -360,7 +361,7 @@ function windowsPrivatePathProcessError(error, status, stdout, path, kind, opera
     return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查输出超过上限${context}`);
   }
   if (error?.code === "ETIMEDOUT" || error?.killed === true) {
-    return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查超过 2 秒，已终止；尚不能判定 ACL 是否有效${context}`);
+    return new WindowsPrivatePathError(`Windows 私有路径 ACL 检查超时，已终止（冷启动最多 5 秒，复用请求最多 2 秒）；尚不能判定 ACL 是否有效${context}`);
   }
   if (error?.code === "EBUSY") {
     return new WindowsPrivatePathError(`Windows ACL 检查请求繁忙，请稍后重试${context}`);

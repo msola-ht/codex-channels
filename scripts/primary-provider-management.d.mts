@@ -37,7 +37,7 @@ export interface PrimaryProviderRemovalTarget {
 }
 
 export interface PrimaryProviderManagementWarning {
-  code: "backup-cleanup-failed";
+  code: "backup-cleanup-failed" | "credential-cleanup-failed";
   providerId: string;
 }
 

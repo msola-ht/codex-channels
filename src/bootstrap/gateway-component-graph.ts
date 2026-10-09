@@ -29,6 +29,7 @@ import {
   executableInvocation,
   resolveExecutable,
 } from "../../runtime/executable.mjs";
+import { codexProcessInvocation } from "../../runtime/owned-process.mjs";
 import {
   loadManagedModelProviderDefinitions,
 } from "../../runtime/model-provider-definitions.mjs";
@@ -291,7 +292,7 @@ export abstract class GatewayComponentGraph {
     }));
     const codexBinary = resolveExecutable(effectiveCodexBinary(config.codexBinary));
     const createCodexProcessInvocation = (args: readonly string[]) =>
-      executableInvocation(codexBinary, args);
+      codexProcessInvocation(codexBinary, args);
     const createTransport = (socketPath: string): CodexTransport =>
       {
         assertAppServerSocketPathSupported(socketPath);

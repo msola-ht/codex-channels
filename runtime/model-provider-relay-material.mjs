@@ -7,7 +7,8 @@ import { loadConfiguredManagedProviderMaterial, loadConfiguredManagedProviderCre
 import { createProviderFileReader } from "./provider-file-access.mjs";
 import { loadCustomSwitchingProviderIds, loadConfiguredCustomSwitchingModelProviders,
   customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath,
-  loadConfiguredCustomPrimaryModelProvider, loadConfiguredCustomPrimaryRelayProfile } from "./model-provider-custom-runtime.mjs";
+  loadConfiguredCustomPrimaryModelProvider, loadConfiguredCustomPrimaryRelayProfile, customPrimaryProviderCredentialPath } from "./model-provider-custom-runtime.mjs";
+import { parse } from "smol-toml";
 import { customOfficialModelCatalogPath } from "./model-provider-official-catalog.mjs";
 import { isResponsesProvider, readResponsesModelCatalog, responsesProviderCatalogPath,
   assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
@@ -48,8 +49,11 @@ function loadBaseRelayProviderMaterial(provider, environment) {
   }
   const catalogPath = isResponsesProvider(provider) ? responsesProviderCatalogPath(environment, provider) : customOfficialModelCatalogPath(environment);
   const configPath = join(codexHomePath(environment), "config.toml");
+  const primaryBlock = switching ? undefined : parse(createProviderFileReader(environment)(configPath)).model_providers?.[provider];
+  const credentialPath = typeof primaryBlock?.env_key === "string" && primaryBlock.env_key.startsWith("CODEX_CONNECT_CUSTOM_") && primaryBlock.env_key.includes("_PRIMARY_")
+    ? customPrimaryProviderCredentialPath(environment, provider, primaryBlock.env_key) : undefined;
   const paths = [...(switching ? [customSwitchingProviderRegistryPath(environment), customPrimaryProviderProfilePath(environment, provider)] : []),
-    configPath, catalogPath];
+    configPath, ...(credentialPath ? [credentialPath] : []), catalogPath];
   const fingerprint = () => {
     const hash = createHash("sha256");
     const read = createProviderFileReader(environment);

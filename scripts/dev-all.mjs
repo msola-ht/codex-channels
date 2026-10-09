@@ -148,6 +148,8 @@ async function ensureAppServerTopology({
   runtime,
   socketPath,
 }) {
+  const document = readGatewayConfig(runtime.configPath);
+  const environment = { ...process.env, CODEX_BINARY: document.codex?.binary ?? process.env.CODEX_BINARY ?? "codex" };
   const topology = appServerRuntime.topology;
   const paths = topology.socketPaths;
   const primaryPath = appServerRuntime.primarySocketPath;
@@ -160,11 +162,11 @@ async function ensureAppServerTopology({
       );
     }
     await ensureAppServerProvider(socketPath, existingSupervisor.primaryProvider);
-    await waitForSocket(undefined, primaryPath, 10_000);
+    await waitForSocket(undefined, primaryPath, 10_000, environment);
     console.log(`检测到现有主 App Server Socket，将直接复用：${primaryPath}`);
     return;
   }
-  const healthy = await Promise.all(paths.map((path) => appServerSocketAcceptsWebSocket(path)));
+  const healthy = await Promise.all(paths.map((path) => appServerSocketAcceptsWebSocket(path, environment)));
   if (healthy.every(Boolean)) {
     throw new Error(
       "现有 App Server 不属于 codexc 统一监管入口；请先停止现有 App Server 后重试",
@@ -191,13 +193,13 @@ async function ensureAppServerTopology({
     },
   );
   appServerSupervisors.push(supervisor);
-  await waitForSocket(supervisor, primaryPath, 10_000);
+  await waitForSocket(supervisor, primaryPath, 10_000, environment);
   console.log("Codex App Server 与模型统计代理已启动。");
 }
 
-async function waitForSocket(child, path, timeoutMs) {
+async function waitForSocket(child, path, timeoutMs, environment) {
   const startedAt = Date.now();
-  while (!(await appServerSocketAcceptsWebSocket(path))) {
+  while (!(await appServerSocketAcceptsWebSocket(path, environment))) {
     if (child && (child.exitCode !== null || child.signalCode !== null)) {
       if (child.exitCode === 0 || child.signalCode !== null) {
         throw new Error(

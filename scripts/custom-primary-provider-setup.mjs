@@ -9,6 +9,7 @@ import {
   listCustomPrimaryProviderCandidates,
   readPrimaryProviderBackup,
   validateCustomPrimaryModelProviderId,
+  readCustomPrimaryProviderApiKey,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   createCodexUserConfigClient,
@@ -135,9 +136,12 @@ export async function runCustomPrimaryProviderSetup({
       : undefined;
   const currentBaseUrl = optionalString(currentProvider?.base_url) ?? "";
   const currentName = optionalString(currentProvider?.name) ?? "";
-  const hasCurrentBearerToken = optionalString(
-    currentProvider?.experimental_bearer_token,
-  ) !== undefined;
+  let currentApiKey;
+  if (fixedProviderId !== undefined) {
+    try { currentApiKey = readCustomPrimaryProviderApiKey(fixedProviderId, currentProvider, environment); }
+    catch { output.write("现有凭据无法安全读取，本次编辑必须显式输入新的 API Key。\n"); }
+  }
+  const hasCurrentBearerToken = currentApiKey !== undefined;
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
   const currentWebsockets = currentProvider?.supports_websockets === true ? "yes" : "no";
 
@@ -345,7 +349,7 @@ export async function runCustomPrimaryProviderSetup({
       ? "API Key（留空保留当前 Key；不回显）"
       : mode === "switching"
         ? `API Key（明文写入 0600 的 ~/.codex/sf-custom-${normalizedId}.config.toml；不回显）`
-        : "API Key（明文写入 0600 的 ~/.codex/config.toml；不回显）",
+        : "API Key（明文写入当前用户私有凭据文件；主配置只保存 env_key 引用；不回显）",
     validate: (value) => String(value).trim() === "" && !canPreserveCurrentBearerToken
       ? "API Key 不能为空"
       : undefined,
@@ -360,7 +364,7 @@ export async function runCustomPrimaryProviderSetup({
 
   const supportsWebsockets = await promptResponsesWebSocket(prompts, {
     baseUrl: normalizedBaseUrl,
-    apiKey: replacementApiKey || optionalString(currentProvider?.experimental_bearer_token),
+    apiKey: replacementApiKey || currentApiKey,
     model: normalizedModel,
     reasoningEffort: custom ? models.find(entry => entry.id === normalizedModel)?.defaultReasoningEffort ?? "none" : "medium",
     environment,
@@ -406,7 +410,7 @@ export async function runCustomPrimaryProviderSetup({
         ]
       : [
           "- 主配置：写入并启用该固定 Provider",
-          "- 认证：API Key 将明文写入 0600 主配置（不回显、不进入命令行和日志）",
+          "- 认证：API Key 将明文写入当前用户私有凭据文件，主配置仅保存 env_key 引用（不回显、不进入命令行和日志）",
         ]),
     ...(custom ? preview.provider.models.map(entry => `- 模型 ${entry.id}：${entry.contextWindow} Token；图片 ${entry.supportsImages ? "支持" : "不支持"}；思考 ${entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`) : []),
     `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,

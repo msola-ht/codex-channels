@@ -473,7 +473,7 @@ if (document) {
 
 async function checkOptionalAppServer(label, socketPath, codexBinary, recordCheck) {
   const available = process.platform === "win32"
-    ? await appServerSocketAcceptsWebSocket(socketPath)
+    ? await appServerSocketAcceptsWebSocket(socketPath, { ...process.env, CODEX_BINARY: codexBinary })
     : existsSync(socketPath);
   if (!available) {
     recordCheck(label, true, "已配置；首次选择该 Provider 或恢复其会话时按需启动");

@@ -16,6 +16,7 @@ import {
 } from "../runtime/app-server-supervisor.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { childProcessIsRunning, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
+import { ownedProcessInvocation } from "../runtime/owned-process.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir } from "./package-path.mjs";
@@ -234,12 +235,13 @@ const runServiceCommand = async (command, args, options) => {
 };
 
 function runWindowsServiceStatusCommand(command, args, options) {
-  // Allow the 5s task query, up to four 2.1s ACL reads, concurrent 2s host
-  // requests and the optional relay config read to finish before the outer cap.
-  const timeoutMs = 20_000;
+  // Include the Job host and cold ACL helper, task query, subsequent ACL reads,
+  // host requests and optional relay config read before the outer cap.
+  const timeoutMs = 25_000;
   const maximumBytes = 1_024 * 1_024;
   return new Promise((resolveResult) => {
-    const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+    const invocation = ownedProcessInvocation({ file: command, args }, options.env);
+    const child = spawn(invocation.file, invocation.args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
     const stdout = [];
     const stderr = [];
     let stdoutBytes = 0;
@@ -277,7 +279,7 @@ function runWindowsServiceStatusCommand(command, args, options) {
       }
     };
     const timer = setTimeout(() => {
-      void stop(Object.assign(new Error("Windows 服务状态查询超过 20 秒，已终止查询进程树"), { code: "ETIMEDOUT" }));
+      void stop(Object.assign(new Error("Windows 服务状态查询超过 25 秒，已终止查询进程树"), { code: "ETIMEDOUT" }));
     }, timeoutMs);
     child.stdout.on("data", (chunk) => {
       if (stopping) return;
@@ -343,7 +345,7 @@ export async function inspectManagedServiceHealth(options = {}) {
             configDocument,
             paths.dataDir,
           );
-          if (await appServerSocketAcceptsWebSocket(primarySocketPath)) {
+          if (await appServerSocketAcceptsWebSocket(primarySocketPath, { ...environment, CODEX_BINARY: configDocument.codex?.binary ?? environment.CODEX_BINARY ?? "codex" })) {
             rpcReachable = true;
           } else {
             const topology = await inspectAppServerSupervisor(primarySocketPath);

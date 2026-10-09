@@ -20,6 +20,8 @@ import {
   customPrimaryProviderProfilePath,
   customSwitchingProviderRegistryPath,
   restoreCustomPrimaryProviderSwitchingProfile,
+  customPrimaryProviderCredentialEnvironmentKey,
+  readCustomPrimaryProviderApiKey,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   createCustomPrimaryProviderConfig,
@@ -106,7 +108,7 @@ function publicSavePreview(input, plan) {
     credential: {
       action: input.credential.action,
       storedAsPlaintext: true,
-      destination: plan.provider.mode === "switching" ? "private-profile" : "main-config",
+      destination: plan.provider.mode === "switching" ? "private-profile" : "private-credential",
     },
   };
 }
@@ -201,6 +203,7 @@ async function applyConnectionSavePlan(input, plan, options) {
       switchingProvider: plan.switchingProvider,
       edits: plan.edits,
       expectedVersion: plan.expectedVersion,
+      credential: plan.credential,
     });
   }
   let backupCleaned = true;
@@ -358,11 +361,13 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     );
   }
   const currentBaseUrl = optionalString(existing.base_url);
-  const currentApiKey = optionalString(existing.experimental_bearer_token);
+  const credential = record(input.credential);
+  const sameOrigin = currentBaseUrl !== undefined && sameUrlOrigin(currentBaseUrl, baseUrl);
+  const currentApiKey = credential.action === "preserve" && sameOrigin
+    ? readCustomPrimaryProviderApiKey(providerId, existing, environment) : undefined;
   const canPreserveApiKey = currentApiKey !== undefined
     && currentBaseUrl !== undefined
     && sameUrlOrigin(currentBaseUrl, baseUrl);
-  const credential = record(input.credential);
   let apiKey;
   if (credential.action === "preserve") {
     if (!canPreserveApiKey) {
@@ -374,11 +379,12 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
   } else {
     throw invalid("invalid-credential-action", "credential", "凭据操作必须是 preserve 或 replace");
   }
+  if (apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) throw invalid("invalid-api-key", "credential.apiKey", "API Key 不能超过 4096 字符或包含控制字符");
   const providerBlock = createCustomPrimaryProviderConfig({
     name: displayName,
     baseUrl,
-    auth: "bearer_token",
-    bearerToken: apiKey,
+    auth: "env_key",
+    envKey: customPrimaryProviderCredentialEnvironmentKey(providerId),
     supportsWebsockets: input.supportsWebsockets,
   });
   const catalog = models ? createResponsesModelCatalog(models, model) : undefined;
@@ -401,6 +407,7 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     reasoningEffort,
     catalogRevision: previousCatalog?.revision,
     apiKey,
+    credential: mode === "exclusive" ? { providerId, baseUrl, apiKey, environmentKey: providerBlock.env_key } : undefined,
     expectedVersion: snapshot.version,
     switchingProvider,
     registeredProviderIds: switchingProviders.map(({ id }) => id),

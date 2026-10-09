@@ -5,6 +5,7 @@ import { webuiLogger } from "./webui-logger.mjs";
 
 import { isPrunableMetricsProviderId } from "./metrics-command-options.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { ownedProcessInvocation } from "../runtime/owned-process.mjs";
 import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 
 const targets = new Set(["gateway", "app-server", "webui", "model-relay", "all"]);
@@ -181,7 +182,7 @@ export class WebuiManagementTaskRunner {
       : normalized.operation === "traffic"
         ? ["cleanup", "traffic", "--confirm"]
         : metricsTaskArguments(normalized);
-    const invocation = resolveExecutableInvocation("codexc", args, environment);
+    const invocation = ownedProcessInvocation(resolveExecutableInvocation("codexc", args, environment), environment);
     await new Promise((resolve) => {
       const child = spawn(invocation.file, invocation.args, {
         env: environment,

@@ -420,6 +420,7 @@ function renderWindowsDefinition(service, identifier, context, projectDir) {
     CODEX_CONNECT_HOME: context.runtime.dataDir,
     CODEX_CONNECT_CONFIG_FILE: context.runtime.configPath,
     PATH: [context.executablePath, dirname(context.pwshBinary)].join(delimiter),
+    CODEX_BINARY: context.codexBinary,
     ...(service.target === "app-server"
       ? { CODEX_CONNECT_SERVICE_ROLE: "app-server" }
       : {}),
@@ -427,7 +428,6 @@ function renderWindowsDefinition(service, identifier, context, projectDir) {
       ? {
           CODEX_CONNECT_SERVICE_ROLE: "gateway",
           CODEX_CONNECT_GATEWAY_SUPERVISED: "1",
-          CODEX_BINARY: context.codexBinary,
         }
       : {}),
   };

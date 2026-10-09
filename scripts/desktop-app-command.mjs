@@ -16,6 +16,7 @@ import {
 } from "../runtime/app-server-supervisor.mjs";
 import { macDesktopAppPluginEnabledConfigKey } from "../runtime/desktop-app-host.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { codexProcessInvocation } from "../runtime/owned-process.mjs";
 import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import {
   loadOrCreateDesktopAppBridgeToken,
@@ -333,7 +334,7 @@ async function inspectMacDesktopAppActiveThreads({ socketPath, codexBinary }) {
   const transport = createAppServerTransport(
     { kind: "local-app-server", socketPath },
     {
-      createCodexProcessInvocation: args => resolveExecutableInvocation(codexBinary, args),
+      createCodexProcessInvocation: args => codexProcessInvocation(codexBinary, args),
       terminateCodexProcess: terminateChildProcess,
       connectTimeoutMs: 3_000,
     },

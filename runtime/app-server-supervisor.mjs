@@ -12,7 +12,7 @@ import {
   createPrivateIpcConnection,
   PrivateIpcServer,
 } from "./private-ipc.mjs";
-import { resolveExecutableInvocation } from "./executable.mjs";
+import { codexProcessInvocation } from "./owned-process.mjs";
 import {
   assertPrivateDirectoryAccessSync,
   readPrivateFileSync,
@@ -817,7 +817,7 @@ export function sameAppServerTopology(actual, expected) {
     && actual.socketPaths.every((path, index) => path === expected.socketPaths[index]);
 }
 
-export async function prepareAppServerSocketPaths(socketPaths) {
+export async function prepareAppServerSocketPaths(socketPaths, environment = process.env) {
   if (process.platform === "win32") {
     for (const directory of new Set(socketPaths.map((socketPath) => dirname(socketPath)))) {
       const existing = lstatSync(directory, { throwIfNoEntry: false });
@@ -827,7 +827,7 @@ export async function prepareAppServerSocketPaths(socketPaths) {
     }
   }
   const occupied = await Promise.all(
-    socketPaths.map((socketPath) => appServerSocketAcceptsWebSocket(socketPath)),
+    socketPaths.map((socketPath) => appServerSocketAcceptsWebSocket(socketPath, environment)),
   );
   if (occupied.some(Boolean)) {
     throw new Error(
@@ -840,12 +840,12 @@ export async function prepareAppServerSocketPaths(socketPaths) {
   }
 }
 
-export async function appServerSocketAcceptsWebSocket(socketPath) {
+export async function appServerSocketAcceptsWebSocket(socketPath, environment = process.env) {
   if (process.platform === "win32") {
     const parent = lstatSync(dirname(socketPath), { throwIfNoEntry: false });
     if (!parent) return false;
     assertPrivateDirectoryAccessSync(dirname(socketPath));
-    return windowsAppServerProxyAcceptsWebSocket(socketPath);
+    return windowsAppServerProxyAcceptsWebSocket(socketPath, environment);
   }
   if (!lstatSync(dirname(socketPath), { throwIfNoEntry: false })) return false;
   const endpoint = inspectAppServerUnixSocket(socketPath);
@@ -979,15 +979,17 @@ function preserveStaleSocket(socketPath) {
   console.warn(`检测到无效 Socket，已保留为：${preserved}`);
 }
 
-async function windowsAppServerProxyAcceptsWebSocket(socketPath) {
-  const invocation = resolveExecutableInvocation(
-    process.env.CODEX_BINARY || "codex",
+async function windowsAppServerProxyAcceptsWebSocket(socketPath, environment) {
+  const invocation = codexProcessInvocation(
+    environment.CODEX_BINARY || "codex",
     ["app-server", "proxy", "--sock", socketPath],
+    environment,
   );
   const child = spawn(invocation.file, invocation.args, {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    env: environment,
   });
   child.stderr.resume();
   const connection = new AppServerProxyDuplex(child.stdout, child.stdin);

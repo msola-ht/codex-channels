@@ -86,6 +86,12 @@ export async function runWindowsServiceHost(definitionPath) {
     }
   }
   if (cleanupErrors.length > 0) {
+    // The launcher owns this host and its descendants in a Windows Job. Let it
+    // observe failure and close that Job even when direct cleanup was denied.
+    if (childProcessIsRunning(child)) {
+      if (child.connected) child.disconnect();
+      child.unref();
+    }
     throw new AggregateError([
       ...(operationError === undefined ? [] : [operationError]), ...cleanupErrors,
     ], "Windows 服务宿主失败且资源清理未完成", { cause: operationError ?? cleanupErrors[0] });

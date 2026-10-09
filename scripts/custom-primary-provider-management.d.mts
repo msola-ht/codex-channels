@@ -69,7 +69,7 @@ export function previewCustomPrimaryProviderSave(
   credential: {
     action: "preserve" | "replace";
     storedAsPlaintext: true;
-    destination: "private-profile" | "main-config";
+    destination: "private-profile" | "private-credential";
   };
 }>;
 

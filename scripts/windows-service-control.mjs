@@ -182,14 +182,14 @@ async function startDefinitions(target, definitionsDirectory, environment, selec
       const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
       const host = await inspectHost(definition.controlPath);
       if (host?.version === 1 && host.running === true) {
-        if (service.target === "app-server") await waitForAppServer(definition.socketPath);
+        if (service.target === "app-server") await waitForAppServer(definition.socketPath, { ...environment, ...definition.environment });
         continue;
       }
       // The primitive checks the exact task's live state before starting it.
       runTaskPrimitive("start", service.windows, environment, undefined, definition.pwshBinary);
       await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
       if (service.target === "app-server") {
-        await waitForAppServer(definition.socketPath);
+        await waitForAppServer(definition.socketPath, { ...environment, ...definition.environment });
       }
     } catch (error) {
       throw lifecycleFailure("启动", selected, index, error);
@@ -215,7 +215,7 @@ function lifecycleFailure(action, selected, index, error) {
   return new Error(`服务${action}中止：已完成 ${completed}；失败 ${selected[index].displayName}：${detail}；未执行 ${pending}。请运行 codexc status。`, { cause: error });
 }
 
-async function waitForAppServer(socketPath) {
+async function waitForAppServer(socketPath, environment) {
   if (typeof socketPath !== "string" || socketPath.length === 0) {
     throw new Error("Windows App Server 服务定义缺少 Socket 路径；请运行 codexc install");
   }
@@ -234,7 +234,7 @@ async function waitForAppServer(socketPath) {
       if (topology.releasedProviders.includes(topology.primaryProvider)) return;
       if (topology.runningProviders.includes(topology.primaryProvider)) {
         lastStage = "主实例已运行，等待 App Server 连接";
-        if (await appServerSocketAcceptsWebSocket(socketPath)) return;
+        if (await appServerSocketAcceptsWebSocket(socketPath, environment)) return;
       } else {
         lastStage = "监管已就绪，等待主实例启动";
       }
@@ -250,13 +250,24 @@ async function stopDefinition(service, definitionsDirectory, environment) {
   const file = definitionPath(definitionsDirectory, service.target);
   if (existsSync(file)) {
     const definition = readDefinition(file);
-    const host = await inspectHost(definition.controlPath);
-    if (host?.version === 1) {
-      await requestHost(definition.controlPath, { action: "stop" });
-      if (await waitForHost(definition.controlPath, false, hostStopTimeoutMs, false)) return;
+    try {
+      const host = await inspectHost(definition.controlPath);
+      if (host?.version === 1) {
+        await requestHost(definition.controlPath, { action: "stop" });
+        await waitForHost(definition.controlPath, false, hostStopTimeoutMs, false);
+      }
+    } catch {
+      // An unavailable host is not proof of exit. Stop the exact scheduled owner.
     }
   }
   runTaskPrimitive("stop", service.windows, environment);
+  const deadline = Date.now() + hostStopTimeoutMs;
+  while (true) {
+    const task = queryTasks([service.windows], environment).get(service.windows);
+    if (!task.exists || task.state === "Ready" || task.state === "Disabled") break;
+    if (Date.now() >= deadline) throw new Error(`计划任务启动器尚未确认停止：${service.windows}`);
+    await new Promise(resolveWait => setTimeout(resolveWait, 250));
+  }
   if (existsSync(file)) {
     const definition = readDefinition(file);
     await waitForHost(definition.controlPath, false, hostStopTimeoutMs);
@@ -350,9 +361,14 @@ function queryTasks(taskNames, environment) {
 async function inspectHost(controlPath) {
   if (!privateIpcEndpointExists(controlPath)) return undefined;
   try {
-    return await requestHost(controlPath, { action: "inspect" });
-  } catch {
-    return undefined;
+    const response = await requestHost(controlPath, { action: "inspect" });
+    if (response?.version !== 1 || typeof response.running !== "boolean" || !Number.isSafeInteger(response.pid)) {
+      throw new Error("Windows 服务宿主状态响应无效");
+    }
+    return response;
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ECONNREFUSED") return undefined;
+    throw error;
   }
 }
 
@@ -392,13 +408,16 @@ function requestHost(controlPath, request) {
 
 async function waitForHost(controlPath, expected, timeoutMs, throwOnTimeout = true) {
   const deadline = Date.now() + timeoutMs;
+  let lastError;
   while (Date.now() < deadline) {
-    const active = (await inspectHost(controlPath))?.running === true;
-    if (active === expected) return true;
+    try {
+      const active = (await inspectHost(controlPath))?.running === true;
+      if (active === expected) return true;
+    } catch (error) { lastError = error; }
     await new Promise((resolveWait) => setTimeout(resolveWait, pollIntervalMs));
   }
   if (!throwOnTimeout) return false;
-  throw new Error(`等待 Windows 服务宿主${expected ? "启动" : "停止"}超时：${controlPath}`);
+  throw new Error(`等待 Windows 服务宿主${expected ? "启动" : "停止"}超时，状态未确认：${controlPath}`, { cause: lastError });
 }
 
 function showLogs(target, definitionsDirectory, environment, { follow, lines }) {

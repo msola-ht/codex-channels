@@ -95,6 +95,8 @@
   管理 `sf-custom-<id>` 私有 Profile；按 Provider 类型校验官方或独立 Responses 模型目录，并严格限制为单个目标 Provider
   块和直接 API Key 字段。注册表与 Profile 的增删改共用私有文件锁并支持执行前快照保护，
   Provider 块与 Key 不进入主配置。
+  固定模式使用不可变的当前用户私有凭据版本，主配置只引用独立 `env_key`；提供凭据读取、创建及显式删除端口，
+  校验 Provider、Origin、版本与文件私有性，拒绝旧主配置明文凭据启动。配置写入结果未知时保留新旧凭据供实际引用选择。
 - `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
@@ -201,7 +203,7 @@
 - `process-lifecycle.mjs` / `process-lifecycle.d.mts`：统一判断子进程存活、向活动子进程转发信号、
   按温和终止、强制终止和有限终态等待关闭单个子进程；显式注册的 Unix 独立进程组用于 Desktop
   Host 及其原生子进程的共同终止，其他子进程仍按原 PID 处理。Windows 对调用方精确持有的 PID 使用系统
-  `taskkill.exe /T` 终止该子进程树，单次命令最多 2 秒，超时拒绝确认完成；避免批处理 Shim 退出后遗留 Codex 后代，且不扫描或结束其他 Codex
+  `taskkill.exe /T` 终止该子进程树，单次命令最多 2 秒，超时拒绝确认完成；受管 Codex 子树另由下面的 Job 宿主保证归属，不扫描或结束其他 Codex
   进程；前台 `codexc run` 的父子 Node 进程先通过仅父子可用的 IPC 请求正常关闭 Gateway、Supervisor
   和私有端点，超时或 IPC 不可用时才回到精确 PID 树终止；多个 Windows Console 信号处理器并发终止
   同一进程树时，以精确 PID 已不存在作为完成结果；
@@ -209,6 +211,7 @@
   入口收到退出信号后停止监管请求、等待已开始的
   Provider 操作，并对全部子进程执行有限终止。可标记失败已由子命令展示，避免嵌套 CLI 重复报错。
   具体关闭超时和资源清理仍由各生命周期所有者决定。
+- `owned-process.mjs` / `owned-process.d.mts` / `windows-owned-process.ps1` / `windows-native.cs`：Windows 受管 Codex、状态查询及维护命令的原生 Job 宿主；使用现有 PowerShell 7 编译调用系统 API，无新增包依赖或安装缓存。通过创建属性原子绑定不可脱离的 Job，再恢复挂起子进程，根进程退出时终止并确认 Job 清空，宿主异常退出由内核关闭 Job 回收后代。计划任务启动器复用同一实现并显式传递工作目录。Proxy 在启动前校验当前用户独占 Socket 目录，并持有完整祖先目录句柄直到连接进程退出；按句柄解析的实际路径拒绝祖先重解析点及非本地盘路径。
 - `cli-presentation.mjs` / `cli-presentation.d.mts`：集中定义公开 CLI 的成功、失败、提示和处理
   状态标签、颜色、输出流路由和换行，Doctor 检查项另用通过；统一遵守 TTY 与 `NO_COLOR`，
   重定向输出保持纯文本。
@@ -238,7 +241,7 @@
   管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
   文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，
   避免路径校验后被符号链接替换；Windows 使用解析后的 PowerShell 7 `pwsh` 调用结构化 SID/ACL
-  适配器，单次调用超过 2 秒即终止并拒绝操作；Windows 原子写入使用先收紧权限的临时子目录，已有父目录只校验所有者与写入权限，不移除上游沙箱读取权限；严格私有文件关闭继承，只允许当前 SID、SYSTEM 和
+  适配器，冷启动调用最多 5 秒、复用调用最多 2 秒，超时终止并拒绝操作；Windows 原子写入使用先收紧权限的临时子目录，已有父目录只校验所有者与写入权限，不移除上游沙箱读取权限；严格私有文件关闭继承，只允许当前 SID、SYSTEM 和
   Administrators 完全控制；状态库、任务库、指标库、媒体、渠道输出和受管备份复用同一合同；
   App Server Socket 目录通过 `secureAppServerSocketDirectorySync` 将已受信任目录收紧为锁定 CLI 要求的单条当前 SID 可继承完全控制权限；其他目录写入与父目录读取接受并保留此更严格权限，不向 Socket 目录重新添加 SYSTEM/Administrators。
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
@@ -248,7 +251,7 @@
   `repairWindowsPrivateFileSync` 仅供显式 `security repair` 使用：管理员所有的普通文件须有当前 SID 完全控制且无拒绝规则，才能恢复当前用户所有权；常规读取和写入不放宽所有者校验。
   Codex Home 顶层严格私有 TOML 的所有者、继承和访问规则拒绝会附带修复命令；共享主配置由 Doctor 提示检查文件及父目录的所有者和写入权限，目录、进程故障与修复操作自身失败不误报文件修复建议。
   Windows 同步及异步读取均在同一只读文件句柄内校验文件、父目录 ACL 并读取，禁止在途写入和替换，不修复权限、不缓存结论。默认上限 1 MiB；异步目录读取最多 2 MiB，同步调用保留既有恢复记录所需的最多 16 MiB。异步取消在句柄释放后完成。
-- `windows-acl-bridge.mjs`：进程内复用隐藏的 PowerShell ACL 适配器，通过 worker 和私有管道支持同步及异步调用；不缓存 ACL 结论。最多 16 个待处理请求，每个请求含排队最多 2 秒，超时、输出超限或进程退出后销毁该实例，下次重新建立。取消排队请求只移除本项；取消在途读取则丢弃结果，等本次读取关闭句柄后释放槽位，保留原期限，不中断其他请求。
+- `windows-acl-bridge.mjs`：进程内复用隐藏的 PowerShell ACL 适配器，通过 worker 和私有管道支持同步及异步调用；不缓存 ACL 结论。最多 16 个待处理请求，冷启动含原生目录句柄代码编译最多 5 秒，复用请求含排队最多 2 秒；每次检查期间固定完整祖先目录，拒绝重解析点及非本地盘路径。超时、输出超限或进程退出后销毁该实例，下次重新建立。取消排队请求只移除本项；取消在途读取则丢弃结果，等本次读取关闭句柄后释放槽位，保留原期限，不中断其他请求。
 - `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器，支持逐行请求及单次调用；stdin/stdout 明确使用 UTF-8，不继承控制台代码页；只读取固定 JSON 请求，通过 .NET
   ACL 类型设置或校验 Owner、访问规则、继承、文件类型与 reparse point，并返回结构化结果，不解析
   本地化命令输出。写操作按绝对路径使用有界命名 Mutex 串行化 ACL 识别与更新，避免并发写入重新放宽 Socket 目录权限。

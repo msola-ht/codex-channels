@@ -10,7 +10,8 @@ import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { aggregateProviderId } from "../runtime/aggregate-model-provider.mjs";
 import { ensureAppServerProvider } from "../runtime/app-server-supervisor.mjs";
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
-import { effectiveCodexBinary, executableInvocation, resolveExecutable } from "../runtime/executable.mjs";
+import { effectiveCodexBinary, resolveExecutable } from "../runtime/executable.mjs";
+import { codexProcessInvocation } from "../runtime/owned-process.mjs";
 import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
@@ -53,7 +54,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     const connectProvider = async ({ socketPath, provider }) => {
       await ensureAppServerProvider(runtime.primarySocketPath, provider);
       const transport = createAppServerTransport({ kind: "local-app-server", socketPath }, {
-        createCodexProcessInvocation: (values) => executableInvocation(codexBinary, values, environment),
+        createCodexProcessInvocation: (values) => codexProcessInvocation(codexBinary, values, environment),
         terminateCodexProcess: terminateChildProcess,
         connectTimeoutMs: 3_000,
       });

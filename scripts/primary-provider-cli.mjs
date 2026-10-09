@@ -259,6 +259,9 @@ export async function removePrimaryProvider(
       writeBackupCleanupWarning(output, result.target.id);
     }
   }
+  if (result.warnings.some(({ code }) => code === "credential-cleanup-failed")) {
+    output.write(`Provider ${result.target.id} 已删除，但私有凭据版本无法安全检查或清理，文件保持保留；请检查其 primary-credentials 目录。\n`);
+  }
   if (result.activation === "restart-all") {
     writeCliRemediationRestartAll();
   }

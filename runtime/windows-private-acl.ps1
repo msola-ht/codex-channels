@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 # Windows console code page, which can corrupt paths or localized ACL reasons.
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Add-Type -Path (Join-Path $PSScriptRoot 'windows-native.cs')
 
 function Throw-InvalidAcl([string]$Message) {
   $aclError = [System.InvalidOperationException]::new($Message)
@@ -59,6 +60,10 @@ function Get-Request([string]$raw) {
 }
 
 function Get-PathItem([string]$Path, [string]$Kind) {
+  $fullPath = [System.IO.Path]::GetFullPath($Path)
+  $directory = if ($Kind -in @('file', 'codex-config')) { [System.IO.Path]::GetDirectoryName($fullPath) } else { $fullPath }
+  try { $script:requestGuards.Add([CodexcWindows.DirectoryGuard]::new($directory)) }
+  catch { Throw-InvalidAcl '私有路径祖先必须为不可替换的本地普通目录' }
   $item = Get-Item -LiteralPath $Path -Force
   if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
     Throw-InvalidAcl '私有路径不能是重解析点'
@@ -217,6 +222,7 @@ function Test-UserOnlyDirectoryAcl($Item, $UserSid) {
 }
 
 function Invoke-AclRequest([string]$raw) {
+$script:requestGuards = [System.Collections.Generic.List[System.IDisposable]]::new()
 $request = $null
 $aclMutex = $null
 $aclMutexHeld = $false
@@ -339,6 +345,8 @@ try {
   # Do not return exception messages: PowerShell/.NET may include file contents.
   return @{ ok = $false; stage = $stage; reason = $_.Exception.Data['codexcAclReason'] }
 } finally {
+  foreach ($guard in $script:requestGuards) { $guard.Dispose() }
+  $script:requestGuards.Clear()
   if ($null -ne $repairStream) { $repairStream.Dispose() }
   if ($aclMutexHeld) { $aclMutex.ReleaseMutex() }
   if ($null -ne $aclMutex) { $aclMutex.Dispose() }

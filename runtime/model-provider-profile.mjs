@@ -62,7 +62,7 @@ export function createCustomPrimaryProviderConfig({
     name,
     base_url: baseUrl,
     wire_api: "responses",
-    requires_openai_auth: auth !== "none" && auth !== "bearer_token",
+    requires_openai_auth: auth !== "none" && auth !== "bearer_token" && auth !== "env_key",
     supports_websockets: supportsWebsockets,
     request_max_retries: thirdPartyProviderRequestMaxRetries,
     stream_max_retries: thirdPartyProviderStreamMaxRetries,
