@@ -52,7 +52,8 @@ import {
   unprotectForCurrentWindowsUserSync,
 } from "../runtime/windows-dpapi.mjs";
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
-import { inspectManagedServiceHealth } from "./service-status.mjs";
+import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
+import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
 const checks = [];
@@ -95,6 +96,17 @@ const runtime = explicitConfigFile
   : { dataDir: userDataDir(), configPath: join(userDataDir(), "config.toml") };
 const { configPath, dataDir } = runtime;
 let document;
+let primaryAppServerReady = false;
+// Begin the independent task/host query now. Handle rejection immediately and
+// render it in the original section; never cache these observations across runs.
+const windowsServices = process.platform === "win32"
+  ? inspectManagedServiceStatusAsync({
+      environment: { ...process.env, CODEX_CONNECT_HOME: dataDir, CODEX_CONNECT_CONFIG_FILE: configPath },
+      platform: "win32", target: "all",
+    }).then(async status => ({ status, gatewayReady: status.services.some(service => service.target === "gateway" && service.running)
+      ? await gatewayOwnerIsReady(configPath).catch(() => false) : false }))
+      .catch(error => ({ error }))
+  : undefined;
 
 setSection("配置文件");
 if (!existsSync(configPath)) {
@@ -444,13 +456,14 @@ if (document) {
       appServerTopology
       && observedTopology?.releasedProviders.includes(appServerTopology.primaryProvider)
     ) {
+      primaryAppServerReady = true;
       recordCheck(
         "Codex App Server",
         true,
         "已因空闲释放停止；下次消息或 TUI 使用时会按需启动（本次未执行 initialize 核验）",
       );
     } else {
-      await checkAppServer("Codex App Server", socketPath, codexBinary ?? codexCommand, recordCheck);
+      primaryAppServerReady = await checkAppServer("Codex App Server", socketPath, codexBinary ?? codexCommand, recordCheck);
     }
   }, ...managedProviders.map((managedProvider, index) => (recordCheck) =>
     checkOptionalAppServer(
@@ -458,6 +471,7 @@ if (document) {
       appServerTopology.socketPaths[index + 1],
       codexBinary ?? codexCommand,
       recordCheck,
+      observedTopology ? observedTopology.runningProviders.includes(managedProvider.provider) : undefined,
     ))];
   // Each connection is independent. Preserve configured report order even when
   // an unavailable Provider takes longer than another connection.
@@ -471,10 +485,10 @@ if (document) {
   }
 }
 
-async function checkOptionalAppServer(label, socketPath, codexBinary, recordCheck) {
-  const available = process.platform === "win32"
+async function checkOptionalAppServer(label, socketPath, codexBinary, recordCheck, running) {
+  const available = running ?? (process.platform === "win32"
     ? await appServerSocketAcceptsWebSocket(socketPath, { ...process.env, CODEX_BINARY: codexBinary })
-    : existsSync(socketPath);
+    : existsSync(socketPath));
   if (!available) {
     recordCheck(label, true, "已配置；首次选择该 Provider 或恢复其会话时按需启动");
     return;
@@ -510,7 +524,7 @@ async function checkAppServerSupervisor(socketPath, expectedTopology) {
 async function checkAppServer(label, socketPath, codexBinary, recordCheck) {
   if (process.platform !== "win32" && !existsSync(socketPath)) {
     recordCheck(label, false, `Socket 不存在：${socketPath}`);
-    return;
+    return false;
   }
   try {
     assertAppServerSocketPathSupported(socketPath);
@@ -522,8 +536,10 @@ async function checkAppServer(label, socketPath, codexBinary, recordCheck) {
       actualVersion === requiredAppServerVersion,
       `${actualVersion ?? "无法识别"}（要求 ${requiredAppServerVersion}）`,
     );
+    return true;
   } catch (error) {
     recordCheck(label, false, `连接失败：${errorMessage(error)}`);
+    return false;
   }
 }
 
@@ -578,18 +594,12 @@ if (process.platform === "darwin") {
   }
 } else if (process.platform === "win32") {
   try {
-    const status = await inspectManagedServiceHealth({
-      environment: {
-        ...process.env,
-        CODEX_CONNECT_HOME: dataDir,
-        CODEX_CONNECT_CONFIG_FILE: configPath,
-      },
-      platform: "win32",
-      target: "all",
-    });
+    const result = await windowsServices;
+    if (result.error) throw result.error;
+    const { status, gatewayReady } = result;
     note(
       "Windows 计划任务",
-      status.healthy
+      status.healthy && gatewayReady && primaryAppServerReady
         ? "App Server 与 Gateway 已运行"
         : `已运行 ${status.services.filter((service) => service.running).length}/${status.services.length}；可运行 codexc install 安装当前用户计划任务`,
     );

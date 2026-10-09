@@ -345,14 +345,9 @@ export async function inspectManagedServiceHealth(options = {}) {
             configDocument,
             paths.dataDir,
           );
-          if (await appServerSocketAcceptsWebSocket(primarySocketPath, { ...environment, CODEX_BINARY: configDocument.codex?.binary ?? environment.CODEX_BINARY ?? "codex" })) {
-            rpcReachable = true;
-          } else {
-            const topology = await inspectAppServerSupervisor(primarySocketPath);
-            rpcReachable = topology?.releasedProviders.includes(
-              topology.primaryProvider,
-            ) === true;
-          }
+          const topology = await inspectAppServerSupervisor(primarySocketPath);
+          rpcReachable = topology?.releasedProviders.includes(topology.primaryProvider) === true
+            || await appServerSocketAcceptsWebSocket(primarySocketPath, { ...environment, CODEX_BINARY: configDocument.codex?.binary ?? environment.CODEX_BINARY ?? "codex" });
         }
       } catch {
         rpcReachable = false;

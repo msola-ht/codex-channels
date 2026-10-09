@@ -34,7 +34,7 @@
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程与受管源码目录归属后，先卸载后台服务，再删除 Git 仓库及已记录和当前包所属 npm prefix 中的全局命令；拒绝符号链接或不匹配路径，保留配置、数据库、凭据、日志、输出和 Shell 配置。
-- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装；`inspectDatabases` 只读校验当前 Schema，拒绝其他版本，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定。
+- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装；`inspectDatabases` 只读校验当前 Schema，拒绝其他版本，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定；仅在监管拓扑匹配且实例已运行时连接 Socket，空闲释放状态不启动 Proxy 探测，不匹配或尚未启动的实例继续等待。
 - `state-database.mjs`：提供状态库与计划任务库的只读版本/结构检查，只接受当前 Schema。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
@@ -80,6 +80,7 @@
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的 HTTP 服务、共享 API 类型与管理路由组合入口；
+  服务入口同时接收终端信号与父进程 `codexc-stop`，统一关闭 HTTP 监听和通知连接；Windows CLI 包装层异步转发停止消息。
   主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
   `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
@@ -504,7 +505,7 @@
   `getupdates`，不显示 Token、`context_token` 或游标；
   主 Unix WebSocket、已配置 Provider 的切换或固定配置、实际模型目录、Provider Socket、
   监管身份与 Provider 拓扑、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，
-  同一次诊断复用已解析的自定义 Provider 拓扑和同次监管检查的空闲释放状态，不缓存跨命令的 ACL 结果；
+  同一次诊断复用已解析的自定义 Provider 拓扑和同次监管检查的空闲释放状态；Windows 计划任务与宿主查询提前并行执行，系统服务汇总复用本次主 App Server 握手结果并独立确认 Gateway 就绪；已确认运行的 Provider 直接握手，不再先建立第二条 Proxy 探测连接，不缓存跨命令的 ACL 结果；
   `--json` 输出完整脱敏检查数组、分类计数与健康状态；不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
 - `service-install-context.mjs` / `service-install-context.d.mts`：systemd 与 launchd 安装器共用的配置、
@@ -517,7 +518,7 @@
   Windows 定义包含解析后的 App Server Socket，缺失时拒绝跳过就绪检查；预检通过私有文件边界读取旧 JSON/VBS 快照，安装激活先停止核心服务与 Relay 再启动，保留 WebUI 运行状态。首次或旧定义不完整的安装在激活失败后保留新定义供诊断，完整旧定义恢复失败时保留原始阶段与两层错误。
 - `service-command.mjs` / `service-command.d.mts`：公开 `appserver`、`relay` 目标映射到内部 `app-server`、`model-relay` 服务标识；实现顶层后台服务命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
   服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
-  检查；顶层 `restart` 统一预检、停止与逐项启动就绪，默认包含已安装 WebUI，失败报告剩余步骤并中止。CLI 只保留帮助展示和命令分派。
+  检查；顶层 `restart` 统一预检、停止与逐项启动就绪，默认包含已安装 WebUI，失败报告剩余步骤并中止。Windows 重启批量查询全部所选计划任务，启动和停止在当前进程调用同一控制器，复用权限检查宿主，避免每一步重新启动 Node 与 ACL 宿主；不缓存权限结论、不改变服务顺序和就绪检查。Model Relay 内部入口接收父进程 `codexc-stop`，完成资源关闭后退出。CLI 只保留帮助展示和命令分派。
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
   稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用；Codex 用户偏好使用
   `next-thread / codex`、`next-tui / codex` 和 `next-thread-and-tui / codex` 分别表示新 Thread、

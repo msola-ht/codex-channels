@@ -70,6 +70,9 @@
   可解析 JSON 并返回非零状态。Windows 由隐藏的 PowerShell 7 启动器和当前 SID 私有 IPC 管理，无需
   管理员权限，登录当前用户后启动。
 
+`webui` 使用异步前台子进程入口，保留已解析的代理环境；Windows 包装层将宿主的
+`codexc-stop` 转发给子进程，正常停止保持退出码 0，终端信号仍按原信号转发。
+
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
 Provider 的独立回环统计代理（DS、OpenCode Go 与 CCG 各自的全部账户共享一个）；任一非主动释放的受监管组件异常
 退出都会共同重建。主 App Server 与 Provider App Server 都支持按需启动和释放；Gateway 全局空闲

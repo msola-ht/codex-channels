@@ -514,7 +514,7 @@ async function executeCommand(command, args) {
         throw new Error(helpText.webui);
       }
       parseWebuiCliArgs(args);
-      runScript("scripts/webui-server.mjs", args, { failureReportedByChild: true });
+      await runForegroundScript("scripts/webui-server.mjs", args, {}, undefined, { useResolvedProxyEnvironment: true });
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
@@ -593,6 +593,7 @@ async function runForegroundScript(
   args,
   additionalEnvironment = {},
   workingDirectory,
+  { useResolvedProxyEnvironment = false } = {},
 ) {
   const runtime = configuredEnvironment();
   const child = spawn(
@@ -602,7 +603,7 @@ async function runForegroundScript(
       stdio: process.platform === "win32"
         ? ["inherit", "inherit", "inherit", "ipc"]
         : "inherit",
-      env: { ...runtime.unresolvedProxyEnvironment, ...additionalEnvironment },
+      env: { ...(useResolvedProxyEnvironment ? runtime.environment : runtime.unresolvedProxyEnvironment), ...additionalEnvironment },
       cwd: workingDirectory ?? runtime.dataDir,
       detached: process.platform !== "win32",
     },
@@ -623,12 +624,12 @@ async function runForegroundScript(
     if (!childProcessIsRunning(child)) return;
     signalChildProcesses([child], "SIGKILL");
   };
-  const forwardSignal = (signal) => {
+  const forwardSignal = (signal, fromParent = false) => {
     if (forwardedSignal) {
       forceStop();
       return;
     }
-    forwardedSignal = signal;
+    if (!fromParent) forwardedSignal = signal;
     if (childProcessIsRunning(child)) {
       if (!sendForegroundStopMessage(child, signal)) {
         signalChildProcesses([child], signal);
@@ -639,6 +640,10 @@ async function runForegroundScript(
   };
   const forwardTerminate = () => forwardSignal("SIGTERM");
   const forwardInterrupt = () => forwardSignal("SIGINT");
+  const controlFromParent = message => {
+    if (message?.type === "codexc-stop" && !shutdownTimer) forwardSignal("SIGTERM", true);
+  };
+  process.on("message", controlFromParent);
   const cleanupSignals = installProcessSignalHandlers({
     SIGTERM: forwardTerminate,
     SIGINT: forwardInterrupt,
@@ -646,6 +651,7 @@ async function runForegroundScript(
   const cleanup = () => {
     if (shutdownTimer) clearTimeout(shutdownTimer);
     cleanupSignals();
+    process.off("message", controlFromParent);
   };
 
   await new Promise((resolveChild, rejectChild) => {

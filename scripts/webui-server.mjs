@@ -1054,7 +1054,7 @@ function main() {
         "failure",
         `WebUI 启动失败：${error instanceof Error ? error.message : String(error)}`,
       );
-      process.exitCode = 1;
+      shutdown(1);
     });
     server.listen(settings.port, host, () => {
       if (!process.stdout.isTTY) {
@@ -1073,12 +1073,18 @@ function main() {
       }
       console.log("按 Ctrl+C 停止。");
     });
-    const shutdown = () => {
-      server.close(() => process.exit(0));
+    let shuttingDown = false;
+    const shutdown = (exitCode = 0) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      server.close(() => process.exit(exitCode));
       closeNotifications();
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
+    process.on("message", message => {
+      if (message?.type === "codexc-stop") shutdown();
+    });
   } catch (error) {
     writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
