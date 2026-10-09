@@ -164,6 +164,12 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
           ? { role, content: userContent(item.content) }
           : { role, content: textContent(item.content) });
       }
+    } else if (item.type === "agent_message") {
+      // Codex multi-agent v2 的 agent_message 是 Responses 私有输入项；Chat 上游没有等价类型，
+      // 只能降级为普通 user 消息，正文按可读文本原样搬运。
+      if (pendingCalls.size) throw new ModelConversionError("Missing tool results");
+      flushToolImages();
+      messages.push({ role: "user", content: agentMessageText(item.content) });
     } else {
       throw new ModelConversionError("Unsupported Responses input item");
     }
@@ -214,7 +220,7 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
     const convertedName = chatToolName(name, namespace);
     if (toolNames.has(convertedName)) throw new ModelConversionError("Conflicting Chat tool names");
     toolNames.set(convertedName, { name, ...(namespace === undefined ? {} : { namespace }), kind: "function" });
-    const fn: JsonObject = { name: convertedName, parameters: object(tool.parameters) };
+    const fn: JsonObject = { name: convertedName, parameters: chatToolParameters(tool.parameters) };
     if (tool.description !== undefined) fn.description = string(tool.description);
     if (tool.strict !== undefined) {
       if (typeof tool.strict !== "boolean") throw new ModelConversionError();
@@ -352,6 +358,54 @@ function textContent(value: unknown): string {
     if (!["input_text", "output_text"].includes(String(part.type))) throw new ModelConversionError("Only text content is supported");
     return string(part.text);
   }).join("");
+}
+
+/**
+ * Codex multi-agent v2 的 agent_message 正文由可读信封与载荷两段构成，信封自带结尾换行，
+ * 因此直接拼接即可还原锁定 CLI 的明文渲染。
+ * 锁定 CLI 只在官方 Provider 上标记加密参数；第三方 Provider 的 `encrypted_content`
+ * 承载的就是明文载荷，所以按原文搬运，不解密、不伪造占位文本，也不推断载荷内容。
+ */
+function agentMessageText(value: unknown): string {
+  const text = array(value).map(raw => {
+    const part = object(raw);
+    if (part.type === "input_text") return string(part.text);
+    if (part.type === "encrypted_content") return string(part.encrypted_content);
+    throw new ModelConversionError("Unsupported agent message content");
+  }).join("");
+  if (text.trim() === "") throw new ModelConversionError("Empty agent message");
+  return text;
+}
+
+/** 工具参数 schema 必须保持对象形态；标记清理只做副本，不修改调用方传入的报文。 */
+function chatToolParameters(value: unknown): JsonObject {
+  return stripEncryptedMarker(object(value)) as JsonObject;
+}
+
+/**
+ * `encrypted` 是 Codex Responses 私有的参数标记（锁定 `JsonSchema` 注释：Responses-only
+ * marker for reviewed encrypted tool parameters）。Chat 上游没有等价语义，保留会让上游或模型
+ * 把它当成参数要求，因此仅在 schema 节点删除布尔标记。枚举等实例数据与属性名保持原样。
+ */
+function stripEncryptedMarker(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(entry => stripEncryptedMarker(entry));
+  if (!value || typeof value !== "object") return value;
+  // 对象展开创建自有数据属性，保留 JSON 中的 __proto__，不触发原型 setter。
+  const result: JsonObject = { ...value };
+  if (typeof result.encrypted === "boolean") delete result.encrypted;
+  // 与锁定 CLI JsonSchema 的子 schema 字段一致；不递归进入 enum 等实例数据。
+  for (const key of ["items", "additionalProperties", "anyOf", "oneOf", "allOf"] as const) {
+    if (Object.hasOwn(result, key)) result[key] = stripEncryptedMarker(result[key]);
+  }
+  for (const key of ["properties", "$defs", "definitions"] as const) {
+    const table = result[key];
+    if (table && typeof table === "object" && !Array.isArray(table)) {
+      result[key] = Object.fromEntries(Object.entries(table).map(
+        ([name, schema]) => [name, stripEncryptedMarker(schema)],
+      ));
+    }
+  }
+  return result;
 }
 
 function chatToolName(name: string, namespace?: string): string {
