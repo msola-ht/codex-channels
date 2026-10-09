@@ -52,6 +52,19 @@ export function isHiddenAutoApprovalReview(event: OutputEvent): boolean {
     && (event.phase !== "completed" || event.status === "inProgress");
 }
 
+export function createHookCompletedPresentation(
+  event: Extract<OutputEvent, { type: "hook.completed" }>,
+): LifecyclePresentation {
+  const status = { completed: "已完成", failed: "执行失败", blocked: "已阻断", stopped: "已停止" }[event.hook.status];
+  return {
+    title: `Codex Hook · ${status}`,
+    fields: [
+      { label: "触发事件", value: event.hook.eventName, literal: true },
+      ...(event.background ? [{ label: "任务", value: `后台任务 · ${event.threadId.slice(0, 12)}` }] : []),
+    ],
+  };
+}
+
 export function createAutoApprovalReviewPresentation(
   event: Extract<OutputEvent, { type: "autoApprovalReview.updated" }>,
 ): LifecyclePresentation | null {

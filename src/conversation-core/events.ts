@@ -310,7 +310,14 @@ export interface AsyncUserQuestion {
   options: string[];
 }
 
+export interface HookCompletion {
+  id: string;
+  eventName: string;
+  status: "completed" | "failed" | "blocked" | "stopped";
+}
+
 export type OutputEvent =
+  | { type: "hook.completed"; target: ConversationTarget; threadId: string; hook: HookCompletion; background?: boolean }
   | { type: "autoApprovalReview.updated"; target: ConversationTarget; threadId: string; turnId: string; sourceThreadId: string; sourceTurnId: string; reviewId: string; phase: "started" | "completed"; status: "inProgress" | "approved" | "denied" | "timedOut" | "aborted"; details?: AutoApprovalReviewDetails; background?: boolean }
   | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; approvalsReviewer?: ThreadApprovalsReviewer | null; identity?: TurnStartIdentity; background?: boolean }
   | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; background?: boolean }

@@ -19,6 +19,7 @@ export function isPersistentOutput(event: OutputEvent, display: OperationUpdateD
       (event.operation.kind === "imageGeneration" && event.operation.status === "completed" && event.operation.imagePath !== undefined)
       || shouldDisplayOperation(event.operation, display)
     ));
+    case "hook.completed":
     case "text.delta": case "user.message": case "plan.updated": case "thread.status":
     case "turn.reasoning": case "account.updated":
     case "account.rateLimits.updated": case "mcp.status.updated": return false;

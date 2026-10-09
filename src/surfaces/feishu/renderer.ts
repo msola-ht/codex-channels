@@ -21,6 +21,7 @@ import { formatSurfaceConfigurationChange } from "../configuration-change-format
 import {
   createStartupPresentation,
   createAutoApprovalReviewPresentation,
+  createHookCompletedPresentation,
   createSubagentContactedPresentation,
   createSubagentCompletedPresentation,
   createSubagentStartedPresentation,
@@ -118,6 +119,8 @@ export function renderFeishuOutput(
   ) => number | null,
 ): string | null {
   switch (event.type) {
+    case "hook.completed":
+      return renderFeishuLifecyclePresentation(createHookCompletedPresentation(event));
     case "autoApprovalReview.updated": {
       const presentation = createAutoApprovalReviewPresentation(event);
       return presentation ? renderFeishuLifecyclePresentation(presentation) : null;
