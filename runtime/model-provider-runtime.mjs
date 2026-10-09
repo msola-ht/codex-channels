@@ -56,6 +56,7 @@ export {
   loadOpencodeGoAccountCredential,
   loadOpencodeGoAccountCredentialFor,
   loadConfiguredProviderCredential,
+  loadConfiguredManagedPrimaryCredential,
 } from "./model-provider-startup-runtime.mjs";
 export {
   customOfficialModelCatalogPath,

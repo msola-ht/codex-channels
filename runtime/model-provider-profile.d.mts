@@ -15,7 +15,8 @@ export function createManagedProviderProfile(
 
 export function createModelProviderConfig(
   definition: ModelProviderDefinition,
-  apiKey: string,
+  apiKey: string | undefined,
+  environmentKey?: string,
 ): Record<string, unknown>;
 
 export function createCustomPrimaryProviderConfig(options: {

@@ -17,7 +17,7 @@ import {
   managedProviderDirectory,
 } from "../runtime/model-provider-runtime.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
-import { applyProviderFileUpdates, snapshotProviderFiles } from "./managed-provider-files.mjs";
+import { applyProviderFileUpdates, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, resolveManagedCatalogModel, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
@@ -136,6 +136,7 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
     updates.set(paths.marker, stringify(createManagedProviderMarker(definition, preview.mode)));
     if (preview.mode === "exclusive" || previous?.mode === "exclusive") updates.set(paths.config, stringify(configured.config));
     if (!previous) updates.set(paths.registry, `${JSON.stringify(validateDeepseekAccounts([...accounts, { id: input.accountId, default: accounts.length === 0 }]))}\n`);
+    stageManagedPrimaryCredential(configured.credential, definition, environment, snapshots, updates);
     await applyProviderFileUpdates(updates, snapshots);
     return { ...preview, action: "configured", model };
   });

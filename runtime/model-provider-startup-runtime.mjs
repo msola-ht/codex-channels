@@ -238,3 +238,9 @@ export function loadConfiguredProviderCredential(provider, environment = process
     apiKey: profile.apiKey,
   };
 }
+
+export function loadConfiguredManagedPrimaryCredential(environment = process.env) {
+  const definitions = exclusiveManagedProviders(environment);
+  if (definitions.length > 1) throw new Error("只能有一个受管第三方 Provider 使用固定模式");
+  return definitions[0] === undefined ? undefined : loadConfiguredProviderCredential(definitions[0].id, environment);
+}

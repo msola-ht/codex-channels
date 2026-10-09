@@ -46,6 +46,7 @@ import {
   applyProviderFileUpdates,
   readOptionalProviderFile,
   snapshotProviderFiles,
+  stageManagedPrimaryCredential,
 } from "./managed-provider-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
@@ -154,7 +155,7 @@ export async function applyCcgConfiguration({
       throw new Error("请选择 CCG 模型目录中的模型");
     }
     await validateCcgCatalog(catalog, environment);
-    const { config: nextConfig, profile } = createManagedProviderConfiguration(
+    const { config: nextConfig, profile, credential } = createManagedProviderConfiguration(
       current, initial.config, definition, {
         mode, previousMode: previous?.mode,
         apiKey, catalogPath: paths.catalog, catalog, model: selectedModel,
@@ -185,6 +186,7 @@ export async function applyCcgConfiguration({
       ? accounts
       : [...accounts, { id: accountId, default: accounts.length === 0 }];
     updates.set(paths.registry, `${JSON.stringify(validateCcgAccounts(nextAccounts), null, 2)}\n`);
+    stageManagedPrimaryCredential(credential, definition, environment, snapshots, updates);
     await applyProviderFileUpdates(updates, snapshots);
     return {
       action: "configured",

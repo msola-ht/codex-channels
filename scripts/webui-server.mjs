@@ -1080,8 +1080,8 @@ function main() {
       server.close(() => process.exit(exitCode));
       closeNotifications();
     };
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
+    process.on("SIGINT", () => shutdown());
+    process.on("SIGTERM", () => shutdown());
     process.on("message", message => {
       if (message?.type === "codexc-stop") shutdown();
     });

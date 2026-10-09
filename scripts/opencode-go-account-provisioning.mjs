@@ -49,6 +49,7 @@ import {
   replaceOptionalProviderFile,
   restoreProviderFileSnapshots,
   snapshotProviderFiles,
+  stageManagedPrimaryCredential,
 } from "./managed-provider-files.mjs";
 
 const definition = opencodeGoProviderDefinition;
@@ -202,7 +203,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     const initialConfig = capturesExclusiveBaseline
       ? currentConfig
       : accountBaseline ?? currentConfig;
-    const { config: nextConfig, profile } = createManagedProviderConfiguration(
+    const { config: nextConfig, profile, credential } = createManagedProviderConfiguration(
       currentConfig,
       initialConfig,
       opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone),
@@ -213,6 +214,14 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       },
     );
     const profileContent = profile === undefined ? undefined : stringify(profile);
+    const credentialUpdates = new Map();
+    stageManagedPrimaryCredential(credential, opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone), environment, snapshots, credentialUpdates);
+    guards = snapshots;
+    for (const [path, content] of credentialUpdates) {
+      await assertProviderFileSnapshots(guards);
+      await replaceOptionalProviderFile(path, content, environment);
+      guards = refreshProviderFileSnapshot(guards, path);
+    }
     const catalogContent = `${JSON.stringify(managedCatalog, null, 2)}\n`;
     if (archivedBaselinePath !== undefined) {
       const previousBaseline = await readOptionalProviderFile(exclusiveBaselinePath, environment);

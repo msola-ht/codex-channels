@@ -77,6 +77,7 @@
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
   config 编辑映射；DeepSeek、OpenCode Go、CCG 与自定义 Provider 共用一次 HTTP 重试、零次流重连的
   故障边界，避免 Codex 默认两层重试相乘；OpenAI 官方 Provider 保持 Codex 原生策略。
+- `managed-provider-credentials.mjs` / `managed-provider-credentials.d.mts`：受管固定 Provider 的不可变版本凭据与 `env_key` 引用，私有 JSON 严格绑定 Provider 和上游 Origin；不写用户文件，保存由账户配置事务负责。运行读取拒绝明文固定配置，设置投影只读模型元数据以支持明确重配；启动环境和 Relay 材料复用同一引用。
 - `opencode-go-quota-windows.mjs` / `opencode-go-quota-windows.d.mts`：为 OpenCode Go 统计代理
   提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照，以 `{ windows, observedAtMs }` 返回成功采样
   的窗口及本地接收时刻；缓存命中保持原时刻，真实请求成功后才更新。按最早 `resetsAt` 失效前缓存，失败时短时

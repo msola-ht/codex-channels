@@ -15,7 +15,7 @@ import { clineRelayCatalogSchema, clinePassReasoningEfforts, clineRelayInputModa
 import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
 import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider, withPreservedManagedModelCatalogSettings } from "../runtime/model-provider-runtime.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
-import { applyProviderFileUpdates, assertProviderFileSnapshots, snapshotProviderFiles } from "./managed-provider-files.mjs";
+import { applyProviderFileUpdates, assertProviderFileSnapshots, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
@@ -157,7 +157,7 @@ export async function applyClinePassConfiguration(input, { environment = process
     }
     await validateModelCatalogWithCodex(catalog, environment);
     const initial = previous && !(previous.mode === "switching" && mode === "exclusive") ? backup.config : current;
-    const { config, profile } = createManagedProviderConfiguration(current, initial, definition, {
+    const { config, profile, credential } = createManagedProviderConfiguration(current, initial, definition, {
       mode, previousMode: previous?.mode, apiKey, catalogPath: paths.catalog, catalog,
       model: previous?.model ?? (catalog.models.some(model => model.slug === definition.defaultModel) ? definition.defaultModel : catalog.models[0]?.slug),
     });
@@ -181,6 +181,7 @@ export async function applyClinePassConfiguration(input, { environment = process
       updates.set(archive, content("backup"));
     }
     if (mode === "exclusive" || previous?.mode === "exclusive") updates.set(paths.config, stringify(config));
+    stageManagedPrimaryCredential(credential, definition, environment, snapshots, updates);
     await applyProviderFileUpdates(updates, snapshots);
     return { ...preview, action: "configured", excludedModels: downloadedCline ? projectClinePassModels(downloadedCline).excludedModels : [] };
   });

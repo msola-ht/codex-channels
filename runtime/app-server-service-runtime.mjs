@@ -39,6 +39,7 @@ import {
 import {
   loadConfiguredCustomPrimaryModelProvider,
   loadConfiguredCustomPrimaryCredential,
+  loadConfiguredManagedPrimaryCredential,
   loadOpenAiBaseUrl,
   loadManagedModelProviderSettings,
   managedProviderDirectory,
@@ -112,6 +113,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     }
   }
   const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
+  // The proxy and its credential must retain the same configuration until the host restarts.
+  const customPrimaryCredential = customPrimaryProvider === undefined ? undefined
+    : loadConfiguredCustomPrimaryCredential(runtime.environment, customPrimaryProvider);
   const customSwitchingProviderIds = new Set(
     appServerRuntime.customSwitchingProviders.map((provider) => provider.provider),
   );
@@ -478,9 +482,6 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   let watchChild;
   let detachChild;
   let lifecycle;
-  const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment);
-  const primaryCredential = loadConfiguredCustomPrimaryCredential(runtime.environment);
-  if (primaryCredential) primaryChildEnvironment[primaryCredential.environmentKey] = primaryCredential.apiKey;
   const ensureInstance = (provider) => {
     if (lifecycle?.closed) throw new Error("App Server 正在关闭，不能启动 Provider");
     const existing = instanceLaunches.get(provider);
@@ -496,6 +497,31 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         await prepareAppServerSocketPaths([socketPath], runtime.environment);
         settingsSnapshots.delete(provider);
         const snapshot = prepareProviderSettings(provider);
+        const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment);
+        let primaryCredential;
+        if (primaryProvider === "openai") {
+          const currentCustomPrimary = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
+          if (JSON.stringify(currentCustomPrimary) !== JSON.stringify(customPrimaryProvider)) {
+            const message = "自定义固定 Provider 配置已变化；请运行 codexc restart all 后重试";
+            printCliMessage("failure", message);
+            throw new Error(message);
+          }
+          const currentCredential = customPrimaryProvider === undefined ? undefined
+            : loadConfiguredCustomPrimaryCredential(runtime.environment, customPrimaryProvider);
+          if (currentCredential?.environmentKey !== customPrimaryCredential?.environmentKey
+            || currentCredential?.apiKey !== customPrimaryCredential?.apiKey) {
+            const message = "自定义固定 Provider 凭据已变化；请运行 codexc restart all 后重试";
+            printCliMessage("failure", message);
+            throw new Error(message);
+          }
+          primaryCredential = customPrimaryCredential;
+        } else {
+          primaryCredential = loadConfiguredManagedPrimaryCredential(runtime.environment);
+        }
+        if (primaryCredential) primaryChildEnvironment[primaryCredential.environmentKey] = primaryCredential.apiKey;
+        if (snapshot && providerSettingsFingerprint(provider) !== snapshot.fingerprint) {
+          throw new Error("Provider 凭据在启动期间发生变化");
+        }
         const attachment = desktopAppAttachment?.provider === provider ? desktopAppAttachment : undefined;
         const primaryAppServerArguments = [
           ...primaryArguments,
@@ -1060,6 +1086,7 @@ function withoutManagedProviderApiKeys(environment) {
   for (const key of Object.keys(childEnvironment)) {
     if (
       /^CODEX_CONNECT_OPENCODE_GO(?:_[A-Z0-9_]+)?_API_KEY$/u.test(key)
+      || /^CODEX_CONNECT_[A-Z0-9_]+_API_KEY_PRIMARY_[a-f0-9]{32}$/u.test(key)
       || /^CODEX_CONNECT_CUSTOM_[A-F0-9]+(?:_PRIMARY_[a-f0-9]{32})?_API_KEY$/u.test(key)
     ) {
       delete childEnvironment[key];

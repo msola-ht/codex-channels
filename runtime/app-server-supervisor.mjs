@@ -6,6 +6,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { Duplex } from "node:stream";
 
 import WebSocket from "ws";
+import { parse } from "smol-toml";
 
 import {
   assertPrivateIpcEndpointSync,
@@ -24,6 +25,7 @@ import { inspectAppServerUnixSocket } from "./app-server-unix-socket.mjs";
 import { codexHomePath } from "./codex-home.mjs";
 import { loadManagedModelProviderDefinitions } from "./model-provider-definitions.mjs";
 import { managedProviderDirectory, managedProviderMarkerPath, readManagedMarker } from "./model-provider-runtime.mjs";
+import { managedPrimaryCredentialPath } from "./managed-provider-credentials.mjs";
 import { readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
 
 const protocolVersion = 5;
@@ -781,6 +783,14 @@ export function readAppServerProviderSettingsFingerprint(provider, environment =
     marker.mode === "exclusive" ? readCodexConfigFile(profilePath) : readPrivateFileSync(profilePath),
     readPrivateFileSync(join(managedProviderDirectory(environment, definition), definition.catalogFileName), 2_097_152),
   ];
+  if (marker.mode === "exclusive") {
+    let block;
+    try { block = parse(parts[1]).model_providers?.[definition.id]; }
+    catch { throw new Error("受管主 Provider 凭据引用无法安全读取"); }
+    if (block?.env_key !== undefined) {
+      parts.push(readPrivateFileSync(managedPrimaryCredentialPath(environment, definition, block.env_key), 16_384));
+    }
+  }
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 }
 

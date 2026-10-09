@@ -141,6 +141,22 @@ OCG/CCG 与自定义 `rs-*` 的普通代理及聚合下游均在发送前复核�
 
 ## 4. 安全边界
 
+DS、OCG、CCG 与 CLP 固定模式的主 `~/.codex/config.toml` 只保存带随机版本的 `env_key`，Key 位于
+`~/.codex-connect/providers/<storage-id>/primary-credentials/<provider-id>/<版本>.json`。
+JSON 使用版本 1，字段限于 `schemaVersion`、`providerId`、`origin`、`apiKey`，私有读取严格核对版本、Provider 和固定上游 Origin；
+Unix 文件/目录分别为 `0600`/`0700`，Windows 使用私有 ACL，主配置可供 Codex 沙盒读取且不包含 Key。
+每次明确重配先写新私有版本，再在同一文件事务内发布引用；旧版本与现有初始备份、归档保留，避免旧引用失效。
+失败时先恢复已有文件再清理新增文件；并发冲突或恢复失败明确报错并保留尚未删除的恢复资料。删除账户保留凭据版本与私有备份。
+
+已有明文固定配置不会被程序更新或启动自动转换；App Server 启动与 Relay 读取均拒绝该配置。
+通过 `codexc setup` 的对应账户“重新配置”，或 WebUI 账户重新配置，输入 Key 并确认保存；设置入口只读模型元数据，旧私有版本缺失或损坏也可明确重配。
+旧备份若含 `experimental_bearer_token`，恢复到共享主配置的操作明确拒绝，保留原文件供人工恢复；
+须先显式配置为私有引用，不把明文备份复制回主配置。代码回退也不能自动改回明文，应保留主配置与对应私有版本，使用支持该引用的版本重新配置。
+
+受管 App Server 在每次启动目标主实例时才将其 Key 注入对应子进程环境，先剥离其他受管/自定义 Key；Relay 独立读取同一私有版本并纳入材料指纹与观察路径。
+原生 `codex` 独立启动只读取 `env_key` 指定的环境变量，不会自动打开 Gateway 私有 JSON；没有该变量会由 Codex 报错。
+共享终端路径使用 `codexc remote`，连接已受管启动的 App Server。切换模式继续使用原私有 Profile，不把 Key 写入主配置。
+
 - Provider id 使用受控列表；模型名来自下载的官方目录，目录缺少的模型不开放；
 - base URL 只允许 HTTP(S)，不得包含用户名、密码、查询或片段；
 - 编译期受管 Provider 的 API Key 只进入目标子进程环境或专用私有凭据文件；用户自定义 Provider
@@ -312,6 +328,8 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 无需加载 Key，因此缺失或损坏的私有凭据仍可显式编辑修复。Key 不进入启动参数。`codexc remote` 连接共享实例，无需向 TUI 注入 Key。直接运行官方 `codex` 不会自动读取 Gateway 私有
 JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行启动官方 CLI 执行模型请求，则须在该进程环境中提供主配置 `env_key`
 指定的 Key，并自行管理其环境保密性。
+
+自定义固定 Provider 的代理目标和凭据绑定到同一次服务启动；修改 Provider、上游地址或凭据后，旧服务拒绝按需重建主实例，须执行 `codexc restart all`。空闲释放后恢复也遵守此限制，不会将新 Key 注入旧代理。
 
 ## 7. 自定义 Responses Provider
 

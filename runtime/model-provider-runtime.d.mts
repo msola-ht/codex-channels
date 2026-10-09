@@ -223,7 +223,7 @@ export function readCustomPrimaryProviderApiKey(provider: string, block: Record<
 export function writeCustomPrimaryProviderCredential(credential: { providerId: string; baseUrl: string; apiKey: string; environmentKey: string }, environment?: NodeJS.ProcessEnv): void;
 export function removeCustomPrimaryProviderCredential(environment: NodeJS.ProcessEnv | undefined, provider: string, environmentKey: string): void;
 export function removeCustomPrimaryProviderCredentials(environment: NodeJS.ProcessEnv | undefined, provider: string): void;
-export function loadConfiguredCustomPrimaryCredential(environment?: NodeJS.ProcessEnv): { environmentKey: string; apiKey: string } | undefined;
+export function loadConfiguredCustomPrimaryCredential(environment?: NodeJS.ProcessEnv, primary?: ConfiguredCustomPrimaryModelProvider): { environmentKey: string; apiKey: string } | undefined;
 export function customPrimaryProviderProfilePath(
   environment: NodeJS.ProcessEnv | undefined,
   provider: string,
@@ -317,5 +317,7 @@ export function loadConfiguredProviderCredential(
   provider: ManagedModelProviderId,
   environment?: NodeJS.ProcessEnv,
 ): { environmentKey: string; apiKey: string };
+
+export function loadConfiguredManagedPrimaryCredential(environment?: NodeJS.ProcessEnv): { environmentKey: string; apiKey: string } | undefined;
 
 export function listRelayProviderIds(environment?: NodeJS.ProcessEnv): string[];

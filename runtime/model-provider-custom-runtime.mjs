@@ -103,8 +103,7 @@ export function removeCustomPrimaryProviderCredentials(environment, provider) {
   for (const name of owned) removeCustomPrimaryProviderCredential(environment, provider, key.replace("0".repeat(32), name.slice(0, 32)));
 }
 
-export function loadConfiguredCustomPrimaryCredential(environment = process.env) {
-  const primary = loadConfiguredCustomPrimaryModelProvider(environment);
+export function loadConfiguredCustomPrimaryCredential(environment = process.env, primary = loadConfiguredCustomPrimaryModelProvider(environment)) {
   if (!primary) return undefined;
   const config = readCustomPrimaryCredentialConfig(environment, primary);
   const provider = record(record(config.model_providers)[primary.id]);
