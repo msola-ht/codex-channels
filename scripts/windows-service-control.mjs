@@ -26,6 +26,7 @@ import {
 } from "../runtime/service-targets.mjs";
 import { packageDir } from "./package-path.mjs";
 import { serviceControlDefinitions, serviceSnapshotHealthy } from "./service-selection.mjs";
+import { serviceStopTimeoutMs, windowsTaskStopTimeoutMs } from "../runtime/shutdown-budget.mjs";
 
 const definitionLimitBytes = 64 * 1024;
 const hostControlTimeoutMs = 2_000;
@@ -33,8 +34,7 @@ const hostResponseLimitBytes = 1_024;
 const hostStartTimeoutMs = 15_000;
 // A running task host precedes configuration/ACL checks and App Server startup.
 const appServerStartTimeoutMs = 60_000;
-// The host allows 10s for graceful IPC stop, then up to 6s for tree termination.
-const hostStopTimeoutMs = 20_000;
+const hostStopTimeoutMs = serviceStopTimeoutMs;
 const pollIntervalMs = 100;
 
 export function windowsServiceDefinitionsDirectory(environment = process.env) {
@@ -324,7 +324,7 @@ function runTaskPrimitive(action, taskName, environment, definition, preferredPw
     env: environment,
     windowsHide: true,
     // Stop has a 20s confirmation budget plus 5s for PowerShell/COM startup.
-    timeout: action === "query" ? 5_000 : action === "stop" ? hostStopTimeoutMs + 5_000 : 15_000,
+    timeout: action === "query" ? 5_000 : action === "stop" ? windowsTaskStopTimeoutMs + 5_000 : 15_000,
   });
   if (result.error?.code === "ETIMEDOUT") {
     let observed = "无法确认当前状态";

@@ -154,6 +154,9 @@ Unix 文件/目录分别为 `0600`/`0700`，Windows 使用私有 ACL，主配置
 须先显式配置为私有引用，不把明文备份复制回主配置。代码回退也不能自动改回明文，应保留主配置与对应私有版本，使用支持该引用的版本重新配置。
 
 受管 App Server 在每次启动目标主实例时才将其 Key 注入对应子进程环境，先剥离其他受管/自定义 Key；Relay 独立读取同一私有版本并纳入材料指纹与观察路径。
+固定、切换与聚合实例在启动时改用随机的临时 `env_key` 名称，并在该实例的官方 `shell_environment_policy.set` 中将同名值覆盖为空，防止工具 shell 默认继承认证值；用户已有过滤规则保持不变，磁盘引用不变。此措施不等于隔离同一操作系统用户，也不替代插件各自的权限边界。锁定上游的用户 Hook 与 `notify` 仍继承宿主环境，不受 shell 环境策略控制；只配置可信的 Hook/通知命令，不能将此方案描述成所有子进程均无凭据。
+共享主配置同时拒绝可识别的明文认证 Header（如 `Authorization`、API Key、Cookie），普通非认证 Header 不因此删除；拒绝时保留原文件和恢复材料，不自动清理用户配置。
+Gateway 自定义固定 Provider 的独立 API 凭据入口不接受 `auth`、`gateway_oauth`、`aws` 或 `env_http_headers`；这些上游认证形式不在当前接入合同内。独立 Relay 还拒绝自定义固定 Provider 的额外 `http_headers`，避免静默遗漏出站 Header。已有配置遇到拒绝时保持原样，需显式调整后再启用。
 原生 `codex` 独立启动只读取 `env_key` 指定的环境变量，不会自动打开 Gateway 私有 JSON；没有该变量会由 Codex 报错。
 共享终端路径使用 `codexc remote`，连接已受管启动的 App Server。切换模式继续使用原私有 Profile，不把 Key 写入主配置。
 

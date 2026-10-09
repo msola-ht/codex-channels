@@ -64,6 +64,9 @@ function loadBaseRelayProviderMaterial(provider, environment) {
   const profile = switching ? loadConfiguredCustomSwitchingModelProviders(environment, provider)[0]
     : loadConfiguredCustomPrimaryRelayProfile(provider, environment);
   if (!profile) throw new Error("Relay Provider was removed");
+  if (!switching && profile.apiKeyEnvironmentKey !== primaryBlock?.env_key) {
+    throw new Error("Relay Provider credential reference changed during read");
+  }
   const catalog = isResponsesProvider(provider) ? readResponsesModelCatalog(environment, provider)
     : JSON.parse(readPrivateFileSync(catalogPath, 8 * 1024 * 1024));
   const models = catalog.models?.map(value => value.slug);

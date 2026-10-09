@@ -18,6 +18,7 @@
   子进程，把其双向 stdio 包装为标准 WebSocket Transport；复用 128 MiB 消息边界，握手使用独立
   有界超时并清理静默 Proxy，关闭 Gateway Client 时只终止对应 Proxy，不终止独立 App Server。
   Proxy 与 stdio 的并发关闭共用清理任务；终止失败保留进程所有权，重新连接不能绕过未完成的清理。
+  Proxy 握手期间关闭会立即取消握手，再等待同一子进程清理，不等待完整连接超时。
 - `stdio-transport.ts`：用于受控开发场景的 stdio Transport。
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；通知不附加本地接收时间戳。

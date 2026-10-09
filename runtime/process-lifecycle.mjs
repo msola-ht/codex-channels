@@ -10,6 +10,15 @@ const childProcessGroups = new WeakSet();
 // must be able to accept cancellation. Parents retain commands until this handshake.
 export function installServiceControlHandler(handler) {
   const requests = new Map();
+  let stopping = false;
+  const cancelAll = () => { for (const controller of requests.values()) controller.abort(); };
+  const requestStop = (message = { type: "codexc-stop" }) => {
+    if (stopping) return;
+    stopping = true;
+    cancelAll();
+    try { void Promise.resolve(handler(message)).catch(() => { process.exitCode = 1; }); }
+    catch { process.exitCode = 1; }
+  };
   const reply = (id, ok) => {
     if (!process.connected || !process.send) return;
     try { process.send({ type: "codexc-control-result", id, ok }, () => undefined); }
@@ -21,14 +30,12 @@ export function installServiceControlHandler(handler) {
       return;
     }
     if (message?.type === "codexc-stop") {
-      for (const controller of requests.values()) controller.abort();
-      try { void Promise.resolve(handler(message)).catch(() => { process.exitCode = 1; }); }
-      catch { process.exitCode = 1; }
+      requestStop(message);
       return;
     }
     if (message?.type !== "codexc-reload" || typeof message.id !== "string" || message.id.length > 64) return;
     const { id, deadline } = message;
-    if (!Number.isSafeInteger(deadline) || deadline <= Date.now() || requests.has(id) || requests.size >= 32) {
+    if (stopping || !Number.isSafeInteger(deadline) || deadline <= Date.now() || requests.has(id) || requests.size >= 32) {
       reply(id, false);
       return;
     }
@@ -41,9 +48,11 @@ export function installServiceControlHandler(handler) {
     }).then(result => reply(id, !controller.signal.aborted && Date.now() < deadline && result !== false), () => reply(id, false))
       .finally(() => { clearTimeout(timer); requests.delete(id); });
   };
-  const cancelAll = () => { for (const controller of requests.values()) controller.abort(); };
+  // This is only the spawning parent's Node IPC channel, never an App Server
+  // client connection. Losing its owner must close the same owned service.
+  const onDisconnect = () => requestStop();
   process.on("message", listener);
-  process.on("disconnect", cancelAll);
+  process.on("disconnect", onDisconnect);
   if (process.connected && process.send) {
     try { process.send({ type: "codexc-control-ready" }, () => undefined); }
     catch { /* A disconnected parent cannot receive readiness. */ }
@@ -51,7 +60,7 @@ export function installServiceControlHandler(handler) {
   return () => {
     cancelAll();
     process.off("message", listener);
-    process.off("disconnect", cancelAll);
+    process.off("disconnect", onDisconnect);
   };
 }
 

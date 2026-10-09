@@ -1,4 +1,6 @@
 export function readCodexConfigFile(path: string, maximumBytes?: number): string;
+export function assertCodexConfigHasNoPlaintextCredentials(content: string | Uint8Array): void;
+export function assertProviderHasNoPlaintextCredentials(provider: unknown): void;
 export function createProviderFileAccess(environment: NodeJS.ProcessEnv): {
   read(path: string, maximumBytes?: number): string;
   write(path: string, content: string | Uint8Array): Promise<void>;

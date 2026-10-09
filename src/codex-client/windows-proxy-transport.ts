@@ -85,6 +85,11 @@ export class WindowsProxyTransport extends BaseTransport {
   async close(): Promise<void> {
     if (this.closeTask) return this.closeTask;
     this.closing = true;
+    // Cancel the handshake immediately; open() retains ownership of its child
+    // cleanup, so close must wait for that cleanup rather than its full timeout.
+    if (this.socket?.readyState === WebSocket.CONNECTING) {
+      this.socket.terminate();
+    }
     const task = Promise.resolve().then(async () => {
       // An opening connection owns its cleanup until it settles.
       await this.connectTask?.catch(() => undefined);

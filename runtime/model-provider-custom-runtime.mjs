@@ -20,6 +20,7 @@ import {
 } from "./model-provider-profile.mjs";
 import { isOpencodeGoProviderNamespace } from "./opencode-go-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
+import { assertProviderHasNoPlaintextCredentials } from "./provider-file-access.mjs";
 
 const maximumConfigBytes = 1_048_576;
 export const customPrimaryProviderProfileName = "sf-custom";
@@ -118,6 +119,7 @@ function readCustomPrimaryCredentialConfig(environment, primary) {
   try { config = record(parse(readCodexConfigFile(join(codexHomePath(environment), "config.toml")))); }
   catch { throw new Error("Codex 主模型 Provider 凭据配置无法安全读取"); }
   const provider = record(record(config.model_providers)[primary.id]);
+  assertCustomPrimaryProviderAuthentication(provider);
   if (config.model_provider !== primary.id || provider.experimental_bearer_token !== undefined
     || typeof provider.base_url !== "string" || validProviderBaseUrl(provider.base_url, "自定义主 Provider") !== primary.baseUrl) {
     throw new Error("Codex 主模型 Provider 在凭据读取期间发生变化，请重新读取配置");
@@ -222,9 +224,7 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
     throw new Error(`Codex 主模型 Provider 不受 Gateway 支持：${id}`);
   }
   const provider = record(providers[id]);
-  if (provider.experimental_bearer_token !== undefined) {
-    throw new Error("自定义固定 Provider 的主配置含明文 API Key；请在 codexc setup 中显式编辑 Provider 保存为私有凭据，Gateway 不会自动迁移");
-  }
+  assertCustomPrimaryProviderAuthentication(provider);
   if (
     typeof document.openai_base_url === "string"
     && document.openai_base_url.trim() !== ""
@@ -273,12 +273,23 @@ export function customPrimaryProviderProfilePath(environment = process.env, prov
   );
 }
 
+function assertCustomPrimaryProviderAuthentication(provider) {
+  assertProviderHasNoPlaintextCredentials(provider);
+  if (provider.auth !== undefined || provider.gateway_oauth !== undefined
+    || provider.aws !== undefined || provider.env_http_headers !== undefined) {
+    throw new Error("自定义固定 Provider 只支持 env_key 独立 API 凭据；其他认证配置已保留，请显式重新配置 Provider");
+  }
+}
+
 /** Independent API material only; never read Codex OAuth/auth.json for Relay. */
 export function loadConfiguredCustomPrimaryRelayProfile(providerId, environment = process.env) {
   const primary = loadConfiguredCustomPrimaryModelProvider(environment);
   if (primary?.id !== providerId) throw new Error("Relay Provider is not the configured custom primary");
   const document = readCustomPrimaryCredentialConfig(environment, primary);
   const provider = record(record(document.model_providers)[providerId]);
+  if (provider.http_headers !== undefined) {
+    throw new Error("Relay 自定义 Provider 不支持额外 HTTP Header；配置已保留，请显式重新配置 Provider");
+  }
   if (provider.requires_openai_auth === true || provider.env_key !== undefined && provider.experimental_bearer_token !== undefined) {
     throw new Error("Relay requires unambiguous independent API credentials");
   }
@@ -286,7 +297,7 @@ export function loadConfiguredCustomPrimaryRelayProfile(providerId, environment 
   if (typeof apiKey !== "string" || !apiKey.length || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) {
     throw new Error("Relay Provider has no usable independent API credentials");
   }
-  return { ...primary, apiKey };
+  return { ...primary, apiKey, apiKeyEnvironmentKey: provider.env_key };
 }
 
 export function customSwitchingProviderRegistryPath(environment = process.env) {

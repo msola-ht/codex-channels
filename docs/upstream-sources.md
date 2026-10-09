@@ -30,6 +30,7 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 Windows 沙箱的 [`apply_read_acls` 调用](https://github.com/openai/codex/blob/d27764b82f7118f674371e6d6e76271d9d606edb/codex-rs/windows-sandbox-rs/src/setup_provisioning.rs#L677) 配置可继承的读取与执行权限，Codex Home 不在默认敏感目录排除列表中。
 因此共享主配置只校验所有权和写入完整性，不能把只读继承直接判成凭据泄漏；该检查也不证明内容机密性。独立 Provider Profile、备份及 Gateway 私有文件仍执行严格私有校验。不得按 `CodexSandboxUsers` 组名全局放行，也不接管上游沙箱账户与凭据管理。
 固定模式自定义 Provider 的 API Key 使用独立私有版本文件，主配置只保存 `env_key`；既有明文配置须经用户显式编辑转换，不能以共享 ACL 检查通过证明密钥安全。Windows 原生目录句柄与 Job 归属分别参考固定版 `windows-sandbox-rs/src/no_reparse_dir.rs`、`utils/pty/src/win/job.rs`；本项目只借鉴语义，不运行或导入上游源码。
+锁定版 `config/src/shell_environment_policy.rs` 默认继承全部环境且跳过默认凭据过滤；`protocol/src/shell_environment.rs` 在过滤后应用 `set`。受管 App Server 因而使用本次启动的随机凭据环境名，并以最高层命令行 `shell_environment_policy.set` 将工具 shell 的同名值覆盖为空，不依赖默认 `KEY/TOKEN` 过滤，也不替换用户已有的 `filters`、`exclude` 或 `include_only`。
 
 `CODEX_HOME` 的解析遵循同一固定提交的 `codex-rs/utils/home-dir/src/lib.rs`：显式路径必须存在且为目录，并规范化；未设置时使用默认路径且不要求预先存在。Windows 服务安装将显式路径保存在服务环境中，防止计划任务与安装终端使用不同目录。
 

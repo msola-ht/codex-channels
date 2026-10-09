@@ -2,13 +2,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveExecutableInvocation } from "./executable.mjs";
 
-/** An owned Windows process cannot outlive its helper's kernel Job handle. */
+/** An owned Windows process is bound to both its caller and its helper's Job. */
 export function ownedProcessInvocation(invocation, environment = process.env, socketPath) {
   if (process.platform !== "win32") return invocation;
   return resolveExecutableInvocation("pwsh.exe", [
     "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
     join(dirname(fileURLToPath(import.meta.url)), "windows-owned-process.ps1"),
-    "-Invocation", Buffer.from(JSON.stringify({ ...invocation, socketPath }), "utf8").toString("base64"),
+    "-Invocation", Buffer.from(JSON.stringify({ ...invocation, socketPath, ownerPid: process.pid }), "utf8").toString("base64"),
   ], environment);
 }
 

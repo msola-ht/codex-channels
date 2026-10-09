@@ -73,6 +73,8 @@ import {
 } from "./process-lifecycle.mjs";
 import { createProxyFetch } from "./proxy-fetch.mjs";
 import { ProviderProxyRuntimeRegistry } from "./provider-proxy-runtime-registry.mjs";
+import { isolateProviderCredential } from "./provider-credential-policy.mjs";
+import { serviceShutdownTimeoutMs } from "./shutdown-budget.mjs";
 
 export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const children = [];
@@ -543,7 +545,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         await prepareAppServerSocketPaths([socketPath], runtime.environment);
         settingsSnapshots.delete(provider);
         const snapshot = prepareProviderSettings(provider);
-        const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment);
+        const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment, customPrimaryCredential?.environmentKey);
         let primaryCredential;
         if (primaryProvider === "openai") {
           const currentCustomPrimary = loadConfiguredCustomPrimaryModelProvider(runtime.environment);
@@ -564,13 +566,18 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         } else {
           primaryCredential = loadConfiguredManagedPrimaryCredential(runtime.environment);
         }
-        if (primaryCredential) primaryChildEnvironment[primaryCredential.environmentKey] = primaryCredential.apiKey;
+        const primaryLaunch = isolateProviderCredential(
+          customPrimaryProvider?.id ?? primaryProvider,
+          primaryArguments,
+          primaryChildEnvironment,
+          primaryCredential,
+        );
         if (snapshot && providerSettingsFingerprint(provider) !== snapshot.fingerprint) {
           throw new Error("Provider 凭据在启动期间发生变化");
         }
         const attachment = desktopAppAttachment?.provider === provider ? desktopAppAttachment : undefined;
         const primaryAppServerArguments = [
-          ...primaryArguments,
+          ...primaryLaunch.arguments,
           ...(attachment
             ? [
                 "-c",
@@ -583,7 +590,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         ];
         const primarySpawnOptions = {
           stdio: "inherit",
-          env: primaryChildEnvironment,
+          env: primaryLaunch.childEnvironment,
           cwd: defaultWorkspace.cwd,
         };
         assertRunning();
@@ -674,8 +681,13 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           providerBaseUrl,
         );
         const attachment = desktopAppAttachment?.provider === provider ? desktopAppAttachment : undefined;
+        const credentials = Object.entries(managed.runtime.childEnvironment);
+        if (credentials.length !== 1) throw new Error("隔离 App Server 必须使用唯一 Provider 凭据");
+        const [[environmentKey, apiKey]] = credentials;
+        const managedLaunch = isolateProviderCredential(provider, argumentsList,
+          withoutManagedProviderApiKeys(runtime.environment, customPrimaryCredential?.environmentKey), { environmentKey, apiKey });
         const managedAppServerArguments = [
-          ...argumentsList,
+          ...managedLaunch.arguments,
           ...(attachment ? ["-c", `${macDesktopAppPluginEnabledConfigKey}=${attachment.toolsEnabled}`] : []),
           "app-server",
           "--listen",
@@ -683,10 +695,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         ];
         const managedSpawnOptions = {
           stdio: "inherit",
-          env: {
-            ...withoutManagedProviderApiKeys(runtime.environment),
-            ...managed.runtime.childEnvironment,
-          },
+          env: managedLaunch.childEnvironment,
           cwd: defaultWorkspace.cwd,
         };
         assertRunning();
@@ -1121,7 +1130,7 @@ export function applyAppServerTimezone(environment, timezone) {
   environment.TZ = timezone;
 }
 
-function withoutManagedProviderApiKeys(environment) {
+function withoutManagedProviderApiKeys(environment, customPrimaryEnvironmentKey) {
   const childEnvironment = { ...environment };
   const managedKeys = new Set(
     loadManagedModelProviderDefinitions(environment)
@@ -1129,14 +1138,17 @@ function withoutManagedProviderApiKeys(environment) {
   );
   // 旧版单账户环境变量不属于当前动态定义，仍必须从子进程环境剥离。
   managedKeys.add("CODEX_CONNECT_OPENCODE_GO_API_KEY");
+  if (customPrimaryEnvironmentKey !== undefined) managedKeys.add(customPrimaryEnvironmentKey);
   for (const key of managedKeys) {
     delete childEnvironment[key];
   }
   for (const key of Object.keys(childEnvironment)) {
     if (
-      /^CODEX_CONNECT_OPENCODE_GO(?:_[A-Z0-9_]+)?_API_KEY$/u.test(key)
-      || /^CODEX_CONNECT_[A-Z0-9_]+_API_KEY_PRIMARY_[a-f0-9]{32}$/u.test(key)
-      || /^CODEX_CONNECT_CUSTOM_[A-F0-9]+(?:_PRIMARY_[a-f0-9]{32})?_API_KEY$/u.test(key)
+      process.platform === "win32" && [...managedKeys].some(name => name.toLowerCase() === key.toLowerCase())
+      || /^CODEX_CONNECT_OPENCODE_GO(?:_[A-Z0-9_]+)?_API_KEY$/iu.test(key)
+      || /^CODEX_CONNECT_[A-Z0-9_]+_API_KEY_PRIMARY_[a-f0-9]{32}$/iu.test(key)
+      || /^CODEX_CONNECT_CUSTOM_[A-F0-9]+(?:_PRIMARY_[a-f0-9]{32})?_API_KEY$/iu.test(key)
+      || /^CODEX_CONNECT_MODEL_AUTH_[A-F0-9]{32}_API_KEY$/iu.test(key)
     ) {
       delete childEnvironment[key];
     }
@@ -1229,6 +1241,10 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
   const close = (initialSignal) => {
     if (closeTask) return closeTask;
     settled = true;
+    const deadline = setTimeout(() => {
+      printCliMessage("failure", "App Server 停止等待超时，监管进程将以故障状态退出");
+      process.exit(1);
+    }, serviceShutdownTimeoutMs);
     cleanup();
     for (const [child, watcher] of watchers) {
       child.off("error", watcher.onError);
@@ -1251,6 +1267,9 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
       const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
       if (errors.length) throw new AggregateError(errors, "App Server 资源清理未完成");
     });
+    // A failed cleanup can retain an owned child or an IPC handle. Keep the
+    // deadline armed on failure so direct foreground entry points stay bounded.
+    void closeTask.then(() => clearTimeout(deadline), () => { process.exitCode = 1; });
     return closeTask;
   };
   const finish = (code, signal, error, initialSignal = "SIGTERM") => {

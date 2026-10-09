@@ -16,20 +16,23 @@ namespace CodexcWindows {
                 string root = Path.GetPathRoot(full);
                 if (root == null || root.Length != 3 || root[1] != ':')
                     throw new IOException("Protected paths require a local drive");
-                Open(root);
-                string current = root;
+                OpenRoot(root);
                 foreach (string part in full.Substring(root.Length).Split(new [] {'\\', '/'}, StringSplitOptions.RemoveEmptyEntries)) {
-                    current = Path.Combine(current, part);
-                    Open(current);
+                    SafeFileHandle child = OpenRelative(handles[handles.Count - 1], part, 0x20081, 1, 1);
+                    handles.Add(child);
+                    Validate(child);
                 }
             } catch { Dispose(); throw; }
         }
-        private void Open(string path) {
+        private void OpenRoot(string path) {
             // Metadata-only opens do not participate in Windows sharing checks.
             // FILE_LIST_DIRECTORY makes omission of FILE_SHARE_DELETE pin the path.
             SafeFileHandle handle = Native.CreateFileW(path, 0x20081, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
             if (handle.IsInvalid) { handle.Dispose(); throw new Win32Exception(Marshal.GetLastWin32Error()); }
             handles.Add(handle);
+            Validate(handle);
+        }
+        private static void Validate(SafeFileHandle handle) {
             StringBuilder finalPath = new StringBuilder(32768);
             uint length = Native.GetFinalPathNameByHandleW(handle, finalPath, (uint)finalPath.Capacity, 0);
             if (length == 0 || length >= finalPath.Capacity) throw new IOException("Cannot resolve protected volume");
@@ -44,9 +47,81 @@ namespace CodexcWindows {
             if ((info.Attributes & 0x400) != 0 || (info.Attributes & 0x10) == 0)
                 throw new IOException("Protected path contains a reparse point or non-directory");
         }
+        // Only socket owners call this after their ACL checks. Read-only ACL checks
+        // retain directory pins without creating files in the inspected directory.
+        public void ProtectContents() {
+            if (handles.Count == 0) throw new ObjectDisposedException("DirectoryGuard");
+            SafeFileHandle directory = handles[handles.Count - 1];
+            SafeFileHandle guard = OpenRelative(directory, ".codexc-socket-" + Guid.NewGuid().ToString("N") + ".guard",
+                0x10001, 2, 0x1040); // FILE_READ_DATA | DELETE; CREATE; NON_DIRECTORY | DELETE_ON_CLOSE
+            handles.Add(guard);
+            // Conversion could have raced guard installation. Reject it before use.
+            Validate(directory);
+        }
+        private static SafeFileHandle OpenRelative(SafeFileHandle directory, string name, uint access, uint disposition, uint options) {
+            if (name.Length == 0 || name.IndexOfAny(new [] {'\\', '/', ':', '\0'}) >= 0 || name == "." || name == "..")
+                throw new IOException("Invalid protected path component");
+            IntPtr text = Marshal.StringToHGlobalUni(name);
+            IntPtr unicode = IntPtr.Zero;
+            try {
+                Native.UnicodeString value = new Native.UnicodeString();
+                value.Length = checked((ushort)(name.Length * 2));
+                value.MaximumLength = checked((ushort)(value.Length + 2));
+                value.Buffer = text;
+                unicode = Marshal.AllocHGlobal(Marshal.SizeOf<Native.UnicodeString>());
+                Marshal.StructureToPtr(value, unicode, false);
+                Native.ObjectAttributes attributes = new Native.ObjectAttributes();
+                attributes.Length = (uint)Marshal.SizeOf<Native.ObjectAttributes>();
+                attributes.RootDirectory = directory.DangerousGetHandle();
+                attributes.Name = unicode;
+                attributes.Attributes = 0x1040; // OBJ_DONT_REPARSE | OBJ_CASE_INSENSITIVE
+                Native.IoStatusBlock io;
+                IntPtr opened;
+                int status = Native.NtCreateFile(out opened, access, ref attributes, out io, IntPtr.Zero,
+                    0x80, 3, disposition, options, IntPtr.Zero, 0);
+                if (status < 0) throw new Win32Exception((int)Native.RtlNtStatusToDosError(status));
+                return new SafeFileHandle(opened, true);
+            } finally {
+                if (unicode != IntPtr.Zero) Marshal.FreeHGlobal(unicode);
+                Marshal.FreeHGlobal(text);
+            }
+        }
         public void Dispose() {
             for (int i = handles.Count - 1; i >= 0; i--) handles[i].Dispose();
             handles.Clear();
+        }
+    }
+
+    // Capture the actual creator once. A retained kernel handle never follows PID reuse.
+    public sealed class ProcessOwner : IDisposable {
+        internal IntPtr Handle { get; private set; }
+        public ProcessOwner(uint processId) {
+            Native.ProcessBasicInformation basic;
+            int status = Native.NtQueryInformationProcess(Native.GetCurrentProcess(), 0, out basic,
+                (uint)Marshal.SizeOf<Native.ProcessBasicInformation>(), IntPtr.Zero);
+            if (status < 0) throw new Win32Exception((int)Native.RtlNtStatusToDosError(status));
+            if (processId == 0 || basic.ParentProcessId.ToInt64() != processId)
+                throw new IOException("Owned process creator does not match");
+            Handle = Native.OpenProcess(0x101000, false, processId); // SYNCHRONIZE | QUERY_LIMITED_INFORMATION
+            if (Handle == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+            try {
+                long parentCreated, helperCreated, exited, kernel, user;
+                if (!Native.GetProcessTimes(Handle, out parentCreated, out exited, out kernel, out user) ||
+                    !Native.GetProcessTimes(Native.GetCurrentProcess(), out helperCreated, out exited, out kernel, out user))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                // A recycled creator PID would identify a process born after this helper.
+                if (parentCreated > helperCreated) throw new IOException("Owned process creator was replaced");
+                EnsureAlive();
+            } catch { Dispose(); throw; }
+        }
+        internal void EnsureAlive() {
+            uint result = Native.WaitForSingleObject(Handle, 0);
+            if (result == uint.MaxValue) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (result != 258) throw new IOException("Owned process creator has exited");
+        }
+        public void Dispose() {
+            if (Handle != IntPtr.Zero) Native.CloseHandle(Handle);
+            Handle = IntPtr.Zero;
         }
     }
 
@@ -54,6 +129,10 @@ namespace CodexcWindows {
         // The job handle belongs to this helper. Even forced helper termination closes it.
         // Assign at creation, matching upstream: no unowned suspended-process window.
         public static int Run(string file, string[] args, bool verbatim, string workingDirectory) {
+            // The scheduled-task launcher itself owns its outer Job.
+            return Run(file, args, verbatim, workingDirectory, null);
+        }
+        public static int Run(string file, string[] args, bool verbatim, string workingDirectory, ProcessOwner owner) {
             IntPtr job = Native.CreateJobObjectW(IntPtr.Zero, null);
             if (job == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
             Native.ProcessInformation process = new Native.ProcessInformation();
@@ -99,13 +178,19 @@ namespace CodexcWindows {
                 startup.Attributes = attributes;
                 StringBuilder command = new StringBuilder(Quote(file));
                 foreach (string arg in args) command.Append(' ').Append(verbatim ? arg : Quote(arg));
+                if (owner != null) owner.EnsureAlive();
                 if (!Native.CreateProcessW(file, command, IntPtr.Zero, IntPtr.Zero, true, 0x08080004,
                     IntPtr.Zero, workingDirectory, ref startup, out process))
                     throw new Win32Exception(Marshal.GetLastWin32Error());
                 if (Native.ResumeThread(process.Thread) == uint.MaxValue) throw new Win32Exception(Marshal.GetLastWin32Error());
-                if (Native.WaitForSingleObject(process.Process, uint.MaxValue) != 0) throw new Win32Exception(Marshal.GetLastWin32Error());
-                uint exitCode;
-                if (!Native.GetExitCodeProcess(process.Process, out exitCode)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                uint completed = owner == null ? Native.WaitForSingleObject(process.Process, uint.MaxValue) :
+                    Native.WaitForMultipleObjects(2, new [] {owner.Handle, process.Process}, false, uint.MaxValue);
+                if (completed == uint.MaxValue) throw new Win32Exception(Marshal.GetLastWin32Error());
+                uint exitCode = 1;
+                if (owner == null || completed == 1) {
+                    if (completed != (owner == null ? 0u : 1u)) throw new IOException("Invalid owned process wait result");
+                    if (!Native.GetExitCodeProcess(process.Process, out exitCode)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                } else if (completed != 0) throw new IOException("Invalid owned process wait result");
                 // A root can exit while descendants remain. End and await the entire job.
                 if (!Native.TerminateJobObject(job, exitCode)) throw new Win32Exception(Marshal.GetLastWin32Error());
                 for (int attempt = 0; attempt < 500; attempt++) {
@@ -140,6 +225,23 @@ namespace CodexcWindows {
     }
 
     internal static class Native {
+        [StructLayout(LayoutKind.Sequential)] internal struct UnicodeString {
+            internal ushort Length, MaximumLength;
+            internal IntPtr Buffer;
+        }
+        [StructLayout(LayoutKind.Sequential)] internal struct ObjectAttributes {
+            internal uint Length;
+            internal IntPtr RootDirectory, Name;
+            internal uint Attributes;
+            internal IntPtr Security, QualityOfService;
+        }
+        [StructLayout(LayoutKind.Sequential)] internal struct IoStatusBlock {
+            internal IntPtr Status;
+            internal UIntPtr Information;
+        }
+        [StructLayout(LayoutKind.Sequential)] internal struct ProcessBasicInformation {
+            internal IntPtr Reserved, Peb, Reserved2, Reserved3, ProcessId, ParentProcessId;
+        }
         [StructLayout(LayoutKind.Sequential)] internal struct FileInformation {
             internal uint Attributes, CreationLow, CreationHigh, AccessLow, AccessHigh, WriteLow, WriteHigh,
                 Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
@@ -193,6 +295,14 @@ namespace CodexcWindows {
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] internal static extern bool CreateProcessW(string file, StringBuilder command, IntPtr processSecurity, IntPtr threadSecurity, bool inherit, uint flags, IntPtr environment, string cwd, ref StartupInfoEx startup, out ProcessInformation process);
         [DllImport("kernel32.dll", SetLastError = true)] internal static extern uint ResumeThread(IntPtr thread);
         [DllImport("kernel32.dll", SetLastError = true)] internal static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+        [DllImport("kernel32.dll", SetLastError = true)] internal static extern uint WaitForMultipleObjects(uint count, IntPtr[] handles, bool waitAll, uint milliseconds);
+        [DllImport("kernel32.dll", SetLastError = true)] internal static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
+        [DllImport("kernel32.dll", SetLastError = true)] internal static extern bool GetProcessTimes(IntPtr process, out long creation, out long exit, out long kernel, out long user);
+        [DllImport("ntdll.dll")] internal static extern int NtQueryInformationProcess(IntPtr process, int kind, out ProcessBasicInformation info, uint length, IntPtr returnedLength);
+        [DllImport("ntdll.dll")] internal static extern uint RtlNtStatusToDosError(int status);
+        [DllImport("ntdll.dll")] internal static extern int NtCreateFile(out IntPtr handle, uint access,
+            ref ObjectAttributes attributes, out IoStatusBlock io, IntPtr allocation, uint fileAttributes,
+            uint share, uint disposition, uint options, IntPtr ea, uint eaLength);
         [DllImport("kernel32.dll", SetLastError = true)] internal static extern bool GetExitCodeProcess(IntPtr process, out uint code);
         [DllImport("kernel32.dll", SetLastError = true)] internal static extern bool CloseHandle(IntPtr handle);
         [DllImport("kernel32.dll")] internal static extern IntPtr GetCurrentProcess();

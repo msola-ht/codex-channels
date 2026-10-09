@@ -17,6 +17,7 @@ import {
 import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { installProcessSignalHandlers, installServiceControlHandler } from "../../runtime/process-lifecycle.mjs";
+import { serviceShutdownTimeoutMs } from "../../runtime/shutdown-budget.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { ResetCreditError } from "../application/index.js";
@@ -43,8 +44,6 @@ const providerSettingsAction: Record<
   failed: "provider-settings-failed",
 };
 
-const shutdownTimeoutMs = 30_000;
-
 export async function runGatewayProcess(): Promise<void> {
   const runtime = loadRuntimeConfig();
   const config = runtime.config;
@@ -56,10 +55,22 @@ export async function runGatewayProcess(): Promise<void> {
   const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config, { service: "gateway", module: "lifecycle" });
   let earlyStop = false;
+  let shutdownTimer: NodeJS.Timeout | undefined;
+  const beginShutdownDeadline = (): void => {
+    if (shutdownTimer) return;
+    // Include ownership acquisition and component construction in the budget:
+    // an early stop must stay bounded even before controls.stop is installed.
+    shutdownTimer = setTimeout(() => {
+      logger.error({ timeoutMs: serviceShutdownTimeoutMs }, "Gateway 停止等待超时，进程将以故障状态退出");
+      process.exit(1);
+    }, serviceShutdownTimeoutMs);
+  };
+  const clearShutdownDeadline = (): void => { clearTimeout(shutdownTimer); };
   const controls: { stop?: () => void; reload?: () => void } = {};
   let reloadPending = false;
   const requestStop = (): void => {
     earlyStop = true;
+    beginShutdownDeadline();
     controls.stop?.();
   };
   const requestReload = (): void => {
@@ -78,9 +89,9 @@ export async function runGatewayProcess(): Promise<void> {
   let weixinCredentialChange: (() => Promise<"changed" | "unchanged" | "unavailable">) | undefined;
   try {
     await gatewayOwner.start();
-    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); return; }
+    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
     const surfacePlugins = await loadBuiltInSurfacePlugins(config);
-    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); return; }
+    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
     if (config.weixin) {
       weixinCredentialChange = await createWeixinCredentialChangeCheck(
         createWeixinCredentialStore(join(config.credentialsDirectory, "weixin")),
@@ -88,7 +99,7 @@ export async function runGatewayProcess(): Promise<void> {
         () => logger.warn({ surface: "weixin" }, "微信凭据检查失败；其他渠道继续运行，下次配置重载重新检查"),
       );
     }
-    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); return; }
+    if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
     application = new GatewayApplication(
       config,
       logger,
@@ -99,6 +110,7 @@ export async function runGatewayProcess(): Promise<void> {
   } catch (error) {
     cleanupHandlers();
     await gatewayOwner.close();
+    clearShutdownDeadline();
     throw error;
   }
   const accountRefresh = new GatewayAccountRefreshServer(
@@ -155,12 +167,13 @@ export async function runGatewayProcess(): Promise<void> {
     cleanupHandlers();
     await application.stop().catch(() => undefined);
     await gatewayOwner.close();
+    clearShutdownDeadline();
     throw error;
   }
 
   const stopWatching = (): Promise<void> => {
-    const providersStopped = providerSettingsWatcher.stop();
-    const networkStopped = networkProxyWatcher.stop();
+    const providersStopped = Promise.resolve().then(() => providerSettingsWatcher.stop());
+    const networkStopped = Promise.resolve().then(() => networkProxyWatcher.stop());
     if (reloadTimer) {
       clearTimeout(reloadTimer);
       reloadTimer = undefined;
@@ -181,27 +194,27 @@ export async function runGatewayProcess(): Promise<void> {
       return;
     }
     stopping = true;
+    // Only this Gateway process is terminated; the App Server stays shared.
+    beginShutdownDeadline();
     gatewayOwner.markNotReady();
-    // A stuck startup or component close must not leave a stopped Gateway
-    // advertised as a live service. Only this Gateway process is terminated.
-    const deadline = setTimeout(() => {
-      logger.error({ timeoutMs: shutdownTimeoutMs }, "Gateway 停止等待超时，进程将以故障状态退出");
-      process.exit(1);
-    }, shutdownTimeoutMs);
-    const watchersStopped = stopWatching();
+    let finalExitCode = exitCode;
+    const reportCloseFailure = (error: unknown, message: string): void => {
+      finalExitCode = 1;
+      logger.error({ err: error }, message);
+    };
     void Promise.all([
-      watchersStopped.catch((error) => logger.error({ err: error }, "Gateway 配置监听关闭失败")),
-      closeAccountRefresh().catch((error) => logger.error({ err: error }, "Gateway 账户刷新 IPC 关闭失败")),
-      application.stop().catch((error) => logger.error({ err: error }, "Gateway 停止失败")),
+      Promise.resolve().then(stopWatching).catch((error) => reportCloseFailure(error, "Gateway 配置监听关闭失败")),
+      closeAccountRefresh().catch((error) => reportCloseFailure(error, "Gateway 账户刷新 IPC 关闭失败")),
+      Promise.resolve().then(() => application.stop()).catch((error) => reportCloseFailure(error, "Gateway 停止失败")),
     ])
       .finally(async () => {
         try {
           await gatewayOwner.close();
         } catch (error) {
-          logger.error({ err: error }, "Gateway 所有权 Socket 关闭失败");
+          reportCloseFailure(error, "Gateway 所有权 Socket 关闭失败");
         }
-        clearTimeout(deadline);
-        process.exit(exitCode);
+        clearShutdownDeadline();
+        process.exit(finalExitCode);
       });
   };
   const reload = async (): Promise<void> => {

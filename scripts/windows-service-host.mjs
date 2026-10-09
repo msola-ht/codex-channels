@@ -19,11 +19,11 @@ import {
   readPrivateFileSync,
   securePrivateFileSync,
 } from "../runtime/private-file.mjs";
+import { serviceGracefulStopTimeoutMs } from "../runtime/shutdown-budget.mjs";
 
 const definitionLimitBytes = 64 * 1024;
 const requestLimitBytes = 1_024;
 const controlTimeoutMs = 2_000;
-const gracefulStopTimeoutMs = 10_000;
 
 export async function runWindowsServiceHost(definitionPath) {
   if (process.platform !== "win32") {
@@ -69,11 +69,11 @@ export async function runWindowsServiceHost(definitionPath) {
     });
     await server.start(`${definition.displayName} Windows 服务宿主已在运行`);
     const result = await Promise.race([resultPromise, stopFailure]);
-    if (stopPromise) await stopPromise;
+    const forcedStop = stopPromise ? await stopPromise : false;
     if (result.error) throw result.error;
-    if (!stopping && (result.code !== 0 || result.signal)) {
+    if ((result.code !== 0 || result.signal) && (!stopping || !forcedStop)) {
       throw new Error(
-        `${definition.displayName} 意外退出：${result.signal ? `signal=${result.signal}` : `exit=${result.code ?? 1}`}`,
+        `${definition.displayName} ${stopping ? "停止时异常退出" : "意外退出"}：${result.signal ? `signal=${result.signal}` : `exit=${result.code ?? 1}`}`,
       );
     }
   } catch (error) {
@@ -184,11 +184,13 @@ function handleControlConnection(socket, definition, child, control, stop) {
 }
 
 async function stopChild(child, control) {
-  if (!childProcessIsRunning(child)) return;
+  if (!childProcessIsRunning(child)) return false;
+  const deadline = Date.now() + serviceGracefulStopTimeoutMs;
   if (await control.send("codexc-stop")) {
-    if (await childExitedWithin(child, gracefulStopTimeoutMs)) return;
+    if (await childExitedWithin(child, Math.max(0, deadline - Date.now()))) return false;
   }
   await terminateChildProcess(child);
+  return true;
 }
 
 function childResult(child) {

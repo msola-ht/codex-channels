@@ -1,12 +1,15 @@
 param([Parameter(Mandatory = $true)][string]$Invocation)
 $ErrorActionPreference = 'Stop'
 $guard = $null
+$owner = $null
 $stage = 'load'
 try {
   . (Join-Path $PSScriptRoot 'windows-native-load.ps1')
   $stage = 'invocation'
   $request = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Invocation)) | ConvertFrom-Json
   if (-not [IO.Path]::IsPathFullyQualified($request.file) -or $request.args -isnot [array]) { throw 'Invalid invocation' }
+  $stage = 'owner'
+  $owner = [CodexcWindows.ProcessOwner]::new([uint32]$request.ownerPid)
   if ($request.socketPath) {
     $stage = 'socket-directory'
     $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($request.socketPath))
@@ -21,9 +24,10 @@ try {
         $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or
         $rule.InheritanceFlags -ne ([Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit) -or
         $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None) { throw 'Invalid socket ACL' }
+    $guard.ProtectContents()
   }
   $stage = 'process'
-  $code = [CodexcWindows.OwnedProcess]::Run($request.file, [string[]]$request.args, [bool]$request.windowsVerbatimArguments, (Get-Location).ProviderPath)
+  $code = [CodexcWindows.OwnedProcess]::Run($request.file, [string[]]$request.args, [bool]$request.windowsVerbatimArguments, (Get-Location).ProviderPath, $owner)
   exit $code
 } catch {
   # Do not print invocation arguments, environment or raw exceptions.
@@ -41,4 +45,5 @@ try {
   exit 1
 } finally {
   if ($null -ne $guard) { $guard.Dispose() }
+  if ($null -ne $owner) { $owner.Dispose() }
 }

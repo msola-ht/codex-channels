@@ -21,6 +21,7 @@ import {
 } from "../runtime/process-lifecycle.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir, runtimeConfig } from "./runtime-config.mjs";
+import { serviceGracefulStopTimeoutMs } from "../runtime/shutdown-budget.mjs";
 
 class DevAllStoppedError extends Error {}
 
@@ -132,6 +133,7 @@ async function runDevAll() {
 async function stopForegroundChildren(children, childControls) {
   const results = await Promise.allSettled(children.map(async child => {
     if (!childProcessIsRunning(child)) return;
+    const deadline = Date.now() + serviceGracefulStopTimeoutMs;
     try {
       if (process.platform === "win32" && await childControls.get(child)?.send("codexc-stop")) {
         await new Promise(resolve => {
@@ -142,12 +144,14 @@ async function stopForegroundChildren(children, childControls) {
             resolve();
           };
           child.once("exit", finish);
-          timer = setTimeout(finish, 5_000);
+          timer = setTimeout(finish, Math.max(0, deadline - Date.now()));
           if (!childProcessIsRunning(child)) finish();
         });
       }
     } finally {
-      await terminateChildProcess(child);
+      await terminateChildProcess(child, process.platform === "win32"
+        ? undefined
+        : { gracePeriodMs: serviceGracefulStopTimeoutMs });
     }
   }));
   const errors = results.filter(result => result.status === "rejected").map(result => result.reason);

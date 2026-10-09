@@ -5,6 +5,7 @@ import { parse } from "smol-toml";
 import { readCodexConfigFileSync, readPrivateFileSync, writeCodexConfigFileAtomic, writePrivateFileAtomic } from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
+const credentialHeaderName = /^(?:authorization|proxy-authorization|cookie|set-cookie|(?:x-)?api[-_]key|x-(?:goog-api-key|auth-token|access-token|amz-security-token))$/iu;
 
 // Keep the established Unix main-config contract; Windows uses the ACL adapter.
 export function readCodexConfigFile(path, maximumBytes = maximumConfigBytes) {
@@ -34,21 +35,32 @@ export function createProviderFileAccess(environment) {
     read: (path, maximumBytes) => (isMainConfig(path) ? readCodexConfigFile : readPrivateFileSync)(path, maximumBytes),
     write: (path, content) => {
       if (!isMainConfig(path)) return writePrivateFileAtomic(path, content);
-      assertCodexConfigHasNoBearerTokens(content);
+      assertCodexConfigHasNoPlaintextCredentials(content);
       return writeCodexConfigFileAtomic(path, content);
     },
   };
 }
 
 /** Backups stay private; their old token must never be published into the shared main config. */
-function assertCodexConfigHasNoBearerTokens(content) {
+export function assertCodexConfigHasNoPlaintextCredentials(content) {
   let document;
   try { document = parse(typeof content === "string" ? content : Buffer.from(content).toString("utf8")); }
   catch { throw new Error("Codex 主配置无法安全解析，未执行写入"); }
   const providers = document.model_providers;
-  if (providers !== null && typeof providers === "object"
-    && Object.values(providers).some(provider => provider !== null && typeof provider === "object" && provider.experimental_bearer_token !== undefined)) {
-    throw new Error("Codex 主配置不得写入明文 Provider 凭据；旧备份已保留，请显式重新配置 Provider 使用私有凭据引用");
+  if (providers !== null && typeof providers === "object") {
+    for (const provider of Object.values(providers)) assertProviderHasNoPlaintextCredentials(provider);
+  }
+}
+
+/** Reject recognizable inline authentication; retain ordinary user headers verbatim. */
+export function assertProviderHasNoPlaintextCredentials(provider) {
+  if (provider === null || typeof provider !== "object") return;
+  const headers = provider.http_headers;
+  if (provider.experimental_bearer_token !== undefined
+    || headers !== null && typeof headers === "object"
+      && Object.entries(headers).some(([name, value]) => credentialHeaderName.test(name)
+        || typeof value === "string" && /^\s*(?:Bearer|Basic|Digest)\s+/iu.test(value))) {
+    throw new Error("Codex 主配置不支持明文 Provider 凭据；请显式重新配置 Provider 使用私有凭据引用");
   }
 }
 

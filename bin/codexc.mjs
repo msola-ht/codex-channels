@@ -61,8 +61,9 @@ import {
 } from "../scripts/metrics-command-options.mjs";
 import { configuredEnvironment, serviceControlEnvironment } from "../scripts/runtime-environment.mjs";
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
+import { serviceStopTimeoutMs } from "../runtime/shutdown-budget.mjs";
 
-const foregroundShutdownTimeoutMs = 5_000;
+const foregroundShutdownTimeoutMs = serviceStopTimeoutMs;
 const foregroundProcessGroupExitTimeoutMs = 1_000;
 const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 

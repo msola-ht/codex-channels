@@ -18,7 +18,7 @@ import { opencodeGoAccountMarkerPath, opencodeGoAccountsFilePath } from "./openc
 import { deepseekAccountMarkerPath, deepseekAccountsFilePath } from "./deepseek-accounts.mjs";
 import { ccgAccountMarkerPath, ccgAccountsFilePath } from "./ccg-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
-import { createProviderFileReader, readCodexConfigFile } from "./provider-file-access.mjs";
+import { assertProviderHasNoPlaintextCredentials, createProviderFileReader, readCodexConfigFile } from "./provider-file-access.mjs";
 export { readCodexConfigFile } from "./provider-file-access.mjs";
 import { managedPrimaryCredentialPath, readManagedPrimaryCredential } from "./managed-provider-credentials.mjs";
 
@@ -646,6 +646,7 @@ export function readProviderProfile(
   const mainPath = resolve(join(codexHomePath(environment), "config.toml"));
   const selectedPath = resolve(path);
   const isMain = process.platform === "win32" ? mainPath.toLowerCase() === selectedPath.toLowerCase() : mainPath === selectedPath;
+  if (readCredential && isMain) assertProviderHasNoPlaintextCredentials(provider);
   if (readCredential && provider.env_key !== undefined && provider.experimental_bearer_token !== undefined) {
     throw new Error("受管 Provider 凭据配置存在歧义");
   }
