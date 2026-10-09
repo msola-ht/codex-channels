@@ -108,7 +108,7 @@ const helpText = {
   logs [目标]                  查看后台服务日志
   reload                       重新读取 Gateway 配置
   update                       更新程序与配套 Codex CLI
-  uninstall [--services]       卸载程序；--services 仅卸载后台服务，均保留用户数据
+  uninstall [--services]       自动识别并卸载当前程序；--services 仅卸载后台服务
 
 信息：
   version, -v, --version       显示版本
@@ -179,9 +179,10 @@ CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CL
 
 --services 只停止并卸载后台服务，保留程序和用户数据。
 
-卸载后台服务、受管 Git 源码仓库与对应 npm 全局命令；保留
-config.toml、数据库、凭据、日志、输出和 Shell 配置。直接从 npm Registry 安装的版本使用
-codexc uninstall --services 和 npm uninstall -g @hegenai/codexc。`,
+自动识别当前安装，先卸载后台服务，再卸载对应 npm 全局命令。
+有精确来源记录的受管安装同时删除受管 Git 源码仓库；本地工作树、npm Registry
+安装和缺少来源记录的旧全局包保留源码。身份未知或冲突时拒绝卸载。
+config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置均保留。`,
   metrics: `用法：codexc metrics
 
 无参数时进入查询与导出菜单；交互清理和重置请用 codexc cleanup。直接命令：

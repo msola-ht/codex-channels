@@ -204,6 +204,8 @@ process.stdin.on("end", () => {
 ')" || fail "npm pack 未返回 tarball 文件名"
 npm install --global --ignore-scripts --loglevel=error --no-audit --no-fund "$package_directory/$tarball" \
   >/dev/null || fail "Codex Connect npm 全局命令安装失败；请检查 npm 全局目录权限"
+node "$checkout/scripts/source-install-metadata.mjs" record "$checkout" "$npm_global_prefix" \
+  || fail "无法记录源码安装来源"
 [ -x "$global_launcher" ] \
   || fail "npm 全局命令入口不存在：$global_launcher"
 completed=true

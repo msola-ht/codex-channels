@@ -1,6 +1,7 @@
 import { closeQueueStreams, openQueueStream } from "./webui-queue-events.mjs";
 import { watchQueueChanges } from "../runtime/queue-events.mjs";
 import { installServiceControlHandler } from "../runtime/process-lifecycle.mjs";
+import { serviceShutdownTimeoutMs } from "../runtime/shutdown-budget.mjs";
 import { accountSnapshotEventsPath, metricsEventsPath } from "../runtime/metrics-events.mjs";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -1050,6 +1051,19 @@ function main() {
       port: settings.port,
       token: settings.token,
     });
+    // Browsers may open TCP preconnections without sending any HTTP request.
+    // Node's HTTP idle-connection cleanup does not reap those sockets.
+    const pendingConnections = new Set();
+    server.on("connection", socket => {
+      pendingConnections.add(socket);
+      socket.once("close", () => pendingConnections.delete(socket));
+    });
+    server.on("request", (request, response) => {
+      pendingConnections.delete(request.socket);
+      response.once("finish", () => {
+        if (shuttingDown) server.closeIdleConnections();
+      });
+    });
     server.on("error", (error) => {
       writeCliMessage(
         "failure",
@@ -1078,8 +1092,19 @@ function main() {
     const shutdown = (exitCode = 0) => {
       if (shuttingDown) return;
       shuttingDown = true;
-      server.close(() => process.exit(exitCode));
+      const deadline = setTimeout(() => {
+        logger.error({ event: "service.shutdown-timeout", timeoutMs: serviceShutdownTimeoutMs }, "WebUI 请求未在停止期限内结束，关闭剩余连接");
+        server.closeAllConnections();
+        process.exit(1);
+      }, serviceShutdownTimeoutMs);
+      deadline.unref();
+      server.close(() => {
+        clearTimeout(deadline);
+        process.exit(exitCode);
+      });
       closeNotifications();
+      for (const socket of pendingConnections) socket.destroy();
+      server.closeIdleConnections();
     };
     process.on("SIGINT", () => shutdown());
     process.on("SIGTERM", () => shutdown());
