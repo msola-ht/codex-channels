@@ -8,11 +8,9 @@ import type {
   ModelSelectionState,
 } from "../../application/index.js";
 import {
-  fastServiceTierId,
-  isFastServiceTier,
   listProviders,
 } from "../../application/index.js";
-import { formatCodexProviderLabel, scopedModelDisplayName } from "../provider-format.js";
+import { formatCodexProviderLabel, formatServiceTier, scopedModelDisplayName } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
@@ -226,9 +224,7 @@ function modelProviderSelectionText(
   return toStructuredMarkdownList([
     `当前模型：${result.state.model}（Provider：${formatCodexProviderLabel(current)}）`,
     `${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort)}`,
-    ...(currentModel && fastServiceTierId(currentModel)
-      ? [`Fast 模式：${isFastServiceTier(result.state.serviceTier, currentModel) ? "开启" : "关闭"}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
-      : []),
+    `速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
     "",
     `当前 Provider：${formatCodexProviderLabel(current)}`,
     "可用提供商：",

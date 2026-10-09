@@ -246,7 +246,7 @@ Gateway 会在关闭 Client 和停止 App Server 前向所有已知授权渠道�
 非自动解除触发的全局空闲轮次只记录日志，不发送渠道通知。共享 App Server 的原生 TUI 必须通过
 `codexc remote` 启动；直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，可能被停止。
 空闲解除时按渠道会话保存 Provider、模型、思考等级和服务层级；Gateway 重启后直接发送消息仍沿用
-这份偏好新建会话。断开后通过 `/model`、思考等级或 Fast 入口调整设置，会更新保存值。
+这份偏好新建会话。断开后通过 `/model`、思考等级或 `/fast` 速度入口调整设置，会更新保存值。
 恢复时若 Provider、模型或设置已不可用，会要求重新选择，不自动换账户或模型。
 已有绑定仍以 App Server 的 Thread 设置为准；显式恢复同 Provider 历史会话继续沿用渠道偏好，
 跨 Provider 恢复尊重目标 Thread，原生 Queue 存在时清除待生效覆盖。撤权、归档和跨渠道接管
@@ -644,8 +644,20 @@ npm 安装版也可以使用 `codexc uninstall --services` 后执行 `npm uninst
 `/r` 的完整 ID、短 ID、名称和序号都只在当前工作区查找。恢复其他工作区的历史前，
 请先使用 `/work` 切换到会话所属工作区；恢复不会自动切换工作区或改写历史会话的目录。
 恢复时如果历史目录或实际权限与工作区不一致，会解除该绑定；下一条普通消息在当前工作区新建会话。
-`/model` 选择 OpenAI 模型会关闭下一轮的 Fast，并同步保存为 Codex 用户默认值，避免 `all` 重启后
-重新开启；需要时可用 `/fast on` 再打开。选择第三方模型不修改 OpenAI 的 Fast 默认值。
+`/fast on` 选择 Fast，`/fast ultrafast` 选择独立的 Ultrafast，`/fast off` 回到 Standard，
+`/fast status` 查看当前档位；无参数时在 Standard 与 Fast 之间切换，当前为 Ultrafast 时回到 Standard。
+加速档位必须由 App Server 的当前模型目录明确提供；模型、账号或 Provider 不支持时拒绝开启，不回退为其他档位。
+设置在下一次 Turn 生效；主 Provider 同时保存 Codex 用户级默认值，独立 Provider 不改写主实例默认值。
+飞书加速菜单按模型能力展示可选档位，Telegram 和微信使用相同命令语义。可用性和消耗以账号及上游规则为准；
+上游 `features.fast_mode` 关闭时不会启用 Fast/Ultrafast，Gateway 不替用户打开该功能开关，最终以 App Server 返回状态为准。
+本地 `codexc config → Codex 新会话与用户偏好 → 默认加速档位` 和 WebUI 的 Codex 设置同样提供
+Standard/Fast/Ultrafast；只按当前模型能力提供加速选项，功能开关关闭时仅允许选择 Standard。
+未显式配置时显示“跟随上游默认”，不会把它等同于明确的 Standard。配置入口沿用预览/确认和配置修订检查，
+只影响新建或重新加载的 Thread；渠道 `/fast` 另外设置当前会话的下一 Turn。
+已配置模型不在可用目录中时保留原模型标识并提示先选择有效模型，不借用其他模型的加速能力；
+未配置模型时只采用目录明确标注的默认模型。模型不可用时仍可选择 Standard 退出加速。
+`/model` 选择 OpenAI 模型会关闭下一轮的 Fast/Ultrafast，回到 Standard，并同步保存为 Codex 用户默认值，避免 `all` 重启后
+重新开启；需要时可用 `/fast on` 或 `/fast ultrafast` 再打开。选择第三方模型不修改 OpenAI 的加速默认值。
 `/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话会优先显示本机指标/缓存中的 Turn 轮数；打开列表不等待历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn 统计；本地没有记录时不会猜测数量。需要完整官方历史计数时，`codexc cleanup sessions` 仍会按候选读取。
 
 计划任务是 Gateway 自有功能，不是 App Server 原生计划 RPC。启用方式和确认语法见 [`计划任务开发设计`](scheduled-tasks-development.md)。

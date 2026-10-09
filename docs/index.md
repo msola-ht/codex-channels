@@ -237,9 +237,17 @@ Computer Use／浏览器过程展示复用已支持的 `item/started`、`item/co
 [`setup-summary.mjs`](../scripts/setup-summary.mjs)；
 用户设置入口位于 `codexc config → Codex 新会话与用户偏好`，在显式确认后复用下表已有的版本化配置事务，不修改登录状态。Auto-review 开关通过稳定只读 `configRequirements/read` 的受控实验字段 `allowedApprovalsReviewers` 和稳定 `featureRequirements` 检查受管审批人及功能限制。
 网络代理菜单通过 [`codex-proxy-env.mjs`](../runtime/codex-proxy-env.mjs) 写入 Codex Home 的 `.env`，依据固定版本 [`arg0::load_dotenv`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/arg0/src/lib.rs) 的加载语义，不新增 RPC。
-渠道选择 OpenAI 模型时，`model-selection-service.ts` 复用 `writeDefaultFastMode(false)` / `config/batchWrite`
+渠道选择 OpenAI 模型时，`model-selection-service.ts` 复用 `writeDefaultServiceTier("default")` / `config/batchWrite`
 把用户级 `service_tier` 保存为 `default`，同时保留下一 Turn 的显式 Standard 覆盖；保存失败不切换会话。
 第三方模型选择不修改 OpenAI 默认值。
+渠道 `/fast ultrafast` 通过既有 `model/list.serviceTiers` 精确检查 `ultrafast`，使用
+`turn/start.serviceTier` 传递下一 Turn 设置；主 Provider 默认值复用 `config/batchWrite` 写入
+`service_tier = "ultrafast"`，独立 Provider 不改主配置。Fast、Ultrafast、Standard 分开展示；
+目录未声明的档位拒绝选择，无绑定偏好恢复时重新检查目录。验证应覆盖命令、配置写入失败、
+Turn 参数、恢复及三渠道输出；不以字段为字符串推断任意档位均受支持。
+`codexc config` 与 WebUI 共用的用户设置边界采用 `service-tier` / `serviceTier`，保留原始配置值与
+模型 `serviceTiers`；独立加速设置和核心默认值事务均验证精确模型能力及 `features.fast_mode`，
+预览不写入，确认写入保留 `expectedVersion` 检查。未显式配置与显式 `default` 分开展示。
 OCG 账户快照明确为无有效订阅时，`gateway-component-graph.ts` 将该账户状态注入
 `model-selection-service.ts`，从渠道 `/model` 的浏览和选择中排除该账户；正常额度刷新后恢复。
 这是本地选择规则，不修改 `model/list` 协议、既有 Thread 或统计代理转发。Telegram 模型按钮经

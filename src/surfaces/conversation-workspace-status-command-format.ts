@@ -1,5 +1,4 @@
 import {
-  isFastServiceTier,
   type ConversationCommandResult,
   type ConversationStatus,
 } from "../application/index.js";
@@ -10,7 +9,7 @@ import {
 } from "../conversation-core/index.js";
 
 import { formatRemainingRateLimitWindow, formatTimezoneLine } from "./account-format.js";
-import { formatCodexProviderLabel, supportsFastMode } from "./provider-format.js";
+import { formatCodexProviderLabel, formatServiceTier } from "./provider-format.js";
 import { formatCacheHitRate, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
@@ -205,9 +204,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `提供商：${formatCodexProviderLabel(status.modelProvider)}`,
     `${reasoningEffortSettingName(status.effort)}：${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
-    ...(supportsFastMode(status.modelProvider)
-      ? [`Fast 模式：${status.threadId ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭") : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`]
-      : []),
+    `速度：${status.threadId || status.fastModePending ? formatServiceTier(status.serviceTier) : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,
     `协作模式：${status.collaborationMode === "plan" ? "Plan" : "Default"}${status.collaborationModePending ? "（下一次 Turn 生效）" : ""}`,
     ...(isAutoApprovalReviewer(status.approvalsReviewer)
       ? [`审批方式：${formatThreadApprovalsReviewer(status.approvalsReviewer)}`]

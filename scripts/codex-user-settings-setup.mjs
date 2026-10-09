@@ -21,6 +21,18 @@ const historyPersistenceLabels = { "save-all": "保存", none: "不保存" };
 const reasoningSummaryHints = { auto: "由 Codex 自动选择摘要方式", concise: "优先压缩为简短摘要", detailed: "保留更多推理摘要内容", none: "不生成推理摘要；未配置时默认选择" };
 const verbosityHints = { low: "回复更简洁", medium: "在简洁和细节之间平衡", high: "提供更完整的解释" };
 const historyPersistenceHints = { "save-all": "保存会话历史，便于恢复和接续", none: "不保存新的会话历史" };
+const serviceTierLabels = { default: "Standard", fast: "Fast", ultrafast: "Ultrafast" };
+
+function serviceTierLabel(value) {
+  if (value === null) return "跟随上游默认";
+  const normalized = normalizedServiceTier(value);
+  return Object.hasOwn(serviceTierLabels, normalized)
+    ? serviceTierLabels[normalized] : `未知档位（${value}）`;
+}
+
+function normalizedServiceTier(value) {
+  return value === "priority" ? "fast" : value;
+}
 
 function compactHint(compact) {
   const contextWindow = compact?.contextWindow ?? null;
@@ -50,7 +62,7 @@ export async function runCodexUserSettingsSetup({
         ? [{
             value: "all",
             label: "配置核心默认值",
-            hint: "一次确认并写入模型、Fast 与权限默认值",
+            hint: "一次确认并写入模型、加速档位与权限默认值",
           }]
         : []),
       ...(settings.defaultsEditable
@@ -61,9 +73,9 @@ export async function runCodexUserSettingsSetup({
           }]
         : []),
       ...(settings.defaultsEditable ? [{
-        value: "fast",
-        label: "Fast 默认状态",
-        hint: settings.defaults.fastEnabled ? "当前：开启" : "当前：关闭",
+        value: "service-tier",
+        label: "默认加速档位",
+        hint: `当前：${serviceTierLabel(settings.defaults.serviceTier)}`,
       }] : []),
       {
         value: "web-search",
@@ -140,8 +152,8 @@ export async function runCodexUserSettingsSetup({
       updateSetting,
     });
   }
-  if (section === "fast") {
-    return runFastSetting({
+  if (section === "service-tier") {
+    return runServiceTierSetting({
       environment,
       output,
       prompts,
@@ -290,15 +302,15 @@ async function runAllSettings({
   }
   const modelDefaults = await promptModelDefaults(prompts, settings);
   if (modelDefaults === null) return { action: "back" };
-  const fastEnabled = await promptFast(prompts, settings.defaults.fastEnabled);
-  if (fastEnabled === null) return { action: "back" };
+  const serviceTier = await promptServiceTier(prompts, settings, modelDefaults.model);
+  if (serviceTier === null) return { action: "back" };
   const permissions = await promptPermissions(prompts, settings);
   if (permissions === null) return { action: "back" };
   const confirmed = await prompts.confirm({
     message: [
       "一次写入 Codex 核心默认值：",
       `${modelDefaults.model.model} · ${modelDefaults.reasoningEffort}`,
-      `Fast ${fastEnabled ? "开启" : "关闭"}`,
+      serviceTierLabel(serviceTier),
       `${permissions.sandboxMode} · ${permissions.approvalPolicy}`,
       `网络${permissions.networkAccess ? "开启" : "关闭"}`,
     ].join(" · "),
@@ -312,7 +324,7 @@ async function runAllSettings({
     kind: "all",
     model: modelDefaults.model.model,
     reasoningEffort: modelDefaults.reasoningEffort,
-    fastEnabled,
+    serviceTier,
     ...permissions,
   }, {
     environment,
@@ -321,13 +333,13 @@ async function runAllSettings({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(
-    `Codex 核心默认值已更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · Fast ${fastEnabled ? "开启" : "关闭"} · ${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"}\n`,
+    `Codex 核心默认值已更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · ${serviceTierLabel(serviceTier)} · ${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"}\n`,
   );
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 
-async function runFastSetting({
+async function runServiceTierSetting({
   environment,
   output,
   prompts,
@@ -336,15 +348,24 @@ async function runFastSetting({
   createClient,
   primaryProvider,
 }) {
-  const enabled = await promptFast(prompts, settings.defaults.fastEnabled);
-  if (enabled === null) return { action: "back" };
-  const result = await updateSetting({ kind: "fast", enabled }, {
+  const model = settings.models.find((candidate) => candidate.model === settings.defaults.model);
+  if (!model) {
+    output.write(`当前默认模型 ${settings.defaults.model ?? "未指定"} 不在可用目录中；请先选择有效的默认模型。仍可选择 Standard 退出加速。\n`);
+  }
+  const serviceTier = await promptServiceTier(prompts, settings, model);
+  if (serviceTier === null) return { action: "back" };
+  const confirmed = await prompts.confirm({
+    message: `保存 Codex 新会话默认加速档位：${serviceTierLabel(serviceTier)}？`,
+    initialValue: false,
+  });
+  if (prompts.isCancel(confirmed) || confirmed !== true) return { action: "back" };
+  const result = await updateSetting({ kind: "service-tier", serviceTier }, {
     environment,
     expectedVersion: settings.version,
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  output.write(`Codex 新会话默认 Fast 已${enabled ? "开启" : "关闭"}。\n`);
+  output.write(`Codex 新会话默认加速档位已设为 ${serviceTierLabel(serviceTier)}。\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
@@ -662,18 +683,24 @@ async function promptModelDefaults(prompts, settings) {
   return { model, reasoningEffort };
 }
 
-async function promptFast(prompts, initialValue) {
-  const enabled = await prompts.select({
-    message: "新会话默认 Fast 状态",
+async function promptServiceTier(prompts, settings, model) {
+  const supports = (value) => settings.defaults.accelerationEnabled && model?.serviceTiers.some((tier) =>
+    value === "fast" ? tier.id === "priority" || tier.id === "fast" : tier.id === "ultrafast");
+  const options = [
+    { value: "default", label: "Standard", hint: "新会话默认使用标准服务层级" },
+    ...(supports("fast") ? [{ value: "fast", label: "Fast", hint: "新会话默认使用 Fast" }] : []),
+    ...(supports("ultrafast") ? [{ value: "ultrafast", label: "Ultrafast", hint: "新会话默认使用 Ultrafast" }] : []),
+    { value: "back", label: "返回" },
+  ];
+  const current = normalizedServiceTier(settings.defaults.serviceTier);
+  const available = options.some((option) => option.value === current);
+  const serviceTier = await prompts.select({
+    message: `新会话默认加速档位（当前：${serviceTierLabel(current)}${available || current === null ? "" : "，当前档位不可选"}）`,
     showInstructions: false,
-    initialValue,
-    options: [
-      { value: true, label: "开启", hint: "新会话默认使用 Fast" },
-      { value: false, label: "关闭", hint: "新会话默认使用标准服务层级" },
-      { value: "back", label: "返回" },
-    ],
+    initialValue: available ? current : "back",
+    options,
   });
-  return prompts.isCancel(enabled) || enabled === "back" ? null : enabled;
+  return prompts.isCancel(serviceTier) || serviceTier === "back" ? null : serviceTier;
 }
 
 async function promptPermissions(prompts, settings) {

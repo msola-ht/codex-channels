@@ -23,7 +23,7 @@ function currentValue(settings: CodexUserSettingsResponse, setting: CodexUserSet
     value: settings.toolSettings.fields.find((field) => JSON.stringify(field.path) === JSON.stringify(setting.path))?.userValue ?? null,
   }
   if (setting.kind === "defaults") return { model: settings.defaults.model, reasoningEffort: settings.defaults.reasoningEffort }
-  if (setting.kind === "fast") return { enabled: settings.defaults.fastEnabled }
+  if (setting.kind === "service-tier") return { serviceTier: settings.defaults.serviceTier }
   if (setting.kind === "approvals-reviewer") return { value: settings.approvalsReviewer.value }
   if (setting.kind === "permissions") return {
     sandboxMode: settings.permissions.sandboxMode ?? "read-only",

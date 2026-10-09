@@ -171,6 +171,9 @@ Core 和投递路径保留经处理的有界纯文本。Telegram 在 HTML 面板
   Provider（如 `model_providers.OpenAI`）显示为“OpenAI · 自定义”，与官方直连区分。
 - Cline Pass 在渠道提供商菜单、模型摘要、状态、完成卡片和用量中保留 `clp-<账户>` 标识，
   例如 `clp-main`；Setup 品牌入口与 WebUI 账户卡片使用完整名称 Cline Pass。
+- WebUI 请求及错误列表按记录的请求服务层级展示 Fast 或 Ultrafast，调用详情区分请求与响应层级。
+  两者不一致时沿用提示说明实际响应层级；`priority` 与 `fast` 视为同档，未知或缺失响应不推断为 Standard。
+  层级复用既有指标字符串字段，不根据当前模型设置补写历史记录，也不据此推断费用。
 - 同一 Turn 中模型请求遇到 `429/5xx` 或上游 WebSocket 断流后由 Codex 重试并最终完成时，完成
   卡片显示“自动重试、最终成功”；真实失败尝试仍保留在
   指标库与异常报告中。

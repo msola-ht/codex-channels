@@ -215,10 +215,12 @@
   占用状态，再按最新配置修订备份并提交，避免登录期间的并发修改被旧快照覆盖。
 - `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与校验；插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
-  Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Fast、计划清单工具、TUI 空闲总结，
-  一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入核心默认值；Fast 仅作为
+  Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Standard/Fast/Ultrafast、计划清单工具、TUI 空闲总结，
+  一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入核心默认值；加速档位仅作为
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
-  第三方固定模式不开放官方默认模型、思考等级和 Fast；已有 `default_permissions` 时不混写传统 Sandbox 字段。
+  第三方固定模式不开放官方默认模型、思考等级和加速档位；已有 `default_permissions` 时不混写传统 Sandbox 字段。
+  Fast 按模型目录精确 `priority`/`fast` ID、Ultrafast 按 `ultrafast` ID 开放，写入前重新校验所选模型；`features.fast_mode` 关闭时拒绝开启加速，不自动修改开关。
+  快照保留已配置但不可用的模型 ID，未配置时只采用目录显式默认模型，不回退到其他条目；CLI/WebUI 提示先选有效模型，仍允许 Standard 退出加速。
   全局 Auto-review 默认值仅允许官方 OpenAI 主实例或复用官方模型目录的 Codex 兼容主实例开启；其他主实例仍可关闭，组织策略限制继续适用。
 - `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc config` 的“Codex 新会话与用户偏好”
   适配器，只负责选择、预览和中文结果；可单独设置计划清单工具、TUI 空闲总结、Plan 思考等级、推理摘要（未配置时默认 `none`）、输出详细程度、

@@ -124,7 +124,7 @@ export function formatSurfaceUserFacingError(
     case "queue.busy":
       return "当前 Session 有活动或待触发 Turn，请稍后重试";
     case "queue.pending-overrides":
-      return "Queue 与待生效的模型、思考、Fast 或 Plan 选择不能同时存在；请先让其中一方处理完成";
+      return "Queue 与待生效的模型、思考、速度或 Plan 选择不能同时存在；请先让其中一方处理完成";
     case "queue.snapshot.required":
       return "数字选择器只对最近五分钟的本会话 Queue 列表有效，请先执行 /queue list";
     case "queue.item-not-found":
@@ -221,9 +221,9 @@ export function formatSurfaceUserFacingError(
       return `当前模型不支持该思考设置，可选：${choices}`;
     }
     case "fast.usage":
-      return "用法：/fast [on|off|status]";
+      return "用法：/fast [on|ultrafast|off|status]";
     case "fast.unsupported":
-      return `当前模型不支持 Fast 模式：${detail(error, "model", "未知")}`;
+      return `当前模型不支持 ${error.details.tier === "Ultrafast" ? "Ultrafast" : "Fast"} 档位：${detail(error, "model", "未知")}`;
     case "provider.account.unavailable":
       return `${detail(error, "provider", "当前提供商")}的账户查询失败，请检查配置或稍后重试`;
     case "collaboration-mode.unsupported":

@@ -772,7 +772,7 @@ export function renderFeishuCommandCenterCard(
         ["当前状态", "status", "default"],
       ]),
       actionRow(token, [
-        ["Fast", "fast", "primary"],
+        ["速度", "fast", "primary"],
         ["账户用量", "usage", "default"],
         ["请求指标", "metrics", "default"],
         ["额度", "limits", "default"],

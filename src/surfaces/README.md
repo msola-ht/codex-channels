@@ -168,8 +168,8 @@ Provider 分别生成固定凭据提示，不展示上游原文。Turn 完成在
 账户状态在正式和调试模式均显示剩余额度及可用的重置时间、剩余时长；含重置时间时标注时区。子代理完成卡片在值可靠时
 展示思考等级、请求次数和 Token：正式模式保留总计，调试模式才展开缓存与推理 Token 和缓存命中率；
 指标读取失败时只显示“统计暂不可用”。
-原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与
-OpenAI 周限；配置的自定义主模型 Provider 追加“ · 自定义”标识（例如“OpenAI · 自定义”），
+原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示
+OpenAI 周限；速度按实际服务档位统一显示为 Standard、Fast、Ultrafast 或未知档位，不根据 Provider 推测；配置的自定义主模型 Provider 追加“ · 自定义”标识（例如“OpenAI · 自定义”），
 历史无 Turn 指标只在通用明细和时间范围聚合中按稳定 Provider ID 展示；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
@@ -180,7 +180,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `conversation-model-account-command-format.ts` 为三个渠道渲染 `/limits reset` 选券预览、确认命令和消费结果，并在 OpenAI `/limits` 中展示重置券可用数量，并按相同
 到期时间合并服务端返回的明细；`null` 到期时间明确显示为“无到期时间”，明细少于可用数量时标出
 未返回明细的剩余张数。
-`provider-format.ts` 统一已知 Provider 显示名、命令中的 Provider 文案及限定 Provider 后的模型显示名前缀裁剪，并对后续 Provider 标识做有界展示。
+`provider-format.ts` 统一已知 Provider 显示名、命令中的 Provider 文案及限定 Provider 后的模型显示名前缀裁剪，并对后续 Provider 标识做有界展示；同时按实际服务档位格式化速度，并依据当前模型目录展示 Fast、Ultrafast 支持情况，供模型、状态与生命周期展示共用。
 `reasoning-effort-format.ts` 统一模型菜单、状态与运行结果的思考设置文案；目录声明 `enabled` 时使用思考模式选择，`enabled` / `none` 分别显示开启/关闭思考，其余等级原样显示，提交给 Application 的控制值保持不变。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。

@@ -105,6 +105,7 @@ export {
 export {
   ModelSelectionService,
   fastServiceTierId,
+  ultrafastServiceTierId,
   isFastServiceTier,
   listProviders,
   resolveEffort,

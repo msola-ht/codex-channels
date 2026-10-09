@@ -733,10 +733,10 @@ export class CodexAppServerClient implements
     return models;
   }
 
-  async writeDefaultFastMode(enabled: boolean): Promise<void> {
+  async writeDefaultServiceTier(tier: "fast" | "ultrafast" | "default"): Promise<void> {
     await this.writeUserConfigEdits([{
       keyPath: "service_tier",
-      value: enabled ? "fast" : "default",
+      value: tier,
     }]);
   }
 

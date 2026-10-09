@@ -540,12 +540,14 @@ export interface CodexUserSettingsResponse {
     displayName: string
     reasoningEfforts: Array<{ effort: string; description: string }>
     defaultReasoningEffort: string
+    serviceTiers: Array<{ id: string; name: string }>
     isDefault: boolean
   }>
   defaults: {
     model: string | null
     reasoningEffort: string | null
-    fastEnabled: boolean
+    serviceTier: string | null
+    accelerationEnabled: boolean
     webSearch: "live" | "indexed" | "cached" | "disabled" | null
     updatePlanEnabled: boolean
     autoRecapEnabled: boolean

@@ -1,5 +1,4 @@
 import {
-  isFastServiceTier,
   lunaReserveModel,
   type ConversationStatus,
 } from "../application/index.js";
@@ -26,7 +25,7 @@ import {
 } from "./elapsed-duration.js";
 import {
   formatCodexProviderLabel,
-  supportsFastMode,
+  formatServiceTier,
 } from "./provider-format.js";
 import {
   formatCompactMetricsValue,
@@ -258,14 +257,12 @@ export function createStartupPresentation(
             label: reasoningEffortSettingName(status.effort),
             value: `${formatReasoningEffort(status.effort)}${pendingSuffix(status.effortPending)}`,
           },
-          ...(supportsFastMode(status.modelProvider)
-            ? [{
-                label: "Fast 模式",
-                value: `${status.threadId
-                  ? (isFastServiceTier(status.serviceTier) ? "开启" : "关闭")
-                  : "未知"}${pendingSuffix(status.fastModePending)}`,
-              }]
-            : []),
+          {
+            label: "速度",
+            value: `${status.threadId || status.fastModePending
+              ? formatServiceTier(status.serviceTier)
+              : "未知"}${pendingSuffix(status.fastModePending)}`,
+          },
           {
             label: "协作模式",
             value: `${status.collaborationMode === "plan" ? "Plan" : "Default"}${pendingSuffix(status.collaborationModePending)}`,
@@ -564,9 +561,7 @@ export function createTurnCompletedPresentation(
   if (event.model) {
     runFields.push({
       label: "模型",
-      value: supportsFastMode(event.modelProvider)
-        ? `${event.model} · ${formatReasoningEffort(event.effort)} · Fast ${isFastServiceTier(event.serviceTier ?? null) ? "开启" : "关闭"}`
-        : `${event.model} · ${formatReasoningEffort(event.effort)}`,
+      value: `${event.model} · ${formatReasoningEffort(event.effort)} · ${formatServiceTier(event.serviceTier)}`,
     });
     runFields.push({
       label: "提供商",

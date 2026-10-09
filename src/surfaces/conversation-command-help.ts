@@ -22,7 +22,7 @@ export const conversationCommandDescriptions = {
   review: "启动代码审查",
   model: "查看或切换模型",
   effort: "查看或切换思考等级",
-  fast: "查看或切换 Fast 模式",
+  fast: "查看或切换 Standard、Fast、Ultrafast 速度",
   skill: "查看或调用 Skill",
   mcp: "检查或管理 MCP、登录 OAuth、浏览或读取资源",
   plugin: "列出、查看或调用 Plugin（开发中）",
@@ -72,7 +72,7 @@ export const conversationCommandHelpSections = [
     title: "模型与能力：",
     lines: [
       "/model [提供商序号或 ID|模型序号、ID 或名称|clear]",
-      "/effort [序号|档位] · /fast [on|off|status]",
+      "/effort [序号|档位] · /fast [on|ultrafast|off|status]",
       "/skill · /skills [名称或序号 任务]",
       "/agents [角色名称或序号 任务]",
       "/mcp [名称或序号]",

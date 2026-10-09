@@ -43,7 +43,7 @@ type ProviderClientMethod =
   | "lunaReserveModel"
   | "updateLunaReserveThreadSettings"
   | "updateThreadApprovalsReviewer"
-  | "writeDefaultFastMode"
+  | "writeDefaultServiceTier"
   | "readDefaultReasoningEffort"
   | "readDefaultServiceTier"
   | "forkThread"
@@ -680,10 +680,10 @@ export class ProviderRoutingClient {
     return this.withPrimaryActivity((client) => client.listModels(...args));
   }
 
-  writeDefaultFastMode(
-    ...args: Parameters<ProviderClientInstance["writeDefaultFastMode"]>
-  ): ReturnType<ProviderClientInstance["writeDefaultFastMode"]> {
-    return this.withPrimaryActivity((client) => client.writeDefaultFastMode(...args));
+  writeDefaultServiceTier(
+    ...args: Parameters<ProviderClientInstance["writeDefaultServiceTier"]>
+  ): ReturnType<ProviderClientInstance["writeDefaultServiceTier"]> {
+    return this.withPrimaryActivity((client) => client.writeDefaultServiceTier(...args));
   }
 
   async readDefaultReasoningEffort(

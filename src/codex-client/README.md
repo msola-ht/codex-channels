@@ -113,7 +113,9 @@
   当前 Thread 审批方式通过 `updateThreadApprovalsReviewer` 更新；请求前注册合法设置通知观察器，等待 RPC 成功和最新同 Thread 同目标通知，超时、断线、关闭或 Thread 失效清理等待和请求，不启动 Turn、不重试设置写入。
   `account/read` 当前认证路由、账户与 Thread 用量及用户级配置
   读取等 App Server 方法的类型化封装；按 Workspace 读取有效思考等级与服务层级，模型、思考等级、服务层级默认值和受控 agents 设置统一通过
-  同一个 `config/batchWrite` 用户配置事务写入，受控的读改写流程从原始用户层取得版本并通过
+  同一个 `config/batchWrite` 用户配置事务写入；`writeDefaultServiceTier` 只接受 Standard 对应的
+  `default`、`fast` 与 `ultrafast`，渠道通过模型目录检查可用性，下一 Turn 覆盖仍走 `turn/start.serviceTier`。
+  受控的读改写流程从原始用户层取得版本并通过
   `expectedVersion` 拒绝并发覆盖；用户设置读取可显式附加稳定 `configRequirements/read`，
   仅投影受控实验 `allowedApprovalsReviewers` 和稳定 `featureRequirements` 中的 Auto-review
   审批人及功能限制，不返回完整受管配置；策略读取失败或畸形时保留有效用户快照，省略审批策略投影，由设置入口显示不可用并拒绝该字段写入。
