@@ -1,15 +1,18 @@
+import { advanceMarkdownFence } from "../markdown-fence.js";
+
 export function formatWeixinFinalText(text: string): string {
   const lines = text.split(/\r?\n/u);
   const output: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const opening = lines[index]!;
-    if (!/^```[a-zA-Z0-9_+-]*\s*$/u.test(opening)) {
+    const fence = advanceMarkdownFence(undefined, opening);
+    if (!fence) {
       output.push(formatWeixinMarkdownLine(opening));
       continue;
     }
     const closingIndex = lines.findIndex(
       (line, candidate) =>
-        candidate > index && /^```\s*$/u.test(line),
+        candidate > index && advanceMarkdownFence(fence, line) === undefined,
     );
     if (closingIndex < 0) {
       // An unclosed fence creates an oversized, unterminated code region in

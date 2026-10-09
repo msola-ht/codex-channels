@@ -132,6 +132,7 @@ import {
 } from "../storage/index.js";
 import {
   canReviewConversationHook,
+  canPreserveWeixinHookReviewText,
   formatProviderIdleReleaseNotice,
   setConfiguredCustomPrimaryProviderId,
   type SurfaceAdapter,
@@ -763,7 +764,11 @@ export abstract class GatewayComponentGraph {
           throw new UserFacingError("hooks.forbidden", "当前用户未获授权管理 Hook");
         }
       },
-      canReviewConversationHook,
+      (surface, hook) => {
+        if (surface === "weixin") return canReviewConversationHook(hook, canPreserveWeixinHookReviewText);
+        if (surface === "feishu" || surface === "telegram") return canReviewConversationHook(hook, () => true);
+        return false;
+      },
     );
     this.conversations = service;
     service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);

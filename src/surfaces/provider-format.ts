@@ -79,3 +79,17 @@ export function scopedModelDisplayName(displayName: string, provider: string | u
 export function formatDisplayedProvider(provider: string): string {
   return provider.startsWith("ocg-") ? formatCodexProviderLabel(provider) : provider;
 }
+
+/** 不改变目录排序或选择编号；不可用模型仍保留在原目录中。 */
+export function formatProviderModelSummary(models: readonly ModelOption[], provider: string): string {
+  let available = 0;
+  let unavailable = 0;
+  for (const model of models) {
+    if ((model.provider ?? "openai") !== provider) continue;
+    if (model.available === false) unavailable += 1;
+    else available += 1;
+  }
+  if (available === 0) return `暂不可用（共 ${unavailable} 个模型）`;
+  return unavailable === 0 ? `${available} 个模型`
+    : `${available} 个可用模型 · ${unavailable} 个暂不可用模型`;
+}

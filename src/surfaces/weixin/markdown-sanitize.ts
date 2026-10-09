@@ -15,3 +15,8 @@ export function sanitizeWeixinMarkdownText(value: string): string {
     .replaceAll("[", "［")
     .replaceAll("]", "］");
 }
+
+/** Hook 信任预览必须保留字面原文；由组合根注入 Application 审查策略。 */
+export function canPreserveWeixinHookReviewText(value: string): boolean {
+  return sanitizeWeixinMarkdownText(value) === value;
+}

@@ -24,6 +24,7 @@ import { surfaceErrorMetadata } from "../error-metadata.js";
 import { formatWeixinCommandText } from "./command-renderer.js";
 import { PendingInteractionRegistry, waitForInteractionPreparation } from "../pending-interaction-registry.js";
 import { sanitizeWeixinMarkdownText } from "./markdown-sanitize.js";
+import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 type ApprovalRequest = Extract<InteractionRequest, { type: "approval" }>;
 type UserInputRequest = Extract<InteractionRequest, { type: "user-input" }>;
@@ -860,7 +861,7 @@ class WeixinPromptTooLongError extends Error {}
 function splitAsyncPromptMarkdown(value: string): string[] {
   if (value.length > maximumPromptCharacters) throw new WeixinPromptTooLongError();
   const messages: string[] = [];
-  let fence: { opening: string; marker: string } | undefined;
+  let fence: MarkdownFence | undefined;
   let current = "";
   let prefixLength = 0;
   const closing = (active: typeof fence): string => active === undefined
@@ -876,21 +877,7 @@ function splitAsyncPromptMarkdown(value: string): string[] {
     }
   };
   for (const line of value.match(/[^\n]*\n|[^\n]+$/gu) ?? []) {
-    const marker = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)\r?\n?$/u.exec(line);
-    let nextFence = fence;
-    if (marker !== null) {
-      if (fence === undefined) {
-        if (marker[1]![0] !== "`" || !marker[2]!.includes("`")) {
-          nextFence = { opening: line.replace(/\r?\n$/u, ""), marker: marker[1]! };
-        }
-      } else if (
-        marker[1]![0] === fence.marker[0]
-        && marker[1]!.length >= fence.marker.length
-        && marker[2]!.trim().length === 0
-      ) {
-        nextFence = undefined;
-      }
-    }
+    const nextFence = advanceMarkdownFence(fence, line);
     if (nextFence !== fence) {
       if (line.length + closing(nextFence).length > maximumPromptMessageCharacters) {
         throw new WeixinPromptTooLongError();

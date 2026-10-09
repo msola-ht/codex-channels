@@ -18,7 +18,7 @@ import {
   formatTimeRemaining,
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
-import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatServiceTier } from "./provider-format.js";
+import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier } from "./provider-format.js";
 import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
@@ -88,9 +88,9 @@ export function formatConversationModels(
       speed,
       "",
       `当前 Provider：${currentProvider === undefined ? "待选择" : formatCodexProviderLabel(currentProvider)}`,
-      "可用提供商：",
+      "提供商列表：",
       ...providers.map((provider, index) =>
-        `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === currentProvider ? " ← 当前" : ""} · ${state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`,
+        `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === currentProvider ? " ← 当前" : ""} · ${formatProviderModelSummary(state.models, provider)}`,
       ),
       "",
       "下一步：/model <提供商序号或 ID>",

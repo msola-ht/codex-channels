@@ -1,10 +1,10 @@
 import { Badge } from "@/components/ui/badge"
+import { normalizeServiceTier } from "../../../../runtime/service-tier.mjs"
 import { TableHint } from "@/components/metrics/data-table"
 import { useTranslation } from "@/hooks/use-translation"
 
 function normalizedTier(tier: string | null | undefined) {
-  const value = tier?.toLowerCase()
-  return value === "fast" || value === "priority" ? "fast" : value
+  return normalizeServiceTier(tier?.toLowerCase())
 }
 
 export function AccelerationBadge({ tier, source, responseTier }: {

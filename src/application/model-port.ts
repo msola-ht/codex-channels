@@ -38,4 +38,8 @@ export interface ModelSelectionPort {
   writeDefaultServiceTier(tier: "fast" | "ultrafast" | "default"): Promise<void>;
   readDefaultReasoningEffort(cwd: string, modelProvider?: string): Promise<string | null>;
   readDefaultServiceTier(cwd: string, modelProvider?: string): Promise<string | null>;
+  readModelAccelerationSettings(cwd: string, modelProvider?: string): Promise<{
+    enabled: boolean;
+    serviceTier: string | null;
+  }>;
 }

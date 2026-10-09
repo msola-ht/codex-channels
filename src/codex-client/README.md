@@ -121,6 +121,7 @@
   读取等 App Server 方法的类型化封装；按 Workspace 读取有效思考等级与服务层级，模型、思考等级、服务层级默认值和受控 agents 设置统一通过
   同一个 `config/batchWrite` 用户配置事务写入；`writeDefaultServiceTier` 只接受 Standard 对应的
   `default`、`fast` 与 `ultrafast`，渠道通过模型目录检查可用性，下一 Turn 覆盖仍走 `turn/start.serviceTier`。
+  `readModelAccelerationSettings` 复用带 Workspace `cwd` 的 `config/read`，只向 Application 返回配置服务层级与 FastMode 是否启用；Provider 路由固定到目标实例，不暴露原始配置。
   受控的读改写流程从原始用户层取得版本并通过
   `expectedVersion` 拒绝并发覆盖；Hook 目录和用户层版本通过独立窄端口读取，不把原始配置交给
   Application。Hook 状态写入携带 `expectedVersion` 和 `reloadUserConfig: true`，不自动重试；

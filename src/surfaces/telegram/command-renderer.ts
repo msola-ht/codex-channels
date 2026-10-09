@@ -10,7 +10,7 @@ import type {
 import {
   listProviders,
 } from "../../application/index.js";
-import { formatCodexProviderLabel, formatServiceTier, scopedModelDisplayName } from "../provider-format.js";
+import { formatCodexProviderLabel, formatProviderModelSummary, formatServiceTier, scopedModelDisplayName } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
@@ -249,9 +249,9 @@ function modelProviderSelectionText(
     `速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
     "",
     `当前 Provider：${formatCodexProviderLabel(current)}`,
-    "可用提供商：",
+    "提供商列表：",
     ...providers.map((provider, index) =>
-      `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === current ? " ← 当前" : ""} · ${result.state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`),
+      `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === current ? " ← 当前" : ""} · ${formatProviderModelSummary(result.state.models, provider)}`),
     "",
     "请先选择提供商，再选择该提供商下的模型；也可输入 /model <提供商序号或 ID>。",
   ].join("\n"));

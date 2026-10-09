@@ -245,6 +245,7 @@ Computer Use／浏览器过程展示复用已支持的 `item/started`、`item/co
 `service_tier = "ultrafast"`，独立 Provider 不改主配置。Fast、Ultrafast、Standard 分开展示；
 目录未声明的档位拒绝选择，无绑定偏好恢复时重新检查目录。验证应覆盖命令、配置写入失败、
 Turn 参数、恢复及三渠道输出；不以字段为字符串推断任意档位均受支持。
+渠道开启前通过 `readModelAccelerationSettings` 复用目标 Provider 与 Workspace 的 `config/read` 检查有效 `features.fast_mode`；关闭不受该开关阻断。无 Thread 且无显式档位偏好时读取有效 `service_tier`，保留未配置的 null，目录 `defaultServiceTier` 不代表用户已启用加速。
 `codexc config` 与 WebUI 共用的用户设置边界采用 `service-tier` / `serviceTier`，保留原始配置值与
 模型 `serviceTiers`；独立加速设置和核心默认值事务均验证精确模型能力及 `features.fast_mode`，
 预览不写入，确认写入保留 `expectedVersion` 检查。未显式配置与显式 `default` 分开展示。

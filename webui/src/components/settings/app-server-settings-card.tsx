@@ -1,4 +1,5 @@
 import { useTranslation } from "@/hooks/use-translation"
+import { acceleratedServiceTierId, normalizeServiceTier } from "../../../../runtime/service-tier.mjs"
 import { useEffect, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -52,10 +53,10 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
   const officialDisabled = busy || !settings.defaultsEditable
   const serviceTier = settings.defaults.serviceTier === null
     ? ""
-    : settings.defaults.serviceTier === "priority" ? "fast" : settings.defaults.serviceTier
+    : normalizeServiceTier(settings.defaults.serviceTier)
   const serviceTierOptions = [["default", t("settingsFields.standard")]]
-  if (settings.defaults.accelerationEnabled && selected?.serviceTiers.some((tier) => tier.id === "priority" || tier.id === "fast")) serviceTierOptions.push(["fast", t("settingsFields.fast")])
-  if (settings.defaults.accelerationEnabled && selected?.serviceTiers.some((tier) => tier.id === "ultrafast")) serviceTierOptions.push(["ultrafast", t("settingsFields.ultrafast")])
+  if (settings.defaults.accelerationEnabled && selected && acceleratedServiceTierId(selected.serviceTiers, "fast")) serviceTierOptions.push(["fast", t("settingsFields.fast")])
+  if (settings.defaults.accelerationEnabled && selected && acceleratedServiceTierId(selected.serviceTiers, "ultrafast")) serviceTierOptions.push(["ultrafast", t("settingsFields.ultrafast")])
   const serviceTierUnavailable = serviceTier !== "" && !serviceTierOptions.some(([value]) => value === serviceTier)
   if (serviceTierUnavailable) serviceTierOptions.push([serviceTier, t("settingsFields.serviceTierUnavailable", { tier: serviceTier === "fast" ? t("settingsFields.fast") : serviceTier === "ultrafast" ? t("settingsFields.ultrafast") : serviceTier })])
   const reviewerHint: MessageKey = settings.approvalsReviewer?.editable

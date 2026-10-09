@@ -45,6 +45,7 @@ import {
   renderFeishuComputerUseCard,
 } from "./operation-format.js";
 import {
+  FeishuMarkdownSplitError,
   feishuPreviewNotice,
   maximumFeishuMessageChunks,
   maximumFeishuStreamingCards,
@@ -994,7 +995,17 @@ export class FeishuOutbox implements SurfaceOutputPort {
   ): Promise<void> {
     let first = true;
     let remainingBudget = maximumChunks;
-    const chunks = splitFeishuMarkdownCards(markdown, maximumChunks, truncationNotice);
+    let chunks: string[];
+    try {
+      chunks = splitFeishuMarkdownCards(markdown, maximumChunks, truncationNotice);
+    } catch (error) {
+      if (!(error instanceof FeishuMarkdownSplitError)) throw error;
+      this.logger.warn({
+        ...surfaceDiagnosticContext(), component: "Feishu", fallback: "post", reason: "markdown-fence-budget",
+      }, "飞书代码围栏超出卡片预算，降级为 Post");
+      await this.sendPost(chatId, markdown, maximumChunks, signal, replyTo, truncationNotice);
+      return;
+    }
     for (const [index, chunk] of chunks.entries()) {
       try {
         if (first && replyTo !== undefined && this.messagePort.replyMarkdownCard) {
@@ -1255,10 +1266,18 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const maximumPreviewCharacters =
       maximumFeishuFinalPreviewCharacters
       - [...feishuPreviewNotice].length;
-    const [head, tail] = splitFeishuStreamingContent(
-      text,
-      maximumPreviewCharacters,
-    );
+    let head: string;
+    let tail: string;
+    try {
+      [head, tail] = splitFeishuStreamingContent(text, maximumPreviewCharacters);
+    } catch (error) {
+      if (!(error instanceof FeishuMarkdownSplitError)) throw error;
+      head = "代码围栏超出预览上限。";
+      tail = text;
+      this.logger.warn({
+        ...surfaceDiagnosticContext(), component: "Feishu", fallback: "file-preview", reason: "markdown-fence-budget",
+      }, "飞书代码围栏超出预览预算，保留完整附件发送");
+    }
     await this.sendMarkdown(
       chatId,
       `${head}${feishuPreviewNotice}`,

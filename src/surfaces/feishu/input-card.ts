@@ -5,6 +5,7 @@ import type {
 import { interactionProcessedTitle } from "../interaction-copy.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import { sanitizeFeishuMarkdown } from "./message-content.js";
+import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 export type FeishuInputAction =
   | "submit"
@@ -449,29 +450,17 @@ function truncateAsyncQuestion(text: string, limit: number): string {
   let body = "";
   let length = 0;
   let firstLine = true;
-  let fence: string | undefined;
+  let fence: MarkdownFence | undefined;
   for (const line of text.split("\n")) {
-    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
-    const marker = match?.[1];
-    let nextFence = fence;
-    if (marker !== undefined) {
-      if (fence === undefined && !(marker[0] === "`" && match![2]!.includes("`"))) {
-        nextFence = marker;
-      } else if (
-        fence !== undefined && marker[0] === fence[0]
-        && marker.length >= fence.length && match![2]!.trim().length === 0
-      ) {
-        nextFence = undefined;
-      }
-    }
+    const nextFence = advanceMarkdownFence(fence, line);
     const part = `${firstLine ? "" : "\n"}${line}`;
     firstLine = false;
     const characters = [...part];
-    const reserve = nextFence === undefined ? 0 : nextFence.length + 1;
+    const reserve = nextFence === undefined ? 0 : nextFence.marker.length + 1;
     if (length + characters.length + reserve > limit) {
       // Keep delimiter lines atomic, including an opening delimiter longer than the preview.
       if (nextFence === fence) {
-        const available = Math.max(0, limit - length - (fence === undefined ? 0 : fence.length + 1));
+        const available = Math.max(0, limit - length - (fence === undefined ? 0 : fence.marker.length + 1));
         body += characters.slice(0, available).join("");
       }
       break;
@@ -480,7 +469,7 @@ function truncateAsyncQuestion(text: string, limit: number): string {
     length += characters.length;
     fence = nextFence;
   }
-  return fence === undefined ? body : `${body}\n${fence}`;
+  return fence === undefined ? body : `${body}\n${fence.marker}`;
 }
 
 function escapeMarkdown(value: string): string {

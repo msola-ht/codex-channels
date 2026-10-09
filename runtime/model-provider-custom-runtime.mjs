@@ -21,6 +21,7 @@ import {
 import { isOpencodeGoProviderNamespace } from "./opencode-go-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 import { assertProviderHasNoPlaintextCredentials } from "./provider-file-access.mjs";
+import { decodeProviderCredentialDocument, encodeProviderCredentialDocument, maximumProviderCredentialBytes, providerCredentialMatchesIdentity } from "./provider-credential-document.mjs";
 
 const maximumConfigBytes = 1_048_576;
 export const customPrimaryProviderProfileName = "sf-custom";
@@ -50,14 +51,14 @@ function validateCustomApiKey(apiKey) {
 function readCustomPrimaryCredential(environment, provider, baseUrl, environmentKey) {
   let credential;
   try {
-    credential = record(JSON.parse(readPrivateFileSync(customPrimaryProviderCredentialPath(environment, provider, environmentKey), 16_384)));
+    credential = decodeProviderCredentialDocument(readPrivateFileSync(customPrimaryProviderCredentialPath(environment, provider, environmentKey), maximumProviderCredentialBytes));
   } catch {
     throw new Error("自定义主 Provider 私有凭据无法安全读取；请显式编辑 Provider 重新保存 Key");
   }
-  if (Object.keys(credential).length !== 4 || credential.schemaVersion !== 1) {
+  if (credential === undefined) {
     throw new Error("自定义主 Provider 私有凭据格式版本不受支持；请显式编辑 Provider 重新保存 Key");
   }
-  if (credential.providerId !== provider || credential.origin !== new URL(validProviderBaseUrl(baseUrl, "自定义主 Provider")).origin) {
+  if (!providerCredentialMatchesIdentity(credential, provider, new URL(validProviderBaseUrl(baseUrl, "自定义主 Provider")).origin)) {
     throw new Error("自定义主 Provider 私有凭据与 Provider 或上游 Origin 不匹配");
   }
   return validateCustomApiKey(credential.apiKey);
@@ -77,9 +78,9 @@ export function readCustomPrimaryProviderApiKey(provider, block, environment = p
 export function writeCustomPrimaryProviderCredential({ providerId, baseUrl, apiKey, environmentKey }, environment = process.env) {
   const path = customPrimaryProviderCredentialPath(environment, providerId, environmentKey);
   if (existsSync(path)) throw new Error("自定义主 Provider 凭据版本已存在，拒绝覆盖");
-  const content = `${JSON.stringify({ schemaVersion: 1, providerId,
-    origin: new URL(validProviderBaseUrl(baseUrl, "自定义主 Provider")).origin, apiKey: validateCustomApiKey(apiKey) })}\n`;
-  if (Buffer.byteLength(content) > 16_384) throw new Error("自定义主 Provider 凭据数据超过读取上限");
+  const content = encodeProviderCredentialDocument(providerId,
+    new URL(validProviderBaseUrl(baseUrl, "自定义主 Provider")).origin, validateCustomApiKey(apiKey));
+  if (Buffer.byteLength(content) > maximumProviderCredentialBytes) throw new Error("自定义主 Provider 凭据数据超过读取上限");
   writePrivateFileAtomicSync(path, content);
 }
 
@@ -97,8 +98,8 @@ export function removeCustomPrimaryProviderCredentials(environment, provider) {
   const owned = names.filter(name => /^[a-f0-9]{32}\.json$/u.test(name));
   for (const name of owned) {
     let content;
-    try { content = record(JSON.parse(readPrivateFileSync(join(directory, name), 16_384))); } catch { throw new Error("自定义主 Provider 凭据版本无法安全读取，未执行删除"); }
-    if (Object.keys(content).length !== 4 || content.schemaVersion !== 1 || content.providerId !== provider || typeof content.origin !== "string") throw new Error("自定义主 Provider 凭据版本无效，未执行删除");
+    try { content = decodeProviderCredentialDocument(readPrivateFileSync(join(directory, name), maximumProviderCredentialBytes)); } catch { throw new Error("自定义主 Provider 凭据版本无法安全读取，未执行删除"); }
+    if (content === undefined || typeof content.origin !== "string" || !providerCredentialMatchesIdentity(content, provider, content.origin)) throw new Error("自定义主 Provider 凭据版本无效，未执行删除");
     validateCustomApiKey(content.apiKey);
   }
   for (const name of owned) removeCustomPrimaryProviderCredential(environment, provider, key.replace("0".repeat(32), name.slice(0, 32)));

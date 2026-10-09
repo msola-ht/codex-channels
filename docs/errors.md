@@ -85,6 +85,7 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `effort.unsupported` | 当前模型不支持该思考等级并附可选值 | 思考等级与模型不匹配 |
 | `fast.usage` | /fast 用法提示 | 参数格式错误 |
 | `fast.unsupported` | 当前模型不支持所选 Fast 或 Ultrafast 档位 | 模型目录未声明该加速档位 |
+| `fast.disabled` | 功能开关关闭，不能启用 Fast/Ultrafast；仍可回到 Standard | 目标 Provider 与 Workspace 的有效 `features.fast_mode` 为 false |
 
 ### 会话、Thread 与 Workspace
 

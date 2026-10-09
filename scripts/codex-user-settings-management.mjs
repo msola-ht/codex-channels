@@ -1,4 +1,5 @@
 import { loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
+import { acceleratedServiceTierId } from "../runtime/service-tier.mjs";
 import { autoReviewProviderCapability, loadAutoReviewProviderPolicy } from "../runtime/auto-review-provider-policy.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 import { supportedPublicApprovalPolicies } from "./codex-public-cli-contract.mjs";
@@ -493,9 +494,7 @@ function serviceTierEdit(serviceTier, config, models, selectedModel = optionalSt
     if (!model) {
       throw invalid("model", "unknown-model", `默认模型不可用：${selectedModel ?? "未指定"}；请先选择有效模型`);
     }
-    const supported = model.serviceTiers.some((tier) => serviceTier === "fast"
-      ? tier.id === "priority" || tier.id === "fast"
-      : tier.id === "ultrafast");
+    const supported = acceleratedServiceTierId(model.serviceTiers, serviceTier);
     if (!supported) {
       throw invalid("serviceTier", "unsupported-service-tier", `模型 ${model.model} 不支持 ${serviceTier === "fast" ? "Fast" : "Ultrafast"}`);
     }

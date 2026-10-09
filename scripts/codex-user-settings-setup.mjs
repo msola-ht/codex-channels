@@ -1,4 +1,5 @@
 import * as clackPrompts from "@clack/prompts";
+import { acceleratedServiceTierId, normalizeServiceTier } from "../runtime/service-tier.mjs";
 
 import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
 import { runCodexSubagentsSetup } from "./codex-subagents-setup.mjs";
@@ -25,13 +26,9 @@ const serviceTierLabels = { default: "Standard", fast: "Fast", ultrafast: "Ultra
 
 function serviceTierLabel(value) {
   if (value === null) return "跟随上游默认";
-  const normalized = normalizedServiceTier(value);
+  const normalized = normalizeServiceTier(value);
   return Object.hasOwn(serviceTierLabels, normalized)
     ? serviceTierLabels[normalized] : `未知档位（${value}）`;
-}
-
-function normalizedServiceTier(value) {
-  return value === "priority" ? "fast" : value;
 }
 
 function compactHint(compact) {
@@ -348,7 +345,8 @@ async function runServiceTierSetting({
   createClient,
   primaryProvider,
 }) {
-  const model = settings.models.find((candidate) => candidate.model === settings.defaults.model);
+  const model = settings.models.find((candidate) => candidate.available !== false
+    && (settings.defaults.model === null ? candidate.isDefault : candidate.model === settings.defaults.model));
   if (!model) {
     output.write(`当前默认模型 ${settings.defaults.model ?? "未指定"} 不在可用目录中；请先选择有效的默认模型。仍可选择 Standard 退出加速。\n`);
   }
@@ -684,15 +682,15 @@ async function promptModelDefaults(prompts, settings) {
 }
 
 async function promptServiceTier(prompts, settings, model) {
-  const supports = (value) => settings.defaults.accelerationEnabled && model?.serviceTiers.some((tier) =>
-    value === "fast" ? tier.id === "priority" || tier.id === "fast" : tier.id === "ultrafast");
+  const supports = (value) => settings.defaults.accelerationEnabled
+    && model && acceleratedServiceTierId(model.serviceTiers, value);
   const options = [
     { value: "default", label: "Standard", hint: "新会话默认使用标准服务层级" },
     ...(supports("fast") ? [{ value: "fast", label: "Fast", hint: "新会话默认使用 Fast" }] : []),
     ...(supports("ultrafast") ? [{ value: "ultrafast", label: "Ultrafast", hint: "新会话默认使用 Ultrafast" }] : []),
     { value: "back", label: "返回" },
   ];
-  const current = normalizedServiceTier(settings.defaults.serviceTier);
+  const current = normalizeServiceTier(settings.defaults.serviceTier);
   const available = options.some((option) => option.value === current);
   const serviceTier = await prompts.select({
     message: `新会话默认加速档位（当前：${serviceTierLabel(current)}${available || current === null ? "" : "，当前档位不可选"}）`,

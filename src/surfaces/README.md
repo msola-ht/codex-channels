@@ -180,7 +180,8 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `conversation-model-account-command-format.ts` 为三个渠道渲染 `/limits reset` 选券预览、确认命令和消费结果，并在 OpenAI `/limits` 中展示重置券可用数量，并按相同
 到期时间合并服务端返回的明细；`null` 到期时间明确显示为“无到期时间”，明细少于可用数量时标出
 未返回明细的剩余张数。
-`provider-format.ts` 统一已知 Provider 显示名、命令中的 Provider 文案及限定 Provider 后的模型显示名前缀裁剪，并对后续 Provider 标识做有界展示；同时按实际服务档位格式化速度，并依据当前模型目录展示 Fast、Ultrafast 支持情况，供模型、状态与生命周期展示共用。
+`provider-format.ts` 统一已知 Provider 显示名、命令中的 Provider 文案及限定 Provider 后的模型显示名前缀裁剪，并对后续 Provider 标识做有界展示；提供商摘要统一统计可用与暂不可用模型，不改变目录排序或选择编号。同时按实际服务档位格式化速度，并依据当前模型目录展示 Fast、Ultrafast 支持情况，供模型、状态与生命周期展示共用。
+`markdown-fence.ts` 只识别反引号或波浪号围栏、合法开头与匹配结束并推进纯状态；共享列表、渠道命令、问题预览及最终正文复用它，字符预算、分片、截断和转义仍由各渠道负责。
 `reasoning-effort-format.ts` 统一模型菜单、状态与运行结果的思考设置文案；目录声明 `enabled` 时使用思考模式选择，`enabled` / `none` 分别显示开启/关闭思考，其余等级原样显示，提交给 Application 的控制值保持不变。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。
@@ -198,7 +199,7 @@ Workspace/状态与操作结果分派隔离。它们统一 Telegram、飞书与�
 `conversation-command-renderer.ts` 把完整 `ConversationCommandResult` 穷尽映射为共享纯文本结果；
 `conversation-hook-command-format.ts` 只接收 Application 的 Hook 展示快照，集中生成纯文本列表、详情、
 持久配置确认文案和合法操作选项；原样使用 Application 选择标识与确认令牌，不展示内部 Key 或哈希。
-向组合根公开各渠道的无损审查策略，Application 在列表、预览与确认时复核；微信格式中和会改变审查字段时拒绝信任。结果区分共享配置保存和实例刷新未确认。
+向组合根公开共享文案的保真检查并接收窄文字保真能力；组合根显式组合飞书、Telegram 与微信策略，未知渠道拒绝审查。Application 在列表、预览与确认时复核；微信格式中和会改变审查字段时拒绝信任。结果区分共享配置保存和实例刷新未确认。
 飞书和 Telegram 接入既有鉴权动作路径，微信按相同命令提供文本入口。
 三个渠道复用该映射，Telegram 在自己的交互式渲染器中处理按钮、键盘及专属展示，其余结果统一走共享映射。
 `/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application

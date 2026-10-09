@@ -58,6 +58,8 @@ const runtimeImporters = new Set([
   "bootstrap", "config", "delivery", "observability", "provider-proxy", "scheduled-tasks", "storage", "surfaces",
 ]);
 const runtimeExceptions = new Map([
+  // Pure service-tier semantics shared with CLI and WebUI; no runtime lifecycle dependency.
+  ["src/application/model-selection-service.ts", new Set(["runtime/service-tier.mjs"])],
   ["src/model-api/chat-request.ts", new Set(["runtime/chat-reasoning.mjs"])],
   ["src/model-api/responses-request.ts", new Set(["runtime/chat-reasoning.mjs"])],
   ["src/model-relay/server.ts", new Set(["runtime/model-relay-listen-host.mjs", "runtime/model-relay-model-id.mjs"])],

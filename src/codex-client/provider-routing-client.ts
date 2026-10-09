@@ -46,6 +46,7 @@ type ProviderClientMethod =
   | "writeDefaultServiceTier"
   | "readDefaultReasoningEffort"
   | "readDefaultServiceTier"
+  | "readModelAccelerationSettings"
   | "forkThread"
   | "startReview"
   | "listSkills"
@@ -712,6 +713,15 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["readDefaultServiceTier"]> {
     return this.withProviderActivity(modelProvider, async () =>
       (await this.ensureClient(modelProvider)).readDefaultServiceTier(cwd)
+    );
+  }
+
+  async readModelAccelerationSettings(
+    cwd: string,
+    modelProvider = this.primaryProvider,
+  ): ReturnType<ProviderClientInstance["readModelAccelerationSettings"]> {
+    return this.withProviderActivity(modelProvider, async () =>
+      (await this.ensureClient(modelProvider)).readModelAccelerationSettings(cwd)
     );
   }
 

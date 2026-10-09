@@ -1,3 +1,4 @@
+import { acceleratedServiceTierId, normalizeServiceTier } from "../../runtime/service-tier.mjs";
 import {
   UserFacingError,
   conversationTargetKey,
@@ -84,7 +85,7 @@ export class ModelSelectionService {
       filter = undefined;
     }
     const models = await this.listModels(requireSelection ? this.status(target).modelProvider : filter);
-    const state = this.selectionState(target, models, filter);
+    const state = await this.selectionState(target, models, filter);
     if (requireSelection && state.modelProvider === undefined) {
       throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
     }
@@ -127,7 +128,7 @@ export class ModelSelectionService {
     target: ConversationTarget,
     modality: ModelInputModality,
   ): Promise<void> {
-    const current = this.resolveState(target, await this.listModels(this.status(target).modelProvider));
+    const current = await this.resolveState(target, await this.listModels(this.status(target).modelProvider));
     if (current.modelProvider === undefined) {
       throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
     }
@@ -178,7 +179,7 @@ export class ModelSelectionService {
       throw new UserFacingError("model.selection.expired", "模型选项已失效，请重新发送 /model 选择");
     }
     this.requireAvailableModel(selected);
-    const current = this.resolveState(target, models);
+    const current = await this.resolveState(target, models);
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
     const leavesThread = providerChanged && this.router.modelSettings(target) !== undefined;
@@ -254,7 +255,7 @@ export class ModelSelectionService {
 
   async selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
     const models = await this.listModels(this.status(target).modelProvider);
-    const current = this.resolveState(target, models);
+    const current = await this.resolveState(target, models);
     const model = findModel(models, current.model, current.modelProvider);
     if (!model) {
       throw new UserFacingError(
@@ -277,15 +278,15 @@ export class ModelSelectionService {
       throw new UserFacingError("fast.usage", "加速参数必须是 on、ultrafast、off 或 status");
     }
     const models = await this.listModels(this.status(target).modelProvider);
-    const current = this.resolveState(target, models);
+    const current = await this.resolveState(target, models);
     const model = findModel(models, current.model, current.modelProvider);
-    if (model) this.requireAvailableModel(model);
     const currentFast = isFastServiceTier(current.serviceTier, model);
     if (normalized === "status") {
       return current;
     }
     const accelerated = currentFast || current.serviceTier === "ultrafast";
     const requested = normalized || (accelerated ? "off" : "on");
+    if (requested !== "off" && model) this.requireAvailableModel(model);
     const tierId = model
       ? requested === "ultrafast" ? ultrafastServiceTierId(model) : fastServiceTierId(model)
       : undefined;
@@ -297,7 +298,17 @@ export class ModelSelectionService {
         { model: current.model, tier: requested === "ultrafast" ? "Ultrafast" : "Fast" },
       );
     }
+    if (requested !== "off") {
+      const acceleration = await this.codex.readModelAccelerationSettings(
+        this.router.workspace(target).cwd,
+        current.modelProvider ?? this.primaryProvider,
+      );
+      if (!acceleration.enabled) {
+        throw new UserFacingError("fast.disabled", "Codex features.fast_mode 已关闭，不能启用加速档位");
+      }
+    }
     const selectedTier = requested === "off" ? standardServiceTierRequestValue : tierId!;
+    this.requireSubscribedProvider(current.modelProvider ?? this.primaryProvider);
     if (current.modelProvider === this.primaryProvider) {
       await this.codex.writeDefaultServiceTier(
         requested === "off" ? "default" : requested === "ultrafast" ? "ultrafast" : "fast",
@@ -447,11 +458,11 @@ export class ModelSelectionService {
     };
   }
 
-  private resolveState(
+  private async resolveState(
     target: ConversationTarget,
     models: ModelOption[],
     filter?: string,
-  ): ModelSelectionState {
+  ): Promise<ModelSelectionState> {
     if (models.length === 0) {
       throw new Error("App Server 没有返回可用模型");
     }
@@ -494,6 +505,10 @@ export class ModelSelectionService {
     );
     const catalogModel = provider === undefined ? undefined : findModel(models, model, provider);
     const serviceTierPending = hasServiceTierOverride(pending);
+    const defaultServiceTier = !serviceTierPending && !current && provider !== undefined
+      && catalogModel !== undefined && catalogModel.available !== false
+      ? await this.codex.readDefaultServiceTier(this.router.workspace(target).cwd, provider)
+      : null;
     return {
       models,
       ...(filter === undefined ? {} : { providerFilter: filter }),
@@ -504,7 +519,7 @@ export class ModelSelectionService {
         ? pending?.serviceTier ?? null
         : current
           ? current.serviceTier
-          : catalogModel?.defaultServiceTier ?? null,
+          : defaultServiceTier,
       pending: pending !== undefined,
       modelPending: hasOverride(pending, "model"),
       effortPending: hasOverride(pending, "effort"),
@@ -573,10 +588,10 @@ export class ModelSelectionService {
     return models.filter((model) => !blocked.has(model.provider ?? "openai"));
   }
 
-  private selectionState(target: ConversationTarget, models: ModelOption[], filter?: string): ModelSelectionState {
+  private async selectionState(target: ConversationTarget, models: ModelOption[], filter?: string): Promise<ModelSelectionState> {
     const selectable = this.selectableModels(models);
     return {
-      ...this.resolveState(target, models, filter),
+      ...await this.resolveState(target, models, filter),
       models: filter === undefined ? selectable : filterModelsByProvider(selectable, filter),
     };
   }
@@ -767,27 +782,19 @@ function modelKey(model: ModelOption): string {
 }
 
 export function fastServiceTierId(model: ModelOption): string | undefined {
-  const tier = model.serviceTiers.find(
-    (candidate) =>
-      candidate.id === "fast" || candidate.id === "priority",
-  );
-  if (tier) {
-    return tier.id;
-  }
-  return undefined;
+  return acceleratedServiceTierId(model.serviceTiers, "fast");
 }
 
 export function ultrafastServiceTierId(model: ModelOption): string | undefined {
-  return model.serviceTiers.find((tier) => tier.id === "ultrafast")?.id;
+  return acceleratedServiceTierId(model.serviceTiers, "ultrafast");
 }
 
 export function isFastServiceTier(serviceTier: string | null, model?: ModelOption): boolean {
   if (!serviceTier) {
     return false;
   }
-  const normalized = serviceTier.toLowerCase();
+  const normalized = normalizeServiceTier(serviceTier.toLowerCase());
   return normalized === "fast"
-    || normalized === "priority"
     || (model !== undefined && fastServiceTierId(model) === serviceTier);
 }
 

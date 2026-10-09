@@ -124,6 +124,7 @@ export {
   type WeixinOutboxOptions,
 } from "./outbox.js";
 export { WeixinInteractionPort } from "./interactions.js";
+export { canPreserveWeixinHookReviewText } from "./markdown-sanitize.js";
 export {
   WeixinConfigurationDeliveryError,
   WeixinSurface,

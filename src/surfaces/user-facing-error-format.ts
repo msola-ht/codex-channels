@@ -247,6 +247,8 @@ export function formatSurfaceUserFacingError(
       return "用法：/fast [on|ultrafast|off|status]";
     case "fast.unsupported":
       return `当前模型不支持 ${error.details.tier === "Ultrafast" ? "Ultrafast" : "Fast"} 档位：${detail(error, "model", "未知")}`;
+    case "fast.disabled":
+      return "Codex features.fast_mode 已关闭，不能启用 Fast/Ultrafast；仍可用 /fast off 回到 Standard";
     case "provider.account.unavailable":
       return `${detail(error, "provider", "当前提供商")}的账户查询失败，请检查配置或稍后重试`;
     case "collaboration-mode.unsupported":

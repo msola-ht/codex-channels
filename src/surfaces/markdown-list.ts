@@ -1,7 +1,9 @@
+import { advanceMarkdownFence, type MarkdownFence } from "./markdown-fence.js";
+
 export function toStructuredMarkdownList(text: string): string {
   const output: string[] = [];
   let firstContent = true;
-  let fenced = false;
+  let fence: MarkdownFence | undefined;
   for (const rawLine of text.split("\n")) {
     const line = rawLine.trimEnd();
     const trimmed = line.trim();
@@ -9,12 +11,9 @@ export function toStructuredMarkdownList(text: string): string {
       output.push("");
       continue;
     }
-    if (/^```/u.test(trimmed)) {
-      fenced = !fenced;
-      output.push(line);
-      continue;
-    }
-    if (fenced) {
+    const previous = fence;
+    fence = advanceMarkdownFence(fence, line);
+    if (previous || fence) {
       output.push(line);
       continue;
     }

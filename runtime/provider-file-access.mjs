@@ -32,6 +32,7 @@ export function createProviderFileAccess(environment) {
   const mainConfig = canonicalPath(join(codexHomePath(environment), "config.toml"));
   const isMainConfig = path => canonicalPath(path) === mainConfig;
   return {
+    isMainConfig,
     read: (path, maximumBytes) => (isMainConfig(path) ? readCodexConfigFile : readPrivateFileSync)(path, maximumBytes),
     write: (path, content) => {
       if (!isMainConfig(path)) return writePrivateFileAtomic(path, content);

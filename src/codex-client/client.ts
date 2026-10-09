@@ -791,6 +791,10 @@ export class CodexAppServerClient implements
   }
 
   async readDefaultServiceTier(cwd: string): Promise<string | null> {
+    return (await this.readModelAccelerationSettings(cwd)).serviceTier;
+  }
+
+  async readModelAccelerationSettings(cwd: string): Promise<{ enabled: boolean; serviceTier: string | null }> {
     const params: ConfigReadParams = { cwd, includeLayers: false };
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
@@ -800,7 +804,15 @@ export class CodexAppServerClient implements
     if (serviceTier !== null && typeof serviceTier !== "string") {
       throw new Error("Codex 响应缺少有效 config service_tier");
     }
-    return serviceTier;
+    const features = response.config.features;
+    if (features !== undefined && (features === null || typeof features !== "object" || Array.isArray(features))) {
+      throw new Error("Codex 响应包含无效 config features");
+    }
+    const fastMode = features?.fast_mode;
+    if (fastMode !== undefined && typeof fastMode !== "boolean") {
+      throw new Error("Codex 响应包含无效 config features.fast_mode");
+    }
+    return { serviceTier, enabled: fastMode !== false };
   }
 
   async writeUserConfigEdits(

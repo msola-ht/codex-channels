@@ -7,6 +7,7 @@ import type { TurnReplyTargets } from "../turn-reply-targets.js";
 import { FeishuMessageError } from "./message-error.js";
 import type { FeishuMessagePort } from "./outbox-message-port.js";
 import {
+  FeishuMarkdownSplitError,
   appendBoundedStreamText, appendFeishuStreamingTruncation, boundedStreamText,
   feishuPreviewNotice, feishuTruncationNotice, maximumFeishuMessageChunks, maximumFeishuStreamingCards,
   maximumFeishuStreamingElementCharacters, splitFeishuStreamingContent,
@@ -432,6 +433,13 @@ export class FeishuTextStreams {
       state.failed = true;
       if (terminal && !signal?.aborted) {
         await this.recoverFailedStream(key, state, fallbackPost, signal);
+        if (error instanceof FeishuMarkdownSplitError && fallbackPost
+          && state.cardCount < maximumFeishuMessageChunks && !this.isClosed() && !signal?.aborted) {
+          this.logger.warn({
+            ...surfaceDiagnosticContext(), component: "Feishu", fallback: "post", reason: "markdown-fence-budget",
+          }, "飞书终态围栏超出卡片预算，Post 已确认恢复");
+          return;
+        }
       }
       throw error;
     }

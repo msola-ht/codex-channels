@@ -1,5 +1,4 @@
 import type { HookCommandView, HookEntry } from "../application/index.js";
-import { sanitizeWeixinMarkdownText } from "./weixin/markdown-sanitize.js";
 
 export interface HookCommandChoice {
   label: string;
@@ -105,9 +104,8 @@ function hookDisplayText(value: string, limit = 500): string {
 }
 
 /** Trust requires the platform's detail view to preserve every review field exactly. */
-export function canReviewConversationHook(surface: string, hook: HookEntry): boolean {
-  if (surface !== "weixin" && surface !== "feishu" && surface !== "telegram") return false;
+export function canReviewConversationHook(hook: HookEntry, preservesText: (value: string) => boolean): boolean {
   const fields = [hook.eventName, hook.matcher ?? "", hook.description, hook.source, hook.sourcePath];
   return fields.every(value => hookDisplayText(value) === value
-    && (surface !== "weixin" || sanitizeWeixinMarkdownText(value) === value));
+    && preservesText(value));
 }

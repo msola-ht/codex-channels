@@ -555,7 +555,7 @@ Windows ACL 检查在当前命令进程内复用 PowerShell，每次仍重新检
 
 Windows 的 Gateway、Provider 设置检查、Remote、配置命令及 Desktop 桥接统一使用命令解析与进程树回收接口，支持 npm 安装的 Codex 启动入口。Provider 定向应用失败时，App Server 日志会记录 `provider-settings-apply-failed` 和受控错误代码；重启后的“已安全应用”只确认当前设置，不代表后续热更新路径也已验证。
 
-Provider 添加过程中若报错，不代表账户已经保存；修复原因后需重新完成添加，服务重启不会补做失败的配置事务。已配置但模型目录尚未确认的 Provider 会在飞书模型列表显示“暂不可用”，目录确认成功后再开放真实模型。
+Provider 添加过程中若报错，不代表账户已经保存；修复原因后需重新完成添加，服务重启不会补做失败的配置事务。已配置但模型目录尚未确认的 Provider 会在渠道模型列表显示“暂不可用”，目录确认成功后再开放真实模型。
 
 源码安装的日常升级统一使用：
 
@@ -649,7 +649,7 @@ npm 安装版也可以使用 `codexc uninstall --services` 后执行 `npm uninst
 加速档位必须由 App Server 的当前模型目录明确提供；模型、账号或 Provider 不支持时拒绝开启，不回退为其他档位。
 设置在下一次 Turn 生效；主 Provider 同时保存 Codex 用户级默认值，独立 Provider 不改写主实例默认值。
 飞书加速菜单按模型能力展示可选档位，Telegram 和微信使用相同命令语义。可用性和消耗以账号及上游规则为准；
-上游 `features.fast_mode` 关闭时不会启用 Fast/Ultrafast，Gateway 不替用户打开该功能开关，最终以 App Server 返回状态为准。
+目标 Provider 与当前 Workspace 的有效 `features.fast_mode` 关闭时，渠道在写入前拒绝开启 Fast/Ultrafast，仍允许 `/fast off`。Gateway 不替用户打开该功能开关，最终以 App Server 返回状态为准。
 本地 `codexc config → Codex 新会话与用户偏好 → 默认加速档位` 和 WebUI 的 Codex 设置同样提供
 Standard/Fast/Ultrafast；只按当前模型能力提供加速选项，功能开关关闭时仅允许选择 Standard。
 未显式配置时显示“跟随上游默认”，不会把它等同于明确的 Standard。配置入口沿用预览/确认和配置修订检查，

@@ -2,7 +2,7 @@ import { clinePassAccountMarkerPath, clinePassAccountsFilePath, isClinePassAccou
 import { createHash } from "node:crypto";
 import { writeResponsesContextFollowers, clinePassFollowsDeepseekContext } from "./responses-context-sync.mjs";
 import { assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 
@@ -18,7 +18,7 @@ import { opencodeGoAccountMarkerPath, opencodeGoAccountsFilePath } from "./openc
 import { deepseekAccountMarkerPath, deepseekAccountsFilePath } from "./deepseek-accounts.mjs";
 import { ccgAccountMarkerPath, ccgAccountsFilePath } from "./ccg-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
-import { assertProviderHasNoPlaintextCredentials, createProviderFileReader, readCodexConfigFile } from "./provider-file-access.mjs";
+import { assertProviderHasNoPlaintextCredentials, createProviderFileAccess, createProviderFileReader, readCodexConfigFile } from "./provider-file-access.mjs";
 export { readCodexConfigFile } from "./provider-file-access.mjs";
 import { managedPrimaryCredentialPath, readManagedPrimaryCredential } from "./managed-provider-credentials.mjs";
 
@@ -587,8 +587,10 @@ export function readProviderProfile(
   } = {},
 ) {
   let document;
+  let fileAccess;
   try {
-    document = record(parse(createProviderFileReader(environment)(path, maximumConfigBytes)));
+    fileAccess = createProviderFileAccess(environment);
+    document = record(parse(fileAccess.read(path, maximumConfigBytes)));
   } catch (error) {
     if (error?.code === "ENOENT") throw error;
     // TOML 解析错误可能包含带 API Key 的原始配置行，不能作为 cause 暴露。
@@ -643,9 +645,7 @@ export function readProviderProfile(
   ) {
     throw new Error(`Codex ${descriptor.definition.displayName} 提供商配置无效`);
   }
-  const mainPath = resolve(join(codexHomePath(environment), "config.toml"));
-  const selectedPath = resolve(path);
-  const isMain = process.platform === "win32" ? mainPath.toLowerCase() === selectedPath.toLowerCase() : mainPath === selectedPath;
+  const isMain = fileAccess.isMainConfig(path);
   if (readCredential && isMain) assertProviderHasNoPlaintextCredentials(provider);
   if (readCredential && provider.env_key !== undefined && provider.experimental_bearer_token !== undefined) {
     throw new Error("受管 Provider 凭据配置存在歧义");

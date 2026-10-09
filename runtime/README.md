@@ -18,6 +18,7 @@
 ## 文件
 
 - `request-timing.mjs` / `request-timing.d.mts`：指标 IPC、存储、CLI 与 WebUI 共用的生成区间校验和观测速度计算；无 I/O、不依赖调试转储。
+- `service-tier.mjs` / `service-tier.d.mts`：Application、CLI 设置与 WebUI 共用的纯加速档位匹配和展示归一；Fast 仅匹配目录的 `fast`/`priority`，Ultrafast 仅匹配 `ultrafast`，返回原始目录 ID，不包含配置写入、功能开关或生命周期操作。
 - `auto-review-metadata.mjs` / `auto-review-metadata.d.mts`：Provider 指标与转储读取共用的自动审查来源、父任务及原始审查身份投影；只接受明确的 `guardian_review` 来源和有界标识，不读取文件或推断缺失归属。
 - `auto-review-provider-policy.mjs` / `auto-review-provider-policy.d.mts`：按已验证的 Provider 模型目录来源统一判定自动审查准入；只允许官方 OpenAI 和复用官方模型目录的自定义 Provider，供设置入口与会话执行门禁共用，不根据模型名称或认证方式推断支持。严格读取用于执行门禁；管理设置投影将读取失败标记为不可用及安全原因，只限制开启，不阻断其他设置或关闭、清除覆盖。
 
@@ -93,6 +94,7 @@
   config 编辑映射；DeepSeek、OpenCode Go、CCG 与自定义 Provider 共用一次 HTTP 重试、零次流重连的
   故障边界，避免 Codex 默认两层重试相乘；OpenAI 官方 Provider 保持 Codex 原生策略。
 - `managed-provider-credentials.mjs` / `managed-provider-credentials.d.mts`：受管固定 Provider 的不可变版本凭据与 `env_key` 引用，私有 JSON 严格绑定 Provider 和上游 Origin；不写用户文件，保存由账户配置事务负责。运行读取拒绝明文固定配置，设置投影只读模型元数据以支持明确重配；启动环境和 Relay 材料复用同一引用。
+- `provider-credential-document.mjs` / `provider-credential-document.d.mts`：受管与自定义固定 Provider 共用的四字段 Schema v1 凭据编码、结构解析、Provider/Origin 绑定与 16 KiB 读取上限；不访问文件，API Key 校验与文件生命周期仍由 Provider 所属模块负责。
 - `opencode-go-quota-windows.mjs` / `opencode-go-quota-windows.d.mts`：为 OpenCode Go 统计代理
   提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照，以 `{ windows, observedAtMs }` 返回成功采样
   的窗口及本地接收时刻；缓存命中保持原时刻，真实请求成功后才更新。按最早 `resetsAt` 失效前缓存，失败时短时
@@ -263,7 +265,7 @@
 - `connect-home.mjs` / `connect-home.d.mts`：统一解析 Gateway 数据目录（`CODEX_CONNECT_HOME`
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup 与 Runtime 复用。
-- `provider-file-access.mjs` / `provider-file-access.d.mts`：在创建访问器时绑定当前环境的 Codex Home，精确规范化匹配唯一共享主配置；其他路径（包括同名备份）保持严格私有。Provider 的读取、指纹、事务写入和回滚使用同一访问器，不由业务入口选择权限标记；不改变磁盘路径或格式。
+- `provider-file-access.mjs` / `provider-file-access.d.mts`：在创建访问器时绑定当前环境的 Codex Home，通过 `isMainConfig` 精确规范化匹配唯一共享主配置；其他路径（包括同名备份）保持严格私有。Provider 的读取、凭据认证选择、指纹、事务写入和回滚使用同一归属判断，不由业务入口选择权限标记；不改变磁盘路径或格式。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
   文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，
