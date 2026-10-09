@@ -49,5 +49,6 @@ export {
   formatConversationStatus,
 } from "./conversation-workspace-status-command-format.js";
 export { formatConversationCommandOutcome } from "./conversation-command-outcome-format.js";
+export { formatConversationHooks } from "./conversation-hook-command-format.js";
 export { formatConversationMetrics } from "./metrics-format.js";
 export { toStructuredMarkdownList } from "./markdown-list.js";

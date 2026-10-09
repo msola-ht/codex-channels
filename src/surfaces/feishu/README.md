@@ -28,6 +28,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
 - `command-center-presentation.ts`：将命令结果转换为命令中心选项、输入表单和展示文案；仅接收动作与结果数据，
   不执行命令或管理交互令牌；速度选择复用共享档位展示，Standard 始终可选，Fast、Ultrafast 按当前模型目录提供。
+  Hook 展示复用共享纯文本格式与合法动作列表，卡片使用 `plain_text` 保留不可信字段的字面内容。
 - `command-center.ts`：生成 CardKit 2.0 分类命令中心、帮助、选择与输入卡片，维护有界短期令牌与菜单事件去重，并复用
   Application 的唯一命令目录与执行入口；重置券选券及确认复用选择卡的一次性令牌，
   选择卡和通用输入卡不解析第二套命令语法。

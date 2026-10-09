@@ -6,6 +6,7 @@ import {
 } from "../../application/index.js";
 import { UserFacingError } from "../../conversation-core/index.js";
 import { formatConversationResetCredits } from "../conversation-model-account-command-format.js";
+import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import {
   formatDelayMinutes,
   formatScheduledAt,
@@ -348,6 +349,14 @@ export function renderCommandCenterChoices(
   action: FeishuCommandCenterAction,
   result: ConversationCommandResult,
 ): FeishuCommandCenterChoices | undefined {
+  if (action === "hooks" && result.kind === "hooks") {
+    return {
+      title: result.view.confirmation ? "确认 Hook 配置操作" : "Hooks",
+      description: formatConversationHooks(result.view),
+      descriptionFormat: "plain_text",
+      choices: hookCommandChoices(result.view).map(choice => ({ ...choice, action: "hooks" })),
+    };
+  }
   if (action === "limits" && result.kind === "limits" && result.result.kind === "rate-limits") {
     return { title: "OpenAI 额度", description: renderFeishuCommandResult(result) ?? "", descriptionFormat: "markdown",
       choices: [{ label: "查看重置券", action: "limits", input: "reset" }] };

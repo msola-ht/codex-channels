@@ -4,6 +4,9 @@
 
 ## 文件
 
+- `hook-port.ts`：定义 Hook 列表、安全审查摘要和精确版本信任/启停的窄端口；不暴露任意配置写入。
+- `conversation-hook-service.ts`：在会话锁内执行 `/hooks` 列表、详情、预览和一次性确认；查询、写入和回读固定到同一 Provider，运行配置刷新由 Client 协调共享配置的实例。选择快照与确认仅在内存保留五分钟，绑定 Actor、渠道会话、Workspace、Thread、Hook key/hash 和配置版本；写入尝试后使各 Provider 的旧交互失效，复核 Surface 的无损审查能力，明确展示部分刷新失败，不把保存成功当作实际执行成功。
+
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
   按钮模型选择通过 `selectModel` 接受精确 Provider 与模型身份，不重新解释为文本选择器。

@@ -1,4 +1,5 @@
 import type { ConversationResetCreditService, ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
+import type { HookCommandView } from "./hook-port.js";
 import {
   UserFacingError,
   type ConversationTarget,
@@ -75,6 +76,7 @@ export const conversationCommandNames = [
   "skill",
   "mcp",
   "plugin",
+  "hooks",
   "usage",
   "metrics",
   "limits",
@@ -110,6 +112,7 @@ export function isConversationCommandName(value: string): value is ConversationC
 }
 
 export type ConversationCommandResult =
+  | { kind: "hooks"; view: HookCommandView }
   | { kind: "auto-review"; state: ReturnType<ConversationCommandUseCases["autoReview"]> }
   | { kind: "reset-credit"; result: ConversationResetCreditResult }
   | { kind: "outcome"; outcome: ConversationCommandOutcome }
@@ -378,6 +381,8 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     this.conversations.touchActivity?.(target);
     const argumentsText = input.trim();
     switch (command) {
+      case "hooks":
+        return { kind: "hooks", view: await this.conversations.hooks(target, argumentsText, actorId) };
       case "autoreview": {
         if (!argumentsText) return { kind: "auto-review", state: this.conversations.autoReview(target) };
         if (argumentsText !== "on" && argumentsText !== "off") {

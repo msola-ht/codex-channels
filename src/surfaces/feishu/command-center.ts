@@ -63,6 +63,7 @@ export const feishuCommandCenterActions = [
   "goal",
   "plan",
   "schedule",
+  "hooks",
   "help",
 ] as const satisfies ReadonlyArray<FeishuCommandCenterAction>;
 
@@ -715,6 +716,7 @@ function renderFeishuCategorizedCommandsCard(
         ["Skills", "skill", "default"],
         ["MCP", "mcp", "default"],
         ["Plugin", "plugin", "default"],
+        ["Hooks", "hooks", "default"],
       ]),
       sectionTitle("当前内容"),
       actionRow(token, [

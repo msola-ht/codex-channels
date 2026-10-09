@@ -17,6 +17,29 @@ export function formatSurfaceUserFacingError(
   surfaceLabel: "Telegram" | "飞书" | "微信",
 ): string {
   switch (error.code) {
+    case "hooks.usage":
+      return "用法：/hooks [page N|列表选择标识|trust <标识>|enable <标识>|disable <标识>|confirm <一次性令牌>]";
+    case "hooks.actor-required":
+    case "hooks.forbidden":
+      return "当前用户身份或工作区授权无法确认，已拒绝 Hook 操作";
+    case "hooks.provider-required":
+      return "当前未确定模型提供商，请先通过 /model 选择提供商";
+    case "hooks.page-invalid":
+      return "Hook 页码无效，请发送 /hooks 返回列表";
+    case "hooks.managed":
+      return "受管理员管理的 Hook 只读，不能在渠道中信任或启停";
+    case "hooks.local-review-required":
+      return "该 Hook 无法在渠道中完整审查，请先在本机核对配置";
+    case "hooks.review-expired":
+      return "Hook 选择、确认或配置已变化或失效，请重新发送 /hooks 并审查详情";
+    case "hooks.read-failed":
+    case "hooks.version-unavailable":
+      return "当前 Hook 配置无法安全读取，请在本机核对配置后重新发送 /hooks";
+    case "hooks.write-unconfirmed":
+      return "Hook 修改结果尚未确认，请先用 /hooks 核对状态，避免重复提交";
+    case "hooks.readback-failed":
+    case "hooks.state-unconfirmed":
+      return "Hook 修改后未能确认实际状态，请使用 /hooks 或在本机核对配置";
     case "reset-credit.failed":
       switch (error.details.reason) {
         case "usage": return resetCreditCommandUsage;

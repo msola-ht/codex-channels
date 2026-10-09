@@ -717,6 +717,21 @@ export class TelegramSurface {
         result,
       );
     });
+    this.bot.callbackQuery(/^hooks:(?:page:[1-9]\d*|(?:trust|enable|disable):[0-9a-f]{16}\.[1-9]\d*|confirm:[0-9a-f]{32}|[0-9a-f]{16}\.[1-9]\d*)$/, async (context) => {
+      await context.answerCallbackQuery({ text: "正在处理 Hooks" });
+      const input = context.callbackQuery.data.slice("hooks:".length).replace(":", " ");
+      const result = await this.commands.execute(
+        target(context),
+        "hooks",
+        input,
+        String(context.from.id),
+      );
+      if (input.startsWith("confirm ")) {
+        try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
+        catch (error) { this.logger.warn(surfaceErrorMetadata(error), "Hook 确认按钮清理失败"); }
+      }
+      await renderTelegramCommandResult(context, result);
+    });
     this.bot.callbackQuery(
       /^plugin:select:([A-Za-z0-9_-]{43})$/,
       async (context) => {

@@ -14,6 +14,7 @@ import { formatCodexProviderLabel, formatServiceTier, scopedModelDisplayName } f
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
+import { formatConversationHooks, hookCommandChoices } from "../conversation-hook-command-format.js";
 import {
   formatConversationPlugins,
 } from "../conversation-extension-command-format.js";
@@ -37,7 +38,7 @@ import {
   formatConversationWorkspaces,
 } from "../conversation-workspace-status-command-format.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
-import { formatStatus } from "./format.js";
+import { formatStatus, splitTelegramText } from "./format.js";
 import { formatTelegramDiffChunks, formatTelegramPanelChunks } from "./html-format.js";
 
 export async function renderTelegramCommandResult(
@@ -119,6 +120,16 @@ export async function renderTelegramCommandResult(
         pluginKeyboard(result),
       );
       return;
+    case "hooks": {
+      const chunks = splitTelegramText(formatConversationHooks(result.view), 3_600);
+      for (const [index, chunk] of chunks.entries()) {
+        await context.reply(chunk, {
+          ...(index === chunks.length - 1 ? { reply_markup: hookKeyboard(result) } : {}),
+          ...(index > 0 ? { disable_notification: true } : {}),
+        });
+      }
+      return;
+    }
     case "reset-credit":
       await replyTelegramPanel(context, formatConversationResetCredits(result, "buttons"),
         resetCreditKeyboard(result, String(context.chat?.id ?? ""), String(context.from?.id ?? "")));
@@ -147,6 +158,17 @@ export async function renderTelegramCommandResult(
   }
   const text = renderConversationCommandResult(result);
   if (text !== null) await replyTelegramPanel(context, text);
+}
+
+export function hookKeyboard(
+  result: Extract<ConversationCommandResult, { kind: "hooks" }>,
+): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: hookCommandChoices(result.view).map(choice => [{
+      text: choice.label,
+      callback_data: `hooks:${choice.input.replace(" ", ":")}`,
+    }]),
+  };
 }
 
 export function workspacePermissionKeyboard(): InlineKeyboardMarkup {

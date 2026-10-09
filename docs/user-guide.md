@@ -635,7 +635,7 @@ npm 安装版也可以使用 `codexc uninstall --services` 后执行 `npm uninst
 - 工作区审批方式：`/workspaceperm autoreview <on|off|clear>`
 - 当前会话审批方式：`/autoreview [on|off]`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
-- 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`
+- 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/hooks`
 - 帮助：`/help`、`/whoami`
 
 `/stop` 会优先中断当前活动 Turn；飞书和 Telegram 同时取消当前待处理交互，原生 Queue 中的排队项保留，可通过 `/queue` 管理。`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。
@@ -661,6 +661,47 @@ Standard/Fast/Ultrafast；只按当前模型能力提供加速选项，功能开
 `/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话会优先显示本机指标/缓存中的 Turn 轮数；打开列表不等待历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn 统计；本地没有记录时不会猜测数量。需要完整官方历史计数时，`codexc cleanup sessions` 仍会按候选读取。
 
 计划任务是 Gateway 自有功能，不是 App Server 原生计划 RPC。启用方式和确认语法见 [`计划任务开发设计`](scheduled-tasks-development.md)。
+
+### Hook 列表、信任与启停
+
+飞书、Telegram 和微信共用 `/hooks`，按当前 Workspace 查询当前会话所属 Provider 的
+App Server；尚未绑定会话时使用已确定的模型 Provider，无法确定时先用 `/model` 选择。
+飞书、Telegram 提供操作按钮，三个渠道均可使用文本命令：
+
+```text
+/hooks
+/hooks page 2
+/hooks <列表返回的选择编号>
+/hooks trust <选择编号>
+/hooks enable <选择编号>
+/hooks disable <选择编号>
+/hooks confirm <预览返回的确认码>
+```
+
+列表显示来源、触发事件、启用与信任状态；详情展示经过安全处理的审查信息。
+选择编号固定到本次列表，不是可随排序变化重新解释的序号。信任、启用、停用均先生成预览，
+再由同一操作者明确确认；选择与确认五分钟过期，Gateway 重启后失效。
+确认时 Workspace、会话或 Provider 与预览不一致，Hook 定义/状态改变或用户配置版本变化时，需重新审查。
+受管 Hook 只读。仅信息完整的 command Hook 可以在渠道逐项信任；MCP Tool、prompt 和 agent
+处理器的完整输入未由列表接口提供，需在本地审查。命令信息被脱敏或截断、来源不明时，渠道也不提供信任操作，
+请在本地 Codex `/hooks` 审查。微信还会检查命令、匹配条件和来源路径能否原样展示；需要替换 Markdown 符号时不允许渠道信任，手动输入信任或确认命令也不能绕过。已信任的非受管项仍可启停。不能通过此入口注册 Hook、部署脚本或一次性信任全部 Hook。
+
+**信任和启用是独立状态。** 新增或变更的非受管 Hook 需要信任当前定义；信任一个已停用 Hook
+不会替它开启。信任哈希对应配置定义，不覆盖所引用脚本的文件内容。
+这些操作持久写入 Codex Home 的用户配置。项目的主实例和 Provider 隔离实例共用该配置，
+因此会影响其他 Provider 和使用相同 Hook 的会话，并非仅当前聊天的一次授权。
+Gateway 数据库不保存另一份 Hook 定义、脚本或信任状态。
+
+写入后通过官方协议协调已连接及正在连接的实例刷新运行配置，并回读列表核对结果，通常不需要重启。
+每次新建连接或重连时均刷新，覆盖未连接实例及 Gateway 重启后仍存活的独立实例；不会为刷新而启动未使用的 Provider。刷新请求使用空编辑，不复制或重写 Hook 状态。
+某实例刷新请求失败时，结果明确提示“已保存，刷新未确认”及对应 Provider；下一次使用该实例前再次尝试刷新，失败则拒绝继续操作。
+首次连接的刷新失败会先清理本次 Client 连接，清理成功后可重新接入；清理未确认时保持拒绝接入，需检查连接清理错误，不会通过终止共享 App Server 绕过。
+“设置成功”只表示保存、回读状态匹配且协调的刷新请求已返回成功，不保证上游内部所有 Thread 刷新成功，也不表示 Hook 已执行；
+实际运行仍看后续 Hook 完成通知。Hook 状态写入中断或结果不明时不会自动重试，旧选择和确认全部失效，先重新执行 `/hooks` 核对。
+列表警告、配置加载错误与空列表分别提示，不向渠道转发上游原始错误正文。
+
+Windows、macOS、Linux 使用同一管理协议；脚本路径、解释器和会话 Shell 仍由实际 App Server
+环境决定，信任操作不会修正平台不兼容的命令。此入口不改变 Windows 代理或 Unix Socket 生命周期。
 
 ## 7. 指标、WebUI 与图片
 

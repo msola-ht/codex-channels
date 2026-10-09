@@ -79,6 +79,12 @@
   并为可调用项生成官方 `plugin://` mention 路径。
 - `permission-adapter.ts`：把官方 Permission Profile 分页响应裁剪为 ID、说明和策略可选状态，
   并对必需字段与分页游标失败关闭。
+- `hook-adapter.ts`：把稳定 `hooks/list` 的单 Workspace 目录裁剪为 Application Hook 条目，
+  校验事件、来源、处理器和信任状态，原始 warnings/errors 只返回计数。命令、MCP 工具、matcher
+  与来源路径复用凭据脱敏、控制字符清理和限长；关键展示信息改变、来源未知，以及缺少执行内容的
+  prompt/agent 及缺少输入模板的 MCP Tool 处理器均标记为不可审阅；命令条目同时提供安全整数
+  timeout、async 和 additionalContext spill 阈值。Hook key 仅用于内部精确定位，不作为渠道展示文本。
+  状态写入只允许 trust/enable/disable，通过 `hooks.state` 的 upsert 保留其他 Hook 与状态字段。
 - `notification-adapter.ts`：把当前支持的官方 Notification 转换为 Routing 或 Conversation Core
   拥有的稳定事件；异步 Agent 消息保留 `delivery` 与已校验的问题，按过程消息处理其阶段；
   `hook/completed` 保留 Thread、运行 ID、已知触发事件及上游终态，不按执行模式额外过滤；忽略 `hook/started`，不转发输出条目、状态自由文本或路径；
@@ -116,7 +122,16 @@
   同一个 `config/batchWrite` 用户配置事务写入；`writeDefaultServiceTier` 只接受 Standard 对应的
   `default`、`fast` 与 `ultrafast`，渠道通过模型目录检查可用性，下一 Turn 覆盖仍走 `turn/start.serviceTier`。
   受控的读改写流程从原始用户层取得版本并通过
-  `expectedVersion` 拒绝并发覆盖；用户设置读取可显式附加稳定 `configRequirements/read`，
+  `expectedVersion` 拒绝并发覆盖；Hook 目录和用户层版本通过独立窄端口读取，不把原始配置交给
+  Application。Hook 状态写入携带 `expectedVersion` 和 `reloadUserConfig: true`，不自动重试；
+  Provider 路由使用调用方明确选择的实例和活动边界，不以主实例替代未知 Provider。各实例共用
+  Codex Home；写入后协调已连接及正在连接的实例，以空编辑 `config/batchWrite` 请求刷新，
+  不复制或重写状态。返回失败 Provider，未连接或刷新失败的实例在后续接入操作前刷新，失败关闭；
+  新建连接与重连均刷新，避免 Gateway 重启后丢失失效标记而继续使用独立实例的旧运行配置。
+  首次连接的握手与刷新共同构成初始化；失败时经既有 Provider 关闭路径清理本次连接，
+  清理成功后才允许重新握手，清理未确认时保留所有权并拒绝接入，不终止独立 App Server。
+  不为刷新启动未使用的 Provider，结果未知的写入同样使旧运行配置失效。并发刷新合并，同一次编辑不重试。
+  用户设置读取可显式附加稳定 `configRequirements/read`，
   仅投影受控实验 `allowedApprovalsReviewers` 和稳定 `featureRequirements` 中的 Auto-review
   审批人及功能限制，不返回完整受管配置；策略读取失败或畸形时保留有效用户快照，省略审批策略投影，由设置入口显示不可用并拒绝该字段写入。
   MCP 概览按 Thread 使用 `toolsAndAuthOnly` 分页，详情使用 `full`；`config/mcpServer/reload` 不自动重试，成功只表示已加载 Thread

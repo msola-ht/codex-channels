@@ -131,6 +131,7 @@ import {
   SqliteSessionDisplayCache,
 } from "../storage/index.js";
 import {
+  canReviewConversationHook,
   formatProviderIdleReleaseNotice,
   setConfiguredCustomPrimaryProviderId,
   type SurfaceAdapter,
@@ -756,6 +757,13 @@ export abstract class GatewayComponentGraph {
         updateThreadApprovalsReviewer: (threadId, reviewer) =>
           this.updateThreadApprovalsReviewer(threadId, reviewer),
       },
+      (target, actorId) => {
+        this.requireRunning();
+        if (!this.accessPolicy(target)?.isAllowed({ target, actorId }) || !this.bindings.actors(target).includes(actorId)) {
+          throw new UserFacingError("hooks.forbidden", "当前用户未获授权管理 Hook");
+        }
+      },
+      canReviewConversationHook,
     );
     this.conversations = service;
     service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);
