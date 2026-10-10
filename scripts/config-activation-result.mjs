@@ -15,6 +15,8 @@ export function configActivationResult(activation) {
       return result("next-tui", "codex", []);
     case "next-thread-and-tui":
       return result("next-thread-and-tui", "codex", []);
+    case "next-services":
+      return result("next-services", "services", []);
     case "restart-gateway":
       return result("restart", "gateway", ["codexc restart gateway"]);
     case "restart-webui":

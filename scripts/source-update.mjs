@@ -819,9 +819,13 @@ async function startCoreServices(checkout, environment, options, services) {
   assertCodexVersion(codexVersion(checkout), environment, options.captureCommand);
   await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
   const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
+  // 恢复范围沿用同一份启动选择：关闭的 WebUI 与未启用的 Relay 不再被重新拉起。
+  const restartable = new Set(
+    serviceControlDefinitions(platform, "all", "start", environment).map(service => service.target),
+  );
   const targets = ["app-server", "gateway", "model-relay", "webui"].filter(target =>
     services.find(service => service.target === target)?.running
-    && (target !== "model-relay" || serviceControlDefinitions(platform, "all", "start", environment).some(service => service.target === target)));
+    && restartable.has(target));
   for (const target of targets) runCheckoutService(checkout, "start", target, environment, options);
 }
 

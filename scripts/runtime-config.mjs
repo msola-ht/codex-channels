@@ -108,10 +108,11 @@ function initializeWorkspaceRepository(workspaceDir, environment) {
   );
   mkdirSync(gitDir, { mode: 0o700 });
   const createdGitDirectory = lstatSync(gitDir);
-  const result = spawnSync("git", ["init", "--quiet", "--no-bare", "--", workspaceDir], {
+  const result = spawnSync("git", ["init", "--quiet", "--no-bare", "--initial-branch=main", "--", workspaceDir], {
     cwd: workspaceDir,
     env: gitEnvironment,
-    stdio: "ignore",
+    encoding: "utf8",
+    stdio: ["ignore", "ignore", "pipe"],
     timeout: 10_000,
   });
   if (result.error || result.status !== 0) {
@@ -127,6 +128,9 @@ function initializeWorkspaceRepository(workspaceDir, environment) {
   }
   if (result.error?.code === "ENOENT") {
     throw new Error("默认 Workspace 的 Git 仓库初始化失败：Git 不可用，请安装 Git 后重新运行 codexc init");
+  }
+  if (/unknown (option|switch)|unrecognized option/iu.test(result.stderr ?? "")) {
+    throw new Error("默认 Workspace 的 Git 仓库初始化失败：当前 Git 不支持 --initial-branch，创建 main 分支需要 Git 2.28 或更高版本，请升级 Git 后重新运行 codexc init");
   }
   if (result.error || result.status !== 0) {
     throw new Error("默认 Workspace 的 Git 仓库初始化失败：git init 失败，请检查目录权限和 Git 配置后重新运行 codexc init");

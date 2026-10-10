@@ -194,12 +194,15 @@ case "$action" in
     set -- $resolved_units
     set +e
     systemctl_user --no-pager status "$@"
-    status_code=$?
     set -e
-    if [ "$status_code" -ne 0 ]; then
-      print_status failure "systemd 服务状态异常。"
-      exit "$status_code"
-    fi
+    # 关闭或未启用的可选服务允许保持停止，只有预期运行的服务才判定状态异常。
+    required_units=$(service_ids "$target" start)
+    for unit in $required_units; do
+      if ! systemctl_user is-active --quiet "$unit"; then
+        print_status failure "systemd 服务状态异常。"
+        exit 1
+      fi
+    done
     ;;
   logs)
     shift

@@ -430,7 +430,7 @@ export interface SettingsSummaryResponse {
       loggingLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace"
       pluginApiEnabled: boolean
     }
-    webui: { host: string; port: number; tokenConfigured: boolean }
+    webui: { enabled?: boolean; host: string; port: number; tokenConfigured: boolean }
     metrics: {
       storage: { retentionDays: number; maxRows: number }
     }

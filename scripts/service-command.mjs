@@ -7,7 +7,12 @@ import { performance } from "node:perf_hooks";
 
 import { runAppServerService } from "../runtime/app-server-service-runtime.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
-import { readGatewayConfig, validateGatewayConfigDocument, validateWebuiConfigDocument } from "../runtime/gateway-config.mjs";
+import {
+  readGatewayConfig,
+  validateGatewayConfigDocument,
+  validateWebuiConfigDocument,
+  webuiServiceEnabled,
+} from "../runtime/gateway-config.mjs";
 import { runGatewayService } from "../runtime/gateway-service-runtime.mjs";
 import { assertSynchronousChildSuccess, installServiceControlHandler } from "../runtime/process-lifecycle.mjs";
 import {
@@ -162,6 +167,10 @@ export async function runRestartCommand(args = []) {
       printCliMessage("note", "Model Relay 未启用：仅停止，不重新启动。");
       return false;
     }
+    if (target === "all" && definition.target === "webui" && webuiServiceEnabled(document) === false) {
+      printCliMessage("note", "WebUI 已在配置中关闭：仅停止，不重新启动。");
+      return false;
+    }
     return true;
   });
   const steps = [
@@ -233,14 +242,17 @@ export async function runServiceCommand(args) {
     printCliMessage("success", coreServiceReadyMessage("all"));
     return;
   }
-  const controlEnvironment = serviceActionAllowsInvalidConfig(action)
-    ? serviceControlEnvironment()
-    : configuredEnvironment().environment;
+  const runtime = serviceActionAllowsInvalidConfig(action) ? undefined : configuredEnvironment();
+  const controlEnvironment = runtime?.environment ?? serviceControlEnvironment();
   if (action === "start" || action === "stop") {
     const platform = { linux: "systemd", darwin: "launchd", win32: "windows" }[process.platform];
     if (!platform) throw new Error("不支持的后台服务平台");
+    const selected = serviceControlDefinitions(platform, serviceArgs[0], action, controlEnvironment);
+    if (action === "start" && serviceArgs[0] === "all" && runtime !== undefined) {
+      printSkippedOptionalServiceNotes(platform, selected, controlEnvironment, runtime.document);
+    }
     const failures = [];
-    for (const definition of serviceControlDefinitions(platform, serviceArgs[0], action, controlEnvironment)) {
+    for (const definition of selected) {
       try {
         await timedServiceStep(action, definition, controlEnvironment);
       } catch (error) {
@@ -322,6 +334,30 @@ function serviceControllerReportsFailure(action) {
 
 function serviceActionAllowsInvalidConfig(action) {
   return new Set(["uninstall", "stop", "reload", "status", "logs"]).has(action);
+}
+
+/** 启动 all 时说明按配置跳过的可选服务，避免与启动失败混淆。 */
+function printSkippedOptionalServiceNotes(platform, selected, environment, document) {
+  const selectedTargets = new Set(selected.map(definition => definition.target));
+  const optionalServices = [
+    {
+      target: "webui",
+      enabled: webuiServiceEnabled(document) !== false,
+      note: "WebUI 已在配置中关闭：跳过启动。",
+    },
+    {
+      target: "model-relay",
+      enabled: document.model_relay?.enabled === true,
+      note: "Model Relay 未启用：跳过启动。",
+    },
+  ];
+  for (const service of optionalServices) {
+    if (service.enabled || selectedTargets.has(service.target)) continue;
+    const definition = serviceDefinitions.find(candidate => candidate.target === service.target);
+    if (definition === undefined) continue;
+    if (!existsSync(serviceDefinitionPath(platform, definition, environment))) continue;
+    printCliMessage("note", service.note);
+  }
 }
 
 export async function waitForManagedServiceReadiness(

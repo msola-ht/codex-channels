@@ -48,12 +48,17 @@ codexc webui [--host 127.0.0.1|::1|0.0.0.0] [--port 端口]
 
 ```toml
 [webui]
+enabled = true        # false 时 codexc start/restart all 不再启动 WebUI；未设置沿用已安装状态
 host = "127.0.0.1"   # 127.0.0.1 / ::1 仅本机；0.0.0.0 必须设置 token
 port = 8787
 token = "你的_访问令牌"
 ```
 
-也可以运行 `codexc config` 选择「WebUI 设置」交互修改以上三项，效果等价。
+也可以运行 `codexc config` 选择「WebUI 设置」交互修改启用状态与以上三项，效果等价。关闭影响
+`codexc start/restart all` 的启动选择和 `codexc update` 的服务恢复范围：设置本身不会停止正在运行的
+实例，也不删除已生成的服务定义；`codexc restart all` 会停止它且不再启动，需要立即停止请运行
+`codexc stop webui`。`codexc install` 只生成服务定义、不启动 WebUI，开启开关后仍需
+`codexc start webui`；关闭后也仍可用 `codexc webui` 前台运行。
 - 前端在 API 返回 401 时显示令牌输入页；也可以通过
   `http://<地址>:<端口>/?token=<令牌>` 直接携带令牌打开（令牌会出现在浏览器历史，谨慎使用）。
   页面启动后会从当前地址中移除令牌参数。手动登录验证最多等待 30 秒，失败后可重新提交；令牌无效与服务暂不可用分别提示。
@@ -83,7 +88,8 @@ SSH 隧道建议统一使用 `127.0.0.1`，不要用服务器公网 IP、Tailsca
 
 ## 后台服务
 
-WebUI 是独立后台服务，已安装时纳入 `start/stop/restart/status/logs all`。
+WebUI 是独立后台服务，已安装时纳入 `stop/status/logs all`；`start all` 与 `restart all` 的启动段
+按 `[webui] enabled` 跳过已关闭项。
 `codexc install` 只生成服务单元并启动 App Server
 与 Gateway，需要后台常驻时单独管理：
 

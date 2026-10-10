@@ -12,6 +12,15 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
       message: "选择 WebUI 设置",
       showInstructions: false,
       options: [
+        {
+          value: "enabled",
+          label: "启用状态",
+          hint: webui.enabled === false
+            ? "已关闭：start/restart all 不再启动，restart all 会停止它"
+            : webui.enabled === true
+              ? "已启用"
+              : "未设置：沿用已安装的服务定义",
+        },
         { value: "host", label: "监听地址", hint: `当前：${webui.host}` },
         { value: "port", label: "监听端口", hint: `当前：${webui.port}` },
         {
@@ -24,7 +33,24 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
     });
     if (prompts.isCancel(section) || section === "back") return { action: "back" };
     let input;
-    if (section === "host") {
+    if (section === "enabled") {
+      const selected = await prompts.select({
+        message: "WebUI 启用状态",
+        showInstructions: false,
+        initialValue: webui.enabled === undefined ? "back" : webui.enabled ? "enabled" : "disabled",
+        options: [
+          { value: "enabled", label: "启用", hint: "随 codexc start/restart all 启动 WebUI" },
+          {
+            value: "disabled",
+            label: "关闭",
+            hint: "不再随 all 启动；需要时用 codexc start webui 单独启动",
+          },
+          { value: "back", label: "返回上一级" },
+        ],
+      });
+      if (prompts.isCancel(selected) || selected === "back") continue;
+      input = { kind: "webui.enabled", value: selected === "enabled" };
+    } else if (section === "host") {
       const selected = await prompts.select({
         message: "监听地址",
         showInstructions: false,
@@ -106,6 +132,11 @@ export async function runWebuiSettings({ environment, output, prompts, writeConf
       environment,
       result.activationResult,
     );
+    if (input.kind === "webui.enabled") {
+      output.write(input.value
+        ? "WebUI 已启用：此后 codexc start/restart all 会启动它；需要现在启动请运行 codexc start webui（未生成服务定义时先运行 codexc install）。\n"
+        : "WebUI 已关闭：此后 codexc start/restart all 不再启动它；正在运行的实例不会自动停止，需要立即停止请运行 codexc stop webui。\n");
+    }
     return { webui: result.value, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
   }
 }

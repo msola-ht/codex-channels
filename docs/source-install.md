@@ -101,7 +101,7 @@ codexc update
 预检。随后使用实际 CLI 核对候选源码锁定的公开参数合同、本地权限映射和
 `CODEX_HOME/config.toml` 根级及所有 Profile 用户设置；未设置 `CODEX_HOME` 时使用
 `~/.codex/config.toml`。即使 `main` 没有新提交或使用本地构建包，也执行同一只读检查。
-只有这些步骤全部通过，才记录服务状态并按 WebUI、Relay、Gateway、App Server 顺序停止运行中的服务，安装配套 CLI、切换源码并刷新全局命令。成功及失败恢复均只启动原本运行的服务，顺序为 App Server、Gateway、仍启用的 Relay、WebUI；手工停止的服务保持停止。Windows 临时克隆也启用 Git 长路径支持。
+只有这些步骤全部通过，才记录服务状态并按 WebUI、Relay、Gateway、App Server 顺序停止运行中的服务，安装配套 CLI、切换源码并刷新全局命令。成功及失败恢复均只启动原本运行的服务，顺序为 App Server、Gateway、仍启用的 Relay、未在配置中关闭的 WebUI；配置中关闭的 WebUI 与未启用的 Relay 保持停止，手工停止的服务也保持停止。Windows 临时克隆也启用 Git 长路径支持。
 
 更新通过官方版本化配置事务将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，避免原生终端另起官方后台；已为 `false` 时不重复写入，未设置或为 `true` 时关闭。即使源码与 CLI 无需更新且数据库已满足当前结构，也执行该设置。其他用户偏好与 Provider 模型目录不改写，也不处理历史服务和 PATH。写入失败会使更新明确失败；数据库已就绪时仍按原恢复流程恢复项目服务。此操作不停止已有官方 daemon，不改变其自动更新设置；`codexc remote` 继续连接项目管理的实例。
 
@@ -139,7 +139,7 @@ Windows 构建使用现有 PowerShell 7 提前编译原生 Job/目录保护 DLL�
 
 若命令报告“Windows 原生组件无法加载，尚未检查文件 ACL”，请按提示重新构建或安装；这表示组件或宿主环境不匹配，运行 `codexc security repair` 不能修复该构建问题。
 
-已有运行服务时，先从本机终端记录 `codexc status all` 和 `codexc status webui` 的状态，停止运行中的 WebUI，再执行 `codexc stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；安装失败先处理错误，不启动版本未就绪的服务。程序目录、Node.js 路径或服务模板改变时用 `codexc install` 重建并激活服务定义；该命令会启动核心服务。macOS/Linux 的 50 秒停止期限及 Linux 的有序子进程收尾设置属于模板变更，仅更新程序和重启不能将它们写入已有定义。
+已有运行服务时，先从本机终端记录 `codexc status all` 和 `codexc status webui` 的状态，停止运行中的 WebUI，再执行 `codexc stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；这里使用显式目标，配置中关闭的 WebUI 不会自动恢复，需要时显式运行 `codexc start webui`。安装失败先处理错误，不启动版本未就绪的服务。程序目录、Node.js 路径或服务模板改变时用 `codexc install` 重建并激活服务定义；该命令会启动核心服务。macOS/Linux 的 50 秒停止期限及 Linux 的有序子进程收尾设置属于模板变更，仅更新程序和重启不能将它们写入已有定义。
 
 `npm run install:global` 不拉取 Git，也不自动管理服务；上面的 `codexc install` 是另行执行的服务操作。自行选择分支并更新源码后重复执行程序安装；没有受管仓库时，`codexc update` 只同步配套 CLI 和校验配置、数据库，不更新本地源码或 Gateway 包。
 

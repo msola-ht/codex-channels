@@ -28,7 +28,7 @@ function activationNotice(activation) {
     return "配置已保存。WebUI 配置将在重启服务后生效：codexc restart webui；CLI 参数优先于本配置。";
   }
   if (activation.target === "all") {
-    return "配置已保存。请重启全部后台服务（含已安装 WebUI，Relay 按启用状态启动）：codexc restart all";
+    return "配置已保存。请重启全部后台服务（WebUI 与 Relay 按启用状态启停）：codexc restart all";
   }
   if (activation.target === "app-server") {
     return "配置已保存。请重启 App Server：codexc restart appserver";
@@ -53,6 +53,10 @@ function activationNotice(activation) {
   if (activation.status === "restart" && activation.target === "gateway") {
     return "配置已保存。\n该设置需要重建 Gateway 连接；后台服务运行时会自动重启，前台进程需重新启动；"
       + "未运行时将在下次启动生效；现有 Thread 不会被修改。";
+  }
+  if (activation.status === "next-services") {
+    return "配置已保存。该开关在下一次 codexc start/restart all 时生效，"
+      + "正在运行的服务不会因此重启或停止；需要立即启停时运行 codexc start webui 或 codexc stop webui。";
   }
   if (activation.status === "none") {
     return "当前值未变化，配置文件未写入，无需重启服务。";

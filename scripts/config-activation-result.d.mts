@@ -4,6 +4,7 @@ export type ConfigActivationStatus =
   | "next-thread"
   | "next-tui"
   | "next-thread-and-tui"
+  | "next-services"
   | "restart"
   | "reinstall-required"
   | "failed";

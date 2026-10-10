@@ -258,11 +258,20 @@ case "$action" in
     target="${2:-all}"
     require_target "$target"
     labels=$(service_ids "$target" status)
+    required_labels=$(service_ids "$target" start)
     status_code=0
     for label in ${(f)labels}; do
-      if ! launchctl print "$user_domain/$label" 2>/dev/null; then
+      launchctl print "$user_domain/$label" 2>/dev/null && continue
+      # 关闭或未启用的可选服务允许保持未加载，只有预期运行的服务才判定异常。
+      required=0
+      for candidate in ${(f)required_labels}; do
+        [ "$candidate" = "$label" ] && required=1
+      done
+      if [ "$required" -eq 1 ]; then
         print_status failure "launchd 服务未加载：$label"
         status_code=1
+      else
+        print_status note "launchd 可选服务未加载：$label"
       fi
     done
     exit "$status_code"

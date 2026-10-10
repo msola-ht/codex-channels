@@ -91,6 +91,7 @@ const weixinSetupSchema = z.strictObject({
 });
 
 const webuiSchema = z.strictObject({
+  enabled: z.boolean().optional(),
   host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
   port: z.number().int().min(1).max(65535).default(8787),
   token: z.string().min(1).optional(),
@@ -348,6 +349,16 @@ export function validateWebuiConfigDocument(document) {
     throw new Error(`config.toml 的 [webui] 配置无效：\n${z.prettifyError(parsed.error)}`);
   }
   return parsed.data;
+}
+
+/**
+ * WebUI 服务开关：true / false 为显式设置；
+ * undefined 表示未设置，服务生命周期沿用既有安装状态。
+ */
+export function webuiServiceEnabled(document) {
+  const webui = document !== null && typeof document === "object" ? document.webui : undefined;
+  if (webui === null || typeof webui !== "object" || Array.isArray(webui)) return undefined;
+  return typeof webui.enabled === "boolean" ? webui.enabled : undefined;
 }
 
 export function validateDebugConfigDocument(document) {

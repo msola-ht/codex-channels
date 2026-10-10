@@ -1,7 +1,11 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { readGatewayConfig, validateGatewayConfigDocument } from "../runtime/gateway-config.mjs";
+import {
+  readGatewayConfig,
+  validateGatewayConfigDocument,
+  validateWebuiConfigDocument,
+} from "../runtime/gateway-config.mjs";
 import { serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import { locateUserConfig } from "./runtime-config.mjs";
 import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
@@ -23,6 +27,7 @@ export function serviceControlDefinitions(platform, target, order = "start", env
     if (definition.core) return true;
     if (definition.target === "webui" && (order === "install" || order === "install-stop")) return false;
     if (!existsSync(serviceDefinitionPath(platform, definition, environment, definitionsDirectory))) return false;
+    if (definition.target === "webui" && order === "start" && configuredWebuiEnabled(environment) === false) return false;
     if (definition.target === "model-relay" && (order === "start" || order === "install")) {
       const { configPath } = locateUserConfig(environment);
       return validateGatewayConfigDocument(readGatewayConfig(configPath)).model_relay?.enabled === true;
@@ -31,10 +36,28 @@ export function serviceControlDefinitions(platform, target, order = "start", env
   });
 }
 
+/**
+ * 启动选择按 [webui] 段严格判定：配置无效时失败关闭，
+ * 不把未知取值当作“未设置”而重新启动用户已关闭的服务。
+ */
+function configuredWebuiEnabled(environment) {
+  const { configPath } = locateUserConfig(environment);
+  return validateWebuiConfigDocument(readGatewayConfig(configPath)).enabled;
+}
+
 export function serviceSnapshotHealthy(services, target, environment = process.env) {
   return services.every(service => {
     if (service.running) return true;
-    if (target !== "all" || service.target !== "model-relay") return false;
+    if (target !== "all") return false;
+    if (service.target === "webui") {
+      // 配置中关闭的 WebUI 允许保持停止；配置不可读或无效时仍按异常报告。
+      try {
+        return configuredWebuiEnabled(environment) === false;
+      } catch {
+        return false;
+      }
+    }
+    if (service.target !== "model-relay") return false;
     try {
       const { configPath } = locateUserConfig(environment);
       return validateGatewayConfigDocument(readGatewayConfig(configPath)).model_relay?.enabled !== true;
