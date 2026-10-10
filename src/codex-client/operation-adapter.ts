@@ -5,6 +5,7 @@ import type {
   SubagentState,
   SubagentStatus,
 } from "../conversation-core/index.js";
+import { finiteNumber, trimmedString } from "./value-primitives.js";
 
 type ItemPhase = "started" | "completed";
 
@@ -12,8 +13,8 @@ export function toOperationUpdate(
   item: Record<string, unknown>,
   phase: ItemPhase,
 ): OperationUpdate | undefined {
-  const itemId = stringValue(item.id);
-  const type = stringValue(item.type);
+  const itemId = trimmedString(item.id);
+  const type = trimmedString(item.type);
   if (!itemId || !type) {
     return undefined;
   }
@@ -24,13 +25,13 @@ export function toOperationUpdate(
   };
   switch (type) {
     case "commandExecution": {
-      const command = stringValue(item.command);
+      const command = trimmedString(item.command);
       if (!command) {
         return undefined;
       }
       const exitCode = finiteNumber(item.exitCode);
       // 与原生 TUI 的 is_exploring_call 一致：用户在终端输入的命令不作只读探索归类。
-      const exploration = stringValue(item.source) === "userShell"
+      const exploration = trimmedString(item.source) === "userShell"
         ? undefined
         : summarizeCommandExploration(item.commandActions);
       return {
@@ -43,7 +44,7 @@ export function toOperationUpdate(
     }
     case "fileChange": {
       const paths = arrayValue(item.changes)
-        .map((change) => stringValue(recordValue(change)?.path))
+        .map((change) => trimmedString(recordValue(change)?.path))
         .filter((path): path is string => path !== undefined);
       return {
         ...common,
@@ -52,11 +53,11 @@ export function toOperationUpdate(
       };
     }
     case "mcpToolCall": {
-      const server = stringValue(item.server);
-      const tool = stringValue(item.tool);
+      const server = trimmedString(item.server);
+      const tool = trimmedString(item.tool);
       const computerUse = server === "cua_repl" && (tool === "js" || tool === "js_reset");
       const title = computerUse && tool === "js"
-        ? stringValue(recordValue(item.arguments)?.title)
+        ? trimmedString(recordValue(item.arguments)?.title)
         : undefined;
       const toolName = tool ? server ? `${server}.${tool}` : tool : undefined;
       return {
@@ -72,8 +73,8 @@ export function toOperationUpdate(
       };
     }
     case "dynamicToolCall": {
-      const namespace = stringValue(item.namespace);
-      const tool = stringValue(item.tool);
+      const namespace = trimmedString(item.namespace);
+      const tool = trimmedString(item.tool);
       return {
         ...common,
         kind: "dynamicTool",
@@ -81,9 +82,9 @@ export function toOperationUpdate(
       };
     }
     case "collabAgentToolCall": {
-      const tool = stringValue(item.tool);
+      const tool = trimmedString(item.tool);
       const receiverThreadIds = arrayValue(item.receiverThreadIds)
-        .map(stringValue)
+        .map(trimmedString)
         .filter((threadId): threadId is string => threadId !== undefined);
       const subagentStates = parseSubagentStates(item.agentsStates);
       return {
@@ -96,8 +97,8 @@ export function toOperationUpdate(
       };
     }
     case "subAgentActivity": {
-      const kind = stringValue(item.kind);
-      const path = stringValue(item.agentPath);
+      const kind = trimmedString(item.kind);
+      const path = trimmedString(item.agentPath);
       return {
         ...common,
         kind: "subagent",
@@ -106,7 +107,7 @@ export function toOperationUpdate(
       };
     }
     case "webSearch": {
-      const query = stringValue(item.query);
+      const query = trimmedString(item.query);
       return {
         ...common,
         kind: "webSearch",
@@ -114,7 +115,7 @@ export function toOperationUpdate(
       };
     }
     case "imageView": {
-      const path = stringValue(item.path);
+      const path = trimmedString(item.path);
       return {
         ...common,
         kind: "imageView",
@@ -122,9 +123,9 @@ export function toOperationUpdate(
       };
     }
     case "imageGeneration": {
-      const imagePath = stringValue(item.savedPath);
+      const imagePath = trimmedString(item.savedPath);
       const failure = recordValue(item.failure);
-      const detail = stringValue(failure?.type) === "usageLimitExceeded"
+      const detail = trimmedString(failure?.type) === "usageLimitExceeded"
         ? "图片生成额度已用尽"
         : undefined;
       return {
@@ -227,11 +228,11 @@ function parseExplorationActions(value: unknown): ExplorationAction[] | undefine
     if (action === undefined) {
       return undefined;
     }
-    switch (stringValue(action.type)) {
+    switch (trimmedString(action.type)) {
       case "read": {
         // 官方 name 是必填字段，path 是解析后的绝对路径；缺失 name 时退回原始命令，
         // 不用绝对路径补位。
-        const name = stringValue(action.name);
+        const name = trimmedString(action.name);
         if (name === undefined) {
           return undefined;
         }
@@ -239,9 +240,9 @@ function parseExplorationActions(value: unknown): ExplorationAction[] | undefine
         break;
       }
       case "search": {
-        const query = stringValue(action.query);
-        const path = stringValue(action.path);
-        const fallback = stringValue(action.command);
+        const query = trimmedString(action.query);
+        const path = trimmedString(action.path);
+        const fallback = trimmedString(action.command);
         const summary = query !== undefined
           ? path !== undefined ? `${query} in ${path}` : query
           : path ?? fallback;
@@ -252,7 +253,7 @@ function parseExplorationActions(value: unknown): ExplorationAction[] | undefine
         break;
       }
       case "listFiles": {
-        const summary = stringValue(action.path) ?? stringValue(action.command);
+        const summary = trimmedString(action.path) ?? trimmedString(action.command);
         if (summary === undefined) {
           return undefined;
         }
@@ -382,7 +383,7 @@ function operationStatus(item: Record<string, unknown>, phase: ItemPhase): Opera
   if (phase === "started") {
     return "running";
   }
-  const status = stringValue(item.status)?.toLowerCase();
+  const status = trimmedString(item.status)?.toLowerCase();
   if (status === "failed" || status === "interrupted" || item.success === false) {
     return "failed";
   }
@@ -398,14 +399,6 @@ function optionalNumber(
 ): { durationMs?: number } {
   const value = finiteNumber(item[key]);
   return value === undefined ? {} : { durationMs: value };
-}
-
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
