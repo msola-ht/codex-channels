@@ -22,7 +22,7 @@ import {
   formatConversationWorkspacePermissions,
   formatConversationStatus,
 } from "../conversation-workspace-status-command-format.js";
-import { formatCodexProviderLabel, formatModelDisplayName, formatModelDisplayNameWithId, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, scopedModelDisplayName } from "../provider-format.js";
+import { formatCodexProviderLabel, formatModelDisplayName, formatModelDisplayNameWithId, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListDisplayName, modelListEntry } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import type {
   FeishuCommandCenterAction,
@@ -680,6 +680,10 @@ export function renderCommandCenterChoices(
       model.model === result.state.model
       && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai"),
   );
+  // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。
+  const currentModelName = currentModel === undefined
+    ? formatModelDisplayName(result.state.model)
+    : modelListEntry(currentModel.displayName, currentModel.provider, currentModel.model).modelName;
   if (action === "model") {
     if (result.state.models.length === 0) {
       return undefined;
@@ -691,7 +695,7 @@ export function renderCommandCenterChoices(
         title: "选择提供商",
         description: [
           "当前模型",
-          `- 模型：${formatModelDisplayName(result.state.model)}`,
+          `- 模型：${currentModelName}`,
           `- Provider：${formatCodexProviderLabel(result.state.modelProvider)}`,
           `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
           `- 速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
@@ -719,7 +723,7 @@ export function renderCommandCenterChoices(
       choices: result.state.models
         .filter((model) => (model.provider ?? "openai") === result.state.providerFilter)
         .map((model, index) => ({
-        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${scopedModelDisplayName(model.displayName, result.state.providerFilter, model.model, index + 1)}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
+        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${modelListDisplayName(model.displayName, model.provider, model.model, index + 1)}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
         action: "model",
         input: model.id,
         })),
@@ -734,7 +738,7 @@ export function renderCommandCenterChoices(
       title: `选择${reasoningEffortSettingName(result.state.effort, currentModel)}`,
       description: [
         "当前设置",
-        `- 模型：${formatModelDisplayName(result.state.model)}`,
+        `- 模型：${currentModelName}`,
         `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
         `- 速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
       ].join("\n"),

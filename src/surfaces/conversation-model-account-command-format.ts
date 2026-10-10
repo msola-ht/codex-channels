@@ -18,7 +18,7 @@ import {
   formatTimeRemaining,
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
-import { formatCodexProviderLabel, formatDisplayedProvider, formatModelDisplayName, formatModelDisplayNameWithId, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier } from "./provider-format.js";
+import { formatCodexProviderLabel, formatDisplayedProvider, formatModelDisplayName, formatModelDisplayNameWithId, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListEntry } from "./provider-format.js";
 import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
@@ -93,7 +93,7 @@ export function formatConversationModels(
         `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === currentProvider ? " ← 当前" : ""} · ${formatProviderModelSummary(state.models, provider)}`,
       ),
       "",
-      "下一步：/model <提供商序号或 ID>",
+      "下一步：/model <提供商序号>",
     ].join("\n"));
   }
   return toStructuredMarkdownList([
@@ -105,14 +105,15 @@ export function formatConversationModels(
     ...providerSwitchNotice,
     `当前 Provider：${formatCodexProviderLabel(state.providerFilter ?? state.modelProvider ?? providers[0])}`,
     `模型列表（${scopedModels.length}）：`,
-    ...scopedModels.map(
-      (model, index) =>
-        `${index + 1}. ${formatModelDisplayName(model.model, model.displayName)} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
-    ),
+    ...scopedModels.map((model, index) => {
+      // 列表项统一为提供商 + 模型名，不附带原始 ID；同名选项按序号区分。
+      const entry = modelListEntry(model.displayName, model.provider, model.model);
+      return `${index + 1}. ${entry.name}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`;
+    }),
     "",
-    scopedModels.some((model) => formatModelDisplayName(model.model, model.displayName) !== model.displayName)
-      ? "切换：/model <模型序号或原始 ID>（显示组名不用于选择）"
-      : "切换：/model <模型序号、ID 或名称>",
+    scopedModels.some((model) => modelListEntry(model.displayName, model.provider, model.model).grouped)
+      ? "切换：/model <模型序号>（显示组名不用于选择）"
+      : "切换：/model <模型序号>",
   ].join("\n"));
 }
 
@@ -157,16 +158,24 @@ export function formatNextMessageModel(value: { model: string; modelProvider?: s
 export function formatConversationModel(
   label: string,
   value: { model: string; modelProvider?: string },
+  name = formatModelDisplayName(value.model),
 ): string {
-  return `${label}：${formatModelDisplayName(value.model)}${value.modelProvider ? ` · Provider：${formatDisplayedProvider(value.modelProvider)}` : ""}`;
+  return `${label}：${name}${value.modelProvider ? ` · Provider：${formatDisplayedProvider(value.modelProvider)}` : ""}`;
 }
 
 function formatModelStateLine(
   state: Extract<ConversationCommandResult, { kind: "models" }>["state"],
 ): string {
+  const current = state.models.find((model) =>
+    model.model === state.model
+    && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
+  // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。
+  const name = current === undefined
+    ? formatModelDisplayName(state.model)
+    : modelListEntry(current.displayName, current.provider, current.model).modelName;
   return state.modelPending
-    ? formatNextMessageModel(state)
-    : `当前模型：${formatModelDisplayName(state.model)}`;
+    ? formatConversationModel("下一条消息模型", state, name)
+    : `当前模型：${name}`;
 }
 
 export function formatConversationUsage(

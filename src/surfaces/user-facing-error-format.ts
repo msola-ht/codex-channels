@@ -221,7 +221,7 @@ export function formatSurfaceUserFacingError(
     case "model.unavailable":
       return `${detail(error, "model", "该模型")} 暂不可用：${detail(error, "reason", "上游暂未开放")}`;
     case "model.selector.required":
-      return "用法：/model <提供商序号或 ID>，再用 /model <模型序号、ID 或名称>";
+      return "用法：/model <提供商序号>，再用 /model <模型序号>";
     case "model.selector.ambiguous":
       return "模型选择不唯一";
     case "model.selector.not-found":
