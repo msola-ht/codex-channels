@@ -17,7 +17,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
   const location = useLocation()
   const interrupted = isClientInterruption(record)
   const autoReview = record.requestPurpose === "autoApprovalReview"
-  const modelAlias = autoReviewModelAlias(record.provider, record.requestPurpose)
+  const modelAlias = autoReviewModelAlias(record.requestPurpose)
   const formatCount = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString(language === "zh" ? "zh-CN" : "en-US")
   const uncached = record.inputTokens === null || record.cachedInputTokens === null
     ? null : Math.max(0, record.inputTokens - record.cachedInputTokens)

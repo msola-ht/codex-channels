@@ -22,7 +22,7 @@ export function TrafficModel({ request, responses, fallback, upstream, provider:
   const notProvided = t("modelComparison.notProvided")
   const echo = names.join(separator) || notProvided
   const rawName = request ?? (names.join(separator) || fallback) ?? null
-  const alias = autoReviewModelAlias(source, requestPurpose)
+  const alias = autoReviewModelAlias(requestPurpose)
   const name = alias ?? formatModelName(rawName, source)
   const provider = typeof upstream === "string" && upstream.trim() !== "" ? upstream.trim() : null
   const unexpectedProvider = isClinePass && (request === "cline-pass/deepseek-v4.1-flash" || request === `${source}/deepseek-v4.1-flash`)

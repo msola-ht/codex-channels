@@ -251,7 +251,10 @@ export class SqliteRequestMetricsQueries {
     const aliasesSql = `WITH model_aliases AS MATERIALIZED (
       SELECT key AS original_model, value AS display_name FROM json_each(?)
     )`;
-    const displayModelSql = "COALESCE(model_aliases.display_name, model_request_metrics.model)";
+    const displayModelSql = `CASE
+      WHEN model_request_metrics.request_purpose = 'autoApprovalReview' THEN 'auto-review'
+      ELSE COALESCE(model_aliases.display_name, model_request_metrics.model)
+    END`;
     const rows = this.reader.prepare(`
       ${aliasesSql}
       SELECT ${displayModelSql} AS model, ${metricsAggregateSql},

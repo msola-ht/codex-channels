@@ -31,7 +31,7 @@ export function ModelDisplayGroups({ management, providers, disabled }: {
   }, [editor, management.lastAppliedSetting])
   const stale = draft !== null && draft.revision !== management.managedSettings?.revision
   const [member, setMember] = useState("")
-  const [invalid, setInvalid] = useState(false)
+  const [invalid, setInvalid] = useState({ name: false, member: false, group: false })
   const candidates = new Map<string, string>()
   const targets = new Set<string>()
   for (const provider of providers?.managedProviders ?? []) {
@@ -46,27 +46,35 @@ export function ModelDisplayGroups({ management, providers, disabled }: {
     management.cancelSetting()
     setDraft({ original: name, name: name ?? "", members: name === null ? [] : groups.get(name) ?? [], revision: management.managedSettings.revision, lastApplied: management.lastAppliedSetting })
     setMember("")
-    setInvalid(false)
+    setInvalid({ name: false, member: false, group: false })
   }
-  const addMember = (model: string) => {
+  const addMember = (model: string, fromInput = false) => {
     if (!draft) return
     try {
-      validateModelDisplayAliases({ [model]: draft.name || "display-group" })
+      validateModelDisplayAliases({ [model]: "display-group" })
       if (draft.members.includes(model) || (Object.hasOwn(aliases, model) && aliases[model] !== draft.original)) throw new Error("member-conflict")
       setDraft({ ...draft, members: [...draft.members, model] })
       setMember("")
-      setInvalid(false)
-    } catch { setInvalid(true) }
+      setInvalid(previous => ({ ...previous, member: false, group: false }))
+    } catch { setInvalid(previous => ({ ...previous, [fromInput ? "member" : "group"]: true })) }
   }
   const preview = () => {
     if (!draft || stale || disabled) return
     try {
-      if (draft.members.length === 0 || (groups.has(draft.name) && draft.name !== draft.original)) throw new Error("group-conflict")
+      validateModelDisplayAliases({ "display-group": draft.name })
+      if (groups.has(draft.name) && draft.name !== draft.original) throw new Error("group-conflict")
+    } catch {
+      setInvalid(previous => ({ ...previous, name: true }))
+      return
+    }
+    try {
+      if (draft.members.length === 0) throw new Error("empty-group")
       const next = Object.fromEntries(Object.entries(aliases).filter(([, name]) => name !== draft.original))
       for (const model of draft.members) next[model] = draft.name
       validateModelDisplayAliases(next)
+      setInvalid(previous => ({ ...previous, name: false, group: false }))
       void management.previewSetting("display.model-aliases", next, { key: "modelDisplay.title" })
-    } catch { setInvalid(true) }
+    } catch { setInvalid(previous => ({ ...previous, group: true })) }
   }
   if (management.loading && management.managedSettings === null) return <LoadingSettingsCard title={t("modelDisplay.title")} />
   return <>
@@ -90,15 +98,15 @@ export function ModelDisplayGroups({ management, providers, disabled }: {
         {draft && <FieldGroup>
           {targets.size > 0 && <ManagedSelect label={t("modelDisplay.dsTarget")} value={targets.has(draft.name) ? `model:${draft.name}` : "custom"} options={[["custom", t("modelDisplay.customName")], ...[...targets].map(id => [`model:${id}`, id] as [string, string])]} onChange={selection => {
             const name = selection === "custom" ? "" : selection.slice("model:".length)
-            if (name !== "" && Object.hasOwn(aliases, name) && aliases[name] !== draft.original) { setInvalid(true); return }
+            if (name !== "" && Object.hasOwn(aliases, name) && aliases[name] !== draft.original) { setInvalid(previous => ({ ...previous, group: true })); return }
             setDraft({ ...draft, name, members: name === "" || draft.members.includes(name) ? draft.members : [...draft.members, name] })
-            setInvalid(false)
+            setInvalid(previous => ({ ...previous, name: false, group: false }))
           }} disabled={disabled} />}
-          <Field data-invalid={invalid}><FieldLabel htmlFor="model-display-name">{t("modelDisplay.name")}</FieldLabel><Input id="model-display-name" value={draft.name} maxLength={120} placeholder="deepseek-flash" aria-invalid={invalid} disabled={disabled} onChange={event => { setDraft({ ...draft, name: event.target.value }); setInvalid(false) }} /></Field>
+          <Field data-invalid={invalid.name} data-disabled={disabled}><FieldLabel htmlFor="model-display-name">{t("modelDisplay.name")}</FieldLabel><Input id="model-display-name" value={draft.name} maxLength={120} placeholder="deepseek-flash" aria-invalid={invalid.name} aria-describedby={invalid.name ? "model-display-error" : undefined} disabled={disabled} onChange={event => { setDraft({ ...draft, name: event.target.value }); setInvalid(previous => ({ ...previous, name: false, group: false })) }} /></Field>
           {candidates.size > 0 && <ManagedSelect label={t("modelDisplay.chooseMember")} value="" placeholder={t("modelDisplay.chooseMember")} options={[...candidates].filter(([id]) => !draft.members.includes(id)).map(([id, label]) => [id, label] as [string, string])} onChange={id => { if (id) addMember(id) }} disabled={disabled} />}
-          <Field data-invalid={invalid}><FieldLabel htmlFor="model-display-member">{t("modelDisplay.memberId")}</FieldLabel><Input id="model-display-member" value={member} maxLength={265} placeholder="cline-pass/deepseek-v4.1-flash" aria-invalid={invalid} disabled={disabled} onChange={event => { setMember(event.target.value); setInvalid(false) }} /><FieldDescription>{t("modelDisplay.memberHint")}</FieldDescription><Button className="self-start" variant="outline" disabled={disabled || member === ""} onClick={() => addMember(member)}>{t("modelDisplay.addMember")}</Button></Field>
-          <Field><FieldLabel>{t("modelDisplay.members")}</FieldLabel>{draft.members.map(model => <div key={model} className="flex items-center gap-2"><span className="min-w-0 flex-1 break-all">{model}</span><Button size="sm" variant="outline" disabled={disabled} aria-label={t("modelDisplay.removeMember", { model })} onClick={() => setDraft({ ...draft, members: draft.members.filter(id => id !== model) })}>{t("modelManagement.remove")}</Button></div>)}</Field>
-          {invalid && <Alert variant="destructive"><AlertDescription>{t("modelDisplay.invalid")}</AlertDescription></Alert>}
+          <Field data-invalid={invalid.member} data-disabled={disabled}><FieldLabel htmlFor="model-display-member">{t("modelDisplay.memberId")}</FieldLabel><Input id="model-display-member" value={member} maxLength={265} placeholder="cline-pass/deepseek-v4.1-flash" aria-invalid={invalid.member} aria-describedby={invalid.member ? "model-display-member-hint model-display-error" : "model-display-member-hint"} disabled={disabled} onChange={event => { setMember(event.target.value); setInvalid(previous => ({ ...previous, member: false })) }} /><FieldDescription id="model-display-member-hint">{t("modelDisplay.memberHint")}</FieldDescription><Button className="self-start" variant="outline" disabled={disabled || member === ""} onClick={() => addMember(member, true)}>{t("modelDisplay.addMember")}</Button></Field>
+          <Field><FieldLabel>{t("modelDisplay.members")}</FieldLabel>{draft.members.map(model => <div key={model} className="flex items-center gap-2"><span className="min-w-0 flex-1 break-all">{model}</span><Button size="sm" variant="outline" disabled={disabled} aria-label={t("modelDisplay.removeMember", { model })} onClick={() => { setDraft({ ...draft, members: draft.members.filter(id => id !== model) }); setInvalid(previous => ({ ...previous, member: member === model ? false : previous.member, group: false })) }}>{t("modelManagement.remove")}</Button></div>)}</Field>
+          {(invalid.name || invalid.member || invalid.group) && <Alert variant="destructive"><AlertDescription id="model-display-error">{t("modelDisplay.invalid")}</AlertDescription></Alert>}
           {stale && <Alert variant="destructive"><AlertDescription>{t("modelDisplay.stale")}</AlertDescription></Alert>}
           {management.actionError && <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert>}
         </FieldGroup>}
