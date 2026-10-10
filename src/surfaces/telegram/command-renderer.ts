@@ -10,7 +10,7 @@ import type {
 import {
   listProviders,
 } from "../../application/index.js";
-import { formatCodexProviderLabel, formatProviderModelSummary, formatServiceTier, scopedModelDisplayName } from "../provider-format.js";
+import { formatCodexProviderLabel, formatModelDisplayName, formatProviderModelSummary, formatServiceTier, scopedModelDisplayName } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
@@ -244,7 +244,7 @@ function modelProviderSelectionText(
     model.model === result.state.model
     && (model.provider ?? "openai") === current);
   return toStructuredMarkdownList([
-    `当前模型：${result.state.model}（Provider：${formatCodexProviderLabel(current)}）`,
+    `当前模型：${formatModelDisplayName(result.state.model)}（Provider：${formatCodexProviderLabel(current)}）`,
     `${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort)}`,
     `速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
     "",
@@ -295,7 +295,7 @@ export function modelSelectionKeyboard(
   return {
     inline_keyboard: models.map((model, index) => [{
       text: boundedButtonLabel(
-        `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${scopedModelDisplayName(model.displayName, result.state.providerFilter)}${model.available === false ? "（暂不可用）" : ""}`,
+        `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${scopedModelDisplayName(model.displayName, result.state.providerFilter, model.model, index + 1)}${model.available === false ? "（暂不可用）" : ""}`,
       ),
       callback_data: `ms:${index + 1}:${token}`,
     }]),

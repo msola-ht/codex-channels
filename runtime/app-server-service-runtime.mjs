@@ -247,6 +247,9 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           ],
         })
         : undefined;
+    // 官方 OpenAI 端点理解 Codex 私有输入项；自定义固定 Provider 复用 openai 路由键但换成第三方上游。
+    // 判定跟随真实 Provider 身份（metricsProvider），聚合快照可能给同一 Provider 派生带摘要的代理键。
+    const officialOpenAiRoute = metricsProvider === "openai" && customPrimaryProvider === undefined;
     if (definition?.upstreamWireApi === "chat_completions") {
       const clinePass = definition.storageId === "clp" || definition.id === "clp";
       bridge = new ChatCompletionsBridge({ ...options,
@@ -298,6 +301,9 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
       ...(!bridge && modelGuard ? { isModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
+      // 除官方 OpenAI 端点外的 Responses 上游都不理解 Codex 私有输入项与参数标记，
+      // 必须在上游收到正文前归一化；Chat 上游由桥转换，不在此处改写。
+      ...(!bridge && !officialOpenAiRoute ? { normalizeResponsesInput: true } : {}),
       ...(opencodeGo
         ? {
             accountIds: goAccountIds.length === 0 ? undefined : goAccountIds,

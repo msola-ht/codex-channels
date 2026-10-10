@@ -15,6 +15,7 @@ dist/
 .pnpm-store/
 .turbo/
 .playwright-cli/
+output/
 
 # Runtime state, sockets and logs
 .runtime/

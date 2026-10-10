@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ChatReasoningEffort } from "./chat-request.js";
+import { agentMessageText, stripEncryptedMarker } from "./codex-private-items.js";
 import { array, ModelConversionError, object, string, toolSearchArguments } from "./validation.js";
 import type { JsonObject } from "./validation.js";
 
@@ -164,6 +165,12 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
           ? { role, content: userContent(item.content) }
           : { role, content: textContent(item.content) });
       }
+    } else if (item.type === "agent_message") {
+      // Codex multi-agent v2 的 agent_message 是 Responses 私有输入项；Chat 上游没有等价类型，
+      // 只能降级为普通 user 消息，正文按可读文本原样搬运。
+      if (pendingCalls.size) throw new ModelConversionError("Missing tool results");
+      flushToolImages();
+      messages.push({ role: "user", content: agentMessageText(item.content) });
     } else {
       throw new ModelConversionError("Unsupported Responses input item");
     }
@@ -214,7 +221,7 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
     const convertedName = chatToolName(name, namespace);
     if (toolNames.has(convertedName)) throw new ModelConversionError("Conflicting Chat tool names");
     toolNames.set(convertedName, { name, ...(namespace === undefined ? {} : { namespace }), kind: "function" });
-    const fn: JsonObject = { name: convertedName, parameters: object(tool.parameters) };
+    const fn: JsonObject = { name: convertedName, parameters: chatToolParameters(tool.parameters) };
     if (tool.description !== undefined) fn.description = string(tool.description);
     if (tool.strict !== undefined) {
       if (typeof tool.strict !== "boolean") throw new ModelConversionError();
@@ -352,6 +359,14 @@ function textContent(value: unknown): string {
     if (!["input_text", "output_text"].includes(String(part.type))) throw new ModelConversionError("Only text content is supported");
     return string(part.text);
   }).join("");
+}
+
+/**
+ * 工具参数 schema 必须保持对象形态；标记清理不修改调用方传入的报文，
+ * 未删除标记时返回同一引用，调用方不得就地修改返回值。
+ */
+function chatToolParameters(value: unknown): JsonObject {
+  return stripEncryptedMarker(object(value)).value as JsonObject;
 }
 
 function chatToolName(name: string, namespace?: string): string {

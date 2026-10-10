@@ -56,7 +56,7 @@ export {
   formatConversationScheduledRuns,
   formatConversationScheduledTasks,
 } from "./conversation-scheduled-task-command-format.js";
-export { setConfiguredCustomPrimaryProviderId } from "./provider-format.js";
+export { setConfiguredCustomPrimaryProviderId, setModelDisplayAliases } from "./provider-format.js";
 export { canReviewConversationHook } from "./conversation-hook-command-format.js";
 export { canPreserveWeixinHookReviewText } from "./weixin/markdown-sanitize.js";
 export type {

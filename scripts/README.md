@@ -86,6 +86,8 @@
   主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
   `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
+  `/api/v1/settings/model-display` 返回只读模型显示映射，概览按该映射合并并提供原始模型成员明细；
+  概览、显示映射与调用采集开关共用可取消的进行中私有配置读取，不缓存配置或权限判断。
 - `webui-management-codex-route.mjs` / `webui-management-gateway-route.mjs` /
   `webui-management-provider-route.mjs`（账户刷新随 HTTP 断开取消私有 IPC 等待，上游认证失败保持 502；单账户刷新复用 Store 精确 Provider 查询，整表同步保留账户增删与来源告警；响应附加同账户的 OpenAI 凭证刷新时间，不写入快照） / `webui-management-task-route.mjs` /
   `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
@@ -230,6 +232,8 @@
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
 - `codex-subagents-setup.mjs` / `codex-subagents-setup.d.mts`：Config 中显式选择的子代理规则与配置入口，
   预览后按选择写入 Codex Home 的 `AGENTS.md` 托管规则段和主配置；主配置复用版本化 `config/batchWrite`。
+  配置预览检测用户层已有子代理默认模型与思考等级覆盖并提示人工处理，保留这些键；仅写规则不读配置并提示未检查覆盖。
+  模型回退仅依据完整目录或目标实际错误，省略参数仅在无有效默认或角色覆盖时继承；省略后仍失败则报告阻塞。
   规则模板只管理协作、模型分工、单轮生命周期及交接，完成要求继承当前全局和项目规则；
   安装、更新和核心默认值配置均不自动应用该预设。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
@@ -280,7 +284,7 @@
   Workspace 默认审批方式跨 Provider 共享，不按 Provider 或模型设限；CLI 与 WebUI 共用输入、配置修订校验及写入接口。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理、日志等级与
   开发中的 Plugin API；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
-- `config-display-menu.mjs`：独立管理操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；
+- `config-display-menu.mjs`：独立管理模型显示组、操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs`：独立管理模型请求转储及其保留天数、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份、模型上游终端标识与模型可见时区；模型请求转储独立写入
@@ -460,6 +464,8 @@
 - `webui-i18n.mjs`：静态读取 WebUI 中英文文案字典，检查键与占位符，并按 Git 基线输出包含术语表的增量翻译任务 JSON；不执行字典代码、不调用翻译服务、不写回译文。
 - `verification-scope.mjs`：读取本地提交或指定 Git 基线的改动文件，供检查入口选择静态检查范围。
 - `verify-commit.mjs`：本地 `verify:commit` 按改动范围执行必要静态检查与构建，`verify:ci` 执行完整静态检查与构建。
+  WebUI 共享 API 类型 `webui-api.ts` 纳入根 TypeScript 与 ESLint 类型检查；单独变更该文件或
+  `runtime/model-display-name.mjs` 及其声明时，也触发 WebUI 构建、Lint 和翻译字典检查，包括删除这些文件的变更。
   macOS 枚举四类 launchd 模板，替换共享停止预算的整数占位符后通过标准输入交给 `plutil`；预算、服务清单或模板渲染入口变化也触发此检查。模板检查不代替安装和服务运行观察。
   输出选中范围、每个阶段及全部检查的累计耗时。类型检查使用 TypeScript 原生增量缓存，覆盖源码及其依赖；
   缓存位于 `node_modules/.cache/codexc/check.tsbuildinfo`，可删除后重建，不缓存后续版本和边界检查。

@@ -5,6 +5,7 @@ import type {
   DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
   RelayQueueSnapshot, RelayManagementSnapshot, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
   ServerTimeResponse,
+  ModelDisplaySettingsResponse,
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
   OfficialAccountSourcesResponse,
@@ -176,6 +177,10 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
 
 export function fetchServerTime(signal?: AbortSignal): Promise<ServerTimeResponse> {
   return getJson<ServerTimeResponse>(`${API_PREFIX}/time`, signal)
+}
+
+export function fetchModelDisplaySettings(signal?: AbortSignal): Promise<ModelDisplaySettingsResponse> {
+  return getJson<ModelDisplaySettingsResponse>(`${API_PREFIX}/settings/model-display`, signal)
 }
 
 export function fetchManagementSettings(signal?: AbortSignal): Promise<ManagementSettingsResponse> {

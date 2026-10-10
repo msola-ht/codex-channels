@@ -16,7 +16,10 @@ const rules = `${startMarker}
 - Global and project rules apply independently of delegation. This section governs cooperation only and cannot override their safety, authorization or delivery requirements. With subagents disabled or unused, the main agent completes the same required work; no task may depend on enabling delegation.
 - Only the main agent may delegate. Proactively delegate bounded independent work when expected benefit exceeds coordination cost and capacity permits; respect requests to work without subagents. No mandatory pipeline or extra review stage. Delegation changes neither authorization nor completion requirements.
 - Use \`fork_turns="none"\` and a self-contained brief: goal, inputs, evidence, working directory, file ownership, dependencies, relevant contacts and expected outputs. Include necessary original passages of applicable instructions, not entire unrelated rule sets or only paths. Explicitly state: "Do not spawn, invoke, or request any new subagents."
-- Select model and effort explicitly: planning, design and independent review → \`gpt-6-astra\`/\`high\`; implementation, execution and failure diagnosis → \`gpt-6.1-sol\`/\`high\`; retrieval, factual summaries and simple low-risk tasks → \`gpt-6-luna\`/\`high\`. Use Sol for substantive code changes. Use only these models, with effort at most \`high\`; if unavailable, report it and let the main agent handle feasible work without silently substituting a model.
+- Dispatch with explicit \`model\` and \`reasoning_effort\` while the session accepts the official GPT set: planning, design and independent review → \`gpt-6-astra\`/\`high\`; implementation, execution and failure diagnosis → \`gpt-6.1-sol\`/\`high\`; retrieval, factual summaries and simple low-risk tasks → \`gpt-6-luna\`/\`high\`, effort at most \`high\`, Sol for substantive code changes.
+- Treat a target GPT model as unavailable only when the complete current Provider catalog establishes that it is unsupported for the current multi-agent backend, or a spawn requesting that exact model fails with \`Unknown model ... for spawn_agent\`. Tool descriptions and error lists show only a limited picker-visible subset; absence from those lists is not evidence of unavailability. Never substitute a model from a reported list or guess a model name.
+- When the complete catalog establishes that the GPT set is unsupported, omit both \`model\` and \`reasoning_effort\`. Omission inherits the current conversation's values only when effective \`agents.default_subagent_model\`, \`agents.default_subagent_reasoning_effort\` and role configuration do not override them; do not assume inheritance or clear user configuration automatically.
+- If a spawn requesting an explicit target model fails with \`Unknown model ... for spawn_agent\`, re-issue the same spawn once with both \`model\` and \`reasoning_effort\` omitted, report this fallback, and omit these overrides in later dispatches in this conversation. If the omitted-parameter request fails, report the blocker and relevant default or role overrides for user review; do not repeat the same failing request or guess another model. The main agent completes work within its own capabilities.
 - Each subagent owns its bounded assignment through investigation, implementation where assigned, correction, self-review and collection of asynchronous results. Return outputs, applicable evidence, changed files and remaining limitations; starting a job is not completion.
 - Use each subagent for one turn only. Do not reuse, restart, append tasks or call \`followup_task\`. Later work belongs to the main agent or a new agent. Before handoff, recover outputs and job handles, stop conflicting work and transfer file/job ownership explicitly.
 - Keep one writer per file and preserve existing changes. During the initial assignment, exchange only facts needed to resolve blockers, shared decisions or dependencies; messages must not expand scope or reactivate ended agents. Give one consolidated completion report.
@@ -27,8 +30,6 @@ ${endMarker}`;
 const preset = [
   { keyPath: "features.multi_agent_v2.enabled", value: true },
   { keyPath: "features.multi_agent_v2.default_wait_timeout_ms", value: 600_000 },
-  { keyPath: "agents.default_subagent_model", value: "gpt-6.1-sol" },
-  { keyPath: "agents.default_subagent_reasoning_effort", value: "high" },
 ];
 
 export async function runCodexSubagentsSetup({
@@ -66,8 +67,9 @@ export async function runCodexSubagentsSetup({
     validatePreset(configSnapshot.config);
     output.write("配置预览（其他键保持原值）：\n");
     for (const edit of preset) output.write(`${edit.keyPath} = ${JSON.stringify(edit.value)}\n`);
-    output.write("模型名称不会验证账户或 Provider 可用性；实际使用仍受模型目录与权限限制。\n");
+    previewSubagentDefaults(configSnapshot.config, output);
   }
+  if (!writesConfig) output.write("仅写规则：未读取主配置，未检查已有子代理默认模型、思考等级或角色配置覆盖；省略派发参数不保证继承当前对话设置。\n");
   if (writesRules) output.write(`规则预览（仅更新托管段）：\n${rules}\n`);
   if (action === "both") output.write("两个文件分别保存，无法保证跨文件原子提交；配置失败时不写规则，规则失败时配置可能已保存。\n");
   const confirmed = await prompts.confirm({ message: "保存上述子代理预设？", initialValue: false });
@@ -119,6 +121,21 @@ function validatePreset(config) {
     || minimum < 0 || maximum > 3_600_000 || minimum > 600_000 || maximum < 600_000) {
     throw new Error("已有子代理等待上下限不允许 600000 毫秒预设；请先人工检查 min_wait_timeout_ms 与 max_wait_timeout_ms。");
   }
+}
+
+function previewSubagentDefaults(config, output) {
+  const defaults = ["default_subagent_model", "default_subagent_reasoning_effort"];
+  const existing = defaults.filter((key) => config.agents !== null
+    && typeof config.agents === "object" && Object.hasOwn(config.agents, key));
+  if (existing.length > 0) {
+    output.write(`检测到用户层子代理默认覆盖：${existing.map((key) => `agents.${key}`).join("、")}。\n`);
+    output.write("这些键会在派发省略对应参数时生效，可能选择当前 Provider 不支持的模型或思考等级；本预设保留这些键，不自动清除。\n");
+    output.write("如需继承当前对话设置，请人工检查有效配置，确认不再需要后移除相应覆盖，再开启新会话；只更新规则或保存本预设不会移除旧值。\n");
+  } else {
+    output.write("用户层未配置 agents.default_subagent_model 或 agents.default_subagent_reasoning_effort。\n");
+  }
+  output.write("本预览只检查主配置用户层；其他配置层及角色配置仍可能覆盖子代理模型与思考等级，需另行检查。未覆盖时省略派发参数才会继承当前对话设置。\n");
+  output.write("本操作不验证账户或 Provider 模型可用性；工具描述及报错名单并非完整目录，实际使用仍受完整模型目录、子代理后端与权限限制。\n");
 }
 
 async function inspectHome(home) {

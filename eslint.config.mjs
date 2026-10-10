@@ -28,6 +28,7 @@ export default defineConfig(
   {
     files: [
       "src/**/*.ts",
+      "scripts/webui-api.ts",
     ],
     ignores: [
       "src/codex-protocol/generated/**",

@@ -1,5 +1,17 @@
 import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
 import type { Translate } from "./i18n/messages"
+import { modelDisplayName } from "../../../runtime/model-display-name.mjs"
+
+let modelDisplayAliases: Readonly<Record<string, string>> = {}
+
+export function setModelDisplayAliases(aliases: Readonly<Record<string, string>>): void {
+  modelDisplayAliases = aliases
+}
+
+export function formatModelLabel(model: string, displayName: string): string {
+  const name = modelDisplayName(model, modelDisplayAliases, displayName)
+  return Object.hasOwn(modelDisplayAliases, model) && name !== model ? `${name}（${model}）` : name
+}
 
 export function requestMethodDisplay(record: RequestRecord | TrafficExchangeSummary, t: Translate): { label: string; variant: "secondary" | "outline" } {
   if (record.requestPurpose === "autoApprovalReview") return { label: t("requestMethod.review"), variant: "secondary" }
@@ -13,17 +25,13 @@ export function isClinePassProvider(provider: string | null | undefined): boolea
 }
 
 /** 审查显示别名只用于呈现，不改写请求、筛选或指标模型。 */
-export function autoReviewModelAlias(provider: string | null | undefined, purpose: string | null | undefined): string | null {
-  if (purpose !== "autoApprovalReview") return null
-  if (isClinePassProvider(provider)) return "clp-auto-review"
-  if (provider === "deepseek" || /^ds-[a-z0-9_-]{1,32}$/.test(provider ?? "")) return "deepseek-auto-review"
-  if (provider === "ocg" || /^ocg-[a-z0-9_-]{1,32}$/.test(provider ?? "")) return "ocg-auto-review"
-  if (provider === "ccg" || /^ccg-[a-z0-9_-]{1,32}$/.test(provider ?? "")) return "ccg-auto-review"
-  return provider && provider !== "openai" ? `${provider}-auto-review` : null
+export function autoReviewModelAlias(purpose: string | null | undefined): string | null {
+  return purpose === "autoApprovalReview" ? "auto-review" : null
 }
 
 export function formatModelName(model: string | null | undefined, provider: string | null | undefined): string | null {
-  return isClinePassProvider(provider) ? model?.replace(/^cline-pass\//, "") ?? null : model ?? null
+  if (model == null) return null
+  return modelDisplayName(model, modelDisplayAliases, isClinePassProvider(provider) ? model.replace(/^cline-pass\//, "") : model)
 }
 
 export type DisplayLanguage = "zh" | "en"

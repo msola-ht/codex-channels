@@ -12,6 +12,7 @@ import {
 } from "../runtime/gateway-config.mjs";
 import { readCodexProxySnapshot, renderCodexProxySettings, validateCodexProxyValue, writeCodexProxySnapshot } from "../runtime/codex-proxy-env.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import { validateModelDisplayAliases } from "../runtime/model-display-name.mjs";
 import { invalidSetting } from "./config-management-error.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import {
@@ -64,6 +65,7 @@ export function loadGatewaySettings(environment = process.env) {
         : "compact",
       planUpdatesEnabled: display.plan_updates !== false,
       reasoningEnabled: display.reasoning === true,
+      modelAliases: validateModelDisplayAliases(display.model_aliases === undefined ? {} : display.model_aliases),
     },
     system: {
       approvalTimeoutSeconds: integerInRange(approval.timeout_seconds, 30, 3_600) ?? 900,
@@ -288,6 +290,16 @@ function applySetting(document, input) {
       const value = booleanValue(input.value, "value", "思考状态显示");
       document.display = { ...table(document.display), reasoning: value };
       return changed(value, displaySettingActivation(document));
+    }
+    case "display.model-aliases": {
+      let value;
+      try {
+        value = validateModelDisplayAliases(input.value);
+      } catch (error) {
+        throw Object.assign(invalid("value", "invalid-model-aliases", error.message), { cause: error });
+      }
+      document.display = { ...table(document.display), model_aliases: value };
+      return { value, activation: "restart-gateway", backupRequired: true };
     }
     case "telegram.message-format": {
       const value = enumValue(input.value, messageFormatValues, "value", "Telegram 消息格式");

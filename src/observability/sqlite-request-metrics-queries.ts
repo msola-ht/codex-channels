@@ -1,5 +1,6 @@
 import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
 import type { RequestTimingSummary } from "../../runtime/request-timing.mjs";
+import { validateModelDisplayAliases } from "../../runtime/model-display-name.mjs";
 import { summarizeResponseUsage } from "./response-usage-summary.js";
 import type {
   RequestInterruptionSummary,
@@ -12,6 +13,7 @@ import type {
   ModelRequestMetricsScope,
   ModelRequestMetricsThreadQuery,
   StoredModelRequestMetric,
+  StoredModelUsage,
   StoredModelRequestMetricsDailyRow,
   StoredModelRequestMetricsErrorReport,
   StoredModelRequestMetricsHourlyRow,
@@ -213,7 +215,12 @@ export class SqliteRequestMetricsQueries {
     const aggregate = aggregateRow === undefined ? null : toStoredMetricsAggregate(aggregateRow);
     const matchedTotal = aggregate?.requestCount ?? 0;
     const rows = this.reader.prepare(`
-      SELECT *
+      SELECT model_request_metrics.*, EXISTS (
+        SELECT 1 FROM subagent_threads AS relation
+        WHERE relation.thread_id = model_request_metrics.thread_id
+          AND model_request_metrics.source = 'owned'
+          AND model_request_metrics.request_purpose IS NULL
+      ) AS is_subagent
       FROM model_request_metrics
       WHERE ${scope.sql}
       ORDER BY ${sortExpression} ${order}, id ${order}
@@ -222,17 +229,71 @@ export class SqliteRequestMetricsQueries {
       ...scope.params,
       query.limit + 1,
       offset,
-    ) as unknown as MetricRow[];
+    ) as unknown as Array<MetricRow & { is_subagent: number }>;
     const hasMore = rows.length > query.limit;
     const pageRows = hasMore ? rows.slice(0, query.limit) : rows;
     return {
       startAtMs: query.startAtMs,
       endAtMs: query.endAtMs,
-      records: pageRows.map(toStoredMetric),
+      records: pageRows.map((row) => ({ ...toStoredMetric(row), isSubagent: row.is_subagent === 1 })),
       nextOffset: hasMore ? offset + query.limit : null,
       matchedTotal,
       aggregate,
     };
+  }
+
+  modelUsage(query: ModelRequestMetricsScope, modelAliases?: Readonly<Record<string, string>>): StoredModelUsage[] {
+    this.reader.requireOpen();
+    const scope = metricsScopeSql(query);
+    const aliases = validateModelDisplayAliases(modelAliases === undefined ? {} : modelAliases);
+    const parameters = [JSON.stringify(aliases), ...scope.params];
+    // 一次物化让 SQLite 为精确匹配建立索引，避免每条请求都扫描完整 json_each。
+    const aliasesSql = `WITH model_aliases AS MATERIALIZED (
+      SELECT key AS original_model, value AS display_name FROM json_each(?)
+    )`;
+    const displayModelSql = `CASE
+      WHEN model_request_metrics.request_purpose = 'autoApprovalReview' THEN 'auto-review'
+      ELSE COALESCE(model_aliases.display_name, model_request_metrics.model)
+    END`;
+    const rows = this.reader.prepare(`
+      ${aliasesSql}
+      SELECT ${displayModelSql} AS model, ${metricsAggregateSql},
+        COUNT(DISTINCT json_array(thread_id, turn_id))
+          FILTER (WHERE thread_id IS NOT NULL AND turn_id IS NOT NULL) AS turn_count
+      FROM model_request_metrics
+      LEFT JOIN model_aliases ON model_request_metrics.model = model_aliases.original_model
+      WHERE ${scope.sql}
+      GROUP BY ${displayModelSql}
+      ORDER BY request_count DESC, model IS NULL ASC, model ASC
+    `).all(...parameters) as unknown as Array<AggregateRow & { turn_count: number }>;
+    const memberRows = this.reader.prepare(`
+      ${aliasesSql}
+      SELECT ${displayModelSql} AS display_model, provider, model_request_metrics.model AS model,
+        ${metricsAggregateSql},
+        COUNT(DISTINCT json_array(thread_id, turn_id))
+          FILTER (WHERE thread_id IS NOT NULL AND turn_id IS NOT NULL) AS turn_count
+      FROM model_request_metrics
+      LEFT JOIN model_aliases ON model_request_metrics.model = model_aliases.original_model
+      WHERE ${scope.sql}
+      GROUP BY provider, model_request_metrics.model, ${displayModelSql}
+      ORDER BY request_count DESC, provider ASC, model IS NULL ASC, model ASC
+    `).all(...parameters) as unknown as Array<AggregateRow & {
+      provider: string;
+      display_model: string | null;
+      turn_count: number;
+    }>;
+    const members = new Map<string | null, StoredModelUsage["members"]>();
+    for (const row of memberRows) {
+      const groupMembers = members.get(row.display_model) ?? [];
+      groupMembers.push({
+        ...toStoredMetricsAggregate(row), provider: row.provider, model: row.model, turnCount: row.turn_count,
+      });
+      members.set(row.display_model, groupMembers);
+    }
+    return rows.map((row) => ({
+      ...toStoredMetricsAggregate(row), model: row.model, turnCount: row.turn_count,
+      members: members.get(row.model) ?? [],
+    }));
   }
 
   providers(): string[] {
@@ -1031,8 +1092,23 @@ export class SqliteRequestMetricsQueries {
     const { total } = this.reader.prepare(`
       SELECT COUNT(*) AS total FROM subagent_threads AS relation ${relationFilter}
     `).get(...parameters) as { total: number };
+    const summary = this.reader.prepare(`
+      SELECT COUNT(*) AS request_count,
+        ${requestOutcomeSql()},
+        COUNT(DISTINCT json_array(thread_id, turn_id)) FILTER (WHERE turn_id IS NOT NULL) AS turn_count,
+        SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, ${cacheUsageSql}
+      FROM model_request_metrics
+      WHERE thread_id IN (SELECT relation.thread_id FROM subagent_threads AS relation ${relationFilter})
+    `).get(...parameters) as unknown as CacheUsageRow & RequestOutcomeRow & {
+      request_count: number;
+      turn_count: number;
+      input_tokens: number | null;
+      output_tokens: number | null;
+    };
     const modelUsageRows = this.reader.prepare(`
-      SELECT model, SUM(input_tokens) AS input_tokens,
+      SELECT model, COUNT(*) AS request_count,
+        COUNT(DISTINCT json_array(thread_id, turn_id)) FILTER (WHERE turn_id IS NOT NULL) AS turn_count,
+        SUM(input_tokens) AS input_tokens,
         SUM(output_tokens) AS output_tokens, ${cacheUsageSql}
       FROM model_request_metrics
       WHERE thread_id IN (SELECT relation.thread_id FROM subagent_threads AS relation ${relationFilter})
@@ -1040,6 +1116,8 @@ export class SqliteRequestMetricsQueries {
       ORDER BY model IS NULL ASC, model ASC
     `).all(...parameters) as unknown as Array<CacheUsageRow & {
       model: string | null;
+      request_count: number;
+      turn_count: number;
       input_tokens: number | null;
       output_tokens: number | null;
     }>;
@@ -1107,8 +1185,20 @@ export class SqliteRequestMetricsQueries {
             ? { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 }
             : toStoredCacheUsage(row),
       })),
+      summary: {
+        requestCount: summary.request_count,
+        requestOutcomes: toStoredRequestOutcomes(summary),
+        turnCount: summary.turn_count,
+        inputTokens: summary.input_tokens ?? 0,
+        outputTokens: summary.output_tokens ?? 0,
+        cacheUsage: summary.request_count === 0
+          ? { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 }
+          : toStoredCacheUsage(summary),
+      },
       modelUsage: modelUsageRows.map((row) => ({
         model: row.model,
+        requestCount: row.request_count,
+        turnCount: row.turn_count,
         inputTokens: row.input_tokens ?? 0,
         outputTokens: row.output_tokens ?? 0,
         cacheUsage: toStoredCacheUsage(row),

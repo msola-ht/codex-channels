@@ -43,6 +43,7 @@ import type {
   StoredModelRequestMetricsHourlyRow,
   StoredModelRequestMetricsPage,
   StoredModelRequestMetricsReport,
+  StoredModelUsage,
   StoredQuotaPeriod,
   StoredSubagentThreadRecord,
   SubagentThreadsQuery,
@@ -588,6 +589,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
 
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
     return this.queries.page(query);
+  }
+
+  modelUsage(query: ModelRequestMetricsScope, modelAliases?: Readonly<Record<string, string>>): StoredModelUsage[] {
+    return this.queries.modelUsage(query, modelAliases);
   }
 
   providers(): string[] {

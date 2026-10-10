@@ -42,6 +42,7 @@ export type {
   StoredModelRequestMetricsPage,
   StoredModelRequestAccountSnapshot,
   StoredModelRequestMetricsGroup,
+  StoredModelUsage,
   StoredModelRequestMetricsReport,
   StoredSubagentThreadRecord,
   StoredSubagentListItem,

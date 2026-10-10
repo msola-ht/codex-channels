@@ -2,6 +2,7 @@ export const managedSettingKinds = new Set([
   "display.operation-updates",
   "display.plan-updates",
   "display.reasoning",
+  "display.model-aliases",
   "system.approval-timeout",
   "system.idle-release-minutes",
   "system.sandbox",

@@ -14,6 +14,7 @@ import { LoadingSettingsCard, SettingsError } from "@/components/settings/settin
 import type { CodexSettingsController } from "@/lib/settings-management"
 import type { MessageKey } from "@/lib/i18n/messages"
 import { ToolAccessSettings } from "@/components/settings/tool-access-settings"
+import { formatModelLabel } from "@/lib/format"
 
 export function AppServerSettingsCard({ management, onChanged, section = "general" }: { management: CodexSettingsController; onChanged?: () => void; section?: "general" | "permissions" | "models" | "context" }) {
   const { t } = useTranslation()
@@ -46,7 +47,7 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
   }
   const selected = selectedModel
   const unavailableModel = selected === undefined ? settings.defaults.model : null
-  const modelOptions = settings.models.map((model) => [model.model, model.displayName])
+  const modelOptions = settings.models.map((model) => [model.model, formatModelLabel(model.model, model.displayName)])
   if (unavailableModel !== null) modelOptions.unshift([unavailableModel, t("settingsFields.modelUnavailable", { model: unavailableModel })])
   const effortOptions = selected?.reasoningEfforts.map((item) => [item.effort, item.effort]) ?? []
   const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null

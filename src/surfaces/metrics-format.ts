@@ -10,7 +10,7 @@ import {
   formatTimezoneLine,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
-import { formatCodexProviderLabel } from "./provider-format.js";
+import { formatCodexProviderLabel, formatModelDisplayName } from "./provider-format.js";
 import {
   formatCacheHitRate,
   formatRequestCount,
@@ -122,7 +122,7 @@ function formatErrorMetricsReport(
       const httpStatus = group.httpStatus === null
         ? ""
         : ` · HTTP ${group.httpStatus}`;
-      return `${index + 1}. ${provider} / ${group.model ?? "未知模型"} · ${formatMetricsErrorType(group.errorType)} · ${status}${httpStatus} · ${formatRequestCount(group.requestCount)} 次 · 最近发生：${formatMetricOccurredAt(group.lastOccurredAtMs)}`;
+      return `${index + 1}. ${provider} / ${group.model === null ? "未知模型" : formatModelDisplayName(group.model)} · ${formatMetricsErrorType(group.errorType)} · ${status}${httpStatus} · ${formatRequestCount(group.requestCount)} 次 · 最近发生：${formatMetricOccurredAt(group.lastOccurredAtMs)}`;
     }),
   );
   const hidden = report.totalGroupCount - report.groups.length;
@@ -262,7 +262,7 @@ function formatMetricsGroup(
     ? "未知提供商"
     : formatCodexProviderLabel(group.provider);
   const label = view === "models"
-    ? `${provider} / ${group.model ?? "未知模型"}`
+    ? `${provider} / ${group.model === null ? "未知模型" : formatModelDisplayName(group.model)}`
     : provider;
   const aggregate = group.aggregate;
   const reasoning = aggregate.reasoningOutputTokens > 0
@@ -308,7 +308,7 @@ export function formatCompactMetricsValue(
 ): string {
   const model = compact.hasMixedModels
     ? "混合模型"
-    : compact.model ?? "模型未知";
+    : compact.model === null ? "模型未知" : formatModelDisplayName(compact.model);
   if (options.concise) {
     const parts = [`${formatRequestCount(compact.requestCount)} 次`];
     if (compact.hasMixedModels || !compact.model || compact.model !== options.currentModel) {

@@ -294,13 +294,10 @@ export interface SubagentThreadsQuery {
 
 export interface StoredThreadSubagentsPage {
   subagents: StoredSubagentListItem[];
+  /** 全部关联子代理自身请求的合计，轮数跨模型按 Thread/Turn 去重。 */
+  summary: Pick<StoredSubagentListItem, "requestCount" | "requestOutcomes" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage">;
   /** 当前关系范围内全部子代理自身请求按真实模型汇总，不受分页影响。 */
-  modelUsage: Array<{
-    model: string | null;
-    inputTokens: number;
-    outputTokens: number;
-    cacheUsage: StoredCacheUsage;
-  }>;
+  modelUsage: Array<Pick<StoredModelUsage, "model" | "requestCount" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage">>;
   total: number;
   offset: number;
   limit: number;
@@ -354,6 +351,17 @@ export interface StoredModelRequestMetricsGroup {
   aggregate: StoredModelRequestMetricsAggregate;
 }
 
+/** 按模型显示名跨提供商汇总，组与成员分别按非空 Thread/Turn 去重。 */
+export interface StoredModelUsage extends StoredModelRequestMetricsAggregate {
+  model: string | null;
+  turnCount: number;
+  members: Array<StoredModelRequestMetricsAggregate & {
+    provider: string;
+    model: string | null;
+    turnCount: number;
+  }>;
+}
+
 export interface StoredModelRequestMetricsReport {
   dimension: ModelRequestMetricsAggregationDimension;
   startAtMs: number;
@@ -401,7 +409,10 @@ export type ModelRequestMetricsSortKey =
 export interface StoredModelRequestMetricsPage {
   startAtMs: number;
   endAtMs: number;
-  records: StoredModelRequestMetric[];
+  records: Array<StoredModelRequestMetric & {
+    /** 是否关联已登记的子代理；false 不代表已确认是主代理。 */
+    isSubagent: boolean;
+  }>;
   nextOffset: number | null;
   matchedTotal: number;
   aggregate: StoredModelRequestMetricsAggregate | null;
@@ -552,6 +563,7 @@ export interface StoredProviderTokenMetric {
 }
 
 export interface ModelRequestMetricsRequestQueryStore {
+  modelUsage(query: ModelRequestMetricsScope, modelAliases?: Readonly<Record<string, string>>): StoredModelUsage[];
   requestRowsAfter(afterLocalId: number, limit: number): StoredModelRequestMetric[];
   recent(limit: number): StoredModelRequestMetric[];
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage;

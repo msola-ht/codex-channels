@@ -46,8 +46,10 @@ export function createVerificationPlan(changes, { ci = false, root = process.cwd
     args: ["node_modules/eslint/bin/eslint.js", ...lintFiles] });
   if (paths.some(path => path.endsWith(".md")) || code.some(path => /^(?:src|scripts|bin|runtime|\.github)\//u.test(path))) checks.push(docs);
   const webui = code.some(path => path.startsWith("webui/"));
+  const webuiShared = code.some(path => path === "scripts/webui-api.ts"
+    || /^runtime\/model-display-name\.(?:mjs|d\.mts)$/u.test(path));
   const sharedBuild = code.some(path => /^(?:package(?:-lock)?\.json|tsconfig(?:\.build)?\.json|scripts\/(?:verify-commit|verification-scope|prepare-package)\.mjs)$/u.test(path));
-  if (webui || sharedBuild) checks.push(webuiBuild, webuiLint, dictionary);
+  if (webui || webuiShared || sharedBuild) checks.push(webuiBuild, webuiLint, dictionary);
   if (code.some(path => /\.(?:sh|ps1)$/u.test(path) || /^(?:launchd|systemd)\//u.test(path)
     || /^(?:runtime\/(?:shutdown-budget|service-targets)|scripts\/(?:service-install-management|verify-commit))\.mjs$/u.test(path))) {
     if (platform !== "win32") checks.push(shell);
