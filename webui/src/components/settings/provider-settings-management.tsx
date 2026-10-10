@@ -288,6 +288,7 @@ function ProviderSettingsConfirmationDialog({
   if (pending.reasoningEffort !== undefined) lines.push(t("managementUi.reasoningConfirm", { value: pending.reasoningEffort }))
   if (pending.windowPercent !== undefined) lines.push(t("managementUi.windowConfirm", { percent: pending.windowPercent }))
   if (pending.credential?.action !== undefined) lines.push(t("managementUi.credentialConfirm", { action: t(pending.credential.action === "replace" ? "managementUi.replaceCredential" : "managementUi.preserveCredential") }))
+  if (pending.transport?.cleartext === true) lines.push(t("managementUi.cleartextUpstream"))
   return <ManagementConfirmationDialog open saving={saving} loading={loading} title={t("managementUi.providerConfirmTitle")} description={t("accountConfirmation.changeDescription")} confirmVariant={pending.operation === "remove" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
     <p className="whitespace-pre-line">{lines.join("\n")}</p>
     <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: pending.activation })}</p>

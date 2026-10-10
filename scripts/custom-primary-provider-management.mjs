@@ -6,7 +6,6 @@ import { codexHomePath } from "../runtime/codex-home.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { createResponsesModelCatalog, resolveResponsesTemplateContexts, isResponsesProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
-import { isIP } from "node:net";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -61,20 +60,6 @@ export function validCustomPrimaryProviderBaseUrl(value) {
       error,
     );
   }
-  const url = new URL(normalized);
-  const hostname = url.hostname.toLowerCase();
-  const address = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
-  const addressFamily = isIP(address);
-  const isLoopback = hostname === "localhost"
-    || (addressFamily === 4 && address.startsWith("127."))
-    || (addressFamily === 6 && address === "::1");
-  if (url.protocol !== "https:" && !isLoopback) {
-    throw invalid(
-      "insecure-base-url",
-      "baseUrl",
-      "自定义主 Provider 远程地址必须使用 HTTPS；HTTP 仅限本机回环地址",
-    );
-  }
   return normalized;
 }
 
@@ -100,9 +85,11 @@ export async function prepareCustomPrimaryProviderSave(input, options = {}) {
 }
 
 function publicSavePreview(input, plan) {
+  const cleartext = new URL(plan.provider.baseUrl).protocol === "http:";
   return {
     operation: input.operation,
     provider: plan.provider,
+    transport: { scheme: cleartext ? "http" : "https", cleartext },
     activation: "restart-all",
     effects: plan.effects,
     credential: {

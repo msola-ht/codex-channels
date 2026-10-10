@@ -59,6 +59,7 @@ export function previewCustomPrimaryProviderSave(
 ): Promise<{
   operation: "create" | "update";
   provider: CustomPrimaryProviderSaveSummary;
+  transport: { scheme: "http" | "https"; cleartext: boolean };
   activation: "restart-all";
   effects: {
     removesTopLevelBaseUrl: boolean;

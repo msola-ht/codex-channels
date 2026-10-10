@@ -766,6 +766,7 @@ export interface ManagementProviderSettingsPreview {
     storedAsPlaintext?: true
     destination?: "private-profile" | "private-credential"
   }
+  transport?: { scheme?: "http" | "https"; cleartext?: boolean }
 }
 
 export interface ManagementProviderSettingsPreviewResponse {

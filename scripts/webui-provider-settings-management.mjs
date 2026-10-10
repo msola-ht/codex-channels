@@ -202,6 +202,18 @@ export function redactProviderSettingsResult(result) {
     ...(result.contextWindow !== undefined ? { contextWindow: result.contextWindow } : {}),
     ...(result.willChange !== undefined ? { willChange: result.willChange } : {}),
     ...(result.effects !== undefined ? { effects: result.effects } : {}),
+    ...(result.transport && typeof result.transport === "object"
+      ? {
+          transport: {
+            ...(result.transport.scheme === "http" || result.transport.scheme === "https"
+              ? { scheme: result.transport.scheme }
+              : {}),
+            ...(typeof result.transport.cleartext === "boolean"
+              ? { cleartext: result.transport.cleartext }
+              : {}),
+          },
+        }
+      : {}),
     ...(result.credential && typeof result.credential === "object"
       ? {
           credential: {

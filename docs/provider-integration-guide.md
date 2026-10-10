@@ -312,7 +312,8 @@ Codex 兼容 Provider 不接受用户自定义模型目录、第三方 `models.j
 模型 ID。该 ID 必须存在于 Codex 官方模型目录；Setup 不请求第三方 `/models`，也不生成第三方
 目录、`models.json` 或自定义 `model_catalog_json`；官方目录快照只在服务启动时生成。新增拒绝覆盖
 config 或私有备份中的已有 ID；编辑保持 ID 不变，同一 URL Origin 可留空保留 Key，Origin 变化时必须重新输入，旧 Key
-不会用于新上游；无效旧 URL 同样要求新 Key，但不阻止修复。远程上游强制 HTTPS，HTTP 仅允许本机回环地址。
+不会用于新上游；无效旧 URL 同样要求新 Key，但不阻止修复。上游 `base_url` 接受不带凭据、查询和片段的 HTTP(S) 地址；
+HTTP 请求与 API Key 均以明文出站，仅建议在受信任的内网或本机服务使用；保存预览会显式标记明文 HTTP 传输。
 选择 `OpenAI` 时固定同名 `name`，允许 Codex 使用远程压缩；上游仍须兼容对应接口。小写 `openai` 是
 Codex 内置保留 ID。固定模式通过 Codex 的 `config/batchWrite` 原子写入用户配置；切换模式不修改
 主配置，而维护逐 Provider 的私有 Profile 和注册表。新增默认推荐切换模式，编辑保持原模式；确认预览

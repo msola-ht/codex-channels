@@ -414,6 +414,7 @@ export async function runCustomPrimaryProviderSetup({
         ]),
     ...(custom ? preview.provider.models.map(entry => `- 模型 ${entry.id}：${entry.contextWindow} Token；图片 ${entry.supportsImages ? "支持" : "不支持"}；思考 ${entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`) : []),
     `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,
+    ...(preview.transport.cleartext ? ["- 传输：明文 HTTP；API Key 与请求内容不加密"] : []),
   ];
   if (preview.provider.id === primaryProviderId) {
     previewLines.push("- 远程压缩：允许 Codex 使用；上游必须兼容对应接口");
