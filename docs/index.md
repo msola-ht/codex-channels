@@ -442,15 +442,23 @@ Fast 只在用户之后通过 `/fast on` 明确开启时生效。
 `multi_agent_v2` 的普通键级写入使用官方 `config/batchWrite` 事务。
 可选子代理预设入口为 [`codex-subagents-setup.mjs`](../scripts/codex-subagents-setup.mjs)：用户显式选择并确认后，
 以用户层修订保护写入 `features.multi_agent_v2.enabled` 与
-`features.multi_agent_v2.default_wait_timeout_ms`（不写 `agents.*` 子代理默认模型，未显式指定时由 App Server
-让子代理继承当前对话的模型与思考等级）；全局 `AGENTS.md` 规则为独立文件写入，
+`features.multi_agent_v2.default_wait_timeout_ms`。预览检测主配置用户层已有的
+`agents.default_subagent_model` 与 `agents.default_subagent_reasoning_effort`，说明省略派发参数时这些键仍会生效，
+并提示人工检查和处理；不写或清除这些键，不检查其他配置层或角色配置。
+“仅写规则”不读配置，并提示未检查覆盖。只有有效默认及角色配置均未覆盖时，省略参数才继承当前对话设置；
+全局 `AGENTS.md` 规则为独立文件写入，
 不新增 RPC，不纳入安装、更新或核心默认值配置。托管规则仅授权主代理派发，每个子代理只执行一轮，
 使用 `fork_turns="none"`，禁止子代理再派发、复用及调用 `followup_task`；交付后的补充工作由全新代理接手。
 模型按交付职责分工：Astra 负责规划、设计与独立验收，Sol 负责实现、执行、测试和故障诊断，
 Luna 负责检索、事实摘要和步骤明确的低风险简单任务；验收发现缺陷由全新 Sol 修正，需要再次验收时使用全新 Astra。
-当前会话所在的 Provider 目录不含该 GPT 集合时（第三方 Provider 常见），省略 `model` 与 `reasoning_effort`
-让子代理继承当前对话的模型与思考等级；`spawn_agent` 返回 `Unknown model ... for spawn_agent` 时同样以该方式
-重发，并在该会话内沿用。
+只有完整 Provider 目录明确目标不支持当前子代理后端，或实际请求该精确目标得到
+`Unknown model ... for spawn_agent`，才判定目标不可用；工具描述及报错名单只包含部分可见模型，缺少目标不构成依据。
+完整目录明确 GPT 集合不受支持时省略 `model` 与 `reasoning_effort`；显式目标返回上述错误时，
+省略两个参数重发一次并在该会话内沿用。省略后仍失败应报告阻塞及需要检查的配置覆盖，不能循环重试。
+默认覆盖和角色覆盖顺序见固定版本
+[`child_config.rs`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/agent/child_config.rs)，
+工具展示的有限可见名单见
+[`multi_agents_spec.rs`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/handlers/multi_agents_spec.rs)。
 这些是行为指令而非运行时强制限制，完整操作说明见[子代理规则与配置](user-guide.md#子代理规则与配置可选)。字段依据固定版本
 [`config.schema.json`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/config.schema.json)。
 

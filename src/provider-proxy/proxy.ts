@@ -136,6 +136,11 @@ interface TurnMetadata {
   reviewerTurnId?: string | null;
 }
 
+interface BufferedResponsesBody {
+  body: Buffer;
+  parsed: unknown;
+}
+
 export class ProviderProxy {
   private readonly server: Server;
   private readonly websocketServer: WebSocketServer;
@@ -176,7 +181,8 @@ export class ProviderProxy {
 
   constructor(private readonly listenAddress: string, options: ProviderProxyOptions) {
     this.websocketServer = new WebSocketServer({ noServer: true,
-      ...(options.isModelEnabled ? { maxPayload: 16 * 1024 * 1024 } : {}),
+      ...(options.isModelEnabled !== undefined || options.normalizeResponsesInput
+        ? { maxPayload: 16 * 1024 * 1024 } : {}),
     });
     this.upstreamAgent = options.upstreamAgent;
     this.defaultUpstream = {
@@ -355,13 +361,14 @@ export class ProviderProxy {
     // 第三方 Responses 上游必须缓冲正文才能归一化私有输入项；有目录守卫时缓冲同时用于模型复核。
     const buffersResponsesBody = route.kind === "response"
       && (this.isModelEnabled !== undefined || this.normalizeResponsesInput);
-    const bufferedBody = buffersResponsesBody
+    const bufferedRequest = buffersResponsesBody
       ? await this.bufferResponsesBody(request, response)
       : undefined;
-    if (bufferedBody === null || this.stopped || response.destroyed) return;
+    if (bufferedRequest === null || this.stopped || response.destroyed) return;
+    const bufferedBody = bufferedRequest?.body;
     // 转储与指标记录客户端原始报文；只有发往第三方上游的正文经过归一化。
-    const upstreamBody = bufferedBody !== undefined && this.normalizeResponsesInput
-      ? this.normalizeResponsesBody(bufferedBody, response)
+    const upstreamBody = bufferedRequest !== undefined && this.normalizeResponsesInput
+      ? this.normalizeResponsesBody(bufferedRequest, response)
       : bufferedBody;
     if (upstreamBody === null) return;
     const turnMetadata = parseTurnMetadata(
@@ -571,9 +578,8 @@ export class ProviderProxy {
    * 归一化发往第三方 Responses 上游的正文。未发生改写时沿用原始字节，
    * 避免无意义的重新序列化；`agent_message` 内容非法时按请求错误失败关闭。
    */
-  private normalizeResponsesBody(body: Buffer, response: ServerResponse): Buffer | null {
+  private normalizeResponsesBody({ body, parsed }: BufferedResponsesBody, response: ServerResponse): Buffer | null {
     try {
-      const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
       const normalized = normalizeResponsesRequest(parsed);
       return normalized.changed ? Buffer.from(JSON.stringify(normalized.body)) : body;
     } catch (error) {
@@ -589,10 +595,10 @@ export class ProviderProxy {
   }
 
   /**
-   * 有界读取发往 Responses 上游的正文。配置了目录守卫时在读取后复核模型；
-   * 没有守卫的第三方 Responses 上游使用同一上限缓冲正文，供归一化私有输入项。
+   * 有界读取并解析发往 Responses 上游的正文。配置了目录守卫时在读取后复核模型；
+   * 归一化复用同一次解析，原始字节保留给转储、指标及未改写请求。
    */
-  private async bufferResponsesBody(request: IncomingMessage, response: ServerResponse): Promise<Buffer | null> {
+  private async bufferResponsesBody(request: IncomingMessage, response: ServerResponse): Promise<BufferedResponsesBody | null> {
     const reject = (status: number, type: string, message: string): null => {
       if (!response.destroyed && !response.headersSent) {
         response.writeHead(status, { "content-type": "application/json", "connection": "close" });
@@ -616,8 +622,8 @@ export class ProviderProxy {
     try {
       const body = await readModelBody(request, controller.signal, 16 * 1024 * 1024);
       clearTimeout(timer);
+      const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
       if (isModelEnabled !== undefined) {
-        const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
         const model = asRecord(parsed)?.model;
         if (typeof model !== "string" || !model.length) {
           return reject(400, "provider_model_request_invalid", "模型请求必须包含明确的 model ID。");
@@ -628,7 +634,7 @@ export class ProviderProxy {
         controller.signal.throwIfAborted();
         if (!enabled) return reject(409, "provider_model_disabled", "该模型已停用或不在当前目录中，请重新选择已启用的模型。");
       }
-      return body;
+      return { body, parsed };
     } catch (error) {
       if (response.destroyed || this.stopped) return null;
       if (checkingCatalog) return reject(503, "provider_catalog_unavailable", "模型目录暂时无法安全读取，请检查目录后重试。");

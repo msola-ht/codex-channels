@@ -230,6 +230,8 @@
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
 - `codex-subagents-setup.mjs` / `codex-subagents-setup.d.mts`：Config 中显式选择的子代理规则与配置入口，
   预览后按选择写入 Codex Home 的 `AGENTS.md` 托管规则段和主配置；主配置复用版本化 `config/batchWrite`。
+  配置预览检测用户层已有子代理默认模型与思考等级覆盖并提示人工处理，保留这些键；仅写规则不读配置并提示未检查覆盖。
+  模型回退仅依据完整目录或目标实际错误，省略参数仅在无有效默认或角色覆盖时继承；省略后仍失败则报告阻塞。
   规则模板只管理协作、模型分工、单轮生命周期及交接，完成要求继承当前全局和项目规则；
   安装、更新和核心默认值配置均不自动应用该预设。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider

@@ -4,8 +4,10 @@ import type { JsonObject } from "./validation.js";
 /**
  * Codex multi-agent v2 的 agent_message 正文由可读信封与载荷两段构成，信封自带结尾换行，
  * 因此直接拼接即可还原锁定 CLI 的明文渲染。
- * 锁定 CLI 只在官方 Provider 上标记加密参数；第三方 Provider 的 `encrypted_content`
- * 承载的就是明文载荷，所以按原文搬运，不解密、不伪造占位文本，也不推断载荷内容。
+ * 锁定 CLI 会为工具来源的消息使用 `encrypted_content` 段，即使第三方返回的是明文。
+ * 这里只按原文搬运载荷，不解密、不伪造占位文本，也不根据字段名称推断载荷内容。
+ * 工具 schema 的 `encrypted` 标记与历史调用的 `encrypted_function_args` 是不同字段；
+ * CLI 会清除第三方请求中的后者，前者由下方的 schema 清理函数处理。
  */
 export function agentMessageText(value: unknown): string {
   const text = array(value).map(raw => {
