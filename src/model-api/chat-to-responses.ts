@@ -186,8 +186,18 @@ function toolCallItem(id: string, state: ToolState, identity: ChatToolIdentity |
     return { id, type: "tool_search_call", call_id: state.callId, status: "completed", execution: "client",
       arguments: toolSearchArguments(toolArguments(state.arguments, "Invalid tool search arguments")) };
   }
-  try { object(JSON.parse(state.arguments)); } catch { throw new ModelConversionError("Invalid Chat tool arguments"); }
+  let parsed: unknown;
+  try { parsed = JSON.parse(state.arguments); }
+  catch { throw new ModelConversionError("Invalid Chat tool arguments", toolArgumentFailure(state.arguments, "invalid_json")); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new ModelConversionError("Invalid Chat tool arguments", toolArgumentFailure(state.arguments, "not_object"));
+  }
   return { ...fields, type: "function_call", arguments: state.arguments, status: "completed" };
+}
+
+/** 工具参数诊断只保留长度与形态分类，不携带上游正文或用户内容。 */
+function toolArgumentFailure(text: string, shape: "invalid_json" | "not_object"): Record<string, string | number> {
+  return { "toolArguments.length": text.length, "toolArguments.shape": text === "" ? "empty" : shape };
 }
 
 function reasoningText(delta: JsonObject): { kind: "reasoning" | "reasoning_content"; text: string } {

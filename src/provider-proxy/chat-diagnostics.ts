@@ -129,6 +129,10 @@ export class ChatDiagnostics {
   error(code: string, stage: "http" | "stream", retryable: boolean): void {
     this.put("error.code", code); this.put("error.stage", stage); this.put("error.retryable", retryable);
   }
+  /** 转换器提交的有界事实；键与值均由转换器限定为不含正文。 */
+  conversion(detail: Readonly<Record<string, string | number | boolean>>): void {
+    for (const [key, value] of Object.entries(detail)) this.put(`conversion.${key}`, value);
+  }
   responseStatus(status: number | undefined): void { this.put("httpStatus", status); }
   snapshot(): ChatDiagnosticSnapshot { return { fields: { ...this.fields }, truncated: this.truncated }; }
 }

@@ -1,8 +1,11 @@
 /** Errors deliberately contain no upstream payload or user content. */
 export class ModelConversionError extends Error {
-  constructor(message = "Unsupported or invalid model API payload") {
+  /** Bounded diagnostic facts only; never carries upstream payload or user content. */
+  readonly diagnostics: Readonly<Record<string, string | number | boolean>> | undefined;
+  constructor(message = "Unsupported or invalid model API payload", diagnostics?: Readonly<Record<string, string | number | boolean>>) {
     super(message);
     this.name = "ModelConversionError";
+    this.diagnostics = diagnostics;
   }
 }
 export type JsonObject = Record<string, unknown>;
