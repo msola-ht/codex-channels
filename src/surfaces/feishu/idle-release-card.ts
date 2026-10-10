@@ -34,7 +34,7 @@ export function renderFeishuConversationIdleReleasedCard(
         },
         {
           tag: "markdown",
-          content: `\`${command}\``,
+          content: ["```", command, "```"].join("\n"),
         },
         {
           tag: "markdown",
