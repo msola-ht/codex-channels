@@ -145,6 +145,7 @@
     "scripts/service-target-query.mjs",
     "scripts/session-cleanup.mjs",
     "scripts/session-menu.mjs",
+    "scripts/init-wizard.mjs",
     "scripts/setup-summary.mjs",
     "scripts/setup.mjs",
     "scripts/skill-setup.mjs",

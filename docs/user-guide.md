@@ -54,6 +54,17 @@ Gateway 配置位于：
 首次运行 `codexc init` 会创建默认工作区 `~/.codex-connect/workspace`，并将其初始化为 Git 仓库，
 默认分支为 `main`，不自动创建提交；已有 `.git` 会保留。Git 不可用或初始化失败时明确报错，并且不写入新配置，
 修复后可重新运行。配置已存在时，重复运行保留现有配置和仓库，不为已有工作区补建仓库。
+在交互终端中，`codexc init` 创建完成后会显示环境检测结果（Codex CLI 版本、官方登录状态、通讯渠道、
+默认模型、默认 Workspace 与可选功能状态），并依次询问是否进入接入向导、是否启用 WebUI、调用详情记录与
+模型转发监听，最后询问是否执行 `codexc install`。可选功能默认取值沿用当前状态：首次初始化默认关闭，
+已有配置未显式设置 WebUI 时按“未设置即继续启动”的语义给出默认值；WebUI 按所选值写入
+`[webui] enabled`，调用详情记录只在取值变化时写入，模型转发监听选“是”进入监听设置、选“否”保持现状。
+在接入向导的类别菜单取消（Esc/Ctrl+C 或选择“取消”）会中止整个初始化向导，在某个子流程中返回或取消
+只结束该子流程。尚未启用任何通讯渠道时，向导明确跳过安装并提示先运行
+`codexc setup`，因为后台服务安装会因配置校验失败而中止。选择安装且启用了 WebUI 时，安装完成后再单独
+启动 WebUI。已有配置无法解析或版本不受支持时，`codexc init` 明确失败并且不修改任何数据。非交互调用
+不进入向导，只创建用户目录、默认工作区仓库与初始配置（不写 `[webui] enabled`，保持未设置即沿用已安装
+状态），仍按 `codexc init && codexc setup && codexc install` 顺序执行。
 
 `codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
 

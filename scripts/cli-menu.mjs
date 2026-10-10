@@ -13,7 +13,7 @@ export function reportMenuError(error) {
 export async function runCliMenu({ prompts = clackPrompts, runCommand }) {
   prompts.intro("Codex Connect");
   const options = [
-    { value: "init", label: "初始化", hint: "创建用户目录与初始配置" },
+    { value: "init", label: "初始化", hint: "创建用户目录与初始配置，并引导接入、可选功能与后台服务" },
     { value: "setup", label: "接入向导", hint: "Provider、渠道与项目技能" },
     { value: "config", label: "日常设置" },
     { value: "work", label: "工作区" },
