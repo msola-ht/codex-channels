@@ -106,6 +106,11 @@ export interface ProviderGroup {
   turnCount: number
 }
 
+export interface ModelUsage extends Aggregate {
+  model: string | null
+  turnCount: number
+}
+
 export interface ErrorGroup {
   provider: string | null
   model: string | null
@@ -154,6 +159,7 @@ export interface OverviewResponse {
   threadCount: number
   turnCount: number
   providers: ProviderGroup[]
+  models: ModelUsage[]
   errors: ErrorsReport
   weeklyQuota: WeeklyQuota | null
   trend: UsageTrendResponse
@@ -231,12 +237,8 @@ export interface SubagentListItem extends Pick<ThreadListItem,
 export interface SubagentsResponse {
   generatedAt: string
   subagents: SubagentListItem[]
-  modelUsage: Array<{
-    model: string | null
-    inputTokens: number
-    outputTokens: number
-    cacheUsage: CacheUsage
-  }>
+  summary: Pick<SubagentListItem, "requestCount" | "requestOutcomes" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage">
+  modelUsage: Array<Pick<ModelUsage, "model" | "requestCount" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage">>
   total: number
   offset: number
   limit: number
@@ -295,6 +297,8 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  /** 是否关联已登记的子代理；false 不代表已确认是主代理。 */
+  isSubagent: boolean
   requestPurpose?: "autoApprovalReview" | null
   reviewerThreadId?: string | null
   reviewerTurnId?: string | null

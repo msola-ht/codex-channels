@@ -33,6 +33,7 @@ export type {
   OfficialAccountSourcesResponse,
   OverviewResponse,
   ProviderGroup,
+  ModelUsage,
   Range,
   RangeName,
   RequestRecord,

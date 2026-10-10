@@ -6,9 +6,10 @@ import { ErrorBanner } from "@/components/metrics/error-banner"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { InputTokenTooltip } from "@/components/metrics/token-tooltip"
 import { RefreshStatus } from "@/components/metrics/refresh-status"
+import { QuerySummary } from "@/components/metrics/query-summary"
+import { ModelUsageCards } from "@/components/metrics/model-usage-cards"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useThreadSubagents } from "@/hooks/use-thread-subagents"
 import { useTranslation } from "@/hooks/use-translation"
 import { formatCacheUsage, formatModelName, formatTime, formatTokens, shortThreadId } from "@/lib/format"
@@ -20,6 +21,7 @@ export function ThreadSubagents({ threadId, parentTurnId }: { threadId?: string;
   const { t } = useTranslation()
   const { data, loading, refreshing, error, errorCode, refetch, pagination, notificationStatus, lastUpdatedAt } = useThreadSubagents(threadId, parentTurnId)
   const global = threadId === undefined
+  const summary = loading ? null : data?.summary
   const columnLabels = {
     time: t("threads.firstRequest"), agent: t("threads.subagent"), thread: t("metrics.thread"),
     parent: t("threads.parentThread"), provider: t("metrics.provider"), model: t("metrics.model"),
@@ -66,39 +68,22 @@ export function ThreadSubagents({ threadId, parentTurnId }: { threadId?: string;
 
   return <section aria-label={t(global ? "threads.allSubagents" : "threads.relatedSubagents")} aria-busy={refreshing} className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
     <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      {global ? <h1 className="mr-auto text-xl font-semibold">{t("threads.allSubagents")}</h1> : null}
       <RefreshStatus status={notificationStatus} updatedAt={lastUpdatedAt} failed={error !== null} history={pagination.pageNumber > 1} />
       <Button variant="outline" size="sm" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
     </div>
     <ErrorBanner error={translateApiError(t, error, errorCode)} pending={refreshing} onRetry={refetch} />
-    {error === null && !loading && data !== null && data.modelUsage.length > 0 ? <section aria-label={t("metrics.model")} className="grid shrink-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {data.modelUsage.map(usage => <Card key={JSON.stringify(usage.model)} size="sm">
-        <CardHeader><CardTitle><TruncatedText text={formatModelName(usage.model, null)} /></CardTitle></CardHeader>
-        <CardContent>
-          <dl className="grid grid-cols-3 gap-3">
-            <div className="flex min-w-0 flex-col gap-1">
-              <dt className="text-sm text-muted-foreground">{t("metrics.input")}</dt>
-              <dd className="text-xl font-semibold tabular-nums"><InputTokenTooltip
-                inputTokens={usage.inputTokens}
-                cachedInputTokens={usage.cacheUsage.missingRequestCount > 0 ? null : usage.cacheUsage.cachedInputTokens}
-                cacheUsage={usage.cacheUsage}
-              /></dd>
-            </div>
-            <div className="flex min-w-0 flex-col gap-1">
-              <dt className="text-sm text-muted-foreground">{t("metrics.cacheHitRate")}</dt>
-              <dd className="text-xl font-semibold tabular-nums">{formatCacheUsage(usage.cacheUsage).rate}</dd>
-            </div>
-            <div className="flex min-w-0 flex-col gap-1">
-              <dt className="text-sm text-muted-foreground">{t("metrics.output")}</dt>
-              <dd className="text-xl font-semibold tabular-nums">{formatTokens(usage.outputTokens)}</dd>
-            </div>
-          </dl>
-        </CardContent>
-      </Card>)}
-    </section> : null}
+    {error === null && !loading && data !== null && data.modelUsage.length > 0 ? <ModelUsageCards usage={data.modelUsage} /> : null}
     {error !== null ? null : <DataTable
       loading={loading}
       title={t(global ? "threads.allSubagents" : "threads.relatedSubagents")}
-      description={({ total }) => <>{t("threads.subagentsTotal", { total })} · {t("threads.subagentMetricsHint")}</>}
+      description={({ total }) => <QuerySummary
+        label={t("threads.subagentsTotal", { total })}
+        range="all"
+        aggregate={summary ?? null}
+        turns={summary?.turnCount}
+        loading={loading}
+      />}
       columns={columns}
       data={data?.subagents ?? []}
       getRowId={agent => agent.threadId}

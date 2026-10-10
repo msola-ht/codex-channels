@@ -20,6 +20,7 @@ import {
   WeeklyQuotaCard,
 } from "@/components/overview/overview-sections"
 import { UsageCharts } from "@/components/overview/usage-charts"
+import { ModelUsageSection } from "@/components/overview/model-usage"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
 import { useTranslation } from "@/hooks/use-translation"
 import type { AccountRefreshAttempts, AccountRefreshControl, AccountRefreshFailure, AccountRemovalNotice } from "@/lib/account-refresh-state"
@@ -134,6 +135,7 @@ function LocalDashboard({
               heatmapLoading={loading}
               error={error}
             />
+            <ModelUsageSection key={data.range.name} models={data.models} />
             <ProviderTable providers={data.providers} />
             <ErrorsSummary errors={data.errors} />
           </>}

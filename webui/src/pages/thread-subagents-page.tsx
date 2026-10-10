@@ -26,9 +26,7 @@ export function ThreadSubagentsPage() {
 }
 
 export function SubagentsPage() {
-  const { t } = useTranslation()
-  return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
-    <h1 className="shrink-0 text-xl font-semibold">{t("threads.allSubagents")}</h1>
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col">
     <ThreadSubagents />
   </div>
 }

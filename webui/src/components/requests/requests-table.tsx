@@ -177,6 +177,7 @@ export function RequestsTable({
             responses={row.original.responseModel === null || row.original.responseModel === undefined ? [] : [row.original.responseModel]}
             fallback={row.original.model ?? undefined}
           />
+          {row.original.isSubagent ? <Badge variant="secondary" size="sm">{t("threads.subagent")}</Badge> : null}
           {(row.original.upstreamAttemptCount ?? 0) > 1 ? <Badge variant="secondary" size="sm"
             title={t("requestDetail.attemptHint")}>{t("requestDetail.attemptBadge", { count: row.original.upstreamAttemptCount! })}</Badge> : null}
           <AccelerationBadge tier={row.original.requestServiceTier} source="request" responseTier={row.original.serviceTier} />

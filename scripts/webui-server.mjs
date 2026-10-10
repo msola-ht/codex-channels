@@ -572,6 +572,7 @@ function handleOverview(environment, url, response) {
         threadCount: overview.threadCount,
         turnCount: overview.turnCount,
         providers: overview.providers,
+        models: overview.models,
         errors: overview.errors,
         weeklyQuota: toWebuiWeeklyQuota(readWeeklyQuota(store, nowMs)),
         trend: { range, generatedAt, ...service.trend(range) },
