@@ -85,6 +85,11 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 `components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。共享 `TooltipContent` 默认在右侧显示，空间不足时由组件自动避让。
 `components/metrics/model-usage-cards.tsx` 为控制台与子代理页提供两行紧凑模型用量卡片，只展示调用方给定的统计范围；`components/overview/model-usage.tsx` 组合控制台模型区，默认显示前八个模型，支持展开全部和收起。
+控制台卡片使用服务端返回的 `members` 展开提供商与原始模型明细，展开时占整行；原始 ID 不再映射。各行展示请求数、轮次、输入、缓存命中率和输出，轮次去重口径附在表格下方。缺少 `members` 的子代理卡片保持原样。
+
+`components/settings/model-display-groups.tsx` 在模型配置页管理显示组，可选择 DS 目标名与已配置模型成员，也可手填历史 ID；复用版本化预览、确认与备份链路，取消确认或预览失败保留草稿，草稿绑定打开时的配置版本以阻止覆盖并发修改。选择标签保留原始 ID，同一 ID 的候选项列出所有来源提供商。
+`hooks/use-model-display-settings.ts` 通过只读 `/api/v1/settings/model-display` 加载共享显示映射，保存后主动刷新，页面挂载期间定期重新读取；`lib/format.ts` 只映射最终名称，不改变原始选择值。
+控制台 `/overview` 在同一统计快照按映射分组并重新去重轮次，卡片直接使用返回的组名，避免二次映射；其他查询保留原统计口径。
 共享 DataTable 的表头和普通数据行采用紧凑间距，保留详情展开区及按钮尺寸。业务表头使用 `metrics.*Column` 短文案，通过 `SortableHeader` 或 `TableHint` 提供完整含义；列菜单继续使用完整名称。`TrafficModel` 对完全同名的请求/响应仅显示一次名称，悬浮保留两端证据，差异标签不变。
 输入 Token 的悬浮提示复用 `InputTokenTooltip`，仅展示缓存与无缓存数量；请求、会话、每轮明细、子代理列表和概览提供商表分别提供独立缓存命中率列。聚合缓存仅部分已知时，两项数量使用 `cacheUsage` 的已知请求统计并标注 `≥`，不从全部输入中扣减已知缓存来推算无缓存量。每轮明细以该轮缓存输入除以输入计算，缓存未知或输入为零时显示 `—`；提供商表沿用聚合 `cacheUsage` 的已知请求统计口径。
 必要操作列显式使用 `enableHiding: false`，公共表格覆盖这些列的旧隐藏偏好，保留其他列的用户选择。请求详情原生按钮打开抽屉后，关闭时恢复到仍存在的触发按钮；调用时间按钮同样保留键盘入口。

@@ -185,7 +185,7 @@ export class RequestMetricsQueryService {
     return this.store.aggregate({ ...filters, dimension, startAtMs: range.startAtMs, endAtMs: range.endAtMs });
   }
 
-  overview(range: ResolvedRequestMetricsRange) {
+  overview(range: ResolvedRequestMetricsRange, modelAliases?: Readonly<Record<string, string>>) {
     const global = this.aggregate("global", range);
     const providers = this.aggregate("provider", range);
     const scope = { startAtMs: range.startAtMs, endAtMs: range.endAtMs };
@@ -194,7 +194,7 @@ export class RequestMetricsQueryService {
       global: global.aggregate,
       threadCount: threads.threadCount,
       turnCount: threads.turnCount,
-      models: this.store.modelUsage(scope),
+      models: this.store.modelUsage(scope, modelAliases),
       providers: providers.groups.map((group) => {
         // Provider 维度直接按非空 provider 列分组；仅 global 维度会返回 null。
         const scopedThreads = this.store.threadCounts({ ...scope, provider: group.provider! });

@@ -591,8 +591,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
     return this.queries.page(query);
   }
 
-  modelUsage(query: ModelRequestMetricsScope): StoredModelUsage[] {
-    return this.queries.modelUsage(query);
+  modelUsage(query: ModelRequestMetricsScope, modelAliases?: Readonly<Record<string, string>>): StoredModelUsage[] {
+    return this.queries.modelUsage(query, modelAliases);
   }
 
   providers(): string[] {

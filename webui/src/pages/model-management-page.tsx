@@ -4,6 +4,8 @@ import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-man
 import { useAccountSettingsManagement } from "@/hooks/use-account-settings-management"
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
+import { useModelDisplayRefresh } from "@/hooks/use-model-display-settings"
+import { ModelDisplayGroups } from "@/components/settings/model-display-groups"
 import { useTranslation } from "@/hooks/use-translation"
 import { translateApiErrorCode } from "@/lib/i18n/translate"
 import { fetchManagementProviders, fetchSettingsSummary } from "@/lib/api"
@@ -49,10 +51,12 @@ export function ModelConfigurationPage() {
   const codex = useCodexSettingsManagement()
   const providers = useProviderSettingsManagement()
   const gateway = useSettingsManagement()
+  const refreshModelDisplay = useModelDisplayRefresh()
   const reloadCodex = codex.refetch, reloadProviders = providers.refetch, reloadGateway = gateway.refetch
   const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway() }, [reloadCodex, reloadProviders, reloadGateway])
   const busy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
   return <SettingsPageFrame title="modelManagement.models" busy={busy} refresh={refresh}>
+    <ModelDisplayGroups management={gateway} providers={providers.settings} disabled={busy || gateway.error !== null} />
     <AppServerSettingsCard management={codex} section="models" onChanged={reloadProviders} />
     <ProviderSettingsManagement management={providers} section="models" onChanged={reloadCodex} />
     <Card><CardHeader><CardTitle>{t("modelManagement.channelModel")}</CardTitle><CardDescription>{t("modelManagement.channelModelHint")}</CardDescription></CardHeader><CardContent>
@@ -60,7 +64,7 @@ export function ModelConfigurationPage() {
       {gateway.error ? <SettingsError message={gateway.error} retry={reloadGateway} /> : gateway.managedSettings && <FieldGroup><ManagedInputRow label={t("modelManagement.channelModel")} defaultValue={gateway.managedSettings.system.defaultModel ?? ""} placeholder={t("modelManagement.followDefault")} disabled={busy} saved={gateway.lastAppliedSetting?.kind === "system.default-model" ? gateway.lastAppliedSetting : null} onBlur={value => void gateway.previewSetting("system.default-model", value || null, { key: "modelManagement.channelModel" })} /></FieldGroup>}
       {gateway.actionError && <Alert variant="destructive"><AlertDescription>{gateway.actionError}</AlertDescription></Alert>}
     </CardContent></Card>
-    <PendingSettingDialog pending={gateway.pendingSetting} saving={gateway.saving} loading={gateway.loading} onCancel={gateway.cancelSetting} onConfirm={() => void gateway.confirmSetting()} />
+    <PendingSettingDialog pending={gateway.pendingSetting} saving={gateway.saving} loading={gateway.loading} onCancel={gateway.cancelSetting} onConfirm={() => void gateway.confirmSetting().then(saved => { if (saved) refreshModelDisplay() })} />
   </SettingsPageFrame>
 }
 

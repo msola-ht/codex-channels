@@ -152,7 +152,7 @@ export function createWebuiServer({
     );
   }
   const serviceStatusCache = { expiresAtMs: 0, value: null, pending: null };
-  const trafficSettingsRead = { pending: null, controller: null, responses: new Set() };
+  const gatewayConfigRead = { pending: null, controller: null, responses: new Set() };
   const providerStateCache = { expiresAtMs: 0, value: null, pending: null };
   const management = createManagementState(
     environment,
@@ -174,9 +174,9 @@ export function createWebuiServer({
     resetGatewayCredits,
   );
   const server = createServer((request, response) => {
-    handleRequest(environment, staticDir, host, token, serviceStatusCache, trafficSettingsRead, management, request, response);
+    handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, management, request, response);
   });
-  server.on("close", () => trafficSettingsRead.controller?.abort());
+  server.on("close", () => gatewayConfigRead.controller?.abort());
   return { host, server, staticDir, token, closeNotifications: () => closeQueueStreams(management) };
 }
 
@@ -198,7 +198,7 @@ export function resolveWebuiSettings({
   };
 }
 
-async function handleRequest(environment, staticDir, host, token, serviceStatusCache, trafficSettingsRead, management, request, response) {
+async function handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, management, request, response) {
   let managementRequest = false;
   try {
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -237,7 +237,7 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         openQueueStream(management, response, (signal, send) => watchQueueChanges(path(resolveGatewayConfigPath(environment)), signal, send));
         return;
       }
-      await routeApi(environment, url, request, response, serviceStatusCache, trafficSettingsRead);
+      await routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead);
       return;
     }
     serveStatic(staticDir, url.pathname, response);
@@ -446,7 +446,7 @@ function readJsonMetadata(path) {
   }
 }
 
-async function routeApi(environment, url, request, response, serviceStatusCache, trafficSettingsRead) {
+async function routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead) {
   const path = url.pathname;
   if (!path.startsWith(`${API_PREFIX}/`)) {
     throw new ApiError(404, "not_found", `未知 API：${path}`);
@@ -471,7 +471,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     return;
   }
   if (apiPath === "/overview") {
-    handleOverview(environment, url, response);
+    await handleOverview(environment, url, response, gatewayConfigRead);
     return;
   }
   if (apiPath === "/daily") {
@@ -519,7 +519,13 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     return;
   }
   if (apiPath === "/settings/traffic") {
-    await handleTrafficSettings(environment, response, trafficSettingsRead);
+    await handleTrafficSettings(environment, response, gatewayConfigRead);
+    return;
+  }
+  if (apiPath === "/settings/model-display") {
+    if (url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "模型显示设置不接受查询参数");
+    const document = await readAvailableGatewayConfig(environment, response, gatewayConfigRead);
+    if (document !== null) sendJson(response, 200, { modelAliases: document.display.model_aliases ?? {} });
     return;
   }
   if (apiPath === "/health") {
@@ -553,9 +559,16 @@ function resolveGatewayConfigPath(environment) {
     : join(userDataDir(environment), "config.toml");
 }
 
-function handleOverview(environment, url, response) {
+async function handleOverview(environment, url, response, configRead) {
+  for (const key of url.searchParams.keys()) {
+    if (!["range", "from", "to"].includes(key)) throw new ApiError(400, "unsupported_parameter", "控制台仅接受时间范围查询参数");
+    if (url.searchParams.getAll(key).length !== 1) throw new ApiError(400, "invalid_parameter", "时间范围查询参数不能重复");
+  }
   const nowMs = Date.now();
   const range = parseRange(url, "90d", nowMs);
+  const document = await readAvailableGatewayConfig(environment, response, configRead);
+  if (document === null) return;
+  const modelAliases = document.display.model_aliases ?? {};
   const heatmapStart = new Date(nowMs);
   heatmapStart.setHours(0, 0, 0, 0);
   heatmapStart.setDate(heatmapStart.getDate() - 89);
@@ -565,7 +578,7 @@ function handleOverview(environment, url, response) {
   try {
     const snapshot = store.readSnapshot(() => {
       const service = new RequestMetricsQueryService(store);
-      const overview = service.overview(range);
+      const overview = service.overview(range, modelAliases);
       return {
         range, generatedAt,
         global: overview.global,
@@ -815,6 +828,11 @@ function loadAvailableGatewaySettings(environment) {
 }
 
 async function handleTrafficSettings(environment, response, state) {
+  const document = await readAvailableGatewayConfig(environment, response, state);
+  if (document !== null) sendJson(response, 200, { modelTrafficDumpEnabled: document.debug?.model_traffic_dump === true });
+}
+
+async function readAvailableGatewayConfig(environment, response, state) {
   const configPath = resolveGatewayConfigPath(environment);
   if (!existsSync(configPath)) {
     throw new ApiError(503, "configuration_unavailable", "Gateway 尚未初始化，请先运行 codexc init");
@@ -830,22 +848,21 @@ async function handleTrafficSettings(environment, response, state) {
     while (state.pending !== null && state.controller?.signal.aborted) {
       await state.pending.catch(() => {});
     }
-    if (response.destroyed) return;
+    if (response.destroyed) return null;
     // Share only a current read, never a cached value or permission decision.
     if (state.pending === null) {
       state.controller = new AbortController();
       state.pending = readPrivateConfigFile(configPath, { signal: state.controller.signal })
-        .then(content => {
-          const document = validateGatewayConfigStructureDocument(parseGatewayConfig(content));
-          return { modelTrafficDumpEnabled: document.debug?.model_traffic_dump === true };
-        }).finally(() => { state.pending = null; state.controller = null; });
+        .then(content => validateGatewayConfigStructureDocument(parseGatewayConfig(content)))
+        .finally(() => { state.pending = null; state.controller = null; });
     }
-    const settings = await state.pending;
-    if (!response.destroyed) sendJson(response, 200, settings);
+    const document = await state.pending;
+    return response.destroyed ? null : document;
   } catch {
     if (!response.destroyed) {
       throw new ApiError(503, "configuration_unavailable", "Gateway 配置不可用，请检查配置格式和私有文件权限");
     }
+    return null;
   } finally {
     response.off("close", disconnected);
     state.responses.delete(response);

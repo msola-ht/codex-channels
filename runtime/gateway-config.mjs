@@ -14,6 +14,7 @@ import { dirname, resolve } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { z } from "zod";
 import { modelRelayConfigSchema } from "./model-relay-config.mjs";
+import { validateModelDisplayAliases } from "./model-display-name.mjs";
 
 import {
   securePrivateDirectorySync,
@@ -208,6 +209,15 @@ const gatewaySchema = z.strictObject({
   ]).optional(),
 });
 
+const modelDisplayAliasesSchema = z.unknown().transform((value, context) => {
+  try {
+    return validateModelDisplayAliases(value);
+  } catch (error) {
+    context.addIssue({ code: "custom", message: error.message });
+    return z.NEVER;
+  }
+});
+
 const gatewayConfigStructureSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
@@ -227,6 +237,7 @@ const gatewayConfigStructureSchema = z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
     reasoning: z.boolean().default(false),
+    model_aliases: modelDisplayAliasesSchema.optional(),
   }).default({
     operation_updates: "compact",
     plan_updates: true,

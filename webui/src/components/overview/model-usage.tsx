@@ -21,7 +21,7 @@ export function ModelUsageSection({ models }: { models: ModelUsage[] }) {
       </Button> : null}
     </div>
     <div id={cardsId}>
-      <ModelUsageCards usage={expanded ? models : models.slice(0, collapsedModelCount)} />
+      <ModelUsageCards grouped usage={expanded ? models : models.slice(0, collapsedModelCount)} />
     </div>
   </section>
 }

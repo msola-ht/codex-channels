@@ -27,6 +27,7 @@ export function useSettingsManagement(): GatewaySettingsController {
 }
 
 function currentValue(settings: ManagementSettingsResponse, setting: ManagementSettingInput): unknown {
+  if (setting.kind === "display.model-aliases") return settings.display.modelAliases
   if (setting.kind === "display.operation-updates") return settings.display.operationUpdates
   if (setting.kind === "display.plan-updates") return settings.display.planUpdatesEnabled
   if (setting.kind === "display.reasoning") return settings.display.reasoningEnabled

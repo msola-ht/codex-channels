@@ -75,6 +75,7 @@ export interface GatewayConfig {
   operationUpdateDisplay: OperationUpdateDisplay;
   planUpdatesEnabled: boolean;
   reasoningEnabled: boolean;
+  modelDisplayAliases?: Record<string, string>;
   pluginApiEnabled: boolean;
   scheduledTasksEnabled: boolean;
   credentialsDirectory: string;
@@ -294,6 +295,7 @@ function loadValidatedConfigDocument(
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
     reasoningEnabled: raw.display.reasoning,
+    modelDisplayAliases: raw.display.model_aliases ?? {},
     pluginApiEnabled: raw.experimental.plugin_api,
     scheduledTasksEnabled: raw.scheduled_tasks.enabled,
     ...(raw.model_relay === undefined ? {} : { modelRelay: raw.model_relay }),

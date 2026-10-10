@@ -22,6 +22,7 @@ export interface GatewaySettings {
     operationUpdates: "full" | "compact" | "hidden";
     planUpdatesEnabled: boolean;
     reasoningEnabled: boolean;
+    modelAliases: Record<string, string>;
   };
   system: {
     approvalTimeoutSeconds: number;
@@ -88,6 +89,7 @@ export type GatewaySettingInput =
   | { kind: "display.operation-updates"; value: "full" | "compact" | "hidden" }
   | { kind: "display.plan-updates"; value: boolean }
   | { kind: "display.reasoning"; value: boolean }
+  | { kind: "display.model-aliases"; value: Record<string, string> }
   | { kind: "telegram.message-format"; value: "html" | "rich" }
   | { kind: "system.approval-timeout"; value: number }
   | { kind: "system.idle-release-minutes"; value: number }

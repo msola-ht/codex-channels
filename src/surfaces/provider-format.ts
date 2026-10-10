@@ -8,8 +8,23 @@ import {
   isOpencodeGoProvider,
   opencodeGoProviderDisplayName,
 } from "../../runtime/opencode-go-accounts.mjs";
+import { modelDisplayName } from "../../runtime/model-display-name.mjs";
 
 let configuredCustomPrimaryProviderIds = new Set<string>();
+let modelDisplayAliases: Readonly<Record<string, string>> = {};
+
+export function setModelDisplayAliases(aliases: Readonly<Record<string, string>> = {}): void {
+  modelDisplayAliases = { ...aliases };
+}
+
+export function formatModelDisplayName(model: string, fallback = model): string {
+  return modelDisplayName(model, modelDisplayAliases, fallback);
+}
+
+export function formatModelDisplayNameWithId(model: string): string {
+  const name = formatModelDisplayName(model);
+  return name === model ? model : `${name}（${model}）`;
+}
 
 export function setConfiguredCustomPrimaryProviderId(
   providerId: string | readonly string[] | undefined,
@@ -62,18 +77,30 @@ export function formatModelSpeedSupport(model: ModelOption | undefined): string 
   return speeds.length > 0 ? `支持 ${speeds.join("、")}` : "不支持加速档位";
 }
 
-export function scopedModelDisplayName(displayName: string, provider: string | undefined): string {
-  if (!provider) return displayName;
+export function scopedModelDisplayName(
+  displayName: string,
+  provider: string | undefined,
+  model = displayName,
+  selectionNumber?: number,
+): string {
+  if (Object.hasOwn(modelDisplayAliases, model)) {
+    // 保留选择编号，防止相同显示组及平台截断隐藏原始 ID 后无法区分选项。
+    return `${selectionNumber === undefined ? "" : `${selectionNumber}. `}${formatModelDisplayNameWithId(model)}`;
+  }
+  let scopedName = displayName;
   // 受管 Provider 的展示名会带上 definition.displayName 前缀（对 OpenCode Go 是
   // 账户邮箱），而 providerFilter 是原始 provider id（如 ocg-<accountId>），两者不同。
   // 优先按格式化后的提供商标签剥离，其次回退到原始 id，避免已单独展示 Provider 的卡片里重复前缀。
-  for (const label of [formatProviderLabel(provider), provider]) {
-    const prefix = `${label} · `;
-    if (displayName.startsWith(prefix)) {
-      return displayName.slice(prefix.length);
+  if (provider) {
+    for (const label of [formatProviderLabel(provider), provider]) {
+      const prefix = `${label} · `;
+      if (scopedName.startsWith(prefix)) {
+        scopedName = scopedName.slice(prefix.length);
+        break;
+      }
     }
   }
-  return displayName;
+  return scopedName;
 }
 
 export function formatDisplayedProvider(provider: string): string {

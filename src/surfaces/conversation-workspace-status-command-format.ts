@@ -9,7 +9,7 @@ import {
 } from "../conversation-core/index.js";
 
 import { formatRemainingRateLimitWindow, formatTimezoneLine } from "./account-format.js";
-import { formatCodexProviderLabel, formatServiceTier } from "./provider-format.js";
+import { formatCodexProviderLabel, formatModelDisplayName, formatServiceTier } from "./provider-format.js";
 import { formatCacheHitRate, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
@@ -201,7 +201,7 @@ export function formatConversationStatus(status: ConversationStatus): string {
     `Turn：${status.turnId ?? "空闲"}`,
     `工作目录：${status.cwd}`,
     `Git 分支：${status.gitBranch ?? "未检测到"}`,
-    `模型：${status.model}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
+    `模型：${formatModelDisplayName(status.model)}${status.modelPending ? "（下一次 Turn 生效）" : ""}`,
     `提供商：${formatCodexProviderLabel(status.modelProvider)}`,
     `${reasoningEffortSettingName(status.effort)}：${formatReasoningEffort(status.effort)}${status.effortPending ? "（下一次 Turn 生效）" : ""}`,
     `速度：${status.threadId || status.fastModePending ? formatServiceTier(status.serviceTier) : "未知"}${status.fastModePending ? "（下一次 Turn 生效）" : ""}`,

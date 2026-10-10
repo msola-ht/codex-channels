@@ -68,6 +68,7 @@ export function translateApiErrorCode(t: Translate, code?: string | null): strin
 const settingErrorKeys: Record<string, MessageKey> = {
   required: "settingsUi.validation.required",
   "invalid-input": "settingsUi.invalid",
+  "invalid-model-aliases": "modelDisplay.invalid",
   "invalid-choice": "settingsUi.validation.choice",
   "invalid-boolean": "settingsUi.validation.boolean",
   "invalid-integer": "settingsUi.validation.integer",

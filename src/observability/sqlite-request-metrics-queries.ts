@@ -1,5 +1,6 @@
 import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
 import type { RequestTimingSummary } from "../../runtime/request-timing.mjs";
+import { validateModelDisplayAliases } from "../../runtime/model-display-name.mjs";
 import { summarizeResponseUsage } from "./response-usage-summary.js";
 import type {
   RequestInterruptionSummary,
@@ -241,19 +242,54 @@ export class SqliteRequestMetricsQueries {
     };
   }
 
-  modelUsage(query: ModelRequestMetricsScope): StoredModelUsage[] {
+  modelUsage(query: ModelRequestMetricsScope, modelAliases?: Readonly<Record<string, string>>): StoredModelUsage[] {
     this.reader.requireOpen();
     const scope = metricsScopeSql(query);
+    const aliases = validateModelDisplayAliases(modelAliases === undefined ? {} : modelAliases);
+    const parameters = [JSON.stringify(aliases), ...scope.params];
+    const aliasesSql = `WITH model_aliases AS (
+      SELECT key AS original_model, value AS display_name FROM json_each(?)
+    )`;
+    const displayModelSql = "COALESCE(model_aliases.display_name, model_request_metrics.model)";
     const rows = this.reader.prepare(`
-      SELECT model, ${metricsAggregateSql},
+      ${aliasesSql}
+      SELECT ${displayModelSql} AS model, ${metricsAggregateSql},
         COUNT(DISTINCT json_array(thread_id, turn_id))
           FILTER (WHERE thread_id IS NOT NULL AND turn_id IS NOT NULL) AS turn_count
       FROM model_request_metrics
+      LEFT JOIN model_aliases ON model_request_metrics.model = model_aliases.original_model
       WHERE ${scope.sql}
-      GROUP BY model
+      GROUP BY ${displayModelSql}
       ORDER BY request_count DESC, model IS NULL ASC, model ASC
-    `).all(...scope.params) as unknown as Array<AggregateRow & { turn_count: number }>;
-    return rows.map((row) => ({ ...toStoredMetricsAggregate(row), model: row.model, turnCount: row.turn_count }));
+    `).all(...parameters) as unknown as Array<AggregateRow & { turn_count: number }>;
+    const memberRows = this.reader.prepare(`
+      ${aliasesSql}
+      SELECT ${displayModelSql} AS display_model, provider, model_request_metrics.model AS model,
+        ${metricsAggregateSql},
+        COUNT(DISTINCT json_array(thread_id, turn_id))
+          FILTER (WHERE thread_id IS NOT NULL AND turn_id IS NOT NULL) AS turn_count
+      FROM model_request_metrics
+      LEFT JOIN model_aliases ON model_request_metrics.model = model_aliases.original_model
+      WHERE ${scope.sql}
+      GROUP BY provider, model_request_metrics.model, ${displayModelSql}
+      ORDER BY request_count DESC, provider ASC, model IS NULL ASC, model ASC
+    `).all(...parameters) as unknown as Array<AggregateRow & {
+      provider: string;
+      display_model: string | null;
+      turn_count: number;
+    }>;
+    const members = new Map<string | null, StoredModelUsage["members"]>();
+    for (const row of memberRows) {
+      const groupMembers = members.get(row.display_model) ?? [];
+      groupMembers.push({
+        ...toStoredMetricsAggregate(row), provider: row.provider, model: row.model, turnCount: row.turn_count,
+      });
+      members.set(row.display_model, groupMembers);
+    }
+    return rows.map((row) => ({
+      ...toStoredMetricsAggregate(row), model: row.model, turnCount: row.turn_count,
+      members: members.get(row.model) ?? [],
+    }));
   }
 
   providers(): string[] {

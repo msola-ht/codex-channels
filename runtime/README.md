@@ -24,6 +24,7 @@
 - `openai-credentials.mjs` / `openai-credentials.d.mts`：有界读取当前 Codex Home 登录缓存，仅在账户 ID 与官方额度账户一致时返回 `last_refresh` 凭证刷新时间；不返回凭据、不刷新登录、不读取订阅日期。
 
 - `model-name-comparison.mjs` / `model-name-comparison.d.mts`：CLI 与 WebUI 共用的请求/响应模型名称对照；区分一致、不一致和信息不足，不推断模型身份或别名。
+- `model-display-name.mjs` / `model-display-name.d.mts`：配置、CLI、频道与 WebUI 共用的模型显示组映射校验和精确单跳展示查找；缺省为空，不修改上游模型 ID、请求、路由、目录或存储的指标键。
 
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。

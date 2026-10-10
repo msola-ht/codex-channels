@@ -18,7 +18,7 @@ import {
   formatTimeRemaining,
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
-import { formatCodexProviderLabel, formatDisplayedProvider, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier } from "./provider-format.js";
+import { formatCodexProviderLabel, formatDisplayedProvider, formatModelDisplayName, formatModelDisplayNameWithId, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier } from "./provider-format.js";
 import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
@@ -107,10 +107,12 @@ export function formatConversationModels(
     `模型列表（${scopedModels.length}）：`,
     ...scopedModels.map(
       (model, index) =>
-        `${index + 1}. ${model.displayName} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
+        `${index + 1}. ${formatModelDisplayName(model.model, model.displayName)} · ${model.model}${model.available === false ? ` · 暂不可用${model.unavailableReason ? `（${model.unavailableReason}）` : ""}` : ""} · ${formatModelSpeedSupport(model)}${formatModelUpgradeBadge(model)}${model.model === state.model && (model.provider ?? "openai") === (state.modelProvider ?? "openai") ? " ← 当前" : ""}`,
     ),
     "",
-    "切换：/model <模型序号、ID 或名称>",
+    scopedModels.some((model) => formatModelDisplayName(model.model, model.displayName) !== model.displayName)
+      ? "切换：/model <模型序号或原始 ID>（显示组名不用于选择）"
+      : "切换：/model <模型序号、ID 或名称>",
   ].join("\n"));
 }
 
@@ -127,7 +129,7 @@ function formatCurrentModelNotices(model: ModelOption | undefined): string[] {
   }
   if (model.upgrade) {
     notices.push([
-      `官方模型提示：建议切换到 ${model.upgrade.model}`,
+      `官方模型提示：建议切换到 ${formatModelDisplayNameWithId(model.upgrade.model)}`,
       ...(model.upgrade.retirementAtSeconds === null
         ? []
         : [`退役时间：${formatUtcDate(model.upgrade.retirementAtSeconds)}（UTC）`]),
@@ -141,7 +143,7 @@ function formatModelUpgradeBadge(model: ModelOption): string {
   const retirement = model.upgrade.retirementAtSeconds === null
     ? ""
     : ` · 退役 ${formatUtcDate(model.upgrade.retirementAtSeconds)} UTC`;
-  return ` · 官方建议替代 ${model.upgrade.model}${retirement}`;
+  return ` · 官方建议替代 ${formatModelDisplayNameWithId(model.upgrade.model)}${retirement}`;
 }
 
 function formatUtcDate(timestampSeconds: number): string {
@@ -156,7 +158,7 @@ export function formatConversationModel(
   label: string,
   value: { model: string; modelProvider?: string },
 ): string {
-  return `${label}：${value.model}${value.modelProvider ? ` · Provider：${formatDisplayedProvider(value.modelProvider)}` : ""}`;
+  return `${label}：${formatModelDisplayName(value.model)}${value.modelProvider ? ` · Provider：${formatDisplayedProvider(value.modelProvider)}` : ""}`;
 }
 
 function formatModelStateLine(
@@ -164,7 +166,7 @@ function formatModelStateLine(
 ): string {
   return state.modelPending
     ? formatNextMessageModel(state)
-    : `当前模型：${state.model}`;
+    : `当前模型：${formatModelDisplayName(state.model)}`;
 }
 
 export function formatConversationUsage(
@@ -276,7 +278,7 @@ function appendThreadUsage(
   const visibleGroups = threadUsage.groups.slice(0, maximumThreadUsageGroups);
   lines.push(
     ...visibleGroups.map((group) =>
-      `${group.model ?? "其他"} · ${formatReasoningEffort(group.reasoningEffort, "其他")} · ${group.speed ?? "其他"}`
+      `${group.model === null ? "其他" : formatModelDisplayName(group.model)} · ${formatReasoningEffort(group.reasoningEffort, "其他")} · ${group.speed ?? "其他"}`
       + `：${formatMicros(group.estimatedUsageCreditsMicros)} Credits`),
   );
   if (threadUsage.groups.length > visibleGroups.length) {

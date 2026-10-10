@@ -86,6 +86,8 @@
   主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
   `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
+  `/api/v1/settings/model-display` 返回只读模型显示映射，概览按该映射合并并提供原始模型成员明细；
+  概览、显示映射与调用采集开关共用可取消的进行中私有配置读取，不缓存配置或权限判断。
 - `webui-management-codex-route.mjs` / `webui-management-gateway-route.mjs` /
   `webui-management-provider-route.mjs`（账户刷新随 HTTP 断开取消私有 IPC 等待，上游认证失败保持 502；单账户刷新复用 Store 精确 Provider 查询，整表同步保留账户增删与来源告警；响应附加同账户的 OpenAI 凭证刷新时间，不写入快照） / `webui-management-task-route.mjs` /
   `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
@@ -282,7 +284,7 @@
   Workspace 默认审批方式跨 Provider 共享，不按 Provider 或模型设限；CLI 与 WebUI 共用输入、配置修订校验及写入接口。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理、日志等级与
   开发中的 Plugin API；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
-- `config-display-menu.mjs`：独立管理操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；
+- `config-display-menu.mjs`：独立管理模型显示组、操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs`：独立管理模型请求转储及其保留天数、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份、模型上游终端标识与模型可见时区；模型请求转储独立写入

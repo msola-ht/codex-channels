@@ -3,7 +3,7 @@ import type {
   ConversationCommandResult,
 } from "../application/index.js";
 
-import { formatDisplayedProvider } from "./provider-format.js";
+import { formatDisplayedProvider, formatModelDisplayNameWithId } from "./provider-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 
@@ -25,7 +25,7 @@ export function formatConversationScheduledTasks(
       `   ID：${task.taskId}`,
       `   计划：${formatSchedule(task.schedule, task.timezone)}`,
       `   下次运行：${formatScheduledAt(task.nextRunAt)}`,
-      `   Workspace：${task.workspaceId} · 模型：${formatDisplayedProvider(task.modelProvider)}/${task.model ?? "默认"} · ${task.sandbox}`,
+      `   Workspace：${task.workspaceId} · 模型：${formatDisplayedProvider(task.modelProvider)}/${task.model ? formatModelDisplayNameWithId(task.model) : "默认"} · ${task.sandbox}`,
     ].join("\n")),
     "",
     "此处列出循环任务定义；每次执行结果与终态：/schedule runs <任务>",
@@ -81,7 +81,7 @@ export function formatConversationScheduledConfirmation(
     ...(preview.action === "delete" ? [`任务：${preview.task.taskId}`] : []),
     `计划：${formatSchedule(preview.task.schedule, preview.task.timezone)}`,
     `Workspace：${preview.task.workspaceId}`,
-    `模型：${formatDisplayedProvider(preview.task.modelProvider)}/${preview.task.model ?? "默认"}`,
+    `模型：${formatDisplayedProvider(preview.task.modelProvider)}/${preview.task.model ? formatModelDisplayNameWithId(preview.task.model) : "默认"}`,
     `${reasoningEffortSettingName(preview.task.reasoningEffort)}：${formatReasoningEffort(preview.task.reasoningEffort, "默认")}`,
     `下次运行：${formatScheduledAt(preview.task.nextRunAt)}`,
     `Sandbox：${preview.task.sandbox}`,

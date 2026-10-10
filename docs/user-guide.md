@@ -58,6 +58,14 @@ Gateway 配置位于：
 
 `codexc config` 的“计划任务”直接选择开关；Telegram 消息格式位于“显示设置”，仅在配置 Bot 后显示。显示子项取消或选择“返回上一级”时回到显示设置；在显示设置中选择“返回”才回到 Config。日志等级统一在“高级设置 → 日志等级”选择，`debug` / `trace` 开启调试信息，`info` 恢复标准输出。
 
+“显示设置 → 模型显示组”或 WebUI“模型管理 → 模型配置 → 模型显示组”可将多个精确模型 ID 显示为同一名称。
+例如创建 `deepseek-flash` 组，加入 `cline-pass/deepseek-v4.1-flash`、`deepseek/deepseek-v4.1-flash` 和
+`deepseek-v4.1-flash`；可从已配置的受管模型选择成员，并选择 DS 模型名作为组名，也可手填历史 ID。
+提供商仍是独立选项，上游请求使用原始 ID；控制台“按模型统计”按显示组汇总，并在组内按 Thread/Turn 去重轮次。
+卡片上的“展开明细”按提供商和原始模型列出各自用量；明细轮次分别去重，跨来源重复的轮次只在组合计中去重。
+保存前展示预览并保留配置备份；编辑可移除成员，删除组恢复原名。WebUI 重新读取即生效，频道显示按保存提示重启 Gateway。
+详细匹配规则见[模型显示组](display.md#模型显示组)。
+
 `codexc setup` 要求标准输入与提示输出均连接终端；不满足时在初始化用户目录前报错。`setup --jsonl` 仍需交互输入及终端 stderr，stdout 输出脱敏 JSON Lines，适合将操作结果重定向到文件，不是无人值守配置接口。
 
 命令只接受当前入口：Provider 管理集中为 `codexc provider`，受管账户使用 `provider deepseek`、`provider opencode-go`、`provider ccg`；各家的可用操作以子命令帮助为准。OpenCode Go 的 `release` 只释放实例，后续请求可重新拉起，不禁用账户。会话归档、转储删除与指标维护集中为 `cleanup sessions`、`cleanup traffic`、`cleanup metrics`（含 `prune`、`reset`）。旧独立 Provider 命令、`sessions`、原领域下的清理命令、`setup --json` 和 `config --json` 均被移除，没有兼容别名。脚本读取配置路径使用 `config paths --json`；诊断使用 `doctor --json`。

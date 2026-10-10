@@ -22,7 +22,7 @@ import {
   formatConversationWorkspacePermissions,
   formatConversationStatus,
 } from "../conversation-workspace-status-command-format.js";
-import { formatCodexProviderLabel, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, scopedModelDisplayName } from "../provider-format.js";
+import { formatCodexProviderLabel, formatModelDisplayName, formatModelDisplayNameWithId, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, scopedModelDisplayName } from "../provider-format.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import type {
   FeishuCommandCenterAction,
@@ -451,7 +451,7 @@ export function renderCommandCenterChoices(
         "**执行配置**",
         `- Workspace：${escapeFeishuCardMarkdown(task.workspaceId)}`,
         `- Provider：${escapeFeishuCardMarkdown(formatCodexProviderLabel(task.modelProvider))}`,
-        `- 模型：${escapeFeishuCardMarkdown(task.model ?? "默认")}`,
+        `- 模型：${escapeFeishuCardMarkdown(task.model ? formatModelDisplayNameWithId(task.model) : "默认")}`,
         `- ${reasoningEffortSettingName(task.reasoningEffort)}：${escapeFeishuCardMarkdown(formatReasoningEffort(task.reasoningEffort, "默认"))}`,
         `- Sandbox：${escapeFeishuCardMarkdown(task.sandbox)}`,
         `- 权限 Profile：${escapeFeishuCardMarkdown(task.permissions ?? "未配置")}`,
@@ -545,7 +545,7 @@ export function renderCommandCenterChoices(
         },
         ...sessionNavigationChoices(result, "sessions"),
         ...result.sessions.map((session) => ({
-          label: `${session.id === result.currentThreadId ? "✓ " : backgroundThreadIds.has(session.id) ? "后台 · " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
+          label: `${session.id === result.currentThreadId ? "✓ " : backgroundThreadIds.has(session.id) ? "后台 · " : ""}${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${formatModelDisplayName(session.model)}` : ""}`,
           action: "resume" as const,
           input: session.id,
         })),
@@ -567,7 +567,7 @@ export function renderCommandCenterChoices(
         },
         ...sessionNavigationChoices(result, "archived"),
         ...result.sessions.map((session) => ({
-          label: `${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${session.model}` : ""}`,
+          label: `${(session.name ?? session.preview) || "未命名"}${session.model ? ` · 模型：${formatModelDisplayName(session.model)}` : ""}`,
           action: "unarchive" as const,
           input: session.id,
         })),
@@ -691,7 +691,7 @@ export function renderCommandCenterChoices(
         title: "选择提供商",
         description: [
           "当前模型",
-          `- 模型：${result.state.model}`,
+          `- 模型：${formatModelDisplayName(result.state.model)}`,
           `- Provider：${formatCodexProviderLabel(result.state.modelProvider)}`,
           `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
           `- 速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
@@ -718,8 +718,8 @@ export function renderCommandCenterChoices(
       descriptionFormat: "markdown",
       choices: result.state.models
         .filter((model) => (model.provider ?? "openai") === result.state.providerFilter)
-        .map((model) => ({
-        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${scopedModelDisplayName(model.displayName, result.state.providerFilter)}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
+        .map((model, index) => ({
+        label: `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${scopedModelDisplayName(model.displayName, result.state.providerFilter, model.model, index + 1)}${model.available === false ? "（暂不可用）" : ""} · ${formatModelSpeedSupport(model)}`,
         action: "model",
         input: model.id,
         })),
@@ -734,7 +734,7 @@ export function renderCommandCenterChoices(
       title: `选择${reasoningEffortSettingName(result.state.effort, currentModel)}`,
       description: [
         "当前设置",
-        `- 模型：${result.state.model}`,
+        `- 模型：${formatModelDisplayName(result.state.model)}`,
         `- ${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort ?? currentModel?.defaultReasoningEffort)}`,
         `- 速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
       ].join("\n"),

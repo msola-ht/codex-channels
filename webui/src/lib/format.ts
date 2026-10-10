@@ -1,5 +1,17 @@
 import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
 import type { Translate } from "./i18n/messages"
+import { modelDisplayName } from "../../../runtime/model-display-name.mjs"
+
+let modelDisplayAliases: Readonly<Record<string, string>> = {}
+
+export function setModelDisplayAliases(aliases: Readonly<Record<string, string>>): void {
+  modelDisplayAliases = aliases
+}
+
+export function formatModelLabel(model: string, displayName: string): string {
+  const name = modelDisplayName(model, modelDisplayAliases, displayName)
+  return Object.hasOwn(modelDisplayAliases, model) && name !== model ? `${name}（${model}）` : name
+}
 
 export function requestMethodDisplay(record: RequestRecord | TrafficExchangeSummary, t: Translate): { label: string; variant: "secondary" | "outline" } {
   if (record.requestPurpose === "autoApprovalReview") return { label: t("requestMethod.review"), variant: "secondary" }
@@ -23,7 +35,8 @@ export function autoReviewModelAlias(provider: string | null | undefined, purpos
 }
 
 export function formatModelName(model: string | null | undefined, provider: string | null | undefined): string | null {
-  return isClinePassProvider(provider) ? model?.replace(/^cline-pass\//, "") ?? null : model ?? null
+  if (model == null) return null
+  return modelDisplayName(model, modelDisplayAliases, isClinePassProvider(provider) ? model.replace(/^cline-pass\//, "") : model)
 }
 
 export type DisplayLanguage = "zh" | "en"

@@ -134,6 +134,7 @@ import {
   canPreserveWeixinHookReviewText,
   formatProviderIdleReleaseNotice,
   setConfiguredCustomPrimaryProviderId,
+  setModelDisplayAliases,
   type SurfaceAdapter,
   SurfaceOutputCoalescer,
 } from "../surfaces/index.js";
@@ -307,6 +308,7 @@ export abstract class GatewayComponentGraph {
       : [customPrimaryProvider.id];
     this.customPrimaryProviderId = customPrimaryProvider?.id;
     setConfiguredCustomPrimaryProviderId(customProviderIds);
+    setModelDisplayAliases(config.modelDisplayAliases);
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger, 64, config.codexClientIdentity),

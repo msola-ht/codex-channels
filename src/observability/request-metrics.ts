@@ -351,10 +351,15 @@ export interface StoredModelRequestMetricsGroup {
   aggregate: StoredModelRequestMetricsAggregate;
 }
 
-/** 按实际模型名跨提供商汇总，轮数按非空 Thread/Turn 去重。 */
+/** 按模型显示名跨提供商汇总，组与成员分别按非空 Thread/Turn 去重。 */
 export interface StoredModelUsage extends StoredModelRequestMetricsAggregate {
   model: string | null;
   turnCount: number;
+  members: Array<StoredModelRequestMetricsAggregate & {
+    provider: string;
+    model: string | null;
+    turnCount: number;
+  }>;
 }
 
 export interface StoredModelRequestMetricsReport {
@@ -558,7 +563,7 @@ export interface StoredProviderTokenMetric {
 }
 
 export interface ModelRequestMetricsRequestQueryStore {
-  modelUsage(query: ModelRequestMetricsScope): StoredModelUsage[];
+  modelUsage(query: ModelRequestMetricsScope, modelAliases?: Readonly<Record<string, string>>): StoredModelUsage[];
   requestRowsAfter(afterLocalId: number, limit: number): StoredModelRequestMetric[];
   recent(limit: number): StoredModelRequestMetric[];
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage;

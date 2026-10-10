@@ -35,7 +35,7 @@ export function classifyConfigReload(
   return { action: "reload", changes: reloadReasons };
 }
 
-/** 只有 Telegram 与飞书消费 `display.*` 设置；只启用微信时它们没有效果。 */
+/** 操作、计划与推理过程显示设置只由 Telegram 与飞书消费。 */
 function displaySettingsAffectEnabledSurface(config: GatewayConfig): boolean {
   return config.telegramEnabled || config.feishu !== undefined;
 }
@@ -87,6 +87,11 @@ function restartRequiredReasons(
     [configChange("surface.feishu.enabled", "feishu"), current.feishu !== undefined, next.feishu !== undefined],
     [configChange("surface.weixin.enabled", "weixin"), current.weixin !== undefined, next.weixin !== undefined],
     [configChange("codex.default-model"), current.codexModel, next.codexModel],
+    [
+      configChange("display.model-aliases"),
+      JSON.stringify(Object.entries(current.modelDisplayAliases ?? {}).sort(([a], [b]) => a.localeCompare(b))),
+      JSON.stringify(Object.entries(next.modelDisplayAliases ?? {}).sort(([a], [b]) => a.localeCompare(b))),
+    ],
     [configChange("codex.sandbox"), current.codexSandbox, next.codexSandbox],
     [configChange("gateway.timezone"), current.gatewayTimezone, next.gatewayTimezone],
     [configChange("codex.timezone"), current.codexTimezone, next.codexTimezone],

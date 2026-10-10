@@ -109,6 +109,11 @@ export interface ProviderGroup {
 export interface ModelUsage extends Aggregate {
   model: string | null
   turnCount: number
+  members: Array<Aggregate & {
+    provider: string
+    model: string | null
+    turnCount: number
+  }>
 }
 
 export interface ErrorGroup {
@@ -396,6 +401,10 @@ export interface ModelTrafficSettingsResponse {
   modelTrafficDumpEnabled: boolean
 }
 
+export interface ModelDisplaySettingsResponse {
+  modelAliases: Record<string, string>
+}
+
 export interface SettingsSummaryResponse {
   observedAt: string
   revision: string
@@ -404,6 +413,7 @@ export interface SettingsSummaryResponse {
       operationUpdates: "full" | "compact" | "hidden"
       planUpdatesEnabled: boolean
       reasoningEnabled: boolean
+      modelAliases: Record<string, string>
     }
     system: {
       approvalTimeoutSeconds: number
