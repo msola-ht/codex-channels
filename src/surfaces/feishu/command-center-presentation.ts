@@ -29,6 +29,7 @@ import type {
   FeishuCommandCenterChoices,
   FeishuCommandCenterForm,
 } from "./command-center.js";
+import { escapeFeishuCardMarkdown } from "./message-content.js";
 import { renderFeishuCommandResult } from "./renderer.js";
 
 const feishuQueueChoiceChunkSize = 13;
@@ -894,13 +895,6 @@ function workspacePermissionLabel(
         never: "免审批",
       } as const);
   return (labels as Record<string, string>)[value] ?? value;
-}
-
-function escapeFeishuCardMarkdown(value: string): string {
-  return value
-    .replace(/[\r\n]+/gu, " ")
-    .replaceAll("\\", "\\\\")
-    .replaceAll(/([`*_~[\]()>#+\-.!|{}])/gu, "\\$1");
 }
 
 function stripMarkdownHeading(value: string): string {

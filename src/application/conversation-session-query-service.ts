@@ -1,4 +1,4 @@
-import type { ConversationTarget, SessionDisplayCachePort } from "../conversation-core/index.js";
+import { UserFacingError, type ConversationTarget, type SessionDisplayCachePort } from "../conversation-core/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { ThreadHistoryPort } from "./thread-history-port.js";
 import type { RequestMetricsQueryPort } from "./request-metrics-port.js";
@@ -307,4 +307,39 @@ export function pinnedFirst<T extends { isPinned: boolean }>(
 ): T[] {
   return sessions.toSorted((left, right) =>
     Number(right.isPinned) - Number(left.isPinned));
+}
+
+/** 会话选择器：序号、精确 ID/名称或唯一 ID 前缀；歧义与缺失明确失败。 */
+export function resolveThread<T extends Pick<ConversationSession, "id" | "name">>(
+  threads: T[],
+  selector: string,
+  command: "resume" | "unarchive" = "resume",
+): T {
+  if (!selector) {
+    throw new UserFacingError(
+      "session.selector.required",
+      "需要提供会话序号、名称或 Session ID",
+      { command },
+    );
+  }
+  if (/^\d+$/.test(selector)) {
+    const index = Number(selector) - 1;
+    const thread = threads[index];
+    if (thread) {
+      return thread;
+    }
+  }
+  const exact = threads.filter((thread) => thread.id === selector || thread.name === selector);
+  if (exact.length === 1) {
+    return exact[0]!;
+  }
+  const prefix = threads.filter((thread) => thread.id.startsWith(selector));
+  if (prefix.length === 1) {
+    return prefix[0]!;
+  }
+  const ambiguous = prefix.length > 1 || exact.length > 1;
+  throw new UserFacingError(
+    ambiguous ? "session.selector.ambiguous" : "session.selector.not-found",
+    ambiguous ? "会话选择不唯一" : "找不到指定会话",
+  );
 }

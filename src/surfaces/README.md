@@ -185,7 +185,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `reasoning-effort-format.ts` 统一模型菜单、状态与运行结果的思考设置文案；目录声明 `enabled` 时使用思考模式选择，`enabled` / `none` 分别显示开启/关闭思考，其余等级原样显示，提交给 Application 的控制值保持不变。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。
-`conversation-command-format.ts` 只汇总稳定导出；纯格式化实现分别位于
+纯格式化实现分别位于
 `conversation-command-help.ts`、`conversation-session-command-format.ts`、
 `conversation-scheduled-task-command-format.ts`、`conversation-extension-command-format.ts`、
 `conversation-hook-command-format.ts`、

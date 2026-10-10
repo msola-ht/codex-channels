@@ -221,7 +221,7 @@ Revert 成功后：
   `conversation-service.ts`：解析规范命令，维护最多 500 个 Turn 的有界页面选择状态，生成和校验
   一次性确认，并在执行前复核 Thread、历史和 Queue。
 - `codex-client/notification-adapter.ts` 与 `conversation-core`：增加受控的 `thread.reverted` 状态失效事件，不把原始响应带入 Core。
-- `surfaces/conversation-command-format.ts` 与三个 Surface：渲染统一列表、破坏性预览、确认结果和
+- `surfaces/conversation-session-command-format.ts` 与三个 Surface：渲染统一列表、破坏性预览、确认结果和
   legacy/并发失败文案；同步 `/help` 与菜单，但不各自实现 Revert 状态。
 
 首期不接入 `thread/items/list` 公开浏览能力。只有真实合同或状态校正证明必须读取 Item 游标时，

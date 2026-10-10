@@ -36,6 +36,7 @@ import {
 } from "./scheduled-task-command.js";
 import type { ScheduledTaskUseCases } from "./scheduled-task-service.js";
 import { resolveProvider, type ModelSelectionIdentity, type ModelSelectionState } from "./model-selection-service.js";
+import { pageCountFor, pageSlice } from "./pagination.js";
 
 export {
   archivedSessionCommandUsageText,
@@ -1083,13 +1084,10 @@ function sessionListResult(
     backgroundThreadIds?: string[];
   },
 ): Extract<ConversationCommandResult, { kind: "sessions" }> {
-  const pageCount = Math.max(1, Math.ceil(sessions.length / maximumSessionListEntries));
-  const start = (view.page - 1) * maximumSessionListEntries;
+  const pageCount = pageCountFor(sessions.length, maximumSessionListEntries);
   return {
     kind: "sessions",
-    sessions: view.page <= pageCount
-      ? sessions.slice(start, start + maximumSessionListEntries)
-      : [],
+    sessions: pageSlice(sessions, view.page, maximumSessionListEntries, pageCount),
     archived: metadata.archived,
     page: view.page,
     pageCount,
@@ -1123,11 +1121,8 @@ function pluginListResult(
         ...plugin.capabilities,
       ].some((value) => value?.toLowerCase().includes(normalizedSearch)))
     : indexed;
-  const pageCount = Math.max(1, Math.ceil(matches.length / maximumPluginListEntries));
-  const pageStart = (view.page - 1) * maximumPluginListEntries;
-  const pageEntries = view.page <= pageCount
-    ? matches.slice(pageStart, pageStart + maximumPluginListEntries)
-    : [];
+  const pageCount = pageCountFor(matches.length, maximumPluginListEntries);
+  const pageEntries = pageSlice(matches, view.page, maximumPluginListEntries, pageCount);
   return {
     kind: "plugins",
     plugins: pageEntries.map(({ plugin }) => plugin),

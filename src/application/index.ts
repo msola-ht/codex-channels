@@ -78,10 +78,6 @@ export {
 } from "./scheduled-task-tool.js";
 export {
   ConversationService,
-  resolveThread,
-  turnErrorCode,
-  turnErrorMessage,
-  turnErrorType,
   type AgentRoleEntry,
   type AgentRolePort,
   type ConversationInput,
@@ -103,6 +99,8 @@ export {
   type Submission,
   type WorkspaceStatusPort,
 } from "./conversation-service.js";
+export { resolveThread } from "./conversation-session-query-service.js";
+export { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 export {
   ModelSelectionService,
   fastServiceTierId,

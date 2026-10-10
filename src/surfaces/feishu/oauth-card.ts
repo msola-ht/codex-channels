@@ -1,4 +1,5 @@
 import type { FeishuCardDocument } from "./approval-card.js";
+import { feishuCardMarkdown, feishuCardPlainText, feishuCardShell } from "./card-kit.js";
 
 export function renderFeishuOAuthCard(
   verificationUriComplete: string,
@@ -6,49 +7,32 @@ export function renderFeishuOAuthCard(
   expiresInSeconds: number,
 ): FeishuCardDocument {
   const inAppUrl = toFeishuInAppUrl(verificationUriComplete);
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: "blue",
-      title: {
+  return feishuCardShell("blue", "请授权飞书账号", [
+    feishuCardMarkdown([
+      "授权后，Codex Gateway 可以使用当前飞书账号执行已开通的用户级能力。",
+      "",
+      `本次请求 ${scopes.length} 项权限，授权链接约 ${
+        Math.max(1, Math.round(expiresInSeconds / 60))
+      } 分钟后失效。`,
+      "",
+      "请求的 Scope：",
+      ...scopes.map((scope) => `- ${scope}`),
+    ].join("\n")),
+    {
+      tag: "button",
+      type: "primary",
+      text: {
         tag: "plain_text",
-        content: "请授权飞书账号",
+        content: "在飞书内授权",
+      },
+      multi_url: {
+        url: inAppUrl,
+        pc_url: inAppUrl,
+        android_url: inAppUrl,
+        ios_url: inAppUrl,
       },
     },
-    body: { elements: [
-      {
-        tag: "markdown",
-        content: [
-          "授权后，Codex Gateway 可以使用当前飞书账号执行已开通的用户级能力。",
-          "",
-          `本次请求 ${scopes.length} 项权限，授权链接约 ${
-            Math.max(1, Math.round(expiresInSeconds / 60))
-          } 分钟后失效。`,
-          "",
-          "请求的 Scope：",
-          ...scopes.map((scope) => `- ${scope}`),
-        ].join("\n"),
-      },
-      {
-        tag: "button",
-        type: "primary",
-        text: {
-          tag: "plain_text",
-          content: "在飞书内授权",
-        },
-        multi_url: {
-          url: inAppUrl,
-          pc_url: inAppUrl,
-          android_url: inAppUrl,
-          ios_url: inAppUrl,
-        },
-      },
-    ] },
-  };
+  ]);
 }
 
 export function renderFeishuOAuthOutcomeCard(
@@ -62,29 +46,11 @@ export function renderFeishuOAuthOutcomeCard(
     "identity-mismatch": "完成授权的账号与发起人不一致，凭据未保存。",
     failed: "授权处理失败，请稍后重试。",
   } as const;
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: successful ? "green" : "grey",
-      title: {
-        tag: "plain_text",
-        content: successful ? "飞书授权成功" : "飞书授权未完成",
-      },
-    },
-    body: {
-      elements: [{
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content: descriptions[outcome],
-        },
-      }],
-    },
-  };
+  return feishuCardShell(
+    successful ? "green" : "grey",
+    successful ? "飞书授权成功" : "飞书授权未完成",
+    [feishuCardPlainText(descriptions[outcome])],
+  );
 }
 
 export function toFeishuInAppUrl(targetUrl: string): string {

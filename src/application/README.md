@@ -23,8 +23,10 @@
   参数校验后映射到 `ScheduledTaskApplicationService`；创建和删除仍返回待确认预览，不直接改写 Store。
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标查询；`ConversationService` 作为统一用例入口委托执行。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
-- `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态；不修改绑定，不建立独立会话索引。
+- `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态，并提供会话选择器 `resolveThread`（序号、精确 ID/名称或唯一 ID 前缀，歧义与缺失明确失败）；不修改绑定，不建立独立会话索引。
 - `conversation-event-coordinator.ts`：在稳定输入事件归约前失效选择快照与展示缓存、处理待生效偏好和 Reserve 标记，归约后执行 Reserve 收尾；子代理跟踪和后台释放调度通过注入端口保持原顺序，不等待 RPC 或渠道输出。
+- `turn-errors.ts`：把单次 Turn 失败归约为稳定的错误类型、错误码与安全文案；只读取已归约的错误对象，不执行 RPC、不生成平台输出。
+- `pagination.ts`：提供 Application 层共用的分页总数、页码校验、偏移/切片与一基序号；错误类型与文案仍由各调用点提供，不持有列表状态。
 - `conversation-service.ts`：按 Turn、Session/Workspace、Queue/Revert、扩展与账户指标五类稳定能力接口公开用例，
   具体 `ConversationService` 负责新建、恢复、切换、归档和固定 Thread，列表查询委托给会话查询组件；提交、steer 或将纯文本
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，

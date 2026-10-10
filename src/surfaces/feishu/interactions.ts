@@ -27,6 +27,7 @@ import {
   type FeishuApprovalAction,
   type FeishuCardDocument,
 } from "./approval-card.js";
+import { feishuCardPlainText, feishuCardShell } from "./card-kit.js";
 import type { FeishuCardAction } from "./card-action.js";
 import {
   renderFeishuInputCard,
@@ -652,29 +653,11 @@ function mapElicitationFormDecision(
 }
 
 function renderMismatchedOutcomeCard(title: string): FeishuCardDocument {
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: "grey",
-      title: {
-        tag: "plain_text",
-        content: interactionCancelledTitle,
-      },
-    },
-    body: {
-      elements: [{
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content: title,
-        },
-      }],
-    },
-  };
+  return feishuCardShell(
+    "grey",
+    interactionCancelledTitle,
+    [feishuCardPlainText(title)],
+  );
 }
 
 function mapApprovalDecision(

@@ -22,6 +22,7 @@ import {
   splitModelMarker,
   type ScheduledTaskCreateRequest,
 } from "./scheduled-task-command.js";
+import { pageCountFor, pageSelector, pageSlice, requirePage } from "./pagination.js";
 
 export type { ScheduledTaskCreateRequest } from "./scheduled-task-command.js";
 
@@ -322,14 +323,15 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     this.requireActor(target, actorId);
     const tasks = this.store.listTasks({ conversation: target })
       .filter((task) => task.actorId === actorId);
-    const pageCount = Math.max(1, Math.ceil(tasks.length / taskPageSize));
-    requirePage(page, pageCount);
-    const offset = (page - 1) * taskPageSize;
-    const visible = tasks.slice(offset, offset + taskPageSize);
+    const pageCount = pageCountFor(tasks.length, taskPageSize);
+    requirePage(page, pageCount, () => {
+      throw scheduledError("scheduled-task.command.invalid", "计划任务页码超出范围");
+    });
+    const visible = pageSlice(tasks, page, taskPageSize, pageCount);
     this.rememberSnapshot(this.taskSnapshots, snapshotKey(target, actorId), tasks.map((task) => task.taskId));
     return {
       tasks: visible.map((task) => toTaskView(task)),
-      selectors: visible.map((_task, index) => String(offset + index + 1)),
+      selectors: visible.map((_task, index) => pageSelector(page, index, taskPageSize)),
       page,
       pageCount,
       totalTaskCount: tasks.length,
@@ -344,10 +346,11 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
   ): ScheduledTaskRunListResult {
     const task = this.resolveTask(target, actorId, selector);
     const runs = this.store.listRuns(task.taskId, { limit: 1_000 });
-    const pageCount = Math.max(1, Math.ceil(runs.length / runPageSize));
-    requirePage(page, pageCount);
-    const offset = (page - 1) * runPageSize;
-    const visible = runs.slice(offset, offset + runPageSize);
+    const pageCount = pageCountFor(runs.length, runPageSize);
+    requirePage(page, pageCount, () => {
+      throw scheduledError("scheduled-task.command.invalid", "计划任务页码超出范围");
+    });
+    const visible = pageSlice(runs, page, runPageSize, pageCount);
     this.rememberSnapshot(
       this.runSnapshots,
       snapshotKey(target, actorId),
@@ -355,7 +358,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     );
     return {
       task: toTaskView(task),
-      runs: visible.map((run, index) => ({ ...run, selector: String(offset + index + 1) })),
+      runs: visible.map((run, index) => ({ ...run, selector: pageSelector(page, index, runPageSize) })),
       page,
       pageCount,
       totalRunCount: runs.length,
@@ -696,12 +699,6 @@ function boundedPreview(value: string): string {
 
 function snapshotKey(target: ConversationTarget, actorId: string): string {
   return `${conversationTargetKey(target)}:${actorId}`;
-}
-
-function requirePage(page: number, pageCount: number): void {
-  if (!Number.isSafeInteger(page) || page < 1 || page > pageCount) {
-    throw scheduledError("scheduled-task.command.invalid", "计划任务页码超出范围");
-  }
 }
 
 function trimMap<K, V>(map: Map<K, V>, maximum: number): void {

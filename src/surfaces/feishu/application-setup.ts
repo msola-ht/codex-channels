@@ -6,6 +6,7 @@ import type { ConversationTarget } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import type { FeishuCardDocument } from "./approval-card.js";
+import { feishuCardMarkdown, feishuCardShell } from "./card-kit.js";
 import {
   feishuFloatingMenuDisplayStrategy,
   FeishuApplicationSetupError,
@@ -381,23 +382,11 @@ export function renderDoctorCard(
       },
     });
   }
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: doctorNeedsAttention(runtime, snapshot, missingScopes)
-        ? "blue"
-        : "green",
-      title: {
-        tag: "plain_text",
-        content: "飞书 Doctor",
-      },
-    },
-    body: { elements },
-  };
+  return feishuCardShell(
+    doctorNeedsAttention(runtime, snapshot, missingScopes) ? "blue" : "green",
+    "飞书 Doctor",
+    elements,
+  );
 }
 
 function renderConfigurationAuthorizationCard(
@@ -405,45 +394,28 @@ function renderConfigurationAuthorizationCard(
   expiresInSeconds: number,
 ): FeishuCardDocument {
   const inAppUrl = toConfigurationInAppUrl(url);
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: "blue",
-      title: {
+  return feishuCardShell("blue", "授权飞书应用", [
+    feishuCardMarkdown([
+      "请通过飞书官方流程确认当前应用授权。",
+      "",
+      "授权完成后，Gateway 会启用 Codex 菜单、追加长连接菜单事件与卡片回调并提交应用版本。",
+      `链接约 ${Math.max(1, Math.ceil(expiresInSeconds / 60))} 分钟后失效。`,
+    ].join("\n")),
+    {
+      tag: "button",
+      text: {
         tag: "plain_text",
-        content: "授权飞书应用",
+        content: "在飞书内确认",
+      },
+      type: "primary",
+      multi_url: {
+        url: inAppUrl,
+        pc_url: inAppUrl,
+        android_url: inAppUrl,
+        ios_url: inAppUrl,
       },
     },
-    body: { elements: [
-      {
-        tag: "markdown",
-        content: [
-          "请通过飞书官方流程确认当前应用授权。",
-          "",
-          "授权完成后，Gateway 会启用 Codex 菜单、追加长连接菜单事件与卡片回调并提交应用版本。",
-          `链接约 ${Math.max(1, Math.ceil(expiresInSeconds / 60))} 分钟后失效。`,
-        ].join("\n"),
-      },
-      {
-        tag: "button",
-        text: {
-          tag: "plain_text",
-          content: "在飞书内确认",
-        },
-        type: "primary",
-        multi_url: {
-          url: inAppUrl,
-          pc_url: inAppUrl,
-          android_url: inAppUrl,
-          ios_url: inAppUrl,
-        },
-      },
-    ] },
-  };
+  ]);
 }
 
 function toConfigurationInAppUrl(url: string): string {
@@ -455,52 +427,18 @@ function toConfigurationInAppUrl(url: string): string {
 }
 
 function renderSetupProgressCard(text: string): FeishuCardDocument {
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: "blue",
-      title: {
-        tag: "plain_text",
-        content: "飞书应用授权",
-      },
-    },
-    body: {
-      elements: [{
-        tag: "markdown",
-        content: text,
-      }],
-    },
-  };
+  return feishuCardShell("blue", "飞书应用授权", [feishuCardMarkdown(text)]);
 }
 
 function renderSetupOutcomeCard(
   success: boolean,
   text: string,
 ): FeishuCardDocument {
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: success ? "green" : "grey",
-      title: {
-        tag: "plain_text",
-        content: success ? "飞书配置完成" : "飞书配置未完成",
-      },
-    },
-    body: {
-      elements: [{
-        tag: "markdown",
-        content: text,
-      }],
-    },
-  };
+  return feishuCardShell(
+    success ? "green" : "grey",
+    success ? "飞书配置完成" : "飞书配置未完成",
+    [feishuCardMarkdown(text)],
+  );
 }
 
 function renderDoctorSummary(

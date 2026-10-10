@@ -4,24 +4,16 @@ import type {
 } from "../../approval/index.js";
 import { interactionProcessedTitle } from "../interaction-copy.js";
 import { contentTruncatedText } from "../output-copy.js";
+import {
+  feishuCardButton,
+  feishuCardColumnSetRows,
+  feishuCardMarkdown,
+  feishuCardPlainText,
+  feishuCardShell,
+  type FeishuCardKitDocument,
+} from "./card-kit.js";
 
-export interface FeishuCardKitDocument {
-  schema: "2.0";
-  config: {
-    update_multi: true;
-    wide_screen_mode: true;
-  };
-  header: {
-    template: "blue" | "green" | "grey";
-    title: {
-      tag: "plain_text";
-      content: string;
-    };
-  };
-  body: {
-    elements: Array<Record<string, unknown>>;
-  };
-}
+export type { FeishuCardKitDocument } from "./card-kit.js";
 
 export type FeishuCardDocument = FeishuCardKitDocument;
 
@@ -87,7 +79,7 @@ export function renderFeishuApprovalCard(
   actions.push(button("拒绝", "danger", interactionToken, "reject"));
 
   return cardKit("Codex 请求批准", "blue", [
-    markdown(request.title),
+    feishuCardMarkdown(request.title),
     ...approvalDetailElements(request.detail),
     ...actionRows(actions),
   ]);
@@ -99,9 +91,9 @@ export function renderFeishuApprovalOutcomeCard(
   outcome: string,
 ): FeishuCardDocument {
   return cardKit(interactionProcessedTitle, decision.approved ? "green" : "grey", [
-    markdown(request.title),
+    feishuCardMarkdown(request.title),
     ...approvalDetailElements(request.detail),
-    markdown(`处理结果：${outcome}`),
+    feishuCardMarkdown(`处理结果：${outcome}`),
   ]);
 }
 
@@ -110,37 +102,16 @@ function cardKit(
   template: "blue" | "green" | "grey",
   elements: Array<Record<string, unknown>>,
 ): FeishuCardKitDocument {
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template,
-      title: {
-        tag: "plain_text",
-        content: title,
-      },
-    },
-    body: { elements },
-  };
-}
-
-function markdown(content: string): Record<string, unknown> {
-  return {
-    tag: "markdown",
-    content,
-  };
+  return feishuCardShell(template, title, elements);
 }
 
 function approvalDetailElements(detail: string): Array<Record<string, unknown>> {
   const preview = approvalDetailPreview(detail);
   if (!preview.truncated) {
-    return [plainText(detail)];
+    return [feishuCardPlainText(detail)];
   }
   return [
-    plainText(`审批内容预览：\n${preview.text}`),
+    feishuCardPlainText(`审批内容预览：\n${preview.text}`),
     collapsedDetail(detail),
   ];
 }
@@ -160,16 +131,6 @@ function approvalDetailPreview(detail: string): {
   return {
     text: `${characters.slice(0, maximumPreviewCharacters).join("").trimEnd()}…`,
     truncated: true,
-  };
-}
-
-function plainText(content: string): Record<string, unknown> {
-  return {
-    tag: "div",
-    text: {
-      tag: "plain_text",
-      content,
-    },
   };
 }
 
@@ -195,13 +156,7 @@ function collapsedDetail(detail: string): Record<string, unknown> {
     vertical_spacing: "8px",
     padding: "8px 8px 8px 8px",
     elements: [
-      {
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content: truncateUtf8(detail, maximumDetailBytes),
-        },
-      },
+      feishuCardPlainText(truncateUtf8(detail, maximumDetailBytes)),
     ],
   };
 }
@@ -209,21 +164,7 @@ function collapsedDetail(detail: string): Record<string, unknown> {
 function actionRows(
   actions: Array<Record<string, unknown>>,
 ): Array<Record<string, unknown>> {
-  const rows: Array<Record<string, unknown>> = [];
-  for (let index = 0; index < actions.length; index += 3) {
-    rows.push({
-      tag: "column_set",
-      flex_mode: "stretch",
-      horizontal_spacing: "8px",
-      columns: actions.slice(index, index + 3).map((action) => ({
-        tag: "column",
-        width: "weighted",
-        weight: 1,
-        elements: [action],
-      })),
-    });
-  }
-  return rows;
+  return feishuCardColumnSetRows(actions);
 }
 
 function button(
@@ -232,18 +173,10 @@ function button(
   interactionToken: string,
   decision: FeishuApprovalAction,
 ): Record<string, unknown> {
-  return {
-    tag: "button",
-    type,
-    text: {
-      tag: "plain_text",
-      content: text,
-    },
-    value: {
-      interaction_token: interactionToken,
-      decision,
-    },
-  };
+  return feishuCardButton(text, type, {
+    interaction_token: interactionToken,
+    decision,
+  });
 }
 
 function truncateUtf8(value: string, maximumBytes: number): string {

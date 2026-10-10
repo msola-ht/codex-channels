@@ -263,43 +263,27 @@ export class FeishuConversationAdapter {
         return;
       }
       const quotedText = await this.readQuotedText(message);
-      this.outbox.prepareTurnReplyTarget?.(
+      const submission = await this.submitWithReplyTarget(
         message.target.conversationId,
         message.messageId,
-      );
-      let submission;
-      try {
-        submission = await this.conversations.submit(
+        () => this.conversations.submit(
           message.target,
           formatQuotedInput(message.text, quotedText),
-        );
-      } catch (error) {
-        this.outbox.discardPendingTurnReplyTarget?.(
-          message.target.conversationId,
-        );
-        throw error;
-      }
-      if (submission.steered) {
-        this.outbox.discardPendingTurnReplyTarget?.(
-          message.target.conversationId,
-        );
-      } else {
-        this.outbox.bindPendingTurnReplyTarget?.(
-          message.target.conversationId,
-          submission.threadId,
-          submission.turnId,
-        );
-      }
-      if (!submission.steered) {
-        return;
-      }
-      if (!this.outbox.replyToTurn?.(
+        ),
+      );
+      this.settleTurnReplyTarget(
         message.target.conversationId,
         submission.threadId,
         submission.turnId,
-        formatTurnInputAppended("text", false, message.text),
-      )) this.notifyText(
+        submission.steered,
+      );
+      if (!submission.steered) {
+        return;
+      }
+      this.replyTurnInput(
         message.target.conversationId,
+        submission.threadId,
+        submission.turnId,
         formatTurnInputAppended("text", false, message.text),
       );
     } catch (error) {
@@ -774,45 +758,34 @@ export class FeishuConversationAdapter {
     ].join("\n").trimEnd(), quotedText);
     const sequence = this.nextInputSequence;
     this.nextInputSequence += 1;
-    this.outbox.prepareTurnReplyTarget?.(
+    const result = await this.submitWithReplyTarget(
       message.target.conversationId,
       message.messageId,
-    );
-    let result;
-    try {
-      result = await this.inputs.enqueue({
+      () => this.inputs.enqueue({
         target: message.target,
         actorId: message.actorId,
         sequence,
         text,
         ...(images.length === 0 ? {} : { localImages: images.map(image => ({ path: image.path, mimeType: image.mimeType, bytes: image.bytes })) }),
-      });
-    } catch (error) {
-      this.outbox.discardPendingTurnReplyTarget?.(
-        message.target.conversationId,
-      );
-      throw error;
-    }
+      }),
+    );
     if (!result.tail) {
       return;
     }
+    this.settleTurnReplyTarget(
+      message.target.conversationId,
+      result.submission.threadId,
+      result.submission.turnId,
+      result.submission.steered,
+    );
     if (result.submission.steered) {
-      this.outbox.discardPendingTurnReplyTarget?.(
-        message.target.conversationId,
-      );
-      if (!this.outbox.replyToTurn?.(
+      this.replyTurnInput(
         message.target.conversationId,
         result.submission.threadId,
         result.submission.turnId,
         formatTurnInputAppended("file"),
-      )) this.notifyText(message.target.conversationId, formatTurnInputAppended("file"));
-      return;
+      );
     }
-    this.outbox.bindPendingTurnReplyTarget?.(
-      message.target.conversationId,
-      result.submission.threadId,
-      result.submission.turnId,
-    );
   }
 
   private async handleAudio(
@@ -836,13 +809,10 @@ export class FeishuConversationAdapter {
       message.fileKey,
     );
     const quotedText = await this.readQuotedText(message);
-    this.outbox.prepareTurnReplyTarget?.(
+    const submission = await this.submitWithReplyTarget(
       message.target.conversationId,
       message.messageId,
-    );
-    let submission;
-    try {
-      submission = await this.conversations.submit(message.target, {
+      () => this.conversations.submit(message.target, {
         ...(quotedText === undefined
           ? {}
           : {
@@ -852,30 +822,22 @@ export class FeishuConversationAdapter {
               ),
             }),
         localAudios: [{ path: audio.path }],
-      });
-    } catch (error) {
-      this.outbox.discardPendingTurnReplyTarget?.(
-        message.target.conversationId,
-      );
-      throw error;
-    }
+      }),
+    );
+    this.settleTurnReplyTarget(
+      message.target.conversationId,
+      submission.threadId,
+      submission.turnId,
+      submission.steered,
+    );
     if (submission.steered) {
-      this.outbox.discardPendingTurnReplyTarget?.(
-        message.target.conversationId,
-      );
-      if (!this.outbox.replyToTurn?.(
+      this.replyTurnInput(
         message.target.conversationId,
         submission.threadId,
         submission.turnId,
         formatTurnInputAppended("audio"),
-      )) this.notifyText(message.target.conversationId, formatTurnInputAppended("audio"));
-      return;
+      );
     }
-    this.outbox.bindPendingTurnReplyTarget?.(
-      message.target.conversationId,
-      submission.threadId,
-      submission.turnId,
-    );
   }
 
   private async submitImageBatch(
@@ -923,45 +885,34 @@ export class FeishuConversationAdapter {
         })),
       };
     }));
-    this.outbox.prepareTurnReplyTarget?.(
+    const results = await this.submitWithReplyTarget(
       replyMessage.target.conversationId,
       replyMessage.messageId,
-    );
-    let results;
-    try {
-      results = await Promise.all(
+      () => Promise.all(
         prepared.map((input) => this.inputs.enqueue(input)),
-      );
-    } catch (error) {
-      this.outbox.discardPendingTurnReplyTarget?.(
-        replyMessage.target.conversationId,
-      );
-      throw error;
-    }
+      ),
+    );
     const submitted = results;
     const tail = submitted.find((result) => result.tail);
-    if (tail?.submission.steered) {
-      this.outbox.discardPendingTurnReplyTarget?.(
-        replyMessage.target.conversationId,
-      );
-    } else if (tail) {
-      this.outbox.bindPendingTurnReplyTarget?.(
+    if (tail) {
+      this.settleTurnReplyTarget(
         replyMessage.target.conversationId,
         tail.submission.threadId,
         tail.submission.turnId,
+        tail.submission.steered,
       );
-    }
-    if (tail?.submission.steered) {
-      const appended = formatTurnInputAppended(
-        "image",
-        messages.some((message) => Boolean(message.text?.trim())),
-      );
-      if (!this.outbox.replyToTurn?.(
-        replyMessage.target.conversationId,
-        tail.submission.threadId,
-        tail.submission.turnId,
-        appended,
-      )) this.notifyText(messages[0]!.target.conversationId, appended);
+      if (tail.submission.steered) {
+        const appended = formatTurnInputAppended(
+          "image",
+          messages.some((message) => Boolean(message.text?.trim())),
+        );
+        this.replyTurnInput(
+          replyMessage.target.conversationId,
+          tail.submission.threadId,
+          tail.submission.turnId,
+          appended,
+        );
+      }
     }
   }
 
@@ -979,6 +930,50 @@ export class FeishuConversationAdapter {
     } catch (error) {
       this.inputOptions.onQuotedTextError?.(error);
       return undefined;
+    }
+  }
+
+  /**
+   * 绑定回复目标后提交；失败时丢弃待绑定的回复目标并原样抛出。
+   * 成功后的 steered/绑定语义由各调用点自行决定，避免强统一。
+   */
+  private async submitWithReplyTarget<T>(
+    conversationId: string,
+    messageId: string,
+    submit: () => Promise<T>,
+  ): Promise<T> {
+    this.outbox.prepareTurnReplyTarget?.(conversationId, messageId);
+    try {
+      return await submit();
+    } catch (error) {
+      this.outbox.discardPendingTurnReplyTarget?.(conversationId);
+      throw error;
+    }
+  }
+
+  /** 提交成功后按 steered 语义丢弃或绑定回复目标。 */
+  private settleTurnReplyTarget(
+    conversationId: string,
+    threadId: string,
+    turnId: string,
+    steered: boolean,
+  ): void {
+    if (steered) {
+      this.outbox.discardPendingTurnReplyTarget?.(conversationId);
+      return;
+    }
+    this.outbox.bindPendingTurnReplyTarget?.(conversationId, threadId, turnId);
+  }
+
+  /** steered 追加提示：优先回复该 Turn，队列拒绝时退回普通文本。 */
+  private replyTurnInput(
+    conversationId: string,
+    threadId: string,
+    turnId: string,
+    text: string,
+  ): void {
+    if (!this.outbox.replyToTurn?.(conversationId, threadId, turnId, text)) {
+      this.notifyText(conversationId, text);
     }
   }
 

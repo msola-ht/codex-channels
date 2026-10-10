@@ -9,6 +9,7 @@ import {
 } from "../operation-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import type { FeishuCardDocument } from "./approval-card.js";
+import { feishuCardMarkdown, feishuCardShell } from "./card-kit.js";
 import { sanitizeFeishuMarkdown } from "./message-content.js";
 import {
   operationSummaryGroups,
@@ -25,17 +26,11 @@ export function renderFeishuComputerUseCard(
       : safeOperationDetail(record.detail),
   );
   const content = withOperationDurationFooter(detail ? `\`${detail}\`` : "", record.durationMs);
-  return {
-    schema: "2.0",
-    config: { update_multi: true, wide_screen_mode: true },
-    header: {
-      template: record.status === "running" ? "blue" : record.status === "completed" ? "green" : "grey",
-      title: { tag: "plain_text", content: `${operationTitle(record)} · ${operationStatus(record.status)}` },
-    },
-    body: {
-      elements: content ? [{ tag: "markdown", content: sanitizeFeishuMarkdown(content) }] : [],
-    },
-  };
+  return feishuCardShell(
+    record.status === "running" ? "blue" : record.status === "completed" ? "green" : "grey",
+    `${operationTitle(record)} · ${operationStatus(record.status)}`,
+    content ? [feishuCardMarkdown(sanitizeFeishuMarkdown(content))] : [],
+  );
 }
 
 export function formatFeishuOperation(

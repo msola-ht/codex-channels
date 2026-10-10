@@ -4,7 +4,18 @@ import type {
 } from "../../approval/index.js";
 import { interactionProcessedTitle } from "../interaction-copy.js";
 import type { FeishuCardDocument } from "./approval-card.js";
-import { sanitizeFeishuMarkdown } from "./message-content.js";
+import {
+  feishuCardButton,
+  feishuCardColumnSetRows,
+  feishuCardMarkdown,
+  feishuCardNote,
+  feishuCardPlainText,
+  feishuCardShell,
+} from "./card-kit.js";
+import {
+  escapeFeishuMarkdown,
+  sanitizeFeishuMarkdown,
+} from "./message-content.js";
 import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 export type FeishuInputAction =
@@ -58,16 +69,16 @@ export function renderFeishuInputOutcomeCard(
     return cardKitWithTitle(
       interactionProcessedTitle,
       request.title,
-      [note(`处理结果：${outcome}`)],
+      [feishuCardNote(`处理结果：${outcome}`)],
       accepted(decision) ? "green" : "grey",
     );
   }
   const elements = [
-    markdown(`**处理结果：** ${escapeMarkdown(outcome)}`),
+    feishuCardMarkdown(`**处理结果：** ${escapeFeishuMarkdown(outcome)}`),
   ];
   if (request.type === "user-input" && request.asynchronous) {
     request.questions.forEach((question, index) => {
-      elements.push(markdown(formatAsyncQuestion(
+      elements.push(feishuCardMarkdown(formatAsyncQuestion(
         question.header || `问题 ${index + 1}`, question.question,
       )));
     });
@@ -82,8 +93,8 @@ export function renderFeishuInputOutcomeCard(
         ? "已提交（敏感内容不显示）"
         : decision.answers[question.id]?.join("、");
       if (answer) {
-        elements.push(markdown(
-          `**${escapeMarkdown(question.header)}：** ${escapeMarkdown(answer)}`,
+        elements.push(feishuCardMarkdown(
+          `**${escapeFeishuMarkdown(question.header)}：** ${escapeFeishuMarkdown(answer)}`,
         ));
       }
     }
@@ -104,13 +115,13 @@ function renderUserInputCard(
     if (index > 0) {
       formElements.push({ tag: "hr" });
     }
-    formElements.push(markdown(
+    formElements.push(feishuCardMarkdown(
       request.asynchronous
         ? formatAsyncQuestion(question.header || `问题 ${index + 1}`, question.question)
-        : `**${escapeMarkdown(truncate(
+        : `**${escapeFeishuMarkdown(truncate(
           question.header || `问题 ${index + 1}`,
           maximumLabelLength,
-        ))}**\n${escapeMarkdown(truncate(question.question, maximumDisplayLength))}`,
+        ))}**\n${escapeFeishuMarkdown(truncate(question.question, maximumDisplayLength))}`,
     ));
     if (question.options.length > 0) {
       formElements.push({
@@ -171,8 +182,8 @@ function renderFormElicitationCard(
   return cardKit(
     "MCP 请求输入",
     [
-      markdown(escapeMarkdown(truncate(request.message, maximumDisplayLength))),
-      markdown("请填写有效 JSON。提交内容不会写入 Gateway 数据库或日志。"),
+      feishuCardMarkdown(escapeFeishuMarkdown(truncate(request.message, maximumDisplayLength))),
+      feishuCardMarkdown("请填写有效 JSON。提交内容不会写入 Gateway 数据库或日志。"),
       {
         tag: "form",
         name: "codexc_mcp_form",
@@ -218,16 +229,16 @@ function renderToolApprovalCard(
     "MCP 工具请求批准",
     request.title,
     [
-      markdown(escapeMarkdown(truncate(request.message, maximumDisplayLength))),
-      markdown(
-        `**工具：** ${escapeMarkdown(truncate(
+      feishuCardMarkdown(escapeFeishuMarkdown(truncate(request.message, maximumDisplayLength))),
+      feishuCardMarkdown(
+        `**工具：** ${escapeFeishuMarkdown(truncate(
           request.toolApproval.toolTitle ?? "未命名工具",
           maximumLabelLength,
         ))}`,
       ),
       ...(request.toolApproval.detail
-        ? [markdown(
-            `**参数：** ${escapeMarkdown(truncate(
+        ? [feishuCardMarkdown(
+            `**参数：** ${escapeFeishuMarkdown(truncate(
               request.toolApproval.detail,
               maximumDisplayLength,
             ))}`,
@@ -250,7 +261,7 @@ function renderUrlElicitationCard(
     "MCP 请求确认",
     request.title,
     [
-      plainText(truncate(request.message, maximumDisplayLength)),
+      feishuCardPlainText(truncate(request.message, maximumDisplayLength)),
       ...buttonRows([
           {
             tag: "button",
@@ -274,26 +285,10 @@ function cardKitWithTitle(
   elements: Array<Record<string, unknown>>,
   template: "blue" | "green" | "grey" = "blue",
 ): FeishuCardDocument {
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template,
-      title: {
-        tag: "plain_text",
-        content: header,
-      },
-    },
-    body: {
-      elements: [
-        plainText(truncate(title, maximumDisplayLength)),
-        ...elements,
-      ],
-    },
-  };
+  return feishuCardShell(template, header, [
+    feishuCardPlainText(truncate(title, maximumDisplayLength)),
+    ...elements,
+  ]);
 }
 
 function cardKit(
@@ -301,43 +296,7 @@ function cardKit(
   elements: Array<Record<string, unknown>>,
   template: "blue" | "green" | "grey" = "blue",
 ): FeishuCardDocument {
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template,
-      title: {
-        tag: "plain_text",
-        content: header,
-      },
-    },
-    body: {
-      elements,
-    },
-  };
-}
-
-function plainText(content: string): Record<string, unknown> {
-  return {
-    tag: "div",
-    text: {
-      tag: "plain_text",
-      content,
-    },
-  };
-}
-
-function note(content: string): Record<string, unknown> {
-  return {
-    tag: "note",
-    elements: [{
-      tag: "plain_text",
-      content,
-    }],
-  };
+  return feishuCardShell(template, header, elements);
 }
 
 function formSubmitButton(
@@ -366,38 +325,16 @@ function actionButton(
   interactionToken: string,
   decision: FeishuInputAction,
 ): Record<string, unknown> {
-  return {
-    tag: "button",
-    type,
-    text: {
-      tag: "plain_text",
-      content: text,
-    },
-    value: {
-      interaction_token: interactionToken,
-      decision,
-    },
-  };
+  return feishuCardButton(text, type, {
+    interaction_token: interactionToken,
+    decision,
+  });
 }
 
 function buttonRows(
   actions: Array<Record<string, unknown>>,
 ): Array<Record<string, unknown>> {
-  const rows: Array<Record<string, unknown>> = [];
-  for (let index = 0; index < actions.length; index += 3) {
-    rows.push({
-      tag: "column_set",
-      flex_mode: "stretch",
-      horizontal_spacing: "8px",
-      columns: actions.slice(index, index + 3).map((action) => ({
-        tag: "column",
-        width: "weighted",
-        weight: 1,
-        elements: [action],
-      })),
-    });
-  }
-  return rows;
+  return feishuCardColumnSetRows(actions);
 }
 
 function input(
@@ -431,19 +368,12 @@ function input(
   };
 }
 
-function markdown(content: string): Record<string, unknown> {
-  return {
-    tag: "markdown",
-    content,
-  };
-}
-
 function formatAsyncQuestion(header: string, question: string): string {
   const safeQuestion = sanitizeFeishuMarkdown(question);
   const notice = "\n\n（问题内容已截断，请让 Codex 分段提供完整内容后再复制代码。）";
   const body = [...safeQuestion].length <= maximumDisplayLength ? safeQuestion
     : truncateAsyncQuestion(safeQuestion, maximumDisplayLength - [...notice].length) + notice;
-  return sanitizeFeishuMarkdown(`**${escapeMarkdown(truncate(header, maximumLabelLength))}**\n${body}`);
+  return sanitizeFeishuMarkdown(`**${escapeFeishuMarkdown(truncate(header, maximumLabelLength))}**\n${body}`);
 }
 
 function truncateAsyncQuestion(text: string, limit: number): string {
@@ -470,10 +400,6 @@ function truncateAsyncQuestion(text: string, limit: number): string {
     fence = nextFence;
   }
   return fence === undefined ? body : `${body}\n${fence.marker}`;
-}
-
-function escapeMarkdown(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll(/([`*_~[\]()>#+\-.!|])/gu, "\\$1");
 }
 
 function accepted(

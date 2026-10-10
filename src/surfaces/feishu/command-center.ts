@@ -13,6 +13,13 @@ import {
   feishuCardElements,
   type FeishuCardDocument,
 } from "./approval-card.js";
+import {
+  feishuCardButton,
+  feishuCardColumnSetRow,
+  feishuCardMarkdown,
+  feishuCardPlainText,
+  feishuCardShell,
+} from "./card-kit.js";
 import type { FeishuCardAction } from "./card-action.js";
 import { formatFeishuCommandMarkdown } from "./command-format.js";
 import type { FeishuOutbox } from "./outbox.js";
@@ -467,343 +474,209 @@ function renderFeishuCommandChoicesCard(
 ): FeishuCardDocument {
   const choices = selection.choices.slice(0, 18);
   if (selection.descriptionFormat === "markdown") {
-    return {
-      schema: "2.0",
-      config: {
-        update_multi: true,
-        wide_screen_mode: true,
-      },
-      header: {
-        template: "blue",
-        title: {
-          tag: "plain_text",
-          content: selection.title,
-        },
-      },
-      body: {
-        elements: [
-          ...(selection.description
-            ? [{ tag: "markdown", content: formatFeishuCommandMarkdown(selection.description) }]
-            : []),
-          ...cardKitChoiceRows(token, choices),
-          ...(selection.choices.length > choices.length
-            ? [{
-                tag: "markdown",
-                content: `仅显示前 ${choices.length} 项，请使用对应聊天命令查看更多选项。`,
-              }]
-            : []),
-        ],
-      },
-    };
-  }
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: "blue",
-      title: {
-        tag: "plain_text",
-        content: selection.title,
-      },
-    },
-    body: { elements: [
+    return feishuCardShell("blue", selection.title, [
       ...(selection.description
-        ? selection.descriptionFormat === "lark_md"
-          ? [{ tag: "markdown", content: formatFeishuCommandMarkdown(selection.description) }]
-          : [{
-              tag: "div",
-              text: {
-                tag: "plain_text",
-                content: selection.description,
-              },
-            }]
+        ? [feishuCardMarkdown(formatFeishuCommandMarkdown(selection.description))]
         : []),
-      ...chunkChoices(choices, 3).map((row) =>
-        actionRow(
-          token,
-          row.map((choice) => [
-            truncateChoiceLabel(choice.label),
-            choice.action,
-            "default",
-            choice.input,
-          ]),
-        )
-      ),
+      ...cardKitChoiceRows(token, choices),
       ...(selection.choices.length > choices.length
-        ? [{
-            tag: "div",
-            text: {
-              tag: "plain_text",
-              content: `仅显示前 ${choices.length} 项，请使用对应聊天命令查看更多选项。`,
-            },
-          }]
+        ? [feishuCardMarkdown(`仅显示前 ${choices.length} 项，请使用对应聊天命令查看更多选项。`)]
         : []),
-    ] },
-  };
+    ]);
+  }
+  return feishuCardShell("blue", selection.title, [
+    ...(selection.description
+      ? selection.descriptionFormat === "lark_md"
+        ? [feishuCardMarkdown(formatFeishuCommandMarkdown(selection.description))]
+        : [feishuCardPlainText(selection.description)]
+      : []),
+    ...chunkChoices(choices, 3).map((row) =>
+      actionRow(
+        token,
+        row.map((choice) => [
+          truncateChoiceLabel(choice.label),
+          choice.action,
+          "default",
+          choice.input,
+        ]),
+      )
+    ),
+    ...(selection.choices.length > choices.length
+      ? [feishuCardPlainText(`仅显示前 ${choices.length} 项，请使用对应聊天命令查看更多选项。`)]
+      : []),
+  ]);
 }
 
 function cardKitChoiceRows(
   token: string,
   choices: ReadonlyArray<FeishuCommandCenterChoices["choices"][number]>,
 ): Array<Record<string, unknown>> {
-  return chunkChoices(choices, 3).map((row, rowIndex) => ({
-    tag: "column_set",
-    flex_mode: "stretch",
-    horizontal_spacing: "8px",
-    columns: row.map((choice, columnIndex) => ({
-      tag: "column",
-      width: "weighted",
-      weight: 1,
-      elements: [{
-        tag: "button",
-        type: rowIndex === 0 && columnIndex === 0 ? "primary" : "default",
-        text: {
-          tag: "plain_text",
-          content: truncateChoiceLabel(choice.label),
-        },
-        value: commandValue(token, choice.action, choice.input),
-      }],
-    })),
-  }));
+  return chunkChoices(choices, 3).map((row, rowIndex) =>
+    feishuCardColumnSetRow(row.map((choice, columnIndex) =>
+      feishuCardButton(
+        truncateChoiceLabel(choice.label),
+        rowIndex === 0 && columnIndex === 0 ? "primary" : "default",
+        commandValue(token, choice.action, choice.input),
+      )
+    ))
+  );
 }
 
 function renderFeishuAcceptedStateCard(
   state: FeishuCommandAcceptedState,
 ): FeishuCardDocument {
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: state.template,
-      title: {
-        tag: "plain_text",
-        content: state.title,
-      },
-    },
-    body: {
-      elements: [{
-        tag: "markdown",
-        content: formatFeishuCommandMarkdown(state.description),
-      }],
-    },
-  };
+  return feishuCardShell(state.template, state.title, [
+    feishuCardMarkdown(formatFeishuCommandMarkdown(state.description)),
+  ]);
 }
 
 function renderFeishuCommandFormCard(
   token: string,
   form: FeishuCommandCenterForm,
 ): FeishuCardDocument {
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: "blue",
-      title: {
-        tag: "plain_text",
-        content: form.title,
-      },
-    },
-    body: {
+  return feishuCardShell("blue", form.title, [
+    ...(form.description
+      ? [feishuCardMarkdown(formatFeishuCommandMarkdown(form.description))]
+      : []),
+    {
+      tag: "form",
+      name: "codexc_command_form",
       elements: [
-        ...(form.description
-          ? [{
-              tag: "markdown",
-              content: formatFeishuCommandMarkdown(form.description),
-            }]
-          : []),
         {
-          tag: "form",
-          name: "codexc_command_form",
-          elements: [
-            {
-              tag: "input",
-              name: "input",
-              required: true,
-              input_type: "multiline_text",
-              rows: form.multiline ? 3 : 1,
-              auto_resize: true,
-              max_rows: form.multiline ? 8 : 1,
-              max_length: 1_000,
-              width: "fill",
-              label: {
-                tag: "plain_text",
-                content: form.fieldLabel,
-              },
-              label_position: "top",
-              ...(form.placeholder
-                ? {
-                    placeholder: {
-                      tag: "plain_text",
-                      content: form.placeholder,
-                    },
-                  }
-                : {}),
-            },
-            {
-              tag: "button",
-              type: "primary",
-              text: {
-                tag: "plain_text",
-                content: "确认",
-              },
-              name: `codexc_command_submit_${token}`,
-              form_action_type: "submit",
-              value: {
-                codexc_command_token: token,
-                codexc_command: form.action,
-              },
-            },
-          ],
+          tag: "input",
+          name: "input",
+          required: true,
+          input_type: "multiline_text",
+          rows: form.multiline ? 3 : 1,
+          auto_resize: true,
+          max_rows: form.multiline ? 8 : 1,
+          max_length: 1_000,
+          width: "fill",
+          label: {
+            tag: "plain_text",
+            content: form.fieldLabel,
+          },
+          label_position: "top",
+          ...(form.placeholder
+            ? {
+                placeholder: {
+                  tag: "plain_text",
+                  content: form.placeholder,
+                },
+              }
+            : {}),
+        },
+        {
+          tag: "button",
+          type: "primary",
+          text: {
+            tag: "plain_text",
+            content: "确认",
+          },
+          name: `codexc_command_submit_${token}`,
+          form_action_type: "submit",
+          value: {
+            codexc_command_token: token,
+            codexc_command: form.action,
+          },
         },
       ],
     },
-  };
+  ]);
 }
 
 function renderFeishuCategorizedCommandsCard(
   token: string,
 ): FeishuCardDocument {
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: "blue",
-      title: {
-        tag: "plain_text",
-        content: "更多 Codex 命令",
-      },
-    },
-    body: { elements: [
-      sectionTitle("会话查询"),
-      actionRow(token, [
-        ["会话列表", "sessions", "primary"],
-        ["已归档", "archived", "default"],
-      ]),
-      sectionTitle("会话操作"),
-      actionRow(token, [
-        ["停止任务", "stop", "default"],
-        ["归档当前", "archive", "default"],
-        ["压缩上下文", "compact", "default"],
-      ]),
-      actionRow(token, [
-        ["分叉会话", "fork", "default"],
-        ["重命名", "rename", "default"],
-        ["App Server Queue", "queue", "default"],
-        ["释放占用", "release", "default"],
-      ]),
-      actionRow(token, [
-        ["固定会话", "pin", "default"],
-        ["取消固定", "unpin", "default"],
-        ["历史回退", "revert", "default"],
-      ]),
-      actionRow(token, [
-        ["计划任务", "schedule", "default"],
-      ]),
-      sectionTitle("能力与集成"),
-      actionRow(token, [
-        ["子代理", "agents", "default"],
-        ["Skills", "skill", "default"],
-        ["MCP", "mcp", "default"],
-        ["Plugin", "plugin", "default"],
-        ["Hooks", "hooks", "default"],
-      ]),
-      sectionTitle("当前内容"),
-      actionRow(token, [
-        ["工作区权限", "workspaceperm", "default"],
-        ["当前会话审批方式", "autoreview", "default"],
-        ["权限查询", "permissions", "default"],
-        ["Diff", "diff", "default"],
-        ["Review", "review", "default"],
-      ]),
-      sectionTitle("飞书"),
-      actionRow(token, [
-        ["我的身份", "whoami", "default"],
-        ["飞书状态", "feishu-status", "default"],
-        ["Doctor", "feishu-doctor", "default"],
-      ]),
-      {
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content: "带文本参数的命令将在下一步打开输入卡片。",
-        },
-      },
-    ] },
-  };
+  return feishuCardShell("blue", "更多 Codex 命令", [
+    sectionTitle("会话查询"),
+    actionRow(token, [
+      ["会话列表", "sessions", "primary"],
+      ["已归档", "archived", "default"],
+    ]),
+    sectionTitle("会话操作"),
+    actionRow(token, [
+      ["停止任务", "stop", "default"],
+      ["归档当前", "archive", "default"],
+      ["压缩上下文", "compact", "default"],
+    ]),
+    actionRow(token, [
+      ["分叉会话", "fork", "default"],
+      ["重命名", "rename", "default"],
+      ["App Server Queue", "queue", "default"],
+      ["释放占用", "release", "default"],
+    ]),
+    actionRow(token, [
+      ["固定会话", "pin", "default"],
+      ["取消固定", "unpin", "default"],
+      ["历史回退", "revert", "default"],
+    ]),
+    actionRow(token, [
+      ["计划任务", "schedule", "default"],
+    ]),
+    sectionTitle("能力与集成"),
+    actionRow(token, [
+      ["子代理", "agents", "default"],
+      ["Skills", "skill", "default"],
+      ["MCP", "mcp", "default"],
+      ["Plugin", "plugin", "default"],
+      ["Hooks", "hooks", "default"],
+    ]),
+    sectionTitle("当前内容"),
+    actionRow(token, [
+      ["工作区权限", "workspaceperm", "default"],
+      ["当前会话审批方式", "autoreview", "default"],
+      ["权限查询", "permissions", "default"],
+      ["Diff", "diff", "default"],
+      ["Review", "review", "default"],
+    ]),
+    sectionTitle("飞书"),
+    actionRow(token, [
+      ["我的身份", "whoami", "default"],
+      ["飞书状态", "feishu-status", "default"],
+      ["Doctor", "feishu-doctor", "default"],
+    ]),
+    feishuCardPlainText("带文本参数的命令将在下一步打开输入卡片。"),
+  ]);
 }
 
 export function renderFeishuCommandCenterCard(
   token: string,
 ): FeishuCardDocument {
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: "blue",
-      title: {
-        tag: "plain_text",
-        content: "Codex 命令中心",
-      },
-    },
-    body: { elements: [
-      {
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content: "选择操作；普通文本仍会发送到当前 Codex Session。",
-        },
-      },
-      sectionTitle("常用"),
-      actionRow(token, [
-        ["新会话", "new", "primary"],
-        ["会话切换", "resume", "default"],
-        ["当前状态", "status", "default"],
-      ]),
-      actionRow(token, [
-        ["速度", "fast", "primary"],
-        ["账户用量", "usage", "default"],
-        ["请求指标", "metrics", "default"],
-        ["额度", "limits", "default"],
-      ]),
-      sectionTitle("模型与工作区"),
-      actionRow(token, [
-        ["模型设置", "model", "default"],
-        ["思考等级", "effort", "default"],
-        ["工作区", "workspace", "default"],
-      ]),
-      actionRow(token, [
-        ["Goal", "goal", "default"],
-        ["Plan 模式", "plan", "default"],
-        ["计划任务", "schedule", "default"],
-      ]),
-      sectionTitle("更多"),
-      actionRow(token, [
-        ["帮助与更多命令", "help", "default"],
-      ]),
-    ] },
-  };
+  return feishuCardShell("blue", "Codex 命令中心", [
+    feishuCardPlainText("选择操作；普通文本仍会发送到当前 Codex Session。"),
+    sectionTitle("常用"),
+    actionRow(token, [
+      ["新会话", "new", "primary"],
+      ["会话切换", "resume", "default"],
+      ["当前状态", "status", "default"],
+    ]),
+    actionRow(token, [
+      ["速度", "fast", "primary"],
+      ["账户用量", "usage", "default"],
+      ["请求指标", "metrics", "default"],
+      ["额度", "limits", "default"],
+    ]),
+    sectionTitle("模型与工作区"),
+    actionRow(token, [
+      ["模型设置", "model", "default"],
+      ["思考等级", "effort", "default"],
+      ["工作区", "workspace", "default"],
+    ]),
+    actionRow(token, [
+      ["Goal", "goal", "default"],
+      ["Plan 模式", "plan", "default"],
+      ["计划任务", "schedule", "default"],
+    ]),
+    sectionTitle("更多"),
+    actionRow(token, [
+      ["帮助与更多命令", "help", "default"],
+    ]),
+  ]);
 }
 
 function sectionTitle(title: string): Record<string, unknown> {
-  return {
-    tag: "markdown",
-    content: `**${title}**`,
-  };
+  return feishuCardMarkdown(`**${title}**`);
 }
 
 function actionRow(
@@ -815,25 +688,15 @@ function actionRow(
     input?: string,
   ]>,
 ): Record<string, unknown> {
-  return {
-    tag: "column_set",
-    flex_mode: "stretch",
-    horizontal_spacing: "8px",
-    columns: actions.map(([label, action, type, input]) => ({
-      tag: "column",
-      width: "weighted",
-      weight: 1,
-      elements: [{
-        tag: "button",
-        text: {
-          tag: "plain_text",
-          content: label,
-        },
-        type,
-        value: commandValue(token, action, input),
-      }],
-    })),
-  };
+  return feishuCardColumnSetRow(actions.map(([label, action, type, input]) => ({
+    tag: "button",
+    text: {
+      tag: "plain_text",
+      content: label,
+    },
+    type,
+    value: commandValue(token, action, input),
+  })));
 }
 
 function commandValue(

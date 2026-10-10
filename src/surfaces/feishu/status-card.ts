@@ -2,6 +2,7 @@ import type { TurnStartIdentity } from "../../conversation-core/index.js";
 import { formatTurnStartIdentityLabel } from "../lifecycle-presentation.js";
 import type { PlanPresentation } from "../plan-presentation.js";
 import type { FeishuCardDocument } from "./approval-card.js";
+import { feishuCardPlainText, feishuCardShell } from "./card-kit.js";
 
 export function renderFeishuThreadStatusCard(
   status: string,
@@ -10,37 +11,21 @@ export function renderFeishuThreadStatusCard(
   const identityPrefix = identity
     ? `${formatTurnStartIdentityLabel(identity)} · `
     : "";
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: status === "active"
-        ? "blue"
+  return feishuCardShell(
+    status === "active"
+      ? "blue"
+      : status === "idle"
+        ? "green"
+        : "grey",
+    "Session 状态",
+    [feishuCardPlainText(
+      status === "active"
+        ? `${identityPrefix}运行中`
         : status === "idle"
-          ? "green"
-          : "grey",
-      title: {
-        tag: "plain_text",
-        content: "Session 状态",
-      },
-    },
-    body: {
-      elements: [{
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content: status === "active"
-            ? `${identityPrefix}运行中`
-            : status === "idle"
-              ? `${identityPrefix}处理结束 · 结果见下方消息`
-              : "未知",
-        },
-      }],
-    },
-  };
+          ? `${identityPrefix}处理结束 · 结果见下方消息`
+          : "未知",
+    )],
+  );
 }
 
 export function renderFeishuPlanCard(
@@ -48,29 +33,9 @@ export function renderFeishuPlanCard(
 ): FeishuCardDocument {
   const detail = presentation.text.split("\n").slice(1).join("\n").trim()
     || "暂无步骤";
-  return {
-    schema: "2.0",
-    config: {
-      update_multi: true,
-      wide_screen_mode: true,
-    },
-    header: {
-      template: presentation.title.startsWith("计划进度")
-        ? "green"
-        : "blue",
-      title: {
-        tag: "plain_text",
-        content: presentation.title,
-      },
-    },
-    body: {
-      elements: [{
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content: detail,
-        },
-      }],
-    },
-  };
+  return feishuCardShell(
+    presentation.title.startsWith("计划进度") ? "green" : "blue",
+    presentation.title,
+    [feishuCardPlainText(detail)],
+  );
 }
