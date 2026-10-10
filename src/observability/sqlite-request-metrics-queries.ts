@@ -247,7 +247,8 @@ export class SqliteRequestMetricsQueries {
     const scope = metricsScopeSql(query);
     const aliases = validateModelDisplayAliases(modelAliases === undefined ? {} : modelAliases);
     const parameters = [JSON.stringify(aliases), ...scope.params];
-    const aliasesSql = `WITH model_aliases AS (
+    // 一次物化让 SQLite 为精确匹配建立索引，避免每条请求都扫描完整 json_each。
+    const aliasesSql = `WITH model_aliases AS MATERIALIZED (
       SELECT key AS original_model, value AS display_name FROM json_each(?)
     )`;
     const displayModelSql = "COALESCE(model_aliases.display_name, model_request_metrics.model)";
