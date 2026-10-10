@@ -21,7 +21,7 @@ export function formatConversationWorkspaces(
     `Workspace（${result.workspaces.length}）：`,
     ...result.workspaces.flatMap((workspace, index) => [
       `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
-      workspace.cwd,
+      `工作目录：${workspace.cwd}`,
       ...workspacePermissionLines(workspace, false),
     ]),
     "",

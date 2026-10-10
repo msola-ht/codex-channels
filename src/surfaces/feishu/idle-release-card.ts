@@ -1,4 +1,13 @@
 import type { FeishuCardDocument } from "./approval-card.js";
+import { formatConversationIdleReleased } from "../output-copy.js";
+
+/** CardKit 创建失败时的降级 Markdown，与卡片一致地把恢复命令放入代码块。 */
+export function formatFeishuConversationIdleReleased(
+  minutes: number,
+  threadId: string,
+): string {
+  return formatConversationIdleReleased(minutes, threadId, { fencedCommand: true });
+}
 
 export function renderFeishuConversationIdleReleasedCard(
   minutes: number,

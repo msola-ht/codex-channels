@@ -14,6 +14,7 @@ import {
   type FeishuCardDocument,
 } from "./approval-card.js";
 import type { FeishuCardAction } from "./card-action.js";
+import { formatFeishuCommandMarkdown } from "./command-format.js";
 import type { FeishuOutbox } from "./outbox.js";
 
 export const feishuCommandMenuEventKey = "codexc_home";
@@ -482,7 +483,7 @@ function renderFeishuCommandChoicesCard(
       body: {
         elements: [
           ...(selection.description
-            ? [{ tag: "markdown", content: selection.description }]
+            ? [{ tag: "markdown", content: formatFeishuCommandMarkdown(selection.description) }]
             : []),
           ...cardKitChoiceRows(token, choices),
           ...(selection.choices.length > choices.length
@@ -511,7 +512,7 @@ function renderFeishuCommandChoicesCard(
     body: { elements: [
       ...(selection.description
         ? selection.descriptionFormat === "lark_md"
-          ? [{ tag: "markdown", content: selection.description }]
+          ? [{ tag: "markdown", content: formatFeishuCommandMarkdown(selection.description) }]
           : [{
               tag: "div",
               text: {
@@ -588,7 +589,7 @@ function renderFeishuAcceptedStateCard(
     body: {
       elements: [{
         tag: "markdown",
-        content: state.description,
+        content: formatFeishuCommandMarkdown(state.description),
       }],
     },
   };
@@ -616,7 +617,7 @@ function renderFeishuCommandFormCard(
         ...(form.description
           ? [{
               tag: "markdown",
-              content: form.description,
+              content: formatFeishuCommandMarkdown(form.description),
             }]
           : []),
         {

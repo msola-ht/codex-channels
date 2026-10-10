@@ -18,7 +18,6 @@ import { surfaceErrorMetadata } from "../error-metadata.js";
 import type {
 } from "../../application/index.js";
 import { readGeneratedImage } from "../generated-image.js";
-import { formatConversationIdleReleased } from "../output-copy.js";
 import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
@@ -38,7 +37,11 @@ import type { InteractionDecision, InteractionRequest } from "../../approval/ind
 import { FeishuMessageError } from "./message-error.js";
 import { bindOutboxMessagePort, type FeishuMessagePort, type ObserveFeishuCardCreation } from "./outbox-message-port.js";
 export type { FeishuMessagePort } from "./outbox-message-port.js";
-import { renderFeishuConversationIdleReleasedCard } from "./idle-release-card.js";
+import { formatFeishuCommandMarkdown } from "./command-format.js";
+import {
+  formatFeishuConversationIdleReleased,
+  renderFeishuConversationIdleReleasedCard,
+} from "./idle-release-card.js";
 import {
   formatFeishuOperation,
   formatFeishuOperationSummary,
@@ -448,10 +451,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
               );
               return this.sendMarkdown(
                 event.target.conversationId,
-                formatConversationIdleReleased(
-                  event.minutes,
-                  event.threadId,
-                ),
+                formatFeishuConversationIdleReleased(event.minutes, event.threadId),
                 maximumFeishuMessageChunks,
                 undefined,
                 undefined,
@@ -752,13 +752,21 @@ export class FeishuOutbox implements SurfaceOutputPort {
     );
   }
 
+  /** Gateway 文案入口：命令渲染为行内代码；不要用于模型或用户正文。 */
   notifyMarkdown(chatId: string, markdown: string): boolean {
     if (this.closed) {
       return false;
     }
     return this.delivery.enqueue(
       chatId,
-      (signal) => this.sendMarkdown(chatId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal),
+      (signal) => this.sendMarkdown(
+        chatId,
+        formatFeishuCommandMarkdown(markdown),
+        maximumFeishuMessageChunks,
+        undefined,
+        undefined,
+        signal,
+      ),
       true,
     );
   }
@@ -787,10 +795,18 @@ export class FeishuOutbox implements SurfaceOutputPort {
     );
   }
 
+  /** Gateway 文案入口：命令渲染为行内代码；不要用于模型或用户正文。 */
   deliverMarkdown(chatId: string, markdown: string): Promise<void> {
     return this.delivery.runOrdered(
       chatId,
-      (signal) => this.sendMarkdown(chatId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal),
+      (signal) => this.sendMarkdown(
+        chatId,
+        formatFeishuCommandMarkdown(markdown),
+        maximumFeishuMessageChunks,
+        undefined,
+        undefined,
+        signal,
+      ),
     );
   }
 

@@ -54,8 +54,12 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；不等待独立文字或图片，
   已在队列中明确相邻的图片可成批处理，普通文本与命令仍沿用既有顺序路径。
+- `command-format.ts`：把 Gateway Markdown 文案中独立成行的命令和“标签：命令”的值渲染为行内代码，
+  供 Markdown 文案出口（`notifyMarkdown`、`deliverMarkdown`）与命令中心 Markdown 卡片共用；
+  只识别共享命令、别名与飞书专有命令，跳过目录/路径/文件字段、缩进代码块、代码围栏、表格行、
+  句内提及与已存在的行内代码；说明含反引号或命令跨度超过 200 字符时放弃装饰。
 - `idle-release-card.ts`：把渠道会话空闲自动解除通知生成为直接携带 `Session ID` 和
-  `/r <Thread ID>` 命令的 CardKit 2.0 卡片。
+  `/r <Thread ID>` 命令的 CardKit 2.0 卡片，并用同一文案生成创建失败时的围栏代码块降级 Markdown。
 - `input-card.ts`：生成 CardKit 2.0 有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片；异步问题复用 Markdown 安全处理，截断时闭合代码围栏，结果卡片保留有界题干。
   MCP 工具审批分别提供一次批准、上游允许的持久范围、拒绝与取消，拒绝和取消不携带持久范围。
 - `interactions.ts`：维护私聊审批、用户输入和 MCP elicitation 的一次性令牌、Actor 绑定、
@@ -70,7 +74,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `oauth.ts`：按 App 与 Actor 协调单一进行中授权、身份匹配、凭据写入、撤销和停止取消。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent`、启动状态和结构化错误
   映射为稳定文本内容；CLI/TUI 输入使用共享“CLI 输入”语义，启动通知、`/status` 与
-  `turn.completed` 结束统计均包含当前 Workspace Git 分支。
+  `turn.completed` 结束统计均包含当前 Workspace Git 分支；Turn Diff 用围栏展示，内容自带
+  围栏时自动加长标记，因此不进入命令装饰层。
 - `message-error.ts`：Client 与 Outbox 共用的结构化消息错误合同，不依赖 SDK；Client 保留原错误类及类型导出。
 - `text-streams.ts`：独占按 Conversation、Thread、Turn 隔离的正文活动流与已完成流、刷新计时器、卡片序号、分卡与终态页脚；共用 Outbox 已绑定关闭信号的消息端口、投递队列和降级发送方法。断线清理使完成缓存立即失效，在途终态不能重新登记旧缓存；无法复用卡片时向当前目标发送完成信息。正文终态失败或取消后释放活动流，不重播正文；结束反馈独立投递，流式结束操作结算后释放原输入回复目标。
   终态的本地围栏排版错误在有剩余消息预算且 Post 恢复确认成功后正常结算，允许后续完整附件继续；平台错误、恢复失败、结果未知和取消仍传播失败。

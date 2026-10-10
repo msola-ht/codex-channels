@@ -1,4 +1,7 @@
-import type { ConversationStatus } from "../../application/index.js";
+import type {
+  ConversationCommandResult,
+  ConversationStatus,
+} from "../../application/index.js";
 import type {
   OutputEvent,
   UserFacingError,
@@ -11,7 +14,6 @@ import {
   emptyCodexResponseText,
   formatCliInput,
   formatCodexWarning,
-  formatConversationIdleReleased,
   formatConnectionLost,
   formatConnectionRestored,
   formatThreadAvailability,
@@ -33,6 +35,7 @@ import {
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
 import { formatSurfaceUserFacingError } from "../user-facing-error-format.js";
+import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import {
   formatRuntimeAccountUpdate,
   formatRuntimeMcpOAuthCompleted,
@@ -41,10 +44,40 @@ import {
 } from "../runtime-status-format.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 import type { FeishuInboxMessage } from "./inbox.js";
+import { formatFeishuConversationIdleReleased } from "./idle-release-card.js";
 
-export {
-  renderConversationCommandResult as renderFeishuCommandResult,
-} from "../conversation-command-renderer.js";
+/**
+ * Turn Diff 是原始代码内容：飞书用围栏展示，与 Telegram 的 `<pre>` 约定一致，
+ * 同时让命令装饰层跳过差分行。
+ */
+export function renderFeishuCommandResult(
+  result: ConversationCommandResult,
+): string | null {
+  const rendered = renderConversationCommandResult(result);
+  if (rendered === null || result.kind !== "artifacts") {
+    return rendered;
+  }
+  return formatFeishuDiffMarkdown(rendered);
+}
+
+function formatFeishuDiffMarkdown(text: string): string {
+  const separator = text.indexOf("\n\n");
+  if (separator < 0 || !text.startsWith("Turn Diff · ")) {
+    return text;
+  }
+  const title = text.slice(0, separator);
+  const diff = text.slice(separator + 2).trimEnd();
+  const fence = safeFeishuFence(diff);
+  return [`**${title}**`, "", fence, diff, fence].join("\n");
+}
+
+function safeFeishuFence(content: string): string {
+  let marker = "```";
+  while (content.split("\n").some((line) => line.trimStart().startsWith(marker))) {
+    marker += "`";
+  }
+  return marker;
+}
 
 export type FeishuStartupRuntimeInfo = LifecycleStartupRuntimeInfo;
 
@@ -193,7 +226,7 @@ export function renderFeishuOutput(
     case "warning":
       return formatCodexWarning(visibleUpstreamMessage(event.message));
     case "conversation.idle.released":
-      return formatConversationIdleReleased(event.minutes, event.threadId);
+      return formatFeishuConversationIdleReleased(event.minutes, event.threadId);
   }
 }
 
