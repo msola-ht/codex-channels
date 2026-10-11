@@ -94,14 +94,15 @@ export async function runManagedProviderModelSetup(provider, { environment = pro
       const windows = provider === "ocg" ? loadManagedModelWindow(environment) : [];
       for (const model of templates.models) {
         const old = previous.get(model.slug);
-        if (old) {
-          if ((old.max_context_window ?? old.context_window) === (model.max_context_window ?? model.context_window)) model.context_window = old.context_window;
-        } else {
-          const window = windows.find(entry => entry.model === model.slug);
-          if (window?.conflicts || window?.windowConflict) throw new Error("同名模型的窗口设置冲突，请先统一设置");
-          if (window?.windowPercent !== undefined) {
-            model.context_window = Math.round((model.max_context_window ?? model.context_window) * window.windowPercent / 100);
+        const window = old ? undefined : windows.find(entry => entry.model === model.slug);
+        if (window?.conflicts || window?.windowConflict) throw new Error("同名模型的窗口设置冲突，请先统一设置");
+        const contextWindow = old?.context_window ?? window?.contextWindow;
+        if (contextWindow !== undefined) {
+          const maximum = model.max_context_window ?? model.context_window;
+          if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > maximum) {
+            throw new Error(`${definition.displayName} 模型上下文窗口必须是 1024-${maximum} 的整数：${model.slug}`);
           }
+          model.context_window = contextWindow;
         }
         previous.set(model.slug, model);
       }

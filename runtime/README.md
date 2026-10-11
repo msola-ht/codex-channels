@@ -105,7 +105,7 @@
   导出门面与 TypeScript 接口；`readManagedMarker` 提供单个 Provider 管理标记的只读查询，不读取其他账户注册表。门面不承载具体读取、写入或启动逻辑。
 - `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录读取；提供原生协议集合、目录输入能力、CLP 独立转发目录与模型覆盖与思考声明、依赖路径和修订摘要，不读取 OAuth 或创建 App Server。
   受管及自定义 Provider 材料复用 `provider-file-access` 的文件归属判断，指纹不自行选择 ACL 策略。
-- `managed-model-catalog.mjs`：受管目录的纯数据校验、单模型设置读取、窗口与思考等级更新及刷新时保留设置；DS、OCG、CCG、CLP 共用，完整保留未修改的上游元数据，不执行文件读写。
+- `managed-model-catalog.mjs`：受管目录的纯数据校验、单模型设置读取、窗口与思考等级更新及刷新时保留设置；窗口按精确 Token 数保留，百分比仅派生、不取整后反向还原；新上限小于原窗口时拒绝刷新。DS、OCG、CCG、CLP 共用，完整保留未修改的上游元数据，不执行文件读写。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile，复用 `managed-model-catalog` 处理目录数据；
   管理每个受管 Provider 的独立模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须

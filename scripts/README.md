@@ -256,13 +256,15 @@
   Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读确认写入结果，仅在确认未生效
   时恢复模型目录，结果明确返回 App Server 重启动作。
 - `model-window-management.mjs` / `model-window-management.d.mts`：提供受管模型上下文窗口的无终端
-  校验、预览与执行接口；按模型 slug 去重，同名模型跨 Provider 共享同一窗口占比，写入经
-  `writeManagedModelWindowGlobal` 在各 Provider 的 `max_context_window` 一致时换算 `context_window`
+  校验、预览与执行接口；按模型 slug 去重，同名模型跨 Provider 共享同一窗口 Token 数，写入经
+  `writeManagedModelWindowGlobal` 在各 Provider 的 `max_context_window` 一致时直接保存 `context_window`
   并广播到所有提供该模型的 Provider，并复用统一 Provider 管理事务；
   同名模型在跨 Provider 窗口占比或最大窗口不一致时，预览暴露冲突与被覆盖值，最大窗口不一致失败关闭，
-  结果明确返回 App Server 重启动作。
+  结果明确返回 App Server 重启动作。仅 CLP 账户持有 DS 跟随窗口时，预览也列出会同步写入的 CP 提供商。
 - `model-window-setup.mjs` / `model-window-setup.d.mts`：`codexc setup` 的“模型上下文窗口”入口；
-  按模型名选择受管模型并设置窗口占比（10–100%，100% 为模型官方窗口），写入复用
+  按模型名选择受管模型，通过 128K、256K、384K、512K、1M 预设或自定义
+  Token 数设置窗口；预设按模型最大窗口过滤，可直接选择最大窗口，自定义范围为 1024 至模型最大值。
+  与添加自定义模型复用 `responses-model-setup.mjs` 的窗口选择交互，写入复用
   `model-window-management.mjs` 的全局广播，同名模型在所有 Provider 共用同一值，结果返回 App Server 重启动作。
 - `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
   Provider、模型与思考等级交互与中文渲染，写入复用管理接口；第三方 Provider 总菜单会先选择 Provider，DeepSeek 与 OpenCode Go 子菜单则复用同一入口并预选当前 Provider。上下文窗口不在本流程，转到

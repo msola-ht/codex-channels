@@ -320,9 +320,12 @@ function managedProviderCatalogPath(provider, environment) {
 // 把同一 context_window 广播到所有提供该模型且已配置的 Provider 目录。
 // 自动压缩阈值不再写入目录，压缩由上游按窗口默认推导。
 export function writeManagedModelWindowGlobal(
-  { model, windowPercent, environment = process.env } = {},
+  { model, windowPercent, contextWindow: requestedContext, environment = process.env } = {},
 ) {
-  validateWindowPercent(windowPercent);
+  if (requestedContext !== undefined && windowPercent !== undefined) {
+    throw new Error("Token 数和窗口百分比不能同时设置");
+  }
+  if (requestedContext === undefined) validateWindowPercent(windowPercent);
   const providers = loadManagedModelProviderSettings(environment);
   const clineFollows = clinePassFollowsDeepseekContext(environment);
   const localModel = provider => clineFollows && isClinePassAccountProvider(provider.provider) && model === "deepseek-flash"
@@ -342,7 +345,11 @@ export function writeManagedModelWindowGlobal(
   ) {
     throw new Error(`同名模型在不同 Provider 的最大上下文窗口不一致：${model}`);
   }
-  const contextWindow = Math.round(base * windowPercent / 100);
+  const contextWindow = requestedContext ?? Math.round(base * windowPercent / 100);
+  if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > base) {
+    throw new Error(`模型上下文窗口必须是 1024-${base} 的整数：${model}`);
+  }
+  windowPercent = contextWindow * 100 / base;
   const updates = new Map();
   const originals = new Map();
   const overridden = [];

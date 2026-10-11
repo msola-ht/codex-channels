@@ -92,7 +92,8 @@ export function normalizeProviderSettingsMutation(input) {
       return {
         operation: input.operation,
         model: input.model,
-        windowPercent: input.windowPercent,
+        ...(input.contextWindow === undefined ? {} : { contextWindow: input.contextWindow }),
+        ...(input.windowPercent === undefined ? {} : { windowPercent: input.windowPercent }),
       };
     default:
       throw new ManagementOperationError(
@@ -134,10 +135,7 @@ export async function previewProviderSettingsMutation(input, environment) {
         return {
           operation: "managed.window",
           ...previewModelWindowChange(
-            {
-              model: input.model,
-              windowPercent: input.windowPercent,
-            },
+            input,
             { environment },
           ),
         };
@@ -176,10 +174,7 @@ export async function applyProviderSettingsMutation(input, environment, preview)
         );
       case "managed.window":
         return await applyModelWindowChange(
-          {
-            model: input.model,
-            windowPercent: input.windowPercent,
-          },
+          input,
           { environment },
         );
       default:

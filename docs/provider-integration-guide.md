@@ -62,7 +62,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 - 在 `~/.codex-connect/providers/<id>/` 生成 `models.json`，schema 与现有目录一致：每个模型必须有
   `context_window`、非空 `supported_reasoning_levels`、合法 `default_reasoning_level`、
-  `display_name` 与输入能力；`max_context_window` 存在时作为窗口占比的换算基准，上下文窗口
+  `display_name` 与输入能力；`max_context_window` 存在时作为可设置窗口的上限，上下文窗口
   只由「模型上下文窗口」按模型名统一写入，其余字段保持下载原样；`auto_compact_token_limit`
   是独立的上游压缩阈值，不换算为上下文窗口，修改窗口时也不清空该字段；
 - 同目录写入 `models.manifest.json`：目录来源与下载时间（CLP 另记 relay 提交与跟随模型，OCG 额外记录下载

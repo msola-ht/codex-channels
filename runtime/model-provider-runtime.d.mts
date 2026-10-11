@@ -111,9 +111,8 @@ export function loadManagedModelWindow(
 
 export function writeManagedModelWindowGlobal(options: {
   model: string;
-  windowPercent: number;
   environment?: NodeJS.ProcessEnv;
-}): {
+} & ({ contextWindow: number; windowPercent?: never } | { windowPercent: number; contextWindow?: never })): {
   model: string;
   windowPercent: number;
   contextWindow: number;

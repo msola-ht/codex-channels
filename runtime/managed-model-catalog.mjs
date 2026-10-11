@@ -64,7 +64,7 @@ export function modelCatalogSetting(content, definition, model) {
     maxContextWindow: windowBase,
     reasoningEffort,
     reasoningEfforts,
-    windowPercent: Math.round(contextWindow * 100 / windowBase),
+    windowPercent: contextWindow * 100 / windowBase,
   };
 }
 
@@ -137,9 +137,7 @@ export function withPreservedManagedModelCatalogSettings(
     )
       ? previous.reasoningEffort
       : current.reasoningEffort;
-    const contextWindow = previous.windowPercent === undefined
-      ? undefined
-      : Math.round(current.maxContextWindow * previous.windowPercent / 100);
+    const contextWindow = previous.contextWindow;
     next = withManagedModelCatalogSettings(next, definition, {
       model: previous.model,
       reasoningEffort,

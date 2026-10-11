@@ -82,6 +82,7 @@ export function applyOpencodeGoAccountConfiguration(
   };
 } & OpenCodeGoAccountConfigurationPreview>;
 
-export function configuredWindowPercentByModel(
-  environment?: NodeJS.ProcessEnv,
+export function configuredContextWindowByModel(
+  environment: NodeJS.ProcessEnv,
+  modelSlugs: ReadonlySet<string>,
 ): Record<string, number>;

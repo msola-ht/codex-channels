@@ -1,18 +1,10 @@
-import { validateModelDefinitions as validateResponsesModels, validateSamplingParameters } from "../runtime/model-catalog.mjs";
+import { contextWindowPresetTokens, validateModelDefinitions as validateResponsesModels, validateSamplingParameters } from "../runtime/model-catalog.mjs";
 import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-instructions.mjs";
 import { promptEnabledProviderModels } from "./provider-model-selection.mjs";
 
-const contextWindowPresets = [
-  { value: "8192", label: "8K（8192 Token）" },
-  { value: "16384", label: "16K（16384 Token）" },
-  { value: "32768", label: "32K（32768 Token）" },
-  { value: "65536", label: "64K（65536 Token）" },
-  { value: "131072", label: "128K（131072 Token）" },
-  { value: "262144", label: "256K（262144 Token）" },
-  { value: "393216", label: "384K（393216 Token）" },
-  { value: "524288", label: "512K（524288 Token）" },
-  { value: "1048576", label: "1M（1048576 Token）" },
-];
+const contextWindowPresets = contextWindowPresetTokens.map(tokens => ({
+  value: String(tokens), label: `${tokens === 1048576 ? "1M" : `${tokens / 1024}K`}（${tokens} Token）`,
+}));
 
 export async function promptResponsesModels(prompts, defaultModel, previous = [], importedIds = [], output = process.stdout, upstreamWireApi = "responses") {
   if (!["responses", "chat_completions"].includes(upstreamWireApi)) throw new Error("自定义模型上游接口不受支持");
@@ -220,12 +212,16 @@ function withNewModelInstructions(model, isNewDefinition) {
   return model;
 }
 
-async function promptContextWindow(prompts, id, current, maximumContext) {
+export async function promptContextWindow(prompts, id, current, maximumContext, { includeMaximum = false } = {}) {
   const presets = contextWindowPresets.filter((preset) => Number(preset.value) <= maximumContext);
   const selected = await prompts.select({
     message: `${id} 当前上下文窗口`,
-    options: [...presets, { value: "custom", label: "自定义 Token 数" }],
-    initialValue: presets.some((preset) => Number(preset.value) === current) ? String(current) : "custom",
+    options: [...presets.map(preset => includeMaximum && Number(preset.value) === maximumContext
+      ? { ...preset, label: `${preset.label} · 最大窗口` } : preset),
+      ...(includeMaximum && !presets.some((preset) => Number(preset.value) === maximumContext)
+        ? [{ value: String(maximumContext), label: `使用最大窗口（${maximumContext} Token）` }] : []),
+      { value: "custom", label: "自定义 Token 数" }],
+    initialValue: presets.some((preset) => Number(preset.value) === current) || (includeMaximum && current === maximumContext) ? String(current) : "custom",
   });
   if (prompts.isCancel(selected)) return undefined;
   if (selected !== "custom") return Number(selected);

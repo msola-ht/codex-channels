@@ -22,8 +22,8 @@ import type { ManagementProviderSettingsResponse } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 import { CustomModelDetails, CustomModelDetailsPreview } from "@/components/settings/custom-model-details"
 import type { CustomModelDraft } from "@/components/settings/custom-model-details"
+import { contextWindowPresetTokens } from "../../../../runtime/model-catalog.mjs"
 
-const contextWindowPresetTokens = [32768, 131072, 262144]
 const probeReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 
 export function ProviderSettingsManagement({ management, onChanged, section }: { management: ProviderSettingsController; onChanged?: () => void; section: "providers" | "models" | "context" }) {
@@ -62,15 +62,15 @@ function ProviderSettingsCard({
   const [confirmRemoveBaseUrl, setConfirmRemoveBaseUrl] = useState(false)
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
   const [windowModel, setWindowModel] = useState(settings.modelWindow[0]?.id ?? "")
-  const [windowError, setWindowError] = useState<"invalid-percent" | null>(null)
+  const [windowError, setWindowError] = useState<"invalid-window" | null>(null)
 
   const managed = settings.managedProviders.find((provider) => provider.id === managedProvider) ?? settings.managedProviders[0]
   const windowEntry = settings.modelWindow.find((candidate) => candidate.id === windowModel) ?? settings.modelWindow[0]
   const [managedDraft, patchManaged, resetManaged] = useSettingsDraft({ model: managed?.model ?? "", reasoning: managed?.reasoningEffort ?? "" })
   const { model: managedModel, reasoning: managedReasoning } = managedDraft
   const managedModelEntry = managed?.models.find((candidate) => candidate.id === managedModel)
-  const [windowDraft, patchWindow, resetWindow] = useSettingsDraft({ percent: String(windowEntry?.windowPercent ?? 100) })
-  const windowPercent = windowDraft.percent
+  const [windowDraft, patchWindow, resetWindow] = useSettingsDraft({ tokens: String(windowEntry?.contextWindow ?? "") })
+  const windowTokens = windowDraft.tokens
   const candidates = useMemo(() => [
     ...settings.customProviders.fixedCandidates,
     ...settings.customProviders.switchingProviders,
@@ -173,16 +173,16 @@ function ProviderSettingsCard({
 
   const updateWindow = async () => {
     if (windowEntry === undefined) return
-    const parsedPercent = Number(windowPercent)
-    if (!Number.isInteger(parsedPercent) || parsedPercent < 10 || parsedPercent > 100) {
-      setWindowError("invalid-percent")
+    const contextWindow = Number(windowTokens)
+    if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > windowEntry.maxContextWindow) {
+      setWindowError("invalid-window")
       return
     }
     setWindowError(null)
     await management.mutate({
       operation: "managed.window",
       model: windowEntry.id,
-      windowPercent: parsedPercent,
+      contextWindow,
     })
   }
 
@@ -229,9 +229,13 @@ function ProviderSettingsCard({
         </div>
         {windowEntry === undefined ? <SettingsEmpty>{t("managementUi.managedModelsEmpty")}</SettingsEmpty> : <>
           <FieldGroup>
-            <Table><TableHeader><TableRow><TableHead>{t("modelManagement.model")}</TableHead><TableHead>{t("managementUi.provider")}</TableHead><TableHead>{t("managementUi.windowPercent")}</TableHead><TableHead>{t("modelManagement.actions")}</TableHead></TableRow></TableHeader><TableBody>{settings.modelWindow.map(entry => <TableRow key={entry.id} data-state={entry.id === windowEntry.id ? "selected" : undefined}><TableCell>{entry.displayName}</TableCell><TableCell>{entry.providers.join(t("managementUi.listSeparator"))}</TableCell><TableCell>{entry.conflicts ? t("managementUi.inconsistent") : `${entry.windowPercent ?? 100}%`}</TableCell><TableCell><Button size="sm" variant="outline" disabled={busy || pending !== null || entry.id === windowEntry.id} onClick={() => setWindowModel(entry.id)}>{t("managementUi.select")}</Button></TableCell></TableRow>)}</TableBody></Table>
+            <Table><TableHeader><TableRow><TableHead>{t("modelManagement.model")}</TableHead><TableHead>{t("managementUi.provider")}</TableHead><TableHead>{t("managementUi.windowTokens")}</TableHead><TableHead>{t("modelManagement.actions")}</TableHead></TableRow></TableHeader><TableBody>{settings.modelWindow.map(entry => <TableRow key={entry.id} data-state={entry.id === windowEntry.id ? "selected" : undefined}><TableCell>{entry.displayName}</TableCell><TableCell>{entry.providers.join(t("managementUi.listSeparator"))}</TableCell><TableCell>{entry.conflicts ? t("managementUi.inconsistent") : entry.contextWindow}</TableCell><TableCell><Button size="sm" variant="outline" disabled={busy || pending !== null || entry.id === windowEntry.id} onClick={() => { setWindowModel(entry.id); setWindowError(null) }}>{t("managementUi.select")}</Button></TableCell></TableRow>)}</TableBody></Table>
             <p className="text-sm">{t("managementUi.editingModel", { model: windowEntry.displayName })}</p>
-            <Field orientation="responsive" data-invalid={windowError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-window-percent">{t("managementUi.windowPercentLabel")}</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-window-percent" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "provider-window-percent-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={10} max={100} value={windowPercent} disabled={busy || pending !== null} onChange={(event) => { patchWindow({ percent: event.target.value }); setWindowError(null) }} /><FieldError id="provider-window-percent-error" className="sm:text-right">{windowError === null ? null : t("managementUi.windowInvalid")}</FieldError></FieldContent></Field>
+            <ManagedSelect label={t("managementUi.contextPreset")} value={windowTokens} options={[
+              ...contextWindowPresetTokens.filter(value => value < windowEntry.maxContextWindow).map(value => [String(value), t("managementUi.contextPresetSize", { size: value === 1048576 ? "1M" : `${value / 1024}K`, tokens: value })] as [string, string]),
+              [String(windowEntry.maxContextWindow), t("managementUi.maximumWindow", { tokens: windowEntry.maxContextWindow })],
+            ]} disabled={busy || pending !== null} onChange={value => { patchWindow({ tokens: value }); setWindowError(null) }} />
+            <Field orientation="responsive" data-invalid={windowError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-window-tokens">{t("managementUi.windowTokens")}</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-window-tokens" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "provider-window-tokens-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={1024} max={windowEntry.maxContextWindow} step={1} value={windowTokens} disabled={busy || pending !== null} onChange={(event) => { patchWindow({ tokens: event.target.value }); setWindowError(null) }} /><FieldError id="provider-window-tokens-error" className="sm:text-right">{windowError === null ? null : t("managementUi.windowInvalid", { max: windowEntry.maxContextWindow })}</FieldError></FieldContent></Field>
           </FieldGroup>
           <p className="text-xs text-muted-foreground">{t("managementUi.windowSummary", { providers: windowEntry.providers.join(t("managementUi.listSeparator")) || t("managementUi.none"), context: formatTokens(windowEntry.contextWindow), max: formatTokens(windowEntry.maxContextWindow) })}</p>
           {windowEntry.conflicts === true ? <Alert><AlertTitle>{t("managementUi.windowConflict")}</AlertTitle><AlertDescription>{t("managementUi.windowConflictDescription", { values: Object.entries(windowEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join(t("accountConfirmation.listSeparator")) || t("managementUi.partlyUnset") })}</AlertDescription></Alert> : null}
@@ -346,7 +350,8 @@ function ProviderSettingsConfirmationDialog({
   if (pending.conflicts === true) lines.push(t("managementUi.percentConflictConfirm"))
   if (pending.windowConflict === true) lines.push(t("managementUi.maxWindowConflict"))
   if (pending.reasoningEffort !== undefined) lines.push(t("managementUi.reasoningConfirm", { value: pending.reasoningEffort }))
-  if (pending.windowPercent !== undefined) lines.push(t("managementUi.windowConfirm", { percent: pending.windowPercent }))
+  if (pending.contextWindow !== undefined) lines.push(t("managementUi.windowTokensConfirm", { tokens: pending.contextWindow }))
+  else if (pending.windowPercent !== undefined) lines.push(t("managementUi.windowConfirm", { percent: pending.windowPercent }))
   if (pending.credential?.action !== undefined) lines.push(t("managementUi.credentialConfirm", { action: t(pending.credential.action === "replace" ? "managementUi.replaceCredential" : "managementUi.preserveCredential") }))
   if (pending.transport?.cleartext === true) lines.push(t("managementUi.cleartextUpstream"))
   return <ManagementConfirmationDialog open saving={saving} loading={loading} title={t("managementUi.providerConfirmTitle")} description={t("accountConfirmation.changeDescription")} confirmVariant={pending.operation === "remove" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>

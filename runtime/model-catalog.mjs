@@ -1,5 +1,6 @@
 // Pure model-definition validation, Codex field generation and source adaptation.
 // Provider files and credentials belong to the runtime persistence owners.
+export const contextWindowPresetTokens = Object.freeze([131072, 262144, 393216, 524288, 1048576]);
 const efforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const verbosityLevels = new Set(["low", "medium", "high"]);
 const reasoningSummaries = new Set(["auto", "concise", "detailed", "none"]);

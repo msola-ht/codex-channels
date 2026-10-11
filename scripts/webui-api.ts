@@ -741,11 +741,10 @@ export type ManagementProviderSettingsMutationInput =
       reasoningEffort: string
       windowPercent?: number
     }
-  | {
+  | ({
       operation: "managed.window"
       model: string
-      windowPercent: number
-    }
+    } & ({ contextWindow: number; windowPercent?: never } | { windowPercent: number; contextWindow?: never }))
 
 export interface ManagementProviderSettingsPreview {
   operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.window"

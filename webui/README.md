@@ -125,6 +125,9 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `components/settings/provider-settings-management.tsx` 按模型提供图片、思考、`apply_patch` 与
 `tool_search` 的手动声明；思考支持开关控制既有思考等级与默认值。新增模型不会预选补丁或搜索工具，
 切换 Chat Completions 也不会改变模型的工具声明。
+独立上下文窗口页按 Token 数选择预设或自定义输入；CLI 与 WebUI 共用 `runtime/model-catalog.mjs`
+的 128K 至 1M 预设（含 384K，不含 2M），仅显示不超过模型最大窗口的预设，并可选最大窗口。
+预览、确认写入和回读保持精确 Token 数，不按整数百分比换算。
 
 `components/settings/custom-model-details.tsx` 复用共享 API 的模型元素类型，组合基本响应参数与可展开的高级参数。
 基本区编辑模型描述、最大窗口、各思考等级说明、图片 original 细节、verbosity 与默认值，以及独立的思考摘要参数。

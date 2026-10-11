@@ -1,3 +1,4 @@
+export const contextWindowPresetTokens: readonly number[];
 export interface SamplingParameters {
   temperature?: number;
   top_p?: number;

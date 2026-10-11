@@ -21,7 +21,7 @@ export function createManagedProviderCatalog(
   options?: {
     previousModels?: Array<Record<string, unknown>>;
     windowPercent?: number | null;
-    modelWindowPercentByModel?: Record<string, number>;
+    modelContextWindowByModel?: Record<string, number>;
   },
 ): { models: Array<Record<string, unknown>> };
 
