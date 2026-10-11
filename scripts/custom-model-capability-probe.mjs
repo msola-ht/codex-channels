@@ -1,5 +1,4 @@
-import { randomBytes, randomInt } from "node:crypto";
-import { deflateSync } from "node:zlib";
+import { randomBytes } from "node:crypto";
 import { fetch as undiciFetch, ProxyAgent } from "undici";
 
 import { responsesToChat } from "../dist/model-api/index.js";
@@ -7,9 +6,10 @@ import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { createRefreshableHttpProxySelector } from "../runtime/network-proxy.mjs";
 import { validProviderBaseUrl } from "../runtime/model-provider-runtime.mjs";
 
-const capabilityNames = ["text", "tools", "images", "applyPatch", "toolSearch", "reasoningNone", "reasoningMedium"];
+const capabilityNames = ["applyPatch", "toolSearch"];
+const reasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const maximumResponseBytes = 128 * 1024;
-const maximumRequests = 12;
+const maximumRequests = 3;
 // Codex rust-v0.160.1 core/assets/tools/apply_patch.lark；生产包不读取 upstream/。
 const patchGrammar = `start: begin_patch hunk+ end_patch
 begin_patch: "*** Begin Patch" LF
@@ -35,40 +35,40 @@ const searchTool = {
   type: "tool_search", execution: "client", description: "Find additional client tools by name.",
   parameters: {type: "object", properties: {query: {type: "string"}, limit: {type: "integer"}}, required: ["query"]},
 };
-const emptyCapabilities = () => ({supportsImages: false, supportsSearchTool: false, reasoningEfforts: [], defaultReasoningEffort: null});
 const message = text => ({type: "message", role: "user", content: [{type: "input_text", text}]});
 const marker = () => `PROBE_${randomBytes(8).toString("hex")}`;
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const validModelId = value => typeof value === "string" && value.trim().length > 0 && value.length <= 200 && !/\p{Cc}/u.test(value);
 
-/** 添加单个自定义模型前的生产能力检测，不保存历史、不执行工具、不自动重试。 */
-export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upstreamWireApi, environment = process.env, signal, timeoutMs = 120000}) {
+/** 按用户选择检测单项工具能力，不保存历史、不执行工具、不自动重试。 */
+export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upstreamWireApi, capability, reasoningEffort, environment = process.env, signal, timeoutMs = 45000}) {
   let endpoint;
   try { endpoint = new URL(validProviderBaseUrl(baseUrl, "模型能力检测")); }
   catch { throw new Error("模型能力检测需要有效的 Provider Base URL"); }
   if (typeof apiKey !== "string" || !apiKey.trim() || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) throw new Error("模型能力检测需要有效 API Key");
   if (!validModelId(model)) throw new Error("模型能力检测需要有效模型 ID");
   if (upstreamWireApi !== "responses" && upstreamWireApi !== "chat_completions") throw new Error("模型能力检测不支持此上游协议");
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120000) throw new Error("模型能力检测总预算必须在 1 到 120000 毫秒之间");
+  if (!capabilityNames.includes(capability)) throw new Error("模型能力检测仅支持 apply_patch 或 tool_search 单项探测");
+  if (!reasoningEfforts.includes(reasoningEffort)) throw new Error("模型能力检测需要有效思考强度");
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 45000) throw new Error("模型能力检测总预算必须在 1 到 45000 毫秒之间");
   endpoint.pathname = `${endpoint.pathname.replace(/\/$/u, "")}/${upstreamWireApi === "responses" ? "responses" : "chat/completions"}`;
-  const checks = [];
+  let check;
   const controller = new AbortController();
   const deadline = performance.now() + timeoutMs;
   let selector;
   let dispatcher;
   let requests = 0;
-  let selectedReasoningEffort;
   const abort = () => { controller.abort(); void selector?.close().catch(() => undefined); };
   signal?.addEventListener("abort", abort, {once: true});
   const timer = setTimeout(abort, timeoutMs);
   if (signal?.aborted) abort();
-  const add = (capability, result) => {
-    checks.push({capability, status: result.status, reason: result.reason, ...(result.httpStatus === undefined ? {} : {httpStatus: result.httpStatus})});
+  const add = result => {
+    check = {capability, status: result.status, reason: result.reason, ...(result.httpStatus === undefined ? {} : {httpStatus: result.httpStatus})};
   };
   const unknown = reason => ({status: "inconclusive", reason});
   const good = (reason, response) => ({status: "supported", reason, httpStatus: response.httpStatus});
   const failedTask = response => ({status: "inconclusive", reason: "本次短任务的输出或工具关联未通过验证", httpStatus: response.httpStatus});
-  const request = async (source, capability, invalidReasoningControl = false) => {
+  const request = async source => {
     if (controller.signal.aborted || performance.now() >= deadline) return unknown(signal?.aborted ? "模型能力检测已取消" : "模型能力检测总预算已耗尽");
     if (requests >= maximumRequests) return unknown("模型能力检测请求次数已达到上限");
     const requestController = new AbortController();
@@ -77,8 +77,7 @@ export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upst
     const requestTimer = setTimeout(forwardAbort, Math.min(15000, Math.max(1, deadline - performance.now())));
     let httpStatus;
     try {
-      let payload = {...(selectedReasoningEffort === undefined ? {} : {reasoning: {effort: selectedReasoningEffort}}),
-        ...source, model, store: false, stream: false, max_output_tokens: 768};
+      let payload = {...source, reasoning: {effort: reasoningEffort}, model, store: false, stream: false, max_output_tokens: 768};
       let identities;
       if (upstreamWireApi === "chat_completions") {
         const converted = responsesToChat({...payload, stream: true});
@@ -87,7 +86,6 @@ export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upst
         delete payload.stream_options;
         identities = converted.toolNames;
       }
-      if (invalidReasoningControl) payload.reasoning = {effort: "invalid_probe_effort"};
       requests += 1;
       const response = await undiciFetch(endpoint, {
         method: "POST", headers: {"content-type": "application/json", authorization: `Bearer ${apiKey}`},
@@ -125,17 +123,6 @@ export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upst
     const args = parseArguments(call.arguments);
     return isObject(args) && Object.keys(args).length === 1 && args[property] === expected ? call : undefined;
   };
-  const toolRoundTrip = async (name, capability) => {
-    const token = marker();
-    const tool = toolsFor(name, "key");
-    const input = [message(`Call ${name} with key K7. After its result, reply with exactly the returned marker.`)];
-    const first = await request({input, tools: [tool], tool_choice: {type: "function", name}, parallel_tool_calls: false}, capability);
-    if (first.status !== "ok") return first;
-    const call = callable(first, name, "key", "K7");
-    if (!call) return failedTask(first);
-    const last = await request({input: [...input, ...first.output, {type: "function_call_output", call_id: call.call_id, output: token}], tools: [tool], tool_choice: "none"}, capability);
-    return last.status !== "ok" ? last : exactText(last, token) ? good("函数调用及模拟工具结果回传已通过", last) : failedTask(last);
-  };
   try {
     controller.signal.throwIfAborted();
     selector = createRefreshableHttpProxySelector(readCodexProxySettings(environment), environment);
@@ -144,82 +131,47 @@ export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upst
     try { proxyUrl = await selector.select(endpoint); } finally { clearTimeout(discoveryTimer); }
     controller.signal.throwIfAborted();
     if (proxyUrl) dispatcher = new ProxyAgent(proxyUrl);
-    const textToken = marker();
-    const text = await request({input: [message(`Reply with exactly ${textToken}.`)]}, "text");
-    add("text", text.status !== "ok" ? text : exactText(text, textToken) ? good("非流式文本短任务已通过", text) : failedTask(text));
-    if (checks[0].status === "supported") {
-      const reasoningToken = marker();
-      const reasoningInput = [message(`Calculate (37 * 24) + (19 * 16) - 127 internally. Reply with exactly ${reasoningToken}.`)];
-      const none = await request({input: reasoningInput, reasoning: {effort: "none"}}, "reasoningNone");
-      const medium = await request({input: reasoningInput, reasoning: {effort: "medium"}}, "reasoningMedium");
-      // 先通过共享转换生成正常请求，再替换同一出站字段进行一次无效值对照。
-      const invalid = await request({input: [message("Reply only OK.")], reasoning: {effort: "none"}}, "reasoningNone", true);
-      const hasThought = response => response.status === "ok" && (response.reasoningText || (response.reasoningTokens !== undefined && response.reasoningTokens > 0));
-      const noneWorks = exactText(none, reasoningToken) && !hasThought(none)
-        && (none.reasoningTokens === 0 || (exactText(medium, reasoningToken) && hasThought(medium)));
-      const parameterRejected = invalid.status === "unsupported";
-      add("reasoningNone", none.status !== "ok" ? none : !parameterRejected
-        ? unknown("思考参数无效值对照未被明确拒绝，无法确认 none 控制有效")
-        : noneWorks ? good("none 请求成功且无思考；观察到零思考 Token 或与 medium 存在思考输出差异", none)
-          : unknown("none 请求兼容，但缺少关闭思考的可观察证据；缺失用量不视为零"));
-      add("reasoningMedium", medium.status !== "ok" ? medium : !parameterRejected
-        ? unknown("思考参数无效值对照未被明确拒绝，无法确认 medium 控制有效")
-        : exactText(medium, reasoningToken) && hasThought(medium) ? good("medium 请求观察到思考文本或正思考 Token；未验证其他强度档位", medium)
-          : unknown("medium 请求兼容，但没有可观察的思考文本或正思考 Token"));
-      selectedReasoningEffort = checks.find(check => check.capability === "reasoningMedium")?.status === "supported" ? "medium"
-        : checks.find(check => check.capability === "reasoningNone")?.status === "supported" ? "none" : undefined;
-      if (selectedReasoningEffort !== undefined) add("tools", await toolRoundTrip("capability_echo", "tools"));
-    }
-    if (checks.find(check => check.capability === "tools")?.status === "supported") {
-      const colors = [{name: "RED", rgb: [255, 0, 0]}, {name: "GREEN", rgb: [0, 255, 0]}, {name: "BLUE", rgb: [0, 0, 255]}];
-      // 十二个独立随机色块在一次请求内提供 3^12 种完整答案，降低忽略图片后猜中的概率。
-      const sequence = Array.from({length: 12}, () => colors[randomInt(colors.length)]);
-      const expectedColors = sequence.map(color => color.name).join(",");
-      const image = await request({input: [{type: "message", role: "user", content: [
-        {type: "input_text", text: "This image contains 12 equal-width color blocks in one horizontal row, separated by white gaps. Ignore the gaps. Identify every block from left to right as RED, GREEN, or BLUE. Reply with exactly 12 uppercase names separated by commas, with no spaces or other text."},
-        {type: "input_image", image_url: colorSequencePng(sequence.map(color => color.rgb)), detail: "low"},
-      ]}]}, "images");
-      add("images", image.status !== "ok" ? image : exactText(image, expectedColors) ? good("随机多色块 PNG 完整序列识别短任务已通过", image) : failedTask(image));
-
+    if (capability === "applyPatch") {
       const patchToken = marker();
       const patch = `*** Begin Patch\n*** Add File: capability_probe.txt\n+${patchToken}\n*** End Patch`;
       const patchTool = {type: "custom", name: "apply_patch", description: "Return a patch for a simulated file. No file will be written.", format: {type: "grammar", syntax: "lark", definition: patchGrammar}};
       const patchInput = [message(`Call apply_patch with precisely this patch; do not wrap it in markdown:\n${patch}\nAfter the simulated result, reply with exactly its marker.`)];
-      const patchCall = await request({input: patchInput, tools: [patchTool], tool_choice: {type: "custom", name: "apply_patch"}}, "applyPatch");
-      if (patchCall.status !== "ok") add("applyPatch", patchCall);
+      const patchCall = await request({input: patchInput, tools: [patchTool], tool_choice: {type: "custom", name: "apply_patch"}});
+      if (patchCall.status !== "ok") add(patchCall);
       else {
         const call = patchCall.calls[0];
-        if (patchCall.calls.length !== 1 || call.type !== "custom_tool_call" || call.name !== "apply_patch" || call.namespace != null || call.input.replace(/\n$/u, "") !== patch) add("applyPatch", failedTask(patchCall));
+        if (patchCall.calls.length !== 1 || call.type !== "custom_tool_call" || call.name !== "apply_patch" || call.namespace != null || call.input.replace(/\n$/u, "") !== patch) add(failedTask(patchCall));
         else {
           const resultToken = marker();
-          const last = await request({input: [...patchInput, ...patchCall.output, {type: "custom_tool_call_output", call_id: call.call_id, output: resultToken}], tools: [patchTool], tool_choice: "none"}, "applyPatch");
-          add("applyPatch", last.status !== "ok" ? last : exactText(last, resultToken)
+          const last = await request({input: [...patchInput, ...patchCall.output, {type: "custom_tool_call_output", call_id: call.call_id, output: resultToken}], tools: [patchTool], tool_choice: "none"});
+          add(last.status !== "ok" ? last : exactText(last, resultToken)
             ? good(upstreamWireApi === "responses" ? "自由格式补丁调用及模拟结果回传已通过；未执行补丁" : "经 Chat 桥的 input 函数补丁调用及模拟结果回传已通过；未执行补丁", last) : failedTask(last));
         }
       }
+    } else {
       const discovered = {...toolsFor("lookup_probe_marker", "key"), defer_loading: true};
       const searchInput = [message("Call tool_search with query lookup_probe_marker and limit 1, then call the discovered tool with key K7. Reply only with its final marker.")];
-      const search = await request({input: searchInput, tools: [searchTool], tool_choice: "required", parallel_tool_calls: false}, "toolSearch");
-      if (search.status !== "ok") add("toolSearch", search);
+      const search = await request({input: searchInput, tools: [searchTool], tool_choice: "required", parallel_tool_calls: false});
+      if (search.status !== "ok") add(search);
       else {
         const call = search.calls[0];
         if (search.calls.length !== 1 || call.type !== "tool_search_call" || call.execution !== "client" || !isObject(call.arguments)
           || typeof call.arguments.query !== "string" || !call.arguments.query.includes(discovered.name)
           || (call.arguments.limit != null && call.arguments.limit !== 1)
-          || Object.keys(call.arguments).some(key => key !== "query" && key !== "limit")) add("toolSearch", failedTask(search));
+          || Object.keys(call.arguments).some(key => key !== "query" && key !== "limit")) add(failedTask(search));
         else {
           const history = [...searchInput, ...search.output, {type: "tool_search_output", call_id: call.call_id, status: "completed", execution: "client", tools: [discovered]}];
           // 已检索工具仍保留 defer_loading；共享转换层负责在 Chat 端移除。
           const loadedTools = [searchTool, {...discovered, defer_loading: false}];
-          const found = await request({input: history, tools: loadedTools, tool_choice: "auto", parallel_tool_calls: false}, "toolSearch");
-          if (found.status !== "ok") add("toolSearch", found);
+          const found = await request({input: history, tools: loadedTools, tool_choice: "auto", parallel_tool_calls: false});
+          if (found.status !== "ok") add(found);
           else {
             const foundCall = callable(found, discovered.name, "key", "K7");
-            if (!foundCall) add("toolSearch", failedTask(found));
+            if (!foundCall) add(failedTask(found));
             else {
               const token = marker();
-              const last = await request({input: [...history, ...found.output, {type: "function_call_output", call_id: foundCall.call_id, output: token}], tools: loadedTools, tool_choice: "none"}, "toolSearch");
-              add("toolSearch", last.status !== "ok" ? last : exactText(last, token)
+              const last = await request({input: [...history, ...found.output, {type: "function_call_output", call_id: foundCall.call_id, output: token}], tools: loadedTools, tool_choice: "none"});
+              add(last.status !== "ok" ? last : exactText(last, token)
                 ? good(upstreamWireApi === "responses" ? "客户端检索、发现工具调用及模拟结果回传已通过" : "经 Chat 桥函数映射的客户端检索、发现工具调用及结果回传已通过", last) : failedTask(last));
             }
           }
@@ -227,7 +179,7 @@ export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upst
       }
     }
   } catch {
-    for (const capability of capabilityNames) if (!checks.some(check => check.capability === capability)) add(capability, unknown(signal?.aborted ? "模型能力检测已取消" : controller.signal.aborted ? "模型能力检测总预算或代理发现预算已耗尽" : "模型能力检测代理配置或发现失败"));
+    add(unknown(signal?.aborted ? "模型能力检测已取消" : controller.signal.aborted ? "模型能力检测总预算或代理发现预算已耗尽" : "模型能力检测代理配置或发现失败"));
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
@@ -236,18 +188,8 @@ export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upst
     await selector?.close().catch(() => undefined);
   }
   const cancelled = signal?.aborted === true;
-  for (const capability of capabilityNames) if (!checks.some(check => check.capability === capability)) add(capability, unknown(cancelled ? "模型能力检测已取消" : "基础文本、思考控制或工具未通过，未继续检测此项"));
-  const supported = capability => checks.find(check => check.capability === capability)?.status === "supported";
-  const capabilities = emptyCapabilities();
-  if (!cancelled && supported("text") && supported("tools")) {
-    capabilities.supportsImages = supported("images");
-    capabilities.supportsSearchTool = supported("toolSearch");
-    if (supported("applyPatch")) capabilities.applyPatchToolType = "freeform";
-    capabilities.reasoningEfforts = ["none", "medium"].filter(effort => supported(effort === "none" ? "reasoningNone" : "reasoningMedium"));
-    capabilities.defaultReasoningEffort = capabilities.reasoningEfforts.includes("medium") ? "medium" : capabilities.reasoningEfforts[0] ?? null;
-  }
-  return {model, upstreamWireApi, status: cancelled ? "cancelled" : "completed", checks, capabilities};
-
+  if (cancelled) add(unknown("模型能力检测已取消"));
+  return {model, upstreamWireApi, capability, reasoningEffort, status: cancelled ? "cancelled" : "completed", check};
 }
 
 async function readBoundedBody(response, controller) {
@@ -275,10 +217,8 @@ function classifyHttp(httpStatus, parsed, capability) {
   if (httpStatus === 429) return {status: "inconclusive", reason: "模型能力检测受到上游限流", httpStatus};
   const error = isObject(parsed) ? parsed.error : undefined;
   const context = typeof error === "string" ? error : isObject(error) ? [error.param, error.code, error.message].filter(value => typeof value === "string").join(" ") : "";
-  const relevant = {text: /\b(?:model|input|messages)\b/iu, tools: /\b(?:tools?|tool_choice|function)\b/iu,
-    images: /\b(?:image|images|image_url|input_image|vision)\b/iu, applyPatch: /\b(?:apply_patch|custom|grammar|freeform)\b/iu,
-    toolSearch: /\btool_search(?:_call|_output)?\b/iu, reasoningNone: /\b(?:reasoning|reasoning_effort|effort)\b/iu,
-    reasoningMedium: /\b(?:reasoning|reasoning_effort|effort)\b/iu}[capability];
+  const relevant = {applyPatch: /\b(?:apply_patch|custom|grammar|freeform)\b/iu,
+    toolSearch: /\btool_search(?:_call|_output)?\b/iu}[capability];
   return {status: [400, 404, 422].includes(httpStatus) && relevant.test(context) ? "unsupported" : "inconclusive",
     reason: [400, 404, 422].includes(httpStatus) && relevant.test(context) ? "上游明确拒绝本项检测使用的输入或参数" : "上游拒绝请求，无法确认本项能力", httpStatus};
 }
@@ -293,7 +233,6 @@ function parseResponses(value) {
   const calls = [];
   const ids = new Set();
   let text = "";
-  let reasoningText = false;
   for (const item of value.output) {
     if (!isObject(item)) return undefined;
     if (item.type === "message") {
@@ -305,7 +244,6 @@ function parseResponses(value) {
     } else if (item.type === "reasoning") {
       for (const part of [...(item.summary ?? []), ...(item.content ?? [])]) {
         if (!isObject(part) || !["summary_text", "reasoning_text"].includes(part.type) || typeof part.text !== "string") return undefined;
-        if (part.text.trim()) reasoningText = true;
       }
     } else if (["function_call", "custom_tool_call", "tool_search_call"].includes(item.type)) {
       if (typeof item.call_id !== "string" || !item.call_id || ids.has(item.call_id) || (item.status != null && item.status !== "completed")) return undefined;
@@ -315,9 +253,7 @@ function parseResponses(value) {
       ids.add(item.call_id); calls.push(item);
     } else return undefined;
   }
-  const tokens = value.usage?.output_tokens_details?.reasoning_tokens;
-  return {status: "ok", output: value.output, text, calls, reasoningText,
-    ...(Number.isSafeInteger(tokens) && tokens >= 0 ? {reasoningTokens: tokens} : {})};
+  return {status: "ok", output: value.output, text, calls};
 }
 
 function parseChat(value, identities) {
@@ -328,7 +264,6 @@ function parseChat(value, identities) {
   if (msg.content != null && typeof msg.content !== "string") return undefined;
   if (msg.refusal != null || msg.function_call != null || (msg.tool_calls != null && !Array.isArray(msg.tool_calls))) return undefined;
   const output = [];
-  let reasoningText = false;
   if ((msg.reasoning != null && typeof msg.reasoning !== "string") || (msg.reasoning_content != null && typeof msg.reasoning_content !== "string")) return undefined;
   let details = "";
   if (msg.reasoning_details != null) {
@@ -343,7 +278,6 @@ function parseChat(value, identities) {
   if (new Set(thoughts).size > 1) return undefined;
   const thought = thoughts[0] ?? "";
   if (thought) {
-    reasoningText = thought.trim().length > 0;
     output.push(msg.reasoning_content ? {type: "reasoning", content: [{type: "reasoning_text", text: thought}], summary: []}
       : {type: "reasoning", summary: [{type: "summary_text", text: thought}]});
   }
@@ -366,38 +300,5 @@ function parseChat(value, identities) {
     ids.add(call.id); output.push(item); calls.push(item);
   }
   if ((calls.length > 0) !== (choice.finish_reason === "tool_calls")) return undefined;
-  const tokens = value.usage?.completion_tokens_details?.reasoning_tokens;
-  return {status: "ok", output, text, calls, reasoningText,
-    ...(Number.isSafeInteger(tokens) && tokens >= 0 ? {reasoningTokens: tokens} : {})};
-}
-
-function colorSequencePng(sequence) {
-  const blockWidth = 32;
-  const gapWidth = 4;
-  const width = blockWidth * sequence.length + gapWidth * (sequence.length - 1);
-  const height = 64;
-  const row = Buffer.from([0, ...sequence.flatMap((rgb, index) => [
-    ...Array.from({length: blockWidth}, () => rgb).flat(),
-    ...(index === sequence.length - 1 ? [] : Array.from({length: gapWidth * 3}, () => 255)),
-  ])]);
-  const pixels = Buffer.concat(Array.from({length: height}, () => row));
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 2;
-  const chunk = (name, data) => {
-    const type = Buffer.from(name);
-    const length = Buffer.alloc(4); length.writeUInt32BE(data.length);
-    const checksum = Buffer.alloc(4); checksum.writeUInt32BE(crc32(Buffer.concat([type, data])));
-    return Buffer.concat([length, type, data, checksum]);
-  };
-  const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(pixels)), chunk("IEND", Buffer.alloc(0))]);
-  return `data:image/png;base64,${png.toString("base64")}`;
-}
-
-function crc32(data) {
-  let value = 0xffffffff;
-  for (const byte of data) {
-    value ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0);
-  }
-  return (value ^ 0xffffffff) >>> 0;
+  return {status: "ok", output, text, calls};
 }

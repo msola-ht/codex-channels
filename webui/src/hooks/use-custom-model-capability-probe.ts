@@ -5,6 +5,7 @@ import type { ManagementCustomModelProbeInput, ManagementCustomModelProbeResult 
 interface ProbeState {
   draftKey: string
   index: number
+  capability: ManagementCustomModelProbeInput["capability"]
   result: ManagementCustomModelProbeResult | null
   errorCode: string | null
   running: boolean
@@ -34,13 +35,18 @@ export function useCustomModelCapabilityProbe(draftKey: string, enabled: boolean
     if (!enabled || active.current !== null) return
     const controller = new AbortController()
     active.current = controller
-    const initial: ProbeState = { draftKey, index, result: null, errorCode: null, running: true, cancelled: false }
+    const initial: ProbeState = { draftKey, index, capability: input.capability, result: null, errorCode: null, running: true, cancelled: false }
     setState(initial)
     const owns = () => active.current === controller && current.current.enabled && current.current.draftKey === draftKey
     try {
       const result = await probeManagementCustomModel(input, controller.signal)
       if (owns() && !controller.signal.aborted) {
-        if (result.model !== input.model || result.upstreamWireApi !== input.upstreamWireApi || !/^[a-f0-9]{64}$/.test(result.connectionToken ?? "")) {
+        if (result.model !== input.model || result.upstreamWireApi !== input.upstreamWireApi
+          || result.capability !== input.capability || result.reasoningEffort !== input.reasoningEffort
+          || result.check?.capability !== input.capability
+          || !["supported", "unsupported", "inconclusive"].includes(result.check.status)
+          || !["completed", "cancelled"].includes(result.status)
+          || !/^[a-f0-9]{64}$/.test(result.connectionToken ?? "")) {
           setState({ ...initial, running: false, errorCode: "custom_model_probe_failed" })
         } else {
           setState({ ...initial, running: false, result })
@@ -61,7 +67,7 @@ export function useCustomModelCapabilityProbe(draftKey: string, enabled: boolean
   }
   const bound = enabled && state?.draftKey === draftKey ? state : null
   const result = bound?.result
-  const canApply = result?.status === "completed" && result.capabilities.reasoningEfforts.length > 0
-    && ["text", "tools"].every(capability => result.checks.some(check => check.capability === capability && check.status === "supported"))
+  const canApply = result?.status === "completed"
+    && (result.check.status === "supported" || result.check.status === "unsupported")
   return { state: bound, running: bound?.running === true, start, cancel, invalidate, canApply }
 }

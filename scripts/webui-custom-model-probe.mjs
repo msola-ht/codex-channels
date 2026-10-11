@@ -20,6 +20,8 @@ const inputSchema = z.strictObject({
   baseUrl: text(2048),
   model: text(200),
   upstreamWireApi: z.enum(["responses", "chat_completions"]),
+  capability: z.enum(["applyPatch", "toolSearch"]),
+  reasoningEffort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"]),
   credential: z.discriminatedUnion("action", [
     z.strictObject({ action: z.literal("preserve") }),
     z.strictObject({ action: z.literal("replace"), apiKey: text(4096) }),
@@ -53,13 +55,14 @@ export async function routeCustomModelCapabilityProbe({ environment, maximumBody
     let result;
     try {
       result = await probeCustomModelCapabilities({ baseUrl, apiKey, model: input.model,
-        upstreamWireApi: input.upstreamWireApi, environment, signal: controller.signal, timeoutMs: 120_000 });
+        upstreamWireApi: input.upstreamWireApi, capability: input.capability, reasoningEffort: input.reasoningEffort,
+        environment, signal: controller.signal, timeoutMs: 45_000 });
     } catch {
       throw new ApiError(503, "custom_model_probe_failed", "模型能力检测未完成，请检查连接与凭据");
     }
     if (!response.destroyed && !controller.signal.aborted) sendManagementJson(response, 200, {
       ...result,
-      connectionToken: customModelProbeConnection({ baseUrl, apiKey, model: input.model, upstreamWireApi: input.upstreamWireApi }),
+      connectionToken: customModelProbeConnection({ baseUrl, apiKey, model: input.model, upstreamWireApi: input.upstreamWireApi, reasoningEffort: input.reasoningEffort, capability: input.capability }),
     });
     return true;
   } finally {

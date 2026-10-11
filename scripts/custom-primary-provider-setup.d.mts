@@ -24,7 +24,6 @@ export interface CustomPrimaryProviderSetupOptions {
   prompts?: CustomPrimaryProviderSetupPrompts;
   providerId?: string;
   probeWebSocket?: typeof import("./responses-websocket-probe.mjs").probeResponsesWebSocket;
-  probeToolSearch?: typeof import("./responses-tool-search-probe.mjs").probeResponsesToolSearch;
   probeModelCapabilities?: typeof import("./custom-model-capability-probe.mjs").probeCustomModelCapabilities;
   loadModelTemplates?: (source: import("./responses-model-templates.mjs").ResponsesTemplateSource) => Promise<import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[]>;
   createClient?: (options: {

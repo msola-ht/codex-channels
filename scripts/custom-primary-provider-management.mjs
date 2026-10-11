@@ -40,9 +40,9 @@ export const primaryProviderId = "OpenAI";
 // Process-local authentication prevents exposing a reusable hash of a stored key.
 // Restarting invalidates outstanding probe drafts; no persistent format is added.
 const probeConnectionSecret = randomBytes(32);
-export function customModelProbeConnection({ baseUrl, upstreamWireApi, apiKey, model }) {
+export function customModelProbeConnection({ baseUrl, upstreamWireApi, apiKey, model, reasoningEffort, capability }) {
   return createHmac("sha256", probeConnectionSecret)
-    .update(JSON.stringify([validCustomPrimaryProviderBaseUrl(baseUrl), upstreamWireApi, apiKey, model]))
+    .update(JSON.stringify([validCustomPrimaryProviderBaseUrl(baseUrl), upstreamWireApi, apiKey, model, reasoningEffort, capability]))
     .digest("hex");
 }
 
@@ -406,13 +406,15 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
   }
   if (apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) throw invalid("invalid-api-key", "credential.apiKey", "API Key 不能超过 4096 字符或包含控制字符");
   if (input.probeConnections !== undefined) {
-    if (!Array.isArray(input.probeConnections) || input.probeConnections.length > 64
+    if (!Array.isArray(input.probeConnections) || input.probeConnections.length > 128
       || input.probeConnections.some(entry => !entry || typeof entry !== "object"
-        || Array.isArray(entry) || Object.keys(entry).some(key => key !== "model" && key !== "token")
+        || Array.isArray(entry) || Object.keys(entry).some(key => !["model", "token", "capability"].includes(key))
+        || !["applyPatch", "toolSearch"].includes(entry.capability)
         || typeof entry.model !== "string" || typeof entry.token !== "string"
         || !/^[a-f0-9]{64}$/.test(entry.token)
         || !models?.some(model => model.id === entry.model)
-        || entry.token !== customModelProbeConnection({ baseUrl, upstreamWireApi, apiKey, model: entry.model }))) {
+        || entry.token !== customModelProbeConnection({ baseUrl, upstreamWireApi, apiKey, model: entry.model,
+          reasoningEffort: models.find(model => model.id === entry.model).defaultReasoningEffort ?? "none", capability: entry.capability }))) {
       throw invalid("stale-model-probe", "catalog", "模型探测使用的连接或凭据已变化，请重新探测后保存");
     }
   }

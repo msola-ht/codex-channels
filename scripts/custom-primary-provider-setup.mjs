@@ -1,5 +1,4 @@
 import { promptResponsesWebSocket } from "./responses-websocket-setup.mjs";
-import { promptResponsesToolSearch } from "./responses-tool-search-setup.mjs";
 import { promptCustomModelCapabilities } from "./custom-model-capability-setup.mjs";
 import { isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
@@ -21,7 +20,6 @@ import {
 import {
   bundledOfficialModelOptions,
   customPrimaryProviderIdFromBaseUrl,
-  customModelProbeConnection,
   customPrimaryProviderUrlsShareOrigin,
   prepareCustomPrimaryProviderSave,
   primaryProviderId,
@@ -65,7 +63,6 @@ export async function runCustomPrimaryProviderSetup({
   catalogKind = "official",
   loadModelTemplates = source => loadResponsesModelTemplates(source, environment),
   probeWebSocket,
-  probeToolSearch,
   probeModelCapabilities,
 } = {}) {
   const custom = editingProviderId === undefined ? catalogKind === "custom" : isCustomCatalogProvider(editingProviderId);
@@ -373,18 +370,7 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error(`模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`);
   }
 
-  const capabilityMode = custom ? await prompts.select({
-    message: "自定义模型能力如何填写？",
-    options: [
-      { value: "probe", label: "逐模型探测并回填（推荐）", hint: "每个模型最多 12 次短请求，可能计费；上下文仍手填，不执行返回的工具" },
-      { value: "manual", label: "手动填写或沿用模板能力" },
-    ],
-    initialValue: editingProviderId === undefined ? "probe" : "manual",
-  }) : "manual";
-  if (prompts.isCancel(capabilityMode)) return { action: allowBack ? "back" : "cancel" };
-  if (!["probe", "manual"].includes(capabilityMode)) throw new Error("模型能力填写方式无效");
-  let models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id), output,
-    { probeCapabilities: capabilityMode === "probe" }) : undefined;
+  const models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id), output) : undefined;
   if (custom && models === undefined) return { action: allowBack ? "back" : "cancel" };
 
   const canPreserveCurrentBearerToken = hasCurrentBearerToken
@@ -407,19 +393,24 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error("API Key 不能为空");
   }
 
-  if (custom && capabilityMode === "probe") {
-    models = await promptCustomModelCapabilities(prompts, {
+  let catalogModels = models;
+  let probeConnections;
+  if (custom) {
+    const selected = await promptCustomModelCapabilities(prompts, {
       baseUrl: normalizedBaseUrl, apiKey: replacementApiKey || currentApiKey, models,
       upstreamWireApi: chatUpstream ? "chat_completions" : "responses", environment,
     }, { output, probe: probeModelCapabilities });
-    if (models === undefined) {
+    if (selected === undefined) {
       output.write("已取消，未修改配置。\n");
       return { action: allowBack ? "back" : "cancel" };
     }
+    catalogModels = selected.models;
+    probeConnections = selected.probeConnections;
   }
 
   const supportsWebsockets = chatUpstream
     ? false
+    : custom ? await prompts.confirm({ message: "是否支持 Responses WebSocket？（不检测，按平台说明选择）", initialValue: currentWebsockets === "yes" })
     : await promptResponsesWebSocket(prompts, {
         baseUrl: normalizedBaseUrl,
         apiKey: replacementApiKey || currentApiKey,
@@ -427,22 +418,7 @@ export async function runCustomPrimaryProviderSetup({
         reasoningEffort: custom ? models.find(entry => entry.id === normalizedModel)?.defaultReasoningEffort ?? "none" : "medium",
         environment,
       }, {output, probe: probeWebSocket, current: currentWebsockets === "yes"});
-  if (supportsWebsockets === undefined) return { action: allowBack ? "back" : "cancel" };
-
-  let catalogModels = models;
-  if (custom && capabilityMode === "manual") {
-    catalogModels = [];
-    for (const entry of models) {
-      const supportsToolSearch = chatUpstream ? true : await promptResponsesToolSearch(prompts, {
-        baseUrl: normalizedBaseUrl,
-        apiKey: replacementApiKey || currentApiKey,
-        model: entry.id,
-        environment,
-      }, {output, probe: probeToolSearch, current: entry.supportsSearchTool === true});
-      if (supportsToolSearch === undefined) return { action: allowBack ? "back" : "cancel" };
-      catalogModels.push({...entry, supportsSearchTool: supportsToolSearch});
-    }
-  }
+  if (supportsWebsockets === undefined || prompts.isCancel(supportsWebsockets)) return { action: allowBack ? "back" : "cancel" };
 
   const saveInput = {
     operation: fixedProviderId === undefined ? "create" : "update",
@@ -454,11 +430,7 @@ export async function runCustomPrimaryProviderSetup({
     ...(custom ? { catalog: { kind: "custom", models: catalogModels } } : {}),
     supportsWebsockets,
     upstreamWireApi: chatUpstream ? "chat_completions" : "responses",
-    ...(custom && capabilityMode === "probe" ? { probeConnections: catalogModels.map(entry => ({
-      model: entry.id,
-      token: customModelProbeConnection({ baseUrl: normalizedBaseUrl, apiKey: replacementApiKey || currentApiKey,
-        upstreamWireApi: chatUpstream ? "chat_completions" : "responses", model: entry.id }),
-    })) } : {}),
+    ...(probeConnections?.length ? { probeConnections } : {}),
     credential: replacementApiKey === ""
       ? { action: "preserve" }
       : { action: "replace", apiKey: replacementApiKey },

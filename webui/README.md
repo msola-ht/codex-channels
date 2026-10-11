@@ -120,10 +120,22 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 控制台、请求与错误列表区分首次加载和后台刷新：`loading` 仅用于当前查询没有结果时的占位，`refreshing` 用于刷新按钮和操作限制；同查询刷新保留内容，切换查询不展示旧范围结果。管理任务的 `notificationError` 独立于读取错误，通知中断不阻止已成功读取的终态触发关联刷新。
 
-## 国际化维护
+## 自定义模型能力设置
 
-`hooks/use-custom-model-capability-probe.ts` 为自定义提供商编辑草稿提供逐模型探测、取消和结果回填；
-绑定当前地址、协议、模型及凭据，草稿变化使旧结果失效。结果只修改草稿，保存仍由现有 Provider 预览确认流程负责。
+`components/settings/provider-settings-management.tsx` 按模型提供图片、思考、`apply_patch` 与
+`tool_search` 的手动声明；思考支持开关控制既有思考等级与默认值。新增模型不会预选补丁或搜索工具，
+切换 Chat Completions 也不会改变模型的工具声明。
+
+每个模型分别提供 `apply_patch` 和 `tool_search` 检测按钮，不运行整套能力检测。
+`hooks/use-custom-model-capability-probe.ts` 将单项请求及结果绑定当前草稿，草稿变化、取消或关闭编辑时
+中止请求并阻止旧结果覆盖。检测使用手填的默认思考等级，未声明时使用 `none`；每次最多 3 个上游短请求，
+服务端总限时 45 秒，客户端限时 50 秒。请求可能产生费用，必须由用户主动点击。
+
+明确支持或不支持的结果可以回填对应的工具字段及连接凭证；未确定或取消的结果不能回填。
+其他模型能力保留手动值，保存继续使用版本化预览与确认。`lib/custom-model-probe.ts` 只将固定原因映射为
+`lib/i18n/messages.ts` 的中英文文案，不展示未经指定的上游响应。
+
+## 国际化维护
 
 当前页面覆盖与剩余验收见 [WebUI 指南](../docs/webui.md)。
 

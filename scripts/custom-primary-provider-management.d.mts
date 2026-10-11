@@ -5,7 +5,7 @@ import type {
 } from "./codex-user-config.mjs";
 
 export const primaryProviderId: "OpenAI";
-export function customModelProbeConnection(input: { baseUrl: string; upstreamWireApi: "responses" | "chat_completions"; apiKey: string; model: string }): string;
+export function customModelProbeConnection(input: { baseUrl: string; upstreamWireApi: "responses" | "chat_completions"; apiKey: string; model: string; reasoningEffort: string; capability: "applyPatch" | "toolSearch" }): string;
 
 export interface CustomPrimaryProviderSaveInput {
   operation: "create" | "update";
@@ -18,7 +18,7 @@ export interface CustomPrimaryProviderSaveInput {
   supportsWebsockets: boolean;
   upstreamWireApi?: "responses" | "chat_completions";
   /** Applied probe drafts bind their connection until save; not persisted or an attestation of capabilities. */
-  probeConnections?: Array<{ model: string; token: string }>;
+  probeConnections?: Array<{ model: string; capability: "applyPatch" | "toolSearch"; token: string }>;
   credential:
     | { action: "preserve" }
     | { action: "replace"; apiKey: string };

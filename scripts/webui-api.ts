@@ -10,6 +10,8 @@ export interface ManagementCustomModelProbeInput {
   baseUrl: string
   model: string
   upstreamWireApi: "responses" | "chat_completions"
+  capability: "applyPatch" | "toolSearch"
+  reasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
   credential: { action: "preserve" } | { action: "replace"; apiKey: string }
 }
 export type RangeName =
@@ -728,7 +730,7 @@ export type ManagementProviderSettingsMutationInput =
         supportsWebsockets: boolean
         upstreamWireApi?: "responses" | "chat_completions"
         credential: { action: "preserve" } | { action: "replace"; apiKey: string }
-        probeConnections?: Array<{ model: string; token: string }>
+        probeConnections?: Array<{ model: string; capability: "applyPatch" | "toolSearch"; token: string }>
         confirmRemoveTopLevelBaseUrl?: boolean
       }
     }

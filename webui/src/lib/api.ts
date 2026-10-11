@@ -362,7 +362,7 @@ export function fetchManagementProviderSettings(signal?: AbortSignal): Promise<M
 export function probeManagementCustomModel(input: ManagementCustomModelProbeInput, signal: AbortSignal): Promise<ManagementCustomModelProbeResult> {
   return requestJson<ManagementCustomModelProbeResult>(`${API_PREFIX}/management/provider-settings/probe`, {
     method: "POST", body: JSON.stringify(input),
-  }, signal, 125_000)
+  }, signal, 50_000)
 }
 
 export function previewManagementProviderSettings(
