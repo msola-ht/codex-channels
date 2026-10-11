@@ -65,19 +65,19 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
   `display_name` 与输入能力；`max_context_window` 存在时作为窗口占比的换算基准，上下文窗口
   只由「模型上下文窗口」按模型名统一写入，其余字段保持下载原样；`auto_compact_token_limit`
   是独立的上游压缩阈值，不换算为上下文窗口，修改窗口时也不清空该字段；
-- 同目录写入 `models.manifest.json`：来源 URL、sha256、下载时间；Profile（切换模式）与固定
-  基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；
+- 同目录写入 `models.manifest.json`：目录来源与下载时间（CLP 另记 relay 提交与跟随模型，OCG 额外记录下载
+  `sha256`）；Profile（切换模式）与固定基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；
 - 目录按 Provider 隔离；同名模型（如两个 Provider 都提供 `deepseek-flash`）是独立选项，
  模型 key 为 `provider + model`；
 - 可选模型以各 Provider 生成的模型目录为准：OCG/CCG 初始以 DS 完整目录为基础，复制 Flash 内容增加 V4.1，并按 Provider 映射模型 ID；配置后可通过共享模型管理显式添加上游支持的 Responses 模型和选择启用列表。新增模型的准确 ID 与能力必须确认，不把 Cline 专属路由或 Chat 参数复制给其他提供商；
 - 默认模型写入 Profile 后，Profile 顶层 `model_reasoning_effort` 必须镜像目录默认值，
   运行时校验不一致即失败关闭。
 
-模型选择复用 `scripts/provider-model-selection.mjs`，保护默认模型并限制启用数量；OCG/CCG 共享目录事务复用 `scripts/managed-provider-model-management.mjs`。CLP 保留官方候选目录下载与 Chat 能力映射，自定义 Responses 保留模板 ID 映射与版本 4 定义格式。通用提示词由 `runtime/third-party-coding-instructions.mjs` 提供，显式写入新定义；不得直接替换版本 4 生成器缺省值，否则既有目录的逐字段一致性校验会失败。
+模型选择复用 `scripts/provider-model-selection.mjs`，保护默认模型并限制启用数量；OCG/CCG 共享目录事务复用 `scripts/managed-provider-model-management.mjs`。CLP 保留官方候选目录下载与 Chat 能力映射，自定义 Responses 保留模板 ID 映射与版本 5 目录格式。通用提示词由 `runtime/third-party-coding-instructions.mjs` 提供，显式写入新定义；不得直接替换版本 5 生成器缺省值，否则既有目录的逐字段一致性校验会失败。
 
 自定义 Responses 的设置向导在能力填写后统一多选启用模型，当前默认模型必须保留；停用即从本次保存的 `definitions/models` 移除。模板更新保留已有自定义提示词。目录写入继续使用现有备份及未完成事务恢复机制；不自动迁移或重写既有数据。
 
-自定义 Responses 出站复核与配置加载共用版本 4、允许字段及定义／生成目录一致性校验。目录 `.pending` 或全局 DS/RS 上下文同步标记存在时，普通 HTTP 和 Responses WS 均拒绝新请求；读取前后检查标记，目录或事务不可用统一返回 `503 provider_catalog_unavailable`。恢复有效目录并完成事务后，下一次请求重新复核，不缓存失败或成功名单。
+自定义 Responses 出站复核与配置加载共用版本 5、允许字段及定义／生成目录一致性校验。目录 `.pending` 或全局 DS/RS 上下文同步标记存在时，普通 HTTP 和 Responses WS 均拒绝新请求；读取前后检查标记，目录或事务不可用统一返回 `503 provider_catalog_unavailable`。恢复有效目录并完成事务后，下一次请求重新复核，不缓存失败或成功名单。
 
 OCG/CCG 与自定义 `rs-*` 的普通代理及聚合下游均在发送前复核当前目录：HTTP 和 Responses WS 拒绝未知／已停用模型，旧会话不自动换模型。HTTP 错误为 `409 provider_model_disabled` 或目录不可用的 `503 provider_catalog_unavailable`；WS 返回对应 error 后关闭连接。CLP 保留专属错误码，独立 Relay 沿用自己的授权。名单约束即时读取，目录展示与能力仍按原服务刷新流程应用。
 
@@ -384,17 +384,17 @@ CLI Setup 的 Codex 兼容 Provider 和自定义 Responses Provider，新增与�
 
 ### 存储、备份与恢复
 
-每个 Provider 的 `~/.codex-connect/providers/responses/<Provider ID>/models.json` 使用版本 4 格式，
-包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`。模型定义可携带 `template: { source, model, followContext }` 关联。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不再保存完整模板快照，输入旧 `snapshot` 字段会明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联。Codex 读取其中的
+每个 Provider 的 `~/.codex-connect/providers/responses/<Provider ID>/models.json` 使用版本 5 格式，
+包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`；生成的每个模型条目声明 `multi_agent_version: v2`，由 Codex 解析为多代理 v2 运行时，不写入主配置的 `features.multi_agent_v2`。模型定义可携带 `template: { source, model, followContext }` 关联。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不再保存完整模板快照，输入旧 `snapshot` 字段会明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联；版本 4 目录在本版本失败关闭，既不自动迁移也不写回，读取该目录的 Gateway 启动与管理界面会一起失败（`codexc provider recover` 只处理未完成写入事务，不处理版本升级），移除只依赖注册表与 Profile 原文，因此目录缺失或不支持时仍可 `codexc provider remove` 后按原 ID 重建。Codex 读取其中的
 `models`，Gateway 严格核对版本与生成结果；不接受未知字段、重复 ID、任意外部路径或手写的第三方目录。
-模型目录保存为两空格缩进的 JSON，DS 上下文同步也保留该排版。文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。
+模型目录保存为两空格缩进的 JSON，DS 上下文同步也保留该排版；账户注册表、账户初始备份与 `models.manifest.json` 同样使用两空格缩进。文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。
 上游接口选择单独保存在同目录的 `provider.json`（版本 1，仅含 `upstreamWireApi`，取值 `responses` 或
 `chat_completions`），沿用同一私有文件工具原子写入，目录 0700、文件 0600，不含 Key。文件缺失按 `responses`
 处理以兼容既有目录，Provider ID 不是 `rs-` 前缀时不读写该文件；版本、字段或取值不受支持时失败关闭并拒绝加载，
 不回退为 `responses`。选择 Chat Completions 时写入，改回 Responses 时删除；编辑 Provider 时未显式改动上游接口就沿用文件中的已保存值，
 元数据不可安全读取时列表省略该字段、保存要求显式选择而不是静默改成 `responses`；删除 Provider 在备份清理成功后
 连同模型目录一起清理，清理中断可按原 ID 重跑 `codexc provider remove`。该文件与主配置、Profile、注册表一并记入
-`~/.codex-connect/private/responses-providers/<Provider ID>.json` 备份；写入是单文件原子替换，失败时保持原值，
+`~/.codex-connect/private/responses-providers/<Provider ID>.json` 备份（两空格缩进 JSON）；写入是单文件原子替换，失败时保持原值，
 随模型目录保存事务失败时按既有规则保留备份与 pending 并拒绝启动，不自动重试，修改后须执行 `codexc restart all`。
 WebUI 的 Provider 预览与保存请求上限为 2 MiB，其他管理接口仍为 64 KiB。模型数量上限仍为 64 个。模型目录（定义和生成结果）不得超过 2 MiB，超限在写入前拒绝。上下文不得超过模板原始最大窗口。模型文件不含 Key。Key 写入私有 Profile 或独立私有凭据版本，主配置只含引用；连接配置的恢复快照单独位于
 `~/.codex-connect/private/responses-providers/<Provider ID>.json`（0600，可能含凭据，勿分享）。

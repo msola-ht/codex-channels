@@ -1,5 +1,6 @@
 import {
   loadConfiguredCustomSwitchingModelProviders,
+  loadCustomSwitchingProviderIds,
   removeCustomPrimaryProviderSwitchingProfile,
   restoreCustomPrimaryProviderSwitchingProfile,
   writeCustomPrimaryProviderCredential,
@@ -83,8 +84,13 @@ export async function writePrimaryProviderConfigEditsWithProfileRemoval({
 
 function switchingProfileSnapshot(environment, providerId) {
   if (providerId === undefined) return undefined;
-  return loadConfiguredCustomSwitchingModelProviders(environment)
-    .find(({ id }) => id === providerId);
+  if (!loadCustomSwitchingProviderIds(environment).includes(providerId)) return undefined;
+  try {
+    return loadConfiguredCustomSwitchingModelProviders(environment, providerId)[0];
+  } catch {
+    // 其他 Provider 的模型目录不可读不应阻止本次移除；目标自身是否可用由调用方先行校验。
+    return undefined;
+  }
 }
 
 function record(value) {

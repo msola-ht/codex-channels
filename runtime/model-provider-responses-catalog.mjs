@@ -65,7 +65,7 @@ export function validateResponsesModels(values, defaultModel, { allowReasoningTo
 export function createResponsesModelCatalog(definitions, defaultModel, { allowReasoningToggle = false } = {}) {
   const validated = validateResponsesModels(definitions, defaultModel, { allowReasoningToggle });
   const catalog = {
-    schemaVersion: 4,
+    schemaVersion: 5,
     defaultModel,
     definitions: validated,
     models: validated.map((model, index) => ({
@@ -86,6 +86,7 @@ export function createResponsesModelCatalog(definitions, defaultModel, { allowRe
       context_window: model.contextWindow, max_context_window: model.maxContextWindow ?? model.contextWindow,
       effective_context_window_percent: 95, experimental_supported_tools: [],
       input_modalities: model.supportsImages ? ["text", "image"] : ["text"],
+      multi_agent_version: "v2",
     })),
   };
   if (Buffer.byteLength(JSON.stringify(catalog, null, 2)) + 1 > maximumBytes) throw new Error("Responses 模型目录不能超过 2 MiB");
@@ -96,7 +97,7 @@ export function createResponsesModelCatalog(definitions, defaultModel, { allowRe
 export function parseResponsesModelCatalog(content) {
   let parsed;
   try { parsed = JSON.parse(content); } catch { throw new Error("Responses 模型目录不是有效 JSON"); }
-  if (parsed?.schemaVersion !== 4 || Object.keys(parsed).some((key) => !["schemaVersion", "defaultModel", "definitions", "models"].includes(key))) throw new Error("Responses 模型目录版本或字段不受支持（仅支持版本 4）；请先保留配置与模型目录完整备份，再重新配置");
+  if (parsed?.schemaVersion !== 5 || Object.keys(parsed).some((key) => !["schemaVersion", "defaultModel", "definitions", "models"].includes(key))) throw new Error("Responses 模型目录版本或字段不受支持（仅支持版本 5）；请先保留配置与模型目录完整备份，再重新配置");
   const expected = createResponsesModelCatalog(parsed.definitions, parsed.defaultModel);
   if (JSON.stringify(parsed) !== JSON.stringify(expected)) throw new Error("Responses 模型目录与模型定义不一致，请重新生成");
   return expected;

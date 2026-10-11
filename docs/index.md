@@ -336,7 +336,7 @@ Codex 兼容 Provider Setup 的官方模型目录复用、手工模型 ID、固�
 [`第三方模型 Provider 接入指南`](provider-integration-guide.md)；该本地 Setup 能力不新增 App Server RPC。
 自定义 Responses Provider 使用 [`model-provider-responses-catalog.mjs`](../runtime/model-provider-responses-catalog.mjs)
 生成逐 Provider 的版本化目录，通过同一 `model/list`、`config/batchWrite`、Thread/Turn 路由接入；
-模板选择及平台模型 ID 映射复用本地目录，版本 4 导入基础模型字段并单独保留最大窗口；DS 模板另保留非空编程指令，缺省指令与工具字段由项目统一生成；DS 上下文跟随接入既有受管模型窗口事务，
+模板选择及平台模型 ID 映射复用本地目录，版本 5 导入基础模型字段并单独保留最大窗口，每个生成的模型条目声明 `multi_agent_version: v2`；DS 模板另保留非空编程指令，缺省指令与工具字段由项目统一生成；DS 上下文跟随接入既有受管模型窗口事务，
 实现见 [`responses-context-sync.mjs`](../runtime/responses-context-sync.mjs)。
 CLI 自定义 Provider 的保存前 WS 检测见 [`responses-websocket-probe.mjs`](../scripts/responses-websocket-probe.mjs) 和 [`responses-websocket-setup.mjs`](../scripts/responses-websocket-setup.mjs)。使用锁定源码 `core/src/client.rs` 的 WS v2 Beta 头及 `codex-api/src/common.rs` 的 `ResponseCreateWsRequest`，以 `generate=false` 预热和经确认的独立文字请求分别报告兼容程度；这不是新的 App Server RPC。
 RS 自定义 Provider 的上游接口选择（`Responses` 直连或 `Chat Completions` 经 Chat 桥转换）保存在模型目录同目录的 `provider.json`，读写与失败关闭见 [`model-provider-upstream-metadata.mjs`](../runtime/model-provider-upstream-metadata.mjs)，Chat 上游复用 [`chat-bridge.ts`](../src/provider-proxy/chat-bridge.ts) 的 `model-api` 转换；客户端检索能力探测见 [`responses-tool-search-probe.mjs`](../scripts/responses-tool-search-probe.mjs) 和 [`responses-tool-search-setup.mjs`](../scripts/responses-tool-search-setup.mjs)，只验证上游是否接受 Codex 检索输入项。

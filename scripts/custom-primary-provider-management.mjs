@@ -123,10 +123,10 @@ async function applySavePlan(input, plan, options) {
     ...(isResponsesProvider(plan.provider.id) ? [customProviderUpstreamMetadataPath(environment, plan.provider.id)] : [])];
   const transaction = writeResponsesModelCatalog(environment, plan.provider.id, plan.models, plan.provider.model, plan.catalogRevision);
   try {
-    writePrivateFileAtomicSync(responsesProviderBackupPath(environment, plan.provider.id), JSON.stringify({
+    writePrivateFileAtomicSync(responsesProviderBackupPath(environment, plan.provider.id), `${JSON.stringify({
       schemaVersion: 1,
       files: backupPaths.map(path => ({ path, content: existsSync(path) ? read(path) : null })),
-    }));
+    }, null, 2)}\n`);
     const result = await withResponsesModelCatalogWrite(transaction, () => applyConnectionSavePlan(input, plan, options));
     finishResponsesModelCatalogWrite(transaction);
     return result;

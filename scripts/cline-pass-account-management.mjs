@@ -162,7 +162,7 @@ export async function applyClinePassConfiguration(input, { environment = process
       model: previous?.model ?? (catalog.models.some(model => model.slug === definition.defaultModel) ? definition.defaultModel : catalog.models[0]?.slug),
     });
     const updates = new Map([
-      [paths.backup, `${JSON.stringify({ config: initial })}\n`],
+      [paths.backup, `${JSON.stringify({ config: initial }, null, 2)}\n`],
       [paths.profile, profile === undefined ? undefined : stringify(profile)],
       [paths.marker, stringify(createManagedProviderMarker(definition, mode))],
     ]);
@@ -170,10 +170,10 @@ export async function applyClinePassConfiguration(input, { environment = process
       updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
       updates.set(paths.manifest, `${JSON.stringify(clinePassManifest(downloadedCline, catalog), null, 2)}\n`);
     }
-    if (!previous) updates.set(paths.registry, `${JSON.stringify(validateClinePassAccounts([...accounts, { id: accountId, default: accounts.length === 0 }]))}\n`);
+    if (!previous) updates.set(paths.registry, `${JSON.stringify(validateClinePassAccounts([...accounts, { id: accountId, default: accounts.length === 0 }]), null, 2)}\n`);
     if (downloadedDs) {
       updates.set(dsCatalogPath, `${JSON.stringify(downloadedDs, null, 2)}\n`);
-      updates.set(dsManifestPath, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() })}\n`);
+      updates.set(dsManifestPath, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() }, null, 2)}\n`);
     }
     if (content("backup") !== undefined && JSON.stringify(backup.config) !== JSON.stringify(initial)) {
       const archive = `${paths.backup}.${randomUUID()}`;
@@ -244,7 +244,7 @@ export async function refreshClinePassCatalog({ environment = process.env, loadT
     updates.set(paths.manifest, `${JSON.stringify(clinePassManifest(source, catalog), null, 2)}\n`);
     if (downloadedDs && catalog.models.some(model => model.slug === definition.defaultModel)) {
       updates.set(dsCatalog, `${JSON.stringify(downloadedDs, null, 2)}\n`);
-      updates.set(dsManifest, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() })}\n`);
+      updates.set(dsManifest, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() }, null, 2)}\n`);
     }
     await assertProviderFileSnapshots(snapshots);
     await applyProviderFileUpdates(updates, snapshots);
@@ -264,7 +264,7 @@ function clinePassRemovalPlan(accountId, environment) {
   const snapshots = snapshotProviderFiles(Object.values(paths), environment);
   const content = key => snapshots.find(item => item.path === paths[key]).content?.toString("utf8");
   const updates = new Map([paths.profile, paths.marker].map(path => [path, undefined]));
-  updates.set(paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining)}\n`);
+  updates.set(paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`);
   if (remaining.length === 0) {
     updates.set(paths.catalog, undefined);
     updates.set(paths.manifest, undefined);
@@ -306,7 +306,7 @@ export async function setClinePassDefaultAccount(accountId, { environment = proc
     const preview = previewClinePassDefaultAccount(accountId, { environment });
     const accounts = loadClinePassAccounts(environment).map(account => ({ ...account, default: account.id === accountId }));
     const path = clinePassAccountsFilePath(environment);
-    await applyProviderFileUpdates(new Map([[path, `${JSON.stringify(validateClinePassAccounts(accounts))}\n`]]), snapshotProviderFiles([path], environment));
+    await applyProviderFileUpdates(new Map([[path, `${JSON.stringify(validateClinePassAccounts(accounts), null, 2)}\n`]]), snapshotProviderFiles([path], environment));
     return { ...preview, account: { ...preview.account, default: true }, action: "default-set" };
   });
 }

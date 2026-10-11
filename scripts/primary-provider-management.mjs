@@ -1,8 +1,10 @@
 import { readOfficialModelCatalog } from "../runtime/model-provider-official-catalog.mjs";
 import { isResponsesProvider, responsesModelSettings, responsesProviderCatalogPath, responsesProviderBackupPath, removeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { removeCustomProviderUpstreamMetadata } from "../runtime/model-provider-upstream-metadata.mjs";
+import { readPrivateFileSync } from "../runtime/private-file.mjs";
 import { existsSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
+import { parse } from "smol-toml";
 
 import {
   backupPrimaryProviderCandidates,
@@ -203,8 +205,7 @@ async function removalPlanForExecution(input, preview, options) {
     });
   }
   if (preview.target.state === "switching") {
-    const switching = loadConfiguredCustomSwitchingModelProviders(environment)
-      .find(({ id }) => id === normalizedId);
+    const switching = registeredSwitchingProviderForRemoval(environment, normalizedId);
     if (switching === undefined) {
       throw invalid("stale-preview", "preview", "Provider 状态已变化，请重新生成删除预览");
     }
@@ -231,7 +232,7 @@ async function removalPlanForExecution(input, preview, options) {
     if (!listCustomPrimaryProviderCandidates(providers).includes(normalizedId)) {
       throw invalid("stale-preview", "preview", "Provider 状态已变化，请重新生成删除预览");
     }
-    if (loadConfiguredCustomSwitchingModelProviders(environment).some(({ id }) => id === normalizedId)) {
+    if (loadCustomSwitchingProviderIds(environment).includes(normalizedId)) {
       throw invalid("stale-preview", "preview", "Provider 状态已变化，请重新生成删除预览");
     }
     const provider = record(providers[normalizedId]);
@@ -457,6 +458,39 @@ async function loadSwitchContext(environment, createClient, includeModels) {
   }
 }
 
+/**
+ * 删除只依赖注册表与 Profile 原文：模型目录不可读（例如旧 schema）时仍要能移除该 Provider。
+ * 目录可读时沿用完整解析结果，保持既有显示名与内容校验语义。
+ */
+function registeredSwitchingProviderForRemoval(environment, providerId) {
+  if (!loadCustomSwitchingProviderIds(environment).includes(providerId)) return undefined;
+  try {
+    const [provider] = loadConfiguredCustomSwitchingModelProviders(environment, providerId);
+    if (provider !== undefined) return provider;
+  } catch {
+    // 目录不可读不阻止删除；下面回退到注册表与 Profile 原文。
+  }
+  let profileContent;
+  try {
+    profileContent = readPrivateFileSync(customPrimaryProviderProfilePath(environment, providerId));
+  } catch {
+    return { id: providerId, name: providerId, baseUrl: "", profileContent: undefined };
+  }
+  let profile;
+  try {
+    profile = record(parse(profileContent));
+  } catch {
+    profile = {};
+  }
+  const block = record(record(profile.model_providers)[providerId]);
+  return {
+    id: providerId,
+    name: optionalString(block.name) ?? providerId,
+    baseUrl: optionalString(block.base_url) ?? "",
+    profileContent,
+  };
+}
+
 async function buildRemovalPlan(
   { providerId },
   {
@@ -487,8 +521,7 @@ async function buildRemovalPlan(
   const providers = record(config.model_providers);
   const candidateIds = listCustomPrimaryProviderCandidates(providers);
   const backup = readPrimaryProviderBackup(environment);
-  const switching = loadConfiguredCustomSwitchingModelProviders(environment)
-    .find(({ id }) => id === normalizedId);
+  const switching = registeredSwitchingProviderForRemoval(environment, normalizedId);
   const configured = candidateIds.includes(normalizedId);
   const backedUp = Object.prototype.hasOwnProperty.call(backup, normalizedId);
   if (!configured && !backedUp && switching === undefined && isResponsesProvider(normalizedId)) {
