@@ -751,6 +751,7 @@ export interface ManagementProviderSettingsPreview {
     name?: string
     baseUrl?: string
     mode?: string
+    upstreamWireApi?: "responses" | "chat_completions"
     catalog?: string
     models?: ResponsesModelDefinition[]
     apiKeyChange?: boolean

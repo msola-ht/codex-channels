@@ -68,6 +68,9 @@ export function normalizeProviderSettingsMutation(input) {
           model: input.provider?.model,
           ...(input.provider?.catalog === undefined ? {} : { catalog: input.provider.catalog }),
           supportsWebsockets: input.provider?.supportsWebsockets,
+          ...(input.provider?.upstreamWireApi === undefined
+            ? {}
+            : { upstreamWireApi: input.provider.upstreamWireApi }),
           credential: input.provider?.credential,
           ...(input.provider?.confirmRemoveTopLevelBaseUrl === undefined
             ? {}
@@ -299,6 +302,9 @@ function redactProvider(provider) {
     ...(provider.name === undefined ? {} : { name: provider.name }),
     ...(provider.baseUrl === undefined ? {} : { baseUrl: provider.baseUrl }),
     ...(provider.mode === undefined ? {} : { mode: provider.mode }),
+    ...(provider.upstreamWireApi === "responses" || provider.upstreamWireApi === "chat_completions"
+      ? { upstreamWireApi: provider.upstreamWireApi }
+      : {}),
     ...redactCatalog(provider),
     ...(provider.hasApiKey === undefined ? {} : { hasApiKey: provider.hasApiKey }),
   };
