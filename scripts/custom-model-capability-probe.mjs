@@ -161,16 +161,15 @@ export async function probeCustomModelCapabilities({baseUrl, apiKey, model, upst
           || Object.keys(call.arguments).some(key => key !== "query" && key !== "limit")) add(failedTask(search));
         else {
           const history = [...searchInput, ...search.output, {type: "tool_search_output", call_id: call.call_id, status: "completed", execution: "client", tools: [discovered]}];
-          // 已检索工具仍保留 defer_loading；共享转换层负责在 Chat 端移除。
-          const loadedTools = [searchTool, {...discovered, defer_loading: false}];
-          const found = await request({input: history, tools: loadedTools, tool_choice: "auto", parallel_tool_calls: false});
+          // 与 Codex 一致：发现工具只经检索结果提供；Chat 转换层从历史中补入函数声明。
+          const found = await request({input: history, tools: [searchTool], tool_choice: "auto", parallel_tool_calls: false});
           if (found.status !== "ok") add(found);
           else {
             const foundCall = callable(found, discovered.name, "key", "K7");
             if (!foundCall) add(failedTask(found));
             else {
               const token = marker();
-              const last = await request({input: [...history, ...found.output, {type: "function_call_output", call_id: foundCall.call_id, output: token}], tools: loadedTools, tool_choice: "none"});
+              const last = await request({input: [...history, ...found.output, {type: "function_call_output", call_id: foundCall.call_id, output: token}], tools: [searchTool], tool_choice: "none"});
               add(last.status !== "ok" ? last : exactText(last, token)
                 ? good(upstreamWireApi === "responses" ? "客户端检索、发现工具调用及模拟结果回传已通过" : "经 Chat 桥函数映射的客户端检索、发现工具调用及结果回传已通过", last) : failedTask(last));
             }
