@@ -90,7 +90,7 @@ export async function listPrimaryProviders({
         name: provider.displayName,
         baseUrl: provider.baseUrl,
         profileName: provider.profileName,
-        upstreamWireApi: provider.upstreamWireApi ?? "responses",
+        upstreamWireApi: provider.upstreamWireApi,
       })),
       backupCandidates: state.customProviders.backupCandidates.map((provider) => ({
         id: provider.id,

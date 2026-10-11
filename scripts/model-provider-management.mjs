@@ -35,6 +35,7 @@ export async function loadModelProviderManagementState({
       model: provider.model,
       reasoningEffort: provider.reasoningEffort,
       supportsWebsockets: provider.supportsWebsockets,
+      upstreamWireApi: provider.upstreamWireApi,
       baseUrl: publicBaseUrl(provider.baseUrl),
       profileName: provider.profileName,
       ...customCatalog(provider.id, environment, provider.model),

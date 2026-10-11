@@ -404,19 +404,18 @@ export async function runCustomPrimaryProviderSetup({
   if (supportsWebsockets === undefined) return { action: allowBack ? "back" : "cancel" };
 
   let catalogModels = models;
-  let supportsToolSearch = false;
   if (custom) {
-    const currentToolSearch = previousCatalog?.definitions.find(entry => entry.id === normalizedModel)?.supportsSearchTool === true;
-    supportsToolSearch = chatUpstream ? true : await promptResponsesToolSearch(prompts, {
-      baseUrl: normalizedBaseUrl,
-      apiKey: replacementApiKey || currentApiKey,
-      model: normalizedModel,
-      environment,
-    }, {output, probe: probeToolSearch, current: currentToolSearch === true});
-    if (supportsToolSearch === undefined) return { action: allowBack ? "back" : "cancel" };
-    catalogModels = models.map(entry => (supportsToolSearch
-      ? {...entry, supportsSearchTool: true}
-      : {...entry, supportsSearchTool: false}));
+    catalogModels = [];
+    for (const entry of models) {
+      const supportsToolSearch = chatUpstream ? true : await promptResponsesToolSearch(prompts, {
+        baseUrl: normalizedBaseUrl,
+        apiKey: replacementApiKey || currentApiKey,
+        model: entry.id,
+        environment,
+      }, {output, probe: probeToolSearch, current: entry.supportsSearchTool === true});
+      if (supportsToolSearch === undefined) return { action: allowBack ? "back" : "cancel" };
+      catalogModels.push({...entry, supportsSearchTool: supportsToolSearch});
+    }
   }
 
   const saveInput = {
@@ -465,7 +464,7 @@ export async function runCustomPrimaryProviderSetup({
     ...(custom ? preview.provider.models.map(entry => `- 模型 ${entry.id}：${entry.contextWindow} Token；图片 ${entry.supportsImages ? "支持" : "不支持"}；思考 ${entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`) : []),
     `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,
     ...(custom
-      ? [`- 工具检索（tool_search）：${supportsToolSearch ? "声明支持；上游须接受 Codex 检索输入项" : "不声明；工具定义全量下发"}`]
+      ? preview.provider.models.map(entry => `- 模型 ${entry.id} 工具检索（tool_search）：${entry.supportsSearchTool ? chatUpstream ? "声明支持；网关转换检索输入项" : "声明支持；上游须接受 Codex 检索输入项" : "不声明；工具定义全量下发"}`)
       : []),
     ...(preview.transport.cleartext ? ["- 传输：明文 HTTP；API Key 与请求内容不加密"] : []),
   ];

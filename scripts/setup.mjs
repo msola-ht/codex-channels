@@ -56,6 +56,11 @@ export async function runSetup({
           hint: "安装或卸载项目技能到用户目录",
         },
         {
+          value: "complete",
+          label: "完成接入",
+          hint: "退出接入向导",
+        },
+        {
           value: "cancel",
           label: "取消",
           hint: "退出 Setup",
@@ -66,6 +71,12 @@ export async function runSetup({
       prompts.cancel("Setup 已取消");
       emitSetupResult(onResult, undefined, undefined, "cancelled");
       return undefined;
+    }
+    if (section === "complete") {
+      const result = { action: "completed" };
+      prompts.outro("接入配置完成");
+      emitSetupResult(onResult, undefined, result);
+      return result;
     }
     if (!["summary", "channels", "models", "skills"].includes(section)) {
       throw new Error(`未知 Setup 类别：${String(section)}`);

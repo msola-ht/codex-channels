@@ -269,7 +269,7 @@ export function projectProviderSettings(state) {
         reasoningEffort: provider.reasoningEffort ?? null,
         baseUrl: provider.baseUrl ?? "",
         supportsWebsockets: provider.supportsWebsockets === true,
-        upstreamWireApi: provider.upstreamWireApi ?? "responses",
+        upstreamWireApi: provider.upstreamWireApi,
         ...redactCatalog(provider),
       })),
       backupCandidates: state.customProviders.backupCandidates.map(redactTarget),

@@ -52,7 +52,7 @@ export async function runInitWizard({
       input,
       output,
       prompts,
-      stayOnMenu: false,
+      stayOnMenu: true,
       // 只有类别菜单的取消（无 category 的 cancelled 事件）才中止整套初始化；
       // 子流程返回 undefined 或 {action:"cancelled"} 只结束该子流程，不中止本向导。
       onResult: (event) => {

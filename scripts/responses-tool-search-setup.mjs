@@ -2,7 +2,7 @@ import { probeResponsesToolSearch } from "./responses-tool-search-probe.mjs";
 
 export async function promptResponsesToolSearch(prompts, input, {output = process.stdout, probe = probeResponsesToolSearch, current = false} = {}) {
   let action = await prompts.select({
-    message:"上游是否支持 Codex 客户端 tool_search（工具按需检索）",
+    message:`模型 ${input.model} 的上游是否支持 Codex 客户端 tool_search（工具按需检索）`,
     options:[
       {value:"detect",label:"自动检测（推荐）",hint:"发送一次极短请求验证上游是否接受检索输入项，可能计费"},
       {value:"no",label:"不声明，工具全量下发"},
@@ -18,9 +18,11 @@ export async function promptResponsesToolSearch(prompts, input, {output = proces
     const controller = new AbortController();
     const cancel = () => controller.abort();
     process.once("SIGINT", cancel);
-    output.write("\n正在检测工具检索兼容性，最长 15 秒；Ctrl+C 取消。\n");
     let result;
-    try { result = await probe({...input, signal: controller.signal}); }
+    try {
+      output.write("\n正在检测工具检索兼容性，最长 15 秒；Ctrl+C 取消。\n");
+      result = await probe({...input, signal: controller.signal});
+    }
     finally { process.removeListener("SIGINT", cancel); }
     if (result.status === "cancelled" || controller.signal.aborted) return undefined;
     output.write(`${result.reason}${result.httpStatus === undefined ? "" : `（HTTP ${result.httpStatus}）`}\n`);

@@ -59,14 +59,15 @@ Gateway 配置位于：
 模型转发监听，最后询问是否执行 `codexc install`。可选功能默认取值沿用当前状态：首次初始化默认关闭，
 已有配置未显式设置 WebUI 时按“未设置即继续启动”的语义给出默认值；WebUI 按所选值写入
 `[webui] enabled`，调用详情记录只在取值变化时写入，模型转发监听选“是”进入监听设置、选“否”保持现状。
-在接入向导的类别菜单取消（Esc/Ctrl+C 或选择“取消”）会中止整个初始化向导，在某个子流程中返回或取消
-只结束该子流程。尚未启用任何通讯渠道时，向导明确跳过安装并提示先运行
+接入向导完成单项后返回类别菜单，可继续配置 Provider、通讯渠道或项目技能；选择“完成接入”后才继续
+可选功能与安装步骤。在类别菜单取消（Esc/Ctrl+C 或选择“取消”）会中止整个初始化向导，在某个子流程中
+返回或取消只结束该子流程。尚未启用任何通讯渠道时，向导明确跳过安装并提示先运行
 `codexc setup`，因为后台服务安装会因配置校验失败而中止。选择安装且启用了 WebUI 时，安装完成后再单独
 启动 WebUI。已有配置无法解析或版本不受支持时，`codexc init` 明确失败并且不修改任何数据。非交互调用
 不进入向导，只创建用户目录、默认工作区仓库与初始配置（不写 `[webui] enabled`，保持未设置即沿用已安装
 状态），仍按 `codexc init && codexc setup && codexc install` 顺序执行。
 
-`codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
+`codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；完成单项后可继续选择，选择“完成接入”正常退出，选择“取消”或在类别菜单按 Esc/Ctrl+C 取消退出。`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 `codexc config` 的“计划任务”直接选择开关；Telegram 消息格式位于“显示设置”，仅在配置 Bot 后显示。显示子项取消或选择“返回上一级”时回到显示设置；在显示设置中选择“返回”才回到 Config。日志等级统一在“高级设置 → 日志等级”选择，`debug` / `trace` 开启调试信息，`info` 恢复标准输出。
 

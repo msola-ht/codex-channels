@@ -246,6 +246,7 @@ export interface ConfiguredCustomSwitchingModelProvider {
   baseUrl: string;
   apiKey: string;
   supportsWebsockets: boolean;
+  upstreamWireApi: "responses" | "chat_completions";
   profileName: string;
   profileContent: string;
   reasoningEffort: string;

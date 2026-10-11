@@ -134,7 +134,8 @@
 - `metrics-menu.mjs` / `metrics-menu.d.mts`：`codexc metrics` 无参数时的交互用例及注入边界声明；负责循环收集查询与导出参数，包括会话列表和历史额度窗口；独立维护参数函数只由统一清理菜单使用，
   通过 CLI 注入的命令边界执行，不承载子进程或输出文件管理。
 - `init-wizard.mjs`：`codexc init` 在交互终端下的初始化向导；先显示环境检测结果（Codex CLI 版本、
-  官方登录、通讯渠道、默认模型、默认 Workspace 与可选功能状态），再按需复用 `setup.mjs` 的接入向导，
+  官方登录、通讯渠道、默认模型、默认 Workspace 与可选功能状态），再按需循环复用 `setup.mjs` 的接入向导，
+  可连续配置模型与渠道，选择“完成接入”后继续；
   逐项询问 WebUI 后台服务、调用详情记录与模型转发监听（默认沿用当前状态、首次初始化默认关闭，通过
   Config 管理接口写入 `[webui] enabled`，调用详情记录仅在变化时写入，模型转发监听选“是”才进入
   `model-relay-listen-menu.mjs`），在接入向导类别菜单取消即中止本向导（子流程取消只结束该子流程），
@@ -142,10 +143,10 @@
   是否执行 `codexc install`；`bin/codexc.mjs` 在安装成功后按配置补启动 WebUI，并对已有但不可用的配置
   失败关闭、不修改数据。非交互调用不进入本模块，只创建用户目录、默认工作区仓库与初始配置。
 - `setup.mjs`：使用 `@clack/prompts` 提供接入类别菜单和脱敏总览，并把“模型与提供商”“通讯渠道”
-  和“项目技能”流程委派给具体适配器；总览与具体流程在选中后按需加载，注入回调优先。模型与提供商下分 OpenAI 官方
+  和“项目技能”流程委派给具体适配器；“完成接入”正常退出，与顶层“取消”区分。总览与具体流程在选中后按需加载，注入回调优先。模型与提供商下分 OpenAI 官方
   登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级；配置写入后的激活结果由
   `config-activation-result.mjs` 提供统一状态和目标定义，只转换子模块显式返回的激活范围，不为查询或取消操作推断重启。公开 CLI 的 `codexc setup --jsonl` 将交互提示
-  写入终端 stderr，并按每行一个事件把脱敏结果或错误写入 stdout；输入或提示输出不连接终端时明确拒绝，操作失败后可继续选择。默认 `codexc setup` 保持纯交互文本输出。
+  写入终端 stderr，并按每行一个事件把脱敏结果或错误写入 stdout；完成接入返回 `result` 事件的 `action: completed`。输入或提示输出不连接终端时明确拒绝，操作失败后可继续选择。默认 `codexc setup` 保持纯交互文本输出。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
   原生子代理、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
@@ -175,7 +176,7 @@
 - `responses-websocket-probe.mjs` / `responses-websocket-probe.d.mts`：按锁定 Codex 协议探测第三方 Responses WS 握手、预热及可选文字请求；复用代理，限制超时与响应大小，取消时释放连接，不保存凭据或原始响应。
 - `responses-websocket-setup.mjs` / `responses-websocket-setup.d.mts`：新增、编辑自定义 Provider 时选择自动检测或手动 WS 开关，模型请求须确认可能计费，结果只进入最终保存预览。
 - `responses-tool-search-probe.mjs` / `responses-tool-search-probe.d.mts`：用一次极短 Responses 请求探测第三方上游是否接受 Codex 的 `tool_search` 输入项；复用代理与 WSS/HTTP 同源设置，限制超时与响应大小，只回结构化结论，不回传上游正文。
-- `responses-tool-search-setup.mjs` / `responses-tool-search-setup.d.mts`：填写 Key 后为自定义 Provider 选择自动检测、不声明或手动声明客户端检索；检测未通过时默认不声明，结果只进入最终保存预览。
+- `responses-tool-search-setup.mjs` / `responses-tool-search-setup.d.mts`：填写 Key 后为自定义 Responses 上游的每个启用模型分别选择自动检测、不声明或手动声明客户端检索；检测未通过时默认不声明，结果只进入最终保存预览，不扩散到其他模型。
 - `model-catalog-validation.mjs` / `model-catalog-validation.d.mts`：Provider 保存前的 Codex 模型目录合同校验；先将自身新建的隔离临时目录设为私有，再写入目录数据，限制运行时间并清理临时文件，不修改系统 TEMP 根目录权限。
 - `responses-model-setup.mjs` / `responses-model-setup.d.mts`：交互收集自定义 Responses 模型能力（含默认开启的自由格式 `apply_patch`、上下文窗口预设）并选择启用列表；新建非 DS 定义显式使用通用编程提示词，已有自定义指令保持；客户端检索在填写 Key 后由检测流程决定。
 - `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义 Responses 共用的 1–64 个模型多选、预览确认与默认模型保护。

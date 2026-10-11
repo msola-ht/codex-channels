@@ -31,7 +31,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       if (prompts.isCancel(name)) return undefined;
       const maximumContext = old?.maxContextWindow ?? 100_000_000;
       const context = template?.followContext ? old.contextWindow : await promptContextWindow(prompts, id, old?.contextWindow, maximumContext);
-      if (prompts.isCancel(context)) return undefined;
+      if (context === undefined) return undefined;
       const reasoning = await prompts.text({ message: "支持的思考等级（逗号分隔；留空表示不支持，请求使用 none）", initialValue: old?.reasoningEfforts.join(",") ?? "" });
       if (prompts.isCancel(reasoning)) return undefined;
       const reasoningEfforts = String(reasoning).trim() === "" ? [] : String(reasoning).split(",").map(value => value.trim());
