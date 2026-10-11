@@ -1,5 +1,5 @@
 import { loadClinePassAccounts, clinePassProviderId } from "./cline-pass-accounts.mjs";
-import { isResponsesProvider, responsesProviderCatalogPath, parseResponsesModelCatalog, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
+import { isCustomCatalogProvider, responsesProviderCatalogPath, parseResponsesModelCatalog, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -161,7 +161,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     appServerRuntime.customSwitchingProviders.map((provider) => provider.provider),
   );
   const officialCatalogPath = (customPrimaryProvider !== undefined && customPrimaryProvider.catalogPath === undefined)
-    || [...customSwitchingProviderIds].some(id => !isResponsesProvider(id))
+    || [...customSwitchingProviderIds].some(id => !isCustomCatalogProvider(id))
     ? writeCustomOfficialModelCatalog(
         runtime.environment,
         runtime.environment.CODEX_BINARY,
@@ -171,7 +171,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     ? appServerRuntime.customSwitchingProviders
     : appServerRuntime.customSwitchingProviders.map((provider) => ({
         ...provider,
-        arguments: withOfficialModelCatalog(provider.arguments, isResponsesProvider(provider.provider) ? responsesProviderCatalogPath(runtime.environment, provider.provider) : officialCatalogPath),
+        arguments: withOfficialModelCatalog(provider.arguments, isCustomCatalogProvider(provider.provider) ? responsesProviderCatalogPath(runtime.environment, provider.provider) : officialCatalogPath),
       }));
   const managedProviders = officialCatalogPath === undefined
     ? appServerRuntime.managedProviders
@@ -179,7 +179,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         customSwitchingProviderIds.has(provider.provider)
           ? {
               ...provider,
-              arguments: withOfficialModelCatalog(provider.arguments, isResponsesProvider(provider.provider) ? responsesProviderCatalogPath(runtime.environment, provider.provider) : officialCatalogPath),
+              arguments: withOfficialModelCatalog(provider.arguments, isCustomCatalogProvider(provider.provider) ? responsesProviderCatalogPath(runtime.environment, provider.provider) : officialCatalogPath),
             }
           : provider);
   const {
@@ -252,7 +252,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const modelGuard = guardedDefinition
       ? new ProviderModelGuard(join(managedProviderDirectory(runtime.environment, guardedDefinition),
         guardedDefinition.catalogFileName), model => isManagedProviderModelValid(guardedDefinition, model))
-      : isResponsesProvider(upstreamProvider)
+      : isCustomCatalogProvider(upstreamProvider)
         ? new ProviderModelGuard(responsesProviderCatalogPath(runtime.environment, upstreamProvider), model =>
           typeof model === "string" && model.trim() === model && model.length > 0 && model.length <= 200 && !/\p{Cc}/u.test(model), {
           parseCatalog: parseResponsesModelCatalog,
@@ -316,7 +316,9 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
       // CLP 桥在桥内按目录校验模型；通用 Chat 桥没有该校验，继续由统计代理拒绝目录外或已停用模型。
-      ...(modelGuard && !bridgedClinePass ? { isModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
+      ...(modelGuard && !bridgedClinePass ? isCustomCatalogProvider(upstreamProvider)
+        ? { readModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) }
+        : { isModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
       // 除官方 OpenAI 端点外的 Responses 上游都不理解 Codex 私有输入项与参数标记，
       // 必须在上游收到正文前归一化；Chat 上游由桥转换，不在此处改写。
       ...(!bridge && !officialOpenAiRoute ? { normalizeResponsesInput: true } : {}),

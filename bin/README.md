@@ -29,7 +29,7 @@
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
 - `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile sf-ds-<账户>`、
-  `--profile sf-ocg-<账户>`、`--profile sf-ccg-<账户>`、`--profile sf-clp-<账户>` 或 `--profile sf-custom-<Provider ID>`
+  `--profile sf-ocg-<账户>`、`--profile sf-ccg-<账户>`、`--profile sf-clp-<账户>`、自定义提供商的 `--profile sf-cp-<名称>` 或 Codex 兼容类型的 `--profile sf-custom-<Provider ID>`
   选择隔离实例；按当前目录或 `--workspace` 解析 Workspace 权限并允许显式 Codex 参数覆盖；
   在 TUI 生命周期内持有对应实例的 Supervisor 租约，直接运行的 `codex --remote` 不具备该保护；
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。

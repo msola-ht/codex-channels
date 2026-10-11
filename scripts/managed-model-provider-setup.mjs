@@ -5,7 +5,7 @@ import {
 import {
   withManagedModelCatalogSettings,
   withPreservedManagedModelCatalogSettings,
-} from "../runtime/model-provider-runtime.mjs";
+} from "../runtime/managed-model-catalog.mjs";
 import { createManagedPrimaryCredential } from "../runtime/managed-provider-credentials.mjs";
 
 const managedRootKeys = Object.freeze([
@@ -84,10 +84,15 @@ export function createManagedProviderConfiguration(current, initial, definition,
 export function createManagedProviderCatalog(catalog, definition, {
   previousModels = [],
   windowPercent = null,
-  modelWindowPercentByModel = {},
+  modelContextWindowByModel = {},
 } = {}) {
   const models = Array.isArray(catalog?.models) ? catalog.models : [];
   const defaultEntry = selectCatalogDefaultModel(models, definition);
+  if (windowPercent !== null && (
+    !Number.isInteger(windowPercent) || windowPercent < 10 || windowPercent > 100
+  )) {
+    throw new Error(`${definition.displayName} 模型上下文窗口百分比无效：${defaultEntry.slug}`);
+  }
   const defaultsApplied = withManagedModelCatalogSettings(catalog, definition, {
     model: defaultEntry.slug,
     reasoningEffort: definition.defaultReasoningEffort,
@@ -97,14 +102,18 @@ export function createManagedProviderCatalog(catalog, definition, {
     definition,
     previousModels,
   );
-  return applyModelWindowByModel(
+  const windowsApplied = applyModelContextWindowByModel(
     preserved,
     definition,
-    {
-      ...modelWindowPercentByModel,
-      ...(windowPercent === null ? {} : { [defaultEntry.slug]: windowPercent }),
-    },
+    modelContextWindowByModel,
   );
+  if (windowPercent === null) return windowsApplied;
+  const selected = windowsApplied.models.find((entry) => entry.slug === defaultEntry.slug);
+  return withManagedModelCatalogSettings(windowsApplied, definition, {
+    model: defaultEntry.slug,
+    reasoningEffort: selected.default_reasoning_level,
+    contextWindow: Math.round(managedCatalogWindowBase(defaultEntry) * windowPercent / 100),
+  });
 }
 
 function selectCatalogDefaultModel(models, definition) {
@@ -129,16 +138,13 @@ export function resolveManagedCatalogModel(catalog, definition, preferred) {
   return selectCatalogDefaultModel(models, definition).slug;
 }
 
-function applyModelWindowByModel(catalog, definition, percents) {
+function applyModelContextWindowByModel(catalog, definition, windows) {
   let next = catalog;
   const models = Array.isArray(catalog?.models) ? catalog.models : [];
   for (const candidate of models) {
     const slug = candidate?.slug;
-    const percent = typeof slug === "string" ? percents[slug] : undefined;
-    if (percent === undefined) continue;
-    if (!Number.isInteger(percent) || percent < 10 || percent > 100) {
-      throw new Error(`${definition.displayName} 模型上下文窗口百分比无效：${slug}`);
-    }
+    const contextWindow = typeof slug === "string" ? windows[slug] : undefined;
+    if (contextWindow === undefined) continue;
     const windowBase = managedCatalogWindowBase(candidate);
     const reasoningEffort = candidate?.default_reasoning_level;
     if (
@@ -148,10 +154,13 @@ function applyModelWindowByModel(catalog, definition, percents) {
     ) {
       throw new Error(`${definition.displayName} 模型目录缺少窗口所需字段：${slug}`);
     }
+    if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > windowBase) {
+      throw new Error(`${definition.displayName} 模型上下文窗口必须是 1024-${windowBase} 的整数：${slug}`);
+    }
     next = withManagedModelCatalogSettings(next, definition, {
       model: slug,
       reasoningEffort,
-      contextWindow: Math.round(windowBase * percent / 100),
+      contextWindow,
     });
   }
   return next;

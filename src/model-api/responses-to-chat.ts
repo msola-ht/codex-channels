@@ -3,6 +3,7 @@ import type { ChatReasoningEffort } from "./chat-request.js";
 import { agentMessageText, stripEncryptedMarker } from "./codex-private-items.js";
 import { array, ModelConversionError, object, string, toolSearchArguments } from "./validation.js";
 import type { JsonObject } from "./validation.js";
+import type { SamplingParameters } from "./index.js";
 
 /** Chat 只有 function 一种工具，因此 Responses 的 function / custom(freeform) / 客户端 tool_search 都映射为 function，回程再还原原始形态。 */
 export type ChatToolKind = "function" | "custom" | "tool_search";
@@ -23,7 +24,9 @@ interface ChatTextMessage {
   reasoning_content?: string;
 }
 export type ChatMessage = ChatTextMessage | { role: "user"; content: string | ChatUserContentPart[] };
-export interface ChatRequest {
+const samplingKeys = ["temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty"] as const satisfies readonly (keyof SamplingParameters)[];
+type ChatSamplingParameters = { [Key in keyof SamplingParameters]?: number | null };
+export interface ChatRequest extends ChatSamplingParameters {
   model: string;
   messages: ChatMessage[];
   stream: true;
@@ -54,7 +57,7 @@ export interface ChatConversionResult {
 }
 export function responsesToChat(value: unknown, supportedReasoningEfforts?: readonly string[], options: ChatConversionOptions = {}): ChatConversionResult {
   const source = object(value);
-  const allowed = new Set(["model", "instructions", "input", "tools", "tool_choice", "parallel_tool_calls", "stream", "stream_options", "store", "include", "reasoning", "text", "service_tier", "prompt_cache_key", "client_metadata", "max_output_tokens"]);
+  const allowed = new Set(["model", "instructions", "input", "tools", "tool_choice", "parallel_tool_calls", "stream", "stream_options", "store", "include", "reasoning", "text", "service_tier", "prompt_cache_key", "client_metadata", "max_output_tokens", ...samplingKeys]);
   if (Object.keys(source).some(key => !allowed.has(key))) throw new ModelConversionError("Unsupported Responses request field");
   if (source.stream !== true || source.store === true) throw new ModelConversionError("Only stateless streaming Responses requests are supported");
   if (source.service_tier != null && source.service_tier !== "default" && source.service_tier !== "auto") throw new ModelConversionError("Unsupported service tier");
@@ -301,6 +304,14 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
   if (source.max_output_tokens !== undefined) {
     if (!Number.isSafeInteger(source.max_output_tokens) || Number(source.max_output_tokens) <= 0) throw new ModelConversionError();
     result.max_completion_tokens = Number(source.max_output_tokens);
+  }
+  for (const key of samplingKeys) {
+    if (!Object.hasOwn(source, key)) continue;
+    const value = source[key];
+    if (value !== null && (typeof value !== "number" || !Number.isFinite(value))) {
+      throw new ModelConversionError(`Invalid sampling parameter: ${key}`);
+    }
+    result[key] = value;
   }
   let structuredOutput: "prompt" | undefined;
   if (responseFormat) {

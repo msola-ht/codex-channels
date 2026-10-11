@@ -9,6 +9,7 @@ export interface ManagedModelProviderRuntime {
   provider: ManagedModelProviderId;
 }
 export function loadConfiguredRelayProviderMaterial(provider: string, environment?: NodeJS.ProcessEnv): {
+  modelSampling?: Record<string, import("./model-catalog.mjs").SamplingParameters>;
   modelCapabilities?: import("./chat-reasoning.mjs").RelayModelCapability[];
   provider: string; baseUrl: string; apiKey: string; models: string[]; modelInputs: Record<string, unknown[]>; protocols: ("chat" | "responses")[]; paths: string[]; revision: string;
 };
@@ -110,9 +111,8 @@ export function loadManagedModelWindow(
 
 export function writeManagedModelWindowGlobal(options: {
   model: string;
-  windowPercent: number;
   environment?: NodeJS.ProcessEnv;
-}): {
+} & ({ contextWindow: number; windowPercent?: never } | { windowPercent: number; contextWindow?: never })): {
   model: string;
   windowPercent: number;
   contextWindow: number;
@@ -218,6 +218,7 @@ export interface ConfiguredCustomPrimaryModelProvider {
 }
 
 export const customPrimaryProviderProfileName: "sf-custom";
+export function customSwitchingProviderProfileName(provider: string): string;
 export function customPrimaryProviderCredentialEnvironmentKey(provider: string, version?: string): string;
 export function customPrimaryProviderCredentialPath(environment: NodeJS.ProcessEnv | undefined, provider: string, environmentKey: string): string;
 export function readCustomPrimaryProviderApiKey(provider: string, block: Record<string, unknown>, environment?: NodeJS.ProcessEnv): string | undefined;

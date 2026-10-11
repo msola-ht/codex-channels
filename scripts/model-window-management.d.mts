@@ -1,9 +1,8 @@
 import type { writeManagedModelWindowGlobal } from "../runtime/model-provider-runtime.mjs";
 
-export interface ModelWindowChangeInput {
+export type ModelWindowChangeInput = {
   model: string;
-  windowPercent: number;
-}
+} & ({ contextWindow: number; windowPercent?: never } | { windowPercent: number; contextWindow?: never });
 
 export interface ModelWindowImportEntry {
   model: string;

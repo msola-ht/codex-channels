@@ -1,6 +1,6 @@
 import { promptResponsesWebSocket } from "./responses-websocket-setup.mjs";
-import { promptResponsesToolSearch } from "./responses-tool-search-setup.mjs";
-import { isResponsesProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { promptCustomModelCapabilities } from "./custom-model-capability-setup.mjs";
+import { createResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { loadResponsesModelTemplates, promptResponsesModelImport } from "./responses-model-templates.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
@@ -8,6 +8,7 @@ import * as clackPrompts from "@clack/prompts";
 
 import {
   loadConfiguredCustomSwitchingModelProviders,
+  customSwitchingProviderProfileName,
   listCustomPrimaryProviderCandidates,
   readPrimaryProviderBackup,
   validateCustomPrimaryModelProviderId,
@@ -62,9 +63,9 @@ export async function runCustomPrimaryProviderSetup({
   catalogKind = "official",
   loadModelTemplates = source => loadResponsesModelTemplates(source, environment),
   probeWebSocket,
-  probeToolSearch,
+  probeModelCapabilities,
 } = {}) {
-  const custom = editingProviderId === undefined ? catalogKind === "custom" : isResponsesProvider(editingProviderId);
+  const custom = editingProviderId === undefined ? catalogKind === "custom" : isCustomCatalogProvider(editingProviderId);
   const previousCatalog = editingProviderId && custom ? readResponsesModelCatalog(environment, editingProviderId) : undefined;
   const client = await createClient({ environment });
   let snapshot;
@@ -79,7 +80,7 @@ export async function runCustomPrimaryProviderSetup({
     await client.close().catch(() => undefined);
   }
   const config = record(snapshot.config);
-  if (!custom && isResponsesProvider(config.model_provider)) officialModels = bundledOfficialModelOptions(environment);
+  if (!custom && isCustomCatalogProvider(config.model_provider)) officialModels = bundledOfficialModelOptions(environment);
   const officialModelIds = new Set(
     officialModels.filter((candidate) => candidate.available !== false)
       .map((candidate) => candidate.model),
@@ -148,7 +149,7 @@ export async function runCustomPrimaryProviderSetup({
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
   const currentWebsockets = currentProvider?.supports_websockets === true ? "yes" : "no";
 
-  output.write(`\nCodex Connect ${custom ? "自定义 Responses Provider" : "Codex 兼容 Provider"} Setup\n\n`);
+  output.write(`\nCodex Connect ${custom ? "自定义提供商" : "Codex 兼容 Provider"} Setup\n\n`);
   output.write(`当前主实例：${currentMainLabel}\n`);
   output.write(fixedProviderId === undefined
     ? "当前操作：新增 Provider\n"
@@ -206,8 +207,7 @@ export async function runCustomPrimaryProviderSetup({
   }
   let normalizedId = fixedProviderId;
   if (normalizedId === undefined) {
-    const derived = customPrimaryProviderIdFromBaseUrl(normalizedBaseUrl);
-    const derivedProviderId = custom ? `rs-${derived.slice(0, 61)}` : derived;
+    const derivedProviderId = customPrimaryProviderIdFromBaseUrl(normalizedBaseUrl, custom ? "custom" : "official", environment);
     const providerId = await prompts.select({
       message: "Provider ID",
       options: [
@@ -234,9 +234,10 @@ export async function runCustomPrimaryProviderSetup({
     }
     if (providerId === "__custom__") {
       const customId = await prompts.text({
-        message: custom ? "Provider ID（必须以 rs- 开头）" : "自定义 Provider ID",
+        message: custom ? "Provider ID（必须以 cp- 开头）" : "自定义 Provider ID",
         validate: (value) => validateCustomPrimaryModelProviderId(String(value).trim(), environment)
-          ?? undefined,
+          ?? (custom !== isCustomCatalogProvider(String(value).trim())
+            ? "自定义提供商必须使用 cp- 前缀；Codex 兼容 Provider 不使用该前缀" : undefined),
       });
       if (prompts.isCancel(customId) || customId === "back") {
         return { action: allowBack ? "back" : "cancel" };
@@ -339,7 +340,11 @@ export async function runCustomPrimaryProviderSetup({
   if (imported === undefined) return { action: allowBack ? "back" : "cancel" };
   const definitions = [...new Map([...(previousCatalog?.definitions ?? []), ...imported.map(entry => {
     const previous = previousCatalog?.definitions.find(model => model.id === entry.id);
-    return previous?.instructions === undefined ? entry : { ...entry, instructions: previous.instructions };
+    return {
+      ...entry,
+      ...(previous?.instructions === undefined ? {} : { instructions: previous.instructions }),
+      ...(previous?.sampling === undefined ? {} : { sampling: structuredClone(previous.sampling) }),
+    };
   })].map(entry => [entry.id, entry])).values()];
   let selectedModel;
   if (imported.length > 0) {
@@ -369,7 +374,7 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error(`模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`);
   }
 
-  const models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id), output) : undefined;
+  const models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id), output, chatUpstream ? "chat_completions" : "responses") : undefined;
   if (custom && models === undefined) return { action: allowBack ? "back" : "cancel" };
 
   const canPreserveCurrentBearerToken = hasCurrentBearerToken
@@ -378,7 +383,7 @@ export async function runCustomPrimaryProviderSetup({
     message: canPreserveCurrentBearerToken
       ? "API Key（留空保留当前 Key；不回显）"
       : mode === "switching"
-        ? `API Key（明文写入 0600 的 ~/.codex/sf-custom-${normalizedId}.config.toml；不回显）`
+        ? `API Key（明文写入 0600 的 ~/.codex/${customSwitchingProviderProfileName(normalizedId)}.config.toml；不回显）`
         : "API Key（明文写入当前用户私有凭据文件；主配置只保存 env_key 引用；不回显）",
     validate: (value) => String(value).trim() === "" && !canPreserveCurrentBearerToken
       ? "API Key 不能为空"
@@ -392,8 +397,24 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error("API Key 不能为空");
   }
 
+  let catalogModels = models;
+  let probeConnections;
+  if (custom) {
+    const selected = await promptCustomModelCapabilities(prompts, {
+      baseUrl: normalizedBaseUrl, apiKey: replacementApiKey || currentApiKey, models,
+      upstreamWireApi: chatUpstream ? "chat_completions" : "responses", environment,
+    }, { output, probe: probeModelCapabilities });
+    if (selected === undefined) {
+      output.write("已取消，未修改配置。\n");
+      return { action: allowBack ? "back" : "cancel" };
+    }
+    catalogModels = selected.models;
+    probeConnections = selected.probeConnections;
+  }
+
   const supportsWebsockets = chatUpstream
     ? false
+    : custom ? await prompts.confirm({ message: "是否支持 Responses WebSocket？（不检测，按平台说明选择）", initialValue: currentWebsockets === "yes" })
     : await promptResponsesWebSocket(prompts, {
         baseUrl: normalizedBaseUrl,
         apiKey: replacementApiKey || currentApiKey,
@@ -401,22 +422,7 @@ export async function runCustomPrimaryProviderSetup({
         reasoningEffort: custom ? models.find(entry => entry.id === normalizedModel)?.defaultReasoningEffort ?? "none" : "medium",
         environment,
       }, {output, probe: probeWebSocket, current: currentWebsockets === "yes"});
-  if (supportsWebsockets === undefined) return { action: allowBack ? "back" : "cancel" };
-
-  let catalogModels = models;
-  if (custom) {
-    catalogModels = [];
-    for (const entry of models) {
-      const supportsToolSearch = chatUpstream ? true : await promptResponsesToolSearch(prompts, {
-        baseUrl: normalizedBaseUrl,
-        apiKey: replacementApiKey || currentApiKey,
-        model: entry.id,
-        environment,
-      }, {output, probe: probeToolSearch, current: entry.supportsSearchTool === true});
-      if (supportsToolSearch === undefined) return { action: allowBack ? "back" : "cancel" };
-      catalogModels.push({...entry, supportsSearchTool: supportsToolSearch});
-    }
-  }
+  if (supportsWebsockets === undefined || prompts.isCancel(supportsWebsockets)) return { action: allowBack ? "back" : "cancel" };
 
   const saveInput = {
     operation: fixedProviderId === undefined ? "create" : "update",
@@ -428,6 +434,7 @@ export async function runCustomPrimaryProviderSetup({
     ...(custom ? { catalog: { kind: "custom", models: catalogModels } } : {}),
     supportsWebsockets,
     upstreamWireApi: chatUpstream ? "chat_completions" : "responses",
+    ...(probeConnections?.length ? { probeConnections } : {}),
     credential: replacementApiKey === ""
       ? { action: "preserve" }
       : { action: "replace", apiKey: replacementApiKey },
@@ -439,8 +446,9 @@ export async function runCustomPrimaryProviderSetup({
     loadContext: async () => ({ snapshot, officialModels }),
   });
   const preview = prepared.preview;
+  const previewModelDetails = custom ? createResponsesModelCatalog(preview.provider.models, preview.provider.model).models : [];
   output.write(preview.provider.mode === "switching"
-    ? `\n将写入 ~/.codex/sf-custom-${normalizedId}.config.toml：\n`
+    ? `\n将写入 ~/.codex/${customSwitchingProviderProfileName(normalizedId)}.config.toml：\n`
     : "\n将写入 ~/.codex/config.toml：\n");
   const previewLines = [
     `- Provider ID：${preview.provider.id}`,
@@ -449,7 +457,7 @@ export async function runCustomPrimaryProviderSetup({
     `- 上游接口：${preview.provider.upstreamWireApi === "chat_completions" ? "Chat Completions（网关转换）" : "Responses（直连）"}`,
     `- 默认模型：${preview.provider.model}`,
     `- 运行模式：${preview.provider.mode === "switching" ? "OpenAI + 自定义切换" : "仅自定义固定"}`,
-    `- 模型目录：${custom ? "自定义 Responses；仅声明的模型与能力" : "Codex 官方"}`,
+    `- 模型目录：${custom ? "自定义；仅声明的模型与能力" : "Codex 官方"}`,
     ...(preview.provider.mode === "switching"
       ? [
           "- 主配置：保持官方 OpenAI",
@@ -461,10 +469,18 @@ export async function runCustomPrimaryProviderSetup({
           "- 主配置：写入并启用该固定 Provider",
           "- 认证：API Key 将明文写入当前用户私有凭据文件，主配置仅保存 env_key 引用（不回显、不进入命令行和日志）",
         ]),
-    ...(custom ? preview.provider.models.map(entry => `- 模型 ${entry.id}：${entry.contextWindow} Token；图片 ${entry.supportsImages ? "支持" : "不支持"}；思考 ${entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`) : []),
+    ...(custom ? preview.provider.models.flatMap((entry, index) => [
+      `- 模型 ${entry.id}：${entry.contextWindow} Token；最大窗口 ${entry.maxContextWindow ?? entry.contextWindow} Token；图片${entry.supportsImages ? "声明支持" : "不声明"}；图片 original ${entry.supportsImageDetailOriginal ? "声明支持" : "不声明"}；apply_patch ${entry.applyPatchToolType === "freeform" ? "freeform" : "不声明"}；思考 ${entry.reasoningEfforts.join("/") || "无可选等级"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`,
+      `  模型描述：${JSON.stringify(previewModelDetails[index].description)}`,
+      `  思考等级说明：${entry.reasoningEfforts.map(effort => `${effort}=${JSON.stringify(entry.reasoningDescriptions?.[effort] ?? effort)}`).join("；") || "无可选等级"}`,
+      `  回答详细程度：${entry.supportsVerbosity ? `声明支持；默认 ${entry.defaultVerbosity}` : "不声明"}；思考摘要：${entry.supportsReasoningSummary ? `声明支持；默认 ${entry.defaultReasoningSummary ?? "Codex 默认"}` : "不声明"}`,
+      `  默认采样参数：${entry.sampling === undefined ? "上游默认值（不发送参数）" : JSON.stringify(entry.sampling)}；请求显式参数优先`,
+      `  有效上下文：${entry.effectiveContextWindowPercent ?? 95}%；自动压缩阈值：${entry.autoCompactTokenLimit === undefined ? "Codex 默认" : `${entry.autoCompactTokenLimit} Token`}；工具输出截断：${entry.truncationPolicy === undefined ? `${Math.min(10_000, Math.floor(entry.contextWindow / 4))} tokens（目录默认）` : `${entry.truncationPolicy.limit} ${entry.truncationPolicy.mode}`}`,
+      `  模型指令（完整内容）：${JSON.stringify(previewModelDetails[index].model_messages.instructions_template)}`,
+    ]) : []),
     `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,
     ...(custom
-      ? preview.provider.models.map(entry => `- 模型 ${entry.id} 工具检索（tool_search）：${entry.supportsSearchTool ? chatUpstream ? "声明支持；网关转换检索输入项" : "声明支持；上游须接受 Codex 检索输入项" : "不声明；工具定义全量下发"}`)
+        ? preview.provider.models.map(entry => `- 模型 ${entry.id} 工具检索（tool_search）：${entry.supportsSearchTool ? chatUpstream ? "声明支持；网关转换检索输入项" : "声明支持；上游须接受 Codex 检索输入项" : "不声明；工具定义全量下发"}`)
       : []),
     ...(preview.transport.cleartext ? ["- 传输：明文 HTTP；API Key 与请求内容不加密"] : []),
   ];

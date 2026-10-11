@@ -3,6 +3,8 @@
 独立的纯转换模块，不依赖 Provider 账户材料、HTTP、App Server RPC、配置读写或存储。原生协议思考策略仅引用共享的无 I/O 能力元数据。
 每个请求必须携带完整输入，转换状态只存活于单次流式响应，不缓存会话历史。
 
+自定义模型添加时的能力探测通过公开入口复用 `responsesToChat`，确保短请求的工具与思考参数编码和运行时通用 Chat 桥一致；探测的网络、凭据及配置写入仍归 Scripts 管理入口负责。
+
 - `index.ts`：公开 `responsesToChat`、`ChatToResponses`、`normalizeResponsesRequest` 与安全错误类型。
 - `responses-to-chat.ts`：Responses 文本、用户内联图片、函数与自由格式工具定义、调用、文本结果、Codex multi-agent v2 的 `agent_message` 输入项，以及工具结果内联图片到紧随 user 消息的映射。
 - `codex-private-items.ts`：Codex 私有输入项与参数标记的共享语义；`agentMessageText` 按可读正文拼接信封与载荷，`stripEncryptedMarker` 只删除 schema 节点的布尔 `encrypted` 标记并报告是否发生改写。
@@ -17,6 +19,9 @@
 直接 Chat 保留工具参数字符串，由客户端在执行前验证 JSON 与工具 Schema；支持最长 128 字符的函数名。`insufficient_system_resource`、`aborted` 与长度/过滤终态均记为 incomplete，原样交付；不将模型中断误判为协议错误。
 
 以下限制针对 Responses 与 Chat 的转换链路；独立 Relay 的直接 Chat 请求使用上述保留合同。
+
+Responses 转 Chat 保留 `temperature`、`top_p`、`top_k`、`min_p`、`presence_penalty`、`repetition_penalty` 六个采样字段，
+只接受有限数字或显式 null；省略字段不生成参数，显式零值和 null 原样传给 Chat 上游。模型目录默认值由调用方在转换前按精确模型补齐。
 
 第三方 Responses 上游不认识 Codex 私有输入项与参数标记，`normalizeResponsesRequest` 用与 Chat 转换相同的语义改写正文：`agent_message` 降级为普通 `user` 消息（可读信封正文原样保留，`id`/`author`/`recipient` 随降级丢弃），工具参数 schema（含命名空间子工具）里的布尔 `encrypted` 标记被删除。其余字段逐字透传，未知条目交给上游判断；私有项内容为空或出现未知内容段时明确拒绝（失败关闭，不退回透传）。该归一化只用于第三方 Responses 上游，官方 OpenAI 路由保持原文透传。
 

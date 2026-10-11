@@ -7,6 +7,7 @@ import type { Socket } from "node:net";
 import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, type RelayModelCapability, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
 import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
+import type { SamplingParameters } from "../model-api/index.js";
 
 export interface RelayQueueEntry {
   requestId: string;
@@ -21,6 +22,7 @@ export interface RelayQueueEntry {
 }
 
 export interface PreparedRelayProvider {
+  readonly modelSampling?: Readonly<Record<string, SamplingParameters>>;
   readonly modelCapabilities?: readonly RelayModelCapability[];
   readonly target: DirectChatTarget;
   readonly models: readonly string[];
@@ -212,7 +214,11 @@ export class ModelRelayServer {
       if (!prepared.protocols.includes(protocol)) throw new RelayAdmissionError(400, "protocol_not_supported");
       const upstreamModels = prepared.models.filter(model => relayModelId(provider!, model) === requestModel);
       if (upstreamModels.length !== 1) throw new RelayAdmissionError(upstreamModels.length ? 503 : 403, upstreamModels.length ? "model_id_conflict" : "model_not_allowed");
-      body = { ...body!, model: upstreamModels[0]! };
+      const upstreamModel = upstreamModels[0]!;
+      const sampling = prepared.modelSampling && Object.hasOwn(prepared.modelSampling, upstreamModel)
+        ? prepared.modelSampling[upstreamModel] : undefined;
+      // Provider/model-scoped defaults never override explicit request parameters, including zero/null.
+      body = { ...sampling, ...body!, model: upstreamModel };
       // Model-specific input policy needs the current provider material.
       phase = "input";
       body = protocol === "responses" ? applyResponsesReasoningPolicy(body as DirectResponsesRequest, provider!, lease.caller.reasoning ?? "passthrough")

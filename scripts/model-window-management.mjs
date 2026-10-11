@@ -1,4 +1,4 @@
-import { listResponsesContextFollowers } from "../runtime/responses-context-sync.mjs";
+import { clinePassFollowsDeepseekContext, listResponsesContextFollowers } from "../runtime/responses-context-sync.mjs";
 import {
   loadManagedModelWindow,
   writeManagedModelWindowGlobal,
@@ -40,7 +40,7 @@ export async function applyModelWindowChange(
       try {
         writeWindow({
           model: plan.model.model,
-          windowPercent: plan.windowPercent,
+          contextWindow: plan.contextWindow,
           environment,
         });
       } catch (error) {
@@ -86,21 +86,24 @@ function buildPlan(input, models) {
       `同名模型在不同 Provider 的最大上下文窗口不一致：${model.displayName}`,
     );
   }
-  const windowPercent = values.windowPercent;
-  if (
-    !Number.isInteger(windowPercent)
-    || windowPercent < 10
-    || windowPercent > 100
-  ) {
+  const hasContext = values.contextWindow !== undefined;
+  if (hasContext && values.windowPercent !== undefined) {
+    throw invalid("invalid-window", "contextWindow", "Token 数和窗口百分比不能同时设置");
+  }
+  if (!hasContext && (!Number.isInteger(values.windowPercent)
+    || values.windowPercent < 10 || values.windowPercent > 100)) {
     throw invalid(
       "invalid-window-percent",
       "windowPercent",
       `模型上下文窗口百分比无效：${model.displayName}`,
     );
   }
-  const contextWindow = Math.round(
-    model.maxContextWindow * windowPercent / 100,
-  );
+  const contextWindow = hasContext ? values.contextWindow
+    : Math.round(model.maxContextWindow * values.windowPercent / 100);
+  if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > model.maxContextWindow) {
+    throw invalid("invalid-window", "contextWindow", `模型上下文窗口必须是 1024-${model.maxContextWindow} 的整数：${model.displayName}`);
+  }
+  const windowPercent = contextWindow * 100 / model.maxContextWindow;
   const overridden = Object.entries(model.perProvider ?? {}).flatMap(
     ([provider, value]) => (
       value !== undefined && value !== windowPercent
@@ -112,7 +115,7 @@ function buildPlan(input, models) {
     model,
     windowPercent,
     contextWindow,
-    willChange: model.windowPercent !== windowPercent || overridden.length > 0,
+    willChange: model.contextWindow !== contextWindow || overridden.length > 0,
     conflicts: model.conflicts === true,
     overridden,
   };
@@ -179,7 +182,9 @@ export function projectModelWindow(models) {
 }
 
 function withFollowers(plan,environment) {
-  if (!plan.model.providers.some(provider=>provider === "deepseek" || provider.startsWith("ds-"))) return plan;
+  const updatesDeepseek = plan.model.providers.some(provider=>provider === "deepseek" || provider.startsWith("ds-"))
+    || (plan.model.model === "deepseek-flash" && clinePassFollowsDeepseekContext(environment));
+  if (!updatesDeepseek) return plan;
   const followers=listResponsesContextFollowers(environment,plan.model.model);
   return {...plan, willChange:plan.willChange || followers.some(entry=>entry.contextWindow !== plan.contextWindow), model:{...plan.model,providers:[...new Set([...plan.model.providers,...followers.map(entry=>entry.providerId)])]}};
 }

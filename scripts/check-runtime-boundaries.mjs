@@ -19,6 +19,7 @@ const allowedDistEntries = new Map([
     "dist/codex-client/index.js",
     "dist/config/index.js",
     "dist/delivery/index.js",
+    "dist/model-api/index.js", // Capability detection uses the same pure Chat conversion as runtime.
     "dist/observability/index.js",
     "dist/observability/query/index.js",
     "dist/scheduled-tasks/index.js",
@@ -61,6 +62,8 @@ const runtimeExceptions = new Map([
   // Pure service-tier semantics shared with CLI and WebUI; no runtime lifecycle dependency.
   ["src/application/model-selection-service.ts", new Set(["runtime/service-tier.mjs"])],
   ["src/model-api/chat-request.ts", new Set(["runtime/chat-reasoning.mjs"])],
+  // Pure catalog sampling types shared by model request adapters; no file or lifecycle access.
+  ["src/model-api/index.ts", new Set(["runtime/model-catalog.mjs"])],
   ["src/model-api/responses-request.ts", new Set(["runtime/chat-reasoning.mjs"])],
   ["src/model-relay/server.ts", new Set(["runtime/model-relay-listen-host.mjs", "runtime/model-relay-model-id.mjs"])],
   ["src/model-relay/admission.ts", new Set(["runtime/model-relay-model-id.mjs"])],

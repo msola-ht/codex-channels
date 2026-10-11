@@ -110,6 +110,7 @@
 - `webui-reset-credit-route.mjs`：OpenAI 重置券实时列表、预览及消费确认路由，复用管理鉴权、限速、一次性令牌和审计，通过 Gateway 私有账户 IPC 执行。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
 - `webui-provider-settings-management.mjs`：复用主 Provider、受管 Provider 默认值与模型窗口、自定义 Provider 管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
+- `webui-custom-model-probe.mjs`：鉴权后的逐模型能力检测入口，限制并发、请求大小和取消生命周期；保留凭据仅可用于原 Origin，检测结果不直接写入配置。
 - `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management、DeepSeek 与 CLP 多账户管理接口，为 WebUI 提供账户资源投影、移除与配置预览、确认后写入和结果脱敏；不返回凭据正文。
 - `webui-management-task-resource.mjs` / `webui-service-status.mjs`：管理任务资源快照、服务状态缓存和版本映射；任务预览与
   设置摘要共用同一服务状态查询，不重复启动平台服务管理器。
@@ -151,16 +152,16 @@
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
   原生子代理、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
   允许名单、代理值或 Provider URL。
-- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider”下 Codex 兼容与自定义 Responses Provider 共用设置流程；
+- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider”下 Codex 兼容与自定义提供商 共用设置流程；
   新增时可从 URL 主机名派生 Provider ID、输入自定义标识符或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
-  上游 `base_url`、直接写入的 API Key、固定/切换模式、上游接口（Responses 直连或 Chat Completions 由网关转换）、WebSocket 开关、客户端检索检测和上游模型 ID。选择 Chat Completions 时强制关闭 WebSocket 并跳过检索检测（检索与工具由 Chat 桥适配）。Codex 兼容入口从官方目录校验，服务启动时导出官方快照；自定义 Responses 入口
+  上游 `base_url`、直接写入的 API Key、固定/切换模式、上游接口（Responses 直连或 Chat Completions 由网关转换）、WebSocket 开关、客户端检索检测和上游模型 ID。选择 Chat Completions 时强制关闭 WebSocket 并跳过检索检测（检索与工具由 Chat 桥适配）。Codex 兼容入口从官方目录校验，服务启动时导出官方快照；自定义提供商入口
   收集逐模型能力并生成独立目录。两者均不调用第三方 `/models`。
   `OpenAI` 选项固定写入同名 `name` 以允许 Codex 使用远程压缩，上游仍须兼容对应接口。新增默认推荐
   切换模式，编辑保持原模式；确认预览明确显示配置位置、API Key 明文存储、默认思考等级和服务层级。固定模式通过 Codex
   `config/batchWrite` 原子写入并激活 `~/.codex/config.toml` 的自定义主 Provider，主配置仅保存 `env_key` 引用，Key 写入
   `~/.codex-connect/providers/custom/<ID>/primary-credentials/<版本>.json` 当前用户私有文件；切换模式保持主
   Provider 为 `openai` 且不修改主配置，为每个 Provider 写入包含完整 Provider 块、Key、模型、
-  官方目录的 `medium` 或自定义目录声明的思考等级和服务层级的 0600 `~/.codex/sf-custom-<Provider ID>.config.toml`，
+  官方目录的 `medium` 或自定义目录声明的思考等级和服务层级的 0600 私有 Profile：自定义目录提供商使用 `~/.codex/sf-cp-<名称>.config.toml`，Codex 兼容类型使用 `~/.codex/sf-custom-<Provider ID>.config.toml`，
   并通过私有显式注册表支持多个隔离实例。Gateway 管理的 DeepSeek、OpenCode Go 与自定义
   Provider 固定使用 `request_max_retries = 1`、`stream_max_retries = 0`，即首次 HTTP 请求失败后
   最多再试一次，流中断不自动重连，避免 Codex 默认 HTTP 重试与流重连相乘；已有配置也由 App Server
@@ -172,14 +173,15 @@
   保留原 Key，Origin 变化时强制重新输入且写入前不复用旧 Key；新增拒绝覆盖 config 或私有备份中的已有 Provider ID。
   无效旧 URL 按不可复用 Key 处理，允许输入新 URL 与新 Key 修复。保留其他候选块，只移除与自定义
   主 Provider 冲突的顶层 `openai_base_url`。
-- `responses-model-templates.mjs` / `responses-model-templates.d.mts`：读取官方 Codex、DeepSeek 模板，交互勾选并映射平台模型 ID；两类均复制基础模型能力并独立保留最大上下文，不导入工具元数据。DeepSeek 另保留 `model_messages.instructions_template` 提示词；官方 Codex 模板不导入源指令。
+- `responses-model-templates.mjs` / `responses-model-templates.d.mts`：读取官方 Codex、DeepSeek 模板，交互勾选并映射平台模型 ID；字段转换与 DS 能力修正统一由 `runtime/model-catalog.mjs` 负责。两类均复制基础能力、描述、等级说明及有效扩展设置，独立保留最大上下文，不导入工具支持声明和官方专用策略；DeepSeek 另保留 `model_messages.instructions_template` 提示词，官方 Codex 模板不导入源指令。
+- `custom-model-capability-probe.mjs` / `custom-model-capability-probe.d.mts`：CLI 与 WebUI 共用的单项工具探测；仅按用户选择验证 apply_patch 或 tool_search 的调用及模拟结果接续，使用手填思考等级、有界请求和安全结果，不执行工具或写配置。
+- `custom-model-capability-setup.mjs` / `custom-model-capability-setup.d.mts`：CLI 逐模型、逐项询问 apply_patch 和 tool_search，支持手动选择或显式探测本项；用户选择采用结果后才回填草稿，最终复用 Provider 预览和目录事务。
 - `responses-websocket-probe.mjs` / `responses-websocket-probe.d.mts`：按锁定 Codex 协议探测第三方 Responses WS 握手、预热及可选文字请求；复用代理，限制超时与响应大小，取消时释放连接，不保存凭据或原始响应。
-- `responses-websocket-setup.mjs` / `responses-websocket-setup.d.mts`：新增、编辑自定义 Provider 时选择自动检测或手动 WS 开关，模型请求须确认可能计费，结果只进入最终保存预览。
+- `responses-websocket-setup.mjs` / `responses-websocket-setup.d.mts`：新增、编辑 Codex 兼容 Provider 时选择自动检测或手动 WS 开关，模型请求须确认可能计费，结果只进入最终保存预览；CP 自定义提供商仅手动选择 WS 开关。
 - `responses-tool-search-probe.mjs` / `responses-tool-search-probe.d.mts`：用一次极短 Responses 请求探测第三方上游是否接受 Codex 的 `tool_search` 输入项；复用代理与 WSS/HTTP 同源设置，限制超时与响应大小，只回结构化结论，不回传上游正文。
-- `responses-tool-search-setup.mjs` / `responses-tool-search-setup.d.mts`：填写 Key 后为自定义 Responses 上游的每个启用模型分别选择自动检测、不声明或手动声明客户端检索；检测未通过时默认不声明，结果只进入最终保存预览，不扩散到其他模型。
 - `model-catalog-validation.mjs` / `model-catalog-validation.d.mts`：Provider 保存前的 Codex 模型目录合同校验；先将自身新建的隔离临时目录设为私有，再写入目录数据，限制运行时间并清理临时文件，不修改系统 TEMP 根目录权限。
-- `responses-model-setup.mjs` / `responses-model-setup.d.mts`：交互收集自定义 Responses 模型能力（含默认开启的自由格式 `apply_patch`、上下文窗口预设）并选择启用列表；新建非 DS 定义显式使用通用编程提示词，已有自定义指令保持；客户端检索在填写 Key 后由检测流程决定。
-- `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义 Responses 共用的 1–64 个模型多选、预览确认与默认模型保护。
+- `responses-model-setup.mjs` / `responses-model-setup.d.mts`：逐项收集自定义模型描述、当前与最大窗口、思考与等级说明、图片精度、详细程度和摘要参数；高级设置支持指令、有效窗口比例、压缩阈值和截断策略，并选择启用列表。每模型独立询问默认采样参数，默认 No 保留已有值；Yes 逐项预填 `temperature=1.0`、`top_p=0.95`、`top_k=20`、`min_p=0.0`、`presence_penalty=0.0`、`repetition_penalty=1.0`（已有值优先），留空省略字段。新建非 DS 定义显式使用通用编程提示词，已有自定义指令保持。填写 Key 后由 `custom-model-capability-setup.mjs` 分别询问 `apply_patch` 与 `tool_search`，用户可手动选择或探测本项，新模型默认均不声明支持。
+- `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义提供商共用的 1–64 个模型多选、预览确认与默认模型保护。
 - `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG 共享目录的手填模型、DS 模板更新、启用选择和备份事务；保护所有账户默认值，目录变化不修改账户凭据。
 - `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内校验当前配置，完成未结束的模型目录保存或回滚目录备份。
 - `custom-primary-provider-management.mjs` / `custom-primary-provider-management.d.mts`：提供自定义主
@@ -254,13 +256,15 @@
   Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读确认写入结果，仅在确认未生效
   时恢复模型目录，结果明确返回 App Server 重启动作。
 - `model-window-management.mjs` / `model-window-management.d.mts`：提供受管模型上下文窗口的无终端
-  校验、预览与执行接口；按模型 slug 去重，同名模型跨 Provider 共享同一窗口占比，写入经
-  `writeManagedModelWindowGlobal` 在各 Provider 的 `max_context_window` 一致时换算 `context_window`
+  校验、预览与执行接口；按模型 slug 去重，同名模型跨 Provider 共享同一窗口 Token 数，写入经
+  `writeManagedModelWindowGlobal` 在各 Provider 的 `max_context_window` 一致时直接保存 `context_window`
   并广播到所有提供该模型的 Provider，并复用统一 Provider 管理事务；
   同名模型在跨 Provider 窗口占比或最大窗口不一致时，预览暴露冲突与被覆盖值，最大窗口不一致失败关闭，
-  结果明确返回 App Server 重启动作。
+  结果明确返回 App Server 重启动作。仅 CLP 账户持有 DS 跟随窗口时，预览也列出会同步写入的 CP 提供商。
 - `model-window-setup.mjs` / `model-window-setup.d.mts`：`codexc setup` 的“模型上下文窗口”入口；
-  按模型名选择受管模型并设置窗口占比（10–100%，100% 为模型官方窗口），写入复用
+  按模型名选择受管模型，通过 128K、256K、384K、512K、1M 预设或自定义
+  Token 数设置窗口；预设按模型最大窗口过滤，可直接选择最大窗口，自定义范围为 1024 至模型最大值。
+  与添加自定义模型复用 `responses-model-setup.mjs` 的窗口选择交互，写入复用
   `model-window-management.mjs` 的全局广播，同名模型在所有 Provider 共用同一值，结果返回 App Server 重启动作。
 - `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
   Provider、模型与思考等级交互与中文渲染，写入复用管理接口；第三方 Provider 总菜单会先选择 Provider，DeepSeek 与 OpenCode Go 子菜单则复用同一入口并预选当前 Provider。上下文窗口不在本流程，转到
@@ -322,7 +326,7 @@
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录，保留原模型并复制 Flash 增加 V4.1；模型 ID 与显示名来自根目录 `provider-model-catalog.json`。
 - `managed-provider-files.mjs` / `managed-provider-files.d.mts`：Provider 文件事务必须提供当前运行环境；统一访问器绑定文件归属，快照携带内存中的读取与写入闭包，并发复核、更新及回滚复用同一策略。固定模式先纳入不可变私有凭据再发布主配置，回滚先恢复已有文件，失败保留新增恢复资料并停止后续删除；未纳入快照的更新明确拒绝，不改变持久化备份格式。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。
-- `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，收紧无效 verbosity/摘要声明，保留其他能力与窗口设置；仅提供目录构建、能力修正接口，不导入账户菜单或管理事务。
+- `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，复用 `runtime/model-catalog.mjs` 收紧无效 verbosity/摘要声明，保留其他能力与窗口设置；仅提供目录构建、能力修正接口，不导入账户菜单或管理事务。
 - `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 多账户配置、默认账户与删除事务。
 - `deepseek-account-setup.mjs` / `deepseek-account-setup.d.mts`：DS Setup 菜单与 `codexc provider deepseek` 入口，复用管理事务和既有模型设置菜单。
 - `deepseek-catalog-baseline.json`：保存人工对照 DeepSeek 官方 Codex 安装脚本审查后的模型完整指纹、

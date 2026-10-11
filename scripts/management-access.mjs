@@ -78,7 +78,8 @@ export function validateManagementJsonRequest({
   if (String(contentType).toLowerCase().split(";", 1)[0]?.trim() !== "application/json") {
     throw new ManagementSecurityError("management.content-type-invalid", "管理请求只接受 JSON", 415);
   }
-  const maximumBodyBytes = method === "POST" && ["/provider-settings", "/provider-settings/preview"].includes(path) ? 2 * 1024 * 1024 : 65_536;
+  const maximumBodyBytes = method === "POST" && path === "/provider-settings/probe" ? 16_384
+    : method === "POST" && ["/provider-settings", "/provider-settings/preview"].includes(path) ? 2 * 1024 * 1024 : 65_536;
   if (!Number.isInteger(contentLength) || contentLength < 0 || contentLength > maximumBodyBytes) {
     throw new ManagementSecurityError("management.body-too-large", "管理请求正文过大", 413);
   }

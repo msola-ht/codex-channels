@@ -85,7 +85,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 `components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。共享 `TooltipContent` 默认在右侧显示，空间不足时由组件自动避让。
 `components/metrics/model-usage-cards.tsx` 为控制台与子代理页提供两行紧凑模型用量卡片，只展示调用方给定的统计范围；`components/overview/model-usage.tsx` 组合控制台模型区，默认显示前八个模型，支持展开全部和收起。
-控制台卡片使用服务端返回的 `members` 展开提供商与原始模型明细，展开时占整行；原始 ID 不再映射。各行展示请求数、轮次、输入、缓存命中率和输出，轮次去重口径附在表格下方。缺少 `members` 的子代理卡片保持原样。
+控制台卡片仅在服务端返回多个 `members` 时显示加粗边框，悬浮或聚焦时强化边框；点击卡片打开明细弹窗，不再显示占位的明细按钮。全卡片点击入口使用绝对定位的标准 Button 与 DialogTrigger，和内容提示作为兄弟元素，内部用量与截断提示独立聚焦和操作。单个成员只展示紧凑汇总。弹窗保留提供商与原始模型 ID，各行展示请求数、轮次、输入、缓存命中率和输出，轮次去重口径放在弹窗说明中，窄屏或大量明细可滚动查看。超过八个模型时，模型区的展开全部/收起按钮始终显示。缺少 `members` 的子代理卡片保持原样。
 
 `components/settings/model-display-groups.tsx` 在模型配置页管理显示组，可选择 DS 目标名与已配置模型成员，也可手填历史 ID；复用版本化预览、确认与备份链路，取消确认或预览失败保留草稿，草稿绑定打开时的配置版本以阻止覆盖并发修改。选择标签保留原始 ID，同一 ID 的候选项列出所有来源提供商。
 `hooks/use-model-display-settings.ts` 通过只读 `/api/v1/settings/model-display` 加载共享显示映射，保存后主动刷新，页面挂载期间定期重新读取；`lib/format.ts` 只映射最终名称，不改变原始选择值。
@@ -119,6 +119,31 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `hooks/use-range-refresh.ts` 与 `lib/range-refresh.ts` 为指标页面补充时间范围失效调度：按服务端时区跨日更新今天、昨天及控制台热力图，滚动范围按最后成功请求的开始时间，每 5 分钟校准；后台、离线、历史分页、加载或错误期间不发起时间驱动读取。`components/metrics/refresh-status.tsx` 展示指标及调用页面的通知状态、最后成功读取时间和陈旧提示；跨日调度以成功请求的开始时间为基准，避免零点前读取、零点后返回的旧范围延迟一天才刷新。`useApi` 的成功完成时间用于展示，只随成功结果更新，失败保留内容时保留原时间，取消的请求不能更新时间。
 
 控制台、请求与错误列表区分首次加载和后台刷新：`loading` 仅用于当前查询没有结果时的占位，`refreshing` 用于刷新按钮和操作限制；同查询刷新保留内容，切换查询不展示旧范围结果。管理任务的 `notificationError` 独立于读取错误，通知中断不阻止已成功读取的终态触发关联刷新。
+
+## 自定义模型能力设置
+
+`components/settings/provider-settings-management.tsx` 按模型提供图片、思考、`apply_patch` 与
+`tool_search` 的手动声明；思考支持开关控制既有思考等级与默认值。新增模型不会预选补丁或搜索工具，
+切换 Chat Completions 也不会改变模型的工具声明。
+独立上下文窗口页按 Token 数选择预设或自定义输入；CLI 与 WebUI 共用 `runtime/model-catalog.mjs`
+的 128K 至 1M 预设（含 384K，不含 2M），仅显示不超过模型最大窗口的预设，并可选最大窗口。
+预览、确认写入和回读保持精确 Token 数，不按整数百分比换算。
+
+`components/settings/custom-model-details.tsx` 复用共享 API 的模型元素类型，组合基本响应参数与可展开的高级参数。
+基本区编辑模型描述、最大窗口、各思考等级说明、图片 original 细节、verbosity 与默认值，以及独立的思考摘要参数。
+Chat Completions 同样开放全部能力选择与保存；切换接口保留已有声明，并说明当前请求转换对 original、verbosity 和摘要参数的限制。
+关闭图片输入同时关闭 original；编辑等级文本时保留说明草稿，在提交预览时按最终等级清理对应说明，避免逐字输入造成丢失。跟随 DS 仅锁定当前窗口，最大窗口仍可独立编辑。高级区保留 instructions 原文，
+编辑有效窗口比例、可留空的自动压缩阈值，以及可恢复默认的 tokens/bytes 截断策略。
+确认弹窗逐模型展示这些参数与 instructions 全文，缺省值明确说明；所有文案均提供中英文。
+
+每个模型分别提供 `apply_patch` 和 `tool_search` 检测按钮，不运行整套能力检测。
+`hooks/use-custom-model-capability-probe.ts` 将单项请求及结果绑定当前草稿，草稿变化、取消或关闭编辑时
+中止请求并阻止旧结果覆盖。检测使用手填的默认思考等级，未声明时使用 `none`；每次最多 3 个上游短请求，
+服务端总限时 45 秒，客户端限时 50 秒。请求可能产生费用，必须由用户主动点击。
+
+明确支持或不支持的结果可以回填对应的工具字段及连接凭证；未确定或取消的结果不能回填。
+其他模型能力保留手动值，保存继续使用版本化预览与确认。`lib/custom-model-probe.ts` 只将固定原因映射为
+`lib/i18n/messages.ts` 的中英文文案，不展示未经指定的上游响应。
 
 ## 国际化维护
 

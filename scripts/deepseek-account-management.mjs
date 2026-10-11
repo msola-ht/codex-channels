@@ -204,5 +204,5 @@ export async function removeDeepseekAccount({ accountId, confirmRemove = false }
 
 function assertNoResponsesContextFollowers(environment, operation) {
   const followers=listResponsesContextFollowers(environment);
-  if (followers.length > 0) throw new Error(`${operation}前，请先关闭关联 RS 模型的上下文跟随：${[...new Set(followers.map(entry=>entry.providerId))].join("、")}`);
+  if (followers.length > 0) throw new Error(`${operation}前，请先关闭关联 CP 模型的上下文跟随：${[...new Set(followers.map(entry=>entry.providerId))].join("、")}`);
 }

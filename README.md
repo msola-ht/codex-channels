@@ -65,6 +65,7 @@ codexc update                # 更新受管源码、同步配套 CLI 并校验�
 codexc uninstall             # 自动识别并卸载当前程序，保留用户数据
 codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc remote -p ds-main     # 用已配置的完整 Provider ID 连接隔离实例
+codexc remote -p cp-llm      # 连接自定义提供商，协议独立选择 Responses 或 Chat Completions
 codexc app      # 启动共享 Desktop App；首次确认后自动启用（预览）
 codexc app -p ds-main # 本次连接已配置的隔离实例；切换前退出 Desktop（预览）
 codexc app --provider agg # API Key 切换提供商聚合到同一桌面模型目录（预览）

@@ -4,7 +4,8 @@ import { readOfficialModelCatalog } from "../runtime/model-provider-official-cat
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { managedProviderDirectory } from "../runtime/model-provider-runtime.mjs";
 import { readPrivateFileSync } from "../runtime/private-file.mjs";
-import { validateResponsesModels } from "../runtime/model-provider-responses-catalog.mjs";
+import { validateModelDefinitions as validateResponsesModels, modelDefinitionsFromCatalog as responsesModelTemplatesFromCatalog } from "../runtime/model-catalog.mjs";
+export { modelDefinitionsFromCatalog as responsesModelTemplatesFromCatalog } from "../runtime/model-catalog.mjs";
 import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 
 export async function loadResponsesModelTemplates(source, environment = process.env) {
@@ -22,23 +23,6 @@ export async function loadResponsesModelTemplates(source, environment = process.
     }
   } else throw new Error("模型模板来源无效");
   return responsesModelTemplatesFromCatalog(catalog, source);
-}
-
-export function responsesModelTemplatesFromCatalog(catalog, source = "official") {
-  if (!["official", "deepseek"].includes(source)) throw new Error("模型模板来源无效");
-  if (!Array.isArray(catalog?.models)) throw new Error("模型模板目录缺少 models");
-  const models = catalog.models.filter(model => model.visibility === "list" && model.supported_in_api === true).map(model => ({
-    id: model.slug,
-    name: model.display_name,
-    contextWindow: model.context_window,
-    ...(model.max_context_window == null ? {} : {maxContextWindow: model.max_context_window}),
-    reasoningEfforts: model.supported_reasoning_levels?.map(entry => entry.effort).filter(effort => effort !== "ultra" && effort !== "persistent"),
-    defaultReasoningEffort: model.default_reasoning_level ?? null,
-    supportsImages: model.input_modalities?.includes("image") === true,
-    ...(source === "deepseek" && typeof model.model_messages?.instructions_template === "string" && model.model_messages.instructions_template.length > 0 ? {instructions: model.model_messages.instructions_template} : {}),
-    ...(source === "official" ? {} : {template: {source, model: model.slug, followContext: false}}),
-  }));
-  return validateResponsesModels(models, models[0]?.id);
 }
 
 export async function promptResponsesModelImport(prompts, previous = [], loadTemplates = loadResponsesModelTemplates) {
@@ -86,7 +70,7 @@ export async function promptResponsesModelImport(prompts, previous = [], loadTem
       const followContext = source === "deepseek" ? await prompts.confirm({ message: "跟随 DeepSeek 模板上下文设置？（通过项目修改 DS 窗口时同步）", initialValue: existing?.template?.source === source && existing.template.model === id ? existing.template.followContext : false }) : false;
       if (prompts.isCancel(followContext)) return undefined;
       const model = {...template, id: String(target).trim(), template: {...template.template, source, model: id, followContext: followContext === true}};
-      const confirmed = await prompts.confirm({ message: `${existing ? "用模板更新已有模型" : "复制"} ${id} → ${model.id}（${model.contextWindow} Token；图片${model.supportsImages ? "支持" : "不支持"}；思考等级 ${model.reasoningEfforts.join("/") || "none"}；上下文${model.template.followContext ? "跟随 DS" : "独立"}）？${existing ? "将替换该模型的名称、能力参数及模板关联；拒绝则保留原值。" : ""}`, initialValue: existing === undefined });
+      const confirmed = await prompts.confirm({ message: `${existing ? "用模板更新已有模型" : "复制"} ${id} → ${model.id}（${model.contextWindow} Token；图片${model.supportsImages ? "支持" : "不支持"}；思考等级 ${model.reasoningEfforts.join("/") || "none"}；上下文${model.template.followContext ? "跟随 DS" : "独立"}）？复制模板已提供的描述、等级说明、图片细节、详细程度、思考摘要及有效上下文、压缩和截断元数据；请确认平台支持这些参数。${existing ? "将替换该模型的名称、能力参数及模板关联；拒绝则保留原值。" : ""}`, initialValue: existing === undefined });
       if (prompts.isCancel(confirmed)) return undefined;
       if (confirmed) selected.push(model);
     }

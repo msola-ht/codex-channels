@@ -5,6 +5,9 @@ import { useTranslation } from "@/hooks/use-translation"
 import { formatModelLabel } from "@/lib/format"
 
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
+import { useCustomModelCapabilityProbe } from "@/hooks/use-custom-model-capability-probe"
+import { translateApiErrorCode } from "@/lib/i18n/translate"
+import { translateCustomModelProbeReason } from "@/lib/custom-model-probe"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -17,8 +20,11 @@ import { LoadingSettingsCard, SettingsEmpty, SettingsError } from "@/components/
 import { formatTokens } from "@/lib/format"
 import type { ManagementProviderSettingsResponse } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
+import { CustomModelDetails, CustomModelDetailsPreview } from "@/components/settings/custom-model-details"
+import type { CustomModelDraft } from "@/components/settings/custom-model-details"
+import { contextWindowPresetTokens } from "../../../../runtime/model-catalog.mjs"
 
-const contextWindowPresetTokens = [32768, 131072, 262144]
+const probeReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 
 export function ProviderSettingsManagement({ management, onChanged, section }: { management: ProviderSettingsController; onChanged?: () => void; section: "providers" | "models" | "context" }) {
   const { t } = useTranslation()
@@ -48,7 +54,7 @@ function ProviderSettingsCard({
   const [mode, setMode] = useState<"switching" | "exclusive">("switching")
   const [model, setModel] = useState("")
   const [catalogKind, setCatalogKind] = useState("official")
-  const [customModels, setCustomModels] = useState<Array<{ id: string; name: string; contextWindow: number; maxContextWindow?: number; reasoningEfforts: string[]; defaultReasoningEffort: string | null; supportsImages: boolean; applyPatchToolType?: "freeform"; supportsSearchTool?: boolean; template?: {source: "official" | "deepseek"; model: string; followContext: boolean} }>>([])
+  const [customModels, setCustomModels] = useState<CustomModelDraft[]>([])
   const [supportsWebsockets, setSupportsWebsockets] = useState("true")
   const [upstreamWireApi, setUpstreamWireApi] = useState<"responses" | "chat_completions">("responses")
   const [upstreamTouched, setUpstreamTouched] = useState(false)
@@ -56,15 +62,15 @@ function ProviderSettingsCard({
   const [confirmRemoveBaseUrl, setConfirmRemoveBaseUrl] = useState(false)
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
   const [windowModel, setWindowModel] = useState(settings.modelWindow[0]?.id ?? "")
-  const [windowError, setWindowError] = useState<"invalid-percent" | null>(null)
+  const [windowError, setWindowError] = useState<"invalid-window" | null>(null)
 
   const managed = settings.managedProviders.find((provider) => provider.id === managedProvider) ?? settings.managedProviders[0]
   const windowEntry = settings.modelWindow.find((candidate) => candidate.id === windowModel) ?? settings.modelWindow[0]
   const [managedDraft, patchManaged, resetManaged] = useSettingsDraft({ model: managed?.model ?? "", reasoning: managed?.reasoningEffort ?? "" })
   const { model: managedModel, reasoning: managedReasoning } = managedDraft
   const managedModelEntry = managed?.models.find((candidate) => candidate.id === managedModel)
-  const [windowDraft, patchWindow, resetWindow] = useSettingsDraft({ percent: String(windowEntry?.windowPercent ?? 100) })
-  const windowPercent = windowDraft.percent
+  const [windowDraft, patchWindow, resetWindow] = useSettingsDraft({ tokens: String(windowEntry?.contextWindow ?? "") })
+  const windowTokens = windowDraft.tokens
   const candidates = useMemo(() => [
     ...settings.customProviders.fixedCandidates,
     ...settings.customProviders.switchingProviders,
@@ -72,6 +78,7 @@ function ProviderSettingsCard({
   ], [settings.customProviders])
   const busy = management.busy || management.loading || management.error !== null
   const pending = management.pendingPreview
+  const probe = useCustomModelCapabilityProbe(JSON.stringify({ configVersion: settings.configVersion, editingId, providerId, providerName, baseUrl, apiKey, upstreamWireApi, customModels, mode, model, supportsWebsockets, confirmRemoveBaseUrl }), editorOpen && catalogKind === "custom" && pending === null)
 
   const managedId = managed?.id
   const windowId = windowEntry?.id
@@ -79,6 +86,7 @@ function ProviderSettingsCard({
   useEffect(() => { resetWindow() }, [windowId, resetWindow])
 
   const resetForm = () => {
+    probe.invalidate()
     setEditorOpen(false)
     setEditingId(null)
     setProviderId("")
@@ -126,9 +134,18 @@ function ProviderSettingsCard({
         baseUrl: baseUrl.trim(),
         mode,
         model: model.trim(),
-        ...(catalogKind === "custom" ? { catalog: { kind: "custom" as const, models: customModels } } : {}),
+        ...(catalogKind === "custom" ? {
+          catalog: { kind: "custom" as const, models: customModels.map(({ probeConnection: _probeConnection, ...entry }) => {
+            const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts.includes(effort)))
+            return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions }
+          }) },
+          probeConnections: customModels.flatMap(entry => (["applyPatch", "toolSearch"] as const).flatMap(capability => {
+            const token = entry.probeConnection?.[capability]
+            return token === undefined ? [] : [{ model: entry.id, capability, token }]
+          })),
+        } : {}),
         supportsWebsockets: supportsWebsockets === "true",
-        ...(catalogKind === "custom" && (upstreamTouched || editingId === null) ? { upstreamWireApi } : {}),
+        ...(catalogKind === "custom" && (upstreamTouched || editingId === null || customModels.some(entry => entry.probeConnection !== undefined)) ? { upstreamWireApi } : {}),
         credential,
         ...(confirmRemoveBaseUrl ? { confirmRemoveTopLevelBaseUrl: true } : {}),
       },
@@ -156,16 +173,16 @@ function ProviderSettingsCard({
 
   const updateWindow = async () => {
     if (windowEntry === undefined) return
-    const parsedPercent = Number(windowPercent)
-    if (!Number.isInteger(parsedPercent) || parsedPercent < 10 || parsedPercent > 100) {
-      setWindowError("invalid-percent")
+    const contextWindow = Number(windowTokens)
+    if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > windowEntry.maxContextWindow) {
+      setWindowError("invalid-window")
       return
     }
     setWindowError(null)
     await management.mutate({
       operation: "managed.window",
       model: windowEntry.id,
-      windowPercent: parsedPercent,
+      contextWindow,
     })
   }
 
@@ -212,9 +229,13 @@ function ProviderSettingsCard({
         </div>
         {windowEntry === undefined ? <SettingsEmpty>{t("managementUi.managedModelsEmpty")}</SettingsEmpty> : <>
           <FieldGroup>
-            <Table><TableHeader><TableRow><TableHead>{t("modelManagement.model")}</TableHead><TableHead>{t("managementUi.provider")}</TableHead><TableHead>{t("managementUi.windowPercent")}</TableHead><TableHead>{t("modelManagement.actions")}</TableHead></TableRow></TableHeader><TableBody>{settings.modelWindow.map(entry => <TableRow key={entry.id} data-state={entry.id === windowEntry.id ? "selected" : undefined}><TableCell>{entry.displayName}</TableCell><TableCell>{entry.providers.join(t("managementUi.listSeparator"))}</TableCell><TableCell>{entry.conflicts ? t("managementUi.inconsistent") : `${entry.windowPercent ?? 100}%`}</TableCell><TableCell><Button size="sm" variant="outline" disabled={busy || pending !== null || entry.id === windowEntry.id} onClick={() => setWindowModel(entry.id)}>{t("managementUi.select")}</Button></TableCell></TableRow>)}</TableBody></Table>
+            <Table><TableHeader><TableRow><TableHead>{t("modelManagement.model")}</TableHead><TableHead>{t("managementUi.provider")}</TableHead><TableHead>{t("managementUi.windowTokens")}</TableHead><TableHead>{t("modelManagement.actions")}</TableHead></TableRow></TableHeader><TableBody>{settings.modelWindow.map(entry => <TableRow key={entry.id} data-state={entry.id === windowEntry.id ? "selected" : undefined}><TableCell>{entry.displayName}</TableCell><TableCell>{entry.providers.join(t("managementUi.listSeparator"))}</TableCell><TableCell>{entry.conflicts ? t("managementUi.inconsistent") : entry.contextWindow}</TableCell><TableCell><Button size="sm" variant="outline" disabled={busy || pending !== null || entry.id === windowEntry.id} onClick={() => { setWindowModel(entry.id); setWindowError(null) }}>{t("managementUi.select")}</Button></TableCell></TableRow>)}</TableBody></Table>
             <p className="text-sm">{t("managementUi.editingModel", { model: windowEntry.displayName })}</p>
-            <Field orientation="responsive" data-invalid={windowError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-window-percent">{t("managementUi.windowPercentLabel")}</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-window-percent" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "provider-window-percent-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={10} max={100} value={windowPercent} disabled={busy || pending !== null} onChange={(event) => { patchWindow({ percent: event.target.value }); setWindowError(null) }} /><FieldError id="provider-window-percent-error" className="sm:text-right">{windowError === null ? null : t("managementUi.windowInvalid")}</FieldError></FieldContent></Field>
+            <ManagedSelect label={t("managementUi.contextPreset")} value={windowTokens} options={[
+              ...contextWindowPresetTokens.filter(value => value < windowEntry.maxContextWindow).map(value => [String(value), t("managementUi.contextPresetSize", { size: value === 1048576 ? "1M" : `${value / 1024}K`, tokens: value })] as [string, string]),
+              [String(windowEntry.maxContextWindow), t("managementUi.maximumWindow", { tokens: windowEntry.maxContextWindow })],
+            ]} disabled={busy || pending !== null} onChange={value => { patchWindow({ tokens: value }); setWindowError(null) }} />
+            <Field orientation="responsive" data-invalid={windowError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-window-tokens">{t("managementUi.windowTokens")}</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-window-tokens" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "provider-window-tokens-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={1024} max={windowEntry.maxContextWindow} step={1} value={windowTokens} disabled={busy || pending !== null} onChange={(event) => { patchWindow({ tokens: event.target.value }); setWindowError(null) }} /><FieldError id="provider-window-tokens-error" className="sm:text-right">{windowError === null ? null : t("managementUi.windowInvalid", { max: windowEntry.maxContextWindow })}</FieldError></FieldContent></Field>
           </FieldGroup>
           <p className="text-xs text-muted-foreground">{t("managementUi.windowSummary", { providers: windowEntry.providers.join(t("managementUi.listSeparator")) || t("managementUi.none"), context: formatTokens(windowEntry.contextWindow), max: formatTokens(windowEntry.maxContextWindow) })}</p>
           {windowEntry.conflicts === true ? <Alert><AlertTitle>{t("managementUi.windowConflict")}</AlertTitle><AlertDescription>{t("managementUi.windowConflictDescription", { values: Object.entries(windowEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join(t("accountConfirmation.listSeparator")) || t("managementUi.partlyUnset") })}</AlertDescription></Alert> : null}
@@ -233,39 +254,68 @@ function ProviderSettingsCard({
           </TableRow>)}
         </TableBody></Table>
         <Dialog open={editorOpen} onOpenChange={open => { if (!open && !management.busy && pending === null) resetForm() }}><DialogContent closeLabel={t("common.close")} showCloseButton={!management.busy && pending === null} className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{editingId === null ? t("managementUi.addProvider") : t("managementUi.editProvider")}</DialogTitle><DialogDescription>{t("managementUi.providerEditorHint")}</DialogDescription></DialogHeader>
-        <ManagedSelect label={t("managementUi.providerType")} value={catalogKind} options={[["official", t("managementUi.compatibleProvider")], ["custom", t("managementUi.responsesProvider")]]} disabled={busy || pending !== null || editingId !== null} onChange={(value) => { setCatalogKind(value); setProviderId(value === "custom" ? "rs-" : ""); setModel(""); setCustomModels([]) }} />
+        <ManagedSelect label={t("managementUi.providerType")} value={catalogKind} options={[["official", t("managementUi.compatibleProvider")], ["custom", t("managementUi.responsesProvider")]]} disabled={busy || pending !== null || editingId !== null} onChange={(value) => { setCatalogKind(value); setProviderId(value === "custom" ? "cp-" : ""); setModel(""); setCustomModels([]) }} />
         <FieldGroup className="grid gap-3 md:grid-cols-2">
           <Field data-disabled={busy || pending !== null || editingId !== null}><FieldLabel htmlFor="custom-provider-id">{catalogKind === "custom" ? t("managementUi.responsesProviderId") : t("managementUi.providerId")}</FieldLabel><Input id="custom-provider-id" placeholder={t("managementUi.providerIdExample")} value={providerId} disabled={busy || pending !== null || editingId !== null} onChange={(event) => setProviderId(event.target.value)} /></Field>
           <Field data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-name">{t("managementUi.displayName")}</FieldLabel><Input id="custom-provider-name" placeholder={t("managementUi.displayName")} value={providerName} disabled={busy || pending !== null} onChange={(event) => setProviderName(event.target.value)} /></Field>
           <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-endpoint">{t("managementUi.responsesBaseUrl")}</FieldLabel><Input id="custom-provider-endpoint" placeholder="https://example.com/v1" value={baseUrl} disabled={busy || pending !== null} onChange={(event) => setBaseUrl(event.target.value)} /></Field>
           <Field data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-model">{catalogKind === "custom" ? t("managementUi.defaultModelId") : t("managementUi.officialModelId")}</FieldLabel><Input id="custom-provider-model" placeholder={t("managementUi.modelId")} value={model} disabled={busy || pending !== null} onChange={(event) => setModel(event.target.value)} /></Field>
           <ManagedSelect label={t("modelManagement.mode")} value={mode} options={[["switching", t("modelManagement.switching")], ["exclusive", t("modelManagement.exclusive")]]} disabled={busy || pending !== null} onChange={(value) => setMode(value as "switching" | "exclusive")} />
-          {catalogKind === "custom" ? <ManagedSelect label={t("managementUi.upstreamInterface")} value={upstreamWireApi} options={[["responses", t("managementUi.upstreamResponses")], ["chat_completions", t("managementUi.upstreamChatCompletions")]]} disabled={busy || pending !== null} onChange={(value) => { const next = value === "chat_completions" ? "chat_completions" : "responses"; setUpstreamWireApi(next); setUpstreamTouched(true); if (next === "chat_completions") { setSupportsWebsockets("false"); setCustomModels(current => current.map(entry => ({ ...entry, supportsSearchTool: true }))) } }} /> : null}
+          {catalogKind === "custom" ? <ManagedSelect label={t("managementUi.upstreamInterface")} value={upstreamWireApi} options={[["responses", t("managementUi.upstreamResponses")], ["chat_completions", t("managementUi.upstreamChatCompletions")]]} disabled={busy || pending !== null} onChange={(value) => { const next = value === "chat_completions" ? "chat_completions" : "responses"; setUpstreamWireApi(next); setUpstreamTouched(true); if (next === "chat_completions") setSupportsWebsockets("false") }} /> : null}
           <ManagedSelect label="WebSocket" value={supportsWebsockets} options={[["true", t("managementUi.supported")], ["false", t("managementUi.unsupported")]]} disabled={busy || pending !== null || upstreamWireApi === "chat_completions"} onChange={setSupportsWebsockets} />
           <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-api-key">API Key</FieldLabel><Input id="custom-provider-api-key" type="password" autoComplete="new-password" placeholder={t("managementUi.preserveCredentials")} value={apiKey} disabled={busy || pending !== null} onChange={(event) => setApiKey(event.target.value)} /></Field>
         </FieldGroup>
         {catalogKind === "custom" ? <div className="flex flex-col gap-3">
           <p className="text-xs text-muted-foreground">{t("managementUi.responsesHint")}</p>
+          <Alert><AlertTitle>{t("modelProbe.title")}</AlertTitle><AlertDescription>{t("modelProbe.hint")}</AlertDescription></Alert>
           {customModels.map((entry, index) => {
             const patch = (changes: Partial<typeof entry>) => setCustomModels(current => current.map((value, position) => position === index ? { ...value, ...changes } : value))
+            const reasoningEffort = probeReasoningEfforts.find(effort => effort === (entry.defaultReasoningEffort ?? "none"))
             return <FieldGroup key={index} className="rounded-md border p-3">
               <Field><FieldLabel htmlFor={`responses-model-${index}`}>{t("managementUi.modelId")}</FieldLabel><Input id={`responses-model-${index}`} value={entry.id} disabled={busy || pending !== null} onChange={event => patch({ id: event.target.value })} /></Field>
               <Field><FieldLabel htmlFor={`responses-name-${index}`}>{t("managementUi.displayName")}</FieldLabel><Input id={`responses-name-${index}`} value={entry.name} disabled={busy || pending !== null} onChange={event => patch({ name: event.target.value })} /></Field>
               {entry.template?.source === "deepseek" ? <Field orientation="horizontal"><Checkbox id={`responses-follow-${index}`} checked={entry.template.followContext} disabled={busy || pending !== null} onCheckedChange={value => patch({template: {...entry.template!, followContext: value === true}})} /><FieldLabel htmlFor={`responses-follow-${index}`}>{t("managementUi.followDsContext", { model: entry.template.model })}</FieldLabel></Field> : null}
               <ManagedSelect label={t("managementUi.contextPreset")} value={entry.contextWindow ? String(entry.contextWindow) : ""} options={contextWindowPresetTokens.filter(value => value <= (entry.maxContextWindow ?? 100000000)).map(value => [String(value), t("managementUi.contextPresetLabel", { k: value / 1024, tokens: value })])} disabled={busy || pending !== null || entry.template?.followContext === true} onChange={value => patch({ contextWindow: Number(value) })} />
               <Field><FieldLabel htmlFor={`responses-context-${index}`}>{t("managementUi.contextTokens")}</FieldLabel><Input id={`responses-context-${index}`} type="number" min={1024} max={entry.maxContextWindow ?? 100000000} value={entry.contextWindow || ""} disabled={busy || pending !== null || entry.template?.followContext === true} onChange={event => patch({ contextWindow: Number(event.target.value) })} /></Field>
-              <Field><FieldLabel htmlFor={`responses-reasoning-${index}`}>{t("managementUi.reasoningList")}</FieldLabel><Input id={`responses-reasoning-${index}`} value={entry.reasoningEfforts.join(",")} placeholder="low,medium,high" disabled={busy || pending !== null} onChange={event => { const values = event.target.value === "" ? [] : event.target.value.split(","); patch({ reasoningEfforts: values, defaultReasoningEffort: values.includes(entry.defaultReasoningEffort ?? "") ? entry.defaultReasoningEffort : values[0] ?? null }) }} /></Field>
+              <Field orientation="horizontal"><Checkbox id={`responses-reasoning-supported-${index}`} checked={entry.reasoningEfforts.length > 0} disabled={busy || pending !== null} onCheckedChange={value => patch({ reasoningEfforts: value === true ? ["medium"] : [], defaultReasoningEffort: value === true ? "medium" : null, reasoningDescriptions: undefined })} /><FieldLabel htmlFor={`responses-reasoning-supported-${index}`}>{t("managementUi.supportsReasoning")}</FieldLabel></Field>
+              {entry.reasoningEfforts.length > 0 ? <Field><FieldLabel htmlFor={`responses-reasoning-${index}`}>{t("managementUi.reasoningList")}</FieldLabel><Input id={`responses-reasoning-${index}`} value={entry.reasoningEfforts.join(",")} placeholder="low,medium,high" disabled={busy || pending !== null} onChange={event => { const values = event.target.value === "" ? [] : event.target.value.split(","); patch({ reasoningEfforts: values, defaultReasoningEffort: values.includes(entry.defaultReasoningEffort ?? "") ? entry.defaultReasoningEffort : values[0] ?? null }) }} /></Field> : null}
               {entry.reasoningEfforts.length > 0 ? <Field><FieldLabel htmlFor={`responses-default-${index}`}>{t("managementUi.defaultReasoning")}</FieldLabel><Input id={`responses-default-${index}`} value={entry.defaultReasoningEffort ?? ""} disabled={busy || pending !== null} onChange={event => patch({ defaultReasoningEffort: event.target.value })} /></Field> : null}
-              <Field orientation="horizontal"><Checkbox id={`responses-images-${index}`} checked={entry.supportsImages} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsImages: value === true })} /><FieldLabel htmlFor={`responses-images-${index}`}>{t("managementUi.imageInput")}</FieldLabel></Field>
-              <Field orientation="horizontal"><Checkbox id={`responses-patch-${index}`} checked={entry.applyPatchToolType === "freeform"} disabled={busy || pending !== null} onCheckedChange={value => patch({ applyPatchToolType: value === true ? "freeform" : undefined })} /><FieldLabel htmlFor={`responses-patch-${index}`}>{t("managementUi.freeformPatchTool")}</FieldLabel></Field>
-              <Field orientation="horizontal"><Checkbox id={`responses-search-${index}`} checked={entry.supportsSearchTool === true} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsSearchTool: value === true })} /><FieldLabel htmlFor={`responses-search-${index}`}>{t("managementUi.toolSearchTool")}</FieldLabel></Field>
+              <Field orientation="horizontal"><Checkbox id={`responses-images-${index}`} checked={entry.supportsImages} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsImages: value === true, supportsImageDetailOriginal: value === true ? entry.supportsImageDetailOriginal : false })} /><FieldLabel htmlFor={`responses-images-${index}`}>{t("managementUi.imageInput")}</FieldLabel></Field>
+              <CustomModelDetails entry={entry} index={index} disabled={busy || pending !== null} upstreamWireApi={upstreamWireApi} patch={patch} />
+              <Field orientation="horizontal"><Checkbox id={`responses-patch-${index}`} checked={entry.applyPatchToolType === "freeform"} disabled={busy || pending !== null} onCheckedChange={value => patch({ applyPatchToolType: value === true ? "freeform" : undefined, probeConnection: { ...entry.probeConnection, applyPatch: undefined } })} /><FieldLabel htmlFor={`responses-patch-${index}`}>{t("managementUi.freeformPatchTool")}</FieldLabel></Field>
+              <Field orientation="horizontal"><Checkbox id={`responses-search-${index}`} checked={entry.supportsSearchTool === true} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsSearchTool: value === true, probeConnection: { ...entry.probeConnection, toolSearch: undefined } })} /><FieldLabel htmlFor={`responses-search-${index}`}>{t("managementUi.toolSearchTool")}</FieldLabel></Field>
+              <p className="text-muted-foreground">{reasoningEffort === undefined ? t("modelProbe.invalidReasoning") : t("modelProbe.reasoningEffort", { effort: reasoningEffort })}</p>
+              <div className="flex flex-wrap gap-2">
+                {(["applyPatch", "toolSearch"] as const).map(capability => <Button key={capability} variant="outline" disabled={busy || pending !== null || probe.running || reasoningEffort === undefined || !entry.id.trim() || !baseUrl.trim() || (editingId === null && !apiKey.trim())} onClick={() => { if (reasoningEffort === undefined) return; void probe.start(index, {
+                  ...(editingId === null ? {} : { providerId: editingId }), baseUrl: baseUrl.trim(), model: entry.id.trim(), upstreamWireApi,
+                  capability, reasoningEffort,
+                  credential: apiKey.trim() === "" ? { action: "preserve" } : { action: "replace", apiKey },
+                }) }}>{probe.running && probe.state?.index === index && probe.state.capability === capability ? t("modelProbe.running") : t("modelProbe.detectTool", { tool: t(`modelProbe.capabilities.${capability}`) })}</Button>)}
+                {probe.state?.index === index && probe.running ? <Button variant="outline" onClick={probe.cancel}>{t("modelProbe.cancel")}</Button> : null}
+                {probe.state?.index === index && probe.state.result ? <Button variant="outline" disabled={busy || pending !== null || !probe.canApply} onClick={() => {
+                  const result = probe.state?.result
+                  if (!probe.canApply || !result || result.model !== entry.id.trim()) return
+                  patch({ ...(result.capability === "applyPatch"
+                    ? { applyPatchToolType: result.check.status === "supported" ? "freeform" : undefined }
+                    : { supportsSearchTool: result.check.status === "supported" }), probeConnection: { ...entry.probeConnection, [result.capability]: result.connectionToken } })
+                }}>{t("modelProbe.applyTool", { tool: t(`modelProbe.capabilities.${probe.state.result.capability}`) })}</Button> : null}
+              </div>
+              {probe.state?.index === index ? <div className="flex flex-col gap-2" role="status" aria-live="polite">
+                {probe.state.errorCode ? <Alert variant="destructive"><AlertDescription>{translateApiErrorCode(t, probe.state.errorCode)}</AlertDescription></Alert> : null}
+                {probe.state.cancelled || probe.state.result?.status === "cancelled" ? <p>{t("modelProbe.cancelled")}</p> : null}
+                {probe.state.result ? <>
+                  <p className="text-muted-foreground">{t("modelProbe.resultHint")}</p>
+                  <Table><TableHeader><TableRow><TableHead>{t("modelProbe.capability")}</TableHead><TableHead>{t("modelProbe.status")}</TableHead><TableHead>{t("modelProbe.evidence")}</TableHead></TableRow></TableHeader><TableBody>{[probe.state.result.check].map(check => <TableRow key={check.capability}><TableCell>{t(`modelProbe.capabilities.${check.capability}`)}</TableCell><TableCell><Badge variant={check.status === "supported" ? "secondary" : "outline"}>{t(`modelProbe.statuses.${check.status}`)}</Badge></TableCell><TableCell><p>{translateCustomModelProbeReason(t, check.reason)}</p>{check.httpStatus === undefined ? t("modelProbe.noHttpStatus") : t("modelProbe.httpStatus", { status: check.httpStatus })}</TableCell></TableRow>)}</TableBody></Table>
+                  {!probe.canApply ? <p className="text-muted-foreground">{t("modelProbe.cannotApply")}</p> : null}
+                </> : null}
+              </div> : null}
               <Button variant="outline" disabled={busy || pending !== null} onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>{t("managementUi.removeModel")}</Button>
             </FieldGroup>
           })}
-          <Button variant="outline" disabled={busy || pending !== null || customModels.length >= 64} onClick={() => setCustomModels(current => [...current, { id: current.length === 0 ? model : "", name: current.length === 0 ? model : "", contextWindow: 0, reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false, applyPatchToolType: "freeform", ...(upstreamWireApi === "chat_completions" ? { supportsSearchTool: true } : {}) }])}>{t("managementUi.addModel")}</Button>
+          <Button variant="outline" disabled={busy || pending !== null || customModels.length >= 64} onClick={() => setCustomModels(current => [...current, { id: current.length === 0 ? model : "", name: current.length === 0 ? model : "", contextWindow: 0, reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false }])}>{t("managementUi.addModel")}</Button>
         </div> : null}
         {mode === "exclusive" ? <Field orientation="horizontal" data-disabled={busy || pending !== null}><Checkbox id="custom-provider-remove-base-url" checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} /><FieldLabel htmlFor="custom-provider-remove-base-url" className="text-xs text-muted-foreground">{t("managementUi.removeBaseUrl")}</FieldLabel></Field> : null}
-        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
+        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || probe.running || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
         </DialogContent></Dialog>
       </section>}
@@ -292,7 +342,7 @@ function ProviderSettingsConfirmationDialog({
   const lines = [t("accountConfirmation.operation", { value: pending.operation })]
   if (pending.provider !== undefined) lines.push(t("managementUi.providerConfirm", { name: pending.provider.displayName ?? pending.provider.name ?? pending.provider.id }))
   if (pending.provider !== undefined && "upstreamWireApi" in pending.provider) lines.push(t("managementUi.upstreamConfirm", { value: pending.provider.upstreamWireApi === "chat_completions" ? t("managementUi.upstreamChatCompletions") : t("managementUi.upstreamResponses") }))
-  if (pending.provider?.models !== undefined) for (const model of pending.provider.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: t(model.supportsImages ? "managementUi.supported" : "managementUi.unsupported"), reasoning: model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? "none" }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model, mode: t(model.template.followContext ? "managementUi.follow" : "managementUi.independent") }) : ""))
+  if (pending.provider?.models !== undefined) for (const model of pending.provider.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: t(model.supportsImages ? "managementUi.supported" : "managementUi.unsupported"), reasoning: model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? "none", patch: model.applyPatchToolType ?? t("managementUi.unsupported"), search: t(model.supportsSearchTool ? "managementUi.supported" : "managementUi.unsupported") }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model, mode: t(model.template.followContext ? "managementUi.follow" : "managementUi.independent") }) : ""))
   if (pending.target !== undefined) lines.push(t("managementUi.targetConfirm", { name: pending.target.displayName, id: pending.target.id }))
   if (pending.model !== undefined) lines.push(t("managementUi.modelConfirm", { name: pending.model.displayName, id: pending.model.id }))
   if (pending.providers !== undefined && pending.providers.length > 0) lines.push(t("managementUi.appliedProviders", { providers: pending.providers.join(t("managementUi.listSeparator")) }))
@@ -300,11 +350,13 @@ function ProviderSettingsConfirmationDialog({
   if (pending.conflicts === true) lines.push(t("managementUi.percentConflictConfirm"))
   if (pending.windowConflict === true) lines.push(t("managementUi.maxWindowConflict"))
   if (pending.reasoningEffort !== undefined) lines.push(t("managementUi.reasoningConfirm", { value: pending.reasoningEffort }))
-  if (pending.windowPercent !== undefined) lines.push(t("managementUi.windowConfirm", { percent: pending.windowPercent }))
+  if (pending.contextWindow !== undefined) lines.push(t("managementUi.windowTokensConfirm", { tokens: pending.contextWindow }))
+  else if (pending.windowPercent !== undefined) lines.push(t("managementUi.windowConfirm", { percent: pending.windowPercent }))
   if (pending.credential?.action !== undefined) lines.push(t("managementUi.credentialConfirm", { action: t(pending.credential.action === "replace" ? "managementUi.replaceCredential" : "managementUi.preserveCredential") }))
   if (pending.transport?.cleartext === true) lines.push(t("managementUi.cleartextUpstream"))
   return <ManagementConfirmationDialog open saving={saving} loading={loading} title={t("managementUi.providerConfirmTitle")} description={t("accountConfirmation.changeDescription")} confirmVariant={pending.operation === "remove" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
     <p className="whitespace-pre-line">{lines.join("\n")}</p>
+    {pending.provider?.models?.map(entry => <CustomModelDetailsPreview key={entry.id} entry={entry} />)}
     <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: pending.activation })}</p>
   </ManagementConfirmationDialog>
 }

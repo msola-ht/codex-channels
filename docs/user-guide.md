@@ -79,7 +79,7 @@ Gateway 配置位于：
 例如创建 `deepseek-flash` 组，加入 `cline-pass/deepseek-v4.1-flash`、`deepseek/deepseek-v4.1-flash` 和
 `deepseek-v4.1-flash`；可从已配置的受管模型选择成员，并选择 DS 模型名作为组名，也可手填历史 ID。
 提供商仍是独立选项，上游请求使用原始 ID；控制台“按模型统计”按显示组汇总，并在组内按 Thread/Turn 去重轮次。
-卡片上的“展开明细”按提供商和原始模型列出各自用量；明细轮次分别去重，跨来源重复的轮次只在组合计中去重。
+仅有一个明细成员的卡片直接展示汇总；多个成员的卡片以加粗边框区分，悬浮或聚焦时边框更明显。点击卡片或键盘聚焦后按 Enter/空格打开明细弹窗，按提供商和原始模型列出各自用量；卡片不显示占位按钮，也不内联展开，用量和截断文字的提示仍可独立操作。明细轮次分别去重，跨来源重复的轮次只在组合计中去重。
 保存前展示预览并保留配置备份；编辑可移除成员，删除组恢复原名。WebUI 重新读取即生效，频道显示按保存提示重启 Gateway。
 详细匹配规则见[模型显示组](display.md#模型显示组)。
 
@@ -340,12 +340,13 @@ DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSe
 codexc remote
 codexc remote resume
 codexc remote -p ds-main resume
+codexc remote -p cp-llm
 codexc remote --profile personal
 ```
 
 `codexc remote` 与 `codexc app` 的 `-p` / `--provider` 使用同一选择规则：接受已配置的完整
-Provider ID（如 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`my-provider`），或注册表中精确登记的
-规范 `sf-*` Profile 名称（如 `sf-ds-main`、`sf-custom-my-provider`）。推荐使用完整 Provider ID；
+Provider ID（如 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`cp-llm`、`my-provider`），或注册表中精确登记的
+规范 `sf-*` Profile 名称（如 `sf-ds-main`、`sf-cp-llm`、`sf-custom-my-provider`）。自定义提供商使用 `cp-` 前缀，支持独立选择 Responses 或 Chat Completions；对应配置文件为 `sf-cp-<名称>.config.toml`。推荐使用完整 Provider ID；
 只匹配已登记的名称，不通过任意剥除 `sf-` 前缀推测目标。未配置、歧义或重复选择均明确拒绝。
 两个入口默认都连接主实例，不根据 OpenAI 登录状态自动选择第三方，也不沿用上次选择；
 Remote 显式指定受管 `--profile` 时仍连接对应实例。
@@ -425,7 +426,7 @@ Remote、Desktop 启动和 `app status` 的 `-p` / `--provider` 共用完整 Pro
 启动时读取聚合服务端的默认模型与思考等级。使用 `-m`/`--model` 或 `-c model=...` 选择其他目录模型时，
 自动采用目标模型的默认思考等级；`-m`/`--model` 优先于 `-c model=...`，重复配置覆盖以最后一项为准。
 显式 `-c model_reasoning_effort=...` 优先；`--` 后的内容只作为原生 Codex 输入，不参与模型或思考等级选择。
-渠道通过 `/model` 的“聚合提供商”目录选择同一组精确模型 ID，
+渠道通过 `/model` 的 `AGG` 目录选择同一组精确模型 ID，模型项显示实际成员提供商的短标签，
 在聚合 Thread 内换模型保留历史；从单账户切入聚合则创建新 Thread。聚合审批 reviewer 固定为
 `user`，Remote 拒绝显式 `auto_review`。聚合 `/account`、`/limits` 明确返回不支持，
 请求指标仍按真实成员账户记录，不生成虚拟账户快照。

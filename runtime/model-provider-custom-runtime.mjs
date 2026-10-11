@@ -1,4 +1,4 @@
-import { isResponsesProvider, responsesModelSettings, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
+import { isCustomCatalogProvider, responsesModelSettings, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
 import { existsSync, readdirSync, unlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -137,6 +137,12 @@ export function validateCustomPrimaryModelProviderId(id, environment = process.e
   if (typeof id !== "string" || !customProviderIdPattern.test(id)) {
     return "Provider ID 只能使用 1-64 位 ASCII 字母、数字、- 或 _";
   }
+  if (id.startsWith("rs-")) {
+    return "自定义提供商使用 cp- 前缀，不支持 rs- Provider ID";
+  }
+  if (id === "cp-") {
+    return "自定义提供商 ID 必须为 cp- 加 1-61 位字母、数字、- 或 _";
+  }
   if (
     builtInModelProviderIds.has(id)
     || id === "deepseek" || id.startsWith("ds-")
@@ -255,9 +261,9 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
   ) {
     throw new Error(`Codex 主模型 Provider ${id} 的 requires_openai_auth 无效`);
   }
-  if (isResponsesProvider(id) && provider.name === "OpenAI") throw new Error("Responses Provider 不能使用 OpenAI 名称");
-  const custom = isResponsesProvider(id) ? responsesModelSettings(environment, id, document.model) : undefined;
-  if (custom && document.model_catalog_json !== custom.catalog.path) throw new Error("Responses Provider 模型目录引用无效");
+  if (isCustomCatalogProvider(id) && provider.name === "OpenAI") throw new Error("自定义提供商不能使用 OpenAI 名称");
+  const custom = isCustomCatalogProvider(id) ? responsesModelSettings(environment, id, document.model) : undefined;
+  if (custom && document.model_catalog_json !== custom.catalog.path) throw new Error("自定义提供商模型目录引用无效");
   const upstreamWireApi = custom === undefined
     ? "responses"
     : readCustomProviderUpstreamWireApi(environment, id);
@@ -272,13 +278,20 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
   };
 }
 
-export function customPrimaryProviderProfilePath(environment = process.env, provider) {
+export function customSwitchingProviderProfileName(provider) {
   if (typeof provider !== "string" || !customProviderIdPattern.test(provider)) {
     throw new Error("自定义切换 Provider ID 无效");
   }
+  if (provider.startsWith("rs-") || provider === "cp-") {
+    throw new Error("自定义提供商 ID 必须使用 cp- 加 1-61 位字母、数字、- 或 _");
+  }
+  return isCustomCatalogProvider(provider) ? `sf-${provider}` : `${customPrimaryProviderProfileName}-${provider}`;
+}
+
+export function customPrimaryProviderProfilePath(environment = process.env, provider) {
   return join(
     codexHomePath(environment),
-    `${customPrimaryProviderProfileName}-${provider}.config.toml`,
+    `${customSwitchingProviderProfileName(provider)}.config.toml`,
   );
 }
 
@@ -430,13 +443,13 @@ function configuredCustomSwitchingProfileFromContent(
   } catch {
     throw new Error("Codex 自定义切换 Provider Profile 无法安全读取");
   }
-  if (!isResponsesProvider(registeredProvider) && profile.model_catalog_json !== undefined) {
+  if (!isCustomCatalogProvider(registeredProvider) && profile.model_catalog_json !== undefined) {
     throw new Error("自定义切换 Provider 当前只支持 Codex 官方模型目录");
   }
-  const custom = isResponsesProvider(registeredProvider)
+  const custom = isCustomCatalogProvider(registeredProvider)
     ? responsesModelSettings(environment, registeredProvider, profile.model) : undefined;
   const reasoningEffort = custom ? custom.reasoningEffort ?? "none" : customSwitchingDefaultReasoningEffort;
-  if (custom && profile.model_catalog_json !== custom.catalog.path) throw new Error("Responses Provider 模型目录引用无效");
+  if (custom && profile.model_catalog_json !== custom.catalog.path) throw new Error("自定义提供商模型目录引用无效");
   const supportedProfileKeys = new Set([
     ...(custom ? ["model_catalog_json", "web_search"] : []),
     "model",
@@ -520,14 +533,14 @@ function configuredCustomSwitchingProfileFromContent(
   const name = typeof provider.name === "string" && provider.name.trim() !== ""
     ? provider.name.trim()
     : id;
-  if (custom && name === "OpenAI") throw new Error("Responses Provider 不能使用 OpenAI 名称");
+  if (custom && name === "OpenAI") throw new Error("自定义提供商不能使用 OpenAI 名称");
   const supportsWebsockets = provider.supports_websockets === true;
   const upstreamWireApi = custom === undefined ? "responses" : readCustomProviderUpstreamWireApi(environment, id);
   if (upstreamWireApi === "chat_completions" && supportsWebsockets) {
     throw new Error(`Codex 自定义切换 Provider ${id} 的 Chat 上游不支持 WebSocket`);
   }
   const environmentKey = customSwitchingProviderEnvironmentKey(id);
-  const profileName = `${customPrimaryProviderProfileName}-${id}`;
+  const profileName = customSwitchingProviderProfileName(id);
   return {
     id,
     provider: id,
@@ -591,11 +604,11 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
   if (typeof model !== "string" || model.trim() === "") {
     throw new Error("自定义 Provider 默认模型不能为空");
   }
-  if (catalogSource?.kind !== "official" && !(isResponsesProvider(provider) && catalogSource?.kind === "custom")) {
+  if (catalogSource?.kind !== "official" && !(isCustomCatalogProvider(provider) && catalogSource?.kind === "custom")) {
     throw new Error("自定义 Provider 当前只支持 Codex 官方模型目录");
   }
-  if (isResponsesProvider(provider) && name === "OpenAI") throw new Error("Responses Provider 不能使用 OpenAI 名称");
-  if (isResponsesProvider(provider) !== (catalogSource.kind === "custom")) throw new Error("Provider 类型与模型目录来源不一致");
+  if (isCustomCatalogProvider(provider) && name === "OpenAI") throw new Error("自定义提供商不能使用 OpenAI 名称");
+  if (isCustomCatalogProvider(provider) !== (catalogSource.kind === "custom")) throw new Error("Provider 类型与模型目录来源不一致");
   const normalizedBaseUrl = validProviderBaseUrl(
     baseUrl,
     `Codex 自定义切换 Provider ${provider}`,

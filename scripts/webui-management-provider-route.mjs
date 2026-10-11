@@ -33,6 +33,7 @@ import {
 } from "./webui-provider-settings-management.mjs";
 import { invalidateServiceStatusSummary } from "./webui-service-status.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
+import { routeCustomModelCapabilityProbe } from "./webui-custom-model-probe.mjs";
 
 export async function routeProviderManagement({
   configPath,
@@ -45,6 +46,7 @@ export async function routeProviderManagement({
   response,
   state,
 }) {
+  if (await routeCustomModelCapabilityProbe({ environment, maximumBodyBytes, path, request, response, state })) return true;
   if (await routeResetCredits({ configPath, maximumBodyBytes, path, principalId, request, response, state })) return true;
   if (path === "/accounts/sources" && request.method === "GET") {
     const { accountMetadata, warnings } = loadAccountSources(environment);

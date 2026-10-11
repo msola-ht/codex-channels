@@ -7,7 +7,7 @@ export interface ModelWindowSetupOptions {
   prompts?: Record<string, unknown>;
   prompter?: {
     selectModel(): Promise<string | "back">;
-    selectWindowPercent(model: ModelWindowImportEntry): Promise<number>;
+    selectContextWindow(model: ModelWindowImportEntry): Promise<number>;
   };
 }
 

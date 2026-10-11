@@ -7,7 +7,7 @@ import {
 import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
 import { resolveProviderSelection } from "./provider-selection.mjs";
 
-export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [-p Provider-ID | --provider Provider-ID | --profile Profile] [Codex 参数...]\n-p / --provider 接受完整 Provider ID、已配置的规范 sf- 名称，以及 agg / sf-agg；省略时连接主实例。个人 Profile 使用 --profile。";
+export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [-p Provider-ID | --provider Provider-ID | --profile Profile] [Codex 参数...]\n-p / --provider 接受完整 Provider ID（如 cp-llm）、已配置的规范 sf- 名称（如 sf-cp-llm），以及 agg / sf-agg；省略时连接主实例。个人 Profile 使用 --profile。";
 
 export function parseCodexRemoteOptions(
   args,
@@ -229,6 +229,7 @@ function reservedManagedProfileArgument(args, index) {
   return profile === "sf-custom"
     || profile?.startsWith("sf-ds-")
     || profile?.startsWith("sf-custom-")
+    || profile?.startsWith("sf-cp-")
     || profile === "sf-ocg"
     || profile?.startsWith("sf-ocg-")
     || profile === "sf-clp"
@@ -242,7 +243,7 @@ function reservedManagedProfileMessage(profile) {
   if (profile === "sf-custom") {
     return "Codex Profile sf-custom 是内部保留名称；固定模式请直接使用 codexc remote";
   }
-  if (profile.startsWith("sf-custom-")) {
+  if (profile.startsWith("sf-custom-") || profile.startsWith("sf-cp-")) {
     return `Codex Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应 Provider`;
   }
   if (profile === "sf-ocg" || profile.startsWith("sf-ocg-")) {

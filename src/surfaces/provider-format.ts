@@ -5,7 +5,7 @@ import {
   type ModelOption,
 } from "../application/index.js";
 import {
-  isOpencodeGoProvider,
+  opencodeGoAccountIdFromProvider,
   opencodeGoProviderDisplayName,
 } from "../../runtime/opencode-go-accounts.mjs";
 import { deepseekAccountIdFromProvider } from "../../runtime/deepseek-accounts.mjs";
@@ -14,7 +14,6 @@ import { ccgAccountIdFromProvider } from "../../runtime/ccg-accounts.mjs";
 import { ccgAccountDefinition, clinePassAccountDefinition, deepseekAccountDefinition } from "../../runtime/model-provider-definitions.mjs";
 import { modelDisplayName } from "../../runtime/model-display-name.mjs";
 
-let configuredCustomPrimaryProviderIds = new Set<string>();
 let modelDisplayAliases: Readonly<Record<string, string>> = {};
 
 export function setModelDisplayAliases(aliases: Readonly<Record<string, string>> = {}): void {
@@ -30,17 +29,9 @@ export function formatModelDisplayNameWithId(model: string): string {
   return name === model ? model : `${name}（${model}）`;
 }
 
-export function setConfiguredCustomPrimaryProviderId(
-  providerId: string | readonly string[] | undefined,
-): void {
-  configuredCustomPrimaryProviderIds = new Set(
-    providerId === undefined ? [] : typeof providerId === "string" ? [providerId] : providerId,
-  );
-}
-
 export function formatProviderLabel(provider: string): string {
   if (provider === "openai") return "OpenAI";
-  if (provider === "codexc-aggregate") return "聚合提供商";
+  if (provider === "codexc-aggregate") return "AGG";
   if (provider === "deepseek") return "DeepSeek";
   // 渠道统一使用短标签；模型目录定义的全名（*AccountDefinition）由模型列表按同一标签归一。
   const deepseekAccount = deepseekAccountIdFromProvider(provider);
@@ -48,10 +39,10 @@ export function formatProviderLabel(provider: string): string {
   const clinePassAccount = clinePassAccountIdFromProvider(provider);
   if (clinePassAccount !== undefined) return `CLP ${clinePassAccount}`;
   const commandCodeAccount = ccgAccountIdFromProvider(provider);
-  if (commandCodeAccount !== undefined) return `CommandCode Go ${commandCodeAccount}`;
-  if (isOpencodeGoProvider(provider)) {
-    return boundProviderLabel(opencodeGoProviderDisplayName(provider));
-  }
+  if (commandCodeAccount !== undefined) return `CCG ${commandCodeAccount}`;
+  const opencodeAccount = opencodeGoAccountIdFromProvider(provider);
+  if (opencodeAccount !== undefined) return `OCG ${opencodeAccount}`;
+  if (/^cp-[A-Za-z0-9_-]{1,61}$/u.test(provider)) return `CP ${provider.slice(3)}`;
   const normalized = provider.replace(/\s+/gu, " ").trim();
   return normalized ? normalized.slice(0, 64) : "未知提供商";
 }
@@ -67,9 +58,7 @@ function boundProviderLabel(value: string): string {
 export function formatCodexProviderLabel(provider?: string): string {
   return provider === undefined || provider === "openai"
     ? "OpenAI 官方"
-    : configuredCustomPrimaryProviderIds.has(provider)
-      ? `${formatProviderLabel(provider)} · 自定义`
-      : formatProviderLabel(provider);
+    : formatProviderLabel(provider);
 }
 
 export function formatServiceTier(serviceTier: string | null | undefined, model?: ModelOption): string {
@@ -163,7 +152,8 @@ function aggregateMemberDisplay(
   const separator = model.indexOf("/");
   if (separator <= 0 || separator === model.length - 1) return undefined;
   const provider = model.slice(0, separator);
-  const prefix = `${formatProviderLabel("codexc-aggregate")} · ${provider} · `;
+  // 目录来源使用固定名称，与渠道短标签 AGG 分离。
+  const prefix = `聚合提供商 · ${provider} · `;
   if (!displayName.startsWith(prefix)) return undefined;
   return { provider, model: model.slice(separator + 1), name: displayName.slice(prefix.length) };
 }
@@ -186,19 +176,13 @@ function providerCatalogLabel(provider: string): string | undefined {
   if (clinePassAccount !== undefined) return clinePassAccountDefinition(clinePassAccount).displayName;
   const commandCodeAccount = ccgAccountIdFromProvider(provider);
   if (commandCodeAccount !== undefined) return ccgAccountDefinition(commandCodeAccount).displayName;
+  if (opencodeGoAccountIdFromProvider(provider) !== undefined) return opencodeGoProviderDisplayName(provider);
   return undefined;
 }
 
-/** 渠道按短标签展示受管账户 Provider；其余位置保持原始标识。 */
+/** 会话、模型行和定时任务复用渠道短标签；官方标识保持原有展示。 */
 export function formatDisplayedProvider(provider: string): string {
-  return isManagedAccountProvider(provider) ? formatCodexProviderLabel(provider) : provider;
-}
-
-function isManagedAccountProvider(provider: string): boolean {
-  return isOpencodeGoProvider(provider)
-    || deepseekAccountIdFromProvider(provider) !== undefined
-    || clinePassAccountIdFromProvider(provider) !== undefined
-    || ccgAccountIdFromProvider(provider) !== undefined;
+  return provider === "openai" ? provider : formatProviderLabel(provider);
 }
 
 /** 不改变目录排序或选择编号；不可用模型仍保留在原目录中。 */

@@ -6,89 +6,26 @@ import { join } from "node:path";
 import { connectHomePath, providerStorageRoot } from "./connect-home.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 
+import { compileModelDefinitions, validateModelDefinitions as validateResponsesModels } from "./model-catalog.mjs";
+export { validateModelDefinitions as validateResponsesModels } from "./model-catalog.mjs";
+
 const activeCatalogWrite = new AsyncLocalStorage();
 
 const maximumBytes = 2 * 1024 * 1024;
-const efforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
-const controlFree = (text) => !Array.from(text).some((character) => { const code = character.codePointAt(0); return (code < 32 && code !== 9 && code !== 10) || code === 127; });
-const instructions = "You are a coding assistant. Follow the user's instructions, inspect the workspace before making changes, use the available tools when needed, and report results accurately. Respect tool permissions and do not claim actions succeeded without evidence.";
-
-export function isResponsesProvider(id) {
-  return typeof id === "string" && id.startsWith("rs-");
+export function isCustomCatalogProvider(id) {
+  return typeof id === "string" && id.startsWith("cp-");
 }
 
 export function responsesProviderCatalogPath(environment, id) {
-  if (!/^rs-[A-Za-z0-9_-]{1,61}$/u.test(id)) {
-    throw new Error("自定义 Responses Provider ID 必须为 rs- 加 1-61 位字母、数字、- 或 _");
+  if (!/^cp-[A-Za-z0-9_-]{1,61}$/u.test(id)) {
+    throw new Error("自定义提供商 ID 必须为 cp- 加 1-61 位字母、数字、- 或 _");
   }
   return join(providerStorageRoot(environment), "responses", id, "models.json");
 }
 
-export function validateResponsesModels(values, defaultModel, { allowReasoningToggle = false } = {}) {
-  if (!Array.isArray(values) || values.length < 1 || values.length > 64) {
-    throw new Error("自定义模型目录必须包含 1-64 个模型");
-  }
-  const seen = new Set();
-  const models = values.map((value) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)
-      || Object.keys(value).some((key) => !["id", "name", "contextWindow", "maxContextWindow", "reasoningEfforts", "defaultReasoningEffort", "supportsImages", "applyPatchToolType", "instructions", "supportsSearchTool", "template"].includes(key))) {
-      throw new Error("自定义模型包含不受支持的字段");
-    }
-    const { id, name, contextWindow, maxContextWindow, reasoningEfforts, defaultReasoningEffort, supportsImages, applyPatchToolType, instructions: prompt, supportsSearchTool } = value;
-    if (typeof id !== "string" || id.trim() !== id || id.length < 1 || id.length > 200 || /\p{Cc}/u.test(id) || seen.has(id)) {
-      throw new Error("自定义模型 ID 无效或重复");
-    }
-    if (typeof name !== "string" || name.trim() === "" || name.length > 120 || /\p{Cc}/u.test(name)) throw new Error("自定义模型显示名称无效");
-    if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > 100_000_000) throw new Error("模型上下文窗口必须为 1024-100000000 的整数");
-    if (!Array.isArray(reasoningEfforts) || reasoningEfforts.some((effort) => !efforts.has(effort) && !(allowReasoningToggle && effort === "enabled")) || new Set(reasoningEfforts).size !== reasoningEfforts.length) throw new Error("模型思考等级无效或重复");
-    if (reasoningEfforts.length === 0 ? defaultReasoningEffort !== null : !reasoningEfforts.includes(defaultReasoningEffort)) throw new Error("默认思考等级必须属于模型声明的等级；不支持时必须为 null");
-    if (typeof supportsImages !== "boolean") throw new Error("模型图片能力必须为布尔值");
-    if (applyPatchToolType !== undefined && applyPatchToolType !== "freeform") throw new Error("模型 apply_patch 工具类型无效");
-    if (prompt !== undefined && (typeof prompt !== "string" || prompt.trim() === "" || prompt.length > 200_000 || !controlFree(prompt))) throw new Error("模型提示词无效");
-    if (supportsSearchTool !== undefined && typeof supportsSearchTool !== "boolean") throw new Error("模型检索工具能力必须为布尔值");
-    const template = value.template;
-    if (template !== undefined && (!template || typeof template !== "object" || Array.isArray(template)
-      || Object.keys(template).some(key => !["source", "model", "followContext"].includes(key)) || !["official", "deepseek"].includes(template.source)
-      || typeof template.model !== "string" || template.model.trim() !== template.model || template.model.length < 1 || template.model.length > 200 || /\p{Cc}/u.test(template.model)
-      || typeof template.followContext !== "boolean" || (template.source !== "deepseek" && template.followContext))) {
-      throw new Error("模型模板关联无效；只有 DeepSeek 模板可跟随上下文");
-    }
-    if (maxContextWindow !== undefined && (!Number.isSafeInteger(maxContextWindow) || maxContextWindow < contextWindow || maxContextWindow > 100_000_000)) throw new Error("模型最大上下文必须为不小于当前窗口且不超过 100000000 的整数");
-    seen.add(id);
-    return { id, name: name.trim(), contextWindow, ...(maxContextWindow === undefined ? {} : {maxContextWindow}), reasoningEfforts: [...reasoningEfforts], defaultReasoningEffort, supportsImages, ...(applyPatchToolType === undefined ? {} : {applyPatchToolType}), ...(prompt === undefined ? {} : {instructions: prompt}), ...(supportsSearchTool === true ? {supportsSearchTool: true} : {}), ...(template === undefined ? {} : {template: {source: template.source, model: template.model, followContext: template.followContext}}) };
-  });
-  if (!seen.has(defaultModel)) throw new Error("默认模型必须存在于自定义模型目录");
-  return models;
-}
-
-/** CLP alone opts into its model-defined toggle; persisted Responses catalogs stay strict. */
-export function createResponsesModelCatalog(definitions, defaultModel, { allowReasoningToggle = false } = {}) {
-  const validated = validateResponsesModels(definitions, defaultModel, { allowReasoningToggle });
-  const catalog = {
-    schemaVersion: 5,
-    defaultModel,
-    definitions: validated,
-    models: validated.map((model, index) => ({
-      slug: model.id, display_name: model.name, description: "User-configured Responses model",
-      default_reasoning_level: model.defaultReasoningEffort,
-      supported_reasoning_levels: model.reasoningEfforts.map((effort) => ({ effort,
-        description: model.reasoningEfforts.includes("enabled") && effort === "none" ? "关闭思考"
-          : effort === "enabled" ? "开启思考，使用模型默认强度" : effort })),
-      shell_type: "unified_exec", visibility: "list", supported_in_api: true,
-      priority: model.id === defaultModel ? 0 : index + 1,
-      availability_nux: null, upgrade: null,
-      model_messages: { instructions_template: model.instructions ?? instructions },
-      include_apps_usage_instructions: false,
-      supports_reasoning_summary_parameter: false,
-      support_verbosity: false, default_verbosity: null, apply_patch_tool_type: model.applyPatchToolType ?? null,
-      ...(model.supportsSearchTool === true ? {supports_search_tool: true} : {}),
-      truncation_policy: { mode: "tokens", limit: Math.min(10_000, Math.floor(model.contextWindow / 4)) },
-      context_window: model.contextWindow, max_context_window: model.maxContextWindow ?? model.contextWindow,
-      effective_context_window_percent: 95, experimental_supported_tools: [],
-      input_modalities: model.supportsImages ? ["text", "image"] : ["text"],
-      multi_agent_version: "v2",
-    })),
-  };
+export function createResponsesModelCatalog(definitions, defaultModel, options) {
+  const compiled = compileModelDefinitions(definitions, defaultModel, options);
+  const catalog = { schemaVersion: 5, defaultModel, ...compiled };
   if (Buffer.byteLength(JSON.stringify(catalog, null, 2)) + 1 > maximumBytes) throw new Error("Responses 模型目录不能超过 2 MiB");
   return catalog;
 }
@@ -106,10 +43,10 @@ export function parseResponsesModelCatalog(content) {
 export function readResponsesModelCatalog(environment, id) {
   assertResponsesContextSyncComplete(environment);
   const path = responsesProviderCatalogPath(environment, id);
-  if (existsSync(`${path}.pending`) && activeCatalogWrite.getStore() !== path) throw new Error(`Responses Provider ${id} 上次保存未完成；请先恢复目录事务`);
+  if (existsSync(`${path}.pending`) && activeCatalogWrite.getStore() !== path) throw new Error(`自定义提供商 ${id} 上次保存未完成；请先恢复目录事务`);
   let content;
   try { content = readPrivateFileSync(path, maximumBytes); } catch {
-    throw new Error(`Responses Provider ${id} 模型目录缺失或无法安全读取`);
+    throw new Error(`自定义提供商 ${id} 模型目录缺失或无法安全读取`);
   }
   const expected = parseResponsesModelCatalog(content);
   return { ...expected, path, content, revision: createHash("sha256").update(content).digest("hex") };
@@ -118,7 +55,7 @@ export function readResponsesModelCatalog(environment, id) {
 export function responsesModelSettings(environment, id, model) {
   const catalog = readResponsesModelCatalog(environment, id);
   const selected = catalog.definitions.find((entry) => entry.id === (model ?? catalog.defaultModel));
-  if (!selected) throw new Error("模型 ID 不在该 Responses Provider 的目录中");
+  if (!selected) throw new Error("模型 ID 不在该自定义提供商的目录中");
   return { catalog, model: selected.id, reasoningEffort: selected.defaultReasoningEffort };
 }
 
@@ -165,7 +102,7 @@ export function responsesContextSyncPath(environment) {
 }
 
 export function assertResponsesContextSyncComplete(environment) {
-  if (existsSync(responsesContextSyncPath(environment))) throw new Error("DS/RS 上下文同步未完成，请停止服务并执行 primary-provider recover <Provider ID> keep 或 rollback");
+  if (existsSync(responsesContextSyncPath(environment))) throw new Error("DS/CP 上下文同步未完成，请停止服务并执行 primary-provider recover <Provider ID> keep 或 rollback");
 }
 
 export function resolveResponsesTemplateContexts(definitions, environment) {

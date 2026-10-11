@@ -35,12 +35,12 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
     const profile = readOptionalConfig(customPrimaryProviderProfilePath(environment, id), environment);
     const registered = loadCustomSwitchingProviderIds(environment).includes(id);
     if (registered !== (profile !== undefined)) {
-      throw new Error("Responses Provider 的 Profile 与注册表不一致，请先恢复对应配置");
+      throw new Error("自定义提供商的 Profile 与注册表不一致，请先恢复对应配置");
     }
     const configured = Object.hasOwn(config.model_providers ?? {}, id);
     const backedUp = Object.hasOwn(readPrimaryProviderBackup(environment), id);
     const referenced = registered || configured || backedUp || config.model_provider === id || config.model_catalog_json === path;
-    if (action === "keep" && !referenced) throw new Error("Responses Provider 没有连接配置或备份，请先恢复配置或选择 rollback");
+    if (action === "keep" && !referenced) throw new Error("自定义提供商没有连接配置或备份，请先恢复配置或选择 rollback");
     const selection = config.model_provider === id ? config : profile;
     if (candidate === undefined && referenced) throw new Error("配置仍引用此目录，不能回滚删除；请先恢复配置");
     if (candidate !== undefined) {
@@ -80,6 +80,6 @@ function readOptionalConfig(path, environment) {
     return parse(content);
   } catch {
     // TOML 解析错误可能包含凭据原文，不向调用方传递。
-    throw new Error("Responses Provider 恢复配置无法安全解析");
+    throw new Error("自定义提供商恢复配置无法安全解析");
   }
 }
