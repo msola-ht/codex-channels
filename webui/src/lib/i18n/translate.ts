@@ -25,6 +25,11 @@ export function translate(
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  invalid_custom_model_probe: "modelProbe.invalid",
+  custom_model_probe_credential_required: "modelProbe.credentialRequired",
+  custom_model_probe_busy: "modelProbe.busy",
+  custom_model_probe_failed: "modelProbe.failed",
+  "stale-model-probe": "modelProbe.stale",
   management_unavailable: "settingsUi.unavailable",
   codex_settings_unavailable: "settingsUi.unavailable",
   provider_state_unavailable: "settingsUi.unavailable",

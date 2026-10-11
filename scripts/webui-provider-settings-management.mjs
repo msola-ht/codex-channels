@@ -72,6 +72,7 @@ export function normalizeProviderSettingsMutation(input) {
             ? {}
             : { upstreamWireApi: input.provider.upstreamWireApi }),
           credential: input.provider?.credential,
+          ...(input.provider?.probeConnections === undefined ? {} : { probeConnections: input.provider.probeConnections }),
           ...(input.provider?.confirmRemoveTopLevelBaseUrl === undefined
             ? {}
             : { confirmRemoveTopLevelBaseUrl: input.provider.confirmRemoveTopLevelBaseUrl }),

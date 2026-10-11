@@ -8,7 +8,7 @@ const contextWindowPresets = [
   { value: "262144", label: "256K（262144 Token）" },
 ];
 
-export async function promptResponsesModels(prompts, defaultModel, previous = [], importedIds = [], output = process.stdout) {
+export async function promptResponsesModels(prompts, defaultModel, previous = [], importedIds = [], output = process.stdout, { probeCapabilities = false } = {}) {
   const ids = [defaultModel, ...previous.map((entry) => entry.id).filter((id) => id !== defaultModel)];
   const models = [];
   for (let index = 0; index < ids.length; index++) {
@@ -22,7 +22,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
     }
     let configure = true;
       if (importedIds.includes(id)) {
-        configure = await prompts.confirm({ message: `调整 ${id} 的模板能力参数？`, initialValue: false });
+        configure = await prompts.confirm({ message: probeCapabilities ? `调整 ${id} 的模板名称或上下文？能力将在探测后回填。` : `调整 ${id} 的模板能力参数？`, initialValue: false });
         if (prompts.isCancel(configure)) return undefined;
         if (!configure) models.push(withNewModelInstructions({...structuredClone(old), ...(template ? {template} : {}), ...(old?.applyPatchToolType === undefined ? {applyPatchToolType: "freeform"} : {})}, true));
       }
@@ -32,16 +32,24 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       const maximumContext = old?.maxContextWindow ?? 100_000_000;
       const context = template?.followContext ? old.contextWindow : await promptContextWindow(prompts, id, old?.contextWindow, maximumContext);
       if (context === undefined) return undefined;
-      const reasoning = await prompts.text({ message: "支持的思考等级（逗号分隔；留空表示不支持，请求使用 none）", initialValue: old?.reasoningEfforts.join(",") ?? "" });
-      if (prompts.isCancel(reasoning)) return undefined;
-      const reasoningEfforts = String(reasoning).trim() === "" ? [] : String(reasoning).split(",").map(value => value.trim());
-      const defaultReasoning = reasoningEfforts.length === 0 ? null : await prompts.select({ message: "默认思考等级", options: reasoningEfforts.map(value => ({ value, label: value })), initialValue: old?.defaultReasoningEffort ?? reasoningEfforts[0] });
-      if (prompts.isCancel(defaultReasoning)) return undefined;
-      const images = await prompts.confirm({ message: `${id} 是否支持图片输入？`, initialValue: old?.supportsImages ?? false });
-      if (prompts.isCancel(images)) return undefined;
-      const patch = await prompts.confirm({ message: `${id} 是否支持 Codex 自由格式 apply_patch 工具？`, initialValue: old?.applyPatchToolType === undefined || old.applyPatchToolType === "freeform" });
-      if (prompts.isCancel(patch)) return undefined;
-      models.push(withNewModelInstructions({ ...structuredClone(old), id, name: String(name), contextWindow: Number(context), reasoningEfforts, defaultReasoningEffort: defaultReasoning, supportsImages: images, applyPatchToolType: patch === true ? "freeform" : undefined, supportsSearchTool: old?.supportsSearchTool, ...(template ? {template} : {}) }, old === undefined || importedIds.includes(id)));
+      if (probeCapabilities) {
+        // These are draft placeholders only. Setup must replace them with this
+        // model's completed probe before entering the existing save transaction.
+        models.push(withNewModelInstructions({ ...structuredClone(old), id, name: String(name), contextWindow: Number(context),
+          reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false,
+          applyPatchToolType: undefined, supportsSearchTool: false, ...(template ? {template} : {}) }, old === undefined || importedIds.includes(id)));
+      } else {
+        const reasoning = await prompts.text({ message: "支持的思考等级（逗号分隔；留空表示不支持，请求使用 none）", initialValue: old?.reasoningEfforts.join(",") ?? "" });
+        if (prompts.isCancel(reasoning)) return undefined;
+        const reasoningEfforts = String(reasoning).trim() === "" ? [] : String(reasoning).split(",").map(value => value.trim());
+        const defaultReasoning = reasoningEfforts.length === 0 ? null : await prompts.select({ message: "默认思考等级", options: reasoningEfforts.map(value => ({ value, label: value })), initialValue: old?.defaultReasoningEffort ?? reasoningEfforts[0] });
+        if (prompts.isCancel(defaultReasoning)) return undefined;
+        const images = await prompts.confirm({ message: `${id} 是否支持图片输入？`, initialValue: old?.supportsImages ?? false });
+        if (prompts.isCancel(images)) return undefined;
+        const patch = await prompts.confirm({ message: `${id} 是否支持 Codex 自由格式 apply_patch 工具？`, initialValue: old?.applyPatchToolType === undefined || old.applyPatchToolType === "freeform" });
+        if (prompts.isCancel(patch)) return undefined;
+        models.push(withNewModelInstructions({ ...structuredClone(old), id, name: String(name), contextWindow: Number(context), reasoningEfforts, defaultReasoningEffort: defaultReasoning, supportsImages: images, applyPatchToolType: patch === true ? "freeform" : undefined, supportsSearchTool: old?.supportsSearchTool, ...(template ? {template} : {}) }, old === undefined || importedIds.includes(id)));
+      }
     }
     if (index === ids.length - 1 && ids.length < 64) {
       const add = await prompts.confirm({ message: "继续添加模型？", initialValue: false });
@@ -57,7 +65,8 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
   // after selection, so a full catalogue can replace an old model in one edit.
   const validated = models.map(model => validateResponsesModels([model], model.id)[0]);
   const enabledModels = await promptEnabledProviderModels(prompts, output, {
-    models: validated.map(model => ({id: model.id, name: model.name, reasoningEffort: model.defaultReasoningEffort ?? "none"})),
+    models: validated.map(model => ({id: model.id, name: model.name,
+      ...(probeCapabilities ? {} : {reasoningEffort: model.defaultReasoningEffort ?? "none"})})),
     enabledModels: validated.map(model => model.id),
     requiredModels: [defaultModel],
     label: "自定义提供商",

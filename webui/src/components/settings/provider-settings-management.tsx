@@ -5,6 +5,9 @@ import { useTranslation } from "@/hooks/use-translation"
 import { formatModelLabel } from "@/lib/format"
 
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
+import { useCustomModelCapabilityProbe } from "@/hooks/use-custom-model-capability-probe"
+import { translateApiErrorCode } from "@/lib/i18n/translate"
+import { translateCustomModelProbeReason } from "@/lib/custom-model-probe"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -48,7 +51,7 @@ function ProviderSettingsCard({
   const [mode, setMode] = useState<"switching" | "exclusive">("switching")
   const [model, setModel] = useState("")
   const [catalogKind, setCatalogKind] = useState("official")
-  const [customModels, setCustomModels] = useState<Array<{ id: string; name: string; contextWindow: number; maxContextWindow?: number; reasoningEfforts: string[]; defaultReasoningEffort: string | null; supportsImages: boolean; applyPatchToolType?: "freeform"; supportsSearchTool?: boolean; template?: {source: "official" | "deepseek"; model: string; followContext: boolean} }>>([])
+  const [customModels, setCustomModels] = useState<Array<{ id: string; name: string; contextWindow: number; maxContextWindow?: number; reasoningEfforts: string[]; defaultReasoningEffort: string | null; supportsImages: boolean; applyPatchToolType?: "freeform"; supportsSearchTool?: boolean; probeConnection?: string; template?: {source: "official" | "deepseek"; model: string; followContext: boolean} }>>([])
   const [supportsWebsockets, setSupportsWebsockets] = useState("true")
   const [upstreamWireApi, setUpstreamWireApi] = useState<"responses" | "chat_completions">("responses")
   const [upstreamTouched, setUpstreamTouched] = useState(false)
@@ -72,6 +75,7 @@ function ProviderSettingsCard({
   ], [settings.customProviders])
   const busy = management.busy || management.loading || management.error !== null
   const pending = management.pendingPreview
+  const probe = useCustomModelCapabilityProbe(JSON.stringify({ configVersion: settings.configVersion, editingId, providerId, providerName, baseUrl, apiKey, upstreamWireApi, customModels, mode, model, supportsWebsockets, confirmRemoveBaseUrl }), editorOpen && catalogKind === "custom" && pending === null)
 
   const managedId = managed?.id
   const windowId = windowEntry?.id
@@ -79,6 +83,7 @@ function ProviderSettingsCard({
   useEffect(() => { resetWindow() }, [windowId, resetWindow])
 
   const resetForm = () => {
+    probe.invalidate()
     setEditorOpen(false)
     setEditingId(null)
     setProviderId("")
@@ -126,9 +131,12 @@ function ProviderSettingsCard({
         baseUrl: baseUrl.trim(),
         mode,
         model: model.trim(),
-        ...(catalogKind === "custom" ? { catalog: { kind: "custom" as const, models: customModels } } : {}),
+        ...(catalogKind === "custom" ? {
+          catalog: { kind: "custom" as const, models: customModels.map(({ probeConnection: _probeConnection, ...entry }) => entry) },
+          probeConnections: customModels.flatMap(entry => entry.probeConnection === undefined ? [] : [{ model: entry.id, token: entry.probeConnection }]),
+        } : {}),
         supportsWebsockets: supportsWebsockets === "true",
-        ...(catalogKind === "custom" && (upstreamTouched || editingId === null) ? { upstreamWireApi } : {}),
+        ...(catalogKind === "custom" && (upstreamTouched || editingId === null || customModels.some(entry => entry.probeConnection !== undefined)) ? { upstreamWireApi } : {}),
         credential,
         ...(confirmRemoveBaseUrl ? { confirmRemoveTopLevelBaseUrl: true } : {}),
       },
@@ -246,6 +254,7 @@ function ProviderSettingsCard({
         </FieldGroup>
         {catalogKind === "custom" ? <div className="flex flex-col gap-3">
           <p className="text-xs text-muted-foreground">{t("managementUi.responsesHint")}</p>
+          <Alert><AlertTitle>{t("modelProbe.title")}</AlertTitle><AlertDescription>{t("modelProbe.hint")}</AlertDescription></Alert>
           {customModels.map((entry, index) => {
             const patch = (changes: Partial<typeof entry>) => setCustomModels(current => current.map((value, position) => position === index ? { ...value, ...changes } : value))
             return <FieldGroup key={index} className="rounded-md border p-3">
@@ -259,13 +268,34 @@ function ProviderSettingsCard({
               <Field orientation="horizontal"><Checkbox id={`responses-images-${index}`} checked={entry.supportsImages} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsImages: value === true })} /><FieldLabel htmlFor={`responses-images-${index}`}>{t("managementUi.imageInput")}</FieldLabel></Field>
               <Field orientation="horizontal"><Checkbox id={`responses-patch-${index}`} checked={entry.applyPatchToolType === "freeform"} disabled={busy || pending !== null} onCheckedChange={value => patch({ applyPatchToolType: value === true ? "freeform" : undefined })} /><FieldLabel htmlFor={`responses-patch-${index}`}>{t("managementUi.freeformPatchTool")}</FieldLabel></Field>
               <Field orientation="horizontal"><Checkbox id={`responses-search-${index}`} checked={entry.supportsSearchTool === true} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsSearchTool: value === true })} /><FieldLabel htmlFor={`responses-search-${index}`}>{t("managementUi.toolSearchTool")}</FieldLabel></Field>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" disabled={busy || pending !== null || probe.running || !entry.id.trim() || !baseUrl.trim() || (editingId === null && !apiKey.trim())} onClick={() => void probe.start(index, {
+                  ...(editingId === null ? {} : { providerId: editingId }), baseUrl: baseUrl.trim(), model: entry.id.trim(), upstreamWireApi,
+                  credential: apiKey.trim() === "" ? { action: "preserve" } : { action: "replace", apiKey },
+                })}>{probe.running && probe.state?.index === index ? t("modelProbe.running") : t("modelProbe.detect")}</Button>
+                {probe.state?.index === index && probe.running ? <Button variant="outline" onClick={probe.cancel}>{t("modelProbe.cancel")}</Button> : null}
+                {probe.state?.index === index && probe.state.result ? <Button variant="outline" disabled={busy || pending !== null || !probe.canApply} onClick={() => {
+                  const result = probe.state?.result
+                  if (!probe.canApply || !result || result.model !== entry.id.trim()) return
+                  patch({ ...result.capabilities, applyPatchToolType: result.capabilities.applyPatchToolType, probeConnection: result.connectionToken })
+                }}>{t("modelProbe.apply")}</Button> : null}
+              </div>
+              {probe.state?.index === index ? <div className="flex flex-col gap-2" role="status" aria-live="polite">
+                {probe.state.errorCode ? <Alert variant="destructive"><AlertDescription>{translateApiErrorCode(t, probe.state.errorCode)}</AlertDescription></Alert> : null}
+                {probe.state.cancelled || probe.state.result?.status === "cancelled" ? <p>{t("modelProbe.cancelled")}</p> : null}
+                {probe.state.result ? <>
+                  <p className="text-muted-foreground">{t("modelProbe.resultHint")}</p>
+                  <Table><TableHeader><TableRow><TableHead>{t("modelProbe.capability")}</TableHead><TableHead>{t("modelProbe.status")}</TableHead><TableHead>{t("modelProbe.evidence")}</TableHead></TableRow></TableHeader><TableBody>{probe.state.result.checks.map(check => <TableRow key={check.capability}><TableCell>{t(`modelProbe.capabilities.${check.capability}`)}</TableCell><TableCell><Badge variant={check.status === "supported" ? "secondary" : "outline"}>{t(`modelProbe.statuses.${check.status}`)}</Badge></TableCell><TableCell><p>{translateCustomModelProbeReason(t, check.reason)}</p>{check.httpStatus === undefined ? t("modelProbe.noHttpStatus") : t("modelProbe.httpStatus", { status: check.httpStatus })}</TableCell></TableRow>)}</TableBody></Table>
+                  {!probe.canApply ? <p className="text-muted-foreground">{t("modelProbe.cannotApply")}</p> : null}
+                </> : null}
+              </div> : null}
               <Button variant="outline" disabled={busy || pending !== null} onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>{t("managementUi.removeModel")}</Button>
             </FieldGroup>
           })}
           <Button variant="outline" disabled={busy || pending !== null || customModels.length >= 64} onClick={() => setCustomModels(current => [...current, { id: current.length === 0 ? model : "", name: current.length === 0 ? model : "", contextWindow: 0, reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false, applyPatchToolType: "freeform", ...(upstreamWireApi === "chat_completions" ? { supportsSearchTool: true } : {}) }])}>{t("managementUi.addModel")}</Button>
         </div> : null}
         {mode === "exclusive" ? <Field orientation="horizontal" data-disabled={busy || pending !== null}><Checkbox id="custom-provider-remove-base-url" checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} /><FieldLabel htmlFor="custom-provider-remove-base-url" className="text-xs text-muted-foreground">{t("managementUi.removeBaseUrl")}</FieldLabel></Field> : null}
-        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
+        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || probe.running || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
         </DialogContent></Dialog>
       </section>}

@@ -2,6 +2,16 @@ export type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { GenerationTiming } from "../runtime/request-timing.mjs"
 import type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
+import type { CustomModelCapabilityProbeResult } from "./custom-model-capability-probe.mjs"
+
+export type ManagementCustomModelProbeResult = CustomModelCapabilityProbeResult & { connectionToken: string }
+export interface ManagementCustomModelProbeInput {
+  providerId?: string
+  baseUrl: string
+  model: string
+  upstreamWireApi: "responses" | "chat_completions"
+  credential: { action: "preserve" } | { action: "replace"; apiKey: string }
+}
 export type RangeName =
   | "today" | "yesterday" | "24h" | "7d" | "30d" | "90d" | "all"
 
@@ -718,6 +728,7 @@ export type ManagementProviderSettingsMutationInput =
         supportsWebsockets: boolean
         upstreamWireApi?: "responses" | "chat_completions"
         credential: { action: "preserve" } | { action: "replace"; apiKey: string }
+        probeConnections?: Array<{ model: string; token: string }>
         confirmRemoveTopLevelBaseUrl?: boolean
       }
     }

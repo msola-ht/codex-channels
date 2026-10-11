@@ -19,6 +19,7 @@ const allowedDistEntries = new Map([
     "dist/codex-client/index.js",
     "dist/config/index.js",
     "dist/delivery/index.js",
+    "dist/model-api/index.js", // Capability detection uses the same pure Chat conversion as runtime.
     "dist/observability/index.js",
     "dist/observability/query/index.js",
     "dist/scheduled-tasks/index.js",

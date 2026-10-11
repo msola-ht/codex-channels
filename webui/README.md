@@ -122,6 +122,9 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 ## 国际化维护
 
+`hooks/use-custom-model-capability-probe.ts` 为自定义提供商编辑草稿提供逐模型探测、取消和结果回填；
+绑定当前地址、协议、模型及凭据，草稿变化使旧结果失效。结果只修改草稿，保存仍由现有 Provider 预览确认流程负责。
+
 当前页面覆盖与剩余验收见 [WebUI 指南](../docs/webui.md)。
 
 

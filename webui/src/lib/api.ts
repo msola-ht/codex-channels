@@ -1,5 +1,6 @@
 import type { ResetCreditSnapshot, ResetCreditPreview, ResetCreditResult } from "./types"
 import type {
+  ManagementCustomModelProbeInput, ManagementCustomModelProbeResult,
   ServiceLogTarget, ServiceLogsResponse,
   QueueChangeEvent,
   DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
@@ -136,9 +137,9 @@ export function onUnauthorized(handler: () => void): () => void {
   }
 }
 
-async function requestJson<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+async function requestJson<T>(path: string, init: RequestInit = {}, signal?: AbortSignal, timeoutMs = 30_000): Promise<T> {
   const token = getToken()
-  const timeoutSignal = AbortSignal.timeout(30_000)
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
   const effectiveSignal = signal === undefined
     ? timeoutSignal
     : AbortSignal.any([signal, timeoutSignal])
@@ -356,6 +357,12 @@ export function cancelManagementTask(id: string, signal?: AbortSignal): Promise<
 
 export function fetchManagementProviderSettings(signal?: AbortSignal): Promise<ManagementProviderSettingsResponse> {
   return getJson<ManagementProviderSettingsResponse>(`${API_PREFIX}/management/provider-settings`, signal)
+}
+
+export function probeManagementCustomModel(input: ManagementCustomModelProbeInput, signal: AbortSignal): Promise<ManagementCustomModelProbeResult> {
+  return requestJson<ManagementCustomModelProbeResult>(`${API_PREFIX}/management/provider-settings/probe`, {
+    method: "POST", body: JSON.stringify(input),
+  }, signal, 125_000)
 }
 
 export function previewManagementProviderSettings(

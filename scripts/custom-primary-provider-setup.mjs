@@ -1,5 +1,6 @@
 import { promptResponsesWebSocket } from "./responses-websocket-setup.mjs";
 import { promptResponsesToolSearch } from "./responses-tool-search-setup.mjs";
+import { promptCustomModelCapabilities } from "./custom-model-capability-setup.mjs";
 import { isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { loadResponsesModelTemplates, promptResponsesModelImport } from "./responses-model-templates.mjs";
@@ -20,6 +21,7 @@ import {
 import {
   bundledOfficialModelOptions,
   customPrimaryProviderIdFromBaseUrl,
+  customModelProbeConnection,
   customPrimaryProviderUrlsShareOrigin,
   prepareCustomPrimaryProviderSave,
   primaryProviderId,
@@ -64,6 +66,7 @@ export async function runCustomPrimaryProviderSetup({
   loadModelTemplates = source => loadResponsesModelTemplates(source, environment),
   probeWebSocket,
   probeToolSearch,
+  probeModelCapabilities,
 } = {}) {
   const custom = editingProviderId === undefined ? catalogKind === "custom" : isCustomCatalogProvider(editingProviderId);
   const previousCatalog = editingProviderId && custom ? readResponsesModelCatalog(environment, editingProviderId) : undefined;
@@ -370,7 +373,18 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error(`模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`);
   }
 
-  const models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id), output) : undefined;
+  const capabilityMode = custom ? await prompts.select({
+    message: "自定义模型能力如何填写？",
+    options: [
+      { value: "probe", label: "逐模型探测并回填（推荐）", hint: "每个模型最多 12 次短请求，可能计费；上下文仍手填，不执行返回的工具" },
+      { value: "manual", label: "手动填写或沿用模板能力" },
+    ],
+    initialValue: editingProviderId === undefined ? "probe" : "manual",
+  }) : "manual";
+  if (prompts.isCancel(capabilityMode)) return { action: allowBack ? "back" : "cancel" };
+  if (!["probe", "manual"].includes(capabilityMode)) throw new Error("模型能力填写方式无效");
+  let models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id), output,
+    { probeCapabilities: capabilityMode === "probe" }) : undefined;
   if (custom && models === undefined) return { action: allowBack ? "back" : "cancel" };
 
   const canPreserveCurrentBearerToken = hasCurrentBearerToken
@@ -393,6 +407,17 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error("API Key 不能为空");
   }
 
+  if (custom && capabilityMode === "probe") {
+    models = await promptCustomModelCapabilities(prompts, {
+      baseUrl: normalizedBaseUrl, apiKey: replacementApiKey || currentApiKey, models,
+      upstreamWireApi: chatUpstream ? "chat_completions" : "responses", environment,
+    }, { output, probe: probeModelCapabilities });
+    if (models === undefined) {
+      output.write("已取消，未修改配置。\n");
+      return { action: allowBack ? "back" : "cancel" };
+    }
+  }
+
   const supportsWebsockets = chatUpstream
     ? false
     : await promptResponsesWebSocket(prompts, {
@@ -405,7 +430,7 @@ export async function runCustomPrimaryProviderSetup({
   if (supportsWebsockets === undefined) return { action: allowBack ? "back" : "cancel" };
 
   let catalogModels = models;
-  if (custom) {
+  if (custom && capabilityMode === "manual") {
     catalogModels = [];
     for (const entry of models) {
       const supportsToolSearch = chatUpstream ? true : await promptResponsesToolSearch(prompts, {
@@ -429,6 +454,11 @@ export async function runCustomPrimaryProviderSetup({
     ...(custom ? { catalog: { kind: "custom", models: catalogModels } } : {}),
     supportsWebsockets,
     upstreamWireApi: chatUpstream ? "chat_completions" : "responses",
+    ...(custom && capabilityMode === "probe" ? { probeConnections: catalogModels.map(entry => ({
+      model: entry.id,
+      token: customModelProbeConnection({ baseUrl: normalizedBaseUrl, apiKey: replacementApiKey || currentApiKey,
+        upstreamWireApi: chatUpstream ? "chat_completions" : "responses", model: entry.id }),
+    })) } : {}),
     credential: replacementApiKey === ""
       ? { action: "preserve" }
       : { action: "replace", apiKey: replacementApiKey },
@@ -462,10 +492,10 @@ export async function runCustomPrimaryProviderSetup({
           "- 主配置：写入并启用该固定 Provider",
           "- 认证：API Key 将明文写入当前用户私有凭据文件，主配置仅保存 env_key 引用（不回显、不进入命令行和日志）",
         ]),
-    ...(custom ? preview.provider.models.map(entry => `- 模型 ${entry.id}：${entry.contextWindow} Token；图片 ${entry.supportsImages ? "支持" : "不支持"}；思考 ${entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`) : []),
+    ...(custom ? preview.provider.models.map(entry => `- 模型 ${entry.id}：${entry.contextWindow} Token；图片${entry.supportsImages ? "声明支持" : "不声明"}；apply_patch ${entry.applyPatchToolType === "freeform" ? "freeform" : "不声明"}；思考 ${entry.reasoningEfforts.join("/") || "无可选等级"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`) : []),
     `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,
     ...(custom
-      ? preview.provider.models.map(entry => `- 模型 ${entry.id} 工具检索（tool_search）：${entry.supportsSearchTool ? chatUpstream ? "声明支持；网关转换检索输入项" : "声明支持；上游须接受 Codex 检索输入项" : "不声明；工具定义全量下发"}`)
+        ? preview.provider.models.map(entry => `- 模型 ${entry.id} 工具检索（tool_search）：${entry.supportsSearchTool ? chatUpstream ? "声明支持；网关转换检索输入项" : "声明支持；上游须接受 Codex 检索输入项" : "不声明；工具定义全量下发"}`)
       : []),
     ...(preview.transport.cleartext ? ["- 传输：明文 HTTP；API Key 与请求内容不加密"] : []),
   ];
