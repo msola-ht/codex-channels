@@ -1,5 +1,6 @@
 import { readOfficialModelCatalog } from "../runtime/model-provider-official-catalog.mjs";
 import { isResponsesProvider, responsesModelSettings, responsesProviderCatalogPath, responsesProviderBackupPath, removeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { removeCustomProviderUpstreamMetadata } from "../runtime/model-provider-upstream-metadata.mjs";
 import { existsSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 
@@ -159,7 +160,10 @@ async function applyPrimaryProviderRemovalPlan(plan, options) {
     try { removeCustomPrimaryProviderCredentials(environment, plan.target.id); }
     catch { credentialsCleaned = false; }
   }
-  if (backupCleaned && isResponsesProvider(plan.target.id)) removeResponsesModelCatalog(environment, plan.target.id);
+  if (backupCleaned && isResponsesProvider(plan.target.id)) {
+    removeResponsesModelCatalog(environment, plan.target.id);
+    removeCustomProviderUpstreamMetadata(environment, plan.target.id);
+  }
   return {
     action: "removed",
     target: plan.target,

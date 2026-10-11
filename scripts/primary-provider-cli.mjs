@@ -83,18 +83,21 @@ export async function listPrimaryProviders({
         name: provider.displayName,
         baseUrl: provider.baseUrl,
         active: provider.active,
+        ...(provider.upstreamWireApi === undefined ? {} : { upstreamWireApi: provider.upstreamWireApi }),
       })),
       switchingProviders: switchingProviders.map((provider) => ({
         id: provider.id,
         name: provider.displayName,
         baseUrl: provider.baseUrl,
         profileName: provider.profileName,
+        upstreamWireApi: provider.upstreamWireApi ?? "responses",
       })),
       backupCandidates: state.customProviders.backupCandidates.map((provider) => ({
         id: provider.id,
         name: provider.displayName,
         baseUrl: provider.baseUrl,
         active: provider.active,
+        ...(provider.upstreamWireApi === undefined ? {} : { upstreamWireApi: provider.upstreamWireApi }),
       })),
     })}\n`);
     return;

@@ -114,7 +114,11 @@ export class ChatCompletionsBridge {
       }
       if (controller.signal.aborted) throw new Error("aborted");
       status = 400;
-      const { request: body, toolNames } = responsesToChat(source, modelCapabilities?.reasoningEfforts);
+      // 自定义 Chat 上游可能不接受 response_format 与 tools 并存（托管 CLP 上游已验证接受，保持原样）。
+      const { request: body, toolNames, structuredOutput } = responsesToChat(source, modelCapabilities?.reasoningEfforts,
+        this.options.clinePass ? {} : { structuredOutputWithTools: "prompt" });
+      // 结构化输出降级只由提示词保证，记录有界事实以便与“模型没按 JSON 输出”区分。
+      if (structuredOutput !== undefined) diagnostics.conversion({ structuredOutput });
       const { reasoning, ...parameters } = body;
       const outbound = this.options.clinePass && reasoning
         ? { ...parameters, ...clinePassChatReasoningControl(body.model, reasoning.effort) }

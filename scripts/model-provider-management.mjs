@@ -1,4 +1,5 @@
 import { isResponsesProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { hasCodexAuthFile } from "../runtime/codex-home.mjs";
 import {
   listCustomPrimaryProviderCandidates,
@@ -132,9 +133,23 @@ function customCandidate(id, value, state, active, environment, model) {
     state,
     active,
     ...customCatalog(id, environment, model),
+    ...customUpstreamWireApi(id, environment),
     supportsWebsockets: provider.supports_websockets === true,
     baseUrl: publicBaseUrl(provider.base_url),
   };
+}
+
+/**
+ * 已保存的上游接口；缺失按 responses。元数据不可安全读取时省略该字段，
+ * 让编辑流程按“沿用已保存值”处理，而不是静默当作 responses。
+ */
+function customUpstreamWireApi(id, environment) {
+  if (!isResponsesProvider(id)) return {};
+  try {
+    return { upstreamWireApi: readCustomProviderUpstreamWireApi(environment, id) };
+  } catch {
+    return {};
+  }
 }
 
 function publicBaseUrl(value) {

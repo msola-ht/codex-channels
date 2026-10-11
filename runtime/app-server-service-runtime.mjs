@@ -224,6 +224,17 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   };
   const proxyProviderIds = new Map();
   const proxyTargetSignatures = new Map();
+  // 上游接口：受管 Provider 来自定义；自定义第三方 Provider 来自其网关侧元数据。
+  // 聚合会给自定义成员派生 `provider@<hash>` 路由键，因此先解析真实 Provider 身份。
+  const upstreamWireApiFor = (provider, routeKey = provider) => {
+    const managed = providerDefinitions.get(routeKey) ?? sharedManagedProviderDefinition(routeKey);
+    if (managed?.upstreamWireApi !== undefined) return managed.upstreamWireApi;
+    if (customPrimaryProvider !== undefined
+      && (provider === customPrimaryProvider.id || routeKey === primaryProvider)) {
+      return customPrimaryProvider.upstreamWireApi;
+    }
+    return customSwitchingProvidersById.get(provider)?.upstreamWireApi;
+  };
   const providerProxyRuntimes = new ProviderProxyRuntimeRegistry(async (
     provider,
     options,
@@ -250,8 +261,10 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     // 官方 OpenAI 端点理解 Codex 私有输入项；自定义固定 Provider 复用 openai 路由键但换成第三方上游。
     // 判定跟随真实 Provider 身份（metricsProvider），聚合快照可能给同一 Provider 派生带摘要的代理键。
     const officialOpenAiRoute = metricsProvider === "openai" && customPrimaryProvider === undefined;
-    if (definition?.upstreamWireApi === "chat_completions") {
-      const clinePass = definition.storageId === "clp" || definition.id === "clp";
+    let bridgedClinePass = false;
+    if (upstreamWireApiFor(metricsProvider, provider) === "chat_completions") {
+      const clinePass = definition?.storageId === "clp" || definition?.id === "clp";
+      bridgedClinePass = clinePass;
       bridge = new ChatCompletionsBridge({ ...options,
         clinePass,
         ...(modelGuard ? { readClinePassModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) } : {}),
@@ -300,7 +313,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     });
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
-      ...(!bridge && modelGuard ? { isModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
+      // CLP 桥在桥内按目录校验模型；通用 Chat 桥没有该校验，继续由统计代理拒绝目录外或已停用模型。
+      ...(modelGuard && !bridgedClinePass ? { isModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
       // 除官方 OpenAI 端点外的 Responses 上游都不理解 Codex 私有输入项与参数标记，
       // 必须在上游收到正文前归一化；Chat 上游由桥转换，不在此处改写。
       ...(!bridge && !officialOpenAiRoute ? { normalizeResponsesInput: true } : {}),
@@ -524,7 +538,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     aggregateProxy = new AggregateModelProxy({ token, assertCurrent: signal => guard.check(signal),
       routes: new Map([...material.routes].map(([slug, route]) => [slug, {
         model: route.model, apiKey: route.apiKey, baseUrl: urls.get(route.provider),
-        timeoutMs: providerDefinitions.get(route.provider)?.upstreamWireApi === "chat_completions"
+        timeoutMs: upstreamWireApiFor(route.provider) === "chat_completions"
           ? chatBridgeRequestTimeoutMs + 10_000 : 65_000,
       }])),
     });

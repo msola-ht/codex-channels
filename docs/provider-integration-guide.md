@@ -16,7 +16,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账�
 | --- | --- | --- |
 | Provider id | 小写字母/数字/`-`/`_`，1–64 位 | 决定 `sf-<id>.config.toml` Profile、`~/.codex-connect/providers/<id>/` 目录、`modelProvider`、环境变量名 |
 | 显示名称 | 1–64 字符 | 出现在 `/model`、WebUI 与完成卡片 |
-| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 使用 `upstreamWireApi: "chat_completions"` 与 `model-api` 模块，不把 Chat 写入 Codex `wire_api`。转换覆盖 `function`、`namespace`、自由格式 `custom`、客户端 `tool_search` 与 multi-agent v2 的 `agent_message` 输入项；模型目录可用 `applyPatchToolType: freeform` 与 `supportsSearchTool` 开启自由格式 `apply_patch` 与客户端检索；未映射的顶层工具声明原样交给上游，不注册本地执行身份，也不承诺托管工具执行与回程；第三方 `wire_api = "responses"` 上游由 ProviderProxy 在提交前归一化 Codex 私有输入项，`agent_message` 降级为普通 `user` 消息、工具参数 schema 的 `encrypted` 布尔标记被删除，HTTP 与 Responses WS 一致，官方 OpenAI 端点保持原文透传；受管 DeepSeek 入口仍关闭内置网页搜索 |
+| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 与上游接口为 `chat_completions` 的自定义第三方 Provider 使用 `model-api` 模块与 Chat 桥，不把 Chat 写入 Codex `wire_api`。转换覆盖 `function`、`namespace`、自由格式 `custom`、客户端 `tool_search` 与 multi-agent v2 的 `agent_message` 输入项；模型目录可用 `applyPatchToolType: freeform` 与 `supportsSearchTool` 开启自由格式 `apply_patch` 与客户端检索；未映射的顶层工具声明原样交给上游，不注册本地执行身份，也不承诺托管工具执行与回程；第三方 `wire_api = "responses"` 上游由 ProviderProxy 在提交前归一化 Codex 私有输入项，`agent_message` 降级为普通 `user` 消息、工具参数 schema 的 `encrypted` 布尔标记被删除，HTTP 与 Responses WS 一致，官方 OpenAI 端点保持原文透传；受管 DeepSeek 入口仍关闭内置网页搜索 |
 | WebSocket | 支持 / 不支持 | 不支持时必须显式声明 `supports_websockets = false` |
 | 认证 | 按 Provider 校验的 API Key | 编译期受管 Provider 的 Key 只进入子进程环境或专用私有凭据文件，不写入命令行、日志或 Gateway 配置 |
 | 模型目录来源 | 官方目录下载器 / `/models` / 审查后的 JSON | 与 DeepSeek 官方目录一致时可复用现有下载器 |
@@ -220,7 +220,8 @@ stream_max_retries = 0
 该候选，显式配置为 `openai` 或未配置时使用官方 OpenAI。配置自定义主 Provider 时不能同时设置顶层 `openai_base_url`。通过
 `codexc provider` 的
 `list` / `add` / `switch` / `remove` 管理候选与激活状态。`list --json` 提供稳定的脚本输出，包含当前
-主实例、固定候选、切换 Provider 与备份候选摘要，不包含 API Key 或其他认证字段。
+主实例、固定候选、切换 Provider 与备份候选摘要，不包含 API Key 或其他认证字段；自定义 Provider 条目在能安全
+读取元数据时另含 `upstreamWireApi`（`responses` 或 `chat_completions`），供脚本区分直连与经网关 Chat 桥转换的条目。
 `codexc provider switch openai` 不运行登录直接切回官方 OpenAI（执行前会二次确认，并提示
 将把 `model_provider` 写回 `openai`；从自定义切回且未指定模型时会清空顶层 `model`），官方凭据保留；切回时自定义候选块移入
 `~/.codex-connect/private/primary-providers.json`（0600）并从 config 清理，之后
@@ -353,17 +354,19 @@ JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行�
 避免启用官方专用协议能力。已有 Codex 兼容 Provider 不自动转换或迁移。
 
 填写平台的 Responses 基础地址（例如 `https://www.zzshu.cc/v1`）、API Key 和一个或多个模型。
+自定义第三方 Provider 支持两种上游接口，在填写基础地址后选择：`Responses` 直连上游，或 `Chat Completions` 由网关的 Chat 桥转换（`function`、`namespace`、自由格式 `custom`、客户端 `tool_search` 与 `agent_message` 均由桥处理）。选 Chat Completions 时 WebSocket 强制关闭、客户端检索默认声明（连接器等工具照常按需检索），不提供 Responses 私有能力（加密推理回放、远程压缩、Fast 档位），模型转发（Relay）对该 Provider 只宣告原生 Chat 并按 Chat 转发，不宣告 Responses；自动审批等带结构化输出的请求同时声明工具时，桥把要求的 JSON schema 追加到系统消息并省略 `response_format`，以适配不接受两者并存的 Chat 上游（托管 CLP 上游已验证接受，保持 `response_format`）。该降级只由提示词保证，桥不校验最终文本是否为 JSON，降级事实记为请求诊断 `conversion.structuredOutput=prompt`；模型仍由统计代理按 Provider 目录拒绝目录外或已停用模型。选择结果写在 `~/.codex-connect/providers/responses/<Provider ID>/provider.json`（0600，缺失按 `responses`），修改后运行 `codexc restart all`。
 CLI 新增或编辑时分别询问是否导入官方 Codex、DeepSeek 模型，勾选平台支持的条目后，逐项填写平台模型 ID，确认“模板 ID → 平台 ID”。多选时按空格勾选、回车确认；空选会提示尚未导入，并提供返回选择或跳过本类模板的选项。两类均可导入，也可跳过后手填。
 官方模板读取当前 Codex CLI 的内置目录，排除不会原样作为请求等级发送的 Codex 专用 `ultra` / `persistent` 模式；其余等级与默认值仍需通过 RS 校验，不能转换时明确报错并使用手填入口；DS 优先读取现有本地共享目录；没有时复用 DS 官方脚本下载与提取流程，不执行脚本。读取失败明确报错，不回退其他来源。
-官方 Codex 与 DS 模板均导入模型 ID、显示名称、当前上下文窗口、源目录声明的最大上下文窗口、支持的思考等级、默认思考等级及图片输入能力。DS 模板另保留非空 `model_messages.instructions_template`；工具配置、等级说明、详细程度、压缩参数和多代理元数据不复制。模型 ID 可映射为平台实际名称；生成目录的其余必需字段使用项目统一默认值。请求使用填写的平台 ID，同一 Provider 内不允许重复。导入后选择默认模型，可调整能力并继续手动添加其他模型。编辑时，唯一已有模板映射会预填平台 ID；同 ID 须明确确认才用模板替换已有模型的名称、能力及关联，默认不覆盖，拒绝则保留原值。按 ID 合并，不重复添加已有条目；同一批导入仍禁止两个模板占用同一平台 ID，未选中的模型继续保留供后续编辑。
+官方 Codex 与 DS 模板均导入模型 ID、显示名称、当前上下文窗口、源目录声明的最大上下文窗口、支持的思考等级、默认思考等级及图片输入能力。DS 模板另保留非空 `model_messages.instructions_template`；工具配置、等级说明、详细程度、压缩参数和多代理元数据不复制，模板的工具声明不代替新增模型时的 `apply_patch` 确认与填写 Key 后的客户端检索检测。模型 ID 可映射为平台实际名称；生成目录的其余必需字段使用项目统一默认值。请求使用填写的平台 ID，同一 Provider 内不允许重复。导入后选择默认模型，可调整能力并继续手动添加其他模型。编辑时，唯一已有模板映射会预填平台 ID；同 ID 须明确确认才用模板替换已有模型的名称、能力及关联，默认不覆盖，拒绝则保留原值。按 ID 合并，不重复添加已有条目；同一批导入仍禁止两个模板占用同一平台 ID，未选中的模型继续保留供后续编辑。
 模板副本独立保存。DS 模型可选择“跟随模板上下文”，须先配置本地 DS 目录；CLI 或 WebUI 修改 DS 上下文时，现有受管目录事务会同步关联的 RS 模型，平台 ID 与其他能力保持独立。CLI 编辑及 WebUI 可关闭跟随，关闭后保留当前窗口。删除最后一个 DS 账户或重建缺失的 DS 目录前，必须先关闭关联 RS 模型的跟随，避免留下失效关联；同一窗口值再次应用时也会修正跟随副本的差异。没有启用跟随的副本不受源目录变化影响；模型 ID、能力仍须符合平台实际支持情况。WebUI 可编辑保存后的平台 ID 和能力，目前模板勾选入口在 CLI。
-每个模型声明准确 ID、显示名称、上下文窗口、图片输入能力、支持的思考等级与默认等级；默认模型必须属于目录。
-上下文窗口接受 1024–100000000 Token。思考等级仅接受锁定 Codex 支持的
+每个模型声明准确 ID、显示名称、上下文窗口、图片输入能力、支持的思考等级与默认等级；第三方自定义模型默认声明自由格式 `apply_patch`，CLI 新增或编辑时确认且默认勾选，WebUI 勾选状态可关闭，关闭后不写入目录。客户端 `tool_search` 在 Responses 上游默认不声明：声明后 Codex 会把 `tool_search_call` / `tool_search_output` 输入项回传上游，上游不接受这些输入项时触发检索的回合会失败。填写 API Key 后，CLI 提供“自动检测”，发送一次极短请求验证上游是否接受检索输入项（最长 15 秒，可能计费，只覆盖输入项接受度，不代表模型一定会调用检索）；检测通过才为目录内全部模型声明，未通过或无法确认保持不声明，WebUI 需手工勾选。选择 Chat Completions 时检索输入项由网关转换，CLI 直接声明，WebUI 在切换上游接口时自动勾选，两处都可以再手动关闭。缺少 `tool_search` 时客户端无法按需检索，会把全部工具定义内联进每次请求；默认模型必须属于目录。
+上下文窗口接受 1024–100000000 Token；CLI 与 WebUI 提供 32K、128K、256K 常用窗口预设（32768 / 131072 / 262144 Token），也可填写其他值。思考等级仅接受锁定 Codex 支持的
 `none/minimal/low/medium/high/xhigh/max`；留空表示不声明可选等级，启动请求显式使用 `none`，
 避免继承官方主配置的思考等级。不会请求第三方 `/models` 或自动推断模型能力。
 
-上游必须兼容锁定版 Codex 的 Responses 流式事件、函数调用、工具结果接续及其请求字段；
-“提供 Responses 地址”不代表所有模型均兼容。此入口不转换 Chat Completions，不提供平台专用协议补丁。
+选择 Responses 时，上游必须兼容锁定版 Codex 的 Responses 流式事件、函数调用、工具结果接续及其请求字段；
+“提供 Responses 地址”不代表所有模型均兼容。此入口只按所选上游接口使用直连 Responses 或网关 Chat 桥转换，
+不为具体平台添加专用协议补丁。
 这些实例仍关闭网页搜索；模板中的能力元数据不代替上游接口兼容性验证，也不自动启用 WS 或改变审批策略。手填模型和官方 Codex 基础模板使用通用编程指令，不额外声明远程压缩、免费额度、Fast、推理摘要或详细程度；DS 导入保留模板的非空编程指令，缺少时使用通用编程指令；工具和请求参数继续采用项目的保守配置。当前目录合同没有可独立设置的最大输出 Token 字段。
 
 固定模式把 Provider、默认模型、思考等级及目录引用写入主配置；切换模式保持官方主配置，写入独立的
@@ -385,6 +388,14 @@ CLI Setup 的 Codex 兼容 Provider 和自定义 Responses Provider，新增与�
 包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`。模型定义可携带 `template: { source, model, followContext }` 关联。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不再保存完整模板快照，输入旧 `snapshot` 字段会明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联。Codex 读取其中的
 `models`，Gateway 严格核对版本与生成结果；不接受未知字段、重复 ID、任意外部路径或手写的第三方目录。
 模型目录保存为两空格缩进的 JSON，DS 上下文同步也保留该排版。文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。
+上游接口选择单独保存在同目录的 `provider.json`（版本 1，仅含 `upstreamWireApi`，取值 `responses` 或
+`chat_completions`），沿用同一私有文件工具原子写入，目录 0700、文件 0600，不含 Key。文件缺失按 `responses`
+处理以兼容既有目录，Provider ID 不是 `rs-` 前缀时不读写该文件；版本、字段或取值不受支持时失败关闭并拒绝加载，
+不回退为 `responses`。选择 Chat Completions 时写入，改回 Responses 时删除；编辑 Provider 时未显式改动上游接口就沿用文件中的已保存值，
+元数据不可安全读取时列表省略该字段、保存要求显式选择而不是静默改成 `responses`；删除 Provider 在备份清理成功后
+连同模型目录一起清理，清理中断可按原 ID 重跑 `codexc provider remove`。该文件与主配置、Profile、注册表一并记入
+`~/.codex-connect/private/responses-providers/<Provider ID>.json` 备份；写入是单文件原子替换，失败时保持原值，
+随模型目录保存事务失败时按既有规则保留备份与 pending 并拒绝启动，不自动重试，修改后须执行 `codexc restart all`。
 WebUI 的 Provider 预览与保存请求上限为 2 MiB，其他管理接口仍为 64 KiB。模型数量上限仍为 64 个。模型目录（定义和生成结果）不得超过 2 MiB，超限在写入前拒绝。上下文不得超过模板原始最大窗口。模型文件不含 Key。Key 写入私有 Profile 或独立私有凭据版本，主配置只含引用；连接配置的恢复快照单独位于
 `~/.codex-connect/private/responses-providers/<Provider ID>.json`（0600，可能含凭据，勿分享）。
 

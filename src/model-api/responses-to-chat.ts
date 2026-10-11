@@ -38,7 +38,21 @@ export interface ChatRequest {
 
 /** Stateless conversion: the caller supplies complete Responses input on every request. */
 export interface ChatToolIdentity { name: string; namespace?: string; kind: ChatToolKind }
-export function responsesToChat(value: unknown, supportedReasoningEfforts?: readonly string[]): { request: ChatRequest; toolNames: ReadonlyMap<string, ChatToolIdentity> } {
+export interface ChatConversionOptions {
+  /**
+   * `response_format` 与 tools 并存时的表达方式。默认保持 `response_format`；
+   * 上游不接受两者并存时用 `prompt`，把 schema 写进系统消息并省略 `response_format`，
+   * 保留工具调用（与上游 Responses 路由对“最终答复才受 schema 约束”的处理一致）。
+   */
+  structuredOutputWithTools?: "response_format" | "prompt";
+}
+export interface ChatConversionResult {
+  request: ChatRequest;
+  toolNames: ReadonlyMap<string, ChatToolIdentity>;
+  /** 仅在把结构化输出改写为系统指令并省略 `response_format` 时置位，供调用方记录有界诊断。 */
+  structuredOutput?: "prompt";
+}
+export function responsesToChat(value: unknown, supportedReasoningEfforts?: readonly string[], options: ChatConversionOptions = {}): ChatConversionResult {
   const source = object(value);
   const allowed = new Set(["model", "instructions", "input", "tools", "tool_choice", "parallel_tool_calls", "stream", "stream_options", "store", "include", "reasoning", "text", "service_tier", "prompt_cache_key", "client_metadata", "max_output_tokens"]);
   if (Object.keys(source).some(key => !allowed.has(key))) throw new ModelConversionError("Unsupported Responses request field");
@@ -288,8 +302,29 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
     if (!Number.isSafeInteger(source.max_output_tokens) || Number(source.max_output_tokens) <= 0) throw new ModelConversionError();
     result.max_completion_tokens = Number(source.max_output_tokens);
   }
-  if (responseFormat) result.response_format = responseFormat;
-  return { request: result, toolNames };
+  let structuredOutput: "prompt" | undefined;
+  if (responseFormat) {
+    if (options.structuredOutputWithTools === "prompt" && tools.length > 0) {
+      appendOutputFormatDirective(messages, responseFormat);
+      structuredOutput = "prompt";
+    } else result.response_format = responseFormat;
+  }
+  return { request: result, toolNames, ...(structuredOutput === undefined ? {} : { structuredOutput }) };
+}
+
+/** 把结构化输出的 schema 作为系统指令下发；工具轮次不受该约束，最终答复才必须是一个 JSON 对象。 */
+function appendOutputFormatDirective(messages: ChatMessage[], responseFormat: JsonObject): void {
+  const spec = object(responseFormat.json_schema);
+  const directive = "OUTPUT FORMAT REQUIREMENT: your final answer must be exactly one JSON object matching the JSON Schema below. "
+    + "Write no Markdown, headings, code fences, commentary or text outside that object; use every required field with the correct types and no other fields. "
+    + "This applies only to your final answer: call tools as usual, and write the JSON object once you are done with them.\nJSON Schema:\n"
+    + JSON.stringify(spec.schema);
+  const first = messages[0];
+  if (first?.role === "system" && typeof first.content === "string") {
+    first.content = `${first.content}\n\n${directive}`;
+    return;
+  }
+  messages.unshift({ role: "system", content: directive });
 }
 
 /** Codex 只请求 json_schema；Chat 用 `response_format` 表达同一份 schema 约束。 */

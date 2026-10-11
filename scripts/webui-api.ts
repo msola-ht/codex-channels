@@ -662,6 +662,7 @@ export interface ManagementProviderSettingsResponse {
       state: "configured" | "backup"
       active: boolean
       supportsWebsockets?: boolean
+      upstreamWireApi?: "responses" | "chat_completions"
       baseUrl: string
     }>
     switchingProviders: Array<{
@@ -673,6 +674,7 @@ export interface ManagementProviderSettingsResponse {
       model: string
       reasoningEffort: string | null
       supportsWebsockets?: boolean
+      upstreamWireApi?: "responses" | "chat_completions"
       baseUrl: string
     }>
     backupCandidates: Array<{
@@ -684,6 +686,7 @@ export interface ManagementProviderSettingsResponse {
       state: "configured" | "backup"
       active: boolean
       supportsWebsockets?: boolean
+      upstreamWireApi?: "responses" | "chat_completions"
       baseUrl: string
     }>
   }
@@ -713,6 +716,7 @@ export type ManagementProviderSettingsMutationInput =
         model: string
         catalog?: { kind: "custom"; models: ResponsesModelDefinition[] }
         supportsWebsockets: boolean
+        upstreamWireApi?: "responses" | "chat_completions"
         credential: { action: "preserve" } | { action: "replace"; apiKey: string }
         confirmRemoveTopLevelBaseUrl?: boolean
       }

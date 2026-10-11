@@ -1,5 +1,7 @@
 import { promptResponsesWebSocket } from "./responses-websocket-setup.mjs";
+import { promptResponsesToolSearch } from "./responses-tool-search-setup.mjs";
 import { isResponsesProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { loadResponsesModelTemplates, promptResponsesModelImport } from "./responses-model-templates.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
 import * as clackPrompts from "@clack/prompts";
@@ -60,6 +62,7 @@ export async function runCustomPrimaryProviderSetup({
   catalogKind = "official",
   loadModelTemplates = source => loadResponsesModelTemplates(source, environment),
   probeWebSocket,
+  probeToolSearch,
 } = {}) {
   const custom = editingProviderId === undefined ? catalogKind === "custom" : isResponsesProvider(editingProviderId);
   const previousCatalog = editingProviderId && custom ? readResponsesModelCatalog(environment, editingProviderId) : undefined;
@@ -174,6 +177,33 @@ export async function runCustomPrimaryProviderSetup({
     return { action: allowBack ? "back" : "cancel" };
   }
   const normalizedBaseUrl = validCustomPrimaryProviderBaseUrl(String(baseUrl).trim());
+  let currentUpstreamWireApi = "responses";
+  let upstreamMetadataUnreadable = false;
+  if (custom && editingProviderId !== undefined) {
+    try {
+      currentUpstreamWireApi = readCustomProviderUpstreamWireApi(environment, editingProviderId);
+    } catch {
+      upstreamMetadataUnreadable = true;
+    }
+  }
+  let chatUpstream = false;
+  if (custom) {
+    if (upstreamMetadataUnreadable) {
+      output.write("\n已保存的上游接口无法安全读取；请重新选择，保存会覆盖该元数据。\n");
+    }
+    const upstreamWireApi = await prompts.select({
+      message: "上游接口",
+      options: [
+        { value: "responses", label: "Responses", hint: "上游提供 /v1/responses，网关直连；客户端检索要求上游支持" },
+        { value: "chat_completions", label: "Chat Completions", hint: "上游提供 /v1/chat/completions，网关转换；客户端检索由网关适配" },
+      ],
+      initialValue: currentUpstreamWireApi,
+    });
+    if (prompts.isCancel(upstreamWireApi) || upstreamWireApi === "back") {
+      return { action: allowBack ? "back" : "cancel" };
+    }
+    chatUpstream = upstreamWireApi === "chat_completions";
+  }
   let normalizedId = fixedProviderId;
   if (normalizedId === undefined) {
     const derived = customPrimaryProviderIdFromBaseUrl(normalizedBaseUrl);
@@ -362,14 +392,32 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error("API Key 不能为空");
   }
 
-  const supportsWebsockets = await promptResponsesWebSocket(prompts, {
-    baseUrl: normalizedBaseUrl,
-    apiKey: replacementApiKey || currentApiKey,
-    model: normalizedModel,
-    reasoningEffort: custom ? models.find(entry => entry.id === normalizedModel)?.defaultReasoningEffort ?? "none" : "medium",
-    environment,
-  }, {output, probe: probeWebSocket, current: currentWebsockets === "yes"});
+  const supportsWebsockets = chatUpstream
+    ? false
+    : await promptResponsesWebSocket(prompts, {
+        baseUrl: normalizedBaseUrl,
+        apiKey: replacementApiKey || currentApiKey,
+        model: normalizedModel,
+        reasoningEffort: custom ? models.find(entry => entry.id === normalizedModel)?.defaultReasoningEffort ?? "none" : "medium",
+        environment,
+      }, {output, probe: probeWebSocket, current: currentWebsockets === "yes"});
   if (supportsWebsockets === undefined) return { action: allowBack ? "back" : "cancel" };
+
+  let catalogModels = models;
+  let supportsToolSearch = false;
+  if (custom) {
+    const currentToolSearch = previousCatalog?.definitions.find(entry => entry.id === normalizedModel)?.supportsSearchTool === true;
+    supportsToolSearch = chatUpstream ? true : await promptResponsesToolSearch(prompts, {
+      baseUrl: normalizedBaseUrl,
+      apiKey: replacementApiKey || currentApiKey,
+      model: normalizedModel,
+      environment,
+    }, {output, probe: probeToolSearch, current: currentToolSearch === true});
+    if (supportsToolSearch === undefined) return { action: allowBack ? "back" : "cancel" };
+    catalogModels = models.map(entry => (supportsToolSearch
+      ? {...entry, supportsSearchTool: true}
+      : {...entry, supportsSearchTool: false}));
+  }
 
   const saveInput = {
     operation: fixedProviderId === undefined ? "create" : "update",
@@ -378,8 +426,9 @@ export async function runCustomPrimaryProviderSetup({
     baseUrl: normalizedBaseUrl,
     mode,
     model: normalizedModel,
-    ...(custom ? { catalog: { kind: "custom", models } } : {}),
+    ...(custom ? { catalog: { kind: "custom", models: catalogModels } } : {}),
     supportsWebsockets,
+    upstreamWireApi: chatUpstream ? "chat_completions" : "responses",
     credential: replacementApiKey === ""
       ? { action: "preserve" }
       : { action: "replace", apiKey: replacementApiKey },
@@ -398,6 +447,7 @@ export async function runCustomPrimaryProviderSetup({
     `- Provider ID：${preview.provider.id}`,
     `- 显示名称：${preview.provider.displayName}`,
     `- 上游：${preview.provider.baseUrl}`,
+    `- 上游接口：${preview.provider.upstreamWireApi === "chat_completions" ? "Chat Completions（网关转换）" : "Responses（直连）"}`,
     `- 默认模型：${preview.provider.model}`,
     `- 运行模式：${preview.provider.mode === "switching" ? "OpenAI + 自定义切换" : "仅自定义固定"}`,
     `- 模型目录：${custom ? "自定义 Responses；仅声明的模型与能力" : "Codex 官方"}`,
@@ -414,6 +464,9 @@ export async function runCustomPrimaryProviderSetup({
         ]),
     ...(custom ? preview.provider.models.map(entry => `- 模型 ${entry.id}：${entry.contextWindow} Token；图片 ${entry.supportsImages ? "支持" : "不支持"}；思考 ${entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`) : []),
     `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,
+    ...(custom
+      ? [`- 工具检索（tool_search）：${supportsToolSearch ? "声明支持；上游须接受 Codex 检索输入项" : "不声明；工具定义全量下发"}`]
+      : []),
     ...(preview.transport.cleartext ? ["- 传输：明文 HTTP；API Key 与请求内容不加密"] : []),
   ];
   if (preview.provider.id === primaryProviderId) {

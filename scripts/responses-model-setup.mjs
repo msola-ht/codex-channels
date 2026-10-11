@@ -2,6 +2,12 @@ import { validateResponsesModels } from "../runtime/model-provider-responses-cat
 import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-instructions.mjs";
 import { promptEnabledProviderModels } from "./provider-model-selection.mjs";
 
+const contextWindowPresets = [
+  { value: "32768", label: "32K（32768 Token）" },
+  { value: "131072", label: "128K（131072 Token）" },
+  { value: "262144", label: "256K（262144 Token）" },
+];
+
 export async function promptResponsesModels(prompts, defaultModel, previous = [], importedIds = [], output = process.stdout) {
   const ids = [defaultModel, ...previous.map((entry) => entry.id).filter((id) => id !== defaultModel)];
   const models = [];
@@ -15,16 +21,16 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       template = {...template, followContext: followContext === true};
     }
     let configure = true;
-    if (importedIds.includes(id)) {
-      configure = await prompts.confirm({ message: `调整 ${id} 的模板能力参数？`, initialValue: false });
-      if (prompts.isCancel(configure)) return undefined;
-      if (!configure) models.push(withNewModelInstructions({...structuredClone(old), ...(template ? {template} : {})}, true));
-    }
+      if (importedIds.includes(id)) {
+        configure = await prompts.confirm({ message: `调整 ${id} 的模板能力参数？`, initialValue: false });
+        if (prompts.isCancel(configure)) return undefined;
+        if (!configure) models.push(withNewModelInstructions({...structuredClone(old), ...(template ? {template} : {}), ...(old?.applyPatchToolType === undefined ? {applyPatchToolType: "freeform"} : {})}, true));
+      }
     if (configure) {
       const name = await prompts.text({ message: `${id} 显示名称`, initialValue: old?.name ?? id });
       if (prompts.isCancel(name)) return undefined;
       const maximumContext = old?.maxContextWindow ?? 100_000_000;
-      const context = template?.followContext ? old.contextWindow : await prompts.text({ message: `${id} 上下文窗口（Token，请按平台说明填写）`, initialValue: String(old?.contextWindow ?? ""), validate: value => Number.isSafeInteger(Number(value)) && Number(value) >= 1024 && Number(value) <= maximumContext ? undefined : `请输入 1024-${maximumContext} 的整数` });
+      const context = template?.followContext ? old.contextWindow : await promptContextWindow(prompts, id, old?.contextWindow, maximumContext);
       if (prompts.isCancel(context)) return undefined;
       const reasoning = await prompts.text({ message: "支持的思考等级（逗号分隔；留空表示不支持，请求使用 none）", initialValue: old?.reasoningEfforts.join(",") ?? "" });
       if (prompts.isCancel(reasoning)) return undefined;
@@ -33,7 +39,9 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       if (prompts.isCancel(defaultReasoning)) return undefined;
       const images = await prompts.confirm({ message: `${id} 是否支持图片输入？`, initialValue: old?.supportsImages ?? false });
       if (prompts.isCancel(images)) return undefined;
-      models.push(withNewModelInstructions({ ...structuredClone(old), id, name: String(name), contextWindow: Number(context), reasoningEfforts, defaultReasoningEffort: defaultReasoning, supportsImages: images, ...(template ? {template} : {}) }, old === undefined || importedIds.includes(id)));
+      const patch = await prompts.confirm({ message: `${id} 是否支持 Codex 自由格式 apply_patch 工具？`, initialValue: old?.applyPatchToolType === undefined || old.applyPatchToolType === "freeform" });
+      if (prompts.isCancel(patch)) return undefined;
+      models.push(withNewModelInstructions({ ...structuredClone(old), id, name: String(name), contextWindow: Number(context), reasoningEfforts, defaultReasoningEffort: defaultReasoning, supportsImages: images, applyPatchToolType: patch === true ? "freeform" : undefined, supportsSearchTool: old?.supportsSearchTool, ...(template ? {template} : {}) }, old === undefined || importedIds.includes(id)));
     }
     if (index === ids.length - 1 && ids.length < 64) {
       const add = await prompts.confirm({ message: "继续添加模型？", initialValue: false });
@@ -62,4 +70,18 @@ function withNewModelInstructions(model, isNewDefinition) {
     return {...model, instructions: thirdPartyCodingInstructions};
   }
   return model;
+}
+
+async function promptContextWindow(prompts, id, current, maximumContext) {
+  const presets = contextWindowPresets.filter((preset) => Number(preset.value) <= maximumContext);
+  const selected = await prompts.select({
+    message: `${id} 上下文窗口`,
+    options: [...presets, { value: "custom", label: "自定义 Token 数" }],
+    initialValue: presets.some((preset) => Number(preset.value) === current) ? String(current) : "custom",
+  });
+  if (prompts.isCancel(selected)) return undefined;
+  if (selected !== "custom") return Number(selected);
+  const typed = await prompts.text({ message: `${id} 上下文窗口（Token，请按平台说明填写）`, initialValue: String(current ?? ""), validate: value => Number.isSafeInteger(Number(value)) && Number(value) >= 1024 && Number(value) <= maximumContext ? undefined : `请输入 1024-${maximumContext} 的整数` });
+  if (prompts.isCancel(typed)) return undefined;
+  return Number(typed);
 }

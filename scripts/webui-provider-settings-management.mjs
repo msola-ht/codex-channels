@@ -266,6 +266,7 @@ export function projectProviderSettings(state) {
         reasoningEffort: provider.reasoningEffort ?? null,
         baseUrl: provider.baseUrl ?? "",
         supportsWebsockets: provider.supportsWebsockets === true,
+        upstreamWireApi: provider.upstreamWireApi ?? "responses",
         ...redactCatalog(provider),
       })),
       backupCandidates: state.customProviders.backupCandidates.map(redactTarget),
@@ -284,6 +285,7 @@ function redactTarget(target) {
     ...(target.mode === undefined ? {} : { mode: target.mode }),
     ...(target.active === undefined ? {} : { active: target.active }),
     ...(target.supportsWebsockets === undefined ? {} : { supportsWebsockets: target.supportsWebsockets }),
+    ...(target.upstreamWireApi === undefined ? {} : { upstreamWireApi: target.upstreamWireApi }),
     ...(target.baseUrl === undefined ? {} : { baseUrl: target.baseUrl }),
     ...(target.model === undefined ? {} : { model: target.model }),
   };

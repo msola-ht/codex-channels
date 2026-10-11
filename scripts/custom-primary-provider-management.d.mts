@@ -15,6 +15,7 @@ export interface CustomPrimaryProviderSaveInput {
   model: string;
   catalog?: { kind: "custom"; models: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[] };
   supportsWebsockets: boolean;
+  upstreamWireApi?: "responses" | "chat_completions";
   credential:
     | { action: "preserve" }
     | { action: "replace"; apiKey: string };
@@ -44,6 +45,7 @@ export interface CustomPrimaryProviderSaveSummary {
   mode: "switching" | "exclusive";
   model: string;
   supportsWebsockets: boolean;
+  upstreamWireApi?: "responses" | "chat_completions";
   catalog: "official" | "custom";
   models?: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[];
   hasApiKey: true;

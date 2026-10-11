@@ -6,6 +6,7 @@ import { codexHomePath } from "../runtime/codex-home.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { createResponsesModelCatalog, resolveResponsesTemplateContexts, isResponsesProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { customProviderUpstreamMetadataPath, customProviderUpstreamWireApis, readCustomProviderUpstreamWireApi, removeCustomProviderUpstreamMetadata, writeCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -118,7 +119,8 @@ async function applySavePlan(input, plan, options) {
   const beforeConfig = existsSync(configPath) ? read(configPath) : undefined;
   const profilePath = customPrimaryProviderProfilePath(environment, plan.provider.id);
   const beforeProfile = existsSync(profilePath) ? read(profilePath) : undefined;
-  const backupPaths = [configPath, customPrimaryProviderProfilePath(environment, plan.provider.id), customSwitchingProviderRegistryPath(environment)];
+  const backupPaths = [configPath, customPrimaryProviderProfilePath(environment, plan.provider.id), customSwitchingProviderRegistryPath(environment),
+    ...(isResponsesProvider(plan.provider.id) ? [customProviderUpstreamMetadataPath(environment, plan.provider.id)] : [])];
   const transaction = writeResponsesModelCatalog(environment, plan.provider.id, plan.models, plan.provider.model, plan.catalogRevision);
   try {
     writePrivateFileAtomicSync(responsesProviderBackupPath(environment, plan.provider.id), JSON.stringify({
@@ -193,6 +195,14 @@ async function applyConnectionSavePlan(input, plan, options) {
       credential: plan.credential,
     });
   }
+  // 元数据只属于自定义 Responses Provider（rs-*）；Codex 兼容 Provider 不写该文件。
+  if (isResponsesProvider(plan.provider.id)) {
+    if (plan.upstreamWireApi === "chat_completions") {
+      writeCustomProviderUpstreamWireApi(environment, plan.provider.id, plan.upstreamWireApi);
+    } else {
+      removeCustomProviderUpstreamMetadata(environment, plan.provider.id);
+    }
+  }
   let backupCleaned = true;
   if (plan.backupCandidateToRemove !== undefined) {
     try {
@@ -264,6 +274,18 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     throw invalid("invalid-websocket-setting", "supportsWebsockets", "WebSocket 设置必须是布尔值");
   }
   const custom = input.catalog?.kind === "custom";
+  // 未显式选择时沿用已保存的上游接口（新建与非 rs- Provider 使用 responses）；读取失败时失败关闭。
+  const upstreamWireApi = input.upstreamWireApi
+    ?? (isResponsesProvider(providerId) ? readCustomProviderUpstreamWireApi(environment, providerId) : "responses");
+  if (!customProviderUpstreamWireApis.includes(upstreamWireApi)) {
+    throw invalid("invalid-upstream-wire-api", "upstreamWireApi", "上游接口必须是 responses 或 chat_completions");
+  }
+  if (upstreamWireApi === "chat_completions" && input.supportsWebsockets) {
+    throw invalid("invalid-upstream-websocket", "supportsWebsockets", "Chat Completions 上游不支持 WebSocket");
+  }
+  if (upstreamWireApi === "chat_completions" && !custom) {
+    throw invalid("invalid-upstream-wire-api", "upstreamWireApi", "Chat Completions 上游只支持自定义 Responses Provider");
+  }
   if (input.catalog !== undefined && (input.catalog?.kind !== "custom" || Object.keys(input.catalog).some(key => !["kind", "models"].includes(key)))) throw invalid("invalid-catalog", "catalog", "模型目录来源不受支持");
   if (custom !== isResponsesProvider(providerId)) throw invalid("invalid-provider-id", "providerId", "自定义 Responses Provider 必须使用 rs- 前缀；Codex 兼容 Provider 不使用该前缀");
   if (custom && displayName === "OpenAI") throw invalid("reserved-provider-name", "name", "自定义 Responses Provider 不能使用 OpenAI 显示名称，以免启用官方专用协议能力");
@@ -383,12 +405,14 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     mode,
     model,
     supportsWebsockets: input.supportsWebsockets,
+    upstreamWireApi,
     catalog: custom ? "custom" : "official",
     ...(models ? { models } : {}),
     hasApiKey: true,
   };
   return {
     provider,
+    upstreamWireApi,
     models,
     validatedCatalog: catalog ? JSON.stringify(catalog) : undefined,
     reasoningEffort,
