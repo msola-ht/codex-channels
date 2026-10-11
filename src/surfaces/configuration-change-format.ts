@@ -3,12 +3,11 @@ import type {
   ConfigChangeCode,
   ConfigChangeScope,
 } from "../config/index.js";
-import type { Workspace } from "../policy/index.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import type { SurfaceConfigurationChange } from "./types.js";
 
 export function formatWorkspacesAdded(
-  workspaces: readonly Workspace[],
+  workspaces: SurfaceConfigurationChange["addedWorkspaces"],
   hasSwitchButtons = false,
 ): string {
   return toStructuredMarkdownList([
@@ -19,11 +18,16 @@ export function formatWorkspacesAdded(
     ...workspaces.flatMap((workspace) => [
       `${workspace.name} · ${workspace.id}`,
       `工作目录：${workspace.cwd}`,
+      "切换命令：",
+      "",
+      "```text",
+      `/work ${workspace.listNumber}`,
+      "```",
       "",
     ]),
     hasSwitchButtons
-      ? "点击下方按钮可直接切换；发送 /workspace 可查看全部 Workspace。"
-      : "发送 /workspace 可查看并切换 Workspace。",
+      ? "点击下方按钮可直接切换；发送 /work 可查看全部 Workspace。"
+      : "发送上方命令可直接切换；发送 /work 可查看全部 Workspace。",
   ].join("\n"));
 }
 

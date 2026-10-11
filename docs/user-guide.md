@@ -315,6 +315,9 @@ codexc work add
 codexc work list [--json]
 ```
 
+新增 Workspace 生效后的渠道通知会逐项以独立代码块提供数字切换命令，例如 `/work 2`，数字与当前完整 Workspace 列表中的序号一致；
+发送该命令即可直接切换，Telegram 通知还提供切换按钮。发送 `/work` 可查看全部 Workspace。
+
 管理模型 Provider：
 
 ```bash

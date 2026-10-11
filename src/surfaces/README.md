@@ -242,6 +242,7 @@ Core 只把 MCP 启动失败、取消及异常恢复投递给 Surface，首次�
 Telegram、飞书与微信分别通过 HTML 面板、CardKit Markdown 或按会话排序的纯文本气泡发送。
 `configuration-change-format.ts` 统一 Telegram、飞书与微信已有的配置热加载、重启、重装和失败通知；
 Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击。
+新增 Workspace 的数字切换命令使用 Bootstrap 从当前完整注册列表附带的序号，不按新增子集重新编号。
 `operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、上游敏感占位符和单行摘要，
 并为三个渠道提供有界的压缩通知去重与文案；
 Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局、分组和发送仍由各自

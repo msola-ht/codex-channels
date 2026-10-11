@@ -1,4 +1,5 @@
 import { splitTelegramText } from "./format.js";
+import { advanceMarkdownFence, type MarkdownFence } from "../markdown-fence.js";
 
 export const telegramInteractionReplyHeading = "Codex 交互回复";
 
@@ -18,9 +19,19 @@ export function protectTelegramReplyHeading(html: string): string {
 
 export function formatTelegramPanelChunks(text: string, limit = 3_600): string[] {
   const contentLimit = Math.max(1, limit - 128);
-  return splitTelegramText(text, contentLimit).map((chunk, index) =>
-    formatTelegramPanelHtml(chunk, { emphasizeFirstLine: index === 0 })
-  );
+  let fence: MarkdownFence | undefined;
+  return splitTelegramText(text, contentLimit).map((chunk, index) => {
+    const opening = fence?.opening;
+    for (const line of chunk.split("\n")) {
+      fence = advanceMarkdownFence(fence, line);
+    }
+    const balanced = [
+      ...(opening ? [opening] : []),
+      chunk,
+      ...(fence ? [fence.marker] : []),
+    ].join("\n");
+    return formatTelegramPanelHtml(balanced, { emphasizeFirstLine: index === 0 });
+  });
 }
 
 export function formatTelegramExpandableQuotePanelChunks(
@@ -74,6 +85,19 @@ export function formatTelegramPanelHtml(
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]!;
+    const fence = advanceMarkdownFence(undefined, line);
+    if (fence) {
+      const code: string[] = [];
+      index += 1;
+      while (index < lines.length) {
+        if (advanceMarkdownFence(fence, lines[index]!) === undefined) break;
+        code.push(lines[index]!);
+        index += 1;
+      }
+      output.push(`<pre>${escapeTelegramHtml(code.join("\n"))}</pre>`);
+      firstContentLine = false;
+      continue;
+    }
     if (!line) {
       output.push("");
       continue;
