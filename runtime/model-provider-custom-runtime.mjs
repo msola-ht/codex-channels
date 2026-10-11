@@ -20,6 +20,7 @@ import {
 } from "./model-provider-profile.mjs";
 import { isOpencodeGoProviderNamespace } from "./opencode-go-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
+import { readCustomProviderUpstreamWireApi } from "./model-provider-upstream-metadata.mjs";
 import { assertProviderHasNoPlaintextCredentials } from "./provider-file-access.mjs";
 import { decodeProviderCredentialDocument, encodeProviderCredentialDocument, maximumProviderCredentialBytes, providerCredentialMatchesIdentity } from "./provider-credential-document.mjs";
 
@@ -257,9 +258,16 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
   if (isResponsesProvider(id) && provider.name === "OpenAI") throw new Error("Responses Provider 不能使用 OpenAI 名称");
   const custom = isResponsesProvider(id) ? responsesModelSettings(environment, id, document.model) : undefined;
   if (custom && document.model_catalog_json !== custom.catalog.path) throw new Error("Responses Provider 模型目录引用无效");
+  const upstreamWireApi = custom === undefined
+    ? "responses"
+    : readCustomProviderUpstreamWireApi(environment, id);
+  if (upstreamWireApi === "chat_completions" && provider.supports_websockets === true) {
+    throw new Error(`Codex 主模型 Provider ${id} 的 Chat 上游不支持 WebSocket`);
+  }
   return {
     id,
     baseUrl: normalizedBaseUrl,
+    upstreamWireApi,
     ...(custom ? { catalogPath: custom.catalog.path } : {}),
   };
 }
@@ -514,6 +522,10 @@ function configuredCustomSwitchingProfileFromContent(
     : id;
   if (custom && name === "OpenAI") throw new Error("Responses Provider 不能使用 OpenAI 名称");
   const supportsWebsockets = provider.supports_websockets === true;
+  const upstreamWireApi = custom === undefined ? "responses" : readCustomProviderUpstreamWireApi(environment, id);
+  if (upstreamWireApi === "chat_completions" && supportsWebsockets) {
+    throw new Error(`Codex 自定义切换 Provider ${id} 的 Chat 上游不支持 WebSocket`);
+  }
   const environmentKey = customSwitchingProviderEnvironmentKey(id);
   const profileName = `${customPrimaryProviderProfileName}-${id}`;
   return {
@@ -524,6 +536,7 @@ function configuredCustomSwitchingProfileFromContent(
     baseUrl: validProviderBaseUrl(provider.base_url, `Codex 自定义切换 Provider ${id}`),
     apiKey,
     supportsWebsockets,
+    upstreamWireApi,
     profileName,
     profileContent,
     reasoningEffort: reasoningEffort ?? undefined,

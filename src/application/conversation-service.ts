@@ -108,9 +108,11 @@ import {
 import {
   ConversationSessionQueryService,
   pinnedFirst,
+  resolveThread,
   type ConversationSession,
   type ConversationSessionQuery,
 } from "./conversation-session-query-service.js";
+import { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 
 export type { ConversationSession, ConversationSessionQuery } from "./conversation-session-query-service.js";
 export type {
@@ -1853,41 +1855,6 @@ function isInlineImageDataUrl(value: string): boolean {
   return /^data:image\/(?:png|jpeg|gif|webp);base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})$/u.test(value);
 }
 
-export function resolveThread<T extends Pick<ConversationSession, "id" | "name">>(
-  threads: T[],
-  selector: string,
-  command: "resume" | "unarchive" = "resume",
-): T {
-  if (!selector) {
-    throw new UserFacingError(
-      "session.selector.required",
-      "需要提供会话序号、名称或 Session ID",
-      { command },
-    );
-  }
-  if (/^\d+$/.test(selector)) {
-    const index = Number(selector) - 1;
-    const thread = threads[index];
-    if (thread) {
-      return thread;
-    }
-  }
-  const exact = threads.filter((thread) => thread.id === selector || thread.name === selector);
-  if (exact.length === 1) {
-    return exact[0]!;
-  }
-  const prefix = threads.filter((thread) => thread.id.startsWith(selector));
-  if (prefix.length === 1) {
-    return prefix[0]!;
-  }
-  const ambiguous = prefix.length > 1 || exact.length > 1;
-  throw new UserFacingError(
-    ambiguous ? "session.selector.ambiguous" : "session.selector.not-found",
-    ambiguous ? "会话选择不唯一" : "找不到指定会话",
-  );
-}
-
-
 function resolveAgentRole(
   roles: readonly AgentRoleEntry[],
   selector: string,
@@ -1900,32 +1867,4 @@ function resolveAgentRole(
     return roles[index];
   }
   return undefined;
-}
-
-export function turnErrorType(error: unknown, phase: TurnErrorPhase): string {
-  const message = error instanceof Error ? error.message : "";
-  if (message.startsWith("You've hit your usage limit")) {
-    return "usage_limit_reached";
-  }
-  if (phase === "start") return "turn_start_error";
-  if (phase === "steer") return "turn_steer_error";
-  return "turn_notification_error";
-}
-
-export function turnErrorCode(error: unknown): string | null {
-  if (typeof error !== "object" || error === null) return null;
-  const code = (error as { code?: unknown }).code;
-  if (typeof code === "number" && Number.isSafeInteger(code)) {
-    return `rpc:${code}`;
-  }
-  return typeof code === "string" && code.length > 0 && code.length <= 64
-    ? code
-    : null;
-}
-
-export function turnErrorMessage(error: unknown): string | null {
-  if (!(error instanceof Error)) return null;
-  const message = error.message.replace(/\s+/gu, " ").trim();
-  if (message.length === 0) return null;
-  return message.length <= 500 ? message : `${message.slice(0, 500)}…`;
 }

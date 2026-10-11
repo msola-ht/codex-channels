@@ -32,6 +32,10 @@ import {
   packageDir,
   requireUserConfig,
 } from "../scripts/runtime-config.mjs";
+import {
+  readGatewayConfig,
+  validateGatewayConfigStructureDocument,
+} from "../runtime/gateway-config.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
   repairWindowsPrivateFileSync,
@@ -117,7 +121,9 @@ const helpText = {
   restart: restartCommandUsage,
   init: `用法：codexc init
 
-初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
+初始化用户数据目录和 config.toml；已有配置不会被覆盖。
+交互终端下继续显示环境检测结果，并依次引导配置模型提供商、通讯渠道、可选功能和后台服务；
+非交互调用只创建用户目录、默认工作区仓库与初始配置，不进入向导。`,
   setup: `用法：codexc setup [--jsonl]
 
 打开脱敏接入状态总览，以及模型与提供商、通讯渠道和项目技能设置菜单。
@@ -313,7 +319,7 @@ async function dispatchCommand(command, args) {
       if (showRequestedHelp(args, "init")) {
         break;
       }
-      initialize(args);
+      await initialize(args);
       break;
     case "setup":
       if (showRequestedHelp(args, "setup")) {
@@ -534,11 +540,12 @@ async function dispatchCommand(command, args) {
   }
 }
 
-function initialize(args) {
+async function initialize(args) {
   if (args.length > 0) {
     throw new Error("用法：codexc init");
   }
   const result = initializeUserData({ cwd: process.cwd() });
+  if (!result.created) assertUsableExistingConfig(result.configPath);
   printCliMessage(
     result.created ? "success" : "note",
     result.created ? "Codex Connect 已初始化。" : "Codex Connect 已经初始化。",
@@ -547,7 +554,61 @@ function initialize(args) {
   console.log(`配置文件：${result.configPath}`);
   if (result.created) {
     console.log(`默认 Workspace：${result.workspace}`);
-    printCliMessage("note", "请运行 codexc setup 配置通讯渠道，然后运行 codexc install。");
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    if (result.created) {
+      printCliMessage("note", "请运行 codexc setup 配置通讯渠道，然后运行 codexc install。");
+    }
+    return;
+  }
+  const { runInitWizard } = await import("../scripts/init-wizard.mjs");
+  const wizard = await runInitWizard({
+    environment: process.env,
+    input: process.stdin,
+    output: process.stdout,
+    configCreated: result.created,
+  });
+  if (wizard?.install === true) {
+    const serviceCommand = await import("../scripts/service-command.mjs");
+    await serviceCommand.runServiceCommand(["install"]);
+    await startConfiguredWebui(serviceCommand);
+    printCliMessage("success", "初始化与后台服务安装已完成。");
+  } else if (wizard?.action === "cancelled") {
+    printCliMessage("note", "初始化向导已取消；已应用的设置会保留，可重新运行 codexc init，"
+      + "或用 codexc setup 完成接入后运行 codexc install。");
+  }
+}
+
+/** 已有配置必须先能解析并通过结构校验，避免向导在不支持的配置上继续写入。 */
+function assertUsableExistingConfig(configPath) {
+  try {
+    validateGatewayConfigStructureDocument(readGatewayConfig(configPath));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `config.toml 当前不可用，未修改任何数据：${reason.split("\n")[0]}\n`
+      + "请先修复配置或运行 codexc doctor 诊断，然后重新运行 codexc init。",
+      { cause: error },
+    );
+  }
+}
+
+/** 安装只启动核心服务；配置中启用的 WebUI 由 init 负责拉起。 */
+async function startConfiguredWebui(serviceCommand) {
+  let document;
+  try {
+    document = readGatewayConfig(requireUserConfig(process.env).configPath);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    printCliMessage("note", `无法读取配置，未自动启动 WebUI：${reason.split("\n")[0]}`);
+    return;
+  }
+  if (document?.webui?.enabled !== true) return;
+  try {
+    await serviceCommand.runServiceCommand(["start", "webui"]);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    printCliMessage("note", `WebUI 未能自动启动：${reason}\n修复后可运行 codexc start webui。`);
   }
 }
 

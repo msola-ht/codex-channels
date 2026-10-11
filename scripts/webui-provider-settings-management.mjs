@@ -68,6 +68,9 @@ export function normalizeProviderSettingsMutation(input) {
           model: input.provider?.model,
           ...(input.provider?.catalog === undefined ? {} : { catalog: input.provider.catalog }),
           supportsWebsockets: input.provider?.supportsWebsockets,
+          ...(input.provider?.upstreamWireApi === undefined
+            ? {}
+            : { upstreamWireApi: input.provider.upstreamWireApi }),
           credential: input.provider?.credential,
           ...(input.provider?.confirmRemoveTopLevelBaseUrl === undefined
             ? {}
@@ -202,6 +205,18 @@ export function redactProviderSettingsResult(result) {
     ...(result.contextWindow !== undefined ? { contextWindow: result.contextWindow } : {}),
     ...(result.willChange !== undefined ? { willChange: result.willChange } : {}),
     ...(result.effects !== undefined ? { effects: result.effects } : {}),
+    ...(result.transport && typeof result.transport === "object"
+      ? {
+          transport: {
+            ...(result.transport.scheme === "http" || result.transport.scheme === "https"
+              ? { scheme: result.transport.scheme }
+              : {}),
+            ...(typeof result.transport.cleartext === "boolean"
+              ? { cleartext: result.transport.cleartext }
+              : {}),
+          },
+        }
+      : {}),
     ...(result.credential && typeof result.credential === "object"
       ? {
           credential: {
@@ -254,6 +269,7 @@ export function projectProviderSettings(state) {
         reasoningEffort: provider.reasoningEffort ?? null,
         baseUrl: provider.baseUrl ?? "",
         supportsWebsockets: provider.supportsWebsockets === true,
+        upstreamWireApi: provider.upstreamWireApi,
         ...redactCatalog(provider),
       })),
       backupCandidates: state.customProviders.backupCandidates.map(redactTarget),
@@ -272,6 +288,7 @@ function redactTarget(target) {
     ...(target.mode === undefined ? {} : { mode: target.mode }),
     ...(target.active === undefined ? {} : { active: target.active }),
     ...(target.supportsWebsockets === undefined ? {} : { supportsWebsockets: target.supportsWebsockets }),
+    ...(target.upstreamWireApi === undefined ? {} : { upstreamWireApi: target.upstreamWireApi }),
     ...(target.baseUrl === undefined ? {} : { baseUrl: target.baseUrl }),
     ...(target.model === undefined ? {} : { model: target.model }),
   };
@@ -285,6 +302,9 @@ function redactProvider(provider) {
     ...(provider.name === undefined ? {} : { name: provider.name }),
     ...(provider.baseUrl === undefined ? {} : { baseUrl: provider.baseUrl }),
     ...(provider.mode === undefined ? {} : { mode: provider.mode }),
+    ...(provider.upstreamWireApi === "responses" || provider.upstreamWireApi === "chat_completions"
+      ? { upstreamWireApi: provider.upstreamWireApi }
+      : {}),
     ...redactCatalog(provider),
     ...(provider.hasApiKey === undefined ? {} : { hasApiKey: provider.hasApiKey }),
   };

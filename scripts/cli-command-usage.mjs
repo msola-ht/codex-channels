@@ -71,15 +71,15 @@ const serviceTargetUsage = internalServiceTargetUsage.split("|").map(serviceComm
 
 export const restartCommandUsage = `用法：codexc restart [${serviceTargetUsage}]
 
-默认 all：重启 Gateway、全部 App Server、已安装的 WebUI，以及已安装且启用的 Relay。
+默认 all：重启 Gateway、全部 App Server、已安装且未关闭的 WebUI，以及已安装且启用的 Relay。
 预检通过后按 WebUI、Relay、Gateway、App Server 顺序停止，再按相反顺序逐项启动并确认就绪。
-未安装的可选服务会跳过；已安装但未启用的 Relay 只停止。单独指定目标时要求已安装。
+未安装的可选服务会跳过；已安装但未启用的 Relay、配置中关闭的 WebUI 只停止。单独指定目标时要求已安装。
 失败即中止后续步骤，不自动回滚。App Server 与 all 必须在本机终端执行。`;
 
 export const serviceCommandUsage = Object.freeze({
   install: "用法：codexc install\n\n生成全部后台服务定义，并启动 App Server、Gateway 及已安装且启用的 Relay；WebUI 单独启动。",
   uninstall: "用法：codexc uninstall --services",
-  start: `用法：codexc start [${serviceTargetUsage}]\n\n默认 all：依次启动 App Server、Gateway、已安装且启用的 Relay、已安装 WebUI，每项确认就绪后再继续。前台运行使用 codexc run。`,
+  start: `用法：codexc start [${serviceTargetUsage}]\n\n默认 all：依次启动 App Server、Gateway、已安装且启用的 Relay、已安装且未关闭的 WebUI，每项确认就绪后再继续。前台运行使用 codexc run。`,
   stop: `用法：codexc stop [${serviceTargetUsage}]\n\n默认 all：依次停止已安装 WebUI、已安装 Relay、Gateway 和 App Server。`,
   reload: "用法：codexc reload\n\n通知 Gateway 重新读取配置。",
   status: `用法：codexc status [${serviceTargetUsage}] [--json]\n\n默认 all：查看 App Server、Gateway、已安装 Relay 与 WebUI。`,

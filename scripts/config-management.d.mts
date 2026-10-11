@@ -62,6 +62,7 @@ export interface GatewaySettings {
   };
   telegram: { configured: boolean; messageFormat: "html" | "rich" };
   webui: {
+    enabled?: boolean;
     host: "127.0.0.1" | "::1" | "0.0.0.0";
     port: number;
     tokenConfigured: boolean;
@@ -130,6 +131,7 @@ export type GatewaySettingInput =
         all_proxy?: string | null;
       };
     }
+  | { kind: "webui.enabled"; value: boolean }
   | { kind: "webui.host"; value: "127.0.0.1" | "::1" | "0.0.0.0" | null; token?: string }
   | { kind: "webui.port"; value: number | null }
   | { kind: "webui.token"; action: "set" | "clear"; value?: string }

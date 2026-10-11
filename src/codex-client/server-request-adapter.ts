@@ -15,6 +15,7 @@ import type {
 } from "../approval/index.js";
 import type { ServerRequest } from "../codex-protocol/index.js";
 import { JsonRpcError, type RpcServerRequest } from "./json-rpc.js";
+import { stringValue } from "./value-primitives.js";
 
 type SupportedServerRequest = Extract<
   ServerRequest,
@@ -855,10 +856,6 @@ function hasOnlyKeys(
   keys: readonly string[],
 ): boolean {
   return Object.keys(record).every((key) => keys.includes(key));
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
 }
 
 function nonEmptyString(value: unknown): string | undefined {

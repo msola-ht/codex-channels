@@ -430,7 +430,7 @@ export interface SettingsSummaryResponse {
       loggingLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace"
       pluginApiEnabled: boolean
     }
-    webui: { host: string; port: number; tokenConfigured: boolean }
+    webui: { enabled?: boolean; host: string; port: number; tokenConfigured: boolean }
     metrics: {
       storage: { retentionDays: number; maxRows: number }
     }
@@ -662,6 +662,7 @@ export interface ManagementProviderSettingsResponse {
       state: "configured" | "backup"
       active: boolean
       supportsWebsockets?: boolean
+      upstreamWireApi?: "responses" | "chat_completions"
       baseUrl: string
     }>
     switchingProviders: Array<{
@@ -673,6 +674,7 @@ export interface ManagementProviderSettingsResponse {
       model: string
       reasoningEffort: string | null
       supportsWebsockets?: boolean
+      upstreamWireApi?: "responses" | "chat_completions"
       baseUrl: string
     }>
     backupCandidates: Array<{
@@ -684,6 +686,7 @@ export interface ManagementProviderSettingsResponse {
       state: "configured" | "backup"
       active: boolean
       supportsWebsockets?: boolean
+      upstreamWireApi?: "responses" | "chat_completions"
       baseUrl: string
     }>
   }
@@ -713,6 +716,7 @@ export type ManagementProviderSettingsMutationInput =
         model: string
         catalog?: { kind: "custom"; models: ResponsesModelDefinition[] }
         supportsWebsockets: boolean
+        upstreamWireApi?: "responses" | "chat_completions"
         credential: { action: "preserve" } | { action: "replace"; apiKey: string }
         confirmRemoveTopLevelBaseUrl?: boolean
       }
@@ -747,6 +751,7 @@ export interface ManagementProviderSettingsPreview {
     name?: string
     baseUrl?: string
     mode?: string
+    upstreamWireApi?: "responses" | "chat_completions"
     catalog?: string
     models?: ResponsesModelDefinition[]
     apiKeyChange?: boolean
@@ -766,6 +771,7 @@ export interface ManagementProviderSettingsPreview {
     storedAsPlaintext?: true
     destination?: "private-profile" | "private-credential"
   }
+  transport?: { scheme?: "http" | "https"; cleartext?: boolean }
 }
 
 export interface ManagementProviderSettingsPreviewResponse {

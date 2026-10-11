@@ -66,12 +66,14 @@ export function gatewayConfigSummary(document, configPath, environment = process
     logLevel: stringValue(logging.level) || "info",
     networkFields: ["http_proxy", "https_proxy", "all_proxy", "no_proxy"]
       .filter((field) => stringValue(network[field])),
-    webui: Object.keys(webui).length === 0
-      ? "使用命令行默认值"
-      : formatHostPort(
-          stringValue(webui.host) || "127.0.0.1",
-          numberValue(webui.port) || 8787,
-        ),
+    webui: webui.enabled === false
+      ? "已关闭（需要时用 codexc start webui 单独启动）"
+      : Object.keys(webui).length === 0
+        ? "使用命令行默认值"
+        : formatHostPort(
+            stringValue(webui.host) || "127.0.0.1",
+            numberValue(webui.port) || 8787,
+          ),
     metricsRetentionDays: numberValue(metricsStorage.retention_days) ?? 365,
     metricsMaxRows: numberValue(metricsStorage.max_rows) ?? 1_000_000,
   };

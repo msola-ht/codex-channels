@@ -84,6 +84,7 @@ export interface GatewayConfig {
   idleReleaseMinutes: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
   webui?: {
+    enabled?: boolean;
     host: "127.0.0.1" | "::1" | "0.0.0.0";
     port: number;
     token?: string;

@@ -18,7 +18,6 @@ import { surfaceErrorMetadata } from "../error-metadata.js";
 import type {
 } from "../../application/index.js";
 import { readGeneratedImage } from "../generated-image.js";
-import { formatConversationIdleReleased } from "../output-copy.js";
 import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
@@ -38,21 +37,30 @@ import type { InteractionDecision, InteractionRequest } from "../../approval/ind
 import { FeishuMessageError } from "./message-error.js";
 import { bindOutboxMessagePort, type FeishuMessagePort, type ObserveFeishuCardCreation } from "./outbox-message-port.js";
 export type { FeishuMessagePort } from "./outbox-message-port.js";
-import { renderFeishuConversationIdleReleasedCard } from "./idle-release-card.js";
+import { formatFeishuCommandMarkdown } from "./command-format.js";
+import {
+  formatFeishuConversationIdleReleased,
+  renderFeishuConversationIdleReleasedCard,
+} from "./idle-release-card.js";
 import {
   formatFeishuOperation,
   formatFeishuOperationSummary,
   renderFeishuComputerUseCard,
 } from "./operation-format.js";
 import {
+  canSendCompletedAnswerFile,
+  canSendCompleteContentFile,
+  enqueueCompletedAnswerFile,
+  sendCompleteContentFile,
+  sendLongFinalAnswer,
+  type FeishuAnswerFilePort,
+} from "./outbox-answer-file.js";
+import {
   FeishuMarkdownSplitError,
   feishuPreviewNotice,
   maximumFeishuMessageChunks,
-  maximumFeishuStreamingCards,
-  maximumFeishuStreamingElementCharacters,
   splitFeishuMarkdownCards,
   splitFeishuPost,
-  splitFeishuStreamingContent,
   splitFeishuText,
 } from "./outbox-content.js";
 import { renderFeishuOutput } from "./renderer.js";
@@ -60,11 +68,6 @@ import {
   renderFeishuPlanCard,
   renderFeishuThreadStatusCard,
 } from "./status-card.js";
-
-const maximumFeishuFinalAnswerFileBytes = 1_000_000;
-const feishuFinalAnswerFileName = "codex-final-answer.txt";
-const maximumFeishuFinalPreviewCharacters = 1_200;
-const feishuFileFailureNotice = "[完整文件发送失败，已改为分段文本]\n\n";
 
 interface FeishuPlanState {
   chatId: string;
@@ -220,7 +223,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         this.delivery.enqueue(event.target.conversationId, async (active) => {
           const receipt = DeliveryReceipt.current();
           if (!receipt?.needsCompleteContent()) return;
-          await this.sendCompleteContentFile(event.target.conversationId, event.text, active);
+          await sendCompleteContentFile(this.answerFilePort, event.target.conversationId, event.text, active);
         }, true);
       }
       if (event.type === "operation.updated" && event.operation.status !== "running") {
@@ -260,10 +263,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     if (event.type === "text.completed") {
       this.flushOperationUpdates(event.target.conversationId, event);
-      if (this.textStreams.completeStream(event, this.canSendCompleteContentFile(event.text)
+      if (this.textStreams.completeStream(event, canSendCompleteContentFile(this.hasAnswerFileDelivery, event.text)
         && (DeliveryReceipt.current() !== undefined
-          || (event.phase !== "commentary" && this.canSendCompletedAnswerFile(event.text))))) {
-        this.enqueueCompletedAnswerFile(event);
+          || (event.phase !== "commentary" && canSendCompletedAnswerFile(this.hasAnswerFileDelivery, event.text))))) {
+        enqueueCompletedAnswerFile(this.answerFilePort, event.target.conversationId, event.text, event.phase);
         return;
       }
     }
@@ -448,10 +451,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
               );
               return this.sendMarkdown(
                 event.target.conversationId,
-                formatConversationIdleReleased(
-                  event.minutes,
-                  event.threadId,
-                ),
+                formatFeishuConversationIdleReleased(event.minutes, event.threadId),
                 maximumFeishuMessageChunks,
                 undefined,
                 undefined,
@@ -752,13 +752,21 @@ export class FeishuOutbox implements SurfaceOutputPort {
     );
   }
 
+  /** Gateway 文案入口：命令渲染为行内代码；不要用于模型或用户正文。 */
   notifyMarkdown(chatId: string, markdown: string): boolean {
     if (this.closed) {
       return false;
     }
     return this.delivery.enqueue(
       chatId,
-      (signal) => this.sendMarkdown(chatId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal),
+      (signal) => this.sendMarkdown(
+        chatId,
+        formatFeishuCommandMarkdown(markdown),
+        maximumFeishuMessageChunks,
+        undefined,
+        undefined,
+        signal,
+      ),
       true,
     );
   }
@@ -787,10 +795,18 @@ export class FeishuOutbox implements SurfaceOutputPort {
     );
   }
 
+  /** Gateway 文案入口：命令渲染为行内代码；不要用于模型或用户正文。 */
   deliverMarkdown(chatId: string, markdown: string): Promise<void> {
     return this.delivery.runOrdered(
       chatId,
-      (signal) => this.sendMarkdown(chatId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal),
+      (signal) => this.sendMarkdown(
+        chatId,
+        formatFeishuCommandMarkdown(markdown),
+        maximumFeishuMessageChunks,
+        undefined,
+        undefined,
+        signal,
+      ),
     );
   }
 
@@ -1168,9 +1184,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (
       event.type === "text.completed"
       && (event.phase !== "commentary" || DeliveryReceipt.current() !== undefined)
-      && this.canSendCompletedAnswerFile(event.text)
+      && canSendCompletedAnswerFile(this.hasAnswerFileDelivery, event.text)
     ) {
-      await this.sendLongFinalAnswer(
+      await sendLongFinalAnswer(
+        this.answerFilePort,
         event.target.conversationId,
         event.text,
         replyTo,
@@ -1186,7 +1203,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         replyTo,
         undefined,
         signal,
-        event.type === "text.completed" && DeliveryReceipt.current() && this.canSendCompleteContentFile(event.text)
+        event.type === "text.completed" && DeliveryReceipt.current() && canSendCompleteContentFile(this.hasAnswerFileDelivery, event.text)
           ? feishuPreviewNotice : undefined,
       );
     } finally {
@@ -1196,109 +1213,25 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
   }
 
-  private enqueueCompletedAnswerFile(
-    event: Extract<OutputEvent, { type: "text.completed" }>,
-  ): void {
-    if (
-      event.phase === "commentary"
-      || !this.canSendCompletedAnswerFile(event.text)
-    ) {
-      return;
-    }
-    const file = Buffer.from(event.text, "utf8");
-    this.delivery.enqueue(
-      event.target.conversationId,
-      async (signal) => {
-        try {
-          await this.messagePort.sendFile!(
-            event.target.conversationId,
-            feishuFinalAnswerFileName,
-            file,
-            signal,
-          );
-          DeliveryReceipt.current()?.confirmCompleteContent();
-        } catch (error) {
-          await this.sendText(
-            event.target.conversationId,
-            "[完整文件发送失败，当前卡片仅包含有界预览]",
-            signal,
-          );
-          throw error;
-        }
+  private get hasAnswerFileDelivery(): boolean {
+    return this.messagePort.sendFile !== undefined;
+  }
+
+  /** 长正文文件补发段唯一端口；能力实现固定，纯逻辑在 outbox-answer-file。 */
+  private get answerFilePort(): FeishuAnswerFilePort {
+    return {
+      ...(this.messagePort.sendFile === undefined ? {} : {
+        sendFile: (chatId: string, fileName: string, file: Buffer, signal?: AbortSignal) =>
+          this.messagePort.sendFile!(chatId, fileName, file, signal),
+      }),
+      sendMarkdown: (chatId, markdown, maximumChunks, replyTo, signal, truncationNotice) =>
+        this.sendMarkdown(chatId, markdown, maximumChunks, replyTo, undefined, signal, truncationNotice),
+      sendText: (chatId, text, signal) => this.sendText(chatId, text, signal),
+      warn: (context, message) => this.logger.warn(context, message),
+      enqueueReliable: (chatId, run) => {
+        this.delivery.enqueue(chatId, run, true);
       },
-      true,
-    );
-  }
-
-  private canSendCompletedAnswerFile(text: string): boolean {
-    if (
-      this.messagePort.sendFile === undefined
-      || [...text].length
-        <= maximumFeishuStreamingElementCharacters
-          * maximumFeishuStreamingCards
-    ) {
-      return false;
-    }
-    return this.canSendCompleteContentFile(text);
-  }
-
-  private canSendCompleteContentFile(text: string): boolean {
-    if (!this.messagePort.sendFile) return false;
-    const bytes = Buffer.byteLength(text, "utf8");
-    return bytes > 0 && bytes <= maximumFeishuFinalAnswerFileBytes;
-  }
-
-  private async sendCompleteContentFile(chatId: string, text: string, signal?: AbortSignal): Promise<void> {
-    const file = Buffer.from(text, "utf8");
-    if (!this.messagePort.sendFile || file.length > maximumFeishuFinalAnswerFileBytes) {
-      throw new Error("可靠结果无法通过完整文件确认");
-    }
-    await this.messagePort.sendFile(chatId, feishuFinalAnswerFileName, file, signal);
-    DeliveryReceipt.current()?.confirmCompleteContent();
-  }
-
-  private async sendLongFinalAnswer(
-    chatId: string,
-    text: string,
-    replyTo?: string,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const maximumPreviewCharacters =
-      maximumFeishuFinalPreviewCharacters
-      - [...feishuPreviewNotice].length;
-    let head: string;
-    let tail: string;
-    try {
-      [head, tail] = splitFeishuStreamingContent(text, maximumPreviewCharacters);
-    } catch (error) {
-      if (!(error instanceof FeishuMarkdownSplitError)) throw error;
-      head = "代码围栏超出预览上限。";
-      tail = text;
-      this.logger.warn({
-        ...surfaceDiagnosticContext(), component: "Feishu", fallback: "file-preview", reason: "markdown-fence-budget",
-      }, "飞书代码围栏超出预览预算，保留完整附件发送");
-    }
-    await this.sendMarkdown(
-      chatId,
-      `${head}${feishuPreviewNotice}`,
-      1,
-      replyTo,
-      undefined,
-      signal,
-    );
-    try {
-      await this.sendCompleteContentFile(chatId, text, signal);
-    } catch (error) {
-      await this.sendMarkdown(
-        chatId,
-        `${feishuFileFailureNotice}${tail}`,
-        maximumFeishuMessageChunks - 1,
-        undefined,
-        undefined,
-        signal,
-      );
-      throw error;
-    }
+    };
   }
 
   private async deliverThreadStatus(

@@ -173,7 +173,7 @@ function ensureCodexCli() {
       throw new Error(`Codex CLI 同步后版本仍不匹配：需要 ${expected}，当前 ${verified || "未知"}；请检查 PATH 中的同名命令`);
     }
   } else {
-    console.log(`Codex CLI ${expected} 检测通过；首次使用继续运行 codexc init、codexc setup、codexc install。`);
+    console.log(`Codex CLI ${expected} 检测通过；程序安装成功后，首次使用请在交互终端运行 codexc init 完成接入与后台服务安装；跳过的步骤再按需运行 codexc setup、codexc install。`);
   }
 }
 

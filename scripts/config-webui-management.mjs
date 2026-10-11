@@ -5,6 +5,7 @@ const hosts = ["127.0.0.1", "::1", "0.0.0.0"];
 export function projectWebuiSettings(document) {
   const webui = table(document.webui);
   return {
+    enabled: typeof webui.enabled === "boolean" ? webui.enabled : undefined,
     host: hosts.includes(webui.host) ? webui.host : "127.0.0.1",
     port: integerInRange(webui.port, 1, 65_535) ?? 8_787,
     tokenConfigured: nonEmptyString(webui.token),
@@ -13,7 +14,17 @@ export function projectWebuiSettings(document) {
 
 export function applyWebuiSetting(document, input) {
   const webui = { ...table(document.webui) };
+  let activation = "restart-webui";
   switch (input.kind) {
+    case "webui.enabled": {
+      if (typeof input.value !== "boolean") {
+        throw invalidSetting("value", "invalid-boolean", "WebUI 启用状态必须是布尔值");
+      }
+      webui.enabled = input.value;
+      // 开关只在后续 start/restart all 的启动选择中生效，本身不启停服务。
+      activation = "next-services";
+      break;
+    }
     case "webui.host": {
       const value = nullableChoice(input.value, hosts, "value", "WebUI 监听地址");
       if (value === "0.0.0.0" && !nonEmptyString(webui.token)) {
@@ -47,7 +58,7 @@ export function applyWebuiSetting(document, input) {
   document.webui = webui;
   return {
     value: projectWebuiSettings(document),
-    activation: "restart-webui",
+    activation,
   };
 }
 

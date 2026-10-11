@@ -26,6 +26,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
   长审批在待处理与处理结果中显示最多三行、150 字符的预览，完整命令、权限与持久规则保留在默认
   收起的核对面板中。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
+- `card-kit.ts`：只构造 CardKit 2.0 外壳（`schema`、`update_multi`、`wide_screen_mode`）、Markdown/纯文本/备注块、按钮与 column_set 行；不承载审批动作、交互令牌或业务语义。
 - `command-center-presentation.ts`：将命令结果转换为命令中心选项、输入表单和展示文案；仅接收动作与结果数据，
   不执行命令或管理交互令牌；速度选择复用共享档位展示，Standard 始终可选，Fast、Ultrafast 按当前模型目录提供。
   Hook 展示复用共享纯文本格式与合法动作列表，卡片使用 `plain_text` 保留不可信字段的字面内容。
@@ -46,16 +47,22 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `file-input.ts`：通过官方消息资源 API 在内存下载独立文件，限制为 1,000,000 字节并严格验证
   文件名与 UTF-8，文件流读取总时限为 30 秒，清理常见终端转义序列并拒绝残留的不支持控制字符，较大文本通过共享私有暂存交给执行端按需读取。
 - `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本、图片、文件和音频元素。
-- `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容。
+- `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容，并集中提供飞书 Markdown 转义（输入卡与卡片展示共用同一核心实现，各自保留换行归一与花括号处理的开关）。
 - `operation-format.ts`：把操作状态渲染为包含脱敏详情的静态 CardKit Markdown；Computer Use
   使用可原地更新的开始／终态卡片，不展示 MCP 读写声明标签，其他操作沿用终态展示。
 - `outbox-content.ts`：集中处理 Outbox 的纯文本缓冲、CardKit 字符分片、富文本字节分片与截断标记；围栏识别复用共享纯状态推进，分片按实际围栏长度预留关闭空间且保持分隔行完整。无法消费正文的分片返回明确的本地排版错误，由 Outbox 降级 Post 或保留完整附件发送。
+- `outbox-answer-file.ts`：长正文可靠结果的完整文件补发判定与编排，接收窄发送端口；字节阈值、文件名与失败提示集中在此，不持有 Outbox 状态。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪，保留回复事件的 `parent_id`。
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
 - `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；不等待独立文字或图片，
   已在队列中明确相邻的图片可成批处理，普通文本与命令仍沿用既有顺序路径。
+- `command-format.ts`：把 Gateway Markdown 文案中独立成行的命令和“标签：命令”的值渲染为行内代码，
+  供 Markdown 文案出口（`notifyMarkdown`、`deliverMarkdown`）与命令中心 Markdown 卡片共用；
+  只识别共享命令、别名与飞书专有命令，跳过目录/路径/文件字段、缩进代码块、代码围栏、表格行、
+  句内提及与已存在的行内代码；命令按整行保留实参，帮助生成处显式分开命令与说明；
+  命令含反引号或跨度超过 200 字符时放弃装饰。
 - `idle-release-card.ts`：把渠道会话空闲自动解除通知生成为直接携带 `Session ID` 和
-  `/r <Thread ID>` 命令的 CardKit 2.0 卡片。
+  `/r <Thread ID>` 命令的 CardKit 2.0 卡片，并用同一文案生成创建失败时的围栏代码块降级 Markdown。
 - `input-card.ts`：生成 CardKit 2.0 有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片；异步问题复用 Markdown 安全处理，截断时闭合代码围栏，结果卡片保留有界题干。
   MCP 工具审批分别提供一次批准、上游允许的持久范围、拒绝与取消，拒绝和取消不携带持久范围。
 - `interactions.ts`：维护私聊审批、用户输入和 MCP elicitation 的一次性令牌、Actor 绑定、
@@ -70,7 +77,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `oauth.ts`：按 App 与 Actor 协调单一进行中授权、身份匹配、凭据写入、撤销和停止取消。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent`、启动状态和结构化错误
   映射为稳定文本内容；CLI/TUI 输入使用共享“CLI 输入”语义，启动通知、`/status` 与
-  `turn.completed` 结束统计均包含当前 Workspace Git 分支。
+  `turn.completed` 结束统计均包含当前 Workspace Git 分支；Turn Diff 用围栏展示，内容自带
+  围栏时自动加长标记，因此不进入命令装饰层。
 - `message-error.ts`：Client 与 Outbox 共用的结构化消息错误合同，不依赖 SDK；Client 保留原错误类及类型导出。
 - `text-streams.ts`：独占按 Conversation、Thread、Turn 隔离的正文活动流与已完成流、刷新计时器、卡片序号、分卡与终态页脚；共用 Outbox 已绑定关闭信号的消息端口、投递队列和降级发送方法。断线清理使完成缓存立即失效，在途终态不能重新登记旧缓存；无法复用卡片时向当前目标发送完成信息。正文终态失败或取消后释放活动流，不重播正文；结束反馈独立投递，流式结束操作结算后释放原输入回复目标。
   终态的本地围栏排版错误在有剩余消息预算且 Post 恢复确认成功后正常结算，允许后续完整附件继续；平台错误、恢复失败、结果未知和取消仍传播失败。

@@ -45,6 +45,7 @@ export interface CustomProviderCandidate {
   state: "configured" | "backup";
   active: boolean;
   supportsWebsockets?: boolean;
+  upstreamWireApi?: "responses" | "chat_completions";
   baseUrl: string;
 }
 
@@ -58,6 +59,7 @@ export interface CustomSwitchingProviderEntry {
   model: string;
   reasoningEffort?: string;
   supportsWebsockets?: boolean;
+  upstreamWireApi: "responses" | "chat_completions";
   baseUrl: string;
   profileName: string;
 }
@@ -90,6 +92,7 @@ export function loadModelProviderManagementState(options?: {
     model: string;
     reasoningEffort?: string;
     supportsWebsockets?: boolean;
+    upstreamWireApi: "responses" | "chat_completions";
     baseUrl: string;
     profileName: string;
     apiKey?: string;

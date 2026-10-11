@@ -57,13 +57,17 @@ Codex CLI 是 Gateway 的必需运行时。安装器找不到 `codex` 时，会�
 并在未登录时执行 `codex login`。npm 全局 `bin` 不在 PATH 时，自动安装后会明确停止并提示修正。
 安装器把构建产物打成临时 npm 包并安装到 `npm prefix --global`，因此不会把源码路径显示为 npm
 依赖，也不会写入 `.zshrc`、`.bashrc` 或 `.profile`。安装使用当前 Node.js 环境的全局目录；使用
-fnm、nvm 等版本管理器时，切换 Node.js 版本也会切换对应的全局命令。随后执行：
+fnm、nvm 等版本管理器时，切换 Node.js 版本也会切换对应的全局命令。安装器只打印下一步提示，
+不自动执行初始化、接入向导或后台服务安装。安装成功后，由用户在交互终端执行完整初始化向导：
 
 ```bash
 codexc init
-codexc setup
-codexc install
 ```
+
+向导可完成 Provider、渠道与项目技能接入、可选功能设置和后台服务安装，并启动已启用的 WebUI。
+已在向导中完成的步骤无需重复执行；跳过接入或安装后，按需运行 `codexc setup`、`codexc install` 补充。
+非交互 `init` 仅初始化用户数据，不执行上述交互步骤；`setup` 仍要求交互终端。
+详细行为见[初始化与配置](user-guide.md#3-初始化与配置)。
 
 Windows 若 Git 仍报告 `Filename too long`，先在普通 PowerShell 中启用当前用户的 Git 长路径配置，
 再重新运行安装器；这不会修改仓库工作树，也不需要管理员权限：
@@ -101,7 +105,7 @@ codexc update
 预检。随后使用实际 CLI 核对候选源码锁定的公开参数合同、本地权限映射和
 `CODEX_HOME/config.toml` 根级及所有 Profile 用户设置；未设置 `CODEX_HOME` 时使用
 `~/.codex/config.toml`。即使 `main` 没有新提交或使用本地构建包，也执行同一只读检查。
-只有这些步骤全部通过，才记录服务状态并按 WebUI、Relay、Gateway、App Server 顺序停止运行中的服务，安装配套 CLI、切换源码并刷新全局命令。成功及失败恢复均只启动原本运行的服务，顺序为 App Server、Gateway、仍启用的 Relay、WebUI；手工停止的服务保持停止。Windows 临时克隆也启用 Git 长路径支持。
+只有这些步骤全部通过，才记录服务状态并按 WebUI、Relay、Gateway、App Server 顺序停止运行中的服务，安装配套 CLI、切换源码并刷新全局命令。成功及失败恢复均只启动原本运行的服务，顺序为 App Server、Gateway、仍启用的 Relay、未在配置中关闭的 WebUI；配置中关闭的 WebUI 与未启用的 Relay 保持停止，手工停止的服务也保持停止。Windows 临时克隆也启用 Git 长路径支持。
 
 更新通过官方版本化配置事务将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，避免原生终端另起官方后台；已为 `false` 时不重复写入，未设置或为 `true` 时关闭。即使源码与 CLI 无需更新且数据库已满足当前结构，也执行该设置。其他用户偏好与 Provider 模型目录不改写，也不处理历史服务和 PATH。写入失败会使更新明确失败；数据库已就绪时仍按原恢复流程恢复项目服务。此操作不停止已有官方 daemon，不改变其自动更新设置；`codexc remote` 继续连接项目管理的实例。
 
@@ -139,11 +143,11 @@ Windows 构建使用现有 PowerShell 7 提前编译原生 Job/目录保护 DLL�
 
 若命令报告“Windows 原生组件无法加载，尚未检查文件 ACL”，请按提示重新构建或安装；这表示组件或宿主环境不匹配，运行 `codexc security repair` 不能修复该构建问题。
 
-已有运行服务时，先从本机终端记录 `codexc status all` 和 `codexc status webui` 的状态，停止运行中的 WebUI，再执行 `codexc stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；安装失败先处理错误，不启动版本未就绪的服务。程序目录、Node.js 路径或服务模板改变时用 `codexc install` 重建并激活服务定义；该命令会启动核心服务。macOS/Linux 的 50 秒停止期限及 Linux 的有序子进程收尾设置属于模板变更，仅更新程序和重启不能将它们写入已有定义。
+已有运行服务时，先从本机终端记录 `codexc status all` 和 `codexc status webui` 的状态，停止运行中的 WebUI，再执行 `codexc stop all`，然后安装。安装成功后按 App Server、Gateway、Relay、WebUI 顺序只启动先前运行的服务；这里使用显式目标，配置中关闭的 WebUI 不会自动恢复，需要时显式运行 `codexc start webui`。安装失败先处理错误，不启动版本未就绪的服务。程序目录、Node.js 路径或服务模板改变时用 `codexc install` 重建并激活服务定义；该命令会启动核心服务。macOS/Linux 的 50 秒停止期限及 Linux 的有序子进程收尾设置属于模板变更，仅更新程序和重启不能将它们写入已有定义。
 
 `npm run install:global` 不拉取 Git，也不自动管理服务；上面的 `codexc install` 是另行执行的服务操作。自行选择分支并更新源码后重复执行程序安装；没有受管仓库时，`codexc update` 只同步配套 CLI 和校验配置、数据库，不更新本地源码或 Gateway 包。
 
-新设备按 `npm run install:global` → `codexc init` → `codexc setup` → `codexc install` 顺序操作；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。
+新设备先运行 `npm run install:global`，安装成功后在交互终端运行 `codexc init` 完成初始化、接入和后台服务安装；仅在跳过相应步骤时再按需运行 `codexc setup`、`codexc install`。非交互 `init` 只初始化用户数据，不提供无人值守接入；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。
 Windows 首次或旧服务定义不完整时，若任务激活或就绪检查失败，会保留本次生成的服务定义并报告原始失败阶段，便于检查状态、日志和重试；不会删除任务引用的定义后再尝试安装不存在的旧服务。已有完整定义的安装继续恢复旧定义；恢复失败时同时保留原始安装错误。
 Windows 安装预检会拒绝权限、类型或大小不安全的旧服务定义与启动器；不会将这些文件用作恢复快照。激活时先停止核心服务和 Relay，再按新定义启动，WebUI 的运行状态保留；App Server 定义缺少 Socket 路径时明确要求重新安装。
 Codex 0.160.1 要求 Windows Socket 目录仅允许当前用户访问。App Server 启动前会将项目已受信任的目录 ACL 收紧为上游要求的单条可继承权限，其他运行时写入保留该权限；不接管不同所有者或放行含不受信任主体的 Socket 目录。请用普通用户终端安装，不依赖管理员提权绕过检查。

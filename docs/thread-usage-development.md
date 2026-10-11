@@ -165,7 +165,7 @@ OpenAI 且存在当前 Thread 时，账户摘要和 Thread 估算是两个独立
 
 ### `surfaces`
 
-- 三个 Surface 继续共用 `conversation-command-format.ts` 的结构化结果格式化，不分别实现估算逻辑。
+- 三个 Surface 继续共用 `conversation-session-command-format.ts` 与 `conversation-model-account-command-format.ts` 的结构化结果格式化，不分别实现估算逻辑。
 - `/help`、命令菜单和公开语法不变；只需更新 `/usage` 的说明文字。
 - 分组和提示在共享 Formatter 中有界生成，平台 Renderer 只负责既有 Markdown/卡片转换。
 

@@ -10,7 +10,7 @@ import type {
 import {
   listProviders,
 } from "../../application/index.js";
-import { formatCodexProviderLabel, formatModelDisplayName, formatProviderModelSummary, formatServiceTier, scopedModelDisplayName } from "../provider-format.js";
+import { formatCodexProviderLabel, formatModelDisplayName, formatProviderModelSummary, formatServiceTier, modelListDisplayName, modelListEntry } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "../reasoning-effort-format.js";
 import { renderConversationCommandResult } from "../conversation-command-renderer.js";
@@ -243,8 +243,12 @@ function modelProviderSelectionText(
   const currentModel = result.state.models.find((model) =>
     model.model === result.state.model
     && (model.provider ?? "openai") === current);
+  // 目录已确认时显示渠道模型名；目录缺失或模型不在列表内时保留原有显示规则。
+  const currentModelName = currentModel === undefined
+    ? formatModelDisplayName(result.state.model)
+    : modelListEntry(currentModel.displayName, currentModel.provider, currentModel.model).modelName;
   return toStructuredMarkdownList([
-    `当前模型：${formatModelDisplayName(result.state.model)}（Provider：${formatCodexProviderLabel(current)}）`,
+    `当前模型：${currentModelName}（Provider：${formatCodexProviderLabel(current)}）`,
     `${reasoningEffortSettingName(result.state.effort, currentModel)}：${formatReasoningEffort(result.state.effort)}`,
     `速度：${formatServiceTier(result.state.serviceTier, currentModel)}${result.state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`,
     "",
@@ -253,7 +257,7 @@ function modelProviderSelectionText(
     ...providers.map((provider, index) =>
       `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === current ? " ← 当前" : ""} · ${formatProviderModelSummary(result.state.models, provider)}`),
     "",
-    "请先选择提供商，再选择该提供商下的模型；也可输入 /model <提供商序号或 ID>。",
+    "请先选择提供商，再选择该提供商下的模型；也可输入 /model <提供商序号>。",
   ].join("\n"));
 }
 
@@ -295,7 +299,7 @@ export function modelSelectionKeyboard(
   return {
     inline_keyboard: models.map((model, index) => [{
       text: boundedButtonLabel(
-        `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${scopedModelDisplayName(model.displayName, result.state.providerFilter, model.model, index + 1)}${model.available === false ? "（暂不可用）" : ""}`,
+        `${model.model === result.state.model && (model.provider ?? "openai") === (result.state.modelProvider ?? "openai") ? "✓ " : ""}${modelListDisplayName(model.displayName, model.provider, model.model, index + 1)}${model.available === false ? "（暂不可用）" : ""}`,
       ),
       callback_data: `ms:${index + 1}:${token}`,
     }]),

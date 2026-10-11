@@ -4,6 +4,7 @@ import type { SessionRouter } from "../session-routing/index.js";
 import type { ConversationLockCoordinator } from "./conversation-lock-coordinator.js";
 import type { ModelSelectionService } from "./model-selection-service.js";
 import type { HookAction, HookCatalog, HookCommandView, HookConfigPort, HookEntry, HookReviewPolicy } from "./hook-port.js";
+import { pageCountFor, pageSlice, requirePage } from "./pagination.js";
 
 const lifetimeMs = 5 * 60_000;
 const pageSize = 8;
@@ -86,14 +87,14 @@ export class ConversationHookService {
 
   private async list(context: Context, page: number): Promise<HookCommandView> {
     const catalog = await this.read(context);
-    const pageCount = Math.max(1, Math.ceil(catalog.hooks.length / pageSize));
-    if (!Number.isSafeInteger(page) || page < 1 || page > pageCount) {
+    const pageCount = pageCountFor(catalog.hooks.length, pageSize);
+    requirePage(page, pageCount, () => {
       throw new UserFacingError("hooks.page-invalid", "Hook 页码不存在，请执行 /hooks");
-    }
+    });
     const id = randomBytes(8).toString("hex");
     const view: HookCommandView = {
       workspaceId: context.workspaceId, provider: context.provider,
-      entries: catalog.hooks.slice((page - 1) * pageSize, page * pageSize)
+      entries: pageSlice(catalog.hooks, page, pageSize, pageCount)
         .map((hook, index) => ({ selector: `${id}.${index + 1}`, hook })),
       warningCount: catalog.warningCount, errorCount: catalog.errorCount, page, pageCount,
     };

@@ -15,6 +15,7 @@ import type {
   ThreadQueuePage,
   ThreadQueuePort,
 } from "./thread-queue-port.js";
+import { pageCountFor, pageSelector, pageSlice, requirePage } from "./pagination.js";
 
 export const maximumNativeQueueItems = 100;
 const nativeQueuePageSize = 25;
@@ -73,19 +74,16 @@ export class ThreadQueueService {
 
   list(target: ConversationTarget, page = 1): Promise<ThreadQueueListResult> {
     return this.locks.forConversation(target, async () => {
-      if (!Number.isSafeInteger(page) || page < 1 || page > maximumNativeQueuePages) {
+      requirePage(page, maximumNativeQueuePages, () => {
         throw new UserFacingError("queue.usage", "Queue 页码无效");
-      }
+      });
       const threadId = this.requireCurrentThread(target);
       const snapshot = await this.readSnapshot(target, threadId);
-      const pageCount = Math.max(1, Math.ceil(snapshot.items.length / nativeQueuePageSize));
-      const start = (page - 1) * nativeQueuePageSize;
-      const items = page <= pageCount
-        ? snapshot.items.slice(start, start + nativeQueuePageSize)
-        : [];
+      const pageCount = pageCountFor(snapshot.items.length, nativeQueuePageSize);
+      const items = pageSlice(snapshot.items, page, nativeQueuePageSize, pageCount);
       return {
         items,
-        selectors: items.map((_item, index) => String(start + index + 1)),
+        selectors: items.map((_item, index) => pageSelector(page, index, nativeQueuePageSize)),
         page,
         pageCount,
         totalItemCount: snapshot.items.length,

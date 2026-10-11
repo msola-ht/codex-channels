@@ -1,9 +1,5 @@
 import {
-  type AccountRateLimits,
-  type AccountUsage,
-  type ConversationSession,
   type ConversationStatus,
-  type ModelSelectionState,
 } from "../../application/index.js";
 import type { OutputEvent } from "../../conversation-core/index.js";
 import {
@@ -17,12 +13,6 @@ import {
   type LifecyclePresentation,
   type StartupRuntimeInfo as LifecycleStartupRuntimeInfo,
 } from "../lifecycle-presentation.js";
-import {
-  formatConversationLimits,
-  formatConversationModels,
-  formatConversationUsage,
-} from "../conversation-model-account-command-format.js";
-import { formatConversationSessions } from "../conversation-session-command-format.js";
 import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
 import type { Workspace } from "../../policy/index.js";
 import type { SurfaceConfigurationChange } from "../types.js";
@@ -61,57 +51,6 @@ export function formatIdleReleaseNotification(minutes: number, threadId: string)
     "",
     "直接发送消息将开始新会话。",
   ].join("\n");
-}
-
-export function formatSessions(
-  threads: ConversationSession[],
-  currentThreadId?: string,
-  options: { archived?: boolean; searchTerm?: string } = {},
-): string {
-  const searchTerm = options.searchTerm ?? null;
-  return formatConversationSessions({
-    kind: "sessions",
-    sessions: threads,
-    archived: options.archived ?? false,
-    page: 1,
-    pageCount: 1,
-    matchedSessionCount: threads.length,
-    view: {
-      page: 1,
-      filter: "all",
-      provider: null,
-      searchTerm,
-    },
-    ...(currentThreadId ? { currentThreadId } : {}),
-  });
-}
-
-export function formatModels(state: ModelSelectionState): string {
-  return formatConversationModels({ kind: "models", view: "model", state });
-}
-
-export function formatReasoningEfforts(state: ModelSelectionState): string {
-  return formatConversationModels({ kind: "models", view: "effort", state });
-}
-
-export function formatFastModeState(state: ModelSelectionState): string {
-  return formatConversationModels({ kind: "models", view: "fast", state });
-}
-
-export function formatUsage(result: AccountUsage): string {
-  return formatConversationUsage({
-    kind: "usage",
-    result: { kind: "token-usage", provider: "openai", usage: result },
-  });
-}
-
-export function formatLimits(
-  result: AccountRateLimits,
-): string {
-  return formatConversationLimits({
-    kind: "limits",
-    result: { kind: "rate-limits", provider: "openai", limits: result },
-  });
 }
 
 export function formatStatus(status: ConversationStatus): string {

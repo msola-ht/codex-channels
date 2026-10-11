@@ -21,7 +21,7 @@ export function formatConversationWorkspaces(
     `Workspace（${result.workspaces.length}）：`,
     ...result.workspaces.flatMap((workspace, index) => [
       `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
-      workspace.cwd,
+      `工作目录：${workspace.cwd}`,
       ...workspacePermissionLines(workspace, false),
     ]),
     "",
@@ -54,6 +54,7 @@ export function formatConversationWorkspacePermissions(
 
 export function formatConversationAutoReview(
   result: Extract<ConversationCommandResult, { kind: "auto-review" }>,
+  formatCommand: (command: string) => string = (command) => command,
 ): string {
   const { threadId, reviewer, updated } = result.state;
   if (threadId === null) {
@@ -65,7 +66,7 @@ export function formatConversationAutoReview(
     `审批方式：${formatThreadApprovalsReviewer(reviewer)}`,
     ...(reviewer === "user" || reviewer === "auto_review"
       ? [
-        "切换：/autoreview on（自动审批）或 /autoreview off（手动审批）",
+        `切换：${formatCommand("/autoreview on")}（自动审批）或 ${formatCommand("/autoreview off")}（手动审批）`,
         "设置用于当前会话后续轮次；切换时须无运行任务或待处理交互。",
       ]
       : ["当前审批方式只读，暂不支持切换。"]),

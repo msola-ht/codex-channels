@@ -169,7 +169,7 @@ export async function applyCcgConfiguration({
       snapshots.push(snapshot);
       updates.set(archive, snapshots.find((item) => item.path === paths.backup).content);
     }
-    updates.set(paths.backup, `${JSON.stringify(initial)}\n`);
+    updates.set(paths.backup, `${JSON.stringify(initial, null, 2)}\n`);
     if (writesCatalog) {
       updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
       updates.set(paths.manifest, `${JSON.stringify({

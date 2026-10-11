@@ -23,7 +23,7 @@
 `codexc install` 重新生成定义、执行 `daemon-reload` 并重启核心服务。
 该操作只启动已启用的 Relay；WebUI 运行状态保留，已加载 unit 的停止设置由 `daemon-reload` 刷新。
 启停、重启、状态和日志可选择 `gateway`、`appserver`、`webui`、`relay` 或 `all`；
-已安装 WebUI 纳入 `all`，安装时只生成 unit 不自动启动。不写目标时，启停、重启和状态默认
+启动 `all` 时排除配置中关闭的 WebUI（`[webui] enabled`），停止、状态与日志仍包含已安装的 WebUI；安装时只生成 unit 不自动启动。不写目标时，启停、重启和状态默认
 `all`，日志默认 `gateway`。
 
 `codexc install` 在安装 unit 前检查当前用户的 systemd linger；未启用时先尝试通过

@@ -20,7 +20,8 @@ App Server 与全部私有 WebSocket 就绪，避免登录或开机并发加载�
 不得终止共享 App Server。
 
 日常管理使用 `codexc start/stop/restart/status/logs`。目标为 `gateway`、`appserver`、
-`webui`、`relay` 或 `all`；WebUI 安装时只生成 plist 不自动启动，已安装时纳入各操作的 `all`。
+`webui`、`relay` 或 `all`；WebUI 安装时只生成 plist 不自动启动，启动 `all` 时排除配置中关闭的 WebUI
+（`[webui] enabled`），停止、状态与日志仍包含已安装的 WebUI。
 不写目标时，启停、重启和状态默认 `all`，日志默认 `gateway`。
 
 四份 plist 的 `ExitTimeOut` 都从共享停止预算渲染为 50 秒，给内部 30 秒清理及子服务

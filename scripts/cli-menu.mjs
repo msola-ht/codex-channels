@@ -13,7 +13,7 @@ export function reportMenuError(error) {
 export async function runCliMenu({ prompts = clackPrompts, runCommand }) {
   prompts.intro("Codex Connect");
   const options = [
-    { value: "init", label: "初始化", hint: "创建用户目录与初始配置" },
+    { value: "init", label: "初始化", hint: "创建用户目录与初始配置，并引导接入、可选功能与后台服务" },
     { value: "setup", label: "接入向导", hint: "Provider、渠道与项目技能" },
     { value: "config", label: "日常设置" },
     { value: "work", label: "工作区" },
@@ -79,7 +79,7 @@ export async function runServiceMenu({ prompts = clackPrompts, runCommand }) {
       const target = await prompts.select({
         message: "选择服务目标", showInstructions: false,
         options: [
-          { value: "all", label: "全部后台服务", hint: "App Server、Gateway、已安装 WebUI 与按启用状态选取的 Relay" },
+          { value: "all", label: "全部后台服务", hint: "App Server、Gateway 与已安装的可选服务；启动按配置跳过已关闭的 WebUI 与未启用的 Relay" },
           { value: "gateway", label: "Gateway" },
           { value: "appserver", label: "App Server", hint: "包含受监管的 Provider 实例" },
           { value: "webui", label: "WebUI" },

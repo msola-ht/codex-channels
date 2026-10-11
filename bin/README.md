@@ -13,7 +13,8 @@
 
 交互终端无参数运行 `codexc` 打开主菜单，调用现有命令；非交互终端显示帮助。主菜单、运行与连接、服务、工作区、指标和清理菜单在单项完成、取消或操作失败后可继续选择，退出当前菜单返回上层；进程终止信号仍结束命令。
 
-- `init`、`setup`、`config`：初始化用户目录；通过 Setup 接入 Provider、通讯渠道和项目技能；
+- `init`、`setup`、`config`：初始化用户目录；`init` 在交互终端下继续显示环境检测结果并引导接入、
+  可选功能与后台服务安装，非交互只创建用户配置；通过 Setup 接入 Provider、通讯渠道和项目技能；
   Setup 和 Config 操作失败后保留分类菜单；通过 Config 统一管理 Codex 新会话与用户偏好，以及 Gateway 的操作详情、计划更新、调试模式、
   审批超时、Sandbox、默认工作区、模型覆盖、WebUI、指标、Telegram 消息格式和配置路径。
   `setup` 在初始化前校验交互终端；`setup --jsonl` 使用终端 stderr 提示并以 JSON Lines 输出脱敏事件；`config` 在非交互终端显示帮助。
@@ -59,11 +60,11 @@
   发送回对应会话；见 `docs/channel-image.md`。
 - `relay`：管理独立模型 API 转发的监听、调用方、Key 和运行状态；边界与操作见[模型 API 转发](../docs/user-guide.md#可选模型-api-转发)。
 - `webui`：启动本机指标查询与受控设置界面；监听参数在读取用户配置前完成校验。
-- `restart [目标]`：统一重启入口，默认全部后台服务。服务管理层预检后依次停止所选服务，再逐项启动并确认就绪；覆盖已安装 WebUI 与按启用状态选取的 Relay，失败中止后续步骤，禁止在 App Server 内自中断。
+- `restart [目标]`：统一重启入口，默认全部后台服务。服务管理层预检后依次停止所选服务，再逐项启动并确认就绪；覆盖已安装且未关闭的 WebUI 与按启用状态选取的 Relay，失败中止后续步骤，禁止在 App Server 内自中断。
 - `install/start/stop/reload/status/logs` 与 `uninstall --services`：顶层后台服务命令；主菜单的“后台服务”分类选择操作及明确目标，日志菜单显示最近 100 行，卸载需确认，配置损坏时仍能进入菜单执行诊断恢复操作。安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
   与 Gateway；启停、状态和日志命令使用
   `gateway`、`appserver`、`webui`、`relay` 或 `all` 明确目标，菜单统一分派到顶层命令；
-  `all` 包含 App Server、Gateway、已安装 WebUI 与 Relay，启动 Relay 要求已启用；停止按 WebUI、Relay、Gateway、App Server 顺序；核心服务安装、启动或重启后按目标等待监管拓扑、
+  `all` 包含 App Server、Gateway 与已安装的可选服务；启动按配置跳过已关闭的 WebUI 与未启用的 Relay，停止、状态与日志仍包含已安装的可选服务；停止按 WebUI、Relay、Gateway、App Server 顺序；核心服务安装、启动或重启后按目标等待监管拓扑、
   WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等
   诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务；`status --json`
   把 macOS launchd、Linux systemd 与 Windows 用户级计划任务归一为同一状态结构，服务异常时仍输出

@@ -124,18 +124,18 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
       const downloaded = await (options.downloadCatalog ?? downloadDeepseekCatalog)(options.fetchImpl ?? fetch);
       catalog = createManagedDeepseekCatalog(downloaded.catalog);
       updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
-      updates.set(paths.manifest, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() })}\n`);
+      updates.set(paths.manifest, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() }, null, 2)}\n`);
     }
     const model = resolveManagedCatalogModel(catalog, definition, previous?.model);
     const configured = createManagedProviderConfiguration(current, initial.config, definition, {
       mode: preview.mode, previousMode: previous?.mode, apiKey: input.apiKey,
       catalogPath: paths.catalog, catalog, model,
     });
-    updates.set(paths.backup, `${JSON.stringify(initial)}\n`);
+    updates.set(paths.backup, `${JSON.stringify(initial, null, 2)}\n`);
     updates.set(paths.profile, configured.profile === undefined ? undefined : stringify(configured.profile));
     updates.set(paths.marker, stringify(createManagedProviderMarker(definition, preview.mode)));
     if (preview.mode === "exclusive" || previous?.mode === "exclusive") updates.set(paths.config, stringify(configured.config));
-    if (!previous) updates.set(paths.registry, `${JSON.stringify(validateDeepseekAccounts([...accounts, { id: input.accountId, default: accounts.length === 0 }]))}\n`);
+    if (!previous) updates.set(paths.registry, `${JSON.stringify(validateDeepseekAccounts([...accounts, { id: input.accountId, default: accounts.length === 0 }]), null, 2)}\n`);
     stageManagedPrimaryCredential(configured.credential, definition, environment, snapshots, updates);
     await applyProviderFileUpdates(updates, snapshots);
     return { ...preview, action: "configured", model };
@@ -147,7 +147,9 @@ export async function setDeepseekDefaultAccount(accountId, { environment = proce
     const accounts = loadDeepseekAccounts(environment);
     if (!accounts.some((account) => account.id === accountId)) throw new Error("DeepSeek 账户不存在");
     const path = deepseekAccountsFilePath(environment);
-    await applyProviderFileUpdates(new Map([[path, `${JSON.stringify(accounts.map((account) => ({ ...account, default: account.id === accountId })))}\n`]]), snapshotProviderFiles([path], environment));
+    await applyProviderFileUpdates(new Map([[path, `${JSON.stringify(
+      accounts.map((account) => ({ ...account, default: account.id === accountId })), null, 2,
+    )}\n`]]), snapshotProviderFiles([path], environment));
     return { action: "default-set", accountId, activation: "restart-all" };
   });
 }
@@ -162,7 +164,7 @@ function deepseekAccountRemovalPlan(accountId, environment) {
   const remaining = accounts.filter((account) => account.id !== accountId);
   if (remaining.length > 0 && !remaining.some((account) => account.default)) throw new Error("请先选择其他默认账户");
   const snapshots = snapshotProviderFiles(Object.values(paths), environment);
-  const updates = new Map([[paths.profile, undefined], [paths.marker, undefined], [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining)}\n`]]);
+  const updates = new Map([[paths.profile, undefined], [paths.marker, undefined], [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`]]);
   if (remaining.length === 0) {
     assertNoResponsesContextFollowers(environment,"删除最后一个 DS 账户");
     updates.set(paths.catalog, undefined);

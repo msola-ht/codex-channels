@@ -18,6 +18,7 @@ import {
   maximumNativeQueueItems,
   queueUserFacingError,
 } from "./thread-queue-service.js";
+import { pageOffset, pageSelector, requirePage } from "./pagination.js";
 
 const pageSize = 25;
 const maximumPages = 20;
@@ -67,9 +68,9 @@ export class ThreadRevertService {
     page = 1,
   ): Promise<ThreadRevertListResult> {
     return this.locks.forConversation(target, async () => {
-      if (!Number.isSafeInteger(page) || page < 1 || page > maximumPages) {
+      requirePage(page, maximumPages, () => {
         throw new UserFacingError("revert.usage", "Revert 页码无效");
-      }
+      });
       const binding = this.requireCurrentBinding(target);
       await this.requirePaginatedThread(binding.threadId);
       const result = await this.readPage(binding.threadId, page);
@@ -86,7 +87,7 @@ export class ThreadRevertService {
         threadId: binding.threadId,
         turns: result.turns,
         selectors: result.turns.map(
-          (_turn, index) => String((page - 1) * pageSize + index + 1),
+          (_turn, index) => pageSelector(page, index, pageSize),
         ),
         page,
         hasNextPage: result.nextCursor !== null,
@@ -149,7 +150,7 @@ export class ThreadRevertService {
         threadId: binding.threadId,
         beforeTurnId: turn.id,
         turn,
-        affectedTurnCount: (selection.page - 1) * pageSize
+        affectedTurnCount: pageOffset(selection.page, pageSize)
           + currentPage.turns.indexOf(turn) + 1,
         activeTurnId: currentPage.activeTurnId,
         queueItemCount: queue.count,
@@ -393,7 +394,7 @@ export class ThreadRevertService {
     }
     const normalized = selector.trim();
     const index = /^\d+$/u.test(normalized)
-      ? Number(normalized) - 1 - (snapshot.page - 1) * pageSize
+      ? Number(normalized) - 1 - pageOffset(snapshot.page, pageSize)
       : snapshot.turns.findIndex((turn) => turn.id === normalized);
     const turn = Number.isSafeInteger(index) && index >= 0
       ? snapshot.turns[index]

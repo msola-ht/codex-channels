@@ -64,6 +64,7 @@ export interface GatewayConfigDocument {
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
   webui?: {
+    enabled?: boolean;
     host: "127.0.0.1" | "::1" | "0.0.0.0";
     port: number;
     token?: string;
@@ -98,10 +99,12 @@ export function validateGatewayProcessConfigDocument(document: unknown): { timez
 export function validateWebuiConfigDocument(
   document: unknown,
 ): {
+  enabled?: boolean;
   host: "127.0.0.1" | "::1" | "0.0.0.0";
   port: number;
   token?: string;
 };
+export function webuiServiceEnabled(document: unknown): boolean | undefined;
 export function validateDebugConfigDocument(
   document: unknown,
 ): {

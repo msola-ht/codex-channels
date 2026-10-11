@@ -1,5 +1,6 @@
 import { readClineRelayCatalog, clineRelayCatalogPath, clineRelayInputModalities, clineRelayReasoningEfforts } from "./cline-relay-catalog.mjs";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { codexHomePath } from "./codex-home.mjs";
 import { loadManagedModelProviderDefinitions } from "./model-provider-definitions.mjs";
@@ -10,6 +11,7 @@ import { loadCustomSwitchingProviderIds, loadConfiguredCustomSwitchingModelProvi
   loadConfiguredCustomPrimaryModelProvider, loadConfiguredCustomPrimaryRelayProfile, customPrimaryProviderCredentialPath } from "./model-provider-custom-runtime.mjs";
 import { parse } from "smol-toml";
 import { customOfficialModelCatalogPath } from "./model-provider-official-catalog.mjs";
+import { customProviderUpstreamMetadataPath, readCustomProviderUpstreamWireApi } from "./model-provider-upstream-metadata.mjs";
 import { isResponsesProvider, readResponsesModelCatalog, responsesProviderCatalogPath,
   assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { readPrivateFileSync } from "./private-file.mjs";
@@ -52,8 +54,9 @@ function loadBaseRelayProviderMaterial(provider, environment) {
   const primaryBlock = switching ? undefined : parse(createProviderFileReader(environment)(configPath)).model_providers?.[provider];
   const credentialPath = typeof primaryBlock?.env_key === "string" && primaryBlock.env_key.startsWith("CODEX_CONNECT_CUSTOM_") && primaryBlock.env_key.includes("_PRIMARY_")
     ? customPrimaryProviderCredentialPath(environment, provider, primaryBlock.env_key) : undefined;
+  const metadataPath = isResponsesProvider(provider) ? customProviderUpstreamMetadataPath(environment, provider) : undefined;
   const paths = [...(switching ? [customSwitchingProviderRegistryPath(environment), customPrimaryProviderProfilePath(environment, provider)] : []),
-    configPath, ...(credentialPath ? [credentialPath] : []), catalogPath];
+    configPath, ...(credentialPath ? [credentialPath] : []), ...(metadataPath !== undefined && existsSync(metadataPath) ? [metadataPath] : []), catalogPath];
   const fingerprint = () => {
     const hash = createHash("sha256");
     const read = createProviderFileReader(environment);
@@ -73,9 +76,12 @@ function loadBaseRelayProviderMaterial(provider, environment) {
   if (!Array.isArray(models) || !models.length || models.some(value => typeof value !== "string" || !value.length || value.length > 200 || /\p{Cc}/u.test(value))) {
     throw new Error("Relay Provider model catalog is invalid");
   }
+  // 上游接口决定 Relay 允许的客户端协议：Chat 上游不支持 Responses 反向转换，只按原生 Chat 转发。
+  const upstreamWireApi = isResponsesProvider(provider) ? readCustomProviderUpstreamWireApi(environment, provider) : "responses";
   if (fingerprint() !== revision) throw new Error("Relay Provider material changed during read");
   assertResponsesContextSyncComplete(environment);
   const modelInputs = Object.fromEntries(catalog.models.map(value => [value.slug, Array.isArray(value.input_modalities) ? value.input_modalities : []]));
-  return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs, protocols: ["responses"],
+  return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs,
+    protocols: upstreamWireApi === "chat_completions" ? ["chat"] : ["responses"],
     paths: [...paths, responsesContextSyncPath(environment)], revision };
 }

@@ -17,3 +17,25 @@ export function sanitizeFeishuMarkdown(markdown: string): string {
     "&lt;",
   );
 }
+
+const feishuMarkdownEscapeCharacters = /([`*_~[\]()>#+\-.!|])/gu;
+const feishuCardMarkdownEscapeCharacters = /([`*_~[\]()>#+\-.!|{}])/gu;
+
+function escapeFeishuMarkdownCharacters(
+  value: string,
+  characters: RegExp,
+  normalizeNewlines: boolean,
+): string {
+  const normalized = normalizeNewlines ? value.replace(/[\r\n]+/gu, " ") : value;
+  return normalized
+    .replaceAll("\\", "\\\\")
+    .replaceAll(characters, "\\$1");
+}
+
+export function escapeFeishuMarkdown(value: string): string {
+  return escapeFeishuMarkdownCharacters(value, feishuMarkdownEscapeCharacters, false);
+}
+
+export function escapeFeishuCardMarkdown(value: string): string {
+  return escapeFeishuMarkdownCharacters(value, feishuCardMarkdownEscapeCharacters, true);
+}

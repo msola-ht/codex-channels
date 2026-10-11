@@ -19,15 +19,14 @@
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
 ```
 
-初始化、配置并安装后台服务：
+安装成功后，在交互终端运行完整初始化向导，按提示配置接入、选择可选功能并安装后台服务：
 
 ```bash
 codexc init
-codexc setup
-codexc work add
-codexc install
 codexc doctor
 ```
+
+向导已完成接入和安装时无需重复执行 `setup`、`install`。若跳过步骤，之后按需运行 `codexc setup` 补充接入、`codexc install` 安装后台服务；添加其他工作区使用 `codexc work add`。非交互 `init` 仅初始化用户数据，接入向导仍需交互终端，详见[初始化与配置](docs/user-guide.md#3-初始化与配置)。
 
 Windows PowerShell 7（开发验证入口，尚未纳入公开正式支持）：
 
@@ -36,7 +35,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 ```
 
 源码安装的目录、更新、代理和 Windows 处理见[`源码安装与更新`](docs/source-install.md)。
-官方安装器与本地 `npm run install:global` 都会将缺失或版本不符的默认 Codex CLI 同步为项目锁定版本，随后运行 `codexc init`、`codexc setup`、`codexc install`。
+官方安装器与本地 `npm run install:global` 都会将缺失或版本不符的默认 Codex CLI 同步为项目锁定版本，只提示后续初始化入口；用户在安装成功后运行 `codexc init`，安装器不自动执行初始化、接入向导或后台服务安装。
 安装和更新统一从本机终端执行。官方受管仓库用 `codexc update` 更新；本地工作树更新后重新运行 `npm run install:global`，服务停启见[本地工作树安装与部署](docs/source-install.md#本地工作树安装与部署)。
 仍使用 `service` 命名空间的旧版需先按[源码安装与更新说明](docs/source-install.md)手动安装新版本，不能直接用旧更新器跨越此次命令改版。
 
@@ -44,6 +43,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 ```bash
 codexc                       # 交互主菜单（非交互终端显示帮助）
+codexc init                  # 完整交互初始化向导（非交互时仅初始化用户数据）
 codexc setup                 # Provider、渠道和项目技能接入
 codexc config                # Codex 新会话偏好与 Gateway 日常设置
 codexc cleanup               # 统一交互归档会话、清理转储和维护指标
@@ -51,9 +51,9 @@ codexc timezone              # App Server 与 WebUI 时区；--gateway 设置网
 codexc work                  # 新建或注册已有工作区、管理权限
 codexc                       # 主菜单 → 后台服务
 codexc run                   # 前台运行核心服务
-codexc start                 # 启动全部后台服务，含已安装 WebUI 与已启用 Relay
+codexc start                 # 启动全部后台服务，含已安装且未关闭的 WebUI 与已启用 Relay
 codexc status                # 查看全部后台服务状态
-codexc restart               # 重启全部后台服务：Gateway、App Server、WebUI、已启用 Relay
+codexc restart               # 重启全部后台服务：Gateway、App Server、未关闭的 WebUI、已启用 Relay
 codexc restart gateway       # 只重启 Gateway
 codexc doctor                # 只读诊断
 codexc metrics               # 查询和导出本机模型请求指标
@@ -71,7 +71,7 @@ codexc app --provider agg # API Key 切换提供商聚合到同一桌面模型�
 codexc remote --provider agg # 终端使用相同聚合目录；渠道从 /model 选择
 ```
 
-首次接入使用 `setup`，日常设置使用 `config`，数据维护使用 `cleanup`。清理菜单的五项操作、服务启停要求和会话归档示例见[本机清理与归档](docs/user-guide.md#本机清理与归档)。在聊天渠道发送 `/help` 查看可用命令。
+首次安装使用 `init` 完整向导，之后补充接入使用 `setup`，日常设置使用 `config`，数据维护使用 `cleanup`。清理菜单的五项操作、服务启停要求和会话归档示例见[本机清理与归档](docs/user-guide.md#本机清理与归档)。在聊天渠道发送 `/help` 查看可用命令。
 Desktop 聚合模式的账户前提、重启要求和会话限制见 [Desktop 共享说明](docs/user-guide.md#codex-desktop-app-共享macos--windows-预览)。
 `remote` 与 `app` 的 `-p` / `--provider` 共用 Provider ID、已登记的规范 `sf-*` Profile 名称及
 `agg` / `sf-agg` 选择；两个入口默认连接主实例。完整规则与 Remote 的个人 `--profile` 用法见[用户指南](docs/user-guide.md)。
