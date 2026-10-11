@@ -13,7 +13,7 @@ import { opencodeGoAccountsFilePath } from "./opencode-go-accounts.mjs";
 import { loadConfiguredCustomSwitchingModelProviders, loadCustomSwitchingProviderIds,
   customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath } from "./model-provider-custom-runtime.mjs";
 import { customOfficialModelCatalogPath } from "./model-provider-official-catalog.mjs";
-import { isResponsesProvider, responsesProviderCatalogPath, responsesContextSyncPath,
+import { isCustomCatalogProvider, responsesProviderCatalogPath, responsesContextSyncPath,
   assertResponsesContextSyncComplete } from "./model-provider-responses-catalog.mjs";
 
 export const aggregateProviderId = "codexc-aggregate";
@@ -48,10 +48,10 @@ export function aggregateProviderMaterialFiles(environment, expectedMembers) {
       paths.set(join(managedProviderDirectory(environment, definition), definition.catalogFileName), 2_097_152);
     } else if (customIds.includes(id)) {
       paths.set(customPrimaryProviderProfilePath(environment, id), 1_048_576);
-      const catalogPath = isResponsesProvider(id)
+      const catalogPath = isCustomCatalogProvider(id)
         ? responsesProviderCatalogPath(environment, id) : customOfficialModelCatalogPath(environment);
-      paths.set(catalogPath, isResponsesProvider(id) ? 2_097_152 : 8_388_608);
-      if (isResponsesProvider(id)) paths.set(`${catalogPath}.pending`, 1_048_576);
+      paths.set(catalogPath, isCustomCatalogProvider(id) ? 2_097_152 : 8_388_608);
+      if (isCustomCatalogProvider(id)) paths.set(`${catalogPath}.pending`, 1_048_576);
     } else {
       throw new Error("聚合账户拓扑已变化，需要显式重启 App Server 服务");
     }

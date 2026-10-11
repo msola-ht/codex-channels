@@ -1,6 +1,6 @@
 import { promptResponsesWebSocket } from "./responses-websocket-setup.mjs";
 import { promptResponsesToolSearch } from "./responses-tool-search-setup.mjs";
-import { isResponsesProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { loadResponsesModelTemplates, promptResponsesModelImport } from "./responses-model-templates.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
@@ -8,6 +8,7 @@ import * as clackPrompts from "@clack/prompts";
 
 import {
   loadConfiguredCustomSwitchingModelProviders,
+  customSwitchingProviderProfileName,
   listCustomPrimaryProviderCandidates,
   readPrimaryProviderBackup,
   validateCustomPrimaryModelProviderId,
@@ -64,7 +65,7 @@ export async function runCustomPrimaryProviderSetup({
   probeWebSocket,
   probeToolSearch,
 } = {}) {
-  const custom = editingProviderId === undefined ? catalogKind === "custom" : isResponsesProvider(editingProviderId);
+  const custom = editingProviderId === undefined ? catalogKind === "custom" : isCustomCatalogProvider(editingProviderId);
   const previousCatalog = editingProviderId && custom ? readResponsesModelCatalog(environment, editingProviderId) : undefined;
   const client = await createClient({ environment });
   let snapshot;
@@ -79,7 +80,7 @@ export async function runCustomPrimaryProviderSetup({
     await client.close().catch(() => undefined);
   }
   const config = record(snapshot.config);
-  if (!custom && isResponsesProvider(config.model_provider)) officialModels = bundledOfficialModelOptions(environment);
+  if (!custom && isCustomCatalogProvider(config.model_provider)) officialModels = bundledOfficialModelOptions(environment);
   const officialModelIds = new Set(
     officialModels.filter((candidate) => candidate.available !== false)
       .map((candidate) => candidate.model),
@@ -148,7 +149,7 @@ export async function runCustomPrimaryProviderSetup({
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
   const currentWebsockets = currentProvider?.supports_websockets === true ? "yes" : "no";
 
-  output.write(`\nCodex Connect ${custom ? "自定义 Responses Provider" : "Codex 兼容 Provider"} Setup\n\n`);
+  output.write(`\nCodex Connect ${custom ? "自定义提供商" : "Codex 兼容 Provider"} Setup\n\n`);
   output.write(`当前主实例：${currentMainLabel}\n`);
   output.write(fixedProviderId === undefined
     ? "当前操作：新增 Provider\n"
@@ -206,8 +207,7 @@ export async function runCustomPrimaryProviderSetup({
   }
   let normalizedId = fixedProviderId;
   if (normalizedId === undefined) {
-    const derived = customPrimaryProviderIdFromBaseUrl(normalizedBaseUrl);
-    const derivedProviderId = custom ? `rs-${derived.slice(0, 61)}` : derived;
+    const derivedProviderId = customPrimaryProviderIdFromBaseUrl(normalizedBaseUrl, custom ? "custom" : "official", environment);
     const providerId = await prompts.select({
       message: "Provider ID",
       options: [
@@ -234,9 +234,10 @@ export async function runCustomPrimaryProviderSetup({
     }
     if (providerId === "__custom__") {
       const customId = await prompts.text({
-        message: custom ? "Provider ID（必须以 rs- 开头）" : "自定义 Provider ID",
+        message: custom ? "Provider ID（必须以 cp- 开头）" : "自定义 Provider ID",
         validate: (value) => validateCustomPrimaryModelProviderId(String(value).trim(), environment)
-          ?? undefined,
+          ?? (custom !== isCustomCatalogProvider(String(value).trim())
+            ? "自定义提供商必须使用 cp- 前缀；Codex 兼容 Provider 不使用该前缀" : undefined),
       });
       if (prompts.isCancel(customId) || customId === "back") {
         return { action: allowBack ? "back" : "cancel" };
@@ -378,7 +379,7 @@ export async function runCustomPrimaryProviderSetup({
     message: canPreserveCurrentBearerToken
       ? "API Key（留空保留当前 Key；不回显）"
       : mode === "switching"
-        ? `API Key（明文写入 0600 的 ~/.codex/sf-custom-${normalizedId}.config.toml；不回显）`
+        ? `API Key（明文写入 0600 的 ~/.codex/${customSwitchingProviderProfileName(normalizedId)}.config.toml；不回显）`
         : "API Key（明文写入当前用户私有凭据文件；主配置只保存 env_key 引用；不回显）",
     validate: (value) => String(value).trim() === "" && !canPreserveCurrentBearerToken
       ? "API Key 不能为空"
@@ -440,7 +441,7 @@ export async function runCustomPrimaryProviderSetup({
   });
   const preview = prepared.preview;
   output.write(preview.provider.mode === "switching"
-    ? `\n将写入 ~/.codex/sf-custom-${normalizedId}.config.toml：\n`
+    ? `\n将写入 ~/.codex/${customSwitchingProviderProfileName(normalizedId)}.config.toml：\n`
     : "\n将写入 ~/.codex/config.toml：\n");
   const previewLines = [
     `- Provider ID：${preview.provider.id}`,
@@ -449,7 +450,7 @@ export async function runCustomPrimaryProviderSetup({
     `- 上游接口：${preview.provider.upstreamWireApi === "chat_completions" ? "Chat Completions（网关转换）" : "Responses（直连）"}`,
     `- 默认模型：${preview.provider.model}`,
     `- 运行模式：${preview.provider.mode === "switching" ? "OpenAI + 自定义切换" : "仅自定义固定"}`,
-    `- 模型目录：${custom ? "自定义 Responses；仅声明的模型与能力" : "Codex 官方"}`,
+    `- 模型目录：${custom ? "自定义；仅声明的模型与能力" : "Codex 官方"}`,
     ...(preview.provider.mode === "switching"
       ? [
           "- 主配置：保持官方 OpenAI",

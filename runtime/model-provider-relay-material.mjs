@@ -12,7 +12,7 @@ import { loadCustomSwitchingProviderIds, loadConfiguredCustomSwitchingModelProvi
 import { parse } from "smol-toml";
 import { customOfficialModelCatalogPath } from "./model-provider-official-catalog.mjs";
 import { customProviderUpstreamMetadataPath, readCustomProviderUpstreamWireApi } from "./model-provider-upstream-metadata.mjs";
-import { isResponsesProvider, readResponsesModelCatalog, responsesProviderCatalogPath,
+import { isCustomCatalogProvider, readResponsesModelCatalog, responsesProviderCatalogPath,
   assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { readPrivateFileSync } from "./private-file.mjs";
 
@@ -49,12 +49,12 @@ function loadBaseRelayProviderMaterial(provider, environment) {
   if (!switching && loadConfiguredCustomPrimaryModelProvider(environment)?.id !== provider) {
     throw new Error("Relay requires a registered Provider with independently managed API credentials");
   }
-  const catalogPath = isResponsesProvider(provider) ? responsesProviderCatalogPath(environment, provider) : customOfficialModelCatalogPath(environment);
+  const catalogPath = isCustomCatalogProvider(provider) ? responsesProviderCatalogPath(environment, provider) : customOfficialModelCatalogPath(environment);
   const configPath = join(codexHomePath(environment), "config.toml");
   const primaryBlock = switching ? undefined : parse(createProviderFileReader(environment)(configPath)).model_providers?.[provider];
   const credentialPath = typeof primaryBlock?.env_key === "string" && primaryBlock.env_key.startsWith("CODEX_CONNECT_CUSTOM_") && primaryBlock.env_key.includes("_PRIMARY_")
     ? customPrimaryProviderCredentialPath(environment, provider, primaryBlock.env_key) : undefined;
-  const metadataPath = isResponsesProvider(provider) ? customProviderUpstreamMetadataPath(environment, provider) : undefined;
+  const metadataPath = isCustomCatalogProvider(provider) ? customProviderUpstreamMetadataPath(environment, provider) : undefined;
   const paths = [...(switching ? [customSwitchingProviderRegistryPath(environment), customPrimaryProviderProfilePath(environment, provider)] : []),
     configPath, ...(credentialPath ? [credentialPath] : []), ...(metadataPath !== undefined && existsSync(metadataPath) ? [metadataPath] : []), catalogPath];
   const fingerprint = () => {
@@ -70,14 +70,14 @@ function loadBaseRelayProviderMaterial(provider, environment) {
   if (!switching && profile.apiKeyEnvironmentKey !== primaryBlock?.env_key) {
     throw new Error("Relay Provider credential reference changed during read");
   }
-  const catalog = isResponsesProvider(provider) ? readResponsesModelCatalog(environment, provider)
+  const catalog = isCustomCatalogProvider(provider) ? readResponsesModelCatalog(environment, provider)
     : JSON.parse(readPrivateFileSync(catalogPath, 8 * 1024 * 1024));
   const models = catalog.models?.map(value => value.slug);
   if (!Array.isArray(models) || !models.length || models.some(value => typeof value !== "string" || !value.length || value.length > 200 || /\p{Cc}/u.test(value))) {
     throw new Error("Relay Provider model catalog is invalid");
   }
   // 上游接口决定 Relay 允许的客户端协议：Chat 上游不支持 Responses 反向转换，只按原生 Chat 转发。
-  const upstreamWireApi = isResponsesProvider(provider) ? readCustomProviderUpstreamWireApi(environment, provider) : "responses";
+  const upstreamWireApi = isCustomCatalogProvider(provider) ? readCustomProviderUpstreamWireApi(environment, provider) : "responses";
   if (fingerprint() !== revision) throw new Error("Relay Provider material changed during read");
   assertResponsesContextSyncComplete(environment);
   const modelInputs = Object.fromEntries(catalog.models.map(value => [value.slug, Array.isArray(value.input_modalities) ? value.input_modalities : []]));

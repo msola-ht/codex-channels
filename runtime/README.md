@@ -68,10 +68,10 @@
   保留共享目录及当前账户，watcher 只为实际账户监听 Profile 和管理标记，再按 Provider ID 合并并去重路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，共用 DS 目录。
 - `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，共享模型目录和 Chat 转换代理。
-- `provider-model-guard.mjs` / `provider-model-guard.d.mts`：CLP Chat 桥、OCG/CCG 与自定义 Responses 代理共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。
+- `provider-model-guard.mjs` / `provider-model-guard.d.mts`：CLP Chat 桥、OCG/CCG 与自定义提供商代理共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。
   CLP 在同一次目录读取中取得模型的思考选项，出站同时验证启用名单和思考能力，不为能力检查重复执行 ACL 读取。
-  自定义 Responses 注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和全局上下文同步标记；任一未完成事务均拒绝出站，不复用管理事务内部的读取豁免。
-- `third-party-coding-instructions.mjs`：非 Flash CLP、新增 OCG/CCG 手填模型与新增非 DS 自定义 Responses 模型共用的编程提示词；显式写入模型定义，不改变既有目录缺省值，不声明模型身份或授予工具权限，不依赖 DS 下载。
+  自定义提供商注入与配置读取器相同的 `parseResponsesModelCatalog` 内容校验，并在异步私有读取前后检查目录 `.pending` 和全局上下文同步标记；任一未完成事务均拒绝出站，不复用管理事务内部的读取豁免。
+- `third-party-coding-instructions.mjs`：非 Flash CLP、新增 OCG/CCG 手填模型与新增非 DS 自定义提供商模型共用的编程提示词；显式写入模型定义，不改变既有目录缺省值，不声明模型身份或授予工具权限，不依赖 DS 下载。
 - `aggregate-model-provider.mjs` / `aggregate-model-provider.d.mts`：从至少两个已配置的 API Key 切换提供商派生 `codexc-aggregate`
   拓扑成员、模型 slug、目录与启动参数；保留各模型元数据，拒绝主配置的全局窗口覆盖，复核账户与
   目录快照；公开第三方账户、Profile、目录及事务状态的源文件清单与内容指纹供安全刷新使用。
@@ -109,8 +109,8 @@
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
   镜像所选模型的默认思考等级。Profile 位于 `~/.codex`，模型目录、清单与管理标记位于
   `~/.codex-connect/providers/<id>/`。
-- `model-provider-custom-runtime.mjs`：拥有 Codex 兼容／自定义 Responses Provider 候选备份和切换模式注册表，支持按目标 Provider 校验恢复状态，逐 Provider
-  管理 `sf-custom-<id>` 私有 Profile；按 Provider 类型校验官方或独立 Responses 模型目录，并严格限制为单个目标 Provider
+- `model-provider-custom-runtime.mjs`：拥有 Codex 兼容／自定义提供商 候选备份和切换模式注册表，支持按目标 Provider 校验恢复状态，逐 Provider
+  自定义目录提供商以 `cp-` 标识，管理 `sf-<id>`（如 `sf-cp-llm`）私有 Profile；Codex 兼容类型继续使用 `sf-custom-<id>`。按 Provider 类型校验官方或独立模型目录，并严格限制为单个目标 Provider
   块和直接 API Key 字段。注册表与 Profile 的增删改共用私有文件锁并支持执行前快照保护，
   Provider 块与 Key 不进入主配置。
   Gateway 新增或替换的固定 Key 使用不可变的当前用户私有凭据版本，主配置只引用独立 `env_key`；普通切换保留既有环境变量引用、OAuth 或无认证语义。提供私有凭据读取、创建及显式删除端口，
@@ -119,7 +119,7 @@
 - `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
-- `responses-context-sync.mjs` / `responses-context-sync.d.mts`：扩展现有 DS 目录与 Profile 事务，按模板关联同步 RS 与 CLP 上下文，保留私有恢复记录并提供整批恢复与预览目标。
+- `responses-context-sync.mjs` / `responses-context-sync.d.mts`：扩展现有 DS 目录与 Profile 事务，按模板关联同步 CP 与 CLP 上下文，保留私有恢复记录并提供整批恢复与预览目标。
 - `model-provider-responses-catalog.mjs` / `model-provider-responses-catalog.d.mts`：校验手填模型定义、模板基础能力与最大上下文，生成版本化的独立目录，管理修订、私有备份与未完成写入标记；不保存凭据。
 - `model-provider-upstream-metadata.mjs` / `model-provider-upstream-metadata.d.mts`：自定义第三方 Provider 的网关侧元数据（当前只有上游接口 `responses` / `chat_completions`），与模型目录同目录、0600 写入；缺失按 `responses`，版本、字段或枚举不合法时失败关闭。
 - `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，

@@ -160,7 +160,7 @@
   精确隐藏模型 `gpt-reserve`，并用不重试的 `thread/settings/update` 同步 Thread 模型与当前协作模式，
   不写用户级默认设置。
 - `provider-routing-client.ts` 不暴露自定义 Thread 分区 RPC；固定状态仍通过官方 Pinned 分区移动实现。
-  `listModelsForProvider` 通过指定实例和既有活动边界读取模型目录，供独立 RS 选择及精确可用性检查共用；不回退主实例目录。
+  `listModelsForProvider` 通过指定实例和既有活动边界读取模型目录，供独立 CP 选择及精确可用性检查共用；不回退主实例目录。
 - `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
   Server Request 的物理来源与已知 Thread Provider 冲突时拒绝；未知来源关联只作为读取路由提示，

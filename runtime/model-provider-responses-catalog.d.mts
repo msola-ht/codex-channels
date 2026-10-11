@@ -11,7 +11,7 @@ export interface ResponsesModelDefinition {
   supportsSearchTool?: boolean;
   template?: {source: "official" | "deepseek"; model: string; followContext: boolean};
 }
-export function isResponsesProvider(id: unknown): boolean;
+export function isCustomCatalogProvider(id: unknown): boolean;
 export function responsesProviderCatalogPath(environment: NodeJS.ProcessEnv | undefined, id: string): string;
 export function validateResponsesModels(values: unknown, defaultModel: string, options?: { allowReasoningToggle?: boolean }): ResponsesModelDefinition[];
 export function createResponsesModelCatalog(definitions: ResponsesModelDefinition[], defaultModel: string, options?: { allowReasoningToggle?: boolean }): {

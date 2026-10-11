@@ -60,7 +60,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
     models: validated.map(model => ({id: model.id, name: model.name, reasoningEffort: model.defaultReasoningEffort ?? "none"})),
     enabledModels: validated.map(model => model.id),
     requiredModels: [defaultModel],
-    label: "自定义 Responses",
+    label: "自定义提供商",
   });
   return enabledModels === undefined ? undefined : validateResponsesModels(validated.filter(model => enabledModels.includes(model.id)), defaultModel);
 }

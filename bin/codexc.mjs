@@ -133,7 +133,7 @@ const helpText = {
 
 常用入口：
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
-  codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / CCG（CommandCode） / Cline Pass 官方 / 受管 Provider 模型设置
+  codexc setup → 模型与提供商 → 第三方 Provider → 自定义提供商 / DeepSeek 官方 / OpenCode Go 官方 / CCG（CommandCode） / Cline Pass 官方 / 受管 Provider 模型设置
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 项目技能（安装或卸载项目技能）
 
@@ -144,8 +144,8 @@ DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开�
   remote: `${CODEX_REMOTE_USAGE}
 
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
-与 codexc app 使用相同的 -p / --provider 选择：推荐 -p ds-main、-p clp-main 或 -p 自定义Provider-ID，
-也接受已配置的规范 sf- 名称，例如 -p sf-ds-main。底层 Profile 文件名不变。
+与 codexc app 使用相同的 -p / --provider 选择：推荐 -p ds-main、-p clp-main 或 -p cp-llm，
+也接受已配置的规范 sf- 名称，例如 -p sf-ds-main、-p sf-cp-llm。
 至少两个 API Key 切换提供商已配置时，可用 -p agg 或 -p sf-agg 连接聚合实例，
 默认模型从服务端读取。自动审批沿用工作区或显式设置；终端退出时释放实例租约。
 Provider 选择不能与 --profile 同用；个人 Profile 请显式使用 --profile，-- 后参数原样透传。

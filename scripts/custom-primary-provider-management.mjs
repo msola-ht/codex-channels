@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
-import { createResponsesModelCatalog, resolveResponsesTemplateContexts, isResponsesProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { createResponsesModelCatalog, resolveResponsesTemplateContexts, isCustomCatalogProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath, customProviderUpstreamWireApis, readCustomProviderUpstreamWireApi, removeCustomProviderUpstreamMetadata, writeCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { isDeepStrictEqual } from "node:util";
 
@@ -36,13 +36,19 @@ import { PrimaryProviderManagementError } from "./primary-provider-management.mj
 
 export const primaryProviderId = "OpenAI";
 
-export function customPrimaryProviderIdFromBaseUrl(baseUrl) {
+export function customPrimaryProviderIdFromBaseUrl(baseUrl, catalogKind, environment = process.env) {
+  if (catalogKind !== "official" && catalogKind !== "custom") {
+    throw invalid("invalid-catalog", "catalog", "模型目录来源不受支持");
+  }
   const hostname = new URL(validCustomPrimaryProviderBaseUrl(baseUrl)).hostname.toLowerCase();
-  const id = hostname
+  const stem = hostname
     .replaceAll(/[^a-z0-9]+/gu, "-")
     .replaceAll(/^-+|-+$/gu, "")
-    .slice(0, 64);
-  const validationError = validateCustomPrimaryModelProviderId(id);
+    .slice(0, catalogKind === "custom" ? 61 : 64);
+  const id = catalogKind === "custom" ? `cp-${stem}` : stem;
+  const validationError = validateCustomPrimaryModelProviderId(id, environment)
+    ?? (catalogKind === "official" && isCustomCatalogProvider(id)
+      ? "Codex 兼容 Provider 不使用 cp- 前缀" : null);
   if (validationError !== null) {
     throw invalid("invalid-provider-id", "providerId", `无法从 URL 提取 Provider ID：${validationError}`);
   }
@@ -120,7 +126,7 @@ async function applySavePlan(input, plan, options) {
   const profilePath = customPrimaryProviderProfilePath(environment, plan.provider.id);
   const beforeProfile = existsSync(profilePath) ? read(profilePath) : undefined;
   const backupPaths = [configPath, customPrimaryProviderProfilePath(environment, plan.provider.id), customSwitchingProviderRegistryPath(environment),
-    ...(isResponsesProvider(plan.provider.id) ? [customProviderUpstreamMetadataPath(environment, plan.provider.id)] : [])];
+    ...(isCustomCatalogProvider(plan.provider.id) ? [customProviderUpstreamMetadataPath(environment, plan.provider.id)] : [])];
   const transaction = writeResponsesModelCatalog(environment, plan.provider.id, plan.models, plan.provider.model, plan.catalogRevision);
   try {
     writePrivateFileAtomicSync(responsesProviderBackupPath(environment, plan.provider.id), `${JSON.stringify({
@@ -140,7 +146,7 @@ async function applySavePlan(input, plan, options) {
       }
     } else {
       // Preserve both revisions when the remote write outcome cannot be established.
-      throw new AggregateError([error], "Responses Provider 保存结果无法确认；已保留模型目录及 .backup，请检查配置后恢复，勿自动重试", { cause: error });
+      throw new AggregateError([error], "自定义提供商保存结果无法确认；已保留模型目录及 .backup，请检查配置后恢复，勿自动重试", { cause: error });
     }
     throw error;
   }
@@ -195,8 +201,8 @@ async function applyConnectionSavePlan(input, plan, options) {
       credential: plan.credential,
     });
   }
-  // 元数据只属于自定义 Responses Provider（rs-*）；Codex 兼容 Provider 不写该文件。
-  if (isResponsesProvider(plan.provider.id)) {
+  // 元数据只属于自定义提供商（cp-*）；Codex 兼容 Provider 不写该文件。
+  if (isCustomCatalogProvider(plan.provider.id)) {
     if (plan.upstreamWireApi === "chat_completions") {
       writeCustomProviderUpstreamWireApi(environment, plan.provider.id, plan.upstreamWireApi);
     } else {
@@ -274,9 +280,9 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     throw invalid("invalid-websocket-setting", "supportsWebsockets", "WebSocket 设置必须是布尔值");
   }
   const custom = input.catalog?.kind === "custom";
-  // 未显式选择时沿用已保存的上游接口（新建与非 rs- Provider 使用 responses）；读取失败时失败关闭。
+  // 未显式选择时沿用已保存的上游接口（新建与非 cp- Provider 使用 responses）；读取失败时失败关闭。
   const upstreamWireApi = input.upstreamWireApi
-    ?? (isResponsesProvider(providerId) ? readCustomProviderUpstreamWireApi(environment, providerId) : "responses");
+    ?? (isCustomCatalogProvider(providerId) ? readCustomProviderUpstreamWireApi(environment, providerId) : "responses");
   if (!customProviderUpstreamWireApis.includes(upstreamWireApi)) {
     throw invalid("invalid-upstream-wire-api", "upstreamWireApi", "上游接口必须是 responses 或 chat_completions");
   }
@@ -284,11 +290,11 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     throw invalid("invalid-upstream-websocket", "supportsWebsockets", "Chat Completions 上游不支持 WebSocket");
   }
   if (upstreamWireApi === "chat_completions" && !custom) {
-    throw invalid("invalid-upstream-wire-api", "upstreamWireApi", "Chat Completions 上游只支持自定义 Responses Provider");
+    throw invalid("invalid-upstream-wire-api", "upstreamWireApi", "Chat Completions 上游只支持自定义提供商");
   }
   if (input.catalog !== undefined && (input.catalog?.kind !== "custom" || Object.keys(input.catalog).some(key => !["kind", "models"].includes(key)))) throw invalid("invalid-catalog", "catalog", "模型目录来源不受支持");
-  if (custom !== isResponsesProvider(providerId)) throw invalid("invalid-provider-id", "providerId", "自定义 Responses Provider 必须使用 rs- 前缀；Codex 兼容 Provider 不使用该前缀");
-  if (custom && displayName === "OpenAI") throw invalid("reserved-provider-name", "name", "自定义 Responses Provider 不能使用 OpenAI 显示名称，以免启用官方专用协议能力");
+  if (custom !== isCustomCatalogProvider(providerId)) throw invalid("invalid-provider-id", "providerId", "自定义提供商必须使用 cp- 前缀；Codex 兼容 Provider 不使用该前缀");
+  if (custom && displayName === "OpenAI") throw invalid("reserved-provider-name", "name", "自定义提供商不能使用 OpenAI 显示名称，以免启用官方专用协议能力");
   const previousCatalog = custom && input.operation === "update" ? readResponsesModelCatalog(environment, providerId) : undefined;
   if (custom && input.operation === "create" && existsSync(responsesProviderCatalogPath(environment, providerId))) throw invalid("provider-exists", "providerId", "该 Provider 已有模型目录，请先恢复或删除已有配置");
   const model = requiredString(input.model, "model", "模型 ID 不能为空");
@@ -438,7 +444,7 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
       ...(custom ? [
         { keyPath: "model_catalog_json", value: responsesProviderCatalogPath(environment, providerId) },
         { keyPath: "model_reasoning_effort", value: reasoningEffort },
-      ] : isResponsesProvider(effectiveActiveProviderId) ? [
+      ] : isCustomCatalogProvider(effectiveActiveProviderId) ? [
         { keyPath: "model_catalog_json", value: null },
         { keyPath: "model_reasoning_effort", value: null },
       ] : []),
@@ -460,7 +466,7 @@ async function loadSaveContext({
       client.readUserConfigSnapshot(),
       includeOfficialModels ? client.listModels() : [],
     ]);
-    return { snapshot, officialModels: includeOfficialModels && isResponsesProvider(record(snapshot.config).model_provider)
+    return { snapshot, officialModels: includeOfficialModels && isCustomCatalogProvider(record(snapshot.config).model_provider)
       ? bundledOfficialModelOptions(environment) : officialModels };
   } finally {
     await client.close().catch(() => undefined);

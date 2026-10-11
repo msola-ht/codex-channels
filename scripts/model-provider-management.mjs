@@ -1,8 +1,9 @@
-import { isResponsesProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { hasCodexAuthFile } from "../runtime/codex-home.mjs";
 import {
   listCustomPrimaryProviderCandidates,
+  validateCustomPrimaryModelProviderId,
   loadConfiguredCustomSwitchingModelProviders,
   loadManagedModelProviderSettings,
   readPrimaryProviderBackup,
@@ -24,6 +25,11 @@ export async function loadModelProviderManagementState({
   const fixedIds = listCustomCandidates(providerConfig);
   const backup = readBackup(environment);
   const backupIds = Object.keys(backup).filter((id) => !fixedIds.includes(id));
+  for (const id of backupIds) {
+    if (validateCustomPrimaryModelProviderId(id, environment) !== null) {
+      throw new Error("主 Provider 备份包含不受支持的 ID；自定义提供商必须使用 cp- 前缀");
+    }
+  }
   const activeId = optionalString(config.model_provider) ?? "openai";
   const managedProviders = loadManagedProviders(environment).map(safeManagedProvider);
   const customSwitchingProviders = loadCustomSwitchingProviders(environment)
@@ -145,7 +151,7 @@ function customCandidate(id, value, state, active, environment, model) {
  * 让编辑流程按“沿用已保存值”处理，而不是静默当作 responses。
  */
 function customUpstreamWireApi(id, environment) {
-  if (!isResponsesProvider(id)) return {};
+  if (!isCustomCatalogProvider(id)) return {};
   try {
     return { upstreamWireApi: readCustomProviderUpstreamWireApi(environment, id) };
   } catch {
@@ -186,7 +192,7 @@ function optionalString(value) {
 }
 
 function customCatalog(id, environment, model) {
-  if (!isResponsesProvider(id)) return {};
+  if (!isCustomCatalogProvider(id)) return {};
   const catalog = readResponsesModelCatalog(environment, id);
   return { catalog: "custom", models: catalog.definitions, model: model ?? catalog.defaultModel };
 }

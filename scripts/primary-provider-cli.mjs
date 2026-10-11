@@ -287,7 +287,7 @@ export async function runCustomPrimaryProviderMenu({
 } = {}) {
   while (true) {
     const action = await prompts.select({
-      message: catalogKind === "custom" ? "自定义 Responses Provider" : "Codex 兼容 Provider",
+      message: catalogKind === "custom" ? "自定义提供商" : "Codex 兼容 Provider",
       showInstructions: false,
       options: [
         { value: "add", label: "新增", hint: "新增固定或切换 Provider" },
@@ -306,7 +306,7 @@ export async function runCustomPrimaryProviderMenu({
       return { action: allowBack ? "back" : "cancel" };
     }
     if (action === "recover") {
-      const id = await prompts.text({ message: "Responses Provider ID" });
+      const id = await prompts.text({ message: "自定义提供商 ID" });
       if (prompts.isCancel(id)) continue;
       const recovery = await prompts.select({ message: "选择恢复方式", options: [{ value: "rollback", label: "回滚上一目录" }, { value: "keep", label: "保留新目录" }] });
       if (prompts.isCancel(recovery)) continue;
@@ -511,7 +511,7 @@ export async function runPrimaryProviderCli(
     const [id, action, yes] = rest;
     if (!id || !["keep", "rollback"].includes(action) || rest.length > 3 || (yes !== undefined && yes !== "--yes")) throw new Error("用法：codexc provider recover <Provider ID> <keep|rollback> [--yes]");
     if (yes !== "--yes") {
-      const confirmed = await prompts.confirm({ message: `恢复 ${id} 模型目录（如有上下文联动事务，将同时恢复关联的 DS、RS、CLP 目录及 Profile）：${action === "keep" ? "保留新目录" : "回滚上一目录"}？请先停止对应服务并核对配置。`, initialValue: false });
+      const confirmed = await prompts.confirm({ message: `恢复 ${id} 模型目录（如有上下文联动事务，将同时恢复关联的 DS、CP、CLP 目录及 Profile）：${action === "keep" ? "保留新目录" : "回滚上一目录"}？请先停止对应服务并核对配置。`, initialValue: false });
       if (prompts.isCancel(confirmed) || confirmed !== true) return;
     }
     await recoverResponsesProviderCatalog(id, action, environment);

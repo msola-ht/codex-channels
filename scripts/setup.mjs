@@ -172,7 +172,7 @@ async function runModelSetup({
         {
           value: "third_party",
           label: "第三方 Provider",
-          hint: "自定义 Responses、DeepSeek 官方、OpenCode Go 官方等",
+          hint: "自定义提供商、DeepSeek 官方、OpenCode Go 官方等",
         },
         { value: "back", label: "返回", hint: "返回设置类别" },
       ],

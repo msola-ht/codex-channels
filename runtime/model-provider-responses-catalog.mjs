@@ -13,13 +13,13 @@ const efforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "m
 const controlFree = (text) => !Array.from(text).some((character) => { const code = character.codePointAt(0); return (code < 32 && code !== 9 && code !== 10) || code === 127; });
 const instructions = "You are a coding assistant. Follow the user's instructions, inspect the workspace before making changes, use the available tools when needed, and report results accurately. Respect tool permissions and do not claim actions succeeded without evidence.";
 
-export function isResponsesProvider(id) {
-  return typeof id === "string" && id.startsWith("rs-");
+export function isCustomCatalogProvider(id) {
+  return typeof id === "string" && id.startsWith("cp-");
 }
 
 export function responsesProviderCatalogPath(environment, id) {
-  if (!/^rs-[A-Za-z0-9_-]{1,61}$/u.test(id)) {
-    throw new Error("自定义 Responses Provider ID 必须为 rs- 加 1-61 位字母、数字、- 或 _");
+  if (!/^cp-[A-Za-z0-9_-]{1,61}$/u.test(id)) {
+    throw new Error("自定义提供商 ID 必须为 cp- 加 1-61 位字母、数字、- 或 _");
   }
   return join(providerStorageRoot(environment), "responses", id, "models.json");
 }
@@ -106,10 +106,10 @@ export function parseResponsesModelCatalog(content) {
 export function readResponsesModelCatalog(environment, id) {
   assertResponsesContextSyncComplete(environment);
   const path = responsesProviderCatalogPath(environment, id);
-  if (existsSync(`${path}.pending`) && activeCatalogWrite.getStore() !== path) throw new Error(`Responses Provider ${id} 上次保存未完成；请先恢复目录事务`);
+  if (existsSync(`${path}.pending`) && activeCatalogWrite.getStore() !== path) throw new Error(`自定义提供商 ${id} 上次保存未完成；请先恢复目录事务`);
   let content;
   try { content = readPrivateFileSync(path, maximumBytes); } catch {
-    throw new Error(`Responses Provider ${id} 模型目录缺失或无法安全读取`);
+    throw new Error(`自定义提供商 ${id} 模型目录缺失或无法安全读取`);
   }
   const expected = parseResponsesModelCatalog(content);
   return { ...expected, path, content, revision: createHash("sha256").update(content).digest("hex") };
@@ -118,7 +118,7 @@ export function readResponsesModelCatalog(environment, id) {
 export function responsesModelSettings(environment, id, model) {
   const catalog = readResponsesModelCatalog(environment, id);
   const selected = catalog.definitions.find((entry) => entry.id === (model ?? catalog.defaultModel));
-  if (!selected) throw new Error("模型 ID 不在该 Responses Provider 的目录中");
+  if (!selected) throw new Error("模型 ID 不在该自定义提供商的目录中");
   return { catalog, model: selected.id, reasoningEffort: selected.defaultReasoningEffort };
 }
 
@@ -165,7 +165,7 @@ export function responsesContextSyncPath(environment) {
 }
 
 export function assertResponsesContextSyncComplete(environment) {
-  if (existsSync(responsesContextSyncPath(environment))) throw new Error("DS/RS 上下文同步未完成，请停止服务并执行 primary-provider recover <Provider ID> keep 或 rollback");
+  if (existsSync(responsesContextSyncPath(environment))) throw new Error("DS/CP 上下文同步未完成，请停止服务并执行 primary-provider recover <Provider ID> keep 或 rollback");
 }
 
 export function resolveResponsesTemplateContexts(definitions, environment) {

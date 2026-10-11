@@ -1,5 +1,5 @@
 import { loadClinePassAccounts, clinePassProviderId } from "./cline-pass-accounts.mjs";
-import { isResponsesProvider, responsesProviderCatalogPath, parseResponsesModelCatalog, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
+import { isCustomCatalogProvider, responsesProviderCatalogPath, parseResponsesModelCatalog, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -161,7 +161,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     appServerRuntime.customSwitchingProviders.map((provider) => provider.provider),
   );
   const officialCatalogPath = (customPrimaryProvider !== undefined && customPrimaryProvider.catalogPath === undefined)
-    || [...customSwitchingProviderIds].some(id => !isResponsesProvider(id))
+    || [...customSwitchingProviderIds].some(id => !isCustomCatalogProvider(id))
     ? writeCustomOfficialModelCatalog(
         runtime.environment,
         runtime.environment.CODEX_BINARY,
@@ -171,7 +171,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     ? appServerRuntime.customSwitchingProviders
     : appServerRuntime.customSwitchingProviders.map((provider) => ({
         ...provider,
-        arguments: withOfficialModelCatalog(provider.arguments, isResponsesProvider(provider.provider) ? responsesProviderCatalogPath(runtime.environment, provider.provider) : officialCatalogPath),
+        arguments: withOfficialModelCatalog(provider.arguments, isCustomCatalogProvider(provider.provider) ? responsesProviderCatalogPath(runtime.environment, provider.provider) : officialCatalogPath),
       }));
   const managedProviders = officialCatalogPath === undefined
     ? appServerRuntime.managedProviders
@@ -179,7 +179,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         customSwitchingProviderIds.has(provider.provider)
           ? {
               ...provider,
-              arguments: withOfficialModelCatalog(provider.arguments, isResponsesProvider(provider.provider) ? responsesProviderCatalogPath(runtime.environment, provider.provider) : officialCatalogPath),
+              arguments: withOfficialModelCatalog(provider.arguments, isCustomCatalogProvider(provider.provider) ? responsesProviderCatalogPath(runtime.environment, provider.provider) : officialCatalogPath),
             }
           : provider);
   const {
@@ -252,7 +252,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const modelGuard = guardedDefinition
       ? new ProviderModelGuard(join(managedProviderDirectory(runtime.environment, guardedDefinition),
         guardedDefinition.catalogFileName), model => isManagedProviderModelValid(guardedDefinition, model))
-      : isResponsesProvider(upstreamProvider)
+      : isCustomCatalogProvider(upstreamProvider)
         ? new ProviderModelGuard(responsesProviderCatalogPath(runtime.environment, upstreamProvider), model =>
           typeof model === "string" && model.trim() === model && model.length > 0 && model.length <= 200 && !/\p{Cc}/u.test(model), {
           parseCatalog: parseResponsesModelCatalog,

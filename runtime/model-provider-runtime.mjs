@@ -17,6 +17,7 @@ export {
 } from "./model-provider-managed-runtime.mjs";
 export {
   customPrimaryProviderProfileName,
+  customSwitchingProviderProfileName,
   validateCustomPrimaryModelProviderId,
   assertCustomPrimaryProviderAuthentication,
   listCustomPrimaryProviderCandidates,

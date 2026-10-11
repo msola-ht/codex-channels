@@ -51,7 +51,7 @@ export interface CustomPrimaryProviderSaveSummary {
   hasApiKey: true;
 }
 
-export function customPrimaryProviderIdFromBaseUrl(baseUrl: string): string;
+export function customPrimaryProviderIdFromBaseUrl(baseUrl: string, catalogKind: "official" | "custom", environment?: NodeJS.ProcessEnv): string;
 export function validCustomPrimaryProviderBaseUrl(value: unknown): string;
 export function customPrimaryProviderUrlsShareOrigin(left: string, right: string): boolean;
 

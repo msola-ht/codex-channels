@@ -340,12 +340,13 @@ DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSe
 codexc remote
 codexc remote resume
 codexc remote -p ds-main resume
+codexc remote -p cp-llm
 codexc remote --profile personal
 ```
 
 `codexc remote` 与 `codexc app` 的 `-p` / `--provider` 使用同一选择规则：接受已配置的完整
-Provider ID（如 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`my-provider`），或注册表中精确登记的
-规范 `sf-*` Profile 名称（如 `sf-ds-main`、`sf-custom-my-provider`）。推荐使用完整 Provider ID；
+Provider ID（如 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`cp-llm`、`my-provider`），或注册表中精确登记的
+规范 `sf-*` Profile 名称（如 `sf-ds-main`、`sf-cp-llm`、`sf-custom-my-provider`）。自定义提供商使用 `cp-` 前缀，支持独立选择 Responses 或 Chat Completions；对应配置文件为 `sf-cp-<名称>.config.toml`。推荐使用完整 Provider ID；
 只匹配已登记的名称，不通过任意剥除 `sf-` 前缀推测目标。未配置、歧义或重复选择均明确拒绝。
 两个入口默认都连接主实例，不根据 OpenAI 登录状态自动选择第三方，也不沿用上次选择；
 Remote 显式指定受管 `--profile` 时仍连接对应实例。

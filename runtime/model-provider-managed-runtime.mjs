@@ -368,7 +368,7 @@ export function writeManagedModelWindowGlobal(
       }), updates, originals);
     }
   }
-  // 全部受管目录、Profile 与 RS 跟随目录共享一次提交和原始快照回滚。
+  // 全部受管目录、Profile 与 CP 跟随目录共享一次提交和原始快照回滚。
   writeCatalogUpdates(environment, updates, originals, model);
   return {
     model,
