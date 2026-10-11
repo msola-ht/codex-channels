@@ -155,12 +155,13 @@ fi
 
 print_next_steps() {
   if [ "$codex_logged_in" = true ]; then
-    printf '%s\n' "下一步：codexc init && codexc setup && codexc install"
+    printf '%s\n' "下一步：在交互终端运行 codexc init，按向导完成接入与后台服务安装"
   else
     printf '%s\n' "下一步：codex login status"
     printf '%s\n' "如未登录：codex login"
-    printf '%s\n' "登录后执行：codexc init && codexc setup && codexc install"
+    printf '%s\n' "登录后在交互终端运行：codexc init，按向导完成接入与后台服务安装"
   fi
+  printf '%s\n' "仅在向导中跳过接入或安装时，之后按需运行 codexc setup、codexc install"
 }
 
 node "$staging/repository/scripts/sandbox-dependencies.mjs" \

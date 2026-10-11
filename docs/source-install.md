@@ -57,13 +57,17 @@ Codex CLI 是 Gateway 的必需运行时。安装器找不到 `codex` 时，会�
 并在未登录时执行 `codex login`。npm 全局 `bin` 不在 PATH 时，自动安装后会明确停止并提示修正。
 安装器把构建产物打成临时 npm 包并安装到 `npm prefix --global`，因此不会把源码路径显示为 npm
 依赖，也不会写入 `.zshrc`、`.bashrc` 或 `.profile`。安装使用当前 Node.js 环境的全局目录；使用
-fnm、nvm 等版本管理器时，切换 Node.js 版本也会切换对应的全局命令。随后执行：
+fnm、nvm 等版本管理器时，切换 Node.js 版本也会切换对应的全局命令。安装器只打印下一步提示，
+不自动执行初始化、接入向导或后台服务安装。安装成功后，由用户在交互终端执行完整初始化向导：
 
 ```bash
 codexc init
-codexc setup
-codexc install
 ```
+
+向导可完成 Provider、渠道与项目技能接入、可选功能设置和后台服务安装，并启动已启用的 WebUI。
+已在向导中完成的步骤无需重复执行；跳过接入或安装后，按需运行 `codexc setup`、`codexc install` 补充。
+非交互 `init` 仅初始化用户数据，不执行上述交互步骤；`setup` 仍要求交互终端。
+详细行为见[初始化与配置](user-guide.md#3-初始化与配置)。
 
 Windows 若 Git 仍报告 `Filename too long`，先在普通 PowerShell 中启用当前用户的 Git 长路径配置，
 再重新运行安装器；这不会修改仓库工作树，也不需要管理员权限：
@@ -143,7 +147,7 @@ Windows 构建使用现有 PowerShell 7 提前编译原生 Job/目录保护 DLL�
 
 `npm run install:global` 不拉取 Git，也不自动管理服务；上面的 `codexc install` 是另行执行的服务操作。自行选择分支并更新源码后重复执行程序安装；没有受管仓库时，`codexc update` 只同步配套 CLI 和校验配置、数据库，不更新本地源码或 Gateway 包。
 
-新设备按 `npm run install:global` → `codexc init` → `codexc setup` → `codexc install` 顺序操作；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。
+新设备先运行 `npm run install:global`，安装成功后在交互终端运行 `codexc init` 完成初始化、接入和后台服务安装；仅在跳过相应步骤时再按需运行 `codexc setup`、`codexc install`。非交互 `init` 只初始化用户数据，不提供无人值守接入；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。
 Windows 首次或旧服务定义不完整时，若任务激活或就绪检查失败，会保留本次生成的服务定义并报告原始失败阶段，便于检查状态、日志和重试；不会删除任务引用的定义后再尝试安装不存在的旧服务。已有完整定义的安装继续恢复旧定义；恢复失败时同时保留原始安装错误。
 Windows 安装预检会拒绝权限、类型或大小不安全的旧服务定义与启动器；不会将这些文件用作恢复快照。激活时先停止核心服务和 Relay，再按新定义启动，WebUI 的运行状态保留；App Server 定义缺少 Socket 路径时明确要求重新安装。
 Codex 0.160.1 要求 Windows Socket 目录仅允许当前用户访问。App Server 启动前会将项目已受信任的目录 ACL 收紧为上游要求的单条可继承权限，其他运行时写入保留该权限；不接管不同所有者或放行含不受信任主体的 Socket 目录。请用普通用户终端安装，不依赖管理员提权绕过检查。

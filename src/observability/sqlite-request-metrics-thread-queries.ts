@@ -32,7 +32,7 @@ import {
   requestOutcomeSql,
   validateThreadId,
   type MetricsQueryReader,
-} from "./sqlite-request-metrics-queries.js";
+} from "./sqlite-request-metrics-query-base.js";
 import type { SqliteRequestMetricsSubagentQueries } from "./sqlite-request-metrics-subagent-queries.js";
 
 /** 会话级只读查询：Thread/Turn 聚合、耗时、中断与分页列表。 */

@@ -241,6 +241,10 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   ) => {
     assertRunning();
     const metricsProvider = proxyProviderIds.get(provider) ?? provider;
+    // 固定自定义 Provider 保留主实例的 IPC 路由键；目录和上游能力使用实际 Provider 身份。
+    const upstreamProvider = provider === primaryProvider
+      ? customPrimaryProvider?.id ?? metricsProvider
+      : metricsProvider;
     const definition = providerDefinitions.get(provider) ?? sharedManagedProviderDefinition(provider);
     let bridge;
     const guardedDefinition = definition && ["ocg", "opencode-go", "ccg", "clp"].includes(definition.storageId ?? definition.id)
@@ -248,21 +252,21 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const modelGuard = guardedDefinition
       ? new ProviderModelGuard(join(managedProviderDirectory(runtime.environment, guardedDefinition),
         guardedDefinition.catalogFileName), model => isManagedProviderModelValid(guardedDefinition, model))
-      : isResponsesProvider(metricsProvider)
-        ? new ProviderModelGuard(responsesProviderCatalogPath(runtime.environment, metricsProvider), model =>
+      : isResponsesProvider(upstreamProvider)
+        ? new ProviderModelGuard(responsesProviderCatalogPath(runtime.environment, upstreamProvider), model =>
           typeof model === "string" && model.trim() === model && model.length > 0 && model.length <= 200 && !/\p{Cc}/u.test(model), {
           parseCatalog: parseResponsesModelCatalog,
           blockedPaths: [
-            `${responsesProviderCatalogPath(runtime.environment, metricsProvider)}.pending`,
+            `${responsesProviderCatalogPath(runtime.environment, upstreamProvider)}.pending`,
             responsesContextSyncPath(runtime.environment),
           ],
         })
         : undefined;
     // 官方 OpenAI 端点理解 Codex 私有输入项；自定义固定 Provider 复用 openai 路由键但换成第三方上游。
-    // 判定跟随真实 Provider 身份（metricsProvider），聚合快照可能给同一 Provider 派生带摘要的代理键。
-    const officialOpenAiRoute = metricsProvider === "openai" && customPrimaryProvider === undefined;
+    // 聚合快照可能派生带摘要的代理键，固定自定义 Provider 则复用 openai 路由键。
+    const officialOpenAiRoute = upstreamProvider === "openai";
     let bridgedClinePass = false;
-    if (upstreamWireApiFor(metricsProvider, provider) === "chat_completions") {
+    if (upstreamWireApiFor(upstreamProvider, provider) === "chat_completions") {
       const clinePass = definition?.storageId === "clp" || definition?.id === "clp";
       bridgedClinePass = clinePass;
       bridge = new ChatCompletionsBridge({ ...options,
@@ -293,9 +297,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
               retentionDays: validatedDebug.model_traffic_retention_days,
               // Fixed custom Providers use the primary IPC route, but their
               // persisted capture identity must describe the actual Provider.
-              label: provider === primaryProvider
-                ? customPrimaryProvider?.id ?? metricsProvider
-                : metricsProvider,
+              label: upstreamProvider,
             },
           }),
     };

@@ -7,7 +7,7 @@ import type {
   UserFacingError,
 } from "../../conversation-core/index.js";
 import {
-  conversationCommandHelpLines,
+  formatConversationCommandHelpLines,
 } from "../conversation-command-help.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
 import {
@@ -45,6 +45,7 @@ import {
 import type { SurfaceConfigurationChange } from "../types.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 import { formatFeishuConversationIdleReleased } from "./idle-release-card.js";
+import { formatFeishuCommandMarkdown } from "./command-format.js";
 
 /**
  * Turn Diff 是原始代码内容：飞书用围栏展示，与 Telegram 的 `<pre>` 约定一致，
@@ -53,7 +54,7 @@ import { formatFeishuConversationIdleReleased } from "./idle-release-card.js";
 export function renderFeishuCommandResult(
   result: ConversationCommandResult,
 ): string | null {
-  const rendered = renderConversationCommandResult(result);
+  const rendered = renderConversationCommandResult(result, formatFeishuCommandMarkdown);
   if (rendered === null || result.kind !== "artifacts") {
     return rendered;
   }
@@ -113,7 +114,7 @@ export function renderFeishuHelp(): string {
     "",
     "普通文本会发送到当前 Codex Session。",
     "",
-    ...conversationCommandHelpLines,
+    ...formatConversationCommandHelpLines(formatFeishuCommandMarkdown),
     "飞书：",
     "- /whoami · /fs <status|doctor|revoke>",
     "- /start · /help · /h",

@@ -312,12 +312,12 @@ export function responsesToChat(value: unknown, supportedReasoningEfforts?: read
   return { request: result, toolNames, ...(structuredOutput === undefined ? {} : { structuredOutput }) };
 }
 
-/** 把结构化输出的 schema 作为系统指令下发；工具轮次不受该约束，最终答复才必须是一个 JSON 对象。 */
+/** 把结构化输出的 schema 作为系统指令下发；工具轮次不受该约束，最终答复必须是符合 schema 的 JSON 值。 */
 function appendOutputFormatDirective(messages: ChatMessage[], responseFormat: JsonObject): void {
   const spec = object(responseFormat.json_schema);
-  const directive = "OUTPUT FORMAT REQUIREMENT: your final answer must be exactly one JSON object matching the JSON Schema below. "
-    + "Write no Markdown, headings, code fences, commentary or text outside that object; use every required field with the correct types and no other fields. "
-    + "This applies only to your final answer: call tools as usual, and write the JSON object once you are done with them.\nJSON Schema:\n"
+  const directive = "OUTPUT FORMAT REQUIREMENT: your final answer must be exactly one JSON value matching the JSON Schema below, including its root type. "
+    + "Write no Markdown, headings, code fences, commentary or text outside that value; follow the schema's required fields, types and additional-property rules. "
+    + "This applies only to your final answer: call tools as usual, and write the JSON value once you are done with them.\nJSON Schema:\n"
     + JSON.stringify(spec.schema);
   const first = messages[0];
   if (first?.role === "system" && typeof first.content === "string") {

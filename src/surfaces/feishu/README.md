@@ -59,7 +59,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `command-format.ts`：把 Gateway Markdown 文案中独立成行的命令和“标签：命令”的值渲染为行内代码，
   供 Markdown 文案出口（`notifyMarkdown`、`deliverMarkdown`）与命令中心 Markdown 卡片共用；
   只识别共享命令、别名与飞书专有命令，跳过目录/路径/文件字段、缩进代码块、代码围栏、表格行、
-  句内提及与已存在的行内代码；说明含反引号或命令跨度超过 200 字符时放弃装饰。
+  句内提及与已存在的行内代码；命令按整行保留实参，帮助生成处显式分开命令与说明；
+  命令含反引号或跨度超过 200 字符时放弃装饰。
 - `idle-release-card.ts`：把渠道会话空闲自动解除通知生成为直接携带 `Session ID` 和
   `/r <Thread ID>` 命令的 CardKit 2.0 卡片，并用同一文案生成创建失败时的围栏代码块降级 Markdown。
 - `input-card.ts`：生成 CardKit 2.0 有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片；异步问题复用 Markdown 安全处理，截断时闭合代码围栏，结果卡片保留有界题干。

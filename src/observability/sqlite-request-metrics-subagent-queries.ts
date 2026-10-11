@@ -15,7 +15,7 @@ import {
   requestOutcomeSql,
   validateThreadId,
   type MetricsQueryReader,
-} from "./sqlite-request-metrics-queries.js";
+} from "./sqlite-request-metrics-query-base.js";
 
 /** 子代理级只读查询：子代理关系分页、直接子级计数与同步游标读取。 */
 export class SqliteRequestMetricsSubagentQueries {

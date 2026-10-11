@@ -4,7 +4,8 @@ import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { SqliteQuotaQueries } from "./sqlite-quota-queries.js";
 import { SqliteAutoApprovalReviewMetrics } from "./sqlite-auto-approval-review-metrics.js";
-import { SqliteRequestMetricsQueries, validateThreadId } from "./sqlite-request-metrics-queries.js";
+import { SqliteRequestMetricsQueries } from "./sqlite-request-metrics-queries.js";
+import { validateThreadId } from "./sqlite-request-metrics-query-base.js";
 
 import {
   securePrivateDirectorySync,

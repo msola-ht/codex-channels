@@ -18,9 +18,6 @@ const commandNames: ReadonlySet<string> = new Set([
 const listMarker = /^(\s*(?:[-*+]\s+|\d+[.)]\s+)?)([\s\S]*)$/u;
 const fieldPrefix = /^([^：\n]{1,32}：)(\S[\s\S]*)$/u;
 const commandToken = /^\/([a-z][a-z0-9-]*)(?:\s|$)/u;
-const cjk = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u;
-const descriptionSeparator = /[\s·；，。、（）]/u;
-const trailingPunctuation = /[\s。；，、！？…]+$/u;
 /** 目录、路径与文件字段的值是路径，即使与命令同名也不是命令。 */
 const pathField = /(目录|路径|文件)/u;
 /** 四空格或制表符缩进在 Markdown 里可能是代码块，不再重复包装。 */
@@ -61,80 +58,38 @@ function formatFeishuCommandLine(line: string): string {
   }
   const marker = marked[1]!;
   const body = marked[2]!;
-  const field = fieldPrefix.exec(body);
-  if (field !== null && pathField.test(field[1]!)) {
+  const command = wrapCommand(body);
+  if (command !== undefined) {
+    return `${marker}${command}`;
+  }
+  // 已知命令的实参也可能含“路径：”等文本，不把它再次解释成字段标签。
+  if (commandToken.test(body)) {
     return line;
   }
-  const rendered = wrapCommandRun(field === null ? body : field[2]!);
+  const field = fieldPrefix.exec(body);
+  if (field === null || pathField.test(field[1]!)) {
+    return line;
+  }
+  const rendered = wrapCommand(field[2]!);
   if (rendered === undefined) {
     return line;
   }
-  return `${marker}${field === null ? "" : field[1]!}${rendered}`;
+  return `${marker}${field[1]!}${rendered}`;
 }
 
-function wrapCommandRun(value: string): string | undefined {
-  const segments = value.split(" · ");
-  let consumed = 0;
-  while (consumed < segments.length && isCommandSegment(segments[consumed]!)) {
-    consumed += 1;
-  }
-  if (consumed === 0) {
+function wrapCommand(value: string): string | undefined {
+  const match = commandToken.exec(value);
+  if (match === null || !commandNames.has(match[1]!)) {
     return undefined;
   }
-  const last = stopAtDescription(segments[consumed - 1]!);
-  const command = [
-    ...segments.slice(0, consumed - 1),
-    last.code,
-  ].join(" · ");
-  const rest = segments.slice(consumed).join(" · ");
-  const tail = rest.length === 0
-    ? last.suffix
-    : `${last.suffix} · ${rest}`;
+  // 命令行整体是可复制范围；搜索词、名称与标点都是实参，不能用语言或分隔符推断说明。
+  // 带说明的帮助在生成处显式分开命令与说明，再进入这一层。
   // 反引号无法配对或跨度会跨分片边界时保留原文，避免产出损坏的 Markdown。
   if (
-    command.trim().length === 0
-    || [...command].length > maximumCommandCharacters
-    || command.includes("`")
-    || tail.includes("`")
+    [...value].length > maximumCommandCharacters
+    || value.includes("`")
   ) {
     return undefined;
   }
-  return `\`${command}\`${tail}`;
-}
-
-function isCommandSegment(segment: string): boolean {
-  const match = commandToken.exec(segment.trim());
-  return match !== null && commandNames.has(match[1]!);
-}
-
-/**
- * 命令之后的中文说明不属于命令本身：占位符括号内的中文照旧保留，
- * 括号外的首个中文字符起为说明，结尾的命令标点留在代码之外。
- */
-function stopAtDescription(segment: string): { code: string; suffix: string } {
-  let depth = 0;
-  for (let index = 0; index < segment.length; index += 1) {
-    const character = segment[index]!;
-    if (character === "<" || character === "[" || character === "(") {
-      depth += 1;
-      continue;
-    }
-    if (character === ">" || character === "]" || character === ")") {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (depth === 0 && (character === "（" || cjk.test(character))) {
-      let end = index;
-      while (end > 0 && descriptionSeparator.test(segment[end - 1]!)) {
-        end -= 1;
-      }
-      return {
-        code: segment.slice(0, end),
-        suffix: segment.slice(end),
-      };
-    }
-  }
-  const code = segment.trimEnd();
-  const trimmed = code.replace(trailingPunctuation, "");
-  return { code: trimmed, suffix: code.slice(trimmed.length) };
+  return `\`${value}\``;
 }

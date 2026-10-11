@@ -169,6 +169,7 @@ function formatSessionLabel(value: string): string {
 
 export function formatConversationOccupancy(
   result: Extract<ConversationCommandResult, { kind: "occupancy" }>,
+  formatCommand: (command: string) => string = (command) => command,
 ): string {
   const { result: release } = result;
   switch (release.status) {
@@ -194,7 +195,7 @@ export function formatConversationOccupancy(
         `进程：${formatProcessCommand(release.holder.command)}`,
         release.releasable
           ? release.stuck
-            ? "当前会话恢复失败，可确认释放：/release force（会向该进程发送结束信号；若是 App Server 子进程，服务会自动重启并重连所有会话）。"
+            ? `当前会话恢复失败，可确认释放：${formatCommand("/release force")}（会向该进程发送结束信号；若是 App Server 子进程，服务会自动重启并重连所有会话）。`
             : "当前会话运行正常，通常无需释放；如确认需要，/release force 会结束该进程（App Server 子进程会重启并重连所有会话）。"
           : "该进程无法自动释放，请关闭占用 Session 的 Codex 客户端，或重启 App Server 服务。",
         `Session ID：${release.threadId}`,

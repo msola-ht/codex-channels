@@ -55,8 +55,8 @@ export const conversationCommandHelpSections = [
     title: "运行与项目：",
     lines: [
       "/status · /workspace [序号|ID|名称] · /workspaceperm",
-      "/autoreview [on|off]（当前会话后续轮次）",
-      "/workspaceperm autoreview <on|off|clear>（工作区默认审批方式）",
+      { command: "/autoreview [on|off]", description: "（当前会话后续轮次）" },
+      { command: "/workspaceperm autoreview <on|off|clear>", description: "（工作区默认审批方式）" },
       "/stop · /queue add <文本> · /queue list [页码]",
       "/queue update <完整 ID 或列表序号> <文本> · /queue delete <完整 ID 或列表序号>",
       "/queue reorder <完整 ID 或列表序号> <目标位置> · /queue start [完整 ID 或列表序号]",
@@ -101,9 +101,17 @@ export const conversationCommandHelpSections = [
   },
 ] as const;
 
-export const conversationCommandHelpLines = conversationCommandHelpSections
-  .flatMap((section) => [
+/** 帮助生成处声明命令与说明的边界，渠道只负责已知命令的排版。 */
+export function formatConversationCommandHelpLines(
+  formatCommand: (command: string) => string = (command) => command,
+): string[] {
+  return conversationCommandHelpSections.flatMap((section) => [
     section.title,
-    ...section.lines.map((line) => `- ${line}`),
+    ...section.lines.map((line) => typeof line === "string"
+      ? `- ${formatCommand(line)}`
+      : `- ${formatCommand(line.command)}${line.description}`),
     "",
   ]);
+}
+
+export const conversationCommandHelpLines = formatConversationCommandHelpLines();

@@ -31,6 +31,7 @@ import type {
 } from "./command-center.js";
 import { escapeFeishuCardMarkdown } from "./message-content.js";
 import { renderFeishuCommandResult } from "./renderer.js";
+import { formatFeishuCommandMarkdown } from "./command-format.js";
 
 const feishuQueueChoiceChunkSize = 13;
 
@@ -624,7 +625,7 @@ export function renderCommandCenterChoices(
     const { threadId, reviewer } = result.state;
     return {
       title: "当前会话审批方式",
-      description: formatConversationAutoReview(result),
+      description: formatConversationAutoReview(result, formatFeishuCommandMarkdown),
       descriptionFormat: "markdown",
       choices: threadId !== null && (reviewer === "user" || reviewer === "auto_review")
         ? (["on", "off"] as const).map(value => ({

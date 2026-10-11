@@ -48,6 +48,7 @@ import { formatConversationMetrics } from "./metrics-format.js";
 
 export function renderConversationCommandResult(
   result: ConversationCommandResult,
+  formatCommand?: (command: string) => string,
 ): string | null {
   switch (result.kind) {
     case "outcome":
@@ -76,9 +77,9 @@ export function renderConversationCommandResult(
     case "workspace-permissions":
       return formatConversationWorkspacePermissions(result);
     case "auto-review":
-      return formatConversationAutoReview(result);
+      return formatConversationAutoReview(result, formatCommand);
     case "models":
-      return formatConversationModels(result);
+      return formatConversationModels(result, formatCommand);
     case "collaboration-mode":
       return formatConversationCollaborationMode(result);
     case "skills":
@@ -120,7 +121,7 @@ export function renderConversationCommandResult(
     case "goal":
       return formatConversationGoal(result);
     case "occupancy":
-      return formatConversationOccupancy(result);
+      return formatConversationOccupancy(result, formatCommand);
   }
   return null;
 }

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { AutoApprovalReviewStore, AutoApprovalReviewSummary } from "./request-metrics.js";
-import { validateThreadId } from "./sqlite-request-metrics-queries.js";
+import { validateThreadId } from "./sqlite-request-metrics-query-base.js";
 
 /** Minimal review identity and observation facts; no approval content or history. */
 export class SqliteAutoApprovalReviewMetrics implements AutoApprovalReviewStore {

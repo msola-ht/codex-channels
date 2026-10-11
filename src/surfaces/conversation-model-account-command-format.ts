@@ -27,6 +27,7 @@ const maximumThreadUsageGroups = 8;
 
 export function formatConversationModels(
   result: Extract<ConversationCommandResult, { kind: "models" }>,
+  formatCommand: (command: string) => string = (command) => command,
 ): string {
   const { state } = result;
   const current = state.models.find((model) =>
@@ -48,7 +49,7 @@ export function formatConversationModels(
       speed,
       `模型支持：${formatModelSpeedSupport(current)}`,
       "",
-      "切换：/fast [on|ultrafast|off|status]（on：Fast；off：Standard）",
+      `切换：${formatCommand("/fast [on|ultrafast|off|status]")}（on：Fast；off：Standard）`,
     ].join("\n"));
   }
   if (result.view === "effort") {
@@ -112,7 +113,7 @@ export function formatConversationModels(
     }),
     "",
     scopedModels.some((model) => modelListEntry(model.displayName, model.provider, model.model).grouped)
-      ? "切换：/model <模型序号>（显示组名不用于选择）"
+      ? `切换：${formatCommand("/model <模型序号>")}（显示组名不用于选择）`
       : "切换：/model <模型序号>",
   ].join("\n"));
 }
