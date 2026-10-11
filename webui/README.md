@@ -85,7 +85,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 `components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。共享 `TooltipContent` 默认在右侧显示，空间不足时由组件自动避让。
 `components/metrics/model-usage-cards.tsx` 为控制台与子代理页提供两行紧凑模型用量卡片，只展示调用方给定的统计范围；`components/overview/model-usage.tsx` 组合控制台模型区，默认显示前八个模型，支持展开全部和收起。
-控制台卡片使用服务端返回的 `members` 展开提供商与原始模型明细，展开时占整行；原始 ID 不再映射。各行展示请求数、轮次、输入、缓存命中率和输出，轮次去重口径附在表格下方。缺少 `members` 的子代理卡片保持原样。
+控制台卡片仅在服务端返回多个 `members` 时显示加粗边框，悬浮或聚焦时强化边框；点击卡片打开明细弹窗，不再显示占位的明细按钮。全卡片点击入口使用绝对定位的标准 Button 与 DialogTrigger，和内容提示作为兄弟元素，内部用量与截断提示独立聚焦和操作。单个成员只展示紧凑汇总。弹窗保留提供商与原始模型 ID，各行展示请求数、轮次、输入、缓存命中率和输出，轮次去重口径放在弹窗说明中，窄屏或大量明细可滚动查看。超过八个模型时，模型区的展开全部/收起按钮始终显示。缺少 `members` 的子代理卡片保持原样。
 
 `components/settings/model-display-groups.tsx` 在模型配置页管理显示组，可选择 DS 目标名与已配置模型成员，也可手填历史 ID；复用版本化预览、确认与备份链路，取消确认或预览失败保留草稿，草稿绑定打开时的配置版本以阻止覆盖并发修改。选择标签保留原始 ID，同一 ID 的候选项列出所有来源提供商。
 `hooks/use-model-display-settings.ts` 通过只读 `/api/v1/settings/model-display` 加载共享显示映射，保存后主动刷新，页面挂载期间定期重新读取；`lib/format.ts` 只映射最终名称，不改变原始选择值。

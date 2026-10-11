@@ -1,11 +1,9 @@
-import { useState } from "react"
-import { ChevronDownIcon, ChevronUpIcon } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "cn"
 import { TableHint, TruncatedText } from "@/components/metrics/data-table"
 import { InputTokenTooltip } from "@/components/metrics/token-tooltip"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useTranslation } from "@/hooks/use-translation"
 import { formatCacheUsage, formatModelName, formatRequestOutcomes, formatTokens } from "@/lib/format"
@@ -28,11 +26,12 @@ export function ModelUsageCards({ usage, grouped = false }: { usage: readonly Ca
 
 function ModelUsageCard({ item, grouped, formatCount }: { item: CardUsage; grouped: boolean; formatCount: (value: number) => string }) {
   const { t } = useTranslation()
-  const [expanded, setExpanded] = useState(false)
   const name = (grouped ? item.model : formatModelName(item.model, null)) ?? t("threads.unknownModel")
   const members = item.members ?? []
-  return <Collapsible open={expanded} onOpenChange={setExpanded} render={<Card size="sm" className={cn("min-w-0 gap-1", expanded && "col-span-full")} />}>
-      <CardHeader className="flex min-w-0 flex-wrap items-center gap-2">
+  const hasDetails = members.length > 1
+  const card = <Card size="sm" className={cn("relative min-w-0 gap-1", hasDetails && "ring-2 ring-primary/50 hover:ring-primary focus-within:ring-primary")}>
+      {hasDetails && <DialogTrigger render={<Button variant="ghost" />} className="absolute inset-0 size-full cursor-pointer rounded-xl" aria-label={t("overview.showModelDetailsLabel", { model: name })} />}
+      <CardHeader className={cn("flex min-w-0 flex-wrap items-center gap-2", hasDetails && "pointer-events-none relative [&_[data-slot=tooltip-trigger][tabindex]]:pointer-events-auto")}>
         <CardTitle className="min-w-[min(8rem,100%)] flex-1"><TruncatedText text={name} className="max-w-full" /></CardTitle>
         <dl className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
           <div className="flex items-center gap-1 whitespace-nowrap">
@@ -46,12 +45,8 @@ function ModelUsageCard({ item, grouped, formatCount }: { item: CardUsage; group
             <dd className="font-medium tabular-nums">{formatCount(item.turnCount)}</dd>
           </div>
         </dl>
-        {members.length > 0 && <CollapsibleTrigger render={<Button variant="ghost" size="sm" />} aria-label={t(expanded ? "overview.hideModelDetailsLabel" : "overview.showModelDetailsLabel", { model: name })}>
-          {expanded ? <ChevronUpIcon data-icon="inline-start" /> : <ChevronDownIcon data-icon="inline-start" />}
-          {expanded ? t("overview.hideModelDetails") : t("overview.showModelDetails", { count: members.length })}
-        </CollapsibleTrigger>}
       </CardHeader>
-      <CardContent>
+      <CardContent className={cn(hasDetails && "pointer-events-none relative [&_[data-slot=tooltip-trigger][tabindex]]:pointer-events-auto")}>
         <dl className="flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-1 whitespace-nowrap">
             <dt className="text-muted-foreground">{t("metrics.inputColumn")}</dt>
@@ -70,8 +65,19 @@ function ModelUsageCard({ item, grouped, formatCount }: { item: CardUsage; group
             <dd className="font-medium tabular-nums">{formatTokens(item.outputTokens)}</dd>
           </div>
         </dl>
-        {members.length > 0 && <CollapsibleContent>
-          <div className="flex flex-col gap-2 pt-3">
+      </CardContent>
+  </Card>
+
+  if (!hasDetails) return card
+
+  return <Dialog>
+    {card}
+    <DialogContent closeLabel={t("common.close")} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-5xl">
+      <DialogHeader className="min-w-0 pr-8">
+        <DialogTitle className="break-all">{name}</DialogTitle>
+        <DialogDescription>{t("overview.modelDetailsHint")}</DialogDescription>
+      </DialogHeader>
+          <div className="min-w-0">
             <Table>
               <TableHeader><TableRow>
                 <TableHead>{t("metrics.provider")}</TableHead><TableHead>{t("overview.originalModel")}</TableHead>
@@ -88,9 +94,7 @@ function ModelUsageCard({ item, grouped, formatCount }: { item: CardUsage; group
                 <TableCell className="text-right tabular-nums">{formatTokens(member.outputTokens)}</TableCell>
               </TableRow>)}</TableBody>
             </Table>
-            <p className="text-xs text-muted-foreground">{t("overview.modelDetailsHint")}</p>
           </div>
-        </CollapsibleContent>}
-      </CardContent>
-  </Collapsible>
+    </DialogContent>
+  </Dialog>
 }
