@@ -23,7 +23,7 @@ export interface SurfaceConfigurationChange {
     | "provider-settings-applied"
     | "provider-settings-failed";
   changes: readonly ConfigChange[];
-  addedWorkspaces: readonly Workspace[];
+  addedWorkspaces: readonly (Workspace & { readonly listNumber: number })[];
   providers?: readonly string[];
 }
 

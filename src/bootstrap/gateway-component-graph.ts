@@ -1335,7 +1335,7 @@ export abstract class GatewayComponentGraph {
       this.surfaceManager.configurationChanged({
         action: "reloaded",
         changes: result.changes,
-        addedWorkspaces,
+        addedWorkspaces: this.numberAddedWorkspaces(addedWorkspaces),
       });
     }
     return result;
@@ -1824,13 +1824,26 @@ export abstract class GatewayComponentGraph {
     }
   }
 
+  private numberAddedWorkspaces(
+    workspaces: readonly GatewayConfig["workspaces"][number][],
+  ) {
+    const registered = this.workspaces.list();
+    return workspaces.map((workspace) => {
+      const index = registered.findIndex((entry) => entry.id === workspace.id);
+      if (index < 0) {
+        throw new Error("新增 Workspace 通知的目标不在当前注册列表中");
+      }
+      return { ...workspace, listNumber: index + 1 };
+    });
+  }
+
   deliverAddedWorkspaceNotifications(
     workspaces: readonly GatewayConfig["workspaces"][number][],
   ): Promise<void> {
     return this.surfaceManager.deliverConfigurationChange({
       action: "reloaded",
       changes: [configChange("workspace.registry")],
-      addedWorkspaces: workspaces,
+      addedWorkspaces: this.numberAddedWorkspaces(workspaces),
     });
   }
 

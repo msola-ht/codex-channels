@@ -57,7 +57,7 @@ export function formatStatus(status: ConversationStatus): string {
   return formatConversationStatus(status);
 }
 
-export function formatWorkspacesAdded(workspaces: readonly Workspace[]): string {
+export function formatWorkspacesAdded(workspaces: SurfaceConfigurationChange["addedWorkspaces"]): string {
   return formatSharedWorkspacesAdded(workspaces, true);
 }
 
