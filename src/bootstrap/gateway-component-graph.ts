@@ -133,7 +133,6 @@ import {
   canReviewConversationHook,
   canPreserveWeixinHookReviewText,
   formatProviderIdleReleaseNotice,
-  setConfiguredCustomPrimaryProviderId,
   setModelDisplayAliases,
   type SurfaceAdapter,
   SurfaceOutputCoalescer,
@@ -303,11 +302,7 @@ export abstract class GatewayComponentGraph {
       };
     this.transport = createTransport(config.codexSocketPath);
     this.primaryProvider = primaryProvider;
-    const customProviderIds = customPrimaryProvider === undefined
-      ? customSwitchingProviders.map(({ id }) => id)
-      : [customPrimaryProvider.id];
     this.customPrimaryProviderId = customPrimaryProvider?.id;
-    setConfiguredCustomPrimaryProviderId(customProviderIds);
     setModelDisplayAliases(config.modelDisplayAliases);
     const clients = new Map<string, CodexAppServerClient>();
     clients.set(primaryProvider, new CodexAppServerClient(

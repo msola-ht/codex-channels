@@ -13,7 +13,7 @@
 配置为 Gateway TOML 的 `[display.model_aliases]`，键是精确原始模型 ID，值是显示组名；默认空映射。
 例如 `"cline-pass/deepseek-v4.1-flash" = "deepseek-flash"`。同一 ID 跨提供商使用同一显示名，
 提供商身份、模型选择的回调和原始 ID 始终独立。渠道模型列表项统一为“提供商 · 模型名”，
-显示组名代替模型名；受管账户 Provider 显示为 `DS <账户>`、`CLP <账户>`、`CommandCode Go <账户>`，
+显示组名代替模型名；提供商统一显示为 `DS <账户>`、`CLP <账户>`、`CCG <账户>`、`OCG <账户>`、`CP <名称>`，聚合为 `AGG`，
 模型目录自带的前缀按同一标签归一（例如 `Cline Pass main · MiMo-V2.6-Flash` 显示为
 `CLP main · MiMo-V2.6-Flash`）。聚合模型改显示成员 Provider 标签与模型名，成员模型沿用自己
 的显示组（例如 `聚合提供商 · clp-main · CLP DeepSeek V4.1 Flash` 显示为
@@ -201,11 +201,11 @@ Core 和投递路径保留经处理的有界纯文本。Telegram 在 HTML 面板
   仍独立展示。
 - 推理 Token 计数对所有 Provider 展示；指标库不保存推理正文；Chat 转换层会处理推理回传，显式开启的调用转储可能保存原始推理内容，见[调用详情](user-guide.md#模型请求转储)。
 - 原生 OpenAI 账户对应的 Codex Provider 明确显示为“OpenAI 官方”；配置的自定义主模型
-  Provider（如 `model_providers.OpenAI`）显示为“OpenAI · 自定义”，与官方直连区分。
-- 受管账户 Provider 在渠道统一使用短标签 `DS <账户>`、`CLP <账户>`、`CommandCode Go <账户>`：
+  Provider 不追加“自定义”后缀；`cp-llm` 显示为 `CP llm`，Codex 兼容类型的 `OpenAI` 保留原 ID。
+- Provider 在渠道统一使用短标签 `DS <账户>`、`CLP <账户>`、`CCG <账户>`、`OCG <账户>`、`CP <名称>`，聚合提供商显示为 `AGG`：
   提供商菜单、模型列表、模型行、状态、完成卡片、`/usage`、`/metrics`、会话列表与定时任务
-  提示都是同一写法。`ds-<账户>`、`clp-<账户>`、`ccg-<账户>` 仍是内部 Provider 标识，
-  只在 Relay／API Key 等按标识展示的位置原样出现。Setup 品牌入口、WebUI 账户卡片与账户设置
+  提示都是同一写法；OCG 使用账户 ID，不使用邮箱或手机号作为渠道标签。`ds-<账户>`、`clp-<账户>`、`ccg-<账户>`、`ocg-<账户>`、`cp-<名称>` 仍是实际 Provider 标识，
+  CLI 的 `-p` 参数、Relay／API Key 等按标识展示的位置仍使用原始 ID。Setup 品牌入口、WebUI 账户卡片与账户设置
   使用完整名称 Cline Pass。
 - WebUI 请求及错误列表按记录的请求服务层级展示 Fast 或 Ultrafast，调用详情区分请求与响应层级。
   两者不一致时沿用提示说明实际响应层级；`priority` 与 `fast` 视为同档，未知或缺失响应不推断为 Standard。

@@ -426,7 +426,7 @@ Remote、Desktop 启动和 `app status` 的 `-p` / `--provider` 共用完整 Pro
 启动时读取聚合服务端的默认模型与思考等级。使用 `-m`/`--model` 或 `-c model=...` 选择其他目录模型时，
 自动采用目标模型的默认思考等级；`-m`/`--model` 优先于 `-c model=...`，重复配置覆盖以最后一项为准。
 显式 `-c model_reasoning_effort=...` 优先；`--` 后的内容只作为原生 Codex 输入，不参与模型或思考等级选择。
-渠道通过 `/model` 的“聚合提供商”目录选择同一组精确模型 ID，
+渠道通过 `/model` 的 `AGG` 目录选择同一组精确模型 ID，模型项显示实际成员提供商的短标签，
 在聚合 Thread 内换模型保留历史；从单账户切入聚合则创建新 Thread。聚合审批 reviewer 固定为
 `user`，Remote 拒绝显式 `auto_review`。聚合 `/account`、`/limits` 明确返回不支持，
 请求指标仍按真实成员账户记录，不生成虚拟账户快照。
