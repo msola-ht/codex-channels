@@ -45,6 +45,25 @@ function configuredWebuiEnabled(environment) {
   return validateWebuiConfigDocument(readGatewayConfig(configPath)).enabled;
 }
 
+/**
+ * 状态判定用的“预期运行”集合：启动选择必须读配置并失败关闭，状态查询不能因此中断，
+ * 因此配置不可读时退回“已安装的可选服务按必需判定”的既有语义，并在 stderr 说明降级。
+ */
+export function serviceStatusRequiredDefinitions(
+  platform,
+  target,
+  environment = process.env,
+  definitionsDirectory,
+) {
+  try {
+    return serviceControlDefinitions(platform, target, "start", environment, definitionsDirectory);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.split("\n")[0].slice(0, 200) : "";
+    process.stderr.write(`无法读取或校验配置${detail === "" ? "" : `（${detail}）`}，已安装的可选服务按必需判定。\n`);
+    return serviceControlDefinitions(platform, target, "status", environment, definitionsDirectory);
+  }
+}
+
 export function serviceSnapshotHealthy(services, target, environment = process.env) {
   return services.every(service => {
     if (service.running) return true;

@@ -14,6 +14,12 @@ export function serviceControlDefinitions(
   environment?: NodeJS.ProcessEnv,
   definitionsDirectory?: string,
 ): ServiceDefinition[];
+export function serviceStatusRequiredDefinitions(
+  platform: ServicePlatform,
+  target: ServiceTarget,
+  environment?: NodeJS.ProcessEnv,
+  definitionsDirectory?: string,
+): ServiceDefinition[];
 export function serviceSnapshotHealthy(
   services: readonly ManagedServiceStatusEntry[],
   target: ServiceTarget,

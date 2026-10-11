@@ -258,11 +258,12 @@ case "$action" in
     target="${2:-all}"
     require_target "$target"
     labels=$(service_ids "$target" status)
-    required_labels=$(service_ids "$target" start)
+    required_labels=$(service_ids "$target" status-required)
     status_code=0
     for label in ${(f)labels}; do
       launchctl print "$user_domain/$label" 2>/dev/null && continue
-      # 关闭或未启用的可选服务允许保持未加载，只有预期运行的服务才判定异常。
+      # 关闭或未启用的可选服务允许保持未加载，只有预期运行的服务才判定异常；
+      # 配置不可读时 status-required 退回“已安装即可选服务必需”，状态查询仍然可用。
       required=0
       for candidate in ${(f)required_labels}; do
         [ "$candidate" = "$label" ] && required=1

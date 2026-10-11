@@ -304,8 +304,9 @@ async function buildSwitchPlan(
   const config = record(snapshot.config);
   const providers = record(config.model_providers);
   const currentProvider = optionalString(config.model_provider) ?? "openai";
-  const switchingProviders = loadConfiguredCustomSwitchingModelProviders(environment);
-  const switching = switchingProviders.find(({ id }) => id === normalizedId);
+  // 只加载目标 Provider：其他 Provider 的目录不可读不应阻塞本次切换，注册表只读 ID 列表。
+  const switchingProviderIds = loadCustomSwitchingProviderIds(environment);
+  const switching = loadConfiguredCustomSwitchingModelProviders(environment, normalizedId)[0];
   if (normalizedId === "openai") {
     const candidateIds = listCustomPrimaryProviderCandidates(providers);
     const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
@@ -346,9 +347,7 @@ async function buildSwitchPlan(
       },
     };
   }
-  const otherSwitchingProviderIds = switchingProviders
-    .map(({ id }) => id)
-    .filter((id) => id !== normalizedId);
+  const otherSwitchingProviderIds = switchingProviderIds.filter((id) => id !== normalizedId);
   if (otherSwitchingProviderIds.length > 0) {
     throw invalid(
       "other-switching-providers",

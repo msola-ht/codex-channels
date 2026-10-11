@@ -197,7 +197,8 @@
   事务；同一异步调用链中的嵌套操作复用事务，避免 Provider 设置与账户删除交叉提交。
 - `primary-provider-management.mjs` / `primary-provider-management.d.mts`：提供自定义主 Provider
   切换与删除的无终端预览和执行接口；预览仅返回脱敏目标、影响与生效动作，执行校验显式模型属于 App Server 官方目录、保持配置/Profile/私有备份事务顺序，
-  并以稳定错误码和结构化警告报告失败或备份清理部分成功。
+  并以稳定错误码和结构化警告报告失败或备份清理部分成功。切换只加载目标 Provider，删除只依赖注册表与
+  Profile 原文，其他 Provider 目录不可读不阻塞本次操作；管理模式整体校验与目标自身目录校验保持失败关闭。
 - `primary-provider-config-transaction.mjs` / `primary-provider-config-transaction.d.mts`：统一自定义
   Provider 固定模式写入事务；切换与新增/编辑共同复用 Profile 移除、Codex 配置版本写入、响应丢失
   只读确认和安全回滚，避免两条管理链路复制高风险事务逻辑。
@@ -558,12 +559,13 @@
   重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示；同时重启 App Server、Gateway 和 WebUI 的指令先停止 Gateway，再重启 App Server、启动 Gateway，最后重启 WebUI。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载 App Server、Gateway、WebUI 与可选 Relay 的 launchd 服务；启停、
   状态和日志支持 `gateway`、`app-server`、`webui`、`model-relay`、`all` 内部目标，
-  启动 `all` 时排除配置中关闭的 WebUI，停止、状态与日志仍包含已安装的 WebUI；安装动作仍只启动核心服务与已启用 Relay，
+  启动 `all` 时排除配置中关闭的 WebUI，停止、状态与日志仍包含已安装的 WebUI；状态判定只把预期运行的服务计入异常，
+  配置不可读时退回“已安装即可选服务必需”并在 stderr 说明降级；安装动作仍只启动核心服务与已启用 Relay，
   普通启动不强制终止已运行的进程，重启由服务命令层组合单目标停止与启动；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
-  控制脚本，避免 Shell 维护第二份服务标识。
+  控制脚本，避免 Shell 维护第二份服务标识；状态判定使用容错的 `status-required` 顺序。
 - `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性、launchd Job 字段或 Windows 计划任务
   生成统一基础 JSON 服务状态；Windows 额外核对受管进程和核心 RPC 端点。目标异常时保留可解析输出
   并返回非零状态，查询器故障则失败关闭。
@@ -573,7 +575,8 @@
 - `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载 App Server、Gateway、WebUI 与可选 Relay 的 systemd 用户服务；
   安装前确保当前用户的 linger 已启用并复查，使用户未登录时也能随系统启动，无法启用则在修改
   unit 状态前失败并显示管理员处理命令；与 launchd 使用相同的目标、服务角色和默认值，启动 `all` 时排除
-  配置中关闭的 WebUI，停止、状态与日志仍包含已安装的 WebUI，状态判定只把预期运行的服务计入异常；
+  配置中关闭的 WebUI，停止、状态与日志仍包含已安装的 WebUI，状态判定只把预期运行的服务计入异常，
+  配置不可读时退回“已安装即可选服务必需”并在 stderr 说明降级；
   安装动作单独保留 WebUI 停启状态。停止不存在的 Unit 与 launchd 一样按已停止处理；
   卸载先完整查询全部目标，只跳过已确认不存在且未运行的 Unit，定义缺失但仍运行时仍先停止；管理器故障、查询不完整或停止/禁用失败时保留全部服务定义，用户数据始终保留。
 - `windows-service-control.mjs` / `windows-service-control.d.mts`：读取用户级 Windows 服务定义，
@@ -611,6 +614,6 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 - `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 与队列 SSE 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
 - `webui-queue-events.mjs`：账户快照、请求指标、Relay、渠道投递与管理任务共用的鉴权后 SSE 转接、订阅总量限制及 WebUI 关闭清理；通知不携带指标、队列或任务内容。
 - `webui-management-delivery-route.mjs`：渠道投递箱鉴权 SSE 变化通知、只读分页查询、按需限定内容预览及单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，在线操作通过投递私有 IPC 交给 Gateway 单写者，确认未发送命令且 Gateway 不可连接时才使用 Journal 维护模式独占锁，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览及只读批量摘要认证解密后仅返回显式展示字段，摘要批次消耗读取配额，批量操作在同一事务中复核全部修订。
-- `service-selection.mjs` / `service-selection.d.mts`：统一三平台服务定义路径，将已安装的可选 WebUI、Relay 纳入 all；启动 all 时排除配置中关闭的 WebUI 与未启用的 Relay，停止、状态与日志仍包含已安装的可选服务，健康判定同样允许关闭的可选服务保持停止；安装动作排除 WebUI，服务顺序由 Runtime 服务目录定义。
+- `service-selection.mjs` / `service-selection.d.mts`：统一三平台服务定义路径，将已安装的可选 WebUI、Relay 纳入 all；启动 all 时排除配置中关闭的 WebUI 与未启用的 Relay，停止、状态与日志仍包含已安装的可选服务，健康判定同样允许关闭的可选服务保持停止；状态查询经容错的 `status-required` 顺序取预期运行集合，配置不可读时退回“已安装即可选服务必需”并在 stderr 说明降级，使诊断不因配置损坏中断；安装动作排除 WebUI，服务顺序由 Runtime 服务目录定义。
 
 指标库只接受当前 Schema。查询与导出支持 `--source owned|relay`、`--caller ID`。
