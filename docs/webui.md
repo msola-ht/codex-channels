@@ -506,6 +506,8 @@ webui/src/
 
 自定义提供商的新增／编辑弹窗逐项手动填写能力，仅 `apply_patch` 和 `tool_search` 提供独立检测按钮。每次使用当前地址、协议、模型、凭据及手填默认思考等级，只探测所选工具，最多三次请求、总预算 45 秒，可能计费。结果需明确回填且只修改对应项；可取消，修改草稿后旧结果失效，最终仍需预览确认保存。覆盖与限制见[添加时探测并写入](provider-integration-guide.md#添加时探测并写入)。管理接口 `POST /api/v1/management/provider-settings/probe` 必须指定 `capability` 与 `reasoningEffort`，沿用管理鉴权与来源校验，正文最多 16 KiB，每个 WebUI 实例同时只运行一个探测，连接断开取消请求。
 
+自定义模型表单还支持模型描述、等级说明、最大窗口、图片原始精度、详细程度和摘要参数；高级设置提供指令模板、有效上下文比例、压缩阈值和工具输出截断。预览展示这些声明及指令内容。Chat 上游同样开放全部能力选择，切换协议保留已有声明，不因这三项声明拦截保存；界面说明当前请求转换限制。字段约束及 v5 备份回退规则见[扩展能力与高级设置](provider-integration-guide.md#扩展能力与高级设置)。
+
 侧栏「调用监控」归并请求、调用详情与错误，原有 `#/requests`、`#/traffic`、`#/errors` 地址和查询参数保留。「消息渠道」包含渠道配置（`#/channels`）、投递队列（`#/delivery`）和消息展示（`#/channels/display`）。渠道配置只显示 Gateway 配置快照，不代表实时连接状态；配置与授权继续使用对应 CLI 入口。消息展示集中管理 Telegram 格式、操作详情、计划更新和思考状态。
 
 「设置」分为常规与偏好（`#/settings`）、工作区与权限（`#/settings/permissions`）、网络与访问（`#/settings/network`）、数据与日志（`#/settings/data`）、服务与维护（`#/settings/services`）。常规页保留 Codex 整组用户偏好和 Gateway 会话/自动化选项；权限页分别展示 Codex、Gateway 全局和 Workspace 权限，并集中默认 Workspace 选择；网络页管理 WebUI 监听/令牌、共享代理、Plugin API 与整组官方 TUI 请求身份；数据页管理调用采集、日志、指标保留与清理；服务页管理服务及后台任务结果；源码安装与更新只在本机终端执行。Relay 服务仍在模型转发页操作。

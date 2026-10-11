@@ -82,6 +82,8 @@ function loadBaseRelayProviderMaterial(provider, environment) {
   assertResponsesContextSyncComplete(environment);
   const modelInputs = Object.fromEntries(catalog.models.map(value => [value.slug, Array.isArray(value.input_modalities) ? value.input_modalities : []]));
   return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs,
+    ...(isCustomCatalogProvider(provider) ? { modelSampling: Object.fromEntries(catalog.definitions
+      .filter(model => model.sampling !== undefined).map(model => [model.id, model.sampling])) } : {}),
     protocols: upstreamWireApi === "chat_completions" ? ["chat"] : ["responses"],
     paths: [...paths, responsesContextSyncPath(environment)], revision };
 }

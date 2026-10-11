@@ -316,7 +316,9 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
       // CLP 桥在桥内按目录校验模型；通用 Chat 桥没有该校验，继续由统计代理拒绝目录外或已停用模型。
-      ...(modelGuard && !bridgedClinePass ? { isModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
+      ...(modelGuard && !bridgedClinePass ? isCustomCatalogProvider(upstreamProvider)
+        ? { readModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) }
+        : { isModelEnabled: (model, signal) => modelGuard.isEnabled(model, signal) } : {}),
       // 除官方 OpenAI 端点外的 Responses 上游都不理解 Codex 私有输入项与参数标记，
       // 必须在上游收到正文前归一化；Chat 上游由桥转换，不在此处改写。
       ...(!bridge && !officialOpenAiRoute ? { normalizeResponsesInput: true } : {}),

@@ -27,6 +27,8 @@
   `/realtime/calls`、`/live`，以及透明转发 `/v1/realtime`、`/v1/live` 和单段受限
   Call ID 的 `/v1/live/<call-id>` WebSocket。这些额外端点不解析为 Responses 指标；DeepSeek、
   OpenCode Go、CCG 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
+  CP 出站请求通过 `readModelCapabilities` 在同次目录复核中取得启用状态与默认采样，HTTP 和 WebSocket `response.create`
+  只补齐请求中缺失的六种采样字段，显式零值或 null 保留；转储与指标仍观察客户端原始报文。
   Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 只在本地读取、原样转发，Hop-by-hop Header 不透传；
   转发 SSE 或 WebSocket 响应时，从提交发送起计响应时间、首内容与总耗时，并持续观察生成区间；两种传输共用非空内容白名单，

@@ -126,6 +126,13 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `tool_search` 的手动声明；思考支持开关控制既有思考等级与默认值。新增模型不会预选补丁或搜索工具，
 切换 Chat Completions 也不会改变模型的工具声明。
 
+`components/settings/custom-model-details.tsx` 复用共享 API 的模型元素类型，组合基本响应参数与可展开的高级参数。
+基本区编辑模型描述、最大窗口、各思考等级说明、图片 original 细节、verbosity 与默认值，以及独立的思考摘要参数。
+Chat Completions 同样开放全部能力选择与保存；切换接口保留已有声明，并说明当前请求转换对 original、verbosity 和摘要参数的限制。
+关闭图片输入同时关闭 original；编辑等级文本时保留说明草稿，在提交预览时按最终等级清理对应说明，避免逐字输入造成丢失。跟随 DS 仅锁定当前窗口，最大窗口仍可独立编辑。高级区保留 instructions 原文，
+编辑有效窗口比例、可留空的自动压缩阈值，以及可恢复默认的 tokens/bytes 截断策略。
+确认弹窗逐模型展示这些参数与 instructions 全文，缺省值明确说明；所有文案均提供中英文。
+
 每个模型分别提供 `apply_patch` 和 `tool_search` 检测按钮，不运行整套能力检测。
 `hooks/use-custom-model-capability-probe.ts` 将单项请求及结果绑定当前草稿，草稿变化、取消或关闭编辑时
 中止请求并阻止旧结果覆盖。检测使用手填的默认思考等级，未声明时使用 `none`；每次最多 3 个上游短请求，

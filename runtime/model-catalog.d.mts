@@ -1,0 +1,37 @@
+export interface SamplingParameters {
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  min_p?: number;
+  presence_penalty?: number;
+  repetition_penalty?: number;
+}
+export interface ModelDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  contextWindow: number;
+  maxContextWindow?: number;
+  reasoningEfforts: string[];
+  defaultReasoningEffort: string | null;
+  reasoningDescriptions?: Record<string, string>;
+  supportsImages: boolean;
+  supportsImageDetailOriginal?: boolean;
+  supportsVerbosity?: boolean;
+  defaultVerbosity?: "low" | "medium" | "high" | null;
+  supportsReasoningSummary?: boolean;
+  defaultReasoningSummary?: "auto" | "concise" | "detailed" | "none";
+  effectiveContextWindowPercent?: number;
+  autoCompactTokenLimit?: number;
+  truncationPolicy?: {mode: "tokens" | "bytes"; limit: number};
+  sampling?: SamplingParameters;
+  applyPatchToolType?: "freeform";
+  instructions?: string;
+  supportsSearchTool?: boolean;
+  template?: {source: "official" | "deepseek"; model: string; followContext: boolean};
+}
+export function validateSamplingParameters(value: unknown): SamplingParameters | undefined;
+export function validateModelDefinitions(values: unknown, defaultModel: string, options?: { allowReasoningToggle?: boolean }): ModelDefinition[];
+export function compileModelDefinitions(definitions: ModelDefinition[], defaultModel: string, options?: { allowReasoningToggle?: boolean }): { definitions: ModelDefinition[]; models: Record<string, unknown>[] };
+export function modelDefinitionsFromCatalog(catalog: unknown, source?: "official" | "deepseek"): ModelDefinition[];
+export function normalizeDeepseekCatalogCapabilities(catalog: { models: Record<string, unknown>[] }): { models: Record<string, unknown>[] };

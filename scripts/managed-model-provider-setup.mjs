@@ -5,7 +5,7 @@ import {
 import {
   withManagedModelCatalogSettings,
   withPreservedManagedModelCatalogSettings,
-} from "../runtime/model-provider-runtime.mjs";
+} from "../runtime/managed-model-catalog.mjs";
 import { createManagedPrimaryCredential } from "../runtime/managed-provider-credentials.mjs";
 
 const managedRootKeys = Object.freeze([

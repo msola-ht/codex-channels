@@ -70,7 +70,8 @@ export class ProviderModelGuard {
       }
       enabled.add(entry.slug);
     }
-    return catalog.models.find(entry => entry.slug === model);
+    const entry = catalog.models.find(entry => entry.slug === model);
+    return entry ? { entry, catalog } : undefined;
   }
 
   async isEnabled(model, signal) {
@@ -78,15 +79,19 @@ export class ProviderModelGuard {
   }
 
   async modelCapabilities(model, signal) {
-    const entry = await this.#readModel(model, signal);
-    if (!entry) return undefined;
+    const selected = await this.#readModel(model, signal);
+    if (!selected) return undefined;
+    const { entry, catalog } = selected;
     const levels = entry.supported_reasoning_levels;
     if (!Array.isArray(levels) || levels.length > 16
       || levels.some(level => !level || typeof level.effort !== "string" || level.effort.length === 0 || level.effort.length > 64)
       || new Set(levels.map(level => level.effort)).size !== levels.length) {
       throw new Error("Provider 模型思考能力目录无效");
     }
-    return { reasoningEfforts: levels.map(level => level.effort) };
+    // Custom catalogue parsing validates definitions and their compiled models
+    // together. Read defaults from that same snapshot, never a second file read.
+    const sampling = catalog.definitions?.find(definition => definition.id === model)?.sampling;
+    return { reasoningEfforts: levels.map(level => level.effort), ...(sampling === undefined ? {} : { sampling }) };
   }
 
   async close() {

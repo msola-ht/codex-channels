@@ -1,6 +1,6 @@
 import { promptResponsesWebSocket } from "./responses-websocket-setup.mjs";
 import { promptCustomModelCapabilities } from "./custom-model-capability-setup.mjs";
-import { isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { createResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { loadResponsesModelTemplates, promptResponsesModelImport } from "./responses-model-templates.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
@@ -340,7 +340,11 @@ export async function runCustomPrimaryProviderSetup({
   if (imported === undefined) return { action: allowBack ? "back" : "cancel" };
   const definitions = [...new Map([...(previousCatalog?.definitions ?? []), ...imported.map(entry => {
     const previous = previousCatalog?.definitions.find(model => model.id === entry.id);
-    return previous?.instructions === undefined ? entry : { ...entry, instructions: previous.instructions };
+    return {
+      ...entry,
+      ...(previous?.instructions === undefined ? {} : { instructions: previous.instructions }),
+      ...(previous?.sampling === undefined ? {} : { sampling: structuredClone(previous.sampling) }),
+    };
   })].map(entry => [entry.id, entry])).values()];
   let selectedModel;
   if (imported.length > 0) {
@@ -370,7 +374,7 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error(`模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`);
   }
 
-  const models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id), output) : undefined;
+  const models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id), output, chatUpstream ? "chat_completions" : "responses") : undefined;
   if (custom && models === undefined) return { action: allowBack ? "back" : "cancel" };
 
   const canPreserveCurrentBearerToken = hasCurrentBearerToken
@@ -442,6 +446,7 @@ export async function runCustomPrimaryProviderSetup({
     loadContext: async () => ({ snapshot, officialModels }),
   });
   const preview = prepared.preview;
+  const previewModelDetails = custom ? createResponsesModelCatalog(preview.provider.models, preview.provider.model).models : [];
   output.write(preview.provider.mode === "switching"
     ? `\n将写入 ~/.codex/${customSwitchingProviderProfileName(normalizedId)}.config.toml：\n`
     : "\n将写入 ~/.codex/config.toml：\n");
@@ -464,7 +469,15 @@ export async function runCustomPrimaryProviderSetup({
           "- 主配置：写入并启用该固定 Provider",
           "- 认证：API Key 将明文写入当前用户私有凭据文件，主配置仅保存 env_key 引用（不回显、不进入命令行和日志）",
         ]),
-    ...(custom ? preview.provider.models.map(entry => `- 模型 ${entry.id}：${entry.contextWindow} Token；图片${entry.supportsImages ? "声明支持" : "不声明"}；apply_patch ${entry.applyPatchToolType === "freeform" ? "freeform" : "不声明"}；思考 ${entry.reasoningEfforts.join("/") || "无可选等级"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`) : []),
+    ...(custom ? preview.provider.models.flatMap((entry, index) => [
+      `- 模型 ${entry.id}：${entry.contextWindow} Token；最大窗口 ${entry.maxContextWindow ?? entry.contextWindow} Token；图片${entry.supportsImages ? "声明支持" : "不声明"}；图片 original ${entry.supportsImageDetailOriginal ? "声明支持" : "不声明"}；apply_patch ${entry.applyPatchToolType === "freeform" ? "freeform" : "不声明"}；思考 ${entry.reasoningEfforts.join("/") || "无可选等级"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`,
+      `  模型描述：${JSON.stringify(previewModelDetails[index].description)}`,
+      `  思考等级说明：${entry.reasoningEfforts.map(effort => `${effort}=${JSON.stringify(entry.reasoningDescriptions?.[effort] ?? effort)}`).join("；") || "无可选等级"}`,
+      `  回答详细程度：${entry.supportsVerbosity ? `声明支持；默认 ${entry.defaultVerbosity}` : "不声明"}；思考摘要：${entry.supportsReasoningSummary ? `声明支持；默认 ${entry.defaultReasoningSummary ?? "Codex 默认"}` : "不声明"}`,
+      `  默认采样参数：${entry.sampling === undefined ? "上游默认值（不发送参数）" : JSON.stringify(entry.sampling)}；请求显式参数优先`,
+      `  有效上下文：${entry.effectiveContextWindowPercent ?? 95}%；自动压缩阈值：${entry.autoCompactTokenLimit === undefined ? "Codex 默认" : `${entry.autoCompactTokenLimit} Token`}；工具输出截断：${entry.truncationPolicy === undefined ? `${Math.min(10_000, Math.floor(entry.contextWindow / 4))} tokens（目录默认）` : `${entry.truncationPolicy.limit} ${entry.truncationPolicy.mode}`}`,
+      `  模型指令（完整内容）：${JSON.stringify(previewModelDetails[index].model_messages.instructions_template)}`,
+    ]) : []),
     `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,
     ...(custom
         ? preview.provider.models.map(entry => `- 模型 ${entry.id} 工具检索（tool_search）：${entry.supportsSearchTool ? chatUpstream ? "声明支持；网关转换检索输入项" : "声明支持；上游须接受 Codex 检索输入项" : "不声明；工具定义全量下发"}`)

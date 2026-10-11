@@ -20,6 +20,8 @@ import { LoadingSettingsCard, SettingsEmpty, SettingsError } from "@/components/
 import { formatTokens } from "@/lib/format"
 import type { ManagementProviderSettingsResponse } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
+import { CustomModelDetails, CustomModelDetailsPreview } from "@/components/settings/custom-model-details"
+import type { CustomModelDraft } from "@/components/settings/custom-model-details"
 
 const contextWindowPresetTokens = [32768, 131072, 262144]
 const probeReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
@@ -52,7 +54,7 @@ function ProviderSettingsCard({
   const [mode, setMode] = useState<"switching" | "exclusive">("switching")
   const [model, setModel] = useState("")
   const [catalogKind, setCatalogKind] = useState("official")
-  const [customModels, setCustomModels] = useState<Array<{ id: string; name: string; contextWindow: number; maxContextWindow?: number; reasoningEfforts: string[]; defaultReasoningEffort: string | null; supportsImages: boolean; applyPatchToolType?: "freeform"; supportsSearchTool?: boolean; probeConnection?: Partial<Record<"applyPatch" | "toolSearch", string>>; template?: {source: "official" | "deepseek"; model: string; followContext: boolean} }>>([])
+  const [customModels, setCustomModels] = useState<CustomModelDraft[]>([])
   const [supportsWebsockets, setSupportsWebsockets] = useState("true")
   const [upstreamWireApi, setUpstreamWireApi] = useState<"responses" | "chat_completions">("responses")
   const [upstreamTouched, setUpstreamTouched] = useState(false)
@@ -133,7 +135,10 @@ function ProviderSettingsCard({
         mode,
         model: model.trim(),
         ...(catalogKind === "custom" ? {
-          catalog: { kind: "custom" as const, models: customModels.map(({ probeConnection: _probeConnection, ...entry }) => entry) },
+          catalog: { kind: "custom" as const, models: customModels.map(({ probeConnection: _probeConnection, ...entry }) => {
+            const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts.includes(effort)))
+            return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions }
+          }) },
           probeConnections: customModels.flatMap(entry => (["applyPatch", "toolSearch"] as const).flatMap(capability => {
             const token = entry.probeConnection?.[capability]
             return token === undefined ? [] : [{ model: entry.id, capability, token }]
@@ -268,10 +273,11 @@ function ProviderSettingsCard({
               {entry.template?.source === "deepseek" ? <Field orientation="horizontal"><Checkbox id={`responses-follow-${index}`} checked={entry.template.followContext} disabled={busy || pending !== null} onCheckedChange={value => patch({template: {...entry.template!, followContext: value === true}})} /><FieldLabel htmlFor={`responses-follow-${index}`}>{t("managementUi.followDsContext", { model: entry.template.model })}</FieldLabel></Field> : null}
               <ManagedSelect label={t("managementUi.contextPreset")} value={entry.contextWindow ? String(entry.contextWindow) : ""} options={contextWindowPresetTokens.filter(value => value <= (entry.maxContextWindow ?? 100000000)).map(value => [String(value), t("managementUi.contextPresetLabel", { k: value / 1024, tokens: value })])} disabled={busy || pending !== null || entry.template?.followContext === true} onChange={value => patch({ contextWindow: Number(value) })} />
               <Field><FieldLabel htmlFor={`responses-context-${index}`}>{t("managementUi.contextTokens")}</FieldLabel><Input id={`responses-context-${index}`} type="number" min={1024} max={entry.maxContextWindow ?? 100000000} value={entry.contextWindow || ""} disabled={busy || pending !== null || entry.template?.followContext === true} onChange={event => patch({ contextWindow: Number(event.target.value) })} /></Field>
-              <Field orientation="horizontal"><Checkbox id={`responses-reasoning-supported-${index}`} checked={entry.reasoningEfforts.length > 0} disabled={busy || pending !== null} onCheckedChange={value => patch({ reasoningEfforts: value === true ? ["medium"] : [], defaultReasoningEffort: value === true ? "medium" : null })} /><FieldLabel htmlFor={`responses-reasoning-supported-${index}`}>{t("managementUi.supportsReasoning")}</FieldLabel></Field>
+              <Field orientation="horizontal"><Checkbox id={`responses-reasoning-supported-${index}`} checked={entry.reasoningEfforts.length > 0} disabled={busy || pending !== null} onCheckedChange={value => patch({ reasoningEfforts: value === true ? ["medium"] : [], defaultReasoningEffort: value === true ? "medium" : null, reasoningDescriptions: undefined })} /><FieldLabel htmlFor={`responses-reasoning-supported-${index}`}>{t("managementUi.supportsReasoning")}</FieldLabel></Field>
               {entry.reasoningEfforts.length > 0 ? <Field><FieldLabel htmlFor={`responses-reasoning-${index}`}>{t("managementUi.reasoningList")}</FieldLabel><Input id={`responses-reasoning-${index}`} value={entry.reasoningEfforts.join(",")} placeholder="low,medium,high" disabled={busy || pending !== null} onChange={event => { const values = event.target.value === "" ? [] : event.target.value.split(","); patch({ reasoningEfforts: values, defaultReasoningEffort: values.includes(entry.defaultReasoningEffort ?? "") ? entry.defaultReasoningEffort : values[0] ?? null }) }} /></Field> : null}
               {entry.reasoningEfforts.length > 0 ? <Field><FieldLabel htmlFor={`responses-default-${index}`}>{t("managementUi.defaultReasoning")}</FieldLabel><Input id={`responses-default-${index}`} value={entry.defaultReasoningEffort ?? ""} disabled={busy || pending !== null} onChange={event => patch({ defaultReasoningEffort: event.target.value })} /></Field> : null}
-              <Field orientation="horizontal"><Checkbox id={`responses-images-${index}`} checked={entry.supportsImages} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsImages: value === true })} /><FieldLabel htmlFor={`responses-images-${index}`}>{t("managementUi.imageInput")}</FieldLabel></Field>
+              <Field orientation="horizontal"><Checkbox id={`responses-images-${index}`} checked={entry.supportsImages} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsImages: value === true, supportsImageDetailOriginal: value === true ? entry.supportsImageDetailOriginal : false })} /><FieldLabel htmlFor={`responses-images-${index}`}>{t("managementUi.imageInput")}</FieldLabel></Field>
+              <CustomModelDetails entry={entry} index={index} disabled={busy || pending !== null} upstreamWireApi={upstreamWireApi} patch={patch} />
               <Field orientation="horizontal"><Checkbox id={`responses-patch-${index}`} checked={entry.applyPatchToolType === "freeform"} disabled={busy || pending !== null} onCheckedChange={value => patch({ applyPatchToolType: value === true ? "freeform" : undefined, probeConnection: { ...entry.probeConnection, applyPatch: undefined } })} /><FieldLabel htmlFor={`responses-patch-${index}`}>{t("managementUi.freeformPatchTool")}</FieldLabel></Field>
               <Field orientation="horizontal"><Checkbox id={`responses-search-${index}`} checked={entry.supportsSearchTool === true} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsSearchTool: value === true, probeConnection: { ...entry.probeConnection, toolSearch: undefined } })} /><FieldLabel htmlFor={`responses-search-${index}`}>{t("managementUi.toolSearchTool")}</FieldLabel></Field>
               <p className="text-muted-foreground">{reasoningEffort === undefined ? t("modelProbe.invalidReasoning") : t("modelProbe.reasoningEffort", { effort: reasoningEffort })}</p>
@@ -345,6 +351,7 @@ function ProviderSettingsConfirmationDialog({
   if (pending.transport?.cleartext === true) lines.push(t("managementUi.cleartextUpstream"))
   return <ManagementConfirmationDialog open saving={saving} loading={loading} title={t("managementUi.providerConfirmTitle")} description={t("accountConfirmation.changeDescription")} confirmVariant={pending.operation === "remove" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
     <p className="whitespace-pre-line">{lines.join("\n")}</p>
+    {pending.provider?.models?.map(entry => <CustomModelDetailsPreview key={entry.id} entry={entry} />)}
     <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: pending.activation })}</p>
   </ManagementConfirmationDialog>
 }

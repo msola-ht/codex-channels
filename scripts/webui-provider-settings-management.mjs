@@ -331,14 +331,7 @@ function toManagementError(error) {
 
 function redactCatalog(provider) {
   if (provider.catalog !== "custom") return provider.catalog === undefined ? {} : { catalog: provider.catalog };
-  return { catalog: "custom", models: (provider.models ?? []).map((model) => ({
-    id: model.id, name: model.name, contextWindow: model.contextWindow,
-    ...(model.maxContextWindow === undefined ? {} : {maxContextWindow: model.maxContextWindow}),
-    reasoningEfforts: model.reasoningEfforts, defaultReasoningEffort: model.defaultReasoningEffort,
-    supportsImages: model.supportsImages,
-    ...(model.applyPatchToolType === undefined ? {} : {applyPatchToolType: model.applyPatchToolType}),
-    ...(model.instructions === undefined ? {} : {instructions: model.instructions}),
-    ...(model.supportsSearchTool === undefined ? {} : {supportsSearchTool: model.supportsSearchTool}),
-    ...(model.template === undefined ? {} : {template: structuredClone(model.template)}),
-  })) };
+  // Loaded catalogs and save previews already contain strict ModelDefinition values.
+  // Clone the whole definition so a new capability cannot disappear at this boundary.
+  return { catalog: "custom", models: structuredClone(provider.models ?? []) };
 }

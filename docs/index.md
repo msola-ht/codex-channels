@@ -338,10 +338,12 @@ Codex 兼容 Provider Setup 的官方模型目录复用、手工模型 ID、固�
 生成逐 Provider 的版本化目录，通过同一 `model/list`、`config/batchWrite`、Thread/Turn 路由接入；
 模板选择及平台模型 ID 映射复用本地目录，版本 5 导入基础模型字段并单独保留最大窗口，每个生成的模型条目声明 `multi_agent_version: v2`；DS 模板另保留非空编程指令，缺省指令与工具字段由项目统一生成；DS 上下文跟随接入既有受管模型窗口事务，
 实现见 [`responses-context-sync.mjs`](../runtime/responses-context-sync.mjs)。
+CP 的逐模型默认采样参数由 CLI 独立询问，保存在目录定义的可选 `sampling` 中，不伪装成 Codex `ModelInfo` 字段；Provider Proxy 的 HTTP/WS 与 Model Relay 按精确模型补齐出站参数，显式请求值优先，见 [`Provider 接入指南`](provider-integration-guide.md#扩展能力与高级设置)。
 CLI Codex 兼容 Provider 的保存前 WS 检测见 [`responses-websocket-probe.mjs`](../scripts/responses-websocket-probe.mjs) 和 [`responses-websocket-setup.mjs`](../scripts/responses-websocket-setup.mjs)。使用锁定源码 `core/src/client.rs` 的 WS v2 Beta 头及 `codex-api/src/common.rs` 的 `ResponseCreateWsRequest`，以 `generate=false` 预热和经确认的独立文字请求分别报告兼容程度；这不是新的 App Server RPC。CP 自定义提供商的 WS 开关仅手动选择，Chat 上游强制关闭。
 CP 自定义 Provider 的上游接口选择（`Responses` 直连或 `Chat Completions` 经 Chat 桥转换）保存在模型目录同目录的 `provider.json`，读写与失败关闭见 [`model-provider-upstream-metadata.mjs`](../runtime/model-provider-upstream-metadata.mjs)，Chat 上游复用 [`chat-bridge.ts`](../src/provider-proxy/chat-bridge.ts) 的 `model-api` 转换；用户可通过 [`custom-model-capability-setup.mjs`](../scripts/custom-model-capability-setup.mjs) 逐项选择能力，按需调用 [`custom-model-capability-probe.mjs`](../scripts/custom-model-capability-probe.mjs) 单独验证 apply_patch 或客户端 tool_search 的调用及模拟结果接续，其余能力手动填写。
 CP 模板不导入 Codex 专用 `ultra` / `persistent` 模式；其请求转换语义已核对锁定源码 `protocol/src/openai_models/reasoning_effort.rs` 及相应测试。
 CP 与 CCG 保存前通过 [`model-catalog-validation.mjs`](../scripts/model-catalog-validation.mjs) 调用本机 `debug models` 校验生成目录。目录字段与指令模板要求以锁定源码 `protocol/src/openai_models.rs` 的 `ModelInfo` / `ModelsResponse` 为准。
+CP v5 目录以可选定义字段保留图片原始精度、详细程度、摘要参数、描述与等级说明，以及有效上下文、压缩阈值和截断策略；旧定义生成结果保持不变。CLI 与 WebUI 逐项声明并在预览确认后保存，Chat 上游同样允许用户声明全部能力，保留现有请求转换限制并在界面说明。字段约束与备份回退见[扩展能力与高级设置](provider-integration-guide.md#扩展能力与高级设置)。
 
 上表“全 Provider 模型代理与请求统计”还包括仅官方 OpenAI 主代理启用的 0.160.1 固定端点清单：
 搜索、图片、记忆摘要与 Realtime HTTP/WS 请求透明转发且不计入 Responses 指标；DeepSeek、
@@ -601,7 +603,7 @@ DS 官方、OCG、CCG、CLP 四类受管入口的内置网页搜索在启动参�
 [`app-server-service-runtime.mjs`](../runtime/app-server-service-runtime.mjs)、
 [`model-provider-startup-runtime.mjs`](../runtime/model-provider-startup-runtime.mjs) 统一消费 Provider 定义；
 来源和边界见 [DeepSeek](deepseek.md#网页搜索)。
-DS 官方目录的无效 verbosity/摘要声明由 [`deepseek-setup.mjs`](../scripts/deepseek-setup.mjs) 收紧，
+DS 官方目录的无效 verbosity/摘要声明由 [`deepseek-setup.mjs`](../scripts/deepseek-setup.mjs) 调用共享纯数据层 [`model-catalog.mjs`](../runtime/model-catalog.mjs) 收紧，
 已有目录经 [`deepseek-account-management.mjs`](../scripts/deepseek-account-management.mjs) 的显式配置事务更新。
 客户端工具检索与跨轮推理的线上验证范围见
 [DS 兼容性边界](deepseek.md#responses-兼容性边界) 与 [CLP 转换边界](cline-pass.md#chat-转换边界)。

@@ -42,6 +42,7 @@
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道指南。
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
   Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
+- [`docs/custom-provider-capability-probe.md`](docs/custom-provider-capability-probe.md)：自定义提供商的实际能力探测记录、思考参数观察、配置建议与验证边界。
 - [`docs/provider-api-relay-development.md`](docs/provider-api-relay-development.md)：Provider 模型 API
   当前转发合同：独立服务、原生 Chat/Responses、提供商接入、鉴权与队列、指标与转储、数据格式及验收边界。
 - [`docs/relay-codex-auth-development.md`](docs/relay-codex-auth-development.md)：Model Relay 只读

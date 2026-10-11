@@ -25,6 +25,7 @@ export function translate(
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  "invalid-auto-compact-limit": "customModel.invalidAutoCompact",
   invalid_custom_model_probe: "modelProbe.invalid",
   custom_model_probe_credential_required: "modelProbe.credentialRequired",
   custom_model_probe_busy: "modelProbe.busy",

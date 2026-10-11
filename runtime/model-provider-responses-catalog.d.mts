@@ -1,16 +1,5 @@
-export interface ResponsesModelDefinition {
-  id: string;
-  name: string;
-  contextWindow: number;
-  maxContextWindow?: number;
-  reasoningEfforts: string[];
-  defaultReasoningEffort: string | null;
-  supportsImages: boolean;
-  applyPatchToolType?: "freeform";
-  instructions?: string;
-  supportsSearchTool?: boolean;
-  template?: {source: "official" | "deepseek"; model: string; followContext: boolean};
-}
+import type { ModelDefinition } from "./model-catalog.mjs";
+export type ResponsesModelDefinition = ModelDefinition;
 export function isCustomCatalogProvider(id: unknown): boolean;
 export function responsesProviderCatalogPath(environment: NodeJS.ProcessEnv | undefined, id: string): string;
 export function validateResponsesModels(values: unknown, defaultModel: string, options?: { allowReasoningToggle?: boolean }): ResponsesModelDefinition[];

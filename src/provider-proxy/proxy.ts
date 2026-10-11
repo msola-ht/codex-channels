@@ -1,6 +1,6 @@
 import { modelRequestDiagnostics, chatDiagnosticsHeader, type ChatDiagnosticsChannel } from "./chat-diagnostics.js";
 import { autoReviewMetadata } from "../../runtime/auto-review-metadata.mjs";
-import { ModelConversionError, normalizeResponsesRequest } from "../model-api/index.js";
+import { ModelConversionError, normalizeResponsesRequest, type SamplingParameters } from "../model-api/index.js";
 import {
   createServer,
   request as httpRequest,
@@ -109,6 +109,8 @@ export interface ProviderProxyOptions {
   resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream | Promise<ProviderProxyUpstream>;
   /** Re-read this provider's enabled model catalogue before sending Responses requests. */
   isModelEnabled?: (model: string, signal: AbortSignal) => Promise<boolean>;
+  /** Read enablement and gateway sampling defaults from one validated catalogue snapshot. */
+  readModelCapabilities?: (model: string, signal: AbortSignal) => Promise<{ sampling?: SamplingParameters } | undefined>;
   /**
    * 第三方 Responses 上游不认识 Codex 私有输入项时改写发往上游的正文：
    * `agent_message` 降级为普通 user 消息，并删除工具参数 schema 里的 `encrypted` 标记。
@@ -139,6 +141,7 @@ interface TurnMetadata {
 interface BufferedResponsesBody {
   body: Buffer;
   parsed: unknown;
+  sampling?: SamplingParameters;
 }
 
 export class ProviderProxy {
@@ -148,6 +151,7 @@ export class ProviderProxy {
   private readonly defaultUpstream: ProviderProxyUpstream;
   private readonly resolveUpstream: ProviderProxyOptions["resolveUpstream"];
   private readonly isModelEnabled: ProviderProxyOptions["isModelEnabled"];
+  private readonly readModelCapabilities: ProviderProxyOptions["readModelCapabilities"];
   private readonly normalizeResponsesInput: boolean;
   private readonly modelAuthorizations = new Set<AbortController>();
   private readonly pendingUpgrades = new Set<Duplex>();
@@ -181,7 +185,7 @@ export class ProviderProxy {
 
   constructor(private readonly listenAddress: string, options: ProviderProxyOptions) {
     this.websocketServer = new WebSocketServer({ noServer: true,
-      ...(options.isModelEnabled !== undefined || options.normalizeResponsesInput
+      ...(options.isModelEnabled !== undefined || options.readModelCapabilities !== undefined || options.normalizeResponsesInput
         ? { maxPayload: 16 * 1024 * 1024 } : {}),
     });
     this.upstreamAgent = options.upstreamAgent;
@@ -195,6 +199,7 @@ export class ProviderProxy {
     };
     this.resolveUpstream = options.resolveUpstream;
     this.isModelEnabled = options.isModelEnabled;
+    this.readModelCapabilities = options.readModelCapabilities;
     this.normalizeResponsesInput = options.normalizeResponsesInput ?? false;
     this.accountIds = options.accountIds;
     this.defaultAccountId = options.defaultAccountId;
@@ -360,15 +365,15 @@ export class ProviderProxy {
     // cannot retain an authorization for a model disabled while it was waiting.
     // 第三方 Responses 上游必须缓冲正文才能归一化私有输入项；有目录守卫时缓冲同时用于模型复核。
     const buffersResponsesBody = route.kind === "response"
-      && (this.isModelEnabled !== undefined || this.normalizeResponsesInput);
+      && (this.isModelEnabled !== undefined || this.readModelCapabilities !== undefined || this.normalizeResponsesInput);
     const bufferedRequest = buffersResponsesBody
       ? await this.bufferResponsesBody(request, response)
       : undefined;
     if (bufferedRequest === null || this.stopped || response.destroyed) return;
     const bufferedBody = bufferedRequest?.body;
     // 转储与指标记录客户端原始报文；只有发往第三方上游的正文经过归一化。
-    const upstreamBody = bufferedRequest !== undefined && this.normalizeResponsesInput
-      ? this.normalizeResponsesBody(bufferedRequest, response)
+    const upstreamBody = bufferedRequest !== undefined
+      ? this.prepareResponsesBody(bufferedRequest, response)
       : bufferedBody;
     if (upstreamBody === null) return;
     const turnMetadata = parseTurnMetadata(
@@ -575,13 +580,15 @@ export class ProviderProxy {
   }
 
   /**
-   * 归一化发往第三方 Responses 上游的正文。未发生改写时沿用原始字节，
+   * 归一化第三方 Responses 正文并补齐当前模型的默认采样。未发生改写时沿用原始字节，
    * 避免无意义的重新序列化；`agent_message` 内容非法时按请求错误失败关闭。
    */
-  private normalizeResponsesBody({ body, parsed }: BufferedResponsesBody, response: ServerResponse): Buffer | null {
+  private prepareResponsesBody({ body, parsed, sampling }: BufferedResponsesBody, response: ServerResponse): Buffer | null {
     try {
-      const normalized = normalizeResponsesRequest(parsed);
-      return normalized.changed ? Buffer.from(JSON.stringify(normalized.body)) : body;
+      const normalized = this.normalizeResponsesInput
+        ? normalizeResponsesRequest(parsed) : { body: parsed, changed: false };
+      const sampled = applySamplingDefaults(normalized.body, sampling);
+      return normalized.changed || sampled.changed ? Buffer.from(JSON.stringify(sampled.body)) : body;
     } catch (error) {
       const message = error instanceof ModelConversionError
         ? error.message
@@ -613,6 +620,7 @@ export class ProviderProxy {
       return reject(400, "provider_model_request_invalid", "模型请求不支持压缩正文。");
     }
     const isModelEnabled = this.isModelEnabled;
+    const readModelCapabilities = this.readModelCapabilities;
     const controller = new AbortController();
     this.modelAuthorizations.add(controller);
     const disconnected = (): void => controller.abort();
@@ -623,18 +631,23 @@ export class ProviderProxy {
       const body = await readModelBody(request, controller.signal, 16 * 1024 * 1024);
       clearTimeout(timer);
       const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
-      if (isModelEnabled !== undefined) {
+      let sampling: SamplingParameters | undefined;
+      if (isModelEnabled !== undefined || readModelCapabilities !== undefined) {
         const model = asRecord(parsed)?.model;
         if (typeof model !== "string" || !model.length) {
           return reject(400, "provider_model_request_invalid", "模型请求必须包含明确的 model ID。");
         }
         checkingCatalog = true;
         timer = setTimeout(() => controller.abort(), 15_000);
-        const enabled = await waitForChatOperation(isModelEnabled(model, controller.signal), controller.signal);
+        const capabilities = readModelCapabilities === undefined ? undefined
+          : await waitForChatOperation(readModelCapabilities(model, controller.signal), controller.signal);
+        const enabled = readModelCapabilities !== undefined ? capabilities !== undefined
+          : await waitForChatOperation(isModelEnabled!(model, controller.signal), controller.signal);
         controller.signal.throwIfAborted();
         if (!enabled) return reject(409, "provider_model_disabled", "该模型已停用或不在当前目录中，请重新选择已启用的模型。");
+        sampling = capabilities?.sampling;
       }
-      return { body, parsed };
+      return { body, parsed, ...(sampling === undefined ? {} : { sampling }) };
     } catch (error) {
       if (response.destroyed || this.stopped) return null;
       if (checkingCatalog) return reject(503, "provider_catalog_unavailable", "模型目录暂时无法安全读取，请检查目录后重试。");
@@ -766,7 +779,7 @@ export class ProviderProxy {
       receivedAtMonotonicMs: number,
       recorded: RawData | string = data,
     ): void => {
-      if ((this.isModelEnabled !== undefined || this.normalizeResponsesInput) && upstream.readyState === WebSocket.CONNECTING
+      if ((this.isModelEnabled !== undefined || this.readModelCapabilities !== undefined || this.normalizeResponsesInput) && upstream.readyState === WebSocket.CONNECTING
         && (pending.length >= 16 || pending.reduce((bytes, message) => bytes + rawDataBytes(message.data), rawDataBytes(data)) > 16 * 1024 * 1024)) {
         rejectModelFrame(503, "provider_catalog_unavailable", "模型上游连接等待队列已满，请稍后重试。");
         return;
@@ -827,7 +840,7 @@ export class ProviderProxy {
     client.on("message", (data, isBinary) => {
       const receivedAtMonotonicMs = performance.now();
       // 目录复核与私有项归一化都需要读取帧内容；两者都没有时保持原样转发。
-      if (!recordsResponseMetrics || (this.isModelEnabled === undefined && !this.normalizeResponsesInput)) {
+      if (!recordsResponseMetrics || (this.isModelEnabled === undefined && this.readModelCapabilities === undefined && !this.normalizeResponsesInput)) {
         forwardClientMessage(data, isBinary, receivedAtMonotonicMs);
         return;
       }
@@ -857,7 +870,9 @@ export class ProviderProxy {
           return;
         }
         const isModelEnabled = this.isModelEnabled;
-        if (isModelEnabled !== undefined) {
+        const readModelCapabilities = this.readModelCapabilities;
+        let sampling: SamplingParameters | undefined;
+        if (isModelEnabled !== undefined || readModelCapabilities !== undefined) {
           if (typeof source.model !== "string" || !source.model.length) {
             rejectModelFrame(400, "provider_model_request_invalid", "模型请求必须包含明确的 response.create 和 model ID。");
             return;
@@ -874,21 +889,27 @@ export class ProviderProxy {
             // not before a potentially slow upstream handshake.
             if (upstream.readyState === WebSocket.CONNECTING) await once(upstream, "open", { signal });
             if (upstream.readyState !== WebSocket.OPEN) throw new Error("Model upstream is closed");
-            const enabled = await waitForChatOperation(isModelEnabled(source.model, signal), signal);
+            const capabilities = readModelCapabilities === undefined ? undefined
+              : await waitForChatOperation(readModelCapabilities(source.model, signal), signal);
+            const enabled = readModelCapabilities !== undefined ? capabilities !== undefined
+              : await waitForChatOperation(isModelEnabled!(source.model, signal), signal);
             signal.throwIfAborted();
             if (!enabled) {
               rejectModelFrame(409, "provider_model_disabled", "该模型已停用或不在当前目录中，请重新选择已启用的模型。");
               return;
             }
+            sampling = capabilities?.sampling;
           } finally {
             this.modelAuthorizations.delete(controller);
           }
         }
         let payload: RawData | string = data;
-        if (this.normalizeResponsesInput) {
+        if (this.normalizeResponsesInput || sampling !== undefined) {
           try {
-            const normalized = normalizeResponsesRequest(parsed);
-            if (normalized.changed) payload = JSON.stringify(normalized.body);
+            const normalized = this.normalizeResponsesInput
+              ? normalizeResponsesRequest(parsed) : { body: parsed, changed: false };
+            const sampled = applySamplingDefaults(normalized.body, sampling);
+            if (normalized.changed || sampled.changed) payload = JSON.stringify(sampled.body);
           } catch (error) {
             rejectModelFrame(400, "provider_model_request_invalid", error instanceof ModelConversionError
               ? error.message
@@ -1216,6 +1237,15 @@ function rawDataBytes(data: RawData | string): number {
   if (data instanceof ArrayBuffer) return data.byteLength;
   if (Array.isArray(data)) return data.reduce((size, chunk) => size + chunk.length, 0);
   return data.length;
+}
+
+/** Explicit request values, including zero and null, always win over catalogue defaults. */
+function applySamplingDefaults(value: unknown, sampling?: SamplingParameters): { body: unknown; changed: boolean } {
+  const source = asRecord(value);
+  if (!sampling || !source || !Object.keys(sampling).some(key => !Object.hasOwn(source, key))) {
+    return { body: value, changed: false };
+  }
+  return { body: { ...sampling, ...source }, changed: true };
 }
 
 function writeUpstreamHead(response: ServerResponse, upstream: IncomingMessage): void {
