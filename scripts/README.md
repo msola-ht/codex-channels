@@ -6,6 +6,9 @@
 
 ## 配置与 Workspace
 
+- `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，由 MCP 客户端启动；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。
+- `video-analysis-client.mjs`：视频 MCP 的严格环境配置、直属文件校验、有界读取及 Strata Responses 请求；只在完整 `completed` 响应中提取分析文字，不接受任意远程视频 URL，不执行模型返回的内容。
+
 - `managed-provider-account-prompt.mjs` / `managed-provider-account-prompt.d.mts`：多账户添加共用预设与自定义 ID 交互。
 
 - `runtime-config.mjs` / `runtime-config.d.mts`：解析并声明用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断和
