@@ -2,7 +2,7 @@
 
 本目录是飞书 Surface 的平台边界。当前已完成官方 SDK 与事件长连接窄封装、私聊普通文本、
 纯文字富文本、代码块与 Markdown 富文本、独立图片、最多四张图片说明文字、一次性音频与独立 UTF-8
-文本文件 Inbox、输出渲染、
+文本文件和视频附件 Inbox、输出渲染、
 Bootstrap 显式组合、全部平台无关
 私聊命令、审批和用户输入卡片，以及
 按需 OAuth 与 Doctor。当前可通过严格 TOML 或统一 Setup 启用单账号私聊 Surface；群聊、Lark、
@@ -42,6 +42,12 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `audio.ts`：通过既有消息资源权限下载独立音频，限制为 5 分钟、20 MiB 和 Codex CLI
   支持的 WAV/MP3/M4A/WebM/OGG，写入一小时私有临时文件后构造 `localAudio`；Application
   仅在当前模型目录包含 `audio` 时提交，否则在创建或追加 Turn 前明确拒绝。
+- `video.ts`：授权后的独立 `video`/`media` 消息与 `.mp4`/`.webm` 文件消息复用官方消息资源下载，
+  由共享视频暂存器验证实际 MP4/WebM 签名、64 MiB 上限与 24 小时有效期。只提交随机附件标识及
+  `strata_video.analyze_video` MCP 调用说明，保留回复引用上下文，视频封面不作为视频下载；未配置
+  `videoDirectory` 明确拒绝。下载前固定工作区和 Thread，提交时由 Application 在会话锁内复核
+  绑定及用户授权；绑定变化拒绝提交。关闭撤销下载与提交，迟到下载释放流，提交失败删除本次附件。
+  富文本 `media` 资源没有原文件名，继续走严格 UTF-8 文本文件路径；视频须独立发送。
 - `event-connection.ts`：隔离官方 WebSocket SDK，管理事件注册、握手、SDK 重连、失败后重新启动
   和最终停止生命周期。
 - `file-input.ts`：通过官方消息资源 API 在内存下载独立文件，限制为 1,000,000 字节并严格验证

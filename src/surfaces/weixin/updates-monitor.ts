@@ -28,7 +28,7 @@ export interface CreateWeixinUpdatesMonitorOptions {
   client: WeixinProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
   handleMessage(message: Extract<WeixinInboundMessage, {
-    kind: "text" | "image" | "file" | "audio";
+    kind: "text" | "image" | "file" | "audio" | "video";
   }>, signal: AbortSignal): Promise<void>;
   maximumConsecutiveFailures?: number;
   recentMessageCapacity?: number;

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { TextAttachmentStore, textAttachmentBody } from "../text-attachment-store.js";
+import { videoAttachmentBody } from "../video-attachment-store.js";
 import { Bot, type Context } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
@@ -92,6 +93,7 @@ import {
 } from "./file-input.js";
 import { formatTelegramUserFacingError } from "./user-error-renderer.js";
 import { TelegramPluginTaskPrompts } from "./plugin-task-prompts.js";
+import { TelegramVideoInput } from "./video-input.js";
 
 export interface TelegramImagePort {
   start(): Promise<void>;
@@ -120,6 +122,7 @@ export interface TelegramSurfaceOptions {
   imageStore?: TelegramImagePort;
   audioStore?: TelegramAudioPort;
   textFileInput?: TelegramTextFilePort;
+  videoDirectory?: string;
   finalMessageFormat?: TelegramFinalMessageFormat;
   operationUpdateDisplay?: OperationUpdateDisplay;
   planUpdatesEnabled?: boolean;
@@ -148,7 +151,7 @@ export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
 }
 
 export type TelegramConversationUseCases =
-  & Pick<ConversationTurnUseCases, "touchActivity" | "submit">
+  & Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">
   & Pick<ConversationSessionUseCases, "status" | "statusForDisplay" | "listWorkspaces">
   & Pick<ConversationExtensionUseCases, "modelState" | "listPlugins">;
 
@@ -184,6 +187,7 @@ export class TelegramSurface {
   private readonly imageStore: TelegramImagePort;
   private readonly audioStore: TelegramAudioPort;
   private readonly textFileInput: TelegramTextFilePort;
+  private readonly videoInput: TelegramVideoInput | undefined;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
   private readonly commands: ConversationCommandExecutor;
   private readonly inputs: SurfaceInputCoalescer;
@@ -197,6 +201,7 @@ export class TelegramSurface {
   private readonly debugEnabled: boolean;
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
+  private stopping = false;
 
   constructor(
     token: string,
@@ -278,6 +283,9 @@ export class TelegramSurface {
       ?? new TelegramAudioStore(uploadsDirectory, token, proxyUrl, logger);
     this.textFileInput = options.textFileInput
       ?? new TelegramTextFileInput(token, proxyUrl, undefined, new TextAttachmentStore(join(uploadsDirectory, "telegram-text"), () => logger.warn("文本附件清理失败")));
+    this.videoInput = options.videoDirectory === undefined
+      ? undefined
+      : new TelegramVideoInput(options.videoDirectory, token, proxyUrl, logger);
     this.lifecycle = new TelegramLifecycle(
       this.bot,
       logger,
@@ -354,13 +362,18 @@ export class TelegramSurface {
       this.imageStore.start(),
       this.audioStore.start(),
       this.textFileInput.start?.(),
+      this.videoInput?.start(),
     ]);
+    if (this.stopping) return;
     this.lifecycle.start();
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
+    const videoClose = this.videoInput?.close();
     try {
       const lifecycleStop = this.lifecycle.stop();
+      await videoClose;
       await this.inputs.close();
       await this.textFileInput.close?.();
       this.imageStore.close();
@@ -415,6 +428,7 @@ export class TelegramSurface {
           "普通文本会发送到当前 Codex Session。",
           "发送 PNG/JPEG/WebP/非动画 GIF 图片时，可在图片说明中写明需要 Codex 处理的任务。",
           "发送 UTF-8 文本文件时，可在文件说明中写明需要 Codex 处理的任务。",
+          "发送 MP4/WebM 视频或视频消息时，会暂存最多 20 MiB 的视频附件供当前会话调用视频 MCP；可附说明文字。",
           "首次消息自动接续当前 Workspace 最近的空闲 CLI/App Server 会话。",
           "",
           ...conversationCommandHelpLines,
@@ -996,8 +1010,17 @@ export class TelegramSurface {
         context.message.caption,
       );
     });
+    this.bot.on(["message:video", "message:video_note"], async (context) => {
+      const video = context.message.video ?? context.message.video_note;
+      if (!video) throw new Error("Telegram 视频消息缺少文件信息");
+      await this.submitVideo(context, video.file_id, video.file_size, context.message.caption);
+    });
     this.bot.on("message:document", async (context) => {
       const document = context.message.document;
+      if (isVideoDocument(document.mime_type, document.file_name)) {
+        await this.submitVideo(context, document.file_id, document.file_size, context.message.caption);
+        return;
+      }
       if (isSupportedImageDocument(document.mime_type, document.file_name)) {
         await this.submitImage(
           context,
@@ -1031,6 +1054,90 @@ export class TelegramSurface {
         throw error;
       }
     });
+  }
+
+  private async submitVideo(
+    context: Context,
+    fileId: string,
+    fileSize: number | undefined,
+    caption: string | undefined,
+  ): Promise<void> {
+    if (this.stopping) return;
+    if (this.videoInput === undefined) {
+      await context.reply("此 Gateway 未配置视频附件接入，暂不支持视频。");
+      return;
+    }
+    const inputTarget = target(context);
+    const actorId = String(context.from?.id ?? "");
+    if (!this.access.isAllowed({ target: inputTarget, actorId })) return;
+    await this.inputs.flushPending(inputTarget, actorId);
+    if (this.stopping || !this.access.isAllowed({ target: inputTarget, actorId })) return;
+    const submitAttachment = this.service.prepareAttachmentSubmission?.(
+      inputTarget,
+      () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
+    );
+    if (submitAttachment === undefined) {
+      await context.reply("此 Gateway 的视频会话提交入口未就绪，请稍后重新发送。");
+      return;
+    }
+    let file;
+    try {
+      try {
+        file = await this.videoInput.download(this.bot.api, fileId, fileSize, submitAttachment.signal);
+      } catch (error) {
+        if (this.stopping) return;
+        if (error instanceof UserFacingError && error.code.startsWith("video.")) {
+          const text = error.code === "video.too-large"
+            ? "Telegram 视频超过 20 MiB 限制，请压缩后重新发送。"
+            : error.code === "video.unsupported"
+              ? "视频附件仅支持内容有效的 MP4 或 WebM，请转换后重新发送。"
+              : error.code === "video.capacity"
+                ? "视频附件暂存容量已满，请稍后重新发送。"
+                : "Telegram 视频下载或暂存失败，请重新发送。";
+          await context.reply(text);
+          return;
+        }
+        throw error;
+      }
+      if (this.stopping || !this.access.isAllowed({ target: inputTarget, actorId })) {
+        return;
+      }
+      const message = context.message;
+      if (!message) {
+        throw new Error("Telegram 视频更新缺少消息信息");
+      }
+      const currentText = caption?.trim();
+      const text = formatQuotedInput([
+        "以下为用户通过 Telegram 上传的视频附件（仅作会话输入）：",
+        ...(currentText ? ["用户说明：", currentText, ""] : []),
+        videoAttachmentBody(file),
+      ].join("\n"), telegramQuotedText(message.reply_to_message));
+      this.outbox.prepareTurnReplyTarget(inputTarget.conversationId, message.message_id);
+      let submission;
+      try {
+        submission = await submitAttachment.submit(text);
+      } catch (error) {
+        this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+        throw error;
+      }
+      if (this.stopping) return;
+      if (submission.steered) {
+        this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+        await context.reply(formatTurnInputAppended("file", Boolean(currentText)), {
+          disable_notification: true,
+          reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+        });
+      } else {
+        this.outbox.bindPendingTurnReplyTarget(
+          inputTarget.conversationId,
+          submission.threadId,
+          submission.turnId,
+        );
+      }
+    } finally {
+      submitAttachment.dispose();
+      if (file !== undefined && !submitAttachment.mayHaveSubmitted) await this.videoInput.discard(file);
+    }
   }
 
   private async submitTextFile(
@@ -1325,6 +1432,7 @@ export class TelegramSurface {
   }
 
   private async authorize(context: Context, next: () => Promise<void>): Promise<void> {
+    if (this.stopping) return;
     if (isWhoAmICommand(context, this.bot.botInfo.username)) {
       await next();
       return;
@@ -1399,7 +1507,14 @@ function telegramMessageType(context: Context): string | undefined {
   if (message.document !== undefined) return "document";
   if (message.voice !== undefined) return "voice";
   if (message.audio !== undefined) return "audio";
+  if (message.video !== undefined) return "video";
+  if (message.video_note !== undefined) return "video-note";
   return "other";
+}
+
+function isVideoDocument(mimeType: string | undefined, fileName: string | undefined): boolean {
+  return mimeType?.startsWith("video/") === true
+    || /\.(?:mp4|webm|mov|mkv|avi|m4v|mpeg|mpg)$/i.test(fileName ?? "");
 }
 
 function isSupportedImageDocument(mimeType: string | undefined, fileName: string | undefined): boolean {

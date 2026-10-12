@@ -6,7 +6,8 @@ export type FeishuParsedContent =
   | { kind: "image"; imageKeys: readonly string[]; text?: string }
   | { kind: "file"; fileKey: string; fileName: string }
   | { kind: "files"; files: readonly { fileKey: string; fileName: string }[]; text?: string; imageKeys: readonly string[] }
-  | { kind: "audio"; fileKey: string; durationMs?: number };
+  | { kind: "audio"; fileKey: string; durationMs?: number }
+  | { kind: "video"; fileKey: string; fileName?: string };
 
 export function parseFeishuTextContent(value: string): string | undefined {
   let parsed: unknown;
@@ -54,7 +55,7 @@ export function parseFeishuImageContent(
 
 export function parseFeishuFileContent(
   value: string,
-): Extract<FeishuParsedContent, { kind: "file" }> | undefined {
+): Extract<FeishuParsedContent, { kind: "file" | "video" }> | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
@@ -78,9 +79,27 @@ export function parseFeishuFileContent(
     return undefined;
   }
   return {
-    kind: "file",
+    kind: /\.(?:mp4|webm)$/iu.test(record.file_name.trim()) ? "video" : "file",
     fileKey: record.file_key,
     fileName: record.file_name.trim(),
+  };
+}
+
+export function parseFeishuVideoContent(
+  value: string,
+): Extract<FeishuParsedContent, { kind: "video" }> | undefined {
+  const record = parseRecord(value);
+  if (
+    record === undefined
+    || typeof record.file_key !== "string"
+    || !isSafeFeishuResourceIdentifier(record.file_key)
+    || (record.file_name !== undefined && (typeof record.file_name !== "string" || !isSafeFeishuFileName(record.file_name)))
+  ) return undefined;
+  // image_key is only the cover; the downloadable video is file_key.
+  return {
+    kind: "video",
+    fileKey: record.file_key,
+    ...(record.file_name === undefined ? {} : { fileName: record.file_name.trim() }),
   };
 }
 

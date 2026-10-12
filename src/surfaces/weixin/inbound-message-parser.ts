@@ -19,6 +19,7 @@ import {
   type WeixinQuotedReference,
   type WeixinPartialQuote,
   type WeixinUpdatesBatch,
+  type WeixinVideoReference,
 } from "./protocol-types.js";
 
 export const maximumWeixinCursorLength = 65_536;
@@ -141,6 +142,10 @@ function parseInboundContent(
       "kind" | "text" | keyof WeixinQuotedReference | "file"
     >
   | Pick<
+      Extract<WeixinInboundMessage, { kind: "video" }>,
+      "kind" | "text" | keyof WeixinQuotedReference | "video"
+    >
+  | Pick<
       Extract<WeixinInboundMessage, { kind: "audio" }>,
       "kind" | keyof WeixinQuotedReference | "audio"
     >
@@ -150,6 +155,7 @@ function parseInboundContent(
   const images: WeixinImageReference[] = [];
   let file: WeixinFileReference | undefined;
   let audio: WeixinAudioReference | undefined;
+  let video: WeixinVideoReference | undefined;
   for (const item of items) {
     const record = requiredRecord(item, "微信消息项目无效");
     const type = optionalSafeInteger(
@@ -178,6 +184,7 @@ function parseInboundContent(
     if (type === 2) {
       if (
         file !== undefined
+        || video !== undefined
         || audio !== undefined
         || images.length >= maximumInboundImages
       ) {
@@ -189,6 +196,7 @@ function parseInboundContent(
     if (type === 3) {
       if (
         audio !== undefined
+        || video !== undefined
         || file !== undefined
         || images.length > 0
         || text !== undefined
@@ -200,14 +208,29 @@ function parseInboundContent(
       continue;
     }
     if (type === 4) {
-      if (file !== undefined || audio !== undefined || images.length > 0) {
+      if (file !== undefined || audio !== undefined || video !== undefined || images.length > 0) {
         return null;
       }
       file = parseFileReference(record);
       continue;
     }
+    if (type === 5) {
+      if (video !== undefined || file !== undefined || audio !== undefined || images.length > 0) return null;
+      const item = requiredRecord(record.video_item, "微信视频项目无效");
+      const media = requiredRecord(item.media, "微信视频媒体无效");
+      const fullUrl = optionalBoundedString(media.full_url, "微信视频地址无效", 8192);
+      const encryptedQueryParam = optionalBoundedString(media.encrypt_query_param, "微信视频下载参数无效", 65536);
+      const mediaAesKey = optionalBoundedString(media.aes_key, "微信视频密钥无效", 1024);
+      if ((!fullUrl && !encryptedQueryParam) || !mediaAesKey) return null;
+      const encryptedBytes = optionalNonNegativeInteger(item.video_size, "微信视频大小无效");
+      video = { mediaAesKey, ...(fullUrl === undefined ? {} : { fullUrl }),
+        ...(encryptedQueryParam === undefined ? {} : { encryptedQueryParam }),
+        ...(encryptedBytes === undefined ? {} : { encryptedBytes }) };
+      continue;
+    }
     return null;
   }
+  if (video !== undefined) return { kind: "video", video, ...quoted, ...(text === undefined ? {} : { text }) };
   if (audio !== undefined) {
     return {
       kind: "audio",

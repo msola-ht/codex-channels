@@ -1,4 +1,7 @@
 import { textAttachmentBody } from "../text-attachment-store.js";
+import { videoAttachmentBody } from "../video-attachment-store.js";
+import type { WeixinVideoStore } from "./video-store.js";
+import type { WeixinVideoReference } from "./protocol-types.js";
 import type { Logger } from "pino";
 
 import {
@@ -63,6 +66,14 @@ export type WeixinConversationMessage =
   | {
       target: ConversationTarget;
       actorId: string;
+      kind: "video";
+      video: WeixinVideoReference;
+      text?: string;
+      quotedText?: string;
+    }
+  | {
+      target: ConversationTarget;
+      actorId: string;
       kind: "text";
       text: string;
       quotedText?: string;
@@ -101,7 +112,7 @@ export class WeixinConversationAdapter {
   constructor(
     private readonly conversations: Pick<
       ConversationTurnUseCases,
-      "touchActivity" | "submit"
+      "touchActivity" | "submit" | "prepareAttachmentSubmission"
     >,
     private readonly outbox: Pick<WeixinOutbox, "notifyText">,
     private readonly commands: ConversationCommandExecutor,
@@ -113,9 +124,11 @@ export class WeixinConversationAdapter {
       now?: () => number;
       debugEnabled?: boolean;
       logger?: Pick<Logger, "warn">;
+      isAllowed?: (target: ConversationTarget, actorId: string) => boolean;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
     private readonly audios?: Pick<WeixinAudioPort, "download">,
+    private readonly videos?: Pick<WeixinVideoStore, "download" | "discard">,
   ) {
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
@@ -137,6 +150,31 @@ export class WeixinConversationAdapter {
   private async handleOnce(message: WeixinConversationMessage, signal?: AbortSignal): Promise<void> {
     try {
       signal?.throwIfAborted();
+      if (message.kind === "video" || (message.kind === "file" && /\.(?:mp4|webm)$/iu.test(message.file.fileName))) {
+        if (!this.videos) throw new UserFacingError("video.unavailable", "微信视频附件输入未启用");
+        await this.inputs.flushPending(message.target, message.actorId);
+        signal?.throwIfAborted();
+        const submit = this.conversations.prepareAttachmentSubmission?.(message.target,
+          () => !signal?.aborted && this.inputOptions.isAllowed?.(message.target, message.actorId) === true);
+        if (!submit) throw new UserFacingError("video.unavailable", "视频附件会话授权入口不可用");
+        const videoSignal = AbortSignal.any([submit.signal, ...(signal ? [signal] : [])]);
+        let file;
+        try {
+          file = await this.videos.download(message.kind === "video" ? message.video : message.file, videoSignal);
+          videoSignal.throwIfAborted();
+          if (this.inputOptions.isAllowed?.(message.target, message.actorId) === false) {
+            return;
+          }
+          await submit.submit([
+            videoAttachmentBody(file),
+            formatQuotedInput(message.text ?? "请概述视频内容。", message.quotedText),
+          ].join("\n\n"));
+        } finally {
+          submit.dispose();
+          if (file !== undefined && !submit.mayHaveSubmitted) await this.videos.discard(file);
+        }
+        return;
+      }
       if (message.kind === "audio") {
         await this.inputs.flushPending(message.target, message.actorId);
         signal?.throwIfAborted();

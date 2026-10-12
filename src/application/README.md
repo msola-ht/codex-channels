@@ -1,5 +1,9 @@
 # Application
 
+`ConversationTurnUseCases.prepareAttachmentSubmission` 为视频下载捕获当前工作区与 Thread；下载完成后在会话锁内复核目标和调用方实时授权，再通过原有文本 Turn 提交入口发送单文件附件引用。首次输入仍由既有 `ensureSession` 建立 Thread，不新增原生视频协议字段，不在 Application 下载媒体或调用视频模型。
+
+返回的提交作用域提供取消信号、一次性 `submit`、`mayHaveSubmitted` 和 `dispose`。Surface 在下载前创建作用域并在结束时释放；`/stop` 取消当前目标的附件准备，准备总时限为 120 秒。每个目标最多 4 个待处理作用域，全局最多 1000 个目标。RPC 可能发出后即使确认失败也保留附件至过期，避免删除已经进入 Thread 的引用；不自动重试提交。
+
 本目录实现跨模块用例，协调 Codex Client、Conversation Core、Session Router 和模型设置，不处理 Telegram SDK 或底层 Transport。
 
 ## 文件
@@ -34,7 +38,7 @@
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   普通 `status` 不执行 Git IO，展示入口 `statusForDisplay` 通过组合根注入的异步只读端口取得当前 Workspace Git 分支；完成卡仅调用 `workspaceGitBranch`，不连带查询模型与账户状态；
-  `/stop` 同时取消当前 Thread 尚未提交的图片准备；已提交 Turn 继续使用官方中断。
+  `/stop` 同时取消当前目标的视频准备及当前 Thread 尚未提交的图片准备；已提交 Turn 继续使用官方中断。
   Workspace 权限更新只写配置；结构化 Auto-review 选择在 Conversation 锁内核对原 Workspace ID，拒绝过期按钮，不改变已加载 Thread 的实际审批方式。
   当前 Thread Auto-review 写入则在同一锁内要求已有绑定、空闲且无待处理交互，未知或 Guardian 实际值只读；已确认的相同值不写。等待 Client 的权威通知确认后再核对绑定，返回 Router 的实际值，不创建 Thread、启动 Turn 或乐观修改缓存。
   所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；

@@ -42,6 +42,7 @@ export interface FeishuFileResourcePort {
   downloadFile(
     messageId: string,
     fileKey: string,
+    signal?: AbortSignal,
   ): Promise<{
     stream: Readable;
     contentLength?: number;

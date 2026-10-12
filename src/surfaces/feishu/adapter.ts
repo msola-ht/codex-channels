@@ -1,4 +1,5 @@
 import { textAttachmentBody } from "../text-attachment-store.js";
+import { videoAttachmentBody, type PreparedVideoAttachment } from "../video-attachment-store.js";
 import {
   isConversationCommandName,
   type ConversationCommandExecutor,
@@ -10,6 +11,7 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
+import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import { parseSlashCommand } from "../slash-command.js";
 import {
@@ -45,6 +47,7 @@ import {
 } from "./file-input.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 import type { FeishuImagePort } from "./media.js";
+import type { FeishuVideoPort } from "./video.js";
 import {
   maximumFeishuAudioDurationMs,
   type FeishuAudioPort,
@@ -79,11 +82,12 @@ const unsupportedMessageLinkText = [
 export class FeishuConversationAdapter {
   private readonly inputs: SurfaceInputCoalescer;
   private nextInputSequence = 0;
+  private readonly videoCancellation = new AbortController();
 
   constructor(
     private readonly conversations: Pick<
       ConversationTurnUseCases,
-      "touchActivity" | "submit"
+      "touchActivity" | "submit" | "prepareAttachmentSubmission"
     >,
     private readonly outbox:
       & Pick<FeishuOutbox, "notifyMarkdown" | "notifyText">
@@ -116,6 +120,8 @@ export class FeishuConversationAdapter {
       quietWindowMs?: number;
       files?: Pick<FeishuFilePort, "download" | "discard">;
       audios?: Pick<FeishuAudioPort, "download">;
+      videos?: Pick<FeishuVideoPort, "download" | "discard">;
+      access?: SurfaceAccessPolicy;
       readQuotedText?(messageId: string): Promise<string | undefined>;
       onQuotedTextError?(error: unknown): void;
       now?: () => number;
@@ -146,6 +152,10 @@ export class FeishuConversationAdapter {
   async handle(message: FeishuInboxMessage): Promise<void> {
     try {
       this.conversations.touchActivity?.(message.target);
+      if (message.kind === "video") {
+        await this.handleVideo(message);
+        return;
+      }
       if (message.kind === "file" || message.kind === "files") {
         await this.handleFile(message);
         return;
@@ -328,7 +338,12 @@ export class FeishuConversationAdapter {
   }
 
   close(): Promise<void> {
+    this.stopVideoInputs();
     return this.inputs.close();
+  }
+
+  stopVideoInputs(): void {
+    this.videoCancellation.abort();
   }
 
   async handleCommandCenterAction(
@@ -785,6 +800,55 @@ export class FeishuConversationAdapter {
         result.submission.turnId,
         formatTurnInputAppended("file"),
       );
+    }
+  }
+
+  private async handleVideo(
+    message: Extract<FeishuInboxMessage, { kind: "video" }>,
+  ): Promise<void> {
+    const videos = this.inputOptions.videos;
+    if (videos === undefined) throw new UserFacingError("video.unsupported", "飞书当前未启用视频输入");
+    if (this.conversations.prepareAttachmentSubmission === undefined) {
+      throw new UserFacingError("video.unavailable", "飞书视频提交能力尚未就绪");
+    }
+    let signal = this.videoCancellation.signal;
+    const check = (): void => {
+      signal.throwIfAborted();
+      if (!this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId })) {
+        throw new UserFacingError("video.unavailable", "当前用户的飞书视频授权已失效");
+      }
+    };
+    let file: PreparedVideoAttachment | undefined;
+    let submitted = false;
+    let submissionScope: ReturnType<NonNullable<typeof this.conversations.prepareAttachmentSubmission>> | undefined;
+    try {
+      check();
+      await this.inputs.flushPending(message.target, message.actorId);
+      check();
+      submissionScope = this.conversations.prepareAttachmentSubmission(message.target, () =>
+        !signal.aborted && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
+      );
+      signal = AbortSignal.any([signal, submissionScope.signal]);
+      file = await videos.download(message.messageId, message.fileKey, signal);
+      check();
+      const quotedText = await this.readQuotedText(message);
+      check();
+      const submission = await this.submitWithReplyTarget(
+        message.target.conversationId,
+        message.messageId,
+        () => {
+          check();
+          return submissionScope!.submit(formatQuotedInput(videoAttachmentBody(file!), quotedText));
+        },
+      );
+      submitted = true;
+      this.settleTurnReplyTarget(message.target.conversationId, submission.threadId, submission.turnId, submission.steered);
+      if (submission.steered) {
+        this.replyTurnInput(message.target.conversationId, submission.threadId, submission.turnId, formatTurnInputAppended("file"));
+      }
+    } finally {
+      submissionScope?.dispose();
+      if (!submitted && !submissionScope?.mayHaveSubmitted && file !== undefined) await videos.discard(file);
     }
   }
 

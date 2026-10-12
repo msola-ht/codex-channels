@@ -158,6 +158,7 @@ function createWeixinModule(
       "uploads",
       "weixin",
     ),
+    videoDirectory: join(dirname(options.config.stateDatabasePath), "uploads", "video"),
     startupNotification: {
       targets: () => authorizedWeixinConversations(
         options.bindings,
@@ -239,6 +240,7 @@ function createFeishuModule(
       "uploads",
       "feishu",
     ),
+    videoDirectory: join(dirname(options.config.stateDatabasePath), "uploads", "video"),
     credentialsDirectory: join(
       dirname(options.config.stateDatabasePath),
       "credentials",
@@ -363,6 +365,7 @@ function createTelegramModule(
     startupRecipients: config.telegramAllowedUserIds,
     workspaces: config.workspaces,
     uploadsDirectory: join(dirname(config.stateDatabasePath), "uploads"),
+    videoDirectory: join(dirname(config.stateDatabasePath), "uploads", "video"),
     logger,
     actorRegistry: bindings,
     onFatal: (error) => options.onFatal("telegram", telegramDefaultAccountId, error),

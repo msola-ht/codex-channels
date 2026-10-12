@@ -783,6 +783,8 @@ API Key 账户、未知类型或未提供明细的券不可使用。渠道使用
 
 ### 正常发图与图片引用
 
+视频附件使用独立的视频分析 MCP：三渠道接收 MP4/WebM 后提交单文件随机引用，实际分析需要在承载该渠道 Thread 的 App Server 中启用 MCP 并配置渠道附件根目录。Telegram 接收上限 20 MiB，飞书/微信 64 MiB；只分析画面，不分析音轨。部署、有效期、授权及尚未实机验收的范围见[视频分析 MCP](video-analysis-mcp.md#渠道视频附件)。
+
 照常在渠道发送图片即可，不需要额外命令。使用 OpenAI ChatGPT 登录时，Gateway 上传已校验的
 原图并以官方 `fileId` 提交；App Server 保存引用，后续历史继续使用引用。自动引用目前要求
 实际模型代理与账户均使用默认 ChatGPT 后端，且账户路由策略为 `NO_CONSTRAINT`；

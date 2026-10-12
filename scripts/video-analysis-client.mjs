@@ -45,21 +45,39 @@ export async function videoConfiguration(environment) {
     root = await realpath(configuredRoot);
     if (!(await stat(root)).isDirectory()) throw new Error();
   } catch { fail("configuration", "STRATA_VIDEO_ROOT 不是可用目录。"); }
+  let channelRoot;
+  if (environment.STRATA_VIDEO_CHANNEL_ROOT !== undefined) {
+    const configured = environment.STRATA_VIDEO_CHANNEL_ROOT;
+    if (!configured || !isAbsolute(configured)) fail("configuration", "STRATA_VIDEO_CHANNEL_ROOT 必须是已存在目录的绝对路径。");
+    try {
+      channelRoot = await realpath(configured);
+      if (!(await stat(channelRoot)).isDirectory()) throw new Error();
+    } catch { fail("configuration", "STRATA_VIDEO_CHANNEL_ROOT 不是可用目录。"); }
+    const contains = (parent, child) => {
+      const value = relative(parent, child);
+      return !isAbsolute(value) && value !== ".." && !value.startsWith(`..${sep}`);
+    };
+    if (contains(root, channelRoot) || contains(channelRoot, root)) {
+      fail("configuration", "本地视频目录与渠道附件目录必须分离，不能相同或互相包含。");
+    }
+  }
   const timeoutText = environment.STRATA_VIDEO_TIMEOUT_SECONDS ?? "900";
   if (!/^\d+$/u.test(timeoutText) || Number(timeoutText) < 1 || Number(timeoutText) > 1800) {
     fail("configuration", "STRATA_VIDEO_TIMEOUT_SECONDS 必须是 1–1800 的整数。");
   }
-  return { endpoint: new URL("v1/responses", endpoint), apiKey, model, root,
+  return { endpoint: new URL("v1/responses", endpoint), apiKey, model, root, channelRoot,
     timeoutMs: Number(timeoutText) * 1000 };
 }
 
 export const videoTool = {
   name: "analyze_video",
-  description: "将指定视频发送给管理员配置的 Strata 模型并返回分析文字。video 接受授权目录直属文件名，或该目录及子目录内的本机绝对路径，不接受 URL。只分析画面，不分析音轨；每次调用独立，追问须再次指定视频。",
+  description: "将视频发送给管理员配置的 Strata 模型。video 接受本地授权目录内的文件名或绝对路径；attachment 接受当前会话收到的渠道视频附件引用，二者只能提供一个，不接受 URL。只分析画面，不分析音轨；追问须再次指定原视频或引用。",
   inputSchema: {
-    type: "object", additionalProperties: false, required: ["video", "question"],
+    type: "object", additionalProperties: false, required: ["question"],
+    oneOf: [{ required: ["video"] }, { required: ["attachment"] }],
     properties: {
       video: { type: "string", minLength: 1, maxLength: 4096, description: "授权目录直属文件名（最多 255 字符），或目录及子目录内的本机绝对路径（最多 4096 字符）。路径属于 MCP 所在主机。" },
+      attachment: { type: "string", maxLength: 64, description: "当前会话提供的渠道视频随机引用；不可枚举、猜测或使用其他会话的引用。与 video 互斥。" },
       question: { type: "string", minLength: 1, maxLength: 16000, description: "视频分析问题；可要求按时间顺序描述并标出时间戳。" },
       max_output_tokens: { type: "integer", minimum: 64, maximum: 4096, default: 1024 },
     },
@@ -69,15 +87,18 @@ export const videoTool = {
 
 function validateArguments(args) {
   if (!args || typeof args !== "object" || Array.isArray(args)
-      || Object.keys(args).some((key) => !["video", "question", "max_output_tokens"].includes(key))
-      || typeof args.video !== "string" || !args.video || args.video.length > 4096
-      || [...args.video].some((character) => character.charCodeAt(0) < 32)
+      || Object.keys(args).some((key) => !["video", "attachment", "question", "max_output_tokens"].includes(key))
+      || Object.hasOwn(args, "video") === Object.hasOwn(args, "attachment")
+      || (Object.hasOwn(args, "video") && (typeof args.video !== "string" || !args.video || args.video.length > 4096
+        || [...args.video].some((character) => character.charCodeAt(0) < 32)))
+      || (Object.hasOwn(args, "attachment") && (typeof args.attachment !== "string"
+        || !/^(?:telegram|feishu|weixin)\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:mp4|webm)$/u.test(args.attachment)))
       || typeof args.question !== "string" || !args.question.trim() || args.question.length > 16000
       || (args.max_output_tokens !== undefined && (!Number.isInteger(args.max_output_tokens)
         || args.max_output_tokens < 64 || args.max_output_tokens > 4096))) {
-    fail("invalid_arguments", "需要 video 文件名或本机绝对路径和非空 question；max_output_tokens 为 64–4096 的整数，不接受其他参数。");
+    fail("invalid_arguments", "需要 video 或 attachment 二选一及非空 question；max_output_tokens 为 64–4096 的整数，不接受其他参数。");
   }
-  const mime = mimeTypes.get(extname(args.video).toLowerCase());
+  const mime = mimeTypes.get(extname(args.video ?? args.attachment).toLowerCase());
   if (!mime) fail("unsupported_video", "只接受 mp4、mov、webm、mkv、avi、ts 视频文件。");
   return mime;
 }
@@ -87,7 +108,7 @@ function sameFile(left, right) {
     && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
 }
 
-async function readVideo(root, name, signal) {
+async function readVideo(root, name, signal, maximumAgeMs) {
   const absolute = isAbsolute(name);
   // Reject traversal before normalization, Windows device/UNC paths and ADS.
   // On POSIX, backslashes and colons are deliberately outside this contract.
@@ -110,6 +131,9 @@ async function readVideo(root, name, signal) {
       fail("unsafe_file", "视频路径及其子目录不能包含链接；请使用授权目录内的真实路径。");
     }
     const before = await lstat(path);
+    if (maximumAgeMs !== undefined && (Date.now() - before.mtimeMs >= maximumAgeMs || before.mtimeMs > Date.now() + 5000)) {
+      fail("attachment_expired", "渠道视频附件已过期或时间无效，请重新上传。");
+    }
     if (!before.isFile() || before.nlink !== 1) {
       fail("unsafe_file", "视频必须是普通文件，不能是链接、目录或设备。");
     }
@@ -142,7 +166,12 @@ async function readVideo(root, name, signal) {
 
 export async function analyzeVideo(config, args, signal) {
   const mime = validateArguments(args);
-  const bytes = await readVideo(config.root, args.video, signal);
+  if (args.attachment !== undefined && !config.channelRoot) {
+    fail("configuration", "视频 MCP 未配置 STRATA_VIDEO_CHANNEL_ROOT，无法读取渠道附件。");
+  }
+  const bytes = args.attachment === undefined
+    ? await readVideo(config.root, args.video, signal)
+    : await readVideo(config.channelRoot, join(config.channelRoot, ...args.attachment.split("/")), signal, 24 * 60 * 60 * 1000);
   signal.throwIfAborted();
   // The same signal must also cancel a socket still in DNS/TCP/TLS setup;
   // aborting only request() leaves Agent.destroy() waiting for connect timeout.
@@ -193,7 +222,7 @@ export async function analyzeVideo(config, args, signal) {
     if (!text.trim()) fail("empty_result", "Strata 完成响应中没有可用的分析文字。");
     if (text.includes(config.apiKey)) fail("sensitive_result", "上游分析内容包含服务凭据，已拒绝返回。");
     signal.throwIfAborted();
-    return { video: args.video, analysis: text, audio_analyzed: false };
+    return { ...(args.attachment === undefined ? { video: args.video } : { attachment: args.attachment }), analysis: text, audio_analyzed: false };
   } catch (error) {
     if (signal.aborted || error instanceof VideoAnalysisError) throw error;
     fail("upstream_transport", "无法完成 Strata 请求：网络错误或响应体中断。");
