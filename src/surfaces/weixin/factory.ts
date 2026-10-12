@@ -15,6 +15,7 @@ import { createCredentialBackedWeixinClient } from "./credential-client.js";
 import { createWeixinCredentialStore } from "./credential-store.js";
 import { WeixinFileInput } from "./file-input.js";
 import { WeixinImageStore } from "./image-store.js";
+import { WeixinVideoStore } from "./video-store.js";
 import type { WeixinInputFatalError } from "./input-adapter.js";
 import { createWeixinReplyContextPersistence } from "./reply-context-persistence.js";
 import {
@@ -25,7 +26,7 @@ import { FileWeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 
 export interface CreateWeixinSurfaceOptions {
   accountId: string;
-  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
+  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">;
   commands: ConversationCommandExecutor;
   access: SurfaceAccessPolicy;
   actorRegistry: ConversationActorRegistry;
@@ -33,6 +34,7 @@ export interface CreateWeixinSurfaceOptions {
   replyContextDirectory: string;
   cursorDirectory: string;
   uploadsDirectory: string;
+  videoDirectory?: string;
   startupNotification: WeixinStartupNotification;
   debugEnabled?: boolean;
   autoCompactPercent?: (
@@ -76,6 +78,7 @@ export function createWeixinSurface(
       options.fetchImpl,
     ),
     files: new WeixinFileInput(options.fetchImpl, new TextAttachmentStore(join(options.uploadsDirectory, "text"), () => options.logger.warn("文本附件清理失败"))),
+    ...(options.videoDirectory === undefined ? {} : { videos: new WeixinVideoStore(options.videoDirectory, () => options.logger.warn("视频附件清理失败"), options.fetchImpl) }),
     audios: new WeixinAudioStore(
       options.uploadsDirectory,
       options.logger,

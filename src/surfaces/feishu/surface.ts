@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { TextAttachmentStore } from "../text-attachment-store.js";
+import { FeishuVideoStore, type FeishuVideoPort } from "./video.js";
 import type { Logger } from "pino";
 
 import type {
@@ -72,7 +73,7 @@ import { renderFeishuConfigurationChange } from "./renderer.js";
 
 const unsupportedFeishuMessageTypeText = [
   "暂不支持该消息类型，已忽略。",
-  "请发送文本、代码块、图片、文件或语音消息。",
+  "请发送文本、代码块、图片、文件、视频或语音消息。",
 ].join("\n");
 const invalidFeishuMessageContentText = [
   "消息内容无法识别，已忽略。",
@@ -90,6 +91,7 @@ interface FeishuSurfaceDependencies {
   imagePort?: FeishuImagePort;
   audioPort?: FeishuAudioPort;
   filePort?: FeishuFilePort;
+  videoPort?: FeishuVideoPort;
   quotedMessagePort?: FeishuQuotedMessagePort;
   createEventConnection: (
     options: FeishuEventConnectionOptions,
@@ -105,11 +107,12 @@ export interface FeishuStartupNotification {
 export interface FeishuSurfaceOptions {
   appId: string;
   appSecret: string;
-  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
+  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">;
   commands: ConversationCommandExecutor;
   access: SurfaceAccessPolicy;
   logger: Logger;
   uploadsDirectory: string;
+  videoDirectory?: string;
   credentialsDirectory: string;
   onFatal: (error: Error) => void;
   actorRegistry?: ConversationActorRegistry;
@@ -147,6 +150,7 @@ export class FeishuSurface implements SurfaceAdapter {
   private readonly applicationSetup: FeishuApplicationSetupController;
   private readonly images: FeishuImagePort;
   private readonly audios: FeishuAudioPort;
+  private readonly videos: FeishuVideoPort | undefined;
   private readonly connection: FeishuEventConnectionPort;
   private readonly oauth: FeishuOAuthControllerPort & {
     close(): Promise<void>;
@@ -204,6 +208,8 @@ export class FeishuSurface implements SurfaceAdapter {
     const files = dependencies.filePort
       ?? (client === undefined ? undefined : new FeishuFileInput(client, new TextAttachmentStore(join(options.uploadsDirectory, "text"), () => options.logger.warn("文本附件清理失败"))));
     this.files = files;
+    this.videos = options.videoDirectory === undefined ? undefined : dependencies.videoPort
+      ?? (client === undefined ? undefined : new FeishuVideoStore(options.videoDirectory, client, options.logger));
     this.output = new FeishuOutbox(
       options.appId,
       messagePort,
@@ -290,6 +296,8 @@ export class FeishuSurface implements SurfaceAdapter {
           : { autoCompactPercent: options.autoCompactPercent }),
         ...(files === undefined ? {} : { files }),
         audios: this.audios,
+        ...(this.videos === undefined ? {} : { videos: this.videos }),
+        access: options.access,
         ...(quotedMessages === undefined
           ? {}
           : {
@@ -515,15 +523,24 @@ export class FeishuSurface implements SurfaceAdapter {
   private readonly files: FeishuFilePort | undefined;
 
   async start(): Promise<void> {
+    if (this.stopPromise !== undefined) throw new Error("飞书 Surface 已停止");
     this.startupAbort?.abort();
     const startupAbort = new AbortController();
     this.startupAbort = startupAbort;
+    try {
+      await this.videos?.start();
+      startupAbort.signal.throwIfAborted();
+    } catch (error) {
+      startupAbort.abort();
+      throw error;
+    }
     const imagesStarting = this.images.start();
     const audiosStarting = this.audios.start();
     this.logger.info(this.lifecycleContext(), "飞书长连接正在连接");
     const connectionStarting = this.connection.start();
     try {
       await Promise.all([imagesStarting, audiosStarting, this.files?.start?.(), connectionStarting]);
+      startupAbort.signal.throwIfAborted();
     } catch (error) {
       startupAbort.abort();
       this.connection.resetAfterStartFailure?.();
@@ -542,10 +559,13 @@ export class FeishuSurface implements SurfaceAdapter {
   private async stopOnce(): Promise<void> {
     this.startupAbort?.abort();
     this.connectionReady = false;
+    this.adapter.stopVideoInputs();
+    const videosClosing = this.videos?.close();
     await this.connection.stop();
     await this.startupTask;
     await this.inbox.close();
     await this.adapter.close();
+    await videosClosing;
     await this.applicationSetup.close();
     await this.oauth.close();
     await this.files?.close?.();

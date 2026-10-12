@@ -89,6 +89,8 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 
 ### 会话、Thread 与 Workspace
 
+视频附件的稳定错误码为 `video.too-large`（大小或声明长度不合法）、`video.unsupported`（容器不支持）、`video.capacity`（暂存容量已满）、`video.unavailable`（未启用、下载/保存失败、停止，或提交前授权/目标变化）。文案不包含平台地址、密钥、附件引用或底层异常；Telegram 的大小提示使用自身 20 MiB 上限。
+
 | 错误码 | 用户提示 | 典型触发 |
 | --- | --- | --- |
 | `session.selector.required` | /resume 用法提示 | 未提供会话选择参数 |

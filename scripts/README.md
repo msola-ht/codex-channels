@@ -6,6 +6,10 @@
 
 ## 配置与 Workspace
 
+- `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，由 MCP 客户端启动；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。
+- `mcp-setup.mjs`：`codexc config → 新增 MCP` 交互入口，支持 stdio、Streamable HTTP 和 Strata 视频预设；校验输入、脱敏确认后通过 Codex 用户配置事务按修订写入，拒绝覆盖同名服务器，不自动安装、启动或重启服务。
+- `video-analysis-client.mjs`：视频 MCP 的严格环境配置、授权目录内文件名/绝对路径校验、有界读取及 Strata Files/Responses 请求；默认使用有界内存 file_id 映射、共享上传及一次明确失效恢复，显式 url 模式兼容旧部署；通过 `instructions` 发送通用视频分析规则，用户问题保持原样，可用有界 `context` 补充同一视频追问线索；预算由上游管理，支持显式思考等级，白名单提取用量及失败分类，只在完整 `completed` 响应中提取分析文字，不接受任意远程视频 URL，不执行模型返回的内容。
+
 - `managed-provider-account-prompt.mjs` / `managed-provider-account-prompt.d.mts`：多账户添加共用预设与自定义 ID 交互。
 
 - `runtime-config.mjs` / `runtime-config.d.mts`：解析并声明用户数据目录和运行时路径，并初始化 `.codex-connect`；为只读诊断和
@@ -247,8 +251,9 @@
 - `codex-subagents-setup.mjs` / `codex-subagents-setup.d.mts`：Config 中显式选择的子代理规则与配置入口，
   预览后按选择写入 Codex Home 的 `AGENTS.md` 托管规则段和主配置；主配置复用版本化 `config/batchWrite`。
   配置预览检测用户层已有子代理默认模型与思考等级覆盖并提示人工处理，保留这些键；仅写规则不读配置并提示未检查覆盖。
-  模型回退仅依据完整目录或目标实际错误，省略参数仅在无有效默认或角色覆盖时继承；省略后仍失败则报告阻塞。
-  规则模板只管理协作、模型分工、单轮生命周期及交接，完成要求继承当前全局和项目规则；
+  规则默认 Sol/high，Luna/max 处理明确低风险任务，Astra/high 按需使用；主代理负责决策、整合及针对性复核。
+  模板管理显式用户约束交接、单轮生命周期、异步回收及审查覆盖；不固定二审或全量重读，不盲目省略模型参数回退。
+  完成要求继承当前全局和项目规则，详细策略见用户指南；运行时模型和角色配置仍独立生效。
   安装、更新和核心默认值配置均不自动应用该预设。
 - `model-provider-default-management.mjs` / `model-provider-default-management.d.mts`：提供受管 Provider
   默认模型与思考等级的无终端校验、预览与执行接口；写默认模型时保留模型目录中已有的上下文窗口，

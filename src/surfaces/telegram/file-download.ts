@@ -1,12 +1,17 @@
 import { get as httpsGet } from "node:https";
 import type { Readable } from "node:stream";
+import type { Api } from "grammy";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
+import { telegramAbortSignal } from "./sdk-signal.js";
 
 const downloadTimeoutMs = 30_000;
 
 export interface TelegramFileApi {
-  getFile(fileId: string): Promise<{ file_path?: string }>;
+  getFile(fileId: string, signal?: Parameters<Api["getFile"]>[1]): Promise<{
+    file_path?: string;
+    file_size?: number;
+  }>;
 }
 
 export interface TelegramFileDownloadResponse {
@@ -17,6 +22,7 @@ export interface TelegramFileDownloadResponse {
 
 export type TelegramFileDownloader = (
   url: URL,
+  signal?: AbortSignal,
 ) => Promise<TelegramFileDownloadResponse>;
 
 export class TelegramFileLocationError extends Error {
@@ -30,10 +36,11 @@ export async function resolveTelegramFileUrl(
   api: TelegramFileApi,
   fileId: string,
   token: string,
+  signal?: AbortSignal,
 ): Promise<URL> {
   let filePath: string | undefined;
   try {
-    filePath = (await api.getFile(fileId)).file_path;
+    filePath = (await api.getFile(fileId, signal === undefined ? undefined : telegramAbortSignal(signal))).file_path;
   } catch {
     throw new TelegramFileLocationError("lookup-failed");
   }
@@ -47,8 +54,8 @@ export function createTelegramFileDownloader(
   proxyUrl: string | undefined,
 ): TelegramFileDownloader {
   const agent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
-  return (url) => new Promise<TelegramFileDownloadResponse>((resolve, reject) => {
-    const request = httpsGet(url, { agent }, (response) => {
+  return (url, signal) => new Promise<TelegramFileDownloadResponse>((resolve, reject) => {
+    const request = httpsGet(url, { agent, signal }, (response) => {
       if (response.statusCode !== 200) {
         response.resume();
         reject(new Error("Telegram 文件服务器返回非成功状态"));

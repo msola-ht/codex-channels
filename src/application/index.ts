@@ -94,6 +94,7 @@ export {
   type ConversationAutoReviewState,
   type ConversationTransferPort,
   type ConversationTurnUseCases,
+  type PreparedAttachmentSubmission,
   type ThreadQueueListResult,
   type ThreadQueueReorderResult,
   type Submission,

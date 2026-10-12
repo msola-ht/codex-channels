@@ -1,6 +1,6 @@
 # Telegram Surface
 
-本目录实现 Telegram Bot 适配器，把聊天、命令、图片、一次性音频、UTF-8 文本文件和按钮交互连接到平台无关
+本目录实现 Telegram Bot 适配器，把聊天、命令、图片、一次性音频、视频附件、UTF-8 文本文件和按钮交互连接到平台无关
 的应用与核心模块。
 
 ## 文件
@@ -17,6 +17,10 @@
   原生 Voice/Audio 最长 5 分钟、最大 20 MiB，只在下载后验证为 WAV、MP3、M4A、WebM 或 OGG
   才构造稳定 `localAudio`，私有临时文件一小时后清理；Application 仅在当前模型目录包含
   `audio` 时提交，否则在创建或追加 Turn 前明确拒绝；
+  `video`、`video_note` 与视频文档在鉴权后下载，只接受内容签名通过校验的 MP4/WebM，
+  保留说明和原生引用，通过视频附件标识提示当前会话调用独立视频 MCP，不暴露本地路径或原文件名；
+  等待先前输入前通过 Application 登记取消范围，等待完成后、下载前捕获工作区与 Thread，提交时在会话锁内复核绑定和授权，绑定改变时明确拒绝；
+  未配置 `videoDirectory` 时明确拒绝视频，关闭时取消下载，迟到结果不提交；
   普通文本与图片说明可读取 `reply_to_message` 自带的文本或说明文字并作为明确引用上下文提交；
   `/queue add|list|update|delete|reorder|start` 管理 App Server 持久 Queue，`/schedule <自然语言>` 由前台 Agent 调用 `schedule_task` 工具生成确认预览，`/schedule` 管理显式启用的
   Gateway 计划任务；创建与删除预览直接提供原生确认/取消按钮，确认仍复用五分钟一次性令牌；选择支持多个思考等级的模型后提供思考等级内联按钮；
@@ -104,6 +108,9 @@
   复用上层 `managed-image-store.ts`。
 - `audio-store.ts`：复用统一文件定位与下载边界，把受支持音频交给
   `managed-audio-store.ts` 验证、私有暂存和一小时清理。
+- `video-input.ts`：复用统一文件定位与可取消下载边界，在平台声明、响应长度与实际流三个位置
+  执行 Telegram 的 20 MiB 上限，整体下载预算 30 秒；共享 `video-attachment-store.ts` 拥有
+  私有暂存、MP4/WebM 内容校验、24 小时过期与容量控制，目录由 Bootstrap 显式注入。下载传递已授权会话与 Actor 供共享层去重，提交后 retain，失败 discard 保留复用旧附件。
 - `file-input.ts`：通过 Bot API 在内存下载最多 1,000,000 字节的普通文件，严格验证文件名、
   UTF-8，文件流读取总时限为 30 秒，清理常见终端转义序列并拒绝残留的不支持控制字符，返回有界文本；二进制正文不进入 Application；清理后至多 32 KiB 内联，更大文本私有暂存 24 小时并提交执行端路径。单个
   UTF-8 文本文件的文件名、说明文字、正文解析和最终原生回复已通过真实 Bot 主路径验收；

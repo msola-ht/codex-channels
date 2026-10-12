@@ -51,6 +51,13 @@ export interface WeixinAudioReference {
   transcript?: string;
 }
 
+export interface WeixinVideoReference {
+  fullUrl?: string;
+  encryptedQueryParam?: string;
+  mediaAesKey: string;
+  encryptedBytes?: number;
+}
+
 export interface WeixinPartialQuote {
   start: string;
   end: string;
@@ -67,6 +74,16 @@ export interface WeixinQuotedReference {
 }
 
 export type WeixinInboundMessage = WeixinQuotedReference & (
+  | {
+      kind: "video";
+      messageId: string;
+      actorId: string;
+      conversationId: string;
+      contextToken: string;
+      text?: string;
+      video: WeixinVideoReference;
+      createdAt?: number;
+    }
   | {
       kind: "text";
       messageId: string;

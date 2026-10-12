@@ -450,14 +450,15 @@ Fast 只在用户之后通过 `/fast on` 明确开启时生效。
 并提示人工检查和处理；不写或清除这些键，不检查其他配置层或角色配置。
 “仅写规则”不读配置，并提示未检查覆盖。只有有效默认及角色配置均未覆盖时，省略参数才继承当前对话设置；
 全局 `AGENTS.md` 规则为独立文件写入，
-不新增 RPC，不纳入安装、更新或核心默认值配置。托管规则仅授权主代理派发，每个子代理只执行一轮，
-使用 `fork_turns="none"`，禁止子代理再派发、复用及调用 `followup_task`；交付后的补充工作由全新代理接手。
-模型按交付职责分工：Astra 负责规划、设计与独立验收，Sol 负责实现、执行、测试和故障诊断，
-Luna 负责检索、事实摘要和步骤明确的低风险简单任务；验收发现缺陷由全新 Sol 修正，需要再次验收时使用全新 Astra。
-只有完整 Provider 目录明确目标不支持当前子代理后端，或实际请求该精确目标得到
-`Unknown model ... for spawn_agent`，才判定目标不可用；工具描述及报错名单只包含部分可见模型，缺少目标不构成依据。
-完整目录明确 GPT 集合不受支持时省略 `model` 与 `reasoning_effort`；显式目标返回上述错误时，
-省略两个参数重发一次并在该会话内沿用。省略后仍失败应报告阻塞及需要检查的配置覆盖，不能循环重试。
+不新增 RPC，不纳入安装、更新或核心默认值配置。完整协作规则由脚本托管文本及
+[子代理规则与配置](user-guide.md#子代理规则与配置可选) 说明：默认 Sol/high 承担理解、审查、实现和执行，
+Luna/max 处理明确、低风险且易核对的整理，Astra/high 仅按需处理复杂问题或独立审查。
+主代理负责决策、整合和针对性复核，不默认重做完整调查；明确要求的完整审查和项目验证仍须执行。
+使用 `fork_turns="none"` 时显式交接用户目标、纠正与授权，不假定继承父对话用户消息。
+子代理不得再派发，每个代理只执行一轮，不复用或调用 `followup_task`；运行中可澄清、纠正及收缩同一任务，
+交付后的工作由主代理或新代理处理。未完成异步作业须明确交接，不以返回句柄代替完成。
+模型选择遵守工具契约，区分能力不支持、临时故障和授权拒绝；不因有限名单缺失断言不可用，
+不将单目标失败泛化，也不盲目省略参数或自动改用 Astra。无法确认合适目标时由主代理接手并说明限制。
 默认覆盖和角色覆盖顺序见固定版本
 [`child_config.rs`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/agent/child_config.rs)，
 工具展示的有限可见名单见
@@ -488,6 +489,7 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | 输入或交互 | 固定 CLI 0.160.1 | Gateway 当前状态 | 边界 |
 | --- | --- | --- | --- |
 | 文本 | `turn/start`、`turn/steer` 的稳定 `UserInput.text` | Telegram、飞书、微信已支持 | 由 Application 的 `TurnInput.text` 进入统一 Turn |
+| 视频附件引用 | 沿用稳定 `UserInput.text`，不添加原生视频类型 | 三渠道已实现下载与单文件随机引用；真实平台待验收 | 视频经私有暂存后，当前会话通过显式配置的独立 MCP 分析；MCP 以 `attachment` 读取有时限的单文件能力引用。下载期间切换工作区/Thread或撤权则拒绝提交。详见[视频分析 MCP](video-analysis-mcp.md#渠道视频附件) |
 | 内联图片 | `turn/start`、`turn/steer` 的稳定 `UserInput.image`（`url`） | 三渠道受限 PNG/JPEG/WebP/非动画 GIF Data URL 已支持；仅当前模型声明 `image` 输入能力时可用 | Surface 完成下载、签名、格式、数量和大小校验后，共享批处理器按 [OpenAI 图片输入要求](https://developers.openai.com/api/docs/guides/images-vision#image-input-requirements)在提交边界读取为有界 Base64 Data URL；Gateway 统一限制为单张 10 MiB、每批最多四张且合计 20 MiB，这是跨渠道安全边界，不代表三平台具有相同官方上限，并低于当前已知 Provider 上限。Application 拒绝 HTTP(S)、空值和非法 Base64，Gateway 不把本地路径或 Base64 写入自身日志或独立存储，并在创建或追加 Turn 前按模型目录检查 `image` 能力；支持时提交官方 `image`，不支持时提示使用 `/model` 切换模型，不调用外部视觉 API，也不建立第二套识图会话 |
 | 图片自动引用 | 稳定 `turn/start`、`turn/steer` 的 `UserInput.image.fileId`；`getAuthStatus` 与受控 `account/read.workspaceRouting` | OpenAI ChatGPT Thread 经当前模型代理后端核验后上传原图并提交编号；仅默认后端一致且策略为 `NO_CONSTRAINT` 时转换，自定义独立后端保留内联，`us`、`us_cr` 或后端不一致拒绝；历史由官方保留。飞书实机已验证首次 `file_id` 与后续 `previous_response_id` 接续不重复 Base64 | [`image-reference-upload.ts`](../src/codex-client/image-reference-upload.ts) |
 | 一次性音频 | 稳定 `UserInput.audio` / `UserInput.localAudio`；模型目录用 `inputModalities` 声明实际能力；固定源码支持 WAV、MP3、M4A、WebM 与 OGG 本地音频 | 三渠道平台接收与受限转换已实现；当前可见模型均未声明 `audio`，原始音频不属于当前端到端支持 | Surface 先验证可信时长、最长 5 分钟、最大 20 MiB 与格式并写入一小时私有临时文件；Application 再按当前或下一 Turn 模型的 `inputModalities` 检查 `audio`，缺失时在 `turn/start` / `turn/steer` 前明确拒绝。微信可信转写仍作为文本提交；SILK 明确拒绝 |

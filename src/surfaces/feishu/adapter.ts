@@ -1,4 +1,5 @@
 import { textAttachmentBody } from "../text-attachment-store.js";
+import { videoAttachmentBody, type PreparedVideoAttachment } from "../video-attachment-store.js";
 import {
   isConversationCommandName,
   type ConversationCommandExecutor,
@@ -10,6 +11,7 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
+import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import { parseSlashCommand } from "../slash-command.js";
 import {
@@ -45,6 +47,7 @@ import {
 } from "./file-input.js";
 import type { FeishuInboxMessage } from "./inbox.js";
 import type { FeishuImagePort } from "./media.js";
+import type { FeishuVideoPort } from "./video.js";
 import {
   maximumFeishuAudioDurationMs,
   type FeishuAudioPort,
@@ -79,11 +82,12 @@ const unsupportedMessageLinkText = [
 export class FeishuConversationAdapter {
   private readonly inputs: SurfaceInputCoalescer;
   private nextInputSequence = 0;
+  private readonly videoCancellation = new AbortController();
 
   constructor(
     private readonly conversations: Pick<
       ConversationTurnUseCases,
-      "touchActivity" | "submit"
+      "touchActivity" | "submit" | "prepareAttachmentSubmission"
     >,
     private readonly outbox:
       & Pick<FeishuOutbox, "notifyMarkdown" | "notifyText">
@@ -116,6 +120,8 @@ export class FeishuConversationAdapter {
       quietWindowMs?: number;
       files?: Pick<FeishuFilePort, "download" | "discard">;
       audios?: Pick<FeishuAudioPort, "download">;
+      videos?: Pick<FeishuVideoPort, "download" | "retain" | "discard">;
+      access?: SurfaceAccessPolicy;
       readQuotedText?(messageId: string): Promise<string | undefined>;
       onQuotedTextError?(error: unknown): void;
       now?: () => number;
@@ -146,7 +152,11 @@ export class FeishuConversationAdapter {
   async handle(message: FeishuInboxMessage): Promise<void> {
     try {
       this.conversations.touchActivity?.(message.target);
-      if (message.kind === "file" || message.kind === "files") {
+      if (message.kind === "video") {
+        await this.handleVideo(message);
+        return;
+      }
+      if (message.kind === "file") {
         await this.handleFile(message);
         return;
       }
@@ -328,7 +338,12 @@ export class FeishuConversationAdapter {
   }
 
   close(): Promise<void> {
+    this.stopVideoInputs();
     return this.inputs.close();
+  }
+
+  stopVideoInputs(): void {
+    this.videoCancellation.abort();
   }
 
   async handleCommandCenterAction(
@@ -721,7 +736,7 @@ export class FeishuConversationAdapter {
   }
 
   private async handleFile(
-    message: Extract<FeishuInboxMessage, { kind: "file" | "files" }>,
+    message: Extract<FeishuInboxMessage, { kind: "file" }>,
   ): Promise<void> {
     if (this.inputOptions.files === undefined) {
       throw new FeishuFileInputError(
@@ -729,32 +744,11 @@ export class FeishuConversationAdapter {
         "飞书当前未启用文本文件输入",
       );
     }
-    const references = message.kind === "file" ? [message] : message.files;
-    const imageKeys = message.kind === "files" ? message.imageKeys : [];
-    if (references.length > 4) throw new UserFacingError("attachment.too-many", "一次最多处理 4 个文本附件");
-    if (imageKeys.length > maximumInboundImages) throw new UserFacingError("image.too-many", "图片数量超过限制", { maximumImages: String(maximumInboundImages) });
-    const files: Awaited<ReturnType<FeishuFilePort["download"]>>[] = [];
-    let bytes = 0;
-    const images: Awaited<ReturnType<FeishuImagePort["download"]>>[] = [];
-    try {
-      for (const reference of references) {
-        const file = await this.inputOptions.files.download(message.messageId, reference.fileKey, reference.fileName);
-        files.push(file);
-        bytes += file.bytes;
-        if (bytes > 1_000_000) throw new UserFacingError("attachment.too-large", "附件总大小超过 1,000,000 字节");
-      }
-      for (const imageKey of imageKeys) images.push(await this.images.download(message.messageId, imageKey));
-    } catch (error) {
-      await Promise.allSettled(files.map(file => this.inputOptions.files?.discard?.(file) ?? Promise.resolve()));
-      throw error;
-    }
+    const file = await this.inputOptions.files.download(message.messageId, message.fileKey, message.fileName);
     const quotedText = await this.readQuotedText(message);
     const text = formatQuotedInput([
-      ...(message.kind === "files" && message.text ? [message.text, ""] : []),
-      ...files.flatMap(file => [
-        "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
-        `文件名：${file.fileName}`, "", textAttachmentBody(file), "",
-      ]),
+      "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
+      `文件名：${file.fileName}`, "", textAttachmentBody(file),
     ].join("\n").trimEnd(), quotedText);
     const sequence = this.nextInputSequence;
     this.nextInputSequence += 1;
@@ -766,7 +760,6 @@ export class FeishuConversationAdapter {
         actorId: message.actorId,
         sequence,
         text,
-        ...(images.length === 0 ? {} : { localImages: images.map(image => ({ path: image.path, mimeType: image.mimeType, bytes: image.bytes })) }),
       }),
     );
     if (!result.tail) {
@@ -785,6 +778,64 @@ export class FeishuConversationAdapter {
         result.submission.turnId,
         formatTurnInputAppended("file"),
       );
+    }
+  }
+
+  private async handleVideo(
+    message: Extract<FeishuInboxMessage, { kind: "video" }>,
+  ): Promise<void> {
+    const videos = this.inputOptions.videos;
+    if (videos === undefined) throw new UserFacingError("video.unsupported", "飞书当前未启用视频输入");
+    if (this.conversations.prepareAttachmentSubmission === undefined) {
+      throw new UserFacingError("video.unavailable", "飞书视频提交能力尚未就绪");
+    }
+    let signal = this.videoCancellation.signal;
+    const check = (): void => {
+      if (signal.aborted) {
+        throw new UserFacingError("video.unavailable", "视频输入已取消或超时，请重新发送");
+      }
+      if (!this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId })) {
+        throw new UserFacingError("video.unavailable", "当前用户的飞书视频授权已失效");
+      }
+    };
+    let file: PreparedVideoAttachment | undefined;
+    let submitted = false;
+    let submissionScope: ReturnType<NonNullable<typeof this.conversations.prepareAttachmentSubmission>> | undefined;
+    try {
+      check();
+      submissionScope = this.conversations.prepareAttachmentSubmission(message.target, () =>
+        !signal.aborted && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
+      );
+      signal = AbortSignal.any([signal, submissionScope.signal]);
+      await this.inputs.flushPending(message.target, message.actorId);
+      check();
+      submissionScope.captureTarget();
+      file = await videos.download(message.messageId, message.fileKey, { target: message.target, actorId: message.actorId }, signal);
+      check();
+      const quotedText = await this.readQuotedText(message);
+      check();
+      const submission = await this.submitWithReplyTarget(
+        message.target.conversationId,
+        message.messageId,
+        () => {
+          check();
+          return submissionScope!.submit(formatQuotedInput([
+            ...(message.text ? ["用户说明：", message.text, ""] : []),
+            videoAttachmentBody(file!),
+          ].join("\n"), quotedText));
+        },
+      );
+      submitted = true;
+      this.settleTurnReplyTarget(message.target.conversationId, submission.threadId, submission.turnId, submission.steered);
+      if (submission.steered) {
+        this.replyTurnInput(message.target.conversationId, submission.threadId, submission.turnId, formatTurnInputAppended("file"));
+      }
+    } finally {
+      submissionScope?.dispose();
+      if (file !== undefined) {
+        if (submitted || submissionScope?.mayHaveSubmitted) videos.retain(file);
+        else await videos.discard(file);
+      }
     }
   }
 

@@ -219,8 +219,17 @@ export interface ConversationAutoReviewState {
 }
 
 /** Stable Turn and user-input lifecycle boundary. */
+export interface PreparedAttachmentSubmission {
+  readonly signal: AbortSignal;
+  readonly mayHaveSubmitted: boolean;
+  captureTarget(): void;
+  submit(text: string): Promise<Submission>;
+  dispose(): void;
+}
+
 export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
+  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean): PreparedAttachmentSubmission;
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission>;
   stop(target: ConversationTarget): Promise<boolean>;
   rename(target: ConversationTarget, name: string): Promise<void>;
@@ -364,6 +373,7 @@ export class ConversationService implements
   ConversationExtensionUseCases,
   ConversationAccountMetricsUseCases {
   private readonly locks = new ConversationLockCoordinator();
+  private readonly attachmentInputs = new Map<string, Set<AbortController>>();
   private readonly hookUseCases: ConversationHookService;
   private readonly queueUseCases: ThreadQueueService;
   private readonly revertUseCases: ThreadRevertService;
@@ -600,6 +610,80 @@ export class ConversationService implements
     return this.submitInput(target, input);
   }
 
+  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean): PreparedAttachmentSubmission {
+    const key = conversationTargetKey(target);
+    const pending = this.attachmentInputs.get(key) ?? new Set<AbortController>();
+    if (!isAllowed() || pending.size >= 4 || (!this.attachmentInputs.has(key) && this.attachmentInputs.size >= 1000)) {
+      throw new UserFacingError("video.unavailable", "视频输入未获授权或正在处理过多附件");
+    }
+    const controller = new AbortController();
+    pending.add(controller);
+    this.attachmentInputs.set(key, pending);
+    let disposed = false;
+    let used = false;
+    let mayHaveSubmitted = false;
+    let captured: { workspaceId: string; workspaceCwd: string; threadId: string | undefined } | undefined;
+    const assertAllowed = () => {
+      if (controller.signal.aborted || !isAllowed()) {
+        throw new UserFacingError("video.unavailable", "视频输入已取消、超时或授权变化，请重新发送");
+      }
+    };
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      clearTimeout(timer);
+      pending.delete(controller);
+      if (pending.size === 0) this.attachmentInputs.delete(key);
+      controller.abort();
+    };
+    const timer = setTimeout(dispose, 120_000);
+    timer.unref();
+    controller.signal.addEventListener("abort", dispose, { once: true });
+    return {
+      signal: controller.signal,
+      get mayHaveSubmitted() { return mayHaveSubmitted; },
+      dispose,
+      captureTarget: () => {
+        assertAllowed();
+        if (captured || used) throw new UserFacingError("video.unavailable", "视频附件目标已捕获");
+        // Register cancellation before flushing earlier Surface input; that input
+        // may create the first Thread, which becomes this video's download target.
+        const workspace = this.router.workspace(target);
+        captured = { workspaceId: workspace.id, workspaceCwd: workspace.cwd,
+          threadId: this.router.current(target)?.threadId };
+      },
+      submit: (text) => this.locked(target, () => {
+        const snapshot = captured;
+        if (!snapshot) throw new UserFacingError("video.unavailable", "视频附件尚未捕获提交目标");
+        const assertCurrent = () => {
+          assertAllowed();
+          const currentWorkspace = this.router.workspace(target);
+          if (currentWorkspace.id !== snapshot.workspaceId || currentWorkspace.cwd !== snapshot.workspaceCwd
+            || (snapshot.threadId !== undefined && this.router.current(target)?.threadId !== snapshot.threadId)) {
+            throw new UserFacingError("video.unavailable", "视频输入的工作区或会话已变化，请重新发送");
+          }
+        };
+        assertCurrent();
+        if (used) throw new UserFacingError("video.unavailable", "视频附件提交入口已使用");
+        used = true;
+        if (this.router.current(target)?.threadId !== snapshot.threadId) {
+          throw new UserFacingError("video.unavailable", "视频下载期间会话发生变化，请重新发送");
+        }
+        const input = normalizeInput(text);
+        if (!input.length) throw new UserFacingError("message.empty", "消息不能为空");
+        // ensureSession may create the first Thread under this same conversation lock.
+        return this.submitInputLocked(target, input, undefined, (submissionThreadId) => {
+          assertCurrent();
+          if (this.router.current(target)?.threadId !== submissionThreadId) {
+            throw new UserFacingError("video.unavailable", "视频附件的实际提交会话已失效，请重新发送");
+          }
+          // Once the RPC may start, a lost acknowledgment must not delete its file.
+          mayHaveSubmitted = true;
+        });
+      }),
+    };
+  }
+
   submitAsyncAnswer(target: ConversationTarget, threadId: string, text: string, isCurrent: () => boolean): Promise<Submission> {
     return this.locked(target, () => {
       const assertCurrent = () => {
@@ -777,7 +861,7 @@ export class ConversationService implements
     target: ConversationTarget,
     input: TurnInput[],
     identity?: TurnStartIdentity,
-    assertCurrent?: () => void,
+    assertCurrent?: (threadId: string) => void,
   ): Promise<Submission> {
     this.touchActivity(target);
     if (input.some((item) => item.type === "image")) {
@@ -789,7 +873,7 @@ export class ConversationService implements
     const active = this.core.activeTurn(target);
     const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
     if (active) {
-      assertCurrent?.();
+      assertCurrent?.(active.threadId);
       this.sessionQueries.invalidateSessionDisplayCache(active.threadId);
       try {
         await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
@@ -1229,11 +1313,14 @@ export class ConversationService implements
   }
 
   async stop(target: ConversationTarget): Promise<boolean> {
+    const attachments = this.attachmentInputs.get(conversationTargetKey(target));
+    const cancelledAttachments = (attachments?.size ?? 0) > 0;
+    for (const controller of [...attachments ?? []]) controller.abort();
     const active = this.core.activeTurn(target);
     const threadId = active?.threadId ?? (this.codex.cancelPendingInput ? this.router.current(target)?.threadId : undefined);
     const cancelled = threadId ? (this.codex.cancelPendingInput?.(threadId) ?? false) : false;
     if (!active) {
-      return cancelled;
+      return cancelled || cancelledAttachments;
     }
     await this.codex.interruptTurn(active.threadId, active.turnId);
     return true;
@@ -1600,7 +1687,7 @@ export class ConversationService implements
     input: TurnInput[],
     clientUserMessageId: string,
     identity?: TurnStartIdentity,
-    assertCurrent?: () => void,
+    assertCurrent?: (threadId: string) => void,
   ): Promise<Submission> {
     this.touchActivity(target);
     const binding = await this.ensureSession(target);
@@ -1623,7 +1710,7 @@ export class ConversationService implements
     }
     let result;
     try {
-      assertCurrent?.();
+      assertCurrent?.(binding.threadId);
       result = await this.codex.startTurn(
         binding.threadId,
         input,

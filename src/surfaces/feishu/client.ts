@@ -717,6 +717,7 @@ export class FeishuMessageClient implements
   async downloadFile(
     messageId: string,
     fileKey: string,
+    signal?: AbortSignal,
   ): Promise<{
     stream: import("node:stream").Readable;
     contentLength?: number;
@@ -726,6 +727,7 @@ export class FeishuMessageClient implements
       fileKey,
       "file",
       "文件",
+      signal,
     );
   }
 
@@ -749,6 +751,7 @@ export class FeishuMessageClient implements
     fileKey: string,
     type: "image" | "file",
     label: "图片" | "文件" | "音频",
+    signal?: AbortSignal,
   ): Promise<{
     stream: import("node:stream").Readable;
     contentLength?: number;
@@ -764,20 +767,31 @@ export class FeishuMessageClient implements
     }
     try {
       const response = await this.observeRequest("downloadResource",
-        () => this.sdkClient.downloadResource({
-          params: {
-            type,
-          },
-          path: {
-            message_id: messageId,
-            file_key: fileKey,
-          },
-        }),
+        async () => {
+          const requestSignal = feishuSdkRequestSignal(signal);
+          const response = await this.sdkClient.downloadResource({
+            params: {
+              type,
+            },
+            path: {
+              message_id: messageId,
+              file_key: fileKey,
+            },
+          });
+          if (requestSignal?.aborted) {
+            const stream = response.getReadableStream();
+            stream.on("error", () => {});
+            stream.destroy();
+            requestSignal.throwIfAborted();
+          }
+          return response;
+        },
         this.sendTimeoutMs,
         new FeishuMessageError(
           "download-timeout",
           `飞书${label}下载超时`,
         ),
+        signal,
       );
       const stream = response.getReadableStream();
       const contentLength = readContentLength(response.headers);

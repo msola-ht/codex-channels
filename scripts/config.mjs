@@ -61,6 +61,7 @@ export async function runConfig({
           hint: "默认模型、思考等级、Fast、权限、推理摘要与其他用户偏好",
         },
         { value: "display", label: "显示设置", hint: "操作详情、计划更新、思考状态" },
+        { value: "mcp", label: "新增 MCP", hint: "本地 stdio、远程 HTTP 或 Strata 视频预设" },
         {
           value: "system",
           label: "系统设置",
@@ -82,6 +83,7 @@ export async function runConfig({
     }
     const handlers = {
       codex_user: () => codexUserSettingsSetup({ environment, output, prompts }),
+      mcp: async (options) => (await import("./mcp-setup.mjs")).runMcpSetup(options),
       display: async (options) => (await import("./config-display-menu.mjs")).runDisplaySettings(options),
       system: async (options) => (await import("./config-system-menu.mjs")).runSystemSettings(options),
       scheduled_tasks: async (options) => (await import("./config-advanced-menu.mjs")).runScheduledTasks(options),
@@ -95,7 +97,7 @@ export async function runConfig({
       throw new Error(`未知 Config 类别：${String(section)}`);
     }
     try {
-      if (section !== "codex_user" && section !== "paths" && gatewayConfigError !== undefined) {
+      if (!["codex_user", "mcp", "paths"].includes(section) && gatewayConfigError !== undefined) {
         throw gatewayConfigError;
       }
       if (section === "paths") {

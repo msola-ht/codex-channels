@@ -18,6 +18,7 @@ import {
   parseFeishuImageContent,
   parseFeishuPostContent,
   parseFeishuTextContent,
+  parseFeishuVideoContent,
 } from "./inbound-content.js";
 
 const DEFAULT_CAPACITY = 100;
@@ -40,8 +41,8 @@ export type FeishuInboxMessage = FeishuInboxMessageBase & (
   | { kind: "text"; text: string }
   | { kind: "image"; imageKeys: readonly string[]; text?: string }
   | { kind: "file"; fileKey: string; fileName: string }
-  | { kind: "files"; files: readonly { fileKey: string; fileName: string }[]; text?: string; imageKeys: readonly string[] }
   | { kind: "audio"; fileKey: string; durationMs?: number }
+  | { kind: "video"; fileKey: string; fileName?: string; text?: string }
 );
 
 export interface FeishuInboxProcessingError extends SurfaceErrorMetadata {
@@ -153,6 +154,8 @@ export class FeishuInbox {
       && event.messageType !== "image"
       && event.messageType !== "file"
       && event.messageType !== "audio"
+      && event.messageType !== "video"
+      && event.messageType !== "media"
       && event.messageType !== "post"
     ) {
       return { status: "ignored", reason: "unsupported-message" };
@@ -178,7 +181,9 @@ export class FeishuInbox {
           ? parseFeishuFileContent(event.content)
           : event.messageType === "audio"
             ? parseFeishuAudioContent(event.content)
-            : parseFeishuPostContent(event.content);
+            : event.messageType === "video" || event.messageType === "media"
+              ? parseFeishuVideoContent(event.content)
+              : parseFeishuPostContent(event.content);
     if (content === undefined) {
       return { status: "ignored", reason: "invalid-content" };
     }

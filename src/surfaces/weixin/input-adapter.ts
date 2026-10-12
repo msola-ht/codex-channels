@@ -25,6 +25,7 @@ import { WeixinConversationAdapter } from "./conversation-adapter.js";
 import type { WeixinAudioPort } from "./audio-store.js";
 import type { WeixinFilePort } from "./file-input.js";
 import type { WeixinImagePort } from "./image-store.js";
+import type { WeixinVideoStore } from "./video-store.js";
 import type { WeixinInteractionPort } from "./interactions.js";
 import type { WeixinOutbox } from "./outbox.js";
 import {
@@ -41,7 +42,7 @@ import { WeixinReplyContextStore } from "./reply-context-store.js";
 
 type WeixinSupportedMessage = Extract<
   WeixinInboundMessage,
-  { kind: "text" | "image" | "file" | "audio" }
+  { kind: "text" | "image" | "file" | "audio" | "video" }
 >;
 
 const maximumQuotedTextCacheEntries = 1_000;
@@ -62,7 +63,7 @@ export interface WeixinInputAdapterOptions {
   accountId: string;
   client: WeixinProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
-  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
+  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">;
   commands: ConversationCommandExecutor;
   outbox: Pick<WeixinOutbox, "notifyText">;
   access: SurfaceAccessPolicy;
@@ -78,6 +79,7 @@ export interface WeixinInputAdapterOptions {
   images?: Pick<WeixinImagePort, "download">;
   files?: Pick<WeixinFilePort, "download">;
   audios?: Pick<WeixinAudioPort, "download">;
+  videos?: Pick<WeixinVideoStore, "download" | "retain" | "discard">;
   doctor?: Omit<
     CreateWeixinDoctorOptions,
     "accountId" | "cursorStore" | "pollingHealth"
@@ -120,6 +122,7 @@ export class WeixinInputAdapter {
       options.images,
       {
         quietWindowMs: 0,
+        isAllowed: (target, actorId) => options.access.isAllowed({ target, actorId }),
         ...(options.logger ? { logger: options.logger } : {}),
         pollingHealth: this.health,
         now: this.now,
@@ -137,6 +140,7 @@ export class WeixinInputAdapter {
       },
       options.files,
       options.audios,
+      options.videos,
     );
     this.monitor = createWeixinUpdatesMonitor({
       accountId: options.accountId,
@@ -249,7 +253,11 @@ export class WeixinInputAdapter {
       return;
     }
     try {
-      const conversationMessage = message.kind === "text"
+      const conversationMessage = message.kind === "video"
+        ? { target, actorId: message.actorId, kind: "video" as const, video: message.video,
+            ...(message.text === undefined ? {} : { text: message.text }),
+            ...(quotedText === undefined ? {} : { quotedText }) }
+        : message.kind === "text"
         ? {
             target,
             actorId: message.actorId,

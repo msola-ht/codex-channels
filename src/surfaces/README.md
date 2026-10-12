@@ -130,6 +130,8 @@ Thread/Turn/Item、事件类型及输入/投递标识；输出队列、输入处
 flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非动画 GIF 签名、单张 10 MiB 与整批 20 MiB，转换为
 有界 Base64 Data URL 再交给 Application；Gateway 只在本次 Turn 内存中持有 Base64，
 不写入自身日志或独立存储，也不向 App Server 发送本地路径，不在 Surface 维护另一套识图会话或重试队列。
+
+`video-attachment-store.ts` 为三渠道提供独立视频附件暂存与单文件随机引用：复用私有媒体存储，按渠道分目录，最多保留八个文件并允许一个串行去重候选，每个文件最大 64 MiB、24 小时过期；只初步验证 MP4/WebM 容器签名，实际可解码性由 Strata 判断。流保存及哈希含排队最多 60 秒、最多四条在途流，关闭销毁流并等待收尾。`store` 接受已授权的 ConversationTarget 与 Actor，按作用域和 SHA-256 去重；Adapter 在提交成功或结果不确定时 `retain`，确定未提交时 `discard`，复用旧附件不会被失败清理删除。去重仅保留有界内存元数据，不续期，不跨会话或重启恢复映射。共享附件提示指导原引用追问及有界 context 传递。引用是持有者凭据，仅提交给完成授权的当前 Conversation；MCP 不提供列举入口，不依赖可伪造的 Actor 参数鉴权。引用不代表跨会话身份认证，泄露后可在有效期内转授读取权。暂存内容不写 StateStore；使用方式与部署边界见[视频分析 MCP](../../docs/video-analysis-mcp.md)。
 三渠道共享的 `/metrics` 分开展示当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的会话累计，
 `global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
 按同一请求口径聚合指标库记录，最多展示请求量最高的 20 组；`errors` 用同一

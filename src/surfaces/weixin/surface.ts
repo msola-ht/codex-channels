@@ -26,6 +26,7 @@ import {
 import type { WeixinAudioPort } from "./audio-store.js";
 import type { WeixinFilePort } from "./file-input.js";
 import type { WeixinImagePort } from "./image-store.js";
+import type { WeixinVideoStore } from "./video-store.js";
 import type { WeixinCredentialStore } from "./credential-store.js";
 import { WeixinInteractionPort } from "./interactions.js";
 import {
@@ -60,7 +61,7 @@ export interface WeixinSurfaceOptions {
   imageSendClient?: WeixinImageSendProtocolClient;
   lifecycleClient?: WeixinLifecycleProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
-  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
+  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">;
   commands: ConversationCommandExecutor;
   access: SurfaceAccessPolicy;
   logger: Logger;
@@ -71,6 +72,7 @@ export interface WeixinSurfaceOptions {
   images?: WeixinImagePort;
   files?: WeixinFilePort;
   audios?: WeixinAudioPort;
+  videos?: WeixinVideoStore;
   startupNotification?: WeixinStartupNotification;
   debugEnabled?: boolean;
   autoCompactPercent?: (
@@ -105,6 +107,7 @@ export class WeixinSurface implements SurfaceAdapter {
   private readonly files: WeixinFilePort | undefined;
   private readonly images: WeixinImagePort | undefined;
   private readonly audios: WeixinAudioPort | undefined;
+  private readonly videos: WeixinVideoStore | undefined;
   private readonly lifecycleClient: WeixinLifecycleProtocolClient | undefined;
   private startPromise: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
@@ -120,6 +123,7 @@ export class WeixinSurface implements SurfaceAdapter {
     this.files = options.files;
     this.images = options.images;
     this.audios = options.audios;
+    this.videos = options.videos;
     this.lifecycleClient = options.lifecycleClient;
     this.accountId = options.accountId;
     this.output = new WeixinOutbox(
@@ -173,6 +177,7 @@ export class WeixinSurface implements SurfaceAdapter {
       ...(options.images === undefined ? {} : { images: options.images }),
       ...(options.files === undefined ? {} : { files: options.files }),
       ...(options.audios === undefined ? {} : { audios: options.audios }),
+      ...(options.videos === undefined ? {} : { videos: options.videos }),
       ...(options.replyContextPersistence === undefined
         ? {}
         : {
@@ -312,11 +317,13 @@ export class WeixinSurface implements SurfaceAdapter {
 
   private async stopOnce(): Promise<void> {
     this.startupAbort.abort();
+    const videoClose = this.videos?.close();
     try {
       await this.input.stop();
     } finally {
       await this.notifyLifecycle("stop");
       await this.files?.close?.();
+      await videoClose;
       this.images?.close();
       this.audios?.close();
       this.interactions.close();
@@ -358,6 +365,7 @@ export class WeixinSurface implements SurfaceAdapter {
       this.images?.start(),
       this.audios?.start(),
       this.files?.start?.(),
+      this.videos?.start(),
     ]);
     await this.input.start();
     await this.notifyLifecycle("start");

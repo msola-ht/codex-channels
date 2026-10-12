@@ -15,6 +15,7 @@ export interface DownloadWeixinCdnBytesOptions {
   url: URL;
   maximumBytes: number;
   tooLarge(): Error;
+  signal?: AbortSignal;
 }
 
 export function resolveWeixinCdnUrl(reference: WeixinCdnReference): URL {
@@ -36,7 +37,7 @@ export async function downloadWeixinCdnBytes(
   options: DownloadWeixinCdnBytesOptions,
 ): Promise<Buffer> {
   return await withWeixinRequestAbort(
-    { timeoutMs: downloadTimeoutMs },
+    { timeoutMs: downloadTimeoutMs, ...(options.signal === undefined ? {} : { signal: options.signal }) },
     async (signal) => {
       const response = await options.fetchImpl(options.url, {
         method: "GET",

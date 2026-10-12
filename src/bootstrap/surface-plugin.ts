@@ -39,7 +39,7 @@ export interface SurfacePluginContext {
 }
 
 export type SurfaceConversationUseCases =
-  & Pick<ConversationTurnUseCases, "touchActivity" | "submit">
+  & Pick<ConversationTurnUseCases, "touchActivity" | "submit" | "prepareAttachmentSubmission">
   & Pick<ConversationSessionUseCases, "status" | "statusForDisplay" | "listWorkspaces">
   & Pick<ConversationExtensionUseCases, "modelState" | "listPlugins">;
 

@@ -1,4 +1,5 @@
 export { FeishuConversationAdapter } from "./adapter.js";
+export { FeishuVideoStore, type FeishuVideoPort } from "./video.js";
 export {
   FeishuAudioStore,
   maximumFeishuAudioBytes,

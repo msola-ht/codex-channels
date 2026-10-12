@@ -113,6 +113,7 @@ DS、OCG、CCG、CLP 使用当前多账户结构，在 `codexc setup → 模型�
 - [官方协议与源码索引](docs/index.md)
 - [Codex Desktop App 共享 App Server](docs/codex-desktop-app-development.md)
 - [渠道图片输入与支持范围](docs/user-guide.md#正常发图与图片引用)
+- [视频分析 MCP 与渠道视频附件](docs/video-analysis-mcp.md)
 - [项目文档索引](index.md)
 
 ## 本地开发

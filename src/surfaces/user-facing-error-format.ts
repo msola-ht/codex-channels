@@ -75,6 +75,10 @@ export function formatSurfaceUserFacingError(
     case "conversation.background-queued":
       return "当前任务仍有下一 Turn 排队消息，暂不能切换会话";
     case "image.reference.failed":
+    case "video.too-large":
+    case "video.unsupported":
+    case "video.capacity":
+    case "video.unavailable":
       return error.message;
     case "image.url.invalid":
       return "图片必须使用 PNG、JPEG、WebP 或非动画 GIF Base64 Data URL";

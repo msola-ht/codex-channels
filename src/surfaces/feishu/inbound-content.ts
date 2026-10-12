@@ -5,8 +5,8 @@ export type FeishuParsedContent =
   | { kind: "text"; text: string }
   | { kind: "image"; imageKeys: readonly string[]; text?: string }
   | { kind: "file"; fileKey: string; fileName: string }
-  | { kind: "files"; files: readonly { fileKey: string; fileName: string }[]; text?: string; imageKeys: readonly string[] }
-  | { kind: "audio"; fileKey: string; durationMs?: number };
+  | { kind: "audio"; fileKey: string; durationMs?: number }
+  | { kind: "video"; fileKey: string; fileName?: string; text?: string };
 
 export function parseFeishuTextContent(value: string): string | undefined {
   let parsed: unknown;
@@ -54,7 +54,7 @@ export function parseFeishuImageContent(
 
 export function parseFeishuFileContent(
   value: string,
-): Extract<FeishuParsedContent, { kind: "file" }> | undefined {
+): Extract<FeishuParsedContent, { kind: "file" | "video" }> | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
@@ -78,9 +78,27 @@ export function parseFeishuFileContent(
     return undefined;
   }
   return {
-    kind: "file",
+    kind: /\.(?:mp4|webm)$/iu.test(record.file_name.trim()) ? "video" : "file",
     fileKey: record.file_key,
     fileName: record.file_name.trim(),
+  };
+}
+
+export function parseFeishuVideoContent(
+  value: string,
+): Extract<FeishuParsedContent, { kind: "video" }> | undefined {
+  const record = parseRecord(value);
+  if (
+    record === undefined
+    || typeof record.file_key !== "string"
+    || !isSafeFeishuResourceIdentifier(record.file_key)
+    || (record.file_name !== undefined && (typeof record.file_name !== "string" || !isSafeFeishuFileName(record.file_name)))
+  ) return undefined;
+  // image_key is only the cover; the downloadable video is file_key.
+  return {
+    kind: "video",
+    fileKey: record.file_key,
+    ...(record.file_name === undefined ? {} : { fileName: record.file_name.trim() }),
   };
 }
 
@@ -142,7 +160,7 @@ export function parseFeishuPostContent(
   }
 
   const imageKeys: string[] = [];
-  const files: { fileKey: string; fileName: string }[] = [];
+  const videoKeys = new Set<string>();
   const lines: string[] = [];
   if (typeof body.title === "string" && body.title.length > 0) {
     lines.push(body.title);
@@ -183,11 +201,8 @@ export function parseFeishuPostContent(
         }
       } else if (item.tag === "media") {
         if (typeof item.file_key !== "string" || !isSafeFeishuResourceIdentifier(item.file_key)) return undefined;
-        if (!files.some(file => file.fileKey === item.file_key)) {
-          // The official post resource has no filename field. Use a display label,
-          // never infer a source filename or filesystem path from the resource key.
-          files.push({ fileKey: item.file_key, fileName: `附件-${files.length + 1}.txt` });
-        }
+        // Official post media is a video; its optional image_key is only a cover.
+        videoKeys.add(item.file_key);
       } else if (item.tag === "img") {
         if (
           typeof item.image_key !== "string"
@@ -203,7 +218,10 @@ export function parseFeishuPostContent(
     lines.push(line);
   }
   const text = lines.join("\n").trim();
-  if (files.length > 0) return { kind: "files", files, imageKeys, ...(text.length === 0 ? {} : { text }) };
+  if (videoKeys.size > 0) {
+    if (videoKeys.size !== 1 || imageKeys.length > 0) return undefined;
+    return { kind: "video", fileKey: [...videoKeys][0]!, ...(text.length === 0 ? {} : { text }) };
+  }
   if (imageKeys.length === 0) {
     return text.length === 0 ? undefined : { kind: "text", text };
   }
@@ -228,7 +246,7 @@ export function extractFeishuQuotedText(
     return undefined;
   }
   const parsed = parseFeishuPostContent(content);
-  return parsed?.kind === "text" || parsed?.kind === "image" || parsed?.kind === "files"
+  return parsed?.kind === "text" || parsed?.kind === "image" || parsed?.kind === "video"
     ? parsed.text?.trim() || undefined
     : undefined;
 }

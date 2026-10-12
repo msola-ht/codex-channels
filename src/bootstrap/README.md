@@ -2,6 +2,8 @@
 
 本目录是模块化单体的组合根，负责创建具体依赖并管理 Gateway 进程生命周期。
 
+渠道组合统一将数据库旁的 `uploads/video` 作为视频附件根传给三个 Surface，各渠道拥有独立暂存器生命周期。该目录不作为普通本地视频目录开放；MCP 通过显式 `STRATA_VIDEO_CHANNEL_ROOT` 和当前会话的随机附件引用读取单个文件，不由 Gateway 自动改写 Codex 配置。
+
 ## 文件
 
 - `index.ts`：向进程入口公开 `GatewayApplication`、计划任务执行/恢复端口、进程生命周期入口和安全的 Gateway 所有权错误。
