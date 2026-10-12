@@ -2,7 +2,7 @@
 
 本目录是飞书 Surface 的平台边界。当前已完成官方 SDK 与事件长连接窄封装、私聊普通文本、
 纯文字富文本、代码块与 Markdown 富文本、独立图片、最多四张图片说明文字、一次性音频与独立 UTF-8
-文本文件和视频附件 Inbox、输出渲染、
+文本文件和独立／富文本视频附件 Inbox、输出渲染、
 Bootstrap 显式组合、全部平台无关
 私聊命令、审批和用户输入卡片，以及
 按需 OAuth 与 Doctor。当前可通过严格 TOML 或统一 Setup 启用单账号私聊 Surface；群聊、Lark、
@@ -42,17 +42,19 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `audio.ts`：通过既有消息资源权限下载独立音频，限制为 5 分钟、20 MiB 和 Codex CLI
   支持的 WAV/MP3/M4A/WebM/OGG，写入一小时私有临时文件后构造 `localAudio`；Application
   仅在当前模型目录包含 `audio` 时提交，否则在创建或追加 Turn 前明确拒绝。
-- `video.ts`：授权后的独立 `video`/`media` 消息与 `.mp4`/`.webm` 文件消息复用官方消息资源下载，
+- `video.ts`：授权后的独立 `video`/`media` 消息、`.mp4`/`.webm` 文件消息与富文本单视频复用官方消息资源下载，
   由共享视频暂存器验证实际 MP4/WebM 签名、64 MiB 上限与 24 小时有效期。只提交随机附件标识及
   `strata_video.analyze_video` MCP 调用说明，保留回复引用上下文，视频封面不作为视频下载；未配置
   `videoDirectory` 明确拒绝。下载前固定工作区和 Thread，提交时由 Application 在会话锁内复核
-  绑定及用户授权；绑定变化拒绝提交。关闭撤销下载与提交，迟到下载释放流，提交失败删除本次附件。
-  富文本 `media` 资源没有原文件名，继续走严格 UTF-8 文本文件路径；视频须独立发送。
+  绑定及用户授权；绑定变化拒绝提交。关闭撤销下载与提交，迟到下载释放流；确定未提交时删除附件，
+  请求可能已发出但确认失败时保留至过期，避免使已提交的引用失效。
+  富文本 `media.file_key` 按视频资源下载，可选封面 `image_key` 不作为独立图片下载。
 - `event-connection.ts`：隔离官方 WebSocket SDK，管理事件注册、握手、SDK 重连、失败后重新启动
   和最终停止生命周期。
 - `file-input.ts`：通过官方消息资源 API 在内存下载独立文件，限制为 1,000,000 字节并严格验证
   文件名与 UTF-8，文件流读取总时限为 30 秒，清理常见终端转义序列并拒绝残留的不支持控制字符，较大文本通过共享私有暂存交给执行端按需读取。
-- `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本、图片、文件和音频元素。
+- `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本、图片、文件、音频和视频元素；
+  富文本优先非空 `content_v2`，`media` 按视频解析，同一 Key 去重，多个不同视频或视频混合独立 `img` 失败关闭。
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容，并集中提供飞书 Markdown 转义（输入卡与卡片展示共用同一核心实现，各自保留换行归一与花括号处理的开关）。
 - `operation-format.ts`：把操作状态渲染为包含脱敏详情的静态 CardKit Markdown；Computer Use
   使用可原地更新的开始／终态卡片，不展示 MCP 读写声明标签，其他操作沿用终态展示。
@@ -174,7 +176,9 @@ Application 的内联 Data URL 输入，同一 Thread 的
   SDK 响应被裁剪为下载流和可选长度，不向其他模块暴露 Client、Header 或上游错误。
 - 独立文件下载复用同一消息资源 API 的 `message_id + file_key + type=file` 窄能力；只接受
   1,000,000 字节以内的非空 UTF-8 文本，自动清理常见终端转义序列并拒绝残留的不支持控制字符，并以文件名边界提交到
-  Application：清理后至多 32 KiB 内联，更大文本暂存 24 小时并提交路径。富文本按非空 `content_v2` 优先于 `content` 解析 `media.file_key`，最多 4 个文本附件，总大小不超过 1,000,000 字节；顺序下载、同组提交，准备失败清理已暂存的文本文件。资源缺少上游原名时显示为“附件-N.txt”，不推断文件格式。Office、压缩包和音视频仍由文本校验拒绝。
+  Application：清理后至多 32 KiB 内联，更大文本暂存 24 小时并提交路径。独立 MP4/WebM
+  文件消息及富文本 `media` 走视频入口，不参与文本大小与 UTF-8 校验；Office、压缩包和其他不受支持的
+  二进制文件明确拒绝。
 
 `message-event.ts` 在平台边界把 SDK 原始事件裁剪为稳定的 `FeishuMessageEvent`，只保留账号、
 Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、消息标识或 Chat 标识时失败关闭；
@@ -216,9 +220,11 @@ Queue ID、有界页码和分组编号，条目标签只显示 Application 提�
 
 `inbox.ts` 只接受当前账号的已授权用户私聊普通文本、由 `text` 与 `a` 元素组成的纯文字
 `post` 富文本、`code_block` 代码块与 `md` Markdown 富文本、独立图片，以及包含最多四张图片和
-可选说明文字的 `post`。超链接同时保留可见文字和目标 URL，`code_block`/`md` 抽取原始文本内容；
+可选说明文字的 `post`；也接受独立音频、UTF-8 文本文件、独立视频，以及含一个去重后视频和
+可选说明文字的 `post`。视频与独立 `img` 混合或多个不同视频明确拒绝，封面不计入图片。
+超链接同时保留可见文字和目标 URL，`code_block`/`md` 抽取原始文本内容；
 其余未知元素或畸形结构失败关闭并通过 Surface 明确提示用户，不能丢弃部分内容后提交。SDK 回调只做
-同步校验、富文本结构与图片 Key 裁剪和入队，不执行资源下载。同一 Chat
+同步校验、富文本结构与资源 Key 裁剪和入队，不执行资源下载。同一 Chat
 按顺序处理，不同 Chat 可以并行。永久无效、未授权、重复或过旧事件被明确忽略；全局输入容量
 耗尽时返回 `retry/overloaded`。由于当前没有经过真实合同验证的 SDK 重试响应通道，Surface
 通过同一有界 Outbox 提示用户稍后重试，不伪造平台自动重投；同一 Chat 在一个连续过载周期内
@@ -302,7 +308,8 @@ StateStore 中已知且仍有授权 Actor 的精确 Chat 生成消息，不要�
 
 `adapter.ts` 对普通文本调用 `ConversationService.submit()`，图片则先通过 `media.ts` 取得受管
 图片记录（路径、可信 MIME 与字节数），再由共享输入批处理器读取为 PNG/JPEG/WebP/非动画 GIF Data URL；富文本内的全部图片按原顺序与说明文字在同一次
-提交中传入，没有说明文字时才使用稳定图片提示。对已知平台无关命令调用
+提交中传入，没有说明文字时才使用稳定图片提示。独立视频与富文本视频复用 `video.ts`、共享暂存器
+及 Application 提交守卫，说明文字与随机附件引用同次提交，不执行其中的斜杠命令。对已知平台无关命令调用
 `ConversationCommandService.execute()`；手动输入的 `/h`、`/work`、`/r` 分别规范化为
 `/help`、`/workspace`、`/resume`，不重复加入命令中心菜单。飞书客户端不会像 Telegram 一样把
 斜杠文本注册成原生命令入口，因此命令发现以 CardKit 2.0 按钮为主；主卡的“帮助与更多命令”打开

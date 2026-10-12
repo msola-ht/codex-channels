@@ -64,6 +64,7 @@
 | 消息事件字段格式 | [官方 CLI 固定事件 Schema 指南](https://github.com/larksuite/cli/blob/a7865cd0a7416655535517a2a630848fde318761/skills/lark-event/SKILL.md) | 核对 `create_time` 为毫秒时间戳字符串 |
 | 长连接规则 | [使用长连接接收事件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/long-connection-mode) | 处理时限、集群投递和订阅类型 |
 | 文本消息发送 | [发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create) | 核对 `chat_id` 接收目标、文本消息体和机器人可用性 |
+| 富文本视频元素 | [发送消息内容结构](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/im-v1/message/create_json) | `media` 是视频标签，`file_key` 是视频文件 Key，可选 `image_key` 是封面；消息资源下载的 `type=file` 不表示 UTF-8 文本文件 |
 | IM 文件上传 | [上传文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/file/create) | 核对 `stream` 文件类型、文件名、Buffer/流、30 MiB 平台上限和返回 `file_key`；项目只用于不超过 1,000,000 字节的完整最终回复 |
 | IM 图片上传 | [上传图片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/image/create) | 核对 `image_type=message`、Buffer、10 MiB 平台上限和返回 `image_key`；项目只用于 App Server 明确返回且经本地安全校验的 PNG/JPEG 生成图片 |
 | 更新消息卡片 | [更新应用发送的消息卡片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/patch) | 核对应用发送的交互卡片原地更新、14 天窗口、单消息 5 QPS 和请求大小限制 |
@@ -174,9 +175,10 @@ EventDispatcher`。
 | 卡片交互 | `im.v1.message.create/patch`、`card.action.trigger` | 私聊审批、CardKit 2.0 用户输入与 MCP form、MCP 工具审批、MCP URL 卡片、一次性令牌、Actor/Chat/消息/请求绑定、重复请求失败关闭、原值决定、超时、有限停止、结果更新失败隔离和跨客户端失效已离线验证；用户输入使用原生选择器并允许单独填写“其他内容”，同时兼容动作值和 CardKit 表单按钮名两种回调载荷；命令审批卡片的一次批准、原生用户输入、MCP 工具审批的一次批准及当前 Gateway 长连接动作接收已通过真实验收，MCP form/URL 卡片仍待真实验收 | 已接入 |
 | 私聊图片 | `im.message.receive_v1`、`im.v1.messageResource.get` | 已完成 PNG/JPEG/WebP/非动画 GIF 内容签名、独立 `image` 与最多四张图片附带说明文字的 `post` 事件裁剪、授权后异步下载、10 MiB Gateway 限制、私有暂存、过期清理，以及图片与原始说明文字同次提交；PNG/JPEG 独立图片及两图至四图加说明文字的顺序和单 Turn 主路径已通过真实验收，WebP/GIF 尚未实机验收 | 已接入 |
 | 私聊一次性音频 | `im.message.receive_v1`、`im.v1.messageResource.get` | 复用既有 `im:resource`，按 `message_id + file_key + type=file` 下载；限制为 5 分钟、20 MiB 及 WAV/MP3/M4A/WebM/OGG，私有暂存一小时。真实飞书接收与 App Server 转换已验证；当前模型目录未声明 `audio`，Application 在创建 Turn 前明确拒绝，不列为当前端到端支持 | 受限接入 |
+| 私聊视频附件 | `im.message.receive_v1`、`im.v1.messageResource.get` | 独立 `media`/`video`、MP4/WebM 文件消息，以及包含一个去重后 `media.file_key` 和可选说明文字的 `post`，复用授权后视频下载、MP4/WebM 签名校验、64 MiB 上限、私有暂存和视频 MCP 附件引用。富文本优先非空 `content_v2`；封面 `image_key` 不作为独立图片，多个不同视频或视频混合独立 `img` 明确拒绝；真实平台收件和最终回复待验收 | 已接入 |
 | 生成图片回传 | `im.v1.image.create`、`im.v1.message.create` 的 `msg_type=image` | 只接受官方 `imageGeneration.savedPath`，共享边界拒绝相对路径、符号链接、非普通文件、超过 10 MiB 和非 PNG/JPEG 内容；上传后严格裁剪 `image_key` 并按 Chat 顺序发送，独立于操作显示档位。离线 Payload、顺序和失败关闭已验证，真实发送主路径已通过 | 已接入 |
 | 渠道图片发送（channel send-image） | `im.v1.image.create`、`im.v1.message.create` 的 `msg_type=image` | 由网关 spool 轮询触发，复用同一共享文件校验与上传发送路径；按 Thread 绑定解析会话，只发给已绑定会话，成功归档 `done/`、失败归档 `failed/` 并保留原因。真实发送待实机验收 | 已接入 |
-| UTF-8 文本文件输入 | `im.message.receive_v1`、`im.v1.messageResource.get` | 独立 `file` 消息及富文本 `media.file_key` 在授权后按 `message_id + file_key + type=file` 下载；严格验证文件名、1,000,000 字节与 UTF-8，清理常见终端转义序列并拒绝残留的不支持控制字符，清理后至多 32 KiB 内联，更大文本私有暂存 24 小时并提交路径。富文本优先非空 `content_v2`，每条最多 4 个文本附件且总量不超过 1,000,000 字节，整组成功后提交；Office、压缩包和文件消息内的音视频不支持；离线主路径已完成，真实文件待验收 | 已接入 |
+| UTF-8 文本文件输入 | `im.message.receive_v1`、`im.v1.messageResource.get` | 独立 `file` 消息在授权后按 `message_id + file_key + type=file` 下载；严格验证文件名、1,000,000 字节与 UTF-8，清理常见终端转义序列并拒绝残留的不支持控制字符，清理后至多 32 KiB 内联，更大文本私有暂存 24 小时并提交路径。富文本 `media` 属于视频入口，不作为文本附件；Office、压缩包和不受支持的二进制文件不支持；真实文本文件输入待验收 | 已接入 |
 | 飞书 Setup 与应用配置 | SDK Device Authorization、`bot/v3/info`、Application v6 只读详情、Application v7 配置写入与发布、机器人菜单事件文档 | 已实现手动输入与扫码、飞书页应用选择、最小新应用所需的私聊接收、消息/CardKit/只读检测与配置写入权限及消息/菜单事件与卡片动作回调声明、身份验证和原子配置；扫码保存后直接保留已有菜单并自动补齐 `codexc_home` 悬浮菜单、长连接事件与回调并提交应用版本，失败时保留连接配置并提供不依赖聊天消息的终端 Setup/Doctor 恢复；终端 Doctor 检查租户 Scope、消息事件和待审核版本，聊天 Doctor 解析已有租户 Scope、只申请缺失差集，并以运行时已收到事件为优先证据显示四项摘要；单个菜单节点与启用开关独立检测，消息路径真实扫码、Doctor 身份探测、命令审批动作回调和菜单点击均已通过 | 已接入 |
 | 飞书以外的 Lark | SDK Domain 配置 | 当前未接入 | 未支持 |
 
@@ -200,6 +202,7 @@ EventDispatcher`。
 | 操作终态与原生流式输出 | [`src/surfaces/feishu/operation-format.ts`](../src/surfaces/feishu/operation-format.ts)、[`src/surfaces/feishu/outbox.ts`](../src/surfaces/feishu/outbox.ts)、[`src/surfaces/feishu/client.ts`](../src/surfaces/feishu/client.ts) |
 | 私聊图片输入 | [`src/surfaces/feishu/media.ts`](../src/surfaces/feishu/media.ts)、[`src/surfaces/managed-image-store.ts`](../src/surfaces/managed-image-store.ts)、[`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) |
 | 私聊一次性音频 | [`src/surfaces/feishu/audio.ts`](../src/surfaces/feishu/audio.ts)、[`src/surfaces/managed-audio-store.ts`](../src/surfaces/managed-audio-store.ts)、[`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) |
+| 私聊视频附件输入 | [`src/surfaces/feishu/inbound-content.ts`](../src/surfaces/feishu/inbound-content.ts)、[`src/surfaces/feishu/video.ts`](../src/surfaces/feishu/video.ts)、[`src/surfaces/video-attachment-store.ts`](../src/surfaces/video-attachment-store.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts)；使用和验收范围见[视频分析 MCP](video-analysis-mcp.md#渠道视频附件) |
 | 私聊文本文件输入 | [`src/surfaces/feishu/file-input.ts`](../src/surfaces/feishu/file-input.ts)、[`src/surfaces/feishu/inbox.ts`](../src/surfaces/feishu/inbox.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) |
 | 输出渲染 | [`src/surfaces/feishu/renderer.ts`](../src/surfaces/feishu/renderer.ts)、[`src/surfaces/lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts) |
 | 权限中心 | [`src/surfaces/feishu/permissions.ts`](../src/surfaces/feishu/permissions.ts)、[`src/surfaces/feishu/adapter.ts`](../src/surfaces/feishu/adapter.ts) |
@@ -245,7 +248,9 @@ EventDispatcher`。
 - 官方资料与实际行为不一致；
 - 计划文件或本地实现入口发生移动。
 
-富文本文件资源依据锁定 SDK 的 `channel/normalize/converters/post.ts` 中 `media.file_key` 分支；
+富文本 `media` 的视频语义依据[官方消息内容结构](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/im-v1/message/create_json)；
+锁定 SDK 的 `channel/normalize/converters/post.ts` 将 `media.file_key` 记为 `type=file` 下载资源，
+该资源分类不等于 UTF-8 文本文件。可选 `image_key` 是视频封面，不独立下载为图片。
 `content_v2` 优先顺序依据锁定官方插件的
 [`post.ts`](https://github.com/larksuite/openclaw-lark/blob/dde0be3680d6fd5443cab426c8f4b3216266346a/src/messaging/converters/post.ts)。
 不推断 SDK 未定义的 `file` 富文本标签，不从显示文件名推断文件类型。

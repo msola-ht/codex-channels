@@ -83,9 +83,11 @@ Codex 客户端的 `tool_timeout_sec` 应大于 MCP 总时限，留出取消收�
 
 | 渠道 | 输入范围 | 本地接收限制 |
 | --- | --- | --- |
-| 飞书 | 独立 `media`/`video` 消息，或 `.mp4`/`.webm` 文件消息 | 64 MiB；富文本中的通用 media 文件仍沿用原有文本附件处理，不猜测为视频 |
+| 飞书 | 独立 `media`/`video` 消息、`.mp4`/`.webm` 文件消息，或同一 `post` 中一个去重后视频 `media` 与可选说明文字 | 64 MiB；富文本优先非空 `content_v2`，封面 `image_key` 不当独立图片下载；多个不同视频或视频混合独立 `img` 明确拒绝 |
 | 微信 | 原生 type 5 视频，或 `.mp4`/`.webm` 文件消息 | 64 MiB 明文；原生视频必须有 AES key，声明 `video_size` 按密文校验 |
 | Telegram | `video`、`video_note`，或视频 MIME/MP4/WebM 文件消息 | 20 MiB 下载限制；GIF/animation 保持原有图片路径 |
+
+飞书 `post` 的 `media` 是[官方视频标签](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/im-v1/message/create_json)，同一条消息中的说明文字与视频一起提交，重复的同一 `file_key` 只下载一次。消息资源 API 的 `type=file` 表示下载资源类型，不把视频变成文本附件；独立 UTF-8 文本文件仍保持 1,000,000 字节上限。富文本视频入口尚待真实平台收件、MCP 调用和最终回复验收。
 
 授权后下载，校验 MP4/WebM 容器签名后保存到私有目录，当前会话收到 `attachment` 引用和有效期，不收到本机路径或平台下载密钥。例如模型调用：
 

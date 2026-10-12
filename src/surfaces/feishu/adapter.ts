@@ -156,7 +156,7 @@ export class FeishuConversationAdapter {
         await this.handleVideo(message);
         return;
       }
-      if (message.kind === "file" || message.kind === "files") {
+      if (message.kind === "file") {
         await this.handleFile(message);
         return;
       }
@@ -736,7 +736,7 @@ export class FeishuConversationAdapter {
   }
 
   private async handleFile(
-    message: Extract<FeishuInboxMessage, { kind: "file" | "files" }>,
+    message: Extract<FeishuInboxMessage, { kind: "file" }>,
   ): Promise<void> {
     if (this.inputOptions.files === undefined) {
       throw new FeishuFileInputError(
@@ -744,32 +744,11 @@ export class FeishuConversationAdapter {
         "飞书当前未启用文本文件输入",
       );
     }
-    const references = message.kind === "file" ? [message] : message.files;
-    const imageKeys = message.kind === "files" ? message.imageKeys : [];
-    if (references.length > 4) throw new UserFacingError("attachment.too-many", "一次最多处理 4 个文本附件");
-    if (imageKeys.length > maximumInboundImages) throw new UserFacingError("image.too-many", "图片数量超过限制", { maximumImages: String(maximumInboundImages) });
-    const files: Awaited<ReturnType<FeishuFilePort["download"]>>[] = [];
-    let bytes = 0;
-    const images: Awaited<ReturnType<FeishuImagePort["download"]>>[] = [];
-    try {
-      for (const reference of references) {
-        const file = await this.inputOptions.files.download(message.messageId, reference.fileKey, reference.fileName);
-        files.push(file);
-        bytes += file.bytes;
-        if (bytes > 1_000_000) throw new UserFacingError("attachment.too-large", "附件总大小超过 1,000,000 字节");
-      }
-      for (const imageKey of imageKeys) images.push(await this.images.download(message.messageId, imageKey));
-    } catch (error) {
-      await Promise.allSettled(files.map(file => this.inputOptions.files?.discard?.(file) ?? Promise.resolve()));
-      throw error;
-    }
+    const file = await this.inputOptions.files.download(message.messageId, message.fileKey, message.fileName);
     const quotedText = await this.readQuotedText(message);
     const text = formatQuotedInput([
-      ...(message.kind === "files" && message.text ? [message.text, ""] : []),
-      ...files.flatMap(file => [
-        "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
-        `文件名：${file.fileName}`, "", textAttachmentBody(file), "",
-      ]),
+      "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
+      `文件名：${file.fileName}`, "", textAttachmentBody(file),
     ].join("\n").trimEnd(), quotedText);
     const sequence = this.nextInputSequence;
     this.nextInputSequence += 1;
@@ -781,7 +760,6 @@ export class FeishuConversationAdapter {
         actorId: message.actorId,
         sequence,
         text,
-        ...(images.length === 0 ? {} : { localImages: images.map(image => ({ path: image.path, mimeType: image.mimeType, bytes: image.bytes })) }),
       }),
     );
     if (!result.tail) {
@@ -838,7 +816,10 @@ export class FeishuConversationAdapter {
         message.messageId,
         () => {
           check();
-          return submissionScope!.submit(formatQuotedInput(videoAttachmentBody(file!), quotedText));
+          return submissionScope!.submit(formatQuotedInput([
+            ...(message.text ? ["用户说明：", message.text, ""] : []),
+            videoAttachmentBody(file!),
+          ].join("\n"), quotedText));
         },
       );
       submitted = true;
