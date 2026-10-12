@@ -19,7 +19,7 @@
   `audio` 时提交，否则在创建或追加 Turn 前明确拒绝；
   `video`、`video_note` 与视频文档在鉴权后下载，只接受内容签名通过校验的 MP4/WebM，
   保留说明和原生引用，通过视频附件标识提示当前会话调用独立视频 MCP，不暴露本地路径或原文件名；
-  下载前通过 Application 捕获工作区与 Thread，提交时在会话锁内复核绑定和授权，绑定改变时明确拒绝；
+  等待先前输入前通过 Application 登记取消范围，等待完成后、下载前捕获工作区与 Thread，提交时在会话锁内复核绑定和授权，绑定改变时明确拒绝；
   未配置 `videoDirectory` 时明确拒绝视频，关闭时取消下载，迟到结果不提交；
   普通文本与图片说明可读取 `reply_to_message` 自带的文本或说明文字并作为明确引用上下文提交；
   `/queue add|list|update|delete|reorder|start` 管理 App Server 持久 Queue，`/schedule <自然语言>` 由前台 Agent 调用 `schedule_task` 工具生成确认预览，`/schedule` 管理显式启用的

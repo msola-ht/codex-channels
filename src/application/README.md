@@ -1,8 +1,8 @@
 # Application
 
-`ConversationTurnUseCases.prepareAttachmentSubmission` 为视频下载捕获当前工作区与 Thread；下载完成后在会话锁内复核目标和调用方实时授权，再通过原有文本 Turn 提交入口发送单文件附件引用。首次输入仍由既有 `ensureSession` 建立 Thread，不新增原生视频协议字段，不在 Application 下载媒体或调用视频模型。
+`ConversationTurnUseCases.prepareAttachmentSubmission` 在等待前序输入前登记视频取消作用域；Surface 排空前序输入后调用一次 `captureTarget`，在下载前捕获当前工作区与 Thread，允许前序输入正常创建首个 Thread。下载完成后在会话锁内复核目标和调用方实时授权，并在异步会话准备之后、Turn 请求发出前再次复核已捕获的 Thread，再通过原有文本 Turn 提交入口发送单文件附件引用。未捕获目标不得提交，取消后不得捕获；首次输入仍由既有 `ensureSession` 建立 Thread，不新增原生视频协议字段，不在 Application 下载媒体或调用视频模型。
 
-返回的提交作用域提供取消信号、一次性 `submit`、`mayHaveSubmitted` 和 `dispose`。Surface 在下载前创建作用域并在结束时释放；`/stop` 取消当前目标的附件准备，准备总时限为 120 秒。每个目标最多 4 个待处理作用域，全局最多 1000 个目标。RPC 可能发出后即使确认失败也保留附件至过期，避免删除已经进入 Thread 的引用；不自动重试提交。
+返回的提交作用域提供取消信号、一次性 `captureTarget` 和 `submit`、`mayHaveSubmitted` 和 `dispose`。Surface 在首次等待前创建作用域并在结束时释放；`/stop` 取消当前目标的附件准备，准备总时限为 120 秒，包含等待前序输入，捕获目标不重置时限。每个目标最多 4 个待处理作用域，全局最多 1000 个目标。RPC 可能发出后即使确认失败也保留附件至过期，避免删除已经进入 Thread 的引用；不自动重试提交。
 
 本目录实现跨模块用例，协调 Codex Client、Conversation Core、Session Router 和模型设置，不处理 Telegram SDK 或底层 Transport。
 

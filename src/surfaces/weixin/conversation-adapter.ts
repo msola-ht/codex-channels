@@ -152,23 +152,35 @@ export class WeixinConversationAdapter {
       signal?.throwIfAborted();
       if (message.kind === "video" || (message.kind === "file" && /\.(?:mp4|webm)$/iu.test(message.file.fileName))) {
         if (!this.videos) throw new UserFacingError("video.unavailable", "微信视频附件输入未启用");
-        await this.inputs.flushPending(message.target, message.actorId);
-        signal?.throwIfAborted();
         const submit = this.conversations.prepareAttachmentSubmission?.(message.target,
           () => !signal?.aborted && this.inputOptions.isAllowed?.(message.target, message.actorId) === true);
         if (!submit) throw new UserFacingError("video.unavailable", "视频附件会话授权入口不可用");
         const videoSignal = AbortSignal.any([submit.signal, ...(signal ? [signal] : [])]);
         let file;
         try {
+          await this.inputs.flushPending(message.target, message.actorId);
+          videoSignal.throwIfAborted();
+          submit.captureTarget();
           file = await this.videos.download(message.kind === "video" ? message.video : message.file, { target: message.target, actorId: message.actorId }, videoSignal);
           videoSignal.throwIfAborted();
           if (this.inputOptions.isAllowed?.(message.target, message.actorId) === false) {
             return;
           }
-          await submit.submit([
+          const result = await submit.submit([
             videoAttachmentBody(file),
             formatQuotedInput(message.text ?? "请概述视频内容。", message.quotedText),
           ].join("\n\n"));
+          if (result.steered) {
+            this.notify(
+              message.target,
+              formatTurnInputAppended("file", Boolean(message.text?.trim())),
+            );
+          }
+        } catch (error) {
+          if (videoSignal.aborted && !signal?.aborted) {
+            throw new UserFacingError("video.unavailable", "视频输入已取消或超时，请重新发送");
+          }
+          throw error;
         } finally {
           submit.dispose();
           if (file !== undefined) {

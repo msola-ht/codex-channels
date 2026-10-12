@@ -791,7 +791,9 @@ export class FeishuConversationAdapter {
     }
     let signal = this.videoCancellation.signal;
     const check = (): void => {
-      signal.throwIfAborted();
+      if (signal.aborted) {
+        throw new UserFacingError("video.unavailable", "视频输入已取消或超时，请重新发送");
+      }
       if (!this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId })) {
         throw new UserFacingError("video.unavailable", "当前用户的飞书视频授权已失效");
       }
@@ -801,12 +803,13 @@ export class FeishuConversationAdapter {
     let submissionScope: ReturnType<NonNullable<typeof this.conversations.prepareAttachmentSubmission>> | undefined;
     try {
       check();
-      await this.inputs.flushPending(message.target, message.actorId);
-      check();
       submissionScope = this.conversations.prepareAttachmentSubmission(message.target, () =>
         !signal.aborted && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
       );
       signal = AbortSignal.any([signal, submissionScope.signal]);
+      await this.inputs.flushPending(message.target, message.actorId);
+      check();
+      submissionScope.captureTarget();
       file = await videos.download(message.messageId, message.fileKey, { target: message.target, actorId: message.actorId }, signal);
       check();
       const quotedText = await this.readQuotedText(message);

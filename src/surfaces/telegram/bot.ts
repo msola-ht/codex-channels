@@ -1070,8 +1070,6 @@ export class TelegramSurface {
     const inputTarget = target(context);
     const actorId = String(context.from?.id ?? "");
     if (!this.access.isAllowed({ target: inputTarget, actorId })) return;
-    await this.inputs.flushPending(inputTarget, actorId);
-    if (this.stopping || !this.access.isAllowed({ target: inputTarget, actorId })) return;
     const submitAttachment = this.service.prepareAttachmentSubmission?.(
       inputTarget,
       () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
@@ -1082,10 +1080,19 @@ export class TelegramSurface {
     }
     let file;
     try {
+      await this.inputs.flushPending(inputTarget, actorId);
+      if (this.stopping || !this.access.isAllowed({ target: inputTarget, actorId })) return;
+      if (submitAttachment.signal.aborted) {
+        throw new UserFacingError("video.unavailable", "视频输入已取消或超时，请重新发送。");
+      }
+      submitAttachment.captureTarget();
       try {
         file = await this.videoInput.download(this.bot.api, fileId, fileSize, { target: inputTarget, actorId }, submitAttachment.signal);
       } catch (error) {
         if (this.stopping) return;
+        if (submitAttachment.signal.aborted) {
+          throw new UserFacingError("video.unavailable", "视频输入已取消或超时，请重新发送。");
+        }
         if (error instanceof UserFacingError && error.code.startsWith("video.")) {
           const text = error.code === "video.too-large"
             ? "Telegram 视频超过 20 MiB 限制，请压缩后重新发送。"
@@ -1101,6 +1108,9 @@ export class TelegramSurface {
       }
       if (this.stopping || !this.access.isAllowed({ target: inputTarget, actorId })) {
         return;
+      }
+      if (submitAttachment.signal.aborted) {
+        throw new UserFacingError("video.unavailable", "视频输入已取消或超时，请重新发送。");
       }
       const message = context.message;
       if (!message) {

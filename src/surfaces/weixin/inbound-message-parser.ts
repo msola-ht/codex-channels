@@ -178,7 +178,9 @@ function parseInboundContent(
         return null;
       }
       text = textItem.text;
-      quoted = parseQuotedReference(record.ref_msg);
+      if (record.ref_msg !== undefined || video === undefined) {
+        quoted = parseQuotedReference(record.ref_msg);
+      }
       continue;
     }
     if (type === 2) {
@@ -226,6 +228,9 @@ function parseInboundContent(
       video = { mediaAesKey, ...(fullUrl === undefined ? {} : { fullUrl }),
         ...(encryptedQueryParam === undefined ? {} : { encryptedQueryParam }),
         ...(encryptedBytes === undefined ? {} : { encryptedBytes }) };
+      if (record.ref_msg !== undefined) {
+        quoted = parseQuotedReference(record.ref_msg);
+      }
       continue;
     }
     return null;

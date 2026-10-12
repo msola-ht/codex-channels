@@ -152,7 +152,7 @@ MCP 上传原视频，不在本地抽帧；当前 Strata 复刻版默认 2 FPS�
 - `upstream_incomplete` 表示服务明确返回 `incomplete`；`details` 提供请求参数、可用用量及白名单原因。`max_output_tokens` 表示服务报告长度受限，不单凭该原因断言预算耗尽：低用量中断还可能是服务生成异常。`upstream_failed` 单独报告服务失败，只保留白名单错误码；未知或缺失终态返回 `upstream_format`。均不返回部分答案或思考正文；仅前述明确文件失效允许一次恢复，生成失败不自动重试。
 - 未知上游错误正文、状态字符串、原因及错误码不会直接透传；HTTP/失败终态保留数字状态和文档白名单 `upstream_code`，以及请求参数和传输诊断。失败终态仍保留 `status:failed` 和上游提供的合法 `usage`；成功与失败用量均不包含模型思考内容。
 
-- 渠道附件从准备到提交设有 120 秒总时限；`/stop` 会取消当前会话正在下载或等待提交的视频，防止停止后又启动新任务。切换工作区、Thread 或撤销授权后，原附件也不会提交。
+- 渠道附件在首次等待前登记取消作用域，120 秒总时限包含排空前序输入、下载和等待提交；排空后、下载前捕获工作区与 Thread，不重置时限。`/stop` 会取消当前会话正在准备的视频，包含尚未开始下载的输入，防止停止后又启动新任务。下载期间切换工作区、Thread 或撤销授权后，原附件也不会提交。
 - 确定尚未提交的失败会删除本次新暂存文件，不删除复用的旧附件；如果提交请求可能已经发出、但确认丢失，文件保留至原定过期时间并可参与去重，不自动重试，避免已进入 Thread 的附件引用失效。
 
 - 每个 MCP 进程最多一个正在运行的分析；并发调用立即返回 `busy`。不同进程仍由 Strata 自己管理负载。
@@ -170,6 +170,16 @@ MCP 上传原视频，不在本地抽帧；当前 Strata 复刻版默认 2 FPS�
 MCP 使用 [2025-06-18 生命周期](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle)、[工具调用](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)和[取消通知](https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/cancellation)，仅声明 tools 能力，不提供资源、提示模板或管理工具。工具按 [ToolAnnotations](https://modelcontextprotocol.io/specification/2025-06-18/schema#toolannotations) 声明 `readOnlyHint:false`、`destructiveHint:false`、`openWorldHint:true`：它可能在 Strata 新建并保留文件，不应在工具目录或渠道中展示为只读；这些提示不替代授权。
 
 ## 已观察的链路与限制
+
+2026-10-12，基于 `main`（`c84cd44d`）的全分支审查补充了以下本地观察，均未发送真实渠道消息或运行真实 Strata 推理：
+
+- 真实 stdio MCP 连接任务自有回环 HTTP 服务，首次只上传 27 字节故障材料，`Content-Length` 正确且无 Transfer-Encoding；默认 `medium` 和显式 `high` 均按预期发送。追问复用同一 file_id；`404 + video_file_expired` 返回受控错误且不重传，后续仍可复用；越界路径与未知思考等级被拒绝。占位结果不证明视频分析成功。
+- 配置向导经真实 Codex 配置 RPC 向隔离的任务自有 Codex Home 写入 stdio MCP 条目，同名新增被拒绝、取消保存不改变文件。未更改操作者的 Codex 配置。
+- 生产 Application 提交作用域的手工交互使用替换的 Router/Core/Turn 端口：目标捕获前停止返回 `true` 并阻止后续捕获；前序输入创建 Thread 后可捕获并提交；未捕获、重复捕获、重复提交、Thread 变化和撤权均被拒绝；确认丢失仍保留 `mayHaveSubmitted:true`。这些观察不等同于真实 App Server 的提交验收。
+- 捕获 Thread 后、异步会话准备期间移除绑定的故障输入，修复前会把视频引用提交到替换 Thread；修复后返回 `video.unavailable`，Turn 请求数为零，`mayHaveSubmitted:false`。还拒绝了 Router 返回的 Thread 与当前绑定不一致的结果；首次未绑定的视频仍可经原有路径创建 Thread 并提交。
+- 飞书真实 Inbox 同一事件循环先接收视频再接收 `/stop`，修复前停止时尚无视频取消作用域，随后仍下载提交；提前登记后返回 `stop:true`，没有下载或提交。引用读取期间取消会清理新附件并返回明确的 `video.unavailable`，不再显示泛化内部失败。
+- 飞书 Inbox → Adapter → VideoStore → Application 的本地链路使用 FFmpeg 生成的 1738 字节 MP4，平台下载和 Codex 执行端口由任务替换：富文本说明保留，同一消息重复 Key 只下载一次，同内容二次消息复用引用且仅保留一个文件。未授权及混合视频图片被拒绝，伪视频内容返回 `video.unsupported`，取消后迟到的 SDK 下载流被销毁。未覆盖真实平台收件及模型回复。
+- Telegram `bot.handleUpdate` 与微信 InputAdapter → 长轮询解析 → AES 下载解密 → 暂存 → 提交 → 游标链路使用 1700 字节生成 MP4、替换的平台/执行端口，均保留视频说明和原生引用；微信 1712 字节密文正确解密，视频追加到运行任务后发送确认。微信密文声明超限、非官方 CDN 均在下载前拒绝；Telegram 无声明长度、实际流为 20 MiB 加 1 字节时返回 `video.too-large`。微信 `/stop` 在首次等待期间取消视频时，没有下载或提交，返回受控取消/超时提示，不终止账号监控器。
 
 2026-10-12，文件引用接入在 Linux / Node.js 24.21.0 下进行了手工 REPL 与真实 stdio MCP 入口交互。上游使用任务自有的本地 HTTP 观察端口、假凭据和非视频故障字节，返回明确标注的占位分析；没有模型推理，以下不是 Strata 实机验收，也没有新增或修改测试文件：
 

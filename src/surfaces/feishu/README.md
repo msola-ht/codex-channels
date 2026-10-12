@@ -45,7 +45,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `video.ts`：授权后的独立 `video`/`media` 消息、`.mp4`/`.webm` 文件消息与富文本单视频复用官方消息资源下载，
   由共享视频暂存器验证实际 MP4/WebM 签名、64 MiB 上限与 24 小时有效期。只提交随机附件标识及
   `strata_video.analyze_video` MCP 调用说明，保留回复引用上下文，视频封面不作为视频下载；未配置
-  `videoDirectory` 明确拒绝。下载前固定工作区和 Thread，提交时由 Application 在会话锁内复核
+  `videoDirectory` 明确拒绝。输入刷新前先登记可取消的提交作用域，刷新完成后再固定工作区和 Thread，提交时由 Application 在会话锁内复核
   绑定及用户授权；绑定变化拒绝提交。关闭撤销下载与提交，迟到下载释放流；确定未提交时删除附件，
   请求可能已发出但确认失败时保留至过期，避免使已提交的引用失效。下载传递已授权会话与 Actor 供共享层内容去重；提交后 retain，失败 discard 不删除复用旧附件。
   富文本 `media.file_key` 按视频资源下载，可选封面 `image_key` 不作为独立图片下载。
