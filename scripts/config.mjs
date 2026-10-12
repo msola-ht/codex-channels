@@ -110,7 +110,7 @@ export async function runConfig({
         continue;
       }
       const result = await handlers[section]({
-        environment, input, output, prompts, writeConfig, telegramConfigured,
+        environment, configPath, dataDir, input, output, prompts, writeConfig, telegramConfigured,
       });
       if (isBackResult(result) || stayOnMenu) continue;
       return result;

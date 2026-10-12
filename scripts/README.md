@@ -7,8 +7,8 @@
 ## 配置与 Workspace
 
 - `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，由 MCP 客户端启动；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。
-- `mcp-setup.mjs`：`codexc config → 新增 MCP` 交互入口，支持 stdio、Streamable HTTP 和 Strata 视频预设；校验输入、脱敏确认后通过 Codex 用户配置事务按修订写入，拒绝覆盖同名服务器，不自动安装、启动或重启服务。
-- `video-analysis-client.mjs`：视频 MCP 的严格环境配置、授权目录内文件名/绝对路径校验、有界读取及 Strata Files/Responses 请求；默认使用有界内存 file_id 映射、共享上传及一次明确失效恢复，显式 url 模式兼容旧部署；通过 `instructions` 发送通用视频分析规则，用户问题保持原样，可用有界 `context` 补充同一视频追问线索；预算由上游管理，支持显式思考等级，白名单提取用量及失败分类，只在完整 `completed` 响应中提取分析文字，不接受任意远程视频 URL，不执行模型返回的内容。
+- `mcp-setup.mjs`：`codexc config → 新增 MCP` 交互入口，支持 stdio、Streamable HTTP 和 Strata 视频预设；预设从有效 Gateway 配置推导 StateStore 旁的渠道附件目录，自动填入任意本机视频范围，不询问目录；最终确认后复核目录并准备私有权限，通过 Codex 用户配置事务按修订写入，拒绝覆盖同名服务器，不自动安装、启动或重启服务。
+- `video-analysis-client.mjs`：视频 MCP 的严格环境配置、本机路径校验（授权目录内文件名/绝对路径，或 `STRATA_VIDEO_ROOT=any` 时的任意绝对路径，渠道附件目录内的路径始终拒绝）、有界读取及 Strata Files/Responses 请求；默认使用有界内存 file_id 映射、共享上传及一次明确失效恢复，显式 url 模式兼容旧部署；通过 `instructions` 发送通用视频分析规则，用户问题保持原样，可用有界 `context` 补充同一视频追问线索；预算由上游管理，支持显式思考等级，白名单提取用量及失败分类，只在完整 `completed` 响应中提取分析文字，不接受任意远程视频 URL，不执行模型返回的内容。
 
 - `managed-provider-account-prompt.mjs` / `managed-provider-account-prompt.d.mts`：多账户添加共用预设与自定义 ID 交互。
 
