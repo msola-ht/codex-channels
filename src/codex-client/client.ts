@@ -791,10 +791,13 @@ export class CodexAppServerClient implements
   }
 
   async readDefaultServiceTier(cwd: string): Promise<string | null> {
-    return (await this.readModelAccelerationSettings(cwd)).serviceTier;
+    const settings = await this.readModelAccelerationSettings(cwd);
+    if (settings.serviceTier === "ultrafast" && !settings.ultrafastEnabled) return null;
+    if ((settings.serviceTier === "fast" || settings.serviceTier === "priority") && !settings.fastEnabled) return null;
+    return settings.serviceTier;
   }
 
-  async readModelAccelerationSettings(cwd: string): Promise<{ enabled: boolean; serviceTier: string | null }> {
+  async readModelAccelerationSettings(cwd: string): Promise<{ fastEnabled: boolean; ultrafastEnabled: boolean; serviceTier: string | null }> {
     const params: ConfigReadParams = { cwd, includeLayers: false };
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
@@ -804,15 +807,36 @@ export class CodexAppServerClient implements
     if (serviceTier !== null && typeof serviceTier !== "string") {
       throw new Error("Codex 响应缺少有效 config service_tier");
     }
-    const features = response.config.features;
+    return { serviceTier, ...await this.readAccelerationFlags(response.config.features) };
+  }
+
+  private async readAccelerationFlags(features: unknown): Promise<{ fastEnabled: boolean; ultrafastEnabled: boolean }> {
     if (features !== undefined && (features === null || typeof features !== "object" || Array.isArray(features))) {
       throw new Error("Codex 响应包含无效 config features");
     }
-    const fastMode = features?.fast_mode;
-    if (fastMode !== undefined && typeof fastMode !== "boolean") {
-      throw new Error("Codex 响应包含无效 config features.fast_mode");
+    const configured = features as Record<string, unknown> | undefined;
+    const { requirements, supportsIndependentSpeedModes } = await this.rpc.request<ConfigRequirementsReadResponse>({
+      method: "configRequirements/read",
+      params: undefined,
+    }, { retryOverload: true });
+    if (supportsIndependentSpeedModes !== true || requirements === undefined || (requirements !== null
+      && (typeof requirements !== "object" || Array.isArray(requirements)
+        || requirements.featureRequirements === undefined
+        || (requirements.featureRequirements !== null && (typeof requirements.featureRequirements !== "object"
+          || Array.isArray(requirements.featureRequirements)))))) {
+      throw new Error("Codex 响应缺少有效加速策略要求");
     }
-    return { serviceTier, enabled: fastMode !== false };
+    const enabled = (key: "fast_mode" | "ultrafast_mode"): boolean => {
+      const value = configured?.[key];
+      const required = requirements?.featureRequirements?.[key];
+      if ((value !== undefined && typeof value !== "boolean")
+        || (required !== undefined && typeof required !== "boolean")) {
+        throw new Error(`Codex 响应包含无效加速开关 ${key}`);
+      }
+      // Both stable features default to true in the locked CLI; exact policy wins.
+      return required ?? value ?? true;
+    };
+    return { fastEnabled: enabled("fast_mode"), ultrafastEnabled: enabled("ultrafast_mode") };
   }
 
   async writeUserConfigEdits(
@@ -834,11 +858,12 @@ export class CodexAppServerClient implements
     }, { retryOverload: false });
   }
 
-  async readUserConfigSnapshot(options: { includeApprovalsReviewerPolicy?: boolean } = {}): Promise<{
+  async readUserConfigSnapshot(options: { includeApprovalsReviewerPolicy?: boolean; includeAcceleration?: boolean } = {}): Promise<{
     config: Record<string, JsonValue | undefined>;
     version: string;
     toolConfig: Record<string, JsonValue | undefined>;
     approvalsReviewerPolicy?: { allowedReviewers: string[] | null; autoReviewDisabled: boolean };
+    acceleration?: { fastEnabled: boolean; ultrafastEnabled: boolean };
   }> {
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
@@ -899,6 +924,7 @@ export class CodexAppServerClient implements
         plugins: response.config.plugins,
       },
       ...(approvalsReviewerPolicy === undefined ? {} : { approvalsReviewerPolicy }),
+      ...(options.includeAcceleration ? { acceleration: await this.readAccelerationFlags(response.config.features) } : {}),
     };
   }
 
@@ -1254,7 +1280,7 @@ export class CodexAppServerClient implements
   async setGoal(threadId: string, objective: string): Promise<ThreadGoal> {
     const response = await this.rpc.request<ThreadGoalSetResponse>({
       method: "thread/goal/set",
-      params: { threadId, objective, status: "active" },
+      params: { threadId, objective, status: "active", origin: "user" },
     }, { retryOverload: false });
     return toThreadGoal(response.goal);
   }
@@ -1262,7 +1288,7 @@ export class CodexAppServerClient implements
   async clearGoal(threadId: string): Promise<void> {
     await this.rpc.request({
       method: "thread/goal/clear",
-      params: { threadId },
+      params: { threadId, origin: "user" },
     }, { retryOverload: false });
   }
 }

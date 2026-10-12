@@ -38,6 +38,8 @@ src/
 API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `scripts/webui-api.ts` 的共享声明，服务端与前端使用同一份类型。
 
+模型默认档位按后端投影的 `fastEnabled`、`ultrafastEnabled` 与精确模型目录分别生成选项；原始配置中的禁用档位保留为不可选显示，Standard 始终可用于退出加速。预览和确认都由后端重新读取对应开关与受管策略，不由前端推断功能默认值。
+
 ## UI 组件规范
 
 - 组件使用官方 `base-nova` 样式和 `@base-ui/react`，类名合并统一使用 `cn` 包。组合触发器使用 `render`，Select 显式提供 `items` 的值与显示标签，ToggleGroup 的受控值使用数组；不保留 Radix 调用接口。

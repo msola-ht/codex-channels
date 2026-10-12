@@ -38,6 +38,8 @@
 - `user-facing-error.ts`：用稳定错误代码和最小参数描述预期输入与状态错误；Surface 按平台独立渲染，未标记异常默认隐藏详情。
 
 本模块不得依赖 Telegram SDK、具体数据库、launchd 或底层 JSON-RPC Transport。完整历史和 Thread 权威状态始终由 App Server 持有。
+`partial_answer` 保留为可展示的部分回答，不计入最终回复判定；仅官方 Turn 终态结束整轮。
+子代理开始事件保留官方启动时的模型和思考等级快照，不以稍后读取的 Thread 配置替代。
 本模块不解析官方 Notification 或 Item；协议校验、Item 分类、操作摘要和敏感命令清洗均由
 `codex-client` 适配边界完成。
 Conversation 目标由 `surface + accountId + conversationId` 唯一标识；Core 不解释平台账号或聊天 ID。

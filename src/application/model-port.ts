@@ -39,7 +39,8 @@ export interface ModelSelectionPort {
   readDefaultReasoningEffort(cwd: string, modelProvider?: string): Promise<string | null>;
   readDefaultServiceTier(cwd: string, modelProvider?: string): Promise<string | null>;
   readModelAccelerationSettings(cwd: string, modelProvider?: string): Promise<{
-    enabled: boolean;
+    fastEnabled: boolean;
+    ultrafastEnabled: boolean;
     serviceTier: string | null;
   }>;
 }

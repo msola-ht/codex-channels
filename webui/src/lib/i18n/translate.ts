@@ -96,6 +96,7 @@ const settingErrorKeys: Record<string, MessageKey> = {
   "invalid-service-tier": "settingsUi.validation.choice",
   "unsupported-service-tier": "settingsFields.serviceTierUnsupported",
   "acceleration-disabled": "settingsFields.accelerationDisabled",
+  "acceleration-unavailable": "settingsFields.appServerUnavailable",
   "invalid-reasoningSummary": "settingsUi.validation.choice",
   "invalid-verbosity": "settingsUi.validation.choice",
   "invalid-historyPersistence": "settingsUi.validation.choice",

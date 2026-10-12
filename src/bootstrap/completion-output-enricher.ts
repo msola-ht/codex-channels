@@ -185,7 +185,9 @@ export class CompletionOutputEnricher {
     event: Extract<OutputEvent, { type: "subagent.spawned" | "subagent.contacted" }>,
     callerSignal: AbortSignal,
   ): Promise<OutputEvent> {
-    const fallback = { ...event, modelProvider: null, model: null, reasoningEffort: null };
+    const fallback = { ...event, modelProvider: null,
+      model: event.type === "subagent.spawned" ? event.model ?? null : null,
+      reasoningEffort: event.type === "subagent.spawned" ? event.reasoningEffort ?? null : null };
     if (!this.options.subagentMetadata || this.stopping || callerSignal.aborted) return fallback;
     const deadline = new AbortController();
     const signal = AbortSignal.any([deadline.signal, callerSignal]);
@@ -215,18 +217,20 @@ export class CompletionOutputEnricher {
       });
       const metadata = await withDeadline(Promise.race([query, cancelled]), 2_000, () => {
         deadline.abort();
-        this.logger.warn({ agentThreadId: event.agentThreadId }, "子代理配置读取超时，省略模型设置");
+        this.logger.warn({ agentThreadId: event.agentThreadId }, "子代理配置读取超时，省略未确认的当前配置");
         return undefined;
       });
       if (signal.aborted || !metadata) return fallback;
       if (!metadata.matches) {
-        this.logger.warn({ agentThreadId: event.agentThreadId, threadId: event.threadId }, "子代理配置归属不匹配，省略模型设置");
+        this.logger.warn({ agentThreadId: event.agentThreadId, threadId: event.threadId }, "子代理配置归属不匹配，省略未确认的当前配置");
         return fallback;
       }
       const { result } = metadata;
-      return { ...event, modelProvider: result.modelProvider ?? null, model: result.model ?? null, reasoningEffort: result.reasoningEffort ?? null };
+      return { ...event, modelProvider: result.modelProvider ?? null,
+        model: event.type === "subagent.spawned" ? fallback.model : result.model ?? null,
+        reasoningEffort: event.type === "subagent.spawned" ? fallback.reasoningEffort : result.reasoningEffort ?? null };
     } catch {
-      if (!signal.aborted) this.logger.warn({ agentThreadId: event.agentThreadId }, "子代理配置读取失败，省略模型设置");
+      if (!signal.aborted) this.logger.warn({ agentThreadId: event.agentThreadId }, "子代理配置读取失败，省略未确认的当前配置");
       return fallback;
     } finally {
       if (cancel) signal.removeEventListener("abort", cancel);

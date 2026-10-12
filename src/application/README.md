@@ -6,6 +6,8 @@
 
 本目录实现跨模块用例，协调 Codex Client、Conversation Core、Session Router 和模型设置，不处理 Telegram SDK 或底层 Transport。
 
+Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的禁用档位回到 Standard，保存偏好与显式待生效覆盖在提交前复核，失效时拒绝并要求用户重新选择，不清除保存数据或重解释已有 Thread 的实际设置。
+
 ## 文件
 
 - `hook-port.ts`：定义 Hook 列表、安全审查摘要和精确版本信任/启停的窄端口；不暴露任意配置写入。

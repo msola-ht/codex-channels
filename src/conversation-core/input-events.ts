@@ -71,6 +71,8 @@ export type ConversationInputEvent =
       agentThreadId: string;
       agentPath: string;
       kind: "started" | "interacted" | "interrupted" | "completed";
+      model?: string;
+      reasoningEffort?: string;
     }
   | {
       type: "turn.modelTiming.updated";
