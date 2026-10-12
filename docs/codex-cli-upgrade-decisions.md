@@ -1,26 +1,37 @@
 # Codex CLI 升级决策
 
 本页说明当前项目采用什么、为什么采用，以及哪些上游能力仍不接入，供下一次升级直接复核。
-当前基线为 `codex-cli 0.160.1`；具体协议和实现以[支持矩阵](index.md#当前支持矩阵)为准，
+当前基线为 `codex-cli 0.162.0`；具体协议和实现以[支持矩阵](index.md#当前支持矩阵)为准，
 升级步骤与门禁见[升级流程](codex-cli-upgrade.md)。本页不重复协议数量、命令参数或逐版本更新日志。
 
-## 当前基线与补丁取舍
+## 当前基线与升级取舍
 
-当前正式基线为 `0.160.1`，固定提交 `d27764b82f7118f674371e6d6e76271d9d606edb`，
-源码与测试位于 `upstream/openai-codex-0.160.1`。决策以固定源码与目标 CLI 实际生成结果为准，
+当前正式基线为 `0.162.0`，固定提交 `c1382380de69521303b416720a52f42d51af6248`，
+源码与测试位于 `upstream/openai-codex-0.162.0`。决策以固定源码与目标 CLI 实际生成结果为准，
 不以官方 main 替代锁定合同。
 
-用户在远程 Windows 执行环境中启动 stdio MCP 服务时，可随配套 CLI 获得系统目录与临时目录
-环境变量保留修复，减少因缺少这些变量而无法启动服务的情况。
-官方 [0.160.1 正式 Release](https://github.com/openai/codex/releases/tag/rust-v0.160.1) 对应的
-`codex-rs` 源码相对 0.160.0 仅修改版本和
-[`stdio_server_launcher.rs`](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/rmcp-client/src/stdio_server_launcher.rs)。
+本次从 0.160.1 升级，包含 0.161.0 的权限、恢复和重试修复，以及
+[0.162.0 正式 Release](https://github.com/openai/codex/releases/tag/rust-v0.162.0) 的自动审查、
+子代理与消息阶段变化。目标严格为 0.162.0；不把后续补丁修复或旧版本实测记为本次验证。
 
 | 范围与用途 | 当前决定与实现入口 | 证据与边界 |
 | --- | --- | --- |
-| 远程 Windows MCP 服务启动 | 随精确 CLI 保留远程执行环境的 `SYSTEMROOT`、`TEMP`、`TMP`；不在 Gateway 复制环境变量处理 | 指定 `source="remote"` 的变量触发环境白名单时一并保留这三个变量，编排端可以是 Unix；不扩大为任意环境变量透传。本项目没有远程执行 Host 管理入口，也不因补丁新增该入口；未进行 Windows 远程实机验收 |
-| 现有渠道与原生终端继续使用锁定版本 | 同步 Gateway、协议、公开 CLI 合同和文档基线 | 875 个生成类型与前版一致；公开 CLI 合同只有 `codexCli` 版本变化，转发参数、枚举和协议方法不变；无需增加业务兼容分支或协议导出 |
-| 官方 daemon 生命周期 | 继续暂缓接管，现有服务管理与更新器维持职责 | daemon 源码没有补丁变化；[专项审查](codex-daemon-review.md)的 0.160.0 隔离实测保留原版本，不能作为 0.160.1 重测结果 |
+| 稳定回答后仍可继续工作 | Client/Core 保留 `partial_answer`，三渠道按正文投递；不算最终回答，飞书不挂整轮完成页脚 | `MessagePhase` 与官方 partial-answer 合同；未知阶段仍保持未知，不伪造最终阶段 |
+| 用户设置和清除 Goal 后留下明确授权来源 | 既有 `/goal` set/clear 调用发送 `origin: "user"` | `thread_goal_processor.rs` 仅为显式 user 来源记录用户指令；自动来源不得冒充用户，写入仍不重试 |
+| 子代理开始卡显示启动设置 | 消费 started 活动的 `model`、`reasoningEffort`，Provider 单独核验 Thread 归属 | 不以稍后 Thread 配置覆盖启动快照；未知保持空，继续卡仍展示读取时设置；不改变持久化指标结构 |
+| 更准确保留审批限制和动作归属 | 随 CLI 获得 Guardian 用户限制保留、检查点恢复和评分对应动作修复 | 不扩展 Gateway 自动授权；不宣称保证中文输出，不接入额外 Decisions 服务或其凭据 |
+| CP 接收新版提示词形状 | 既有 Responses 透传和 Chat 桥继续接收 `input` 内 developer 消息 | 基础提示词从顶层 `instructions` 移入 input；隔离目标 CLI 的标准 Responses 请求已观察到 developer→system 映射。自定义目录默认不启用 Responses Lite，其专属 reasoning context 和工具注入不纳入 Chat 桥支持范围，不通过放宽校验冒充兼容 |
+| 原生终端和工具执行更可靠 | 随 CLI 获得模型默认值、Retry-After、CRLF、Linux/Windows 沙箱及 MCP 修复 | 不改变 Gateway 重试、OS 权限和服务所有权；非当前平台仍需实机确认 |
+| 现有渠道与原生终端继续使用锁定版本 | 同步 Gateway、协议、公开 CLI 合同、CI 和文档 | 888 个生成类型；本项目公开 CLI 转发合同仅版本变化；新增 3 个客户端方法、1 个通知，服务端请求方法不变 |
+| 官方 daemon 生命周期 | 继续暂缓接管，现有服务管理与更新器维持职责 | [专项审查](codex-daemon-review.md)的 0.160.0 隔离实测保留原版本；本次未升级或重建生产服务 |
+
+本次不新增 Thread prediction、附件所属 Thread 反查、Bedrock GovCloud、浏览器扩展请求头、
+环境必需 Skill、远程环境或 worktree 管理入口；这些能力没有当前渠道需求或超出现有授权边界。
+新 `parentTurnId` / `rootTurnId` 不代替已确认的子代理归属，用户直接发起 Turn 不伪造父轮。
+`reviewTarget` 不开启拒绝后续做，MCP OAuth `loginId` 不扩展已有登录流程。
+Fast/Ultrafast 分别读取 `fast_mode` / `ultrafast_mode`，结合 `configRequirements/read` 的独立档位合同和受管功能策略；目录能力与对应开关同时允许才可选择。默认值、偏好恢复、渠道命令、配置向导与 WebUI 共用这一语义，不自动打开开关。
+自定义 Provider 的实时联网与 V2 远程压缩能力覆盖暂不接入配置界面，也不自动打开；未配置时遵守上游默认。
+新子代理规则只使用 `fork_turns="none"`，与上游取消部分历史 fork 的指导一致。
 
 使用目标 CLI 按项目固定选项生成协议，复核受控导出与现有业务边界。
 静态检查、构建和人工验收要求遵循[升级流程](codex-cli-upgrade.md)，实际结果保存在对应 PR。
@@ -32,7 +43,7 @@ Desktop 按平台记录：macOS 已由操作者确认验收，Windows 尚未验�
 
 ### 既有适配与内部修复
 
-以下适配在 0.160.0 已接入，继续在当前基线保留；不属于 0.160.1 新增能力。
+以下适配在 0.160.0 已接入，继续在当前基线保留；不属于本次新增能力。
 
 | 用户得到什么 | 现有决定与实现入口 | 验证边界 |
 | --- | --- | --- |
@@ -254,7 +265,7 @@ Base64；不要求文件管理、下载入口或单独命令。此前上传与�
 
 ## 全表复核范围与结论
 
-当前基线复核覆盖 0.160.1 补丁影响、延续采用的适配、能力分类、当前采用、持续不采用、
+当前基线复核覆盖 0.162.0 升级影响、延续采用的适配、能力分类、当前采用、持续不采用、
 重新评估条件与仍有效的既有决定。0.160.0 原生 daemon 专项源码审查和隔离实测作为历史依据保留。
 各表项目数会随基线和决策变化，不作为完整性的人工校验值；
 完整性由固定版本源码、生成协议、支持矩阵和实现入口交叉复核。

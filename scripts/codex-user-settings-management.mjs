@@ -31,7 +31,7 @@ export async function loadCodexUserSettings({
   try {
     await client.connect();
     const [snapshot, models] = await Promise.all([
-      client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: true }),
+      client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: true, includeAcceleration: true }),
       provider === "openai" ? client.listModels() : Promise.resolve([]),
     ]);
     return projectSettings(snapshot, provider, models);
@@ -60,7 +60,7 @@ export async function updateCodexUserSetting(
   try {
     await client.connect();
     const [snapshot, models] = await Promise.all([
-      client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer" }),
+      client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer", includeAcceleration: input?.kind === "all" || input?.kind === "service-tier" }),
       ["all", "defaults", "preferences", "service-tier"].includes(input?.kind)
         ? client.listModels()
         : Promise.resolve([]),
@@ -72,6 +72,7 @@ export async function updateCodexUserSetting(
       config: snapshot.config,
       toolConfig: snapshot.toolConfig,
       approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,
+      acceleration: snapshot.acceleration,
       provider,
       models,
     });
@@ -120,7 +121,7 @@ export async function previewCodexUserSetting(
   try {
     await client.connect();
     const [snapshot, models] = await Promise.all([
-      client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer" }),
+      client.readUserConfigSnapshot({ includeApprovalsReviewerPolicy: input?.kind === "approvals-reviewer", includeAcceleration: input?.kind === "all" || input?.kind === "service-tier" }),
       ["all", "defaults", "preferences", "service-tier"].includes(input?.kind)
         ? client.listModels()
         : Promise.resolve([]),
@@ -132,6 +133,7 @@ export async function previewCodexUserSetting(
       config: snapshot.config,
       toolConfig: snapshot.toolConfig,
       approvalsReviewerPolicy: snapshot.approvalsReviewerPolicy,
+      acceleration: snapshot.acceleration,
       provider,
       models,
     });
@@ -194,7 +196,7 @@ function projectSettings(snapshot, provider, rawModels) {
       model: configuredModel ?? selectedModel?.model ?? null,
       reasoningEffort: effort ?? null,
       serviceTier,
-      accelerationEnabled: record(config.features).fast_mode !== false,
+      ...accelerationFlags(snapshot.acceleration),
       webSearch,
       updatePlanEnabled: updatePlan.enabled === true,
       autoRecapEnabled: tui.auto_recap === true,
@@ -235,7 +237,7 @@ function compactPercent(config) {
   return Math.round(Math.min(100, autoCompactLimit * 100 / contextWindow));
 }
 
-function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, provider, models }) {
+function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, acceleration, provider, models }) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("input", "invalid-input", "Codex 用户设置输入必须是对象");
   }
@@ -243,12 +245,12 @@ function createEdits(input, { config, toolConfig, approvalsReviewerPolicy, provi
     case "tool-access":
       return toolSettingEdits(input, config, toolConfig, invalid);
     case "all":
-      return allEdits(input, provider, config, models);
+      return allEdits(input, provider, config, models, acceleration);
     case "defaults":
       return defaultEdits(input, provider, models);
     case "service-tier":
       assertOfficialDefaults(provider);
-      return serviceTierEdit(input.serviceTier, config, models);
+      return serviceTierEdit(input.serviceTier, config, models, acceleration);
     case "permissions":
       return permissionEdits(input, config);
     case "approvals-reviewer":
@@ -300,10 +302,10 @@ function approvalsReviewerEdits(input, config, policy) {
   };
 }
 
-function allEdits(input, provider, config, models) {
+function allEdits(input, provider, config, models, acceleration) {
   assertOfficialDefaults(provider);
   const defaults = defaultEdits(input, provider, models);
-  const tier = serviceTierEdit(input.serviceTier, config, models, defaults.value.model);
+  const tier = serviceTierEdit(input.serviceTier, config, models, acceleration, defaults.value.model);
   const permissions = permissionEdits(input, config);
   return {
     edits: [...defaults.edits, ...tier.edits, ...permissions.edits],
@@ -449,13 +451,21 @@ function modelCompactEdits(input) {
   };
 }
 
-function serviceTierEdit(serviceTier, config, models, selectedModel = optionalString(config.model)) {
+function accelerationFlags(value) {
+  if (typeof value?.fastEnabled !== "boolean" || typeof value?.ultrafastEnabled !== "boolean") {
+    throw invalid("serviceTier", "acceleration-unavailable", "无法确认 Codex 的加速开关和策略，请重新读取设置");
+  }
+  return { fastEnabled: value.fastEnabled, ultrafastEnabled: value.ultrafastEnabled };
+}
+
+function serviceTierEdit(serviceTier, config, models, acceleration, selectedModel = optionalString(config.model)) {
   if (!["default", "fast", "ultrafast"].includes(serviceTier)) {
     throw invalid("serviceTier", "invalid-service-tier", "加速档位必须是 default、fast 或 ultrafast");
   }
   if (serviceTier !== "default") {
-    if (record(config.features).fast_mode === false) {
-      throw invalid("serviceTier", "acceleration-disabled", "Codex features.fast_mode 已关闭，不能启用加速档位");
+    const flags = accelerationFlags(acceleration);
+    if (!(serviceTier === "ultrafast" ? flags.ultrafastEnabled : flags.fastEnabled)) {
+      throw invalid("serviceTier", "acceleration-disabled", `Codex ${serviceTier === "ultrafast" ? "Ultrafast" : "Fast"} 已关闭或受策略限制，不能启用该档位`);
     }
     const model = selectedModel === null
       ? models.find((candidate) => candidate.isDefault && candidate.available !== false)

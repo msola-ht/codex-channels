@@ -30,7 +30,7 @@ export function parseThreadStatus(value: unknown): string | undefined {
 }
 
 export function parseMessagePhase(value: unknown): MessagePhase | null {
-  return value === "commentary" || value === "final_answer" ? value : null;
+  return value === "commentary" || value === "partial_answer" || value === "final_answer" ? value : null;
 }
 
 export function parsePlanType(

@@ -240,6 +240,12 @@ export class ModelSelectionService {
             ? { serviceTier: standardServiceTierRequestValue }
             : {}),
     };
+    if (nextPending.serviceTier && nextPending.serviceTier !== standardServiceTierRequestValue) {
+      const acceleration = await this.codex.readModelAccelerationSettings(this.router.workspace(target).cwd, selectedProvider);
+      if (!(nextPending.serviceTier === "ultrafast" ? acceleration.ultrafastEnabled : acceleration.fastEnabled)) {
+        nextPending.serviceTier = standardServiceTierRequestValue;
+      }
+    }
     if (providerChanged) {
       await this.router.newSession(target, false, {
         model: selected.model, modelProvider: selectedProvider,
@@ -303,8 +309,8 @@ export class ModelSelectionService {
         this.router.workspace(target).cwd,
         current.modelProvider ?? this.primaryProvider,
       );
-      if (!acceleration.enabled) {
-        throw new UserFacingError("fast.disabled", "Codex features.fast_mode 已关闭，不能启用加速档位");
+      if (!(requested === "ultrafast" ? acceleration.ultrafastEnabled : acceleration.fastEnabled)) {
+        throw new UserFacingError("fast.disabled", `Codex ${requested === "ultrafast" ? "Ultrafast" : "Fast"} 已关闭或受策略限制，不能启用该档位`);
       }
     }
     const selectedTier = requested === "off" ? standardServiceTierRequestValue : tierId!;
@@ -619,10 +625,20 @@ export class ModelSelectionService {
     }
   }
 
-  /** Check persisted identities against the current catalog before starting any Thread. */
+  /** Recheck saved identities and explicit pending speed choices before submission. */
   async validateUnboundPreference(target: ConversationTarget): Promise<void> {
     const preference = this.router.modelPreference?.(target);
-    if (!preference) return;
+    if (!preference) {
+      const pending = this.pendingByConversation.get(this.key(target));
+      if (pending?.serviceTier && pending.serviceTier !== standardServiceTierRequestValue) {
+        const provider = pending.modelProvider ?? this.router.modelSettings(target)?.modelProvider ?? this.primaryProvider;
+        const acceleration = await this.codex.readModelAccelerationSettings(this.router.workspace(target).cwd, provider);
+        if (!(pending.serviceTier === "ultrafast" ? acceleration.ultrafastEnabled : acceleration.fastEnabled)) {
+          throw new UserFacingError("model.selection.expired", "待生效的加速档位已关闭或受策略限制，请发送 /fast off 或重新选择档位");
+        }
+      }
+      return;
+    }
     const models = await this.listModels(preference.modelProvider);
     const model = findModel(models, preference.model, preference.modelProvider);
     if (!model) {
@@ -637,6 +653,14 @@ export class ModelSelectionService {
       && preference.serviceTier !== fastServiceTierId(model)
       && preference.serviceTier !== ultrafastServiceTierId(model)) {
       throw new UserFacingError("model.selection.expired", "保存的服务层级已不可用，请重新发送 /model 选择");
+    }
+    if (preference.serviceTier && preference.serviceTier !== standardServiceTierRequestValue) {
+      const acceleration = await this.codex.readModelAccelerationSettings(
+        this.router.workspace(target).cwd, preference.modelProvider,
+      );
+      if (!(preference.serviceTier === "ultrafast" ? acceleration.ultrafastEnabled : acceleration.fastEnabled)) {
+        throw new UserFacingError("model.selection.expired", "保存的加速档位已关闭或受策略限制，请发送 /fast off 或重新选择档位");
+      }
     }
   }
 

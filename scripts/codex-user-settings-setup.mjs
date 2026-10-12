@@ -677,7 +677,7 @@ async function promptModelDefaults(prompts, settings) {
 }
 
 async function promptServiceTier(prompts, settings, model) {
-  const supports = (value) => settings.defaults.accelerationEnabled
+  const supports = (value) => (value === "ultrafast" ? settings.defaults.ultrafastEnabled : settings.defaults.fastEnabled)
     && model && acceleratedServiceTierId(model.serviceTiers, value);
   const options = [
     { value: "default", label: "Standard", hint: "新会话默认使用标准服务层级" },

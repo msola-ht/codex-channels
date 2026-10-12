@@ -393,7 +393,7 @@ export class ConversationCore {
           this.phaseByItem.delete(key);
           return;
         }
-        if (phase !== "commentary" && event.text.trim().length > 0) {
+        if (phase !== "commentary" && phase !== "partial_answer" && event.text.trim().length > 0) {
           this.turnsWithFinalResponse.add(this.turnKey(event.threadId, event.turnId));
         }
         this.publishForThread(event.threadId, {
@@ -435,6 +435,7 @@ export class ConversationCore {
           turnId: event.turnId,
           agentThreadId: event.agentThreadId,
           agentPath: event.agentPath,
+          ...(event.kind === "started" ? { model: event.model, reasoningEffort: event.reasoningEffort } : {}),
         });
         return;
       case "turn.error":

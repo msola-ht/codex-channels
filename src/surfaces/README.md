@@ -53,6 +53,7 @@ Bootstrap 的内置插件注册表负责把一个渠道插件展开为零到多�
 Telegram、飞书目录仍只实现平台 Adapter，不导入插件宿主或组合根类型。
 `SurfaceOutputPort` 接收平台无关的 `OutputEvent`。Reader 只同步调用 `observe`；`deliver` 和
 `deliverSnapshot` 的等待发生在后台 Conversation 队列，不阻塞 Reader。
+`partial_answer` 按稳定正文投递，包括微信回复窗口和长正文处理，但不代表整轮完成；飞书不把整轮完成页脚挂到部分回答卡上。
 可选 `observe` 在实时发布时执行本地生命周期处理，持久重放不再调用；`handle` 的直接调用仍处理本地状态。
 `delivery-policy.ts` 定义最新展示快照的键及终态淘汰关系；Bootstrap 持有有界临时快照，平台不维护第二套投递恢复队列。状态进入渠道队列后仍属于该快照的预算；断线、终态与新轮次
 会取消对应旧状态的未发送操作。状态发送失败或结果未知会向调用方报告，不自动重试整个状态。

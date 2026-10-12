@@ -1,6 +1,6 @@
 import { DeliveryReceipt } from "../delivery-receipt.js";
 import type { Logger } from "pino";
-import type { OutputEvent } from "../../conversation-core/index.js";
+import type { MessagePhase, OutputEvent } from "../../conversation-core/index.js";
 import type { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { surfaceDiagnosticContext } from "../diagnostics.js";
 import type { TurnReplyTargets } from "../turn-reply-targets.js";
@@ -22,7 +22,7 @@ interface FeishuStreamState {
   threadId: string;
   turnId: string;
   itemId: string;
-  phase?: "commentary" | "final_answer" | null;
+  phase?: MessagePhase | null;
   text: string;
   cardText: string;
   flushGeneration: number;
@@ -247,7 +247,7 @@ export class FeishuTextStreams {
       state.chatId === chatId && state.threadId === threadId && state.turnId === turnId
     );
     const footerTarget = matching.findLast(([, state]) =>
-      state.phase !== "commentary"
+      state.phase !== "commentary" && state.phase !== "partial_answer"
     );
     let pending = matching.length;
     for (const [key, state] of matching) {
@@ -464,7 +464,8 @@ export class FeishuTextStreams {
         });
         throw error;
       }
-      if (state.completionFooter === undefined && state.phase !== "commentary" && this.streams.get(key) === state) {
+      if (state.completionFooter === undefined && state.phase !== "commentary"
+        && state.phase !== "partial_answer" && this.streams.get(key) === state) {
         this.rememberFinishedStream(finishedStreamKey(state.chatId, state.threadId, state.turnId), {
           chatId: state.chatId,
           threadId: state.threadId,

@@ -352,6 +352,8 @@ function toItemEvent(
     const agentThreadId = nonEmptyString(item.agentThreadId);
     const agentPath = nonEmptyString(item.agentPath);
     const kind = parseSubagentActivityKind(item.kind);
+    const model = kind === "started" ? nonEmptyString(item.model) : undefined;
+    const reasoningEffort = kind === "started" ? nonEmptyString(item.reasoningEffort) : undefined;
     return agentThreadId && agentPath && kind
       ? {
           type: "item.subagentActivity",
@@ -361,6 +363,8 @@ function toItemEvent(
           agentThreadId,
           agentPath,
           kind,
+          ...(model ? { model } : {}),
+          ...(reasoningEffort ? { reasoningEffort } : {}),
         }
       : undefined;
   }

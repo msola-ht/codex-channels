@@ -573,7 +573,8 @@ export interface CodexUserSettingsResponse {
     model: string | null
     reasoningEffort: string | null
     serviceTier: string | null
-    accelerationEnabled: boolean
+    fastEnabled: boolean
+    ultrafastEnabled: boolean
     webSearch: "live" | "indexed" | "cached" | "disabled" | null
     updatePlanEnabled: boolean
     autoRecapEnabled: boolean
