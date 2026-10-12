@@ -125,7 +125,7 @@ export async function runMcpSetup({ environment = process.env, output = process.
     server.enabled = await ask("confirm", { message: "保存后启用此 MCP？", initialValue: true });
     // Do not print launch arguments, URL queries, header values or environment values.
     output.write(`写入：${join(codexHomePath(environment), "config.toml")}\n作用范围：该 Codex Home 的用户配置\nMCP：${name}；类型：${kind}；启用：${server.enabled}\n启动超时：${server.startup_timeout_sec} 秒；调用超时：${server.tool_timeout_sec} 秒\n`);
-    if (kind === "strata") output.write(`视频授权目录：${server.env.STRATA_VIDEO_ROOT}\n渠道附件目录：${server.env.STRATA_VIDEO_CHANNEL_ROOT ?? "未启用"}\n视频传输：${server.env.STRATA_VIDEO_TRANSPORT}\n思考默认 high；预算由 Strata 管理。\n`);
+    if (kind === "strata") output.write(`视频授权目录：${server.env.STRATA_VIDEO_ROOT}\n渠道附件目录：${server.env.STRATA_VIDEO_CHANNEL_ROOT ?? "未启用"}\n视频传输：${server.env.STRATA_VIDEO_TRANSPORT}\n思考默认 medium；可选 none、low、medium、xhigh；预算由 Strata 管理。\n`);
     output.write("参数、环境变量与 Header 值不回显；密钥值将保存在用户配置中。继承变量须由实际启动 Codex 的环境提供。\n");
     output.write("未读取插件清单；请使用独立名称，用户配置中的同名 MCP 会优先于插件服务器。\n");
     if (await ask("confirm", { message: "确认新增并保存上述 MCP？", initialValue: false }) !== true) return { action: "back" };

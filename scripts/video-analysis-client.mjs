@@ -6,7 +6,7 @@ import { Agent, request } from "undici";
 
 const maximumVideoBytes = 64 * 1024 * 1024;
 const maximumResponseBytes = 2 * 1024 * 1024;
-const reasoningEfforts = ["none", "low", "medium", "high"];
+const reasoningEfforts = ["none", "low", "medium", "high", "xhigh"];
 // Process-local capability mappings; no bytes, answers or conversation history.
 const videoFiles = new Map();
 const maximumMappings = 64;
@@ -115,7 +115,7 @@ export const videoTool = {
       attachment: { type: "string", maxLength: 64, description: "当前会话提供的渠道视频随机引用；不可枚举、猜测或使用其他会话的引用。与 video 互斥。" },
       question: { type: "string", minLength: 1, maxLength: 16000, description: "视频分析问题。采样时间标签不等于精确动作时间；看不清的细节应说明不确定。" },
       context: { type: "string", minLength: 1, maxLength: 8000, description: "可选追问上下文：仅整理当前会话中与本次同一视频有关的指代、问题和先前分析线索，不附其他会话、其他视频内容或密钥。先前分析仍需依据画面核实；无必要上下文时省略。" },
-      reasoning_effort: { type: "string", enum: reasoningEfforts, default: "high", description: "思考等级，默认 high；可显式覆盖，none 关闭思考。预算由 Strata 管理。" },
+      reasoning_effort: { type: "string", default: "medium", description: "思考等级：none、low、medium、xhigh，默认 medium；可显式覆盖，none 关闭思考。预算由 Strata 管理。" },
     },
   },
   // Files mode creates remote objects retained beyond the current call.
@@ -133,7 +133,7 @@ function validateArguments(args) {
       || typeof args.question !== "string" || !args.question.trim() || args.question.length > 16000
       || (args.context !== undefined && (typeof args.context !== "string" || !args.context.trim() || args.context.length > 8000))
       || (args.reasoning_effort !== undefined && !reasoningEfforts.includes(args.reasoning_effort))) {
-    fail("invalid_arguments", "需要 video 或 attachment 二选一及非空 question；context 可选，为 1–8000 字符的非空文本；reasoning_effort 为 none、low、medium 或 high，不接受预算或其他参数。");
+    fail("invalid_arguments", "需要 video 或 attachment 二选一及非空 question；context 可选，为 1–8000 字符的非空文本；reasoning_effort 请使用 none、low、medium 或 xhigh，不接受预算或其他参数。");
   }
   const mime = mimeTypes.get(extname(args.video ?? args.attachment).toLowerCase());
   if (!mime) fail("unsupported_video", "只接受 mp4、mov、webm、mkv、avi、ts 视频文件。");
@@ -343,7 +343,7 @@ export async function analyzeVideo(config, args, signal) {
 async function analyzeVideoRequest(config, args, signal) {
   const mime = validateArguments(args);
   const generation = {
-    reasoning_effort: args.reasoning_effort ?? "high",
+    reasoning_effort: args.reasoning_effort ?? "medium",
   };
   if (args.attachment !== undefined && !config.channelRoot) {
     fail("configuration", "视频 MCP 未配置 STRATA_VIDEO_CHANNEL_ROOT，无法读取渠道附件。");

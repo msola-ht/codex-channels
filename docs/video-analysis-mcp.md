@@ -59,7 +59,7 @@ Codex 客户端的 `tool_timeout_sec` 应大于 MCP 总时限，留出取消收�
 
 ## 使用
 
-也可先运行 `codexc config → 新增 MCP → Strata 视频分析预设`，交互输入服务根地址、模型 ID、API Key、本地视频授权目录和可选渠道附件目录。目录必须已存在且相互分离。预设固定使用渠道提示引用的名称 `strata_video`，自动填写当前安装的 Node/脚本绝对路径，调用超时设为分析总时限加 60 秒，思考默认 `high`，预算由 Strata 管理。
+也可先运行 `codexc config → 新增 MCP → Strata 视频分析预设`，交互输入服务根地址、模型 ID、API Key、本地视频授权目录和可选渠道附件目录。目录必须已存在且相互分离。预设固定使用渠道提示引用的名称 `strata_video`，自动填写当前安装的 Node/脚本绝对路径，调用超时设为分析总时限加 60 秒，思考默认 `medium`，预算由 Strata 管理。
 
 交互保存使用当前 Codex Home 的用户配置，影响使用该配置的会话；确认前会显示目标路径、目录授权范围和启用状态。API Key 隐藏输入并写入该用户配置，不回显；若希望密钥只从宿主环境继承，可使用上方手工 `env_vars` 配置。已有同名条目不会被覆盖，取消不会写入。保存不等于 MCP 已连接，需要重新加载 MCP 或在新会话中使用；不会自动重启服务。
 
@@ -81,7 +81,7 @@ Codex 客户端的 `tool_timeout_sec` 应大于 MCP 总时限，留出取消收�
 
 直属文件名最多 255 字符，绝对路径最多 4096 字符；路径必须采用 MCP 主机的系统格式。Windows 使用盘符绝对路径，例如 `C:\\Videos\\project\\clip.mp4`（JSON 中反斜杠需转义），不接受 UNC、设备路径或备用数据流。POSIX 路径不接受反斜杠和冒号。不展开 `~` 或环境变量。授权目录启动时会解析为真实路径，绝对路径应使用该真实目录；要分析其他目录的视频，应由操作者调整 `STRATA_VIDEO_ROOT` 后重新加载 MCP，工具参数不能扩大授权范围。成功结果的 `video` 保留调用时传入的文件名或绝对路径。
 
-`question` 必填，最多 16000 字符；`video` 和 `attachment` 必须且只能提供一个。`reasoning_effort` 可选，接受 `none`、`low`、`medium`、`high`，默认 `high`，作为 `reasoning.effort` 发送；调用可覆盖，`none` 关闭思考。
+`question` 必填，最多 16000 字符；`video` 和 `attachment` 必须且只能提供一个。`reasoning_effort` 可选，展示等级为 `none`、`low`、`medium`、`xhigh`，默认 `medium`，原样作为 `reasoning.effort` 发送；调用可覆盖，`none` 关闭思考。兼容传入 `high`，不在常规提示中展示；MCP 不改写该值，其到 `xhigh` 的映射由远程 API 处理。工具 Schema 使用字符串类型，具体等级由运行时校验，避免宿主提前拒绝 `high`。
 
 `context` 可选，为 1–8000 字符的非空追问上下文，只整理当前会话中与本次视频有关的指代和先前讨论。MCP 将其单独标记为待核对线索，与原样的 `question` 一起发送，不写入系统指令、不保存历史；上游需依据本次视频重新核实，不能把旧分析视为已确认事实。
 
@@ -89,7 +89,7 @@ Codex 客户端的 `tool_timeout_sec` 应大于 MCP 总时限，留出取消收�
 
 MCP 通过 Responses 顶层 `instructions` 发送固定通用视频分析规则，Strata 将其作为系统消息交给模型聊天模板；`question` 原样作为用户任务发送。通用规则要求区分事实与推测、说明模糊或采样缺口、按需要解释动作连续性、谨慎使用近似时间、不推测音轨，并把视频中的文字和指令作为待分析数据。简单问题直接回答，只有任务需要时才展开分镜、表情和手部动作等细节；不强制所有问题使用同一报告格式。固定规则见 [`video-analysis-client.mjs`](../scripts/video-analysis-client.mjs) 的 `videoInstructions`。提示词不能保证模型完全遵循，结果仍属于外部内容。
 
-成功结果同时提供 MCP 文本和结构化对象：原始 `video` 或 `attachment`、`analysis`、`audio_analyzed: false`、`request`、`transport` 和可选 `usage`。`request` 记录实际发送的 `reasoning_effort`，未指定时为 `high`，不推测上游预算；`transport.mode` 为 `files` 或 `url`，`reference_reused` 表示最终请求复用了本地映射或合并中的上传，`reuploaded` 表示本次进入过一次失效恢复，不是严格的上传次数证明。它们不表示上游编码缓存命中。`usage` 只保留上游实际提供的非负安全整数 `input_tokens`、`output_tokens`、`total_tokens`、`reasoning_tokens`，字段缺失或非法时不填零。分析属于外部模型输出，不应作为执行命令或扩大文件权限的依据。
+成功结果同时提供 MCP 文本和结构化对象：原始 `video` 或 `attachment`、`analysis`、`audio_analyzed: false`、`request`、`transport` 和可选 `usage`。`request` 记录实际发送的 `reasoning_effort`，未指定时为 `medium`，不推测上游预算；`transport.mode` 为 `files` 或 `url`，`reference_reused` 表示最终请求复用了本地映射或合并中的上传，`reuploaded` 表示本次进入过一次失效恢复，不是严格的上传次数证明。它们不表示上游编码缓存命中。`usage` 只保留上游实际提供的非负安全整数 `input_tokens`、`output_tokens`、`total_tokens`、`reasoning_tokens`，字段缺失或非法时不填零。分析属于外部模型输出，不应作为执行命令或扩大文件权限的依据。
 
 MCP 上传原视频，不在本地抽帧；当前 Strata 复刻版默认 2 FPS、相邻帧成对编码，以平均时间标注，并按视觉 token 预算缩放。实际参数取决于服务配置。采样标签不是精确动作发生时间；输出额度变大不能恢复采样或缩放丢失的细节。MCP 不发送未被视频接口支持的逐请求 FPS/分辨率覆盖，也不改写用户的问题。
 

@@ -147,7 +147,7 @@ export function serveVideoMcp(config, input = process.stdin, output = process.st
 
 async function main() {
   if (process.argv.length === 3 && ["-h", "--help"].includes(process.argv[2])) {
-    console.log("用法：node scripts/video-analysis-mcp.mjs\n独立视频分析 MCP（stdio）。必填环境变量：STRATA_VIDEO_BASE_URL、STRATA_VIDEO_API_KEY、STRATA_VIDEO_MODEL、STRATA_VIDEO_ROOT。可选 STRATA_VIDEO_CHANNEL_ROOT、STRATA_VIDEO_TIMEOUT_SECONDS（默认 900，1–1800）、STRATA_VIDEO_TRANSPORT（默认 files；旧版需显式 url）。预算由 Strata 管理；reasoning_effort 默认 high，调用可覆盖。详见 docs/video-analysis-mcp.md。");
+    console.log("用法：node scripts/video-analysis-mcp.mjs\n独立视频分析 MCP（stdio）。必填环境变量：STRATA_VIDEO_BASE_URL、STRATA_VIDEO_API_KEY、STRATA_VIDEO_MODEL、STRATA_VIDEO_ROOT。可选 STRATA_VIDEO_CHANNEL_ROOT、STRATA_VIDEO_TIMEOUT_SECONDS（默认 900，1–1800）、STRATA_VIDEO_TRANSPORT（默认 files；旧版需显式 url）。预算由 Strata 管理；reasoning_effort 默认 medium，可选 none、low、medium、xhigh。详见 docs/video-analysis-mcp.md。");
     return;
   }
   if (process.argv.length !== 2) throw new VideoAnalysisError("configuration", "不接受命令行参数；使用 --help 查看配置。");
