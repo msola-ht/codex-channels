@@ -17,7 +17,7 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 | --- | --- | --- | --- |
 | Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex-0.162.0` | `openai/codex` | `rust-v0.162.0`，提交 `c1382380de69521303b416720a52f42d51af6248` |
 | 微信 ClawBot HTTP、消息和媒体合同 | `upstream/openclaw-weixin` | `Tencent/openclaw-weixin` | `v2.4.9`，提交 `43675b66551d12d6853155a7869a50fb12a18a1e` |
-| 飞书官方 Node SDK | `upstream/larksuite-node-sdk` | `larksuite/node-sdk` | `@larksuiteoapi/node-sdk@1.74.0`，提交 `394c83092395a51402ee408b751d7f9fb05f5518` |
+| 飞书官方 Node SDK | `upstream/larksuite-node-sdk-1.75.0` | `larksuite/node-sdk` | `@larksuiteoapi/node-sdk@1.75.0`，公开源码提交 `e34a66f0d20935ee77f94909d16d93292d58b6c7`；发布包核对边界见飞书资料索引 |
 | 飞书官方 OpenClaw 插件参考 | `upstream/openclaw-lark` | `larksuite/openclaw-lark` | 提交 `dde0be3680d6fd5443cab426c8f4b3216266346a` |
 
 飞书协议和 API 字段以官方 Node SDK及飞书开放平台为主要事实来源；OpenClaw 插件只用于参考渠道
@@ -87,8 +87,8 @@ Relay 更新和回退见[Relay 模型设置](provider-api-relay-development.md#c
 ```text
 git clone --depth 1 --branch rust-v0.162.0 https://github.com/openai/codex.git upstream/openai-codex-0.162.0
 git clone --branch v2.4.9 https://github.com/Tencent/openclaw-weixin.git upstream/openclaw-weixin
-git clone https://github.com/larksuite/node-sdk.git upstream/larksuite-node-sdk
-git -C upstream/larksuite-node-sdk checkout 394c83092395a51402ee408b751d7f9fb05f5518
+git clone https://github.com/larksuite/node-sdk.git upstream/larksuite-node-sdk-1.75.0
+git -C upstream/larksuite-node-sdk-1.75.0 checkout e34a66f0d20935ee77f94909d16d93292d58b6c7
 git clone https://github.com/larksuite/openclaw-lark.git upstream/openclaw-lark
 git -C upstream/openclaw-lark checkout dde0be3680d6fd5443cab426c8f4b3216266346a
 ```
