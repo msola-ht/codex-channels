@@ -1,8 +1,12 @@
 import * as clackPrompts from "@clack/prompts";
-import { isAbsolute, join } from "node:path";
+import { lstatSync, mkdirSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { readGatewayConfig, validateGatewayConfigStructureDocument } from "../runtime/gateway-config.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
+import { securePrivateDirectorySync } from "../runtime/private-file.mjs";
 import { packageDir } from "./package-path.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
+import { userDataDir } from "./runtime-config.mjs";
 import { videoConfiguration } from "./video-analysis-client.mjs";
 
 const cancelled = Symbol("cancelled");
@@ -11,6 +15,40 @@ const clean = value => typeof value === "string" && !/[\0\r\n]/u.test(value);
 const required = value => clean(value) && value.trim() ? undefined : "请输入非空单行文本";
 const positive = value => /^\d+$/u.test(value) && Number.isSafeInteger(Number(value)) && Number(value) > 0
   ? undefined : "请输入正整数秒数";
+
+// Local videos are read from anywhere on this host, so the operator never picks a directory.
+const localVideoScope = "any";
+
+/**
+ * Gateway-owned channel attachment directory beside the StateStore database; derived from
+ * configuration without creating it before the operator confirms saving.
+ */
+function strataChannelRoot({ environment, dataDir, configPath }) {
+  const path = resolve(configPath ?? (environment.CODEX_CONNECT_CONFIG_FILE?.trim()
+    || join(dataDir ?? userDataDir(environment), "config.toml")));
+  try {
+    const document = validateGatewayConfigStructureDocument(readGatewayConfig(path));
+    // Match Gateway: schema supplies the default; preserve spaces in path values.
+    const stateDatabasePath = resolve(dirname(path), document.storage.database_path);
+    return join(dirname(stateDatabasePath), "uploads", "video");
+  } catch (error) {
+    throw new Error("无法读取或校验 Gateway 配置，未确定渠道附件目录；请先检查当前配置，未写入 MCP", { cause: error });
+  }
+}
+
+function prepareStrataChannelRoot(root) {
+  try {
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+    const metadata = lstatSync(root);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()
+        || (process.getuid !== undefined && metadata.uid !== process.getuid())) {
+      throw new Error("渠道附件目录必须是当前用户拥有的非链接目录");
+    }
+    securePrivateDirectorySync(root);
+  } catch (error) {
+    throw new Error(`无法准备渠道附件目录 ${root}；请检查目录类型、所有者和权限，未写入 MCP`, { cause: error });
+  }
+}
 
 function jsonValue(text, kind) {
   let value;
@@ -44,7 +82,7 @@ function httpUrl(value) {
 }
 
 /** Add one user-owned server; never replace existing or plugin configuration. */
-export async function runMcpSetup({ environment = process.env, output = process.stdout,
+export async function runMcpSetup({ environment = process.env, dataDir, configPath, output = process.stdout,
   prompts = clackPrompts, createClient = createCodexUserConfigClient } = {}) {
   const ask = async (method, options) => {
     const value = await prompts[method](options);
@@ -93,17 +131,17 @@ export async function runMcpSetup({ environment = process.env, output = process.
         STRATA_VIDEO_BASE_URL: await text("Strata 服务根地址（不含 /v1）", "", httpUrl),
         STRATA_VIDEO_MODEL: await text("Strata 模型 ID"),
         STRATA_VIDEO_API_KEY: await ask("password", { message: "Strata API Key（写入用户配置，不回显）", validate: required }),
-        STRATA_VIDEO_ROOT: await text("本地视频授权目录（已存在的绝对路径）", "", value => isAbsolute(value) ? undefined : "请输入绝对路径"),
+        STRATA_VIDEO_ROOT: localVideoScope,
+        STRATA_VIDEO_CHANNEL_ROOT: strataChannelRoot({ environment, dataDir, configPath }),
       };
-      const channelRoot = await text("渠道附件目录（已存在的绝对路径；留空不启用）", "", value => !value || isAbsolute(value) ? undefined : "请输入绝对路径或留空");
-      if (channelRoot) env.STRATA_VIDEO_CHANNEL_ROOT = channelRoot;
       env.STRATA_VIDEO_TRANSPORT = await ask("select", { message: "Strata 视频传输方式", options: [
         { value: "files", label: "文件引用（默认；需要启用 video_files，追问复用上传）" },
         { value: "url", label: "旧版兼容（每次完整发送视频，无预处理缓存）" },
       ] });
       const seconds = await text("视频分析总时限（1–1800 秒）", "900", value => positive(value) ?? (Number(value) > 1800 ? "最大 1800 秒" : undefined));
       env.STRATA_VIDEO_TIMEOUT_SECONDS = seconds;
-      await videoConfiguration(env);
+      // Validate service settings now; the attachment directory is prepared only after confirmation.
+      await videoConfiguration({ ...env, STRATA_VIDEO_CHANNEL_ROOT: undefined });
       server = { command: process.execPath, args: [join(packageDir, "scripts", "video-analysis-mcp.mjs")], env,
         tool_timeout_sec: Number(seconds) + 60 };
     } else if (kind === "stdio") {
@@ -125,10 +163,17 @@ export async function runMcpSetup({ environment = process.env, output = process.
     server.enabled = await ask("confirm", { message: "保存后启用此 MCP？", initialValue: true });
     // Do not print launch arguments, URL queries, header values or environment values.
     output.write(`写入：${join(codexHomePath(environment), "config.toml")}\n作用范围：该 Codex Home 的用户配置\nMCP：${name}；类型：${kind}；启用：${server.enabled}\n启动超时：${server.startup_timeout_sec} 秒；调用超时：${server.tool_timeout_sec} 秒\n`);
-    if (kind === "strata") output.write(`视频授权目录：${server.env.STRATA_VIDEO_ROOT}\n渠道附件目录：${server.env.STRATA_VIDEO_CHANNEL_ROOT ?? "未启用"}\n视频传输：${server.env.STRATA_VIDEO_TRANSPORT}\n思考默认 medium；可选 none、low、medium、xhigh；预算由 Strata 管理。\n`);
+    if (kind === "strata") output.write(`本机视频范围：任意本机绝对路径（STRATA_VIDEO_ROOT=${server.env.STRATA_VIDEO_ROOT}；任何可使用此 MCP 的会话都能指定本机视频路径）\n渠道附件目录（确认后创建并设置私有权限）：${server.env.STRATA_VIDEO_CHANNEL_ROOT}\n视频传输：${server.env.STRATA_VIDEO_TRANSPORT}\n思考默认 medium；可选 none、low、medium、xhigh；预算由 Strata 管理。\n`);
     output.write("参数、环境变量与 Header 值不回显；密钥值将保存在用户配置中。继承变量须由实际启动 Codex 的环境提供。\n");
     output.write("未读取插件清单；请使用独立名称，用户配置中的同名 MCP 会优先于插件服务器。\n");
     if (await ask("confirm", { message: "确认新增并保存上述 MCP？", initialValue: false }) !== true) return { action: "back" };
+    if (kind === "strata") {
+      if (strataChannelRoot({ environment, dataDir, configPath }) !== server.env.STRATA_VIDEO_CHANNEL_ROOT) {
+        throw new Error("Gateway 渠道附件目录已变化，未写入 MCP；请重新进入菜单核对目录");
+      }
+      prepareStrataChannelRoot(server.env.STRATA_VIDEO_CHANNEL_ROOT);
+      await videoConfiguration(server.env);
+    }
     try {
       await client.writeUserConfigEdits([{ keyPath: `mcp_servers.${name}`, value: server }], { expectedVersion: snapshot.version });
     } catch (error) {

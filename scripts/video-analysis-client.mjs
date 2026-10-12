@@ -7,6 +7,8 @@ import { Agent, request } from "undici";
 const maximumVideoBytes = 64 * 1024 * 1024;
 const maximumResponseBytes = 2 * 1024 * 1024;
 const reasoningEfforts = ["none", "low", "medium", "high", "xhigh"];
+// Explicit opt-in value for "no directory scope"; never inferred from a missing variable.
+const unrestrictedRootValue = "any";
 // Process-local capability mappings; no bytes, answers or conversation history.
 const videoFiles = new Map();
 const maximumMappings = 64;
@@ -43,6 +45,12 @@ const mimeTypes = new Map([
   [".avi", "video/x-msvideo"], [".ts", "video/mp2t"],
 ]);
 
+/** True when `child` is `parent` itself or nested inside it. */
+function within(parent, child) {
+  const value = relative(parent, child);
+  return !isAbsolute(value) && value !== ".." && !value.startsWith(`..${sep}`);
+}
+
 export class VideoAnalysisError extends Error {
   constructor(code, message, details) {
     super(message);
@@ -70,14 +78,16 @@ export async function videoConfiguration(environment) {
     fail("configuration", "必须设置有效的 STRATA_VIDEO_API_KEY 和 STRATA_VIDEO_MODEL。");
   }
   const configuredRoot = environment.STRATA_VIDEO_ROOT;
-  if (!configuredRoot || !isAbsolute(configuredRoot)) {
-    fail("configuration", "STRATA_VIDEO_ROOT 必须是已存在目录的绝对路径。");
-  }
   let root;
-  try {
-    root = await realpath(configuredRoot);
-    if (!(await stat(root)).isDirectory()) throw new Error();
-  } catch { fail("configuration", "STRATA_VIDEO_ROOT 不是可用目录。"); }
+  if (configuredRoot !== unrestrictedRootValue) {
+    if (!configuredRoot || !isAbsolute(configuredRoot)) {
+      fail("configuration", `STRATA_VIDEO_ROOT 必须是已存在目录的绝对路径，或 ${unrestrictedRootValue}。`);
+    }
+    try {
+      root = await realpath(configuredRoot);
+      if (!(await stat(root)).isDirectory()) throw new Error();
+    } catch { fail("configuration", "STRATA_VIDEO_ROOT 不是可用目录。"); }
+  }
   let channelRoot;
   if (environment.STRATA_VIDEO_CHANNEL_ROOT !== undefined) {
     const configured = environment.STRATA_VIDEO_CHANNEL_ROOT;
@@ -86,12 +96,11 @@ export async function videoConfiguration(environment) {
       channelRoot = await realpath(configured);
       if (!(await stat(channelRoot)).isDirectory()) throw new Error();
     } catch { fail("configuration", "STRATA_VIDEO_CHANNEL_ROOT 不是可用目录。"); }
-    const contains = (parent, child) => {
-      const value = relative(parent, child);
-      return !isAbsolute(value) && value !== ".." && !value.startsWith(`..${sep}`);
-    };
-    if (contains(root, channelRoot) || contains(channelRoot, root)) {
-      fail("configuration", "本地视频目录与渠道附件目录必须分离，不能相同或互相包含。");
+    // Staged attachments stay reference-only: the local scope may cover the channel
+    // directory, but a local path inside it is refused when reading, so the local
+    // root can never be the attachment directory itself or sit inside it.
+    if (root !== undefined && within(channelRoot, root)) {
+      fail("configuration", "本机视频目录不能是渠道附件目录或位于其中。");
     }
   }
   const timeoutText = environment.STRATA_VIDEO_TIMEOUT_SECONDS ?? "900";
@@ -104,23 +113,39 @@ export async function videoConfiguration(environment) {
     timeoutMs: Number(timeoutText) * 1000 });
 }
 
-export const videoTool = {
-  name: "analyze_video",
-  description: "将视频发送给管理员配置的 Strata 模型，只分析画面，不分析音轨。video 接受本地授权目录内文件名或绝对路径；attachment 接受当前会话的渠道引用，二者只能提供一个，不接受 URL。同一视频追问应复用原 video/attachment，无需用户重复上传；用 context 补充同一视频的必要上下文。只整理已有分析时无需调用；核实新画面细节时再调用。多个视频指代不明时先澄清，禁止猜测引用或自动改用其他视频。默认复用有效的 Strata 文件引用；显式 url 兼容模式每次发送完整视频。上游不保留问答历史，不缓存答案。",
-  inputSchema: {
-    type: "object", additionalProperties: false, required: ["question"],
-    oneOf: [{ required: ["video"] }, { required: ["attachment"] }],
-    properties: {
-      video: { type: "string", minLength: 1, maxLength: 4096, description: "授权目录直属文件名（最多 255 字符），或目录及子目录内的本机绝对路径（最多 4096 字符）。路径属于 MCP 所在主机。" },
-      attachment: { type: "string", maxLength: 64, description: "当前会话提供的渠道视频随机引用；不可枚举、猜测或使用其他会话的引用。与 video 互斥。" },
-      question: { type: "string", minLength: 1, maxLength: 16000, description: "视频分析问题。采样时间标签不等于精确动作时间；看不清的细节应说明不确定。" },
-      context: { type: "string", minLength: 1, maxLength: 8000, description: "可选追问上下文：仅整理当前会话中与本次同一视频有关的指代、问题和先前分析线索，不附其他会话、其他视频内容或密钥。先前分析仍需依据画面核实；无必要上下文时省略。" },
-      reasoning_effort: { type: "string", default: "medium", description: "思考等级：none、low、medium、xhigh，默认 medium；可显式覆盖，none 关闭思考。预算由 Strata 管理。" },
+function buildVideoTool(unrestricted) {
+  const scope = unrestricted
+    ? "video 接受本机绝对路径，不限定目录；"
+    : "video 接受本地授权目录内文件名或绝对路径；";
+  const videoParameter = unrestricted
+    ? "本机绝对路径，最多 4096 字符，例如 /data/videos/clip.mp4；路径属于 MCP 所在主机。不接受直属文件名、相对路径或 URL。"
+    : "授权目录直属文件名（最多 255 字符），或目录及子目录内的本机绝对路径（最多 4096 字符）。路径属于 MCP 所在主机。";
+  return {
+    name: "analyze_video",
+    description: `将视频发送给管理员配置的 Strata 模型，只分析画面，不分析音轨。${scope}attachment 接受当前会话的渠道引用，二者只能提供一个，不接受 URL。同一视频追问应复用原 video/attachment，无需用户重复上传；用 context 补充同一视频的必要上下文。只整理已有分析时无需调用；核实新画面细节时再调用。多个视频指代不明时先澄清，禁止猜测引用或自动改用其他视频。默认复用有效的 Strata 文件引用；显式 url 兼容模式每次发送完整视频。上游不保留问答历史，不缓存答案。`,
+    inputSchema: {
+      type: "object", additionalProperties: false, required: ["question"],
+      oneOf: [{ required: ["video"] }, { required: ["attachment"] }],
+      properties: {
+        video: { type: "string", minLength: 1, maxLength: 4096, description: videoParameter },
+        attachment: { type: "string", maxLength: 64, description: "当前会话提供的渠道视频随机引用；不可枚举、猜测或使用其他会话的引用。与 video 互斥。" },
+        question: { type: "string", minLength: 1, maxLength: 16000, description: "视频分析问题。采样时间标签不等于精确动作时间；看不清的细节应说明不确定。" },
+        context: { type: "string", minLength: 1, maxLength: 8000, description: "可选追问上下文：仅整理当前会话中与本次同一视频有关的指代、问题和先前分析线索，不附其他会话、其他视频内容或密钥。先前分析仍需依据画面核实；无必要上下文时省略。" },
+        reasoning_effort: { type: "string", default: "medium", description: "思考等级：none、low、medium、xhigh，默认 medium；可显式覆盖，none 关闭思考。预算由 Strata 管理。" },
+      },
     },
-  },
-  // Files mode creates remote objects retained beyond the current call.
-  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-};
+    // Files mode creates remote objects retained beyond the current call.
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  };
+}
+
+export const videoTool = buildVideoTool(false);
+const unrestrictedVideoTool = buildVideoTool(true);
+
+/** Tool list entry for this configuration; the local-path form follows the configured scope. */
+export function videoToolFor(config) {
+  return config.root === undefined ? unrestrictedVideoTool : videoTool;
+}
 
 function validateArguments(args) {
   if (!args || typeof args !== "object" || Array.isArray(args)
@@ -145,7 +170,7 @@ function sameFile(left, right) {
     && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
 }
 
-async function readVideo(root, name, signal, maximumAgeMs, inspectOnly = false, expected) {
+async function readVideo(root, name, signal, maximumAgeMs, inspectOnly = false, expected, forbiddenRoot) {
   const absolute = isAbsolute(name);
   // Reject traversal before normalization, Windows device/UNC paths and ADS.
   // On POSIX, backslashes and colons are deliberately outside this contract.
@@ -156,10 +181,18 @@ async function readVideo(root, name, signal, maximumAgeMs, inspectOnly = false, 
       || (!absolute && (name.length > 255 || /[/\\:]/u.test(name)))) {
     fail("invalid_arguments", "video 只接受直属文件名或本机绝对路径，不接受相对路径、URL、点路径或设备路径。");
   }
+  if (root === undefined && !absolute) {
+    fail("invalid_arguments", "当前未限定本机视频目录，请提供本机绝对路径而不是直属文件名。");
+  }
   const path = absolute ? resolve(name) : join(root, name);
-  const withinRoot = relative(root, path);
-  if (!withinRoot || isAbsolute(withinRoot) || withinRoot === ".." || withinRoot.startsWith(`..${sep}`)) {
-    fail("unsafe_file", "视频路径必须位于 STRATA_VIDEO_ROOT 授权目录内。");
+  if (root !== undefined) {
+    const withinRoot = relative(root, path);
+    if (!withinRoot || isAbsolute(withinRoot) || withinRoot === ".." || withinRoot.startsWith(`..${sep}`)) {
+      fail("unsafe_file", "视频路径必须位于 STRATA_VIDEO_ROOT 授权目录内。");
+    }
+  }
+  if (forbiddenRoot !== undefined && within(forbiddenRoot, path)) {
+    fail("unsafe_file", "渠道附件目录只能用 attachment 引用读取，不接受本机路径。");
   }
   let handle;
   try {
@@ -258,7 +291,7 @@ function forgetMapping(key, entry) {
 
 async function fileReference(config, source, mime, signal) {
   // Recheck the capability and local readability even on a hit; no content read.
-  const inspected = await readVideo(source.root, source.name, signal, source.maximumAgeMs, true, source.identity);
+  const inspected = await readVideo(source.root, source.name, signal, source.maximumAgeMs, true, source.identity, source.forbiddenRoot);
   // Recovery must still refer to this call's original file, not a replacement
   // appearing at the same path while Responses was in flight.
   source.identity ??= inspected.identity;
@@ -286,7 +319,7 @@ async function fileReference(config, source, mime, signal) {
     activeUploads++;
     const timer = setTimeout(() => controller.abort(), config.timeoutMs);
     current.promise = (async () => {
-      const bytes = await readVideo(source.root, source.name, controller.signal, source.maximumAgeMs, false, identity);
+      const bytes = await readVideo(source.root, source.name, controller.signal, source.maximumAgeMs, false, identity, source.forbiddenRoot);
       const result = await strataRequest(config, new URL("/v1/files", config.endpoint), bytes, mime, controller.signal);
       if (result?.object !== "video_file" || result.status !== "ready"
           || typeof result.id !== "string" || !/^video_[A-Za-z0-9_-]{1,200}$/u.test(result.id)
@@ -317,7 +350,7 @@ async function fileReference(config, source, mime, signal) {
       if (signal.aborted) onAbort();
     })]);
     signal.throwIfAborted();
-    await readVideo(source.root, source.name, signal, source.maximumAgeMs, true, identity);
+    await readVideo(source.root, source.name, signal, source.maximumAgeMs, true, identity, source.forbiddenRoot);
     return { key, entry: current, reused };
   } finally {
     signal.removeEventListener("abort", onAbort);
@@ -349,7 +382,7 @@ async function analyzeVideoRequest(config, args, signal) {
     fail("configuration", "视频 MCP 未配置 STRATA_VIDEO_CHANNEL_ROOT，无法读取渠道附件。");
   }
   const source = args.attachment === undefined
-    ? { root: config.root, name: args.video }
+    ? { root: config.root, name: args.video, forbiddenRoot: config.channelRoot }
     : { root: config.channelRoot, name: join(config.channelRoot, ...args.attachment.split("/")), maximumAgeMs: 24 * 60 * 60 * 1000 };
   const transport = { mode: config.transport, reference_reused: false, reuploaded: false };
   try {
@@ -362,7 +395,7 @@ async function analyzeVideoRequest(config, args, signal) {
         transport.reference_reused = reference.reused;
         video = { type: "input_video", file_id: reference.entry.value.id };
       } else if (config.transport === "url") {
-        const bytes = await readVideo(source.root, source.name, signal, source.maximumAgeMs);
+        const bytes = await readVideo(source.root, source.name, signal, source.maximumAgeMs, false, undefined, source.forbiddenRoot);
         video = { type: "input_video", video_url: `data:${mime};base64,${bytes.toString("base64")}` };
       } else fail("configuration", "视频传输模式未配置。");
       try {

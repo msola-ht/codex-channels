@@ -12,7 +12,7 @@ Codex CLI / App → stdio MCP → 附件授权与身份检查 → Strata Files�
 
 Strata 必须已部署支持 `input_video` 的版本，启用视频、加载模型及兼容的视觉编码器。普通上游发行版是否支持应按实际部署确认；HTTP 200 的 `/health` 不等于视频可用，视频部署的 `videos: true` 才表示该项准备就绪。
 
-这个工具分析画面，音轨被 Strata 忽略；每次推理独立，只缓存授权文件到 Strata 文件引用的映射，不缓存答案或问答历史。没有添加 CLI/App 视频上传按钮。本地视频通过 MCP 主机的授权目录读取；飞书、微信、Telegram 可接收视频附件并把单文件随机引用交给当前会话。Desktop 使用远程 App Server 时，文件和 MCP 命令应在启动 MCP 的主机可用。
+这个工具分析画面，音轨被 Strata 忽略；每次推理独立，只缓存授权文件到 Strata 文件引用的映射，不缓存答案或问答历史。没有添加 CLI/App 视频上传按钮。本地视频通过 MCP 主机的本机文件路径读取，`STRATA_VIDEO_ROOT=any` 时不限定目录；飞书、微信、Telegram 可接收视频附件并把单文件随机引用交给当前会话。Desktop 使用远程 App Server 时，文件和 MCP 命令应在启动 MCP 的主机可用。
 
 ## 配置
 
@@ -23,14 +23,14 @@ Strata 必须已部署支持 `input_video` 的版本，启用视频、加载模�
 | `STRATA_VIDEO_BASE_URL` | 必填，固定 Strata 服务根地址，例如 `http://192.168.50.54:8080`；不要附加 `/v1`、凭据或查询参数 |
 | `STRATA_VIDEO_API_KEY` | 必填，部署的 API Key；通过环境传入，不作为工具参数 |
 | `STRATA_VIDEO_MODEL` | 必填，部署接受的精确模型 ID |
-| `STRATA_VIDEO_ROOT` | 必填，已存在的视频目录绝对路径 |
-| `STRATA_VIDEO_CHANNEL_ROOT` | 可选，Gateway 数据库旁的 `uploads/video` 绝对路径；用于渠道随机附件引用，必须已存在且与本地视频目录分离 |
+| `STRATA_VIDEO_ROOT` | 必填，已存在的视频目录绝对路径，或字面值 `any`（不限定目录，只接受本机绝对路径）；配置向导的 Strata 预设写为 `any` |
+| `STRATA_VIDEO_CHANNEL_ROOT` | 可选，Gateway 数据库旁的 `uploads/video` 绝对路径；用于渠道随机附件引用，必须已存在。它可以位于本机视频目录内，但不能等于或包含本机视频目录 |
 | `STRATA_VIDEO_TIMEOUT_SECONDS` | 单次调用总时限，包含文件读取、上传、排队、准备和生成；默认 900 秒，范围 1–1800 秒 |
 | `STRATA_VIDEO_TRANSPORT` | 默认 `files`，上传一次后复用引用；旧 Strata 或未启用文件接口时，由操作者显式选择 `url`，每次完整发送 Base64 视频；其他值拒绝启动 |
 
-目录是本 MCP 实例的文件授权范围，应是由当前操作者控制的专用本地视频目录，不应是家目录或整个仓库。接受直属普通文件名，或授权目录及其子目录内的本机绝对路径。拒绝目录外路径、相对路径（例如 `sub/clip.mp4`）、含 `.`/`..` 的路径、URL、符号链接和硬链接；子目录也不能通过链接跳转。不要让不可信进程替换授权目录、其父目录或其中的子目录。支持 MP4、MOV、WebM、MKV、AVI、TS，实际解码能力仍由 Strata/FFmpeg 决定。
+`STRATA_VIDEO_ROOT` 是本 MCP 实例的文件读取范围。配置为已存在目录时，接受直属普通文件名，或该目录及其子目录内的本机绝对路径；配置为字面值 `any` 时不限定目录，只接受本机绝对路径（例如 `/data/videos/project/clip.mp4`），不再接受直属文件名。两种方式都拒绝目录外路径（前者）、相对路径（例如 `sub/clip.mp4`）、含 `.`/`..` 的路径、URL、符号链接和硬链接，子目录也不能通过链接跳转。使用目录模式时该目录应是由当前操作者控制的专用视频目录，不应是家目录或整个仓库；使用 `any` 时任何能调用该工具的会话都能指定本机任意视频路径，只应向可信会话提供该 MCP。不要让不可信进程替换目录、其父目录或其中的子目录。支持 MP4、MOV、WebM、MKV、AVI、TS，实际解码能力仍由 Strata/FFmpeg 决定。
 
-共享 App Server 或全局 MCP 配置可能把同一工具提供给多个工作区；本工具没有渠道 Actor 身份，不按 Gateway Workspace Registry 二次授权。只向有权访问本地视频目录的客户端/会话启用 `video` 输入。渠道走独立 `attachment` 能力引用，不能把共享附件目录配置为 `STRATA_VIDEO_ROOT`；两种根目录相同或互相包含时启动失败。
+共享 App Server 或全局 MCP 配置可能把同一工具提供给多个工作区；本工具没有渠道 Actor 身份，不按 Gateway Workspace Registry 二次授权。只向有权访问本机视频文件的客户端/会话启用 `video` 输入。渠道走独立 `attachment` 能力引用：目录模式下，本机视频目录不能等于渠道附件目录，也不能位于渠道附件目录内。本机视频目录可以包含渠道附件目录，但本机路径入口会拒绝读取渠道附件目录内的文件，渠道附件只能通过随机引用读取。
 
 建议在 Codex Home 创建独立的 `strata-video.config.toml`，通过 `codex -p strata-video` 按需启用；它叠加基础配置，不改变默认模型。也可放入 Codex 使用的 `config.toml`，但此时须确认全局目录授权范围。内容如下（替换路径和模型 ID）：
 
@@ -44,6 +44,7 @@ tool_timeout_sec = 960
 [mcp_servers.strata_video.env]
 STRATA_VIDEO_BASE_URL = "http://192.168.50.54:8080"
 STRATA_VIDEO_MODEL = "qwen3.8-flash-next-iq3_s"
+# 或 "any"：不限定目录，只接受本机绝对路径。
 STRATA_VIDEO_ROOT = "/absolute/path/videos"
 STRATA_VIDEO_TIMEOUT_SECONDS = "900"
 STRATA_VIDEO_TRANSPORT = "files"
@@ -51,7 +52,7 @@ STRATA_VIDEO_TRANSPORT = "files"
 # STRATA_VIDEO_CHANNEL_ROOT = "/absolute/path/gateway-data/uploads/video"
 ```
 
-Windows 将 `args` 和 `STRATA_VIDEO_ROOT` 替换为 Windows 绝对路径，可使用 TOML 单引号保留反斜杠。macOS/Linux 保持对应主机的绝对路径。`node` 必须在启动 MCP 的宿主 PATH 内，否则使用 Node 可执行文件绝对路径。
+Windows 将 `args` 和 `STRATA_VIDEO_ROOT` 替换为 Windows 绝对路径，可使用 TOML 单引号保留反斜杠；`any` 在 Windows 上同样表示只接受本机绝对路径，因此多盘符无需逐个列出。macOS/Linux 保持对应主机的绝对路径。`node` 必须在启动 MCP 的宿主 PATH 内，否则使用 Node 可执行文件绝对路径。
 
 `env_vars` 只转发宿主实际已有的环境变量，不会自动创建密钥。CLI 从启动它的环境继承；Desktop/独立 App Server 必须在自己的启动环境中具备该变量，终端临时 export 不保证 GUI 或后台服务可见。不要把密钥提交到仓库。缺少任何必填设置，MCP 启动即失败，不回退到其他模型服务。
 
@@ -59,27 +60,27 @@ Codex 客户端的 `tool_timeout_sec` 应大于 MCP 总时限，留出取消收�
 
 ## 使用
 
-也可先运行 `codexc config → 新增 MCP → Strata 视频分析预设`，交互输入服务根地址、模型 ID、API Key、本地视频授权目录和可选渠道附件目录。目录必须已存在且相互分离。预设固定使用渠道提示引用的名称 `strata_video`，自动填写当前安装的 Node/脚本绝对路径，调用超时设为分析总时限加 60 秒，思考默认 `medium`，预算由 Strata 管理。
+也可先运行 `codexc config → 新增 MCP → Strata 视频分析预设`，输入服务根地址、模型 ID、API Key 及传输方式和超时设置；不询问任何目录。本机视频范围写为 `STRATA_VIDEO_ROOT=any`，即任意本机绝对路径都能分析（不限定目录，也不接受直属文件名）。预设要求当前 Gateway 配置已存在且通过结构校验；文件缺失、不可读或无效时停止，不猜测目录。渠道附件目录自动取 StateStore 数据库旁的 `uploads/video`（默认 `<数据目录>/data/uploads/video`），相对数据库路径以配置文件所在目录为基准，保留路径文本中的空格；范围、目录与目标 Codex 配置文件都会在确认摘要中显示。预设固定使用渠道提示引用的名称 `strata_video`，自动填写当前安装的 Node/脚本绝对路径，调用超时设为分析总时限加 60 秒，思考默认 `medium`，预算由 Strata 管理。
 
-交互保存使用当前 Codex Home 的用户配置，影响使用该配置的会话；确认前会显示目标路径、目录授权范围和启用状态。API Key 隐藏输入并写入该用户配置，不回显；若希望密钥只从宿主环境继承，可使用上方手工 `env_vars` 配置。已有同名条目不会被覆盖，取消不会写入。保存不等于 MCP 已连接，需要重新加载 MCP 或在新会话中使用；不会自动重启服务。
+交互保存使用当前 Codex Home 的用户配置，影响使用该配置的会话；确认前会显示目标路径、目录授权范围和启用状态。API Key 隐藏输入并写入该用户配置，不回显；若希望密钥只从宿主环境继承，可使用上方手工 `env_vars` 配置。已有同名条目不会被覆盖。最终确认前取消，不创建渠道附件目录、不写入 MCP；确认后再次核对 Gateway 推导出的目录，若已变化则停止。随后创建目录，按 Gateway 暂存器的要求拒绝符号链接、非目录和其他用户拥有的目录，并设置平台私有权限；目录准备失败时不保存 MCP。确认后的配置写入若失败，已准备的目录会保留。保存不等于 MCP 已连接，需要重新加载 MCP 或在新会话中使用；不会自动重启服务。保存的渠道目录是当时的配置值，之后更改 `storage.database_path` 时需同步调整 MCP 环境配置。
 
-把 `clip.mp4` 放入配置的目录后，对 Codex 说：
+使用预设的 `any` 模式时，直接提供 MCP 所在主机的视频绝对路径。例如对 Codex 说：
 
-> 使用 strata_video 的 analyze_video，分析 clip.mp4 中按时间顺序发生了什么，标明关键事件时间戳。
+> 使用 strata_video 的 analyze_video，分析 /data/videos/project/clip.mp4 中按时间顺序发生了什么，标明关键事件时间戳。
 
 工具参数：
 
 ```json
-{"video":"clip.mp4","question":"按时间顺序描述关键事件，时间只标可靠的近似值。"}
+{"video":"/data/videos/project/clip.mp4","question":"按时间顺序描述关键事件，时间只标可靠的近似值。"}
 ```
 
-也可直接指定已有视频的绝对路径，无需复制到目录顶层。例如 `STRATA_VIDEO_ROOT=/data/videos` 时：
+仅在手工配置的目录模式下（例如 `STRATA_VIDEO_ROOT=/data/videos`），才可用直属文件名读取 `/data/videos/clip.mp4`：
 
 ```json
-{"video":"/data/videos/project/clip.mp4","question":"描述视频中的主要事件。"}
+{"video":"clip.mp4","question":"描述视频中的主要事件。"}
 ```
 
-直属文件名最多 255 字符，绝对路径最多 4096 字符；路径必须采用 MCP 主机的系统格式。Windows 使用盘符绝对路径，例如 `C:\\Videos\\project\\clip.mp4`（JSON 中反斜杠需转义），不接受 UNC、设备路径或备用数据流。POSIX 路径不接受反斜杠和冒号。不展开 `~` 或环境变量。授权目录启动时会解析为真实路径，绝对路径应使用该真实目录；要分析其他目录的视频，应由操作者调整 `STRATA_VIDEO_ROOT` 后重新加载 MCP，工具参数不能扩大授权范围。成功结果的 `video` 保留调用时传入的文件名或绝对路径。
+直属文件名最多 255 字符（仅目录模式），绝对路径最多 4096 字符；路径必须采用 MCP 主机的系统格式。Windows 使用盘符绝对路径，例如 `C:\\Videos\\project\\clip.mp4`（JSON 中反斜杠需转义），不接受 UNC、设备路径或备用数据流。POSIX 路径不接受反斜杠和冒号。不展开 `~` 或环境变量。目录模式下授权目录启动时解析为真实路径，绝对路径应使用该真实目录；`STRATA_VIDEO_ROOT=any` 时本机任意绝对路径都可用，工具参数仍不能改变这一范围，要收紧范围应由操作者改回目录模式并重新加载 MCP。两种模式都不能用本机路径读取渠道附件目录内的文件，渠道附件只接受 `attachment` 引用。成功结果的 `video` 保留调用时传入的文件名或绝对路径。
 
 `question` 必填，最多 16000 字符；`video` 和 `attachment` 必须且只能提供一个。`reasoning_effort` 可选，展示等级为 `none`、`low`、`medium`、`xhigh`，默认 `medium`，原样作为 `reasoning.effort` 发送；调用可覆盖，`none` 关闭思考。兼容传入 `high`，不在常规提示中展示；MCP 不改写该值，其到 `xhigh` 的映射由远程 API 处理。工具 Schema 使用字符串类型，具体等级由运行时校验，避免宿主提前拒绝 `high`。
 
@@ -171,10 +172,19 @@ MCP 使用 [2025-06-18 生命周期](https://modelcontextprotocol.io/specificati
 
 ## 已观察的链路与限制
 
+2026-10-12，目录配置修复后的工作区（基于 `190e2f12`）补充观察：
+
+- 在隔离的任务自有 Codex Home 中，经真实 `codexc config` TTY 菜单和 Codex 配置 RPC 保存 Strata 预设。相对配置目录与含前导空格的数据库路径正确保留，保存后的 MCP 配置解析结果与 Gateway 配置加载器推导出的附件目录一致，新目录权限为 `0700`。相对配置文件路径且省略 `storage` 时，确认摘要使用正确的默认目录，没有重复拼接基础目录。
+- 最终确认前取消、数据库路径类型错误、TOML 语法错误、确认期间数据库目录变化，以及附件根是符号链接时，均未写入 MCP；取消和配置错误没有创建默认附件目录。确认后的目录变化与链接目录分别返回明确的目录已变化、目录准备失败提示。未修改操作者配置或启动渠道服务。
+- 保存后的配置通过真实 stdio 完成 MCP 初始化和工具清单查询；`any` 模式下直属文件名返回 `invalid_arguments`，渠道目录绝对路径返回 `unsafe_file`。未发送视频或调用 Strata，未观察 Windows/macOS 的目录保护及真实渠道收件、推理结果。
+
 2026-10-12，基于 `main`（`c84cd44d`）的全分支审查补充了以下本地观察，均未发送真实渠道消息或运行真实 Strata 推理：
 
 - 真实 stdio MCP 连接任务自有回环 HTTP 服务，首次只上传 27 字节故障材料，`Content-Length` 正确且无 Transfer-Encoding；默认 `medium` 和显式 `high` 均按预期发送。追问复用同一 file_id；`404 + video_file_expired` 返回受控错误且不重传，后续仍可复用；越界路径与未知思考等级被拒绝。占位结果不证明视频分析成功。
 - 配置向导经真实 Codex 配置 RPC 向隔离的任务自有 Codex Home 写入 stdio MCP 条目，同名新增被拒绝、取消保存不改变文件。未更改操作者的 Codex 配置。
+- Strata 预设不再询问任何目录：以替换的提示与配置客户端驱动、并用真实 TTY 走到保存时，提示序列都没有目录输入，写入 `STRATA_VIDEO_ROOT=any` 和按配置解析出的渠道附件目录；该目录按 0700 创建，已存在时可重复运行，被同名文件占用时在写入前返回明确错误。
+- 预设运行使用当前 `CODEX_CONNECT_CONFIG_FILE` 或 `CODEX_CONNECT_HOME` 定位的数据目录；本次实际得到操作者配置旁（`[storage] database_path = "data/gateway.sqlite3"`）的 `data/uploads/video`。写入目标是隔离的临时 Codex Home，未改动操作者的 Codex 配置或 Gateway 配置。
+- 真实 stdio MCP 配合任务自有回环 HTTP 观察服务验证任意路径模式：`STRATA_VIDEO_ROOT=any` 时授权目录外任意绝对路径可上传分析，直属文件名返回 `invalid_arguments`，渠道附件目录内的路径返回 `unsafe_file`，同一配置下 `attachment` 引用仍可读取，`tools/list` 的 `video` 参数说明随模式变化。配置校验也接受了覆盖渠道附件目录的本机范围，仍拒绝把本机视频目录设为渠道附件目录或置于其中。上游返回占位分析，不证明真实推理成功。
 - 生产 Application 提交作用域的手工交互使用替换的 Router/Core/Turn 端口：目标捕获前停止返回 `true` 并阻止后续捕获；前序输入创建 Thread 后可捕获并提交；未捕获、重复捕获、重复提交、Thread 变化和撤权均被拒绝；确认丢失仍保留 `mayHaveSubmitted:true`。这些观察不等同于真实 App Server 的提交验收。
 - 捕获 Thread 后、异步会话准备期间移除绑定的故障输入，修复前会把视频引用提交到替换 Thread；修复后返回 `video.unavailable`，Turn 请求数为零，`mayHaveSubmitted:false`。还拒绝了 Router 返回的 Thread 与当前绑定不一致的结果；首次未绑定的视频仍可经原有路径创建 Thread 并提交。
 - 飞书真实 Inbox 同一事件循环先接收视频再接收 `/stop`，修复前停止时尚无视频取消作用域，随后仍下载提交；提前登记后返回 `stop:true`，没有下载或提交。引用读取期间取消会清理新附件并返回明确的 `video.unavailable`，不再显示泛化内部失败。
