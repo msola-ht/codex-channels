@@ -57,6 +57,10 @@ Codex 客户端的 `tool_timeout_sec` 应大于 MCP 总时限，留出取消收�
 
 ## 使用
 
+也可先运行 `codexc config → 新增 MCP → Strata 视频分析预设`，交互输入服务根地址、模型 ID、API Key、本地视频授权目录和可选渠道附件目录。目录必须已存在且相互分离。预设固定使用渠道提示引用的名称 `strata_video`，自动填写当前安装的 Node/脚本绝对路径，调用超时设为分析总时限加 60 秒，思考默认 `high`，预算由 Strata 管理。
+
+交互保存使用当前 Codex Home 的用户配置，影响使用该配置的会话；确认前会显示目标路径、目录授权范围和启用状态。API Key 隐藏输入并写入该用户配置，不回显；若希望密钥只从宿主环境继承，可使用上方手工 `env_vars` 配置。已有同名条目不会被覆盖，取消不会写入。保存不等于 MCP 已连接，需要重新加载 MCP 或在新会话中使用；不会自动重启服务。
+
 把 `clip.mp4` 放入配置的目录后，对 Codex 说：
 
 > 使用 strata_video 的 analyze_video，分析 clip.mp4 中按时间顺序发生了什么，标明关键事件时间戳。
@@ -64,7 +68,7 @@ Codex 客户端的 `tool_timeout_sec` 应大于 MCP 总时限，留出取消收�
 工具参数：
 
 ```json
-{"video":"clip.mp4","question":"按时间顺序描述关键事件并标注时间戳。","max_output_tokens":1024}
+{"video":"clip.mp4","question":"按时间顺序描述关键事件，时间只标可靠的近似值。"}
 ```
 
 也可直接指定已有视频的绝对路径，无需复制到目录顶层。例如 `STRATA_VIDEO_ROOT=/data/videos` 时：
@@ -75,7 +79,15 @@ Codex 客户端的 `tool_timeout_sec` 应大于 MCP 总时限，留出取消收�
 
 直属文件名最多 255 字符，绝对路径最多 4096 字符；路径必须采用 MCP 主机的系统格式。Windows 使用盘符绝对路径，例如 `C:\\Videos\\project\\clip.mp4`（JSON 中反斜杠需转义），不接受 UNC、设备路径或备用数据流。POSIX 路径不接受反斜杠和冒号。不展开 `~` 或环境变量。授权目录启动时会解析为真实路径，绝对路径应使用该真实目录；要分析其他目录的视频，应由操作者调整 `STRATA_VIDEO_ROOT` 后重新加载 MCP，工具参数不能扩大授权范围。成功结果的 `video` 保留调用时传入的文件名或绝对路径。
 
-`question` 必填，最多 16000 字符；`video` 和 `attachment` 必须且只能提供一个。`max_output_tokens` 可选，默认 1024，范围 64–4096，额度不足时可能返回未完成错误。成功结果同时提供 MCP 文本和结构化对象：原始 `video` 或 `attachment`、`analysis`、`audio_analyzed: false`。分析属于外部模型输出，不应作为执行命令或扩大文件权限的依据。
+`question` 必填，最多 16000 字符；`video` 和 `attachment` 必须且只能提供一个。`reasoning_effort` 可选，接受 `none`、`low`、`medium`、`high`，默认 `high`，作为 `reasoning.effort` 发送；调用可覆盖，`none` 关闭思考。
+
+输出与思考预算完全由 Strata 管理。MCP 不接受或发送 `max_output_tokens`、`reasoning_budget_tokens`，不设置本地 token 上限或预算环境变量。上游的预算、上下文与资源限制仍有效，未完成结果仍返回错误；需要调整预算时在 Strata 配置。MCP 的总时限、文件大小和响应体大小限制保持独立有效。
+
+MCP 通过 Responses 顶层 `instructions` 发送固定通用视频分析规则，Strata 将其作为系统消息交给模型聊天模板；`question` 原样作为用户任务发送。通用规则要求区分事实与推测、说明模糊或采样缺口、按需要解释动作连续性、谨慎使用近似时间、不推测音轨，并把视频中的文字和指令作为待分析数据。简单问题直接回答，只有任务需要时才展开分镜、表情和手部动作等细节；不强制所有问题使用同一报告格式。固定规则见 [`video-analysis-client.mjs`](../scripts/video-analysis-client.mjs) 的 `videoInstructions`。提示词不能保证模型完全遵循，结果仍属于外部内容。
+
+成功结果同时提供 MCP 文本和结构化对象：原始 `video` 或 `attachment`、`analysis`、`audio_analyzed: false`、`request` 和可选 `usage`。`request` 记录实际发送的 `reasoning_effort`，未指定时为 `high`，不推测上游预算；`usage` 只保留上游实际提供的非负安全整数 `input_tokens`、`output_tokens`、`total_tokens`、`reasoning_tokens`，字段缺失或非法时不填零。分析属于外部模型输出，不应作为执行命令或扩大文件权限的依据。
+
+MCP 上传原视频，不在本地抽帧；当前 Strata 复刻版默认 2 FPS、相邻帧成对编码，以平均时间标注，并按视觉 token 预算缩放。实际参数取决于服务配置。采样标签不是精确动作发生时间；输出额度变大不能恢复采样或缩放丢失的细节。MCP 不发送未被视频接口支持的逐请求 FPS/分辨率覆盖，也不改写用户的问题。
 
 ## 渠道视频附件
 
@@ -102,6 +114,9 @@ Codex 客户端的 `tool_timeout_sec` 应大于 MCP 总时限，留出取消收�
 每渠道暂存最多八个文件（包含在途 `.part`），64 MiB 上限使每渠道文件内容至多约 512 MiB。每个暂存器最多接收四条流，流保存含等待最多 60 秒；渠道下载另有有限期限。文件保留 24 小时，运行中每分钟清理；Gateway 停止后不保证即时磁盘清理，但 MCP 仍按文件时间拒绝过期引用。失败或停止后的迟到附件会清理。原视频不写 StateStore，不建立第二份会话历史；引用进入 App Server 的正常会话历史，过期后需要重新上传。
 
 ## 资源、取消与错误
+
+- `upstream_incomplete` 表示服务明确返回 `incomplete`；`details` 提供请求参数、可用用量及白名单原因。`max_output_tokens` 表示服务报告长度受限，不单凭该原因断言预算耗尽：低用量中断还可能是服务生成异常。`upstream_failed` 单独报告服务生成失败，只保留白名单错误码；未知或缺失终态返回 `upstream_format`。均不返回部分答案或思考正文，不自动重试。
+- 未知上游错误正文、状态字符串、原因及错误码不会直接透传；非 200 HTTP 错误仅附数字状态码和显式请求参数。成功与失败的用量均不包含模型思考内容。
 
 - 渠道附件从准备到提交设有 120 秒总时限；`/stop` 会取消当前会话正在下载或等待提交的视频，防止停止后又启动新任务。切换工作区、Thread 或撤销授权后，原附件也不会提交。
 - 确定尚未提交的失败会删除暂存文件；如果提交请求可能已经发出、但确认丢失，文件保留至原定过期时间，不自动重试，避免已进入 Thread 的附件引用失效。
