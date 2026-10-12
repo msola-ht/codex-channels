@@ -73,6 +73,8 @@ Gateway 配置位于：
 
 `codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；完成单项后可继续选择，选择“完成接入”正常退出，选择“取消”或在类别菜单按 Esc/Ctrl+C 取消退出。`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
 
+“Codex 新会话与用户偏好”先显示设置分类，进入具体项目后再读取当前值与可用选项；分类页返回或取消无需等待 App Server。核心默认值是否可修改，以进入后读取的 Provider 和 Permission Profile 为准；保存仍需确认，并校验配置修订及对应策略。
+
 `codexc config` 的“计划任务”直接选择开关；Telegram 消息格式位于“显示设置”，仅在配置 Bot 后显示。显示子项取消或选择“返回上一级”时回到显示设置；在显示设置中选择“返回”才回到 Config。日志等级统一在“高级设置 → 日志等级”选择，`debug` / `trace` 开启调试信息，`info` 恢复标准输出。
 
 “显示设置 → 模型显示组”或 WebUI“模型管理 → 模型配置 → 模型显示组”可将多个精确模型 ID 显示为同一名称。
