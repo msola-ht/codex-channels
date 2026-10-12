@@ -315,6 +315,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     });
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
+      // CP Responses 上游可能缓冲完整工具参数；为无数据阶段保留五分钟。
+      ...(!bridge && isCustomCatalogProvider(upstreamProvider) ? { timeoutMs: 300_000 } : {}),
       // CLP 桥在桥内按目录校验模型；通用 Chat 桥没有该校验，继续由统计代理拒绝目录外或已停用模型。
       ...(modelGuard && !bridgedClinePass ? isCustomCatalogProvider(upstreamProvider)
         ? { readModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) }
@@ -543,7 +545,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       routes: new Map([...material.routes].map(([slug, route]) => [slug, {
         model: route.model, apiKey: route.apiKey, baseUrl: urls.get(route.provider),
         timeoutMs: upstreamWireApiFor(route.provider) === "chat_completions"
-          ? chatBridgeRequestTimeoutMs + 10_000 : 65_000,
+          ? chatBridgeRequestTimeoutMs + 10_000
+          : isCustomCatalogProvider(route.provider) ? 310_000 : 65_000,
       }])),
     });
     await aggregateProxy.start();

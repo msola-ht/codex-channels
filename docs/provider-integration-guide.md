@@ -351,6 +351,7 @@ JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行�
 `provider` 管理链路。WebUI 的 Provider 设置中选择“自定义提供商”。
 此类型使用 `cp-` 开头的 Provider ID（其后 1-61 位 ASCII 字母、数字、`-` 或 `_`）。
 例如 `cp-llm`，终端使用 `codexc remote -p cp-llm` 或 `codexc app -p cp-llm`，规范 Profile 与文件分别为 `sf-cp-llm` 和 `sf-cp-llm.config.toml`。`cp-` 表示自定义提供商，与上游协议无关；协议独立选择 Responses 或 Chat Completions。
+所有 `cp-*` Responses Provider（固定、切换和聚合模式）共用 300 秒的统计代理超时预算，不是单个 Provider 的可配置项。上游 HTTP（包括 `/responses` 和 `/models`）按连接连续空闲计时，以容纳上游缓冲大段工具参数的情况，不限制请求总时长；WebSocket 握手和上游关闭后的终态交付等待也使用该预算，不是 WebSocket 思考时长限制。聚合入口为该路由预留 310 秒空闲预算，仍保留 600 秒响应总期限。更新程序并重启 App Server 后生效，Chat 桥和其他 Provider 保持原有超时预算。
 模型目录缺失时明确报错，不回退到官方目录。显示名称禁止使用上游具有特殊语义的 `OpenAI`，
 避免启用官方专用协议能力。已有 Codex 兼容 Provider 不自动转换或迁移。
 
