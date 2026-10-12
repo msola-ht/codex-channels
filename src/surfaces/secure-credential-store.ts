@@ -39,6 +39,29 @@ const keyBytes = 32;
 const ivBytes = 12;
 const tagBytes = 16;
 
+type KeychainOperation = "get" | "set" | "remove";
+type KeychainFailureReason = "timeout" | "unavailable" | "permission-denied" | "command-failed";
+
+export class KeychainCredentialStoreError extends Error {
+  readonly code = "credential-store-failed";
+
+  constructor(
+    readonly operation: KeychainOperation,
+    readonly reason: KeychainFailureReason,
+    readonly exitCode?: number,
+  ) {
+    const operationLabel = { get: "读取", set: "保存", remove: "删除" }[operation];
+    const reasonLabel = {
+      timeout: "命令超时",
+      unavailable: "系统钥匙串命令不可用",
+      "permission-denied": "权限不足",
+      "command-failed": "系统钥匙串命令失败",
+    }[reason];
+    super(`${operationLabel}安全凭据失败：${reasonLabel}${exitCode === undefined ? "" : `（退出码 ${exitCode}）`}`);
+    this.name = "KeychainCredentialStoreError";
+  }
+}
+
 export class MacKeychainCredentialRecordStore
 implements SecureCredentialRecordStore {
   constructor(
@@ -58,25 +81,29 @@ implements SecureCredentialRecordStore {
       ]);
       return String(stdout).trim();
     } catch (error) {
-      const code = (error as { code?: unknown }).code;
+      const code = keychainErrorFields(error).code;
       if (code === 44 || code === "44") {
         return null;
       }
-      throw error;
+      throw safeKeychainError(error, "get");
     }
   }
 
   async set(key: string, value: string): Promise<void> {
-    await this.run("security", [
-      "add-generic-password",
-      "-U",
-      "-s",
-      this.service,
-      "-a",
-      key,
-      "-w",
-      value,
-    ]);
+    try {
+      await this.run("security", [
+        "add-generic-password",
+        "-U",
+        "-s",
+        this.service,
+        "-a",
+        key,
+        "-w",
+        value,
+      ]);
+    } catch (error) {
+      throw safeKeychainError(error, "set");
+    }
   }
 
   async remove(key: string): Promise<void> {
@@ -89,12 +116,33 @@ implements SecureCredentialRecordStore {
         key,
       ]);
     } catch (error) {
-      const code = (error as { code?: unknown }).code;
+      const code = keychainErrorFields(error).code;
       if (code !== 44 && code !== "44") {
-        throw error;
+        throw safeKeychainError(error, "remove");
       }
     }
   }
+}
+
+function keychainErrorFields(error: unknown): { code?: unknown; killed?: unknown } {
+  return typeof error === "object" && error !== null ? error : {};
+}
+
+function safeKeychainError(error: unknown, operation: KeychainOperation): KeychainCredentialStoreError {
+  const { code, killed } = keychainErrorFields(error);
+  const reason = killed === true || code === "ETIMEDOUT"
+    ? "timeout"
+    : code === "ENOENT"
+      ? "unavailable"
+      : code === "EACCES" || code === "EPERM"
+        ? "permission-denied"
+        : "command-failed";
+  const exitCode = typeof code === "number" && Number.isSafeInteger(code)
+    ? code
+    : undefined;
+  // execFile errors contain the complete command, credential arguments and stderr.
+  // Preserve only closed failure classifications; never retain the original cause.
+  return new KeychainCredentialStoreError(operation, reason, exitCode);
 }
 
 export class EncryptedFileCredentialRecordStore

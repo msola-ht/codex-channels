@@ -6,6 +6,7 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 
 import {
   readGatewayConfig,
+  validateGatewayConfigStructureDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import {
@@ -67,6 +68,7 @@ class TelegramSetupSession {
     this.#environment = environment;
     this.#configPath = requireUserConfig(environment).configPath;
     this.#document = readGatewayConfig(this.#configPath);
+    validateGatewayConfigStructureDocument(this.#document);
     this.#existing = table(this.#document.telegram);
     this.#existingFingerprint = fingerprint(this.#existing);
     this.#createClient = options.createClient ?? createTelegramClient;
@@ -181,18 +183,20 @@ class TelegramSetupSession {
       throw invalidState("confirm", this.#state);
     }
     const currentDocument = readGatewayConfig(this.#configPath);
+    validateGatewayConfigStructureDocument(currentDocument);
     if (fingerprint(table(currentDocument.telegram)) !== this.#existingFingerprint) {
       throw invalid("stale-session", "session", "Telegram 配置已变化，请重新开始 Setup");
     }
+    const allowedUserIds = [...this.#preview.allowedUserIds];
+    currentDocument.telegram = {
+      ...this.#existing,
+      bot_token: this.#token,
+      allowed_user_ids: allowedUserIds.map(Number),
+    };
+    validateGatewayConfigStructureDocument(currentDocument);
     this.#clearTimeout();
     this.#setState("saving");
-    const allowedUserIds = [...this.#preview.allowedUserIds];
     try {
-      currentDocument.telegram = {
-        ...this.#existing,
-        bot_token: this.#token,
-        allowed_user_ids: allowedUserIds.map(Number),
-      };
       this.#writeConfig(this.#configPath, currentDocument);
     } catch (error) {
       this.#fail("save-failed");
@@ -234,6 +238,18 @@ class TelegramSetupSession {
       const result = await client.getMe(this.#abortController.signal);
       if (this.#state !== "validating") return;
       const username = validateUsername(result?.username);
+      const webhook = await client.getWebhookInfo(this.#abortController.signal);
+      if (this.#state !== "validating") return;
+      if (typeof webhook?.url !== "string") {
+        throw invalid("invalid-webhook-info", "bot", "Telegram webhook 状态无效");
+      }
+      if (webhook.url !== "") {
+        throw invalid(
+          "webhook-active",
+          "bot",
+          "该 Bot 已设置 webhook，请先解除现有 webhook 后再接入长轮询。",
+        );
+      }
       const configuredToken = stringValue(this.#existing.bot_token);
       const reusesConfiguredBot = token === configuredToken;
       const configuredAllowedUserIds = reusesConfiguredBot
@@ -249,6 +265,10 @@ class TelegramSetupSession {
       this.#setState("validated");
     } catch (error) {
       if (this.#abortController.signal.aborted) return;
+      if (error instanceof TelegramSetupSessionError && error.code === "webhook-active") {
+        this.#fail(error.code);
+        throw error;
+      }
       const safeMessage = safeErrorMessage(error, token);
       this.#fail("validation-failed");
       throw invalid(
@@ -372,6 +392,7 @@ function createTelegramClient(token, proxyUrl) {
   });
   return {
     getMe: (signal) => bot.api.getMe(signal),
+    getWebhookInfo: (signal) => bot.api.getWebhookInfo(signal),
     getUpdates: (parameters, signal) => bot.api.getUpdates(parameters, signal),
   };
 }
@@ -466,7 +487,8 @@ export function normalizeUserIds(values) {
     ) {
       throw new Error(`无效的 Telegram 用户 ID：${value}`);
     }
-    if (!ids.includes(value)) ids.push(value);
+    const canonicalId = String(numericId);
+    if (!ids.includes(canonicalId)) ids.push(canonicalId);
   }
   if (ids.length === 0) throw new Error("至少需要一个 Telegram 用户 ID");
   return ids.join(",");

@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import {
+  readGatewayConfig,
+  validateGatewayConfigStructureDocument,
+} from "../runtime/gateway-config.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
@@ -13,7 +16,7 @@ import {
   resolveTelegramProxy,
   waitForPrivateSender,
 } from "./telegram-setup-session.mjs";
-import { createPrompter } from "./terminal-prompter.mjs";
+import { ChannelSetupCancelled, createChannelPrompter } from "./channel-setup-presentation.mjs";
 
 const tokenPattern = /^\d+:[A-Za-z0-9_-]{30,}$/;
 
@@ -36,9 +39,10 @@ export async function runTelegramSetup({
 } = {}) {
   const { configPath } = requireUserConfig(environment);
   const document = readGatewayConfig(configPath);
+  validateGatewayConfigStructureDocument(document);
   const existing = table(document.telegram);
   const existingToken = stringValue(existing.bot_token);
-  const prompt = prompter ?? createPrompter(input, output);
+  const prompt = prompter ?? createChannelPrompter(input, output);
   const ownerId = `codexc-setup:${randomUUID()}`;
   let session;
   let unsubscribe;
@@ -64,15 +68,14 @@ export async function runTelegramSetup({
   };
 
   try {
-    output.write("\nCodex Connect Telegram Setup\n\n");
-    output.write("1. 新建 Telegram Bot（通过官方 @BotFather）\n");
-    output.write("2. 使用已有 Telegram Bot\n");
-    if (existingToken) {
-      output.write("3. 保留当前配置的 Telegram Bot\n");
-    }
-
-    const maximumChoice = existingToken ? 3 : 2;
-    const choice = await askChoice(prompt, `请选择 [1-${maximumChoice}]`, maximumChoice);
+    output.write("\n通讯渠道 · Telegram 接入\n\n");
+    const choice = await prompt.select("选择接入方式", [
+      { value: "1", label: "新建 Telegram Bot", hint: "通过官方 @BotFather 创建" },
+      { value: "2", label: "使用已有 Telegram Bot" },
+      ...(existingToken ? [{ value: "3", label: "保留当前配置的 Telegram Bot" }] : []),
+      { value: "back", label: "返回" },
+    ]);
+    if (choice === "back") return undefined;
     const botSource = choice === "1" ? "new" : choice === "2" ? "existing" : "configured";
     let token;
     if (choice === "3") {
@@ -179,6 +182,7 @@ export async function runTelegramSetup({
           }
         }
       } catch (error) {
+        if (error instanceof ChannelSetupCancelled) throw error;
         output.write(`自动获取用户 ID 失败：${errorMessage(error)}\n`);
       }
     }
@@ -197,6 +201,12 @@ export async function runTelegramSetup({
     }
 
     session.useAllowedUserIds(ownerId, allowedUserIds.split(","));
+    output.write(`\n准备保存 Telegram 配置：\n- Bot：@${bot.username}\n- 允许用户：${allowedUserIds}\n`);
+    if (!await promptWithinSession((signal) =>
+      prompt.confirm("确认保存以上配置？", true, { signal }))) {
+      output.write("未保存 Telegram 配置。\n");
+      return undefined;
+    }
     const result = await session.confirm(ownerId);
     output.write(`\nTelegram 配置已保存：${result.configPath}\n`);
     output.write("下一步运行：codexc doctor\n");
@@ -208,6 +218,10 @@ export async function runTelegramSetup({
       activation: result.activation,
       activationResult: configActivationResult(result.activation),
     };
+  } catch (error) {
+    if (!(error instanceof ChannelSetupCancelled)) throw error;
+    output.write("已取消 Telegram 接入，未保存配置。\n");
+    return undefined;
   } finally {
     unsubscribe?.();
     if (session) {
@@ -222,15 +236,6 @@ export async function runTelegramSetup({
 
 export function isDirectExecution(moduleUrl, argvPath) {
   return Boolean(argvPath) && moduleUrl === pathToFileURL(argvPath).href;
-}
-
-async function askChoice(prompt, label, maximum) {
-  while (true) {
-    const choice = await prompt.ask(label);
-    if (new RegExp(`^[1-${maximum}]$`).test(choice)) {
-      return choice;
-    }
-  }
 }
 
 async function askToken(prompt, output) {
@@ -266,6 +271,7 @@ function telegramSetupFailure(status) {
     expired: "Telegram Setup 已超时",
     cancelled: "Telegram Setup 已取消",
     "validation-failed": "Telegram Bot 验证请求失败",
+    "webhook-active": "该 Bot 已设置 webhook，请先解除现有 webhook 后再接入长轮询。",
     "save-failed": "Telegram 配置保存失败",
   };
   return new TelegramSetupSessionError(

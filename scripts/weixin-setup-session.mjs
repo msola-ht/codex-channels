@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import {
   readGatewayConfig,
+  validateGatewayConfigStructureDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { withPrivateFileLock } from "../runtime/private-file-lock.mjs";
@@ -87,11 +88,15 @@ class WeixinSetupSession {
     if (this.#state !== "created") {
       throw invalidState("start", this.#state);
     }
+    const document = readGatewayConfig(this.#configPath);
+    validateGatewayConfigStructureDocument(document);
+    const existing = table(document.weixin);
+    this.#existingFingerprint = fingerprint(existing);
     this.#expiresAt = this.#now() + this.#timeoutMs;
     this.#setState("starting");
     this.#timeout = setTimeout(() => this.#expire(), this.#timeoutMs);
     this.#timeout.unref?.();
-    this.#loginPromise = this.#run().catch(() => {});
+    this.#loginPromise = this.#run(existing).catch(() => {});
     return this.status(ownerId);
   }
 
@@ -171,6 +176,7 @@ class WeixinSetupSession {
     const preserveExistingAllowedUsers = input.preserveExistingAllowedUsers
       === true;
     const currentDocument = readGatewayConfig(this.#configPath);
+    validateGatewayConfigStructureDocument(currentDocument);
     const currentExisting = table(currentDocument.weixin);
     if (fingerprint(currentExisting) !== this.#existingFingerprint) {
       throw invalid(
@@ -179,12 +185,19 @@ class WeixinSetupSession {
         "微信配置已变化，请重新开始 Setup",
       );
     }
-    this.#clearTimeout();
-    this.#setState("saving");
     const allowedUserIds = preserveExistingAllowedUsers
       ? unique([this.#scannerId, ...this.#existingAllowedUserIds])
       : [this.#scannerId];
     const credential = this.#credential;
+    currentDocument.weixin = {
+      enabled: true,
+      account_id: credential.accountId,
+      allowed_user_ids: allowedUserIds,
+    };
+    // Keep the read document: its source metadata owns concurrent-write detection.
+    validateGatewayConfigStructureDocument(currentDocument);
+    this.#clearTimeout();
+    this.#setState("saving");
     let store;
     let previous;
     let credentialWriteAttempted = false;
@@ -197,11 +210,6 @@ class WeixinSetupSession {
       previous = await store.get(credential.accountId);
       credentialWriteAttempted = true;
       await store.set(credential);
-      currentDocument.weixin = {
-        enabled: true,
-        account_id: credential.accountId,
-        allowed_user_ids: allowedUserIds,
-      };
       configBeforeWrite = statSync(this.#configPath, { bigint: true });
       configWriteAttempted = true;
       this.#writeConfig(this.#configPath, currentDocument);
@@ -279,7 +287,7 @@ class WeixinSetupSession {
     return this.status(ownerId);
   }
 
-  async #run() {
+  async #run(existing) {
     try {
       const result = await this.#runLogin({
         client: this.#client,
@@ -304,11 +312,8 @@ class WeixinSetupSession {
       const credential = await this.#validateCredential(result, this.#now());
       if (!activeStates.has(this.#state)) return;
       const scannerId = validateActorId(result.userId);
-      const document = readGatewayConfig(this.#configPath);
-      const existing = table(document.weixin);
       this.#credential = credential;
       this.#scannerId = scannerId;
-      this.#existingFingerprint = fingerprint(existing);
       this.#existingAllowedUserIds = existing.account_id === credential.accountId
         ? validActorIds(existing.allowed_user_ids)
         : [];

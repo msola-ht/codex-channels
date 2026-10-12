@@ -44,7 +44,7 @@ Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌�
 
 `secure-credential-store.ts` 提供 Surface 内部复用的 macOS Keychain、Linux AES-256-GCM 和 Windows
 DPAPI 主密钥 + AES-256-GCM 字符串记录机制；平台模块仍各自拥有 Service、目录、记录键、载荷校验
-和错误语义。
+和错误语义。macOS Keychain 命令失败在记录存储边界转换为安全错误，不传播含凭据参数的原始命令、标准输出或标准错误；读取和删除的记录不存在语义保持不变。
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap

@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
-import qrcode from "qrcode";
-
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import {
@@ -13,7 +11,7 @@ import {
   WeixinSetupSessionError,
   createWeixinSetupSession,
 } from "./weixin-setup-session.mjs";
-import { createPrompter } from "./terminal-prompter.mjs";
+import { ChannelSetupCancelled, createChannelPrompter, renderTerminalQRCode } from "./channel-setup-presentation.mjs";
 
 export async function runWeixinSetup({
   environment = process.env,
@@ -29,7 +27,7 @@ export async function runWeixinSetup({
   now = Date.now,
   createSetupSession = createWeixinSetupSession,
 } = {}) {
-  const prompt = prompter ?? createPrompter(input, output);
+  const prompt = prompter ?? createChannelPrompter(input, output);
   const ownerId = `codexc-setup:${randomUUID()}`;
   let session;
   let unsubscribe;
@@ -62,7 +60,7 @@ export async function runWeixinSetup({
   };
 
   try {
-    output.write("\nCodex Connect 微信 Setup\n\n");
+    output.write("\n通讯渠道 · 微信接入\n\n");
     output.write("扫码成功后，最终确认将安全保存连接并启用微信消息接收。\n");
     output.write("警告：微信可能用新连接替换并删除该账号已有的机器人连接。\n");
     if (!await prompt.confirm("确认继续扫码连接微信？", false)) {
@@ -85,7 +83,13 @@ export async function runWeixinSetup({
       if (status.qrCode && status.qrCode !== lastQrCode) {
         lastQrCode = status.qrCode;
         output.write("\n请使用微信扫描下面的二维码：\n\n");
-        renderQRCode(status.qrCode, output);
+        try {
+          renderQRCode(status.qrCode, output);
+        } catch (error) {
+          adapterError = error;
+          session.cancel(ownerId);
+          return;
+        }
       }
       if (
         status.upstreamStatus
@@ -112,7 +116,12 @@ export async function runWeixinSetup({
       }
     });
     session.start(ownerId);
-    const status = await session.waitForLogin(ownerId);
+    let status;
+    try {
+      status = await session.waitForLogin(ownerId);
+    } catch (error) {
+      throw adapterError ?? error;
+    }
     await verificationTask;
     if (adapterError) throw adapterError;
     if (status.state === "already-connected") {
@@ -160,6 +169,10 @@ export async function runWeixinSetup({
       activation: result.activation,
       activationResult: configActivationResult(result.activation),
     };
+  } catch (error) {
+    if (!(error instanceof ChannelSetupCancelled)) throw error;
+    output.write("已取消微信接入，未保存配置。\n");
+    return undefined;
   } finally {
     unsubscribe?.();
     if (session) {
@@ -180,7 +193,7 @@ function isTerminatedSetupStatus(status) {
 function weixinSetupFailure(status) {
   const code = status.error?.code ?? status.state;
   const messages = {
-    expired: "微信二维码登录合同验证超时",
+    expired: "微信二维码登录超时，请重新开始接入",
     cancelled: "微信 Setup 已取消",
     "refresh-limit": "微信二维码刷新次数已达到上限",
     timeout: "微信二维码请求超时",
@@ -231,16 +244,6 @@ function renderStatus(status, output) {
   if (messages[status]) {
     output.write(messages[status]);
   }
-}
-
-function renderTerminalQRCode(value, output) {
-  qrcode.toString(value, { type: "terminal", small: true }, (error, rendered) => {
-    if (error) {
-      output.write(`二维码渲染失败：${error.message}\n`);
-      return;
-    }
-    output.write(`${rendered}\n`);
-  });
 }
 
 function isDirectExecution(moduleUrl, argvPath) {
