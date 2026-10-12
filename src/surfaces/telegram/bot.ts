@@ -1083,7 +1083,7 @@ export class TelegramSurface {
     let file;
     try {
       try {
-        file = await this.videoInput.download(this.bot.api, fileId, fileSize, submitAttachment.signal);
+        file = await this.videoInput.download(this.bot.api, fileId, fileSize, { target: inputTarget, actorId }, submitAttachment.signal);
       } catch (error) {
         if (this.stopping) return;
         if (error instanceof UserFacingError && error.code.startsWith("video.")) {
@@ -1136,7 +1136,10 @@ export class TelegramSurface {
       }
     } finally {
       submitAttachment.dispose();
-      if (file !== undefined && !submitAttachment.mayHaveSubmitted) await this.videoInput.discard(file);
+      if (file !== undefined) {
+        if (submitAttachment.mayHaveSubmitted) this.videoInput.retain(file);
+        else await this.videoInput.discard(file);
+      }
     }
   }
 

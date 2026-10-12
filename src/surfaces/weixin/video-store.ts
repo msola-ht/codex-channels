@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { UserFacingError } from "../../conversation-core/index.js";
-import { VideoAttachmentStore, maximumVideoAttachmentBytes, type PreparedVideoAttachment } from "../video-attachment-store.js";
+import { VideoAttachmentStore, maximumVideoAttachmentBytes, type PreparedVideoAttachment, type VideoAttachmentScope } from "../video-attachment-store.js";
 import { downloadWeixinCdnBytes, resolveWeixinCdnUrl } from "./cdn-download.js";
 import { decryptWeixinMedia, parseWeixinMediaAesKey } from "./media-crypto.js";
 import type { WeixinFileReference, WeixinVideoReference } from "./protocol-types.js";
@@ -23,15 +23,16 @@ export class WeixinVideoStore {
     await this.storage.close();
   }
   discard(file: PreparedVideoAttachment): Promise<void> { return this.storage.discard(file); }
+  retain(file: PreparedVideoAttachment): void { this.storage.retain(file); }
 
-  download(reference: WeixinVideoReference | WeixinFileReference, inputSignal?: AbortSignal): Promise<PreparedVideoAttachment> {
-    const task = this.downloadOnce(reference, inputSignal);
+  download(reference: WeixinVideoReference | WeixinFileReference, scope: VideoAttachmentScope, inputSignal?: AbortSignal): Promise<PreparedVideoAttachment> {
+    const task = this.downloadOnce(reference, scope, inputSignal);
     this.downloads.add(task);
     void task.finally(() => this.downloads.delete(task)).catch(() => undefined);
     return task;
   }
 
-  private async downloadOnce(reference: WeixinVideoReference | WeixinFileReference, inputSignal?: AbortSignal): Promise<PreparedVideoAttachment> {
+  private async downloadOnce(reference: WeixinVideoReference | WeixinFileReference, scope: VideoAttachmentScope, inputSignal?: AbortSignal): Promise<PreparedVideoAttachment> {
     const signal = inputSignal ? AbortSignal.any([inputSignal, this.controller.signal]) : this.controller.signal;
     if (this.active >= 2 || signal.aborted) throw new UserFacingError("video.unavailable", "视频接收已停止或繁忙");
     this.active++;
@@ -61,7 +62,7 @@ export class WeixinVideoStore {
         if (!/^[a-f0-9]{32}$/iu.test(reference.declaredMd5)
           || createHash("md5").update(bytes).digest("hex") !== reference.declaredMd5.toLowerCase()) throw new Error("invalid checksum");
       }
-      return await this.storage.store({ stream: Readable.from([bytes]), contentLength: bytes.length }, signal);
+      return await this.storage.store({ stream: Readable.from([bytes]), contentLength: bytes.length }, scope, signal);
     } catch (error) {
       if (error instanceof UserFacingError) throw error;
       // CDN URLs and encryption keys must never cross the channel boundary.

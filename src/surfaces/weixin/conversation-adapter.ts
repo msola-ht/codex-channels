@@ -128,7 +128,7 @@ export class WeixinConversationAdapter {
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
     private readonly audios?: Pick<WeixinAudioPort, "download">,
-    private readonly videos?: Pick<WeixinVideoStore, "download" | "discard">,
+    private readonly videos?: Pick<WeixinVideoStore, "download" | "retain" | "discard">,
   ) {
     this.inputs = new SurfaceInputCoalescer(
       (target, input) => conversations.submit(target, input),
@@ -160,7 +160,7 @@ export class WeixinConversationAdapter {
         const videoSignal = AbortSignal.any([submit.signal, ...(signal ? [signal] : [])]);
         let file;
         try {
-          file = await this.videos.download(message.kind === "video" ? message.video : message.file, videoSignal);
+          file = await this.videos.download(message.kind === "video" ? message.video : message.file, { target: message.target, actorId: message.actorId }, videoSignal);
           videoSignal.throwIfAborted();
           if (this.inputOptions.isAllowed?.(message.target, message.actorId) === false) {
             return;
@@ -171,7 +171,10 @@ export class WeixinConversationAdapter {
           ].join("\n\n"));
         } finally {
           submit.dispose();
-          if (file !== undefined && !submit.mayHaveSubmitted) await this.videos.discard(file);
+          if (file !== undefined) {
+            if (submit.mayHaveSubmitted) this.videos.retain(file);
+            else await this.videos.discard(file);
+          }
         }
         return;
       }

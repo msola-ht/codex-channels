@@ -5,6 +5,7 @@ import { UserFacingError } from "../../conversation-core/index.js";
 import {
   VideoAttachmentStore,
   type PreparedVideoAttachment,
+  type VideoAttachmentScope,
 } from "../video-attachment-store.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 import {
@@ -50,10 +51,15 @@ export class TelegramVideoInput {
     return this.storage.discard(file);
   }
 
+  retain(file: PreparedVideoAttachment): void {
+    this.storage.retain(file);
+  }
+
   async download(
     api: TelegramFileApi,
     fileId: string,
     fileSize: number | undefined,
+    scope: VideoAttachmentScope,
     inputSignal?: AbortSignal,
   ): Promise<PreparedVideoAttachment> {
     validateSize(fileSize);
@@ -108,7 +114,7 @@ export class TelegramVideoInput {
       const file = await this.storage.store({
         stream: bounded,
         ...(response.contentLength === undefined ? {} : { contentLength: response.contentLength }),
-      }, signal);
+      }, scope, signal);
       if (signal.aborted) {
         await this.storage.discard(file);
         signal.throwIfAborted();

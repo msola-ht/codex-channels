@@ -79,7 +79,7 @@ export interface WeixinInputAdapterOptions {
   images?: Pick<WeixinImagePort, "download">;
   files?: Pick<WeixinFilePort, "download">;
   audios?: Pick<WeixinAudioPort, "download">;
-  videos?: Pick<WeixinVideoStore, "download" | "discard">;
+  videos?: Pick<WeixinVideoStore, "download" | "retain" | "discard">;
   doctor?: Omit<
     CreateWeixinDoctorOptions,
     "accountId" | "cursorStore" | "pollingHealth"

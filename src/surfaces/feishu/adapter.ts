@@ -120,7 +120,7 @@ export class FeishuConversationAdapter {
       quietWindowMs?: number;
       files?: Pick<FeishuFilePort, "download" | "discard">;
       audios?: Pick<FeishuAudioPort, "download">;
-      videos?: Pick<FeishuVideoPort, "download" | "discard">;
+      videos?: Pick<FeishuVideoPort, "download" | "retain" | "discard">;
       access?: SurfaceAccessPolicy;
       readQuotedText?(messageId: string): Promise<string | undefined>;
       onQuotedTextError?(error: unknown): void;
@@ -807,7 +807,7 @@ export class FeishuConversationAdapter {
         !signal.aborted && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
       );
       signal = AbortSignal.any([signal, submissionScope.signal]);
-      file = await videos.download(message.messageId, message.fileKey, signal);
+      file = await videos.download(message.messageId, message.fileKey, { target: message.target, actorId: message.actorId }, signal);
       check();
       const quotedText = await this.readQuotedText(message);
       check();
@@ -829,7 +829,10 @@ export class FeishuConversationAdapter {
       }
     } finally {
       submissionScope?.dispose();
-      if (!submitted && !submissionScope?.mayHaveSubmitted && file !== undefined) await videos.discard(file);
+      if (file !== undefined) {
+        if (submitted || submissionScope?.mayHaveSubmitted) videos.retain(file);
+        else await videos.discard(file);
+      }
     }
   }
 
