@@ -1,5 +1,6 @@
 import * as clackPrompts from "@clack/prompts";
 import { acceleratedServiceTierId, normalizeServiceTier } from "../runtime/service-tier.mjs";
+import { loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 
 import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
 import { runCodexSubagentsSetup } from "./codex-subagents-setup.mjs";
@@ -31,14 +32,6 @@ function serviceTierLabel(value) {
     ? serviceTierLabels[normalized] : `未知档位（${value}）`;
 }
 
-function compactHint(compact) {
-  const contextWindow = compact?.contextWindow ?? null;
-  const autoCompactPercent = compact?.autoCompactPercent ?? null;
-  return contextWindow === null
-    ? "当前：模型默认窗口 · 自动压缩默认 95%"
-    : `当前：${contextWindow.toLocaleString()} tokens · 自动压缩 ${autoCompactPercent === null ? "默认 95%" : `${autoCompactPercent}%`}`;
-}
-
 export async function runCodexUserSettingsSetup({
   environment = process.env,
   output = process.stdout,
@@ -48,53 +41,53 @@ export async function runCodexUserSettingsSetup({
   loadSettings = loadCodexUserSettings,
   updateSetting = updateCodexUserSetting,
   createClient,
-  primaryProvider,
+  primaryProvider = loadPrimaryModelProvider,
 } = {}) {
-  const settings = await loadSettings({ environment, createClient, primaryProvider });
+  const defaultsEditable = primaryProvider(environment) === "openai";
   const section = await prompts.select({
     message: "选择 Codex 新会话与用户偏好",
     showInstructions: false,
     options: [
-      ...(settings.defaultsEditable && settings.permissions.editable
+      ...(defaultsEditable
         ? [{
             value: "all",
             label: "配置核心默认值",
             hint: "一次确认并写入模型、加速档位与权限默认值",
           }]
         : []),
-      ...(settings.defaultsEditable
+      ...(defaultsEditable
         ? [{
             value: "defaults",
             label: "默认模型与思考等级",
-            hint: `${settings.defaults.model ?? "跟随官方默认"} · ${settings.defaults.reasoningEffort ?? "跟随模型默认"}`,
+            hint: "查看并选择默认模型与思考等级",
           }]
         : []),
-      ...(settings.defaultsEditable ? [{
+      ...(defaultsEditable ? [{
         value: "service-tier",
         label: "默认加速档位",
-        hint: `当前：${serviceTierLabel(settings.defaults.serviceTier)}`,
+        hint: "查看并选择 Standard、Fast 或 Ultrafast",
       }] : []),
       {
         value: "web-search",
         label: "联网搜索模式",
-        hint: settings.defaults.webSearch ?? "当前：未设置（默认缓存）",
+        hint: "查看并选择联网搜索方式",
       },
       {
         value: "update-plan",
         label: "计划清单工具",
-        hint: settings.defaults.updatePlanEnabled ? "当前：开启" : "当前：关闭",
+        hint: "查看并设置计划清单工具开关",
       },
       {
         value: "auto-recap",
         label: "空闲总结",
-        hint: settings.defaults.autoRecapEnabled ? "当前：开启" : "当前：关闭（默认）",
+        hint: "查看并设置空闲总结开关",
       },
-      ...(settings.defaultsEditable ? [{
+      ...(defaultsEditable ? [{
         value: "model-compact",
         label: "模型上下文与自动压缩",
-        hint: compactHint(settings.compact),
+        hint: "查看并设置上下文窗口与自动压缩比例",
       }] : []),
-      ...(settings.defaultsEditable ? [{
+      ...(defaultsEditable ? [{
         value: "preferences",
         label: "其他用户偏好",
         hint: "Plan、推理摘要（未配置默认 none）、输出详细程度、更新检查与历史",
@@ -102,42 +95,25 @@ export async function runCodexUserSettingsSetup({
       {
         value: "permissions",
         label: "沙盒、审批与网络",
-        hint: permissionHint(settings.permissions),
+        hint: "查看当前权限并设置用户默认值",
       },
       {
         value: "approvals-reviewer",
         label: "Codex 默认审批方式",
-        hint: settings.approvalsReviewer.editable
-          ? settings.approvalsReviewer.value === "auto_review" ? "当前：自动审查" : settings.approvalsReviewer.value === "user" ? "当前：手动审批" : "当前：未设置"
-          : settings.approvalsReviewer.reason === "unavailable"
-            ? "当前：只读，审批策略暂不可用"
-            : "当前：只读，检查配置或组织策略",
+        hint: "查看审批策略与手动／自动审查偏好",
       },
       { value: "tool-access", label: "电脑、浏览器与 MCP", hint: "查看合并配置，管理原生访问策略与已有 MCP 参数" },
-      ...(settings.defaultsEditable ? [{ value: "subagents", label: "子代理规则与配置（可选）", hint: "预览并选择写入全局规则、Codex 主配置；不默认启用" }] : []),
+      ...(defaultsEditable ? [{ value: "subagents", label: "子代理规则与配置（可选）", hint: "预览并选择写入全局规则、Codex 主配置；不默认启用" }] : []),
       { value: "back", label: "返回", hint: "返回设置类别" },
     ],
   });
   if (prompts.isCancel(section) || section === "back") return { action: "back" };
   if (section === "subagents") {
-    if (!settings.defaultsEditable) throw new Error("子代理预设仅对 OpenAI 主配置开放");
+    if (!defaultsEditable) throw new Error("子代理预设仅对 OpenAI 主配置开放");
     return subagentsSetup({ environment, output, prompts, createClient });
   }
-  if (section === "tool-access") {
-    return runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
-  }
-  if (section === "all") {
-    return runAllSettings({
-      environment,
-      output,
-      prompts,
-      settings,
-      updateSetting,
-      createClient,
-      primaryProvider,
-    });
-  }
   if (section === "defaults") {
+    output.write("正在读取 Codex 当前设置…\n");
     return defaultsSetup({
       environment,
       output,
@@ -148,6 +124,14 @@ export async function runCodexUserSettingsSetup({
       loadSettings,
       updateSetting,
     });
+  }
+  output.write("正在读取 Codex 当前设置…\n");
+  const settings = await loadSettings({ environment, createClient, primaryProvider });
+  if (section === "tool-access") {
+    return runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
+  }
+  if (section === "all") {
+    return runAllSettings({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
   }
   if (section === "service-tier") {
     return runServiceTierSetting({
@@ -735,13 +719,4 @@ async function promptPermissions(prompts, settings) {
     return null;
   }
   return { sandboxMode, approvalPolicy, networkAccess };
-}
-
-function permissionHint(permissions) {
-  if (!permissions.editable) return `当前使用 Permission Profile：${permissions.defaultPermissions}`;
-  return [
-    permissions.sandboxMode ?? "未显式设置 Sandbox",
-    permissions.approvalPolicy ?? "未显式设置审批",
-    `网络${permissions.networkAccess === true ? "开启" : "关闭"}`,
-  ].join(" · ");
 }

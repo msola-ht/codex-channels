@@ -59,7 +59,10 @@ const feishuSchema = z.strictObject({
     "app_secret 不能为空",
   ).optional(),
   allowed_open_ids: z.array(
-    z.string().trim().regex(/^ou_.+$/u),
+    z.string().trim().regex(
+      /^ou_[^\s,，;；]+$/u,
+      "每个 Open ID 须以 ou_ 开头，不能包含空白、逗号或分号",
+    ),
   ).min(1).refine(
     (values) => new Set(values).size === values.length,
     "allowed_open_ids 不能包含重复项",

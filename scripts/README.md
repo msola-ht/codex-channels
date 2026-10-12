@@ -242,8 +242,9 @@
   Fast 按模型目录精确 `priority`/`fast` ID、Ultrafast 按 `ultrafast` ID 开放，纯目录匹配与 Application、WebUI 共用 `runtime/service-tier.mjs`，预览和写入前重新校验所选模型及 Client 投影的独立开关；`fast_mode` / `ultrafast_mode` 分别结合合并配置与受管策略，不自动修改开关。设置页保留原始配置档位，关闭档位仍可退出到 Standard。
   快照保留已配置但不可用的模型 ID，未配置时只采用目录显式默认模型，不回退到其他条目；CLI/WebUI 提示先选有效模型，仍允许 Standard 退出加速。
   全局 Auto-review 默认值仅允许官方 OpenAI 主实例或复用官方模型目录的 Codex 兼容主实例开启；其他主实例仍可关闭，组织策略限制继续适用。
-- `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc config` 的“Codex 新会话与用户偏好”
-  适配器，只负责选择、预览和中文结果；可单独设置计划清单工具、TUI 空闲总结、Plan 思考等级、推理摘要（未配置时默认 `none`）、输出详细程度、
+- `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc config` 的“Codex 新会话与用户偏好”适配器。
+  分类菜单先显示，选择具体设置后再读取 App Server 状态；返回或取消不启动临时 App Server，默认模型入口不重复预读。
+  只负责选择、预览和中文结果；可单独设置计划清单工具、TUI 空闲总结、Plan 思考等级、推理摘要（未配置时默认 `none`）、输出详细程度、
   更新检查、历史保存与 Auto-review 审批审核人；Auto-review 单独显式确认，受管限制或未知值拒绝修改。
   第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
@@ -354,7 +355,8 @@
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
   从同一受审查来源生成共享模型目录；重复配置时保留仍受支持的
   默认模型与逐模型设置。
-- `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口，并允许
+- `channel-setup-presentation.mjs`：三个通讯渠道共用的 Clack 选择、输入、确认与取消适配器，以及微信、飞书共用的紧凑二维码渲染；保留完整模块、使用 L 级纠错，终端过窄或渲染失败时向调用方报告错误，由渠道取消扫码会话并返回向导。
+- `terminal-prompter.mjs`：为本机维护命令提供最小的终端文本、确认和可见凭据输入接口，并允许
   长流程通过 `AbortSignal` 中止尚未完成的问题。
 - `telegram-setup.mjs`：把 Telegram Bot 来源、长轮询冲突确认、允许名单输入和中文输出适配到
   `telegram-setup-session.mjs` 的结构化会话；复用统一 Codex `.env`、环境变量和系统代理解析；交互输入的
@@ -362,14 +364,14 @@
 - `telegram-setup-session.mjs` / `telegram-setup-session.d.mts`：提供所有者绑定的 Telegram Setup
   开始、状态、自动配对、允许名单预览、确认与取消接口；Bot Token 和一次性配对码只保存在有期限的
   进程内会话中，状态、预览和结果不返回 Token，取消和超时通过 grammY `AbortSignal` 中止验证或
-  长轮询，确认时检查 Telegram 配置未被并发改动后再原子写入。
+  长轮询；验证时拒绝已设置 Webhook 的 Bot，不自动解除已有接入。请求前及确认时校验配置版本和结构，确认时检查 Telegram 配置未被并发改动并校验候选配置后再原子写入。
 - `feishu-setup.mjs`：把手动凭据输入、Device Authorization 二维码、允许名单确认和中文输出适配到
   `feishu-setup-session.mjs` 的结构化会话；扫码时由飞书授权页选择新建或已有企业自建应用，只申请
   私聊接收与发送、流式卡片、应用自管理检测、受控配置写入和命令中心所需权限、事件与回调。
 - `feishu-setup-session.mjs` / `feishu-setup-session.d.mts`：提供所有者绑定的飞书 Setup 开始、状态、
   脱敏预览、确认与取消接口；手动与扫码两种方式都验证凭据和 Bot 身份，扫码授权、Bot 验证与终端
   等待共用整体期限及真实 `AbortSignal`。App Secret 与短期授权只由进程内会话持有，确认时检查飞书
-  配置未被并发改动后再原子保存；扫码模式只保存本次扫码用户，并在保存后保留已有菜单、自动发布
+  配置未被并发改动后再原子保存；请求前及写入前校验配置版本与结构，手动模式仅在 App ID 相同时提供原允许名单。扫码模式只保存本次扫码用户，并在保存后保留已有菜单、自动发布
   `codexc_home` 悬浮菜单、长连接事件与卡片回调。远程配置失败时保留已保存的连接配置，并返回脱敏
   警告供终端提示通过 `codexc doctor` 和重新扫码恢复。
 - `weixin-setup.mjs`：从统一 Setup 菜单执行连接替换风险确认、微信扫码和严格结果裁剪，把
@@ -379,10 +381,11 @@
 - `weixin-setup-session.mjs` / `weixin-setup-session.d.mts`：提供所有者绑定的微信 Setup 开始、状态、
   配对码提交、确认与取消接口；二维码和凭据只保存在有期限的进程内会话中，状态与保存预览不返回
   Bot Token，取消和超时会中止底层请求并丢弃临时状态，确认时检查微信配置未被并发改动后复用原子
-  凭据/配置回滚事务；写入异常时同时核对原子替换的文件身份和目标配置，不能用旧配置值相同判定提交成功。
+  凭据/配置回滚事务；扫码前及凭据写入前校验配置版本与结构。写入异常时同时核对原子替换的文件身份和目标配置，不能用旧配置值相同判定提交成功。
 - `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份、应用权限、
   消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
-  稳定错误。
+  稳定错误；每次凭据验证使用独立 Token 缓存，鉴权和 Bot 查询均受请求期限与会话取消约束。
+- `feishu-registration.mjs` / `feishu-registration-worker.mjs`：在独立 Worker 内复用锁定 SDK 的扫码注册，限定注册开始和轮询请求期限；父端取消、失败或完成后等待 Worker 终止，不在后台遗留注册请求，也不更改主进程的 SDK HTTP 默认值。
 - `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单、目录创建与已有目录注册，并调用统一的 Workspace 权限设置用例；
   `list --json` 返回稳定的 Workspace 注册摘要；CLI 入口只负责分发。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。

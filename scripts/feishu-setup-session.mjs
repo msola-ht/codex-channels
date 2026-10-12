@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import { registerApp } from "@larksuiteoapi/node-sdk";
-
 import {
   readGatewayConfig,
+  validateGatewayConfigStructureDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { validateFeishuApplication } from "./feishu-application.mjs";
+import { registerFeishuApplication } from "./feishu-registration.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 const appIdPattern = /^cli_[0-9a-fA-F]{16}$/u;
@@ -86,9 +86,10 @@ class FeishuSetupSession {
     const environment = options.environment ?? process.env;
     this.#configPath = requireUserConfig(environment).configPath;
     this.#document = readGatewayConfig(this.#configPath);
+    validateGatewayConfigStructureDocument(this.#document);
     this.#existing = table(this.#document.feishu);
     this.#existingFingerprint = fingerprint(this.#existing);
-    this.#registerApplication = options.registerApplication ?? registerApp;
+    this.#registerApplication = options.registerApplication ?? registerFeishuApplication;
     this.#validateApplication = options.validateApplication
       ?? validateFeishuApplication;
     this.#configureApplication = options.configureApplication
@@ -100,6 +101,7 @@ class FeishuSetupSession {
   start(ownerId, input) {
     this.#assertOwner(ownerId);
     if (this.#state !== "created") throw invalidState("start", this.#state);
+    validateGatewayConfigStructureDocument(readGatewayConfig(this.#configPath));
     const mode = setupMode(input?.mode);
     let manualCredential;
     if (mode === "manual") {
@@ -183,21 +185,23 @@ class FeishuSetupSession {
       throw invalidState("confirm", this.#state);
     }
     const currentDocument = readGatewayConfig(this.#configPath);
+    validateGatewayConfigStructureDocument(currentDocument);
     if (fingerprint(table(currentDocument.feishu)) !== this.#existingFingerprint) {
       throw invalid("stale-session", "session", "飞书配置已变化，请重新开始 Setup");
     }
-    this.#clearTimeout();
-    this.#setState("saving");
     const credential = this.#credential;
     const allowedOpenIds = [...this.#preview.allowedOpenIds];
+    currentDocument.feishu = {
+      ...this.#existing,
+      enabled: true,
+      app_id: credential.appId,
+      app_secret: credential.appSecret,
+      allowed_open_ids: allowedOpenIds,
+    };
+    validateGatewayConfigStructureDocument(currentDocument);
+    this.#clearTimeout();
+    this.#setState("saving");
     try {
-      currentDocument.feishu = {
-        ...this.#existing,
-        enabled: true,
-        app_id: credential.appId,
-        app_secret: credential.appSecret,
-        allowed_open_ids: allowedOpenIds,
-      };
       this.#writeConfig(this.#configPath, currentDocument);
     } catch (error) {
       this.#fail("save-failed");
@@ -259,6 +263,7 @@ class FeishuSetupSession {
       const bot = await this.#validateBot();
       if (!activeState(this.#state)) return;
       const configuredAllowedOpenIds = this.#mode === "manual"
+        && this.#credential.appId === this.#existing.app_id
         ? validConfiguredOpenIds(this.#existing.allowed_open_ids)
         : [];
       this.#application = {
@@ -402,8 +407,8 @@ export function normalizeOpenIds(values) {
   for (const raw of values) {
     const value = String(raw).trim();
     if (!value) continue;
-    if (!openIdPattern.test(value)) {
-      throw new Error(`无效的飞书用户 Open ID：${value}`);
+    if (!openIdPattern.test(value) || /[\s,，;；]/u.test(value)) {
+      throw new Error("无效的飞书用户 Open ID：每项须以 ou_ 开头，不能包含空白或分隔符；多个用户请用英文逗号分隔。");
     }
     if (!openIds.includes(value)) openIds.push(value);
   }

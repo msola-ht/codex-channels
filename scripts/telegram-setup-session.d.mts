@@ -90,6 +90,7 @@ export function createTelegramSetupSession(
     createSessionId?: () => string;
     createClient?: (token: string, proxyUrl?: string) => {
       getMe(signal?: AbortSignal): Promise<{ username?: string }>;
+      getWebhookInfo(signal?: AbortSignal): Promise<{ url: string }>;
       getUpdates(parameters: object, signal?: AbortSignal): Promise<unknown[]>;
     };
     createPairingCode?: () => string;

@@ -119,7 +119,7 @@ Gateway 设置，并提供不显示凭据、令牌或代理值的配置总览。
 启用状态或凭据变化需要重启 Gateway，允许 Open ID 集合可热加载；允许名单收窄时同时清理该飞书
 账号下已撤权 Actor 的绑定。
 
-微信 Setup 写入默认禁用的 `weixin` 表，只包含 `enabled`、账号 ID 和允许用户 ID；Bot Token
+微信 Setup 在最终确认保存后写入已启用的 `weixin` 表，只包含 `enabled`、账号 ID 和允许用户 ID；Bot Token
 位于独立安全凭据后端。整表缺失或 `enabled = false` 时运行配置不包含微信账号；显式启用后
 账号或启用状态变化需要重启 Gateway；允许用户新增可热加载，允许名单收窄需要重启 Gateway，
 并在重新组合 Surface 时清理被撤权 Actor 的绑定和 App Server 订阅。

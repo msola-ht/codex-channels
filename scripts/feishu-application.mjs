@@ -1,4 +1,4 @@
-import { Client, LoggerLevel } from "@larksuiteoapi/node-sdk";
+import { Client, DefaultCache, LoggerLevel, defaultHttpInstance } from "@larksuiteoapi/node-sdk";
 
 const appIdPattern = /^cli_[0-9a-fA-F]{16}$/u;
 const openIdPattern = /^ou_.+$/u;
@@ -18,14 +18,33 @@ export async function validateFeishuApplication(
   ) {
     throw new Error("飞书应用凭据格式无效");
   }
+  if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
+    throw new Error("飞书应用请求超时时间无效");
+  }
 
   try {
+    signal?.throwIfAborted();
+    const request = (options) => defaultHttpInstance.request({
+      ...options,
+      timeout: requestTimeoutMs,
+      signal: globalThis.AbortSignal.any([
+        globalThis.AbortSignal.timeout(requestTimeoutMs),
+        ...(signal ? [signal] : []),
+      ]),
+    });
     const client = createClient({
       appId,
       appSecret,
       logger: silentSdkLogger,
       loggerLevel: LoggerLevel.error,
       source: "codexc",
+      // App ID alone is the SDK's shared cache key; every credential check
+      // must authenticate the supplied secret instead of reusing another token.
+      cache: new DefaultCache(),
+      httpInstance: {
+        request,
+        post: (url, data, options) => request({ ...options, method: "POST", url, data }),
+      },
     });
     const response = await client.request({
       method: "GET",
