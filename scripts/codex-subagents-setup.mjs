@@ -13,52 +13,52 @@ const endMarker = "<!-- codexc:subagents:end -->";
 const rules = `${startMarker}
 ## Subagents
 
-### 职责与模型
+### Responsibilities and models
 
-- 主代理负责理解用户需求和最新纠正、确定授权边界、拆分任务、处理关键决策、协调依赖、整合结果及最终交付。小任务、强耦合工作或不值得额外协调的任务可以直接完成。
-- 只有主代理可以派发；尊重用户不使用子代理的要求。子代理不得创建、调用或请求新的子代理。委派不扩大用户授权，不改变全局规则、项目规则及完成要求；未启用或未使用子代理时，主代理完成同样的必要工作。
-- 默认使用 \`gpt-6.1-sol\`，\`reasoning_effort="high"\`：负责代码阅读与理解、日常审查、实现、重构、命令执行和故障诊断。
-- 使用 \`gpt-6-luna\`，\`reasoning_effort="max"\`：负责范围明确、低风险、结果容易核对的文件定位、符号检索、资料摘录和清单整理。实质代码修改、跨模块语义分析，以及授权、并发或数据一致性判断交给 Sol。
-- 使用 \`gpt-6-astra\`，\`reasoning_effort="high"\`：仅用于明确的复杂设计取舍、已有证据仍不能解释的关键疑点，或高影响问题的独立审查。派发时说明具体问题和预期产物。
-- 主代理已经使用 Astra 时，复杂判断优先自行处理；只有独立视角或并行处理能提供明确收益时，才额外派发 Astra。
-- 不要求用满并发容量，不建立固定的 Luna → Sol → Astra 流程。文件数量多、代码长或普通检查失败，不单独构成升级模型的理由。
+- The primary agent is responsible for understanding the user's needs and latest corrections, establishing authorization boundaries, splitting tasks, making key decisions, coordinating dependencies, integrating results, and delivering the final outcome. Handle small tasks, tightly coupled work, or work that does not justify additional coordination directly.
+- Only the primary agent may delegate; respect a user's request not to use subagents. Subagents must not spawn, invoke, or request new subagents. Delegation does not expand user authorization or change global rules, project rules, or completion requirements. When subagents are disabled or unused, the primary agent must complete the same necessary work.
+- Default to \`gpt-6.1-sol\` with \`reasoning_effort="high"\` for code reading and understanding, routine review, implementation, refactoring, command execution, and troubleshooting.
+- Use \`gpt-6-luna\` with \`reasoning_effort="max"\` for clearly scoped, low-risk, easily checked file discovery, symbol searches, source excerpts, and inventory preparation. Assign substantive code changes, semantic analysis across modules, and judgments about authorization, concurrency, or data consistency to Sol.
+- Use \`gpt-6-astra\` with \`reasoning_effort="high"\` only for specific complex design tradeoffs, key uncertainties that existing evidence cannot explain, or independent review of high-impact issues. State the concrete question and expected deliverable when delegating.
+- When the primary agent already uses Astra, prefer handling complex judgments directly. Delegate to another Astra only when an independent perspective or parallel work offers a clear benefit.
+- Do not require all concurrency slots to be filled or establish a fixed Luna → Sol → Astra pipeline. File count, code length, or an ordinary check failure alone does not justify moving to a more capable model.
 
-### 派发与上下文
+### Delegation and context
 
-- 只有独立交付物的预期收益大于派发、协调及复核成本时才委派。通常派发主代理能够同时推进其他工作的独立任务，或需要独立视角的任务；能够顺手完成的简单操作直接处理，无需单独进行成本评估。避免多个代理重复搜索、调查或实现同一范围。
-- 使用 \`fork_turns="none"\`，提供自包含简报：用户目标与最新纠正、允许和禁止的操作、工作目录、任务范围及非目标、文件与任务归属、必要输入、已有证据、依赖和交付要求。
-- 携带适用指令的必要原文，不复制整份无关历史，也不只提供规则路径。不得假定子代理自动获得父对话中的用户消息。明确写入："Do not spawn, invoke, or request any new subagents."
-- 审查按模块或风险边界拆分，实现按文件所有权拆分。同一文件同一时间只有一个写入者，保留已有用户和代理改动；涉及共同接口时，先约定接口和归属，再并行处理。
-- 提供可核验的背景和已有证据，不把主代理或其他代理的推断当成已确认事实。复用证据前确认输入和适用范围仍一致。
+- Delegate only when the expected benefit of an independent deliverable exceeds the cost of delegation, coordination, and review. Usually delegate independent tasks that let the primary agent advance other work concurrently, or tasks needing an independent perspective. Handle straightforward operations directly without a separate cost assessment. Avoid having multiple agents repeat searches, investigations, or implementation in the same scope.
+- Use \`fork_turns="none"\` and provide a self-contained brief: the user's goal and latest corrections, allowed and prohibited actions, working directory, scope and non-goals, file and task ownership, required inputs, existing evidence, dependencies, and delivery requirements.
+- Include the necessary verbatim excerpts of applicable instructions. Do not copy an entire irrelevant history or provide only paths to rule files. Do not assume subagents automatically receive user messages from the parent conversation. Explicitly include: "Do not spawn, invoke, or request any new subagents."
+- Split reviews by module or risk boundary, and implementation by file ownership. Allow only one writer per file at a time and preserve existing user and agent changes. For shared interfaces, agree on the interface and ownership before working in parallel.
+- Provide verifiable context and existing evidence. Do not present the primary agent's or another agent's inferences as confirmed facts. Before reusing evidence, confirm that its inputs and applicable scope remain unchanged.
 
-### 执行与交接
+### Execution and handoff
 
-- 子代理负责既定范围内的调查、执行、必要修正、自审和异步结果回收。只读任务不得修改；能够在范围内自主解决的问题应继续处理。
-- 遇到缺失授权、超出任务范围或无法解决的阻塞时，报告具体原因、已有证据和剩余工作，不猜测结果，不自行扩大任务。
-- 执行期间仅交换依赖、接口、阻塞和用户纠正等必要信息。运行中的同一任务允许澄清、纠正和收缩范围，这不算追加任务；不得借消息新增独立交付物或激活已结束的代理。纠正使原任务实质改变时，由主代理决定停止并重新派发。
-- 用户纠正、取消或授权变化影响在途任务时，主代理及时传达并停止受影响的后续操作，重新确认范围、归属和证据有效性。无关且可独立继续的工作可以继续。
-- 每个子代理从初次派发到交付或终止只执行一轮。任何阶段均不调用 \`followup_task\`；交付或终止后不复用、不追加任务。后续由主代理处理，或派发新代理。
-- 子代理应回收自己启动的异步作业并解释结果后再报告完成。确需交接未完成工作时，明确其状态、句柄、剩余操作和资源归属，由主代理接管；返回句柄本身不构成完成。
-- 交接前确认本任务拥有的冲突操作已经停止，并明确转移文件和作业归属。不得据此终止用户或其他任务的进程与服务。
-- 优先使用完成通知和现有作业句柄，按预计耗时及工具指导安排等待。不得仅因等待较久就重复执行、重启作业、派发相同任务或声称有进展。
+- Subagents own investigation, execution, necessary corrections, self-review, and collection of asynchronous results within their assigned scope. Read-only tasks must not modify anything. Continue resolving issues independently when they are within scope.
+- When authorization is missing, an issue is outside scope, or a blocker cannot be resolved, report the specific cause, existing evidence, and remaining work. Do not guess results or expand the task independently.
+- During execution, exchange only necessary information about dependencies, interfaces, blockers, and user corrections. Clarifying, correcting, or narrowing the same running task is allowed and does not count as adding a task. Do not use messages to add independent deliverables or reactivate finished agents. If a correction materially changes the original task, the primary agent decides whether to stop it and delegate a new task.
+- When user corrections, cancellation, or authorization changes affect work in progress, the primary agent must promptly communicate them, stop affected subsequent operations, and reassess scope, ownership, and evidence validity. Unrelated work that can proceed independently may continue.
+- Each subagent performs only one task cycle, from initial delegation to delivery or termination. Never call \`followup_task\` at any stage. Do not reuse an agent or add tasks after delivery or termination. The primary agent handles subsequent work or delegates to a new agent.
+- Subagents must collect results from asynchronous jobs they started and explain those results before reporting completion. If unfinished work must be handed off, explicitly identify its status, handles, remaining operations, and resource ownership for the primary agent to take over. Returning a handle alone does not constitute completion.
+- Before handoff, confirm that conflicting operations owned by the task have stopped, and explicitly transfer file and job ownership. This does not authorize terminating processes or services belonging to the user or other tasks.
+- Prefer completion notifications and existing job handles. Schedule waits according to expected duration and tool guidance. A long wait alone does not justify repeating execution, restarting a job, delegating the same task again, or claiming progress.
 
-### 报告与主代理复核
+### Reporting and primary-agent review
 
-- 报告与任务规模相称，提供具体结论、必要文件或符号位置、事实依据、实际改动、已观察结果及剩余限制。区分观察与推断，避免重复简报和粘贴大量源码。
-- 说明证据对应的产物状态与关键输入；发生并发变化时，指出哪些结论仍有效。审查发现应包含触发条件、影响和建议；未发现问题时，说明审查范围和限制，不能只说“没有问题”。
-- 主代理读完整报告，将任务要求、证据与当前产物对应起来。发生改动时核对实际变更范围，重点检查授权边界、关键判断和跨模块相互作用。
-- 先利用报告中的定位和证据进行针对性复核，不把逐文件重读、重复完整调查或重跑已有效验证作为默认完成条件。证据不足、结论矛盾、输入变化、集成风险或高影响疑点出现时，再扩大复核范围。
-- 子代理自报完成不能直接视为任务完成。主代理仍负责项目要求的最终验证和交付；无法观察的行为应明确说明，不得用推断冒充成功。子代理只提供其任务所需的证据，不必各自重复完整用户路径。
-- 不因委派自动增加固定二审。用户明确要求或项目规定的完整审查、独立审查和验证必须执行，不得以节省成本缩减范围。
-- 独立审查可以复用可核验的输入与实际观察，但必须自行形成判断。仅核对已有发现时，应称为发现复核，不得冒充完整独立审查。
-- 最终声明必须对应实际审查覆盖。整合子代理的完整审查结果并做针对性复核，可以报告团队完成了相应范围的审查；不得描述为主代理亲自重新进行了全量审查。未覆盖范围和仍依赖推断的部分应明确说明。
+- Scale reports to the task. Provide concrete conclusions, necessary file or symbol locations, factual support, actual changes, observed results, and remaining limitations. Distinguish observations from inferences; avoid repeating the brief or pasting large amounts of source code.
+- Identify the artifact state and key inputs to which the evidence applies. If concurrent changes occur, state which conclusions remain valid. Review findings must include triggers, impact, and recommendations. If no issues are found, describe the review scope and limitations rather than merely saying "no issues."
+- The primary agent must read the full report and reconcile the task requirements and evidence with the current artifacts. When changes were made, verify their actual scope, focusing on authorization boundaries, key judgments, and interactions across modules.
+- Start with targeted review using the report's locations and evidence. Do not make rereading every file, repeating a full investigation, or rerunning still-valid verification a default completion condition. Expand the review when evidence is insufficient, conclusions conflict, inputs change, or integration risks or high-impact uncertainties arise.
+- A subagent's completion claim does not establish that the task is complete. The primary agent remains responsible for final verification and delivery required by the project. State which behavior could not be observed; do not present inference as successful observation. Subagents need only provide evidence for their assigned tasks, rather than each repeating the entire user path.
+- Delegation does not automatically add a mandatory second review. Complete any full review, independent review, or verification explicitly requested by the user or required by the project; do not reduce that scope to save cost.
+- Independent review may reuse verifiable inputs and actual observations, but the reviewer must form an independent judgment. Checking only existing findings must be described as findings verification, not as a full independent review.
+- Final claims must match actual review coverage. After integrating complete subagent reviews and performing targeted review, the primary agent may report that the team reviewed the corresponding scope. Do not describe this as the primary agent personally repeating the entire review. Explicitly identify uncovered areas and conclusions that still rely on inference.
 
-### 能力限制与回退
+### Capability limits and fallback
 
-- 遵守当前工具契约和有效配置。有限展示名单缺少某个模型，不单独证明模型不可用；工具明确限定可用值时，必须遵守。
-- 区分模型或思考等级不支持、参数错误、临时故障和授权拒绝。明确不支持的精确组合不重复尝试；临时故障按工具指导处理；授权拒绝不得通过更换模型或路径绕过。
-- 不把单个模型失败推断为所有模型不可用。不盲目省略 \`model\` 或 \`reasoning_effort\` 回退，因为默认值和角色配置可能改变实际模型、思考等级及成本。
-- 无法确认合适目标时，由主代理接手自身能力范围内的工作，并报告限制。不得自动修改用户配置或改用 Astra 来强行完成派发。
+- Follow the current tool contract and effective configuration. A model's absence from a limited display list alone does not prove it is unavailable. Honor any explicit limits on accepted values in the tool contract.
+- Distinguish unsupported models or reasoning levels, invalid parameters, transient failures, and authorization denials. Do not retry an exact combination known to be unsupported. Handle transient failures according to tool guidance. Never bypass an authorization denial by changing the model or execution path.
+- Do not infer that all models are unavailable from a single model failure. Do not blindly fall back by omitting \`model\` or \`reasoning_effort\`, because defaults and role configuration may change the actual model, reasoning level, and cost.
+- If no suitable target can be confirmed, the primary agent takes over work within its own capabilities and reports the limitation. Do not automatically change user configuration or switch to Astra to force delegation through.
 ${endMarker}`;
 
 const preset = [
