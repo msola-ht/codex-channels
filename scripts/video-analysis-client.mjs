@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { lstat, open, realpath, stat } from "node:fs/promises";
-import { extname, isAbsolute, join } from "node:path";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Agent, request } from "undici";
 
 const maximumVideoBytes = 64 * 1024 * 1024;
@@ -55,11 +55,11 @@ export async function videoConfiguration(environment) {
 
 export const videoTool = {
   name: "analyze_video",
-  description: "将指定视频发送给管理员配置的 Strata 模型并返回分析文字。video 是授权目录直属文件名，不是路径或 URL。只分析画面，不分析音轨；每次调用独立，追问须再次指定视频。",
+  description: "将指定视频发送给管理员配置的 Strata 模型并返回分析文字。video 接受授权目录直属文件名，或该目录及子目录内的本机绝对路径，不接受 URL。只分析画面，不分析音轨；每次调用独立，追问须再次指定视频。",
   inputSchema: {
     type: "object", additionalProperties: false, required: ["video", "question"],
     properties: {
-      video: { type: "string", minLength: 1, maxLength: 255, description: "授权视频目录中的直属文件名，例如 clip.mp4。" },
+      video: { type: "string", minLength: 1, maxLength: 4096, description: "授权目录直属文件名（最多 255 字符），或目录及子目录内的本机绝对路径（最多 4096 字符）。路径属于 MCP 所在主机。" },
       question: { type: "string", minLength: 1, maxLength: 16000, description: "视频分析问题；可要求按时间顺序描述并标出时间戳。" },
       max_output_tokens: { type: "integer", minimum: 64, maximum: 4096, default: 1024 },
     },
@@ -70,13 +70,12 @@ export const videoTool = {
 function validateArguments(args) {
   if (!args || typeof args !== "object" || Array.isArray(args)
       || Object.keys(args).some((key) => !["video", "question", "max_output_tokens"].includes(key))
-      || typeof args.video !== "string" || !args.video || args.video.length > 255
-      || /[/\\:]/u.test(args.video) || [...args.video].some((character) => character.charCodeAt(0) < 32)
-      || [".", ".."].includes(args.video)
+      || typeof args.video !== "string" || !args.video || args.video.length > 4096
+      || [...args.video].some((character) => character.charCodeAt(0) < 32)
       || typeof args.question !== "string" || !args.question.trim() || args.question.length > 16000
       || (args.max_output_tokens !== undefined && (!Number.isInteger(args.max_output_tokens)
         || args.max_output_tokens < 64 || args.max_output_tokens > 4096))) {
-    fail("invalid_arguments", "需要 video 直属文件名和非空 question；max_output_tokens 为 64–4096 的整数，不接受其他参数。");
+    fail("invalid_arguments", "需要 video 文件名或本机绝对路径和非空 question；max_output_tokens 为 64–4096 的整数，不接受其他参数。");
   }
   const mime = mimeTypes.get(extname(args.video).toLowerCase());
   if (!mime) fail("unsupported_video", "只接受 mp4、mov、webm、mkv、avi、ts 视频文件。");
@@ -89,10 +88,27 @@ function sameFile(left, right) {
 }
 
 async function readVideo(root, name, signal) {
-  const path = join(root, name);
+  const absolute = isAbsolute(name);
+  // Reject traversal before normalization, Windows device/UNC paths and ADS.
+  // On POSIX, backslashes and colons are deliberately outside this contract.
+  if (name.split(/[/\\]/u).some((part) => part === "." || part === "..")
+      || (absolute && (process.platform === "win32"
+        ? !/^[a-z]:[/\\]/iu.test(name) || name.slice(2).includes(":")
+        : /[\\:]/u.test(name)))
+      || (!absolute && (name.length > 255 || /[/\\:]/u.test(name)))) {
+    fail("invalid_arguments", "video 只接受直属文件名或本机绝对路径，不接受相对路径、URL、点路径或设备路径。");
+  }
+  const path = absolute ? resolve(name) : join(root, name);
+  const withinRoot = relative(root, path);
+  if (!withinRoot || isAbsolute(withinRoot) || withinRoot === ".." || withinRoot.startsWith(`..${sep}`)) {
+    fail("unsafe_file", "视频路径必须位于 STRATA_VIDEO_ROOT 授权目录内。");
+  }
   let handle;
   try {
     signal.throwIfAborted();
+    if (await realpath(path) !== path) {
+      fail("unsafe_file", "视频路径及其子目录不能包含链接；请使用授权目录内的真实路径。");
+    }
     const before = await lstat(path);
     if (!before.isFile() || before.nlink !== 1) {
       fail("unsafe_file", "视频必须是普通文件，不能是链接、目录或设备。");
