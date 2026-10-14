@@ -25,6 +25,7 @@ interface AsyncQuestionOptions {
   currentThread(target: ConversationTarget): string | undefined;
   submit(target: ConversationTarget, threadId: string, text: string, isCurrent: () => boolean): Promise<unknown>;
   warn(event: QuestionEvent, message: string): void;
+  settled?(threadId: string): void;
 }
 
 /** Owns live optional questions; answers are ordinary Turn input, never RPC responses. */
@@ -83,12 +84,17 @@ export class AsyncQuestionCoordinator {
       this.active.delete(key);
       if (!this.stopped) this.remember(key);
       this.tasks.delete(task);
+      if (!this.stopped) this.options.settled?.(event.threadId);
     });
     this.tasks.add(task);
   }
 
   cancelStale(): void {
     this.cancelMatching((pending) => this.options.currentThread(pending.event.target) !== pending.event.threadId);
+  }
+
+  hasPendingForThread(threadId: string): boolean {
+    return [...this.pending].some(({ event }) => event.threadId === threadId);
   }
 
   cancelThread(threadId: string): void {

@@ -35,6 +35,7 @@ export interface BindingRestoreCoordinatorOptions {
   output: EventBus<OutputEvent>;
   enabledSurfaces(): readonly Pick<SurfaceAdapter, "surface" | "accountId">[];
   scheduledRecovery(): ScheduledBindingRecoveryPort | undefined;
+  releaseBackground(threadId: string, isCurrent: () => boolean): Promise<boolean>;
   restored?(threadId: string): void;
   markTurnStarted(
     target: ConversationBinding["target"],
@@ -46,6 +47,7 @@ export interface BindingRestoreCoordinatorOptions {
 
 export class BindingRestoreCoordinator {
   private readonly disconnectedProviders = new Set<string>();
+  private readonly providerDisconnectGenerations = new Map<string, number>();
   private readonly disconnectedBindingsByProvider = new Map<string, Set<string>>();
   private readonly pendingBindingRestores = new Map<string, PendingBindingRestore>();
   private readonly restoringThreadIds = new Set<string>();
@@ -69,6 +71,10 @@ export class BindingRestoreCoordinator {
   }
 
   markProviderDisconnected(provider: string, threadIds: ReadonlySet<string>): void {
+    this.providerDisconnectGenerations.set(
+      provider,
+      (this.providerDisconnectGenerations.get(provider) ?? 0) + 1,
+    );
     this.disconnectedProviders.add(provider);
     if (threadIds.size === 0) return;
     const existing = this.disconnectedBindingsByProvider.get(provider);
@@ -121,6 +127,10 @@ export class BindingRestoreCoordinator {
     const scheduledRecovery = this.options.scheduledRecovery();
     const scheduledThreadIds = scheduledRecovery?.runningThreadIds()
       ?? new Set<string>();
+    const disconnectGenerations = new Map(this.providerDisconnectGenerations);
+    const disconnectedProviders = new Set(this.disconnectedProviders);
+    const bindingProviders = new Map(this.options.router.allBindings().map((binding) =>
+      [binding.threadId, this.options.codex.knownProvider(binding.threadId)]));
     const candidateThreadIds = new Set(
       this.options.router.allBindings()
         .filter((binding) => {
@@ -153,28 +163,30 @@ export class BindingRestoreCoordinator {
       this.restoringThreadIds.add(threadId);
     }
     const restoredThreadIds = new Set<string>();
+    const restoredBindings = new Map<string, ConversationBinding>();
+    const releasedThreadIds = new Set<string>();
+    const isConnectionCurrent = (binding: ConversationBinding): boolean => {
+      if (this.stopped || !candidateThreadIds.has(binding.threadId)) return false;
+      const currentProvider = this.options.codex.knownProvider(binding.threadId);
+      const expectedProvider = bindingProviders.get(binding.threadId);
+      if (expectedProvider !== undefined && currentProvider !== expectedProvider) return false;
+      if (currentProvider === undefined) return true;
+      return (this.providerDisconnectGenerations.get(currentProvider) ?? 0)
+          === (disconnectGenerations.get(currentProvider) ?? 0)
+        && (provider === currentProvider || !disconnectedProviders.has(currentProvider));
+    };
+    const canRestore = (binding: ConversationBinding): boolean =>
+      isConnectionCurrent(binding) && this.isCurrentBinding(binding);
     let failures: SubscriptionRestoreFailure[];
     try {
       failures = await this.options.router.restoreSubscriptions(
-        (_target, binding) => !this.stopped && candidateThreadIds.has(binding.threadId),
+        (_target, binding) => canRestore(binding),
         (binding, thread) => {
-          if (this.stopped) return;
+          if (!canRestore(binding)) return;
+          bindingProviders.set(binding.threadId, this.options.codex.knownProvider(binding.threadId));
           restoredThreadIds.add(binding.threadId);
-          if (thread.status.type !== "active") {
-            if (
-              this.options.router.isBackgroundThread(binding.threadId)
-              && !scheduledThreadIds.has(binding.threadId)
-            ) {
-              this.options.output.publish({
-                type: "warning",
-                target: binding.target,
-                threadId: binding.threadId,
-                background: true,
-                message: "后台任务已在 Gateway 离线期间结束，可通过 /resume 查看完整会话。",
-              }, true);
-            }
-            return;
-          }
+          restoredBindings.set(binding.threadId, binding);
+          if (thread.status.type !== "active") return;
           if (thread.activeTurnId) {
             this.options.markTurnStarted(
               binding.target,
@@ -199,8 +211,53 @@ export class BindingRestoreCoordinator {
             ? {}
             : { modelProvider: task.modelProvider };
         },
-        (binding) => scheduledThreadIds.has(binding.threadId),
       );
+      // Router has released the per-Thread restore locks. Background cleanup
+      // must use Application's complete descendant/Queue/interaction checks.
+      for (const [threadId, binding] of restoredBindings) {
+        if (!canRestore(binding)) {
+          restoredThreadIds.delete(threadId);
+          continue;
+        }
+        if (
+          !this.options.router.isBackgroundThread(threadId)
+          || scheduledThreadIds.has(threadId)
+        ) continue;
+        const isCurrent = () => canRestore(binding)
+          && this.options.router.isBackgroundThread(threadId);
+        try {
+          const released = await this.options.releaseBackground(threadId, isCurrent);
+          if (!isConnectionCurrent(binding)) {
+            restoredThreadIds.delete(threadId);
+            continue;
+          }
+          if (released) {
+            if (this.options.router.allBindings().some((current) => current.threadId === threadId)) {
+              restoredThreadIds.delete(threadId);
+              continue;
+            }
+            releasedThreadIds.add(threadId);
+            this.options.output.publish({
+              type: "warning",
+              target: binding.target,
+              threadId,
+              background: true,
+              message: "后台任务已在 Gateway 离线期间结束，可通过 /resume 查看完整会话。",
+            }, true);
+          } else if (!canRestore(binding)) {
+            restoredThreadIds.delete(threadId);
+          }
+        } catch (error) {
+          restoredThreadIds.delete(threadId);
+          if (!isCurrent()) continue;
+          failures.push({
+            binding,
+            error: error instanceof Error ? error : new Error(String(error)),
+            bindingRemoved: false,
+            reason: "other",
+          });
+        }
+      }
     } finally {
       for (const threadId of candidateThreadIds) {
         this.restoringThreadIds.delete(threadId);
@@ -208,6 +265,16 @@ export class BindingRestoreCoordinator {
     }
     if (this.stopped) return;
     for (const threadId of restoredThreadIds) {
+      const binding = restoredBindings.get(threadId)!;
+      if (
+        !isConnectionCurrent(binding)
+        || (!releasedThreadIds.has(threadId) && !this.isCurrentBinding(binding))
+        || (releasedThreadIds.has(threadId)
+          && this.options.router.allBindings().some((current) => current.threadId === threadId))
+      ) {
+        restoredThreadIds.delete(threadId);
+        continue;
+      }
       this.options.restored?.(threadId);
       const pending = this.pendingBindingRestores.get(threadId);
       if (!pending) continue;
@@ -219,7 +286,7 @@ export class BindingRestoreCoordinator {
     await scheduledRecovery?.recoverRunning(restoredThreadIds, this.recoveryAbort.signal);
     if (this.stopped) return;
     for (const failure of failures) {
-      if (!failure.bindingRemoved && !this.isCurrentBinding(failure.binding)) continue;
+      if (!failure.bindingRemoved && !canRestore(failure.binding)) continue;
       this.options.logger.warn(
         {
           err: failure.error,

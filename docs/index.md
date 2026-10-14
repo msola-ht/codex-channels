@@ -362,6 +362,7 @@ OpenCode Go 和自定义第三方代理仍拒绝这些路径。
 [`router.ts`](../src/session-routing/router.ts) 核验官方祖先、Workspace、Provider 和绑定有效性；
 [`coordinator.ts`](../src/approval/coordinator.ts) 保留子代理原有 Thread、Turn、Item 与请求身份，
 把交互送到已绑定祖先会话，归属解析与排队共用有效期，绑定变化或 `serverRequest/resolved` 会取消旧请求。
+`serverRequest/resolved` 的官方 Thread 归属也用于交互结束后的后台空闲复核；子代理请求沿已核验祖先找到绑定所有者，不在渠道交互移出队列时提前释放订阅。
 无人值守 `automation` Thread 及其后代仍拒绝交互审批。
 官方依据为固定版 [`thread_data.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs)
 及 [`bespoke_event_handling.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/bespoke_event_handling.rs)。
@@ -510,6 +511,10 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 下一条前台消息强制新建 Thread，避免普通发送或 steer 绕过恢复校验。
 共享订阅的生命周期按 Thread 串行，后台恢复在 RPC 前后复核原绑定，避免过期结果覆盖用户切换。
 后台清理在绑定已被撤权移除后仍取消当前 Client 的订阅；沿用固定版本 `thread/unsubscribe` 的 `notSubscribed`/`notLoaded` 幂等结果，不修改前台绑定。
+会话切换与空闲释放通过 `ThreadLifecyclePort.hasActiveDescendants` 使用对应 Provider 的 `thread/loaded/list`
+和 `thread/read` 核验父子活动，包括未持久化的已加载标准子代理 Thread；官方列表排除 `SessionSource::Internal`，不宣称枚举全部内部代理。
+查询限时、限页数、节点数与祖先深度，
+身份或祖先关系无法确认时失败关闭。恢复后台订阅后复用正常释放条件，不仅凭父 Thread 空闲就清理绑定。
 [`conversation-service.ts`](../src/application/conversation-service.ts) 在锁内复核选择上下文，并恢复活动 Turn。
 
 ## 本项目实现映射

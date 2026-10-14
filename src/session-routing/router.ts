@@ -61,6 +61,14 @@ interface ApprovalResolution {
   overflowed: boolean;
 }
 
+interface ThreadReleaseCondition {
+  isCurrent(): boolean;
+  verifyIdle(): Promise<boolean>;
+  canRestore(): boolean;
+  restored(thread: ThreadSnapshot): void;
+  restoreRequired?(): void;
+}
+
 const maximumBackgroundThreadsPerConversation = 3;
 class SupersededRestoreError extends Error {}
 
@@ -221,6 +229,10 @@ export class SessionRouter {
     return this.codex.readThread(threadId, signal);
   }
 
+  hasActiveDescendants(threadId: string, signal?: AbortSignal): Promise<boolean> {
+    return this.codex.hasActiveDescendants(threadId, signal);
+  }
+
   foregroundThreadId(target: ConversationTarget): string | undefined {
     return this.bindings.get(target)?.threadId;
   }
@@ -303,10 +315,6 @@ export class SessionRouter {
     ) => boolean = () => true,
     onRestored: (binding: ConversationBinding, thread: ThreadSnapshot) => void = () => undefined,
     optionsForBinding: (binding: ConversationBinding) => ThreadStartOptions = () => ({}),
-    retainBackground: (
-      binding: ConversationBinding,
-      thread: ThreadSnapshot,
-    ) => boolean = () => false,
   ): Promise<SubscriptionRestoreFailure[]> {
     const failures: SubscriptionRestoreFailure[] = [];
     for (const binding of this.bindings.list()) {
@@ -376,24 +384,6 @@ export class SessionRouter {
           };
         }
         onRestored(restoredBinding, restoredThread);
-        if (
-          wasBackground
-          && restoredThread.status.type !== "active"
-          && !retainBackground(restoredBinding, restoredThread)
-        ) {
-          try {
-            await this.codex.unsubscribeThread(restoredBinding.threadId);
-            this.bindings.removeThread(restoredBinding.threadId);
-            this.notifyBindingsChanged();
-          } catch (error) {
-            return {
-              binding: restoredBinding,
-              error: error instanceof Error ? error : new Error(String(error)),
-              bindingRemoved: false,
-              reason: "other",
-            };
-          }
-        }
         return undefined;
       });
       if (failure) failures.push(failure);
@@ -594,6 +584,9 @@ export class SessionRouter {
     transition?: {
       assertCurrent: () => void;
       restored: (binding: ConversationBinding, thread: ThreadSnapshot) => void;
+      verifyPreviousIdle?: () => Promise<boolean>;
+      restoredPrevious?: (thread: ThreadSnapshot) => void;
+      restorePreviousFailed?: () => void;
     },
   ): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
@@ -636,8 +629,15 @@ export class SessionRouter {
     try {
       transition?.assertCurrent();
       if (current && current.threadId !== resumed.thread.id && !preserveCurrent) {
+        if (transition?.verifyPreviousIdle && !await transition.verifyPreviousIdle()) {
+          throw new UserFacingError("thread.takeover.changed", "原会话仍有活动，请重新选择会话");
+        }
+        transition?.assertCurrent();
         await this.codex.unsubscribeThread(current.threadId);
         previousUnsubscribed = true;
+        if (transition?.verifyPreviousIdle && !await transition.verifyPreviousIdle()) {
+          throw new UserFacingError("thread.takeover.changed", "原会话活动已变化，请重新选择会话");
+        }
       }
       transition?.assertCurrent();
       const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
@@ -646,11 +646,13 @@ export class SessionRouter {
       let failure = error;
       if (previousUnsubscribed && current) {
         try {
-          await this.resumeInWorkspace(
+          const restored = await this.resumeInWorkspace(
             await this.codex.readThread(current.threadId), this.workspaces.require(current.workspaceId),
             {}, false,
           );
+          transition?.restoredPrevious?.(restored.thread);
         } catch (restoreError) {
+          transition?.restorePreviousFailed?.();
           failure = new AggregateError([error, restoreError], "绑定切换失败，且原订阅恢复失败", { cause: error });
         }
       }
@@ -824,12 +826,19 @@ export class SessionRouter {
     return transfer;
   }
 
-  async newSession(target: ConversationTarget, preserveCurrent = false, preference?: ConversationModelPreference): Promise<void> {
+  async newSession(target: ConversationTarget, preserveCurrent = false, preference?: ConversationModelPreference,
+    condition?: ThreadReleaseCondition): Promise<void> {
     const current = this.bindings.get(target);
     return this.withThreadLifecycle(current ? [current.threadId] : [], async () => {
       this.assertLifecycleCurrent(target, current);
       if (preserveCurrent) {
         this.bindings.demote(target, preference);
+      } else if (current && condition) {
+        const snapshot = await this.codex.readThread(current.threadId);
+        if (!condition.isCurrent() || !await condition.verifyIdle()
+          || !await this.releaseIdleUnlocked(target, current, snapshot, condition, preference)) {
+          throw new UserFacingError("thread.takeover.changed", "当前会话活动已变化，请重新新建会话");
+        }
       } else {
         await this.detachUnlocked(target, preference);
       }
@@ -841,56 +850,97 @@ export class SessionRouter {
     target: ConversationTarget,
     expected: ConversationBinding,
     snapshot: ThreadSnapshot,
-    condition: {
-      isCurrent(): boolean;
-      verifyIdle(): Promise<boolean>;
-      canRestore(): boolean;
-      restored(thread: ThreadSnapshot): void;
-    },
+    condition: ThreadReleaseCondition,
     preference?: ConversationModelPreference,
   ): Promise<boolean> {
-    return this.withThreadLifecycle([expected.threadId], async () => {
-      const ownsBinding = () => this.sameBinding(expected, this.bindings.get(target));
-      if (!ownsBinding() || !condition.isCurrent()) return false;
-      await this.codex.unsubscribeThread(expected.threadId);
-      let verified = false;
-      try {
-        verified = ownsBinding() && condition.isCurrent() && await condition.verifyIdle();
-      } catch {
-        // An inconclusive final read must preserve the binding and restore its
-        // subscription just like activity arriving during unsubscribe.
-      }
-      if (!verified || !ownsBinding() || !condition.isCurrent()) {
-        // Unsubscribe is already effective on the server. Keep the local binding
-        // and restore its subscription when cancellation came from new activity.
-        // Shutdown/disconnection instead leaves restoration to reconnect.
-        if (ownsBinding() && condition.canRestore()) {
-          const workspace = this.workspaces.require(expected.workspaceId);
-          const resumed = await this.resumeInWorkspace(snapshot, workspace, {}, false,
-            () => ownsBinding() && condition.canRestore());
-          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
-          this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-          this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
-          condition.restored(resumed.thread);
-        }
-        return false;
-      }
-      this.contextCompactionItemIdsByThread.delete(expected.threadId);
-      this.bindings.unbind(target, preference);
-      this.markForceNew(target, Date.now());
-      this.notifyBindingsChanged();
-      return true;
-    });
+    return this.withThreadLifecycle([expected.threadId], () =>
+      this.releaseIdleUnlocked(target, expected, snapshot, condition, preference));
   }
 
-  async releaseBackground(threadId: string): Promise<ConversationTarget | undefined> {
+  private async releaseIdleUnlocked(
+    target: ConversationTarget,
+    expected: ConversationBinding,
+    snapshot: ThreadSnapshot,
+    condition: ThreadReleaseCondition,
+    preference?: ConversationModelPreference,
+  ): Promise<boolean> {
+    const ownsBinding = () => this.sameBinding(expected, this.bindings.get(target));
+    if (!ownsBinding() || !condition.isCurrent()) return false;
+    await this.codex.unsubscribeThread(expected.threadId);
+    let verified = false;
+    try {
+      verified = ownsBinding() && condition.isCurrent() && await condition.verifyIdle();
+    } catch {
+      // An inconclusive final read must preserve the binding and restore its
+      // subscription just like activity arriving during unsubscribe.
+    }
+    if (!verified || !ownsBinding() || !condition.isCurrent()) {
+      // Unsubscribe is already effective on the server. Keep the local binding
+      // and restore its subscription when cancellation came from new activity.
+      // Shutdown/disconnection instead leaves restoration to reconnect.
+      if (ownsBinding() && condition.canRestore()) {
+        const workspace = this.workspaces.require(expected.workspaceId);
+        let resumed: ThreadResumeSession;
+        try {
+          resumed = await this.resumeInWorkspace(snapshot, workspace, {}, false,
+            () => ownsBinding() && condition.canRestore());
+        } catch (error) {
+          if (ownsBinding() && condition.canRestore()) condition.restoreRequired?.();
+          throw error;
+        }
+        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+        this.namesByThread.set(resumed.thread.id, resumed.thread.name);
+        this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
+        condition.restored(resumed.thread);
+      }
+      return false;
+    }
+    this.contextCompactionItemIdsByThread.delete(expected.threadId);
+    this.bindings.unbind(target, preference);
+    this.markForceNew(target, Date.now());
+    this.notifyBindingsChanged();
+    return true;
+  }
+
+  async releaseBackground(threadId: string, condition?: ThreadReleaseCondition): Promise<ConversationTarget | undefined> {
     return this.withThreadLifecycle([threadId], async () => {
       const binding = this.bindings.getByThread(threadId);
       // Revocation may already have removed the local binding while a fresh
       // background Thread was being created. Still cancel our subscription;
       // never unsubscribe a Thread that has since become a valid foreground.
       if (binding && !this.bindings.isBackground(threadId)) return undefined;
+      let snapshot: ThreadSnapshot | undefined;
+      const isCurrent = () => binding !== undefined && this.sameBinding(binding, this.bindings.getByThread(threadId))
+        && this.bindings.isBackground(threadId) && condition?.isCurrent() === true;
+      if (condition) {
+        if (!isCurrent() || !await condition.verifyIdle() || !isCurrent()) return undefined;
+        snapshot = await this.codex.readThread(threadId);
+        if (!isCurrent() || (snapshot.status.type !== "idle" && snapshot.status.type !== "notLoaded")) return undefined;
+      }
       await this.codex.unsubscribeThread(threadId);
+      if (condition && binding && snapshot) {
+        let verified = false;
+        let verificationFailed = false;
+        let verificationError: unknown;
+        try { verified = isCurrent() && await condition.verifyIdle() && isCurrent(); } catch (error) {
+          // Keep the binding when the final observation is inconclusive.
+          verificationFailed = true;
+          verificationError = error;
+        }
+        if (!verified) {
+          if (this.sameBinding(binding, this.bindings.getByThread(threadId)) && condition.canRestore()) {
+            const resumed = await this.resumeInWorkspace(snapshot, this.workspaces.require(binding.workspaceId), {}, false,
+              () => this.sameBinding(binding, this.bindings.getByThread(threadId)) && condition.canRestore());
+            this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
+              resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+            this.namesByThread.set(resumed.thread.id, resumed.thread.name);
+            this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
+            condition.restored(resumed.thread);
+          }
+          if (verificationFailed) throw verificationError;
+          return undefined;
+        }
+      }
       if (binding) this.bindings.removeThread(threadId);
       this.contextCompactionItemIdsByThread.delete(threadId);
       this.notifyBindingsChanged();

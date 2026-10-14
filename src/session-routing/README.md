@@ -41,11 +41,13 @@
 切换到不同 Workspace 会解除当前前台 Thread，并在下一条消息中强制新建 Thread，不自动接续目标 Workspace
 中的历史空闲 Thread；当前模型、思考等级和服务层级偏好仍按 Conversation 保留。
 
-运行中的前台 Thread 在 `/resume` 或 `/new` 切换时转为后台绑定，保持 App Server 订阅与原
+仍有活动 Turn、子代理或待处理交互的前台 Thread 在 `/resume` 或 `/new` 切换时转为后台绑定，保持 App Server 订阅与原
 Conversation 归属；新输入只路由到前台 Thread。后台 Turn 完成后先与原生 Queue 的自动派发
 协调；Queue 已启动下一 Turn、仍有排队条目或 Thread 仍为活动状态时保留绑定，只有权威状态确认
-空闲后才取消订阅并移除后台绑定，Thread 历史仍由 App Server 保存。Gateway 恢复时同时恢复前台与后台订阅；若后台
-Thread 已在离线期间结束，只提示通过 `/resume` 查看，不伪造或重放完成事件。
+空闲后才取消订阅并移除后台绑定，Thread 历史仍由 App Server 保存。释放在生命周期锁内以及取消订阅后复核活动，
+新活动或无法确认的读取会保留绑定并恢复订阅。Gateway 恢复时同时恢复前台与后台订阅；后台清理由 Application
+按同一条件执行，确认释放后才提示通过 `/resume` 查看，不依据父 Thread 空闲推断子代理结束。
+后台末次读取失败在补偿订阅后仍向生命周期所有者报告失败，进入既有恢复重试，不与权威确认仍忙混同。
 - `thread-state-sync.ts`：定义并消费不含协议信封的稳定 Thread 路由事件，同步模型、思考等级和
   服务层级，并在官方通知未携带不可变 Provider 时保留 Router 已确认的值；归档或删除事件会清理对应绑定，关闭事件只表示无订阅者的空闲 Thread 已从
   App Server 内存卸载，保留可恢复的持久化绑定。官方通知的校验和转换由 `codex-client` 完成。

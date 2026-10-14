@@ -66,11 +66,16 @@ export class SqliteAutoApprovalReviewMetrics implements AutoApprovalReviewStore 
   sessionAutoApprovalReviewSummary(threadId: string,
     pendingParentTurns: readonly { threadId: string; turnId: string }[] = []): AutoApprovalReviewSummary {
     validateThreadId(threadId, "Thread ID");
-    return this.summary(`SELECT thread_id, turn_id FROM auto_approval_review_turns WHERE thread_id = ?
+    const summary = this.summary(`SELECT thread_id, turn_id FROM auto_approval_review_turns WHERE thread_id = ?
       UNION SELECT thread_id, turn_id FROM turn_execution_metrics WHERE thread_id = ?
       UNION SELECT thread_id, turn_id FROM model_request_metrics WHERE thread_id = ? AND turn_id IS NOT NULL
       UNION SELECT parent_thread_id, parent_turn_id FROM subagent_turns WHERE parent_thread_id = ?`,
     [threadId, threadId, threadId, threadId], pendingParentTurns);
+    // Complete observations of the known turns cannot prove that no older turns are missing.
+    const historyComplete = this.database.prepare("SELECT history_complete FROM thread_execution_state WHERE thread_id = ?")
+      .get(threadId)?.history_complete === 1;
+    return summary.coverage === "complete" && !historyComplete
+      ? { ...summary, coverage: "partial" } : summary;
   }
 
   private summary(seed: string, parameters: string[], pendingParentTurns: readonly { threadId: string; turnId: string }[]): AutoApprovalReviewSummary {

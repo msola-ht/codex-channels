@@ -60,7 +60,8 @@ function toAutoApprovalReviewDetails(
       case "execve":
         if (typeof raw.program === "string" && Array.isArray(raw.argv) && raw.argv.length <= 1_024
           && raw.argv.every((arg: unknown) => typeof arg === "string")) {
-          operation = redactCommandArguments([raw.program, ...raw.argv])
+          // execve argv includes argv[0]; use the actual program in its place, as App Server does.
+          operation = redactCommandArguments([raw.program, ...raw.argv.slice(1)])
             .map((arg: string) => /\s|["'\\]/u.test(arg) ? JSON.stringify(arg) : arg).join(" ");
         }
         break;
