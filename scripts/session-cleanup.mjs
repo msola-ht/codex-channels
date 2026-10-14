@@ -18,12 +18,7 @@ import { requireUserConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 import { SqliteSessionDisplayCache } from "../dist/storage/index.js";
-
-const usage = `用法：codexc cleanup sessions <最大轮数> [--idle-days <天数>] [--confirm]
-
-默认只预览，不归档。加 --confirm 才会归档符合条件的旧会话。
-执行前必须停止 Gateway；App Server 保持运行。清理覆盖配置中的全部 Workspace 和 Provider。
-主会话轮数用于筛选，派生后代随官方归档；指定 --idle-days 时可查询成员均须达到空闲天数。`;
+import { sessionCleanupUsage as usage } from "./cli-command-usage.mjs";
 
 export async function runSessionCleanup(args, { environment = process.env, output = console } = {}) {
   if (args.length === 0 || args.some((arg) => arg === "-h" || arg === "--help")) {
@@ -209,6 +204,9 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     }
     output.log("归档结束：已核验 " + results.filter((item) => item.status === "confirmed").length
       + " 组，其余 " + results.filter((item) => item.status !== "confirmed").length + " 组；未自动重试或回滚。");
+    if (results.some(item => item.status !== "confirmed" || item.cacheError)) {
+      throw new Error("归档执行未全部完成或展示缓存清理失败，请按逐组结果核查后重新预览；未自动重试或回滚");
+    }
     return { maxTurns, idleDays, candidates, skipped, results };
   } finally {
     try { cache?.close(); }

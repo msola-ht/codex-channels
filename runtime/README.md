@@ -282,6 +282,7 @@
   避免路径校验后被符号链接替换；Windows 使用解析后的 PowerShell 7 `pwsh` 调用结构化 SID/ACL
   适配器，冷启动调用最多 5 秒、复用调用最多 2 秒，超时终止并拒绝操作；Windows 原子写入使用先收紧权限的临时子目录，已有父目录只校验所有者与写入权限，不移除上游沙箱读取权限；严格私有文件关闭继承，只允许当前 SID、SYSTEM 和
   Administrators 完全控制；状态库、任务库、指标库、媒体、渠道输出和受管备份复用同一合同；
+  渠道图片暂存目录通过 `ensurePrivateDirectorySync` 在保护权限前检查目录类型、链接与所有者，消费端和提交端共用。
   App Server Socket 目录通过 `secureAppServerSocketDirectorySync` 将已受信任目录收紧为锁定 CLI 要求的单条当前 SID 可继承完全控制权限；其他目录写入与父目录读取接受并保留此更严格权限，不向 Socket 目录重新添加 SYSTEM/Administrators。
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
   `readCodexConfigFileSync` / `assertCodexConfigAccessSync` 对共享主配置校验当前用户所有权及写入完整性，允许上游继承的只读访问，不声称主配置机密性；Provider Profile、凭据、备份仍要求严格私有。普通设置不增加 RPC 后 ACL 修复事务。

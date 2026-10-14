@@ -56,6 +56,7 @@ export interface CodexUserConfigClient
   extends CodexDefaultSettingsClient, CodexUserConfigTransactionClient {}
 
 export function createSharedCodexUserConfigClient(options?: { environment?: NodeJS.ProcessEnv }): Promise<CodexUserConfigClient>;
+export function resolveCodexUserConfigBinary(environment?: NodeJS.ProcessEnv): string;
 
 /** Handoff for an already-running updater; only disables daemon auto-start. */
 

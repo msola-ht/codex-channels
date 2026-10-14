@@ -11,14 +11,14 @@ codexc channel send-image /absolute/path/to/project/output/playwright/screenshot
 codexc channel send-image /absolute/path/to/project/output/playwright/screenshot.png --thread <Thread ID>  # 明确指定目标会话
 ```
 
-- 图片必须是绝对路径、普通文件、PNG/JPEG，大小 1 字节到 10 MiB。
+- 图片必须是绝对路径、非符号链接的普通文件、PNG/JPEG，大小 1 字节到 10 MiB。
 - 不指定 `--thread` 且当前只有唯一绑定时会自动选择；存在多个绑定或没有绑定时拒绝。
 - 提交后命令立即返回，图片由网关轮询发送，不代表已送达客户端。
 
 ## 工作原理
 
-1. 命令把图片复制到 `~/.codex-connect/data/channel-outbox/pending/`，并写入同名的
-   manifest（`version`、`threadId`、`imagePath`、`createdAtMs`）。
+1. 命令先通过共享校验读取有界图片字节，再私有原子写入 `~/.codex-connect/data/channel-outbox/pending/`，
+   最后发布同名 manifest（`version`、`threadId`、`imagePath`、`createdAtMs`）；入队失败清除本次暂存文件。
 2. Gateway 默认每 3 秒扫描一次 `pending/`，通过 `threadId` 在会话路由中解析出
    `surface + accountId + conversationId`，再调用对应 Surface Outbox 的
    `sendChannelImage`，使用渠道机器人凭据发送。
@@ -29,6 +29,7 @@ codexc channel send-image /absolute/path/to/project/output/playwright/screenshot
 ## 安全与边界
 
 - `channel-outbox/` 及其子目录权限为 `0700`，manifest 和复制的图片为 `0600`。
+- 提交端和 Gateway 启动端在收紧目录权限前拒绝符号链接或错误所有者，已有目录也须通过检查。
 - Gateway 只接受位于 `pending/` 目录内的图片路径；读取时复用
   `generated-image.ts` 的校验（绝对路径、无符号链接、普通文件、10 MiB、PNG/JPEG 签名）。
 - 发送目标只能是已经绑定的会话；Thread 未绑定或绑定不存在时归档失败，不会猜测渠道。

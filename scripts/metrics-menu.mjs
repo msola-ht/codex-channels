@@ -43,7 +43,7 @@ export async function runMetricsMenu({
           hint: "查看指标库路径、Schema 与记录数",
         },
         { value: "threads", label: "会话列表导出", hint: "按时间范围导出有指标的会话" },
-        { value: "quota", label: "历史额度窗口", hint: "只读查询已记录的额度周期" },
+        { value: "quota", label: "历史额度窗口导出", hint: "导出已记录的额度周期" },
         { value: "cancel", label: "返回", hint: "结束指标操作" },
       ],
     });
@@ -70,8 +70,7 @@ async function runMetricsMenuAction(action, { prompts, readThreads, runDatabaseC
     const format = await selectExportFormat(prompts);
     if (prompts.isCancel(format)) return;
     const args = [action, "--range", String(range), "--format", String(format)];
-    if (action === "quota") await runDatabaseCommand(args);
-    else await runMetricsCommand(args);
+    await runMetricsCommand(args);
     return;
   }
   if (action === "status") {
@@ -244,6 +243,15 @@ export async function runMetricsMaintenanceMenu(action, {
       prompts.cancel("已取消");
       return;
     }
+    const confirmed = await prompts.confirm({
+      message: `备份后清理指标，仅保留最近 ${String(keepDays)} 天、最多 ${String(maxRows)} 行，确认删除超出范围的数据？`,
+      initialValue: false,
+    });
+    if (prompts.isCancel(confirmed)) {
+      prompts.cancel("已取消");
+      return;
+    }
+    if (confirmed !== true) return;
     await runDatabaseCommand([
       "cleanup-restart",
       "--keep-days",

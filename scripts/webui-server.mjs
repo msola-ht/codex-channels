@@ -530,7 +530,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     return;
   }
   if (apiPath === "/health") {
-    sendJson(response, 200, { ok: true, service: "webui" });
+    sendJson(response, 200, { ok: true, service: "webui", pid: process.pid, parentPid: process.ppid });
     return;
   }
   if (apiPath === "/accounts") {
@@ -1103,7 +1103,7 @@ function main() {
         console.log(`请通过服务器实际 IP 访问 http://<服务器IP>:${settings.port}/`);
         console.log("API 请求需要请求头 Authorization: Bearer <令牌>，或使用 ?token=<令牌> 打开。");
       } else {
-        console.log(`Codex WebUI: http://${host}:${settings.port}/${configNote}`);
+        console.log(`Codex WebUI: http://${host.includes(":") ? `[${host}]` : host}:${settings.port}/${configNote}`);
       }
       console.log("按 Ctrl+C 停止。");
     });

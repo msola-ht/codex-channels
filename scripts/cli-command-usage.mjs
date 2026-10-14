@@ -42,6 +42,13 @@ WebUI 页面时间也随之呈现。缺省不写入配置，两个进程都沿�
 直接运行的网关需重新执行原启动命令。--gateway 只设置网关，重启网关后生效；
 网关未设置时默认跟随 codex.timezone，--follow-app-server 删除网关独立设置。`;
 
+export const sessionCleanupUsage = `用法：codexc cleanup sessions <最大轮数> [--idle-days <天数>] [--confirm]
+
+默认只预览，不归档。加 --confirm 后仍须在本机终端确认候选列表。
+执行前必须停止 Gateway；App Server 保持运行。扫描覆盖配置中的全部 Workspace 及其所有 Provider 历史。
+主会话轮数用于筛选，派生后代随官方归档；指定 --idle-days 时可查询成员均须达到空闲天数。
+确认后的执行存在失败、部分完成、结果未确认或复核跳过时返回非零退出码；不自动重试或回滚。`;
+
 export const cleanupUsage = `用法：codexc cleanup [sessions|traffic|metrics] [参数]
 
   sessions <最大轮数> [--idle-days 天数] [--confirm]   预览或归档会话（不删除历史）

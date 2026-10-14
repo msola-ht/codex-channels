@@ -56,6 +56,7 @@ import {
   desktopAppCommandUsage,
   timezoneCommandUsage,
   cleanupUsage,
+  sessionCleanupUsage,
   serviceCommandUsage,
   restartCommandUsage,
 } from "../scripts/cli-command-usage.mjs";
@@ -122,7 +123,8 @@ const helpText = {
   init: `用法：codexc init
 
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。
-交互终端下继续显示环境检测结果，并依次引导配置模型提供商、通讯渠道、可选功能和后台服务；
+交互终端下继续显示环境检测结果，并依次引导模型提供商与通讯渠道、Codex 新会话与用户偏好、
+官方 TUI 身份、模型可见时区、可选功能和后台服务；
 非交互调用只创建用户目录、默认工作区仓库与初始配置，不进入向导。`,
   setup: `用法：codexc setup [--jsonl]
 
@@ -180,7 +182,8 @@ Git 源码安装检查并构建官方 main 最新提交，校验当前配置、�
 在一个停机窗口更新程序与所需 CLI，再恢复核心服务。
 CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CLI，不更新 Gateway 程序包。
 数据库只接受当前 Schema，不迁移或删除数据；关闭 Codex daemon 自动启动，其他用户偏好与模型目录不改写。
-预检失败时不停止服务；更新按原运行状态恢复核心服务和 WebUI，失败报告阶段并尝试恢复。必须从本机终端执行。`,
+预检失败时不停止服务；更新按原运行状态恢复核心服务和 WebUI，失败报告阶段并尝试恢复。
+须在本机执行，不能从 Gateway/App Server 服务进程调用；需要安装配套 CLI 时必须在交互终端确认。`,
   uninstall: `用法：codexc uninstall [--services]
 
 --services 只停止并卸载后台服务，保留程序和用户数据。
@@ -239,7 +242,7 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
   "metrics.prune": `用法：codexc cleanup metrics prune <provider>
 
-provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以及当前或已备份的自定义主 Provider ID。备份并删除本地指标库中该提供商全部请求行，随后
+provider 为区分大小写的精确 Provider ID，包含已移除配置的历史 ID；以字母或数字开头，只含字母、数字、_、-，最长 64 字符。备份并删除本地指标库中该提供商全部请求行，随后
 按原状态恢复 Gateway。OpenAI 额度重置
 后可用 openai 从零重新统计用量；备份保留在指标库同目录的 *.<provider>-prune-*.bak。`,
   "metrics.cleanup": `用法：codexc cleanup metrics [--before YYYY-MM-DD | --keep-days 天数] [--max-rows 行数] [--vacuum] [--restart-gateway]
@@ -247,7 +250,7 @@ provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以�
 按配置 [metrics.storage] 或命令行覆盖值清理最旧请求指标。默认要求 Gateway 已停止；
 加 --restart-gateway 自动停止并重新启动。清理前创建 0600 备份；--vacuum 会立即回收文件空间。`,
   cleanup: cleanupUsage,
-  "sessions.cleanup": "用法：codexc cleanup sessions <最大轮数> [--idle-days <天数>] [--confirm]",
+  "sessions.cleanup": sessionCleanupUsage,
   "metrics.report": `${metricsCommandUsage.report}
 
 只读输出汇报；默认最近 30 天并按模型分组，写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
@@ -256,7 +259,8 @@ provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以�
 只读导出脱敏请求记录；默认最近 30 天、JSON 格式并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。支持 --thread、--turn 及模型、操作、状态组合筛选；--turn 必须同时指定 --thread。`,
   "metrics.quota": `${metricsCommandUsage.quota}
 
-只读查询已记录的 OpenAI 与 OpenCode Go 历史额度窗口；按实际重置时间归并，并显示窗口起止、请求、Token 和本机样本估算。`,
+只读查询已记录的 OpenAI 与 OpenCode Go 历史额度窗口；按实际重置时间归并，并显示窗口起止、请求、Token 和本机样本估算。
+默认导出到 ~/.codex-connect/output/<日期>/；加 --stdout 输出到标准输出。`,
   version: "用法：codexc version",
   gateway: `用法：codexc gateway
 
@@ -571,7 +575,12 @@ async function initialize(args) {
   if (wizard?.install === true) {
     const serviceCommand = await import("../scripts/service-command.mjs");
     await serviceCommand.runServiceCommand(["install"]);
-    await startConfiguredWebui(serviceCommand);
+    try {
+      await startConfiguredWebui(serviceCommand);
+    } catch (error) {
+      throw new Error("核心服务已完成安装，但 WebUI 启动未完成："
+        + `${error instanceof Error ? error.message : String(error)}\n请核查 codexc status webui，修复后运行 codexc start webui。`, { cause: error });
+    }
     printCliMessage("success", "初始化与后台服务安装已完成。");
   } else if (wizard?.action === "cancelled") {
     printCliMessage("note", "初始化向导已取消；已应用的设置会保留，可重新运行 codexc init，"
@@ -595,21 +604,9 @@ function assertUsableExistingConfig(configPath) {
 
 /** 安装只启动核心服务；配置中启用的 WebUI 由 init 负责拉起。 */
 async function startConfiguredWebui(serviceCommand) {
-  let document;
-  try {
-    document = readGatewayConfig(requireUserConfig(process.env).configPath);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    printCliMessage("note", `无法读取配置，未自动启动 WebUI：${reason.split("\n")[0]}`);
-    return;
-  }
+  const document = readGatewayConfig(requireUserConfig(process.env).configPath);
   if (document?.webui?.enabled !== true) return;
-  try {
-    await serviceCommand.runServiceCommand(["start", "webui"]);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    printCliMessage("note", `WebUI 未能自动启动：${reason}\n修复后可运行 codexc start webui。`);
-  }
+  await serviceCommand.runServiceCommand(["start", "webui"]);
 }
 
 function runDoctor(args) {
@@ -871,13 +868,7 @@ async function metrics(args) {
     );
     return;
   }
-  if (new Set(["run", "turns", "threads", "report", "export"]).has(subcommand)) {
-    runMetricsCommand([subcommand, ...rest]);
-    return;
-  }
-  runScript("scripts/metrics-database.mjs", [subcommand, ...(
-    subcommand === "quota" ? rest.filter((argument) => argument !== "--stdout") : rest
-  )], { failureReportedByChild: true });
+  runMetricsCommand([subcommand, ...rest]);
 }
 
 async function metricsMaintenance(args) {

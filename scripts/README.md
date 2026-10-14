@@ -46,7 +46,7 @@
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
   统一查询服务访问只读 Store，不加载服务控制或数据库维护流程。
-  普通只读查询在同一连接上校验 Schema 并读取，诊断入口独立统计总行数。
+  普通只读查询在同一连接上校验 Schema 并读取；分页、聚合与额度组合结果共享只读快照，诊断入口独立统计总行数。
 - `metrics-database.mjs` / `metrics-database.d.mts`：提供 `codexc metrics` 的公开入口和 CLI，
   组合只读访问、输出渲染以及 `reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
@@ -62,20 +62,22 @@
   `prune <provider>` 备份后删除本地指标库中指定提供商（区分大小写的精确 Provider ID，含历史记录对应的 ID）的全部请求
   行，Gateway 按执行前的运行状态恢复；额度重置
   后可用它从零重新统计用量。
+  cleanup/prune 在任何维护写入前校验完整当前 Schema，并在检查点、备份、删除与 VACUUM 期间持有统一 writer 锁；备份不覆盖既有文件。裁剪计时会撤销对应 Thread 历史完整标记。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
   时间范围、组合筛选、分组、格式及维护命令参数，通过 Observability 的 `query/index` 无状态入口复用规范范围、日期解析与聚合维度，并向顶层帮助
   导出规范用法行；不访问配置、数据库或服务，
   `metrics-database.mjs` 保留原有公开入口与 `metricsRange` 导出。
 - `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入。
-- `channel-send-image.mjs`：`codexc channel send-image` 的实现，把本地图片复制到
-  `data/channel-outbox/pending/` 并写入 manifest；由 Gateway 轮询后按 Thread 绑定
+- `channel-send-image.mjs`：`codexc channel send-image` 的实现，通过 Surface 公开入口校验并有界读取本地图片，私有原子写入
+  `data/channel-outbox/pending/` 后发布 manifest，失败时清理本次暂存；由 Gateway 轮询后按 Thread 绑定
   会话发送并归档，详见 `docs/channel-image.md`。
 - `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc cleanup sessions`，通过
   主 App Server 按 Workspace 枚举全部 Provider 历史，最多并行检查四组候选；跨已连接实例核对活动状态，已移除 Provider 的历史仍可由共享历史连接维护。后代参与绑定、活动、固定与 Workspace 检查，确认后每个父会话只发一次官方归档，批次结束按 Workspace 复用官方双状态根列表核验。
+  执行确认后的失败、部分成功、未确认、复核跳过及缓存清理失败返回非零状态，逐组结果保留，不自动重试或回滚。
 - `cli-command-usage.mjs`：共享纯帮助文案与服务动作目录，不加载命令执行实现。
 - `cli-help.mjs`：校验公开命令的精确帮助路径，拒绝未知子命令和多余参数。
 - `delivery-command.mjs`：仅执行 status/list 时从 Surface 窄诊断入口加载载荷解码与屏障策略，避免帮助及其他 CLI 命令加载平台 SDK；通过 Surface 公开入口复用持久输出分类，离线查看独立投递箱的计数、事件身份、阻塞策略与检查点，并根据明确参数重发或确认送达；不输出正文、不自动清理未确认记录。
-- `cli-menu.mjs` / `cli-menu.d.mts`：七项顶层导航、运行与连接、后台服务与更多工具子菜单，以及交互操作失败呈现；低频初始化、诊断、指标和清理集中在更多工具，返回菜单保留上次选择。只分派现有命令，保留进程终止信号语义。
+- `cli-menu.mjs` / `cli-menu.d.mts`：七项顶层导航、运行与连接、后台服务与更多工具子菜单，以及交互操作失败呈现；连接入口包含指定工作区/Provider 的 TUI 与 Desktop，更多工具分组组织诊断查询、指标、清理、初始化和程序维护，返回菜单保留上次选择。维护写操作需确认；只分派现有命令，保留进程终止信号语义。
 - `cleanup-menu.mjs` / `cleanup-menu.d.mts`：统一清理交互入口，复用会话参数菜单、指标维护菜单和现有执行命令；转储先预览再确认删除，Provider 指标按精确 ID 确认清理，单项完成后返回菜单。
 - `maintenance-services.mjs` / `maintenance-services.d.mts`：交互清理共用的服务状态检查、停服确认与逆序恢复；异常时保留操作和恢复错误，不停止非受管进程。
 - `session-menu.mjs` / `session-menu.d.mts`：统一清理菜单使用的会话归档参数收集；收集 Turn 上限和空闲天数后调用
@@ -237,6 +239,7 @@
   之后可用 `primary-provider switch` 从备份恢复；同时移除冲突的顶层 `openai_base_url`，从第三方
   模式恢复时清除第三方顶层模型。设备登录完成后在统一 Provider 管理事务内重新读取配置与角色
   占用状态，再按最新配置修订备份并提交，避免登录期间的并发修改被旧快照覆盖。
+  登录子进程异步运行，输出跟随交互输出流，不混入 Setup JSONL；失败、信号取消或输出异常均停止后续配置写入，并清理自有进程。
 - `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与校验；插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
   Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Standard/Fast/Ultrafast、计划清单工具、TUI 空闲总结，
@@ -282,7 +285,7 @@
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：WebUI 只读配置连接已有主 App Server，连接失败不启动临时进程；CLI 事务创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` 普通键级修改及更新器关闭 daemon 自动启动作为官方 `config/batchWrite` 事务写入用户配置；
   用户设置修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
-  初始化向导显式传入与环境检测一致的 Codex 可执行文件，读取和保存共用该选择；默认 Codex Home 尚不存在时
+  所有 CLI 用户设置、MCP 与官方登录统一解析 Gateway 显式 Codex binary，配置为默认 `codex` 时才采用 `CODEX_BINARY`；默认 Codex Home 尚不存在时
   从用户主目录启动并由 Codex 初始化默认目录，显式 `CODEX_HOME` 仍要求已存在且为目录。
 - `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“项目技能”类别；列出项目 `.codex/skills` 下带
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
@@ -292,8 +295,8 @@
   或代理值的 Gateway 配置总览和可安全编辑的参数：显示设置（操作详情、计划更新、默认关闭的思考状态）、系统设置
   （模型请求转储、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、计划任务、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标存储
   （本地保留天数与最大记录数）、
-  Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
-  配置文件路径；`--json` 不进入菜单或读取配置正文，只输出路径与文件存在状态。子菜单与总览在选中后按需加载，路径查询和取消不加载这些实现。
+  Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端无参数时显示帮助。
+  `paths [--json]` 不进入菜单或读取配置正文，只输出绝对路径与文件存在状态，不创建配置。子菜单与总览在选中后按需加载，路径查询和取消不加载这些实现。
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，只显示配置来源、有效开关、作用范围
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
 - `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
@@ -569,6 +572,7 @@
   服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
   检查；顶层 `restart` 统一预检、停止与逐项启动就绪，默认包含已安装且未关闭的 WebUI，失败报告剩余步骤并中止。Windows 重启批量查询全部所选计划任务，启动和停止在当前进程调用同一控制器，复用权限检查宿主，避免每一步重新启动 Node 与 ACL 宿主；不缓存权限结论、不改变服务顺序和就绪检查。Model Relay 内部入口接收父进程 `codexc-stop`，完成资源关闭后退出。CLI 只保留帮助展示和命令分派。
   `start`、`stop`、`restart` 共用逐服务步骤计时，单调时钟覆盖控制器及启动就绪等待；完成或失败均输出步骤耗时，重启单独报告预检耗时。命令总耗时由 CLI 统一输出。批量目标继续使用共享服务选择与顺序；`start all` 说明按配置跳过的 WebUI 与 Relay，`restart all` 说明只停止不重启的可选服务；Windows、启动和重启在首个失败后中止，Linux/macOS 的 `stop all` 保留尝试其余目标后汇总失败的行为。
+  WebUI 就绪校验有界健康 JSON、服务身份与受管进程 PID（或其直接父进程），拒绝重定向和其他进程的成功响应。
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
   稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用；Codex 用户偏好使用
   `next-thread / codex`、`next-tui / codex` 和 `next-thread-and-tui / codex` 分别表示新 Thread、
@@ -590,6 +594,7 @@
 - `service-status.mjs` / `service-status.d.mts`：通过 systemd 属性、launchd Job 字段或 Windows 计划任务
   生成统一基础 JSON 服务状态；Windows 额外核对受管进程和核心 RPC 端点。目标异常时保留可解析输出
   并返回非零状态，查询器故障则失败关闭。
+  macOS 文本状态也复用该解析，区分已加载与实际运行。
   Windows 异步查询的整体预算为 25 秒，包含 Job 宿主、ACL 冷启动、内部查询与宿主 IPC 阶段；超时只回收本次查询的 Job 子树，回收失败明确报告退出未确认。
 - `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
   TTY 颜色及 `NO_COLOR` 规则；日志和数据内容不经过状态渲染。

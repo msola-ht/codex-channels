@@ -214,7 +214,7 @@
 - `channel-image-spool.ts`：扫描 `data/channel-outbox/pending/` 的图片发送请求，按
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据
   发送，成功归档到 `done/`、失败归档到 `failed/` 并保留原因；Unix 使用 `0700/0600`，Windows
-  使用当前 SID 私有 ACL，并在启动时收紧既有受管文件；只接受
+  使用当前 SID 私有 ACL；创建或使用目录时检查类型、链接与所有者，启动时先拒绝既有文件链接或异主文件，再收紧权限；只接受
   pending 目录内的绝对图片路径。每次轮询只处理一批快照；失败归档未完成时，当前进程按轮询间隔
   仅重试归档，不再次发送图片，停止时不继续处理下一条。
 

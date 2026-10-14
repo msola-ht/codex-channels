@@ -1,10 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
-  copyFileSync,
   existsSync,
-  mkdirSync,
-  statSync,
-  writeFileSync,
+  renameSync,
+  rmSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -13,8 +11,8 @@ import { fileURLToPath } from "node:url";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
-  securePrivateDirectorySync,
-  securePrivateFileSync,
+  ensurePrivateDirectorySync,
+  writePrivateFileAtomicSync,
 } from "../runtime/private-file.mjs";
 import {
   locateUserConfig,
@@ -25,8 +23,6 @@ import {
   CHANNEL_SEND_IMAGE_USAGE,
   parseChannelSendImageArgs,
 } from "./channel-send-image-options.mjs";
-
-const maximumChannelImageBytes = 10 * 1024 * 1024;
 
 export async function submitChannelImage({
   environment = process.env,
@@ -40,12 +36,13 @@ export async function submitChannelImage({
     throw new Error("请提供要发送的图片路径：codexc channel send-image <图片路径>");
   }
   assertAbsoluteChannelImagePath(imagePath);
-  if (!existsSync(imagePath) || !statSync(imagePath).isFile()) {
-    throw new Error(`图片文件不存在：${imagePath}`);
-  }
-  const stat = statSync(imagePath);
-  if (stat.size <= 0 || stat.size > maximumChannelImageBytes) {
-    throw new Error("图片大小必须在 1 字节到 10 MiB 之间");
+  const { readGeneratedImage, GeneratedImageError } = await import("../dist/surfaces/index.js");
+  let image;
+  try {
+    image = await readGeneratedImage(imagePath);
+  } catch (error) {
+    if (!(error instanceof GeneratedImageError)) throw error;
+    throw new Error("图片必须是绝对路径的普通文件（非符号链接），PNG/JPEG，大小 1 字节到 10 MiB", { cause: error });
   }
 
   const runtime = resolveRuntimePaths({
@@ -64,25 +61,27 @@ export async function submitChannelImage({
   }
 
   const pendingDirectory = join(runtime.spoolDirectory, "pending");
-  mkdirSync(pendingDirectory, { recursive: true });
-  securePrivateDirectorySync(pendingDirectory);
+  ensurePrivateDirectorySync(runtime.spoolDirectory);
+  ensurePrivateDirectorySync(pendingDirectory);
   const base = randomUUID();
-  const extension = imageExtension(imagePath);
-  const pendingImage = join(pendingDirectory, `${base}${extension}`);
-  copyFileSync(imagePath, pendingImage);
-  securePrivateFileSync(pendingImage);
+  const pendingImage = join(pendingDirectory, `${base}.${image.format === "jpeg" ? "jpg" : "png"}`);
   const manifestPath = join(pendingDirectory, `${base}.json`);
-  writeFileSync(
-    manifestPath,
-    `${JSON.stringify({
-      version: 1,
-      threadId: resolvedThreadId,
-      imagePath: pendingImage,
-      createdAtMs: now(),
-    }, null, 2)}\n`,
-    { mode: 0o600 },
-  );
-  securePrivateFileSync(manifestPath);
+  const stagedManifestPath = join(pendingDirectory, `.${base}.pending`);
+  try {
+    writePrivateFileAtomicSync(pendingImage, image.bytes);
+    // Publish only after the validated bytes are complete and private.
+    writePrivateFileAtomicSync(stagedManifestPath, `${JSON.stringify({
+        version: 1,
+        threadId: resolvedThreadId,
+        imagePath: pendingImage,
+        createdAtMs: now(),
+      }, null, 2)}\n`);
+    renameSync(stagedManifestPath, manifestPath);
+  } catch (error) {
+    rmSync(stagedManifestPath, { force: true });
+    rmSync(pendingImage, { force: true });
+    throw error;
+  }
   return {
     manifestPath,
     imagePath: pendingImage,
@@ -140,11 +139,6 @@ function resolveThreadId(bindings, requestedThreadId) {
     );
   }
   return bindings[0].threadId;
-}
-
-function imageExtension(path) {
-  const match = path.match(/\.([a-zA-Z0-9]{1,10})$/u);
-  return match ? `.${match[1].toLowerCase()}` : "";
 }
 
 function printResult(result) {

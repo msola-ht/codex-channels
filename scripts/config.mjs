@@ -129,9 +129,12 @@ export async function runConfig({
 
 function resolveConfigPaths(environment) {
   const explicit = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
-  if (explicit) return { configPath: explicit, dataDir: dirname(explicit) };
-  const home = environment.CODEX_CONNECT_HOME?.trim()
-    || join(homedir(), ".codex-connect");
+  if (explicit) {
+    const configPath = resolve(explicit);
+    return { configPath, dataDir: dirname(configPath) };
+  }
+  const home = resolve(environment.CODEX_CONNECT_HOME?.trim()
+    || join(homedir(), ".codex-connect"));
   return { configPath: join(home, "config.toml"), dataDir: home };
 }
 

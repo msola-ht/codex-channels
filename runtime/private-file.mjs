@@ -269,6 +269,18 @@ export function securePrivateDirectorySync(path) {
   chmodSync(path, 0o700);
 }
 
+/** Create or protect a directory only after checking its type and ownership. */
+export function ensurePrivateDirectorySync(path) {
+  mkdirSync(path, { recursive: true, mode: 0o700 });
+  const metadata = lstatSync(path);
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()
+    || (process.platform !== "win32" && process.getuid !== undefined && metadata.uid !== process.getuid())) {
+    throw new Error("私有目录类型或所有者无效");
+  }
+  securePrivateDirectorySync(path);
+  assertPrivateDirectoryAccessSync(path);
+}
+
 /** Tighten a trusted Windows socket directory to the locked Codex user-only ACL. */
 export function secureAppServerSocketDirectorySync(path) {
   if (process.platform === "win32") {

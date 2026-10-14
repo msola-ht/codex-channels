@@ -14,7 +14,6 @@ import { readGatewayConfig, webuiServiceEnabled } from "../runtime/gateway-confi
 import { gatewayChannelStates } from "./config-summary.mjs";
 import { reportMenuError } from "./cli-menu.mjs";
 import { runCodexUserSettingsSetup } from "./codex-user-settings-setup.mjs";
-import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 import { runOfficialTuiIdentity } from "./config-system-menu.mjs";
 import { runTimezoneCommand } from "./timezone-command.mjs";
 import { loadGatewaySettings, updateGatewaySetting } from "./config-management.mjs";
@@ -131,16 +130,7 @@ async function configureCodexSettings({ environment, input, output, prompts }) {
     if (!options.some(option => option.value === section)) throw new Error("未知 Codex 初始化设置");
     selected = section;
     try {
-      if (section === "preferences") await runCodexUserSettingsSetup({
-        environment, output, prompts,
-        createClient: ({ environment: clientEnvironment }) => {
-          const codex = table(readDocument(clientEnvironment).codex);
-          return createCodexUserConfigClient({
-            environment: clientEnvironment,
-            codexBinary: effectiveCodexBinary(stringValue(codex.binary) || "codex", clientEnvironment),
-          });
-        },
-      });
+      if (section === "preferences") await runCodexUserSettingsSetup({ environment, output, prompts });
       else if (section === "identity") await runOfficialTuiIdentity({ environment, output, prompts });
       else await runTimezoneCommand([], { environment, input, output, prompts });
     } catch (error) {

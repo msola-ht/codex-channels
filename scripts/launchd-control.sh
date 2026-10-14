@@ -257,25 +257,7 @@ case "$action" in
   status)
     target="${2:-all}"
     require_target "$target"
-    labels=$(service_ids "$target" status)
-    required_labels=$(service_ids "$target" status-required)
-    status_code=0
-    for label in ${(f)labels}; do
-      launchctl print "$user_domain/$label" 2>/dev/null && continue
-      # 关闭或未启用的可选服务允许保持未加载，只有预期运行的服务才判定异常；
-      # 配置不可读时 status-required 退回“已安装即可选服务必需”，状态查询仍然可用。
-      required=0
-      for candidate in ${(f)required_labels}; do
-        [ "$candidate" = "$label" ] && required=1
-      done
-      if [ "$required" -eq 1 ]; then
-        print_status failure "launchd 服务未加载：$label"
-        status_code=1
-      else
-        print_status note "launchd 可选服务未加载：$label"
-      fi
-    done
-    exit "$status_code"
+    exec "${NODE_BINARY:-node}" "$script_dir/service-status.mjs" "$target" --text
     ;;
   logs)
     shift

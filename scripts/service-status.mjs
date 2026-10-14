@@ -515,11 +515,20 @@ function safeProcessError(result) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    if (process.argv.length !== 3) {
+    const textOutput = process.argv[3] === "--text";
+    if (process.argv.length !== (textOutput ? 4 : 3)) {
       throw new Error("用法：codexc status [gateway|appserver|webui|relay|all] [--json]");
     }
     const result = await inspectManagedServiceHealth({ target: process.argv[2] });
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    if (textOutput) {
+      for (const service of result.services) {
+        const healthy = serviceSnapshotHealthy([service], result.target, process.env);
+        writeCliMessage(healthy ? (service.running ? "success" : "note") : "failure",
+          `${service.name}: ${service.state}${service.pid === null ? "" : ` pid=${service.pid}`}`);
+      }
+    } else {
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    }
     if (!result.healthy) process.exitCode = 1;
   } catch (error) {
     writeCliMessage("failure", error instanceof Error ? error.message : String(error));

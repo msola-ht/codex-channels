@@ -7,7 +7,7 @@ import {
 import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
 import { resolveProviderSelection } from "./provider-selection.mjs";
 
-export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [-p Provider-ID | --provider Provider-ID | --profile Profile] [Codex 参数...]\n-p / --provider 接受完整 Provider ID（如 cp-llm）、已配置的规范 sf- 名称（如 sf-cp-llm），以及 agg / sf-agg；省略时连接主实例。个人 Profile 使用 --profile。";
+export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID | -C DIR | --cd DIR] [-p Provider-ID | --provider Provider-ID | --profile Profile] [Codex 参数...]\n-p / --provider 接受完整 Provider ID（如 cp-llm）、已配置的规范 sf- 名称（如 sf-cp-llm），以及 agg / sf-agg；省略时连接主实例。个人 Profile 使用 --profile。";
 
 export function parseCodexRemoteOptions(
   args,
@@ -32,6 +32,7 @@ export function parseCodexRemoteOptions(
   assertManagedProfileDefinitions(managedProfileDefinitions);
   const passthrough = [];
   let workspaceId;
+  let cwd;
   let selectedProfile;
   let selectedProvider;
   let hasUnmanagedProfile = false;
@@ -40,6 +41,23 @@ export function parseCodexRemoteOptions(
     if (argument === "--") {
       passthrough.push(...args.slice(index));
       break;
+    }
+    if (argument === "--remote" || argument.startsWith("--remote=")
+      || argument === "--remote-auth-token-env" || argument.startsWith("--remote-auth-token-env=")) {
+      throw new Error("codexc remote 只连接所选的受管本机实例，不能透传 --remote 或 --remote-auth-token-env");
+    }
+    if (argument === "-C" || argument === "--cd" || argument.startsWith("--cd=") || /^-C./u.test(argument)) {
+      if (cwd !== undefined) throw new Error("只能指定一个 -C / --cd");
+      const separateValue = argument === "-C" || argument === "--cd";
+      const value = separateValue
+        ? args[index + 1]
+        : argument.startsWith("--cd=")
+          ? argument.slice("--cd=".length)
+          : argument.slice(argument.startsWith("-C=") ? 3 : 2);
+      if (!value || (separateValue && value.startsWith("-"))) throw new Error(CODEX_REMOTE_USAGE);
+      cwd = value;
+      if (separateValue) index += 1;
+      continue;
     }
     if (argument === "--workspace") {
       if (workspaceId !== undefined) throw new Error("只能指定一个 --workspace");
@@ -115,7 +133,10 @@ export function parseCodexRemoteOptions(
     }
     passthrough.push(argument);
   }
-  return { passthrough, workspaceId, selectedProfile, selectedProvider };
+  if (workspaceId !== undefined && cwd !== undefined) {
+    throw new Error("--workspace 不能与 -C / --cd 同时使用");
+  }
+  return { passthrough, workspaceId, cwd, selectedProfile, selectedProvider };
 }
 
 function customProviderIdArgument(args, index, definitions) {

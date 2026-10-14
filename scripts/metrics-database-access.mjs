@@ -107,7 +107,7 @@ export function readMetricsReport(environment = process.env, options = {}) {
   const store = openReadOnlyMetricsDatabase(environment, range.endAtMs);
   try {
     const queries = new RequestMetricsQueryService(store);
-    return {
+    return store.readSnapshot(() => ({
       format: "codex-connect-request-metrics-report",
       version: 3,
       generatedAt: new Date(range.endAtMs).toISOString(),
@@ -116,7 +116,7 @@ export function readMetricsReport(environment = process.env, options = {}) {
       filters,
       report: queries.aggregate(dimension, range, filters),
       errors: queries.errors(range, filters),
-    };
+    }));
   } finally {
     store.close();
   }
@@ -128,29 +128,31 @@ export function readMetricsExport(environment = process.env, options = {}) {
   const store = openReadOnlyMetricsDatabase(environment, range.endAtMs);
   try {
     const queries = new RequestMetricsQueryService(store);
-    const records = [];
-    let offset = 0;
-    do {
-      const page = queries.page(range, {
-        ...filters,
-        offset,
-        limit: 500,
-        sortKey: "recordedAtMs",
-        sortDirection: "asc",
-      });
-      records.push(...page.records);
-      offset = page.nextOffset ?? -1;
-    } while (offset >= 0);
-    return {
-      format: "codex-connect-request-metrics-export",
-      version: 3,
-      generatedAt: new Date(range.endAtMs).toISOString(),
-      range,
-      filters,
-      aggregate: queries.aggregate("global", range, filters).aggregate,
-      weeklyQuota: readWeeklyQuota(store, range.endAtMs),
-      records,
-    };
+    return store.readSnapshot(() => {
+      const records = [];
+      let offset = 0;
+      do {
+        const page = queries.page(range, {
+          ...filters,
+          offset,
+          limit: 500,
+          sortKey: "recordedAtMs",
+          sortDirection: "asc",
+        });
+        records.push(...page.records);
+        offset = page.nextOffset ?? -1;
+      } while (offset >= 0);
+      return {
+        format: "codex-connect-request-metrics-export",
+        version: 3,
+        generatedAt: new Date(range.endAtMs).toISOString(),
+        range,
+        filters,
+        aggregate: queries.aggregate("global", range, filters).aggregate,
+        weeklyQuota: readWeeklyQuota(store, range.endAtMs),
+        records,
+      };
+    });
   } finally {
     store.close();
   }
@@ -215,17 +217,19 @@ export function readWeeklyQuota(store, nowMs) {
 export function readMetricsRun(environment = process.env, threadId) {
   const store = openReadOnlyMetricsDatabase(environment);
   try {
-    const summary = new RequestMetricsQueryService(store).threadSummary(threadId);
-    return {
-      format: "codex-connect-request-metrics-run",
-      version: 2,
-      generatedAt: new Date().toISOString(),
-      threadId,
-      latestTurn: summary.latestTurn,
-      sessionDurationMs: summary.sessionDurationMs,
-      latestExecution: summary.latestExecution,
-      threadAggregate: summary.threadAggregate,
-    };
+    return store.readSnapshot(() => {
+      const summary = new RequestMetricsQueryService(store).threadSummary(threadId);
+      return {
+        format: "codex-connect-request-metrics-run",
+        version: 2,
+        generatedAt: new Date().toISOString(),
+        threadId,
+        latestTurn: summary.latestTurn,
+        sessionDurationMs: summary.sessionDurationMs,
+        latestExecution: summary.latestExecution,
+        threadAggregate: summary.threadAggregate,
+      };
+    });
   } finally {
     store.close();
   }
@@ -237,21 +241,23 @@ export function readMetricsThreads(environment = process.env, options = {}) {
   const store = openReadOnlyMetricsDatabase(environment);
   try {
     const queries = new RequestMetricsQueryService(store);
-    const threads = [];
-    let offset = 0;
-    do {
-      const page = queries.threadList(range, { ...filters, offset, limit: 500 });
-      threads.push(...page.threads);
-      offset = page.nextOffset ?? -1;
-    } while (offset >= 0);
-    return {
-      format: "codex-connect-request-metrics-threads",
-      version: 1,
-      generatedAt: new Date().toISOString(),
-      range,
-      filters,
-      threads,
-    };
+    return store.readSnapshot(() => {
+      const threads = [];
+      let offset = 0;
+      do {
+        const page = queries.threadList(range, { ...filters, offset, limit: 500 });
+        threads.push(...page.threads);
+        offset = page.nextOffset ?? -1;
+      } while (offset >= 0);
+      return {
+        format: "codex-connect-request-metrics-threads",
+        version: 1,
+        generatedAt: new Date().toISOString(),
+        range,
+        filters,
+        threads,
+      };
+    });
   } finally {
     store.close();
   }
@@ -263,22 +269,24 @@ export function readMetricsTurns(environment = process.env, threadId, options = 
   const store = openReadOnlyMetricsDatabase(environment);
   try {
     const queries = new RequestMetricsQueryService(store);
-    const turns = [];
-    let offset = 0;
-    do {
-      const page = queries.threadTurnSummaries(threadId, range, { ...filters, offset, limit: 500 });
-      turns.push(...page.turns);
-      offset = page.nextOffset ?? -1;
-    } while (offset >= 0);
-    return {
-      format: "codex-connect-request-metrics-turns",
-      version: 2,
-      generatedAt: new Date().toISOString(),
-      threadId,
-      range,
-      filters,
-      turns,
-    };
+    return store.readSnapshot(() => {
+      const turns = [];
+      let offset = 0;
+      do {
+        const page = queries.threadTurnSummaries(threadId, range, { ...filters, offset, limit: 500 });
+        turns.push(...page.turns);
+        offset = page.nextOffset ?? -1;
+      } while (offset >= 0);
+      return {
+        format: "codex-connect-request-metrics-turns",
+        version: 2,
+        generatedAt: new Date().toISOString(),
+        threadId,
+        range,
+        filters,
+        turns,
+      };
+    });
   } finally {
     store.close();
   }
@@ -301,7 +309,7 @@ export function resolveMetricsDatabaseContext(environment) {
 }
 
 export function requireCompatibleMetricsDatabase(environment = process.env) {
-  const status = inspectMetricsDatabase(environment);
+  const status = validateMetricsDatabaseStructure(environment);
   if (!status.exists) throw new Error(`指标数据库尚未创建：${status.databasePath}`);
   if (!status.compatible) {
     throw new Error("模型请求指标数据库版本不兼容；仅支持当前 Schema；请核对数据库版本及备份，勿删除数据库");

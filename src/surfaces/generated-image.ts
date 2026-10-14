@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
+import { lstat, open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
 export const maximumGeneratedImageBytes = 10 * 1024 * 1024;
@@ -57,9 +57,14 @@ async function readImage<Format extends string>(
   }
   let file;
   try {
-    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const before = await lstat(path);
+    if (!before.isFile() || before.isSymbolicLink()) throw new GeneratedImageError("invalid-file");
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const stat = await file.stat();
-    if (!stat.isFile() || stat.size <= 0) {
+    const current = await lstat(path);
+    if (!stat.isFile() || stat.size <= 0 || !current.isFile() || current.isSymbolicLink()
+      || before.dev !== stat.dev || before.ino !== stat.ino
+      || current.dev !== stat.dev || current.ino !== stat.ino) {
       throw new GeneratedImageError("invalid-file");
     }
     if (stat.size > maximumBytes) {
