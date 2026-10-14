@@ -2,7 +2,7 @@
 
 本目录封装 Codex App Server Transport、JSON-RPC 会话和类型化 API，是 Gateway 访问 App Server 的唯一底层入口。
 
-0.162.0 的 `partial_answer` 在通知边界保留，Goal set/clear 的渠道用户操作显式携带 `origin: "user"`。
+0.162.0 引入的 `partial_answer` 在通知边界继续保留，Goal set/clear 的渠道用户操作显式携带 `origin: "user"`。
 子代理 started 活动保留官方 `model` 与 `reasoningEffort`，空值不推断；其他活动不复用启动快照。
 
 遵循[跨平台变更规则](../../docs/development-rules.md#cross-platform-changes)：Unix UDS 与 Windows 官方 Proxy 是同一本机 App Server 合同的适配方式，不能各自放宽认证、消息边界或生命周期语义。Transport 只拥有本次连接及显式创建的子进程；关闭、连接中取消和回收失败都不得扩大为终止共享 App Server。修改共享 Transport 接口时同时核对 UDS、Proxy、stdio 的调用与关闭路径，具体进程及文件保护由注入的 Runtime 能力承担。
@@ -17,7 +17,7 @@
 - `index.ts`：本模块的公开导出入口。
 - `transport.ts`：Transport 接口和公共生命周期基类。
 - `unix-websocket-transport.ts`：连接前校验当前用户私有的父目录和本人所有的真实 Unix Socket，
-  通过共享 Runtime 校验 0.162.0 的确定性 rendezvous 链接与受保护目标，再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
+  通过共享 Runtime 校验 0.162.1 的确定性 rendezvous 链接与受保护目标，再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
   128 MiB 边界一致，避免大型 Thread 恢复响应被客户端提前断开，同时保留有界内存约束。
 - `windows-proxy-transport.ts`：在 Windows 启动并拥有固定版 `codex app-server proxy --sock`
   子进程，把其双向 stdio 包装为标准 WebSocket Transport；复用 128 MiB 消息边界，握手使用独立
@@ -61,7 +61,7 @@
 - `account-adapter.ts`：把 `account/read` 的当前认证类型裁剪为 API、ChatGPT 或无需 OpenAI 认证的
   启动探测路由，不读取或传播凭据；把账户 Token 用量、单桶或多桶额度、重置券数量与到期时间、账户 ID、普通用量权限及
   有界 Luna Reserve 授权摘要映射为 Application
-  稳定摘要；接受当前 0.162.0 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
+  稳定摘要；接受当前 0.162.1 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
   不把上游响应正文交给 Surface。
   `client.ts` 的手动与后台额度查询直接调用 `account/rateLimits/read`，携带取消信号且不主动刷新登录凭据；
   后台查询省略重置券详情，启动认证路由使用 `account/read.refreshToken: false`。

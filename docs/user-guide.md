@@ -255,7 +255,7 @@ auto_recap = false
 
 Codex 0.156.1 已停用模型人格：CLI 与 WebUI 不再提供人格选择，保存其他偏好不会改写配置中已有的 `personality`。
 
-在 `codexc config → Codex 新会话与用户偏好 → 其他用户偏好` 中选择推理摘要。开发基线 0.162.0
+在 `codexc config → Codex 新会话与用户偏好 → 其他用户偏好` 中选择推理摘要。开发基线 0.162.1
 在尚未配置时预选“关闭”，与配套 CLI 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
 不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
 检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`。
@@ -384,7 +384,7 @@ Remote 的 `--profile` 继续支持原生个人 Profile 和已登记的规范受
 显式传给 Codex 的 `-c approvals_reviewer=...` 或 `--approve-for-me` 优先于工作区默认审批方式。
 Remote 不按 Provider 或模型限制自动审查，也不为审批资格固定模型或限制个人 Profile。
 聚合入口仍保护其 Provider 与模型目录，防止透传参数替换路由。
-Remote 的 `resume` 和继承式 `fork` 由原生 TUI 保留历史模型及审批方式，Codex 0.162.0 不应用启动参数中的 reviewer 覆盖；
+Remote 的 `resume` 和继承式 `fork` 由原生 TUI 保留历史模型及审批方式，Codex 0.162.1 不应用启动参数中的 reviewer 覆盖；
 恢复后应核对实际模型与审批方式。
 
 ### Codex Desktop App 共享（macOS / Windows 预览）
@@ -484,7 +484,7 @@ Remote Control 或手机配对。Desktop 的连接环境属于未公开兼容入
 macOS 上使用 ChatGPT `26.908.70816` 的既有实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
 Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
 私有 UDS，并在首次附加当前工具 Pipe 时短暂重启目标 App Server 子进程，以 OpenAI 签名的 Desktop
-Node 托管项目锁定的 Codex CLI；开发基线为 0.162.0，既有私有 Pipe 与签名链实机验收使用 0.154.0，
+Node 托管项目锁定的 Codex CLI；开发基线为 0.162.1，既有私有 Pipe 与签名链实机验收使用 0.154.0，
 升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到目标实例，
 Host 租约存在时空闲释放不会停止目标实例。目标实例已空闲释放时，`codexc app` 会先获取临时租约，
 按需恢复实例并保护启动预检，再通过 App Server 的官方 `thread/loaded/list` 和 `thread/read`

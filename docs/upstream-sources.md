@@ -15,7 +15,7 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 
 | 用途 | 本地目录 | 来源仓库 | 当前基线 |
 | --- | --- | --- | --- |
-| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex-0.162.0` | `openai/codex` | `rust-v0.162.0`，提交 `c1382380de69521303b416720a52f42d51af6248` |
+| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex-0.162.1` | `openai/codex` | `rust-v0.162.1`，提交 `092d3acd6bec3e3a14bdc7e7a2810ab628ab759d` |
 | 微信 ClawBot HTTP、消息和媒体合同 | `upstream/openclaw-weixin` | `Tencent/openclaw-weixin` | `v2.4.9`，提交 `43675b66551d12d6853155a7869a50fb12a18a1e` |
 | 飞书官方 Node SDK | `upstream/larksuite-node-sdk-1.75.0` | `larksuite/node-sdk` | `@larksuiteoapi/node-sdk@1.75.0`，公开源码提交 `e34a66f0d20935ee77f94909d16d93292d58b6c7`；发布包核对边界见飞书资料索引 |
 | 飞书官方 OpenClaw 插件参考 | `upstream/openclaw-lark` | `larksuite/openclaw-lark` | 提交 `dde0be3680d6fd5443cab426c8f4b3216266346a` |
@@ -23,6 +23,10 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 飞书协议和 API 字段以官方 Node SDK及飞书开放平台为主要事实来源；OpenClaw 插件只用于参考渠道
 编排、授权、卡片、媒体和错误处理，不替代官方 SDK。微信未发布独立 SDK，固定版本官方插件的
 源码、类型和测试是协议研究基线，真实合同仍以本项目的脱敏探针结果为准。
+
+本次 0.162.1 审查使用独立任务目录中的正式 Tag 副本，已核对提交；未切换或修改原有
+`upstream/openai-codex-0.162.0`。表中 0.162.1 路径是长期参考目录约定，本机尚未创建；
+缺少该目录时使用固定 Tag 链接，不能拿旧副本冒充新基线。
 
 ## Windows 主配置与沙箱权限
 
@@ -85,7 +89,7 @@ Relay 更新和回退见[Relay 模型设置](provider-api-relay-development.md#c
 新工作区没有 `upstream/` 时，按当前锁定基线显式克隆：
 
 ```text
-git clone --depth 1 --branch rust-v0.162.0 https://github.com/openai/codex.git upstream/openai-codex-0.162.0
+git clone --depth 1 --branch rust-v0.162.1 https://github.com/openai/codex.git upstream/openai-codex-0.162.1
 git clone --branch v2.4.9 https://github.com/Tencent/openclaw-weixin.git upstream/openclaw-weixin
 git clone https://github.com/larksuite/node-sdk.git upstream/larksuite-node-sdk-1.75.0
 git -C upstream/larksuite-node-sdk-1.75.0 checkout e34a66f0d20935ee77f94909d16d93292d58b6c7
