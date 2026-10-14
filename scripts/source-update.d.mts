@@ -29,6 +29,7 @@ export interface SourceUpdatePlan {
   checkout?: string;
   currentCommit?: string;
   currentVersion?: string;
+  npmPrefix?: string;
   targetCommit?: string;
   updateAvailable?: boolean;
   steps: SourceUpdateStage[];

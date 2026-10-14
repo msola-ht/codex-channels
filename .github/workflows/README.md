@@ -56,5 +56,6 @@ hook 配置；随后直接调用 `npm run verify:ci`。本地 `npm ci`、`npm in
 `npm run verify:commit`，PR 由 `npm run verify:ci` 完成完整静态检查与构建。
 
 Windows Job 的 PowerShell 语法检查包含根目录 `install.ps1`。
+Unix Job 通过共享验证入口逐文件检查 `install.sh`、`scripts/launchd-control.sh` 和 `scripts/systemd-control.sh` 的 Bash 语法。
 
 跨平台故障排查使用工作流锁定的 Node.js 及配套 npm 复现。必须区分本地验证与当前 PR 提交的远端检查结果，不以重跑、跳过或降低门禁代替定位。

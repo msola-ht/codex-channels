@@ -7,6 +7,7 @@ import * as clackPrompts from "@clack/prompts";
 
 import {
   readGatewayConfig,
+  validateGatewayConfigStructureDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
@@ -44,6 +45,7 @@ export async function runConfig({
     let gatewayConfigError;
     try {
       document = readGatewayConfig(configPath);
+      validateGatewayConfigStructureDocument(document);
     } catch (error) {
       gatewayConfigError = error;
     }

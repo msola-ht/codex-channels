@@ -1,29 +1,35 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   renameSync,
   rmSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { resolveExecutableInvocation, resolveOptionalExecutable } from "../runtime/executable.mjs";
 import { packageDir } from "./package-path.mjs";
-import { userDataDir } from "./runtime-config.mjs";
+import { locateUserConfig, userDataDir } from "./runtime-config.mjs";
 import {
   currentNpmGlobalPrefix,
+  hasManagedSourceMarker,
   inferNpmGlobalPrefix,
+  readInstalledSourceMetadata,
+  readManagedNpmPrefixes,
   recordManagedSourceMetadata,
 } from "./source-install-metadata.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
-import { serviceControlDefinitions } from "./service-selection.mjs";
+import { serviceControlDefinitions, serviceDefinitionPath } from "./service-selection.mjs";
 import { inspectManagedServiceStatus } from "./service-status.mjs";
 import { withPrivateFileLock } from "../runtime/private-file-lock.mjs";
+import { readPrivateFileSync } from "../runtime/private-file.mjs";
+import { serviceDefinitions } from "../runtime/service-targets.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
@@ -33,9 +39,26 @@ const codexVersionMismatchRemediations = new WeakMap();
 
 export function managedSourceCheckout(environment = process.env, projectDir = packageDir) {
   const expected = join(userDataDir(environment), "codex-channels");
-  if (!existsSync(expected) || !existsSync(join(expected, ".git"))) return undefined;
-  if (realpathSync(expected) === realpathSync(projectDir)) return expected;
-  return hasManagedSourceMarker(expected, environment) ? expected : undefined;
+  const source = inferNpmGlobalPrefix(projectDir) ? readInstalledSourceMetadata(projectDir) : undefined;
+  const checkoutExists = existsSync(expected);
+  const canonicalCheckout = checkoutExists ? realpathSync(expected) : resolve(expected);
+  if (source?.managed && !sameInstallationPath(source.checkout, canonicalCheckout)) {
+    throw new Error("当前 npm 全局包的受管源码来源与用户目录不一致，拒绝更新；请核对安装来源和 CODEX_CONNECT_HOME");
+  }
+  if (!checkoutExists) {
+    if (source?.managed) throw new Error("当前 npm 全局包的受管源码目录不存在，拒绝更新；请恢复源码目录或重新安装程序");
+    return undefined;
+  }
+  if (!existsSync(join(expected, ".git"))) {
+    if (source?.managed) throw new Error("当前 npm 全局包的受管源码目录不是 Git 仓库，拒绝更新");
+    return undefined;
+  }
+  if (sameInstallationPath(canonicalCheckout, realpathSync(projectDir))) return expected;
+  if (!source?.managed) return undefined;
+  if (!hasManagedSourceMarker(expected, environment)) {
+    throw new Error("当前 npm 全局包的源码来源缺少受管标记，拒绝更新");
+  }
+  return expected;
 }
 
 export function inspectManagedSourceUpdatePlan(
@@ -53,6 +76,8 @@ export function inspectManagedSourceUpdatePlan(
   }
   const repository = options.repository ?? officialRepository;
   assertManagedRepository(checkout, repository, environment, options.captureCommand);
+  readManagedNpmPrefixes(checkout, environment);
+  const npmPrefix = assertSourceUpdateInstallation(checkout, environment, options);
   const targetCommit = resolveMainCommit(
     repository,
     checkout,
@@ -74,6 +99,7 @@ export function inspectManagedSourceUpdatePlan(
     checkout,
     currentCommit,
     currentVersion,
+    npmPrefix,
     targetCommit,
     updateAvailable,
     steps: [
@@ -238,11 +264,17 @@ export async function updateManagedSourceInstallation(
     writeMessageSafely(writeMessage, "note", "正在核对候选版本的 Codex 公开合同。");
     await runStage(
       "validate-codex-contract",
-      () => (options.validateCodexContract ?? validateCodexContract)(
-        stagedCheckout,
-        preparedCodex.validationEnvironment,
-        options,
-      ),
+      async () => {
+        await (options.validateCodexContract ?? validateCodexContract)(
+          stagedCheckout,
+          preparedCodex.validationEnvironment,
+          options,
+        );
+        if (assertSourceUpdateInstallation(checkout, environment, options) !== plan.npmPrefix) {
+          throw new Error("npm 全局目录在候选构建期间发生变化，拒绝更新；请重新运行 codexc update");
+        }
+        recordManagedSourceMetadata(stagedCheckout, [...readManagedNpmPrefixes(checkout, environment), plan.npmPrefix], environment);
+      },
     );
     if (inspection.services.installed) {
       servicesBeforeUpdate = await (options.inspectServices ?? inspectUpdateServices)(environment);
@@ -438,7 +470,6 @@ async function installManagedSourceCommand(
   writeMessage,
   options,
 ) {
-  markManagedSourceCheckout(checkout, environment);
   await (options.installGlobalPackage ?? installGlobalPackage)(checkout, environment, options);
 
   writeMessageSafely(
@@ -458,21 +489,67 @@ function installGlobalPackage(checkout, environment, options) {
   );
 }
 
-function markManagedSourceCheckout(checkout, environment) {
-  recordManagedSourceMetadata(
-    checkout,
-    [currentNpmGlobalPrefix(environment), inferNpmGlobalPrefix(packageDir)],
-    environment,
-  );
+function assertSourceUpdateInstallation(checkout, environment, options) {
+  const prefix = currentNpmGlobalPrefix(environment);
+  const canonicalPrefix = existsSync(prefix) ? realpathSync(prefix) : resolve(prefix);
+  const activePrefix = inferNpmGlobalPrefix(packageDir);
+  if (activePrefix && !sameInstallationPath(activePrefix, canonicalPrefix)) {
+    throw new Error("当前 codexc 所属 npm 全局目录与当前 npm prefix 不一致；请切回原 Node.js/npm 环境后运行 codexc update。更新不会自动重装后台服务");
+  }
+  const globalPackage = join(canonicalPrefix, ...(process.platform === "win32" ? [] : ["lib"]), "node_modules", "@hegenai", "codexc");
+  const cliEntries = [join(realpathSync(checkout), "bin", "codexc.mjs"), join(globalPackage, "bin", "codexc.mjs")];
+  const platform = { linux: "systemd", darwin: "launchd", win32: "windows" }[process.platform];
+  if (!platform) throw new Error("codexc update 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
+  const definitionsDirectory = platform === "windows" ? join(locateUserConfig(environment).dataDir, "services") : undefined;
+  for (const definition of serviceDefinitions) {
+    const path = serviceDefinitionPath(platform, definition, environment, definitionsDirectory);
+    const command = definition.target === "app-server" ? "service-app-server"
+      : definition.target === "model-relay" ? "service-model-relay" : definition.target;
+    let matches;
+    try {
+      const stat = lstatSync(path, { throwIfNoEntry: false });
+      if (!stat) continue;
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("服务定义不是普通文件");
+      if (platform === "systemd") {
+        const starts = readFileSync(path, "utf8").split(/\r?\n/u).filter(line => /^\s*ExecStart\s*=/u.test(line));
+        const nodeArgument = starts.length === 1 ? /^ExecStart=("(?:\\.|[^"\\])*") /u.exec(starts[0])?.[1] : undefined;
+        matches = nodeArgument !== undefined && cliEntries.some(entry =>
+          starts[0] === `ExecStart=${nodeArgument} --disable-warning=ExperimentalWarning ${systemdArgument(entry)} ${command}`);
+      } else {
+        const value = platform === "launchd"
+          ? JSON.parse(capture("/usr/bin/plutil", ["-extract", "ProgramArguments", "json", "-o", "-", path], checkout, environment, options.captureCommand))
+          : JSON.parse(readPrivateFileSync(path, 1024 * 1024));
+        const args = platform === "launchd" ? value : value.arguments;
+        matches = Array.isArray(args) && args.length === 3 + Number(platform === "launchd")
+          && args[Number(platform === "launchd")] === "--disable-warning=ExperimentalWarning"
+          && args[args.length - 1] === command
+          && cliEntries.some(entry => sameInstallationPath(args[args.length - 2], entry));
+        if (platform === "windows" && matches) {
+          const projectDir = dirname(dirname(args[args.length - 2]));
+          matches = value.version === 1 && value.target === definition.target
+            && sameInstallationPath(value.launcherPath, join(projectDir, "scripts", "windows-service-launcher.ps1"))
+            && sameInstallationPath(value.serviceHost, join(projectDir, "scripts", "windows-service-host.mjs"));
+        }
+      }
+    } catch {
+      throw new Error(`${definition.displayName} 服务定义无法安全读取或解析，拒绝更新；请检查定义权限与格式，按源码安装文档运行 codexc install 重建服务定义。尚未停止服务或替换程序`);
+    }
+    if (!matches) {
+      throw new Error(`${definition.displayName} 服务定义使用的程序路径不在本次更新范围内，拒绝更新；请切回原 Node.js/npm 环境，或按源码安装文档手动安装程序并运行 codexc install 重建服务定义。尚未停止服务或替换程序`);
+    }
+  }
+  return prefix;
 }
 
-function hasManagedSourceMarker(checkout, environment) {
-  const result = spawnSync(
-    "git",
-    ["config", "--local", "--get", "codex-connect.managed-source"],
-    { cwd: checkout, env: environment, encoding: "utf8" },
-  );
-  return !result.error && result.status === 0 && result.stdout.trim() === "true";
+function sameInstallationPath(left, right) {
+  if (typeof left !== "string" || typeof right !== "string" || !isAbsolute(left) || !isAbsolute(right)) return false;
+  return process.platform === "win32"
+    ? resolve(left).toLowerCase() === resolve(right).toLowerCase()
+    : resolve(left) === resolve(right);
+}
+
+function systemdArgument(value) {
+  return `"${value.replaceAll("\\", "\\\\").replaceAll("\n", "\\n").replaceAll("\r", "\\r").replaceAll("\t", "\\t").replaceAll('"', '\\"').replaceAll("%", "%%")}"`;
 }
 
 function assertFastForward(checkout, currentCommit, targetCommit, environment) {
@@ -735,8 +812,13 @@ function installCodexCli(version, checkout, environment, options) {
 }
 
 export async function buildCheckout(checkout, environment, options) {
+  const ignoreScripts = capture("npm", ["config", "get", "ignore-scripts"], checkout, environment, options.captureCommand).trim();
+  if (ignoreScripts !== "true" && ignoreScripts !== "false") {
+    throw new Error("无法确认 npm ignore-scripts 设置，拒绝构建候选源码");
+  }
   for (const [cwd, args] of [
-    [checkout, ["ci", "--no-audit", "--no-fund"]],
+    [checkout, ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]],
+    ...(ignoreScripts === "false" ? [[checkout, ["run", "hooks:install"]]] : []),
     [checkout, ["run", "build"]],
     [checkout, ["run", "check"]],
     [join(checkout, "webui"), ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]],

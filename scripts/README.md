@@ -37,8 +37,9 @@
 - `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
 - `source-update.mjs` / `source-update.d.mts`：从本机终端更新受管官方 `main`；跨平台独占锁阻止并发更新，候选克隆启用长路径支持。先构建并只读检查配置、数据库结构和精确 CLI 合同，CLI 不匹配时确认后同步。记录 App Server、Gateway、Relay、WebUI 状态，按依赖顺序停服；刷新源码与全局命令后，只恢复原本运行的服务，Relay 还须保持启用，WebUI 还须未被配置关闭。恢复前再次校验 CLI 版本和配置、数据库，失败保留阶段及必要备份。无新提交或本地构建包只同步配套 CLI，不更新 Gateway 包；关闭 daemon 自动启动，其他用户偏好和模型目录不变。
+  已安装包按自身来源记录识别受管源码，不因旧受管目录残留而覆盖本地构建包。更新预检核对当前 npm prefix、运行包和已安装服务定义的程序路径，拒绝刷新范围外的服务路径；停服前再次复核，换仓库时合并保留完整安装 prefix 归属。候选依赖安装禁用隐式生命周期，随后显式构建一次；仅在 npm 有效配置未禁用脚本时安装 Git hooks。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
-  prefix，并在已安装包记录精确源码来源，从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
+  prefix，并在已安装包记录精确源码来源，从当前全局包路径识别其所属 prefix，供安装归属核对和跨 Node.js 环境卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：统一识别受管源码、本地工作树构建包与 npm 全局包，先卸载后台服务，再卸载当前包及来源匹配的已记录包；只有路径、来源与受管标记均匹配才删除仓库。拒绝符号链接、身份冲突和执行中替换，保留普通工作树和用户数据。
 - `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装；`inspectDatabases` 只读校验当前 Schema，拒绝其他版本，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定；仅在监管拓扑匹配且实例已运行时连接 Socket，空闲释放状态不启动 Proxy 探测，不匹配或尚未启动的实例继续等待。
 - `state-database.mjs`：提供状态库与计划任务库的只读版本/结构检查，只接受当前 Schema。
@@ -291,7 +292,7 @@
 - `config-summary.mjs`：把已经读取的严格配置投影为脱敏总览，只显示配置来源、有效开关、作用范围
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
 - `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
-  设置脱敏读取与明确修改接口；只接受受控的显示、系统（含一键官方 TUI 身份与模型上游终端标识）、自动化、网络、
+  设置脱敏读取与明确修改接口；读取快照及写入前复用当前版本的完整结构校验，拒绝未知字段和非法值，校验不回填默认值或替换带注释来源的原文对象；只接受受控的显示、系统（含一键官方 TUI 身份与模型上游终端标识）、自动化、网络、
   高级、Telegram 格式、WebUI、指标和 Workspace 权限输入，返回稳定字段错误与精确生效动作，
   凭据和网络读取只显示是否已配置；
   网络操作只更新共享 Codex `.env`，不写入 Gateway TOML；读取返回覆盖两个文件的修订，
@@ -396,7 +397,7 @@
   `service-app-server` 入口立即启动主 App Server；已配置的隔离 Provider App Server
   在首次选择模型、恢复 Thread 或使用对应 Remote TUI 时由监管入口按需启动。统计代理也按 Provider
   使用情况启动；原生子代理复用父线程实例与代理；
-  随后再启动 Gateway。只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
+  随后再启动 Gateway；源码与构建入口均使用包目录的绝对路径，配置可位于仓库外。只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `provider-selection.mjs` / `provider-selection.d.mts`：Remote 与 Desktop 共用的纯 Provider 选择映射；
@@ -489,6 +490,7 @@
 - `webui-i18n.mjs`：静态读取 WebUI 中英文文案字典，检查键与占位符，并按 Git 基线输出包含术语表的增量翻译任务 JSON；不执行字典代码、不调用翻译服务、不写回译文。
 - `verification-scope.mjs`：读取本地提交或指定 Git 基线的改动文件，供检查入口选择静态检查范围。
 - `verify-commit.mjs`：本地 `verify:commit` 按改动范围执行必要静态检查与构建，`verify:ci` 执行完整静态检查与构建。
+  Unix 平台对安装脚本及两个服务控制脚本逐文件执行 `bash -n`，任一文件失败即阻止后续检查。
   WebUI 共享 API 类型 `webui-api.ts` 纳入根 TypeScript 与 ESLint 类型检查；单独变更该文件或
   `runtime/model-display-name.mjs` 及其声明时，也触发 WebUI 构建、Lint 和翻译字典检查，包括删除这些文件的变更。
   macOS 枚举四类 launchd 模板，替换共享停止预算的整数占位符后通过标准输入交给 `plutil`；预算、服务清单或模板渲染入口变化也触发此检查。模板检查不代替安装和服务运行观察。
@@ -496,7 +498,6 @@
   缓存位于 `node_modules/.cache/codexc/check.tsbuildinfo`，可删除后重建，不缓存后续版本和边界检查。
   需要构建产物时，在完整类型检查成功后才清理并构建 Gateway，使用 `--noCheck` 避免重复类型分析；
   独立 `npm run build` 保留完整类型检查。
-- `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
 - `config-backup.mjs`：调用方持有配置锁并验证目标后，执行私有备份、同步及逐字节校验，再原子保存，可传递完整文件容量上限；供 Relay 管理等配置写入使用。
 - `traffic-command-options.mjs` / `traffic-command-options.d.mts`：集中解析并预检 `codexc traffic` 的
   转储目录、逻辑调用编号、正文长度、关键字、跟随与清理参数，使顶层 CLI 在读取配置前拒绝非法输入，
@@ -607,8 +608,10 @@
 - `windows-scheduled-task.ps1`：创建、启动、查询和删除当前用户计划任务；任务通过
   `wscript.exe` 以隐藏窗口运行对应 VBS 启动器，避免服务进程占用可见终端窗口。
 - `windows-log-follow.ps1`：按服务目标跟随读取用户级运行日志，供 `codexc logs` 使用。
-- `windows-app-server-proxy-probe.mjs`：Windows App Server 代理连接的只读探针，用于确认
-  代理端点、初始化握手和 RPC 可达性。
+- `windows-app-server-proxy-probe.mjs`：Windows App Server 代理连接的历史探针；默认 `readonly`
+  场景只查询代理端点、初始化握手和 RPC。`peer` 创建临时 Thread；`turn`、`approval`、`interrupt`
+  会启动模型轮次，其中 `approval` 请求执行命令；`message-limit` 发送大消息并可能断开连接。
+  非默认场景须按实际副作用取得授权，不能作为只读诊断执行；按冻结历史资产保留，不作为功能完成证据。
 
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。
 
