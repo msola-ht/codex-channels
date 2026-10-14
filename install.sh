@@ -169,7 +169,13 @@ node "$staging/repository/scripts/sandbox-dependencies.mjs" \
 
 note "正在安装依赖并构建 Gateway"
 (cd "$staging/repository" \
-  && npm ci --no-audit --no-fund \
+  && ignore_scripts="$(npm config get ignore-scripts)" \
+  && case "$ignore_scripts" in
+    true|false) ;;
+    *) fail "无法确认 npm ignore-scripts 设置，拒绝构建源码" ;;
+  esac \
+  && npm ci --ignore-scripts --no-audit --no-fund \
+  && { [ "$ignore_scripts" = true ] || npm run hooks:install; } \
   && npm run build \
   && npm run check) \
   || fail "Gateway 依赖安装或构建失败"

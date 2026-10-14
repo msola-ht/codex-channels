@@ -173,7 +173,6 @@
     "scripts/traffic-dump-presentation.mjs",
     "scripts/traffic-dump-reader.mjs",
     "scripts/state-database.mjs",
-    "scripts/validate-config.mjs",
     "scripts/webui-account-settings-management.mjs",
     "scripts/webui-command-options.mjs",
     "scripts/webui-http.mjs",

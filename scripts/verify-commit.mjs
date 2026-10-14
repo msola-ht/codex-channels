@@ -18,12 +18,8 @@ const docs = { name: "文档与索引", command: "npm", args: ["run", "docs:chec
 // Emission follows the full source type check. Standalone builds retain their
 // independent type checking.
 const gatewayBuild = { name: "Gateway 构建", command: "npm", args: ["run", "build", "--", "--noCheck"] };
-const shell = { name: "Shell 语法", command: "bash", args: [
-    "-n",
-    "install.sh",
-    "scripts/launchd-control.sh",
-    "scripts/systemd-control.sh",
-  ] };
+const shell = ["install.sh", "scripts/launchd-control.sh", "scripts/systemd-control.sh"]
+  .map(path => ({ name: `Shell 语法 ${path}`, command: "bash", args: ["-n", path] }));
 const templates = serviceDefinitions.map(service => ({
   name: `launchd 模板 ${service.target}`, command: "plutil", args: ["-lint", "--", "-"],
   templatePath: `launchd/${service.launchd}.plist.template`,
@@ -32,7 +28,7 @@ const templates = serviceDefinitions.map(service => ({
 export function createVerificationPlan(changes, { ci = false, root = process.cwd(), platform = process.platform } = {}) {
   if (ci) return { reason: "PR 静态检查与构建", checks: [
     checkTypes, rootLint, webuiBuild, webuiLint, dictionary, docs, gatewayBuild,
-    ...(platform === "win32" ? [] : [shell]), ...(platform === "darwin" ? templates : []),
+    ...(platform === "win32" ? [] : shell), ...(platform === "darwin" ? templates : []),
   ] };
 
   const paths = changes.map(change => change.path);
@@ -52,7 +48,7 @@ export function createVerificationPlan(changes, { ci = false, root = process.cwd
   if (webui || webuiShared || sharedBuild) checks.push(webuiBuild, webuiLint, dictionary);
   if (code.some(path => /\.(?:sh|ps1)$/u.test(path) || /^(?:launchd|systemd)\//u.test(path)
     || /^(?:runtime\/(?:shutdown-budget|service-targets)|scripts\/(?:service-install-management|verify-commit))\.mjs$/u.test(path))) {
-    if (platform !== "win32") checks.push(shell);
+    if (platform !== "win32") checks.push(...shell);
     if (platform === "darwin") checks.push(...templates);
   }
 

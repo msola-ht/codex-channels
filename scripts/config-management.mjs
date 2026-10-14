@@ -7,6 +7,7 @@ import {
   parseGatewayConfig,
   timezonePattern,
   validateCodexConfigDocument,
+  validateGatewayConfigStructureDocument,
   validateGatewayProcessConfigDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
@@ -174,6 +175,7 @@ export function updateGatewaySetting(
   }
   const originalDocument = structuredClone(document);
   const result = applySetting(document, input);
+  validateGatewayConfigStructureDocument(document);
   if (JSON.stringify(document) === JSON.stringify(originalDocument)) {
     return {
       kind: input.kind,
@@ -522,11 +524,14 @@ function changed(value, activation) {
 
 function readConfigSnapshot(configPath, readConfig = readFileSync, environment = process.env) {
   const content = readConfig(configPath, "utf8");
+  const document = parseGatewayConfig(content, configPath);
+  // 校验不接收补入默认值的返回文档，以保留原文来源、注释和未配置字段。
+  validateGatewayConfigStructureDocument(document);
   const proxy = readCodexProxySnapshot(environment);
   return {
     content,
     proxy,
-    document: parseGatewayConfig(content, configPath),
+    document,
     revision: createHash("sha256").update(JSON.stringify([content, proxy.content])).digest("hex"),
   };
 }

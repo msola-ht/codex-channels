@@ -41,7 +41,7 @@ async function runDevAll() {
   const runtimeDir = dirname(socketPath);
   const gatewayEntry = process.env.CODEX_CONNECT_GATEWAY_ENTRY === "dist"
     ? [join(projectDir, "dist/main.js")]
-    : [join(projectDir, "node_modules", "tsx", "dist", "cli.mjs"), "src/main.ts"];
+    : [join(projectDir, "node_modules", "tsx", "dist", "cli.mjs"), join(projectDir, "src", "main.ts")];
 
   mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
   securePrivateDirectorySync(runtimeDir);
