@@ -230,15 +230,17 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       const resolved = replace ? turns.map(turn => ({ ...turn,
         durationMs: turn.durationMs ?? this.turnExecutionDuration(threadId, turn.turnId),
       })) : turns;
+      const cutoff = Math.max(0, Date.now() - this.retentionMs);
+      const historyTruncated = resolved.some(turn => turn.recordedAtMs < cutoff);
       this.database.prepare(`INSERT INTO thread_execution_state VALUES (?, ?, ?)
         ON CONFLICT(thread_id) DO UPDATE SET provider = excluded.provider,
-        history_complete = CASE WHEN ? THEN 1 ELSE history_complete END`).run(threadId, provider, replace ? 1 : 0, replace ? 1 : 0);
+        history_complete = CASE WHEN ? THEN 0 WHEN ? THEN excluded.history_complete ELSE history_complete END`)
+        .run(threadId, provider, Number(replace && !historyTruncated), Number(historyTruncated), Number(replace));
       if (replace) this.database.prepare("DELETE FROM turn_execution_metrics WHERE thread_id = ?").run(threadId);
       const insert = this.database.prepare(`INSERT INTO turn_execution_metrics VALUES (?, ?, ?,
         (SELECT COALESCE(MAX(ordinal), 0) + 1 FROM turn_execution_metrics WHERE thread_id = ?), ?)
         ON CONFLICT(thread_id, turn_id) DO UPDATE SET
           duration_ms = COALESCE(excluded.duration_ms, duration_ms)`);
-      const cutoff = Math.max(0, Date.now() - this.retentionMs);
       for (const turn of resolved) {
         if (turn.recordedAtMs < cutoff) continue;
         insert.run(threadId, turn.turnId, turn.durationMs, threadId, turn.recordedAtMs);
@@ -761,6 +763,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
     this.database.exec("BEGIN IMMEDIATE");
     try {
       new SqliteAutoApprovalReviewMetrics(this.database).cleanup(Math.max(0, nowMs - this.retentionMs), this.maximumRows);
+      this.database.prepare(`UPDATE thread_execution_state SET history_complete = 0 WHERE thread_id IN (
+        SELECT thread_id FROM turn_execution_metrics WHERE recorded_at_ms < ?
+          OR rowid IN (SELECT rowid FROM turn_execution_metrics ORDER BY recorded_at_ms DESC, rowid DESC LIMIT -1 OFFSET ?)
+      )`).run(Math.max(0, nowMs - this.retentionMs), this.maximumRows);
       this.database.prepare("DELETE FROM turn_execution_metrics WHERE recorded_at_ms < ?").run(Math.max(0, nowMs - this.retentionMs));
       this.database.prepare(`DELETE FROM turn_execution_metrics WHERE rowid IN (
         SELECT rowid FROM turn_execution_metrics ORDER BY recorded_at_ms DESC, rowid DESC LIMIT -1 OFFSET ?
