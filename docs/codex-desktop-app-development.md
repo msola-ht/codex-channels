@@ -9,7 +9,7 @@
 至少有两个 API Key 切换提供商时，还派生按需启动的虚拟 Provider
 `codexc-aggregate`，把这些成员的模型提供给同一个模型选择器；Desktop 共享另要求主 Provider 为 OpenAI。
 
-当前锁定的 Codex CLI 0.162.0 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
+当前锁定的 Codex CLI 0.162.1 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
 包含未公开的 WebSocket 与强制 CLI 启动入口。macOS 使用强制 CLI 与受管 stdio Proxy，Windows
 继续使用 `CODEX_APP_SERVER_WS_URL`。这些入口不属于公开稳定合同，因此功能必须默认关闭、严格做
 平台兼容探测，并在入口消失或行为改变时失败关闭。官方 Remote Control 的云端配对、Environment
@@ -65,7 +65,7 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
   桌面连接关闭但启动回调未返回时临时租约仍保护目标；命令成功、受控桌面启动失败和桥不可用后
   租约均清空。该观察替代了 Windows 桌面启动边界，不代表 Windows App 或 Windows Proxy 已实测。
 - 2026-09-16/17 的 macOS 历史实测覆盖 Thread 双向共享、内置工具启动与 App Server 重启恢复；
-  实测 CLI 为 0.154.0、ChatGPT 为 `26.908.70816`。这些结果不是当前 CLI 0.162.0 或任意新 App 构建的验收。
+  实测 CLI 为 0.154.0、ChatGPT 为 `26.908.70816`。这些结果不是当前 CLI 0.162.1 或任意新 App 构建的验收。
 - 本次操作者确认未附新的 CLI 与 Desktop 构建号，保留已有版本记录，不据此声明特定新版本组合已重测。
   Windows 尚未验收；平台验收结论分别记录，不宣称全平台正式支持。
 
@@ -74,9 +74,9 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 
 ### 官方锁定版本
 
-- 项目固定 `codex-cli 0.162.0`，协议与实现仍以 [`Codex 协议索引`](index.md)和
-  `upstream/openai-codex-0.162.0` 的 `rust-v0.162.0` 锁定源码为准。下文 0.154.0 与 0.160.1 的实机结果是历史验收，
-  不代表 0.162.0 已完成打包 Desktop 私有工具 Pipe 与签名链的实机复核。
+- 项目固定 `codex-cli 0.162.1`，协议与实现仍以 [`Codex 协议索引`](index.md)和
+  `rust-v0.162.1` 锁定源码为准；本机参考副本状态见[上游来源](upstream-sources.md)。下文 0.154.0 与 0.160.1 的实机结果是历史验收，
+  不代表 0.162.1 已完成打包 Desktop 私有工具 Pipe 与签名链的实机复核。
 - 官方远程客户端以 WebSocket 连接 App Server；每个连接独立执行一次
   `initialize` / `initialized`。
 - Unix 客户端可以直接通过 WebSocket-over-UDS 连接。官方
@@ -85,9 +85,9 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
   裸中继。
 - 官方 `app-server daemon` 是实验性生命周期工具，会自行选择二进制、环境、控制 Socket 与更新
   方式。它不能代替本项目现有的 Provider 代理、指标采集和 Supervisor，因此本轮不采用。
-- 锁定源码 [`core/src/session/step_settings.rs`](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/core/src/session/step_settings.rs)
+- 锁定源码 [`core/src/session/step_settings.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/session/step_settings.rs)
   的 `apply_update` 在模型改变时重新解析 `ModelInfo`，构成同 Provider 目录内换模型采用模型元数据
-  的实现依据；[`model-provider/src/provider.rs`](https://github.com/openai/codex/blob/rust-v0.162.0/codex-rs/model-provider/src/provider.rs)
+  的实现依据；[`model-provider/src/provider.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/model-provider/src/provider.rs)
   对自定义目录使用 `StaticModelsManager`，不能据此承诺运行中目录热刷新。这些源码依据不替代
   Desktop 跨模型历史与工具的实机验收。
 
@@ -107,7 +107,7 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
   已通过真实 Pipe 验证。因此修复必须同时满足动态环境交付和可信父进程链，不能只补变量或转发
   Socket。
 - Desktop 随包 Codex 为 `0.154.0-alpha.6.2`，与项目锁定协议基线不同，不能成为共享主 App
-  Server。实施只能继续运行项目解析出的精确 Codex CLI 0.162.0 原生可执行文件；Desktop 随包内容
+  Server。实施只能继续运行项目解析出的精确 Codex CLI 0.162.1 原生可执行文件；Desktop 随包内容
   只提供同一 OpenAI Team 签名的 Node 托管进程和 MCP 资源。
 - 这些变量没有公开稳定文档。支持结论只能按经过真实验收的 Desktop 版本与平台记录，不能把
   “安装包中存在字符串”解释为完成兼容。
@@ -463,7 +463,7 @@ Supervisor 只接受当前用户、已配置的目标 Provider、已启用配置
 8. macOS 与 Windows 各自在真实 Desktop 上通过；任一平台未通过时必须单独标为预览或不支持，
    不能宣称全平台完成。
 9. Desktop 随包提供的 `codex_app` MCP 在共享模式下通过实机验证。
-10. macOS 受管路径必须继续使用项目锁定的 Codex CLI 0.162.0；不得以 Desktop 随包的预发布 CLI
+10. macOS 受管路径必须继续使用项目锁定的 Codex CLI 0.162.1；不得以 Desktop 随包的预发布 CLI
     替换协议事实来源，也不得让动态 Pipe、完整启动环境或工具消息进入日志与状态输出。
 
 ## 失败与回滚
