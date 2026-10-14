@@ -354,7 +354,7 @@ function terminalUserAgentToken() {
   return detectTerminalUserAgentToken(process.env) ?? "unknown";
 }
 
-async function runOfficialTuiIdentity({ environment, output, prompts, writeConfig }) {
+export async function runOfficialTuiIdentity({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
   const settings = loadGatewaySettings(environment);
   const protocolMetadata = JSON.parse(
     readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"),

@@ -143,7 +143,8 @@
   通过 CLI 注入的命令边界执行，不承载子进程或输出文件管理。
 - `init-wizard.mjs`：`codexc init` 在交互终端下的初始化向导；先显示环境检测结果（Codex CLI 版本、
   官方登录、通讯渠道、默认模型、默认 Workspace 与可选功能状态），再按需循环复用 `setup.mjs` 的接入向导，
-  可连续配置模型与渠道，选择“完成接入”后继续；
+  可连续配置模型与渠道，选择“完成接入”后进入 Codex 设置菜单，复用用户偏好、官方 TUI 身份与时区设置，
+  单项完成、返回或失败后可继续选择，选择“完成 Codex 设置”后继续；该菜单取消会中止初始化；
   逐项询问 WebUI 后台服务、调用详情记录与模型转发监听（默认沿用当前状态、首次初始化默认关闭，通过
   Config 管理接口写入 `[webui] enabled`，调用详情记录仅在变化时写入，模型转发监听选“是”才进入
   `model-relay-listen-menu.mjs`），在接入向导类别菜单取消即中止本向导（子流程取消只结束该子流程），
@@ -281,6 +282,8 @@
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：WebUI 只读配置连接已有主 App Server，连接失败不启动临时进程；CLI 事务创建隔离的 stdio App Server Client，把 Codex 官方默认值与
   `multi_agent_v2` 普通键级修改及更新器关闭 daemon 自动启动作为官方 `config/batchWrite` 事务写入用户配置；
   用户设置修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
+  初始化向导显式传入与环境检测一致的 Codex 可执行文件，读取和保存共用该选择；默认 Codex Home 尚不存在时
+  从用户主目录启动并由 Codex 初始化默认目录，显式 `CODEX_HOME` 仍要求已存在且为目录。
 - `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“项目技能”类别；列出项目 `.codex/skills` 下带
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
   `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改

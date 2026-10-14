@@ -109,4 +109,5 @@ export function areCodexUserConfigEditsApplied(
 export function createCodexUserConfigClient(options?: {
   environment?: NodeJS.ProcessEnv;
   cwd?: string;
+  codexBinary?: string;
 }): Promise<CodexUserConfigClient>;
