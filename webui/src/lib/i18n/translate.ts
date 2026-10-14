@@ -35,6 +35,46 @@ const apiErrorKeys: Record<string, MessageKey> = {
   codex_settings_unavailable: "settingsUi.unavailable",
   provider_state_unavailable: "settingsUi.unavailable",
   account_state_unavailable: "settingsUi.unavailable",
+  codex_settings_failed: "settingsUi.writeUnconfirmed",
+  provider_settings_failed: "settingsUi.writeUnconfirmed",
+  account_settings_failed: "settingsUi.writeUnconfirmed",
+  "operation-failed": "settingsUi.writeUnconfirmed",
+  "rollback-failed": "settingsUi.writeUnconfirmed",
+  "save-unconfirmed": "settingsUi.writeUnconfirmed",
+  "provider-state-unavailable": "settingsUi.unavailable",
+  "account-state-unavailable": "settingsUi.unavailable",
+  "supervisor-unavailable": "settingsUi.unavailable",
+  "supervisor-incompatible": "settingsUi.unavailable",
+  "backup-unavailable": "settingsUi.unavailable",
+  "account-not-found": "settingsUi.targetMissing",
+  "provider-not-found": "settingsUi.targetMissing",
+  "account-exists": "settingsUi.stateConflict",
+  "provider-exists": "settingsUi.stateConflict",
+  "default-account-conflict": "settingsUi.defaultAccountConflict",
+  "primary-provider-conflict": "settingsUi.primaryProviderConflict",
+  "context-followers-conflict": "settingsUi.contextFollowersConflict",
+  "config-path-conflict": "settingsUi.stateConflict",
+  "invalid-mode": "settingsUi.invalid",
+  "invalid-api-key": "settingsUi.invalidCredential",
+  "invalid-account-id": "settingsUi.invalid",
+  "confirmation-required": "settingsUi.invalid",
+  "stale-preview": "relay.stale",
+  "provider-not-configured": "settingsUi.targetMissing",
+  "profile-conflict": "settingsUi.stateConflict",
+  "window-conflict": "settingsUi.stateConflict",
+  "other-switching-providers": "settingsUi.stateConflict",
+  "account-runtime-in-use": "settingsUi.accountInUse",
+  "catalog-unavailable": "settingsUi.unavailable",
+  "catalog-invalid": "settingsUi.unavailable",
+  "invalid-provider-id": "settingsUi.invalid",
+  "invalid-catalog": "settingsUi.invalid",
+  "invalid-operation": "settingsUi.invalid",
+  "invalid-credential-action": "settingsUi.invalidCredential",
+  "api-key-replacement-required": "settingsUi.invalidCredential",
+  "invalid-contact": "settingsUi.invalid",
+  "model-not-supported": "settingsUi.validation.model",
+  "reasoning-effort-not-supported": "settingsUi.validation.reasoning",
+  "invalid-window-percent": "settingsUi.validation.percent",
   invalid_json: "settingsUi.invalid",
   invalid_provider_operation: "settingsUi.invalid",
   invalid_account_operation: "settingsUi.invalid",
@@ -68,7 +108,9 @@ const apiErrorKeys: Record<string, MessageKey> = {
 
 /** 结构化错误码到界面文案；未知或缺失代码使用通用提示，不展示内部消息。 */
 export function translateApiErrorCode(t: Translate, code?: string | null): string {
-  return t(code != null && Object.hasOwn(apiErrorKeys, code) ? apiErrorKeys[code]! : "errors.unknown")
+  if (code != null && Object.hasOwn(apiErrorKeys, code)) return t(apiErrorKeys[code]!)
+  if (code != null && Object.hasOwn(settingErrorKeys, code)) return t(settingErrorKeys[code]!)
+  return t("errors.unknown")
 }
 
 const settingErrorKeys: Record<string, MessageKey> = {

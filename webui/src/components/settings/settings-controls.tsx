@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -20,6 +21,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { useTranslation } from "@/hooks/use-translation"
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import type { PendingSetting } from "@/lib/settings-management"
+import type { ManagementSettingMutationResponse } from "@/lib/types"
 import type { Translate } from "@/lib/i18n/messages"
 
 export function ManagementConfirmationDialog({
@@ -117,6 +119,23 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
   )
 }
 
+export function SettingsMutationFeedback({ result, writeUnconfirmed, readbackRequired }: {
+  result: ManagementSettingMutationResponse | null
+  writeUnconfirmed: boolean
+  readbackRequired: boolean
+}) {
+  const { t } = useTranslation()
+  if (result === null && !writeUnconfirmed) return null
+  return <Alert><AlertDescription className="flex flex-col gap-2">
+    {writeUnconfirmed ? <p>{t("settingsUi.writeUnconfirmed")}</p> : result !== null ? <>
+      <p>{t("settingsUi.savedActivation", { value: formatActivation(result.activation, t) })}</p>
+      {result.activation.commands.length > 0 && <p>{t(result.activation.status === "reload" ? "settingsUi.manualCommand" : "settingsUi.command", { value: result.activation.commands.join("; ") })}</p>}
+      {result.auditStatus === "degraded" && <p>{t("settingsUi.auditDegraded")}</p>}
+    </> : null}
+    {readbackRequired && (writeUnconfirmed || result?.consistency === "unknown") && <p>{t("settingsUi.readbackUnknown")}</p>}
+  </AlertDescription></Alert>
+}
+
 export function ManagedSelect({ label, value, options, disabled, disabledValues = [], onChange, description, placeholder }: { description?: string; placeholder?: string; label: string; value: string; options: string[][]; disabled: boolean; disabledValues?: readonly string[]; onChange: (value: string) => void }) {
   const { t } = useTranslation()
   const selectId = useId()
@@ -167,5 +186,6 @@ function formatActivation(activation: PendingSetting["activation"], t: Translate
     return t("settingsUi.restartWebui")
   }
   if (activation.status === "reinstall-required") return t("settingsUi.reinstall")
-  return `${activation.status} / ${activation.target}`
+  if (activation.status === "next-services") return t("settingsUi.nextServices")
+  return t("settingsUi.activationUnknown")
 }

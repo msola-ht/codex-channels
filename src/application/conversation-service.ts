@@ -186,8 +186,6 @@ const builtInAgentRoles: AgentRoleEntry[] = [
   { name: "worker", description: "执行与实现：完成归属明确的实现、修复或测试任务" },
 ];
 
-const maximumBackgroundThreadsPerConversation = 3;
-
 export interface ConversationStatus {
   threadId?: string;
   threadName?: string | null;
@@ -1094,16 +1092,6 @@ export class ConversationService implements
       const selectedHasQueue = await this.probeNativeQueueItems(selected.id);
       const active = this.core.activeTurn(target);
       const preserveCurrent = leavesCurrent && current !== undefined && !await this.isThreadIdle(current.threadId);
-      if (
-        preserveCurrent
-        && !this.router.isBackgroundThread?.(selected.id)
-        && (this.router.backgroundBindings?.(target).length ?? 0) >= maximumBackgroundThreadsPerConversation
-      ) {
-        throw new UserFacingError(
-          "conversation.background-limit",
-          `后台任务已满，最多同时运行 ${maximumBackgroundThreadsPerConversation} 个`,
-        );
-      }
       const activity = this.core.trackThreadActivity(selected.id);
       const previousActivity = leavesCurrent && current ? this.core.trackThreadActivity(current.threadId) : undefined;
       let binding;
@@ -1161,15 +1149,6 @@ export class ConversationService implements
         );
       }
       const preserveCurrent = current !== undefined && !await this.isThreadIdle(current.threadId);
-      if (
-        preserveCurrent
-        && (this.router.backgroundBindings?.(target).length ?? 0) >= maximumBackgroundThreadsPerConversation
-      ) {
-        throw new UserFacingError(
-          "conversation.background-limit",
-          `后台任务已满，最多同时运行 ${maximumBackgroundThreadsPerConversation} 个`,
-        );
-      }
       const activity = current ? this.core.trackThreadActivity(current.threadId) : undefined;
       try {
         await this.router.newSession(target, preserveCurrent, modelPreference, current ? {

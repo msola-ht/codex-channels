@@ -2,22 +2,25 @@ import { loadModelProviderManagementState } from "./model-provider-management.mj
 import {
   applyManagedProviderDefaultChange,
   previewManagedProviderDefaultChange,
+  ModelProviderDefaultManagementError,
 } from "./model-provider-default-management.mjs";
 import {
   applyPrimaryProviderRemoval,
   applyPrimaryProviderSwitch,
   previewPrimaryProviderRemoval,
   previewPrimaryProviderSwitch,
+  PrimaryProviderManagementError,
 } from "./primary-provider-management.mjs";
 import {
   applyCustomPrimaryProviderSave,
   previewCustomPrimaryProviderSave,
 } from "./custom-primary-provider-management.mjs";
-import { ManagementOperationError } from "./webui-management-operations.mjs";
+import { ManagementOperationError, managementOperationError } from "./webui-management-operations.mjs";
 import {
   applyModelWindowChange,
   previewModelWindowChange,
   projectModelWindow,
+  ModelWindowManagementError,
 } from "./model-window-management.mjs";
 import {
   loadManagedModelWindow,
@@ -316,12 +319,7 @@ function redactModel(model) {
 }
 
 function toManagementError(error) {
-  if (error instanceof ManagementOperationError) return error;
-  return new ManagementOperationError(
-    typeof error?.code === "string" ? error.code : "provider_settings_failed",
-    error instanceof Error ? error.message : "Provider 设置操作失败",
-    error?.field,
-  );
+  return managementOperationError(error, [PrimaryProviderManagementError, ModelProviderDefaultManagementError, ModelWindowManagementError], "provider_settings_failed");
 }
 
 function redactCatalog(provider) {

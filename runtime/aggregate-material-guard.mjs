@@ -81,20 +81,24 @@ export class AggregateMaterialGuard {
       entry.reject(error);
     }
     this.#pending.clear();
-    const retiring = { worker, wait: undefined };
+    const retiring = { worker, termination: undefined };
     this.#retiring = retiring;
-    const termination = Promise.resolve().then(() => worker.terminate()).then(() => {
+    retiring.termination = Promise.resolve().then(() => worker.terminate()).then(() => {
       if (this.#retiring === retiring) this.#retiring = undefined;
     });
-    let timer;
-    retiring.wait = Promise.race([
-      termination,
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("聚合材料复核线程关闭超时")), 5_000); }),
-    ]).finally(() => clearTimeout(timer));
+    const wait = this.#waitForRetirement(retiring);
     // A deadline never authorizes overlapping workers. Keep refusing checks
     // until actual exit; the next caller then creates a fresh worker on demand.
-    void retiring.wait.catch(() => undefined);
-    return retiring.wait;
+    void wait.catch(() => undefined);
+    return wait;
+  }
+
+  #waitForRetirement(retiring) {
+    let timer;
+    return Promise.race([
+      retiring.termination,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("聚合材料复核线程关闭超时")), 5_000); }),
+    ]).finally(() => clearTimeout(timer));
   }
 
   check(signal) {
@@ -126,9 +130,11 @@ export class AggregateMaterialGuard {
   close() {
     if (this.#closing) return this.#closing;
     this.#closed = true;
-    this.#closing = this.#worker
+    const closing = (this.#worker
       ? this.#retire(this.#worker, new Error("聚合材料复核已关闭"))
-      : this.#retiring?.wait ?? Promise.resolve();
-    return this.#closing;
+      : this.#retiring ? this.#waitForRetirement(this.#retiring) : Promise.resolve())
+      .finally(() => { if (this.#closing === closing) this.#closing = undefined; });
+    this.#closing = closing;
+    return closing;
   }
 }

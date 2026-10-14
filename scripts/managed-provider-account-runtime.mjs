@@ -2,6 +2,7 @@ import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime
 import { inspectAppServerSupervisorState, releaseAppServerProvider } from "../runtime/app-server-supervisor.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
+import { AccountManagementError } from "./account-management-error.mjs";
 
 export function managedAccountPrimarySocket(environment) {
   const { configPath, dataDir } = runtimeConfig(environment);
@@ -16,9 +17,7 @@ export async function inspectManagedAccountRuntime(provider, {
   const primarySocketPath = resolvePrimarySocket(environment);
   const inspection = await inspectSupervisor(primarySocketPath);
   if (inspection.status === "incompatible") {
-    const error = new Error("App Server 监管协议不兼容或响应无效；请先运行 codexc restart appserver");
-    error.code = "supervisor-incompatible";
-    throw error;
+    throw new AccountManagementError("supervisor-incompatible", "action", "App Server 监管协议不兼容或响应无效；请先运行 codexc restart appserver");
   }
   return {
     provider,
@@ -40,9 +39,7 @@ export async function stopManagedAccountForRemoval(provider, options = {}) {
   const plan = await inspectManagedAccountRuntime(provider, options);
   const action = await releaseManagedAccountRuntime(plan, options);
   if (action === "in-use") {
-    const error = new Error(`账户 ${provider} 正在被 Remote TUI 使用；请退出对应 TUI 后再删除`);
-    error.code = "account-runtime-in-use";
-    throw error;
+    throw new AccountManagementError("account-runtime-in-use", "accountId", `账户 ${provider} 正在被 Remote TUI 使用；请退出对应 TUI 后再删除`);
   }
   return action;
 }

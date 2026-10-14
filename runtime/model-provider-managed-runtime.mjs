@@ -1,4 +1,4 @@
-import { clinePassAccountMarkerPath, clinePassAccountsFilePath, isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
+import { isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
 import { createHash } from "node:crypto";
 import { writeResponsesContextFollowers, clinePassFollowsDeepseekContext } from "./responses-context-sync.mjs";
 import { assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
@@ -12,10 +12,8 @@ import {
   deepseekProviderDefinition,
   isManagedProviderApiKeyValid,
   loadManagedModelProviderDefinitions,
+  managedProviderAccountFamilyForDefinition,
 } from "./model-provider-definitions.mjs";
-import { opencodeGoAccountMarkerPath, opencodeGoAccountsFilePath } from "./opencode-go-accounts.mjs";
-import { deepseekAccountMarkerPath, deepseekAccountsFilePath } from "./deepseek-accounts.mjs";
-import { ccgAccountMarkerPath, ccgAccountsFilePath } from "./ccg-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 import { assertProviderHasNoPlaintextCredentials, createProviderFileAccess, createProviderFileReader, readCodexConfigFile } from "./provider-file-access.mjs";
 export { readCodexConfigFile } from "./provider-file-access.mjs";
@@ -40,14 +38,8 @@ export function managedProviderDirectory(environment, definition) {
 
 export function managedProviderMarkerPath(environment, definition) {
   if (definition.accountId !== undefined) {
-    if (definition.storageId === "clp") return clinePassAccountMarkerPath(environment, definition.accountId);
-    if (definition.storageId === "deepseek") {
-      return deepseekAccountMarkerPath(environment, definition.accountId);
-    }
-    if (definition.storageId === "ccg") {
-      return ccgAccountMarkerPath(environment, definition.accountId);
-    }
-    return opencodeGoAccountMarkerPath(environment, definition.accountId);
+    const family = managedProviderAccountFamilyForDefinition(definition);
+    return family.markerPath(environment, definition.accountId);
   }
   return join(
     managedProviderDirectory(environment, definition),
@@ -499,7 +491,8 @@ export function loadConfiguredManagedProviderCredentials(provider, environment =
   if (!marker) throw new Error("Relay CLP account marker is missing");
   const descriptor = providerDescriptor(definition);
   const profilePath = configuredProfilePath(codexHomePath(environment), descriptor, marker.mode);
-  const paths = [clinePassAccountsFilePath(environment), managedProviderMarkerPath(environment, definition), profilePath];
+  const family = managedProviderAccountFamilyForDefinition(definition);
+  const paths = [family.accountsFilePath(environment), managedProviderMarkerPath(environment, definition), profilePath];
   const credentialKey = addManagedCredentialMaterialPath(paths, profilePath, environment, definition);
   const fingerprint = () => {
     const hash = createHash("sha256");
@@ -526,9 +519,9 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
   const marker = readManagedMarker(environment, definition);
   if (!marker) throw new Error("Relay Provider 管理标记不存在");
   const directory = managedProviderDirectory(environment, definition);
-  const registry = { clp: clinePassAccountsFilePath, deepseek: deepseekAccountsFilePath, "opencode-go": opencodeGoAccountsFilePath, ccg: ccgAccountsFilePath }[definition.storageId ?? definition.id];
-  if (!registry) throw new Error("Relay Provider 注册材料不受支持");
-  const paths = [registry(environment), managedProviderMarkerPath(environment, definition),
+  const family = managedProviderAccountFamilyForDefinition(definition);
+  if (family === undefined) throw new Error("Relay Provider 注册材料不受支持");
+  const paths = [family.accountsFilePath(environment), managedProviderMarkerPath(environment, definition),
     configuredProfilePath(codexHomePath(environment), providerDescriptor(definition), marker.mode),
     join(directory, definition.catalogFileName), join(directory, definition.catalogManifestFileName)];
   const credentialKey = addManagedCredentialMaterialPath(paths, paths[2], environment, definition);

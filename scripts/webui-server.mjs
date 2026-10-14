@@ -243,7 +243,8 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
     serveStatic(staticDir, url.pathname, response);
   } catch (error) {
     if (error instanceof ManagementOperationError) {
-      sendManagementJson(response, error.code === "stale-revision" ? 409 : 400, {
+      if (error.status >= 500) logger.error({ event: "management.failed", code: error.code, err: error.cause }, "WebUI 管理操作失败");
+      sendManagementJson(response, error.status, {
         error: {
           code: error.code,
           ...(error.field === undefined ? {} : { field: error.field }),

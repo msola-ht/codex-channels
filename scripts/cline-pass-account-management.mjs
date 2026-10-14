@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { AccountManagementError } from "./account-management-error.mjs";
 import { clinePassAccountDirectory, clinePassAccountMarkerPath, clinePassAccountsFilePath, loadClinePassAccounts, validateClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -98,18 +99,18 @@ async function selectClinePassModels(models, providers, selectModels) {
 }
 
 export function previewClinePassConfiguration(input, { environment = process.env } = {}) {
-  if (existsSync(join(codexHomePath(environment), "sf-cline-pass.config.toml"))) throw new Error("CLP 单账户配置不受支持，请先移除旧配置再重新设置账户");
+  if (existsSync(join(codexHomePath(environment), "sf-cline-pass.config.toml"))) throw new AccountManagementError("provider-state-unavailable", "accountId", "CLP 单账户配置不受支持，请先移除旧配置再重新设置账户");
   const definition = clinePassAccountDefinition(input.accountId);
   const mode = input.mode ?? "switching";
-  if (!["switching", "exclusive"].includes(mode)) throw new Error("CLP 模式无效");
-  if (!isManagedProviderApiKeyValid(definition, input.apiKey)) throw new Error("CLP API Key 无效");
+  if (!["switching", "exclusive"].includes(mode)) throw new AccountManagementError("invalid-mode", "mode", "CLP 模式无效");
+  if (!isManagedProviderApiKeyValid(definition, input.apiKey)) throw new AccountManagementError("invalid-api-key", "apiKey", "CLP API Key 无效");
   const accounts = loadClinePassAccounts(environment);
   const account = accounts.find(item => item.id === input.accountId);
-  if (Boolean(account) !== (input.reconfigure === true)) throw new Error(account ? "账户已存在，请选择重新配置" : "CLP 账户不存在");
+  if (Boolean(account) !== (input.reconfigure === true)) throw new AccountManagementError(account ? "account-exists" : "account-not-found", "accountId", account ? "账户已存在，请选择重新配置" : "CLP 账户不存在");
   validateClinePassAccounts(account ? accounts : [...accounts, { id: input.accountId, default: accounts.length === 0 }]);
   const previous = loadManagedModelProviderSettings(environment).find(item => item.provider === definition.id);
-  if (account && !previous) throw new Error("CLP 账户配置不完整，请先恢复缺失文件");
-  if (mode === "exclusive" && !["openai", definition.id].includes(loadPrimaryModelProvider(environment))) throw new Error("请先恢复当前固定 Provider");
+  if (account && !previous) throw new AccountManagementError("provider-state-unavailable", "accountId", "CLP 账户配置不完整，请先恢复缺失文件");
+  if (mode === "exclusive" && !["openai", definition.id].includes(loadPrimaryModelProvider(environment))) throw new AccountManagementError("primary-provider-conflict", "mode", "请先恢复当前固定 Provider");
   return { operation: account ? "reconfigure" : "add", account: { id: input.accountId, provider: definition.id, default: account?.default ?? accounts.length === 0 }, mode,
     effects: { writesMainConfig: mode === "exclusive" || previous?.mode === "exclusive", writesIsolatedProfile: mode === "switching" }, activation: "restart-all" };
 }
@@ -119,7 +120,7 @@ export async function applyClinePassConfiguration(input, { environment = process
   const definition = clinePassAccountDefinition(accountId);
   return withModelProviderManagementTransaction(environment, async () => {
     const preview = previewClinePassConfiguration(input, { environment });
-    if (mode === "exclusive" && confirmExclusiveConfigChange !== true) throw new Error("固定模式修改 Codex 主配置前必须确认");
+    if (mode === "exclusive" && confirmExclusiveConfigChange !== true) throw new AccountManagementError("confirmation-required", "confirmExclusiveConfigChange", "固定模式修改 Codex 主配置前必须确认");
     const accounts = loadClinePassAccounts(environment);
     const paths = clinePassSetupPaths(environment, accountId);
     const dsDirectory = managedProviderDirectory(environment, deepseekProviderDefinition);
@@ -129,9 +130,9 @@ export async function applyClinePassConfiguration(input, { environment = process
     const content = key => snapshots.find(item => item.path === paths[key]).content?.toString("utf8");
     const current = content("config") === undefined ? {} : parsePrivateConfig(content("config"));
     const previous = loadManagedModelProviderSettings(environment).find(item => item.provider === definition.id);
-    if (!previous && (content("profile") !== undefined || content("marker") !== undefined || hasProviderBaseConfig(current, definition))) throw new Error("CLP 配置路径已被占用");
+    if (!previous && (content("profile") !== undefined || content("marker") !== undefined || hasProviderBaseConfig(current, definition))) throw new AccountManagementError("config-path-conflict", "accountId", "CLP 配置路径已被占用");
     const backup = content("backup") === undefined ? undefined : parsePrivateBackup(content("backup"));
-    if (previous && !backup?.config) throw new Error("CLP 初始备份缺失");
+    if (previous && !backup?.config) throw new AccountManagementError("backup-unavailable", "accountId", "CLP 初始备份缺失");
     let downloadedDs;
     let downloadedCline;
     let catalog;
@@ -255,12 +256,12 @@ export async function refreshClinePassCatalog({ environment = process.env, loadT
 function clinePassRemovalPlan(accountId, environment) {
   const definition = clinePassAccountDefinition(accountId);
   const accounts = loadClinePassAccounts(environment);
-  if (!accounts.some(account => account.id === accountId)) throw new Error("CLP 账户不存在");
+  if (!accounts.some(account => account.id === accountId)) throw new AccountManagementError("account-not-found", "accountId", "CLP 账户不存在");
   const remaining = accounts.filter(account => account.id !== accountId);
-  if (remaining.length > 0 && !remaining.some(account => account.default)) throw new Error("请先选择其他默认账户");
+  if (remaining.length > 0 && !remaining.some(account => account.default)) throw new AccountManagementError("default-account-conflict", "accountId", "请先选择其他默认账户");
   const paths = clinePassSetupPaths(environment, accountId);
   const previous = loadManagedModelProviderSettings(environment).find(item => item.provider === definition.id);
-  if (!previous) throw new Error("CLP 账户配置不完整，请先恢复缺失文件");
+  if (!previous) throw new AccountManagementError("provider-state-unavailable", "accountId", "CLP 账户配置不完整，请先恢复缺失文件");
   const snapshots = snapshotProviderFiles(Object.values(paths), environment);
   const content = key => snapshots.find(item => item.path === paths[key]).content?.toString("utf8");
   const updates = new Map([paths.profile, paths.marker].map(path => [path, undefined]));
@@ -270,7 +271,7 @@ function clinePassRemovalPlan(accountId, environment) {
     updates.set(paths.manifest, undefined);
   }
   if (previous.mode === "exclusive") {
-    if (content("backup") === undefined) throw new Error("CLP 初始备份缺失");
+    if (content("backup") === undefined) throw new AccountManagementError("backup-unavailable", "accountId", "CLP 初始备份缺失");
     const backup = parsePrivateBackup(content("backup"));
     updates.set(paths.config, stringify(restoreProviderBaseConfig(parsePrivateConfig(content("config")), backup.config, definition)));
   }
@@ -285,7 +286,7 @@ export async function previewClinePassRemoval(accountId, options = {}) {
 }
 
 export async function removeClinePassConfiguration({ accountId, confirmRemove = false }, options = {}) {
-  if (!confirmRemove) throw new Error("移除 CLP 前必须确认");
+  if (!confirmRemove) throw new AccountManagementError("confirmation-required", "confirmRemove", "移除 CLP 前必须确认");
   const environment = options.environment ?? process.env;
   return withModelProviderManagementTransaction(environment, async () => {
     const plan = clinePassRemovalPlan(accountId, environment);
@@ -297,7 +298,7 @@ export async function removeClinePassConfiguration({ accountId, confirmRemove = 
 
 export function previewClinePassDefaultAccount(accountId, { environment = process.env } = {}) {
   const account = loadClinePassAccounts(environment).find(item => item.id === accountId);
-  if (!account) throw new Error("CLP 账户不存在");
+  if (!account) throw new AccountManagementError("account-not-found", "accountId", "CLP 账户不存在");
   return { operation: "default", account: { ...account, provider: clinePassAccountDefinition(accountId).id }, activation: "restart-all" };
 }
 

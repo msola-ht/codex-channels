@@ -1,4 +1,3 @@
-import { loadClinePassAccounts, clinePassProviderId } from "./cline-pass-accounts.mjs";
 import { isCustomCatalogProvider, responsesProviderCatalogPath, parseResponsesModelCatalog, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { spawn } from "node:child_process";
@@ -32,6 +31,7 @@ import {
 } from "./gateway-config.mjs";
 import {
   loadManagedModelProviderDefinitions,
+  managedProviderAccountFamilies,
   isManagedProviderModelValid,
   opencodeGoProviderDefinition,
   sharedManagedProviderDefinition,
@@ -52,7 +52,6 @@ import {
   writeCustomOfficialModelCatalog,
 } from "./model-provider-runtime.mjs";
 import {
-  loadOpencodeGoAccounts,
   opencodeGoAccountIdFromProvider,
   opencodeGoProviderId,
 } from "./opencode-go-accounts.mjs";
@@ -60,8 +59,6 @@ import {
   managedProviderAccountIdFromProvider,
   sharedProviderProxyKey,
 } from "./managed-provider-account-routing.mjs";
-import { loadDeepseekAccounts, deepseekProviderId } from "./deepseek-accounts.mjs";
-import { loadCcgAccounts, ccgProviderId } from "./ccg-accounts.mjs";
 import { createOpencodeGoQuotaWindowsProvider } from "./opencode-go-quota-windows.mjs";
 import { createRefreshableHttpProxySelector } from "./network-proxy.mjs";
 import {
@@ -238,6 +235,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   const providerProxyRuntimes = new ProviderProxyRuntimeRegistry(async (
     provider,
     options,
+    retain,
   ) => {
     assertRunning();
     const metricsProvider = proxyProviderIds.get(provider) ?? provider;
@@ -247,6 +245,18 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       : metricsProvider;
     const definition = providerDefinitions.get(provider) ?? sharedManagedProviderDefinition(provider);
     let bridge;
+    let modelProxy;
+    const ownedResources = new Set();
+    const proxyRuntime = { baseUrl: "", proxy: { close: async () => {
+      const errors = [];
+      // Stop ingress before its bridge and guard, retaining only failed owners.
+      for (const resource of [...ownedResources].reverse()) {
+        try { await resource.close(); ownedResources.delete(resource); }
+        catch (error) { errors.push(error); }
+      }
+      if (errors.length) throw new AggregateError(errors, "模型代理资源未能完全关闭");
+    } } };
+    retain(proxyRuntime);
     const guardedDefinition = definition && ["ocg", "opencode-go", "ccg", "clp"].includes(definition.storageId ?? definition.id)
       ? definition : undefined;
     const modelGuard = guardedDefinition
@@ -262,6 +272,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           ],
         })
         : undefined;
+    if (modelGuard) ownedResources.add(modelGuard);
     // 官方 OpenAI 端点理解 Codex 私有输入项；自定义固定 Provider 复用 openai 路由键但换成第三方上游。
     // 聚合快照可能派生带摘要的代理键，固定自定义 Provider 则复用 openai 路由键。
     const officialOpenAiRoute = upstreamProvider === "openai";
@@ -275,11 +286,9 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         onError: () => proxySelector.invalidate(),
         ...(validatedCodex.upstream_user_agent ? { upstreamUserAgent: validatedCodex.upstream_user_agent } : {}),
       });
-      try { await bridge.start(); assertRunning(); }
-      catch (error) {
-        try { await bridge.close(); } finally { await modelGuard?.close(); }
-        throw error;
-      }
+      ownedResources.add(bridge);
+      await bridge.start();
+      assertRunning();
       options = bridge.proxyOptions();
     }
     const optionsWithUserAgent = {
@@ -302,6 +311,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           }),
     };
     const opencodeGo = provider === "ocg";
+    const accountFamily = managedProviderAccountFamilies.find(family => family.proxyKey === provider);
     const managedAccountProxyOptions = (accounts, providerId, label) => ({
       accountIds: accounts.map((account) => account.id),
       defaultAccountId: accounts.find((account) => account.default)?.id,
@@ -313,7 +323,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         );
       },
     });
-    const modelProxy = new ProviderProxy("127.0.0.1:0", {
+    modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
       // CP Responses 上游可能缓冲完整工具参数；为无数据阶段保留五分钟。
       ...(!bridge && isCustomCatalogProvider(upstreamProvider) ? { timeoutMs: 300_000 } : {}),
@@ -346,12 +356,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
               );
             },
           }
-        : provider === "deepseek"
-          ? managedAccountProxyOptions(dsAccounts, deepseekProviderId, "DS")
-          : provider === "clp"
-            ? managedAccountProxyOptions(clineAccounts, clinePassProviderId, "CLP")
-            : provider === "ccg"
-              ? managedAccountProxyOptions(ccgAccounts, ccgProviderId, "CCG")
+        : accountFamily
+          ? managedAccountProxyOptions(accountsByProxyKey.get(provider), accountFamily.providerId, accountFamily.definition.displayName)
               : {
                 onMetrics: (metrics) => sendProviderProxyMetrics(
                   providerMetricsSocketPath(socketPath, metricsProvider),
@@ -366,18 +372,10 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         );
       },
     });
-    try { await modelProxy.start(); } catch (error) {
-      try { await bridge?.close(); } finally { await modelGuard?.close(); }
-      throw error;
-    }
-    const proxyRuntime = {
-      baseUrl: `http://${modelProxy.address()}`,
-      proxy: bridge || modelGuard ? { close: async () => {
-        try { await modelProxy.close(); } finally {
-          try { await bridge?.close(); } finally { await modelGuard?.close(); }
-        }
-      } } : modelProxy,
-    };
+    ownedResources.add(modelProxy);
+    await modelProxy.start();
+    assertRunning();
+    proxyRuntime.baseUrl = `http://${modelProxy.address()}`;
     console.log(
       `${opencodeGo ? "opencode-go" : provider} 模型统计代理已启动：${modelProxy.address()}`,
     );
@@ -399,18 +397,17 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     });
   };
   const closeProviderProxy = async (proxy) => {
-    for (const key of proxyTargetSignatures.keys()) {
-      if (providerProxyRuntimes.get(key)?.proxy !== proxy) continue;
+    const keys = [...proxyTargetSignatures.keys()].filter(key => providerProxyRuntimes.get(key)?.proxy === proxy);
+    await providerProxyRuntimes.close(proxy);
+    for (const key of keys) {
       proxyTargetSignatures.delete(key);
       proxyProviderIds.delete(key);
     }
-    providerProxyRuntimes.remove(proxy);
-    await proxy.close();
   };
-  const goAccounts = loadOpencodeGoAccounts(runtime.environment);
-  const clineAccounts = loadClinePassAccounts(runtime.environment);
-  const dsAccounts = loadDeepseekAccounts(runtime.environment);
-  const ccgAccounts = loadCcgAccounts(runtime.environment);
+  const accountsByProxyKey = new Map(managedProviderAccountFamilies.map(family => [
+    family.proxyKey, family.loadAccounts(runtime.environment),
+  ]));
+  const goAccounts = accountsByProxyKey.get("ocg");
   const proxyAccountId = managedProviderAccountIdFromProvider;
   const goAccountIds = goAccounts.map((account) => account.id);
   const goDefaultAccount = goAccounts.find((account) => account.default);
@@ -493,22 +490,41 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   const instanceLaunches = new Map();
   let aggregateProxy;
   let aggregateGuard;
+  let aggregateClosing;
+  let aggregateCleanupRequired = false;
   const aggregateProxyKeys = new Set();
-  const closeAggregateProxy = async () => {
+  const closeAggregateProxy = () => {
+    if (aggregateClosing) return aggregateClosing;
+    aggregateCleanupRequired = true;
     const current = aggregateProxy;
     const guard = aggregateGuard;
-    aggregateProxy = undefined;
-    aggregateGuard = undefined;
-    const results = await Promise.allSettled([current?.close(), guard?.close()]);
-    for (const key of aggregateProxyKeys) providerProxyRuntimes.removeUser(key, aggregateProviderId);
-    const orphanedProxies = [...aggregateProxyKeys].filter(key => !providerProxyIsInUse(key))
-      .map(key => providerProxyRuntimes.get(key)?.proxy).filter(Boolean);
-    aggregateProxyKeys.clear();
-    const proxyResults = await Promise.allSettled(orphanedProxies.map(proxy => closeProviderProxy(proxy)));
-    const errors = [...results, ...proxyResults].filter(result => result.status === "rejected").map(result => result.reason);
-    if (errors.length) throw new AggregateError(errors, "聚合模型资源未能完全关闭");
+    const closure = (async () => {
+      const results = await Promise.allSettled([
+        Promise.resolve().then(async () => { await current?.close(); if (aggregateProxy === current) aggregateProxy = undefined; }),
+        Promise.resolve().then(async () => { await guard?.close(); if (aggregateGuard === guard) aggregateGuard = undefined; }),
+      ]);
+      // A surviving aggregate listener must retain its member routes.
+      const proxyResults = aggregateProxy ? [] : await Promise.allSettled([...aggregateProxyKeys].map(async key => {
+        providerProxyRuntimes.removeUser(key, aggregateProviderId);
+        if (!providerProxyIsInUse(key)) {
+          const proxy = providerProxyRuntimes.get(key)?.proxy;
+          if (proxy) await closeProviderProxy(proxy);
+        }
+        aggregateProxyKeys.delete(key);
+      }));
+      const errors = [...results, ...proxyResults].filter(result => result.status === "rejected").map(result => result.reason);
+      if (errors.length) throw new AggregateError(errors, "聚合模型资源未能完全关闭");
+      aggregateCleanupRequired = false;
+    })().finally(() => { if (aggregateClosing === closure) aggregateClosing = undefined; });
+    aggregateClosing = closure;
+    return closure;
   };
   const prepareAggregateRuntime = async (snapshot) => {
+    if (aggregateClosing) await aggregateClosing;
+    if (aggregateCleanupRequired) await closeAggregateProxy();
+    if (aggregateProxy || aggregateGuard || aggregateProxyKeys.size) {
+      throw new Error("聚合模型旧资源尚未确认释放");
+    }
     const material = loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers);
     if (material.fingerprint !== snapshot.fingerprint || material.defaultModel !== snapshot.defaultModel) {
       throw new Error("聚合设置在启动材料读取期间发生变化");
@@ -557,15 +573,36 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       childEnvironment: { [aggregateTokenEnvironmentKey]: token } };
   };
   const childrenByProvider = new Map();
+  const failedInstanceStarts = new Set();
   const providerProxyIsInUse = (proxyKey) =>
     providerProxyRuntimes.hasUsers(proxyKey)
     || sharedProviderProxyKey(primaryProvider) === proxyKey;
   const { watchChild, detachChild } = lifecycle;
+  const cleanFailedInstance = async (provider, child) => {
+    failedInstanceStarts.add(provider);
+    const errors = [];
+    try { await terminateChildProcess(child); }
+    catch (error) { errors.push(error); }
+    if (childProcessIsRunning(child)) {
+      // A healthy socket cannot turn an unconfirmed launch into readiness.
+      // Keep both ownership indexes so release and service shutdown can retry.
+      watchChild(child);
+      if (!errors.length) errors.push(new Error(`App Server 子进程尚未确认退出：${provider}`));
+    } else {
+      detachChild(child);
+      childrenByProvider.delete(provider);
+      failedInstanceStarts.delete(provider);
+    }
+    return errors;
+  };
   const ensureInstance = (provider) => {
     assertRunning();
     const existing = instanceLaunches.get(provider);
     if (existing) return existing;
     const launch = (async () => {
+      if (failedInstanceStarts.has(provider)) {
+        throw new Error(`App Server 启动失败资源尚未确认清理，请先释放后重试：${provider}`);
+      }
       if (provider === primaryProvider) {
         const runningChild = childrenByProvider.get(provider);
         if (runningChild) {
@@ -647,23 +684,10 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           watchChild(child);
           console.log(`${provider} App Server 已按需启动：${socketPath}`);
         } catch (error) {
-          let cleanupError;
-          childrenByProvider.delete(provider);
-          if (childProcessIsRunning(child) && child.pid !== undefined) {
-            try {
-              await terminateChildProcess(child);
-            } catch (terminationError) {
-              cleanupError = terminationError;
-            }
-          }
-          if (childProcessIsRunning(child)) {
-            watchChild(child);
-          } else {
-            const childIndex = children.indexOf(child);
-            if (childIndex >= 0) children.splice(childIndex, 1);
-          }
-          if (cleanupError) {
-            throw new Error(
+          const cleanupErrors = await cleanFailedInstance(provider, child);
+          if (cleanupErrors.length) {
+            throw new AggregateError(
+              [error, ...cleanupErrors],
               `App Server 启动失败且资源未能完全清理：${provider}`,
               { cause: error },
             );
@@ -749,37 +773,23 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         watchChild(child);
         console.log(`${provider} App Server 已按需启动：${managed.socketPath}`);
       } catch (error) {
-        let cleanupError;
-        providerProxyRuntimes.removeUser(proxyKey, provider);
-        if (child) {
-          childrenByProvider.delete(provider);
-          if (childProcessIsRunning(child) && child.pid !== undefined) {
-            try {
-              await terminateChildProcess(child);
-            } catch (terminationError) {
-              cleanupError = terminationError;
-            }
-          }
-          if (childProcessIsRunning(child)) {
-            watchChild(child);
-          } else {
-            const childIndex = children.indexOf(child);
-            if (childIndex >= 0) children.splice(childIndex, 1);
-          }
-        }
-        if (proxy && !providerProxyIsInUse(proxyKey)) {
+        const cleanupErrors = child ? await cleanFailedInstance(provider, child) : [];
+        const childSurvives = child && childProcessIsRunning(child);
+        if (!childSurvives) providerProxyRuntimes.removeUser(proxyKey, provider);
+        if (!childSurvives && proxy && !providerProxyIsInUse(proxyKey)) {
           try {
             await closeProviderProxy(proxy);
           } catch (proxyError) {
-            cleanupError ??= proxyError;
+            cleanupErrors.push(proxyError);
           }
         }
-        if (aggregate) {
+        if (!childSurvives && aggregate) {
           try { await closeAggregateProxy(); }
-          catch (proxyError) { cleanupError ??= proxyError; }
+          catch (proxyError) { cleanupErrors.push(proxyError); }
         }
-        if (cleanupError) {
-          throw new Error(
+        if (cleanupErrors.length) {
+          throw new AggregateError(
+            [error, ...cleanupErrors],
             `模型 Provider App Server 启动失败且资源未能完全清理：${provider}`,
             { cause: error },
           );
@@ -799,27 +809,31 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       throw new Error(`模型 Provider 未配置独立 App Server：${provider}`);
     }
     const child = childrenByProvider.get(provider);
-    if (!child) return false;
-    detachChild?.(child);
-    try {
-      await terminateChildProcess(child);
-    } catch (error) {
-      if (!children.includes(child)) children.push(child);
-      watchChild?.(child);
-      throw error;
+    if (child) {
+      detachChild(child, { retainOwnership: true });
+      try {
+        await terminateChildProcess(child);
+      } catch (error) {
+        if (!children.includes(child)) children.push(child);
+        watchChild(child);
+        throw error;
+      }
+      detachChild(child);
+      childrenByProvider.delete(provider);
+      failedInstanceStarts.delete(provider);
     }
-    childrenByProvider.delete(provider);
-    if (provider === aggregateProviderId) await closeAggregateProxy();
     // The baseline belongs to the terminated instance, even if proxy cleanup fails.
     settingsSnapshots.delete(provider);
+    if (provider === aggregateProviderId) await closeAggregateProxy();
     if (provider !== primaryProvider) {
       const proxyKey = sharedProviderProxyKey(provider);
       providerProxyRuntimes.removeUser(proxyKey, provider);
-      if (isGoProvider(provider) && !providerProxyIsInUse(proxyKey)) {
+      if (!providerProxyIsInUse(proxyKey)) {
         const proxy = providerProxyRuntimes.get(proxyKey)?.proxy;
         if (proxy) await closeProviderProxy(proxy);
       }
     }
+    if (!child) return false;
     console.log(`${provider} App Server 已释放：${
       provider === primaryProvider
         ? socketPath
@@ -844,7 +858,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     if (provider !== primaryProvider && !managed) throw new Error("Provider 启动材料不可用");
     const targetSocket = provider === primaryProvider ? socketPath : managed.socketPath;
     const running = childrenByProvider.has(provider);
-    if (running) {
+    if (running && !failedInstanceStarts.has(provider)) {
       const { CodexAppServerClient, createAppServerTransport, JsonRpcClient } = await import("../dist/codex-client/index.js");
       signal.throwIfAborted();
       const client = new CodexAppServerClient(new JsonRpcClient(createAppServerTransport(
@@ -1132,7 +1146,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       () => desktopAppBridge?.close(),
       () => supervisorOwner?.close(),
       () => closeAggregateProxy(),
-      ...providerProxyRuntimes.values().map(({ proxy }) => () => proxy.close()),
+      ...providerProxyRuntimes.values().map(({ proxy }) => () => closeProviderProxy(proxy)),
       ...[...upstreamAgents].map(agent => () => agent.destroy()),
     ].map(operation => Promise.resolve().then(operation)));
     const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
@@ -1360,14 +1374,17 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
     child.once("error", onError);
     child.once("exit", onExit);
   };
-  const detachChild = (child) => {
+  const detachChild = (child, { retainOwnership = false } = {}) => {
     const watcher = watchers.get(child);
-    if (!watcher) return;
-    watchers.delete(child);
-    child.off("error", watcher.onError);
-    child.off("exit", watcher.onExit);
-    const index = children.indexOf(child);
-    if (index >= 0) children.splice(index, 1);
+    if (watcher) {
+      watchers.delete(child);
+      child.off("error", watcher.onError);
+      child.off("exit", watcher.onExit);
+    }
+    if (!retainOwnership) {
+      const index = children.indexOf(child);
+      if (index >= 0) children.splice(index, 1);
+    }
   };
   for (const child of children) watchChild(child);
   return { watchChild, detachChild, close,

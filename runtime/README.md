@@ -58,6 +58,8 @@
   共同使用。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
+  账户家族登记同时拥有实例展开、账户身份、共享代理键和注册表／管理标记路径；账户路由、服务代理、
+  Relay 与聚合材料读取共用这份登记。未登记家族或能力与身份不一致时明确拒绝，不回退到其他账户家族。
   `webSearch` 声明受管实例是否在启动参数中关闭内置网页搜索，不改写基础配置或模型目录的客户端工具检索能力。
   CCG 采用显式多账户实例与 DS 来源目录，通过 Command Code 账户接口
   查询 Credits 与 5 小时/7 天窗口；模型 ID
@@ -89,7 +91,7 @@
 - `managed-provider-account-registry.mjs` / `managed-provider-account-registry.d.mts`：复用 DS、OCG、
   CCG 的单一默认账户约束，并集中 DS/CCG 同构注册表记录与凭据变量冲突校验。
 - `managed-provider-account-routing.mjs` / `managed-provider-account-routing.d.mts`：集中 DS、OCG、CCG、CLP 四家账户
-  Provider 的账户 ID、共享统计代理键和同一家多账户默认选择；混合 Provider 不推断默认值。
+  Provider 的账户 ID、共享统计代理键和同一家多账户默认选择，消费定义模块的家族登记；混合 Provider 不推断默认值。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
   config 编辑映射；DeepSeek、OpenCode Go、CCG 与自定义 Provider 共用一次 HTTP 重试、零次流重连的
@@ -171,6 +173,8 @@
   宿主仅在内存持有管理标记、实际 Profile 与模型目录内容的已应用指纹及该代默认模型；Gateway 重建时可重新核对，
   相同内容返回 `changed: false` 并保持现有连接，读取期间或重启期间的新变化不会冒充已应用。
   普通按需启动同样重读并校验目标材料，实例就绪后才确认基线；运行实例不会因 ensure 被自动重启。
+  启动失败后仍存活的子进程保留 Provider 归属和清理状态，不能仅凭健康 Socket 再次确认就绪；
+  代理与聚合 Guard 也保留未确认关闭的资源，清理完成前不创建替代实例。
   释放子进程即失效其基线，后续原生租约启动采用新材料；释放后调用方取消仍完成恢复并记录实际成功的基线。
 - `gateway-service-runtime.mjs`：持有内部 Gateway 服务子进程及其 reload、终止、退出信号转发；受管服务
   启动前的 App Server 就绪等待由服务命令脚本注入，可由停止请求取消；停止后不再创建 Gateway。
@@ -212,8 +216,8 @@
   留给固定版 App Server 原地恢复，Unix 继续安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
   保持连接而阻塞服务退出，同时等待已经开始的 Provider 生命周期操作收尾且拒绝启动排队操作。
 - `provider-proxy-runtime-registry.mjs` / `provider-proxy-runtime-registry.d.mts`：按共享代理键合并并发
-  启动，保存已启动代理及其 Provider 使用者，并提供统一查询、移除和关闭遍历入口，避免 DS、OpenCode Go
-  与 CCG 多账户同时启动时重复创建或过早关闭共享代理。
+  启动，保存构造中与已启动代理及其 Provider 使用者；关闭成功后才移除登记，失败保留资源并允许再次清理，
+  清理未确认时拒绝复用或替换，避免多账户同时启动时重复创建或过早关闭共享代理。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
 - `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
   私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权

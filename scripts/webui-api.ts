@@ -550,7 +550,7 @@ export interface ManagementSettingMutationResponse {
   value: unknown
   activation: { status: string; target: string; commands: readonly string[] }
   auditStatus?: "recorded" | "degraded"
-  consistency?: "unknown"
+  consistency?: "confirmed" | "unknown"
   confirmationRequired?: boolean
   confirmationToken?: string
   confirmationExpiresAt?: number
