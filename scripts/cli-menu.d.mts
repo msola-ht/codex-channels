@@ -1,5 +1,6 @@
 export interface CliMenuPrompts {
   intro(message: string): void;
+  outro(message: string): void;
   isCancel(value: unknown): boolean;
   select(options: Record<string, unknown>): Promise<unknown>;
   confirm(options: Record<string, unknown>): Promise<unknown>;

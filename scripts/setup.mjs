@@ -29,21 +29,21 @@ export async function runSetup({
   if (!input.isTTY || !output.isTTY) {
     throw new Error("Setup 需要交互终端；请将标准输入和提示输出连接终端。--jsonl 仅改变结果输出格式。");
   }
-  prompts.intro("Codex Connect Setup");
+  prompts.intro("接入向导");
   while (true) {
     const section = await prompts.select({
-      message: "选择设置类别",
+      message: "接入项目",
       showInstructions: false,
       options: [
         {
           value: "summary",
           label: "接入状态总览",
-          hint: "脱敏显示 Provider、模型、通讯渠道与用户技能状态",
+          hint: "脱敏查看模型、渠道与技能状态",
         },
         {
           value: "models",
           label: "模型与提供商",
-          hint: "管理 OpenAI、第三方 Provider 与模型默认值",
+          hint: "OpenAI、第三方 Provider 与默认模型",
         },
         {
           value: "channels",
@@ -53,22 +53,22 @@ export async function runSetup({
         {
           value: "skills",
           label: "项目技能",
-          hint: "安装或卸载项目技能到用户目录",
+          hint: "安装或卸载用户目录中的项目技能",
         },
         {
           value: "complete",
           label: "完成接入",
-          hint: "退出接入向导",
+          hint: "正常结束接入向导",
         },
         {
           value: "cancel",
           label: "取消",
-          hint: "退出 Setup",
+          hint: "中止接入向导",
         },
       ],
     });
     if (prompts.isCancel(section) || section === "cancel") {
-      prompts.cancel("Setup 已取消");
+      prompts.cancel("已取消接入");
       emitSetupResult(onResult, undefined, undefined, "cancelled");
       return undefined;
     }
@@ -161,18 +161,18 @@ async function runModelSetup({
 }) {
   while (true) {
     const category = await prompts.select({
-      message: "选择模型与提供商设置",
+      message: "模型与提供商",
       showInstructions: false,
       options: [
         {
           value: "official",
           label: "OpenAI 官方",
-          hint: "OpenAI 官方登录与固定主 Provider 恢复",
+          hint: "登录与恢复官方 Provider",
         },
         {
           value: "third_party",
           label: "第三方 Provider",
-          hint: "自定义提供商、DeepSeek 官方、OpenCode Go 官方等",
+          hint: "自定义提供商与第三方账户",
         },
         { value: "back", label: "返回", hint: "返回设置类别" },
       ],
@@ -216,13 +216,13 @@ async function runOfficialModelSetup({
 }) {
   while (true) {
     const module = await prompts.select({
-      message: "OpenAI 官方设置",
+      message: "OpenAI 官方",
       showInstructions: false,
       options: [
         {
           value: "official_login",
           label: "登录并恢复官方",
-          hint: "运行 codex login --device-auth，并停用自定义固定主 Provider",
+          hint: "设备登录，并停用自定义固定主 Provider",
         },
         { value: "back", label: "返回", hint: "返回模型与提供商菜单" },
       ],
@@ -253,48 +253,48 @@ async function runThirdPartyModelSetup({
 }) {
   while (true) {
     const module = await prompts.select({
-      message: "第三方 Provider 设置",
+      message: "第三方 Provider",
       showInstructions: false,
       options: [
         {
           value: "custom_primary",
           label: "Codex 兼容",
-          hint: "使用 Codex 官方模型目录；新增、编辑、切换或删除 Provider",
+          hint: "使用 Codex 官方模型目录，管理 Provider",
         },
         {
           value: "custom_responses",
           label: "自定义第三方",
-          hint: "手填模型 ID、上下文与能力；使用独立模型目录",
+          hint: "独立模型目录，手填模型与能力",
         },
         {
           value: "deepseek",
           label: "DeepSeek 官方",
-          hint: "管理账户、运行模式、默认账户与模型设置",
+          hint: "账户、运行模式与模型设置",
         },
         {
           value: "opencode-go",
           label: "OpenCode Go 官方",
-          hint: "添加、列出、设置默认、停止、删除或修改模型设置",
+          hint: "账户、默认账户与模型设置",
         },
         {
           value: "ccg",
           label: "CommandCode Go 官方",
-          hint: "获取 DS 基础模型目录，配置固定/切换模式或删除",
+          hint: "DS 模型目录与固定/切换模式",
         },
         {
           value: "clp",
           label: "Cline Pass 官方",
-          hint: "Chat 模型接入、固定/切换模式与移除配置",
+          hint: "Chat 模型与固定/切换模式",
         },
         {
           value: "provider_default",
           label: "默认模型与思考等级",
-          hint: "设置 DeepSeek、OpenCode Go、CommandCode Go、Cline Pass 的默认模型与思考等级",
+          hint: "受管 Provider 的默认模型与思考等级",
         },
         {
           value: "model_window",
           label: "模型上下文窗口",
-          hint: "按模型名统一设置受管 Provider 的上下文 Token 数",
+          hint: "按模型设置受管 Provider 的上下文大小",
         },
         { value: "back", label: "返回", hint: "返回模型与提供商菜单" },
       ],
@@ -334,13 +334,13 @@ async function runChannelSetup({
   weixinSetup,
 }) {
   const channel = await prompts.select({
-    message: "选择通讯渠道",
+    message: "通讯渠道",
     showInstructions: false,
     options: [
       {
         value: "telegram",
         label: "Telegram",
-        hint: "Bot 与用户授权；消息格式在 codexc config 中管理",
+        hint: "Bot 与用户授权",
       },
       {
         value: "feishu",

@@ -152,23 +152,27 @@ async function runWorkspaceMenu({
   output,
   prompts,
 }) {
-  prompts.intro("Codex Connect Workspace");
+  prompts.intro("工作区");
   while (true) {
     const action = await prompts.select({
-      message: "选择操作",
+      message: "工作区操作",
       showInstructions: false,
       options: [
-        { value: "list", label: "列出工作区", hint: "查看全部 Workspace 与默认项" },
+        { value: "list", label: "列出工作区", hint: "查看全部工作区与默认项" },
         { value: "create", label: "新增工作区", hint: "在 ~/.codex-connect/<id>-work 下新建并注册" },
         { value: "register-current", label: "注册当前目录", hint: cwd },
         { value: "register-existing", label: "注册已有目录", hint: "输入目录路径，不创建或删除目录" },
         { value: "remove", label: "删除工作区", hint: "删除注册，不删除目录" },
-        { value: "permissions", label: "工作区权限", hint: "沙箱、审批策略、权限 Profile" },
-        { value: "cancel", label: "取消" },
+        { value: "permissions", label: "工作区权限", hint: "沙箱、审批策略与权限 Profile" },
+        { value: "cancel", label: "返回", hint: "结束工作区操作" },
       ],
     });
-    if (prompts.isCancel(action) || action === "cancel") {
-      prompts.cancel("已取消");
+    if (prompts.isCancel(action)) {
+      prompts.cancel("已取消工作区操作");
+      return;
+    }
+    if (action === "cancel") {
+      prompts.outro("已退出工作区菜单");
       return;
     }
     try {
@@ -256,10 +260,11 @@ async function createWorkspaceInteractively({
     message: `将在 ${directory} 创建并注册（不会更改默认工作区），继续？`,
     initialValue: true,
   });
-  if (prompts.isCancel(confirmed) || confirmed === false) {
+  if (prompts.isCancel(confirmed)) {
     prompts.cancel("已取消");
     return;
   }
+  if (confirmed === false) return;
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const result = addWorkspaceToConfig({
     configPath: runtime.configPath,

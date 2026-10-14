@@ -11,31 +11,31 @@ export async function runMetricsMenu({
   runDatabaseCommand,
   runMetricsCommand,
 }) {
-  prompts.intro("Codex Connect Metrics");
+  prompts.intro("指标与导出");
   while (true) {
     const action = await prompts.select({
-      message: "选择指标操作",
+      message: "指标操作",
       showInstructions: false,
       options: [
         {
           value: "run",
           label: "本次运行导出",
-          hint: "指定 Thread 输出最近运行与累计汇总（写入 output 目录）",
+          hint: "按 Thread 导出最近运行与累计汇总",
         },
         {
           value: "turns",
           label: "会话明细导出",
-          hint: "选择会话后导出每次对话汇总（写入 output 目录）",
+          hint: "选择会话，导出每轮对话汇总",
         },
         {
           value: "report",
           label: "聚合汇报",
-          hint: "按时间范围与分组输出汇报（写入 output 目录）",
+          hint: "按时间范围与分组导出汇报",
         },
         {
           value: "export",
           label: "明细导出",
-          hint: "导出脱敏请求记录（写入 output 目录）",
+          hint: "导出脱敏请求记录",
         },
         {
           value: "status",
@@ -44,11 +44,15 @@ export async function runMetricsMenu({
         },
         { value: "threads", label: "会话列表导出", hint: "按时间范围导出有指标的会话" },
         { value: "quota", label: "历史额度窗口", hint: "只读查询已记录的额度周期" },
-        { value: "cancel", label: "取消" },
+        { value: "cancel", label: "返回", hint: "结束指标操作" },
       ],
     });
-    if (prompts.isCancel(action) || action === "cancel") {
-      prompts.cancel("已取消");
+    if (prompts.isCancel(action)) {
+      prompts.cancel("已取消指标操作");
+      return;
+    }
+    if (action === "cancel") {
+      prompts.outro("已退出指标菜单");
       return;
     }
     try {
@@ -204,10 +208,11 @@ export async function runMetricsMaintenanceMenu(action, {
       message: "重置会先备份现有指标库，确认继续？",
       initialValue: false,
     });
-    if (prompts.isCancel(confirmed) || confirmed !== true) {
+    if (prompts.isCancel(confirmed)) {
       prompts.cancel("已取消");
       return;
     }
+    if (confirmed !== true) return;
     await runDatabaseCommand(["reset"]);
     return;
   }

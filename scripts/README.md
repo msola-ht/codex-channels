@@ -75,7 +75,7 @@
 - `cli-command-usage.mjs`：共享纯帮助文案与服务动作目录，不加载命令执行实现。
 - `cli-help.mjs`：校验公开命令的精确帮助路径，拒绝未知子命令和多余参数。
 - `delivery-command.mjs`：仅执行 status/list 时从 Surface 窄诊断入口加载载荷解码与屏障策略，避免帮助及其他 CLI 命令加载平台 SDK；通过 Surface 公开入口复用持久输出分类，离线查看独立投递箱的计数、事件身份、阻塞策略与检查点，并根据明确参数重发或确认送达；不输出正文、不自动清理未确认记录。
-- `cli-menu.mjs` / `cli-menu.d.mts`：顶层导航、运行与连接子菜单和服务操作菜单，以及交互操作失败呈现；只分派现有命令，保留进程终止信号语义。
+- `cli-menu.mjs` / `cli-menu.d.mts`：七项顶层导航、运行与连接、后台服务与更多工具子菜单，以及交互操作失败呈现；低频初始化、诊断、指标和清理集中在更多工具，返回菜单保留上次选择。只分派现有命令，保留进程终止信号语义。
 - `cleanup-menu.mjs` / `cleanup-menu.d.mts`：统一清理交互入口，复用会话参数菜单、指标维护菜单和现有执行命令；转储先预览再确认删除，Provider 指标按精确 ID 确认清理，单项完成后返回菜单。
 - `maintenance-services.mjs` / `maintenance-services.d.mts`：交互清理共用的服务状态检查、停服确认与逆序恢复；异常时保留操作和恢复错误，不停止非受管进程。
 - `session-menu.mjs` / `session-menu.d.mts`：统一清理菜单使用的会话归档参数收集；收集 Turn 上限和空闲天数后调用
@@ -359,8 +359,8 @@
   从同一受审查来源生成共享模型目录；重复配置时保留仍受支持的
   默认模型与逐模型设置。
 - `channel-setup-presentation.mjs`：三个通讯渠道共用的 Clack 选择、输入、确认与取消适配器，以及微信、飞书共用的紧凑二维码渲染；保留完整模块、使用 L 级纠错，终端过窄或渲染失败时向调用方报告错误，由渠道取消扫码会话并返回向导。
-- `terminal-prompter.mjs`：为本机维护命令提供最小的终端文本、确认和可见凭据输入接口，并允许
-  长流程通过 `AbortSignal` 中止尚未完成的问题。
+- `terminal-prompter.mjs`：为本机维护命令统一提供 Clack 确认接口，保留调用方的默认选项；取消确认不执行操作，
+  `AbortSignal` 中止返回 `AbortError`，关闭时释放在途交互；非终端调用要求使用显式参数。
 - `telegram-setup.mjs`：把 Telegram Bot 来源、长轮询冲突确认、允许名单输入和中文输出适配到
   `telegram-setup-session.mjs` 的结构化会话；复用统一 Codex `.env`、环境变量和系统代理解析；交互输入的
   Token 在当前终端明文显示，但验证错误继续脱敏；新建 Bot 仅引导使用官方 BotFather。

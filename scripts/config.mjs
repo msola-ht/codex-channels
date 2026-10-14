@@ -39,7 +39,7 @@ export async function runConfig({
     output.write("用法：codexc config [paths [--json]]\n交互设置需要终端；查询配置路径使用 codexc config paths。\n");
     return undefined;
   }
-  prompts.intro("Codex Connect Config");
+  prompts.intro("日常设置");
   while (true) {
     let document;
     let gatewayConfigError;
@@ -53,34 +53,38 @@ export async function runConfig({
     const telegramConfigured = typeof telegram.bot_token === "string"
       && telegram.bot_token.trim().length > 0;
     const section = await prompts.select({
-      message: "选择配置项",
+      message: "设置项目",
       showInstructions: false,
       options: [
-        { value: "summary", label: "Gateway 配置总览", hint: "脱敏显示当前 Gateway 设置、来源与作用范围" },
+        { value: "summary", label: "Gateway 配置总览", hint: "脱敏查看设置、来源与作用范围" },
         {
           value: "codex_user",
           label: "Codex 新会话与用户偏好",
-          hint: "默认模型、思考等级、Fast、权限、推理摘要与其他用户偏好",
+          hint: "模型、思考等级、Fast、权限与用户偏好",
         },
         { value: "display", label: "显示设置", hint: "操作详情、计划更新、思考状态" },
         { value: "mcp", label: "新增 MCP", hint: "本地 stdio、远程 HTTP 或 Strata 视频预设" },
         {
           value: "system",
           label: "系统设置",
-          hint: "调用详情记录、审批超时、Sandbox、默认工作区与渠道模型覆盖",
+          hint: "调用记录、审批超时、默认工作区与渠道模型",
         },
         { value: "scheduled_tasks", label: "计划任务", hint: "启用或关闭无人值守任务" },
-        { value: "network", label: "网络代理", hint: "显式 HTTP、HTTPS、通用代理与直连规则" },
+        { value: "network", label: "网络代理", hint: "HTTP、HTTPS、通用代理与直连规则" },
         { value: "advanced", label: "高级设置", hint: "日志等级与开发中功能" },
-        { value: "relay", label: "模型转发监听", hint: "关闭、仅本机或局域网；Key 管理使用 WebUI 或 codexc relay" },
+        { value: "relay", label: "模型转发监听", hint: "关闭、仅本机或局域网访问" },
         { value: "webui", label: "WebUI 设置", hint: "启用状态、监听地址、端口与访问令牌" },
         { value: "metrics", label: "指标存储", hint: "本地保留天数与最大记录数" },
-        { value: "paths", label: "查看配置路径", hint: "显示用户目录与配置文件位置" },
-        { value: "cancel", label: "取消", hint: "退出 Config" },
+        { value: "paths", label: "查看配置路径", hint: "用户目录与配置文件位置" },
+        { value: "cancel", label: "返回", hint: "结束日常设置" },
       ],
     });
-    if (prompts.isCancel(section) || section === "cancel") {
-      prompts.cancel("Config 已取消");
+    if (prompts.isCancel(section)) {
+      prompts.cancel("已取消设置");
+      return undefined;
+    }
+    if (section === "cancel") {
+      prompts.outro("已退出设置菜单");
       return undefined;
     }
     const handlers = {

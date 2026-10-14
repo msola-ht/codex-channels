@@ -30,7 +30,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 所有 CLI 命令在结束或失败时显示“命令总耗时”，单位为秒并保留两位小数。计时统一写入 stderr，stdout 的 JSON、JSONL、版本号和导出内容不混入计时文本；主菜单每次执行的命令也单独计时。前台服务、日志跟随和交互命令的耗时包含运行及等待输入的时间，在命令返回时显示；强制终止进程时不保证输出。使用单调时钟，从命令分派开始，不包含 Node 加载 CLI 静态模块之前的启动时间。
 
-在交互终端直接运行 `codexc` 打开主菜单，可进入初始化、接入、日常设置、工作区、后台服务、指标、清理、诊断，以及“运行与连接”中的 TUI、WebUI 和前台核心服务启动入口。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 显示帮助，`timezone` 仅显示当前时区。配置路径查询明确使用 `codexc config paths [--json]`，终端与管道中的行为一致。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。
+在交互终端直接运行 `codexc` 打开主菜单：运行与连接、工作区、日常设置、接入向导、后台服务、更多工具和退出。“运行与连接”提供 Codex TUI、WebUI 和前台核心服务；“更多工具”集中诊断、指标查询与导出、清理与归档和首次初始化。返回主菜单或这些子菜单时保留上次选择，方便继续操作。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 显示帮助，`timezone` 仅显示当前时区。配置路径查询明确使用 `codexc config paths [--json]`，终端与管道中的行为一致。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。
 
 在 `codexc` 主菜单选择“后台服务”可选择操作和目标。菜单调用顶层服务命令，`restart all` 包含已安装且未关闭的 WebUI。
 `all` 覆盖 App Server、Gateway 与已安装的可选服务：`start all` 与 `restart all` 的启动段按配置跳过已关闭的 WebUI 和未启用的 Relay，`stop`、`status`、`logs` 的 `all` 仍包含它们，便于停止和排查。启动逐项等待就绪，停止顺序为 WebUI、Relay、Gateway、App Server。

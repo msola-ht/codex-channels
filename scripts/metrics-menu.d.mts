@@ -1,5 +1,6 @@
 export interface MetricsMenuPrompts {
   intro(message: string): void;
+  outro(message: string): void;
   cancel(message: string): void;
   isCancel(value: unknown): boolean;
   select(options: Record<string, unknown>): Promise<unknown>;
