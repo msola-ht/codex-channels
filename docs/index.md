@@ -362,6 +362,7 @@ OpenCode Go 和自定义第三方代理仍拒绝这些路径。
 [`router.ts`](../src/session-routing/router.ts) 核验官方祖先、Workspace、Provider 和绑定有效性；
 [`coordinator.ts`](../src/approval/coordinator.ts) 保留子代理原有 Thread、Turn、Item 与请求身份，
 把交互送到已绑定祖先会话，归属解析与排队共用有效期，绑定变化或 `serverRequest/resolved` 会取消旧请求。
+`serverRequest/resolved` 的官方 Thread 归属也用于交互结束后的后台空闲复核；子代理请求沿已核验祖先找到绑定所有者，不在渠道交互移出队列时提前释放订阅。
 无人值守 `automation` Thread 及其后代仍拒绝交互审批。
 官方依据为固定版 [`thread_data.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs)
 及 [`bespoke_event_handling.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/bespoke_event_handling.rs)。

@@ -685,7 +685,8 @@ export abstract class GatewayComponentGraph {
       collaborationModes,
       {
         hasPendingInteraction: (threadId) =>
-          this.interactions.hasPendingForThread(threadId),
+          this.interactions.hasPendingForThread(threadId)
+          || this.asyncQuestions?.hasPendingForThread(threadId) === true,
         notifyTransferred: ({ previousTarget, nextTarget, threadId }) => {
           this.logger.info({
             threadId,
@@ -759,14 +760,7 @@ export abstract class GatewayComponentGraph {
         return false;
       },
       {
-        backgrounded: (threadId) => {
-          void this.trackQueueLifecycleTask(() => service.retryPendingBackgroundRelease(threadId,
-            () => !this.stopping && !this.isBindingRestoring(threadId)))
-            .catch(async (error) => {
-              this.logger.warn({ err: error, threadId }, "会话转后台后的空闲清理失败，安排订阅恢复");
-              if (!this.stopping && !this.isBindingRestoring(threadId)) await this.restoreIdleBinding(threadId);
-            });
-        },
+        backgrounded: (threadId) => this.retrySettledBackground(threadId),
         restoreRequired: (threadId) => {
           if (!this.stopping && !this.isBindingRestoring(threadId)) void this.restoreIdleBinding(threadId);
         },
@@ -1140,6 +1134,7 @@ export abstract class GatewayComponentGraph {
       warn: (event, message) => this.output.publish({
         type: "warning", target: event.target, threadId: event.threadId, message,
       }, true),
+      settled: (threadId) => this.retrySettledBackground(threadId),
     });
     if (primaryProvider === "openai" && this.customPrimaryProviderId === undefined) {
       const primaryClient = clients.get(primaryProvider)!;
@@ -1238,9 +1233,20 @@ export abstract class GatewayComponentGraph {
     });
     this.inbound.subscribe("approval-resolution", (notification) => {
       if (notification.method === "serverRequest/resolved") {
-        const params = notification.params as { requestId?: string | number };
+        const params = notification.params as { requestId?: string | number; threadId?: unknown };
         if (params.requestId !== undefined) {
           this.approval.resolved(params.requestId);
+          if (typeof params.threadId === "string" && params.threadId.trim()) {
+            const threadId = params.threadId;
+            void this.trackQueueLifecycleTask(async () => {
+              const controller = new AbortController();
+              const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
+              try {
+                const route = await this.router.resolveApprovalTarget(threadId, () => !this.stopping, signal);
+                if (route?.isCurrent() && !this.stopping) this.retrySettledBackground(route.ownerThreadId);
+              } finally { controller.abort(); }
+            }).catch((error) => this.logger.warn({ err: error, threadId }, "交互解决后的后台归属查询失败，已保留绑定"));
+          }
         }
       }
     });
@@ -1822,6 +1828,15 @@ export abstract class GatewayComponentGraph {
     if (failures.length > 0) {
       throw new AggregateError(failures, "Gateway 资源未完全关闭");
     }
+  }
+
+  private retrySettledBackground(threadId: string): void {
+    void this.trackQueueLifecycleTask(() => this.conversations.retryPendingBackgroundRelease(threadId,
+      () => !this.stopping && !this.isBindingRestoring(threadId)))
+      .catch(async (error) => {
+        this.logger.warn({ err: error, threadId }, "后台空闲复核失败，安排订阅恢复");
+        if (!this.stopping && !this.isBindingRestoring(threadId)) await this.restoreIdleBinding(threadId);
+      });
   }
 
   private trackQueueLifecycleTask<T>(operation: () => Promise<T>): Promise<T | undefined> {

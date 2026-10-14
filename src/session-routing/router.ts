@@ -920,8 +920,12 @@ export class SessionRouter {
       await this.codex.unsubscribeThread(threadId);
       if (condition && binding && snapshot) {
         let verified = false;
-        try { verified = isCurrent() && await condition.verifyIdle() && isCurrent(); } catch {
+        let verificationFailed = false;
+        let verificationError: unknown;
+        try { verified = isCurrent() && await condition.verifyIdle() && isCurrent(); } catch (error) {
           // Keep the binding when the final observation is inconclusive.
+          verificationFailed = true;
+          verificationError = error;
         }
         if (!verified) {
           if (this.sameBinding(binding, this.bindings.getByThread(threadId)) && condition.canRestore()) {
@@ -933,6 +937,7 @@ export class SessionRouter {
             this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
             condition.restored(resumed.thread);
           }
+          if (verificationFailed) throw verificationError;
           return undefined;
         }
       }
