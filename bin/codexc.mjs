@@ -79,44 +79,49 @@ const helpText = {
 
 交互终端无参数时打开主菜单；非交互终端显示帮助。
 
-初始化与配置：
-  init                         初始化用户目录和配置
-  setup [--jsonl]              交互配置 Provider、通讯渠道与项目技能
-  config [paths [--json]]      日常设置；paths 只读查询配置路径
-  timezone                     设置 App Server、WebUI 或网关时区
-  doctor                       诊断安装、配置和服务
-  security                     修复本机私有路径权限
-
-项目与 Codex：
+运行与连接：
   remote [参数]                启动共享 App Server 的 Codex TUI
-  app                         启动 Codex Desktop App 或管理共享连接
+  app                          启动 Codex Desktop App 或管理共享连接（macOS / Windows）
+  webui                        前台运行本地管理 WebUI
+  run                          前台运行核心服务
+
+工作区：
   work                         管理 Workspace（交互菜单或子命令）
+
+日常设置：
+  config [paths [--json]]       Codex 与 Gateway 设置；paths 只读查询配置路径
+  timezone                     设置 App Server、WebUI 或网关时区
+
+接入与账户：
+  setup [--jsonl]               交互配置 Provider、通讯渠道与项目技能
   provider                     管理 Provider 与各家账户
 
-指标与工具：
-  reset-credit                 查询并确认使用 OpenAI 重置券
-  metrics                      查询、导出和维护模型指标（交互菜单或子命令）
-  relay                        管理模型转发监听、调用方与访问密钥
-  delivery                     离线核对并处理未确认的渠道投递
-  cleanup                      统一交互清理会话、转储和指标
-  traffic                      查看模型请求与响应转储（列表、详情或持续跟随）
-  channel                      发送渠道图片
-  webui                        启动本地管理 WebUI
-
-服务与维护：
-  run                          前台运行核心服务
-  install                      安装后台服务并启动核心服务
-  start [目标]                 启动后台服务
-  stop [目标]                  停止后台服务
-  restart                      重启全部后台服务（含 WebUI 与已启用 Relay）
+状态与服务：
   status [目标]                查看后台服务状态
   logs [目标]                  查看后台服务日志
+  doctor                       只读诊断安装、配置和服务
+  start [目标]                 启动后台服务
+  restart [目标]               重启后台服务，默认 all
+  stop [目标]                  停止后台服务
   reload                       重新读取 Gateway 配置
-  update                       更新程序与配套 Codex CLI
-  uninstall [--services]       自动识别并卸载当前程序；--services 仅卸载后台服务
+  install                      安装后台服务并启动核心服务
+  uninstall --services         停止并卸载后台服务，保留程序与用户数据
 
-信息：
-  version, -v, --version       显示版本
+数据与维护：
+  metrics                      查询与导出模型指标（交互菜单或子命令）
+  reset-credit                 查询并确认使用 OpenAI 重置券
+  traffic                      查看模型请求与响应转储（列表、详情或持续跟随）
+  delivery                     离线核对并处理未确认的渠道投递
+  relay                        查询模型转发状态、调用方，管理监听与访问密钥
+  channel                      发送渠道图片（需指定本地文件）
+  cleanup                      统一交互清理会话、转储和指标
+
+程序维护：
+  version, -v, --version        显示版本
+  init                         首次初始化用户目录和配置，交互终端继续向导
+  update                       更新程序与配套 Codex CLI
+  security                     修复本机私有路径权限（Windows）
+  uninstall                    自动识别并卸载当前程序，保留用户数据
 
 运行 codexc <命令> -h 查看详细用法。`,
   restart: restartCommandUsage,
@@ -161,9 +166,8 @@ Provider 选择不能与 --profile 同用；个人 Profile 请显式使用 --pro
   logs: serviceCommandUsage.logs,
   config: `用法：codexc config [paths [--json]]
 
-打开统一日常配置菜单：Codex 新会话与用户偏好、Gateway 脱敏配置总览、显示设置、系统设置、自动化（计划任务）、
-网络代理、高级设置（日志等级与开发中功能）、WebUI 设置、
-指标存储、Telegram 消息格式与配置路径查看。
+打开按作用范围分类的日常设置：Codex 用户偏好、工具与 MCP、Gateway 显示与会话、身份与时区、
+调用记录、Gateway 计划任务、网络代理、服务访问（Relay / WebUI）、日志与高级功能、指标存储、配置总览与路径。
 无参数打开交互菜单，非交互终端显示帮助。paths 只读查询路径；paths --json 在终端或管道中均输出路径和文件存在状态，不进入交互或写配置。`,
   timezone: timezoneCommandUsage,
   doctor: `用法：codexc doctor [--json]
@@ -195,7 +199,7 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
   metrics: `用法：codexc metrics
 
 无参数时进入查询与导出菜单；交互清理和重置请用 codexc cleanup。直接命令：
-  ${metricsCommandUsage.run.slice("用法：".length)}   本次运行汇总（最近 Turn + 会话累计）
+  ${metricsCommandUsage.run.slice("用法：".length)}   所选会话最近运行汇总（最近 Turn + 会话累计）
   ${metricsCommandUsage.turns.slice("用法：".length)}   会话每次对话明细
   ${metricsCommandUsage.threads.slice("用法：".length)}   列出有指标的会话
   ${metricsCommandUsage.report.slice("用法：".length)}   聚合汇报
@@ -227,7 +231,7 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
 只读显示指标数据库路径、Schema 兼容性和记录数量；--json 输出稳定 JSON。`,
   "metrics.run": `${metricsCommandUsage.run}
 
-导出指定 Thread 的本次运行汇总：最近 Turn 的请求数、Token、缓存命中率、速度与耗时，
+导出指定 Thread 的最近运行汇总：最近 Turn 的请求数、Token、缓存命中率、速度与耗时，
 以及当前会话累计；默认输出 Markdown 并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
   "metrics.turns": `${metricsCommandUsage.turns}
 

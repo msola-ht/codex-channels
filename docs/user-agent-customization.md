@@ -160,7 +160,7 @@ Provider Proxy，需要 `codexc restart all`；App Server 不会自动重启，�
 当前不增加独立 `codexc ua` 命令，也不在 `codexc setup` 的 Provider 页面重复入口。
 脚本或自动化直接编辑 TOML；交互入口与配置文件使用同一校验和原子写入实现。
 
-终端标识的取值来自运行命令的终端，而不是常驻进程：`codexc config` → 系统设置 →
+终端标识的取值来自运行命令的终端，而不是常驻进程：`codexc config` → 身份与时区 →
 “模型上游终端标识” 预填运行该命令的终端探测结果（`TERM_PROGRAM[/版本]` 优先，其次各终端
 专有变量，最后 `TERM`），可编辑后保存，留空则删除 `terminal_identity` 并回到 App Server
 自行探测；`codexc install` 在生成服务定义前，
@@ -223,10 +223,10 @@ Provider ID 字符串插值到全局 UA。
   在生成服务定义前，若 `terminal_identity` 未配置且运行命令的
   终端可探测，则由 `scripts/service-command.mjs` 按该终端补入配置；其余服务命令不改写该配置。
 - `scripts/config-management.mjs`、`scripts/config-system-menu.mjs`：通过 `codexc config` 的
-  「系统设置 → 一键设为官方 TUI 身份」用当前系统与终端信息生成官方格式 `User-Agent`，
+  「身份与时区 → 一键设为官方 TUI 身份」用当前系统与终端信息生成官方格式 `User-Agent`，
   在单次受 revision 保护的原子写入中同时保存 `codex-tui` 客户端身份与上游 UA，给出
   `codexc restart all` 提示；该入口只写显式覆盖，默认身份不依赖它，也不再提供单项目
-  编辑入口；「系统设置 → 模型上游终端标识」用同一写入接口单独保存 `terminal_identity`，预填
+  编辑入口；「身份与时区 → 模型上游终端标识」用同一写入接口单独保存 `terminal_identity`，预填
   运行命令的终端探测结果并允许编辑，留空即删除该字段。设置读取接口在 `officialTuiIdentity`
   下额外返回派生默认值（`defaults`），供 CLI 与 WebUI 显示未配置时实际生效的身份，界面不把
   默认值写回配置。

@@ -16,10 +16,12 @@ export async function runCleanupMenu({
   services = {},
 }) {
   prompts.intro("数据清理");
+  let selectedAction = "sessions";
   while (true) {
     const action = await prompts.select({
       message: "清理项目",
       showInstructions: false,
+      initialValue: selectedAction,
       options: [
         { value: "sessions", label: "归档短会话及子会话", hint: "临停 Gateway，预览并确认归档" },
         { value: "traffic", label: "删除请求与响应转储", hint: "预览后确认删除，临停相关服务" },
@@ -40,6 +42,7 @@ export async function runCleanupMenu({
     if (!["sessions", "cleanup", "reset", "traffic", "prune"].includes(action)) {
       throw new Error(`未知清理项目：${String(action)}`);
     }
+    selectedAction = action;
     try {
       if (action === "sessions") {
         await runSessionCleanupMenu({ prompts, runCleanup: runSessionCleanup });

@@ -8,6 +8,7 @@ import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { gatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { reportMenuError } from "./cli-menu.mjs";
+import { runDefaultWorkspace } from "./config-system-menu.mjs";
 import { runWorkspaceSettings } from "./config-workspace-menu.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import {
@@ -20,7 +21,7 @@ import {
 const helpText = {
   work: `用法：codexc work
 
-交互终端无子命令时进入菜单：列出、新建、注册当前或已有目录、删除、权限；新建目录位于
+交互终端无子命令时进入菜单：列出、设置默认、注册当前或已有目录、新建、权限、移除注册；新建目录位于
 ~/.codex-connect/<id>-work，不更改默认工作区。
 
 其他用法：
@@ -35,7 +36,7 @@ const helpText = {
 把 --cwd 指定的目录注册为 Workspace，未指定时使用当前目录；交互式新建请运行 codexc work。`,
   remove: `用法：codexc work remove <序号|ID|名称>
 
-删除 Workspace 注册，不删除磁盘目录。`,
+移除 Workspace 注册，不删除磁盘目录。`,
 };
 
 export async function runWorkspaceCommand(args, {
@@ -153,17 +154,20 @@ async function runWorkspaceMenu({
   prompts,
 }) {
   prompts.intro("工作区");
+  let selected = "list";
   while (true) {
     const action = await prompts.select({
       message: "工作区操作",
       showInstructions: false,
+      initialValue: selected,
       options: [
         { value: "list", label: "列出工作区", hint: "查看全部工作区与默认项" },
-        { value: "create", label: "新增工作区", hint: "在 ~/.codex-connect/<id>-work 下新建并注册" },
+        { value: "default", label: "设置默认工作区", hint: "选择已注册工作区作为 Gateway 默认项" },
         { value: "register-current", label: "注册当前目录", hint: cwd },
         { value: "register-existing", label: "注册已有目录", hint: "输入目录路径，不创建或删除目录" },
-        { value: "remove", label: "删除工作区", hint: "删除注册，不删除目录" },
+        { value: "create", label: "新建工作区", hint: "在 ~/.codex-connect/<id>-work 下新建并注册" },
         { value: "permissions", label: "工作区权限", hint: "沙箱、审批策略与权限 Profile" },
+        { value: "remove", label: "移除工作区注册", hint: "从 Gateway 移除注册，保留磁盘目录" },
         { value: "cancel", label: "返回", hint: "结束工作区操作" },
       ],
     });
@@ -175,9 +179,14 @@ async function runWorkspaceMenu({
       prompts.outro("已退出工作区菜单");
       return;
     }
+    selected = action;
     try {
       if (action === "list") {
         listWorkspaces(runtime.configPath, { output });
+        continue;
+      }
+      if (action === "default") {
+        await runDefaultWorkspace({ environment, output, prompts });
         continue;
       }
       if (action === "register-current" || action === "register-existing") {
@@ -296,7 +305,7 @@ async function removeWorkspaceInteractively({
     return;
   }
   const selected = await prompts.select({
-    message: "选择要删除的 Workspace",
+    message: "选择要移除注册的 Workspace（磁盘目录保留）",
     showInstructions: false,
     options: workspaces.map((item) => ({
       value: item.id,

@@ -30,10 +30,18 @@ export async function runSetup({
     throw new Error("Setup 需要交互终端；请将标准输入和提示输出连接终端。--jsonl 仅改变结果输出格式。");
   }
   prompts.intro("接入向导");
+  const selection = {
+    section: "summary",
+    modelCategory: "official",
+    officialModule: "official_login",
+    thirdPartyModule: "deepseek",
+    channel: "telegram",
+  };
   while (true) {
     const section = await prompts.select({
       message: "接入项目",
       showInstructions: false,
+      initialValue: selection.section,
       options: [
         {
           value: "summary",
@@ -43,7 +51,7 @@ export async function runSetup({
         {
           value: "models",
           label: "模型与提供商",
-          hint: "OpenAI、第三方 Provider 与默认模型",
+          hint: "Provider 接入与受管模型设置",
         },
         {
           value: "channels",
@@ -81,6 +89,7 @@ export async function runSetup({
     if (!["summary", "channels", "models", "skills"].includes(section)) {
       throw new Error(`未知 Setup 类别：${String(section)}`);
     }
+    selection.section = section;
     try {
       switch (section) {
         case "summary":
@@ -91,6 +100,7 @@ export async function runSetup({
             input,
             output,
             prompts,
+            selection,
             feishuSetup,
             telegramSetup,
             weixinSetup,
@@ -106,6 +116,7 @@ export async function runSetup({
             input,
             output,
             prompts,
+            selection,
             deepseekSetup,
             ccgSetup,
             clinePassSetup,
@@ -150,6 +161,7 @@ async function runModelSetup({
   input,
   output,
   prompts,
+  selection,
   deepseekSetup,
   ccgSetup,
   clinePassSetup,
@@ -163,6 +175,7 @@ async function runModelSetup({
     const category = await prompts.select({
       message: "模型与提供商",
       showInstructions: false,
+      initialValue: selection.modelCategory,
       options: [
         {
           value: "official",
@@ -172,27 +185,31 @@ async function runModelSetup({
         {
           value: "third_party",
           label: "第三方 Provider",
-          hint: "自定义提供商与第三方账户",
+          hint: "账户与自定义接入、受管模型设置",
         },
         { value: "back", label: "返回", hint: "返回设置类别" },
       ],
     });
     if (prompts.isCancel(category) || category === "back") return { action: "back" };
     if (category === "official") {
+      selection.modelCategory = category;
       const result = await runOfficialModelSetup({
         input,
         output,
         prompts,
+        selection,
         officialLoginSetup,
       });
       if (isBackResult(result)) continue;
       return result;
     }
     if (category === "third_party") {
+      selection.modelCategory = category;
       const result = await runThirdPartyModelSetup({
         input,
         output,
         prompts,
+        selection,
         deepseekSetup,
         ccgSetup,
         clinePassSetup,
@@ -212,12 +229,14 @@ async function runOfficialModelSetup({
   input,
   output,
   prompts,
+  selection,
   officialLoginSetup,
 }) {
   while (true) {
     const module = await prompts.select({
       message: "OpenAI 官方",
       showInstructions: false,
+      initialValue: selection.officialModule,
       options: [
         {
           value: "official_login",
@@ -230,6 +249,7 @@ async function runOfficialModelSetup({
     if (prompts.isCancel(module) || module === "back") return { action: "back" };
     let result;
     if (module === "official_login") {
+      selection.officialModule = module;
       result = await officialLoginSetup({ input, output, prompts });
     } else {
       throw new Error(`未知官方设置：${String(module)}`);
@@ -243,6 +263,7 @@ async function runThirdPartyModelSetup({
   input,
   output,
   prompts,
+  selection,
   deepseekSetup,
   ccgSetup,
   clinePassSetup,
@@ -255,17 +276,8 @@ async function runThirdPartyModelSetup({
     const module = await prompts.select({
       message: "第三方 Provider",
       showInstructions: false,
+      initialValue: selection.thirdPartyModule,
       options: [
-        {
-          value: "custom_primary",
-          label: "Codex 兼容",
-          hint: "使用 Codex 官方模型目录，管理 Provider",
-        },
-        {
-          value: "custom_responses",
-          label: "自定义第三方",
-          hint: "独立模型目录，手填模型与能力",
-        },
         {
           value: "deepseek",
           label: "DeepSeek 官方",
@@ -287,19 +299,33 @@ async function runThirdPartyModelSetup({
           hint: "Chat 模型与固定/切换模式",
         },
         {
+          value: "custom_primary",
+          label: "Codex 兼容 Provider 接入",
+          hint: "管理自定义接入，使用 Codex 官方模型目录",
+        },
+        {
+          value: "custom_responses",
+          label: "自定义模型 Provider 接入",
+          hint: "管理自定义接入，手填独立模型目录与能力",
+        },
+        {
           value: "provider_default",
-          label: "默认模型与思考等级",
-          hint: "受管 Provider 的默认模型与思考等级",
+          label: "受管 Provider 默认模型与思考等级",
+          hint: "按 Provider 设置新会话默认值",
         },
         {
           value: "model_window",
-          label: "模型上下文窗口",
-          hint: "按模型设置受管 Provider 的上下文大小",
+          label: "受管模型目录上下文窗口",
+          hint: "按模型名统一设置，应用包含该模型的所有受管 Provider",
         },
         { value: "back", label: "返回", hint: "返回模型与提供商菜单" },
       ],
     });
     if (prompts.isCancel(module) || module === "back") return { action: "back" };
+    if (!["deepseek", "opencode-go", "clp", "ccg", "custom_responses", "custom_primary", "provider_default", "model_window"].includes(module)) {
+      throw new Error(`未知第三方设置：${String(module)}`);
+    }
+    selection.thirdPartyModule = module;
     let result;
     if (module === "deepseek") {
       result = await deepseekSetup({ input, output, prompts, allowBack: true });
@@ -317,8 +343,6 @@ async function runThirdPartyModelSetup({
       result = await modelProviderDefaultSetup({ input, output, prompts, allowBack: true });
     } else if (module === "model_window") {
       result = await modelWindowSetup({ input, output, prompts, allowBack: true });
-    } else {
-      throw new Error(`未知第三方设置：${String(module)}`);
     }
     if (isBackResult(result)) continue;
     return result;
@@ -329,6 +353,7 @@ async function runChannelSetup({
   input,
   output,
   prompts,
+  selection,
   feishuSetup,
   telegramSetup,
   weixinSetup,
@@ -336,6 +361,7 @@ async function runChannelSetup({
   const channel = await prompts.select({
     message: "通讯渠道",
     showInstructions: false,
+    initialValue: selection.channel,
     options: [
       {
         value: "telegram",
@@ -364,10 +390,13 @@ async function runChannelSetup({
   }
   switch (channel) {
     case "telegram":
+      selection.channel = channel;
       return telegramSetup({ input, output });
     case "feishu":
+      selection.channel = channel;
       return feishuSetup({ input, output });
     case "weixin":
+      selection.channel = channel;
       return weixinSetup({ input, output });
     default:
       throw new Error(`未知通讯渠道：${String(channel)}`);

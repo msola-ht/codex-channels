@@ -44,11 +44,11 @@ codexc timezone --json             # 只读输出当前配置
 删除 `codex.timezone`，「其他」要求手动输入 IANA 名称。已配置的值默认高亮，因此直接回车不会
 改变配置；不在常见列表里的当前值会单独列在「当前配置」下。
 
-同一入口也位于 `codexc config` → 系统设置 → 模型可见时区。
+同一入口也位于 `codexc config` → 身份与时区 → 模型可见时区。
 
 ## 网关时区
 
-使用 `codexc config` → 系统设置 → 网关时区，或 `codexc timezone --gateway`，选择：
+使用 `codexc config` → 身份与时区 → 网关时区，或 `codexc timezone --gateway`，选择：
 
 - **跟随 App Server（默认）**：删除 `gateway.timezone`，启动时使用 `codex.timezone`；App Server
   未配置时继承网关运行环境的系统时区。这是跟随配置，不是查询 App Server 进程的实际时区。

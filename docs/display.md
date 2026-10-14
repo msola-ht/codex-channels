@@ -10,7 +10,7 @@
 
 ## 模型显示组
 
-模型显示组通过 `codexc config → 显示设置 → 模型显示组` 或 WebUI“模型管理 → 模型配置”维护。
+模型显示组通过 `codexc config → Gateway 显示设置 → 模型显示组` 或 WebUI“模型管理 → 模型配置”维护。
 配置为 Gateway TOML 的 `[display.model_aliases]`，键是精确原始模型 ID，值是显示组名；默认空映射。
 例如 `"cline-pass/deepseek-v4.1-flash" = "deepseek-flash"`。同一 ID 跨提供商使用同一显示名，
 提供商身份、模型选择的回调和原始 ID 始终独立。渠道模型列表项统一为“提供商 · 模型名”，
@@ -629,7 +629,7 @@ Turn 的启动回复直接登记为 Thread 状态消息，后续 `active` 不再
 这张回复并保留扩展身份。
 
 Turn 推理期间，Gateway 消费官方 `item/reasoning/summaryTextDelta`、`summaryPartAdded` 与
-`textDelta` 通知。渠道思考状态默认不显示；在 `codexc config → 显示设置 → 思考状态显示` 中开启后，
+`textDelta` 通知。渠道思考状态默认不显示；在 `codexc config → Gateway 显示设置 → 思考状态显示` 中开启后，
 飞书和 Telegram 按顺序展示“思考中…”状态，连续思考只显示一次，操作打断后再次思考时重新显示一次。
 每段独立从 0 开始计时，超过 1 秒时附“耗时”字段并每秒流式原地更新；
 飞书使用每段一张的流式卡片，Telegram 原地编辑同一条面板。微信不主动发送推理状态，以保留单次
@@ -700,7 +700,7 @@ MCP 详情及分页中的登录、浏览、翻页和资源读取命令沿用用�
 
 ## 调试模式
 
-在 `codexc config` 中选择“高级设置 → 日志等级”，设为 `debug` 可全局开启脱敏调试信息，同时启用 Gateway 各模块的脱敏调试日志，并在渠道中显示
+在 `codexc config` 中选择“日志与高级功能 → 日志等级”，设为 `debug` 可全局开启脱敏调试信息，同时启用 Gateway 各模块的脱敏调试日志，并在渠道中显示
 启动通知的“运行环境”小节和完成通知的 Token 子项；改为 `info` 后，隐藏这些调试字段，但保留完成通知的
 Token 总计。
 修改后只需重启 Gateway：
@@ -756,7 +756,7 @@ codexc logs gateway -n 500
 都不再启动。短回复未进入流式发送时，正文失败也会独立尝试完成统计。
 发送失败与进程关闭仍可能造成未送达，日志本身不提供离线持久化或自动补发；已持久接收结果的恢复与不确定发送处理由独立[投递箱](delivery.md)负责。
 
-需要查看模型请求与响应的完整字段时，在 `codexc config` 中选择“系统设置 → 调用详情记录”，
+需要查看模型请求与响应的完整字段时，在 `codexc config` 中选择“调用记录 → 调用详情记录”，
 使用 `[debug].model_traffic_dump` 旁路转储，而不是提高日志等级；文件位置与脱敏边界见
 [使用指导](user-guide.md#模型请求转储)。
 

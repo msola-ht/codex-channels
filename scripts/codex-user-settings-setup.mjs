@@ -125,11 +125,11 @@ export async function runCodexUserSettingsSetup({
       updateSetting,
     });
   }
+  if (section === "tool-access") {
+    return runCodexToolAccess({ environment, output, prompts, loadSettings, updateSetting, createClient, primaryProvider });
+  }
   output.write("正在读取 Codex 当前设置…\n");
   const settings = await loadSettings({ environment, createClient, primaryProvider });
-  if (section === "tool-access") {
-    return runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
-  }
   if (section === "all") {
     return runAllSettings({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
   }
@@ -212,6 +212,16 @@ async function runApprovalsReviewerSetting({ environment, output, prompts, setti
   output.write(`Codex 默认审批方式已设为${value === "auto_review" ? "自动审查" : "手动审批"}。\n`);
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
+}
+
+export async function runCodexToolAccess({
+  environment = process.env, output = process.stdout, prompts = clackPrompts,
+  loadSettings = loadCodexUserSettings, updateSetting = updateCodexUserSetting,
+  createClient, primaryProvider = loadPrimaryModelProvider,
+} = {}) {
+  output.write("正在读取 Codex 当前设置…\n");
+  const settings = await loadSettings({ environment, createClient, primaryProvider });
+  return runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
 }
 
 async function runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {

@@ -40,6 +40,7 @@ export async function runConfig({
     return undefined;
   }
   prompts.intro("日常设置");
+  let selected = "summary";
   while (true) {
     let document;
     let gatewayConfigError;
@@ -55,6 +56,7 @@ export async function runConfig({
     const section = await prompts.select({
       message: "设置项目",
       showInstructions: false,
+      initialValue: selected,
       options: [
         { value: "summary", label: "Gateway 配置总览", hint: "脱敏查看设置、来源与作用范围" },
         {
@@ -62,18 +64,19 @@ export async function runConfig({
           label: "Codex 新会话与用户偏好",
           hint: "模型、思考等级、Fast、权限与用户偏好",
         },
-        { value: "display", label: "显示设置", hint: "操作详情、计划更新、思考状态" },
-        { value: "mcp", label: "新增 MCP", hint: "本地 stdio、远程 HTTP 或 Strata 视频预设" },
+        { value: "mcp", label: "工具与 MCP", hint: "新增 MCP、电脑、浏览器与已有 MCP 访问管理" },
+        { value: "display", label: "Gateway 显示设置", hint: "渠道操作详情、计划更新、思考状态" },
         {
           value: "system",
-          label: "系统设置",
-          hint: "调用记录、审批超时、默认工作区与渠道模型",
+          label: "Gateway 会话设置",
+          hint: "审批超时、空闲解除、Sandbox、默认工作区与渠道模型",
         },
-        { value: "scheduled_tasks", label: "计划任务", hint: "启用或关闭无人值守任务" },
-        { value: "network", label: "网络代理", hint: "HTTP、HTTPS、通用代理与直连规则" },
-        { value: "advanced", label: "高级设置", hint: "日志等级与开发中功能" },
-        { value: "relay", label: "模型转发监听", hint: "关闭、仅本机或局域网访问" },
-        { value: "webui", label: "WebUI 设置", hint: "启用状态、监听地址、端口与访问令牌" },
+        { value: "identity", label: "身份与时区", hint: "官方 TUI 身份、终端标识、模型与网关时区" },
+        { value: "traffic", label: "调用记录", hint: "Codex 与 Relay 共用的采集、记录模式与保留天数" },
+        { value: "scheduled_tasks", label: "Gateway 计划任务", hint: "启用或关闭无人值守任务" },
+        { value: "network", label: "网络代理", hint: "Codex 与 Gateway 共用 HTTP、HTTPS、通用代理与直连规则" },
+        { value: "services", label: "服务访问", hint: "Relay 监听与 WebUI 启用、监听、访问令牌" },
+        { value: "advanced", label: "日志与高级功能", hint: "Gateway 日志等级与开发中 Plugin API" },
         { value: "metrics", label: "指标存储", hint: "本地保留天数与最大记录数" },
         { value: "paths", label: "查看配置路径", hint: "用户目录与配置文件位置" },
         { value: "cancel", label: "返回", hint: "结束日常设置" },
@@ -87,16 +90,18 @@ export async function runConfig({
       prompts.outro("已退出设置菜单");
       return undefined;
     }
+    selected = section;
     const handlers = {
       codex_user: () => codexUserSettingsSetup({ environment, output, prompts }),
-      mcp: async (options) => (await import("./mcp-setup.mjs")).runMcpSetup(options),
+      mcp: runMcpSettings,
       display: async (options) => (await import("./config-display-menu.mjs")).runDisplaySettings(options),
       system: async (options) => (await import("./config-system-menu.mjs")).runSystemSettings(options),
+      identity: async (options) => (await import("./config-system-menu.mjs")).runSystemSettings({ ...options, group: "identity" }),
+      traffic: async (options) => (await import("./config-system-menu.mjs")).runSystemSettings({ ...options, group: "traffic" }),
       scheduled_tasks: async (options) => (await import("./config-advanced-menu.mjs")).runScheduledTasks(options),
       network: async (options) => (await import("./config-advanced-menu.mjs")).runNetworkSettings(options),
       advanced: async (options) => (await import("./config-advanced-menu.mjs")).runAdvancedSettings(options),
-      relay: async (options) => (await import("./model-relay-listen-menu.mjs")).runRelayListenMenu(options),
-      webui: async (options) => (await import("./config-webui-menu.mjs")).runWebuiSettings(options),
+      services: runServiceAccessSettings,
       metrics: async (options) => (await import("./metrics-config-menu.mjs")).runMetricsSettings(options),
     };
     if (!["summary", "paths"].includes(section) && !Object.hasOwn(handlers, section)) {
@@ -125,6 +130,40 @@ export async function runConfig({
       reportMenuError(error);
     }
   }
+}
+
+async function runMcpSettings(options) {
+  const { prompts } = options;
+  const action = await prompts.select({
+    message: "工具与 MCP",
+    showInstructions: false,
+    options: [
+      { value: "add", label: "新增 MCP", hint: "本地 stdio、远程 HTTP 或 Strata 视频预设" },
+      { value: "manage", label: "电脑、浏览器与已有 MCP", hint: "查看并设置启用状态、工具开关与调用审批" },
+      { value: "back", label: "返回配置菜单" },
+    ],
+  });
+  if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (action === "add") return (await import("./mcp-setup.mjs")).runMcpSetup(options);
+  if (action === "manage") return (await import("./codex-user-settings-setup.mjs")).runCodexToolAccess(options);
+  throw new Error(`未知 MCP 设置：${String(action)}`);
+}
+
+async function runServiceAccessSettings(options) {
+  const { prompts } = options;
+  const action = await prompts.select({
+    message: "服务访问",
+    showInstructions: false,
+    options: [
+      { value: "relay", label: "模型转发监听", hint: "关闭、仅本机或局域网访问" },
+      { value: "webui", label: "WebUI 设置", hint: "启用状态、监听地址、端口与访问令牌" },
+      { value: "back", label: "返回配置菜单" },
+    ],
+  });
+  if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (action === "relay") return (await import("./model-relay-listen-menu.mjs")).runRelayListenMenu(options);
+  if (action === "webui") return (await import("./config-webui-menu.mjs")).runWebuiSettings(options);
+  throw new Error(`未知服务访问设置：${String(action)}`);
 }
 
 function resolveConfigPaths(environment) {

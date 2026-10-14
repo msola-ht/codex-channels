@@ -181,7 +181,7 @@ async function configureOptionalFeatures({
       });
       applied.push(`webui.enabled=${webui === true}`);
       output.write(webui === true
-        ? "WebUI 已启用：codexc start/restart all 会启动它；地址与访问令牌用 codexc config → WebUI 设置 修改。\n"
+        ? "WebUI 已启用：codexc start/restart all 会启动它；地址与访问令牌用 codexc config → 服务访问 → WebUI 设置 修改。\n"
         : "WebUI 已关闭：codexc start/restart all 不再启动它；需要时用 codexc start webui 单独启动。\n");
     }
     if (trafficDump !== storedTrafficDump) {
