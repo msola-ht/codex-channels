@@ -510,6 +510,10 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 下一条前台消息强制新建 Thread，避免普通发送或 steer 绕过恢复校验。
 共享订阅的生命周期按 Thread 串行，后台恢复在 RPC 前后复核原绑定，避免过期结果覆盖用户切换。
 后台清理在绑定已被撤权移除后仍取消当前 Client 的订阅；沿用固定版本 `thread/unsubscribe` 的 `notSubscribed`/`notLoaded` 幂等结果，不修改前台绑定。
+会话切换与空闲释放通过 `ThreadLifecyclePort.hasActiveDescendants` 使用对应 Provider 的 `thread/loaded/list`
+和 `thread/read` 核验父子活动，包括未持久化的已加载标准子代理 Thread；官方列表排除 `SessionSource::Internal`，不宣称枚举全部内部代理。
+查询限时、限页数、节点数与祖先深度，
+身份或祖先关系无法确认时失败关闭。恢复后台订阅后复用正常释放条件，不仅凭父 Thread 空闲就清理绑定。
 [`conversation-service.ts`](../src/application/conversation-service.ts) 在锁内复核选择上下文，并恢复活动 Turn。
 
 ## 本项目实现映射

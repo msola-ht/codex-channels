@@ -19,6 +19,7 @@ type ProviderClientMethod =
   | "listThreads"
   | "listCollaborationModes"
   | "readThread"
+  | "hasActiveDescendants"
   | "startThread"
   | "resumeThread"
   | "unsubscribeThread"
@@ -953,6 +954,27 @@ export class ProviderRoutingClient {
     } finally {
       signal.removeEventListener("abort", cancel);
     }
+  }
+
+  async hasActiveDescendants(
+    threadId: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const querySignal = AbortSignal.any([
+      this.shutdown.signal,
+      AbortSignal.timeout(10_000),
+      ...(signal ? [signal] : []),
+    ]);
+    return this.untilClosed(async () => {
+      const thread = await this.readThread(threadId, querySignal);
+      querySignal.throwIfAborted();
+      return this.withProviderActivity(thread.modelProvider, async () => {
+        querySignal.throwIfAborted();
+        const client = await this.ensureClient(thread.modelProvider);
+        querySignal.throwIfAborted();
+        return client.hasActiveDescendants(threadId, querySignal);
+      });
+    }, querySignal);
   }
 
   private canonicalProvider(provider: string): string {

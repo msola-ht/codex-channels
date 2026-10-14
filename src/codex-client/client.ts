@@ -357,7 +357,106 @@ export class CodexAppServerClient implements
       method: "thread/read",
       params: { threadId, includeTurns: false },
     }, { retryOverload: true, ...(signal ? { signal } : {}) });
+    if (result.thread.parentThreadId !== null
+      && (typeof result.thread.parentThreadId !== "string" || !result.thread.parentThreadId.trim())) {
+      throw new Error("Codex Thread 响应缺少有效 parentThreadId");
+    }
     return toThreadSnapshot(result.thread);
+  }
+
+  async hasActiveDescendants(threadId: string, signal?: AbortSignal): Promise<boolean> {
+    const disconnected = new AbortController();
+    const querySignal = AbortSignal.any([
+      disconnected.signal,
+      AbortSignal.timeout(10_000),
+      ...(signal ? [signal] : []),
+    ]);
+    const removeDisconnect = this.rpc.onDisconnect((error) => disconnected.abort(error));
+    try {
+      return await this.queryActiveDescendants(threadId, querySignal);
+    } finally {
+      removeDisconnect();
+    }
+  }
+
+  private async queryActiveDescendants(threadId: string, querySignal: AbortSignal): Promise<boolean> {
+    const snapshots = new Map<string, ThreadSnapshot>();
+    const read = async (id: string): Promise<ThreadSnapshot> => {
+      querySignal.throwIfAborted();
+      const cached = snapshots.get(id);
+      if (cached) return cached;
+      if (!id.trim() || snapshots.size >= 2_000) {
+        throw new Error("Codex 后代活动查询包含无效身份或超过节点上限");
+      }
+      const thread = await this.readThread(id, querySignal);
+      querySignal.throwIfAborted();
+      if (thread.id !== id || !thread.sessionId.trim() || !thread.modelProvider.trim()) {
+        throw new Error("Codex 后代活动查询的 Thread 身份不完整或不匹配");
+      }
+      snapshots.set(id, thread);
+      return thread;
+    };
+    const root = await read(threadId);
+    const loadedIds = new Set<string>();
+    const cursors = new Set<string>();
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      querySignal.throwIfAborted();
+      if (++pages > 20) throw new Error("Codex 后代活动查询超过分页上限");
+      const result: ThreadLoadedListResponse = await this.rpc.request<ThreadLoadedListResponse>({
+        method: "thread/loaded/list",
+        params: { limit: 100, ...(cursor ? { cursor } : {}) },
+      }, { retryOverload: true, signal: querySignal });
+      if (!Array.isArray(result.data) || result.data.length > 100
+        || (result.nextCursor !== null
+          && (typeof result.nextCursor !== "string" || !result.nextCursor.trim()))) {
+        throw new Error("Codex 后代活动查询返回了无效分页");
+      }
+      for (const id of result.data) {
+        if (typeof id !== "string" || !id.trim() || loadedIds.has(id)) {
+          throw new Error("Codex 后代活动查询返回了无效或重复 Thread 身份");
+        }
+        loadedIds.add(id);
+        if (loadedIds.size > 2_000) throw new Error("Codex 后代活动查询超过节点上限");
+      }
+      cursor = result.nextCursor;
+      if (cursor !== null) {
+        if (result.data.length === 0 || cursors.has(cursor)) {
+          throw new Error("Codex 后代活动查询返回了循环或空分页");
+        }
+        cursors.add(cursor);
+      }
+    } while (cursor !== null);
+
+    for (const id of loadedIds) {
+      if (id === threadId) continue;
+      const thread = await read(id);
+      if (thread.status.type === "idle" || thread.status.type === "notLoaded") continue;
+      const ancestors = new Set<string>([id]);
+      let parentId = thread.parentThreadId;
+      let depth = 0;
+      while (parentId != null) {
+        querySignal.throwIfAborted();
+        if (++depth > 64 || ancestors.has(parentId)) {
+          throw new Error("Codex 后代活动查询包含循环关系或超过祖先深度上限");
+        }
+        if (parentId === threadId) {
+          if (thread.modelProvider !== root.modelProvider || thread.sessionId !== root.sessionId) {
+            throw new Error("Codex 活动后代的模型 Provider 或 Session 与根 Thread 不匹配");
+          }
+          return true;
+        }
+        ancestors.add(parentId);
+        const parent = await read(parentId);
+        if (parent.modelProvider !== thread.modelProvider || parent.sessionId !== thread.sessionId) {
+          throw new Error("Codex 后代活动查询的祖先模型 Provider 或 Session 不匹配");
+        }
+        parentId = parent.parentThreadId;
+      }
+    }
+    querySignal.throwIfAborted();
+    return false;
   }
 
   async startThread(cwd: string, options: ThreadStartOptions = {}): Promise<ThreadSession> {

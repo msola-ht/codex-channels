@@ -415,6 +415,10 @@ export class ConversationService implements
     private readonly threadApprovalsReviewer?: ThreadApprovalsReviewerPort,
     hookAuthorization?: (target: ConversationTarget, actorId: string) => void,
     hookReviewPolicy?: HookReviewPolicy,
+    private readonly bindingLifecycle?: {
+      backgrounded(threadId: string): void;
+      restoreRequired(threadId: string): void;
+    },
   ) {
     this.hookUseCases = new ConversationHookService(this.locks, router, models, queries, hookAuthorization ?? (() => {
       throw new UserFacingError("hooks.forbidden", "Hook 管理授权不可用");
@@ -555,6 +559,11 @@ export class ConversationService implements
         this.touchActivity(target);
         return { status: "busy", threadId: current.threadId };
       }
+      if (await this.router.hasActiveDescendants(current.threadId, condition?.signal)) {
+        this.touchActivity(target);
+        return busy();
+      }
+      if (!isCurrent() || isLocallyBusy()) return busy();
       const modelPreference = this.models.capturePreference?.(target);
       const activity = this.core.trackThreadActivity?.(current.threadId);
       try {
@@ -569,7 +578,9 @@ export class ConversationService implements
             if (!isCurrent() || isLocallyBusy()) return false;
             const latest = await this.router.readThread(current.threadId, condition?.signal);
             return isCurrent() && !isLocallyBusy()
-              && (latest.status.type === "idle" || latest.status.type === "notLoaded");
+              && (latest.status.type === "idle" || latest.status.type === "notLoaded")
+              && !await this.router.hasActiveDescendants(current.threadId, condition?.signal)
+              && isCurrent() && !isLocallyBusy();
           },
           canRestore: () => !condition?.signal.aborted && (condition?.canRestore() ?? true),
           restored: (thread) => activity?.restore(target, thread.activeTurnId),
@@ -1082,7 +1093,7 @@ export class ConversationService implements
       }
       const selectedHasQueue = await this.probeNativeQueueItems(selected.id);
       const active = this.core.activeTurn(target);
-      const preserveCurrent = active !== undefined && leavesCurrent;
+      const preserveCurrent = leavesCurrent && current !== undefined && !await this.isThreadIdle(current.threadId);
       if (
         preserveCurrent
         && !this.router.isBackgroundThread?.(selected.id)
@@ -1094,6 +1105,7 @@ export class ConversationService implements
         );
       }
       const activity = this.core.trackThreadActivity(selected.id);
+      const previousActivity = leavesCurrent && current ? this.core.trackThreadActivity(current.threadId) : undefined;
       let binding;
       try {
         binding = await this.router.resume(target, selected.id, preserveCurrent, selected.cwd,
@@ -1101,16 +1113,27 @@ export class ConversationService implements
             assertCurrent: () => {
               if (this.router.workspace(target).cwd !== currentCwd
                 || this.router.current?.(target)?.threadId !== current?.threadId
-                || (leavesCurrent && this.core.activeTurn(target)?.turnId !== active?.turnId)) {
+                || (leavesCurrent && this.core.activeTurn(target)?.turnId !== active?.turnId)
+                || (leavesCurrent && current && !preserveCurrent && this.hasLocalThreadWork(current.threadId))) {
                 throw new UserFacingError("thread.takeover.changed", "当前会话或工作区已变化，请重新选择");
               }
             },
             restored: (restored, thread) => activity.restore(restored.target, thread.activeTurnId),
+            ...(leavesCurrent && current ? {
+              verifyPreviousIdle: () => this.isThreadIdle(current.threadId),
+              restoredPrevious: (thread: Awaited<ReturnType<SessionRouter["readThread"]>>) => previousActivity?.restore(target, thread.activeTurnId),
+              restorePreviousFailed: () => this.bindingLifecycle?.restoreRequired(current.threadId),
+            } : {}),
           });
       } finally {
         activity.stop();
+        previousActivity?.stop();
       }
       this.invalidateRevertSnapshot(target);
+      if (preserveCurrent && current) {
+        this.pendingBackgroundReleases.set(current.threadId, false);
+        this.bindingLifecycle?.backgrounded(current.threadId);
+      }
       if (selectedHasQueue) {
         this.clearPendingSelections(target);
       } else {
@@ -1137,9 +1160,9 @@ export class ConversationService implements
           "当前任务仍有下一 Turn 排队消息，暂不能转入后台",
         );
       }
-      const active = this.core.activeTurn(target);
+      const preserveCurrent = current !== undefined && !await this.isThreadIdle(current.threadId);
       if (
-        active
+        preserveCurrent
         && (this.router.backgroundBindings?.(target).length ?? 0) >= maximumBackgroundThreadsPerConversation
       ) {
         throw new UserFacingError(
@@ -1147,15 +1170,28 @@ export class ConversationService implements
           `后台任务已满，最多同时运行 ${maximumBackgroundThreadsPerConversation} 个`,
         );
       }
-      await this.router.newSession(target, active !== undefined, modelPreference);
+      const activity = current ? this.core.trackThreadActivity(current.threadId) : undefined;
+      try {
+        await this.router.newSession(target, preserveCurrent, modelPreference, current ? {
+          isCurrent: () => this.router.current(target)?.threadId === current.threadId && !this.hasLocalThreadWork(current.threadId),
+          verifyIdle: () => this.isThreadIdle(current.threadId),
+          canRestore: () => this.router.current(target)?.threadId === current.threadId,
+          restored: thread => activity?.restore(target, thread.activeTurnId),
+          restoreRequired: () => this.bindingLifecycle?.restoreRequired(current.threadId),
+        } : undefined);
+      } finally { activity?.stop(); }
+      if (preserveCurrent && current) {
+        this.pendingBackgroundReleases.set(current.threadId, false);
+        this.bindingLifecycle?.backgrounded(current.threadId);
+      }
       this.invalidateRevertSnapshot(target);
       this.restoreSelectionsAfterBindingChange(target, modelPreference);
       return {
         ...(current?.threadId
           ? { previousThreadId: current.threadId }
           : {}),
-        ...(active?.threadId
-          ? { backgroundedThreadId: active.threadId }
+        ...(preserveCurrent && current
+          ? { backgroundedThreadId: current.threadId }
           : {}),
       };
     });
@@ -1777,14 +1813,14 @@ export class ConversationService implements
 
   async releaseBackgroundIfComplete(
     threadId: string,
-    options: { dispatchQueued?: boolean } = {},
+    options: { dispatchQueued?: boolean; isCurrent?: () => boolean } = {},
   ): Promise<boolean> {
     // Retries must keep the latest completion's dispatch policy: interruption
     // preserves Queue entries even when subagent settlement delays release.
     this.pendingBackgroundReleases.set(threadId, options.dispatchQueued !== false);
     const current = this.backgroundReleaseAttempts.get(threadId);
     if (current) return current;
-    const attempt = this.performBackgroundRelease(threadId);
+    const attempt = this.performBackgroundRelease(threadId, options.isCurrent);
     this.backgroundReleaseAttempts.set(threadId, attempt);
     try {
       return await attempt;
@@ -1797,7 +1833,9 @@ export class ConversationService implements
 
   private async performBackgroundRelease(
     threadId: string,
+    canRelease: () => boolean = () => true,
   ): Promise<boolean> {
+    if (!canRelease()) return false;
     if (!this.router.isBackgroundThread(threadId)) {
       this.pendingBackgroundReleases.delete(threadId);
       return false;
@@ -1813,20 +1851,37 @@ export class ConversationService implements
     } else if (await this.probeNativeQueueItems(threadId)) {
       return false;
     }
-    const active = this.core.activeTurnForThread(threadId);
-    if (active) {
-      return false;
-    }
-    const readThread = this.router.readThread?.bind(this.router);
-    if (readThread) {
-      const snapshot = await readThread(threadId);
-      if (snapshot.status.type === "active") {
-        return false;
-      }
-    }
-    await this.router.releaseBackground(threadId);
+    const target = this.router.targetForThread(threadId);
+    if (!target || !canRelease() || this.hasLocalThreadWork(threadId)) return false;
+    const activity = this.core.trackThreadActivity(threadId);
+    let released;
+    try {
+      released = await this.router.releaseBackground(threadId, {
+        isCurrent: () => canRelease() && !this.hasLocalThreadWork(threadId),
+        verifyIdle: () => this.isThreadIdle(threadId),
+        canRestore: canRelease,
+        restored: thread => activity.restore(target, thread.activeTurnId),
+      });
+    } finally { activity.stop(); }
+    if (!released) return false;
     this.pendingBackgroundReleases.delete(threadId);
     return true;
+  }
+
+  private hasLocalThreadWork(threadId: string): boolean {
+    return this.core.activeTurnForThread(threadId) !== undefined
+      || this.hasPendingSubagentRuns?.(threadId) === true
+      || this.transfers?.hasPendingInteraction(threadId) === true;
+  }
+
+  private async isThreadIdle(threadId: string): Promise<boolean> {
+    if (this.hasLocalThreadWork(threadId)) return false;
+    const signal = AbortSignal.timeout(10_000);
+    const snapshot = await this.router.readThread(threadId, signal);
+    if (snapshot.status.type !== "idle" && snapshot.status.type !== "notLoaded") return false;
+    if (await this.router.hasActiveDescendants(threadId, signal)) return false;
+    if (await this.probeNativeQueueItems(threadId)) return false;
+    return !this.hasLocalThreadWork(threadId);
   }
 
   /**
@@ -1834,12 +1889,12 @@ export class ConversationService implements
    * must invoke this from a later lifecycle event; this method never waits in
    * the App Server notification reader itself.
    */
-  retryPendingBackgroundRelease(threadId: string): Promise<boolean> {
+  retryPendingBackgroundRelease(threadId: string, isCurrent?: () => boolean): Promise<boolean> {
     const dispatchQueued = this.pendingBackgroundReleases.get(threadId);
     if (dispatchQueued === undefined) {
       return Promise.resolve(false);
     }
-    return this.releaseBackgroundIfComplete(threadId, { dispatchQueued });
+    return this.releaseBackgroundIfComplete(threadId, { dispatchQueued, ...(isCurrent ? { isCurrent } : {}) });
   }
 
   private async dispatchNativeQueueBeforeRelease(

@@ -220,7 +220,7 @@ export abstract class GatewayComponentGraph {
   private resetCredits: OpenAiResetCreditService | undefined;
   private accountWarmupTask: Promise<void> | undefined;
   private reconnectCoordinator: GatewayReconnectCoordinator | undefined;
-  private readonly queueLifecycleTasks = new Set<Promise<void>>();
+  private readonly queueLifecycleTasks = new Set<Promise<unknown>>();
   private codexUpstreamUserAgent: string | undefined;
   private openAiConnectivity: OpenAiConnectivityStatus | "recovering" = "not-applicable";
   private startupNetworkRecovery: StartupNetworkRecovery | undefined;
@@ -758,6 +758,19 @@ export abstract class GatewayComponentGraph {
         if (surface === "feishu" || surface === "telegram") return canReviewConversationHook(hook, () => true);
         return false;
       },
+      {
+        backgrounded: (threadId) => {
+          void this.trackQueueLifecycleTask(() => service.retryPendingBackgroundRelease(threadId,
+            () => !this.stopping && !this.isBindingRestoring(threadId)))
+            .catch(async (error) => {
+              this.logger.warn({ err: error, threadId }, "会话转后台后的空闲清理失败，安排订阅恢复");
+              if (!this.stopping && !this.isBindingRestoring(threadId)) await this.restoreIdleBinding(threadId);
+            });
+        },
+        restoreRequired: (threadId) => {
+          if (!this.stopping && !this.isBindingRestoring(threadId)) void this.restoreIdleBinding(threadId);
+        },
+      },
     );
     this.conversations = service;
     service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);
@@ -812,8 +825,9 @@ export abstract class GatewayComponentGraph {
               // 0.148 deliberately keeps Queue entries after an interrupted turn;
               // only normal/failed completion participates in native idle dispatch.
               dispatchQueued: event.status !== "interrupted",
+              isCurrent: () => !this.stopping && !this.isBindingRestoring(threadId),
             })
-          : service.retryPendingBackgroundRelease(threadId));
+          : service.retryPendingBackgroundRelease(threadId, () => !this.stopping && !this.isBindingRestoring(threadId)));
         void this.providerIdleReleaser.closeIfIdle().catch((error) => {
           this.logger.warn(
             { err: error },
@@ -825,12 +839,15 @@ export abstract class GatewayComponentGraph {
           { err: error, threadId },
           "后台 Thread 终态后的订阅清理失败，已保留绑定供后续重试",
         );
+        if (!this.stopping && !this.isBindingRestoring(threadId)) {
+          await this.restoreIdleBinding(threadId);
+        }
         this.output.publish({
           type: "warning",
           target: event.target,
           threadId,
           background: true,
-          message: "后台任务已完成，但订阅清理暂时失败；Gateway 重启后会重试。",
+          message: "后台会话清理暂时失败，已安排订阅恢复；可通过 /resume 查看会话状态。",
         }, true);
       }
     });
@@ -1151,11 +1168,15 @@ export abstract class GatewayComponentGraph {
       reduce: (event) => this.core.handle(event),
       isBackgroundThread: (threadId) => this.router.isBackgroundThread(threadId),
       retryBackgroundRelease: (threadId, trigger) => {
-        void this.trackQueueLifecycleTask(() => service.retryPendingBackgroundRelease(threadId))
-          .catch((error) => {
+        void this.trackQueueLifecycleTask(() => service.retryPendingBackgroundRelease(threadId,
+          () => !this.stopping && !this.isBindingRestoring(threadId)))
+          .catch(async (error) => {
             this.logger.warn({ err: error, threadId }, trigger === "thread-idle"
               ? "后台 Thread 空闲状态后的订阅清理失败，已保留绑定供后续重试"
               : "子代理终态后的后台 Thread 订阅清理失败，已保留绑定供后续重试");
+            if (!this.stopping && !this.isBindingRestoring(threadId)) {
+              await this.restoreIdleBinding(threadId);
+            }
           });
       },
     });
@@ -1271,6 +1292,12 @@ export abstract class GatewayComponentGraph {
       output: this.output,
       enabledSurfaces: () => this.surfaces,
       scheduledRecovery: () => this.scheduledTasks?.coordinator,
+      releaseBackground: async (threadId, isCurrent) =>
+        await this.trackQueueLifecycleTask(() =>
+          this.conversations.releaseBackgroundIfComplete(threadId, {
+            dispatchQueued: false,
+            isCurrent,
+          })) === true,
       markTurnStarted: (target, threadId, turnId) => {
         this.core.markTurnStarted(target, threadId, turnId);
       },
@@ -1797,11 +1824,11 @@ export abstract class GatewayComponentGraph {
     }
   }
 
-  private trackQueueLifecycleTask(operation: () => Promise<unknown>): Promise<void> {
+  private trackQueueLifecycleTask<T>(operation: () => Promise<T>): Promise<T | undefined> {
     if (this.stopping) {
-      return Promise.resolve();
+      return Promise.resolve(undefined);
     }
-    const task = operation().then(() => undefined);
+    const task = operation();
     const tracked = task.finally(() => {
       this.queueLifecycleTasks.delete(tracked);
     });
