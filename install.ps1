@@ -129,7 +129,12 @@ try {
   Write-Output "[提示] Codex CLI 检测通过：$($codexCommand.Source) · $codexVersion · $loginState"
 
   Write-Output '[提示] 正在安装依赖并构建 Gateway'
-  Invoke-Checked $npm @('ci', '--no-audit', '--no-fund') $repositoryRoot
+  $ignoreScripts = Invoke-Captured $npm @('config', 'get', 'ignore-scripts') $repositoryRoot
+  if ($ignoreScripts -cnotin @('true', 'false')) { throw '无法确认 npm ignore-scripts 设置，拒绝构建源码' }
+  Invoke-Checked $npm @('ci', '--ignore-scripts', '--no-audit', '--no-fund') $repositoryRoot
+  if ($ignoreScripts -ceq 'false') {
+    Invoke-Checked $npm @('run', 'hooks:install') $repositoryRoot
+  }
   Invoke-Checked $npm @('run', 'build') $repositoryRoot
   Invoke-Checked $npm @('run', 'check') $repositoryRoot
   Write-Output '[提示] 正在安装依赖并构建 WebUI'

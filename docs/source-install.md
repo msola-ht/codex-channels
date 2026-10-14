@@ -51,6 +51,9 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 `codex-channels`。已有同名目录时不会覆盖。安装前会显示 npm 版本和全局目录，并检测已有的 npm
 全局版 `@hegenai/codexc` 及当前 `codexc` 命令来源；源码构建完成后会用当前 `main` 构建结果替换
 当前 Node.js 环境中的同名全局包。
+两个安装器均禁用依赖安装时的隐式生命周期，再显式构建一次 Gateway；仅在有效 npm
+`ignore-scripts` 设置为 `false` 时安装 Git hooks。设置为 `true` 时仍执行显式构建，
+但不会运行隐式的 `prebuild` / `postbuild`，Windows 原生产物限制见下文。
 Codex CLI 是 Gateway 的必需运行时。安装器找不到 `codex` 时，会通过 npm 安装与 `main` 项目版本
 一致的 `@openai/codex`；已有版本不匹配时也同步到锁定版本，可能升级或降级。同步失败或 PATH 仍指向其他版本时停止安装。安装器使用固定版本官方
 `codex login status` 检查登录状态；未登录或状态检查错误不阻止源码安装，用户需先运行该命令诊断，

@@ -448,9 +448,11 @@
 - `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 的 `generate-ts --experimental`，
   成功后替换协议类型、记录版本与实验状态并同步 npm/Gateway 版本；实验生成只服务于 `docs/index.md` 明确列出的受控协议边界。
 - `check-protocol.mjs`：校验本机 Codex CLI 版本，并按记录的实验状态重新生成到临时目录确认类型逐文件一致。
-- `weixin-qr-contract-probe.mjs`：隔离二维码合同探针；默认离线显示帮助，只有显式
+- `weixin-qr-contract-probe.mjs`：直接执行时提供隔离二维码合同探针；默认离线显示帮助，只有显式
   `qr --live` 并再次确认连接替换风险后才访问固定微信端点，严格裁剪状态、限制官方重定向域名
   并有限取消；不注册 Surface、不写配置或凭据，也不属于公开 `codexc` 命令。
+  该文件同时导出正式 `weixin-setup.mjs` 与 `weixin-setup-session.mjs` 使用的二维码客户端和
+  登录流程，随 npm 包分发；导入不会执行独立探针入口，不能按无调用的历史脚本删除。
 - `weixin-updates-contract-probe.mjs`：从已验证的微信安全凭据执行一次显式 `once --live`
   `getupdates` 长轮询，只报告消息数量、字段形状、项目类型、上下文令牌存在性和
   `message_id` 精度；`sequence --live` 只在内存把首轮游标传给第二轮并比较重放数量和游标推进；
