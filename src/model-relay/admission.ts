@@ -11,6 +11,7 @@ export interface RelayCaller {
   enabled: boolean;
   models: readonly string[];
   reasoning?: "passthrough" | "off";
+  modelReasoning?: Readonly<Record<string, import("../model-api/index.js").RelayModelReasoning>>;
 }
 type RetiredIdentity = Pick<RelayCaller, "callerId" | "keyId" | "credentialGeneration">;
 export interface RelayPolicy extends RelayLimit {
@@ -296,14 +297,19 @@ function refill(bucket: Bucket, now: number): void {
   bucket.updated = Math.max(bucket.updated, now);
 }
 function privilege(caller: RelayCaller): string {
+  // Compare effective policy, so expanding a Key default into identical model entries
+  // (for example, when only renaming it in WebUI) does not revoke active requests.
   return JSON.stringify([caller.callerId, caller.keyId, caller.credentialGeneration, caller.secretSha256,
-    [...caller.models].sort(), caller.enabled, caller.reasoning ?? "passthrough"]);
+    caller.enabled, [...caller.models].sort().map(model => [model,
+      caller.modelReasoning && Object.hasOwn(caller.modelReasoning, model)
+        ? caller.modelReasoning[model] : caller.reasoning ?? "passthrough"])]);
 }
 function freezePolicy(policy: RelayPolicy): RelayPolicy {
   return Object.freeze({ ...policy,
     retiredCallers: Object.freeze((policy.retiredCallers ?? []).map(caller => Object.freeze({ ...caller }))),
     accounts: Object.freeze(policy.accounts.map(account => Object.freeze({ ...account }))),
-    callers: Object.freeze(policy.callers.map(caller => Object.freeze({ ...caller, models: Object.freeze([...caller.models]) }))),
+    callers: Object.freeze(policy.callers.map(caller => Object.freeze({ ...caller, models: Object.freeze([...caller.models]),
+      ...(caller.modelReasoning === undefined ? {} : { modelReasoning: Object.freeze({ ...caller.modelReasoning }) }) }))),
   });
 }
 

@@ -12,6 +12,8 @@ import type { GenerationTiming } from "../../runtime/request-timing.mjs";
 export type DirectChatTarget = DirectModelTarget;
 export interface DirectChatCall {
   request: DirectChatRequest;
+  /** Optional tighter success-body budget; error bodies remain capped at 64 KiB. */
+  maximumResponseBytes?: number;
   capture?: DirectChatCapture;
   diagnostics?(summary: ModelRequestDiagnostics): void;
   timing?(value: { responseTimeMs?: number; generationTiming?: GenerationTiming }): void;
@@ -65,7 +67,9 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
       if (call.request.stream) errorStage = "stream";
       if (call.request.stream) {
         for await (const { data, receivedAt: at } of readModelFrames(incoming, call.signal, {
-          frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024,
+          frameBytes: Math.min(call.maximumResponseBytes ?? Infinity, 1024 * 1024),
+          bufferBytes: Math.min(call.maximumResponseBytes ?? Infinity, 2 * 1024 * 1024),
+          totalBytes: Math.min(call.maximumResponseBytes ?? Infinity, 32 * 1024 * 1024),
         })) {
           if (data === "[DONE]") { call.observer.finish();
             if (call.observer.status === "completed") generationTiming = generation.finish(call.observer.usage.outputTokens, call.observer.usage.reasoningOutputTokens);
@@ -83,7 +87,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
         }
         throw new ModelConversionError("Chat stream disconnected before DONE");
       }
-      const body = await readDirectModelBody(incoming, call.signal);
+      const body = await readDirectModelBody(incoming, call.signal, call.maximumResponseBytes);
       const parsed: unknown = parseDirectModelJson(body, call.capture);
       const receivedAt = performance.now();
       call.capture?.value(parsed, false);

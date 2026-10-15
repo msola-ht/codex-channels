@@ -1,8 +1,8 @@
-import type { RelayModelCapability, RelayReasoningEffort } from "../../runtime/chat-reasoning.mjs";
-export type { RelayModelCapability, RelayReasoningEffort } from "../../runtime/chat-reasoning.mjs";
+import type { RelayModelCapability, RelayReasoningEffort, RelayModelReasoning } from "../../runtime/chat-reasoning.mjs";
+export type { RelayModelCapability, RelayReasoningEffort, RelayModelReasoning } from "../../runtime/chat-reasoning.mjs";
 import { supportsChatReasoningOff } from "../../runtime/chat-reasoning.mjs";
 import { ModelConversionError } from "./validation.js";
-import { assertNoNestedReasoningControls, isRequestObject, reasoningControlFields, validateDirectModel, validateDirectStream } from "./direct-request.js";
+import { applyExplicitReasoningPolicy, assertNoNestedReasoningControls, isRequestObject, reasoningControlFields, validateDirectModel, validateDirectStream } from "./direct-request.js";
 
 /** Model parameters stay opaque to the relay; only local routing/delivery fields are typed. */
 export interface DirectChatRequest extends Record<string, unknown> {
@@ -39,11 +39,13 @@ export function validateDirectChatRequest(value: unknown): DirectChatRequest {
 }
 
 /** Explicit per-key policy, after authentication; passthrough keeps all client parameters. */
-export function applyChatReasoningPolicy(request: DirectChatRequest, provider: string, mode: "passthrough" | "off", extraModel?: RelayModelCapability): DirectChatRequest {
+export function applyChatReasoningPolicy(request: DirectChatRequest, provider: string, mode: RelayModelReasoning, extraModel?: RelayModelCapability): DirectChatRequest {
   if (extraModel !== undefined && (!provider.startsWith("clp-") || extraModel.id !== request.model)) {
     throw new DirectChatRequestError("model", "Invalid model capability");
   }
   if (mode === "passthrough") return request;
+  if (mode !== "off") return applyExplicitReasoningPolicy(request, mode,
+    effort => provider.startsWith("clp-") ? clinePassChatReasoningControl(request.model, effort) : { reasoning_effort: effort }, DirectChatRequestError);
   const knownOff = supportsChatReasoningOff(provider, request.model);
   if (!knownOff && !extraModel?.reasoning_efforts.includes("none")) return request;
   assertNoNestedReasoningControls(request, DirectChatRequestError);
@@ -54,12 +56,12 @@ export function applyChatReasoningPolicy(request: DirectChatRequest, provider: s
   return result;
 }
 
-/** Shared CLP wire mapping; disabling uses the gateway toggle for every model. */
+/** Shared CLP wire mapping; preserve the established per-model defaults. */
 export type ChatReasoningEffort = RelayReasoningEffort | "enabled";
 export function clinePassChatReasoningControl(model: string, effort: ChatReasoningEffort):
   { reasoning: { effort: RelayReasoningEffort } | { enabled: boolean } } | { reasoning_effort: RelayReasoningEffort } {
   if (effort === "enabled") return { reasoning: { enabled: true } };
-  if (effort === "none") return { reasoning: { enabled: false } };
   if (model === "cline-pass/deepseek-v4.1-flash") return { reasoning: { effort } };
+  if (effort === "none") return { reasoning: { enabled: false } };
   return { reasoning_effort: effort };
 }

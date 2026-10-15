@@ -4,6 +4,7 @@ import { useTranslation } from "@/hooks/use-translation"
 import type { RelayManagedCaller, RelayManagementInput, RelayManagementSnapshot } from "@/lib/types"
 import { formatTime } from "@/lib/format"
 import { RelayModelCopy } from "@/components/settings/relay-model-copy"
+import { RelayModelReasoningLabel } from "@/components/settings/relay-key-models"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
@@ -31,7 +32,7 @@ export function RelayKeyTable({ snapshot: data, blocked, onEdit, onAction }: {
         <TableCell><div className="flex flex-wrap gap-1">{protocols?.length
           ? protocols.map(protocol => <Badge key={protocol} variant="outline">{protocol === "chat" ? "Chat" : "Responses"}</Badge>)
           : <Badge variant="outline">{t("relay.capabilityUnknown")}</Badge>}</div></TableCell>
-        <TableCell>{t(entry.reasoning === "off" ? "relay.keyOff" : "relay.passthrough")}</TableCell><TableCell className="tabular-nums">{entry.credential_generation}</TableCell><TableCell><Badge variant={entry.enabled ? "secondary" : "outline"}>{t(entry.enabled ? "relay.enabled" : "relay.disabled")}</Badge></TableCell>
+        <TableCell className="min-w-48 max-w-72 whitespace-normal"><dl className="flex flex-col gap-2">{entry.models.map(id => <div key={id}><dt className="break-all">{id}</dt><dd className="text-muted-foreground"><RelayModelReasoningLabel value={entry.model_reasoning?.[id] ?? entry.reasoning} /></dd></div>)}</dl></TableCell><TableCell className="tabular-nums">{entry.credential_generation}</TableCell><TableCell><Badge variant={entry.enabled ? "secondary" : "outline"}>{t(entry.enabled ? "relay.enabled" : "relay.disabled")}</Badge></TableCell>
         <TableCell className="whitespace-nowrap tabular-nums">{!usage ? t("relay.usageUnknown") : usage.lastRequestAtMs === null ? t("relay.noRecordedRequests") : formatTime(usage.lastRequestAtMs)}</TableCell>
         <TableCell className="whitespace-nowrap tabular-nums">{!usage ? t("relay.usageUnknown") : <div className="flex flex-col gap-1"><span>{t("relay.requestCount", { count: usage.requestCount })}</span><span className={usage.unsuccessfulRequestCount > 0 ? "text-destructive" : "text-muted-foreground"}>{t("relay.unsuccessfulCount", { count: usage.unsuccessfulRequestCount })}</span></div>}</TableCell>
         <TableCell className="w-px whitespace-nowrap"><div className="flex items-center gap-1">

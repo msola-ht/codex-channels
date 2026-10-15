@@ -4,9 +4,9 @@
 支持多个 CLP 账户，各账户使用独立 API Key，支持固定与切换模式。首次配置从 Cline 官方目录生成 Codex 多模型目录；勾选 Flash 时优先作为默认，否则以所选模型在官方目录中的第一项作为默认，CLI 保存前明确显示。
 Setup 和 WebUI 设置页均可添加、重新配置、设置默认及移除账户。账户 ID 为 1–32 位小写字母、数字、`-` 或 `_`；映射后凭据变量名相同的 ID 不可同时使用，例如 `a-b` 与 `a_b`。
 Flash 的上下文、图片、思考等级与提示词复用 DS 的 `deepseek-flash`：优先读取本地 DS 目录，缺失时读取官方安装脚本中的目录并与 Cline 配置一并保存为本地共享 DS 模板，不执行脚本，无需手填上下文；目录自带的提示词（`model_messages.instructions_template`）随模板带入 Flash。其他模型使用 Cline 声明的各自上下文、图片能力、思考控制和通用编程提示词，不复制 DS 能力。
-保留 Cline 已验证的 `none` 思考等级和 Chat 转换边界，不复制原生搜索等服务端能力。
+保留 Cline 目录声明的 `none` 思考选项和 Chat 转换边界；请求关闭不保证上游停止内部推理，不复制原生搜索等服务端能力。
 通过“模型上下文窗口”统一修改 `deepseek-flash`，同步 DS、同名受管模型、CLP 和已启用 DS 跟随的第三方自定义模型；不同模型不联动思考等级。
-所有 Cline 账户共享同一份 Codex 模型目录。独立 Relay 可下载／更新 Cline 模型文件，并按账户设置[独立模型目录和思考策略](provider-api-relay-development.md#clp-转发模型目录与设置)，不写入 Codex 目录。添加账户或更新密钥保留已有上下文及思考等级；调整上下文仍使用统一的模型窗口设置。
+所有 Cline 账户共享同一份 Codex 模型目录。独立 Relay 可下载／更新 Cline 模型文件，并在每把 Key 下逐模型设置[思考策略](provider-api-relay-development.md#clp-转发模型目录与设置)，不写入 Codex 目录。添加账户或更新密钥保留已有上下文及思考等级；调整上下文仍使用统一的模型窗口设置。
 
 已有账户通过 `codexc setup → 模型与提供商 → 第三方 Provider → Cline Pass 官方 → 选择启用模型／更新共享目录` 扩展或更新模型，无需删除账户、重新输入 Key。空格勾选、回车确认，再预览最终名单并保存；默认勾选当前启用项，新增模型不自动勾选。首次在 CLI 配置时也提供多选，Flash 可用时默认勾选它，但允许只选择其他模型；已有账户新增或更换 Key 沿用共享名单。所有 CLP 账户与聚合共用选择，未勾选项不进入运行时目录。账户当前默认模型必须保留；要停用它，先在模型设置中更换默认模型。取消多选或放弃保存不会写入配置。WebUI 首次配置仍生成完整的受支持目录，启用名单在 CLI 调整。
 
@@ -68,7 +68,9 @@ Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘�
 工具结果中的内联图片不能放进 Chat 的 `tool` 消息，转换时按原顺序收集，在该组工具结果之后作为紧随的一条 `user` 消息图片段写出，并用相同的调用 ID 与图片序号标记关联原 `tool` 文本位置和图片；并行结果只写出一条，结果文本仍留在对应 `tool` 消息里，因此上下文中的截图不会再让整次请求失败。
 不支持图片文件引用、远程图片 URL 或 `detail: original`；`auto`、`low`、`high` 原样传递。
 新账户复用共享目录中的图片能力和思考等级。
-Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；非关闭等级通过 Chat `reasoning.effort` 原样传递，`none` 与其他 CLP 模型统一映射为 `reasoning.enabled=false`。2026-10-15 的既有转发记录中，旧 `reasoning.effort=none` 仍返回非零推理 Token 和思考正文，不能再用早期观察保证当前关闭有效。其他模型按官方目录声明生成选项：普通等级使用 `reasoning_effort`，开关选项 `enabled` 使用 `reasoning.enabled=true`，不发送 `reasoning_effort=enabled`。桥在出站前按当前启用目录复核选项，未声明的选项明确拒绝。优先默认 `high`，没有时使用目录投影的第一个合法等级；仅有开关时默认 `none`。只有精确 Flash 模型限定 DeepSeek 上游路由，其他模型由 Cline 按模型 ID 路由。
+Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；等级通过 Chat `reasoning.effort` 原样传递，包括 `none`；不因一次观察自动改成其他关闭格式。其他模型按官方目录声明生成选项：普通等级使用 `reasoning_effort`，`none` 使用 `reasoning.enabled=false`，开关选项 `enabled` 使用 `reasoning.enabled=true`，不发送 `reasoning_effort=enabled`。桥在出站前按当前启用目录复核选项，未声明的选项明确拒绝。优先默认 `high`，没有时使用目录投影的第一个合法等级；仅有开关时默认 `none`。只有精确 Flash 模型请求限定 DeepSeek 上游路由，其他模型由 Cline 按模型 ID 路由。
+
+当前关闭限制：历史记录中，相同的 `reasoning.effort=none` 和 `gateway.only=["deepseek"]` 在 2026-10-14 04:56 UTC 返回 `deepseek` 路由、0 推理 Token；12:22 UTC 返回的路由已变为 `openai-compatible-private`、模型为 `private/deepseek-v4p1-flash-contributor`，报告 145 推理 Token。这是路由变化与失效同时出现的证据，不能据此确定服务端变更机制或某次本地提交为根因。2026-10-15 12:27 UTC 经授权直接请求同一 Cline 上游，固定文本、模型、路由限定及 `max_tokens=64`，各执行一次：旧 `none` 返回思考正文和 15 推理 Token；`enabled=false` 不返回思考正文但报告 27 推理 Token；不设控制返回思考正文和 16 推理 Token。三次均为上述私有路由、HTTP 200、`finish_reason=stop`，收到流终帧。该对比支持新参数影响正文返回，但不证明内部推理已关闭，也不替代部署后完整客户端链路验证。
 
 已有目录需通过“选择启用模型／更新共享目录”显式刷新才会增加开关选项；安装代码不自动改写目录，已有默认选择保留。聚合继承同一目录，仍按已有活动和租约条件刷新。回退到不支持 `enabled` 的旧版本前，先把相关默认值和会话选择改为 `none`，再按上述成对目录备份流程回退。此开关适配仅用于受管 CLP 的 Responses→Chat 桥；不自动改写其他提供商的原生 Responses 参数或独立 Relay 的客户端参数。
 未传入思考选项时沿用上游默认值；需要开启思考时，选择目录提供的 `enabled` 或非 `none` 等级。

@@ -20,6 +20,7 @@ const allowedDistEntries = new Map([
     "dist/config/index.js",
     "dist/delivery/index.js",
     "dist/model-api/index.js", // Capability detection uses the same pure Chat conversion as runtime.
+    "dist/provider-proxy/index.js", // Explicit Relay reasoning probes reuse bounded direct transports and response observers.
     "dist/observability/index.js",
     "dist/observability/query/index.js",
     "dist/scheduled-tasks/index.js",

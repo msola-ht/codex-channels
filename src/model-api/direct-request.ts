@@ -1,4 +1,5 @@
 import type { ModelConversionError } from "./validation.js";
+import type { RelayModelReasoning, RelayReasoningEffort } from "./chat-request.js";
 
 type RequestError = new (param: string, reason: string) => ModelConversionError;
 
@@ -20,6 +21,30 @@ export function validateDirectStream(value: unknown, ErrorType: RequestError): b
 }
 
 export const reasoningControlFields = ["reasoning", "thinking", "reasoning_effort", "enable_thinking"] as const;
+
+/** Explicit field selection is portable; the upstream decides whether it is supported. */
+export function applyExplicitReasoningPolicy<T extends Record<string, unknown>>(
+  request: T,
+  mode: Exclude<RelayModelReasoning, "passthrough" | "off">,
+  effortControl: (effort: RelayReasoningEffort) => Record<string, unknown>,
+  ErrorType: RequestError,
+): T {
+  assertNoNestedReasoningControls(request, ErrorType);
+  let control: Record<string, unknown>;
+  switch (mode) {
+    case "off-reasoning-effort": control = { reasoning: { effort: "none" } }; break;
+    case "off-reasoning-enabled": control = { reasoning: { enabled: false } }; break;
+    case "off-reasoning-effort-field": control = { reasoning_effort: "none" }; break;
+    case "off-thinking": control = { thinking: { type: "disabled" } }; break;
+    case "off-enable-thinking": control = { enable_thinking: false }; break;
+    case "minimal": case "low": case "medium": case "high": case "xhigh": case "max":
+      control = effortControl(mode); break;
+    default: throw new ErrorType("reasoning", "Unsupported reasoning policy");
+  }
+  const result = { ...request };
+  for (const field of reasoningControlFields) delete result[field];
+  return Object.assign(result, control);
+}
 
 export function assertNoNestedReasoningControls(request: Record<string, unknown>, ErrorType: RequestError): void {
   for (const container of ["extra_body", "extraBody"]) {

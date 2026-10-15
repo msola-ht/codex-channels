@@ -54,6 +54,8 @@ export class DirectResponsesObserver {
 
 interface DirectResponsesCall {
   request: DirectResponsesRequest;
+  /** Optional tighter success-body budget; error bodies remain capped at 64 KiB. */
+  maximumResponseBytes?: number;
   target: DirectModelTarget;
   signal: AbortSignal;
   clientHeaders?: IncomingHttpHeaders;
@@ -92,7 +94,7 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
       }, call.signal);
       if (call.request.stream) errorStage = "stream";
       if (!call.request.stream) {
-        const value = parse(await readDirectModelBody(incoming, call.signal), call.capture);
+        const value = parse(await readDirectModelBody(incoming, call.signal, call.maximumResponseBytes), call.capture);
         if (chatStreamError(value)) call.observer.receivedError(performance.now());
         diagnostics.push(value);
         call.capture?.value(value, false);
@@ -101,7 +103,11 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
         if (call.observer.hasContent) call.content();
         call.capture?.done(); await emit(deliverable(value, false), true); return;
       }
-      for await (const frame of readModelFrames(incoming, call.signal, { frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024 })) {
+      for await (const frame of readModelFrames(incoming, call.signal, {
+        frameBytes: Math.min(call.maximumResponseBytes ?? Infinity, 1024 * 1024),
+        bufferBytes: Math.min(call.maximumResponseBytes ?? Infinity, 2 * 1024 * 1024),
+        totalBytes: Math.min(call.maximumResponseBytes ?? Infinity, 32 * 1024 * 1024),
+      })) {
         const value = parse(frame.data, call.capture);
         const event = frame.raw.split(/\r?\n/u).filter(line => line.startsWith("event:")).at(-1)?.slice(6).trim();
         if (event && event !== value.type) throw new ModelConversionError("Responses SSE event does not match its payload");

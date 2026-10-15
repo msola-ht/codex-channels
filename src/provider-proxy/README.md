@@ -186,7 +186,7 @@ HTTP 错误保存实际 `upstreamStatus`，状态优先确定错误类别及重�
 Relay 转储的最终模型结果由请求宿主传入，与同一请求的指标共用一次投影；采集器只保存报文、诊断与终态时间，不维护另一套结果推断。`completed` 与交付 `failed/disconnected` 可以同时成立，详情分别解释生成结果和交付状态。
 `chat-io.ts` 的 JSON 正文及 SSE 增量读取使用严格 UTF-8 解码，跨分片字符保留解码状态；入站编码错误为受控请求失败，直接上游编码错误为 `invalid_upstream_encoding`。错误诊断正文解码失败仍保留 HTTP 分类与安全退避头。消费者在协议终态停止读取，不继续等待终态后的尾流。
 
-Chat 桥与直接模型适配器共用 `direct-model-http.ts` 的成功响应校验：媒体类型忽略大小写、去除参数后精确匹配 JSON/SSE；请求明确发送 `Accept-Encoding: identity`，成功响应仅接受缺省或 `identity` 编码。其他编码返回 `invalid_upstream_encoding`，不把压缩字节当作 UTF-8。原生 Responses 透明代理保持上游传输合同。
+Chat 桥与直接模型适配器共用 `direct-model-http.ts` 的成功响应校验：媒体类型忽略大小写、去除参数后精确匹配 JSON/SSE；请求明确发送 `Accept-Encoding: identity`，成功响应仅接受缺省或 `identity` 编码。其他编码返回 `invalid_upstream_encoding`，不把压缩字节当作 UTF-8。直接 Chat/Responses 调用可通过 `maximumResponseBytes` 收紧成功响应的完整正文、SSE 帧及累计字节预算，供短请求探测使用；错误正文仍使用既有 64 KiB 上限。原生 Responses 透明代理保持上游传输合同。
 
 受管 CLP 桥在真正发起 HTTP 请求前调用 Runtime 注入的当前模型目录复核；停用或未知模型返回 `409 clp_model_disabled`，缺少复核器或无法安全读取目录返回 `503 clp_catalog_unavailable`，使用固定中文提示并阻止上游请求。共享账户与聚合经过同一检查，已提交请求不强行中断；非 CLP 桥和 Relay 独立目录不受影响。
 

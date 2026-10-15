@@ -2,6 +2,7 @@ import { parseRelayModelId } from "./model-relay-model-id.mjs";
 import { isRelayListenHost } from "./model-relay-listen-host.mjs";
 import { z } from "zod";
 import { createHash } from "node:crypto";
+import { relayModelReasoningModes } from "./chat-reasoning.mjs";
 
 const identity = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
 export const relayDisplayNameSchema = z.string().refine(value => value.trim() === value && [...value].length >= 1 && [...value].length <= 64 && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value), "用途名称须为 1–64 个字符，不含控制字符或首尾空白");
@@ -13,6 +14,13 @@ const limits = (concurrency, burst) => ({
 });
 export const relayKeyModelsSchema = z.array(z.string().refine(value => parseRelayModelId(value) !== null)).min(1).max(256)
   .refine(values => new Set(values).size === values.length);
+export const relayModelReasoningMapSchema = z.unknown().superRefine((value, context) => {
+  if (value === null || typeof value !== "object") return;
+  if (["__proto__", "prototype", "constructor"].some(key => Object.hasOwn(value, key))) {
+    context.addIssue({ code: "custom", message: "模型思考策略不接受原型字段" });
+  }
+  if (Object.keys(value).length > 256) context.addIssue({ code: "custom", message: "模型思考策略最多 256 项" });
+}).pipe(z.record(z.string().refine(value => parseRelayModelId(value) !== null), z.enum(relayModelReasoningModes)));
 export const modelRelayConfigSchema = z.strictObject({
     enabled: z.boolean().default(false),
     host: z.string().refine(isRelayListenHost, "Relay 监听地址须为回环、IPv4 内网地址或 0.0.0.0").default("127.0.0.1"),
@@ -28,7 +36,12 @@ export const modelRelayConfigSchema = z.strictObject({
       secret_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
       enabled: z.boolean(),
       reasoning: z.enum(["passthrough", "off"]).optional(),
+      model_reasoning: relayModelReasoningMapSchema.optional(),
       models: relayKeyModelsSchema,
+    }).superRefine((caller, context) => {
+      for (const id of Object.keys(caller.model_reasoning ?? {})) {
+        if (!caller.models.includes(id)) context.addIssue({ code: "custom", path: ["model_reasoning", id], message: "思考策略模型必须属于当前 Key 授权范围" });
+      }
     })).max(128).default([]),
   }).superRefine((value, context) => {
     for (const [values, key, path] of [[value.callers, "caller_id", "callers"], [value.callers, "key_id", "callers"]]) {
@@ -59,7 +72,8 @@ export function relayPolicyFromConfig(config) {
     accounts: [...new Set(config.callers.flatMap(caller => caller.models.map(id => parseRelayModelId(id).provider)))].map(provider => ({ provider })),
     callers: config.callers.map(caller => ({ callerId: caller.caller_id, keyId: caller.key_id,
       credentialGeneration: caller.credential_generation, secretSha256: caller.secret_sha256,
-      enabled: caller.enabled, models: [...caller.models], reasoning: caller.reasoning ?? "passthrough" })) };
+      enabled: caller.enabled, models: [...caller.models], reasoning: caller.reasoning ?? "passthrough",
+      ...(caller.model_reasoning === undefined ? {} : { modelReasoning: { ...caller.model_reasoning } }) })) };
 }
 
 export function modelRelayConfigDigest(config) {

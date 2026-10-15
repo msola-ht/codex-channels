@@ -5,6 +5,7 @@ import type {
   QueueChangeEvent,
   DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
   RelayQueueSnapshot, RelayManagementSnapshot, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
+  RelayReasoningProbeInput, RelayReasoningProbeResult, RelayReasoningProbeEvent,
   ServerTimeResponse,
   ModelDisplaySettingsResponse,
   ErrorsResponse,
@@ -546,6 +547,89 @@ export function refreshOfficialAccountSnapshot(
 
 export function fetchRelayManagement(signal?: AbortSignal): Promise<RelayManagementSnapshot> {
   return getJson(`${API_PREFIX}/management/relay`, signal)
+}
+export async function probeRelayReasoning(
+  input: RelayReasoningProbeInput,
+  signal?: AbortSignal,
+  onProgress?: (event: Extract<RelayReasoningProbeEvent, { type: "progress" }>) => void,
+): Promise<RelayReasoningProbeResult> {
+  const controller = new AbortController()
+  const effectiveSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(95_000), ...(signal ? [signal] : [])])
+  const invalid = () => new ApiClientError("Relay 思考探测响应无效或已中断", 502, "relay_probe_failed")
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+  const cancel = () => { void reader?.cancel().catch(() => {}) }
+  try {
+    const response = await requestResponse(`${API_PREFIX}/management/relay/reasoning-probe`, {
+      method: "POST", body: JSON.stringify(input), headers: { accept: "application/x-ndjson" },
+    }, effectiveSignal, 95_000)
+    if (response.headers.get("content-type")?.split(";", 1)[0].trim() !== "application/x-ndjson" || !response.body) throw invalid()
+    reader = response.body.getReader()
+    effectiveSignal.addEventListener("abort", cancel, { once: true })
+    effectiveSignal.throwIfAborted()
+    const line = new Uint8Array(64 * 1024)
+    const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+    let lineBytes = 0
+    let totalBytes = 0
+    let result: RelayReasoningProbeResult | undefined
+    while (true) {
+      const next = await reader.read()
+      effectiveSignal.throwIfAborted()
+      if (next.done) break
+      totalBytes += next.value.byteLength
+      if (totalBytes > 256 * 1024) throw invalid()
+      let offset = 0
+      while (offset < next.value.byteLength) {
+        const newline = next.value.indexOf(10, offset)
+        const end = newline < 0 ? next.value.byteLength : newline
+        const count = end - offset
+        if (lineBytes + count + (newline < 0 ? 0 : 1) > line.byteLength) throw invalid()
+        line.set(next.value.subarray(offset, end), lineBytes)
+        lineBytes += count
+        offset = end + (newline < 0 ? 0 : 1)
+        if (newline < 0) break
+        if (result !== undefined || lineBytes === 0) throw invalid()
+        let event: RelayReasoningProbeEvent
+        try { event = readRelayReasoningProbeEvent(JSON.parse(decoder.decode(line.subarray(0, lineBytes))), input) }
+        catch { throw invalid() }
+        lineBytes = 0
+        if (event.type === "error") throw new ApiClientError("Relay 思考探测暂不可用", 502, event.code)
+        if (event.type === "result") result = event.result
+        else onProgress?.(event)
+      }
+    }
+    if (lineBytes !== 0 || result === undefined) throw invalid()
+    return result
+  } finally {
+    effectiveSignal.removeEventListener("abort", cancel)
+    controller.abort()
+    await reader?.cancel().catch(() => {})
+    reader?.releaseLock()
+  }
+}
+
+function readRelayReasoningProbeEvent(value: unknown, input: RelayReasoningProbeInput): RelayReasoningProbeEvent {
+  const object = (candidate: unknown): candidate is Record<string, unknown> => candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
+  const keys = (candidate: Record<string, unknown>, names: string[]) => Object.keys(candidate).length === names.length && names.every(name => Object.hasOwn(candidate, name))
+  const count = (candidate: unknown) => candidate === null || typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate >= 0
+  const modes = ["passthrough", "off-reasoning-effort", "off-reasoning-enabled", "off-reasoning-effort-field", "off-thinking", "off-enable-thinking"]
+  if (!object(value)) throw new Error("Invalid probe event")
+  if (value.type === "error" && keys(value, ["type", "code"]) && value.code === "relay_probe_failed") return { type: "error", code: value.code }
+  if (value.type !== "progress" && value.type !== "result"
+    || !keys(value, value.type === "progress" ? ["type", "result", "currentMode"] : ["type", "result"])) throw new Error("Invalid probe event")
+  const result = value.result
+  if (!object(result) || !keys(result, ["model", "protocol", "revision", "observedAtMs", "rows", "stoppedReason"])
+    || result.model !== input.model || result.protocol !== input.protocol || result.revision !== input.revision
+    || typeof result.observedAtMs !== "number" || !Number.isSafeInteger(result.observedAtMs) || result.observedAtMs <= 0
+    || ![null, "timeout", "material_changed"].includes(result.stoppedReason as string | null)
+    || !Array.isArray(result.rows) || result.rows.length !== modes.length
+    || !result.rows.every((row: unknown, index: number) => object(row)
+      && keys(row, ["mode", "status", "httpStatus", "reasoningText", "reasoningTokens", "outputTokens", "responseModel"])
+      && row.mode === modes[index] && typeof row.status === "string" && ["completed", "incomplete", "failed", "timeout", "not_run"].includes(row.status)
+      && (row.httpStatus === null || typeof row.httpStatus === "number" && Number.isInteger(row.httpStatus) && row.httpStatus >= 100 && row.httpStatus <= 599)
+      && (row.reasoningText === null || typeof row.reasoningText === "boolean")
+      && count(row.reasoningTokens) && count(row.outputTokens) && (row.responseModel === null || typeof row.responseModel === "string"))
+    || value.type === "progress" && value.currentMode !== null && (typeof value.currentMode !== "string" || !modes.includes(value.currentMode))) throw new Error("Invalid probe result")
+  return value as RelayReasoningProbeEvent
 }
 export function previewRelayManagement(input: RelayManagementMutation, signal?: AbortSignal): Promise<{ preview: RelayManagementPreview; confirmationToken: string }> {
   return requestJson(`${API_PREFIX}/management/relay/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
