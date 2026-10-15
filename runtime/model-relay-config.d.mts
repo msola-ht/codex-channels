@@ -1,10 +1,12 @@
 import type { ZodType } from "zod";
+import type { RelayModelReasoning } from "./chat-reasoning.mjs";
 
 /** requests_per_minute=0 disables rate/burst checks; max_concurrency remains enforced. */
 export interface ModelRelayLimitConfig { max_concurrency: number; requests_per_minute: number; burst: number }
 export interface ModelRelayCallerConfig {
   caller_id: string; display_name?: string; key_id: string; credential_generation: number; secret_sha256: string;
   enabled: boolean; models: string[]; reasoning?: "passthrough" | "off";
+  model_reasoning?: Record<string, RelayModelReasoning>;
 }
 export interface ModelRelayConfig extends ModelRelayLimitConfig {
   enabled: boolean; host: string; port: number;
@@ -18,10 +20,11 @@ export function relayPolicyFromConfig(config: ModelRelayConfig): {
   accounts: Array<{ provider: string }>;
   retiredCallers: Array<{ callerId: string; keyId: string; credentialGeneration: number }>;
   callers: Array<{ callerId: string; keyId: string; credentialGeneration: number; secretSha256: string;
-    enabled: boolean; models: string[]; reasoning: "passthrough" | "off" }>;
+    enabled: boolean; models: string[]; reasoning: "passthrough" | "off"; modelReasoning?: Record<string, RelayModelReasoning> }>;
 };
 
 export const relayDisplayNameSchema: ZodType<string>;
 
 
 export const relayKeyModelsSchema: ZodType<string[]>;
+export const relayModelReasoningMapSchema: ZodType<Record<string, RelayModelReasoning>>;

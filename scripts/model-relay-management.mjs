@@ -4,7 +4,7 @@ import { stringify } from "smol-toml";
 import { createHash, randomBytes } from "node:crypto";
 import { parseGatewayConfig, validateGatewayConfigDocument, withGatewayConfigLock } from "../runtime/gateway-config.mjs";
 import { assertPrivateConfigAccessSync, readPrivateFileSync } from "../runtime/private-file.mjs";
-import { modelRelayConfigDigest, modelRelayConfigSchema, relayKeyModelsSchema } from "../runtime/model-relay-config.mjs";
+import { modelRelayConfigDigest, modelRelayConfigSchema, relayKeyModelsSchema, relayModelReasoningMapSchema } from "../runtime/model-relay-config.mjs";
 import { loadConfiguredRelayProviderMaterial, listRelayProviderIds } from "../runtime/model-provider-runtime.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
@@ -62,8 +62,9 @@ export function readRelayListener(environment = process.env) {
 }
 
 function safeCallers(callers) {
-  return callers.map(({ caller_id, key_id, credential_generation, enabled, reasoning, display_name, models }) =>
-    ({ caller_id, key_id, credential_generation, enabled, models: [...models], ...(display_name === undefined ? {} : { display_name }), reasoning: reasoning ?? "passthrough" }));
+  return callers.map(({ caller_id, key_id, credential_generation, enabled, reasoning, model_reasoning, display_name, models }) =>
+    ({ caller_id, key_id, credential_generation, enabled, models: [...models], ...(display_name === undefined ? {} : { display_name }),
+      reasoning: reasoning ?? "passthrough", ...(model_reasoning === undefined ? {} : { model_reasoning: { ...model_reasoning } }) }));
 }
 
 // Only recover a completed mutation result: failures before callback completion still fail closed.
@@ -97,6 +98,16 @@ function withRelayConfigLock(configPath, operation) {
 
 /** Explicit configuration transaction; service activation occurs only after atomic save. */
 export async function manageModelRelay(input, environment = process.env, options = {}) {
+  if (!commands.includes(input.command)) throw invalid("未知 Relay 操作");
+  if (Object.hasOwn(input, "extraModels") || ["issue", "edit"].includes(input.command) && Object.hasOwn(input, "provider")) throw invalid("提供商不再支持思考覆盖；请在 Key 设置思考策略");
+  if (input.reasoning !== undefined && !["passthrough", "off"].includes(input.reasoning)) throw invalid("思考策略无效");
+  if (input.reasoning !== undefined && input.modelReasoning !== undefined) throw invalid("整把 Key 策略与逐模型思考策略不可同时设置");
+  if (input.modelReasoning !== undefined) {
+    if (!["issue", "edit"].includes(input.command)) throw invalid("当前操作不支持逐模型思考策略");
+    const parsed = relayModelReasoningMapSchema.safeParse(input.modelReasoning);
+    if (!parsed.success) throw invalid("逐模型思考策略包含无效模型、策略或超过数量限制");
+    input = { ...input, modelReasoning: parsed.data };
+  }
   // Revision-bound confirmation must use exactly the catalog reviewed in its preview.
   if (!options.preview && options.expectedRevision === undefined && readClineRelayCatalog(environment).status === "missing"
     && (input.command === "providers" || ["issue", "edit"].includes(input.command) && input.models?.some(id => id.startsWith("clp-")))
@@ -117,9 +128,7 @@ export async function manageModelRelay(input, environment = process.env, options
 }
 
 async function executeModelRelay(input, environment, options) {
-  if (!commands.includes(input.command)) throw invalid("未知 Relay 操作");
-  if (Object.hasOwn(input, "extraModels") || ["issue", "edit"].includes(input.command) && Object.hasOwn(input, "provider")) throw invalid("提供商不再支持思考覆盖；请在 Key 设置思考策略");
-  if (input.reasoning !== undefined && !["passthrough", "off"].includes(input.reasoning)) throw invalid("思考策略无效");
+  const modelReasoning = input.modelReasoning;
   const { configPath } = locateUserConfig(environment);
   const endpoint = modelRelayPaths(configPath).control;
   if (input.command === "status") return { ...await queryModelRelayControl(endpoint, "status"),
@@ -150,18 +159,28 @@ async function executeModelRelay(input, environment, options) {
       const bytes = options.preview ? Buffer.alloc(32) : randomBytes(32); secret = `cr1.${input.key}.${bytes.toString("base64url")}`;
       config.callers.push({ caller_id: input.caller, key_id: input.key, credential_generation: 1,
         ...(input.name === undefined ? {} : { display_name: input.name }),
-        secret_sha256: createHash("sha256").update(bytes).digest("hex"), enabled: true, models: [...input.models], ...(input.reasoning === "off" ? { reasoning: "off" } : {}) });
+        secret_sha256: createHash("sha256").update(bytes).digest("hex"), enabled: true, models: [...input.models],
+        ...(modelReasoning ? { model_reasoning: completeModelReasoning(modelReasoning, input.models) } : input.reasoning === "off" ? { reasoning: "off" } : {}) });
     } else if (input.command === "edit") {
       const caller = config.callers.find(value => value.caller_id === input.caller);
       if (!caller) throw invalid("Relay 调用方不存在");
       if (input.models !== undefined && JSON.stringify(input.models) !== JSON.stringify(caller.models)) {
         validateKeyModels(input.models, environment);
         retainSettlementIdentity(config, caller);
+        if (caller.model_reasoning !== undefined) caller.model_reasoning = Object.fromEntries(input.models
+          .filter(id => Object.hasOwn(caller.model_reasoning, id) || !caller.models.includes(id))
+          .map(id => [id, Object.hasOwn(caller.model_reasoning, id) ? caller.model_reasoning[id] : "passthrough"]));
         caller.models = [...input.models];
       }
       if (input.name !== undefined) caller.display_name = input.name;
-      if (input.reasoning === "off") caller.reasoning = "off";
-      else if (input.reasoning === "passthrough") delete caller.reasoning;
+      if (modelReasoning) {
+        caller.model_reasoning = completeModelReasoning(modelReasoning, caller.models);
+        delete caller.reasoning;
+      } else if (input.reasoning !== undefined) {
+        delete caller.model_reasoning;
+        if (input.reasoning === "off") caller.reasoning = "off";
+        else delete caller.reasoning;
+      }
     } else if (input.command === "delete") {
       removed = config.callers.find(value => value.caller_id === input.caller);
       if (!removed) throw invalid("Relay 调用方不存在");
@@ -203,6 +222,13 @@ async function executeModelRelay(input, environment, options) {
   const activation = response.result === "applied" ? "saved_and_applied" : response.result === "not_running" ? "saved_not_running" : "saved_unconfirmed";
   return { activation, backupPath: result.backupPath, ...(result.cleanupStatus ? { cleanupStatus: result.cleanupStatus } : {}), ...(secret === undefined ? {} : { key: secret }),
     ...(activation === "saved_unconfirmed" ? { recovery: "配置已保存，生效未确认；请用 codexc relay status 核对。需要立即停止入口时执行 codexc stop relay；已保存的配置不会自动回滚。" } : {}) };
+}
+
+function completeModelReasoning(modelReasoning, models) {
+  if (Object.keys(modelReasoning).length !== models.length || models.some(id => !Object.hasOwn(modelReasoning, id))) {
+    throw invalid("逐模型思考策略须完整匹配当前 Key 选择的模型");
+  }
+  return { ...modelReasoning };
 }
 
 /** Retains settlement authority only; never a usable credential or request permission. */

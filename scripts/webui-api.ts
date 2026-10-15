@@ -3,6 +3,10 @@ import type { GenerationTiming } from "../runtime/request-timing.mjs"
 import type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 import type { CustomModelCapabilityProbeResult } from "./custom-model-capability-probe.mjs"
+import type { RelayModelReasoning } from "../runtime/chat-reasoning.mjs";
+export type { RelayModelReasoning } from "../runtime/chat-reasoning.mjs";
+import type { RelayReasoningProbeInput, RelayReasoningProbeResult } from "./relay-reasoning-probe.mjs";
+export type { RelayReasoningProbeInput, RelayReasoningProbeResult, RelayReasoningProbeEvent } from "./relay-reasoning-probe.mjs";
 
 export type ManagementCustomModelProbeResult = CustomModelCapabilityProbeResult & { connectionToken: string }
 export interface ManagementCustomModelProbeInput {
@@ -1204,7 +1208,7 @@ export interface TrafficTraceResponse extends Omit<TrafficDetailResponse, "excha
 export type RelayReasoning = "passthrough" | "off";
 export interface RelayManagedCaller {
   caller_id: string; display_name?: string; key_id: string; credential_generation: number; enabled: boolean;
-  models: string[]; reasoning: RelayReasoning;
+  models: string[]; reasoning: RelayReasoning; model_reasoning?: Record<string, RelayModelReasoning>;
 }
 export interface RelayManagementSnapshot {
   clineCatalog?: ClineRelayCatalogSnapshot;
@@ -1220,8 +1224,8 @@ export interface RelayManagementSnapshot {
   providers: Array<{ id: string; available: boolean; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; relayId: string; reasoningOff: boolean; inputModalities: Array<"text" | "image" | "audio" | "video" | "pdf"> }> }>;
 }
 export type RelayManagementInput =
-  | { command: "issue"; name?: string; caller: string; key: string; models: string[]; reasoning: RelayReasoning }
-  | { command: "edit"; name?: string; models?: string[]; caller: string; reasoning: RelayReasoning }
+  | { command: "issue"; name?: string; caller: string; key: string; models: string[]; reasoning?: RelayReasoning; modelReasoning?: Record<string, RelayModelReasoning> }
+  | { command: "edit"; name?: string; models?: string[]; caller: string; reasoning?: RelayReasoning; modelReasoning?: Record<string, RelayModelReasoning> }
   | { command: "rotate" | "disable" | "delete"; caller: string };
 export interface RelayManagementMutation { revision: string; input: RelayManagementInput }
 export interface RelayManagementPreview { command: RelayManagementInput["command"]; caller: string; callers: RelayManagedCaller[] }
@@ -1230,6 +1234,10 @@ export interface RelayManagementResult {
   activation: "saved_and_applied" | "saved_not_running" | "saved_unconfirmed";
   key?: string; auditStatus: "recorded" | "failed";
 }
+
+export type RelayReasoningProbeProtocol = RelayReasoningProbeInput["protocol"];
+export type RelayReasoningProbeRow = RelayReasoningProbeResult["rows"][number];
+export type RelayReasoningProbeMode = RelayReasoningProbeRow["mode"];
 
 /** Ephemeral authenticated model requests; not a persisted request history. */
 export type RelayQueueSnapshot = { state: "stopped" | "unknown" } | {

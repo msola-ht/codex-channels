@@ -2,7 +2,7 @@ import { open } from "node:fs/promises";
 import type { Readable } from "node:stream";
 
 import { UserFacingError } from "../conversation-core/index.js";
-import { ManagedMediaStore } from "./managed-media-store.js";
+import { ManagedMediaStore, type ManagedMediaInput } from "./managed-media-store.js";
 
 export const maximumManagedAudioBytes = 20 * 1024 * 1024;
 
@@ -38,6 +38,7 @@ export class ManagedAudioStore {
       maximumBytes: maximumManagedAudioBytes,
       retentionMs,
       cleanupIntervalMs,
+      operationTimeoutMs: 30_000,
       managedFileName: /^[0-9a-f-]+\.(?:wav|mp3|m4a|webm|ogg|part)$/u,
       closedMessage: "音频暂存器已经关闭",
       storeFailureMessage: "保存音频失败",
@@ -63,8 +64,8 @@ export class ManagedAudioStore {
     this.storage.close();
   }
 
-  async store(source: ManagedAudioSource): Promise<StoredManagedAudio> {
-    return await this.storage.store(source);
+  async store(source: ManagedMediaInput, signal?: AbortSignal): Promise<StoredManagedAudio> {
+    return await this.storage.store(source, signal);
   }
 }
 

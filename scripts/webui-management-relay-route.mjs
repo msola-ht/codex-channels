@@ -3,24 +3,100 @@ import { openQueueStream } from "./webui-queue-events.mjs";
 import { watchRelayChanges } from "../runtime/model-relay-control.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { locateUserConfig } from "./runtime-config.mjs";
-import { relayDisplayNameSchema, relayKeyModelsSchema } from "../runtime/model-relay-config.mjs";
+import { relayDisplayNameSchema, relayKeyModelsSchema, relayModelReasoningMapSchema } from "../runtime/model-relay-config.mjs";
 import { z } from "zod";
 import { manageModelRelay, readRelayQueue, readRelayManagement, withRelayManagementTransaction } from "./model-relay-management.mjs";
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
 import { fingerprintManagementValue } from "./management-security.mjs";
+import { managementSecurityHeaders } from "./management-security.mjs";
+import { probeRelayReasoning } from "./relay-reasoning-probe.mjs";
+
+const activeReasoningProbes = new WeakSet();
+const reasoningProbe = z.strictObject({ revision: z.string().regex(/^[a-f0-9]{64}$/u), model: z.string().max(265), protocol: z.enum(["chat", "responses"]) });
 
 const identity = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
-const fields = { name: relayDisplayNameSchema.optional(), reasoning: z.enum(["passthrough", "off"]) };
+const fields = { name: relayDisplayNameSchema.optional(), reasoning: z.enum(["passthrough", "off"]).optional(), modelReasoning: relayModelReasoningMapSchema.optional() };
 const mutation = z.discriminatedUnion("command", [
   z.strictObject({ command: z.literal("issue"), caller: identity, key: identity, models: relayKeyModelsSchema, ...fields }),
   z.strictObject({ command: z.literal("edit"), caller: identity, models: relayKeyModelsSchema.optional(), ...fields }),
   z.strictObject({ command: z.literal("delete"), caller: identity }),
   z.strictObject({ command: z.literal("rotate"), caller: identity }),
   z.strictObject({ command: z.literal("disable"), caller: identity }),
-]);
+]).superRefine((input, context) => {
+  if (input.reasoning !== undefined && input.modelReasoning !== undefined) {
+    context.addIssue({ code: "custom", path: ["modelReasoning"], message: "整把 Key 策略与逐模型思考策略不可同时设置" });
+  }
+});
 const envelope = z.strictObject({ input: mutation, revision: z.string().regex(/^[a-f0-9]{64}$/u), confirmationToken: z.string().max(128).optional() });
 
 export async function routeRelayManagement({ environment, maximumBodyBytes, openMetricsStore, path, principalId, request, response, state }) {
+  if (path === "/relay/reasoning-probe" && request.method === "POST") {
+    if (new URL(request.url, "http://localhost").search) throw new ApiError(400, "relay_probe_invalid", "Relay 思考探测参数无效");
+    let body;
+    try { body = await readJsonBody(request, maximumBodyBytes); }
+    catch { throw new ApiError(400, "relay_probe_invalid", "Relay 思考探测参数无效"); }
+    const parsed = reasoningProbe.safeParse(body);
+    if (!parsed.success) throw new ApiError(400, "relay_probe_invalid", "Relay 思考探测参数无效");
+    if (activeReasoningProbes.has(state)) throw new ApiError(409, "relay_probe_busy", "已有 Relay 思考探测正在运行");
+    activeReasoningProbes.add(state);
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    const timer = setTimeout(cancel, 95_000);
+    response.once("close", cancel);
+    request.once("aborted", cancel);
+    if (request.aborted || response.destroyed) cancel();
+    let writtenBytes = 0;
+    const send = async (event, signal = controller.signal) => {
+      signal.throwIfAborted();
+      controller.signal.throwIfAborted();
+      const line = `${JSON.stringify(event)}\n`;
+      const bytes = Buffer.byteLength(line);
+      // Keep enough room for the fixed terminal error, even after a large snapshot.
+      if (bytes > 64 * 1024 || writtenBytes + bytes > 256 * 1024 - (event.type === "error" ? 0 : 128)) throw new Error("Relay probe stream capacity exceeded");
+      if (!response.headersSent) {
+        response.writeHead(200, { ...managementSecurityHeaders(), "content-type": "application/x-ndjson; charset=utf-8", "x-accel-buffering": "no" });
+        response.flushHeaders();
+      }
+      writtenBytes += bytes;
+      if (response.write(line)) return;
+      await new Promise((resolve, reject) => {
+        const finish = error => {
+          response.off("drain", drain);
+          response.off("error", fail);
+          signal.removeEventListener("abort", aborted);
+          controller.signal.removeEventListener("abort", aborted);
+          if (error) reject(error);
+          else resolve();
+        };
+        const drain = () => finish();
+        const fail = () => finish(new Error("Relay probe stream closed"));
+        const aborted = () => finish(new Error("Relay probe stream cancelled"));
+        response.once("drain", drain);
+        response.once("error", fail);
+        signal.addEventListener("abort", aborted, { once: true });
+        controller.signal.addEventListener("abort", aborted, { once: true });
+        if (signal.aborted || controller.signal.aborted || response.destroyed) aborted();
+      });
+    };
+    try {
+      const result = await probeRelayReasoning(parsed.data, { environment, signal: controller.signal, onProgress: send });
+      await send({ type: "result", result });
+      response.end();
+    } catch (error) {
+      if (!response.headersSent) throw error;
+      if (!controller.signal.aborted && !response.destroyed) {
+        try { await send({ type: "error", code: "relay_probe_failed" }); response.end(); }
+        catch { response.destroy(); }
+      } else response.destroy();
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+      response.off("close", cancel);
+      request.off("aborted", cancel);
+      activeReasoningProbes.delete(state);
+    }
+    return true;
+  }
   if (path === "/relay/catalog/update" && request.method === "POST") {
     if (new URL(request.url, "http://localhost").search || !z.strictObject({}).safeParse(await readJsonBody(request, maximumBodyBytes)).success) {
       throw new ApiError(400, "relay_invalid", "Cline 目录更新参数无效");

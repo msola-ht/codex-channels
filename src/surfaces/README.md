@@ -46,6 +46,7 @@ Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌�
 `secure-credential-store.ts` 提供 Surface 内部复用的 macOS Keychain、Linux AES-256-GCM 和 Windows
 DPAPI 主密钥 + AES-256-GCM 字符串记录机制；平台模块仍各自拥有 Service、目录、记录键、载荷校验
 和错误语义。macOS Keychain 命令失败在记录存储边界转换为安全错误，不传播含凭据参数的原始命令、标准输出或标准错误；读取和删除的记录不存在语义保持不变。
+Windows 持续流量路径使用异步 DPAPI、ACL 与记录读写；每目录串行、总容量 16 项和 15 秒取消预算，物理操作结算前保留槽位。凭据格式、作用域与 OAuth 关闭时的在途回滚归属不变。
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap
@@ -275,9 +276,11 @@ Skill、Plugin 与子代理新建 Turn 时由统一 `turn.started` 生命周期�
 一次性音频的 20 MiB、WAV/MP3/M4A/WebM/OGG 内容签名、Unix `0700/0600` 或 Windows 当前 SID
 ACL 私有暂存和一小时清理由
 `managed-audio-store.ts` 复用。两者通过内部 `managed-media-store.ts` 统一私有目录生命周期、
-有界流落盘、临时文件清理和过期清理；各自的格式白名单、限制、保留时间和公开接口保持独立。
+有界流落盘、临时文件清理和过期清理；图片与音频从取得下载地址到完整流落盘共用 30 秒总预算，关闭会取消在途下载和 `pipeline`，关闭后的新操作与迟到结果均拒绝。视频的落盘沿用 60 秒预算并接入相同关闭信号；各自的格式白名单、限制和保留时间保持独立。
+三渠道音频在等待前序输入前登记 Application 附件作用域；`/stop` 取消准备，下载前捕获工作区与 Thread，提交前复核原目标和实时授权，避免下载完成后意外启动新 Turn。
 组合根在创建渠道前收紧共享 `uploads` 根目录；媒体暂存器启动时拒绝符号链接、非目录和非当前用户所有的目录，
 再收紧渠道目录权限，Windows 继续由共享 ACL 辅助函数验证当前 SID 所有权并关闭权限继承。
+媒体下载中的目录和文件权限操作异步执行，并共享下载取消信号。
 Application 只接收绝对本地路径；
 平台仍各自负责取得受信下载流。所有输入在调用 Application 前必须构造
 `SurfaceAccessContext` 并通过对应访问策略。

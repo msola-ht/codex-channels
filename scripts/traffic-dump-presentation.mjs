@@ -85,18 +85,18 @@ export function requestContent(body) {
   const input = body?.input ?? body?.messages;
   return {
     instructions: body?.instructions == null ? null : displayText(body.instructions),
-    input: input == null ? null : (Array.isArray(input) ? input : [input]).map((item) => {
+    input: input == null ? null : (Array.isArray(input) ? input : [input]).flatMap((item) => {
       if (typeof item === "string") return { type: "message", role: "user", text: item };
       const type = stringValue(item?.type) ?? (typeof item?.role === "string" ? "message" : "unknown");
-      return {
-        ...outputItem({ ...item, type }),
+      return outputItems(item !== null && typeof item === "object" && !Array.isArray(item) ? { ...item, type } : item).map(projected => ({
+        ...projected,
         role: stringValue(item?.role),
         omittedItems: type === "omitted" ? tokenCount(item.omitted_items) : undefined,
-      };
+      }));
     }),
     tools: Array.isArray(body?.tools) ? body.tools.map((tool) => ({
       type: stringValue(tool?.type) ?? "unknown",
-      name: stringValue(tool?.name),
+      name: stringValue(tool?.name) ?? stringValue(tool?.function?.name),
       definition: displayText(tool),
     })) : null,
   };
@@ -249,11 +249,13 @@ export function createOutputCollector(maxBytes, terminalOutput, observeModelEven
   let frame;
   let sse = "";
   let droppingSse = false;
+  let responsePart = 0;
+  let responseGap = false;
   const hasTerminalOutput = Array.isArray(terminalOutput) && terminalOutput.length > 0;
 
   function add(index, item) {
     if (!collectOutput) return;
-    if (!item || typeof item !== "object") return;
+    if (item === undefined) item = null;
     const size = Buffer.byteLength(JSON.stringify(item));
     const previous = items.get(index)?.size ?? 0;
     if (bytes - previous + size > maxBytes) {
@@ -267,12 +269,31 @@ export function createOutputCollector(maxBytes, terminalOutput, observeModelEven
   function event(text) {
     const value = parseObject(text);
     observeModelEvent?.(value);
-    if (Array.isArray(value?.choices)) for (const choice of value.choices) {
+    if (!hasTerminalOutput && !truncated && Array.isArray(value?.choices)) for (const choice of value.choices) {
       const index = choice?.index ?? (value.choices.length === 1 ? 0 : undefined);
       if (!Number.isSafeInteger(index) || index < 0 || index > 128) continue;
-      const previous = items.get(index)?.item?.content ?? "";
-      const delta = choice?.delta?.content;
-      if (typeof delta === "string") add(index, { type: "message", content: previous + delta });
+      const previous = items.get(index)?.item ?? { type: "message" };
+      const delta = choice?.delta;
+      if (!delta || typeof delta !== "object") continue;
+      const next = { ...previous };
+      for (const field of ["content", "refusal", "reasoning", "reasoning_content"]) {
+        if (typeof delta[field] === "string") next[field] = (previous[field] ?? "") + delta[field];
+      }
+      if (Array.isArray(delta.tool_calls)) {
+        const calls = new Map((previous.tool_calls ?? []).map(call => [call.index, call]));
+        for (const call of delta.tool_calls) {
+          if (!Number.isSafeInteger(call?.index) || call.index < 0 || call.index >= 64) { truncated = true; continue; }
+          const old = calls.get(call.index) ?? { index: call.index };
+          const merged = { ...old, function: { ...old.function } };
+          for (const field of ["id", "type"]) if (typeof call[field] === "string") merged[field] = call[field];
+          for (const field of ["name", "arguments"]) {
+            if (typeof call.function?.[field] === "string") merged.function[field] = (old.function?.[field] ?? "") + call.function[field];
+          }
+          calls.set(call.index, merged);
+        }
+        next.tool_calls = [...calls.values()].sort((left, right) => left.index - right.index);
+      }
+      if (Object.keys(next).length > 1) add(index, next);
     }
     if (value === undefined && text.trim() !== "[DONE]" && !hasTerminalOutput) truncated = true;
     if (!hasTerminalOutput && value?.type === "response.output_item.done"
@@ -311,13 +332,25 @@ export function createOutputCollector(maxBytes, terminalOutput, observeModelEven
   if (hasTerminalOutput) terminalOutput.forEach((item, index) => add(index, item));
   return {
     consume(record) {
+      if (record.kind === "response_body" && record.part !== undefined) {
+        if (!Number.isSafeInteger(record.part) || record.part !== responsePart + 1) {
+          if (!hasTerminalOutput) truncated = true;
+          responseGap = true;
+          sse = "";
+        }
+        responsePart = record.part;
+        if (responseGap) return;
+      }
       if (typeof record.text !== "string") return;
       if (record.kind === "response_body" && record.encoding === "utf8") {
         consumeSse(record.text);
       } else if (record.kind === "websocket_frame" && record.direction === "upstream"
         && record.binary !== true) {
         if (record.parts > 1) {
-          if (record.part === 1) frame = { text: "", next: 1, parts: record.parts };
+          if (record.part === 1) {
+            if (frame && !hasTerminalOutput) truncated = true;
+            frame = { text: "", next: 1, parts: record.parts };
+          }
           if (!frame || frame.next !== record.part || frame.parts !== record.parts) {
             if (!hasTerminalOutput) truncated = true;
             frame = undefined;
@@ -342,7 +375,7 @@ export function createOutputCollector(maxBytes, terminalOutput, observeModelEven
       if (sse && !droppingSse) sseBlock(sse);
       return {
         output: [...items.entries()].sort(([left], [right]) => left - right)
-          .map(([, { item }]) => outputItem(item)),
+          .flatMap(([, { item }]) => outputItems(item)),
         outputTruncated: truncated || (!hasTerminalOutput && frame !== undefined),
         outputSource: hasTerminalOutput ? "terminal" : "trace",
       };
@@ -350,15 +383,31 @@ export function createOutputCollector(maxBytes, terminalOutput, observeModelEven
   };
 }
 
+function outputItems(item) {
+  if (item?.type !== "message") return [outputItem(item)];
+  if (item.role === "tool") return [outputItem({ type: "function_call_output", call_id: item.tool_call_id, output: item.content })];
+  const calls = Array.isArray(item.tool_calls) ? item.tool_calls : [];
+  const reasoning = item.reasoning_content ?? item.reasoning;
+  const projected = item.content != null || item.refusal != null || calls.length === 0 && reasoning == null
+    ? [outputItem(item)] : [];
+  if (reasoning != null) projected.unshift(outputItem({ type: "reasoning", summary: [{ text: reasoning }] }));
+  return projected.concat(calls.map(call => (call?.type === "function" || call?.type === undefined)
+    && call?.function && typeof call.function === "object" && !Array.isArray(call.function)
+    ? outputItem({ type: "function_call", name: call.function.name, call_id: call.id, arguments: call.function.arguments })
+    : outputItem(call)));
+}
+
 function outputItem(item) {
+  if (item === null || typeof item !== "object" || Array.isArray(item)) return { type: "unknown", text: displayText(item ?? null) };
   let text;
   if (item.type === "message") {
     text = Array.isArray(item.content)
-      ? item.content.map((part) => part.text ?? part.refusal ?? JSON.stringify(part)).join("\n")
-      : typeof item.content === "string" ? item.content : JSON.stringify(item.content ?? null);
+      ? item.content.map((part) => displayText(part?.text ?? part?.refusal ?? part)).join("\n")
+      : displayText(item.content ?? item.refusal ?? null);
+    if (item.content != null && item.refusal != null) text += `\n${displayText(item.refusal)}`;
   } else if (item.type === "reasoning") {
     text = Array.isArray(item.summary)
-      ? item.summary.map((part) => part.text ?? "").join("\n")
+      ? item.summary.map((part) => displayText(part?.text ?? part)).join("\n")
       : JSON.stringify(item.summary ?? null);
   } else if (item.type === "function_call" || item.type === "custom_tool_call") {
     const input = item.arguments ?? item.input;

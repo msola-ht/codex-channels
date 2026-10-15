@@ -117,8 +117,9 @@ import {
 import { EventBus } from "../event-bus/index.js";
 import {
   BufferedModelRequestMetricsWriter,
+  AsyncMetricsStore,
+  metricsWorkerFailureMetadata,
   modelRequestMetricsDatabasePath,
-  SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
 import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy } from "../policy/index.js";
 import {
@@ -174,6 +175,8 @@ export abstract class GatewayComponentGraph {
   private readonly transport: CodexTransport;
   private readonly codex: ProviderRoutingClient;
   private readonly turnExecution: TurnExecutionTracker;
+  private readonly metricsDatabase: AsyncMetricsStore;
+  private readonly metricsReady: Promise<void>;
   private readonly autoApprovalReview: AutoApprovalReviewTracker;
   private readonly autoApprovalReviewNotifications: AutoApprovalReviewNotifications;
   private readonly primaryProvider: string;
@@ -419,18 +422,36 @@ export abstract class GatewayComponentGraph {
           );
         });
       },
+      (binding) => {
+        if (!this.stopping && !this.isBindingRestoring(binding.threadId)) {
+          void this.restoreIdleBinding(binding.threadId);
+        }
+      },
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
-    const metricsStore = new SqliteModelRequestMetricsStore(
+    this.metricsDatabase = new AsyncMetricsStore(
       modelRequestMetricsDatabasePath(config.stateDatabasePath),
-      undefined,
       {
         retentionDays: config.metricsStorage.retentionDays,
         maximumRows: config.metricsStorage.maxRows,
+      }, (error) => {
+        logger.error({ err: error, ...metricsWorkerFailureMetadata(error) }, "指标数据库 Worker 不可用，Gateway 正在停止");
+        void this.requestStop().catch(() => logger.error("指标数据库故障后的 Gateway 清理失败"));
       },
     );
-    let closeConstructionMetrics: () => void | Promise<void> = () => metricsStore.close();
+    const metricsStore = this.metricsDatabase.store;
+    const providersWithoutSubscription = new Set<string>();
+    this.metricsReady = this.metricsDatabase.ready.then(async () => {
+      const snapshots = await metricsStore.latestAccountSnapshots();
+      for (const snapshot of snapshots) {
+        if (snapshot.provider.startsWith("ocg-") && snapshot.usage !== null
+          && typeof snapshot.usage === "object" && "kind" in snapshot.usage
+          && snapshot.usage.kind === "subscription-required") providersWithoutSubscription.add(snapshot.provider);
+      }
+    });
+    void this.metricsReady.catch(() => undefined);
+    let closeConstructionMetrics: () => void | Promise<void> = () => this.metricsDatabase.close();
     registerConstructionCleanup("Request Metrics", () => closeConstructionMetrics());
     this.metricsEvents = configPath === undefined ? undefined : new QueueEventsServer(metricsEventsPath(configPath));
     if (this.metricsEvents) registerConstructionCleanup("Metrics Notifications", () => this.metricsEvents!.close());
@@ -438,10 +459,19 @@ export abstract class GatewayComponentGraph {
     if (this.accountSnapshotEvents) registerConstructionCleanup("Account Snapshot Notifications", () => this.accountSnapshotEvents!.close());
     this.turnExecution = new TurnExecutionTracker(this.codex, metricsStore,
       () => this.metricsEvents?.changed(),
-      (error, threadId) => logger.warn({ module: "metrics", event: "turn_timing.sync_failed", err: error, threadId }, "轮次耗时记录或同步失败"));
+      (error, threadId) => logger.warn({ module: "metrics", event: "turn_timing.sync_failed", err: error, threadId, ...metricsWorkerFailureMetadata(error) }, "轮次耗时记录或同步失败"),
+      signal => this.metricsDatabase.withSignal(signal),
+      (error) => {
+        logger.error({ err: error, ...metricsWorkerFailureMetadata(error) }, "轮次耗时覆盖无法持久降级，Gateway 正在停止");
+        void this.requestStop().catch(() => logger.error("指标故障后的 Gateway 清理失败"));
+      });
     this.autoApprovalReview = new AutoApprovalReviewTracker(metricsStore,
       (threadId) => this.codex.knownProvider(threadId),
-      (error, threadId) => logger.warn({ module: "metrics", event: "auto_review.write_failed", err: error, threadId }, "自动审查统计记录失败，统计覆盖不完整"));
+      (error, threadId) => logger.warn({ module: "metrics", event: "auto_review.write_failed", err: error, threadId, ...metricsWorkerFailureMetadata(error) }, "自动审查统计记录失败，统计覆盖不完整"),
+      (error) => {
+        logger.error({ err: error, ...metricsWorkerFailureMetadata(error) }, "自动审查覆盖无法持久降级，Gateway 正在停止");
+        void this.requestStop().catch(() => logger.error("指标故障后的 Gateway 清理失败"));
+      });
     this.autoApprovalReviewNotifications = new AutoApprovalReviewNotifications({
       targetForThread: (threadId) => this.router.targetForThread(threadId),
       isBackgroundThread: (threadId) => this.router.isBackgroundThread(threadId),
@@ -452,8 +482,11 @@ export abstract class GatewayComponentGraph {
         "自动审查通知未向渠道发送"),
     });
     const metricsWriter = new BufferedModelRequestMetricsWriter(
-      metricsStore,
-      (error) => logger.error({ module: "metrics", event: "request_metrics.write_failed", err: error }, "模型请求指标后台写入失败"),
+      { recordBatch: samples => metricsStore.recordBatch(samples), close: async () => {
+        try { await this.metricsDatabase.drain(); }
+        finally { await this.metricsDatabase.close(); }
+      } },
+      (error) => logger.error({ module: "metrics", event: "request_metrics.write_failed", err: error, ...metricsWorkerFailureMetadata(error) }, "模型请求指标后台写入失败"),
       () => this.metricsEvents?.changed(),
     );
     closeConstructionMetrics = () => metricsWriter.close();
@@ -519,27 +552,12 @@ export abstract class GatewayComponentGraph {
     });
     closeConstructionMetrics = () => this.providerMetrics.close();
     this.subagentCompletion = new SubagentCompletionTracker({
-      readSummary: (agentThreadId, terminalTurnId) => {
-        if (!terminalTurnId) return metricsStore.threadSummary(agentThreadId);
-        const latestTurn = metricsStore.threadTurnSummary(
-          agentThreadId,
-          terminalTurnId,
-        );
-        return {
-          latestTurn,
-          threadAggregate: metricsStore.threadTurnTaskSummary(
-            agentThreadId,
-            terminalTurnId,
-          ) ?? latestTurn,
-        };
-      },
+      readSummary: (agentThreadId, terminalTurnId, signal) => this.metricsDatabase.withSignal(signal).subagentCompletionSummary(agentThreadId, terminalTurnId),
       waitForMetrics: (agentThreadId, agentTurnId) =>
         metricsWriter.waitForCurrentWrites(agentThreadId, agentTurnId),
       onRunStarted: (details) => {
         this.autoApprovalReviewNotifications.recordRun(details);
-        try {
-          metricsStore.recordSubagentTurn(details);
-        } catch (error) {
+        void metricsStore.recordSubagentTurn(details).catch((error) => {
           this.autoApprovalReview.markIncomplete();
           logger.warn(
             {
@@ -551,7 +569,7 @@ export abstract class GatewayComponentGraph {
             },
             "子代理运行指标归属写入失败",
           );
-        }
+        });
       },
       onRunAttributionIncomplete: () => {
         this.autoApprovalReview.markIncomplete();
@@ -578,10 +596,10 @@ export abstract class GatewayComponentGraph {
         );
       },
     });
-    this.output.subscribe("subagent-metrics", (event) => {
+    this.output.subscribe("subagent-metrics", async (event) => {
       if (event.type === "subagent.spawned") {
         try {
-          metricsStore.recordSubagentThread({
+          await metricsStore.recordSubagentThread({
             agentThreadId: event.agentThreadId,
             parentThreadId: event.threadId,
             parentTurnId: event.turnId,
@@ -618,11 +636,7 @@ export abstract class GatewayComponentGraph {
         defaultModel: provider.model,
       })),
       () => hasCodexAuthFile(process.env),
-      () => new Set(metricsStore.latestAccountSnapshots()
-        .filter((snapshot) => snapshot.provider.startsWith("ocg-")
-          && snapshot.usage !== null && typeof snapshot.usage === "object"
-          && "kind" in snapshot.usage && snapshot.usage.kind === "subscription-required")
-        .map((snapshot) => snapshot.provider)),
+      () => providersWithoutSubscription,
       defaultThirdPartyProvider,
       [
         ...customSwitchingProviders.filter((provider) => provider.catalogSource.kind === "custom").map((provider) => ({
@@ -649,11 +663,13 @@ export abstract class GatewayComponentGraph {
           metricsDatabasePath: modelRequestMetricsDatabasePath(
             config.stateDatabasePath,
           ),
+          metricsQuery: signal => this.metricsDatabase.withSignal(signal),
         },
       ),
     ];
     this.providerAccounts = new ProviderAccountService(accountAdapters, {
-      writeOfficialAccountSnapshot: (snapshot) => {
+      writeOfficialAccountSnapshot: async (snapshot, signal) => {
+        signal?.throwIfAborted();
         const definition = providerDefinitions.find(
           (candidate) => candidate.id === snapshot.provider,
         );
@@ -666,7 +682,7 @@ export abstract class GatewayComponentGraph {
           ?? definitionAccountId
           ?? opencodeGoAccountIdFromProvider(snapshot.provider)
           ?? null;
-        metricsStore.upsertAccountSnapshot({
+        await this.metricsDatabase.withSignal(signal).upsertAccountSnapshot({
           sourceId: `${snapshot.provider}:${accountId ?? "default"}`,
           provider: snapshot.provider,
           accountId,
@@ -677,6 +693,11 @@ export abstract class GatewayComponentGraph {
           usage: snapshot.usage,
           limits: snapshot.limits,
         });
+        // The write is confirmed; cancellation must not suppress its cache invalidation.
+        if (snapshot.provider.startsWith("ocg-")) {
+          if (snapshot.usage.kind === "subscription-required") providersWithoutSubscription.add(snapshot.provider);
+          else providersWithoutSubscription.delete(snapshot.provider);
+        }
         try { this.accountSnapshotEvents?.changed(); }
         catch (error) { logger.warn({ err: error }, "账户快照已保存，但变化通知失败"); }
       },
@@ -778,6 +799,10 @@ export abstract class GatewayComponentGraph {
           if (!this.stopping && !this.isBindingRestoring(threadId)) void this.restoreIdleBinding(threadId);
         },
       },
+      (operation) => logger.warn(
+        { module: "sessions", event: "display_cache.disabled", operation, reason: "cache-operation-failed" },
+        "会话派生缓存操作失败，当前会话查询实例已禁用缓存",
+      ),
     );
     this.conversations = service;
     service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);
@@ -1067,32 +1092,31 @@ export abstract class GatewayComponentGraph {
           if (provider === "openai" || !this.providerAccounts || !accountAdapters.some((adapter) => adapter.provider === provider)) return undefined;
           return completionAccountStatus(provider, await this.providerAccounts.accountUsage(provider, undefined, signal));
         },
-        completionTiming: async (threadId, turnId, current) => {
+        completionTiming: async (threadId, turnId, current, signal) => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
           if (!persisted) return current;
-          const summary = metricsStore.threadTurnSummary(threadId, turnId);
+          const summary = await this.metricsDatabase.withSignal(signal).threadTurnSummary(threadId, turnId);
           return mergeCompletionTiming(summary, turnId, current);
         },
-        executionTiming: (threadId, turnId) => {
-          const sessionTiming = metricsStore.sessionExecutionTiming(threadId, turnId);
+        executionTiming: async (threadId, turnId, signal) => {
+          const { durationMs, sessionTiming } = await this.metricsDatabase.withSignal(signal).completionExecutionTiming(threadId, turnId);
+          if (!this.turnExecution.isReliable()) sessionTiming.historyComplete = false;
           return {
-            durationMs: metricsStore.turnExecutionDuration(threadId, turnId),
+            durationMs,
             sessionDurationMs: sessionTiming.historyComplete && sessionTiming.missingTurnCount === 0
               ? sessionTiming.knownDurationMs : null,
             sessionTiming,
           };
         },
-        autoApprovalReview: (threadId, turnId) => this.autoApprovalReview.summary(threadId, turnId, this.subagentCompletion.pendingParentTurns()),
-        sessionAutoApprovalReview: (threadId) => this.autoApprovalReview.sessionSummary(threadId, this.subagentCompletion.pendingParentTurns()),
-        taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
-          let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
-          if (summary === null) return undefined;
+        autoApprovalReview: (threadId, turnId, signal) => this.autoApprovalReview.summary(threadId, turnId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal)),
+        sessionAutoApprovalReview: (threadId, signal) => this.autoApprovalReview.sessionSummary(threadId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal)),
+        taskAggregate: async (threadId, turnId, signal): Promise<TurnTaskMetricsSummary | undefined> => {
           // The completion event can outrun the buffered request writer. Once
           // a child is known, wait for the current queue watermark so the
           // parent task total includes the root Turn's just-finished samples.
           const persisted = await metricsWriter.waitForCurrentWrites(threadId);
           if (!persisted) return undefined;
-          summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
+          const summary = await this.metricsDatabase.withSignal(signal).threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
           return {
             responseUsage: summary.responseUsage ?? null,
@@ -1106,10 +1130,10 @@ export abstract class GatewayComponentGraph {
             reasoningOutputTokens: summary.reasoningOutputTokens,
           };
         },
-        sessionAggregate: async (threadId): Promise<TurnTaskMetricsSummary | undefined> => {
+        sessionAggregate: async (threadId, signal): Promise<TurnTaskMetricsSummary | undefined> => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId);
           if (!persisted) return undefined;
-          const aggregate = metricsStore.threadSummary(threadId).threadAggregate;
+          const aggregate = (await this.metricsDatabase.withSignal(signal).threadSummary(threadId)).threadAggregate;
           if (aggregate === null) return undefined;
           return {
             responseUsage: aggregate.responseUsage ?? null,
@@ -1559,6 +1583,10 @@ export abstract class GatewayComponentGraph {
     try {
       this.requireRunning();
       this.startupAbort = new AbortController();
+      await this.metricsReady;
+      this.requireRunning();
+      await this.scheduledTasks?.prepareStore(this.startupAbort.signal);
+      this.requireRunning();
       await this.surfaceManager.preparePersistence();
       this.requireRunning();
       await this.providerMetrics.start();
@@ -1682,6 +1710,7 @@ export abstract class GatewayComponentGraph {
     this.conversationIdleReleaser?.cancelPending();
     this.conversations?.setIdleReleaseEnabled(false);
     this.surfaceManager.beginShutdown?.();
+    this.conversations?.closeSessionQueries();
     this.startupAbort?.abort();
     void this.startupNetworkRecovery?.stop();
     this.openAiConnectivityAbort?.abort(new Error("Gateway 正在停止"));
@@ -1795,6 +1824,7 @@ export abstract class GatewayComponentGraph {
     this.conversationIdleReleaser?.cancelPending();
     this.conversations?.setIdleReleaseEnabled(false);
     this.surfaceManager.beginShutdown?.();
+    this.conversations?.closeSessionQueries();
     this.startupAbort?.abort();
     const restoringBindings = this.bindingRestoreCoordinator().close();
     this.openAiConnectivityAbort?.abort();
@@ -1818,6 +1848,7 @@ export abstract class GatewayComponentGraph {
       ["Inbound Event Bus", () => this.inbound.close({ requireDrained: true })],
       ["Derived Output Inputs", () => this.output.drain()],
       ["Turn Execution Metrics", () => this.turnExecution.stop()],
+      ["Auto-review Metrics", () => this.autoApprovalReview.stop()],
       ["Subagent Terminals", () => this.subagentCompletion?.drain()],
       ["Auto-review Notifications", () => this.autoApprovalReviewNotifications.reset()],
       ["Surface", () => this.surfaceManager.stop()],

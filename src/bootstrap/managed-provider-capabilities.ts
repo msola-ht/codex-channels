@@ -10,11 +10,13 @@ import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "./opencode-go-account-adapter.js";
 import { createCcgAccountAdapter } from "./ccg-account-adapter.js";
 import { createClinePassAccountAdapter } from "./cline-pass-account-adapter.js";
+import type { AsyncGatewayMetricsStore } from "../observability/index.js";
 
 export interface ManagedProviderAccountFactoryOptions {
   environment?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   metricsDatabasePath: string;
+  metricsQuery?: (signal?: AbortSignal) => Pick<AsyncGatewayMetricsStore, "providerQuotaTokens">;
 }
 
 export function createManagedProviderAccountAdapters(
@@ -44,6 +46,7 @@ export function createManagedProviderAccountAdapters(
           environment,
           fetchImpl,
           metricsDatabasePath: options.metricsDatabasePath,
+          ...(options.metricsQuery ? { metricsQuery: options.metricsQuery } : {}),
           provider: definition.id,
         }));
         break;

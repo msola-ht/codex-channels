@@ -71,8 +71,8 @@ export class ProviderMetricsComposition {
     const sample = { ...metrics };
     try {
       this.options.writer.enqueue({
-        provider,
         ...sample,
+        provider,
         reasoningEffort:
           metrics.reasoningEffort
           ?? (metrics.requestPurpose === "autoApprovalReview" || metrics.threadId === null

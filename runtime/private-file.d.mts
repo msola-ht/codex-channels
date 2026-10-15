@@ -20,15 +20,19 @@ export function writePrivateFileAtomicSync(
 export function writePrivateFileAtomic(
   path: string,
   content: string | Uint8Array,
+  options?: { signal?: AbortSignal },
 ): Promise<void>;
 
 export function securePrivateFileSync(path: string): void;
 export function readCodexConfigFileSync(path: string, maximumBytes?: number): string;
 export function assertCodexConfigAccessSync(path: string): void;
-export function writeCodexConfigFileAtomic(path: string, content: string | Uint8Array): Promise<void>;
+export function writeCodexConfigFileAtomic(path: string, content: string | Uint8Array, options?: { signal?: AbortSignal }): Promise<void>;
 export function repairWindowsPrivateFileSync(path: string): void;
 
 export function securePrivateDirectorySync(path: string): void;
+export function securePrivateFile(path: string, options?: { signal?: AbortSignal }): Promise<void>;
+export function securePrivateDirectory(path: string, options?: { signal?: AbortSignal }): Promise<void>;
+export function assertPrivateDirectoryAccess(path: string, options?: { signal?: AbortSignal }): Promise<void>;
 export function secureAppServerSocketDirectorySync(path: string): void;
 
 export function assertPrivateDirectoryAccessSync(path: string): void;

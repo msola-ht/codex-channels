@@ -25,7 +25,7 @@ interface PendingBindingRestore {
 
 export interface ScheduledBindingRecoveryPort {
   runningThreadIds(): ReadonlySet<string>;
-  taskForThread(threadId: string): { modelProvider?: string | null } | undefined;
+  taskForThread(threadId: string): Promise<{ modelProvider?: string | null } | undefined>;
   recoverRunning(threadIds: ReadonlySet<string>, signal: AbortSignal): Promise<void>;
 }
 
@@ -179,6 +179,13 @@ export class BindingRestoreCoordinator {
       isConnectionCurrent(binding) && this.isCurrentBinding(binding);
     let failures: SubscriptionRestoreFailure[];
     try {
+      const scheduledProviders = new Map<string, string>();
+      for (const threadId of candidateThreadIds) {
+        if (!scheduledThreadIds.has(threadId)) continue;
+        const task = await scheduledRecovery?.taskForThread(threadId);
+        if (this.recoveryAbort.signal.aborted) return;
+        if (task?.modelProvider != null) scheduledProviders.set(threadId, task.modelProvider);
+      }
       failures = await this.options.router.restoreSubscriptions(
         (_target, binding) => canRestore(binding),
         (binding, thread) => {
@@ -206,10 +213,10 @@ export class BindingRestoreCoordinator {
           }
         },
         (binding) => {
-          const task = scheduledRecovery?.taskForThread(binding.threadId);
-          return task?.modelProvider == null
+          const modelProvider = scheduledProviders.get(binding.threadId);
+          return modelProvider === undefined
             ? {}
-            : { modelProvider: task.modelProvider };
+            : { modelProvider };
         },
       );
       // Router has released the per-Thread restore locks. Background cleanup

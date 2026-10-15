@@ -66,11 +66,12 @@ export async function runAppServerServiceCommand(args) {
 
 export async function runModelRelayServiceCommand(args) {
   if (args.length > 0) throw new Error("内部服务入口不接受参数");
+  const startup = new AbortController();
   let stop;
   let stopping = false;
-  const stopped = new Promise(resolve => { stop = () => { stopping = true; resolve(); }; });
+  const stopped = new Promise(resolve => { stop = () => { stopping = true; startup.abort(); resolve(); }; });
   const controlFromParent = message => { if (message?.type === "codexc-stop") stop(); };
-  process.once("SIGINT", stop); process.once("SIGTERM", stop);
+  process.on("SIGINT", stop); process.on("SIGTERM", stop);
   const cleanupControl = installServiceControlHandler(controlFromParent);
   let service;
   try {
@@ -78,13 +79,18 @@ export async function runModelRelayServiceCommand(args) {
     const { startModelRelayService } = await import("../runtime/model-relay-service.mjs");
     if (stopping) return;
     const { configPath } = locateUserConfig(process.env);
-    service = await startModelRelayService(configPath, process.env);
+    service = await startModelRelayService(configPath, process.env, { signal: startup.signal });
     await stopped;
   }
+  catch (error) {
+    if (!stopping || error?.name !== "AbortError") throw error;
+  }
   finally {
-    process.off("SIGINT", stop); process.off("SIGTERM", stop);
-    cleanupControl();
-    await service?.close();
+    try { await service?.close(); }
+    finally {
+      process.off("SIGINT", stop); process.off("SIGTERM", stop);
+      cleanupControl();
+    }
   }
 }
 

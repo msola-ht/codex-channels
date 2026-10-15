@@ -19,6 +19,7 @@ import {
   metricsRangeOptions,
   metricsFilterOptions,
 } from "./metrics-command-options.mjs";
+import { MetricsExportError, metricsExportMaximumBytes } from "./metrics-export-limits.mjs";
 
 export { metricsRange } from "./metrics-command-options.mjs";
 export function inspectMetricsDatabase(environment = process.env) {
@@ -123,39 +124,52 @@ export function readMetricsReport(environment = process.env, options = {}) {
 }
 
 export function readMetricsExport(environment = process.env, options = {}) {
-  const range = metricsRangeOptions(options, options.nowMs ?? Date.now());
+  let result;
+  let bytes = 0;
+  for (const frame of iterateMetricsExport(environment, options)) {
+    if (frame.type === "header") {
+      result = { ...frame.value, records: [] };
+      bytes = Buffer.byteLength(JSON.stringify(result));
+    } else {
+      bytes += Buffer.byteLength(JSON.stringify(frame.value)) + (result.records.length > 0 ? 1 : 0);
+    }
+    if (bytes > metricsExportMaximumBytes) throw new MetricsExportError("metrics_export_capacity");
+    if (frame.type === "record") result.records.push(frame.value);
+  }
+  return result;
+}
+
+/** 首帧元数据、后续逐条记录，共用一个只读快照；停止迭代即关闭数据库。 */
+export function* iterateMetricsExport(environment = process.env, options = {}) {
+  const reader = openMetricsExport(environment, options);
+  try { yield* reader.frames; }
+  finally { reader.close(); }
+}
+
+/** 初始化连接与读取阶段分离，供 Worker 对两个阶段分别限时。 */
+export function openMetricsExport(environment = process.env, options = {}) {
+  const range = options.resolvedRange ?? metricsRangeOptions(options, options.nowMs ?? Date.now());
   const filters = metricsFilterOptions(options);
   const store = openReadOnlyMetricsDatabase(environment, range.endAtMs);
-  try {
-    const queries = new RequestMetricsQueryService(store);
-    return store.readSnapshot(() => {
-      const records = [];
-      let offset = 0;
-      do {
-        const page = queries.page(range, {
-          ...filters,
-          offset,
-          limit: 500,
-          sortKey: "recordedAtMs",
-          sortDirection: "asc",
-        });
-        records.push(...page.records);
-        offset = page.nextOffset ?? -1;
-      } while (offset >= 0);
-      return {
-        format: "codex-connect-request-metrics-export",
-        version: 3,
-        generatedAt: new Date(range.endAtMs).toISOString(),
-        range,
-        filters,
-        aggregate: queries.aggregate("global", range, filters).aggregate,
-        weeklyQuota: readWeeklyQuota(store, range.endAtMs),
-        records,
-      };
-    });
-  } finally {
-    store.close();
-  }
+  const queries = new RequestMetricsQueryService(store);
+  const frames = store.iterateSnapshot(function* () {
+      const aggregate = queries.aggregate("global", range, filters).aggregate;
+      yield { type: "header", value: {
+        ...(options.webui ? { total: aggregate?.requestCount ?? 0 } : {
+          format: "codex-connect-request-metrics-export", version: 3,
+          weeklyQuota: readWeeklyQuota(store, range.endAtMs),
+        }),
+        generatedAt: new Date(range.endAtMs).toISOString(), range, filters, aggregate,
+      } };
+      for (const record of store.iterateExport({
+        ...filters, startAtMs: range.startAtMs, endAtMs: range.endAtMs,
+        sortKey: options.sortKey ?? "recordedAtMs", sortDirection: options.sortDirection ?? "asc",
+      })) yield { type: "record", value: record };
+  });
+  return { frames, close: () => {
+    try { frames.return(); }
+    finally { store.close(); }
+  } };
 }
 
 export function readQuotaHistory(environment = process.env, options = {}) {

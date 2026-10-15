@@ -42,6 +42,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `audio.ts`：通过既有消息资源权限下载独立音频，限制为 5 分钟、20 MiB 和 Codex CLI
   支持的 WAV/MP3/M4A/WebM/OGG，写入一小时私有临时文件后构造 `localAudio`；Application
   仅在当前模型目录包含 `audio` 时提交，否则在创建或追加 Turn 前明确拒绝。
+  音频在等待前序输入前登记附件取消作用域，下载前固定工作区与 Thread，`/stop`、关闭或授权变化后拒绝提交。图片与音频资源下载和完整流落盘共享 30 秒总预算，取消信号贯穿 SDK 请求与 `pipeline`。
 - `video.ts`：授权后的独立 `video`/`media` 消息、`.mp4`/`.webm` 文件消息与富文本单视频复用官方消息资源下载，
   由共享视频暂存器验证实际 MP4/WebM 签名、64 MiB 上限与 24 小时有效期。只提交随机附件标识及
   `strata_video.analyze_video` MCP 调用说明，保留回复引用上下文，视频封面不作为视频下载；未配置
@@ -83,6 +84,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `oauth-token-store.ts`：macOS Keychain、Linux AES-256-GCM 与 Windows 当前用户 DPAPI 主密钥保护的
   AES-256-GCM 私有凭据后端。
 - `oauth.ts`：按 App 与 Actor 协调单一进行中授权、身份匹配、凭据写入、撤销和停止取消。
+  关闭最多等待 5 秒，仍保留未结算凭据作业的归属；同 App 重建期间凭据入口以 `oauth.closing` 拒绝，旧刷新成功轮换仍保存，直到旧作业实际结束。
 - `renderer.ts`：把平台无关 `ConversationCommandResult`、`OutputEvent`、启动状态和结构化错误
   映射为稳定文本内容；CLI/TUI 输入使用共享“CLI 输入”语义，启动通知、`/status` 与
   `turn.completed` 结束统计均包含当前 Workspace Git 分支；Turn Diff 用围栏展示，内容自带

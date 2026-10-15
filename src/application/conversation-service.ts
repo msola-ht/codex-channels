@@ -111,6 +111,7 @@ import {
   resolveThread,
   type ConversationSession,
   type ConversationSessionQuery,
+  type SessionDisplayCacheOperation,
 } from "./conversation-session-query-service.js";
 import { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 
@@ -221,13 +222,13 @@ export interface PreparedAttachmentSubmission {
   readonly signal: AbortSignal;
   readonly mayHaveSubmitted: boolean;
   captureTarget(): void;
-  submit(text: string): Promise<Submission>;
+  submit(value: string | ConversationInput): Promise<Submission>;
   dispose(): void;
 }
 
 export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
-  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean): PreparedAttachmentSubmission;
+  prepareAttachmentSubmission?(target: ConversationTarget, isAllowed: () => boolean, kind?: "video" | "audio"): PreparedAttachmentSubmission;
   submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission>;
   stop(target: ConversationTarget): Promise<boolean>;
   rename(target: ConversationTarget, name: string): Promise<void>;
@@ -361,7 +362,7 @@ export interface ConversationAccountMetricsUseCases {
   requestMetrics(
     target: ConversationTarget,
     query?: RequestMetricsCommandQuery,
-  ): RequestMetricsResult | null;
+  ): Promise<RequestMetricsResult | null>;
 }
 
 export class ConversationService implements
@@ -417,12 +418,13 @@ export class ConversationService implements
       backgrounded(threadId: string): void;
       restoreRequired(threadId: string): void;
     },
+    onSessionDisplayCacheError?: (operation: SessionDisplayCacheOperation) => void,
   ) {
     this.hookUseCases = new ConversationHookService(this.locks, router, models, queries, hookAuthorization ?? (() => {
       throw new UserFacingError("hooks.forbidden", "Hook 管理授权不可用");
     }), hookReviewPolicy);
     this.sessionQueries = new ConversationSessionQueryService(
-      router, threadHistory, requestMetricsQuery, sessionDisplayCache,
+      router, threadHistory, requestMetricsQuery, sessionDisplayCache, onSessionDisplayCacheError,
     );
     this.extensionQueries = new ConversationExtensionQueryService(
       router,
@@ -600,7 +602,7 @@ export class ConversationService implements
   requestMetrics(
     target: ConversationTarget,
     query: RequestMetricsCommandQuery = { view: "session" },
-  ): RequestMetricsResult | null {
+  ): Promise<RequestMetricsResult | null> {
     return this.accountMetrics.requestMetrics(target, query);
   }
 
@@ -619,11 +621,15 @@ export class ConversationService implements
     return this.submitInput(target, input);
   }
 
-  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean): PreparedAttachmentSubmission {
+  closeSessionQueries(): void {
+    this.sessionQueries.close();
+  }
+
+  prepareAttachmentSubmission(target: ConversationTarget, isAllowed: () => boolean, kind: "video" | "audio" = "video"): PreparedAttachmentSubmission {
     const key = conversationTargetKey(target);
     const pending = this.attachmentInputs.get(key) ?? new Set<AbortController>();
     if (!isAllowed() || pending.size >= 4 || (!this.attachmentInputs.has(key) && this.attachmentInputs.size >= 1000)) {
-      throw new UserFacingError("video.unavailable", "视频输入未获授权或正在处理过多附件");
+      throw new UserFacingError(`${kind}.unavailable`, "附件输入未获授权或正在处理过多附件");
     }
     const controller = new AbortController();
     pending.add(controller);
@@ -634,7 +640,7 @@ export class ConversationService implements
     let captured: { workspaceId: string; workspaceCwd: string; threadId: string | undefined } | undefined;
     const assertAllowed = () => {
       if (controller.signal.aborted || !isAllowed()) {
-        throw new UserFacingError("video.unavailable", "视频输入已取消、超时或授权变化，请重新发送");
+        throw new UserFacingError(`${kind}.unavailable`, "附件输入已取消、超时或授权变化，请重新发送");
       }
     };
     const dispose = () => {
@@ -654,37 +660,37 @@ export class ConversationService implements
       dispose,
       captureTarget: () => {
         assertAllowed();
-        if (captured || used) throw new UserFacingError("video.unavailable", "视频附件目标已捕获");
+        if (captured || used) throw new UserFacingError(`${kind}.unavailable`, "附件目标已捕获");
         // Register cancellation before flushing earlier Surface input; that input
-        // may create the first Thread, which becomes this video's download target.
+        // may create the first Thread, which becomes this attachment's target.
         const workspace = this.router.workspace(target);
         captured = { workspaceId: workspace.id, workspaceCwd: workspace.cwd,
           threadId: this.router.current(target)?.threadId };
       },
-      submit: (text) => this.locked(target, () => {
+      submit: (value) => this.locked(target, () => {
         const snapshot = captured;
-        if (!snapshot) throw new UserFacingError("video.unavailable", "视频附件尚未捕获提交目标");
+        if (!snapshot) throw new UserFacingError(`${kind}.unavailable`, "附件尚未捕获提交目标");
         const assertCurrent = () => {
           assertAllowed();
           const currentWorkspace = this.router.workspace(target);
           if (currentWorkspace.id !== snapshot.workspaceId || currentWorkspace.cwd !== snapshot.workspaceCwd
             || (snapshot.threadId !== undefined && this.router.current(target)?.threadId !== snapshot.threadId)) {
-            throw new UserFacingError("video.unavailable", "视频输入的工作区或会话已变化，请重新发送");
+            throw new UserFacingError(`${kind}.unavailable`, "附件输入的工作区或会话已变化，请重新发送");
           }
         };
         assertCurrent();
-        if (used) throw new UserFacingError("video.unavailable", "视频附件提交入口已使用");
+        if (used) throw new UserFacingError(`${kind}.unavailable`, "附件提交入口已使用");
         used = true;
         if (this.router.current(target)?.threadId !== snapshot.threadId) {
-          throw new UserFacingError("video.unavailable", "视频下载期间会话发生变化，请重新发送");
+          throw new UserFacingError(`${kind}.unavailable`, "附件下载期间会话发生变化，请重新发送");
         }
-        const input = normalizeInput(text);
+        const input = normalizeInput(value);
         if (!input.length) throw new UserFacingError("message.empty", "消息不能为空");
         // ensureSession may create the first Thread under this same conversation lock.
         return this.submitInputLocked(target, input, undefined, (submissionThreadId) => {
           assertCurrent();
           if (this.router.current(target)?.threadId !== submissionThreadId) {
-            throw new UserFacingError("video.unavailable", "视频附件的实际提交会话已失效，请重新发送");
+            throw new UserFacingError(`${kind}.unavailable`, "附件的实际提交会话已失效，请重新发送");
           }
           // Once the RPC may start, a lost acknowledgment must not delete its file.
           mayHaveSubmitted = true;
@@ -1372,6 +1378,7 @@ export class ConversationService implements
     return this.locked(target, async () => {
       this.requireIdle(target);
       const binding = await this.ensureSession(target);
+      this.requireIdle(target);
       await this.codex.compactThread(binding.threadId);
     });
   }
@@ -1438,6 +1445,7 @@ export class ConversationService implements
     return this.locked(target, async () => {
       this.requireIdle(target);
       const binding = await this.ensureSession(target);
+      this.requireIdle(target);
       const result = await this.codex.startReview(binding.threadId, reviewTarget);
       this.core.markTurnStarted(target, result.threadId, result.turnId);
       return { threadId: result.threadId, turnId: result.turnId, steered: false };
@@ -1706,6 +1714,11 @@ export class ConversationService implements
   ): Promise<Submission> {
     this.touchActivity(target);
     const binding = await this.ensureSession(target);
+    // Subscription restoration can publish an active Turn while ensure waits.
+    // Do not start a new Turn using the idle decision made before that await.
+    if (this.core.activeTurn(target)) {
+      throw new UserFacingError("conversation.busy", "会话活动状态已恢复，请重新发送消息", { reason: "activity-restored" });
+    }
     this.sessionQueries.invalidateSessionDisplayCache(binding.threadId);
     const workspace = this.router.workspace(target);
     const overrides = this.turnOverrides(target);

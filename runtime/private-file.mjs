@@ -15,7 +15,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import {
-  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -48,6 +47,9 @@ export async function readPrivateConfigFile(path, { signal, maximumBytes = defau
   }
   signal?.throwIfAborted();
   if (process.platform === "win32") {
+    const metadata = await lstat(path);
+    signal?.throwIfAborted();
+    if (metadata.isSymbolicLink()) throw new Error("私有路径不能是符号链接");
     const invocation = windowsPrivatePathInvocation();
     let result;
     try {
@@ -193,23 +195,24 @@ export function writePrivateFileAtomicSync(path, content) {
   }
 }
 
-export async function writePrivateFileAtomic(path, content) {
-  return writeFileAtomic(path, content, false);
+export async function writePrivateFileAtomic(path, content, options = {}) {
+  return writeFileAtomic(path, content, false, options);
 }
 
-export async function writeCodexConfigFileAtomic(path, content) {
-  return writeFileAtomic(path, content, true);
+export async function writeCodexConfigFileAtomic(path, content, options = {}) {
+  return writeFileAtomic(path, content, true, options);
 }
 
-async function writeFileAtomic(path, content, sharedConfig) {
+async function writeFileAtomic(path, content, sharedConfig, { signal }) {
+  signal?.throwIfAborted();
   const parent = dirname(path);
   let parentExisted = true;
   try { await lstat(parent); } catch (error) { if (error.code !== "ENOENT") throw error; parentExisted = false; }
   await mkdir(parent, { recursive: true, mode: 0o700 });
   let staging;
   if (process.platform === "win32") {
-    if (parentExisted) assertWindowsPrivatePathSync(parent, "parent-directory");
-    else securePrivateDirectorySync(parent);
+    if (parentExisted) await assertWindowsPrivatePath(parent, "parent-directory", "verify", {}, signal);
+    else await securePrivateDirectory(parent, { signal });
     staging = await mkdtemp(join(parent, ".codexc-write-"));
   }
   const sharedWindows = process.platform === "win32" && sharedConfig;
@@ -218,22 +221,20 @@ async function writeFileAtomic(path, content, sharedConfig) {
   const temporaryPath = staging && !sharedWindows ? join(staging, "content") : privateTemporaryPath(path);
   let retainStaging = false;
   try {
-    if (staging) securePrivateDirectorySync(staging);
+    signal?.throwIfAborted();
+    if (staging) await securePrivateDirectory(staging, { signal });
     if (sharedWindows) {
       await writeFile(temporaryPath, "", { flag: "wx" });
-      securePrivateFileSync(temporaryPath);
-      await writeFile(temporaryPath, content, { flag: "r+" });
-    } else await writeFile(temporaryPath, content, { mode: 0o600, flag: "wx" });
-    if (process.platform === "win32") {
-      assertWindowsPrivatePathSync(temporaryPath, "file", "secure");
-    } else {
-      await chmod(temporaryPath, 0o600);
-    }
+      await securePrivateFile(temporaryPath, { signal });
+      await writeFile(temporaryPath, content, { flag: "r+", signal });
+    } else await writeFile(temporaryPath, content, { mode: 0o600, flag: "wx", signal });
+    await securePrivateFile(temporaryPath, { signal });
+    signal?.throwIfAborted();
     if (process.platform === "win32" && sharedConfig) {
       retainStaging = true;
-      assertWindowsPrivatePathSync(temporaryPath, "codex-config", "replace-config", {
+      await assertWindowsPrivatePath(temporaryPath, "codex-config", "replace-config", {
         destination: resolve(path), recoveryDirectory: resolve(staging),
-      });
+      }, signal);
       retainStaging = false;
     } else await rename(temporaryPath, path);
   } catch (error) {
@@ -267,6 +268,49 @@ export function securePrivateDirectorySync(path) {
     return;
   }
   chmodSync(path, 0o700);
+}
+
+export async function securePrivateFile(path, { signal } = {}) {
+  signal?.throwIfAborted();
+  if (process.platform === "win32") await assertWindowsPrivatePath(path, "file", "secure", {}, signal);
+  else await secureUnixPrivatePath(path, false, signal);
+  signal?.throwIfAborted();
+}
+
+export async function securePrivateDirectory(path, { signal } = {}) {
+  signal?.throwIfAborted();
+  if (process.platform === "win32") await assertWindowsPrivatePath(path, "directory", "secure", {}, signal);
+  else await secureUnixPrivatePath(path, true, signal);
+  signal?.throwIfAborted();
+}
+
+async function secureUnixPrivatePath(path, directory, signal) {
+  const validate = metadata => {
+    if (metadata.isSymbolicLink() || !(directory ? metadata.isDirectory() : metadata.isFile())
+      || (process.getuid !== undefined && metadata.uid !== process.getuid())) {
+      throw new Error("私有路径类型或所有者无效");
+    }
+  };
+  const before = await lstat(path);
+  validate(before);
+  signal?.throwIfAborted();
+  const descriptor = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const opened = await descriptor.stat();
+    validate(opened);
+    if (opened.dev !== before.dev || opened.ino !== before.ino) throw new Error("私有路径在保护期间发生变化");
+    signal?.throwIfAborted();
+    await descriptor.chmod(directory ? 0o700 : 0o600);
+    const current = await lstat(path);
+    validate(current);
+    if (current.dev !== opened.dev || current.ino !== opened.ino) throw new Error("私有路径在保护期间发生变化");
+  } finally { await descriptor.close(); }
+}
+
+export async function assertPrivateDirectoryAccess(path, { signal } = {}) {
+  signal?.throwIfAborted();
+  if (process.platform === "win32") await assertWindowsPrivatePath(path, "directory", "verify", {}, signal);
+  signal?.throwIfAborted();
 }
 
 /** Create or protect a directory only after checking its type and ownership. */
@@ -332,6 +376,25 @@ function assertWindowsPrivatePathSync(path, kind, operation = "verify", addition
   } catch {
     throw new WindowsPrivatePathError("Windows 私有路径 ACL 检查返回无效");
   }
+  if (response?.ok === false) throw windowsPrivatePathProcessError(undefined, 1, result, path, kind, operation);
+  if (response?.ok !== true) throw new WindowsPrivatePathError("Windows 私有路径 ACL 校验未通过");
+}
+
+async function assertWindowsPrivatePath(path, kind, operation = "verify", additional = {}, signal) {
+  signal?.throwIfAborted();
+  const before = await lstat(path);
+  if (before.isSymbolicLink()) throw new Error("私有路径不能是符号链接");
+  let result;
+  try {
+    result = await invokeWindowsAcl(windowsPrivatePathInvocation(), { operation, kind, path, ...additional }, 1_048_576, signal);
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw windowsPrivatePathProcessError(error, error.code, "", path, kind, operation);
+  }
+  signal?.throwIfAborted();
+  let response;
+  try { response = JSON.parse(result.trim()); }
+  catch { throw new WindowsPrivatePathError("Windows 私有路径 ACL 检查返回无效"); }
   if (response?.ok === false) throw windowsPrivatePathProcessError(undefined, 1, result, path, kind, operation);
   if (response?.ok !== true) throw new WindowsPrivatePathError("Windows 私有路径 ACL 校验未通过");
 }

@@ -72,7 +72,8 @@ export interface SubagentCompletionTrackerOptions {
   readSummary: (
     agentThreadId: string,
     terminalTurnId?: string,
-  ) => SubagentMetricsSummary;
+    signal?: AbortSignal,
+  ) => Promise<SubagentMetricsSummary>;
   waitForMetrics?: (agentThreadId: string, agentTurnId?: string) => Promise<boolean>;
   onRunStarted?: (details: {
     agentThreadId: string;
@@ -390,9 +391,10 @@ export class SubagentCompletionTracker {
 
   private async drainTerminals(): Promise<void> {
     const entries = [...this.active.values(), ...this.detached];
+    const cancellation = new AbortController();
     let timer: NodeJS.Timeout | undefined;
     const deadline = new Promise<false>((resolve) => {
-      timer = setTimeout(() => resolve(false), defaultSettleDelayMs);
+      timer = setTimeout(() => { cancellation.abort(); resolve(false); }, defaultSettleDelayMs);
     });
     try {
       await Promise.all(entries.map(async (entry) => {
@@ -405,10 +407,11 @@ export class SubagentCompletionTracker {
           entry.metricsCheckpoint ?? Promise.resolve(true),
           deadline,
         ]);
-        await this.complete(entry.agentThreadId, entry, entry.revision, this.detached.has(entry));
+        await this.complete(entry.agentThreadId, entry, entry.revision, this.detached.has(entry), cancellation.signal);
       }));
     } finally {
       if (timer) clearTimeout(timer);
+      cancellation.abort();
       this.close();
     }
   }
@@ -776,6 +779,7 @@ export class SubagentCompletionTracker {
     entry: ActiveSubagent,
     revision: number,
     detached = false,
+    signal?: AbortSignal,
   ): Promise<void> {
     if (
       this.closed || entry.emitted || entry.revision !== revision
@@ -790,7 +794,7 @@ export class SubagentCompletionTracker {
     let metricsStatus: SubagentCompletedEvent["metricsStatus"] = "unavailable";
     if (metricsPersisted) {
       try {
-        summary = this.options.readSummary(agentThreadId, entry.terminalTurnId);
+        summary = await this.options.readSummary(agentThreadId, entry.terminalTurnId, signal);
         metricsStatus = summary.threadAggregate?.requestCount
           ? "available"
           : "empty";
@@ -798,6 +802,8 @@ export class SubagentCompletionTracker {
         this.options.onReadError?.(error, agentThreadId);
       }
     }
+    if (this.closed || entry.emitted || entry.revision !== revision
+      || (!detached && this.active.get(agentThreadId) !== entry)) return;
     const aggregate = summary?.threadAggregate ?? null;
     if (metricsStatus === "empty") {
       this.options.onMissingMetrics?.(agentThreadId);

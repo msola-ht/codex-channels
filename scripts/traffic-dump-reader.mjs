@@ -207,7 +207,8 @@ export async function describeDumpExchange(
       storedBytes: interaction.response.payload?.bytes,
       ...(streamFacts ?? facts),
       ...collected,
-      ...(nativeResponses && responsePayload.truncated ? { outputTruncated: true } : {}),
+      ...(responsePayload.truncated || interaction.response.traceTruncated === true && collected.outputSource === "trace"
+        ? { outputTruncated: true } : {}),
     },
     trace: trace.items,
     tracePage: trace.page,

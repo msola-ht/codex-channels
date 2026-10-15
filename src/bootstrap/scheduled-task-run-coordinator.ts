@@ -6,11 +6,12 @@ import type {
   TurnStatus,
 } from "../conversation-core/index.js";
 import type { ThreadHistoryPort } from "../application/index.js";
+import { ScheduledTaskStateError } from "../scheduled-tasks/index.js";
 import type {
   ScheduledRun,
   ScheduledRunErrorCategory,
   ScheduledTask,
-  ScheduledTaskStore,
+  ScheduledTaskStorePort,
 } from "../scheduled-tasks/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
 
@@ -22,6 +23,7 @@ interface ExecutionReference {
 }
 
 interface PendingTerminal {
+  turnId: string;
   status: Exclude<TurnStatus, "inProgress">;
 }
 
@@ -47,6 +49,7 @@ export interface ScheduledTaskRunValidation {
  * in-memory active-turn map, so Gateway restart can reconcile from history.
  */
 export class ScheduledTaskRunCoordinator {
+  private initialized = false;
   private readonly referencesByRun = new Map<string, ExecutionReference>();
   private readonly runIdsByThread = new Map<string, Set<string>>();
   private readonly pendingTerminalByRun = new Map<string, PendingTerminal>();
@@ -56,7 +59,7 @@ export class ScheduledTaskRunCoordinator {
   private readonly onRecovered: ScheduledTaskRunCoordinatorOptions["onRecovered"];
 
   constructor(
-    private readonly store: ScheduledTaskStore,
+    private readonly store: ScheduledTaskStorePort,
     private readonly router: SessionRouter,
     private readonly history: ThreadHistoryPort,
     options: ScheduledTaskRunCoordinatorOptions,
@@ -69,40 +72,53 @@ export class ScheduledTaskRunCoordinator {
     this.onRecovered = options.onRecovered;
   }
 
-  initialize(): void {
+  async initialize(signal?: AbortSignal): Promise<void> {
+    this.initialized = false;
     this.referencesByRun.clear();
     this.runIdsByThread.clear();
     this.pendingTerminalByRun.clear();
     this.pendingFailureByRun.clear();
-    for (const run of this.store.listRunningRuns()) {
-      if (run.threadId === null || run.turnId === null) {
-        this.markUncertainIfRunning(run.runId);
-        continue;
+    let afterRunId: string | undefined;
+    while (!signal?.aborted) {
+      const runs = await this.store.listRecoverableRuns(afterRunId === undefined ? {} : { afterRunId });
+      if (signal?.aborted) return;
+      for (const run of runs) {
+        if (signal?.aborted) return;
+        if (run.threadId === null || run.turnId === null) {
+          await this.markUncertainIfRunning(run.runId, signal);
+        }
+        if (run.threadId === null) continue;
+        this.remember({
+          runId: run.runId,
+          taskId: run.taskId,
+          threadId: run.threadId,
+          turnId: run.turnId,
+        });
+        if (run.errorCategory === "approval") {
+          this.pendingFailureByRun.set(run.runId, "approval");
+        }
       }
-      this.remember({
-        runId: run.runId,
-        taskId: run.taskId,
-        threadId: run.threadId,
-        turnId: run.turnId,
-      });
-      if (run.errorCategory === "approval") {
-        this.pendingFailureByRun.set(run.runId, "approval");
+      if (runs.length < 200) {
+        this.initialized = true;
+        return;
       }
+      afterRunId = runs.at(-1)!.runId;
     }
   }
 
-  /** Running scheduled Threads must remain bound while authoritative history is read. */
+  /** Unresolved scheduled Threads remain protected while authoritative history is read. */
   runningThreadIds(): ReadonlySet<string> {
     return new Set(this.runIdsByThread.keys());
   }
 
-  taskForThread(threadId: string): ScheduledTask | undefined {
+  async taskForThread(threadId: string): Promise<ScheduledTask | undefined> {
+    if (!this.initialized) throw new Error("计划任务运行关联尚未就绪");
     const runIds = this.runIdsByThread.get(threadId);
     for (const runId of runIds ?? []) {
       const reference = this.referencesByRun.get(runId);
       if (!reference) continue;
-      const run = this.store.getRun(runId);
-      if (run?.state === "dispatching" || run?.state === "running") {
+      const run = await this.store.getRun(runId);
+      if (run?.state === "dispatching" || run?.state === "running" || run?.state === "uncertain") {
         return this.store.getTask(reference.taskId);
       }
     }
@@ -140,30 +156,37 @@ export class ScheduledTaskRunCoordinator {
     });
   }
 
-  noteServerRequestRejected(threadId: string): void {
-    for (const runId of this.runIdsByThread.get(threadId) ?? []) {
-      const run = this.store.getRun(runId);
-      if (run?.state === "dispatching" || run?.state === "running") {
-        this.pendingFailureByRun.set(runId, "approval");
-        try {
-          this.store.markApprovalRejected(runId);
-        } catch (error) {
-          this.logger?.warn(
-            { err: error, runId, threadId },
-            "计划任务无人值守审批拒绝状态持久化失败",
-          );
+  async noteServerRequestRejected(threadId: string): Promise<boolean> {
+    if (!this.initialized) throw new Error("计划任务运行关联尚未就绪");
+    const runIds = [...(this.runIdsByThread.get(threadId) ?? [])];
+    // Ownership comes from restored/live execution references. Record every
+    // rejection synchronously so a concurrent Turn completion cannot win an
+    // awaited Task/Run lookup and discard the unattended failure.
+    for (const runId of runIds) {
+      this.pendingFailureByRun.set(runId, "approval");
+    }
+    for (const runId of runIds) {
+      try {
+        const run = await this.store.getRun(runId);
+        if (run?.state === "dispatching" || run?.state === "running") {
+          await this.store.markApprovalRejected(runId);
         }
+      } catch (error) {
+        this.logger?.warn(
+          { err: error, runId, threadId },
+          "计划任务无人值守审批拒绝状态持久化失败",
+        );
       }
     }
+    return runIds.length > 0;
   }
 
   /** Apply a completion that raced the scheduler's dispatching -> running write. */
-  onRunStateChanged(run: ScheduledRun): void {
+  async onRunStateChanged(run: ScheduledRun, signal?: AbortSignal): Promise<void> {
     if (
       run.state === "completed"
       || run.state === "failed"
       || run.state === "interrupted"
-      || run.state === "uncertain"
     ) {
       this.pendingTerminalByRun.delete(run.runId);
       this.pendingFailureByRun.delete(run.runId);
@@ -171,43 +194,85 @@ export class ScheduledTaskRunCoordinator {
       return;
     }
     const pending = this.pendingTerminalByRun.get(run.runId);
-    if (!pending) return;
-    this.pendingTerminalByRun.delete(run.runId);
-    this.applyTerminal(run.runId, pending.status);
+    const reference = this.referencesByRun.get(run.runId);
+    if (!pending || !reference || reference.turnId === null) return;
+    if (reference.turnId === pending.turnId) {
+      await this.applyTerminal(run.runId, pending.status);
+      return;
+    }
+    // Only one early candidate is retained per Run. A native client can finish
+    // another Turn before turn/start responds; recover the scheduled Turn's
+    // exact result from bounded authoritative history instead of guessing.
+    if (signal?.aborted) return;
+    const timeout = AbortSignal.timeout(5_000);
+    const historySignal = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+    let turn: Awaited<ReturnType<ScheduledTaskRunCoordinator["findTurn"]>>;
+    try {
+      turn = await this.findTurn(reference.threadId, reference.turnId, historySignal);
+    } catch (error) {
+      if (signal?.aborted) return;
+      this.logger?.warn(
+        { err: error, runId: run.runId, threadId: reference.threadId, turnId: reference.turnId },
+        "计划任务启动期间的完成事件无法从权威 Turn 历史确认",
+      );
+    }
+    // Live completion may arrive during the history read or its failure. It is
+    // sufficient evidence on its own and must win over an uncertain fallback.
+    if (signal?.aborted) return;
+    const latest = await this.store.getRun(run.runId);
+    if (signal?.aborted) return;
+    const live = this.pendingTerminalByRun.get(run.runId);
+    if (live?.turnId === reference.turnId) {
+      await this.applyTerminal(run.runId, live.status, signal);
+    } else if (turn && turn.status !== "inProgress") {
+      await this.applyTerminal(run.runId, turn.status, signal);
+    } else if (!turn && latest?.state === "running") {
+      await this.store.markUncertain(run.runId);
+    }
+    if (this.pendingTerminalByRun.get(run.runId) === pending) {
+      this.pendingTerminalByRun.delete(run.runId);
+    }
   }
 
-  handleOutput(event: OutputEvent): void {
+  async handleOutput(event: OutputEvent): Promise<void> {
     if (event.type !== "turn.completed" || event.status === "inProgress") return;
-    this.handleCompletion(event.threadId, event.turnId, event.status);
+    await this.handleCompletion(event.threadId, event.turnId, event.status);
   }
 
   /** Remember live completion before asynchronous output consumers can fall behind recovery. */
   observeOutput(event: OutputEvent): void {
     if (event.type !== "turn.completed" || event.status === "inProgress") return;
     const reference = this.referenceFor(event.threadId, event.turnId);
-    if (reference) this.pendingTerminalByRun.set(reference.runId, { status: event.status });
+    if (reference) this.rememberTerminal(reference, event.turnId, event.status);
   }
 
-  handleCompletion(
+  async handleCompletion(
     threadId: string,
     turnId: string,
     status: Exclude<TurnStatus, "inProgress">,
-  ): void {
+  ): Promise<void> {
     const run = this.referenceFor(threadId, turnId);
     if (!run) return;
-    const stored = this.store.getRun(run.runId);
+    // An early completion may precede turn/start's response. Keep its exact ID
+    // until onTurnStarted confirms it; a Thread-only association proves nothing.
+    if (run.turnId === null) {
+      this.rememberTerminal(run, turnId, status);
+      return;
+    }
+    const stored = await this.store.getRun(run.runId);
     if (!stored || stored.state === "completed" || stored.state === "failed" || stored.state === "interrupted") {
+      this.forget(run.runId);
       return;
     }
     if (stored.state === "dispatching") {
-      this.pendingTerminalByRun.set(run.runId, { status });
+      this.rememberTerminal(run, turnId, status);
       return;
     }
-    this.applyTerminal(run.runId, status);
+    await this.applyTerminal(run.runId, status);
   }
 
   /**
-   * Reconcile persisted running Runs after subscriptions have been restored.
+   * Reconcile persisted running/uncertain Runs after subscriptions are restored.
    * Idle is never treated as success: the exact Turn must be found in the
    * authoritative paginated history with a terminal status.
    */
@@ -216,14 +281,15 @@ export class ScheduledTaskRunCoordinator {
       threadIds === undefined || threadIds.has(reference.threadId));
     for (const reference of running) {
       if (signal?.aborted) return;
-      const run = this.store.getRun(reference.runId);
-      const task = this.store.getTask(reference.taskId);
-      if (!run || run.state !== "running" || !task) continue;
+      const run = await this.store.getRun(reference.runId);
+      const task = await this.store.getTask(reference.taskId);
+      if (signal?.aborted) return;
+      if (!run || (run.state !== "running" && run.state !== "uncertain") || !task) continue;
       if (await this.applyRecoveryValidation(reference, signal)) continue;
       if (signal?.aborted) return;
       const binding = this.router.targetForThread(reference.threadId);
       if (!binding || !this.router.isBackgroundThread(reference.threadId)) {
-        this.markUncertainIfRunning(run.runId);
+        await this.markUncertainIfRunning(run.runId, signal);
         continue;
       }
       const settings = this.router.modelSettingsForThread(reference.threadId);
@@ -231,21 +297,21 @@ export class ScheduledTaskRunCoordinator {
         task.modelProvider != null
         && settings?.modelProvider !== task.modelProvider
       ) {
-        this.markUncertainIfRunning(run.runId);
+        await this.markUncertainIfRunning(run.runId, signal);
         continue;
       }
       if (
         task.model != null
         && settings?.model !== task.model
       ) {
-        this.markUncertainIfRunning(run.runId);
+        await this.markUncertainIfRunning(run.runId, signal);
         continue;
       }
       try {
         const turn = await this.findTurn(reference.threadId, reference.turnId, signal);
         if (signal?.aborted) return;
         if (!turn) {
-          this.markUncertainIfRunning(run.runId);
+          await this.markUncertainIfRunning(run.runId, signal);
           continue;
         }
         if (turn.status === "inProgress") continue;
@@ -258,7 +324,8 @@ export class ScheduledTaskRunCoordinator {
           && currentTarget.accountId === task.accountId
           && currentTarget.conversationId === task.conversationId
           && this.router.isBackgroundThread(reference.threadId);
-        const recovered = this.applyTerminal(run.runId, turn.status);
+        const recovered = await this.applyTerminal(run.runId, turn.status, signal);
+        if (signal?.aborted) return;
         if (!stillOwned) continue;
         if (recovered && !liveCompletionObserved) this.onRecovered?.(recovered, currentTarget);
         await this.router.releaseBackground(reference.threadId).catch((error) => {
@@ -271,7 +338,7 @@ export class ScheduledTaskRunCoordinator {
           { err: error, threadId: reference.threadId, turnId: reference.turnId },
           "计划任务运行状态无法从权威 Turn 历史恢复",
         );
-        this.markUncertainIfRunning(run.runId);
+        await this.markUncertainIfRunning(run.runId, signal);
       }
     }
   }
@@ -283,6 +350,7 @@ export class ScheduledTaskRunCoordinator {
     for (let page = 0; page < 100; page += 1) {
       signal?.throwIfAborted();
       const result = await this.history.listThreadTurns(threadId, {
+        ...(signal === undefined ? {} : { signal }),
         cursor,
         limit: 100,
         sortDirection: "desc",
@@ -300,11 +368,12 @@ export class ScheduledTaskRunCoordinator {
 
   private async applyRecoveryValidation(reference: ExecutionReference, signal?: AbortSignal): Promise<boolean> {
     if (signal?.aborted) return true;
-    const run = this.store.getRun(reference.runId);
-    const task = this.store.getTask(reference.taskId);
-    if (!run || run.state !== "running") return true;
+    const run = await this.store.getRun(reference.runId);
+    const task = await this.store.getTask(reference.taskId);
+    if (signal?.aborted) return true;
+    if (!run || (run.state !== "running" && run.state !== "uncertain")) return true;
     if (!task) {
-      this.markUncertainIfRunning(run.runId);
+      await this.markUncertainIfRunning(run.runId, signal);
       return true;
     }
     let validation: ScheduledTaskRunValidation | undefined;
@@ -317,11 +386,13 @@ export class ScheduledTaskRunCoordinator {
     if (signal?.aborted) return true;
     if (!validation) return false;
     if (!validation.blockTask) {
-      this.markUncertainIfRunning(run.runId);
+      await this.markUncertainIfRunning(run.runId, signal);
       return true;
     }
-    this.blockTask(task.taskId);
-    this.markFailedIfRunning(run.runId, validation.category);
+    await this.blockTask(task.taskId);
+    if (signal?.aborted) return true;
+    await this.markFailedIfRunning(run.runId, validation.category, signal);
+    if (signal?.aborted) return true;
     try {
       await this.router.releaseBackground(reference.threadId);
     } catch (error) {
@@ -337,22 +408,35 @@ export class ScheduledTaskRunCoordinator {
     return true;
   }
 
-  private applyTerminal(
+  private async applyTerminal(
     runId: string,
     status: Exclude<TurnStatus, "inProgress">,
-  ): ScheduledRun | undefined {
-    const run = this.store.getRun(runId);
+    signal?: AbortSignal,
+  ): Promise<ScheduledRun | undefined> {
+    const run = await this.store.getRun(runId);
+    if (signal?.aborted) return;
+    // A terminal observation releases only the exact execution's refusal
+    // ownership. It cannot rewrite an uncertain historical result as success.
+    if (run?.state === "uncertain") {
+      this.forget(runId);
+      return;
+    }
     if (!run || (run.state !== "running" && run.state !== "dispatching")) return;
     const forcedFailure = this.pendingFailureByRun.get(runId);
-    this.pendingFailureByRun.delete(runId);
-    if (forcedFailure !== undefined) {
-      this.store.markFailed(runId, forcedFailure);
-    } else if (status === "completed") {
-      this.store.markCompleted(runId);
-    } else if (status === "interrupted") {
-      this.store.markInterrupted(runId);
-    } else {
-      this.store.markFailed(runId, "unknown");
+    try {
+      if (forcedFailure !== undefined) {
+        await this.store.markFailed(runId, forcedFailure);
+      } else if (status === "completed") {
+        await this.store.markCompleted(runId);
+      } else if (status === "interrupted") {
+        await this.store.markInterrupted(runId);
+      } else {
+        await this.store.markFailed(runId, "unknown");
+      }
+    } catch (error) {
+      if (!(error instanceof ScheduledTaskStateError)) throw error;
+      const latest = await this.store.getRun(runId);
+      if (!latest || latest.state === "dispatching" || latest.state === "running" || latest.state === "uncertain") throw error;
     }
     this.forget(runId);
     return this.store.getRun(runId);
@@ -363,6 +447,17 @@ export class ScheduledTaskRunCoordinator {
       .map((runId) => this.referencesByRun.get(runId))
       .find((reference): reference is ExecutionReference =>
         reference !== undefined && (reference.turnId === null || reference.turnId === turnId));
+  }
+
+  private rememberTerminal(
+    reference: ExecutionReference,
+    turnId: string,
+    status: Exclude<TurnStatus, "inProgress">,
+  ): void {
+    const pending = this.pendingTerminalByRun.get(reference.runId);
+    if (reference.turnId !== null || !pending || pending.turnId === turnId) {
+      this.pendingTerminalByRun.set(reference.runId, { turnId, status });
+    }
   }
 
   private remember(reference: ExecutionReference): void {
@@ -383,27 +478,28 @@ export class ScheduledTaskRunCoordinator {
     if (runs?.size === 0) this.runIdsByThread.delete(reference.threadId);
   }
 
-  private blockTask(taskId: string): void {
+  private async blockTask(taskId: string): Promise<void> {
     try {
-      this.store.blockTask(taskId);
+      await this.store.blockTask(taskId);
     } catch (error) {
       this.logger?.warn({ err: error, taskId }, "计划任务授权失败后无法标记 blocked");
     }
   }
 
-  private markFailedIfRunning(runId: string, category: ScheduledRunErrorCategory): void {
-    const run = this.store.getRun(runId);
+  private async markFailedIfRunning(runId: string, category: ScheduledRunErrorCategory, signal?: AbortSignal): Promise<void> {
+    const run = await this.store.getRun(runId);
+    if (signal?.aborted) return;
     if (run?.state === "running") {
-      this.store.markFailed(runId, category);
+      await this.store.markFailed(runId, category);
       this.forget(runId);
     }
   }
 
-  private markUncertainIfRunning(runId: string): void {
-    const run = this.store.getRun(runId);
+  private async markUncertainIfRunning(runId: string, signal?: AbortSignal): Promise<void> {
+    const run = await this.store.getRun(runId);
+    if (signal?.aborted) return;
     if (run?.state === "running") {
-      this.store.markUncertain(runId);
-      this.forget(runId);
+      await this.store.markUncertain(runId);
     }
   }
 }

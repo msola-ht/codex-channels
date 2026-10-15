@@ -203,7 +203,7 @@ export interface ProviderAccountQueryPort {
 }
 
 export interface OfficialAccountSnapshotWriter {
-  writeOfficialAccountSnapshot(snapshot: OfficialAccountSnapshot): void;
+  writeOfficialAccountSnapshot(snapshot: OfficialAccountSnapshot, signal?: AbortSignal): Promise<void>;
 }
 
 /** 跨展示端复用的、已脱敏官方账户快照读模型。 */

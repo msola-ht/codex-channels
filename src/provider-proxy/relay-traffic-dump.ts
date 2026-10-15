@@ -1,4 +1,3 @@
-import type { WriteStream } from "node:fs";
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
 import { RelayDumpPayload, redactRelayValue } from "./relay-dump-payload.js";
 import { capturedTrafficHeaders } from "./traffic-dump-headers.js";
@@ -28,10 +27,8 @@ export interface DirectChatCapture {
 export class RelayTrafficDump {
   private readonly sessionGroups: Set<TrafficDumpSession>[] = [];
   private get sessions(): TrafficDumpSession[] { return this.sessionGroups.flatMap(group => [...group]); }
-  private queue = Promise.resolve();
   // Includes accepted writes that have not reached disk yet.
   private retained = 0;
-  private protectedDuringMaintenance: string[] | undefined;
   private ready = false;
   private retentionDays = 30;
   private maintenance: Promise<void> | undefined;
@@ -40,18 +37,20 @@ export class RelayTrafficDump {
   private active = 0;
   private reserved = 0;
   private closed = false;
+  private closeTask: Promise<void> | undefined;
   private failed = false;
   private skippedCapacity = 0;
   private readonly reported = new Set<string>();
   private readonly storage: Record<"chat" | "responses", TrafficDumpStorage>;
   constructor(private readonly options: { directory: string; onError(error: Error): void }) {
-    const pendingBudget = { bytes: 0 };
+    const pendingBudget = { bytes: 0, items: 0, traceBytes: 0 };
     const create = (protocol: "chat" | "responses"): TrafficDumpStorage => {
       const sessions = new Set<TrafficDumpSession>(); this.sessionGroups.push(sessions);
       return new TrafficDumpStorage({ ...options, label: `relay.${protocol}`, retentionDays: this.retentionDays,
         retentionManagedExternally: true, maximumPendingBytes: 14 * MiB, pendingBudget, rotateAfterPayloadBytes: 8 * MiB,
-        onBytesAccepted: bytes => { this.retained += bytes; }, onError: () => this.fail() }, {
-        sessions, streams: new Set<WriteStream>(), getWriteQueue: () => this.queue, setWriteQueue: queue => { this.queue = queue; },
+        onBytesAccepted: bytes => { this.retained += bytes; },
+        onCapacity: error => this.notice(error.message), onError: error => this.fail(error.message) }, {
+        sessions,
       });
     };
     this.storage = { chat: create("chat"), responses: create("responses") };
@@ -70,27 +69,32 @@ export class RelayTrafficDump {
       else await task;
     }
   }
-  /** First enabled request waits for initialization, within its cancellation deadline. */
-  async open(provider: string, signal: AbortSignal, debug = false): Promise<DirectChatCapture | undefined> {
-    await this.prepare(signal);
-    signal.throwIfAborted();
-    return this.begin(provider, debug);
+  /** A request never waits for disk maintenance; initialization has explicit diagnostics. */
+  open(provider: string, signal: AbortSignal, debug = false): Promise<DirectChatCapture | undefined> {
+    return Promise.resolve().then(() => {
+      signal.throwIfAborted();
+      return this.begin(provider, debug);
+    });
   }
   private maintain(): Promise<void> {
     if (this.maintenance) return this.maintenance;
     if (this.closed || this.failed) return Promise.resolve();
     const initializing = !this.ready;
+    const timer = setTimeout(() => {
+      this.maintenanceAbort.abort();
+      this.fail("Relay traffic dump maintenance failed (timeout)");
+    }, 5000);
     const protectedSessionDirectories = [...this.sessions].flatMap(session => session.sessionDirectory ? [session.sessionDirectory] : []);
-    this.protectedDuringMaintenance = protectedSessionDirectories;
     this.maintenance = (async () => {
       const retained = await pruneModelTrafficDumpSessionsAsync({ directory: this.options.directory, labels: ["relay.chat", "relay.responses"], retentionDays: this.retentionDays,
         maximumBytes: 512 * MiB - reservationBytes - 128 * 1024,
-        protectedSessionDirectories,
+        protectedSessionDirectories, isProtected: path => this.sessions.some(session => session.sessionDirectory === path),
         onRemoved: bytes => { if (!initializing) this.retained -= bytes; } }, this.maintenanceAbort.signal);
       if (initializing) this.retained = retained;
-      this.ready = true;
+      if (!this.closed && !this.failed && !this.maintenanceAbort.signal.aborted) this.ready = true;
     })().catch(() => { if (!this.closed) this.fail(); }).finally(() => {
-      this.lastMaintenance = performance.now(); this.maintenance = undefined; this.protectedDuringMaintenance = undefined;
+      this.lastMaintenance = performance.now(); this.maintenance = undefined;
+      clearTimeout(timer);
     });
     return this.maintenance;
   }
@@ -104,7 +108,8 @@ export class RelayTrafficDump {
     if (!this.ready || elapsed >= 60_000 || full && elapsed >= 1000) void this.maintain();
     if (!this.ready || full) {
       if (full) this.skippedCapacity = Math.min(Number.MAX_SAFE_INTEGER, this.skippedCapacity + 1);
-      this.notice("Relay traffic dump capacity unavailable; capture skipped"); return undefined;
+      this.notice(this.ready ? "Relay traffic dump capacity unavailable; capture skipped"
+        : "Relay traffic dump initializing; capture skipped"); return undefined;
     }
     try {
       this.active++; this.reserved += reservation;
@@ -114,9 +119,6 @@ export class RelayTrafficDump {
       const session = storage.beginLogicalInteraction(startedAtMs);
       const id = storage.nextInteractionId(session);
       const reference = storage.reference(session, id);
-      if (session.sessionDirectory && this.protectedDuringMaintenance && !this.protectedDuringMaintenance.includes(session.sessionDirectory)) {
-        this.protectedDuringMaintenance.push(session.sessionDirectory);
-      }
       let requestSaved = false;
       let status: number | undefined;
       let responseHeaders: Record<string, unknown> = {};
@@ -162,7 +164,7 @@ export class RelayTrafficDump {
           storage.writeInteraction(session, { id, kind: "request", transport: "http", account: provider, startedAtMs,
             method: "POST", path, headers: head.headers, headersTruncated: head.truncated,
             ...(debug ? { debug: { version: 1, inbound, transformations: [...requestChanges] } } : {}), requestModel: request.model,
-            bytes: Buffer.byteLength(JSON.stringify(request)), payload: { bytes: part?.bytes ?? 0, parts: part ? [part] : [], truncated: omitted } });
+            bytes: Buffer.byteLength(JSON.stringify(request)), payload: { bytes: part?.bytes ?? 0, parts: part ? [part] : [], truncated: omitted || part === undefined } });
           requestSaved = true;
         }),
         head: (code, headers) => safe(() => { status = code; diagnostics.responseStatus(code); diagnostics.header(headers["x-request-id"]); const head = capturedTrafficHeaders(headers); responseHeaders = head.headers; upstreamHeadersTruncated = head.truncated; }),
@@ -206,13 +208,28 @@ export class RelayTrafficDump {
       };
     } catch { this.fail(); return undefined; }
   }
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.closeTask) return this.closeTask;
     this.closed = true; this.maintenanceAbort.abort();
+    this.closeTask = this.closeWithinBudget().catch((error: unknown) => {
+      this.closeTask = undefined;
+      throw error;
+    });
+    return this.closeTask;
+  }
+  private async closeWithinBudget(): Promise<void> {
     let timer: NodeJS.Timeout | undefined;
-    try { await Promise.race([Promise.all([...Object.values(this.storage).map(storage => storage.close()), this.maintenance]), new Promise<void>(resolve => {
-      timer = setTimeout(() => { for (const storage of Object.values(this.storage)) storage.abort(); resolve(); }, 5000);
+    try { await Promise.race([Promise.all([...Object.values(this.storage).map(storage => storage.close()), this.maintenance]), new Promise<void>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        for (const storage of Object.values(this.storage)) storage.abort();
+        reject(new Error("Relay traffic dump shutdown failed (timeout)"));
+      }, 5000);
     })]); } finally { clearTimeout(timer); }
   }
   private notice(message: string): void { if (this.reported.has(message)) return; this.reported.add(message); try { this.options.onError(new Error(message)); } catch { /* Capture is a side channel. */ } }
-  private fail(): void { this.failed = true; this.notice("Relay traffic dump capture failed"); }
+  private fail(message = "Relay traffic dump capture failed"): void {
+    if (this.failed) return;
+    this.failed = true; this.maintenanceAbort.abort(); this.notice(message);
+    for (const storage of Object.values(this.storage)) storage.abort();
+  }
 }

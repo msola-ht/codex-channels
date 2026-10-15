@@ -14,6 +14,8 @@ export interface ThreadTurnSummary {
 }
 
 export interface ThreadTurnsListOptions {
+  /** Cancels local waiting; never sent as an App Server protocol field. */
+  signal?: AbortSignal;
   cursor?: string | null;
   limit?: number;
   sortDirection?: ThreadHistorySortDirection;

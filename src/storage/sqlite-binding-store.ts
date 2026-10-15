@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -57,6 +57,47 @@ const schemaVersion = 6;
 export { schemaVersion as stateDatabaseSchemaVersion };
 const idleStatePersistenceIntervalMs = 60_000;
 
+const requiredStateColumns = {
+  conversation_actors: ["surface", "account_id", "conversation_id", "actor_id", "created_at"],
+  conversation_background_bindings: [
+    "surface", "account_id", "conversation_id", "workspace_id", "thread_id", "session_id", "updated_at",
+  ],
+  conversation_bindings: [
+    "surface", "account_id", "conversation_id", "workspace_id", "thread_id", "session_id", "updated_at",
+  ],
+  conversation_workspaces: ["surface", "account_id", "conversation_id", "workspace_id", "updated_at"],
+  conversation_idle_state: ["surface", "account_id", "conversation_id", "last_activity_at", "force_new"],
+  conversation_model_preferences: [
+    "surface", "account_id", "conversation_id", "model", "model_provider", "effort", "service_tier",
+  ],
+};
+
+/** Read-only compatibility check shared by startup and installation preflight. */
+export function assertStateDatabaseSchema(
+  database: DatabaseSync,
+  { allowEmpty = false }: { allowEmpty?: boolean } = {},
+): void {
+  const version = Number(database.prepare("PRAGMA user_version").get()?.user_version);
+  if (version === 0 && allowEmpty) {
+    if (database.prepare("SELECT 1 FROM sqlite_schema LIMIT 1").get()) {
+      throw new Error("状态数据库 Schema 0 含有未知结构，不能初始化；请核对数据库及备份");
+    }
+    return;
+  }
+  if (version !== schemaVersion) {
+    throw new Error(
+      `状态数据库版本不兼容：当前 ${version}，Gateway 需要 ${schemaVersion}。仅支持当前 Schema；请核对数据库版本及备份，不要删除数据库`,
+    );
+  }
+  for (const [table, required] of Object.entries(requiredStateColumns)) {
+    const definition = database.prepare("SELECT type FROM sqlite_schema WHERE name = ?").get(table);
+    if (definition?.type !== "table") throw new Error(`状态数据库结构不完整：缺少表 ${table}`);
+    const columns = new Set(database.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name));
+    const missing = required.filter(column => !columns.has(column));
+    if (missing.length > 0) throw new Error(`状态数据库结构不完整：${table} 缺少 ${missing.join("、")}`);
+  }
+}
+
 export class SqliteBindingStore implements BindingStore {
   private readonly database: DatabaseSync;
   private readonly memory = new MemoryBindingStore();
@@ -64,13 +105,27 @@ export class SqliteBindingStore implements BindingStore {
   private closed = false;
 
   constructor(readonly path: string) {
+    // Reject existing unsupported data before changing either its permissions or journal mode.
+    const existed = existsSync(path);
+    if (existed) {
+      const existing = new DatabaseSync(path, { readOnly: true });
+      try {
+        assertStateDatabaseSchema(existing, { allowEmpty: true });
+      } finally {
+        existing.close();
+      }
+    }
     const parent = dirname(path);
     mkdirSync(parent, { recursive: true, mode: 0o700 });
-    securePrivateDirectorySync(parent);
+    if (!existed) securePrivateDirectorySync(parent);
     this.database = new DatabaseSync(path);
     try {
+      // Recheck the actual writable connection, not only the earlier path snapshot.
+      assertStateDatabaseSchema(this.database, { allowEmpty: true });
+      if (existed) securePrivateDirectorySync(parent);
       securePrivateFileSync(path);
-      this.database.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = DELETE;");
+      // Binding writes stay synchronous and atomic; a competing writer must not stall the Reader.
+      this.database.exec("PRAGMA busy_timeout = 0; PRAGMA journal_mode = DELETE;");
       this.initializeSchema();
       this.load();
     } catch (error) {
@@ -587,19 +642,15 @@ export class SqliteBindingStore implements BindingStore {
   }
 
   private initializeSchema(): void {
-    const row = this.database.prepare("PRAGMA user_version").get() as { user_version: number };
-    if (row.user_version === schemaVersion) {
-      return;
-    }
-    if (row.user_version !== 0) {
-      throw new Error(
-        `状态数据库版本不兼容：当前 ${row.user_version}，Gateway 需要 ${schemaVersion}。仅支持当前 Schema；请核对数据库版本及备份，不要删除数据库`,
-      );
-    }
+    if (this.database.prepare("PRAGMA user_version").get()?.user_version === schemaVersion) return;
     this.database.exec("BEGIN IMMEDIATE");
     try {
-      this.createSchema();
-      this.database.exec(`PRAGMA user_version = ${schemaVersion}; COMMIT;`);
+      assertStateDatabaseSchema(this.database, { allowEmpty: true });
+      if (this.database.prepare("PRAGMA user_version").get()?.user_version === 0) {
+        this.createSchema();
+        this.database.exec(`PRAGMA user_version = ${schemaVersion};`);
+      }
+      this.database.exec("COMMIT");
     } catch (error) {
       this.database.exec("ROLLBACK");
       throw error;

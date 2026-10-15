@@ -10,6 +10,7 @@ import {
   type RequestOutcomeRow,
 } from "./sqlite-request-metrics-row-codec.js";
 import {
+  agentResponseSql,
   cacheUsageSql,
   metricsPageOffset,
   requestOutcomeSql,
@@ -90,7 +91,8 @@ export class SqliteRequestMetricsSubagentQueries {
         SELECT thread_id, COUNT(DISTINCT turn_id) AS turn_count,
           ${requestOutcomeSql()},
           COUNT(*) AS request_count, SUM(input_tokens) AS input_tokens,
-          SUM(output_tokens) AS output_tokens, ${cacheUsageSql}, MAX(id) AS latest_id,
+          SUM(output_tokens) AS output_tokens, ${cacheUsageSql},
+          MAX(CASE WHEN ${agentResponseSql} THEN id END) AS latest_id,
           MIN(request_started_at_ms) AS first_request_started_at_ms,
           MAX(recorded_at_ms) AS last_recorded_at_ms
         FROM model_request_metrics

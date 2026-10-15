@@ -91,7 +91,23 @@ DS 历史引用由上游按其无状态合同忽略，客户端仍须携带完�
 资料见 [DeepSeek 接入边界](deepseek.md#responses-兼容性边界)与
 [官方 Responses 参数说明](https://api-docs.deepseek.com/guides/responses_api/)。
 
-思考策略默认跟随客户端。Key 强制关闭仅对已登记的提供商、模型及协议组合生效；其他组合保留客户端参数，不阻止请求：通用 CLP Chat 使用 Cline 官方适配器的 `reasoning.enabled=false`；CLP 精确 DeepSeek 模型保留已验证的 `reasoning.effort=none`，DS Responses 使用 `reasoning.effort=none`，DS Chat 使用 `reasoning_effort=none`。
+思考设置在创建或编辑 Key 时按所选模型分别保存；同一模型在不同 Key 下互不影响。默认“跟随客户端”保留原参数。选择等级时，Responses 使用 `reasoning.effort`，Chat 使用 `reasoning_effort`；CLP Flash 沿用 `reasoning.effort`。显式等级或关闭方式覆盖顶层思考控制字段；上游不支持时可以拒绝，Relay 不自动换参数重试。
+
+“关闭”展开以下显式字段方式；`off` 仅保留为既有配置与 CLI 的自动映射值，不再出现在 WebUI 新选择菜单中。选项只指定出站字段，不保证模型停止内部推理或零推理 Token：
+
+| 配置值 | 出站控制 |
+| --- | --- |
+| `off` | 原有默认映射：受支持 DS Responses 和 CLP Flash Chat 为 `reasoning.effort=none`，DS Chat 为 `reasoning_effort=none`，其他明确支持的 CLP Chat 为 `reasoning.enabled=false`；未声明能力的组合保留客户端参数 |
+| `off-reasoning-effort` | `reasoning: { effort: "none" }` |
+| `off-reasoning-enabled` | `reasoning: { enabled: false }` |
+| `off-reasoning-effort-field` | `reasoning_effort: "none"` |
+| `off-thinking` | `thinking: { type: "disabled" }` |
+| `off-enable-thinking` | `enable_thinking: false` |
+
+显式字段方式适用于受管和自定义 Relay 提供商，不按模型名称推断其有效性。2026-10-15 的 CLP Flash 受限实测中，`enabled=false` 未返回思考正文，但仍报告非零推理 Token，详见 [CLP 当前限制](cline-pass.md)。
+WebUI 的 `POST /api/v1/management/relay/reasoning-probe` 接受配置 revision、精确公开模型 ID 和原生协议，不接受调用地址或凭据。用户手动开始后，按固定顺序比较无控制基线及五种显式关闭方式，共最多 6 次请求、每次请求 64 个输出 Token；不自动重试，不写服务器配置或历史。复用 Relay 的模型材料、参数投影、CLP 路由限定、代理选择和直接 Chat/Responses 解析；请求前及出站前复核版本，材料变化时停止。每个 WebUI 实例最多执行一组，单请求限时 15 秒、总预算 90 秒，成功响应最多 128 KiB（含 SSE 注释等原始正文），错误正文沿用 64 KiB 上限。断连、取消和超时释放网络资源。以 `application/x-ndjson` 推送 `progress`、最终 `result` 或受控 `error` 事件；每项开始与结束均推送当前方式及六行快照，`observedAtMs` 记录整组开始时间。前端限制单行 64 KiB、整流 256 KiB，95 秒预算覆盖完整响应读取；缺少最终结果的断流不能当作完成。返回逐项结构化状态、HTTP 状态及有限用量观察，不返回正文、凭据或任意上游错误；缺失推理用量保持未知，结果不判定内部推理是否关闭。采用结果只回填模型草稿，保存仍走既有预览确认。
+
+浏览器使用独立版本化 localStorage 缓存六项全部执行、`stoppedReason=null` 的最终结果，每个公开模型 ID 与协议保留最近一组，最多 20 组、7 天；缓存与 Key 无关，但采用必须匹配当前配置 revision。读取时校验版本、结构和容量，损坏或不支持的版本不静默覆盖；存储失败显示提示并保留本次内存结果。记录只含受限观察元数据，无凭据或正文，支持显式清除；取消、断流或整组提前停止的结果不覆盖已有完整记录。该缓存可丢弃，无需迁移或服务器数据备份，回滚代码不会改变 Gateway 配置或数据库；重新探测始终需要用户手动发起。
 `extra_body` / `extraBody` 内的思考控制字段与关闭策略冲突时返回具体字段路径；
 跟随客户端不增加该限制。不修改历史思考内容或隐藏上游输出。
 
@@ -130,15 +146,18 @@ Relay 的请求采集、私有 IPC、Gateway 单写者及统计数据库不变�
 目录回退不回退 Key 或配置。
 更新改变 Relay 可用模型集合，但不修改 Key 的模型授权或思考策略；上游目录移除的模型将不再可调用，其他模型保持可用。Relay 启用且配置 CLP 账户时会在后台自动下载缺失目录；首次打开 WebUI 转发设置页也会自动补齐；CLI 查询提供商或为已注册 CLP 账户创建／修改 Key 时，若目录缺失，会先下载再继续操作。下载完成前该账户暂不可用，不阻塞其他提供商；已有有效文件直接复用，不自动更新版本。每个服务实例或页面实例自动尝试一次，失败记录固定服务日志或页面提示，可手动重试。损坏文件需显式更新修复，不自动覆盖，不回退 Codex 目录。关闭服务或页面时取消未完成的下载，服务最多等待 2 秒。后台落盘前在管理锁内复核目录仍缺失，避免覆盖并发手动更新。仅下载时间变化而模型数据相同时不会撤销在途请求。从当前目录读取关闭思考能力，不新增持久配置。
 配置预览绑定目录 revision，期间更新目录后必须重新预览。
+Relay Key 的 WebUI 预览与确认接口正文上限为 512 KiB，容纳最多 256 个模型 ID 及完整逐模型思考映射（含非 ASCII 名称）；仍执行模型条数、参数及配置文件 1 MiB 上限校验，其他管理接口的正文预算不变。
 CLI 自动下载在管理锁外进行，落盘前持锁复核目录仍缺失，避免阻塞 Key 撤销或覆盖并发更新。
 WebUI 预览与确认保存均不自动下载目录；目录不可用时，保留原模型授权的改名仍可保存，改变授权则须通过当前目录校验。
 
 `toggle` 允许选择关闭；`effort.values` 提供明确等级，`default` / `null` 不等同于关闭。
-预算型控制保留在目录中，此版不转换为等级，也不新增预算设置；未声明可用等级时仅支持跟随客户端。
+预算型控制保留在目录中，此版不转换为等级，也不新增预算设置。目录声明仅用于展示已知能力；Key 的逐模型策略允许显式选择等级或关闭参数方式，不将未声明能力推断为支持，是否接受由上游决定。
 目录保留 `modalities.input/output`；模型列表优先采用显式输入类型，缺失时按 Cline 的能力映射显示文本、图片、视频及 PDF，音频只依据显式输入声明。无能力信息时显示“未声明”。`modalities` 是当前格式的可选字段；重新下载按上游声明保存，并沿用目录备份与原子写入流程。输入标签描述上游声明，不扩展 Relay 请求协议。
 工具等能力保留在下载目录中，当前界面展示输入类型与协议；不启用 Cline 的搜索工具，不修改客户端工具定义。
 Cline 自身会从 OpenRouter 目录合并部分能力，目录仍可能与实际端点有差异。
-思考策略只属于 Key：`passthrough` 保留客户端参数；`off` 仅对当前目录或静态能力明确支持的模型关闭思考，其他模型仍保留客户端参数。提供商不保存模型级策略或能力快照。保存授权与策略使用管理预览确认、revision、配置锁、私有备份和原子替换；失败保留原配置，生效确认失败明确报告。
+思考配置属于 Key 下的精确公开模型 ID：`model_relay.callers[].model_reasoning` 保存模型 ID 到 `passthrough`、`off`、`minimal/low/medium/high/xhigh/max` 或上述显式关闭方式的映射。管理入口要求提交覆盖所选模型的完整映射，拒绝额外模型和未知模式；移除模型同步移除其设置，不跨 Key 或提供商复用。保存沿用预览确认、revision、配置锁、私有备份和原子替换；失败保留或恢复原配置，生效确认失败明确报告。每个模型最终生效的思考策略参与准入权限指纹，变化时撤销该 Key 的旧在途请求；仅将统一策略展开为等效模型映射不撤销请求。
+
+已有 Key 的 `reasoning=passthrough|off` 保持原义，不自动迁移；未设置逐模型覆盖的模型继续使用该值。WebUI 显式保存完整模型映射后才清除旧统一值。CLI 可用 `--model-reasoning '{"提供商/模型ID":"high"}'` 提交完整映射，不能同时提供 `--reasoning`；显式使用原 `--reasoning` 会清除模型映射并恢复 Key 统一策略。回退到不支持模型映射的程序前，先用当前 CLI 明确设置旧统一策略或恢复保存前的配置备份，再回退程序；不同模型的独立策略不能由旧版本完整表达。新字段不是自动迁移机制，旧程序遇到未知字段应拒绝，不能静默忽略。
 
 ## 身份、材料与资源
 

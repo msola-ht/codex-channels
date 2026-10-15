@@ -1,4 +1,6 @@
-export { DeliveryJournal, readDeliveryQueue, readDeliveryPayload, readDeliveryEntries, readDeliveryPayloads } from "./journal.js";
+export { DeliveryJournal, closeDeliveryJournals, waitForDeliveryJournalsExit } from "./journal.js";
+export { readDeliveryQueue, readDeliveryPayload, readDeliveryEntries, readDeliveryPayloads, closeDeliveryReaders, waitForDeliveryReadersExit, DeliveryReadError } from "./reader.js";
+export type { DeliveryReadOptions, DeliveryReadFailure } from "./reader.js";
 export type { DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryFailure } from "./types.js";
 export { DeliveryCoordinator, type DeliveryCoordinatorOptions } from "./coordinator.js";
 export { DeliveryError, deliverySchemaVersion, defaultDeliveryLimits } from "./types.js";

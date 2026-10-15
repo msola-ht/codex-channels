@@ -1,6 +1,7 @@
 import { supportsChatReasoningOff } from "../../runtime/chat-reasoning.mjs";
+import type { RelayModelReasoning } from "../../runtime/chat-reasoning.mjs";
 import { ModelConversionError } from "./validation.js";
-import { assertNoNestedReasoningControls, isRequestObject, reasoningControlFields, validateDirectModel, validateDirectStream } from "./direct-request.js";
+import { applyExplicitReasoningPolicy, assertNoNestedReasoningControls, isRequestObject, reasoningControlFields, validateDirectModel, validateDirectStream } from "./direct-request.js";
 
 /** Native Responses payload; model-specific parameters remain upstream-owned. */
 export interface DirectResponsesRequest extends Record<string, unknown> {
@@ -52,8 +53,9 @@ export function validateDirectResponsesRequest(provider: string, value: unknown)
     stream, store: false, ...(value.background === undefined ? {} : { background: false }) };
 }
 
-export function applyResponsesReasoningPolicy(request: DirectResponsesRequest, provider: string, mode: "passthrough" | "off"): DirectResponsesRequest {
+export function applyResponsesReasoningPolicy(request: DirectResponsesRequest, provider: string, mode: RelayModelReasoning): DirectResponsesRequest {
   if (mode === "passthrough") return request;
+  if (mode !== "off") return applyExplicitReasoningPolicy(request, mode, effort => ({ reasoning: { effort } }), DirectResponsesRequestError);
   if (!provider.startsWith("ds-") || !supportsChatReasoningOff(provider, request.model)) {
     return request;
   }

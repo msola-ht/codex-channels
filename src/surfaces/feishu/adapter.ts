@@ -854,40 +854,55 @@ export class FeishuConversationAdapter {
     if (message.durationMs > maximumFeishuAudioDurationMs) {
       throw new UserFacingError("audio.too-large", "语音最长支持 5 分钟");
     }
-    await this.inputs.flushPending(message.target, message.actorId);
-    const audio = await this.inputOptions.audios.download(
-      message.messageId,
-      message.fileKey,
+    const scope = this.conversations.prepareAttachmentSubmission?.(
+      message.target,
+      () => !this.videoCancellation.signal.aborted
+        && this.inputOptions.access?.isAllowed({ target: message.target, actorId: message.actorId }) === true,
+      "audio",
     );
-    const quotedText = await this.readQuotedText(message);
-    const submission = await this.submitWithReplyTarget(
-      message.target.conversationId,
-      message.messageId,
-      () => this.conversations.submit(message.target, {
-        ...(quotedText === undefined
-          ? {}
-          : {
-              text: formatQuotedInput(
-                "请听取这段语音并根据内容协助我。",
-                quotedText,
-              ),
-            }),
-        localAudios: [{ path: audio.path }],
-      }),
-    );
-    this.settleTurnReplyTarget(
-      message.target.conversationId,
-      submission.threadId,
-      submission.turnId,
-      submission.steered,
-    );
-    if (submission.steered) {
-      this.replyTurnInput(
+    if (!scope) throw new UserFacingError("audio.unavailable", "语音提交能力尚未就绪");
+    const signal = AbortSignal.any([scope.signal, this.videoCancellation.signal]);
+    try {
+      await this.inputs.flushPending(message.target, message.actorId);
+      scope.captureTarget();
+      const audio = await this.inputOptions.audios.download(
+        message.messageId,
+        message.fileKey,
+        signal,
+      );
+      signal.throwIfAborted();
+      const quotedText = await this.readQuotedText(message);
+      const submission = await this.submitWithReplyTarget(
+        message.target.conversationId,
+        message.messageId,
+        () => scope.submit({
+          ...(quotedText === undefined
+            ? {}
+            : {
+                text: formatQuotedInput(
+                  "请听取这段语音并根据内容协助我。",
+                  quotedText,
+                ),
+              }),
+          localAudios: [{ path: audio.path }],
+        }),
+      );
+      this.settleTurnReplyTarget(
         message.target.conversationId,
         submission.threadId,
         submission.turnId,
-        formatTurnInputAppended("audio"),
+        submission.steered,
       );
+      if (submission.steered) {
+        this.replyTurnInput(
+          message.target.conversationId,
+          submission.threadId,
+          submission.turnId,
+          formatTurnInputAppended("audio"),
+        );
+      }
+    } finally {
+      scope.dispose();
     }
   }
 

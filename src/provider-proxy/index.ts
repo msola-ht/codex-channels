@@ -9,7 +9,7 @@ export {
   ProviderProxyMetricsServer,
   sendProviderProxyMetrics,
 } from "./metrics-channel.js";
-export { pruneModelTrafficDumpSessions } from "./traffic-dump.js";
+export { pruneModelTrafficDumpSessions, pruneModelTrafficDumpSessionsAsync } from "./traffic-dump.js";
 
 export { ChatCompletionsBridge } from "./chat-bridge.js";
 export { sendDirectChat, type DirectChatTarget } from "./direct-chat.js";

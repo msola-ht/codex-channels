@@ -27,7 +27,7 @@ export class RelayDumpPayload {
     if (!this.pendingBytes) return;
     const content = Buffer.concat(this.pending, this.pendingBytes); this.discard();
     const part = this.storage.writePayload(this.session, content, "utf8");
-    if (!part) return;
+    if (!part) { this.truncated = true; return; }
     const previous = this.parts.at(-1);
     if (previous && previous.file === part.file && previous.offset + previous.bytes === part.offset) previous.bytes += part.bytes;
     else this.parts.push(part);

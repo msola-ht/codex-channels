@@ -9,6 +9,8 @@ export interface MetricsQueryReader {
 }
 
 export const observableCompletionSql = "status = 'completed'";
+/** Representative agent settings come from ordinary responses, never review/compact requests. */
+export const agentResponseSql = "source = 'owned' AND operation = 'response' AND request_purpose IS NULL";
 export const interruptedRequestSql = `NOT (${observableCompletionSql}) AND COALESCE(
   CASE WHEN source = 'relay' THEN error_code ELSE error_type END = 'client_disconnected', 0)`;
 export const normalizedStatusSql = "status";

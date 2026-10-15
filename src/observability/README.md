@@ -32,11 +32,14 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   会话、请求、异常、趋势和额度查询；Bootstrap、`codexc metrics` 与 WebUI 复用同一查询语义，
   各自只负责授权、参数边界和结果呈现。
   控制台整体及各 Provider 的会话/轮次计数使用 `threadCounts(scope)`，按自身 Thread/Turn 去重，不执行会话列表的递归用量、排序或行映射。
-- `request-metrics-writer.ts`：提供 10,000 条上限的有界延迟写入队列；指标 Socket 只负责入队，
+- `async-metrics-store.ts` / `metrics-worker.ts` / `metrics-worker-protocol.ts`：Gateway 唯一指标数据库连接由单 Worker 拥有，初始化、SQL 写入与查询、保留清理和关闭均在线程内执行；主线程只使用明确的异步窄端口，不再为账户窗口额外打开同步读连接。请求队列上限 256 项、8 MiB，逐项串行，2 秒普通请求预算包括排队；初始化独立限时 15 秒，关闭确认独立限时 5 秒。取消的排队请求不执行；已发出的写入保留请求、容量和原始期限，调用方取消等待后仍由内部任务接收实际结果，成功提交后的缓存与通知继续收尾。真正的写入超时按结果未知处理，连接不再接收新操作且不重试写入；未确认线程退出时保留 Worker 所有权与数据库锁归属。
+  正常关闭、初始化失败与致命请求失败共用协作关闭：停止标记阻止迟到就绪与尚未开始的 SQL，线程先关闭 SQLite，再用 1 秒预算请求 Windows ACL helper 退出；预算失败继续保留 owner 并等待实际退出后才关闭端口。`closeMetricsStores()` 拒绝新实例并请求所有 owner 关闭，`waitForMetricsStoresExit()` 供最终退出路径等待物理结束，实例仅在 Worker exit 后移出登记。
+- `provider-quota-tokens.ts`：按精确 Provider 单次流式归约最多三个额度窗口，只返回有限窗口总数；Gateway 在线程内读取，保留同步只读消费端的同一窗口语义。
+- `request-metrics-writer.ts`：提供 10,000 条、16 MiB 上限的有界延迟写入队列；指标 Socket 只负责入队，
   批次成功提交后通过注入回调通知读取方失效，通知故障不改变写入结果；失败批次不发送成功通知。
-  每 10 ms 最多取 32 条并优先在一个 SQLite 事务中写入，关闭时排空，减少逐请求事务开销；公开
+  每批最多取 32 条并等待异步事务完成后再调度后续批次；关闭排空有总预算，预算耗尽显式记录未写入样本并关闭数据库，不继续无限等待。公开
   持久化水位只等待调用时该 Thread 或 Turn 已经入队的最后一条记录，不被后续无关请求延长，并
-  返回该范围内的实际写入结果。
+  返回该范围内的实际写入结果。已取出但未确认提交的批次仍属于水位；失败范围有界保留，迟到的等待不能把历史失败解释为成功，失败范围溢出时保守返回不可用。
 - `request-metrics-database.ts`：集中保存指标 Schema 版本、固定路径和进程级独占锁；Gateway 与 reset
   共用独立 SQLite 锁库中的排他事务，由操作系统在进程退出时释放，不依赖 PID 或失效锁删除；真实
   运行中持有者与并发重建均失败关闭。
@@ -51,10 +54,10 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   请求分页的 `isSubagent` 只读关联当前 `subagent_threads` 的精确 Thread 登记；Relay、自动审查及未登记归属返回 false，不代表已确认是主代理，不新增持久化字段。
   `modelUsage(scope, modelAliases?)` 在相同请求范围内按模型显示名跨提供商合并：明确标记 `request_purpose = 'autoApprovalReview'` 的请求优先归入 `auto-review`，包括原始模型为空或配置了其他显示名的审查请求；其他请求的可选映射以持久化模型 ID 做一次精确匹配，未配置的模型和 null 保持原值，用途缺失时不从模型名称推断审查。相同原始模型的审查与其他请求按各自规则分组。同一显示名在 SQLite 内先分组，再汇总请求、Token、状态、压缩和缓存指标及按 Thread/Turn 去重的轮数。每组的 `members` 按提供商与原始模型 ID 返回同范围的请求、Token、状态、压缩、缓存指标和去重轮数，原始模型 null 保留；组轮数独立去重，跨审查模型的相同 Thread/Turn 仍只计一轮，不能把成员轮数相加。组与成员均完整返回，按请求量降序稳定排序，不沿用 CLI 的“提供商 + 模型”分组或前 20 组上限。控制台通过 `overview(range, modelAliases?).models` 在同一只读快照消费，其他查询和持久化模型字段保持原口径。
   Thread 列表额外返回同筛选范围的 `totalTokens`、自身缓存与后代输入/缓存/输出分项，以及按请求去重的 `treeAggregate`，支持总计 Token 排序；缓存是输入子集，不重复累加，自身与后代分别判断缓存完整性。自身 `cacheUsage` 与后代 `subagentUsage.cacheUsage` 分别保留输入和缓存均已观测的缓存样本及缺失请求数，供部分采集时展示已知缓存；完整缓存合计仍在任意请求缺失时返回 null。WebUI 主会话查询允许只有后代匹配的根入选。普通 Thread 查询仍保留自身有匹配记录的行集合，自身聚合与 Turn 查询口径不变；不新增持久化汇总或 Schema 字段。
-- `sqlite-request-metrics-thread-queries.ts`：Thread/Turn 列表、汇总与耗时查询，只被请求查询组合根持有；不接触写入、事务或数据库生命周期。
+- `sqlite-request-metrics-thread-queries.ts`：Thread/Turn 列表、汇总与耗时查询，只被请求查询组合根持有；不接触写入、事务或数据库生命周期。代表会话或轮次的提供商、模型和思考等级只取相应范围内最近的普通响应（`source = owned`、`operation = response`、用途为空），不使用自动审查、压缩或后代请求兜底；无普通响应仍保留聚合与列表行，模型字段返回未知。子代理列表采用相同选择，单次轮次首 Token 时间同样排除审查请求；用量和请求统计保留全部匹配用途。
 - `sqlite-request-metrics-subagent-queries.ts`：子代理线程列表、单线程往返与同步游标查询，同样只被组合根持有并保持只读。
 - `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v31 建库 SQL、存储列定义、版本错误和
-  严格结构校验；Store 持有初始化事务，仅创建新库，明确拒绝不支持的版本或结构。
+  严格结构校验；Store 持有初始化事务，仅在空库建表，已有非空库必须具有当前版本与结构。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、
   逐请求上游 `User-Agent` 和额度快照写入独立 `request-metrics.sqlite3`。新采集请求不解析上游时间戳；
   可空 `upstream_ttft_ms` 逐请求保留上游原值，Turn 汇总仅选择自身首个有效 OpenAI 普通响应样本，不合计或平均。
@@ -64,12 +67,15 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   可空 `quota_observed_at_ms` 保存额度快照的本机采集时间，未观测时为空。
   数据库使用严格 Schema v31、Unix `0600` / Windows 当前 SID 私有文件权限，
   可空 `request_service_tier` 独立保留出站请求层级。
-  只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
+  只接受当前 Schema；已有库先只读核验版本和结构，再保护权限、创建 Writer 锁与启用 WAL；不兼容库原样拒绝。
+  首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式。
-  可通过同步 `readSnapshot()` 让多个查询共用一个读事务，保持并发采集期间的结果一致；分页每页最多
-  500 条、按受控字段与方向排序的偏移分页，供 CLI 报表、导出和本地 WebUI 复用。记录默认保留
-  365 天、以 1,000,000 条为清理目标，可由 `[metrics.storage]` 收窄或扩大；每 100 次写入分批清理，两个清理周期之间
+  可通过同步 `readSnapshot()` 让多个查询共用一个读事务，保持并发采集期间的结果一致；`iterateSnapshot()`
+  跨迭代保留只读事务，完成、异常或提前 return 时释放。导出使用 `iterateExport()` 的单一 SQLite 游标，
+  沿用普通分页的受控排序、null 与 id 次序，不在每批重复聚合或累积全部记录；只读 Worker 的归属、背压与取消由脚本消费端负责。
+  普通分页每页最多 500 条，供 CLI 报表和本地 WebUI 复用。记录默认保留
+  365 天、以 1,000,000 条为清理目标，可由 `[metrics.storage]` 收窄或扩大；保留期限始终按本机当前时钟计算，每 100 次写入分批清理，两个清理周期之间
   最多短暂超出 99 条。行数裁剪按 id 上界一次定位，不再对主键做倒序偏移扫描，因此只保证"不超过目标条数"
   并始终保留最新记录；按 Provider 单独清理等操作在 id 上留下空洞时，可能比目标少保留一部分最旧记录。
   每条记录保存提供商、模型、思考等级、服务层级、状态与错误类型；路由层在
@@ -87,11 +93,11 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   记录时间及精确条件筛选，再按自身 Thread/Turn 汇总、排序和分页，返回匹配总数和不受分页影响的
   汇总；Provider 筛选支持单值或多值并集，`providers()` 返回库内完整去重名单供筛选选项使用。
   `threadTurnSummaries()` 另外返回同筛选范围、分页前的后代 `subagentAggregate`、按 Thread/Turn 去重的 `subagentTurnCount` 和会话加后代的 `treeAggregate`；递归关系只覆盖已登记后代，请求必须具有 Turn 归属，不改变自身轮次列表与聚合口径。精确 Turn 筛选时这三个字段均为 null，避免推断后代请求的父轮次归属；无匹配请求时聚合为 null、后代轮数为零。WebUI `/turns` 入口在同一读取快照中取得这些汇总和轮次分页。
-  Provider、模型和思考等级取匹配范围内最后一条记录，不混入范围外的最新设置。父 Turn 任务窄查询由
+  Provider、模型和思考等级只取同筛选范围内最近的普通响应（`source = owned`、`operation = response`、用途为空），不混入范围外的最新设置；无普通响应时保持未知。父 Turn 任务窄查询由
   `threadTurnTaskSummary()` 提供，子代理完成卡片通过 `threadTurnSummary()` 精确读取官方终态对应
   Turn，再按需合并该 Turn 的子任务；`threadList()` 与 `threadTurnSummaries()` 供
   `codexc metrics threads` 和 `turns` 导出复用。
-  `subagents()` 从全部已登记关系读取各层子代理，`threadSubagents()` 限定为目标 Thread 的直接子代理；两者均包括尚无请求的代理，聚合各自全部保留请求的轮次、Token 与缓存指标，模型、提供商与思考等级共同取最后入库请求（无请求时为 null），在数据库内按首次请求或最后记录排序后分页；会话列表的
+  `subagents()` 从全部已登记关系读取各层子代理，`threadSubagents()` 限定为目标 Thread 的直接子代理；两者均包括尚无请求的代理，聚合各自全部保留请求的轮次、Token 与缓存指标，模型、提供商与思考等级共同取同范围最近的普通响应（`source = owned`、`operation = response`、用途为空；无普通响应时为 null），在数据库内按首次请求或最后记录排序后分页；会话列表的
   `directSubagentCount` 同样只计直接子级，不随请求筛选变化，不把关系导航混入指标聚合。
   每轮明细的 `directSubagentCount` 通过 `subagent_turns` 精确父 Thread/Turn 关联并验证直接父关系后，按不同子 Thread 计数；`threadSubagents()` 的可选 `parentTurnId` 使用相同关系筛选和分页，全局 `subagents()` 拒绝该字段，子代理行用量仍为自身全部保留历史。
   WebUI 顶层列表通过 `mainThreadsOnly` 在汇总和分页前排除已登记子代理；CLI 导出与控制台仍查询全部会话。

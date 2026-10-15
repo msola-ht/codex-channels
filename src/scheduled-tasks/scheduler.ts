@@ -6,7 +6,7 @@ import {
   type ScheduledTaskExecutionPort,
   type ScheduledTaskExecutionResult,
   type ScheduledTaskSchedulerOptions,
-  type ScheduledTaskStore,
+  type ScheduledTaskStorePort,
   type ScheduledTaskTickResult,
 } from "./types.js";
 
@@ -39,9 +39,10 @@ export class ScheduledTaskScheduler {
   private readonly abortControllers = new Set<AbortController>();
   private manualRunTail: Promise<void> = Promise.resolve();
   private lastCleanupAttemptAt: number | undefined;
+  private cleanupIncomplete = false;
 
   constructor(
-    private readonly store: ScheduledTaskStore,
+    private readonly store: ScheduledTaskStorePort,
     private readonly executor: ScheduledTaskExecutionPort,
     options: ScheduledTaskSchedulerOptions = {},
   ) {
@@ -61,8 +62,8 @@ export class ScheduledTaskScheduler {
     if (!Number.isSafeInteger(this.maxConcurrentRunsPerConversation) || this.maxConcurrentRunsPerConversation < 1) {
       throw new RangeError("Conversation 后台容量必须是正整数");
     }
-    if (!Number.isSafeInteger(this.maxTasksPerTick) || this.maxTasksPerTick < 1) {
-      throw new RangeError("单次调度任务数上限必须是正整数");
+    if (!Number.isSafeInteger(this.maxTasksPerTick) || this.maxTasksPerTick < 1 || this.maxTasksPerTick > 1_000) {
+      throw new RangeError("单次调度任务数上限必须在 1 到 1000 之间");
     }
     if (!Number.isSafeInteger(this.stopTimeoutMs) || this.stopTimeoutMs < 0 || this.stopTimeoutMs > maxTimerDelayMs) {
       throw new RangeError("计划任务停止等待上限必须是非负整数毫秒");
@@ -76,7 +77,6 @@ export class ScheduledTaskScheduler {
       this.resolveTickCompletion = resolve;
     });
     try {
-      this.maybeCleanup(nowMs);
       const result: MutableTickResult = {
         claimed: [],
         skippedOverlap: [],
@@ -87,96 +87,108 @@ export class ScheduledTaskScheduler {
       let processed = 0;
       const dispatchGroups = new Map<string, DispatchJob[]>();
       let claimOrder = 0;
-      for (const initialTask of this.store.listDueTasks(nowMs)) {
-        if (this.stopping) break;
-        if (processed >= this.maxTasksPerTick) break;
-        let task = this.store.getTask(initialTask.taskId);
-        if (!task || task.status !== "active" || task.nextRunAt === null) continue;
+      let claimFailure: Error | undefined;
+      try {
+        for (const initialTask of await this.store.listDueTasks(nowMs, this.maxTasksPerTick)) {
+          if (this.stopping) break;
+          if (processed >= this.maxTasksPerTick) break;
+          let task = await this.store.getTask(initialTask.taskId);
+          if (this.stopping) break;
+          if (!task || task.status !== "active" || task.nextRunAt === null) continue;
 
-        while (
-          task.nextRunAt !== null
-          && task.nextRunAt < nowMs - this.catchUpWindowMs
-          && processed < this.maxTasksPerTick
-          && !this.stopping
-        ) {
-          const missed = this.store.claimDue(task.taskId, task.nextRunAt, "missed", nowMs);
-          result.missed.push(missed.run);
-          processed += 1;
-          task = this.store.getTask(task.taskId);
-          if (!task || task.status !== "active") break;
-        }
-        if (!task || task.status !== "active" || task.nextRunAt === null || task.nextRunAt > nowMs) continue;
-        if (processed >= this.maxTasksPerTick) break;
+          while (
+            task.nextRunAt !== null
+            && task.nextRunAt < nowMs - this.catchUpWindowMs
+            && processed < this.maxTasksPerTick
+            && !this.stopping
+          ) {
+            const missed = await this.store.claimDue(task.taskId, task.nextRunAt, "missed", nowMs);
+            result.missed.push(missed.run);
+            processed += 1;
+            task = await this.store.getTask(task.taskId);
+            if (!task || task.status !== "active") break;
+          }
+          if (!task || task.status !== "active" || task.nextRunAt === null || task.nextRunAt > nowMs) continue;
+          if (processed >= this.maxTasksPerTick) break;
 
-        const scheduledFor = task.nextRunAt;
-        if (this.activeRunExists(task)) {
-          const skipped = this.store.claimDue(task.taskId, scheduledFor, "claimed", nowMs);
-          if (skipped.kind === "blocked") result.blocked.push(skipped.run);
-          else result.skippedOverlap.push(skipped.run);
+          const scheduledFor = task.nextRunAt;
+          const key = conversationKey(task);
+          const reservedCapacity = dispatchGroups.get(key)?.length ?? 0;
+          const capacityAvailable = await this.capacityAvailable(task, reservedCapacity);
+          if (this.stopping) break;
+          // Blocking Runs can complete during any awaited preflight. The
+          // transaction decides overlap and capacity together; route its
+          // actual outcome rather than a stale hasBlockingRun observation.
+          const claim = await this.store.claimDue(
+            task.taskId, scheduledFor, capacityAvailable ? "claimed" : "skipped_capacity", nowMs,
+          );
           processed += 1;
-          continue;
+          if (claim.kind === "claimed") {
+            // Claim serially in stable order. Independent Conversations
+            // dispatch concurrently, but one Conversation stays in claim order
+            // so async validation cannot reorder its fresh Thread starts.
+            const group = dispatchGroups.get(key) ?? [];
+            group.push({ order: claimOrder, task, run: claim.run });
+            dispatchGroups.set(key, group);
+            claimOrder += 1;
+          } else if (claim.kind === "skipped_overlap") {
+            result.skippedOverlap.push(claim.run);
+          } else if (claim.kind === "skipped_capacity") {
+            result.skippedCapacity.push(claim.run);
+          } else if (claim.kind === "blocked") {
+            result.blocked.push(claim.run);
+          } else {
+            result.missed.push(claim.run);
+          }
         }
-        const key = conversationKey(task);
-        const reservedCapacity = dispatchGroups.get(key)?.length ?? 0;
-        const capacityAvailable = await this.capacityAvailable(task, reservedCapacity);
-        if (this.stopping) break;
-        if (!capacityAvailable) {
-          const skipped = this.store.claimDue(task.taskId, scheduledFor, "skipped_capacity", nowMs);
-          result.skippedCapacity.push(skipped.run);
-          processed += 1;
-          continue;
-        }
-
-        const claim = this.store.claimDue(task.taskId, scheduledFor, "claimed", nowMs);
-        processed += 1;
-        if (claim.kind === "claimed") {
-          // Claim synchronously in stable order.  Independent Conversations
-          // dispatch concurrently, but one Conversation stays in claim order
-          // so async validation cannot reorder its fresh Thread starts.
-          const group = dispatchGroups.get(key) ?? [];
-          group.push({ order: claimOrder, task, run: claim.run });
-          dispatchGroups.set(key, group);
-          claimOrder += 1;
-        } else if (claim.kind === "skipped_overlap") {
-          result.skippedOverlap.push(claim.run);
-        } else if (claim.kind === "skipped_capacity") {
-          result.skippedCapacity.push(claim.run);
-        } else if (claim.kind === "blocked") {
-          result.blocked.push(claim.run);
-        } else {
-          result.missed.push(claim.run);
-        }
+      } catch (error) {
+        // Claims already persisted must be settled even if a later read or
+        // capacity check fails. No new execution starts after this failure.
+        claimFailure = error instanceof Error ? error : new Error("计划任务领取失败", { cause: error });
       }
-      const dispatched = await Promise.all(
+      const dispatched = await Promise.allSettled(
         [...dispatchGroups.values()].map(async (group) => {
           const resolved: Array<{ readonly order: number; readonly run: ScheduledRun }> = [];
+          const failures: unknown[] = [];
           for (const job of group) {
-            if (this.stopping) {
-              const interrupted = this.store.markInterrupted(
-                job.run.runId,
-                this.transitionTime(job.run),
-              );
+            try {
+              if (this.stopping || claimFailure !== undefined || failures.length > 0) {
+                const interrupted = await this.store.markInterrupted(
+                  job.run.runId,
+                  this.transitionTime(job.run),
+                );
+                resolved.push({
+                  order: job.order,
+                  run: await this.notifyRunStateChanged(interrupted),
+                });
+                continue;
+              }
               resolved.push({
                 order: job.order,
-                run: await this.notifyRunStateChanged(interrupted),
+                run: await this.dispatchSafely(job.task, job.run),
               });
-              continue;
+            } catch (error) {
+              failures.push(error);
             }
-            resolved.push({
-              order: job.order,
-              run: await this.dispatch(job.task, job.run),
-            });
           }
+          if (failures.length > 0) throw new AggregateError(failures, "计划任务派发状态收敛失败");
           return resolved;
         }),
       );
+      const dispatchFailure = dispatched.find((entry) => entry.status === "rejected");
+      if (dispatchFailure?.status === "rejected") {
+        throw new AggregateError(dispatched.flatMap((entry) => entry.status === "rejected" ? [entry.reason as unknown] : []), "计划任务批次收敛失败");
+      }
+      if (claimFailure !== undefined) throw claimFailure;
       const resolvedByOrder = new Map(
-        dispatched.flat().map(({ order, run }) => [order, run]),
+        dispatched.flatMap((entry) => entry.status === "fulfilled" ? entry.value : [])
+          .map(({ order, run }) => [order, run]),
       );
       result.claimed.push(
         ...[...resolvedByOrder.keys()].sort((left, right) => left - right)
           .map((order) => resolvedByOrder.get(order)!),
       );
+      if (!this.stopping) await this.maybeCleanup(nowMs);
       return result;
     } finally {
       this.ticking = false;
@@ -213,24 +225,24 @@ export class ScheduledTaskScheduler {
       this.tickCompletion = new Promise<void>((resolve) => {
         this.resolveTickCompletion = resolve;
       });
-      const retry = "runId" in selection ? this.store.getRun(selection.runId) : undefined;
+      const retry = "runId" in selection ? await this.store.getRun(selection.runId) : undefined;
       if ("runId" in selection && retry?.state !== "uncertain") {
         throw new ScheduledTaskStateError("只有 uncertain Run 可以显式解除后重试");
       }
       const taskId = "taskId" in selection ? selection.taskId : retry!.taskId;
-      const task = this.store.getTask(taskId);
+      const task = await this.store.getTask(taskId);
       if (!task) throw new Error(`任务不存在：${taskId}`);
       const claimOccurrence = (result: "claimed" | "skipped_capacity") => retry
         ? this.store.claimRetry(retry.runId, nowMs, result)
         : this.store.claimManual(taskId, nowMs, result);
       if (!await this.capacityAvailable(task, 0, retry !== undefined)) {
         if (this.stopping) throw new Error("计划任务调度器正在停止");
-        return claimOccurrence("skipped_capacity").run;
+        return (await claimOccurrence("skipped_capacity")).run;
       }
       if (this.stopping) throw new Error("计划任务调度器正在停止");
-      const claim = claimOccurrence("claimed");
+      const claim = await claimOccurrence("claimed");
       if (claim.kind !== "claimed") return claim.run;
-      return await this.dispatch(task, claim.run);
+      return await this.dispatchSafely(task, claim.run);
     } finally {
       if (this.ticking) {
         this.ticking = false;
@@ -266,8 +278,11 @@ export class ScheduledTaskScheduler {
     if (this.ticking) throw new ScheduledTaskStopTimeoutError();
   }
 
-  recoverAfterCrash(nowMs = this.clock.now()): ScheduledRun[] {
-    return this.store.recoverAfterCrash(nowMs);
+  async recoverAfterCrash(nowMs = this.clock.now(), signal?: AbortSignal): Promise<void> {
+    while (!signal?.aborted && !this.stopping) {
+      const recovered = await this.store.recoverAfterCrash(nowMs);
+      if (recovered.length < 200) return;
+    }
   }
 
   private scheduleNextTick(delayMs: number): void {
@@ -280,16 +295,13 @@ export class ScheduledTaskScheduler {
     }, delayMs);
   }
 
-  private activeRunExists(task: ScheduledTask): boolean {
-    return this.store.hasBlockingRun(task.taskId);
-  }
-
   private async capacityAvailable(
     task: ScheduledTask,
     reservedCapacity: number,
     replacingUncertain = false,
   ): Promise<boolean> {
-    const activeCount = this.store.countConversationActiveRuns(task) - (replacingUncertain ? 1 : 0);
+    const activeCount = await this.store.countConversationActiveRuns(task) - (replacingUncertain ? 1 : 0);
+    if (this.stopping) return false;
     if (activeCount >= this.maxConcurrentRunsPerConversation) return false;
     if (this.executor.availableCapacity !== undefined) {
       const available = await this.executor.availableCapacity(task);
@@ -302,13 +314,16 @@ export class ScheduledTaskScheduler {
   }
 
   private async dispatch(task: ScheduledTask, run: ScheduledRun): Promise<ScheduledRun> {
+    if (this.stopping) {
+      return await this.notifyRunStateChanged(await this.store.markInterrupted(run.runId, this.transitionTime(run)));
+    }
     const controller = new AbortController();
     this.abortControllers.add(controller);
     let outcome: ScheduledTaskExecutionResult;
     try {
       outcome = await this.executor.execute(task, run, controller.signal);
     } catch {
-      const updated = this.store.markUncertain(run.runId, this.transitionTime(run));
+      const updated = await this.store.markUncertain(run.runId, this.transitionTime(run));
       return await this.notifyRunStateChanged(updated);
     } finally {
       this.abortControllers.delete(controller);
@@ -316,7 +331,7 @@ export class ScheduledTaskScheduler {
     switch (outcome.kind) {
       case "running":
         {
-          const updated = this.store.markRunning(
+          const updated = await this.store.markRunning(
             run.runId,
             this.transitionTime(run),
             executionIdentifiers(outcome),
@@ -325,14 +340,14 @@ export class ScheduledTaskScheduler {
         }
       case "completed":
         {
-          const started = this.store.markRunning(
+          const started = await this.store.markRunning(
             run.runId,
             this.transitionTime(run),
             executionIdentifiers(outcome),
           );
           const reconciled = await this.notifyRunStateChanged(started);
           if (reconciled.state !== "running") return reconciled;
-          const updated = this.store.markCompleted(
+          const updated = await this.store.markCompleted(
             run.runId,
             this.transitionTime(reconciled),
             executionIdentifiers(outcome),
@@ -341,7 +356,7 @@ export class ScheduledTaskScheduler {
         }
       case "failed":
         {
-          const updated = this.store.markFailed(
+          const updated = await this.store.markFailed(
             run.runId,
             outcome.category ?? "unknown",
             this.transitionTime(run),
@@ -349,7 +364,7 @@ export class ScheduledTaskScheduler {
           );
           if (outcome.blockTask) {
             try {
-              this.store.blockTask(task.taskId, updated.completedAt ?? this.transitionTime(run));
+              await this.store.blockTask(task.taskId, updated.completedAt ?? this.transitionTime(run));
             } catch (error) {
               this.reportError(error);
             }
@@ -358,7 +373,7 @@ export class ScheduledTaskScheduler {
         }
       case "interrupted":
         {
-          const updated = this.store.markInterrupted(
+          const updated = await this.store.markInterrupted(
             run.runId,
             this.transitionTime(run),
             executionIdentifiers(outcome),
@@ -367,13 +382,34 @@ export class ScheduledTaskScheduler {
         }
       case "uncertain":
         {
-          const updated = this.store.markUncertain(
+          const updated = await this.store.markUncertain(
             run.runId,
             this.transitionTime(run),
             executionIdentifiers(outcome),
           );
           return await this.notifyRunStateChanged(updated);
         }
+    }
+  }
+
+  private async dispatchSafely(task: ScheduledTask, run: ScheduledRun): Promise<ScheduledRun> {
+    try {
+      return await this.dispatch(task, run);
+    } catch (error) {
+      try {
+        const latest = await this.store.getRun(run.runId);
+        if (latest && latest.state !== "dispatching" && latest.state !== "running") {
+          // A live completion can win an awaited transition. Its durable
+          // terminal row is authoritative; never rewrite it as uncertain.
+          if (error instanceof ScheduledTaskStateError) return latest;
+        } else if (latest) {
+          const uncertain = await this.store.markUncertain(run.runId, this.transitionTime(latest));
+          await this.notifyRunStateChanged(uncertain);
+        }
+      } catch (recoveryError) {
+        this.reportError(recoveryError);
+      }
+      throw error;
     }
   }
 
@@ -388,7 +424,7 @@ export class ScheduledTaskScheduler {
     }
     // Observers may reconcile a raced completion and return the newer Store
     // row.  Always hand callers the authoritative latest row when available.
-    return this.store.getRun(run.runId) ?? run;
+    return await this.store.getRun(run.runId) ?? run;
   }
 
   private transitionTime(run: ScheduledRun): number {
@@ -407,14 +443,15 @@ export class ScheduledTaskScheduler {
     }
   }
 
-  private maybeCleanup(nowMs: number): void {
+  private async maybeCleanup(nowMs: number): Promise<void> {
     if (
       this.lastCleanupAttemptAt !== undefined
+      && !this.cleanupIncomplete
       && nowMs - this.lastCleanupAttemptAt < scheduledTaskCleanupIntervalMs
     ) return;
     this.lastCleanupAttemptAt = nowMs;
     try {
-      this.store.cleanup(nowMs);
+      this.cleanupIncomplete = !(await this.store.cleanup(nowMs)).complete;
     } catch (error) {
       // Cleanup is terminal-row maintenance; a failed cleanup must not stop safe scheduling.
       this.reportError(error);

@@ -21,7 +21,9 @@ import { serviceShutdownTimeoutMs } from "../../runtime/shutdown-budget.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { ResetCreditError } from "../application/index.js";
-import { createLogger } from "../observability/index.js";
+import { closeMetricsStores, createLogger, waitForMetricsStoresExit } from "../observability/index.js";
+import { closeDeliveryJournals, waitForDeliveryJournalsExit } from "../delivery/index.js";
+import { closeScheduledTaskStores, waitForScheduledTaskStoresExit } from "../scheduled-tasks/index.js";
 import { createWeixinCredentialChangeCheck, createWeixinCredentialStore } from "../surfaces/index.js";
 import { GatewayApplication, GatewayConstructionCleanupError } from "./app.js";
 import { loadBuiltInSurfacePlugins } from "./surface-composition.js";
@@ -54,15 +56,32 @@ export async function runGatewayProcess(): Promise<void> {
   const eventQueuePath = configEventQueuePath(dirname(runtime.configPath));
   const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config, { service: "gateway", module: "lifecycle" });
+  const closeStorageOwners = async (): Promise<boolean> => {
+    const components = ["Delivery", "Metrics", "Scheduled Tasks"];
+    const results = await Promise.allSettled([
+      closeDeliveryJournals(), closeMetricsStores(), closeScheduledTaskStores(),
+    ]);
+    for (const [index, result] of results.entries()) {
+      if (result.status === "rejected") {
+        logger.error({ err: result.reason, component: components[index] }, "Gateway 存储关闭未确认");
+      }
+    }
+    await Promise.all([
+      waitForDeliveryJournalsExit(), waitForMetricsStoresExit(), waitForScheduledTaskStoresExit(),
+    ]);
+    return results.every(result => result.status === "fulfilled");
+  };
   let earlyStop = false;
   let shutdownTimer: NodeJS.Timeout | undefined;
+  let shutdownTimedOut = false;
   const beginShutdownDeadline = (): void => {
     if (shutdownTimer) return;
     // Include ownership acquisition and component construction in the budget:
     // an early stop must stay bounded even before controls.stop is installed.
     shutdownTimer = setTimeout(() => {
-      logger.error({ timeoutMs: serviceShutdownTimeoutMs }, "Gateway 停止等待超时，进程将以故障状态退出");
-      process.exit(1);
+      shutdownTimedOut = true;
+      logger.error({ timeoutMs: serviceShutdownTimeoutMs }, "Gateway 停止等待超时，等待存储资源退出后以故障状态退出");
+      void closeStorageOwners().then(() => process.exit(1));
     }, serviceShutdownTimeoutMs);
   };
   const clearShutdownDeadline = (): void => { clearTimeout(shutdownTimer); };
@@ -221,7 +240,8 @@ export async function runGatewayProcess(): Promise<void> {
           reportCloseFailure(error, "Gateway 所有权 Socket 关闭失败");
         }
         clearShutdownDeadline();
-        process.exit(finalExitCode);
+        if (!(await closeStorageOwners())) finalExitCode = 1;
+        process.exit(shutdownTimedOut ? 1 : finalExitCode);
       });
   };
   const reload = async (): Promise<void> => {

@@ -206,27 +206,42 @@ function singleReportProvider(report) {
   return providers.size === 1 ? providers.values().next().value : null;
 }
 
-export function printMetricsExport(result, format) {
+export function* renderMetricsExport(frames, format) {
+  const iterator = frames[Symbol.iterator]();
+  try {
+    const header = iterator.next();
+    if (header.done || header.value.type !== "header") throw new Error("指标导出元数据缺失");
+    yield* renderMetricsExportBody(iterator, header.value.value, format);
+  } finally {
+    iterator.return?.();
+  }
+}
+
+function* renderMetricsExportBody(iterator, result, format) {
   if (format === "json") {
-    console.log(JSON.stringify(result, null, 2));
+    const metadata = JSON.stringify(result);
+    yield `${metadata.slice(0, -1)},"records":[`;
+    let separator = "";
+    for (let next = iterator.next(); !next.done; next = iterator.next()) {
+      yield `${separator}${JSON.stringify(next.value.value)}`;
+      separator = ",";
+    }
+    yield "]}\n";
     return;
   }
   if (format === "markdown") {
-    console.log("# Codex Connect 请求明细");
-    console.log("");
-    console.log(`- 时区：${formatLocalTimeZone()}`);
-    console.log(`- 生成时间：${formatLocalTime(Date.parse(result.generatedAt))}`);
-    console.log(`- 时间范围：${result.range.name}`);
-    printWeeklyQuotaMarkdown(result.weeklyQuota);
-    console.log("");
-    if (result.records.length === 0) {
-      console.log("本时间范围没有请求记录。");
+    yield `# Codex Connect 请求明细\n\n- 时区：${formatLocalTimeZone()}\n- 生成时间：${formatLocalTime(Date.parse(result.generatedAt))}\n- 时间范围：${result.range.name}\n`;
+    yield* weeklyQuotaMarkdownLines(result.weeklyQuota);
+    const first = iterator.next();
+    if (first.done) {
+      yield "\n本时间范围没有请求记录。\n";
       return;
     }
-    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存 | 输出 | 首 Token | 速度 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
-    for (const record of result.records) {
-      console.log(
+    yield "\n| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存 | 输出 | 首 Token | 速度 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |\n";
+    yield "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n";
+    for (let next = first; !next.done; next = iterator.next()) {
+      const record = next.value.value;
+      yield (
         [
           markdownCell(formatLocalTime(record.recordedAtMs)),
           markdownCell(record.provider ?? ""),
@@ -244,7 +259,7 @@ export function printMetricsExport(result, format) {
           markdownCell(record.traffic == null ? "未关联"
             : `${record.traffic.label} / ${record.traffic.session} / #${record.traffic.interaction}`),
           markdownCell(record.source), markdownCell(record.callerId), markdownCell(record.deliveryStatus),
-        ].join(" | "),
+        ].join(" | ") + "\n"
       );
     }
     return;
@@ -254,43 +269,34 @@ export function printMetricsExport(result, format) {
     ...csvColumns(),
     ...weeklyQuotaCsvColumns(),
   ];
-  const rows = [
-    ...result.records.map((record) => ({
-      type: "request",
-      ...record,
-      ...flattenRecordedWeeklyQuota(record),
-    })),
-    ...(result.weeklyQuota === null
-      ? []
-      : [{
-          type: "weekly_quota_summary",
-          ...flattenWeeklyQuota(result.weeklyQuota),
-        }]),
-  ];
-  console.log(columns.map(([heading]) => csvCell(heading)).join(","));
-  for (const row of rows) {
-    console.log(columns.map(([, read]) => csvCell(read(row))).join(","));
+  yield columns.map(([heading]) => csvCell(heading)).join(",") + "\n";
+  for (let next = iterator.next(); !next.done; next = iterator.next()) {
+    const record = next.value.value;
+    const row = { type: "request", ...record, ...flattenRecordedWeeklyQuota(record) };
+    yield columns.map(([, read]) => csvCell(read(row))).join(",") + "\n";
+  }
+  if (result.weeklyQuota !== null) {
+    const row = { type: "weekly_quota_summary", ...flattenWeeklyQuota(result.weeklyQuota) };
+    yield columns.map(([, read]) => csvCell(read(row))).join(",") + "\n";
   }
 }
 
 function printWeeklyQuotaMarkdown(quota) {
-  console.log("");
-  console.log("## 当前周额度区间");
-  console.log("");
+  for (const line of weeklyQuotaMarkdownLines(quota)) process.stdout.write(line);
+}
+
+function* weeklyQuotaMarkdownLines(quota) {
+  yield "\n## 当前周额度区间\n\n";
   if (quota === null) {
-    console.log("暂无统计代理捕获的周额度快照。");
+    yield "暂无统计代理捕获的周额度快照。\n";
     return;
   }
-  console.log(`- 已用：${quota.usedPercent}%`);
-  console.log(`- 剩余：${quota.remainingPercent}%`);
-  console.log(`- 重置时间：${formatLocalTime(quota.resetsAt * 1_000)}`);
-  console.log(`- 观测时间：${formatLocalTime(quota.observedAtMs)}`);
+  yield `- 已用：${quota.usedPercent}%\n- 剩余：${quota.remainingPercent}%\n- 重置时间：${formatLocalTime(quota.resetsAt * 1_000)}\n- 观测时间：${formatLocalTime(quota.observedAtMs)}\n`;
   if (quota.estimate === null) {
-    console.log("- 每 1% 估算：正在采样，尚未观测到额度增长");
+    yield "- 每 1% 估算：正在采样，尚未观测到额度增长\n";
     return;
   }
-  console.log(`- 观测变化：${quota.estimate.observedDeltaPercent}%（${quota.estimate.intervalCount} 个区间）`);
-  console.log(`- 每 1%：约 ${quota.estimate.totalTokensPerPercent} Token`);
+  yield `- 观测变化：${quota.estimate.observedDeltaPercent}%（${quota.estimate.intervalCount} 个区间）\n- 每 1%：约 ${quota.estimate.totalTokensPerPercent} Token\n`;
 }
 
 function flattenWeeklyQuota(quota) {

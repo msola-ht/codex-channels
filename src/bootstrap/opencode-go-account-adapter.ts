@@ -7,8 +7,9 @@ import {
 } from "../../runtime/opencode-go-accounts.mjs";
 import {
   SqliteModelRequestMetricsStore,
+  sumProviderQuotaTokens,
+  type AsyncGatewayMetricsStore,
 } from "../observability/index.js";
-import type { ModelRequestMetricsRequestQueryStore } from "../observability/index.js";
 import { AccountQuery } from "./account-query.js";
 
 import type {
@@ -74,15 +75,16 @@ export function createOpencodeGoAccountAdapter(
         }
         query.stage = "local";
         query.operation = "local-tokens";
-        const localTokens = options.metricsDatabasePath === undefined
+        const localTokens = options.metricsDatabasePath === undefined && options.metricsQuery === undefined
           ? null
-          : readWindowLocalTokens(
+          : await readWindowLocalTokens(
               options.metricsDatabasePath,
               nowMs,
               usage.windows,
               windowStartAtMs,
               windowEndAtMs,
               provider,
+              options.metricsQuery, query.signal,
             );
         const windows = localTokens === null
           ? usage.windows
@@ -100,6 +102,7 @@ export interface OpencodeGoAccountAdapterOptions {
   environment?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   metricsDatabasePath?: string;
+  metricsQuery?: (signal?: AbortSignal) => Pick<AsyncGatewayMetricsStore, "providerQuotaTokens">;
   nowMs?: () => number;
   provider?: string;
 }
@@ -110,22 +113,18 @@ function defaultOpencodeGoProvider(environment: NodeJS.ProcessEnv): string {
   return opencodeGoProviderId(account.id);
 }
 
-function readWindowLocalTokens(
-  metricsDatabasePath: string,
+async function readWindowLocalTokens(
+  metricsDatabasePath: string | undefined,
   nowMs: number,
   quotaWindows: readonly ProviderQuotaWindow[],
   monthlyWindowStartAtMs: number,
   monthlyWindowEndAtMs: number | null,
   provider: string,
-): Map<string, number> {
+  metricsQuery?: (signal?: AbortSignal) => Pick<AsyncGatewayMetricsStore, "providerQuotaTokens">,
+  signal?: AbortSignal,
+): Promise<Map<string, number>> {
   const tokens = new Map<string, number>();
   try {
-    const store = new SqliteModelRequestMetricsStore(
-      metricsDatabasePath,
-      nowMs,
-      { readOnly: true },
-    );
-    try {
       const ranges: ReadonlyArray<readonly [string, number | null, number, number]> = [
         [
           "rolling",
@@ -156,12 +155,15 @@ function readWindowLocalTokens(
         Number.isFinite(startAtMs)
         && Number.isFinite(endAtMs)
         && endAtMs > startAtMs);
-      const refreshed = new Map(validRanges.map(([windowId]) => [windowId, 0]));
-      readOpencodeGoTokens(store, validRanges, provider, refreshed);
+      let refreshed: Map<string, number>;
+      if (metricsQuery) refreshed = await metricsQuery(signal).providerQuotaTokens(validRanges, provider);
+      else {
+        if (metricsDatabasePath === undefined) return tokens;
+        const store = new SqliteModelRequestMetricsStore(metricsDatabasePath, nowMs, { readOnly: true });
+        try { refreshed = sumProviderQuotaTokens(store, validRanges, provider); }
+        finally { store.close(); }
+      }
       for (const [windowId, total] of refreshed) tokens.set(windowId, total);
-    } finally {
-      store.close();
-    }
   } catch {
     // 指标库不可用时窗口本地 Token 保持不可用
   }
@@ -189,89 +191,11 @@ function quotaWindowRange(
   return [nowMs - durationMs, nowMs];
 }
 
-function readOpencodeGoTokens(
-  store: Pick<ModelRequestMetricsRequestQueryStore, "forEachProviderTokenMetric">,
-  ranges: ReadonlyArray<readonly [string, number | null, number, number]>,
-  provider: string,
-  totals: Map<string, number>,
-): void {
-  if (ranges.length === 0) return;
-  const startAtMs = Math.min(...ranges.map(([, , start]) => start));
-  const endAtMs = Math.max(...ranges.map(([, , , end]) => end));
-  store.forEachProviderTokenMetric({ provider, startAtMs, endAtMs }, (record) => {
-    const totalTokens = record.totalTokens;
-    const tokens = (
-      totalTokens !== null
-      && Number.isSafeInteger(totalTokens)
-      && totalTokens >= 0
-    )
-      ? totalTokens
-      : record.inputTokens !== null && record.outputTokens !== null
-        ? record.inputTokens + record.outputTokens
-        : null;
-    if (tokens === null) return;
-    for (const [windowId, currentResetsAt, windowStartAtMs, windowEndAtMs] of ranges) {
-      if (requestInQuotaWindow(
-        record,
-        windowId,
-        currentResetsAt,
-        windowStartAtMs,
-        windowEndAtMs,
-      )) {
-        totals.set(windowId, (totals.get(windowId) ?? 0) + tokens);
-      }
-    }
-  });
-}
-
 function windowResetsAt(
   windows: readonly ProviderQuotaWindow[],
   windowId: string,
 ): number | null {
   return windows.find((window) => window.windowId === windowId)?.resetsAt ?? null;
-}
-
-function requestInQuotaWindow(
-  record: {
-    requestStartedAtMs: number | null;
-    recordedAtMs: number;
-    quotaWindows?: ReadonlyArray<{
-      windowId: string;
-      resetsAt: number | null;
-      usedPercentMillionths?: number | null;
-      status?: string | null;
-    }> | null;
-  },
-  windowId: string,
-  currentResetsAt: number | null,
-  startAtMs: number,
-  endAtMs: number,
-): boolean {
-  const snapshot = record.quotaWindows?.find((window) => window.windowId === windowId);
-  const requestAtMs = record.requestStartedAtMs ?? record.recordedAtMs;
-  // 滚动窗口按请求时间归属；固定窗口仅接受请求开始时仍有效的快照。
-  if (
-    windowId !== "rolling"
-    && snapshot?.resetsAt !== null
-    && snapshot?.resetsAt !== undefined
-    && currentResetsAt !== null
-    && snapshot.resetsAt * 1_000 > requestAtMs
-  ) {
-    return snapshot.resetsAt === currentResetsAt;
-  }
-  return requestStartsInWindow(record, startAtMs, endAtMs);
-}
-
-
-function requestStartsInWindow(
-  record: { requestStartedAtMs: number | null; recordedAtMs: number },
-  startAtMs: number,
-  endAtMs: number,
-): boolean {
-  // 窗口按请求开始时间判定（入库时间只用于分页），
-  // 避免跨窗口重置的长请求串入相邻窗口的汇总。
-  const requestAtMs = record.requestStartedAtMs ?? record.recordedAtMs;
-  return requestAtMs >= startAtMs && requestAtMs < endAtMs;
 }
 
 export function opencodeGoMonthlyWindowStartMs(resetsAtSeconds: number): number {

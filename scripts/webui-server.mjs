@@ -4,6 +4,7 @@ import { installServiceControlHandler } from "../runtime/process-lifecycle.mjs";
 import { serviceShutdownTimeoutMs } from "../runtime/shutdown-budget.mjs";
 import { accountSnapshotEventsPath, metricsEventsPath } from "../runtime/metrics-events.mjs";
 import { createServer } from "node:http";
+import { Writable } from "node:stream";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,6 +15,10 @@ import {
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
 import { metricsRangeOptions } from "./metrics-command-options.mjs";
+import { createMetricsExportOwner } from "./metrics-export-stream.mjs";
+import { MetricsExportError } from "./metrics-export-limits.mjs";
+import { closeDeliveryReaders, waitForDeliveryReadersExit, closeDeliveryJournals, waitForDeliveryJournalsExit } from "../dist/delivery/index.js";
+import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "../runtime/windows-acl-bridge.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
@@ -154,6 +159,7 @@ export function createWebuiServer({
   const serviceStatusCache = { expiresAtMs: 0, value: null, pending: null };
   const gatewayConfigRead = { pending: null, controller: null, responses: new Set() };
   const providerStateCache = { expiresAtMs: 0, value: null, pending: null };
+  const metricsExports = createMetricsExportOwner();
   const management = createManagementState(
     environment,
     host,
@@ -174,10 +180,19 @@ export function createWebuiServer({
     resetGatewayCredits,
   );
   const server = createServer((request, response) => {
-    handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, management, request, response);
+    handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, metricsExports, management, request, response);
   });
   server.on("close", () => gatewayConfigRead.controller?.abort());
-  return { host, server, staticDir, token, closeNotifications: () => closeQueueStreams(management) };
+  return { host, server, staticDir, token, closeNotifications: async () => {
+    gatewayConfigRead.controller?.abort();
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => closeQueueStreams(management)),
+      metricsExports.close(), closeDeliveryReaders(), closeDeliveryJournals(), closeWindowsAclBridge({ timeoutMs: 2_000 }),
+    ]);
+    if (results.some(result => result.status === "rejected")) throw new Error("WebUI 后台资源退出未确认");
+  }, waitForNotificationsExit: async () => {
+    await Promise.all([metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit()]);
+  } };
 }
 
 export function resolveWebuiSettings({
@@ -198,7 +213,7 @@ export function resolveWebuiSettings({
   };
 }
 
-async function handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, management, request, response) {
+async function handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, metricsExports, management, request, response) {
   let managementRequest = false;
   try {
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -237,7 +252,7 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         openQueueStream(management, response, (signal, send) => watchQueueChanges(path(resolveGatewayConfigPath(environment)), signal, send));
         return;
       }
-      await routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead);
+      await routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports);
       return;
     }
     serveStatic(staticDir, url.pathname, response);
@@ -447,7 +462,7 @@ function readJsonMetadata(path) {
   }
 }
 
-async function routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead) {
+async function routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports) {
   const path = url.pathname;
   if (!path.startsWith(`${API_PREFIX}/`)) {
     throw new ApiError(404, "not_found", `未知 API：${path}`);
@@ -508,7 +523,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     return;
   }
   if (apiPath === "/requests/export") {
-    handleRequestsExport(environment, url, response);
+    await handleRequestsExport(environment, url, request, response, metricsExports);
     return;
   }
   if (apiPath === "/errors") {
@@ -677,8 +692,10 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
   try {
     const queries = new RequestMetricsQueryService(store);
     if (view === "run") {
-      const summary = queries.threadSummary(threadId);
-      const subagent = queries.subagentThread(threadId);
+      const { summary, subagent } = store.readSnapshot(() => ({
+        summary: queries.threadSummary(threadId),
+        subagent: queries.subagentThread(threadId),
+      }));
       sendJson(response, 200, {
         generatedAt: new Date().toISOString(),
         threadId,
@@ -727,13 +744,13 @@ async function handleRequests(environment, url, response) {
   const filters = parseMetricsFilters(url);
   const store = openMetricsStore(environment, range.endAtMs);
   try {
-    const page = new RequestMetricsQueryService(store).page(range, {
+    const page = store.readSnapshot(() => new RequestMetricsQueryService(store).page(range, {
       offset,
       limit,
       sortKey: sort.key,
       sortDirection: sort.direction,
       ...filters,
-    });
+    }));
     const records = page.records;
     if (records.some(record => record.source === "relay")) {
       const config = readGatewayConfig(resolveGatewayConfigPath(environment));
@@ -759,27 +776,58 @@ async function handleRequests(environment, url, response) {
   }
 }
 
-function handleRequestsExport(environment, url, response) {
+async function handleRequestsExport(environment, url, request, response, exports) {
   const range = parseRange(url);
   const filters = parseMetricsFilters(url);
   const sort = parseRequestSort(url);
-  const store = openMetricsStore(environment, range.endAtMs);
+  const controller = new AbortController();
+  const framed = request.headers.accept === "application/vnd.codexc.metrics-export.v1";
+  // The browser explicitly opts in; ordinary HTTP and CLI exports retain JSON.
+  // Each frame has a one-byte kind and four-byte big-endian payload length.
+  const frame = (kind, payload = Buffer.alloc(0)) => {
+    const header = Buffer.alloc(5);
+    header[0] = kind;
+    header.writeUInt32BE(payload.length, 1);
+    return Buffer.concat([header, payload]);
+  };
+  const output = framed ? new Writable({
+    write(chunk, _encoding, callback) {
+      response.write(frame(1, chunk), callback);
+    },
+  }) : response;
+  const outputError = error => output.destroy(error);
+  if (framed) response.on("error", outputError);
+  const disconnected = () => controller.abort();
+  response.once("close", disconnected);
   try {
-    const queries = new RequestMetricsQueryService(store);
-    const records = [];
-    let offset = 0;
-    do {
-      const page = queries.page(range, { ...filters, sortKey: sort.key, sortDirection: sort.direction, offset, limit: 500 });
-      records.push(...page.records);
-      offset = page.nextOffset ?? -1;
-    } while (offset >= 0);
-    sendJson(response, 200, {
-      range, filters, generatedAt: new Date(range.endAtMs).toISOString(),
-      records, total: records.length,
-      aggregate: queries.aggregate("global", range, filters).aggregate,
-    });
+    response.setHeader("Content-Type", framed ? "application/vnd.codexc.metrics-export.v1" : "application/json; charset=utf-8");
+    response.setHeader("Cache-Control", "no-store");
+    await exports.stream(environment, {
+      ...filters, resolvedRange: range, sortKey: sort.key, sortDirection: sort.direction, webui: true,
+    }, { output, signal: controller.signal });
+    if (!response.destroyed) response.end(framed ? frame(2) : undefined);
+  } catch (error) {
+    if (response.headersSent || response.destroyed) {
+      if (error instanceof MetricsExportError && error.code !== "metrics_export_cancelled") {
+        logger.warn({ event: "metrics.export-interrupted", code: error.code }, "指标导出流未完成");
+      }
+      if (framed && !response.destroyed && error instanceof MetricsExportError) {
+        response.end(frame(3, Buffer.from(error.code, "utf8")));
+        return;
+      }
+      response.destroy();
+      return;
+    }
+    if (error instanceof MetricsExportError) {
+      throw new ApiError(error.code === "metrics_export_busy" ? 429 : 503, error.code, error.message);
+    }
+    throw error;
   } finally {
-    store.close();
+    response.off("close", disconnected);
+    if (framed) {
+      response.off("error", outputError);
+      output.destroy();
+    }
   }
 }
 
@@ -798,18 +846,21 @@ async function handleErrors(environment, url, response) {
   const store = openMetricsStore(environment, range.endAtMs);
   try {
     const queries = new RequestMetricsQueryService(store);
-    const page = queries.page(range, {
-      ...filters,
-      offset,
-      limit,
-      sortKey: sort.key,
-      sortDirection: sort.direction,
-      onlyFailures: true,
-    });
+    const { page, errors } = store.readSnapshot(() => ({
+      page: queries.page(range, {
+        ...filters,
+        offset,
+        limit,
+        sortKey: sort.key,
+        sortDirection: sort.direction,
+        onlyFailures: true,
+      }),
+      errors: queries.errors(range, filters),
+    }));
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
-      errors: queries.errors(range, filters),
+      errors,
       records: page.records,
       nextOffset: page.nextOffset,
       total: page.matchedTotal,
@@ -980,7 +1031,7 @@ function parseThreadQuery(url, threadId) {
 function parseRequestSort(url) {
   const sort = url.searchParams.get("sort") ?? "time";
   const direction = url.searchParams.get("direction") ?? "desc";
-  const key = requestSortKeys[sort];
+  const key = Object.hasOwn(requestSortKeys, sort) ? requestSortKeys[sort] : undefined;
   if (key === undefined) {
     throw new ApiError(400, "invalid_sort", "sort 不支持该请求字段");
   }
@@ -1064,7 +1115,7 @@ function main() {
   try {
     const settings = resolveWebuiSettings({ args: process.argv.slice(2) });
     applyConfiguredTimezone(process.env, settings.configPath);
-    const { host, server, closeNotifications } = createWebuiServer({
+    const { host, server, closeNotifications, waitForNotificationsExit } = createWebuiServer({
       environment: process.env,
       host: settings.host,
       port: settings.port,
@@ -1114,14 +1165,19 @@ function main() {
       const deadline = setTimeout(() => {
         logger.error({ event: "service.shutdown-timeout", timeoutMs: serviceShutdownTimeoutMs }, "WebUI 请求未在停止期限内结束，关闭剩余连接");
         server.closeAllConnections();
-        process.exit(1);
+        process.exitCode = 1;
       }, serviceShutdownTimeoutMs);
       deadline.unref();
-      server.close(() => {
-        clearTimeout(deadline);
-        process.exit(exitCode);
+      const resourcesClosed = closeNotifications().catch(async () => {
+        logger.error({ event: "service.background-close-failed" }, "WebUI 后台资源未确认退出，保留所有权等待实际结束");
+        process.exitCode = 1;
+        await waitForNotificationsExit();
       });
-      closeNotifications();
+      const httpClosed = new Promise(resolve => server.close(resolve));
+      void Promise.all([httpClosed, resourcesClosed]).then(() => {
+        clearTimeout(deadline);
+        process.exit(process.exitCode || exitCode);
+      });
       for (const socket of pendingConnections) socket.destroy();
       server.closeIdleConnections();
     };

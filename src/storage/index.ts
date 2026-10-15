@@ -7,5 +7,5 @@ export type {
   ConversationModelPreference,
 } from "./binding-store.js";
 export { MemoryBindingStore } from "./memory-binding-store.js";
-export { SqliteBindingStore, stateDatabaseSchemaVersion } from "./sqlite-binding-store.js";
-export { SqliteSessionDisplayCache, sessionDisplayCacheSchemaVersion } from "./sqlite-session-display-cache.js";
+export { SqliteBindingStore, assertStateDatabaseSchema, stateDatabaseSchemaVersion } from "./sqlite-binding-store.js";
+export { SqliteSessionDisplayCache, assertSessionDisplayCacheSchema, sessionDisplayCacheSchemaVersion } from "./sqlite-session-display-cache.js";

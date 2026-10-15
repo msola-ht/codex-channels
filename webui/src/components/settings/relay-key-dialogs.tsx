@@ -1,5 +1,5 @@
 import { useRef } from "react"
-import { RelayKeyModels } from "@/components/settings/relay-key-models"
+import { RelayKeyModels, RelayModelReasoningLabel } from "@/components/settings/relay-key-models"
 import { useTranslation } from "@/hooks/use-translation"
 import type { useRelayKeyEditor } from "@/hooks/use-relay-key-editor"
 import type { useRelayManagement } from "@/hooks/use-relay-management"
@@ -26,9 +26,9 @@ export function RelayKeyDialogs({ editor, management, blocked, refreshBlocked, o
   const cancelRef = useRef<HTMLButtonElement>(null)
   const data = management.data
   const {
-    editing, setEditing, name, setName, caller, models, setModels, reasoning, changeReasoning,
-    removedModelCount, result, setResult, nameInvalid, draftStale, latestCaller,
-    modelsChanged, selectedModelsAvailable, selectedModelsSupportOff, openEditor, submit,
+    editing, setEditing, name, setName, caller, models, setModels, modelReasoning, changeModelReasoning,
+    result, setResult, nameInvalid, draftStale, latestCaller,
+    modelsChanged, selectedModelsAvailable, openEditor, submit,
     confirm, preview, previewCaller,
   } = editor
   return <>
@@ -43,18 +43,17 @@ export function RelayKeyDialogs({ editor, management, blocked, refreshBlocked, o
           <Field data-invalid={name.length > 0 && nameInvalid} data-disabled={management.busy}><FieldLabel htmlFor="relay-name">{t("relay.purpose")}</FieldLabel>{editing === "new" && <ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={[name]} disabled={management.busy} aria-label={t("relay.purposePresetsLabel")} onValueChange={([value]) => { if (value) setName(value) }}>
             {(["translation", "coding", "chat", "writing", "testing"] as const).map(preset => <ToggleGroupItem key={preset} value={t(`relay.purposePresets.${preset}`)}>{t(`relay.purposePresets.${preset}`)}</ToggleGroupItem>)}
           </ToggleGroup>}<Input id="relay-name" value={name} disabled={management.busy} onChange={event => setName(event.target.value)} aria-invalid={name.length > 0 && nameInvalid} aria-describedby={name.length > 0 && nameInvalid ? "relay-name-hint relay-name-error" : "relay-name-hint"} /><FieldDescription id="relay-name-hint">{t("relay.purposeHint")}</FieldDescription>{name.length > 0 && nameInvalid && <FieldError id="relay-name-error">{t("relay.nameInvalid")}</FieldError>}{editing !== "new" && <FieldDescription>{t("relay.callerId")}: {caller}</FieldDescription>}</Field>
-          {removedModelCount > 0 && <Alert><AlertDescription>{t("relay.offModelsRemoved", { count: removedModelCount })}</AlertDescription></Alert>}
-          <RelayKeyModels providers={data?.providers ?? []} models={models} reasoning={reasoning} disabled={management.busy || draftStale} onChange={setModels} />
-          <Field data-disabled={management.busy}><FieldLabel id="relay-reasoning-label">{t("relay.reasoning")}</FieldLabel><ToggleGroup variant="outline" value={[reasoning]} disabled={management.busy || draftStale} aria-labelledby="relay-reasoning-label" aria-describedby="relay-reasoning-hint" onValueChange={([value]) => { if (value === "passthrough" || value === "off") changeReasoning(value) }}><ToggleGroupItem value="passthrough">{t("relay.passthrough")}</ToggleGroupItem><ToggleGroupItem value="off">{t("relay.keyOff")}</ToggleGroupItem></ToggleGroup><FieldDescription id="relay-reasoning-hint">{t("relay.offHint")}</FieldDescription></Field>
+          <RelayKeyModels providers={data?.providers ?? []} models={models} modelReasoning={modelReasoning} disabled={management.busy || draftStale}
+            revision={data?.revision ?? ""} editorScope={caller} active={editing !== null && !preview} onChange={setModels} onReasoningChange={changeModelReasoning} />
         </FieldGroup>
-        <DialogFooter><Button variant="outline" disabled={management.busy} onClick={() => setEditing(null)}>{t("relay.cancel")}</Button><Button disabled={blocked || draftStale || nameInvalid || !models.length || !selectedModelsSupportOff || modelsChanged && !selectedModelsAvailable} onClick={submit}>{management.busy && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("relay.preview")}</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" disabled={management.busy} onClick={() => setEditing(null)}>{t("relay.cancel")}</Button><Button disabled={blocked || draftStale || nameInvalid || !models.length || modelsChanged && !selectedModelsAvailable} onClick={submit}>{management.busy && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("relay.preview")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     <AlertDialog open={preview !== undefined} onOpenChange={(open, details) => { if (management.busy) { details.cancel(); return }; if (!open) management.cancel() }}>
       <AlertDialogContent initialFocus={cancelRef} className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-lg" finalFocus={restoreFocus}>
         <AlertDialogHeader><AlertDialogTitle>{preview ? t(`relay.operation.${preview.command}`) : t("relay.confirm")}</AlertDialogTitle><AlertDialogDescription>{preview ? t(`relay.confirmHints.${preview.command}`) : ""}</AlertDialogDescription></AlertDialogHeader>
         <div className="min-h-0 overflow-y-auto">
-          {preview && <dl className="grid min-w-0 gap-3"><div><dt className="text-muted-foreground">{t("relay.purpose")}</dt><dd className="break-words">{previewCaller?.display_name ?? preview.caller}</dd></div><div><dt className="text-muted-foreground">{t("relay.callerId")}</dt><dd className="break-all">{preview.caller}</dd></div>{previewCaller && <><div><dt className="text-muted-foreground">{t("relay.provider")}</dt><dd className="break-all">{[...new Set(previewCaller.models.map(id => id.slice(0, id.indexOf("/"))))].join(", ")}</dd></div>{preview.command !== "delete" && <div><dt className="text-muted-foreground">{t("relay.models")}</dt><dd className="break-all">{previewCaller.models.join(", ")}</dd></div>}<div><dt className="text-muted-foreground">{t("relay.reasoning")}</dt><dd>{t(previewCaller.reasoning === "off" ? "relay.keyOff" : "relay.passthrough")}</dd></div></>}</dl>}
+          {preview && <dl className="grid min-w-0 gap-3"><div><dt className="text-muted-foreground">{t("relay.purpose")}</dt><dd className="break-words">{previewCaller?.display_name ?? preview.caller}</dd></div><div><dt className="text-muted-foreground">{t("relay.callerId")}</dt><dd className="break-all">{preview.caller}</dd></div>{previewCaller && <><div><dt className="text-muted-foreground">{t("relay.provider")}</dt><dd className="break-all">{[...new Set(previewCaller.models.map(id => id.slice(0, id.indexOf("/"))))].join(", ")}</dd></div>{preview.command !== "delete" && <div><dt className="text-muted-foreground">{t("relay.models")}</dt><dd className="break-all">{previewCaller.models.join(", ")}</dd></div>}<div><dt className="text-muted-foreground">{t("relay.reasoning")}</dt><dd><dl className="flex flex-col gap-2">{previewCaller.models.map(id => <div key={id}><dt className="break-all">{id}</dt><dd><RelayModelReasoningLabel value={previewCaller.model_reasoning?.[id] ?? previewCaller.reasoning} /></dd></div>)}</dl></dd></div></>}</dl>}
         </div>
         <AlertDialogFooter><AlertDialogCancel ref={cancelRef} disabled={management.busy}>{t("relay.cancel")}</AlertDialogCancel><AlertDialogAction variant={(preview?.command === "disable" || preview?.command === "delete") ? "destructive" : "default"} disabled={management.busy} onClick={event => { event.preventDefault(); void confirm() }}>{management.busy && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("relay.confirm")}</AlertDialogAction></AlertDialogFooter>
       </AlertDialogContent>

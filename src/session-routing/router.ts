@@ -78,6 +78,8 @@ export class SessionRouter {
   private readonly backgroundReservations = new Map<string, number>();
   private readonly threadLifecycleQueues = new Map<string, Promise<void>>();
   private readonly approvalResolutions = new Set<ApprovalResolution>();
+  // An existing binding is not usable until a failed detach restores its subscription.
+  private readonly unsubscribedBindings = new Set<string>();
   // 模型设置保留到进程结束：thread/list 不返回 model，
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
@@ -90,6 +92,7 @@ export class SessionRouter {
     private readonly workspaces: WorkspaceRegistry,
     private readonly dynamicTools: readonly ThreadDynamicToolSpec[] = [],
     private readonly onBindingsChanged?: () => void,
+    private readonly onSubscriptionRestoreRequired?: (binding: ConversationBinding) => void,
   ) {}
 
   private workspacePermissions(workspace: Workspace): ThreadStartOptions {
@@ -390,6 +393,7 @@ export class SessionRouter {
                 : "other",
           };
         }
+        this.unsubscribedBindings.delete(binding.threadId);
         onRestored(restoredBinding, restoredThread);
         return undefined;
       });
@@ -415,6 +419,16 @@ export class SessionRouter {
       const pending = this.threadLifecycleQueues.get(current.threadId);
       if (pending) {
         await pending;
+        return this.ensure(target, startOptions);
+      }
+      if (this.unsubscribedBindings.has(current.threadId)) {
+        if (this.onSubscriptionRestoreRequired) {
+          this.onSubscriptionRestoreRequired(current);
+          throw new UserFacingError("conversation.busy", "会话订阅正在恢复，请稍后重试", { reason: "subscription-restoring" });
+        }
+        const failures = await this.restoreSubscriptions((_target, binding) =>
+          this.sameBinding(current, binding));
+        if (failures[0]) throw failures[0].error;
         return this.ensure(target, startOptions);
       }
       return current;
@@ -849,7 +863,8 @@ export class SessionRouter {
       } else {
         await this.detachUnlocked(target, preference);
       }
-      this.markForceNew(target, Date.now());
+      // Both unbind and demote persist the marker with the binding change.
+      if (!current) this.markForceNew(target, Date.now());
     });
   }
 
@@ -874,6 +889,7 @@ export class SessionRouter {
     const ownsBinding = () => this.sameBinding(expected, this.bindings.get(target));
     if (!ownsBinding() || !condition.isCurrent()) return false;
     await this.codex.unsubscribeThread(expected.threadId);
+    this.unsubscribedBindings.add(expected.threadId);
     let verified = false;
     try {
       verified = ownsBinding() && condition.isCurrent() && await condition.verifyIdle();
@@ -885,26 +901,21 @@ export class SessionRouter {
       // Unsubscribe is already effective on the server. Keep the local binding
       // and restore its subscription when cancellation came from new activity.
       // Shutdown/disconnection instead leaves restoration to reconnect.
-      if (ownsBinding() && condition.canRestore()) {
-        const workspace = this.workspaces.require(expected.workspaceId);
-        let resumed: ThreadResumeSession;
-        try {
-          resumed = await this.resumeInWorkspace(snapshot, workspace, {}, false,
-            () => ownsBinding() && condition.canRestore());
-        } catch (error) {
-          if (ownsBinding() && condition.canRestore()) condition.restoreRequired?.();
-          throw error;
-        }
-        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
-        this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-        this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
-        condition.restored(resumed.thread);
-      }
+      await this.restoreUnsubscribedBinding(expected, snapshot, condition);
       return false;
     }
+    try {
+      this.bindings.unbind(target, preference);
+    } catch (error) {
+      try {
+        await this.restoreUnsubscribedBinding(expected, snapshot, condition);
+      } catch (restoreError) {
+        throw new AggregateError([error, restoreError], "解除绑定失败，且原订阅恢复失败", { cause: restoreError });
+      }
+      throw error;
+    }
+    this.unsubscribedBindings.delete(expected.threadId);
     this.contextCompactionItemIdsByThread.delete(expected.threadId);
-    this.bindings.unbind(target, preference);
-    this.markForceNew(target, Date.now());
     this.notifyBindingsChanged();
     return true;
   }
@@ -1100,11 +1111,50 @@ export class SessionRouter {
     const current = this.bindings.get(target);
     if (current) {
       await this.codex.unsubscribeThread(current.threadId);
+      this.unsubscribedBindings.add(current.threadId);
+      try {
+        this.bindings.unbind(target, preference);
+      } catch (error) {
+        try {
+          if (this.sameBinding(current, this.bindings.get(target))) {
+            if (this.onSubscriptionRestoreRequired) this.onSubscriptionRestoreRequired(current);
+            else await this.restoreUnsubscribedBinding(current);
+          }
+        } catch (restoreError) {
+          throw new AggregateError([error, restoreError], "解除绑定失败，且原订阅恢复失败", { cause: restoreError });
+        }
+        throw error;
+      }
+      this.unsubscribedBindings.delete(current.threadId);
       this.contextCompactionItemIdsByThread.delete(current.threadId);
-      this.bindings.unbind(target, preference);
       this.notifyBindingsChanged();
     } else {
       this.bindings.setModelPreference(target, preference);
+    }
+  }
+
+  private async restoreUnsubscribedBinding(
+    expected: ConversationBinding,
+    snapshot?: ThreadSnapshot,
+    condition?: ThreadReleaseCondition,
+  ): Promise<void> {
+    const isCurrent = () => this.sameBinding(expected, this.bindings.get(expected.target))
+      && (condition?.canRestore() ?? true);
+    if (!isCurrent()) return;
+    try {
+      const workspace = this.workspaces.require(expected.workspaceId);
+      const historical = snapshot ?? await this.codex.readThread(expected.threadId);
+      if (!isCurrent()) return;
+      const resumed = await this.resumeInWorkspace(historical, workspace, {}, false, isCurrent);
+      this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort,
+        resumed.serviceTier, resumed.collaborationMode, resumed.approvalsReviewer);
+      this.namesByThread.set(resumed.thread.id, resumed.thread.name);
+      this.contextCompactionItemIdsByThread.set(resumed.thread.id, resumed.contextCompactionItemIds);
+      this.unsubscribedBindings.delete(expected.threadId);
+      condition?.restored(resumed.thread);
+    } catch (error) {
+      if (isCurrent()) condition?.restoreRequired?.();
+      throw error;
     }
   }
 
@@ -1130,6 +1180,9 @@ export class SessionRouter {
   }
 
   private notifyBindingsChanged(): void {
+    for (const threadId of this.unsubscribedBindings) {
+      if (!this.bindings.getByThread(threadId)) this.unsubscribedBindings.delete(threadId);
+    }
     if (this.approvalResolutions.size > 0) {
       const currentBindings = new Map(this.bindings.list().map(binding => [binding.threadId, binding]));
       for (const resolution of this.approvalResolutions) {

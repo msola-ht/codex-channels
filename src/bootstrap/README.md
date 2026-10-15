@@ -15,18 +15,18 @@
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，避免输出积压导致旧问题重新登记；拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
   回答提交结束前持续保护原 Thread，整个问题流程结束后触发后台空闲复核；审批类交互则在官方 `serverRequest/resolved` 后解析绑定祖先并复核，避免只清理交互状态而遗留后台订阅。
 - `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限；异步预检返回后及 Thread 创建后再次复核当前授权、取消、Workspace 与投递准入，撤权时释放新建后台绑定而不启动 Turn。临时容量拒绝不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
-- `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态；确认离线终态后通过组合层向原 Conversation 发布恢复通知，再释放后台绑定。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
-- `scheduled-task-server-request.ts`：为已关联的计划任务 Thread 返回五类 Server Request 的官方安全拒绝形状；普通命令和文件审批返回 `decline`，已有终端输入 `writeStdin` 返回 `cancel` 中止本轮，其他方法明确失败；非计划任务请求交给既有审批处理器。只在 `scheduled_tasks.enabled=true` 时由组合根安装。
+- `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态；确认离线终态后通过组合层向原 Conversation 发布恢复通知，再释放后台绑定。恢复包含已知 Thread 的 `uncertain` Run，结果未知不清除无人值守拒绝归属；精确 Turn 的终态只释放该未知 Run 的运行期归属，不改写历史结果。启动响应前每 Run 只保留一个带 Turn ID 的完成候选，其他轮次不覆盖它；启动响应不匹配时在五秒和分页上限内读取权威历史的精确 Turn，缺失或读取失败保留为 `uncertain`，不能将同 Thread 的其他轮次用于结算。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
+- `scheduled-task-server-request.ts`：按启动恢复及实时登记的 Thread/Run 归属，在首次异步操作前记录无人值守拒绝，避免并发 Turn 完成误报成功；持久化失败保留进程内拒绝事实并记录告警。为已关联的计划任务 Thread 返回五类 Server Request 的官方安全拒绝形状；普通命令和文件审批返回 `decline`，已有终端输入 `writeStdin` 返回 `cancel` 中止本轮，其他方法明确失败；非计划任务请求交给既有审批处理器。只在 `scheduled_tasks.enabled=true` 时由组合根安装。
 - `scheduled-task-tool-request.ts`：校验前台 `item/tool/call` 的 Thread 绑定、唯一授权 Actor 和
   `schedule_task` 工具名，把结果复用现有计划任务渲染格式返回给 Agent，并把确认预览交给当前
-  `surface + accountId` 的原生交互入口；后台计划任务 Thread 的
-  同类请求先由 `scheduled-task-server-request.ts` 拒绝。
+  `surface + accountId` 的原生交互入口；先拒绝后台绑定，再在 5 秒预算内查询官方 Thread 来源并复核同一前台归属，拒绝 `automation` 来源或无法确认的结果。
+  已登记计划任务的同类请求先由 `scheduled-task-server-request.ts` 拒绝；工具入口的独立检查仍覆盖未知 Run、显式重试和重启后的旧 Thread。
 - `app.ts`：通过异步 `GatewayApplication.create` 提供唯一构造入口，接收已加载的内置渠道插件；构造失败时逆序清理组合根登记的已取得资源，继续清理其余组件并保留原始错误及清理错误。提供启动、停止和配置重载入口，编排顶层生命周期，
   把具体组件所有权交给组件图；持有启动/停止幂等任务，内部致命故障同时通知进程生命周期退出，配置重载继承组件图实现，启动中取消、订阅移除和资源关闭由组件图统一处理。
 - `gateway-component-graph.ts`：只为 OpenAI 主 Client 注入遵循共享代理配置的图片上传 HTTP 客户端，本地模型路由核验直连回环地址；
   为渠道 Hook 管理注入实时授权守卫及 Surface 无损审查策略，在会话锁内和写入前复核运行状态、渠道允许名单及 Actor 归属；
   校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；
-  构造期间即时登记数据库、指标写入方、通知端点与已创建的渠道实例；计划任务 Store 和插件实例创建边界也登记部分取得的资源，不依赖尚未返回的完整应用实例回滚；
+  构造期间即时登记数据库、指标写入方、通知端点与已创建的渠道实例；指标数据库由单 Worker 拥有，启动先等待独立初始化及订阅限制投影读取完成，再开放指标 Socket 与渠道；订阅限制只在已确认账户快照提交后更新内存投影。计划任务 Store 和插件实例创建边界也登记部分取得的资源，不依赖尚未返回的完整应用实例回滚；
   私有持有当前配置、Workspace Registry、Surface 集合与管理器，统一协调配置重载和重启通知接收方的临时切换与恢复；
   启动账户预热绑定应用关闭信号，按账户记录安全失败分类，在指标存储关闭前最多等待 5 秒；
   迟到的用量与额度结果均禁止写入。把同一 Client 的
@@ -56,14 +56,16 @@
   恢复容器及退避计数只在协调器内部创建，组合根不持有或注入其可变状态。
 - `scheduled-task-composition.ts`：在功能启用时集中创建计划任务 Store、Executor、Run Coordinator、Scheduler、
   Application Service 与动态工具 Handler，并拥有恢复、启动、停止和关闭顺序；Gateway 组合根只保留
-  Surface 创建上下文、无人值守权限边界和 App Server 请求接线。
+  Surface 创建上下文、无人值守权限边界和 App Server 请求接线。Store Worker 就绪后才恢复与启动调度；
+  审批查询、拒绝标记和完成持久化经异步端口执行，同步输出观察仅登记内存终态。
 - `git-workspace-status.ts`：通过异步子进程读取当前授权 Workspace 的 Git 分支，限制执行时间与输出大小，接收调用方取消；状态命令、上线通知与完成卡共用该读取器，不阻塞 Gateway 事件循环。
-- `request-metrics-query-adapter.ts`：复用 Observability 统一只读查询服务，把查询结果和 Provider
+- `request-metrics-query-adapter.ts`：通过 Observability Worker 的异步窄端口读取相同范围和聚合语义，把查询结果和 Provider
   显示名映射为 Application 的 `/metrics` 窄端口，保留错误组的来源和错误码；不让 Application 依赖 SQLite 实现。
 - `managed-provider-capabilities.ts`：按 `runtime/model-provider-definitions.mjs` 的编译期能力元数据
   有界装配 DeepSeek、OpenCode Go、CCG、CLP 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
   账户能力；未知能力或适配器冲突启动时失败关闭，不回退到 OpenAI 账户查询。
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
+  模型请求入口；IPC 只投影约定字段，Provider 归属由组合层确定，不接受入站扩展字段覆盖。
   模型请求统计端口。所有脱敏请求样本都会持久化；具备 Thread 与 Turn 关联的样本按 Turn 聚合
   到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
   Core 统计。优先使用代理指标携带的 HTTP/WS 请求中明确提供的 `reasoning.effort`，
@@ -78,10 +80,10 @@
   上游轮次首 Token 使用当前 Turn 首个有效 OpenAI 上游样本，覆盖重启后仅观测到后续请求的实时值；
   若当前 Turn 已部分延迟写入，按持久化汇总校正请求状态与
   可选用量字段。
-- `auto-approval-review-tracker.ts`：在有界展示队列之前采集所有已归属 Provider 的官方审查与轮次通知，包括未绑定渠道的后代；仅写入最小指标事实。断线使观测覆盖失效，写入失败可观测并保守降级；完成卡通过窄读取端口获取当前轮递归任务快照和当前会话累计快照。
+- `auto-approval-review-tracker.ts`：在有界展示队列之前采集所有已归属 Provider 的官方审查与轮次通知，包括未绑定渠道的后代；Reader 只提交有界异步写入，不执行 SQL。断线使观测覆盖失效，写入失败或队列超限会合并一次独立的持久覆盖降级，无法落库则停止 Gateway；关闭限时等待已接收操作。完成卡通过异步窄端口获取当前轮递归任务快照和当前会话累计快照。
 - `auto-approval-review-notifications.ts`：独立于指标写入，每次仅发布审查完成结果，不补发开始通知；仅 `turn.started` 可记录直接会话归属，审查开始、子代理活动与继续操作不能捕获当前绑定。按已记录的授权归属及既有精确父子 Turn 关系路由，完成时复核原会话与 Provider，保留来源身份、Client 校验的固定动作类别、文件数量、网络协议与端口，以及经凭据脱敏、控制字符清理并各按最多 320 字符截断的 operation、cwd、rationale，并投影 durationMs。Client 保留 ASCII 标点；execve program 与 argv 逐参数脱敏后再格式化。operation 摘要按 action 类别取 command、execve program 与 argv、文件列表、network host（不含完整 target URL）、MCP server/tool 或权限申请 reason；不展示 stdin 正文，不采集风险与用户授权字段。保持有界等待和去重，断线只清理对应 Provider 的归属及等待。无归属、淘汰与输出失败可观测；Core 与投递摘要保持有界纯文本，经现有加密投递箱暂存，平台富文本转义由 Surface 负责。指标采集仍消费开始和完成事件；StateStore 与指标库不增加审查正文、schema 或指标字段，持久投递沿用当前结构版本，历史事件可缺省 details。
 - `turn-execution-tracker.ts`：将官方轮次耗时幂等写入指标库；单队列、有界分页补齐历史，
-  绑定恢复与 Revert 后重新同步，丢弃与实时事件冲突的快照；完整性以指标库为准，内存只记录当前连接的有界观测集合。
+  绑定恢复与 Revert 后重新同步，丢弃与实时事件冲突的快照；实时观察在单 Worker 内按序完成，历史读取有取消及分页预算，只重试权威读取、不重试结果未知的写入。完整性以指标库为准，写入或排队失败会持久降级所有历史完整标记，无法落库则停止 Gateway；内存只记录当前连接的有界观测集合。
   清理后再次完成与写入失败触发补齐；同一五秒预算内最多三次尝试，失效与成功均通知读取方刷新。
   停止时取消读取与重试并等待任务退出，禁止迟到写入，不阻塞 App Server Reader。
 - `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 发给发起父 Turn 的
@@ -172,10 +174,13 @@
   进程退出；配置重载同时检查已启用微信的安全凭据变化，重新扫码替换同账号凭据也触发连接重建。
   只有应用启动完成后才把所有权
   协议标记为就绪，供服务管理入口区分进程占位和可用 Gateway；账户刷新私有 IPC 与应用一同启停。
-  内部致命停止请求进入同一进程关闭链，立即取消设置与代理监听、撤销就绪并关闭账户 IPC；以非零状态退出，整体关闭最多等待 30 秒，不终止共享 App Server。
+  内部致命停止请求进入同一进程关闭链，立即取消设置与代理监听、撤销就绪并关闭账户 IPC；整体关闭预算为 30 秒，超时标记故障。正常及超时后的显式进程退出均先关闭投递、指标与计划任务存储，阻止新数据库 Worker 创建，并确认其 Worker 与嵌套 helper 已实际退出，不把超时视为资源回收成功，不终止共享 App Server。
   该 IPC 根据受控账户查询原因生成固定文案，不透传内部异常 message；按 Provider 记录阶段、分类、
   耗时和受控状态码，主动取消不记录为上游失败；快照等未知本地异常按内部故障处理。
 - `provider-settings-watcher.ts`：监听当前 Gateway 已启用的受管 Provider 模型目录、Profile 与管理标记；
+  构造与轮询不在 Gateway 主线程读文件；单个有界 Runtime Worker 安全读取、散列并完整校验稳定快照，
+  同时最多一项读取，应用与模型刷新后的确认使用新读取。Worker 初始化、普通读取与停止分别有独立时限，
+  限制单文件、文件数与整批字节预算，私有访问校验保持当前平台语义，跨线程仅返回指纹和安全失败阶段。
   聚合使用 Runtime 提供的第三方成员材料指纹捕获成员配置、目录及源路径变化，复用同一待应用流程；
   主 Codex 配置不参与聚合变化监听，必要的主配置校验留在材料加载与实例启动／应用边界。
   校验后逐 Provider 调用监管设置应用端口，原生 TUI/Desktop 租约或权威活动 Thread 保留待应用状态。

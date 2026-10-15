@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { readPrivateFileSync } from "../../runtime/private-file.mjs";
+import { assertPrivateDirectoryAccessSync, assertPrivateFileAccessSync, readPrivateFileSync } from "../../runtime/private-file.mjs";
 import { deliverySchemaVersion, type DeliveryQueueEntry, type DeliveryQueueSnapshot, type DeliveryState } from "./types.js";
 import { decryptDeliveryPayload, deliveryPayloadAad } from "./payload-codec.js";
 
@@ -45,15 +45,16 @@ function inspect(path: string, directory: boolean): boolean {
   if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile())
     || (process.getuid && stat.uid !== process.getuid())
     || (process.platform !== "win32" && (stat.mode & 0o077) !== 0)) throw new Error("Unsafe delivery path");
+  if (directory) assertPrivateDirectoryAccessSync(path);
+  else assertPrivateFileAccessSync(path);
   return true;
 }
 
-/** Read-only transaction, no recovery, key access, writer lock or directory creation. */
-export function readDeliveryQueue(directory: string, options: { before?: number; state?: DeliveryState; id?: string } = {}): DeliveryQueueSnapshot {
+function queueSnapshot(db: DatabaseSync | null, options: { before?: number; state?: DeliveryState; id?: string }): DeliveryQueueSnapshot {
   const before = integer.parse(options.before ?? 0);
   const filter = options.state === undefined ? null : stateSchema.parse(options.state);
   const id = options.id === undefined ? null : z.string().min(1).max(4096).parse(options.id);
-  return withReadDatabase<DeliveryQueueSnapshot>(directory, db => {
+  if (db) {
     const summary = { records: 0, bytes: 0, pending: 0, sending: 0, uncertain: 0, blocked: 0 };
     for (const row of db.prepare("SELECT state,COUNT(*) AS records,SUM(bytes) AS bytes FROM deliveries GROUP BY state").all()) {
       const state = stateSchema.parse(row.state);
@@ -66,34 +67,69 @@ export function readDeliveryQueue(directory: string, options: { before?: number;
     const records = rows.slice(0, 50);
     return { state: "available", observedAt: Date.now(), summary, records,
       nextCursor: rows.length > 50 ? records.at(-1)!.sequence : null };
-  }) ?? { state: "missing", observedAt: Date.now(), summary: null, records: [], nextCursor: null };
-}
-
-/** Metadata lookup in one transaction, without global aggregates or payload access. */
-export function readDeliveryEntries(directory: string, ids: string[]): Array<DeliveryQueueEntry | null> {
-  validateIds(ids);
-  return withReadDatabase(directory, db => ids.map(id => readDeliveryQueueRows(db, 0, null, id)[0] ?? null)) ?? ids.map(() => null);
+  }
+  return { state: "missing", observedAt: Date.now(), summary: null, records: [], nextCursor: null };
 }
 
 function validateIds(ids: string[]) {
   z.array(z.string().min(1).max(4096)).min(1).max(50).refine(values => new Set(values).size === values.length).parse(ids);
 }
 
-function withReadDatabase<T>(directory: string, read: (db: DatabaseSync) => T): T | null {
+function openReadDatabase(directory: string): DatabaseSync | null {
   const path = join(directory, "outbox.sqlite3");
   if (!inspect(directory, true) || !inspect(path, false)) return null;
   const db = new DatabaseSync(path, { readOnly: true });
   try {
-    db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=100; BEGIN;");
-    if (db.prepare("PRAGMA user_version").get()?.user_version !== deliverySchemaVersion) throw new Error("Unsupported delivery schema");
-    const metadata = db.prepare("SELECT version FROM metadata").all();
-    if (metadata.length !== 1 || metadata[0]?.version !== deliverySchemaVersion) throw new Error("Invalid delivery metadata");
-    return read(db);
-  } finally { db.close(); }
+    db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=100;");
+    withReadTransaction(db, () => {});
+    return db;
+  } catch (error) { db.close(); throw error; }
 }
 
-function decryptPayload(db: DatabaseSync, key: Buffer, row: DeliveryQueueEntry): string {
-  const raw = db.prepare("SELECT payload,nonce,tag FROM deliveries WHERE id=?").get(row.id)!;
+function withReadTransaction<T>(db: DatabaseSync, read: () => T): T {
+  db.exec("BEGIN;");
+  try {
+    // Releasing the lock between items also releases the schema snapshot.
+    if (db.prepare("PRAGMA user_version").get()?.user_version !== deliverySchemaVersion) throw new Error("Unsupported delivery schema");
+    const metadata = db.prepare("SELECT version FROM metadata LIMIT 2").all();
+    if (metadata.length !== 1 || metadata[0]?.version !== deliverySchemaVersion) throw new Error("Invalid delivery metadata");
+    return read();
+  }
+  finally { db.exec("ROLLBACK;"); }
+}
+
+/** Worker-owned read-only connection; no transaction spans decryption, messages or ACKs. */
+export function openDeliveryReader(directory: string, content: boolean) {
+  const db = openReadDatabase(directory);
+  let key: Buffer | undefined;
+  try { if (db && content) key = readKey(directory); }
+  catch (error) { db?.close(); throw error; }
+  return {
+    queue: (options: { before?: number; state?: DeliveryState; id?: string }) => db
+      ? withReadTransaction(db, () => queueSnapshot(db, options)) : queueSnapshot(null, options),
+    entries(ids: string[]) {
+      validateIds(ids);
+      return db ? withReadTransaction(db, () => ids.map(id => readDeliveryQueueRows(db, 0, null, id)[0] ?? null)) : ids.map(() => null);
+    },
+    payload(id: string, revision: string) {
+      z.string().min(1).max(4096).parse(id);
+      if (!db || !key) return null;
+      const value = withReadTransaction(db, () => {
+        const row = readDeliveryQueueRows(db, 0, null, id)[0];
+        if (!row || row.revision !== revision) return null;
+        // Reject oversized corrupt blobs before materializing them in JS.
+        const raw = db.prepare("SELECT CASE WHEN length(payload)<=4194304 THEN payload ELSE NULL END AS payload,nonce,tag FROM deliveries WHERE id=?").get(id)!;
+        return { row, raw };
+      });
+      if (!value) return null;
+      try { return { row: value.row, payload: decryptPayload(value.raw, key, value.row) }; }
+      catch { return null; }
+    },
+    close() { key?.fill(0); db?.close(); },
+  };
+}
+
+function decryptPayload(raw: { payload?: unknown; nonce?: unknown; tag?: unknown }, key: Buffer, row: DeliveryQueueEntry): string {
   const payload = z.instanceof(Uint8Array).refine(value => value.length <= 4 * 1024 * 1024).parse(raw.payload);
   return decryptDeliveryPayload(key, payload, z.instanceof(Uint8Array).parse(raw.nonce),
     z.instanceof(Uint8Array).parse(raw.tag), deliveryPayloadAad(row));
@@ -103,27 +139,4 @@ function readKey(directory: string): Buffer {
   const key = readPrivateFileSync(join(directory, "payload.key"), 64);
   if (!/^[0-9a-f]{64}$/u.test(key)) throw new Error("Invalid delivery key");
   return Buffer.from(key, "hex");
-}
-
-/** Project one authenticated payload at a time; never accumulate a batch of raw bodies. */
-export function readDeliveryPayloads<T>(directory: string, ids: string[], project: (row: DeliveryQueueEntry, payload: string) => T): Array<T | null> {
-  validateIds(ids);
-  return withReadDatabase(directory, db => {
-    const key = readKey(directory);
-    return ids.map(id => {
-      const row = readDeliveryQueueRows(db, 0, null, id)[0];
-      if (!row) return null;
-      try { return project(row, decryptPayload(db, key, row)); }
-      catch { return null; }
-    });
-  }) ?? ids.map(() => null);
-}
-
-/** Explicit single-record inspection; no writer recovery. */
-export function readDeliveryPayload(directory: string, id: string) {
-  z.string().min(1).max(4096).parse(id);
-  return withReadDatabase(directory, db => {
-    const row = readDeliveryQueueRows(db, 0, null, id)[0];
-    return row ? { row, payload: decryptPayload(db, readKey(directory), row) } : null;
-  });
 }

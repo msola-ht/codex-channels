@@ -59,11 +59,15 @@ export function formatSurfaceUserFacingError(
       return "文本附件暂存空间已满，请稍后重试或发送较小片段";
     case "message.empty":
       return "消息不能为空";
+    case "oauth.closing":
+      return "飞书用户授权正在关闭，请稍后重试";
     case "conversation.name.invalid":
       return "会话名称必须为 1–64 个字符";
     case "conversation.missing":
       return "当前还没有 Codex Session";
     case "conversation.busy":
+      if (error.details.reason === "subscription-restoring") return "会话订阅正在恢复，请稍后重试";
+      if (error.details.reason === "activity-restored") return "会话活动状态已恢复，请重新发送消息以继续当前任务";
       if (error.details.reason === "pending-interaction") return "当前会话有待处理交互，请先完成或取消后再切换审批方式";
       return "当前任务运行中，请先使用 /stop 停止当前任务";
     case "delivery.overloaded":
@@ -98,6 +102,8 @@ export function formatSurfaceUserFacingError(
       return "音频超过 20 MiB 限制";
     case "audio.unsupported":
       return "仅支持 WAV、MP3、M4A、WebM 和 OGG 音频";
+    case "audio.unavailable":
+      return "语音输入已取消、超时或授权发生变化，请确认授权后重新发送";
     case "model.input.audio.unsupported":
       return `当前模型 ${detail(error, "model", "未知")} 不支持语音输入，请发送文字或图片`;
     case "model.input.image.unsupported":

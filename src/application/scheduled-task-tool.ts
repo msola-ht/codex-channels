@@ -113,7 +113,7 @@ export class ScheduledTaskToolService {
         case "create":
           return {
             kind: "confirmation",
-            preview: this.tasks.previewCreate(target, actorId, {
+            preview: await this.tasks.previewCreate(target, actorId, {
               schedule: request.schedule,
               timezone: request.timezone,
               prompt: request.prompt,
@@ -121,21 +121,21 @@ export class ScheduledTaskToolService {
             }),
           };
         case "list":
-          return { kind: "tasks", result: this.tasks.list(target, actorId, request.page) };
+          return { kind: "tasks", result: await this.tasks.list(target, actorId, request.page) };
         case "runs":
           return {
             kind: "runs",
-            result: this.tasks.runs(target, actorId, request.selector, request.page),
+            result: await this.tasks.runs(target, actorId, request.selector, request.page),
           };
         case "rename":
           return outcome(
             "renamed",
-            this.tasks.rename(target, actorId, request.selector, request.name),
+            await this.tasks.rename(target, actorId, request.selector, request.name),
           );
         case "pause":
-          return outcome("paused", this.tasks.pause(target, actorId, request.selector));
+          return outcome("paused", await this.tasks.pause(target, actorId, request.selector));
         case "resume":
-          return outcome("resumed", this.tasks.resume(target, actorId, request.selector));
+          return outcome("resumed", await this.tasks.resume(target, actorId, request.selector));
         case "run":
           return { kind: "outcome", outcome: { action: "run-requested", run: await this.tasks.run(target, actorId, request.selector) } };
         case "retry":
@@ -143,7 +143,7 @@ export class ScheduledTaskToolService {
         case "delete":
           return {
             kind: "confirmation",
-            preview: this.tasks.previewDelete(target, actorId, request.selector),
+            preview: await this.tasks.previewDelete(target, actorId, request.selector),
           };
       }
     } catch (error) {

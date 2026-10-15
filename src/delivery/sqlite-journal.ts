@@ -15,6 +15,16 @@ interface Row {
   bytes: number;
 }
 
+/** Read-only compatibility checks must precede permissions, locks and journal changes. */
+function requireCurrentDeliverySchema(database: DatabaseSync): void {
+  if (database.prepare("PRAGMA user_version").get()?.user_version !== deliverySchemaVersion
+    || database.prepare("PRAGMA page_size").get()?.page_size !== 4096
+    || database.prepare("PRAGMA quick_check").get()?.quick_check !== "ok") throw new DeliveryError("storage");
+  const metadata = database.prepare("SELECT version,proof,nonce,tag FROM metadata LIMIT 2").all();
+  if (metadata.length !== 1 || metadata[0]?.version !== deliverySchemaVersion) throw new DeliveryError("storage");
+  database.prepare("SELECT sequence,id,account,conversation,state,created_at,attempt,bytes,payload,nonce,tag,progress FROM deliveries LIMIT 0").all();
+}
+
 /** Only constructed in the journal Worker in production. */
 export class SqliteDeliveryJournal {
   private readonly database: DatabaseSync;
@@ -30,13 +40,21 @@ export class SqliteDeliveryJournal {
     for (const value of Object.values(limits)) {
       if (!Number.isSafeInteger(value) || value <= 0) throw new DeliveryError("storage");
     }
+    const path = join(directory, "outbox.sqlite3");
+    const existing = lstatSync(path, { throwIfNoEntry: false });
+    if (existing) {
+      if (!existing.isFile() || existing.isSymbolicLink()
+        || (process.getuid && existing.uid !== process.getuid())) throw new DeliveryError("storage");
+      const inspection = new DatabaseSync(path, { readOnly: true });
+      try { requireCurrentDeliverySchema(inspection); }
+      finally { inspection.close(); }
+    }
     if (mode === "runtime") mkdirSync(directory, { recursive: true, mode: 0o700 });
     const dir = lstatSync(directory);
     if (!dir.isDirectory() || dir.isSymbolicLink() || (process.getuid && dir.uid !== process.getuid())) throw new DeliveryError("storage");
     securePrivateDirectorySync(directory);
     this.syncDirectory(dirname(directory));
     this.writerLock = this.acquireLock();
-    const path = join(directory, "outbox.sqlite3");
     const keyPath = join(directory, "payload.key");
     let database: DatabaseSync | undefined;
     try {
@@ -63,6 +81,7 @@ export class SqliteDeliveryJournal {
         || (process.platform !== "win32" && (metadata.mode & 0o077) !== 0)) throw new DeliveryError("storage");
       database = new DatabaseSync(path);
       this.database = database;
+      if (!fresh) requireCurrentDeliverySchema(database);
       database.exec("PRAGMA busy_timeout=1000; PRAGMA journal_mode=DELETE; PRAGMA synchronous=EXTRA; PRAGMA secure_delete=ON; PRAGMA max_page_count=131072;");
       if (database.prepare("PRAGMA page_size").get()?.page_size !== 4096
         || database.prepare("PRAGMA quick_check").get()?.quick_check !== "ok") throw new DeliveryError("storage");
@@ -240,10 +259,12 @@ export class SqliteDeliveryJournal {
 
   close(): void {
     if (this.closed) return;
-    this.database.close();
+    try { this.database.close(); }
+    finally {
+      this.key.fill(0);
+      this.writerLock.close();
+    }
     this.closed = true;
-    this.key.fill(0);
-    this.writerLock.close();
   }
 
   private acquireLock(): DatabaseSync {

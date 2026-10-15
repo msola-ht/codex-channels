@@ -27,7 +27,7 @@ const directlySupportedEncodeTypes = new Set([7, 8]);
 export interface WeixinAudioPort {
   start(): Promise<void>;
   close(): void;
-  download(reference: WeixinAudioReference): Promise<StoredManagedAudio>;
+  download(reference: WeixinAudioReference, signal?: AbortSignal): Promise<StoredManagedAudio>;
 }
 
 export class WeixinAudioDownloadError extends Error {
@@ -73,6 +73,7 @@ export class WeixinAudioStore implements WeixinAudioPort {
 
   async download(
     reference: WeixinAudioReference,
+    signal?: AbortSignal,
   ): Promise<StoredManagedAudio> {
     if (this.closed) {
       throw new Error("微信语音暂存器已经关闭");
@@ -102,24 +103,28 @@ export class WeixinAudioStore implements WeixinAudioPort {
     }
     await this.start();
     try {
-      const key = reference.mediaAesKey === undefined
-        ? undefined
-        : parseWeixinMediaAesKey(reference.mediaAesKey);
-      const response = await downloadWeixinCdnBytes({
-        fetchImpl: this.fetchImpl,
-        url: resolveWeixinCdnUrl(reference),
-        maximumBytes: key === undefined
-          ? maximumWeixinAudioBytes
-          : maximumEncryptedAudioBytes,
-        tooLarge: audioTooLarge,
-      });
-      const plaintext = key === undefined
-        ? response
-        : decryptWeixinMedia(response, key);
-      return await this.storage.store({
-        stream: Readable.from([plaintext]),
-        contentLength: plaintext.length,
-      });
+      return await this.storage.store(async (downloadSignal) => {
+        const key = reference.mediaAesKey === undefined
+          ? undefined
+          : parseWeixinMediaAesKey(reference.mediaAesKey);
+        const response = await downloadWeixinCdnBytes({
+          fetchImpl: this.fetchImpl,
+          url: resolveWeixinCdnUrl(reference),
+          maximumBytes: key === undefined
+            ? maximumWeixinAudioBytes
+            : maximumEncryptedAudioBytes,
+          tooLarge: audioTooLarge,
+          signal: downloadSignal,
+        });
+        const plaintext = key === undefined
+          ? response
+          : decryptWeixinMedia(response, key);
+        downloadSignal.throwIfAborted();
+        return {
+          stream: Readable.from([plaintext]),
+          contentLength: plaintext.length,
+        };
+      }, signal);
     } catch (error) {
       if (error instanceof UserFacingError) {
         throw error;

@@ -40,7 +40,7 @@ import {
   WeixinFileInputError,
   type WeixinFilePort,
 } from "./file-input.js";
-import type { WeixinAudioPort } from "./audio-store.js";
+import { WeixinAudioDownloadError, type WeixinAudioPort } from "./audio-store.js";
 import {
   renderWeixinDoctor,
   type WeixinDoctor,
@@ -191,44 +191,60 @@ export class WeixinConversationAdapter {
         return;
       }
       if (message.kind === "audio") {
-        await this.inputs.flushPending(message.target, message.actorId);
-        signal?.throwIfAborted();
-        if (message.audio.transcript !== undefined) {
-          await this.conversations.submit(
-            message.target,
-            formatQuotedInput(
-              message.audio.transcript,
-              message.quotedText,
-            ),
-          );
+        const scope = this.conversations.prepareAttachmentSubmission?.(
+          message.target,
+          () => !signal?.aborted && this.inputOptions.isAllowed?.(message.target, message.actorId) === true,
+          "audio",
+        );
+        if (!scope) throw new UserFacingError("audio.unavailable", "语音提交能力尚未就绪");
+        const audioSignal = AbortSignal.any([scope.signal, ...(signal ? [signal] : [])]);
+        try {
+          await this.inputs.flushPending(message.target, message.actorId);
+          audioSignal.throwIfAborted();
+          scope.captureTarget();
+          if (message.audio.transcript !== undefined) {
+            await scope.submit(
+              formatQuotedInput(
+                message.audio.transcript,
+                message.quotedText,
+              ),
+            );
+            return;
+          }
+          if (this.audios === undefined) {
+            throw new UserFacingError(
+              "audio.unsupported",
+              "微信语音输入尚未启用",
+            );
+          }
+          const audio = await this.audios.download(message.audio, audioSignal);
+          audioSignal.throwIfAborted();
+          const result = await scope.submit({
+            ...(message.quotedText === undefined
+              ? {}
+              : {
+                  text: formatQuotedInput(
+                    "请听取这段语音并根据内容协助我。",
+                    message.quotedText,
+                  ),
+                }),
+            localAudios: [{ path: audio.path }],
+          });
+          if (result.steered) {
+            this.notify(
+              message.target,
+              formatTurnInputAppended("audio", false),
+            );
+          }
           return;
+        } catch (error) {
+          if (audioSignal.aborted && !signal?.aborted) {
+            throw new UserFacingError("audio.unavailable", "语音输入已取消或超时，请重新发送");
+          }
+          throw error;
+        } finally {
+          scope.dispose();
         }
-        if (this.audios === undefined) {
-          throw new UserFacingError(
-            "audio.unsupported",
-            "微信语音输入尚未启用",
-          );
-        }
-        const audio = await this.audios.download(message.audio);
-        signal?.throwIfAborted();
-        const result = await this.conversations.submit(message.target, {
-          ...(message.quotedText === undefined
-            ? {}
-            : {
-                text: formatQuotedInput(
-                  "请听取这段语音并根据内容协助我。",
-                  message.quotedText,
-                ),
-              }),
-          localAudios: [{ path: audio.path }],
-        });
-        if (result.steered) {
-          this.notify(
-            message.target,
-            formatTurnInputAppended("audio", false),
-          );
-        }
-        return;
       }
       if (message.kind === "file") {
         const sequence = this.nextSequence;
@@ -400,6 +416,10 @@ export class WeixinConversationAdapter {
         throw error;
       }
       if (error instanceof WeixinImageDownloadError) {
+        this.notify(message.target, formatOperationFailure(error.message));
+        return;
+      }
+      if (error instanceof WeixinAudioDownloadError) {
         this.notify(message.target, formatOperationFailure(error.message));
         return;
       }
