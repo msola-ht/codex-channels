@@ -46,6 +46,7 @@ Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌�
 `secure-credential-store.ts` 提供 Surface 内部复用的 macOS Keychain、Linux AES-256-GCM 和 Windows
 DPAPI 主密钥 + AES-256-GCM 字符串记录机制；平台模块仍各自拥有 Service、目录、记录键、载荷校验
 和错误语义。macOS Keychain 命令失败在记录存储边界转换为安全错误，不传播含凭据参数的原始命令、标准输出或标准错误；读取和删除的记录不存在语义保持不变。
+Windows 持续流量路径使用异步 DPAPI、ACL 与记录读写；每目录串行、总容量 16 项和 15 秒取消预算，物理操作结算前保留槽位。凭据格式、作用域与 OAuth 关闭时的在途回滚归属不变。
 
 `types.ts` 定义最小 `SurfaceAdapter` 契约。每个实例使用
 `surface + accountId` 标识，分别提供启停、输出、可选配置变更通知、计划任务确认呈现与 `InteractionPort`；Bootstrap
@@ -279,6 +280,7 @@ ACL 私有暂存和一小时清理由
 三渠道音频在等待前序输入前登记 Application 附件作用域；`/stop` 取消准备，下载前捕获工作区与 Thread，提交前复核原目标和实时授权，避免下载完成后意外启动新 Turn。
 组合根在创建渠道前收紧共享 `uploads` 根目录；媒体暂存器启动时拒绝符号链接、非目录和非当前用户所有的目录，
 再收紧渠道目录权限，Windows 继续由共享 ACL 辅助函数验证当前 SID 所有权并关闭权限继承。
+媒体下载中的目录和文件权限操作异步执行，并共享下载取消信号。
 Application 只接收绝对本地路径；
 平台仍各自负责取得受信下载流。所有输入在调用 Application 前必须构造
 `SurfaceAccessContext` 并通过对应访问策略。

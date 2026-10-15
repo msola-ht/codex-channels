@@ -6,6 +6,7 @@ import { modelRelayConfigSchema, modelRelayConfigDigest } from "./model-relay-co
 import { loadConfiguredRelayProviderMaterial, listRelayProviderIds } from "./model-provider-runtime.mjs";
 import { readCodexProxySnapshot } from "./codex-proxy-env.mjs";
 import { withWindowsAclDeadline } from "./windows-acl-bridge.mjs";
+import { readClineRelayCatalog } from "./cline-relay-catalog.mjs";
 
 if (!parentPort) throw new Error("Internal Relay worker requires a parent");
 parentPort.on("message", request => {
@@ -40,9 +41,11 @@ function readMaterials() {
         catch { unavailable.push(provider); }
       }
       const proxy = readCodexProxySnapshot(environment);
+      const clineCatalogStatus = config.enabled && config.callers.some(caller => caller.models.some(id => id.startsWith("clp-")))
+        ? readClineRelayCatalog(environment).status : undefined;
       if (readPrivateFileSync(configPath, 1024 * 1024) !== content) continue;
       parentPort.postMessage({ ok: true, config, debug: validateDebugConfigDocument(document.debug ?? {}), digest: modelRelayConfigDigest(config), materials, unavailable,
-        proxy: proxy.settings, proxyPath: proxy.path });
+        proxy: proxy.settings, proxyPath: proxy.path, clineCatalogStatus });
       return;
     } catch { break; }
   }

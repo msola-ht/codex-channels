@@ -1,4 +1,3 @@
-import type { WriteStream } from "node:fs";
 import { ModelRequestTimeoutError } from "./chat-errors.js";
 import type { IncomingHttpHeaders } from "node:http";
 import { TrafficCallTiming } from "./traffic-call-timing.js";
@@ -38,6 +37,7 @@ import {
 
 export {
   pruneModelTrafficDumpSessions,
+  pruneModelTrafficDumpSessionsAsync,
   type PruneModelTrafficDumpOptions,
 } from "./traffic-dump-retention.js";
 
@@ -80,8 +80,6 @@ export class ModelTrafficDump {
   private readonly itemMaxBytes: number;
   private readonly sessions = new Set<TrafficDumpSession>();
   private readonly storage: TrafficDumpStorage;
-  private readonly streams = new Set<WriteStream>();
-  private writeQueue = Promise.resolve();
   private connectionCount = 0;
 
   constructor(options: ModelTrafficDumpOptions) {
@@ -93,12 +91,7 @@ export class ModelTrafficDump {
       onError: options.onError,
       retentionDays: options.retentionDays ?? 0,
     }, {
-      getWriteQueue: () => this.writeQueue,
       sessions: this.sessions,
-      setWriteQueue: (queue) => {
-        this.writeQueue = queue;
-      },
-      streams: this.streams,
     });
   }
 

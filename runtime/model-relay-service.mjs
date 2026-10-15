@@ -81,12 +81,11 @@ export async function startModelRelayService(configPath, environment = process.e
     if (next.debug.model_traffic_dump) void dump.prepare();
     const policyChanged = !snapshot || snapshot.digest !== next.digest;
     snapshot = next;
-    if (next.config.enabled && next.config.callers.some(caller => caller.models.some(id => id.startsWith("clp-")))) catalogBootstrap.ensure();
-    relay ??= new ModelRelayServer({ queueChanged: () => control.changed(), capture: async (provider, signal, protocol) => {
+    if (next.clineCatalogStatus !== undefined) catalogBootstrap.ensure(next.clineCatalogStatus);
+    relay ??= new ModelRelayServer({ queueChanged: () => control.changed(), capture: (provider, signal, protocol) => {
       if (!snapshot?.debug.model_traffic_dump) return undefined;
-      await dump.prepare(signal);
       signal.throwIfAborted();
-      // Initialization may outlive a configuration refresh; use the latest global settings.
+      // Initialization stays in the background; model requests never wait for dump storage.
       if (closed || !snapshot?.debug.model_traffic_dump) return undefined;
       const debug = snapshot.debug;
       return dump.begin(provider, debug.model_traffic_input_items === 0 && debug.model_traffic_item_max_bytes === 0, protocol);

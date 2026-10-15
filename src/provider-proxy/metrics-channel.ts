@@ -1,10 +1,10 @@
 import { validModelRequestDiagnostics } from "./chat-diagnostics.js";
 import { validRequestTiming } from "../../runtime/request-timing.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
-import { createConnection, type Socket } from "node:net";
+import type { Socket } from "node:net";
 
 import {
-  createPrivateIpcConnection,
+  createPrivateIpcConnectionAsync,
   PrivateIpcServer,
 } from "../../runtime/private-ipc.mjs";
 
@@ -27,7 +27,10 @@ export class ProviderProxyMetricsServer {
     private readonly onMetrics: (metrics: ProviderProxyMetrics) => void,
     private readonly onError?: (error: Error) => void,
   ) {
-    this.server = new PrivateIpcServer(this.socketPath, (socket) => this.handleConnection(socket));
+    this.server = new PrivateIpcServer(this.socketPath, (socket) => this.handleConnection(socket), {
+      maximumConnections: 8,
+      connectionTimeoutMs: modelRequestPolicy.metricsDeliveryTimeoutMs,
+    });
   }
 
   async start(): Promise<void> {
@@ -39,15 +42,13 @@ export class ProviderProxyMetricsServer {
       await this.server.start(`模型代理指标 Socket 已被占用：${this.socketPath}`);
       this.started = true;
     } catch (error) {
-      await this.closeResources();
+      // PrivateIpcServer owns failed-start cleanup; explicit close permanently withdraws admission.
+      for (const socket of this.sockets) socket.destroy();
       throw error;
     }
   }
 
   async close(): Promise<void> {
-    if (this.stopped) {
-      return;
-    }
     this.stopped = true;
     await this.closeResources();
   }
@@ -107,15 +108,8 @@ export function sendProviderProxyMetrics(
   metrics: ProviderProxyMetrics,
 ): Promise<void> {
   return new Promise((resolve) => {
-    let socket: Socket;
-    try {
-      socket = process.platform === "win32"
-        ? createPrivateIpcConnection(socketPath)
-        : createConnection(socketPath);
-    } catch {
-      resolve();
-      return;
-    }
+    let socket: Socket | undefined;
+    const cancellation = new AbortController();
     let settled = false;
     const finish = (): void => {
       if (settled) {
@@ -123,21 +117,24 @@ export function sendProviderProxyMetrics(
       }
       settled = true;
       clearTimeout(timer);
-      socket.destroy();
+      cancellation.abort();
+      socket?.destroy();
       resolve();
     };
     const timer = setTimeout(finish, modelRequestPolicy.metricsDeliveryTimeoutMs);
-    socket.once("connect", () => {
-      socket.write(`${JSON.stringify(metrics)}\n`);
-    });
-    socket.on("data", (chunk: Buffer) => {
-      if (chunk.includes(10)) {
-        finish();
-      }
-    });
-    socket.once("end", finish);
-    socket.once("error", finish);
-    socket.once("close", finish);
+    void createPrivateIpcConnectionAsync(socketPath, { signal: cancellation.signal }).then(connection => {
+      socket = connection;
+      socket.once("error", finish);
+      if (settled) { socket.destroy(); return; }
+      socket.once("connect", () => {
+        if (!settled) connection.write(`${JSON.stringify(metrics)}\n`);
+      });
+      socket.on("data", (chunk: Buffer) => {
+        if (chunk.includes(10)) finish();
+      });
+      socket.once("end", finish);
+      socket.once("close", finish);
+    }).catch(finish);
   });
 }
 

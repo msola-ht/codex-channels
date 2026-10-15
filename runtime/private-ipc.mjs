@@ -10,10 +10,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createConnection, createServer } from "node:net";
+import { lstat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 import {
   readPrivateFileSync,
+  readPrivateConfigFile,
   securePrivateDirectorySync,
   securePrivateFileSync,
 } from "./private-file.mjs";
@@ -31,6 +33,9 @@ export class PrivateIpcServer {
   #server;
   #socketIdentity;
   #sockets = new Set();
+  #starting;
+  #closing;
+  #closed = false;
 
   constructor(logicalPath, listener, bounds) {
     this.#logicalPath = logicalPath;
@@ -51,7 +56,21 @@ export class PrivateIpcServer {
     return this.#server.listening;
   }
 
-  async start(occupiedMessage) {
+  start(occupiedMessage) {
+    if (this.#closed) return Promise.reject(new Error("私有 IPC 服务已关闭"));
+    this.#starting ??= this.#start(occupiedMessage).catch(async error => {
+      try { await this.#closeResources(); }
+      catch (cleanupError) {
+        this.#closed = true;
+        throw new AggregateError([error, cleanupError], "私有 IPC 启动失败且清理未确认", { cause: cleanupError });
+      }
+      this.#starting = undefined;
+      throw error;
+    });
+    return this.#starting;
+  }
+
+  async #start(occupiedMessage) {
     mkdirSync(dirname(this.#logicalPath), { recursive: true, mode: 0o700 });
     securePrivateDirectorySync(dirname(this.#logicalPath));
     if (process.platform === "win32") {
@@ -63,10 +82,12 @@ export class PrivateIpcServer {
       throw Object.assign(new Error("私有 IPC Socket 路径无效或超过平台长度限制"), { code: "ERR_PRIVATE_IPC_PATH" });
     }
     await removeStaleUnixEndpoint(this.#logicalPath, occupiedMessage);
+    if (this.#closed) throw new Error("私有 IPC 服务已关闭");
     // libuv unlinks its bind pathname on close without checking the inode. Bind
     // under an unpublished name so it never owns cleanup of the public endpoint.
     const boundPath = await listenUnpublishedUnix(this.#server, this.#logicalPath, occupiedMessage);
     try {
+      if (this.#closed) throw new Error("私有 IPC 服务已关闭");
       const status = lstatSync(boundPath);
       this.#socketIdentity = { dev: status.dev, ino: status.ino };
       chmodSync(boundPath, 0o600);
@@ -75,7 +96,6 @@ export class PrivateIpcServer {
       // Keep the bind name occupied until libuv closes and unlinks it. Releasing
       // it early lets a later owner publish there and be deleted by this close.
     } catch (error) {
-      await this.close();
       if (error?.code === "EEXIST") throw new Error(occupiedMessage, { cause: error });
       throw error;
     }
@@ -88,16 +108,13 @@ export class PrivateIpcServer {
       token: randomBytes(32).toString("hex"),
     };
     await listen(this.#server, this.#descriptor.pipe, occupiedMessage);
-    try {
-      await this.#claimWindowsDescriptor(occupiedMessage);
-    } catch (error) {
-      await this.close();
-      throw error;
-    }
+    if (this.#closed) throw new Error("私有 IPC 服务已关闭");
+    await this.#claimWindowsDescriptor(occupiedMessage);
   }
 
   async #claimWindowsDescriptor(occupiedMessage) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (this.#closed) throw new Error("私有 IPC 服务已关闭");
       let descriptor;
       try {
         descriptor = openSync(this.#logicalPath, "wx", 0o600);
@@ -108,6 +125,7 @@ export class PrivateIpcServer {
         if (await privateIpcAcceptsConnections(this.#logicalPath)) {
           throw new Error(occupiedMessage, { cause: error });
         }
+        if (this.#closed) throw new Error("私有 IPC 服务已关闭", { cause: error });
         const current = lstatSync(this.#logicalPath, { throwIfNoEntry: false });
         if (current?.dev === stale.dev && current.ino === stale.ino) {
           unlinkSync(this.#logicalPath);
@@ -127,7 +145,21 @@ export class PrivateIpcServer {
     throw new Error("Windows 私有 IPC 端点竞争失败");
   }
 
-  async close() {
+  close() {
+    this.#closed = true;
+    if (this.#closing) return this.#closing;
+    const closing = (async () => {
+      await this.#starting?.catch(() => {});
+      await this.#closeResources();
+    })().catch(error => {
+      if (this.#closing === closing) this.#closing = undefined;
+      throw error;
+    });
+    this.#closing = closing;
+    return closing;
+  }
+
+  async #closeResources() {
     const closing = closeServer(this.#server);
     for (const socket of this.#sockets) socket.destroy();
     await closing;
@@ -177,6 +209,26 @@ export function createPrivateIpcConnection(logicalPath) {
   return socket;
 }
 
+/** Inspect the current descriptor asynchronously; callers include this read in their deadline. */
+export async function createPrivateIpcConnectionAsync(logicalPath, { signal } = {}) {
+  signal?.throwIfAborted();
+  let endpoint;
+  if (process.platform === "win32") {
+    endpoint = parseWindowsDescriptor(await readPrivateConfigFile(logicalPath, { signal, maximumBytes: descriptorLimitBytes }), logicalPath);
+  } else {
+    const status = await lstat(logicalPath);
+    if (!status.isSocket() || status.uid !== process.getuid?.() || (status.mode & 0o077) !== 0) {
+      throw new Error(`私有 IPC Socket 路径不安全：${logicalPath}`);
+    }
+  }
+  signal?.throwIfAborted();
+  const socket = createConnection({ path: endpoint?.pipe ?? logicalPath, signal });
+  if (endpoint) socket.prependOnceListener("connect", () => {
+    socket.write(`${JSON.stringify({ token: endpoint.token })}\n`);
+  });
+  return socket;
+}
+
 /** One bounded JSON exchange. Callers own response validation and confirmation semantics. */
 export function requestPrivateIpcJson(logicalPath, request, { timeoutMs, maximumBytes, signal }) {
   return new Promise((resolve, reject) => {
@@ -186,11 +238,13 @@ export function requestPrivateIpcJson(logicalPath, request, { timeoutMs, maximum
     let done = false;
     let bytes = 0;
     const chunks = [];
+    const cancellation = new AbortController();
     const finish = (value, failed) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
+      cancellation.abort();
       socket?.destroy();
       if (failed) reject(new Error("Private IPC request unconfirmed"));
       else resolve(value);
@@ -199,20 +253,24 @@ export function requestPrivateIpcJson(logicalPath, request, { timeoutMs, maximum
     try {
       const payload = `${JSON.stringify(request)}\n`;
       timer = setTimeout(abort, timeoutMs);
-      socket = createPrivateIpcConnection(logicalPath);
       signal?.addEventListener("abort", abort, { once: true });
-      socket.once("connect", () => { if (!done) socket.write(payload); });
-      socket.on("error", abort);
-      socket.once("close", abort);
-      socket.on("data", chunk => {
-        if (done) return;
-        bytes += chunk.length;
-        if (bytes > maximumBytes) { abort(); return; }
-        chunks.push(chunk);
-        if (!chunk.includes(10)) return;
-        try { finish(JSON.parse(Buffer.concat(chunks).toString("utf8").trim()), false); }
-        catch { abort(); }
-      });
+      void createPrivateIpcConnectionAsync(logicalPath, { signal: cancellation.signal }).then(connection => {
+        socket = connection;
+        socket.on("error", abort);
+        if (done) { socket.destroy(); return; }
+        socket.once("connect", () => { if (!done) socket.write(payload); });
+        socket.once("close", abort);
+        socket.once("end", abort);
+        socket.on("data", chunk => {
+          if (done) return;
+          bytes += chunk.length;
+          if (bytes > maximumBytes) { abort(); return; }
+          chunks.push(chunk);
+          if (!chunk.includes(10)) return;
+          try { finish(JSON.parse(Buffer.concat(chunks).toString("utf8").trim()), false); }
+          catch { abort(); }
+        });
+      }).catch(abort);
       if (signal?.aborted) abort();
     } catch { abort(); }
   });
@@ -302,12 +360,15 @@ function sameToken(actual, expected) {
 }
 
 function readWindowsDescriptor(logicalPath) {
-  let value;
   try {
-    value = JSON.parse(readPrivateFileSync(logicalPath, descriptorLimitBytes));
+    return parseWindowsDescriptor(readPrivateFileSync(logicalPath, descriptorLimitBytes), logicalPath);
   } catch (error) {
     throw new Error(`Windows 私有 IPC 端点不安全或描述无效：${logicalPath}`, { cause: error });
   }
+}
+
+function parseWindowsDescriptor(content, logicalPath) {
+  const value = JSON.parse(content);
   if (
     value?.version !== 1
     || typeof value.pipe !== "string"

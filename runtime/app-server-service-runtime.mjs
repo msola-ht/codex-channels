@@ -195,7 +195,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     ProviderProxy,
     AggregateModelProxy,
     ChatCompletionsBridge,
-    pruneModelTrafficDumpSessions,
+    pruneModelTrafficDumpSessionsAsync,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
   assertRunning();
@@ -208,6 +208,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   registerCloseResources(() => proxySelector.close());
   let supervisorOwner;
   let desktopAppBridge;
+  let trafficMaintenance;
   const upstreamAgentFor = async (upstreamUrl, signal) => {
     signal?.throwIfAborted();
     const proxyUrl = await proxySelector.select(upstreamUrl);
@@ -1166,16 +1167,22 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     await supervisorOwner.start();
     assertRunning();
     try {
-      pruneModelTrafficDumpSessions({
+      const signal = globalThis.AbortSignal.any([lifecycle.signal, globalThis.AbortSignal.timeout(5_000)]);
+      trafficMaintenance = pruneModelTrafficDumpSessionsAsync({
         directory: trafficDumpDirectory,
         retentionDays: validatedDebug.model_traffic_retention_days,
+      }, signal);
+      await new Promise((resolve, reject) => {
+        const abort = () => reject(signal.reason);
+        signal.addEventListener("abort", abort, { once: true });
+        void trafficMaintenance.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+        if (signal.aborted) abort();
       });
     } catch (error) {
-      console.error(
-        "模型请求转储自动清理失败："
-        + (error instanceof Error ? error.message : String(error)),
-      );
+      const reason = lifecycle.closed ? "cancelled" : error?.name === "TimeoutError" ? "timeout" : "io";
+      console.error(`模型请求转储自动清理未完成（${reason}）`);
     }
+    assertRunning();
     await ensureInstance(primaryProvider);
     assertRunning();
     supervisorOwner.markRunning(primaryProvider);
@@ -1208,6 +1215,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     // Drain them before taking the resource snapshot used by cleanup.
     await Promise.allSettled([...instanceLaunches.values()]);
     const results = await Promise.allSettled([
+      () => trafficMaintenance?.catch(() => undefined),
       () => proxySelector.close(),
       () => desktopAppBridge?.close(),
       () => supervisorOwner?.close(),
@@ -1381,6 +1389,7 @@ function waitForAppServer(
 }
 
 function forwardChildrenLifecycle(children, closeResources = async () => undefined) {
+  const cancellation = new AbortController();
   let settled = false;
   let stopRequested = false;
   let closeTask;
@@ -1389,6 +1398,7 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
   const close = (initialSignal) => {
     if (closeTask) return closeTask;
     settled = true;
+    cancellation.abort(new AppServerStoppedError());
     const deadline = setTimeout(() => {
       printCliMessage("failure", "App Server 停止等待超时，监管进程将以故障状态退出");
       process.exit(1);
@@ -1490,6 +1500,6 @@ function forwardChildrenLifecycle(children, closeResources = async () => undefin
     }
   };
   for (const child of children) watchChild(child);
-  return { watchChild, detachChild, close,
+  return { watchChild, detachChild, close, signal: cancellation.signal,
     get closed() { return settled; }, get stopRequested() { return stopRequested; } };
 }

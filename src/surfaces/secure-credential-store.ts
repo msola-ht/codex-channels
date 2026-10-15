@@ -17,9 +17,9 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import {
-  readWindowsSecureRecordSync,
-  removeWindowsSecureRecordSync,
-  writeWindowsSecureRecordSync,
+  readWindowsSecureRecord,
+  removeWindowsSecureRecord,
+  writeWindowsSecureRecord,
 } from "../../runtime/windows-secure-record.mjs";
 
 export interface SecureCredentialRecordStore {
@@ -248,17 +248,15 @@ implements SecureCredentialRecordStore {
   constructor(private readonly directory: string) {}
 
   get(key: string): Promise<string | null> {
-    return Promise.resolve(readWindowsSecureRecordSync(this.directory, key));
+    return readWindowsSecureRecord(this.directory, key);
   }
 
   set(key: string, value: string): Promise<void> {
-    writeWindowsSecureRecordSync(this.directory, key, value);
-    return Promise.resolve();
+    return writeWindowsSecureRecord(this.directory, key, value);
   }
 
   remove(key: string): Promise<void> {
-    removeWindowsSecureRecordSync(this.directory, key);
-    return Promise.resolve();
+    return removeWindowsSecureRecord(this.directory, key);
   }
 }
 

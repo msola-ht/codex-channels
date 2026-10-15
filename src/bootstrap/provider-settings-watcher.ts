@@ -1,24 +1,7 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-
 import type { Logger } from "pino";
 
-import { codexHomePath } from "../../runtime/codex-home.mjs";
-import {
-  aggregateProviderId,
-  readAggregateProviderSettingsFingerprint,
-} from "../../runtime/aggregate-model-provider.mjs";
-import {
-  loadManagedModelProviderDefinitions,
-  loadManagedModelProviderWatcherDefinitions,
-} from "../../runtime/model-provider-definitions.mjs";
-import {
-  managedProviderMarkerPath,
-  managedProviderDirectory,
-  readManagedMarker,
-  validateConfiguredModelProviders,
-} from "../../runtime/model-provider-runtime.mjs";
+import { aggregateProviderId } from "../../runtime/aggregate-model-provider.mjs";
+import { ProviderSettingsSnapshotReader } from "../../runtime/provider-settings-snapshot-reader.mjs";
 
 export interface ProviderSettingsWatcherOptions {
   logger: Logger;
@@ -48,12 +31,6 @@ export interface ProviderSettingsStateChange {
   providers: string[];
 }
 
-interface ManagedProviderFiles {
-  provider: string;
-  paths: string[];
-  settingsFingerprint?: () => string;
-}
-
 const defaultPollIntervalMs = 2_000;
 const defaultRestartCooldownMs = 30_000;
 const defaultValidationCooldownMs = 30_000;
@@ -66,17 +43,16 @@ export class ProviderSettingsWatcher {
   private readonly onStateChange:
     | ((change: ProviderSettingsStateChange) => void)
     | undefined;
-  private readonly environment: NodeJS.ProcessEnv;
   private readonly pollIntervalMs: number;
   private readonly restartCooldownMs: number;
   private readonly validationCooldownMs: number;
   private readonly nowMs: () => number;
-  private readonly validate: () => void;
-  private readonly filesByProvider: ManagedProviderFiles[];
-  private readonly visibleProviderIds: ReadonlySet<string>;
+  private readonly validate: (() => void) | undefined;
+  private readonly reader: ProviderSettingsSnapshotReader;
+  private visibleProviderIds: ReadonlySet<string> | undefined;
+  private checkTask: Promise<void> | undefined;
   private fingerprints = new Map<string, string>();
   private lastReadFailureAt = Number.NEGATIVE_INFINITY;
-  private lastValidationFailureAt = Number.NEGATIVE_INFINITY;
   private timer: NodeJS.Timeout | undefined;
   private stopping = false;
   private initialized = false;
@@ -98,65 +74,27 @@ export class ProviderSettingsWatcher {
     }
     this.refreshProviderModels = options.refreshProviderModels;
     this.onStateChange = options.onStateChange;
-    this.environment = options.environment ?? process.env;
     this.pollIntervalMs = options.pollIntervalMs ?? defaultPollIntervalMs;
     this.restartCooldownMs = options.restartCooldownMs ?? defaultRestartCooldownMs;
     this.validationCooldownMs =
       options.validationCooldownMs ?? defaultValidationCooldownMs;
     this.nowMs = options.nowMs ?? Date.now;
-    this.validate = options.validate ?? (() => {
-      validateConfiguredModelProviders(this.environment);
-    });
-    const visibleProviderIds = new Set(
-      options.configuredProviders ?? loadManagedModelProviderDefinitions(this.environment)
-        .map((definition) => definition.id),
-    );
-    const codexHome = codexHomePath(this.environment);
-    const definitions = loadManagedModelProviderWatcherDefinitions(this.environment);
-    const filesByProvider = new Map<string, ManagedProviderFiles>();
-    for (const definition of definitions) {
-      const files = filesByProvider.get(definition.id) ?? {
-        provider: definition.id,
-        paths: [],
-      };
-      const paths = [
-        join(
-          managedProviderDirectory(this.environment, definition),
-          definition.catalogFileName,
-        ),
-        ...("profileFileName" in definition ? [
-          join(codexHome, readManagedMarker(this.environment, definition)?.mode === "exclusive"
-            ? "config.toml"
-            : definition.profileFileName),
-          managedProviderMarkerPath(this.environment, definition),
-        ] : []),
-      ];
-      for (const path of paths) {
-        if (!files.paths.includes(path)) files.paths.push(path);
-      }
-      filesByProvider.set(definition.id, files);
+    this.validate = options.validate;
+    this.visibleProviderIds = options.configuredProviders ? new Set(options.configuredProviders) : undefined;
+    const members = this.visibleProviderIds?.has(aggregateProviderId) ? [...(options.aggregateMembers ?? [])] : [];
+    if (this.visibleProviderIds?.has(aggregateProviderId) && members.length < 2) {
+      throw new Error("聚合设置监听需要至少两个已配置切换 Provider");
     }
-    if (visibleProviderIds.has(aggregateProviderId)) {
-      const members = [...(options.aggregateMembers ?? [])];
-      if (members.length < 2) throw new Error("聚合设置监听需要至少两个已配置切换 Provider");
-      filesByProvider.set(aggregateProviderId, {
-        provider: aggregateProviderId,
-        paths: [],
-        settingsFingerprint: () => readAggregateProviderSettingsFingerprint(this.environment, members),
-      });
-    }
-    this.filesByProvider = [...filesByProvider.values()];
-    this.visibleProviderIds = visibleProviderIds;
+    this.reader = new ProviderSettingsSnapshotReader(options.environment ?? process.env, members);
   }
 
   start(): void {
     if (this.stopping || this.timer) return;
-    this.fingerprints = this.tryReadFingerprints() ?? new Map<string, string>();
     // The supervisor owns the applied baseline, so a Gateway rebuild cannot lose pending changes.
-    for (const provider of this.visibleProviderIds) this.pendingProviders.set(provider, 0);
-    this.initialized = true;
+    for (const provider of this.visibleProviderIds ?? []) this.pendingProviders.set(provider, 0);
+    void this.checkOnce();
     this.timer = setInterval(() => {
-      void this.checkNow();
+      if (!this.checkTask) void this.checkOnce();
     }, this.pollIntervalMs);
     this.timer.unref?.();
   }
@@ -168,11 +106,12 @@ export class ProviderSettingsWatcher {
       clearInterval(this.timer);
       this.timer = undefined;
     }
-    if (!this.restartTask) return;
+    const readerStopped = this.reader.close();
+    const workStopped = Promise.all([this.checkTask, this.restartTask]).then(() => undefined);
     let timer: NodeJS.Timeout | undefined;
     try {
-      await Promise.race([
-        this.restartTask,
+      await Promise.all([readerStopped, Promise.race([
+        workStopped,
         new Promise<void>((resolve) => {
           timer = setTimeout(() => {
             this.logger.warn({ timeoutMs: this.stopTimeoutMs }, "Provider 设置应用停止等待超时");
@@ -180,32 +119,46 @@ export class ProviderSettingsWatcher {
           }, this.stopTimeoutMs);
           timer.unref?.();
         }),
-      ]);
+      ])]);
     } finally {
       if (timer) clearTimeout(timer);
     }
   }
 
   async checkNow(): Promise<void> {
-    if (this.stopping) {
-      return;
-    }
-    const nextFingerprints = this.tryReadFingerprints();
-    if (!nextFingerprints) {
-      return;
+    await this.checkOnce();
+    await this.restartTask;
+  }
+
+  private checkOnce(): Promise<void> {
+    if (this.stopping) return Promise.resolve();
+    if (this.checkTask) return this.checkTask;
+    const task = this.checkSettings().finally(() => {
+      if (this.checkTask === task) this.checkTask = undefined;
+    });
+    this.checkTask = task;
+    return task;
+  }
+
+  private async checkSettings(): Promise<void> {
+    const nextFingerprints = await this.tryReadFingerprints();
+    if (!nextFingerprints) return;
+    this.acceptFingerprints(nextFingerprints);
+  }
+
+  private acceptFingerprints(nextFingerprints: Map<string, string>): void {
+    if (this.stopping) return;
+    if (!this.initialized) {
+      this.fingerprints = nextFingerprints;
+      this.initialized = true;
+      for (const provider of this.visibleProviderIds ?? []) this.pendingProviders.set(provider, 0);
     }
     if (this.initialized && !sameFingerprints(this.fingerprints, nextFingerprints)) {
-      const providers = this.filesByProvider
-        .filter((files) => providerFilesChanged(files, this.fingerprints, nextFingerprints))
-        .map(({ provider }) => provider)
-        .filter((provider) => this.visibleProviderIds.has(provider));
+      const providers = [...(this.visibleProviderIds ?? [])]
+        .filter((provider) => this.fingerprints.get(provider) !== nextFingerprints.get(provider));
       if (providers.length === 0) {
         this.fingerprints = nextFingerprints;
         this.considerRestart();
-        await this.restartTask;
-        return;
-      }
-      if (!this.validateSettings(providers)) {
         return;
       }
       this.fingerprints = nextFingerprints;
@@ -221,13 +174,11 @@ export class ProviderSettingsWatcher {
         "第三方模型设置已变化，等待对应 Provider 安全应用",
       );
       this.considerRestart();
-      await this.restartTask;
       return;
     }
     if (this.pendingProviders.size > 0) {
       this.considerRestart();
     }
-    await this.restartTask;
   }
 
   private considerRestart(): void {
@@ -240,7 +191,6 @@ export class ProviderSettingsWatcher {
       return failures?.generation !== generation || failures.count < maximumApplyFailures;
     }));
     if (pending.size === 0) return;
-    if (!this.validateSettings([...pending.keys()])) return;
     const task = this.runRestart(pending).finally(() => {
       if (this.restartTask === task) this.restartTask = undefined;
     });
@@ -255,6 +205,7 @@ export class ProviderSettingsWatcher {
     for (const [provider, generation] of pending) {
       if (this.stopping) return;
       try {
+        const fingerprint = this.fingerprints.get(provider);
         const wasDeferred = this.deferredGenerations.get(provider) === generation;
         if (generation > 0 && !wasDeferred) this.emitState("restarting", [provider]);
         const applied = await this.applyProviderSettings(provider, this.cancellation.signal);
@@ -267,20 +218,17 @@ export class ProviderSettingsWatcher {
         if (generation > 0 && wasDeferred) this.emitState("restarting", [provider]);
         this.deferredGenerations.delete(provider);
         // Re-read before confirming: a change made during application remains pending.
-        void this.checkNow();
+        const current = await this.tryReadFingerprints();
         if (this.stopping) return;
-        const current = this.tryReadFingerprints();
-        if (!current || this.filesByProvider.some((files) => files.provider === provider
-          && providerFilesChanged(files, this.fingerprints, current))) continue;
+        if (current) this.acceptFingerprints(current);
+        if (!current || current.get(provider) !== fingerprint) continue;
         if (this.pendingProviders.get(provider) !== generation) continue;
         await this.refreshProviderModels(provider, this.cancellation.signal);
         if (this.stopping) return;
-        const confirmed = this.tryReadFingerprints();
-        if (!confirmed || this.filesByProvider.some((files) => files.provider === provider
-          && providerFilesChanged(files, this.fingerprints, confirmed))) {
-          void this.checkNow();
-          continue;
-        }
+        const confirmed = await this.tryReadFingerprints();
+        if (this.stopping) return;
+        if (confirmed) this.acceptFingerprints(confirmed);
+        if (!confirmed || confirmed.get(provider) !== fingerprint) continue;
         if (this.pendingProviders.get(provider) !== generation) continue;
         this.pendingProviders.delete(provider);
         this.applyFailures.delete(provider);
@@ -321,72 +269,26 @@ export class ProviderSettingsWatcher {
     }
   }
 
-  private validateSettings(providers: readonly string[]): boolean {
+  private async tryReadFingerprints(): Promise<Map<string, string> | undefined> {
     try {
-      this.validate();
-      return true;
+      const snapshot = await this.reader.readFresh();
+      if (this.stopping) return undefined;
+      this.validate?.();
+      this.visibleProviderIds ??= new Set(snapshot.visibleProviders);
+      return new Map(snapshot.fingerprints);
     } catch (error) {
-      const now = this.nowMs();
-      if (now - this.lastValidationFailureAt >= this.validationCooldownMs) {
-        this.lastValidationFailureAt = now;
-        this.logger.error(
-          { err: error, providers },
-          "第三方模型设置变化校验失败，继续使用现有配置并等待修复",
-        );
-      }
-      return false;
-    }
-  }
-
-  private tryReadFingerprints(): Map<string, string> | undefined {
-    try {
-      return this.readFingerprints();
-    } catch (error) {
+      if (this.stopping) return undefined;
       const now = this.nowMs();
       if (now - this.lastReadFailureAt >= this.validationCooldownMs) {
         this.lastReadFailureAt = now;
         this.logger.error(
-          { err: error },
+          { err: error, phase: error instanceof Error && "phase" in error ? error.phase : "read" },
           "读取第三方模型设置失败，继续使用现有配置并等待修复",
         );
       }
       return undefined;
     }
   }
-
-  private readFingerprints(): Map<string, string> {
-    const fingerprints = new Map<string, string>();
-    for (const { provider, paths, settingsFingerprint } of this.filesByProvider) {
-      for (const path of paths) {
-        fingerprints.set(path, readFileFingerprint(path));
-      }
-      if (settingsFingerprint) fingerprints.set(`provider:${provider}`, settingsFingerprint());
-    }
-    return fingerprints;
-  }
-}
-
-function providerFilesChanged(
-  files: ManagedProviderFiles,
-  current: ReadonlyMap<string, string>,
-  next: ReadonlyMap<string, string>,
-): boolean {
-  return files.paths.some((path) => current.get(path) !== next.get(path))
-    || (files.settingsFingerprint !== undefined
-      && current.get(`provider:${files.provider}`) !== next.get(`provider:${files.provider}`));
-}
-
-function readFileFingerprint(path: string): string {
-  let content: string;
-  try {
-    content = readFileSync(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return "missing";
-    }
-    throw error;
-  }
-  return createHash("sha256").update(content).digest("hex");
 }
 
 function sameFingerprints(

@@ -168,6 +168,7 @@
   变量仍保持最高优先级。CLI 与脚本只负责准备已校验的运行环境和默认 Workspace。
   固定自定义 Provider 的转储标签使用真实 Provider ID；指标 IPC 仍使用主实例路由，由 Gateway
   映射为真实身份。历史转储不按当前配置改标，避免把官方或其他旧来源误认为当前提供商。
+  启动历史转储清理使用异步文件操作，5 秒预算或服务停止会取消后续扫描；实际在途操作由服务关闭链路收尾。
   受管 Provider 设置应用只刷新目标实例的启动参数与私有环境；释放运行实例前通过临时 Client
   读取全部已加载 Thread 的权威状态，并复核租约与取消。活动任务、原生租约和读取失败均阻止重启；
   临时 Client 复用共享命令解析和进程回收端口，Windows 的 npm 启动脚本与直接可执行文件采用相同连接流程。
@@ -200,6 +201,7 @@
   公共层从接受连接起管理全部 Socket，包括尚未认证的连接；认证受绝对期限限制，停止监听时统一关闭连接。
   Relay 指标与控制查询共用单次 JSON 请求生命周期：调用方指定回应字节上限、绝对截止时间及可选取消信号，
   统一关闭连接和清理等待，不重试；业务版本、关联 ID、确认结果和持久化含义由调用方验证。
+  指标与 JSON 请求通过异步连接入口读取当前 Windows 描述文件，权限读取也计入调用方总期限；不缓存 ACL 结果。启动中关闭阻止迟到端点发布，清理失败保留归属并允许重试。
 - `app-server-supervisor.mjs`：以当前用户私有 IPC 持有 App Server 监管入口互斥锁，
   监管检查将无响应或连接失败作为不可用错误交给启动等待重试，不将其误报为协议不兼容；已收到但不合法的响应仍拒绝使用。
   各平台监听与端点清理统一委托 `private-ipc.mjs`；关闭仍先销毁租约连接，再等待在途 Provider 操作，关闭后拒绝重启同一 Owner。
@@ -282,6 +284,7 @@
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
   `providers/`，供 Setup 与 Runtime 复用。
 - `provider-file-access.mjs` / `provider-file-access.d.mts`：在创建访问器时绑定当前环境的 Codex Home，通过 `isMainConfig` 精确规范化匹配唯一共享主配置；其他路径（包括同名备份）保持严格私有。Provider 的读取、凭据认证选择、指纹、事务写入和回滚使用同一归属判断，不由业务入口选择权限标记；不改变磁盘路径或格式。
+- `provider-settings-snapshot-reader.mjs` / `provider-settings-snapshot-reader.d.mts` / `provider-settings-snapshot-worker.mjs`：Provider 设置观察器拥有的单 Worker，读取有界材料指纹并校验完整配置；初始化与单次读取分别限时，关闭确认线程退出，源正文和凭据不跨线程返回。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
   文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，
@@ -297,6 +300,7 @@
   `repairWindowsPrivateFileSync` 仅供显式 `security repair` 使用：管理员所有的普通文件须有当前 SID 完全控制且无拒绝规则，才能恢复当前用户所有权；常规读取和写入不放宽所有者校验。
   Codex Home 顶层严格私有 TOML 的所有者、继承和访问规则拒绝会附带修复命令；共享主配置由 Doctor 提示检查文件及父目录的所有者和写入权限，目录、进程故障与修复操作自身失败不误报文件修复建议。
   Windows 同步及异步读取均在同一只读文件句柄内校验文件、父目录 ACL 并读取，禁止在途写入和替换，不修复权限、不缓存结论。默认上限 1 MiB；异步目录读取最多 2 MiB，同步调用保留既有恢复记录所需的最多 16 MiB。异步取消在句柄释放后完成。
+  `securePrivateFile` / `securePrivateDirectory` 以及异步原子写入使用可取消 ACL 请求，供媒体与转储等持续流量路径复用；同步接口保留给同步管理入口。
 - `windows-acl-bridge.mjs`：进程内复用隐藏的 PowerShell ACL 适配器，通过 worker 和私有管道支持同步及异步调用；不缓存 ACL 结论。最多 16 个待处理请求，冷启动含 DLL 加载最多 5 秒，复用请求含排队最多 2 秒；每次检查期间固定完整祖先目录，拒绝重解析点及非本地盘路径。超时、输出超限或进程退出后销毁该实例，下次重新建立。取消排队请求只移除本项；取消在途读取则丢弃结果，等本次读取关闭句柄后释放槽位，保留原期限，不中断其他请求。
 - `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器，支持逐行请求及单次调用；stdin/stdout 明确使用 UTF-8，不继承控制台代码页；只读取固定 JSON 请求，通过 .NET
   ACL 类型设置或校验 Owner、访问规则、继承、文件类型与 reparse point，并返回结构化结果，不解析
@@ -308,9 +312,11 @@
 - `windows-dpapi.mjs` / `windows-dpapi.d.mts` / `windows-dpapi.ps1`：通过 PowerShell 7 调用
   `ProtectedData` 的 `CurrentUser` 作用域保护和解保护小型二进制主密钥；只接受 Base64 JSON stdin/stdout，
   单次调用最多 5 秒，继承调用方明确传入的环境，不把输入或底层异常写入日志。
+  异步调用最多同时持有 4 个子进程，取消后等待子进程关闭再释放归属。
 - `windows-secure-record.mjs` / `windows-secure-record.d.mts`：Windows 版本化安全凭据记录；每个凭据
   目录持有一个 DPAPI 保护的随机 256-bit 主密钥，记录继续使用随机 IV 的 AES-256-GCM，文件名只含
   记录键摘要，目录和文件同时复用当前 SID 私有 ACL 与原子替换。
+  异步记录操作按目录串行，至多接纳 16 项，整次预算 15 秒；主密钥以独占发布避免竞争覆盖，既有磁盘结构不变。
 - `workspace-permission.mjs` / `workspace-permission.d.mts`：统一 Workspace 的 Sandbox、审批策略
   与 Permission Profile 更新及互斥规则，供 CLI、Config 菜单和渠道写入适配器复用。
 
@@ -330,4 +336,4 @@
 - `cline-relay-catalog.mjs` / `cline-relay-catalog.d.mts`：独立 Cline 转发模型文件的严格校验、只读快照与思考能力投影；不读取 Codex 模型目录。
 
 - `cline-relay-catalog-update.mjs` / `cline-relay-catalog-update.d.mts`：固定来源的目录下载、格式解析、备份和原子替换；供自动初始化与显式更新共用。
-- `cline-relay-catalog-bootstrap.mjs` / `cline-relay-catalog-bootstrap.d.mts`：服务拥有的缺失目录单次后台初始化，复用管理锁，取消、失败报告与限时关闭；关闭超时报未确认并保留任务归属，不覆盖并发更新。
+- `cline-relay-catalog-bootstrap.mjs` / `cline-relay-catalog-bootstrap.d.mts`：服务拥有的缺失目录单次后台初始化，消费材料 Worker 的目录状态，常规刷新不在主线程读取文件；复用管理锁，取消、失败报告与限时关闭；关闭超时报未确认并保留任务归属，不覆盖并发更新。

@@ -6,8 +6,8 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import {
-  securePrivateDirectorySync,
-  securePrivateFileSync,
+  securePrivateDirectory,
+  securePrivateFile,
 } from "../../runtime/private-file.mjs";
 
 import { UserFacingError } from "../conversation-core/index.js";
@@ -64,7 +64,7 @@ export class ManagedMediaStore<MimeType extends string> {
       || (currentUid !== undefined && metadata.uid !== currentUid)) {
       throw new Error("媒体暂存目录类型或所有者无效");
     }
-    securePrivateDirectorySync(this.options.directory);
+    await securePrivateDirectory(this.options.directory, { signal: this.cancellation.signal });
     await this.secureExistingFiles();
     await this.cleanupExpired().catch((error: unknown) => {
       this.options.onCleanupFailure(error);
@@ -136,7 +136,7 @@ export class ManagedMediaStore<MimeType extends string> {
         { signal },
       );
       signal.throwIfAborted();
-      securePrivateFileSync(temporaryPath);
+      await securePrivateFile(temporaryPath, { signal });
       const mediaType = await this.options.detectType(temporaryPath);
       signal.throwIfAborted();
       if (!mediaType) {
@@ -184,7 +184,7 @@ export class ManagedMediaStore<MimeType extends string> {
     const entries = await readdir(this.options.directory, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isFile() && this.options.managedFileName.test(entry.name)) {
-        securePrivateFileSync(join(this.options.directory, entry.name));
+        await securePrivateFile(join(this.options.directory, entry.name), { signal: this.cancellation.signal });
       }
     }
   }

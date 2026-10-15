@@ -20,3 +20,7 @@ export function windowsSecureRecordPath(
   directory: string,
   key: string,
 ): string;
+
+export function readWindowsSecureRecord(directory: string, key: string, environment?: NodeJS.ProcessEnv, options?: { signal?: AbortSignal }): Promise<string | null>;
+export function writeWindowsSecureRecord(directory: string, key: string, value: string, environment?: NodeJS.ProcessEnv, options?: { signal?: AbortSignal }): Promise<void>;
+export function removeWindowsSecureRecord(directory: string, key: string, options?: { signal?: AbortSignal }): Promise<void>;
