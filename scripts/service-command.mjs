@@ -389,12 +389,48 @@ async function waitForHttpServiceReadiness(environment) {
     try {
       const response = await fetch(url, {
         signal: controller.signal,
+        redirect: "error",
         ...(typeof section?.token === "string"
           ? { headers: { authorization: `Bearer ${section.token}` } }
           : {}),
       });
-      if (response.ok) return;
-      lastError = new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("WebUI 健康响应缺少正文");
+      const chunks = [];
+      let bytes = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bytes += value.byteLength;
+          if (bytes > 1024) throw new Error("WebUI 健康响应超过上限");
+          chunks.push(Buffer.from(value));
+        }
+      } finally {
+        await reader.cancel();
+      }
+      let health;
+      try {
+        health = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        throw new Error("WebUI 健康响应不是有效 JSON");
+      }
+      if (health?.ok !== true || health?.service !== "webui"
+        || !Number.isSafeInteger(health.pid) || health.pid <= 0
+        || !Number.isSafeInteger(health.parentPid) || health.parentPid <= 0) {
+        throw new Error("WebUI 健康响应身份无效");
+      }
+      const status = await inspectManagedServiceStatusAsync({ target: "webui", environment });
+      const service = status.services.find(candidate => candidate.target === "webui");
+      if (service?.running !== true || service.pid === null
+        || (service.pid !== health.pid && service.pid !== health.parentPid)) {
+        throw new Error("健康端点不属于正在运行的受管 WebUI 服务");
+      }
+      return;
     } catch (error) {
       lastError = error;
     } finally {
@@ -453,7 +489,7 @@ function parseServiceLogOptions(args) {
     if (option === "--lines" || option === "-n") {
       const value = remaining[index + 1];
       const lines = Number(value);
-      if (!Number.isSafeInteger(lines) || lines <= 0 || lines > 10_000) {
+      if (typeof value !== "string" || !/^\d+$/u.test(value) || !Number.isSafeInteger(lines) || lines <= 0 || lines > 10_000) {
         throw new Error("日志行数必须是 1 到 10000 之间的整数");
       }
       result.push("--lines", String(lines));

@@ -12,6 +12,10 @@ import {
 } from "../runtime/executable.mjs";
 import { readGatewayConfig, webuiServiceEnabled } from "../runtime/gateway-config.mjs";
 import { gatewayChannelStates } from "./config-summary.mjs";
+import { reportMenuError } from "./cli-menu.mjs";
+import { runCodexUserSettingsSetup } from "./codex-user-settings-setup.mjs";
+import { runOfficialTuiIdentity } from "./config-system-menu.mjs";
+import { runTimezoneCommand } from "./timezone-command.mjs";
 import { loadGatewaySettings, updateGatewaySetting } from "./config-management.mjs";
 import { runRelayListenMenu } from "./model-relay-listen-menu.mjs";
 import { packageDir } from "./package-path.mjs";
@@ -19,7 +23,7 @@ import { requireUserConfig } from "./runtime-config.mjs";
 import { runSetup } from "./setup.mjs";
 
 /**
- * `codexc init` 的交互向导：检测现状，然后按需引导接入、可选功能与后台服务安装。
+ * `codexc init` 的交互向导：检测现状，然后按需引导接入、Codex 设置、可选功能与后台服务安装。
  * 非交互调用不进入本模块，保持原有的只创建配置行为。
  */
 export async function runInitWizard({
@@ -65,8 +69,11 @@ export async function runInitWizard({
         : "接入向导已取消：未继续初始化；可重新运行 codexc init 或运行 codexc setup。\n");
       return cancelWizard(prompts);
     }
-    document = readDocument(environment);
   }
+
+  const codexSettings = await configureCodexSettings({ environment, input, output, prompts });
+  if (codexSettings.cancelled) return cancelWizard(prompts);
+  document = readDocument(environment);
 
   const optional = await configureOptionalFeatures({
     environment,
@@ -104,6 +111,32 @@ export async function runInitWizard({
 function cancelWizard(prompts) {
   prompts.cancel("初始化向导已取消");
   return { action: "cancelled" };
+}
+
+async function configureCodexSettings({ environment, input, output, prompts }) {
+  const options = [
+    { value: "preferences", label: "Codex 新会话与用户偏好", hint: "统一配置默认值与用户偏好，也可单独调整默认审批方式" },
+    { value: "identity", label: "一键设为官方 TUI 身份" },
+    { value: "timezone", label: "服务时区" },
+    { value: "done", label: "完成 Codex 设置", hint: "继续可选功能与安装；未修改的设置保持原样" },
+  ];
+  let selected = "preferences";
+  while (true) {
+    const section = await prompts.select({
+      message: "Codex 设置", showInstructions: false, initialValue: selected, options,
+    });
+    if (prompts.isCancel(section)) return { cancelled: true };
+    if (section === "done") return { cancelled: false };
+    if (!options.some(option => option.value === section)) throw new Error("未知 Codex 初始化设置");
+    selected = section;
+    try {
+      if (section === "preferences") await runCodexUserSettingsSetup({ environment, output, prompts });
+      else if (section === "identity") await runOfficialTuiIdentity({ environment, output, prompts });
+      else await runTimezoneCommand([], { environment, input, output, prompts });
+    } catch (error) {
+      reportMenuError(error);
+    }
+  }
 }
 
 async function configureOptionalFeatures({
@@ -148,7 +181,7 @@ async function configureOptionalFeatures({
       });
       applied.push(`webui.enabled=${webui === true}`);
       output.write(webui === true
-        ? "WebUI 已启用：codexc start/restart all 会启动它；地址与访问令牌用 codexc config → WebUI 设置 修改。\n"
+        ? "WebUI 已启用：codexc start/restart all 会启动它；地址与访问令牌用 codexc config → 服务访问 → WebUI 设置 修改。\n"
         : "WebUI 已关闭：codexc start/restart all 不再启动它；需要时用 codexc start webui 单独启动。\n");
     }
     if (trafficDump !== storedTrafficDump) {

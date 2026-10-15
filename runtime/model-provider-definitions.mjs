@@ -3,15 +3,20 @@ import {
   opencodeGoApiKeyEnvironmentKey,
   opencodeGoProviderId,
   opencodeGoAccountDisplayName,
+  opencodeGoAccountIdFromProvider,
+  isOpencodeGoProvider,
+  opencodeGoAccountMarkerPath,
+  opencodeGoAccountsFilePath,
 } from "./opencode-go-accounts.mjs";
-import { loadDeepseekAccounts, deepseekProviderId, deepseekApiKeyEnvironmentKey } from "./deepseek-accounts.mjs";
-import { loadCcgAccounts, ccgProviderId, ccgApiKeyEnvironmentKey } from "./ccg-accounts.mjs";
-import { loadClinePassAccounts, clinePassProviderId, clinePassApiKeyEnvironmentKey } from "./cline-pass-accounts.mjs";
-
-const managedProviderCapabilityKinds = Object.freeze({
-  accountAdapters: new Set(["none", "deepseek", "opencode-go", "ccg", "clp"]),
-  instanceAdapters: new Set(["single", "opencode-go-accounts", "deepseek-accounts", "ccg-accounts", "clp-accounts"]),
-});
+import { loadDeepseekAccounts, deepseekProviderId, deepseekApiKeyEnvironmentKey,
+  deepseekAccountIdFromProvider, isDeepseekAccountProvider, deepseekAccountMarkerPath,
+  deepseekAccountsFilePath } from "./deepseek-accounts.mjs";
+import { loadCcgAccounts, ccgProviderId, ccgApiKeyEnvironmentKey,
+  ccgAccountIdFromProvider, isCcgAccountProvider, ccgAccountMarkerPath,
+  ccgAccountsFilePath } from "./ccg-accounts.mjs";
+import { loadClinePassAccounts, clinePassProviderId, clinePassApiKeyEnvironmentKey,
+  clinePassAccountIdFromProvider, isClinePassAccountProvider, clinePassAccountMarkerPath,
+  clinePassAccountsFilePath } from "./cline-pass-accounts.mjs";
 
 const deepseekProviderCapabilities = Object.freeze({
   accountAdapter: "deepseek",
@@ -110,12 +115,63 @@ export function isManagedProviderModelValid(definition, model) {
     : /^[a-z0-9][a-z0-9._-]{0,119}$/u.test(model));
 }
 
-export const managedModelProviderDefinitions = Object.freeze([
-  deepseekProviderDefinition,
-  opencodeGoProviderDefinition,
-  commandCodeProviderDefinition,
-  clinePassProviderDefinition,
-]);
+/** 编译期账户家族登记；各账户模块仍拥有注册表读取和路径校验。 */
+export const managedProviderAccountFamilies = Object.freeze([
+  {
+    definition: deepseekProviderDefinition,
+    aggregateMaterialOrder: 0,
+    matches: isDeepseekAccountProvider,
+    accountId: deepseekAccountIdFromProvider,
+    providerId: deepseekProviderId,
+    loadAccounts: loadDeepseekAccounts,
+    markerPath: deepseekAccountMarkerPath,
+    accountsFilePath: deepseekAccountsFilePath,
+    accountDefinition: (account) => deepseekAccountDefinition(account.id),
+  },
+  {
+    definition: opencodeGoProviderDefinition,
+    aggregateMaterialOrder: 3,
+    matches: isOpencodeGoProvider,
+    accountId: opencodeGoAccountIdFromProvider,
+    providerId: opencodeGoProviderId,
+    loadAccounts: loadOpencodeGoAccounts,
+    markerPath: opencodeGoAccountMarkerPath,
+    accountsFilePath: opencodeGoAccountsFilePath,
+    accountDefinition: (account) => opencodeGoAccountDefinition(account.id, account.email, account.phone),
+  },
+  {
+    definition: commandCodeProviderDefinition,
+    aggregateMaterialOrder: 2,
+    matches: isCcgAccountProvider,
+    accountId: ccgAccountIdFromProvider,
+    providerId: ccgProviderId,
+    loadAccounts: loadCcgAccounts,
+    markerPath: ccgAccountMarkerPath,
+    accountsFilePath: ccgAccountsFilePath,
+    accountDefinition: (account) => ccgAccountDefinition(account.id),
+  },
+  {
+    definition: clinePassProviderDefinition,
+    aggregateMaterialOrder: 1,
+    matches: isClinePassAccountProvider,
+    accountId: clinePassAccountIdFromProvider,
+    providerId: clinePassProviderId,
+    loadAccounts: loadClinePassAccounts,
+    markerPath: clinePassAccountMarkerPath,
+    accountsFilePath: clinePassAccountsFilePath,
+    accountDefinition: (account) => clinePassAccountDefinition(account.id),
+  },
+].map((family) => Object.freeze({
+  ...family,
+  proxyKey: family.definition.id,
+  storageId: family.definition.storageId ?? family.definition.id,
+  accountAdapter: family.definition.capabilities.accountAdapter,
+  instanceAdapter: family.definition.capabilities.instanceAdapter,
+})));
+
+export const managedModelProviderDefinitions = Object.freeze(
+  managedProviderAccountFamilies.map((family) => family.definition),
+);
 
 /** 共享代理键（如 clp、ocg）对应的基础定义；账户展开后的列表不包含这些键。 */
 export function sharedManagedProviderDefinition(proxyKey) {
@@ -125,8 +181,8 @@ export function sharedManagedProviderDefinition(proxyKey) {
 }
 
 export function loadOpencodeGoAccountDefinitions(environment = process.env) {
-  return loadOpencodeGoAccounts(environment).map((account) =>
-    opencodeGoAccountDefinition(account.id, account.email, account.phone));
+  const family = managedProviderAccountFamilies.find((candidate) => candidate.proxyKey === "ocg");
+  return family.loadAccounts(environment).map(family.accountDefinition);
 }
 
 export function loadManagedModelProviderDefinitions(environment = process.env) {
@@ -151,24 +207,12 @@ export function expandManagedModelProviderDefinitions(
   environment = process.env,
 ) {
   return Object.freeze(definitions.flatMap((definition) => {
-    const capabilities = assertManagedModelProviderCapabilities(definition);
-    switch (capabilities.instanceAdapter) {
-      case "single":
-        assertManagedModelProviderProfile(definition);
-        return [definition];
-      case "opencode-go-accounts":
-        return loadOpencodeGoAccountDefinitions(environment);
-      case "deepseek-accounts":
-        return loadDeepseekAccounts(environment).map((account) => deepseekAccountDefinition(account.id));
-      case "clp-accounts":
-        return loadClinePassAccounts(environment).map((account) => clinePassAccountDefinition(account.id));
-      case "ccg-accounts":
-        return loadCcgAccounts(environment).map((account) => ccgAccountDefinition(account.id));
-      default:
-        throw new Error(
-          `未知受管 Provider 实例适配器：${String(capabilities.instanceAdapter)}`,
-        );
+    const family = managedProviderAccountFamilyForDefinition(definition);
+    if (family === undefined) {
+      assertManagedModelProviderProfile(definition);
+      return [definition];
     }
+    return family.loadAccounts(environment).map(family.accountDefinition);
   }));
 }
 
@@ -244,16 +288,31 @@ export function opencodeGoAccountDefinition(accountId, email, phone) {
 }
 
 export function assertManagedModelProviderCapabilities(definition) {
+  managedProviderAccountFamilyForDefinition(definition);
+  return definition.capabilities;
+}
+
+export function managedProviderAccountFamilyForDefinition(definition) {
   const capabilities = definition?.capabilities;
   if (
     capabilities === null
     || typeof capabilities !== "object"
     || Array.isArray(capabilities)
-    || !managedProviderCapabilityKinds.accountAdapters.has(capabilities.accountAdapter)
-    || !managedProviderCapabilityKinds.instanceAdapters.has(capabilities.instanceAdapter)
   ) {
     const provider = typeof definition?.id === "string" ? definition.id : "unknown";
     throw new Error(`受管 Provider 能力定义无效：${provider}`);
   }
-  return capabilities;
+  if (capabilities.accountAdapter === "none" && capabilities.instanceAdapter === "single"
+    && definition.accountId === undefined) return undefined;
+  const family = managedProviderAccountFamilies.find((candidate) =>
+    candidate.storageId === (definition.storageId ?? definition.id));
+  if (family === undefined) throw new Error("受管 Provider 账户家族尚未登记");
+  if (capabilities.accountAdapter !== family.accountAdapter
+    || capabilities.instanceAdapter !== family.instanceAdapter
+    || (definition.accountId === undefined
+      ? definition.id !== family.definition.id
+      : !family.matches(definition.id) || family.accountId(definition.id) !== definition.accountId)) {
+    throw new Error("受管 Provider 账户家族、能力或实例身份不一致");
+  }
+  return family;
 }

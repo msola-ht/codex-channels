@@ -7,7 +7,7 @@ export const desktopAppCommandUsage = `用法：codexc app [--provider <Provider
 
   不带子命令             启动 Desktop App；首次使用确认后自动启用共享
   -p, --provider ID     选择完整 Provider ID 或已配置的 sf- 名称；聚合用 agg / sf-agg，省略连接主实例
-  enable [--port 端口]   单独启用共享或指定桥端口，并重启 App Server 服务
+  enable [--port 端口]   单独启用共享并重启 App Server；--port 仅 Windows，范围 1 到 65535（十进制整数）
   disable                禁用共享连接并重启 App Server 服务
   status                 只读检查 Desktop、配置和所选 Provider 连接状态
 
@@ -16,7 +16,7 @@ export const desktopAppCommandUsage = `用法：codexc app [--provider <Provider
 聚合目录包含 DS、CLP、OCG、CCG 和自定义切换提供商的模型，已加载模型间切换无需退出 Desktop。
 更换实例前须完全退出 Desktop；Provider 选择不保存，不修改聊天渠道或原生 TUI 绑定。
 安装新代码或增删聚合成员后须重启服务；Gateway 运行时自动检测成员目录变更，待活动和租约释放后刷新聚合实例。
-日常只需 codexc app。首次启用会重启 App Server，可能中断现有连接与任务；默认不确认。`;
+日常只需 codexc app。首次启用会重启 App Server，可能中断现有连接与任务；确认默认选择“否”。`;
 
 export const timezoneCommandUsage = `用法：codexc timezone [<IANA 时区>|--system] [--json]
       codexc timezone --gateway [<IANA 时区>|--follow-app-server|--system] [--json]
@@ -41,6 +41,13 @@ WebUI 页面时间也随之呈现。缺省不写入配置，两个进程都沿�
 修改 App Server 时区后，App Server、Gateway 与 WebUI 均需重启；托管网关自动重启，
 直接运行的网关需重新执行原启动命令。--gateway 只设置网关，重启网关后生效；
 网关未设置时默认跟随 codex.timezone，--follow-app-server 删除网关独立设置。`;
+
+export const sessionCleanupUsage = `用法：codexc cleanup sessions <最大轮数> [--idle-days <天数>] [--confirm]
+
+默认只预览，不归档。加 --confirm 后仍须在本机终端确认候选列表。
+执行前必须停止 Gateway；App Server 保持运行。扫描覆盖配置中的全部 Workspace 及其所有 Provider 历史。
+主会话轮数用于筛选，派生后代随官方归档；指定 --idle-days 时可查询成员均须达到空闲天数。
+确认后的执行存在失败、部分完成、结果未确认或复核跳过时返回非零退出码；不自动重试或回滚。`;
 
 export const cleanupUsage = `用法：codexc cleanup [sessions|traffic|metrics] [参数]
 
@@ -81,7 +88,7 @@ export const serviceCommandUsage = Object.freeze({
   uninstall: "用法：codexc uninstall --services",
   start: `用法：codexc start [${serviceTargetUsage}]\n\n默认 all：依次启动 App Server、Gateway、已安装且启用的 Relay、已安装且未关闭的 WebUI，每项确认就绪后再继续。前台运行使用 codexc run。`,
   stop: `用法：codexc stop [${serviceTargetUsage}]\n\n默认 all：依次停止已安装 WebUI、已安装 Relay、Gateway 和 App Server。`,
-  reload: "用法：codexc reload\n\n通知 Gateway 重新读取配置。",
+  reload: "用法：codexc reload\n\n通知运行中的 Gateway 重新读取配置；不启动服务，成功提示不代表配置已应用，请核对服务日志。其他设置按保存时提示重启；服务定义或安装环境变化时需运行 codexc install。",
   status: `用法：codexc status [${serviceTargetUsage}] [--json]\n\n默认 all：查看 App Server、Gateway、已安装 Relay 与 WebUI。`,
-  logs: `用法：codexc logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]\n\n默认 gateway；all 包含 App Server、Gateway、已安装 Relay 与 WebUI。`,
+  logs: `用法：codexc logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]\n\n默认 gateway；all 包含 App Server、Gateway、已安装 Relay 与 WebUI。行数为 1 到 10000 的十进制整数，默认 100；-f 持续跟随。`,
 });

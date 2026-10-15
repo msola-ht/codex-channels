@@ -7,6 +7,7 @@ import { configActivationResult } from "./config-activation-result.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import {
   applyClinePassConfiguration,
+  previewClinePassConfiguration,
   previewClinePassRemoval,
   removeClinePassConfiguration,
   setClinePassDefaultAccount,
@@ -45,8 +46,14 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
     if (prompts.isCancel(apiKey)) return { action: "back" };
     const mode = await prompts.select({ message: "运行模式", options: [{ value: "switching", label: "切换模式" }, { value: "exclusive", label: "固定模式" }] });
     if (prompts.isCancel(mode)) return { action: "back" };
-    if (mode === "exclusive" && await prompts.confirm({ message: "固定模式会修改 Codex 主配置，是否继续？", initialValue: false }) !== true) return { action: "back" };
-    result = await applyClinePassConfiguration({ accountId, apiKey, mode, reconfigure: action === "reconfigure", confirmExclusiveConfigChange: mode === "exclusive" }, { environment, selectModels: selection => promptEnabledModels(prompts, output, selection) });
+    const input = { accountId, apiKey, mode, reconfigure: action === "reconfigure" };
+    const preview = previewClinePassConfiguration(input, { environment });
+    let confirmExclusiveConfigChange = false;
+    if (preview.effects.writesMainConfig) {
+      confirmExclusiveConfigChange = await prompts.confirm({ message: "此操作会修改或恢复 Codex 主配置，是否继续？", initialValue: false }) === true;
+      if (!confirmExclusiveConfigChange) return { action: "back" };
+    }
+    result = await applyClinePassConfiguration({ ...input, confirmExclusiveConfigChange }, { environment, selectModels: selection => promptEnabledModels(prompts, output, selection) });
     if (result.action === "back") return result;
   }
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));

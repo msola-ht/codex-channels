@@ -3,6 +3,7 @@ import { webuiLogger } from "./webui-logger.mjs";
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
 import {
   codexManagementError,
+  assertManagementAuditWritable,
   invalidateProviderManagementSummary,
 } from "./webui-management-operations.mjs";
 import {
@@ -91,7 +92,7 @@ export async function routeCodexSettingsManagement({
           previewFingerprint: fingerprintManagementValue(preview),
         });
       }
-      state.audit.assertWritable();
+      assertManagementAuditWritable(state.audit);
       result = await state.updateCodexSetting(body.setting, {
         environment,
         expectedVersion: body.revision,
@@ -128,7 +129,7 @@ export async function routeCodexSettingsManagement({
       revision: current?.version ?? null,
       value: result.value,
       activation: configActivationResult(result.activation),
-      ...(current === null ? { consistency: "unknown" } : {}),
+      consistency: current === null ? "unknown" : "confirmed",
       auditStatus,
     });
     return true;

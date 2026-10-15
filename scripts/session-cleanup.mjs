@@ -18,12 +18,8 @@ import { requireUserConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 import { SqliteSessionDisplayCache } from "../dist/storage/index.js";
-
-const usage = `用法：codexc cleanup sessions <最大轮数> [--idle-days <天数>] [--confirm]
-
-默认只预览，不归档。加 --confirm 才会归档符合条件的旧会话。
-执行前必须停止 Gateway；App Server 保持运行。清理覆盖配置中的全部 Workspace 和 Provider。
-主会话轮数用于筛选，派生后代随官方归档；指定 --idle-days 时可查询成员均须达到空闲天数。`;
+import { sessionCleanupUsage as usage } from "./cli-command-usage.mjs";
+import { assertStateDatabaseSchema } from "./state-database.mjs";
 
 export async function runSessionCleanup(args, { environment = process.env, output = console } = {}) {
   if (args.length === 0 || args.some((arg) => arg === "-h" || arg === "--help")) {
@@ -32,6 +28,9 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     return;
   }
   const { confirm, maxTurns, idleDays } = parseSessionCleanupArgs(args);
+  if (confirm && (!process.stdin.isTTY || !process.stdout.isTTY)) {
+    throw new Error("归档确认必须在交互终端执行；请先不加 --confirm 预览，再在本机终端加 --confirm 重试");
+  }
   const config = requireUserConfig(environment);
   await requireStoppedGateway(config.configPath);
   const document = readGatewayConfig(config.configPath);
@@ -39,6 +38,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
   const runtime = resolveAppServerRuntime(document, config.dataDir, environment);
   const codexBinary = resolveExecutable(effectiveCodexBinary(document.codex.binary, environment), environment);
   const databasePath = resolveConfiguredPath(document.storage?.database_path, config.dataDir, "data/gateway.sqlite3");
+  readBoundThreadIds(databasePath);
   const clients = new Map();
   const candidates = [];
   const skipped = [];
@@ -68,7 +68,10 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
       clients.set(provider, client);
     };
     for (const entry of socketEntries) {
-      if (entry.provider !== aggregateProviderId) await connectProvider(entry);
+      if (entry.provider === runtime.primaryProvider || entry.provider !== aggregateProviderId) {
+        output.log("正在连接归档检查入口：" + entry.provider);
+        await connectProvider(entry);
+      }
     }
     // thread/list explicitly includes every Provider in the shared Codex Home.
     // Do not start an unused virtual instance merely to discover its history.
@@ -76,29 +79,38 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     const ensureClient = async (provider) => {
       if (provider !== aggregateProviderId || clients.has(provider)) return;
       const entry = socketEntries.find(value => value.provider === provider);
-      if (!entry) return; // clientFor reports an unavailable historical Provider.
+      if (!entry) return; // Removed Providers use shared-history maintenance.
       aggregateConnection ??= connectProvider(entry);
       await aggregateConnection;
     };
     const context = {
-      clients, ensureClient, workspaces, databasePath, maxTurns,
+      clients, ensureClient, primaryClient: clients.get(runtime.primaryProvider), workspaces, databasePath, maxTurns,
       idleCutoff: idleDays === null ? null : Math.floor(Date.now() / 1000) - idleDays * 86_400,
     };
     output.log("正在扫描主会话（已连接 " + clients.size + " 个 Provider，" + workspaces.length + " 个 Workspace；聚合会话按需连接）…");
     const roots = new Map();
-    for (const client of clients.values()) {
-      for (const workspace of workspaces) {
-        for (const thread of await client.listThreads(workspace.cwd, { fullScan: true })) {
-          if (!thread.parentThreadId && thread.source !== "automation") roots.set(thread.id, thread);
-        }
+    // Every instance shares the same history; modelProviders: [] already covers
+    // historical Providers. Only live-state reads need the owning instance.
+    for (const cwd of new Set(workspaces.map(workspace => workspace.cwd))) {
+      for (const thread of await context.primaryClient.listThreads(cwd, { fullScan: true })) {
+        if (!thread.parentThreadId && thread.source !== "automation") roots.set(thread.id, thread);
       }
     }
-    for (const thread of roots.values()) {
+    output.log("正在检查 " + roots.size + " 个主会话（最多同时检查 4 组）…");
+    let inspected = 0;
+    const inspections = await inspectInBatches([...roots.values()], async thread => {
       try {
-        candidates.push(await inspectCandidate(thread, context));
+        return { candidate: await inspectCandidate(thread, context) };
       } catch (error) {
-        skipped.push({ id: thread.id, reason: summarizeFailure(error) });
+        return { skipped: { id: thread.id, reason: summarizeFailure(error) } };
+      } finally {
+        inspected++;
+        if (inspected % 10 === 0 || inspected === roots.size) output.log("扫描进度：" + inspected + "/" + roots.size);
       }
+    });
+    for (const inspection of inspections) {
+      if (inspection.candidate) candidates.push(inspection.candidate);
+      else skipped.push(inspection.skipped);
     }
     output.log("待归档主会话组：" + candidates.length + "；跳过：" + skipped.length);
     for (const [index, candidate] of candidates.entries()) {
@@ -110,14 +122,12 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
         + "，已归档后代 " + children.filter((item) => item.archived).length);
     }
     for (const item of skipped) output.log("跳过：" + item.id + " · " + item.reason);
-    output.log("父会话及派生后代由官方一起归档；后代数量仅含可查询成员。操作不是整组原子事务，请勿同时操作候选会话。");
+    output.log("父会话及派生后代由官方一起归档；后代数量仅含可查询成员。已移除 Provider 的历史仍可维护，不需要恢复模型凭据。");
+    output.log("活动预检覆盖已连接实例；其他实例的写入占用由官方归档锁拒绝。操作不是整组原子事务，请勿同时操作候选会话。");
     if (!confirm || candidates.length === 0) {
       if (!confirm) output.log("确认执行：codexc cleanup sessions " + maxTurns
         + (idleDays === null ? "" : " --idle-days " + idleDays) + " --confirm（仅限交互终端）");
       return { maxTurns, idleDays, candidates, skipped, results };
-    }
-    if (!process.stdin.isTTY || !process.stdout.isTTY) {
-      throw new Error("归档确认必须在交互终端执行；请先预览，再在本机终端加 --confirm 重试");
     }
     const prompter = createPrompter(process.stdin, process.stdout);
     let accepted;
@@ -128,11 +138,17 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
       output.log("已取消会话归档。");
       return { maxTurns, idleDays, candidates, skipped, results };
     }
-    for (const candidate of candidates) {
-      if (await gatewayOwnerIsActive(config.configPath)) {
-        output.log("Gateway 已启动，停止执行剩余归档。");
-        for (const remaining of candidates.slice(results.length)) {
-          results.push({ id: remaining.thread.id, status: "skipped", reason: "Gateway 已启动" });
+    const pendingVerification = [];
+    for (const [index, candidate] of candidates.entries()) {
+      output.log("归档进度：" + (index + 1) + "/" + candidates.length + " · 复核 " + candidate.thread.id);
+      let stopReason;
+      try {
+        if (await gatewayOwnerIsActive(config.configPath)) stopReason = "Gateway 已启动";
+      } catch (error) { stopReason = "Gateway 状态无法确认：" + summarizeFailure(error); }
+      if (stopReason) {
+        output.log(stopReason + "，停止执行剩余归档，继续核验已发出的请求。");
+        for (const remaining of candidates.slice(index)) {
+          results.push({ id: remaining.thread.id, status: "skipped", reason: stopReason });
         }
         break;
       }
@@ -146,16 +162,33 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
         results.push({ id: candidate.thread.id, status: "skipped", reason: summarizeFailure(error) });
         continue;
       }
-      const client = clientFor(current.thread, clients);
+      const client = clients.get(current.maintenanceProvider);
       let requestError;
       try { await client.archiveThread(current.thread.id); }
       catch (error) { requestError = summarizeFailure(error); }
-      let result;
-      try { result = await verifyArchive(current, client); }
-      catch (error) {
-        result = { status: "unconfirmed", archivedIds: [], reason: "结果核验失败：" + summarizeFailure(error) };
-      }
+      const result = { id: current.thread.id, status: "unconfirmed", archivedIds: [] };
       if (requestError) result.requestError = requestError;
+      results.push(result);
+      pendingVerification.push({ candidate: current, client, result });
+    }
+    // Take fresh authoritative root lists after writes, once per Workspace,
+    // rather than rescanning the entire history for every archived group.
+    const rootStates = new Map();
+    for (const cwd of new Set(pendingVerification.map(item => item.candidate.thread.cwd))) {
+      output.log("正在核验归档结果：" + cwd);
+      try {
+        const archived = await context.primaryClient.listThreads(cwd, { fullScan: true, archived: true });
+        const active = await context.primaryClient.listThreads(cwd, { fullScan: true, archived: false });
+        rootStates.set(cwd, { archived: new Set(archived.map(thread => thread.id)), active: new Set(active.map(thread => thread.id)) });
+      } catch (error) { rootStates.set(cwd, { error }); }
+    }
+    for (const { candidate: current, client, result } of pendingVerification) {
+      let verification;
+      try { verification = await verifyArchive(current, client, rootStates.get(current.thread.cwd)); }
+      catch (error) {
+        verification = { status: "unconfirmed", archivedIds: [], reason: "结果核验失败：" + summarizeFailure(error) };
+      }
+      Object.assign(result, verification);
       if (result.archivedIds.length > 0) {
         try {
           cache ??= new SqliteSessionDisplayCache(join(dirname(databasePath), "session-display-cache.sqlite3"));
@@ -164,7 +197,6 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
           result.cacheError = summarizeFailure(error);
         }
       }
-      results.push({ id: current.thread.id, ...result });
     }
     const labels = { confirmed: "已核验可查询成员归档", partial: "部分完成", failed: "未归档", unconfirmed: "结果未确认", skipped: "跳过" };
     for (const result of results) {
@@ -174,6 +206,9 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     }
     output.log("归档结束：已核验 " + results.filter((item) => item.status === "confirmed").length
       + " 组，其余 " + results.filter((item) => item.status !== "confirmed").length + " 组；未自动重试或回滚。");
+    if (results.some(item => item.status !== "confirmed" || item.cacheError)) {
+      throw new Error("归档执行未全部完成或展示缓存清理失败，请按逐组结果核查后重新预览；未自动重试或回滚");
+    }
     return { maxTurns, idleDays, candidates, skipped, results };
   } finally {
     try { cache?.close(); }
@@ -185,17 +220,27 @@ async function requireStoppedGateway(configPath) {
   if (await gatewayOwnerIsActive(configPath)) throw new Error("清理会话前必须先停止 Gateway：codexc stop gateway");
 }
 
-function clientFor(thread, clients) {
-  const client = clients.get(thread.modelProvider);
-  if (!client) throw new Error("会话所属 Provider 不可用：" + thread.modelProvider);
-  return client;
-}
-
-async function readOwnedThread(thread, clients, ensureClient) {
+async function readOwnedThread(thread, { clients, ensureClient, primaryClient }) {
   await ensureClient(thread.modelProvider);
-  const current = await clientFor(thread, clients).readThread(thread.id);
-  if (current.modelProvider !== thread.modelProvider) throw new Error("会话 Provider 已变化");
-  return current;
+  const preferred = clients.get(thread.modelProvider) ?? primaryClient;
+  const readers = [...clients.entries()];
+  let selected;
+  for (const [provider, client] of readers) {
+    const current = await client.readThread(thread.id);
+    if (current.id !== thread.id || current.modelProvider !== thread.modelProvider) throw new Error("会话身份或 Provider 已变化");
+    requireEligibleMember(current);
+    // Historical Providers need no model credentials for maintenance. A live
+    // instance still owns its loaded Thread; never replace its active state
+    // with the primary instance's notLoaded projection.
+    if (current.status.type !== "notLoaded") {
+      if (selected && selected.thread.status.type !== "notLoaded") throw new Error("会话被多个实例加载，无法确认归档归属");
+      selected = { thread: current, client, provider };
+    } else if (!selected || (selected.thread.status.type === "notLoaded" && client === preferred)) {
+      selected = { thread: current, client, provider };
+    }
+  }
+  if (!selected) throw new Error("没有可用的历史维护连接");
+  return selected;
 }
 
 async function readDescendants(client, id) {
@@ -216,26 +261,47 @@ function requireUnbound(members, bound) {
 }
 
 async function inspectCandidate(listed, context) {
-  const { clients, ensureClient, workspaces, databasePath, maxTurns, idleCutoff } = context;
-  const thread = await readOwnedThread(listed, clients, ensureClient);
+  const { workspaces, databasePath, maxTurns, idleCutoff } = context;
+  const { thread, client, provider } = await readOwnedThread(listed, context);
   if (thread.parentThreadId || thread.source === "automation") throw new Error("不是可清理的交互主会话");
-  const client = clientFor(thread, clients);
+  if (!workspaces.some(workspace => workspace.cwd === thread.cwd)) throw new Error("会话组包含未配置 Workspace：" + thread.id);
+  if (idleCutoff !== null && !isThreadIdle(thread, idleCutoff)) throw new Error("会话组未达到空闲天数条件");
+  const turnCount = await countTurns(client, thread.id, maxTurns);
+  if (turnCount > maxTurns) throw new Error("主会话 Turn 数超过上限");
   const members = [{ thread, archived: false }];
+  const loadedProviders = new Set(thread.status.type === "idle" ? [provider] : []);
   const children = await readDescendants(client, thread.id);
   for (const child of children) {
-    members.push({ thread: await readOwnedThread(child.thread, clients, ensureClient), archived: child.archived });
+    const current = await readOwnedThread(child.thread, context);
+    if (current.thread.status.type === "idle") loadedProviders.add(current.provider);
+    members.push({ thread: current.thread, archived: child.archived });
   }
+  if (loadedProviders.size > 1) throw new Error("会话组被多个实例加载，请先退出对应会话再归档");
   for (const { thread: member } of members) {
     if (!workspaces.some((workspace) => workspace.cwd === member.cwd)) throw new Error("会话组包含未配置 Workspace：" + member.id);
-    if (member.isPinned) throw new Error("会话组包含固定会话：" + member.id);
-    if (member.activeTurnId || member.status.type === "active") throw new Error("会话组包含活动会话：" + member.id);
-    if (member.status.type !== "idle" && member.status.type !== "notLoaded") throw new Error("会话状态不可确认：" + member.id);
     if (idleCutoff !== null && !isThreadIdle(member, idleCutoff)) throw new Error("会话组未达到空闲天数条件");
   }
   requireUnbound(members, readBoundThreadIds(databasePath));
-  const turnCount = await countTurns(client, thread.id, maxTurns);
-  if (turnCount > maxTurns) throw new Error("主会话 Turn 数超过上限");
-  return { thread, members, turnCount };
+  const maintenanceProvider = loadedProviders.values().next().value ?? provider;
+  return { thread, members, turnCount, maintenanceProvider };
+}
+
+function requireEligibleMember(member) {
+  if (member.isPinned) throw new Error("会话组包含固定会话：" + member.id);
+  if (member.activeTurnId || member.status.type === "active") throw new Error("会话组包含活动会话：" + member.id);
+  if (member.status.type !== "idle" && member.status.type !== "notLoaded") throw new Error("会话状态不可确认：" + member.id);
+}
+
+async function inspectInBatches(threads, inspect) {
+  const results = new Array(threads.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(4, threads.length) }, async () => {
+    while (next < threads.length) {
+      const index = next++;
+      results[index] = await inspect(threads[index]);
+    }
+  }));
+  return results;
 }
 
 function candidateSnapshot(candidate) {
@@ -248,14 +314,13 @@ function candidateSnapshot(candidate) {
   });
 }
 
-async function verifyArchive(candidate, client) {
+async function verifyArchive(candidate, client, rootState) {
+  if (rootState.error) throw rootState.error;
   const descendants = await readDescendants(client, candidate.thread.id);
-  const archivedRoots = await client.listThreads(candidate.thread.cwd, { fullScan: true, archived: true });
-  const activeRoots = await client.listThreads(candidate.thread.cwd, { fullScan: true, archived: false });
   const archived = new Set(descendants.filter((item) => item.archived).map((item) => item.thread.id));
   const active = new Set(descendants.filter((item) => !item.archived).map((item) => item.thread.id));
-  if (archivedRoots.some((thread) => thread.id === candidate.thread.id)) archived.add(candidate.thread.id);
-  if (activeRoots.some((thread) => thread.id === candidate.thread.id)) active.add(candidate.thread.id);
+  if (rootState.archived.has(candidate.thread.id)) archived.add(candidate.thread.id);
+  if (rootState.active.has(candidate.thread.id)) active.add(candidate.thread.id);
   const expected = candidate.members.filter((item) => !item.archived).map((item) => item.thread.id);
   const archivedIds = expected.filter((id) => archived.has(id) && !active.has(id));
   const known = new Set(candidate.members.map((item) => item.thread.id));
@@ -272,6 +337,7 @@ async function verifyArchive(candidate, client) {
 }
 
 export function parseSessionCleanupArgs(args) {
+  if (args.filter((arg) => arg === "--confirm").length > 1) throw new Error("--confirm 不能重复");
   const confirm = args.includes("--confirm");
   const values = args.filter((arg) => arg !== "--confirm");
   if (values.length < 1 || !/^\d+$/u.test(values[0] ?? "")) throw new Error(usage);
@@ -298,7 +364,7 @@ async function countTurns(client, threadId, maxTurns) {
   let total = 0;
   const cursors = new Set();
   do {
-    const page = await client.listThreadTurns(threadId, { cursor, limit: 100 });
+    const page = await client.listThreadTurns(threadId, { cursor, limit: Math.min(100, maxTurns - total + 1) });
     total += page.turns.length;
     if (total > maxTurns) return total;
     cursor = page.nextCursor;
@@ -312,6 +378,7 @@ function readBoundThreadIds(path) {
   if (!existsSync(path)) return new Set();
   const database = new DatabaseSync(path, { readOnly: true });
   try {
+    assertStateDatabaseSchema(database);
     const ids = new Set();
     for (const table of ["conversation_bindings", "conversation_background_bindings"]) {
       for (const row of database.prepare(`SELECT thread_id FROM ${table}`).all()) ids.add(row.thread_id);

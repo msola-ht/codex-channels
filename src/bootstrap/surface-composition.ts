@@ -62,6 +62,7 @@ export interface ReloadableWeixinAccess {
 export function createSurfaceModules(
   options: SurfacePluginContext,
   plugins: readonly BuiltInSurfacePlugin[],
+  onCreated?: (module: SurfaceRuntimeModule) => void,
 ): SurfaceRuntimeModule[] {
   if (plugins.length > 0) {
     const uploadsDirectory = join(dirname(options.config.stateDatabasePath), "uploads");
@@ -80,7 +81,7 @@ export function createSurfaceModules(
     }
     securePrivateDirectorySync(uploadsDirectory);
   }
-  return composeBuiltInSurfacePlugins(plugins, options);
+  return composeBuiltInSurfacePlugins(plugins, options, onCreated);
 }
 
 /** Explicit built-in registry: load code before creating any channel resources. */

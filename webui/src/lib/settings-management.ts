@@ -30,6 +30,9 @@ export type PendingSetting = {
 }
 
 export interface GatewaySettingsController {
+  actionResult: ManagementSettingMutationResponse | null
+  writeUnconfirmed: boolean
+  readbackRequired: boolean
   lastAppliedSetting?: ManagementSettingInput | null
   managedSettings: ManagementSettingsResponse | null
   loading: boolean
@@ -44,6 +47,9 @@ export interface GatewaySettingsController {
 }
 
 export interface CodexSettingsController {
+  actionResult: ManagementSettingMutationResponse | null
+  writeUnconfirmed: boolean
+  readbackRequired: boolean
   lastAppliedSetting?: CodexUserSettingInput | null
   codexSettings: CodexUserSettingsResponse | null
   loading: boolean

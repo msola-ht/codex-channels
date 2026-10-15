@@ -1,16 +1,20 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 import * as clackPrompts from "@clack/prompts";
 
+import { codexProcessInvocation } from "../runtime/owned-process.mjs";
 import {
-  executableInvocation,
-  resolveOptionalExecutable,
-} from "../runtime/executable.mjs";
+  ForwardedChildSignalError,
+  installProcessSignalHandlers,
+  registerChildProcessGroup,
+  signalChildProcesses,
+  terminateChildProcess,
+} from "../runtime/process-lifecycle.mjs";
 import {
   backupPrimaryProviderCandidates,
   listCustomPrimaryProviderCandidates,
 } from "../runtime/model-provider-runtime.mjs";
-import { createCodexUserConfigClient } from "./codex-user-config.mjs";
+import { createCodexUserConfigClient, resolveCodexUserConfigBinary } from "./codex-user-config.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
@@ -23,35 +27,68 @@ function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-function resolveCodexBinary(environment) {
-  const configured = typeof environment.CODEX_BINARY === "string"
-    ? environment.CODEX_BINARY.trim()
-    : "";
-  const binary = configured || "codex";
-  return resolveOptionalExecutable(binary, environment) ?? binary;
-}
-
-function defaultRunLogin({ codexBinary, environment }) {
-  const invocation = executableInvocation(
+async function defaultRunLogin({ codexBinary, environment, input, output }) {
+  const invocation = codexProcessInvocation(
     codexBinary,
     ["login", "--device-auth"],
     environment,
   );
-  const result = spawnSync(invocation.file, invocation.args, {
-    stdio: "inherit",
+  const child = spawn(invocation.file, invocation.args, {
+    stdio: [input, "pipe", "pipe"],
+    detached: process.platform !== "win32",
     env: environment,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.status !== 0) {
-    throw new Error(`codex login 未成功完成（退出码 ${result.status ?? "未知"}）`);
+  if (process.platform !== "win32") registerChildProcessGroup(child);
+  let failure;
+  let forwardedSignal;
+  let termination;
+  const stopChild = () => {
+    termination ??= terminateChildProcess(child);
+    void termination.catch(() => undefined);
+  };
+  const forwardOutput = (text) => {
+    if (failure !== undefined) return;
+    try { output.write(text); }
+    catch (error) { failure = error; stopChild(); }
+  };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", forwardOutput);
+  child.stderr.on("data", forwardOutput);
+  const forwardSignal = (signal) => {
+    forwardedSignal ??= signal;
+    try { signalChildProcesses([child], signal); }
+    catch (error) { failure ??= error; }
+    stopChild();
+  };
+  const removeSignalHandlers = installProcessSignalHandlers({
+    SIGINT: () => forwardSignal("SIGINT"),
+    SIGTERM: () => forwardSignal("SIGTERM"),
+  });
+  try {
+    const result = await new Promise((resolveExit) => {
+      child.once("error", (error) => { failure ??= error; });
+      child.once("close", (status, signal) => resolveExit({ status, signal }));
+    });
+    if (termination !== undefined) await termination;
+    if (failure !== undefined) throw failure;
+    if (forwardedSignal || result.signal) {
+      throw new ForwardedChildSignalError(forwardedSignal || result.signal);
+    }
+    if (result.status !== 0) {
+      throw new Error(`codex login 未成功完成（退出码 ${result.status ?? "未知"}）`);
+    }
+  } finally {
+    removeSignalHandlers();
+    child.stdout.off("data", forwardOutput);
+    child.stderr.off("data", forwardOutput);
   }
 }
 
 export async function runOfficialLoginSetup({
   environment = process.env,
+  input = process.stdin,
   output = process.stdout,
   prompts = clackPrompts,
   createClient = createCodexUserConfigClient,
@@ -92,9 +129,11 @@ export async function runOfficialLoginSetup({
   }
   output.write("将运行 codex login --device-auth；打开终端显示的链接并输入验证码完成登录。\n");
 
-  runLogin({
-    codexBinary: resolveCodexBinary(environment),
+  await runLogin({
+    codexBinary: resolveCodexUserConfigBinary(environment),
     environment,
+    input,
+    output,
   });
 
   const backedUp = await withModelProviderManagementTransaction(environment, async () => {

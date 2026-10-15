@@ -4,12 +4,8 @@ import { lstatSync } from "node:fs";
 import { parse } from "smol-toml";
 import { codexHomePath } from "./codex-home.mjs";
 import { loadManagedProviderProfiles, managedProviderDirectory, managedProviderMarkerPath, readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
-import { loadManagedModelProviderDefinitions } from "./model-provider-definitions.mjs";
+import { loadManagedModelProviderDefinitions, managedProviderAccountFamilies } from "./model-provider-definitions.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
-import { deepseekAccountsFilePath } from "./deepseek-accounts.mjs";
-import { clinePassAccountsFilePath } from "./cline-pass-accounts.mjs";
-import { ccgAccountsFilePath } from "./ccg-accounts.mjs";
-import { opencodeGoAccountsFilePath } from "./opencode-go-accounts.mjs";
 import { loadConfiguredCustomSwitchingModelProviders, loadCustomSwitchingProviderIds,
   customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath } from "./model-provider-custom-runtime.mjs";
 import { customOfficialModelCatalogPath } from "./model-provider-official-catalog.mjs";
@@ -31,10 +27,9 @@ export function aggregateProviderMembers(primaryProvider, providers) {
 /** Source paths only: safe for watchers, with no credential material returned. */
 export function aggregateProviderMaterialFiles(environment, expectedMembers) {
   const paths = new Map([
-    [deepseekAccountsFilePath(environment), 1_048_576],
-    [clinePassAccountsFilePath(environment), 1_048_576],
-    [ccgAccountsFilePath(environment), 1_048_576],
-    [opencodeGoAccountsFilePath(environment), 1_048_576],
+    ...[...managedProviderAccountFamilies]
+      .sort((left, right) => left.aggregateMaterialOrder - right.aggregateMaterialOrder)
+      .map((family) => [family.accountsFilePath(environment), 1_048_576]),
     [customSwitchingProviderRegistryPath(environment), 262_144],
     [responsesContextSyncPath(environment), 1_048_576],
   ]);

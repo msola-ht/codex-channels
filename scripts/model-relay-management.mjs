@@ -202,7 +202,7 @@ async function executeModelRelay(input, environment, options) {
   catch { response = { result: "unconfirmed" }; }
   const activation = response.result === "applied" ? "saved_and_applied" : response.result === "not_running" ? "saved_not_running" : "saved_unconfirmed";
   return { activation, backupPath: result.backupPath, ...(result.cleanupStatus ? { cleanupStatus: result.cleanupStatus } : {}), ...(secret === undefined ? {} : { key: secret }),
-    ...(activation === "saved_unconfirmed" ? { recovery: "生效未确认；需要立即停止入口时执行 codexc stop relay。不会撤销已保存的禁用。" } : {}) };
+    ...(activation === "saved_unconfirmed" ? { recovery: "配置已保存，生效未确认；请用 codexc relay status 核对。需要立即停止入口时执行 codexc stop relay；已保存的配置不会自动回滚。" } : {}) };
 }
 
 /** Retains settlement authority only; never a usable credential or request permission. */

@@ -17,7 +17,7 @@
   一级 Surface 出口只提供组合入口及 Bootstrap 凭据变更检查所需的窄接口。
 - `updates-cursor-store.ts`：在 `data/weixin-updates` 下按账号 SHA-256 文件名保存严格版本 1
   `get_updates_buf`；目录 `0700`、文件 `0600`，临时文件原子替换，损坏、未知版本和符号链接
-  失败关闭。
+  失败关闭。只读诊断使用 `inspect` 复用载荷校验，不修复目录或文件权限。
 - `protocol-client.ts`：实现固定 `v2.4.9` 的 `getupdates`、`sendmessage` 和 `getuploadurl`
   HTTP 合同，并按官方 AES-128-ECB、CDN 二进制 `POST` 与
   双层 key 编码发送生成图片和受限内存文件；图片与文件复用同一媒体上传管线，只在验证和

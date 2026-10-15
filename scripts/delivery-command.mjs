@@ -7,7 +7,7 @@ import { isCommandHelp } from "./cli-help.mjs";
 
 export const deliveryCommandUsage = `用法：codexc delivery <status|list|retry|confirm>
   status                            显示存储占用、待核对记录和阻塞会话数量
-  list                              分页列出事件、会话、阻塞策略与发送检查点（不输出正文）
+  list                              自动读取全部页，列出事件、会话、阻塞策略与发送检查点（不输出正文）
   retry <ID> --allow-duplicate        明确重发整条未知/阻塞结果，可能重复已送达的分片
   confirm <ID> --confirmed-delivered  已自行核实送达后删除未知/阻塞结果
 

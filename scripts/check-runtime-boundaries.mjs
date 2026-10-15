@@ -24,6 +24,7 @@ const allowedDistEntries = new Map([
     "dist/observability/query/index.js",
     "dist/scheduled-tasks/index.js",
     "dist/storage/index.js",
+    "dist/surfaces/index.js", // Local image submission reuses Surface media validation without loading platform SDKs.
     "dist/surfaces/delivery-diagnostics/index.js", // Offline policy only; never load platform SDKs.
     "dist/surfaces/feishu/index.js",
     "dist/surfaces/token-format.js",

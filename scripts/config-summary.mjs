@@ -15,7 +15,7 @@ export function writeGatewayConfigSummary(output, document, configPath, environm
     `- 计划任务：${enabledLabel(summary.scheduledTasks)}`,
     `- 会话空闲自动解除：${summary.idleReleaseMinutes === 0 ? "关闭" : `${summary.idleReleaseMinutes} 分钟`}`,
     `- 调用详情记录：${enabledLabel(summary.modelTrafficDump)}`,
-    `- 调用记录自动保留：${summary.modelTrafficRetentionDays === 0 ? "关闭" : `${summary.modelTrafficRetentionDays} 天`}`,
+    `- 调用记录按时间自动清理：${summary.modelTrafficRetentionDays === 0 ? "关闭" : `保留 ${summary.modelTrafficRetentionDays} 天`}`,
     `- Plugin API：${enabledLabel(summary.pluginApi)}（开发中）`,
     `- 日志等级：${summary.logLevel}`,
     `- Codex .env 代理：${summary.networkFields.join("、") || "未配置（使用环境变量或系统发现）"}`,

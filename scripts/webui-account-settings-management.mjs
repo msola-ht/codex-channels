@@ -1,4 +1,4 @@
-import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
+import { loadClinePassAccounts, clinePassProviderId, validateClinePassAccountId } from "../runtime/cline-pass-accounts.mjs";
 import { previewClinePassConfiguration, applyClinePassConfiguration, previewClinePassRemoval, removeClinePassConfiguration, previewClinePassDefaultAccount, setClinePassDefaultAccount } from "./cline-pass-account-management.mjs";
 import {
   applyDeepseekAccountConfiguration,
@@ -7,7 +7,7 @@ import {
   previewDeepseekAccountRemoval,
   setDeepseekDefaultAccount,
 } from "./deepseek-account-management.mjs";
-import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
+import { loadDeepseekAccounts, deepseekProviderId, validateDeepseekAccountId } from "../runtime/deepseek-accounts.mjs";
 import {
   applyOpencodeGoDefaultAccountChange,
   applyOpencodeGoAccountRemoval,
@@ -15,10 +15,12 @@ import {
   previewOpencodeGoAccountRemoval,
   previewOpencodeGoAccountStop,
   previewOpencodeGoDefaultAccountChange,
+  OpenCodeGoAccountManagementError,
 } from "./opencode-go-account-management.mjs";
 import {
   applyOpencodeGoAccountConfiguration as applyOpencodeGoAccountProvisioning,
   previewOpencodeGoAccountConfiguration,
+  OpenCodeGoAccountProvisioningError,
 } from "./opencode-go-account-provisioning.mjs";
 import {
   loadOpencodeGoAccounts,
@@ -26,7 +28,8 @@ import {
   readOpencodeGoAccountMarker,
 } from "../runtime/opencode-go-accounts.mjs";
 import { loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
-import { ManagementOperationError } from "./webui-management-operations.mjs";
+import { ManagementOperationError, managementOperationError } from "./webui-management-operations.mjs";
+import { AccountManagementError } from "./account-management-error.mjs";
 
 export async function loadAccountSettingsResource(
   environment,
@@ -107,7 +110,7 @@ export function normalizeAccountSettingsMutation(input) {
     case "deepseek.configure":
       return {
         operation: input.operation,
-        accountId: input.accountId,
+        accountId: managementAccountId(input.accountId, input.operation === "clp.configure" ? validateClinePassAccountId : validateDeepseekAccountId),
         ...(input.reconfigure === undefined ? {} : { reconfigure: input.reconfigure }),
         ...(input.mode === undefined ? {} : { mode: input.mode }),
         ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
@@ -119,9 +122,17 @@ export function normalizeAccountSettingsMutation(input) {
     case "clp.remove":
     case "deepseek.default":
     case "deepseek.remove":
-      return { operation: input.operation, accountId: input.accountId };
+      return { operation: input.operation, accountId: managementAccountId(input.accountId, input.operation.startsWith("clp.") ? validateClinePassAccountId : validateDeepseekAccountId) };
     default:
       throw new ManagementOperationError("invalid_account_operation", "账户设置操作不受支持");
+  }
+}
+
+function managementAccountId(value, validate) {
+  try {
+    return validate(value);
+  } catch {
+    throw new ManagementOperationError("invalid-account-id", "账户 ID 格式无效，请使用 1–32 位小写字母、数字、- 或 _", "accountId");
   }
 }
 
@@ -148,7 +159,7 @@ export async function previewAccountSettingsMutation(input, environment) {
         return await previewDeepseekAccountRemoval(input.accountId, { environment });
       case "deepseek.default": {
         const account = loadDeepseekAccounts(environment).find((entry) => entry.id === input.accountId);
-        if (!account) throw new Error("DeepSeek 账户不存在");
+        if (!account) throw new ManagementOperationError("account-not-found", "DeepSeek 账户不存在");
         return { operation: input.operation, account: { ...account, provider: deepseekProviderId(account.id) }, activation: "restart-all" };
       }
       default:
@@ -159,11 +170,11 @@ export async function previewAccountSettingsMutation(input, environment) {
   }
 }
 
-export async function applyAccountSettingsMutation(input, environment) {
+export async function applyAccountSettingsMutation(input, environment, confirmedPreview) {
   try {
     switch (input.operation) {
       case "opencode.account.configure":
-        return await applyOpencodeGoAccountProvisioning(accountSettingsApplyInput(input), { environment });
+        return await applyOpencodeGoAccountProvisioning(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "opencode.account.default":
         return await applyOpencodeGoDefaultAccountChange(input.accountId, { environment });
       case "opencode.account.stop":
@@ -171,13 +182,13 @@ export async function applyAccountSettingsMutation(input, environment) {
       case "opencode.account.remove":
         return await applyOpencodeGoAccountRemoval(accountSettingsApplyInput(input), { environment });
       case "clp.configure":
-        return await applyClinePassConfiguration(accountSettingsApplyInput(input), { environment });
+        return await applyClinePassConfiguration(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "clp.default":
         return await setClinePassDefaultAccount(input.accountId, { environment });
       case "clp.remove":
         return await removeClinePassConfiguration(accountSettingsApplyInput(input), { environment });
       case "deepseek.configure":
-        return await applyDeepseekAccountConfiguration(accountSettingsApplyInput(input), { environment });
+        return await applyDeepseekAccountConfiguration(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "deepseek.default":
         return await setDeepseekDefaultAccount(input.accountId, { environment });
       case "deepseek.remove":
@@ -190,19 +201,16 @@ export async function applyAccountSettingsMutation(input, environment) {
   }
 }
 
-export function accountSettingsApplyInput(input) {
+export function accountSettingsApplyInput(input, confirmedPreview) {
   switch (input.operation) {
     case "opencode.account.configure":
-      return input.mode === "exclusive"
+    case "clp.configure":
+    case "deepseek.configure":
+      return confirmedPreview?.effects?.writesMainConfig === true
         ? { ...input, confirmExclusiveConfigChange: true }
         : input;
     case "opencode.account.remove":
       return { ...input, confirmHistoryLoss: true };
-    case "clp.configure":
-    case "deepseek.configure":
-      return input.mode === "exclusive"
-        ? { ...input, confirmExclusiveConfigChange: true }
-        : input;
     case "clp.remove":
     case "deepseek.remove":
       return { ...input, confirmRemove: true };
@@ -251,10 +259,5 @@ function redactProvider(provider) {
 }
 
 function toManagementError(error) {
-  if (error instanceof ManagementOperationError) return error;
-  return new ManagementOperationError(
-    typeof error?.code === "string" ? error.code : "account_settings_failed",
-    error instanceof Error ? error.message : "账户设置操作失败",
-    error?.field,
-  );
+  return managementOperationError(error, [OpenCodeGoAccountManagementError, OpenCodeGoAccountProvisioningError, AccountManagementError], "account_settings_failed");
 }

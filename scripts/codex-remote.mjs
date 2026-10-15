@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { isAbsolute, relative, sep } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { parse } from "smol-toml";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
@@ -49,7 +49,7 @@ async function runRemoteCli() {
   const codex = table(document.codex);
   const { workspaces } = readWorkspaceConfig(document);
   const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders();
-  const { passthrough, selectedProfile, selectedProvider, workspaceId } = parseCodexRemoteOptions(
+  const { passthrough, selectedProfile, selectedProvider, workspaceId, cwd } = parseCodexRemoteOptions(
     process.argv.slice(2),
     {
       customSwitchingProfiles: customSwitchingProviders.map(
@@ -60,7 +60,8 @@ async function runRemoteCli() {
       ),
     },
   );
-  let workdir = realpathSync(process.cwd());
+  let workdir = realpathSync(cwd === undefined ? process.cwd() : resolve(cwd));
+  if (!statSync(workdir).isDirectory()) throw new Error("Codex 工作目录必须是目录");
   let workspace = workspaceForWorkdir(workspaces, workdir);
   if (workspaceId !== undefined) {
     workspace = workspaces.find((candidate) => candidate.id === workspaceId);

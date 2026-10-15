@@ -32,6 +32,7 @@ export function securePrivateDirectorySync(path: string): void;
 export function secureAppServerSocketDirectorySync(path: string): void;
 
 export function assertPrivateDirectoryAccessSync(path: string): void;
+export function ensurePrivateDirectorySync(path: string): void;
 
 export function assertPrivateFileAccessSync(path: string): void;
 

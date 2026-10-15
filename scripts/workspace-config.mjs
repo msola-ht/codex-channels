@@ -100,7 +100,7 @@ export function addWorkspaceToConfig({
     (candidate) => candidate.id === parsed.defaultWorkspaceId,
   );
   let defaultWorkspace = previousDefault;
-  if (fallbackDefaultWorkspace) {
+  if (!defaultWorkspace && fallbackDefaultWorkspace) {
     const fallback = ensureFallbackWorkspace(fallbackDefaultWorkspace);
     defaultWorkspace = upsertFallbackWorkspace(workspaces, fallback);
   }

@@ -21,23 +21,28 @@ export async function runSystemSettings({
   input,
   output,
   prompts,
+  group = "conversation",
   writeConfig = writeGatewayConfig,
 }) {
+  const groups = {
+    conversation: {
+      message: "Gateway 会话设置",
+      values: ["approval_timeout", "idle_release", "sandbox", "default_workspace", "default_model"],
+    },
+    identity: {
+      message: "身份与时区",
+      values: ["official_tui_identity", "official_tui_terminal", "app_server_timezone", "gateway_timezone"],
+    },
+    traffic: {
+      message: "调用记录（Codex 与 Relay 共用）",
+      values: ["model_traffic_dump", "model_traffic_mode", "model_traffic_retention"],
+    },
+  };
+  if (!Object.hasOwn(groups, group)) throw new Error(`未知系统设置分组：${String(group)}`);
   const section = await prompts.select({
-    message: "选择系统设置",
+    message: groups[group].message,
     showInstructions: false,
     options: [
-      {
-        value: "model_traffic_dump",
-        label: "调用详情记录",
-        hint: "记录完整模型报文；仅排查时临时开启",
-      },
-      { value: "model_traffic_mode", label: "调用记录模式", hint: "Codex 与 Relay 共用；生产精简，调试增加报文信息" },
-      {
-        value: "model_traffic_retention",
-        label: "调用记录保留天数",
-        hint: "默认 30 天；0 关闭按时间自动清理",
-      },
       { value: "approval_timeout", label: "审批超时", hint: "approval.timeout_seconds（30–3600 秒）" },
       {
         value: "idle_release",
@@ -49,7 +54,7 @@ export async function runSystemSettings({
         label: "Gateway 渠道 Sandbox",
         hint: "外部渠道默认值；Codex 新会话与用户偏好在 Config 中管理",
       },
-      { value: "default_workspace", label: "默认工作区", hint: "default_workspace" },
+      { value: "default_workspace", label: "默认工作区", hint: "Gateway 默认项；也可在 codexc work 中设置" },
       {
         value: "default_model",
         label: "渠道新会话模型覆盖",
@@ -67,7 +72,7 @@ export async function runSystemSettings({
       },
       {
         value: "app_server_timezone",
-        label: "模型可见时区",
+        label: "服务时区",
         hint: "codex.timezone；缺省沿用系统时区，决定模型看到的时区与当前日期，WebUI 同步跟随",
       },
       {
@@ -75,10 +80,22 @@ export async function runSystemSettings({
         label: "网关时区",
         hint: "默认跟随 App Server，也可选择系统或自定义时区；重启网关后生效",
       },
+      {
+        value: "model_traffic_dump",
+        label: "调用详情记录",
+        hint: "Codex 与 Relay 共用；记录完整报文，仅排查时临时开启",
+      },
+      { value: "model_traffic_mode", label: "调用记录模式", hint: "Codex 与 Relay 共用；生产精简，调试增加报文信息" },
+      {
+        value: "model_traffic_retention",
+        label: "调用记录保留天数",
+        hint: "默认 30 天；0 关闭按时间自动清理",
+      },
       { value: "back", label: "返回", hint: "返回配置菜单" },
-    ],
+    ].filter((option) => option.value === "back" || groups[group].values.includes(option.value)),
   });
   if (prompts.isCancel(section) || section === "back") return { action: "back" };
+  if (!groups[group].values.includes(section)) throw new Error(`未知系统设置：${String(section)}`);
   if (section === "model_traffic_dump") {
     return runModelTrafficDump({ environment, output, prompts, writeConfig });
   }
@@ -155,14 +172,14 @@ async function runModelTrafficRetention({ environment, output, prompts, writeCon
     initialValue: String(settings.system.modelTrafficRetentionDays),
     validate: (input) => {
       const parsed = Number(input);
-      return Number.isInteger(parsed) && parsed >= 0 && parsed <= 36_500
+      return /^\d+$/u.test(String(input).trim()) && Number.isInteger(parsed) && parsed >= 0 && parsed <= 36_500
         ? undefined
         : "请输入 0–36500 之间的整数";
     },
   });
   if (prompts.isCancel(value)) return { action: "back" };
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 36_500) {
+  if (!/^\d+$/u.test(String(value).trim()) || !Number.isInteger(parsed) || parsed < 0 || parsed > 36_500) {
     throw new Error("调用记录保留天数必须为 0–36500 之间的整数");
   }
   const result = updateGatewaySetting({
@@ -188,14 +205,14 @@ async function runApprovalTimeout({ environment, output, prompts, writeConfig })
     initialValue: String(settings.system.approvalTimeoutSeconds),
     validate: (input) => {
       const parsed = Number(input);
-      return Number.isInteger(parsed) && parsed >= 30 && parsed <= 3600
+      return /^\d+$/u.test(String(input).trim()) && Number.isInteger(parsed) && parsed >= 30 && parsed <= 3600
         ? undefined
         : "请输入 30–3600 之间的整数";
     },
   });
   if (prompts.isCancel(value)) return { action: "back" };
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 30 || parsed > 3600) {
+  if (!/^\d+$/u.test(String(value).trim()) || !Number.isInteger(parsed) || parsed < 30 || parsed > 3600) {
     throw new Error("审批超时必须为 30–3600 之间的整数");
   }
   const result = updateGatewaySetting({
@@ -214,21 +231,23 @@ async function runIdleRelease({ environment, output, prompts, writeConfig }) {
     initialValue: String(settings.system.idleReleaseMinutes),
     validate: (input) => {
       const parsed = Number(input);
-      return Number.isInteger(parsed) && parsed >= 0 && parsed <= 1440
+      return /^\d+$/u.test(String(input).trim()) && Number.isInteger(parsed) && parsed >= 0 && parsed <= 1440
         ? undefined
         : "请输入 0–1440 之间的整数";
     },
   });
   if (prompts.isCancel(value)) return { action: "back" };
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 1440) {
+  if (!/^\d+$/u.test(String(value).trim()) || !Number.isInteger(parsed) || parsed < 0 || parsed > 1440) {
     throw new Error("会话空闲自动解除必须为 0–1440 之间的整数");
   }
   const result = updateGatewaySetting({
     kind: "system.idle-release-minutes",
     value: parsed,
   }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`会话空闲自动解除已设为 ${parsed} 分钟：${result.configPath}\n`);
+  output.write(parsed === 0
+    ? `会话空闲自动解除已关闭：${result.configPath}\n`
+    : `会话空闲自动解除已设为 ${parsed} 分钟：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return {
     idleReleaseMinutes: parsed,
@@ -263,13 +282,14 @@ async function runSandbox({ environment, output, prompts, writeConfig }) {
   return { sandbox: selected, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
-async function runDefaultWorkspace({ environment, output, prompts, writeConfig }) {
+export async function runDefaultWorkspace({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
   const settings = loadGatewaySettings(environment);
   const workspaces = settings.system.workspaces;
   if (workspaces.length === 0) {
     output.write("配置中没有已注册的 Workspace；请使用 codexc work add 注册后重试。\n");
     return { action: "back" };
   }
+  const back = Symbol("default-workspace-back");
   const selected = await prompts.select({
     message: "默认工作区",
     showInstructions: false,
@@ -282,10 +302,10 @@ async function runDefaultWorkspace({ environment, output, prompts, writeConfig }
         label: workspace.name,
         hint: workspace.id,
       })),
-      { value: "back", label: "返回上一级" },
+      { value: back, label: "返回上一级" },
     ],
   });
-  if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
+  if (prompts.isCancel(selected) || selected === back) return { action: "back" };
   const result = updateGatewaySetting({
     kind: "system.default-workspace",
     value: selected,
@@ -354,7 +374,7 @@ function terminalUserAgentToken() {
   return detectTerminalUserAgentToken(process.env) ?? "unknown";
 }
 
-async function runOfficialTuiIdentity({ environment, output, prompts, writeConfig }) {
+export async function runOfficialTuiIdentity({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
   const settings = loadGatewaySettings(environment);
   const protocolMetadata = JSON.parse(
     readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"),

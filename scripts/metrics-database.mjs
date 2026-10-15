@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 export { validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
 import {
+  constants,
   copyFileSync,
   existsSync,
   renameSync,
@@ -22,6 +23,7 @@ import {
 import { serviceCommandTarget, serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
   acquireRequestMetricsDatabaseLock,
+  requireCurrentModelRequestMetricsSchema,
 } from "../dist/observability/index.js";
 import {
   inspectMetricsDatabase,
@@ -212,9 +214,20 @@ export function cleanupMetricsDatabase(environment = process.env, options = {}) 
     );
   }
   const databasePath = requireCompatibleMetricsDatabase(environment);
+  const lock = acquireRequestMetricsDatabaseLock(databasePath);
+  try {
+    requireCompatibleDatabasePath(databasePath);
+    return cleanupCompatibleMetricsDatabase(databasePath, { ...options, keepDays, maxRows, beforeMs });
+  } finally {
+    lock.release();
+  }
+}
+
+function cleanupCompatibleMetricsDatabase(databasePath, options) {
+  const { keepDays, maxRows, beforeMs } = options;
   checkpoint(databasePath);
   const backupPath = `${databasePath}.cleanup-${backupTimestamp(new Date())}.bak`;
-  copyFileSync(databasePath, backupPath);
+  copyFileSync(databasePath, backupPath, constants.COPYFILE_EXCL);
   securePrivateFileSync(backupPath);
   const database = new DatabaseSync(databasePath);
   let deletedByAge;
@@ -228,6 +241,10 @@ export function cleanupMetricsDatabase(environment = process.env, options = {}) 
       DELETE FROM model_request_metrics
       WHERE id <= (SELECT MAX(id) FROM model_request_metrics) - ?
     `).run(maxRows).changes);
+    database.prepare(`UPDATE thread_execution_state SET history_complete = 0 WHERE thread_id IN (
+      SELECT thread_id FROM turn_execution_metrics WHERE recorded_at_ms < ?
+        OR rowid IN (SELECT rowid FROM turn_execution_metrics ORDER BY recorded_at_ms DESC, rowid DESC LIMIT -1 OFFSET ?)
+    )`).run(Math.max(0, beforeMs), maxRows);
     database.prepare("DELETE FROM turn_execution_metrics WHERE recorded_at_ms < ?").run(Math.max(0, beforeMs));
     database.prepare(`DELETE FROM turn_execution_metrics WHERE rowid IN (
       SELECT rowid FROM turn_execution_metrics ORDER BY recorded_at_ms DESC, rowid DESC LIMIT -1 OFFSET ?
@@ -317,6 +334,29 @@ function pruneProviderDatabase({
   localDatabasePath,
   allowVacuumLocal,
 }) {
+  if (!existsSync(localDatabasePath)) {
+    return { provider, local: { databasePath: localDatabasePath, backupPath: null, deleted: 0 } };
+  }
+  requireCompatibleDatabasePath(localDatabasePath);
+  const lock = acquireRequestMetricsDatabaseLock(localDatabasePath);
+  try {
+    requireCompatibleDatabasePath(localDatabasePath);
+    return pruneCompatibleProviderDatabase({ provider, localDatabasePath, allowVacuumLocal });
+  } finally {
+    lock.release();
+  }
+}
+
+function requireCompatibleDatabasePath(databasePath) {
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    requireCurrentModelRequestMetricsSchema(database);
+  } finally {
+    database.close();
+  }
+}
+
+function pruneCompatibleProviderDatabase({ provider, localDatabasePath, allowVacuumLocal }) {
   const localBackupPath = backupMetricsDatabase(localDatabasePath, provider);
   const localDeleted = deleteProviderRows(
     localDatabasePath,
@@ -342,7 +382,7 @@ function backupMetricsDatabase(databasePath, provider) {
     throw new Error(`备份指标数据库失败：${errorMessage(error)}`, { cause: error });
   }
   const backupPath = `${databasePath}.${provider}-prune-${backupTimestamp(new Date())}.bak`;
-  copyFileSync(databasePath, backupPath);
+  copyFileSync(databasePath, backupPath, constants.COPYFILE_EXCL);
   securePrivateFileSync(backupPath);
   return backupPath;
 }

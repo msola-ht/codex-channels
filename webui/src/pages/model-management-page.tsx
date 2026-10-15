@@ -13,7 +13,7 @@ import { ProviderSettingsManagement } from "@/components/settings/provider-setti
 import { AccountSettingsManagement } from "@/components/settings/account-settings-management"
 import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
 import { ProviderStatusCard } from "@/components/settings/provider-channel-status"
-import { PendingSettingDialog, ManagedInputRow } from "@/components/settings/settings-controls"
+import { PendingSettingDialog, ManagedInputRow, SettingsMutationFeedback } from "@/components/settings/settings-controls"
 import { SettingsError, LoadingSettingsCard } from "@/components/settings/settings-feedback"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { FieldGroup } from "@/components/ui/field"
@@ -65,6 +65,7 @@ export function ModelConfigurationPage() {
       {gateway.actionError && <Alert variant="destructive"><AlertDescription>{gateway.actionError}</AlertDescription></Alert>}
     </CardContent></Card>
     <PendingSettingDialog pending={gateway.pendingSetting} saving={gateway.saving} loading={gateway.loading} onCancel={gateway.cancelSetting} onConfirm={() => void gateway.confirmSetting().then(saved => { if (saved) refreshModelDisplay() })} />
+    <SettingsMutationFeedback result={gateway.actionResult} writeUnconfirmed={gateway.writeUnconfirmed} readbackRequired={gateway.readbackRequired} />
   </SettingsPageFrame>
 }
 

@@ -243,11 +243,11 @@ case "$action" in
     reject_unsupported_jobs
     gateway_label=$(service_ids gateway start)
     if ! job_loaded "$gateway_label"; then
-      print_status failure "Gateway 尚未运行，请先执行 codexc start。"
+      print_status failure "Gateway 尚未运行，请先执行 codexc start gateway。"
       exit 1
     fi
     if launchctl kill SIGHUP "$user_domain/$gateway_label" 2>/dev/null; then
-      print_status success "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
+      print_status success "已通知 Gateway 重新读取配置，请查看日志确认应用结果；其他设置按保存时提示重启，服务定义或安装环境变化时需运行 codexc install。"
     else
       print_status failure "Gateway 当前没有可接收信号的运行进程，未隐式启动服务。"
       print_status remediation "请先执行 codexc start gateway，再运行 codexc reload。"
@@ -257,25 +257,7 @@ case "$action" in
   status)
     target="${2:-all}"
     require_target "$target"
-    labels=$(service_ids "$target" status)
-    required_labels=$(service_ids "$target" status-required)
-    status_code=0
-    for label in ${(f)labels}; do
-      launchctl print "$user_domain/$label" 2>/dev/null && continue
-      # 关闭或未启用的可选服务允许保持未加载，只有预期运行的服务才判定异常；
-      # 配置不可读时 status-required 退回“已安装即可选服务必需”，状态查询仍然可用。
-      required=0
-      for candidate in ${(f)required_labels}; do
-        [ "$candidate" = "$label" ] && required=1
-      done
-      if [ "$required" -eq 1 ]; then
-        print_status failure "launchd 服务未加载：$label"
-        status_code=1
-      else
-        print_status note "launchd 可选服务未加载：$label"
-      fi
-    done
-    exit "$status_code"
+    exec "${NODE_BINARY:-node}" "$script_dir/service-status.mjs" "$target" --text
     ;;
   logs)
     shift

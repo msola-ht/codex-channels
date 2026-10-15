@@ -14,3 +14,4 @@ export function runCodexUserSettingsSetup(options?: {
   createClient?: import("./codex-user-settings-management.mjs").CodexUserSettingsDependencies["createClient"];
   primaryProvider?: import("./codex-user-settings-management.mjs").CodexUserSettingsDependencies["primaryProvider"];
 }): Promise<unknown>;
+export function runCodexToolAccess(options?: Parameters<typeof runCodexUserSettingsSetup>[0]): Promise<unknown>;

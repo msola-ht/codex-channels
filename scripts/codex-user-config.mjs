@@ -1,14 +1,17 @@
 import { isDeepStrictEqual } from "node:util";
+import { statSync } from "node:fs";
+import { homedir } from "node:os";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
+  effectiveCodexBinary,
   resolveOptionalExecutable,
 } from "../runtime/executable.mjs";
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
 import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { readGatewayConfig, validateCodexConfigDocument } from "../runtime/gateway-config.mjs";
-import { locateUserConfig } from "./runtime-config.mjs";
+import { locateOptionalUserConfig, locateUserConfig } from "./runtime-config.mjs";
 
 export async function disableCodexDaemonAutoStart(environment = process.env, dependencies = {}) {
   await updateCodexUserConfig(environment, (config) => {
@@ -74,9 +77,9 @@ export async function writeCodexUserConfigEdits(
 
 export async function createCodexUserConfigClient({
   environment = process.env,
-  cwd = codexHomePath(environment),
+  cwd = codexUserConfigWorkingDirectory(environment),
+  codexBinary: configuredBinary = resolveCodexUserConfigBinary(environment),
 } = {}) {
-  const configuredBinary = stringValue(environment.CODEX_BINARY) || "codex";
   const codexBinary = resolveOptionalExecutable(configuredBinary, environment) ?? configuredBinary;
   // Metadata-only config/read, config/batchWrite and model/list do not require Provider credentials.
   // Keep explicit repair available when a private reference is missing or invalid.
@@ -97,13 +100,36 @@ export async function createCodexUserConfigClient({
   );
 }
 
+export function resolveCodexUserConfigBinary(environment = process.env) {
+  const config = locateOptionalUserConfig(environment);
+  const codex = config === undefined
+    ? { binary: "codex" }
+    : validateCodexConfigDocument(readGatewayConfig(config.configPath).codex ?? {});
+  const configuredBinary = effectiveCodexBinary(codex.binary, environment);
+  return resolveOptionalExecutable(configuredBinary, environment) ?? configuredBinary;
+}
+
+function codexUserConfigWorkingDirectory(environment) {
+  const home = codexHomePath(environment);
+  try {
+    if (!statSync(home).isDirectory()) throw new Error("Codex Home 必须指向目录");
+    return home;
+  } catch (error) {
+    // 首次使用由 Codex 创建默认 Home；不能把尚不存在的目录传给 spawn。
+    // 显式 CODEX_HOME 必须已经存在，保持官方 CLI 的路径约束。
+    if (error?.code === "ENOENT" && !environment.CODEX_HOME?.trim()) return homedir();
+    if (error?.code === "ENOENT") throw new Error("CODEX_HOME 必须指向已存在的目录", { cause: error });
+    throw error;
+  }
+}
+
 /** WebUI reads reuse the running primary server; never start a temporary server. */
 export async function createSharedCodexUserConfigClient({ environment = process.env } = {}) {
   const config = locateUserConfig(environment);
   const document = readGatewayConfig(config.configPath);
   const codex = validateCodexConfigDocument(document.codex ?? {});
   const socketPath = resolvePrimaryAppServerSocketPath({ codex }, config.dataDir);
-  const configuredBinary = stringValue(environment.CODEX_BINARY) || codex.binary;
+  const configuredBinary = effectiveCodexBinary(codex.binary, environment);
   const codexBinary = resolveOptionalExecutable(configuredBinary, environment) ?? configuredBinary;
   const { CodexAppServerClient, JsonRpcClient, createAppServerTransport } = await import("../dist/codex-client/index.js");
   const transport = createAppServerTransport({ kind: "local-app-server", socketPath }, {
@@ -112,10 +138,6 @@ export async function createSharedCodexUserConfigClient({ environment = process.
     terminateCodexProcess: terminateChildProcess,
   });
   return new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 function configValueAtPath(config, keyPath) {

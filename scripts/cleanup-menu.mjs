@@ -15,27 +15,34 @@ export async function runCleanupMenu({
   readStorage,
   services = {},
 }) {
-  prompts.intro("Codex Connect Cleanup");
+  prompts.intro("数据清理");
+  let selectedAction = "sessions";
   while (true) {
     const action = await prompts.select({
-      message: "选择清理项目",
+      message: "清理项目",
       showInstructions: false,
+      initialValue: selectedAction,
       options: [
-        { value: "sessions", label: "归档短会话及子会话", hint: "预览前确认临停 Gateway，结束后按原状态恢复；保留 App Server" },
-        { value: "traffic", label: "删除请求与响应转储", hint: "预览后确认临停 Gateway、Relay 和 App Server，结束后恢复" },
-        { value: "cleanup", label: "清理旧指标", hint: "按保留天数和行数备份清理；临停 Gateway 后按原状态恢复" },
-        { value: "prune", label: "清理指定 Provider 的指标", hint: "保留备份；输入精确 Provider ID，按原状态恢复 Gateway" },
-        { value: "reset", label: "重置整个指标库", hint: "备份并重建；临停 Gateway 后按原状态恢复" },
-        { value: "cancel", label: "退出" },
+        { value: "sessions", label: "归档短会话及子会话", hint: "临停 Gateway，预览并确认归档" },
+        { value: "traffic", label: "删除请求与响应转储", hint: "预览后确认删除，临停相关服务" },
+        { value: "cleanup", label: "清理旧指标", hint: "按保留天数与记录数备份清理" },
+        { value: "prune", label: "清理指定 Provider 的指标", hint: "按精确 Provider ID 备份清理" },
+        { value: "reset", label: "重置整个指标库", hint: "备份后重置，临停 Gateway" },
+        { value: "cancel", label: "返回", hint: "结束数据清理" },
       ],
     });
-    if (prompts.isCancel(action) || action === "cancel") {
-      prompts.cancel("已退出清理菜单");
+    if (prompts.isCancel(action)) {
+      prompts.cancel("已取消清理");
+      return;
+    }
+    if (action === "cancel") {
+      prompts.outro("已退出清理菜单");
       return;
     }
     if (!["sessions", "cleanup", "reset", "traffic", "prune"].includes(action)) {
       throw new Error(`未知清理项目：${String(action)}`);
     }
+    selectedAction = action;
     try {
       if (action === "sessions") {
         await runSessionCleanupMenu({ prompts, runCleanup: runSessionCleanup });

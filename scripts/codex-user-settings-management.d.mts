@@ -6,12 +6,19 @@ export type CodexUserSettingInput =
   | { kind: "tool-access"; path: string[]; value: CodexUserConfigValue }
   | {
       kind: "all";
+      reasoningSummary: "auto" | "concise" | "detailed" | "none";
+      planModeReasoningEffort: string;
+      verbosity: "low" | "medium" | "high";
+      checkForUpdateOnStartup: boolean;
+      historyPersistence: "save-all" | "none";
       model: string;
       reasoningEffort: string;
       serviceTier: "default" | "fast" | "ultrafast";
-      sandboxMode: "read-only" | "workspace-write";
-      approvalPolicy: "on-request" | "never";
-      networkAccess: boolean;
+      permissions: {
+        sandboxMode: "read-only" | "workspace-write";
+        approvalPolicy: "on-request" | "never";
+        networkAccess: boolean;
+      } | null;
     }
   | { kind: "defaults"; model: string; reasoningEffort: string }
   | { kind: "service-tier"; serviceTier: "default" | "fast" | "ultrafast" }

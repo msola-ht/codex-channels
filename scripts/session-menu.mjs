@@ -6,7 +6,7 @@ export async function runSessionCleanupMenu({ prompts = clackPrompts, runCleanup
 }) {
 
   const maxTurns = await prompts.text({
-    message: "归档主会话的最大轮数（超过此数跳过整组）",
+    message: "主会话最多几轮（超过则跳过整组）",
     placeholder: "3",
     initialValue: "3",
     validate: (value) => {
@@ -24,7 +24,7 @@ export async function runSessionCleanupMenu({ prompts = clackPrompts, runCleanup
   }
 
   const idleDays = await prompts.text({
-    message: "连续空闲多少天（可留空）",
+    message: "至少空闲几天（留空不限制）",
     placeholder: "不限制",
     validate: (value) => {
       const input = (value ?? "").trim();

@@ -182,6 +182,9 @@ export class ProviderProxy {
   }>();
   private started = false;
   private stopped = false;
+  private closed = false;
+  private closing: Promise<void> | undefined;
+  private listenerClosed = false;
 
   constructor(private readonly listenAddress: string, options: ProviderProxyOptions) {
     this.websocketServer = new WebSocketServer({ noServer: true,
@@ -243,6 +246,7 @@ export class ProviderProxy {
   }
 
   async start(): Promise<void> {
+    if (this.stopped) throw new Error("模型代理已关闭，不能重新启动");
     if (this.started) return;
     await new Promise<void>((resolve, reject) => {
       const onListenError = (error: Error): void => {
@@ -273,25 +277,38 @@ export class ProviderProxy {
     return `127.0.0.1:${address.port}`;
   }
 
-  async close(): Promise<void> {
-    if (!this.started || this.stopped) return;
+  close(): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    if (this.closing) return this.closing;
     this.stopped = true;
+    const closing = this.finishClose().then(() => { this.closed = true; }).finally(() => {
+      if (this.closing === closing) this.closing = undefined;
+    });
+    this.closing = closing;
+    return closing;
+  }
+
+  private async finishClose(): Promise<void> {
     for (const controller of this.modelAuthorizations) controller.abort();
     for (const socket of this.pendingUpgrades) socket.destroy();
     const quotaRefreshes = [...this.quotaRefreshByAccount.values()];
     for (const refresh of quotaRefreshes) refresh.controller.abort();
     for (const client of this.websocketServer.clients) client.terminate();
     this.server.closeAllConnections?.();
-    await Promise.all([
-      new Promise<void>((resolveClose) => {
-        this.server.close(() => resolveClose());
+    const results = await Promise.allSettled([
+      Promise.resolve().then(async () => {
+        if (this.listenerClosed) return;
+        if (this.server.listening) await new Promise<void>((resolveClose, rejectClose) => {
+          this.server.close(error => error ? rejectClose(error) : resolveClose());
+        });
+        this.listenerClosed = true;
       }),
-      settleWithin(
-        quotaRefreshes.map((refresh) => refresh.promise),
-        quotaRefreshCloseTimeoutMs,
-      ),
+      settleWithin(quotaRefreshes.map((refresh) => refresh.promise), quotaRefreshCloseTimeoutMs),
+      Promise.resolve().then(() => this.trafficDump?.close()),
     ]);
-    await this.trafficDump?.close();
+    const failures: unknown[] = [];
+    for (const result of results) if (result.status === "rejected") failures.push(result.reason);
+    if (failures.length) throw new AggregateError(failures, "模型代理资源未完全关闭");
   }
 
   private async handleHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -1145,8 +1162,8 @@ async function settleWithin(
   try {
     await Promise.race([
       Promise.allSettled(promises),
-      new Promise<void>((resolve) => {
-        timeout = setTimeout(resolve, timeoutMs);
+      new Promise<void>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("模型代理额度刷新关闭超时")), timeoutMs);
       }),
     ]);
   } finally {

@@ -51,6 +51,7 @@ export interface BuiltInSurfacePlugin {
 export function composeBuiltInSurfacePlugins(
   plugins: readonly BuiltInSurfacePlugin[],
   context: SurfacePluginContext,
+  onCreated?: (module: SurfaceRuntimeModule) => void,
 ): SurfaceRuntimeModule[] {
   const pluginIds = new Set<string>();
   const surfaceAccounts = new Set<string>();
@@ -65,6 +66,7 @@ export function composeBuiltInSurfacePlugins(
     }
     pluginIds.add(plugin.id);
     for (const module of plugin.create(context)) {
+      onCreated?.(module);
       if (module.adapter.surface !== plugin.id) {
         throw new Error(
           `内置 Surface 插件 ${plugin.id} 返回了其他 Surface：${module.adapter.surface}`,

@@ -103,6 +103,12 @@ export async function routeGatewaySettingsManagement({
       environment,
       expectedRevision: body.revision,
     });
+    let current = null;
+    try {
+      current = loadGatewaySettings(environment);
+    } catch (error) {
+      webuiLogger.warn({ module: "settings", event: "settings.readback_failed", err: error }, "Gateway 设置已写入，但新修订读取失败");
+    }
     let auditStatus = "recorded";
     try {
       state.audit.record({
@@ -114,17 +120,18 @@ export async function routeGatewaySettingsManagement({
         revision: result.previousRevision,
         phase: "completed",
         resultCode: "updated",
-        recovery: "none",
+        recovery: current === null ? "re-read" : "none",
       });
     } catch (error) {
       auditStatus = "degraded";
       webuiLogger.error({ module: "audit", event: "settings.audit_failed", err: error }, "管理设置已写入，但审计记录失败");
     }
     sendManagementJson(response, 200, {
-      revision: loadGatewaySettings(environment).revision,
+      revision: current?.revision ?? null,
       value: result.value,
       activation: result.activationResult,
       auditStatus,
+      consistency: current === null ? "unknown" : "confirmed",
     });
     return true;
   }

@@ -21,11 +21,12 @@
   `schedule_task` 工具名，把结果复用现有计划任务渲染格式返回给 Agent，并把确认预览交给当前
   `surface + accountId` 的原生交互入口；后台计划任务 Thread 的
   同类请求先由 `scheduled-task-server-request.ts` 拒绝。
-- `app.ts`：提供 `GatewayApplication` 的构造、启动、停止和配置重载入口，构造时接收已加载的内置渠道插件，编排顶层生命周期，
+- `app.ts`：通过异步 `GatewayApplication.create` 提供唯一构造入口，接收已加载的内置渠道插件；构造失败时逆序清理组合根登记的已取得资源，继续清理其余组件并保留原始错误及清理错误。提供启动、停止和配置重载入口，编排顶层生命周期，
   把具体组件所有权交给组件图；持有启动/停止幂等任务，内部致命故障同时通知进程生命周期退出，配置重载继承组件图实现，启动中取消、订阅移除和资源关闭由组件图统一处理。
 - `gateway-component-graph.ts`：只为 OpenAI 主 Client 注入遵循共享代理配置的图片上传 HTTP 客户端，本地模型路由核验直连回环地址；
   为渠道 Hook 管理注入实时授权守卫及 Surface 无损审查策略，在会话锁内和写入前复核运行状态、渠道允许名单及 Actor 归属；
   校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；
+  构造期间即时登记数据库、指标写入方、通知端点与已创建的渠道实例；计划任务 Store 和插件实例创建边界也登记部分取得的资源，不依赖尚未返回的完整应用实例回滚；
   私有持有当前配置、Workspace Registry、Surface 集合与管理器，统一协调配置重载和重启通知接收方的临时切换与恢复；
   启动账户预热绑定应用关闭信号，按账户记录安全失败分类，在指标存储关闭前最多等待 5 秒；
   迟到的用量与额度结果均禁止写入。把同一 Client 的
@@ -213,7 +214,7 @@
 - `channel-image-spool.ts`：扫描 `data/channel-outbox/pending/` 的图片发送请求，按
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据
   发送，成功归档到 `done/`、失败归档到 `failed/` 并保留原因；Unix 使用 `0700/0600`，Windows
-  使用当前 SID 私有 ACL，并在启动时收紧既有受管文件；只接受
+  使用当前 SID 私有 ACL；创建或使用目录时检查类型、链接与所有者，启动时先拒绝既有文件链接或异主文件，再收紧权限；只接受
   pending 目录内的绝对图片路径。每次轮询只处理一批快照；失败归档未完成时，当前进程按轮询间隔
   仅重试归档，不再次发送图片，停止时不继续处理下一条。
 

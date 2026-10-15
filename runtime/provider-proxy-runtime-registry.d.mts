@@ -3,11 +3,12 @@ export interface ProviderProxyRuntime<TProxy> {
   proxy: TProxy;
 }
 
-export class ProviderProxyRuntimeRegistry<TOptions, TProxy> {
+export class ProviderProxyRuntimeRegistry<TOptions, TProxy extends { close(): Promise<void> }> {
   constructor(
     startRuntime: (
       key: string,
       options: TOptions,
+      retain: (runtime: ProviderProxyRuntime<TProxy>) => void,
     ) => Promise<ProviderProxyRuntime<TProxy>>,
   );
   ensure(
@@ -18,6 +19,6 @@ export class ProviderProxyRuntimeRegistry<TOptions, TProxy> {
   addUser(key: string, user: string): void;
   removeUser(key: string, user: string): void;
   hasUsers(key: string): boolean;
-  remove(proxy: TProxy): boolean;
+  close(proxy: TProxy): Promise<void>;
   values(): ProviderProxyRuntime<TProxy>[];
 }

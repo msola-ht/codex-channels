@@ -24,7 +24,8 @@ import { ApiError, readJsonBody, sendJson, sendManagementJson } from "./webui-ht
 import {
   invalidateProviderManagementSummary,
   loadProviderManagementSummary,
-  ManagementOperationError,
+  managementOperationError,
+  assertManagementAuditWritable,
 } from "./webui-management-operations.mjs";
 import {
   loadProviderSettingsResource,
@@ -160,12 +161,10 @@ export async function routeProviderManagement({
     });
     let result;
     try {
-      state.audit.assertWritable();
+      assertManagementAuditWritable(state.audit);
       result = await state.applyAccountSettings(input, environment, safePreview);
     } catch (error) {
-      throw error instanceof ManagementOperationError
-        ? error
-        : new ApiError(400, "account_settings_write_failed", error instanceof Error ? error.message : "账户设置写入失败");
+      throw managementOperationError(error, [], "account_settings_failed");
     }
     invalidateProviderManagementSummary(state.providerStateCache);
     invalidateServiceStatusSummary(state.serviceStatusCache);
@@ -225,12 +224,10 @@ export async function routeProviderManagement({
     });
     let result;
     try {
-      state.audit.assertWritable();
+      assertManagementAuditWritable(state.audit);
       result = await state.applyProviderSettings(input, environment, safePreview);
     } catch (error) {
-      throw error instanceof ManagementOperationError
-        ? error
-        : new ApiError(400, "provider_settings_write_failed", error instanceof Error ? error.message : "Provider 设置写入失败");
+      throw managementOperationError(error, [], "provider_settings_failed");
     }
     invalidateProviderManagementSummary(state.providerStateCache);
     invalidateServiceStatusSummary(state.serviceStatusCache);

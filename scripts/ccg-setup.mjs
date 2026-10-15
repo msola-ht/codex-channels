@@ -112,9 +112,6 @@ export async function applyCcgConfiguration({
   if (!["switching", "exclusive"].includes(mode)) throw new Error("CCG 模式无效");
   const definition = ccgAccountDefinition(accountId);
   if (!isManagedProviderApiKeyValid(definition, apiKey)) throw new Error("CCG API Key 无效");
-  if (mode === "exclusive" && confirmExclusiveConfigChange !== true) {
-    throw new Error("固定模式会修改 Codex 主配置，必须先明确确认");
-  }
   return withModelProviderManagementTransaction(environment, async () => {
     const accounts = loadCcgAccounts(environment);
     const existing = accounts.find((account) => account.id === accountId);
@@ -130,6 +127,9 @@ export async function applyCcgConfiguration({
     const previous = loadManagedModelProviderSettings(environment)
       .find((item) => item.provider === definition.id);
     if (existing && previous === undefined) throw new Error("CCG 账户配置不完整，请先恢复缺失文件");
+    if ((mode === "exclusive" || previous?.mode === "exclusive") && confirmExclusiveConfigChange !== true) {
+      throw new Error("修改 Codex 主配置前必须明确确认");
+    }
     const current = await readConfig(paths.config, environment);
     if (!previous && (hasProviderBaseConfig(current, definition)
       || await readOptionalProviderFile(paths.profile, environment) !== undefined
@@ -310,12 +310,15 @@ export async function runCcgSetup({
       ],
     });
     if (prompts.isCancel(mode)) return { action: "back" };
-    if (mode === "exclusive") {
-      const confirmed = await prompts.confirm({
-        message: "固定模式会备份并修改 Codex 主配置，确认继续？",
+    const current = loadManagedModelProviderSettings(environment)
+      .find((provider) => provider.provider === ccgProviderId(accountId));
+    let confirmExclusiveConfigChange = false;
+    if (mode === "exclusive" || current?.mode === "exclusive") {
+      confirmExclusiveConfigChange = await prompts.confirm({
+        message: "此操作会修改或恢复 Codex 主配置，确认继续？",
         initialValue: false,
-      });
-      if (confirmed !== true) return { action: "back" };
+      }) === true;
+      if (!confirmExclusiveConfigChange) return { action: "back" };
     }
     const apiKey = await prompts.password({
       message: "CommandCode API Key（保存到本机 0600 私有配置）",
@@ -331,8 +334,6 @@ export async function runCcgSetup({
       const downloaded = await downloadCatalog(fetchImpl);
       catalog = createCcgCatalog(downloaded.catalog);
     }
-    const current = loadManagedModelProviderSettings(environment)
-      .find((provider) => provider.provider === ccgProviderId(accountId));
     const model = await prompts.select({
       message: "选择 CCG 默认模型（来自目录文件）",
       options: catalog.models.map((entry) => ({ value: entry.slug, label: entry.display_name })),
@@ -342,7 +343,7 @@ export async function runCcgSetup({
     result = await applyCcgConfiguration({
       accountId, apiKey, catalog, model, mode,
       reconfigure: action === "reconfigure",
-      confirmExclusiveConfigChange: mode === "exclusive",
+      confirmExclusiveConfigChange,
     }, { environment });
     output.write(`CCG 账户 ${accountId} 已配置；切换模式可使用 codexc remote --profile sf-ccg-${accountId}。\n`);
   } else {

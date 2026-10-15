@@ -54,6 +54,9 @@ export async function applyPrimaryProviderSwitch(
   const environment = options.environment ?? process.env;
   return withModelProviderManagementTransaction(environment, async () => {
     const plan = await buildSwitchPlan(input, options);
+    if (options.switchPreview !== undefined && !isDeepStrictEqual(options.switchPreview, publicSwitchPreview(plan))) {
+      throw invalid("stale-preview", "preview", "Provider 状态已变化，请重新生成切换预览并确认");
+    }
     return applyPrimaryProviderSwitchPlan(plan, options);
   });
 }

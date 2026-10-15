@@ -116,7 +116,7 @@ codexc delivery status
 codexc delivery list
 ```
 
-`status` 输出存储计数和逻辑字节数，并附带 `retainedNotices`（未知或授权失效但不阻塞的保留记录，字段名沿用既有接口）、`blockingRecords`（仍参与顺序屏障的记录，含正常排队）和 `blockedConversations`（因未知结果或授权阻塞而暂停后续投递的会话数量）。`list` 分页输出记录 ID、Conversation、状态、检查点、事件类型、Thread/Turn、操作种类/状态，以及 `blocksFollowing`、`blocksExecution`。`blocksExecution` 固定为 false，表示单条记录本身不禁止执行；账号/全局存储容量保护独立计算。`blocksFollowing` 表示投递顺序策略，后续排队项仍可能被前序记录挡住，不表示每条记录都会立刻发送。投递箱被运行中的 Gateway 占用时，命令明确提示先停止 Gateway，不并发打开写入者。两命令从认证载荷提取限定字段，不输出正文、通知内容、图片或授权快照。打开投递箱时，崩溃留下的 `sending` 会转为 `uncertain`，所以这些命令属于离线维护，不是 `doctor` 的只读检查。
+`status` 输出存储计数和逻辑字节数，并附带 `retainedNotices`（未知或授权失效但不阻塞的保留记录，字段名沿用既有接口）、`blockingRecords`（仍参与顺序屏障的记录，含正常排队）和 `blockedConversations`（因未知结果或授权阻塞而暂停后续投递的会话数量）。`list` 内部逐页读取并自动输出全部记录的 ID、Conversation、状态、检查点、事件类型、Thread/Turn、操作种类/状态，以及 `blocksFollowing`、`blocksExecution`。`blocksExecution` 固定为 false，表示单条记录本身不禁止执行；账号/全局存储容量保护独立计算。`blocksFollowing` 表示投递顺序策略，后续排队项仍可能被前序记录挡住，不表示每条记录都会立刻发送。投递箱被运行中的 Gateway 占用时，命令明确提示先停止 Gateway，不并发打开写入者。两命令从认证载荷提取限定字段，不输出正文、通知内容、图片或授权快照。打开投递箱时，崩溃留下的 `sending` 会转为 `uncertain`，所以这些命令属于离线维护，不是 `doctor` 的只读检查。
 
 自行核对平台消息及 App Server 历史后，选择其中一种处理：
 

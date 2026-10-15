@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
-import { ManagedSelect, PendingSettingDialog, SettingsRow } from "@/components/settings/settings-controls"
+import { ManagedSelect, PendingSettingDialog, SettingsRow, SettingsMutationFeedback } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
 import type { CodexSettingsController } from "@/lib/settings-management"
 import type { MessageKey } from "@/lib/i18n/messages"
@@ -105,6 +105,7 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
 
   return <>
     <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} loading={management.loading} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
+    <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
     <Card>
       <CardHeader><CardTitle>{t(section === "models" ? "settingsFields.modelDefaults" : section === "context" ? "settingsFields.codexContext" : section === "permissions" ? "navigation.codexPermissions" : "navigation.codexGeneral")}</CardTitle><CardDescription>{t("navigation.configurationHint")}</CardDescription></CardHeader>
       <CardContent className="flex flex-col gap-5 text-sm">

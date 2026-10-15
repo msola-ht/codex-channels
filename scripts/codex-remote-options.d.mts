@@ -18,6 +18,7 @@ export function parseCodexRemoteOptions(
 ): {
   passthrough: string[];
   workspaceId: string | undefined;
+  cwd: string | undefined;
   selectedProfile: string | undefined;
   selectedProvider: string | undefined;
 };

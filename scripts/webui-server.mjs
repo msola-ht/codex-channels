@@ -243,7 +243,8 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
     serveStatic(staticDir, url.pathname, response);
   } catch (error) {
     if (error instanceof ManagementOperationError) {
-      sendManagementJson(response, error.code === "stale-revision" ? 409 : 400, {
+      if (error.status >= 500) logger.error({ event: "management.failed", code: error.code, err: error.cause }, "WebUI 管理操作失败");
+      sendManagementJson(response, error.status, {
         error: {
           code: error.code,
           ...(error.field === undefined ? {} : { field: error.field }),
@@ -529,7 +530,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     return;
   }
   if (apiPath === "/health") {
-    sendJson(response, 200, { ok: true, service: "webui" });
+    sendJson(response, 200, { ok: true, service: "webui", pid: process.pid, parentPid: process.ppid });
     return;
   }
   if (apiPath === "/accounts") {
@@ -1102,7 +1103,7 @@ function main() {
         console.log(`请通过服务器实际 IP 访问 http://<服务器IP>:${settings.port}/`);
         console.log("API 请求需要请求头 Authorization: Bearer <令牌>，或使用 ?token=<令牌> 打开。");
       } else {
-        console.log(`Codex WebUI: http://${host}:${settings.port}/${configNote}`);
+        console.log(`Codex WebUI: http://${host.includes(":") ? `[${host}]` : host}:${settings.port}/${configNote}`);
       }
       console.log("按 Ctrl+C 停止。");
     });

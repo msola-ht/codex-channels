@@ -33,13 +33,21 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
   const [actionError, setActionError] = useState<SettingError | null>(null)
   const [saving, setSaving] = useState(false)
   const [pending, setPending] = useState<{ setting: Setting; revision: string; value: PendingSetting } | null>(null)
+  const [actionResult, setActionResult] = useState<SettingMutationPreview | null>(null)
+  const [writeUnconfirmed, setWriteUnconfirmed] = useState(false)
+  const [readbackBaseline, setReadbackBaseline] = useState<Snapshot | null>(null)
   const operation = useRef<AbortController | null>(null)
   useEffect(() => () => operation.current?.abort(), [])
   useEffect(() => { if (request.error !== null && operation.current === null) setPending(null) }, [request.error, saving])
+  useEffect(() => {
+    if (readbackBaseline !== null && data !== null && data !== readbackBaseline && !request.loading && request.error === null) {
+      setReadbackBaseline(null)
+    }
+  }, [data, readbackBaseline, request.loading, request.error])
 
   const previewSetting = useCallback(async (setting: Setting, label: SettingLabel) => {
     const snapshot = data
-    if (snapshot === null || request.loading || request.error !== null || saving || operation.current !== null || pending !== null) return
+    if (snapshot === null || readbackBaseline !== null || request.loading || request.error !== null || saving || operation.current !== null || pending !== null) return
     const controller = new AbortController()
     operation.current = controller
     setSaving(true)
@@ -67,34 +75,42 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
       if (operation.current === controller) operation.current = null
       if (!controller.signal.aborted) setSaving(false)
     }
-  }, [currentValue, data, preview, refetch, revisionOf, request.loading, request.error, saving, pending])
+  }, [currentValue, data, preview, refetch, revisionOf, request.loading, request.error, saving, pending, readbackBaseline])
 
   const confirmSetting = useCallback(async (): Promise<boolean> => {
     const snapshot = data
     const pendingSetting = pending
-    if (snapshot === null || pendingSetting === null || operation.current !== null || saving || request.loading || request.error !== null) return false
+    if (snapshot === null || readbackBaseline !== null || pendingSetting === null || operation.current !== null || saving || request.loading || request.error !== null) return false
     const controller = new AbortController()
     operation.current = controller
     setSaving(true)
     setActionError(null)
     try {
-      await update(pendingSetting.revision, pendingSetting.setting, pendingSetting.value.confirmationToken, controller.signal)
+      const result = await update(pendingSetting.revision, pendingSetting.setting, pendingSetting.value.confirmationToken, controller.signal)
       if (controller.signal.aborted) return false
       setPending(null)
       setLastAppliedSetting(pendingSetting.setting)
+      setActionResult(result)
+      setWriteUnconfirmed(false)
+      setReadbackBaseline(snapshot)
       refetch()
       return true
     } catch (error) {
       if (!controller.signal.aborted) {
         setPending(null)
         handleError(error, pendingSetting.setting, refetch, () => setPending(null), setActionError)
+        if (!(error instanceof ApiClientError) || (error.status >= 500 && error.code !== "management_audit_unavailable")) {
+          setWriteUnconfirmed(true)
+          setReadbackBaseline(snapshot)
+          refetch()
+        }
       }
       return false
     } finally {
       if (operation.current === controller) operation.current = null
       if (!controller.signal.aborted) setSaving(false)
     }
-  }, [data, pending, refetch, update, request.loading, request.error, saving])
+  }, [data, pending, refetch, update, request.loading, request.error, saving, readbackBaseline])
 
   const cancelSetting = useCallback(() => {
     if (operation.current !== null) return
@@ -103,11 +119,20 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
     setSaving(false)
   }, [])
 
+  const refreshSettings = useCallback(() => {
+    if (operation.current !== null) return
+    refetch()
+  }, [refetch])
+
   return {
     ...request,
+    refetch: refreshSettings,
     error: translateApiError(t, request.error, request.errorCode),
     pendingSetting: pending?.value ?? null,
     lastAppliedSetting,
+    actionResult,
+    writeUnconfirmed,
+    readbackRequired: readbackBaseline !== null,
     actionError: actionError === null ? null : translateSettingErrorCode(t, actionError.code, actionError.kind),
     saving,
     previewSetting,

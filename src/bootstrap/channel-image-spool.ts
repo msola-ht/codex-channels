@@ -1,6 +1,6 @@
 import {
   existsSync,
-  mkdirSync,
+  lstatSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -12,7 +12,7 @@ import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { Logger } from "pino";
 
 import {
-  securePrivateDirectorySync,
+  ensurePrivateDirectorySync,
   securePrivateFileSync,
 } from "../../runtime/private-file.mjs";
 
@@ -93,8 +93,7 @@ export class ChannelImageSpool {
       this.doneDirectory,
       this.failedDirectory,
     ]) {
-      mkdirSync(directory, { recursive: true });
-      securePrivateDirectorySync(directory);
+      ensurePrivateDirectorySync(directory);
     }
     for (const directory of [
       this.pendingDirectory,
@@ -103,7 +102,12 @@ export class ChannelImageSpool {
     ]) {
       for (const name of readdirSync(directory)) {
         const path = join(directory, name);
-        if (statSync(path).isFile()) securePrivateFileSync(path);
+        const metadata = lstatSync(path);
+        if (metadata.isSymbolicLink()
+          || (process.getuid !== undefined && metadata.uid !== process.getuid())) {
+          throw new Error("渠道图片暂存文件类型或所有者无效");
+        }
+        if (metadata.isFile()) securePrivateFileSync(path);
       }
     }
   }

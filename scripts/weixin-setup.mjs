@@ -166,6 +166,7 @@ export async function runWeixinSetup({
       accountId: result.accountId,
       allowedUserIds: result.allowedUserIds,
       configPath: result.configPath,
+      warnings: result.warnings,
       activation: result.activation,
       activationResult: configActivationResult(result.activation),
     };

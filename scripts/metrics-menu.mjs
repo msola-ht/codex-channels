@@ -11,46 +11,56 @@ export async function runMetricsMenu({
   runDatabaseCommand,
   runMetricsCommand,
 }) {
-  prompts.intro("Codex Connect Metrics");
+  prompts.intro("指标与导出");
+  let selectedAction = "report";
   while (true) {
     const action = await prompts.select({
-      message: "选择指标操作",
+      message: "指标操作",
       showInstructions: false,
+      initialValue: selectedAction,
       options: [
         {
-          value: "run",
-          label: "本次运行导出",
-          hint: "指定 Thread 输出最近运行与累计汇总（写入 output 目录）",
+          value: "report",
+          label: "聚合报告导出",
+          hint: "按时间范围与分组导出汇总",
         },
+        { value: "threads", label: "会话列表导出", hint: "按时间范围导出有指标的会话" },
         {
           value: "turns",
-          label: "会话明细导出",
-          hint: "选择会话后导出每次对话汇总（写入 output 目录）",
+          label: "会话轮次明细导出",
+          hint: "选择会话，导出每轮对话汇总",
         },
         {
-          value: "report",
-          label: "聚合汇报",
-          hint: "按时间范围与分组输出汇报（写入 output 目录）",
+          value: "run",
+          label: "会话最近运行汇总导出",
+          hint: "选择会话，导出最近运行与累计汇总",
         },
         {
           value: "export",
-          label: "明细导出",
-          hint: "导出脱敏请求记录（写入 output 目录）",
+          label: "请求明细导出",
+          hint: "导出脱敏请求记录",
         },
+        { value: "quota", label: "历史额度窗口导出", hint: "导出已记录的额度周期" },
         {
           value: "status",
           label: "数据库状态",
           hint: "查看指标库路径、Schema 与记录数",
         },
-        { value: "threads", label: "会话列表导出", hint: "按时间范围导出有指标的会话" },
-        { value: "quota", label: "历史额度窗口", hint: "只读查询已记录的额度周期" },
-        { value: "cancel", label: "取消" },
+        { value: "cancel", label: "返回", hint: "结束指标操作" },
       ],
     });
-    if (prompts.isCancel(action) || action === "cancel") {
-      prompts.cancel("已取消");
+    if (prompts.isCancel(action)) {
+      prompts.cancel("已取消指标操作");
       return;
     }
+    if (action === "cancel") {
+      prompts.outro("已退出指标菜单");
+      return;
+    }
+    if (!["report", "threads", "turns", "run", "export", "quota", "status"].includes(action)) {
+      throw new Error(`未知指标操作：${String(action)}`);
+    }
+    selectedAction = action;
     try {
       await runMetricsMenuAction(action, { prompts, readThreads, runDatabaseCommand, runMetricsCommand });
     } catch (error) {
@@ -66,20 +76,15 @@ async function runMetricsMenuAction(action, { prompts, readThreads, runDatabaseC
     const format = await selectExportFormat(prompts);
     if (prompts.isCancel(format)) return;
     const args = [action, "--range", String(range), "--format", String(format)];
-    if (action === "quota") await runDatabaseCommand(args);
-    else await runMetricsCommand(args);
+    await runMetricsCommand(args);
     return;
   }
   if (action === "status") {
     await runDatabaseCommand(["status"]);
     return;
   }
-  if (action === "run") {
-    const threadId = await prompts.text({
-      message: "Thread ID",
-      placeholder: "例如：019fcb00-c0e1-7222-995d-a9e9f8f35443",
-      validate: (value) => String(value ?? "").trim() ? undefined : "Thread ID 不能为空",
-    });
+  if (action === "run" || action === "turns") {
+    const threadId = await selectMetricsThread(prompts, readThreads);
     if (prompts.isCancel(threadId)) {
       prompts.cancel("已取消");
       return;
@@ -89,41 +94,7 @@ async function runMetricsMenuAction(action, { prompts, readThreads, runDatabaseC
       prompts.cancel("已取消");
       return;
     }
-    await runMetricsCommand(["run", String(threadId).trim(), "--format", String(format)]);
-    return;
-  }
-  if (action === "turns") {
-    let threads;
-    try {
-      threads = await readThreads();
-    } catch (error) {
-      writeCliMessage("failure", error instanceof Error ? error.message : String(error));
-      return;
-    }
-    if (threads.length === 0) {
-      writeCliMessage("note", "指标库中暂无可导出的会话记录。");
-      return;
-    }
-    const { formatLocalTime } = await import("./metrics-export-format.mjs");
-    const selected = await prompts.select({
-      message: "选择会话",
-      showInstructions: false,
-      options: threads.map((thread) => ({
-        value: thread.threadId,
-        label: `${thread.threadId.slice(0, 12)}… · ${thread.turnCount} 次对话 · ${thread.requestCount} 次请求`,
-        hint: formatLocalTime(thread.lastRecordedAtMs),
-      })),
-    });
-    if (prompts.isCancel(selected)) {
-      prompts.cancel("已取消");
-      return;
-    }
-    const format = await selectExportFormat(prompts);
-    if (prompts.isCancel(format)) {
-      prompts.cancel("已取消");
-      return;
-    }
-    await runMetricsCommand(["turns", String(selected), "--format", String(format)]);
+    await runMetricsCommand([action, String(threadId).trim(), "--format", String(format)]);
     return;
   }
   if (action === "report") {
@@ -204,10 +175,11 @@ export async function runMetricsMaintenanceMenu(action, {
       message: "重置会先备份现有指标库，确认继续？",
       initialValue: false,
     });
-    if (prompts.isCancel(confirmed) || confirmed !== true) {
+    if (prompts.isCancel(confirmed)) {
       prompts.cancel("已取消");
       return;
     }
+    if (confirmed !== true) return;
     await runDatabaseCommand(["reset"]);
     return;
   }
@@ -239,6 +211,15 @@ export async function runMetricsMaintenanceMenu(action, {
       prompts.cancel("已取消");
       return;
     }
+    const confirmed = await prompts.confirm({
+      message: `备份后清理指标，仅保留最近 ${String(keepDays)} 天、最多 ${String(maxRows)} 行，确认删除超出范围的数据？`,
+      initialValue: false,
+    });
+    if (prompts.isCancel(confirmed)) {
+      prompts.cancel("已取消");
+      return;
+    }
+    if (confirmed !== true) return;
     await runDatabaseCommand([
       "cleanup-restart",
       "--keep-days",
@@ -261,6 +242,37 @@ function defaultReadStorage() {
 async function defaultReadThreads() {
   const { readMetricsThreads } = await import("./metrics-database-access.mjs");
   return readMetricsThreads().threads;
+}
+
+async function selectMetricsThread(prompts, readThreads) {
+  let threads;
+  try {
+    threads = await readThreads();
+    if (threads.length === 0) writeCliMessage("note", "指标库中暂无可列出的会话记录，可手动输入 Thread ID。");
+  } catch (error) {
+    writeCliMessage("failure", error instanceof Error ? error.message : String(error));
+    threads = [];
+  }
+  const { formatLocalTime } = await import("./metrics-export-format.mjs");
+  const manual = Symbol("manual-thread");
+  const selected = await prompts.select({
+    message: "选择会话",
+    showInstructions: false,
+    options: [
+      ...threads.map((thread) => ({
+        value: thread.threadId,
+        label: `${thread.threadId.slice(0, 12)}… · ${thread.turnCount} 次对话 · ${thread.requestCount} 次请求`,
+        hint: formatLocalTime(thread.lastRecordedAtMs),
+      })),
+      { value: manual, label: "手动输入 Thread ID", hint: "指定未列出的会话" },
+    ],
+  });
+  if (prompts.isCancel(selected) || selected !== manual) return selected;
+  return prompts.text({
+    message: "Thread ID",
+    placeholder: "例如：019fcb00-c0e1-7222-995d-a9e9f8f35443",
+    validate: (value) => String(value ?? "").trim() ? undefined : "Thread ID 不能为空",
+  });
 }
 
 function selectExportFormat(prompts) {

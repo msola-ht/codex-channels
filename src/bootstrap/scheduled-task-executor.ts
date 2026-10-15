@@ -105,7 +105,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
 
   availableCapacity(task: ScheduledTask): number {
     return this.acceptsExecution(toTarget(task))
-      ? Math.max(0, 3 - this.router.backgroundBindings(toTarget(task)).length) : 0;
+      ? this.router.availableBackgroundCapacity(toTarget(task)) : 0;
   }
 
   async validateRun(task: ScheduledTask, signal?: AbortSignal): Promise<ScheduledTaskRunValidation | undefined> {

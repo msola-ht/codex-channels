@@ -75,6 +75,7 @@ class SupersededRestoreError extends Error {}
 export class SessionRouter {
   private readonly forceNew = new Set<string>();
   private readonly backgroundStartQueues = new Map<string, Promise<void>>();
+  private readonly backgroundReservations = new Map<string, number>();
   private readonly threadLifecycleQueues = new Map<string, Promise<void>>();
   private readonly approvalResolutions = new Set<ApprovalResolution>();
   // 模型设置保留到进程结束：thread/list 不返回 model，
@@ -131,6 +132,12 @@ export class SessionRouter {
 
   backgroundBindings(target: ConversationTarget): ConversationBinding[] {
     return this.bindings.backgrounds(target);
+  }
+
+  availableBackgroundCapacity(target: ConversationTarget): number {
+    return Math.max(0, maximumBackgroundThreadsPerConversation
+      - this.backgroundBindings(target).length
+      - (this.backgroundReservations.get(this.key(target)) ?? 0));
   }
 
   isBackgroundThread(threadId: string): boolean {
@@ -526,54 +533,50 @@ export class SessionRouter {
     }
     const backgroundStartOptions: ThreadStartOptions = { ...startOptions };
     delete backgroundStartOptions.dynamicTools;
-    if (this.backgroundBindings(target).length >= maximumBackgroundThreadsPerConversation) {
-      throw new UserFacingError(
-        "conversation.background-limit",
-        `后台任务已满，最多同时运行 ${maximumBackgroundThreadsPerConversation} 个`,
+    return this.withBackgroundCapacity(target, 1, async () => {
+      const workspace = workspaceId === undefined
+        ? this.workspace(target)
+        : this.workspaces.require(workspaceId);
+      const session = await this.codex.startThread(workspace.cwd, {
+        ...this.workspacePermissions(workspace),
+        ...backgroundStartOptions,
+        threadSource: "automation",
+      });
+      if (this.bindings.getByThread(session.thread.id)) {
+        throw new UserFacingError(
+          "thread.bound",
+          "App Server 返回的计划任务 Thread 已绑定，已拒绝覆盖现有会话",
+        );
+      }
+      const binding = {
+        target,
+        workspaceId: workspace.id,
+        threadId: session.thread.id,
+        sessionId: session.thread.sessionId,
+      };
+      try {
+        this.bindings.bindBackground(binding);
+      } catch (error) {
+        await this.codex.unsubscribeThread(session.thread.id).catch(() => undefined);
+        throw error;
+      }
+      this.captureModelSettings(
+        session.thread.id,
+        session.model,
+        session.modelProvider,
+        session.reasoningEffort,
+        session.serviceTier,
+        "default",
+        session.approvalsReviewer,
       );
-    }
-    const workspace = workspaceId === undefined
-      ? this.workspace(target)
-      : this.workspaces.require(workspaceId);
-    const session = await this.codex.startThread(workspace.cwd, {
-      ...this.workspacePermissions(workspace),
-      ...backgroundStartOptions,
-      threadSource: "automation",
+      this.namesByThread.set(session.thread.id, session.thread.name);
+      this.contextCompactionItemIdsByThread.set(
+        session.thread.id,
+        session.contextCompactionItemIds,
+      );
+      this.notifyBindingsChanged();
+      return { binding, session };
     });
-    if (this.bindings.getByThread(session.thread.id)) {
-      throw new UserFacingError(
-        "thread.bound",
-        "App Server 返回的计划任务 Thread 已绑定，已拒绝覆盖现有会话",
-      );
-    }
-    const binding = {
-      target,
-      workspaceId: workspace.id,
-      threadId: session.thread.id,
-      sessionId: session.thread.sessionId,
-    };
-    try {
-      this.bindings.bindBackground(binding);
-    } catch (error) {
-      await this.codex.unsubscribeThread(session.thread.id).catch(() => undefined);
-      throw error;
-    }
-    this.captureModelSettings(
-      session.thread.id,
-      session.model,
-      session.modelProvider,
-      session.reasoningEffort,
-      session.serviceTier,
-      "default",
-      session.approvalsReviewer,
-    );
-    this.namesByThread.set(session.thread.id, session.thread.name);
-    this.contextCompactionItemIdsByThread.set(
-      session.thread.id,
-      session.contextCompactionItemIds,
-    );
-    this.notifyBindingsChanged();
-    return { binding, session };
   }
 
   async resume(
@@ -592,7 +595,10 @@ export class SessionRouter {
     const current = this.bindings.get(target);
     return this.withThreadLifecycle([threadId, ...(current ? [current.threadId] : [])], () => {
       this.assertLifecycleCurrent(target, current);
-      return this.resumeUnlocked(target, threadId, preserveCurrent, expectedCwd, transition);
+      const additional = preserveCurrent && current && current.threadId !== threadId
+        && !this.bindings.isBackground(threadId) ? 1 : 0;
+      return this.withBackgroundCapacity(target, additional,
+        () => this.resumeUnlocked(target, threadId, preserveCurrent, expectedCwd, transition));
     });
   }
 
@@ -832,6 +838,7 @@ export class SessionRouter {
     return this.withThreadLifecycle(current ? [current.threadId] : [], async () => {
       this.assertLifecycleCurrent(target, current);
       if (preserveCurrent) {
+        if (this.bindings.get(target)) this.requireBackgroundCapacity(target, 1);
         this.bindings.demote(target, preference);
       } else if (current && condition) {
         const snapshot = await this.codex.readThread(current.threadId);
@@ -1154,6 +1161,30 @@ export class SessionRouter {
     const current = this.bindings.get(target);
     if (current && (!expected || !this.sameBinding(expected, current))) {
       throw new UserFacingError("thread.takeover.changed", "等待期间会话绑定已变化，请重新选择");
+    }
+  }
+
+  private requireBackgroundCapacity(target: ConversationTarget, additional: number): void {
+    if (additional > this.availableBackgroundCapacity(target)) {
+      throw new UserFacingError(
+        "conversation.background-limit",
+        `后台任务已满，最多同时运行 ${maximumBackgroundThreadsPerConversation} 个`,
+      );
+    }
+  }
+
+  /** Reserve before asynchronous creation/switching; every background-producing path shares this budget. */
+  private async withBackgroundCapacity<T>(target: ConversationTarget, additional: number, action: () => Promise<T>): Promise<T> {
+    if (additional === 0) return action();
+    this.requireBackgroundCapacity(target, additional);
+    const key = this.key(target);
+    this.backgroundReservations.set(key, (this.backgroundReservations.get(key) ?? 0) + additional);
+    try {
+      return await action();
+    } finally {
+      const remaining = (this.backgroundReservations.get(key) ?? 0) - additional;
+      if (remaining === 0) this.backgroundReservations.delete(key);
+      else this.backgroundReservations.set(key, remaining);
     }
   }
 

@@ -56,6 +56,7 @@ import {
   desktopAppCommandUsage,
   timezoneCommandUsage,
   cleanupUsage,
+  sessionCleanupUsage,
   serviceCommandUsage,
   restartCommandUsage,
 } from "../scripts/cli-command-usage.mjs";
@@ -78,51 +79,58 @@ const helpText = {
 
 交互终端无参数时打开主菜单；非交互终端显示帮助。
 
-初始化与配置：
-  init                         初始化用户目录和配置
-  setup [--jsonl]              交互配置 Provider、通讯渠道与项目技能
-  config [paths [--json]]      日常设置；paths 只读查询配置路径
-  timezone                     设置 App Server、WebUI 或网关时区
-  doctor                       诊断安装、配置和服务
-  security                     修复本机私有路径权限
-
-项目与 Codex：
+运行与连接：
   remote [参数]                启动共享 App Server 的 Codex TUI
-  app                         启动 Codex Desktop App 或管理共享连接
+  app                          启动 Codex Desktop App 或管理共享连接（macOS / Windows）
+  webui                        前台运行本地管理 WebUI
+  run                          前台运行核心服务
+
+工作区：
   work                         管理 Workspace（交互菜单或子命令）
+
+日常设置：
+  config [paths [--json]]       Codex 与 Gateway 设置；paths 只读查询配置路径
+  timezone                     设置 App Server、WebUI 或网关时区
+
+接入与账户：
+  setup [--jsonl]               交互配置 Provider、通讯渠道与项目技能
   provider                     管理 Provider 与各家账户
 
-指标与工具：
-  reset-credit                 查询并确认使用 OpenAI 重置券
-  metrics                      查询、导出和维护模型指标（交互菜单或子命令）
-  relay                        管理模型转发监听、调用方与访问密钥
-  delivery                     离线核对并处理未确认的渠道投递
-  cleanup                      统一交互清理会话、转储和指标
-  traffic                      查看模型请求与响应转储（列表、详情或持续跟随）
-  channel                      发送渠道图片
-  webui                        启动本地管理 WebUI
-
-服务与维护：
-  run                          前台运行核心服务
-  install                      安装后台服务并启动核心服务
-  start [目标]                 启动后台服务
-  stop [目标]                  停止后台服务
-  restart                      重启全部后台服务（含 WebUI 与已启用 Relay）
+状态与服务：
   status [目标]                查看后台服务状态
   logs [目标]                  查看后台服务日志
+  doctor                       只读诊断安装、配置和服务
+  start [目标]                 启动后台服务
+  restart [目标]               重启后台服务，默认 all
+  stop [目标]                  停止后台服务
   reload                       重新读取 Gateway 配置
-  update                       更新程序与配套 Codex CLI
-  uninstall [--services]       自动识别并卸载当前程序；--services 仅卸载后台服务
+  install                      安装后台服务并启动核心服务
+  uninstall --services         停止并卸载后台服务，保留程序与用户数据
 
-信息：
-  version, -v, --version       显示版本
+数据与维护：
+  metrics                      查询与导出模型指标（交互菜单或子命令）
+  reset-credit                 查询并确认使用 OpenAI 重置券
+  traffic                      查看模型请求与响应转储（列表、详情或持续跟随）
+  delivery                     离线核对并处理未确认的渠道投递
+  relay                        查询模型转发状态、调用方，管理监听与访问密钥
+  channel                      发送渠道图片（需指定本地文件）
+  cleanup                      统一交互清理会话、转储和指标
+
+程序维护：
+  version, -v, --version        显示版本
+  init                         初始化用户目录和配置，或继续交互向导
+  update                       更新程序与配套 Codex CLI
+  security                     修复本机私有路径权限（Windows）
+  uninstall                    自动识别并卸载当前程序，保留用户数据
 
 运行 codexc <命令> -h 查看详细用法。`,
   restart: restartCommandUsage,
   init: `用法：codexc init
 
-初始化用户数据目录和 config.toml；已有配置不会被覆盖。
-交互终端下继续显示环境检测结果，并依次引导配置模型提供商、通讯渠道、可选功能和后台服务；
+初始化用户数据目录和 config.toml；已有配置内容在初始化步骤中保留，文件权限可能收紧。
+重复运行也可进入交互向导，后续设置按你的选择保存。
+交互终端下继续显示环境检测结果，并依次引导模型提供商与通讯渠道、Codex 新会话与用户偏好、
+官方 TUI 身份、服务时区、可选功能和后台服务；
 非交互调用只创建用户目录、默认工作区仓库与初始配置，不进入向导。`,
   setup: `用法：codexc setup [--jsonl]
 
@@ -133,14 +141,17 @@ const helpText = {
 
 常用入口：
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
-  codexc setup → 模型与提供商 → 第三方 Provider → 自定义提供商 / DeepSeek 官方 / OpenCode Go 官方 / CCG（CommandCode） / Cline Pass 官方 / 受管 Provider 模型设置
+  codexc setup → 模型与提供商 → 第三方 Provider → DeepSeek 官方 / OpenCode Go 官方 / CCG（CommandCode） / Cline Pass 官方
+  codexc setup → 模型与提供商 → 第三方 Provider → Codex 兼容 Provider 接入 / 自定义模型 Provider 接入
+  codexc setup → 模型与提供商 → 第三方 Provider → 受管 Provider 默认模型与思考等级 / 受管模型目录上下文窗口
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 项目技能（安装或卸载项目技能）
 
 DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开同一受管 Provider 设置，并预选当前 Provider。`,
   run: `用法：codexc run
 
-在前台启动 Codex App Server 与 Gateway。`,
+在前台启动 Gateway，复用拓扑一致的现有 App Server；没有现有实例时启动受管 App Server。
+退出时停止本次启动的子进程，保留复用的 App Server；不启动 WebUI 或 Model Relay。`,
   remote: `${CODEX_REMOTE_USAGE}
 
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
@@ -159,9 +170,8 @@ Provider 选择不能与 --profile 同用；个人 Profile 请显式使用 --pro
   logs: serviceCommandUsage.logs,
   config: `用法：codexc config [paths [--json]]
 
-打开统一日常配置菜单：Codex 新会话与用户偏好、Gateway 脱敏配置总览、显示设置、系统设置、自动化（计划任务）、
-网络代理、高级设置（日志等级与开发中功能）、WebUI 设置、
-指标存储、Telegram 消息格式与配置路径查看。
+打开按作用范围分类的日常设置：Codex 用户偏好、工具与 MCP、Gateway 显示与会话、身份与时区、
+调用记录、Gateway 计划任务、网络代理、服务访问（Relay / WebUI）、日志与高级功能、指标存储、配置总览与路径。
 无参数打开交互菜单，非交互终端显示帮助。paths 只读查询路径；paths --json 在终端或管道中均输出路径和文件存在状态，不进入交互或写配置。`,
   timezone: timezoneCommandUsage,
   doctor: `用法：codexc doctor [--json]
@@ -180,7 +190,8 @@ Git 源码安装检查并构建官方 main 最新提交，校验当前配置、�
 在一个停机窗口更新程序与所需 CLI，再恢复核心服务。
 CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CLI，不更新 Gateway 程序包。
 数据库只接受当前 Schema，不迁移或删除数据；关闭 Codex daemon 自动启动，其他用户偏好与模型目录不改写。
-预检失败时不停止服务；更新按原运行状态恢复核心服务和 WebUI，失败报告阶段并尝试恢复。必须从本机终端执行。`,
+预检失败时不停止服务；更新按原运行状态恢复核心服务和 WebUI，失败报告阶段并尝试恢复。
+须在本机执行，不能从 Gateway/App Server 服务进程调用；需要安装配套 CLI 时必须在交互终端确认。`,
   uninstall: `用法：codexc uninstall [--services]
 
 --services 只停止并卸载后台服务，保留程序和用户数据。
@@ -192,7 +203,7 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
   metrics: `用法：codexc metrics
 
 无参数时进入查询与导出菜单；交互清理和重置请用 codexc cleanup。直接命令：
-  ${metricsCommandUsage.run.slice("用法：".length)}   本次运行汇总（最近 Turn + 会话累计）
+  ${metricsCommandUsage.run.slice("用法：".length)}   所选会话最近运行汇总（最近 Turn + 会话累计）
   ${metricsCommandUsage.turns.slice("用法：".length)}   会话每次对话明细
   ${metricsCommandUsage.threads.slice("用法：".length)}   列出有指标的会话
   ${metricsCommandUsage.report.slice("用法：".length)}   聚合汇报
@@ -209,7 +220,7 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
 
 把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，发送回该 Thread 绑定的
 飞书/微信/Telegram 会话。不指定 --thread 且存在多个绑定时会拒绝并提示指定。
-图片会被复制到 ~/.codex-connect/data/channel-outbox/pending/，由网关轮询发送；
+图片会被复制到状态数据库所在目录的 channel-outbox/pending/，由网关轮询发送；
 成功后归档到 done/，失败归档到 failed/ 并保留原因。`,
   webui: `用法：codexc webui [--host 地址] [--port 端口]
 
@@ -224,7 +235,7 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
 只读显示指标数据库路径、Schema 兼容性和记录数量；--json 输出稳定 JSON。`,
   "metrics.run": `${metricsCommandUsage.run}
 
-导出指定 Thread 的本次运行汇总：最近 Turn 的请求数、Token、缓存命中率、速度与耗时，
+导出指定 Thread 的最近运行汇总：最近 Turn 的请求数、Token、缓存命中率、速度与耗时，
 以及当前会话累计；默认输出 Markdown 并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
   "metrics.turns": `${metricsCommandUsage.turns}
 
@@ -239,7 +250,7 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
   "metrics.prune": `用法：codexc cleanup metrics prune <provider>
 
-provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以及当前或已备份的自定义主 Provider ID。备份并删除本地指标库中该提供商全部请求行，随后
+provider 为区分大小写的精确 Provider ID，包含已移除配置的历史 ID；以字母或数字开头，只含字母、数字、_、-，最长 64 字符。备份并删除本地指标库中该提供商全部请求行，随后
 按原状态恢复 Gateway。OpenAI 额度重置
 后可用 openai 从零重新统计用量；备份保留在指标库同目录的 *.<provider>-prune-*.bak。`,
   "metrics.cleanup": `用法：codexc cleanup metrics [--before YYYY-MM-DD | --keep-days 天数] [--max-rows 行数] [--vacuum] [--restart-gateway]
@@ -247,7 +258,7 @@ provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以�
 按配置 [metrics.storage] 或命令行覆盖值清理最旧请求指标。默认要求 Gateway 已停止；
 加 --restart-gateway 自动停止并重新启动。清理前创建 0600 备份；--vacuum 会立即回收文件空间。`,
   cleanup: cleanupUsage,
-  "sessions.cleanup": "用法：codexc cleanup sessions <最大轮数> [--idle-days <天数>] [--confirm]",
+  "sessions.cleanup": sessionCleanupUsage,
   "metrics.report": `${metricsCommandUsage.report}
 
 只读输出汇报；默认最近 30 天并按模型分组，写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
@@ -256,7 +267,8 @@ provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以�
 只读导出脱敏请求记录；默认最近 30 天、JSON 格式并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。支持 --thread、--turn 及模型、操作、状态组合筛选；--turn 必须同时指定 --thread。`,
   "metrics.quota": `${metricsCommandUsage.quota}
 
-只读查询已记录的 OpenAI 与 OpenCode Go 历史额度窗口；按实际重置时间归并，并显示窗口起止、请求、Token 和本机样本估算。`,
+只读查询已记录的 OpenAI 与 OpenCode Go 历史额度窗口；按实际重置时间归并，并显示窗口起止、请求、Token 和本机样本估算。
+默认导出到 ~/.codex-connect/output/<日期>/；加 --stdout 输出到标准输出。`,
   version: "用法：codexc version",
   gateway: `用法：codexc gateway
 
@@ -445,6 +457,9 @@ async function dispatchCommand(command, args) {
         if (values[0] === "list"
           ? !(values.length === 1 || (values.length === 2 && values[1] === "--json"))
           : values.length !== 2) throw new Error(usage);
+        if (["add", "reconfigure", "remove"].includes(values[0])) {
+          requireInteractiveTerminal(`codexc provider ${family} ${values[0]}`);
+        }
         const script = family === "deepseek" ? "deepseek-account-setup" : `${family}-setup`;
         runScript(`scripts/${script}.mjs`, ["account", values[0] === "release" ? "stop" : values[0], ...values.slice(1)], { failureReportedByChild: true });
         break;
@@ -452,6 +467,9 @@ async function dispatchCommand(command, args) {
       if (isCommandHelp(args, [[], ["add"], ["list"], ["switch"], ["remove"], ["recover"]], primaryProviderUsage)) {
         console.log(primaryProviderUsage);
         break;
+      }
+      if (args[0] === "add" || (["switch", "recover"].includes(args[0]) && args.at(-1) !== "--yes")) {
+        requireInteractiveTerminal(`codexc provider ${args[0]}${args[0] === "add" ? "" : "（非交互调用须显式使用 --yes）"}`);
       }
       runScript("scripts/primary-provider-cli.mjs", args, {
         failureReportedByChild: true,
@@ -557,7 +575,7 @@ async function initialize(args) {
   }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     if (result.created) {
-      printCliMessage("note", "请运行 codexc setup 配置通讯渠道，然后运行 codexc install。");
+      printCliMessage("note", "可在交互终端重新运行 codexc init 完成向导；也可运行 codexc setup 配置模型与通讯渠道，再运行 codexc install。");
     }
     return;
   }
@@ -571,7 +589,12 @@ async function initialize(args) {
   if (wizard?.install === true) {
     const serviceCommand = await import("../scripts/service-command.mjs");
     await serviceCommand.runServiceCommand(["install"]);
-    await startConfiguredWebui(serviceCommand);
+    try {
+      await startConfiguredWebui(serviceCommand);
+    } catch (error) {
+      throw new Error("核心服务已完成安装，但 WebUI 启动未完成："
+        + `${error instanceof Error ? error.message : String(error)}\n请核查 codexc status webui，修复后运行 codexc start webui。`, { cause: error });
+    }
     printCliMessage("success", "初始化与后台服务安装已完成。");
   } else if (wizard?.action === "cancelled") {
     printCliMessage("note", "初始化向导已取消；已应用的设置会保留，可重新运行 codexc init，"
@@ -586,7 +609,7 @@ function assertUsableExistingConfig(configPath) {
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `config.toml 当前不可用，未修改任何数据：${reason.split("\n")[0]}\n`
+      `config.toml 当前不可用，未改写配置内容；文件权限可能已收紧：${reason.split("\n")[0]}\n`
       + "请先修复配置或运行 codexc doctor 诊断，然后重新运行 codexc init。",
       { cause: error },
     );
@@ -595,21 +618,9 @@ function assertUsableExistingConfig(configPath) {
 
 /** 安装只启动核心服务；配置中启用的 WebUI 由 init 负责拉起。 */
 async function startConfiguredWebui(serviceCommand) {
-  let document;
-  try {
-    document = readGatewayConfig(requireUserConfig(process.env).configPath);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    printCliMessage("note", `无法读取配置，未自动启动 WebUI：${reason.split("\n")[0]}`);
-    return;
-  }
+  const document = readGatewayConfig(requireUserConfig(process.env).configPath);
   if (document?.webui?.enabled !== true) return;
-  try {
-    await serviceCommand.runServiceCommand(["start", "webui"]);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    printCliMessage("note", `WebUI 未能自动启动：${reason}\n修复后可运行 codexc start webui。`);
-  }
+  await serviceCommand.runServiceCommand(["start", "webui"]);
 }
 
 function runDoctor(args) {
@@ -871,13 +882,7 @@ async function metrics(args) {
     );
     return;
   }
-  if (new Set(["run", "turns", "threads", "report", "export"]).has(subcommand)) {
-    runMetricsCommand([subcommand, ...rest]);
-    return;
-  }
-  runScript("scripts/metrics-database.mjs", [subcommand, ...(
-    subcommand === "quota" ? rest.filter((argument) => argument !== "--stdout") : rest
-  )], { failureReportedByChild: true });
+  runMetricsCommand([subcommand, ...rest]);
 }
 
 async function metricsMaintenance(args) {
@@ -1042,6 +1047,12 @@ function printVersion(args) {
 function requireNoArguments(args, usage) {
   if (args.length > 0) {
     throw new Error(usage);
+  }
+}
+
+function requireInteractiveTerminal(command) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error(`${command} 需要交互终端；请将标准输入和标准输出连接终端。`);
   }
 }
 

@@ -7,6 +7,7 @@ export interface OfficialLoginSetupPrompts {
 
 export interface OfficialLoginSetupOptions {
   environment?: NodeJS.ProcessEnv;
+  input?: NodeJS.ReadableStream;
   output?: { write(value: string): unknown };
   prompts?: OfficialLoginSetupPrompts;
   createClient?: (options: {
@@ -15,7 +16,9 @@ export interface OfficialLoginSetupOptions {
   runLogin?: (options: {
     codexBinary: string;
     environment: NodeJS.ProcessEnv;
-  }) => void;
+    input: NodeJS.ReadableStream;
+    output: { write(value: string): unknown };
+  }) => void | Promise<void>;
 }
 
 export function runOfficialLoginSetup(options?: OfficialLoginSetupOptions): Promise<

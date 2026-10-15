@@ -23,7 +23,7 @@ import { accountQueryFailureMetadata } from "./account-query.js";
 import { ResetCreditError } from "../application/index.js";
 import { createLogger } from "../observability/index.js";
 import { createWeixinCredentialChangeCheck, createWeixinCredentialStore } from "../surfaces/index.js";
-import { GatewayApplication } from "./app.js";
+import { GatewayApplication, GatewayConstructionCleanupError } from "./app.js";
 import { loadBuiltInSurfacePlugins } from "./surface-composition.js";
 import { NetworkProxyWatcher } from "./network-proxy-watcher.js";
 import {
@@ -100,17 +100,24 @@ export async function runGatewayProcess(): Promise<void> {
       );
     }
     if (earlyStop) { await gatewayOwner.close(); cleanupHandlers(); clearShutdownDeadline(); return; }
-    application = new GatewayApplication(
+    application = await GatewayApplication.create(
       config,
       logger,
       surfacePlugins,
       runtime.configPath,
       () => stop(1),
+      beginShutdownDeadline,
     );
   } catch (error) {
-    cleanupHandlers();
-    await gatewayOwner.close();
-    clearShutdownDeadline();
+    beginShutdownDeadline();
+    let ownershipClosed = false;
+    try { await gatewayOwner.close(); ownershipClosed = true; }
+    catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Gateway 构造失败且进程所有权清理未完成", { cause: cleanupError });
+    } finally {
+      cleanupHandlers();
+      if (ownershipClosed && !(error instanceof GatewayConstructionCleanupError)) clearShutdownDeadline();
+    }
     throw error;
   }
   const accountRefresh = new GatewayAccountRefreshServer(

@@ -2,9 +2,9 @@ import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   readdirSync,
   readFileSync,
-  statSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -277,7 +277,7 @@ if (document) {
         join(dirname(stateDatabasePath), "weixin-updates"),
       );
       try {
-        const cursor = await cursorStore.get(accountId);
+        const cursor = await cursorStore.inspect(accountId);
         note(
           "微信消息游标",
           cursor === null
@@ -285,7 +285,7 @@ if (document) {
             : "检查点存在且载荷有效（内容已隐藏）",
         );
       } catch {
-        record("微信消息游标", false, "检查点读取或校验失败");
+        record("微信消息游标", false, "检查点读取、权限或载荷校验失败；未修改文件");
       }
       if (allowedWeixinUsers) {
         const contexts = createWeixinReplyContextPersistence(
@@ -397,13 +397,13 @@ if (document) {
     clientIdentityConfigured
       ? "已自定义"
       : `默认（codex-tui / ${requiredAppServerVersion}）`,
-    "默认即为官方 TUI 身份并跟随 Codex CLI 升级；需要覆盖时运行 codexc config → 系统设置 → "
+    "默认即为官方 TUI 身份并跟随 Codex CLI 升级；需要覆盖时运行 codexc config → 身份与时区 → "
       + "一键设为官方 TUI 身份，之后运行 codexc restart all",
   );
   note(
     "模型上游 User-Agent",
     stringValue(codex.upstream_user_agent) ? "已自定义" : "默认（App Server 生成的官方 TUI UA）",
-    "默认由 App Server 按当前锁定版本生成并跟随升级；需要覆盖时运行 codexc config → 系统设置 → "
+    "默认由 App Server 按当前锁定版本生成并跟随升级；需要覆盖时运行 codexc config → 身份与时区 → "
       + "一键设为官方 TUI 身份，之后运行 codexc restart all",
   );
 
@@ -729,7 +729,14 @@ function checkWindowsCredentialBackend() {
 
 function checkMode(name, path, expected) {
   try {
-    const actual = statSync(path).mode & 0o777;
+    const metadata = lstatSync(path);
+    if (metadata.isSymbolicLink()
+      || (expected === 0o700 ? !metadata.isDirectory() : !metadata.isFile())
+      || (process.getuid !== undefined && metadata.uid !== process.getuid())) {
+      record(name, false, "路径类型或属主无效：必须是当前用户拥有的非符号链接目录或文件");
+      return;
+    }
+    const actual = metadata.mode & 0o777;
     record(name, actual === expected, `${actual.toString(8).padStart(3, "0")}（要求 ${expected.toString(8)}）`);
   } catch (error) {
     record(name, false, errorMessage(error));

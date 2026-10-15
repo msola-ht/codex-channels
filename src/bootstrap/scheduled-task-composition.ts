@@ -34,6 +34,7 @@ import {
 
 export interface ScheduledTaskCompositionOptions {
   stateDatabasePath: string;
+  registerConstructionCleanup?: (component: string, close: () => void | Promise<void>) => void;
   router: SessionRouter;
   codex: ProviderRoutingClient;
   turns?: TurnExecutionPort;
@@ -59,6 +60,7 @@ export class ScheduledTaskComposition {
     this.store = new SqliteScheduledTaskStore(
       scheduledTaskDatabasePath(options.stateDatabasePath),
     );
+    options.registerConstructionCleanup?.("Scheduled Task Store", () => this.store.close());
     const coordinatorRef: { current?: ScheduledTaskRunCoordinator } = {};
     const requireCoordinator = (): ScheduledTaskRunCoordinator => {
       if (!coordinatorRef.current) {

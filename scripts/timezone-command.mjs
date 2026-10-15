@@ -78,18 +78,23 @@ export function parseTimezoneCommandArgs(
     );
   }
   if (timezone !== null && !isKnownTimezone(timezone, { exists, root })) {
-    throw usageError(`系统时区库中没有 ${timezone}`);
+    throw usageError(`当前运行环境不支持时区：${timezone}`);
   }
   if (timezone !== null) return { action: "set", timezone, json, ...target };
   if (useSystemTimezone) return { action: "clear", json, ...target };
   return { action: json ? "status" : "prompt", json, ...target };
 }
 
-/** 系统时区库缺失时不做存在性判断，交给运行 App Server 的平台解析。 */
+/** 先校验实际时区名称；系统提供 zoneinfo 时再核对其可用性。 */
 export function isKnownTimezone(
   timezone,
   { exists = existsSync, root = zoneinfoRoot } = {},
 ) {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: timezone });
+  } catch {
+    return false;
+  }
   if (!exists(join(root, "UTC"))) return true;
   return exists(join(root, timezone));
 }
@@ -118,7 +123,7 @@ export function normalizeTimezoneInput(value, { exists = existsSync, root = zone
     return `时区名称无效：${trimmed}；需要 IANA 名称（如 Asia/Shanghai）`;
   }
   if (!isKnownTimezone(trimmed, { exists, root })) {
-    return `系统时区库中没有 ${trimmed}`;
+    return `当前运行环境不支持时区：${trimmed}`;
   }
   return undefined;
 }
@@ -150,7 +155,7 @@ export async function runTimezoneCommand(args = [], {
   if (parsed.action === "prompt") {
     const choices = timezoneChoices(current, gateway);
     const value = await prompts.select({
-      message: gateway ? "网关时区" : "模型可见时区",
+      message: gateway ? "网关时区" : "服务时区",
       showInstructions: false,
       initialValue: gateway && current === null ? "app-server"
         : current !== null && choices.some((choice) => choice.value === current)
@@ -179,6 +184,10 @@ export async function runTimezoneCommand(args = [], {
       next = value === systemTimezoneValue ? (gateway ? "system" : null) : value;
     }
   }
+  if (next !== null && next !== "system" && next !== "app-server") {
+    const error = normalize(next);
+    if (error !== undefined) throw new Error(error ?? "时区名称不能为空");
+  }
   const result = updateGatewaySetting({
     kind: gateway ? "system.gateway-timezone" : "system.app-server-timezone",
     value: gateway && next === "app-server" ? null : next,
@@ -198,7 +207,7 @@ export async function runTimezoneCommand(args = [], {
     ? `网关时区已设为${gatewayTimezoneLabel(result.value)}：${result.configPath}`
     : result.value === null
     ? `已恢复系统时区，App Server 与 WebUI 下次启动后使用运行环境的时区：${result.configPath}`
-    : `模型可见时区已设为 ${result.value}（App Server 与 WebUI）：${result.configPath}`, {
+    : `服务时区已设为 ${result.value}（App Server 与 WebUI）：${result.configPath}`, {
     stdout: output,
     environment,
   });
@@ -216,8 +225,8 @@ function writeCurrentTimezone({ environment, output, current, configPath, gatewa
   writeCliMessage("note", gateway
     ? `当前网关时区：${gatewayTimezoneLabel(current)}（${configPath}）`
     : current === null
-    ? `当前未设置模型可见时区，App Server 与 WebUI 沿用系统时区：${configPath}`
-    : `当前模型可见时区：${current}（App Server 与 WebUI，${configPath}）`, {
+    ? `当前未设置服务时区，App Server 与 WebUI 沿用系统时区：${configPath}`
+    : `当前服务时区：${current}（App Server 与 WebUI，${configPath}）`, {
     stdout: output,
     environment,
   });

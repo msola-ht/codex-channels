@@ -230,10 +230,11 @@ export abstract class GatewayComponentGraph {
 
   protected abstract requestStop(): Promise<void>;
 
-  constructor(
+  protected constructor(
     private config: GatewayConfig,
     private readonly logger: Logger,
     surfacePlugins: readonly BuiltInSurfacePlugin[],
+    registerConstructionCleanup: (component: string, close: () => void | Promise<void>) => void,
     configPath?: string,
   ) {
     logger = logger.child({ module: "gateway" });
@@ -375,6 +376,7 @@ export abstract class GatewayComponentGraph {
           : this.providerIdleReleaser.runOperation(provider, operation);
       },
     );
+    registerConstructionCleanup("Codex Client", () => this.codex.close());
     this.inbound = new EventBus<RpcNotification>(logger.child({ module: "inbound" }), 2_000, undefined, {
       entries: 4_096,
       bytes: 32 * 1024 * 1024,
@@ -384,6 +386,7 @@ export abstract class GatewayComponentGraph {
         void this.requestStop().catch(() => logger.error("协议通知超载后的 Gateway 清理失败"));
       },
     });
+    registerConstructionCleanup("Inbound Event Bus", () => this.inbound.close());
     this.output = new EventBus<OutputEvent>(logger.child({ module: "output" }), 1_000, new SurfaceOutputCoalescer().key, {
       entries: 2_048,
       bytes: 32 * 1024 * 1024,
@@ -393,10 +396,13 @@ export abstract class GatewayComponentGraph {
         void this.requestStop().catch(() => logger.error("共享输出超载后的 Gateway 清理失败"));
       },
     });
+    registerConstructionCleanup("Output Event Bus", () => this.output.close());
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
+    registerConstructionCleanup("Binding Store", () => this.bindings.close());
     this.sessionDisplayCache = new SqliteSessionDisplayCache(
       join(dirname(config.stateDatabasePath), "session-display-cache.sqlite3"),
     );
+    registerConstructionCleanup("Session Display Cache", () => this.sessionDisplayCache?.close());
     this.workspaces = new WorkspaceRegistry(config.workspaces, config.defaultWorkspaceId);
     this.router = new SessionRouter(
       this.codex,
@@ -424,8 +430,12 @@ export abstract class GatewayComponentGraph {
         maximumRows: config.metricsStorage.maxRows,
       },
     );
+    let closeConstructionMetrics: () => void | Promise<void> = () => metricsStore.close();
+    registerConstructionCleanup("Request Metrics", () => closeConstructionMetrics());
     this.metricsEvents = configPath === undefined ? undefined : new QueueEventsServer(metricsEventsPath(configPath));
+    if (this.metricsEvents) registerConstructionCleanup("Metrics Notifications", () => this.metricsEvents!.close());
     this.accountSnapshotEvents = configPath === undefined ? undefined : new QueueEventsServer(accountSnapshotEventsPath(configPath));
+    if (this.accountSnapshotEvents) registerConstructionCleanup("Account Snapshot Notifications", () => this.accountSnapshotEvents!.close());
     this.turnExecution = new TurnExecutionTracker(this.codex, metricsStore,
       () => this.metricsEvents?.changed(),
       (error, threadId) => logger.warn({ module: "metrics", event: "turn_timing.sync_failed", err: error, threadId }, "轮次耗时记录或同步失败"));
@@ -446,11 +456,13 @@ export abstract class GatewayComponentGraph {
       (error) => logger.error({ module: "metrics", event: "request_metrics.write_failed", err: error }, "模型请求指标后台写入失败"),
       () => this.metricsEvents?.changed(),
     );
+    closeConstructionMetrics = () => metricsWriter.close();
     this.relayMetrics = configPath === undefined ? undefined : new RelayMetricsComposition({
       path: modelRelayPaths(configPath).metrics,
       writer: metricsWriter,
       authorize: createRelayMetricAuthorization(configPath),
     });
+    if (this.relayMetrics) registerConstructionCleanup("Relay Metrics", () => this.relayMetrics!.close());
     const recordTurnErrorMetric = (
       provider: string,
       model: string | null,
@@ -505,6 +517,7 @@ export abstract class GatewayComponentGraph {
       onModelTiming: (event) => this.core.handle(event),
       logger,
     });
+    closeConstructionMetrics = () => this.providerMetrics.close();
     this.subagentCompletion = new SubagentCompletionTracker({
       readSummary: (agentThreadId, terminalTurnId) => {
         if (!terminalTurnId) return metricsStore.threadSummary(agentThreadId);
@@ -930,6 +943,7 @@ export abstract class GatewayComponentGraph {
     this.scheduledTasks = config.scheduledTasksEnabled
       ? new ScheduledTaskComposition({
           stateDatabasePath: config.stateDatabasePath,
+          registerConstructionCleanup,
           router: this.router,
           codex: this.codex,
           turns: execution,
@@ -993,6 +1007,7 @@ export abstract class GatewayComponentGraph {
       return JSON.stringify([workspace.id, workspace.cwd, status.threadId]);
     });
     const commands = new ConversationCommandService(service, scheduledTaskUseCases, channelResetCredits);
+    const constructedSurfaces = new Set<SurfaceAdapter>();
     this.surfaceModules = createSurfaceModules({
       config,
       service,
@@ -1013,7 +1028,12 @@ export abstract class GatewayComponentGraph {
         error,
       ),
       autoCompactPercent: (provider, model) => this.resolveAutoCompactPercent(provider, model),
-    }, surfacePlugins);
+    }, surfacePlugins, module => {
+      if (constructedSurfaces.has(module.adapter)) return;
+      constructedSurfaces.add(module.adapter);
+      registerConstructionCleanup(`Surface ${module.adapter.surface}/${module.adapter.accountId}`,
+        () => module.adapter.stop());
+    });
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(
       this.surfaces,
@@ -1107,6 +1127,9 @@ export abstract class GatewayComponentGraph {
         },
       },
     );
+    // Construction never starts adapters, so manager.stop only closes routing
+    // and persistence; the individually registered adapters still own stop().
+    registerConstructionCleanup("Surface Routing", () => this.surfaceManager.stop());
     this.channelImageSpool = new ChannelImageSpool({
       directory: join(dirname(config.stateDatabasePath), "channel-outbox"),
       resolveTarget: (threadId) => this.router.targetForThread(threadId),

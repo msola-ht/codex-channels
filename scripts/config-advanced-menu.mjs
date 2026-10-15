@@ -27,7 +27,7 @@ export async function runNetworkSettings({
     message: "选择网络代理设置（统一写入 Codex .env）",
     showInstructions: false,
     options: [
-      { value: "batch", label: "一次设置 HTTP / HTTPS / 通用代理", hint: "写入 ~/.codex/.env，Codex 与 Gateway 共用" },
+      { value: "batch", label: "一次设置 HTTP / HTTPS / 通用代理", hint: "写入当前 Codex Home 的 .env，Codex 与 Gateway 共用" },
       ...proxyFields.map(([value, label]) => ({
         value,
         label,
@@ -87,7 +87,8 @@ async function runProxyBatch({ environment, output, prompts, writeConfig, settin
     kind: "network.proxy-batch",
     values,
   }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`HTTP、HTTPS、通用代理已一次性更新：${result.configPath}\n`);
+  const labels = proxyFields.filter(([field]) => Object.hasOwn(values, field)).map(([, label]) => label);
+  output.write(`${labels.join("、")}已保存；未选择的代理保持原值：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { fields: Object.keys(values), configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }

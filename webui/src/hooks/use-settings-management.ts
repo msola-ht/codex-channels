@@ -12,6 +12,9 @@ export function useSettingsManagement(): GatewaySettingsController {
     currentValue,
   })
   return {
+    actionResult: management.actionResult,
+    writeUnconfirmed: management.writeUnconfirmed,
+    readbackRequired: management.readbackRequired,
     lastAppliedSetting: management.lastAppliedSetting,
     loading: management.loading,
     error: management.error,

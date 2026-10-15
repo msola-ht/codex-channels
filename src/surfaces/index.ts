@@ -68,3 +68,4 @@ export type {
 export { mayReleaseUncertainOutputBarrier, isPersistentOutput, snapshotPersistentOutput, decodePersistentOutput, withPersistentOutputImage } from "./persistent-output.js";
 export type { DeliveryCheckpoint } from "./delivery-receipt.js";
 export { withPersistentDeliveryDiagnostics } from "./diagnostics.js";
+export { readGeneratedImage, GeneratedImageError } from "./generated-image.js";

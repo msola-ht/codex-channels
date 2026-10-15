@@ -1,4 +1,4 @@
-# 模型可见时区
+# 服务时区
 
 本文说明模型请求里 `environment context` 的时区与日期从哪里来，以及如何在不修改系统时区的前提下
 调整它。对应配置字段 `[codex].timezone`、`[gateway].timezone`，公开命令 `codexc timezone`。
@@ -27,9 +27,8 @@ Responses 请求 `input` 的一部分发给模型：
 | `gateway.timezone` | 不设置，跟随 `codex.timezone` | `system` 表示独立使用系统时区，或填写 Node.js 支持的 IANA 时区名称 |
 
 `codex.timezone` 用于 App Server 与 WebUI；网关未配置独立时区时也跟随此值，不修改系统时区。
-通过 `codexc timezone` 写入时会在边界校验 IANA 名称格式与系统时区库存在性，避免系统
-解析失败后静默回退到 UTC；运行环境没有系统时区库时只校验名称格式。直接编辑配置文件只做格式
-校验，名称是否被平台识别由平台解析决定。
+通过 `codexc timezone` 写入时会校验名称格式及 Node.js 是否识别该时区；系统提供 zoneinfo 时还会核对对应条目是否存在，避免把目录名或未知名称当成时区。运行环境没有系统时区库时仍检查 Node.js 的时区支持。
+直接编辑 `codex.timezone` 只做格式校验，名称是否被平台识别由平台解析决定；`gateway.timezone` 还要求 Node.js 支持该名称。
 
 ## 命令
 
@@ -44,11 +43,11 @@ codexc timezone --json             # 只读输出当前配置
 删除 `codex.timezone`，「其他」要求手动输入 IANA 名称。已配置的值默认高亮，因此直接回车不会
 改变配置；不在常见列表里的当前值会单独列在「当前配置」下。
 
-同一入口也位于 `codexc config` → 系统设置 → 模型可见时区。
+同一入口也位于 `codexc config` → 身份与时区 → 服务时区。
 
 ## 网关时区
 
-使用 `codexc config` → 系统设置 → 网关时区，或 `codexc timezone --gateway`，选择：
+使用 `codexc config` → 身份与时区 → 网关时区，或 `codexc timezone --gateway`，选择：
 
 - **跟随 App Server（默认）**：删除 `gateway.timezone`，启动时使用 `codex.timezone`；App Server
   未配置时继承网关运行环境的系统时区。这是跟随配置，不是查询 App Server 进程的实际时区。

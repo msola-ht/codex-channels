@@ -30,14 +30,17 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 所有 CLI 命令在结束或失败时显示“命令总耗时”，单位为秒并保留两位小数。计时统一写入 stderr，stdout 的 JSON、JSONL、版本号和导出内容不混入计时文本；主菜单每次执行的命令也单独计时。前台服务、日志跟随和交互命令的耗时包含运行及等待输入的时间，在命令返回时显示；强制终止进程时不保证输出。使用单调时钟，从命令分派开始，不包含 Node 加载 CLI 静态模块之前的启动时间。
 
-在交互终端直接运行 `codexc` 打开主菜单，可进入初始化、接入、日常设置、工作区、后台服务、指标、清理、诊断，以及“运行与连接”中的 TUI、WebUI 和前台核心服务启动入口。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 显示帮助，`timezone` 仅显示当前时区。配置路径查询明确使用 `codexc config paths [--json]`，终端与管道中的行为一致。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。
+在交互终端直接运行 `codexc` 打开主菜单，依次为运行与连接、工作区、日常设置、接入与账户、状态与服务、数据与维护、程序维护和退出。主帮助采用同一分类；现有子命令保持不变。“运行与连接”提供 Codex TUI、工作区与 Provider 选择、WebUI 和前台核心服务，macOS/Windows 另显示 Desktop App；工作区列表按 ID 排序并标注默认项，Provider 只列当前配置可用的实例，隔离实例按 ID 排序，聚合条件或选择别名不满足时不提供聚合项。“状态与服务”先列状态、日志与诊断，再列启停和安装；“数据与维护”集中指标、额度、调用记录、投递核对、Relay 查询与清理；“程序维护”包含版本、初始化与配置向导、更新与卸载，Windows 另显示权限修复。更新、修复和卸载需确认。
 
-在 `codexc` 主菜单选择“后台服务”可选择操作和目标。菜单调用顶层服务命令，`restart all` 包含已安装且未关闭的 WebUI。
+菜单在同一次调用的循环内保留上次选择，方便连续操作；该选择不写入配置，也不跨进程保存。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 显示帮助，`timezone` 仅显示当前时区。配置路径查询明确使用 `codexc config paths [--json]`，返回绝对路径且不创建配置，终端与管道中的行为一致。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。需指定参数的图片发送、投递处理和重置券消费仍使用对应直接命令。
+
+在 `codexc` 主菜单选择“状态与服务”可选择操作和目标。菜单调用顶层服务命令，`restart all` 包含已安装且未关闭的 WebUI。
 `all` 覆盖 App Server、Gateway 与已安装的可选服务：`start all` 与 `restart all` 的启动段按配置跳过已关闭的 WebUI 和未启用的 Relay，`stop`、`status`、`logs` 的 `all` 仍包含它们，便于停止和排查。启动逐项等待就绪，停止顺序为 WebUI、Relay、Gateway、App Server。
-WebUI 开关位于 `codexc config → WebUI 设置 → 启用状态`，写入 `[webui] enabled`；未设置时沿用已安装的服务定义。显式 `false` 后 `codexc start all` 不再启动它、`codexc restart all` 会停止它且不再启动，`codexc update` 也不恢复它；设置本身不停止正在运行的实例，也不删除已生成的服务定义。需要时仍可用 `codexc start webui` 单独启动，用 `codexc stop webui` 单独停止。
+WebUI 开关位于 `codexc config → 服务访问 → WebUI 设置 → 启用状态`，写入 `[webui] enabled`；未设置时沿用已安装的服务定义。显式 `false` 后 `codexc start all` 不再启动它、`codexc restart all` 会停止它且不再启动，`codexc update` 也不恢复它；设置本身不停止正在运行的实例，也不删除已生成的服务定义。需要时仍可用 `codexc start webui` 单独启动，用 `codexc stop webui` 单独停止。
 菜单日志显示最近 100 行，持续跟随仍使用 `codexc logs <目标> -f`。卸载后台服务需确认。
 
-`codexc work` 菜单区分新建工作区、注册当前目录和注册已有目录；注册前显示实际目录并确认，不创建或删除已有目录。`codexc metrics` 菜单包含会话列表导出和历史额度窗口查询，清理与重置统一使用 `codexc cleanup`。上述操作菜单完成单项后可继续选择；“运行与连接”完成后返回该子菜单，退出后返回主菜单。Setup 和 Config 单项失败会显示错误并返回各自分类菜单，不自动重试写入。
+`codexc work` 按列表、设置默认、注册当前目录、注册已有目录、新建目录、权限和移除注册排序；选择默认项即保存，注册前显示实际目录并确认，移除注册不删除目录。`codexc metrics` 按聚合报告、会话列表、会话轮次明细、会话最近运行汇总、请求明细、历史额度和数据库状态排序；会话明细和最近运行汇总共用列表选择，并提供明确的手动输入 Thread ID 入口。清理与重置统一使用 `codexc cleanup`。上述操作菜单完成单项后可继续选择；“运行与连接”完成后返回该子菜单，退出后返回主菜单。Setup 和 Config 单项失败会显示错误并返回各自分类菜单，不自动重试写入。
+新增或重复注册工作区保留有效的默认工作区；仅在默认值缺失时选择后备工作区，失效目录仍需显式清理。
 
 ```bash
 codexc init                  # 首次安装的完整交互向导
@@ -53,33 +56,39 @@ Gateway 配置位于：
 
 首次运行 `codexc init` 会创建默认工作区 `~/.codex-connect/workspace`，并将其初始化为 Git 仓库，
 默认分支为 `main`，不自动创建提交；已有 `.git` 会保留。Git 不可用或初始化失败时明确报错，并且不写入新配置，
-修复后可重新运行。配置已存在时，重复运行保留现有配置和仓库，不为已有工作区补建仓库。
+修复后可重新运行。配置已存在时，初始化步骤保留现有配置内容和仓库，不为已有工作区补建仓库，但可能收紧配置文件权限。重复运行仍可进入交互向导，后续设置按选择保存；已有配置不可用时中止向导，不改写其内容。
 在交互终端中，`codexc init` 创建完成后会显示环境检测结果（Codex CLI 版本、官方登录状态、通讯渠道、
-默认模型、默认 Workspace 与可选功能状态），并依次询问是否进入接入向导、是否启用 WebUI、调用详情记录与
-模型转发监听，最后询问是否执行 `codexc install`。可选功能默认取值沿用当前状态：首次初始化默认关闭，
+默认模型、默认 Workspace 与可选功能状态），先询问是否进入接入向导，再进入 Codex 设置菜单，随后询问是否启用 WebUI、调用详情记录与
+配置模型转发监听，最后询问是否执行 `codexc install`。可选功能默认取值沿用当前状态：首次初始化默认关闭，
 已有配置未显式设置 WebUI 时按“未设置即继续启动”的语义给出默认值；WebUI 按所选值写入
 `[webui] enabled`，调用详情记录只在取值变化时写入，模型转发监听选“是”进入监听设置、选“否”保持现状。
 接入向导完成单项后返回类别菜单，可继续配置 Provider、通讯渠道或项目技能；选择“完成接入”后才继续
-可选功能与安装步骤。在类别菜单取消（Esc/Ctrl+C 或选择“取消”）会中止整个初始化向导，在某个子流程中
+Codex 设置、可选功能与安装步骤。Codex 设置可连续选择“Codex 新会话与用户偏好”（统一配置默认值与用户偏好，也可单独调整默认审批方式）、
+“一键设为官方 TUI 身份”和“服务时区”，复用日常设置的校验与保存流程；默认值与用户偏好的可见性沿用当前 Provider 限制。
+选择“完成 Codex 设置”继续，未修改的设置保持原样。用户偏好通过临时 App Server 读写配置，无需先安装后台服务；
+读写使用与初始化环境检测相同的 Codex 可执行文件。默认 Codex Home 尚不存在时由 Codex 初始化；显式指定的 `CODEX_HOME` 必须是已存在的目录。
+单项失败会显示错误并返回 Codex 设置菜单。在接入类别或 Codex 设置菜单取消（Esc/Ctrl+C，或接入类别选择“取消”）会中止整个初始化向导，在某个子流程中
 返回或取消只结束该子流程。尚未启用任何通讯渠道时，向导明确跳过安装并提示先运行
 `codexc setup`，因为后台服务安装会因配置校验失败而中止。选择安装且启用了 WebUI 时，向导在核心服务
 安装完成后自动启动 WebUI；已完成接入和安装时，无需再执行 `codexc setup`、`codexc install`。
+WebUI 启动失败会报告核心服务已安装、WebUI 未完成，并以失败状态退出；核对 `codexc status webui` 后可用 `codexc start webui` 重试。
 跳过相应步骤后，可在交互终端运行 `codexc setup` 补充接入，再按需运行 `codexc install` 安装后台服务；
 单独执行 `install` 只启动核心服务，需要 WebUI 时另行运行 `codexc start webui`。
-已有配置无法解析或版本不受支持时，`codexc init` 明确失败并且不修改任何数据。非交互调用
+已有配置无法解析或版本不受支持时，`codexc init` 明确失败，不改写配置内容；初始化检查可能收紧文件权限。非交互调用
 不进入向导，只创建用户目录、默认工作区仓库与初始配置（不写 `[webui] enabled`，保持未设置即沿用已安装
 状态），不配置接入、选择可选功能或安装服务。之后回到交互终端运行 `codexc init` 继续完整向导，
 或用 `codexc setup` 完成接入后按需执行 `codexc install`；`setup` 仍要求终端，不是无人值守配置接口。
 
-`codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；完成单项后可继续选择，选择“完成接入”正常退出，选择“取消”或在类别菜单按 Esc/Ctrl+C 取消退出。`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
+`codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；完成单项后可继续选择，选择“完成接入”正常退出，选择“取消”或在类别菜单按 Esc/Ctrl+C 取消退出。`setup --jsonl` 的渠道结果保留 `warnings`，飞书另返回 `applicationConfiguration`，配置保存成功但存在降级时应按这些字段处理。`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 CLI 和 WebUI 的 Gateway 设置在读取和保存前均校验当前配置结构；不支持的版本、未知字段或非法值会阻止操作并保留原文件，不以默认显示值掩盖错误。请先修复配置，再重新进入设置。
 
-“Codex 新会话与用户偏好”先显示设置分类，进入具体项目后再读取当前值与可用选项；分类页返回或取消无需等待 App Server。核心默认值是否可修改，以进入后读取的 Provider 和 Permission Profile 为准；保存仍需确认，并校验配置修订及对应策略。
+“Codex 新会话与用户偏好”先显示设置分类，进入具体项目后再读取当前值与可用选项；分类页返回或取消无需等待 App Server。“配置默认值与用户偏好”统一收集模型、加速档位、权限、Plan 思考等级、推理摘要、输出详细程度、更新检查与历史记录，最后一次确认并批量写入；中途取消不保存。可修改项以进入后读取的 Provider 和 Permission Profile 为准；使用 Permission Profile 时保留现有权限，其余偏好仍可设置。保存校验配置修订及对应策略。
+初始化、日常 Codex 设置、MCP 配置与官方登录使用同一可执行文件选择：显式 `[codex] binary` 优先；值为默认 `codex` 时允许 `CODEX_BINARY` 覆盖。官方登录输出跟随交互输出流，`setup --jsonl` 的 stdout 只保留事件；登录失败或取消不会继续恢复官方配置。
 
-`codexc config` 的“计划任务”直接选择开关；Telegram 消息格式位于“显示设置”，仅在配置 Bot 后显示。显示子项取消或选择“返回上一级”时回到显示设置；在显示设置中选择“返回”才回到 Config。日志等级统一在“高级设置 → 日志等级”选择，`debug` / `trace` 开启调试信息，`info` 恢复标准输出。
+`codexc config` 按作用范围区分 Codex 用户偏好、工具与 MCP、Gateway 显示和会话、身份与时区、调用记录、网络与服务访问、日志及指标存储。“Gateway 计划任务”直接选择开关；Telegram 消息格式位于“Gateway 显示设置”，仅在配置 Bot 后显示。显示子项取消或选择“返回上一级”时回到显示设置；在显示设置中选择“返回”才回到 Config。日志等级统一在“日志与高级功能 → 日志等级”选择，`debug` / `trace` 开启调试信息，`info` 恢复标准输出。Relay 监听与 WebUI 设置统一位于“服务访问”。
 
-“显示设置 → 模型显示组”或 WebUI“模型管理 → 模型配置 → 模型显示组”可将多个精确模型 ID 显示为同一名称。
+“Gateway 显示设置 → 模型显示组”或 WebUI“模型管理 → 模型配置 → 模型显示组”可将多个精确模型 ID 显示为同一名称。
 例如创建 `deepseek-flash` 组，加入 `cline-pass/deepseek-v4.1-flash`、`deepseek/deepseek-v4.1-flash` 和
 `deepseek-v4.1-flash`；可从已配置的受管模型选择成员，并选择 DS 模型名作为组名，也可手填历史 ID。
 提供商仍是独立选项，上游请求使用原始 ID；控制台“按模型统计”按显示组汇总，并在组内按 Thread/Turn 去重轮次。
@@ -93,7 +102,7 @@ CLI 和 WebUI 的 Gateway 设置在读取和保存前均校验当前配置结构
 
 Setup 仅按具体操作返回的激活范围提示重启。列出账户、停止账户等操作不会因经过模型菜单而附加“重启全部服务”；需要重启的配置修改会返回对应服务目标，Setup 不自动执行重启。
 
-`codexc timezone` 设置模型可见时区，WebUI 同步跟随；网关默认也跟随，可用 `codexc timezone --gateway` 选择系统或自定义时区，细节见[`模型可见时区`](model-timezone.md)。
+`codexc timezone` 设置服务时区，WebUI 同步跟随；网关默认也跟随，可用 `codexc timezone --gateway` 选择系统或自定义时区，细节见[`服务时区`](model-timezone.md)。
 
 Telegram、飞书和微信至少启用一个。Telegram 需要 Bot Token 和允许用户；飞书需要应用凭据和允许的 `open_id`；微信需要扫码凭据、账号和允许用户，Setup 最终确认保存时会直接启用消息接收。
 
@@ -149,6 +158,8 @@ Codex 用户默认和 Workspace 默认审批方式不依赖 Provider 或模型�
 本机可通过 `codexc work` 的工作区权限菜单设置同一覆盖，配置字段为
 `[[workspaces]].approvals_reviewer`，仅接受 `auto_review` 或 `user`，删除该字段即跟随 Codex 默认。
 
+工作区沙箱与审批策略未配置时，菜单默认保留继承状态。清除覆盖后，Gateway 分别使用全局 `codex.sandbox` 与 `on-request`；`codexc remote` 则沿用 Codex 自身默认设置。`untrusted` 可用于 Gateway，但当前 Remote 入口需要显式传入 `--ask-for-approval on-request|never` 覆盖。保存相同值不会改写配置，也不会要求热加载。
+
 ### 计划相关设置
 
 在 `codexc config → Codex 新会话与用户偏好 → 计划清单工具` 中控制上游 `update_plan` 工具，默认关闭：
@@ -171,7 +182,7 @@ enabled = true
 ### 子代理规则与配置（可选）
 
 入口为 `codexc config → Codex 新会话与用户偏好 → 子代理规则与配置（可选）`，仅对 OpenAI 主配置开放。
-安装、更新和“配置核心默认值”不会自动应用这套预设；仅在主动选择并确认后写入。
+安装、更新和“配置默认值与用户偏好”不会自动应用这套预设；仅在主动选择并确认后写入。
 可选择只写全局规则、只写 Codex 主配置，或同时写入。确认前显示实际路径和待写内容，
 路径遵循 `CODEX_HOME`，通常为 `~/.codex/AGENTS.md` 和 `~/.codex/config.toml`。
 
@@ -257,14 +268,14 @@ auto_recap = false
 
 Codex 0.156.1 已停用模型人格：CLI 与 WebUI 不再提供人格选择，保存其他偏好不会改写配置中已有的 `personality`。
 
-在 `codexc config → Codex 新会话与用户偏好 → 其他用户偏好` 中选择推理摘要。开发基线 0.162.1
+在 `codexc config → Codex 新会话与用户偏好 → 配置默认值与用户偏好` 中选择推理摘要。开发基线 0.162.1
 在尚未配置时预选“关闭”，与配套 CLI 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
 不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
 检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`。
 
 ### 渠道会话空闲自动解除
 
-在 `codexc config → 系统设置 → 会话空闲自动解除` 中设置渠道会话自动解除 Thread 绑定的全局
+在 `codexc config → Gateway 会话设置 → 会话空闲自动解除` 中设置渠道会话自动解除 Thread 绑定的全局
 空闲阈值，默认 15 分钟：
 
 ```toml
@@ -349,9 +360,12 @@ codexc provider list [--json]
 codexc provider switch <Provider ID> [模型] [--yes]
 ```
 
-`primary-provider switch` 会把主实例切换到目标 Provider，执行前会二次确认，并提示将改写
-Codex 主配置的 `model_provider` / `model`；传 `--yes` 跳过确认（适合脚本化调用），
-仅命令行 switch 支持 `--yes`，交互式 Setup 菜单仍会确认。
+`codexc provider switch` 会把主实例切换到目标 Provider，执行前会二次确认，并提示将改写
+Codex 主配置的 `model_provider` / `model`；`switch` 与 `recover` 可用 `--yes` 显式跳过确认（适合脚本化调用）；交互式 Setup 菜单仍会确认。确认期间切换目标或影响范围发生变化时拒绝执行，需重新确认。
+
+Provider 新增、需要确认的受管账户删除与重配要求标准输入、标准输出均为终端；非交互调用会明确报错。`list`、默认账户设置和实例释放保留各自的脚本调用方式。
+受管账户进入固定模式会修改 Codex 主配置，从固定模式改为切换模式会恢复主配置；这两种操作都需要明确确认，保存时也会在管理锁内重新检查实际影响。
+受管 Provider 的默认模型按账户设置，模型思考等级由共享目录的账户共用，最后选择前会列出当前共享账户；窗口设置也会提前展示上下文跟随者。保存默认模型前会重读 Provider 模式，防止交互期间切换模式后写到错误范围。
 
 添加账户时，Setup 与 WebUI 已有的多账户配置入口均提供 `main`（主账户）、`work`（工作账户）、`other`（其他账户）和“自定义”；已占用的预设不再显示。名称仅作账户 ID，不决定默认账户或自动切换行为。
 
@@ -383,6 +397,7 @@ Remote 的 `--profile` 继续支持原生个人 Profile 和已登记的规范受
 直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，空闲释放可能停止对应实例；
 共享 App Server 的 TUI 请统一使用 `codexc remote`。
 `codexc remote` 会按当前目录或显式 `--workspace` 选中的工作区传递权限及可选 `approvals_reviewer`；
+也可用一次 `-C DIR` / `--cd DIR` 指定目录，按该目录匹配工作区及其权限；不能与 `--workspace` 同时使用。原生 `resume` / `fork` 上的目录参数同样参与选择，重复目录参数被拒绝。不能透传 `--remote` 或 `--remote-auth-token-env` 替换受管连接；原生 `--` 之后的内容按字面参数保留。
 显式传给 Codex 的 `-c approvals_reviewer=...` 或 `--approve-for-me` 优先于工作区默认审批方式。
 Remote 不按 Provider 或模型限制自动审查，也不为审批资格固定模型或限制个人 Profile。
 聚合入口仍保护其 Provider 与模型目录，防止透传参数替换路由。
@@ -458,6 +473,7 @@ Remote、Desktop 启动和 `app status` 的 `-p` / `--provider` 共用完整 Pro
 
 需要诊断时使用 `codexc app status [--provider <Provider-ID>]`；非交互启用或指定 Windows 桥端口时，
 使用 `codexc app enable [--port <端口>]`，再执行 `codexc app`。
+`--port` 仅适用于 Windows，接受 1 到 65535 的十进制整数；macOS 使用受管 stdio，拒绝端口参数。Linux 上的启用、禁用与启动会在读取配置前报告不支持，`app status` 仍可只读查询。
 关闭功能前同样先完全退出 App，再执行：
 
 ```bash
@@ -504,13 +520,13 @@ Windows 先以临时 Provider 租约等待目标实例就绪，再检查桥并�
 
 ### Computer Use 与浏览器排障
 
-配置入口：`codexc config → Codex 新会话与用户偏好 → 电脑、浏览器与 MCP`，或 WebUI
+配置入口：`codexc config → 工具与 MCP → 电脑、浏览器与已有 MCP`，Codex 用户偏好中的“电脑、浏览器与 MCP”保留同一入口；也可使用 WebUI
 「设置 → 工作区与权限」中的 Codex 权限与工具分区。两者修改同一份 Codex 用户配置，使用版本检查；WebUI 写入前需要预览并确认。
 
 当前支持默认应用访问、浏览器历史访问和默认站点策略，以及配置中已有的 macOS Bundle ID、Windows AUMID
 和站点规则。普通 MCP 可修改启用状态、启动/调用超时、工具允许/禁用列表与审批策略；已有单工具覆盖还可修改
 审批和输出 token 上限。插件 MCP 只开放这些策略覆盖，不修改插件清单里的启动命令、环境和超时。
-新增 MCP 使用 `codexc config → 新增 MCP`：支持本地 stdio、远程 Streamable HTTP 和 Strata 视频预设。stdio 逐项输入命令、参数 JSON 数组、工作目录、环境变量和继承变量；HTTP 输入 URL、Bearer Token 环境变量名、固定 Header 和环境变量 Header。支持设置启动/调用超时及启用状态。密钥类 JSON 隐藏输入，固定值写入 Codex 用户配置；环境变量引用需由实际启动 Codex 的宿主提供。保存前显示脱敏摘要及目标路径，确认后按配置修订写入；同名服务器拒绝覆盖，配置冲突不自动重试。此入口不安装 MCP 包、不执行命令探测、不自动重启服务，OAuth 登录仍使用 Codex 原生入口。Strata 预设详见[视频分析 MCP](video-analysis-mcp.md)。
+新增 MCP 使用 `codexc config → 工具与 MCP → 新增 MCP`：支持本地 stdio、远程 Streamable HTTP 和 Strata 视频预设。stdio 逐项输入命令、参数 JSON 数组、工作目录、环境变量和继承变量；HTTP 输入 URL、Bearer Token 环境变量名、固定 Header 和环境变量 Header。支持设置启动/调用超时及启用状态。密钥类 JSON 隐藏输入，固定值写入 Codex 用户配置；环境变量引用需由实际启动 Codex 的宿主提供。保存前显示脱敏摘要及目标路径，确认后按配置修订写入；同名服务器拒绝覆盖，配置冲突不自动重试。此入口不安装 MCP 包、不执行命令探测、不自动重启服务，OAuth 登录仍使用 Codex 原生入口。Strata 预设详见[视频分析 MCP](video-analysis-mcp.md)。
 
 “电脑、浏览器与 MCP”策略页不发现插件清单里的服务器或创建应用/站点规则；未列出的高级字段仍在 Codex 原生配置中管理。
 
@@ -548,10 +564,10 @@ codexc logs -n 200
 
 公开目标统一为 `gateway|appserver|webui|relay|all`，不接受 `app-server` 或 `model-relay` 作为 CLI 目标。
 日常服务操作直接使用 `codexc <动作>`，不提供 `service` 子命令。
-`codexc run` 在前台运行核心服务；`codexc start [目标]` 启动已安装后台服务。
+`codexc run` 在前台运行 Gateway，并复用拓扑一致的现有 App Server；没有现有实例时启动受管 App Server。退出时仅停止本次启动的子进程，保留复用的 App Server，不启动 WebUI 或 Model Relay。`codexc start [目标]` 启动已安装后台服务。
 `codexc install` 生成服务定义并启动核心服务；`codexc uninstall --services` 仅停止并卸载后台服务，
 `codexc uninstall` 自动识别并卸载当前程序，受管源码来源匹配时也删除仓库；两者都保留用户数据。`codexc reload` 只通知 Gateway 重读配置。
-Windows 重载成功表示 Gateway 已接受重读请求，不代表配置应用已经完成；若提示“重新加载结果未确认”，
+重载成功仅表示已发送通知（Windows 为 Gateway 已接受重读请求），不代表配置应用已经完成；其他设置按保存时提示重启，服务定义或安装环境变化时才需重新运行 `codexc install`。若提示“重新加载结果未确认”，
 应先核对服务日志与实际配置状态，不能据此认定请求没有执行。尚未接受的重载请求会在截止或连接断开时取消。
 
 Windows 安装时若显式设置了 `CODEX_HOME`，该路径必须是已存在的目录，安装器会将规范化后的路径写入四个服务定义。更换目录后需要在设置了新值的终端重新运行 `codexc install`；已有定义不会被后台自动改写，安装失败沿用既有定义备份和恢复流程。
@@ -574,7 +590,7 @@ Windows 启动前会检查服务定义所用的 PowerShell、原生构建产物�
 
 `start/stop/status` 默认操作全部后台服务；`start all` 按配置跳过已关闭的 WebUI 与未启用的 Relay，
 `stop/status all` 仍包含已安装的可选服务，
-`logs` 默认 Gateway。macOS 普通 `start` 不强制重启已运行的服务。
+`logs` 默认 Gateway，显示最近 100 行；`-n` / `--lines` 接受 1 到 10000 的十进制整数，`-f` 持续跟随。macOS 普通 `start` 不强制重启已运行的服务。
 单独重启 Gateway 不停止共享 App Server；单独重启 App Server 时，仍运行的 Gateway 会按真实断线处理并重连。
 渠道内禁止停止或重启 App Server，全部重启也必须在本机终端执行。
 WebUI 内不执行包含自身的停止、重启或卸载任务；请在本机终端运行对应的 `codexc stop/restart webui`、`codexc stop/restart all` 或 `codexc uninstall --services`。
@@ -640,7 +656,7 @@ codexc update
 codexc doctor
 ```
 
-安装和更新统一从本机终端执行。本地源码更新后重新执行 `npm run install:global`，该命令不自动停启服务，具体顺序见[本地工作树安装与部署](source-install.md#本地工作树安装与部署)。
+安装和更新由本机操作者执行；仅需要交互确认的步骤要求 TTY。本地源码更新后重新执行 `npm run install:global`，该命令不自动停启服务，具体顺序见[本地工作树安装与部署](source-install.md#本地工作树安装与部署)。
 
 官方安装器和本地 `npm run install:global` 在默认 Codex CLI 缺失或版本不符时自动同步项目锁定版本，无需先初始化或配置渠道；它们只提示下一步，不自动执行初始化、接入向导或后台服务安装。首次安装成功后，用户在交互终端运行 `codexc init` 完成完整向导，跳过的步骤再按需补充。显式 `CODEX_BINARY` 由操作者管理，本地安装遇到版本不符时拒绝替换。
 更新发现默认 CLI 缺失或版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
@@ -668,6 +684,7 @@ codexc cleanup
 | 重置整个指标库 | `codexc cleanup metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
 
 `codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。会话归档、旧指标清理和指标库重置会在确认后临停运行中的 Gateway；转储删除先预览并确认，再询问临停 Gateway、Relay 和 App Server。结束、取消或失败后按原状态恢复，原先停止的服务不会被启动；恢复失败会报告具体服务和手动启动命令。底层命令仍检查实际进程已退出，不终止前台自行运行的进程。执行失败会报告错误并返回清理菜单。
+旧指标清理菜单收集保留范围和 VACUUM 选择后，再显示默认拒绝的删除确认。旧指标清理和 Provider 清理均校验完整的当前 Schema，并在检查点、备份、删除和 VACUUM 期间持有共享 writer 锁；前台写入者占用时拒绝操作。Provider ID 可为已移除提供商的历史精确 ID，区分大小写。裁剪 Thread 计时记录时会撤销对应历史完整标记，避免剩余数据被误当作完整历史。
 
 会话归档示例：先停止 Gateway，保留 App Server，预览“主会话不超过 3 轮、整组可查询成员至少空闲 7 天”的候选：
 
@@ -676,7 +693,7 @@ codexc stop gateway
 codexc cleanup sessions 3 --idle-days 7
 ```
 
-核对后在交互终端执行，命令会重新扫描并再次询问确认：
+核对后在交互终端执行，命令会重新扫描并再次询问确认；非交互 `--confirm` 在扫描前拒绝，不兼容的绑定库也会在连接 App Server 前拒绝：
 
 ```bash
 codexc cleanup sessions 3 --idle-days 7 --confirm
@@ -685,8 +702,10 @@ codexc start gateway
 
 交互归档统一从 `codexc cleanup → 归档短会话及子会话` 进入。菜单在 Gateway 运行时先询问是否临时停止，保留 App Server；预览后的归档仍需确认。完成、取消或失败后恢复原先运行的 Gateway，原先停止则保持停止；恢复失败会提示手动启动。前台自行运行的 Gateway 仍须退出，菜单不终止非受管进程。`codexc cleanup sessions` 无参数显示用法。不指定 `--idle-days` 就没有会话年龄限制。
 轮数阈值只计算主会话，子孙轮数不累加；派生子孙随官方归档，Fork 独立筛选。
+已移除或改名 Provider 的历史会话仍可归档，无需恢复旧 Provider 或凭据；检查已连接实例的活动状态，其他实例持有的写入锁由官方归档接口拒绝。扫描只读取一份共享历史，候选最多四组并行检查；确认后逐组复核与归档，最后集中核验结果，终端会显示扫描和归档进度。
 活动、固定、渠道绑定或状态无法确认的成员会使整组跳过。归档保留历史，不是永久删除；
 官方操作可能部分成功，执行期间不要在其他客户端操作候选会话。完整筛选及核验口径见[展示说明](display.md)。
+执行确认后，只要有失败、部分成功、结果未确认、复核跳过或展示缓存清理失败，命令就以非零状态结束，并保留逐组结果；不自动重试或回滚。仅预览、执行前筛选跳过或用户取消不视为归档执行失败。
 
 ### 卸载
 
@@ -791,6 +810,8 @@ codexc traffic
 ```
 
 WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接使用设置页，显式配置令牌后所有 API 都会验证，非回环监听必须配置令牌。详情见 [`WebUI`](webui.md)。
+指标查询与清理、转储查看与清理的同名单值选项拒绝重复，避免后一个值静默改变范围；转储查看最多指定一个 session 目录。
+`metrics report/export/run/threads/turns/quota` 默认生成私有导出文件，使用 `--stdout` 输出到标准输出。组合查询、分页明细及聚合共用一次只读快照，运行中新增记录会在下一次查询出现。服务启动等待 WebUI 健康响应与受管进程身份匹配；其他程序返回 HTTP 200 不代表 WebUI 已就绪。IPv6 地址使用带方括号的 URL。
 
 ### OpenAI 重置券 CLI
 
@@ -875,7 +896,7 @@ codexc logs -n 100
 
 ### 模型请求转储
 
-需要查看模型请求和响应的完整字段时，运行 `codexc config`，选择“系统设置 → 调用详情记录 → 开启”，
+需要查看模型请求和响应的完整字段时，运行 `codexc config`，选择“调用记录 → 调用详情记录 → 开启”，
 再按提示重启 App Server。也可以手工设置：
 
 ```toml
@@ -1015,7 +1036,7 @@ Responses 只提供同步无状态创建；`store` 可省略或传布尔值，�
 官方 DS 的 `previous_response_id`、`conversation` 原样转发，由上游按其无状态合同忽略；客户端仍需在 `input` 中携带所需完整历史，引用不会恢复上下文。其他 Responses 提供商仍拒绝服务端会话引用：多个 Relay Key 可共享上游账户，当前没有响应/会话归属校验，不能通过引用读取共享账户历史。Relay 不提供响应管理端点。
 普通参数、工具声明和远程图片交由上游处理；Chat 保留原始响应字段与工具增量，客户端须等待有效终态后才执行工具。
 完整双协议、提供商接入与升级回滚合同见[转发设计与边界](provider-api-relay-development.md)。
-局域网交互设置：运行 `codexc relay listen`，或进入 `codexc config` → 模型转发监听，选择关闭、仅本机、局域网（0.0.0.0）或指定内网 IP。确认后自动备份、原子保存并向运行中的 Relay 确认生效，保留 Key 和现有端口。若服务未运行，会提示启动命令，不自动安装或启动。配置被其他操作修改时拒绝覆盖，请重新进入菜单。
+局域网交互设置：运行 `codexc relay listen`，或进入 `codexc config` → 服务访问 → 模型转发监听，选择关闭、仅本机、局域网（0.0.0.0）或指定内网 IP。确认后自动备份、原子保存并向运行中的 Relay 确认生效，保留 Key 和现有端口。若服务未运行，会提示启动命令，不自动安装或启动。配置被其他操作修改时拒绝覆盖，请重新进入菜单。
 
 手动设置：先备份当前实际使用的配置文件并校验备份，再在已有 `[model_relay]` 段设置 `host = "192.168.1.10"`（替换为服务器的内网地址），或 `host = "0.0.0.0"`。不要重复创建同名 TOML 段。保留现有 Key、并发及其他字段；默认端口为 4119。支持 10/8、172.16/12、192.168/16 的规范 IPv4 地址，IPv6 当前仅支持回环 `::1`。不接受域名、URL 或公网 IP 字面量。
 
@@ -1067,7 +1088,7 @@ Relay 保留普通应用请求头（例如 User-Agent、HTTP-Referer、X-Title�
 
 在 WebUI“请求明细”点击唯一的“查看调用详情”：已采集报文直接打开现有转储视图；未关联时仅显示“未关联”，不提供详情链接。Relay 没有 Codex 会话或轮次，HTTP 200 不等于客户端交付成功。出站 User-Agent 只记录新调用实际发送的值，缺失时不推断客户端类型。
 
-Codex 和 Relay 共用 `[debug].model_traffic_dump`，默认关闭。在 WebUI 的 Gateway 系统设置或 `codexc config` 系统设置中，用“记录调用详情”控制采集，用“调用记录模式”选择生产或调试；不再单独按 Key 开启。只记录启用后实际出站的调用，不补录历史。
+Codex 和 Relay 共用 `[debug].model_traffic_dump`，默认关闭。在 WebUI 的 Gateway 系统设置或 `codexc config → 调用记录` 中控制采集，并用“调用记录模式”选择生产或调试；不再单独按 Key 开启。只记录启用后实际出站的调用，不补录历史。
 
 只接受当前全局采集配置，未知字段明确拒绝；不提供旧采集配置转换命令。
 

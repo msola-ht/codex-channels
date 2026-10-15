@@ -47,6 +47,36 @@ export interface ModelProviderDefinition {
 
 export type ModelProviderTemplate = Omit<ModelProviderDefinition, "profileName" | "profileFileName">;
 
+export interface ManagedProviderAccount {
+  readonly id: string;
+  readonly default: boolean;
+  readonly email?: string;
+  readonly phone?: string;
+}
+
+export interface ManagedProviderAccountFamily {
+  readonly definition: ModelProviderTemplate;
+  readonly proxyKey: ManagedModelProviderId;
+  readonly storageId: string;
+  readonly accountAdapter: Exclude<ManagedModelProviderAccountAdapter, "none">;
+  readonly instanceAdapter: Exclude<ManagedModelProviderInstanceAdapter, "single">;
+  /** 保留聚合材料既有路径顺序，避免仅登记重构改变材料指纹。 */
+  readonly aggregateMaterialOrder: number;
+  readonly matches: (provider: string) => boolean;
+  readonly accountId: (provider: string) => string | undefined;
+  readonly providerId: (accountId: string) => string;
+  readonly loadAccounts: (environment?: NodeJS.ProcessEnv) => readonly ManagedProviderAccount[];
+  readonly markerPath: (environment: NodeJS.ProcessEnv, accountId: string) => string;
+  readonly accountsFilePath: (environment?: NodeJS.ProcessEnv) => string;
+  readonly accountDefinition: (account: ManagedProviderAccount) => ModelProviderDefinition;
+}
+
+export const managedProviderAccountFamilies: readonly ManagedProviderAccountFamily[];
+/** 非账户 single/none 定义返回 undefined；未登记家族和身份不一致明确失败。 */
+export function managedProviderAccountFamilyForDefinition(
+  definition: Partial<ModelProviderDefinition>,
+): ManagedProviderAccountFamily | undefined;
+
 export function clinePassAccountDefinition(accountId: string): ModelProviderDefinition;
 export const clinePassProviderDefinition: ModelProviderTemplate;
 export const deepseekProviderDefinition: ModelProviderTemplate;

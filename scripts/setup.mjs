@@ -29,21 +29,29 @@ export async function runSetup({
   if (!input.isTTY || !output.isTTY) {
     throw new Error("Setup 需要交互终端；请将标准输入和提示输出连接终端。--jsonl 仅改变结果输出格式。");
   }
-  prompts.intro("Codex Connect Setup");
+  prompts.intro("接入向导");
+  const selection = {
+    section: "summary",
+    modelCategory: "official",
+    officialModule: "official_login",
+    thirdPartyModule: "deepseek",
+    channel: "telegram",
+  };
   while (true) {
     const section = await prompts.select({
-      message: "选择设置类别",
+      message: "接入项目",
       showInstructions: false,
+      initialValue: selection.section,
       options: [
         {
           value: "summary",
           label: "接入状态总览",
-          hint: "脱敏显示 Provider、模型、通讯渠道与用户技能状态",
+          hint: "脱敏查看模型、渠道与技能状态",
         },
         {
           value: "models",
           label: "模型与提供商",
-          hint: "管理 OpenAI、第三方 Provider 与模型默认值",
+          hint: "Provider 接入与受管模型设置",
         },
         {
           value: "channels",
@@ -53,22 +61,22 @@ export async function runSetup({
         {
           value: "skills",
           label: "项目技能",
-          hint: "安装或卸载项目技能到用户目录",
+          hint: "安装或卸载用户目录中的项目技能",
         },
         {
           value: "complete",
           label: "完成接入",
-          hint: "退出接入向导",
+          hint: "正常结束接入向导",
         },
         {
           value: "cancel",
           label: "取消",
-          hint: "退出 Setup",
+          hint: "中止接入向导",
         },
       ],
     });
     if (prompts.isCancel(section) || section === "cancel") {
-      prompts.cancel("Setup 已取消");
+      prompts.cancel("已取消接入");
       emitSetupResult(onResult, undefined, undefined, "cancelled");
       return undefined;
     }
@@ -81,6 +89,7 @@ export async function runSetup({
     if (!["summary", "channels", "models", "skills"].includes(section)) {
       throw new Error(`未知 Setup 类别：${String(section)}`);
     }
+    selection.section = section;
     try {
       switch (section) {
         case "summary":
@@ -91,6 +100,7 @@ export async function runSetup({
             input,
             output,
             prompts,
+            selection,
             feishuSetup,
             telegramSetup,
             weixinSetup,
@@ -106,6 +116,7 @@ export async function runSetup({
             input,
             output,
             prompts,
+            selection,
             deepseekSetup,
             ccgSetup,
             clinePassSetup,
@@ -150,6 +161,7 @@ async function runModelSetup({
   input,
   output,
   prompts,
+  selection,
   deepseekSetup,
   ccgSetup,
   clinePassSetup,
@@ -161,38 +173,43 @@ async function runModelSetup({
 }) {
   while (true) {
     const category = await prompts.select({
-      message: "选择模型与提供商设置",
+      message: "模型与提供商",
       showInstructions: false,
+      initialValue: selection.modelCategory,
       options: [
         {
           value: "official",
           label: "OpenAI 官方",
-          hint: "OpenAI 官方登录与固定主 Provider 恢复",
+          hint: "登录与恢复官方 Provider",
         },
         {
           value: "third_party",
           label: "第三方 Provider",
-          hint: "自定义提供商、DeepSeek 官方、OpenCode Go 官方等",
+          hint: "账户与自定义接入、受管模型设置",
         },
         { value: "back", label: "返回", hint: "返回设置类别" },
       ],
     });
     if (prompts.isCancel(category) || category === "back") return { action: "back" };
     if (category === "official") {
+      selection.modelCategory = category;
       const result = await runOfficialModelSetup({
         input,
         output,
         prompts,
+        selection,
         officialLoginSetup,
       });
       if (isBackResult(result)) continue;
       return result;
     }
     if (category === "third_party") {
+      selection.modelCategory = category;
       const result = await runThirdPartyModelSetup({
         input,
         output,
         prompts,
+        selection,
         deepseekSetup,
         ccgSetup,
         clinePassSetup,
@@ -212,17 +229,19 @@ async function runOfficialModelSetup({
   input,
   output,
   prompts,
+  selection,
   officialLoginSetup,
 }) {
   while (true) {
     const module = await prompts.select({
-      message: "OpenAI 官方设置",
+      message: "OpenAI 官方",
       showInstructions: false,
+      initialValue: selection.officialModule,
       options: [
         {
           value: "official_login",
           label: "登录并恢复官方",
-          hint: "运行 codex login --device-auth，并停用自定义固定主 Provider",
+          hint: "设备登录，并停用自定义固定主 Provider",
         },
         { value: "back", label: "返回", hint: "返回模型与提供商菜单" },
       ],
@@ -230,6 +249,7 @@ async function runOfficialModelSetup({
     if (prompts.isCancel(module) || module === "back") return { action: "back" };
     let result;
     if (module === "official_login") {
+      selection.officialModule = module;
       result = await officialLoginSetup({ input, output, prompts });
     } else {
       throw new Error(`未知官方设置：${String(module)}`);
@@ -243,6 +263,7 @@ async function runThirdPartyModelSetup({
   input,
   output,
   prompts,
+  selection,
   deepseekSetup,
   ccgSetup,
   clinePassSetup,
@@ -253,53 +274,58 @@ async function runThirdPartyModelSetup({
 }) {
   while (true) {
     const module = await prompts.select({
-      message: "第三方 Provider 设置",
+      message: "第三方 Provider",
       showInstructions: false,
+      initialValue: selection.thirdPartyModule,
       options: [
-        {
-          value: "custom_primary",
-          label: "Codex 兼容",
-          hint: "使用 Codex 官方模型目录；新增、编辑、切换或删除 Provider",
-        },
-        {
-          value: "custom_responses",
-          label: "自定义第三方",
-          hint: "手填模型 ID、上下文与能力；使用独立模型目录",
-        },
         {
           value: "deepseek",
           label: "DeepSeek 官方",
-          hint: "管理账户、运行模式、默认账户与模型设置",
+          hint: "账户、运行模式与模型设置",
         },
         {
           value: "opencode-go",
           label: "OpenCode Go 官方",
-          hint: "添加、列出、设置默认、停止、删除或修改模型设置",
+          hint: "账户、默认账户与模型设置",
         },
         {
           value: "ccg",
           label: "CommandCode Go 官方",
-          hint: "获取 DS 基础模型目录，配置固定/切换模式或删除",
+          hint: "DS 模型目录与固定/切换模式",
         },
         {
           value: "clp",
           label: "Cline Pass 官方",
-          hint: "Chat 模型接入、固定/切换模式与移除配置",
+          hint: "Chat 模型与固定/切换模式",
+        },
+        {
+          value: "custom_primary",
+          label: "Codex 兼容 Provider 接入",
+          hint: "管理自定义接入，使用 Codex 官方模型目录",
+        },
+        {
+          value: "custom_responses",
+          label: "自定义模型 Provider 接入",
+          hint: "管理自定义接入，手填独立模型目录与能力",
         },
         {
           value: "provider_default",
-          label: "默认模型与思考等级",
-          hint: "设置 DeepSeek、OpenCode Go、CommandCode Go、Cline Pass 的默认模型与思考等级",
+          label: "受管 Provider 默认模型与思考等级",
+          hint: "默认模型按账户设置；模型思考等级由共享目录账户共用",
         },
         {
           value: "model_window",
-          label: "模型上下文窗口",
-          hint: "按模型名统一设置受管 Provider 的上下文 Token 数",
+          label: "受管模型目录上下文窗口",
+          hint: "按模型名统一设置，应用包含该模型的所有受管 Provider",
         },
         { value: "back", label: "返回", hint: "返回模型与提供商菜单" },
       ],
     });
     if (prompts.isCancel(module) || module === "back") return { action: "back" };
+    if (!["deepseek", "opencode-go", "clp", "ccg", "custom_responses", "custom_primary", "provider_default", "model_window"].includes(module)) {
+      throw new Error(`未知第三方设置：${String(module)}`);
+    }
+    selection.thirdPartyModule = module;
     let result;
     if (module === "deepseek") {
       result = await deepseekSetup({ input, output, prompts, allowBack: true });
@@ -317,8 +343,6 @@ async function runThirdPartyModelSetup({
       result = await modelProviderDefaultSetup({ input, output, prompts, allowBack: true });
     } else if (module === "model_window") {
       result = await modelWindowSetup({ input, output, prompts, allowBack: true });
-    } else {
-      throw new Error(`未知第三方设置：${String(module)}`);
     }
     if (isBackResult(result)) continue;
     return result;
@@ -329,18 +353,20 @@ async function runChannelSetup({
   input,
   output,
   prompts,
+  selection,
   feishuSetup,
   telegramSetup,
   weixinSetup,
 }) {
   const channel = await prompts.select({
-    message: "选择通讯渠道",
+    message: "通讯渠道",
     showInstructions: false,
+    initialValue: selection.channel,
     options: [
       {
         value: "telegram",
         label: "Telegram",
-        hint: "Bot 与用户授权；消息格式在 codexc config 中管理",
+        hint: "Bot 与用户授权",
       },
       {
         value: "feishu",
@@ -364,10 +390,13 @@ async function runChannelSetup({
   }
   switch (channel) {
     case "telegram":
+      selection.channel = channel;
       return telegramSetup({ input, output });
     case "feishu":
+      selection.channel = channel;
       return feishuSetup({ input, output });
     case "weixin":
+      selection.channel = channel;
       return weixinSetup({ input, output });
     default:
       throw new Error(`未知通讯渠道：${String(channel)}`);

@@ -13,6 +13,7 @@ export function parseChannelSendImageArgs(args) {
   const positional = [];
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === "--thread") {
+      if (threadId !== undefined) throw new Error("--thread 只能指定一次");
       threadId = args[index + 1];
       if (!threadId || threadId.startsWith("--")) {
         throw new Error("--thread 缺少值");
