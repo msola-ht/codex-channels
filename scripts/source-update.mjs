@@ -33,6 +33,7 @@ import { serviceDefinitions } from "../runtime/service-targets.mjs";
 import { registerChildProcessGroup, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import { withCliProgress, writeCliSection } from "./cli-operation-progress.mjs";
 import { installCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
+import { supervisedCliInvocation } from "./cli-command-worker.mjs";
 import { formatCliMessage } from "../runtime/cli-presentation.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
@@ -1039,8 +1040,9 @@ async function captureAsync(command, args, cwd, environment, implementation, sig
 
 async function executeUpdateCommand(command, args, cwd, environment, signal) {
   signal?.throwIfAborted();
-  const invocation = resolveExecutableInvocation(command, args, environment);
   const supervised = signal !== undefined && process.platform !== "win32";
+  const resolved = resolveExecutableInvocation(command, args, environment);
+  const invocation = supervised ? supervisedCliInvocation(resolved) : resolved;
   let cleanup;
   let cleanupError;
   let abort;
@@ -1048,9 +1050,7 @@ async function executeUpdateCommand(command, args, cwd, environment, signal) {
     const result = await new Promise((resolveResult, reject) => {
     // Only disposable preparation commands receive a cancellation signal.
     // A supervisor retains the Unix group until descendants release their pipes.
-    const child = spawn(supervised ? process.execPath : invocation.file, supervised
-      ? [join(packageDir, "scripts/installation-command.mjs"), "--internal-run", invocation.file, ...invocation.args]
-      : invocation.args, {
+    const child = spawn(invocation.file, invocation.args, {
       cwd,
       env: environment,
       stdio: ["ignore", "pipe", "pipe"],
@@ -1060,7 +1060,16 @@ async function executeUpdateCommand(command, args, cwd, environment, signal) {
     });
     if (supervised) registerChildProcessGroup(child);
     abort = () => {
-      cleanup ??= terminateChildProcess(child).catch(error => { cleanupError = error; });
+      cleanup ??= terminateChildProcess(child).catch(error => {
+        cleanupError = error;
+        child.unref();
+      }).finally(() => {
+        // A failed termination cannot depend on a future close event from the
+        // process that did not stop. Release local pipes and report uncertainty.
+        child.stdout.destroy();
+        child.stderr.destroy();
+        finish(child.exitCode, child.signalCode);
+      });
     };
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
@@ -1084,15 +1093,21 @@ async function executeUpdateCommand(command, args, cwd, environment, signal) {
       stderr = (stderr + chunk).slice(-limit);
     });
     child.once("error", reject);
-    child.once("close", (status, signal) => resolveResult({
+    const finish = (status, signal) => resolveResult({
       status, signal,
       stdout: `${stdoutTruncated ? "[日志超长，仅保留末尾内容]\n" : ""}${stdout}`,
       stderr: `${stderrTruncated ? "[日志超长，仅保留末尾内容]\n" : ""}${stderr}`,
       truncated: stdoutTruncated || stderrTruncated,
-    }));
+    });
+    child.once("close", finish);
     });
     await cleanup;
-    if (cleanupError) throw cleanupError;
+    if (cleanupError) {
+      const diagnostic = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n");
+      throw Object.assign(new Error(`更新命令子进程终止未获确认${diagnostic ? `\n命令输出：\n${diagnostic}` : ""}`, { cause: cleanupError }), {
+        exitCode: signal?.reason?.exitCode ?? 1,
+      });
+    }
     if (signal?.aborted) {
       const diagnostic = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n");
       if (diagnostic) {

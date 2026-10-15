@@ -9,7 +9,7 @@
 - `cli-operation-progress.mjs`：CLI 共用的分组标题与阶段展示；终端使用不读取 stdin 的行内动画，重定向、CI 和 dumb 终端使用纯文本。支持延迟显示、选择输出流或静默，以及沿用调用方取消信号。阶段完成必须等待实际操作结束，取消后由调用方收尾，进度层不直接退出进程。
 - `cli-lifecycle-command.mjs`：更新、程序卸载、Doctor 与指标/数据维护的 CLI 父子进程协作；就绪握手后通过私有 IPC 转发取消，子进程在安全边界检查取消，父进程等待事务收尾并退出，不用强制终止代替取消。指标导出可把子进程标准输出直接写入私有文件。
 - `installation-command.mjs`：安装入口共用的异步命令执行器；避免同步子进程冻结进度，交互模式保留有界诊断尾部并在失败时展示，非交互模式实时输出日志，取消时终止自己启动的进程树。供源码安装器和本地安装复用，不管理后台服务。
-- `cli-command-worker.mjs`：安装命令、Doctor 与 Desktop 平台查询共用的 Unix 进程组监管入口；等待后代输出管道关闭，保留组长身份以支持取消升级为强制终止，不把直接子进程退出当作整组完成。Windows 保留调用方已有的进程所有权机制。
+- `cli-command-worker.mjs`：安装命令、更新准备命令、服务控制器、Doctor 与 Desktop 平台查询共用的 Unix 进程组监管入口；等待后代输出管道关闭，保留组长身份以支持取消升级为强制终止，不把直接子进程退出当作整组完成。Windows 保留调用方已有的进程所有权机制。
 
 - `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，由 MCP 客户端启动；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。
 - `mcp-setup.mjs`：`codexc config → 工具与 MCP → 新增 MCP` 交互入口，支持 stdio、Streamable HTTP 和 Strata 视频预设；预设从有效 Gateway 配置推导 StateStore 旁的渠道附件目录，自动填入任意本机视频范围，不询问目录；最终确认后复核目录并准备私有权限，通过 Codex 用户配置事务按修订写入，拒绝覆盖同名服务器，不自动安装、启动或重启服务。

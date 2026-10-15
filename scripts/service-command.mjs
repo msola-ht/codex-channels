@@ -32,6 +32,7 @@ import { readWorkspaceConfig } from "./workspace-config.mjs";
 import { serviceControlDefinitions, serviceDefinitionPath, waitForSelectedRelay } from "./service-selection.mjs";
 import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
 import { withCliProgress, writeCliSection } from "./cli-operation-progress.mjs";
+import { supervisedCliInvocation } from "./cli-command-worker.mjs";
 
 const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 
@@ -502,11 +503,14 @@ async function runProgressServiceController(action, serviceArgs, environment, pr
   }
   const windows = process.platform === "win32";
   if (!["linux", "darwin", "win32"].includes(process.platform)) throw new Error("不支持的后台服务平台");
-  const child = spawn(
-    windows ? process.execPath : process.platform === "darwin" ? "/bin/zsh" : "/bin/sh",
-    [join(packageDir, windows ? "scripts/windows-service-control.mjs"
+  const invocation = supervisedCliInvocation({
+    file: windows ? process.execPath : process.platform === "darwin" ? "/bin/zsh" : "/bin/sh",
+    args: [join(packageDir, windows ? "scripts/windows-service-control.mjs"
       : process.platform === "darwin" ? "scripts/launchd-control.sh" : "scripts/systemd-control.sh"), action, ...serviceArgs,
     ...(windows ? ["--definitions", join(environment.CODEX_CONNECT_HOME, "services")] : [])],
+  });
+  const child = spawn(
+    invocation.file, invocation.args,
     { env: environment, stdio: ["inherit", "pipe", "pipe"], detached: waitOnCancel || !windows, windowsHide: true },
   );
   if (!windows) registerChildProcessGroup(child);
@@ -521,7 +525,15 @@ async function runProgressServiceController(action, serviceArgs, environment, pr
   const stopped = new Promise((resolve, reject) => {
     abort = () => {
       if (waitOnCancel) return;
-      cleanup ??= terminateChildProcess(child);
+      cleanup ??= terminateChildProcess(child).catch(error => {
+        child.unref();
+        throw Object.assign(new Error("后台服务控制命令终止未获确认，请检查服务状态", { cause: error }), {
+          exitCode: progress.signal.reason?.exitCode ?? 1,
+        });
+      }).finally(() => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+      });
       void cleanup.then(() => reject(progress.signal.reason), reject);
     };
     child.once("error", reject);
