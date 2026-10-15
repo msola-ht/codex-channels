@@ -355,6 +355,8 @@ JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行�
 例如 `cp-llm`，终端使用 `codexc remote -p cp-llm` 或 `codexc app -p cp-llm`，规范 Profile 与文件分别为 `sf-cp-llm` 和 `sf-cp-llm.config.toml`。`cp-` 表示自定义提供商，与上游协议无关；协议独立选择 Responses 或 Chat Completions。
 所有 Provider 的固定、切换和聚合模式以及独立 Relay 共用统一请求策略。完整协议事件空闲为 300 秒，WebSocket 建连为 15 秒，对齐锁定 Codex 0.162.1 的有效默认值；生成没有固定总期限。HTTP 首响应头额外保留 300 秒网络等待，错误正文最多 5 秒，非流式正文最多 300 秒；下游交付受阻最多 30 秒，终态和关闭收尾最多 5 秒。聚合与 Chat 桥外层不重复启动内层模型计时器。
 
+代理本地期限使用同一套错误分类：上传 408 `upload_timeout`、准备 504 `preparation_timeout`、上游等待 504 `upstream_timeout`、交付与收尾 504 `delivery_timeout`。可发送结构化错误时，用 `timeout_stage` 区分 `upload/prepare/headers/body/stream/delivery/terminal`；响应头已经发送时不改写 HTTP 状态。上游已返回的错误及安全 `Retry-After` 不因诊断正文读取失败而被替换。Chat 桥和 Relay 的直接适配器显式请求 `Accept-Encoding: identity`，成功响应只接受缺省或 `identity` 编码，并精确校验 JSON/SSE 媒体类型；透明 Responses 代理仍保留上游传输合同。
+
 第三方与聚合 App Server 启动时显式注入统一的 `stream_idle_timeout_ms=300000`、`websocket_connect_timeout_ms=15000`，已有显式冲突值会被拒绝，用户文件不自动改写。启动后通过 `config/read` 复核合并后的 Provider 配置，受管层覆盖导致的不一致不会被当成已就绪。Provider 启动、租约、设置应用及 Desktop 附加等可能启动实例的监管操作统一等待最多 60 秒，包含实例就绪、配置核验及连接收尾；这是控制面等待，不是模型请求总期限。当前锁定版内置 OpenAI 不接受同名 Provider 块替换，使用内置默认，不提供一个实际上无法覆盖官方行为的全局可调超时选项。
 
 Chat 桥以完整 Chat 数据事件计空闲，Codex 仍以实际收到的完整 Responses 事件计空闲；注释心跳、零碎字节以及桥内尚未通过完整校验的工具参数不会伪造客户端进展。上传、目录复核、排队和服务停止继续使用各自的资源预算。更新程序后分别重启 App Server 和 Relay 生效；Gateway 重启不会替代这两个独立服务的策略激活。

@@ -60,6 +60,7 @@ import type { TrafficCallTiming } from "./traffic-call-timing.js";
 import { createJsonStringFieldScanner, scanJsonStringField } from "./traffic-dump-content.js";
 import { ChatBodyTooLargeError, readModelBody, waitForChatOperation } from "./chat-io.js";
 import { finishProxyResponse, sendProxyWebSocket, waitForProxyOperation, writeResponseChunk } from "./proxy-delivery.js";
+import { ModelRequestTimeoutError, type ModelRequestStage } from "./chat-errors.js";
 
 export type {
   ProviderProxyMetrics,
@@ -362,22 +363,24 @@ export class ProviderProxy {
       const metrics = createMetricsState(metadata, startedAtMs, "http",
         metadata.operation,
         effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent));
-      metrics.httpStatus = 502;
-      markMetricsFailed(metrics, "provider_proxy_route_error", Date.now(), error, failedAtMonotonicMs);
+      metrics.httpStatus = error instanceof ModelRequestTimeoutError ? error.status : 502;
+      markMetricsFailed(metrics, error instanceof ModelRequestTimeoutError ? error.code : "provider_proxy_route_error", Date.now(), error, failedAtMonotonicMs);
       const exchange = this.trafficDump?.beginHttpExchange({
         ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
         headers: request.headers, method: request.method ?? "GET",
         path: request.url ?? "", startedAtMs, startedAtMonotonicMs,
       });
-      exchange?.responseHead(502, {});
+      exchange?.responseHead(metrics.httpStatus, {});
       exchange?.observeRequestMetrics(metrics);
       exchange?.failure("upstream_route", undefined, failedAtMonotonicMs);
       if (route.kind === "response") {
         await this.deliverMetrics(metrics, route.accountId, signal);
       }
       if (signal.aborted || response.destroyed) return;
-      response.writeHead(502, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: { type: "provider_proxy_route_error" } }));
+      response.writeHead(metrics.httpStatus, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: error instanceof ModelRequestTimeoutError
+        ? { type: error.code, code: error.code, message: error.message, timeout_stage: error.stage }
+        : { type: "provider_proxy_route_error" } }));
       this.onError?.(asError(error));
       return;
     }
@@ -482,7 +485,7 @@ export class ProviderProxy {
         const isStream = contentType.includes("text/event-stream")
           || (recordsResponseMetrics && !contentType.includes("json") && !isError);
         if (isError || !isStream) {
-          bodyTimer = setTimeout(() => upstreamResponse.destroy(new Error(isError ? "模型上游错误正文读取超时" : "模型上游正文读取超时")),
+          bodyTimer = setTimeout(() => upstreamResponse.destroy(new ModelRequestTimeoutError("body")),
             isError ? modelRequestPolicy.errorBodyTimeoutMs : modelRequestPolicy.bodyReadTimeoutMs);
         }
       }
@@ -520,10 +523,10 @@ export class ProviderProxy {
         const next = forwarding.then(async () => {
           signal.throwIfAborted();
           if (completed) await emitMetrics();
-          await writeResponseChunk(response, chunk, signal, timeoutMs, () => invalidateGenerationTiming(metrics));
+          await writeResponseChunk(response, chunk, signal, timeoutMs, () => invalidateGenerationTiming(metrics), completed ? "terminal" : "delivery");
           upstreamResponse.resume();
         });
-        forwarding = waitForProxyOperation(next, signal, timeoutMs, "模型响应交付超时").catch(failDelivery);
+        forwarding = waitForProxyOperation(next, signal, timeoutMs, completed ? "terminal" : "delivery").catch(failDelivery);
       });
       upstreamResponse.on("end", () => {
         clearTimeout(bodyTimer);
@@ -536,7 +539,7 @@ export class ProviderProxy {
           if (completed || recordsResponseMetrics) await emitMetrics();
           await finishProxyResponse(response, signal, modelRequestPolicy.terminalDeliveryTimeoutMs);
         });
-        forwarding = waitForProxyOperation(ending, signal, modelRequestPolicy.terminalDeliveryTimeoutMs, "模型响应收尾交付超时").catch(failDelivery);
+        forwarding = waitForProxyOperation(ending, signal, modelRequestPolicy.terminalDeliveryTimeoutMs, "terminal").catch(failDelivery);
       });
       upstreamResponse.on("error", (error) => {
         clearTimeout(bodyTimer);
@@ -546,7 +549,7 @@ export class ProviderProxy {
           response.destroy();
           return;
         }
-        markMetricsFailed(metrics, "upstream_response_error", Date.now(), error, failedAtMonotonicMs);
+        markMetricsFailed(metrics, error instanceof ModelRequestTimeoutError ? error.code : "upstream_response_error", Date.now(), error, failedAtMonotonicMs);
         exchange?.failure("upstream_response", error, failedAtMonotonicMs);
         void emitMetrics();
         response.destroy();
@@ -559,12 +562,15 @@ export class ProviderProxy {
       clearDeadlines();
       if (closingRejectedUpload || deliveryFailed || signal.aborted) return;
       const failedAtMonotonicMs = performance.now();
-      markMetricsFailed(metrics, "upstream_request_error", Date.now(), error, failedAtMonotonicMs);
+      if (error instanceof ModelRequestTimeoutError && metrics.httpStatus === null) metrics.httpStatus = error.status;
+      markMetricsFailed(metrics, error instanceof ModelRequestTimeoutError ? error.code : "upstream_request_error", Date.now(), error, failedAtMonotonicMs);
       exchange?.failure("upstream_request", error, failedAtMonotonicMs);
       void emitMetrics();
       if (!response.headersSent) {
-        response.writeHead(502, { "content-type": "application/json" });
-        response.end(JSON.stringify({ error: { type: "provider_proxy_upstream_error" } }));
+        response.writeHead(error instanceof ModelRequestTimeoutError ? error.status : 502, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: error instanceof ModelRequestTimeoutError
+          ? { type: error.code, code: error.code, message: error.message, timeout_stage: error.stage }
+          : { type: "provider_proxy_upstream_error" } }));
       } else {
         response.destroy();
       }
@@ -624,10 +630,10 @@ export class ProviderProxy {
     observeRequestSubmitted(metrics, submittedAt);
     exchange?.callTiming?.submitted(submittedAt);
     if (!this.chatDiagnostics) {
-      headersTimer = setTimeout(() => upstream.destroy(new Error("模型上游首响应头超时")), modelRequestPolicy.headersTimeoutMs);
+      headersTimer = setTimeout(() => upstream.destroy(new ModelRequestTimeoutError("headers")), modelRequestPolicy.headersTimeoutMs);
     }
     if (!request.complete) {
-      uploadTimer = setTimeout(() => upstream.destroy(new Error("模型请求上传超时")), modelRequestPolicy.preparationTimeoutMs);
+      uploadTimer = setTimeout(() => upstream.destroy(new ModelRequestTimeoutError("upload")), modelRequestPolicy.preparationTimeoutMs);
       request.once("end", () => clearTimeout(uploadTimer));
     }
     upstream.flushHeaders();
@@ -662,10 +668,10 @@ export class ProviderProxy {
    * 归一化复用同一次解析，原始字节保留给转储、指标及未改写请求。
    */
   private async bufferResponsesBody(request: IncomingMessage, response: ServerResponse): Promise<BufferedResponsesBody | null> {
-    const reject = (status: number, type: string, message: string): null => {
+    const reject = (status: number, type: string, message: string, stage?: ModelRequestStage): null => {
       if (!response.destroyed && !response.headersSent) {
         response.writeHead(status, { "content-type": "application/json", "connection": "close" });
-        response.end(JSON.stringify({ error: { type, message } }));
+        response.end(JSON.stringify({ error: { type, message, ...(stage === undefined ? {} : { code: type, timeout_stage: stage }) } }));
       }
       return null;
     };
@@ -681,7 +687,7 @@ export class ProviderProxy {
     this.modelAuthorizations.add(controller);
     const disconnected = (): void => controller.abort();
     response.once("close", disconnected);
-    let timer = setTimeout(() => controller.abort(), modelRequestPolicy.preparationTimeoutMs);
+    let timer = setTimeout(() => controller.abort(new ModelRequestTimeoutError("upload")), modelRequestPolicy.preparationTimeoutMs);
     let checkingCatalog = false;
     try {
       const body = await readModelBody(request, controller.signal, 16 * 1024 * 1024);
@@ -694,7 +700,7 @@ export class ProviderProxy {
           return reject(400, "provider_model_request_invalid", "模型请求必须包含明确的 model ID。");
         }
         checkingCatalog = true;
-        timer = setTimeout(() => controller.abort(), modelRequestPolicy.preparationTimeoutMs);
+        timer = setTimeout(() => controller.abort(new ModelRequestTimeoutError("prepare")), modelRequestPolicy.preparationTimeoutMs);
         const capabilities = readModelCapabilities === undefined ? undefined
           : await waitForChatOperation(readModelCapabilities(model, controller.signal), controller.signal);
         const enabled = readModelCapabilities !== undefined ? capabilities !== undefined
@@ -706,6 +712,8 @@ export class ProviderProxy {
       return { body, parsed, ...(sampling === undefined ? {} : { sampling }) };
     } catch (error) {
       if (response.destroyed || this.stopped) return null;
+      const reason: unknown = controller.signal.reason;
+      if (reason instanceof ModelRequestTimeoutError) return reject(reason.status, reason.code, reason.message, reason.stage);
       if (checkingCatalog) return reject(503, "provider_catalog_unavailable", "模型目录暂时无法安全读取，请检查目录后重试。");
       return reject(error instanceof ChatBodyTooLargeError ? 413 : controller.signal.aborted ? 408 : 400,
         "provider_model_request_invalid", "模型请求正文无效、超过 16 MiB 或上传超时。");
@@ -758,12 +766,12 @@ export class ProviderProxy {
           "websocket", "response",
           effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
         );
-        metrics.httpStatus = 502;
-        markMetricsFailed(metrics, "provider_proxy_route_error", Date.now(), error);
+        metrics.httpStatus = error instanceof ModelRequestTimeoutError ? error.status : 502;
+        markMetricsFailed(metrics, error instanceof ModelRequestTimeoutError ? error.code : "provider_proxy_route_error", Date.now(), error);
         await this.deliverMetrics(metrics, route.accountId, signal);
       }
       if (signal.aborted || socket.destroyed) return;
-      socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      socket.end(`HTTP/1.1 ${error instanceof ModelRequestTimeoutError ? "504 Gateway Timeout" : "502 Bad Gateway"}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
       this.onError?.(asError(error));
       return;
     } finally {
@@ -853,7 +861,7 @@ export class ProviderProxy {
         if (metrics) observeRequestSubmitted(metrics, submittedAt);
         await sendProxyWebSocket(upstream, data, isBinary, deliverySignal, modelRequestPolicy.deliveryTimeoutMs);
       });
-      sending = waitForProxyOperation(next, deliverySignal, modelRequestPolicy.deliveryTimeoutMs, "模型 WebSocket 上游交付超时")
+      sending = waitForProxyOperation(next, deliverySignal, modelRequestPolicy.deliveryTimeoutMs, "delivery")
         .catch(error => failForwarding(error, "upstream_delivery")).finally(() => {
           queuedUpstreamBytes -= bytes;
           queuedUpstreamFrames -= 1;
@@ -918,7 +926,7 @@ export class ProviderProxy {
       upstream.terminate();
       if (client.readyState === WebSocket.OPEN) {
         forwarding = sendProxyWebSocket(client, JSON.stringify({ type: "error", status, error: { type, message } }), false,
-          deliverySignal, modelRequestPolicy.terminalDeliveryTimeoutMs)
+          deliverySignal, modelRequestPolicy.terminalDeliveryTimeoutMs, undefined, "terminal")
           .then(() => closePeer(client, 1008, Buffer.from("Model authorization failed")), failForwarding);
       }
     };
@@ -1095,9 +1103,9 @@ export class ProviderProxy {
         }
         await sendProxyWebSocket(client, data, isBinary, deliverySignal, timeoutMs, () => {
           if (frameMetrics && !completedMetrics) invalidateGenerationTiming(frameMetrics);
-        });
+        }, completedMetrics ? "terminal" : "delivery");
       });
-      const delivered = waitForProxyOperation(queued, deliverySignal, timeoutMs, "模型 WebSocket 客户端交付超时")
+      const delivered = waitForProxyOperation(queued, deliverySignal, timeoutMs, completedMetrics ? "terminal" : "delivery")
         .catch(failForwarding).finally(() => {
           queuedClientBytes -= bytes;
           queuedClientFrames -= 1;
@@ -1146,7 +1154,7 @@ export class ProviderProxy {
         // The final frame may still be waiting for its metrics acknowledgement.
         // Keep upstream close ordered after every frame already accepted for delivery.
         const timer = setTimeout(() => {
-          this.onError?.(new Error("模型 WebSocket 收尾交付超时"));
+          this.onError?.(new ModelRequestTimeoutError("terminal"));
           client.terminate();
         }, modelRequestPolicy.terminalDeliveryTimeoutMs);
         const cancelDrain = (): void => clearTimeout(timer);
@@ -1208,7 +1216,7 @@ export class ProviderProxy {
   private async upstreamFor(headers: IncomingHttpHeaders, requestSignal: AbortSignal): Promise<ProviderProxyUpstream> {
     const controller = new AbortController();
     const signal = AbortSignal.any([requestSignal, controller.signal]);
-    const timer = setTimeout(() => controller.abort(new Error("模型上游路由准备超时")), modelRequestPolicy.preparationTimeoutMs);
+    const timer = setTimeout(() => controller.abort(new ModelRequestTimeoutError("prepare")), modelRequestPolicy.preparationTimeoutMs);
     try {
       signal.throwIfAborted();
       return await waitForChatOperation(Promise.resolve(this.resolveUpstream?.(headers, signal) ?? this.defaultUpstream), signal);
@@ -1231,7 +1239,7 @@ export class ProviderProxy {
     const signal = AbortSignal.any([requestSignal, this.shutdownController.signal]);
     try {
       await waitForProxyOperation(Promise.resolve(this.onMetrics?.({ ...metrics, quotaWindows, quotaObservedAtMs }, accountId)),
-        signal, modelRequestPolicy.terminalDeliveryTimeoutMs, "模型终态指标交付超时");
+        signal, modelRequestPolicy.terminalDeliveryTimeoutMs, "terminal");
     } catch (error) {
       if (!signal.aborted) this.onError?.(asError(error));
     }

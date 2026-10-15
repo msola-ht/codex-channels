@@ -102,7 +102,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
       await emit(value as Record<string, unknown>, true);
     });
   } catch (error) {
-    if (!delivering && !call.signal.aborted) diagnostics.error("upstream_failure", errorStage, false);
+    if (!delivering && !call.signal.aborted) diagnostics.error(error instanceof ChatUpstreamError ? error.code : "upstream_failure", errorStage, error instanceof ChatUpstreamError && error.retryable);
     throw error;
   } finally {
     call.diagnostics?.(modelRequestDiagnostics(diagnostics.snapshot()));

@@ -8,6 +8,29 @@ export class ChatUpstreamError extends Error {
     this.name = "ChatUpstreamError";
   }
 }
+
+export type ModelRequestStage = "upload" | "prepare" | "headers" | "body" | "stream" | "delivery" | "terminal";
+const timeoutMessages: Record<ModelRequestStage, string> = {
+  upload: "模型请求正文上传超时。",
+  prepare: "模型请求准备超时。",
+  headers: "模型上游首响应头等待超时。",
+  body: "模型上游正文读取超时。",
+  stream: "模型上游完整事件等待超时。",
+  delivery: "模型响应下游交付超时。",
+  terminal: "模型响应终态收尾超时。",
+};
+
+/** Local deadlines only; a received upstream HTTP error keeps its own classification. */
+export class ModelRequestTimeoutError extends ChatUpstreamError {
+  readonly status: number;
+  constructor(readonly stage: ModelRequestStage) {
+    super(stage === "upload" ? "upload_timeout" : stage === "prepare" ? "preparation_timeout"
+      : stage === "delivery" || stage === "terminal" ? "delivery_timeout" : "upstream_timeout",
+    timeoutMessages[stage], stage !== "delivery" && stage !== "terminal");
+    this.name = "ModelRequestTimeoutError";
+    this.status = stage === "upload" ? 408 : 504;
+  }
+}
 const descriptions: Record<string, readonly [string, boolean]> = {
   context_length_exceeded: ["输入超过模型上下文窗口，请缩短输入或压缩上下文。", false],
   content_filter: ["上游内容过滤阻止了本次生成。", false],
@@ -53,6 +76,13 @@ export async function readChatHttpError(incoming: IncomingMessage, capture?: { v
     const error = chatUpstreamError(value, incoming.statusCode);
     return new ChatUpstreamError(error.code, error.message, error.retryable, retryAfter);
   };
+  signal?.throwIfAborted();
+  const encoding = incoming.headers["content-encoding"];
+  if (encoding !== undefined && encoding.trim().toLowerCase() !== "identity") {
+    incoming.destroy();
+    capture?.invalid(0);
+    return classify(undefined);
+  }
   const parts: Buffer[] = [];
   let size = 0;
   let timedOut = false;

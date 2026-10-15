@@ -1107,6 +1107,8 @@ Relay 支持 JSON 非流式调用，不要求客户端启用流式。失败响�
 `X-Relay-Request-Id` 可与指标记录关联。`invalid_upstream_*` 表示上游响应类型或字段校验失败；
 例如上游 HTTP 200 配合 `invalid_upstream_tools` 表示工具响应字段校验未通过，并非上游返回了 502。
 Chat 和 Responses 的 JSON/SSE 内容无法解析为 JSON 时统一返回 `invalid_upstream_json`，不回显上游原文。
+上游成功响应的媒体类型须匹配请求的 JSON/SSE 格式；Relay 请求 `identity` 编码，不支持的响应压缩编码返回 `invalid_upstream_encoding`。
+本地模型请求超时额外提供 `timeout_stage`：`upload`（408 `upload_timeout`）、`prepare`（504 `preparation_timeout`）、`headers/body/stream`（504 `upstream_timeout`）、`delivery/terminal`（504 `delivery_timeout`）。流式响应已发送响应头时保留原 HTTP 状态，通过流内错误或断连表示失败；排队超时仍按下文的 429 合同处理。
 WebUI 请求列表的失败状态提示可查看错误码；诊断不包含请求内容、密钥或上游错误原文。
 上游 429/503 提供的 `Retry-After` 在为受限整数秒或规范 HTTP 日期时会保留，客户端可据此退避；Relay 不自动重试。
 Chat 的长度限制、内容过滤、`insufficient_system_resource` 和 `aborted` 终态原样交付，指标与新转储记为未完整完成。

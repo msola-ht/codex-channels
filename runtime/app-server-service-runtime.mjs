@@ -592,11 +592,49 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     }
     return errors;
   };
-  const policyClients = new Map();
+  const temporaryClients = new Map();
+  const ownTemporaryClient = (targetSocket, client) => {
+    assertRunning();
+    temporaryClients.set(client, { socketPath: targetSocket, active: true, closeTask: undefined });
+  };
+  const closeTemporaryClient = async (client, operationFailure) => {
+    const owned = temporaryClients.get(client);
+    if (!owned) return;
+    owned.active = false;
+    if (!owned.closeTask) {
+      owned.closeTask = Promise.resolve().then(() => client.close()).then(() => {
+        temporaryClients.delete(client);
+      });
+    }
+    const task = owned.closeTask;
+    try {
+      await task;
+    } catch (error) {
+      if (operationFailure) {
+        throw new AggregateError([operationFailure.error, error], "App Server 临时读取与连接清理均失败", {
+          cause: error,
+        });
+      }
+      throw error;
+    } finally {
+      if (owned.closeTask === task) owned.closeTask = undefined;
+    }
+  };
+  const retryTemporaryClientCleanup = async (targetSocket) => {
+    // Only abandoned connections are eligible: another operation may still be
+    // using its own temporary connection to this same shared App Server.
+    const results = await Promise.allSettled([...temporaryClients]
+      .filter(([, owned]) => owned.socketPath === targetSocket && !owned.active)
+      .map(([client]) => closeTemporaryClient(client)));
+    const errors = results.filter(result => result.status === "rejected").map(result => result.reason);
+    if (errors.length) throw new AggregateError(errors, "App Server 临时连接资源清理未完成");
+  };
   const confirmRequestPolicy = async (targetSocket, provider) => {
     assertRunning();
+    await retryTemporaryClientCleanup(targetSocket);
     const expectedProvider = provider === primaryProvider ? customPrimaryProvider?.id ?? provider : provider;
-    await verifyAppServerRequestPolicy(targetSocket, expectedProvider, defaultWorkspace.cwd, runtime.environment, policyClients);
+    await verifyAppServerRequestPolicy(targetSocket, expectedProvider, defaultWorkspace.cwd, runtime.environment,
+      ownTemporaryClient, closeTemporaryClient);
     assertRunning();
   };
   const ensureInstance = (provider) => {
@@ -873,6 +911,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const targetSocket = provider === primaryProvider ? socketPath : managed.socketPath;
     const running = childrenByProvider.has(provider);
     if (running && !failedInstanceStarts.has(provider)) {
+      await retryTemporaryClientCleanup(targetSocket);
       const { CodexAppServerClient, createAppServerTransport, JsonRpcClient } = await import("../dist/codex-client/index.js");
       signal.throwIfAborted();
       const client = new CodexAppServerClient(new JsonRpcClient(createAppServerTransport(
@@ -885,15 +924,21 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           connectTimeoutMs: 3_000,
         },
       ), 5_000), { sandbox: "read-only" });
-      const cancel = () => { void client.close().catch(() => undefined); };
+      ownTemporaryClient(targetSocket, client);
+      const cancel = () => { void closeTemporaryClient(client).catch(() => undefined); };
       signal.addEventListener("abort", cancel, { once: true });
+      let operationFailure;
       try {
+        signal.throwIfAborted();
         await client.connect();
         signal.throwIfAborted();
         if (await client.countActiveLoadedThreads() > 0) return { applied: false, reason: "active" };
+      } catch (error) {
+        operationFailure = { error };
+        throw error;
       } finally {
         signal.removeEventListener("abort", cancel);
-        await client.close();
+        await closeTemporaryClient(client, operationFailure);
       }
     } else if (await appServerSocketAcceptsWebSocket(targetSocket, runtime.environment)) {
       throw new Error("拒绝重启未受监管的 App Server");
@@ -960,6 +1005,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       if (!canAttach()) throw new Error("Desktop 目标 App Server 正被其他客户端租约占用");
       return;
     }
+    await retryTemporaryClientCleanup(targetSocket);
     const { CodexAppServerClient, createAppServerTransport, JsonRpcClient } = await import("../dist/codex-client/index.js");
     signal.throwIfAborted();
     const client = new CodexAppServerClient(new JsonRpcClient(createAppServerTransport(
@@ -972,17 +1018,23 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         connectTimeoutMs: 3_000,
       },
     ), 5_000), { sandbox: "read-only" });
-    const cancel = () => { void client.close().catch(() => undefined); };
+    ownTemporaryClient(targetSocket, client);
+    const cancel = () => { void closeTemporaryClient(client).catch(() => undefined); };
     signal.addEventListener("abort", cancel, { once: true });
+    let operationFailure;
     try {
+      signal.throwIfAborted();
       await client.connect();
       signal.throwIfAborted();
       if (await client.countActiveLoadedThreads() > 0) {
         throw new Error("Desktop 目标 App Server 仍有活动任务，不能附加 Desktop Host");
       }
+    } catch (error) {
+      operationFailure = { error };
+      throw error;
     } finally {
       signal.removeEventListener("abort", cancel);
-      await client.close();
+      await closeTemporaryClient(client, operationFailure);
     }
     // Pending Remote leases are registered before their queued ensure. Check
     // again after the RPC read; this does not freeze Turns from external clients.
@@ -1160,10 +1212,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       () => desktopAppBridge?.close(),
       () => supervisorOwner?.close(),
       () => closeAggregateProxy(),
-      ...[...policyClients].map(([path, client]) => async () => {
-        await client.close();
-        if (policyClients.get(path) === client) policyClients.delete(path);
-      }),
+      ...[...temporaryClients.keys()].map(client => () => closeTemporaryClient(client)),
       ...providerProxyRuntimes.values().map(({ proxy }) => () => closeProviderProxy(proxy)),
       ...[...upstreamAgents].map(agent => () => agent.destroy()),
     ].map(operation => Promise.resolve().then(operation)));
@@ -1235,12 +1284,7 @@ function spawnCodexProcess(codexBinary, args, options, environment) {
  * Built-in OpenAI ignores same-name provider overlays in the locked version;
  * third-party providers must retain the explicit policy injected at launch.
  */
-async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environment, clients) {
-  const previous = clients.get(socketPath);
-  if (previous) {
-    await previous.close();
-    clients.delete(socketPath);
-  }
+async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environment, ownClient, closeClient) {
   const { createAppServerTransport, JsonRpcClient } = await import("../dist/codex-client/index.js");
   const rpc = new JsonRpcClient(createAppServerTransport(
     { kind: "local-app-server", socketPath },
@@ -1250,7 +1294,8 @@ async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environme
       connectTimeoutMs: 3_000,
     },
   ), 5_000);
-  clients.set(socketPath, rpc);
+  ownClient(socketPath, rpc);
+  let operationFailure;
   try {
     await rpc.connect();
     const response = await rpc.request({ method: "config/read", params: { cwd, includeLayers: false } }, { retryOverload: false });
@@ -1261,9 +1306,11 @@ async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environme
     const configured = config.model_providers?.[provider];
     assertProviderModelRequestPolicy(configured ?? {}, provider !== "openai");
     if (provider !== "openai") assertProviderModelRetryPolicy(configured);
+  } catch (error) {
+    operationFailure = { error };
+    throw error;
   } finally {
-    await rpc.close();
-    if (clients.get(socketPath) === rpc) clients.delete(socketPath);
+    await closeClient(rpc, operationFailure);
   }
 }
 

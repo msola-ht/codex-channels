@@ -1,10 +1,11 @@
 import type { ServerResponse } from "node:http";
 import WebSocket, { type RawData } from "ws";
+import { ModelRequestTimeoutError } from "./chat-errors.js";
 
 /** A stage deadline releases its waiter even when an injected callback ignores cancellation. */
-export function waitForProxyOperation<T>(pending: Promise<T>, signal: AbortSignal, timeoutMs: number, message: string): Promise<T> {
+export function waitForProxyOperation<T>(pending: Promise<T>, signal: AbortSignal, timeoutMs: number, stage: "delivery" | "terminal"): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => failed(new Error(message)), timeoutMs);
+    const timer = setTimeout(() => failed(new ModelRequestTimeoutError(stage)), timeoutMs);
     const cleanup = (): void => {
       clearTimeout(timer);
       signal.removeEventListener("abort", aborted);
@@ -17,21 +18,21 @@ export function waitForProxyOperation<T>(pending: Promise<T>, signal: AbortSigna
   });
 }
 
-export function writeResponseChunk(response: ServerResponse, chunk: Buffer, signal: AbortSignal, timeoutMs: number, backpressure?: () => void): Promise<void> {
+export function writeResponseChunk(response: ServerResponse, chunk: Buffer, signal: AbortSignal, timeoutMs: number, backpressure?: () => void, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
   return waitForDelivery(response, signal, timeoutMs, "drain", () => {
     const written = response.write(chunk);
     if (!written) backpressure?.();
     return written;
-  });
+  }, stage);
 }
 
 export function finishProxyResponse(response: ServerResponse, signal: AbortSignal, timeoutMs: number): Promise<void> {
-  return waitForDelivery(response, signal, timeoutMs, "finish", () => { response.end(); return response.writableFinished; });
+  return waitForDelivery(response, signal, timeoutMs, "finish", () => { response.end(); return response.writableFinished; }, "terminal");
 }
 
-function waitForDelivery(response: ServerResponse, signal: AbortSignal, timeoutMs: number, event: "drain" | "finish", submit: () => boolean): Promise<void> {
+function waitForDelivery(response: ServerResponse, signal: AbortSignal, timeoutMs: number, event: "drain" | "finish", submit: () => boolean, stage: "delivery" | "terminal"): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => failed(new Error("模型响应交付超时")), timeoutMs);
+    const timer = setTimeout(() => failed(new ModelRequestTimeoutError(stage)), timeoutMs);
     const cleanup = (): void => {
       clearTimeout(timer);
       response.off(event, completed); response.off("close", closed); response.off("error", failed);
@@ -49,9 +50,9 @@ function waitForDelivery(response: ServerResponse, signal: AbortSignal, timeoutM
   });
 }
 
-export function sendProxyWebSocket(target: WebSocket, data: RawData | string, isBinary: boolean, signal: AbortSignal, timeoutMs: number, backpressure?: () => void): Promise<void> {
+export function sendProxyWebSocket(target: WebSocket, data: RawData | string, isBinary: boolean, signal: AbortSignal, timeoutMs: number, backpressure?: () => void, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => failed(new Error("模型 WebSocket 交付超时")), timeoutMs);
+    const timer = setTimeout(() => failed(new ModelRequestTimeoutError(stage)), timeoutMs);
     const cleanup = (): void => {
       clearTimeout(timer);
       target.off("close", closed); target.off("error", failed);

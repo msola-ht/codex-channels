@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { StringDecoder } from "node:string_decoder";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { ModelConversionError } from "../model-api/index.js";
-import { chatUpstreamError } from "./chat-errors.js";
+import { ModelRequestTimeoutError } from "./chat-errors.js";
 
 export class ChatBodyTooLargeError extends ModelConversionError {}
 
@@ -45,7 +45,7 @@ export function readModelBody(request: IncomingMessage, signal: AbortSignal, max
   });
 }
 
-export async function writeChatData(response: ServerResponse, data: string, signal: AbortSignal, backpressure?: () => void, timeoutMs: number = modelRequestPolicy.deliveryTimeoutMs): Promise<void> {
+export async function writeChatData(response: ServerResponse, data: string, signal: AbortSignal, backpressure?: () => void, timeoutMs: number = modelRequestPolicy.deliveryTimeoutMs, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
   signal.throwIfAborted();
   if (response.destroyed || response.writableEnded) throw new Error("Response disconnected");
   await new Promise<void>((resolve, reject) => {
@@ -68,7 +68,7 @@ export async function writeChatData(response: ServerResponse, data: string, sign
       if (response.write(data)) drain();
       else {
         backpressure?.();
-        if (!settled) timer = setTimeout(() => error(Object.assign(new Error("Response delivery timed out"), { code: "ETIMEDOUT" })), timeoutMs);
+        if (!settled) timer = setTimeout(() => error(new ModelRequestTimeoutError(stage)), timeoutMs);
       }
     } catch (reason) { error(reason); }
   });
@@ -125,11 +125,11 @@ export async function* readModelFrames(incoming: IncomingMessage, signal: AbortS
     }
     buffer += decoder.end();
     signal.throwIfAborted();
-    if (timedOut) throw chatUpstreamError({ code: "upstream_timeout" });
+    if (timedOut) throw new ModelRequestTimeoutError("stream");
     if (buffer.trim()) throw new ModelConversionError("Chat stream has an incomplete frame");
   } catch (error) {
     if (signal.aborted) throw signal.reason;
-    if (timedOut) throw chatUpstreamError({ code: "upstream_timeout" });
+    if (timedOut) throw new ModelRequestTimeoutError("stream");
     throw error;
   } finally {
     clearTimeout(timeout); signal.removeEventListener("abort", abort);

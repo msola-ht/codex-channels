@@ -3,7 +3,7 @@ import type { IncomingHttpHeaders } from "node:http";
 import { ModelConversionError, type DirectResponsesRequest, type DirectChatUsage } from "../model-api/index.js";
 import { parseDirectModelJson, readDirectModelBody, validateDirectModelResponse, withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
 import { readModelFrames } from "./chat-io.js";
-import { chatStreamError, chatUpstreamError } from "./chat-errors.js";
+import { ChatUpstreamError, chatStreamError, chatUpstreamError } from "./chat-errors.js";
 import { createMetricsState, hasResponseOutputContent, observeJsonResponse, observeResponseEvent, observeRequestSubmitted, observeResponseReceived } from "./response-metrics-observer.js";
 import type { GenerationTiming } from "../../runtime/request-timing.mjs";
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
@@ -118,7 +118,7 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
       throw new ModelConversionError("Responses stream disconnected before a terminal event");
     });
   } catch (error) {
-    if (!delivering && !call.signal.aborted) diagnostics.error("upstream_failure", errorStage, false);
+    if (!delivering && !call.signal.aborted) diagnostics.error(error instanceof ChatUpstreamError ? error.code : "upstream_failure", errorStage, error instanceof ChatUpstreamError && error.retryable);
     throw error;
   } finally { call.diagnostics?.(modelRequestDiagnostics(diagnostics.snapshot())); }
 }

@@ -6,7 +6,7 @@ import type { RequestRecord } from "@/lib/types"
 function reason(record: RequestRecord) {
   if (record.errorCode === "client_disconnected") return "disconnected"
   if (record.errorCode === "request_revoked") return "revoked"
-  if (record.errorCode === "upstream_timeout" || record.errorCode === "request_timeout") return "timeout"
+  if (["upstream_timeout", "request_timeout", "upload_timeout", "preparation_timeout", "delivery_timeout"].includes(record.errorCode ?? "")) return "timeout"
   if (record.errorCode === "rate_limit" || record.httpStatus === 429) return "rateLimited"
   if (record.errorCode?.startsWith("invalid_upstream_")) return "invalidResponse"
   if (record.errorCode === "authentication_error") return "authentication"

@@ -8,6 +8,7 @@ import type { Socket } from "node:net";
 import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, type RelayModelCapability, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
 import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
+import { ModelRequestTimeoutError } from "../provider-proxy/index.js";
 import type { SamplingParameters } from "../model-api/index.js";
 
 export interface RelayQueueEntry {
@@ -167,7 +168,7 @@ export class ModelRelayServer {
       if (!models) {
         if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") throw new RelayAdmissionError(415, "unsupported_media_type");
         if (Number(request.headers["content-length"] ?? 0) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
-        const uploadTimer = setTimeout(() => controller.abort(new RelayAdmissionError(408, "upload_timeout")), 15_000);
+        const uploadTimer = setTimeout(() => controller.abort(new ModelRequestTimeoutError("upload")), 15_000);
         try {
           const text = await readChatBody(request, signal, 1024 * 1024);
           inbound = JSON.parse(text) as unknown;
@@ -197,7 +198,7 @@ export class ModelRelayServer {
         signal.throwIfAborted();
       }
       phase = "prepare"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
-      preparationTimer = setTimeout(() => controller.abort(new RelayAdmissionError(504, "preparation_timeout")), modelRequestPolicy.preparationTimeoutMs);
+      preparationTimer = setTimeout(() => controller.abort(new ModelRequestTimeoutError("prepare")), modelRequestPolicy.preparationTimeoutMs);
       if (models) {
         const ids: string[] = [];
         for (const providerId of new Set(lease.caller.models.map(id => parseRelayModelId(id)!.provider))) {
@@ -266,7 +267,7 @@ export class ModelRelayServer {
                 if (Buffer.byteLength(frame) > 1024 * 1024) throw new ModelConversionError("Model delivery frame exceeds size limit");
                 if (!response.headersSent) response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
                 capture?.delivered?.(value, true, response.statusCode, response.getHeaders());
-                await writeChatData(response, frame, deliverySignal, () => { if (!terminal) generationBlocked = true; }, terminal ? modelRequestPolicy.terminalDeliveryTimeoutMs : modelRequestPolicy.deliveryTimeoutMs);
+                await writeChatData(response, frame, deliverySignal, () => { if (!terminal) generationBlocked = true; }, terminal ? modelRequestPolicy.terminalDeliveryTimeoutMs : modelRequestPolicy.deliveryTimeoutMs, terminal ? "terminal" : "delivery");
               }
               if (terminal) {
                 if (protocol === "chat") capture?.delivered?.(undefined, true, response.statusCode, response.getHeaders());
@@ -288,16 +289,13 @@ export class ModelRelayServer {
       clearTimeout(preparationTimer);
       if (delivering) phase = "delivery";
       const signalReason: unknown = controller.signal.reason ?? lease?.signal.reason;
-      const failure = signalReason instanceof RelayAdmissionError ? signalReason : error;
-      const deliveryTimedOut = phase === "delivery" && failure instanceof Error && "code" in failure && failure.code === "ETIMEDOUT";
-      const status = failure instanceof RelayAdmissionError ? failure.status
-        : deliveryTimedOut ? 504
+      const failure = signalReason instanceof RelayAdmissionError || signalReason instanceof ModelRequestTimeoutError ? signalReason : error;
+      const status = failure instanceof RelayAdmissionError || failure instanceof ModelRequestTimeoutError ? failure.status
         : phase === "input" && failure instanceof ChatBodyTooLargeError ? 413
         : failure instanceof ChatUpstreamError && failure.code === "rate_limit" ? 429
           : failure instanceof ChatUpstreamError && failure.code === "upstream_timeout" ? 504
             : phase === "input" ? 400 : phase === "prepare" ? 503 : 502;
       errorCode = failure instanceof RelayAdmissionError || failure instanceof ChatUpstreamError || failure instanceof DirectChatResponseError ? failure.code
-        : deliveryTimedOut ? "delivery_timeout"
         : phase === "input" && failure instanceof ChatBodyTooLargeError ? "request_too_large"
         : error instanceof ModelConversionError ? phase === "input" ? "invalid_request" : "invalid_upstream_response"
           : phase === "input" ? "invalid_request" : "upstream_error";
@@ -314,7 +312,8 @@ export class ModelRelayServer {
           message: (failure instanceof DirectChatRequestError || failure instanceof DirectResponsesRequestError) && phase === "input" ? message
             : `${message} [${errorCode}; phase=${phase}${httpStatus === undefined ? "" : `; upstream_http=${httpStatus}`}; request_id=${relayRequestId}]`,
           ...(phase === "input" && (failure instanceof DirectChatRequestError || failure instanceof DirectResponsesRequestError) ? { param: failure.param } : {}),
-          phase, request_id: relayRequestId, ...(httpStatus === undefined ? {} : { upstream_status: httpStatus }),
+          phase, ...(failure instanceof ModelRequestTimeoutError ? { timeout_stage: failure.stage } : {}),
+          request_id: relayRequestId, ...(httpStatus === undefined ? {} : { upstream_status: httpStatus }),
           upstream_attempted: started !== undefined } };
         // Draining the rejected upload keeps the socket open long enough for the client to read
         // the rejection; destroying an unread request resets it and surfaces as EPIPE/ECONNRESET.
@@ -355,8 +354,8 @@ export class ModelRelayServer {
   }
 }
 
-function deliveryTimeout(): Error & { code: string } {
-  return Object.assign(new Error("Response delivery timed out"), { code: "ETIMEDOUT" });
+function deliveryTimeout(): ModelRequestTimeoutError {
+  return new ModelRequestTimeoutError("terminal");
 }
 
 async function endResponse(response: ServerResponse, text: string, signal: AbortSignal, timeoutMs: number = modelRequestPolicy.terminalDeliveryTimeoutMs): Promise<void> {

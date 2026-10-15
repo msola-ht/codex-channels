@@ -7,6 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { ChatBodyTooLargeError, readChatBody, waitForChatOperation } from "./chat-io.js";
 import { endToEndHeaders } from "./request-routing.js";
+import { ModelRequestTimeoutError, type ModelRequestStage } from "./chat-errors.js";
 
 const maximumBodyBytes = 16 * 1024 * 1024;
 const uploadTimeoutMs = 30_000;
@@ -126,10 +127,10 @@ export class AggregateModelProxy {
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const controller = new AbortController();
     const { signal } = controller;
-    const timeout = (): void => controller.abort(new AggregateRequestError(504, "aggregate_timeout", "聚合模型请求超时。"));
+    const timeout = (stage: ModelRequestStage): void => controller.abort(new ModelRequestTimeoutError(stage));
     const disconnected = (): void => { if (!response.writableFinished) controller.abort(); };
     const aborted = (): void => controller.abort();
-    const uploadTimer = setTimeout(timeout, uploadTimeoutMs);
+    const uploadTimer = setTimeout(() => timeout("upload"), uploadTimeoutMs);
     let snapshotTimer: ReturnType<typeof setTimeout> | undefined;
     let deliveryTimer: ReturnType<typeof setTimeout> | undefined;
     let upstream: ClientRequest | undefined;
@@ -163,7 +164,7 @@ export class AggregateModelProxy {
       catch { throw new AggregateRequestError(400, "invalid_payload", "聚合模型请求嵌套结构无效。"); }
       const headers = requestHeaders(request.headers, route.authorization, Buffer.byteLength(payload), body.stream === true);
       signal.throwIfAborted();
-      snapshotTimer = setTimeout(timeout, snapshotTimeoutMs);
+      snapshotTimer = setTimeout(() => timeout("prepare"), snapshotTimeoutMs);
       try {
         const pending = this.assertCurrent?.(signal);
         if (pending !== undefined) await waitForChatOperation(pending, signal);
@@ -184,18 +185,18 @@ export class AggregateModelProxy {
       response.flushHeaders();
       const delivery = new Writable({
         write(chunk: Buffer, encoding, callback) {
-          deliveryTimer = setTimeout(timeout, modelRequestPolicy.deliveryTimeoutMs);
+          deliveryTimer = setTimeout(() => timeout("delivery"), modelRequestPolicy.deliveryTimeoutMs);
           response.write(chunk, encoding, error => { clearTimeout(deliveryTimer); callback(error); });
         },
         final(callback) {
-          deliveryTimer = setTimeout(timeout, modelRequestPolicy.terminalDeliveryTimeoutMs);
+          deliveryTimer = setTimeout(() => timeout("terminal"), modelRequestPolicy.terminalDeliveryTimeoutMs);
           response.end(() => { clearTimeout(deliveryTimer); callback(); });
         },
       });
       await pipeline(incoming, delivery, { signal });
     } catch (error) {
-      const failure = signal.reason instanceof AggregateRequestError ? signal.reason
-        : error instanceof AggregateRequestError ? error
+      const failure = signal.reason instanceof AggregateRequestError || signal.reason instanceof ModelRequestTimeoutError ? signal.reason
+        : error instanceof AggregateRequestError || error instanceof ModelRequestTimeoutError ? error
         : error instanceof ChatBodyTooLargeError ? new AggregateRequestError(413, "body_too_large", "聚合模型请求正文超过 16 MiB。")
         : new AggregateRequestError(502, "local_proxy_failed", "本地模型代理连接失败或响应中断。");
       if (!response.destroyed && !response.headersSent) reject(request, response, failure);
@@ -257,9 +258,10 @@ function responseHeaders(source: IncomingHttpHeaders): IncomingHttpHeaders {
   return headers;
 }
 
-function reject(request: IncomingMessage, response: ServerResponse, error: AggregateRequestError): void {
+function reject(request: IncomingMessage, response: ServerResponse, error: AggregateRequestError | ModelRequestTimeoutError): void {
   request.pause();
-  const body = JSON.stringify({ error: { type: error.status >= 500 ? "server_error" : "invalid_request_error", code: error.code, message: error.message } });
+  const body = JSON.stringify({ error: { type: error.status >= 500 ? "server_error" : "invalid_request_error", code: error.code, message: error.message,
+    ...(error instanceof ModelRequestTimeoutError ? { timeout_stage: error.stage } : {}) } });
   response.writeHead(error.status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(body), connection: "close" });
   const timer = setTimeout(() => response.destroy(), modelRequestPolicy.terminalDeliveryTimeoutMs);
   const cleanup = (): void => { clearTimeout(timer); response.off("finish", cleanup); response.off("close", cleanup); };

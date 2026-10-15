@@ -5,7 +5,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { ChatToResponses, ModelConversionError, clinePassChatReasoningControl, responsesToChat } from "../model-api/index.js";
 import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "./chat-diagnostics.js";
-import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
+import { ChatUpstreamError, ModelRequestTimeoutError, type ModelRequestStage, chatStreamError } from "./chat-errors.js";
+import { validateDirectModelResponse } from "./direct-model-http.js";
 import type { ProviderProxyOptions } from "./proxy.js";
 import { readChatBody, readModelFrames, waitForChatOperation, writeChatData } from "./chat-io.js";
 import { pinClinePassRouting } from "./cline-pass-routing.js";
@@ -58,28 +59,25 @@ export class ChatCompletionsBridge {
     this.active.add(terminalController);
     let status = 400;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const phaseTimeout = (timeoutMs: number, upload = false): void => {
+    const phaseTimeout = (timeoutMs: number, stage: ModelRequestStage): void => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (upload) status = 408;
-        controller.abort(upload
-          ? new ChatUpstreamError("request_timeout", "请求正文接收超时，请重试。", true)
-          : chatUpstreamError({ code: "upstream_timeout" }));
+        controller.abort(new ModelRequestTimeoutError(stage));
       }, timeoutMs);
     };
-    phaseTimeout(modelRequestPolicy.preparationTimeoutMs, true);
+    phaseTimeout(modelRequestPolicy.preparationTimeoutMs, "upload");
     const abort = (): void => { controller.abort(); terminalController.abort(); };
     response.once("close", abort);
     request.once("aborted", abort);
     let upstreamRequest: ReturnType<typeof httpRequest> | undefined;
     let incoming: IncomingMessage | undefined;
     const finishResponse = async (data?: string): Promise<void> => {
-      const terminalTimer = setTimeout(() => terminalController.abort(new ChatUpstreamError("delivery_timeout", "模型响应交付超时，请重试。", true)), modelRequestPolicy.terminalDeliveryTimeoutMs);
+      const terminalTimer = setTimeout(() => terminalController.abort(new ModelRequestTimeoutError("terminal")), modelRequestPolicy.terminalDeliveryTimeoutMs);
       try {
         const finished = once(response, "finish", { signal: terminalController.signal });
         // Attach a rejection handler before a synchronous write can fail.
         void finished.catch(() => undefined);
-        if (data !== undefined) await writeChatData(response, data, terminalController.signal, undefined, modelRequestPolicy.terminalDeliveryTimeoutMs);
+        if (data !== undefined) await writeChatData(response, data, terminalController.signal, undefined, modelRequestPolicy.terminalDeliveryTimeoutMs, "terminal");
         response.end();
         await finished;
       } catch (error) {
@@ -103,7 +101,7 @@ export class ChatCompletionsBridge {
     try {
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new ModelConversionError("Compressed model requests are unsupported");
       const payloadBody = await readChatBody(request, controller.signal, 16 * 1024 * 1024);
-      phaseTimeout(modelRequestPolicy.preparationTimeoutMs);
+      phaseTimeout(modelRequestPolicy.preparationTimeoutMs, "prepare");
       const source: unknown = JSON.parse(payloadBody);
       const requestedModel = source && typeof source === "object" && "model" in source ? source.model : undefined;
       let modelCapabilities: { reasoningEfforts: readonly string[] } | undefined;
@@ -140,7 +138,7 @@ export class ChatCompletionsBridge {
         ? { ...parameters, ...clinePassChatReasoningControl(body.model, reasoning.effort) }
         : body;
       const payload = JSON.stringify(this.options.clinePass ? pinClinePassRouting(outbound) : outbound);
-      const headers: Record<string, string> = { "content-type": "application/json", accept: "text/event-stream", "content-length": String(Buffer.byteLength(payload)) };
+      const headers: Record<string, string> = { "content-type": "application/json", accept: "text/event-stream", "accept-encoding": "identity", "content-length": String(Buffer.byteLength(payload)) };
       if (typeof request.headers.authorization === "string") headers.authorization = request.headers.authorization;
       if (this.options.upstreamUserAgent) headers["user-agent"] = this.options.upstreamUserAgent;
       status = 502;
@@ -152,7 +150,7 @@ export class ChatCompletionsBridge {
       });
       const ready = once(upstreamRequest, "response", { signal: controller.signal });
       timing = { submittedAt: performance.now() };
-      phaseTimeout(modelRequestPolicy.headersTimeoutMs);
+      phaseTimeout(modelRequestPolicy.headersTimeoutMs, "headers");
       upstreamRequest.end(payload);
       [incoming] = await ready as [IncomingMessage];
       clearTimeout(timer);
@@ -161,16 +159,11 @@ export class ChatCompletionsBridge {
       publishDiagnostics();
       if (incoming.statusCode !== 200) {
         status = incoming.statusCode && incoming.statusCode >= 400 ? incoming.statusCode : 502;
-        throw await readChatHttpError(incoming, { value: value => {
+      }
+      await validateDirectModelResponse(incoming, true, { value: value => {
           diagnostics.push(value);
           if (chatStreamError(value)) observeFirstResponse(performance.now());
         }, invalid: () => {} }, controller.signal);
-      }
-      if (!incoming.headers["content-type"]?.startsWith("text/event-stream")) {
-        // 200 但不是 SSE：上游没有按流式合同返回，按服务异常归类且不读取正文。
-        incoming.destroy();
-        throw chatUpstreamError({ code: "server_error" });
-      }
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       const converter = new ChatToResponses(`resp_${randomUUID()}`, body.model, toolNames);
       const emit = async (events: Record<string, unknown>[]): Promise<void> => {
@@ -179,8 +172,8 @@ export class ChatCompletionsBridge {
           try {
             await writeChatData(response, `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`, controller.signal, () => { generationBlocked = true; });
           } catch (error) {
-            if (error instanceof Error && "code" in error && error.code === "ETIMEDOUT") {
-              controller.abort(new ChatUpstreamError("delivery_timeout", "模型响应交付超时，请重试。", true));
+            if (error instanceof ModelRequestTimeoutError) {
+              controller.abort(error);
             }
             throw error;
           }
@@ -222,11 +215,13 @@ export class ChatCompletionsBridge {
       const aborted = controller.signal.reason instanceof ChatUpstreamError ? controller.signal.reason
         : terminalController.signal.reason instanceof ChatUpstreamError ? terminalController.signal.reason : undefined;
       const failure = error instanceof ModelConversionError || error instanceof ChatUpstreamError ? error
-        : aborted ?? (error instanceof Error && "code" in error && error.code === "ETIMEDOUT" ? chatUpstreamError({ code: "upstream_timeout" }) : undefined);
+        : aborted;
+      if (failure instanceof ModelRequestTimeoutError) status = failure.status;
       const message = failure?.message ?? "Chat upstream request failed";
       if (status === 502 && (!controller.signal.aborted || aborted)) this.options.onError?.(new Error(message));
       controller.abort(failure);
-      const detail = { code: failure instanceof ChatUpstreamError ? failure.code : status === 400 ? "invalid_request_error" : "chat_upstream_error", message };
+      const detail = { code: failure instanceof ChatUpstreamError ? failure.code : status === 400 ? "invalid_request_error" : "chat_upstream_error", message,
+        ...(failure instanceof ModelRequestTimeoutError ? { timeout_stage: failure.stage } : {}) };
       diagnostics.error(detail.code, response.headersSent ? "stream" : "http", failure instanceof ChatUpstreamError && failure.retryable);
       if (failure instanceof ModelConversionError && failure.diagnostics) diagnostics.conversion(failure.diagnostics);
       publishDiagnostics();

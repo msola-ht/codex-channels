@@ -306,6 +306,7 @@ function ResponseFailure({ response, diagnostics }: { response: NonNullable<Traf
     authentication_error: "authentication", permission_denied: "permission", payment_required: "payment",
     context_length_exceeded: "context", content_filter: "content", server_error: "server",
     upstream_timeout: "timeout", request_timeout: "timeout", invalid_request_error: "invalid", not_found: "notFound",
+    upload_timeout: "timeout", preparation_timeout: "timeout", delivery_timeout: "timeout",
   } as const
   const statusReasons = { 400: "invalid", 401: "authentication", 402: "payment", 403: "permission", 404: "notFound", 429: "rateLimit", 500: "server", 502: "server", 503: "server", 504: "timeout" } as const
   const known = codes.find((code): code is keyof typeof reasons => typeof code === "string" && Object.hasOwn(reasons, code))
