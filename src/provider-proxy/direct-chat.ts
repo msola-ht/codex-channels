@@ -2,8 +2,8 @@ import { ChatDiagnostics, modelRequestDiagnostics, type ModelRequestDiagnostics 
 import type { IncomingHttpHeaders } from "node:http";
 import { DirectChatResponse, ModelConversionError, type DirectChatRequest } from "../model-api/index.js";
 import { ChatUpstreamError, chatStreamError, chatUpstreamError } from "./chat-errors.js";
-import { readChatBody, readModelFrames } from "./chat-io.js";
-import { parseDirectModelJson, validateDirectModelResponse, withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
+import { readModelFrames } from "./chat-io.js";
+import { parseDirectModelJson, readDirectModelBody, validateDirectModelResponse, withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
 
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
 import { ChatGenerationTimingObserver } from "./generation-timing.js";
@@ -61,7 +61,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
           diagnostics.push(value); call.capture?.value(value, stream);
         },
         invalid: count => call.capture?.invalid(count),
-      });
+      }, call.signal);
       if (call.request.stream) errorStage = "stream";
       if (call.request.stream) {
         for await (const { data, receivedAt: at } of readModelFrames(incoming, call.signal, {
@@ -83,7 +83,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
         }
         throw new ModelConversionError("Chat stream disconnected before DONE");
       }
-      const body = await readChatBody(incoming, call.signal, 8 * 1024 * 1024);
+      const body = await readDirectModelBody(incoming, call.signal);
       const parsed: unknown = parseDirectModelJson(body, call.capture);
       const receivedAt = performance.now();
       call.capture?.value(parsed, false);

@@ -17,6 +17,7 @@
 
 ## 文件
 
+- `model-request-policy.mjs` / `model-request-policy.d.mts`：Codex 启动、Provider Proxy、Chat 桥与独立 Relay 共用的纯请求阶段预算；完整事件空闲 300 秒、WebSocket 建连 15 秒对齐锁定 Codex 默认，生成没有总期限。第三方与聚合启动显式注入对应字段，已有冲突值拒绝激活；服务就绪前通过 `config/read` 核验合并配置中的 Provider 与策略，包含高优先受管层，官方 OpenAI 保持内置默认。核验连接由服务持有，关闭失败保留以便重试清理；Supervisor 中可能触发 Provider 启动的操作在调用方和服务端统一等待 60 秒，涵盖启动、核验及连接收尾，该控制面预算不限制模型生成。只检查超时，不加载凭据、不写用户配置。
 - `request-timing.mjs` / `request-timing.d.mts`：指标 IPC、存储、CLI 与 WebUI 共用的生成区间校验和观测速度计算；无 I/O、不依赖调试转储。
 - `service-tier.mjs` / `service-tier.d.mts`：Application、CLI 设置与 WebUI 共用的纯加速档位匹配和展示归一；Fast 仅匹配目录的 `fast`/`priority`，Ultrafast 仅匹配 `ultrafast`，返回原始目录 ID，不包含配置写入、功能开关或生命周期操作。
 - `auto-review-metadata.mjs` / `auto-review-metadata.d.mts`：Provider 指标与转储读取共用的自动审查来源、父任务及原始审查身份投影；只接受明确的 `guardian_review` 来源和有界标识，不读取文件或推断缺失归属。

@@ -11,7 +11,7 @@ export {
 } from "./metrics-channel.js";
 export { pruneModelTrafficDumpSessions } from "./traffic-dump.js";
 
-export { ChatCompletionsBridge, chatBridgeRequestTimeoutMs } from "./chat-bridge.js";
+export { ChatCompletionsBridge } from "./chat-bridge.js";
 export { sendDirectChat, type DirectChatTarget } from "./direct-chat.js";
 export { sendDirectResponses, DirectResponsesObserver } from "./direct-responses.js";
 export { ChatBodyTooLargeError, readChatBody, waitForChatOperation, writeChatData } from "./chat-io.js";

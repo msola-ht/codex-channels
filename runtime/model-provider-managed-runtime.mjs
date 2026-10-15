@@ -1,4 +1,5 @@
 import { isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
+import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
 import { createHash } from "node:crypto";
 import { writeResponsesContextFollowers, clinePassFollowsDeepseekContext } from "./responses-context-sync.mjs";
 import { assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
@@ -610,6 +611,7 @@ export function readProviderProfile(
     throw new Error(`Codex ${descriptor.definition.displayName} Profile 模型目录或思考等级无效`);
   }
   const provider = record(record(document.model_providers)[descriptor.id]);
+  assertProviderModelRequestPolicy(provider);
   if (
     provider.name !== descriptor.id
     || provider.base_url !== descriptor.baseUrl

@@ -7,6 +7,7 @@ import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArgum
   readAggregateProviderSettingsFingerprint } from "./aggregate-model-provider.mjs";
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 import { ProviderModelGuard } from "./provider-model-guard.mjs";
+import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -194,7 +195,6 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     ProviderProxy,
     AggregateModelProxy,
     ChatCompletionsBridge,
-    chatBridgeRequestTimeoutMs,
     pruneModelTrafficDumpSessions,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
@@ -208,8 +208,10 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   registerCloseResources(() => proxySelector.close());
   let supervisorOwner;
   let desktopAppBridge;
-  const upstreamAgentFor = async (upstreamUrl) => {
+  const upstreamAgentFor = async (upstreamUrl, signal) => {
+    signal?.throwIfAborted();
     const proxyUrl = await proxySelector.select(upstreamUrl);
+    signal?.throwIfAborted();
     assertRunning();
     if (!proxyUrl) return undefined;
     const existing = upstreamAgentsByProxyUrl.get(proxyUrl);
@@ -325,8 +327,6 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     });
     modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
-      // CP Responses 上游可能缓冲完整工具参数；为无数据阶段保留五分钟。
-      ...(!bridge && isCustomCatalogProvider(upstreamProvider) ? { timeoutMs: 300_000 } : {}),
       // CLP 桥在桥内按目录校验模型；通用 Chat 桥没有该校验，继续由统计代理拒绝目录外或已停用模型。
       ...(modelGuard && !bridgedClinePass ? isCustomCatalogProvider(upstreamProvider)
         ? { readModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) }
@@ -435,8 +435,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       ...(upstreamUrl.port ? { upstreamPort: Number(upstreamUrl.port) } : {}),
       upstreamProtocol: upstreamUrl.protocol === "http:" ? "http" : "https",
       upstreamBasePath: upstreamUrl.pathname,
-      resolveUpstream: async () => {
-        const agent = await upstreamAgentFor(upstreamUrl);
+      resolveUpstream: async (_headers, signal) => {
+        const agent = await upstreamAgentFor(upstreamUrl, signal);
         return {
           ...(agent ? { agent } : {}),
           host: upstreamUrl.hostname,
@@ -560,9 +560,6 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     aggregateProxy = new AggregateModelProxy({ token, assertCurrent: signal => guard.check(signal),
       routes: new Map([...material.routes].map(([slug, route]) => [slug, {
         model: route.model, apiKey: route.apiKey, baseUrl: urls.get(route.provider),
-        timeoutMs: upstreamWireApiFor(route.provider) === "chat_completions"
-          ? chatBridgeRequestTimeoutMs + 10_000
-          : isCustomCatalogProvider(route.provider) ? 310_000 : 65_000,
       }])),
     });
     await aggregateProxy.start();
@@ -595,6 +592,13 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     }
     return errors;
   };
+  const policyClients = new Map();
+  const confirmRequestPolicy = async (targetSocket, provider) => {
+    assertRunning();
+    const expectedProvider = provider === primaryProvider ? customPrimaryProvider?.id ?? provider : provider;
+    await verifyAppServerRequestPolicy(targetSocket, expectedProvider, defaultWorkspace.cwd, runtime.environment, policyClients);
+    assertRunning();
+  };
   const ensureInstance = (provider) => {
     assertRunning();
     const existing = instanceLaunches.get(provider);
@@ -607,9 +611,13 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         const runningChild = childrenByProvider.get(provider);
         if (runningChild) {
           await waitForAppServer(socketPath, runningChild, provider, runtime.environment);
+          await confirmRequestPolicy(socketPath, provider);
           return;
         }
-        if (await appServerSocketAcceptsWebSocket(socketPath, runtime.environment)) return;
+        if (await appServerSocketAcceptsWebSocket(socketPath, runtime.environment)) {
+          await confirmRequestPolicy(socketPath, provider);
+          return;
+        }
         await prepareAppServerSocketPaths([socketPath], runtime.environment);
         settingsSnapshots.delete(provider);
         const snapshot = prepareProviderSettings(provider);
@@ -678,6 +686,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         childrenByProvider.set(provider, child);
         try {
           await waitForAppServer(socketPath, child, provider, runtime.environment);
+          await confirmRequestPolicy(socketPath, provider);
           assertRunning();
           confirmProviderSettings(provider, snapshot);
           settingsRecoveryRequired.delete(provider);
@@ -706,9 +715,13 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       const runningChild = childrenByProvider.get(provider);
       if (runningChild) {
         await waitForAppServer(managed.socketPath, runningChild, provider, runtime.environment);
+        await confirmRequestPolicy(managed.socketPath, provider);
         return;
       }
-      if (await appServerSocketAcceptsWebSocket(managed.socketPath, runtime.environment)) return;
+      if (await appServerSocketAcceptsWebSocket(managed.socketPath, runtime.environment)) {
+        await confirmRequestPolicy(managed.socketPath, provider);
+        return;
+      }
       await prepareAppServerSocketPaths([managed.socketPath], runtime.environment);
       const proxyKey = sharedProviderProxyKey(provider);
       if (!aggregate) providerProxyRuntimes.addUser(proxyKey, provider);
@@ -766,6 +779,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           runtime.environment,
           "模型 Provider App Server",
         );
+        await confirmRequestPolicy(managed.socketPath, provider);
         if (aggregate) await aggregateGuard.check();
         assertRunning();
         confirmProviderSettings(provider, snapshot);
@@ -1045,9 +1059,9 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           upstreamHost: apiUrl.hostname,
           upstreamProtocol: "https",
           upstreamBasePath: apiUrl.pathname,
-          resolveUpstream: async (headers) => {
+          resolveUpstream: async (headers, signal) => {
             const target = headers["chatgpt-account-id"] === undefined ? apiUrl : chatgptUrl;
-            const agent = await upstreamAgentFor(target);
+            const agent = await upstreamAgentFor(target, signal);
             return {
               ...(agent ? { agent } : {}),
               host: target.hostname,
@@ -1146,6 +1160,10 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       () => desktopAppBridge?.close(),
       () => supervisorOwner?.close(),
       () => closeAggregateProxy(),
+      ...[...policyClients].map(([path, client]) => async () => {
+        await client.close();
+        if (policyClients.get(path) === client) policyClients.delete(path);
+      }),
       ...providerProxyRuntimes.values().map(({ proxy }) => () => closeProviderProxy(proxy)),
       ...[...upstreamAgents].map(agent => () => agent.destroy()),
     ].map(operation => Promise.resolve().then(operation)));
@@ -1211,6 +1229,41 @@ function spawnCodexProcess(codexBinary, args, options, environment) {
     ...options,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
+}
+
+/** Read merged configuration through Codex, including managed layers above CLI overrides.
+ * Built-in OpenAI ignores same-name provider overlays in the locked version;
+ * third-party providers must retain the explicit policy injected at launch.
+ */
+async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environment, clients) {
+  const previous = clients.get(socketPath);
+  if (previous) {
+    await previous.close();
+    clients.delete(socketPath);
+  }
+  const { createAppServerTransport, JsonRpcClient } = await import("../dist/codex-client/index.js");
+  const rpc = new JsonRpcClient(createAppServerTransport(
+    { kind: "local-app-server", socketPath },
+    {
+      createCodexProcessInvocation: args => codexProcessInvocation(environment.CODEX_BINARY, args, environment),
+      terminateCodexProcess: terminateChildProcess,
+      connectTimeoutMs: 3_000,
+    },
+  ), 5_000);
+  clients.set(socketPath, rpc);
+  try {
+    await rpc.connect();
+    const response = await rpc.request({ method: "config/read", params: { cwd, includeLayers: false } }, { retryOverload: false });
+    const config = response?.config;
+    if (!config || (config.model_provider ?? "openai") !== provider) {
+      throw new Error("App Server 当前 Provider 与受管启动策略不一致");
+    }
+    const configured = config.model_providers?.[provider];
+    assertProviderModelRequestPolicy(configured ?? {}, provider !== "openai");
+  } finally {
+    await rpc.close();
+    if (clients.get(socketPath) === rpc) clients.delete(socketPath);
+  }
 }
 
 function waitForAppServer(

@@ -1,4 +1,5 @@
 import { isCustomCatalogProvider, responsesModelSettings, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
+import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
 import { existsSync, readdirSync, unlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -232,6 +233,7 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
     throw new Error(`Codex 主模型 Provider 不受 Gateway 支持：${id}`);
   }
   const provider = record(providers[id]);
+  assertProviderModelRequestPolicy(provider);
   assertCustomPrimaryProviderAuthentication(provider);
   if (
     typeof document.openai_base_url === "string"
@@ -485,6 +487,7 @@ function configuredCustomSwitchingProfileFromContent(
     throw new Error("Codex 自定义切换 Provider Profile 只能包含已注册的 Provider 块");
   }
   const provider = record(profileProviders[id]);
+  assertProviderModelRequestPolicy(provider);
   const supportedProviderKeys = new Set([
     "name",
     "base_url",
@@ -493,6 +496,8 @@ function configuredCustomSwitchingProfileFromContent(
     "supports_websockets",
     "request_max_retries",
     "stream_max_retries",
+    "stream_idle_timeout_ms",
+    "websocket_connect_timeout_ms",
     "experimental_bearer_token",
   ]);
   if (Object.keys(provider).some((key) => !supportedProviderKeys.has(key))) {

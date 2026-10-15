@@ -1,4 +1,5 @@
 import { basename, dirname, extname, join, resolve } from "node:path";
+import { assertProviderModelRequestPolicy, providerModelRequestTimeouts } from "./model-request-policy.mjs";
 
 import { parse } from "smol-toml";
 
@@ -100,6 +101,7 @@ export function loadOpenAiBaseUrl(environment = process.env) {
     throw new Error("Codex OpenAI base URL 配置无法安全读取");
   }
   const configured = document.openai_base_url;
+  assertProviderModelRequestPolicy(record(record(document.model_providers).openai));
   if (configured === undefined) return undefined;
   if (typeof configured !== "string") {
     throw new Error("Codex openai_base_url 必须是 HTTP(S) URL");
@@ -140,6 +142,7 @@ export function withProviderBaseUrl(argumentsList, provider, baseUrl) {
     `model_providers.${provider}.base_url=`,
     `model_providers.${provider}.request_max_retries=`,
     `model_providers.${provider}.stream_max_retries=`,
+    ...Object.keys(providerModelRequestTimeouts()).map(key => `model_providers.${provider}.${key}=`),
   ];
   const kept = [];
   for (let index = 0; index < argumentsList.length; index += 1) {
@@ -164,6 +167,9 @@ export function withProviderBaseUrl(argumentsList, provider, baseUrl) {
     `model_providers.${provider}.request_max_retries=${thirdPartyProviderRequestMaxRetries}`,
     "-c",
     `model_providers.${provider}.stream_max_retries=${thirdPartyProviderStreamMaxRetries}`,
+    ...Object.entries(providerModelRequestTimeouts()).flatMap(([key, value]) => [
+      "-c", `model_providers.${provider}.${key}=${value}`,
+    ]),
   ];
 }
 

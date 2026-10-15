@@ -1,5 +1,6 @@
 /** Cline's documented OpenAI-compatible errors; never expose upstream free text. */
 import type { IncomingMessage } from "node:http";
+import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 
 export class ChatUpstreamError extends Error {
   constructor(readonly code: string, message: string, readonly retryable: boolean, readonly retryAfter?: string) {
@@ -46,7 +47,7 @@ export function chatStreamError(value: unknown): ChatUpstreamError | undefined {
   }
   return undefined;
 }
-export async function readChatHttpError(incoming: IncomingMessage, capture?: { value(value: unknown, stream: boolean): void; invalid(bytes: number): void }): Promise<ChatUpstreamError> {
+export async function readChatHttpError(incoming: IncomingMessage, capture?: { value(value: unknown, stream: boolean): void; invalid(bytes: number): void }, signal?: AbortSignal): Promise<ChatUpstreamError> {
   const retryAfter = incoming.statusCode === 429 || incoming.statusCode === 503 ? safeRetryAfter(incoming.headers["retry-after"]) : undefined;
   const classify = (value: unknown): ChatUpstreamError => {
     const error = chatUpstreamError(value, incoming.statusCode);
@@ -54,6 +55,11 @@ export async function readChatHttpError(incoming: IncomingMessage, capture?: { v
   };
   const parts: Buffer[] = [];
   let size = 0;
+  let timedOut = false;
+  const abort = (): void => { incoming.destroy(); };
+  signal?.throwIfAborted();
+  signal?.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(() => { timedOut = true; incoming.destroy(); }, modelRequestPolicy.errorBodyTimeoutMs);
   try {
     for await (const value of incoming) {
       const part = Buffer.isBuffer(value) ? value : Buffer.from(value as string);
@@ -61,12 +67,18 @@ export async function readChatHttpError(incoming: IncomingMessage, capture?: { v
       if (size > 64 * 1024) { incoming.destroy(); break; }
       parts.push(part);
     }
+    signal?.throwIfAborted();
+    if (timedOut) { capture?.invalid(size); return classify(undefined); }
     if (size <= 64 * 1024) {
       const value: unknown = JSON.parse(Buffer.concat(parts).toString("utf8"));
       capture?.value(value, false);
       return classify(object(value).error);
     }
-  } catch { /* Non-JSON or interrupted bodies retain the HTTP classification. */ }
+  } catch {
+    if (signal?.aborted) throw signal.reason;
+    // The HTTP error is already authoritative. A stalled diagnostic body must
+    // not replace 401/429/503 with 504 or discard a validated Retry-After.
+  } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
   capture?.invalid(size);
   return classify(undefined);
 }

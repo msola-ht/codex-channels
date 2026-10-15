@@ -2,15 +2,15 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request as httpRequest, type ClientRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
+import { Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { ChatBodyTooLargeError, readChatBody, waitForChatOperation } from "./chat-io.js";
 import { endToEndHeaders } from "./request-routing.js";
 
 const maximumBodyBytes = 16 * 1024 * 1024;
 const uploadTimeoutMs = 30_000;
 const snapshotTimeoutMs = 15_000;
-const defaultRouteTimeoutMs = 310_000;
-const maximumRouteTimeoutMs = 600_000;
 const correlationHeaders = new Set([
   "user-agent", "session-id", "thread-id", "x-request-id", "x-client-request-id",
   "x-codex-turn-metadata", "x-codex-parent-thread-id", "x-responsesapi-include-timing-metrics",
@@ -21,8 +21,6 @@ export interface AggregateModelRoute {
   apiKey: string;
   /** Already authorized, running ProviderProxy; never a real upstream URL. */
   baseUrl: string;
-  /** Header and stream idle budget; independent of the 600-second response deadline. */
-  timeoutMs?: number;
 }
 
 export interface AggregateModelProxyOptions {
@@ -37,7 +35,6 @@ interface LocalRoute {
   authorization: string;
   port: number;
   path: string;
-  timeoutMs: number;
 }
 
 class AggregateRequestError extends Error {
@@ -69,12 +66,8 @@ export class AggregateModelProxy {
       const match = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})(\/go\/[a-zA-Z0-9_-]{1,128})?\/?$/u.exec(route.baseUrl);
       const port = Number(match?.[1]);
       if (!match || port > 65535) throw new Error("聚合模型代理目标必须是已授权的本地 ProviderProxy。");
-      const timeoutMs = route.timeoutMs === undefined ? defaultRouteTimeoutMs : route.timeoutMs;
-      if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > maximumRouteTimeoutMs) {
-        throw new Error("聚合模型代理路由超时必须是 1 至 600000 毫秒的整数。");
-      }
       this.routes.set(slug, { model: route.model, authorization: `Bearer ${route.apiKey}`, port,
-        path: `${match[2] ?? ""}/responses`, timeoutMs });
+        path: `${match[2] ?? ""}/responses` });
     }
     if (this.routes.size === 0) throw new Error("聚合模型代理至少需要一个授权模型。");
     this.server = createServer({ maxHeaderSize: 16 * 1024, headersTimeout: uploadTimeoutMs, requestTimeout: uploadTimeoutMs }, (request, response) => {
@@ -136,16 +129,15 @@ export class AggregateModelProxy {
     const timeout = (): void => controller.abort(new AggregateRequestError(504, "aggregate_timeout", "聚合模型请求超时。"));
     const disconnected = (): void => { if (!response.writableFinished) controller.abort(); };
     const aborted = (): void => controller.abort();
-    let totalTimer = setTimeout(timeout, uploadTimeoutMs + snapshotTimeoutMs + maximumRouteTimeoutMs);
     const uploadTimer = setTimeout(timeout, uploadTimeoutMs);
     let snapshotTimer: ReturnType<typeof setTimeout> | undefined;
-    let headTimer: ReturnType<typeof setTimeout> | undefined;
+    let deliveryTimer: ReturnType<typeof setTimeout> | undefined;
     let upstream: ClientRequest | undefined;
     let incoming: IncomingMessage | undefined;
     this.active.add(controller);
     response.once("close", disconnected);
+    response.once("error", aborted);
     request.once("aborted", aborted);
-    response.setTimeout(uploadTimeoutMs, timeout);
     try {
       if (this.stopped) throw new AggregateRequestError(503, "aggregate_closed", "聚合模型代理已关闭。");
       if (request.method !== "POST" || request.url !== "/responses") throw new AggregateRequestError(404, "unsupported_endpoint", "聚合模型代理仅支持 POST /responses。");
@@ -171,7 +163,6 @@ export class AggregateModelProxy {
       catch { throw new AggregateRequestError(400, "invalid_payload", "聚合模型请求嵌套结构无效。"); }
       const headers = requestHeaders(request.headers, route.authorization, Buffer.byteLength(payload), body.stream === true);
       signal.throwIfAborted();
-      response.setTimeout(snapshotTimeoutMs, timeout);
       snapshotTimer = setTimeout(timeout, snapshotTimeoutMs);
       try {
         const pending = this.assertCurrent?.(signal);
@@ -182,20 +173,26 @@ export class AggregateModelProxy {
       }
       signal.throwIfAborted();
       clearTimeout(snapshotTimer);
-      clearTimeout(totalTimer);
-      totalTimer = setTimeout(timeout, maximumRouteTimeoutMs);
-      response.setTimeout(route.timeoutMs, timeout);
+      // The authorized local target owns real upstream header/protocol-idle clocks.
+      // This outer hop only bounds writes that are actually waiting for delivery.
       upstream = httpRequest({ hostname: "127.0.0.1", port: route.port, path: route.path, method: "POST", headers, signal, agent: false });
-      upstream.setTimeout(route.timeoutMs, timeout);
-      headTimer = setTimeout(timeout, route.timeoutMs);
       const ready = once(upstream, "response", { signal });
       upstream.end(payload);
       [incoming] = await ready as [IncomingMessage];
-      clearTimeout(headTimer);
       signal.throwIfAborted();
       response.writeHead(incoming.statusCode ?? 502, responseHeaders(incoming.headers));
       response.flushHeaders();
-      await pipeline(incoming, response, { signal });
+      const delivery = new Writable({
+        write(chunk: Buffer, encoding, callback) {
+          deliveryTimer = setTimeout(timeout, modelRequestPolicy.deliveryTimeoutMs);
+          response.write(chunk, encoding, error => { clearTimeout(deliveryTimer); callback(error); });
+        },
+        final(callback) {
+          deliveryTimer = setTimeout(timeout, modelRequestPolicy.terminalDeliveryTimeoutMs);
+          response.end(() => { clearTimeout(deliveryTimer); callback(); });
+        },
+      });
+      await pipeline(incoming, delivery, { signal });
     } catch (error) {
       const failure = signal.reason instanceof AggregateRequestError ? signal.reason
         : error instanceof AggregateRequestError ? error
@@ -204,11 +201,11 @@ export class AggregateModelProxy {
       if (!response.destroyed && !response.headersSent) reject(request, response, failure);
       else if (!response.writableFinished) response.destroy();
     } finally {
-      clearTimeout(totalTimer); clearTimeout(uploadTimer); clearTimeout(snapshotTimer); clearTimeout(headTimer);
+      clearTimeout(uploadTimer); clearTimeout(snapshotTimer); clearTimeout(deliveryTimer);
       upstream?.destroy();
       if (incoming && !incoming.complete) incoming.destroy();
-      response.setTimeout(0);
-      response.off("close", disconnected); request.off("aborted", aborted);
+      response.off("close", disconnected); response.off("error", aborted); request.off("aborted", aborted);
+      controller.abort();
       this.active.delete(controller);
     }
   }
@@ -264,5 +261,8 @@ function reject(request: IncomingMessage, response: ServerResponse, error: Aggre
   request.pause();
   const body = JSON.stringify({ error: { type: error.status >= 500 ? "server_error" : "invalid_request_error", code: error.code, message: error.message } });
   response.writeHead(error.status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(body), connection: "close" });
+  const timer = setTimeout(() => response.destroy(), modelRequestPolicy.terminalDeliveryTimeoutMs);
+  const cleanup = (): void => { clearTimeout(timer); response.off("finish", cleanup); response.off("close", cleanup); };
+  response.once("finish", cleanup); response.once("close", cleanup);
   response.end(body);
 }

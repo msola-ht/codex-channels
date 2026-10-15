@@ -1,7 +1,9 @@
 import { once } from "node:events";
 import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeaders } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { ChatUpstreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
+import { readChatBody } from "./chat-io.js";
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
 import type { ProviderProxyUpstream } from "./proxy.js";
 import { effectiveUpstreamUserAgent } from "./response-metrics-observer.js";
@@ -9,8 +11,8 @@ import { endToEndHeaders } from "./request-routing.js";
 
 export interface DirectModelTarget extends ProviderProxyUpstream { authorization: string }
 
-export async function validateDirectModelResponse(incoming: IncomingMessage, stream: boolean, capture?: Pick<DirectChatCapture, "value" | "invalid">): Promise<void> {
-  if (incoming.statusCode !== 200) throw await readChatHttpError(incoming, capture);
+export async function validateDirectModelResponse(incoming: IncomingMessage, stream: boolean, capture?: Pick<DirectChatCapture, "value" | "invalid">, signal?: AbortSignal): Promise<void> {
+  if (incoming.statusCode !== 200) throw await readChatHttpError(incoming, capture, signal);
   const contentType = incoming.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
   if (contentType !== (stream ? "text/event-stream" : "application/json")) {
     throw new ChatUpstreamError("invalid_upstream_content_type", "Upstream response Content-Type does not match the requested JSON/SSE format.", false);
@@ -23,6 +25,14 @@ export function parseDirectModelJson(text: string, capture?: DirectChatCapture):
     capture?.invalid(Buffer.byteLength(text));
     throw new ChatUpstreamError("invalid_upstream_json", "Upstream response contains invalid JSON.", false);
   }
+}
+
+/** A successful non-streaming response must complete within its own body budget. */
+export async function readDirectModelBody(incoming: IncomingMessage, signal: AbortSignal): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(chatUpstreamError({ code: "upstream_timeout" })), modelRequestPolicy.bodyReadTimeoutMs);
+  try { return await readChatBody(incoming, AbortSignal.any([signal, controller.signal]), 8 * 1024 * 1024); }
+  finally { clearTimeout(timer); }
 }
 
 interface DirectModelHttpCall {
@@ -60,8 +70,7 @@ export async function withDirectModelResponse(call: DirectModelHttpCall, consume
   });
   let timeoutError: ReturnType<typeof chatUpstreamError> | undefined;
   const timeout = (): void => { timeoutError = chatUpstreamError({ code: "upstream_timeout" }); request.destroy(timeoutError); };
-  const timer = setTimeout(timeout, 60_000);
-  request.setTimeout(60_000, timeout);
+  const timer = setTimeout(timeout, modelRequestPolicy.headersTimeoutMs);
   try {
     const ready = once(request, "response");
     const ua = request.getHeader("user-agent");
