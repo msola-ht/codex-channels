@@ -45,7 +45,9 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
 - `sqlite-auto-approval-review-metrics.ts`：在同一指标连接保存官方自动审查 ID、通过/拒绝/超时/中止/进行中状态与轮次连续观测标记；按精确 `subagent_turns` 递归去重汇总本轮任务和当前会话累计，各分类、总次数与覆盖独立返回。无法区分的历史终态明确保留 unknown，不推成拒绝。不保存审查内容；重启、断线、写入失败和保留裁剪降级覆盖，不能从官方历史补齐缺失审查。Gateway 是唯一写入方，只读访问、清理、Provider prune 和 reset 沿用指标库边界。
 - `sqlite-quota-queries.ts`：封装周额度估算、最新额度与历史窗口归约；通过 Store 的同一连接和受跟踪迭代器读取，不创建连接或事务，不承担 Store 关闭及 Schema 生命周期。
 - `sqlite-request-metrics-query-base.ts`：请求、Thread 与子代理查询共用的只读 Reader 端口、SQL 聚合片段及分页、范围、ID 校验；不依赖查询组件或组合根，不持有连接、事务或写入口。ID 校验同时供 Store 与自动审查写入使用。
+  中断统计共用来源感知判定：未生成完成时，Relay 使用 `error_code`、原生代理使用 `error_type` 的 `client_disconnected`；缺失原因不视为中断。已完成生成的交付异常不改写生成结果，查询不回写历史记录。
 - `sqlite-request-metrics-queries.ts`：请求分页、错误统计、日/小时汇总、Relay 调用方与 Key 的批量使用摘要及同步游标读取，并作为组合根持有线程域与子代理域查询；通过 Store 的读取与关闭检查端口执行，SQL 和行映射不介入写入、事务或数据库生命周期。
+  错误聚合保留来源、提供商、模型、生成状态、HTTP 状态、错误类型和错误码维度；同组最新诊断按记录时间及行 ID 确定，有限组结果按全部分组维度稳定排序。CLI 与 WebUI 共用该投影，不修改存储 Schema。
   请求分页的 `isSubagent` 只读关联当前 `subagent_threads` 的精确 Thread 登记；Relay、自动审查及未登记归属返回 false，不代表已确认是主代理，不新增持久化字段。
   `modelUsage(scope, modelAliases?)` 在相同请求范围内按模型显示名跨提供商合并：明确标记 `request_purpose = 'autoApprovalReview'` 的请求优先归入 `auto-review`，包括原始模型为空或配置了其他显示名的审查请求；其他请求的可选映射以持久化模型 ID 做一次精确匹配，未配置的模型和 null 保持原值，用途缺失时不从模型名称推断审查。相同原始模型的审查与其他请求按各自规则分组。同一显示名在 SQLite 内先分组，再汇总请求、Token、状态、压缩和缓存指标及按 Thread/Turn 去重的轮数。每组的 `members` 按提供商与原始模型 ID 返回同范围的请求、Token、状态、压缩、缓存指标和去重轮数，原始模型 null 保留；组轮数独立去重，跨审查模型的相同 Thread/Turn 仍只计一轮，不能把成员轮数相加。组与成员均完整返回，按请求量降序稳定排序，不沿用 CLI 的“提供商 + 模型”分组或前 20 组上限。控制台通过 `overview(range, modelAliases?).models` 在同一只读快照消费，其他查询和持久化模型字段保持原口径。
   Thread 列表额外返回同筛选范围的 `totalTokens`、自身缓存与后代输入/缓存/输出分项，以及按请求去重的 `treeAggregate`，支持总计 Token 排序；缓存是输入子集，不重复累加，自身与后代分别判断缓存完整性。自身 `cacheUsage` 与后代 `subagentUsage.cacheUsage` 分别保留输入和缓存均已观测的缓存样本及缺失请求数，供部分采集时展示已知缓存；完整缓存合计仍在任意请求缺失时返回 null。WebUI 主会话查询允许只有后代匹配的根入选。普通 Thread 查询仍保留自身有匹配记录的行集合，自身聚合与 Turn 查询口径不变；不新增持久化汇总或 Schema 字段。

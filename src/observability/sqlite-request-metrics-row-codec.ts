@@ -150,6 +150,8 @@ export interface ErrorSummaryRow extends RequestOutcomeRow {
 }
 
 export interface ErrorGroupRow {
+  source: "owned" | "relay";
+  error_code: string | null;
   provider: string;
   model: string | null;
   status: "failed" | "incomplete" | "unknown";

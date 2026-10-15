@@ -212,8 +212,8 @@ base_url = "https://proxy.example.com/v1"
 wire_api = "responses"
 requires_openai_auth = true
 supports_websockets = false
-request_max_retries = 1
-stream_max_retries = 0
+request_max_retries = 4
+stream_max_retries = 5
 ```
 
 可配置多个自定义主 Provider 候选块，但同一时刻只激活一个：`model_provider` 显式选中时激活
@@ -273,9 +273,11 @@ Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_u
 
 修改后运行 `codexc restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。
-Gateway 管理的 DeepSeek、OpenCode Go 与自定义 Provider 统一使用一次 HTTP 失败重试、零次流
-断开重连，即首次 HTTP 请求失败后最多再试一次，避免 Codex 默认请求重试和流重连相乘；已有配置
-也会在 App Server 服务启动时应用同一边界。OpenAI 官方 Provider 保持 Codex 原生重试策略。
+所有通过 Codex 的 Provider（官方、第三方固定、切换及聚合）统一采用锁定 Codex 0.162.1 的重试语义：HTTP 失败最多重试 4 次、流失败最多重试 5 次。第三方和聚合启动显式注入 `4/5`；代理和 Chat 桥不叠加重发。新建受管 Profile 写入相同值，已有配置文件不自动改写，启动覆盖统一实际行为；Profile 中已有重试字段仍按非负安全整数读取。
+
+所有 Codex 实例保留原生网络重连、取消和 WebSocket→HTTP 降级，不注入第三方专属的 `unbounded_connection_retries` 开关。该功能由 Codex 的默认值、用户设置及受管要求共同决定；锁定版本默认开启，符合条件的普通采样连接失败可能持续退避重连。HTTP、流重试和传输降级是不同层，因此不承诺整个 Turn 的固定发送次数或总时长。HTTP 重试针对可恢复的 5xx 和传输错误，使用 Codex 退避及上游等待建议；Chat 桥保留经过校验的 `Retry-After`。独立 Relay 不经过 Codex，不自行重试，由调用方决定。
+
+启动就绪前通过 `config/read` 核验实际第三方及聚合 Provider 的 `4/5`，受管 Provider 覆盖冲突或核验失败会拒绝就绪。官方 OpenAI 保持内置默认；不把同名原始配置块误认为已覆盖内置 Provider。更新程序后重启 App Server 激活进程策略。
 
 已存在的 Thread 在 Codex 中保留创建时的 Provider：恢复旧会话时，官方实现会用线程保存的
 `model_provider` 覆盖当前配置。因此切换 `model_provider` 后，旧会话仍走原 Provider（例如内置
@@ -289,7 +291,7 @@ Gateway 管理的 DeepSeek、OpenCode Go 与自定义 Provider 统一使用一�
 在固定模式把自定义 Thread 路由到主 App Server；切换模式保持官方 `openai` 主实例，并通过
 自定义目录提供商的 `~/.codex/sf-cp-<名称>.config.toml`（ID 为 `cp-<名称>`），或 Codex 兼容类型的 `~/.codex/sf-custom-<Provider ID>.config.toml` 启动独立自定义 App Server。每个 Profile 完整保存该
 Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort = "medium"`、服务层级、
-`request_max_retries = 1` 和 `stream_max_retries = 0`；受管 Provider 的新 Profile 也写入同一重试
+`request_max_retries = 4` 和 `stream_max_retries = 5`；受管 Provider 的新 Profile 也写入同一重试
 边界，主 `~/.codex/config.toml` 保持官方配置。
 `codexc remote -p <Provider ID>` 或 `codexc app -p <Provider ID>` 连接该隔离实例；
 规范 Profile 名称 `sf-cp-<名称>` 或 Codex 兼容类型的 `sf-custom-<Provider ID>` 也可传给 `-p` / `--provider`，Remote 还可显式使用
@@ -351,7 +353,13 @@ JSON 凭据文件；使用固定模式时应运行 `codexc remote`，若自行�
 `provider` 管理链路。WebUI 的 Provider 设置中选择“自定义提供商”。
 此类型使用 `cp-` 开头的 Provider ID（其后 1-61 位 ASCII 字母、数字、`-` 或 `_`）。
 例如 `cp-llm`，终端使用 `codexc remote -p cp-llm` 或 `codexc app -p cp-llm`，规范 Profile 与文件分别为 `sf-cp-llm` 和 `sf-cp-llm.config.toml`。`cp-` 表示自定义提供商，与上游协议无关；协议独立选择 Responses 或 Chat Completions。
-所有 `cp-*` Responses Provider（固定、切换和聚合模式）共用 300 秒的统计代理超时预算，不是单个 Provider 的可配置项。上游 HTTP（包括 `/responses` 和 `/models`）按连接连续空闲计时，以容纳上游缓冲大段工具参数的情况，不限制请求总时长；WebSocket 握手和上游关闭后的终态交付等待也使用该预算，不是 WebSocket 思考时长限制。聚合入口为该路由预留 310 秒空闲预算，仍保留 600 秒响应总期限。更新程序并重启 App Server 后生效，Chat 桥和其他 Provider 保持原有超时预算。
+所有 Provider 的固定、切换和聚合模式以及独立 Relay 共用统一请求策略。完整协议事件空闲为 300 秒，WebSocket 建连为 15 秒，对齐锁定 Codex 0.162.1 的有效默认值；生成没有固定总期限。HTTP 首响应头额外保留 300 秒网络等待，错误正文最多 5 秒，非流式正文最多 300 秒；下游交付受阻最多 30 秒，终态和关闭收尾最多 5 秒。聚合与 Chat 桥外层不重复启动内层模型计时器。
+
+代理本地期限使用同一套错误分类：上传 408 `upload_timeout`、准备 504 `preparation_timeout`、上游等待 504 `upstream_timeout`、交付与收尾 504 `delivery_timeout`。可发送结构化错误时，用 `timeout_stage` 区分 `upload/prepare/headers/body/stream/delivery/terminal`；响应头已经发送时不改写 HTTP 状态。上游已返回的错误及安全 `Retry-After` 不因诊断正文读取失败而被替换。Chat 桥和 Relay 的直接适配器显式请求 `Accept-Encoding: identity`，成功响应只接受缺省或 `identity` 编码，并精确校验 JSON/SSE 媒体类型；透明 Responses 代理仍保留上游传输合同。
+
+第三方与聚合 App Server 启动时显式注入统一的 `stream_idle_timeout_ms=300000`、`websocket_connect_timeout_ms=15000`，已有显式冲突值会被拒绝，用户文件不自动改写。启动后通过 `config/read` 复核合并后的 Provider 配置，受管层覆盖导致的不一致不会被当成已就绪。Provider 启动、租约、设置应用及 Desktop 附加等可能启动实例的监管操作统一等待最多 60 秒，包含实例就绪、配置核验及连接收尾；这是控制面等待，不是模型请求总期限。当前锁定版内置 OpenAI 不接受同名 Provider 块替换，使用内置默认，不提供一个实际上无法覆盖官方行为的全局可调超时选项。
+
+Chat 桥以完整 Chat 数据事件计空闲，Codex 仍以实际收到的完整 Responses 事件计空闲；注释心跳、零碎字节以及桥内尚未通过完整校验的工具参数不会伪造客户端进展。上传、目录复核、排队和服务停止继续使用各自的资源预算。更新程序后分别重启 App Server 和 Relay 生效；Gateway 重启不会替代这两个独立服务的策略激活。
 模型目录缺失时明确报错，不回退到官方目录。显示名称禁止使用上游具有特殊语义的 `OpenAI`，
 避免启用官方专用协议能力。已有 Codex 兼容 Provider 不自动转换或迁移。
 

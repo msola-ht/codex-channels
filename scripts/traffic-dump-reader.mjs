@@ -200,7 +200,7 @@ export async function describeDumpExchange(
       eventType: interaction.response.eventType,
       errorScope: interaction.response.errorScope,
       websocketClose: trace.websocketClose,
-      failureStage: failureStage(interaction.response, responseBody),
+      failureStage: failureStage(interaction.response, responseBody, trace.chatDiagnostics?.fields?.["error.timeoutStage"]),
       error: interaction.response.error,
       capture: interaction.response.capture,
       deliveryStatus: interaction.response.deliveryStatus,

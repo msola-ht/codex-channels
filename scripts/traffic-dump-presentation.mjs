@@ -139,27 +139,38 @@ export function responseFacts(body) {
   };
 }
 
+const failureStageLabels = {
+  timeout_upload: "请求正文上传超时", timeout_prepare: "请求准备超时", timeout_headers: "上游首响应头等待超时",
+  timeout_body: "上游正文读取超时", timeout_stream: "上游完整事件等待超时", timeout_delivery: "响应交付超时", timeout_terminal: "终态收尾超时",
+  client_delivery: "响应交付", upstream_delivery: "上游请求交付",
+  upstream_route: "上游路由解析", upstream_handshake: "上游 WebSocket 握手",
+  upstream_request: "上游请求（连接或发送）", upstream_response: "上游响应接收",
+  client_request: "客户端请求接收", client_disconnected: "客户端连接断开",
+  client_error: "客户端 WebSocket 传输", upstream_error: "上游 WebSocket 传输",
+  websocket_client_closed: "客户端 WebSocket 关闭", websocket_upstream_closed: "上游 WebSocket 关闭",
+  superseded_by_next_request: "上一请求未结束即收到下一请求",
+  upstream_terminal: "上游返回失败或不完整终态", upstream_http: "上游 HTTP 响应",
+  unknown: "未识别的传输阶段", unobserved: "未提供失败阶段",
+};
+
+/** CLI presentation only; API consumers receive the stable stage identifier. */
+export function formatFailureStage(stage) {
+  return Object.hasOwn(failureStageLabels, stage) ? failureStageLabels[stage] : failureStageLabels.unknown;
+}
+
 /** 只解释转储已经记录的失败位置，不由耗时或错误文本推断网络根因。 */
-export function failureStage(record, body) {
-  if (record?.state !== "failed" && record?.state !== "incomplete") return undefined;
-  const stages = {
-    upstream_route: "上游路由解析",
-    upstream_handshake: "上游 WebSocket 握手",
-    upstream_request: "上游请求（连接或发送）",
-    upstream_response: "上游响应接收",
-    client_request: "客户端请求接收",
-    client_disconnected: "客户端连接断开",
-    client_error: "客户端 WebSocket 传输",
-    upstream_error: "上游 WebSocket 传输",
-    websocket_client_closed: "客户端 WebSocket 关闭",
-    websocket_upstream_closed: "上游 WebSocket 关闭",
-    superseded_by_next_request: "上一请求未结束即收到下一请求",
-  };
-  if (record.errorScope !== undefined) return stages[record.errorScope] ?? "未识别的传输阶段";
+export function failureStage(record, body, localTimeoutStage) {
+  if (record?.state !== "failed" && record?.state !== "incomplete" && record?.deliveryStatus !== "failed" && record?.deliveryStatus !== "disconnected") return undefined;
+  const timeoutStage = typeof record.errorScope === "string" && record.errorScope.startsWith("timeout_")
+    ? record.errorScope.slice(8) : localTimeoutStage;
+  if (typeof timeoutStage === "string" && Object.hasOwn(failureStageLabels, `timeout_${timeoutStage}`)) return `timeout_${timeoutStage}`;
+  if (record.errorScope !== undefined) return Object.hasOwn(failureStageLabels, record.errorScope) ? record.errorScope : "unknown";
+  if (record.state === "completed" && record.deliveryStatus === "disconnected") return "client_disconnected";
+  if (record.state === "completed" && record.deliveryStatus === "failed") return "client_delivery";
   const failureTypes = ["response.failed", "response.incomplete", "error"];
-  if (failureTypes.includes(record.eventType) || failureTypes.includes(body?.type)) return "上游返回失败或不完整终态";
-  if (record.status >= 400) return "上游 HTTP 响应";
-  return "未提供失败阶段";
+  if (failureTypes.includes(record.eventType) || failureTypes.includes(body?.type)) return "upstream_terminal";
+  if (record.status >= 400) return "upstream_http";
+  return "unobserved";
 }
 
 /** 只收集本次调用内明确记录的声明，不继承 WS 连接的其他调用。 */

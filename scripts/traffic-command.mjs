@@ -4,6 +4,7 @@ import { statSync } from "node:fs";
 import { formatGenerationSpeed } from "../runtime/request-timing.mjs";
 import { join } from "node:path";
 import { modelNameComparison } from "../runtime/model-name-comparison.mjs";
+import { formatFailureStage } from "./traffic-dump-presentation.mjs";
 
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import { parseTrafficCommandArgs } from "./traffic-command-options.mjs";
@@ -180,7 +181,7 @@ function renderDetail(detail) {
       + (detail.response.status === null ? "" : ` HTTP ${detail.response.status}`));
     lines.push(`首 Token：${detail.response.firstTokenMs === undefined ? "未提供" : formatElapsedDuration(detail.response.firstTokenMs)}`);
     lines.push(`生成速度：${formatGenerationSpeed({ ...detail.response, status: detail.response?.state, totalDurationMs: detail.response?.durationMs })}`);
-    if (detail.response.failureStage !== undefined) lines.push(`失败阶段：${detail.response.failureStage}`);
+    if (detail.response.failureStage !== undefined) lines.push(`失败阶段：${formatFailureStage(detail.response.failureStage)}`);
     if (detail.response.websocketClose !== undefined) lines.push(`客户端 WebSocket 关闭码：${detail.response.websocketClose.code}`);
     if (detail.continuation !== undefined) {
       const next = detail.continuation.next;

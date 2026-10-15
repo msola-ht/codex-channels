@@ -1,9 +1,10 @@
-import { once } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { StringDecoder } from "node:string_decoder";
+import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { ModelConversionError } from "../model-api/index.js";
+import { ChatUpstreamError, ModelRequestTimeoutError } from "./chat-errors.js";
 
 export class ChatBodyTooLargeError extends ModelConversionError {}
+export class ChatBodyEncodingError extends ModelConversionError {}
 
 /** Detach cancelled preparation; a late resolver can no longer advance the request. */
 export function waitForChatOperation<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -17,7 +18,9 @@ export function waitForChatOperation<T>(pending: Promise<T>, signal: AbortSignal
 
 /** Pause an unfinished upload on error so the owner can still send a safe HTTP response. */
 export async function readChatBody(request: IncomingMessage, signal: AbortSignal, maximumBytes: number): Promise<string> {
-  return (await readModelBody(request, signal, maximumBytes)).toString("utf8");
+  const body = await readModelBody(request, signal, maximumBytes);
+  try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body); }
+  catch { throw new ChatBodyEncodingError("Model request contains invalid UTF-8"); }
 }
 
 export function readModelBody(request: IncomingMessage, signal: AbortSignal, maximumBytes: number): Promise<Buffer> {
@@ -44,13 +47,33 @@ export function readModelBody(request: IncomingMessage, signal: AbortSignal, max
   });
 }
 
-export async function writeChatData(response: ServerResponse, data: string, signal: AbortSignal, backpressure?: () => void): Promise<void> {
+export async function writeChatData(response: ServerResponse, data: string, signal: AbortSignal, backpressure?: () => void, timeoutMs: number = modelRequestPolicy.deliveryTimeoutMs, stage: "delivery" | "terminal" = "delivery"): Promise<void> {
   signal.throwIfAborted();
-  if (response.destroyed) throw new Error("Response disconnected");
-  if (!response.write(data)) {
-    backpressure?.();
-    await once(response, "drain", { signal });
-  }
+  if (response.destroyed || response.writableEnded) throw new Error("Response disconnected");
+  await new Promise<void>((resolve, reject) => {
+    let timer: NodeJS.Timeout | undefined;
+    let settled = false;
+    const cleanup = (): void => {
+      clearTimeout(timer); response.off("drain", drain); response.off("close", close); response.off("error", error);
+      signal.removeEventListener("abort", abort);
+    };
+    const error = (reason: unknown): void => {
+      if (settled) return;
+      settled = true; cleanup(); reject(reason instanceof Error ? reason : new Error("Response disconnected"));
+    };
+    const drain = (): void => { if (!settled) { settled = true; cleanup(); resolve(); } };
+    const close = (): void => error(new Error("Response disconnected"));
+    const abort = (): void => error(signal.reason);
+    response.once("drain", drain); response.once("close", close); response.once("error", error);
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      if (response.write(data)) drain();
+      else {
+        backpressure?.();
+        if (!settled) timer = setTimeout(() => error(new ModelRequestTimeoutError(stage)), timeoutMs);
+      }
+    } catch (reason) { error(reason); }
+  });
 }
 
 export interface ChatStreamBounds {
@@ -63,30 +86,59 @@ export interface ChatStreamBounds {
 
 /** Pull-based decoding keeps downstream backpressure attached to the upstream reader. */
 export async function* readModelFrames(incoming: IncomingMessage, signal: AbortSignal, bounds: ChatStreamBounds): AsyncGenerator<{ data: string; raw: string; receivedAt: number }> {
-  const decoder = new StringDecoder("utf8");
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+  const decode = (chunk?: Buffer): string => {
+    try { return decoder.decode(chunk, { stream: chunk !== undefined }); }
+    catch { throw new ChatUpstreamError("invalid_upstream_encoding", "Upstream response contains invalid UTF-8.", false); }
+  };
   let buffer = "";
   let total = 0;
-  for await (const value of incoming) {
-    const receivedAt = performance.now();
-    signal.throwIfAborted();
-    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value as string);
-    total += chunk.length;
-    if (total > bounds.totalBytes) throw new ModelConversionError("Chat response exceeds size limit");
-    buffer += decoder.write(chunk);
-    if (bounds.bufferCharacters !== undefined && buffer.length > bounds.bufferCharacters) throw new ModelConversionError("Chat buffer exceeds size limit");
-    if (Buffer.byteLength(buffer) > bounds.bufferBytes) throw new ModelConversionError("Chat buffer exceeds size limit");
-    let match: RegExpExecArray | null;
-    while ((match = /\r?\n\r?\n/u.exec(buffer))) {
-      const frame = buffer.slice(0, match.index);
-      buffer = buffer.slice(match.index + match[0].length);
-      if (Buffer.byteLength(frame) > bounds.frameBytes) throw new ModelConversionError("Chat frame exceeds size limit");
-      const data = frame.split(/\r?\n/u).filter(line => line.startsWith("data:"))
-        .map(line => line.slice(5).replace(/^ /u, "")).join("\n");
-      if (data === "[DONE]" && /(?:^|\r?\n)data:/u.test(buffer)) throw new ModelConversionError("Chat data follows DONE");
-      if (data) yield { data, raw: frame, receivedAt };
+  let timeout: NodeJS.Timeout | undefined;
+  let timedOut = false;
+  const abort = (): void => { incoming.destroy(); };
+  const arm = (): void => {
+    timeout = setTimeout(() => { timedOut = true; incoming.destroy(); }, modelRequestPolicy.streamIdleTimeoutMs);
+  };
+  signal.throwIfAborted();
+  signal.addEventListener("abort", abort, { once: true });
+  arm();
+  try {
+    for await (const value of incoming) {
+      const receivedAt = performance.now();
+      signal.throwIfAborted();
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value as string);
+      total += chunk.length;
+      if (total > bounds.totalBytes) throw new ModelConversionError("Chat response exceeds size limit");
+      buffer += decode(chunk);
+      if (bounds.bufferCharacters !== undefined && buffer.length > bounds.bufferCharacters) throw new ModelConversionError("Chat buffer exceeds size limit");
+      if (Buffer.byteLength(buffer) > bounds.bufferBytes) throw new ModelConversionError("Chat buffer exceeds size limit");
+      let match: RegExpExecArray | null;
+      while ((match = /\r?\n\r?\n/u.exec(buffer))) {
+        const frame = buffer.slice(0, match.index);
+        buffer = buffer.slice(match.index + match[0].length);
+        if (Buffer.byteLength(frame) > bounds.frameBytes) throw new ModelConversionError("Chat frame exceeds size limit");
+        const data = frame.split(/\r?\n/u).filter(line => line.startsWith("data:"))
+          .map(line => line.slice(5).replace(/^ /u, "")).join("\n");
+        if (data === "[DONE]" && /(?:^|\r?\n)data:/u.test(buffer)) throw new ModelConversionError("Chat data follows DONE");
+        if (data) {
+          clearTimeout(timeout);
+          yield { data, raw: frame, receivedAt };
+          signal.throwIfAborted();
+          arm();
+        }
+      }
+      if (Buffer.byteLength(buffer) > bounds.frameBytes) throw new ModelConversionError("Chat frame exceeds size limit");
     }
-    if (Buffer.byteLength(buffer) > bounds.frameBytes) throw new ModelConversionError("Chat frame exceeds size limit");
+    buffer += decode();
+    signal.throwIfAborted();
+    if (timedOut) throw new ModelRequestTimeoutError("stream");
+    if (buffer.trim()) throw new ModelConversionError("Chat stream has an incomplete frame");
+  } catch (error) {
+    if (signal.aborted) throw signal.reason;
+    if (timedOut) throw new ModelRequestTimeoutError("stream");
+    throw error;
+  } finally {
+    clearTimeout(timeout); signal.removeEventListener("abort", abort);
+    if (!incoming.readableEnded) incoming.destroy();
   }
-  buffer += decoder.end();
-  if (buffer.trim()) throw new ModelConversionError("Chat stream has an incomplete frame");
 }

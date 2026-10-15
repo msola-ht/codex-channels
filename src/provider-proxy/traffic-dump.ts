@@ -1,4 +1,5 @@
 import type { WriteStream } from "node:fs";
+import { ModelRequestTimeoutError } from "./chat-errors.js";
 import type { IncomingHttpHeaders } from "node:http";
 import { TrafficCallTiming } from "./traffic-call-timing.js";
 import { StringDecoder } from "node:string_decoder";
@@ -420,6 +421,7 @@ export class ModelTrafficExchange {
 
   failure(scope: string, error?: unknown, endedAtMonotonicMs = performance.now()): void {
     if (this.failureRecorded) return;
+    if (error instanceof ModelRequestTimeoutError) scope = `timeout_${error.stage}`;
     this.failureRecorded = true;
     this.finishRequestModel();
     this.finishResponseModel();

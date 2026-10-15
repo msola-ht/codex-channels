@@ -1,5 +1,6 @@
 import { parseRelayModelId, relayModelId } from "../../runtime/model-relay-model-id.mjs";
 import { isRelayListenHost } from "../../runtime/model-relay-listen-host.mjs";
+import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -7,6 +8,7 @@ import type { Socket } from "node:net";
 import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, type RelayModelCapability, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
 import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
+import { ModelRequestTimeoutError } from "../provider-proxy/index.js";
 import type { SamplingParameters } from "../model-api/index.js";
 
 export interface RelayQueueEntry {
@@ -113,7 +115,7 @@ export class ModelRelayServer {
     request.socket.setTimeout(0);
     response.setHeader("connection", "close");
     const controller = new AbortController(); this.active.add(controller);
-    const totalTimer = setTimeout(() => controller.abort(new RelayAdmissionError(504, "request_timeout")), 300_000);
+    let preparationTimer: NodeJS.Timeout | undefined;
     const disconnected = (): void => { if (!response.writableFinished) controller.abort(new RelayAdmissionError(499, "client_disconnected")); };
     response.once("close", disconnected);
     let lease: RelayLease | undefined;
@@ -126,9 +128,11 @@ export class ModelRelayServer {
     let firstTokenMs: number | undefined;
     let outputTiming: Pick<RelayMetric, "responseTimeMs" | "generationTiming"> = {};
     let generationBlocked = false;
+    let delivering = false;
     let httpStatus: number | undefined;
     let userAgent: string | null = null;
     let errorCode: string | undefined;
+    let timeoutStage: ModelRequestTimeoutError["stage"] | undefined;
     let requestModel = "";
     let reasoningEffort: string | null = null;
     let provider: string | null = null;
@@ -165,7 +169,7 @@ export class ModelRelayServer {
       if (!models) {
         if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") throw new RelayAdmissionError(415, "unsupported_media_type");
         if (Number(request.headers["content-length"] ?? 0) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
-        const uploadTimer = setTimeout(() => controller.abort(new RelayAdmissionError(408, "upload_timeout")), 15_000);
+        const uploadTimer = setTimeout(() => controller.abort(new ModelRequestTimeoutError("upload")), 15_000);
         try {
           const text = await readChatBody(request, signal, 1024 * 1024);
           inbound = JSON.parse(text) as unknown;
@@ -195,6 +199,7 @@ export class ModelRelayServer {
         signal.throwIfAborted();
       }
       phase = "prepare"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
+      preparationTimer = setTimeout(() => controller.abort(new ModelRequestTimeoutError("prepare")), modelRequestPolicy.preparationTimeoutMs);
       if (models) {
         const ids: string[] = [];
         for (const providerId of new Set(lease.caller.models.map(id => parseRelayModelId(id)!.provider))) {
@@ -206,7 +211,9 @@ export class ModelRelayServer {
           }
         }
         if (new Set(ids).size !== ids.length) throw new RelayAdmissionError(503, "model_id_conflict");
-        await endResponse(response, JSON.stringify({ object: "list", data: ids.map(id => ({ id, object: "model", owned_by: "relay" })) }), signal);
+        signal.throwIfAborted(); clearTimeout(preparationTimer);
+        phase = "delivery";
+        await endResponse(response, JSON.stringify({ object: "list", data: ids.map(id => ({ id, object: "model", owned_by: "relay" })) }), signal, modelRequestPolicy.deliveryTimeoutMs);
         return;
       }
       const prepared = await waitForChatOperation(this.options.prepare(provider!, signal), signal);
@@ -229,8 +236,15 @@ export class ModelRelayServer {
         body = routed;
       }
       if (Buffer.byteLength(JSON.stringify(body)) > 1024 * 1024) throw new RelayAdmissionError(413, "request_too_large");
+      // Preparation includes optional capture initialization and the material/proxy resolver.
+      phase = "prepare";
+      const pendingCapture = Promise.resolve(this.options.capture?.(provider!, signal, protocol));
+      void pendingCapture.then(value => {
+        if (signal.aborted) value?.finish("failed", "failed", "preparation_cancelled");
+      }, () => {}).catch(() => { this.metricFailures = Math.min(Number.MAX_SAFE_INTEGER, this.metricFailures + 1); });
+      capture = await waitForChatOperation(pendingCapture, signal);
+      signal.throwIfAborted(); clearTimeout(preparationTimer);
       phase = "upstream"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
-      capture = await this.options.capture?.(provider!, signal, protocol);
       capture?.inbound?.(inbound, request.headers);
       if (clineRoutingChanged) capture?.transformed?.("provider_routing_pinned");
       if (inbound && typeof inbound === "object" && !("stream" in inbound)) capture?.transformed?.("stream_defaulted");
@@ -242,34 +256,48 @@ export class ModelRelayServer {
         headers: (status: number) => { httpStatus = status; },
         content: () => { firstTokenMs ??= performance.now() - started!; },
         emit: async (value: Record<string, unknown> | undefined, terminal: boolean, rawFrame?: string) => {
+          delivering = true;
           if (terminal) { completedAt = performance.now(); phase = "delivery"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.(); }
-          if (stream) {
-            if (value !== undefined) {
-              const frame = rawFrame === undefined ? `${protocol === "responses" ? `event: ${String(value.type)}\n` : ""}data: ${JSON.stringify(value)}\n\n` : `${rawFrame}\n\n`;
-              if (Buffer.byteLength(frame) > 1024 * 1024) throw new ModelConversionError("Model delivery frame exceeds size limit");
-              if (!response.headersSent) response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
-              capture?.delivered?.(value, true, response.statusCode, response.getHeaders());
-              await writeChatData(response, frame, signal, () => { if (!terminal) generationBlocked = true; });
+          const deliveryController = new AbortController();
+          const terminalTimer = terminal ? setTimeout(() => deliveryController.abort(deliveryTimeout()), modelRequestPolicy.terminalDeliveryTimeoutMs) : undefined;
+          const deliverySignal = terminal ? AbortSignal.any([signal, deliveryController.signal]) : signal;
+          try {
+            if (stream) {
+              if (value !== undefined) {
+                const frame = rawFrame === undefined ? `${protocol === "responses" ? `event: ${String(value.type)}\n` : ""}data: ${JSON.stringify(value)}\n\n` : `${rawFrame}\n\n`;
+                if (Buffer.byteLength(frame) > 1024 * 1024) throw new ModelConversionError("Model delivery frame exceeds size limit");
+                if (!response.headersSent) response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+                capture?.delivered?.(value, true, response.statusCode, response.getHeaders());
+                await writeChatData(response, frame, deliverySignal, () => { if (!terminal) generationBlocked = true; }, terminal ? modelRequestPolicy.terminalDeliveryTimeoutMs : modelRequestPolicy.deliveryTimeoutMs, terminal ? "terminal" : "delivery");
+              }
+              if (terminal) {
+                if (protocol === "chat") capture?.delivered?.(undefined, true, response.statusCode, response.getHeaders());
+                await endResponse(response, protocol === "chat" ? "data: [DONE]\n\n" : "", deliverySignal);
+              }
+            } else {
+              response.setHeader("content-type", "application/json");
+              capture?.delivered?.(value, false, response.statusCode, response.getHeaders());
+              await endResponse(response, JSON.stringify(value), deliverySignal);
             }
-            if (terminal) {
-              if (protocol === "chat") capture?.delivered?.(undefined, true, response.statusCode, response.getHeaders());
-              await endResponse(response, protocol === "chat" ? "data: [DONE]\n\n" : "", signal);
-            }
-          } else {
-            response.setHeader("content-type", "application/json");
-            capture?.delivered?.(value, false, response.statusCode, response.getHeaders());
-            await endResponse(response, JSON.stringify(value), signal);
-          }
+            delivering = false;
+          } finally { clearTimeout(terminalTimer); }
         },
       };
       if (protocol === "responses") await sendDirectResponses({ ...call, request: body as DirectResponsesRequest, observer: observer as DirectResponsesObserver });
       else await sendDirectChat({ ...call, request: body as DirectChatRequest, observer: observer as DirectChatResponse, unwrapClpEnvelope: provider!.startsWith("clp-") });
       deliveryStatus = "finished";
     } catch (error) {
+      clearTimeout(preparationTimer);
+      if (delivering) phase = "delivery";
       const signalReason: unknown = controller.signal.reason ?? lease?.signal.reason;
-      const failure = signalReason instanceof RelayAdmissionError ? signalReason : error;
-      const status = failure instanceof RelayAdmissionError ? failure.status
+      const failure = signalReason instanceof RelayAdmissionError || signalReason instanceof ModelRequestTimeoutError ? signalReason : error;
+      if (failure instanceof ModelRequestTimeoutError) timeoutStage = failure.stage;
+      const status = failure instanceof RelayAdmissionError || failure instanceof ModelRequestTimeoutError ? failure.status
         : phase === "input" && failure instanceof ChatBodyTooLargeError ? 413
+        // Relay owns the upstream credentials: an upstream 401 is not a failed
+        // Relay-key authentication. Preserve explicit availability/retreat codes.
+        : failure instanceof ChatUpstreamError && failure.upstreamStatus !== undefined
+          ? [429, 503, 504].includes(failure.upstreamStatus) ? failure.upstreamStatus : failure.upstreamStatus === 408 ? 504 : 502
         : failure instanceof ChatUpstreamError && failure.code === "rate_limit" ? 429
           : failure instanceof ChatUpstreamError && failure.code === "upstream_timeout" ? 504
             : phase === "input" ? 400 : phase === "prepare" ? 503 : 502;
@@ -290,7 +318,8 @@ export class ModelRelayServer {
           message: (failure instanceof DirectChatRequestError || failure instanceof DirectResponsesRequestError) && phase === "input" ? message
             : `${message} [${errorCode}; phase=${phase}${httpStatus === undefined ? "" : `; upstream_http=${httpStatus}`}; request_id=${relayRequestId}]`,
           ...(phase === "input" && (failure instanceof DirectChatRequestError || failure instanceof DirectResponsesRequestError) ? { param: failure.param } : {}),
-          phase, request_id: relayRequestId, ...(httpStatus === undefined ? {} : { upstream_status: httpStatus }),
+          phase, ...(failure instanceof ModelRequestTimeoutError ? { timeout_stage: failure.stage } : {}),
+          request_id: relayRequestId, ...(httpStatus === undefined ? {} : { upstream_status: httpStatus }),
           upstream_attempted: started !== undefined } };
         // Draining the rejected upload keeps the socket open long enough for the client to read
         // the rejection; destroying an unread request resets it and surfaces as EPIPE/ECONNRESET.
@@ -298,41 +327,60 @@ export class ModelRelayServer {
         if (!request.complete) response.once("finish", () => request.resume());
         // Error delivery has a separate short bound, even if the model request was cancelled.
         try {
-          if (response.headersSent) { capture?.delivered?.(detail, true, response.statusCode, response.getHeaders()); await endResponse(response, `${protocol === "responses" ? "event: error\n" : ""}data: ${JSON.stringify(detail)}\n\n`, AbortSignal.timeout(1000)); }
+          if (response.headersSent) { capture?.delivered?.(detail, true, response.statusCode, response.getHeaders()); await endResponse(response, `${protocol === "responses" ? "event: error\n" : ""}data: ${JSON.stringify(detail)}\n\n`, new AbortController().signal); }
           else {
             if (failure instanceof ChatUpstreamError && failure.retryAfter !== undefined) response.setHeader("retry-after", failure.retryAfter);
-            response.statusCode = status === 499 ? 502 : status; response.setHeader("content-type", "application/json"); capture?.delivered?.(detail, false, response.statusCode, response.getHeaders()); await endResponse(response, JSON.stringify(detail), AbortSignal.timeout(1000)); }
+            response.statusCode = status === 499 ? 502 : status; response.setHeader("content-type", "application/json"); capture?.delivered?.(detail, false, response.statusCode, response.getHeaders()); await endResponse(response, JSON.stringify(detail), new AbortController().signal); }
         } catch { response.destroy(); }
       }
     } finally {
       if (this.requests.delete(relayRequestId)) this.options.queueChanged?.();
-      clearTimeout(totalTimer); response.off("close", disconnected); controller.abort(); this.active.delete(controller);
+      clearTimeout(preparationTimer); response.off("close", disconnected); controller.abort(); this.active.delete(controller);
+      lease?.release();
       if (observer.status === "failed") errorCode ??= "upstream_response_failed";
       if (observer instanceof DirectResponsesObserver) outputTiming = observer.timing;
       if (generationBlocked) delete outputTiming.generationTiming;
-      const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs, observer.responseModel, {
+      const modelStatus = observer.status === "unknown" ? "failed" : observer.status;
+      const traffic = capture?.finish(modelStatus, deliveryStatus, errorCode, firstTokenMs, observer.responseModel, {
         ...outputTiming, ...(observer.usage.outputTokens === undefined ? {} : { outputTokens: observer.usage.outputTokens }),
-      });
+      }, timeoutStage);
       if (lease && started !== undefined) {
         const ended = completedAt ?? performance.now();
         const metric: RelayMetric = { ...diagnostics, source: "relay", threadId: null, turnId: null, relayRequestId,
           ...(traffic ? { traffic } : {}),
           callerId: lease.caller.callerId, keyId: lease.caller.keyId, credentialGeneration: lease.caller.credentialGeneration,
           provider: provider!, requestModel, ...(userAgent === null ? {} : { userAgent }), responseFormat: stream ? "sse" : "json",
-          status: observer.status === "unknown" ? "failed" : observer.status, deliveryStatus,
+          status: modelStatus, deliveryStatus,
           requestStartedAtMs: submittedAt!, responseCompletedAtMs: submittedAt! + (ended - started), totalDurationMs: ended - started,
           ...observer.usage, ...outputTiming, ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
           ...(observer.responseModel === undefined ? {} : { responseModel: observer.responseModel }),
           ...(httpStatus === undefined ? {} : { httpStatus }), ...(errorCode === undefined ? {} : { errorCode }) };
         try { this.options.enqueueMetric(metric); } catch { this.metricFailures = Math.min(Number.MAX_SAFE_INTEGER, this.metricFailures + 1); }
       }
-      lease?.release();
     }
   }
 }
 
-async function endResponse(response: ServerResponse, text: string, signal: AbortSignal): Promise<void> {
+function deliveryTimeout(): ModelRequestTimeoutError {
+  return new ModelRequestTimeoutError("terminal");
+}
+
+async function endResponse(response: ServerResponse, text: string, signal: AbortSignal, timeoutMs: number = modelRequestPolicy.terminalDeliveryTimeoutMs): Promise<void> {
   signal.throwIfAborted();
+  if (response.destroyed || response.writableEnded) throw new Error("Response disconnected");
   if (!response.headersSent) response.setHeader("content-type", "application/json");
-  const done = once(response, "finish", { signal }); response.end(text); await done;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => error(deliveryTimeout()), timeoutMs);
+    const cleanup = (): void => {
+      clearTimeout(timer); response.off("finish", finish); response.off("close", close); response.off("error", error);
+      signal.removeEventListener("abort", abort);
+    };
+    const finish = (): void => { cleanup(); resolve(); };
+    const error = (reason: unknown): void => { cleanup(); reject(reason instanceof Error ? reason : new Error("Response disconnected")); };
+    const close = (): void => error(new Error("Response disconnected"));
+    const abort = (): void => error(signal.reason);
+    response.once("finish", finish); response.once("close", close); response.once("error", error);
+    signal.addEventListener("abort", abort, { once: true });
+    try { response.end(text); } catch (reason) { error(reason); }
+  });
 }

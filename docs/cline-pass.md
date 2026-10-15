@@ -44,7 +44,7 @@ Remote 保留 `--profile sf-clp-<账户>`；两个入口默认连接主实例。
 该按需实例的桌面目录包含 DS、CLP、OCG、CCG 和自定义切换提供商；CLP 的精确模型 ID 形如
 `clp-main/cline-pass/deepseek-v4.1-flash`，显示名称包含账户 Provider ID。已加载模型间切换无需退出
 Desktop，更换 App Server 实例仍须完全退出。聚合请求复用现有 CLP Chat 桥，每次用目标账户真实 Key
-替换本地令牌；关闭网页搜索、模型 API WebSocket 和自动重试，不改变独立 Relay 的目录及路由。
+替换本地令牌；关闭网页搜索和模型 API WebSocket，经过 Codex 的请求统一采用原生重试策略，不改变独立 Relay 的目录及路由；Relay 自身不自动重试。
 终端也可用 `codexc remote --provider agg`，渠道从 `/model` 的“聚合提供商”目录选择；
 同一聚合 Thread 内切换保留历史，账户额度查询不合并，请求指标按真实账户记录。
 安装新代码或增删成员后须重启相关服务；现有成员的 Key、模型目录变更由运行中的 Gateway 检测，待活动和租约释放后刷新，旧快照在等待期间拒绝

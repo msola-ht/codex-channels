@@ -1,5 +1,7 @@
 import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
-import type { Translate } from "./i18n/messages"
+import { messages, type Translate } from "./i18n/messages"
+import { translate } from "./i18n/translate"
+import { failureLabelKeys, recordedRequestFailure } from "./request-failure"
 import { modelDisplayName } from "../../../runtime/model-display-name.mjs"
 
 let modelDisplayAliases: Readonly<Record<string, string>> = {}
@@ -126,17 +128,15 @@ export function formatTimestamp(value: number, timeZone = getServerTimeZone()): 
 
 const errorTypeNames: Record<string, { zh: string; en: string }> = {
   usage_limit_reached: { zh: "用量上限", en: "Usage limit" },
-  rate_limit_reached: { zh: "速率限制", en: "Rate limit" },
   service_unavailable_error: { zh: "服务暂不可用", en: "Service unavailable" },
-  invalid_request_error: { zh: "无效请求", en: "Invalid request" },
   unknown_error: { zh: "未知错误", en: "Unknown error" },
   new_api_error: { zh: "上游 API 错误", en: "Upstream API error" },
   upstream_handshake_error: { zh: "上游握手失败", en: "Upstream handshake failed" },
   upstream_error: { zh: "上游错误", en: "Upstream error" },
   upstream_request_error: { zh: "上游请求失败", en: "Upstream request failed" },
   upstream_response_error: { zh: "上游响应失败", en: "Upstream response failed" },
+  upstream_delivery_error: { zh: "上游请求交付失败", en: "Upstream request delivery failed" },
   client_request_error: { zh: "客户端请求失败", en: "Client request failed" },
-  client_disconnected: { zh: "客户端断开", en: "Client disconnected" },
   websocket_closed: { zh: "WebSocket 关闭", en: "WebSocket closed" },
   http_error: { zh: "HTTP 请求失败", en: "HTTP request failed" },
   response_not_observed: { zh: "响应未完整观测", en: "Response not fully observed" },
@@ -145,13 +145,21 @@ const errorTypeNames: Record<string, { zh: string; en: string }> = {
   turn_notification_error: { zh: "Turn 运行失败", en: "Turn failed" },
 }
 
-export function formatErrorType(
-  value: string | null,
-  language: DisplayLanguage,
-): string {
-  if (value === null) return "—"
-  const label = errorTypeNames[value]
-  return label ? label[language] : value
+export function formatRequestError(record: Pick<RequestRecord, "source" | "status" | "deliveryStatus" | "errorCode" | "errorType" | "httpStatus" | "errorMessage">, language: DisplayLanguage): string {
+  const reason = recordedRequestFailure(record)
+  // Do not reclassify raw codes after the source-aware classifier rejected them.
+  const localType = record.source === "relay" ? record.errorCode : record.errorType
+  const label = localType && Object.hasOwn(errorTypeNames, localType) ? errorTypeNames[localType] : undefined
+  const fallback = record.status === "incomplete" ? translate(language, "requests.relayReasons.incomplete")
+    : record.status === "failed" ? translate(language, "requests.relayReasons.requestFailed")
+    : record.status === "unknown" || record.errorType || record.errorCode || record.errorMessage ? translate(language, "requests.relayReasons.unknown") : "—"
+  return reason ? translate(language, `requests.relayReasons.${failureLabelKeys[reason]}`)
+    : label ? label[language] : fallback
+}
+
+export function formatTrafficFailureStage(stage: string, language: DisplayLanguage): string {
+  const stages = messages[language].traffic.failureStages
+  return Object.hasOwn(stages, stage) ? stages[stage as keyof typeof stages] : stages.unknown
 }
 
 const errorMessageTranslations: ReadonlyArray<{
@@ -220,8 +228,8 @@ export function formatRequestOutcomes(outcomes: RequestOutcomeCounts | null, t: 
   })
 }
 
-export function isClientInterruption(record: Pick<RequestRecord, "status" | "errorType">): boolean {
-  return record.status !== "completed" && record.errorType === "client_disconnected"
+export function isClientInterruption(record: Pick<RequestRecord, "source" | "status" | "deliveryStatus" | "errorCode" | "errorType" | "httpStatus">): boolean {
+  return record.status !== "completed" && (record.source === "relay" ? record.errorCode : record.errorType) === "client_disconnected"
 }
 
 export function formatInterruptionSummary(summary: RequestInterruptionSummary, t: Translate): string {

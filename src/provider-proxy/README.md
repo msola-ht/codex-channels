@@ -12,11 +12,9 @@
   拒绝 WebSocket、压缩正文和远端响应状态引用；正文限制 16 MiB，强制 `store=false`。
   不读取账户或目录文件，不直接访问真实上游，不重试或回退；发送前调用可选 `assertCurrent(signal)`
   复核快照，支持可取消的异步复核，变更返回 409 并提示等待安全应用或在 Gateway 未运行时重启。上传预算独立为 30 秒；
-  快照复核预算独立为 15 秒；完成复核后，首包和双向空闲使用路由 `timeoutMs`，默认 310 秒，
-  接受 1 至 600000 毫秒的整数。运行时为 DS 预留 65 秒，为 CP Responses 在统计代理的 300 秒之外预留至 310 秒，
-  为 CLP 在桥的 300 秒和统计代理的
-  5 秒终态宽限外再预留 5 秒；响应另有 600 秒总预算，持续输出不会因超过空闲时限被截断。
-  整个请求上界为上传、复核与响应总预算之和，不因流式活动无限延长。
+  快照复核预算独立为 15 秒；完成复核后由真实出站层负责首响应头等待，Codex 负责可见完整 Responses 事件的空闲等待。
+  聚合不重复设置模型首响应头、socket 空闲或生成总期限；只有实际写入下游受阻时启动 30 秒交付预算，结束交付最多 5 秒。
+  持续正常输出可超过 600 秒；客户端取消、服务关闭或交付停滞会取消内层请求。
   异步快照复核不是文件状态与网络提交的原子操作；完成后复核取消状态才提交本地请求。
   原样交付状态码和 JSON/SSE 正文，过滤跳级头和响应凭据头，取消、断流及关闭清理连接。
 - `proxy.ts`：HTTP/SSE 与 WebSocket 转发、背压和连接生命周期协调。监听自动分配的回环地址，把精确
@@ -57,8 +55,8 @@
   请求指标投递；`quotaObservedAtMs` 保存响应头或有效额度事件到达的本地时刻，后续终态或失败
   不刷新该时间，无效事件不覆盖已有快照；缺失快照或历史未采集时为 null，不从请求时间推断。
   不保存完整 Header、事件正文或其他额度桶。
-  普通增量不经过指标确认链；终态指标仍在对应完成事件转发前完成投递确认。
-  上游收到 WebSocket 关闭后，先交付已排队的终态再关闭客户端；收尾等待沿用上游超时预算，
+  普通增量不经过指标确认链；终态指标在对应完成事件转发前等待确认，最多 1 秒后退让并继续交付，为外层 5 秒收尾预算留出余量。指标 IPC 使用同一绝对期限，不因零碎确认字节续期。
+  上游收到 WebSocket 关闭后，先交付已排队的终态再关闭客户端；收尾使用独立 5 秒预算，
   超时记录错误并释放连接，客户端断开或代理停止立即取消等待。
   从 `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联，并识别精确的
   `request_kind=compaction` 操作标记和不计指标的 `request_kind=prewarm`。
@@ -79,10 +77,11 @@
   代理关闭时取消在途刷新并执行有上限的等待；关闭中拒绝重新启动，并发关闭共享在途任务，只有监听、刷新和转储资源全部确认后才记为完成。刷新等待超时报错并保留关闭状态，后续关闭可在实际刷新结算后重试，不重复关闭已确认的监听。生产 OpenAI 周额度与 OpenCode Go 外部窗口线路互斥；
   若两类独立来源快照同时存在，保留快照但观测时刻为 null，避免把一个来源的时间赋给另一来源。
   其他路径、OpenAI 额外端点的非 POST 请求以及非 GET 的 `/models` 返回 404；监听地址强制为回环，
-  上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。上游在请求正文接收完整前返回 HTTP 错误时，停止转发上传正文，完整发送错误响应后关闭本跳连接；主动清理不重复上报失败指标。服务入口按统一
+  真实 HTTP 出站首响应头等待最多 300 秒，错误正文最多 5 秒，非流式正文最多 300 秒；Responses SSE/WS 的模型空闲由 Codex 消费完整事件控制，不以任意 socket 字节续期。Chat 桥外层不重复启动桥已负责的首响应头或正文预算。准备阶段最多 30 秒，WS 建连最多 15 秒；双向交付受阻最多 30 秒，终态交付和关闭收尾最多 5 秒。客户端提前断开时取消上游请求。上游在请求正文接收完整前返回 HTTP 错误时，停止转发上传正文，完整发送错误响应后关闭本跳连接；主动清理不重复上报失败指标。服务入口按统一
   共享代理解析结果选择传入上游 Agent（Codex `.env` 优先，不读取旧 TOML `[network]`）。OpenCode Go、DeepSeek 与 CCG 的共享代理额外接受
   `/go/<账户>/responses` 与 `/go/<账户>/models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
   携带账户标识供服务侧按具体账户 Provider Socket 上报。
+- `proxy-delivery.ts`：HTTP/WS 写入、背压与关闭等待的有界交付；取消、断连和错误结束当前等待，模型等待与下游交付停滞分别计时。
 - `response-metrics-observer.ts`：从 HTTP Header、SSE/JSON 终态与 WebSocket 完成或关闭信息中
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
   平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID
@@ -162,20 +161,27 @@ HTTP 生成失败交互索引，WebSocket 仅保留握手 trace，不伪造 `res
 
 `chat-diagnostics.ts` 白名单提取有界的上游模型、标识、路由、费用与用量明细，经请求级进程内回调在终态交付前提交给代理，写入独立 `chat_diagnostics` trace 事件；随机关联编号随本地 HTTP 传递，观察器随请求关闭清理；不进入 App Server 输出。指标订阅不依赖转储是否开启，仅投影受校验的实际上游、尝试次数、结束原因、错误阶段及内层上游错误摘要，经私有 IPC 独立入库；不保存诊断中的标识、费用、正文或路由历史。桥的工具参数转换失败时另提交 `conversion.toolArguments.length` 与 `conversion.toolArguments.shape`（`empty`/`invalid_json`/`not_object`）：只描述参数形态，绝不包含参数正文，也不改变对客户端交付的错误文案。转储同时把同一次调用诊断里的 `routing.finalProvider` 作为可选 `upstreamProvider` 写入 V2 响应索引，供调用列表在模型名旁展示上游标签；请求明细列表从指标库独立读取同名字段；没有诊断或字段缺失时不写入，也不推断。
 
-`chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码；HTTP 错误可携带经验证的 Retry-After，供原生 Relay 交付，不自动重试。
+`chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码；HTTP 错误可携带经验证的 Retry-After，由 Chat 桥及原生 Relay 交付，不自动重试。桥将上游 429/503 的受限整数秒或规范 HTTP 日期交给外层 Codex，错误正文超时或使用不支持的压缩编码时不丢失该建议，畸形值不转发。
+
+本地模型请求期限统一使用 `ModelRequestTimeoutError`：上传为 HTTP 408 `upload_timeout`，准备为 HTTP 504 `preparation_timeout`，上游响应头/正文/完整事件为 HTTP 504 `upstream_timeout`，交付/收尾为 HTTP 504 `delivery_timeout`。可发送结构化错误时附带 `timeout_stage`（`upload/prepare/headers/body/stream/delivery/terminal`）；已发送 HTTP 响应头时不改写状态，透明转发中断仅关闭连接并记录受控错误。已完成生成的指标不被交付失败覆盖。
+HTTP 错误保存实际 `upstreamStatus`，状态优先确定错误类别及重试性质；400 只允许上下文超限或内容过滤细分，不让正文覆盖认证和可用性。原生 HTTP/WS 交付失败先记录明确原因再关闭，后续清理保留首次失败及其时间。流量转储复用 `errorScope` 的 `timeout_<stage>` 值记录本地超时，读取端仅映射已知阶段；指标数据库与既有转储结构不变，不回填历史。
+Relay 转储的最终模型结果由请求宿主传入，与同一请求的指标共用一次投影；采集器只保存报文、诊断与终态时间，不维护另一套结果推断。`completed` 与交付 `failed/disconnected` 可以同时成立，详情分别解释生成结果和交付状态。
+`chat-io.ts` 的 JSON 正文及 SSE 增量读取使用严格 UTF-8 解码，跨分片字符保留解码状态；入站编码错误为受控请求失败，直接上游编码错误为 `invalid_upstream_encoding`。错误诊断正文解码失败仍保留 HTTP 分类与安全退避头。消费者在协议终态停止读取，不继续等待终态后的尾流。
+
+Chat 桥与直接模型适配器共用 `direct-model-http.ts` 的成功响应校验：媒体类型忽略大小写、去除参数后精确匹配 JSON/SSE；请求明确发送 `Accept-Encoding: identity`，成功响应仅接受缺省或 `identity` 编码。其他编码返回 `invalid_upstream_encoding`，不把压缩字节当作 UTF-8。原生 Responses 透明代理保持上游传输合同。
 
 受管 CLP 桥在真正发起 HTTP 请求前调用 Runtime 注入的当前模型目录复核；停用或未知模型返回 `409 clp_model_disabled`，缺少复核器或无法安全读取目录返回 `503 clp_catalog_unavailable`，使用固定中文提示并阻止上游请求。共享账户与聚合经过同一检查，已提交请求不强行中断；非 CLP 桥和 Relay 独立目录不受影响。
 
 自定义 `cp-*` 的 Runtime 守卫还复用配置读取器的版本 5 和完整目录一致性校验，并拒绝目录 `.pending` 与全局上下文同步未完成状态；HTTP/WS 复用相同回调，不把合法 slug 单独视为有效目录。
 
-OCG/CCG 和自定义 `cp-*` 由 Runtime 向 `ProviderProxy` 注入同源目录复核。HTTP 在路由解析后、有界读取正文并复核模型再提交原始字节；Responses WS 每个 `response.create` 在连接可用后、发送前按顺序复核。停用返回 `409 provider_model_disabled`，目录不可用返回 `503 provider_catalog_unavailable`；WS 包装为 error 后关闭连接，已提交请求不撤回。HTTP 正文上限 16 MiB、上传预算 30 秒，目录复核预算 15 秒；全代理最多 16 项授权准备，WS 单帧与连接队列各限制 16 MiB、队列最多 16 帧。官方 OpenAI、DS 与独立 Relay 不注入目录复核，不推断无目录提供商的模型授权。
+OCG/CCG 和自定义 `cp-*` 由 Runtime 向 `ProviderProxy` 注入同源目录复核。HTTP 在路由解析后、有界读取正文并复核模型再提交原始字节；Responses WS 每个 `response.create` 在连接可用后、发送前按顺序复核。停用返回 `409 provider_model_disabled`，目录不可用返回 `503 provider_catalog_unavailable`；WS 包装为 error 后关闭连接，已提交请求不撤回。HTTP 正文上限 16 MiB、上传预算 30 秒，目录复核预算 30 秒；全代理最多 16 项授权准备，WS 单帧与连接队列各限制 16 MiB、队列最多 16 帧。官方 OpenAI、DS 与独立 Relay 不注入目录复核，不推断无目录提供商的模型授权。
 除官方 OpenAI 端点外的 Responses 上游（受管 DS/OCG/CCG、自定义 Provider 与自定义 `cp-*`）在提交前归一化 Codex 私有输入项：`agent_message` 降级为普通 `user` 消息，工具参数 schema 中的布尔 `encrypted` 标记被删除，无法转换的私有项按 `400 provider_model_request_invalid` 失败关闭，不退回透传（与 Chat 桥一致）。HTTP 与 Responses WS 都只替换发往上游的字节，转储与指标仍记录客户端原始报文；未发生改写时沿用原始字节。正文改写后按实际字节重写 `content-length`；没有目录守卫的第三方上游沿用同一 16 MiB 正文上限、30 秒上传预算与 16 项准备上限，压缩正文仍拒绝。
 Responses WS 归一化同样要求文本 JSON 消息且单条不超过 16 MiB；无守卫上游也在 WebSocket 接收层限制消息大小（含分片累计），并受同一等待队列上限约束。HTTP 目录复核与归一化共用一次正文解析。官方 `openai` 路由（含 `openai_base_url` 覆盖）不归一化，该端点理解 Codex 私有输入项；独立 Relay 的出站请求来自外部调用方自带报文，同样不归一化。
 
 `chat-bridge.ts` 按 Runtime 的受管 CLP 身份映射模型思考参数，并仅对精确 Flash 模型限定 DeepSeek 上游；其他 Chat Provider 不注入。它管理 Chat HTTP 连接、SSE 分帧、背压、取消和有限超时，通过 `model-api/index.ts` 调用纯转换模块。转换覆盖 Responses 的 `function`、`namespace`、自由格式 `custom` 工具、执行位置为 `client` 的 `tool_search`（含其结果带回的工具声明）与 Codex multi-agent v2 的 `agent_message` 输入项；`agent_message` 降级为普通 `user` 消息，Responses 私有的 `encrypted` 参数标记不下发；未映射的顶层工具声明及其 `tool_choice` 原样交给上游判断，不为它们注册客户端执行身份；回程不支持的工具调用仍明确失败。`text.format` 的 `json_schema` 映射为 Chat `response_format`，`text.verbosity` 校验后忽略。
 上游接口为 `chat_completions` 的自定义第三方 Provider 复用同一桥，按通用分支运行（不 pin CLP 路由、不读 CLP 目录、思考等级按通用形状发送）；这类 Provider 的 WebSocket 关闭，客户端检索与连接器工具由桥转换。通用分支在请求同时带工具时把 `text.format` 的 schema 追加到首条 system 消息并省略 `response_format`，因为部分 Chat 上游拒绝两者并存；托管 CLP 已验证接受，继续使用 `response_format`。该降级只由提示词保证，桥不校验最终文本，`conversion.structuredOutput=prompt` 记录在请求诊断中；模型侧仍由统计代理按 Provider 目录拒绝目录外或已停用模型。
 受管 CLP 通过同次启用目录读取取得思考选项，所有显式选项须属于当前模型；只有声明开关的目录允许 `enabled`，出站转换为 `reasoning.enabled=true`。未知选项在出站前拒绝，目录不可读时失败关闭；直接 Chat/Responses Relay 保留自己的参数合同，不套用此目录或转换。
-Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 服务生命周期；转换后的 Responses 事件复用现有指标采集。桥在收到上游响应头前不写回任何字节，桥的单次请求预算默认 300 秒（见 `chatBridgeRequestTimeoutMs`），覆盖正文接收、路由等待及上游处理。正文接收超时返回 408 `request_timeout` 并关闭未完成的请求连接；上游阶段超时返回 `upstream_timeout`。面向桥的统计代理在此预算上额外预留 5 秒用于终态发送，避免先按空闲超时截断并丢失桥的错误分类。
+Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 服务生命周期；转换后的 Responses 事件复用现有指标采集。统一阶段预算来自 `runtime/model-request-policy.mjs`：上传 30 秒、准备 30 秒、真实上游首响应头 300 秒、完整 Chat 数据事件空闲 300 秒；没有生成总期限。正文接收超时返回 408 `upload_timeout`；上游等待超时返回 504 `upstream_timeout`。交付受阻最多 30 秒，终态与失败交付使用独立 5 秒预算，外层统计代理不再以 305 秒计时抢先截断。完整数据事件空闲不因注释心跳或不完整字节续期；下游背压期间暂停上游事件等待。工具转换仍保留完整校验后发布的合同；转换前有 Chat 帧不等于 Codex 已看到 Responses 事件，长时间没有可交付事件时仍受 Codex 自身的 300 秒空闲限制，不伪造保活事件。
 
 - `relay-traffic-dump.ts`：Relay Chat/Responses JSON/SSE 脱敏采集，复用 V2 存储与 ChatDiagnostics 白名单采集；JSON（含成功包装）读取 message、SSE 读取 delta 中的上游诊断，终态按同一 interaction 写入既有 chat_diagnostics 与 upstreamProvider，缺失不推断；所有账户共享容量和待写预算，按协议使用 relay.chat/relay.responses 标签，共享两协议容量和待写预算；`prepare(signal)` 在取消边界内异步初始化容量，服务组合层在其后复核全局采集设置；`setRetentionDays` 使用全局保留天数，`open(provider, signal, debug)` 在取消边界内等待首次初始化；共享存储报告实际接受的写入量，在途调用单独预留预算；后台单任务清理历史并保护活动及新建批次，整理期间继续采集；有限关闭，采集失败不影响模型交付；`diagnostics()` 提供当前 owner 状态、活动数与容量跳过累计，不推断历史未采集原因。
 - `relay-metric.ts`：直接模型调用的最小跨进程指标合同，不包含消息正文或凭据。

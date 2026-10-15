@@ -90,6 +90,8 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
       requestOutcomes: report.requestOutcomes,
       unsuccessfulRequestCount: report.unsuccessfulRequestCount,
       groups: report.groups.map((group) => ({
+        source: group.source,
+        errorCode: group.errorCode,
         provider: group.provider,
         model: group.model,
         status: group.status,

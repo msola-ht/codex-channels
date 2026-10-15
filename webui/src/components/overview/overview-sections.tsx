@@ -37,7 +37,8 @@ import { useTranslation } from "@/hooks/use-translation"
 import type { MessageKey, Translate } from "@/lib/i18n/messages"
 import {
   formatCount,
-  formatErrorType,
+  formatRequestError,
+  isClientInterruption,
   formatFailureRate,
   formatCacheUsage,
   formatRequestOutcomes,
@@ -576,15 +577,13 @@ export function ErrorsSummary({ errors }: { errors: ErrorsReport }) {
         ) : (
           <ul className="flex flex-col gap-2">
             {errors.groups.slice(0, 5).map((group) => (
-              <li key={`${group.provider}-${group.model}-${group.status}-${group.errorType}`}>
+              <li key={JSON.stringify([group.source, group.provider, group.model, group.status, group.httpStatus, group.errorType, group.errorCode])}>
                 <div className="flex items-center justify-between gap-2 text-sm">
                   <span className="truncate">
                     {group.provider ?? t("common.unknown")} ·{" "}
-                    {group.status !== "completed" && group.errorType === "client_disconnected"
+                    {isClientInterruption(group)
                       ? t("metrics.interrupted")
-                      : group.errorType === null
-                      ? group.status
-                      : formatErrorType(group.errorType, language)}
+                      : formatRequestError({ ...group, errorMessage: group.lastErrorMessage }, language)}
                   </span>
                   <span className="tabular-nums text-muted-foreground">
                     {t("overview.countAndTime", {

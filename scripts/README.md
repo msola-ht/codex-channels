@@ -173,9 +173,9 @@
   Provider 为 `openai` 且不修改主配置，为每个 Provider 写入包含完整 Provider 块、Key、模型、
   官方目录的 `medium` 或自定义目录声明的思考等级和服务层级的 0600 私有 Profile：自定义目录提供商使用 `~/.codex/sf-cp-<名称>.config.toml`，Codex 兼容类型使用 `~/.codex/sf-custom-<Provider ID>.config.toml`，
   并通过私有显式注册表支持多个隔离实例。Gateway 管理的 DeepSeek、OpenCode Go 与自定义
-  Provider 固定使用 `request_max_retries = 1`、`stream_max_retries = 0`，即首次 HTTP 请求失败后
-  最多再试一次，流中断不自动重连，避免 Codex 默认 HTTP 重试与流重连相乘；已有配置也由 App Server
-  服务启动参数施加同一边界。自定义固定模式不能保留其他自定义切换 Profile；转为固定
+  Provider 新配置写入 `request_max_retries = 4`、`stream_max_retries = 5`，与锁定 Codex 默认一致；
+  App Server 启动统一第三方与聚合的实际重试值并回读核验，不改写既有文件。
+  网络重连及 WS→HTTP 降级由 Codex 原生策略控制，不承诺整个 Turn 的固定发送次数。自定义固定模式不能保留其他自定义切换 Profile；转为固定
   模式前用户须先删除其他自定义切换 Provider。受管切换 Provider 可共存；受管固定模式必须先恢复
   官方模式，写入响应丢失时只读确认固定配置事务。只支持
   独立 API Key，切换模式在私有 Profile 使用 `experimental_bearer_token`，固定模式使用私有凭据与 `env_key`。Unix 文件为 0600，Windows 使用私有 ACL。
@@ -521,6 +521,7 @@
   正文和独立 trace 均有界读取；客户端 WebSocket 关闭明细提取同连接关闭码，并按当前 writer 的原始 Thread/Turn、账户与目标关联一个后续调用，额外正文最多读取 1 MiB，不改写原始状态或推断取消原因。`describeDumpTrace` 为 WebUI 事件翻页单独读取轨迹，不重读正文或聚合输出。Turn State 字符数仅在单次调用诊断中提取，指标列表不读取调用索引。只识别当前 V2 格式。
 - `traffic-dump-presentation.mjs`：从已有 V2 请求接口识别协议、请求头识别客户端自报名称，从正文投影每次调用的元数据、参数、用量和错误，从响应索引投影失败阶段；从终态或
   独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件；投影请求输入、声明工具与参数对照，并分开提取本次调用的服务端模型声明和安全缓冲候选及来源；仅从同次调用的单调时钟节点计算阶段，不与上游轮次或旧墙钟相减，不回写转储。
+  失败阶段读取结果为稳定标识；`formatFailureStage` 仅供 CLI 中文呈现，WebUI 使用自己的中英文字典。未知标识明确回退为未知阶段，不通过文案匹配解释历史记录。
 
 ## 构建、打包与服务
 

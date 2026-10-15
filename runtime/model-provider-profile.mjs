@@ -1,7 +1,7 @@
 import { isManagedProviderApiKeyValid } from "./model-provider-definitions.mjs";
 
-export const thirdPartyProviderRequestMaxRetries = 1;
-export const thirdPartyProviderStreamMaxRetries = 0;
+import { thirdPartyProviderRequestMaxRetries, thirdPartyProviderStreamMaxRetries } from "./model-request-policy.mjs";
+export { thirdPartyProviderRequestMaxRetries, thirdPartyProviderStreamMaxRetries };
 
 export function createManagedProviderProfile(definition, {
   apiKey,

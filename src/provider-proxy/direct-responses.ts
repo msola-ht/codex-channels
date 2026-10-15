@@ -1,9 +1,9 @@
 import { ChatDiagnostics, modelRequestDiagnostics, type ModelRequestDiagnostics } from "./chat-diagnostics.js";
 import type { IncomingHttpHeaders } from "node:http";
 import { ModelConversionError, type DirectResponsesRequest, type DirectChatUsage } from "../model-api/index.js";
-import { parseDirectModelJson, validateDirectModelResponse, withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
-import { readChatBody, readModelFrames } from "./chat-io.js";
-import { chatStreamError, chatUpstreamError } from "./chat-errors.js";
+import { parseDirectModelJson, readDirectModelBody, validateDirectModelResponse, withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
+import { readModelFrames } from "./chat-io.js";
+import { ChatUpstreamError, chatStreamError, chatUpstreamError } from "./chat-errors.js";
 import { createMetricsState, hasResponseOutputContent, observeJsonResponse, observeResponseEvent, observeRequestSubmitted, observeResponseReceived } from "./response-metrics-observer.js";
 import type { GenerationTiming } from "../../runtime/request-timing.mjs";
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
@@ -89,17 +89,17 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
           diagnostics.push(value); call.capture?.value(value, stream);
         },
         invalid: count => call.capture?.invalid(count),
-      });
+      }, call.signal);
       if (call.request.stream) errorStage = "stream";
       if (!call.request.stream) {
-        const value = parse(await readChatBody(incoming, call.signal, 8 * 1024 * 1024), call.capture);
+        const value = parse(await readDirectModelBody(incoming, call.signal), call.capture);
         if (chatStreamError(value)) call.observer.receivedError(performance.now());
         diagnostics.push(value);
         call.capture?.value(value, false);
         if (!call.observer.observe(value, false)) throw new ModelConversionError("Responses JSON has no terminal state");
         if (call.observer.status === "failed") diagnostics.error("upstream_failure", errorStage, false);
         if (call.observer.hasContent) call.content();
-        call.capture?.done(call.observer.status === "unknown" ? "incomplete" : call.observer.status); await emit(deliverable(value, false), true); return;
+        call.capture?.done(); await emit(deliverable(value, false), true); return;
       }
       for await (const frame of readModelFrames(incoming, call.signal, { frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024 })) {
         const value = parse(frame.data, call.capture);
@@ -110,7 +110,7 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
         const terminal = call.observer.observe(value, true, frame.receivedAt);
         if (call.observer.status === "failed") diagnostics.error("upstream_failure", errorStage, false);
         if (call.observer.hasContent) call.content();
-        if (terminal) call.capture?.done(call.observer.status === "unknown" ? "incomplete" : call.observer.status);
+        if (terminal) call.capture?.done();
         const output = deliverable(value, true);
         await emit(output, terminal, output === value ? frame.raw : undefined);
         if (terminal) return;
@@ -118,7 +118,7 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
       throw new ModelConversionError("Responses stream disconnected before a terminal event");
     });
   } catch (error) {
-    if (!delivering && !call.signal.aborted) diagnostics.error("upstream_failure", errorStage, false);
+    if (!delivering && !call.signal.aborted) diagnostics.error(error instanceof ChatUpstreamError ? error.code : "upstream_failure", errorStage, error instanceof ChatUpstreamError && error.retryable);
     throw error;
   } finally { call.diagnostics?.(modelRequestDiagnostics(diagnostics.snapshot())); }
 }

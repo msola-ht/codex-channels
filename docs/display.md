@@ -268,8 +268,8 @@ Gateway 检测到活动 Turn 时会等其完成后再写入设置，避免把已
 `/metrics` 可查看当前 Thread 最近 Turn 的运行聚合，以及递归包含全部显式子代理后代的 Thread 会话累计。
 `/metrics global|providers|models <范围>` 按同一口径汇总指标库全部保留记录，并显示请求、Token、缓存、
 压缩和错误统计；历史无 Turn 记录不再形成单独的会话分栏。
-`/metrics errors` 按提供商、模型、状态、HTTP 状态和错误类型汇总异常请求，显示异常率与最近
-发生时间。它不会替代 `/status` 的 App Server 上下文统计。
+`/metrics errors` 按来源、提供商、模型、状态、HTTP 状态、错误类型和错误码汇总异常请求，显示异常率与最近
+发生时间，并按最近发生时间排序。来源及受限格式的错误码保留在渠道输出中，与 CLI、WebUI 共用同一聚合结果。它不会替代 `/status` 的 App Server 上下文统计。
 本机 `codexc metrics run <Thread ID>` 的会话累计使用上述递归口径；
 `codexc metrics turns <Thread ID>` 仍列出指定 Thread 自身的 Turn 明细，不把子代理任务拆入公开
 Turn 行，避免改变既有输出结构。渠道 `/metrics` 只查询当前绑定 Thread，不接受任意 Thread ID。

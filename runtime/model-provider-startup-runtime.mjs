@@ -1,4 +1,5 @@
 import { basename, dirname, extname, join, resolve } from "node:path";
+import { providerModelRequestTimeouts } from "./model-request-policy.mjs";
 
 import { parse } from "smol-toml";
 
@@ -140,6 +141,7 @@ export function withProviderBaseUrl(argumentsList, provider, baseUrl) {
     `model_providers.${provider}.base_url=`,
     `model_providers.${provider}.request_max_retries=`,
     `model_providers.${provider}.stream_max_retries=`,
+    ...Object.keys(providerModelRequestTimeouts()).map(key => `model_providers.${provider}.${key}=`),
   ];
   const kept = [];
   for (let index = 0; index < argumentsList.length; index += 1) {
@@ -164,6 +166,9 @@ export function withProviderBaseUrl(argumentsList, provider, baseUrl) {
     `model_providers.${provider}.request_max_retries=${thirdPartyProviderRequestMaxRetries}`,
     "-c",
     `model_providers.${provider}.stream_max_retries=${thirdPartyProviderStreamMaxRetries}`,
+    ...Object.entries(providerModelRequestTimeouts()).flatMap(([key, value]) => [
+      "-c", `model_providers.${provider}.${key}=${value}`,
+    ]),
   ];
 }
 

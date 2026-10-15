@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from "react"
+import { requestFailureReason } from "@/lib/request-failure"
+import { formatTrafficFailureStage } from "@/lib/format"
 import { formatGenerationSpeed } from "../../../../runtime/request-timing.mjs"
 import { ChevronLeftIcon, ChevronRightIcon, CopyIcon } from "lucide-react"
 import { TrafficParameterComparison, TrafficRequestContent } from "@/components/traffic/traffic-request-content"
@@ -204,7 +206,7 @@ export function TrafficDetail({
               <span role="status" className="text-xs text-muted-foreground">{copyState === "copied" ? t("traffic.referenceCopied") : copyState === "failed" ? t("traffic.referenceCopyFailed") : ""}</span>
             </div>
           </TrafficDisclosure>
-          {detail.response?.state === "completed" && hasResponseDiagnostics(detail.response) ? <TrafficDisclosure title={t("traffic.postCompleteDiagnosticsTitle")}>
+          {detail.response?.state === "completed" && detail.response.deliveryStatus !== "failed" && detail.response.deliveryStatus !== "disconnected" && hasResponseDiagnostics(detail.response) ? <TrafficDisclosure title={t("traffic.postCompleteDiagnosticsTitle")}>
             <p className="text-sm text-muted-foreground">{t("traffic.postCompleteDiagnosticsNote")}</p>
             <ResponseErrorDetails response={detail.response} />
           </TrafficDisclosure> : null}
@@ -297,20 +299,14 @@ function SummaryMetric({ label, value, description }: { label: ReactNode; value:
 }
 
 function ResponseFailure({ response, diagnostics }: { response: NonNullable<TrafficExchangeDetail["response"]>; diagnostics?: TrafficExchangeDetail["chatDiagnostics"] }) {
-  const { t } = useTranslation()
-  if (response.state === "completed") return null
+  const { t, language } = useTranslation()
+  const deliveryFailed = response.deliveryStatus === "failed" || response.deliveryStatus === "disconnected"
+  if (response.state === "completed" && !deliveryFailed) return null
   const fields = diagnostics?.fields ?? {}
-  const codes = [fields["upstreamError.cause.type"], fields["upstreamError.cause.code"], fields["upstreamError.type"], fields["upstreamError.code"], fields["error.code"], response.error]
-  const reasons = {
-    rate_limit_exceeded: "rateLimit", rate_limit: "rateLimit", rate_limit_reached: "rateLimit",
-    authentication_error: "authentication", permission_denied: "permission", payment_required: "payment",
-    context_length_exceeded: "context", content_filter: "content", server_error: "server",
-    upstream_timeout: "timeout", request_timeout: "timeout", invalid_request_error: "invalid", not_found: "notFound",
-  } as const
-  const statusReasons = { 400: "invalid", 401: "authentication", 402: "payment", 403: "permission", 404: "notFound", 429: "rateLimit", 500: "server", 502: "server", 503: "server", 504: "timeout" } as const
-  const known = codes.find((code): code is keyof typeof reasons => typeof code === "string" && Object.hasOwn(reasons, code))
-  const status = fields["upstreamError.cause.statusCode"] ?? response.status
-  const reason = known ? reasons[known] : typeof status === "number" && Object.hasOwn(statusReasons, status) ? statusReasons[status as keyof typeof statusReasons] : "unknown"
+  const codes = [response.error, fields["error.code"]]
+  const reason = response.state === "completed" && deliveryFailed
+    ? response.deliveryStatus === "disconnected" ? "deliveryDisconnected" : "deliveryFailed"
+    : requestFailureReason(codes, response.status) ?? "unknown"
   const facts = [
     [t("traffic.failureUpstreamCode"), fields["upstreamError.code"]],
     [t("traffic.failureCause"), fields["upstreamError.cause.type"] ?? fields["upstreamError.cause.code"] ?? fields["upstreamError.type"]],
@@ -318,15 +314,15 @@ function ResponseFailure({ response, diagnostics }: { response: NonNullable<Traf
     [t("traffic.failureRequestId"), fields["upstreamError.request_id"] ?? fields.requestId],
   ]
   return <Alert variant="destructive">
-    <AlertTitle>{response.state === "incomplete" ? t("traffic.responseIncomplete") : t("traffic.requestFailed")}</AlertTitle>
+    <AlertTitle>{response.state === "completed" ? t("traffic.deliveryIncomplete") : response.state === "incomplete" ? t("traffic.responseIncomplete") : t("traffic.requestFailed")}</AlertTitle>
     <AlertDescription className="min-w-0">
       <p>{response.errorScope === "websocket_client_closed" && reason === "unknown" ? t("traffic.clientClosedExplanation") : t(`traffic.failureReasons.${reason}`)}</p>
       {response.websocketClose === undefined ? null : <p>{t("traffic.clientCloseCode", { code: response.websocketClose.code })}</p>}
       {facts.filter(([, value]) => value !== undefined).map(([label, value]) => <p key={String(label)} className="break-all">{label}: {String(value)}</p>)}
-      {response.failureStage === undefined ? null : <p>{t("traffic.failureStage", { stage: response.failureStage })}</p>}
-      {response.failure === undefined && response.error === undefined && response.errorScope === undefined
-        ? <p>{t("traffic.failureUnknown")}</p>
-        : <TrafficDisclosure title={t("traffic.errorDetailsTitle")}><ResponseErrorDetails response={response} /></TrafficDisclosure>}
+      {response.failureStage === undefined ? null : <p>{t("traffic.failureStage", { stage: formatTrafficFailureStage(response.failureStage, language) })}</p>}
+      {hasResponseDiagnostics(response)
+        ? <TrafficDisclosure title={t("traffic.errorDetailsTitle")}><ResponseErrorDetails response={response} /></TrafficDisclosure>
+        : reason === "unknown" ? <p>{t("traffic.failureUnknown")}</p> : null}
     </AlertDescription>
   </Alert>
 }

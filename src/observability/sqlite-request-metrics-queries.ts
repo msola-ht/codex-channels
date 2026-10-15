@@ -366,9 +366,9 @@ export class SqliteRequestMetricsQueries {
         SELECT
           *,
           ROW_NUMBER() OVER (
-            PARTITION BY provider, model, normalized_status, http_status,
-              normalized_error_type
-            ORDER BY recorded_at_ms DESC
+            PARTITION BY source, provider, model, normalized_status, http_status,
+              normalized_error_type, error_code
+            ORDER BY recorded_at_ms DESC, id DESC
           ) AS last_row
         FROM normalized
         WHERE normalized_status <> 'completed'
@@ -377,6 +377,8 @@ export class SqliteRequestMetricsQueries {
         provider,
         model,
         normalized_status AS status,
+        source,
+        error_code,
         http_status,
         normalized_error_type AS error_type,
         MAX(error_message) FILTER (WHERE last_row = 1) AS last_error_message,
@@ -384,9 +386,10 @@ export class SqliteRequestMetricsQueries {
         MAX(recorded_at_ms) AS last_occurred_at_ms,
         COUNT(*) OVER () AS total_group_count
       FROM ranked
-      GROUP BY provider, model, normalized_status, http_status, normalized_error_type
+      GROUP BY source, provider, model, normalized_status, http_status, normalized_error_type, error_code
       ORDER BY last_occurred_at_ms DESC, request_count DESC,
-        provider ASC, model ASC
+        source ASC, provider ASC, model ASC, normalized_status ASC, http_status ASC,
+        normalized_error_type ASC, error_code ASC
       LIMIT ?
     `).all(
       ...scope.params,
@@ -398,6 +401,8 @@ export class SqliteRequestMetricsQueries {
       requestOutcomes: toStoredRequestOutcomes(summary),
       unsuccessfulRequestCount: summary.unsuccessful_request_count ?? 0,
       groups: rows.map((row) => ({
+        source: row.source,
+        errorCode: row.error_code,
         provider: row.provider,
         model: row.model,
         status: row.status,

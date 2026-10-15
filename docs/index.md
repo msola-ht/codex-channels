@@ -423,6 +423,7 @@ Provider Proxy 独立采集请求与响应模型、出站 `request_service_tier`
 
 CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，读取用户层并投影该连接的合并配置；渠道跨 Provider
 切换则向目标 App Server 发送带 Workspace CWD 的只读 `config/read`，取得该 Profile 的有效思考等级。
+App Server 服务在确认实例就绪前也通过带启动 Workspace CWD 的 `config/read` 核对 Provider 与统一请求策略；第三方和聚合必须保留显式注入的 300 秒完整事件空闲、15 秒 WebSocket 建连、HTTP 重试 4 次及流重试 5 次，匹配锁定 Codex 默认。受管 Provider 覆盖冲突或缺失必要响应会阻止就绪。内置 OpenAI 保留官方默认，不把原始同名 TOML 块当作已覆盖生效。所有实例的网络重连开关与 WS→HTTP 降级交由 Codex 原生配置和要求控制，不施加第三方专属覆盖。
 WebUI 的 Codex 和 Provider 配置读取通过 `scripts/codex-user-config.mjs` 的共享 Client 连接已有主 App Server，关闭连接不停止服务，也不在服务不可用时启动临时进程。
 Codex 设置读取沿用 `model/list` 查询已有目录；每次读取后立即断开连接，不获取 Supervisor 保活租约或唤醒已释放实例，模型相关保存仍执行原有目录校验。
 

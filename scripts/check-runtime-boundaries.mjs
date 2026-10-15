@@ -66,7 +66,8 @@ const runtimeExceptions = new Map([
   // Pure catalog sampling types shared by model request adapters; no file or lifecycle access.
   ["src/model-api/index.ts", new Set(["runtime/model-catalog.mjs"])],
   ["src/model-api/responses-request.ts", new Set(["runtime/chat-reasoning.mjs"])],
-  ["src/model-relay/server.ts", new Set(["runtime/model-relay-listen-host.mjs", "runtime/model-relay-model-id.mjs"])],
+  // Pure stage budgets shared with Codex startup and model transports; no service or file access.
+  ["src/model-relay/server.ts", new Set(["runtime/model-relay-listen-host.mjs", "runtime/model-relay-model-id.mjs", "runtime/model-request-policy.mjs"])],
   ["src/model-relay/admission.ts", new Set(["runtime/model-relay-model-id.mjs"])],
   ["src/codex-client/unix-websocket-transport.ts", new Set(["runtime/app-server-unix-socket.mjs"])],
 ]);

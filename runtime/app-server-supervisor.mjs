@@ -30,10 +30,12 @@ import { maximumProviderCredentialBytes } from "./provider-credential-document.m
 import { readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
 
 const protocolVersion = 5;
+// Includes child readiness, policy connect/initialize/read and owned Proxy cleanup.
+// Control-plane callers and handlers share this bound; it is not a model deadline.
+const providerOperationTimeoutMs = 60_000;
 const desktopAppHostProtocolVersion = 2;
 const desktopAppProviderProtocolVersion = 1;
 const providerSettingsProtocolVersion = 1;
-const providerSettingsTimeoutMs = 30_000;
 const maximumResponseBytes = 16_384;
 const maximumRequestBytes = 4_096;
 const connectionTimeoutMs = 1_000;
@@ -147,7 +149,7 @@ export class AppServerSupervisorOwner {
         socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
         return;
       }
-      socket.setTimeout(20_000, () => socket.destroy());
+      socket.setTimeout(providerOperationTimeoutMs, () => socket.destroy());
       const controller = new AbortController();
       const cancel = () => controller.abort(new Error("Desktop Host 附加已取消"));
       socket.once("end", cancel);
@@ -244,7 +246,7 @@ export class AppServerSupervisorOwner {
         socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
         return;
       }
-      socket.setTimeout(15_000, () => socket.destroy());
+      socket.setTimeout(providerOperationTimeoutMs, () => socket.destroy());
       const leases = this.#providerLeases.get(request.provider) ?? new Set();
       leases.add(socket);
       this.#providerLeases.set(request.provider, leases);
@@ -292,7 +294,7 @@ export class AppServerSupervisorOwner {
       const controller = new AbortController();
       const cancel = () => controller.abort(new Error("Provider 设置应用已取消"));
       socket.once("close", cancel);
-      const timer = setTimeout(() => { cancel(); socket.destroy(); }, providerSettingsTimeoutMs);
+      const timer = setTimeout(() => { cancel(); socket.destroy(); }, providerOperationTimeoutMs);
       socket.setTimeout(0);
       try {
         const canApply = () => {
@@ -340,7 +342,7 @@ export class AppServerSupervisorOwner {
         })}\n`);
         return;
       }
-      socket.setTimeout(15_000, () => socket.destroy());
+      socket.setTimeout(providerOperationTimeoutMs, () => socket.destroy());
       try {
         const result = await this.#runProviderOperation(request.provider, async () => {
           if (this.#hasProviderLease(request.provider)) {
@@ -392,7 +394,7 @@ export class AppServerSupervisorOwner {
       socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
       return;
     }
-    socket.setTimeout(15_000, () => socket.destroy());
+    socket.setTimeout(providerOperationTimeoutMs, () => socket.destroy());
     try {
       await this.#runProviderOperation(request.provider, async () => {
         await this.#ensureProvider(request.provider);
@@ -527,7 +529,7 @@ export async function ensureAppServerProvider(primarySocketPath, provider) {
   const response = await readSupervisorResponse(socketPath, {
     action: "ensureProvider",
     provider,
-  }, 15_000);
+  }, providerOperationTimeoutMs);
   if (response === undefined) {
     throw new Error(
       `无法连接 App Server 监管入口：${socketPath}；`
@@ -569,7 +571,7 @@ export async function acquireAppServerProviderLease(primarySocketPath, provider)
     };
     const timer = setTimeout(
       () => fail(`模型 Provider 租约请求超时：${provider}`),
-      15_000,
+      providerOperationTimeoutMs,
     );
     socket.once("connect", () => {
       socket.write(`${JSON.stringify({ action: "leaseProvider", provider })}\n`);
@@ -634,7 +636,7 @@ export async function acquireMacDesktopAppHostLease(
     };
     const timer = setTimeout(
       () => fail("Codex Desktop App Host 附加超时"),
-      20_000,
+      providerOperationTimeoutMs,
     );
     socket.once("connect", () => {
       socket.write(`${JSON.stringify({
@@ -725,7 +727,7 @@ export async function releaseAppServerProvider(primarySocketPath, provider) {
   const response = await readSupervisorResponse(socketPath, {
     action: "releaseProvider",
     provider,
-  }, 15_000);
+  }, providerOperationTimeoutMs);
   if (response === undefined) {
     throw new Error(
       `无法连接 App Server 监管入口：${socketPath}；`
@@ -763,7 +765,7 @@ export async function applyAppServerProviderSettings(primarySocketPath, provider
   assertSafeSupervisorSocket(socketPath);
   const response = await readSupervisorResponse(socketPath, {
     action: "applyProviderSettings", settingsProtocolVersion: providerSettingsProtocolVersion, provider,
-  }, providerSettingsTimeoutMs, signal);
+  }, providerOperationTimeoutMs, signal);
   signal?.throwIfAborted();
   let value;
   try { value = JSON.parse(response); } catch { throw new Error("Provider 设置应用未确认"); }

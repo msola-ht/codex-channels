@@ -29,6 +29,7 @@ import {
   metricsPageOffset,
   metricsScopeSql,
   observableCompletionSql,
+  interruptedRequestSql,
   requestOutcomeSql,
   validateThreadId,
   type MetricsQueryReader,
@@ -300,7 +301,7 @@ export class SqliteRequestMetricsThreadQueries {
         AND latest_completion_at_ms > response_completed_at_ms THEN 1 END) AS no_observed_completion,
       COUNT(CASE WHEN input_tokens IS NULL OR output_tokens IS NULL THEN 1 END) AS usage_unobserved
     FROM observed
-    WHERE NOT (${observableCompletionSql}) AND error_type = 'client_disconnected'
+    WHERE ${interruptedRequestSql}
     ${byTurn ? "GROUP BY turn_id" : ""}
     `).all(...parameters) as unknown as InterruptionRow[];
   }

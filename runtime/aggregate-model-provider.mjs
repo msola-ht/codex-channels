@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { providerModelRequestTimeouts, thirdPartyProviderRequestMaxRetries, thirdPartyProviderStreamMaxRetries } from "./model-request-policy.mjs";
 import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { parse } from "smol-toml";
@@ -175,8 +176,11 @@ export function aggregateLaunchArguments(material, dataDir, baseUrl) {
     [`model_providers.${aggregateProviderId}.wire_api`]: "responses",
     [`model_providers.${aggregateProviderId}.requires_openai_auth`]: false,
     [`model_providers.${aggregateProviderId}.supports_websockets`]: false,
-    [`model_providers.${aggregateProviderId}.request_max_retries`]: 0,
-    [`model_providers.${aggregateProviderId}.stream_max_retries`]: 0,
+    [`model_providers.${aggregateProviderId}.request_max_retries`]: thirdPartyProviderRequestMaxRetries,
+    [`model_providers.${aggregateProviderId}.stream_max_retries`]: thirdPartyProviderStreamMaxRetries,
+    ...Object.fromEntries(Object.entries(providerModelRequestTimeouts()).map(([key, value]) => [
+      `model_providers.${aggregateProviderId}.${key}`, value,
+    ])),
   };
   return Object.entries(settings).filter(([, value]) => value !== undefined)
     .flatMap(([key, value]) => ["-c", `${key}=${JSON.stringify(value)}`]);
