@@ -11,6 +11,7 @@ import {
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { toolSettingValueError } from "./codex-tool-settings.mjs";
+import { withCliProgress } from "./cli-operation-progress.mjs";
 
 const reasoningSummaryLabels = {
   auto: "自动",
@@ -108,7 +109,6 @@ export async function runCodexUserSettingsSetup({
     return subagentsSetup({ environment, output, prompts, createClient });
   }
   if (section === "defaults") {
-    output.write("正在读取 Codex 当前设置…\n");
     return defaultsSetup({
       environment,
       output,
@@ -123,8 +123,8 @@ export async function runCodexUserSettingsSetup({
   if (section === "tool-access") {
     return runCodexToolAccess({ environment, output, prompts, loadSettings, updateSetting, createClient, primaryProvider });
   }
-  output.write("正在读取 Codex 当前设置…\n");
-  const settings = await loadSettings({ environment, createClient, primaryProvider });
+  const settings = await withCliProgress("读取 Codex 当前设置", () =>
+    loadSettings({ environment, createClient, primaryProvider }), { output, delayMs: 150, handleSignals: false });
   if (section === "all") {
     return runAllSettings({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
   }
@@ -198,7 +198,7 @@ async function runApprovalsReviewerSetting({ environment, output, prompts, setti
     initialValue: false,
   });
   if (prompts.isCancel(confirmed) || confirmed !== true) return { action: "back" };
-  const result = await updateSetting({ kind: "approvals-reviewer", value }, {
+  const result = await saveUserSettings(updateSetting, output, { kind: "approvals-reviewer", value }, {
     environment, expectedVersion: settings.version, createClient, primaryProvider,
   });
   output.write(`Codex 默认审批方式已设为${value === "auto_review" ? "自动审查" : "手动审批"}。\n`);
@@ -211,8 +211,8 @@ export async function runCodexToolAccess({
   loadSettings = loadCodexUserSettings, updateSetting = updateCodexUserSetting,
   createClient, primaryProvider = loadPrimaryModelProvider,
 } = {}) {
-  output.write("正在读取 Codex 当前设置…\n");
-  const settings = await loadSettings({ environment, createClient, primaryProvider });
+  const settings = await withCliProgress("读取 Codex 当前设置", () =>
+    loadSettings({ environment, createClient, primaryProvider }), { output, delayMs: 150, handleSignals: false });
   return runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
 }
 
@@ -257,7 +257,7 @@ async function runToolSetting({ environment, output, prompts, settings, updateSe
   }
   const confirmed = await prompts.confirm({ message: `保存 ${field.label}：${JSON.stringify(value)}？`, initialValue: false });
   if (prompts.isCancel(confirmed) || confirmed !== true) return { action: "back" };
-  const result = await updateSetting({ kind: "tool-access", path: field.path, value }, {
+  const result = await saveUserSettings(updateSetting, output, { kind: "tool-access", path: field.path, value }, {
     environment, expectedVersion: settings.version, createClient, primaryProvider,
   });
   output.write("已保存 Codex 工具设置。插件启动参数由插件清单管理；本页不修改操作系统权限。\n");
@@ -308,7 +308,7 @@ async function runAllSettings({
     output.write("已取消，未修改 Codex 默认值与用户偏好。\n");
     return undefined;
   }
-  const result = await updateSetting({
+  const result = await saveUserSettings(updateSetting, output, {
     kind: "all",
     model: modelDefaults.model.model,
     reasoningEffort: modelDefaults.reasoningEffort,
@@ -349,7 +349,7 @@ async function runServiceTierSetting({
     initialValue: false,
   });
   if (prompts.isCancel(confirmed) || confirmed !== true) return { action: "back" };
-  const result = await updateSetting({ kind: "service-tier", serviceTier }, {
+  const result = await saveUserSettings(updateSetting, output, { kind: "service-tier", serviceTier }, {
     environment,
     expectedVersion: settings.version,
     ...(createClient === undefined ? {} : { createClient }),
@@ -390,7 +390,7 @@ async function runWebSearchSetting({
     output.write("已取消，未修改联网搜索设置。\n");
     return undefined;
   }
-  const result = await updateSetting({ kind: "web-search", mode }, {
+  const result = await saveUserSettings(updateSetting, output, { kind: "web-search", mode }, {
     environment,
     expectedVersion: settings.version,
     ...(createClient === undefined ? {} : { createClient }),
@@ -425,7 +425,7 @@ async function runUpdatePlanSetting({ environment, output, prompts, settings, up
     output.write("已取消，未修改计划清单工具设置。\n");
     return undefined;
   }
-  const result = await updateSetting({ kind: "update-plan", enabled: value }, {
+  const result = await saveUserSettings(updateSetting, output, { kind: "update-plan", enabled: value }, {
     environment,
     expectedVersion: settings.version,
     ...(createClient === undefined ? {} : { createClient }),
@@ -460,7 +460,7 @@ async function runAutoRecapSetting({ environment, output, prompts, settings, upd
     output.write("已取消，未修改空闲总结设置。\n");
     return undefined;
   }
-  const result = await updateSetting({ kind: "auto-recap", enabled: value }, {
+  const result = await saveUserSettings(updateSetting, output, { kind: "auto-recap", enabled: value }, {
     environment,
     expectedVersion: settings.version,
     ...(createClient === undefined ? {} : { createClient }),
@@ -534,7 +534,7 @@ async function runModelCompactSetting({
     output.write("已取消，未修改模型上下文与自动压缩。\n");
     return undefined;
   }
-  const result = await updateSetting({
+  const result = await saveUserSettings(updateSetting, output, {
     kind: "model-compact",
     contextWindow,
     autoCompactPercent,
@@ -598,7 +598,7 @@ async function runPermissionSettings({
     output.write("已取消，未修改 Codex 用户权限设置。\n");
     return undefined;
   }
-  const result = await updateSetting({
+  const result = await saveUserSettings(updateSetting, output, {
     kind: "permissions",
     sandboxMode,
     approvalPolicy,
@@ -614,6 +614,12 @@ async function runPermissionSettings({
   );
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
+}
+
+function saveUserSettings(updateSetting, output, input, options) {
+  return withCliProgress("保存 Codex 用户设置", () => updateSetting(input, options), {
+    output, delayMs: 150, handleSignals: false,
+  });
 }
 
 async function promptModelDefaults(prompts, settings) {

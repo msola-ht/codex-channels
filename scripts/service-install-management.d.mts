@@ -72,7 +72,9 @@ export interface ServiceInstallOptions {
   spawnCommand?: typeof import("node:child_process").spawnSync;
   controllerStdio?: import("node:child_process").StdioOptions;
   readinessOptions?: Record<string, unknown>;
+  signal?: AbortSignal;
   onProgress?: (progress: ServiceInstallProgress) => void;
+  onOutput?: (text: string, options: { stream: "stdout" | "stderr" }) => void;
 }
 
 export function previewServiceInstall(

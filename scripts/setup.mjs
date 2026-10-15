@@ -146,7 +146,7 @@ export async function runSetup({
         }
       }
     } catch (error) {
-      if (!stayOnMenu || error instanceof ForwardedChildSignalError) throw error;
+      if (!stayOnMenu || error instanceof ForwardedChildSignalError || error?.exitCode === 130 || error?.exitCode === 143) throw error;
       const event = sanitizeSetupEvent({
         event: "error", category: section,
         message: error instanceof Error ? error.message : String(error),

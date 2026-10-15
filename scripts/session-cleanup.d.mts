@@ -15,5 +15,6 @@ export function runSessionCleanup(
   options?: {
     environment?: NodeJS.ProcessEnv;
     output?: Pick<Console, "log">;
+    signal?: AbortSignal;
   },
 ): Promise<unknown>;

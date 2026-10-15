@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import {
   existsSync,
   readFileSync,
@@ -53,7 +53,10 @@ export async function controlWindowsServices({
   follow = false,
   lines = 100,
   json = false,
+  quiet = false,
+  signal,
 } = {}) {
+  signal?.throwIfAborted();
   if (process.platform !== "win32") {
     throw new Error("Windows 计划任务控制器只支持 Windows");
   }
@@ -97,13 +100,15 @@ export async function controlWindowsServices({
   }
   const parsedTarget = parseServiceTarget(target);
   if (action === "start") {
-    await startDefinitions(parsedTarget, definitionsDirectory, environment);
-    printLifecycleResult("start", parsedTarget);
+    await startDefinitions(parsedTarget, definitionsDirectory, environment, "start", signal);
+    signal?.throwIfAborted();
+    if (!quiet) printLifecycleResult("start", parsedTarget);
     return;
   }
   if (action === "stop") {
-    await stopDefinitions(parsedTarget, definitionsDirectory, environment);
-    printLifecycleResult("stop", parsedTarget);
+    await stopDefinitions(parsedTarget, definitionsDirectory, environment, "stop", signal);
+    signal?.throwIfAborted();
+    if (!quiet) printLifecycleResult("stop", parsedTarget);
     return;
   }
   if (action === "reload") {
@@ -181,22 +186,26 @@ export async function inspectWindowsServiceStatus({
   };
 }
 
-async function startDefinitions(target, definitionsDirectory, environment, selection = "start") {
+async function startDefinitions(target, definitionsDirectory, environment, selection = "start", signal) {
   const selected = serviceControlDefinitions("windows", target, selection, environment, definitionsDirectory);
   for (const [index, service] of selected.entries()) {
     try {
+      signal?.throwIfAborted();
       const file = definitionPath(definitionsDirectory, service.target);
       const definition = readDefinition(file);
       const host = await inspectHost(definition.controlPath);
+      signal?.throwIfAborted();
       if (host?.version === 1 && host.running === true) {
-        if (service.target === "app-server") await waitForAppServer(definition.socketPath, { ...environment, ...definition.environment });
+        if (service.target === "app-server") await waitForAppServer(definition.socketPath, { ...environment, ...definition.environment }, signal);
         continue;
       }
       // The primitive checks the exact task's live state before starting it.
-      runTaskPrimitive("start", service.windows, environment, file, definition.pwshBinary);
+      await runTaskPrimitive("start", service.windows, environment, file, definition.pwshBinary, true);
+      signal?.throwIfAborted();
       try {
-        await waitForHost(definition.controlPath, true, hostStartTimeoutMs);
+        await waitForHost(definition.controlPath, true, hostStartTimeoutMs, true, signal);
       } catch (error) {
+        signal?.throwIfAborted();
         let taskDetail = "计划任务状态读取失败";
         try {
           const task = queryTasks([service.windows], environment).get(service.windows);
@@ -207,20 +216,23 @@ async function startDefinitions(target, definitionsDirectory, environment, selec
         throw new Error(`${error.message}；${taskDetail}；请检查 codexc logs`, { cause: error });
       }
       if (service.target === "app-server") {
-        await waitForAppServer(definition.socketPath, { ...environment, ...definition.environment });
+        await waitForAppServer(definition.socketPath, { ...environment, ...definition.environment }, signal);
       }
     } catch (error) {
+      signal?.throwIfAborted();
       throw lifecycleFailure("启动", selected, index, error);
     }
   }
 }
 
-async function stopDefinitions(target, definitionsDirectory, environment, selection = "stop") {
+async function stopDefinitions(target, definitionsDirectory, environment, selection = "stop", signal) {
   const selected = serviceControlDefinitions("windows", target, selection, environment, definitionsDirectory);
   for (const [index, definition] of selected.entries()) {
     try {
-      await stopDefinition(definition, definitionsDirectory, environment);
+      signal?.throwIfAborted();
+      await stopDefinition(definition, definitionsDirectory, environment, signal);
     } catch (error) {
+      signal?.throwIfAborted();
       throw lifecycleFailure("停止", selected, index, error);
     }
   }
@@ -233,13 +245,14 @@ function lifecycleFailure(action, selected, index, error) {
   return new Error(`服务${action}中止：已完成 ${completed}；失败 ${selected[index].displayName}：${detail}；未执行 ${pending}。请运行 codexc status。`, { cause: error });
 }
 
-async function waitForAppServer(socketPath, environment) {
+async function waitForAppServer(socketPath, environment, signal) {
   if (typeof socketPath !== "string" || socketPath.length === 0) {
     throw new Error("Windows App Server 服务定义缺少 Socket 路径；请运行 codexc install");
   }
   const deadline = Date.now() + appServerStartTimeoutMs;
   let lastStage = "等待监管入口";
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     let state;
     try {
       state = await inspectAppServerSupervisorState(socketPath);
@@ -264,25 +277,29 @@ async function waitForAppServer(socketPath, environment) {
   throw new Error(`等待 Codex App Server 就绪超时（应用启动等待 ${appServerStartTimeoutMs / 1_000} 秒；${lastStage}）：${socketPath}`);
 }
 
-async function stopDefinition(service, definitionsDirectory, environment) {
+async function stopDefinition(service, definitionsDirectory, environment, signal) {
+  signal?.throwIfAborted();
   const file = definitionPath(definitionsDirectory, service.target);
   let definition;
   if (existsSync(file)) {
     definition = readDefinition(file);
     try {
       const host = await inspectHost(definition.controlPath);
+      signal?.throwIfAborted();
       if (host?.version === 1) {
         await requestHost(definition.controlPath, { action: "stop" });
-        await waitForHost(definition.controlPath, false, hostStopTimeoutMs, false);
+        await waitForHost(definition.controlPath, false, hostStopTimeoutMs, false, signal);
       }
     } catch {
       // An unavailable host is not proof of exit. Stop the exact scheduled owner.
     }
   }
+  signal?.throwIfAborted();
   // The primitive stops and confirms the exact task using one scheduler connection.
-  runTaskPrimitive("stop", service.windows, environment);
+  await runTaskPrimitive("stop", service.windows, environment, undefined, undefined, true);
+  signal?.throwIfAborted();
   if (definition) {
-    await waitForHost(definition.controlPath, false, hostStopTimeoutMs);
+    await waitForHost(definition.controlPath, false, hostStopTimeoutMs, true, signal);
   }
 }
 
@@ -302,7 +319,7 @@ function preflight(environment) {
   }
 }
 
-function runTaskPrimitive(action, taskName, environment, definition, preferredPwsh) {
+function runTaskPrimitive(action, taskName, environment, definition, preferredPwsh, asynchronous = false) {
   const pwsh = preferredPwsh || resolveExecutable("pwsh.exe", environment);
   const args = [
     "-NoLogo",
@@ -319,13 +336,35 @@ function runTaskPrimitive(action, taskName, environment, definition, preferredPw
       : ["-TaskName", taskName]),
     ...(definition ? ["-DefinitionPath", definition] : []),
   ];
-  const result = spawnSync(pwsh, args, {
+  const options = {
     encoding: "utf8",
     env: environment,
     windowsHide: true,
     // Stop has a 20s confirmation budget plus 5s for PowerShell/COM startup.
     timeout: action === "query" ? 5_000 : action === "stop" ? windowsTaskStopTimeoutMs + 5_000 : 15_000,
-  });
+  };
+  if (asynchronous) {
+    // Await the current scheduler operation on cancellation: its external effect
+    // cannot be rolled back by killing PowerShell. Callers stop at the next boundary.
+    return new Promise((resolve, reject) => {
+      execFile(pwsh, args, options, (error, stdout, stderr) => {
+        const result = {
+          stdout, stderr,
+          status: error ? typeof error.code === "number" ? error.code : null : 0,
+          error: error?.killed && error.code === null
+            ? Object.assign(error, { code: "ETIMEDOUT" })
+            : typeof error?.code === "string" ? error
+            : undefined,
+        };
+        try { resolve(readTaskPrimitiveResult(result, action, taskName, environment)); }
+        catch (failure) { reject(failure); }
+      });
+    });
+  }
+  return readTaskPrimitiveResult(spawnSync(pwsh, args, options), action, taskName, environment);
+}
+
+function readTaskPrimitiveResult(result, action, taskName, environment) {
   if (result.error?.code === "ETIMEDOUT") {
     let observed = "无法确认当前状态";
     if (action !== "query") {
@@ -450,10 +489,11 @@ function requestHost(controlPath, request) {
   });
 }
 
-async function waitForHost(controlPath, expected, timeoutMs, throwOnTimeout = true) {
+async function waitForHost(controlPath, expected, timeoutMs, throwOnTimeout = true, signal) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     try {
       const active = (await inspectHost(controlPath))?.running === true;
       if (active === expected) return true;

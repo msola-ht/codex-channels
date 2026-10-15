@@ -94,6 +94,7 @@ export async function runWorkspaceCommand(args, {
     if (result.added || result.removedWorkspaces.length > 0 || result.defaultChanged) {
       writeCliMessage("note", gatewayConfigActivationNotice);
     }
+    reportEventQueueCleanup(result, eventQueuePath);
     return;
   }
   if (subcommand === "remove") {
@@ -110,6 +111,7 @@ export async function runWorkspaceCommand(args, {
       writeCliMessage("success", `默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
     }
     writeCliMessage("note", gatewayConfigActivationNotice);
+    reportEventQueueCleanup(result, eventQueuePath);
     return;
   }
   if (inputIsTTY && outputIsTTY && subcommand !== "list") {
@@ -296,6 +298,7 @@ async function createWorkspaceInteractively({
     writeCliMessage("success", `默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
   }
   writeCliMessage("note", gatewayConfigActivationNotice);
+  reportEventQueueCleanup(result, eventQueuePath);
 }
 
 async function removeWorkspaceInteractively({
@@ -338,6 +341,13 @@ async function removeWorkspaceInteractively({
     writeCliMessage("success", `默认 Workspace 已切换为：${result.defaultWorkspace.name} (${result.defaultWorkspace.id})`);
   }
   writeCliMessage("note", gatewayConfigActivationNotice);
+  reportEventQueueCleanup(result, eventQueuePath);
+}
+
+function reportEventQueueCleanup(result, eventQueuePath) {
+  if (!result.eventQueueCleanupPending) return;
+  writeCliMessage("note", "Workspace 配置已保存，但旧工作区通知队列清理未完成；请勿重复添加或移除。", { destination: "stderr" });
+  writeCliMessage("remediation", `运行 codexc work list 核对配置，并检查通知队列及其目录的权限和占用：${eventQueuePath}`, { destination: "stderr" });
 }
 
 function listWorkspaces(configPath, {

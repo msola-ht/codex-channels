@@ -1,4 +1,5 @@
 import { readOfficialModelCatalog } from "../runtime/model-provider-official-catalog.mjs";
+import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import { isCustomCatalogProvider, responsesModelSettings, responsesProviderCatalogPath, responsesProviderBackupPath, removeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { removeCustomProviderUpstreamMetadata } from "../runtime/model-provider-upstream-metadata.mjs";
 import { readPrivateFileSync } from "../runtime/private-file.mjs";
@@ -20,6 +21,7 @@ import {
   readCustomPrimaryProviderApiKey,
   removeCustomPrimaryProviderCredentials,
   assertCustomPrimaryProviderAuthentication,
+  readManagedMarker,
 } from "../runtime/model-provider-runtime.mjs";
 import { thirdPartyProviderRequestMaxRetries, thirdPartyProviderStreamMaxRetries } from "../runtime/model-provider-profile.mjs";
 import {
@@ -285,6 +287,16 @@ async function buildSwitchPlan(
   } = {},
 ) {
   const normalizedId = normalizeProviderId(providerId, { allowOfficial: true });
+  const exclusiveProviders = loadManagedModelProviderDefinitions(environment).filter(
+    (definition) => readManagedMarker(environment, definition)?.mode === "exclusive",
+  );
+  if (exclusiveProviders.length > 0) {
+    throw invalid(
+      "managed-fixed-provider-active",
+      "providerId",
+      `当前受管固定 Provider ${exclusiveProviders.map(({ id }) => id).join("、")} 尚未退出固定模式；请先在 codexc setup 中将对应受管账户改为切换模式，再切换主 Provider`,
+    );
+  }
   const normalizedModel = optionalString(model);
   const { snapshot, officialModels } = await loadSwitchContext(
     environment,

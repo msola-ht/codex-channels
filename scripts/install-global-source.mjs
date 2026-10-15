@@ -5,8 +5,9 @@ import { join, resolve } from "node:path";
 
 import { resolveExecutableInvocation, resolveOptionalExecutable } from "../runtime/executable.mjs";
 import { packageDir } from "./package-path.mjs";
-import { ensureSandboxDependencies } from "./sandbox-dependencies.mjs";
 import { currentNpmGlobalPrefix, recordInstalledSourceMetadata } from "./source-install-metadata.mjs";
+import { runInstallationCommand } from "./installation-command.mjs";
+import { writeCliSection } from "./cli-operation-progress.mjs";
 
 const sourceConfig = join(packageDir, "tsconfig.build.json");
 const webuiDir = join(packageDir, "webui");
@@ -18,20 +19,26 @@ const args = process.argv.slice(2);
 if (args.some((arg) => arg !== "--prepared")) {
   throw new Error("用法：install-global-source.mjs [--prepared]");
 }
-const alreadyPrepared = args.includes("--prepared");
-const prepared = alreadyPrepared
-  ? assertPreparedBuild()
-  : run(process.execPath, [join(packageDir, "scripts", "prepare-package.mjs")]);
-const webuiBuilt = prepared === 0 && !alreadyPrepared ? buildWebui() : prepared;
-if (prepared === 0 && webuiBuilt === 0) {
-  if (!alreadyPrepared) assertPreparedBuild();
-  ensureCodexCli();
-  ensureSandboxDependencies();
+async function install() {
+  const alreadyPrepared = args.includes("--prepared");
+  writeCliSection(alreadyPrepared ? "检查安装产物" : "构建准备");
+  console.log(alreadyPrepared
+    ? "[安装] 使用已有 Gateway/WebUI 构建产物安装全局 codexc 命令。"
+    : "[构建] 准备 Gateway/WebUI 构建产物，随后安装全局 codexc 命令。");
+  if (!alreadyPrepared) {
+    await run(process.execPath, [join(packageDir, "scripts", "prepare-package.mjs")], packageDir, "准备并构建 Gateway");
+    await buildWebui();
+  }
+  await assertPreparedBuild();
+  await ensureCodexCli();
+  await run(process.execPath, [join(packageDir, "scripts", "sandbox-dependencies.mjs")], packageDir, "检查沙盒运行依赖");
   const prefix = currentNpmGlobalPrefix();
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-install-"));
   try {
-    const tarballPath = packSource(temporaryDirectory);
-    process.exitCode = runQuiet("npm", [
+    writeCliSection("安装程序");
+    const tarballPath = await packSource(temporaryDirectory);
+    console.log(`[安装] npm 全局目录：${prefix}`);
+    await run("npm", [
       "install",
       "--global",
       "--prefix",
@@ -41,57 +48,51 @@ if (prepared === 0 && webuiBuilt === 0) {
       "--no-audit",
       "--no-fund",
       tarballPath,
-    ]);
-    if (process.exitCode === 0) recordInstalledSourceMetadata(packageDir, prefix);
+    ], packageDir, "安装全局 codexc 命令");
+    recordInstalledSourceMetadata(packageDir, prefix);
+    writeCliSection("安装结果与下一步");
+    console.log(`[完成] 当前源码构建结果已安装为全局 codexc 命令：${prefix}`);
+    console.log("[提示] 本步骤只安装程序；后台服务的安装与启动由初始化向导或外层更新流程处理。");
+    try {
+      // Configuration helpers depend on packages prepared by this installation.
+      const { printSourceInstallNextSteps } = await import("./source-install-summary.mjs");
+      printSourceInstallNextSteps();
+    } catch {
+      console.log("[提示] 无法生成后续指引；请运行 codexc doctor 检查配置与运行环境。");
+    }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
-} else {
-  process.exitCode = prepared === 0 ? webuiBuilt : prepared;
 }
 
-function assertPreparedBuild() {
+try { await install(); }
+catch (error) {
+  console.error(error instanceof Error ? error.message : "源码安装失败");
+  process.exitCode = error?.exitCode ?? 1;
+}
+
+async function assertPreparedBuild() {
   if (
     !existsSync(join(packageDir, "dist", "main.js"))
     || !existsSync(join(webuiDir, "dist", "index.html"))
   ) {
     throw new Error("预构建源码缺少 Gateway 或 WebUI 构建结果");
   }
-  if (process.platform === "win32" && run("pwsh.exe", [
+  if (process.platform === "win32") await run("pwsh.exe", [
     "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
     "-File", join(packageDir, "runtime", "windows-native-load.ps1"),
-  ]) !== 0) {
-    throw new Error("预构建源码的 Windows 原生产物无效；请先运行 npm run build");
-  }
-  return 0;
+  ], packageDir, "验证 Windows 原生产物");
 }
 
-function packSource(destination) {
-  const invocation = resolveExecutableInvocation("npm", [
+async function packSource(destination) {
+  const result = await runInstallationCommand("生成源码安装包", "npm", [
     "pack",
     "--ignore-scripts",
     "--loglevel=error",
     "--json",
     "--pack-destination",
     destination,
-  ]);
-  const result = spawnSync(
-    invocation.file,
-    invocation.args,
-    {
-      cwd: packageDir,
-      encoding: "utf8",
-      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-    },
-  );
-  if (result.error) {
-    throw result.error;
-  }
-  if (result.status !== 0) {
-    throw new Error(
-      `源码打包失败：exit=${result.status ?? 1}\n${result.stderr || result.stdout}`,
-    );
-  }
+  ], { cwd: packageDir, captureStdout: true });
   const report = JSON.parse(result.stdout);
   const packageReport = Array.isArray(report) ? report[0] : Object.values(report)[0];
   if (!packageReport?.filename) {
@@ -100,46 +101,21 @@ function packSource(destination) {
   return resolve(destination, packageReport.filename);
 }
 
-function buildWebui() {
-  const installed = run(
+async function buildWebui() {
+  await run(
     "npm",
     ["ci", "--ignore-scripts", "--no-audit", "--no-fund"],
-    webuiDir,
+    webuiDir, "安装 WebUI 依赖",
   );
-  if (installed !== 0) return installed;
-  return run("npm", ["run", "build"], webuiDir);
+  await run("npm", ["run", "build"], webuiDir, "构建 WebUI");
 }
 
-function run(command, args, cwd = packageDir) {
-  const invocation = resolveExecutableInvocation(command, args);
-  const result = spawnSync(invocation.file, invocation.args, {
-    cwd,
-    stdio: "inherit",
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-  });
-  if (result.error) {
-    throw result.error;
-  }
-  return result.status ?? 1;
-}
-
-function runQuiet(command, args, cwd = packageDir) {
-  const invocation = resolveExecutableInvocation(command, args);
-  const result = spawnSync(invocation.file, invocation.args, {
-    cwd,
-    encoding: "utf8",
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    if (result.stdout) process.stdout.write(result.stdout);
-    if (result.stderr) process.stderr.write(result.stderr);
-  }
-  return result.status ?? 1;
+async function run(command, args, cwd, label) {
+  await runInstallationCommand(label, command, args, { cwd });
 }
 
 // Source installation must work before init/setup; do not depend on channel configuration.
-function ensureCodexCli() {
+async function ensureCodexCli() {
   const metadata = JSON.parse(readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"));
   const expected = /^codex-cli (\d+\.\d+\.\d+)$/u.exec(metadata.codexCli)?.[1];
   if (!expected) throw new Error("源码协议元数据缺少正式 Codex CLI 版本");
@@ -151,9 +127,7 @@ function ensureCodexCli() {
   if (!executable) {
     if (configured) throw new Error("CODEX_BINARY 指定的可执行文件不存在，请修正后重新安装");
     console.log(`未检测到 Codex CLI，正在安装 @openai/codex@${expected}`);
-    if (run("npm", ["install", "--global", "--include=optional", "--no-audit", "--no-fund", `@openai/codex@${expected}`]) !== 0) {
-      throw new Error(`Codex CLI 安装失败；请检查 npm 全局目录权限后重试 npm run install:global`);
-    }
+    await run("npm", ["install", "--global", "--include=optional", "--no-audit", "--no-fund", `@openai/codex@${expected}`], packageDir, "安装 Codex CLI");
     installed = true;
     executable = resolveOptionalExecutable(command);
     if (!executable) throw new Error("Codex CLI 安装后仍不在 PATH，请将当前 npm 全局命令目录加入 PATH 后重新运行 npm run install:global");
@@ -163,18 +137,15 @@ function ensureCodexCli() {
     if (installed) throw new Error(`Codex CLI 安装版本不匹配：需要 ${expected}，当前 ${actual || "未知"}`);
     if (configured) throw new Error(`CODEX_BINARY 版本不匹配：需要 ${expected}，当前 ${actual || "未知"}；请更新指定文件后重试`);
     console.log(`Codex CLI 当前 ${actual || "未知"}，正在同步为项目锁定版本 ${expected}`);
-    if (run("npm", ["install", "--global", "--include=optional", "--no-audit", "--no-fund", `@openai/codex@${expected}`]) !== 0) {
-      throw new Error("Codex CLI 版本同步失败；请检查 npm 全局目录权限后重试 npm run install:global");
-    }
+    await run("npm", ["install", "--global", "--include=optional", "--no-audit", "--no-fund", `@openai/codex@${expected}`], packageDir, "同步 Codex CLI 版本");
     const refreshed = resolveOptionalExecutable("codex");
     if (!refreshed) throw new Error("Codex CLI 安装后仍不在 PATH，请修正 PATH 后重试");
     const verified = readCodexVersion(refreshed, expected, configured);
     if (verified !== expected) {
       throw new Error(`Codex CLI 同步后版本仍不匹配：需要 ${expected}，当前 ${verified || "未知"}；请检查 PATH 中的同名命令`);
     }
-  } else {
-    console.log(`Codex CLI ${expected} 检测通过；程序安装成功后，首次使用请在交互终端运行 codexc init 完成接入与后台服务安装；跳过的步骤再按需运行 codexc setup、codexc install。`);
   }
+  console.log(`[通过] Codex CLI 版本符合要求：${expected}`);
 }
 
 function readCodexVersion(executable, expected, configured) {

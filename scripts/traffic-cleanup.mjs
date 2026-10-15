@@ -3,6 +3,7 @@
 import { lstatSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { setImmediate } from "node:timers/promises";
 
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import {
@@ -19,6 +20,7 @@ import {
 } from "./traffic-command-options.mjs";
 import { dumpCatalog } from "./traffic-dump-reader.mjs";
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
+import { withCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
 
 export async function runTrafficCleanup(
   args,
@@ -26,8 +28,10 @@ export async function runTrafficCleanup(
     assertAppServersStopped = assertConfiguredAppServersStopped,
     environment = process.env,
     output = console,
+    signal,
   } = {},
 ) {
+  signal?.throwIfAborted();
   const options = parseTrafficCleanupArgs(args);
   const located = locateOptionalUserConfig(environment);
   const directory = options.directory ?? join(located?.dataDir ?? userDataDir(environment), "traffic");
@@ -39,9 +43,17 @@ export async function runTrafficCleanup(
     return preview;
   }
   await assertAppServersStopped(environment, directory);
+  signal?.throwIfAborted();
   const confirmed = trafficCleanupPreview(directory);
+  let deleted = 0;
   for (const target of confirmed.targets) {
+    await setImmediate();
+    if (signal?.aborted) {
+      output.log(`清理已中止，已删除 ${deleted}/${confirmed.targets.length} 个 V2 session。`);
+      signal.throwIfAborted();
+    }
     rmSync(target, { force: true, recursive: true });
+    deleted++;
   }
   output.log(`已删除 ${confirmed.v2Sessions} 个 V2 session（${formatBytes(confirmed.bytes)}）。`);
   return confirmed;
@@ -120,9 +132,9 @@ function formatBytes(bytes) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  runTrafficCleanup(process.argv.slice(2)).catch((error) => {
+  withCliLifecycleCancellation("转储清理", signal => runTrafficCleanup(process.argv.slice(2), { signal })).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
+    process.exitCode = error?.exitCode ?? 1;
   });
 }
 

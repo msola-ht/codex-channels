@@ -25,4 +25,4 @@ export function serviceSnapshotHealthy(
   target: ServiceTarget,
   environment?: NodeJS.ProcessEnv,
 ): boolean;
-export function waitForSelectedRelay(target: ServiceTarget, environment?: NodeJS.ProcessEnv): Promise<void>;
+export function waitForSelectedRelay(target: ServiceTarget, environment?: NodeJS.ProcessEnv, options?: { signal?: AbortSignal }): Promise<void>;

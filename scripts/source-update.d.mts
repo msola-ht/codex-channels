@@ -51,6 +51,8 @@ export interface SourceUpdateFailure {
 export interface SourceUpdateOptions {
   projectDir?: string;
   repository?: string;
+  /** Cancellation for disposable preparation commands; omit during mutation/recovery. */
+  getCommandSignal?: () => AbortSignal | undefined;
   captureCommand?: (
     command: string,
     args: string[],
@@ -60,7 +62,12 @@ export interface SourceUpdateOptions {
     command: string,
     args: string[],
     options: Record<string, unknown>,
-  ) => void;
+  ) => Promise<void> | void;
+  runStage?: <T>(
+    stage: SourceUpdateStage,
+    operation: () => Promise<T> | T,
+    options: { recovery: boolean },
+  ) => Promise<T> | T;
   confirmCodexCliInstall?: (request: {
     currentVersion?: string;
     requiredVersion: string;
@@ -135,7 +142,7 @@ export function inspectManagedSourceUpdatePlan(
 
 export function getSourceUpdateFailure(error: unknown): SourceUpdateFailure | undefined;
 export function assertCodexVersion(expected: string, environment: NodeJS.ProcessEnv, captureCommand?: SourceUpdateOptions["captureCommand"]): void;
-export function validateCodexContract(checkout: string, environment: NodeJS.ProcessEnv, options: SourceUpdateOptions): void;
+export function validateCodexContract(checkout: string, environment: NodeJS.ProcessEnv, options: SourceUpdateOptions): Promise<void>;
 export function buildCheckout(checkout: string, environment: NodeJS.ProcessEnv, options: SourceUpdateOptions): Promise<void>;
 export function packageVersion(checkout: string): string;
 export function codexVersion(checkout: string): string;

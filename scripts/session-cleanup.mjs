@@ -20,8 +20,10 @@ import { createPrompter } from "./terminal-prompter.mjs";
 import { SqliteSessionDisplayCache } from "../dist/storage/index.js";
 import { sessionCleanupUsage as usage } from "./cli-command-usage.mjs";
 import { assertStateDatabaseSchema } from "./state-database.mjs";
+import { withCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
 
-export async function runSessionCleanup(args, { environment = process.env, output = console } = {}) {
+export async function runSessionCleanup(args, { environment = process.env, output = console, signal } = {}) {
+  signal?.throwIfAborted();
   if (args.length === 0 || args.some((arg) => arg === "-h" || arg === "--help")) {
     if (args.length > 1 || (args.length === 1 && !["-h", "--help"].includes(args[0]))) throw new Error(usage);
     output.log(usage);
@@ -33,6 +35,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
   }
   const config = requireUserConfig(environment);
   await requireStoppedGateway(config.configPath);
+  signal?.throwIfAborted();
   const document = readGatewayConfig(config.configPath);
   const workspaces = readWorkspaceConfig(document).workspaces;
   const runtime = resolveAppServerRuntime(document, config.dataDir, environment);
@@ -52,7 +55,9 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
       })),
     ];
     const connectProvider = async ({ socketPath, provider }) => {
+      signal?.throwIfAborted();
       await ensureAppServerProvider(runtime.primarySocketPath, provider);
+      signal?.throwIfAborted();
       const transport = createAppServerTransport({ kind: "local-app-server", socketPath }, {
         createCodexProcessInvocation: (values) => codexProcessInvocation(codexBinary, values, environment),
         terminateCodexProcess: terminateChildProcess,
@@ -77,6 +82,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     // Do not start an unused virtual instance merely to discover its history.
     let aggregateConnection;
     const ensureClient = async (provider) => {
+      signal?.throwIfAborted();
       if (provider !== aggregateProviderId || clients.has(provider)) return;
       const entry = socketEntries.find(value => value.provider === provider);
       if (!entry) return; // Removed Providers use shared-history maintenance.
@@ -84,7 +90,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
       await aggregateConnection;
     };
     const context = {
-      clients, ensureClient, primaryClient: clients.get(runtime.primaryProvider), workspaces, databasePath, maxTurns,
+      clients, ensureClient, primaryClient: clients.get(runtime.primaryProvider), workspaces, databasePath, maxTurns, signal,
       idleCutoff: idleDays === null ? null : Math.floor(Date.now() / 1000) - idleDays * 86_400,
     };
     output.log("正在扫描主会话（已连接 " + clients.size + " 个 Provider，" + workspaces.length + " 个 Workspace；聚合会话按需连接）…");
@@ -92,6 +98,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     // Every instance shares the same history; modelProviders: [] already covers
     // historical Providers. Only live-state reads need the owning instance.
     for (const cwd of new Set(workspaces.map(workspace => workspace.cwd))) {
+      signal?.throwIfAborted();
       for (const thread of await context.primaryClient.listThreads(cwd, { fullScan: true })) {
         if (!thread.parentThreadId && thread.source !== "automation") roots.set(thread.id, thread);
       }
@@ -107,7 +114,8 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
         inspected++;
         if (inspected % 10 === 0 || inspected === roots.size) output.log("扫描进度：" + inspected + "/" + roots.size);
       }
-    });
+    }, signal);
+    signal?.throwIfAborted();
     for (const inspection of inspections) {
       if (inspection.candidate) candidates.push(inspection.candidate);
       else skipped.push(inspection.skipped);
@@ -132,7 +140,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     const prompter = createPrompter(process.stdin, process.stdout);
     let accepted;
     try {
-      accepted = await prompter.confirm("确认归档以上 " + candidates.length + " 个主会话及其派生后代", false);
+      accepted = await prompter.confirm("确认归档以上 " + candidates.length + " 个主会话及其派生后代", false, { signal });
     } finally { prompter.close(); }
     if (!accepted) {
       output.log("已取消会话归档。");
@@ -142,8 +150,9 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     for (const [index, candidate] of candidates.entries()) {
       output.log("归档进度：" + (index + 1) + "/" + candidates.length + " · 复核 " + candidate.thread.id);
       let stopReason;
+      if (signal?.aborted) stopReason = "已收到取消请求";
       try {
-        if (await gatewayOwnerIsActive(config.configPath)) stopReason = "Gateway 已启动";
+        if (!stopReason && await gatewayOwnerIsActive(config.configPath)) stopReason = "Gateway 已启动";
       } catch (error) { stopReason = "Gateway 状态无法确认：" + summarizeFailure(error); }
       if (stopReason) {
         output.log(stopReason + "，停止执行剩余归档，继续核验已发出的请求。");
@@ -158,6 +167,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
         if (candidateSnapshot(current) !== candidateSnapshot(candidate)) throw new Error("会话组已变化，请重新预览");
         await requireStoppedGateway(config.configPath);
         requireUnbound(current.members, readBoundThreadIds(databasePath));
+        signal?.throwIfAborted();
       } catch (error) {
         results.push({ id: candidate.thread.id, status: "skipped", reason: summarizeFailure(error) });
         continue;
@@ -206,6 +216,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     }
     output.log("归档结束：已核验 " + results.filter((item) => item.status === "confirmed").length
       + " 组，其余 " + results.filter((item) => item.status !== "confirmed").length + " 组；未自动重试或回滚。");
+    signal?.throwIfAborted();
     if (results.some(item => item.status !== "confirmed" || item.cacheError)) {
       throw new Error("归档执行未全部完成或展示缓存清理失败，请按逐组结果核查后重新预览；未自动重试或回滚");
     }
@@ -220,12 +231,14 @@ async function requireStoppedGateway(configPath) {
   if (await gatewayOwnerIsActive(configPath)) throw new Error("清理会话前必须先停止 Gateway：codexc stop gateway");
 }
 
-async function readOwnedThread(thread, { clients, ensureClient, primaryClient }) {
+async function readOwnedThread(thread, { clients, ensureClient, primaryClient, signal }) {
+  signal?.throwIfAborted();
   await ensureClient(thread.modelProvider);
   const preferred = clients.get(thread.modelProvider) ?? primaryClient;
   const readers = [...clients.entries()];
   let selected;
   for (const [provider, client] of readers) {
+    signal?.throwIfAborted();
     const current = await client.readThread(thread.id);
     if (current.id !== thread.id || current.modelProvider !== thread.modelProvider) throw new Error("会话身份或 Provider 已变化");
     requireEligibleMember(current);
@@ -243,9 +256,10 @@ async function readOwnedThread(thread, { clients, ensureClient, primaryClient })
   return selected;
 }
 
-async function readDescendants(client, id) {
+async function readDescendants(client, id, signal) {
   const members = [];
   for (const archived of [false, true]) {
+    signal?.throwIfAborted();
     for (const thread of await client.listThreadDescendants(id, archived)) members.push({ thread, archived });
   }
   const ids = new Set();
@@ -261,16 +275,17 @@ function requireUnbound(members, bound) {
 }
 
 async function inspectCandidate(listed, context) {
+  context.signal?.throwIfAborted();
   const { workspaces, databasePath, maxTurns, idleCutoff } = context;
   const { thread, client, provider } = await readOwnedThread(listed, context);
   if (thread.parentThreadId || thread.source === "automation") throw new Error("不是可清理的交互主会话");
   if (!workspaces.some(workspace => workspace.cwd === thread.cwd)) throw new Error("会话组包含未配置 Workspace：" + thread.id);
   if (idleCutoff !== null && !isThreadIdle(thread, idleCutoff)) throw new Error("会话组未达到空闲天数条件");
-  const turnCount = await countTurns(client, thread.id, maxTurns);
+  const turnCount = await countTurns(client, thread.id, maxTurns, context.signal);
   if (turnCount > maxTurns) throw new Error("主会话 Turn 数超过上限");
   const members = [{ thread, archived: false }];
   const loadedProviders = new Set(thread.status.type === "idle" ? [provider] : []);
-  const children = await readDescendants(client, thread.id);
+  const children = await readDescendants(client, thread.id, context.signal);
   for (const child of children) {
     const current = await readOwnedThread(child.thread, context);
     if (current.thread.status.type === "idle") loadedProviders.add(current.provider);
@@ -292,11 +307,11 @@ function requireEligibleMember(member) {
   if (member.status.type !== "idle" && member.status.type !== "notLoaded") throw new Error("会话状态不可确认：" + member.id);
 }
 
-async function inspectInBatches(threads, inspect) {
+async function inspectInBatches(threads, inspect, signal) {
   const results = new Array(threads.length);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(4, threads.length) }, async () => {
-    while (next < threads.length) {
+    while (next < threads.length && !signal?.aborted) {
       const index = next++;
       results[index] = await inspect(threads[index]);
     }
@@ -359,11 +374,12 @@ export function isThreadIdle(thread, cutoffSeconds) {
   return lastActivity !== undefined && lastActivity !== null && lastActivity <= cutoffSeconds;
 }
 
-async function countTurns(client, threadId, maxTurns) {
+async function countTurns(client, threadId, maxTurns, signal) {
   let cursor;
   let total = 0;
   const cursors = new Set();
   do {
+    signal?.throwIfAborted();
     const page = await client.listThreadTurns(threadId, { cursor, limit: Math.min(100, maxTurns - total + 1) });
     total += page.turns.length;
     if (total > maxTurns) return total;
@@ -397,5 +413,6 @@ function summarizeFailure(error) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  runSessionCleanup(process.argv.slice(2)).catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });
+  withCliLifecycleCancellation("会话归档", signal => runSessionCleanup(process.argv.slice(2), { signal }))
+    .catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = error?.exitCode ?? 1; });
 }

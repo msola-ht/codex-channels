@@ -13,7 +13,7 @@ export function createChannelPrompter(input, output) {
   };
   return {
     ask: (message, options) => read(prompts.text, { ...options, message }),
-    secret: (message, options) => read(prompts.text, { ...options, message }),
+    secret: (message, options) => read(prompts.password, { ...options, message }),
     confirm: (message, initialValue, options) => read(prompts.confirm, {
       ...options, message, initialValue, active: "是", inactive: "否",
     }),

@@ -2,7 +2,7 @@ import * as clackPrompts from "@clack/prompts";
 import { maintenanceServiceRunning, runMaintenanceServices } from "./maintenance-services.mjs";
 
 export async function runSessionCleanupMenu({ prompts = clackPrompts, runCleanup,
-  gatewayRunning = () => maintenanceServiceRunning("gateway"), runService,
+  gatewayRunning = () => maintenanceServiceRunning("gateway"), runService, services = {},
 }) {
 
   const maxTurns = await prompts.text({
@@ -46,6 +46,6 @@ export async function runSessionCleanupMenu({ prompts = clackPrompts, runCleanup
   // The cleanup command performs the candidate preview and its own final
   // confirmation in the terminal.
   args.push("--confirm");
-  return runMaintenanceServices({ prompts, targets: ["gateway"], isRunning: gatewayRunning,
-    ...(runService ? { runService: action => runService(action) } : {}), run: () => runCleanup(args) });
+  return runMaintenanceServices({ prompts, targets: ["gateway"], isRunning: gatewayRunning, ...services,
+    ...(runService ? { runService: action => runService(action) } : {}), run: options => runCleanup(args, options) });
 }

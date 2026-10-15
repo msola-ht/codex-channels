@@ -12,7 +12,7 @@ export function ensureSandboxDependencies({
 } = {}) {
   if (platform === "darwin") {
     if (!resolve("/usr/bin/sandbox-exec")) throw new Error("macOS 缺少系统 sandbox-exec，请修复系统组件后重试；无需安装 bubblewrap");
-    log("macOS 系统沙盒入口已就绪，无需安装 bubblewrap。");
+    log("[通过] 已找到 macOS 沙盒工具：/usr/bin/sandbox-exec");
     return;
   }
   if (platform !== "linux") return;

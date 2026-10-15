@@ -138,7 +138,7 @@ if [ "$codex_version" != "$version" ]; then
   codex_command="$(command -v codex 2>/dev/null || true)"
   [ -n "$codex_command" ] \
     || fail "Codex CLI 已安装到 $npm_global_prefix/bin，但该目录不在 PATH；请加入 PATH 后重新运行"
-  success "Codex CLI $version 已安装。"
+  note "正在核对 Codex CLI 安装后的版本与 PATH"
 fi
 codex_output="$("$codex_command" --version 2>/dev/null)" || fail "Codex CLI 安装后无法执行，请检查 PATH"
 codex_version="$(printf '%s\n' "$codex_output" | awk '{ print $NF }')"
@@ -153,36 +153,23 @@ else
   note "Codex CLI 检测通过：$codex_command · $codex_version · 未登录或登录状态不可用"
 fi
 
-print_next_steps() {
-  if [ "$codex_logged_in" = true ]; then
-    printf '%s\n' "下一步：在交互终端运行 codexc init，按向导完成接入与后台服务安装"
-  else
-    printf '%s\n' "下一步：codex login status"
-    printf '%s\n' "如未登录：codex login"
-    printf '%s\n' "登录后在交互终端运行：codexc init，按向导完成接入与后台服务安装"
-  fi
-  printf '%s\n' "仅在向导中跳过接入或安装时，之后按需运行 codexc setup、codexc install"
-}
-
 node "$staging/repository/scripts/sandbox-dependencies.mjs" \
   || fail "沙盒运行依赖检查或安装失败"
 
-note "正在安装依赖并构建 Gateway"
 (cd "$staging/repository" \
   && ignore_scripts="$(npm config get ignore-scripts)" \
   && case "$ignore_scripts" in
     true|false) ;;
     *) fail "无法确认 npm ignore-scripts 设置，拒绝构建源码" ;;
   esac \
-  && npm ci --ignore-scripts --no-audit --no-fund \
+  && node scripts/installation-command.mjs '安装 Gateway 依赖' -- npm ci --ignore-scripts --no-audit --no-fund \
   && { [ "$ignore_scripts" = true ] || npm run hooks:install; } \
-  && npm run build \
-  && npm run check) \
+  && node scripts/installation-command.mjs '构建 Gateway' -- npm run build \
+  && node scripts/installation-command.mjs '检查 Gateway' -- npm run check) \
   || fail "Gateway 依赖安装或构建失败"
-note "正在安装依赖并构建 WebUI"
 (cd "$staging/repository/webui" \
-  && npm ci --ignore-scripts --no-audit --no-fund \
-  && npm run build) \
+  && node ../scripts/installation-command.mjs '安装 WebUI 依赖' -- npm ci --ignore-scripts --no-audit --no-fund \
+  && node ../scripts/installation-command.mjs '构建 WebUI' -- npm run build) \
   || fail "WebUI 依赖安装或构建失败"
 
 [ -f "$staging/repository/dist/main.js" ] || fail "构建结果缺少 dist/main.js"
@@ -196,6 +183,7 @@ git -C "$staging/repository" config --local codex-connect.npm-prefix "$npm_globa
 mv "$staging/repository" "$checkout"
 package_directory="$staging/package"
 mkdir -p "$package_directory"
+note "正在打包 Codex Connect 源码"
 pack_report="$(cd "$checkout" && npm pack --ignore-scripts --loglevel=error --json --pack-destination "$package_directory")" \
   || fail "Codex Connect 源码打包失败"
 tarball="$(printf '%s' "$pack_report" | node -e '
@@ -209,8 +197,9 @@ process.stdin.on("end", () => {
   process.stdout.write(entry.filename);
 });
 ')" || fail "npm pack 未返回 tarball 文件名"
-npm install --global --ignore-scripts --loglevel=error --no-audit --no-fund "$package_directory/$tarball" \
-  >/dev/null || fail "Codex Connect npm 全局命令安装失败；请检查 npm 全局目录权限"
+node "$checkout/scripts/installation-command.mjs" '安装 npm 全局命令' -- \
+  npm install --global --ignore-scripts --loglevel=error --no-audit --no-fund "$package_directory/$tarball" \
+  || fail "Codex Connect npm 全局命令安装失败；请检查 npm 全局目录权限"
 node "$checkout/scripts/source-install-metadata.mjs" record "$checkout" "$npm_global_prefix" \
   || fail "无法记录源码安装来源"
 [ -x "$global_launcher" ] \
@@ -222,4 +211,8 @@ staging=""
 success "Codex Connect Git 源码已安装：$checkout"
 printf '%s\n' "分支：main"
 success "npm 全局命令已安装：$global_launcher"
-print_next_steps
+if [ "$codex_logged_in" != true ]; then
+  note "请先运行 codex login status 检查登录状态；如未登录，运行 codex login。"
+fi
+node "$checkout/scripts/source-install-summary.mjs" \
+  || note "无法生成后续指引；请运行 codexc doctor 检查配置与运行环境。"

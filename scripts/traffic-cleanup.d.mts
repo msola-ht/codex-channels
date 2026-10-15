@@ -16,6 +16,7 @@ export interface TrafficCleanupDependencies {
   ) => Promise<void>;
   environment?: NodeJS.ProcessEnv;
   output?: Pick<Console, "log">;
+  signal?: AbortSignal;
 }
 
 export function runTrafficCleanup(

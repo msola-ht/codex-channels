@@ -15,6 +15,8 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import { isCommandHelp } from "../scripts/cli-help.mjs";
+import { runCliLifecycleCommand } from "../scripts/cli-lifecycle-command.mjs";
+import { withCliProgress } from "../scripts/cli-operation-progress.mjs";
 import { primaryProviderUsage } from "../scripts/primary-provider-usage.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
 import {
@@ -294,7 +296,7 @@ try {
   ) {
     printCliMessage("failure", error instanceof Error ? error.message : String(error));
   }
-  if (error instanceof ReportedChildExitError) {
+  if (error instanceof ReportedChildExitError || [130, 143].includes(error?.exitCode)) {
     process.exitCode = error.exitCode;
   } else if (!(error instanceof ForwardedChildSignalError)) {
     process.exitCode = 1;
@@ -432,7 +434,7 @@ async function dispatchCommand(command, args) {
       if (showRequestedHelp(args, "doctor")) {
         break;
       }
-      runDoctor(args);
+      await runDoctor(args);
       break;
     case "security":
       security(args);
@@ -479,7 +481,10 @@ async function dispatchCommand(command, args) {
     case "update": {
       if (showRequestedHelp(args, "update")) break;
       requireNoArguments(args, "用法：codexc update");
-      runScript("scripts/source-update.mjs", [], { failureReportedByChild: true });
+      const runtime = configuredEnvironment();
+      await runCliLifecycleCommand(join(packageDir, "scripts/source-update.mjs"), [], {
+        environment: runtime.environment, cwd: runtime.dataDir,
+      });
       break;
     }
     case "uninstall":
@@ -492,7 +497,9 @@ async function dispatchCommand(command, args) {
         break;
       }
       requireNoArguments(args, "用法：codexc uninstall [--services]");
-      runStandaloneScript("scripts/source-uninstall.mjs", [], serviceControlEnvironment());
+      await runCliLifecycleCommand(join(packageDir, "scripts/source-uninstall.mjs"), [], {
+        environment: serviceControlEnvironment(), cwd: process.cwd(),
+      });
       break;
     case "reset-credit":
       await (await import("../scripts/reset-credit-command.mjs")).runResetCreditCommand(args);
@@ -513,11 +520,11 @@ async function dispatchCommand(command, args) {
             break;
           }
           (await import("../scripts/session-cleanup.mjs")).parseSessionCleanupArgs(values);
-          runScript("scripts/session-cleanup.mjs", values, { failureReportedByChild: true });
+          await runMaintenanceScript("scripts/session-cleanup.mjs", values);
         } else if (target === "traffic") {
           if (showRequestedHelp(values, "traffic.cleanup")) break;
           parseTrafficCleanupArgs(values);
-          runStandaloneScript("scripts/traffic-cleanup.mjs", values);
+          await runMaintenanceScript("scripts/traffic-cleanup.mjs", values, undefined, false);
         } else if (target === "metrics") {
           await metricsMaintenance(values);
         } else throw new Error(cleanupUsage);
@@ -528,9 +535,9 @@ async function dispatchCommand(command, args) {
         break;
       }
       await (await import("../scripts/cleanup-menu.mjs")).runCleanupMenu({
-        runSessionCleanup: (values) => runScript("scripts/session-cleanup.mjs", values, { failureReportedByChild: true }),
-        runTrafficCleanup: (values) => runStandaloneScript("scripts/traffic-cleanup.mjs", values),
-        runDatabaseCommand: (values) => runScript("scripts/metrics-database.mjs", values, { failureReportedByChild: true }),
+        runSessionCleanup: (values, options) => runMaintenanceScript("scripts/session-cleanup.mjs", values, options),
+        runTrafficCleanup: (values, options) => runMaintenanceScript("scripts/traffic-cleanup.mjs", values, options, false),
+        runDatabaseCommand: (values, options) => runMaintenanceScript("scripts/metrics-database.mjs", values, options),
       });
       break;
     case "traffic":
@@ -623,19 +630,14 @@ async function startConfiguredWebui(serviceCommand) {
   await serviceCommand.runServiceCommand(["start", "webui"]);
 }
 
-function runDoctor(args) {
+async function runDoctor(args) {
   if (!(args.length === 0 || (args.length === 1 && args[0] === "--json"))) {
     throw new Error("用法：codexc doctor [--json]");
   }
-  const result = spawnSync(process.execPath, nodeArguments([
-    join(packageDir, "scripts/doctor.mjs"),
-    ...args,
-  ]), {
-    stdio: "inherit",
-    env: process.env,
+  await runCliLifecycleCommand(join(packageDir, "scripts/doctor.mjs"), args, {
+    environment: process.env,
     cwd: process.cwd(),
   });
-  assertSynchronousChildSuccess(result, { failureReportedByChild: true });
 }
 
 function runSetup(args = []) {
@@ -671,6 +673,16 @@ function runStandaloneScript(relativePath, args, environment = process.env) {
     process.cwd(),
     { failureReportedByChild: true },
   );
+}
+
+async function runMaintenanceScript(relativePath, args, { signal } = {}, configure = true) {
+  const runtime = configure ? configuredEnvironment() : undefined;
+  const { runMaintenanceCommand } = await import("../scripts/maintenance-services.mjs");
+  return runMaintenanceCommand(join(packageDir, relativePath), args, {
+    environment: runtime?.environment ?? process.env,
+    cwd: runtime?.dataDir ?? process.cwd(),
+    signal,
+  });
 }
 
 async function runForegroundScript(
@@ -845,19 +857,9 @@ async function metrics(args) {
       return;
     }
     await (await import("../scripts/metrics-menu.mjs")).runMetricsMenu({
-      runDatabaseCommand: (commandArgs) => {
-        if (commandArgs.length === 1 && commandArgs[0] === "status") {
-          run(
-            process.execPath,
-            [join(packageDir, "scripts/metrics-database.mjs"), "status"],
-            process.env,
-            process.cwd(),
-            { failureReportedByChild: true },
-          );
-          return;
-        }
-        runScript("scripts/metrics-database.mjs", commandArgs, { failureReportedByChild: true });
-      },
+      runDatabaseCommand: (commandArgs) => runMaintenanceScript(
+        "scripts/metrics-database.mjs", commandArgs, undefined, commandArgs[0] !== "status",
+      ),
       runMetricsCommand,
     });
     return;
@@ -873,16 +875,10 @@ async function metrics(args) {
     subcommand === "status"
     && (rest.length === 0 || (rest.length === 1 && rest[0] === "--json"))
   ) {
-    run(
-      process.execPath,
-      [join(packageDir, "scripts/metrics-database.mjs"), subcommand, ...rest],
-      process.env,
-      process.cwd(),
-      { failureReportedByChild: true },
-    );
+    await runMaintenanceScript("scripts/metrics-database.mjs", [subcommand, ...rest], undefined, false);
     return;
   }
-  runMetricsCommand([subcommand, ...rest]);
+  await runMetricsCommand([subcommand, ...rest]);
 }
 
 async function metricsMaintenance(args) {
@@ -893,7 +889,7 @@ async function metricsMaintenance(args) {
   const values = action === "cleanup"
     ? [rest.includes("--restart-gateway") ? "cleanup-restart" : "cleanup", ...rest.filter(value => value !== "--restart-gateway")]
     : [action, ...rest];
-  runScript("scripts/metrics-database.mjs", values, { failureReportedByChild: true });
+  await runMaintenanceScript("scripts/metrics-database.mjs", values);
 }
 
 async function channel(args) {
@@ -916,38 +912,30 @@ async function channel(args) {
   runScript("scripts/channel-send-image.mjs", rest, { failureReportedByChild: true });
 }
 
-function runMetricsCommand(args) {
+async function runMetricsCommand(args) {
   const withoutStdout = args.filter((argument) => argument !== "--stdout");
   const writeFile = withoutStdout.length === args.length;
   if (!writeFile) {
-    runScript("scripts/metrics-database.mjs", withoutStdout, { failureReportedByChild: true });
+    const runtime = configuredEnvironment();
+    await withCliProgress("查询指标", ({ signal }) => runCliLifecycleCommand(
+      join(packageDir, "scripts/metrics-database.mjs"), withoutStdout,
+      { environment: runtime.environment, cwd: runtime.dataDir, signal },
+    ), { output: process.stderr, delayMs: 250 });
     return;
   }
-  const output = openMetricsExportFile(
-    withoutStdout[0] ?? "metrics",
-    withoutStdout,
-  );
-  let result;
+  let output;
   try {
-    result = spawnSync(
-      process.execPath,
-      nodeArguments([
-        join(packageDir, "scripts/metrics-database.mjs"),
-        ...withoutStdout,
-      ]),
-      { stdio: ["inherit", output.fileDescriptor, "inherit"] },
-    );
-  } finally {
-    closeSync(output.fileDescriptor);
-  }
-  if (result.error) {
-    rmSync(output.file, { force: true });
-    throw new Error(`指标导出失败：${result.error.message}`);
-  }
-  try {
-    assertSynchronousChildSuccess(result, { failureReportedByChild: true });
+    await withCliProgress("导出指标", async ({ signal }) => {
+      output = openMetricsExportFile(withoutStdout[0] ?? "metrics", withoutStdout);
+      try {
+        await runCliLifecycleCommand(join(packageDir, "scripts/metrics-database.mjs"), withoutStdout,
+          { environment: process.env, cwd: process.cwd(), signal, stdout: output.fileDescriptor });
+      } finally {
+        closeSync(output.fileDescriptor);
+      }
+    }, { output: process.stderr, delayMs: 250 });
   } catch (error) {
-    rmSync(output.file, { force: true });
+    if (output) rmSync(output.file, { force: true });
     throw error;
   }
   chmodSync(output.file, 0o600);

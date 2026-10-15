@@ -6,6 +6,11 @@
 
 ## 配置与 Workspace
 
+- `cli-operation-progress.mjs`：CLI 共用的分组标题与阶段展示；终端使用不读取 stdin 的行内动画，重定向、CI 和 dumb 终端使用纯文本。支持延迟显示、选择输出流或静默，以及沿用调用方取消信号。阶段完成必须等待实际操作结束，取消后由调用方收尾，进度层不直接退出进程。
+- `cli-lifecycle-command.mjs`：更新、程序卸载、Doctor 与指标/数据维护的 CLI 父子进程协作；就绪握手后通过私有 IPC 转发取消，子进程在安全边界检查取消，父进程等待事务收尾并退出，不用强制终止代替取消。指标导出可把子进程标准输出直接写入私有文件。
+- `installation-command.mjs`：安装入口共用的异步命令执行器；避免同步子进程冻结进度，交互模式保留有界诊断尾部并在失败时展示，非交互模式实时输出日志，取消时终止自己启动的进程树。供源码安装器和本地安装复用，不管理后台服务。
+- `cli-command-worker.mjs`：安装命令、更新准备命令、服务控制器、Doctor 与 Desktop 平台查询共用的 Unix 进程组监管入口；等待后代输出管道关闭，保留组长身份以支持取消升级为强制终止，不把直接子进程退出当作整组完成。Windows 保留调用方已有的进程所有权机制。
+
 - `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，由 MCP 客户端启动；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。
 - `mcp-setup.mjs`：`codexc config → 工具与 MCP → 新增 MCP` 交互入口，支持 stdio、Streamable HTTP 和 Strata 视频预设；预设从有效 Gateway 配置推导 StateStore 旁的渠道附件目录，自动填入任意本机视频范围，不询问目录；最终确认后复核目录并准备私有权限，通过 Codex 用户配置事务按修订写入，拒绝覆盖同名服务器，不自动安装、启动或重启服务。
 - `video-analysis-client.mjs`：视频 MCP 的严格环境配置、本机路径校验（授权目录内文件名/绝对路径，或 `STRATA_VIDEO_ROOT=any` 时的任意绝对路径，渠道附件目录内的路径始终拒绝）、有界读取及 Strata Files/Responses 请求；默认使用有界内存 file_id 映射、共享上传及一次明确失效恢复，显式 url 模式兼容旧部署；通过 `instructions` 发送通用视频分析规则，用户问题保持原样，可用有界 `context` 补充同一视频追问线索；预算由上游管理，支持显式思考等级，白名单提取用量及失败分类，只在完整 `completed` 响应中提取分析文字，不接受任意远程视频 URL，不执行模型返回的内容。
@@ -28,6 +33,8 @@
   入口能力及内置工具 Host 是否已附加，明确这些状态不代表 MCP 工具就绪；启动前持有临时 Provider 租约，按需恢复已释放的实例，
   通过官方已加载 Thread 清单和逐项状态读取检查持久及临时会话，并在活动 Turn 或 `codexc remote`
   目标实例租约存在时拒绝会触发子进程切换的启动；打开 Desktop 前释放临时租约。
+  平台命令异步执行，限制 15 秒和 1 MiB 输出；资源标记单遍异步扫描，活动 Thread 检查设置 30 秒总预算。
+  检查与启动进度延迟显示，JSON 状态禁用进度；取消等待自有查询和租约收尾。
   macOS 的具体构建实机验收边界见 `docs/codex-desktop-app-development.md`，Windows 尚未实机验收。
 - `desktop-app-proxy.mjs`：只由 macOS Desktop 的 `CODEX_CLI_PATH` 启动；解析并受控传递 Desktop
   内置插件的布尔启用值和本次 Provider；无插件配置时恢复目标实例但不持有长期租约，带配置时把动态工具 Pipe
@@ -79,7 +86,7 @@
 - `delivery-command.mjs`：仅执行 status/list 时从 Surface 窄诊断入口加载载荷解码与屏障策略，避免帮助及其他 CLI 命令加载平台 SDK；通过 Surface 公开入口复用持久输出分类，离线查看独立投递箱的计数、事件身份、阻塞策略与检查点，并根据明确参数重发或确认送达；不输出正文、不自动清理未确认记录。
 - `cli-menu.mjs` / `cli-menu.d.mts`：八项顶层导航及运行连接、状态服务、数据维护、程序维护子菜单；与主帮助共用分类口径。连接菜单列出已注册工作区和实际可用的 Provider 拓扑，普通隔离实例使用规范 Profile 名分派，聚合项另校验选择别名；按平台隐藏不可用的 Desktop 与权限修复。循环保留上次选择，维护写操作需确认；只分派现有命令，保留进程终止信号语义。
 - `cleanup-menu.mjs` / `cleanup-menu.d.mts`：统一清理交互入口，复用会话参数菜单、指标维护菜单和现有执行命令；转储先预览再确认删除，Provider 指标按精确 ID 确认清理，单项完成后返回菜单。
-- `maintenance-services.mjs` / `maintenance-services.d.mts`：交互清理共用的服务状态检查、停服确认与逆序恢复；异常时保留操作和恢复错误，不停止非受管进程。
+- `maintenance-services.mjs` / `maintenance-services.d.mts`：交互清理共用的服务状态检查、停服确认与逆序恢复；取消覆盖停止、维护和恢复全程，子命令通过私有 IPC 在安全边界收尾，恢复后才返回取消状态，不停止非受管进程。
 - `session-menu.mjs` / `session-menu.d.mts`：统一清理菜单使用的会话归档参数收集；收集 Turn 上限和空闲天数后调用
   会话清理 CLI；确认后临停运行中的受管 Gateway，结束后按原状态恢复，保留清理命令自身的候选预览与最终确认。
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的 Token、汇总请求数与时间格式化，
@@ -233,12 +240,7 @@
   模式时保留官方模型。
 - `primary-provider-usage.mjs`：`codexc provider` 的规范帮助文案，供脚本与入口帮助共用，
   避免两份文案漂移。
-- `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → OpenAI 官方 → 登录并恢复官方”；运行
-  `codex login --device-auth` 完成官方登录（打开终端显示的链接并输入验证码），并通过
-  `config/batchWrite` 把 `model_provider` 写回 `openai`，候选块移入私有备份并从 config 清理，
-  之后可用 `primary-provider switch` 从备份恢复；同时移除冲突的顶层 `openai_base_url`，从第三方
-  模式恢复时清除第三方顶层模型。设备登录完成后在统一 Provider 管理事务内重新读取配置与角色
-  占用状态，再按最新配置修订备份并提交，避免登录期间的并发修改被旧快照覆盖。
+- `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的官方设备登录入口；登录前预览共享 Provider 切换计划，受管固定模式须先改为切换模式。登录完成后重新核对确认范围与配置修订，再提交官方恢复；自定义候选备份、第三方默认模型、模型目录和思考设置清理与 `codexc provider switch openai` 保持一致。
   登录子进程异步运行，输出跟随交互输出流，不混入 Setup JSONL；失败、信号取消或输出异常均停止后续配置写入，并清理自有进程。
 - `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与校验；插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
@@ -366,7 +368,7 @@
   `AbortSignal` 中止返回 `AbortError`，关闭时释放在途交互；非终端调用要求使用显式参数。
 - `telegram-setup.mjs`：把 Telegram Bot 来源、长轮询冲突确认、允许名单输入和中文输出适配到
   `telegram-setup-session.mjs` 的结构化会话；复用统一 Codex `.env`、环境变量和系统代理解析；交互输入的
-  Token 在当前终端明文显示，但验证错误继续脱敏；新建 Bot 仅引导使用官方 BotFather。
+  Token 使用隐藏输入，验证错误继续脱敏；新建 Bot 仅引导使用官方 BotFather。
 - `telegram-setup-session.mjs` / `telegram-setup-session.d.mts`：提供所有者绑定的 Telegram Setup
   开始、状态、自动配对、允许名单预览、确认与取消接口；Bot Token 和一次性配对码只保存在有期限的
   进程内会话中，状态、预览和结果不返回 Token，取消和超时通过 grammY `AbortSignal` 中止验证或
@@ -536,6 +538,7 @@
   （`webui/dist`），再生成临时 npm tarball 并通过禁用隐式生命周期脚本的 npm 全局安装；安装结果
   不链接或依赖源码目录，并避免 npm 12 脚本策略跳过构建；源码更新可用内部 `--prepared` 复用已
   验证的 Gateway/WebUI 构建结果，避免重复构建。Windows 在两条路径打包前均验证原生 DLL 与当前源码、宿主环境匹配且可加载；缺失时失败，不隐式重建。注册全局 Gateway 前按协议元数据同步缺失或版本不符的默认 Codex CLI；CLI 安装显式包含平台可选依赖，执行失败与版本不符分别报告。显式二进制无效或版本不符时失败关闭，不依赖渠道配置。
+- `source-install-summary.mjs`：安装成功后共用的只读下一步指引；区分配置不存在、已有普通配置文件和无法确认状态，不把配置存在视为服务就绪，不修改配置或启动服务。构建、依赖检查阶段不加载该模块或输出初始化建议；指引生成失败不改变已完成安装的结果。
 - `webui-dev.mjs`：仓库根目录 `npm run webui:dev` 的一键开发入口，并行启动
   `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。
@@ -551,12 +554,12 @@
   Workspace、飞书凭据/Bot 身份、
   微信配置与 Bot 凭据、只读消息游标检查点（不修复权限）、允许用户的加密回复上下文覆盖数和最近保存时间，
   以及微信运行时启用状态；缺少 `bubblewrap` 时说明内置 helper 回退并输出发行版安装命令，
-  文本模式立即输出标题、向 stderr 提示检测阶段，按诊断领域逐步输出失败、提示和处理建议，交互终端区分颜色并汇总各状态数量；独立 App Server 检查并发执行，飞书 SDK 按需加载；
+  文本模式立即输出标题、向 stderr 提示检测阶段，按诊断领域逐步输出失败、提示和处理建议，交互终端区分颜色并汇总各状态数量；独立 App Server 与服务查询最多四项并发且按原顺序展示，查询命令有超时和 1 MiB 输出上限，飞书 SDK 按需加载；
   Doctor 不自动安装或修改 AppArmor，不调用
   `getupdates`，不显示 Token、`context_token` 或游标；
   主 Unix WebSocket、已配置 Provider 的切换或固定配置、实际模型目录、Provider Socket、
   监管身份与 Provider 拓扑、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，
-  同一次诊断复用已解析的自定义 Provider 拓扑和同次监管检查的空闲释放状态；Windows 计划任务与宿主查询提前并行执行，系统服务汇总复用本次主 App Server 握手结果并独立确认 Gateway 就绪；已确认运行的 Provider 直接握手，不再先建立第二条 Proxy 探测连接，不缓存跨命令的 ACL 结果；
+  同一次诊断复用已解析的自定义 Provider 拓扑和同次监管检查的空闲释放状态；Windows 计划任务与宿主在系统服务阶段批量查询，系统服务汇总复用本次主 App Server 握手结果并独立确认 Gateway 就绪；已确认运行的 Provider 直接握手，不再先建立第二条 Proxy 探测连接，不缓存跨命令的 ACL 结果；
   `--json` 输出完整脱敏检查数组、分类计数与健康状态；不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
 - `service-install-context.mjs` / `service-install-context.d.mts`：后台服务安装器共用的配置、
@@ -566,6 +569,7 @@
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
   控制脚本实现 linger、Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 使用当前用户计划任务及受管宿主，并校验私有定义与就绪状态。
+  控制器异步执行并提供输出回调；取消在阶段边界生效，当前操作完成后执行既有恢复，恢复不继承取消信号。
   Windows 定义包含解析后的 App Server Socket，缺失时拒绝跳过就绪检查；预检通过私有文件边界读取旧 JSON/VBS 快照，安装激活先停止核心服务与 Relay 再启动，保留 WebUI 运行状态。首次或旧定义不完整的安装在激活失败后保留新定义供诊断，完整旧定义恢复失败时保留原始阶段与两层错误。
 - `service-command.mjs` / `service-command.d.mts`：公开 `appserver`、`relay` 目标映射到内部 `app-server`、`model-relay` 服务标识；实现顶层后台服务命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
   服务目标与日志参数（行数限定为 1 到 10000 的十进制整数）、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪

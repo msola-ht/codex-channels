@@ -240,7 +240,7 @@ export function isDirectExecution(moduleUrl, argvPath) {
 
 async function askToken(prompt, output) {
   while (true) {
-    output.write("请输入 Telegram Bot Token（输入内容会显示，粘贴后按回车）。\n");
+    output.write("请输入 Telegram Bot Token（输入内容隐藏，粘贴后按回车）。\n");
     const token = await prompt.secret("Telegram Bot Token");
     if (tokenPattern.test(token)) {
       return token;
