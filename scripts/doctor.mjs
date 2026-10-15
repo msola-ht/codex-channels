@@ -58,6 +58,7 @@ import { inspectWorkspaceConfig } from "./workspace-config.mjs";
 import { withCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
 import { withCliProgress } from "./cli-operation-progress.mjs";
 import { ownedProcessInvocation } from "../runtime/owned-process.mjs";
+import { supervisedCliInvocation } from "./cli-command-worker.mjs";
 import { childProcessIsRunning, registerChildProcessGroup, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 
 try {
@@ -944,7 +945,7 @@ async function mapChecks(values, inspect) {
 function runDoctorCommand(invocation, { timeoutMs = 3_000, environment = process.env } = {}) {
   checkCancellation();
   return new Promise((resolveResult) => {
-    const owned = ownedProcessInvocation(invocation, environment);
+    const owned = supervisedCliInvocation(ownedProcessInvocation(invocation, environment));
     const child = spawn(owned.file, owned.args, {
       env: environment,
       windowsVerbatimArguments: owned.windowsVerbatimArguments,
@@ -1009,7 +1010,7 @@ function runDoctorCommand(invocation, { timeoutMs = 3_000, environment = process
   });
 }
 function checkCancellation() {
-  if (progress.signal.aborted && queryCleanupFailure) throw queryCleanupFailure;
+  if (queryCleanupFailure) throw queryCleanupFailure;
   progress.signal.throwIfAborted();
 }
   }, { output: process.argv.includes("--json") ? null : process.stderr, delayMs: 250, signal, handleSignals: false }));

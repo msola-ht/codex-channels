@@ -33,6 +33,7 @@ import { runRestartCommand } from "./service-command.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 import { resolveProviderSelection } from "./provider-selection.mjs";
 import { withCliProgress } from "./cli-operation-progress.mjs";
+import { supervisedCliInvocation } from "./cli-command-worker.mjs";
 
 const defaultBridgePort = 47_821;
 const compatibilityMarker = Buffer.from("CODEX_APP_SERVER_WS_URL", "utf8");
@@ -465,7 +466,8 @@ export async function inspectWindowsDesktopApp({
   try {
     installation = await inspectInstallation();
     signal?.throwIfAborted();
-  } catch {
+  } catch (error) {
+    if (error instanceof DesktopCommandCleanupError) throw error;
     signal?.throwIfAborted();
     return {
       installed: false,
@@ -874,9 +876,17 @@ function inspectDesktopAppForPlatform(platform, environment, signal) {
   return unsupportedDesktopApp();
 }
 
+class DesktopCommandCleanupError extends Error {
+  constructor(cause) {
+    super("Desktop 平台命令终止未获确认，请检查残留进程", { cause });
+    this.name = "DesktopCommandCleanupError";
+  }
+}
+
 async function runDesktopPlatformCommand(file, args, { signal, ...options } = {}) {
   signal?.throwIfAborted();
-  const child = spawn(file, args, {
+  const invocation = supervisedCliInvocation({ file, args });
+  const child = spawn(invocation.file, invocation.args, {
     ...options,
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32",
@@ -899,7 +909,7 @@ async function runDesktopPlatformCommand(file, args, { signal, ...options } = {}
       }
       await terminateChildProcess(child);
     })().catch(error => {
-      failure = new AggregateError([failure, error], "Desktop 平台命令终止未获确认");
+      failure = new DesktopCommandCleanupError(new AggregateError([failure, error]));
       child.unref();
     }).finally(() => {
       child.stdout.destroy();
@@ -969,9 +979,10 @@ async function inspectWindowsDesktopInstallation(environment, signal) {
       signal,
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof DesktopCommandCleanupError) throw error;
     signal?.throwIfAborted();
-    throw new Error("Windows Desktop 安装包查询失败");
+    throw new Error("Windows Desktop 安装包查询失败", { cause: error });
   }
   try {
     return JSON.parse(result.stdout.trim());
@@ -988,7 +999,8 @@ async function readMacBundleVersion(infoPath, signal) {
       { signal },
     );
     return result.stdout.trim() || null;
-  } catch {
+  } catch (error) {
+    if (error instanceof DesktopCommandCleanupError) throw error;
     signal?.throwIfAborted();
     return null;
   }
@@ -1009,7 +1021,8 @@ async function macApplicationStatus(appPath, signal) {
     if (status === "true") return true;
     if (status === "false") return false;
     return null;
-  } catch {
+  } catch (error) {
+    if (error instanceof DesktopCommandCleanupError) throw error;
     signal?.throwIfAborted();
     return null;
   }
@@ -1035,9 +1048,10 @@ async function openMacDesktopApp(path, _endpoint, provider, { signal } = {}) {
       "-a",
       path,
     ], { signal });
-  } catch {
+  } catch (error) {
+    if (error instanceof DesktopCommandCleanupError) throw error;
     signal?.throwIfAborted();
-    throw new Error("ChatGPT Desktop App 启动失败");
+    throw new Error("ChatGPT Desktop App 启动失败", { cause: error });
   }
 }
 
@@ -1081,8 +1095,8 @@ async function regularFile(path) {
   }
 }
 
-// The bridge acquires its own lease (15s) before opening the Windows Proxy
-// Transport (10s). Keep this outer deadline longer than those bounded stages.
+// The caller already holds a ready Provider lease. This is a separate bridge
+// readiness budget, not the Supervisor's 60s instance-startup lease budget.
 function probeDesktopAppBridge(endpoint, { signal, timeoutMs = 30_000 } = {}) {
   signal?.throwIfAborted();
   return new Promise((resolvePromise, rejectPromise) => {
