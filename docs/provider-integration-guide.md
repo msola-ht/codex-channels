@@ -212,8 +212,8 @@ base_url = "https://proxy.example.com/v1"
 wire_api = "responses"
 requires_openai_auth = true
 supports_websockets = false
-request_max_retries = 1
-stream_max_retries = 0
+request_max_retries = 4
+stream_max_retries = 5
 ```
 
 可配置多个自定义主 Provider 候选块，但同一时刻只激活一个：`model_provider` 显式选中时激活
@@ -273,9 +273,11 @@ Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_u
 
 修改后运行 `codexc restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。
-Gateway 管理的 DeepSeek、OpenCode Go 与自定义 Provider 统一使用一次 HTTP 失败重试、零次流
-断开重连，即首次 HTTP 请求失败后最多再试一次，避免 Codex 默认请求重试和流重连相乘；已有配置
-也会在 App Server 服务启动时应用同一边界。OpenAI 官方 Provider 保持 Codex 原生重试策略。
+所有通过 Codex 的 Provider（官方、第三方固定、切换及聚合）统一采用锁定 Codex 0.162.1 的重试语义：HTTP 失败最多重试 4 次、流失败最多重试 5 次。第三方和聚合启动显式注入 `4/5`；代理和 Chat 桥不叠加重发。新建受管 Profile 写入相同值，已有配置文件不自动改写，启动覆盖统一实际行为；Profile 中已有重试字段仍按非负安全整数读取。
+
+所有 Codex 实例保留原生网络重连、取消和 WebSocket→HTTP 降级，不注入第三方专属的 `unbounded_connection_retries` 开关。该功能由 Codex 的默认值、用户设置及受管要求共同决定；锁定版本默认开启，符合条件的普通采样连接失败可能持续退避重连。HTTP、流重试和传输降级是不同层，因此不承诺整个 Turn 的固定发送次数或总时长。HTTP 重试针对可恢复的 5xx 和传输错误，使用 Codex 退避及上游等待建议；Chat 桥保留经过校验的 `Retry-After`。独立 Relay 不经过 Codex，不自行重试，由调用方决定。
+
+启动就绪前通过 `config/read` 核验实际第三方及聚合 Provider 的 `4/5`，受管 Provider 覆盖冲突或核验失败会拒绝就绪。官方 OpenAI 保持内置默认；不把同名原始配置块误认为已覆盖内置 Provider。更新程序后重启 App Server 激活进程策略。
 
 已存在的 Thread 在 Codex 中保留创建时的 Provider：恢复旧会话时，官方实现会用线程保存的
 `model_provider` 覆盖当前配置。因此切换 `model_provider` 后，旧会话仍走原 Provider（例如内置
@@ -289,7 +291,7 @@ Gateway 管理的 DeepSeek、OpenCode Go 与自定义 Provider 统一使用一�
 在固定模式把自定义 Thread 路由到主 App Server；切换模式保持官方 `openai` 主实例，并通过
 自定义目录提供商的 `~/.codex/sf-cp-<名称>.config.toml`（ID 为 `cp-<名称>`），或 Codex 兼容类型的 `~/.codex/sf-custom-<Provider ID>.config.toml` 启动独立自定义 App Server。每个 Profile 完整保存该
 Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort = "medium"`、服务层级、
-`request_max_retries = 1` 和 `stream_max_retries = 0`；受管 Provider 的新 Profile 也写入同一重试
+`request_max_retries = 4` 和 `stream_max_retries = 5`；受管 Provider 的新 Profile 也写入同一重试
 边界，主 `~/.codex/config.toml` 保持官方配置。
 `codexc remote -p <Provider ID>` 或 `codexc app -p <Provider ID>` 连接该隔离实例；
 规范 Profile 名称 `sf-cp-<名称>` 或 Codex 兼容类型的 `sf-custom-<Provider ID>` 也可传给 `-p` / `--provider`，Remote 还可显式使用

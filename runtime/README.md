@@ -17,7 +17,7 @@
 
 ## 文件
 
-- `model-request-policy.mjs` / `model-request-policy.d.mts`：Codex 启动、Provider Proxy、Chat 桥与独立 Relay 共用的纯请求阶段预算；完整事件空闲 300 秒、WebSocket 建连 15 秒对齐锁定 Codex 默认，生成没有总期限。第三方与聚合启动显式注入对应字段，已有冲突值拒绝激活；服务就绪前通过 `config/read` 核验合并配置中的 Provider 与策略，包含高优先受管层，官方 OpenAI 保持内置默认。核验连接由服务持有，关闭失败保留以便重试清理；Supervisor 中可能触发 Provider 启动的操作在调用方和服务端统一等待 60 秒，涵盖启动、核验及连接收尾，该控制面预算不限制模型生成。只检查超时，不加载凭据、不写用户配置。
+- `model-request-policy.mjs` / `model-request-policy.d.mts`：共享纯请求阶段预算与锁定 Codex 默认重试值；完整事件空闲 300 秒、WebSocket 建连 15 秒、HTTP 重试 4 次、流重试 5 次，生成没有总期限。第三方与聚合显式注入并通过 `config/read` 核验，官方 OpenAI 保持内置默认；所有 Codex 实例保留原生网络重连及 WS→HTTP 降级，代理和 Relay 不重发。核验连接关闭失败保留以便重试清理；可能启动实例的 Supervisor 操作两端统一等待 60 秒，涵盖启动、核验及连接收尾，不限制模型生成。不加载凭据、不写用户配置。
 - `request-timing.mjs` / `request-timing.d.mts`：指标 IPC、存储、CLI 与 WebUI 共用的生成区间校验和观测速度计算；无 I/O、不依赖调试转储。
 - `service-tier.mjs` / `service-tier.d.mts`：Application、CLI 设置与 WebUI 共用的纯加速档位匹配和展示归一；Fast 仅匹配目录的 `fast`/`priority`，Ultrafast 仅匹配 `ultrafast`，返回原始目录 ID，不包含配置写入、功能开关或生命周期操作。
 - `auto-review-metadata.mjs` / `auto-review-metadata.d.mts`：Provider 指标与转储读取共用的自动审查来源、父任务及原始审查身份投影；只接受明确的 `guardian_review` 来源和有界标识，不读取文件或推断缺失归属。
@@ -95,8 +95,8 @@
   Provider 的账户 ID、共享统计代理键和同一家多账户默认选择，消费定义模块的家族登记；混合 Provider 不推断默认值。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
-  config 编辑映射；DeepSeek、OpenCode Go、CCG 与自定义 Provider 共用一次 HTTP 重试、零次流重连的
-  故障边界，避免 Codex 默认两层重试相乘；OpenAI 官方 Provider 保持 Codex 原生策略。
+  config 编辑映射；重试值消费 `model-request-policy.mjs`，新建第三方 Profile 写入 Codex 默认 `4/5`。
+  已有 Profile 按原字段读取，启动覆盖统一行为；网络重连和 WS→HTTP 降级均归 Codex。
 - `managed-provider-credentials.mjs` / `managed-provider-credentials.d.mts`：受管固定 Provider 的不可变版本凭据与 `env_key` 引用，私有 JSON 严格绑定 Provider 和上游 Origin；不写用户文件，保存由账户配置事务负责。运行读取拒绝明文固定配置，设置投影只读模型元数据以支持明确重配；启动环境和 Relay 材料复用同一引用。
 - `provider-credential-document.mjs` / `provider-credential-document.d.mts`：受管与自定义固定 Provider 共用的四字段 Schema v1 凭据编码、结构解析、Provider/Origin 绑定与 16 KiB 读取上限；不访问文件，API Key 校验与文件生命周期仍由 Provider 所属模块负责。
 - `opencode-go-quota-windows.mjs` / `opencode-go-quota-windows.d.mts`：为 OpenCode Go 统计代理
@@ -131,8 +131,8 @@
 - `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，
   为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只把当前 Provider 的 Key 注入目标
   子进程环境；读取并校验已有 OpenAI 上游地址，为统计代理替换 Provider 地址，同时统一 DeepSeek、
-  OpenCode Go、CCG 的凭据读取。全部第三方 Provider 沿用一次 HTTP 重试、
-  零次流重连的固定边界。
+  OpenCode Go、CCG 的凭据读取。全部第三方 Provider 启动采用锁定 Codex 的
+  HTTP 重试 4 次、流重试 5 次，原生网络重连与传输降级不另行覆盖。
 - `app-server-read.mjs`：连接本机 Codex App Server 并完成 `initialize` 握手，返回 App Server
   生成的完整 `User-Agent`；供 Doctor 的版本核验复用，Windows 使用已构建的 `codex-client`
   传输，其余平台走私有 Unix WebSocket，不承担会话业务。Doctor 以官方非全局客户端身份

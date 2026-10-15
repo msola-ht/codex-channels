@@ -240,6 +240,9 @@ export class ChatCompletionsBridge {
               response.setHeader("connection", "close");
               response.once("finish", () => request.destroy());
             }
+            if (failure instanceof ChatUpstreamError && failure.retryAfter !== undefined) {
+              response.setHeader("retry-after", failure.retryAfter);
+            }
             response.writeHead(status, { "content-type": "application/json" });
             await finishResponse(JSON.stringify({ error: detail }));
           }

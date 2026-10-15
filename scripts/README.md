@@ -173,9 +173,9 @@
   Provider 为 `openai` 且不修改主配置，为每个 Provider 写入包含完整 Provider 块、Key、模型、
   官方目录的 `medium` 或自定义目录声明的思考等级和服务层级的 0600 私有 Profile：自定义目录提供商使用 `~/.codex/sf-cp-<名称>.config.toml`，Codex 兼容类型使用 `~/.codex/sf-custom-<Provider ID>.config.toml`，
   并通过私有显式注册表支持多个隔离实例。Gateway 管理的 DeepSeek、OpenCode Go 与自定义
-  Provider 固定使用 `request_max_retries = 1`、`stream_max_retries = 0`，即首次 HTTP 请求失败后
-  最多再试一次，流中断不自动重连，避免 Codex 默认 HTTP 重试与流重连相乘；已有配置也由 App Server
-  服务启动参数施加同一边界。自定义固定模式不能保留其他自定义切换 Profile；转为固定
+  Provider 新配置写入 `request_max_retries = 4`、`stream_max_retries = 5`，与锁定 Codex 默认一致；
+  App Server 启动统一第三方与聚合的实际重试值并回读核验，不改写既有文件。
+  网络重连及 WS→HTTP 降级由 Codex 原生策略控制，不承诺整个 Turn 的固定发送次数。自定义固定模式不能保留其他自定义切换 Profile；转为固定
   模式前用户须先删除其他自定义切换 Provider。受管切换 Provider 可共存；受管固定模式必须先恢复
   官方模式，写入响应丢失时只读确认固定配置事务。只支持
   独立 API Key，切换模式在私有 Profile 使用 `experimental_bearer_token`，固定模式使用私有凭据与 `env_key`。Unix 文件为 0600，Windows 使用私有 ACL。

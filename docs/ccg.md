@@ -3,7 +3,7 @@
 CCG 是 CommandCode 的受管 Responses Provider，支持在同一 Gateway 中配置多个账户。
 每个账户使用显式 ID，Provider ID 为 `ccg-<accountId>`。
 上游地址为 `https://api.commandcode.ai/provider/v1`，使用 CommandCode API Key，
-关闭 Responses WebSocket，沿用第三方 Provider 的一次 HTTP 重试、零次流重连。
+关闭 Responses WebSocket，重试统一跟随锁定 Codex 默认：HTTP 重试 4 次、流重试 5 次，网络重连由 Codex 原生配置控制。
 接口与认证参考 [CommandCode Provider 文档](https://commandcode.ai/docs/provider)。
 
 ## 接入与模型设置

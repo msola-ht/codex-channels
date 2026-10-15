@@ -13,6 +13,24 @@ export const modelRequestPolicy = Object.freeze({
   terminalDeliveryTimeoutMs: 5_000,
 });
 
+// Match the locked Codex defaults for every provider routed through Codex.
+// Local proxies and Relay never replay requests. Connection recovery and WS -> HTTP
+// fallback remain native Codex behavior, independent of these retry counters.
+export const thirdPartyProviderRequestMaxRetries = 4;
+export const thirdPartyProviderStreamMaxRetries = 5;
+
+/** Check the effective config/read result, including layers above launch overrides. */
+export function assertProviderModelRetryPolicy(provider) {
+  for (const [key, expected] of [
+    ["request_max_retries", thirdPartyProviderRequestMaxRetries],
+    ["stream_max_retries", thirdPartyProviderStreamMaxRetries],
+  ]) {
+    if (provider?.[key] !== expected) {
+      throw new Error(`Codex Provider 的 ${key} 与统一重试策略冲突，应为 ${expected}；请检查 Profile 或受管配置`);
+    }
+  }
+}
+
 /** Validate only the model timeout contract, never infer authentication or routing. */
 export function assertProviderModelRequestPolicy(provider, requireExplicit = false) {
   if (!provider || typeof provider !== "object" || Array.isArray(provider)) {

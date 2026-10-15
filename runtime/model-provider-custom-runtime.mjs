@@ -523,13 +523,13 @@ function configuredCustomSwitchingProfileFromContent(
   }
   if (
     provider.request_max_retries !== undefined
-    && provider.request_max_retries !== thirdPartyProviderRequestMaxRetries
+    && (!Number.isSafeInteger(provider.request_max_retries) || provider.request_max_retries < 0)
   ) {
     throw new Error(`Codex 自定义切换 Provider ${id} 的 request_max_retries 无效`);
   }
   if (
     provider.stream_max_retries !== undefined
-    && provider.stream_max_retries !== thirdPartyProviderStreamMaxRetries
+    && (!Number.isSafeInteger(provider.stream_max_retries) || provider.stream_max_retries < 0)
   ) {
     throw new Error(`Codex 自定义切换 Provider ${id} 的 stream_max_retries 无效`);
   }

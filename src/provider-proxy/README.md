@@ -161,7 +161,7 @@ HTTP 生成失败交互索引，WebSocket 仅保留握手 trace，不伪造 `res
 
 `chat-diagnostics.ts` 白名单提取有界的上游模型、标识、路由、费用与用量明细，经请求级进程内回调在终态交付前提交给代理，写入独立 `chat_diagnostics` trace 事件；随机关联编号随本地 HTTP 传递，观察器随请求关闭清理；不进入 App Server 输出。指标订阅不依赖转储是否开启，仅投影受校验的实际上游、尝试次数、结束原因、错误阶段及内层上游错误摘要，经私有 IPC 独立入库；不保存诊断中的标识、费用、正文或路由历史。桥的工具参数转换失败时另提交 `conversion.toolArguments.length` 与 `conversion.toolArguments.shape`（`empty`/`invalid_json`/`not_object`）：只描述参数形态，绝不包含参数正文，也不改变对客户端交付的错误文案。转储同时把同一次调用诊断里的 `routing.finalProvider` 作为可选 `upstreamProvider` 写入 V2 响应索引，供调用列表在模型名旁展示上游标签；请求明细列表从指标库独立读取同名字段；没有诊断或字段缺失时不写入，也不推断。
 
-`chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码；HTTP 错误可携带经验证的 Retry-After，供原生 Relay 交付，不自动重试。
+`chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码；HTTP 错误可携带经验证的 Retry-After，由 Chat 桥及原生 Relay 交付，不自动重试。桥将上游 429/503 的受限整数秒或规范 HTTP 日期交给外层 Codex，错误正文超时不丢失该建议，畸形值不转发。
 
 受管 CLP 桥在真正发起 HTTP 请求前调用 Runtime 注入的当前模型目录复核；停用或未知模型返回 `409 clp_model_disabled`，缺少复核器或无法安全读取目录返回 `503 clp_catalog_unavailable`，使用固定中文提示并阻止上游请求。共享账户与聚合经过同一检查，已提交请求不强行中断；非 CLP 桥和 Relay 独立目录不受影响。
 

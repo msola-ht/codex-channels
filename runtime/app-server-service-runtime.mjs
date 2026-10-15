@@ -7,7 +7,7 @@ import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArgum
   readAggregateProviderSettingsFingerprint } from "./aggregate-model-provider.mjs";
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 import { ProviderModelGuard } from "./provider-model-guard.mjs";
-import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
+import { assertProviderModelRequestPolicy, assertProviderModelRetryPolicy } from "./model-request-policy.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -1260,6 +1260,7 @@ async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environme
     }
     const configured = config.model_providers?.[provider];
     assertProviderModelRequestPolicy(configured ?? {}, provider !== "openai");
+    if (provider !== "openai") assertProviderModelRetryPolicy(configured);
   } finally {
     await rpc.close();
     if (clients.get(socketPath) === rpc) clients.delete(socketPath);
