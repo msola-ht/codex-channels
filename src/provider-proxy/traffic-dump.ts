@@ -71,6 +71,8 @@ export interface ModelTrafficWebSocketExchangeInput {
   url: string;
 }
 
+type CapturedPayload = { parts: TrafficPayloadPart[]; truncated: boolean };
+
 /**
  * 模型请求转储入口：建立 HTTP/WS 交换，并把 V2 文件生命周期委派给独立存储组件。
  * 只做旁路复制；写入失败由存储组件停止转储并经 onError 上报。
@@ -89,6 +91,7 @@ export class ModelTrafficDump {
       directory: options.directory,
       label: options.label,
       onError: options.onError,
+      onCapacity: options.onError,
       retentionDays: options.retentionDays ?? 0,
     }, {
       sessions: this.sessions,
@@ -175,8 +178,8 @@ export class ModelTrafficExchange {
   private readonly requestBody: BodyAccumulator;
   private readonly responseBody: BodyAccumulator;
   private readonly partNumbers = new Map<string, number>();
-  private readonly requestPayloadParts: TrafficPayloadPart[] = [];
-  private readonly responsePayloadParts: TrafficPayloadPart[] = [];
+  private readonly requestPayload: CapturedPayload = { parts: [], truncated: false };
+  private readonly responsePayload: CapturedPayload = { parts: [], truncated: false };
   private readonly sseTerminal = new SseTerminalCollector();
   private readonly requestModelDecoder = new StringDecoder("utf8");
   private readonly requestModelScanner = createJsonStringFieldScanner("model");
@@ -245,14 +248,14 @@ export class ModelTrafficExchange {
   ) {
     const limitBytes = bodyBufferLimit(inputItems, itemMaxBytes);
     this.requestBody = new BodyAccumulator(
-      (chunk) => this.writeBody("request_body", chunk, this.requestPayloadParts),
+      (chunk) => this.writeBody("request_body", chunk, this.requestPayload),
       limitBytes,
     );
     this.responseBody = new BodyAccumulator(
       (chunk) => this.writeBody(
         "response_body",
         chunk,
-        this.responseIsSse ? undefined : this.responsePayloadParts,
+        this.responseIsSse ? undefined : this.responsePayload,
       ),
       limitBytes,
     );
@@ -354,7 +357,7 @@ export class ModelTrafficExchange {
           transport: "websocket",
           url: this.websocketHandshake?.url,
           headers: this.websocketHandshake?.headers ?? {},
-          payload: payloadOf(this.storeTextPayload(session, compacted)),
+          payload: this.storeTextPayload(session, compacted),
           startedAtMs: this.activeWebSocket.startedAtMs,
           ...metadata,
         });
@@ -436,13 +439,12 @@ export class ModelTrafficExchange {
   private writeBody(
     kind: string,
     chunk: Buffer,
-    payloadParts: TrafficPayloadPart[] | undefined,
+    payload: CapturedPayload | undefined,
   ): void {
     const decoded = decodeUtf8(chunk);
     if (decoded === null) {
       for (const part of splitBuffer(chunk)) {
-        const stored = this.payloadSink(this.storageSession(), part, "base64");
-        if (stored) payloadParts?.push(stored);
+        this.storeBodyPart(part, "base64", payload);
         this.write({
           kind,
           part: this.nextPart(kind),
@@ -459,12 +461,7 @@ export class ModelTrafficExchange {
       if (models.length > 0) this.responseModels = models;
     }
     for (const part of splitText(text)) {
-      const stored = this.payloadSink(
-        this.storageSession(),
-        Buffer.from(part, "utf8"),
-        "utf8",
-      );
-      if (stored) payloadParts?.push(stored);
+      this.storeBodyPart(Buffer.from(part, "utf8"), "utf8", payload);
       this.write({
         kind,
         part: this.nextPart(kind),
@@ -472,6 +469,16 @@ export class ModelTrafficExchange {
         encoding: "utf8",
         text: part,
       });
+    }
+  }
+
+  private storeBodyPart(content: Buffer, encoding: "base64" | "utf8", payload: CapturedPayload | undefined): void {
+    // A missing middle part cannot be joined to a later suffix as if it were a complete body.
+    if (payload?.truncated) return;
+    const stored = this.payloadSink(this.storageSession(), content, encoding);
+    if (payload) {
+      if (stored) payload.parts.push(stored);
+      else payload.truncated = true;
     }
   }
 
@@ -517,7 +524,7 @@ export class ModelTrafficExchange {
       path: this.requestHead?.path,
       headers: this.requestHead?.headers ?? {},
       bytes: this.requestBytes,
-      payload: payloadOf(this.requestPayloadParts),
+      payload: { ...payloadOf(this.requestPayload.parts), truncated: this.requestPayload.truncated },
       ...requestFieldsOf(undefined, this.requestHead?.headers, this.requestModel),
     });
   }
@@ -531,10 +538,10 @@ export class ModelTrafficExchange {
     if (this.transport !== "http" || this.responseRecorded) return;
     this.responseRecorded = true;
     const terminal = this.sseTerminal.terminal;
-    let payload = payloadOf(this.responsePayloadParts);
+    let payload = { ...payloadOf(this.responsePayload.parts), truncated: this.responsePayload.truncated };
     if (terminal !== undefined) {
       const compacted = compactText(terminal.text, this.inputItems, this.itemMaxBytes);
-      payload = payloadOf(this.storeTextPayload(this.initialSession, compacted));
+      payload = this.storeTextPayload(this.initialSession, compacted);
     }
     const status = this.responseHeadRecord?.status ?? null;
     const terminalState = terminal === undefined
@@ -596,9 +603,9 @@ export class ModelTrafficExchange {
       ...(this.requestMetrics?.outputTokens == null ? {} : { outputTokens: this.requestMetrics.outputTokens }),
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
-      payload: payloadOf(compacted === undefined
-        ? []
-        : this.storeTextPayload(active.session, compacted)),
+      payload: compacted === undefined
+        ? { ...payloadOf([]), truncated: false }
+        : this.storeTextPayload(active.session, compacted),
       responseModels: this.responseModels,
     });
     this.completeLogicalInteraction(active.session);
@@ -612,11 +619,14 @@ export class ModelTrafficExchange {
   private storeTextPayload(
     session: TrafficDumpSession,
     text: string,
-  ): TrafficPayloadPart[] {
-    return splitBuffer(Buffer.from(text, "utf8"))
-      .flatMap((part) => {
-        const stored = this.payloadSink(session, part, "utf8");
-        return stored === undefined ? [] : [stored];
-      });
+  ): { bytes: number; parts: TrafficPayloadPart[]; truncated: boolean } {
+    const parts: TrafficPayloadPart[] = [];
+    let truncated = false;
+    for (const part of splitBuffer(Buffer.from(text, "utf8"))) {
+      const stored = this.payloadSink(session, part, "utf8");
+      if (stored === undefined) { truncated = true; break; }
+      parts.push(stored);
+    }
+    return { ...payloadOf(parts), truncated };
   }
 }

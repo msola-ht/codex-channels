@@ -144,7 +144,7 @@ async function requestResponse(path: string, init: RequestInit = {}, signal?: Ab
     ? timeoutSignal
     : AbortSignal.any([signal, timeoutSignal])
   const headers = new Headers(init.headers)
-  headers.set("accept", "application/json")
+  if (!headers.has("accept")) headers.set("accept", "application/json")
   if (init.body !== undefined && !headers.has("content-type")) headers.set("content-type", "application/json")
   if (token !== null) headers.set("authorization", `Bearer ${token}`)
   const response = await fetch(path, {
@@ -286,19 +286,69 @@ export function fetchRequests(
 }
 
 export async function fetchMetricsExport(query: MetricsQuery, signal?: AbortSignal): Promise<Blob> {
-  const response = await requestResponse(`${API_PREFIX}/requests/export?${metricsQueryParams(query)}`, {}, signal, 150_000)
-  if (response.body === null) throw new ApiClientError("指标导出内容缺失", 502, "metrics_export_unavailable")
+  const mediaType = "application/vnd.codexc.metrics-export.v1"
+  const response = await requestResponse(`${API_PREFIX}/requests/export?${metricsQueryParams(query)}`, { headers: { accept: mediaType } }, signal, 150_000)
+  const invalid = () => new ApiClientError("指标导出内容不完整", 502, "metrics_export_unavailable")
+  if (response.headers.get("content-type") !== mediaType || response.body === null) {
+    await response.body?.cancel().catch(() => {})
+    throw invalid()
+  }
   const reader = response.body.getReader()
   const chunks: ArrayBuffer[] = []
+  let pending = new Uint8Array(0)
+  let offset = 0
   let bytes = 0
+  let frames = 0
+  let terminal: { code: string | null } | null = null
+  // Read only a bounded header/payload at a time, including across network reads.
+  const read = async (length: number): Promise<Uint8Array<ArrayBuffer> | null> => {
+    const value = new Uint8Array(length)
+    let filled = 0
+    while (filled < length) {
+      if (offset === pending.byteLength) {
+        const next = await reader.read()
+        if (next.done) {
+          if (filled !== 0) throw invalid()
+          return null
+        }
+        pending = next.value
+        offset = 0
+      }
+      const count = Math.min(length - filled, pending.byteLength - offset)
+      value.set(pending.subarray(offset, offset + count), filled)
+      filled += count
+      offset += count
+    }
+    return value
+  }
   try {
     for (;;) {
-      const next = await reader.read()
-      if (next.done) break
-      bytes += next.value.byteLength
-      if (bytes > 64 * 1024 * 1024) throw new ApiClientError("指标导出超出容量", 503, "metrics_export_capacity")
-      chunks.push(next.value.slice().buffer)
+      const header = await read(5)
+      if (header === null) break
+      if (terminal !== null) throw invalid()
+      const kind = header[0]
+      const length = new DataView(header.buffer).getUint32(1)
+      if (kind === 1) {
+        if (length === 0 || length > 64 * 1024 || ++frames > 1024) throw invalid()
+        bytes += length
+        if (bytes > 64 * 1024 * 1024) throw new ApiClientError("指标导出超出容量", 503, "metrics_export_capacity")
+        const payload = await read(length)
+        if (payload === null) throw invalid()
+        chunks.push(payload.buffer)
+      } else if (kind === 2 && length === 0) {
+        terminal = { code: null }
+      } else if (kind === 3 && length > 0 && length <= 64) {
+        const payload = await read(length)
+        if (payload === null) throw invalid()
+        let code: string
+        try { code = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(payload) }
+        catch { throw invalid() }
+        if (!["metrics_export_capacity", "metrics_export_busy", "metrics_export_timeout", "metrics_export_unavailable", "metrics_export_cancelled", "metrics_database_unavailable", "metrics_database_incompatible"].includes(code)) throw invalid()
+        terminal = { code }
+      } else throw invalid()
     }
+    if (terminal === null || (terminal.code === null && frames === 0)) throw invalid()
+    if (terminal.code !== null) throw new ApiClientError("指标导出失败", 503, terminal.code)
     return new Blob(chunks, { type: "application/json" })
   } catch (error) {
     await reader.cancel().catch(() => {})

@@ -4,6 +4,7 @@ import { installServiceControlHandler } from "../runtime/process-lifecycle.mjs";
 import { serviceShutdownTimeoutMs } from "../runtime/shutdown-budget.mjs";
 import { accountSnapshotEventsPath, metricsEventsPath } from "../runtime/metrics-events.mjs";
 import { createServer } from "node:http";
+import { Writable } from "node:stream";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -522,7 +523,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     return;
   }
   if (apiPath === "/requests/export") {
-    await handleRequestsExport(environment, url, response, metricsExports);
+    await handleRequestsExport(environment, url, request, response, metricsExports);
     return;
   }
   if (apiPath === "/errors") {
@@ -775,24 +776,44 @@ async function handleRequests(environment, url, response) {
   }
 }
 
-async function handleRequestsExport(environment, url, response, exports) {
+async function handleRequestsExport(environment, url, request, response, exports) {
   const range = parseRange(url);
   const filters = parseMetricsFilters(url);
   const sort = parseRequestSort(url);
   const controller = new AbortController();
+  const framed = request.headers.accept === "application/vnd.codexc.metrics-export.v1";
+  // The browser explicitly opts in; ordinary HTTP and CLI exports retain JSON.
+  // Each frame has a one-byte kind and four-byte big-endian payload length.
+  const frame = (kind, payload = Buffer.alloc(0)) => {
+    const header = Buffer.alloc(5);
+    header[0] = kind;
+    header.writeUInt32BE(payload.length, 1);
+    return Buffer.concat([header, payload]);
+  };
+  const output = framed ? new Writable({
+    write(chunk, _encoding, callback) {
+      response.write(frame(1, chunk), callback);
+    },
+  }) : response;
+  const outputError = error => output.destroy(error);
+  if (framed) response.on("error", outputError);
   const disconnected = () => controller.abort();
   response.once("close", disconnected);
   try {
-    response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.setHeader("Content-Type", framed ? "application/vnd.codexc.metrics-export.v1" : "application/json; charset=utf-8");
     response.setHeader("Cache-Control", "no-store");
     await exports.stream(environment, {
       ...filters, resolvedRange: range, sortKey: sort.key, sortDirection: sort.direction, webui: true,
-    }, { output: response, signal: controller.signal });
-    if (!response.destroyed) response.end();
+    }, { output, signal: controller.signal });
+    if (!response.destroyed) response.end(framed ? frame(2) : undefined);
   } catch (error) {
     if (response.headersSent || response.destroyed) {
       if (error instanceof MetricsExportError && error.code !== "metrics_export_cancelled") {
         logger.warn({ event: "metrics.export-interrupted", code: error.code }, "指标导出流未完成");
+      }
+      if (framed && !response.destroyed && error instanceof MetricsExportError) {
+        response.end(frame(3, Buffer.from(error.code, "utf8")));
+        return;
       }
       response.destroy();
       return;
@@ -803,6 +824,10 @@ async function handleRequestsExport(environment, url, response, exports) {
     throw error;
   } finally {
     response.off("close", disconnected);
+    if (framed) {
+      response.off("error", outputError);
+      output.destroy();
+    }
   }
 }
 

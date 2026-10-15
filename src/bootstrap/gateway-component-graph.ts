@@ -693,7 +693,7 @@ export abstract class GatewayComponentGraph {
           usage: snapshot.usage,
           limits: snapshot.limits,
         });
-        signal?.throwIfAborted();
+        // The write is confirmed; cancellation must not suppress its cache invalidation.
         if (snapshot.provider.startsWith("ocg-")) {
           if (snapshot.usage.kind === "subscription-required") providersWithoutSubscription.add(snapshot.provider);
           else providersWithoutSubscription.delete(snapshot.provider);

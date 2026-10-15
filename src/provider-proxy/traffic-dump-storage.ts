@@ -9,6 +9,9 @@ import { modelTrafficDumpFileSizeLimitBytes, protectModelTrafficDumpSession, pru
 const sessionRotationIntervalMs = 24 * 60 * 60 * 1_000;
 const maximumPendingBytes = 14 * 1_048_576;
 const maximumPendingItems = 4096;
+const maximumPendingTraceBytes = 4 * 1_048_576;
+const reservedIndexBytes = 256 * 1024;
+const reservedIndexItems = 128;
 const maximumSessions = 128;
 const operationBudgetMs = 5000;
 
@@ -32,11 +35,12 @@ export interface TrafficDumpSession {
   writerSession: string;
 }
 
-interface PendingBudget { bytes: number; items: number }
+interface PendingBudget { bytes: number; items: number; traceBytes: number }
 interface TrafficDumpStorageOptions {
   directory: string;
   label: string;
   onError: (error: Error) => void;
+  onCapacity: (error: Error) => void;
   retentionDays: number;
   maximumPendingBytes?: number;
   pendingBudget?: PendingBudget;
@@ -45,7 +49,7 @@ interface TrafficDumpStorageOptions {
   onBytesAccepted?: (bytes: number) => void;
 }
 
-type WriteJob = { session: TrafficDumpSession; name: string; content: string | Buffer; bytes: number };
+type WriteJob = { session: TrafficDumpSession; name: string; content: string | Buffer; bytes: number; trace?: true };
 type RetireJob = { session: TrafficDumpSession; bytes: 0 };
 type Job = WriteJob | RetireJob;
 type SessionFiles = { prepared: boolean; files: Map<string, FileHandle> };
@@ -66,10 +70,11 @@ export class TrafficDumpStorage {
   private failed = false;
   private closing: Promise<void> | undefined;
   private cleanupTask: Promise<void> | undefined;
+  private readonly capacityNotices = new Set<string>();
 
   constructor(private readonly options: TrafficDumpStorageOptions, private readonly state: { sessions: Set<TrafficDumpSession> }) {
     this.label = options.label.replace(/[^A-Za-z0-9._-]+/gu, "_");
-    this.budget = options.pendingBudget ?? { bytes: 0, items: 0 };
+    this.budget = options.pendingBudget ?? { bytes: 0, items: 0, traceBytes: 0 };
   }
 
   sessionForConnection(startedAtMs: number): TrafficDumpSession { return this.ensureCurrentSession(startedAtMs, false); }
@@ -92,10 +97,13 @@ export class TrafficDumpStorage {
     if (this.closed || this.failed) return;
     const content = `${JSON.stringify({ ts: Date.now(), ...record })}\n`;
     const bytes = Buffer.byteLength(content);
+    if (this.budget.traceBytes + bytes > maximumPendingTraceBytes || !this.hasCapacity(bytes, true)) {
+      this.noticeCapacity("trace"); return;
+    }
     if (session.traceWrittenBytes > 0 && session.traceWrittenBytes + bytes > modelTrafficDumpFileSizeLimitBytes) {
       session.traceFileIndex++; session.traceWrittenBytes = 0;
     }
-    if (this.enqueue({ session, name: `trace-${session.traceFileIndex}.jsonl`, content, bytes })) session.traceWrittenBytes += bytes;
+    if (this.enqueue({ session, name: `trace-${session.traceFileIndex}.jsonl`, content, bytes, trace: true })) session.traceWrittenBytes += bytes;
   }
   writeInteraction(session: TrafficDumpSession, record: Record<string, unknown>): void {
     if (this.closed || this.failed) return;
@@ -109,7 +117,10 @@ export class TrafficDumpStorage {
     }
     const part = { bytes: content.length, encoding, file: `payload-${session.payloadFileIndex}.bin`, offset: session.payloadWrittenBytes };
     // Own a copy: callers may reuse their network Buffer as soon as forwarding continues.
-    if (!this.hasCapacity(content.length)) { this.fail("queue", "capacity"); return undefined; }
+    if (!this.hasCapacity(content.length, true)) {
+      this.noticeCapacity("payload");
+      return undefined;
+    }
     if (!this.enqueue({ session, name: part.file, content: Buffer.from(content), bytes: content.length })) return undefined;
     session.payloadWrittenBytes += content.length;
     return part;
@@ -169,22 +180,39 @@ export class TrafficDumpStorage {
     return session;
   }
 
-  private hasCapacity(bytes: number): boolean {
-    return this.budget.items < maximumPendingItems && this.budget.bytes + bytes <= (this.options.maximumPendingBytes ?? maximumPendingBytes);
+  private hasCapacity(bytes: number, reserveIndex = false): boolean {
+    return this.budget.items < maximumPendingItems - (reserveIndex ? reservedIndexItems : 0)
+      && this.budget.bytes + bytes <= (this.options.maximumPendingBytes ?? maximumPendingBytes) - (reserveIndex ? reservedIndexBytes : 0);
+  }
+  private noticeCapacity(kind: "trace" | "payload"): void {
+    if (this.capacityNotices.has(kind)) return;
+    this.capacityNotices.add(kind);
+    try { this.options.onCapacity(new Error(`Traffic dump ${kind} skipped (capacity)`)); } catch { /* Side channel. */ }
   }
   private enqueue(job: Job): boolean {
     if (this.failed) return false;
     if (!this.hasCapacity(job.bytes)) { this.fail("queue", "capacity"); return false; }
     this.budget.bytes += job.bytes; this.budget.items++;
+    if ("trace" in job && job.trace) this.budget.traceBytes += job.bytes;
     this.jobs.push(job);
     this.options.onBytesAccepted?.(job.bytes);
-    if (!this.running) {
-      // The microtask boundary guarantees that even the first file preparation never blocks the caller.
-      this.running = Promise.resolve().then(() => this.drain()).finally(() => { this.running = undefined; });
-    }
+    this.startDrain();
     return true;
   }
-  private release(job: Job): void { this.budget.bytes -= job.bytes; this.budget.items--; }
+  private startDrain(): void {
+    if (this.running || this.failed || this.jobs.length === 0) return;
+    // A completion microtask can enqueue after drain observes an empty queue.
+    // Hand off ownership only after checking those newly accepted writes too.
+    this.running = Promise.resolve().then(() => this.drain()).finally(() => {
+      this.running = undefined;
+      this.startDrain();
+    });
+  }
+  private release(job: Job): void {
+    this.budget.bytes -= job.bytes; this.budget.items--;
+    if ("trace" in job && job.trace) this.budget.traceBytes -= job.bytes;
+    if (this.budget.items === 0) this.capacityNotices.clear();
+  }
   private async drain(): Promise<void> {
     while (this.jobs.length && !this.failed) {
       const job = this.jobs.shift()!;
@@ -261,7 +289,13 @@ export class TrafficDumpStorage {
   }
   private cleanupAfterWrites(): Promise<void> {
     if (this.cleanupTask) return this.cleanupTask;
-    const task = (async () => { await this.running; await this.closeFiles(); })();
+    const task = (async () => {
+      while (this.running || (!this.failed && this.jobs.length > 0)) {
+        this.startDrain();
+        await this.running;
+      }
+      await this.closeFiles();
+    })();
     this.cleanupTask = task;
     void task.then(() => { if (this.cleanupTask === task) this.cleanupTask = undefined; }, () => {
       if (this.cleanupTask === task) this.cleanupTask = undefined;

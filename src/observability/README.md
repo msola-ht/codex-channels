@@ -32,7 +32,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   会话、请求、异常、趋势和额度查询；Bootstrap、`codexc metrics` 与 WebUI 复用同一查询语义，
   各自只负责授权、参数边界和结果呈现。
   控制台整体及各 Provider 的会话/轮次计数使用 `threadCounts(scope)`，按自身 Thread/Turn 去重，不执行会话列表的递归用量、排序或行映射。
-- `async-metrics-store.ts` / `metrics-worker.ts` / `metrics-worker-protocol.ts`：Gateway 唯一指标数据库连接由单 Worker 拥有，初始化、SQL 写入与查询、保留清理和关闭均在线程内执行；主线程只使用明确的异步窄端口，不再为账户窗口额外打开同步读连接。请求队列上限 256 项、8 MiB，逐项串行，2 秒普通请求预算包括排队；初始化独立限时 15 秒，关闭确认独立限时 5 秒。取消的排队请求不执行，已发出的写入取消或超时按结果未知处理，连接不再接收新操作且不重试写入；未确认线程退出时保留 Worker 所有权与数据库锁归属。
+- `async-metrics-store.ts` / `metrics-worker.ts` / `metrics-worker-protocol.ts`：Gateway 唯一指标数据库连接由单 Worker 拥有，初始化、SQL 写入与查询、保留清理和关闭均在线程内执行；主线程只使用明确的异步窄端口，不再为账户窗口额外打开同步读连接。请求队列上限 256 项、8 MiB，逐项串行，2 秒普通请求预算包括排队；初始化独立限时 15 秒，关闭确认独立限时 5 秒。取消的排队请求不执行；已发出的写入保留请求、容量和原始期限，调用方取消等待后仍由内部任务接收实际结果，成功提交后的缓存与通知继续收尾。真正的写入超时按结果未知处理，连接不再接收新操作且不重试写入；未确认线程退出时保留 Worker 所有权与数据库锁归属。
 - `provider-quota-tokens.ts`：按精确 Provider 单次流式归约最多三个额度窗口，只返回有限窗口总数；Gateway 在线程内读取，保留同步只读消费端的同一窗口语义。
 - `request-metrics-writer.ts`：提供 10,000 条、16 MiB 上限的有界延迟写入队列；指标 Socket 只负责入队，
   批次成功提交后通过注入回调通知读取方失效，通知故障不改变写入结果；失败批次不发送成功通知。
@@ -53,7 +53,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   请求分页的 `isSubagent` 只读关联当前 `subagent_threads` 的精确 Thread 登记；Relay、自动审查及未登记归属返回 false，不代表已确认是主代理，不新增持久化字段。
   `modelUsage(scope, modelAliases?)` 在相同请求范围内按模型显示名跨提供商合并：明确标记 `request_purpose = 'autoApprovalReview'` 的请求优先归入 `auto-review`，包括原始模型为空或配置了其他显示名的审查请求；其他请求的可选映射以持久化模型 ID 做一次精确匹配，未配置的模型和 null 保持原值，用途缺失时不从模型名称推断审查。相同原始模型的审查与其他请求按各自规则分组。同一显示名在 SQLite 内先分组，再汇总请求、Token、状态、压缩和缓存指标及按 Thread/Turn 去重的轮数。每组的 `members` 按提供商与原始模型 ID 返回同范围的请求、Token、状态、压缩、缓存指标和去重轮数，原始模型 null 保留；组轮数独立去重，跨审查模型的相同 Thread/Turn 仍只计一轮，不能把成员轮数相加。组与成员均完整返回，按请求量降序稳定排序，不沿用 CLI 的“提供商 + 模型”分组或前 20 组上限。控制台通过 `overview(range, modelAliases?).models` 在同一只读快照消费，其他查询和持久化模型字段保持原口径。
   Thread 列表额外返回同筛选范围的 `totalTokens`、自身缓存与后代输入/缓存/输出分项，以及按请求去重的 `treeAggregate`，支持总计 Token 排序；缓存是输入子集，不重复累加，自身与后代分别判断缓存完整性。自身 `cacheUsage` 与后代 `subagentUsage.cacheUsage` 分别保留输入和缓存均已观测的缓存样本及缺失请求数，供部分采集时展示已知缓存；完整缓存合计仍在任意请求缺失时返回 null。WebUI 主会话查询允许只有后代匹配的根入选。普通 Thread 查询仍保留自身有匹配记录的行集合，自身聚合与 Turn 查询口径不变；不新增持久化汇总或 Schema 字段。
-- `sqlite-request-metrics-thread-queries.ts`：Thread/Turn 列表、汇总与耗时查询，只被请求查询组合根持有；不接触写入、事务或数据库生命周期。
+- `sqlite-request-metrics-thread-queries.ts`：Thread/Turn 列表、汇总与耗时查询，只被请求查询组合根持有；不接触写入、事务或数据库生命周期。代表会话或轮次的提供商、模型和思考等级只取相应范围内最近的普通响应（`source = owned`、`operation = response`、用途为空），不使用自动审查、压缩或后代请求兜底；无普通响应仍保留聚合与列表行，模型字段返回未知。子代理列表采用相同选择，单次轮次首 Token 时间同样排除审查请求；用量和请求统计保留全部匹配用途。
 - `sqlite-request-metrics-subagent-queries.ts`：子代理线程列表、单线程往返与同步游标查询，同样只被组合根持有并保持只读。
 - `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v31 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 持有初始化事务，仅在空库建表，已有非空库必须具有当前版本与结构。

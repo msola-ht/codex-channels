@@ -24,6 +24,7 @@ import {
   type TurnSummaryRow,
 } from "./sqlite-request-metrics-row-codec.js";
 import {
+  agentResponseSql,
   compactAggregateSql,
   metricsAggregateSql,
   metricsPageOffset,
@@ -76,7 +77,7 @@ export class SqliteRequestMetricsThreadQueries {
     const threadAggregate = this.reader.prepare(`${scopeSql}
       SELECT
         ${requestOutcomeSql()},
-        (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
+        (SELECT provider FROM scoped WHERE thread_id = ? AND ${agentResponseSql} ORDER BY id DESC LIMIT 1) AS provider,
         NULL AS turn_id,
         COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count,
         COUNT(*) AS request_count,
@@ -91,7 +92,7 @@ export class SqliteRequestMetricsThreadQueries {
         COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM scoped
-    `).get(threadId) as unknown as TurnSummaryRow;
+    `).get(threadId, threadId) as unknown as TurnSummaryRow;
     const sessionTiming = this.sessionExecutionTiming(threadId);
     return {
       threadId,
@@ -160,12 +161,16 @@ export class SqliteRequestMetricsThreadQueries {
         )
       )
     `;
-    const row = this.reader.prepare(`${scopeSql}
+    const row = this.reader.prepare(`${scopeSql}, representative AS (
+      SELECT provider, model, reasoning_effort FROM scoped
+      WHERE thread_id = ? AND turn_id = ? AND ${agentResponseSql}
+      ORDER BY id DESC LIMIT 1
+    )
       SELECT
         ${requestOutcomeSql()},
-        (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
-        (SELECT model FROM scoped ORDER BY id DESC LIMIT 1) AS model,
-        (SELECT reasoning_effort FROM scoped ORDER BY id DESC LIMIT 1)
+        (SELECT provider FROM representative) AS provider,
+        (SELECT model FROM representative) AS model,
+        (SELECT reasoning_effort FROM representative)
           AS reasoning_effort,
         ? AS turn_id,
         COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count,
@@ -181,7 +186,7 @@ export class SqliteRequestMetricsThreadQueries {
         COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM scoped
-    `).get(threadId, turnId, threadId, turnId, turnId) as TurnSummaryRow | undefined;
+    `).get(threadId, turnId, threadId, turnId, threadId, turnId, turnId) as TurnSummaryRow | undefined;
     // The direct-child probe above is the display gate. Keep a zero summary
     // when a child has not produced any model rows yet so the parent card can
     // distinguish an observed child from an absent task aggregate.
@@ -318,7 +323,7 @@ export class SqliteRequestMetricsThreadQueries {
           WHERE first_timing.thread_id = model_request_metrics.thread_id
             AND first_timing.turn_id = model_request_metrics.turn_id
             AND first_timing.provider = 'openai'
-            AND first_timing.operation = 'response'
+            AND ${agentResponseSql}
             AND first_timing.upstream_ttft_ms IS NOT NULL
           ORDER BY first_timing.id LIMIT 1
         ) AS upstream_ttft_ms,
@@ -329,7 +334,7 @@ export class SqliteRequestMetricsThreadQueries {
               = model_request_metrics.thread_id
             AND latest_provider.turn_id
               = model_request_metrics.turn_id
-            AND latest_provider.operation = 'response'
+            AND ${agentResponseSql}
           ORDER BY latest_provider.id DESC
           LIMIT 1
         ) AS provider,
@@ -340,7 +345,7 @@ export class SqliteRequestMetricsThreadQueries {
               = model_request_metrics.thread_id
             AND latest_model.turn_id
               = model_request_metrics.turn_id
-            AND latest_model.operation = 'response'
+            AND ${agentResponseSql}
           ORDER BY latest_model.id DESC
           LIMIT 1
         ) AS model,
@@ -351,7 +356,7 @@ export class SqliteRequestMetricsThreadQueries {
               = model_request_metrics.thread_id
             AND latest_effort.turn_id
               = model_request_metrics.turn_id
-            AND latest_effort.operation = 'response'
+            AND ${agentResponseSql}
           ORDER BY latest_effort.id DESC
           LIMIT 1
         ) AS reasoning_effort,
@@ -582,7 +587,8 @@ export class SqliteRequestMetricsThreadQueries {
         SELECT thread_id, turn_id, COUNT(DISTINCT turn_id) AS turn_count,
           ${metricsAggregateSql},
           MIN(request_started_at_ms) AS first_request_started_at_ms,
-          MAX(recorded_at_ms) AS recorded_at_ms, MAX(id) AS latest_id
+          MAX(recorded_at_ms) AS recorded_at_ms,
+          MAX(CASE WHEN ${agentResponseSql} THEN id END) AS latest_id
         FROM scoped WHERE thread_id IN (SELECT root_thread_id FROM tree_grouped)
         GROUP BY thread_id
       )
@@ -672,7 +678,7 @@ export class SqliteRequestMetricsThreadQueries {
           ${metricsAggregateSql},
           MIN(request_started_at_ms) AS first_request_started_at_ms,
           MAX(recorded_at_ms) AS recorded_at_ms,
-          MAX(id) AS latest_id
+          MAX(CASE WHEN ${agentResponseSql} THEN id END) AS latest_id
         FROM scoped
         GROUP BY turn_id
       )
@@ -680,7 +686,7 @@ export class SqliteRequestMetricsThreadQueries {
         timing.duration_ms,
         subagent.agent_path, subagent.parent_thread_id, subagent.parent_turn_id
       FROM grouped
-      JOIN model_request_metrics AS latest ON latest.id = grouped.latest_id
+      LEFT JOIN model_request_metrics AS latest ON latest.id = grouped.latest_id
       LEFT JOIN turn_execution_metrics AS timing ON timing.thread_id = grouped.thread_id AND timing.turn_id = grouped.turn_id
       LEFT JOIN subagent_threads AS subagent ON subagent.thread_id = grouped.thread_id
       ORDER BY ${sortColumn} ${direction}, grouped.turn_id ${direction}

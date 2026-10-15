@@ -43,12 +43,13 @@ export class RelayTrafficDump {
   private readonly reported = new Set<string>();
   private readonly storage: Record<"chat" | "responses", TrafficDumpStorage>;
   constructor(private readonly options: { directory: string; onError(error: Error): void }) {
-    const pendingBudget = { bytes: 0, items: 0 };
+    const pendingBudget = { bytes: 0, items: 0, traceBytes: 0 };
     const create = (protocol: "chat" | "responses"): TrafficDumpStorage => {
       const sessions = new Set<TrafficDumpSession>(); this.sessionGroups.push(sessions);
       return new TrafficDumpStorage({ ...options, label: `relay.${protocol}`, retentionDays: this.retentionDays,
         retentionManagedExternally: true, maximumPendingBytes: 14 * MiB, pendingBudget, rotateAfterPayloadBytes: 8 * MiB,
-        onBytesAccepted: bytes => { this.retained += bytes; }, onError: error => this.fail(error.message) }, {
+        onBytesAccepted: bytes => { this.retained += bytes; },
+        onCapacity: error => this.notice(error.message), onError: error => this.fail(error.message) }, {
         sessions,
       });
     };
@@ -163,7 +164,7 @@ export class RelayTrafficDump {
           storage.writeInteraction(session, { id, kind: "request", transport: "http", account: provider, startedAtMs,
             method: "POST", path, headers: head.headers, headersTruncated: head.truncated,
             ...(debug ? { debug: { version: 1, inbound, transformations: [...requestChanges] } } : {}), requestModel: request.model,
-            bytes: Buffer.byteLength(JSON.stringify(request)), payload: { bytes: part?.bytes ?? 0, parts: part ? [part] : [], truncated: omitted } });
+            bytes: Buffer.byteLength(JSON.stringify(request)), payload: { bytes: part?.bytes ?? 0, parts: part ? [part] : [], truncated: omitted || part === undefined } });
           requestSaved = true;
         }),
         head: (code, headers) => safe(() => { status = code; diagnostics.responseStatus(code); diagnostics.header(headers["x-request-id"]); const head = capturedTrafficHeaders(headers); responseHeaders = head.headers; upstreamHeadersTruncated = head.truncated; }),

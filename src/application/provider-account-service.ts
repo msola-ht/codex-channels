@@ -183,7 +183,8 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
         usage: currentUsage,
         limits: mergedLimits,
       }), signal);
-      signal.throwIfAborted();
+      // A dispatched write settles with its actual result even if its caller left.
+      // Keep merge state aligned with the confirmed database snapshot.
       this.snapshotUsage.set(provider, currentUsage);
       this.snapshotLimits.set(provider, mergedLimits);
       if (limits !== undefined) this.limitsObservedAt.set(provider, observedAtMs);

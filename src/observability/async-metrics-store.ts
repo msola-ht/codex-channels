@@ -93,7 +93,7 @@ export class AsyncMetricsStore {
     });
   }
 
-  private cancel(entry: Pending, reason: string): void {
+  private cancel(entry: Pending, reason: "cancelled" | "timeout"): void {
     if (this.active === entry) {
       if (!new Set<MetricsMethod>(["recordBatch", "recordSubagentThread", "recordSubagentTurn", "upsertAccountSnapshot", "recordTurnExecution", "replaceThreadExecutions", "invalidateThreadExecutions", "observeAutoApprovalTurn", "recordAutoApprovalReview", "invalidateAutoApprovalCoverage", "observeTurnExecution", "invalidateAllThreadExecutions"]).has(entry.message.method)) {
         entry.cancelled = true;
@@ -102,6 +102,9 @@ export class AsyncMetricsStore {
         entry.reject(this.error("request", reason, entry.message.method));
         return;
       }
+      // A dispatched write still owns its slot until its result or deadline.
+      // The caller may stop waiting, but cancellation cannot undo committed SQL.
+      if (reason === "cancelled") return;
       // SQL may already have committed. Never retry an unknown write or reuse this connection.
       this.fail(this.error("request", `${reason}-outcome-unknown`, entry.message.method));
       return;
