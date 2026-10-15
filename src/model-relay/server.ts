@@ -132,6 +132,7 @@ export class ModelRelayServer {
     let httpStatus: number | undefined;
     let userAgent: string | null = null;
     let errorCode: string | undefined;
+    let timeoutStage: ModelRequestTimeoutError["stage"] | undefined;
     let requestModel = "";
     let reasoningEffort: string | null = null;
     let provider: string | null = null;
@@ -290,8 +291,13 @@ export class ModelRelayServer {
       if (delivering) phase = "delivery";
       const signalReason: unknown = controller.signal.reason ?? lease?.signal.reason;
       const failure = signalReason instanceof RelayAdmissionError || signalReason instanceof ModelRequestTimeoutError ? signalReason : error;
+      if (failure instanceof ModelRequestTimeoutError) timeoutStage = failure.stage;
       const status = failure instanceof RelayAdmissionError || failure instanceof ModelRequestTimeoutError ? failure.status
         : phase === "input" && failure instanceof ChatBodyTooLargeError ? 413
+        // Relay owns the upstream credentials: an upstream 401 is not a failed
+        // Relay-key authentication. Preserve explicit availability/retreat codes.
+        : failure instanceof ChatUpstreamError && failure.upstreamStatus !== undefined
+          ? [429, 503, 504].includes(failure.upstreamStatus) ? failure.upstreamStatus : failure.upstreamStatus === 408 ? 504 : 502
         : failure instanceof ChatUpstreamError && failure.code === "rate_limit" ? 429
           : failure instanceof ChatUpstreamError && failure.code === "upstream_timeout" ? 504
             : phase === "input" ? 400 : phase === "prepare" ? 503 : 502;
@@ -336,7 +342,7 @@ export class ModelRelayServer {
       if (generationBlocked) delete outputTiming.generationTiming;
       const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs, observer.responseModel, {
         ...outputTiming, ...(observer.usage.outputTokens === undefined ? {} : { outputTokens: observer.usage.outputTokens }),
-      });
+      }, timeoutStage);
       if (lease && started !== undefined) {
         const ended = completedAt ?? performance.now();
         const metric: RelayMetric = { ...diagnostics, source: "relay", threadId: null, turnId: null, relayRequestId,

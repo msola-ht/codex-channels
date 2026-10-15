@@ -3,7 +3,7 @@ import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
 import { RelayDumpPayload, redactRelayValue } from "./relay-dump-payload.js";
 import { capturedTrafficHeaders } from "./traffic-dump-headers.js";
 import { ChatDiagnostics } from "./chat-diagnostics.js";
-import { chatStreamError, chatUpstreamError } from "./chat-errors.js";
+import { chatStreamError, chatUpstreamError, type ModelRequestStage } from "./chat-errors.js";
 import { waitForChatOperation } from "./chat-io.js";
 import { pruneModelTrafficDumpSessionsAsync } from "./traffic-dump-retention.js";
 import { TrafficDumpStorage, type TrafficDumpSession } from "./traffic-dump-storage.js";
@@ -21,7 +21,7 @@ export interface DirectChatCapture {
   value(value: unknown, stream: boolean): void;
   invalid(bytes: number): void;
   done(status?: "completed" | "failed" | "incomplete"): void;
-  finish(delivery: "finished" | "disconnected" | "failed", errorCode?: string, firstTokenMs?: number, responseModel?: string, timing?: Pick<ProviderProxyMetrics, "responseTimeMs" | "generationTiming"> & { outputTokens?: number }): ProviderProxyMetrics["traffic"];
+  finish(delivery: "finished" | "disconnected" | "failed", errorCode?: string, firstTokenMs?: number, responseModel?: string, timing?: Pick<ProviderProxyMetrics, "responseTimeMs" | "generationTiming"> & { outputTokens?: number }, timeoutStage?: ModelRequestStage): ProviderProxyMetrics["traffic"];
 }
 
 /** One Relay owner, all accounts share the same V2 disk and pending-write budgets. */
@@ -178,7 +178,7 @@ export class RelayTrafficDump {
         }),
         invalid: count => safe(() => { upstream.invalid(count); }),
         done: (status = "completed") => safe(() => { complete = true; modelStatus = status; completedAt = performance.now(); if (streaming && protocol === "chat") upstream.value(undefined, true); }),
-        finish: (delivery, errorCode, firstTokenMs, responseModel, timing) => {
+        finish: (delivery, errorCode, firstTokenMs, responseModel, timing, timeoutStage) => {
           if (finished) return undefined;
           safe(() => {
             if (!requestSaved) return;
@@ -193,7 +193,7 @@ export class RelayTrafficDump {
                   payload: delivered!.finish(), state: deliveredStatus === undefined ? "not_started" : delivery }, transformations: [...responseChanges] } } : {}),
               ...timing, responseModels: responseModel === undefined ? [] : [responseModel],
               state: modelStatus, deliveryStatus: delivery, error: errorCode,
-              errorScope: complete ? undefined : "upstream_response", bytes: upstream.bytes,
+              errorScope: timeoutStage === undefined ? complete ? undefined : "upstream_response" : `timeout_${timeoutStage}`, bytes: upstream.bytes,
               payload,
               capture: protocol === "chat" ? "redacted_upstream_chat" : "redacted_upstream_responses", firstTokenMs, callTiming: { clock: "monotonic", basis: "submitted", endMs: (completedAt ?? performance.now()) - submittedAt } });
           });

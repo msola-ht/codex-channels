@@ -6,7 +6,7 @@ import { request as httpsRequest } from "node:https";
 import { ChatToResponses, ModelConversionError, clinePassChatReasoningControl, responsesToChat } from "../model-api/index.js";
 import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "./chat-diagnostics.js";
 import { ChatUpstreamError, ModelRequestTimeoutError, type ModelRequestStage, chatStreamError } from "./chat-errors.js";
-import { validateDirectModelResponse } from "./direct-model-http.js";
+import { parseDirectModelJson, validateDirectModelResponse } from "./direct-model-http.js";
 import type { ProviderProxyOptions } from "./proxy.js";
 import { readChatBody, readModelFrames, waitForChatOperation, writeChatData } from "./chat-io.js";
 import { pinClinePassRouting } from "./cline-pass-routing.js";
@@ -185,7 +185,7 @@ export class ChatCompletionsBridge {
         frameBytes: Infinity, bufferBytes: Infinity, totalBytes: Infinity, bufferCharacters: 2 * 1024 * 1024,
       })) {
         if (data === "[DONE]") { done = true; break; }
-        const chunk: unknown = JSON.parse(data);
+        const chunk: unknown = parseDirectModelJson(data);
         diagnostics.push(chunk);
         const upstreamError = chatStreamError(chunk);
         if (upstreamError) { observeFirstResponse(receivedAt); throw upstreamError; }
@@ -222,7 +222,8 @@ export class ChatCompletionsBridge {
       controller.abort(failure);
       const detail = { code: failure instanceof ChatUpstreamError ? failure.code : status === 400 ? "invalid_request_error" : "chat_upstream_error", message,
         ...(failure instanceof ModelRequestTimeoutError ? { timeout_stage: failure.stage } : {}) };
-      diagnostics.error(detail.code, response.headersSent ? "stream" : "http", failure instanceof ChatUpstreamError && failure.retryable);
+      diagnostics.error(detail.code, response.headersSent ? "stream" : "http", failure instanceof ChatUpstreamError && failure.retryable,
+        failure instanceof ModelRequestTimeoutError ? failure.stage : undefined);
       if (failure instanceof ModelConversionError && failure.diagnostics) diagnostics.conversion(failure.diagnostics);
       publishDiagnostics();
       if (!response.destroyed) {

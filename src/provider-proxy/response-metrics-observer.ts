@@ -265,6 +265,7 @@ export function observeResponseEvent(
   receivedAtMs: number,
   receivedAtMonotonicMs: number,
 ): boolean {
+  if (metrics.status === "completed" || metrics.status === "failed") return false;
   if (!convertedMetrics.has(metrics) && requestClocks.has(metrics)) {
     if (event && type) observeResponseReceived(metrics, receivedAtMonotonicMs);
     if (!blockedGeneration.has(metrics) && metrics.operation === "response" && (type.startsWith("response.") || type === "error")) {
@@ -311,12 +312,11 @@ export function observeResponseEvent(
   if (type === "error") {
     const error = asRecord(event?.error);
     const errorType = boundedString(error?.type) ?? "upstream_error";
-    metrics.httpStatus = finiteNonNegativeNumber(event?.status);
-    markMetricsFailed(metrics, errorType, receivedAtMs, undefined, receivedAtMonotonicMs);
-    metrics.errorType = errorType;
-    metrics.errorCode = boundedString(error?.code);
-    metrics.errorMessage = boundedMessage(error?.message);
-    metrics.responseCompletedAtMs = receivedAtMs;
+    if (markMetricsFailed(metrics, errorType, receivedAtMs, undefined, receivedAtMonotonicMs)) {
+      metrics.httpStatus = finiteNonNegativeNumber(event?.status);
+      metrics.errorCode = boundedString(error?.code);
+      metrics.errorMessage = boundedMessage(error?.message);
+    }
     return true;
   }
   return false;
@@ -375,7 +375,7 @@ export function observeJsonResponse(
   receivedAtMs: number,
   receivedAtMonotonicMs = performance.now(),
 ): boolean {
-  if (!response) return false;
+  if (!response || metrics.status === "completed" || metrics.status === "failed") return false;
   observeResponseReceived(metrics, receivedAtMonotonicMs);
   const status = response.status;
   const eventType = status === "completed"
@@ -512,8 +512,9 @@ export function markMetricsFailed(
   receivedAtMs: number,
   error?: unknown,
   receivedAtMonotonicMs = performance.now(),
-): void {
-  if (metrics.status === "completed") return;
+): boolean {
+  // Connection teardown must not replace an already observed outcome.
+  if (metrics.status === "completed" || metrics.status === "failed") return false;
   observeTotalDuration(metrics, receivedAtMonotonicMs);
   metrics.status = "failed";
   metrics.errorType = errorType;
@@ -522,6 +523,7 @@ export function markMetricsFailed(
     metrics.responseCompletedAtMs,
     receivedAtMs,
   );
+  return true;
 }
 
 function nodeErrorCode(error: unknown): string | null {

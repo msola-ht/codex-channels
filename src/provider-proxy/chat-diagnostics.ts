@@ -1,6 +1,7 @@
 /** Bounded, allowlisted upstream facts; never collect content, credentials or error bodies. */
 import { randomUUID } from "node:crypto";
 import type { UpstreamTiming } from "./response-metrics-observer.js";
+import type { ModelRequestStage } from "./chat-errors.js";
 
 export const chatDiagnosticsHeader = "x-codexc-chat-observer";
 type Fields = Record<string, string | number | boolean>;
@@ -126,8 +127,9 @@ export class ChatDiagnostics {
     }
     this.put("upstreamError.cause.param.type", param.type);
   }
-  error(code: string, stage: "http" | "stream", retryable: boolean): void {
+  error(code: string, stage: "http" | "stream", retryable: boolean, timeoutStage?: ModelRequestStage): void {
     this.put("error.code", code); this.put("error.stage", stage); this.put("error.retryable", retryable);
+    if (timeoutStage !== undefined) this.put("error.timeoutStage", timeoutStage);
   }
   /** 转换器提交的有界事实；键与值均由转换器限定为不含正文。 */
   conversion(detail: Readonly<Record<string, string | number | boolean>>): void {

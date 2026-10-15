@@ -1111,6 +1111,8 @@ Chat 和 Responses 的 JSON/SSE 内容无法解析为 JSON 时统一返回 `inva
 本地模型请求超时额外提供 `timeout_stage`：`upload`（408 `upload_timeout`）、`prepare`（504 `preparation_timeout`）、`headers/body/stream`（504 `upstream_timeout`）、`delivery/terminal`（504 `delivery_timeout`）。流式响应已发送响应头时保留原 HTTP 状态，通过流内错误或断连表示失败；排队超时仍按下文的 429 合同处理。
 WebUI 请求列表的失败状态提示可查看错误码；诊断不包含请求内容、密钥或上游错误原文。
 上游 429/503 提供的 `Retry-After` 在为受限整数秒或规范 HTTP 日期时会保留，客户端可据此退避；Relay 不自动重试。
+Relay 的上游 HTTP 429、503、504 分别返回同一状态，408 映射为 504；其他上游 HTTP 错误返回 502，并保留 `upstream_status` 与受控错误码。上游认证失败不表示调用方 Relay Key 无效。HTTP 状态决定错误类别和重试性质，错误正文不能把认证失败改成可重试的服务错误。
+需要解析的 JSON/SSE 正文严格校验 UTF-8，非法或截断编码明确失败，不以替换字符继续转换。已记录的失败原因不会被后续断连清理覆盖。启用流量转储时，已记录的本地超时阶段可在调用详情查看；指标数据库仍保留原有 `http/stream` 阶段，未采集的历史细节不推断、不回填。
 Chat 的长度限制、内容过滤、`insufficient_system_resource` 和 `aborted` 终态原样交付，指标与新转储记为未完整完成。
 工具参数字符串原样保留，客户端须在执行工具前验证 JSON 与参数含义；Relay 不执行工具或补齐参数。
 Chat 与 Responses 的非流式首内容耗时在整包解析校验后观测，不是上游实际生成首 Token 的时间；空内容不填此值。

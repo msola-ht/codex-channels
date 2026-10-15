@@ -139,6 +139,8 @@ const errorTypeNames: Record<string, { zh: string; en: string }> = {
   preparation_timeout: { zh: "请求准备超时", en: "Request preparation timed out" },
   upstream_timeout: { zh: "上游等待超时", en: "Upstream timed out" },
   delivery_timeout: { zh: "响应交付超时", en: "Response delivery timed out" },
+  client_delivery_error: { zh: "响应交付失败", en: "Response delivery failed" },
+  upstream_delivery_error: { zh: "上游请求交付失败", en: "Upstream request delivery failed" },
   client_request_error: { zh: "客户端请求失败", en: "Client request failed" },
   client_disconnected: { zh: "客户端断开", en: "Client disconnected" },
   websocket_closed: { zh: "WebSocket 关闭", en: "WebSocket closed" },

@@ -428,7 +428,6 @@ export class ProviderProxy {
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
       if (!recordsResponseMetrics) return Promise.resolve();
-      metrics.responseCompletedAtMs = Math.max(metrics.responseCompletedAtMs, Date.now());
       metricsDelivery ??= this.deliverMetrics(metrics, route.accountId, signal);
       return metricsDelivery;
     };
@@ -459,9 +458,12 @@ export class ProviderProxy {
     const failDelivery = (error: unknown): void => {
       // ServerResponse may emit close before the finish waiter's promise settles.
       // A completed write is successful even when that close cancels other work.
-      if (deliveryFailed || response.writableFinished) return;
+      if (deliveryFailed || response.writableFinished || signal.aborted) return;
       deliveryFailed = true;
-      exchange?.failure("client_delivery", error);
+      const failedAtMonotonicMs = performance.now();
+      markMetricsFailed(metrics, error instanceof ModelRequestTimeoutError ? error.code : "client_delivery_error", Date.now(), error, failedAtMonotonicMs);
+      exchange?.failure("client_delivery", error, failedAtMonotonicMs);
+      void emitMetrics();
       this.onError?.(asError(error));
       upstreamIncoming?.destroy();
       upstream.destroy();
@@ -589,11 +591,11 @@ export class ProviderProxy {
     response.on("close", () => {
       const closedAtMonotonicMs = performance.now();
       if (!response.writableEnded) {
-        if (metrics.status !== "completed") {
+        if (!deliveryFailed && metrics.status !== "completed") {
           markMetricsFailed(metrics, "client_disconnected", Date.now(), undefined, closedAtMonotonicMs);
           exchange?.failure("client_disconnected", undefined, closedAtMonotonicMs);
           void emitMetrics();
-        } else {
+        } else if (!deliveryFailed) {
           exchange?.failure("client_disconnected", undefined, closedAtMonotonicMs);
         }
         upstream.destroy();
@@ -836,11 +838,21 @@ export class ProviderProxy {
     const stopWebSockets = (): void => { client.terminate(); upstream.terminate(); };
     this.shutdownController.signal.addEventListener("abort", stopWebSockets, { once: true });
     let forwardingFailed = false;
-    const failForwarding = (error: unknown, stage = "client_delivery"): void => {
+    const failActiveMetrics = (errorType: string, error: unknown, at: number): void => {
+      const metrics = activeMetrics;
+      if (!metrics) return;
+      activeMetrics = undefined;
+      markMetricsFailed(metrics, errorType, Date.now(), error, at);
+      void this.deliverMetrics(metrics, route.accountId);
+    };
+    const failForwarding = (error: unknown, stage: "client_delivery" | "upstream_delivery" = "client_delivery"): void => {
       if (forwardingFailed || deliverySignal.aborted) return;
       forwardingFailed = true;
+      const failedAtMonotonicMs = performance.now();
+      failActiveMetrics(error instanceof ModelRequestTimeoutError ? error.code
+        : stage === "upstream_delivery" ? "upstream_delivery_error" : "client_delivery_error", error, failedAtMonotonicMs);
+      exchange?.failure(stage, error, failedAtMonotonicMs);
       deliveryController.abort(error);
-      exchange?.failure(stage, error);
       this.onError?.(asError(error));
       client.terminate();
       upstream.terminate();
@@ -1168,11 +1180,11 @@ export class ProviderProxy {
         closePeer(client, code, reason);
       }
       if (!activeMetrics) return;
-      const reasonType = websocketCloseErrorType(reason);
+      const reasonType = failureType === "websocket_closed" ? websocketCloseErrorType(reason) : null;
       if (reasonType) {
-        markMetricsFailed(activeMetrics, "websocket_closed", failureAtMs, undefined, failureAtMonotonicMs);
-        activeMetrics.errorType = reasonType;
-        activeMetrics.errorMessage = boundedMessage(reason.toString("utf8"));
+        if (markMetricsFailed(activeMetrics, reasonType, failureAtMs, undefined, failureAtMonotonicMs)) {
+          activeMetrics.errorMessage = boundedMessage(reason.toString("utf8"));
+        }
       } else {
         markMetricsFailed(
           activeMetrics,
@@ -1188,6 +1200,7 @@ export class ProviderProxy {
     client.on("error", (error) => {
       const failedAtMonotonicMs = performance.now();
       noteFailureType("client_disconnected", failedAtMonotonicMs);
+      failActiveMetrics("client_request_error", error, failedAtMonotonicMs);
       exchange?.failure("client_error", error, failureAtMonotonicMs);
       this.onError?.(asError(error));
       upstream.terminate();
@@ -1196,6 +1209,7 @@ export class ProviderProxy {
       if (deliverySignal.aborted) return;
       const failedAtMonotonicMs = performance.now();
       noteFailureType("websocket_closed", failedAtMonotonicMs);
+      failActiveMetrics("upstream_response_error", error, failedAtMonotonicMs);
       exchange?.failure("upstream_error", error, failureAtMonotonicMs);
       this.onError?.(asError(error));
       client.terminate();

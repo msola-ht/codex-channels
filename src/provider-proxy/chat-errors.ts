@@ -3,7 +3,7 @@ import type { IncomingMessage } from "node:http";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 
 export class ChatUpstreamError extends Error {
-  constructor(readonly code: string, message: string, readonly retryable: boolean, readonly retryAfter?: string) {
+  constructor(readonly code: string, message: string, readonly retryable: boolean, readonly retryAfter?: string, readonly upstreamStatus?: number) {
     super(message);
     this.name = "ChatUpstreamError";
   }
@@ -44,20 +44,33 @@ const httpErrors: Record<number, readonly [string, string, boolean]> = {
   402: ["payment_required", "上游额度不足，请检查账户余额或套餐状态。", false],
   403: ["permission_denied", "API Key 无权访问此资源，请检查权限。", false],
   404: ["not_found", "上游端点或模型不存在，请检查模型 ID 与地址。", false],
+  408: ["upstream_timeout", "上游接收请求超时，请稍后重试。", true],
   429: ["rate_limit", "上游限流，请稍后重试或降低并发。", true],
   500: ["server_error", "上游服务暂时异常，请稍后重试。", true],
   502: ["server_error", "上游模型提供商异常，请稍后重试。", true],
   503: ["server_error", "上游服务暂不可用，请稍后重试。", true],
+  504: ["upstream_timeout", "上游响应超时，请稍后重试。", true],
 };
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 export function chatUpstreamError(value: unknown, status?: number): ChatUpstreamError {
   const code = object(value).code;
+  if (status !== undefined) {
+    // HTTP determines authentication, availability and retryability. Only refine
+    // 400 with compatible, non-retryable input errors from the bounded body.
+    if (status === 400 && (code === "context_length_exceeded" || code === "content_filter")) {
+      const [message, retryable] = descriptions[code]!;
+      return new ChatUpstreamError(code, message, retryable, undefined, status);
+    }
+    const info = httpErrors[status];
+    return info ? new ChatUpstreamError(...info, undefined, status)
+      : new ChatUpstreamError("chat_upstream_error", "模型上游请求失败。", false, undefined, status);
+  }
   if (typeof code === "string" && Object.hasOwn(descriptions, code)) {
     const [message, retryable] = descriptions[code]!;
     return new ChatUpstreamError(code, message, retryable);
   }
   // HTTP status is authoritative; numeric stream codes follow the documented error format.
-  const numeric = status ?? (typeof code === "number" ? code : typeof code === "string" && /^\d{3}$/u.test(code) ? Number(code) : undefined);
+  const numeric = typeof code === "number" ? code : typeof code === "string" && /^\d{3}$/u.test(code) ? Number(code) : undefined;
   const info = numeric === undefined ? undefined : httpErrors[numeric];
   return info ? new ChatUpstreamError(...info) : new ChatUpstreamError("chat_upstream_error", "Chat 上游请求失败。", false);
 }
@@ -74,7 +87,7 @@ export async function readChatHttpError(incoming: IncomingMessage, capture?: { v
   const retryAfter = incoming.statusCode === 429 || incoming.statusCode === 503 ? safeRetryAfter(incoming.headers["retry-after"]) : undefined;
   const classify = (value: unknown): ChatUpstreamError => {
     const error = chatUpstreamError(value, incoming.statusCode);
-    return new ChatUpstreamError(error.code, error.message, error.retryable, retryAfter);
+    return new ChatUpstreamError(error.code, error.message, error.retryable, retryAfter, error.upstreamStatus);
   };
   signal?.throwIfAborted();
   const encoding = incoming.headers["content-encoding"];
@@ -100,7 +113,7 @@ export async function readChatHttpError(incoming: IncomingMessage, capture?: { v
     signal?.throwIfAborted();
     if (timedOut) { capture?.invalid(size); return classify(undefined); }
     if (size <= 64 * 1024) {
-      const value: unknown = JSON.parse(Buffer.concat(parts).toString("utf8"));
+      const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(parts)));
       capture?.value(value, false);
       return classify(object(value).error);
     }

@@ -149,6 +149,8 @@ function formatMetricsErrorType(value: string | null): string {
     preparation_timeout: "请求准备超时",
     upstream_timeout: "上游等待超时",
     delivery_timeout: "响应交付超时",
+    client_delivery_error: "响应交付失败",
+    upstream_delivery_error: "上游请求交付失败",
     upstream_error: "上游错误",
     client_request_error: "客户端请求失败",
     client_disconnected: "客户端提前断开",

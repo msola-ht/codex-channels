@@ -298,7 +298,7 @@ function SummaryMetric({ label, value, description }: { label: ReactNode; value:
 
 function ResponseFailure({ response, diagnostics }: { response: NonNullable<TrafficExchangeDetail["response"]>; diagnostics?: TrafficExchangeDetail["chatDiagnostics"] }) {
   const { t } = useTranslation()
-  if (response.state === "completed") return null
+  if (response.state === "completed" && response.deliveryStatus !== "failed") return null
   const fields = diagnostics?.fields ?? {}
   const codes = [fields["upstreamError.cause.type"], fields["upstreamError.cause.code"], fields["upstreamError.type"], fields["upstreamError.code"], fields["error.code"], response.error]
   const reasons = {

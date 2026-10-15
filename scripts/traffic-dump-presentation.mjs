@@ -140,9 +140,17 @@ export function responseFacts(body) {
 }
 
 /** 只解释转储已经记录的失败位置，不由耗时或错误文本推断网络根因。 */
-export function failureStage(record, body) {
-  if (record?.state !== "failed" && record?.state !== "incomplete") return undefined;
+export function failureStage(record, body, localTimeoutStage) {
+  if (record?.state !== "failed" && record?.state !== "incomplete" && record?.deliveryStatus !== "failed") return undefined;
+  const timeoutStages = {
+    upload: "请求正文上传超时", prepare: "请求准备超时", headers: "上游首响应头等待超时",
+    body: "上游正文读取超时", stream: "上游完整事件等待超时", delivery: "响应交付超时", terminal: "终态收尾超时",
+  };
+  const timeoutStage = typeof record.errorScope === "string" && record.errorScope.startsWith("timeout_")
+    ? record.errorScope.slice(8) : localTimeoutStage;
+  if (typeof timeoutStage === "string" && Object.hasOwn(timeoutStages, timeoutStage)) return timeoutStages[timeoutStage];
   const stages = {
+    client_delivery: "响应交付", upstream_delivery: "上游请求交付",
     upstream_route: "上游路由解析",
     upstream_handshake: "上游 WebSocket 握手",
     upstream_request: "上游请求（连接或发送）",

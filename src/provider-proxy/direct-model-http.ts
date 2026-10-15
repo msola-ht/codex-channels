@@ -3,7 +3,7 @@ import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage,
 import { request as httpsRequest } from "node:https";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { ChatUpstreamError, ModelRequestTimeoutError, readChatHttpError } from "./chat-errors.js";
-import { readChatBody } from "./chat-io.js";
+import { ChatBodyEncodingError, readChatBody } from "./chat-io.js";
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
 import type { ProviderProxyUpstream } from "./proxy.js";
 import { effectiveUpstreamUserAgent } from "./response-metrics-observer.js";
@@ -36,6 +36,10 @@ export async function readDirectModelBody(incoming: IncomingMessage, signal: Abo
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new ModelRequestTimeoutError("body")), modelRequestPolicy.bodyReadTimeoutMs);
   try { return await readChatBody(incoming, AbortSignal.any([signal, controller.signal]), 8 * 1024 * 1024); }
+  catch (error) {
+    if (error instanceof ChatBodyEncodingError) throw new ChatUpstreamError("invalid_upstream_encoding", "Upstream response contains invalid UTF-8.", false);
+    throw error;
+  }
   finally { clearTimeout(timer); }
 }
 

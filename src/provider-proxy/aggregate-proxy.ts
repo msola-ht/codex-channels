@@ -5,7 +5,7 @@ import type { Socket } from "node:net";
 import { Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
-import { ChatBodyTooLargeError, readChatBody, waitForChatOperation } from "./chat-io.js";
+import { ChatBodyEncodingError, ChatBodyTooLargeError, readChatBody, waitForChatOperation } from "./chat-io.js";
 import { endToEndHeaders } from "./request-routing.js";
 import { ModelRequestTimeoutError, type ModelRequestStage } from "./chat-errors.js";
 
@@ -154,7 +154,7 @@ export class AggregateModelProxy {
         throw new AggregateRequestError(415, "unsupported_content_type", "聚合模型请求必须使用 application/json。");
       }
       if (Number(request.headers["content-length"]) > maximumBodyBytes) throw new ChatBodyTooLargeError("Aggregate request exceeds size limit");
-      const text = await readJsonBody(request, controller);
+      const text = await readChatBody(request, signal, maximumBodyBytes);
       clearTimeout(uploadTimer);
       const body = parseBody(text);
       const route = this.routes.get(body.model);
@@ -198,6 +198,7 @@ export class AggregateModelProxy {
       const failure = signal.reason instanceof AggregateRequestError || signal.reason instanceof ModelRequestTimeoutError ? signal.reason
         : error instanceof AggregateRequestError || error instanceof ModelRequestTimeoutError ? error
         : error instanceof ChatBodyTooLargeError ? new AggregateRequestError(413, "body_too_large", "聚合模型请求正文超过 16 MiB。")
+        : error instanceof ChatBodyEncodingError ? new AggregateRequestError(400, "invalid_payload", "聚合模型请求包含无效 UTF-8。")
         : new AggregateRequestError(502, "local_proxy_failed", "本地模型代理连接失败或响应中断。");
       if (!response.destroyed && !response.headersSent) reject(request, response, failure);
       else if (!response.writableFinished) response.destroy();
@@ -213,18 +214,6 @@ export class AggregateModelProxy {
 }
 
 function digest(value: string): Buffer { return createHash("sha256").update(value).digest(); }
-
-async function readJsonBody(request: IncomingMessage, controller: AbortController): Promise<string> {
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  const validate = (chunk?: Buffer): void => {
-    try { decoder.decode(chunk, { stream: chunk !== undefined }); }
-    catch { controller.abort(new AggregateRequestError(400, "invalid_payload", "聚合模型请求包含无效 UTF-8。")); }
-  };
-  const ended = (): void => validate();
-  request.on("data", validate); request.once("end", ended);
-  try { return await readChatBody(request, controller.signal, maximumBodyBytes); }
-  finally { request.off("data", validate); request.off("end", ended); }
-}
 
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
 

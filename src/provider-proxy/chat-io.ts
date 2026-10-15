@@ -1,10 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { StringDecoder } from "node:string_decoder";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { ModelConversionError } from "../model-api/index.js";
-import { ModelRequestTimeoutError } from "./chat-errors.js";
+import { ChatUpstreamError, ModelRequestTimeoutError } from "./chat-errors.js";
 
 export class ChatBodyTooLargeError extends ModelConversionError {}
+export class ChatBodyEncodingError extends ModelConversionError {}
 
 /** Detach cancelled preparation; a late resolver can no longer advance the request. */
 export function waitForChatOperation<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -18,7 +18,9 @@ export function waitForChatOperation<T>(pending: Promise<T>, signal: AbortSignal
 
 /** Pause an unfinished upload on error so the owner can still send a safe HTTP response. */
 export async function readChatBody(request: IncomingMessage, signal: AbortSignal, maximumBytes: number): Promise<string> {
-  return (await readModelBody(request, signal, maximumBytes)).toString("utf8");
+  const body = await readModelBody(request, signal, maximumBytes);
+  try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body); }
+  catch { throw new ChatBodyEncodingError("Model request contains invalid UTF-8"); }
 }
 
 export function readModelBody(request: IncomingMessage, signal: AbortSignal, maximumBytes: number): Promise<Buffer> {
@@ -84,7 +86,11 @@ export interface ChatStreamBounds {
 
 /** Pull-based decoding keeps downstream backpressure attached to the upstream reader. */
 export async function* readModelFrames(incoming: IncomingMessage, signal: AbortSignal, bounds: ChatStreamBounds): AsyncGenerator<{ data: string; raw: string; receivedAt: number }> {
-  const decoder = new StringDecoder("utf8");
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+  const decode = (chunk?: Buffer): string => {
+    try { return decoder.decode(chunk, { stream: chunk !== undefined }); }
+    catch { throw new ChatUpstreamError("invalid_upstream_encoding", "Upstream response contains invalid UTF-8.", false); }
+  };
   let buffer = "";
   let total = 0;
   let timeout: NodeJS.Timeout | undefined;
@@ -103,7 +109,7 @@ export async function* readModelFrames(incoming: IncomingMessage, signal: AbortS
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value as string);
       total += chunk.length;
       if (total > bounds.totalBytes) throw new ModelConversionError("Chat response exceeds size limit");
-      buffer += decoder.write(chunk);
+      buffer += decode(chunk);
       if (bounds.bufferCharacters !== undefined && buffer.length > bounds.bufferCharacters) throw new ModelConversionError("Chat buffer exceeds size limit");
       if (Buffer.byteLength(buffer) > bounds.bufferBytes) throw new ModelConversionError("Chat buffer exceeds size limit");
       let match: RegExpExecArray | null;
@@ -123,7 +129,7 @@ export async function* readModelFrames(incoming: IncomingMessage, signal: AbortS
       }
       if (Buffer.byteLength(buffer) > bounds.frameBytes) throw new ModelConversionError("Chat frame exceeds size limit");
     }
-    buffer += decoder.end();
+    buffer += decode();
     signal.throwIfAborted();
     if (timedOut) throw new ModelRequestTimeoutError("stream");
     if (buffer.trim()) throw new ModelConversionError("Chat stream has an incomplete frame");
