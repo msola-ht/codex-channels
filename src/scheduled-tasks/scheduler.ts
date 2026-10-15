@@ -112,26 +112,16 @@ export class ScheduledTaskScheduler {
           if (processed >= this.maxTasksPerTick) break;
 
           const scheduledFor = task.nextRunAt;
-          if (await this.store.hasBlockingRun(task.taskId)) {
-            if (this.stopping) break;
-            const skipped = await this.store.claimDue(task.taskId, scheduledFor, "claimed", nowMs);
-            if (skipped.kind === "blocked") result.blocked.push(skipped.run);
-            else result.skippedOverlap.push(skipped.run);
-            processed += 1;
-            continue;
-          }
           const key = conversationKey(task);
           const reservedCapacity = dispatchGroups.get(key)?.length ?? 0;
           const capacityAvailable = await this.capacityAvailable(task, reservedCapacity);
           if (this.stopping) break;
-          if (!capacityAvailable) {
-            const skipped = await this.store.claimDue(task.taskId, scheduledFor, "skipped_capacity", nowMs);
-            result.skippedCapacity.push(skipped.run);
-            processed += 1;
-            continue;
-          }
-
-          const claim = await this.store.claimDue(task.taskId, scheduledFor, "claimed", nowMs);
+          // Blocking Runs can complete during any awaited preflight. The
+          // transaction decides overlap and capacity together; route its
+          // actual outcome rather than a stale hasBlockingRun observation.
+          const claim = await this.store.claimDue(
+            task.taskId, scheduledFor, capacityAvailable ? "claimed" : "skipped_capacity", nowMs,
+          );
           processed += 1;
           if (claim.kind === "claimed") {
             // Claim serially in stable order. Independent Conversations

@@ -42,6 +42,7 @@ helper 关闭预算失败后继续等待实际退出才关闭端口；`closeSche
 全部 owner 关闭，`waitForScheduledTaskStoresExit()` 供最终退出路径等待物理结束，实例仅在 exit 后移出登记。
 到期查询直接使用 SQL `LIMIT`；Scheduler 在派发后增量清理，
 每批最多读取 16 个 Task 和 200 个 Run，完成一轮后等待 24 小时。清理失败经 `onError` 观察但不阻断安全调度。
+领取事务按当时的 Run 状态优先判定重叠或未知阻塞，再判定容量，调度器只按事务返回的结果派发，避免异步预检期间旧 Run 完成后遗留未派发的领取。
 Application 通过不阻止进程退出的短期定时器主动清理超过五分钟的待确认记录，并把 Store 状态冲突
 转换为稳定的用户可见错误；
 每个 Actor 在同一 Conversation 的未删除任务固定限制为 100 个。

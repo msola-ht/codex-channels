@@ -327,14 +327,6 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     return rows.map(runFromRow);
   }
 
-  hasBlockingRun(taskId: string): boolean {
-    this.requireOpen();
-    const row = this.database
-      .prepare("SELECT 1 AS found FROM runs WHERE task_id = ? AND state IN ('dispatching', 'running', 'uncertain') LIMIT 1")
-      .get(taskId) as { found: number } | undefined;
-    return row !== undefined;
-  }
-
   countConversationActiveRuns(conversation: {
     readonly surface: string;
     readonly accountId: string;
@@ -387,7 +379,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
           ORDER BY CASE state WHEN 'uncertain' THEN 0 ELSE 1 END LIMIT 1
         `)
         .get(taskId) as { state: string } | undefined;
-      const effectiveResult = result === "claimed" && blocking
+      const effectiveResult = (result === "claimed" || result === "skipped_capacity") && blocking
         ? blocking.state === "uncertain" ? "blocked" : "skipped_overlap"
         : result;
       const state: ScheduledRunState = effectiveResult === "claimed" ? "dispatching" : effectiveResult;
