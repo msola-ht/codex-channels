@@ -141,7 +141,7 @@ export function responseFacts(body) {
 
 /** 只解释转储已经记录的失败位置，不由耗时或错误文本推断网络根因。 */
 export function failureStage(record, body, localTimeoutStage) {
-  if (record?.state !== "failed" && record?.state !== "incomplete" && record?.deliveryStatus !== "failed") return undefined;
+  if (record?.state !== "failed" && record?.state !== "incomplete" && record?.deliveryStatus !== "failed" && record?.deliveryStatus !== "disconnected") return undefined;
   const timeoutStages = {
     upload: "请求正文上传超时", prepare: "请求准备超时", headers: "上游首响应头等待超时",
     body: "上游正文读取超时", stream: "上游完整事件等待超时", delivery: "响应交付超时", terminal: "终态收尾超时",
@@ -164,6 +164,8 @@ export function failureStage(record, body, localTimeoutStage) {
     superseded_by_next_request: "上一请求未结束即收到下一请求",
   };
   if (record.errorScope !== undefined) return stages[record.errorScope] ?? "未识别的传输阶段";
+  if (record.state === "completed" && record.deliveryStatus === "disconnected") return "客户端连接断开";
+  if (record.state === "completed" && record.deliveryStatus === "failed") return "响应交付";
   const failureTypes = ["response.failed", "response.incomplete", "error"];
   if (failureTypes.includes(record.eventType) || failureTypes.includes(body?.type)) return "上游返回失败或不完整终态";
   if (record.status >= 400) return "上游 HTTP 响应";

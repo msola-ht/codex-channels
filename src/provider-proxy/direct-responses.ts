@@ -99,7 +99,7 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
         if (!call.observer.observe(value, false)) throw new ModelConversionError("Responses JSON has no terminal state");
         if (call.observer.status === "failed") diagnostics.error("upstream_failure", errorStage, false);
         if (call.observer.hasContent) call.content();
-        call.capture?.done(call.observer.status === "unknown" ? "incomplete" : call.observer.status); await emit(deliverable(value, false), true); return;
+        call.capture?.done(); await emit(deliverable(value, false), true); return;
       }
       for await (const frame of readModelFrames(incoming, call.signal, { frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024 })) {
         const value = parse(frame.data, call.capture);
@@ -110,7 +110,7 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
         const terminal = call.observer.observe(value, true, frame.receivedAt);
         if (call.observer.status === "failed") diagnostics.error("upstream_failure", errorStage, false);
         if (call.observer.hasContent) call.content();
-        if (terminal) call.capture?.done(call.observer.status === "unknown" ? "incomplete" : call.observer.status);
+        if (terminal) call.capture?.done();
         const output = deliverable(value, true);
         await emit(output, terminal, output === value ? frame.raw : undefined);
         if (terminal) return;

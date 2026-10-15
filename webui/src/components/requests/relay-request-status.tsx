@@ -4,6 +4,8 @@ import type { RequestRecord } from "@/lib/types"
 
 /** Historical evidence only: never infer a request's outcome from current service settings. */
 function reason(record: RequestRecord) {
+  if (record.status === "completed" && record.deliveryStatus === "disconnected") return "disconnected"
+  if (record.status === "completed" && record.deliveryStatus === "failed") return "deliveryFailed"
   if (record.errorCode === "client_disconnected") return "disconnected"
   if (record.errorCode === "request_revoked") return "revoked"
   if (["upstream_timeout", "request_timeout", "upload_timeout", "preparation_timeout", "delivery_timeout"].includes(record.errorCode ?? "")) return "timeout"

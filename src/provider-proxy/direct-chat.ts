@@ -69,7 +69,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
         })) {
           if (data === "[DONE]") { call.observer.finish();
             if (call.observer.status === "completed") generationTiming = generation.finish(call.observer.usage.outputTokens, call.observer.usage.reasoningOutputTokens);
-            call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete"); await emit(undefined, true); return; }
+            call.capture?.done(); await emit(undefined, true); return; }
           const value: unknown = parseDirectModelJson(data, call.capture);
           diagnostics.push(value);
           call.capture?.value(value, true);
@@ -98,7 +98,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
       responseTimeMs ??= receivedAt - submittedAt!;
       call.observer.finish();
       if (call.observer.hasContent) call.content();
-      call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete");
+      call.capture?.done();
       await emit(value as Record<string, unknown>, true);
     });
   } catch (error) {

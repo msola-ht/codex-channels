@@ -240,7 +240,7 @@ export class ModelRelayServer {
       phase = "prepare";
       const pendingCapture = Promise.resolve(this.options.capture?.(provider!, signal, protocol));
       void pendingCapture.then(value => {
-        if (signal.aborted) value?.finish("failed", "preparation_cancelled");
+        if (signal.aborted) value?.finish("failed", "failed", "preparation_cancelled");
       }, () => {}).catch(() => { this.metricFailures = Math.min(Number.MAX_SAFE_INTEGER, this.metricFailures + 1); });
       capture = await waitForChatOperation(pendingCapture, signal);
       signal.throwIfAborted(); clearTimeout(preparationTimer);
@@ -340,7 +340,8 @@ export class ModelRelayServer {
       if (observer.status === "failed") errorCode ??= "upstream_response_failed";
       if (observer instanceof DirectResponsesObserver) outputTiming = observer.timing;
       if (generationBlocked) delete outputTiming.generationTiming;
-      const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs, observer.responseModel, {
+      const modelStatus = observer.status === "unknown" ? "failed" : observer.status;
+      const traffic = capture?.finish(modelStatus, deliveryStatus, errorCode, firstTokenMs, observer.responseModel, {
         ...outputTiming, ...(observer.usage.outputTokens === undefined ? {} : { outputTokens: observer.usage.outputTokens }),
       }, timeoutStage);
       if (lease && started !== undefined) {
@@ -349,7 +350,7 @@ export class ModelRelayServer {
           ...(traffic ? { traffic } : {}),
           callerId: lease.caller.callerId, keyId: lease.caller.keyId, credentialGeneration: lease.caller.credentialGeneration,
           provider: provider!, requestModel, ...(userAgent === null ? {} : { userAgent }), responseFormat: stream ? "sse" : "json",
-          status: observer.status === "unknown" ? "failed" : observer.status, deliveryStatus,
+          status: modelStatus, deliveryStatus,
           requestStartedAtMs: submittedAt!, responseCompletedAtMs: submittedAt! + (ended - started), totalDurationMs: ended - started,
           ...observer.usage, ...outputTiming, ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
           ...(observer.responseModel === undefined ? {} : { responseModel: observer.responseModel }),

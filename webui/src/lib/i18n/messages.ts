@@ -1278,7 +1278,10 @@ const zh = {
     "failureCause": "具体原因",
     "failureUpstreamStatus": "内部错误状态",
     "failureRequestId": "上游请求 ID",
+    "deliveryIncomplete": "生成已完成，交付未完成",
     "failureReasons": {
+      "deliveryDisconnected": "模型已完成生成，但客户端连接已断开，不能确认响应完整送达。",
+      "deliveryFailed": "模型已完成生成，但响应交付失败，不能确认响应完整送达。",
       "rateLimit": "上游限流，请稍后重试或降低并发。",
       "authentication": "上游认证失败，请检查 API Key。",
       "permission": "上游拒绝访问，请检查账户权限。",
@@ -2638,7 +2641,10 @@ const en: Messages = {
     "failureCause": "Underlying cause",
     "failureUpstreamStatus": "Internal error status",
     "failureRequestId": "Upstream request ID",
+    "deliveryIncomplete": "Generation completed; delivery incomplete",
     "failureReasons": {
+      "deliveryDisconnected": "The model completed generation, but the client disconnected. Complete delivery is not confirmed.",
+      "deliveryFailed": "The model completed generation, but response delivery failed. Complete delivery is not confirmed.",
       "rateLimit": "The upstream service is rate limiting requests. Retry later or reduce concurrency.",
       "authentication": "Upstream authentication failed. Check the API key.",
       "permission": "Upstream access was denied. Check account permissions.",
