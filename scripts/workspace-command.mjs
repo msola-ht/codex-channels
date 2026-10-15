@@ -33,7 +33,9 @@ const helpText = {
   列出全部 Workspace 与当前默认项；--json 输出稳定 JSON。`,
   add: `用法：codexc work add [--id ID] [--name 名称] [--cwd 目录] [--prune-missing]
 
-把 --cwd 指定的目录注册为 Workspace，未指定时使用当前目录；交互式新建请运行 codexc work。`,
+把 --cwd 指定的目录注册为 Workspace，未指定时使用当前目录；交互式新建请运行 codexc work。
+--prune-missing 同时清理不存在或非目录的注册，不删除磁盘文件；先确认磁盘已挂载且这些项目不再使用。
+无法访问的目录会阻止清理。`,
   remove: `用法：codexc work remove <序号|ID|名称>
 
 移除 Workspace 注册，不删除磁盘目录；固定的 codex-connect 工作区不可移除。`,
@@ -325,7 +327,7 @@ async function removeWorkspaceInteractively({
   }
   const result = removeWorkspaceFromConfig({
     configPath: runtime.configPath,
-    selector: selected,
+    selector: { id: selected },
     fallbackDefaultWorkspace,
     eventQueuePath,
   });
@@ -359,11 +361,7 @@ function listWorkspaces(configPath, {
   }
   console.log(`Workspace（${workspaces.length}）：`);
   workspaces.forEach((item, index) => {
-    const status = item.status === "missing"
-      ? " · 目录不存在"
-      : item.status === "inaccessible"
-        ? " · 目录无法访问"
-        : "";
+    const status = item.status === "available" ? "" : ` · ${item.detail}`;
     console.log(`${index + 1}. ${item.name} · ${item.id}${item.id === defaultWorkspaceId ? " ← 默认" : ""}${status}`);
     console.log(`   ${item.cwd}`);
   });

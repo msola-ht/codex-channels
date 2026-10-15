@@ -15,6 +15,7 @@ export interface DoctorReport {
 export function createDoctorReport(checks: readonly DoctorCheck[]): DoctorReport;
 export function renderDoctorText(report: DoctorReport): string;
 export function createDoctorTextRenderer(): {
+  renderSection(section: string): string;
   renderCheck(check: DoctorCheck): string;
   renderSummary(report: DoctorReport): string;
 };

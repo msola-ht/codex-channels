@@ -1,10 +1,7 @@
 import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import {
-  existsSync,
   lstatSync,
   readFileSync,
-  realpathSync,
-  statSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
@@ -20,6 +17,7 @@ import {
   resolveProxyEnvironment,
 } from "../../runtime/network-proxy.mjs";
 import { assertPrivateConfigAccessSync } from "../../runtime/private-file.mjs";
+import { inspectWorkspaceDirectory } from "../../runtime/workspace-directory.mjs";
 
 export {
   configChange,
@@ -325,17 +323,14 @@ function validateWorkspaces(
     if (!isAbsolute(workspace.cwd)) {
       throw new ConfigurationError(`Workspace ${workspace.id} 的 cwd 必须是绝对路径`);
     }
-    if (!existsSync(workspace.cwd)) {
-      throw new ConfigurationError(`Workspace ${workspace.id} 的 cwd 必须是已存在的目录`);
-    }
-    const cwd = realpathSync(workspace.cwd);
-    if (!statSync(cwd).isDirectory()) {
-      throw new ConfigurationError(`Workspace ${workspace.id} 的 cwd 必须是目录`);
+    const directory = inspectWorkspaceDirectory(workspace.cwd);
+    if (!directory.valid) {
+      throw new ConfigurationError(`工作区 ${workspace.id}：${directory.detail}；cwd：${workspace.cwd}。请运行 codexc doctor 查看配置来源和处理方式。`);
     }
     return {
       id: workspace.id,
       name: workspace.name,
-      cwd,
+      cwd: directory.cwd,
       ...(workspace.sandbox === undefined
         ? {}
         : { sandbox: workspace.sandbox }),

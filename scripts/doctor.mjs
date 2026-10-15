@@ -6,7 +6,7 @@ import {
   readdirSync,
   readFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { parse } from "smol-toml";
 
@@ -29,7 +29,7 @@ import {
 } from "../runtime/app-server-runtime.mjs";
 import {
   readGatewayConfig,
-  validateGatewayConfigDocument,
+  validateGatewayConfigStructureDocument,
 } from "../runtime/gateway-config.mjs";
 import {
   loadOpenAiBaseUrl,
@@ -54,7 +54,7 @@ import {
 import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from "./runtime-config.mjs";
 import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
-import { readWorkspaceConfig } from "./workspace-config.mjs";
+import { inspectWorkspaceConfig } from "./workspace-config.mjs";
 
 const checks = [];
 let checkSection = "基础环境";
@@ -109,6 +109,7 @@ const windowsServices = process.platform === "win32"
   : undefined;
 
 setSection("配置文件");
+note("配置来源", `${configPath}（工作区路径来自此文件，与程序安装目录分别配置）`);
 if (!existsSync(configPath)) {
   record("用户配置", false, `不存在：${configPath}；请先运行 codexc init`);
 } else {
@@ -122,7 +123,7 @@ if (!existsSync(configPath)) {
   checkPrivateFile("配置文件权限", configPath);
   try {
     const candidate = readGatewayConfig(configPath);
-    validateGatewayConfigDocument(candidate);
+    validateGatewayConfigStructureDocument(candidate);
     document = candidate;
     record("配置格式", true, "TOML 语法与 Gateway Schema 有效");
   } catch (error) {
@@ -176,6 +177,11 @@ if (document) {
 
   setSection("通讯渠道");
   const tokenConfigured = Boolean(stringValue(telegram.bot_token));
+  const channelEnabled = tokenConfigured || feishu.enabled === true || weixin.enabled === true;
+  record("渠道启用", channelEnabled, channelEnabled
+    ? "至少一个通讯渠道已配置启用"
+    : "尚未配置通讯渠道，Gateway 暂不能启动；继续检查工作区及其他独立项目",
+  channelEnabled ? undefined : "运行 codexc setup 配置 Telegram、飞书或微信，然后重新运行 codexc doctor");
   const allowedUsers = validAllowedUsers(telegram.allowed_user_ids);
   if (tokenConfigured) {
     record("Telegram Token", true, "已配置（内容已隐藏）");
@@ -358,12 +364,32 @@ if (document) {
   } else {
     note("Gateway 计划任务", "已关闭");
   }
-  setSection("Workspace");
+  setSection("工作区");
   try {
-    const { workspaces, defaultWorkspace } = readWorkspaceConfig(document);
-    record("Workspace", true, `${workspaces.length} 个，默认 ${defaultWorkspace.id}`);
+    const { workspaces, defaultWorkspaceId } = inspectWorkspaceConfig(document);
+    const defaultExists = workspaces.some((workspace) => workspace.id === defaultWorkspaceId);
+    record("默认工作区引用", defaultExists, defaultExists
+      ? defaultWorkspaceId
+      : `default_workspace = ${JSON.stringify(defaultWorkspaceId)} 未匹配任何已登记工作区`,
+    defaultExists ? undefined : "运行 codexc work 设置默认工作区，然后重新运行 codexc doctor");
+    for (const workspace of workspaces) {
+      const available = workspace.status === "available";
+      const removal = workspace.id === "codex-connect" || resolve(workspace.cwd) === resolve(dataDir, "workspace")
+        ? "固定默认工作区不可移除，请恢复目录或修正 cwd。"
+        : /^\d+$/.test(workspace.id) || workspaces.some((entry) => entry.id !== workspace.id && entry.name === workspace.id)
+          ? "确认不再使用时运行 codexc work，在菜单中选择该工作区并移除注册，不删除磁盘文件。"
+          : `确认不再使用时运行 codexc work remove ${workspace.id} 移除注册，不删除磁盘文件。`;
+      record(`工作区 ${workspace.name}（${workspace.id}${workspace.id === defaultWorkspaceId ? "，默认" : ""}）`, available,
+        available ? workspace.cwd : `${workspace.detail}\n  配置文件：${configPath}\n  配置项：[[workspaces]] 中 id = ${JSON.stringify(workspace.id)} 的 cwd\n  路径：${workspace.cwd}`,
+        available ? undefined : "先检查磁盘挂载、路径和权限；项目已搬家时修改 cwd，保留 id 和其他设置。"
+          + removal + "修复后运行 codexc doctor。");
+    }
+    if (!defaultExists || workspaces.some((workspace) => workspace.status !== "available")) {
+      note("影响范围", "当前磁盘配置无法用于 Gateway 启动；热加载失败时已运行的 Gateway 会保留原配置，其当前状态需另行确认。Doctor 只读检查，未移除任何注册。");
+    }
   } catch (error) {
-    record("Workspace", false, errorMessage(error));
+    record("工作区配置", false, `${errorMessage(error)}；配置文件：${configPath}`,
+      "修正工作区配置后运行 codexc doctor；当前磁盘配置无法用于 Gateway 启动，热加载失败时保留原配置。");
   }
 
   setSection("Codex 与 App Server");
@@ -618,7 +644,7 @@ process.exitCode = report.healthy ? 0 : 1;
 
 function setSection(section) {
   checkSection = section;
-  if (textRenderer) process.stderr.write(`正在检查：${section}\n`);
+  if (textRenderer) process.stdout.write(textRenderer.renderSection(section));
 }
 
 function record(name, passed, detail, remediation) {
