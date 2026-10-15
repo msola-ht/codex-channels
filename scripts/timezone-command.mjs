@@ -155,7 +155,7 @@ export async function runTimezoneCommand(args = [], {
   if (parsed.action === "prompt") {
     const choices = timezoneChoices(current, gateway);
     const value = await prompts.select({
-      message: gateway ? "网关时区" : "模型可见时区",
+      message: gateway ? "网关时区" : "服务时区",
       showInstructions: false,
       initialValue: gateway && current === null ? "app-server"
         : current !== null && choices.some((choice) => choice.value === current)
@@ -207,7 +207,7 @@ export async function runTimezoneCommand(args = [], {
     ? `网关时区已设为${gatewayTimezoneLabel(result.value)}：${result.configPath}`
     : result.value === null
     ? `已恢复系统时区，App Server 与 WebUI 下次启动后使用运行环境的时区：${result.configPath}`
-    : `模型可见时区已设为 ${result.value}（App Server 与 WebUI）：${result.configPath}`, {
+    : `服务时区已设为 ${result.value}（App Server 与 WebUI）：${result.configPath}`, {
     stdout: output,
     environment,
   });
@@ -225,8 +225,8 @@ function writeCurrentTimezone({ environment, output, current, configPath, gatewa
   writeCliMessage("note", gateway
     ? `当前网关时区：${gatewayTimezoneLabel(current)}（${configPath}）`
     : current === null
-    ? `当前未设置模型可见时区，App Server 与 WebUI 沿用系统时区：${configPath}`
-    : `当前模型可见时区：${current}（App Server 与 WebUI，${configPath}）`, {
+    ? `当前未设置服务时区，App Server 与 WebUI 沿用系统时区：${configPath}`
+    : `当前服务时区：${current}（App Server 与 WebUI，${configPath}）`, {
     stdout: output,
     environment,
   });

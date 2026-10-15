@@ -115,9 +115,9 @@ function cancelWizard(prompts) {
 
 async function configureCodexSettings({ environment, input, output, prompts }) {
   const options = [
-    { value: "preferences", label: "Codex 新会话与用户偏好", hint: "核心默认值、其他用户偏好与默认审批方式" },
+    { value: "preferences", label: "Codex 新会话与用户偏好", hint: "统一配置默认值与用户偏好，也可单独调整默认审批方式" },
     { value: "identity", label: "一键设为官方 TUI 身份" },
-    { value: "timezone", label: "模型可见时区" },
+    { value: "timezone", label: "服务时区" },
     { value: "done", label: "完成 Codex 设置", hint: "继续可选功能与安装；未修改的设置保持原样" },
   ];
   let selected = "preferences";

@@ -410,7 +410,7 @@ HTML 和微信结构化字段渲染。
 Codex CLI），并在“系统”下方分别显示“App Server 时区”和“网关时区”。App Server 时区使用
 Gateway 启动时读取的 `codex.timezone` 并标注“配置”，未配置时显示“跟随系统（未配置）”；网关时区
 使用 Gateway 进程的实际时区。App Server 字段不表示已核实其实际生效状态，配置生效条件见
-[模型可见时区](model-timezone.md)。Node.js 运行时、连接方式和 App Server User-Agent 仍作为调试字段放在
+[服务时区](model-timezone.md)。Node.js 运行时、连接方式和 App Server User-Agent 仍作为调试字段放在
 “运行环境”小节。当前 Codex Home 缺少 `auth.json` 时跳过 OpenAI 启动连通性检查，不显示连通性告警。
 此时启动通知额外显示“OpenAI 官方：未登录；请运行 codex login，或发送 /model 选择第三方提供商”；
 使用自定义主 Provider 或固定第三方 Provider 时官方登录不参与当前路由，不显示该字段。

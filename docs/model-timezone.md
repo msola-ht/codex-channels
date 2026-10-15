@@ -1,4 +1,4 @@
-# 模型可见时区
+# 服务时区
 
 本文说明模型请求里 `environment context` 的时区与日期从哪里来，以及如何在不修改系统时区的前提下
 调整它。对应配置字段 `[codex].timezone`、`[gateway].timezone`，公开命令 `codexc timezone`。
@@ -43,7 +43,7 @@ codexc timezone --json             # 只读输出当前配置
 删除 `codex.timezone`，「其他」要求手动输入 IANA 名称。已配置的值默认高亮，因此直接回车不会
 改变配置；不在常见列表里的当前值会单独列在「当前配置」下。
 
-同一入口也位于 `codexc config` → 身份与时区 → 模型可见时区。
+同一入口也位于 `codexc config` → 身份与时区 → 服务时区。
 
 ## 网关时区
 

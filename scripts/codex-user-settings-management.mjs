@@ -150,7 +150,7 @@ export async function previewCodexUserSetting(
 
 function codexUserSettingActivation(kind) {
   if (kind === "auto-recap") return "next-tui";
-  if (kind === "preferences") return "next-thread-and-tui";
+  if (kind === "preferences" || kind === "all") return "next-thread-and-tui";
   return "next-thread";
 }
 
@@ -306,13 +306,18 @@ function allEdits(input, provider, config, models, acceleration) {
   assertOfficialDefaults(provider);
   const defaults = defaultEdits(input, provider, models);
   const tier = serviceTierEdit(input.serviceTier, config, models, acceleration, defaults.value.model);
-  const permissions = permissionEdits(input, config);
+  if (input.permissions === null && optionalString(record(config).default_permissions) === null) {
+    throw invalid("permissions", "missing-permissions", "未使用 Permission Profile，必须明确选择权限默认值");
+  }
+  const permissions = input.permissions === null ? { edits: [], value: {} } : permissionEdits(input.permissions ?? {}, config);
+  const preferences = preferenceEdits(input, models);
   return {
-    edits: [...defaults.edits, ...tier.edits, ...permissions.edits],
+    edits: [...defaults.edits, ...tier.edits, ...permissions.edits, ...preferences.edits],
     value: {
       ...defaults.value,
       serviceTier: tier.value.serviceTier,
       ...permissions.value,
+      ...preferences.value,
     },
   };
 }

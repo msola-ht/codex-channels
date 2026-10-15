@@ -51,8 +51,8 @@ export async function runCodexUserSettingsSetup({
       ...(defaultsEditable
         ? [{
             value: "all",
-            label: "配置核心默认值",
-            hint: "一次确认并写入模型、加速档位与权限默认值",
+            label: "配置默认值与用户偏好",
+            hint: "统一设置模型、加速、权限、Plan、摘要、输出、更新检查与历史",
           }]
         : []),
       ...(defaultsEditable
@@ -86,11 +86,6 @@ export async function runCodexUserSettingsSetup({
         value: "model-compact",
         label: "模型上下文与自动压缩",
         hint: "查看并设置上下文窗口与自动压缩比例",
-      }] : []),
-      ...(defaultsEditable ? [{
-        value: "preferences",
-        label: "其他用户偏好",
-        hint: "Plan、推理摘要（未配置默认 none）、输出详细程度、更新检查与历史",
       }] : []),
       {
         value: "permissions",
@@ -163,9 +158,6 @@ export async function runCodexUserSettingsSetup({
   }
   if (section === "model-compact") {
     return runModelCompactSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
-  }
-  if (section === "preferences") {
-    return runPreferencesSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
   }
   if (section === "permissions") {
     return runPermissionSettings({
@@ -282,28 +274,38 @@ async function runAllSettings({
   createClient,
   primaryProvider,
 }) {
-  if (!settings.defaultsEditable || !settings.permissions.editable) {
-    output.write("当前配置不能使用一键写入全部，请分别检查 Provider 与 Permission Profile。\n");
+  if (!settings.defaultsEditable) {
+    output.write("当前 Provider 不支持配置官方默认值与用户偏好。\n");
     return { action: "back" };
   }
   const modelDefaults = await promptModelDefaults(prompts, settings);
   if (modelDefaults === null) return { action: "back" };
   const serviceTier = await promptServiceTier(prompts, settings, modelDefaults.model);
   if (serviceTier === null) return { action: "back" };
-  const permissions = await promptPermissions(prompts, settings);
-  if (permissions === null) return { action: "back" };
+  const permissions = settings.permissions.editable ? await promptPermissions(prompts, settings) : null;
+  if (settings.permissions.editable && permissions === null) return { action: "back" };
+  const permissionSummary = permissions === null
+    ? `保留 Permission Profile（${settings.permissions.defaultPermissions}），不修改权限`
+    : `${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"}`;
+  if (permissions === null) output.write(`${permissionSummary}。\n`);
+  const preferences = await promptPreferences(prompts, settings, modelDefaults.model);
+  if (preferences === null) return { action: "back" };
   const confirmed = await prompts.confirm({
     message: [
-      "一次写入 Codex 核心默认值：",
+      "一次写入 Codex 默认值与用户偏好：",
       `${modelDefaults.model.model} · ${modelDefaults.reasoningEffort}`,
       serviceTierLabel(serviceTier),
-      `${permissions.sandboxMode} · ${permissions.approvalPolicy}`,
-      `网络${permissions.networkAccess ? "开启" : "关闭"}`,
+      permissionSummary,
+      `Plan ${preferences.planModeReasoningEffort}`,
+      `摘要${reasoningSummaryLabels[preferences.reasoningSummary]}`,
+      `输出${verbosityLabels[preferences.verbosity]}`,
+      `更新检查${preferences.checkForUpdateOnStartup ? "开启" : "关闭"}`,
+      `历史${historyPersistenceLabels[preferences.historyPersistence]}`,
     ].join(" · "),
     initialValue: true,
   });
   if (prompts.isCancel(confirmed) || confirmed !== true) {
-    output.write("已取消，未修改 Codex 核心默认值。\n");
+    output.write("已取消，未修改 Codex 默认值与用户偏好。\n");
     return undefined;
   }
   const result = await updateSetting({
@@ -311,7 +313,8 @@ async function runAllSettings({
     model: modelDefaults.model.model,
     reasoningEffort: modelDefaults.reasoningEffort,
     serviceTier,
-    ...permissions,
+    permissions,
+    ...preferences,
   }, {
     environment,
     expectedVersion: settings.version,
@@ -319,7 +322,7 @@ async function runAllSettings({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(
-    `Codex 核心默认值已更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · ${serviceTierLabel(serviceTier)} · ${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"}\n`,
+    `Codex 默认值与用户偏好已更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · ${serviceTierLabel(serviceTier)} · ${permissionSummary}\n`,
   );
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
@@ -548,25 +551,15 @@ async function runModelCompactSetting({
   return result;
 }
 
-async function runPreferencesSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
-  const preferences = await promptPreferences(prompts, settings);
-  if (preferences === null) return { action: "back" };
-  const confirmed = await prompts.confirm({ message: `保存其他用户偏好：Plan 思考等级 ${preferences.planModeReasoningEffort} · 摘要 ${reasoningSummaryLabels[preferences.reasoningSummary]} · 输出详细程度 ${verbosityLabels[preferences.verbosity]} · 更新检查 ${preferences.checkForUpdateOnStartup ? "开启" : "关闭"} · 历史记录 ${historyPersistenceLabels[preferences.historyPersistence]}？`, initialValue: true });
-  if (prompts.isCancel(confirmed) || confirmed !== true) { output.write("已取消，未修改其他用户偏好。\n"); return undefined; }
-  const result = await updateSetting({ kind: "preferences", ...preferences }, { environment, expectedVersion: settings.version, ...(createClient === undefined ? {} : { createClient }), ...(primaryProvider === undefined ? {} : { primaryProvider }) });
-  output.write("Codex 其他用户偏好已更新。\n");
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
-  return result;
-}
-
-async function promptPreferences(prompts, settings) {
+async function promptPreferences(prompts, settings, model) {
   const pick = async (message, initialValue, options) => {
     const value = await prompts.select({ message, showInstructions: false, initialValue, options: [...options, { value: "back", label: "返回" }] });
     return prompts.isCancel(value) || value === "back" ? null : value;
   };
-  const model = settings.models.find((item) => item.model === settings.defaults.model) ?? settings.models[0];
   if (!model || model.reasoningEfforts.length === 0) throw new Error("当前没有可用模型思考等级");
-  const planModeReasoningEffort = await pick("Plan 默认思考等级", settings.defaults.planModeReasoningEffort ?? model.defaultReasoningEffort, model.reasoningEfforts.map((item) => ({ value: item.effort, label: item.effort, hint: item.description })));
+  const initialPlanEffort = model.reasoningEfforts.some((item) => item.effort === settings.defaults.planModeReasoningEffort)
+    ? settings.defaults.planModeReasoningEffort : model.defaultReasoningEffort;
+  const planModeReasoningEffort = await pick("Plan 默认思考等级", initialPlanEffort, model.reasoningEfforts.map((item) => ({ value: item.effort, label: item.effort, hint: item.description })));
   if (planModeReasoningEffort === null) return null;
   const reasoningSummary = await pick("推理摘要", settings.defaults.reasoningSummary ?? "none", Object.entries(reasoningSummaryLabels).map(([value, label]) => ({ value, label, hint: reasoningSummaryHints[value] })));
   if (reasoningSummary === null) return null;

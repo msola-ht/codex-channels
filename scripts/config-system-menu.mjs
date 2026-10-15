@@ -72,7 +72,7 @@ export async function runSystemSettings({
       },
       {
         value: "app_server_timezone",
-        label: "模型可见时区",
+        label: "服务时区",
         hint: "codex.timezone；缺省沿用系统时区，决定模型看到的时区与当前日期，WebUI 同步跟随",
       },
       {
