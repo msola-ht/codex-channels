@@ -1253,9 +1253,10 @@ export class ProviderProxy {
     const signal = AbortSignal.any([requestSignal, this.shutdownController.signal]);
     try {
       await waitForProxyOperation(Promise.resolve(this.onMetrics?.({ ...metrics, quotaWindows, quotaObservedAtMs }, accountId)),
-        signal, modelRequestPolicy.terminalDeliveryTimeoutMs, "terminal");
+        signal, modelRequestPolicy.metricsDeliveryTimeoutMs, "terminal");
     } catch (error) {
-      if (!signal.aborted) this.onError?.(asError(error));
+      if (!signal.aborted) this.onError?.(error instanceof ModelRequestTimeoutError
+        ? new Error("模型请求指标确认超时，已跳过等待并继续交付", { cause: error }) : asError(error));
     }
   }
 

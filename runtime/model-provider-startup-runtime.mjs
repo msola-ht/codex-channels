@@ -1,5 +1,5 @@
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { assertProviderModelRequestPolicy, providerModelRequestTimeouts } from "./model-request-policy.mjs";
+import { providerModelRequestTimeouts } from "./model-request-policy.mjs";
 
 import { parse } from "smol-toml";
 
@@ -101,7 +101,6 @@ export function loadOpenAiBaseUrl(environment = process.env) {
     throw new Error("Codex OpenAI base URL 配置无法安全读取");
   }
   const configured = document.openai_base_url;
-  assertProviderModelRequestPolicy(record(record(document.model_providers).openai));
   if (configured === undefined) return undefined;
   if (typeof configured !== "string") {
     throw new Error("Codex openai_base_url 必须是 HTTP(S) URL");

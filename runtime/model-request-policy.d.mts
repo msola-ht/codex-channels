@@ -7,6 +7,7 @@ export const modelRequestPolicy: Readonly<{
   errorBodyTimeoutMs: number;
   deliveryTimeoutMs: number;
   terminalDeliveryTimeoutMs: number;
+  metricsDeliveryTimeoutMs: number;
 }>;
 export function assertProviderModelRequestPolicy(provider: unknown, requireExplicit?: boolean): void;
 export const thirdPartyProviderRequestMaxRetries: 4;

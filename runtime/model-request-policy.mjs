@@ -11,6 +11,8 @@ export const modelRequestPolicy = Object.freeze({
   errorBodyTimeoutMs: 5_000,
   deliveryTimeoutMs: 30_000,
   terminalDeliveryTimeoutMs: 5_000,
+  // Metrics are best effort and must leave room for terminal delivery.
+  metricsDeliveryTimeoutMs: 1_000,
 });
 
 // Match the locked Codex defaults for every provider routed through Codex.

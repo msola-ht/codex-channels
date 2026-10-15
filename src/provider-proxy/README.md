@@ -55,7 +55,7 @@
   请求指标投递；`quotaObservedAtMs` 保存响应头或有效额度事件到达的本地时刻，后续终态或失败
   不刷新该时间，无效事件不覆盖已有快照；缺失快照或历史未采集时为 null，不从请求时间推断。
   不保存完整 Header、事件正文或其他额度桶。
-  普通增量不经过指标确认链；终态指标仍在对应完成事件转发前完成投递确认。
+  普通增量不经过指标确认链；终态指标在对应完成事件转发前等待确认，最多 1 秒后退让并继续交付，为外层 5 秒收尾预算留出余量。指标 IPC 使用同一绝对期限，不因零碎确认字节续期。
   上游收到 WebSocket 关闭后，先交付已排队的终态再关闭客户端；收尾使用独立 5 秒预算，
   超时记录错误并释放连接，客户端断开或代理停止立即取消等待。
   从 `x-codex-turn-metadata` 提取 `thread_id` / `turn_id` 用于按 Turn 关联，并识别精确的
@@ -174,7 +174,7 @@ Chat 桥与直接模型适配器共用 `direct-model-http.ts` 的成功响应校
 
 自定义 `cp-*` 的 Runtime 守卫还复用配置读取器的版本 5 和完整目录一致性校验，并拒绝目录 `.pending` 与全局上下文同步未完成状态；HTTP/WS 复用相同回调，不把合法 slug 单独视为有效目录。
 
-OCG/CCG 和自定义 `cp-*` 由 Runtime 向 `ProviderProxy` 注入同源目录复核。HTTP 在路由解析后、有界读取正文并复核模型再提交原始字节；Responses WS 每个 `response.create` 在连接可用后、发送前按顺序复核。停用返回 `409 provider_model_disabled`，目录不可用返回 `503 provider_catalog_unavailable`；WS 包装为 error 后关闭连接，已提交请求不撤回。HTTP 正文上限 16 MiB、上传预算 30 秒，目录复核预算 15 秒；全代理最多 16 项授权准备，WS 单帧与连接队列各限制 16 MiB、队列最多 16 帧。官方 OpenAI、DS 与独立 Relay 不注入目录复核，不推断无目录提供商的模型授权。
+OCG/CCG 和自定义 `cp-*` 由 Runtime 向 `ProviderProxy` 注入同源目录复核。HTTP 在路由解析后、有界读取正文并复核模型再提交原始字节；Responses WS 每个 `response.create` 在连接可用后、发送前按顺序复核。停用返回 `409 provider_model_disabled`，目录不可用返回 `503 provider_catalog_unavailable`；WS 包装为 error 后关闭连接，已提交请求不撤回。HTTP 正文上限 16 MiB、上传预算 30 秒，目录复核预算 30 秒；全代理最多 16 项授权准备，WS 单帧与连接队列各限制 16 MiB、队列最多 16 帧。官方 OpenAI、DS 与独立 Relay 不注入目录复核，不推断无目录提供商的模型授权。
 除官方 OpenAI 端点外的 Responses 上游（受管 DS/OCG/CCG、自定义 Provider 与自定义 `cp-*`）在提交前归一化 Codex 私有输入项：`agent_message` 降级为普通 `user` 消息，工具参数 schema 中的布尔 `encrypted` 标记被删除，无法转换的私有项按 `400 provider_model_request_invalid` 失败关闭，不退回透传（与 Chat 桥一致）。HTTP 与 Responses WS 都只替换发往上游的字节，转储与指标仍记录客户端原始报文；未发生改写时沿用原始字节。正文改写后按实际字节重写 `content-length`；没有目录守卫的第三方上游沿用同一 16 MiB 正文上限、30 秒上传预算与 16 项准备上限，压缩正文仍拒绝。
 Responses WS 归一化同样要求文本 JSON 消息且单条不超过 16 MiB；无守卫上游也在 WebSocket 接收层限制消息大小（含分片累计），并受同一等待队列上限约束。HTTP 目录复核与归一化共用一次正文解析。官方 `openai` 路由（含 `openai_base_url` 覆盖）不归一化，该端点理解 Codex 私有输入项；独立 Relay 的出站请求来自外部调用方自带报文，同样不归一化。
 

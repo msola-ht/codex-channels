@@ -1,7 +1,7 @@
 import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
 import { messages, type Translate } from "./i18n/messages"
 import { translate } from "./i18n/translate"
-import { failureLabelKeys, recordedRequestFailure, requestFailureReason } from "./request-failure"
+import { failureLabelKeys, recordedRequestFailure } from "./request-failure"
 import { modelDisplayName } from "../../../runtime/model-display-name.mjs"
 
 let modelDisplayAliases: Readonly<Record<string, string>> = {}
@@ -145,22 +145,16 @@ const errorTypeNames: Record<string, { zh: string; en: string }> = {
   turn_notification_error: { zh: "Turn 运行失败", en: "Turn failed" },
 }
 
-export function formatErrorType(
-  value: string | null,
-  language: DisplayLanguage,
-): string {
-  if (value === null) return "—"
-  const label = Object.hasOwn(errorTypeNames, value) ? errorTypeNames[value] : undefined
-  const reason = requestFailureReason([value])
-  return reason ? translate(language, `requests.relayReasons.${failureLabelKeys[reason]}`) : label ? label[language] : translate(language, "requests.relayReasons.requestFailed")
-}
-
 export function formatRequestError(record: Pick<RequestRecord, "source" | "status" | "deliveryStatus" | "errorCode" | "errorType" | "httpStatus" | "errorMessage">, language: DisplayLanguage): string {
   const reason = recordedRequestFailure(record)
+  // Do not reclassify raw codes after the source-aware classifier rejected them.
+  const localType = record.source === "relay" ? record.errorCode : record.errorType
+  const label = localType && Object.hasOwn(errorTypeNames, localType) ? errorTypeNames[localType] : undefined
+  const fallback = record.status === "incomplete" ? translate(language, "requests.relayReasons.incomplete")
+    : record.status === "failed" ? translate(language, "requests.relayReasons.requestFailed")
+    : record.status === "unknown" || record.errorType || record.errorCode || record.errorMessage ? translate(language, "requests.relayReasons.unknown") : "—"
   return reason ? translate(language, `requests.relayReasons.${failureLabelKeys[reason]}`)
-    : record.errorType || record.errorCode ? formatErrorType(record.errorType ?? record.errorCode, language)
-    : record.status === "failed" || record.status === "incomplete" || record.errorMessage
-      ? translate(language, "requests.relayReasons.requestFailed") : "—"
+    : label ? label[language] : fallback
 }
 
 export function formatTrafficFailureStage(stage: string, language: DisplayLanguage): string {

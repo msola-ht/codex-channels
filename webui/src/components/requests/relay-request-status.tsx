@@ -7,10 +7,11 @@ import { recordedRequestFailure, failureLabelKeys } from "@/lib/request-failure"
 function reason(record: RequestRecord) {
   const classified = recordedRequestFailure(record)
   if (classified) return failureLabelKeys[classified]
-  if (record.status === "failed" || record.errorCode) return "requestFailed"
   if (record.deliveryStatus === "disconnected") return "disconnected"
   if (record.deliveryStatus === "failed") return "deliveryFailed"
   if (record.status === "incomplete") return "incomplete"
+  if (record.status === "failed") return "requestFailed"
+  if (record.status === "unknown" || record.errorCode) return "unknown"
   return undefined
 }
 

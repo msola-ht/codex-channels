@@ -1303,9 +1303,11 @@ async function verifyAppServerRequestPolicy(socketPath, provider, cwd, environme
     if (!config || (config.model_provider ?? "openai") !== provider) {
       throw new Error("App Server 当前 Provider 与受管启动策略不一致");
     }
-    const configured = config.model_providers?.[provider];
-    assertProviderModelRequestPolicy(configured ?? {}, provider !== "openai");
-    if (provider !== "openai") assertProviderModelRetryPolicy(configured);
+    if (provider !== "openai") {
+      const configured = config.model_providers?.[provider];
+      assertProviderModelRequestPolicy(configured, true);
+      assertProviderModelRetryPolicy(configured);
+    }
   } catch (error) {
     operationFailure = { error };
     throw error;

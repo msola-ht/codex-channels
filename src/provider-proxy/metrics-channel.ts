@@ -1,5 +1,6 @@
 import { validModelRequestDiagnostics } from "./chat-diagnostics.js";
 import { validRequestTiming } from "../../runtime/request-timing.mjs";
+import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import { createConnection, type Socket } from "node:net";
 
 import {
@@ -121,10 +122,11 @@ export function sendProviderProxyMetrics(
         return;
       }
       settled = true;
+      clearTimeout(timer);
       socket.destroy();
       resolve();
     };
-    socket.setTimeout(1_000, finish);
+    const timer = setTimeout(finish, modelRequestPolicy.metricsDeliveryTimeoutMs);
     socket.once("connect", () => {
       socket.write(`${JSON.stringify(metrics)}\n`);
     });
@@ -135,6 +137,7 @@ export function sendProviderProxyMetrics(
     });
     socket.once("end", finish);
     socket.once("error", finish);
+    socket.once("close", finish);
   });
 }
 
