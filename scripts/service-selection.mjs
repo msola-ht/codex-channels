@@ -84,14 +84,17 @@ export function serviceSnapshotHealthy(services, target, environment = process.e
   });
 }
 
-export async function waitForSelectedRelay(target, environment = process.env) {
+export async function waitForSelectedRelay(target, environment = process.env, { signal } = {}) {
+  signal?.throwIfAborted();
   const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
   if (!serviceControlDefinitions(platform, target, "start", environment).some(value => value.target === "model-relay")) return;
   const { configPath } = locateUserConfig(environment);
   const enabled = validateGatewayConfigDocument(readGatewayConfig(configPath)).model_relay?.enabled === true;
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     const status = await queryModelRelayControl(modelRelayPaths(configPath).control, "status");
+    signal?.throwIfAborted();
     if (status.result === "status" && status.configurationValid === true && status.enabled === enabled && status.listening === enabled) return;
     await new Promise(resolve => setTimeout(resolve, 100));
   }

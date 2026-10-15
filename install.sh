@@ -156,22 +156,20 @@ fi
 node "$staging/repository/scripts/sandbox-dependencies.mjs" \
   || fail "沙盒运行依赖检查或安装失败"
 
-note "正在安装依赖并构建 Gateway"
 (cd "$staging/repository" \
   && ignore_scripts="$(npm config get ignore-scripts)" \
   && case "$ignore_scripts" in
     true|false) ;;
     *) fail "无法确认 npm ignore-scripts 设置，拒绝构建源码" ;;
   esac \
-  && npm ci --ignore-scripts --no-audit --no-fund \
+  && node scripts/installation-command.mjs '安装 Gateway 依赖' -- npm ci --ignore-scripts --no-audit --no-fund \
   && { [ "$ignore_scripts" = true ] || npm run hooks:install; } \
-  && npm run build \
-  && npm run check) \
+  && node scripts/installation-command.mjs '构建 Gateway' -- npm run build \
+  && node scripts/installation-command.mjs '检查 Gateway' -- npm run check) \
   || fail "Gateway 依赖安装或构建失败"
-note "正在安装依赖并构建 WebUI"
 (cd "$staging/repository/webui" \
-  && npm ci --ignore-scripts --no-audit --no-fund \
-  && npm run build) \
+  && node ../scripts/installation-command.mjs '安装 WebUI 依赖' -- npm ci --ignore-scripts --no-audit --no-fund \
+  && node ../scripts/installation-command.mjs '构建 WebUI' -- npm run build) \
   || fail "WebUI 依赖安装或构建失败"
 
 [ -f "$staging/repository/dist/main.js" ] || fail "构建结果缺少 dist/main.js"
@@ -185,6 +183,7 @@ git -C "$staging/repository" config --local codex-connect.npm-prefix "$npm_globa
 mv "$staging/repository" "$checkout"
 package_directory="$staging/package"
 mkdir -p "$package_directory"
+note "正在打包 Codex Connect 源码"
 pack_report="$(cd "$checkout" && npm pack --ignore-scripts --loglevel=error --json --pack-destination "$package_directory")" \
   || fail "Codex Connect 源码打包失败"
 tarball="$(printf '%s' "$pack_report" | node -e '
@@ -198,8 +197,9 @@ process.stdin.on("end", () => {
   process.stdout.write(entry.filename);
 });
 ')" || fail "npm pack 未返回 tarball 文件名"
-npm install --global --ignore-scripts --loglevel=error --no-audit --no-fund "$package_directory/$tarball" \
-  >/dev/null || fail "Codex Connect npm 全局命令安装失败；请检查 npm 全局目录权限"
+node "$checkout/scripts/installation-command.mjs" '安装 npm 全局命令' -- \
+  npm install --global --ignore-scripts --loglevel=error --no-audit --no-fund "$package_directory/$tarball" \
+  || fail "Codex Connect npm 全局命令安装失败；请检查 npm 全局目录权限"
 node "$checkout/scripts/source-install-metadata.mjs" record "$checkout" "$npm_global_prefix" \
   || fail "无法记录源码安装来源"
 [ -x "$global_launcher" ] \

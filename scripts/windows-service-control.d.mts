@@ -13,6 +13,8 @@ export function controlWindowsServices(options: {
   follow?: boolean;
   lines?: number;
   json?: boolean;
+  quiet?: boolean;
+  signal?: AbortSignal;
 }): Promise<ManagedServiceStatus | void>;
 
 export function inspectWindowsServiceStatus(options?: {

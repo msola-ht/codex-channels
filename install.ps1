@@ -128,19 +128,18 @@ try {
   $loginState = if ($LASTEXITCODE -eq 0) { '已登录' } else { '未登录或登录状态不可用' }
   Write-Output "[提示] Codex CLI 检测通过：$($codexCommand.Source) · $codexVersion · $loginState"
 
-  Write-Output '[提示] 正在安装依赖并构建 Gateway'
+  $installationCommand = Join-Path $repositoryRoot 'scripts\installation-command.mjs'
   $ignoreScripts = Invoke-Captured $npm @('config', 'get', 'ignore-scripts') $repositoryRoot
   if ($ignoreScripts -cnotin @('true', 'false')) { throw '无法确认 npm ignore-scripts 设置，拒绝构建源码' }
-  Invoke-Checked $npm @('ci', '--ignore-scripts', '--no-audit', '--no-fund') $repositoryRoot
+  Invoke-Checked $node @($installationCommand, '安装 Gateway 依赖', '--', $npm, 'ci', '--ignore-scripts', '--no-audit', '--no-fund') $repositoryRoot
   if ($ignoreScripts -ceq 'false') {
     Invoke-Checked $npm @('run', 'hooks:install') $repositoryRoot
   }
-  Invoke-Checked $npm @('run', 'build') $repositoryRoot
-  Invoke-Checked $npm @('run', 'check') $repositoryRoot
-  Write-Output '[提示] 正在安装依赖并构建 WebUI'
+  Invoke-Checked $node @($installationCommand, '构建 Gateway', '--', $npm, 'run', 'build') $repositoryRoot
+  Invoke-Checked $node @($installationCommand, '检查 Gateway', '--', $npm, 'run', 'check') $repositoryRoot
   $webui = Join-Path $repositoryRoot 'webui'
-  Invoke-Checked $npm @('ci', '--ignore-scripts', '--no-audit', '--no-fund') $webui
-  Invoke-Checked $npm @('run', 'build') $webui
+  Invoke-Checked $node @($installationCommand, '安装 WebUI 依赖', '--', $npm, 'ci', '--ignore-scripts', '--no-audit', '--no-fund') $webui
+  Invoke-Checked $node @($installationCommand, '构建 WebUI', '--', $npm, 'run', 'build') $webui
   if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot 'dist\main.js')) -or -not (Test-Path -LiteralPath (Join-Path $webui 'dist\index.html'))) {
     throw '构建结果不完整'
   }
@@ -150,10 +149,11 @@ try {
   Move-Item -LiteralPath $repositoryRoot -Destination $checkout
   $packageDirectory = Join-Path $staging 'package'
   New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
+  Write-Output '[提示] 正在打包 Codex Connect 源码'
   $packJson = Invoke-Captured $npm @('pack', '--ignore-scripts', '--loglevel=error', '--json', '--pack-destination', $packageDirectory) $checkout
   $packEntry = @($packJson | ConvertFrom-Json)[0]
   if (-not $packEntry.filename) { throw 'npm pack 未返回 tarball 文件名' }
-  Invoke-Checked $npm @('install', '--global', '--ignore-scripts', '--loglevel=error', '--no-audit', '--no-fund', (Join-Path $packageDirectory $packEntry.filename)) $checkout
+  Invoke-Checked $node @((Join-Path $checkout 'scripts\installation-command.mjs'), '安装 npm 全局命令', '--', $npm, 'install', '--global', '--ignore-scripts', '--loglevel=error', '--no-audit', '--no-fund', (Join-Path $packageDirectory $packEntry.filename)) $checkout
   Invoke-Checked $node @((Join-Path $checkout 'scripts\source-install-metadata.mjs'), 'record', $checkout, $npmPrefix) $checkout
   if (-not (Test-Path -LiteralPath (Join-Path $npmPrefix 'codexc.cmd'))) { throw "npm 全局命令入口不存在：$npmPrefix\codexc.cmd" }
   $completed = $true

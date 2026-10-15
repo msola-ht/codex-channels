@@ -577,7 +577,7 @@ macOS 和 Linux 的服务定义为停止预留 50 秒，覆盖内部收尾预算
 Windows 启动前会检查服务定义所用的 PowerShell、原生构建产物、Node、CLI 入口及工作目录。缺失或不匹配时先返回修复提示，不启动任务；服务进程启动后的故障仍可能在宿主等待超时后报告。此时显示的“最近一次任务结果”不保证来自本次启动，请结合 `codexc logs` 判断。
 
 `codexc restart [gateway|appserver|webui|relay|all]` 是唯一重启入口，默认 `all`。
-`start`、`stop`、`restart` 另外为每个服务步骤显示耗时（秒，保留两位小数），失败步骤也显示耗时；启动步骤包含就绪检查。重启还会显示预检耗时。
+`start`、`stop`、`restart` 在交互终端逐项显示动态进度，每个服务步骤完成后保留一条结果与耗时（秒，保留两位小数）；启动步骤包含就绪检查，失败步骤也显示耗时。重启先显示预检进度与耗时。重定向输出或 CI 环境使用纯文本；跳过原因和诊断信息始终保留。按 Ctrl+C 中止后不再执行后续步骤，已完成的启停不自动回滚。
 单独指定目标时要求该后台服务已安装；`appserver` 包含受监管的 Provider 实例。
 全部重启要求 Gateway 与 App Server 已安装，未安装的 WebUI、Relay 明确提示跳过；
 已安装但未启用的 Relay，以及配置中关闭的 WebUI，都只停止，不重新启动。显式 `restart relay` 或 `restart webui` 仍会重启该服务，Relay 监听由配置开关控制。

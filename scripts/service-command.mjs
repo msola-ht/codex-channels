@@ -1,9 +1,9 @@
 import { restartCommandUsage, serviceCommandActions, serviceCommandUsage } from "./cli-command-usage.mjs";
 export { serviceCommandActions, serviceCommandUsage } from "./cli-command-usage.mjs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { performance } from "node:perf_hooks";
+import { createInterface } from "node:readline";
 
 import { runAppServerService } from "../runtime/app-server-service-runtime.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
@@ -14,7 +14,7 @@ import {
   webuiServiceEnabled,
 } from "../runtime/gateway-config.mjs";
 import { runGatewayService } from "../runtime/gateway-service-runtime.mjs";
-import { assertSynchronousChildSuccess, installServiceControlHandler } from "../runtime/process-lifecycle.mjs";
+import { assertSynchronousChildSuccess, ForwardedChildSignalError, installServiceControlHandler, registerChildProcessGroup, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import {
   defaultServiceTarget,
   serviceTargetIncludes,
@@ -31,6 +31,7 @@ import {
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 import { serviceControlDefinitions, serviceDefinitionPath, waitForSelectedRelay } from "./service-selection.mjs";
 import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
+import { withCliProgress } from "./cli-operation-progress.mjs";
 
 const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 
@@ -107,91 +108,95 @@ function recordInstalledTerminalIdentity(environment) {
   printCliMessage("note", `已按当前终端记录模型上游终端标识：${terminalIdentity}`);
 }
 
-function serviceElapsed(startedAt) {
-  return `${((performance.now() - startedAt) / 1000).toFixed(2)} 秒`;
-}
-
 async function timedServiceStep(action, definition, environment) {
   const label = `${action === "stop" ? "停止" : "启动并确认就绪"} ${definition.displayName}`;
-  const startedAt = performance.now();
-  printCliMessage("note", label);
-  try {
-    await runServiceController(action, [definition.target], environment);
-    if (action === "start") await waitForServiceReadiness(definition.target, environment);
-    printCliMessage("note", `${label}：完成，耗时 ${serviceElapsed(startedAt)}。`);
-  } catch (error) {
-    printCliMessage("failure", `${label}：失败，耗时 ${serviceElapsed(startedAt)}。`);
-    throw error;
-  }
+  await withCliProgress(label, async progress => {
+    await runServiceController(action, [definition.target], environment, progress);
+    progress.signal.throwIfAborted();
+    if (action === "start") {
+      progress.message(`等待 ${definition.displayName} 就绪`);
+      await waitForServiceReadiness(definition.target, environment, progress.signal);
+    }
+  });
 }
 
 export async function runRestartCommand(args = []) {
-  const startedAt = performance.now();
   if (args.length > 1) throw new Error(restartCommandUsage);
   const target = parseServiceTarget(args[0] ?? "all");
   rejectUnsafeAppServerServiceAction("restart", [target], process.env);
-  const runtime = configuredEnvironment();
-  const document = validateGatewayConfigDocument(runtime.document);
-  const platform = { linux: "systemd", darwin: "launchd", win32: "windows" }[process.platform];
-  if (!platform) throw new Error("codexc restart 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
-  if (serviceTargetIncludes(target, "gateway") || serviceTargetIncludes(target, "app-server")) {
-    const { loadConfigDocument } = await import("../dist/config/index.js");
-    loadConfigDocument(readFileSync(runtime.configPath, "utf8"), dirname(runtime.configPath), { environment: runtime.environment });
-  }
-  const selected = (target === "all" ? ["webui", "model-relay", "gateway", "app-server"] : [target])
-    .map(value => serviceDefinitions.find(definition => definition.target === value));
-  const windowsStatus = platform === "windows"
-    ? await (await import("./windows-service-control.mjs")).inspectWindowsServiceStatus({
-        target, environment: runtime.environment,
-        definitionsDirectory: join(runtime.dataDir, "services"),
-      })
-    : undefined;
-  const stopping = [];
-  for (const definition of selected) {
-    if (!existsSync(serviceDefinitionPath(platform, definition, runtime.environment))) {
-      if (target !== "all" || definition.core) {
-        throw new Error(`${definition.displayName} 后台服务未安装；请先运行 codexc install。尚未停止任何服务。`);
+  const { runtime, stopping, steps } = await withCliProgress("重启预检", async progress => {
+    const runtime = configuredEnvironment();
+    const document = validateGatewayConfigDocument(runtime.document);
+    const platform = { linux: "systemd", darwin: "launchd", win32: "windows" }[process.platform];
+    if (!platform) throw new Error("codexc restart 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
+    if (serviceTargetIncludes(target, "gateway") || serviceTargetIncludes(target, "app-server")) {
+      const { loadConfigDocument } = await import("../dist/config/index.js");
+      loadConfigDocument(readFileSync(runtime.configPath, "utf8"), dirname(runtime.configPath), { environment: runtime.environment });
+    }
+    const selected = (target === "all" ? ["webui", "model-relay", "gateway", "app-server"] : [target])
+      .map(value => serviceDefinitions.find(definition => definition.target === value));
+    const windowsStatus = platform === "windows"
+      ? await (await import("./windows-service-control.mjs")).inspectWindowsServiceStatus({
+          target, environment: runtime.environment,
+          definitionsDirectory: join(runtime.dataDir, "services"),
+        })
+      : undefined;
+    const stopping = [];
+    for (const definition of selected) {
+      progress.signal.throwIfAborted();
+      progress.message(`检查 ${definition.displayName} 服务定义与状态`);
+      if (!existsSync(serviceDefinitionPath(platform, definition, runtime.environment))) {
+        if (target !== "all" || definition.core) {
+          throw new Error(`${definition.displayName} 后台服务未安装；请先运行 codexc install。尚未停止任何服务。`);
+        }
+        progress.log(`跳过 ${definition.displayName}：未安装后台服务。`);
+        continue;
       }
-      printCliMessage("note", `跳过 ${definition.displayName}：未安装后台服务。`);
-      continue;
+      const status = windowsStatus ?? await inspectManagedServiceStatusAsync({ target: definition.target, environment: runtime.environment });
+      if (platform !== "launchd" && status.services.find(service => service.target === definition.target)?.loaded !== true) {
+        throw new Error(`${definition.displayName} 服务定义未被服务管理器加载；请运行 codexc install。尚未停止任何服务。`);
+      }
+      stopping.push(definition);
     }
-    const status = windowsStatus ?? await inspectManagedServiceStatusAsync({ target: definition.target, environment: runtime.environment });
-    if (platform !== "launchd" && status.services.find(service => service.target === definition.target)?.loaded !== true) {
-      throw new Error(`${definition.displayName} 服务定义未被服务管理器加载；请运行 codexc install。尚未停止任何服务。`);
-    }
-    stopping.push(definition);
-  }
-  if (platform === "launchd") await runServiceController("check-install", [], runtime.environment);
-  const starting = [...stopping].reverse().filter(definition => {
-    if (target === "all" && definition.target === "model-relay" && document.model_relay?.enabled !== true) {
-      printCliMessage("note", "Model Relay 未启用：仅停止，不重新启动。");
-      return false;
-    }
-    if (target === "all" && definition.target === "webui" && webuiServiceEnabled(document) === false) {
-      printCliMessage("note", "WebUI 已在配置中关闭：仅停止，不重新启动。");
-      return false;
-    }
-    return true;
+    progress.signal.throwIfAborted();
+    if (platform === "launchd") await runServiceController("check-install", [], runtime.environment, progress);
+    const starting = [...stopping].reverse().filter(definition => {
+      if (target === "all" && definition.target === "model-relay" && document.model_relay?.enabled !== true) {
+        progress.log("Model Relay 未启用：仅停止，不重新启动。");
+        return false;
+      }
+      if (target === "all" && definition.target === "webui" && webuiServiceEnabled(document) === false) {
+        progress.log("WebUI 已在配置中关闭：仅停止，不重新启动。");
+        return false;
+      }
+      return true;
+    });
+    const steps = [
+      ...stopping.map(definition => ({ action: "stop", definition })),
+      ...starting.map(definition => ({ action: "start", definition })),
+    ];
+    return { runtime, stopping, steps };
   });
-  const steps = [
-    ...stopping.map(definition => ({ action: "stop", definition })),
-    ...starting.map(definition => ({ action: "start", definition })),
-  ];
   const label = step => `${step.action === "stop" ? "停止" : "启动并确认就绪"} ${step.definition.displayName}`;
   const completed = [];
-  printCliMessage("note", `重启预检完成，耗时 ${serviceElapsed(startedAt)}。`);
   for (const [index, step] of steps.entries()) {
     try {
       await timedServiceStep(step.action, step.definition, runtime.environment);
       completed.push(label(step));
     } catch (error) {
-      throw new Error(
+      if (error instanceof ForwardedChildSignalError) throw error;
+      const failure = new Error(
         `重启中止：${label(step)}失败。\n已完成：${completed.join("；") || "无"}。`
         + `\n未执行：${steps.slice(index + 1).map(label).join("；") || "无"}。`
         + "\n未自动回滚；请用 codexc status 和 codexc status webui 检查状态，排除问题后重试。"
         + `\n原因：${error instanceof Error ? error.message : "服务操作失败"}`,
         { cause: error },
       );
+      if (error?.exitCode === 130 || error?.exitCode === 143) {
+        printCliMessage("failure", failure.message);
+        throw error;
+      }
+      throw failure;
     }
   }
   printCliMessage("success", `${target === "all" ? "全部已选后台服务" : stopping[0].displayName}重启完成。`);
@@ -258,7 +263,8 @@ export async function runServiceCommand(args) {
       } catch (error) {
         // Unix controllers historically attempt every selected stop before
         // reporting failure. Timing must not turn this into fail-fast behavior.
-        if (action !== "stop" || serviceArgs[0] !== "all" || platform === "windows") throw error;
+        if (error instanceof ForwardedChildSignalError || error?.exitCode === 130 || error?.exitCode === 143
+          || action !== "stop" || serviceArgs[0] !== "all" || platform === "windows") throw error;
         failures.push({ definition, error });
       }
     }
@@ -272,13 +278,19 @@ export async function runServiceCommand(args) {
   await runServiceController(action, serviceArgs, controlEnvironment);
 }
 
-async function runServiceController(action, serviceArgs, controlEnvironment) {
+async function runServiceController(action, serviceArgs, controlEnvironment, progress) {
   if (process.platform === "win32" && (action === "start" || action === "stop")) {
     const { controlWindowsServices } = await import("./windows-service-control.mjs");
     await controlWindowsServices({
       action, target: serviceArgs[0], environment: controlEnvironment,
       definitionsDirectory: join(controlEnvironment.CODEX_CONNECT_HOME, "services"),
+      quiet: progress !== undefined,
+      signal: progress?.signal,
     });
+    return;
+  }
+  if (progress && (process.platform === "darwin" || process.platform === "linux")) {
+    await runProgressServiceController(action, serviceArgs, controlEnvironment, progress);
     return;
   }
   if (process.platform === "darwin") {
@@ -316,15 +328,13 @@ async function runServiceController(action, serviceArgs, controlEnvironment) {
   }
 }
 
-async function waitForServiceReadiness(target, environment) {
+async function waitForServiceReadiness(target, environment, signal) {
   const readinessTarget = target === "gateway" || target === "app-server" || target === "all" ? target : undefined;
-  await waitForSelectedRelay(target, environment);
+  await waitForSelectedRelay(target, environment, { signal });
   if (readinessTarget) {
-    await waitForManagedServiceReadiness(readinessTarget, environment);
-    printCliMessage("success", coreServiceReadyMessage(readinessTarget));
+    await waitForManagedServiceReadiness(readinessTarget, environment, { signal });
   } else if (target === "webui") {
-    await waitForHttpServiceReadiness(environment);
-    printCliMessage("success", "WebUI 已就绪。");
+    await waitForHttpServiceReadiness(environment, signal);
   }
 }
 
@@ -369,7 +379,7 @@ export async function waitForManagedServiceReadiness(
   await waitForCoreServiceTarget(target, environment, options);
 }
 
-async function waitForHttpServiceReadiness(environment) {
+async function waitForHttpServiceReadiness(environment, signal) {
   const configPath = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   if (!configPath) throw new Error("缺少 Gateway 配置路径，无法确认服务就绪");
   const document = readGatewayConfig(configPath);
@@ -384,11 +394,12 @@ async function waitForHttpServiceReadiness(environment) {
   const deadline = Date.now() + 5_000;
   let lastError;
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 750);
     try {
       const response = await fetch(url, {
-        signal: controller.signal,
+        signal: signal ? globalThis.AbortSignal.any([controller.signal, signal]) : controller.signal,
         redirect: "error",
         ...(typeof section?.token === "string"
           ? { headers: { authorization: `Bearer ${section.token}` } }
@@ -425,6 +436,7 @@ async function waitForHttpServiceReadiness(environment) {
         throw new Error("WebUI 健康响应身份无效");
       }
       const status = await inspectManagedServiceStatusAsync({ target: "webui", environment });
+      signal?.throwIfAborted();
       const service = status.services.find(candidate => candidate.target === "webui");
       if (service?.running !== true || service.pid === null
         || (service.pid !== health.pid && service.pid !== health.parentPid)) {
@@ -432,6 +444,7 @@ async function waitForHttpServiceReadiness(environment) {
       }
       return;
     } catch (error) {
+      signal?.throwIfAborted();
       lastError = error;
     } finally {
       clearTimeout(timeout);
@@ -441,6 +454,55 @@ async function waitForHttpServiceReadiness(environment) {
   throw new Error(
     `WebUI 启动后未就绪：${lastError instanceof Error ? lastError.message : "健康检查超时"}`,
   );
+}
+
+/** Fold only controller-owned success lines; unknown output and diagnostics remain visible. */
+async function runProgressServiceController(action, serviceArgs, environment, progress) {
+  progress.signal.throwIfAborted();
+  const definition = serviceDefinitions.find(value => value.target === serviceArgs[0]);
+  const normalMessages = new Set(definition ? [
+    `[成功] ${definition.displayName}已停止。`,
+    `[成功] ${definition.displayName} 已停止。`,
+    `[成功] ${definition.displayName}已启动。`,
+    `[成功] ${definition.displayName} 已启动。`,
+    `[提示] ${definition.displayName} 启动操作已完成，正在确认就绪状态。`,
+  ] : []);
+  const child = spawn(
+    process.platform === "darwin" ? "/bin/zsh" : "/bin/sh",
+    [join(packageDir, process.platform === "darwin" ? "scripts/launchd-control.sh" : "scripts/systemd-control.sh"), action, ...serviceArgs],
+    { env: environment, stdio: ["inherit", "pipe", "pipe"], detached: true },
+  );
+  registerChildProcessGroup(child);
+  const stdout = createInterface({ input: child.stdout });
+  const stderr = createInterface({ input: child.stderr });
+  stdout.on("line", line => {
+    if (!normalMessages.has(line)) progress.log(line);
+  });
+  stderr.on("line", line => progress.log(line, { stream: "stderr" }));
+  let cleanup;
+  let abort;
+  const stopped = new Promise((resolve, reject) => {
+    abort = () => {
+      cleanup ??= terminateChildProcess(child);
+      void cleanup.then(() => reject(progress.signal.reason), reject);
+    };
+    child.once("error", reject);
+    child.once("close", (status, signal) => resolve({ status, signal }));
+    progress.signal.addEventListener("abort", abort, { once: true });
+    if (progress.signal.aborted) abort();
+  });
+  try {
+    // Cleanup remains owned and awaited even if the child closes while cancelling.
+    const result = await stopped;
+    if (cleanup) await cleanup;
+    progress.signal.throwIfAborted();
+    assertSynchronousChildSuccess(result);
+  } finally {
+    progress.signal.removeEventListener("abort", abort);
+    stdout.close();
+    stderr.close();
+    if (cleanup) await cleanup;
+  }
 }
 
 function coreServiceReadyMessage(target) {
