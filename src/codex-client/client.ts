@@ -503,7 +503,7 @@ export class CodexAppServerClient implements
         sortDirection: options.sortDirection ?? "desc",
         itemsView: "summary",
       } satisfies ThreadTurnsListParams,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}) });
     const page = toThreadTurnsPage(response);
     if (page.turns.length > limit) {
       throw new Error("Codex Turn 列表响应超过请求页大小");

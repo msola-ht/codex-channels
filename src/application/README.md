@@ -1,6 +1,6 @@
 # Application
 
-`ConversationTurnUseCases.prepareAttachmentSubmission` 在等待前序输入前登记视频取消作用域；Surface 排空前序输入后调用一次 `captureTarget`，在下载前捕获当前工作区与 Thread，允许前序输入正常创建首个 Thread。下载完成后在会话锁内复核目标和调用方实时授权，并在异步会话准备之后、Turn 请求发出前再次复核已捕获的 Thread，再通过原有文本 Turn 提交入口发送单文件附件引用。未捕获目标不得提交，取消后不得捕获；首次输入仍由既有 `ensureSession` 建立 Thread，不新增原生视频协议字段，不在 Application 下载媒体或调用视频模型。
+`ConversationTurnUseCases.prepareAttachmentSubmission` 在等待前序输入前登记音频或视频取消作用域；Surface 排空前序输入后调用一次 `captureTarget`，在下载前捕获当前工作区与 Thread，允许前序输入正常创建首个 Thread。下载完成后在会话锁内复核目标和调用方实时授权，并在异步会话准备之后、Turn 请求发出前再次复核已捕获的 Thread，再通过原有 Turn 提交入口发送文本视频引用或含 `localAudios` 的稳定输入。未捕获目标不得提交，取消后不得捕获；首次输入仍由既有 `ensureSession` 建立 Thread，不新增原生视频协议字段，不在 Application 下载媒体或调用视频模型。
 
 返回的提交作用域提供取消信号、一次性 `captureTarget` 和 `submit`、`mayHaveSubmitted` 和 `dispose`。Surface 在首次等待前创建作用域并在结束时释放；`/stop` 取消当前目标的附件准备，准备总时限为 120 秒，包含等待前序输入，捕获目标不重置时限。每个目标最多 4 个待处理作用域，全局最多 1000 个目标。RPC 可能发出后即使确认失败也保留附件至过期，避免删除已经进入 Thread 的引用；不自动重试提交。
 
@@ -29,7 +29,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   参数校验后映射到 `ScheduledTaskApplicationService`；创建和删除仍返回待确认预览，不直接改写 Store。
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标查询；`ConversationService` 作为统一用例入口委托执行。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
-- `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态，并提供会话选择器 `resolveThread`（序号、精确 ID/名称或唯一 ID 前缀，歧义与缺失明确失败）；不修改绑定，不建立独立会话索引。
+- `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态，并提供会话选择器 `resolveThread`（序号、精确 ID/名称或唯一 ID 前缀，歧义与缺失明确失败）；不修改绑定，不建立独立会话索引。派生轮数扫描每轮最多 10 秒、100 页，同 Thread 后台刷新合并，后台最多 3 个并发；关闭取消扫描并拒绝迟到缓存写入，超限时轮数保持未知。
 - `conversation-event-coordinator.ts`：在稳定输入事件归约前失效选择快照与展示缓存、处理待生效偏好和 Reserve 标记，归约后执行 Reserve 收尾；子代理跟踪和后台释放调度通过注入端口保持原顺序，不等待 RPC 或渠道输出。
 - `turn-errors.ts`：把单次 Turn 失败归约为稳定的错误类型、错误码与安全文案；只读取已归约的错误对象，不执行 RPC、不生成平台输出。
 - `pagination.ts`：提供 Application 层共用的分页总数、页码校验、偏移/切片与一基序号；错误类型与文案仍由各调用点提供，不持有列表状态。

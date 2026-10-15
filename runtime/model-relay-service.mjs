@@ -7,13 +7,16 @@ import { ModelRelayMaterialReader } from "./model-relay-material-reader.mjs";
 import { ModelRelayControl } from "./model-relay-control.mjs";
 import { modelRelayPaths } from "./model-relay-paths.mjs";
 import { relayPolicyFromConfig } from "./model-relay-config.mjs";
+import { serviceShutdownTimeoutMs } from "./shutdown-budget.mjs";
 
 /** Independent service owner. Never starts, stops or connects to App Server. */
-export async function startModelRelayService(configPath, environment = process.env) {
+export async function startModelRelayService(configPath, environment = process.env, { signal } = {}) {
+  signal?.throwIfAborted();
   const { ModelRelayServer, RelayMetricsSender } = await import("../dist/model-relay/index.js");
   const { createLogger } = await import("../dist/observability/index.js");
   const logger = createLogger({ logLevel: "info" }, { service: "relay", module: "service" });
   const { sendRelayMetrics, RelayTrafficDump } = await import("../dist/provider-proxy/index.js");
+  signal?.throwIfAborted();
   environment = { ...environment, CODEX_CONNECT_CONFIG_FILE: configPath };
   const catalogBootstrap = createClineRelayCatalogBootstrap(environment, {
     ready: () => refreshCurrent(),
@@ -30,14 +33,25 @@ export async function startModelRelayService(configPath, environment = process.e
   let refreshTask;
   let closed = false;
   let closeTask;
+  let closeDeadline;
+  let controlStart;
   let poll;
   const watchers = new Map();
   const agents = new Map();
+  const cleanupTasks = new Map();
+  const cleaned = new Set();
+  const assertOpen = () => {
+    signal?.throwIfAborted();
+    if (closed) throw new Error("Relay closed");
+  };
   const sender = new RelayMetricsSender((envelope, signal) => sendRelayMetrics(paths.metrics, envelope, signal));
   const unavailable = async () => {
     relay?.admission.failClosed();
     const changed = snapshot !== undefined || listening !== undefined;
     snapshot = undefined;
+    // The shutdown owner closes the listener after this refresh settles;
+    // do not race another stopListening against that close.
+    if (closed) return;
     await relay?.stopListening().catch(() => {}); listening = undefined;
     if (changed) control.changed();
   };
@@ -52,14 +66,14 @@ export async function startModelRelayService(configPath, environment = process.e
     }
   };
   const publish = async next => {
-    if (closed) throw new Error("Relay closed");
+    assertOpen();
     if (!selector || JSON.stringify(snapshot?.proxy) !== JSON.stringify(next.proxy)) {
       for (const account of snapshot?.materials ?? []) relay?.admission.invalidateProvider(account.provider);
       await selector?.close();
       for (const agent of agents.values()) agent.destroy(); agents.clear();
       selector = createRefreshableHttpProxySelector(next.proxy, environment);
     }
-    if (closed) throw new Error("Relay closed");
+    assertOpen();
     for (const old of snapshot?.materials ?? []) {
       if (next.materials.find(value => value.provider === old.provider)?.revision !== old.revision) relay?.admission.invalidateProvider(old.provider);
     }
@@ -114,9 +128,10 @@ export async function startModelRelayService(configPath, environment = process.e
     const address = next.config.enabled ? `${next.config.host}:${next.config.port}` : undefined;
     if (listening !== address) {
       if (listening) await relay.stopListening();
-      if (closed) throw new Error("Relay closed");
+      assertOpen();
       relay.admission.apply(relayPolicyFromConfig(next.config));
       if (address) await relay.start(next.config.port, next.config.host);
+      assertOpen();
       listening = address;
       logger.info({ event: address ? "listener.started" : "listener.stopped" }, address ? "Relay 已开始监听" : "Relay 已停止监听");
     }
@@ -151,25 +166,83 @@ export async function startModelRelayService(configPath, environment = process.e
       capture: { ...dump.diagnostics(), enabled: snapshot?.debug.model_traffic_dump === true },
       unavailableAccounts: snapshot?.unavailable.length ?? 0, metrics: sender.diagnostics() };
   });
+  const cleanup = (name, operation, key = name) => {
+    if (cleaned.has(key)) return Promise.resolve();
+    if (cleanupTasks.has(key)) return cleanupTasks.get(key);
+    const task = Promise.resolve().then(operation).then(() => {
+      cleaned.add(key); cleanupTasks.delete(key);
+    }, error => {
+      cleanupTasks.delete(key);
+      throw new Error(`Relay ${name} cleanup failed`, { cause: error });
+    });
+    cleanupTasks.set(key, task);
+    // A timed-out owner keeps the physical operation until it settles.
+    void task.catch(() => {});
+    return task;
+  };
+  const waitForCleanup = async tasks => {
+    let timer;
+    try {
+      return await Promise.race([Promise.allSettled(tasks), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Relay shutdown deadline exceeded; cleanup remains unconfirmed")), Math.max(0, closeDeadline - Date.now()));
+      })]);
+    } finally { clearTimeout(timer); }
+  };
   const close = () => {
     if (closeTask) return closeTask;
+    closeDeadline ??= Date.now() + serviceShutdownTimeoutMs;
     closed = true; clearInterval(poll);
-    for (const watcher of watchers.values()) watcher.close(); watchers.clear();
+    signal?.removeEventListener("abort", abort);
+    relay?.admission.failClosed();
     closeTask = (async () => {
-      await catalogBootstrap.close();
-      await control.close(); await reader.close();
-      await refreshTask?.catch(() => {});
-      await relay?.close(); await dump.close(); await sender.close(); await selector?.close();
-      for (const agent of agents.values()) agent.destroy(); agents.clear();
-    })();
+      const errors = [];
+      const collect = async tasks => {
+        try { await waitForCleanup(tasks.map(task => task.catch(error => { errors.push(error); }))); }
+        catch (error) { errors.push(error); }
+      };
+      await collect([
+        ...[...watchers].map(([directory, watcher]) => cleanup("watcher", () => { watcher.close(); watchers.delete(directory); }, watcher)),
+        cleanup("catalog", () => catalogBootstrap.close()),
+        cleanup("control", async () => { await controlStart?.catch(() => {}); await control.close(); }),
+        cleanup("reader", () => reader.close()),
+        cleanup("listener", async () => {
+          // No listener can be published after this refresh has settled.
+          await refreshTask?.catch(() => {});
+          await relay?.close(); listening = undefined;
+        }),
+      ]);
+      // A failed or timed-out listener must not skip the remaining owned resources.
+      await collect([
+        cleanup("capture", () => dump.close()), cleanup("metrics", () => sender.close()),
+        cleanup("proxy", () => selector?.close()),
+        ...[...agents].map(([url, agent]) => cleanup("agent", () => { agent.destroy(); agents.delete(url); }, agent)),
+      ]);
+      if (errors.length) throw new AggregateError(errors, `Relay shutdown incomplete: ${errors.map(error => error.message).join("; ")}`);
+    })().catch(error => { closeTask = undefined; throw error; });
     return closeTask;
   };
+  let rejectStartup;
+  const cancelled = new Promise((_, reject) => { rejectStartup = reject; });
+  const abort = () => {
+    rejectStartup(signal.reason);
+    void close().catch(() => {});
+  };
+  signal?.addEventListener("abort", abort, { once: true });
   try {
-    await control.start(); await refresh();
+    assertOpen();
+    controlStart = control.start();
+    await Promise.race([controlStart, cancelled]);
+    assertOpen();
+    await Promise.race([refresh(), cancelled]);
+    assertOpen();
     poll = setInterval(() => {
       void selector?.refresh().catch(() => {});
       void refresh().catch(() => {});
     }, 1000);
     return { close, refresh: refreshCurrent, status: () => ({ enabled: snapshot?.config.enabled === true, listening: Boolean(listening) }) };
-  } catch (error) { await close(); throw error; }
+  } catch (error) {
+    try { await close(); }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], "Relay startup failed and shutdown incomplete", { cause: cleanupError }); }
+    throw error;
+  }
 }

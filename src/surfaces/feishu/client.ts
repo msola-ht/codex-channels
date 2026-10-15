@@ -702,6 +702,7 @@ export class FeishuMessageClient implements
   async downloadImage(
     messageId: string,
     imageKey: string,
+    signal?: AbortSignal,
   ): Promise<{
     stream: import("node:stream").Readable;
     contentLength?: number;
@@ -711,6 +712,7 @@ export class FeishuMessageClient implements
       imageKey,
       "image",
       "图片",
+      signal,
     );
   }
 
@@ -734,6 +736,7 @@ export class FeishuMessageClient implements
   async downloadAudio(
     messageId: string,
     fileKey: string,
+    signal?: AbortSignal,
   ): Promise<{
     stream: import("node:stream").Readable;
     contentLength?: number;
@@ -743,6 +746,7 @@ export class FeishuMessageClient implements
       fileKey,
       "file",
       "音频",
+      signal,
     );
   }
 

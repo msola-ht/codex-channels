@@ -1682,6 +1682,7 @@ export abstract class GatewayComponentGraph {
     this.conversationIdleReleaser?.cancelPending();
     this.conversations?.setIdleReleaseEnabled(false);
     this.surfaceManager.beginShutdown?.();
+    this.conversations?.closeSessionQueries();
     this.startupAbort?.abort();
     void this.startupNetworkRecovery?.stop();
     this.openAiConnectivityAbort?.abort(new Error("Gateway 正在停止"));
@@ -1795,6 +1796,7 @@ export abstract class GatewayComponentGraph {
     this.conversationIdleReleaser?.cancelPending();
     this.conversations?.setIdleReleaseEnabled(false);
     this.surfaceManager.beginShutdown?.();
+    this.conversations?.closeSessionQueries();
     this.startupAbort?.abort();
     const restoringBindings = this.bindingRestoreCoordinator().close();
     this.openAiConnectivityAbort?.abort();

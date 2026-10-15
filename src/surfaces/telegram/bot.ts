@@ -101,6 +101,7 @@ export interface TelegramImagePort {
   download(
     api: Parameters<TelegramImageStore["download"]>[0],
     fileId: string,
+    signal?: AbortSignal,
   ): ReturnType<TelegramImageStore["download"]>;
 }
 
@@ -110,6 +111,7 @@ export interface TelegramAudioPort {
   download(
     api: Parameters<TelegramAudioStore["download"]>[0],
     fileId: string,
+    signal?: AbortSignal,
   ): ReturnType<TelegramAudioStore["download"]>;
 }
 
@@ -1309,46 +1311,57 @@ export class TelegramSurface {
     }
     const inputTarget = target(context);
     const actorId = String(context.from?.id ?? "");
-    await this.inputs.flushPending(inputTarget, actorId);
-    const audio = await this.audioStore.download(this.bot.api, fileId);
-    const quotedText = telegramQuotedText(context.message?.reply_to_message);
-    const currentText = caption?.trim();
-    this.outbox.prepareTurnReplyTarget(
-      inputTarget.conversationId,
-      context.message!.message_id,
+    const scope = this.service.prepareAttachmentSubmission?.(
+      inputTarget,
+      () => !this.stopping && this.access.isAllowed({ target: inputTarget, actorId }),
+      "audio",
     );
-    let submission;
+    if (!scope) throw new UserFacingError("audio.unavailable", "语音提交能力尚未就绪");
     try {
-      submission = await this.service.submit(inputTarget, {
-        ...(currentText || quotedText !== undefined
-          ? {
-              text: formatQuotedInput(
-                currentText || "请听取这段语音并根据内容协助我。",
-                quotedText,
-              ),
-            }
-          : {}),
-        localAudios: [{ path: audio.path }],
-      });
-    } catch (error) {
-      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
-      throw error;
-    }
-    if (submission.steered) {
-      this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
-      await context.reply(formatTurnInputAppended("audio", Boolean(currentText)), {
-        disable_notification: true,
-        reply_parameters: {
-          message_id: context.message!.message_id,
-          allow_sending_without_reply: true,
-        },
-      });
-    } else {
-      this.outbox.bindPendingTurnReplyTarget(
+      await this.inputs.flushPending(inputTarget, actorId);
+      scope.captureTarget();
+      const audio = await this.audioStore.download(this.bot.api, fileId, scope.signal);
+      const quotedText = telegramQuotedText(context.message?.reply_to_message);
+      const currentText = caption?.trim();
+      this.outbox.prepareTurnReplyTarget(
         inputTarget.conversationId,
-        submission.threadId,
-        submission.turnId,
+        context.message!.message_id,
       );
+      let submission;
+      try {
+        submission = await scope.submit({
+          ...(currentText || quotedText !== undefined
+            ? {
+                text: formatQuotedInput(
+                  currentText || "请听取这段语音并根据内容协助我。",
+                  quotedText,
+                ),
+              }
+            : {}),
+          localAudios: [{ path: audio.path }],
+        });
+      } catch (error) {
+        this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+        throw error;
+      }
+      if (submission.steered) {
+        this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
+        await context.reply(formatTurnInputAppended("audio", Boolean(currentText)), {
+          disable_notification: true,
+          reply_parameters: {
+            message_id: context.message!.message_id,
+            allow_sending_without_reply: true,
+          },
+        });
+      } else {
+        this.outbox.bindPendingTurnReplyTarget(
+          inputTarget.conversationId,
+          submission.threadId,
+          submission.turnId,
+        );
+      }
+    } finally {
+      scope.dispose();
     }
   }
 

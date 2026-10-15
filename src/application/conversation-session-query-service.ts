@@ -6,6 +6,8 @@ import type { RequestMetricsQueryPort } from "./request-metrics-port.js";
 const sessionListPageSize = 20;
 const sessionTurnCountCacheTtlMs = 5 * 60_000;
 const sessionScanConcurrency = 3;
+const sessionScanTimeoutMs = 10_000;
+const sessionScanMaximumPages = 100;
 
 export interface ConversationSession {
   selector?: string;
@@ -32,6 +34,7 @@ export interface ConversationSessionQuery {
 
 /** Owns session list projections and their derived cache; never changes bindings. */
 export class ConversationSessionQueryService {
+  private readonly cancellation = new AbortController();
   private readonly sessionDisplayCacheRefreshes = new Map<string, {
     promise: Promise<void>;
     rerun: boolean;
@@ -46,10 +49,15 @@ export class ConversationSessionQueryService {
     private readonly sessionDisplayCache?: SessionDisplayCachePort,
   ) {}
 
+  close(): void {
+    this.cancellation.abort();
+  }
+
   async listSessions(
     target: ConversationTarget,
     options: ConversationSessionQuery = {},
   ): Promise<ConversationSession[]> {
+    this.cancellation.signal.throwIfAborted();
     const archiveOptions = options.archived === undefined ? {} : { archived: options.archived };
     const needsCompleteCatalog = Boolean(
       options.searchTerm
@@ -60,6 +68,7 @@ export class ConversationSessionQueryService {
       ...archiveOptions,
       ...(needsCompleteCatalog ? { fullScan: true } : {}),
     }));
+    this.cancellation.signal.throwIfAborted();
     const ordered = options.searchTerm
         ? await this.router.list(target, {
             ...archiveOptions,
@@ -67,6 +76,7 @@ export class ConversationSessionQueryService {
             searchTerm: options.searchTerm,
           })
         : all;
+    this.cancellation.signal.throwIfAborted();
     const selectors = new Map(all.map((thread, index) => [thread.id, String(index + 1)]));
     const normalizedProvider = options.provider?.trim().toLowerCase() || null;
     const sessions = ordered.map((thread) => ({ thread, selector: selectors.get(thread.id) }))
@@ -160,6 +170,7 @@ export class ConversationSessionQueryService {
 
   /** Reconcile one invalidated session without rescanning the Thread catalog. */
   refreshSessionDisplayCache(threadId: string): Promise<void> {
+    if (this.cancellation.signal.aborted) return Promise.resolve();
     const existing = this.sessionDisplayCacheRefreshes.get(threadId);
     if (existing) {
       if ((this.sessionDisplayCacheGenerations.get(threadId) ?? 0) !== existing.generation) {
@@ -167,6 +178,9 @@ export class ConversationSessionQueryService {
       }
       return existing.promise;
     }
+    // Counts are optional derived data. Leave the invalidated count unknown
+    // rather than build another unbounded queue behind busy history scans.
+    if (this.sessionDisplayCacheRefreshes.size >= sessionScanConcurrency) return Promise.resolve();
     const state = {
       promise: Promise.resolve(),
       rerun: false,
@@ -177,7 +191,7 @@ export class ConversationSessionQueryService {
         state.rerun = false;
         state.generation = this.sessionDisplayCacheGenerations.get(threadId) ?? 0;
         await this.refreshSessionDisplayCacheNow(threadId);
-      } while (state.rerun);
+      } while (state.rerun && !this.cancellation.signal.aborted);
     })().finally(() => {
       if (this.sessionDisplayCacheRefreshes.get(threadId) === state) {
         this.sessionDisplayCacheRefreshes.delete(threadId);
@@ -193,15 +207,17 @@ export class ConversationSessionQueryService {
     const entry = cache?.get(threadId);
     if (!cache || !history || !entry) return;
     const generation = this.sessionDisplayCacheGenerations.get(threadId) ?? 0;
-    const count = await countThreadTurns(history, threadId);
+    const signal = AbortSignal.any([this.cancellation.signal, AbortSignal.timeout(sessionScanTimeoutMs)]);
+    const count = await countThreadTurns(history, threadId, signal);
+    if (signal.aborted) return;
     let snapshot: Awaited<ReturnType<SessionRouter["readThread"]>> | undefined;
     try {
-      snapshot = await this.router.readThread(threadId);
+      snapshot = await this.router.readThread(threadId, signal);
     } catch {
       snapshot = undefined;
     }
     // A newer Turn may have started while the history request was in flight.
-    if ((this.sessionDisplayCacheGenerations.get(threadId) ?? 0) !== generation) return;
+    if (signal.aborted || (this.sessionDisplayCacheGenerations.get(threadId) ?? 0) !== generation) return;
     const latest = cache.get(threadId);
     if (!latest || count === undefined) return;
     cache.put({
@@ -247,8 +263,11 @@ export class ConversationSessionQueryService {
     ) {
       return cached.turnCount;
     }
-    const count = await countThreadTurns(this.threadHistory!, threadId);
-    if (count !== undefined && cached && this.sessionDisplayCache) {
+    const signal = AbortSignal.any([this.cancellation.signal, AbortSignal.timeout(sessionScanTimeoutMs)]);
+    const generation = this.sessionDisplayCacheGenerations.get(threadId) ?? 0;
+    const count = await countThreadTurns(this.threadHistory!, threadId, signal);
+    if (!signal.aborted && (this.sessionDisplayCacheGenerations.get(threadId) ?? 0) === generation
+      && count !== undefined && cached && this.sessionDisplayCache) {
       this.sessionDisplayCache.put({ ...cached, turnCount: count, measuredAt: Date.now() });
     }
     return count;
@@ -259,16 +278,22 @@ export class ConversationSessionQueryService {
 async function countThreadTurns(
   history: ThreadHistoryPort,
   threadId: string,
+  signal: AbortSignal,
 ): Promise<number | undefined> {
   let count = 0;
   let cursor: string | null = null;
   const cursors = new Set<string>();
+  let pages = 0;
   try {
     do {
+      signal.throwIfAborted();
+      if (++pages > sessionScanMaximumPages) return undefined;
       const page = await history.listThreadTurns(threadId, {
         limit: 100,
+        signal,
         ...(cursor ? { cursor } : {}),
       });
+      signal.throwIfAborted();
       count += page.turns.length;
       cursor = page.nextCursor;
       if (cursor) {

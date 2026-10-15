@@ -571,7 +571,7 @@
   控制脚本实现 linger、Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 使用当前用户计划任务及受管宿主，并校验私有定义与就绪状态。
   控制器异步执行并提供输出回调；取消在阶段边界生效，当前操作完成后执行既有恢复，恢复不继承取消信号。
   Windows 定义包含解析后的 App Server Socket，缺失时拒绝跳过就绪检查；预检通过私有文件边界读取旧 JSON/VBS 快照，安装激活先停止核心服务与 Relay 再启动，保留 WebUI 运行状态。首次或旧定义不完整的安装在激活失败后保留新定义供诊断，完整旧定义恢复失败时保留原始阶段与两层错误。
-- `service-command.mjs` / `service-command.d.mts`：公开 `appserver`、`relay` 目标映射到内部 `app-server`、`model-relay` 服务标识；实现顶层后台服务命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
+- `service-command.mjs` / `service-command.d.mts`：公开 `appserver`、`relay` 目标映射到内部 `app-server`、`model-relay` 服务标识；实现顶层后台服务命令和隐藏的 Gateway/App Server/Relay 服务入口装配；Relay 在启动和关闭期间持续接收停止信号及父进程控制，取消传入资源 owner；集中解析
   服务目标与日志参数（行数限定为 1 到 10000 的十进制整数）、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
   检查；顶层 `restart` 统一预检、停止与逐项启动就绪，默认包含已安装且未关闭的 WebUI，失败报告剩余步骤并中止。Windows 重启批量查询全部所选计划任务，启动和停止在当前进程调用同一控制器，复用权限检查宿主，避免每一步重新启动 Node 与 ACL 宿主；不缓存权限结论、不改变服务顺序和就绪检查。Model Relay 内部入口接收父进程 `codexc-stop`，完成资源关闭后退出。CLI 只保留帮助展示和命令分派。
   `start`、`stop`、`restart` 共用逐服务步骤计时，单调时钟覆盖控制器及启动就绪等待；完成或失败均输出步骤耗时，重启单独报告预检耗时。命令总耗时由 CLI 统一输出。批量目标继续使用共享服务选择与顺序；`start all` 说明按配置跳过的 WebUI 与 Relay，`restart all` 说明只停止不重启的可选服务；Windows、启动和重启在首个失败后中止，Linux/macOS 的 `stop all` 保留尝试其余目标后汇总失败的行为。

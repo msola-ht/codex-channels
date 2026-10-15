@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 
+import { UserFacingError } from "../../conversation-core/index.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import type { FeishuOutbox } from "./outbox.js";
 import {
@@ -20,6 +21,10 @@ import {
 const maximumScopesPerAuthorization = 100;
 const defaultCloseTimeoutMs = 5_000;
 const refreshTimeoutMs = 15_000;
+
+// A bounded close may return before credential IO or a rotating refresh settles.
+// Keep its ownership until settlement, including across Surface reconstruction.
+const closingTasksByApp = new Map<string, Set<Promise<unknown>>>();
 
 type FeishuRefreshOutcome =
   | { kind: "ok"; token: StoredFeishuUserToken }
@@ -52,7 +57,10 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     string,
     Promise<FeishuRefreshOutcome>
   >();
+  private readonly revoking = new Map<string, Promise<boolean>>();
+  private readonly tasks = new Set<Promise<unknown>>();
   private closed = false;
+  private closing: Promise<void> | undefined;
 
   constructor(
     private readonly appId: string,
@@ -71,15 +79,13 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     userOpenId: string,
     requiredScopes: readonly string[],
   ): "started" | "running" {
+    this.assertOpen();
     const key = this.key(userOpenId);
-    if (this.pending.has(key)) {
-      return "running";
-    }
-    if (this.closed) {
+    if (this.pending.has(key) || this.revoking.has(key)) {
       return "running";
     }
     const controller = new AbortController();
-    const task = this.runAuthorization(
+    const task = this.track(this.runAuthorization(
       chatId,
       userOpenId,
       requiredScopes,
@@ -112,22 +118,36 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
       }
     }).finally(() => {
       this.pending.delete(key);
-    });
+    }));
     this.pending.set(key, { controller, task });
     return "started";
   }
 
-  async status(
+  status(
     userOpenId: string,
   ): Promise<FeishuUserAuthorizationStatus> {
+    return this.track(this.readStatus(userOpenId));
+  }
+
+  private async readStatus(
+    userOpenId: string,
+  ): Promise<FeishuUserAuthorizationStatus> {
+    this.assertOpen();
+    const revoking = this.revoking.get(this.key(userOpenId));
+    if (revoking) {
+      await revoking;
+      this.assertOpen();
+    }
     if (this.pending.has(this.key(userOpenId))) {
       return "pending";
     }
     const stored = await this.tokens.get(this.appId, userOpenId);
+    this.assertOpen();
     if (feishuTokenStatus(stored) !== "refreshable") {
       return feishuTokenStatus(stored);
     }
     const outcome = await this.refreshOutcome(userOpenId);
+    this.assertOpen();
     return outcome.kind === "ok"
       ? feishuTokenStatus(outcome.token)
       : outcome.kind === "terminal"
@@ -135,7 +155,28 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
         : "refreshable";
   }
 
-  async revoke(userOpenId: string): Promise<boolean> {
+  revoke(userOpenId: string): Promise<boolean> {
+    if (this.closed || closingTasksByApp.has(this.appId)) {
+      return Promise.reject(new UserFacingError(
+        "oauth.closing",
+        "飞书用户授权正在关闭，请稍后重试",
+      ));
+    }
+    const key = this.key(userOpenId);
+    const existing = this.revoking.get(key);
+    if (existing) {
+      return existing;
+    }
+    const task = this.track(this.runRevoke(userOpenId));
+    this.revoking.set(key, task);
+    const clear = () => {
+      this.revoking.delete(key);
+    };
+    void task.then(clear, clear);
+    return task;
+  }
+
+  private async runRevoke(userOpenId: string): Promise<boolean> {
     const pending = this.pending.get(this.key(userOpenId));
     pending?.controller.abort();
     if (pending) {
@@ -164,20 +205,35 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     return existing !== null;
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    this.closing ??= this.closeOnce();
+    return this.closing;
+  }
+
+  private async closeOnce(): Promise<void> {
     this.closed = true;
     const entries = [...this.pending.values()];
     for (const entry of entries) {
       entry.controller.abort();
     }
-    const refreshTasks = [...this.refreshing.values()];
-    if (entries.length === 0 && refreshTasks.length === 0) {
+    const tasks = [...this.tasks];
+    if (tasks.length === 0) {
       return;
     }
-    await this.waitForClose([
-      ...entries.map((entry) => entry.task),
-      ...refreshTasks,
-    ]);
+    const closingTasks = closingTasksByApp.get(this.appId)
+      ?? new Set<Promise<unknown>>();
+    closingTasksByApp.set(this.appId, closingTasks);
+    for (const task of tasks) {
+      closingTasks.add(task);
+      const release = () => {
+        closingTasks.delete(task);
+        if (closingTasks.size === 0) {
+          closingTasksByApp.delete(this.appId);
+        }
+      };
+      void task.then(release, release);
+    }
+    await this.waitForClose(tasks);
   }
 
   private async runAuthorization(
@@ -230,6 +286,9 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
         existingToken = outcome.token;
       }
     }
+    if (signal.aborted) {
+      return;
+    }
     const scopes = feishuTokenStatus(existingToken) === "valid"
       ? requestedScopes.filter(
         (scope) => !existingToken!.scopes.includes(scope),
@@ -257,6 +316,9 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
         authorization.expiresInSeconds,
       ),
     );
+    if (signal.aborted) {
+      return;
+    }
     const result = await this.api.pollDeviceToken(authorization, signal);
     if (signal.aborted) {
       return;
@@ -273,6 +335,9 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
       result.token.accessToken,
       signal,
     );
+    if (signal.aborted) {
+      return;
+    }
     if (authorizedOpenId !== userOpenId) {
       await this.outbox.updateCard(
         chatId,
@@ -314,6 +379,9 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
         renderFeishuOAuthOutcomeCard("success"),
       );
     } catch {
+      if (signal.aborted) {
+        return;
+      }
       this.logger.warn(
         {
           surface: "feishu",
@@ -342,6 +410,24 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     return `${this.appId}:${userOpenId}`;
   }
 
+  private assertOpen(): void {
+    if (this.closed || closingTasksByApp.has(this.appId)) {
+      throw new UserFacingError(
+        "oauth.closing",
+        "飞书用户授权正在关闭，请稍后重试",
+      );
+    }
+  }
+
+  private track<T>(task: Promise<T>): Promise<T> {
+    this.tasks.add(task);
+    const release = () => {
+      this.tasks.delete(task);
+    };
+    void task.then(release, release);
+    return task;
+  }
+
   private refreshOutcome(userOpenId: string): Promise<FeishuRefreshOutcome> {
     return this.refreshWithLock(userOpenId, false);
   }
@@ -350,6 +436,9 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     userOpenId: string,
     force: boolean,
   ): Promise<FeishuRefreshOutcome> {
+    if (this.closed || this.revoking.has(this.key(userOpenId))) {
+      return Promise.resolve({ kind: "retry-later" });
+    }
     const key = this.key(userOpenId);
     const existing = this.refreshing.get(key);
     if (existing) {
@@ -357,11 +446,12 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     }
     const task = this.refreshOnce(userOpenId, force);
     this.refreshing.set(key, task);
-    void task.finally(() => {
+    const release = () => {
       if (this.refreshing.get(key) === task) {
         this.refreshing.delete(key);
       }
-    });
+    };
+    void task.then(release, release);
     return task;
   }
 
@@ -370,6 +460,9 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     force: boolean,
   ): Promise<FeishuRefreshOutcome> {
     const stored = await this.tokens.get(this.appId, userOpenId);
+    if (this.closed || this.revoking.has(this.key(userOpenId))) {
+      return { kind: "retry-later" };
+    }
     if (!stored) {
       return { kind: "retry-later" };
     }
@@ -384,6 +477,8 @@ export class FeishuOAuthController implements FeishuOAuthControllerPort {
     }
     let refreshed: FeishuRefreshTokenResult;
     try {
+      // Once dispatched, a refresh may consume its token. Preserve a successful
+      // rotation during shutdown; the ownership fence prevents a new writer.
       refreshed = await this.api.refreshUserToken(
         stored.refreshToken,
         AbortSignal.timeout(refreshTimeoutMs),

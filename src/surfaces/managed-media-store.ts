@@ -17,6 +17,8 @@ export interface ManagedMediaSource {
   contentLength?: number;
 }
 
+export type ManagedMediaInput = ManagedMediaSource | ((signal: AbortSignal) => Promise<ManagedMediaSource>);
+
 export interface ManagedMediaType<MimeType extends string> {
   extension: string;
   mimeType: MimeType;
@@ -27,6 +29,7 @@ export interface ManagedMediaStoreOptions<MimeType extends string> {
   maximumBytes: number;
   retentionMs: number;
   cleanupIntervalMs: number;
+  operationTimeoutMs?: number;
   managedFileName: RegExp;
   closedMessage: string;
   storeFailureMessage: string;
@@ -46,6 +49,7 @@ export interface StoredManagedMedia<MimeType extends string> {
 export class ManagedMediaStore<MimeType extends string> {
   private cleanupTimer: NodeJS.Timeout | undefined;
   private closed = false;
+  private readonly cancellation = new AbortController();
 
   constructor(private readonly options: ManagedMediaStoreOptions<MimeType>) {}
 
@@ -81,57 +85,83 @@ export class ManagedMediaStore<MimeType extends string> {
 
   close(): void {
     this.closed = true;
+    this.cancellation.abort();
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = undefined;
     }
   }
 
-  async store(source: ManagedMediaSource): Promise<StoredManagedMedia<MimeType>> {
-    if (
-      source.contentLength !== undefined
-      && this.options.invalidContentLength(source.contentLength)
-    ) {
-      source.stream.destroy();
-      throw this.options.tooLargeError();
-    }
-
-    const id = randomUUID();
-    const temporaryPath = join(this.options.directory, `${id}.part`);
-    let bytes = 0;
-    const limiter = new Transform({
-      transform: (chunk: Buffer, _encoding, callback) => {
-        bytes += chunk.length;
-        if (bytes > this.options.maximumBytes) {
-          callback(this.options.tooLargeError());
-          return;
-        }
-        callback(null, chunk);
-      },
-    });
-
+  async store(input: ManagedMediaInput, inputSignal?: AbortSignal): Promise<StoredManagedMedia<MimeType>> {
+    const deadline = new AbortController();
+    const signal = AbortSignal.any([
+      this.cancellation.signal, deadline.signal,
+      ...(inputSignal === undefined ? [] : [inputSignal]),
+    ]);
+    const timer = setTimeout(() => deadline.abort(), this.options.operationTimeoutMs ?? 60_000);
+    timer.unref();
+    let source: ManagedMediaSource | undefined;
+    let finalPath: string | undefined;
+    const temporaryPath = join(this.options.directory, `${randomUUID()}.part`);
     try {
+      signal.throwIfAborted();
+      source = typeof input === "function" ? await input(signal) : input;
+      // A late download may already be failed or cancelled before pipeline owns it.
+      source.stream.on("error", () => {});
+      signal.throwIfAborted();
+      if (
+        source.contentLength !== undefined
+        && this.options.invalidContentLength(source.contentLength)
+      ) {
+        source.stream.destroy();
+        throw this.options.tooLargeError();
+      }
+
+      let bytes = 0;
+      const limiter = new Transform({
+        transform: (chunk: Buffer, _encoding, callback) => {
+          bytes += chunk.length;
+          if (bytes > this.options.maximumBytes) {
+            callback(this.options.tooLargeError());
+            return;
+          }
+          callback(null, chunk);
+        },
+      });
+
       await pipeline(
         source.stream,
         limiter,
         createWriteStream(temporaryPath, { flags: "wx", mode: 0o600 }),
+        { signal },
       );
+      signal.throwIfAborted();
       securePrivateFileSync(temporaryPath);
       const mediaType = await this.options.detectType(temporaryPath);
+      signal.throwIfAborted();
       if (!mediaType) {
         throw this.options.unsupportedError();
       }
-      const finalPath = join(this.options.directory, `${id}.${mediaType.extension}`);
+      finalPath = temporaryPath.replace(/\.part$/u, `.${mediaType.extension}`);
       await rename(temporaryPath, finalPath);
+      signal.throwIfAborted();
       return { path: finalPath, mimeType: mediaType.mimeType, bytes };
     } catch (error) {
       await unlink(temporaryPath).catch(() => undefined);
+      if (finalPath !== undefined) await unlink(finalPath).catch(() => undefined);
       if (error instanceof UserFacingError) {
         throw error;
       }
       // 文件系统和下载流异常可能包含本机路径或上游响应，边界处统一脱敏。
       // eslint-disable-next-line preserve-caught-error
       throw new Error(this.options.storeFailureMessage);
+    } finally {
+      clearTimeout(timer);
+      source?.stream.destroy();
+      if (typeof input !== "function" && source === undefined) {
+        input.stream.on("error", () => {});
+        input.stream.destroy();
+      }
     }
   }
 

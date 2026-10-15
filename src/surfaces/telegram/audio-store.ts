@@ -1,6 +1,5 @@
 import type { Logger } from "pino";
 
-import { UserFacingError } from "../../conversation-core/index.js";
 import {
   ManagedAudioStore,
   maximumManagedAudioBytes,
@@ -50,28 +49,22 @@ export class TelegramAudioStore {
   async download(
     api: TelegramFileApi,
     fileId: string,
+    signal?: AbortSignal,
   ): Promise<StoredManagedAudio> {
-    let url: URL;
-    try {
-      url = await resolveTelegramFileUrl(api, fileId, this.token);
-    } catch (error) {
-      if (
-        error instanceof TelegramFileLocationError
-        && error.code === "invalid-path"
-      ) {
-        throw new Error("Telegram 返回了无效的音频路径", { cause: error });
+    return this.storage.store(async (downloadSignal) => {
+      let url: URL;
+      try {
+        url = await resolveTelegramFileUrl(api, fileId, this.token, downloadSignal);
+      } catch (error) {
+        if (
+          error instanceof TelegramFileLocationError
+          && error.code === "invalid-path"
+        ) {
+          throw new Error("Telegram 返回了无效的音频路径", { cause: error });
+        }
+        throw new Error("无法从 Telegram 获取音频下载信息", { cause: error });
       }
-      throw new Error("无法从 Telegram 获取音频下载信息", { cause: error });
-    }
-    try {
-      return await this.storage.store(await this.downloader(url));
-    } catch (error) {
-      if (error instanceof UserFacingError) {
-        throw error;
-      }
-      // 下载错误可能包含 Bot Token、远端响应或本机路径。
-      // eslint-disable-next-line preserve-caught-error
-      throw new Error("保存 Telegram 音频失败");
-    }
+      return await this.downloader(url, downloadSignal);
+    }, signal);
   }
 }

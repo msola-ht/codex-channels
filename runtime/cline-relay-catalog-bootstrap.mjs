@@ -29,7 +29,9 @@ export function createClineRelayCatalogBootstrap(environment, { ready, failed })
     async close() {
       closed = true; controller.abort();
       let timer;
-      try { await Promise.race([task, new Promise(resolve => { timer = setTimeout(resolve, 2000); })]); }
+      try { await Promise.race([task, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Relay catalog shutdown unconfirmed")), 2000);
+      })]); }
       finally { clearTimeout(timer); }
     },
   };

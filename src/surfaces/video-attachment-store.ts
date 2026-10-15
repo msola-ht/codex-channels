@@ -89,10 +89,10 @@ export class VideoAttachmentStore {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.storage.close();
     for (const stream of this.streams) stream.destroy();
     await this.writes.catch(() => undefined);
     await this.started?.catch(() => undefined);
-    this.storage.close();
     this.retained.clear();
   }
 
@@ -121,7 +121,7 @@ export class VideoAttachmentStore {
       if (entries.filter(name => managedName.test(name)).length >= 9) {
         throw new UserFacingError("video.capacity", "视频暂存容量已满，请等待附件过期后重试");
       }
-      const file = await this.storage.store(source);
+      const file = await this.storage.store(source, signal);
       const attachment = `${this.namespace}/${file.path.slice(this.directory.length + 1)}`;
       try {
         const { digest, identity } = await fingerprintVideo(file.path, check);

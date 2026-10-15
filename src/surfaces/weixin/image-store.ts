@@ -25,7 +25,7 @@ const maximumEncryptedImageBytes = maximumWeixinImageBytes + 16;
 export interface WeixinImagePort {
   start(): Promise<void>;
   close(): void;
-  download(reference: WeixinImageReference): Promise<StoredManagedImage>;
+  download(reference: WeixinImageReference, signal?: AbortSignal): Promise<StoredManagedImage>;
 }
 
 export class WeixinImageDownloadError extends Error {
@@ -71,28 +71,33 @@ export class WeixinImageStore implements WeixinImagePort {
 
   async download(
     reference: WeixinImageReference,
+    signal?: AbortSignal,
   ): Promise<StoredManagedImage> {
     if (this.closed) {
       throw new Error("微信图片暂存器已经关闭");
     }
     await this.start();
     try {
-      const encryption = resolveEncryption(reference);
-      const response = await downloadWeixinCdnBytes({
-        fetchImpl: this.fetchImpl,
-        url: resolveWeixinCdnUrl(reference),
-        maximumBytes: encryption.key === undefined
-          ? maximumWeixinImageBytes
-          : maximumEncryptedImageBytes,
-        tooLarge: imageTooLarge,
-      });
-      const plaintext = encryption.key === undefined
-        ? response
-        : decryptWeixinMedia(response, encryption.key);
-      return await this.storage.store({
-        stream: Readable.from([plaintext]),
-        contentLength: plaintext.length,
-      });
+      return await this.storage.store(async (downloadSignal) => {
+        const encryption = resolveEncryption(reference);
+        const response = await downloadWeixinCdnBytes({
+          fetchImpl: this.fetchImpl,
+          url: resolveWeixinCdnUrl(reference),
+          maximumBytes: encryption.key === undefined
+            ? maximumWeixinImageBytes
+            : maximumEncryptedImageBytes,
+          tooLarge: imageTooLarge,
+          signal: downloadSignal,
+        });
+        const plaintext = encryption.key === undefined
+          ? response
+          : decryptWeixinMedia(response, encryption.key);
+        downloadSignal.throwIfAborted();
+        return {
+          stream: Readable.from([plaintext]),
+          contentLength: plaintext.length,
+        };
+      }, signal);
     } catch (error) {
       if (error instanceof UserFacingError) {
         throw error;

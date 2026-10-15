@@ -13,13 +13,13 @@ export const maximumFeishuAudioBytes = maximumManagedAudioBytes;
 export const maximumFeishuAudioDurationMs = 5 * 60 * 1000;
 
 export interface FeishuAudioResourcePort {
-  downloadAudio(messageId: string, fileKey: string): Promise<ManagedAudioSource>;
+  downloadAudio(messageId: string, fileKey: string, signal?: AbortSignal): Promise<ManagedAudioSource>;
 }
 
 export interface FeishuAudioPort {
   start(): Promise<void>;
   close(): void;
-  download(messageId: string, fileKey: string): Promise<StoredManagedAudio>;
+  download(messageId: string, fileKey: string, signal?: AbortSignal): Promise<StoredManagedAudio>;
 }
 
 export class FeishuAudioStore implements FeishuAudioPort {
@@ -44,7 +44,7 @@ export class FeishuAudioStore implements FeishuAudioPort {
     this.storage.close();
   }
 
-  async download(messageId: string, fileKey: string): Promise<StoredManagedAudio> {
+  async download(messageId: string, fileKey: string, signal?: AbortSignal): Promise<StoredManagedAudio> {
     if (
       !isSafeFeishuResourceIdentifier(messageId)
       || !isSafeFeishuResourceIdentifier(fileKey)
@@ -53,7 +53,8 @@ export class FeishuAudioStore implements FeishuAudioPort {
     }
     try {
       return await this.storage.store(
-        await this.resources.downloadAudio(messageId, fileKey),
+        (downloadSignal) => this.resources.downloadAudio(messageId, fileKey, downloadSignal),
+        signal,
       );
     } catch (error) {
       if (error instanceof UserFacingError) {

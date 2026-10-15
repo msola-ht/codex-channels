@@ -5,7 +5,7 @@ import {
   readInputImage,
   type InputImageMimeType,
 } from "./generated-image.js";
-import { ManagedMediaStore } from "./managed-media-store.js";
+import { ManagedMediaStore, type ManagedMediaInput } from "./managed-media-store.js";
 
 export const maximumManagedImageBytes = 10 * 1024 * 1024;
 
@@ -36,6 +36,7 @@ export class ManagedImageStore {
       maximumBytes: maximumManagedImageBytes,
       retentionMs,
       cleanupIntervalMs,
+      operationTimeoutMs: 30_000,
       managedFileName: /^[0-9a-f-]+\.(?:gif|jpg|png|webp|part)$/u,
       closedMessage: "图片暂存器已经关闭",
       storeFailureMessage: "保存图片失败",
@@ -60,8 +61,8 @@ export class ManagedImageStore {
     this.storage.close();
   }
 
-  async store(source: ManagedImageSource): Promise<StoredManagedImage> {
-    return await this.storage.store(source);
+  async store(source: ManagedMediaInput, signal?: AbortSignal): Promise<StoredManagedImage> {
+    return await this.storage.store(source, signal);
   }
 }
 

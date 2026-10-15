@@ -32,13 +32,14 @@ export interface FeishuImageResourcePort {
   downloadImage(
     messageId: string,
     imageKey: string,
+    signal?: AbortSignal,
   ): Promise<ManagedImageSource>;
 }
 
 export interface FeishuImagePort {
   start(): Promise<void>;
   close(): void;
-  download(messageId: string, imageKey: string): Promise<StoredManagedImage>;
+  download(messageId: string, imageKey: string, signal?: AbortSignal): Promise<StoredManagedImage>;
 }
 
 export class FeishuImageStore implements FeishuImagePort {
@@ -78,19 +79,17 @@ export class FeishuImageStore implements FeishuImagePort {
   async download(
     messageId: string,
     imageKey: string,
+    signal?: AbortSignal,
   ): Promise<StoredManagedImage> {
     if (this.closed) {
       throw new Error("飞书图片暂存器已经关闭");
     }
     await this.start();
-    let source: ManagedImageSource;
     try {
-      source = await this.resources.downloadImage(messageId, imageKey);
-    } catch {
-      throw new Error("下载飞书图片失败");
-    }
-    try {
-      return await this.storage.store(source);
+      return await this.storage.store(
+        (downloadSignal) => this.resources.downloadImage(messageId, imageKey, downloadSignal),
+        signal,
+      );
     } catch (error) {
       if (error instanceof UserFacingError) {
         throw error;
