@@ -78,8 +78,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     const result = await adapter.accountLimits(signal);
     signal?.throwIfAborted();
     if (sequence >= (this.savedLimitsSequence.get(modelProvider) ?? 0)) {
-      this.savedLimitsSequence.set(modelProvider, sequence);
-      await this.persist(undefined, result, signal);
+      await this.persist(undefined, result, signal, sequence);
     }
     if (result.kind !== "rate-limits" || !this.readCredentialRefreshTime) return result;
     // Login metadata is presentation-only; never persist it as an official quota snapshot.
@@ -151,7 +150,12 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     });
   }
 
-  private async persist(usage: ProviderAccountUsage | undefined, limits?: ProviderAccountLimits, callerSignal?: AbortSignal): Promise<void> {
+  private async persist(
+    usage: ProviderAccountUsage | undefined,
+    limits?: ProviderAccountLimits,
+    callerSignal?: AbortSignal,
+    limitsSequence?: number,
+  ): Promise<void> {
     callerSignal?.throwIfAborted();
     const writer = this.snapshotWriter;
     if (!writer) return;
@@ -165,6 +169,9 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     this.pendingSnapshotBytes += bytes;
     const task = (this.snapshotTails.get(provider) ?? Promise.resolve()).then(async () => {
       signal.throwIfAborted();
+      // The provider tail reserves ordering; only confirmed writes advance the watermark.
+      // Recheck here because a newer in-flight write may have committed while this waited.
+      if (limitsSequence !== undefined && limitsSequence < (this.savedLimitsSequence.get(provider) ?? 0)) return;
       const currentUsage = usage ?? this.snapshotUsage.get(provider) ?? { kind: "unsupported" as const, provider };
       // OpenAI 用量不能刷新额度时间，也不能在重启后用占位额度覆盖已有记录。
       if (provider === "openai" && limits === undefined && !this.limitsObservedAt.has(provider)) {
@@ -188,6 +195,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
       this.snapshotUsage.set(provider, currentUsage);
       this.snapshotLimits.set(provider, mergedLimits);
       if (limits !== undefined) this.limitsObservedAt.set(provider, observedAtMs);
+      if (limitsSequence !== undefined) this.savedLimitsSequence.set(provider, limitsSequence);
     });
     const tail = task.catch(() => undefined).finally(() => {
       this.pendingSnapshots--;

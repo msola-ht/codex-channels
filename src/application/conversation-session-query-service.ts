@@ -138,13 +138,16 @@ export class ConversationSessionQueryService {
     }
     if (options.turnCountMode === "cached") {
       const countByThread = new Map<string, number>();
-      const cachedCountGenerations = new Map<string, number>();
+      const generations = new Map(visible.map((session) => [
+        session.id, this.sessionDisplayCacheGenerations.get(session.id) ?? 0,
+      ]));
+      const cachedCounts = new Set<string>();
       for (const session of visible) {
         // Prefer the direct local metric count. It is a single indexed query
         // and, unlike the full summary, never traverses subagent Threads.
-        const metricsCount = this.requestMetricsQuery?.threadTurnCount !== undefined
-          ? await this.requestMetricsQuery.threadTurnCount(session.id)
-          : (await this.requestMetricsQuery?.forThread(session.id))?.threadAggregate?.turnCount;
+        const metricsCount = await this.localThreadTurnCount(session.id);
+        this.cancellation.signal.throwIfAborted();
+        if ((this.sessionDisplayCacheGenerations.get(session.id) ?? 0) !== generations.get(session.id)) continue;
         if (metricsCount !== undefined && metricsCount !== null) {
           countByThread.set(session.id, metricsCount);
           continue;
@@ -152,13 +155,13 @@ export class ConversationSessionQueryService {
         const cached = this.useSessionDisplayCache("get", (cache) => cache.get(session.id));
         if (cached?.turnCount !== null && cached?.turnCount !== undefined) {
           countByThread.set(session.id, cached.turnCount);
-          cachedCountGenerations.set(session.id, this.sessionDisplayCacheGenerations.get(session.id) ?? 0);
+          cachedCounts.add(session.id);
         }
       }
+      this.cancellation.signal.throwIfAborted();
       return sessions.map((session) => {
-        const generation = cachedCountGenerations.get(session.id);
-        if (generation !== undefined && (this.sessionDisplayCacheDisabled
-          || (this.sessionDisplayCacheGenerations.get(session.id) ?? 0) !== generation)) return session;
+        if ((cachedCounts.has(session.id) && this.sessionDisplayCacheDisabled)
+          || (this.sessionDisplayCacheGenerations.get(session.id) ?? 0) !== generations.get(session.id)) return session;
         const turnCount = countByThread.get(session.id);
         return turnCount === undefined ? session : { ...session, turnCount };
       });
@@ -172,6 +175,7 @@ export class ConversationSessionQueryService {
       session.id,
       await this.cachedOrCountThreadTurns(session.id),
     ] as const);
+    this.cancellation.signal.throwIfAborted();
     const countByThread = new Map(
       counts.filter((entry): entry is readonly [string, number] => entry[1] !== undefined),
     );
@@ -270,6 +274,31 @@ export class ConversationSessionQueryService {
       (this.sessionDisplayCacheGenerations.get(threadId) ?? 0) + 1,
     );
     this.useSessionDisplayCache("remove", (cache) => cache.remove(threadId));
+  }
+
+  private async localThreadTurnCount(threadId: string): Promise<number | null | undefined> {
+    const signal = this.cancellation.signal;
+    signal.throwIfAborted();
+    let onAbort: (() => void) | undefined;
+    try {
+      const request = this.requestMetricsQuery?.threadTurnCount !== undefined
+        ? this.requestMetricsQuery.threadTurnCount(threadId)
+        : this.requestMetricsQuery?.forThread(threadId).then((summary) => summary.threadAggregate?.turnCount);
+      if (!request) return undefined;
+      const cancelled = new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(new DOMException("Session query closed", "AbortError"));
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) onAbort();
+      });
+      return await Promise.race([request, cancelled]);
+    } catch {
+      signal.throwIfAborted();
+      // Metrics only decorate an authoritative list. Busy, timed-out or failed
+      // local reads leave the existing display cache or an unknown count.
+      return undefined;
+    } finally {
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+    }
   }
 
   private async cachedOrCountThreadTurns(threadId: string): Promise<number | undefined> {

@@ -249,6 +249,8 @@ export function createOutputCollector(maxBytes, terminalOutput, observeModelEven
   let frame;
   let sse = "";
   let droppingSse = false;
+  let responsePart = 0;
+  let responseGap = false;
   const hasTerminalOutput = Array.isArray(terminalOutput) && terminalOutput.length > 0;
 
   function add(index, item) {
@@ -330,13 +332,25 @@ export function createOutputCollector(maxBytes, terminalOutput, observeModelEven
   if (hasTerminalOutput) terminalOutput.forEach((item, index) => add(index, item));
   return {
     consume(record) {
+      if (record.kind === "response_body" && record.part !== undefined) {
+        if (!Number.isSafeInteger(record.part) || record.part !== responsePart + 1) {
+          if (!hasTerminalOutput) truncated = true;
+          responseGap = true;
+          sse = "";
+        }
+        responsePart = record.part;
+        if (responseGap) return;
+      }
       if (typeof record.text !== "string") return;
       if (record.kind === "response_body" && record.encoding === "utf8") {
         consumeSse(record.text);
       } else if (record.kind === "websocket_frame" && record.direction === "upstream"
         && record.binary !== true) {
         if (record.parts > 1) {
-          if (record.part === 1) frame = { text: "", next: 1, parts: record.parts };
+          if (record.part === 1) {
+            if (frame && !hasTerminalOutput) truncated = true;
+            frame = { text: "", next: 1, parts: record.parts };
+          }
           if (!frame || frame.next !== record.part || frame.parts !== record.parts) {
             if (!hasTerminalOutput) truncated = true;
             frame = undefined;

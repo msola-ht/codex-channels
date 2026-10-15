@@ -93,17 +93,19 @@ export class TrafficDumpStorage {
     return this.closed || this.failed ? undefined : { label: this.label, session: session.writerSession, interaction };
   }
 
-  writeTrace(session: TrafficDumpSession, record: Record<string, unknown>): void {
-    if (this.closed || this.failed) return;
+  writeTrace(session: TrafficDumpSession, record: Record<string, unknown>): boolean {
+    if (this.closed || this.failed) return false;
     const content = `${JSON.stringify({ ts: Date.now(), ...record })}\n`;
     const bytes = Buffer.byteLength(content);
     if (this.budget.traceBytes + bytes > maximumPendingTraceBytes || !this.hasCapacity(bytes, true)) {
-      this.noticeCapacity("trace"); return;
+      this.noticeCapacity("trace"); return false;
     }
     if (session.traceWrittenBytes > 0 && session.traceWrittenBytes + bytes > modelTrafficDumpFileSizeLimitBytes) {
       session.traceFileIndex++; session.traceWrittenBytes = 0;
     }
-    if (this.enqueue({ session, name: `trace-${session.traceFileIndex}.jsonl`, content, bytes, trace: true })) session.traceWrittenBytes += bytes;
+    if (!this.enqueue({ session, name: `trace-${session.traceFileIndex}.jsonl`, content, bytes, trace: true })) return false;
+    session.traceWrittenBytes += bytes;
+    return true;
   }
   writeInteraction(session: TrafficDumpSession, record: Record<string, unknown>): void {
     if (this.closed || this.failed) return;

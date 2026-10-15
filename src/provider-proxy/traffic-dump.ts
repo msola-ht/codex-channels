@@ -213,6 +213,7 @@ export class ModelTrafficExchange {
   private responseRecorded = false;
   private failureRecorded = false;
   private responseIsSse = false;
+  private responseTraceTruncated = false;
   private requestModelFinished = false;
   private responseModelFinished = false;
 
@@ -229,7 +230,7 @@ export class ModelTrafficExchange {
     private readonly traceSink: (
       session: TrafficDumpSession,
       record: Record<string, unknown>,
-    ) => void,
+    ) => boolean,
     private readonly interactionSink: (
       session: TrafficDumpSession,
       record: Record<string, unknown>,
@@ -340,6 +341,7 @@ export class ModelTrafficExchange {
       let interaction = this.activeWebSocket?.id;
       if (direction === "client" && eventTypeOf(parsed) === "response.create") {
         this.completeActiveWebSocket("incomplete", "superseded_by_next_request", undefined, undefined, receivedAtMonotonicMs);
+        this.responseTraceTruncated = false;
         this.callTiming = receivedAtMonotonicMs === undefined ? undefined : new TrafficCallTiming();
         this.requestMetrics = undefined;
         this.responseModels = [];
@@ -505,11 +507,16 @@ export class ModelTrafficExchange {
   }
 
   private writeTrace(record: Record<string, unknown>): void {
-    this.traceSink(this.storageSession(), {
+    const output = record.kind === "response_body"
+      || record.kind === "websocket_frame" && record.direction === "upstream";
+    // Never join later output bytes across a lost trace segment, including WS frames.
+    if (output && this.responseTraceTruncated) return;
+    const accepted = this.traceSink(this.storageSession(), {
       ...this.prefix,
       ...(this.httpInteractionId === undefined ? {} : { interaction: this.httpInteractionId }),
       ...record,
     });
+    if (output && !accepted) this.responseTraceTruncated = true;
   }
 
   private recordHttpRequest(): void {
@@ -568,6 +575,7 @@ export class ModelTrafficExchange {
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
       payload,
+      ...(this.responseTraceTruncated ? { traceTruncated: true } : {}),
       ...(this.upstreamProvider === undefined ? {} : { upstreamProvider: this.upstreamProvider }),
       responseModels: terminal === undefined
         ? this.responseModels
@@ -606,6 +614,7 @@ export class ModelTrafficExchange {
       payload: compacted === undefined
         ? { ...payloadOf([]), truncated: false }
         : this.storeTextPayload(active.session, compacted),
+      ...(this.responseTraceTruncated ? { traceTruncated: true } : {}),
       responseModels: this.responseModels,
     });
     this.completeLogicalInteraction(active.session);
