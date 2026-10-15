@@ -71,7 +71,7 @@ export async function runConfig({
           label: "Gateway 会话设置",
           hint: "审批超时、空闲解除、Sandbox、默认工作区与渠道模型",
         },
-        { value: "identity", label: "身份与时区", hint: "官方 TUI 身份、终端标识、模型与网关时区" },
+        { value: "identity", label: "身份与时区", hint: "官方 TUI 身份、终端标识、服务时区与网关时区" },
         { value: "traffic", label: "调用记录", hint: "Codex 与 Relay 共用的采集、记录模式与保留天数" },
         { value: "scheduled_tasks", label: "Gateway 计划任务", hint: "启用或关闭无人值守任务" },
         { value: "network", label: "网络代理", hint: "Codex 与 Gateway 共用 HTTP、HTTPS、通用代理与直连规则" },
