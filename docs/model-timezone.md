@@ -27,9 +27,8 @@ Responses 请求 `input` 的一部分发给模型：
 | `gateway.timezone` | 不设置，跟随 `codex.timezone` | `system` 表示独立使用系统时区，或填写 Node.js 支持的 IANA 时区名称 |
 
 `codex.timezone` 用于 App Server 与 WebUI；网关未配置独立时区时也跟随此值，不修改系统时区。
-通过 `codexc timezone` 写入时会在边界校验 IANA 名称格式与系统时区库存在性，避免系统
-解析失败后静默回退到 UTC；运行环境没有系统时区库时只校验名称格式。直接编辑配置文件只做格式
-校验，名称是否被平台识别由平台解析决定。
+通过 `codexc timezone` 写入时会校验名称格式及 Node.js 是否识别该时区；系统提供 zoneinfo 时还会核对对应条目是否存在，避免把目录名或未知名称当成时区。运行环境没有系统时区库时仍检查 Node.js 的时区支持。
+直接编辑 `codex.timezone` 只做格式校验，名称是否被平台识别由平台解析决定；`gateway.timezone` 还要求 Node.js 支持该名称。
 
 ## 命令
 

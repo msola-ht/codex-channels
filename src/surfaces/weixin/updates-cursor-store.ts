@@ -32,8 +32,16 @@ implements WeixinUpdatesCursorStore {
   constructor(private readonly directory: string) {}
 
   async get(accountId: string): Promise<string | null> {
+    return this.readCursor(accountId, true);
+  }
+
+  async inspect(accountId: string): Promise<string | null> {
+    return this.readCursor(accountId, false);
+  }
+
+  private async readCursor(accountId: string, repairPermissions: boolean): Promise<string | null> {
     const validatedAccountId = validateWeixinAccountId(accountId);
-    if (!await this.ensureExistingDirectory()) {
+    if (!await this.ensureExistingDirectory(repairPermissions)) {
       return null;
     }
     const path = this.recordPath(validatedAccountId);
@@ -54,7 +62,10 @@ implements WeixinUpdatesCursorStore {
       throw new Error("微信消息游标文件无效");
     }
     try {
-      await chmod(path, 0o600);
+      if (repairPermissions) await chmod(path, 0o600);
+      else if (process.platform !== "win32" && (metadata.mode & 0o077) !== 0) {
+        throw new Error("微信消息游标文件权限不安全");
+      }
       const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
       return validateStoredCursor(parsed, validatedAccountId).cursor;
     } catch (error) {
@@ -111,7 +122,7 @@ implements WeixinUpdatesCursorStore {
     }
   }
 
-  private async ensureExistingDirectory(): Promise<boolean> {
+  private async ensureExistingDirectory(repairPermissions = true): Promise<boolean> {
     let metadata;
     try {
       metadata = await lstat(this.directory);
@@ -124,7 +135,10 @@ implements WeixinUpdatesCursorStore {
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
       throw new Error("微信消息游标目录无效");
     }
-    await chmod(this.directory, 0o700);
+    if (repairPermissions) await chmod(this.directory, 0o700);
+    else if (process.platform !== "win32" && (metadata.mode & 0o077) !== 0) {
+      throw new Error("微信消息游标目录权限不安全");
+    }
     return true;
   }
 

@@ -133,7 +133,7 @@ async function runToolGroup(group, { prompts, runCommand }) {
     { value: "cleanup", label: "清理与归档", hint: "归档会话、删除转储与维护指标库", args: ["cleanup"] },
   ] : [
     { value: "version", label: "查看程序版本", args: ["version"] },
-    { value: "init", label: "首次初始化", hint: "创建配置，并按需引导接入与安装服务", args: ["init"] },
+    { value: "init", label: "初始化与配置向导", hint: "创建配置或继续向导，按需接入与安装服务", args: ["init"] },
     { value: "update", label: "更新程序", hint: "更新受管源码；可能停止并恢复后台服务", args: ["update"] },
     ...(process.platform === "win32"
       ? [{ value: "security", label: "修复本机私有路径权限", hint: "Windows 定向修复", args: ["security", "repair"] }] : []),
@@ -166,7 +166,7 @@ export async function runServiceMenu({ prompts = clackPrompts, runCommand }) {
     { value: "start", label: "启动服务" },
     { value: "restart", label: "重启服务" },
     { value: "stop", label: "停止服务" },
-    { value: "reload", label: "重载 Gateway 配置", hint: "应用已保存的配置" },
+    { value: "reload", label: "重载 Gateway 配置", hint: "通知运行中的 Gateway 重读；应用结果查看日志" },
     { value: "install", label: "安装后台服务", hint: "生成服务定义并启动核心服务" },
     { value: "uninstall", label: "卸载后台服务", hint: "停止并卸载全部后台服务，保留用户数据" },
     { value: "cancel", label: "返回主菜单" },

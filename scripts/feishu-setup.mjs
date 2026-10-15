@@ -192,6 +192,8 @@ export async function runFeishuSetup({
       appId: result.appId,
       allowedOpenIds: result.allowedOpenIds,
       configPath: result.configPath,
+      applicationConfiguration: result.applicationConfiguration,
+      warnings: result.warnings,
       activation: result.activation,
       activationResult: configActivationResult(result.activation),
     };

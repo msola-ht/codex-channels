@@ -1,7 +1,10 @@
 import * as clackPrompts from "@clack/prompts";
+import { join } from "node:path";
+import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 
 import {
   loadManagedModelProviderSettings,
+  managedProviderDirectory,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   readCodexUserConfigSnapshot,
@@ -27,7 +30,7 @@ export async function runModelProviderDefaultSetup({
 } = {}) {
   const configured = loadManagedModelProviderSettings(environment);
   if (configured.length === 0) {
-    throw new Error("尚未配置第三方 Provider，请先配置 DeepSeek 或 OpenCode Go");
+    throw new Error("尚未配置受管 Provider，请先在 Setup 中完成第三方账户接入");
   }
   const prompt = prompter ?? createPrompter(prompts, configured, { allowBack });
   try {
@@ -41,6 +44,15 @@ export async function runModelProviderDefaultSetup({
     if (!selectedModel) {
       throw new Error(`${selected.displayName} 不支持模型：${model}`);
     }
+    output.write("默认模型只修改所选账户；该模型的默认思考等级由共享模型目录的账户共用，其他账户使用同一模型时也会采用新等级。\n");
+    const definitions = loadManagedModelProviderDefinitions(environment);
+    const definition = definitions.find((entry) => entry.id === selected.provider);
+    if (!definition) throw new Error("Provider 定义已变化，请重新选择");
+    const catalogPath = join(managedProviderDirectory(environment, definition), definition.catalogFileName);
+    const sharedIds = new Set(definitions.filter((entry) =>
+      join(managedProviderDirectory(environment, entry), entry.catalogFileName) === catalogPath).map((entry) => entry.id));
+    output.write(`当前共享目录且包含此模型的账户：${configured.filter((entry) => sharedIds.has(entry.provider)
+      && entry.models.some((candidate) => candidate.model === model)).map((entry) => entry.displayName).join("、")}。\n`);
     const reasoningEffort = await prompt.selectReasoningEffort(selected, selectedModel);
     const result = await applyManagedProviderDefaultChange({
       provider: selected.provider,
@@ -48,15 +60,21 @@ export async function runModelProviderDefaultSetup({
       reasoningEffort,
     }, {
       environment,
-      loadProviders: () => configured,
+      loadProviders: () => {
+        const current = loadManagedModelProviderSettings(environment);
+        if (current.find((candidate) => candidate.provider === selected.provider)?.mode !== selected.mode) {
+          throw new Error("Provider 模式已变化，请重新选择并设置默认模型");
+        }
+        return current;
+      },
       readConfigSnapshot,
       writeConfigEdits,
     });
-    output.write(`${selected.displayName} 默认模型已设为 ${model}。\n`);
-    output.write(`模型上下文：${selectedModel.contextWindow} tokens。\n`);
-    output.write(`默认思考等级：${reasoningEffort}。\n`);
+    output.write(`${result.provider.displayName} 默认模型已设为 ${result.model.id}。\n`);
+    output.write(`模型上下文：${result.model.contextWindow} tokens。\n`);
+    output.write(`共享模型目录中的默认思考等级：${reasoningEffort}。\n`);
     output.write("新会话使用该默认值；恢复历史会话仍使用 Thread 原有模型。\n");
-    output.write("上下文窗口请在「模型上下文窗口」中按模型名统一设置；自动压缩使用上游默认。\n");
+    output.write("上下文窗口请在「受管模型目录上下文窗口」中按模型名统一设置；自动压缩配置保持既有规则。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-app-server"));
     return {
       action: "configured",

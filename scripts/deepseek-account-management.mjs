@@ -81,7 +81,7 @@ export function previewDeepseekAccountConfiguration(input, { environment = proce
     account: { id: input.accountId, provider: definition.id, exists: Boolean(previous), default: previous?.default ?? accounts.length === 0 },
     mode,
     effects: { writesMainConfig: mode === "exclusive" || configured?.mode === "exclusive", writesIsolatedProfile: mode === "switching", downloadsCatalog: !existsSync(deepseekAccountPaths(environment, input.accountId).catalog) },
-    confirmation: { required: mode === "exclusive", field: "confirmExclusiveConfigChange" },
+    confirmation: { required: mode === "exclusive" || configured?.mode === "exclusive", field: "confirmExclusiveConfigChange" },
     activation: "restart-all",
   };
 }
@@ -92,7 +92,7 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
     const preview = previewDeepseekAccountConfiguration(input, { environment });
     const definition = deepseekAccountDefinition(input.accountId);
     if (!isManagedProviderApiKeyValid(definition, input.apiKey)) throw new AccountManagementError("invalid-api-key", "apiKey", "DeepSeek API Key 无效");
-    if (preview.mode === "exclusive" && input.confirmExclusiveConfigChange !== true) throw new AccountManagementError("confirmation-required", "confirmExclusiveConfigChange", "固定模式必须明确确认");
+    if (preview.effects.writesMainConfig && input.confirmExclusiveConfigChange !== true) throw new AccountManagementError("confirmation-required", "confirmExclusiveConfigChange", "修改 Codex 主配置前必须明确确认");
     const paths = deepseekAccountPaths(environment, input.accountId);
     const snapshots = snapshotProviderFiles(Object.values(paths), environment);
     const accounts = loadDeepseekAccounts(environment);

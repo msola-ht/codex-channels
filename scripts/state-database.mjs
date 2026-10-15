@@ -46,8 +46,7 @@ export function inspectStateDatabase(environment = process.env) {
     const row = database.prepare("PRAGMA user_version").get();
     const schemaVersion = Number(row?.user_version);
     if (schemaVersion === currentSchemaVersion) {
-      validateStateTables(database, Object.keys(requiredStateColumns));
-      validatePreferenceTable(database);
+      assertStateDatabaseSchema(database);
     }
     return {
       compatible: schemaVersion === currentSchemaVersion,
@@ -60,6 +59,15 @@ export function inspectStateDatabase(environment = process.env) {
   } finally {
     database.close();
   }
+}
+
+export function assertStateDatabaseSchema(database) {
+  const version = database.prepare("PRAGMA user_version").get()?.user_version;
+  if (version !== currentSchemaVersion) {
+    throw new Error(`状态数据库 Schema ${version ?? "unknown"} 不兼容，需要 ${currentSchemaVersion}`);
+  }
+  validateStateTables(database, Object.keys(requiredStateColumns));
+  validatePreferenceTable(database);
 }
 
 export function validateStateDatabaseStructure(environment = process.env) {

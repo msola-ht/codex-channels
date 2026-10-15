@@ -32,6 +32,7 @@ import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import { runManagedProviderModelSetup } from "./managed-provider-model-management.mjs";
+import { opencodeGoAccountPaths } from "./opencode-go-account-files.mjs";
 
 class OpenCodeGoSetupCancelled extends Error {}
 
@@ -165,18 +166,21 @@ export async function addOpencodeGoAccount(accountId, {
     mode,
     reconfigure,
   }, { environment });
-  if (mode === "exclusive") {
+  let confirmExclusiveConfigChange = false;
+  if (preview.effects.writesMainConfig) {
+    const message = `此操作会修改或恢复 Codex 主配置 ${opencodeGoAccountPaths(environment, accountId).configPath}，确认继续？`;
     const confirmed = prompter
-      ? await prompter.confirm("固定模式会修改并备份 ~/.codex/config.toml，确认继续？", false)
+      ? await prompter.confirm(message, false)
       : await confirmPrompt(
           prompts,
-          "固定模式会修改并备份 ~/.codex/config.toml，确认继续？",
+          message,
           false,
         );
-    if (!confirmed) {
+    if (confirmed !== true) {
       output.write("已取消，未修改任何文件。\n");
       return { action: "cancelled", accountId };
     }
+    confirmExclusiveConfigChange = true;
   }
   const apiKey = prompter
     ? await prompter.secret("OpenCode Go API Key（以 sk- 开头）")
@@ -188,7 +192,7 @@ export async function addOpencodeGoAccount(accountId, {
     mode,
     reconfigure,
     apiKey,
-    confirmExclusiveConfigChange: true,
+    confirmExclusiveConfigChange,
   }, { environment, fetchImpl, downloadCatalog });
   const paths = result.paths;
   output.write(mode === "switching"

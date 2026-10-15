@@ -172,14 +172,14 @@ async function runModelTrafficRetention({ environment, output, prompts, writeCon
     initialValue: String(settings.system.modelTrafficRetentionDays),
     validate: (input) => {
       const parsed = Number(input);
-      return Number.isInteger(parsed) && parsed >= 0 && parsed <= 36_500
+      return /^\d+$/u.test(String(input).trim()) && Number.isInteger(parsed) && parsed >= 0 && parsed <= 36_500
         ? undefined
         : "请输入 0–36500 之间的整数";
     },
   });
   if (prompts.isCancel(value)) return { action: "back" };
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 36_500) {
+  if (!/^\d+$/u.test(String(value).trim()) || !Number.isInteger(parsed) || parsed < 0 || parsed > 36_500) {
     throw new Error("调用记录保留天数必须为 0–36500 之间的整数");
   }
   const result = updateGatewaySetting({
@@ -205,14 +205,14 @@ async function runApprovalTimeout({ environment, output, prompts, writeConfig })
     initialValue: String(settings.system.approvalTimeoutSeconds),
     validate: (input) => {
       const parsed = Number(input);
-      return Number.isInteger(parsed) && parsed >= 30 && parsed <= 3600
+      return /^\d+$/u.test(String(input).trim()) && Number.isInteger(parsed) && parsed >= 30 && parsed <= 3600
         ? undefined
         : "请输入 30–3600 之间的整数";
     },
   });
   if (prompts.isCancel(value)) return { action: "back" };
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 30 || parsed > 3600) {
+  if (!/^\d+$/u.test(String(value).trim()) || !Number.isInteger(parsed) || parsed < 30 || parsed > 3600) {
     throw new Error("审批超时必须为 30–3600 之间的整数");
   }
   const result = updateGatewaySetting({
@@ -231,21 +231,23 @@ async function runIdleRelease({ environment, output, prompts, writeConfig }) {
     initialValue: String(settings.system.idleReleaseMinutes),
     validate: (input) => {
       const parsed = Number(input);
-      return Number.isInteger(parsed) && parsed >= 0 && parsed <= 1440
+      return /^\d+$/u.test(String(input).trim()) && Number.isInteger(parsed) && parsed >= 0 && parsed <= 1440
         ? undefined
         : "请输入 0–1440 之间的整数";
     },
   });
   if (prompts.isCancel(value)) return { action: "back" };
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 1440) {
+  if (!/^\d+$/u.test(String(value).trim()) || !Number.isInteger(parsed) || parsed < 0 || parsed > 1440) {
     throw new Error("会话空闲自动解除必须为 0–1440 之间的整数");
   }
   const result = updateGatewaySetting({
     kind: "system.idle-release-minutes",
     value: parsed,
   }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`会话空闲自动解除已设为 ${parsed} 分钟：${result.configPath}\n`);
+  output.write(parsed === 0
+    ? `会话空闲自动解除已关闭：${result.configPath}\n`
+    : `会话空闲自动解除已设为 ${parsed} 分钟：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return {
     idleReleaseMinutes: parsed,

@@ -13,7 +13,7 @@ export const modelRelayUsage = `用法：codexc relay <命令>
   delete --caller ID             删除调用方并撤销密钥；保留历史指标和转储
   disable [--caller ID]           禁用调用方；省略 caller 则禁用服务
   listen                         交互设置：关闭、仅本机、局域网或指定内网 IP
-  enable                         启用服务配置（安装与启动通过 service）
+  enable                         启用服务配置（安装用 codexc install，单独启动用 codexc start relay）
 所有命令支持 -h/--help；新秘密仅在成功保存后输出一次。`;
 
 export function parseModelRelayCommand(args) {

@@ -311,7 +311,7 @@ async function runThirdPartyModelSetup({
         {
           value: "provider_default",
           label: "受管 Provider 默认模型与思考等级",
-          hint: "按 Provider 设置新会话默认值",
+          hint: "默认模型按账户设置；模型思考等级由共享目录账户共用",
         },
         {
           value: "model_window",

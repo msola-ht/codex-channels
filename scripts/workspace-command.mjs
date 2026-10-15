@@ -22,7 +22,7 @@ const helpText = {
   work: `用法：codexc work
 
 交互终端无子命令时进入菜单：列出、设置默认、注册当前或已有目录、新建、权限、移除注册；新建目录位于
-~/.codex-connect/<id>-work，不更改默认工作区。
+配置文件所在目录的 <id>-work（通常为 ~/.codex-connect/<id>-work），不更改默认工作区。
 
 其他用法：
   codexc work list [--json]
@@ -36,7 +36,7 @@ const helpText = {
 把 --cwd 指定的目录注册为 Workspace，未指定时使用当前目录；交互式新建请运行 codexc work。`,
   remove: `用法：codexc work remove <序号|ID|名称>
 
-移除 Workspace 注册，不删除磁盘目录。`,
+移除 Workspace 注册，不删除磁盘目录；固定的 codex-connect 工作区不可移除。`,
 };
 
 export async function runWorkspaceCommand(args, {
@@ -165,7 +165,7 @@ async function runWorkspaceMenu({
         { value: "default", label: "设置默认工作区", hint: "选择已注册工作区作为 Gateway 默认项" },
         { value: "register-current", label: "注册当前目录", hint: cwd },
         { value: "register-existing", label: "注册已有目录", hint: "输入目录路径，不创建或删除目录" },
-        { value: "create", label: "新建工作区", hint: "在 ~/.codex-connect/<id>-work 下新建并注册" },
+        { value: "create", label: "新建工作区", hint: `在 ${runtime.dataDir}/<id>-work 下新建并注册` },
         { value: "permissions", label: "工作区权限", hint: "沙箱、审批策略与权限 Profile" },
         { value: "remove", label: "移除工作区注册", hint: "从 Gateway 移除注册，保留磁盘目录" },
         { value: "cancel", label: "返回", hint: "结束工作区操作" },
@@ -247,7 +247,8 @@ async function createWorkspaceInteractively({
     validate: (value) => {
       const trimmed = String(value ?? "").trim();
       if (!trimmed) return "名称不能为空";
-      if ([...trimmed].length > 64) return "名称最长 64 个字符";
+      if (trimmed.length > 64) return "名称过长，请缩短（最多 64 个字符，部分字符计为两位）";
+      if (/[\r\n]/u.test(trimmed)) return "名称不能换行";
     },
   });
   if (prompts.isCancel(entered)) {
@@ -255,6 +256,9 @@ async function createWorkspaceInteractively({
     return;
   }
   const name = String(entered).trim();
+  if (!name || name.length > 64 || /[\r\n]/u.test(name)) {
+    throw new Error("工作区名称不能为空、过长或包含换行（最多 64 个字符，部分字符计为两位）");
+  }
   const unavailableIds = inspectWorkspaceConfig(
     readGatewayConfig(runtime.configPath),
   ).workspaces.map((workspace) => workspace.id);
@@ -300,14 +304,16 @@ async function removeWorkspaceInteractively({
 }) {
   const document = readGatewayConfig(runtime.configPath);
   const { workspaces } = inspectWorkspaceConfig(document);
-  if (workspaces.length === 0) {
-    writeCliMessage("note", "当前没有已配置的 Workspace。");
+  const removable = workspaces.filter((item) => item.id !== fallbackDefaultWorkspace.id
+    && resolve(item.cwd) !== resolve(fallbackDefaultWorkspace.cwd));
+  if (removable.length === 0) {
+    writeCliMessage("note", "当前没有可移除的 Workspace；固定默认工作区不能移除。");
     return;
   }
   const selected = await prompts.select({
     message: "选择要移除注册的 Workspace（磁盘目录保留）",
     showInstructions: false,
-    options: workspaces.map((item) => ({
+    options: removable.map((item) => ({
       value: item.id,
       label: `${item.name} · ${item.id}`,
       hint: item.cwd,

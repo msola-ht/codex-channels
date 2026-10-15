@@ -112,7 +112,7 @@ function buildPlan(input, configured) {
     throw invalid(
       "provider-not-configured",
       "provider",
-      "尚未配置第三方 Provider，请先配置 DeepSeek 或 OpenCode Go",
+      "尚未配置受管 Provider，请先在 Setup 中完成第三方账户接入",
     );
   }
   const values = record(input);

@@ -8,6 +8,7 @@ export interface PrimaryProviderManagementOptions {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CodexUserConfigTransactionClient>;
   preview?: PrimaryProviderRemovalPreview;
+  switchPreview?: PrimaryProviderSwitchPreview;
 }
 
 export interface PrimaryProviderTarget {
@@ -48,6 +49,13 @@ export interface PrimaryProviderRemovalPreview {
   effects: { restoresOfficial: boolean };
 }
 
+export interface PrimaryProviderSwitchPreview {
+  operation: "switch";
+  target: PrimaryProviderTarget;
+  activation: "restart-all";
+  effects: PrimaryProviderSwitchEffects;
+}
+
 export class PrimaryProviderManagementError extends Error {
   readonly code: string;
   readonly field: string;
@@ -56,12 +64,7 @@ export class PrimaryProviderManagementError extends Error {
 export function previewPrimaryProviderSwitch(
   input: { providerId: string; model?: string },
   options?: PrimaryProviderManagementOptions,
-): Promise<{
-  operation: "switch";
-  target: PrimaryProviderTarget;
-  activation: "restart-all";
-  effects: PrimaryProviderSwitchEffects;
-}>;
+): Promise<PrimaryProviderSwitchPreview>;
 
 export function applyPrimaryProviderSwitch(
   input: { providerId: string; model?: string },

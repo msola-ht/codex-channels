@@ -5,6 +5,7 @@ import {
 } from "../runtime/model-provider-runtime.mjs";
 import {
   applyModelWindowChange,
+  previewModelWindowChange,
 } from "./model-window-management.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
@@ -21,7 +22,7 @@ export async function runModelWindowSetup({
 } = {}) {
   const models = loadManagedModelWindow(environment);
   if (models.length === 0) {
-    throw new Error("尚未配置受管第三方模型，请先配置 DeepSeek 或 OpenCode Go");
+    throw new Error("尚未配置受管第三方模型，请先在 Setup 中完成第三方账户接入");
   }
   const prompt = prompter ?? createPrompter(prompts, models, { allowBack });
   try {
@@ -29,6 +30,11 @@ export async function runModelWindowSetup({
     if (model === "back") return { action: "back" };
     const selected = models.find((candidate) => candidate.model === model);
     if (!selected) throw new Error(`未找到已配置模型：${model}`);
+    const preview = previewModelWindowChange({ model: selected.model, contextWindow: selected.contextWindow }, { environment });
+    output.write(`本次窗口设置影响的 Provider（含上下文跟随者）：${preview.providers.join("、")}。\n`);
+    if (preview.conflicts) {
+      output.write(`保存将统一当前不一致的窗口：${preview.overridden.map((entry) => `${entry.provider} ${entry.previousPercent}%`).join("；")}。\n`);
+    }
     const contextWindow = await prompt.selectContextWindow(selected);
     const result = await applyModelWindowChange({
       model: selected.model,
@@ -39,7 +45,7 @@ export async function runModelWindowSetup({
     if (result.conflicts === true) {
       output.write(`注意：已覆盖不同 Provider 上不一致的窗口占比（${result.overridden.map((entry) => `${entry.provider} ${entry.previousPercent}%`).join("；")}）。\n`);
     }
-    output.write("同名模型在所有 Provider 共用同一窗口；自动压缩使用上游默认。\n");
+    output.write("已统一上述 Provider 的模型窗口及上下文跟随设置；既有自动压缩阈值保持不变。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-app-server"));
     return {
       action: "configured",

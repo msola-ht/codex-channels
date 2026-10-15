@@ -30,7 +30,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 所有 CLI 命令在结束或失败时显示“命令总耗时”，单位为秒并保留两位小数。计时统一写入 stderr，stdout 的 JSON、JSONL、版本号和导出内容不混入计时文本；主菜单每次执行的命令也单独计时。前台服务、日志跟随和交互命令的耗时包含运行及等待输入的时间，在命令返回时显示；强制终止进程时不保证输出。使用单调时钟，从命令分派开始，不包含 Node 加载 CLI 静态模块之前的启动时间。
 
-在交互终端直接运行 `codexc` 打开主菜单，依次为运行与连接、工作区、日常设置、接入与账户、状态与服务、数据与维护、程序维护和退出。主帮助采用同一分类；现有子命令保持不变。“运行与连接”提供 Codex TUI、工作区与 Provider 选择、WebUI 和前台核心服务，macOS/Windows 另显示 Desktop App；工作区列表按 ID 排序并标注默认项，Provider 只列当前配置可用的实例，隔离实例按 ID 排序，聚合条件或选择别名不满足时不提供聚合项。“状态与服务”先列状态、日志与诊断，再列启停和安装；“数据与维护”集中指标、额度、调用记录、投递核对、Relay 查询与清理；“程序维护”包含版本、首次初始化、更新与卸载，Windows 另显示权限修复。更新、修复和卸载需确认。
+在交互终端直接运行 `codexc` 打开主菜单，依次为运行与连接、工作区、日常设置、接入与账户、状态与服务、数据与维护、程序维护和退出。主帮助采用同一分类；现有子命令保持不变。“运行与连接”提供 Codex TUI、工作区与 Provider 选择、WebUI 和前台核心服务，macOS/Windows 另显示 Desktop App；工作区列表按 ID 排序并标注默认项，Provider 只列当前配置可用的实例，隔离实例按 ID 排序，聚合条件或选择别名不满足时不提供聚合项。“状态与服务”先列状态、日志与诊断，再列启停和安装；“数据与维护”集中指标、额度、调用记录、投递核对、Relay 查询与清理；“程序维护”包含版本、初始化与配置向导、更新与卸载，Windows 另显示权限修复。更新、修复和卸载需确认。
 
 菜单在同一次调用的循环内保留上次选择，方便连续操作；该选择不写入配置，也不跨进程保存。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 显示帮助，`timezone` 仅显示当前时区。配置路径查询明确使用 `codexc config paths [--json]`，返回绝对路径且不创建配置，终端与管道中的行为一致。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。需指定参数的图片发送、投递处理和重置券消费仍使用对应直接命令。
 
@@ -56,7 +56,7 @@ Gateway 配置位于：
 
 首次运行 `codexc init` 会创建默认工作区 `~/.codex-connect/workspace`，并将其初始化为 Git 仓库，
 默认分支为 `main`，不自动创建提交；已有 `.git` 会保留。Git 不可用或初始化失败时明确报错，并且不写入新配置，
-修复后可重新运行。配置已存在时，重复运行保留现有配置和仓库，不为已有工作区补建仓库。
+修复后可重新运行。配置已存在时，初始化步骤保留现有配置内容和仓库，不为已有工作区补建仓库，但可能收紧配置文件权限。重复运行仍可进入交互向导，后续设置按选择保存；已有配置不可用时中止向导，不改写其内容。
 在交互终端中，`codexc init` 创建完成后会显示环境检测结果（Codex CLI 版本、官方登录状态、通讯渠道、
 默认模型、默认 Workspace 与可选功能状态），先询问是否进入接入向导，再进入 Codex 设置菜单，随后询问是否启用 WebUI、调用详情记录与
 配置模型转发监听，最后询问是否执行 `codexc install`。可选功能默认取值沿用当前状态：首次初始化默认关闭，
@@ -74,12 +74,12 @@ Codex 设置、可选功能与安装步骤。Codex 设置可连续选择“Codex
 WebUI 启动失败会报告核心服务已安装、WebUI 未完成，并以失败状态退出；核对 `codexc status webui` 后可用 `codexc start webui` 重试。
 跳过相应步骤后，可在交互终端运行 `codexc setup` 补充接入，再按需运行 `codexc install` 安装后台服务；
 单独执行 `install` 只启动核心服务，需要 WebUI 时另行运行 `codexc start webui`。
-已有配置无法解析或版本不受支持时，`codexc init` 明确失败并且不修改任何数据。非交互调用
+已有配置无法解析或版本不受支持时，`codexc init` 明确失败，不改写配置内容；初始化检查可能收紧文件权限。非交互调用
 不进入向导，只创建用户目录、默认工作区仓库与初始配置（不写 `[webui] enabled`，保持未设置即沿用已安装
 状态），不配置接入、选择可选功能或安装服务。之后回到交互终端运行 `codexc init` 继续完整向导，
 或用 `codexc setup` 完成接入后按需执行 `codexc install`；`setup` 仍要求终端，不是无人值守配置接口。
 
-`codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；完成单项后可继续选择，选择“完成接入”正常退出，选择“取消”或在类别菜单按 Esc/Ctrl+C 取消退出。`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
+`codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；完成单项后可继续选择，选择“完成接入”正常退出，选择“取消”或在类别菜单按 Esc/Ctrl+C 取消退出。`setup --jsonl` 的渠道结果保留 `warnings`，飞书另返回 `applicationConfiguration`，配置保存成功但存在降级时应按这些字段处理。`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 CLI 和 WebUI 的 Gateway 设置在读取和保存前均校验当前配置结构；不支持的版本、未知字段或非法值会阻止操作并保留原文件，不以默认显示值掩盖错误。请先修复配置，再重新进入设置。
 
@@ -157,6 +157,8 @@ Codex 用户默认和 Workspace 默认审批方式不依赖 Provider 或模型�
 同样支持自动审查、手动审批、跟随 Codex 默认，复用权限设置预览、配置版本校验和高风险确认。
 本机可通过 `codexc work` 的工作区权限菜单设置同一覆盖，配置字段为
 `[[workspaces]].approvals_reviewer`，仅接受 `auto_review` 或 `user`，删除该字段即跟随 Codex 默认。
+
+工作区沙箱与审批策略未配置时，菜单默认保留继承状态。清除覆盖后，Gateway 分别使用全局 `codex.sandbox` 与 `on-request`；`codexc remote` 则沿用 Codex 自身默认设置。`untrusted` 可用于 Gateway，但当前 Remote 入口需要显式传入 `--ask-for-approval on-request|never` 覆盖。保存相同值不会改写配置，也不会要求热加载。
 
 ### 计划相关设置
 
@@ -358,9 +360,12 @@ codexc provider list [--json]
 codexc provider switch <Provider ID> [模型] [--yes]
 ```
 
-`primary-provider switch` 会把主实例切换到目标 Provider，执行前会二次确认，并提示将改写
-Codex 主配置的 `model_provider` / `model`；传 `--yes` 跳过确认（适合脚本化调用），
-仅命令行 switch 支持 `--yes`，交互式 Setup 菜单仍会确认。
+`codexc provider switch` 会把主实例切换到目标 Provider，执行前会二次确认，并提示将改写
+Codex 主配置的 `model_provider` / `model`；`switch` 与 `recover` 可用 `--yes` 显式跳过确认（适合脚本化调用）；交互式 Setup 菜单仍会确认。确认期间切换目标或影响范围发生变化时拒绝执行，需重新确认。
+
+Provider 新增、需要确认的受管账户删除与重配要求标准输入、标准输出均为终端；非交互调用会明确报错。`list`、默认账户设置和实例释放保留各自的脚本调用方式。
+受管账户进入固定模式会修改 Codex 主配置，从固定模式改为切换模式会恢复主配置；这两种操作都需要明确确认，保存时也会在管理锁内重新检查实际影响。
+受管 Provider 的默认模型按账户设置，模型思考等级由共享目录的账户共用，最后选择前会列出当前共享账户；窗口设置也会提前展示上下文跟随者。保存默认模型前会重读 Provider 模式，防止交互期间切换模式后写到错误范围。
 
 添加账户时，Setup 与 WebUI 已有的多账户配置入口均提供 `main`（主账户）、`work`（工作账户）、`other`（其他账户）和“自定义”；已占用的预设不再显示。名称仅作账户 ID，不决定默认账户或自动切换行为。
 
@@ -468,6 +473,7 @@ Remote、Desktop 启动和 `app status` 的 `-p` / `--provider` 共用完整 Pro
 
 需要诊断时使用 `codexc app status [--provider <Provider-ID>]`；非交互启用或指定 Windows 桥端口时，
 使用 `codexc app enable [--port <端口>]`，再执行 `codexc app`。
+`--port` 仅适用于 Windows，接受 1 到 65535 的十进制整数；macOS 使用受管 stdio，拒绝端口参数。Linux 上的启用、禁用与启动会在读取配置前报告不支持，`app status` 仍可只读查询。
 关闭功能前同样先完全退出 App，再执行：
 
 ```bash
@@ -558,10 +564,10 @@ codexc logs -n 200
 
 公开目标统一为 `gateway|appserver|webui|relay|all`，不接受 `app-server` 或 `model-relay` 作为 CLI 目标。
 日常服务操作直接使用 `codexc <动作>`，不提供 `service` 子命令。
-`codexc run` 在前台运行核心服务；`codexc start [目标]` 启动已安装后台服务。
+`codexc run` 在前台运行 Gateway，并复用拓扑一致的现有 App Server；没有现有实例时启动受管 App Server。退出时仅停止本次启动的子进程，保留复用的 App Server，不启动 WebUI 或 Model Relay。`codexc start [目标]` 启动已安装后台服务。
 `codexc install` 生成服务定义并启动核心服务；`codexc uninstall --services` 仅停止并卸载后台服务，
 `codexc uninstall` 自动识别并卸载当前程序，受管源码来源匹配时也删除仓库；两者都保留用户数据。`codexc reload` 只通知 Gateway 重读配置。
-Windows 重载成功表示 Gateway 已接受重读请求，不代表配置应用已经完成；若提示“重新加载结果未确认”，
+重载成功仅表示已发送通知（Windows 为 Gateway 已接受重读请求），不代表配置应用已经完成；其他设置按保存时提示重启，服务定义或安装环境变化时才需重新运行 `codexc install`。若提示“重新加载结果未确认”，
 应先核对服务日志与实际配置状态，不能据此认定请求没有执行。尚未接受的重载请求会在截止或连接断开时取消。
 
 Windows 安装时若显式设置了 `CODEX_HOME`，该路径必须是已存在的目录，安装器会将规范化后的路径写入四个服务定义。更换目录后需要在设置了新值的终端重新运行 `codexc install`；已有定义不会被后台自动改写，安装失败沿用既有定义备份和恢复流程。
@@ -584,7 +590,7 @@ Windows 启动前会检查服务定义所用的 PowerShell、原生构建产物�
 
 `start/stop/status` 默认操作全部后台服务；`start all` 按配置跳过已关闭的 WebUI 与未启用的 Relay，
 `stop/status all` 仍包含已安装的可选服务，
-`logs` 默认 Gateway。macOS 普通 `start` 不强制重启已运行的服务。
+`logs` 默认 Gateway，显示最近 100 行；`-n` / `--lines` 接受 1 到 10000 的十进制整数，`-f` 持续跟随。macOS 普通 `start` 不强制重启已运行的服务。
 单独重启 Gateway 不停止共享 App Server；单独重启 App Server 时，仍运行的 Gateway 会按真实断线处理并重连。
 渠道内禁止停止或重启 App Server，全部重启也必须在本机终端执行。
 WebUI 内不执行包含自身的停止、重启或卸载任务；请在本机终端运行对应的 `codexc stop/restart webui`、`codexc stop/restart all` 或 `codexc uninstall --services`。
@@ -687,7 +693,7 @@ codexc stop gateway
 codexc cleanup sessions 3 --idle-days 7
 ```
 
-核对后在交互终端执行，命令会重新扫描并再次询问确认：
+核对后在交互终端执行，命令会重新扫描并再次询问确认；非交互 `--confirm` 在扫描前拒绝，不兼容的绑定库也会在连接 App Server 前拒绝：
 
 ```bash
 codexc cleanup sessions 3 --idle-days 7 --confirm
@@ -804,6 +810,7 @@ codexc traffic
 ```
 
 WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接使用设置页，显式配置令牌后所有 API 都会验证，非回环监听必须配置令牌。详情见 [`WebUI`](webui.md)。
+指标查询与清理、转储查看与清理的同名单值选项拒绝重复，避免后一个值静默改变范围；转储查看最多指定一个 session 目录。
 `metrics report/export/run/threads/turns/quota` 默认生成私有导出文件，使用 `--stdout` 输出到标准输出。组合查询、分页明细及聚合共用一次只读快照，运行中新增记录会在下一次查询出现。服务启动等待 WebUI 健康响应与受管进程身份匹配；其他程序返回 HTTP 200 不代表 WebUI 已就绪。IPv6 地址使用带方括号的 URL。
 
 ### OpenAI 重置券 CLI

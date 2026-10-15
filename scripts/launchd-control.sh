@@ -243,11 +243,11 @@ case "$action" in
     reject_unsupported_jobs
     gateway_label=$(service_ids gateway start)
     if ! job_loaded "$gateway_label"; then
-      print_status failure "Gateway 尚未运行，请先执行 codexc start。"
+      print_status failure "Gateway 尚未运行，请先执行 codexc start gateway。"
       exit 1
     fi
     if launchctl kill SIGHUP "$user_domain/$gateway_label" 2>/dev/null; then
-      print_status success "已通知 Gateway 重新读取配置；Gateway 连接变化会自动重启，App Server 配置变化需重新安装服务。"
+      print_status success "已通知 Gateway 重新读取配置，请查看日志确认应用结果；其他设置按保存时提示重启，服务定义或安装环境变化时需运行 codexc install。"
     else
       print_status failure "Gateway 当前没有可接收信号的运行进程，未隐式启动服务。"
       print_status remediation "请先执行 codexc start gateway，再运行 codexc reload。"

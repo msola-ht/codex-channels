@@ -120,7 +120,7 @@ export async function applyClinePassConfiguration(input, { environment = process
   const definition = clinePassAccountDefinition(accountId);
   return withModelProviderManagementTransaction(environment, async () => {
     const preview = previewClinePassConfiguration(input, { environment });
-    if (mode === "exclusive" && confirmExclusiveConfigChange !== true) throw new AccountManagementError("confirmation-required", "confirmExclusiveConfigChange", "固定模式修改 Codex 主配置前必须确认");
+    if (preview.effects.writesMainConfig && confirmExclusiveConfigChange !== true) throw new AccountManagementError("confirmation-required", "confirmExclusiveConfigChange", "修改 Codex 主配置前必须明确确认");
     const accounts = loadClinePassAccounts(environment);
     const paths = clinePassSetupPaths(environment, accountId);
     const dsDirectory = managedProviderDirectory(environment, deepseekProviderDefinition);

@@ -114,11 +114,11 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     loadAccounts,
     loadPrimaryProvider,
   });
-  if (mode === "exclusive" && confirmExclusiveConfigChange !== true) {
+  if ((plan.mode === "exclusive" || plan.previousMode === "exclusive") && confirmExclusiveConfigChange !== true) {
     throw invalid(
       "confirmation-required",
       "confirmExclusiveConfigChange",
-      "固定模式会修改并备份 Codex 主配置，必须先明确确认",
+      "修改 Codex 主配置前必须明确确认",
     );
   }
   if (typeof apiKey !== "string" || !/^sk-[^\s"]+$/u.test(apiKey) || apiKey.length > 4_096) {
@@ -170,6 +170,13 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     previous?.model,
   );
   const previousMode = readOpencodeGoAccountMarker(environment, accountId)?.mode;
+  if (previousMode === "exclusive" && confirmExclusiveConfigChange !== true) {
+    throw invalid(
+      "confirmation-required",
+      "confirmExclusiveConfigChange",
+      "恢复 Codex 主配置前必须明确确认",
+    );
+  }
   const entersExclusiveMode = previousMode === "switching" && mode === "exclusive";
   const capturesExclusiveBaseline = mode === "exclusive"
     && (previous === undefined || entersExclusiveMode);
@@ -251,12 +258,14 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     );
     guards = refreshProviderFileSnapshot(guards, plan.paths.manifestPath);
     await assertProviderFileSnapshots(guards);
-    await replaceOptionalProviderFile(
-      plan.paths.configPath,
-      Object.keys(nextConfig).length === 0 ? undefined : stringify(nextConfig),
-      environment,
-    );
-    guards = refreshProviderFileSnapshot(guards, plan.paths.configPath);
+    if (mode === "exclusive" || previousMode === "exclusive") {
+      await replaceOptionalProviderFile(
+        plan.paths.configPath,
+        Object.keys(nextConfig).length === 0 ? undefined : stringify(nextConfig),
+        environment,
+      );
+      guards = refreshProviderFileSnapshot(guards, plan.paths.configPath);
+    }
     await assertProviderFileSnapshots(guards);
     await replaceOptionalProviderFile(plan.paths.profilePath, profileContent, environment);
     guards = refreshProviderFileSnapshot(guards, plan.paths.profilePath);
@@ -446,7 +455,7 @@ function publicPreview(plan) {
       updatesExternalAgent: plan.updatesExternalAgent,
     },
     confirmation: {
-      required: plan.mode === "exclusive",
+      required: plan.mode === "exclusive" || plan.previousMode === "exclusive",
       field: "confirmExclusiveConfigChange",
     },
     activation: "restart-all",

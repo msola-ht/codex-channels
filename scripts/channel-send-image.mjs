@@ -9,7 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { readGatewayConfig, validateGatewayConfigStructureDocument } from "../runtime/gateway-config.mjs";
 import {
   ensurePrivateDirectorySync,
   writePrivateFileAtomicSync,
@@ -23,6 +23,7 @@ import {
   CHANNEL_SEND_IMAGE_USAGE,
   parseChannelSendImageArgs,
 } from "./channel-send-image-options.mjs";
+import { assertStateDatabaseSchema } from "./state-database.mjs";
 
 export async function submitChannelImage({
   environment = process.env,
@@ -94,6 +95,7 @@ export async function submitChannelImage({
 function resolveRuntimePaths({ environment, stateDatabasePath, spoolDirectory }) {
   const userConfig = locateUserConfig(environment);
   const document = readGatewayConfig(userConfig.configPath);
+  validateGatewayConfigStructureDocument(document);
   const resolvedStatePath = stateDatabasePath
     ?? resolveConfiguredPath(
       document.storage?.database_path,
@@ -113,10 +115,15 @@ function readBindings(stateDatabasePath) {
   }
   const database = new DatabaseSync(stateDatabasePath, { readOnly: true });
   try {
+    assertStateDatabaseSchema(database);
     return database.prepare(`
       SELECT thread_id AS threadId, surface, account_id AS accountId,
              conversation_id AS conversationId
       FROM conversation_bindings
+      UNION
+      SELECT thread_id AS threadId, surface, account_id AS accountId,
+             conversation_id AS conversationId
+      FROM conversation_background_bindings
     `).all();
   } finally {
     database.close();

@@ -43,8 +43,13 @@ export function parseTrafficCommandArgs(args) {
     list: false,
     maxBytes: undefined,
   };
+  const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    if (argument.startsWith("--")) {
+      if (seen.has(argument)) throw new Error(`${argument} 不能重复`);
+      seen.add(argument);
+    }
     if (argument === "--all") {
       options.all = true;
       continue;
@@ -87,13 +92,17 @@ export function parseTrafficCommandArgs(args) {
   if (options.all && options.list) {
     throw new Error("--list 与 --all 不能同时使用");
   }
+  if (options.files.length > 1) throw new Error("只能指定一个 V2 session 目录");
   return options;
 }
 
 export function parseTrafficCleanupArgs(args) {
   const options = { confirm: false, directory: undefined };
+  const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    if (seen.has(argument)) throw new Error(`${argument} 不能重复`);
+    seen.add(argument);
     if (argument === "--confirm") {
       options.confirm = true;
       continue;
@@ -129,7 +138,7 @@ function boundedInteger(raw, name, description, minimum) {
 }
 
 function requiredValue(raw, name) {
-  if (raw === undefined || raw.startsWith("-")) {
+  if (raw === undefined || raw.length === 0 || raw.startsWith("-")) {
     throw new Error(`${name} 缺少值`);
   }
   return raw;

@@ -3,6 +3,7 @@ import {
   loadGatewaySettings,
   updateGatewaySetting,
 } from "./config-management.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 
 export async function runWorkspaceSettings({
   environment,
@@ -47,7 +48,7 @@ export async function runWorkspaceSettings({
         {
           value: "sandbox",
           label: "沙箱",
-          hint: `当前：${entry.sandbox ?? "未配置（使用全局）"}`,
+          hint: `当前：${entry.sandbox ?? "未配置（继承默认）"}`,
         },
         {
           value: "approval_policy",
@@ -75,12 +76,12 @@ export async function runWorkspaceSettings({
       const selected = await prompts.select({
         message: "沙箱模式",
         showInstructions: false,
-        initialValue: entry.sandbox ?? "workspace-write",
+        initialValue: entry.sandbox ?? "clear",
         options: [
           { value: "read-only", label: "只读", hint: "禁止写文件" },
           { value: "workspace-write", label: "工作区可写", hint: "允许修改授权 Workspace" },
           { value: "danger-full-access", label: "完全访问", hint: "不启用文件系统沙箱" },
-          { value: "clear", label: "清除（使用全局）", hint: "回退 codex.sandbox" },
+          { value: "clear", label: "清除（使用默认）", hint: "Gateway 使用 codex.sandbox；Remote 跟随 Codex 默认" },
         ],
       });
       if (prompts.isCancel(selected)) continue;
@@ -92,12 +93,12 @@ export async function runWorkspaceSettings({
       const selected = await prompts.select({
         message: "审批策略",
         showInstructions: false,
-        initialValue: entry.approvalPolicy ?? "on-request",
+        initialValue: entry.approvalPolicy ?? "clear",
         options: [
-          { value: "untrusted", label: "不信任", hint: "更严格地要求审批" },
+          { value: "untrusted", label: "不信任", hint: "Gateway 支持；Remote 需用 --ask-for-approval 显式覆盖" },
           { value: "on-request", label: "按需审批", hint: "需要时请求审批" },
           { value: "never", label: "免审批", hint: "不再请求审批" },
-          { value: "clear", label: "清除（使用默认）", hint: "回退 on-request" },
+          { value: "clear", label: "清除（使用默认）", hint: "Gateway 使用 on-request；Remote 跟随 Codex 默认" },
         ],
       });
       if (prompts.isCancel(selected)) continue;
@@ -153,7 +154,9 @@ export async function runWorkspaceSettings({
       throw error;
     }
     const updated = result.value;
-    output.write(
+    if (result.activationResult.status === "none") {
+      writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+    } else output.write(
       `已更新 ${entry.name ?? entry.id} 的权限：${result.configPath}\n`
         + "权限热加载后对新建、分叉或卸载后恢复的 Thread 生效；Auto-review 不改变已加载 Thread，清除覆盖后历史恢复保留 Codex 持久设置。\n",
     );

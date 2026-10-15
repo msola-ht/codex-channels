@@ -2,9 +2,9 @@ import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   readdirSync,
   readFileSync,
-  statSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -277,7 +277,7 @@ if (document) {
         join(dirname(stateDatabasePath), "weixin-updates"),
       );
       try {
-        const cursor = await cursorStore.get(accountId);
+        const cursor = await cursorStore.inspect(accountId);
         note(
           "微信消息游标",
           cursor === null
@@ -285,7 +285,7 @@ if (document) {
             : "检查点存在且载荷有效（内容已隐藏）",
         );
       } catch {
-        record("微信消息游标", false, "检查点读取或校验失败");
+        record("微信消息游标", false, "检查点读取、权限或载荷校验失败；未修改文件");
       }
       if (allowedWeixinUsers) {
         const contexts = createWeixinReplyContextPersistence(
@@ -729,7 +729,14 @@ function checkWindowsCredentialBackend() {
 
 function checkMode(name, path, expected) {
   try {
-    const actual = statSync(path).mode & 0o777;
+    const metadata = lstatSync(path);
+    if (metadata.isSymbolicLink()
+      || (expected === 0o700 ? !metadata.isDirectory() : !metadata.isFile())
+      || (process.getuid !== undefined && metadata.uid !== process.getuid())) {
+      record(name, false, "路径类型或属主无效：必须是当前用户拥有的非符号链接目录或文件");
+      return;
+    }
+    const actual = metadata.mode & 0o777;
     record(name, actual === expected, `${actual.toString(8).padStart(3, "0")}（要求 ${expected.toString(8)}）`);
   } catch (error) {
     record(name, false, errorMessage(error));

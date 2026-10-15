@@ -6,6 +6,7 @@ import * as clackPrompts from "@clack/prompts";
 import { loadDeepseekAccounts, deepseekProviderId, validateDeepseekAccountId } from "../runtime/deepseek-accounts.mjs";
 import {
   applyDeepseekAccountConfiguration,
+  previewDeepseekAccountConfiguration,
   removeDeepseekAccount, setDeepseekDefaultAccount,
 } from "./deepseek-account-management.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
@@ -44,10 +45,15 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
   } else if (["add", "reconfigure"].includes(action)) {
     const mode = await prompts.select({ message: "运行模式", options: [{ value: "switching", label: "切换模式" }, { value: "exclusive", label: "固定主 Provider" }] });
     if (prompts.isCancel(mode)) return { action: "back" };
-    if (mode === "exclusive" && await prompts.confirm({ message: "固定模式会修改 Codex 主配置，确认继续？", initialValue: false }) !== true) return { action: "back" };
+    const preview = previewDeepseekAccountConfiguration({ accountId, mode, reconfigure: action === "reconfigure" }, { environment });
+    let confirmExclusiveConfigChange = false;
+    if (preview.effects.writesMainConfig) {
+      confirmExclusiveConfigChange = await prompts.confirm({ message: "此操作会修改或恢复 Codex 主配置，确认继续？", initialValue: false }) === true;
+      if (!confirmExclusiveConfigChange) return { action: "back" };
+    }
     const apiKey = await prompts.password({ message: "DeepSeek API Key" });
     if (prompts.isCancel(apiKey)) return { action: "back" };
-    result = await applyDeepseekAccountConfiguration({ accountId, apiKey, mode, reconfigure: action === "reconfigure", confirmExclusiveConfigChange: mode === "exclusive" }, { environment });
+    result = await applyDeepseekAccountConfiguration({ accountId, apiKey, mode, reconfigure: action === "reconfigure", confirmExclusiveConfigChange }, { environment });
   } else throw new Error("未知 DeepSeek 账户操作");
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;

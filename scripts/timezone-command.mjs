@@ -78,18 +78,23 @@ export function parseTimezoneCommandArgs(
     );
   }
   if (timezone !== null && !isKnownTimezone(timezone, { exists, root })) {
-    throw usageError(`系统时区库中没有 ${timezone}`);
+    throw usageError(`当前运行环境不支持时区：${timezone}`);
   }
   if (timezone !== null) return { action: "set", timezone, json, ...target };
   if (useSystemTimezone) return { action: "clear", json, ...target };
   return { action: json ? "status" : "prompt", json, ...target };
 }
 
-/** 系统时区库缺失时不做存在性判断，交给运行 App Server 的平台解析。 */
+/** 先校验实际时区名称；系统提供 zoneinfo 时再核对其可用性。 */
 export function isKnownTimezone(
   timezone,
   { exists = existsSync, root = zoneinfoRoot } = {},
 ) {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: timezone });
+  } catch {
+    return false;
+  }
   if (!exists(join(root, "UTC"))) return true;
   return exists(join(root, timezone));
 }
@@ -118,7 +123,7 @@ export function normalizeTimezoneInput(value, { exists = existsSync, root = zone
     return `时区名称无效：${trimmed}；需要 IANA 名称（如 Asia/Shanghai）`;
   }
   if (!isKnownTimezone(trimmed, { exists, root })) {
-    return `系统时区库中没有 ${trimmed}`;
+    return `当前运行环境不支持时区：${trimmed}`;
   }
   return undefined;
 }
@@ -178,6 +183,10 @@ export async function runTimezoneCommand(args = [], {
     } else {
       next = value === systemTimezoneValue ? (gateway ? "system" : null) : value;
     }
+  }
+  if (next !== null && next !== "system" && next !== "app-server") {
+    const error = normalize(next);
+    if (error !== undefined) throw new Error(error ?? "时区名称不能为空");
   }
   const result = updateGatewaySetting({
     kind: gateway ? "system.gateway-timezone" : "system.app-server-timezone",

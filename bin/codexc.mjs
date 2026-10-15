@@ -118,7 +118,7 @@ const helpText = {
 
 程序维护：
   version, -v, --version        显示版本
-  init                         首次初始化用户目录和配置，交互终端继续向导
+  init                         初始化用户目录和配置，或继续交互向导
   update                       更新程序与配套 Codex CLI
   security                     修复本机私有路径权限（Windows）
   uninstall                    自动识别并卸载当前程序，保留用户数据
@@ -127,7 +127,8 @@ const helpText = {
   restart: restartCommandUsage,
   init: `用法：codexc init
 
-初始化用户数据目录和 config.toml；已有配置不会被覆盖。
+初始化用户数据目录和 config.toml；已有配置内容在初始化步骤中保留，文件权限可能收紧。
+重复运行也可进入交互向导，后续设置按你的选择保存。
 交互终端下继续显示环境检测结果，并依次引导模型提供商与通讯渠道、Codex 新会话与用户偏好、
 官方 TUI 身份、模型可见时区、可选功能和后台服务；
 非交互调用只创建用户目录、默认工作区仓库与初始配置，不进入向导。`,
@@ -140,14 +141,17 @@ const helpText = {
 
 常用入口：
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
-  codexc setup → 模型与提供商 → 第三方 Provider → 自定义提供商 / DeepSeek 官方 / OpenCode Go 官方 / CCG（CommandCode） / Cline Pass 官方 / 受管 Provider 模型设置
+  codexc setup → 模型与提供商 → 第三方 Provider → DeepSeek 官方 / OpenCode Go 官方 / CCG（CommandCode） / Cline Pass 官方
+  codexc setup → 模型与提供商 → 第三方 Provider → Codex 兼容 Provider 接入 / 自定义模型 Provider 接入
+  codexc setup → 模型与提供商 → 第三方 Provider → 受管 Provider 默认模型与思考等级 / 受管模型目录上下文窗口
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 项目技能（安装或卸载项目技能）
 
 DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开同一受管 Provider 设置，并预选当前 Provider。`,
   run: `用法：codexc run
 
-在前台启动 Codex App Server 与 Gateway。`,
+在前台启动 Gateway，复用拓扑一致的现有 App Server；没有现有实例时启动受管 App Server。
+退出时停止本次启动的子进程，保留复用的 App Server；不启动 WebUI 或 Model Relay。`,
   remote: `${CODEX_REMOTE_USAGE}
 
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
@@ -216,7 +220,7 @@ config.toml、数据库、凭据、日志、输出、Codex CLI 和 Shell 配置�
 
 把本地 PNG/JPEG 图片（最大 10 MiB）交给 Gateway，发送回该 Thread 绑定的
 飞书/微信/Telegram 会话。不指定 --thread 且存在多个绑定时会拒绝并提示指定。
-图片会被复制到 ~/.codex-connect/data/channel-outbox/pending/，由网关轮询发送；
+图片会被复制到状态数据库所在目录的 channel-outbox/pending/，由网关轮询发送；
 成功后归档到 done/，失败归档到 failed/ 并保留原因。`,
   webui: `用法：codexc webui [--host 地址] [--port 端口]
 
@@ -453,6 +457,9 @@ async function dispatchCommand(command, args) {
         if (values[0] === "list"
           ? !(values.length === 1 || (values.length === 2 && values[1] === "--json"))
           : values.length !== 2) throw new Error(usage);
+        if (["add", "reconfigure", "remove"].includes(values[0])) {
+          requireInteractiveTerminal(`codexc provider ${family} ${values[0]}`);
+        }
         const script = family === "deepseek" ? "deepseek-account-setup" : `${family}-setup`;
         runScript(`scripts/${script}.mjs`, ["account", values[0] === "release" ? "stop" : values[0], ...values.slice(1)], { failureReportedByChild: true });
         break;
@@ -460,6 +467,9 @@ async function dispatchCommand(command, args) {
       if (isCommandHelp(args, [[], ["add"], ["list"], ["switch"], ["remove"], ["recover"]], primaryProviderUsage)) {
         console.log(primaryProviderUsage);
         break;
+      }
+      if (args[0] === "add" || (["switch", "recover"].includes(args[0]) && args.at(-1) !== "--yes")) {
+        requireInteractiveTerminal(`codexc provider ${args[0]}${args[0] === "add" ? "" : "（非交互调用须显式使用 --yes）"}`);
       }
       runScript("scripts/primary-provider-cli.mjs", args, {
         failureReportedByChild: true,
@@ -565,7 +575,7 @@ async function initialize(args) {
   }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     if (result.created) {
-      printCliMessage("note", "请运行 codexc setup 配置通讯渠道，然后运行 codexc install。");
+      printCliMessage("note", "可在交互终端重新运行 codexc init 完成向导；也可运行 codexc setup 配置模型与通讯渠道，再运行 codexc install。");
     }
     return;
   }
@@ -599,7 +609,7 @@ function assertUsableExistingConfig(configPath) {
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `config.toml 当前不可用，未修改任何数据：${reason.split("\n")[0]}\n`
+      `config.toml 当前不可用，未改写配置内容；文件权限可能已收紧：${reason.split("\n")[0]}\n`
       + "请先修复配置或运行 codexc doctor 诊断，然后重新运行 codexc init。",
       { cause: error },
     );
@@ -1037,6 +1047,12 @@ function printVersion(args) {
 function requireNoArguments(args, usage) {
   if (args.length > 0) {
     throw new Error(usage);
+  }
+}
+
+function requireInteractiveTerminal(command) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error(`${command} 需要交互终端；请将标准输入和标准输出连接终端。`);
   }
 }
 

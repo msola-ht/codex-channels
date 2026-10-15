@@ -489,7 +489,7 @@ function parseServiceLogOptions(args) {
     if (option === "--lines" || option === "-n") {
       const value = remaining[index + 1];
       const lines = Number(value);
-      if (!Number.isSafeInteger(lines) || lines <= 0 || lines > 10_000) {
+      if (typeof value !== "string" || !/^\d+$/u.test(value) || !Number.isSafeInteger(lines) || lines <= 0 || lines > 10_000) {
         throw new Error("日志行数必须是 1 到 10000 之间的整数");
       }
       result.push("--lines", String(lines));

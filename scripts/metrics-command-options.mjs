@@ -95,6 +95,7 @@ export function parseMetricsOptions(args, allowed) {
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
     if (!allowed.has(option)) throw new Error(`未知参数：${option}`);
+    if (Object.hasOwn(result, option.slice(2))) throw new Error(`${option} 不能重复`);
     const value = args[index + 1];
     if (!value || value.startsWith("--")) throw new Error(`${option} 缺少值`);
     result[option.slice(2)] = value;
@@ -107,6 +108,8 @@ export function validateMetricsCommandArgs(subcommand, args) {
   if (!["run", "turns", "threads", "report", "export", "quota", "cleanup", "prune", "status", "reset"].includes(subcommand)) {
     throw new Error(`未知指标命令：${subcommand}`);
   }
+  const stdoutCount = args.filter((argument) => argument === "--stdout").length;
+  if (stdoutCount > 1) throw new Error("--stdout 不能重复");
   const withoutStdout = args.filter((argument) => argument !== "--stdout");
   if (subcommand === "run") {
     parseMetricsRunArgs(withoutStdout);
@@ -151,6 +154,9 @@ export function validateMetricsCommandArgs(subcommand, args) {
     return;
   }
   if (subcommand === "cleanup") {
+    if (args.filter((argument) => argument === "--restart-gateway").length > 1) {
+      throw new Error("--restart-gateway 不能重复");
+    }
     const options = parseCleanupOptions(
       args.filter((argument) => argument !== "--restart-gateway"),
     );
@@ -176,8 +182,11 @@ export function validateMetricsCommandArgs(subcommand, args) {
 
 export function parseCleanupOptions(args) {
   const options = {};
+  const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
+    if (seen.has(option)) throw new Error(`${option} 不能重复`);
+    seen.add(option);
     if (option === "--vacuum") {
       options.vacuum = true;
       continue;
@@ -225,8 +234,13 @@ function parseThreadCommandArgs(args, usage, scoped = false) {
   let threadId;
   let format = "markdown";
   const options = {};
+  const seen = new Set();
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index];
+    if (option.startsWith("-")) {
+      if (seen.has(option)) throw new Error(`${option} 不能重复`);
+      seen.add(option);
+    }
     if (option === "--format") {
       const value = args[index + 1];
       if (!value || value.startsWith("--")) {
@@ -236,7 +250,7 @@ function parseThreadCommandArgs(args, usage, scoped = false) {
       index += 1;
       continue;
     }
-    if (option.startsWith("--")) {
+    if (option.startsWith("-")) {
       if (scoped && metricsQueryOptions.includes(option) && option !== "--thread") {
         const value = args[index + 1];
         if (!value || value.startsWith("--")) throw new Error(`${option} 缺少值`);

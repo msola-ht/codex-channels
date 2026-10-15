@@ -115,7 +115,7 @@ export async function controlWindowsServices({
     if (result?.version !== 1 || result.ok !== true) {
       throw new Error("Gateway 重新加载结果未确认");
     }
-    writeCliMessage("success", "已通知 Gateway 重新读取配置；App Server 配置变化仍需重新安装服务。");
+    writeCliMessage("success", "已通知 Gateway 重新读取配置，请查看日志确认应用结果；其他设置按保存时提示重启，服务定义或安装环境变化时需运行 codexc install。");
     return;
   }
   if (action === "status") {

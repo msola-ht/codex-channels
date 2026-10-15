@@ -130,7 +130,7 @@ export async function listPrimaryProviders({
   }
   output.write(
     "\n设为固定主 Provider：codexc provider switch <Provider ID>；"
-    + "新增：codexc provider add；编辑：codexc setup 中选择自定义第三方 → 编辑。\n",
+    + "新增：codexc provider add；编辑：codexc setup → 模型与提供商 → 第三方 Provider → Codex 兼容 Provider 接入或自定义模型 Provider 接入 → 编辑。\n",
   );
 }
 
@@ -145,13 +145,14 @@ export async function switchPrimaryProvider(
     createClient = createCodexUserConfigClient,
   } = {},
 ) {
+  let switchPreview;
   if (confirm) {
-    const preview = await previewPrimaryProviderSwitch(
+    switchPreview = await previewPrimaryProviderSwitch(
       { providerId, model },
       { environment, createClient },
     );
     const confirmed = await prompts.confirm({
-      message: switchConfirmationMessage(preview.target),
+      message: switchConfirmationMessage(switchPreview),
       initialValue: false,
     });
     if (prompts.isCancel(confirmed) || confirmed !== true) {
@@ -161,7 +162,7 @@ export async function switchPrimaryProvider(
   }
   const result = await applyPrimaryProviderSwitch(
     { providerId, model },
-    { environment, createClient },
+    { environment, createClient, switchPreview },
   );
   if (result.effects.restoresFromBackup) {
     output.write(`从备份恢复自定义主 Provider：${result.target.id}。\n`);
@@ -189,9 +190,11 @@ export async function switchPrimaryProvider(
   writeCliRemediationRestartAll();
 }
 
-function switchConfirmationMessage(target) {
+function switchConfirmationMessage({ target, effects }) {
   if (target.id === "openai") {
-    return "将恢复 OpenAI 官方主 Provider，并改写 Codex 主配置（model_provider 设为 openai；未指定模型时 model 置空）。确认继续？";
+    const modelChange = effects.clearsCustomModel ? "清空自定义模式的顶层 model" : target.model
+      ? `model 设为 ${target.model}` : "保留当前顶层 model";
+    return `将恢复 OpenAI 官方主 Provider（model_provider 设为 openai；${modelChange}）。确认继续？`;
   }
   const label = `${target.displayName}（${target.id}）`;
   if (target.source === "switching") {
@@ -495,7 +498,7 @@ export async function runPrimaryProviderCli(
   } = {},
 ) {
   const [subcommand, ...rest] = args;
-  if (args.length === 0 || isCommandHelp(args, [[], ["add"], ["list"], ["switch"], ["remove"]], primaryProviderUsage)) {
+  if (args.length === 0 || isCommandHelp(args, [[], ["add"], ["list"], ["switch"], ["remove"], ["recover"]], primaryProviderUsage)) {
     output.write(`${primaryProviderUsage}\n`);
     return;
   }

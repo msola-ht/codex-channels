@@ -49,6 +49,13 @@ export async function runDesktopAppCommand(args, options = {}) {
   const parsed = parseDesktopAppArgs(args);
   const environment = options.environment ?? process.env;
   const platform = options.platform ?? process.platform;
+  const supported = platform === "darwin" || platform === "win32";
+  if (parsed.action !== "status" && !supported) {
+    throw new Error("Codex Desktop App 共享当前只支持 macOS 与 Windows");
+  }
+  if (parsed.port !== undefined && platform !== "win32") {
+    throw new Error("--port 仅用于 Windows Desktop 共享桥；macOS 使用受管 stdio，无需设置端口");
+  }
   const output = options.output ?? process.stdout;
   const writeMessage = options.writeMessage ?? printCliMessage;
   const inspectDesktopApp = options.inspectDesktopApp
@@ -80,7 +87,6 @@ export async function runDesktopAppCommand(args, options = {}) {
     : resolveProviderSelection(parsed.provider, { environment: runtimeEnvironment }).provider;
   const selectedSocketPath = resolveDesktopAppSocketPath(appServer, selectedProvider);
   let desktopConfig = desktopAppConfig(codex.desktop_app);
-  const supported = platform === "darwin" || platform === "win32";
   const app = supported
     ? inspectDesktopApp()
     : unsupportedDesktopApp();
@@ -105,9 +111,6 @@ export async function runDesktopAppCommand(args, options = {}) {
     return status;
   }
 
-  if (!supported) {
-    throw new Error("Codex Desktop App 共享当前只支持 macOS 与 Windows");
-  }
   if (parsed.action === "open" || parsed.action === "enable") {
     assertDesktopAppCompatible(app);
   }
@@ -557,7 +560,7 @@ function parseDesktopAppArgs(args) {
     if (rest.length === 0) return { action };
     if (rest.length === 2 && rest[0] === "--port") {
       const port = Number(rest[1]);
-      if (Number.isInteger(port) && port >= 1 && port <= 65_535) {
+      if (/^\d+$/u.test(rest[1]) && Number.isInteger(port) && port >= 1 && port <= 65_535) {
         return { action, port };
       }
     }

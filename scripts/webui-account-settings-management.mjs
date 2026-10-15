@@ -170,11 +170,11 @@ export async function previewAccountSettingsMutation(input, environment) {
   }
 }
 
-export async function applyAccountSettingsMutation(input, environment) {
+export async function applyAccountSettingsMutation(input, environment, confirmedPreview) {
   try {
     switch (input.operation) {
       case "opencode.account.configure":
-        return await applyOpencodeGoAccountProvisioning(accountSettingsApplyInput(input), { environment });
+        return await applyOpencodeGoAccountProvisioning(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "opencode.account.default":
         return await applyOpencodeGoDefaultAccountChange(input.accountId, { environment });
       case "opencode.account.stop":
@@ -182,13 +182,13 @@ export async function applyAccountSettingsMutation(input, environment) {
       case "opencode.account.remove":
         return await applyOpencodeGoAccountRemoval(accountSettingsApplyInput(input), { environment });
       case "clp.configure":
-        return await applyClinePassConfiguration(accountSettingsApplyInput(input), { environment });
+        return await applyClinePassConfiguration(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "clp.default":
         return await setClinePassDefaultAccount(input.accountId, { environment });
       case "clp.remove":
         return await removeClinePassConfiguration(accountSettingsApplyInput(input), { environment });
       case "deepseek.configure":
-        return await applyDeepseekAccountConfiguration(accountSettingsApplyInput(input), { environment });
+        return await applyDeepseekAccountConfiguration(accountSettingsApplyInput(input, confirmedPreview), { environment });
       case "deepseek.default":
         return await setDeepseekDefaultAccount(input.accountId, { environment });
       case "deepseek.remove":
@@ -201,19 +201,16 @@ export async function applyAccountSettingsMutation(input, environment) {
   }
 }
 
-export function accountSettingsApplyInput(input) {
+export function accountSettingsApplyInput(input, confirmedPreview) {
   switch (input.operation) {
     case "opencode.account.configure":
-      return input.mode === "exclusive"
+    case "clp.configure":
+    case "deepseek.configure":
+      return confirmedPreview?.effects?.writesMainConfig === true
         ? { ...input, confirmExclusiveConfigChange: true }
         : input;
     case "opencode.account.remove":
       return { ...input, confirmHistoryLoss: true };
-    case "clp.configure":
-    case "deepseek.configure":
-      return input.mode === "exclusive"
-        ? { ...input, confirmExclusiveConfigChange: true }
-        : input;
     case "clp.remove":
     case "deepseek.remove":
       return { ...input, confirmRemove: true };

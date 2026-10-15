@@ -19,6 +19,7 @@ import { readWorkspaceConfig } from "./workspace-config.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 import { SqliteSessionDisplayCache } from "../dist/storage/index.js";
 import { sessionCleanupUsage as usage } from "./cli-command-usage.mjs";
+import { assertStateDatabaseSchema } from "./state-database.mjs";
 
 export async function runSessionCleanup(args, { environment = process.env, output = console } = {}) {
   if (args.length === 0 || args.some((arg) => arg === "-h" || arg === "--help")) {
@@ -27,6 +28,9 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
     return;
   }
   const { confirm, maxTurns, idleDays } = parseSessionCleanupArgs(args);
+  if (confirm && (!process.stdin.isTTY || !process.stdout.isTTY)) {
+    throw new Error("归档确认必须在交互终端执行；请先不加 --confirm 预览，再在本机终端加 --confirm 重试");
+  }
   const config = requireUserConfig(environment);
   await requireStoppedGateway(config.configPath);
   const document = readGatewayConfig(config.configPath);
@@ -34,6 +38,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
   const runtime = resolveAppServerRuntime(document, config.dataDir, environment);
   const codexBinary = resolveExecutable(effectiveCodexBinary(document.codex.binary, environment), environment);
   const databasePath = resolveConfiguredPath(document.storage?.database_path, config.dataDir, "data/gateway.sqlite3");
+  readBoundThreadIds(databasePath);
   const clients = new Map();
   const candidates = [];
   const skipped = [];
@@ -123,9 +128,6 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
       if (!confirm) output.log("确认执行：codexc cleanup sessions " + maxTurns
         + (idleDays === null ? "" : " --idle-days " + idleDays) + " --confirm（仅限交互终端）");
       return { maxTurns, idleDays, candidates, skipped, results };
-    }
-    if (!process.stdin.isTTY || !process.stdout.isTTY) {
-      throw new Error("归档确认必须在交互终端执行；请先预览，再在本机终端加 --confirm 重试");
     }
     const prompter = createPrompter(process.stdin, process.stdout);
     let accepted;
@@ -335,6 +337,7 @@ async function verifyArchive(candidate, client, rootState) {
 }
 
 export function parseSessionCleanupArgs(args) {
+  if (args.filter((arg) => arg === "--confirm").length > 1) throw new Error("--confirm 不能重复");
   const confirm = args.includes("--confirm");
   const values = args.filter((arg) => arg !== "--confirm");
   if (values.length < 1 || !/^\d+$/u.test(values[0] ?? "")) throw new Error(usage);
@@ -375,6 +378,7 @@ function readBoundThreadIds(path) {
   if (!existsSync(path)) return new Set();
   const database = new DatabaseSync(path, { readOnly: true });
   try {
+    assertStateDatabaseSchema(database);
     const ids = new Set();
     for (const table of ["conversation_bindings", "conversation_background_bindings"]) {
       for (const row of database.prepare(`SELECT thread_id FROM ${table}`).all()) ids.add(row.thread_id);
