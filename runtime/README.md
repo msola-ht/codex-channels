@@ -17,6 +17,8 @@
 
 ## 文件
 
+- `workspace-directory.mjs` / `workspace-directory.d.mts`：CLI 诊断、工作区管理和 Gateway 配置校验共用的只读目录检查，区分不存在、非目录和无法访问，不移除注册或修改目录。
+
 - `model-request-policy.mjs` / `model-request-policy.d.mts`：共享纯请求阶段预算与锁定 Codex 默认重试值；完整事件空闲 300 秒、WebSocket 建连 15 秒、HTTP 重试 4 次、流重试 5 次，生成没有总期限。第三方与聚合显式注入并通过 `config/read` 核验，官方 OpenAI 保持内置默认；所有 Codex 实例保留原生网络重连及 WS→HTTP 降级，代理和 Relay 不重发。核验连接关闭失败保留以便重试清理；可能启动实例的 Supervisor 操作两端统一等待 60 秒，涵盖启动、核验及连接收尾，不限制模型生成。不加载凭据、不写用户配置。
 - `request-timing.mjs` / `request-timing.d.mts`：指标 IPC、存储、CLI 与 WebUI 共用的生成区间校验和观测速度计算；无 I/O、不依赖调试转储。
 - `service-tier.mjs` / `service-tier.d.mts`：Application、CLI 设置与 WebUI 共用的纯加速档位匹配和展示归一；Fast 仅匹配目录的 `fast`/`priority`，Ultrafast 仅匹配 `ultrafast`，返回原始目录 ID，不包含配置写入、功能开关或生命周期操作。

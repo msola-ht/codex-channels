@@ -884,6 +884,8 @@ codexc logs -n 100
 
 常见处理：
 
+- 尚未配置通讯渠道：Doctor 会单独报告 Gateway 启动所需的渠道未配置，并继续检查工作区等独立项目；运行 `codexc setup` 完成渠道接入后重新诊断。
+- 工作区路径失效：Doctor 显示实际配置来源，逐项检查所有工作区及默认引用；任何失效项都会阻止 Gateway 使用该配置启动，热加载失败时保留原配置。先检查磁盘挂载、路径与权限；项目搬家时修改对应 `[[workspaces]].cwd` 并保留 ID。确认项目不再使用时，可运行 `codexc work remove <ID>` 移除注册，不删除目录；纯数字 ID 或 ID 与其他工作区名称相同时，请使用 `codexc work` 菜单精确选择。固定默认工作区不可移除。`codexc work add --prune-missing` 会在注册当前目录时清理不存在或非目录的注册，必须先确认这些项目不再使用，无法访问的目录会阻止清理。Doctor 不自动清理，修复后重新运行 `codexc doctor`。
 - 配置修改未生效：`codexc reload`。
 - 只重启 Gateway：`codexc restart gateway`；共享 App Server 与活动 Thread 会保留。
 - Codex CLI 版本不一致：按 `codexc update` 或错误提示安装精确版本后重试。

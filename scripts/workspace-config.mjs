@@ -17,13 +17,14 @@ import {
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { securePrivateFileSync } from "../runtime/private-file.mjs";
+import { inspectWorkspaceDirectory } from "../runtime/workspace-directory.mjs";
 
 export function readWorkspaceConfig(document) {
   const parsed = parseWorkspaceConfig(document);
   const workspaces = parsed.workspaces.map((workspace) => {
     const directory = inspectWorkspaceDirectory(workspace.cwd);
     if (!directory.valid) {
-      throw new Error(`Workspace ${workspace.id} 的目录不存在或不是目录：${workspace.cwd}`);
+      throw new Error(`工作区 ${workspace.id}：${directory.detail}；cwd：${workspace.cwd}。请运行 codexc doctor 查看配置来源和处理方式。`);
     }
     return { ...workspace, cwd: directory.cwd };
   });
@@ -41,14 +42,10 @@ export function inspectWorkspaceConfig(document) {
   return {
     defaultWorkspaceId: parsed.defaultWorkspaceId,
     workspaces: parsed.workspaces.map((workspace) => {
-      try {
-        const directory = inspectWorkspaceDirectory(workspace.cwd);
-        return directory.valid
-          ? { ...workspace, cwd: directory.cwd, status: "available" }
-          : { ...workspace, status: "missing" };
-      } catch {
-        return { ...workspace, status: "inaccessible" };
-      }
+      const directory = inspectWorkspaceDirectory(workspace.cwd);
+      return directory.valid
+        ? { ...workspace, cwd: directory.cwd, status: directory.status }
+        : { ...workspace, status: directory.status, detail: directory.detail };
     }),
   };
 }
@@ -87,9 +84,12 @@ export function addWorkspaceToConfig({
       workspaces.push({ ...workspace, cwd: directory.cwd });
       continue;
     }
+    if (directory.status === "inaccessible") {
+      throw new Error(`工作区 ${workspace.id}：${directory.detail}；cwd：${workspace.cwd}。未清理注册。`);
+    }
     if (!pruneMissing) {
       throw new Error([
-        `Workspace ${workspace.id} 的目录不存在或不是目录：${workspace.cwd}`,
+        `工作区 ${workspace.id}：${directory.detail}；cwd：${workspace.cwd}`,
         "确认这些目录不再使用后，运行 codexc work add --prune-missing 清理失效项并添加当前目录。",
       ].join("\n"));
     }
@@ -251,6 +251,11 @@ function ensureFallbackWorkspace(workspace) {
 }
 
 function resolveWorkspaceSelector(workspaces, selector) {
+  if (selector && typeof selector === "object") {
+    const workspace = workspaces.find((entry) => entry.id === selector.id);
+    if (!workspace) throw new Error("找不到指定 Workspace ID");
+    return workspace;
+  }
   const normalized = String(selector ?? "").trim();
   if (!normalized) {
     throw new Error("需要提供 Workspace 序号、ID 或名称");
@@ -315,20 +320,6 @@ function parseWorkspaceConfig(document) {
     workspaces,
     defaultWorkspaceId: required(document, "default_workspace"),
   };
-}
-
-function inspectWorkspaceDirectory(cwd) {
-  try {
-    const resolvedCwd = realpathSync(cwd);
-    return statSync(resolvedCwd).isDirectory()
-      ? { valid: true, cwd: resolvedCwd }
-      : { valid: false };
-  } catch (error) {
-    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
-      return { valid: false };
-    }
-    throw new Error(`Workspace 目录无法访问：${cwd}`, { cause: error });
-  }
 }
 
 function normalizedName(value) {

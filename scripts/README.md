@@ -395,7 +395,7 @@
 - `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单、目录创建与已有目录注册，并调用统一的 Workspace 权限设置用例；
   默认工作区选择复用 `config-system-menu.mjs` 的版本化配置写入，移除操作仅移除注册；本次菜单循环保留上次选择。
   `list --json` 返回稳定的 Workspace 注册摘要；CLI 入口只负责分发。
-- `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
+- `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。交互菜单按精确 ID 移除，避免数字 ID 被解释为列表序号；目录状态复用共享只读检查。
 
 ## 开发与协议
 
@@ -545,7 +545,7 @@
   版本重置为新的正式基础版本；Gateway 候选发行和修复发行可分别在该基础版本后使用受控的
   `-rc.N` 或 `-fixN` 后缀。任一后缀 Tag 发布并核验后，`main` 必须通过独立 PR 恢复无后缀基础
   版本；历史发布记录由对应 Release 保留，当前安装入口统一使用源码。
-- `doctor-output.mjs` / `doctor-output.d.mts`：把已收集的诊断项转换为结构化报告并渲染终端文本，不执行环境探测。
+- `doctor-output.mjs` / `doctor-output.d.mts`：把已收集的诊断项转换为结构化报告并渲染终端文本；文本阶段标题、进度、完成状态与结果统一写入 stdout，JSON 模式仅输出报告，不执行环境探测。
 - `doctor.mjs`：检查 npm 包、Node、Linux PATH 中的 `bubblewrap`、Codex CLI、当前 TOML 配置、
   OpenAI 主提供商使用的配置、环境变量或系统代理路由（不显示代理地址或凭据）、
   Workspace、飞书凭据/Bot 身份、
