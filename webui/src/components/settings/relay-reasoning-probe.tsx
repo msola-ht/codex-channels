@@ -57,39 +57,40 @@ export function RelayReasoningProbe({ model, revision, editorScope, protocols, a
     <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-5xl" closeLabel={t("relay.close")}>
       <DialogHeader className="pr-8"><DialogTitle>{t("relay.probe.title")}</DialogTitle><DialogDescription>{t("relay.probe.description")}</DialogDescription></DialogHeader>
       <FieldGroup className="min-h-0 overflow-y-auto px-1 py-1">
-        <Field><FieldLabel>{t("relay.probe.model")}</FieldLabel><FieldDescription className="break-all">{model}</FieldDescription></Field>
-        <Alert><AlertDescription>{t("relay.probe.cost")}</AlertDescription></Alert>
-        <Field><FieldLabel>{t("relay.protocol")}</FieldLabel>
-          {protocols.length > 1 ? <ToggleGroup variant="outline" size="sm" value={[protocol]} aria-label={t("relay.protocol")} disabled={!available || disabled}
+        <Field><div className="flex min-w-0 items-center gap-2">
+          <FieldDescription className="min-w-0 truncate" title={model}>{model}</FieldDescription>
+          {protocols.length > 1 ? <ToggleGroup className="shrink-0" variant="outline" size="sm" value={[protocol]} aria-label={t("relay.protocol")} disabled={!available || disabled}
             onValueChange={([value]) => { if ((value === "chat" || value === "responses") && value !== protocol) { probe.cancel(); setSelectedProtocol(value) } }}>
             {protocols.map(value => <ToggleGroupItem key={value} value={value}>{value === "chat" ? "Chat" : "Responses"}</ToggleGroupItem>)}
-          </ToggleGroup> : <Badge variant="outline">{protocols.length ? protocol === "chat" ? "Chat" : "Responses" : unknown}</Badge>}
-          <FieldDescription>{t("relay.probe.protocolHint")}</FieldDescription>
+          </ToggleGroup> : <Badge variant="outline" className="shrink-0">{protocols.length ? protocol === "chat" ? "Chat" : "Responses" : unknown}</Badge>}
+          </div>
+          {protocols.length > 1 && <FieldDescription>{t("relay.probe.protocolHint")}</FieldDescription>}
         </Field>
+        <FieldDescription>{t("relay.probe.cost")}</FieldDescription>
         {!available && <Alert><AlertDescription>{t("relay.unavailable")}</AlertDescription></Alert>}
         {probe.revisionChanged && <Alert><AlertDescription>{t("relay.probe.revisionChanged")}</AlertDescription></Alert>}
         {probe.state?.errorCode && !probe.materialChanged && <Alert variant="destructive"><AlertDescription>{t(errorLabels[probe.state.errorCode] ?? "relay.probe.failed")}</AlertDescription></Alert>}
         {probe.state?.cancelled && <FieldDescription role="status">{t("relay.probe.cancelled")}</FieldDescription>}
         {probe.running && <FieldDescription role="status" aria-live="polite" className="flex items-center gap-2"><Spinner aria-label={t("common.loading")} />{t("relay.probe.progress", { count: probe.completedCount, total: probe.totalCount, mode: probe.state?.currentMode ? t(modeLabels[probe.state.currentMode]) : t("relay.probe.waiting") })}</FieldDescription>}
-        <FieldDescription>{t("relay.probe.cacheHint")}</FieldDescription>
         {probe.cacheIssue && <Alert><AlertDescription>{t(probe.cacheIssue === "invalid" ? "relay.probe.cacheInvalid" : "relay.probe.cacheUnavailable")}</AlertDescription></Alert>}
         {probe.cacheCleared && <FieldDescription role="status">{t("relay.probe.cacheCleared")}</FieldDescription>}
         {results.map(({ result: displayed, historical }) => <Field key={`${historical}:${displayed.observedAtMs}`}>
-          <FieldLabel>{t(historical ? "relay.probe.historyTitle" : "relay.probe.currentTitle")}</FieldLabel>
-          <FieldDescription>{t("relay.probe.observedAt", { time: formatTimestamp(displayed.observedAtMs) })}</FieldDescription>
-          {historical && <FieldDescription>{t("relay.probe.historyHint")}</FieldDescription>}
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <FieldLabel>{t(historical ? "relay.probe.historyTitle" : "relay.probe.currentTitle")}</FieldLabel>
+            <FieldDescription>{formatTimestamp(displayed.observedAtMs)}</FieldDescription>
+          </div>
           {!historical && !probe.running && (!probe.state?.final || !completeRelayProbeResult(displayed)) && <FieldDescription>{t("relay.probe.partialHint")}</FieldDescription>}
-          <Table><TableCaption>{t("relay.probe.resultHint")}</TableCaption>
+          <Table className="min-w-[60rem] table-fixed [&_th]:whitespace-normal"><TableCaption>{t("relay.probe.resultHint")}</TableCaption>
           <TableHeader><TableRow>
-            <TableHead>{t("relay.probe.method")}</TableHead><TableHead>{t("relay.status")}</TableHead><TableHead>{t("relay.probe.httpStatus")}</TableHead>
-            <TableHead>{t("relay.probe.reasoningText")}</TableHead><TableHead>{t("relay.probe.reasoningTokens")}</TableHead><TableHead>{t("relay.probe.outputTokens")}</TableHead>
-            <TableHead>{t("relay.probe.responseModel")}</TableHead><TableHead>{t("relay.actions")}</TableHead>
+            <TableHead className="w-[26%]">{t("relay.probe.method")}</TableHead><TableHead className="w-[8%]">{t("relay.status")}</TableHead><TableHead className="w-[7%]">{t("relay.probe.httpStatus")}</TableHead>
+            <TableHead className="w-[10%]">{t("relay.probe.reasoningText")}</TableHead><TableHead className="w-[9%]">{t("relay.probe.reasoningTokens")}</TableHead><TableHead className="w-[9%]">{t("relay.probe.outputTokens")}</TableHead>
+            <TableHead className="w-[23%]">{t("relay.probe.responseModel")}</TableHead><TableHead className="w-[8%]">{t("relay.actions")}</TableHead>
           </TableRow></TableHeader>
           <TableBody>{displayed.rows.map(row => <TableRow key={row.mode}>
-            <TableCell>{t(modeLabels[row.mode])}</TableCell><TableCell>{!historical && probe.running && probe.state?.currentMode === row.mode ? t("relay.probe.inProgress") : t(`relay.probe.statuses.${row.status}`)}</TableCell>
-            <TableCell>{row.httpStatus ?? unknown}</TableCell><TableCell>{row.reasoningText === null ? unknown : t(row.reasoningText ? "relay.probe.observed" : "relay.probe.notObserved")}</TableCell>
-            <TableCell>{row.reasoningTokens ?? unknown}</TableCell><TableCell>{row.outputTokens ?? unknown}</TableCell>
-            <TableCell className="max-w-48 whitespace-normal break-all">{row.responseModel ?? unknown}</TableCell>
+            <TableCell className="truncate" title={t(modeLabels[row.mode])}>{t(modeLabels[row.mode])}</TableCell><TableCell className="whitespace-normal break-words">{!historical && probe.running && probe.state?.currentMode === row.mode ? t("relay.probe.inProgress") : t(`relay.probe.statuses.${row.status}`)}</TableCell>
+            <TableCell className="whitespace-normal break-words">{row.httpStatus ?? unknown}</TableCell><TableCell className="whitespace-normal break-words">{row.reasoningText === null ? unknown : t(row.reasoningText ? "relay.probe.observed" : "relay.probe.notObserved")}</TableCell>
+            <TableCell className="truncate" title={String(row.reasoningTokens ?? unknown)}>{row.reasoningTokens ?? unknown}</TableCell><TableCell className="truncate" title={String(row.outputTokens ?? unknown)}>{row.outputTokens ?? unknown}</TableCell>
+            <TableCell><span className="block truncate" title={row.responseModel ?? undefined}>{row.responseModel ?? unknown}</span></TableCell>
             <TableCell>{row.mode !== "passthrough" && <Button variant="outline" size="xs" disabled={!probe.canApply(row, displayed)}
               aria-label={t("relay.probe.applyLabel", { model, mode: t(modeLabels[row.mode]) })}
               onClick={() => { if (row.mode !== "passthrough" && probe.canApply(row, displayed)) { onApply(row.mode); close() } }}>{t("relay.probe.apply")}</Button>}</TableCell>
