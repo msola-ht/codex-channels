@@ -53,4 +53,4 @@ export {
   ScheduledTaskScheduler,
   ScheduledTaskStopTimeoutError,
 } from "./scheduler.js";
-export { AsyncSqliteScheduledTaskStore, ScheduledTaskStorageError } from "./async-sqlite-store.js";
+export { AsyncSqliteScheduledTaskStore, ScheduledTaskStorageError, closeScheduledTaskStores, waitForScheduledTaskStoresExit } from "./async-sqlite-store.js";

@@ -10,6 +10,19 @@ const requestTimeoutMs = 2_000;
 const shutdownTimeoutMs = 5_000;
 const maximumQueueCount = 256;
 const maximumQueueBytes = 8 * 1024 * 1024;
+const stores = new Map<AsyncMetricsStore, Promise<void>>();
+let closingStores = false;
+
+export async function closeMetricsStores(): Promise<void> {
+  closingStores = true;
+  const results = await Promise.allSettled([...stores.keys()].map(store => store.close()));
+  if (results.some(result => result.status === "rejected")) throw new MetricsWorkerFailure("close", "close-unconfirmed");
+}
+
+/** Physical Worker exit includes its owned ACL helper, even after close times out. */
+export async function waitForMetricsStoresExit(): Promise<void> {
+  await Promise.all([...stores.values()]);
+}
 
 interface Pending {
   message: Extract<MetricsWorkerRequest, { type: "request" }>;
@@ -27,6 +40,7 @@ export class AsyncMetricsStore {
   readonly ready: Promise<void>;
   readonly store: AsyncGatewayMetricsStore;
   private readonly worker: Worker;
+  private readonly cancellation = new Int32Array(new SharedArrayBuffer(4));
   private readonly exit: Promise<void>;
   private readonly queue: Pending[] = [];
   private active: Pending | undefined;
@@ -44,11 +58,12 @@ export class AsyncMetricsStore {
   private readonly initializationTimer: NodeJS.Timeout;
 
   constructor(path: string, options: { retentionDays: number; maximumRows: number }, private readonly onFatal?: (error: Error) => void) {
+    if (closingStores) throw this.error("initialization", "closing");
     this.ready = new Promise((resolve, reject) => { this.resolveReady = resolve; this.rejectReady = reject; });
     // Construction owns cleanup even when a later constructor operation fails.
     void this.ready.catch(() => undefined);
     this.worker = new Worker(new URL("./metrics-worker.js", import.meta.url), {
-      workerData: { path, ...options }, execArgv: [],
+      workerData: { path, ...options, cancellation: this.cancellation }, execArgv: [],
     });
     this.store = this.withSignal();
     this.initializationTimer = setTimeout(() => this.fail(this.error("initialization", "timeout")), initializationTimeoutMs);
@@ -56,9 +71,11 @@ export class AsyncMetricsStore {
     this.worker.on("error", () => this.fail(this.error(this.initialized ? "request" : "initialization", "worker-unavailable")));
     this.exit = new Promise(resolve => this.worker.once("exit", () => {
       this.exited = true;
+      stores.delete(this);
       this.fail(this.error(this.closing ? "close" : "request", "worker-exited"));
       resolve();
     }));
+    stores.set(this, this.exit);
   }
 
   withSignal(signal?: AbortSignal): AsyncGatewayMetricsStore {
@@ -184,15 +201,22 @@ export class AsyncMetricsStore {
     this.rejectReady(error);
     for (const entry of this.queue.splice(0)) { this.release(entry); entry.reject(error); }
     if (this.active) { this.release(this.active); this.active.reject(error); this.active = undefined; }
-    if (!this.closing) { try { this.onFatal?.(error); } catch { /* Ownership survives failure reporting. */ } }
+    if (!this.closing) {
+      try { this.onFatal?.(error); } catch { /* Ownership survives failure reporting. */ }
+      void this.close().catch(() => undefined);
+    }
   }
 
   close(): Promise<void> {
     if (this.closeTask) return this.closeTask;
     this.closing = true;
+    Atomics.store(this.cancellation, 0, 1);
     this.fail(this.error("close", "closing"));
     this.closeTask = (async () => {
-      if (!this.exited) this.worker.postMessage({ type: "close" } satisfies MetricsWorkerRequest);
+      if (!this.exited) {
+        try { this.worker.postMessage({ type: "close" } satisfies MetricsWorkerRequest); }
+        catch { /* Keep ownership until physical exit, even if IPC is unavailable. */ }
+      }
       let timer: NodeJS.Timeout | undefined;
       const confirmed = await Promise.race([
         this.exit.then(() => true),

@@ -5,7 +5,21 @@ import {
   scheduledTaskWorkerMethods,
   type ScheduledTaskWorkerMethod,
   type ScheduledTaskWorkerReply,
+  type ScheduledTaskWorkerRequest,
 } from "./sqlite-worker-protocol.js";
+
+const stores = new Map<AsyncSqliteScheduledTaskStore, Promise<void>>();
+let closingStores = false;
+
+export async function closeScheduledTaskStores(): Promise<void> {
+  closingStores = true;
+  const results = await Promise.allSettled([...stores.keys()].map(store => store.close()));
+  if (results.some(result => result.status === "rejected")) throw new ScheduledTaskStorageError("shutdown", "close-unconfirmed");
+}
+
+export async function waitForScheduledTaskStoresExit(): Promise<void> {
+  await Promise.all([...stores.values()]);
+}
 
 type AsyncMethods = {
   [K in ScheduledTaskWorkerMethod]: (...args: Parameters<ScheduledTaskStore[K]>) => Promise<ReturnType<ScheduledTaskStore[K]>>;
@@ -27,6 +41,7 @@ export class ScheduledTaskStorageError extends Error {
 export class AsyncSqliteScheduledTaskStore {
   readonly operations: AsyncMethods & { readonly path: string; close(): Promise<void> };
   private readonly worker: Worker;
+  private readonly cancellation = new Int32Array(new SharedArrayBuffer(4));
   private readonly initialized: Promise<void>;
   private resolveInitialization!: () => void;
   private rejectInitialization!: (error: Error) => void;
@@ -43,18 +58,28 @@ export class AsyncSqliteScheduledTaskStore {
   private unavailable = false;
   private initializedSuccessfully = false;
   private closed = false;
-  private termination: Promise<void> | undefined;
+  private readonly exit: Promise<void>;
+  private exited = false;
+  private closeAcknowledged = false;
+  private closeTask: Promise<void> | undefined;
 
   constructor(readonly path: string) {
+    if (closingStores) throw new ScheduledTaskStoreClosedError();
     this.initialized = new Promise((resolve, reject) => {
       this.resolveInitialization = resolve;
       this.rejectInitialization = reject;
     });
     void this.initialized.catch(() => undefined);
-    this.worker = new Worker(new URL("./sqlite-worker.js", import.meta.url), { workerData: { path } });
+    this.worker = new Worker(new URL("./sqlite-worker.js", import.meta.url), { workerData: { path, cancellation: this.cancellation }, execArgv: [] });
     this.worker.on("message", (reply: ScheduledTaskWorkerReply) => this.receive(reply));
     this.worker.on("error", () => this.fail(new ScheduledTaskStorageError(this.initializedSuccessfully ? "request" : "initialization", "worker-error")));
-    this.worker.on("exit", () => this.fail(new ScheduledTaskStorageError(this.initializedSuccessfully ? "request" : "initialization", "worker-exited")));
+    this.exit = new Promise(resolve => this.worker.once("exit", () => {
+      this.exited = true;
+      stores.delete(this);
+      this.fail(new ScheduledTaskStorageError(this.initializedSuccessfully ? "request" : "initialization", "worker-exited"));
+      resolve();
+    }));
+    stores.set(this, this.exit);
     this.initializationTimer = setTimeout(() => {
       this.fail(new ScheduledTaskStorageError("initialization", "timeout"));
     }, 10_000);
@@ -101,6 +126,7 @@ export class AsyncSqliteScheduledTaskStore {
   }
 
   private receive(reply: ScheduledTaskWorkerReply): void {
+    if ("type" in reply) { this.closeAcknowledged = reply.ok; return; }
     if (this.closed || this.unavailable) return;
     if (reply.id === 0) {
       clearTimeout(this.initializationTimer);
@@ -122,6 +148,7 @@ export class AsyncSqliteScheduledTaskStore {
   }
 
   private fail(error: Error): void {
+    if (this.unavailable) return;
     this.unavailable = true;
     clearTimeout(this.initializationTimer);
     this.rejectInitialization(error);
@@ -130,28 +157,38 @@ export class AsyncSqliteScheduledTaskStore {
       pending.reject(error);
     }
     this.pending.clear();
-    void this.terminate().catch(() => undefined);
+    void this.shutdown().catch(() => undefined);
   }
 
-  private terminate(): Promise<void> {
-    // Retain ownership on failure; no replacement Worker can be opened.
-    this.termination ??= this.worker.terminate().then(() => undefined);
-    return this.termination;
+  private shutdown(): Promise<void> {
+    if (this.closeTask) return this.closeTask;
+    Atomics.store(this.cancellation, 0, 1);
+    this.closeTask = (async () => {
+      if (!this.exited) {
+        try { this.worker.postMessage({ type: "close" } satisfies ScheduledTaskWorkerRequest); }
+        catch { /* An unavailable channel still requires physical exit confirmation. */ }
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          this.exit,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new ScheduledTaskStorageError("shutdown", "exit-unconfirmed")), 2_000);
+          }),
+        ]);
+        if (this.initializedSuccessfully && !this.closeAcknowledged) {
+          throw new ScheduledTaskStorageError("shutdown", "close-unconfirmed");
+        }
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    })().finally(() => { this.closeTask = undefined; });
+    return this.closeTask;
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.closed = true;
     this.fail(new ScheduledTaskStoreClosedError());
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        this.terminate(),
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => reject(new ScheduledTaskStorageError("shutdown", "timeout")), 2_000);
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    return this.shutdown();
   }
 }

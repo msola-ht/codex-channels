@@ -35,7 +35,12 @@ v1 或未知版本在打开时失败关闭，不提供历史迁移；新安装�
 App Server 执行与 Surface `/schedule` 管理命令已接入且默认关闭；Application 负责 Actor 归属、
 五分钟选择快照和创建/删除确认，Surface 不直接访问 Store。
 Gateway 经异步端口使用唯一计划任务 SQLite Worker，初始化、普通请求和关闭分别有独立时限；
-超时写入不自动重试，也不创建替代写者。到期查询直接使用 SQL `LIMIT`；Scheduler 在派发后增量清理，
+超时写入不自动重试，也不创建替代写者。正常关闭与致命失败通过同一停止标记和协作关闭消息收敛，
+阻止迟到就绪及尚未开始的 SQL；线程先关闭 SQLite，再以 1 秒预算请求 Windows ACL helper 退出。
+父端保留原 2 秒关闭预算，要求关闭确认及 Worker exit；超时仍保留 owner，不强行终止线程。
+helper 关闭预算失败后继续等待实际退出才关闭端口；`closeScheduledTaskStores()` 拒绝新实例并请求
+全部 owner 关闭，`waitForScheduledTaskStoresExit()` 供最终退出路径等待物理结束，实例仅在 exit 后移出登记。
+到期查询直接使用 SQL `LIMIT`；Scheduler 在派发后增量清理，
 每批最多读取 16 个 Task 和 200 个 Run，完成一轮后等待 24 小时。清理失败经 `onError` 观察但不阻断安全调度。
 Application 通过不阻止进程退出的短期定时器主动清理超过五分钟的待确认记录，并把 Store 状态冲突
 转换为稳定的用户可见错误；

@@ -10,8 +10,9 @@ export const scheduledTaskWorkerMethods = [
 export type ScheduledTaskWorkerMethod = (typeof scheduledTaskWorkerMethods)[number];
 export type ScheduledTaskWorkerRequest = {
   [K in ScheduledTaskWorkerMethod]: { readonly id: number; readonly method: K; readonly args: Parameters<ScheduledTaskStore[K]> }
-}[ScheduledTaskWorkerMethod];
+}[ScheduledTaskWorkerMethod] | { readonly type: "close" };
 
 export type ScheduledTaskWorkerReply =
+  | { readonly type: "closed"; readonly ok: boolean }
   | { readonly id: number; readonly ok: true; readonly value: unknown }
   | { readonly id: number; readonly ok: false; readonly reason: "state" | "schema" | "sqlite" | "invalid-input" | "storage"; readonly stateMessage?: string };

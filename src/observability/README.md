@@ -33,6 +33,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   各自只负责授权、参数边界和结果呈现。
   控制台整体及各 Provider 的会话/轮次计数使用 `threadCounts(scope)`，按自身 Thread/Turn 去重，不执行会话列表的递归用量、排序或行映射。
 - `async-metrics-store.ts` / `metrics-worker.ts` / `metrics-worker-protocol.ts`：Gateway 唯一指标数据库连接由单 Worker 拥有，初始化、SQL 写入与查询、保留清理和关闭均在线程内执行；主线程只使用明确的异步窄端口，不再为账户窗口额外打开同步读连接。请求队列上限 256 项、8 MiB，逐项串行，2 秒普通请求预算包括排队；初始化独立限时 15 秒，关闭确认独立限时 5 秒。取消的排队请求不执行；已发出的写入保留请求、容量和原始期限，调用方取消等待后仍由内部任务接收实际结果，成功提交后的缓存与通知继续收尾。真正的写入超时按结果未知处理，连接不再接收新操作且不重试写入；未确认线程退出时保留 Worker 所有权与数据库锁归属。
+  正常关闭、初始化失败与致命请求失败共用协作关闭：停止标记阻止迟到就绪与尚未开始的 SQL，线程先关闭 SQLite，再用 1 秒预算请求 Windows ACL helper 退出；预算失败继续保留 owner 并等待实际退出后才关闭端口。`closeMetricsStores()` 拒绝新实例并请求所有 owner 关闭，`waitForMetricsStoresExit()` 供最终退出路径等待物理结束，实例仅在 Worker exit 后移出登记。
 - `provider-quota-tokens.ts`：按精确 Provider 单次流式归约最多三个额度窗口，只返回有限窗口总数；Gateway 在线程内读取，保留同步只读消费端的同一窗口语义。
 - `request-metrics-writer.ts`：提供 10,000 条、16 MiB 上限的有界延迟写入队列；指标 Socket 只负责入队，
   批次成功提交后通过注入回调通知读取方失效，通知故障不改变写入结果；失败批次不发送成功通知。
@@ -92,11 +93,11 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   记录时间及精确条件筛选，再按自身 Thread/Turn 汇总、排序和分页，返回匹配总数和不受分页影响的
   汇总；Provider 筛选支持单值或多值并集，`providers()` 返回库内完整去重名单供筛选选项使用。
   `threadTurnSummaries()` 另外返回同筛选范围、分页前的后代 `subagentAggregate`、按 Thread/Turn 去重的 `subagentTurnCount` 和会话加后代的 `treeAggregate`；递归关系只覆盖已登记后代，请求必须具有 Turn 归属，不改变自身轮次列表与聚合口径。精确 Turn 筛选时这三个字段均为 null，避免推断后代请求的父轮次归属；无匹配请求时聚合为 null、后代轮数为零。WebUI `/turns` 入口在同一读取快照中取得这些汇总和轮次分页。
-  Provider、模型和思考等级取匹配范围内最后一条记录，不混入范围外的最新设置。父 Turn 任务窄查询由
+  Provider、模型和思考等级只取同筛选范围内最近的普通响应（`source = owned`、`operation = response`、用途为空），不混入范围外的最新设置；无普通响应时保持未知。父 Turn 任务窄查询由
   `threadTurnTaskSummary()` 提供，子代理完成卡片通过 `threadTurnSummary()` 精确读取官方终态对应
   Turn，再按需合并该 Turn 的子任务；`threadList()` 与 `threadTurnSummaries()` 供
   `codexc metrics threads` 和 `turns` 导出复用。
-  `subagents()` 从全部已登记关系读取各层子代理，`threadSubagents()` 限定为目标 Thread 的直接子代理；两者均包括尚无请求的代理，聚合各自全部保留请求的轮次、Token 与缓存指标，模型、提供商与思考等级共同取最后入库请求（无请求时为 null），在数据库内按首次请求或最后记录排序后分页；会话列表的
+  `subagents()` 从全部已登记关系读取各层子代理，`threadSubagents()` 限定为目标 Thread 的直接子代理；两者均包括尚无请求的代理，聚合各自全部保留请求的轮次、Token 与缓存指标，模型、提供商与思考等级共同取同范围最近的普通响应（`source = owned`、`operation = response`、用途为空；无普通响应时为 null），在数据库内按首次请求或最后记录排序后分页；会话列表的
   `directSubagentCount` 同样只计直接子级，不随请求筛选变化，不把关系导航混入指标聚合。
   每轮明细的 `directSubagentCount` 通过 `subagent_turns` 精确父 Thread/Turn 关联并验证直接父关系后，按不同子 Thread 计数；`threadSubagents()` 的可选 `parentTurnId` 使用相同关系筛选和分页，全局 `subagents()` 拒绝该字段，子代理行用量仍为自身全部保留历史。
   WebUI 顶层列表通过 `mainThreadsOnly` 在汇总和分页前排除已登记子代理；CLI 导出与控制台仍查询全部会话。
