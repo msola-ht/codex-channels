@@ -455,6 +455,8 @@ export interface StoredThreadTurnsPage extends StoredThreadMetricsPage {
 }
 
 export interface StoredModelRequestMetricsErrorGroup {
+  source: "owned" | "relay";
+  errorCode: string | null;
   provider: string;
   model: string | null;
   status: Exclude<ModelRequestStatus, "completed">;

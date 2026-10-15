@@ -79,6 +79,8 @@ export function printMetricsReport(result, format) {
       ["group", (row) => row.group],
       ["status", (row) => row.status],
       ["errorType", (row) => row.errorType],
+      ["errorCode", (row) => row.errorCode],
+      ["source", (row) => row.source],
       ["lastErrorMessage", (row) => row.lastErrorMessage],
       ["httpStatus", (row) => row.httpStatus],
       ["lastOccurredAtMs", (row) => row.lastOccurredAtMs],
@@ -126,6 +128,9 @@ export function printMetricsReport(result, format) {
         group: group.model ?? group.provider ?? "全部",
         status: group.status,
         errorType: group.errorType,
+        errorCode: group.errorCode,
+        source: group.source,
+        lastErrorMessage: group.lastErrorMessage,
         httpStatus: group.httpStatus,
         lastOccurredAtMs: group.lastOccurredAtMs,
         requestCount: group.requestCount,
@@ -184,10 +189,10 @@ export function printMetricsReport(result, format) {
     console.log("本时间范围没有中断、失败或未完整观测请求。");
     return;
   }
-  console.log("| 提供商 | 模型 | 状态 | 类型 | HTTP | 次数 |");
-  console.log("| --- | --- | --- | --- | ---: | ---: |");
+  console.log("| 来源 | 提供商 | 模型 | 状态 | 类型 | 错误码 | HTTP | 次数 |");
+  console.log("| --- | --- | --- | --- | --- | --- | ---: | ---: |");
   for (const group of result.errors.groups) {
-    console.log(`| ${markdownCell(group.provider)} | ${markdownCell(group.model ?? "未观测")} | ${formatRequestStatus(group)} | ${markdownCell(group.errorType ?? "未提供")} | ${group.httpStatus ?? ""} | ${group.requestCount} |`);
+    console.log(`| ${markdownCell(group.source)} | ${markdownCell(group.provider)} | ${markdownCell(group.model ?? "未观测")} | ${formatRequestStatus(group)} | ${markdownCell(group.errorType ?? "未提供")} | ${markdownCell(group.errorCode ?? "未提供")} | ${group.httpStatus ?? ""} | ${group.requestCount} |`);
   }
 }
 
@@ -367,7 +372,7 @@ function formatRequestOutcomes(outcomes) {
 
 function formatRequestStatus(record) {
   if (record.status === "completed") return "完成";
-  if (record.errorType === "client_disconnected") return "客户端中断";
+  if ((record.source === "relay" ? record.errorCode : record.errorType) === "client_disconnected") return "客户端中断";
   if (record.status === "failed") return "其他失败";
   return "未完整观测";
 }

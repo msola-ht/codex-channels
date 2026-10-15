@@ -1,5 +1,5 @@
 import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
-import type { Translate } from "./i18n/messages"
+import { messages, type Translate } from "./i18n/messages"
 import { translate } from "./i18n/translate"
 import { failureLabelKeys, recordedRequestFailure, requestFailureReason } from "./request-failure"
 import { modelDisplayName } from "../../../runtime/model-display-name.mjs"
@@ -155,12 +155,17 @@ export function formatErrorType(
   return reason ? translate(language, `requests.relayReasons.${failureLabelKeys[reason]}`) : label ? label[language] : translate(language, "requests.relayReasons.requestFailed")
 }
 
-export function formatRequestError(record: RequestRecord, language: DisplayLanguage): string {
+export function formatRequestError(record: Pick<RequestRecord, "source" | "status" | "deliveryStatus" | "errorCode" | "errorType" | "httpStatus" | "errorMessage">, language: DisplayLanguage): string {
   const reason = recordedRequestFailure(record)
   return reason ? translate(language, `requests.relayReasons.${failureLabelKeys[reason]}`)
     : record.errorType || record.errorCode ? formatErrorType(record.errorType ?? record.errorCode, language)
     : record.status === "failed" || record.status === "incomplete" || record.errorMessage
       ? translate(language, "requests.relayReasons.requestFailed") : "—"
+}
+
+export function formatTrafficFailureStage(stage: string, language: DisplayLanguage): string {
+  const stages = messages[language].traffic.failureStages
+  return Object.hasOwn(stages, stage) ? stages[stage as keyof typeof stages] : stages.unknown
 }
 
 const errorMessageTranslations: ReadonlyArray<{
@@ -230,7 +235,7 @@ export function formatRequestOutcomes(outcomes: RequestOutcomeCounts | null, t: 
 }
 
 export function isClientInterruption(record: Pick<RequestRecord, "source" | "status" | "deliveryStatus" | "errorCode" | "errorType" | "httpStatus">): boolean {
-  return record.status !== "completed" && recordedRequestFailure(record) === "disconnected"
+  return record.status !== "completed" && (record.source === "relay" ? record.errorCode : record.errorType) === "client_disconnected"
 }
 
 export function formatInterruptionSummary(summary: RequestInterruptionSummary, t: Translate): string {

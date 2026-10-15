@@ -9,6 +9,8 @@ export interface MetricsQueryReader {
 }
 
 export const observableCompletionSql = "status = 'completed'";
+export const interruptedRequestSql = `NOT (${observableCompletionSql}) AND COALESCE(
+  CASE WHEN source = 'relay' THEN error_code ELSE error_type END = 'client_disconnected', 0)`;
 export const normalizedStatusSql = "status";
 export const compactAggregateSql = `
   ${requestOutcomeSql("operation = 'compact'", "compact_")},
@@ -50,11 +52,11 @@ export const metricsAggregateSql = `
 `;
 
 export function requestOutcomeSql(condition = "1", prefix = ""): string {
-  const interrupted = `NOT (${observableCompletionSql}) AND error_type = 'client_disconnected'`;
+  const interrupted = interruptedRequestSql;
   const failed = `NOT (${observableCompletionSql}) AND status = 'failed'
-    AND (error_type IS NULL OR error_type <> 'client_disconnected')`;
+    AND NOT (${interruptedRequestSql})`;
   const incomplete = `NOT (${observableCompletionSql}) AND status <> 'failed'
-    AND (error_type IS NULL OR error_type <> 'client_disconnected')`;
+    AND NOT (${interruptedRequestSql})`;
   return [
     ["completed", observableCompletionSql], ["interrupted", interrupted],
     ["failed", failed], ["incomplete", incomplete],

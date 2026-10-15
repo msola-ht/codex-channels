@@ -116,18 +116,19 @@ function formatErrorMetricsReport(
     "### 请求明细",
     ...report.groups.map((group, index) => {
       const provider = formatCodexProviderLabel(group.provider);
-      const status = group.errorType === "client_disconnected"
+      const status = (group.source === "relay" ? group.errorCode : group.errorType) === "client_disconnected"
         ? "客户端中断"
         : formatRequestStatus(group.status);
       const httpStatus = group.httpStatus === null
         ? ""
         : ` · HTTP ${group.httpStatus}`;
-      return `${index + 1}. ${provider} / ${group.model === null ? "未知模型" : formatModelDisplayName(group.model)} · ${formatMetricsErrorType(group.errorType)} · ${status}${httpStatus} · ${formatRequestCount(group.requestCount)} 次 · 最近发生：${formatMetricOccurredAt(group.lastOccurredAtMs)}`;
+      const code = group.errorCode === null ? "" : ` · 错误码：${/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/u.test(group.errorCode) ? group.errorCode : "未识别"}`;
+      return `${index + 1}. ${group.source === "relay" ? "Relay" : "原生代理"} · ${provider} / ${group.model === null ? "未知模型" : formatModelDisplayName(group.model)} · ${formatMetricsErrorType(group.errorType)}${code} · ${status}${httpStatus} · ${formatRequestCount(group.requestCount)} 次 · 最近发生：${formatMetricOccurredAt(group.lastOccurredAtMs)}`;
     }),
   );
   const hidden = report.totalGroupCount - report.groups.length;
   if (hidden > 0) {
-    lines.push(`仅显示出现次数最高的 ${report.groups.length} 项，另有 ${hidden} 项。`);
+    lines.push(`按最近发生时间显示 ${report.groups.length} 项，另有 ${hidden} 项。`);
   }
   return toStructuredMarkdownList(lines.join("\n"));
 }

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react"
 import { requestFailureReason } from "@/lib/request-failure"
+import { formatTrafficFailureStage } from "@/lib/format"
 import { formatGenerationSpeed } from "../../../../runtime/request-timing.mjs"
 import { ChevronLeftIcon, ChevronRightIcon, CopyIcon } from "lucide-react"
 import { TrafficParameterComparison, TrafficRequestContent } from "@/components/traffic/traffic-request-content"
@@ -298,7 +299,7 @@ function SummaryMetric({ label, value, description }: { label: ReactNode; value:
 }
 
 function ResponseFailure({ response, diagnostics }: { response: NonNullable<TrafficExchangeDetail["response"]>; diagnostics?: TrafficExchangeDetail["chatDiagnostics"] }) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const deliveryFailed = response.deliveryStatus === "failed" || response.deliveryStatus === "disconnected"
   if (response.state === "completed" && !deliveryFailed) return null
   const fields = diagnostics?.fields ?? {}
@@ -318,7 +319,7 @@ function ResponseFailure({ response, diagnostics }: { response: NonNullable<Traf
       <p>{response.errorScope === "websocket_client_closed" && reason === "unknown" ? t("traffic.clientClosedExplanation") : t(`traffic.failureReasons.${reason}`)}</p>
       {response.websocketClose === undefined ? null : <p>{t("traffic.clientCloseCode", { code: response.websocketClose.code })}</p>}
       {facts.filter(([, value]) => value !== undefined).map(([label, value]) => <p key={String(label)} className="break-all">{label}: {String(value)}</p>)}
-      {response.failureStage === undefined ? null : <p>{t("traffic.failureStage", { stage: response.failureStage })}</p>}
+      {response.failureStage === undefined ? null : <p>{t("traffic.failureStage", { stage: formatTrafficFailureStage(response.failureStage, language) })}</p>}
       {hasResponseDiagnostics(response)
         ? <TrafficDisclosure title={t("traffic.errorDetailsTitle")}><ResponseErrorDetails response={response} /></TrafficDisclosure>
         : reason === "unknown" ? <p>{t("traffic.failureUnknown")}</p> : null}

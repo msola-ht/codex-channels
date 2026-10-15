@@ -38,14 +38,13 @@ export const failureLabelKeys = {
 export function recordedRequestFailure(record: Pick<RequestRecord, "source" | "status" | "deliveryStatus" | "errorCode" | "errorType" | "httpStatus">) {
   if (record.status === "completed" && record.deliveryStatus === "disconnected") return "disconnected"
   if (record.status === "completed" && record.deliveryStatus === "failed") return "delivery"
-  if (record.source !== "relay") {
-    // Native metrics also carry upstream error fields. Local transport failures
-    // retain priority; otherwise actual HTTP errors precede upstream identifiers.
-    if (["upload_timeout", "preparation_timeout", "upstream_timeout", "delivery_timeout", "client_delivery_error", "client_disconnected"].includes(record.errorType ?? "")) {
-      return requestFailureReason([record.errorType])
-    }
-    const httpReason = requestFailureReason([], record.httpStatus)
-    if (httpReason) return httpReason
+  if (record.source === "relay") return requestFailureReason([record.errorCode], record.httpStatus)
+  // Native metrics also carry upstream error fields. Local transport failures
+  // retain priority; otherwise actual HTTP errors precede upstream identifiers.
+  if (["upload_timeout", "preparation_timeout", "upstream_timeout", "delivery_timeout", "client_delivery_error", "client_disconnected"].includes(record.errorType ?? "")) {
+    return requestFailureReason([record.errorType])
   }
-  return requestFailureReason([record.errorCode, record.errorType], record.httpStatus)
+  const httpReason = requestFailureReason([], record.httpStatus)
+  if (httpReason) return httpReason
+  return requestFailureReason([record.errorCode === "client_disconnected" ? undefined : record.errorCode, record.errorType], record.httpStatus)
 }

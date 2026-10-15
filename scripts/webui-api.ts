@@ -129,6 +129,8 @@ export interface ModelUsage extends Aggregate {
 }
 
 export interface ErrorGroup {
+  source: "owned" | "relay"
+  errorCode: string | null
   provider: string | null
   model: string | null
   status: string
@@ -1166,6 +1168,7 @@ export interface TrafficExchangeDetail {
       totalTokens?: number
     } | null
     failure?: string
+    /** Stable stage identifier; localized by each presentation surface. */
     failureStage?: string
     output: Array<{ type: string; name?: string; callId?: string; phase?: string; text: string }>
     outputTruncated: boolean

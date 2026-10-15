@@ -59,7 +59,7 @@
   Surface 创建上下文、无人值守权限边界和 App Server 请求接线。
 - `git-workspace-status.ts`：通过异步子进程读取当前授权 Workspace 的 Git 分支，限制执行时间与输出大小，接收调用方取消；状态命令、上线通知与完成卡共用该读取器，不阻塞 Gateway 事件循环。
 - `request-metrics-query-adapter.ts`：复用 Observability 统一只读查询服务，把查询结果和 Provider
-  显示名映射为 Application 的 `/metrics` 窄端口；不让 Application 依赖 SQLite 实现。
+  显示名映射为 Application 的 `/metrics` 窄端口，保留错误组的来源和错误码；不让 Application 依赖 SQLite 实现。
 - `managed-provider-capabilities.ts`：按 `runtime/model-provider-definitions.mjs` 的编译期能力元数据
   有界装配 DeepSeek、OpenCode Go、CCG、CLP 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
   账户能力；未知能力或适配器冲突启动时失败关闭，不回退到 OpenAI 账户查询。

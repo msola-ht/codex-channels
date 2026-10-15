@@ -117,6 +117,8 @@ export interface RequestMetricsAggregateReport {
 }
 
 export interface RequestMetricsErrorGroup {
+  source: "owned" | "relay";
+  errorCode: string | null;
   provider: string;
   model: string | null;
   status: "failed" | "incomplete" | "unknown";
