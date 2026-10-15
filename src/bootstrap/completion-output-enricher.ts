@@ -13,8 +13,8 @@ import type {
 const completionEnrichmentTimeoutMs = 250;
 
 export interface CompletionOutputEnricherOptions {
-  autoApprovalReview?(threadId: string, turnId: string): Extract<OutputEvent, { type: "turn.completed" }>["autoApprovalReview"];
-  sessionAutoApprovalReview?(threadId: string): Extract<OutputEvent, { type: "turn.completed" }>["sessionAutoApprovalReview"];
+  autoApprovalReview?(threadId: string, turnId: string, signal: AbortSignal): Promise<Extract<OutputEvent, { type: "turn.completed" }>["autoApprovalReview"]>;
+  sessionAutoApprovalReview?(threadId: string, signal: AbortSignal): Promise<Extract<OutputEvent, { type: "turn.completed" }>["sessionAutoApprovalReview"]>;
   subagentMetadata?(agentThreadId: string, signal: AbortSignal): Promise<{
     id: string;
     parentThreadId?: string | null;
@@ -23,23 +23,26 @@ export interface CompletionOutputEnricherOptions {
     model?: string | null;
     reasoningEffort?: string | null;
   }>;
-  executionTiming?(threadId: string, turnId: string): {
+  executionTiming?(threadId: string, turnId: string, signal: AbortSignal): Promise<{
     durationMs: number | null;
     sessionDurationMs: number | null;
     sessionTiming?: Extract<OutputEvent, { type: "turn.completed" }>["sessionTiming"];
-  };
+  }>;
   completionAccountStatus?(provider: string, signal: AbortSignal): Promise<CompletionAccountStatus | undefined>;
   completionTiming?(
     threadId: string,
     turnId: string,
     current: TurnOutputTiming | undefined,
+    signal: AbortSignal,
   ): TurnOutputTiming | undefined | Promise<TurnOutputTiming | undefined>;
   taskAggregate?(
     threadId: string,
     turnId: string,
+    signal: AbortSignal,
   ): TurnTaskMetricsSummary | undefined | Promise<TurnTaskMetricsSummary | undefined>;
   sessionAggregate?(
     threadId: string,
+    signal: AbortSignal,
   ): TurnTaskMetricsSummary | undefined | Promise<TurnTaskMetricsSummary | undefined>;
 }
 
@@ -80,6 +83,7 @@ export class CompletionOutputEnricher {
     }
     const accountStatusResult = this.readCompletionAccountStatus(event, signal);
     const enrichmentDeadline = Date.now() + completionEnrichmentTimeoutMs;
+    const metricsSignal = AbortSignal.any([signal, AbortSignal.timeout(completionEnrichmentTimeoutMs)]);
     const gitBranchResult = this.readGitBranch(event, enrichmentDeadline, signal);
     // Keep unexpected callback failures observed while the ordered metrics settle.
     void gitBranchResult.catch(() => undefined);
@@ -90,6 +94,7 @@ export class CompletionOutputEnricher {
         event.threadId,
         event.turnId,
         event.timing,
+        metricsSignal,
       ),
       enrichmentDeadline,
       event.timing,
@@ -100,7 +105,7 @@ export class CompletionOutputEnricher {
     const taskAggregateResult = this.resolveCompletionMetrics(
       event,
       "task",
-      () => this.options.taskAggregate?.(event.threadId, event.turnId),
+      () => this.options.taskAggregate?.(event.threadId, event.turnId, metricsSignal),
       enrichmentDeadline,
     );
     const taskAggregate = taskAggregateResult instanceof Promise
@@ -109,34 +114,40 @@ export class CompletionOutputEnricher {
     const sessionAggregateResult = this.resolveCompletionMetrics(
       event,
       "session",
-      () => this.options.sessionAggregate?.(event.threadId),
+      () => this.options.sessionAggregate?.(event.threadId, metricsSignal),
       enrichmentDeadline,
     );
     const sessionAggregate = sessionAggregateResult instanceof Promise
       ? await sessionAggregateResult
       : sessionAggregateResult;
-    const accountStatus = await accountStatusResult;
-    const gitBranch = await gitBranchResult;
-    let execution: ReturnType<NonNullable<CompletionOutputEnricherOptions["executionTiming"]>> | undefined;
+    let execution: Awaited<ReturnType<NonNullable<CompletionOutputEnricherOptions["executionTiming"]>>> | undefined;
+    const unknownReview = { approved: 0, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 0, coverage: "unknown" as const };
     let autoApprovalReview: Extract<OutputEvent, { type: "turn.completed" }>["autoApprovalReview"];
     try {
-      autoApprovalReview = this.options.autoApprovalReview?.(event.threadId, event.turnId);
+      autoApprovalReview = await this.resolveCompletionMetrics(event, "turn",
+        () => this.options.autoApprovalReview?.(event.threadId, event.turnId, metricsSignal), enrichmentDeadline,
+        this.options.autoApprovalReview ? unknownReview : undefined);
     } catch {
       autoApprovalReview = { approved: 0, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 0, coverage: "unknown" };
       this.logger.warn({ threadId: event.threadId, turnId: event.turnId }, "完成卡自动审查统计读取失败");
     }
     let sessionAutoApprovalReview: typeof autoApprovalReview;
     try {
-      sessionAutoApprovalReview = this.options.sessionAutoApprovalReview?.(event.threadId);
+      sessionAutoApprovalReview = await this.resolveCompletionMetrics(event, "session",
+        () => this.options.sessionAutoApprovalReview?.(event.threadId, metricsSignal), enrichmentDeadline,
+        this.options.sessionAutoApprovalReview ? unknownReview : undefined);
     } catch {
       sessionAutoApprovalReview = { approved: 0, denied: 0, timedOut: 0, aborted: 0, inProgress: 0, unknown: 0, total: 0, coverage: "unknown" };
       this.logger.warn({ threadId: event.threadId }, "完成卡会话自动审查统计读取失败");
     }
     try {
-      execution = this.options.executionTiming?.(event.threadId, event.turnId);
+      execution = await this.resolveCompletionMetrics(event, "turn",
+        () => this.options.executionTiming?.(event.threadId, event.turnId, metricsSignal), enrichmentDeadline);
     } catch {
       this.logger.warn({ threadId: event.threadId, turnId: event.turnId }, "完成卡轮次耗时读取失败");
     }
+    const accountStatus = await accountStatusResult;
+    const gitBranch = await gitBranchResult;
     return {
       ...event,
       ...(autoApprovalReview === undefined ? {} : { autoApprovalReview }),

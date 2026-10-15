@@ -195,16 +195,17 @@ export interface ScheduledTaskStore {
       readonly conversationId: string;
     };
     readonly includeDeleted?: boolean;
+    readonly actorId?: string;
   }): ScheduledTask[];
   renameTask(taskId: string, name: string, nowMs?: number): ScheduledTask;
   pauseTask(taskId: string, nowMs?: number): ScheduledTask;
   resumeTask(taskId: string, nowMs?: number): ScheduledTask;
   blockTask(taskId: string, nowMs?: number): ScheduledTask;
   deleteTask(taskId: string, nowMs?: number): ScheduledTask;
-  listDueTasks(nowMs: number): ScheduledTask[];
+  listDueTasks(nowMs: number, limit?: number): ScheduledTask[];
   listRuns(taskId: string, options?: { readonly limit?: number }): ScheduledRun[];
-  /** All running rows, independent of per-task display retention windows. */
-  listRunningRuns(): ScheduledRun[];
+  /** Bounded keyset page, independent of per-task display retention windows. */
+  listRunningRuns(options?: { readonly afterRunId?: string; readonly limit?: number }): ScheduledRun[];
   /** Narrow query used by the scheduler; it must not depend on the display limit. */
   hasBlockingRun(taskId: string): boolean;
   /** Count in-flight or unresolved runs for one Conversation without loading history. */
@@ -262,14 +263,26 @@ export interface ScheduledTaskStore {
     resolution: ScheduledUncertainResolution,
     nowMs?: number,
   ): ScheduledRun;
-  /** Convert dispatching rows left by a crashed Gateway into uncertain. */
+  /** Convert at most 200 dispatching rows left by a crashed Gateway into uncertain. */
   recoverAfterCrash(nowMs?: number): ScheduledRun[];
-  /** Remove terminal runs older than 90 days and retain at most 200 per task. */
-  cleanup(nowMs?: number): number;
+  /** Incrementally remove terminal history within a bounded row/task budget. */
+  cleanup(nowMs?: number): ScheduledTaskCleanupResult;
   /** Copy the private database, preserving its restrictive file mode. */
   backup(destinationPath?: string): string;
   close(): void;
 }
+
+export interface ScheduledTaskCleanupResult {
+  readonly deleted: number;
+  readonly complete: boolean;
+}
+
+/** Runtime consumers await persistence; synchronous CLI stores remain usable. */
+export type ScheduledTaskStorePort = {
+  [K in keyof ScheduledTaskStore]: ScheduledTaskStore[K] extends (...args: infer A) => infer R
+    ? (...args: A) => R | Promise<R>
+    : ScheduledTaskStore[K];
+};
 
 export type ScheduledUncertainResolution = "failed" | "interrupted";
 

@@ -147,7 +147,7 @@ export type RequestMetricsResult =
   | RequestMetricsErrorReport;
 
 export interface RequestMetricsQueryPort {
-  forThread(threadId: string): ThreadRequestMetricsSummary;
+  forThread(threadId: string): Promise<ThreadRequestMetricsSummary>;
   /**
    * Return the locally observed Turn count for this Thread only.
    *
@@ -155,18 +155,18 @@ export interface RequestMetricsQueryPort {
    * Threads and is intended for fast session pickers. `null` means that no
    * local request metric exists for the Thread yet.
    */
-  threadTurnCount?(threadId: string): number | null;
+  threadTurnCount?(threadId: string): Promise<number | null>;
   aggregate(
     view: RequestMetricsAggregateView,
     range: RequestMetricsTimeRange,
-  ): RequestMetricsAggregateReport;
-  errors(range: RequestMetricsTimeRange): RequestMetricsErrorReport;
+  ): Promise<RequestMetricsAggregateReport>;
+  errors(range: RequestMetricsTimeRange): Promise<RequestMetricsErrorReport>;
   weeklyQuotaEstimate(
     provider: string,
     limitId: string,
     resetsAt: number,
     nowMs: number,
-  ): WeeklyQuotaMetricsObservation | null;
+  ): Promise<WeeklyQuotaMetricsObservation | null>;
 }
 
 const weeklyWindowDurationMins = 7 * 24 * 60;

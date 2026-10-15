@@ -361,7 +361,7 @@ export interface ConversationAccountMetricsUseCases {
   requestMetrics(
     target: ConversationTarget,
     query?: RequestMetricsCommandQuery,
-  ): RequestMetricsResult | null;
+  ): Promise<RequestMetricsResult | null>;
 }
 
 export class ConversationService implements
@@ -600,7 +600,7 @@ export class ConversationService implements
   requestMetrics(
     target: ConversationTarget,
     query: RequestMetricsCommandQuery = { view: "session" },
-  ): RequestMetricsResult | null {
+  ): Promise<RequestMetricsResult | null> {
     return this.accountMetrics.requestMetrics(target, query);
   }
 

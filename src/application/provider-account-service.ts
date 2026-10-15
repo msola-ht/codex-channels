@@ -1,3 +1,4 @@
+import { serialize } from "node:v8";
 import type {
   AccountQueryPort,
   AccountThreadUsage,
@@ -19,6 +20,9 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
   private readonly limitsObservedAt = new Map<string, number>();
   private limitsQuerySequence = 0;
   private readonly savedLimitsSequence = new Map<string, number>();
+  private readonly snapshotTails = new Map<string, Promise<void>>();
+  private pendingSnapshots = 0;
+  private pendingSnapshotBytes = 0;
 
   constructor(
     adapters: readonly ProviderAccountAdapter[],
@@ -50,7 +54,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     if (!threadId || adapter.provider !== "openai" || !adapter.accountThreadUsage) {
       const result = await accountUsage;
       signal?.throwIfAborted();
-      this.persist(result);
+      await this.persist(result, undefined, signal);
       return result;
     }
     const [usage, threadUsage]: [ProviderAccountUsage, AccountThreadUsage] = await Promise.all([
@@ -61,7 +65,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     ]);
     signal?.throwIfAborted();
     const result = usage.kind === "token-usage" ? { ...usage, threadUsage } : usage;
-    this.persist(result);
+    await this.persist(result, undefined, signal);
     return result;
   }
 
@@ -74,12 +78,8 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     const result = await adapter.accountLimits(signal);
     signal?.throwIfAborted();
     if (sequence >= (this.savedLimitsSequence.get(modelProvider) ?? 0)) {
-      this.persist(
-        this.snapshotUsage.get(modelProvider)
-          ?? { kind: "unsupported", provider: modelProvider },
-        result,
-      );
       this.savedLimitsSequence.set(modelProvider, sequence);
+      await this.persist(undefined, result, signal);
     }
     if (result.kind !== "rate-limits" || !this.readCredentialRefreshTime) return result;
     // Login metadata is presentation-only; never persist it as an official quota snapshot.
@@ -151,29 +151,57 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     });
   }
 
-  private persist(usage: ProviderAccountUsage, limits?: ProviderAccountLimits): void {
-    if (!this.snapshotWriter) return;
-    // OpenAI 用量不能刷新额度时间，也不能在重启后用占位额度覆盖已有记录。
-    if (usage.provider === "openai" && limits === undefined && !this.limitsObservedAt.has(usage.provider)) {
-      this.snapshotUsage.set(usage.provider, usage);
-      return;
-    }
-    const observedAtMs = usage.provider === "openai" && limits === undefined
-      ? this.limitsObservedAt.get(usage.provider)!
-      : Date.now();
-    const mergedUsage = usage;
-    // 用量查询没有额度观测；只合并已成功保存的额度，不用占位值覆盖。
-    const mergedLimits = limits ?? this.snapshotLimits.get(usage.provider)
-      ?? { kind: "unsupported" as const, provider: usage.provider };
-    this.snapshotWriter.writeOfficialAccountSnapshot(createOfficialAccountSnapshot({
-      provider: mergedUsage.provider,
-      observedAtMs,
-      usage: mergedUsage,
-      limits: mergedLimits,
-    }));
-    this.snapshotUsage.set(usage.provider, usage);
-    this.snapshotLimits.set(usage.provider, mergedLimits);
-    if (limits !== undefined) this.limitsObservedAt.set(usage.provider, observedAtMs);
+  private async persist(usage: ProviderAccountUsage | undefined, limits?: ProviderAccountLimits, callerSignal?: AbortSignal): Promise<void> {
+    callerSignal?.throwIfAborted();
+    const writer = this.snapshotWriter;
+    if (!writer) return;
+    const provider = usage?.provider ?? limits?.provider;
+    if (provider === undefined) throw new Error("账户快照缺少 Provider");
+    const bytes = serialize([usage, limits]).byteLength;
+    if (this.pendingSnapshots >= 128 || this.pendingSnapshotBytes + bytes > 4 * 1024 * 1024) throw new Error("账户快照队列已满");
+    const signal = AbortSignal.any([AbortSignal.timeout(2_000), ...(callerSignal ? [callerSignal] : [])]);
+    const observationAtMs = Date.now();
+    this.pendingSnapshots++;
+    this.pendingSnapshotBytes += bytes;
+    const task = (this.snapshotTails.get(provider) ?? Promise.resolve()).then(async () => {
+      signal.throwIfAborted();
+      const currentUsage = usage ?? this.snapshotUsage.get(provider) ?? { kind: "unsupported" as const, provider };
+      // OpenAI 用量不能刷新额度时间，也不能在重启后用占位额度覆盖已有记录。
+      if (provider === "openai" && limits === undefined && !this.limitsObservedAt.has(provider)) {
+        this.snapshotUsage.set(provider, currentUsage);
+        return;
+      }
+      const observedAtMs = provider === "openai" && limits === undefined
+        ? this.limitsObservedAt.get(provider)!
+        : observationAtMs;
+      // 用量查询没有额度观测；只合并已成功保存的额度，不用占位值覆盖。
+      const mergedLimits = limits ?? this.snapshotLimits.get(provider)
+        ?? { kind: "unsupported" as const, provider };
+      await writer.writeOfficialAccountSnapshot(createOfficialAccountSnapshot({
+        provider,
+        observedAtMs,
+        usage: currentUsage,
+        limits: mergedLimits,
+      }), signal);
+      signal.throwIfAborted();
+      this.snapshotUsage.set(provider, currentUsage);
+      this.snapshotLimits.set(provider, mergedLimits);
+      if (limits !== undefined) this.limitsObservedAt.set(provider, observedAtMs);
+    });
+    const tail = task.catch(() => undefined).finally(() => {
+      this.pendingSnapshots--;
+      this.pendingSnapshotBytes -= bytes;
+      if (this.snapshotTails.get(provider) === tail) this.snapshotTails.delete(provider);
+    });
+    this.snapshotTails.set(provider, tail);
+    let cancel!: () => void;
+    try {
+      await Promise.race([task, new Promise<never>((_, reject) => {
+        cancel = () => reject(new Error("账户快照已取消或超时"));
+        signal.addEventListener("abort", cancel, { once: true });
+        if (signal.aborted) cancel();
+      })]);
+    } finally { signal.removeEventListener("abort", cancel); }
   }
 }
 

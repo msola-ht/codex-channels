@@ -39,7 +39,8 @@ export class SqliteSessionDisplayCache implements SessionDisplayCachePort {
     this.database = new DatabaseSync(path);
     try {
       securePrivateFileSync(path);
-      this.database.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = DELETE;");
+      // Derived-cache contention fails immediately instead of blocking all conversations for five seconds.
+      this.database.exec("PRAGMA busy_timeout = 0; PRAGMA journal_mode = DELETE;");
       this.initializeSchema();
     } catch (error) {
       try {

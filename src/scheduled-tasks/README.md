@@ -11,6 +11,8 @@
 - `sqlite-row-codec.ts`：数据库 Task/Run Row 的严格领域映射、持久化枚举和时间戳校验。
 - `sqlite-schema.ts`：Schema v2 SQL、版本读取和数据库严格结构校验。
 - `sqlite-store.ts`：数据库文件与事务、原子领取、清理、崩溃收敛及当前结构检查。
+- `async-sqlite-store.ts`：Gateway 独占的 SQLite Worker、初始化与请求预算、有界准入和关闭。
+- `sqlite-worker.ts`、`sqlite-worker-protocol.ts`：封闭的存储命令及脱敏失败分类；同步 Store 保留给 CLI 冷路径。
 - `scheduler.ts`：注入 Clock 与执行端口的有限调度循环。
 
 Schedule 目前支持 `interval`（每 N 分钟，UTC anchor 加固定分钟间隔）、`once`（绝对日期时间，或
@@ -28,8 +30,10 @@ v1 或未知版本在打开时失败关闭，不提供历史迁移；新安装�
 领取失败不消耗原未知状态，已结束的一次性任务仍可显式重试未知 Run。停止调度
 时会向尚未完成的执行端口传递取消信号，并在有限等待上限后报告稳定超时。配置与 Bootstrap
 App Server 执行与 Surface `/schedule` 管理命令已接入且默认关闭；Application 负责 Actor 归属、
-五分钟选择快照和创建/删除确认，Surface 不直接访问 Store。Scheduler 在首次 tick 和之后每 24 小时最多调用一次
-Run 清理；清理失败经 `onError` 观察但不阻断本次安全调度。
+五分钟选择快照和创建/删除确认，Surface 不直接访问 Store。
+Gateway 经异步端口使用唯一计划任务 SQLite Worker，初始化、普通请求和关闭分别有独立时限；
+超时写入不自动重试，也不创建替代写者。到期查询直接使用 SQL `LIMIT`；Scheduler 在派发后增量清理，
+每批最多读取 16 个 Task 和 200 个 Run，完成一轮后等待 24 小时。清理失败经 `onError` 观察但不阻断安全调度。
 Application 通过不阻止进程退出的短期定时器主动清理超过五分钟的待确认记录，并把 Store 状态冲突
 转换为稳定的用户可见错误；
 每个 Actor 在同一 Conversation 的未删除任务固定限制为 100 个。

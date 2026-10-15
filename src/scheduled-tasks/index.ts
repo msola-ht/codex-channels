@@ -35,6 +35,8 @@ export {
   type ScheduledTaskStatus,
   type ScheduledUncertainResolution,
   type ScheduledTaskStore,
+  type ScheduledTaskStorePort,
+  type ScheduledTaskCleanupResult,
   type ScheduledTaskTickResult,
 } from "./types.js";
 export {
@@ -51,3 +53,4 @@ export {
   ScheduledTaskScheduler,
   ScheduledTaskStopTimeoutError,
 } from "./scheduler.js";
+export { AsyncSqliteScheduledTaskStore, ScheduledTaskStorageError } from "./async-sqlite-store.js";

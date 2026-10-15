@@ -8,25 +8,16 @@ import type {
   WeeklyQuotaMetricsObservation,
 } from "../application/index.js";
 import type {
-  ModelRequestMetricsQuotaAccountStore,
-  ModelRequestMetricsRequestQueryStore,
-  ModelRequestMetricsThreadQueryStore,
+  AsyncGatewayMetricsStore,
 } from "../observability/index.js";
 import {
-  queryRequestMetricsAggregate,
-  queryRequestMetricsErrors,
   requestMetricsAggregationDimension,
   resolveRequestMetricsRange as resolveSharedRequestMetricsRange,
 } from "../observability/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
 
-type RequestMetricsQueryStore =
-  & Pick<ModelRequestMetricsRequestQueryStore, "aggregate" | "errors">
-  & Pick<
-    ModelRequestMetricsThreadQueryStore,
-    "threadSummary" | "threadTurnCount"
-  >
-  & Pick<ModelRequestMetricsQuotaAccountStore, "weeklyQuotaEstimate">;
+type RequestMetricsQueryStore = Pick<AsyncGatewayMetricsStore,
+  "aggregate" | "errors" | "threadSummary" | "threadTurnCount" | "weeklyQuotaEstimate">;
 
 export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
   constructor(
@@ -35,8 +26,8 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
     private readonly now: () => number = Date.now,
   ) {}
 
-  forThread(threadId: string): ThreadRequestMetricsSummary {
-    const summary = this.store.threadSummary(threadId);
+  async forThread(threadId: string): Promise<ThreadRequestMetricsSummary> {
+    const summary = await this.store.threadSummary(threadId);
     return {
       threadId: summary.threadId,
       modelProvider: this.router.modelSettingsForThread(threadId)
@@ -46,20 +37,16 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
     };
   }
 
-  threadTurnCount(threadId: string): number | null {
+  threadTurnCount(threadId: string): Promise<number | null> {
     return this.store.threadTurnCount(threadId);
   }
 
-  aggregate(
+  async aggregate(
     view: RequestMetricsAggregateView,
     range: RequestMetricsTimeRange,
-  ): RequestMetricsAggregateReport {
+  ): Promise<RequestMetricsAggregateReport> {
     const resolvedRange = resolveRequestMetricsRange(range, this.now());
-    const report = queryRequestMetricsAggregate(
-      this.store,
-      requestMetricsAggregationDimension(view),
-      { name: range, ...resolvedRange },
-    );
+    const report = await this.store.aggregate({ dimension: requestMetricsAggregationDimension(view), ...resolvedRange });
     return {
       view,
       range,
@@ -75,12 +62,9 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
     };
   }
 
-  errors(range: RequestMetricsTimeRange): RequestMetricsErrorReport {
+  async errors(range: RequestMetricsTimeRange): Promise<RequestMetricsErrorReport> {
     const resolvedRange = resolveRequestMetricsRange(range, this.now());
-    const report = queryRequestMetricsErrors(
-      this.store,
-      { name: range, ...resolvedRange },
-    );
+    const report = await this.store.errors(resolvedRange);
     return {
       view: "errors",
       range,
@@ -110,7 +94,7 @@ export class RequestMetricsQueryAdapter implements RequestMetricsQueryPort {
     limitId: string,
     resetsAt: number,
     nowMs: number,
-  ): WeeklyQuotaMetricsObservation | null {
+  ): Promise<WeeklyQuotaMetricsObservation | null> {
     return this.store.weeklyQuotaEstimate({ provider, limitId, resetsAt, nowMs });
   }
 }

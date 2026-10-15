@@ -189,7 +189,7 @@ export type ConversationCommandResult =
       plugin: Awaited<ReturnType<ConversationCommandUseCases["pluginDetail"]>>;
     }
   | { kind: "usage"; result: Awaited<ReturnType<ConversationCommandUseCases["providerAccountUsage"]>> }
-  | { kind: "metrics"; summary: ReturnType<ConversationCommandUseCases["requestMetrics"]> }
+  | { kind: "metrics"; summary: Awaited<ReturnType<ConversationCommandUseCases["requestMetrics"]>> }
   | { kind: "limits"; result: Awaited<ReturnType<ConversationCommandUseCases["providerAccountLimits"]>> }
   | {
       kind: "permissions";
@@ -209,17 +209,17 @@ export type ConversationCommandResult =
     }
   | {
       kind: "scheduled-tasks";
-      result: ReturnType<ScheduledTaskUseCases["list"]>;
+      result: Awaited<ReturnType<ScheduledTaskUseCases["list"]>>;
     }
   | {
       kind: "scheduled-runs";
-      result: ReturnType<ScheduledTaskUseCases["runs"]>;
+      result: Awaited<ReturnType<ScheduledTaskUseCases["runs"]>>;
     }
   | {
       kind: "scheduled-confirmation";
       preview:
-        | ReturnType<ScheduledTaskUseCases["previewCreate"]>
-        | ReturnType<ScheduledTaskUseCases["previewDelete"]>;
+        | Awaited<ReturnType<ScheduledTaskUseCases["previewCreate"]>>
+        | Awaited<ReturnType<ScheduledTaskUseCases["previewDelete"]>>;
     };
 
 export interface ConversationModelSummary {
@@ -312,7 +312,7 @@ export type ConversationCommandOutcome =
         | "scheduled-task.renamed"
         | "scheduled-task.paused"
         | "scheduled-task.resumed";
-      task: ReturnType<ScheduledTaskUseCases["rename"]>;
+      task: Awaited<ReturnType<ScheduledTaskUseCases["rename"]>>;
     }
   | {
       type: "scheduled-task.run-requested" | "scheduled-task.retry-requested";
@@ -692,7 +692,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "metrics":
         return {
           kind: "metrics",
-          summary: this.conversations.requestMetrics(
+          summary: await this.conversations.requestMetrics(
             target,
             parseMetricsCommand(argumentsText),
           ),
@@ -966,34 +966,34 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "natural":
         return {
           kind: "scheduled-confirmation",
-          preview: scheduled.previewNaturalLanguage(target, actorId, operation.description),
+          preview: await scheduled.previewNaturalLanguage(target, actorId, operation.description),
         };
       case "create":
         return {
           kind: "scheduled-confirmation",
-          preview: scheduled.previewCreate(target, actorId, operation.request),
+          preview: await scheduled.previewCreate(target, actorId, operation.request),
         };
       case "list":
         return {
           kind: "scheduled-tasks",
-          result: scheduled.list(target, actorId, operation.page),
+          result: await scheduled.list(target, actorId, operation.page),
         };
       case "runs":
         return {
           kind: "scheduled-runs",
-          result: scheduled.runs(target, actorId, operation.selector, operation.page),
+          result: await scheduled.runs(target, actorId, operation.selector, operation.page),
         };
       case "rename":
         return {
           kind: "outcome",
           outcome: {
             type: "scheduled-task.renamed",
-            task: scheduled.rename(target, actorId, operation.selector, operation.name),
+            task: await scheduled.rename(target, actorId, operation.selector, operation.name),
           },
         };
       case "pause":
       case "resume": {
-        const task = scheduled[operation.type](target, actorId, operation.selector);
+        const task = await scheduled[operation.type](target, actorId, operation.selector);
         return {
           kind: "outcome",
           outcome: {
@@ -1020,10 +1020,10 @@ export class ConversationCommandService implements ConversationCommandExecutor {
       case "delete":
         return {
           kind: "scheduled-confirmation",
-          preview: scheduled.previewDelete(target, actorId, operation.selector),
+          preview: await scheduled.previewDelete(target, actorId, operation.selector),
         };
       case "confirm": {
-        const confirmed = scheduled.confirm(target, actorId, operation.token);
+        const confirmed = await scheduled.confirm(target, actorId, operation.token);
         return {
           kind: "outcome",
           outcome: {

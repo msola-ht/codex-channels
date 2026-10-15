@@ -79,6 +79,9 @@ export {
   type ResolvedRequestMetricsRange,
 } from "./request-metrics-query-service.js";
 export { BufferedModelRequestMetricsWriter } from "./request-metrics-writer.js";
+export { AsyncMetricsStore, metricsWorkerFailureMetadata } from "./async-metrics-store.js";
+export { sumProviderQuotaTokens, type ProviderQuotaTokenRange } from "./provider-quota-tokens.js";
+export type { AsyncGatewayMetricsStore, AsyncTurnExecutionStore, AsyncAutoApprovalReviewStore } from "./metrics-worker-protocol.js";
 export {
   acquireRequestMetricsDatabaseLock,
   modelRequestMetricsSchemaVersion,

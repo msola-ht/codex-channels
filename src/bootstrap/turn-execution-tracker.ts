@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { ThreadHistoryPort } from "../application/index.js";
 import type { ConversationInputEvent } from "../conversation-core/index.js";
-import type { TurnExecutionMetric, TurnExecutionStore } from "../observability/index.js";
+import type { AsyncTurnExecutionStore, TurnExecutionMetric } from "../observability/index.js";
 
 /** Owns bounded history hydration; cards and WebUI only read the metrics store. */
 export class TurnExecutionTracker {
@@ -11,12 +11,17 @@ export class TurnExecutionTracker {
   private readonly abort = new AbortController();
   private active: { threadId: string; provider: string; invalidated: boolean } | undefined;
   private task: Promise<void> | undefined;
+  private readonly writes = new Set<Promise<void>>();
+  private invalidation: Promise<void> | undefined;
+  private reliable = true;
 
   constructor(
     private readonly history: Pick<ThreadHistoryPort, "listThreadTurns">,
-    private readonly store: TurnExecutionStore,
+    private readonly store: AsyncTurnExecutionStore,
     private readonly changed: () => void,
     private readonly failed: (error: unknown, threadId: string) => void,
+    private readonly scopedStore: (signal: AbortSignal) => AsyncTurnExecutionStore = () => store,
+    private readonly fatal: (error: unknown) => void = error => failed(error, "<coverage>"),
   ) {}
 
   handle(event: ConversationInputEvent, provider: string): void {
@@ -27,22 +32,19 @@ export class TurnExecutionTracker {
     this.observe(threadId, provider);
     // Invalidate before any fallible store operation, including a failed live write.
     if (this.active?.threadId === threadId) this.active.invalidated = true;
-    try {
-      if (event.type === "thread.reverted") {
-        this.store.invalidateThreadExecutions(threadId);
-      } else {
-        if (firstObservation) this.store.invalidateThreadExecutions(threadId, false);
-        this.store.recordTurnExecution(threadId, provider, {
-          turnId: event.turnId, durationMs: event.durationMs ?? null, recordedAtMs: Date.now(),
+    this.write(threadId, async () => {
+      const complete = await this.store.observeTurnExecution(threadId, provider,
+        event.type === "thread.reverted" ? { type: "reverted" } : {
+          type: "completed", first: firstObservation,
+          turn: { turnId: event.turnId, durationMs: event.durationMs ?? null, recordedAtMs: Date.now() },
         });
-      }
+      // A hydration may have started while this live observation awaited its
+      // Worker result. It must not replace the newer committed Turn facts.
+      if (this.active?.threadId === threadId) this.active.invalidated = true;
       this.notify(threadId);
-      if (this.store.isExecutionHistoryComplete(threadId)) return;
-    } catch (error) {
-      this.failed(error, threadId);
-      this.invalidate(threadId);
-    }
-    this.enqueue(threadId, provider, event.type === "turn.completed" ? event.turnId : undefined);
+      if (complete) return;
+      this.enqueue(threadId, provider, event.type === "turn.completed" ? event.turnId : undefined);
+    }, () => this.enqueue(threadId, provider, event.type === "turn.completed" ? event.turnId : undefined));
   }
 
   /** Called for restored bindings as well as completions; no new Turn is required. */
@@ -60,10 +62,39 @@ export class TurnExecutionTracker {
   }
 
   private invalidate(threadId: string): void {
-    try {
-      this.store.invalidateThreadExecutions(threadId, false);
+    this.write(threadId, async () => {
+      await this.store.invalidateThreadExecutions(threadId, false);
       this.notify(threadId);
-    } catch (error) { this.failed(error, threadId); }
+    });
+  }
+
+  /** A failed live observation cannot certify an older database snapshot as complete. */
+  isReliable(): boolean { return this.reliable; }
+
+  private write(threadId: string, operation: () => Promise<void>, recover?: () => void): void {
+    if (this.writes.size >= 128) {
+      this.reliable = false;
+      this.failed(new Error("轮次耗时写入队列已满"), threadId);
+      this.invalidateCoverage();
+      recover?.();
+      return;
+    }
+    const task = operation().catch(error => {
+      this.reliable = false;
+      this.failed(error, threadId);
+      if (this.active?.threadId === threadId) this.active.invalidated = true;
+      this.invalidateCoverage();
+      if (!this.abort.signal.aborted) recover?.();
+    }).finally(() => this.writes.delete(task));
+    this.writes.add(task);
+  }
+
+  private invalidateCoverage(): void {
+    if (this.invalidation) return;
+    this.invalidation = Promise.all([...this.writes]).then(async () => {
+      await this.store.invalidateAllThreadExecutions();
+      this.changed();
+    }).catch(error => this.fatal(error)).finally(() => { this.invalidation = undefined; });
   }
 
   private notify(threadId: string): void {
@@ -71,7 +102,10 @@ export class TurnExecutionTracker {
   }
 
   private enqueue(threadId: string, provider: string, throughTurnId?: string): void {
+    if (this.abort.signal.aborted) return;
     if (this.pending.size >= 64 && !this.pending.has(threadId)) {
+      this.reliable = false;
+      this.invalidateCoverage();
       this.failed(new Error("轮次耗时同步队列已满"), threadId);
       return;
     }
@@ -79,7 +113,9 @@ export class TurnExecutionTracker {
     this.startDrain();
   }
 
-  async settled(): Promise<void> { while (this.task) await this.task; }
+  async settled(): Promise<void> {
+    while (this.task || this.writes.size > 0 || this.invalidation) await Promise.all([this.task, ...this.writes, this.invalidation]);
+  }
 
   private startDrain(): void {
     if (this.task || this.abort.signal.aborted || this.pending.size === 0) return;
@@ -105,7 +141,12 @@ export class TurnExecutionTracker {
     this.abort.abort();
     this.pending.clear();
     this.observed.clear();
-    await this.settled();
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([this.settled(), new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("轮次耗时统计停止尚未确认")), 5_000);
+      })]);
+    } finally { if (timer) clearTimeout(timer); }
   }
 
   private async drain(): Promise<void> {
@@ -116,25 +157,38 @@ export class TurnExecutionTracker {
       this.active = active;
       const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(5_000)]);
       try {
+        await Promise.all([...this.writes]);
+        if (signal.aborted || active.invalidated) continue;
+        const store = this.scopedStore(signal);
+        await store.invalidateThreadExecutions(threadId, false);
+        this.notify(threadId);
+        let snapshot: TurnExecutionMetric[] | undefined;
         for (let attempt = 0; attempt < 3 && !active.invalidated && !signal.aborted; attempt += 1) {
           try {
             if (attempt > 0) await delay(attempt * 100, undefined, { signal });
             if (active.invalidated) break;
-            // Repair invalidation too if the original write failed while the database was unavailable.
-            this.store.invalidateThreadExecutions(threadId, false);
-            this.notify(threadId);
             const turns = await readThreadExecutions(this.history, threadId, signal);
             if (signal.aborted || active.invalidated) break;
             if (throughTurnId !== undefined && !turns.some(turn => turn.turnId === throughTurnId)) {
               throw new Error("官方历史尚未包含已完成轮次");
             }
-            this.store.replaceThreadExecutions(threadId, provider, turns);
-            this.notify(threadId);
+            if (signal.aborted || active.invalidated) break;
+            snapshot = turns;
             break;
           } catch (error) {
             if (!this.abort.signal.aborted && !active.invalidated) this.failed(error, threadId);
           }
         }
+        // Retry only authoritative reads, never writes with an uncertain commit result.
+        await Promise.all([...this.writes]);
+        if (snapshot && !signal.aborted && !active.invalidated) {
+          await store.replaceThreadExecutions(threadId, provider, snapshot);
+          this.notify(threadId);
+        }
+      } catch (error) {
+        this.reliable = false;
+        this.invalidateCoverage();
+        if (!this.abort.signal.aborted && !active.invalidated) this.failed(error, threadId);
       } finally { this.active = undefined; }
     }
   }
@@ -151,7 +205,7 @@ export async function readThreadExecutions(
   let cursor: string | null = null;
   for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
     signal.throwIfAborted();
-    const request = history.listThreadTurns(threadId, { cursor, limit: 100, sortDirection: "desc" });
+    const request = history.listThreadTurns(threadId, { cursor, limit: 100, sortDirection: "desc", signal });
     const page = await new Promise<Awaited<typeof request>>((resolve, reject) => {
       const abort = () => reject(new Error("轮次耗时同步已取消或超时"));
       signal.addEventListener("abort", abort, { once: true });

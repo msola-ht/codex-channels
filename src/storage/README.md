@@ -35,6 +35,9 @@ Schema v6 保存前台、后台绑定、`conversation_idle_state` 和 `conversat
 
 存储实现必须保持可替换。字段只服务于绑定恢复或必要偏好；不支持的格式保留原数据并明确报错。涉及用户数据的处置须先明确备份、失败恢复和回滚方案并取得相应授权，不能自动删除数据库，也不能读取或复制 `~/.codex/sessions`。
 
+绑定变更仍在同步事务成功后更新内存授权与路由；绑定库和展示缓存遇到锁竞争立即报错，
+不在 Gateway 主线程执行 SQLite 忙等，也不将失败写入视为成功。此边界保留同步接口，不提供异步落盘承诺。
+
 会话展示缓存位于 Gateway 数据目录的 `session-display-cache.sqlite3`。它只缓存由 App Server
 `thread/list` 和 `thread/turns/list` 产生的状态、筛选元数据及轮数，用于 `/r` 和清理预览避免重复读取
 历史；轮数缓存五分钟后重新向 App Server 校验。发送新消息会立即使对应轮数失效，官方

@@ -80,6 +80,12 @@ export class ScheduledTaskStoreClosedError extends Error {
 export class SqliteScheduledTaskStore implements ScheduledTaskStore {
   private readonly database: DatabaseSync;
   private closed = false;
+  private cleanupCursor: {
+    taskId: string;
+    scheduledFor: number | undefined;
+    runId: string | undefined;
+    rank: number;
+  } | undefined;
 
   constructor(readonly path: string) {
     if (path !== ":memory:") {
@@ -116,7 +122,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
   createTask(input: CreateScheduledTaskInput): ScheduledTask {
     this.requireOpen();
     const task = buildTask(input);
-    this.database
+    const inserted = this.database
       .prepare(`
         INSERT INTO tasks (
           task_id, name, status, created_at, updated_at,
@@ -124,7 +130,10 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
           schedule_type, schedule_json, timezone, anchor_at, next_run_at,
           model_provider, model, reasoning_effort, service_tier,
           sandbox, approval_policy, permissions
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        WHERE (SELECT COUNT(*) FROM tasks
+          WHERE surface = ? AND account_id = ? AND conversation_id = ? AND actor_id = ?
+            AND status <> 'deleted') < 100
       `)
       .run(
         task.taskId,
@@ -150,7 +159,14 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         task.permission?.sandbox ?? null,
         task.permission?.approvalPolicy ?? null,
         task.permission?.permissions ?? null,
+        task.surface,
+        task.accountId,
+        task.conversationId,
+        task.actorId,
       );
+    if (Number(inserted.changes) === 0) {
+      throw new ScheduledTaskStateError("每个用户在同一会话最多创建 100 个计划任务，请先删除不再使用的任务");
+    }
     return task;
   }
 
@@ -174,6 +190,10 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         options.conversation.accountId,
         options.conversation.conversationId,
       );
+    }
+    if (options.actorId !== undefined) {
+      filters.push("actor_id = ?");
+      values.push(options.actorId);
     }
     const where = filters.length === 0 ? "" : ` WHERE ${filters.join(" AND ")}`;
     const rows = this.database
@@ -252,16 +272,19 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     return this.requireTask(taskId);
   }
 
-  listDueTasks(nowMs: number): ScheduledTask[] {
+  listDueTasks(nowMs: number, limit = 100): ScheduledTask[] {
     this.requireOpen();
     this.requireTimestamp(nowMs);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
+      throw new RangeError("到期任务查询 limit 必须在 1 到 1000 之间");
+    }
     const rows = this.database
       .prepare(`
         SELECT * FROM tasks
         WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ?
-        ORDER BY next_run_at ASC, task_id ASC
+        ORDER BY next_run_at ASC, task_id ASC LIMIT ?
       `)
-      .all(nowMs) as unknown as TaskRow[];
+      .all(nowMs, limit) as unknown as TaskRow[];
     return rows.map(taskFromRow);
   }
 
@@ -280,15 +303,19 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     return rows.map(runFromRow);
   }
 
-  listRunningRuns(): ScheduledRun[] {
+  listRunningRuns(options: { readonly afterRunId?: string; readonly limit?: number } = {}): ScheduledRun[] {
     this.requireOpen();
+    const limit = options.limit ?? 200;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
+      throw new RangeError("Running Run 查询 limit 必须在 1 到 1000 之间");
+    }
     const rows = this.database
       .prepare(`
         SELECT * FROM runs
-        WHERE state = 'running'
-        ORDER BY scheduled_for ASC, run_id ASC
+        WHERE state = 'running' AND run_id > ?
+        ORDER BY run_id ASC LIMIT ?
       `)
-      .all() as unknown as RunRow[];
+      .all(options.afterRunId ?? "", limit) as unknown as RunRow[];
     return rows.map(runFromRow);
   }
 
@@ -475,6 +502,10 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     if (run.state !== "running") {
       throw new ScheduledTaskStateError(`Run ${runId} 不能从 ${run.state} 转为 completed`);
     }
+    // Preserve a rejection persisted during awaited terminal reconciliation.
+    if (run.errorCategory === "approval") {
+      return this.markFailed(runId, "approval", nowMs, identifiers);
+    }
     this.requireRunTimestampAtLeast(nowMs, run, "completed_at");
     this.database
       .prepare(`
@@ -547,19 +578,19 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     let recoveredRunIds: string[] = [];
     try {
       const dispatching = this.database
-        .prepare("SELECT * FROM runs WHERE state = 'dispatching'")
+        .prepare("SELECT * FROM runs WHERE state = 'dispatching' ORDER BY run_id LIMIT 200")
         .all() as unknown as RunRow[];
       recoveredRunIds = dispatching.map((row) => row.run_id);
       for (const row of dispatching) {
         this.requireRunTimestampAtLeast(nowMs, runFromRow(row), "completed_at");
       }
-      this.database
+      if (recoveredRunIds.length > 0) this.database
         .prepare(`
           UPDATE runs SET state = 'uncertain', completed_at = ?,
             error_category = 'gateway_crash', error_message = 'Gateway 在派发结果确认前退出'
-          WHERE state = 'dispatching'
+          WHERE state = 'dispatching' AND run_id IN (${recoveredRunIds.map(() => "?").join(",")})
         `)
-        .run(nowMs);
+        .run(nowMs, ...recoveredRunIds);
       this.database.exec("COMMIT");
     } catch (error) {
       this.rollback(error);
@@ -572,45 +603,60 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     return rows.map(runFromRow);
   }
 
-  cleanup(nowMs = Date.now()): number {
+  cleanup(nowMs = Date.now()): { deleted: number; complete: boolean } {
     this.requireOpen();
     this.requireTimestamp(nowMs);
     const cutoff = nowMs - retentionMs;
     let deleted = 0;
+    let inspected = 0;
+    let visited = 0;
+    let cursor = this.cleanupCursor && { ...this.cleanupCursor };
+    let complete = false;
     this.database.exec("BEGIN IMMEDIATE");
     try {
-      const expired = this.database
-        .prepare(`
-          DELETE FROM runs
-          WHERE state NOT IN ('dispatching', 'running', 'uncertain')
-            AND COALESCE(completed_at, scheduled_for) < ?
-        `)
-        .run(cutoff);
-      deleted += Number(expired.changes);
-      const tasks = this.database
-        .prepare("SELECT task_id FROM tasks")
-        .all() as Array<{ task_id: string }>;
-      for (const task of tasks) {
-        const overflow = this.database
-          .prepare(`
-            DELETE FROM runs
-            WHERE task_id = ?
-              AND state NOT IN ('dispatching', 'running', 'uncertain')
-              AND run_id NOT IN (
-                SELECT run_id FROM runs
-                WHERE task_id = ?
-                ORDER BY scheduled_for DESC, run_id DESC
-                LIMIT ?
-              )
-          `)
-          .run(task.task_id, task.task_id, scheduledTaskMaximumRunsPerTask);
-        deleted += Number(overflow.changes);
+      // Walk the existing tasks PK and runs_task_idx with keyset cursors.
+      // LIMIT bounds rows inspected as well as deleted; no OFFSET or full scan.
+      while (inspected < 200 && visited < 16) {
+        if (!cursor) {
+          const first = this.database.prepare("SELECT task_id FROM tasks ORDER BY task_id LIMIT 1")
+            .get() as { task_id: string } | undefined;
+          if (!first) { complete = true; break; }
+          cursor = { taskId: first.task_id, scheduledFor: undefined, runId: undefined, rank: 0 };
+        }
+        visited += 1;
+        const remaining = 200 - inspected;
+        const rows = (cursor.scheduledFor === undefined
+          ? this.database.prepare(`SELECT run_id, scheduled_for, completed_at, state FROM runs
+              WHERE task_id = ? ORDER BY scheduled_for DESC, run_id DESC LIMIT ?`)
+            .all(cursor.taskId, remaining)
+          : this.database.prepare(`SELECT run_id, scheduled_for, completed_at, state FROM runs
+              WHERE task_id = ? AND (scheduled_for, run_id) < (?, ?)
+              ORDER BY scheduled_for DESC, run_id DESC LIMIT ?`)
+            .all(cursor.taskId, cursor.scheduledFor, cursor.runId!, remaining)) as Array<{
+              run_id: string; scheduled_for: number; completed_at: number | null; state: string;
+            }>;
+        for (const row of rows) {
+          inspected += 1;
+          cursor.rank += 1;
+          cursor.scheduledFor = row.scheduled_for;
+          cursor.runId = row.run_id;
+          if (!["dispatching", "running", "uncertain"].includes(row.state)
+            && ((row.completed_at ?? row.scheduled_for) < cutoff || cursor.rank > scheduledTaskMaximumRunsPerTask)) {
+            deleted += Number(this.database.prepare("DELETE FROM runs WHERE run_id = ?").run(row.run_id).changes);
+          }
+        }
+        if (rows.length === remaining) break;
+        const next = this.database.prepare("SELECT task_id FROM tasks WHERE task_id > ? ORDER BY task_id LIMIT 1")
+          .get(cursor.taskId) as { task_id: string } | undefined;
+        if (!next) { cursor = undefined; complete = true; break; }
+        cursor = { taskId: next.task_id, scheduledFor: undefined, runId: undefined, rank: 0 };
       }
       this.database.exec("COMMIT");
+      this.cleanupCursor = cursor;
     } catch (error) {
       this.rollback(error);
     }
-    return deleted;
+    return { deleted, complete };
   }
 
   backup(destinationPath?: string): string {

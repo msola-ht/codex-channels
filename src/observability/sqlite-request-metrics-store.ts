@@ -3,6 +3,7 @@ import { validRequestTiming } from "../../runtime/request-timing.mjs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { SqliteQuotaQueries } from "./sqlite-quota-queries.js";
+import { sumProviderQuotaTokens, type ProviderQuotaTokenRange } from "./provider-quota-tokens.js";
 import { SqliteAutoApprovalReviewMetrics } from "./sqlite-auto-approval-review-metrics.js";
 import { SqliteRequestMetricsQueries } from "./sqlite-request-metrics-queries.js";
 import { validateThreadId } from "./sqlite-request-metrics-query-base.js";
@@ -51,6 +52,7 @@ import type {
   StoredThreadSubagentsPage,
   StoredThreadListPage,
   StoredThreadRequestMetricsSummary,
+  StoredThreadRequestMetricsAggregate,
   StoredThreadTurnsPage,
   StoredTurnRequestMetricsSummary,
   StoredWeeklyQuotaEstimate,
@@ -173,6 +175,44 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
 
   recordTurnExecution(threadId: string, provider: string, turn: TurnExecutionMetric): void {
     this.writeThreadExecutions(threadId, provider, [turn], false);
+  }
+
+  observeTurnExecution(threadId: string, provider: string,
+    observation: { type: "reverted" } | { type: "completed"; first: boolean; turn: TurnExecutionMetric }): boolean {
+    if (observation.type === "reverted") this.invalidateThreadExecutions(threadId);
+    else {
+      if (observation.first) this.invalidateThreadExecutions(threadId, false);
+      this.recordTurnExecution(threadId, provider, observation.turn);
+    }
+    return this.isExecutionHistoryComplete(threadId);
+  }
+
+  invalidateAllThreadExecutions(): void {
+    this.requireOpen();
+    if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
+    this.database.exec("UPDATE thread_execution_state SET history_complete = 0");
+  }
+
+  providerQuotaTokens(ranges: readonly ProviderQuotaTokenRange[], provider: string): Map<string, number> {
+    return sumProviderQuotaTokens(this, ranges, provider);
+  }
+
+  completionExecutionTiming(threadId: string, turnId: string): { durationMs: number | null; sessionTiming: SessionExecutionTiming } {
+    return this.readSnapshot(() => ({
+      durationMs: this.turnExecutionDuration(threadId, turnId),
+      sessionTiming: this.sessionExecutionTiming(threadId, turnId),
+    }));
+  }
+
+  subagentCompletionSummary(threadId: string, turnId?: string): {
+    latestTurn: StoredTurnRequestMetricsSummary | null;
+    threadAggregate: StoredThreadRequestMetricsAggregate | StoredTurnRequestMetricsSummary | null;
+  } {
+    return this.readSnapshot(() => {
+      if (turnId === undefined) return this.threadSummary(threadId);
+      const latestTurn = this.threadTurnSummary(threadId, turnId);
+      return { latestTurn, threadAggregate: this.threadTurnTaskSummary(threadId, turnId) ?? latestTurn };
+    });
   }
 
   isExecutionHistoryComplete(threadId: string): boolean {
@@ -726,12 +766,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
 
   close(): void {
     if (this.closed) return;
+    this.database.close();
+    this.lock?.release();
     this.closed = true;
-    try {
-      this.database.close();
-    } finally {
-      this.lock?.release();
-    }
   }
 
   private initializeSchema(): void {

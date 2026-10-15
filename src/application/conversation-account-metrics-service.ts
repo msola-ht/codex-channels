@@ -66,13 +66,13 @@ export class ConversationAccountMetricsService {
       return resolved;
     }
     const nowMs = Date.now();
-    const weeklyEstimates = resolved.limits.limits.flatMap((limit) => {
+    const weeklyEstimates = (await Promise.all(resolved.limits.limits.map(async (limit) => {
       if (limit.limitId !== "codex") return [];
       const window = [limit.primary, limit.secondary].find(
         (candidate) => candidate?.windowDurationMins === 10_080,
       );
       if (!window || window.resetsAt === null) return [];
-      const observation = this.requestMetricsQuery?.weeklyQuotaEstimate(
+      const observation = await this.requestMetricsQuery?.weeklyQuotaEstimate(
         "openai",
         limit.limitId,
         window.resetsAt,
@@ -80,16 +80,16 @@ export class ConversationAccountMetricsService {
       ) ?? null;
       const estimate = estimateWeeklyLimit(limit, observation);
       return estimate === null ? [] : [estimate];
-    });
+    }))).flat();
     return weeklyEstimates.length === 0
       ? resolved
       : { ...resolved, weeklyEstimates };
   }
 
-  requestMetrics(
+  async requestMetrics(
     target: ConversationTarget,
     query: RequestMetricsCommandQuery = { view: "session" },
-  ): RequestMetricsResult | null {
+  ): Promise<RequestMetricsResult | null> {
     if (!this.requestMetricsQuery) return null;
     if (query.view === "errors") {
       return this.requestMetricsQuery.errors(query.range ?? "24h");

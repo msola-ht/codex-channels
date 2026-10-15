@@ -70,7 +70,8 @@ export class SqliteBindingStore implements BindingStore {
     this.database = new DatabaseSync(path);
     try {
       securePrivateFileSync(path);
-      this.database.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = DELETE;");
+      // Binding writes stay synchronous and atomic; a competing writer must not stall the Reader.
+      this.database.exec("PRAGMA busy_timeout = 0; PRAGMA journal_mode = DELETE;");
       this.initializeSchema();
       this.load();
     } catch (error) {

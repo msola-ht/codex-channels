@@ -26,7 +26,7 @@
 - `gateway-component-graph.ts`：只为 OpenAI 主 Client 注入遵循共享代理配置的图片上传 HTTP 客户端，本地模型路由核验直连回环地址；
   为渠道 Hook 管理注入实时授权守卫及 Surface 无损审查策略，在会话锁内和写入前复核运行状态、渠道允许名单及 Actor 归属；
   校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；
-  构造期间即时登记数据库、指标写入方、通知端点与已创建的渠道实例；计划任务 Store 和插件实例创建边界也登记部分取得的资源，不依赖尚未返回的完整应用实例回滚；
+  构造期间即时登记数据库、指标写入方、通知端点与已创建的渠道实例；指标数据库由单 Worker 拥有，启动先等待独立初始化及订阅限制投影读取完成，再开放指标 Socket 与渠道；订阅限制只在已确认账户快照提交后更新内存投影。计划任务 Store 和插件实例创建边界也登记部分取得的资源，不依赖尚未返回的完整应用实例回滚；
   私有持有当前配置、Workspace Registry、Surface 集合与管理器，统一协调配置重载和重启通知接收方的临时切换与恢复；
   启动账户预热绑定应用关闭信号，按账户记录安全失败分类，在指标存储关闭前最多等待 5 秒；
   迟到的用量与额度结果均禁止写入。把同一 Client 的
@@ -56,9 +56,10 @@
   恢复容器及退避计数只在协调器内部创建，组合根不持有或注入其可变状态。
 - `scheduled-task-composition.ts`：在功能启用时集中创建计划任务 Store、Executor、Run Coordinator、Scheduler、
   Application Service 与动态工具 Handler，并拥有恢复、启动、停止和关闭顺序；Gateway 组合根只保留
-  Surface 创建上下文、无人值守权限边界和 App Server 请求接线。
+  Surface 创建上下文、无人值守权限边界和 App Server 请求接线。Store Worker 就绪后才恢复与启动调度；
+  审批查询、拒绝标记和完成持久化经异步端口执行，同步输出观察仅登记内存终态。
 - `git-workspace-status.ts`：通过异步子进程读取当前授权 Workspace 的 Git 分支，限制执行时间与输出大小，接收调用方取消；状态命令、上线通知与完成卡共用该读取器，不阻塞 Gateway 事件循环。
-- `request-metrics-query-adapter.ts`：复用 Observability 统一只读查询服务，把查询结果和 Provider
+- `request-metrics-query-adapter.ts`：通过 Observability Worker 的异步窄端口读取相同范围和聚合语义，把查询结果和 Provider
   显示名映射为 Application 的 `/metrics` 窄端口，保留错误组的来源和错误码；不让 Application 依赖 SQLite 实现。
 - `managed-provider-capabilities.ts`：按 `runtime/model-provider-definitions.mjs` 的编译期能力元数据
   有界装配 DeepSeek、OpenCode Go、CCG、CLP 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
@@ -78,10 +79,10 @@
   上游轮次首 Token 使用当前 Turn 首个有效 OpenAI 上游样本，覆盖重启后仅观测到后续请求的实时值；
   若当前 Turn 已部分延迟写入，按持久化汇总校正请求状态与
   可选用量字段。
-- `auto-approval-review-tracker.ts`：在有界展示队列之前采集所有已归属 Provider 的官方审查与轮次通知，包括未绑定渠道的后代；仅写入最小指标事实。断线使观测覆盖失效，写入失败可观测并保守降级；完成卡通过窄读取端口获取当前轮递归任务快照和当前会话累计快照。
+- `auto-approval-review-tracker.ts`：在有界展示队列之前采集所有已归属 Provider 的官方审查与轮次通知，包括未绑定渠道的后代；Reader 只提交有界异步写入，不执行 SQL。断线使观测覆盖失效，写入失败或队列超限会合并一次独立的持久覆盖降级，无法落库则停止 Gateway；关闭限时等待已接收操作。完成卡通过异步窄端口获取当前轮递归任务快照和当前会话累计快照。
 - `auto-approval-review-notifications.ts`：独立于指标写入，每次仅发布审查完成结果，不补发开始通知；仅 `turn.started` 可记录直接会话归属，审查开始、子代理活动与继续操作不能捕获当前绑定。按已记录的授权归属及既有精确父子 Turn 关系路由，完成时复核原会话与 Provider，保留来源身份、Client 校验的固定动作类别、文件数量、网络协议与端口，以及经凭据脱敏、控制字符清理并各按最多 320 字符截断的 operation、cwd、rationale，并投影 durationMs。Client 保留 ASCII 标点；execve program 与 argv 逐参数脱敏后再格式化。operation 摘要按 action 类别取 command、execve program 与 argv、文件列表、network host（不含完整 target URL）、MCP server/tool 或权限申请 reason；不展示 stdin 正文，不采集风险与用户授权字段。保持有界等待和去重，断线只清理对应 Provider 的归属及等待。无归属、淘汰与输出失败可观测；Core 与投递摘要保持有界纯文本，经现有加密投递箱暂存，平台富文本转义由 Surface 负责。指标采集仍消费开始和完成事件；StateStore 与指标库不增加审查正文、schema 或指标字段，持久投递沿用当前结构版本，历史事件可缺省 details。
 - `turn-execution-tracker.ts`：将官方轮次耗时幂等写入指标库；单队列、有界分页补齐历史，
-  绑定恢复与 Revert 后重新同步，丢弃与实时事件冲突的快照；完整性以指标库为准，内存只记录当前连接的有界观测集合。
+  绑定恢复与 Revert 后重新同步，丢弃与实时事件冲突的快照；实时观察在单 Worker 内按序完成，历史读取有取消及分页预算，只重试权威读取、不重试结果未知的写入。完整性以指标库为准，写入或排队失败会持久降级所有历史完整标记，无法落库则停止 Gateway；内存只记录当前连接的有界观测集合。
   清理后再次完成与写入失败触发补齐；同一五秒预算内最多三次尝试，失效与成功均通知读取方刷新。
   停止时取消读取与重试并等待任务退出，禁止迟到写入，不阻塞 App Server Reader。
 - `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 发给发起父 Turn 的

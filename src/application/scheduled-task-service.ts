@@ -15,6 +15,7 @@ import {
   type ScheduledTask,
   type ScheduledTaskSandbox,
   type ScheduledTaskStore,
+  type ScheduledTaskStorePort,
 } from "../scheduled-tasks/index.js";
 import {
   parseNaturalScheduledTaskDraft,
@@ -148,34 +149,34 @@ export interface ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     description: string,
-  ): ScheduledTaskCreatePreview;
+  ): Promise<ScheduledTaskCreatePreview>;
   previewCreate(
     target: ConversationTarget,
     actorId: string,
     request: ScheduledTaskCreateRequest,
-  ): ScheduledTaskCreatePreview;
+  ): Promise<ScheduledTaskCreatePreview>;
   confirm(
     target: ConversationTarget,
     actorId: string,
     token: string,
-  ): { action: "created" | "deleted"; task: ScheduledTaskView };
-  list(target: ConversationTarget, actorId: string, page?: number): ScheduledTaskListResult;
+  ): Promise<{ action: "created" | "deleted"; task: ScheduledTaskView }>;
+  list(target: ConversationTarget, actorId: string, page?: number): Promise<ScheduledTaskListResult>;
   runs(
     target: ConversationTarget,
     actorId: string,
     selector: string,
     page?: number,
-  ): ScheduledTaskRunListResult;
-  rename(target: ConversationTarget, actorId: string, selector: string, name: string): ScheduledTaskView;
-  pause(target: ConversationTarget, actorId: string, selector: string): ScheduledTaskView;
-  resume(target: ConversationTarget, actorId: string, selector: string): ScheduledTaskView;
+  ): Promise<ScheduledTaskRunListResult>;
+  rename(target: ConversationTarget, actorId: string, selector: string, name: string): Promise<ScheduledTaskView>;
+  pause(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledTaskView>;
+  resume(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledTaskView>;
   run(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledRun>;
   retry(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledRun>;
   previewDelete(
     target: ConversationTarget,
     actorId: string,
     selector: string,
-  ): ScheduledTaskDeletePreview;
+  ): Promise<ScheduledTaskDeletePreview>;
 }
 
 export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
@@ -185,18 +186,18 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
   private readonly confirmationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
-    private readonly store: ScheduledTaskStore,
+    private readonly store: ScheduledTaskStorePort,
     private readonly application: ScheduledTaskApplicationPort,
     private readonly now: () => number = Date.now,
   ) {}
 
-  previewNaturalLanguage(
+  async previewNaturalLanguage(
     target: ConversationTarget,
     actorId: string,
     description: string,
-  ): ScheduledTaskCreatePreview {
+  ): Promise<ScheduledTaskCreatePreview> {
     this.requireActor(target, actorId);
-    this.requireTaskCapacity(target, actorId);
+    await this.requireTaskCapacity(target, actorId);
     const normalizedDescription = normalizeDraftDescription(description);
     const { rest, model } = splitModelMarker(normalizedDescription);
     const deterministic = parseNaturalScheduledTaskDraft(rest, this.now());
@@ -213,13 +214,14 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     );
   }
 
-  previewCreate(
+  async previewCreate(
     target: ConversationTarget,
     actorId: string,
     request: ScheduledTaskCreateRequest,
-  ): ScheduledTaskCreatePreview {
+  ): Promise<ScheduledTaskCreatePreview> {
     this.requireActor(target, actorId);
-    this.requireTaskCapacity(target, actorId);
+    await this.requireTaskCapacity(target, actorId);
+    this.requireActor(target, actorId);
     const now = this.now();
     const prompt = normalizePrompt(request.prompt);
     const timezone = validateIanaTimeZone(request.timezone);
@@ -287,15 +289,16 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     return context;
   }
 
-  confirm(
+  async confirm(
     target: ConversationTarget,
     actorId: string,
     token: string,
-  ): { action: "created" | "deleted"; task: ScheduledTaskView } {
+  ): Promise<{ action: "created" | "deleted"; task: ScheduledTaskView }> {
     this.requireActor(target, actorId);
     const confirmation = this.consumeConfirmation(target, actorId, token);
     if (confirmation.kind === "create") {
-      this.requireTaskCapacity(target, actorId);
+      await this.requireTaskCapacity(target, actorId);
+      this.requireActor(target, actorId);
       const current = this.application.creationContext(target);
       if (
         current.workspaceId !== confirmation.input.workspaceId
@@ -309,20 +312,21 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       ) {
         throw scheduledError("scheduled-task.confirmation.invalid", "计划任务创建上下文已变化，请重新预览");
       }
-      const task = this.mutateTask(() => this.store.createTask(confirmation.input));
+      const task = await this.mutateTask(() => this.store.createTask(confirmation.input));
       this.invalidateTarget(target, actorId);
       return { action: "created", task: toTaskView(task) };
     }
-    const task = this.requireOwnedTask(target, actorId, confirmation.taskId);
-    const deleted = this.mutateTask(() => this.store.deleteTask(task.taskId, this.now()));
+    const task = await this.requireOwnedTask(target, actorId, confirmation.taskId);
+    const deleted = await this.mutateTask(() => this.store.deleteTask(task.taskId, this.now()));
     this.invalidateTarget(target, actorId);
     return { action: "deleted", task: toTaskView(deleted, task) };
   }
 
-  list(target: ConversationTarget, actorId: string, page = 1): ScheduledTaskListResult {
+  async list(target: ConversationTarget, actorId: string, page = 1): Promise<ScheduledTaskListResult> {
     this.requireActor(target, actorId);
-    const tasks = this.store.listTasks({ conversation: target })
+    const tasks = (await this.store.listTasks({ conversation: target, actorId }))
       .filter((task) => task.actorId === actorId);
+    this.requireActor(target, actorId);
     const pageCount = pageCountFor(tasks.length, taskPageSize);
     requirePage(page, pageCount, () => {
       throw scheduledError("scheduled-task.command.invalid", "计划任务页码超出范围");
@@ -338,14 +342,15 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     };
   }
 
-  runs(
+  async runs(
     target: ConversationTarget,
     actorId: string,
     selector: string,
     page = 1,
-  ): ScheduledTaskRunListResult {
-    const task = this.resolveTask(target, actorId, selector);
-    const runs = this.store.listRuns(task.taskId, { limit: 1_000 });
+  ): Promise<ScheduledTaskRunListResult> {
+    const task = await this.resolveTask(target, actorId, selector);
+    const runs = await this.store.listRuns(task.taskId, { limit: 1_000 });
+    this.requireActor(target, actorId);
     const pageCount = pageCountFor(runs.length, runPageSize);
     requirePage(page, pageCount, () => {
       throw scheduledError("scheduled-task.command.invalid", "计划任务页码超出范围");
@@ -365,28 +370,28 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     };
   }
 
-  rename(
+  async rename(
     target: ConversationTarget,
     actorId: string,
     selector: string,
     name: string,
-  ): ScheduledTaskView {
-    const task = this.resolveTask(target, actorId, selector);
-    const updated = this.mutateTask(() =>
+  ): Promise<ScheduledTaskView> {
+    const task = await this.resolveTask(target, actorId, selector);
+    const updated = await this.mutateTask(() =>
       this.store.renameTask(task.taskId, normalizeName(name), this.now())
     );
     return toTaskView(updated);
   }
 
-  pause(target: ConversationTarget, actorId: string, selector: string): ScheduledTaskView {
-    const task = this.resolveTask(target, actorId, selector);
-    const updated = this.mutateTask(() => this.store.pauseTask(task.taskId, this.now()));
+  async pause(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledTaskView> {
+    const task = await this.resolveTask(target, actorId, selector);
+    const updated = await this.mutateTask(() => this.store.pauseTask(task.taskId, this.now()));
     return toTaskView(updated);
   }
 
-  resume(target: ConversationTarget, actorId: string, selector: string): ScheduledTaskView {
-    const task = this.resolveTask(target, actorId, selector);
-    const updated = this.mutateTask(() => this.store.resumeTask(task.taskId, this.now()));
+  async resume(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledTaskView> {
+    const task = await this.resolveTask(target, actorId, selector);
+    const updated = await this.mutateTask(() => this.store.resumeTask(task.taskId, this.now()));
     return toTaskView(updated);
   }
 
@@ -395,7 +400,7 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     actorId: string,
     selector: string,
   ): Promise<ScheduledRun> {
-    const task = this.resolveTask(target, actorId, selector);
+    const task = await this.resolveTask(target, actorId, selector);
     if (task.status === "blocked") {
       throw scheduledError("scheduled-task.state.invalid", "阻塞的计划任务不能立即运行");
     }
@@ -407,8 +412,8 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     actorId: string,
     selector: string,
   ): Promise<ScheduledRun> {
-    const run = this.resolveRun(target, actorId, selector);
-    this.requireOwnedTask(target, actorId, run.taskId);
+    const run = await this.resolveRun(target, actorId, selector);
+    await this.requireOwnedTask(target, actorId, run.taskId);
     if (run.state !== "uncertain") {
       throw scheduledError("scheduled-task.state.invalid", "只有 uncertain Run 可以显式解除后重试");
     }
@@ -417,12 +422,12 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     return retried;
   }
 
-  previewDelete(
+  async previewDelete(
     target: ConversationTarget,
     actorId: string,
     selector: string,
-  ): ScheduledTaskDeletePreview {
-    const task = this.resolveTask(target, actorId, selector);
+  ): Promise<ScheduledTaskDeletePreview> {
+    const task = await this.resolveTask(target, actorId, selector);
     const token = randomUUID();
     const expiresAt = this.now() + confirmationLifetimeMs;
     this.rememberConfirmation({
@@ -442,11 +447,11 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     }
   }
 
-  private resolveTask(
+  private async resolveTask(
     target: ConversationTarget,
     actorId: string,
     selector: string,
-  ): ScheduledTask {
+  ): Promise<ScheduledTask> {
     this.requireActor(target, actorId);
     const normalized = selector.trim();
     if (!normalized) throw scheduledError("scheduled-task.command.invalid", "需要提供任务 ID 或列表序号");
@@ -462,11 +467,11 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     return this.requireOwnedTask(target, actorId, normalized);
   }
 
-  private resolveRun(
+  private async resolveRun(
     target: ConversationTarget,
     actorId: string,
     selector: string,
-  ): ScheduledRun {
+  ): Promise<ScheduledRun> {
     this.requireActor(target, actorId);
     const normalized = selector.trim();
     if (!normalized) throw scheduledError("scheduled-task.command.invalid", "需要提供 Run ID");
@@ -477,23 +482,25 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       }
       const runId = snapshot.ids[Number(normalized) - 1];
       if (!runId) throw scheduledError("scheduled-task.not-found", "Run 列表序号不存在");
-      const run = this.store.getRun(runId);
+      const run = await this.store.getRun(runId);
       if (!run) throw scheduledError("scheduled-task.not-found", "找不到指定 Run");
-      this.requireOwnedTask(target, actorId, run.taskId);
+      await this.requireOwnedTask(target, actorId, run.taskId);
       return run;
     }
-    const run = this.store.getRun(normalized);
+    const run = await this.store.getRun(normalized);
     if (!run) throw scheduledError("scheduled-task.not-found", "找不到指定 Run");
-    this.requireOwnedTask(target, actorId, run.taskId);
+    await this.requireOwnedTask(target, actorId, run.taskId);
     return run;
   }
 
-  private requireOwnedTask(
+  private async requireOwnedTask(
     target: ConversationTarget,
     actorId: string,
     taskId: string,
-  ): ScheduledTask {
-    const task = this.store.getTask(taskId);
+  ): Promise<ScheduledTask> {
+    this.requireActor(target, actorId);
+    const task = await this.store.getTask(taskId);
+    this.requireActor(target, actorId);
     if (
       !task
       || task.status === "deleted"
@@ -555,8 +562,8 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     this.confirmationTimers.delete(token);
   }
 
-  private requireTaskCapacity(target: ConversationTarget, actorId: string): void {
-    const taskCount = this.store.listTasks({ conversation: target })
+  private async requireTaskCapacity(target: ConversationTarget, actorId: string): Promise<void> {
+    const taskCount = (await this.store.listTasks({ conversation: target, actorId }))
       .filter((task) => task.actorId === actorId)
       .length;
     if (taskCount >= maximumTasksPerActorConversation) {
@@ -567,9 +574,9 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     }
   }
 
-  private mutateTask<T>(operation: () => T): T {
+  private async mutateTask<T>(operation: () => T | Promise<T>): Promise<T> {
     try {
-      return operation();
+      return await operation();
     } catch (error) {
       if (error instanceof ScheduledTaskStateError) {
         throw scheduledError("scheduled-task.state.invalid", error.message);

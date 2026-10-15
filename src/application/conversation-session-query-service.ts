@@ -138,8 +138,8 @@ export class ConversationSessionQueryService {
         // Prefer the direct local metric count. It is a single indexed query
         // and, unlike the full summary, never traverses subagent Threads.
         const metricsCount = this.requestMetricsQuery?.threadTurnCount !== undefined
-          ? this.requestMetricsQuery.threadTurnCount(session.id)
-          : this.requestMetricsQuery?.forThread(session.id)?.threadAggregate?.turnCount;
+          ? await this.requestMetricsQuery.threadTurnCount(session.id)
+          : (await this.requestMetricsQuery?.forThread(session.id))?.threadAggregate?.turnCount;
         if (metricsCount !== undefined && metricsCount !== null) {
           countByThread.set(session.id, metricsCount);
           continue;
