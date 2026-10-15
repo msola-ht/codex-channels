@@ -19,6 +19,9 @@ if (args.some((arg) => arg !== "--prepared")) {
   throw new Error("用法：install-global-source.mjs [--prepared]");
 }
 const alreadyPrepared = args.includes("--prepared");
+console.log(alreadyPrepared
+  ? "[安装] 使用已有 Gateway/WebUI 构建产物安装全局 codexc 命令。"
+  : "[构建] 从当前源码构建 Gateway/WebUI，随后安装全局 codexc 命令。");
 const prepared = alreadyPrepared
   ? assertPreparedBuild()
   : run(process.execPath, [join(packageDir, "scripts", "prepare-package.mjs")]);
@@ -30,7 +33,9 @@ if (prepared === 0 && webuiBuilt === 0) {
   const prefix = currentNpmGlobalPrefix();
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-install-"));
   try {
+    console.log("[打包] 正在生成源码安装包……");
     const tarballPath = packSource(temporaryDirectory);
+    console.log(`[安装] 正在安装全局 codexc 命令，npm 全局目录：${prefix}`);
     process.exitCode = runQuiet("npm", [
       "install",
       "--global",
@@ -42,12 +47,26 @@ if (prepared === 0 && webuiBuilt === 0) {
       "--no-fund",
       tarballPath,
     ]);
-    if (process.exitCode === 0) recordInstalledSourceMetadata(packageDir, prefix);
+    if (process.exitCode === 0) {
+      recordInstalledSourceMetadata(packageDir, prefix);
+      console.log(`[完成] 当前源码构建结果已安装为全局 codexc 命令：${prefix}`);
+      console.log("[提示] 本步骤只安装程序；后台服务的安装与启动由初始化向导或外层更新流程处理。");
+      try {
+        // Configuration helpers depend on packages prepared by this installation.
+        const { printSourceInstallNextSteps } = await import("./source-install-summary.mjs");
+        printSourceInstallNextSteps();
+      } catch {
+        console.log("[提示] 无法生成后续指引；请运行 codexc doctor 检查配置与运行环境。");
+      }
+    } else {
+      console.error("[失败] 全局 codexc 命令安装失败，请检查上方 npm 错误后重试。");
+    }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 } else {
   process.exitCode = prepared === 0 ? webuiBuilt : prepared;
+  console.error("[失败] 构建未完成，未执行全局 codexc 命令安装。");
 }
 
 function assertPreparedBuild() {
@@ -172,9 +191,8 @@ function ensureCodexCli() {
     if (verified !== expected) {
       throw new Error(`Codex CLI 同步后版本仍不匹配：需要 ${expected}，当前 ${verified || "未知"}；请检查 PATH 中的同名命令`);
     }
-  } else {
-    console.log(`Codex CLI ${expected} 检测通过；程序安装成功后，首次使用请在交互终端运行 codexc init 完成接入与后台服务安装；跳过的步骤再按需运行 codexc setup、codexc install。`);
   }
+  console.log(`[通过] Codex CLI 版本符合要求：${expected}`);
 }
 
 function readCodexVersion(executable, expected, configured) {

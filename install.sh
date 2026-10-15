@@ -138,7 +138,7 @@ if [ "$codex_version" != "$version" ]; then
   codex_command="$(command -v codex 2>/dev/null || true)"
   [ -n "$codex_command" ] \
     || fail "Codex CLI 已安装到 $npm_global_prefix/bin，但该目录不在 PATH；请加入 PATH 后重新运行"
-  success "Codex CLI $version 已安装。"
+  note "正在核对 Codex CLI 安装后的版本与 PATH"
 fi
 codex_output="$("$codex_command" --version 2>/dev/null)" || fail "Codex CLI 安装后无法执行，请检查 PATH"
 codex_version="$(printf '%s\n' "$codex_output" | awk '{ print $NF }')"
@@ -152,17 +152,6 @@ else
   codex_logged_in=false
   note "Codex CLI 检测通过：$codex_command · $codex_version · 未登录或登录状态不可用"
 fi
-
-print_next_steps() {
-  if [ "$codex_logged_in" = true ]; then
-    printf '%s\n' "下一步：在交互终端运行 codexc init，按向导完成接入与后台服务安装"
-  else
-    printf '%s\n' "下一步：codex login status"
-    printf '%s\n' "如未登录：codex login"
-    printf '%s\n' "登录后在交互终端运行：codexc init，按向导完成接入与后台服务安装"
-  fi
-  printf '%s\n' "仅在向导中跳过接入或安装时，之后按需运行 codexc setup、codexc install"
-}
 
 node "$staging/repository/scripts/sandbox-dependencies.mjs" \
   || fail "沙盒运行依赖检查或安装失败"
@@ -222,4 +211,8 @@ staging=""
 success "Codex Connect Git 源码已安装：$checkout"
 printf '%s\n' "分支：main"
 success "npm 全局命令已安装：$global_launcher"
-print_next_steps
+if [ "$codex_logged_in" != true ]; then
+  note "请先运行 codex login status 检查登录状态；如未登录，运行 codex login。"
+fi
+node "$checkout/scripts/source-install-summary.mjs" \
+  || note "无法生成后续指引；请运行 codexc doctor 检查配置与运行环境。"

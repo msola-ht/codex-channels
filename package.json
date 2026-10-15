@@ -159,6 +159,7 @@
     "scripts/setup.mjs",
     "scripts/skill-setup.mjs",
     "scripts/source-install-metadata.mjs",
+    "scripts/source-install-summary.mjs",
     "scripts/source-uninstall.mjs",
     "scripts/source-update.mjs",
     "scripts/systemd-control.sh",
