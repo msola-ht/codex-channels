@@ -137,7 +137,7 @@ export function onUnauthorized(handler: () => void): () => void {
   }
 }
 
-async function requestJson<T>(path: string, init: RequestInit = {}, signal?: AbortSignal, timeoutMs = 30_000): Promise<T> {
+async function requestResponse(path: string, init: RequestInit = {}, signal?: AbortSignal, timeoutMs = 30_000): Promise<Response> {
   const token = getToken()
   const timeoutSignal = AbortSignal.timeout(timeoutMs)
   const effectiveSignal = signal === undefined
@@ -169,6 +169,11 @@ async function requestJson<T>(path: string, init: RequestInit = {}, signal?: Abo
     }
     throw new ApiClientError(message, response.status, code)
   }
+  return response
+}
+
+async function requestJson<T>(path: string, init: RequestInit = {}, signal?: AbortSignal, timeoutMs = 30_000): Promise<T> {
+  const response = await requestResponse(path, init, signal, timeoutMs)
   return await response.json() as T
 }
 
@@ -280,8 +285,27 @@ export function fetchRequests(
   return getJson<RequestsResponse>(`${API_PREFIX}/requests?${metricsQueryParams(query)}`, signal)
 }
 
-export function fetchMetricsExport(query: MetricsQuery, signal?: AbortSignal): Promise<unknown> {
-  return getJson(`${API_PREFIX}/requests/export?${metricsQueryParams(query)}`, signal)
+export async function fetchMetricsExport(query: MetricsQuery, signal?: AbortSignal): Promise<Blob> {
+  const response = await requestResponse(`${API_PREFIX}/requests/export?${metricsQueryParams(query)}`, {}, signal, 150_000)
+  if (response.body === null) throw new ApiClientError("指标导出内容缺失", 502, "metrics_export_unavailable")
+  const reader = response.body.getReader()
+  const chunks: ArrayBuffer[] = []
+  let bytes = 0
+  try {
+    for (;;) {
+      const next = await reader.read()
+      if (next.done) break
+      bytes += next.value.byteLength
+      if (bytes > 64 * 1024 * 1024) throw new ApiClientError("指标导出超出容量", 503, "metrics_export_capacity")
+      chunks.push(next.value.slice().buffer)
+    }
+    return new Blob(chunks, { type: "application/json" })
+  } catch (error) {
+    await reader.cancel().catch(() => {})
+    throw error
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 export function fetchErrors(

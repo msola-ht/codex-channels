@@ -36,10 +36,10 @@ export async function routeDeliveryManagement({ environment, maximumBodyBytes, p
       const directory = directoryFor(environment);
       const entries = parsed.data.entries;
       const revisions = new Map(entries.map(entry => [entry.id, entry.revision]));
-      const contents = await readDeliveryPayloads(directory, entries.map(entry => entry.id), (row, payload) => {
+      const contents = await readForRequest(request, response, signal => readDeliveryPayloads(directory, entries.map(entry => entry.id), (row, payload) => {
         if (entryRevision(directory, row) !== revisions.get(row.id)) return null;
         return displayContent(payload, 160);
-      });
+      }, { signal }));
       sendManagementJson(response, 200, { records: entries.map((entry, index) => ({ ...entry, content: contents[index] })) });
     } catch { throw new ApiError(503, "delivery_unavailable", "投递内容暂不可读取"); }
     return true;
@@ -50,7 +50,7 @@ export async function routeDeliveryManagement({ environment, maximumBodyBytes, p
     if (!parsed.success || [...params.keys()].length !== new Set(params.keys()).size) throw new ApiError(400, "delivery_invalid", "投递参数无效");
     try {
       const directory = directoryFor(environment);
-      const value = await readDeliveryPayload(directory, parsed.data.id);
+      const value = await readForRequest(request, response, signal => readDeliveryPayload(directory, parsed.data.id, { signal }));
       if (!value || entryRevision(directory, value.row) !== parsed.data.revision) throw new ApiError(409, "delivery_stale", "记录已变化，请刷新");
       sendManagementJson(response, 200, displayContent(value.payload, 20000));
     } catch (error) {
@@ -65,7 +65,7 @@ export async function routeDeliveryManagement({ environment, maximumBodyBytes, p
     if (!parsed.success || [...params.keys()].length !== new Set(params.keys()).size) throw new ApiError(400, "delivery_invalid", "投递队列参数无效");
     try {
       const directory = directoryFor(environment);
-      const snapshot = await readDeliveryQueue(directory, parsed.data);
+      const snapshot = await readForRequest(request, response, signal => readDeliveryQueue(directory, { ...parsed.data, signal }));
       sendManagementJson(response, 200, { ...snapshot, records: snapshot.records.map(row => ({ ...row, revision: entryRevision(directory, row) })) });
     } catch { throw new ApiError(503, "delivery_unavailable", "投递队列暂不可读取"); }
     return true;
@@ -81,7 +81,7 @@ export async function routeDeliveryManagement({ environment, maximumBodyBytes, p
   let directory, row;
   try {
     directory = directoryFor(environment);
-    row = (await readDeliveryEntries(directory, [id]))[0];
+    row = (await readForRequest(request, response, signal => readDeliveryEntries(directory, [id], { signal })))[0];
   } catch { throw new ApiError(503, "delivery_unavailable", "投递队列暂不可读取"); }
   if (!retryable(row) || entryRevision(directory, row) !== revision) throw new ApiError(409, "delivery_stale", "投递记录已变化，请刷新后重试");
   const binding = { sessionId: principalId, operation: "delivery.retry", inputFingerprint: fingerprintManagementValue({ id, revision }),
@@ -117,7 +117,7 @@ async function batchDelivery({ environment, maximumBodyBytes, path, principalId,
   let rows;
   try {
     directory = directoryFor(environment);
-    rows = await readDeliveryEntries(directory, entries.map(entry => entry.id));
+    rows = await readForRequest(request, response, signal => readDeliveryEntries(directory, entries.map(entry => entry.id), { signal }));
   } catch { throw new ApiError(503, "delivery_unavailable", "投递队列暂不可读取"); }
   if (rows.some((row, index) => !retryable(row) || entryRevision(directory, row) !== entries[index].revision)) throw new ApiError(409, "delivery_stale", "记录已变化，请重新选择");
   const binding = { sessionId: principalId, operation: `delivery.batch.${action}`, inputFingerprint: fingerprintManagementValue({ action, entries }),
@@ -144,6 +144,19 @@ function displayContent(payload, limit) {
     threadId: "threadId" in event ? event.threadId ?? null : null, turnId: "turnId" in event ? event.turnId : null,
     status: "status" in event ? event.status : event.type === "operation.updated" ? event.operation.status : null,
     imageFormat: image?.format ?? null };
+}
+
+async function readForRequest(request, response, read) {
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  request.once("aborted", cancel);
+  response.once("close", cancel);
+  if (request.aborted || response.destroyed) cancel();
+  try { return await read(controller.signal); }
+  finally {
+    request.off("aborted", cancel);
+    response.off("close", cancel);
+  }
 }
 
 async function resolveDelivery(directory, rows, action) {

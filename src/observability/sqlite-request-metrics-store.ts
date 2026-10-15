@@ -662,6 +662,21 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
     }
   }
 
+  /** 导出消费者的 finally/return 同样释放游标和只读事务。 */
+  *iterateSnapshot<T>(read: () => Iterable<T>): Generator<T> {
+    this.requireOpen();
+    this.database.exec("BEGIN");
+    try {
+      yield* read();
+    } finally {
+      this.database.exec("ROLLBACK");
+    }
+  }
+
+  iterateExport(query: ModelRequestMetricsScope & Pick<ModelRequestMetricsPageQuery, "sortKey" | "sortDirection">) {
+    return this.queries.iterateExport(query);
+  }
+
   daily(
     query: { startAtMs: number; endAtMs: number },
   ): StoredModelRequestMetricsDailyRow[] {

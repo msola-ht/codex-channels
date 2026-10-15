@@ -185,6 +185,7 @@ export function readMetricsReport(
   options?: MetricsQueryOptions & { group?: "global" | "providers" | "models" },
 ): MetricsReportDocument;
 
+/** 同步对象读取上限 64 MiB；命令行与 WebUI 使用有背压的只读 Worker 流。 */
 export function readMetricsExport(
   environment?: NodeJS.ProcessEnv,
   options?: MetricsQueryOptions,

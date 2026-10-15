@@ -7,8 +7,36 @@ const maximumPending = 16;
 let worker;
 let nextId = 0;
 const pending = new Set();
+const owners = new Map();
 const readyWorkers = new WeakSet();
 let operationDeadline;
+let closing = false;
+
+/** Physical exit observation, separate from the caller's bounded shutdown wait. */
+export function waitForWindowsAclBridgeExit() {
+  return Promise.all([...owners.values()]).then(() => undefined);
+}
+
+/** Confirm the helper process and its owning thread have exited before releasing an ephemeral caller. */
+export async function closeWindowsAclBridge({ timeoutMs = 2_000 } = {}) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw fail("EINVAL");
+  closing = true;
+  worker = undefined;
+  const owned = [...owners];
+  for (const [instance] of owned) {
+    instance.ref();
+    instance.postMessage({ stop: true });
+  }
+  let timer;
+  try {
+    await Promise.race([
+      Promise.all(owned.map(([, exit]) => exit)),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(fail("ETIMEDOUT")), timeoutMs); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Bound synchronous ACL work by its owning operation's absolute deadline. */
 export function withWindowsAclDeadline(deadline, operation) {
@@ -24,13 +52,20 @@ function fail(code) {
 }
 
 function request(invocation, input, maximumBytes) {
+  if (closing) throw fail("EBUSY");
   if (operationDeadline !== undefined && operationDeadline <= Date.now()) throw fail("ETIMEDOUT");
   if (pending.size >= maximumPending) throw fail("EBUSY");
   if (!worker) {
+    // A timed-out helper remains owned until its child and thread really exit.
+    if (owners.size > 0) throw fail("EBUSY");
     const instance = new Worker(new URL(import.meta.url), {
       workerData: { windowsAclBridge: true, invocation }, execArgv: [],
     });
     worker = instance;
+    owners.set(instance, new Promise(resolve => instance.once("exit", () => {
+      owners.delete(instance);
+      resolve();
+    })));
     const stopped = () => {
       if (worker === instance) worker = undefined;
       for (const entry of pending) {
@@ -91,7 +126,7 @@ export async function invokeWindowsAcl(invocation, input, maximumBytes, signal) 
     throw error;
   } finally {
     signal?.removeEventListener("abort", cancel);
-    if (![...pending].some(other => other.worker === entry.worker && other.asynchronous)) entry.worker.unref();
+    if (!closing && ![...pending].some(other => other.worker === entry.worker && other.asynchronous)) entry.worker.unref();
   }
 }
 
@@ -124,7 +159,6 @@ if (workerData?.windowsAclBridge === true) {
     for (const entry of queue) respond(entry, status);
     current = undefined;
     queue.length = 0;
-    parentPort.close();
   };
   const next = () => {
     if (current || stopped) return;
@@ -140,7 +174,11 @@ if (workerData?.windowsAclBridge === true) {
   child.on("error", () => stop(-1));
   // Wait for closed streams so an early stdin EPIPE cannot mask the reserved
   // native-loader failure code. Other failures still use bounded request time.
-  child.on("close", (code) => stop(code === 78 ? -5 : -1));
+  child.on("close", (code) => {
+    stop(code === 78 ? -5 : -1);
+    // The outer owner may release its slot only after the OS child has closed.
+    parentPort.close();
+  });
   child.stdin.on("error", (error) => { if (error.code !== "EPIPE") stop(-1); });
   child.stdout.on("data", (chunk) => {
     if (!current || stopped) { stop(-1); return; }

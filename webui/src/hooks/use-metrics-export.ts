@@ -17,7 +17,7 @@ export function useMetricsExport(query: MetricsQuery) {
     try {
       const result = await fetchMetricsExport(query, request.signal)
       if (request.signal.aborted) return
-      const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: "application/json" }))
+      const url = URL.createObjectURL(result)
       const anchor = document.createElement("a")
       anchor.href = url
       anchor.download = "request-metrics.json"

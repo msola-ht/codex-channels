@@ -897,7 +897,14 @@ const zh = {
     "notFound": "请求的数据不存在或已被清理。",
     "invalidQuery": "查询条件无效，请检查筛选条件。",
     "network": "无法连接服务，请检查连接后重试。",
-    "timeout": "请求超时，请重试。"
+    "timeout": "请求超时，请重试。",
+    exportCapacity: "导出超过 64 MiB，请缩小时间范围或增加筛选条件后重试。",
+    exportBusy: "已有两个导出任务正在处理，请稍后重试。",
+    exportTimeout: "导出超时，请缩小时间范围或增加筛选条件后重试。",
+    exportUnavailable: "指标导出暂不可用，请检查数据库状态后重试。",
+    exportCancelled: "指标导出已取消。",
+    metricsMissing: "指标数据库尚未创建。",
+    metricsIncompatible: "指标数据库版本或结构不兼容，请核对版本及备份，不要删除数据库。"
   },
   common: {
     notifications: "通知",
@@ -2275,7 +2282,14 @@ const en: Messages = {
     "notFound": "The requested data was not found or has been removed.",
     "invalidQuery": "Invalid query. Check the filters.",
     "network": "Cannot reach the service. Check your connection and retry.",
-    "timeout": "The request timed out. Try again."
+    "timeout": "The request timed out. Try again.",
+    exportCapacity: "The export exceeds 64 MiB. Narrow the date range or add filters and try again.",
+    exportBusy: "Two exports are already in progress. Try again later.",
+    exportTimeout: "The export timed out. Narrow the date range or add filters and try again.",
+    exportUnavailable: "Metrics export is unavailable. Check the database status and try again.",
+    exportCancelled: "Metrics export was cancelled.",
+    metricsMissing: "The metrics database has not been created yet.",
+    metricsIncompatible: "The metrics database version or structure is incompatible. Check the version and backups; do not delete the database."
   },
   common: {
     notifications: "Notifications",

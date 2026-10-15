@@ -104,6 +104,13 @@ const apiErrorKeys: Record<string, MessageKey> = {
   invalid_parent_turn_id: "errors.invalidQuery",
   network_error: "errors.network",
   request_timeout: "errors.timeout",
+  metrics_export_capacity: "errors.exportCapacity",
+  metrics_export_busy: "errors.exportBusy",
+  metrics_export_timeout: "errors.exportTimeout",
+  metrics_export_unavailable: "errors.exportUnavailable",
+  metrics_export_cancelled: "errors.exportCancelled",
+  metrics_database_unavailable: "errors.metricsMissing",
+  metrics_database_incompatible: "errors.metricsIncompatible",
 }
 
 /** 结构化错误码到界面文案；未知或缺失代码使用通用提示，不展示内部消息。 */

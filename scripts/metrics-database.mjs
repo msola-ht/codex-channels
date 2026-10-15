@@ -27,7 +27,6 @@ import {
 } from "../dist/observability/index.js";
 import {
   inspectMetricsDatabase,
-  readMetricsExport,
   readQuotaHistory,
   readMetricsReport,
   readMetricsRun,
@@ -38,6 +37,7 @@ import {
 } from "./metrics-database-access.mjs";
 import { inspectManagedServiceStatus } from "./service-status.mjs";
 import { withCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
+import { createMetricsExportOwner } from "./metrics-export-stream.mjs";
 import { resolveConfiguredPath } from "./runtime-config.mjs";
 import {
   assertExportFormat,
@@ -56,7 +56,6 @@ import {
   isRecord,
 } from "./metrics-export-format.mjs";
 import {
-  printMetricsExport,
   printMetricsReport,
   printMetricsRun,
   printMetricsThreads,
@@ -634,13 +633,15 @@ if (
         );
         const format = options.format ?? "json";
         assertExportFormat(format, ["json", "csv", "markdown"]);
-        printMetricsExport(
-          readMetricsExport(process.env, {
+        const exports = createMetricsExportOwner();
+        try {
+          await exports.stream(process.env, {
             ...options,
             ...(options.thread ? { threadId: options.thread } : {}),
-          }),
-          format,
-        );
+          }, { format, output: process.stdout, signal });
+        } finally {
+          await exports.close();
+        }
       } else if (command === "quota") {
         const options = parseMetricsOptions(process.argv.slice(3), new Set(["--range", "--from", "--to", "--format"]));
         const format = options.format ?? "markdown";

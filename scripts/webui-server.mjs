@@ -14,6 +14,10 @@ import {
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
 import { metricsRangeOptions } from "./metrics-command-options.mjs";
+import { createMetricsExportOwner } from "./metrics-export-stream.mjs";
+import { MetricsExportError } from "./metrics-export-limits.mjs";
+import { closeDeliveryReaders, waitForDeliveryReadersExit } from "../dist/delivery/index.js";
+import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "../runtime/windows-acl-bridge.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
@@ -154,6 +158,7 @@ export function createWebuiServer({
   const serviceStatusCache = { expiresAtMs: 0, value: null, pending: null };
   const gatewayConfigRead = { pending: null, controller: null, responses: new Set() };
   const providerStateCache = { expiresAtMs: 0, value: null, pending: null };
+  const metricsExports = createMetricsExportOwner();
   const management = createManagementState(
     environment,
     host,
@@ -174,10 +179,19 @@ export function createWebuiServer({
     resetGatewayCredits,
   );
   const server = createServer((request, response) => {
-    handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, management, request, response);
+    handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, metricsExports, management, request, response);
   });
   server.on("close", () => gatewayConfigRead.controller?.abort());
-  return { host, server, staticDir, token, closeNotifications: () => closeQueueStreams(management) };
+  return { host, server, staticDir, token, closeNotifications: async () => {
+    gatewayConfigRead.controller?.abort();
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => closeQueueStreams(management)),
+      metricsExports.close(), closeDeliveryReaders(), closeWindowsAclBridge({ timeoutMs: 2_000 }),
+    ]);
+    if (results.some(result => result.status === "rejected")) throw new Error("WebUI 后台资源退出未确认");
+  }, waitForNotificationsExit: async () => {
+    await Promise.all([metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForWindowsAclBridgeExit()]);
+  } };
 }
 
 export function resolveWebuiSettings({
@@ -198,7 +212,7 @@ export function resolveWebuiSettings({
   };
 }
 
-async function handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, management, request, response) {
+async function handleRequest(environment, staticDir, host, token, serviceStatusCache, gatewayConfigRead, metricsExports, management, request, response) {
   let managementRequest = false;
   try {
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -237,7 +251,7 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         openQueueStream(management, response, (signal, send) => watchQueueChanges(path(resolveGatewayConfigPath(environment)), signal, send));
         return;
       }
-      await routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead);
+      await routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports);
       return;
     }
     serveStatic(staticDir, url.pathname, response);
@@ -447,7 +461,7 @@ function readJsonMetadata(path) {
   }
 }
 
-async function routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead) {
+async function routeApi(environment, url, request, response, serviceStatusCache, gatewayConfigRead, metricsExports) {
   const path = url.pathname;
   if (!path.startsWith(`${API_PREFIX}/`)) {
     throw new ApiError(404, "not_found", `未知 API：${path}`);
@@ -508,7 +522,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     return;
   }
   if (apiPath === "/requests/export") {
-    handleRequestsExport(environment, url, response);
+    await handleRequestsExport(environment, url, response, metricsExports);
     return;
   }
   if (apiPath === "/errors") {
@@ -759,27 +773,34 @@ async function handleRequests(environment, url, response) {
   }
 }
 
-function handleRequestsExport(environment, url, response) {
+async function handleRequestsExport(environment, url, response, exports) {
   const range = parseRange(url);
   const filters = parseMetricsFilters(url);
   const sort = parseRequestSort(url);
-  const store = openMetricsStore(environment, range.endAtMs);
+  const controller = new AbortController();
+  const disconnected = () => controller.abort();
+  response.once("close", disconnected);
   try {
-    const queries = new RequestMetricsQueryService(store);
-    const records = [];
-    let offset = 0;
-    do {
-      const page = queries.page(range, { ...filters, sortKey: sort.key, sortDirection: sort.direction, offset, limit: 500 });
-      records.push(...page.records);
-      offset = page.nextOffset ?? -1;
-    } while (offset >= 0);
-    sendJson(response, 200, {
-      range, filters, generatedAt: new Date(range.endAtMs).toISOString(),
-      records, total: records.length,
-      aggregate: queries.aggregate("global", range, filters).aggregate,
-    });
+    response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.setHeader("Cache-Control", "no-store");
+    await exports.stream(environment, {
+      ...filters, resolvedRange: range, sortKey: sort.key, sortDirection: sort.direction, webui: true,
+    }, { output: response, signal: controller.signal });
+    if (!response.destroyed) response.end();
+  } catch (error) {
+    if (response.headersSent || response.destroyed) {
+      if (error instanceof MetricsExportError && error.code !== "metrics_export_cancelled") {
+        logger.warn({ event: "metrics.export-interrupted", code: error.code }, "指标导出流未完成");
+      }
+      response.destroy();
+      return;
+    }
+    if (error instanceof MetricsExportError) {
+      throw new ApiError(error.code === "metrics_export_busy" ? 429 : 503, error.code, error.message);
+    }
+    throw error;
   } finally {
-    store.close();
+    response.off("close", disconnected);
   }
 }
 
@@ -980,7 +1001,7 @@ function parseThreadQuery(url, threadId) {
 function parseRequestSort(url) {
   const sort = url.searchParams.get("sort") ?? "time";
   const direction = url.searchParams.get("direction") ?? "desc";
-  const key = requestSortKeys[sort];
+  const key = Object.hasOwn(requestSortKeys, sort) ? requestSortKeys[sort] : undefined;
   if (key === undefined) {
     throw new ApiError(400, "invalid_sort", "sort 不支持该请求字段");
   }
@@ -1064,7 +1085,7 @@ function main() {
   try {
     const settings = resolveWebuiSettings({ args: process.argv.slice(2) });
     applyConfiguredTimezone(process.env, settings.configPath);
-    const { host, server, closeNotifications } = createWebuiServer({
+    const { host, server, closeNotifications, waitForNotificationsExit } = createWebuiServer({
       environment: process.env,
       host: settings.host,
       port: settings.port,
@@ -1114,14 +1135,19 @@ function main() {
       const deadline = setTimeout(() => {
         logger.error({ event: "service.shutdown-timeout", timeoutMs: serviceShutdownTimeoutMs }, "WebUI 请求未在停止期限内结束，关闭剩余连接");
         server.closeAllConnections();
-        process.exit(1);
+        process.exitCode = 1;
       }, serviceShutdownTimeoutMs);
       deadline.unref();
-      server.close(() => {
-        clearTimeout(deadline);
-        process.exit(exitCode);
+      const resourcesClosed = closeNotifications().catch(async () => {
+        logger.error({ event: "service.background-close-failed" }, "WebUI 后台资源未确认退出，保留所有权等待实际结束");
+        process.exitCode = 1;
+        await waitForNotificationsExit();
       });
-      closeNotifications();
+      const httpClosed = new Promise(resolve => server.close(resolve));
+      void Promise.all([httpClosed, resourcesClosed]).then(() => {
+        clearTimeout(deadline);
+        process.exit(process.exitCode || exitCode);
+      });
       for (const socket of pendingConnections) socket.destroy();
       server.closeIdleConnections();
     };

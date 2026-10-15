@@ -193,6 +193,31 @@ export class SqliteRequestMetricsQueries {
     };
   }
 
+  /** 单一游标保留 SQLite 的 null 排序与 id 次序，不重复执行分页聚合。 */
+  *iterateExport(query: ModelRequestMetricsScope & Pick<ModelRequestMetricsPageQuery, "sortKey" | "sortDirection">): Generator<StoredModelRequestMetric & { isSubagent: boolean }> {
+    this.reader.requireOpen();
+    const scope = metricsScopeSql(query);
+    const sortExpression = pageSortSql[query.sortKey ?? "recordedAtMs"];
+    const direction = query.sortDirection ?? "asc";
+    if (sortExpression === undefined || !["asc", "desc"].includes(direction)) {
+      throw new Error("模型请求指标排序无效");
+    }
+    const order = direction.toUpperCase();
+    for (const raw of this.reader.iterateRows(`
+      SELECT model_request_metrics.*, EXISTS (
+        SELECT 1 FROM subagent_threads AS relation
+        WHERE relation.thread_id = model_request_metrics.thread_id
+          AND model_request_metrics.source = 'owned'
+          AND model_request_metrics.request_purpose IS NULL
+      ) AS is_subagent
+      FROM model_request_metrics WHERE ${scope.sql}
+      ORDER BY ${sortExpression} ${order}, id ${order}
+    `, ...scope.params)) {
+      const row = raw as unknown as MetricRow & { is_subagent: number };
+      yield { ...toStoredMetric(row), isSubagent: row.is_subagent === 1 };
+    }
+  }
+
   modelUsage(query: ModelRequestMetricsScope, modelAliases?: Readonly<Record<string, string>>): StoredModelUsage[] {
     this.reader.requireOpen();
     const scope = metricsScopeSql(query);

@@ -4,11 +4,15 @@
 
 ## 文件与公开边界
 
-- `index.ts`：公开 Journal、Coordinator、容量与状态类型。
+- `index.ts`：公开 Journal、Coordinator、异步只读查询、读取关闭/退出确认，以及容量、状态与安全故障类型。
 - `types.ts`：schema、状态、容量、Worker 命令及安全错误码。
 - `sqlite-journal.ts`：独立 SQLite、私有密钥、AES-256-GCM、事务额度、检查点、会话顺序与操作系统释放的单写者锁；生产环境由 Worker 独占。
 - `payload-codec.ts`：写入端与只读查看端共用的 AES-256-GCM 编解码和记录身份认证数据；不持有密钥、文件、连接或恢复状态。
-- `queue-reader.ts`：在线只读元数据快照，校验私有路径及当前 Schema，在同一读事务中统计并按状态/游标分页，明确 ID 与序号范围条件使用现有索引；以完整检查点与载荷 GCM 身份摘要绑定修订，不读取密钥或正文，不输出检查点细节、不执行恢复。维护写入者复用行映射，在持锁连接上重新读取所选记录。通过 `index.ts` 的异步 `readDeliveryQueue` 延迟加载 SQLite。独立 `readDeliveryPayload` 仅供显式单条内容查询，在只读事务中认证解密，不恢复状态；调用方负责裁剪可展示字段。`readDeliveryEntries` 在一次只读事务内读取最多 50 条元数据，不计算全局统计；`readDeliveryPayloads` 同事务逐条解密并经调用方投影为限定摘要，不积累原始载荷，单条不可解码返回空结果。
+- `queue-reader.ts`：Worker 内的只读连接、短事务快照与维护写入者复用的行映射。校验 Unix 所有者/权限、Windows 私有 ACL 与当前 Schema；同一读事务统计和分页，以完整检查点与载荷 GCM 身份摘要绑定修订。元数据不读取密钥或正文、不输出检查点细节、不执行恢复；载荷查询在 SQLite 内拒绝超过 4 MiB 的正文，再于事务外认证解密，单条不可解码返回空结果。
+- `reader-protocol.ts`：只读 Worker 的有限命令、逐条载荷/ACK 协议和固定故障分类，不跨线程传递函数或原始异常。
+- `reader-worker.ts`：独占一个只读 SQLite 连接。批量正文先用短事务捕获所有目标的修订基线；每条用独立短事务读取同快照的修订与正文，基线变化则该项返回空结果。密钥读取、解密、主线程投影与逐条 ACK 均不持有 SQLite 事务，避免阻塞 DELETE 模式的唯一写入者。每条等待主线程投影完成并 ACK 后才读取下一条，不积累 50 条原始正文；不获取写入者锁、不创建目录或恢复数据。
+- `reader.ts`：公开异步 `readDeliveryQueue`、`readDeliveryEntries`、`readDeliveryPayload`、`readDeliveryPayloads`，全进程最多 2 个尚未确认退出的只读 Worker，过载显式拒绝。批量最多 50 个不同 ID，投影结果累计最多 4 MiB；调用方负责同步裁剪可展示字段。支持请求 `AbortSignal`；初始化预算 Windows 30 秒、其他平台 5 秒，普通请求（包含全部逐条投影）总预算 5 秒，关闭等待最多 2 秒，退出未确认保留资源归属和容量。`DeliveryReadError.failure` 仅含阶段、原因和操作。WebUI 断开只取消本请求的读取，不改变已经开始的投递处理语义。
+  `closeDeliveryReaders()` 永久停止新读取准入、取消所有在途只读操作并在 2 秒内等待；超时仍保留归属，`waitForDeliveryReadersExit()` 提供真实退出的等待句柄。Windows 关闭先等待 ACL helper 的子进程与线程真实退出；超过关闭预算时读取调用报告未确认，外层 Worker 保持引用及容量归属，等待 helper 的真实退出后再关闭，不强制终止或允许进程自然退出后遗忘 helper。其他平台可终止自身只读 Worker，仍在实际 `exit` 后释放容量。
 - `worker.ts`：串行处理存储命令，不执行平台请求或业务授权。
 - `journal.ts`：主线程的有界 Worker 邮箱，预留控制槽，限制启动、请求和关闭等待；`available` 暴露 Worker 未失败且未关闭的即时状态，不代替 `ready`；`onFailure` 对非正常 Worker 故障通知组合根一次，正常关闭不触发。
   Windows Worker 初始化单独允许 30 秒以覆盖多次私有 ACL 操作，其余平台初始化与普通请求仍为 5 秒；故障提供固定枚举的阶段、原因与操作，不传递原始异常、路径或正文。

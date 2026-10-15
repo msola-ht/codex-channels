@@ -1,23 +1,6 @@
 import { Worker } from "node:worker_threads";
 import { DeliveryError, type DeliveryFailure, type DeliveryLimits, type DeliveryQueueEntry, type DeliveryRecord, type DeliveryState, type DeliverySubmission, type DeliverySummary, type JournalCommand, type JournalResult, type WorkerReply } from "./types.js";
 
-// Keep node:sqlite out of CLI imports that only construct a Worker journal.
-export async function readDeliveryQueue(directory: string, options?: { before?: number; state?: DeliveryState; id?: string }) {
-  return (await import("./queue-reader.js")).readDeliveryQueue(directory, options);
-}
-
-export async function readDeliveryPayload(directory: string, id: string) {
-  return (await import("./queue-reader.js")).readDeliveryPayload(directory, id);
-}
-
-export async function readDeliveryEntries(directory: string, ids: string[]) {
-  return (await import("./queue-reader.js")).readDeliveryEntries(directory, ids);
-}
-
-export async function readDeliveryPayloads<T>(directory: string, ids: string[], project: (row: DeliveryQueueEntry, payload: string) => T) {
-  return (await import("./queue-reader.js")).readDeliveryPayloads(directory, ids, project);
-}
-
 export class DeliveryJournal {
   private readonly worker: Worker;
   private readonly pending = new Map<number, { resolve(value: JournalResult): void; reject(error: Error): void; bytes: number; timer: NodeJS.Timeout }>();
