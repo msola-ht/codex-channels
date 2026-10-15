@@ -33,8 +33,7 @@ import {
 } from "./sqlite-row-codec.js";
 import {
   readScheduledTaskUserVersion,
-  requireScheduledTaskDatabaseStructure,
-  ScheduledTaskSchemaError,
+  requireScheduledTaskDatabaseSchema,
   scheduledTaskInitialSchemaSql,
 } from "./sqlite-schema.js";
 import {
@@ -99,9 +98,18 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
       } else if (source !== undefined && (source.mode & 0o777) !== 0o600) {
         throw new Error("计划任务数据库文件权限必须是 0600");
       }
+      if (source !== undefined) {
+        const existing = new DatabaseSync(path, { readOnly: true });
+        try {
+          requireScheduledTaskDatabaseSchema(existing);
+        } finally {
+          existing.close();
+        }
+      }
     }
     this.database = new DatabaseSync(path);
     try {
+      requireScheduledTaskDatabaseSchema(this.database);
       if (path !== ":memory:") securePrivateFileSync(path);
       this.database.exec(
         "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = DELETE; PRAGMA foreign_keys = ON;",
@@ -445,7 +453,18 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
       const latest = this.database
         .prepare("SELECT MAX(scheduled_for) AS value FROM runs WHERE task_id = ?")
         .get(taskId) as { value: number | null };
-      const scheduledFor = Math.max(nowMs, (latest.value ?? -1) + 1);
+      let scheduledFor = Math.max(nowMs, latest.value === null ? nowMs : latest.value + 1);
+      // Automatic occurrences share one millisecond remainder: UTC anchors for
+      // interval/relative once, whole seconds for local calendar/absolute once.
+      // Reserve that entire class, including future occurrences, for claimDue.
+      const automaticAnchor = task.schedule === null ? 0 : scheduleAnchorAt(task.schedule) ?? 0;
+      const automaticRemainder = ((automaticAnchor % 1_000) + 1_000) % 1_000;
+      this.requireTimestamp(scheduledFor);
+      while (scheduledFor === task.nextRunAt
+        || ((scheduledFor % 1_000) + 1_000) % 1_000 === automaticRemainder) {
+        scheduledFor += 1;
+        this.requireTimestamp(scheduledFor);
+      }
       if (retry && kind === "claimed") this.resolveUncertain(retry.runId, "failed", nowMs);
       this.insertRun(runId, taskId, scheduledFor, state, nowMs);
       this.database.exec("COMMIT");
@@ -676,26 +695,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
   private initializeSchema(): void {
     this.database.exec("BEGIN IMMEDIATE");
     try {
-      const hasAnyTable = this.database
-        .prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' LIMIT 1")
-        .get() as { found: number } | undefined;
-      const metadataExists = this.database
-        .prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = 'schema_metadata'")
-        .get() as { found: number } | undefined;
-      const version = metadataExists
-        ? (this.database.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get() as { value: number } | undefined)?.value
-        : undefined;
-      const pragmaVersion = readScheduledTaskUserVersion(this.database);
-      if (hasAnyTable || metadataExists || pragmaVersion !== 0) {
-        const foundVersion = pragmaVersion !== schemaVersion ? pragmaVersion : (version ?? 0);
-        if (foundVersion !== schemaVersion) {
-          throw new ScheduledTaskSchemaError(foundVersion, schemaVersion);
-        }
-        if (version === undefined) {
-          throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("schema_metadata 缺少 schema_version"));
-        }
-        requireScheduledTaskDatabaseStructure(this.database);
-      } else {
+      if (requireScheduledTaskDatabaseSchema(this.database) === "empty") {
         this.database.exec(scheduledTaskInitialSchemaSql);
       }
       this.database.exec("COMMIT");
@@ -860,8 +860,8 @@ export function inspectScheduledTaskDatabaseFile(
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
     const foundVersion = readScheduledTaskUserVersion(database);
-    if (foundVersion === schemaVersion) {
-      requireScheduledTaskDatabaseStructure(database);
+    if (foundVersion === schemaVersion || foundVersion === 0) {
+      requireScheduledTaskDatabaseSchema(database);
       return {
         compatible: true,
         databasePath,

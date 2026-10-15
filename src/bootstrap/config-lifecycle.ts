@@ -22,6 +22,7 @@ import { loadRuntimeConfig } from "../config/index.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { ResetCreditError } from "../application/index.js";
 import { createLogger } from "../observability/index.js";
+import { closeDeliveryJournals, waitForDeliveryJournalsExit } from "../delivery/index.js";
 import { createWeixinCredentialChangeCheck, createWeixinCredentialStore } from "../surfaces/index.js";
 import { GatewayApplication, GatewayConstructionCleanupError } from "./app.js";
 import { loadBuiltInSurfacePlugins } from "./surface-composition.js";
@@ -56,13 +57,16 @@ export async function runGatewayProcess(): Promise<void> {
   const logger = createLogger(config, { service: "gateway", module: "lifecycle" });
   let earlyStop = false;
   let shutdownTimer: NodeJS.Timeout | undefined;
+  let shutdownTimedOut = false;
   const beginShutdownDeadline = (): void => {
     if (shutdownTimer) return;
     // Include ownership acquisition and component construction in the budget:
     // an early stop must stay bounded even before controls.stop is installed.
     shutdownTimer = setTimeout(() => {
-      logger.error({ timeoutMs: serviceShutdownTimeoutMs }, "Gateway 停止等待超时，进程将以故障状态退出");
-      process.exit(1);
+      shutdownTimedOut = true;
+      logger.error({ timeoutMs: serviceShutdownTimeoutMs }, "Gateway 停止等待超时，等待投递存储资源退出后以故障状态退出");
+      void closeDeliveryJournals().catch(() => undefined)
+        .then(() => waitForDeliveryJournalsExit()).then(() => process.exit(1));
     }, serviceShutdownTimeoutMs);
   };
   const clearShutdownDeadline = (): void => { clearTimeout(shutdownTimer); };
@@ -221,7 +225,10 @@ export async function runGatewayProcess(): Promise<void> {
           reportCloseFailure(error, "Gateway 所有权 Socket 关闭失败");
         }
         clearShutdownDeadline();
-        process.exit(finalExitCode);
+        try { await closeDeliveryJournals(); }
+        catch (error) { reportCloseFailure(error, "Gateway 投递存储关闭未确认"); }
+        await waitForDeliveryJournalsExit();
+        process.exit(shutdownTimedOut ? 1 : finalExitCode);
       });
   };
   const reload = async (): Promise<void> => {

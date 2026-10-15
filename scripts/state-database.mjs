@@ -1,6 +1,11 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { stateDatabaseSchemaVersion as currentSchemaVersion } from "../dist/storage/index.js";
+import {
+  assertStateDatabaseSchema,
+  stateDatabaseSchemaVersion as currentSchemaVersion,
+} from "../dist/storage/index.js";
+
+export { assertStateDatabaseSchema };
 
 import {
   inspectScheduledTaskDatabaseFile,
@@ -12,22 +17,6 @@ import {
   resolveConfiguredPath,
 } from "./runtime-config.mjs";
 
-const preferenceColumns = ["surface", "account_id", "conversation_id", "model", "model_provider", "effort", "service_tier"];
-const requiredStateColumns = Object.freeze({
-  conversation_actors: ["surface", "account_id", "conversation_id", "actor_id", "created_at"],
-  conversation_background_bindings: [
-    "surface", "account_id", "conversation_id", "workspace_id", "thread_id", "session_id", "updated_at",
-  ],
-  conversation_bindings: [
-    "surface", "account_id", "conversation_id", "workspace_id", "thread_id", "session_id", "updated_at",
-  ],
-  conversation_workspaces: [
-    "surface", "account_id", "conversation_id", "workspace_id", "updated_at",
-  ],
-  conversation_idle_state: [
-    "surface", "account_id", "conversation_id", "last_activity_at", "force_new",
-  ],
-});
 export function inspectStateDatabase(environment = process.env) {
   const { databasePath } = resolveStateDatabaseContext(environment);
   const scheduledTasks = inspectScheduledTaskDatabaseFile(scheduledTaskDatabasePath(databasePath));
@@ -45,11 +34,11 @@ export function inspectStateDatabase(environment = process.env) {
   try {
     const row = database.prepare("PRAGMA user_version").get();
     const schemaVersion = Number(row?.user_version);
-    if (schemaVersion === currentSchemaVersion) {
-      assertStateDatabaseSchema(database);
+    if (schemaVersion === 0 || schemaVersion === currentSchemaVersion) {
+      assertStateDatabaseSchema(database, { allowEmpty: true });
     }
     return {
-      compatible: schemaVersion === currentSchemaVersion,
+      compatible: schemaVersion === 0 || schemaVersion === currentSchemaVersion,
       databasePath,
       exists: true,
       schemaVersion,
@@ -59,15 +48,6 @@ export function inspectStateDatabase(environment = process.env) {
   } finally {
     database.close();
   }
-}
-
-export function assertStateDatabaseSchema(database) {
-  const version = database.prepare("PRAGMA user_version").get()?.user_version;
-  if (version !== currentSchemaVersion) {
-    throw new Error(`状态数据库 Schema ${version ?? "unknown"} 不兼容，需要 ${currentSchemaVersion}`);
-  }
-  validateStateTables(database, Object.keys(requiredStateColumns));
-  validatePreferenceTable(database);
 }
 
 export function validateStateDatabaseStructure(environment = process.env) {
@@ -100,22 +80,4 @@ function resolveStateDatabaseContext(environment) {
 
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function validateStateTables(database, tables) {
-  for (const table of tables) {
-    const columns = new Set(
-      database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name),
-    );
-    const missing = requiredStateColumns[table].filter((column) => !columns.has(column));
-    if (missing.length > 0) {
-      throw new Error(`状态数据库结构不完整：${table} 缺少 ${missing.join("、")}`);
-    }
-  }
-}
-
-function validatePreferenceTable(database) {
-  const columns = new Set(database.prepare("PRAGMA table_info(conversation_model_preferences)").all().map(column => column.name));
-  const missing = preferenceColumns.filter(column => !columns.has(column));
-  if (missing.length) throw new Error(`状态数据库结构不完整：conversation_model_preferences 缺少 ${missing.join("、")}`);
 }

@@ -113,6 +113,18 @@ export function readScheduledTaskUserVersion(database: DatabaseSync): number {
   return Number(row?.user_version ?? 0);
 }
 
+/** Validate before opening an existing file for writes or changing its journal mode. */
+export function requireScheduledTaskDatabaseSchema(database: DatabaseSync): "empty" | "current" {
+  const version = readScheduledTaskUserVersion(database);
+  if (version === 0
+    && database.prepare("SELECT 1 FROM sqlite_master LIMIT 1").get() === undefined) {
+    return "empty";
+  }
+  if (version !== schemaVersion) throw new ScheduledTaskSchemaError(version);
+  requireScheduledTaskDatabaseStructure(database);
+  return "current";
+}
+
 function indexedColumns(database: DatabaseSync, indexName: string): string[] {
   return (database.prepare(`PRAGMA index_info(${indexName})`).all() as Array<{ name: string }>)
     .map((column) => column.name);
@@ -186,10 +198,11 @@ export function requireScheduledTaskDatabaseStructure(database: DatabaseSync): v
   if (runSql.sql.toLowerCase().includes("'pending'")) {
     throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("runs 不支持 pending 状态"));
   }
-  const metadataNames = (database
-    .prepare("SELECT name FROM schema_metadata ORDER BY name")
-    .all() as Array<{ name: string }>);
-  if (metadataNames.length !== 1 || metadataNames[0]?.name !== "schema_version") {
+  const metadata = database
+    .prepare("SELECT name, value FROM schema_metadata ORDER BY name")
+    .all() as Array<{ name: string; value: number }>;
+  if (metadata.length !== 1 || metadata[0]?.name !== "schema_version"
+    || metadata[0].value !== schemaVersion) {
     throw new ScheduledTaskSchemaError(schemaVersion, schemaVersion, new Error("schema_metadata 内容无效"));
   }
 }

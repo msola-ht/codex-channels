@@ -1,4 +1,4 @@
-export { DeliveryJournal } from "./journal.js";
+export { DeliveryJournal, closeDeliveryJournals, waitForDeliveryJournalsExit } from "./journal.js";
 export { readDeliveryQueue, readDeliveryPayload, readDeliveryEntries, readDeliveryPayloads, closeDeliveryReaders, waitForDeliveryReadersExit, DeliveryReadError } from "./reader.js";
 export type { DeliveryReadOptions, DeliveryReadFailure } from "./reader.js";
 export type { DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryFailure } from "./types.js";

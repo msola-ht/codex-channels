@@ -56,7 +56,7 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
 - `sqlite-request-metrics-thread-queries.ts`：Thread/Turn 列表、汇总与耗时查询，只被请求查询组合根持有；不接触写入、事务或数据库生命周期。
 - `sqlite-request-metrics-subagent-queries.ts`：子代理线程列表、单线程往返与同步游标查询，同样只被组合根持有并保持只读。
 - `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v31 建库 SQL、存储列定义、版本错误和
-  严格结构校验；Store 持有初始化事务，仅创建新库，明确拒绝不支持的版本或结构。
+  严格结构校验；Store 持有初始化事务，仅在空库建表，已有非空库必须具有当前版本与结构。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、
   逐请求上游 `User-Agent` 和额度快照写入独立 `request-metrics.sqlite3`。新采集请求不解析上游时间戳；
   可空 `upstream_ttft_ms` 逐请求保留上游原值，Turn 汇总仅选择自身首个有效 OpenAI 普通响应样本，不合计或平均。
@@ -66,14 +66,15 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   可空 `quota_observed_at_ms` 保存额度快照的本机采集时间，未观测时为空。
   数据库使用严格 Schema v31、Unix `0600` / Windows 当前 SID 私有文件权限，
   可空 `request_service_tier` 独立保留出站请求层级。
-  只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
+  只接受当前 Schema；已有库先只读核验版本和结构，再保护权限、创建 Writer 锁与启用 WAL；不兼容库原样拒绝。
+  首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式。
   可通过同步 `readSnapshot()` 让多个查询共用一个读事务，保持并发采集期间的结果一致；`iterateSnapshot()`
   跨迭代保留只读事务，完成、异常或提前 return 时释放。导出使用 `iterateExport()` 的单一 SQLite 游标，
   沿用普通分页的受控排序、null 与 id 次序，不在每批重复聚合或累积全部记录；只读 Worker 的归属、背压与取消由脚本消费端负责。
   普通分页每页最多 500 条，供 CLI 报表和本地 WebUI 复用。记录默认保留
-  365 天、以 1,000,000 条为清理目标，可由 `[metrics.storage]` 收窄或扩大；每 100 次写入分批清理，两个清理周期之间
+  365 天、以 1,000,000 条为清理目标，可由 `[metrics.storage]` 收窄或扩大；保留期限始终按本机当前时钟计算，每 100 次写入分批清理，两个清理周期之间
   最多短暂超出 99 条。行数裁剪按 id 上界一次定位，不再对主键做倒序偏移扫描，因此只保证"不超过目标条数"
   并始终保留最新记录；按 Provider 单独清理等操作在 id 上留下空洞时，可能比目标少保留一部分最旧记录。
   每条记录保存提供商、模型、思考等级、服务层级、状态与错误类型；路由层在

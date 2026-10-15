@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { validRequestTiming } from "../../runtime/request-timing.mjs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
@@ -115,6 +115,17 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       }
       return;
     }
+    // Reject incompatible existing data before repairing permissions, creating a lock or enabling WAL.
+    if (existsSync(path)) {
+      const existing = new DatabaseSync(path, { readOnly: true });
+      try {
+        if (existing.prepare("SELECT 1 FROM sqlite_master LIMIT 1").get()) {
+          requireCurrentModelRequestMetricsSchema(existing);
+        }
+      } finally {
+        existing.close();
+      }
+    }
     const parent = dirname(path);
     mkdirSync(parent, { recursive: true, mode: 0o700 });
     securePrivateDirectorySync(parent);
@@ -123,6 +134,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
     try {
       database = new DatabaseSync(path);
       this.database = database;
+      if (database.prepare("SELECT 1 FROM sqlite_master LIMIT 1").get()) {
+        requireCurrentModelRequestMetricsSchema(database);
+      }
       securePrivateFileSync(path);
       this.database.exec(`
         PRAGMA busy_timeout = 10;
@@ -287,14 +301,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       }
       this.database.exec("COMMIT");
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
-    this.finishRecords(turns.length, Date.now());
+    this.finishRecords(turns.length);
   }
 
   record(sample: ModelRequestMetricSample): void {
     this.requireOpen();
     if (!this.insert) throw new Error("只读模型请求指标数据库不能写入");
-    const recordedAtMs = this.insertSample(sample);
-    this.finishRecords(1, recordedAtMs);
+    this.insertSample(sample);
+    this.finishRecords(1);
   }
 
   recordBatch(samples: readonly ModelRequestMetricSample[]): void {
@@ -305,21 +319,20 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       this.record(samples[0]!);
       return;
     }
-    let latestRecordedAtMs = 0;
     this.database.exec("BEGIN IMMEDIATE");
     try {
       for (const sample of samples) {
-        latestRecordedAtMs = Math.max(latestRecordedAtMs, this.insertSample(sample));
+        this.insertSample(sample);
       }
       this.database.exec("COMMIT");
     } catch (error) {
       this.database.exec("ROLLBACK");
       throw error;
     }
-    this.finishRecords(samples.length, latestRecordedAtMs);
+    this.finishRecords(samples.length);
   }
 
-  private insertSample(sample: ModelRequestMetricSample): number {
+  private insertSample(sample: ModelRequestMetricSample): void {
     const validReviewIdentity = (value: string | null | undefined): boolean => value == null
       || (typeof value === "string" && value.trim().length > 0 && value.length <= 128);
     if (!validReviewIdentity(sample.reviewerThreadId) || !validReviewIdentity(sample.reviewerTurnId)
@@ -404,13 +417,12 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       sample.reviewerThreadId ?? null,
       sample.reviewerTurnId ?? null,
     );
-    return recordedAtMs;
   }
 
-  private finishRecords(count: number, recordedAtMs: number): void {
+  private finishRecords(count: number): void {
     this.recordsSinceCleanup += count;
     if (this.recordsSinceCleanup >= cleanupInterval) {
-      this.cleanup(recordedAtMs);
+      this.cleanup(Date.now());
     }
   }
 

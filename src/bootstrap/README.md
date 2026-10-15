@@ -65,6 +65,7 @@
   有界装配 DeepSeek、OpenCode Go、CCG、CLP 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
   账户能力；未知能力或适配器冲突启动时失败关闭，不回退到 OpenAI 账户查询。
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
+  模型请求入口；IPC 只投影约定字段，Provider 归属由组合层确定，不接受入站扩展字段覆盖。
   模型请求统计端口。所有脱敏请求样本都会持久化；具备 Thread 与 Turn 关联的样本按 Turn 聚合
   到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
   Core 统计。优先使用代理指标携带的 HTTP/WS 请求中明确提供的 `reasoning.effort`，
@@ -173,7 +174,7 @@
   进程退出；配置重载同时检查已启用微信的安全凭据变化，重新扫码替换同账号凭据也触发连接重建。
   只有应用启动完成后才把所有权
   协议标记为就绪，供服务管理入口区分进程占位和可用 Gateway；账户刷新私有 IPC 与应用一同启停。
-  内部致命停止请求进入同一进程关闭链，立即取消设置与代理监听、撤销就绪并关闭账户 IPC；以非零状态退出，整体关闭最多等待 30 秒，不终止共享 App Server。
+  内部致命停止请求进入同一进程关闭链，立即取消设置与代理监听、撤销就绪并关闭账户 IPC；整体关闭预算为 30 秒，超时标记故障。显式进程退出前仍确认投递写入 Worker 及其嵌套 helper 已退出，不把超时视为资源回收成功，不终止共享 App Server。
   该 IPC 根据受控账户查询原因生成固定文案，不透传内部异常 message；按 Provider 记录阶段、分类、
   耗时和受控状态码，主动取消不记录为上游失败；快照等未知本地异常按内部故障处理。
 - `provider-settings-watcher.ts`：监听当前 Gateway 已启用的受管 Provider 模型目录、Profile 与管理标记；

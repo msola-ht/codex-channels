@@ -101,6 +101,7 @@
   主服务托管静态前端和只读指标 API，子代理列表提供全局已登记关系与按父 Thread 的直接子级查询，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
   `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
+  请求列表、错误汇总与单次运行详情的相关查询共享同一只读数据库快照，避免并发写入造成响应内部不一致。
   `/api/v1/settings/model-display` 返回只读模型显示映射，概览按该映射合并并提供原始模型成员明细；
   概览、显示映射与调用采集开关共用可取消的进行中私有配置读取，不缓存配置或权限判断。
 - `webui-management-codex-route.mjs` / `webui-management-gateway-route.mjs` /

@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -13,6 +13,31 @@ import type {
 
 const schemaVersion = 1;
 export { schemaVersion as sessionDisplayCacheSchemaVersion };
+
+/** Read-only compatibility check shared by startup and installation preflight. */
+export function assertSessionDisplayCacheSchema(
+  database: DatabaseSync,
+  { allowEmpty = false }: { allowEmpty?: boolean } = {},
+): void {
+  const version = Number(database.prepare("PRAGMA user_version").get()?.user_version);
+  if (version === 0 && allowEmpty) {
+    if (database.prepare("SELECT 1 FROM sqlite_schema LIMIT 1").get()) {
+      throw new Error("会话缓存数据库 Schema 0 含有未知结构，不能初始化；请核对数据库及备份");
+    }
+    return;
+  }
+  if (version !== schemaVersion) {
+    throw new Error(`会话缓存数据库版本不兼容：当前 ${version}，需要 ${schemaVersion}`);
+  }
+  const definition = database.prepare("SELECT type FROM sqlite_schema WHERE name = 'session_display_cache'").get();
+  if (definition?.type !== "table") throw new Error("会话缓存数据库结构不完整：缺少表 session_display_cache");
+  const columns = new Set(database.prepare("PRAGMA table_info(session_display_cache)").all().map(column => column.name));
+  const missing = [
+    "thread_id", "workspace_id", "archived", "preview", "name", "model_provider", "status_type",
+    "active_turn_id", "is_pinned", "turn_count", "measured_at", "updated_at",
+  ].filter(column => !columns.has(column));
+  if (missing.length > 0) throw new Error(`会话缓存数据库结构不完整：session_display_cache 缺少 ${missing.join("、")}`);
+}
 
 interface CacheRow {
   thread_id: string;
@@ -33,11 +58,22 @@ export class SqliteSessionDisplayCache implements SessionDisplayCachePort {
   private closed = false;
 
   constructor(readonly path: string) {
+    const existed = existsSync(path);
+    if (existed) {
+      const existing = new DatabaseSync(path, { readOnly: true });
+      try {
+        assertSessionDisplayCacheSchema(existing, { allowEmpty: true });
+      } finally {
+        existing.close();
+      }
+    }
     const parent = dirname(path);
     mkdirSync(parent, { recursive: true, mode: 0o700 });
-    securePrivateDirectorySync(parent);
+    if (!existed) securePrivateDirectorySync(parent);
     this.database = new DatabaseSync(path);
     try {
+      assertSessionDisplayCacheSchema(this.database, { allowEmpty: true });
+      if (existed) securePrivateDirectorySync(parent);
       securePrivateFileSync(path);
       // Derived-cache contention fails immediately instead of blocking all conversations for five seconds.
       this.database.exec("PRAGMA busy_timeout = 0; PRAGMA journal_mode = DELETE;");
@@ -121,12 +157,11 @@ export class SqliteSessionDisplayCache implements SessionDisplayCachePort {
   private initializeSchema(): void {
     const row = this.database.prepare("PRAGMA user_version").get() as { user_version: number };
     if (row.user_version === schemaVersion) return;
-    if (row.user_version !== 0) {
-      throw new Error(`会话缓存数据库版本不兼容：当前 ${row.user_version}，需要 ${schemaVersion}`);
-    }
     this.database.exec("BEGIN IMMEDIATE");
     try {
-      this.database.exec(`
+      assertSessionDisplayCacheSchema(this.database, { allowEmpty: true });
+      if (this.database.prepare("PRAGMA user_version").get()?.user_version === 0) {
+        this.database.exec(`
         CREATE TABLE session_display_cache (
           thread_id TEXT PRIMARY KEY CHECK (length(thread_id) > 0),
           workspace_id TEXT NOT NULL CHECK (length(workspace_id) > 0),
@@ -142,7 +177,8 @@ export class SqliteSessionDisplayCache implements SessionDisplayCachePort {
           updated_at INTEGER NOT NULL
         ) STRICT;
         PRAGMA user_version = ${schemaVersion};
-      `);
+        `);
+      }
       this.database.exec("COMMIT");
     } catch (error) {
       this.database.exec("ROLLBACK");

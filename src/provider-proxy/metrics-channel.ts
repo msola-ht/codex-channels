@@ -1,4 +1,4 @@
-import { validModelRequestDiagnostics } from "./chat-diagnostics.js";
+import { modelRequestDiagnosticKeys, validModelRequestDiagnostics } from "./chat-diagnostics.js";
 import { validRequestTiming } from "../../runtime/request-timing.mjs";
 import { modelRequestPolicy } from "../../runtime/model-request-policy.mjs";
 import type { Socket } from "node:net";
@@ -15,6 +15,16 @@ import {
 } from "./response-metrics-observer.js";
 
 const maximumMetricsBytes = 8_192;
+const metricsFields = [
+  "transport", "responseFormat", "operation", "threadId", "turnId", "requestPurpose",
+  "reviewerThreadId", "reviewerTurnId", "model", "serviceTier", "requestServiceTier",
+  "reasoningEffort", "status", "httpStatus", "userAgent", "errorType", "errorCode",
+  "errorMessage", "incompleteReason", "inputTokens", "cachedInputTokens", "outputTokens",
+  "reasoningOutputTokens", "totalTokens", "responseUsageAmount", "upstreamTtftMs",
+  "firstTokenMs", "responseTimeMs", "generationTiming", "timingBasis", "totalDurationMs",
+  "requestModel", "responseModel", "traffic", "requestStartedAtMs", "responseCompletedAtMs",
+  "weeklyQuota", "quotaObservedAtMs", "quotaWindows", ...modelRequestDiagnosticKeys,
+] as const satisfies readonly (keyof ProviderProxyMetrics)[];
 
 export class ProviderProxyMetricsServer {
   private readonly server: PrivateIpcServer;
@@ -226,17 +236,36 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     return undefined;
   }
   const userAgent = record.userAgent;
+  // This private IPC owns request facts only; Provider, source and recording time belong to Gateway.
+  const metrics = Object.fromEntries(metricsFields
+    .filter(key => Object.hasOwn(record, key))
+    .map(key => [key, record[key]])) as unknown as ProviderProxyMetrics;
   return {
-    ...record,
+    ...metrics,
     userAgent: typeof userAgent === "string" ? userAgent : null,
     reasoningEffort: boundedString(record.reasoningEffort),
     errorMessage: typeof record.errorMessage === "string"
       ? record.errorMessage
       : null,
-    weeklyQuota,
-    quotaWindows,
-    quotaObservedAtMs: quotaObservedAtMs ?? null,
-  } as unknown as ProviderProxyMetrics;
+    ...(metrics.traffic === undefined ? {} : { traffic: {
+      label: metrics.traffic.label,
+      session: metrics.traffic.session,
+      interaction: metrics.traffic.interaction,
+    } }),
+    weeklyQuota: metrics.weeklyQuota === null ? null : {
+      limitId: metrics.weeklyQuota.limitId,
+      usedPercentMillionths: metrics.weeklyQuota.usedPercentMillionths,
+      resetsAt: metrics.weeklyQuota.resetsAt,
+      planType: metrics.weeklyQuota.planType,
+    },
+    quotaWindows: metrics.quotaWindows === null ? null : metrics.quotaWindows.map(window => ({
+      windowId: window.windowId,
+      resetsAt: window.resetsAt,
+      ...(window.usedPercentMillionths === undefined ? {} : { usedPercentMillionths: window.usedPercentMillionths }),
+      ...(window.status === undefined ? {} : { status: window.status }),
+    })),
+    quotaObservedAtMs: metrics.quotaObservedAtMs ?? null,
+  };
 }
 
 function validTrafficReference(value: unknown): boolean {

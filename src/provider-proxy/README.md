@@ -112,6 +112,7 @@
   确认，不依赖 Windows named pipe 不具备的半关闭时序。发送异步读取并核验当前 Windows descriptor，
   descriptor/ACL、连接、认证、单帧发送和确认共用 1 秒预算；接收端最多持有 8 个连接，
   每连接也受 1 秒预算约束，认证前连接同样计入上限。只接受当前指标结构，必需的可空字段必须显式传入；缺字段的旧记录直接拒绝。
+  解码仅投影已校验的请求字段和额度子字段；Provider、流量来源与入库时间不由此 IPC 声明，组合层按接收端确定 Provider。
 - `traffic-dump.ts`：仅在 `[debug].model_traffic_dump` 开启时使用的模型报文旁路转储入口与 HTTP/WebSocket
   逻辑调用归约；`traffic-dump-storage.ts` 管理 V2 session、顺序写入和文件轮转，
   `traffic-dump-retention.ts` 管理历史批次保留，`traffic-dump-content.ts` 负责正文分片、终态解析、裁剪与凭据头脱敏。V2 为每个 writer

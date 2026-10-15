@@ -16,7 +16,7 @@ import {
 import { metricsRangeOptions } from "./metrics-command-options.mjs";
 import { createMetricsExportOwner } from "./metrics-export-stream.mjs";
 import { MetricsExportError } from "./metrics-export-limits.mjs";
-import { closeDeliveryReaders, waitForDeliveryReadersExit } from "../dist/delivery/index.js";
+import { closeDeliveryReaders, waitForDeliveryReadersExit, closeDeliveryJournals, waitForDeliveryJournalsExit } from "../dist/delivery/index.js";
 import { closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "../runtime/windows-acl-bridge.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { userDataDir } from "./runtime-config.mjs";
@@ -186,11 +186,11 @@ export function createWebuiServer({
     gatewayConfigRead.controller?.abort();
     const results = await Promise.allSettled([
       Promise.resolve().then(() => closeQueueStreams(management)),
-      metricsExports.close(), closeDeliveryReaders(), closeWindowsAclBridge({ timeoutMs: 2_000 }),
+      metricsExports.close(), closeDeliveryReaders(), closeDeliveryJournals(), closeWindowsAclBridge({ timeoutMs: 2_000 }),
     ]);
     if (results.some(result => result.status === "rejected")) throw new Error("WebUI 后台资源退出未确认");
   }, waitForNotificationsExit: async () => {
-    await Promise.all([metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForWindowsAclBridgeExit()]);
+    await Promise.all([metricsExports.waitForExit(), waitForDeliveryReadersExit(), waitForDeliveryJournalsExit(), waitForWindowsAclBridgeExit()]);
   } };
 }
 
@@ -691,8 +691,10 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
   try {
     const queries = new RequestMetricsQueryService(store);
     if (view === "run") {
-      const summary = queries.threadSummary(threadId);
-      const subagent = queries.subagentThread(threadId);
+      const { summary, subagent } = store.readSnapshot(() => ({
+        summary: queries.threadSummary(threadId),
+        subagent: queries.subagentThread(threadId),
+      }));
       sendJson(response, 200, {
         generatedAt: new Date().toISOString(),
         threadId,
@@ -741,13 +743,13 @@ async function handleRequests(environment, url, response) {
   const filters = parseMetricsFilters(url);
   const store = openMetricsStore(environment, range.endAtMs);
   try {
-    const page = new RequestMetricsQueryService(store).page(range, {
+    const page = store.readSnapshot(() => new RequestMetricsQueryService(store).page(range, {
       offset,
       limit,
       sortKey: sort.key,
       sortDirection: sort.direction,
       ...filters,
-    });
+    }));
     const records = page.records;
     if (records.some(record => record.source === "relay")) {
       const config = readGatewayConfig(resolveGatewayConfigPath(environment));
@@ -819,18 +821,21 @@ async function handleErrors(environment, url, response) {
   const store = openMetricsStore(environment, range.endAtMs);
   try {
     const queries = new RequestMetricsQueryService(store);
-    const page = queries.page(range, {
-      ...filters,
-      offset,
-      limit,
-      sortKey: sort.key,
-      sortDirection: sort.direction,
-      onlyFailures: true,
-    });
+    const { page, errors } = store.readSnapshot(() => ({
+      page: queries.page(range, {
+        ...filters,
+        offset,
+        limit,
+        sortKey: sort.key,
+        sortDirection: sort.direction,
+        onlyFailures: true,
+      }),
+      errors: queries.errors(range, filters),
+    }));
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
-      errors: queries.errors(range, filters),
+      errors,
       records: page.records,
       nextOffset: page.nextOffset,
       total: page.matchedTotal,

@@ -4,7 +4,7 @@
 
 ## 文件
 
-- `index.ts`：本模块的公开导出入口；导出状态库与会话展示缓存的 Schema 版本常量，供运行时与更新预检共用。
+- `index.ts`：本模块的公开导出入口；导出状态库与会话展示缓存的 Schema 版本常量和只读结构校验，供运行时与更新预检共用。
 - `binding-store.ts`：定义 Conversation、Workspace、Thread 和必要偏好的存储接口。
 - `memory-binding-store.ts`：用于临时运行的内存实现。
 - `sqlite-binding-store.ts`：单机 Gateway 使用的 SQLite 实现，负责当前 Schema、Unix owner-only 权限、
@@ -17,6 +17,9 @@ Conversation 使用 `surface + accountId + conversationId` 作为复合身份；
 Conversation。空闲 Thread 的跨渠道接管在同一个 SQLite 事务中移除原绑定、释放目标 Conversation
 原绑定并写入新绑定。数据库必须使用当前 Schema v6；其他版本会失败关闭，不执行自动迁移。
 标记为当前版本但缺少必需表或字段的数据库同样会失败关闭，不执行自动补表或修补。
+会话展示缓存执行相同的必需表和字段校验。已有数据库先通过只读兼容性校验，写连接再校验，
+通过后才保护权限、设置日志模式或初始化；不兼容的 Schema 不修改权限、日志模式或结构。
+仅新库或 Schema 0 且没有任何 Schema 对象的空库可以初始化，Schema 0 的未知结构会明确拒绝。
 
 授权操作者通过独立的 Conversation→Actor 关联保存，不从群聊或私聊的 Conversation ID
 推断用户身份。无法确认操作者或已撤权的会话会解除绑定，避免恢复订阅后继续向未授权会话输出。
@@ -31,7 +34,7 @@ Schema v6 保存前台、后台绑定、`conversation_idle_state` 和 `conversat
 事务中原子写入，常规活动以一分钟粒度写库，
 强制新建标记会立即写库，确保 Gateway 重启后普通消息仍不会自动接续已释放的旧 Thread。
 撤权导致所有绑定时也会原子写入强制新建标记，重新授权后的普通消息仍从新会话开始。
-当前只接受 Schema v6，初始化只创建新库；不提供旧版本迁移，也不删除 App Server Thread。安装预检与运行时均拒绝其他版本。
+已有非空状态库只接受 Schema v6，初始化仅用于新库或明确空库；不提供旧版本迁移，也不删除 App Server Thread。安装预检与运行时均拒绝其他非空版本。
 
 存储实现必须保持可替换。字段只服务于绑定恢复或必要偏好；不支持的格式保留原数据并明确报错。涉及用户数据的处置须先明确备份、失败恢复和回滚方案并取得相应授权，不能自动删除数据库，也不能读取或复制 `~/.codex/sessions`。
 

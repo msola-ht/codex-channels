@@ -7,7 +7,7 @@ import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { serviceCommandTarget, serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import { loadConfigDocument } from "../dist/config/index.js";
-import { sessionDisplayCacheSchemaVersion } from "../dist/storage/index.js";
+import { assertSessionDisplayCacheSchema, sessionDisplayCacheSchemaVersion } from "../dist/storage/index.js";
 import { validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
 import { validateStateDatabaseStructure } from "./state-database.mjs";
 import { requireUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
@@ -47,8 +47,11 @@ export function inspectSessionDisplayCache(environment = process.env) {
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
     const version = Number(database.prepare("PRAGMA user_version").get()?.user_version);
+    if (version === 0 || version === sessionDisplayCacheSchemaVersion) {
+      assertSessionDisplayCacheSchema(database, { allowEmpty: true });
+    }
     return {
-      compatible: version === sessionDisplayCacheSchemaVersion,
+      compatible: version === 0 || version === sessionDisplayCacheSchemaVersion,
       databasePath,
       exists: true,
       schemaVersion: version,

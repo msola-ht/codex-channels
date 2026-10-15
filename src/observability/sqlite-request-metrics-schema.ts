@@ -269,14 +269,12 @@ export class ModelRequestMetricsSchemaError extends Error {
 }
 
 export function ensureCurrentModelRequestMetricsSchema(database: DatabaseSync): void {
-  database.exec(schemaMetadataSql);
-  const version = database.prepare(`
-    SELECT value FROM schema_metadata WHERE name = 'schema_version'
-  `).get() as { value: number } | undefined;
-  if (version && version.value !== schemaVersion) {
-    throw new ModelRequestMetricsSchemaError(version.value, schemaVersion);
+  if (database.prepare("SELECT 1 FROM sqlite_master LIMIT 1").get()) {
+    requireCurrentModelRequestMetricsSchema(database);
+    return;
   }
-  if (!version) database.exec(initialSchemaSql);
+  database.exec(schemaMetadataSql);
+  database.exec(initialSchemaSql);
 }
 
 export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync): void {
