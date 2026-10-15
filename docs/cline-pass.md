@@ -68,7 +68,7 @@ Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘�
 工具结果中的内联图片不能放进 Chat 的 `tool` 消息，转换时按原顺序收集，在该组工具结果之后作为紧随的一条 `user` 消息图片段写出，并用相同的调用 ID 与图片序号标记关联原 `tool` 文本位置和图片；并行结果只写出一条，结果文本仍留在对应 `tool` 消息里，因此上下文中的截图不会再让整次请求失败。
 不支持图片文件引用、远程图片 URL 或 `detail: original`；`auto`、`low`、`high` 原样传递。
 新账户复用共享目录中的图片能力和思考等级。
-Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；选择的等级通过 Chat `reasoning.effort` 原样传递，`none` 明确关闭思考。其他模型按官方目录声明生成选项：普通等级使用 `reasoning_effort`，`none` 使用 `reasoning.enabled=false`，开关选项 `enabled` 使用 `reasoning.enabled=true`，不发送 `reasoning_effort=enabled`。桥在出站前按当前启用目录复核选项，未声明的选项明确拒绝。优先默认 `high`，没有时使用目录投影的第一个合法等级；仅有开关时默认 `none`。只有精确 Flash 模型限定 DeepSeek 上游路由，其他模型由 Cline 按模型 ID 路由。
+Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；非关闭等级通过 Chat `reasoning.effort` 原样传递，`none` 与其他 CLP 模型统一映射为 `reasoning.enabled=false`。2026-10-15 的既有转发记录中，旧 `reasoning.effort=none` 仍返回非零推理 Token 和思考正文，不能再用早期观察保证当前关闭有效。其他模型按官方目录声明生成选项：普通等级使用 `reasoning_effort`，开关选项 `enabled` 使用 `reasoning.enabled=true`，不发送 `reasoning_effort=enabled`。桥在出站前按当前启用目录复核选项，未声明的选项明确拒绝。优先默认 `high`，没有时使用目录投影的第一个合法等级；仅有开关时默认 `none`。只有精确 Flash 模型限定 DeepSeek 上游路由，其他模型由 Cline 按模型 ID 路由。
 
 已有目录需通过“选择启用模型／更新共享目录”显式刷新才会增加开关选项；安装代码不自动改写目录，已有默认选择保留。聚合继承同一目录，仍按已有活动和租约条件刷新。回退到不支持 `enabled` 的旧版本前，先把相关默认值和会话选择改为 `none`，再按上述成对目录备份流程回退。此开关适配仅用于受管 CLP 的 Responses→Chat 桥；不自动改写其他提供商的原生 Responses 参数或独立 Relay 的客户端参数。
 未传入思考选项时沿用上游默认值；需要开启思考时，选择目录提供的 `enabled` 或非 `none` 等级。

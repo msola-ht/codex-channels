@@ -54,11 +54,12 @@ export function applyChatReasoningPolicy(request: DirectChatRequest, provider: s
   return result;
 }
 
-/** Shared CLP wire mapping; exact Flash retains its verified DeepSeek control. */
+/** Shared CLP wire mapping; disabling uses the gateway toggle for every model. */
 export type ChatReasoningEffort = RelayReasoningEffort | "enabled";
 export function clinePassChatReasoningControl(model: string, effort: ChatReasoningEffort):
   { reasoning: { effort: RelayReasoningEffort } | { enabled: boolean } } | { reasoning_effort: RelayReasoningEffort } {
   if (effort === "enabled") return { reasoning: { enabled: true } };
+  if (effort === "none") return { reasoning: { enabled: false } };
   if (model === "cline-pass/deepseek-v4.1-flash") return { reasoning: { effort } };
-  return effort === "none" ? { reasoning: { enabled: false } } : { reasoning_effort: effort };
+  return { reasoning_effort: effort };
 }

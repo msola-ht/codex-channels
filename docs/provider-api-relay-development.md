@@ -91,7 +91,7 @@ DS 历史引用由上游按其无状态合同忽略，客户端仍须携带完�
 资料见 [DeepSeek 接入边界](deepseek.md#responses-兼容性边界)与
 [官方 Responses 参数说明](https://api-docs.deepseek.com/guides/responses_api/)。
 
-思考策略默认跟随客户端。Key 强制关闭仅对已登记的提供商、模型及协议组合生效；其他组合保留客户端参数，不阻止请求：通用 CLP Chat 使用 Cline 官方适配器的 `reasoning.enabled=false`；CLP 精确 DeepSeek 模型保留已验证的 `reasoning.effort=none`，DS Responses 使用 `reasoning.effort=none`，DS Chat 使用 `reasoning_effort=none`。
+思考策略默认跟随客户端。Key 强制关闭仅对已登记的提供商、模型及协议组合生效；其他组合保留客户端参数，不阻止请求：CLP Chat（包括精确 DeepSeek Flash 模型）统一使用 Cline 官方适配器的 `reasoning.enabled=false`，DS Responses 使用 `reasoning.effort=none`，DS Chat 使用 `reasoning_effort=none`。跟随客户端时不会把原生 DeepSeek 的 `thinking.type=disabled` 转换为 Cline 网关参数；需要 Relay 覆盖关闭时，应使用配置为强制关闭的 Key。
 `extra_body` / `extraBody` 内的思考控制字段与关闭策略冲突时返回具体字段路径；
 跟随客户端不增加该限制。不修改历史思考内容或隐藏上游输出。
 
