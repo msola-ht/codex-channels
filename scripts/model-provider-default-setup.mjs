@@ -74,7 +74,7 @@ export async function runModelProviderDefaultSetup({
     output.write(`模型上下文：${result.model.contextWindow} tokens。\n`);
     output.write(`共享模型目录中的默认思考等级：${reasoningEffort}。\n`);
     output.write("新会话使用该默认值；恢复历史会话仍使用 Thread 原有模型。\n");
-    output.write("上下文窗口请在「受管模型目录上下文窗口」中按模型名统一设置；自动压缩配置保持既有规则。\n");
+    output.write("已清除当前主配置或 Provider Profile 的上下文窗口与自动压缩覆盖，恢复模型目录与上游默认规则；窗口请在「受管模型目录上下文窗口」中按模型名统一设置。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-app-server"));
     return {
       action: "configured",
