@@ -295,7 +295,7 @@ try {
   ) {
     printCliMessage("failure", error instanceof Error ? error.message : String(error));
   }
-  if (error instanceof ReportedChildExitError) {
+  if (error instanceof ReportedChildExitError || [130, 143].includes(error?.exitCode)) {
     process.exitCode = error.exitCode;
   } else if (!(error instanceof ForwardedChildSignalError)) {
     process.exitCode = 1;
@@ -519,11 +519,11 @@ async function dispatchCommand(command, args) {
             break;
           }
           (await import("../scripts/session-cleanup.mjs")).parseSessionCleanupArgs(values);
-          runScript("scripts/session-cleanup.mjs", values, { failureReportedByChild: true });
+          await runMaintenanceScript("scripts/session-cleanup.mjs", values);
         } else if (target === "traffic") {
           if (showRequestedHelp(values, "traffic.cleanup")) break;
           parseTrafficCleanupArgs(values);
-          runStandaloneScript("scripts/traffic-cleanup.mjs", values);
+          await runMaintenanceScript("scripts/traffic-cleanup.mjs", values, undefined, false);
         } else if (target === "metrics") {
           await metricsMaintenance(values);
         } else throw new Error(cleanupUsage);
@@ -534,9 +534,9 @@ async function dispatchCommand(command, args) {
         break;
       }
       await (await import("../scripts/cleanup-menu.mjs")).runCleanupMenu({
-        runSessionCleanup: (values) => runScript("scripts/session-cleanup.mjs", values, { failureReportedByChild: true }),
-        runTrafficCleanup: (values) => runStandaloneScript("scripts/traffic-cleanup.mjs", values),
-        runDatabaseCommand: (values) => runScript("scripts/metrics-database.mjs", values, { failureReportedByChild: true }),
+        runSessionCleanup: (values, options) => runMaintenanceScript("scripts/session-cleanup.mjs", values, options),
+        runTrafficCleanup: (values, options) => runMaintenanceScript("scripts/traffic-cleanup.mjs", values, options, false),
+        runDatabaseCommand: (values, options) => runMaintenanceScript("scripts/metrics-database.mjs", values, options),
       });
       break;
     case "traffic":
@@ -677,6 +677,16 @@ function runStandaloneScript(relativePath, args, environment = process.env) {
     process.cwd(),
     { failureReportedByChild: true },
   );
+}
+
+async function runMaintenanceScript(relativePath, args, { signal } = {}, configure = true) {
+  const runtime = configure ? configuredEnvironment() : undefined;
+  const { runMaintenanceCommand } = await import("../scripts/maintenance-services.mjs");
+  return runMaintenanceCommand(join(packageDir, relativePath), args, {
+    environment: runtime?.environment ?? process.env,
+    cwd: runtime?.dataDir ?? process.cwd(),
+    signal,
+  });
 }
 
 async function runForegroundScript(
@@ -899,7 +909,7 @@ async function metricsMaintenance(args) {
   const values = action === "cleanup"
     ? [rest.includes("--restart-gateway") ? "cleanup-restart" : "cleanup", ...rest.filter(value => value !== "--restart-gateway")]
     : [action, ...rest];
-  runScript("scripts/metrics-database.mjs", values, { failureReportedByChild: true });
+  await runMaintenanceScript("scripts/metrics-database.mjs", values);
 }
 
 async function channel(args) {

@@ -226,7 +226,7 @@ function detectionSummary({ environment, configPath, document }) {
     "检测结果",
     `- 配置文件：${configPath}`,
     `- Codex CLI：${codexCliStatus(environment, codex)}`,
-    `- 官方登录：${hasCodexAuthFile(environment) ? "已登录" : `未登录（${join(codexHomePath(environment), "auth.json")} 不存在）`}`,
+    `- 官方登录：${hasCodexAuthFile(environment) ? "检测到鉴权文件（未验证登录方式、有效期或官方登录状态）" : `未检测到鉴权文件（${join(codexHomePath(environment), "auth.json")} 不存在；未验证其他凭据存储）`}`,
     `- 通讯渠道：${channels.join("、") || "未配置"}`,
     `- 默认模型：${stringValue(codex.default_model) || "跟随 Provider 默认模型"}`,
     `- 默认 Workspace：${stringValue(table(defaultWorkspace).id) || stringValue(document.default_workspace)} → ${stringValue(table(defaultWorkspace).cwd)}`,

@@ -5,6 +5,7 @@ import { ForwardedChildSignalError, ReportedChildExitError } from "../runtime/pr
 
 export function reportMenuError(error) {
   if (error instanceof ForwardedChildSignalError) throw error;
+  if ([130, 143].includes(error?.exitCode)) throw error;
   if (!(error instanceof ReportedChildExitError)) {
     writeCliMessage("failure", error instanceof Error ? error.message : String(error));
   }

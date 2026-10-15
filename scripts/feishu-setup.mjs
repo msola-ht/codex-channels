@@ -215,7 +215,7 @@ export async function runFeishuSetup({
 }
 
 async function readManualRegistration(prompt, output) {
-  output.write("App ID、App Secret 的输入内容会显示，请避开屏幕共享或录屏。\n");
+  output.write("App ID 输入内容会显示；App Secret 输入内容隐藏。\n");
   let appId;
   while (!appId) {
     const value = await prompt.ask("飞书 App ID");

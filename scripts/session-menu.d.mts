@@ -1,3 +1,5 @@
+import type { MaintenanceServiceOptions } from "./maintenance-services.mjs";
+
 export interface SessionMenuPrompts {
   intro(message: string): void;
   cancel(message: string): void;
@@ -9,7 +11,8 @@ export interface SessionMenuPrompts {
 
 export function runSessionCleanupMenu(options: {
   prompts?: SessionMenuPrompts;
-  runCleanup: (args: string[]) => void | Promise<unknown>;
+  runCleanup: (args: string[], options?: { signal: AbortSignal }) => void | Promise<unknown>;
   gatewayRunning?: () => boolean | Promise<boolean>;
   runService?: (action: "stop" | "start") => void | Promise<unknown>;
+  services?: MaintenanceServiceOptions;
 }): Promise<unknown>;

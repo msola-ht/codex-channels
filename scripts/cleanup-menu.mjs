@@ -45,11 +45,11 @@ export async function runCleanupMenu({
     selectedAction = action;
     try {
       if (action === "sessions") {
-        await runSessionCleanupMenu({ prompts, runCleanup: runSessionCleanup });
+        await runSessionCleanupMenu({ prompts, runCleanup: runSessionCleanup, services });
       } else if (action === "cleanup" || action === "reset") {
         await runMetricsMaintenanceMenu(action, { prompts, readStorage,
           runDatabaseCommand: values => runMaintenanceServices({ ...services, prompts, targets: ["gateway"],
-            run: () => runDatabaseCommand([values[0] === "cleanup-restart" ? "cleanup" : values[0], ...values.slice(1)]) }),
+            run: options => runDatabaseCommand([values[0] === "cleanup-restart" ? "cleanup" : values[0], ...values.slice(1)], options) }),
         });
       } else if (action === "traffic") {
         await runTrafficCleanup([]);
@@ -58,7 +58,7 @@ export async function runCleanupMenu({
           initialValue: false,
         });
         if (!prompts.isCancel(confirmed) && confirmed === true) await runMaintenanceServices({ ...services, prompts,
-          targets: ["gateway", "relay", "app-server"], run: () => runTrafficCleanup(["--confirm"]) });
+          targets: ["gateway", "relay", "app-server"], run: options => runTrafficCleanup(["--confirm"], options) });
       } else if (action === "prune") {
         const provider = await prompts.text({
           message: "需要清理指标的精确 Provider ID（区分大小写）",
@@ -71,7 +71,8 @@ export async function runCleanupMenu({
           message: `确认备份并清理 Provider ${id} 的请求指标？Gateway 将按原运行状态恢复。`,
           initialValue: false,
         });
-        if (!prompts.isCancel(confirmed) && confirmed === true) await runDatabaseCommand(["prune", id]);
+        if (!prompts.isCancel(confirmed) && confirmed === true) await runMaintenanceServices({ ...services, prompts,
+          targets: ["gateway"], run: options => runDatabaseCommand(["prune", id], options) });
       }
     } catch (error) {
       reportMenuError(error);

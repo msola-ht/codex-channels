@@ -10,22 +10,10 @@ import {
   signalChildProcesses,
   terminateChildProcess,
 } from "../runtime/process-lifecycle.mjs";
-import {
-  backupPrimaryProviderCandidates,
-  listCustomPrimaryProviderCandidates,
-} from "../runtime/model-provider-runtime.mjs";
 import { createCodexUserConfigClient, resolveCodexUserConfigBinary } from "./codex-user-config.mjs";
-import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { applyPrimaryProviderSwitch, previewPrimaryProviderSwitch } from "./primary-provider-management.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
-
-function record(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-function optionalString(value) {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
 
 async function defaultRunLogin({ codexBinary, environment, input, output }) {
   const invocation = codexProcessInvocation(
@@ -94,24 +82,19 @@ export async function runOfficialLoginSetup({
   createClient = createCodexUserConfigClient,
   runLogin = defaultRunLogin,
 } = {}) {
-  const client = await createClient({ environment });
-  let snapshot;
-  try {
-    await client.connect();
-    snapshot = await client.readUserConfigSnapshot();
-  } finally {
-    await client.close().catch(() => undefined);
-  }
-  const config = record(snapshot.config);
-  const candidates = listCustomPrimaryProviderCandidates(record(config.model_providers));
-  const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
+  const preview = await previewPrimaryProviderSwitch(
+    { providerId: "openai" },
+    { environment, createClient },
+  );
+  const candidates = preview.effects.candidateIdsToBackup;
 
   output.write("\nCodex Connect 官方登录模式 Setup\n\n");
   const notices = [
     ...(candidates.length > 0
-      ? [`备份并停用自定义候选：${candidates.join("、")}（可用 primary-provider switch 切回）`]
+      ? [`备份并停用自定义候选：${candidates.join("、")}（可用 codexc provider switch 切回）`]
       : []),
-    ...(hasTopLevelBaseUrl ? ["移除顶层 openai_base_url"] : []),
+    ...(preview.effects.removesTopLevelBaseUrl ? ["移除顶层 openai_base_url"] : []),
+    ...(preview.effects.clearsCustomModel ? ["清除第三方默认模型及对应模型设置"] : []),
   ];
   output.write(
     notices.length === 0
@@ -136,39 +119,11 @@ export async function runOfficialLoginSetup({
     output,
   });
 
-  const backedUp = await withModelProviderManagementTransaction(environment, async () => {
-    const writer = await createClient({ environment });
-    try {
-      await writer.connect();
-      const currentSnapshot = await writer.readUserConfigSnapshot();
-      const currentConfig = record(currentSnapshot.config);
-      const activeProvider = optionalString(currentConfig.model_provider);
-      const currentCandidates = backupPrimaryProviderCandidates(
-        record(currentConfig.model_providers),
-        environment,
-      );
-      const edits = [
-        ...(optionalString(currentConfig.openai_base_url) === undefined
-          ? []
-          : [{ keyPath: "openai_base_url", value: null }]),
-        { keyPath: "model_provider", value: "openai" },
-        ...(activeProvider !== undefined && activeProvider !== "openai"
-          ? [{ keyPath: "model", value: null }]
-          : []),
-        ...currentCandidates.map((id) => ({
-          keyPath: `model_providers.${id}`,
-          value: null,
-        })),
-      ];
-      await writer.writeUserConfigEdits(
-        edits,
-        { expectedVersion: currentSnapshot.version },
-      );
-      return currentCandidates;
-    } finally {
-      await writer.close().catch(() => undefined);
-    }
-  });
+  const result = await applyPrimaryProviderSwitch(
+    { providerId: "openai" },
+    { environment, createClient, switchPreview: preview },
+  );
+  const backedUp = result.effects.backedUpProviderIds;
   output.write(
     backedUp.length === 0
       ? "已恢复官方 OpenAI 模式。\n"

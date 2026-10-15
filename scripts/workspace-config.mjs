@@ -14,6 +14,7 @@ import {
 } from "../runtime/config-event-queue.mjs";
 import {
   readGatewayConfig,
+  validateGatewayConfigStructureDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { securePrivateFileSync } from "../runtime/private-file.mjs";
@@ -60,8 +61,8 @@ export function addWorkspaceToConfig({
   eventQueuePath,
 }) {
   const document = readGatewayConfig(configPath);
-  securePrivateFileSync(configPath);
   const parsed = parseWorkspaceConfig(document);
+  securePrivateFileSync(configPath);
   if (
     !parsed.workspaces.some((workspace) => workspace.id === parsed.defaultWorkspaceId)
     && !pruneMissing
@@ -117,6 +118,7 @@ export function addWorkspaceToConfig({
     || previousDefault.id !== defaultWorkspace.id
     || previousDefault.name !== defaultWorkspace.name
     || previousDefault.cwd !== defaultWorkspace.cwd;
+  let eventQueueCleanupPending = false;
   if (added || removedWorkspaces.length > 0 || defaultChanged) {
     if (eventQueuePath && removedWorkspaces.length > 0 && !added) {
       readConfigEvents(eventQueuePath);
@@ -137,7 +139,7 @@ export function addWorkspaceToConfig({
       throw error;
     }
     if (eventQueuePath && removedWorkspaces.length > 0) {
-      discardWorkspaceConfigEvents(
+      eventQueueCleanupPending = cleanupCommittedWorkspaceEvents(
         eventQueuePath,
         removedWorkspaces.map((removed) => removed.id),
       );
@@ -149,6 +151,7 @@ export function addWorkspaceToConfig({
     defaultWorkspace,
     defaultChanged,
     removedWorkspaces,
+    eventQueueCleanupPending,
   };
 }
 
@@ -159,8 +162,8 @@ export function removeWorkspaceFromConfig({
   eventQueuePath,
 }) {
   const document = readGatewayConfig(configPath);
-  securePrivateFileSync(configPath);
   const parsed = parseWorkspaceConfig(document);
+  securePrivateFileSync(configPath);
   const selected = resolveWorkspaceSelector(parsed.workspaces, selector);
   if (
     selected.id === fallbackDefaultWorkspace.id
@@ -183,14 +186,25 @@ export function removeWorkspaceFromConfig({
     readConfigEvents(eventQueuePath);
   }
   writeWorkspaceConfig(configPath, document, workspaces, defaultWorkspace.id);
-  if (eventQueuePath) {
-    discardWorkspaceConfigEvents(eventQueuePath, [selected.id]);
-  }
+  const eventQueueCleanupPending = eventQueuePath
+    ? cleanupCommittedWorkspaceEvents(eventQueuePath, [selected.id])
+    : false;
   return {
     removedWorkspace: selected,
     defaultWorkspace,
     defaultChanged: defaultWorkspace.id !== parsed.defaultWorkspaceId,
+    eventQueueCleanupPending,
   };
+}
+
+function cleanupCommittedWorkspaceEvents(eventQueuePath, workspaceIds) {
+  try {
+    discardWorkspaceConfigEvents(eventQueuePath, workspaceIds);
+    return false;
+  } catch {
+    // 配置已经提交，清理通知失败不能再报告为注册操作未成功。
+    return true;
+  }
 }
 
 export function chooseWorkspaceId(name, unavailableIds = []) {
@@ -282,7 +296,8 @@ function writeWorkspaceConfig(configPath, document, workspaces, defaultWorkspace
 }
 
 function parseWorkspaceConfig(document) {
-  const parsed = document.workspaces;
+  const validated = validateGatewayConfigStructureDocument(document);
+  const parsed = validated.workspaces;
   if (!Array.isArray(parsed) || parsed.length === 0) {
     throw new Error("workspaces 必须是非空数组");
   }
@@ -318,7 +333,7 @@ function parseWorkspaceConfig(document) {
   }
   return {
     workspaces,
-    defaultWorkspaceId: required(document, "default_workspace"),
+    defaultWorkspaceId: required(validated, "default_workspace"),
   };
 }
 

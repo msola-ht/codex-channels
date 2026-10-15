@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DeliveryError, DeliveryJournal } from "../dist/delivery/index.js";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { readGatewayConfig, validateGatewayConfigStructureDocument } from "../runtime/gateway-config.mjs";
 import { locateUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
 
@@ -26,7 +26,7 @@ export async function runDeliveryCommand(args, environment = process.env) {
       || (command === "confirm" && confirmation === "--confirmed-delivered"));
   if (!read && !resolve) throw new Error(deliveryCommandUsage);
   const { configPath, dataDir } = locateUserConfig(environment);
-  const config = readGatewayConfig(configPath);
+  const config = validateGatewayConfigStructureDocument(readGatewayConfig(configPath));
   const database = resolveConfiguredPath(config.storage?.database_path, dataDir, "data/gateway.sqlite3");
   const directory = join(dirname(database), "delivery-outbox");
   if (!existsSync(join(directory, "outbox.sqlite3"))) throw new Error("投递箱尚未创建，未修改任何投递数据");

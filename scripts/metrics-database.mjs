@@ -37,6 +37,7 @@ import {
   resolveMetricsDatabaseContext,
 } from "./metrics-database-access.mjs";
 import { inspectManagedServiceStatus } from "./service-status.mjs";
+import { withCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
 import { resolveConfiguredPath } from "./runtime-config.mjs";
 import {
   assertExportFormat,
@@ -572,91 +573,94 @@ if (
   && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 ) {
   try {
-    const command = process.argv[2];
-    if (
-      command === "status"
-      && (
-        process.argv.length === 3
-        || (process.argv.length === 4 && process.argv[3] === "--json")
-      )
-    ) {
-      printStatus(inspectMetricsDatabase(), { json: process.argv[3] === "--json" });
-    } else if (command === "reset" && process.argv.length === 3) {
-      const result = resetMetricsDatabase();
-      if (!result.changed) {
-        writeCliMessage("note", "指标数据库尚未创建，无需重置。");
+    await withCliLifecycleCancellation("指标命令", async signal => {
+      signal.throwIfAborted();
+      const command = process.argv[2];
+      if (
+        command === "status"
+        && (
+          process.argv.length === 3
+          || (process.argv.length === 4 && process.argv[3] === "--json")
+        )
+      ) {
+        printStatus(inspectMetricsDatabase(), { json: process.argv[3] === "--json" });
+      } else if (command === "reset" && process.argv.length === 3) {
+        const result = resetMetricsDatabase();
+        if (!result.changed) {
+          writeCliMessage("note", "指标数据库尚未创建，无需重置。");
+          console.log(`数据库：${result.databasePath}`);
+        } else {
+          writeCliMessage("success", "指标数据库已归档并重置。");
+          console.log(`数据库：${result.databasePath}`);
+          console.log(`旧库备份：${result.backupPath}`);
+          writeCliMessage("remediation", "启动 Gateway 后将自动创建当前 Schema。");
+        }
+      } else if (command === "prune" && process.argv.length === 4) {
+        const provider = process.argv[3];
+        const result = pruneProviderMetrics(provider);
+        writeCliMessage("success", `已清理 ${result.provider} 请求指标：本地删除 ${result.local.deleted} 条。`);
+        if (result.local.backupPath !== null) {
+          console.log(`本地备份：${result.local.backupPath}`);
+        }
+        for (const warning of result.warnings) {
+          writeCliMessage("note", `警告：${warning}`, { destination: "stderr" });
+        }
+        const restored = [];
+        restored.push(result.gatewayWasRunning ? "Gateway 已恢复运行" : "Gateway 原为停止，保持停止");
+        writeCliMessage("success", restored.join("；") + "。");
+      } else if (command === "cleanup" || command === "cleanup-restart") {
+        const options = parseCleanupOptions(process.argv.slice(3));
+        const result = command === "cleanup-restart"
+          ? cleanupMetricsDatabaseWithGatewayRestart(process.env, options)
+          : cleanupMetricsDatabase(process.env, options);
+        writeCliMessage("success", `已清理 ${result.deleted} 条指标，剩余 ${result.remaining} 条。`);
         console.log(`数据库：${result.databasePath}`);
+        console.log(`备份：${result.backupPath}`);
+        if (!result.vacuumed) {
+          writeCliMessage("note", "未执行 VACUUM；空闲页会由 SQLite 后续复用。需要立即缩小文件时加 --vacuum。");
+        }
+      } else if (command === "report") {
+        const options = parseMetricsOptions(
+          process.argv.slice(3),
+          new Set([...metricsQueryOptions, "--group", "--format"]),
+        );
+        const format = options.format ?? "markdown";
+        assertExportFormat(format, ["markdown", "json", "csv"]);
+        printMetricsReport(readMetricsReport(process.env, options), format);
+      } else if (command === "export") {
+        const options = parseMetricsOptions(
+          process.argv.slice(3),
+          new Set([...metricsQueryOptions, "--format"]),
+        );
+        const format = options.format ?? "json";
+        assertExportFormat(format, ["json", "csv", "markdown"]);
+        printMetricsExport(
+          readMetricsExport(process.env, {
+            ...options,
+            ...(options.thread ? { threadId: options.thread } : {}),
+          }),
+          format,
+        );
+      } else if (command === "quota") {
+        const options = parseMetricsOptions(process.argv.slice(3), new Set(["--range", "--from", "--to", "--format"]));
+        const format = options.format ?? "markdown";
+        assertExportFormat(format, ["markdown", "json", "csv"]);
+        printQuotaHistory(readQuotaHistory(process.env, options), format);
+      } else if (command === "run") {
+        const options = parseMetricsRunArgs(process.argv.slice(3));
+        printMetricsRun(readMetricsRun(process.env, options.threadId), options.format);
+      } else if (command === "threads") {
+        const options = parseMetricsThreadsArgs(process.argv.slice(3));
+        printMetricsThreads(readMetricsThreads(process.env, options), options.format);
+      } else if (command === "turns") {
+        const options = parseMetricsTurnsArgs(process.argv.slice(3));
+        printMetricsTurns(readMetricsTurns(process.env, options.threadId, options), options.format);
       } else {
-        writeCliMessage("success", "指标数据库已归档并重置。");
-        console.log(`数据库：${result.databasePath}`);
-        console.log(`旧库备份：${result.backupPath}`);
-        writeCliMessage("remediation", "启动 Gateway 后将自动创建当前 Schema。");
+        throw new Error(
+          "查询：codexc metrics <status|run|threads|turns|report|export|quota>；维护：codexc cleanup metrics [prune|reset]",
+        );
       }
-    } else if (command === "prune" && process.argv.length === 4) {
-      const provider = process.argv[3];
-      const result = pruneProviderMetrics(provider);
-      writeCliMessage("success", `已清理 ${result.provider} 请求指标：本地删除 ${result.local.deleted} 条。`);
-      if (result.local.backupPath !== null) {
-        console.log(`本地备份：${result.local.backupPath}`);
-      }
-      for (const warning of result.warnings) {
-        writeCliMessage("note", `警告：${warning}`, { destination: "stderr" });
-      }
-      const restored = [];
-      restored.push(result.gatewayWasRunning ? "Gateway 已恢复运行" : "Gateway 原为停止，保持停止");
-      writeCliMessage("success", restored.join("；") + "。");
-    } else if (command === "cleanup" || command === "cleanup-restart") {
-      const options = parseCleanupOptions(process.argv.slice(3));
-      const result = command === "cleanup-restart"
-        ? cleanupMetricsDatabaseWithGatewayRestart(process.env, options)
-        : cleanupMetricsDatabase(process.env, options);
-      writeCliMessage("success", `已清理 ${result.deleted} 条指标，剩余 ${result.remaining} 条。`);
-      console.log(`数据库：${result.databasePath}`);
-      console.log(`备份：${result.backupPath}`);
-      if (!result.vacuumed) {
-        writeCliMessage("note", "未执行 VACUUM；空闲页会由 SQLite 后续复用。需要立即缩小文件时加 --vacuum。");
-      }
-    } else if (command === "report") {
-      const options = parseMetricsOptions(
-        process.argv.slice(3),
-        new Set([...metricsQueryOptions, "--group", "--format"]),
-      );
-      const format = options.format ?? "markdown";
-      assertExportFormat(format, ["markdown", "json", "csv"]);
-      printMetricsReport(readMetricsReport(process.env, options), format);
-    } else if (command === "export") {
-      const options = parseMetricsOptions(
-        process.argv.slice(3),
-        new Set([...metricsQueryOptions, "--format"]),
-      );
-      const format = options.format ?? "json";
-      assertExportFormat(format, ["json", "csv", "markdown"]);
-      printMetricsExport(
-        readMetricsExport(process.env, {
-          ...options,
-          ...(options.thread ? { threadId: options.thread } : {}),
-        }),
-        format,
-      );
-    } else if (command === "quota") {
-      const options = parseMetricsOptions(process.argv.slice(3), new Set(["--range", "--from", "--to", "--format"]));
-      const format = options.format ?? "markdown";
-      assertExportFormat(format, ["markdown", "json", "csv"]);
-      printQuotaHistory(readQuotaHistory(process.env, options), format);
-    } else if (command === "run") {
-      const options = parseMetricsRunArgs(process.argv.slice(3));
-      printMetricsRun(readMetricsRun(process.env, options.threadId), options.format);
-    } else if (command === "threads") {
-      const options = parseMetricsThreadsArgs(process.argv.slice(3));
-      printMetricsThreads(readMetricsThreads(process.env, options), options.format);
-    } else if (command === "turns") {
-      const options = parseMetricsTurnsArgs(process.argv.slice(3));
-      printMetricsTurns(readMetricsTurns(process.env, options.threadId, options), options.format);
-    } else {
-      throw new Error(
-        "查询：codexc metrics <status|run|threads|turns|report|export|quota>；维护：codexc cleanup metrics [prune|reset]",
-      );
-    }
+    });
   } catch (error) {
     if (
       !(error instanceof ReportedChildExitError)
@@ -666,8 +670,10 @@ if (
     }
     if (error instanceof ReportedChildExitError) {
       process.exitCode = error.exitCode;
-    } else if (!(error instanceof ForwardedChildSignalError)) {
-      process.exitCode = 1;
+    } else if (error instanceof ForwardedChildSignalError) {
+      process.exitCode = error.signal === "SIGINT" ? 130 : error.signal === "SIGTERM" ? 143 : 1;
+    } else {
+      process.exitCode = error?.exitCode ?? 1;
     }
   }
 }

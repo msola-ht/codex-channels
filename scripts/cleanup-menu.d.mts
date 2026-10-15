@@ -6,8 +6,8 @@ export const cleanupUsage: string;
 export function runCleanupMenu(options: {
   prompts?: MetricsMenuPrompts;
   services?: MaintenanceServiceOptions;
-  runSessionCleanup: (args: string[]) => void | Promise<unknown>;
-  runTrafficCleanup: (args: string[]) => void | Promise<unknown>;
-  runDatabaseCommand: (args: string[]) => void;
+  runSessionCleanup: (args: string[], options?: { signal: AbortSignal }) => void | Promise<unknown>;
+  runTrafficCleanup: (args: string[], options?: { signal: AbortSignal }) => void | Promise<unknown>;
+  runDatabaseCommand: (args: string[], options?: { signal: AbortSignal }) => void | Promise<unknown>;
   readStorage?: () => Record<string, unknown>;
 }): Promise<void>;

@@ -150,8 +150,10 @@ export async function runDesktopAppCommand(args, options = {}) {
     const token = platform === "darwin" ? undefined : loadOrCreateDesktopAppBridgeToken(located.dataDir);
     const applied = { enabled: true, port };
     const previous = writeDesktopAppConfig(located.configPath, applied);
+    let phase = "重启 App Server";
     try {
       await restartAppServer();
+      phase = "确认 Desktop 共享入口就绪";
       if (platform === "darwin") {
         await assertMacDesktopAppHostReady(appServer.primarySocketPath, inspectSupervisorState);
       } else if (token !== undefined) {
@@ -163,7 +165,7 @@ export async function runDesktopAppCommand(args, options = {}) {
         });
       }
     } catch (error) {
-      await rollbackDesktopAppConfig({ configPath: located.configPath, previous, applied, restartAppServer, cause: error });
+      await rollbackDesktopAppConfig({ configPath: located.configPath, previous, applied, restartAppServer, cause: error, phase });
     }
     desktopConfig = applied;
   }
@@ -277,6 +279,7 @@ export async function runDesktopAppCommand(args, options = {}) {
       applied: undefined,
       restartAppServer,
       cause: error,
+      phase: "禁用共享后重启 App Server",
     });
   }
   writeMessage("success", "Codex Desktop App 共享已禁用。");
@@ -718,21 +721,26 @@ async function rollbackDesktopAppConfig({
   applied,
   restartAppServer,
   cause,
+  phase,
 }) {
   let rollbackError;
+  let rollbackPhase = "读取并校验当前配置";
   try {
     const document = readGatewayConfig(configPath);
     const validated = validateGatewayConfigDocument(document);
     const codex = table(document.codex);
     const current = desktopAppConfig(validated.codex.desktop_app);
     if (JSON.stringify(current) !== JSON.stringify(applied)) {
+      rollbackPhase = "配置已被其他操作修改，拒绝覆盖";
       throw new Error("config.toml 在 Desktop App 配置回滚前已发生变化");
     }
+    rollbackPhase = "保存原共享配置";
     if (previous === undefined) delete codex.desktop_app;
     else codex.desktop_app = previous;
     document.codex = codex;
     validateGatewayConfigDocument(document);
     writeGatewayConfig(configPath, document);
+    rollbackPhase = "原共享配置已恢复，重启 App Server";
     await restartAppServer();
   } catch (error) {
     rollbackError = error;
@@ -740,11 +748,21 @@ async function rollbackDesktopAppConfig({
   if (rollbackError) {
     throw new AggregateError(
       [cause, rollbackError],
-      "Codex Desktop App 配置失败，且回滚未完全完成",
+      `Codex Desktop App 配置失败，且回滚未完全完成。\n原操作：${phase}${desktopFailureCode(cause)}。\n恢复失败：${rollbackPhase}${desktopFailureCode(rollbackError)}。\n请先运行 codexc app status 检查共享配置，再检查 codexc status appserver 与 codexc logs appserver；确认配置后再重启。`,
       { cause: rollbackError },
     );
   }
   throw cause;
+}
+
+// Display bounded classifications, never raw config parsing or bridge errors:
+// those can contain private configuration lines or authenticated endpoints.
+function desktopFailureCode(error) {
+  if (Number.isSafeInteger(error?.exitCode)) return `（退出码 ${error.exitCode}）`;
+  if (["EACCES", "EPERM", "ENOENT", "ENOSPC", "EBUSY", "ETIMEDOUT", "ECONNREFUSED"].includes(error?.code)) {
+    return `（${error.code}）`;
+  }
+  return "";
 }
 
 function assertDesktopAppCompatible(app) {
