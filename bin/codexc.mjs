@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 
 import { isCommandHelp } from "../scripts/cli-help.mjs";
+import { runCliLifecycleCommand } from "../scripts/cli-lifecycle-command.mjs";
 import { primaryProviderUsage } from "../scripts/primary-provider-usage.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
 import {
@@ -479,7 +480,10 @@ async function dispatchCommand(command, args) {
     case "update": {
       if (showRequestedHelp(args, "update")) break;
       requireNoArguments(args, "用法：codexc update");
-      runScript("scripts/source-update.mjs", [], { failureReportedByChild: true });
+      const runtime = configuredEnvironment();
+      await runCliLifecycleCommand(join(packageDir, "scripts/source-update.mjs"), [], {
+        environment: runtime.environment, cwd: runtime.dataDir,
+      });
       break;
     }
     case "uninstall":
@@ -492,7 +496,9 @@ async function dispatchCommand(command, args) {
         break;
       }
       requireNoArguments(args, "用法：codexc uninstall [--services]");
-      runStandaloneScript("scripts/source-uninstall.mjs", [], serviceControlEnvironment());
+      await runCliLifecycleCommand(join(packageDir, "scripts/source-uninstall.mjs"), [], {
+        environment: serviceControlEnvironment(), cwd: process.cwd(),
+      });
       break;
     case "reset-credit":
       await (await import("../scripts/reset-credit-command.mjs")).runResetCreditCommand(args);

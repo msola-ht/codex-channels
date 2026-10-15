@@ -54,10 +54,13 @@ export async function withCliProgress(label, operation) {
     else process.stdout.write(`[成功] ${message}\n`);
     return result;
   } catch (error) {
-    const message = `${label}：${controller.signal.aborted ? "已取消" : "失败"}，耗时 ${elapsed()}。`;
+    const cancelled = controller.signal.aborted || error?.exitCode === 130 || error?.exitCode === 143;
+    const message = `${label}：${cancelled ? "已取消" : "失败"}，耗时 ${elapsed()}。`;
     if (spinner) {
-      spinner.error(message);
-      if (controller.signal.aborted) process.stderr.write(`${message}\n`);
+      const alreadyCancelled = spinner.isCancelled;
+      if (cancelled) spinner.cancel(message);
+      else spinner.error(message);
+      if (alreadyCancelled) process.stderr.write(`${message}\n`);
     } else process.stderr.write(`[失败] ${message}\n`);
     throw error;
   } finally {

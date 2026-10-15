@@ -8,6 +8,7 @@ import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { ReportedChildExitError } from "../runtime/process-lifecycle.mjs";
 import { withCliProgress, writeCliSection } from "./cli-operation-progress.mjs";
+import { installCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
 import { packageDir } from "./package-path.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
@@ -31,6 +32,7 @@ export async function uninstallInstallation(
   const terminate = () => cancel("SIGTERM");
   process.on("SIGINT", interrupt);
   process.on("SIGTERM", terminate);
+  const cleanupCancellation = installCliLifecycleCancellation(cancel);
   try {
     writeCliSection("卸载准备");
     const targets = await withCliProgress("确认卸载身份与删除范围", async () => {
@@ -88,6 +90,7 @@ export async function uninstallInstallation(
   } finally {
     process.off("SIGINT", interrupt);
     process.off("SIGTERM", terminate);
+    cleanupCancellation();
   }
 }
 

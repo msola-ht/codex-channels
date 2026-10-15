@@ -51,6 +51,8 @@ export interface SourceUpdateFailure {
 export interface SourceUpdateOptions {
   projectDir?: string;
   repository?: string;
+  /** Cancellation for disposable preparation commands; omit during mutation/recovery. */
+  getCommandSignal?: () => AbortSignal | undefined;
   captureCommand?: (
     command: string,
     args: string[],

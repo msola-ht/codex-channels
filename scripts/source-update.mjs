@@ -30,7 +30,9 @@ import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
 import { withPrivateFileLock } from "../runtime/private-file-lock.mjs";
 import { readPrivateFileSync } from "../runtime/private-file.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
+import { registerChildProcessGroup, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import { withCliProgress, writeCliSection } from "./cli-operation-progress.mjs";
+import { installCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
 import { formatCliMessage } from "../runtime/cli-presentation.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
@@ -217,6 +219,7 @@ export async function updateManagedSourceInstallation(
         installRoot,
         environment,
         options.runCommand,
+        options.getCommandSignal?.(),
       );
     });
     const candidate = await runStage("validate-candidate", async () => {
@@ -236,13 +239,14 @@ export async function updateManagedSourceInstallation(
         stagedCheckout,
         environment,
         options.captureCommand,
+        options.getCommandSignal?.(),
       )).trim();
       if (targetCommit !== remoteCommit) {
         throw new Error("官方 main 在预检后发生变化，请重新运行 codexc update");
       }
-      await assertFastForward(stagedCheckout, currentCommit, targetCommit, environment);
+      await assertFastForward(stagedCheckout, currentCommit, targetCommit, environment, options.getCommandSignal?.());
       if (!options.confirmCodexCliInstall) {
-        await assertCodexVersionAsync(targetCodexVersion, environment, options.captureCommand);
+        await assertCodexVersionAsync(targetCodexVersion, environment, options.captureCommand, options.getCommandSignal?.());
       }
       return { targetCodexVersion, targetCommit, targetVersion };
     });
@@ -425,9 +429,25 @@ export function getCodexVersionMismatchRemediation(error) {
 }
 
 export function writeSourceUpdateFailure(error, writeMessage = writeCliMessage) {
-  writeMessage("failure", errorMessage(error));
-  for (const remediation of getCodexVersionMismatchRemediation(error)) {
-    writeMessage("remediation", remediation);
+  const pending = [error];
+  const seen = new Set();
+  const messages = new Set();
+  const remediations = new Set();
+  while (pending.length > 0 && seen.size < 12) {
+    const current = pending.shift();
+    if (seen.has(current)) continue;
+    seen.add(current);
+    const message = errorMessage(current);
+    if (!messages.has(message)) {
+      writeMessage("failure", current === error ? message : `关联原因：${message}`);
+      messages.add(message);
+    }
+    for (const remediation of getCodexVersionMismatchRemediation(current)) {
+      if (!remediations.has(remediation)) writeMessage("remediation", remediation);
+      remediations.add(remediation);
+    }
+    if (current instanceof AggregateError) pending.push(...current.errors.slice(0, 12));
+    if (current instanceof Error && current.cause !== undefined) pending.push(current.cause);
   }
 }
 
@@ -560,12 +580,12 @@ function systemdArgument(value) {
   return `"${value.replaceAll("\\", "\\\\").replaceAll("\n", "\\n").replaceAll("\r", "\\r").replaceAll("\t", "\\t").replaceAll('"', '\\"').replaceAll("%", "%%")}"`;
 }
 
-async function assertFastForward(checkout, currentCommit, targetCommit, environment) {
-  const object = await executeUpdateCommand("git", ["cat-file", "-e", `${currentCommit}^{commit}`], checkout, environment);
+async function assertFastForward(checkout, currentCommit, targetCommit, environment, signal) {
+  const object = await executeUpdateCommand("git", ["cat-file", "-e", `${currentCommit}^{commit}`], checkout, environment, signal);
   if (object.status !== 0) {
     throw new Error("当前源码包含官方 main 之外的提交，拒绝自动覆盖");
   }
-  const result = await executeUpdateCommand("git", ["merge-base", "--is-ancestor", currentCommit, targetCommit], checkout, environment);
+  const result = await executeUpdateCommand("git", ["merge-base", "--is-ancestor", currentCommit, targetCommit], checkout, environment, signal);
   if (result.status === 0) return;
   if (result.status === 1) {
     throw new Error("当前源码包含官方 main 之外的提交，拒绝自动覆盖");
@@ -616,7 +636,7 @@ function assertManagedRepository(checkout, repository, environment, captureComma
 }
 
 async function prepareCodexVersion(expected, checkout, environment, writeMessage, options) {
-  const actual = await installedCodexVersionAsync(environment, options.captureCommand, expected);
+  const actual = await installedCodexVersionAsync(environment, options.captureCommand, expected, options.getCommandSignal?.());
   if (actual === expected) {
     return { installRequired: false, validationEnvironment: environment };
   }
@@ -650,6 +670,7 @@ async function prepareCodexVersion(expected, checkout, environment, writeMessage
     validationEnvironment,
     options.captureCommand,
     expected,
+    options.getCommandSignal?.(),
   );
   if (installed !== expected) {
     throw codexVersionMismatchError(expected, installed);
@@ -697,22 +718,23 @@ export function assertCodexVersion(expected, environment, captureCommand) {
   if (actual !== expected) throw codexVersionMismatchError(expected, actual);
 }
 
-async function installedCodexVersionAsync(environment, captureCommand, expected) {
+async function installedCodexVersionAsync(environment, captureCommand, expected, signal) {
   if (captureCommand) return installedCodexVersion(environment, captureCommand, expected);
   const executable = environment.CODEX_BINARY?.trim() || "codex";
   if (!resolveOptionalExecutable(executable, environment)) {
     return installedCodexVersion(environment, undefined, expected);
   }
   try {
-    const output = await captureAsync(executable, ["--version"], process.cwd(), environment);
+    const output = await captureAsync(executable, ["--version"], process.cwd(), environment, undefined, signal);
     return installedCodexVersion(environment, () => output, expected);
   } catch (cause) {
+    if (signal?.aborted) throw signal.reason;
     return installedCodexVersion(environment, () => { throw cause; }, expected);
   }
 }
 
-async function assertCodexVersionAsync(expected, environment, captureCommand) {
-  const actual = await installedCodexVersionAsync(environment, captureCommand, expected);
+async function assertCodexVersionAsync(expected, environment, captureCommand, signal) {
+  const actual = await installedCodexVersionAsync(environment, captureCommand, expected, signal);
   if (actual !== expected) throw codexVersionMismatchError(expected, actual);
 }
 
@@ -726,6 +748,7 @@ export async function validateCodexContract(checkout, environment, options) {
     checkout,
     environment,
     options.captureCommand,
+    options.getCommandSignal?.(),
   );
 }
 
@@ -802,6 +825,7 @@ async function installCodexCliForValidation(
     checkout,
     environment,
     options.runCommand,
+    options.getCommandSignal?.(),
   );
   const binary = join(
     prefix,
@@ -826,7 +850,7 @@ async function installCodexCli(version, checkout, environment, options) {
 }
 
 export async function buildCheckout(checkout, environment, options) {
-  const ignoreScripts = (await captureAsync("npm", ["config", "get", "ignore-scripts"], checkout, environment, options.captureCommand)).trim();
+  const ignoreScripts = (await captureAsync("npm", ["config", "get", "ignore-scripts"], checkout, environment, options.captureCommand, options.getCommandSignal?.())).trim();
   if (ignoreScripts !== "true" && ignoreScripts !== "false") {
     throw new Error("无法确认 npm ignore-scripts 设置，拒绝构建候选源码");
   }
@@ -838,7 +862,7 @@ export async function buildCheckout(checkout, environment, options) {
     [join(checkout, "webui"), ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]],
     [join(checkout, "webui"), ["run", "build"]],
   ]) {
-    await runQuiet("npm", args, cwd, environment, options.runCommand);
+    await runQuiet("npm", args, cwd, environment, options.runCommand, options.getCommandSignal?.());
   }
   if (
     !existsSync(join(checkout, "dist", "main.js"))
@@ -848,12 +872,13 @@ export async function buildCheckout(checkout, environment, options) {
   }
 }
 
-async function runQuiet(command, args, cwd, environment, implementation) {
+async function runQuiet(command, args, cwd, environment, implementation, signal) {
+  signal?.throwIfAborted();
   if (implementation) {
     await implementation(command, args, { cwd, environment, quiet: true });
     return;
   }
-  const result = await executeUpdateCommand(command, args, cwd, environment);
+  const result = await executeUpdateCommand(command, args, cwd, environment, signal);
   if (result.status === 0) return;
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
@@ -1002,9 +1027,9 @@ function capture(command, args, cwd, environment, implementation, options = {}) 
   return result.stdout;
 }
 
-async function captureAsync(command, args, cwd, environment, implementation) {
+async function captureAsync(command, args, cwd, environment, implementation, signal) {
   if (implementation) return implementation(command, args, { cwd, environment });
-  const result = await executeUpdateCommand(command, args, cwd, environment);
+  const result = await executeUpdateCommand(command, args, cwd, environment, signal);
   if (result.truncated) throw new Error(`${command} 输出超过限制，拒绝解析不完整结果`);
   if (result.status !== 0) {
     throw new Error(`${command} 执行失败：${result.stderr || result.stdout || `exit=${result.status ?? 1}`}`);
@@ -1012,12 +1037,20 @@ async function captureAsync(command, args, cwd, environment, implementation) {
   return result.stdout;
 }
 
-function executeUpdateCommand(command, args, cwd, environment) {
+async function executeUpdateCommand(command, args, cwd, environment, signal) {
+  signal?.throwIfAborted();
   const invocation = resolveExecutableInvocation(command, args, environment);
-  return new Promise((resolveResult, reject) => {
-    // Terminal cancellation belongs to the updater. Let the owned command settle
-    // before deciding whether the transaction must recover or stop at a boundary.
-    const child = spawn(invocation.file, invocation.args, {
+  const supervised = signal !== undefined && process.platform !== "win32";
+  let cleanup;
+  let cleanupError;
+  let abort;
+  try {
+    const result = await new Promise((resolveResult, reject) => {
+    // Only disposable preparation commands receive a cancellation signal.
+    // A supervisor retains the Unix group until descendants release their pipes.
+    const child = spawn(supervised ? process.execPath : invocation.file, supervised
+      ? [join(packageDir, "scripts/installation-command.mjs"), "--internal-run", invocation.file, ...invocation.args]
+      : invocation.args, {
       cwd,
       env: environment,
       stdio: ["ignore", "pipe", "pipe"],
@@ -1025,6 +1058,12 @@ function executeUpdateCommand(command, args, cwd, environment) {
       windowsHide: true,
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     });
+    if (supervised) registerChildProcessGroup(child);
+    abort = () => {
+      cleanup ??= terminateChildProcess(child).catch(error => { cleanupError = error; });
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
     const limit = 1024 * 1024;
     let stdout = "";
     let stderr = "";
@@ -1051,7 +1090,23 @@ function executeUpdateCommand(command, args, cwd, environment) {
       stderr: `${stderrTruncated ? "[日志超长，仅保留末尾内容]\n" : ""}${stderr}`,
       truncated: stdoutTruncated || stderrTruncated,
     }));
-  });
+    });
+    await cleanup;
+    if (cleanupError) throw cleanupError;
+    if (signal?.aborted) {
+      const diagnostic = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n");
+      if (diagnostic) {
+        throw Object.assign(new Error(`${signal.reason.message}\n命令结束状态：${result.signal ? `signal=${result.signal}` : `exit=${result.status ?? 1}`}\n命令输出：\n${diagnostic}`, { cause: signal.reason }), {
+          name: "AbortError", exitCode: signal.reason.exitCode,
+        });
+      }
+      throw signal.reason;
+    }
+    return result;
+  } finally {
+    if (abort) signal?.removeEventListener("abort", abort);
+    await cleanup;
+  }
 }
 
 async function inspectSourceUpdatePlan(environment, options) {
@@ -1063,12 +1118,12 @@ async function inspectSourceUpdatePlan(environment, options) {
       + "} catch (error) { process.stderr.write(error.message); process.exitCode = 1; }",
     import.meta.url,
     JSON.stringify({ projectDir: options.projectDir, repository: options.repository }),
-  ], options.projectDir ?? packageDir, environment);
+  ], options.projectDir ?? packageDir, environment, undefined, options.getCommandSignal?.());
   return JSON.parse(output);
 }
 
 async function inspectSourceInstallation(checkout, environment, options) {
-  const prefix = (await captureAsync("npm", ["prefix", "--global"], checkout, environment)).trim();
+  const prefix = (await captureAsync("npm", ["prefix", "--global"], checkout, environment, undefined, options.getCommandSignal?.())).trim();
   if (!isAbsolute(prefix) || dirname(prefix) === prefix) throw new Error("无法解析 npm 全局目录");
   return assertSourceUpdateInstallation(checkout, environment, options, prefix);
 }
@@ -1157,6 +1212,7 @@ async function main() {
   // Keep handling cancellation while recovery is running between progress stages.
   process.on("SIGINT", interrupt);
   process.on("SIGTERM", terminate);
+  const cleanupCancellation = installCliLifecycleCancellation(cancel);
   let activeProgress;
   let currentSection;
   let switching = false;
@@ -1189,6 +1245,7 @@ async function main() {
   };
   try {
     const options = {
+      getCommandSignal: () => switching ? undefined : controller.signal,
       runStage: async (stage, operation, { recovery }) => {
         if (!recovery && !switching) controller.signal.throwIfAborted();
         if (["stop-services", "install-codex-cli", "switch-source"].includes(stage)) switching = true;
@@ -1224,7 +1281,7 @@ async function main() {
         else writeCliMessage(kind, message);
       },
       runCommand: async (command, args, { cwd, environment }) => {
-        const child = await executeUpdateCommand(command, args, cwd, environment);
+        const child = await executeUpdateCommand(command, args, cwd, environment, switching ? undefined : controller.signal);
         if (child.status === 0) return;
         const log = (text, stream) => activeProgress
           ? activeProgress.log(text, { stream })
@@ -1255,6 +1312,7 @@ async function main() {
     prompter?.close();
     process.off("SIGINT", interrupt);
     process.off("SIGTERM", terminate);
+    cleanupCancellation();
   }
   if (!result.changed) {
     writeCliMessage(

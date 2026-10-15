@@ -7,6 +7,7 @@
 ## 配置与 Workspace
 
 - `cli-operation-progress.mjs`：安装、卸载、更新和服务操作共用的分组标题与阶段展示；终端按需加载 Clack spinner，重定向、CI、dumb 终端及依赖尚未可用时使用纯文本。阶段完成必须等待调用方实际操作结束，取消信号交由调用方收尾后退出。
+- `cli-lifecycle-command.mjs`：更新与程序卸载的 CLI 父子进程协作；就绪握手后通过私有 IPC 转发取消，父进程等待子进程完成事务收尾并退出，不用强制终止代替取消。
 - `installation-command.mjs`：安装入口共用的异步命令执行器；避免同步子进程冻结进度，交互模式保留有界诊断尾部并在失败时展示，非交互模式实时输出日志，取消时终止自己启动的进程树。供源码安装器和本地安装复用，不管理后台服务。
 
 - `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，由 MCP 客户端启动；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。

@@ -42,6 +42,7 @@
     "scripts/ccg-setup.mjs",
     "scripts/cli-status.mjs",
     "scripts/cli-operation-progress.mjs",
+    "scripts/cli-lifecycle-command.mjs",
     "scripts/installation-command.mjs",
     "scripts/cli-help.mjs",
     "scripts/cli-command-usage.mjs",
