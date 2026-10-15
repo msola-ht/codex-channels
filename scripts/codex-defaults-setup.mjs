@@ -8,6 +8,7 @@ import {
 } from "./codex-user-settings-management.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
+import { withCliProgress } from "./cli-operation-progress.mjs";
 
 export async function runCodexDefaultsSetup({
   environment = process.env,
@@ -19,7 +20,8 @@ export async function runCodexDefaultsSetup({
   loadSettings = loadCodexUserSettings,
   updateSetting = updateCodexUserSetting,
 } = {}) {
-  const settings = await loadSettings({ environment, createClient, primaryProvider });
+  const settings = await withCliProgress("读取 Codex 默认模型设置", () =>
+    loadSettings({ environment, createClient, primaryProvider }), { output, delayMs: 150, handleSignals: false });
   if (!settings.defaultsEditable) {
     throw new Error(
       `当前是第三方固定模式（${settings.provider}）；请先恢复 OpenAI 默认配置，再设置 Codex 官方模型`,
@@ -88,7 +90,7 @@ export async function runCodexDefaultsSetup({
     output.write("已取消，未修改 Codex 全局配置。\n");
     return undefined;
   }
-  const result = await updateSetting({
+  const result = await withCliProgress("保存 Codex 默认模型设置", () => updateSetting({
     kind: "defaults",
     model: model.model,
     reasoningEffort: selectedEffort,
@@ -97,7 +99,7 @@ export async function runCodexDefaultsSetup({
     expectedVersion: settings.version,
     createClient,
     primaryProvider,
-  });
+  }), { output, delayMs: 150, handleSignals: false });
   output.write(`Codex 全局默认设置已更新：${model.model} · ${selectedEffort}\n`);
   const activationResult = configActivationResult(result.activation);
   writeGatewayConfigActivationNotice(output, environment, activationResult);

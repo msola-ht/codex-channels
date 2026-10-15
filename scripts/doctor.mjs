@@ -1,5 +1,5 @@
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -55,15 +55,23 @@ import { packageDir, resolveConfiguredPath, runtimeConfig, userDataDir } from ".
 import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { inspectWorkspaceConfig } from "./workspace-config.mjs";
+import { withCliLifecycleCancellation } from "./cli-lifecycle-command.mjs";
+import { withCliProgress } from "./cli-operation-progress.mjs";
+import { ownedProcessInvocation } from "../runtime/owned-process.mjs";
+import { childProcessIsRunning, registerChildProcessGroup, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
+
+try {
+  await withCliLifecycleCancellation("Doctor 诊断", (signal) => withCliProgress("Doctor 诊断", async (progress) => {
 
 const checks = [];
+let queryCleanupFailure;
 let checkSection = "基础环境";
 const jsonOutput = process.argv.length === 3 && process.argv[2] === "--json";
 if (!(process.argv.length === 2 || jsonOutput)) {
   throw new Error("用法：codexc doctor [--json]");
 }
 const textRenderer = jsonOutput ? undefined : createDoctorTextRenderer();
-if (textRenderer) process.stdout.write("Codex Connect Doctor\n");
+if (textRenderer) writeText("Codex Connect Doctor\n");
 const packageMetadata = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
 const protocolMetadata = JSON.parse(
   readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"),
@@ -97,16 +105,6 @@ const runtime = explicitConfigFile
 const { configPath, dataDir } = runtime;
 let document;
 let primaryAppServerReady = false;
-// Begin the independent task/host query now. Handle rejection immediately and
-// render it in the original section; never cache these observations across runs.
-const windowsServices = process.platform === "win32"
-  ? inspectManagedServiceStatusAsync({
-      environment: { ...process.env, CODEX_CONNECT_HOME: dataDir, CODEX_CONNECT_CONFIG_FILE: configPath },
-      platform: "win32", target: "all",
-    }).then(async status => ({ status, gatewayReady: status.services.some(service => service.target === "gateway" && service.running)
-      ? await gatewayOwnerIsReady(configPath).catch(() => false) : false }))
-      .catch(error => ({ error }))
-  : undefined;
 
 setSection("配置文件");
 note("配置来源", `${configPath}（工作区路径来自此文件，与程序安装目录分别配置）`);
@@ -209,7 +207,7 @@ if (document) {
         inspectFeishuApplicationConfiguration,
         validateFeishuApplication,
       } = await import("./feishu-application.mjs");
-      await validateFeishuApplication({ appId, appSecret });
+      await validateFeishuApplication({ appId, appSecret }, { signal: progress.signal });
       record("飞书应用", true, "凭据与 Bot 身份验证通过（敏感内容已隐藏）");
       try {
         const application = await inspectFeishuApplicationConfiguration({
@@ -398,11 +396,7 @@ if (document) {
   try {
     codexBinary = resolveExecutable(codexCommand);
     const invocation = executableInvocation(codexBinary, ["--version"]);
-    const versionResult = spawnSync(invocation.file, invocation.args, {
-      encoding: "utf8",
-      timeout: 5_000,
-      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-    });
+    const versionResult = await runDoctorCommand(invocation, { timeoutMs: 5_000 });
     if (versionResult.error) {
       throw versionResult.error;
     }
@@ -501,11 +495,11 @@ if (document) {
     ))];
   // Each connection is independent. Preserve configured report order even when
   // an unavailable Provider takes longer than another connection.
-  const appServerResults = await Promise.all(appServerChecks.map(async (check) => {
+  const appServerResults = await mapChecks(appServerChecks, async (check) => {
     const results = [];
     await check((...values) => results.push(values));
     return results;
-  }));
+  });
   for (const results of appServerResults) {
     for (const values of results) record(...values);
   }
@@ -575,42 +569,50 @@ if (process.platform === "darwin") {
   const domain = `gui/${uid}`;
   const labels = serviceDefinitions.filter(definition => definition.core).map(definition => definition.launchd);
   const unsupportedLabels = ["com.msola.codex-app-server", "com.msola.codex-gateway"];
-  const loaded = labels.filter((label) =>
-    spawnSync("launchctl", ["print", `${domain}/${label}`], { stdio: "ignore" }).status === 0,
-  );
-  const loadedUnsupported = unsupportedLabels.filter((label) =>
-    spawnSync("launchctl", ["print", `${domain}/${label}`], { stdio: "ignore" }).status === 0,
-  );
+  const launchdResults = await mapChecks([...labels, ...unsupportedLabels], (label) =>
+    runDoctorCommand({ file: "launchctl", args: ["print", `${domain}/${label}`] }));
+  for (const [index, result] of launchdResults.entries()) {
+    if (result.error) note("launchd 查询", `${[...labels, ...unsupportedLabels][index]}：${errorMessage(result.error)}`);
+  }
+  const loaded = labels.filter((_, index) => launchdResults[index].status === 0);
+  const loadedUnsupported = unsupportedLabels.filter((_, index) => launchdResults[index + labels.length].status === 0);
   record(
     "launchd 冲突",
-    loadedUnsupported.length === 0,
-    loadedUnsupported.length === 0
+    loadedUnsupported.length === 0 && !launchdResults.slice(labels.length).some((result) => result.error),
+    launchdResults.slice(labels.length).some((result) => result.error)
+      ? "部分 Job 查询失败，无法确认是否存在不支持的 Job"
+      : loadedUnsupported.length === 0
       ? "未检测到不支持的 Job"
       : `检测到不支持的 Job：${loadedUnsupported.join(", ")}；请先手动卸载`,
   );
   note(
     "launchd",
-    loaded.length === labels.length
+    launchdResults.slice(0, labels.length).some((result) => result.error)
+      ? `已确认加载 ${loaded.length}/${labels.length}；部分状态无法查询`
+      : loaded.length === labels.length
       ? "App Server 与 Gateway 已加载"
       : `已加载 ${loaded.length}/${labels.length}；前台运行模式可忽略`,
   );
 } else if (process.platform === "linux") {
   const units = serviceDefinitions.filter(definition => definition.core).map(definition => definition.systemd);
-  const active = units.filter((unit) =>
-    spawnSync("systemctl", ["--user", "is-active", "--quiet", unit], { stdio: "ignore", timeout: 3_000 }).status === 0,
-  );
+  const uid = process.getuid?.();
+  const serviceQueries = units.map((unit) => ({ file: "systemctl", args: ["--user", "is-active", "--quiet", unit] }));
+  if (uid !== undefined) serviceQueries.push({ file: "loginctl", args: ["show-user", String(uid), "--property=Linger", "--value"] });
+  const serviceResults = await mapChecks(serviceQueries, (invocation) => runDoctorCommand(invocation));
+  for (const [index, result] of serviceResults.entries()) {
+    if (result.error) note("systemd 查询", `${index < units.length ? units[index] : "linger"}：${errorMessage(result.error)}`);
+  }
+  const active = units.filter((_, index) => serviceResults[index].status === 0);
   note(
     "systemd",
-    active.length === units.length
+    serviceResults.slice(0, units.length).some((result) => result.error)
+      ? `已确认运行 ${active.length}/${units.length}；部分状态无法查询`
+      : active.length === units.length
       ? "App Server 与 Gateway 已运行"
       : `已运行 ${active.length}/${units.length}；可运行 codexc install 安装用户服务`,
   );
-  const uid = process.getuid?.();
   if (uid !== undefined) {
-    const linger = spawnSync("loginctl", ["show-user", String(uid), "--property=Linger", "--value"], {
-      encoding: "utf8",
-      timeout: 3_000,
-    });
+    const linger = serviceResults[units.length];
     note(
       "systemd linger",
       linger.status === 0 && linger.stdout.trim() === "yes"
@@ -620,9 +622,13 @@ if (process.platform === "darwin") {
   }
 } else if (process.platform === "win32") {
   try {
-    const result = await windowsServices;
-    if (result.error) throw result.error;
-    const { status, gatewayReady } = result;
+    const status = await inspectManagedServiceStatusAsync({
+      environment: { ...process.env, CODEX_CONNECT_HOME: dataDir, CODEX_CONNECT_CONFIG_FILE: configPath },
+      platform: "win32", target: "all",
+      run: (file, args, options) => runDoctorCommand({ file, args }, { timeoutMs: 25_000, environment: options.env }),
+    });
+    const gatewayReady = status.services.some(service => service.target === "gateway" && service.running)
+      ? await gatewayOwnerIsReady(configPath).catch(() => false) : false;
     note(
       "Windows 计划任务",
       status.healthy && gatewayReady && primaryAppServerReady
@@ -637,17 +643,23 @@ if (process.platform === "darwin") {
 }
 
 const report = createDoctorReport(checks);
-process.stdout.write(jsonOutput
-  ? `${JSON.stringify(report, null, 2)}\n`
-  : textRenderer.renderSummary(report));
+if (jsonOutput) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+else writeText(textRenderer.renderSummary(report));
 process.exitCode = report.healthy ? 0 : 1;
 
 function setSection(section) {
+  checkCancellation();
   checkSection = section;
-  if (textRenderer) process.stdout.write(textRenderer.renderSection(section));
+  progress.message(`正在检查：${section}`);
+  if (textRenderer) writeText(textRenderer.renderSection(section));
+}
+
+function writeText(text) {
+  progress.log(text, { stream: "stdout" });
 }
 
 function record(name, passed, detail, remediation) {
+  checkCancellation();
   const check = {
     section: checkSection,
     kind: passed ? "success" : "failure",
@@ -656,13 +668,14 @@ function record(name, passed, detail, remediation) {
     remediation,
   };
   checks.push(check);
-  if (textRenderer) process.stdout.write(textRenderer.renderCheck(check));
+  if (textRenderer) writeText(textRenderer.renderCheck(check));
 }
 
 function note(name, detail, remediation) {
+  checkCancellation();
   const check = { section: checkSection, kind: "note", name, detail, remediation };
   checks.push(check);
-  if (textRenderer) process.stdout.write(textRenderer.renderCheck(check));
+  if (textRenderer) writeText(textRenderer.renderCheck(check));
 }
 
 function checkPrivateDirectory(name, path, remediation) {
@@ -910,5 +923,101 @@ function appServerVersion(userAgent) {
 }
 
 function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function mapChecks(values, inspect) {
+  const results = new Array(values.length);
+  let next = 0;
+  const workers = await Promise.allSettled(Array.from({ length: Math.min(4, values.length) }, async () => {
+    while (next < values.length) {
+      checkCancellation();
+      const index = next++;
+      results[index] = await inspect(values[index]);
+    }
+  }));
+  const failure = workers.find((worker) => worker.status === "rejected");
+  if (failure) throw failure.reason;
+  return results;
+}
+
+function runDoctorCommand(invocation, { timeoutMs = 3_000, environment = process.env } = {}) {
+  checkCancellation();
+  return new Promise((resolveResult) => {
+    const owned = ownedProcessInvocation(invocation, environment);
+    const child = spawn(owned.file, owned.args, {
+      env: environment,
+      windowsVerbatimArguments: owned.windowsVerbatimArguments,
+      windowsHide: true,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (process.platform !== "win32") registerChildProcessGroup(child);
+    const output = { stdout: [], stderr: [] };
+    let outputBytes = 0;
+    let settled = false;
+    let stopping = false;
+    const finish = (error, status = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      progress.signal.removeEventListener("abort", abort);
+      resolveResult({
+        error, status,
+        stdout: Buffer.concat(output.stdout).toString("utf8"),
+        stderr: Buffer.concat(output.stderr).toString("utf8"),
+      });
+    };
+    const stop = async (error) => {
+      if (settled || stopping) return;
+      stopping = true;
+      clearTimeout(timer);
+      try {
+        if (!childProcessIsRunning(child)) {
+          throw new Error("查询主进程已退出，无法确认持有输出管道的后代进程已退出");
+        }
+        await terminateChildProcess(child, { gracePeriodMs: 100, forcePeriodMs: 1_000 });
+        finish(error);
+      } catch (cause) {
+        queryCleanupFailure = new Error(`诊断查询进程回收失败，退出未确认：pid=${child.pid}`, { cause });
+        finish(queryCleanupFailure);
+      } finally {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        if (childProcessIsRunning(child)) child.unref();
+      }
+    };
+    const abort = () => { void stop(progress.signal.reason); };
+    const timer = setTimeout(() => {
+      void stop(Object.assign(new Error(`诊断查询超过 ${timeoutMs / 1_000} 秒`), { code: "ETIMEDOUT" }));
+    }, timeoutMs);
+    for (const stream of ["stdout", "stderr"]) {
+      child[stream].on("data", (chunk) => {
+        if (stopping) return;
+        outputBytes += chunk.length;
+        if (outputBytes > 1_024 * 1_024) {
+          void stop(Object.assign(new Error("诊断查询输出超过 1 MiB 上限"), { code: "ENOBUFS" }));
+        } else output[stream].push(chunk);
+      });
+    }
+    child.once("error", (error) => { if (!stopping) finish(error); });
+    child.once("close", (status, signal) => {
+      if (!stopping) finish(signal ? new Error(`诊断查询被信号终止：${signal}`) : undefined, status);
+    });
+    progress.signal.addEventListener("abort", abort, { once: true });
+    if (progress.signal.aborted) abort();
+  });
+}
+function checkCancellation() {
+  if (progress.signal.aborted && queryCleanupFailure) throw queryCleanupFailure;
+  progress.signal.throwIfAborted();
+}
+  }, { output: process.argv.includes("--json") ? null : process.stderr, delayMs: 250, signal, handleSignals: false }));
+} catch (error) {
+  process.stderr.write(`${errorMessageForExit(error)}\n`);
+  process.exitCode = error?.exitCode ?? 1;
+}
+
+function errorMessageForExit(error) {
   return error instanceof Error ? error.message : String(error);
 }

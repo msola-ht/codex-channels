@@ -1,7 +1,7 @@
 import { desktopAppCommandUsage } from "./cli-command-usage.mjs";
 export { desktopAppCommandUsage } from "./cli-command-usage.mjs";
-import { spawn, spawnSync } from "node:child_process";
-import { closeSync, lstatSync, openSync, readSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { lstat, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +17,7 @@ import {
 import { macDesktopAppPluginEnabledConfigKey } from "../runtime/desktop-app-host.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { codexProcessInvocation } from "../runtime/owned-process.mjs";
-import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
+import { childProcessIsRunning, registerChildProcessGroup, terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 import {
   loadOrCreateDesktopAppBridgeToken,
   readDesktopAppBridgeToken,
@@ -32,6 +32,7 @@ import { locateUserConfig, requireUserConfig } from "./runtime-config.mjs";
 import { runRestartCommand } from "./service-command.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 import { resolveProviderSelection } from "./provider-selection.mjs";
+import { withCliProgress } from "./cli-operation-progress.mjs";
 
 const defaultBridgePort = 47_821;
 const compatibilityMarker = Buffer.from("CODEX_APP_SERVER_WS_URL", "utf8");
@@ -44,6 +45,8 @@ const macCompatibilityMarkers = [
 const bridgePath = "/codex-app-server";
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const desktopAppProxyPath = join(scriptDirectory, "desktop-app-proxy.mjs");
+const desktopCommandTimeoutMs = 15_000;
+const maximumDesktopCommandOutputBytes = 1_048_576;
 
 export async function runDesktopAppCommand(args, options = {}) {
   const parsed = parseDesktopAppArgs(args);
@@ -59,7 +62,7 @@ export async function runDesktopAppCommand(args, options = {}) {
   const output = options.output ?? process.stdout;
   const writeMessage = options.writeMessage ?? printCliMessage;
   const inspectDesktopApp = options.inspectDesktopApp
-    ?? (() => inspectDesktopAppForPlatform(platform, environment));
+    ?? (({ signal } = {}) => inspectDesktopAppForPlatform(platform, environment, signal));
   const restartAppServer = options.restartAppServer
     ?? (() => runRestartCommand(["appserver"]));
   const probeBridge = options.probeBridge ?? probeDesktopAppBridge;
@@ -69,7 +72,7 @@ export async function runDesktopAppCommand(args, options = {}) {
     ?? acquireAppServerProviderLease;
   const openDesktop = options.openDesktop
     ?? (platform === "win32"
-      ? (path, endpoint) => openWindowsDesktopApp(path, endpoint, { environment })
+      ? (path, endpoint, _provider, { signal } = {}) => openWindowsDesktopApp(path, endpoint, { environment, signal })
       : openMacDesktopApp);
   const located = parsed.action === "status"
     ? locateUserConfig(environment)
@@ -87,12 +90,13 @@ export async function runDesktopAppCommand(args, options = {}) {
     : resolveProviderSelection(parsed.provider, { environment: runtimeEnvironment }).provider;
   const selectedSocketPath = resolveDesktopAppSocketPath(appServer, selectedProvider);
   let desktopConfig = desktopAppConfig(codex.desktop_app);
+  const progressOptions = { output: parsed.json ? null : output, delayMs: 250, signal: options.signal };
   const app = supported
-    ? inspectDesktopApp()
+    ? await withCliProgress("检查 Desktop 安装与运行状态", ({ signal }) => inspectDesktopApp({ signal }), progressOptions)
     : unsupportedDesktopApp();
 
   if (parsed.action === "status") {
-    const status = await readDesktopAppStatus({
+    const status = await withCliProgress("读取 Desktop 共享入口状态", () => readDesktopAppStatus({
       platform,
       supported,
       app,
@@ -102,7 +106,7 @@ export async function runDesktopAppCommand(args, options = {}) {
       selectedProvider,
       dataDir: located.dataDir,
       inspectSupervisorState,
-    });
+    }), progressOptions);
     if (parsed.json) {
       output.write(`${JSON.stringify(status, null, 2)}\n`);
     } else {
@@ -120,28 +124,33 @@ export async function runDesktopAppCommand(args, options = {}) {
       : "无法确认 ChatGPT Desktop App 是否已退出");
   }
 
-  async function withWindowsStartupLease(provider, operation) {
+  async function withStartupLease(provider, operation, progress) {
     let lease;
     try {
+      progress.signal.throwIfAborted();
+      progress.message(`等待 Provider ${provider} 的临时实例租约`);
       lease = await acquireProviderLease(appServer.primarySocketPath, provider);
     } catch {
+      progress.signal.throwIfAborted();
       throw new Error(`Provider ${provider} 的 App Server 未能就绪；请查看 App Server 服务状态与日志`);
     }
     let operationFailed = false;
     let operationError;
     try {
+      progress.signal.throwIfAborted();
       await operation();
     } catch (error) {
       operationFailed = true;
       operationError = error;
     }
     try {
+      progress.message(`释放 Provider ${provider} 的临时实例租约`);
       await lease.close();
-    } catch {
+    } catch (error) {
       if (operationFailed) {
-        throw new AggregateError([operationError], `Provider ${provider} 的启动检查或桌面启动失败，且临时租约未能释放`);
+        throw new AggregateError([operationError, error], `Provider ${provider} 的启动检查或桌面启动失败，且临时租约未能释放`, { cause: error });
       }
-      throw new Error(`无法释放 Provider ${provider} 的启动检查租约；请检查 App Server 服务状态`);
+      throw new Error(`无法释放 Provider ${provider} 的启动检查租约；请检查 App Server 服务状态`, { cause: error });
     }
     if (operationFailed) throw operationError;
   }
@@ -154,16 +163,20 @@ export async function runDesktopAppCommand(args, options = {}) {
     try {
       await restartAppServer();
       phase = "确认 Desktop 共享入口就绪";
-      if (platform === "darwin") {
-        await assertMacDesktopAppHostReady(appServer.primarySocketPath, inspectSupervisorState);
-      } else if (token !== undefined) {
-        await assertDesktopAppProviderSelectionReady(appServer.primarySocketPath, inspectSupervisorState);
-        await withWindowsStartupLease(appServer.primaryProvider, async () => {
-          if (!await probeBridge(privateBridgeEndpoint(port, token, appServer.primaryProvider))) {
-            throw new Error("Codex Desktop App 桥在服务重启后未就绪");
-          }
-        });
-      }
+      await withCliProgress(phase, async (progress) => {
+        if (platform === "darwin") {
+          await assertMacDesktopAppHostReady(appServer.primarySocketPath, inspectSupervisorState);
+        } else if (token !== undefined) {
+          await assertDesktopAppProviderSelectionReady(appServer.primarySocketPath, inspectSupervisorState);
+          progress.signal.throwIfAborted();
+          await withStartupLease(appServer.primaryProvider, async () => {
+            progress.message("检查 Desktop 共享桥连接");
+            if (!await probeBridge(privateBridgeEndpoint(port, token, appServer.primaryProvider), { signal: progress.signal })) {
+              throw new Error("Codex Desktop App 桥在服务重启后未就绪");
+            }
+          }, progress);
+        }
+      }, progressOptions);
     } catch (error) {
       await rollbackDesktopAppConfig({ configPath: located.configPath, previous, applied, restartAppServer, cause: error, phase });
     }
@@ -183,71 +196,64 @@ export async function runDesktopAppCommand(args, options = {}) {
       await enableSharing(desktopConfig?.port ?? defaultBridgePort);
     }
     if (platform === "darwin") {
-      const topology = await assertMacDesktopAppHostReady(
-        appServer.primarySocketPath,
-        inspectSupervisorState,
-      );
-      if (topology.desktopAppAttached === true) {
-        throw new Error("现有 Codex Desktop App Host 租约尚未释放；请稍后重试");
-      }
-      if (topology.leasedProviders.includes(selectedProvider)) {
-        throw new Error(
-          `Provider ${selectedProvider} 的 App Server 正由原生客户端租约保护；请退出相关客户端后重试`,
-        );
-      }
       const inspectActiveThreads = options.inspectActiveThreads
         ?? inspectMacDesktopAppActiveThreads;
-      let lease;
-      try {
-        lease = await acquireProviderLease(appServer.primarySocketPath, selectedProvider);
-      } catch {
-        throw new Error(
-          `无法恢复并保护 Provider ${selectedProvider} 的 App Server 以完成启动检查；已取消启动`,
+      await withCliProgress("检查 Desktop 启动条件", async (progress) => {
+        const topology = await assertMacDesktopAppHostReady(
+          appServer.primarySocketPath,
+          inspectSupervisorState,
         );
-      }
-      let leaseReleaseFailed = false;
-      try {
-        let activeThreadCount;
-        try {
-          activeThreadCount = await inspectActiveThreads({
-            socketPath: selectedSocketPath,
-            codexBinary: runtimeEnvironment.CODEX_BINARY,
-          });
-        } catch (error) {
-          if (error instanceof DesktopAppPreflightError) throw error;
-          throw new DesktopAppPreflightError("activity");
+        if (topology.desktopAppAttached === true) {
+          throw new Error("现有 Codex Desktop App Host 租约尚未释放；请稍后重试");
         }
-        if (!Number.isSafeInteger(activeThreadCount) || activeThreadCount < 0) {
-          throw new DesktopAppPreflightError("activity");
-        }
-        if (activeThreadCount > 0) {
+        if (topology.leasedProviders.includes(selectedProvider)) {
           throw new Error(
-            `Provider ${selectedProvider} 的 App Server 当前有 ${activeThreadCount} 个活动 Thread；`
-            + "请等待 Turn 完成后重试",
+            `Provider ${selectedProvider} 的 App Server 正由原生客户端租约保护；请退出相关客户端后重试`,
           );
         }
-      } finally {
-        try {
-          await lease.close();
-        } catch {
-          leaseReleaseFailed = true;
-        }
-      }
-      if (leaseReleaseFailed) {
-        throw new Error(`无法释放 Provider ${selectedProvider} 的启动检查租约；已取消启动`);
-      }
+        await withStartupLease(selectedProvider, async () => {
+          progress.message(`读取 Provider ${selectedProvider} 的活动 Thread`);
+          let activeThreadCount;
+          try {
+            activeThreadCount = await inspectActiveThreads({
+              socketPath: selectedSocketPath,
+              codexBinary: runtimeEnvironment.CODEX_BINARY,
+              signal: progress.signal,
+            });
+          } catch (error) {
+            progress.signal.throwIfAborted();
+            if (error instanceof DesktopAppPreflightError) throw error;
+            throw new DesktopAppPreflightError("activity");
+          }
+          if (!Number.isSafeInteger(activeThreadCount) || activeThreadCount < 0) {
+            throw new DesktopAppPreflightError("activity");
+          }
+          if (activeThreadCount > 0) {
+            throw new Error(
+              `Provider ${selectedProvider} 的 App Server 当前有 ${activeThreadCount} 个活动 Thread；`
+              + "请等待 Turn 完成后重试",
+            );
+          }
+        }, progress);
+      }, progressOptions);
       writeMessage("note", `已确认 Provider ${selectedProvider} 当前没有活动 Turn；启动时会短暂重启该 Provider 的 App Server。`);
-      await openDesktop(app.path, "", selectedProvider);
+      await withCliProgress("发送 Desktop 启动请求", ({ signal }) =>
+        openDesktop(app.path, "", selectedProvider, { signal }), progressOptions);
     } else {
-      await assertDesktopAppProviderSelectionReady(appServer.primarySocketPath, inspectSupervisorState);
-      const token = readDesktopAppBridgeToken(located.dataDir);
-      const endpoint = privateBridgeEndpoint(desktopConfig.port, token, selectedProvider);
-      await withWindowsStartupLease(selectedProvider, async () => {
-        if (!await probeBridge(endpoint)) {
-          throw new Error(`Provider ${selectedProvider} 已就绪，但 Desktop App 桥连接失败；请检查桥配置与 App Server 服务日志`);
-        }
-        await openDesktop(app.path, endpoint, selectedProvider);
-      });
+      await withCliProgress("检查并启动 Desktop", async (progress) => {
+        await assertDesktopAppProviderSelectionReady(appServer.primarySocketPath, inspectSupervisorState);
+        const token = readDesktopAppBridgeToken(located.dataDir);
+        const endpoint = privateBridgeEndpoint(desktopConfig.port, token, selectedProvider);
+        await withStartupLease(selectedProvider, async () => {
+          progress.message(`检查 Provider ${selectedProvider} 的 Desktop 共享桥`);
+          if (!await probeBridge(endpoint, { signal: progress.signal })) {
+            throw new Error(`Provider ${selectedProvider} 已就绪，但 Desktop App 桥连接失败；请检查桥配置与 App Server 服务日志`);
+          }
+          progress.signal.throwIfAborted();
+          progress.message("发送 Desktop 启动请求");
+          await openDesktop(app.path, endpoint, selectedProvider, { signal: progress.signal });
+        }, progress);
+      }, progressOptions);
     }
     writeMessage("success", `已发送 ChatGPT Desktop App 启动请求，目标为 Provider ${selectedProvider} 的共享 App Server；本次选择不保存。`);
     writeMessage("note", "启动请求成功不代表 Desktop 已连接或内置 MCP 工具已就绪；请检查 App 内状态。");
@@ -329,7 +335,8 @@ async function assertDesktopAppProviderSelectionReady(primarySocketPath, inspect
   }
 }
 
-async function inspectMacDesktopAppActiveThreads({ socketPath, codexBinary }) {
+async function inspectMacDesktopAppActiveThreads({ socketPath, codexBinary, signal }) {
+  signal?.throwIfAborted();
   const {
     CodexAppServerClient,
     createAppServerTransport,
@@ -353,19 +360,39 @@ async function inspectMacDesktopAppActiveThreads({ socketPath, codexBinary }) {
     ),
     { sandbox: "read-only" },
   );
+  let closeTask;
+  const close = () => {
+    closeTask ??= client.close();
+    // Closing rejects pending RPC work; the finally below observes cleanup itself.
+    void closeTask.catch(() => undefined);
+  };
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    close();
+  }, 30_000);
+  signal?.addEventListener("abort", close, { once: true });
   try {
-    await client.connect();
-  } catch {
-    throw new DesktopAppPreflightError("initialize");
-  }
-  try {
+    signal?.throwIfAborted();
     try {
-      return await client.countActiveLoadedThreads();
+      await client.connect();
     } catch {
+      signal?.throwIfAborted();
+      throw new DesktopAppPreflightError("initialize");
+    }
+    try {
+      const count = await client.countActiveLoadedThreads();
+      signal?.throwIfAborted();
+      if (timedOut) throw new DesktopAppPreflightError("activity");
+      return count;
+    } catch {
+      signal?.throwIfAborted();
       throw new DesktopAppPreflightError("activity");
     }
   } finally {
-    await client.close();
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", close);
+    await (closeTask ?? client.close());
   }
 }
 
@@ -377,17 +404,20 @@ class DesktopAppPreflightError extends Error {
   }
 }
 
-export function inspectMacDesktopApp({
+export async function inspectMacDesktopApp({
   environment = process.env,
+  signal,
   candidates = [
     "/Applications/ChatGPT.app",
     join(environment.HOME || homedir(), "Applications", "ChatGPT.app"),
   ],
 } = {}) {
+  signal?.throwIfAborted();
   for (const path of candidates) {
+    signal?.throwIfAborted();
     let bundle;
     try {
-      bundle = lstatSync(path);
+      bundle = await lstat(path);
     } catch (error) {
       if (error?.code === "ENOENT") continue;
       throw error;
@@ -399,16 +429,18 @@ export function inspectMacDesktopApp({
     const infoPath = join(path, "Contents", "Info.plist");
     let compatible;
     try {
-      compatible = macCompatibilityMarkers.every((marker) =>
-        fileContainsMarker(resourcesPath, marker));
+      compatible = await fileContainsMarkers(resourcesPath, macCompatibilityMarkers, signal);
     } catch {
+      signal?.throwIfAborted();
       return desktopAppFailure(path, "无法读取 ChatGPT Desktop App 资源");
     }
+    const version = await readMacBundleVersion(infoPath, signal);
+    const running = await macApplicationStatus(path, signal);
     return {
       installed: true,
       path,
-      version: readMacBundleVersion(infoPath),
-      running: macApplicationStatus(path),
+      version,
+      running,
       compatible,
       reason: compatible ? null : "当前 Desktop 构建缺少共享 App Server 兼容入口",
     };
@@ -423,14 +455,18 @@ export function inspectMacDesktopApp({
   };
 }
 
-export function inspectWindowsDesktopApp({
+export async function inspectWindowsDesktopApp({
   environment = process.env,
-  inspectInstallation = () => inspectWindowsDesktopInstallation(environment),
+  signal,
+  inspectInstallation = () => inspectWindowsDesktopInstallation(environment, signal),
 } = {}) {
+  signal?.throwIfAborted();
   let installation;
   try {
-    installation = inspectInstallation();
+    installation = await inspectInstallation();
+    signal?.throwIfAborted();
   } catch {
+    signal?.throwIfAborted();
     return {
       installed: false,
       path: null,
@@ -453,14 +489,15 @@ export function inspectWindowsDesktopApp({
   const executablePath = stringValue(installation.executablePath);
   const resourcePath = stringValue(installation.resourcePath);
   const running = typeof installation.running === "boolean" ? installation.running : null;
-  if (!executablePath || !regularFile(executablePath)) {
+  if (!executablePath || !await regularFile(executablePath)) {
     return desktopAppFailure(null, "OpenAI.Codex 包内未找到正式 Desktop 可执行文件", running);
   }
   let compatible;
   try {
     compatible = Boolean(resourcePath)
-      && fileContainsMarker(resourcePath, compatibilityMarker);
+      && await fileContainsMarkers(resourcePath, [compatibilityMarker], signal);
   } catch {
+    signal?.throwIfAborted();
     return desktopAppFailure(executablePath, "无法读取 OpenAI.Codex Desktop 资源", running);
   }
   return {
@@ -480,8 +517,13 @@ export function openWindowsDesktopApp(
     environment = process.env,
     spawnProcess = spawn,
     startupConfirmationMs = 1_000,
+    signal,
   } = {},
 ) {
+  signal?.throwIfAborted();
+  if (!Number.isSafeInteger(startupConfirmationMs) || startupConfirmationMs < 0 || startupConfirmationMs > desktopCommandTimeoutMs) {
+    throw new Error("Desktop 启动确认等待必须为 0 到 15000 毫秒的整数");
+  }
   const childEnvironment = {};
   for (const [name, value] of Object.entries(environment)) {
     if (name.toLowerCase() !== "codex_app_server_ws_url") {
@@ -506,34 +548,60 @@ export function openWindowsDesktopApp(
     }
     let settled = false;
     let timer;
+    let stopping;
     const cleanup = () => {
       if (timer) clearTimeout(timer);
+      clearTimeout(deadline);
       child.removeListener("error", reject);
       child.removeListener("exit", handleExit);
+      child.removeListener("spawn", handleSpawn);
+      signal?.removeEventListener("abort", abort);
     };
     const reject = () => {
-      if (settled) return;
+      if (settled || stopping) return;
       settled = true;
       cleanup();
       rejectLaunch(new Error("OpenAI.Codex Desktop 启动失败"));
     };
+    const abort = () => {
+      if (settled || stopping) return;
+      if (timer) clearTimeout(timer);
+      child.removeListener("spawn", handleSpawn);
+      stopping = terminateChildProcess(child).then(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        rejectLaunch(signal?.aborted ? signal.reason : new Error("OpenAI.Codex Desktop 启动确认超时"));
+      }, () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        child.unref();
+        rejectLaunch(new Error("OpenAI.Codex Desktop 启动取消后未能确认子进程退出"));
+      });
+    };
     const resolve = () => {
-      if (settled) return;
+      if (settled || stopping) return;
       settled = true;
       cleanup();
       child.unref();
       resolveLaunch();
     };
-    const handleExit = () => reject();
-    child.once("error", reject);
-    child.once("exit", handleExit);
-    child.once("spawn", () => {
+    const handleExit = () => { if (!stopping) reject(); };
+    const handleSpawn = () => {
+      if (settled || stopping) return;
       if (startupConfirmationMs === 0) {
         resolve();
         return;
       }
       timer = setTimeout(resolve, startupConfirmationMs);
-    });
+    };
+    const deadline = setTimeout(abort, desktopCommandTimeoutMs + startupConfirmationMs);
+    child.once("error", reject);
+    child.once("exit", handleExit);
+    child.once("spawn", handleSpawn);
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
   });
 }
 
@@ -800,13 +868,82 @@ function desktopAppFailure(path, reason, running = null) {
   };
 }
 
-function inspectDesktopAppForPlatform(platform, environment) {
-  if (platform === "darwin") return inspectMacDesktopApp({ environment });
-  if (platform === "win32") return inspectWindowsDesktopApp({ environment });
+function inspectDesktopAppForPlatform(platform, environment, signal) {
+  if (platform === "darwin") return inspectMacDesktopApp({ environment, signal });
+  if (platform === "win32") return inspectWindowsDesktopApp({ environment, signal });
   return unsupportedDesktopApp();
 }
 
-function inspectWindowsDesktopInstallation(environment) {
+async function runDesktopPlatformCommand(file, args, { signal, ...options } = {}) {
+  signal?.throwIfAborted();
+  const child = spawn(file, args, {
+    ...options,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
+    windowsHide: true,
+  });
+  if (process.platform !== "win32") registerChildProcessGroup(child);
+  let failure;
+  let stdout = "";
+  let capturedBytes = 0;
+  let stopping;
+  let resolveStopped;
+  const stopped = new Promise(resolve => { resolveStopped = resolve; });
+  const stop = (cause) => {
+    failure ??= cause;
+    stopping ??= (async () => {
+      if (!childProcessIsRunning(child)) {
+        // A closed leader cannot safely identify its former process group.
+        // Open output pipes still prevent us from confirming child cleanup.
+        throw new Error("Desktop 平台命令主进程已退出，输出通道仍未关闭");
+      }
+      await terminateChildProcess(child);
+    })().catch(error => {
+      failure = new AggregateError([failure, error], "Desktop 平台命令终止未获确认");
+      child.unref();
+    }).finally(() => {
+      child.stdout.destroy();
+      child.stderr.destroy();
+      resolveStopped();
+    });
+  };
+  const abort = () => stop(signal.reason);
+  const collect = (chunk, retain) => {
+    capturedBytes += Buffer.byteLength(chunk);
+    if (capturedBytes > maximumDesktopCommandOutputBytes) {
+      stop(new Error("Desktop 平台命令输出超过 1 MiB"));
+    } else if (retain) {
+      stdout += chunk;
+    }
+  };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", chunk => collect(chunk, true));
+  child.stderr.on("data", chunk => collect(chunk, false));
+  const closed = new Promise(resolveClose => {
+    child.once("error", error => { failure ??= error; });
+    child.once("close", (code, signal) => resolveClose({ code, signal }));
+  });
+  const timeout = setTimeout(() => stop(Object.assign(
+    new Error("Desktop 平台命令等待超时"), { code: "ETIMEDOUT" },
+  )), desktopCommandTimeoutMs);
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  try {
+    const result = await Promise.race([closed, stopped]);
+    await stopping;
+    if (failure) throw failure;
+    if (!result || result.code !== 0 || result.signal) {
+      throw new Error("Desktop 平台命令执行失败");
+    }
+    return { stdout };
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
+async function inspectWindowsDesktopInstallation(environment, signal) {
   let invocation;
   try {
     invocation = resolveExecutableInvocation(
@@ -825,14 +962,15 @@ function inspectWindowsDesktopInstallation(environment) {
   } catch {
     throw new Error("Windows Desktop 探测需要 PowerShell 7（pwsh）");
   }
-  const result = spawnSync(invocation.file, invocation.args, {
-    encoding: "utf8",
-    env: environment,
-    maxBuffer: 1_048_576,
-    windowsHide: true,
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-  });
-  if (result.error || result.status !== 0) {
+  let result;
+  try {
+    result = await runDesktopPlatformCommand(invocation.file, invocation.args, {
+      env: environment,
+      signal,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    });
+  } catch {
+    signal?.throwIfAborted();
     throw new Error("Windows Desktop 安装包查询失败");
   }
   try {
@@ -842,39 +980,46 @@ function inspectWindowsDesktopInstallation(environment) {
   }
 }
 
-function readMacBundleVersion(infoPath) {
-  const result = spawnSync(
-    "/usr/bin/plutil",
-    ["-extract", "CFBundleShortVersionString", "raw", "-o", "-", infoPath],
-    { encoding: "utf8", maxBuffer: 1_048_576 },
-  );
-  return result.status === 0 && result.stdout.trim() ? result.stdout.trim() : null;
+async function readMacBundleVersion(infoPath, signal) {
+  try {
+    const result = await runDesktopPlatformCommand(
+      "/usr/bin/plutil",
+      ["-extract", "CFBundleShortVersionString", "raw", "-o", "-", infoPath],
+      { signal },
+    );
+    return result.stdout.trim() || null;
+  } catch {
+    signal?.throwIfAborted();
+    return null;
+  }
 }
 
-function macApplicationStatus(appPath) {
-  const result = spawnSync("/usr/bin/osascript", [
-    "-e",
-    "on run argv",
-    "-e",
-    "application (item 1 of argv) is running",
-    "-e",
-    "end run",
-    appPath,
-  ], { encoding: "utf8", maxBuffer: 1_048_576 });
-  if (result.error) return null;
-  if (result.status !== 0) return null;
-  const status = result.stdout.trim();
-  if (status === "true") return true;
-  if (status === "false") return false;
-  return null;
+async function macApplicationStatus(appPath, signal) {
+  try {
+    const result = await runDesktopPlatformCommand("/usr/bin/osascript", [
+      "-e",
+      "on run argv",
+      "-e",
+      "application (item 1 of argv) is running",
+      "-e",
+      "end run",
+      appPath,
+    ], { signal });
+    const status = result.stdout.trim();
+    if (status === "true") return true;
+    if (status === "false") return false;
+    return null;
+  } catch {
+    signal?.throwIfAborted();
+    return null;
+  }
 }
 
-function openMacDesktopApp(path, _endpoint, provider) {
+async function openMacDesktopApp(path, _endpoint, provider, { signal } = {}) {
   const resourcesPath = join(path, "Contents", "Resources");
   const nodePath = join(resourcesPath, "cua_node", "bin", "node");
-  const result = spawnSync(
-    "/usr/bin/open",
-    [
+  try {
+    await runDesktopPlatformCommand("/usr/bin/open", [
       "--env",
       "CODEX_APP_SERVER_FORCE_CLI=1",
       "--env",
@@ -889,36 +1034,47 @@ function openMacDesktopApp(path, _endpoint, provider) {
       `CODEX_BROWSER_USE_NODE_PATH=${nodePath}`,
       "-a",
       path,
-    ],
-    { stdio: "ignore" },
-  );
-  if (result.error || result.status !== 0) {
+    ], { signal });
+  } catch {
+    signal?.throwIfAborted();
     throw new Error("ChatGPT Desktop App 启动失败");
   }
 }
 
-function fileContainsMarker(path, marker) {
-  const status = lstatSync(path);
+async function fileContainsMarkers(path, markers, signal) {
+  signal?.throwIfAborted();
+  const status = await lstat(path);
   if (!status.isFile() || status.isSymbolicLink()) return false;
-  const descriptor = openSync(path, "r");
+  const descriptor = await open(path, "r");
   const chunk = Buffer.allocUnsafe(64 * 1024);
   let carry = Buffer.alloc(0);
+  const remaining = new Set(markers);
+  const carryLength = Math.max(...markers.map(marker => marker.length)) - 1;
   try {
-    while (true) {
-      const bytes = readSync(descriptor, chunk, 0, chunk.length, null);
-      if (bytes === 0) return false;
-      const current = Buffer.concat([carry, chunk.subarray(0, bytes)]);
-      if (current.includes(marker)) return true;
-      carry = current.subarray(Math.max(0, current.length - marker.length + 1));
+    const openedStatus = await descriptor.stat();
+    if (!openedStatus.isFile()) return false;
+    let position = 0;
+    while (position < openedStatus.size) {
+      signal?.throwIfAborted();
+      const { bytesRead } = await descriptor.read(chunk, 0, Math.min(chunk.length, openedStatus.size - position), position);
+      if (bytesRead === 0) return false;
+      position += bytesRead;
+      const current = Buffer.concat([carry, chunk.subarray(0, bytesRead)]);
+      for (const marker of remaining) {
+        if (current.includes(marker)) remaining.delete(marker);
+      }
+      if (remaining.size === 0) return true;
+      carry = current.subarray(Math.max(0, current.length - carryLength));
     }
+    return false;
   } finally {
-    closeSync(descriptor);
+    await descriptor.close();
   }
 }
 
-function regularFile(path) {
+async function regularFile(path) {
   try {
-    const status = lstatSync(path);
+    const status = await lstat(path);
     return status.isFile() && !status.isSymbolicLink();
   } catch {
     return false;
@@ -927,29 +1083,62 @@ function regularFile(path) {
 
 // The bridge acquires its own lease (15s) before opening the Windows Proxy
 // Transport (10s). Keep this outer deadline longer than those bounded stages.
-function probeDesktopAppBridge(endpoint, timeoutMs = 30_000) {
-  return new Promise((resolvePromise) => {
+function probeDesktopAppBridge(endpoint, { signal, timeoutMs = 30_000 } = {}) {
+  signal?.throwIfAborted();
+  return new Promise((resolvePromise, rejectPromise) => {
     const socket = new WebSocket(endpoint, {
       perMessageDeflate: false,
       handshakeTimeout: timeoutMs,
     });
     let settled = false;
-    const finish = (ready) => {
+    let closing = false;
+    let ready = false;
+    let closeTimeout;
+    const complete = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      clearTimeout(closeTimeout);
+      signal?.removeEventListener("abort", abort);
       socket.removeAllListeners();
       socket.once("error", () => undefined);
+      if (signal?.aborted) rejectPromise(signal.reason);
+      else resolvePromise(ready);
+    };
+    const finish = (value) => {
+      if (settled || closing) return;
+      closing = true;
+      ready = value;
+      clearTimeout(timeout);
+      if (socket.readyState === WebSocket.CLOSED) {
+        complete();
+        return;
+      }
+      closeTimeout = setTimeout(() => {
+        socket.terminate();
+        complete();
+      }, 2_000);
       if (socket.readyState === WebSocket.OPEN) socket.close();
       else socket.terminate();
-      resolvePromise(ready);
+    };
+    const abort = () => {
+      if (closing) socket.terminate();
+      else finish(false);
     };
     const timeout = setTimeout(() => finish(false), timeoutMs);
     timeout.unref();
     socket.once("open", () => finish(true));
     socket.once("error", () => finish(false));
-    socket.once("close", () => finish(false));
-    socket.once("unexpected-response", () => finish(false));
+    socket.once("close", () => {
+      if (!closing) ready = false;
+      complete();
+    });
+    socket.once("unexpected-response", (_request, response) => {
+      response.destroy();
+      finish(false);
+    });
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
   });
 }
 

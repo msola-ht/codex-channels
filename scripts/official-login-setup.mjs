@@ -14,6 +14,7 @@ import { createCodexUserConfigClient, resolveCodexUserConfigBinary } from "./cod
 import { applyPrimaryProviderSwitch, previewPrimaryProviderSwitch } from "./primary-provider-management.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
+import { withCliProgress } from "./cli-operation-progress.mjs";
 
 async function defaultRunLogin({ codexBinary, environment, input, output }) {
   const invocation = codexProcessInvocation(
@@ -82,10 +83,10 @@ export async function runOfficialLoginSetup({
   createClient = createCodexUserConfigClient,
   runLogin = defaultRunLogin,
 } = {}) {
-  const preview = await previewPrimaryProviderSwitch(
+  const preview = await withCliProgress("读取官方登录模式切换预览", () => previewPrimaryProviderSwitch(
     { providerId: "openai" },
     { environment, createClient },
-  );
+  ), { output, delayMs: 150, handleSignals: false });
   const candidates = preview.effects.candidateIdsToBackup;
 
   output.write("\nCodex Connect 官方登录模式 Setup\n\n");
@@ -119,10 +120,10 @@ export async function runOfficialLoginSetup({
     output,
   });
 
-  const result = await applyPrimaryProviderSwitch(
+  const result = await withCliProgress("保存官方 OpenAI 模式", () => applyPrimaryProviderSwitch(
     { providerId: "openai" },
     { environment, createClient, switchPreview: preview },
-  );
+  ), { output, delayMs: 150, handleSignals: false });
   const backedUp = result.effects.backedUpProviderIds;
   output.write(
     backedUp.length === 0

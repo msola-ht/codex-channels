@@ -2,10 +2,11 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { ReportedChildExitError } from "../runtime/process-lifecycle.mjs";
-import { inspectManagedServiceStatus } from "./service-status.mjs";
+import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
 import { serviceControlEnvironment } from "./runtime-environment.mjs";
 import { serviceCommandTarget } from "../runtime/service-targets.mjs";
 import { runCliLifecycleCommand } from "./cli-lifecycle-command.mjs";
+import { withCliProgress } from "./cli-operation-progress.mjs";
 
 export const runMaintenanceCommand = runCliLifecycleCommand;
 
@@ -13,9 +14,10 @@ function commandTarget(target) {
   return serviceCommandTarget(target === "relay" ? "model-relay" : target);
 }
 
-export function maintenanceServiceRunning(target) {
-  const service = inspectManagedServiceStatus({ target: target === "relay" ? "model-relay" : target,
-    environment: serviceControlEnvironment() }).services.find(entry => entry.target === (target === "relay" ? "model-relay" : target));
+export async function maintenanceServiceRunning(target) {
+  const status = await inspectManagedServiceStatusAsync({ target: target === "relay" ? "model-relay" : target,
+    environment: serviceControlEnvironment() });
+  const service = status.services.find(entry => entry.target === (target === "relay" ? "model-relay" : target));
   if (!service || (!service.running && !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state))) {
     throw new Error(`无法确认 ${target} 服务状态，已取消维护`);
   }
@@ -58,10 +60,13 @@ export async function runMaintenanceServices({ prompts, targets, run,
   try {
     try {
       // Read every state before stopping any service.
-      for (const target of targets) {
-        controller.signal.throwIfAborted();
-        if (await isRunning(target)) running.push(target);
-      }
+      await withCliProgress("检查维护前服务状态", async progress => {
+        for (const target of targets) {
+          controller.signal.throwIfAborted();
+          progress.message(`检查 ${target} 服务状态`);
+          if (await isRunning(target)) running.push(target);
+        }
+      }, { signal: controller.signal, handleSignals: false, output: process.stderr, delayMs: 250 });
       controller.signal.throwIfAborted();
       if (running.length > 0) {
         const accepted = await prompts.confirm({

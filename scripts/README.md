@@ -6,8 +6,8 @@
 
 ## 配置与 Workspace
 
-- `cli-operation-progress.mjs`：安装、卸载、更新和服务操作共用的分组标题与阶段展示；终端按需加载 Clack spinner，重定向、CI、dumb 终端及依赖尚未可用时使用纯文本。阶段完成必须等待调用方实际操作结束，取消信号交由调用方收尾后退出。
-- `cli-lifecycle-command.mjs`：更新、程序卸载与数据维护的 CLI 父子进程协作；就绪握手后通过私有 IPC 转发取消，子进程在安全边界检查取消，父进程等待事务收尾并退出，不用强制终止代替取消。
+- `cli-operation-progress.mjs`：CLI 共用的分组标题与阶段展示；终端使用不读取 stdin 的行内动画，重定向、CI 和 dumb 终端使用纯文本。支持延迟显示、选择输出流或静默，以及沿用调用方取消信号。阶段完成必须等待实际操作结束，取消后由调用方收尾，进度层不直接退出进程。
+- `cli-lifecycle-command.mjs`：更新、程序卸载、Doctor 与指标/数据维护的 CLI 父子进程协作；就绪握手后通过私有 IPC 转发取消，子进程在安全边界检查取消，父进程等待事务收尾并退出，不用强制终止代替取消。指标导出可把子进程标准输出直接写入私有文件。
 - `installation-command.mjs`：安装入口共用的异步命令执行器；避免同步子进程冻结进度，交互模式保留有界诊断尾部并在失败时展示，非交互模式实时输出日志，取消时终止自己启动的进程树。供源码安装器和本地安装复用，不管理后台服务。
 
 - `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，由 MCP 客户端启动；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。
@@ -32,6 +32,8 @@
   入口能力及内置工具 Host 是否已附加，明确这些状态不代表 MCP 工具就绪；启动前持有临时 Provider 租约，按需恢复已释放的实例，
   通过官方已加载 Thread 清单和逐项状态读取检查持久及临时会话，并在活动 Turn 或 `codexc remote`
   目标实例租约存在时拒绝会触发子进程切换的启动；打开 Desktop 前释放临时租约。
+  平台命令异步执行，限制 15 秒和 1 MiB 输出；资源标记单遍异步扫描，活动 Thread 检查设置 30 秒总预算。
+  检查与启动进度延迟显示，JSON 状态禁用进度；取消等待自有查询和租约收尾。
   macOS 的具体构建实机验收边界见 `docs/codex-desktop-app-development.md`，Windows 尚未实机验收。
 - `desktop-app-proxy.mjs`：只由 macOS Desktop 的 `CODEX_CLI_PATH` 启动；解析并受控传递 Desktop
   内置插件的布尔启用值和本次 Provider；无插件配置时恢复目标实例但不持有长期租约，带配置时把动态工具 Pipe
@@ -551,12 +553,12 @@
   Workspace、飞书凭据/Bot 身份、
   微信配置与 Bot 凭据、只读消息游标检查点（不修复权限）、允许用户的加密回复上下文覆盖数和最近保存时间，
   以及微信运行时启用状态；缺少 `bubblewrap` 时说明内置 helper 回退并输出发行版安装命令，
-  文本模式立即输出标题、向 stderr 提示检测阶段，按诊断领域逐步输出失败、提示和处理建议，交互终端区分颜色并汇总各状态数量；独立 App Server 检查并发执行，飞书 SDK 按需加载；
+  文本模式立即输出标题、向 stderr 提示检测阶段，按诊断领域逐步输出失败、提示和处理建议，交互终端区分颜色并汇总各状态数量；独立 App Server 与服务查询最多四项并发且按原顺序展示，查询命令有超时和 1 MiB 输出上限，飞书 SDK 按需加载；
   Doctor 不自动安装或修改 AppArmor，不调用
   `getupdates`，不显示 Token、`context_token` 或游标；
   主 Unix WebSocket、已配置 Provider 的切换或固定配置、实际模型目录、Provider Socket、
   监管身份与 Provider 拓扑、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，
-  同一次诊断复用已解析的自定义 Provider 拓扑和同次监管检查的空闲释放状态；Windows 计划任务与宿主查询提前并行执行，系统服务汇总复用本次主 App Server 握手结果并独立确认 Gateway 就绪；已确认运行的 Provider 直接握手，不再先建立第二条 Proxy 探测连接，不缓存跨命令的 ACL 结果；
+  同一次诊断复用已解析的自定义 Provider 拓扑和同次监管检查的空闲释放状态；Windows 计划任务与宿主在系统服务阶段批量查询，系统服务汇总复用本次主 App Server 握手结果并独立确认 Gateway 就绪；已确认运行的 Provider 直接握手，不再先建立第二条 Proxy 探测连接，不缓存跨命令的 ACL 结果；
   `--json` 输出完整脱敏检查数组、分类计数与健康状态；不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
 - `service-install-context.mjs` / `service-install-context.d.mts`：后台服务安装器共用的配置、

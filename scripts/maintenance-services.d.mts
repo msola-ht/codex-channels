@@ -4,7 +4,7 @@ export interface MaintenanceServiceOptions {
   isRunning?: (target: MaintenanceTarget) => boolean | Promise<boolean>;
   runService?: (action: "stop" | "start", target: MaintenanceTarget) => void | Promise<unknown>;
 }
-export function maintenanceServiceRunning(target: MaintenanceTarget): boolean;
+export function maintenanceServiceRunning(target: MaintenanceTarget): Promise<boolean>;
 export function runMaintenanceCommand(script: string, args: string[], options: {
   environment?: NodeJS.ProcessEnv;
   cwd?: string;

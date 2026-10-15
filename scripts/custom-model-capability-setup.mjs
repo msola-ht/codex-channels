@@ -1,5 +1,6 @@
 import { probeCustomModelCapabilities } from "./custom-model-capability-probe.mjs";
 import { customModelProbeConnection } from "./custom-primary-provider-management.mjs";
+import { withCliProgress } from "./cli-operation-progress.mjs";
 
 const labels = { applyPatch: "apply_patch", toolSearch: "tool_search" };
 const statuses = { supported: "通过", unsupported: "未通过", inconclusive: "无法确认" };
@@ -38,7 +39,14 @@ export async function promptCustomModelCapabilities(prompts, input, {
         if (controller.signal.aborted || prompts.isCancel(action) || action === "cancel") return undefined;
         if (action === "detect") {
           output.write(`\n正在探测 ${model.id} 的 ${labels[capability]}，最长 45 秒；Ctrl+C 取消。\n`);
-          result = await probe({ ...connection, capability, environment: input.environment, signal: controller.signal });
+          try {
+            result = await withCliProgress(`探测 ${model.id} 的 ${labels[capability]}`, progress =>
+              probe({ ...connection, capability, environment: input.environment, signal: progress.signal }),
+            { output, delayMs: 150, signal: controller.signal });
+          } catch (error) {
+            if (controller.signal.aborted) return undefined;
+            throw error;
+          }
           if (controller.signal.aborted || result.status === "cancelled") return undefined;
           if (result.model !== model.id || result.upstreamWireApi !== input.upstreamWireApi
             || result.capability !== capability || result.check.capability !== capability || result.reasoningEffort !== connection.reasoningEffort) {

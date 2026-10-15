@@ -4,10 +4,10 @@ import { ReportedChildExitError } from "../runtime/process-lifecycle.mjs";
 
 // Update/uninstall must finish their own recovery, including after their launcher
 // receives a signal. IPC avoids Windows kill(), which terminates rather than cancels.
-export async function runCliLifecycleCommand(script, args, { environment, cwd, signal }) {
+export async function runCliLifecycleCommand(script, args, { environment, cwd, signal, stdout = "inherit" }) {
   signal?.throwIfAborted();
   const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", script, ...args], {
-    env: environment, cwd, stdio: ["inherit", "inherit", "inherit", "ipc"],
+    env: environment, cwd, stdio: ["inherit", stdout, "inherit", "ipc"],
     detached: true, windowsHide: true,
   });
   let ready = false;

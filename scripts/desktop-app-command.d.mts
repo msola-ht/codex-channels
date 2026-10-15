@@ -10,19 +10,21 @@ export interface DesktopAppInspection {
 export interface DesktopAppCommandOptions {
   environment?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
+  signal?: AbortSignal;
   output?: Pick<NodeJS.WriteStream, "write">;
   writeMessage?: (kind: "success" | "failure" | "note", message: string) => void;
-  inspectDesktopApp?: () => DesktopAppInspection;
+  inspectDesktopApp?: (options?: { signal?: AbortSignal }) => DesktopAppInspection | Promise<DesktopAppInspection>;
   restartAppServer?: () => Promise<void>;
   confirmEnable?: () => boolean | Promise<boolean>;
-  probeBridge?: (endpoint: string) => Promise<boolean>;
+  probeBridge?: (endpoint: string, options?: { signal?: AbortSignal }) => Promise<boolean>;
   inspectSupervisorState?: typeof import("../runtime/app-server-supervisor.mjs").inspectAppServerSupervisorState;
   acquireProviderLease?: typeof import("../runtime/app-server-supervisor.mjs").acquireAppServerProviderLease;
   inspectActiveThreads?: (options: {
     socketPath: string;
     codexBinary: string;
+    signal?: AbortSignal;
   }) => Promise<number>;
-  openDesktop?: (path: string, endpoint: string, provider: string) => void | Promise<void>;
+  openDesktop?: (path: string, endpoint: string, provider: string, options?: { signal?: AbortSignal }) => void | Promise<void>;
 }
 
 export const desktopAppCommandUsage: string;
@@ -33,17 +35,25 @@ export function runDesktopAppCommand(
 export function inspectMacDesktopApp(options?: {
   environment?: NodeJS.ProcessEnv;
   candidates?: string[];
-}): DesktopAppInspection;
+  signal?: AbortSignal;
+}): Promise<DesktopAppInspection>;
 export function inspectWindowsDesktopApp(options?: {
   environment?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
   inspectInstallation?: () => {
     installed?: boolean;
     executablePath?: string | null;
     resourcePath?: string | null;
     version?: string | null;
     running?: boolean | null;
-  };
-}): DesktopAppInspection;
+  } | Promise<{
+    installed?: boolean;
+    executablePath?: string | null;
+    resourcePath?: string | null;
+    version?: string | null;
+    running?: boolean | null;
+  }>;
+}): Promise<DesktopAppInspection>;
 export function openWindowsDesktopApp(
   path: string,
   endpoint: string,
@@ -51,5 +61,6 @@ export function openWindowsDesktopApp(
     environment?: NodeJS.ProcessEnv;
     spawnProcess?: typeof import("node:child_process").spawn;
     startupConfirmationMs?: number;
+    signal?: AbortSignal;
   },
 ): Promise<void>;

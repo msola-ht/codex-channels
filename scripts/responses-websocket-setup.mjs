@@ -1,4 +1,5 @@
 import { probeResponsesWebSocket } from "./responses-websocket-probe.mjs";
+import { withCliProgress } from "./cli-operation-progress.mjs";
 
 export async function promptResponsesWebSocket(prompts, input, {output = process.stdout, probe = probeResponsesWebSocket, current = false} = {}) {
   let action = await prompts.select({
@@ -25,8 +26,14 @@ export async function promptResponsesWebSocket(prompts, input, {output = process
     process.once("SIGINT", cancel);
     output.write(`\n正在检测 WS ${action === "generate" ? "模型请求" : "连接及预热"}，最长 15 秒；Ctrl+C 取消。\n`);
     let result;
-    try { result = await probe({...input,mode:action === "generate" ? "generate" : "prewarm",signal:controller.signal}); }
-    finally { process.removeListener("SIGINT",cancel); }
+    try {
+      result = await withCliProgress(`检测 WS ${action === "generate" ? "模型请求" : "连接及预热"}`, progress =>
+        probe({...input,mode:action === "generate" ? "generate" : "prewarm",signal:progress.signal}),
+      {output,delayMs:150,signal:controller.signal});
+    } catch (error) {
+      if (controller.signal.aborted) return undefined;
+      throw error;
+    } finally { process.removeListener("SIGINT",cancel); }
     if (result.status === "cancelled" || controller.signal.aborted) return undefined;
     output.write(`${result.reason}${result.httpStatus === undefined ? "" : `（HTTP ${result.httpStatus}）`}\n`);
     if (result.connected && result.status === "inconclusive") output.write("WS 握手成功，但请求兼容性尚未确认。\n");
