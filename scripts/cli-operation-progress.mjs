@@ -1,6 +1,11 @@
 import { performance } from "node:perf_hooks";
 import { ReportedChildExitError } from "../runtime/process-lifecycle.mjs";
 
+export function writeCliSection(title) {
+  const line = process.env.TERM === "dumb" ? "---" : "──";
+  process.stdout.write(`\n${line} ${title} ${line}\n`);
+}
+
 /** Presentation only: callers must settle their work before returning on cancellation. */
 export async function withCliProgress(label, operation) {
   const controller = new AbortController();

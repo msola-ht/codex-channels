@@ -1,10 +1,13 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, realpathSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { ReportedChildExitError } from "../runtime/process-lifecycle.mjs";
+import { withCliProgress, writeCliSection } from "./cli-operation-progress.mjs";
 import { packageDir } from "./package-path.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
@@ -18,6 +21,77 @@ export async function uninstallInstallation(
   environment = process.env,
   options = {},
 ) {
+  // Finish the destructive action already in progress before honoring cancellation.
+  const controller = new AbortController();
+  const cancel = (signal) => controller.abort(new ReportedChildExitError(
+    signal === "SIGINT" ? 130 : 143,
+    "卸载已取消，当前操作已收尾；尚未处理的程序与用户数据已保留。",
+  ));
+  const interrupt = () => cancel("SIGINT");
+  const terminate = () => cancel("SIGTERM");
+  process.on("SIGINT", interrupt);
+  process.on("SIGTERM", terminate);
+  try {
+    writeCliSection("卸载准备");
+    const targets = await withCliProgress("确认卸载身份与删除范围", async () => {
+      controller.signal.throwIfAborted();
+      return inspectInstallation(environment, options);
+    });
+    const { projectDir, checkout, expectedCheckout, packages } = targets;
+    controller.signal.throwIfAborted();
+    // The child owns service progress. Keep our cancellation handler installed
+    // while it settles instead of letting the parent exit ahead of its work.
+    await (options.uninstallServices ?? uninstallServices)(projectDir, environment);
+    controller.signal.throwIfAborted();
+    for (const installed of packages.values()) assertUnchangedPackage(installed);
+    writeCliSection("删除程序");
+    await withCliProgress("卸载全局命令与受管源码", async (progress) => {
+      // Load presentation before deleting this package: no new script, worker or
+      // optional dependency may need to be loaded after the current npm removal.
+      const installations = [...packages.values()].sort((left, right) =>
+        Number(left.directory === projectDir) - Number(right.directory === projectDir));
+      for (const installed of installations) {
+        controller.signal.throwIfAborted();
+        progress.signal.throwIfAborted();
+        assertUnchangedPackage(installed);
+        const message = `卸载 npm 全局命令：${installed.prefix}`;
+        progress.message(message);
+        if (!progress.interactive) progress.log(`[进行中] ${message}`);
+        if (options.uninstallGlobalPackage) {
+          await options.uninstallGlobalPackage([installed.prefix], environment);
+        } else {
+          await uninstallGlobalPackage(installed.prefix, environment, progress);
+        }
+      }
+      controller.signal.throwIfAborted();
+      progress.signal.throwIfAborted();
+      if (checkout) {
+        const current = inspectManagedCheckout(expectedCheckout, checkout.directory, environment);
+        assertSameDirectory(checkout, current);
+        const message = `删除受管源码：${checkout.directory}`;
+        progress.message(message);
+        if (!progress.interactive) progress.log(`[进行中] ${message}`);
+        await rm(checkout.directory, { recursive: true });
+      }
+      controller.signal.throwIfAborted();
+    });
+    return { checkout: checkout?.directory, prefixes: [...packages.values()].map((entry) => entry.prefix) };
+  } catch (error) {
+    if (controller.signal.aborted && error !== controller.signal.reason) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new ReportedChildExitError(
+        controller.signal.reason.exitCode,
+        `${controller.signal.reason.message}\n当前操作结果：${detail}`,
+      );
+    }
+    throw error;
+  } finally {
+    process.off("SIGINT", interrupt);
+    process.off("SIGTERM", terminate);
+  }
+}
+
+function inspectInstallation(environment, options) {
   const projectDir = realpathSync(options.projectDir ?? packageDir);
   const expectedCheckout = join(userDataDir(environment), "codex-channels");
   const activePrefix = inferNpmGlobalPrefix(projectDir);
@@ -50,22 +124,7 @@ export async function uninstallInstallation(
     }
   }
 
-  // Keep this command available if removing another prefix fails.
-  const installations = [...packages.values()].sort((left, right) =>
-    Number(left.directory === projectDir) - Number(right.directory === projectDir));
-  // Identify every target before stopping services and recheck it before deletion.
-  await (options.uninstallServices ?? uninstallServices)(projectDir, environment);
-  for (const installed of installations) assertUnchangedPackage(installed);
-  for (const installed of installations) {
-    assertUnchangedPackage(installed);
-    await (options.uninstallGlobalPackage ?? uninstallGlobalPackage)([installed.prefix], environment);
-  }
-  if (checkout) {
-    const current = inspectManagedCheckout(expectedCheckout, checkout.directory, environment);
-    assertSameDirectory(checkout, current);
-    rmSync(checkout.directory, { recursive: true });
-  }
-  return { checkout: checkout?.directory, prefixes: [...packages.values()].map((entry) => entry.prefix) };
+  return { projectDir, expectedCheckout, checkout, packages };
 }
 
 function inspectManagedCheckout(expected, source, environment) {
@@ -110,47 +169,45 @@ function assertUnchangedPackage(expected) {
   }
 }
 
-function uninstallGlobalPackage(prefixes, environment) {
-  for (const prefix of prefixes) {
-    const invocation = resolveExecutableInvocation(
-      "npm",
-      [
-        "uninstall",
-        "--global",
-        "--prefix",
-        prefix,
-        "--ignore-scripts",
-        "--no-audit",
-        "--no-fund",
-        "@hegenai/codexc",
-      ],
-      environment,
-    );
-    const result = spawnSync(
-      invocation.file,
-      invocation.args,
-      {
-        env: environment,
-        cwd: prefix,
-        stdio: "inherit",
-        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-      },
-    );
-    if (result.error) throw result.error;
-    if (result.status !== 0) {
-      throw new Error(`npm 全局命令卸载失败：${prefix} · exit=${result.status ?? 1}`);
-    }
-    if (existsSync(join(prefix, ...(process.platform === "win32" ? [] : ["lib"]), "node_modules", "@hegenai", "codexc"))) {
-      throw new Error(`npm 全局包仍然存在，源码已保留：${prefix}`);
-    }
+async function uninstallGlobalPackage(prefix, environment, progress) {
+  const invocation = resolveExecutableInvocation(
+    "npm",
+    [
+      "uninstall",
+      "--global",
+      "--prefix",
+      prefix,
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "@hegenai/codexc",
+    ],
+    environment,
+  );
+  const result = await runUninstallCommand(
+    invocation.file,
+    invocation.args,
+    {
+      env: environment,
+      cwd: prefix,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    },
+    progress,
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`npm 全局命令卸载失败：${prefix} · exit=${result.status ?? 1}`);
+  }
+  if (existsSync(join(prefix, ...(process.platform === "win32" ? [] : ["lib"]), "node_modules", "@hegenai", "codexc"))) {
+    throw new Error(`npm 全局包仍然存在，源码已保留：${prefix}`);
   }
 }
 
-function uninstallServices(projectDir, environment) {
-  const result = spawnSync(
+async function uninstallServices(projectDir, environment) {
+  const result = await runUninstallCommand(
     process.execPath,
     [join(projectDir, "bin", "codexc.mjs"), "uninstall", "--services"],
-    { cwd: projectDir, env: environment, stdio: "inherit" },
+    { cwd: projectDir, env: environment },
   );
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -158,11 +215,43 @@ function uninstallServices(projectDir, environment) {
   }
 }
 
+function runUninstallCommand(command, args, options, progress) {
+  return new Promise((resolveClose) => {
+    const child = spawn(command, args, {
+      ...options,
+      stdio: progress ? ["ignore", "pipe", "pipe"] : "inherit",
+      // Terminal interrupts must not cut npm off halfway through self-removal.
+      // Keep awaiting close; only the next destructive action is cancelled.
+      detached: progress !== undefined,
+      windowsHide: true,
+    });
+    let failure;
+    if (progress) {
+      for (const stream of ["stdout", "stderr"]) {
+        child[stream].setEncoding("utf8");
+        child[stream].on("data", (chunk) => {
+          progress.log(chunk, { stream });
+          if (process[stream].writableNeedDrain) {
+            child[stream].pause();
+            process[stream].once("drain", () => child[stream].resume());
+          }
+        });
+      }
+    }
+    child.once("error", (error) => { failure = error; });
+    child.once("close", (status, signal) => resolveClose({
+      status,
+      error: failure ?? (signal ? new Error(`卸载子命令被信号终止：${signal}`) : undefined),
+    }));
+  });
+}
+
 async function main() {
   const result = await uninstallInstallation();
   writeCliMessage("success", result.checkout
     ? `受管 Git 源码与对应 npm 全局命令已删除：${result.checkout}`
     : "当前 npm 全局命令已卸载，源码工作树已保留。");
+  writeCliSection("保留用户数据");
   writeCliMessage("note", "用户配置、数据库、凭据、日志、输出、Codex CLI 与 Shell 配置均已保留。");
 }
 
@@ -174,6 +263,6 @@ if (
     await main();
   } catch (error) {
     writeCliMessage("failure", error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
+    process.exitCode = error?.exitCode ?? 1;
   }
 }

@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -26,10 +26,12 @@ import {
 } from "./source-install-metadata.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 import { serviceControlDefinitions, serviceDefinitionPath } from "./service-selection.mjs";
-import { inspectManagedServiceStatus } from "./service-status.mjs";
+import { inspectManagedServiceStatusAsync } from "./service-status.mjs";
 import { withPrivateFileLock } from "../runtime/private-file-lock.mjs";
 import { readPrivateFileSync } from "../runtime/private-file.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
+import { withCliProgress, writeCliSection } from "./cli-operation-progress.mjs";
+import { formatCliMessage } from "../runtime/cli-presentation.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
@@ -133,15 +135,21 @@ export async function updateManagedSourceInstallation(
   let activeStage = "inspect";
   const runStage = async (stage, operation) => {
     activeStage = stage;
-    const result = await operation();
-    completedStages.push(stage);
+    const complete = async () => {
+      const result = await operation();
+      completedStages.push(stage);
+      return result;
+    };
+    const result = stage === "prepare-codex-cli" || stage === "update-installation"
+      ? await complete()
+      : await runUpdateStage(options, stage, complete);
     return result;
   };
   let plan;
   try {
     plan = await runStage(
       "inspect",
-      () => inspectManagedSourceUpdatePlan(environment, options),
+      () => inspectSourceUpdatePlan(environment, options),
     );
   } catch (error) {
     throw annotateSourceUpdateFailure(error, {
@@ -190,11 +198,11 @@ export async function updateManagedSourceInstallation(
   let backupPath;
   const renamePath = options.renamePath ?? renameSync;
   try {
-    writeMessageSafely(writeMessage, "note", "正在克隆 Git main 候选源码。");
-    await runStage("clone-candidate", () => {
+    if (!options.runStage) writeMessageSafely(writeMessage, "note", "正在克隆 Git main 候选源码。");
+    await runStage("clone-candidate", async () => {
       stagingRoot = mkdtempSync(join(installRoot, ".codex-channels-update."));
       stagedCheckout = join(stagingRoot, "codex-channels");
-      runQuiet(
+      await runQuiet(
         "git",
         [
           "-c", "core.longpaths=true",
@@ -211,7 +219,7 @@ export async function updateManagedSourceInstallation(
         options.runCommand,
       );
     });
-    const candidate = await runStage("validate-candidate", () => {
+    const candidate = await runStage("validate-candidate", async () => {
       const targetVersion = packageVersion(stagedCheckout);
       const targetCodexVersion = codexVersion(stagedCheckout);
       if (!isGatewayVersionCompatible(targetVersion, targetCodexVersion)) {
@@ -222,19 +230,19 @@ export async function updateManagedSourceInstallation(
       if (compareVersions(targetVersion, currentVersion) < 0) {
         throw new Error(`拒绝降级源码安装：当前 ${currentVersion}，main 为 ${targetVersion}`);
       }
-      const targetCommit = capture(
+      const targetCommit = (await captureAsync(
         "git",
         ["rev-parse", "HEAD"],
         stagedCheckout,
         environment,
         options.captureCommand,
-      ).trim();
+      )).trim();
       if (targetCommit !== remoteCommit) {
         throw new Error("官方 main 在预检后发生变化，请重新运行 codexc update");
       }
-      assertFastForward(stagedCheckout, currentCommit, targetCommit, environment);
+      await assertFastForward(stagedCheckout, currentCommit, targetCommit, environment);
       if (!options.confirmCodexCliInstall) {
-        assertCodexVersion(targetCodexVersion, environment, options.captureCommand);
+        await assertCodexVersionAsync(targetCodexVersion, environment, options.captureCommand);
       }
       return { targetCodexVersion, targetCommit, targetVersion };
     });
@@ -261,7 +269,7 @@ export async function updateManagedSourceInstallation(
         options,
       ),
     );
-    writeMessageSafely(writeMessage, "note", "正在核对候选版本的 Codex 公开合同。");
+    if (!options.runStage) writeMessageSafely(writeMessage, "note", "正在核对候选版本的 Codex 公开合同。");
     await runStage(
       "validate-codex-contract",
       async () => {
@@ -270,7 +278,7 @@ export async function updateManagedSourceInstallation(
           preparedCodex.validationEnvironment,
           options,
         );
-        if (assertSourceUpdateInstallation(checkout, environment, options) !== plan.npmPrefix) {
+        if (await inspectSourceInstallation(checkout, environment, options) !== plan.npmPrefix) {
           throw new Error("npm 全局目录在候选构建期间发生变化，拒绝更新；请重新运行 codexc update");
         }
         recordManagedSourceMetadata(stagedCheckout, [...readManagedNpmPrefixes(checkout, environment), plan.npmPrefix], environment);
@@ -295,7 +303,7 @@ export async function updateManagedSourceInstallation(
         options,
       ),
     );
-    writeMessageSafely(writeMessage, "note", "候选源码已通过校验，准备切换。");
+    if (!options.runStage) writeMessageSafely(writeMessage, "note", "候选源码已通过校验，准备切换。");
     const proposedBackupPath = `${checkout}.pre-update-${Date.now()}`;
     await runStage("switch-source", () => {
       renamePath(checkout, proposedBackupPath);
@@ -358,7 +366,8 @@ export async function updateManagedSourceInstallation(
         if (switched && !completedStages.includes("refresh-command")) {
           throw new Error("全局程序安装未完成，保留服务停止状态；请从保留的源码完成 npm run install:global 后按原状态启动服务", { cause: error });
         }
-        await (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate);
+        await runUpdateStage(options, "restore-services", () =>
+          (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate), true);
         servicesRestored = true;
       } catch (startError) {
         const combinedError = new AggregateError(
@@ -479,8 +488,8 @@ async function installManagedSourceCommand(
   );
 }
 
-function installGlobalPackage(checkout, environment, options) {
-  runQuiet(
+async function installGlobalPackage(checkout, environment, options) {
+  await runQuiet(
     process.execPath,
     [join(checkout, "scripts", "install-global-source.mjs"), "--prepared"],
     checkout,
@@ -489,8 +498,7 @@ function installGlobalPackage(checkout, environment, options) {
   );
 }
 
-function assertSourceUpdateInstallation(checkout, environment, options) {
-  const prefix = currentNpmGlobalPrefix(environment);
+function assertSourceUpdateInstallation(checkout, environment, options, prefix = currentNpmGlobalPrefix(environment)) {
   const canonicalPrefix = existsSync(prefix) ? realpathSync(prefix) : resolve(prefix);
   const activePrefix = inferNpmGlobalPrefix(packageDir);
   if (activePrefix && !sameInstallationPath(activePrefix, canonicalPrefix)) {
@@ -552,22 +560,12 @@ function systemdArgument(value) {
   return `"${value.replaceAll("\\", "\\\\").replaceAll("\n", "\\n").replaceAll("\r", "\\r").replaceAll("\t", "\\t").replaceAll('"', '\\"').replaceAll("%", "%%")}"`;
 }
 
-function assertFastForward(checkout, currentCommit, targetCommit, environment) {
-  const object = spawnSync(
-    "git",
-    ["cat-file", "-e", `${currentCommit}^{commit}`],
-    { cwd: checkout, env: environment, encoding: "utf8" },
-  );
-  if (object.error) throw object.error;
+async function assertFastForward(checkout, currentCommit, targetCommit, environment) {
+  const object = await executeUpdateCommand("git", ["cat-file", "-e", `${currentCommit}^{commit}`], checkout, environment);
   if (object.status !== 0) {
     throw new Error("当前源码包含官方 main 之外的提交，拒绝自动覆盖");
   }
-  const result = spawnSync(
-    "git",
-    ["merge-base", "--is-ancestor", currentCommit, targetCommit],
-    { cwd: checkout, env: environment, encoding: "utf8" },
-  );
-  if (result.error) throw result.error;
+  const result = await executeUpdateCommand("git", ["merge-base", "--is-ancestor", currentCommit, targetCommit], checkout, environment);
   if (result.status === 0) return;
   if (result.status === 1) {
     throw new Error("当前源码包含官方 main 之外的提交，拒绝自动覆盖");
@@ -618,7 +616,7 @@ function assertManagedRepository(checkout, repository, environment, captureComma
 }
 
 async function prepareCodexVersion(expected, checkout, environment, writeMessage, options) {
-  const actual = installedCodexVersion(environment, options.captureCommand, expected);
+  const actual = await installedCodexVersionAsync(environment, options.captureCommand, expected);
   if (actual === expected) {
     return { installRequired: false, validationEnvironment: environment };
   }
@@ -639,19 +637,16 @@ async function prepareCodexVersion(expected, checkout, environment, writeMessage
   );
   let binary;
   try {
-    binary = await (
-      options.installCodexCliForValidation ?? installCodexCliForValidation
-    )(
-      expected,
-      checkout,
-      environment,
-      options,
-    );
+    binary = await runUpdateStage(options, "prepare-codex-cli", () =>
+      (options.installCodexCliForValidation ?? installCodexCliForValidation)(
+        expected, checkout, environment, options,
+      ));
   } catch (error) {
+    if (error?.name === "AbortError") throw error;
     throw codexValidationInstallFailureError(expected, error);
   }
   const validationEnvironment = { ...environment, CODEX_BINARY: binary };
-  const installed = installedCodexVersion(
+  const installed = await installedCodexVersionAsync(
     validationEnvironment,
     options.captureCommand,
     expected,
@@ -686,7 +681,7 @@ async function installPreparedCodexVersion(
   } catch (error) {
     throw codexInstallFailureError(expected, error);
   }
-  const installed = installedCodexVersion(environment, options.captureCommand, expected);
+  const installed = await installedCodexVersionAsync(environment, options.captureCommand, expected);
   if (installed !== expected) {
     throw codexVersionMismatchError(expected, installed);
   }
@@ -702,8 +697,27 @@ export function assertCodexVersion(expected, environment, captureCommand) {
   if (actual !== expected) throw codexVersionMismatchError(expected, actual);
 }
 
-export function validateCodexContract(checkout, environment, options) {
-  capture(
+async function installedCodexVersionAsync(environment, captureCommand, expected) {
+  if (captureCommand) return installedCodexVersion(environment, captureCommand, expected);
+  const executable = environment.CODEX_BINARY?.trim() || "codex";
+  if (!resolveOptionalExecutable(executable, environment)) {
+    return installedCodexVersion(environment, undefined, expected);
+  }
+  try {
+    const output = await captureAsync(executable, ["--version"], process.cwd(), environment);
+    return installedCodexVersion(environment, () => output, expected);
+  } catch (cause) {
+    return installedCodexVersion(environment, () => { throw cause; }, expected);
+  }
+}
+
+async function assertCodexVersionAsync(expected, environment, captureCommand) {
+  const actual = await installedCodexVersionAsync(environment, captureCommand, expected);
+  if (actual !== expected) throw codexVersionMismatchError(expected, actual);
+}
+
+export async function validateCodexContract(checkout, environment, options) {
+  await captureAsync(
     process.execPath,
     [
       join(checkout, "scripts", "codex-public-cli-contract.mjs"),
@@ -768,11 +782,11 @@ function codexValidationInstallFailureError(expected, cause) {
   );
 }
 
-function installCodexCliForValidation(
+async function installCodexCliForValidation(
   version, checkout, environment, options,
   prefix = join(resolve(checkout, ".."), "codex-cli-contract"),
 ) {
-  run(
+  await runQuiet(
     process.platform === "win32" ? "npm.cmd" : "npm",
     [
       "install",
@@ -801,8 +815,8 @@ function installCodexCliForValidation(
   return binary;
 }
 
-function installCodexCli(version, checkout, environment, options) {
-  run(
+async function installCodexCli(version, checkout, environment, options) {
+  await runQuiet(
     process.platform === "win32" ? "npm.cmd" : "npm",
     ["install", "-g", "--include=optional", `@openai/codex@${version}`],
     checkout,
@@ -812,7 +826,7 @@ function installCodexCli(version, checkout, environment, options) {
 }
 
 export async function buildCheckout(checkout, environment, options) {
-  const ignoreScripts = capture("npm", ["config", "get", "ignore-scripts"], checkout, environment, options.captureCommand).trim();
+  const ignoreScripts = (await captureAsync("npm", ["config", "get", "ignore-scripts"], checkout, environment, options.captureCommand)).trim();
   if (ignoreScripts !== "true" && ignoreScripts !== "false") {
     throw new Error("无法确认 npm ignore-scripts 设置，拒绝构建候选源码");
   }
@@ -824,7 +838,7 @@ export async function buildCheckout(checkout, environment, options) {
     [join(checkout, "webui"), ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]],
     [join(checkout, "webui"), ["run", "build"]],
   ]) {
-    runQuiet("npm", args, cwd, environment, options.runCommand);
+    await runQuiet("npm", args, cwd, environment, options.runCommand);
   }
   if (
     !existsSync(join(checkout, "dist", "main.js"))
@@ -834,20 +848,12 @@ export async function buildCheckout(checkout, environment, options) {
   }
 }
 
-function runQuiet(command, args, cwd, environment, implementation) {
+async function runQuiet(command, args, cwd, environment, implementation) {
   if (implementation) {
-    implementation(command, args, { cwd, environment, quiet: true });
+    await implementation(command, args, { cwd, environment, quiet: true });
     return;
   }
-  const invocation = resolveExecutableInvocation(command, args, environment);
-  const result = spawnSync(invocation.file, invocation.args, {
-    cwd,
-    env: environment,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-  });
-  if (result.error) throw result.error;
+  const result = await executeUpdateCommand(command, args, cwd, environment);
   if (result.status === 0) return;
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
@@ -868,8 +874,8 @@ async function inspectStagedInstallation(checkout, environment) {
   return { config, services };
 }
 
-function disableCandidateDaemonAutoStart(checkout, environment, options) {
-  run(process.execPath, [
+async function disableCandidateDaemonAutoStart(checkout, environment, options) {
+  await runQuiet(process.execPath, [
     "--input-type=module",
     "--eval",
     "const candidate = await import(process.argv[1]); await candidate.disableCodexDaemonAutoStart(process.env);",
@@ -882,12 +888,12 @@ function disableCandidateDaemonAutoStart(checkout, environment, options) {
 async function stopCoreServices(checkout, environment, options, services) {
   for (const target of ["webui", "model-relay", "gateway", "app-server"]) {
     if (!services.find(service => service.target === target)?.running) continue;
-    runCheckoutService(checkout, "stop", target, environment, options);
+    await runCheckoutService(checkout, "stop", target, environment, options);
   }
 }
 
-function inspectUpdateServices(environment) {
-  const services = inspectManagedServiceStatus({ environment, target: "all" }).services;
+async function inspectUpdateServices(environment) {
+  const services = (await inspectManagedServiceStatusAsync({ environment, target: "all" })).services;
   for (const service of services) {
     if (!service.running && !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state)) {
       throw new Error(`无法确认更新前 ${service.target} 运行状态；未停止服务`);
@@ -898,7 +904,7 @@ function inspectUpdateServices(environment) {
 
 async function startCoreServices(checkout, environment, options, services) {
   // A failed CLI/package switch must not restart services against an unverified installation.
-  assertCodexVersion(codexVersion(checkout), environment, options.captureCommand);
+  await assertCodexVersionAsync(codexVersion(checkout), environment, options.captureCommand);
   await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
   const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
   // 恢复范围沿用同一份启动选择：关闭的 WebUI 与未启用的 Relay 不再被重新拉起。
@@ -908,13 +914,13 @@ async function startCoreServices(checkout, environment, options, services) {
   const targets = ["app-server", "gateway", "model-relay", "webui"].filter(target =>
     services.find(service => service.target === target)?.running
     && restartable.has(target));
-  for (const target of targets) runCheckoutService(checkout, "start", target, environment, options);
+  for (const target of targets) await runCheckoutService(checkout, "start", target, environment, options);
 }
 
-function runCheckoutService(checkout, action, target, environment, options) {
+async function runCheckoutService(checkout, action, target, environment, options) {
   // Load both the command and its target mapping from the active checkout in a fresh process.
   // The updater itself can still be running code loaded before the source switch.
-  run(process.execPath, [
+  await runQuiet(process.execPath, [
     "--input-type=module", "--eval",
     "const { runServiceCommand } = await import(process.argv[1]); "
       + "const { serviceCommandTarget } = await import(process.argv[2]); "
@@ -996,22 +1002,79 @@ function capture(command, args, cwd, environment, implementation, options = {}) 
   return result.stdout;
 }
 
-function run(command, args, cwd, environment, implementation) {
-  if (implementation) {
-    implementation(command, args, { cwd, environment });
-    return;
-  }
-  const invocation = resolveExecutableInvocation(command, args, environment);
-  const result = spawnSync(invocation.file, invocation.args, {
-    cwd,
-    env: environment,
-    stdio: "inherit",
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-  });
-  if (result.error) throw result.error;
+async function captureAsync(command, args, cwd, environment, implementation) {
+  if (implementation) return implementation(command, args, { cwd, environment });
+  const result = await executeUpdateCommand(command, args, cwd, environment);
+  if (result.truncated) throw new Error(`${command} 输出超过限制，拒绝解析不完整结果`);
   if (result.status !== 0) {
-    throw new Error(`${command} 执行失败：exit=${result.status ?? 1}`);
+    throw new Error(`${command} 执行失败：${result.stderr || result.stdout || `exit=${result.status ?? 1}`}`);
   }
+  return result.stdout;
+}
+
+function executeUpdateCommand(command, args, cwd, environment) {
+  const invocation = resolveExecutableInvocation(command, args, environment);
+  return new Promise((resolveResult, reject) => {
+    // Terminal cancellation belongs to the updater. Let the owned command settle
+    // before deciding whether the transaction must recover or stop at a boundary.
+    const child = spawn(invocation.file, invocation.args, {
+      cwd,
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+      windowsHide: true,
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    });
+    const limit = 1024 * 1024;
+    let stdout = "";
+    let stderr = "";
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", chunk => {
+      stdoutBytes += Buffer.byteLength(chunk);
+      stdoutTruncated ||= stdoutBytes > limit;
+      stdout = (stdout + chunk).slice(-limit);
+    });
+    child.stderr.on("data", chunk => {
+      stderrBytes += Buffer.byteLength(chunk);
+      stderrTruncated ||= stderrBytes > limit;
+      stderr = (stderr + chunk).slice(-limit);
+    });
+    child.once("error", reject);
+    child.once("close", (status, signal) => resolveResult({
+      status, signal,
+      stdout: `${stdoutTruncated ? "[日志超长，仅保留末尾内容]\n" : ""}${stdout}`,
+      stderr: `${stderrTruncated ? "[日志超长，仅保留末尾内容]\n" : ""}${stderr}`,
+      truncated: stdoutTruncated || stderrTruncated,
+    }));
+  });
+}
+
+async function inspectSourceUpdatePlan(environment, options) {
+  if (options.captureCommand) return inspectManagedSourceUpdatePlan(environment, options);
+  const output = await captureAsync(process.execPath, [
+    "--input-type=module", "--eval",
+    "try { const source = await import(process.argv[1]); "
+      + "process.stdout.write(JSON.stringify(source.inspectManagedSourceUpdatePlan(process.env, JSON.parse(process.argv[2])))); "
+      + "} catch (error) { process.stderr.write(error.message); process.exitCode = 1; }",
+    import.meta.url,
+    JSON.stringify({ projectDir: options.projectDir, repository: options.repository }),
+  ], options.projectDir ?? packageDir, environment);
+  return JSON.parse(output);
+}
+
+async function inspectSourceInstallation(checkout, environment, options) {
+  const prefix = (await captureAsync("npm", ["prefix", "--global"], checkout, environment)).trim();
+  if (!isAbsolute(prefix) || dirname(prefix) === prefix) throw new Error("无法解析 npm 全局目录");
+  return assertSourceUpdateInstallation(checkout, environment, options, prefix);
+}
+
+function runUpdateStage(options, stage, operation, recovery = false) {
+  return options.runStage ? options.runStage(stage, operation, { recovery }) : operation();
 }
 
 function errorMessage(error) {
@@ -1023,8 +1086,9 @@ export async function updateInstalledPackage(environment = process.env, options 
   const checkout = options.projectDir ?? packageDir;
   const expected = codexVersion(checkout);
   const writeMessage = options.writeMessage ?? writeCliMessage;
-  writeMessageSafely(writeMessage, "note", "正在检查配套 Codex CLI、当前配置和数据库结构。");
-  const inspection = await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
+  if (!options.runStage) writeMessageSafely(writeMessage, "note", "正在检查配套 Codex CLI、当前配置和数据库结构。");
+  const inspection = await runUpdateStage(options, "inspect-candidate", () =>
+    (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment));
   let temporaryDirectory;
   let servicesStopped = false;
   let servicesBeforeUpdate = [];
@@ -1039,18 +1103,21 @@ export async function updateInstalledPackage(environment = process.env, options 
           );
         }),
     });
-    await (options.validateCodexContract ?? validateCodexContract)(
-      checkout, prepared.validationEnvironment, options,
-    );
+    await runUpdateStage(options, "validate-codex-contract", () =>
+      (options.validateCodexContract ?? validateCodexContract)(checkout, prepared.validationEnvironment, options));
     if (prepared.installRequired && inspection.services.installed) {
       servicesBeforeUpdate = await (options.inspectServices ?? inspectUpdateServices)(environment);
       servicesStopped = true;
-      await (options.stopServices ?? stopCoreServices)(checkout, environment, options, servicesBeforeUpdate);
+      await runUpdateStage(options, "stop-services", () =>
+        (options.stopServices ?? stopCoreServices)(checkout, environment, options, servicesBeforeUpdate));
     }
-    await installPreparedCodexVersion(prepared, expected, checkout, environment, writeMessage, options);
-    disableCandidateDaemonAutoStart(checkout, environment, options);
+    await runUpdateStage(options, "install-codex-cli", () =>
+      installPreparedCodexVersion(prepared, expected, checkout, environment, writeMessage, options));
+    await runUpdateStage(options, "configure-codex-daemon", () =>
+      disableCandidateDaemonAutoStart(checkout, environment, options));
     if (servicesStopped) {
-      await (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate);
+      await runUpdateStage(options, "restore-services", () =>
+        (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate));
       servicesStopped = false;
     }
     writeMessageSafely(
@@ -1063,7 +1130,8 @@ export async function updateInstalledPackage(environment = process.env, options 
   } catch (error) {
     if (servicesStopped) {
       try {
-        await (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate);
+        await runUpdateStage(options, "restore-services", () =>
+          (options.startServices ?? startCoreServices)(checkout, environment, options, servicesBeforeUpdate), true);
       } catch (restoreError) {
         throw new AggregateError([error, restoreError], "配套 CLI 更新失败，且核心服务恢复失败", { cause: restoreError });
       }
@@ -1080,25 +1148,113 @@ async function main() {
     ? createPrompter(process.stdin, process.stdout)
     : undefined;
   let result;
+  const controller = new AbortController();
+  const cancel = signal => controller.abort(Object.assign(new Error("程序更新已取消"), {
+    name: "AbortError", exitCode: signal === "SIGINT" ? 130 : 143,
+  }));
+  const interrupt = () => cancel("SIGINT");
+  const terminate = () => cancel("SIGTERM");
+  // Keep handling cancellation while recovery is running between progress stages.
+  process.on("SIGINT", interrupt);
+  process.on("SIGTERM", terminate);
+  let activeProgress;
+  let currentSection;
+  let switching = false;
+  const completedCliStages = new Set();
+  const finishCancellation = () => {
+    if (!controller.signal.aborted) return;
+    const work = result?.changed ? "源码与全局命令已更新" : "配套 CLI 与安装状态检查已完成";
+    const services = completedCliStages.has("restore-services")
+      ? "服务已按更新前运行状态恢复"
+      : "本次未停止后台服务";
+    throw Object.assign(new Error(`已收到取消请求；${work}，${services}，更新已安全收尾。`), {
+      name: "AbortError", exitCode: controller.signal.reason.exitCode,
+    });
+  };
+  const stages = {
+    inspect: ["检查", "检查受管源码与更新目标"],
+    "clone-candidate": ["准备更新", "克隆 main 候选源码"],
+    "validate-candidate": ["准备更新", "校验候选源码版本与提交关系"],
+    "build-candidate": ["准备更新", "构建并检查候选源码"],
+    "inspect-candidate": ["检查", "检查当前配置、数据库与服务安装状态"],
+    "prepare-codex-cli": ["准备更新", "准备配套 Codex CLI 候选环境"],
+    "validate-codex-contract": ["准备更新", "校验 Codex CLI 公开合同"],
+    "stop-services": ["切换安装", "按原运行状态停止后台服务"],
+    "install-codex-cli": ["切换安装", "同步配套 Codex CLI"],
+    "switch-source": ["切换安装", "切换候选源码"],
+    "refresh-command": ["切换安装", "刷新 npm 全局命令"],
+    "configure-codex-daemon": ["切换安装", "配置 Codex daemon 自动启动偏好"],
+    "restore-services": ["恢复服务", "按原运行状态恢复后台服务"],
+    cleanup: ["完成", "清理本次更新临时文件"],
+  };
   try {
     const options = {
+      runStage: async (stage, operation, { recovery }) => {
+        if (!recovery && !switching) controller.signal.throwIfAborted();
+        if (["stop-services", "install-codex-cli", "switch-source"].includes(stage)) switching = true;
+        const [category, label] = stages[stage];
+        const section = stage === "inspect-candidate" && currentSection === "准备更新" ? currentSection : category;
+        if (section !== currentSection) {
+          writeCliSection(recovery ? "失败收尾 · 恢复服务" : section);
+          currentSection = section;
+        }
+        let settled = false;
+        let value;
+        try {
+          return await withCliProgress(label, async progress => {
+            activeProgress = progress;
+            value = await operation();
+            settled = true;
+            completedCliStages.add(stage);
+            if (!recovery && !switching) controller.signal.throwIfAborted();
+            return value;
+          });
+        } catch (error) {
+          if ((recovery || switching) && settled && controller.signal.aborted) return value;
+          throw error;
+        } finally {
+          activeProgress = undefined;
+        }
+      },
+      writeMessage: (kind, message) => {
+        if (activeProgress && kind === "note") activeProgress.message(message);
+        else if (activeProgress) activeProgress.log(formatCliMessage(kind, message), {
+          stream: kind === "failure" ? "stderr" : "stdout",
+        });
+        else writeCliMessage(kind, message);
+      },
+      runCommand: async (command, args, { cwd, environment }) => {
+        const child = await executeUpdateCommand(command, args, cwd, environment);
+        if (child.status === 0) return;
+        const log = (text, stream) => activeProgress
+          ? activeProgress.log(text, { stream })
+          : process[stream].write(text);
+        if (child.stdout) log(child.stdout, "stdout");
+        if (child.stderr) log(child.stderr, "stderr");
+        throw new Error(`${command} 执行失败：${child.signal ? `signal=${child.signal}` : `exit=${child.status ?? 1}`}`);
+      },
       ...(prompter
         ? {
             confirmCodexCliInstall: ({ currentVersion, requiredVersion }) =>
               prompter.confirm(
                 `Codex CLI 版本不匹配（需要 ${requiredVersion}，当前 ${currentVersion ?? "未知"}），是否现在安装？`,
                 true,
+                { signal: controller.signal },
               ),
           }
         : {}),
     };
     if (!checkout) {
       await updateInstalledPackage(process.env, options);
+      finishCancellation();
       return;
     }
     result = await updateManagedSourceInstallation(process.env, { ...options, projectDir: checkout });
+    finishCancellation();
   } finally {
     prompter?.close();
+    process.off("SIGINT", interrupt);
+    process.off("SIGTERM", terminate);
   }
   if (!result.changed) {
     writeCliMessage(
@@ -1122,6 +1278,6 @@ if (
     await withPrivateFileLock(join(userDataDir(process.env), ".source-update"), main, { label: "程序更新" });
   } catch (error) {
     writeSourceUpdateFailure(error);
-    process.exitCode = 1;
+    process.exitCode = error?.exitCode ?? 1;
   }
 }

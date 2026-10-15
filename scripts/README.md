@@ -6,7 +6,7 @@
 
 ## 配置与 Workspace
 
-- `cli-operation-progress.mjs`：安装和服务操作共用的阶段展示；终端按需加载 Clack spinner，重定向、CI、dumb 终端及依赖尚未可用时使用纯文本。阶段完成必须等待调用方实际操作结束，取消信号交由调用方收尾后退出。
+- `cli-operation-progress.mjs`：安装、卸载、更新和服务操作共用的分组标题与阶段展示；终端按需加载 Clack spinner，重定向、CI、dumb 终端及依赖尚未可用时使用纯文本。阶段完成必须等待调用方实际操作结束，取消信号交由调用方收尾后退出。
 - `installation-command.mjs`：安装入口共用的异步命令执行器；避免同步子进程冻结进度，交互模式保留有界诊断尾部并在失败时展示，非交互模式实时输出日志，取消时终止自己启动的进程树。供源码安装器和本地安装复用，不管理后台服务。
 
 - `video-analysis-mcp.mjs`：独立 stdio 视频分析 MCP 入口，由 MCP 客户端启动；拥有初始化、单请求准入、取消、总超时和标准流退出，不连接 App Server 或 Gateway。配置见[视频分析 MCP](../docs/video-analysis-mcp.md)。
@@ -570,6 +570,7 @@
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
   控制脚本实现 linger、Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 使用当前用户计划任务及受管宿主，并校验私有定义与就绪状态。
+  控制器异步执行并提供输出回调；取消在阶段边界生效，当前操作完成后执行既有恢复，恢复不继承取消信号。
   Windows 定义包含解析后的 App Server Socket，缺失时拒绝跳过就绪检查；预检通过私有文件边界读取旧 JSON/VBS 快照，安装激活先停止核心服务与 Relay 再启动，保留 WebUI 运行状态。首次或旧定义不完整的安装在激活失败后保留新定义供诊断，完整旧定义恢复失败时保留原始阶段与两层错误。
 - `service-command.mjs` / `service-command.d.mts`：公开 `appserver`、`relay` 目标映射到内部 `app-server`、`model-relay` 服务标识；实现顶层后台服务命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
   服务目标与日志参数（行数限定为 1 到 10000 的十进制整数）、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪

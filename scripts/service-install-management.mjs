@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 
 import { loadRuntimeConfig } from "../dist/config/index.js";
 import {
@@ -113,6 +114,7 @@ export function writeServiceDefinitions(
 }
 
 async function executePlan(plan, environment, options) {
+  options.signal?.throwIfAborted();
   assertFreshPlan(plan, environment, options);
   const completedStages = [];
   let definitionSnapshot;
@@ -121,7 +123,9 @@ async function executePlan(plan, environment, options) {
   const executeStage = async (stage, operation) => {
     emitProgress(options, plan, stage, "started", completedStages);
     try {
+      options.signal?.throwIfAborted();
       await operation();
+      options.signal?.throwIfAborted();
       completedStages.push(stage);
       emitProgress(options, plan, stage, "completed", completedStages);
     } catch (error) {
@@ -137,16 +141,21 @@ async function executePlan(plan, environment, options) {
     definitionSnapshot = captureDefinitionSnapshot(plan);
   });
   try {
-    writeStarted = true;
-    await executeStage("write-definitions", () => writeDefinitions(plan, options));
-    activationStarted = true;
-    await executeStage("activate-core", () =>
-      (options.activateCore ?? defaultActivateCore)(plan, environment, options));
+    await executeStage("write-definitions", () => {
+      writeStarted = true;
+      writeDefinitions(plan, options);
+    });
+    await executeStage("activate-core", () => {
+      activationStarted = true;
+      return (options.activateCore ?? defaultActivateCore)(plan, environment, options);
+    });
     await executeStage("verify-core", () =>
       (options.waitForCore ?? defaultWaitForCore)(
         "all",
         environment,
-        options.readinessOptions,
+        options.signal
+          ? { ...options.readinessOptions, signal: options.signal }
+          : options.readinessOptions,
       ));
   } catch (error) {
     if (writeStarted) {
@@ -167,7 +176,18 @@ async function executePlan(plan, environment, options) {
         restoreDefinitionSnapshot(definitionSnapshot, options);
         if (activationStarted) {
           rollbackStage = "旧服务重新激活";
-          await (options.rollbackCore ?? defaultActivateCore)(plan, environment, options);
+          const recoveryOptions = {
+            ...options,
+            signal: undefined,
+            readinessOptions: options.readinessOptions
+              ? { ...options.readinessOptions, signal: undefined }
+              : options.readinessOptions,
+          };
+          if (options.rollbackCore) {
+            await options.rollbackCore(plan, environment, recoveryOptions);
+          } else {
+            await defaultActivateCore(plan, environment, recoveryOptions, true);
+          }
         }
       } catch (restoreError) {
         throw new ServiceInstallManagementError(
@@ -380,39 +400,74 @@ function writeDefinitions(plan, options) {
   }
 }
 
-function defaultPreflight(plan, environment, options) {
+async function defaultPreflight(plan, environment, options) {
   if (plan.serviceManager === "launchd") {
-    runController(plan, "check-install", environment, options);
+    await runController(plan, "check-install", environment, options);
   }
   if (plan.serviceManager === "windows") {
-    runController(plan, "preflight", environment, options);
+    await runController(plan, "preflight", environment, options);
   }
 }
 
-function defaultActivateCore(plan, environment, options) {
-  runController(plan, "install", environment, options);
+function defaultActivateCore(plan, environment, options, isolateSignals) {
+  return runController(plan, "install", environment, options, isolateSignals);
 }
 
 async function defaultWaitForCore(target, environment, options) {
   const { waitForCoreServiceTarget } = await import("./local-installation.mjs");
   await waitForCoreServiceTarget(target, environment, options);
-  await waitForSelectedRelay(target, environment);
+  await waitForSelectedRelay(target, environment, options);
 }
 
-function runController(plan, action, environment, options) {
+async function runController(plan, action, environment, options, isolateSignals = options.signal !== undefined) {
   const args = plan.serviceManager === "windows"
     ? [plan.controlScript, action, "--definitions", plan.destinationDirectory]
     : [plan.controlScript, action];
-  const result = (options.spawnCommand ?? spawnSync)(
-    plan.shell,
-    args,
-    {
-      cwd: plan.context.runtime.dataDir,
-      env: environment,
-      stdio: options.controllerStdio ?? "inherit",
-    },
-  );
+  const controllerOptions = {
+    cwd: plan.context.runtime.dataDir,
+    env: environment,
+    stdio: options.controllerStdio ?? (options.onOutput ? ["inherit", "pipe", "pipe"] : "inherit"),
+  };
+  if (options.spawnCommand) {
+    const result = options.spawnCommand(plan.shell, args, controllerOptions);
+    for (const stream of ["stdout", "stderr"]) {
+      if (result[stream]) {
+        for (const line of String(result[stream]).split(/\r?\n/u)) {
+          if (line) emitControllerOutput(options, line, stream);
+        }
+      }
+    }
+    assertSynchronousChildSuccess(result, { failureReportedByChild: true });
+    return;
+  }
+  const child = spawn(plan.shell, args, {
+    ...controllerOptions,
+    // Finish the current service-manager operation before cancellation recovery.
+    detached: isolateSignals,
+    windowsHide: true,
+  });
+  const readers = [];
+  for (const stream of ["stdout", "stderr"]) {
+    if (!child[stream]) continue;
+    const reader = createInterface({ input: child[stream] });
+    reader.on("line", line => emitControllerOutput(options, line, stream));
+    readers.push(reader);
+  }
+  let childError;
+  const result = await new Promise(resolveResult => {
+    child.once("error", error => { childError = error; });
+    child.once("close", (status, signal) => resolveResult({ status, signal, error: childError }));
+  });
+  for (const reader of readers) reader.close();
   assertSynchronousChildSuccess(result, { failureReportedByChild: true });
+}
+
+function emitControllerOutput(options, text, stream) {
+  try {
+    options.onOutput?.(text, { stream });
+  } catch {
+    // Output observers must not interrupt a service-manager operation or recovery.
+  }
 }
 
 function renderWindowsDefinition(service, identifier, context, projectDir) {

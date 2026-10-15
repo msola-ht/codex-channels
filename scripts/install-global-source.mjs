@@ -7,6 +7,7 @@ import { resolveExecutableInvocation, resolveOptionalExecutable } from "../runti
 import { packageDir } from "./package-path.mjs";
 import { currentNpmGlobalPrefix, recordInstalledSourceMetadata } from "./source-install-metadata.mjs";
 import { runInstallationCommand } from "./installation-command.mjs";
+import { writeCliSection } from "./cli-operation-progress.mjs";
 
 const sourceConfig = join(packageDir, "tsconfig.build.json");
 const webuiDir = join(packageDir, "webui");
@@ -20,6 +21,7 @@ if (args.some((arg) => arg !== "--prepared")) {
 }
 async function install() {
   const alreadyPrepared = args.includes("--prepared");
+  writeCliSection(alreadyPrepared ? "检查安装产物" : "构建准备");
   console.log(alreadyPrepared
     ? "[安装] 使用已有 Gateway/WebUI 构建产物安装全局 codexc 命令。"
     : "[构建] 准备 Gateway/WebUI 构建产物，随后安装全局 codexc 命令。");
@@ -33,6 +35,7 @@ async function install() {
   const prefix = currentNpmGlobalPrefix();
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-install-"));
   try {
+    writeCliSection("安装程序");
     const tarballPath = await packSource(temporaryDirectory);
     console.log(`[安装] npm 全局目录：${prefix}`);
     await run("npm", [
@@ -47,6 +50,7 @@ async function install() {
       tarballPath,
     ], packageDir, "安装全局 codexc 命令");
     recordInstalledSourceMetadata(packageDir, prefix);
+    writeCliSection("安装结果与下一步");
     console.log(`[完成] 当前源码构建结果已安装为全局 codexc 命令：${prefix}`);
     console.log("[提示] 本步骤只安装程序；后台服务的安装与启动由初始化向导或外层更新流程处理。");
     try {
