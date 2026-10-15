@@ -1,5 +1,7 @@
 import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
 import type { Translate } from "./i18n/messages"
+import { translate } from "./i18n/translate"
+import { failureLabelKeys, recordedRequestFailure, requestFailureReason } from "./request-failure"
 import { modelDisplayName } from "../../../runtime/model-display-name.mjs"
 
 let modelDisplayAliases: Readonly<Record<string, string>> = {}
@@ -126,23 +128,15 @@ export function formatTimestamp(value: number, timeZone = getServerTimeZone()): 
 
 const errorTypeNames: Record<string, { zh: string; en: string }> = {
   usage_limit_reached: { zh: "用量上限", en: "Usage limit" },
-  rate_limit_reached: { zh: "速率限制", en: "Rate limit" },
   service_unavailable_error: { zh: "服务暂不可用", en: "Service unavailable" },
-  invalid_request_error: { zh: "无效请求", en: "Invalid request" },
   unknown_error: { zh: "未知错误", en: "Unknown error" },
   new_api_error: { zh: "上游 API 错误", en: "Upstream API error" },
   upstream_handshake_error: { zh: "上游握手失败", en: "Upstream handshake failed" },
   upstream_error: { zh: "上游错误", en: "Upstream error" },
   upstream_request_error: { zh: "上游请求失败", en: "Upstream request failed" },
   upstream_response_error: { zh: "上游响应失败", en: "Upstream response failed" },
-  upload_timeout: { zh: "请求上传超时", en: "Request upload timed out" },
-  preparation_timeout: { zh: "请求准备超时", en: "Request preparation timed out" },
-  upstream_timeout: { zh: "上游等待超时", en: "Upstream timed out" },
-  delivery_timeout: { zh: "响应交付超时", en: "Response delivery timed out" },
-  client_delivery_error: { zh: "响应交付失败", en: "Response delivery failed" },
   upstream_delivery_error: { zh: "上游请求交付失败", en: "Upstream request delivery failed" },
   client_request_error: { zh: "客户端请求失败", en: "Client request failed" },
-  client_disconnected: { zh: "客户端断开", en: "Client disconnected" },
   websocket_closed: { zh: "WebSocket 关闭", en: "WebSocket closed" },
   http_error: { zh: "HTTP 请求失败", en: "HTTP request failed" },
   response_not_observed: { zh: "响应未完整观测", en: "Response not fully observed" },
@@ -156,8 +150,17 @@ export function formatErrorType(
   language: DisplayLanguage,
 ): string {
   if (value === null) return "—"
-  const label = errorTypeNames[value]
-  return label ? label[language] : value
+  const label = Object.hasOwn(errorTypeNames, value) ? errorTypeNames[value] : undefined
+  const reason = requestFailureReason([value])
+  return reason ? translate(language, `requests.relayReasons.${failureLabelKeys[reason]}`) : label ? label[language] : translate(language, "requests.relayReasons.requestFailed")
+}
+
+export function formatRequestError(record: RequestRecord, language: DisplayLanguage): string {
+  const reason = recordedRequestFailure(record)
+  return reason ? translate(language, `requests.relayReasons.${failureLabelKeys[reason]}`)
+    : record.errorType || record.errorCode ? formatErrorType(record.errorType ?? record.errorCode, language)
+    : record.status === "failed" || record.status === "incomplete" || record.errorMessage
+      ? translate(language, "requests.relayReasons.requestFailed") : "—"
 }
 
 const errorMessageTranslations: ReadonlyArray<{
@@ -226,8 +229,8 @@ export function formatRequestOutcomes(outcomes: RequestOutcomeCounts | null, t: 
   })
 }
 
-export function isClientInterruption(record: Pick<RequestRecord, "status" | "errorType">): boolean {
-  return record.status !== "completed" && record.errorType === "client_disconnected"
+export function isClientInterruption(record: Pick<RequestRecord, "source" | "status" | "deliveryStatus" | "errorCode" | "errorType" | "httpStatus">): boolean {
+  return record.status !== "completed" && recordedRequestFailure(record) === "disconnected"
 }
 
 export function formatInterruptionSummary(summary: RequestInterruptionSummary, t: Translate): string {

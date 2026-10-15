@@ -1280,6 +1280,10 @@ const zh = {
     "failureRequestId": "上游请求 ID",
     "deliveryIncomplete": "生成已完成，交付未完成",
     "failureReasons": {
+      "invalidResponse": "上游响应的编码、媒体类型或正文结构不符合协议，无法继续处理。",
+      "disconnected": "客户端连接已断开，响应交付中断。",
+      "delivery": "响应交付失败，不能确认响应完整送达。",
+      "revoked": "请求因撤销或服务关闭被取消。",
       "deliveryDisconnected": "模型已完成生成，但客户端连接已断开，不能确认响应完整送达。",
       "deliveryFailed": "模型已完成生成，但响应交付失败，不能确认响应完整送达。",
       "rateLimit": "上游限流，请稍后重试或降低并发。",
@@ -2643,6 +2647,10 @@ const en: Messages = {
     "failureRequestId": "Upstream request ID",
     "deliveryIncomplete": "Generation completed; delivery incomplete",
     "failureReasons": {
+      "invalidResponse": "The upstream response encoding, media type, or body structure does not match the protocol and cannot be processed.",
+      "disconnected": "The client disconnected and response delivery was interrupted.",
+      "delivery": "Response delivery failed. Complete delivery is not confirmed.",
+      "revoked": "The request was cancelled by revocation or service shutdown.",
       "deliveryDisconnected": "The model completed generation, but the client disconnected. Complete delivery is not confirmed.",
       "deliveryFailed": "The model completed generation, but response delivery failed. Complete delivery is not confirmed.",
       "rateLimit": "The upstream service is rate limiting requests. Retry later or reduce concurrency.",

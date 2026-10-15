@@ -29,7 +29,7 @@ import {
   formatErrorMessage,
   isClientInterruption,
   formatElapsedDuration,
-  formatErrorType,
+  formatRequestError,
   formatRequestTime,
   requestMethodDisplay,
   formatTimestamp,
@@ -205,7 +205,7 @@ export function RequestsTable({
         if (isClientInterruption(record)) return <TableHint hint={t("metrics.clientInterruption")}>{badge}</TableHint>
         if (!record.errorMessage && !record.errorType && !record.errorCode) return badge
         const details = [
-          formatErrorType(record.errorType ?? record.errorCode ?? null, language),
+          formatRequestError(record, language),
           ...(record.errorMessage ? [formatErrorMessage(record.errorMessage, language)] : []),
           ...(record.errorCode ? [t("common.errorCode", { code: record.errorCode })] : []),
         ].join(" · ")
@@ -302,10 +302,7 @@ export function RequestsTable({
       ),
       cell: ({ row }) => {
         if (isClientInterruption(row.original)) return <TruncatedText text={t("metrics.clientInterruption")} className="max-w-40" />
-        const label = formatErrorType(
-          row.original.errorType ?? row.original.errorCode ?? null,
-          language,
-        )
+        const label = formatRequestError(row.original, language)
         const message = row.original.errorMessage
         if (!message) {
           return <TruncatedText text={label} className="max-w-40" />

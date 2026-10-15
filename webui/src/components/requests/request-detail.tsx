@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { RelayRequestStatus } from "@/components/requests/relay-request-status"
 import { useTranslation } from "@/hooks/use-translation"
 import { useModelTrafficDumpEnabled } from "@/hooks/use-model-traffic-settings"
-import { autoReviewModelAlias, formatElapsedDuration, formatErrorMessage, formatErrorType, formatTimestamp, getServerTimeZone, isClientInterruption } from "@/lib/format"
+import { autoReviewModelAlias, formatElapsedDuration, formatErrorMessage, formatRequestError, formatTimestamp, getServerTimeZone, isClientInterruption } from "@/lib/format"
 import { trafficDetailPath } from "@/lib/traffic-state"
 import type { RequestRecord } from "@/lib/types"
 
@@ -72,7 +72,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
     {autoReview ? <Badge variant="outline">{t("requestPurpose.autoApprovalReview")}</Badge> : null}
     {record.source === "relay" ? <RelayRequestStatus record={record} /> : interrupted ? <Badge variant="secondary">{t("metrics.interrupted")}</Badge> : <StatusBadge status={record.status} />}
     {record.errorType || record.errorCode || record.errorMessage ? <div className="flex flex-col gap-1 break-words" role="note">
-      <p>{interrupted ? t("metrics.clientInterruption") : formatErrorType(record.errorType ?? record.errorCode, language)}</p>
+      <p>{interrupted ? t("metrics.clientInterruption") : formatRequestError(record, language)}</p>
       {!interrupted && record.errorMessage ? <p>{formatErrorMessage(record.errorMessage, language)}</p> : null}
       {record.errorCode ? <p>{t("common.errorCode", { code: record.errorCode })}</p> : null}
     </div> : null}
