@@ -50,6 +50,7 @@ export class ConversationEventCoordinator {
     ) {
       // The display cache is derived data. Invalidate before any list command
       // can observe a stale count, including Turns started by the native TUI.
+      // The query service disables faulty cache I/O without interrupting Core.
       this.conversations.invalidateSessionDisplayCache(event.threadId);
     }
     if (event.type === "turn.started") {

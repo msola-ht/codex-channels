@@ -11,6 +11,7 @@ import type {
   ConversationCommandOutcome,
 } from "../application/index.js";
 import type { ConversationTarget } from "../conversation-core/index.js";
+import type { ThreadSnapshot } from "../session-routing/index.js";
 import {
   formatConversationCommandOutcome,
   formatConversationScheduledConfirmation,
@@ -21,6 +22,8 @@ import { scheduledTaskToolName } from "../application/index.js";
 
 export interface ScheduledTaskToolLookup {
   targetForThread(threadId: string): ConversationTarget | undefined;
+  foregroundThreadId(target: ConversationTarget): string | undefined;
+  readThread(threadId: string, signal: AbortSignal): Promise<ThreadSnapshot>;
   actorsForTarget(target: ConversationTarget): readonly string[];
   execute(
     target: ConversationTarget,
@@ -37,8 +40,9 @@ export interface ScheduledTaskToolLookup {
 /**
  * Official dynamic tool request handler for foreground Gateway sessions.
  *
- * Scheduled-task execution Threads are rejected by
- * createScheduledTaskServerRequestHandler before this handler is reached.
+ * The unattended wrapper rejects owned execution Threads first. This handler
+ * also checks official source, so resolved/retried Runs cannot turn their old
+ * automation Thread into an interactive dynamic-tool entry point.
  */
 export function createScheduledTaskToolRequestHandler(
   lookup: ScheduledTaskToolLookup,
@@ -64,8 +68,23 @@ export function createScheduledTaskToolRequestHandler(
     }
 
     const target = lookup.targetForThread(threadId);
-    if (!target) {
-      return toolFailure("当前 Thread 未绑定 Gateway 会话，计划任务工具已拒绝");
+    if (!target || lookup.foregroundThreadId(target) !== threadId) {
+      return toolFailure("当前 Thread 不属于 Gateway 前台会话，计划任务工具已拒绝");
+    }
+    try {
+      const signal = AbortSignal.timeout(5_000);
+      const thread = await lookup.readThread(threadId, signal);
+      signal.throwIfAborted();
+      const current = lookup.targetForThread(threadId);
+      if (
+        thread.id !== threadId || thread.source === "automation"
+        || current?.surface !== target.surface
+        || current.accountId !== target.accountId
+        || current.conversationId !== target.conversationId
+        || lookup.foregroundThreadId(target) !== threadId
+      ) return toolFailure("当前 Thread 的交互归属无效，计划任务工具已拒绝");
+    } catch {
+      return toolFailure("当前 Thread 的交互归属无法确认，计划任务工具已拒绝");
     }
     const actors = lookup.actorsForTarget(target);
     if (actors.length !== 1) {

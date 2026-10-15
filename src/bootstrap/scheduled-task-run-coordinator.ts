@@ -23,6 +23,7 @@ interface ExecutionReference {
 }
 
 interface PendingTerminal {
+  turnId: string;
   status: Exclude<TurnStatus, "inProgress">;
 }
 
@@ -79,14 +80,14 @@ export class ScheduledTaskRunCoordinator {
     this.pendingFailureByRun.clear();
     let afterRunId: string | undefined;
     while (!signal?.aborted) {
-      const runs = await this.store.listRunningRuns(afterRunId === undefined ? {} : { afterRunId });
+      const runs = await this.store.listRecoverableRuns(afterRunId === undefined ? {} : { afterRunId });
       if (signal?.aborted) return;
       for (const run of runs) {
         if (signal?.aborted) return;
         if (run.threadId === null || run.turnId === null) {
           await this.markUncertainIfRunning(run.runId, signal);
-          continue;
         }
+        if (run.threadId === null) continue;
         this.remember({
           runId: run.runId,
           taskId: run.taskId,
@@ -105,7 +106,7 @@ export class ScheduledTaskRunCoordinator {
     }
   }
 
-  /** Running scheduled Threads must remain bound while authoritative history is read. */
+  /** Unresolved scheduled Threads remain protected while authoritative history is read. */
   runningThreadIds(): ReadonlySet<string> {
     return new Set(this.runIdsByThread.keys());
   }
@@ -117,7 +118,7 @@ export class ScheduledTaskRunCoordinator {
       const reference = this.referencesByRun.get(runId);
       if (!reference) continue;
       const run = await this.store.getRun(runId);
-      if (run?.state === "dispatching" || run?.state === "running") {
+      if (run?.state === "dispatching" || run?.state === "running" || run?.state === "uncertain") {
         return this.store.getTask(reference.taskId);
       }
     }
@@ -166,7 +167,10 @@ export class ScheduledTaskRunCoordinator {
     }
     for (const runId of runIds) {
       try {
-        await this.store.markApprovalRejected(runId);
+        const run = await this.store.getRun(runId);
+        if (run?.state === "dispatching" || run?.state === "running") {
+          await this.store.markApprovalRejected(runId);
+        }
       } catch (error) {
         this.logger?.warn(
           { err: error, runId, threadId },
@@ -178,12 +182,11 @@ export class ScheduledTaskRunCoordinator {
   }
 
   /** Apply a completion that raced the scheduler's dispatching -> running write. */
-  async onRunStateChanged(run: ScheduledRun): Promise<void> {
+  async onRunStateChanged(run: ScheduledRun, signal?: AbortSignal): Promise<void> {
     if (
       run.state === "completed"
       || run.state === "failed"
       || run.state === "interrupted"
-      || run.state === "uncertain"
     ) {
       this.pendingTerminalByRun.delete(run.runId);
       this.pendingFailureByRun.delete(run.runId);
@@ -191,9 +194,44 @@ export class ScheduledTaskRunCoordinator {
       return;
     }
     const pending = this.pendingTerminalByRun.get(run.runId);
-    if (!pending) return;
-    this.pendingTerminalByRun.delete(run.runId);
-    await this.applyTerminal(run.runId, pending.status);
+    const reference = this.referencesByRun.get(run.runId);
+    if (!pending || !reference || reference.turnId === null) return;
+    if (reference.turnId === pending.turnId) {
+      await this.applyTerminal(run.runId, pending.status);
+      return;
+    }
+    // Only one early candidate is retained per Run. A native client can finish
+    // another Turn before turn/start responds; recover the scheduled Turn's
+    // exact result from bounded authoritative history instead of guessing.
+    if (signal?.aborted) return;
+    const timeout = AbortSignal.timeout(5_000);
+    const historySignal = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+    let turn: Awaited<ReturnType<ScheduledTaskRunCoordinator["findTurn"]>>;
+    try {
+      turn = await this.findTurn(reference.threadId, reference.turnId, historySignal);
+    } catch (error) {
+      if (signal?.aborted) return;
+      this.logger?.warn(
+        { err: error, runId: run.runId, threadId: reference.threadId, turnId: reference.turnId },
+        "计划任务启动期间的完成事件无法从权威 Turn 历史确认",
+      );
+    }
+    // Live completion may arrive during the history read or its failure. It is
+    // sufficient evidence on its own and must win over an uncertain fallback.
+    if (signal?.aborted) return;
+    const latest = await this.store.getRun(run.runId);
+    if (signal?.aborted) return;
+    const live = this.pendingTerminalByRun.get(run.runId);
+    if (live?.turnId === reference.turnId) {
+      await this.applyTerminal(run.runId, live.status, signal);
+    } else if (turn && turn.status !== "inProgress") {
+      await this.applyTerminal(run.runId, turn.status, signal);
+    } else if (!turn && latest?.state === "running") {
+      await this.store.markUncertain(run.runId);
+    }
+    if (this.pendingTerminalByRun.get(run.runId) === pending) {
+      this.pendingTerminalByRun.delete(run.runId);
+    }
   }
 
   async handleOutput(event: OutputEvent): Promise<void> {
@@ -205,7 +243,7 @@ export class ScheduledTaskRunCoordinator {
   observeOutput(event: OutputEvent): void {
     if (event.type !== "turn.completed" || event.status === "inProgress") return;
     const reference = this.referenceFor(event.threadId, event.turnId);
-    if (reference) this.pendingTerminalByRun.set(reference.runId, { status: event.status });
+    if (reference) this.rememberTerminal(reference, event.turnId, event.status);
   }
 
   async handleCompletion(
@@ -215,19 +253,26 @@ export class ScheduledTaskRunCoordinator {
   ): Promise<void> {
     const run = this.referenceFor(threadId, turnId);
     if (!run) return;
+    // An early completion may precede turn/start's response. Keep its exact ID
+    // until onTurnStarted confirms it; a Thread-only association proves nothing.
+    if (run.turnId === null) {
+      this.rememberTerminal(run, turnId, status);
+      return;
+    }
     const stored = await this.store.getRun(run.runId);
     if (!stored || stored.state === "completed" || stored.state === "failed" || stored.state === "interrupted") {
+      this.forget(run.runId);
       return;
     }
     if (stored.state === "dispatching") {
-      this.pendingTerminalByRun.set(run.runId, { status });
+      this.rememberTerminal(run, turnId, status);
       return;
     }
     await this.applyTerminal(run.runId, status);
   }
 
   /**
-   * Reconcile persisted running Runs after subscriptions have been restored.
+   * Reconcile persisted running/uncertain Runs after subscriptions are restored.
    * Idle is never treated as success: the exact Turn must be found in the
    * authoritative paginated history with a terminal status.
    */
@@ -239,7 +284,7 @@ export class ScheduledTaskRunCoordinator {
       const run = await this.store.getRun(reference.runId);
       const task = await this.store.getTask(reference.taskId);
       if (signal?.aborted) return;
-      if (!run || run.state !== "running" || !task) continue;
+      if (!run || (run.state !== "running" && run.state !== "uncertain") || !task) continue;
       if (await this.applyRecoveryValidation(reference, signal)) continue;
       if (signal?.aborted) return;
       const binding = this.router.targetForThread(reference.threadId);
@@ -305,6 +350,7 @@ export class ScheduledTaskRunCoordinator {
     for (let page = 0; page < 100; page += 1) {
       signal?.throwIfAborted();
       const result = await this.history.listThreadTurns(threadId, {
+        ...(signal === undefined ? {} : { signal }),
         cursor,
         limit: 100,
         sortDirection: "desc",
@@ -325,7 +371,7 @@ export class ScheduledTaskRunCoordinator {
     const run = await this.store.getRun(reference.runId);
     const task = await this.store.getTask(reference.taskId);
     if (signal?.aborted) return true;
-    if (!run || run.state !== "running") return true;
+    if (!run || (run.state !== "running" && run.state !== "uncertain")) return true;
     if (!task) {
       await this.markUncertainIfRunning(run.runId, signal);
       return true;
@@ -369,6 +415,12 @@ export class ScheduledTaskRunCoordinator {
   ): Promise<ScheduledRun | undefined> {
     const run = await this.store.getRun(runId);
     if (signal?.aborted) return;
+    // A terminal observation releases only the exact execution's refusal
+    // ownership. It cannot rewrite an uncertain historical result as success.
+    if (run?.state === "uncertain") {
+      this.forget(runId);
+      return;
+    }
     if (!run || (run.state !== "running" && run.state !== "dispatching")) return;
     const forcedFailure = this.pendingFailureByRun.get(runId);
     try {
@@ -395,6 +447,17 @@ export class ScheduledTaskRunCoordinator {
       .map((runId) => this.referencesByRun.get(runId))
       .find((reference): reference is ExecutionReference =>
         reference !== undefined && (reference.turnId === null || reference.turnId === turnId));
+  }
+
+  private rememberTerminal(
+    reference: ExecutionReference,
+    turnId: string,
+    status: Exclude<TurnStatus, "inProgress">,
+  ): void {
+    const pending = this.pendingTerminalByRun.get(reference.runId);
+    if (reference.turnId !== null || !pending || pending.turnId === turnId) {
+      this.pendingTerminalByRun.set(reference.runId, { turnId, status });
+    }
   }
 
   private remember(reference: ExecutionReference): void {
@@ -437,7 +500,6 @@ export class ScheduledTaskRunCoordinator {
     if (signal?.aborted) return;
     if (run?.state === "running") {
       await this.store.markUncertain(runId);
-      this.forget(runId);
     }
   }
 }

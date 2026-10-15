@@ -9,6 +9,8 @@ const sessionScanConcurrency = 3;
 const sessionScanTimeoutMs = 10_000;
 const sessionScanMaximumPages = 100;
 
+export type SessionDisplayCacheOperation = "get" | "put" | "invalidateTurnCount" | "remove";
+
 export interface ConversationSession {
   selector?: string;
   id: string;
@@ -41,12 +43,14 @@ export class ConversationSessionQueryService {
     generation: number;
   }>();
   private readonly sessionDisplayCacheGenerations = new Map<string, number>();
+  private sessionDisplayCacheDisabled = false;
 
   constructor(
     private readonly router: Pick<SessionRouter, "list" | "modelSettingsForThread" | "workspace" | "readThread">,
     private readonly threadHistory?: ThreadHistoryPort,
     private readonly requestMetricsQuery?: RequestMetricsQueryPort,
     private readonly sessionDisplayCache?: SessionDisplayCachePort,
+    private readonly onSessionDisplayCacheError?: (operation: SessionDisplayCacheOperation) => void,
   ) {}
 
   close(): void {
@@ -108,7 +112,7 @@ export class ConversationSessionQueryService {
     }
     const start = (page - 1) * sessionListPageSize;
     const visible = sessions.slice(start, start + sessionListPageSize);
-    if (this.sessionDisplayCache) {
+    if (this.sessionDisplayCache && !this.sessionDisplayCacheDisabled) {
       const workspaceId = this.router.workspace(target).id;
       const archived = options.archived === true;
       // Only the page that will be rendered needs a display-cache row. Writing
@@ -116,8 +120,8 @@ export class ConversationSessionQueryService {
       for (const session of visible) {
         const thread = ordered.find((item) => item.id === session.id);
         if (!thread) continue;
-        const previous = this.sessionDisplayCache.get(thread.id);
-        this.sessionDisplayCache.put({
+        const previous = this.useSessionDisplayCache("get", (cache) => cache.get(thread.id));
+        this.useSessionDisplayCache("put", (cache) => cache.put({
           threadId: thread.id,
           workspaceId,
           archived,
@@ -129,11 +133,12 @@ export class ConversationSessionQueryService {
           isPinned: thread.isPinned,
           turnCount: previous?.turnCount ?? null,
           measuredAt: previous?.measuredAt ?? null,
-        });
+        }));
       }
     }
     if (options.turnCountMode === "cached") {
       const countByThread = new Map<string, number>();
+      const cachedCountGenerations = new Map<string, number>();
       for (const session of visible) {
         // Prefer the direct local metric count. It is a single indexed query
         // and, unlike the full summary, never traverses subagent Threads.
@@ -144,17 +149,25 @@ export class ConversationSessionQueryService {
           countByThread.set(session.id, metricsCount);
           continue;
         }
-        const cached = this.sessionDisplayCache?.get(session.id);
+        const cached = this.useSessionDisplayCache("get", (cache) => cache.get(session.id));
         if (cached?.turnCount !== null && cached?.turnCount !== undefined) {
           countByThread.set(session.id, cached.turnCount);
+          cachedCountGenerations.set(session.id, this.sessionDisplayCacheGenerations.get(session.id) ?? 0);
         }
       }
       return sessions.map((session) => {
+        const generation = cachedCountGenerations.get(session.id);
+        if (generation !== undefined && (this.sessionDisplayCacheDisabled
+          || (this.sessionDisplayCacheGenerations.get(session.id) ?? 0) !== generation)) return session;
         const turnCount = countByThread.get(session.id);
         return turnCount === undefined ? session : { ...session, turnCount };
       });
     }
     if (!this.threadHistory) return sessions;
+    const cacheWasDisabled = this.sessionDisplayCacheDisabled;
+    const generations = new Map(visible.map((session) => [
+      session.id, this.sessionDisplayCacheGenerations.get(session.id) ?? 0,
+    ]));
     const counts = await mapWithConcurrency(visible, sessionScanConcurrency, async (session) => [
       session.id,
       await this.cachedOrCountThreadTurns(session.id),
@@ -163,6 +176,8 @@ export class ConversationSessionQueryService {
       counts.filter((entry): entry is readonly [string, number] => entry[1] !== undefined),
     );
     return sessions.map((session) => {
+      if ((!cacheWasDisabled && this.sessionDisplayCacheDisabled)
+        || (this.sessionDisplayCacheGenerations.get(session.id) ?? 0) !== generations.get(session.id)) return session;
       const turnCount = countByThread.get(session.id);
       return turnCount === undefined ? session : { ...session, turnCount };
     });
@@ -170,7 +185,7 @@ export class ConversationSessionQueryService {
 
   /** Reconcile one invalidated session without rescanning the Thread catalog. */
   refreshSessionDisplayCache(threadId: string): Promise<void> {
-    if (this.cancellation.signal.aborted) return Promise.resolve();
+    if (this.cancellation.signal.aborted || this.sessionDisplayCacheDisabled) return Promise.resolve();
     const existing = this.sessionDisplayCacheRefreshes.get(threadId);
     if (existing) {
       if ((this.sessionDisplayCacheGenerations.get(threadId) ?? 0) !== existing.generation) {
@@ -202,10 +217,9 @@ export class ConversationSessionQueryService {
   }
 
   private async refreshSessionDisplayCacheNow(threadId: string): Promise<void> {
-    const cache = this.sessionDisplayCache;
     const history = this.threadHistory;
-    const entry = cache?.get(threadId);
-    if (!cache || !history || !entry) return;
+    const entry = this.useSessionDisplayCache("get", (cache) => cache.get(threadId));
+    if (!history || !entry) return;
     const generation = this.sessionDisplayCacheGenerations.get(threadId) ?? 0;
     const signal = AbortSignal.any([this.cancellation.signal, AbortSignal.timeout(sessionScanTimeoutMs)]);
     const count = await countThreadTurns(history, threadId, signal);
@@ -218,9 +232,9 @@ export class ConversationSessionQueryService {
     }
     // A newer Turn may have started while the history request was in flight.
     if (signal.aborted || (this.sessionDisplayCacheGenerations.get(threadId) ?? 0) !== generation) return;
-    const latest = cache.get(threadId);
+    const latest = this.useSessionDisplayCache("get", (cache) => cache.get(threadId));
     if (!latest || count === undefined) return;
-    cache.put({
+    this.useSessionDisplayCache("put", (cache) => cache.put({
       ...latest,
       ...(snapshot
         ? {
@@ -237,7 +251,7 @@ export class ConversationSessionQueryService {
           }),
       turnCount: count,
       measuredAt: Date.now(),
-    });
+    }));
   }
 
   invalidateSessionDisplayCache(threadId: string): void {
@@ -245,16 +259,21 @@ export class ConversationSessionQueryService {
       threadId,
       (this.sessionDisplayCacheGenerations.get(threadId) ?? 0) + 1,
     );
-    this.sessionDisplayCache?.invalidateTurnCount(threadId);
+    this.useSessionDisplayCache("invalidateTurnCount", (cache) => cache.invalidateTurnCount(threadId));
   }
 
   removeSessionDisplayCache(threadId: string): void {
-    this.sessionDisplayCacheGenerations.delete(threadId);
-    this.sessionDisplayCache?.remove(threadId);
+    // Keep a new generation until shutdown so an in-flight scan cannot restore
+    // a removed row, even if this Thread is listed again before the scan ends.
+    this.sessionDisplayCacheGenerations.set(
+      threadId,
+      (this.sessionDisplayCacheGenerations.get(threadId) ?? 0) + 1,
+    );
+    this.useSessionDisplayCache("remove", (cache) => cache.remove(threadId));
   }
 
   private async cachedOrCountThreadTurns(threadId: string): Promise<number | undefined> {
-    const cached = this.sessionDisplayCache?.get(threadId);
+    const cached = this.useSessionDisplayCache("get", (cache) => cache.get(threadId));
     if (
       cached?.turnCount !== null
       && cached?.turnCount !== undefined
@@ -266,11 +285,36 @@ export class ConversationSessionQueryService {
     const signal = AbortSignal.any([this.cancellation.signal, AbortSignal.timeout(sessionScanTimeoutMs)]);
     const generation = this.sessionDisplayCacheGenerations.get(threadId) ?? 0;
     const count = await countThreadTurns(this.threadHistory!, threadId, signal);
-    if (!signal.aborted && (this.sessionDisplayCacheGenerations.get(threadId) ?? 0) === generation
-      && count !== undefined && cached && this.sessionDisplayCache) {
-      this.sessionDisplayCache.put({ ...cached, turnCount: count, measuredAt: Date.now() });
+    if (signal.aborted || (this.sessionDisplayCacheGenerations.get(threadId) ?? 0) !== generation) {
+      return undefined;
+    }
+    if (count !== undefined && cached) {
+      this.useSessionDisplayCache("put", (cache) => cache.put({ ...cached, turnCount: count, measuredAt: Date.now() }));
     }
     return count;
+  }
+
+  private useSessionDisplayCache<T>(
+    operation: SessionDisplayCacheOperation,
+    use: (cache: SessionDisplayCachePort) => T,
+  ): T | undefined {
+    if (!this.sessionDisplayCache || this.sessionDisplayCacheDisabled || this.cancellation.signal.aborted) {
+      return undefined;
+    }
+    try {
+      return use(this.sessionDisplayCache);
+    } catch {
+      // A failed invalidation/removal may leave persistent stale rows behind.
+      // Disable every cache operation for this instance before reporting it;
+      // neither later reads nor in-flight scans may reuse those rows.
+      this.sessionDisplayCacheDisabled = true;
+      try {
+        this.onSessionDisplayCacheError?.(operation);
+      } catch {
+        // Diagnostics cannot interrupt authoritative events or Turn submission.
+      }
+      return undefined;
+    }
   }
 
 }

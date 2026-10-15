@@ -111,6 +111,7 @@ import {
   resolveThread,
   type ConversationSession,
   type ConversationSessionQuery,
+  type SessionDisplayCacheOperation,
 } from "./conversation-session-query-service.js";
 import { turnErrorCode, turnErrorMessage, turnErrorType } from "./turn-errors.js";
 
@@ -417,12 +418,13 @@ export class ConversationService implements
       backgrounded(threadId: string): void;
       restoreRequired(threadId: string): void;
     },
+    onSessionDisplayCacheError?: (operation: SessionDisplayCacheOperation) => void,
   ) {
     this.hookUseCases = new ConversationHookService(this.locks, router, models, queries, hookAuthorization ?? (() => {
       throw new UserFacingError("hooks.forbidden", "Hook 管理授权不可用");
     }), hookReviewPolicy);
     this.sessionQueries = new ConversationSessionQueryService(
-      router, threadHistory, requestMetricsQuery, sessionDisplayCache,
+      router, threadHistory, requestMetricsQuery, sessionDisplayCache, onSessionDisplayCacheError,
     );
     this.extensionQueries = new ConversationExtensionQueryService(
       router,
@@ -1376,6 +1378,7 @@ export class ConversationService implements
     return this.locked(target, async () => {
       this.requireIdle(target);
       const binding = await this.ensureSession(target);
+      this.requireIdle(target);
       await this.codex.compactThread(binding.threadId);
     });
   }
@@ -1442,6 +1445,7 @@ export class ConversationService implements
     return this.locked(target, async () => {
       this.requireIdle(target);
       const binding = await this.ensureSession(target);
+      this.requireIdle(target);
       const result = await this.codex.startReview(binding.threadId, reviewTarget);
       this.core.markTurnStarted(target, result.threadId, result.turnId);
       return { threadId: result.threadId, turnId: result.turnId, steered: false };
@@ -1710,6 +1714,11 @@ export class ConversationService implements
   ): Promise<Submission> {
     this.touchActivity(target);
     const binding = await this.ensureSession(target);
+    // Subscription restoration can publish an active Turn while ensure waits.
+    // Do not start a new Turn using the idle decision made before that await.
+    if (this.core.activeTurn(target)) {
+      throw new UserFacingError("conversation.busy", "会话活动状态已恢复，请重新发送消息", { reason: "activity-restored" });
+    }
     this.sessionQueries.invalidateSessionDisplayCache(binding.threadId);
     const workspace = this.router.workspace(target);
     const overrides = this.turnOverrides(target);

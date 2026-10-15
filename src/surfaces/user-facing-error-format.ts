@@ -66,6 +66,8 @@ export function formatSurfaceUserFacingError(
     case "conversation.missing":
       return "当前还没有 Codex Session";
     case "conversation.busy":
+      if (error.details.reason === "subscription-restoring") return "会话订阅正在恢复，请稍后重试";
+      if (error.details.reason === "activity-restored") return "会话活动状态已恢复，请重新发送消息以继续当前任务";
       if (error.details.reason === "pending-interaction") return "当前会话有待处理交互，请先完成或取消后再切换审批方式";
       return "当前任务运行中，请先使用 /stop 停止当前任务";
     case "delivery.overloaded":

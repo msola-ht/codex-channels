@@ -204,8 +204,8 @@ export interface ScheduledTaskStore {
   deleteTask(taskId: string, nowMs?: number): ScheduledTask;
   listDueTasks(nowMs: number, limit?: number): ScheduledTask[];
   listRuns(taskId: string, options?: { readonly limit?: number }): ScheduledRun[];
-  /** Bounded keyset page, independent of per-task display retention windows. */
-  listRunningRuns(options?: { readonly afterRunId?: string; readonly limit?: number }): ScheduledRun[];
+  /** Bounded ownership recovery, independent of per-task display retention windows. */
+  listRecoverableRuns(options?: { readonly afterRunId?: string; readonly limit?: number }): ScheduledRun[];
   /** Narrow query used by the scheduler; it must not depend on the display limit. */
   hasBlockingRun(taskId: string): boolean;
   /** Count in-flight or unresolved runs for one Conversation without loading history. */

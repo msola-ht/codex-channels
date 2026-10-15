@@ -15,12 +15,12 @@
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，避免输出积压导致旧问题重新登记；拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
   回答提交结束前持续保护原 Thread，整个问题流程结束后触发后台空闲复核；审批类交互则在官方 `serverRequest/resolved` 后解析绑定祖先并复核，避免只清理交互状态而遗留后台订阅。
 - `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限；异步预检返回后及 Thread 创建后再次复核当前授权、取消、Workspace 与投递准入，撤权时释放新建后台绑定而不启动 Turn。临时容量拒绝不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
-- `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态；确认离线终态后通过组合层向原 Conversation 发布恢复通知，再释放后台绑定。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
+- `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态；确认离线终态后通过组合层向原 Conversation 发布恢复通知，再释放后台绑定。恢复包含已知 Thread 的 `uncertain` Run，结果未知不清除无人值守拒绝归属；精确 Turn 的终态只释放该未知 Run 的运行期归属，不改写历史结果。启动响应前每 Run 只保留一个带 Turn ID 的完成候选，其他轮次不覆盖它；启动响应不匹配时在五秒和分页上限内读取权威历史的精确 Turn，缺失或读取失败保留为 `uncertain`，不能将同 Thread 的其他轮次用于结算。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
 - `scheduled-task-server-request.ts`：按启动恢复及实时登记的 Thread/Run 归属，在首次异步操作前记录无人值守拒绝，避免并发 Turn 完成误报成功；持久化失败保留进程内拒绝事实并记录告警。为已关联的计划任务 Thread 返回五类 Server Request 的官方安全拒绝形状；普通命令和文件审批返回 `decline`，已有终端输入 `writeStdin` 返回 `cancel` 中止本轮，其他方法明确失败；非计划任务请求交给既有审批处理器。只在 `scheduled_tasks.enabled=true` 时由组合根安装。
 - `scheduled-task-tool-request.ts`：校验前台 `item/tool/call` 的 Thread 绑定、唯一授权 Actor 和
   `schedule_task` 工具名，把结果复用现有计划任务渲染格式返回给 Agent，并把确认预览交给当前
-  `surface + accountId` 的原生交互入口；后台计划任务 Thread 的
-  同类请求先由 `scheduled-task-server-request.ts` 拒绝。
+  `surface + accountId` 的原生交互入口；先拒绝后台绑定，再在 5 秒预算内查询官方 Thread 来源并复核同一前台归属，拒绝 `automation` 来源或无法确认的结果。
+  已登记计划任务的同类请求先由 `scheduled-task-server-request.ts` 拒绝；工具入口的独立检查仍覆盖未知 Run、显式重试和重启后的旧 Thread。
 - `app.ts`：通过异步 `GatewayApplication.create` 提供唯一构造入口，接收已加载的内置渠道插件；构造失败时逆序清理组合根登记的已取得资源，继续清理其余组件并保留原始错误及清理错误。提供启动、停止和配置重载入口，编排顶层生命周期，
   把具体组件所有权交给组件图；持有启动/停止幂等任务，内部致命故障同时通知进程生命周期退出，配置重载继承组件图实现，启动中取消、订阅移除和资源关闭由组件图统一处理。
 - `gateway-component-graph.ts`：只为 OpenAI 主 Client 注入遵循共享代理配置的图片上传 HTTP 客户端，本地模型路由核验直连回环地址；

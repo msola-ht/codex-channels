@@ -91,7 +91,7 @@ export class ScheduledTaskComposition {
           requireCoordinator().onThreadStarted(run, target, threadId),
         onTurnStarted: (run, target, threadId, turnId) =>
           requireCoordinator().onTurnStarted(run, target, threadId, turnId),
-        onRunStateChanged: (run) => requireCoordinator().onRunStateChanged(run),
+        onRunStateChanged: (run) => requireCoordinator().onRunStateChanged(run, this.preparationAbort.signal),
         logger: options.logger,
       },
     );
@@ -142,6 +142,8 @@ export class ScheduledTaskComposition {
     const toolService = new ScheduledTaskToolService(this.service, Date.now);
     this.toolHandler = createScheduledTaskToolRequestHandler({
       targetForThread: (threadId) => options.router.targetForThread(threadId),
+      foregroundThreadId: (target) => options.router.foregroundThreadId(target),
+      readThread: (threadId, signal) => options.router.readThread(threadId, signal),
       actorsForTarget: (target) => options.bindings.actors(target),
       execute: (target, actorId, args) => toolService.execute(target, actorId, args),
       presentConfirmation: options.presentConfirmation,

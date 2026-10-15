@@ -303,16 +303,16 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     return rows.map(runFromRow);
   }
 
-  listRunningRuns(options: { readonly afterRunId?: string; readonly limit?: number } = {}): ScheduledRun[] {
+  listRecoverableRuns(options: { readonly afterRunId?: string; readonly limit?: number } = {}): ScheduledRun[] {
     this.requireOpen();
     const limit = options.limit ?? 200;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
-      throw new RangeError("Running Run 查询 limit 必须在 1 到 1000 之间");
+      throw new RangeError("恢复 Run 查询 limit 必须在 1 到 1000 之间");
     }
     const rows = this.database
       .prepare(`
         SELECT * FROM runs
-        WHERE state = 'running' AND run_id > ?
+        WHERE state IN ('running', 'uncertain') AND run_id > ?
         ORDER BY run_id ASC LIMIT ?
       `)
       .all(options.afterRunId ?? "", limit) as unknown as RunRow[];

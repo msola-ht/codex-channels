@@ -29,7 +29,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   参数校验后映射到 `ScheduledTaskApplicationService`；创建和删除仍返回待确认预览，不直接改写 Store。
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标异步查询；`ConversationService` 作为统一用例入口委托执行。`/metrics`、可见会话页的本地 Turn 计数与周额度估算等待数据库 Worker，不在调用线程执行 SQL；账户快照写入接受取消信号，取消结果和早于已确认额度序号的结果不能刷新快照。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
-- `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态，并提供会话选择器 `resolveThread`（序号、精确 ID/名称或唯一 ID 前缀，歧义与缺失明确失败）；不修改绑定，不建立独立会话索引。派生轮数扫描每轮最多 10 秒、100 页，同 Thread 后台刷新合并，后台最多 3 个并发；关闭取消扫描并拒绝迟到缓存写入，超限时轮数保持未知。
+- `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态，并提供会话选择器 `resolveThread`（序号、精确 ID/名称或唯一 ID 前缀，歧义与缺失明确失败）；不修改绑定，不建立独立会话索引。派生轮数扫描每轮最多 10 秒、100 页，同 Thread 后台刷新合并，后台最多 3 个并发；关闭取消扫描并拒绝迟到缓存写入，超限时轮数保持未知。缓存读写、失效或删除失败后，本实例停止使用该缓存并报告固定操作分类；不返回旧缓存，不阻止权威事件归约或用户输入。失效和删除先更新代次，迟到扫描结果既不回写也不展示。
 - `conversation-event-coordinator.ts`：在稳定输入事件归约前失效选择快照与展示缓存、处理待生效偏好和 Reserve 标记，归约后执行 Reserve 收尾；子代理跟踪和后台释放调度通过注入端口保持原顺序，不等待 RPC 或渠道输出。
 - `turn-errors.ts`：把单次 Turn 失败归约为稳定的错误类型、错误码与安全文案；只读取已归约的错误对象，不执行 RPC、不生成平台输出。
 - `pagination.ts`：提供 Application 层共用的分页总数、页码校验、偏移/切片与一基序号；错误类型与文案仍由各调用点提供，不持有列表状态。

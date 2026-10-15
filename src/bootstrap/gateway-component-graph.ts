@@ -422,6 +422,11 @@ export abstract class GatewayComponentGraph {
           );
         });
       },
+      (binding) => {
+        if (!this.stopping && !this.isBindingRestoring(binding.threadId)) {
+          void this.restoreIdleBinding(binding.threadId);
+        }
+      },
     );
     this.threadState = new ThreadStateSynchronizer(this.router);
     this.core = new ConversationCore(this.router, this.output);
@@ -794,6 +799,10 @@ export abstract class GatewayComponentGraph {
           if (!this.stopping && !this.isBindingRestoring(threadId)) void this.restoreIdleBinding(threadId);
         },
       },
+      (operation) => logger.warn(
+        { module: "sessions", event: "display_cache.disabled", operation, reason: "cache-operation-failed" },
+        "会话派生缓存操作失败，当前会话查询实例已禁用缓存",
+      ),
     );
     this.conversations = service;
     service.setIdleReleaseEnabled(config.idleReleaseMinutes > 0);

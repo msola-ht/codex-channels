@@ -2,7 +2,7 @@ import type { ScheduledTaskStore } from "./types.js";
 
 export const scheduledTaskWorkerMethods = [
   "createTask", "getTask", "listTasks", "renameTask", "pauseTask", "resumeTask", "blockTask", "deleteTask",
-  "listDueTasks", "listRuns", "listRunningRuns", "hasBlockingRun", "countConversationActiveRuns", "getRun",
+  "listDueTasks", "listRuns", "listRecoverableRuns", "hasBlockingRun", "countConversationActiveRuns", "getRun",
   "claimDue", "claimManual", "claimRetry", "markRunning", "markApprovalRejected", "markCompleted",
   "markFailed", "markInterrupted", "markUncertain", "resolveUncertain", "recoverAfterCrash", "cleanup", "backup",
 ] as const satisfies readonly (keyof ScheduledTaskStore)[];

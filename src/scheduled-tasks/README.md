@@ -37,3 +37,9 @@ Gateway 经异步端口使用唯一计划任务 SQLite Worker，初始化、普�
 Application 通过不阻止进程退出的短期定时器主动清理超过五分钟的待确认记录，并把 Store 状态冲突
 转换为稳定的用户可见错误；
 每个 Actor 在同一 Conversation 的未删除任务固定限制为 100 个。
+
+恢复查询按 Run ID 有界读取 `running` 和 `uncertain`，让 Bootstrap 恢复已知 Thread 的无人值守
+拒绝归属；缺少 Turn ID 时不能把同 Thread 的其他轮次终态当作原 Run 的结束证明。
+已知 Turn 的权威终态只释放未知 Run 的运行期拒绝归属，不改写其历史未知状态。
+显式重试和任务删除不证明旧 Thread 已终止；动态计划工具另行核验前台绑定与官方 Thread source，
+拒绝后台或 `automation` 来源，普通审批继续由 Router 的官方来源检查安全拒绝。
