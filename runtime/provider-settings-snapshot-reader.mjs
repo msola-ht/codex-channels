@@ -7,6 +7,7 @@ export class ProviderSettingsSnapshotReader {
   #terminating;
   #closeTask;
   #readyWorker;
+  #workerExit;
   #closed = false;
   constructor(environment, aggregateMembers = []) {
     this.environment = { ...environment };
@@ -25,6 +26,7 @@ export class ProviderSettingsSnapshotReader {
         resourceLimits: { maxOldGenerationSizeMb: 64 },
       });
       worker.on("error", () => {});
+      this.#workerExit = new Promise(resolve => worker.once("exit", resolve));
       worker.on("exit", () => {
         if (this.#worker === worker) {
           this.#worker = undefined;
@@ -85,9 +87,17 @@ export class ProviderSettingsSnapshotReader {
   }
   #terminate(worker) {
     if (this.#terminating) return this.#terminating;
-    const task = Promise.resolve().then(() => worker.terminate()).then(() => {
+    // Windows must close its nested ACL helper before the outer thread exits.
+    // A bounded caller wait may expire, but this task retains the physical owner.
+    const exit = this.#workerExit;
+    worker.postMessage({ operation: "close" });
+    const fallback = process.platform === "win32" ? undefined : setTimeout(() => {
+      if (this.#worker === worker) void worker.terminate().catch(() => {});
+    }, 100);
+    const task = exit.then(() => {
       if (this.#worker === worker) this.#worker = undefined;
     }).finally(() => {
+      clearTimeout(fallback);
       // A failed termination retains ownership and blocks replacement until exit is confirmed.
       if (this.#worker !== worker && this.#terminating === task) this.#terminating = undefined;
     });

@@ -8,12 +8,21 @@ import { loadManagedModelProviderDefinitions, loadManagedModelProviderWatcherDef
 import { managedProviderDirectory, managedProviderMarkerPath, readManagedMarker, validateConfiguredModelProviders } from "./model-provider-runtime.mjs";
 import { readCodexConfigFile } from "./provider-file-access.mjs";
 import { readPrivateFileSync } from "./private-file.mjs";
-import { withWindowsAclDeadline } from "./windows-acl-bridge.mjs";
+import { withWindowsAclDeadline, closeWindowsAclBridge, waitForWindowsAclBridgeExit } from "./windows-acl-bridge.mjs";
 
 if (!parentPort) throw new Error("Provider settings worker requires a parent");
 const { environment, aggregateMembers } = workerData;
 const maximumSnapshotBytes = 32 * 1024 * 1024;
 const maximumSnapshotFiles = 512;
+let stopping = false;
+
+async function close() {
+  if (stopping) return;
+  stopping = true;
+  try { await closeWindowsAclBridge({ timeoutMs: 1_000 }); }
+  catch { await waitForWindowsAclBridgeExit(); }
+  parentPort.close();
+}
 
 function fingerprints() {
   const files = new Map();
@@ -57,7 +66,9 @@ function fingerprints() {
   return [...digests];
 }
 
-parentPort.on("message", ({ deadline }) => {
+parentPort.on("message", ({ deadline, operation }) => {
+  if (operation === "close") { void close(); return; }
+  if (stopping) return;
   let phase = "read";
   try {
     const snapshot = withWindowsAclDeadline(deadline, () => {

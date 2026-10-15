@@ -155,22 +155,26 @@ export class ScheduledTaskRunCoordinator {
     });
   }
 
-  async noteServerRequestRejected(threadId: string): Promise<void> {
-    for (const runId of this.runIdsByThread.get(threadId) ?? []) {
+  async noteServerRequestRejected(threadId: string): Promise<boolean> {
+    if (!this.initialized) throw new Error("计划任务运行关联尚未就绪");
+    const runIds = [...(this.runIdsByThread.get(threadId) ?? [])];
+    // Ownership comes from restored/live execution references. Record every
+    // rejection synchronously so a concurrent Turn completion cannot win an
+    // awaited Task/Run lookup and discard the unattended failure.
+    for (const runId of runIds) {
       this.pendingFailureByRun.set(runId, "approval");
-      const run = await this.store.getRun(runId);
-      if (run?.state === "dispatching" || run?.state === "running") {
-        this.pendingFailureByRun.set(runId, "approval");
-        try {
-          await this.store.markApprovalRejected(runId);
-        } catch (error) {
-          this.logger?.warn(
-            { err: error, runId, threadId },
-            "计划任务无人值守审批拒绝状态持久化失败",
-          );
-        }
+    }
+    for (const runId of runIds) {
+      try {
+        await this.store.markApprovalRejected(runId);
+      } catch (error) {
+        this.logger?.warn(
+          { err: error, runId, threadId },
+          "计划任务无人值守审批拒绝状态持久化失败",
+        );
       }
     }
+    return runIds.length > 0;
   }
 
   /** Apply a completion that raced the scheduler's dispatching -> running write. */
@@ -367,7 +371,6 @@ export class ScheduledTaskRunCoordinator {
     if (signal?.aborted) return;
     if (!run || (run.state !== "running" && run.state !== "dispatching")) return;
     const forcedFailure = this.pendingFailureByRun.get(runId);
-    this.pendingFailureByRun.delete(runId);
     try {
       if (forcedFailure !== undefined) {
         await this.store.markFailed(runId, forcedFailure);

@@ -5,8 +5,8 @@ import {
 } from "../codex-client/index.js";
 
 export interface ScheduledTaskThreadLookup {
-  taskForThread(threadId: string): Promise<unknown>;
-  noteServerRequestRejected?(threadId: string): void | Promise<void>;
+  /** Identify owned Runs and record rejection before the first asynchronous read. */
+  noteServerRequestRejected(threadId: string): Promise<boolean>;
 }
 
 /**
@@ -20,10 +20,9 @@ export function createScheduledTaskServerRequestHandler(
 ): ServerRequestHandler {
   return async (request) => {
     const threadId = threadIdFromRequest(request);
-    if (threadId === undefined || await lookup.taskForThread(threadId) === undefined) {
+    if (threadId === undefined || !await lookup.noteServerRequestRejected(threadId)) {
       return fallback(request);
     }
-    await lookup.noteServerRequestRejected?.(threadId);
     switch (request.method) {
       case "item/commandExecution/requestApproval":
         // writeStdin offers only accept/cancel; decline rejects the tool but
