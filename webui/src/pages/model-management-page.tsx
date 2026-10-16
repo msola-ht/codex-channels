@@ -56,9 +56,9 @@ export function ModelConfigurationPage() {
   const refresh = useCallback(() => { reloadCodex(); reloadProviders(); reloadGateway() }, [reloadCodex, reloadProviders, reloadGateway])
   const busy = codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null || gateway.loading || gateway.saving || gateway.pendingSetting !== null
   return <SettingsPageFrame title="modelManagement.models" busy={busy} refresh={refresh}>
-    <ModelDisplayGroups management={gateway} providers={providers.settings} disabled={busy || gateway.error !== null} />
-    <AppServerSettingsCard management={codex} section="models" onChanged={reloadProviders} />
     <ProviderSettingsManagement management={providers} section="models" onChanged={reloadCodex} />
+    <AppServerSettingsCard management={codex} section="models" onChanged={reloadProviders} />
+    <ModelDisplayGroups management={gateway} providers={providers.settings} disabled={busy || gateway.error !== null} />
     <Card><CardHeader><CardTitle>{t("modelManagement.channelModel")}</CardTitle><CardDescription>{t("modelManagement.channelModelHint")}</CardDescription></CardHeader><CardContent>
       {gateway.loading && gateway.managedSettings === null && <Skeleton className="h-9 w-full" />}
       {gateway.error ? <SettingsError message={gateway.error} retry={reloadGateway} /> : gateway.managedSettings && <FieldGroup><ManagedInputRow label={t("modelManagement.channelModel")} defaultValue={gateway.managedSettings.system.defaultModel ?? ""} placeholder={t("modelManagement.followDefault")} disabled={busy} saved={gateway.lastAppliedSetting?.kind === "system.default-model" ? gateway.lastAppliedSetting : null} onBlur={value => void gateway.previewSetting("system.default-model", value || null, { key: "modelManagement.channelModel" })} /></FieldGroup>}

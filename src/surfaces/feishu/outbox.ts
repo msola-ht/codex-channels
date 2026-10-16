@@ -1,4 +1,5 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
+import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
 import { isPersistentOutput } from "../persistent-output.js";
 import { isHiddenAutoApprovalReview } from "../lifecycle-presentation.js";
@@ -66,6 +67,7 @@ import {
 import { renderFeishuOutput } from "./renderer.js";
 import {
   renderFeishuPlanCard,
+  renderFeishuRetryCard,
   renderFeishuThreadStatusCard,
 } from "./status-card.js";
 
@@ -122,6 +124,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private nextReasoningSegment = 0;
   private readonly activeOperations = new Set<string>();
   private readonly snapshots = new SnapshotDelivery();
+  private readonly retryMessages = new TurnRetryMessages<string>();
   private readonly reasoningGenerations = new Map<string, number>();
   private readonly operationDisplays = new Map<string, { chatId: string; markdown: string }>();
   private readonly computerUseCards = new Map<string, { chatId: string; messageId?: string }>();
@@ -156,6 +159,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   observe(event: OutputEvent): void {
     if (this.closed || event.target.surface !== "feishu" || event.target.accountId !== this.accountId) return;
     this.snapshots.observe(event);
+    this.retryMessages.observe(event);
     if (event.type === "turn.started") {
       this.clearExecutionTurns(event.threadId);
       this.reasoningCards.delete(event.threadId);
@@ -234,6 +238,13 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   private handleEvent(event: OutputEvent): void {
+    if (event.type === "turn.retry") {
+      const run = this.retryMessages.prepare(event);
+      if (run) this.delivery.enqueue(event.target.conversationId,
+        (signal) => run((text, id) => this.sendRetryStatus(event.target.conversationId, text, id, signal)), true,
+        { coalesceKey: surfaceDeliveryCoalesceKey(event)! });
+      return;
+    }
     if (event.type === "text.delta") {
       this.textStreams.acceptStreamDelta(event);
       return;
@@ -855,6 +866,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.planMessages.clear();
     this.textStreams.clear();
     this.reasoningCards.clear();
+    this.retryMessages.clear();
     this.activeOperations.clear();
     this.reasoningGenerations.clear();
     this.operationDisplays.clear();
@@ -1232,6 +1244,13 @@ export class FeishuOutbox implements SurfaceOutputPort {
         this.delivery.enqueue(chatId, run, true);
       },
     };
+  }
+
+  private async sendRetryStatus(chatId: string, text: string, messageId?: string, signal?: AbortSignal): Promise<string> {
+    const card = renderFeishuRetryCard(text);
+    if (messageId === undefined) return this.messagePort.sendCard(chatId, card, signal);
+    await this.messagePort.updateCard(messageId, card, signal);
+    return messageId;
   }
 
   private async deliverThreadStatus(

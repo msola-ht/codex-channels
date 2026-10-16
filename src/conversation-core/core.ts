@@ -51,6 +51,7 @@ export class ConversationCore {
   private readonly mcpStatus = new Map<string, string>();
   private readonly unhealthyMcpServers = new Set<string>();
   private readonly reasoningByThread = new Map<string, ReasoningState>();
+  private readonly retryByThread = new Map<string, { turnId: string; target: ConversationTarget; retrying: boolean }>();
   private accountStatus: string | undefined;
   private readonly rateLimitNotices = new Map<string, string>();
   private readonly rateLimitSnapshots = new Map<string, RateLimitSnapshot>();
@@ -99,6 +100,7 @@ export class ConversationCore {
     if (current?.threadId === threadId && current.turnId === turnId) {
       return;
     }
+    this.invalidateRetry(threadId);
     const artifacts = this.artifactsByThread.get(threadId);
     if (artifacts?.turnId !== turnId) {
       this.artifactsByThread.set(threadId, { threadId, turnId });
@@ -137,7 +139,7 @@ export class ConversationCore {
     return this.activeByThread.size > 0;
   }
 
-  private pruneUnboundTurns(): void {
+  pruneUnboundTurns(): void {
     for (const [threadId, active] of this.activeByThread) {
       const owner = this.router.targetForThread(threadId);
       if (owner && this.key(owner) === this.key(active.target)) continue;
@@ -237,6 +239,7 @@ export class ConversationCore {
       }
     }
     this.reasoningByThread.clear();
+    for (const threadId of this.retryByThread.keys()) this.invalidateRetry(threadId);
     this.mcpStatus.clear();
     this.unhealthyMcpServers.clear();
     this.publishConnectionNotice("connection.lost", message);
@@ -287,6 +290,7 @@ export class ConversationCore {
         this.artifactsByThread.delete(event.threadId);
         this.timingByThread.delete(event.threadId);
         this.disposeReasoning(event.threadId);
+        this.invalidateRetry(event.threadId);
         return;
       case "turn.diff.updated": {
         const current = this.artifactsByThread.get(event.threadId);
@@ -326,6 +330,7 @@ export class ConversationCore {
         );
         return;
       case "item.agentMessage.delta": {
+        if (event.text.length > 0) this.resumeRetry(event.threadId, event.turnId);
         this.clearReasoning(event.threadId, event.turnId);
         const key = this.itemKey(event.threadId, event.turnId, event.itemId);
         const phase = this.phaseByItem.get(key);
@@ -340,6 +345,7 @@ export class ConversationCore {
         return;
       }
       case "item.reasoning.delta": {
+        this.resumeRetry(event.threadId, event.turnId);
         const current = this.reasoningByThread.get(event.threadId);
         if (current !== undefined && current.turnId !== event.turnId) {
           if (current.timer !== undefined) {
@@ -386,6 +392,7 @@ export class ConversationCore {
         return;
       }
       case "item.agentMessage.completed": {
+        if (event.text.trim().length > 0) this.resumeRetry(event.threadId, event.turnId);
         const key = this.itemKey(event.threadId, event.turnId, event.itemId);
         const phase = event.phase ?? this.phaseByItem.get(key) ?? null;
         if (event.delivery === "async" && event.questions) {
@@ -440,7 +447,10 @@ export class ConversationCore {
         return;
       case "turn.error":
         this.clearReasoning(event.threadId, event.turnId);
-        if (!event.willRetry) {
+        if (event.willRetry) {
+          this.startRetry(event.threadId, event.turnId);
+        } else {
+          this.finishRetry(event.threadId, event.turnId, "failed");
           this.errorsByTurn.set(event.turnId, {
             message: event.message,
             ...(event.errorCode ? { errorCode: event.errorCode } : {}),
@@ -448,6 +458,7 @@ export class ConversationCore {
         }
         return;
       case "turn.completed": {
+        if (event.status !== "inProgress") this.finishRetry(event.threadId, event.turnId, event.status);
         this.clearReasoning(event.threadId, event.turnId);
         const responseKey = this.turnKey(event.threadId, event.turnId);
         const hasUserMessage = this.turnsWithUserMessage.has(responseKey);
@@ -781,6 +792,7 @@ export class ConversationCore {
   }
 
   private clearTurnResponseState(threadId: string): void {
+    this.invalidateRetry(threadId);
     const prefix = `${threadId}:`;
     for (const key of this.turnsWithUserMessage) {
       if (key.startsWith(prefix)) {
@@ -796,6 +808,49 @@ export class ConversationCore {
 
   private turnKey(threadId: string, turnId: string): string {
     return `${threadId}:${turnId}`;
+  }
+
+  private startRetry(threadId: string, turnId: string): void {
+    const active = this.activeByThread.get(threadId);
+    const target = this.router.targetForThread(threadId);
+    // Late notifications must not revive an ended Turn or reach a new binding owner.
+    if (!target || active?.turnId !== turnId || this.key(active.target) !== this.key(target)) return;
+    const previous = this.retryByThread.get(threadId);
+    if (previous?.turnId === turnId && previous.retrying) return;
+    this.retryByThread.set(threadId, { turnId, target, retrying: true });
+    this.publishForThread(threadId, { type: "turn.retry", threadId, turnId, status: "retrying" });
+  }
+
+  private resumeRetry(threadId: string, turnId: string): void {
+    const state = this.retryByThread.get(threadId);
+    if (state?.turnId !== turnId || !state.retrying) return;
+    const target = this.router.targetForThread(threadId);
+    if (!target || this.key(target) !== this.key(state.target) || this.activeByThread.get(threadId)?.turnId !== turnId) {
+      this.retryByThread.delete(threadId);
+      return;
+    }
+    state.retrying = false;
+    this.publishForThread(threadId, { type: "turn.retry", threadId, turnId, status: "resumed" });
+  }
+
+  private finishRetry(threadId: string, turnId: string, status: "completed" | "failed" | "interrupted"): void {
+    const state = this.retryByThread.get(threadId);
+    if (state?.turnId !== turnId) return;
+    this.retryByThread.delete(threadId);
+    const target = this.router.targetForThread(threadId);
+    if (target && this.key(target) === this.key(state.target)) {
+      this.publishForThread(threadId, { type: "turn.retry", threadId, turnId, status });
+    }
+  }
+
+  private invalidateRetry(threadId: string): void {
+    const state = this.retryByThread.get(threadId);
+    if (!state) return;
+    this.retryByThread.delete(threadId);
+    const owner = this.router.targetForThread(threadId);
+    if (owner && this.key(owner) !== this.key(state.target)) return;
+    this.publish({ type: "turn.retry", target: state.target, threadId, turnId: state.turnId,
+      status: "unavailable", ...(this.isBackgroundThread(threadId) ? { background: true } : {}) });
   }
 
   private itemKey(threadId: string, turnId: string, itemId: string): string {

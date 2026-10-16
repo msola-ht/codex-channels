@@ -7,6 +7,7 @@ export interface ProviderModelSelectionEntry {
 export interface ProviderModelSelectionOptions {
   models: ProviderModelSelectionEntry[];
   requiredModels?: string[];
+  retainedModels?: string[];
 }
 
 export function validateEnabledModelSelection(selected: unknown, options: ProviderModelSelectionOptions): string[];

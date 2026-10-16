@@ -99,6 +99,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
   单独发送终态消息。完成的原生生成图片
   独立于操作显示档位上传并发送。
 - `status-card.ts`：把 Session 状态和计划进度映射为可原地更新的轻量 CardKit 2.0 卡片。
+  同时承接模型请求重试固定文案；Outbox 按完整目标、Thread 和 Turn 复用卡片，不与 Session 活动状态混用。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由
   模块入口只暴露 `createFeishuSurface()` 工厂与生产选项类型。
 

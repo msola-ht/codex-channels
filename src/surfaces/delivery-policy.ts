@@ -23,6 +23,7 @@ export interface SurfaceDeliveryDecision {
 const weixinWindowEventTypes: ReadonlySet<OutputEvent["type"]> = new Set<OutputEvent["type"]>([
   "turn.started",
   "turn.completed",
+  "turn.retry",
   "autoApprovalReview.updated",
   "hook.completed",
   "conversation.idle.released",
@@ -79,6 +80,7 @@ export function surfaceDeliveryCoalesceKey(
   event: OutputEvent,
   segment = 0,
 ): string | undefined {
+  if (event.type === "turn.retry") return `retry:${JSON.stringify([event.threadId, event.turnId])}`;
   return event.type === "turn.reasoning"
     ? `reasoning:${event.threadId}:${event.turnId}:${segment}`
     : undefined;
@@ -120,6 +122,7 @@ export class SurfaceOutputCoalescer {
 const backlogSheddableEventTypes: ReadonlySet<OutputEvent["type"]> =
   new Set<OutputEvent["type"]>([
     "turn.reasoning",
+    "turn.retry",
     "user.message",
     "thread.status",
     "thread.name",
@@ -154,7 +157,7 @@ export function surfaceOutputSnapshotKey(event: OutputEvent): string | undefined
       break;
     case "user.message": detail = event.itemId; break;
     case "mcp.status.updated": detail = event.name; break;
-    case "plan.updated": case "turn.reasoning": case "thread.status":
+    case "plan.updated": case "turn.reasoning": case "turn.retry": case "thread.status":
     case "account.updated": case "account.rateLimits.updated": break;
     default: return undefined;
   }
@@ -166,12 +169,17 @@ export function supersedesSurfaceSnapshot(event: OutputEvent, snapshot: OutputEv
   if (event.target.surface !== snapshot.target.surface || event.target.accountId !== snapshot.target.accountId
     || event.target.conversationId !== snapshot.target.conversationId) return false;
   if (!("threadId" in event) || !("threadId" in snapshot) || event.threadId !== snapshot.threadId) return false;
+  // Retry closure has its own receipt. Preserve it while older in-flight creation settles.
+  if (snapshot.type === "turn.retry" && snapshot.status !== "retrying" && snapshot.status !== "resumed") return false;
   if (event.type === "connection.lost") return true;
+  if (event.type === "conversation.idle.released" && snapshot.type === "turn.retry") return true;
   // A mirrored input still explains the result after the Turn has finished.
   if (snapshot.type === "user.message") return false;
   if (event.type === "turn.started" && "turnId" in snapshot && event.turnId !== snapshot.turnId) return true;
   if (!("turnId" in event) || !("turnId" in snapshot) || event.turnId !== snapshot.turnId) return false;
-  if (event.type === "turn.completed") return true;
+  if (event.type === "turn.completed") {
+    return snapshot.type !== "turn.retry" || snapshot.status === "retrying" || snapshot.status === "resumed";
+  }
   if (event.type === "operation.updated" && event.operation.status !== "running") {
     return snapshot.type === "operation.updated" && snapshot.operation.itemId === event.operation.itemId;
   }

@@ -6,7 +6,7 @@ const contextWindowPresets = contextWindowPresetTokens.map(tokens => ({
   value: String(tokens), label: `${tokens === 1048576 ? "1M" : `${tokens / 1024}K`}（${tokens} Token）`,
 }));
 
-export async function promptResponsesModels(prompts, defaultModel, previous = [], importedIds = [], output = process.stdout, upstreamWireApi = "responses") {
+export async function promptResponsesModels(prompts, defaultModel, previous = [], importedIds = [], output = process.stdout, upstreamWireApi = "responses", retainedModels = []) {
   if (!["responses", "chat_completions"].includes(upstreamWireApi)) throw new Error("自定义模型上游接口不受支持");
   if (upstreamWireApi === "chat_completions") output.write("Chat 上游仍可逐项声明所有模型能力；当前转换不传递 verbosity，并拒绝 original 图片精度和非 none 摘要参数，声明不会改变转换规则。\n");
   const ids = [defaultModel, ...previous.map((entry) => entry.id).filter((id) => id !== defaultModel)];
@@ -83,12 +83,13 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
     }
   }
   // Validate candidate capabilities individually; the 64-model limit applies
-  // after selection, so a full catalogue can replace an old model in one edit.
+  // after selection; removing saved models uses the independent removal flow.
   const validated = models.map(model => validateResponsesModels([model], model.id)[0]);
   const enabledModels = await promptEnabledProviderModels(prompts, output, {
     models: validated.map(model => ({id: model.id, name: model.name, reasoningEffort: model.defaultReasoningEffort ?? "none"})),
     enabledModels: validated.map(model => model.id),
     requiredModels: [defaultModel],
+    retainedModels,
     label: "自定义提供商",
   });
   return enabledModels === undefined ? undefined : validateResponsesModels(validated.filter(model => enabledModels.includes(model.id)), defaultModel);

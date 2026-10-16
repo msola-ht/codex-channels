@@ -21,7 +21,7 @@ export function isPersistentOutput(event: OutputEvent, display: OperationUpdateD
     ));
     case "hook.completed":
     case "text.delta": case "user.message": case "plan.updated": case "thread.status":
-    case "turn.reasoning": case "account.updated":
+    case "turn.reasoning": case "turn.retry": case "account.updated":
     case "account.rateLimits.updated": case "mcp.status.updated": return false;
     default: { const exhaustive: never = event; throw new Error(`未分类输出：${String(exhaustive)}`); }
   }

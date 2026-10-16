@@ -16,6 +16,7 @@ export interface ClinePassConfigurationOptions {
     models: Array<{ id: string; name: string; reasoningEffort: string }>;
     enabledModels: string[];
     requiredModels: string[];
+    retainedModels: string[];
   }) => Promise<string[] | undefined>;
 }
 export function clinePassSetupPaths(environment: NodeJS.ProcessEnv, accountId: string): Record<"config" | "profile" | "marker" | "catalog" | "manifest" | "backup" | "registry", string>;

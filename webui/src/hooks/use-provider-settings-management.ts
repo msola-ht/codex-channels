@@ -9,8 +9,10 @@ import type {
   ManagementProviderSettingsMutationResponse,
   ManagementProviderSettingsPreview,
   ManagementProviderSettingsResponse,
+  ManagementSettingMutationResponse,
 } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
+import { configActivationResult } from "../../../scripts/config-activation-result.mjs"
 
 export function useProviderSettingsManagement(): ProviderSettingsController {
   const management = useManagementConfirmedMutation<
@@ -22,6 +24,15 @@ export function useProviderSettingsManagement(): ProviderSettingsController {
     load: fetchManagementProviderSettings,
     preview: previewManagementProviderSettings,
     apply: applyManagementProviderSettings,
+    trackReadback: true,
   })
-  return { ...management, settings: management.data }
+  const result = management.actionResult
+  const actionResult: ManagementSettingMutationResponse | null = result === null ? null : {
+    revision: null,
+    value: null,
+    activation: configActivationResult(result.activation ?? "unknown"),
+    auditStatus: result.auditStatus,
+    consistency: management.readbackRequired ? "unknown" : "confirmed",
+  }
+  return { ...management, actionResult, settings: management.data }
 }

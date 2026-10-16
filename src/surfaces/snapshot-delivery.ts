@@ -8,6 +8,10 @@ export class SnapshotDelivery {
 
   observe(event: OutputEvent): void {
     for (const entry of this.active) {
+      // The owner may already hold a newer terminal retry snapshot. Let its in-flight creation
+      // settle so that the terminal update can reuse the verified platform message handle.
+      // The owner's snapshot controller still cancels a latest-state entry that is obsolete.
+      if (entry.event.type === "turn.retry") continue;
       if (supersedesSurfaceSnapshot(event, entry.event)) entry.controller.abort();
     }
   }

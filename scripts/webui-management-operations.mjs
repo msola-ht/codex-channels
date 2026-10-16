@@ -43,7 +43,7 @@ function managementErrorStatus(code) {
   if (["stale-revision", "stale-preview", "stale-model-probe", "account-exists", "provider-exists", "default-account-conflict", "primary-provider-conflict", "permission-conflict", "context-followers-conflict", "config-path-conflict", "profile-conflict", "window-conflict", "other-switching-providers", "account-runtime-in-use"].includes(code)) return 409;
   if (["account-not-found", "provider-not-found", "provider-not-configured"].includes(code)) return 404;
   if (["provider_state_unavailable", "account_state_unavailable", "provider-state-unavailable", "account-state-unavailable", "supervisor-unavailable", "supervisor-incompatible", "backup-unavailable", "catalog-unavailable", "catalog-invalid", "official-models-unavailable", "acceleration-unavailable", "approvals-reviewer-unavailable"].includes(code)) return 503;
-  if (["operation-failed", "rollback-failed", "stop-failed", "write-failed", "save-unconfirmed"].includes(code)) return 500;
+  if (["operation-failed", "rollback-failed", "stop-failed", "write-failed", "save-unconfirmed", "readback-failed"].includes(code)) return 500;
   return 400;
 }
 

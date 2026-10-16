@@ -296,6 +296,7 @@ Remote 沿用工作区或显式审批参数，恢复与继承式分叉保留历�
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口 |
 | --- | --- | --- |
+| 模型请求重试状态 | 稳定 `error.willRetry`、模型输出通知与 `turn/completed` | [`notification-conversation-events.ts`](../src/codex-client/notification-conversation-events.ts) → [`core.ts`](../src/conversation-core/core.ts) → 三渠道 `turn.retry` 展示；连续重试去重、终态收尾，不重发请求或原样显示错误详情；见下方模型请求重试展示说明 |
 | Codex Auto-review 用户偏好 | 稳定 `config/read`、`configRequirements/read`、`config/batchWrite`；受控实验 `configRequirements/read.allowedApprovalsReviewers` | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs) 投影并单独写入用户层 `approvals_reviewer = "user"` 或 `"auto_review"`；[`client.ts`](../src/codex-client/client.ts) 只在该设置读取时检查受管 requirements。CLI 与 WebUI 显式确认并校验用户层修订；未知现值、受管限制和不可用的策略读取失败关闭。审查生命周期通知及统计通过下表独立的状态投影链路处理。 |
 | Thread 实际审批方式展示 | `thread/start`、`thread/resume`、`thread/fork` 响应及 `thread/settings/updated.threadSettings` 的稳定 `approvalsReviewer` 字段 | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts) 与 [`notification-thread-state.ts`](../src/codex-client/notification-thread-state.ts) 映射实际值，经 [`router.ts`](../src/session-routing/router.ts) 与 [`core.ts`](../src/conversation-core/core.ts) 传给 [`lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts) 的启动、完成卡和 [`conversation-workspace-status-command-format.ts`](../src/surfaces/conversation-workspace-status-command-format.ts) 的 `/status`；缺失或未知值显示未知，不从全局开关推断。 |
 | 当前 Thread 审批方式切换 | 稳定 `thread/settings/update.approvalsReviewer` 与 `thread/settings/updated.threadSettings.approvalsReviewer`，受控 `ThreadSettingsUpdateParams` / `ThreadSettingsUpdateResponse` | [`turn-port.ts`](../src/application/turn-port.ts) 的审批设置窄端口、[`conversation-service.ts`](../src/application/conversation-service.ts) 与 [`client.ts`](../src/codex-client/client.ts) 实现 `/autoreview [on\|off]`：查询不创建 Thread，写入核对当前绑定、空闲状态与待处理交互，只有 `user` / `auto_review` 可写，其他实际值只读。相同已确认值直接返回；变更不启动 Turn、不改 Workspace 默认、不重试，先注册通知观察再请求，同时确认 RPC 成功与最新同 Thread 同目标合法通知；超时、断线、关闭及 Thread 失效清理等待，结果未确认单独回报，不乐观改缓存。Provider 路由保持对应实例隔离。上游依据为锁定源码 `request_processors/turn_processor.rs::thread_settings_update_inner`、`bespoke_event_handling.rs::ThreadSettingsApplied` 与 `tests/suite/v2/thread_settings_update.rs` / `model_auto_review.rs` |
@@ -528,6 +529,26 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 查询限时、限页数、节点数与祖先深度，
 身份或祖先关系无法确认时失败关闭。恢复后台订阅后复用正常释放条件，不仅凭父 Thread 空闲就清理绑定。
 [`conversation-service.ts`](../src/application/conversation-service.ts) 在锁内复核选择上下文，并恢复活动 Turn。
+
+### 模型请求重试展示
+
+稳定 `error` 通知的 `willRetry: true` 表示 App Server 仍在重试，不是 Turn 失败。
+锁定版 [`responses_retry.rs`](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/core/src/responses_retry.rs) 生成重试提示，
+[`bespoke_event_handling.rs`](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/app-server/src/bespoke_event_handling.rs) 将 `StreamError` 转为该通知。
+Client 沿用既有 `turn.error` 输入，Core 仅对当前活动 Turn 发布不含原始错误正文的 `turn.retry` 状态；
+模型文本或推理进展结束连续重试段，最终错误与官方 Turn 终态负责收尾。Gateway 不根据此通知重发请求或切换模型。
+飞书、Telegram 与微信消费同一状态，渠道范围和投递限制见 [展示规则](display.md)。
+此路径与 Gateway 到 App Server 的连接恢复独立；没有新增 RPC、协议字段或实验能力。
+Bootstrap 按 Provider 连接代次淘汰旧连接排队的 Turn 开始、推理心跳与可重试错误，保留已接收的结果和终态；
+自动恢复通过 Core 活动观察器让期间收到的实时终态优先于旧快照，防止恢复后重新显示已结束 Turn 的重试状态。
+Core 在新 Turn、解绑、Thread 回退或关闭及连接中断时发布本地 `unavailable` 展示状态，不伪造官方 Turn 终态。
+渠道收尾使用独立快照回执，状态编辑失败不影响持久结果；微信同 Turn 的提示预算跨断线保留。
+
+Linux 隔离 Codex Home 中已用真实 App Server 与本机不可达模型地址观察：两次 `willRetry:true` 只产生一次重试展示，
+随后 `willRetry:false` 和失败终态正确收尾；重试期间主动中断产生 `interrupted` 收尾。
+将捕获的旧重试通知再次交给 Core 不产生新展示；将旧活动快照交给恢复观察器不会重新激活已中断 Turn。
+复审时在真实重试通知后调用 Core 的定向断线入口，观察到 `retrying → unavailable`；再次重放捕获的通知新增展示为 0，活动 Turn 已清除，随后真实中断返回 `interrupted`。这验证本地断线处理入口，未模拟实际 Transport 断网。
+观察经过真实 Client、Core 与共享渠道文案，未向外部平台发消息；平台发送/编辑、成功恢复后的实际输出与跨平台行为仍待观察。
 
 ## 本项目实现映射
 

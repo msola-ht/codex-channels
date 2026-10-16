@@ -1,4 +1,5 @@
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
+import { loadProviderModelCatalogs, previewProviderModelRemoval, applyProviderModelRemoval, ProviderModelManagementError } from "./provider-model-management.mjs";
 import {
   applyManagedProviderDefaultChange,
   previewManagedProviderDefaultChange,
@@ -14,6 +15,8 @@ import {
 import {
   applyCustomPrimaryProviderSave,
   previewCustomPrimaryProviderSave,
+  previewCustomProviderModelsSave,
+  applyCustomProviderModelsSave,
 } from "./custom-primary-provider-management.mjs";
 import { ManagementOperationError, managementOperationError } from "./webui-management-operations.mjs";
 import {
@@ -34,6 +37,7 @@ export async function loadProviderSettingsResource(
     const state = await loadProviderState({ environment });
     return {
       ...projectProviderSettings(state),
+      modelCatalogs: (await loadProviderModelCatalogs({ environment })).catalogs,
       modelWindow: projectModelWindow(
         loadManagedModelWindow(environment),
       ),
@@ -51,6 +55,20 @@ export function normalizeProviderSettingsMutation(input) {
     throw new ManagementOperationError("invalid_json", "Provider 设置操作正文必须是对象");
   }
   switch (input.operation) {
+    case "model.custom.save":
+      if (Object.keys(input).some(key => !["operation", "provider", "model", "models", "probeConnections", "resourceRevision", "confirmationToken"].includes(key))) {
+        throw new ManagementOperationError("invalid_provider_operation", "模型保存请求包含不支持的字段");
+      }
+      if (typeof input.resourceRevision !== "string" || !/^[a-f0-9]{64}$/u.test(input.resourceRevision)) {
+        throw new ManagementOperationError("stale-preview", "请刷新模型目录后重新编辑");
+      }
+      return { operation: input.operation, provider: input.provider, model: input.model, models: input.models, resourceRevision: input.resourceRevision,
+        ...(input.probeConnections === undefined ? {} : { probeConnections: input.probeConnections }) };
+    case "model.remove":
+      if (Object.keys(input).some(key => !["operation", "provider", "model", "confirmationToken"].includes(key))) {
+        throw new ManagementOperationError("invalid_provider_operation", "模型移除请求包含不支持的字段");
+      }
+      return { operation: input.operation, provider: input.provider, model: input.model };
     case "primary.switch":
       return {
         operation: input.operation,
@@ -109,6 +127,10 @@ export function normalizeProviderSettingsMutation(input) {
 export async function previewProviderSettingsMutation(input, environment) {
   try {
     switch (input.operation) {
+      case "model.custom.save":
+        return await previewCustomProviderModelsSave(input, { environment });
+      case "model.remove":
+        return await previewProviderModelRemoval({ provider: input.provider, model: input.model }, { environment });
       case "primary.switch":
         return await previewPrimaryProviderSwitch(
           { providerId: input.providerId, model: input.model },
@@ -153,6 +175,10 @@ export async function previewProviderSettingsMutation(input, environment) {
 export async function applyProviderSettingsMutation(input, environment, preview) {
   try {
     switch (input.operation) {
+      case "model.custom.save":
+        return await applyCustomProviderModelsSave(input, { environment, preview });
+      case "model.remove":
+        return await applyProviderModelRemoval({ provider: input.provider, model: input.model }, { environment, preview });
       case "primary.switch":
         return await applyPrimaryProviderSwitch(
           { providerId: input.providerId, model: input.model },
@@ -193,6 +219,7 @@ export function redactProviderSettingsResult(result) {
   return {
     ...(typeof result.action === "string" ? { action: result.action } : {}),
     ...(typeof result.operation === "string" ? { operation: result.operation } : {}),
+    ...(typeof result.revision === "string" ? { revision: result.revision } : {}),
     ...(result.target !== undefined ? { target: redactTarget(result.target) } : {}),
     ...(result.provider !== undefined ? { provider: redactProvider(result.provider) } : {}),
     ...(result.model !== undefined ? { model: redactModel(result.model) } : {}),
@@ -299,6 +326,7 @@ function redactProvider(provider) {
     ...(provider.id === undefined ? {} : { id: provider.id }),
     ...(provider.displayName === undefined ? {} : { displayName: provider.displayName }),
     ...(provider.name === undefined ? {} : { name: provider.name }),
+    ...(provider.model === undefined ? {} : { model: provider.model }),
     ...(provider.baseUrl === undefined ? {} : { baseUrl: provider.baseUrl }),
     ...(provider.mode === undefined ? {} : { mode: provider.mode }),
     ...(provider.upstreamWireApi === "responses" || provider.upstreamWireApi === "chat_completions"
@@ -319,7 +347,7 @@ function redactModel(model) {
 }
 
 function toManagementError(error) {
-  return managementOperationError(error, [PrimaryProviderManagementError, ModelProviderDefaultManagementError, ModelWindowManagementError], "provider_settings_failed");
+  return managementOperationError(error, [PrimaryProviderManagementError, ModelProviderDefaultManagementError, ModelWindowManagementError, ProviderModelManagementError], "provider_settings_failed");
 }
 
 function redactCatalog(provider) {

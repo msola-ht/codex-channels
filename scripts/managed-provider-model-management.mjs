@@ -47,6 +47,9 @@ export async function updateManagedProviderModels(provider, { environment = proc
     const next = await editCatalog({ catalog: structuredClone(current), requiredModels, definition, previousModels: providers[0].models });
     if (next === undefined) return { action: "back", activation: "none" };
     if (!Array.isArray(next?.models)) throw new Error("模型目录缺少 models");
+    if (current.models.some(model => !next.models.some(candidate => candidate?.slug === model.slug))) {
+      throw new Error("启用选择不能移除已保存模型；请从统一模型管理入口预览并移除");
+    }
     validateEnabledModelSelection(next.models.map(entry => entry?.slug), {
       models: next.models.map(entry => ({ id: entry?.slug })), requiredModels,
     });
@@ -75,12 +78,16 @@ export async function runManagedProviderModelSetup(provider, { environment = pro
   const definition = definitionFor(provider);
   const result = await updateManagedProviderModels(provider, { environment, editCatalog: async ({ catalog, requiredModels, previousModels }) => {
     const action = await prompts.select({ message: `${definition.displayName} 共享模型目录`, options: [
-      { value: "select", label: "选择启用模型" },
+      { value: "select", label: "查看启用模型", hint: "移除请使用统一模型管理入口" },
       { value: "add", label: "添加第三方 Responses 模型", hint: "按上游说明填写准确 ID 和能力" },
       { value: "templates", label: "导入／刷新 DS 模板", hint: "使用该提供商的既有 ID 映射" },
       { value: "back", label: "返回" },
     ] });
     if (prompts.isCancel(action) || action === "back") return undefined;
+    if (action === "select") {
+      output.write(`${catalog.models.map(entry => `  ${entry.slug}${requiredModels.includes(entry.slug) ? "（账户默认）" : ""}`).join("\n")}\n移除请使用统一模型管理入口。\n`);
+      return undefined;
+    }
     const previousIds = catalog.models.map(entry => entry.slug);
     if (action === "add") {
       const model = await promptAdditionalModel(prompts, definition, previousIds);
@@ -111,7 +118,9 @@ export async function runManagedProviderModelSetup(provider, { environment = pro
     const enabled = await promptEnabledProviderModels(prompts, output, {
       label: `${definition.displayName}（全部账户及聚合共用）`,
       models: catalog.models.map(entry => ({ id: entry.slug, name: entry.display_name, reasoningEffort: entry.default_reasoning_level })),
-      enabledModels: action === "add" ? catalog.models.map(entry => entry.slug) : previousIds, requiredModels,
+      enabledModels: action === "add" ? catalog.models.map(entry => entry.slug) : previousIds,
+      requiredModels,
+      retainedModels: previousIds,
     });
     if (!enabled) return undefined;
     return { ...catalog, models: catalog.models.filter(entry => enabled.includes(entry.slug)) };

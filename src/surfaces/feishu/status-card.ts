@@ -28,6 +28,10 @@ export function renderFeishuThreadStatusCard(
   );
 }
 
+export function renderFeishuRetryCard(text: string): FeishuCardDocument {
+  return feishuCardShell("blue", "模型请求状态", [feishuCardPlainText(text)]);
+}
+
 export function renderFeishuPlanCard(
   presentation: PlanPresentation,
 ): FeishuCardDocument {
