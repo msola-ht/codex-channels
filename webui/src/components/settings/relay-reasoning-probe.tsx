@@ -21,6 +21,9 @@ const modeLabels = {
   "off-reasoning-effort-field": "relay.reasoningModes.offReasoningEffortField",
   "off-thinking": "relay.reasoningModes.offThinking",
   "off-enable-thinking": "relay.reasoningModes.offEnableThinking",
+  "off-chat-template-thinking": "relay.reasoningModes.offChatTemplateThinking",
+  "off-google-thinking-budget": "relay.reasoningModes.offGoogleThinkingBudget",
+  "off-reasoning-enabled-thinking": "relay.reasoningModes.offReasoningEnabledThinking",
 } as const satisfies Record<RelayReasoningProbeMode, MessageKey>
 
 const errorLabels: Record<string, MessageKey> = {

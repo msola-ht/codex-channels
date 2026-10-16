@@ -1,6 +1,6 @@
 import type { RelayReasoningProbeMode, RelayReasoningProbeResult } from "@/lib/types"
 
-export const relayReasoningProbeModes = ["passthrough", "off-reasoning-effort", "off-reasoning-enabled", "off-reasoning-effort-field", "off-thinking", "off-enable-thinking"] as const satisfies readonly RelayReasoningProbeMode[]
+export const relayReasoningProbeModes = ["passthrough", "off-reasoning-effort", "off-reasoning-enabled", "off-reasoning-effort-field", "off-thinking", "off-enable-thinking", "off-chat-template-thinking", "off-google-thinking-budget", "off-reasoning-enabled-thinking"] as const satisfies readonly RelayReasoningProbeMode[]
 
 const storageKey = "codex-webui:relay-reasoning-probes:v1"
 const maximumEntries = 20

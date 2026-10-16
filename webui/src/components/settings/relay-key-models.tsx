@@ -24,10 +24,13 @@ const relayModelReasoningLabels = {
   "off-reasoning-effort-field": "relay.reasoningModes.offReasoningEffortField",
   "off-thinking": "relay.reasoningModes.offThinking",
   "off-enable-thinking": "relay.reasoningModes.offEnableThinking",
+  "off-chat-template-thinking": "relay.reasoningModes.offChatTemplateThinking",
+  "off-google-thinking-budget": "relay.reasoningModes.offGoogleThinkingBudget",
+  "off-reasoning-enabled-thinking": "relay.reasoningModes.offReasoningEnabledThinking",
 } as const satisfies Record<RelayModelReasoning, MessageKey>
 
 const reasoningLevels = ["minimal", "low", "medium", "high", "xhigh", "max"] as const
-const reasoningOffMethods = ["off-reasoning-effort", "off-reasoning-enabled", "off-reasoning-effort-field", "off-thinking", "off-enable-thinking"] as const
+const reasoningOffMethods = ["off-reasoning-effort", "off-reasoning-enabled", "off-reasoning-effort-field", "off-thinking", "off-enable-thinking", "off-chat-template-thinking", "off-google-thinking-budget", "off-reasoning-enabled-thinking"] as const
 
 export function RelayModelReasoningLabel({ value }: { value: RelayModelReasoning }) {
   const { t } = useTranslation()

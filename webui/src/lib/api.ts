@@ -554,14 +554,14 @@ export async function probeRelayReasoning(
   onProgress?: (event: Extract<RelayReasoningProbeEvent, { type: "progress" }>) => void,
 ): Promise<RelayReasoningProbeResult> {
   const controller = new AbortController()
-  const effectiveSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(95_000), ...(signal ? [signal] : [])])
+  const effectiveSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(140_000), ...(signal ? [signal] : [])])
   const invalid = () => new ApiClientError("Relay 思考探测响应无效或已中断", 502, "relay_probe_failed")
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   const cancel = () => { void reader?.cancel().catch(() => {}) }
   try {
     const response = await requestResponse(`${API_PREFIX}/management/relay/reasoning-probe`, {
       method: "POST", body: JSON.stringify(input), headers: { accept: "application/x-ndjson" },
-    }, effectiveSignal, 95_000)
+    }, effectiveSignal, 140_000)
     if (response.headers.get("content-type")?.split(";", 1)[0].trim() !== "application/x-ndjson" || !response.body) throw invalid()
     reader = response.body.getReader()
     effectiveSignal.addEventListener("abort", cancel, { once: true })
@@ -611,7 +611,7 @@ function readRelayReasoningProbeEvent(value: unknown, input: RelayReasoningProbe
   const object = (candidate: unknown): candidate is Record<string, unknown> => candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
   const keys = (candidate: Record<string, unknown>, names: string[]) => Object.keys(candidate).length === names.length && names.every(name => Object.hasOwn(candidate, name))
   const count = (candidate: unknown) => candidate === null || typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate >= 0
-  const modes = ["passthrough", "off-reasoning-effort", "off-reasoning-enabled", "off-reasoning-effort-field", "off-thinking", "off-enable-thinking"]
+  const modes = ["passthrough", "off-reasoning-effort", "off-reasoning-enabled", "off-reasoning-effort-field", "off-thinking", "off-enable-thinking", "off-chat-template-thinking", "off-google-thinking-budget", "off-reasoning-enabled-thinking"]
   if (!object(value)) throw new Error("Invalid probe event")
   if (value.type === "error" && keys(value, ["type", "code"]) && value.code === "relay_probe_failed") return { type: "error", code: value.code }
   if (value.type !== "progress" && value.type !== "result"

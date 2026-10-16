@@ -124,8 +124,10 @@ export function RequestsTable({
     },
     {
       id: "source", enableSorting: false, header: t("filters.source"),
-      cell: ({ row }) => <div className="flex flex-col gap-1">
-        <span>{row.original.source === "relay" ? t("filters.relay") : t("filters.owned")}</span>
+      cell: ({ row }) => row.original.source === "relay" ? <TableHint hint={`${t("relay.keysTitle")}: ${row.original.callerDisplayName ?? row.original.keyId ?? "—"}`}>
+        <span>{t("filters.relay")}</span>
+      </TableHint> : <div className="flex flex-col gap-1">
+        <span>{t("filters.owned")}</span>
         <TruncatedText text={row.original.callerDisplayName ?? row.original.callerId ?? ""} className="max-w-40 text-muted-foreground" />
       </div>,
     },
@@ -170,6 +172,7 @@ export function RequestsTable({
       cell: ({ row }) => (
         <span className="flex items-center gap-2 whitespace-nowrap">
           <TrafficModel
+            compareNames={row.original.source !== "relay"}
             provider={row.original.provider}
             requestPurpose={row.original.requestPurpose}
             upstream={row.original.upstreamProvider}
@@ -198,9 +201,7 @@ export function RequestsTable({
       ),
       cell: ({ row }) => {
         const record = row.original
-        if (record.source === "relay") return <div className="flex flex-col gap-1"><RelayRequestStatus key={record.relayRequestId ?? record.id} record={record} />
-          {record.deliveryStatus == null ? null : <span className="text-xs text-muted-foreground">{t("requestDetail.deliverySummary", { value: record.deliveryStatus === "finished" ? t("filters.deliveryFinished") : record.deliveryStatus === "disconnected" ? t("filters.deliveryDisconnected") : t("filters.deliveryFailed") })}</span>}
-        </div>
+        if (record.source === "relay") return <RelayRequestStatus key={record.relayRequestId ?? record.id} record={record} />
         const badge = isClientInterruption(record) ? <Badge variant="secondary">{t("metrics.interrupted")}</Badge> : <StatusBadge status={record.status} />
         if (isClientInterruption(record)) return <TableHint hint={t("metrics.clientInterruption")}>{badge}</TableHint>
         if (!record.errorMessage && !record.errorType && !record.errorCode) return badge

@@ -16,7 +16,7 @@ export const modelRelayUsage = `用法：codexc relay <命令>
   listen                         交互设置：关闭、仅本机、局域网或指定内网 IP
   enable                         启用服务配置（安装用 codexc install，单独启动用 codexc start relay）
 --model-reasoning 接受单个 JSON 对象，键须完整匹配所选模型，值为 passthrough|off|minimal|low|medium|high|xhigh|max
-或 off-reasoning-effort|off-reasoning-enabled|off-reasoning-effort-field|off-thinking|off-enable-thinking。
+或 off-reasoning-effort|off-reasoning-enabled|off-reasoning-effort-field|off-thinking|off-enable-thinking|off-chat-template-thinking|off-google-thinking-budget|off-reasoning-enabled-thinking。
 edit 省略 --model 时须匹配当前全部模型。--reasoning 设置整把 Key 策略并清除逐模型策略，两种参数不可同时使用。
 所有命令支持 -h/--help；新秘密仅在成功保存后输出一次。`;
 

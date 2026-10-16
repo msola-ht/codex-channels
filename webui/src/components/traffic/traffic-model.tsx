@@ -14,7 +14,7 @@ const comparisonKeys: Readonly<Record<string, MessageKey>> = {
 }
 
 /** 响应模型与实际路由分别展示；不从模型名或备用提供商推断上游身份。 */
-export function TrafficModel({ request, responses, fallback, upstream, provider: source, requestPurpose }: { provider?: string | null; request?: string | null; responses: string[]; fallback?: string | null; upstream?: string | null; requestPurpose?: string | null }) {
+export function TrafficModel({ request, responses, fallback, upstream, provider: source, requestPurpose, compareNames = true }: { provider?: string | null; request?: string | null; responses: string[]; fallback?: string | null; upstream?: string | null; requestPurpose?: string | null; compareNames?: boolean }) {
   const { t } = useTranslation()
   const isClinePass = isClinePassProvider(source)
   const names = isClinePass ? [] : [...new Set(responses.map(name => name.trim()).filter(Boolean))]
@@ -30,17 +30,17 @@ export function TrafficModel({ request, responses, fallback, upstream, provider:
   if (names.length === 0 && provider === null && alias === null) return <TruncatedText text={name} className="max-w-64" />
   const comparisonHint = isClinePass
     ? t("modelComparison.requestOnly", { name: request ?? notProvided })
-    : t("modelComparison.requestAndResponses", { request: request ?? notProvided, responses: echo })
+    : t(compareNames ? "modelComparison.requestAndResponses" : "modelComparison.requestAndEcho", { request: request ?? notProvided, responses: echo })
   const upstreamHint = provider === null ? "" : t("modelComparison.upstream", { provider })
   return (
     <TableHint hint={[alias === null ? "" : t("requestPurpose.modelAliasHint"), comparisonHint, upstreamHint].filter(Boolean).join(" ")}>
       <span className="inline-flex max-w-[32rem] flex-wrap items-center gap-1.5 align-middle">
         <span className="max-w-64 truncate">{name ?? "—"}</span>
         {names.filter(response => response !== request?.trim()).map(response => {
-          const comparison = modelNameComparison(request, response)
-          const comparisonKey = comparisonKeys[comparison]
+          const comparison = compareNames ? modelNameComparison(request, response) : null
+          const comparisonKey = comparison === null ? undefined : comparisonKeys[comparison]
           const mismatch = comparisonKey === "modelComparison.mismatch"
-          return <Badge key={response} size="sm" variant={mismatch ? "destructive" : "outline"} className="max-w-48" title={t("modelComparison.responseBadge", { name: response, comparison: comparisonKey === undefined ? comparison : t(comparisonKey) })}>
+          return <Badge key={response} size="sm" variant={mismatch ? "destructive" : "outline"} className="max-w-48" title={comparison === null ? t("modelComparison.responseEcho", { name: response }) : t("modelComparison.responseBadge", { name: response, comparison: comparisonKey === undefined ? comparison : t(comparisonKey) })}>
             {mismatch ? <TriangleAlertIcon data-icon="inline-start" /> : null}
             <span className="truncate">{response}</span>
           </Badge>

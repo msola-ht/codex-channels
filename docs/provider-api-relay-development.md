@@ -100,14 +100,23 @@ DS 历史引用由上游按其无状态合同忽略，客户端仍须携带完�
 | `off` | 原有默认映射：受支持 DS Responses 和 CLP Flash Chat 为 `reasoning.effort=none`，DS Chat 为 `reasoning_effort=none`，其他明确支持的 CLP Chat 为 `reasoning.enabled=false`；未声明能力的组合保留客户端参数 |
 | `off-reasoning-effort` | `reasoning: { effort: "none" }` |
 | `off-reasoning-enabled` | `reasoning: { enabled: false }` |
+| `off-reasoning-enabled-thinking` | `reasoning: { enabled: false }, thinking: { type: "disabled" }`，对照 Cline DeepSeek 的组合关闭字段 |
 | `off-reasoning-effort-field` | `reasoning_effort: "none"` |
 | `off-thinking` | `thinking: { type: "disabled" }` |
 | `off-enable-thinking` | `enable_thinking: false` |
+| `off-chat-template-thinking` | `chat_template_kwargs: { enable_thinking: false }` |
+| `off-google-thinking-budget` | `extra_body: { google: { thinking_config: { thinking_budget: 0 } } }` |
+
+新增嵌套方式分别参考 [Qwen vLLM](https://qwen.readthedocs.io/zh-cn/stable/deployment/vllm.html) 和 [Gemini OpenAI 兼容接口](https://ai.google.dev/gemini-api/docs/openai)。Gemini 零预算仅适用于允许关闭思考的型号；这些字段不保证任何 Chat/Responses 中间服务支持。强制策略会移除其他已知思考控制，包括模板中的 `enable_thinking` 和 Google 的 `thinking_config`，保留其他模板及 Google 参数；结构不合法或 SDK 包装层中的冲突字段明确拒绝。
+
+DS 原生 Responses 的自动 `off` 同样清除客户端 `reasoning.enabled`，避免与强制写入的 `effort=none` 冲突；保留 `summary` 等非开关选项。
+
+旧六项或八项浏览器记录不符合当前九项结果合同，读取时显示缓存不可用且不覆盖原始数据；用户可手动清除检测历史后重新检测。升级不迁移或删除缓存，不更改已保存的 Key 策略；回退代码可继续读取未清除的旧记录。新增策略保存仍使用现有配置预览、确认和备份流程；回退到不支持新策略的版本前应先改回原有策略。
 
 显式字段方式适用于受管和自定义 Relay 提供商，不按模型名称推断其有效性。2026-10-15 的 CLP Flash 受限实测中，`enabled=false` 未返回思考正文，但仍报告非零推理 Token，详见 [CLP 当前限制](cline-pass.md)。
-WebUI 的 `POST /api/v1/management/relay/reasoning-probe` 接受配置 revision、精确公开模型 ID 和原生协议，不接受调用地址或凭据。用户手动开始后，按固定顺序比较无控制基线及五种显式关闭方式，共最多 6 次请求、每次请求 64 个输出 Token；不自动重试，不写服务器配置或历史。复用 Relay 的模型材料、参数投影、CLP 路由限定、代理选择和直接 Chat/Responses 解析；请求前及出站前复核版本，材料变化时停止。每个 WebUI 实例最多执行一组，单请求限时 15 秒、总预算 90 秒，成功响应最多 128 KiB（含 SSE 注释等原始正文），错误正文沿用 64 KiB 上限。断连、取消和超时释放网络资源。以 `application/x-ndjson` 推送 `progress`、最终 `result` 或受控 `error` 事件；每项开始与结束均推送当前方式及六行快照，`observedAtMs` 记录整组开始时间。前端限制单行 64 KiB、整流 256 KiB，95 秒预算覆盖完整响应读取；缺少最终结果的断流不能当作完成。返回逐项结构化状态、HTTP 状态及有限用量观察，不返回正文、凭据或任意上游错误；缺失推理用量保持未知，结果不判定内部推理是否关闭。采用结果只回填模型草稿，保存仍走既有预览确认。
+WebUI 的 `POST /api/v1/management/relay/reasoning-probe` 接受配置 revision、精确公开模型 ID 和原生协议，不接受调用地址或凭据。用户手动开始后，按固定顺序比较无控制基线及八种显式关闭方式，共最多 9 次请求、每次请求 64 个输出 Token；不自动重试，不写服务器配置或历史。复用 Relay 的模型材料、参数投影、CLP 路由限定、代理选择和直接 Chat/Responses 解析；请求前及出站前复核版本，材料变化时停止。每个 WebUI 实例最多执行一组，单请求限时 15 秒、总预算 135 秒，成功响应最多 128 KiB（含 SSE 注释等原始正文），错误正文沿用 64 KiB 上限。断连、取消和超时释放网络资源。以 `application/x-ndjson` 推送 `progress`、最终 `result` 或受控 `error` 事件；每项开始与结束均推送当前方式及九行快照，`observedAtMs` 记录整组开始时间。前端限制单行 64 KiB、整流 256 KiB，140 秒预算覆盖完整响应读取；缺少最终结果的断流不能当作完成。返回逐项结构化状态、HTTP 状态及有限用量观察，不返回正文、凭据或任意上游错误；缺失推理用量保持未知，结果不判定内部推理是否关闭。采用结果只回填模型草稿，保存仍走既有预览确认。
 
-浏览器使用独立版本化 localStorage 缓存六项全部执行、`stoppedReason=null` 的最终结果，每个公开模型 ID 与协议保留最近一组，最多 20 组、7 天；缓存与 Key 无关，但采用必须匹配当前配置 revision。读取时校验版本、结构和容量，损坏或不支持的版本不静默覆盖；存储失败显示提示并保留本次内存结果。记录只含受限观察元数据，无凭据或正文，支持显式清除；取消、断流或整组提前停止的结果不覆盖已有完整记录。该缓存可丢弃，无需迁移或服务器数据备份，回滚代码不会改变 Gateway 配置或数据库；重新探测始终需要用户手动发起。
+浏览器使用独立版本化 localStorage 缓存九项全部执行、`stoppedReason=null` 的最终结果，每个公开模型 ID 与协议保留最近一组，最多 20 组、7 天；缓存与 Key 无关，但采用必须匹配当前配置 revision。读取时校验版本、结构和容量，损坏或不支持的版本不静默覆盖；存储失败显示提示并保留本次内存结果。记录只含受限观察元数据，无凭据或正文，支持显式清除；取消、断流或整组提前停止的结果不覆盖已有完整记录。该缓存可丢弃，无需迁移或服务器数据备份，回滚代码不会改变 Gateway 配置或数据库；重新探测始终需要用户手动发起。
 `extra_body` / `extraBody` 内的思考控制字段与关闭策略冲突时返回具体字段路径；
 跟随客户端不增加该限制。不修改历史思考内容或隐藏上游输出。
 

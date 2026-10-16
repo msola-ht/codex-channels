@@ -2,7 +2,7 @@ import type { RelayModelCapability, RelayReasoningEffort, RelayModelReasoning } 
 export type { RelayModelCapability, RelayReasoningEffort, RelayModelReasoning } from "../../runtime/chat-reasoning.mjs";
 import { supportsChatReasoningOff } from "../../runtime/chat-reasoning.mjs";
 import { ModelConversionError } from "./validation.js";
-import { applyExplicitReasoningPolicy, assertNoNestedReasoningControls, isRequestObject, reasoningControlFields, validateDirectModel, validateDirectStream } from "./direct-request.js";
+import { applyExplicitReasoningPolicy, clearReasoningControls, isRequestObject, validateDirectModel, validateDirectStream } from "./direct-request.js";
 
 /** Model parameters stay opaque to the relay; only local routing/delivery fields are typed. */
 export interface DirectChatRequest extends Record<string, unknown> {
@@ -48,9 +48,7 @@ export function applyChatReasoningPolicy(request: DirectChatRequest, provider: s
     effort => provider.startsWith("clp-") ? clinePassChatReasoningControl(request.model, effort) : { reasoning_effort: effort }, DirectChatRequestError);
   const knownOff = supportsChatReasoningOff(provider, request.model);
   if (!knownOff && !extraModel?.reasoning_efforts.includes("none")) return request;
-  assertNoNestedReasoningControls(request, DirectChatRequestError);
-  const result: DirectChatRequest = { ...request };
-  for (const field of reasoningControlFields) delete result[field];
+  const result = clearReasoningControls(request, DirectChatRequestError);
   if (provider.startsWith("ds-")) result.reasoning_effort = "none";
   else Object.assign(result, clinePassChatReasoningControl(request.model, "none"));
   return result;
