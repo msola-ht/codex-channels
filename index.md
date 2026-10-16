@@ -20,6 +20,7 @@
 
 ## 协议与设计
 
+- [`docs/unified-model-management-design.md`](docs/unified-model-management-design.md)：第三方模型统一管理设计提案（尚未实施），覆盖接入、目录、移除、引用保护、运行时生效与恢复。
 - [`docs/rust-migration-retrospective.md`](docs/rust-migration-retrospective.md)：Rust 迁移暂停结论、问题复盘、已有成果与网关重写建议；不是现行实施计划。
 - [`docs/delivery.md`](docs/delivery.md)：关键结果投递箱的容量、状态、离线核对与备份恢复。
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：本机管理写接口的 Bearer 认证、Origin、修订、防重放、任务与审计边界。
