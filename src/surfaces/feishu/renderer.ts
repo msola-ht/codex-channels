@@ -153,6 +153,9 @@ export function renderFeishuOutput(
   ) => number | null,
 ): string | null {
   switch (event.type) {
+    case "turn.retry":
+      // The Outbox owns the editable retry card and its transient message handle.
+      return null;
     case "hook.completed":
       return renderFeishuLifecyclePresentation(createHookCompletedPresentation(event));
     case "autoApprovalReview.updated": {

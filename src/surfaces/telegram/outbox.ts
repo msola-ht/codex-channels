@@ -1,4 +1,5 @@
 import { SnapshotDelivery } from "../snapshot-delivery.js";
+import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
 import { isPersistentOutput } from "../persistent-output.js";
 import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
@@ -126,6 +127,7 @@ export class TelegramOutbox {
   private nextOperationLogSegment = 0;
   private readonly activeOperations = new Set<string>();
   private readonly snapshots = new SnapshotDelivery();
+  private readonly retryMessages = new TurnRetryMessages<number>();
   private readonly reasoningGenerations = new Map<string, number>();
   private readonly replyTargets = new TurnReplyTargets<number>();
   private readonly typing: TelegramTypingIndicator;
@@ -187,6 +189,7 @@ export class TelegramOutbox {
   observe(event: OutputEvent): void {
     if (this.closed || event.target.surface !== "telegram" || event.target.accountId !== (this.options.accountId ?? telegramDefaultAccountId)) return;
     this.snapshots.observe(event);
+    this.retryMessages.observe(event);
     if (event.type === "text.completed" && isEmptyCommentary(event)) this.textStreams.discard(event);
     if (event.type === "turn.started") {
       this.expireRunningOperations(event.threadId, (key) => key !== this.turnKey(event.threadId, event.turnId));
@@ -257,6 +260,13 @@ export class TelegramOutbox {
   private handleEvent(event: OutputEvent): void {
     const chatId = event.target.conversationId;
     switch (event.type) {
+      case "turn.retry": {
+        const run = this.retryMessages.prepare(event);
+        if (run) this.enqueue(chatId,
+          (signal) => run((text, id) => this.sendRetryStatus(chatId, text, id, signal)), true,
+          { coalesceKey: surfaceDeliveryCoalesceKey(event)! });
+        return;
+      }
       case "turn.started":
         this.enqueue(
           chatId,
@@ -702,6 +712,7 @@ export class TelegramOutbox {
     this.operationUpdates.clear();
     this.planProgress.clear();
     this.reasoningMessages.clear();
+    this.retryMessages.clear();
     this.activeOperations.clear();
     this.reasoningGenerations.clear();
     this.replyTargets.clear();
@@ -1248,6 +1259,13 @@ export class TelegramOutbox {
       signal,
     );
     return message.message_id;
+  }
+
+  private async sendRetryStatus(chatId: string, text: string, messageId?: number, signal?: AbortSignal): Promise<number> {
+    if (messageId === undefined) return this.sendMessage(chatId, text, undefined, true, signal);
+    await this.executor.editMessageText({ chatId, critical: true },
+      (requestSignal) => this.api.editMessageText(chatId, messageId, text, {}, telegramAbortSignal(requestSignal)), signal);
+    return messageId;
   }
 
   private async sendHtmlMessage(

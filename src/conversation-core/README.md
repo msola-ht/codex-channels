@@ -18,7 +18,7 @@
   Token 与压缩摘要，以及组合层从指标库恢复的单次响应用量汇总与缺失计数；上游 `upstreamTtftMs` 仅保留内部原始统计。统计摘要不计算模型请求聚合耗时、
   本地首段回复延迟或 TPS；完成卡展示官方整轮耗时，以及组合层从官方历史恢复的会话累计执行耗时；
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
-  不污染最终完成状态，Thread 与全局 warning 分开路由；MCP 状态通知按 Provider、Thread 与服务去重，
+  不污染最终完成状态；当前活动 Turn 的可重试错误发布 `turn.retry` 临时状态，同一连续重试段去重，收到模型文本或推理进展后转为继续处理，最终错误和官方完成状态结束展示；不携带上游错误正文，也不由 Gateway 重发模型请求。新 Turn、解绑、Thread 生命周期和连接断开发布本地 `unavailable` 状态并清理跟踪，不将展示失效解释为官方 Turn 终态；bootstrap 在绑定变化时调用 `pruneUnboundTurns()`，防止等到后续查询才清理旧状态。Thread 与全局 warning 分开路由；MCP 状态通知按 Provider、Thread 与服务去重，
   重试的 `starting` 不清除持续故障指纹，错误内容或原因变化仍通知，官方 `ready` 只在故障后通知恢复；
   MCP OAuth 完成结果按 Thread 精确投递，
   无 Thread 的结果只广播给相同 Provider 的会话。

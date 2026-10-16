@@ -1,5 +1,6 @@
 import { isPersistentOutput } from "../persistent-output.js";
 import { SnapshotDelivery } from "../snapshot-delivery.js";
+import { TurnRetryMessages } from "../turn-retry-presentation.js";
 import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import type { Logger } from "pino";
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
@@ -12,7 +13,7 @@ import type {
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { ContextCompactionNotices } from "../operation-presentation.js";
-import { resolveSurfaceDelivery } from "../delivery-policy.js";
+import { resolveSurfaceDelivery, surfaceDeliveryCoalesceKey } from "../delivery-policy.js";
 import { exponentialRetryDelay, withDeliveryRetry } from "../delivery-retry.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import type { SurfaceOutputPort } from "../types.js";
@@ -93,6 +94,7 @@ export interface WeixinOutboxOptions {
 
 export class WeixinOutbox implements SurfaceOutputPort {
   private readonly snapshots = new SnapshotDelivery();
+  private readonly retryMessages = new TurnRetryMessages<void>();
   private readonly compactionNotices = new ContextCompactionNotices();
   private readonly delivery: ConversationDeliveryQueue;
   private readonly accountId: string;
@@ -140,12 +142,19 @@ export class WeixinOutbox implements SurfaceOutputPort {
     ) {
       return;
     }
+    if (!DeliveryReceipt.current()) this.observe(event);
     withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+  }
+
+  observe(event: OutputEvent): void {
+    if (this.closed || !this.matches(event.target)) return;
+    this.snapshots.observe(event);
+    this.retryMessages.observe(event, false);
   }
 
   deliverSnapshot(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void> {
     return this.snapshots.run(event, signal, authorized, () => {
-      if (this.closed || !this.matches(event.target) || event.type !== "hook.completed") {
+      if (this.closed || !this.matches(event.target) || (event.type !== "hook.completed" && event.type !== "turn.retry")) {
         throw new Error("状态投递目标无效或已关闭");
       }
       withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
@@ -171,6 +180,13 @@ export class WeixinOutbox implements SurfaceOutputPort {
     // 通知和上下文压缩，推理、计划、其他操作、连接等事件不占用该预算（详见 delivery-policy.ts）。
     const decision = resolveSurfaceDelivery("weixin", event);
     if (decision.disposition === "ignore") {
+      return;
+    }
+    if (event.type === "turn.retry") {
+      const run = this.retryMessages.prepare(event, true);
+      if (run) this.delivery.enqueue(event.target.conversationId,
+        (signal) => run((text) => this.sendEvent(event, text, signal, this.contexts.get(event.target))), true,
+        { coalesceKey: surfaceDeliveryCoalesceKey(event)! });
       return;
     }
     if (event.type === "turn.started") {
@@ -259,6 +275,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     }
     this.closed = true;
     await this.delivery.close();
+    this.retryMessages.clear();
     this.contexts.clear();
   }
 

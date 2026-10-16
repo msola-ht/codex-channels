@@ -37,11 +37,10 @@ export interface BindingRestoreCoordinatorOptions {
   scheduledRecovery(): ScheduledBindingRecoveryPort | undefined;
   releaseBackground(threadId: string, isCurrent: () => boolean): Promise<boolean>;
   restored?(threadId: string): void;
-  markTurnStarted(
-    target: ConversationBinding["target"],
-    threadId: string,
-    turnId: string,
-  ): void;
+  trackThreadActivity(threadId: string): {
+    restore(target: ConversationBinding["target"], activeTurnId: string | null): void;
+    stop(): void;
+  };
   logger: Logger;
 }
 
@@ -177,6 +176,8 @@ export class BindingRestoreCoordinator {
     };
     const canRestore = (binding: ConversationBinding): boolean =>
       isConnectionCurrent(binding) && this.isCurrentBinding(binding);
+    const activity = new Map([...candidateThreadIds].map(threadId =>
+      [threadId, this.options.trackThreadActivity(threadId)]));
     let failures: SubscriptionRestoreFailure[];
     try {
       const scheduledProviders = new Map<string, string>();
@@ -193,24 +194,9 @@ export class BindingRestoreCoordinator {
           bindingProviders.set(binding.threadId, this.options.codex.knownProvider(binding.threadId));
           restoredThreadIds.add(binding.threadId);
           restoredBindings.set(binding.threadId, binding);
-          if (thread.status.type !== "active") return;
-          if (thread.activeTurnId) {
-            this.options.markTurnStarted(
-              binding.target,
-              binding.threadId,
-              thread.activeTurnId,
-            );
-            this.options.logger.info(
-              {
-                surface: binding.target.surface,
-                accountId: binding.target.accountId,
-                conversationId: binding.target.conversationId,
-                threadId: binding.threadId,
-                turnId: thread.activeTurnId,
-              },
-              "已恢复正在运行的 Codex Turn",
-            );
-          }
+          // Notifications received during resume are newer than its snapshot.
+          activity.get(binding.threadId)?.restore(binding.target,
+            thread.status.type === "active" ? thread.activeTurnId : null);
         },
         (binding) => {
           const modelProvider = scheduledProviders.get(binding.threadId);
@@ -266,6 +252,7 @@ export class BindingRestoreCoordinator {
         }
       }
     } finally {
+      for (const observer of activity.values()) observer.stop();
       for (const threadId of candidateThreadIds) {
         this.restoringThreadIds.delete(threadId);
       }

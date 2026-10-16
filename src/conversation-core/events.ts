@@ -352,6 +352,7 @@ export type OutputEvent =
   | { type: "thread.name"; target: ConversationTarget; threadId: string; name: string | null; background?: boolean }
   | { type: "thread.availability"; target: ConversationTarget; threadId: string; availability: "occupied" | "available"; background?: boolean }
   | { type: "turn.reasoning"; target: ConversationTarget; threadId: string; turnId: string; summary: string; elapsedMs: number; final?: boolean; background?: boolean }
+  | { type: "turn.retry"; target: ConversationTarget; threadId: string; turnId: string; status: "retrying" | "resumed" | "completed" | "failed" | "interrupted" | "unavailable"; background?: boolean }
   | { type: "connection.lost"; target: ConversationTarget; threadId: string; message: string; background?: boolean }
   | { type: "connection.restored"; target: ConversationTarget; threadId: string; message: string; background?: boolean }
   | ({ type: "account.updated"; target: ConversationTarget } & AccountStatus)

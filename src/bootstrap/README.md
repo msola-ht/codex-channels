@@ -57,7 +57,7 @@
   同一组合根还把 Luna Reserve 状态机接到最终 `usageLimitExceeded`、Thread/账户生命周期和关闭顺序；
   切换通知复用平台无关输出事件，不让 App Server Reader 等待额度 RPC 或渠道网络。
 - `gateway-reconnect-coordinator.ts`：拥有断线检查去重、串行 Provider 重连、12 次有界退避和关闭取消；通过断线代次拒绝过期恢复确认，重复断线不会重置未完成恢复的重试预算。连接成功后的绑定恢复失败只重试恢复阶段，不重复握手。主动停止的 Provider 不自动重启。关闭时等待断线检查与重连任务，等待时限仍由顶层生命周期控制；绑定状态由 Binding Restore Coordinator 管理。
-- `binding-restore-coordinator.ts`：单独拥有待恢复 Thread、Provider 断线绑定、恢复中集合、写锁占用通知和有界退避任务；Provider 重连与 Gateway 停止通过显式方法恢复、取消并等待，不保存第二套绑定。成功恢复后通过回调触发耗时补齐，停止后的迟到恢复不触发回调。
+- `binding-restore-coordinator.ts`：单独拥有待恢复 Thread、Provider 断线绑定、恢复中集合、写锁占用通知和有界退避任务；Provider 重连与 Gateway 停止通过显式方法恢复、取消并等待，不保存第二套绑定。恢复期间通过 Core 临时活动观察器合并实时 Turn 开始与完成，旧快照不重新激活已结束 Turn；观察器在成功、失败或取消后释放。成功恢复后通过回调触发耗时补齐，停止后的迟到恢复不触发回调。
   普通后台绑定在 Router 恢复锁释放后交给 Application 的统一释放入口，核对父 Turn、权威后代、Queue 与交互保护；仅确认释放后提示离线结束，暂时失败保留绑定并进入原恢复重试。正常后台清理的补偿失败也交回绑定恢复，避免失去订阅后依赖后续通知才能重试。恢复与清理复核原绑定、Provider 断线代次及停止状态，失效恢复不继续释放。
   恢复容器及退避计数只在协调器内部创建，组合根不持有或注入其可变状态。
 - `scheduled-task-composition.ts`：在功能启用时集中创建计划任务 Store、Executor、Run Coordinator、Scheduler、

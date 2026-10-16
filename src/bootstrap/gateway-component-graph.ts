@@ -182,6 +182,8 @@ export abstract class GatewayComponentGraph {
   private readonly primaryProvider: string;
   private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
+  private readonly notificationGenerations = new WeakMap<RpcNotification, { provider: string; generation: number }>();
+  private readonly providerNotificationGenerations = new Map<string, number>();
   private readonly output: EventBus<OutputEvent>;
   private readonly surfaceModules: SurfaceRuntimeModule[];
   private readonly surfaces: SurfaceAdapter[];
@@ -407,6 +409,7 @@ export abstract class GatewayComponentGraph {
       this.workspaces,
       config.scheduledTasksEnabled ? [scheduledTaskToolSpec] : [],
       () => {
+        this.core?.pruneUnboundTurns();
         this.asyncQuestions?.cancelStale();
         this.approval?.cancelStale();
         void this.providerIdleReleaser?.closeIfIdle().catch((error) => {
@@ -1226,6 +1229,12 @@ export abstract class GatewayComponentGraph {
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
+        const source = this.notificationGenerations.get(notification);
+        const stale = source !== undefined
+          && source.generation !== (this.providerNotificationGenerations.get(source.provider) ?? 0);
+        // Preserve accepted results, but never revive live status from a disconnected stream.
+        if (stale && (coreEvent.type === "turn.started" || coreEvent.type === "item.reasoning.delta"
+          || (coreEvent.type === "turn.error" && coreEvent.willRetry))) return;
         if (coreEvent.type === "turn.started") {
           this.autoApprovalReviewNotifications.observeParentRun(coreEvent.threadId, coreEvent.turnId);
         }
@@ -1342,9 +1351,7 @@ export abstract class GatewayComponentGraph {
             dispatchQueued: false,
             isCurrent,
           })) === true,
-      markTurnStarted: (target, threadId, turnId) => {
-        this.core.markTurnStarted(target, threadId, turnId);
-      },
+      trackThreadActivity: (threadId) => this.core.trackThreadActivity(threadId),
       logger: this.logger,
     });
     return this.bindingRestore;
@@ -1627,6 +1634,10 @@ export abstract class GatewayComponentGraph {
       await this.relayMetrics?.apply(true);
       this.requireRunning();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
+        const provider = notification.provider ?? this.primaryProvider;
+        this.notificationGenerations.set(notification, {
+          provider, generation: this.providerNotificationGenerations.get(provider) ?? 0,
+        });
         // Revoke live tools before bounded asynchronous notification consumers.
         const toolEvent = toConversationInputEvent(notification);
         if (toolEvent) this.scheduledTasks?.toolHandler.handleInput(toolEvent);
@@ -1642,6 +1653,7 @@ export abstract class GatewayComponentGraph {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
+        this.providerNotificationGenerations.set(provider, (this.providerNotificationGenerations.get(provider) ?? 0) + 1);
         this.scheduledTasks?.toolHandler.cancelThreads((threadId) => this.codex.knownProvider(threadId) === provider);
         this.conversationIdleReleaser?.cancelPending(new Set(this.router.allBindings()
           .filter((binding) => this.codex.knownProvider(binding.threadId) === provider)
