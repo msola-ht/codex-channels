@@ -54,7 +54,7 @@ export class RelayMetricsComposition {
     if (rejection) return rejection;
     this.options.writer.enqueue({
       ...sample, transport: "http", operation: "response", model: sample.responseModel ?? sample.requestModel,
-      serviceTier: null, requestServiceTier: null, reasoningEffort: null, httpStatus: sample.httpStatus ?? null,
+      serviceTier: null, requestServiceTier: null, reasoningEffort: sample.reasoningEffort ?? null, httpStatus: sample.httpStatus ?? null,
       errorType: sample.errorCode ?? null, errorCode: sample.errorCode ?? null, errorMessage: null, incompleteReason: null,
       inputTokens: sample.inputTokens ?? null, cachedInputTokens: sample.cachedInputTokens ?? null,
       outputTokens: sample.outputTokens ?? null, reasoningOutputTokens: sample.reasoningOutputTokens ?? null,

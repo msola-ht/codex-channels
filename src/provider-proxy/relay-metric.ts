@@ -13,6 +13,8 @@ export interface RelayMetric extends DirectChatUsage, ModelRequestDiagnostics {
   credentialGeneration: number;
   provider: string;
   requestModel: string;
+  /** Explicit effort in the submitted request, after per-key policy; absent means unobserved. */
+  reasoningEffort?: string;
   responseModel?: string;
   userAgent?: string;
   responseFormat: "json" | "sse";

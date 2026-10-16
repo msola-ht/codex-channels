@@ -204,5 +204,5 @@ Responses WS 归一化同样要求文本 JSON 消息且单条不超过 16 MiB；
 Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 服务生命周期；转换后的 Responses 事件复用现有指标采集。统一阶段预算来自 `runtime/model-request-policy.mjs`：上传 30 秒、准备 30 秒、真实上游首响应头 300 秒、完整 Chat 数据事件空闲 300 秒；没有生成总期限。正文接收超时返回 408 `upload_timeout`；上游等待超时返回 504 `upstream_timeout`。交付受阻最多 30 秒，终态与失败交付使用独立 5 秒预算，外层统计代理不再以 305 秒计时抢先截断。完整数据事件空闲不因注释心跳或不完整字节续期；下游背压期间暂停上游事件等待。工具转换仍保留完整校验后发布的合同；转换前有 Chat 帧不等于 Codex 已看到 Responses 事件，长时间没有可交付事件时仍受 Codex 自身的 300 秒空闲限制，不伪造保活事件。
 
 - `relay-traffic-dump.ts`：Relay Chat/Responses JSON/SSE 脱敏采集，复用 V2 存储与 ChatDiagnostics 白名单采集；JSON（含成功包装）读取 message、SSE 读取 delta 中的上游诊断，终态按同一 interaction 写入既有 chat_diagnostics 与 upstreamProvider，缺失不推断；所有账户共享容量和待写预算，按协议使用 relay.chat/relay.responses 标签，共享两协议容量和待写预算；`prepare(signal)` 在取消边界内异步初始化容量，服务组合层在其后复核全局采集设置；`setRetentionDays` 使用全局保留天数，`open(provider, signal, debug)` 复核取消后立即尝试采集，首次容量初始化期间跳过并报告 initializing，不等待磁盘；共享存储报告实际接受的写入量，在途调用单独预留预算；后台单任务清理历史并保护活动及新建批次，整理期间继续采集；维护与关闭各有 5 秒预算，采集失败不影响模型交付；`diagnostics()` 提供当前 owner 状态、活动数与容量跳过累计，不推断历史未采集原因。
-- `relay-metric.ts`：直接模型调用的最小跨进程指标合同，不包含消息正文或凭据。
+- `relay-metric.ts`：直接模型调用的最小跨进程指标合同，包含策略处理后的明确出站思考等级；不包含消息正文或凭据。
 - `relay-metrics-channel.ts`：版本化、受限帧与连接的私有指标 IPC；显式接收/拒绝，未知确认不判定为丢失；异步接收任务最多 8 个，断连时取消，任务实际结束才释放名额。

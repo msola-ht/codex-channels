@@ -9,7 +9,7 @@ export type RelayMetricRejection = "invalid_sample" | "unknown_provider" | "queu
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const identity = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 const sampleKeys = [...modelRequestDiagnosticKeys, "traffic", "source", "threadId", "turnId", "relayRequestId", "callerId", "keyId", "credentialGeneration", "provider", "requestModel", "userAgent",
-  "responseModel", "responseFormat", "status", "deliveryStatus", "requestStartedAtMs", "responseCompletedAtMs", "totalDurationMs", "firstTokenMs", "responseTimeMs", "generationTiming",
+  "responseModel", "reasoningEffort", "responseFormat", "status", "deliveryStatus", "requestStartedAtMs", "responseCompletedAtMs", "totalDurationMs", "firstTokenMs", "responseTimeMs", "generationTiming",
   "httpStatus", "errorCode", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"];
 
 export class RelayMetricsServer {
@@ -83,6 +83,8 @@ function validSample(value: unknown, provider: unknown, requestId: unknown): val
     }
     if (sample.userAgent !== undefined && (typeof sample.userAgent !== "string" || sample.userAgent.length < 1
       || sample.userAgent.length > 512 || [...sample.userAgent].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))) return false;
+    if (sample.reasoningEffort !== undefined && (typeof sample.reasoningEffort !== "string" || sample.reasoningEffort.length < 1
+      || sample.reasoningEffort.length > 64 || [...sample.reasoningEffort].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))) return false;
     for (const key of ["requestModel", "responseModel", "errorCode"]) {
       const text = sample[key];
       if (text === undefined && key !== "requestModel") continue;
