@@ -59,6 +59,8 @@ export function applyResponsesReasoningPolicy(request: DirectResponsesRequest, p
   if (!provider.startsWith("ds-") || !supportsChatReasoningOff(provider, request.model)) {
     return request;
   }
-  const result: DirectResponsesRequest = { ...clearReasoningControls(request, DirectResponsesRequestError), reasoning: { ...(isRequestObject(request.reasoning) ? request.reasoning : {}), effort: "none" } };
+  const reasoning: Record<string, unknown> = { ...(isRequestObject(request.reasoning) ? request.reasoning : {}), effort: "none" };
+  delete reasoning.enabled;
+  const result: DirectResponsesRequest = { ...clearReasoningControls(request, DirectResponsesRequestError), reasoning };
   return result;
 }

@@ -109,6 +109,8 @@ DS 历史引用由上游按其无状态合同忽略，客户端仍须携带完�
 
 新增嵌套方式分别参考 [Qwen vLLM](https://qwen.readthedocs.io/zh-cn/stable/deployment/vllm.html) 和 [Gemini OpenAI 兼容接口](https://ai.google.dev/gemini-api/docs/openai)。Gemini 零预算仅适用于允许关闭思考的型号；这些字段不保证任何 Chat/Responses 中间服务支持。强制策略会移除其他已知思考控制，包括模板中的 `enable_thinking` 和 Google 的 `thinking_config`，保留其他模板及 Google 参数；结构不合法或 SDK 包装层中的冲突字段明确拒绝。
 
+DS 原生 Responses 的自动 `off` 同样清除客户端 `reasoning.enabled`，避免与强制写入的 `effort=none` 冲突；保留 `summary` 等非开关选项。
+
 旧六项或八项浏览器记录不符合当前九项结果合同，读取时显示缓存不可用且不覆盖原始数据；用户可手动清除检测历史后重新检测。升级不迁移或删除缓存，不更改已保存的 Key 策略；回退代码可继续读取未清除的旧记录。新增策略保存仍使用现有配置预览、确认和备份流程；回退到不支持新策略的版本前应先改回原有策略。
 
 显式字段方式适用于受管和自定义 Relay 提供商，不按模型名称推断其有效性。2026-10-15 的 CLP Flash 受限实测中，`enabled=false` 未返回思考正文，但仍报告非零推理 Token，详见 [CLP 当前限制](cline-pass.md)。
