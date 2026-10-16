@@ -810,6 +810,7 @@ export interface ManagementProviderSettingsPreview {
     id: string
     displayName?: string
     name?: string
+    model?: string
     baseUrl?: string
     mode?: string
     upstreamWireApi?: "responses" | "chat_completions"

@@ -67,9 +67,9 @@ function writeCatalogExclusions(output, excludedModels) {
   for (const entry of excludedModels) output.write(`未加入 Codex 目录：${entry.model}（${entry.reason}）。\n`);
 }
 
-async function promptEnabledModels(prompts, output, { models, enabledModels, requiredModels }) {
+async function promptEnabledModels(prompts, output, { models, enabledModels, requiredModels, retainedModels }) {
   return promptEnabledProviderModels(prompts, output, {
-    models, enabledModels, requiredModels, label: "CLP（全部账户共享）",
+    models, enabledModels, requiredModels, retainedModels, label: "CLP（全部账户共享）",
     defaultModelWhenUnrequired: definition.defaultModel,
   });
 }

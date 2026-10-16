@@ -4,7 +4,7 @@ import { parse } from "smol-toml";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { managedProviderAccountFamilies, loadManagedModelProviderDefinitions, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
-import { managedProviderDirectory, managedProviderMarkerPath, customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath, primaryProviderBackupPath } from "../runtime/model-provider-runtime.mjs";
+import { managedProviderDirectory, managedProviderMarkerPath, customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath, primaryProviderBackupPath, loadConfiguredCustomPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { customProviderUpstreamMetadataPath } from "../runtime/model-provider-upstream-metadata.mjs";
 import { customOfficialModelCatalogPath } from "../runtime/model-provider-official-catalog.mjs";
 import { createResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog, responsesProviderCatalogPath, responsesContextSyncPath, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
@@ -163,6 +163,13 @@ async function buildRemovalPlan(input, environment) {
     const provider = [...state.customProviders.fixedCandidates.filter(candidate => candidate.active), ...state.customProviders.switchingProviders]
       .find(candidate => candidate.id === input.provider);
     if (!provider) throw invalid("provider-not-configured", "provider", "当前没有可管理的自定义提供商");
+    if (!state.customProviders.switchingProviders.some(candidate => candidate.id === input.provider)) {
+      try {
+        if (loadConfiguredCustomPrimaryModelProvider(environment)?.id !== input.provider) throw new Error("Provider 不匹配");
+      } catch (error) {
+        throw invalid("provider-state-unavailable", "provider", "当前固定提供商配置不受支持，请先修复连接配置", error);
+      }
+    }
     custom = readResponsesModelCatalog(environment, input.provider);
     catalog = custom;
     providers = [provider.id];

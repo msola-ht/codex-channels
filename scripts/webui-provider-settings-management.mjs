@@ -326,6 +326,7 @@ function redactProvider(provider) {
     ...(provider.id === undefined ? {} : { id: provider.id }),
     ...(provider.displayName === undefined ? {} : { displayName: provider.displayName }),
     ...(provider.name === undefined ? {} : { name: provider.name }),
+    ...(provider.model === undefined ? {} : { model: provider.model }),
     ...(provider.baseUrl === undefined ? {} : { baseUrl: provider.baseUrl }),
     ...(provider.mode === undefined ? {} : { mode: provider.mode }),
     ...(provider.upstreamWireApi === "responses" || provider.upstreamWireApi === "chat_completions"

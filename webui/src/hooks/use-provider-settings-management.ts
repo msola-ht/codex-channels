@@ -12,6 +12,7 @@ import type {
   ManagementSettingMutationResponse,
 } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
+import { configActivationResult } from "../../../scripts/config-activation-result.mjs"
 
 export function useProviderSettingsManagement(): ProviderSettingsController {
   const management = useManagementConfirmedMutation<
@@ -29,9 +30,7 @@ export function useProviderSettingsManagement(): ProviderSettingsController {
   const actionResult: ManagementSettingMutationResponse | null = result === null ? null : {
     revision: null,
     value: null,
-    activation: result.activation === "restart-all"
-      ? { status: "restart", target: "all", commands: ["codexc restart all"] }
-      : { status: result.activation === "none" ? "none" : "unknown", target: "", commands: [] },
+    activation: configActivationResult(result.activation ?? "unknown"),
     auditStatus: result.auditStatus,
     consistency: management.readbackRequired ? "unknown" : "confirmed",
   }
