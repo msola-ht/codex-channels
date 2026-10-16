@@ -28,6 +28,7 @@ export {
 export {
   ProviderRoutingClient,
   type ProviderClientInstance,
+  type ConnectedThreadState,
 } from "./provider-routing-client.js";
 export {
   JsonRpcClient,

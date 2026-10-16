@@ -279,6 +279,17 @@ export interface StoredSubagentListItem extends StoredSubagentThreadRecord, Pick
   "provider" | "model" | "reasoningEffort" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"
 > {
   directSubagentCount: number;
+  /** 仅按父 Turn 查询时返回精确子 Turn，最多 100 个；完整范围仍由父 Thread/Turn 确定。 */
+  turnIds: string[] | null;
+  turnIdsTruncated: boolean;
+  executionTiming: {
+    /** 已知官方整轮耗时之和；无已知值或累计超出安全整数时为 null。 */
+    durationMs: number | null;
+    /** 范围内登记的轮数，包括缺失官方耗时的轮次。 */
+    observedTurnCount: number;
+    missingDurationTurnCount: number;
+    historyComplete: boolean;
+  };
   firstRequestStartedAtMs: number | null;
   lastRecordedAtMs: number | null;
 }
@@ -294,7 +305,7 @@ export interface SubagentThreadsQuery {
 
 export interface StoredThreadSubagentsPage {
   subagents: StoredSubagentListItem[];
-  /** 全部关联子代理自身请求的合计，轮数跨模型按 Thread/Turn 去重。 */
+  /** 全部关联子代理同范围自身请求的合计，父 Turn 查询仅纳入精确子 Turn；轮数跨模型去重。 */
   summary: Pick<StoredSubagentListItem, "requestCount" | "requestOutcomes" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage">;
   /** 当前关系范围内全部子代理自身请求按真实模型汇总，不受分页影响。 */
   modelUsage: Array<Pick<StoredModelUsage, "model" | "requestCount" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage">>;

@@ -79,11 +79,15 @@ export type ProviderClientInstance = Pick<CodexAppServerClient, ProviderClientMe
   & Partial<Pick<CodexAppServerClient, "cancelPendingInput">>;
 
 type ThreadSnapshot = Awaited<ReturnType<ProviderClientInstance["readThread"]>>;
+export type ConnectedThreadState =
+  | { status: ThreadSnapshot["status"]["type"]; observedAtMs: number }
+  | { status: "unknown"; reason: "provider_unavailable" | "thread_unavailable" };
 type ProviderOperationMode = "activity" | "operation";
 type ProviderOperationRunner = <T>(
   provider: string,
   mode: ProviderOperationMode,
   operation: () => Promise<T>,
+  signal?: AbortSignal,
 ) => Promise<T>;
 
 const SERVER_REQUEST_RESOLVED_METHOD = "serverRequest/resolved";
@@ -413,6 +417,42 @@ export class ProviderRoutingClient {
       return thread;
     };
     return signal ? this.untilClosed(read, signal) : read();
+  }
+
+  /** Read only connected instances; observation must never admit or wake a Provider. */
+  async readConnectedThreadState(threadId: string, signal: AbortSignal): Promise<ConnectedThreadState> {
+    const querySignal = AbortSignal.any([this.shutdown.signal, signal]);
+    const read = (provider: string, verifyProvider: boolean): Promise<ThreadSnapshot | undefined> =>
+      this.untilClosed(() => this.withProviderActivity(provider, async () => {
+        querySignal.throwIfAborted();
+        const canonical = this.canonicalProvider(provider);
+        // Admission waits for settings/idle-close barriers, so recheck inside it.
+        if (!this.connectedProviders.has(canonical) || this.providerCloseTasks.has(canonical)
+          || this.providerAborts.get(canonical)?.signal.aborted) return undefined;
+        const client = this.clients.get(canonical);
+        if (!client) return undefined;
+        const cancellation = AbortSignal.any([querySignal, this.providerSignal(canonical)]);
+        const snapshot = await client.readThread(threadId, cancellation);
+        cancellation.throwIfAborted();
+        this.assertReadThread(snapshot, threadId, verifyProvider ? provider : undefined);
+        return snapshot;
+      }, querySignal), querySignal);
+    try {
+      querySignal.throwIfAborted();
+      const known = this.knownProvider(threadId);
+      let thread = await read(known ?? this.primaryProvider, known !== undefined);
+      if (!thread) return { status: "unknown", reason: "provider_unavailable" };
+      if (known === undefined && this.canonicalProvider(thread.modelProvider) !== this.primaryProvider) {
+        thread = await read(thread.modelProvider, true);
+        if (!thread) return { status: "unknown", reason: "provider_unavailable" };
+      }
+      querySignal.throwIfAborted();
+      this.rememberThread(thread);
+      return { status: thread.status.type, observedAtMs: Date.now() };
+    } catch {
+      querySignal.throwIfAborted();
+      return { status: "unknown", reason: "thread_unavailable" };
+    }
   }
 
   async startThread(
@@ -1033,10 +1073,11 @@ export class ProviderRoutingClient {
   private withProviderActivity<T>(
     provider: string,
     operation: () => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     const canonical = this.canonicalProvider(provider);
     const run = async () => { this.shutdown.signal.throwIfAborted(); return operation(); };
-    return this.runProviderOperation?.(canonical, "activity", run) ?? run();
+    return this.runProviderOperation?.(canonical, "activity", run, signal) ?? run();
   }
 
   private withProviderOperation<T>(

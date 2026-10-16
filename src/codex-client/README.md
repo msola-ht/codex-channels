@@ -183,6 +183,8 @@ RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
   Server Request 的物理来源与已知 Thread Provider 冲突时拒绝；未知来源关联只作为读取路由提示，
   后续官方 Thread 快照必须匹配所读实例及请求的 Thread ID，才可用于子代理审批归属。
+  `readConnectedThreadState` 只在现有连接的活动保护内读取官方无历史 Thread 元数据；未知归属先由已连接主实例定位，
+  再由已连接目标实例核验，不启动或连接 Provider。无法读取时明确返回未知，不把 idle/notLoaded 解释为任务完成。
   第三方实例在查询对应实时模型目录、首次选择模型或恢复其 Thread 时通过私有监管入口按需启动并连接，未使用的
   Provider 不增加 App Server 子进程；MCP 配置刷新只尝试当前已连接实例并传播任一失败，单 Provider
   重连只恢复该侧 Thread。组合根为所有 Provider 请求注入活动保护：统一空闲管理器在 Gateway 没有前后台

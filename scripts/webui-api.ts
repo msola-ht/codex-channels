@@ -253,6 +253,16 @@ export interface SubagentListItem extends Pick<ThreadListItem,
   agentPath: string
   recordedAtMs: number
   directSubagentCount: number
+  turnIds: string[] | null
+  turnIdsTruncated: boolean
+  executionTiming: {
+    durationMs: number | null
+    observedTurnCount: number
+    missingDurationTurnCount: number
+    historyComplete: boolean
+  }
+  liveState: { threadId: string; status: "active" | "idle" | "systemError" | "notLoaded"; observedAtMs: number }
+    | { threadId: string; status: "unknown"; reason: "gateway_unavailable" | "provider_unavailable" | "thread_unavailable" | "timeout" | "invalid_response" }
   firstRequestStartedAtMs: number | null
   lastRecordedAtMs: number | null
 }

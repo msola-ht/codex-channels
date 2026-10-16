@@ -19,7 +19,9 @@ import {
   formatCacheUsage,
   formatElapsedDuration,
   formatModelName,
-  formatTime,
+  formatRequestTime,
+  formatTimestamp,
+  getServerTimeZone,
   formatTokens,
   shortThreadId,
 } from "@/lib/format"
@@ -103,8 +105,8 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
         <SortableHeader column={column}>{t("metrics.first")}</SortableHeader>
       ),
       cell: ({ getValue }) => (
-        <span className="tabular-nums text-muted-foreground">
-          {formatTime(getValue<number>())}
+        <span className="whitespace-nowrap tabular-nums text-muted-foreground" title={`${formatTimestamp(getValue<number>())} · ${getServerTimeZone()}`}>
+          {formatRequestTime(getValue<number>())}
         </span>
       ),
     },
@@ -218,8 +220,8 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
         <SortableHeader column={column}>{t("metrics.last")}</SortableHeader>
       ),
       cell: ({ getValue }) => (
-        <span className="tabular-nums text-muted-foreground">
-          {formatTime(getValue<number>())}
+        <span className="whitespace-nowrap tabular-nums text-muted-foreground" title={`${formatTimestamp(getValue<number>())} · ${getServerTimeZone()}`}>
+          {formatRequestTime(getValue<number>())}
         </span>
       ),
     },

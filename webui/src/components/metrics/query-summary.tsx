@@ -3,13 +3,13 @@ import { formatCacheUsage, formatCount, formatTokens, formatRequestOutcomes, for
 import type { Aggregate, Range } from "@/lib/types"
 import { cn } from "cn"
 
-export function QuerySummary({ aggregate, range, turns, label, loading = false }: { aggregate: Pick<Aggregate, "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"> | null; range: Range<string> | "all"; turns?: number; label?: string; loading?: boolean }) {
+export function QuerySummary({ aggregate, range, turns, label, scopeLabel, loading = false }: { aggregate: Pick<Aggregate, "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"> | null; range: Range<string> | "all"; turns?: number; label?: string; scopeLabel?: string; loading?: boolean }) {
   const { t } = useTranslation()
   const cache = formatCacheUsage(aggregate?.cacheUsage ?? null)
   return (
     <span className={cn("flex shrink-0 flex-wrap gap-x-5 gap-y-1 text-sm text-muted-foreground", loading && "invisible")} aria-hidden={loading || undefined}>
       {label === undefined ? null : <span>{label}</span>}
-      <span>{t("metrics.period", { range: range === "all" || range.name === "all" ? t("metrics.allHistory") : t("metrics.dateRange", { from: formatTime(range.startAtMs), to: formatTime(range.endAtMs) }) })}</span>
+      <span>{scopeLabel ?? t("metrics.period", { range: range === "all" || range.name === "all" ? t("metrics.allHistory") : t("metrics.dateRange", { from: formatTime(range.startAtMs), to: formatTime(range.endAtMs) }) })}</span>
       {turns === undefined ? null : <span>{t("metrics.turns", { count: formatCount(turns) })}</span>}
       <span>{t("metrics.requestsTotal", { count: formatCount(aggregate?.requestCount ?? 0) })}</span>
       <span>{formatRequestOutcomes(aggregate?.requestOutcomes ?? null, t)}</span>

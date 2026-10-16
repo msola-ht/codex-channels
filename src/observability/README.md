@@ -97,9 +97,11 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   `threadTurnTaskSummary()` 提供，子代理完成卡片通过 `threadTurnSummary()` 精确读取官方终态对应
   Turn，再按需合并该 Turn 的子任务；`threadList()` 与 `threadTurnSummaries()` 供
   `codexc metrics threads` 和 `turns` 导出复用。
-  `subagents()` 从全部已登记关系读取各层子代理，`threadSubagents()` 限定为目标 Thread 的直接子代理；两者均包括尚无请求的代理，聚合各自全部保留请求的轮次、Token 与缓存指标，模型、提供商与思考等级共同取同范围最近的普通响应（`source = owned`、`operation = response`、用途为空；无普通响应时为 null），在数据库内按首次请求或最后记录排序后分页；会话列表的
+  `subagents()` 从全部已登记关系读取各层子代理，`threadSubagents()` 限定为目标 Thread 的直接子代理；两者均包括尚无请求的代理，未指定父 Turn 时聚合各自全部保留请求的轮次、Token 与缓存指标，模型、提供商与思考等级共同取同范围最近的普通响应（`source = owned`、`operation = response`、用途为空；无普通响应时为 null），在数据库内按首次请求或最后记录排序后分页；会话列表的
   `directSubagentCount` 同样只计直接子级，不随请求筛选变化，不把关系导航混入指标聚合。
-  每轮明细的 `directSubagentCount` 通过 `subagent_turns` 精确父 Thread/Turn 关联并验证直接父关系后，按不同子 Thread 计数；`threadSubagents()` 的可选 `parentTurnId` 使用相同关系筛选和分页，全局 `subagents()` 拒绝该字段，子代理行用量仍为自身全部保留历史。
+  每轮明细的 `directSubagentCount` 通过 `subagent_turns` 精确父 Thread/Turn 关联并验证直接父关系后，按不同子 Thread 计数；`threadSubagents()` 的可选 `parentTurnId` 使用相同关系筛选，行用量、请求数、代表模型、时间排序、分页前汇总与模型分布均只纳入这些精确子 Thread/Turn 的请求，不混入同一代理其他调用的历史。全局 `subagents()` 拒绝该字段。
+  子代理行的 `executionTiming` 仅累计 `turn_execution_metrics` 的官方耗时，`durationMs` 返回已知部分（无已知值或累计超出安全整数时为 null），`observedTurnCount` 返回范围内轮数，`missingDurationTurnCount` 保留缺失数；它不使用请求耗时推算。父 Turn 查询按全部精确关系轮次统计，缺失执行行也计入缺失，`historyComplete` 同时要求这些关系均已有官方执行行且 `thread_execution_state` 已确认历史完整；断开或恢复尚未补齐时保留已知值但标记部分累计；其余查询按全部自身保留执行轮次统计，完整性沿用 `thread_execution_state`。有已知累计不代表完整总耗时。
+  父 Turn 查询同时返回每个代理最多 100 个精确 `turnIds` 和显式 `turnIdsTruncated`；截断只限制导航信息，不裁剪聚合。其他查询的 `turnIds` 为 null，`turnIdsTruncated` 为 false。行的 `parentTurnId` 在父 Turn 查询中保持当前查询范围，其他查询沿用线程关系登记值。
   WebUI 顶层列表通过 `mainThreadsOnly` 在汇总和分页前排除已登记子代理；CLI 导出与控制台仍查询全部会话。
   会话列表的 `sessionTiming` 批量读取当前页各会话全部自身保留轮次的官方耗时，保留缺失轮数与历史完整性，不受请求筛选影响、不叠加后代。
   时间范围聚合覆盖指标库全部保留记录，可按全局、提供商或“提供商 + 模型”分组；支持 `today`、`yesterday`、`24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围，最多

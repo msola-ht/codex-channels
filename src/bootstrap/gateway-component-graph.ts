@@ -13,6 +13,7 @@ import { RelayMetricsComposition, createRelayMetricAuthorization } from "./relay
 import { modelRelayPaths } from "../../runtime/model-relay-paths.mjs";
 import { accountSnapshotEventsPath, metricsEventsPath } from "../../runtime/metrics-events.mjs";
 import { QueueEventsServer } from "../../runtime/queue-events.mjs";
+import { threadStateReadTimeoutMs, type GatewayThreadState } from "../../runtime/gateway-thread-state.mjs";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
 import {
@@ -364,10 +365,10 @@ export abstract class GatewayComponentGraph {
         ? undefined
         : new Set([customPrimaryProvider.id]),
       customPrimaryProvider?.id ?? primaryProvider,
-      (provider, mode, operation) => {
+      (provider, mode, operation, signal) => {
         if (!this.providerIdleReleaser) return operation();
         return mode === "activity"
-          ? this.providerIdleReleaser.runActivity(provider, operation)
+          ? this.providerIdleReleaser.runActivity(provider, operation, signal)
           : this.providerIdleReleaser.runOperation(provider, operation);
       },
     );
@@ -1519,6 +1520,42 @@ export abstract class GatewayComponentGraph {
     }
     if (result) await this.stageProviderModels(provider, result, candidate, cancellation);
     return true;
+  }
+
+  async readConnectedThreadStates(
+    threadIds: readonly string[],
+    signal: AbortSignal,
+  ): Promise<GatewayThreadState[]> {
+    this.requireRunning();
+    const deadline = new AbortController();
+    const timeout = setTimeout(() => deadline.abort(), threadStateReadTimeoutMs);
+    const cancellation = AbortSignal.any([signal, deadline.signal]);
+    const states: GatewayThreadState[] = threadIds.map(threadId => ({ threadId, status: "unknown", reason: "timeout" }));
+    let next = 0;
+    const read = async (): Promise<void> => {
+      while (next < threadIds.length) {
+        signal.throwIfAborted();
+        if (deadline.signal.aborted) return;
+        const index = next++;
+        const threadId = threadIds[index]!;
+        try {
+          const state = await this.codex.readConnectedThreadState(threadId, cancellation);
+          states[index] = { threadId, ...state };
+        } catch (error) {
+          signal.throwIfAborted();
+          if (deadline.signal.aborted) return;
+          throw error;
+        }
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(4, threadIds.length) }, read));
+      signal.throwIfAborted();
+      return states;
+    } finally {
+      clearTimeout(timeout);
+      deadline.abort();
+    }
   }
 
   async resetCreditOperation(request: import("../../runtime/gateway-account-refresh.mjs").ResetCreditRequest, signal: AbortSignal): Promise<unknown> {

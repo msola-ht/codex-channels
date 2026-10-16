@@ -109,8 +109,8 @@ export class ProviderIdleReleaser {
     });
   }
 
-  runActivity<T>(provider: string, operation: () => Promise<T>): Promise<T> {
-    return this.runProviderOperation(provider, operation);
+  runActivity<T>(provider: string, operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.runProviderOperation(provider, operation, signal);
   }
 
   runOperation<T>(provider: string, operation: () => Promise<T>): Promise<T> {
@@ -303,12 +303,16 @@ export class ProviderIdleReleaser {
   private async runProviderOperation<T>(
     provider: string,
     operation: () => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     while (true) {
+      signal?.throwIfAborted();
       const barrier = this.settingsBarriers.get(provider) ?? this.closeTask;
       if (!barrier) break;
-      await barrier.catch(() => undefined);
+      if (signal) await waitForSettings(barrier.catch(() => undefined), signal);
+      else await barrier.catch(() => undefined);
     }
+    signal?.throwIfAborted();
     this.cancelGrace();
     this.activeOperations.set(
       provider,

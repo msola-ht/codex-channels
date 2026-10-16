@@ -33,6 +33,7 @@ import {
 } from "../runtime/gateway-config.mjs";
 import { readPrivateConfigFile } from "../runtime/private-file.mjs";
 import { requestGatewayAccountRefresh, requestGatewayResetCredits } from "../runtime/gateway-account-refresh.mjs";
+import { requestGatewayThreadStates } from "../runtime/gateway-thread-state.mjs";
 import { modelRelayConfigSchema } from "../runtime/model-relay-config.mjs";
 import {
   RequestMetricsQueryService,
@@ -499,12 +500,12 @@ async function routeApi(environment, url, request, response, serviceStatusCache,
     return;
   }
   if (apiPath === "/subagents") {
-    handleSubagents(environment, url, response);
+    await handleSubagents(environment, url, response);
     return;
   }
   const subagentsMatch = apiPath.match(/^\/threads\/([^/]+)\/subagents$/u);
   if (subagentsMatch) {
-    handleThreadSubagents(environment, subagentsMatch[1], url, response);
+    await handleThreadSubagents(environment, subagentsMatch[1], url, response);
     return;
   }
   const threadMatch = apiPath.match(/^\/threads\/([^/]+)\/(run|turns)$/u);
@@ -647,10 +648,10 @@ function handleThreads(environment, url, response) {
 }
 
 function handleThreadSubagents(environment, rawThreadId, url, response) {
-  handleSubagents(environment, url, response, parseThreadId(rawThreadId));
+  return handleSubagents(environment, url, response, parseThreadId(rawThreadId));
 }
 
-function handleSubagents(environment, url, response, threadId) {
+async function handleSubagents(environment, url, response, threadId) {
   const allowed = ["offset", "limit", "sortKey", "sortDirection", ...(threadId === undefined ? [] : ["parentTurnId"])];
   for (const key of url.searchParams.keys()) {
     if (!allowed.includes(key)) throw new ApiError(400, "unsupported_parameter", `子代理列表只接受 ${allowed.join("、")}`);
@@ -672,14 +673,35 @@ function handleSubagents(environment, url, response, threadId) {
     sortDirection,
   };
   const store = openMetricsStore(environment);
+  let page;
   try {
-    const page = store.readSnapshot(() => {
+    page = store.readSnapshot(() => {
       const queries = new RequestMetricsQueryService(store);
       return threadId === undefined ? queries.subagents(query) : queries.threadSubagents(threadId, query);
     });
-    sendJson(response, 200, { generatedAt: new Date().toISOString(), ...(threadId === undefined ? {} : { threadId }), ...page });
   } finally {
     store.close();
+  }
+  // Release the SQLite snapshot before querying the Gateway's existing connections.
+  const controller = new AbortController();
+  const disconnected = () => controller.abort();
+  response.once("close", disconnected);
+  try {
+    if (response.destroyed) return;
+    const states = page.subagents.length === 0 ? [] : await requestGatewayThreadStates(
+      resolveGatewayConfigPath(environment), page.subagents.map(agent => agent.threadId), controller.signal,
+    );
+    const byThread = new Map(states.map(state => [state.threadId, state]));
+    if (response.destroyed) return;
+    sendJson(response, 200, {
+      generatedAt: new Date().toISOString(), ...(threadId === undefined ? {} : { threadId }), ...page,
+      subagents: page.subagents.map(agent => ({
+        ...agent,
+        liveState: byThread.get(agent.threadId) ?? { threadId: agent.threadId, status: "unknown", reason: "invalid_response" },
+      })),
+    });
+  } finally {
+    response.off("close", disconnected);
   }
 }
 

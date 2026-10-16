@@ -22,7 +22,9 @@ import {
   formatInterruptionSummary,
   formatInterruptedUsage,
   formatElapsedDuration,
-  formatTime,
+  formatRequestTime,
+  formatTimestamp,
+  getServerTimeZone,
   formatTokens,
   shortThreadId,
 } from "@/lib/format"
@@ -60,9 +62,9 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       header: ({ column }) => (
         <SortableHeader column={column}>{t("metrics.time")}</SortableHeader>
       ),
-      cell: ({ row }) => (
-        <span className="tabular-nums text-muted-foreground">
-          {formatTime(row.original.recordedAtMs ?? null)}
+      cell: ({ row }) => row.original.recordedAtMs == null ? "—" : (
+        <span className="whitespace-nowrap tabular-nums text-muted-foreground" title={`${formatTimestamp(row.original.recordedAtMs)} · ${getServerTimeZone()}`}>
+          {formatRequestTime(row.original.recordedAtMs)}
         </span>
       ),
     },
