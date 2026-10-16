@@ -16,7 +16,6 @@ export function writeGatewayConfigSummary(output, document, configPath, environm
     `- 会话空闲自动解除：${summary.idleReleaseMinutes === 0 ? "关闭" : `${summary.idleReleaseMinutes} 分钟`}`,
     `- 调用详情记录：${enabledLabel(summary.modelTrafficDump)}`,
     `- 调用记录按时间自动清理：${summary.modelTrafficRetentionDays === 0 ? "关闭" : `保留 ${summary.modelTrafficRetentionDays} 天`}`,
-    `- Plugin API：${enabledLabel(summary.pluginApi)}（开发中）`,
     `- 日志等级：${summary.logLevel}`,
     `- Codex .env 代理：${summary.networkFields.join("、") || "未配置（使用环境变量或系统发现）"}`,
     `- WebUI：${summary.webui}`,
@@ -32,7 +31,6 @@ export function gatewayConfigSummary(document, configPath, environment = process
   const display = table(document.display);
   const conversation = table(document.conversation);
   const debug = table(document.debug);
-  const experimental = table(document.experimental);
   const scheduledTasks = table(document.scheduled_tasks);
   const logging = table(document.logging);
   const network = readCodexProxySettings(environment);
@@ -62,7 +60,6 @@ export function gatewayConfigSummary(document, configPath, environment = process
     scheduledTasks: scheduledTasks.enabled === true,
     modelTrafficDump: debug.model_traffic_dump === true,
     modelTrafficRetentionDays: numberValue(debug.model_traffic_retention_days) ?? 30,
-    pluginApi: experimental.plugin_api === true,
     logLevel: stringValue(logging.level) || "info",
     networkFields: ["http_proxy", "https_proxy", "all_proxy", "no_proxy"]
       .filter((field) => stringValue(network[field])),

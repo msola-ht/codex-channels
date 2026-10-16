@@ -58,7 +58,6 @@ export interface GatewaySettings {
   }>;
   advanced: {
     loggingLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
-    pluginApiEnabled: boolean;
   };
   telegram: { configured: boolean; messageFormat: "html" | "rich" };
   webui: {
@@ -116,7 +115,6 @@ export type GatewaySettingInput =
   | { kind: "system.gateway-timezone"; value: string | null }
   | { kind: "automation.scheduled-tasks"; value: boolean }
   | { kind: "advanced.logging-level"; value: GatewaySettings["advanced"]["loggingLevel"] }
-  | { kind: "advanced.plugin-api"; value: boolean }
   | {
       kind: "network.proxy";
       field: "http_proxy" | "https_proxy" | "all_proxy" | "no_proxy";

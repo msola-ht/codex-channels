@@ -247,9 +247,6 @@ const gatewayConfigStructureSchema = z.strictObject({
     plan_updates: true,
     reasoning: false,
   }),
-  experimental: z.strictObject({
-    plugin_api: z.boolean().default(false),
-  }).default({ plugin_api: false }),
   debug: debugSchema.optional(),
   scheduled_tasks: z.strictObject({
     enabled: z.boolean().default(false),

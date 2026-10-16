@@ -19,7 +19,6 @@ export const managedSettingKinds = new Set([
   "webui.token",
   "telegram.message-format",
   "system.default-workspace",
-  "advanced.plugin-api",
   "network.proxy",
   "network.proxy-batch",
   "workspace.permissions",
@@ -29,7 +28,6 @@ export const highRiskManagedSettingKinds = new Set([
   "system.sandbox",
   "system.official-tui-identity",
   "automation.scheduled-tasks",
-  "advanced.plugin-api",
   "webui.host",
   "webui.token",
   "network.proxy",
@@ -75,7 +73,6 @@ export function redactManagedSettings(settings) {
     },
     advanced: {
       loggingLevel: settings.advanced.loggingLevel,
-      pluginApiEnabled: settings.advanced.pluginApiEnabled,
     },
     network: {
       configuredFields: Object.entries(settings.network)

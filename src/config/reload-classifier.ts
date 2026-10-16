@@ -129,11 +129,6 @@ function restartRequiredReasons(
         ] as Array<[ConfigChange, unknown, unknown]>
       : []),
     [
-      configChange("experimental.plugin-api"),
-      current.pluginApiEnabled,
-      next.pluginApiEnabled,
-    ],
-    [
       configChange("scheduled-tasks.enabled"),
       current.scheduledTasksEnabled,
       next.scheduledTasksEnabled,

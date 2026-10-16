@@ -5,6 +5,7 @@ import {
   validateIanaTimeZone,
   type Schedule,
   type ScheduledRun,
+  type ScheduledTaskOperationContext,
   type ScheduleWeekday,
 } from "../scheduled-tasks/index.js";
 import type {
@@ -106,8 +107,10 @@ export class ScheduledTaskToolService {
     target: Parameters<ScheduledTaskUseCases["list"]>[0],
     actorId: string,
     args: unknown,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskToolResult> {
     try {
+      operation?.assertCurrent();
       const request = parseToolRequest(args, this.now());
       switch (request.action) {
         case "create":
@@ -118,37 +121,41 @@ export class ScheduledTaskToolService {
               timezone: request.timezone,
               prompt: request.prompt,
               ...(request.model === undefined ? {} : { model: request.model }),
-            }),
+            }, operation),
           };
         case "list":
-          return { kind: "tasks", result: await this.tasks.list(target, actorId, request.page) };
+          return { kind: "tasks", result: await this.tasks.list(target, actorId, request.page, operation) };
         case "runs":
           return {
             kind: "runs",
-            result: await this.tasks.runs(target, actorId, request.selector, request.page),
+            result: await this.tasks.runs(target, actorId, request.selector, request.page, operation),
           };
         case "rename":
           return outcome(
             "renamed",
-            await this.tasks.rename(target, actorId, request.selector, request.name),
+            await this.tasks.rename(target, actorId, request.selector, request.name, operation),
           );
         case "pause":
-          return outcome("paused", await this.tasks.pause(target, actorId, request.selector));
+          return outcome("paused", await this.tasks.pause(target, actorId, request.selector, operation));
         case "resume":
-          return outcome("resumed", await this.tasks.resume(target, actorId, request.selector));
+          return outcome("resumed", await this.tasks.resume(target, actorId, request.selector, operation));
         case "run":
-          return { kind: "outcome", outcome: { action: "run-requested", run: await this.tasks.run(target, actorId, request.selector) } };
+          return { kind: "outcome", outcome: { action: "run-requested", run: await this.tasks.run(target, actorId, request.selector, operation) } };
         case "retry":
-          return { kind: "outcome", outcome: { action: "retry-requested", run: await this.tasks.retry(target, actorId, request.selector) } };
+          return { kind: "outcome", outcome: { action: "retry-requested", run: await this.tasks.retry(target, actorId, request.selector, operation) } };
         case "delete":
           return {
             kind: "confirmation",
-            preview: await this.tasks.previewDelete(target, actorId, request.selector),
+            preview: await this.tasks.previewDelete(target, actorId, request.selector, operation),
           };
       }
     } catch (error) {
       return { kind: "error", message: toolErrorMessage(error) };
     }
+  }
+
+  cancelConfirmation(token: string): void {
+    this.tasks.cancelConfirmation(token);
   }
 }
 

@@ -516,6 +516,7 @@ export class SessionRouter {
     this.backgroundStartQueues.set(key, queued);
     await previous;
     try {
+      startOptions.beforeSubmit?.();
       return await this.startBackgroundUnlocked(target, startOptions, workspaceId);
     } finally {
       release();

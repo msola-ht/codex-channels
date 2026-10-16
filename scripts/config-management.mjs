@@ -53,7 +53,6 @@ export function loadGatewaySettings(environment = process.env) {
   const scheduledTasks = table(document.scheduled_tasks);
   const logging = table(document.logging);
   const debug = table(document.debug);
-  const experimental = table(document.experimental);
   const network = snapshot.proxy.settings;
   const telegram = table(document.telegram);
   const workspaces = workspaceOptions(document);
@@ -112,7 +111,6 @@ export function loadGatewaySettings(environment = process.env) {
     ])),
     advanced: {
       loggingLevel: loggingLevelValues.includes(logging.level) ? logging.level : "info",
-      pluginApiEnabled: experimental.plugin_api === true,
     },
     telegram: {
       configured: stringValue(telegram.bot_token) !== "",
@@ -454,11 +452,6 @@ function applySetting(document, input) {
     case "advanced.logging-level": {
       const value = enumValue(input.value, loggingLevelValues, "value", "日志等级");
       document.logging = { ...table(document.logging), level: value };
-      return changed(value, "restart-gateway");
-    }
-    case "advanced.plugin-api": {
-      const value = booleanValue(input.value, "value", "Plugin API");
-      document.experimental = { ...table(document.experimental), plugin_api: value };
       return changed(value, "restart-gateway");
     }
     default:

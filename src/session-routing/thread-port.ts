@@ -71,6 +71,8 @@ export interface ThreadDynamicToolSpec {
 }
 
 export interface ThreadStartOptions {
+  /** Local start-only guard, called after preparation immediately before the RPC write. */
+  beforeSubmit?: () => void;
   model?: string;
   modelProvider?: string;
   /** The only non-interactive source exposed by the stable Gateway port. */

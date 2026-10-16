@@ -8,7 +8,6 @@ import {
 } from "../application/index.js";
 import type {
   ProviderRoutingClient,
-  ServerRequestHandler,
 } from "../codex-client/index.js";
 import {
   surfaceAccountKey,
@@ -30,6 +29,7 @@ import { ScheduledTaskRunCoordinator } from "./scheduled-task-run-coordinator.js
 import {
   createScheduledTaskToolRequestHandler,
   type ScheduledTaskToolLookup,
+  type ScheduledTaskToolRequestHandler,
 } from "./scheduled-task-tool-request.js";
 
 export interface ScheduledTaskCompositionOptions {
@@ -51,7 +51,7 @@ export interface ScheduledTaskCompositionOptions {
 
 export class ScheduledTaskComposition {
   readonly service: ScheduledTaskApplicationService;
-  readonly toolHandler: ServerRequestHandler;
+  readonly toolHandler: ScheduledTaskToolRequestHandler;
   readonly coordinator: ScheduledTaskRunCoordinator;
   private readonly store: AsyncSqliteScheduledTaskStore;
   private readonly scheduler: ScheduledTaskScheduler;
@@ -136,8 +136,8 @@ export class ScheduledTaskComposition {
         && options.bindings.actors(target).includes(actorId),
       isProviderConfigured: (provider) => options.codex.isProviderConfigured(provider),
       creationContext: (target) => options.creationContext(target),
-      runTaskNow: (taskId) => this.scheduler.runTaskNow(taskId),
-      retryRun: (runId) => this.scheduler.retryRun(runId),
+      runTaskNow: (taskId, operation) => this.scheduler.runTaskNow(taskId, undefined, operation),
+      retryRun: (runId, operation) => this.scheduler.retryRun(runId, undefined, operation),
     }, Date.now);
     const toolService = new ScheduledTaskToolService(this.service, Date.now);
     this.toolHandler = createScheduledTaskToolRequestHandler({
@@ -145,7 +145,9 @@ export class ScheduledTaskComposition {
       foregroundThreadId: (target) => options.router.foregroundThreadId(target),
       readThread: (threadId, signal) => options.router.readThread(threadId, signal),
       actorsForTarget: (target) => options.bindings.actors(target),
-      execute: (target, actorId, args) => toolService.execute(target, actorId, args),
+      rejectUnattended: (threadId) => this.coordinator.noteServerRequestRejected(threadId),
+      execute: (target, actorId, args, operation) => toolService.execute(target, actorId, args, operation),
+      cancelConfirmation: (token) => toolService.cancelConfirmation(token),
       presentConfirmation: options.presentConfirmation,
     });
   }
@@ -192,12 +194,14 @@ export class ScheduledTaskComposition {
   }
 
   stop(): Promise<void> {
+    this.toolHandler.close();
     this.preparationAbort.abort(new Error("计划任务组合正在停止"));
     this.storePrepared = false;
     return this.scheduler.stop();
   }
 
   close(): Promise<void> {
+    this.toolHandler.close();
     this.preparationAbort.abort(new Error("计划任务组合已关闭"));
     this.storePrepared = false;
     return this.store.close();

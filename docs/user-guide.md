@@ -4,7 +4,7 @@
 
 ## 1. 工作方式
 
-Gateway 把 Telegram、飞书和微信消息接入本机 Codex App Server。`codexc remote` 连接的是同一个 App Server，因此原生 TUI 与聊天渠道共享 Thread、Workspace、模型提供商和实时运行状态。
+Gateway 把 Telegram、飞书和微信消息接入本机 Codex App Server。`codexc remote` 连接对应 Provider 的同一个 App Server，原生 TUI 与聊天渠道可在工作区与 Provider 匹配时接续同一 Thread，并共享实时运行状态。Workspace 注册表由 Gateway 管理，终端包装入口读取同一份配置；它不是上游 Project 的同步副本。
 
 App Server 是 Thread、Turn、Item 和会话历史的唯一事实来源。Gateway 的 StateStore 只保存渠道与 Workspace 的最小绑定，不复制完整会话历史。独立投递箱按[投递合同](delivery.md)加密保存待送达结果；显式开启的调用转储另按下文保存模型报文。
 
@@ -82,6 +82,11 @@ WebUI 启动失败会报告核心服务已安装、WebUI 未完成，并以失�
 `codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；完成单项后可继续选择，选择“完成接入”正常退出，选择“取消”或在类别菜单按 Esc/Ctrl+C 取消退出。`setup --jsonl` 的渠道结果保留 `warnings`，飞书另返回 `applicationConfiguration`，配置保存成功但存在降级时应按这些字段处理。`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 CLI 和 WebUI 的 Gateway 设置在读取和保存前均校验当前配置结构；不支持的版本、未知字段或非法值会阻止操作并保留原文件，不以默认显示值掩盖错误。请先修复配置，再重新进入设置。
+
+Plugin 查询与调用不再需要 Gateway 功能开关。旧配置中的 `[experimental].plugin_api`（TOML 写法为
+`[experimental]` 表下的 `plugin_api`）及仅含该字段的表已不受支持，不会被自动忽略或迁移。
+升级前请备份实际使用的 `config.toml`，再显式删除该键及空的 `[experimental]` 表；未清理时配置校验失败，
+原文件保持不变。若需回退旧版本，恢复与该版本匹配的配置备份。程序更新不会代为修改这项旧配置。
 
 “Codex 新会话与用户偏好”先显示设置分类，进入具体项目后再读取当前值与可用选项；分类页返回或取消无需等待 App Server。“配置默认值与用户偏好”统一收集模型、加速档位、权限、Plan 思考等级、推理摘要、输出详细程度、更新检查与历史记录，最后一次确认并批量写入；中途取消不保存。可修改项以进入后读取的 Provider 和 Permission Profile 为准；使用 Permission Profile 时保留现有权限，其余偏好仍可设置。保存校验配置修订及对应策略。
 初始化、日常 Codex 设置、MCP 配置与官方登录使用同一可执行文件选择：显式 `[codex] binary` 优先；值为默认 `codex` 时允许 `CODEX_BINARY` 覆盖。官方登录输出跟随交互输出流，`setup --jsonl` 的 stdout 只保留事件；登录失败或取消不会继续恢复官方配置。
@@ -270,7 +275,7 @@ auto_recap = false
 
 Codex 0.156.1 已停用模型人格：CLI 与 WebUI 不再提供人格选择，保存其他偏好不会改写配置中已有的 `personality`。
 
-在 `codexc config → Codex 新会话与用户偏好 → 配置默认值与用户偏好` 中选择推理摘要。开发基线 0.162.1
+在 `codexc config → Codex 新会话与用户偏好 → 配置默认值与用户偏好` 中选择推理摘要。开发基线 0.163.0
 在尚未配置时预选“关闭”，与配套 CLI 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
 不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
 检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`。
@@ -385,6 +390,11 @@ codexc remote -p cp-llm
 codexc remote --profile personal
 ```
 
+若要让新建终端会话使用渠道的登记目录，可运行 `codexc remote --workspace <ID>`。
+从登记目录的子目录启动时，Remote 会采用匹配 Workspace 的权限默认值，但仍使用子目录作为
+工作目录；渠道按登记根目录查询和恢复，不能保证列出或接续这些子目录会话。
+直接使用原生 `codex --remote` 不会读取 Gateway Workspace 注册表。
+
 `codexc remote` 与 `codexc app` 的 `-p` / `--provider` 使用同一选择规则：接受已配置的完整
 Provider ID（如 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`cp-llm`、`my-provider`），或注册表中精确登记的
 规范 `sf-*` Profile 名称（如 `sf-ds-main`、`sf-cp-llm`、`sf-custom-my-provider`）。自定义提供商使用 `cp-` 前缀，支持独立选择 Responses 或 Chat Completions；对应配置文件为 `sf-cp-<名称>.config.toml`。推荐使用完整 Provider ID；
@@ -405,7 +415,7 @@ Remote 的 `--profile` 继续支持原生个人 Profile 和已登记的规范受
 显式传给 Codex 的 `-c approvals_reviewer=...` 或 `--approve-for-me` 优先于工作区默认审批方式。
 Remote 不按 Provider 或模型限制自动审查，也不为审批资格固定模型或限制个人 Profile。
 聚合入口仍保护其 Provider 与模型目录，防止透传参数替换路由。
-Remote 的 `resume` 和继承式 `fork` 由原生 TUI 保留历史模型及审批方式，Codex 0.162.1 不应用启动参数中的 reviewer 覆盖；
+Remote 的 `resume` 和继承式 `fork` 由原生 TUI 保留历史模型及审批方式，Codex 0.163.0 不应用启动参数中的 reviewer 覆盖；
 恢复后应核对实际模型与审批方式。
 
 ### Codex Desktop App 共享（macOS / Windows 预览）
@@ -506,7 +516,7 @@ Remote Control 或手机配对。Desktop 的连接环境属于未公开兼容入
 macOS 上使用 ChatGPT `26.908.70816` 的既有实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
 Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
 私有 UDS，并在首次附加当前工具 Pipe 时短暂重启目标 App Server 子进程，以 OpenAI 签名的 Desktop
-Node 托管项目锁定的 Codex CLI；开发基线为 0.162.1，既有私有 Pipe 与签名链实机验收使用 0.154.0，
+Node 托管项目锁定的 Codex CLI；开发基线为 0.163.0，既有私有 Pipe 与签名链实机验收使用 0.154.0，
 升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到目标实例，
 Host 租约存在时空闲释放不会停止目标实例。目标实例已空闲释放时，`codexc app` 会先获取临时租约，
 按需恢复实例并保护启动预检，再通过 App Server 的官方 `thread/loaded/list` 和 `thread/read`
@@ -743,6 +753,17 @@ codexc uninstall
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/hooks`
 - 帮助：`/help`、`/whoami`
+
+`/sessions search <关键词>` 匹配会话标题，不检索消息正文。
+`/pin` 将 Thread 移入官方 Pinned 分区，`/unpin` 将其移出分区；若此前在其他客户端的自定义分区中，
+这组操作不会恢复原分区。该归属变化也会影响使用同一 Thread 的其他客户端。
+
+`/plugin` 查询当前 Workspace 的已安装 Plugin；`/plugin list search <关键词>` 只搜索已安装目录，
+`/plugin <名称或序号>` 查看详情，`/plugin health` 查看需要处理的状态。
+`/plugin <名称或序号> <任务>` 在 OpenAI Thread 中调用已启用且可用的 Plugin，仍需满足当前 Actor 与 Workspace 授权。
+渠道命令不提供市场搜索、安装或卸载；请通过 Codex 原生入口管理安装。
+已有 Plugin 所属 MCP 的工具审批、允许／禁用工具和输出预算可在 CLI／WebUI 的工具设置中管理；
+这些设置不提供 Plugin 安装、卸载或统一执行禁用开关。
 
 `/stop` 会优先中断当前活动 Turn，并取消当前目标尚未提交的音频、视频准备及 Client 待提交的图片准备；被取消的音频或视频下载即使稍后返回，也不会重新提交。飞书和 Telegram 同时取消当前待处理交互，原生 Queue 中的排队项保留，可通过 `/queue` 管理。`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天；主任务已经结束但子代理或交互尚未完成时，也会保留旧会话的后台绑定。重连后的清理仍需确认这些活动已经结束，查询失败不会直接解除占用。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。
 存在原 Thread 时，`/new` 的结果会显示 `恢复会话：/r <Thread ID>`，可直接复制该命令恢复旧会话。

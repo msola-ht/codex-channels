@@ -460,6 +460,7 @@ export class CodexAppServerClient implements
   }
 
   async startThread(cwd: string, options: ThreadStartOptions = {}): Promise<ThreadSession> {
+    options.beforeSubmit?.();
     const response = await this.rpc.request<ThreadStartResponse>({
       method: "thread/start",
       params: {
@@ -581,6 +582,7 @@ export class CodexAppServerClient implements
     overrides: TurnOverrides = {},
   ): Promise<TurnStarted> {
     return this.submitTurnInput(threadId, input, async (protocolInput) => {
+      overrides.beforeSubmit?.();
       const response = await this.rpc.request<TurnStartResponse>({
         method: "turn/start",
         params: {

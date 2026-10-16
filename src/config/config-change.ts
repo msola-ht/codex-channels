@@ -14,7 +14,6 @@ export type GlobalConfigChangeCode =
   | "display.plan-updates"
   | "display.reasoning"
   | "display.model-aliases"
-  | "experimental.plugin-api"
   | "scheduled-tasks.enabled"
   | "metrics.storage"
   | "model-relay.policy"

@@ -758,9 +758,6 @@ export abstract class GatewayComponentGraph {
         listAgentRoles: () => listConfiguredAgentRoles(process.env),
       },
       {
-        pluginApiEnabled: config.pluginApiEnabled,
-      },
-      {
         releaseThread: (target, force) => this.releaseThread(target, force),
       },
       execution,
@@ -1299,6 +1296,9 @@ export abstract class GatewayComponentGraph {
     });
     const approvalHandler = (request: Parameters<typeof handleApprovalServerRequest>[0]) =>
       handleApprovalServerRequest(request, this.approval, approval => this.codex.fileApprovalChanges(approval));
+    const guardedApprovalHandler = this.scheduledTasks === undefined
+      ? approvalHandler
+      : createScheduledTaskServerRequestHandler(this.scheduledTasks.coordinator, approvalHandler);
     const appServerRequestHandler: Parameters<typeof this.codex.setServerRequestHandler>[0] =
       async (request) => {
         if (request.method === "item/tool/call") {
@@ -1307,16 +1307,9 @@ export abstract class GatewayComponentGraph {
           }
           return scheduledTaskToolHandler(request);
         }
-        return approvalHandler(request);
+        return guardedApprovalHandler(request);
       };
-    this.codex.setServerRequestHandler(
-      this.scheduledTasks === undefined
-        ? appServerRequestHandler
-        : createScheduledTaskServerRequestHandler(
-            this.scheduledTasks.coordinator,
-            appServerRequestHandler,
-        ),
-    );
+    this.codex.setServerRequestHandler(appServerRequestHandler);
     this.bindingRestoreCoordinator();
   }
 
@@ -1600,11 +1593,22 @@ export abstract class GatewayComponentGraph {
       await this.relayMetrics?.apply(true);
       this.requireRunning();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
+        // Revoke live tools before bounded asynchronous notification consumers.
+        const toolEvent = toConversationInputEvent(notification);
+        if (toolEvent) this.scheduledTasks?.toolHandler.handleInput(toolEvent);
+        if (notification.method === "serverRequest/resolved" && typeof notification.params === "object"
+          && notification.params !== null && !Array.isArray(notification.params)) {
+          const params = notification.params as { requestId?: unknown; threadId?: unknown };
+          if ((typeof params.requestId === "string" || typeof params.requestId === "number") && typeof params.threadId === "string") {
+            this.scheduledTasks?.toolHandler.resolved(params.requestId, params.threadId);
+          }
+        }
         // Persist minimal facts before bounded asynchronous presentation queues.
         this.autoApprovalReview.handleNotification(notification);
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
+        this.scheduledTasks?.toolHandler.cancelThreads((threadId) => this.codex.knownProvider(threadId) === provider);
         this.conversationIdleReleaser?.cancelPending(new Set(this.router.allBindings()
           .filter((binding) => this.codex.knownProvider(binding.threadId) === provider)
           .map((binding) => binding.threadId)));
@@ -1706,6 +1710,7 @@ export abstract class GatewayComponentGraph {
 
   protected async stopInternal(startup: Promise<void> | undefined, startupSettled: boolean): Promise<void> {
     this.stopping = true;
+    this.scheduledTasks?.toolHandler.close();
     this.providerSettingsAbort.abort(new Error("Gateway 正在停止"));
     this.conversationIdleReleaser?.cancelPending();
     this.conversations?.setIdleReleaseEnabled(false);
@@ -1820,6 +1825,7 @@ export abstract class GatewayComponentGraph {
 
   private async shutdownComponentsOnce(): Promise<void> {
     this.stopping = true;
+    this.scheduledTasks?.toolHandler.close();
     this.providerSettingsAbort.abort(new Error("Gateway 正在停止"));
     this.conversationIdleReleaser?.cancelPending();
     this.conversations?.setIdleReleaseEnabled(false);

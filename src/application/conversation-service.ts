@@ -399,9 +399,6 @@ export class ConversationService implements
     private readonly workspacePermissions?: WorkspacePermissionPort,
     private readonly turnErrorRecorder?: TurnErrorRecorder,
     private readonly agentRoles?: AgentRolePort,
-    experimentalFeatures: { pluginApiEnabled: boolean } = {
-      pluginApiEnabled: false,
-    },
     private readonly threadOccupancy?: ThreadOccupancyPort,
     private readonly threadQueue?: ThreadQueuePort,
     threadHistory?: ThreadHistoryPort,
@@ -430,7 +427,6 @@ export class ConversationService implements
       router,
       models,
       queries,
-      experimentalFeatures.pluginApiEnabled,
     );
     this.accountMetrics = new ConversationAccountMetricsService(
       queries,
@@ -761,7 +757,6 @@ export class ConversationService implements
     selector: string,
     task: string,
   ): Promise<Submission & { pluginName: string }> {
-    this.extensionQueries.assertPluginApiEnabled();
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
     if (!normalizedSelector || !normalizedTask) {
@@ -774,7 +769,7 @@ export class ConversationService implements
       if ((this.models.status(target).modelProvider ?? "openai") !== "openai") {
         throw new UserFacingError(
           "plugin.provider.unsupported",
-          "开发中的 Plugin 调用当前只支持 OpenAI Session",
+          "Plugin 调用当前只支持 OpenAI Session",
         );
       }
       const workspace = this.router.workspace(target);

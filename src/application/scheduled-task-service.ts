@@ -16,6 +16,7 @@ import {
   type ScheduledTaskSandbox,
   type ScheduledTaskStore,
   type ScheduledTaskStorePort,
+  type ScheduledTaskOperationContext,
 } from "../scheduled-tasks/index.js";
 import {
   parseNaturalScheduledTaskDraft,
@@ -56,8 +57,8 @@ export interface ScheduledTaskCreationContext {
 export interface ScheduledTaskApplicationPort {
   isActorAuthorized(target: ConversationTarget, actorId: string): boolean;
   creationContext(target: ConversationTarget): ScheduledTaskCreationContext;
-  runTaskNow(taskId: string): Promise<ScheduledRun>;
-  retryRun(runId: string): Promise<ScheduledRun>;
+  runTaskNow(taskId: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledRun>;
+  retryRun(runId: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledRun>;
   /** Synchronous fail-closed check used when a Provider is explicitly requested. */
   isProviderConfigured(provider: string): boolean;
 }
@@ -154,28 +155,32 @@ export interface ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     request: ScheduledTaskCreateRequest,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskCreatePreview>;
   confirm(
     target: ConversationTarget,
     actorId: string,
     token: string,
   ): Promise<{ action: "created" | "deleted"; task: ScheduledTaskView }>;
-  list(target: ConversationTarget, actorId: string, page?: number): Promise<ScheduledTaskListResult>;
+  list(target: ConversationTarget, actorId: string, page?: number, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskListResult>;
   runs(
     target: ConversationTarget,
     actorId: string,
     selector: string,
     page?: number,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskRunListResult>;
-  rename(target: ConversationTarget, actorId: string, selector: string, name: string): Promise<ScheduledTaskView>;
-  pause(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledTaskView>;
-  resume(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledTaskView>;
-  run(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledRun>;
-  retry(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledRun>;
+  rename(target: ConversationTarget, actorId: string, selector: string, name: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskView>;
+  pause(target: ConversationTarget, actorId: string, selector: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskView>;
+  resume(target: ConversationTarget, actorId: string, selector: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskView>;
+  run(target: ConversationTarget, actorId: string, selector: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledRun>;
+  retry(target: ConversationTarget, actorId: string, selector: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledRun>;
+  cancelConfirmation(token: string): void;
   previewDelete(
     target: ConversationTarget,
     actorId: string,
     selector: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskDeletePreview>;
 }
 
@@ -218,9 +223,12 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     request: ScheduledTaskCreateRequest,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskCreatePreview> {
+    operation?.assertCurrent();
     this.requireActor(target, actorId);
     await this.requireTaskCapacity(target, actorId);
+    operation?.assertCurrent();
     this.requireActor(target, actorId);
     const now = this.now();
     const prompt = normalizePrompt(request.prompt);
@@ -322,10 +330,11 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     return { action: "deleted", task: toTaskView(deleted, task) };
   }
 
-  async list(target: ConversationTarget, actorId: string, page = 1): Promise<ScheduledTaskListResult> {
+  async list(target: ConversationTarget, actorId: string, page = 1, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskListResult> {
     this.requireActor(target, actorId);
     const tasks = (await this.store.listTasks({ conversation: target, actorId }))
       .filter((task) => task.actorId === actorId);
+    operation?.assertCurrent();
     this.requireActor(target, actorId);
     const pageCount = pageCountFor(tasks.length, taskPageSize);
     requirePage(page, pageCount, () => {
@@ -347,9 +356,11 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     actorId: string,
     selector: string,
     page = 1,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskRunListResult> {
     const task = await this.resolveTask(target, actorId, selector);
     const runs = await this.store.listRuns(task.taskId, { limit: 1_000 });
+    operation?.assertCurrent();
     this.requireActor(target, actorId);
     const pageCount = pageCountFor(runs.length, runPageSize);
     requirePage(page, pageCount, () => {
@@ -375,22 +386,26 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     actorId: string,
     selector: string,
     name: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskView> {
     const task = await this.resolveTask(target, actorId, selector);
+    operation?.assertCurrent();
     const updated = await this.mutateTask(() =>
       this.store.renameTask(task.taskId, normalizeName(name), this.now())
     );
     return toTaskView(updated);
   }
 
-  async pause(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledTaskView> {
+  async pause(target: ConversationTarget, actorId: string, selector: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskView> {
     const task = await this.resolveTask(target, actorId, selector);
+    operation?.assertCurrent();
     const updated = await this.mutateTask(() => this.store.pauseTask(task.taskId, this.now()));
     return toTaskView(updated);
   }
 
-  async resume(target: ConversationTarget, actorId: string, selector: string): Promise<ScheduledTaskView> {
+  async resume(target: ConversationTarget, actorId: string, selector: string, operation?: ScheduledTaskOperationContext): Promise<ScheduledTaskView> {
     const task = await this.resolveTask(target, actorId, selector);
+    operation?.assertCurrent();
     const updated = await this.mutateTask(() => this.store.resumeTask(task.taskId, this.now()));
     return toTaskView(updated);
   }
@@ -399,25 +414,29 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     selector: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledRun> {
     const task = await this.resolveTask(target, actorId, selector);
+    operation?.assertCurrent();
     if (task.status === "blocked") {
       throw scheduledError("scheduled-task.state.invalid", "阻塞的计划任务不能立即运行");
     }
-    return await this.mutateTaskAsync(async () => await this.application.runTaskNow(task.taskId));
+    return await this.mutateTaskAsync(async () => await this.application.runTaskNow(task.taskId, operation));
   }
 
   async retry(
     target: ConversationTarget,
     actorId: string,
     selector: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledRun> {
     const run = await this.resolveRun(target, actorId, selector);
     await this.requireOwnedTask(target, actorId, run.taskId);
+    operation?.assertCurrent();
     if (run.state !== "uncertain") {
       throw scheduledError("scheduled-task.state.invalid", "只有 uncertain Run 可以显式解除后重试");
     }
-    const retried = await this.mutateTaskAsync(() => this.application.retryRun(run.runId));
+    const retried = await this.mutateTaskAsync(() => this.application.retryRun(run.runId, operation));
     this.invalidateTarget(target, actorId);
     return retried;
   }
@@ -426,8 +445,10 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
     target: ConversationTarget,
     actorId: string,
     selector: string,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskDeletePreview> {
     const task = await this.resolveTask(target, actorId, selector);
+    operation?.assertCurrent();
     const token = randomUUID();
     const expiresAt = this.now() + confirmationLifetimeMs;
     this.rememberConfirmation({
@@ -439,6 +460,10 @@ export class ScheduledTaskApplicationService implements ScheduledTaskUseCases {
       taskId: task.taskId,
     });
     return { action: "delete", token, expiresAt, task: toTaskView(task) };
+  }
+
+  cancelConfirmation(token: string): void {
+    this.forgetConfirmation(token);
   }
 
   private requireActor(target: ConversationTarget, actorId: string): void {

@@ -19,6 +19,7 @@ import type {
   ScheduledTask,
   ScheduledTaskExecutionPort,
   ScheduledTaskExecutionResult,
+  ScheduledTaskOperationContext,
 } from "../scheduled-tasks/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { BindingStore } from "../storage/index.js";
@@ -116,11 +117,16 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     task: ScheduledTask,
     run: ScheduledRun,
     signal: AbortSignal,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskExecutionResult> {
     const target = toTarget(task);
     if (!this.acceptsExecution(target)) return { kind: "failed", category: "capacity" };
     let validation: ValidationFailure | undefined;
-    try { validation = await this.validate(task, target, signal); }
+    try {
+      operation?.assertCurrent();
+      validation = await this.validate(task, target, signal);
+      operation?.assertCurrent();
+    }
     catch (error) {
       if (signal.aborted) return { kind: "interrupted" };
       throw error;
@@ -140,6 +146,30 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     // Provider/model validation can await network I/O; recheck before creating a Thread.
     if (!this.acceptsExecution(target)) return { kind: "failed", category: "capacity" };
     const workspace = this.workspaces.require(task.workspaceId);
+    const rejectedBeforeSubmit = new Error("计划任务在提交前已失效");
+    let submissionRejection: ScheduledTaskExecutionResult = { kind: "interrupted" };
+    const beforeSubmit = (): void => {
+      try {
+        signal.throwIfAborted();
+        operation?.assertCurrent();
+      } catch {
+        throw rejectedBeforeSubmit;
+      }
+      const currentValidation = this.validateCurrent(task, target);
+      const currentWorkspace = this.workspaces.get(task.workspaceId);
+      const workspaceChanged = currentWorkspace?.cwd !== workspace.cwd
+        || currentWorkspace.sandbox !== workspace.sandbox
+        || currentWorkspace.approvalPolicy !== workspace.approvalPolicy
+        || currentWorkspace.permissions !== workspace.permissions;
+      if (currentValidation || workspaceChanged || !this.acceptsExecution(target)) {
+        submissionRejection = {
+          kind: "failed",
+          category: currentValidation?.category ?? (workspaceChanged ? "workspace" : "capacity"),
+          ...(currentValidation?.blockTask ? { blockTask: true } : {}),
+        };
+        throw rejectedBeforeSubmit;
+      }
+    };
     const permission = task.permission;
     // Store v1 normalizes this field, but keep the executor closed if a test or
     // a future store implementation supplies an invalid value.
@@ -153,6 +183,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
 
     const provider = task.modelProvider ?? "openai";
     const startOptions = {
+      beforeSubmit,
       ...(task.model == null ? {} : { model: task.model }),
       ...(task.modelProvider == null ? {} : { modelProvider: provider }),
       ...(workspace.permissions !== undefined
@@ -170,33 +201,18 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
         task.workspaceId,
       );
     } catch (error) {
+      if (error === rejectedBeforeSubmit) return submissionRejection;
       return writeFailure(error);
     }
     const threadId = started.binding.threadId;
     this.onThreadStarted?.(run, target, threadId);
 
-    if (signal.aborted) {
-      // Thread creation is known to have succeeded.  Do not start a Turn after
-      // cancellation; a cleanup failure deliberately retains the binding for
-      // a later unsubscribe/recovery attempt.
+    // Recheck after Thread creation and again at the final Turn RPC boundary.
+    try { beforeSubmit(); }
+    catch (error) {
+      if (error !== rejectedBeforeSubmit) throw error;
       await this.releaseFreshBackground(threadId);
-      return { kind: "interrupted", threadId };
-    }
-
-    // Thread creation itself is asynchronous. Revoke before the Turn write,
-    // even when capacity remains available and the Thread was already created.
-    const currentValidation = this.validateCurrent(task, target);
-    const currentWorkspace = this.workspaces.get(task.workspaceId);
-    const workspaceChanged = currentWorkspace?.cwd !== workspace.cwd
-      || currentWorkspace.sandbox !== workspace.sandbox
-      || currentWorkspace.approvalPolicy !== workspace.approvalPolicy
-      || currentWorkspace.permissions !== workspace.permissions;
-    if (currentValidation || workspaceChanged || !this.acceptsExecution(target)) {
-      await this.releaseFreshBackground(threadId);
-      return { kind: "failed", threadId,
-        category: currentValidation?.category ?? (workspaceChanged ? "workspace" : "capacity"),
-        ...(currentValidation?.blockTask ? { blockTask: true } : {}),
-      };
+      return withThreadId(submissionRejection, threadId);
     }
 
     const actualProvider = started.session.modelProvider ?? started.session.thread.modelProvider;
@@ -218,6 +234,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     }
 
     const overrides: TurnOverrides = {
+      beforeSubmit,
       ...(task.model == null ? {} : { model: task.model }),
       ...(task.reasoningEffort == null ? {} : { effort: task.reasoningEffort }),
       ...(task.serviceTier == null ? {} : { serviceTier: task.serviceTier }),
@@ -233,6 +250,10 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       );
       turnId = turn.turnId;
     } catch (error) {
+      if (error === rejectedBeforeSubmit) {
+        await this.releaseFreshBackground(threadId);
+        return withThreadId(submissionRejection, threadId);
+      }
       const result = writeFailure(error);
       if (result.kind === "failed") {
         await this.releaseFreshBackground(threadId);
@@ -354,7 +375,7 @@ function withThreadId(
 ): ScheduledTaskExecutionResult {
   return result.kind === "uncertain"
     ? { ...result, threadId }
-    : result.kind === "failed"
+    : result.kind === "failed" || result.kind === "interrupted"
       ? { ...result, threadId }
       : result;
 }

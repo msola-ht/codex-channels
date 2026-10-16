@@ -516,7 +516,7 @@ webui/src/
 
 侧栏「调用监控」归并请求、调用详情与错误，原有 `#/requests`、`#/traffic`、`#/errors` 地址和查询参数保留。「消息渠道」包含渠道配置（`#/channels`）、投递队列（`#/delivery`）和消息展示（`#/channels/display`）。渠道配置只显示 Gateway 配置快照，不代表实时连接状态；配置与授权继续使用对应 CLI 入口。消息展示集中管理 Telegram 格式、操作详情、计划更新和思考状态。
 
-「设置」分为常规与偏好（`#/settings`）、工作区与权限（`#/settings/permissions`）、网络与访问（`#/settings/network`）、数据与日志（`#/settings/data`）、服务与维护（`#/settings/services`）。常规页保留 Codex 整组用户偏好和 Gateway 会话/自动化选项；权限页分别展示 Codex、Gateway 全局和 Workspace 权限，并集中默认 Workspace 选择；网络页管理 WebUI 监听/令牌、共享代理、Plugin API 与整组官方 TUI 请求身份；数据页管理调用采集、日志、指标保留与清理；服务页管理服务及后台任务结果；源码安装与更新只在本机终端执行。Relay 服务仍在模型转发页操作。
+「设置」分为常规与偏好（`#/settings`）、工作区与权限（`#/settings/permissions`）、网络与访问（`#/settings/network`）、数据与日志（`#/settings/data`）、服务与维护（`#/settings/services`）。常规页保留 Codex 整组用户偏好和 Gateway 会话/自动化选项；权限页分别展示 Codex、Gateway 全局和 Workspace 权限，并集中默认 Workspace 选择；网络页管理 WebUI 监听/令牌、共享代理与整组官方 TUI 请求身份；数据页管理调用采集、日志、指标保留与清理；服务页管理服务及后台任务结果；源码安装与更新只在本机终端执行。Relay 服务仍在模型转发页操作。
 
 Workspace 权限中的“工作区默认审批方式”可选择跟随 Codex 默认、手动审批或 Auto-review（自动审查），确认时包含工作区名称，沿用权限预览、版本校验和高风险确认。工作区覆盖对新建、分叉、卸载后恢复的会话生效；已加载会话保留实际审批方式。清除覆盖后新会话跟随 Codex 默认，恢复历史会话可能保留其已保存设置。App Server 卡片管理“Codex 默认审批方式”，渠道的“当前会话审批方式”展示 App Server 实际值并通过已有命令切换。
 

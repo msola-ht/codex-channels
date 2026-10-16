@@ -25,7 +25,7 @@ export const conversationCommandDescriptions = {
   fast: "查看或切换 Standard、Fast、Ultrafast 速度",
   skill: "查看或调用 Skill",
   mcp: "检查或管理 MCP、登录 OAuth、浏览或读取资源",
-  plugin: "列出、查看或调用 Plugin（开发中）",
+  plugin: "列出、查看或调用 Plugin",
   hooks: "查看、审查、信任或启停 Hooks",
   usage: "查看账号与当前 Session 用量",
   metrics: "查看会话、聚合或异常请求指标",

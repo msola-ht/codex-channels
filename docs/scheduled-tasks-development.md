@@ -43,7 +43,8 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
 
 - 不兼容或导入 ChatGPT/Codex App 已创建的 Scheduled；官方没有公开同步 API。
 - 不在同一 Thread 上按计划继续上下文；这需要与活动 Turn、原生 Queue 和会话设置单独设计。
-- 允许前台 Agent 调用 `schedule_task` 生成待确认预览，但不允许它绕过确认、直接改写任务状态。
+- 前台 Agent 的 `schedule_task` 创建和删除仅生成待确认预览，不允许绕过确认；已有任务的
+  重命名、暂停、恢复、立即运行和重试沿用下文列明的授权用例，不增加任意状态写入入口。
 - 实验 `additionalContext` 仍不接入；只接入当前自然语言入口所需的 `dynamicTools` 与
   `item/tool/call` 宿主回调。
 - 不读取 `plugin/read.scheduledTasks` 并自动安装插件任务模板。
@@ -56,17 +57,17 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
   Chat 内任务、Worktree、模型、权限和 RRULE 的当前产品行为。
 - [OpenAI App Server 文档](https://learn.chatgpt.com/docs/app-server)：App Server 定位、JSON-RPC、
   Thread/Turn 与实验动态工具；官方建议自动化作业或 CI 使用 Codex SDK。
-- [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)：
+- [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)：
   `threadSource` 与实验 `dynamicTools`。
-- [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)：
+- [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)：
   实验 `additionalContext`。
-- [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs)：
+- [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs)：
   `ScheduledTaskSummary` 及其有限 Schedule 类型。
-- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/README.md)：
+- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/README.md)：
   `dynamicTools` 与 `item/tool/call` 的宿主回调合同。
 
-参考源码必须匹配 `rust-v0.162.1` 的提交
-`092d3acd6bec3e3a14bdc7e7a2810ab628ab759d`；本机副本状态见[上游来源](upstream-sources.md)。当前网页文档描述的新产品能力不能反向当作固定版
+参考源码必须匹配 `rust-v0.163.0` 的提交
+`83086188ae0614bd882818ff1aa23f3194962012`；本机副本状态见[上游来源](upstream-sources.md)。当前网页文档描述的新产品能力不能反向当作固定版
 协议字段。
 
 ## 采用方案
@@ -233,6 +234,15 @@ Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通
 [`scheduled-task-tool-request.ts`](../src/bootstrap/scheduled-task-tool-request.ts) 校验 Thread
 绑定和唯一授权 Actor，再交给 Application 的 `ScheduledTaskToolService`。
 
+工具请求在首次异步检查前登记原 Request、Thread、Turn 和调用 ID；无人值守检查也包含在该生命周期内。
+原 Turn 结束、对应动态工具 Item 完成、请求被其他客户端解决、Thread 失效、连接断开或 Gateway
+关闭时立即撤销尚未完成的请求。任务读取、手动运行排队和容量检查结束后，在写入、领取或派发前
+再次核验原请求与前台归属；取消后的未交付创建/删除预览不再保留有效确认令牌。
+取消不代表已提交的存储写入或 App Server Turn 被回滚；已提交操作的结果应通过 `/schedule` 查询。
+本地提交守卫随 Thread/Turn 启动参数穿过后台队列、投递准入和 Provider 准备，最终在 Client
+发送 RPC 前同步核验取消、原归属、当前授权、Workspace 目录/权限及投递容量。提交前拒绝不会
+误记为结果未知；已创建 Thread 则释放后台绑定。写 RPC 发出后仍等待真实响应，不用取消信号丢弃结果。
+
 `ScheduledTaskToolService` 不复写任何存储或调度逻辑，只把模型参数解析为现有的
 `previewCreate`、`list`、`runs`、`rename`、`pause`、`resume`、`run`、`retry` 和
 `previewDelete` 用例。`create` 与 `delete` 只返回一次性确认令牌；`confirm` 不在动态工具中暴露，
@@ -240,9 +250,9 @@ Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通
 `surface + accountId` 精确交给当前 Surface；飞书复用 CardKit 2.0 确认卡，Telegram 复用内联按钮，
 微信保留 `/schedule confirm <令牌>` 文本输入。三条路径使用同一个五分钟令牌。
 
-该工具只在 Gateway 前台会话注册；后台计划任务 Thread 不携带 `dynamicTools`，且
-`createScheduledTaskServerRequestHandler` 会把后台 Thread 上的 `item/tool/call` 安全拒绝，防止
-计划任务递归创建更多计划任务。
+该工具只在 Gateway 前台会话注册；后台计划任务 Thread 不携带 `dynamicTools`，工具处理器在
+登记取消生命周期后先查询恢复协调器并拒绝无人值守调用，其余审批仍由
+`createScheduledTaskServerRequestHandler` 拒绝，防止计划任务递归创建更多计划任务。
 
 时区不得猜测。用户明确表达“北京时间”等地区或时区时，模型可以规范化为 IANA 名称；完全没有表达
 时区时工具返回可操作提示，不创建任务。每两周、每月第 N 个星期几或更复杂日历规则返回固定的不支持

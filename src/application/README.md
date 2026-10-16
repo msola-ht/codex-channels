@@ -26,7 +26,7 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
 - `scheduled-task-command.ts`：定义计划任务命令的解析结果与创建请求类型，解析固定句式和模型标记，不依赖具体用例服务。
 - `scheduled-task-service.ts`：通过异步存储端口执行计划任务用例，持有列表选择器和一次性确认状态；消费命令解析结果，并通过注入端口检查授权、取得创建上下文及触发运行。数据库读取后复核 Actor，创建数量上限同时由存储原子约束。
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
-  参数校验后映射到 `ScheduledTaskApplicationService`；创建和删除仍返回待确认预览，不直接改写 Store。
+  参数校验后映射到 `ScheduledTaskApplicationService`；将工具请求的取消和当前归属复核传到预览、写入及手动调度边界，失效请求不展示预览并撤销未交付确认令牌。创建和删除仍返回待确认预览，不直接改写 Store；已提交的写入不因取消而回滚。
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标异步查询；`ConversationService` 作为统一用例入口委托执行。`/metrics`、可见会话页的本地 Turn 计数与周额度估算等待数据库 Worker，不在调用线程执行 SQL；账户快照按 Provider 排队，执行前拒绝取消及早于已确认额度序号的结果。只有写入成功才推进序号，较新观测保存失败不阻断旧有效结果；调用方取消等待后，已派发写入仍按实际确认结果更新缓存与序号。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
 - `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态，并提供会话选择器 `resolveThread`（序号、精确 ID/名称或唯一 ID 前缀，歧义与缺失明确失败）；不修改绑定，不建立独立会话索引。派生轮数扫描每轮最多 10 秒、100 页，同 Thread 后台刷新合并，后台最多 3 个并发；关闭取消扫描和本地指标等待，拒绝迟到列表结果及缓存写入，超限时轮数保持未知。本地轮数指标读取失败降级为展示缓存或未知，不阻止权威列表返回。缓存读写、失效或删除失败后，本实例停止使用该缓存并报告固定操作分类；不返回旧缓存，不阻止权威事件归约或用户输入。失效和删除先更新代次，迟到扫描与本地指标结果既不回写也不展示。
@@ -131,9 +131,9 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
 - `mcp-port.ts`：定义 MCP Server 概览、当前 Thread 的未启动/连接中/已连接/需认证/失败/取消/禁用或未知运行状态、可空 Plugin 来源、只表示工具发现是否失败的布尔状态、带只读/可能写入/未知属性的工具摘要、资源/模板详情、共享 OAuth
   能力判断、登录结果和有界只读资源内容；Plugin 来源只供 `/mcp` 详情展示，不用于授权或 OAuth；不向 Surface 暴露工具 Schema、二进制正文或完整官方响应。
-- `plugin-port.ts`：定义开发中 Plugin 的已安装摘要、版本、来源、安装时间、开发者、分类、能力、
+- `plugin-port.ts`：定义 Plugin 的已安装摘要、版本、来源、安装时间、开发者、分类、能力、
   认证时机、可用原因、适用套餐标识、Marketplace 加载失败计数与只供 Turn 调用的官方 mention 引用；
-  不提供搜索、市场、安装、卸载或分享能力。
+  不提供市场搜索、安装、卸载或分享能力；已安装目录的本地搜索由命令层处理。
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
 - `workspace-permission-port.ts`：定义渠道 `/workspaceperm` 使用的工作区权限写入窄端口；
@@ -149,9 +149,10 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   有界列表、预览和一次性确认结果，不保存完整历史或工作区文件状态。
 - `turn-port.ts`：定义项目拥有的 Turn 输入、设置覆盖、Review 目标与执行窄端口，并复用 Core
   统一的 Goal 稳定状态类型；
+  Turn 启动可携带仅限本地的 `beforeSubmit` 守卫，由 Client 在异步准备之后、RPC 写入之前调用，不改变官方参数或已提交写入的响应等待；
   `ThreadApprovalsReviewerPort` 单独定义已加载 Thread 审批方式更新，只有 `user` / `auto_review` 可写；组合根注入的端口在官方确认与共享入站归约完成后返回，Application 再复核绑定与最新实际值。
   输入只允许文本、PNG/JPEG/WebP/非动画 GIF Base64 Data URL 图片、绝对本地音频路径、已由 Client 从当前 Workspace
-  `skills/list` 解析的 Skill 引用，以及受开发中开关约束的 Plugin mention；Data URL 仅允许内联
+  `skills/list` 解析的 Skill 引用，以及经当前 Workspace 解析的 Plugin mention；Data URL 仅允许内联
   受支持的 `data:image/*;base64,...`，音频路径不代表当前模型可用，必须先通过模型目录能力检查。
   显式 Skill 调用同时发送 `$<skill-name>` 文本标记和内部 Skill 引用。Application 不构造官方 `UserInput`，
   也不接收完整官方 Turn 响应。
@@ -182,7 +183,7 @@ Thread 返回稳定概览与详情；命令结果携带工具、资源或模板�
 重试、要求当前会话已经绑定 Thread，且只对共享能力判断允许的认证状态开放；详情结果保留用户本次使用的原始选择器，供 Surface
 生成可继续执行的登录、浏览和资源读取命令；Bearer Token 返回结构化认证结果并明确提示无需 OAuth，
 资源读取只展示已经隐藏常见凭据的有界文本或二进制元数据。
-Plugin API 仍被官方标记为开发中，只在 `plugin_api` 开关开启时列出或查看当前 Workspace 已安装项，
+Plugin 列表与详情只查询当前 Workspace 已安装项，
 详情只使用同一次 `plugin/installed` 返回的安全摘要，能力与适用套餐有界展示，不读取本机路径或远端 URL；
 Application 对同一已安装目录提供每页 8 项的本地分页过滤和只含需处理项的健康归约，保留原目录全局
 数字选择器，不调用 `plugin/search`；同时保留 Marketplace 加载失败计数，并仅在互斥区内确认仍为
@@ -217,8 +218,8 @@ Skill 查询与显式调用只依赖 `SkillQueryPort`；用户和项目直接安
 校验由 Client 适配器在协议边界完成。
 MCP 查询与配置刷新只依赖 `McpQueryPort`；Application 从官方详情归约只含需处理项与提示的健康
 摘要，连接失败、取消或工具发现失败只建议显式刷新，并把刷新交给 Client，不把运行状态读取冒充远端网络探测，也不接收工具发现错误正文。官方状态分页、Thread 配置上下文、OAuth
-URL 校验、资源限长与响应裁剪由 Client 适配器处理，渠道查询分页与搜索由共享命令结果表达。Plugin 调试只依赖
-`PluginQueryPort`，开关和 Provider 限制由 Application 执行。
+URL 校验、资源限长与响应裁剪由 Client 适配器处理，渠道查询分页与搜索由共享命令结果表达。Plugin 查询与调用只依赖
+`PluginQueryPort`，Workspace、可用性与调用时的 Provider 限制由 Application 执行。
 Permission Profile 查询只依赖 `PermissionQueryPort`；CWD、分页和官方响应裁剪由 Client 处理。
 命令成功文案、命令菜单说明和平台交互形式由各 Surface 维护，并通过类型穷尽检查保持完整。
 `/whoami`、交互取消、图片下载等平台能力不属于通用会话命令，继续由具体 Surface 实现。

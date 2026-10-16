@@ -65,9 +65,9 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 仍不得进入日志。可通过 `codexc config` 的“高级设置 → 日志等级”选择完整等级，变化需要重启
 Gateway，不需要重启 App Server。
 
-`experimental.plugin_api` 控制当前锁定 Codex 0.162.1 的开发中 Plugin 调试入口，默认关闭；未显式开启时
-`/plugin` 的列表与调用在 Application 边界失败关闭，不发送 `plugin/installed` 或 mention
-请求。变化需要重启 Gateway，不需要重启 App Server；Doctor 始终显示开关状态与风险提示。
+Plugin 查询与调用不再读取 Gateway 配置开关；共享严格 Schema 拒绝旧的
+`experimental.plugin_api` 及 `[experimental]` 表，不自动忽略或迁移，结构校验失败时不补全或改写原文件。
+升级前的配置备份、显式清理及回退步骤集中见[使用指导](../../docs/user-guide.md#3-初始化与配置)。
 
 `scheduled_tasks.enabled` 控制 Gateway 计划任务执行层，默认关闭。开启时才创建独立私有
 `scheduled-tasks.sqlite3`、恢复既有 Run 并启动领取循环；关闭时不创建数据库，也不接管普通

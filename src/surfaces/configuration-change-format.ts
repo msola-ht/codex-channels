@@ -135,7 +135,6 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "display.plan-updates": "自动计划显示",
     "display.reasoning": "思考状态显示",
     "display.model-aliases": "模型显示名映射",
-    "experimental.plugin-api": "开发中 Plugin API",
     "scheduled-tasks.enabled": "Gateway 计划任务",
     "metrics.storage": "指标保留策略",
     "model-relay.policy": "模型 API 转发策略",

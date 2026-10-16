@@ -446,7 +446,6 @@ export interface SettingsSummaryResponse {
     network: { configuredFields: string[] }
     advanced: {
       loggingLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace"
-      pluginApiEnabled: boolean
     }
     webui: { enabled?: boolean; host: string; port: number; tokenConfigured: boolean }
     metrics: {
@@ -540,7 +539,7 @@ export interface ManagementSettingsResponse {
     workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null; approvalsReviewer: string | null }>
   }
   automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled">
-  advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel" | "pluginApiEnabled">
+  advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel">
   network: Pick<SettingsSummaryResponse["gateway"]["network"], "configuredFields">
   telegram: { configured: boolean; messageFormat: "html" | "rich" }
   metrics: {

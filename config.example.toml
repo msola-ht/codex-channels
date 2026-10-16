@@ -69,10 +69,6 @@ plan_updates = true
 # 是否在渠道显示“思考中”状态卡；默认 false，不显示。
 reasoning = false
 
-[experimental]
-# Codex 0.148.0 Plugin API 仍在开发中，默认关闭；仅在需要调试时显式开启。
-plugin_api = false
-
 [debug]
 # Codex 与 Relay 共用的调用详情开关，写入 Gateway 数据目录下的 traffic，默认关闭；
 # Codex 重启 App Server 后生效；Relay 配置刷新后用于新请求。

@@ -461,7 +461,7 @@ export function formatConversationPlugins(
   });
   if (page > pageCount) {
     return toStructuredMarkdownList([
-      `已安装 Plugin（开发中${searchTerm ? `，匹配 ${matchedPluginCount}` : ""}）：`,
+      `已安装 Plugin${searchTerm ? `（匹配 ${matchedPluginCount}）` : ""}：`,
       ...loadErrorNotice,
       `第 ${page} 页不存在，共 ${pageCount} 页`,
       `返回第一页：/plugin list 1${commandSuffix}`,
@@ -469,14 +469,14 @@ export function formatConversationPlugins(
   }
   if (plugins.length === 0 && searchTerm) {
     return toStructuredMarkdownList([
-      "已安装 Plugin（开发中，匹配 0 · 第 1/1 页）：",
+      "已安装 Plugin（匹配 0 · 第 1/1 页）：",
       ...loadErrorNotice,
       `没有匹配“${searchTerm}”的 Plugin。`,
       "重新搜索：/plugin list search <关键词>",
     ].join("\n"));
   }
   return toStructuredMarkdownList([
-    `已安装 Plugin（开发中，${searchTerm ? `匹配 ${matchedPluginCount}` : `共 ${totalPluginCount}`} · 第 ${page}/${pageCount} 页）：`,
+    `已安装 Plugin（${searchTerm ? `匹配 ${matchedPluginCount}` : `共 ${totalPluginCount}`} · 第 ${page}/${pageCount} 页）：`,
     ...loadErrorNotice,
     ...plugins.map((plugin, index) => {
       const status = !plugin.available
@@ -508,7 +508,7 @@ export function formatConversationPluginHealth(
   const { report } = result;
   const visibleIssues = report.issues.slice(0, 8);
   const lines = [
-    "Plugin 健康（开发中）",
+    "Plugin 健康",
     `已安装：${report.installedCount}`,
     `已启用：${report.enabledCount}`,
     `可调用：${report.callableCount}`,
@@ -567,7 +567,6 @@ export function formatConversationPluginDetail(
     plugin.enabled && plugin.available
       ? `调用：/plugin ${plugin.id} <任务>`
       : "当前 Plugin 不可调用。",
-    "提示：Plugin API 仍处于开发中。",
   ].join("\n"));
 }
 

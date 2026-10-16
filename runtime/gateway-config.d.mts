@@ -53,7 +53,6 @@ export interface GatewayConfigDocument {
     reasoning: boolean;
     model_aliases?: Record<string, string>;
   };
-  experimental: { plugin_api: boolean };
   debug?: {
     model_traffic_dump: boolean;
     model_traffic_input_items: number;

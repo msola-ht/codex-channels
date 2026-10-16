@@ -85,9 +85,6 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
       plan_updates: true,
       reasoning: false,
     },
-    experimental: {
-      plugin_api: false,
-    },
     scheduled_tasks: {
       enabled: false,
     },

@@ -219,7 +219,7 @@ Workspace/状态与操作结果分派隔离。它们统一 Telegram、飞书与�
 进行每页 8 项的本地分页过滤，`/plugin health` 只展示未启用、不可用和 Marketplace 加载失败等状态，
 问题最多展示 8 项；只带选择器时查看开发者、分类、能力、认证时机及套餐等安全详情，能力与套餐
 列表最多展示 8 项；`health` / `list` 同名 Plugin 带任务时仍可直接调用，详情使用完整 ID 或序号；
-带选择器和任务时调用 Plugin，并统一显示开发中提示；飞书按相同分页生成一次性任务表单，
+带选择器和任务时调用 Plugin；飞书按相同分页生成一次性任务表单，
 Telegram 使用当前页按钮和绑定 Actor 的十分钟一次性 ForceReply，微信提供可复制的编号任务命令；
 各 Surface 都不拼装 Plugin mention 路径。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；

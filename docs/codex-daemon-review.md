@@ -6,16 +6,16 @@
 `a956835d020762cb2b570053af06f643a11c0ecc`，本轮完成源码、项目调用链和 Linux 隔离实测审查。
 本地参考仓库为 `upstream/openai-codex-0.160.0`；没有以官方 main 代替锁定版本。
 
-当前项目基线已更新为 `0.162.1`，固定源码提交为
-`092d3acd6bec3e3a14bdc7e7a2810ab628ab759d`；本轮使用独立临时源码副本，
-长期参考目录约定及本机副本状态见[上游来源](upstream-sources.md)。
+当前项目基线已更新为 `0.163.0`，固定源码提交为
+`83086188ae0614bd882818ff1aa23f3194962012`；只读参考目录为 `upstream/openai-codex-0.163.0`，
+本机副本状态见[上游来源](upstream-sources.md)。
 本次未接管官方 daemon；升级取舍见[升级决策](codex-cli-upgrade-decisions.md)。
-下文的固定链接、隔离实测和关闭自动启动验收保留原版本与范围；未将它们记作 0.162.1 实机重测。
+下文的固定链接、隔离实测和关闭自动启动验收保留原版本与范围；未将它们记作 0.163.0 实机重测。
 
 **当前决定：暂不实施官方 daemon 接管，继续使用项目现有服务管理。**
 原生恢复与包管理有实际收益，不能继续仅以“又一套后台管理”概括。与此同时，直接替换
 `spawn` 会破坏现有 Provider 配置、代理所有权和恢复边界；完整迁移必须满足下文条件。
-本次改动仅在既有 `codexc update` 中关闭用户层 `features.daemon_auto_start`，防止原生终端自动启动另一套后台；不执行 daemon 接管，不改变存储布局，不停止已有官方后台。
+既有 `codexc update` 会关闭用户层 `features.daemon_auto_start`，防止原生终端自动启动另一套后台；不执行 daemon 接管，不改变存储布局，不停止已有官方后台。
 
 `daemon_auto_start` 在 0.160.0 默认开启；关闭自动启动与关闭 daemon 自动更新是不同操作。
 更新器复用 `config/read` 与带 `expectedVersion` 的 `config/batchWrite`，不增加 RPC；

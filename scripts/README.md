@@ -314,8 +314,7 @@
   `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
   的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
   Workspace 默认审批方式跨 Provider 共享，不按 Provider 或模型设限；CLI 与 WebUI 共用输入、配置修订校验及写入接口。
-- `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理、日志等级与
-  开发中的 Plugin API；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
+- `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理与日志等级；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
 - `config-display-menu.mjs`：独立管理模型显示组、操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs` / `config-system-menu.d.mts`：以受控分组分别提供 Gateway 会话、身份与时区、调用记录入口，分组越界选择明确拒绝；向 Workspace 菜单公开默认项设置，复用配置修订与生效通知。管理模型请求转储及其保留天数、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、

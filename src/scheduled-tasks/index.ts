@@ -30,6 +30,7 @@ export {
   type ScheduledTaskExecutionPort,
   type ScheduledTaskExecutionResult,
   type ScheduledTaskPermission,
+  type ScheduledTaskOperationContext,
   type ScheduledTaskSandbox,
   type ScheduledTaskSchedulerOptions,
   type ScheduledTaskStatus,

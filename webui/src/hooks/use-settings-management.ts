@@ -44,7 +44,6 @@ function currentValue(settings: ManagementSettingsResponse, setting: ManagementS
   if (setting.kind === "advanced.logging-level") return settings.advanced.loggingLevel
   if (setting.kind === "metrics.storage") return { storage: settings.metrics.storage }
   if (setting.kind === "webui.port" || setting.kind === "webui.host" || setting.kind === "webui.token") return settings.webui
-  if (setting.kind === "advanced.plugin-api") return settings.advanced.pluginApiEnabled
   if (setting.kind === "system.default-model") return settings.system.defaultModel
   if (setting.kind === "system.default-workspace") return settings.system.defaultWorkspace
   if (setting.kind === "system.official-tui-identity") return settings.system.officialTuiIdentity
