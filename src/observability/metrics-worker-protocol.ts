@@ -4,6 +4,8 @@ import type {
   ModelRequestMetricsWriteStore, TurnExecutionStore,
 } from "./request-metrics.js";
 
+export type MetricsWriteScopeQuery = { type: "task"; turnId: string } | { type: "session" } | { type: "sessionReview" };
+
 /** Gateway's connection stays inside one Worker; CLI/WebUI retain their sync ports. */
 export type GatewayMetricsStore =
   & Pick<ModelRequestMetricsWriteStore, "recordBatch" | "recordSubagentThread" | "recordSubagentTurn">
@@ -22,6 +24,7 @@ export type GatewayMetricsStore =
       latestTurn: import("./request-metrics.js").StoredTurnRequestMetricsSummary | null;
       threadAggregate: import("./request-metrics.js").StoredThreadRequestMetricsAggregate | import("./request-metrics.js").StoredTurnRequestMetricsSummary | null;
     };
+    metricsWriteScopes(threadId: string, scope: MetricsWriteScopeQuery): { threadId: string; turnId?: string }[];
   };
 
 export const gatewayMetricsMethods = [
@@ -34,7 +37,7 @@ export const gatewayMetricsMethods = [
   "taskAutoApprovalReviewSummary", "sessionAutoApprovalReviewSummary",
   "observeTurnExecution", "invalidateAllThreadExecutions",
   "providerQuotaTokens",
-  "completionExecutionTiming", "subagentCompletionSummary",
+  "completionExecutionTiming", "subagentCompletionSummary", "metricsWriteScopes",
 ] as const satisfies readonly (keyof GatewayMetricsStore)[];
 
 export type MetricsMethod = typeof gatewayMetricsMethods[number];

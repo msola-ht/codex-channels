@@ -8,6 +8,12 @@
 export const scheduledTasksSchemaVersion = 2 as const;
 export const scheduledTaskDatabaseFileName = "scheduled-tasks.sqlite3" as const;
 
+/** Lifetime and current authorization of an interactive operation. */
+export interface ScheduledTaskOperationContext {
+  readonly signal: AbortSignal;
+  assertCurrent(): void;
+}
+
 export class ScheduledTaskStateError extends Error {
   readonly code = "scheduled-task.state.invalid" as const;
 
@@ -293,6 +299,7 @@ export interface ScheduledTaskExecutionPort {
     task: ScheduledTask,
     run: ScheduledRun,
     signal: AbortSignal,
+    operation?: ScheduledTaskOperationContext,
   ): Promise<ScheduledTaskExecutionResult>;
   /** Optional hook after the Store records the dispatch result. */
   onRunStateChanged?(run: ScheduledRun): void | Promise<void>;

@@ -118,6 +118,7 @@ import type {
   ThreadResumeSession,
   ThreadStartOptions,
   ThreadSnapshot,
+  ThreadModelSettings,
 } from "../session-routing/index.js";
 import { JsonRpcClient, JsonRpcError, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
 import { UserFacingError } from "../conversation-core/index.js";
@@ -175,7 +176,6 @@ import {
 
 export interface ThreadDefaults {
   model?: string;
-  sandbox: "read-only" | "workspace-write";
 }
 
 export class CodexAppServerClient implements
@@ -196,7 +196,7 @@ export class CodexAppServerClient implements
 {
   private readonly imageUpload: ImageReferenceUpload | undefined;
   private readonly fileChanges = new FileChangeApprovalContext();
-  private readonly pendingReviewerUpdates = new Set<() => void>();
+  private readonly pendingSettingsUpdates = new Set<() => void>();
 
   constructor(
     private readonly rpc: JsonRpcClient,
@@ -217,13 +217,13 @@ export class CodexAppServerClient implements
   }
 
   reconnect(): Promise<InitializeResponse> {
-    for (const cancel of this.pendingReviewerUpdates) cancel();
+    for (const cancel of this.pendingSettingsUpdates) cancel();
     this.fileChanges.clear();
     return this.rpc.reconnect();
   }
 
   close(): Promise<void> {
-    for (const cancel of this.pendingReviewerUpdates) cancel();
+    for (const cancel of this.pendingSettingsUpdates) cancel();
     this.fileChanges.clear();
     this.imageUpload?.cancelAll();
     return this.rpc.close();
@@ -460,16 +460,17 @@ export class CodexAppServerClient implements
   }
 
   async startThread(cwd: string, options: ThreadStartOptions = {}): Promise<ThreadSession> {
+    options.beforeSubmit?.();
     const response = await this.rpc.request<ThreadStartResponse>({
       method: "thread/start",
       params: {
         cwd,
         historyMode: "paginated",
-        approvalPolicy: options.approvalPolicy ?? "on-request",
+        ...(options.approvalPolicy === undefined ? {} : { approvalPolicy: options.approvalPolicy }),
         ...(options.approvalsReviewer === undefined ? {} : { approvalsReviewer: options.approvalsReviewer }),
         ...(options.permissions !== undefined
           ? { permissions: options.permissions }
-          : { sandbox: options.sandbox ?? this.defaults.sandbox }),
+          : options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
         ...(options.model
           ? { model: options.model }
           : this.defaults.model ? { model: this.defaults.model } : {}),
@@ -526,11 +527,11 @@ export class CodexAppServerClient implements
   ): Promise<ThreadResumeSession> {
     const settings = {
       cwd,
-      approvalPolicy: options.approvalPolicy ?? "on-request",
+      ...(options.approvalPolicy === undefined ? {} : { approvalPolicy: options.approvalPolicy }),
       ...(options.approvalsReviewer === undefined ? {} : { approvalsReviewer: options.approvalsReviewer }),
       ...(options.permissions !== undefined
         ? { permissions: options.permissions }
-        : { sandbox: options.sandbox ?? this.defaults.sandbox }),
+        : options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
     };
     const response = await this.rpc.request<ThreadResumeResponse>({
       method: "thread/resume",
@@ -581,6 +582,7 @@ export class CodexAppServerClient implements
     overrides: TurnOverrides = {},
   ): Promise<TurnStarted> {
     return this.submitTurnInput(threadId, input, async (protocolInput) => {
+      overrides.beforeSubmit?.();
       const response = await this.rpc.request<TurnStartResponse>({
         method: "turn/start",
         params: {
@@ -889,6 +891,23 @@ export class CodexAppServerClient implements
     return effort;
   }
 
+  /** Preflight only; the created Thread's actual permissions must also be checked. */
+  async readUnattendedPermissionSettings(
+    cwd: string,
+    signal?: AbortSignal,
+  ): Promise<{ sandbox: "read-only" | "workspace-write"; permissions: null }> {
+    const response = await this.rpc.request<ConfigReadResponse>({
+      method: "config/read",
+      params: { cwd, includeLayers: false } satisfies ConfigReadParams,
+    }, { retryOverload: true, ...(signal === undefined ? {} : { signal }) });
+    const sandbox = response.config.sandbox_mode;
+    if (response.config.default_permissions != null || (sandbox !== "read-only" && sandbox !== "workspace-write")) {
+      throw new UserFacingError("scheduled-task.state.invalid",
+        "无法确认计划任务的原生权限：请在目标项目的 Codex 配置中显式设置受限 sandbox_mode；命名 Permission Profile 暂不支持无人值守预检");
+    }
+    return { sandbox, permissions: null };
+  }
+
   async readDefaultServiceTier(cwd: string): Promise<string | null> {
     const settings = await this.readModelAccelerationSettings(cwd);
     if (settings.serviceTier === "ultrafast" && !settings.ultrafastEnabled) return null;
@@ -1073,11 +1092,11 @@ export class CodexAppServerClient implements
       params: {
         threadId,
         cwd,
-        approvalPolicy: options.approvalPolicy ?? "on-request",
+        ...(options.approvalPolicy === undefined ? {} : { approvalPolicy: options.approvalPolicy }),
         ...(options.approvalsReviewer === undefined ? {} : { approvalsReviewer: options.approvalsReviewer }),
         ...(options.permissions !== undefined
           ? { permissions: options.permissions }
-          : { sandbox: options.sandbox ?? this.defaults.sandbox }),
+          : options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
         ...(options.model ? { model: options.model } : {}),
         ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       },
@@ -1282,27 +1301,59 @@ export class CodexAppServerClient implements
   async updateLunaReserveThreadSettings(
     threadId: string,
     settings: LunaReserveThreadSettings,
+    beforeSubmit?: () => void,
   ): Promise<void> {
-    await this.rpc.request({
-      method: "thread/settings/update",
-      params: {
-        threadId,
-        model: settings.model,
-        effort: settings.effort,
-        serviceTier: settings.serviceTier,
-        collaborationMode: {
-          mode: settings.collaborationMode,
-          settings: {
+    await this.confirmThreadSettings(
+      threadId,
+      actual => actual.model === settings.model
+        && actual.effort === settings.effort
+        && actual.serviceTier === (settings.serviceTier ?? "default")
+        && actual.collaborationMode === settings.collaborationMode,
+      signal => {
+        beforeSubmit?.();
+        return this.rpc.request({
+          method: "thread/settings/update",
+          params: {
+            threadId,
             model: settings.model,
-            reasoning_effort: settings.effort,
-            developer_instructions: null,
+            effort: settings.effort,
+            serviceTier: settings.serviceTier,
+            collaborationMode: {
+              mode: settings.collaborationMode,
+              settings: {
+                model: settings.model,
+                reasoning_effort: settings.effort,
+                developer_instructions: null,
+              },
+            },
           },
-        },
+        }, { retryOverload: false, signal });
       },
-    }, { retryOverload: false });
+      () => new Error("Luna Reserve 设置结果尚未确认，请查询当前会话模型"),
+      () => new Error("Luna Reserve 设置更新失败"),
+    );
   }
 
   async updateThreadApprovalsReviewer(threadId: string, reviewer: "user" | "auto_review"): Promise<void> {
+    await this.confirmThreadSettings(
+      threadId,
+      settings => settings.approvalsReviewer === reviewer,
+      signal => this.rpc.request<ThreadSettingsUpdateResponse>({
+        method: "thread/settings/update",
+        params: { threadId, approvalsReviewer: reviewer } satisfies ThreadSettingsUpdateParams,
+      }, { retryOverload: false, signal }),
+      () => new UserFacingError("autoreview.update-unconfirmed", "会话审批方式更新结果尚未确认，请重新查询状态"),
+      () => new UserFacingError("autoreview.update-failed", "会话审批方式更新失败，请重新查询状态"),
+    );
+  }
+
+  private async confirmThreadSettings(
+    threadId: string,
+    matches: (settings: ThreadModelSettings) => boolean,
+    submit: (signal: AbortSignal) => Promise<unknown>,
+    unconfirmed: () => Error,
+    failed: () => Error,
+  ): Promise<void> {
     const controller = new AbortController();
     let acknowledged = false;
     let observed = false;
@@ -1311,7 +1362,6 @@ export class CodexAppServerClient implements
     let removeDisconnect = () => {};
     let timer: NodeJS.Timeout | undefined;
     let cancel = () => {};
-    const unconfirmed = () => new UserFacingError("autoreview.update-unconfirmed", "会话审批方式更新结果尚未确认，请重新查询状态");
     await new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
         if (settled) return;
@@ -1319,12 +1369,12 @@ export class CodexAppServerClient implements
         if (timer) clearTimeout(timer);
         removeNotification();
         removeDisconnect();
-        this.pendingReviewerUpdates.delete(cancel);
+        this.pendingSettingsUpdates.delete(cancel);
         if (error) { controller.abort(error); reject(error); }
         else resolve();
       };
       cancel = () => finish(unconfirmed());
-      this.pendingReviewerUpdates.add(cancel);
+      this.pendingSettingsUpdates.add(cancel);
       removeNotification = this.rpc.onNotification(notification => {
         const event = toThreadStateEvent(notification);
         if (!event || event.threadId !== threadId) return;
@@ -1333,19 +1383,25 @@ export class CodexAppServerClient implements
           return;
         }
         if (event.type !== "thread.settings.updated") return;
-        observed = event.settings.approvalsReviewer === reviewer;
+        observed = matches(event.settings);
         if (acknowledged && observed) finish();
       });
       removeDisconnect = this.rpc.onDisconnect(cancel);
       timer = setTimeout(cancel, 10_000);
-      void this.rpc.request<ThreadSettingsUpdateResponse>({
-        method: "thread/settings/update",
-        params: { threadId, approvalsReviewer: reviewer } satisfies ThreadSettingsUpdateParams,
-      }, { retryOverload: false, signal: controller.signal }).then(() => {
+      // A local submission guard can throw before the RPC is sent. Clean up
+      // subscriptions and the timeout in that case as well.
+      let submitted: Promise<unknown>;
+      try {
+        submitted = submit(controller.signal);
+      } catch (error) {
+        finish(error instanceof Error ? error : unconfirmed());
+        return;
+      }
+      void submitted.then(() => {
         acknowledged = true;
         if (observed) finish();
       }, error => finish(error instanceof JsonRpcError
-        ? new UserFacingError("autoreview.update-failed", "会话审批方式更新失败，请重新查询状态")
+        ? failed()
         : unconfirmed()));
     });
   }

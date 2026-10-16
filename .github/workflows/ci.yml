@@ -46,7 +46,7 @@ jobs:
         run: npm ci --ignore-scripts --prefix webui
 
       - name: Install locked Codex CLI
-        run: npm install --global @openai/codex@0.162.1
+        run: npm install --global @openai/codex@0.163.0
 
       - name: Add npm global bin to PATH
         shell: bash

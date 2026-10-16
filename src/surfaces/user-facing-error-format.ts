@@ -198,12 +198,6 @@ export function formatSurfaceUserFacingError(
       return "Workspace 选择不唯一";
     case "workspace.selector.not-found":
       return "找不到指定 Workspace";
-    case "workspace.permission.usage":
-      return error.details.reason === "stale-selection"
-        ? "工作区审批按钮已失效或工作区已变化，请重新发送 /workspaceperm"
-        : "用法：/workspaceperm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|autoreview <on|off|clear>|profile <Profile ID|clear>]";
-    case "workspace.permission.conflict":
-      return "permissions 与 sandbox 互斥，不能同时配置；请先清除其中一项";
     case "autoreview.usage":
       return "用法：/autoreview [on|off]；只切换当前会话后续轮次的审批方式";
     case "autoreview.unavailable":
@@ -214,8 +208,6 @@ export function formatSurfaceUserFacingError(
       return "当前会话审批方式更新请求未成功；请用 /autoreview 核对实际状态后再决定是否重试";
     case "autoreview.update-unconfirmed":
       return "尚未确认当前会话审批方式更新结果；请求不会自动重试，请用 /autoreview 核对实际状态";
-    case "workspace.permission.unavailable":
-      return "当前 Gateway 不支持修改工作区权限";
     case "model.current.missing":
       return `当前模型不在可用模型列表中：${detail(error, "model", "未知")}`;
     case "model.configured-default.missing":
@@ -287,10 +279,8 @@ export function formatSurfaceUserFacingError(
       return "Plugin 名称不唯一，请使用序号或完整 ID";
     case "plugin.unavailable":
       return "指定的 Plugin 未启用、被管理员禁用或暂不可调用";
-    case "plugin.disabled":
-      return "开发中的 Plugin API 已关闭；请在 [experimental] 中启用 plugin_api 后重启 Gateway";
     case "plugin.provider.unsupported":
-      return "开发中的 Plugin 调用当前只支持 OpenAI Session";
+      return "Plugin 调用当前只支持 OpenAI Session";
     case "agents.usage":
       return "用法：/agents <角色名称或序号> <任务>";
     case "agents.not-found":

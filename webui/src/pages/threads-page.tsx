@@ -25,6 +25,7 @@ export function ThreadsPage() {
         </div>
       </div>
       <QueryFilters query={query} onChange={update} revision={data} />
+      <p className="shrink-0 text-sm text-muted-foreground">{t("metrics.conversationUsageScope")}</p>
       <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={refreshing} />
       {error !== null ? null : data === null ? <PageSkeleton rows={5} /> : (
         <>

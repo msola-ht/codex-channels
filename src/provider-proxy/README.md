@@ -21,7 +21,7 @@
   `/responses` 与只读 `/models` 路径转发到上游；官方 OpenAI
   主代理提供只读 `GET /_codexc/image-upload-route`，通过正在运行的路由解析器核验默认
   ChatGPT 图片引用后端，不转发上游、不读取凭据、不生成模型指标；独立后端返回不支持。
-  主代理还按当前锁定 Codex 0.162.1 的固定端点清单接受 POST `/alpha/search`、
+  主代理还按当前锁定 Codex 0.163.0 的固定端点清单接受 POST `/alpha/search`、
   `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
   `/realtime/calls`、`/live`，以及透明转发 `/v1/realtime`、`/v1/live` 和单段受限
   Call ID 的 `/v1/live/<call-id>` WebSocket。这些额外端点不解析为 Responses 指标；DeepSeek、
@@ -47,7 +47,7 @@
   或成功率。通过普通 HTTP/WebSocket `/responses` 发送、由私有元数据
   `request_kind=compaction` 标记的 remote compaction v2 归为
   压缩操作；压缩操作以自身成功状态为准，不要求模型 Usage，但观测到的 Token 和额度快照
-  与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。当前锁定 Codex 0.162.1 的 WebSocket 首轮
+  与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。当前锁定 Codex 0.163.0 的 WebSocket 首轮
   `request_kind=prewarm` 使用 `generate=false` 建立并复用连接，不是模型推理请求；代理照常透明
   转发其私有元数据，但不把其完成事件、Usage 或耗时写入模型请求指标。
   OpenAI HTTP/SSE 只从明确的 `x-codex-primary/secondary-*` 白名单响应头提取 10,080 分钟周窗口，
@@ -105,11 +105,13 @@
 - `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的当前用户私有 IPC；Unix 使用
   `0600` Socket，Windows 使用认证命名管道；接收端统一复用共享运行时管理监听与端点清理，
   启动时保护父目录权限，拒绝宽权限旧 Socket，删除旧端点前复核文件身份；启动失败清理后可在同一实例重试，
-  显式关闭后不再接受启动。接收端归约后返回确认，保证短回复的
-  Turn 完成事件不会抢先清理请求统计状态；Gateway 不在线时指标直接丢弃并继续模型响应。接收端拒绝
+  显式关闭后不再接受启动。接收端校验、入队并完成实时归约后返回 `ok` 确认，仅表示已受理、不表示已落库；
+  无效指标或入队拒绝返回 `rejected`。入队失败仍归约普通请求的实时计时，供完成卡降级使用；自动审查请求不归约到用户轮次。
+  该确认顺序保证短回复的 Turn 完成事件不会抢先清理请求统计状态；Gateway 不在线时指标丢弃并继续模型响应。接收端拒绝
   不安全、无认证或已被活动进程占用的端点；Unix 公开端点由共享运行时独占发布并按 inode 清理，
-  关闭旧监听不会按原公开路径自动删除已替换的文件或新监听端点。指标按换行完成单帧并在归约后
-  确认，不依赖 Windows named pipe 不具备的半关闭时序。发送异步读取并核验当前 Windows descriptor，
+  关闭旧监听不会按原公开路径自动删除已替换的文件或新监听端点。指标按换行完成单帧，发送端只把完整合法的 `ok` 帧视为受理；
+  拒绝、未知或不完整确认、断连和超时返回受控错误，经代理既有错误回调记录后继续模型响应，不重试；未确认不证明指标一定丢失。
+  不依赖 Windows named pipe 不具备的半关闭时序。发送异步读取并核验当前 Windows descriptor，
   descriptor/ACL、连接、认证、单帧发送和确认共用 1 秒预算；接收端最多持有 8 个连接，
   每连接也受 1 秒预算约束，认证前连接同样计入上限。只接受当前指标结构，必需的可空字段必须显式传入；缺字段的旧记录直接拒绝。
   解码仅投影已校验的请求字段和额度子字段；Provider、流量来源与入库时间不由此 IPC 声明，组合层按接收端确定 Provider。

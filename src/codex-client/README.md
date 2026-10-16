@@ -2,6 +2,13 @@
 
 本目录封装 Codex App Server Transport、JSON-RPC 会话和类型化 API，是 Gateway 访问 App Server 的唯一底层入口。
 
+Thread/Turn 启动的本地 `beforeSubmit` 守卫透过 Provider 准备保留到 RPC 发送前同步执行，不编码为
+协议字段；守卫拒绝时不发请求，已经发出的写请求仍等待实际响应，不以取消丢弃写入结果。
+
+Luna Reserve 设置写入也在 Provider 准备后执行最终提交守卫，并与当前 Thread 审批方式更新复用
+RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 失效、重连或关闭会清理等待。
+空 RPC 响应不等于设置已经应用，组合根须等待共享入站归约后由 Application 核对实际设置。
+
 0.162.0 引入的 `partial_answer` 在通知边界继续保留，Goal set/clear 的渠道用户操作显式携带 `origin: "user"`。
 子代理 started 活动保留官方 `model` 与 `reasoningEffort`，空值不推断；其他活动不复用启动快照。
 
@@ -17,7 +24,7 @@
 - `index.ts`：本模块的公开导出入口。
 - `transport.ts`：Transport 接口和公共生命周期基类。
 - `unix-websocket-transport.ts`：连接前校验当前用户私有的父目录和本人所有的真实 Unix Socket，
-  通过共享 Runtime 校验 0.162.1 的确定性 rendezvous 链接与受保护目标，再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
+  通过共享 Runtime 校验 0.163.0 的确定性 rendezvous 链接与受保护目标，再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
   128 MiB 边界一致，避免大型 Thread 恢复响应被客户端提前断开，同时保留有界内存约束。
 - `windows-proxy-transport.ts`：在 Windows 启动并拥有固定版 `codex app-server proxy --sock`
   子进程，把其双向 stdio 包装为标准 WebSocket Transport；复用 128 MiB 消息边界，握手使用独立
@@ -67,7 +74,7 @@
 - `account-adapter.ts`：把 `account/read` 的当前认证类型裁剪为 API、ChatGPT 或无需 OpenAI 认证的
   启动探测路由，不读取或传播凭据；把账户 Token 用量、单桶或多桶额度、重置券数量与到期时间、账户 ID、普通用量权限及
   有界 Luna Reserve 授权摘要映射为 Application
-  稳定摘要；接受当前 0.162.1 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
+  稳定摘要；接受当前 0.163.0 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
   不把上游响应正文交给 Surface。
   `client.ts` 的手动与后台额度查询直接调用 `account/rateLimits/read`，携带取消信号且不主动刷新登录凭据；
   后台查询省略重置券详情，启动认证路由使用 `account/read.refreshToken: false`。
@@ -151,16 +158,18 @@
   刷新了 MCP 配置，远端连接结果仍由后续运行状态查询确认；MCP 概览、刷新与账户额度读取接受调用方取消信号，
   截止时间到达会清理 Pending Request，不代表撤销服务端已接收的刷新。OAuth 不自动重试并消费
   官方登录完成通知，资源读取保持只读；Permission
-  Profile 按 CWD 分页。开发中 Plugin 只调用 `plugin/installed` 并经 Application 开关约束，
-  不接入搜索、安装或分享。Thread 列表支持官方 `searchTerm`、`sectionId` 和
+  Profile 按 CWD 分页。Plugin 查询只调用 `plugin/installed`，按当前 Workspace CWD 获取已安装目录，
+  不接入市场搜索、安装或分享。Thread 列表支持官方 `searchTerm`、`sectionId` 和
   `section_position` 排序，并显式传空
   `modelProviders` 获取当前 Workspace 的全部 Provider，
   供跨 Provider 会话展示和冷恢复定位使用；macOS Desktop 启动前的只读检查使用官方分页
   `thread/loaded/list` 枚举当前内存中的持久及临时 Thread，再通过 `thread/read` 读取权威状态，只返回
   活动 Thread 数量。
   新 Thread 可显式携带官方 `modelProvider`、受控 `threadSource=automation` 与实验
-  `dynamicTools`；Fork 由 Session Router 注入当前 Workspace 的权限参数，调用方只允许选择模型
-  Provider，不得跨 Provider 或自行扩大权限。
+  `dynamicTools`；前台新建、恢复和 Fork 不补网关权限默认值，由 App Server 处理原生配置及继承。
+  Thread 响应保留实际目录、沙箱、审批策略和 Profile 身份；恢复只核对显式请求的约束。
+  无人值守预检按目标 Provider/CWD 读取原生明确受限沙箱配置，创建后的实际权限仍须复核。
+  Fork 调用方只允许选择同一 Provider，不承担跨 Provider 权限或历史转换。
   已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
@@ -174,6 +183,8 @@
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
   Server Request 的物理来源与已知 Thread Provider 冲突时拒绝；未知来源关联只作为读取路由提示，
   后续官方 Thread 快照必须匹配所读实例及请求的 Thread ID，才可用于子代理审批归属。
+  `readConnectedThreadState` 只在现有连接的活动保护内读取官方无历史 Thread 元数据；未知归属先由已连接主实例定位，
+  再由已连接目标实例核验，不启动或连接 Provider。无法读取时明确返回未知，不把 idle/notLoaded 解释为任务完成。
   第三方实例在查询对应实时模型目录、首次选择模型或恢复其 Thread 时通过私有监管入口按需启动并连接，未使用的
   Provider 不增加 App Server 子进程；MCP 配置刷新只尝试当前已连接实例并传播任一失败，单 Provider
   重连只恢复该侧 Thread。组合根为所有 Provider 请求注入活动保护：统一空闲管理器在 Gateway 没有前后台

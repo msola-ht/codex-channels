@@ -42,10 +42,6 @@ import type {
   ThreadOccupancyReleaseResult,
 } from "./thread-occupancy-port.js";
 import type { Workspace } from "../policy/index.js";
-import type {
-  WorkspacePermissionPort,
-  WorkspacePermissionUpdate,
-} from "./workspace-permission-port.js";
 import {
   ConversationCore,
   UserFacingError,
@@ -336,11 +332,6 @@ export interface ConversationSessionUseCases {
   artifacts(target: ConversationTarget): TurnArtifacts | undefined;
   listWorkspaces(): Workspace[];
   selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace>;
-  updateWorkspacePermissions(
-    target: ConversationTarget,
-    update: WorkspacePermissionUpdate,
-    expectedWorkspaceId?: string,
-  ): Promise<Workspace>;
   releaseThread(
     target: ConversationTarget,
     force?: boolean,
@@ -396,12 +387,8 @@ export class ConversationService implements
     private readonly transfers?: ConversationTransferPort,
     providerAccounts?: ProviderAccountQueryPort,
     requestMetricsQuery?: RequestMetricsQueryPort,
-    private readonly workspacePermissions?: WorkspacePermissionPort,
     private readonly turnErrorRecorder?: TurnErrorRecorder,
     private readonly agentRoles?: AgentRolePort,
-    experimentalFeatures: { pluginApiEnabled: boolean } = {
-      pluginApiEnabled: false,
-    },
     private readonly threadOccupancy?: ThreadOccupancyPort,
     private readonly threadQueue?: ThreadQueuePort,
     threadHistory?: ThreadHistoryPort,
@@ -430,7 +417,6 @@ export class ConversationService implements
       router,
       models,
       queries,
-      experimentalFeatures.pluginApiEnabled,
     );
     this.accountMetrics = new ConversationAccountMetricsService(
       queries,
@@ -761,7 +747,6 @@ export class ConversationService implements
     selector: string,
     task: string,
   ): Promise<Submission & { pluginName: string }> {
-    this.extensionQueries.assertPluginApiEnabled();
     const normalizedSelector = selector.trim();
     const normalizedTask = task.trim();
     if (!normalizedSelector || !normalizedTask) {
@@ -774,7 +759,7 @@ export class ConversationService implements
       if ((this.models.status(target).modelProvider ?? "openai") !== "openai") {
         throw new UserFacingError(
           "plugin.provider.unsupported",
-          "开发中的 Plugin 调用当前只支持 OpenAI Session",
+          "Plugin 调用当前只支持 OpenAI Session",
         );
       }
       const workspace = this.router.workspace(target);
@@ -1262,33 +1247,6 @@ export class ConversationService implements
         this.restoreSelectionsAfterBindingChange(target, modelPreference);
       }
       return workspace;
-    });
-  }
-
-  updateWorkspacePermissions(
-    target: ConversationTarget,
-    update: WorkspacePermissionUpdate,
-    expectedWorkspaceId?: string,
-  ): Promise<Workspace> {
-    if (!this.workspacePermissions) {
-      throw new UserFacingError(
-        "workspace.permission.unavailable",
-        "当前 Gateway 不支持修改工作区权限",
-      );
-    }
-    return this.locked(target, () => {
-      const workspaceId = this.router.workspace(target).id;
-      if (expectedWorkspaceId !== undefined && workspaceId !== expectedWorkspaceId) {
-        throw new UserFacingError(
-          "workspace.permission.usage",
-          "当前工作区已变化，请重新发送 /workspaceperm",
-          { reason: "stale-selection" },
-        );
-      }
-      return this.workspacePermissions!.updateWorkspacePermissions(
-        workspaceId,
-        update,
-      );
     });
   }
 

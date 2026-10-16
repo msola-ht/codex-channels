@@ -27,7 +27,6 @@ export interface GatewaySettings {
   system: {
     approvalTimeoutSeconds: number;
     idleReleaseMinutes: number;
-    sandbox: "read-only" | "workspace-write";
     defaultWorkspace: string | null;
     defaultModel: string | null;
     modelTrafficMode: "production" | "debug";
@@ -58,7 +57,6 @@ export interface GatewaySettings {
   }>;
   advanced: {
     loggingLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
-    pluginApiEnabled: boolean;
   };
   telegram: { configured: boolean; messageFormat: "html" | "rich" };
   webui: {
@@ -70,14 +68,6 @@ export interface GatewaySettings {
   metrics: {
     storage: { retentionDays: number; maxRows: number };
   };
-  workspaces: Array<{
-    id: string;
-    name: string;
-    sandbox: "read-only" | "workspace-write" | "danger-full-access" | null;
-    approvalPolicy: "untrusted" | "on-request" | "never" | null;
-    approvalsReviewer: "user" | "auto_review" | null;
-    permissions: string | null;
-  }>;
   channels: Array<{
     id: "telegram" | "feishu" | "weixin";
     displayName: string;
@@ -94,7 +84,6 @@ export type GatewaySettingInput =
   | { kind: "telegram.message-format"; value: "html" | "rich" }
   | { kind: "system.approval-timeout"; value: number }
   | { kind: "system.idle-release-minutes"; value: number }
-  | { kind: "system.sandbox"; value: "read-only" | "workspace-write" }
   | { kind: "system.default-workspace"; value: string }
   | { kind: "system.default-model"; value: string | null }
   | { kind: "system.model-traffic-dump"; value: boolean }
@@ -116,7 +105,6 @@ export type GatewaySettingInput =
   | { kind: "system.gateway-timezone"; value: string | null }
   | { kind: "automation.scheduled-tasks"; value: boolean }
   | { kind: "advanced.logging-level"; value: GatewaySettings["advanced"]["loggingLevel"] }
-  | { kind: "advanced.plugin-api"; value: boolean }
   | {
       kind: "network.proxy";
       field: "http_proxy" | "https_proxy" | "all_proxy" | "no_proxy";
@@ -135,16 +123,7 @@ export type GatewaySettingInput =
   | { kind: "webui.host"; value: "127.0.0.1" | "::1" | "0.0.0.0" | null; token?: string }
   | { kind: "webui.port"; value: number | null }
   | { kind: "webui.token"; action: "set" | "clear"; value?: string }
-  | { kind: "metrics.storage"; retentionDays: number; maxRows: number }
-  | {
-      kind: "workspace.permissions";
-      workspaceId: string;
-      update:
-        | { kind: "sandbox"; value: "read-only" | "workspace-write" | "danger-full-access" | null }
-        | { kind: "approval"; value: "untrusted" | "on-request" | "never" | null }
-        | { kind: "approvals-reviewer"; value: "user" | "auto_review" | null }
-        | { kind: "permissions"; value: string | null };
-    };
+  | { kind: "metrics.storage"; retentionDays: number; maxRows: number };
 
 export function loadGatewaySettings(environment?: NodeJS.ProcessEnv): GatewaySettings;
 

@@ -4,7 +4,7 @@
 
 ## 1. 工作方式
 
-Gateway 把 Telegram、飞书和微信消息接入本机 Codex App Server。`codexc remote` 连接的是同一个 App Server，因此原生 TUI 与聊天渠道共享 Thread、Workspace、模型提供商和实时运行状态。
+Gateway 把 Telegram、飞书和微信消息接入本机 Codex App Server。`codexc remote` 连接对应 Provider 的同一个 App Server，原生 TUI 与聊天渠道可在工作区与 Provider 匹配时接续同一 Thread，并共享实时运行状态。Workspace 注册表由 Gateway 管理，终端包装入口读取同一份配置；它不是上游 Project 的同步副本。
 
 App Server 是 Thread、Turn、Item 和会话历史的唯一事实来源。Gateway 的 StateStore 只保存渠道与 Workspace 的最小绑定，不复制完整会话历史。独立投递箱按[投递合同](delivery.md)加密保存待送达结果；显式开启的调用转储另按下文保存模型报文。
 
@@ -39,7 +39,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 WebUI 开关位于 `codexc config → 服务访问 → WebUI 设置 → 启用状态`，写入 `[webui] enabled`；未设置时沿用已安装的服务定义。显式 `false` 后 `codexc start all` 不再启动它、`codexc restart all` 会停止它且不再启动，`codexc update` 也不恢复它；设置本身不停止正在运行的实例，也不删除已生成的服务定义。需要时仍可用 `codexc start webui` 单独启动，用 `codexc stop webui` 单独停止。
 菜单日志显示最近 100 行，持续跟随仍使用 `codexc logs <目标> -f`。卸载后台服务需确认。
 
-`codexc work` 按列表、设置默认、注册当前目录、注册已有目录、新建目录、权限和移除注册排序；选择默认项即保存，注册前显示实际目录并确认，移除注册不删除目录。`codexc metrics` 按聚合报告、会话列表、会话轮次明细、会话最近运行汇总、请求明细、历史额度和数据库状态排序；会话明细和最近运行汇总共用列表选择，并提供明确的手动输入 Thread ID 入口。清理与重置统一使用 `codexc cleanup`。上述操作菜单完成单项后可继续选择；“运行与连接”完成后返回该子菜单，退出后返回主菜单。Setup 和 Config 单项失败会显示错误并返回各自分类菜单，不自动重试写入。
+`codexc work` 按列表、设置默认、注册当前目录、注册已有目录、新建目录和移除注册排序；选择默认项即保存，注册前显示实际目录并确认，移除注册不删除目录。`codexc metrics` 按聚合报告、会话列表、会话轮次明细、会话最近运行汇总、请求明细、历史额度和数据库状态排序；会话明细和最近运行汇总共用列表选择，并提供明确的手动输入 Thread ID 入口。清理与重置统一使用 `codexc cleanup`。上述操作菜单完成单项后可继续选择；“运行与连接”完成后返回该子菜单，退出后返回主菜单。Setup 和 Config 单项失败会显示错误并返回各自分类菜单，不自动重试写入。
 新增或重复注册工作区保留有效的默认工作区；仅在默认值缺失时选择后备工作区，失效目录仍需显式清理。
 
 ```bash
@@ -82,6 +82,11 @@ WebUI 启动失败会报告核心服务已安装、WebUI 未完成，并以失�
 `codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；完成单项后可继续选择，选择“完成接入”正常退出，选择“取消”或在类别菜单按 Esc/Ctrl+C 取消退出。`setup --jsonl` 的渠道结果保留 `warnings`，飞书另返回 `applicationConfiguration`，配置保存成功但存在降级时应按这些字段处理。`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区使用 `codexc work`，后台服务使用顶层 `start/stop/restart/status/logs` 命令，也可从主菜单进入。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 CLI 和 WebUI 的 Gateway 设置在读取和保存前均校验当前配置结构；不支持的版本、未知字段或非法值会阻止操作并保留原文件，不以默认显示值掩盖错误。请先修复配置，再重新进入设置。
+
+Plugin 查询与调用不再需要 Gateway 功能开关。旧配置中的 `[experimental].plugin_api`（TOML 写法为
+`[experimental]` 表下的 `plugin_api`）及仅含该字段的表已不受支持，不会被自动忽略或迁移。
+升级前请备份实际使用的 `config.toml`，再显式删除该键及空的 `[experimental]` 表；未清理时配置校验失败，
+原文件保持不变。若需回退旧版本，恢复与该版本匹配的配置备份。程序更新不会代为修改这项旧配置。
 
 “Codex 新会话与用户偏好”先显示设置分类，进入具体项目后再读取当前值与可用选项；分类页返回或取消无需等待 App Server。“配置默认值与用户偏好”统一收集模型、加速档位、权限、Plan 思考等级、推理摘要、输出详细程度、更新检查与历史记录，最后一次确认并批量写入；中途取消不保存。可修改项以进入后读取的 Provider 和 Permission Profile 为准；使用 Permission Profile 时保留现有权限，其余偏好仍可设置。保存校验配置修订及对应策略。
 初始化、日常 Codex 设置、MCP 配置与官方登录使用同一可执行文件选择：显式 `[codex] binary` 优先；值为默认 `codex` 时允许 `CODEX_BINARY` 覆盖。官方登录输出跟随交互输出流，`setup --jsonl` 的 stdout 只保留事件；登录失败或取消不会继续恢复官方配置。
@@ -130,7 +135,7 @@ Gateway 不再按 Provider 或模型白名单限制自动审查；已配置的�
 已经加载的 Thread 及恢复的历史会话保留自身审批方式，不随默认值切换；受管 Provider 独立实例
 仍以各自有效配置为准。无需为了此偏好重启 Gateway。
 
-Codex 用户默认和 Workspace 默认审批方式不依赖 Provider 或模型资格；Workspace 默认跨 Provider 共用。
+Codex 原生审批方式不依赖 Gateway 的 Provider 或模型资格白名单。
 新建、未加载恢复和分叉按已有权限继承规则传递审批方式，不因模型变化自动切回手动审批。
 已加载会话保留实际审批方式、订阅及活动任务状态。Gateway 不因第三方身份拦截新执行。
 
@@ -149,18 +154,20 @@ Codex 用户默认和 Workspace 默认审批方式不依赖 Provider 或模型�
 五分钟内有效且只能提交一次，切换会话后须重新查询。只有 App Server 权威设置确认后才报告已切换；
 未确认时不会自动重试，应重新用 `/autoreview` 核对实际状态。
 
-飞书、Telegram 和微信可用 `/workspaceperm` 查询当前工作区的默认审批方式；
-`/workspaceperm autoreview on` 开启自动审查，`off` 选择手动审批，`clear` 删除工作区覆盖。
-该覆盖对新建、分叉、卸载后恢复的会话生效；已加载会话保留实际审批方式，须用 `/autoreview` 修改当前会话。
-`clear` 只移除工作区覆盖；新会话跟随 Codex 默认，恢复历史会话可能保留其已保存设置，因此并非每次 `/resume` 都会继承新的默认值。
-当前会话的实际审批方式仍由 `/status` 及启动、完成卡片展示。
-飞书命令中心与 Telegram `/workspaceperm` 查询结果提供标明“工作区默认”的三种选择按钮，微信使用同一组文本命令。
-按钮限时、一次性并绑定原工作区与当前用户；切换工作区后须重新查询。WebUI 的「工作区与权限」
-同样支持自动审查、手动审批、跟随 Codex 默认，复用权限设置预览、配置版本校验和高风险确认。
-本机可通过 `codexc work` 的工作区权限菜单设置同一覆盖，配置字段为
-`[[workspaces]].approvals_reviewer`，仅接受 `auto_review` 或 `user`，删除该字段即跟随 Codex 默认。
+Workspace 只保存目录身份，不另存沙箱、审批策略、Permission Profile 或审批方式。
+渠道新会话由目标 App Server 按授权目录加载原生配置；恢复、重连和分叉遵循原生 Thread 权限继承规则，
+不会强制重置为当前项目默认。当前会话实际审批方式仍由 `/status`、`/autoreview` 及生命周期卡片展示。
+本机 CLI 与 WebUI 的 Codex 权限设置修改原生用户层配置；项目级差异使用受信任的 `.codex/config.toml`。
+用户层偏好不代表所有 Provider、项目或既有 Thread 的实际权限。渠道不再提供 `/workspaceperm`。
 
-工作区沙箱与审批策略未配置时，菜单默认保留继承状态。清除覆盖后，Gateway 分别使用全局 `codex.sandbox` 与 `on-request`；`codexc remote` 则沿用 Codex 自身默认设置。`untrusted` 可用于 Gateway，但当前 Remote 入口需要显式传入 `--ask-for-approval on-request|never` 覆盖。保存相同值不会改写配置，也不会要求热加载。
+升级前备份 Gateway `config.toml`。先在副本准备配置，待停止旧 Gateway 和会修改配置的 WebUI 后，
+再将清理后的配置用于新版；不要让旧 Gateway 热加载清理后的文件，否则旧默认值可能改变执行权限。
+显式删除 `[codex].sandbox` 和各 `[[workspaces]]` 的
+`sandbox`、`approval_policy`、`approvals_reviewer`、`permissions`。全局 sandbox 可能由旧默认补全写入，
+未手动设置也应检查。需要保留的项目差异应先在原生 Codex 配置中明确设置，不会自动搬到全局配置。
+旧字段会使严格配置校验失败，原文件保留不改写；清理前不能依赖新版配置菜单自行修复。
+失败时保持 Gateway 停止，修正新版配置后再启动；回退需先恢复旧程序及对应配置备份，
+再启动旧 Gateway。App Server 独立运行，不因这项清理而停止。现有 Thread 和计划任务数据库不随此次配置清理迁移或删除。
 
 ### 计划相关设置
 
@@ -270,7 +277,7 @@ auto_recap = false
 
 Codex 0.156.1 已停用模型人格：CLI 与 WebUI 不再提供人格选择，保存其他偏好不会改写配置中已有的 `personality`。
 
-在 `codexc config → Codex 新会话与用户偏好 → 配置默认值与用户偏好` 中选择推理摘要。开发基线 0.162.1
+在 `codexc config → Codex 新会话与用户偏好 → 配置默认值与用户偏好` 中选择推理摘要。开发基线 0.163.0
 在尚未配置时预选“关闭”，与配套 CLI 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
 不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
 检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`。
@@ -339,7 +346,7 @@ Codex、Gateway 渠道和模型统计代理共用该文件；修改后在任务�
 不补读系统代理；仅有 `NO_PROXY` 时仍允许自动发现。Windows 不读取 WinINET/WinHTTP。
 不支持旧 TOML `[network]`，更新器不会迁移或修改代理配置。
 
-Workspace 只能从已登记项目中选择，并可分别设置 Sandbox、审批策略、Permission Profile 和默认审批方式；不会接受聊天用户提交的任意绝对路径。默认审批方式与当前会话实际设置的区别见[审批方式](#审批方式手动审批与自动审查auto-review)。
+Workspace 只能从已登记项目中选择，不接受聊天用户提交的任意绝对路径；沙箱与审批由 App Server 原生配置及 Thread 状态决定。默认审批方式与当前会话实际设置的区别见[审批方式](#审批方式手动审批与自动审查auto-review)。
 
 ## 4. Workspace、Provider 与终端
 
@@ -385,6 +392,11 @@ codexc remote -p cp-llm
 codexc remote --profile personal
 ```
 
+若要让新建终端会话使用渠道的登记目录，可运行 `codexc remote --workspace <ID>`。
+从登记目录的子目录启动时，Remote 保留子目录作为
+工作目录；渠道按登记根目录查询和恢复，不能保证列出或接续这些子目录会话。
+直接使用原生 `codex --remote` 不会读取 Gateway Workspace 注册表。
+
 `codexc remote` 与 `codexc app` 的 `-p` / `--provider` 使用同一选择规则：接受已配置的完整
 Provider ID（如 `ds-main`、`clp-main`、`ocg-main`、`ccg-main`、`cp-llm`、`my-provider`），或注册表中精确登记的
 规范 `sf-*` Profile 名称（如 `sf-ds-main`、`sf-cp-llm`、`sf-custom-my-provider`）。自定义提供商使用 `cp-` 前缀，支持独立选择 Responses 或 Chat Completions；对应配置文件为 `sf-cp-<名称>.config.toml`。推荐使用完整 Provider ID；
@@ -400,12 +412,11 @@ Remote 的 `--profile` 继续支持原生个人 Profile 和已登记的规范受
 直接运行 `codex` 会创建独立 TUI，不共享 Gateway Thread；需要共享会话时使用 `codexc remote`。跨 Provider 切换会创建目标 Provider 的新 Thread，不复制原 Provider 历史。
 直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，空闲释放可能停止对应实例；
 共享 App Server 的 TUI 请统一使用 `codexc remote`。
-`codexc remote` 会按当前目录或显式 `--workspace` 选中的工作区传递权限及可选 `approvals_reviewer`；
-也可用一次 `-C DIR` / `--cd DIR` 指定目录，按该目录匹配工作区及其权限；不能与 `--workspace` 同时使用。原生 `resume` / `fork` 上的目录参数同样参与选择，重复目录参数被拒绝。不能透传 `--remote` 或 `--remote-auth-token-env` 替换受管连接；原生 `--` 之后的内容按字面参数保留。
-显式传给 Codex 的 `-c approvals_reviewer=...` 或 `--approve-for-me` 优先于工作区默认审批方式。
+`codexc remote` 不注入网关权限参数，原生配置、Profile 和显式参数由 Codex 处理。
+可用 `--workspace` 选择登记目录，或用一次 `-C DIR` / `--cd DIR` 指定目录；两者不能同时使用。原生 `resume` / `fork` 上的目录参数同样参与选择，重复目录参数被拒绝。不能透传 `--remote` 或 `--remote-auth-token-env` 替换受管连接；原生 `--` 之后的内容按字面参数保留。
 Remote 不按 Provider 或模型限制自动审查，也不为审批资格固定模型或限制个人 Profile。
 聚合入口仍保护其 Provider 与模型目录，防止透传参数替换路由。
-Remote 的 `resume` 和继承式 `fork` 由原生 TUI 保留历史模型及审批方式，Codex 0.162.1 不应用启动参数中的 reviewer 覆盖；
+Remote 的 `resume` 和继承式 `fork` 由原生 TUI 保留历史模型及审批方式，Codex 0.163.0 不应用启动参数中的 reviewer 覆盖；
 恢复后应核对实际模型与审批方式。
 
 ### Codex Desktop App 共享（macOS / Windows 预览）
@@ -506,7 +517,7 @@ Remote Control 或手机配对。Desktop 的连接环境属于未公开兼容入
 macOS 上使用 ChatGPT `26.908.70816` 的既有实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
 Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
 私有 UDS，并在首次附加当前工具 Pipe 时短暂重启目标 App Server 子进程，以 OpenAI 签名的 Desktop
-Node 托管项目锁定的 Codex CLI；开发基线为 0.162.1，既有私有 Pipe 与签名链实机验收使用 0.154.0，
+Node 托管项目锁定的 Codex CLI；开发基线为 0.163.0，既有私有 Pipe 与签名链实机验收使用 0.154.0，
 升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到目标实例，
 Host 租约存在时空闲释放不会停止目标实例。目标实例已空闲释放时，`codexc app` 会先获取临时租约，
 按需恢复实例并保护启动预检，再通过 App Server 的官方 `thread/loaded/list` 和 `thread/read`
@@ -537,7 +548,7 @@ Windows 先以临时 Provider 租约等待目标实例就绪，再检查桥并�
 新增入口会拒绝用户层、合并配置及已配置插件策略中已知的同名服务器，但不会读取插件清单；尚未出现在这些配置中的插件服务器可能重名。确认时会提示使用独立名称，Codex 的同名用户配置优先于插件服务器。
 
 “用户设置”与“App Server 合并配置”分别展示，未设置时不臆测上游默认值。合并结果来自用户配置管理连接，
-不包含当前渠道 Thread 的 Workspace/Profile 覆盖，也不表示组织策略、工具审批或操作系统权限已经放行。
+不包含当前渠道 Thread 的项目/Profile 配置及历史权限，也不表示组织策略、工具审批或操作系统权限已经放行。
 选择“移除用户设置”仅删除该字段；工具列表的 `[]` 是显式空列表，与删除字段不同。
 审批模式 `auto` 按工具属性判断，`prompt` 每次询问，`writes` 对非只读工具询问，`approve` 免除此层工具审批；
 应用/站点的 `allow` 不会取消其他审批。保存后在新会话中使用；已有 MCP 连接与桌面客户端不保证即时采用新配置。
@@ -735,14 +746,25 @@ codexc uninstall
 在聊天中发送 `/help` 查看当前渠道完整命令。常用命令包括：
 
 - 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`
-- Workspace：`/workspace`、`/workspaceperm`
+- Workspace：`/workspace`
 - 运行：`/status`、`/stop`、`/queue`、`/revert`、`/compact`、`/fork`、`/review`、`/release`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
-- 工作区审批方式：`/workspaceperm autoreview <on|off|clear>`
+- 工作区权限由 App Server 原生配置及 Thread 状态管理。
 - 当前会话审批方式：`/autoreview [on|off]`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/hooks`
 - 帮助：`/help`、`/whoami`
+
+`/sessions search <关键词>` 匹配会话标题，不检索消息正文。
+`/pin` 将 Thread 移入官方 Pinned 分区，`/unpin` 将其移出分区；若此前在其他客户端的自定义分区中，
+这组操作不会恢复原分区。该归属变化也会影响使用同一 Thread 的其他客户端。
+
+`/plugin` 查询当前 Workspace 的已安装 Plugin；`/plugin list search <关键词>` 只搜索已安装目录，
+`/plugin <名称或序号>` 查看详情，`/plugin health` 查看需要处理的状态。
+`/plugin <名称或序号> <任务>` 在 OpenAI Thread 中调用已启用且可用的 Plugin，仍需满足当前 Actor 与 Workspace 授权。
+渠道命令不提供市场搜索、安装或卸载；请通过 Codex 原生入口管理安装。
+已有 Plugin 所属 MCP 的工具审批、允许／禁用工具和输出预算可在 CLI／WebUI 的工具设置中管理；
+这些设置不提供 Plugin 安装、卸载或统一执行禁用开关。
 
 `/stop` 会优先中断当前活动 Turn，并取消当前目标尚未提交的音频、视频准备及 Client 待提交的图片准备；被取消的音频或视频下载即使稍后返回，也不会重新提交。飞书和 Telegram 同时取消当前待处理交互，原生 Queue 中的排队项保留，可通过 `/queue` 管理。`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天；主任务已经结束但子代理或交互尚未完成时，也会保留旧会话的后台绑定。重连后的清理仍需确认这些活动已经结束，查询失败不会直接解除占用。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。
 存在原 Thread 时，`/new` 的结果会显示 `恢复会话：/r <Thread ID>`，可直接复制该命令恢复旧会话。
@@ -825,6 +847,7 @@ WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接�
 `metrics report/export/run/threads/turns/quota` 默认生成私有导出文件，使用 `--stdout` 输出到标准输出。组合查询、分页明细及聚合共用一次只读快照，运行中新增记录会在下一次查询出现。服务启动等待 WebUI 健康响应与受管进程身份匹配；其他程序返回 HTTP 200 不代表 WebUI 已就绪。IPv6 地址使用带方括号的 URL。
 
 指标查询与导出在独立子进程执行，耗时超过 250 毫秒才显示进度，进度写入标准错误流，不混入 JSON/CSV 或导出文件。取消会等待当前数据库操作释放资源；失败或取消的导出文件会移除，只有成功后才报告文件路径。
+`metrics report/export` 支持 `--request-purpose autoApprovalReview|unmarked`；不指定时包含全部用途。`unmarked` 表示未标记用途（含历史未知），不能证明是普通请求，可与 Thread/Turn 归属筛选组合。会话、轮次和 `run` 的任务统计固定排除明确审查，不接受此选项。聚合保留已知 Token 累计与 `usageCoverage` 缺失计数，CSV/JSON 同步输出；Markdown 的 `≥` 表示字段缺失，全未知显示“未观测”。全局和提供商总量含审查，以“其中自动审查”列出，不能再次加到总数。模型组只按记录模型归组，涉及轮次不可跨组相加。
 请求明细 `metrics export` 通过只读 Worker 从同一快照逐块输出，JSON、CSV、Markdown 均保留原有字段与筛选语义；单次最多 64 MiB，读取和输出共用 120 秒预算，初始化和关闭另有限时。超过容量或时间限制会明确失败，请缩小时间范围或增加筛选条件后重试。Windows 辅助进程退出未确认时会报告关闭失败并保留进程引用，不把超时视为清理完成。
 
 ### OpenAI 重置券 CLI

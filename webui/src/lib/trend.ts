@@ -1,4 +1,4 @@
-import type { DailyUsageRow, HourlyUsageRow, Range, UsageTrendResponse } from "./types"
+import type { CacheUsage, DailyUsageRow, HourlyUsageRow, Range, ReviewUsage, UsageCoverage, UsageTrendResponse } from "./types"
 import { formatCalendarDay } from "./format"
 
 const calendarDayMs = 86_400_000
@@ -30,6 +30,8 @@ function fillDays(rows: DailyUsageRow[], startDay: number, days: number): DailyU
     return rowsByDay.get(day) ?? {
       day, requestCount: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
       cacheUsage: { inputTokens: 0, cachedInputTokens: 0, missingRequestCount: 0 },
+      usageCoverage: { inputMissingRequestCount: 0, outputMissingRequestCount: 0, reasoningMissingRequestCount: 0 },
+      reviewUsage: { requestCount: 0, inputTokens: 0, outputTokens: 0, usageCoverage: { inputMissingRequestCount: 0, outputMissingRequestCount: 0, reasoningMissingRequestCount: 0 } },
     }
   })
 }
@@ -37,9 +39,12 @@ function fillDays(rows: DailyUsageRow[], startDay: number, days: number): DailyU
 export interface UsageTrendRow {
   period: string
   requestCount: number
-  inputTokens: number
+  inputTokens: number | null
   cachedInputTokens: number | null
-  outputTokens: number
+  outputTokens: number | null
+  usageCoverage: UsageCoverage
+  reviewUsage: ReviewUsage
+  cacheUsage: CacheUsage
 }
 
 export function usageTrendRows(trend: UsageTrendResponse): UsageTrendRow[] {
@@ -48,17 +53,20 @@ export function usageTrendRows(trend: UsageTrendResponse): UsageTrendRow[] {
 
 export function toUsageTrend(rows: (DailyUsageRow | HourlyUsageRow)[]): UsageTrendRow[] {
   return rows.map((row) => {
-    const inputTokens = Math.max(0, row.inputTokens)
+    const inputTokens = row.requestCount > 0 && row.usageCoverage.inputMissingRequestCount === row.requestCount ? null : Math.max(0, row.inputTokens)
     const cachedInputTokens = row.cacheUsage.cachedInputTokens === null
       ? null
-      : Math.min(Math.max(0, row.cacheUsage.cachedInputTokens), inputTokens)
-    const outputTokens = Math.max(0, row.outputTokens)
+      : Math.max(0, row.cacheUsage.cachedInputTokens)
+    const outputTokens = row.requestCount > 0 && row.usageCoverage.outputMissingRequestCount === row.requestCount ? null : Math.max(0, row.outputTokens)
     return {
       period: "hour" in row ? row.hour : row.day,
       requestCount: row.requestCount,
       inputTokens,
       cachedInputTokens,
       outputTokens,
+      usageCoverage: row.usageCoverage,
+      reviewUsage: row.reviewUsage,
+      cacheUsage: row.cacheUsage,
     }
   })
 }

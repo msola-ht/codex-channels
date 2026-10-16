@@ -6,12 +6,11 @@ const maximumPendingBytes = 16 * 1024 * 1024;
 const maximumBatchSize = 32;
 const flushDelayMs = 10;
 
-interface WriteScope { threadId: string | null; turnId: string | null }
+interface WriteScope { threadId: string | null; turnId: string | null; requestPurpose?: "autoApprovalReview" | null }
 interface WriteEntry { sample: ModelRequestMetricSample; sequence: number; bytes: number }
 interface WriteCheckpoint {
   target: number;
-  threadId: string | undefined;
-  turnId: string | undefined;
+  matches: (scope: WriteScope) => boolean;
   resolve: (succeeded: boolean) => void;
 }
 interface WriterStore {
@@ -64,14 +63,52 @@ export class BufferedModelRequestMetricsWriter<Store extends WriterStore = Write
     this.scheduleFlush();
   }
 
-  waitForCurrentWrites(threadId?: string, turnId?: string): Promise<boolean> {
+  waitForCurrentWritesInScopes(
+    scopes: readonly { threadId: string; turnId?: string }[],
+    requestPurpose: "autoApprovalReview" | null,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    return this.waitForMatchingWrites(scopeMatcher(scopes, requestPurpose), signal);
+  }
+
+  async waitForCurrentWritesInScope(
+    resolveScopes: () => Promise<readonly { threadId: string; turnId?: string }[]>,
+    requestPurpose: "autoApprovalReview" | null,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const target = this.enqueuedCount;
+    // Only completion of this watermark matters here; failures are checked
+    // against the database's authoritative task/session scope below.
+    await this.waitForMatchingWrites(() => true, signal);
+    signal?.throwIfAborted();
+    const scopes = await resolveScopes();
+    signal?.throwIfAborted();
+    return this.succeeded(target, scopeMatcher(scopes, requestPurpose));
+  }
+
+  private waitForMatchingWrites(matchesScope: (scope: WriteScope) => boolean, signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("模型请求指标等待已取消"));
     let target = this.processedCount;
     for (const entry of [...this.active, ...this.pending]) {
-      if (matches(entry.sample, threadId, turnId)) target = entry.sequence;
+      if (matchesScope(entry.sample)) target = entry.sequence;
     }
-    if (target <= this.processedCount) return Promise.resolve(this.succeeded(target, threadId, turnId));
-    if (this.checkpoints.length >= 1_024) return Promise.resolve(false);
-    return new Promise(resolve => this.checkpoints.push({ target, threadId, turnId, resolve }));
+    if (target <= this.processedCount) return Promise.resolve(this.succeeded(target, matchesScope));
+    if (this.checkpoints.length >= 1_024) return Promise.reject(new Error("模型请求指标等待队列已满"));
+    return new Promise((resolve, reject) => {
+      const cleanup = (): void => {
+        signal?.removeEventListener("abort", abort);
+        const index = this.checkpoints.indexOf(checkpoint);
+        if (index !== -1) this.checkpoints.splice(index, 1);
+      };
+      const abort = (): void => {
+        cleanup();
+        reject(signal?.reason instanceof Error ? signal.reason : new Error("模型请求指标等待已取消"));
+      };
+      const checkpoint: WriteCheckpoint = { target, matches: matchesScope,
+        resolve: succeeded => { cleanup(); resolve(succeeded); } };
+      this.checkpoints.push(checkpoint);
+      signal?.addEventListener("abort", abort, { once: true });
+    });
   }
 
   close(): Promise<void> {
@@ -149,7 +186,7 @@ export class BufferedModelRequestMetricsWriter<Store extends WriterStore = Write
         const checkpoint = this.checkpoints[index]!;
         if (checkpoint.target > this.processedCount) continue;
         this.checkpoints.splice(index, 1);
-        checkpoint.resolve(this.succeeded(checkpoint.target, checkpoint.threadId, checkpoint.turnId));
+        checkpoint.resolve(this.succeeded(checkpoint.target, checkpoint.matches));
       }
     }
     if (committed) {
@@ -162,14 +199,15 @@ export class BufferedModelRequestMetricsWriter<Store extends WriterStore = Write
   }
 
   private recordFailure(scope: WriteScope, sequence: number): void {
-    const existing = this.failures.find(entry => entry.sample.threadId === scope.threadId && entry.sample.turnId === scope.turnId);
+    const existing = this.failures.find(entry => entry.sample.threadId === scope.threadId && entry.sample.turnId === scope.turnId
+      && (entry.sample.requestPurpose ?? null) === (scope.requestPurpose ?? null));
     if (existing) { existing.sequence = Math.min(existing.sequence, sequence); return; }
     if (this.failures.length >= maximumPendingRecords) { this.failureOverflow = true; return; }
-    this.failures.push({ sequence, sample: { threadId: scope.threadId, turnId: scope.turnId } });
+    this.failures.push({ sequence, sample: { threadId: scope.threadId, turnId: scope.turnId, requestPurpose: scope.requestPurpose ?? null } });
   }
 
-  private succeeded(target: number, threadId?: string, turnId?: string): boolean {
-    return !this.failureOverflow && !this.failures.some(entry => entry.sequence <= target && matches(entry.sample, threadId, turnId));
+  private succeeded(target: number, matchesScope: (scope: WriteScope) => boolean): boolean {
+    return !this.failureOverflow && !this.failures.some(entry => entry.sequence <= target && matchesScope(entry.sample));
   }
 
   private report(error: unknown): void {
@@ -177,7 +215,21 @@ export class BufferedModelRequestMetricsWriter<Store extends WriterStore = Write
   }
 }
 
-function matches(scope: WriteScope, threadId?: string, turnId?: string): boolean {
-  return (threadId === undefined || scope.threadId === threadId)
-    && (turnId === undefined || scope.turnId === turnId);
+function scopeMatcher(scopes: readonly { threadId: string; turnId?: string }[], requestPurpose: "autoApprovalReview" | null): (scope: WriteScope) => boolean {
+  const threads = new Map<string, Set<string> | undefined>();
+  for (const scope of scopes) {
+    if (threads.has(scope.threadId) && threads.get(scope.threadId) === undefined) continue;
+    if (scope.turnId === undefined) threads.set(scope.threadId, undefined);
+    else {
+      const turns = threads.get(scope.threadId) ?? new Set<string>();
+      turns.add(scope.turnId);
+      threads.set(scope.threadId, turns);
+    }
+  }
+  return scope => {
+    // Thread/task summaries only consume requests attributed to a concrete Turn.
+    if (scope.threadId === null || scope.turnId === null || !threads.has(scope.threadId) || (scope.requestPurpose ?? null) !== requestPurpose) return false;
+    const turns = threads.get(scope.threadId);
+    return turns === undefined || turns.has(scope.turnId);
+  };
 }

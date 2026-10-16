@@ -10,10 +10,18 @@ export function mergeCompletionTiming(
   const timing: TurnOutputTiming = {
     ...current,
     modelRequestCount: latestTurn.requestCount,
+    usageCoverage: latestTurn.usageCoverage,
     requestInputTokens: latestTurn.inputTokens,
     requestOutputTokens: latestTurn.outputTokens,
   };
   reconcileModelRequestStatuses(timing, latestTurn);
+  assignOptionalMetric(
+    timing,
+    "reasoningRequestCount",
+    latestTurn.requestCount > latestTurn.usageCoverage.reasoningMissingRequestCount
+      ? latestTurn.reasoningRequestCount
+      : null,
+  );
   assignOptionalMetric(timing, "performance", latestTurn.performance ?? null);
   assignOptionalMetric(timing, "responseUsage", latestTurn.responseUsage ?? null);
   assignOptionalMetric(timing, "upstreamTtftMs", latestTurn.upstreamTtftMs ?? null);

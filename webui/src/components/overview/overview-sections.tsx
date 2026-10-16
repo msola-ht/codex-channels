@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Progress } from "@/components/ui/progress"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Table,
   TableBody,
@@ -26,6 +27,8 @@ import { Badge } from "@/components/ui/badge"
 import {
   InputTokenTooltip,
   OutputTokenTooltip,
+  ReviewUsageSummary,
+  TokenHint,
 } from "@/components/metrics/token-tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { TableHint } from "@/components/metrics/data-table"
@@ -44,6 +47,7 @@ import {
   formatRequestOutcomes,
   formatTime,
   formatTokens,
+  formatTotalUsage,
 } from "@/lib/format"
 import type {
   Aggregate,
@@ -104,27 +108,38 @@ export function GlobalCards({ global, threadCount, turnCount }: { global: Aggreg
   }
   const cache = formatCacheUsage(global.cacheUsage)
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="flex flex-col gap-2"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
         title={t("overview.totalTokens")}
-        value={formatTokens(global.inputTokens + global.outputTokens)}
-        description={`${t("metrics.requestsTotal", { count: formatCount(global.requestCount) })} · ${formatRequestOutcomes(global.requestOutcomes, t)}`}
+        value={<TokenHint value={formatTotalUsage(global)} />}
+        description={
+          <Tooltip>
+            <TooltipTrigger aria-description={formatRequestOutcomes(global.requestOutcomes, t)} render={<span tabIndex={0} className="cursor-help whitespace-nowrap underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2" />}>
+              {t("metrics.requestsTotal", { count: formatCount(global.requestCount) })}
+            </TooltipTrigger>
+            <TooltipContent>
+              <ul className="flex flex-col gap-1">
+                {formatRequestOutcomes(global.requestOutcomes, t).split(" · ").map((detail) => <li key={detail} className="whitespace-nowrap">{detail}</li>)}
+              </ul>
+            </TooltipContent>
+          </Tooltip>
+        }
       />
       <StatCard
         title={t("metrics.input")}
-        value={formatTokens(global.inputTokens)}
+        value={<InputTokenTooltip inputTokens={global.inputTokens} cachedInputTokens={global.cachedInputTokens} cacheUsage={global.cacheUsage} requestCount={global.requestCount} usageCoverage={global.usageCoverage} />}
         description={t("overview.cacheSummary", { cached: cache.cached, rate: cache.rate })}
       />
       <StatCard
         title={t("metrics.output")}
-        value={formatTokens(global.outputTokens)}
+        value={<OutputTokenTooltip outputTokens={global.outputTokens} reasoningOutputTokens={global.reasoningOutputTokens} requestCount={global.requestCount} usageCoverage={global.usageCoverage} />}
       />
       <StatCard
         title={t("overview.threads")}
-        value={formatCount(threadCount)}
+        value={<TableHint hint={t("metrics.executionThreadsHint")}>{formatCount(threadCount)}</TableHint>}
         description={t("overview.turnCount", { count: formatCount(turnCount) })}
       />
-    </div>
+    </div></div>
   )
 }
 
@@ -141,13 +156,14 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
           <TableHeader>
             <TableRow>
               <TableHead>{t("metrics.provider")}</TableHead>
-              <TableHead>{t("overview.threads")}</TableHead>
-              <TableHead>{t("overview.turnColumn")}</TableHead>
+              <TableHead><TableHint hint={t("metrics.executionThreadsHint")}>{t("overview.threads")}</TableHint></TableHead>
+              <TableHead><TableHint hint={t("metrics.involvedTurnsHint")}>{t("metrics.involvedTurns")}</TableHint></TableHead>
               <TableHead>{t("metrics.requests")}</TableHead>
               <TableHead><TableHint hint={t("metrics.input")}>{t("metrics.inputColumn")}</TableHint></TableHead>
-              <TableHead><TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint></TableHead>
+              <TableHead><TableHint hint={t("metrics.cacheScopeHint")}>{t("metrics.cacheHitRateColumn")}</TableHint></TableHead>
               <TableHead><TableHint hint={t("metrics.output")}>{t("metrics.outputColumn")}</TableHint></TableHead>
               <TableHead>{t("metrics.compact")}</TableHead>
+              <TableHead><TableHint hint={t("metrics.reviewSubsetHint")}>{t("metrics.reviewTokens")}</TableHint></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -162,6 +178,8 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
                     inputTokens={group.aggregate.inputTokens}
                     cachedInputTokens={group.aggregate.cachedInputTokens}
                     cacheUsage={group.aggregate.cacheUsage}
+                    requestCount={group.aggregate.requestCount}
+                    usageCoverage={group.aggregate.usageCoverage}
                   />
                 </TableCell>
                 <TableCell className="tabular-nums">
@@ -171,6 +189,8 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
                   <OutputTokenTooltip
                     outputTokens={group.aggregate.outputTokens}
                     reasoningOutputTokens={group.aggregate.reasoningOutputTokens}
+                    requestCount={group.aggregate.requestCount}
+                    usageCoverage={group.aggregate.usageCoverage}
                   />
                 </TableCell>
                 <TableCell className="tabular-nums">
@@ -178,11 +198,14 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
                     ? t("overview.none")
                     : t("metrics.times", { count: group.aggregate.compact.requestCount })}
                 </TableCell>
+                <TableCell className="whitespace-nowrap tabular-nums">
+                  <ReviewUsageSummary usage={group.aggregate.reviewUsage} />
+                </TableCell>
               </TableRow>
             ))}
             {providers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="h-16 text-center text-muted-foreground">
+                <TableCell colSpan={9} className="h-16 text-center text-muted-foreground">
                   {t("overview.noData")}
                 </TableCell>
               </TableRow>

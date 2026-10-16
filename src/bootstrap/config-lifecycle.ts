@@ -14,6 +14,7 @@ import {
   GatewayAccountRefreshError,
   GatewayAccountRefreshServer,
 } from "../../runtime/gateway-account-refresh.mjs";
+import { GatewayThreadStateServer } from "../../runtime/gateway-thread-state.mjs";
 import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { installProcessSignalHandlers, installServiceControlHandler } from "../../runtime/process-lifecycle.mjs";
@@ -161,11 +162,16 @@ export async function runGatewayProcess(): Promise<void> {
       }
     },
   );
+  const threadStates = new GatewayThreadStateServer(
+    runtime.configPath,
+    (threadIds, signal) => application.readConnectedThreadStates(threadIds, signal),
+  );
   let stopping = false;
   let started = false;
   let reloading = false;
   let reloadTimer: NodeJS.Timeout | undefined;
   let accountRefreshStartup: Promise<void> | undefined;
+  let threadStatesStartup: Promise<void> | undefined;
 
   let providerSettingsWatcher: ProviderSettingsWatcher;
   let networkProxyWatcher: NetworkProxyWatcher;
@@ -215,6 +221,10 @@ export async function runGatewayProcess(): Promise<void> {
     await accountRefreshStartup?.catch(() => undefined);
     await accountRefresh.close();
   };
+  const closeThreadStates = async (): Promise<void> => {
+    await threadStatesStartup?.catch(() => undefined);
+    await threadStates.close();
+  };
   const stop = (exitCode = 0): void => {
     if (stopping) {
       return;
@@ -231,7 +241,8 @@ export async function runGatewayProcess(): Promise<void> {
     void Promise.all([
       Promise.resolve().then(stopWatching).catch((error) => reportCloseFailure(error, "Gateway 配置监听关闭失败")),
       closeAccountRefresh().catch((error) => reportCloseFailure(error, "Gateway 账户刷新 IPC 关闭失败")),
-      Promise.resolve().then(() => application.stop()).catch((error) => reportCloseFailure(error, "Gateway 停止失败")),
+      closeThreadStates().catch((error) => reportCloseFailure(error, "Gateway Thread 状态 IPC 关闭失败"))
+        .then(() => application.stop()).catch((error) => reportCloseFailure(error, "Gateway 停止失败")),
     ])
       .finally(async () => {
         try {
@@ -344,10 +355,14 @@ export async function runGatewayProcess(): Promise<void> {
     if (stopping) return;
     accountRefreshStartup = accountRefresh.start();
     await accountRefreshStartup;
+    if (stopping) return;
+    threadStatesStartup = threadStates.start();
+    await threadStatesStartup;
   } catch (error) {
     if (stopping) return;
     await stopWatching();
     await closeAccountRefresh().catch(() => undefined);
+    await closeThreadStates().catch(() => undefined);
     await application.stop().catch(() => undefined);
     await gatewayOwner.close();
     throw error;

@@ -11,7 +11,7 @@ import { translateApiError } from "@/lib/i18n/translate"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
 
 export function ErrorsPage() {
-  const { query, update } = useMetricsQuery("30d")
+  const { query, update } = useMetricsQuery("30d", "time", true)
   const { data, loading, refreshing, error, errorCode, refetch, notificationStatus, lastUpdatedAt } = useErrors(query)
   const { offset, limit } = query
   const pageNumber = Math.floor(offset / limit) + 1
@@ -29,7 +29,7 @@ export function ErrorsPage() {
           <Button variant="outline" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
         </div>
       </div>
-      <QueryFilters query={query} onChange={update} showThreadFilters={false} revision={data} />
+      <QueryFilters query={query} onChange={update} showThreadFilters={false} showRequestPurpose revision={data} />
 
       <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={refreshing} />
 

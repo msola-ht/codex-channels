@@ -40,7 +40,6 @@ export class ConversationExtensionQueryService {
     private readonly router: SessionRouter,
     private readonly models: ModelSelectionService,
     private readonly queries: ConversationExtensionQueryPort,
-    private readonly pluginApiEnabled: boolean,
   ) {}
 
   modelState(target: ConversationTarget): Promise<ModelSelectionState> {
@@ -227,7 +226,6 @@ export class ConversationExtensionQueryService {
   }
 
   listPlugins(target: ConversationTarget): Promise<InstalledPluginCatalog> {
-    this.assertPluginApiEnabled();
     return this.queries.listPlugins(this.router.workspace(target).cwd);
   }
 
@@ -266,7 +264,6 @@ export class ConversationExtensionQueryService {
     target: ConversationTarget,
     selector: string,
   ): Promise<InstalledPlugin> {
-    this.assertPluginApiEnabled();
     return this.resolvePlugin(this.router.workspace(target).cwd, selector);
   }
 
@@ -295,15 +292,6 @@ export class ConversationExtensionQueryService {
       );
     }
     return matches[0]!;
-  }
-
-  assertPluginApiEnabled(): void {
-    if (!this.pluginApiEnabled) {
-      throw new UserFacingError(
-        "plugin.disabled",
-        "开发中的 Plugin API 已关闭；请在 [experimental] 中启用 plugin_api 后重启 Gateway",
-      );
-    }
   }
 
   listPermissionProfiles(

@@ -26,6 +26,7 @@ export class TurnTimingAccumulator {
   private modelInputUsageCount = 0;
   private modelCachedInputUsageCount = 0;
   private modelOutputTokens: number | undefined;
+  private modelOutputUsageCount = 0;
   private modelReasoningOutputTokens: number | undefined;
   private compactModel: string | undefined;
   private compactModelConflict = false;
@@ -36,6 +37,8 @@ export class TurnTimingAccumulator {
   private compactInputUsageCount = 0;
   private compactCachedInputUsageCount = 0;
   private compactOutputTokens = 0;
+  private compactOutputUsageCount = 0;
+  private compactReasoningUsageCount = 0;
 
   constructor(readonly turnId: string) {}
 
@@ -71,6 +74,7 @@ export class TurnTimingAccumulator {
     }
     if (event.outputTokens !== undefined) {
       this.modelOutputTokens = (this.modelOutputTokens ?? 0) + event.outputTokens;
+      this.modelOutputUsageCount += 1;
     }
     if (event.reasoningOutputTokens !== undefined) {
       this.reasoningUsageCount += 1;
@@ -134,12 +138,19 @@ export class TurnTimingAccumulator {
     }
     if (event.outputTokens !== undefined) {
       this.compactOutputTokens += event.outputTokens;
+      this.compactOutputUsageCount += 1;
     }
+    if (event.reasoningOutputTokens !== undefined) this.compactReasoningUsageCount += 1;
   }
 
   private appendModelRequestSummary(result: TurnOutputTiming): void {
     if (this.modelRequestCount === 0) return;
     result.modelRequestCount = this.modelRequestCount;
+    result.usageCoverage = {
+      inputMissingRequestCount: this.modelRequestCount - this.modelInputUsageCount,
+      outputMissingRequestCount: this.modelRequestCount - this.modelOutputUsageCount,
+      reasoningMissingRequestCount: this.modelRequestCount - this.reasoningUsageCount,
+    };
     if (
       this.interruptedModelRequestCount > 0
       || this.incompleteModelRequestCount > 0
@@ -161,7 +172,8 @@ export class TurnTimingAccumulator {
     if (
       this.modelCachedInputTokens !== undefined
       && this.modelInputUsageCount > 0
-      && this.modelCachedInputUsageCount === this.modelInputUsageCount
+      && this.modelCachedInputUsageCount === this.modelRequestCount
+      && this.modelInputUsageCount === this.modelRequestCount
     ) {
       result.requestCachedInputTokens = this.modelCachedInputTokens;
     }
@@ -170,13 +182,19 @@ export class TurnTimingAccumulator {
     }
     if (this.compactRequestCount > 0) {
       result.compact = {
+        usageCoverage: {
+          inputMissingRequestCount: this.compactRequestCount - this.compactInputUsageCount,
+          outputMissingRequestCount: this.compactRequestCount - this.compactOutputUsageCount,
+          reasoningMissingRequestCount: this.compactRequestCount - this.compactReasoningUsageCount,
+        },
         model: this.compactModelConflict ? null : this.compactModel ?? null,
         hasMixedModels: this.compactModelConflict,
         requestCount: this.compactRequestCount,
         unsuccessfulRequestCount: this.compactUnsuccessfulRequestCount,
         inputTokens: this.compactInputTokens,
         cachedInputTokens: this.compactInputUsageCount > 0
-          && this.compactCachedInputUsageCount === this.compactInputUsageCount
+          && this.compactCachedInputUsageCount === this.compactRequestCount
+          && this.compactInputUsageCount === this.compactRequestCount
           ? this.compactCachedInputTokens
           : null,
         outputTokens: this.compactOutputTokens,
@@ -188,14 +206,13 @@ export class TurnTimingAccumulator {
     nonReasoningOutputTokens?: number;
     reasoningTokens?: number;
   } {
-    if (this.modelOutputTokens !== undefined) {
-      const reasoningTokens = Math.max(0, this.modelReasoningOutputTokens ?? 0);
+    if (this.modelRequestCount > 0) {
+      const reasoningTokens = this.modelReasoningOutputTokens;
       return {
-        nonReasoningOutputTokens: Math.max(
-          0,
-          this.modelOutputTokens - reasoningTokens,
-        ),
-        reasoningTokens,
+        ...(this.modelOutputTokens !== undefined && reasoningTokens !== undefined
+          && this.modelOutputUsageCount === this.modelRequestCount && this.reasoningUsageCount === this.modelRequestCount
+          ? { nonReasoningOutputTokens: Math.max(0, this.modelOutputTokens - reasoningTokens) } : {}),
+        ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
       };
     }
     if (!fallbackUsage) return {};

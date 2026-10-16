@@ -12,6 +12,14 @@ export interface AutoApprovalReviewDetails {
   durationMs?: number;
 }
 export interface AutoApprovalReviewCounts {
+  /** Retained observations, never proof that all review costs were captured. */
+  usage?: {
+    coverage: "observed" | "partial";
+    requestCount: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    missingTokenRequestCount: number;
+  };
   approved: number;
   denied: number;
   timedOut: number;
@@ -113,6 +121,7 @@ export interface RequestInterruptionSummary {
 }
 
 export interface CompactRequestMetricsSummary {
+  usageCoverage?: TokenUsageCoverage;
   /** Supplied by query-time enrichment; retained live snapshots need not contain it. */
   requestOutcomes?: RequestOutcomeCounts;
   model: string | null;
@@ -131,6 +140,7 @@ export interface ResponseUsageSummary {
 }
 
 export interface TurnOutputTiming {
+  usageCoverage?: TokenUsageCoverage;
   performance?: {
     requestCount: number;
     firstTokenSampleCount: number;
@@ -156,6 +166,8 @@ export interface TurnOutputTiming {
 }
 
 export interface TurnTaskMetricsSummary {
+  /** Retained completion events may predate field-level coverage. */
+  usageCoverage?: TokenUsageCoverage;
   performance?: TurnOutputTiming["performance"];
   compact?: CompactRequestMetricsSummary | null;
   requestOutcomes: RequestOutcomeCounts;
@@ -167,6 +179,13 @@ export interface TurnTaskMetricsSummary {
   cachedInputTokens: number | null;
   outputTokens: number;
   reasoningOutputTokens: number;
+}
+
+/** Missing fields among retained request observations; not proof of capture completeness. */
+export interface TokenUsageCoverage {
+  inputMissingRequestCount: number;
+  outputMissingRequestCount: number;
+  reasoningMissingRequestCount: number;
 }
 
 export interface RateLimitWindow {
@@ -327,7 +346,7 @@ export type OutputEvent =
   | { type: "plan.updated"; target: ConversationTarget; threadId: string; turnId: string; explanation: string | null; steps: TurnPlanStep[]; background?: boolean }
   | { type: "subagent.spawned"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean; /** Provider is read from the Thread; model and effort are the official startup activity snapshot. */ modelProvider?: string | null; model?: string | null; reasoningEffort?: string | null }
   | { type: "subagent.contacted"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean; /** Read-time Thread configuration, not per-turn execution telemetry. */ modelProvider?: string | null; model?: string | null; reasoningEffort?: string | null }
-  | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; status: SubagentTerminalStatus; metricsStatus: "available" | "empty" | "unavailable"; model: string | null; modelProvider: string | null; reasoningEffort: string | null; requestCount: number; unsuccessfulRequestCount: number; inputTokens: number; cachedInputTokens: number | null; outputTokens: number; reasoningOutputTokens: number; upstreamTtftMs?: number }
+  | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; status: SubagentTerminalStatus; metricsStatus: "available" | "empty" | "unavailable"; model: string | null; modelProvider: string | null; reasoningEffort: string | null; requestCount: number; unsuccessfulRequestCount: number; inputTokens: number; cachedInputTokens: number | null; outputTokens: number; reasoningOutputTokens: number; upstreamTtftMs?: number; usageCoverage?: TokenUsageCoverage }
   | { type: "turn.completed"; target: ConversationTarget; threadId: string; sessionName?: string | null; turnId: string; status: TurnStatus; error?: string; errorCode?: TurnErrorCode; missingFinalResponse?: true; durationMs?: number; sessionDurationMs?: number | undefined; sessionTiming?: { knownDurationMs: number | null; missingTurnCount: number; historyComplete: boolean } | undefined; autoApprovalReview?: AutoApprovalReviewCounts; sessionAutoApprovalReview?: AutoApprovalReviewCounts; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; approvalsReviewer?: ThreadApprovalsReviewer | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; accountStatus?: CompletionAccountStatus; goal?: ThreadGoal; contextCompactionCount?: number; taskAggregate?: TurnTaskMetricsSummary; sessionAggregate?: TurnTaskMetricsSummary; workspaceId?: string; workspaceName?: string; gitBranch?: string | undefined; background?: boolean }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
   | { type: "thread.name"; target: ConversationTarget; threadId: string; name: string | null; background?: boolean }

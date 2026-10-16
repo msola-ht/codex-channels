@@ -8,7 +8,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
-import { InputTokenTooltip } from "@/components/metrics/token-tooltip"
+import { InputTokenTooltip, OutputTokenTooltip } from "@/components/metrics/token-tooltip"
 import {
   DataTable,
   SortableHeader,
@@ -20,10 +20,10 @@ import {
 import {
   formatModelName,
   formatInterruptionSummary,
-  formatInterruptedUsage,
   formatElapsedDuration,
-  formatTime,
-  formatTokens,
+  formatRequestTime,
+  formatTimestamp,
+  getServerTimeZone,
   shortThreadId,
 } from "@/lib/format"
 import type { MetricsQuery, ThreadTurnsResponse } from "@/lib/types"
@@ -60,9 +60,9 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       header: ({ column }) => (
         <SortableHeader column={column}>{t("metrics.time")}</SortableHeader>
       ),
-      cell: ({ row }) => (
-        <span className="tabular-nums text-muted-foreground">
-          {formatTime(row.original.recordedAtMs ?? null)}
+      cell: ({ row }) => row.original.recordedAtMs == null ? "—" : (
+        <span className="whitespace-nowrap tabular-nums text-muted-foreground" title={`${formatTimestamp(row.original.recordedAtMs)} · ${getServerTimeZone()}`}>
+          {formatRequestTime(row.original.recordedAtMs)}
         </span>
       ),
     },
@@ -132,20 +132,18 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       header: ({ column }) => (
         <SortableHeader column={column} hint={t("metrics.input")}>{t("metrics.inputColumn")}</SortableHeader>
       ),
-      cell: ({ row }) => row.original.interruptionSummary.usageUnobserved > 0
-        ? <TableHint hint={formatInterruptionSummary(row.original.interruptionSummary, t)}>{formatInterruptedUsage(row.original.inputTokens, row.original.interruptionSummary)}</TableHint>
-        : <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} />,
+      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} requestCount={row.original.requestCount} usageCoverage={row.original.usageCoverage} />,
     },
     {
       id: "cacheHitRate",
       enableSorting: false,
-      header: () => <TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint>,
+      header: () => <TableHint hint={t("metrics.observedCacheHitRateHint")}>{t("metrics.cacheHitRateColumn")}</TableHint>,
       cell: ({ row }) => {
         const turn = row.original
         const rate = turn.inputTokens > 0 && turn.cachedInputTokens !== null
           ? `${(turn.cachedInputTokens / turn.inputTokens * 100).toFixed(1)}%`
           : "—"
-        return <span className="whitespace-nowrap tabular-nums">{rate !== "—" && turn.interruptionSummary.usageUnobserved > 0
+        return <span className="whitespace-nowrap tabular-nums">{rate !== "—" && turn.usageCoverage.inputMissingRequestCount > 0
           ? <TableHint hint={t("metrics.observedCacheHitRateHint")}>{rate}</TableHint>
           : rate}</span>
       },
@@ -156,31 +154,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       header: ({ column }) => (
         <SortableHeader column={column} hint={t("metrics.output")}>{t("metrics.outputColumn")}</SortableHeader>
       ),
-      cell: ({ row }) => {
-        const turn = row.original
-        if (turn.interruptionSummary.usageUnobserved > 0) return <TableHint hint={formatInterruptionSummary(turn.interruptionSummary, t)}>{formatInterruptedUsage(turn.outputTokens, turn.interruptionSummary)}</TableHint>
-        const nonReasoning = Math.max(
-          0,
-          turn.outputTokens - turn.reasoningOutputTokens,
-        )
-        return (
-          <Tooltip>
-            <TooltipTrigger aria-description={[t("metrics.reasoning", { count: formatTokens(turn.reasoningOutputTokens) }), t("metrics.nonReasoning", { count: nonReasoning === null ? "—" : formatTokens(nonReasoning) })].join("; ")} render={<span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2" />}>
-                {formatTokens(turn.outputTokens)}
-              </TooltipTrigger>
-            <TooltipContent side="right" align="start">
-              <ul className="flex flex-col gap-1">
-                <li className="whitespace-nowrap">
-                  {t("metrics.reasoning", { count: formatTokens(turn.reasoningOutputTokens) })}
-                </li>
-                <li className="whitespace-nowrap">
-                  {t("metrics.nonReasoning", { count: formatTokens(nonReasoning) })}
-                </li>
-              </ul>
-            </TooltipContent>
-          </Tooltip>
-        )
-      },
+      cell: ({ row }) => <OutputTokenTooltip outputTokens={row.original.outputTokens} reasoningOutputTokens={row.original.reasoningOutputTokens} requestCount={row.original.requestCount} usageCoverage={row.original.usageCoverage} />,
     },
     {
       id: "compact",

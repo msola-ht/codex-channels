@@ -25,15 +25,10 @@ import {
   applyWebuiSetting,
   projectWebuiSettings,
 } from "./config-webui-management.mjs";
-import {
-  applyWorkspaceSetting,
-  projectWorkspaceSettings,
-} from "./config-workspace-management.mjs";
 import { detectTerminalIdentity } from "../runtime/terminal-identity.mjs";
 import { packageDir, requireUserConfig } from "./runtime-config.mjs";
 
 const operationUpdateValues = ["full", "compact", "hidden"];
-const sandboxValues = ["read-only", "workspace-write"];
 const messageFormatValues = ["html", "rich"];
 const loggingLevelValues = ["fatal", "error", "warn", "info", "debug", "trace"];
 const proxyFields = ["http_proxy", "https_proxy", "all_proxy", "no_proxy"];
@@ -53,7 +48,6 @@ export function loadGatewaySettings(environment = process.env) {
   const scheduledTasks = table(document.scheduled_tasks);
   const logging = table(document.logging);
   const debug = table(document.debug);
-  const experimental = table(document.experimental);
   const network = snapshot.proxy.settings;
   const telegram = table(document.telegram);
   const workspaces = workspaceOptions(document);
@@ -75,7 +69,6 @@ export function loadGatewaySettings(environment = process.env) {
         0,
         1_440,
       ) ?? 15,
-      sandbox: codex.sandbox === "read-only" ? "read-only" : "workspace-write",
       defaultWorkspace: stringValue(document.default_workspace) || null,
       defaultModel: stringValue(codex.default_model) || null,
       modelTrafficMode: debug.model_traffic_input_items === 0 && debug.model_traffic_item_max_bytes === 0 ? "debug" : "production",
@@ -112,7 +105,6 @@ export function loadGatewaySettings(environment = process.env) {
     ])),
     advanced: {
       loggingLevel: loggingLevelValues.includes(logging.level) ? logging.level : "info",
-      pluginApiEnabled: experimental.plugin_api === true,
     },
     telegram: {
       configured: stringValue(telegram.bot_token) !== "",
@@ -120,7 +112,6 @@ export function loadGatewaySettings(environment = process.env) {
     },
     webui: projectWebuiSettings(document),
     metrics: projectMetricsSettings(document),
-    workspaces: projectWorkspaceSettings(document),
     channels: gatewayChannelStates(document),
   };
 }
@@ -274,8 +265,7 @@ function applySetting(document, input) {
     throw invalid("input", "invalid-input", "设置输入必须是对象");
   }
   const delegated = applyWebuiSetting(document, input)
-    ?? applyMetricsSetting(document, input)
-    ?? applyWorkspaceSetting(document, input);
+    ?? applyMetricsSetting(document, input);
   if (delegated !== undefined) return delegated;
   switch (input.kind) {
     case "display.operation-updates": {
@@ -319,11 +309,6 @@ function applySetting(document, input) {
         ...table(document.conversation),
         idle_release_minutes: value,
       };
-      return changed(value, "restart-gateway");
-    }
-    case "system.sandbox": {
-      const value = enumValue(input.value, sandboxValues, "value", "Gateway 渠道 Sandbox");
-      document.codex = { ...table(document.codex), sandbox: value };
       return changed(value, "restart-gateway");
     }
     case "system.default-workspace": {
@@ -454,11 +439,6 @@ function applySetting(document, input) {
     case "advanced.logging-level": {
       const value = enumValue(input.value, loggingLevelValues, "value", "日志等级");
       document.logging = { ...table(document.logging), level: value };
-      return changed(value, "restart-gateway");
-    }
-    case "advanced.plugin-api": {
-      const value = booleanValue(input.value, "value", "Plugin API");
-      document.experimental = { ...table(document.experimental), plugin_api: value };
       return changed(value, "restart-gateway");
     }
     default:

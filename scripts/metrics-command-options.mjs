@@ -44,6 +44,8 @@ const metricsRangeUsage = requestMetricsRangeNames.join("|");
 const rangeUsage = `[--range <${metricsRangeUsage}> | --from YYYY-MM-DD --to YYYY-MM-DD]`;
 const filtersUsage = "[--source owned|relay] [--caller ID] [--provider ID] [--model ID] [--operation response|compact] [--status completed|failed|incomplete|unknown] [--filter 关键字]";
 export const metricsQueryOptions = ["--range", "--from", "--to", "--source", "--caller", "--provider", "--model", "--operation", "--status", "--filter", "--thread", "--turn"];
+export const metricsRequestPurposeOption = "--request-purpose";
+const requestPurposeUsage = "[--request-purpose unmarked|autoApprovalReview]";
 
 export function metricsFilterOptions(options) {
   return parseRequestMetricsFilters({
@@ -51,6 +53,7 @@ export function metricsFilterOptions(options) {
     threadId: options.threadId ?? options.thread,
     turnId: options.turnId ?? options.turn,
     callerId: options.callerId ?? options.caller,
+    requestPurpose: options.requestPurpose ?? options["request-purpose"],
   });
 }
 
@@ -58,8 +61,8 @@ export const metricsCommandUsage = Object.freeze({
   run: "用法：codexc metrics run <Thread ID> [--format markdown|json|csv] [--stdout]",
   turns: `用法：codexc metrics turns <Thread ID> ${rangeUsage} ${filtersUsage} [--turn ID] [--format markdown|json|csv] [--stdout]`,
   threads: `用法：codexc metrics threads ${rangeUsage} ${filtersUsage} [--thread ID] [--turn ID] [--format markdown|json|csv] [--stdout]`,
-  report: `用法：codexc metrics report ${rangeUsage} ${filtersUsage} [--thread ID] [--turn ID] [--group <global|providers|models>] [--format markdown|json|csv] [--stdout]`,
-  export: `用法：codexc metrics export ${rangeUsage} ${filtersUsage} [--thread ID] [--turn ID] [--format json|csv|markdown] [--stdout]`,
+  report: `用法：codexc metrics report ${rangeUsage} ${filtersUsage} ${requestPurposeUsage} [--thread ID] [--turn ID] [--group <global|providers|models>] [--format markdown|json|csv] [--stdout]`,
+  export: `用法：codexc metrics export ${rangeUsage} ${filtersUsage} ${requestPurposeUsage} [--thread ID] [--turn ID] [--format json|csv|markdown] [--stdout]`,
   quota: `用法：codexc metrics quota [--range <${metricsRangeUsage}> | --from YYYY-MM-DD --to YYYY-MM-DD] [--format markdown|json|csv] [--stdout]`,
 });
 
@@ -126,7 +129,7 @@ export function validateMetricsCommandArgs(subcommand, args) {
   if (subcommand === "report") {
     const options = parseMetricsOptions(
       withoutStdout,
-      new Set([...metricsQueryOptions, "--group", "--format"]),
+      new Set([...metricsQueryOptions, metricsRequestPurposeOption, "--group", "--format"]),
     );
     assertExportFormat(options.format ?? "markdown", ["markdown", "json", "csv"]);
     metricsRangeOptions(options, Date.now());
@@ -137,7 +140,7 @@ export function validateMetricsCommandArgs(subcommand, args) {
   if (subcommand === "export") {
     const options = parseMetricsOptions(
       withoutStdout,
-      new Set([...metricsQueryOptions, "--format"]),
+      new Set([...metricsQueryOptions, metricsRequestPurposeOption, "--format"]),
     );
     assertExportFormat(options.format ?? "json", ["json", "csv", "markdown"]);
     metricsRangeOptions(options, Date.now());

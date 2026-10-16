@@ -35,7 +35,7 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
 
 1. 允许已授权用户为当前 Conversation 和 Workspace 创建、查看、暂停、恢复、删除并手动运行任务。
 2. 每次到期运行强制创建新的后台 Codex Thread，不替换或追加当前前台 Thread。
-3. 复用现有 Provider、模型、思考等级、Workspace 权限、后台绑定、Surface 输出和指标链路。
+3. 复用现有 Provider、模型、思考等级、App Server 原生权限、后台绑定、Surface 输出和指标链路。
 4. Gateway 或 App Server 重启后能够恢复调度，不重复执行结果未知的任务。
 5. 只持久化任务定义与最小运行元数据，不复制 App Server Thread 历史或模型输出正文。
 
@@ -43,7 +43,8 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
 
 - 不兼容或导入 ChatGPT/Codex App 已创建的 Scheduled；官方没有公开同步 API。
 - 不在同一 Thread 上按计划继续上下文；这需要与活动 Turn、原生 Queue 和会话设置单独设计。
-- 允许前台 Agent 调用 `schedule_task` 生成待确认预览，但不允许它绕过确认、直接改写任务状态。
+- 前台 Agent 的 `schedule_task` 创建和删除仅生成待确认预览，不允许绕过确认；已有任务的
+  重命名、暂停、恢复、立即运行和重试沿用下文列明的授权用例，不增加任意状态写入入口。
 - 实验 `additionalContext` 仍不接入；只接入当前自然语言入口所需的 `dynamicTools` 与
   `item/tool/call` 宿主回调。
 - 不读取 `plugin/read.scheduledTasks` 并自动安装插件任务模板。
@@ -56,17 +57,17 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
   Chat 内任务、Worktree、模型、权限和 RRULE 的当前产品行为。
 - [OpenAI App Server 文档](https://learn.chatgpt.com/docs/app-server)：App Server 定位、JSON-RPC、
   Thread/Turn 与实验动态工具；官方建议自动化作业或 CI 使用 Codex SDK。
-- [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)：
+- [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)：
   `threadSource` 与实验 `dynamicTools`。
-- [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)：
+- [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)：
   实验 `additionalContext`。
-- [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs)：
+- [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs)：
   `ScheduledTaskSummary` 及其有限 Schedule 类型。
-- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/README.md)：
+- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/README.md)：
   `dynamicTools` 与 `item/tool/call` 的宿主回调合同。
 
-参考源码必须匹配 `rust-v0.162.1` 的提交
-`092d3acd6bec3e3a14bdc7e7a2810ab628ab759d`；本机副本状态见[上游来源](upstream-sources.md)。当前网页文档描述的新产品能力不能反向当作固定版
+参考源码必须匹配 `rust-v0.163.0` 的提交
+`83086188ae0614bd882818ff1aa23f3194962012`；本机副本状态见[上游来源](upstream-sources.md)。当前网页文档描述的新产品能力不能反向当作固定版
 协议字段。
 
 ## 采用方案
@@ -98,7 +99,7 @@ Scheduler 是另一种入站适配器，权限不得高于 Surface 用户。它�
   Provider 可用，不能静默换模型。
 - 不指定模型时冻结创建时当前会话的模型与 Provider；明确给定时接受模型 ID 或 `provider/model`
   复合串，所选 Provider 未配置时创建预览直接失败关闭，不静默回退默认。
-- Workspace 权限使用运行时重新读取的当前配置，不复制创建时的旧权限快照。
+- 执行权限使用目标 Provider 按 Workspace cwd 解析的当前原生配置；历史任务快照不作为运行时权限上限。
 - 新 Thread 作为当前 Conversation 的后台绑定；不替换前台绑定。完成后沿用现有后台释放逻辑，
   Thread 历史仍由 App Server 保存，用户可显式 `/resume`。
 
@@ -172,6 +173,8 @@ occurrence claim -> missed | skipped_overlap | skipped_capacity | blocked | disp
 Provider 恢复后台绑定和订阅，再读取权威 Thread 与分页 Turn 状态：活动 Turn 继续等待；终态 Turn
 按官方状态完成 Run；Thread、Turn 或 Provider 无法定位时进入 `uncertain`。不得只凭 Thread 当前
 空闲推断 Run 已成功，也不得为补齐完成通知重新启动 Turn。
+恢复只复核归属、授权及后端可用性，不以当前原生权限配置重新判断已提交 Run 的成败；
+严格原生权限预检只用于新执行，避免配置变化掩盖旧 Turn 的权威结果。
 恢复确认终态后，在释放后台绑定前向原 Conversation 发送恢复通知，包含运行状态、Run ID、Thread ID
 和 `/schedule runs` 查看入口；不复制模型正文，也不把无法确认的 Run 报告为成功。
 
@@ -213,8 +216,11 @@ Scheduler 在首次 tick 和之后每 24 小时最多执行一次清理；清理
 2. Actor 撤权、Workspace 删除、Surface 停用或 Provider 删除时自动把任务置为 `blocked`，不改投其他
    Actor、Workspace 或 Provider。
 3. 当前只允许 `read-only` 或 `workspace-write`；拒绝 `danger-full-access`。
-4. 使用 Workspace 当前权限配置，但 Approval Policy 固定为 `never`；若组织要求或 Permission
-   Profile 不能形成无需人工批准的运行环境，则创建或运行失败关闭。
+4. 预览、确认及每次运行按目标 Provider 和授权 cwd 读取原生配置，仅接受明确的
+   `sandbox_mode=read-only|workspace-write`；缺省沙箱及 `default_permissions` 命名 Profile 无法由当前
+   只读配置接口证明运行权限，明确拒绝，不猜测或自行展开 Profile。新建 Thread 仅显式传
+   `approvalPolicy=never`，不覆盖原生沙箱；实际响应的 cwd、审批策略和沙箱必须与预检一致才启动 Turn。
+   原生组织策略不允许无人值守时失败关闭；任务表结构保持不变，不改写旧权限快照。
 5. 运行中仍出现命令、文件、额外权限、用户输入或 MCP elicitation Server Request 时自动拒绝或
    取消，并把 Run 标记为需要处理；不得等待一个无人值守的渠道交互令牌。
 6. 禁止任务执行服务安装、服务停止、App Server 重启、凭据设置和其他现有渠道禁止操作。
@@ -233,6 +239,15 @@ Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通
 [`scheduled-task-tool-request.ts`](../src/bootstrap/scheduled-task-tool-request.ts) 校验 Thread
 绑定和唯一授权 Actor，再交给 Application 的 `ScheduledTaskToolService`。
 
+工具请求在首次异步检查前登记原 Request、Thread、Turn 和调用 ID；无人值守检查也包含在该生命周期内。
+原 Turn 结束、对应动态工具 Item 完成、请求被其他客户端解决、Thread 失效、连接断开或 Gateway
+关闭时立即撤销尚未完成的请求。任务读取、手动运行排队和容量检查结束后，在写入、领取或派发前
+再次核验原请求与前台归属；取消后的未交付创建/删除预览不再保留有效确认令牌。
+取消不代表已提交的存储写入或 App Server Turn 被回滚；已提交操作的结果应通过 `/schedule` 查询。
+本地提交守卫随 Thread/Turn 启动参数穿过后台队列、投递准入和 Provider 准备，最终在 Client
+发送 RPC 前同步核验取消、原归属、当前授权、Workspace 目录及投递容量。提交前拒绝不会
+误记为结果未知；已创建 Thread 则释放后台绑定。写 RPC 发出后仍等待真实响应，不用取消信号丢弃结果。
+
 `ScheduledTaskToolService` 不复写任何存储或调度逻辑，只把模型参数解析为现有的
 `previewCreate`、`list`、`runs`、`rename`、`pause`、`resume`、`run`、`retry` 和
 `previewDelete` 用例。`create` 与 `delete` 只返回一次性确认令牌；`confirm` 不在动态工具中暴露，
@@ -240,9 +255,9 @@ Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通
 `surface + accountId` 精确交给当前 Surface；飞书复用 CardKit 2.0 确认卡，Telegram 复用内联按钮，
 微信保留 `/schedule confirm <令牌>` 文本输入。三条路径使用同一个五分钟令牌。
 
-该工具只在 Gateway 前台会话注册；后台计划任务 Thread 不携带 `dynamicTools`，且
-`createScheduledTaskServerRequestHandler` 会把后台 Thread 上的 `item/tool/call` 安全拒绝，防止
-计划任务递归创建更多计划任务。
+该工具只在 Gateway 前台会话注册；后台计划任务 Thread 不携带 `dynamicTools`，工具处理器在
+登记取消生命周期后先查询恢复协调器并拒绝无人值守调用，其余审批仍由
+`createScheduledTaskServerRequestHandler` 拒绝，防止计划任务递归创建更多计划任务。
 
 时区不得猜测。用户明确表达“北京时间”等地区或时区时，模型可以规范化为 IANA 名称；完全没有表达
 时区时工具返回可操作提示，不创建任务。每两周、每月第 N 个星期几或更复杂日历规则返回固定的不支持

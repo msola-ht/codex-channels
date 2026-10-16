@@ -7,7 +7,6 @@ import type {
   RequestMetricsTimeRange,
 } from "./request-metrics-port.js";
 import type { ReviewTarget } from "./turn-port.js";
-import type { WorkspacePermissionUpdate } from "./workspace-permission-port.js";
 
 export const mcpCommandUsageText = "用法：/mcp [health | reload | 名称或序号 [tools|resources|templates [页码] [search <关键词>]] | login <名称或序号> | resource <名称或序号> <URI>]";
 export const pluginCommandUsageText = "用法：/plugin [health | list [页码] [search <关键词>] | <名称、完整 ID 或序号> [任务]]";
@@ -320,42 +319,6 @@ export function parseReviewTarget(input: string): ReviewTarget {
   if (kind === "commit" && value) return { type: "commit", sha: value, title: null };
   if (kind === "custom" && value) return { type: "custom", instructions: value };
   throw new UserFacingError("review.usage", "Review 参数无效");
-}
-
-export function parseWorkspacePermissionCommand(
-  input: string,
-): WorkspacePermissionUpdate | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  const [field, ...rest] = trimmed.split(/\s+/u);
-  const value = rest.join(" ").trim();
-  if (field === "sandbox") {
-    if (value === "clear") return { kind: "sandbox", value: null };
-    if (value === "read-only" || value === "workspace-write" || value === "danger-full-access") {
-      return { kind: "sandbox", value };
-    }
-  }
-  if (field === "approval") {
-    if (value === "clear") return { kind: "approval", value: null };
-    if (value === "untrusted" || value === "on-request" || value === "never") {
-      return { kind: "approval", value };
-    }
-  }
-  if (field === "autoreview") {
-    if (value === "clear") return { kind: "approvals-reviewer", value: null };
-    if (value === "on") return { kind: "approvals-reviewer", value: "auto_review" };
-    if (value === "off") return { kind: "approvals-reviewer", value: "user" };
-  }
-  if (field === "profile") {
-    if (value === "clear") return { kind: "permissions", value: null };
-    if (value.length > 0 && value.length <= 128) {
-      return { kind: "permissions", value };
-    }
-  }
-  throw new UserFacingError(
-    "workspace.permission.usage",
-    "用法：/workspaceperm [sandbox <read-only|workspace-write|danger-full-access|clear>|approval <untrusted|on-request|never|clear>|profile <Profile ID|clear>|autoreview <on|off|clear>]",
-  );
 }
 
 function sessionListUsageError(archived: boolean): UserFacingError {

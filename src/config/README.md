@@ -1,6 +1,6 @@
 # Config
 
-Workspace 的可选 `approvals_reviewer` 严格接受 `user` 或 `auto_review`，映射为 `approvalsReviewer`；缺省保持缺省，不由配置补全写入。该字段通过既有 Workspace Registry 热加载更新，只作为新建、分叉及未加载 Thread 恢复的参数；已加载会话保持 App Server 返回的实际 reviewer。
+Workspace 仅定义 `id`、`name` 和 `cwd`；执行权限由 App Server 原生配置及 Thread 继承规则决定，Gateway 不提供工作区权限覆盖字段。
 
 本目录负责把共享运行时已完成结构校验的 TOML 文档转换为 Gateway 运行配置。
 `display.model_aliases` 映射为可选运行字段 `modelDisplayAliases`，未配置时为空映射；Bootstrap
@@ -65,9 +65,9 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 仍不得进入日志。可通过 `codexc config` 的“高级设置 → 日志等级”选择完整等级，变化需要重启
 Gateway，不需要重启 App Server。
 
-`experimental.plugin_api` 控制当前锁定 Codex 0.162.1 的开发中 Plugin 调试入口，默认关闭；未显式开启时
-`/plugin` 的列表与调用在 Application 边界失败关闭，不发送 `plugin/installed` 或 mention
-请求。变化需要重启 Gateway，不需要重启 App Server；Doctor 始终显示开关状态与风险提示。
+Plugin 查询与调用不再读取 Gateway 配置开关；共享严格 Schema 拒绝旧的
+`experimental.plugin_api` 及 `[experimental]` 表，不自动忽略或迁移，结构校验失败时不补全或改写原文件。
+升级前的配置备份、显式清理及回退步骤集中见[使用指导](../../docs/user-guide.md#3-初始化与配置)。
 
 `scheduled_tasks.enabled` 控制 Gateway 计划任务执行层，默认关闭。开启时才创建独立私有
 `scheduled-tasks.sqlite3`、恢复既有 Run 并启动领取循环；关闭时不创建数据库，也不接管普通
@@ -88,13 +88,9 @@ Thread 的 Server Request。变化需要重启 Gateway，不需要重装或重�
 
 Thread 分区使用当前固定分区与置顶设置；严格 Schema 拒绝 `[thread_sections]` 等未定义字段。
 
-`[[workspaces]]` 除 `id`、`name`、`cwd` 外支持可选的工作区权限：`sandbox`（
-`read-only` / `workspace-write` / `danger-full-access`）、`approval_policy`（
-`untrusted` / `on-request` / `never`）和 `permissions`（App Server 命名权限 Profile）。
-`permissions` 与 `sandbox` 必须互斥，同时配置时失败关闭。权限只作用于该 Workspace 新建或
-恢复的 Thread 启动参数，不影响已绑定 Thread；权限变化按 `workspace.registry` 热加载，不要求
-重启 Gateway。`danger-full-access` 和 `never` 是显式放开的完全权限选项，仅应在明确可信的
-Workspace 上配置。
+`[[workspaces]]` 只支持 `id`、`name`、`cwd`。沙箱、审批策略和 Permission Profile 由 App Server
+原生配置与 Thread 状态负责；Gateway 不保存全局 `codex.sandbox` 或工作区权限覆盖。
+严格 Schema 拒绝这些旧字段，不静默迁移；备份、显式清理和回退步骤见用户指南。
 
 模型统计代理由 App Server 服务自动装配：主 Provider 随服务启动，切换 Provider 在首次使用时
 按需启动，不属于用户配置；其上游网络请求继续复用 Codex `.env`、标准环境变量与受支持系统代理的统一解析结果，不接受旧 `[network]` 表。

@@ -26,7 +26,8 @@
   Auto-review 用户设置受管限制判断使用的 `configRequirements/read.allowedApprovalsReviewers`
   只读字段（经 `ConfigRequirementsReadResponse` 受控导出），
   `item/autoApprovalReview/started|completed` 的身份、来源和状态最小投影，
-  以及受默认关闭配置开关约束的 `plugin/installed` 和 Turn `mention` 调试；其余实验类型不构成支持能力。
+  以及通过稳定 `plugin/installed` 查询当前 Workspace 已安装插件、在 OpenAI Thread 中使用官方
+  Turn `mention` 显式调用插件；其余实验类型不构成支持能力。
 
 升级协议时先阅读 [`docs/codex-cli-upgrade.md`](../../docs/codex-cli-upgrade.md)，在工作区干净且
 已安装精确目标 CLI 后执行：

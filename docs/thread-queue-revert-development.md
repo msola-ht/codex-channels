@@ -1,6 +1,6 @@
 # Thread Queue 与 Revert
 
-本文定义锁定 Codex CLI `0.162.1` 的实验 `thread/queue/*`、`thread/queue/changed`、
+本文定义锁定 Codex CLI `0.163.0` 的实验 `thread/queue/*`、`thread/queue/changed`、
 `thread/revert`、`thread/reverted` 以及 Revert 所需分页历史查询在 Gateway 中的使用合同。
 当前实现使用原生 Queue、分页历史与 Revert，以下定义授权和状态协调合同。
 三个 Surface 的当前支持范围和静态检查入口以
@@ -35,20 +35,21 @@ App Server 是待提交用户消息和 Thread 历史的唯一事实来源。Gate
 - 升级前的历史合同实测使用临时 `CODEX_HOME`、当时锁定版 App Server 和本机 Mock Responses SSE 服务，
   不调用用户账户或真实模型。历史实测确认 Queue 条目在 Revert 后按原顺序保留，但不会由 Revert
   自动启动；用户显式 `/queue start` 后按队列顺序继续派发。
-  本次 0.162.1 仅核对相关上游源码与 0.162.0 无差异，没有重跑 Queue/Revert 联合实测。
+  此前升级到 0.162.1 时，仅核对相关上游源码与 0.162.0 无差异，没有重跑 Queue/Revert 联合实测。
+  升级到 0.163.0 时，Queue 处理器与 Queue/Revert 上游合同测试保持不变；本次仍未重跑联合实测。
 
 ## 固定事实来源
 
-当前实现只以正式 Tag `rust-v0.162.1` 为准：
+当前实现只以正式 Tag `rust-v0.163.0` 为准：
 
-- [`thread_queue_processor.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/request_processors/thread_queue_processor.rs)：Queue 请求处理、分页和错误边界。
-- [`thread_queue.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/tests/suite/v2/thread_queue.rs)：实验握手、容量、持久化、自动派发、中断和手动启动合同。
-- [`thread_revert.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/tests/suite/v2/thread_revert.rs)：分页历史回退、活动 Turn 中断、通知和重启合同。
-- [`thread_processor.rs`](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/request_processors/thread_processor.rs)：Revert 只接受分页历史 Thread，并在回退后重新加载同一 Thread。
+- [`thread_queue_processor.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/src/request_processors/thread_queue_processor.rs)：Queue 请求处理、分页和错误边界。
+- [`thread_queue.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/tests/suite/v2/thread_queue.rs)：实验握手、容量、持久化、自动派发、中断和手动启动合同。
+- [`thread_revert.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/tests/suite/v2/thread_revert.rs)：分页历史回退、活动 Turn 中断、通知和重启合同。
+- [`thread_processor.rs`](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/app-server/src/request_processors/thread_processor.rs)：Revert 只接受分页历史 Thread，并在回退后重新加载同一 Thread。
 - 本地生成类型：[`codex-protocol/generated/v2/`](../src/codex-protocol/generated/v2/)。生成类型是字段名称和可空性的最终事实来源。
 
 参考源码应匹配提交
-`092d3acd6bec3e3a14bdc7e7a2810ab628ab759d`，即 `rust-v0.162.1`；本机副本状态见[上游来源](upstream-sources.md)。不得用官方 `main`
+`83086188ae0614bd882818ff1aa23f3194962012`，即 `rust-v0.163.0`；本机副本状态见[上游来源](upstream-sources.md)。不得用官方 `main`
 补充或替代本设计。
 
 ## Queue 原生合同
@@ -237,7 +238,7 @@ Revert 成功后：
 - 修改根 `AGENTS.md` 中受控实验例外，精确加入 `thread/turns/list`、`thread/revert` 与
   `thread/reverted`，不借机开放 `thread/items/list` 或其他实验 API。
 - 更新 `docs/index.md` 的受控导出数、直接调用方法数、支持矩阵、固定源码说明和复核命令结果。
-- 不增加运行时兼容层；运行中的 App Server 不是精确 `0.162.1` 时仍由现有版本门禁拒绝。
+- 不增加运行时兼容层；运行中的 App Server 不是精确 `0.163.0` 时仍由现有版本门禁拒绝。
 - 不新增 Gateway SQLite Schema，也不新增消息正文持久化配置。
 
 Queue 是对现有 `/queue` 的完整替换，实施后默认可用，不另设功能开关。Revert 是新的破坏性实验
@@ -268,8 +269,8 @@ Revert 仍需单独满足以下条件，完成前保持失败关闭：
 
 - 新建 Thread 使用 paginated；legacy Thread 明确拒绝 Revert，且没有隐式迁移。
 - Revert 具有一次性确认、执行前复核、活动 Turn 中断处理和“不会恢复文件”提示。
-- Queue/Revert 联合行为在所声明的验收版本上完成真实 App Server 复核；本次 0.162.1 未重跑该项，
-  仅保留历史实测及相关源码未变的核对结果，不声明新版联合验收已完成。
+- Queue/Revert 联合行为在所声明的验收版本上完成真实 App Server 复核；本次 0.163.0 未重跑该项，
+  仅保留历史实测及 Queue 处理器、Queue/Revert 上游合同测试未变的核对结果，不声明新版联合验收已完成。
 - `docs/index.md`、根 README、模块 README 与三个 Surface 帮助和实现一致。
 
 遇到以下任一情况必须停止实施并重新审查设计：

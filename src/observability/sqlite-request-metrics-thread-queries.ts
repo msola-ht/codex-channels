@@ -19,6 +19,7 @@ import {
   toStoredRequestOutcomes,
   toStoredThreadAggregate,
   toStoredTurnSummary,
+  toStoredUsageCoverage,
   type AggregateRow,
   type CacheUsageRow,
   type TurnSummaryRow,
@@ -28,13 +29,21 @@ import {
   compactAggregateSql,
   metricsAggregateSql,
   metricsPageOffset,
-  metricsScopeSql,
+  metricsScopeSql as requestMetricsScopeSql,
   observableCompletionSql,
   interruptedRequestSql,
   requestOutcomeSql,
+  usageCoverageSql,
   validateThreadId,
   type MetricsQueryReader,
 } from "./sqlite-request-metrics-query-base.js";
+
+function metricsScopeSql(...args: Parameters<typeof requestMetricsScopeSql>): ReturnType<typeof requestMetricsScopeSql> {
+  if (args[0].requestPurpose === "autoApprovalReview") {
+    throw new Error("任务统计排除自动审查，请使用请求明细查询审查用量");
+  }
+  return requestMetricsScopeSql(...args);
+}
 import type { SqliteRequestMetricsSubagentQueries } from "./sqlite-request-metrics-subagent-queries.js";
 
 /** 会话级只读查询：Thread/Turn 聚合、耗时、中断与分页列表。 */
@@ -52,7 +61,7 @@ export class SqliteRequestMetricsThreadQueries {
     const latestTurn = this.reader.prepare(`
       SELECT turn_id
       FROM model_request_metrics
-      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
+      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response' AND request_purpose IS NULL
       ORDER BY id DESC
       LIMIT 1
     `).get(threadId) as { turn_id: string } | undefined;
@@ -72,10 +81,12 @@ export class SqliteRequestMetricsThreadQueries {
         FROM model_request_metrics AS metric
         WHERE metric.thread_id IN (SELECT thread_id FROM thread_tree)
           AND metric.turn_id IS NOT NULL
+          AND metric.request_purpose IS NULL
       )
     `;
     const threadAggregate = this.reader.prepare(`${scopeSql}
       SELECT
+        ${usageCoverageSql()},
         ${requestOutcomeSql()},
         (SELECT provider FROM scoped WHERE thread_id = ? AND ${agentResponseSql} ORDER BY id DESC LIMIT 1) AS provider,
         NULL AS turn_id,
@@ -89,6 +100,7 @@ export class SqliteRequestMetricsThreadQueries {
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        COUNT(CASE WHEN reasoning_output_tokens > 0 THEN 1 END) AS reasoning_request_count,
         COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM scoped
@@ -149,7 +161,7 @@ export class SqliteRequestMetricsThreadQueries {
       ), scoped AS (
         SELECT metric.*
         FROM model_request_metrics AS metric
-        WHERE (
+        WHERE metric.request_purpose IS NULL AND ((
           metric.thread_id = ? AND metric.turn_id = ?
         ) OR (
           EXISTS (
@@ -158,7 +170,7 @@ export class SqliteRequestMetricsThreadQueries {
             WHERE task.thread_id = metric.thread_id
               AND task.turn_id = metric.turn_id
           )
-        )
+        ))
       )
     `;
     const row = this.reader.prepare(`${scopeSql}, representative AS (
@@ -167,6 +179,7 @@ export class SqliteRequestMetricsThreadQueries {
       ORDER BY id DESC LIMIT 1
     )
       SELECT
+        ${usageCoverageSql()},
         ${requestOutcomeSql()},
         (SELECT provider FROM representative) AS provider,
         (SELECT model FROM representative) AS model,
@@ -183,6 +196,7 @@ export class SqliteRequestMetricsThreadQueries {
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        COUNT(CASE WHEN reasoning_output_tokens > 0 THEN 1 END) AS reasoning_request_count,
         COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM scoped
@@ -216,7 +230,7 @@ export class SqliteRequestMetricsThreadQueries {
 
   private turnPerformance(threadId: string, turnId: string): RequestTimingSummary {
     return this.scopedPerformance(`WITH scoped AS (
-      SELECT * FROM model_request_metrics WHERE thread_id = ? AND turn_id = ?
+      SELECT * FROM model_request_metrics WHERE thread_id = ? AND turn_id = ? AND request_purpose IS NULL
     )`, [threadId, turnId]);
   }
 
@@ -277,13 +291,13 @@ export class SqliteRequestMetricsThreadQueries {
 
   private turnResponseUsage(threadId: string, turnId: string): ResponseUsageSummary | null {
     return this.scopedResponseUsage(`WITH scoped AS (
-      SELECT provider, response_usage_amount FROM model_request_metrics WHERE thread_id = ? AND turn_id = ?
+      SELECT provider, response_usage_amount FROM model_request_metrics WHERE thread_id = ? AND turn_id = ? AND request_purpose IS NULL
     )`, [threadId, turnId]);
   }
 
   private turnInterruptionSummary(threadId: string, turnId: string): RequestInterruptionSummary {
     return this.queryInterruptionSummary(`WITH scoped AS (
-      SELECT * FROM model_request_metrics WHERE thread_id = ? AND turn_id = ?
+      SELECT * FROM model_request_metrics WHERE thread_id = ? AND turn_id = ? AND request_purpose IS NULL
     )`, [threadId, turnId]);
   }
 
@@ -317,6 +331,7 @@ export class SqliteRequestMetricsThreadQueries {
   ): TurnSummaryRow | undefined {
     return this.reader.prepare(`
       SELECT
+        ${usageCoverageSql()},
         ${requestOutcomeSql()},
         (
           SELECT upstream_ttft_ms FROM model_request_metrics AS first_timing
@@ -371,10 +386,11 @@ export class SqliteRequestMetricsThreadQueries {
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        COUNT(CASE WHEN reasoning_output_tokens > 0 THEN 1 END) AS reasoning_request_count,
         COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM model_request_metrics
-      WHERE thread_id = ? AND turn_id = ?
+      WHERE thread_id = ? AND turn_id = ? AND request_purpose IS NULL
       GROUP BY turn_id
     `).get(threadId, turnId) as TurnSummaryRow | undefined;
   }
@@ -389,6 +405,7 @@ export class SqliteRequestMetricsThreadQueries {
     const scope = metricsScopeSql({ ...query, threadId });
     const interruptions = rows.length === 0 ? [] : this.queryInterruptionRows(`WITH scoped AS (
       SELECT * FROM model_request_metrics WHERE ${scope.sql}
+        AND request_purpose IS NULL
         AND turn_id IN (${rows.map(() => "?").join(", ")})
     )`, [...scope.params, ...rows.map((row) => row.turn_id!)], true);
     const interruptionByTurn = new Map(interruptions.map((row) => [row.turn_id, interruptionFromRow(row)]));
@@ -420,6 +437,7 @@ export class SqliteRequestMetricsThreadQueries {
     ), scoped AS (
       SELECT * FROM model_request_metrics
       WHERE ${scope.sql} AND turn_id IS NOT NULL
+        AND request_purpose IS NULL
         AND thread_id IN (SELECT thread_id FROM tree)
     )`;
     const parameters = [threadId, ...scope.params];
@@ -447,7 +465,7 @@ export class SqliteRequestMetricsThreadQueries {
     const row = this.reader.prepare(`
       SELECT COUNT(DISTINCT turn_id) AS turn_count, COUNT(*) AS request_count
       FROM model_request_metrics
-      WHERE thread_id = ? AND turn_id IS NOT NULL
+      WHERE thread_id = ? AND turn_id IS NOT NULL AND request_purpose IS NULL
     `).get(threadId) as { turn_count: number; request_count: number };
     return row.request_count === 0 ? null : row.turn_count;
   }
@@ -460,6 +478,7 @@ export class SqliteRequestMetricsThreadQueries {
       FROM (
         SELECT DISTINCT thread_id, turn_id FROM model_request_metrics
         WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL
+          AND request_purpose IS NULL
       )
     `).get(...scope.params) as { threadCount: number; turnCount: number };
   }
@@ -472,6 +491,7 @@ export class SqliteRequestMetricsThreadQueries {
     return {
       ...page,
       threads: rows.map((row) => ({
+        usageCoverage: toStoredUsageCoverage(row),
         cacheUsage: row.request_count === null
           ? { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 }
           : toStoredCacheUsage(row),
@@ -492,6 +512,12 @@ export class SqliteRequestMetricsThreadQueries {
         cachedInputTokens: row.request_count === null ? 0
           : row.cache_missing_request_count === 0 ? row.cached_input_tokens ?? 0 : null,
         subagentUsage: {
+          requestCount: row.subagent_request_count,
+          usageCoverage: toStoredUsageCoverage({
+            input_missing_request_count: row.subagent_input_missing_request_count,
+            output_missing_request_count: row.subagent_output_missing_request_count,
+            reasoning_output_missing_request_count: row.subagent_reasoning_output_missing_request_count,
+          }),
           inputTokens: row.subagent_input_tokens ?? 0,
           cachedInputTokens: row.subagent_cache_missing_request_count === 0
             ? row.subagent_cached_input_tokens ?? 0 : null,
@@ -537,6 +563,7 @@ export class SqliteRequestMetricsThreadQueries {
     const cte = `WITH RECURSIVE scoped AS (
         SELECT * FROM model_request_metrics
         WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL
+          AND request_purpose IS NULL
       ), ancestors(thread_id) AS (
         SELECT DISTINCT thread_id FROM scoped
         UNION
@@ -556,6 +583,8 @@ export class SqliteRequestMetricsThreadQueries {
         FROM tree JOIN scoped ON scoped.thread_id = tree.thread_id
       ), tree_grouped AS (
         SELECT root_thread_id,
+          COUNT(CASE WHEN thread_id != root_thread_id THEN 1 END) AS subagent_request_count,
+          ${usageCoverageSql("thread_id != root_thread_id", "subagent_")},
           SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)) AS total_tokens,
           SUM(CASE WHEN thread_id != root_thread_id THEN input_tokens END) AS subagent_input_tokens,
           SUM(CASE WHEN thread_id != root_thread_id THEN cached_input_tokens END) AS subagent_cached_input_tokens,
@@ -606,6 +635,10 @@ export class SqliteRequestMetricsThreadQueries {
       recorded_at_ms: number | null;
       total_tokens: number;
       subagent_input_tokens: number | null;
+      subagent_request_count: number;
+      subagent_input_missing_request_count: number;
+      subagent_output_missing_request_count: number;
+      subagent_reasoning_output_missing_request_count: number;
       subagent_cached_input_tokens: number | null;
       subagent_output_tokens: number | null;
       subagent_known_cached_input_tokens: number | null;
@@ -665,7 +698,7 @@ export class SqliteRequestMetricsThreadQueries {
       throw new Error("会话指标排序无效");
     }
     const scoped = `SELECT * FROM model_request_metrics
-      WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL`;
+      WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL AND request_purpose IS NULL`;
     const summary = this.reader.prepare(`
       SELECT ${metricsAggregateSql},
         COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count

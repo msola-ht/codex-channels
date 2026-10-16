@@ -12,15 +12,20 @@ import {
   type DataTableProps,
 } from "@/components/metrics/data-table"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
-import { InputTokenTooltip } from "@/components/metrics/token-tooltip"
+import { InputTokenTooltip, TokenHint } from "@/components/metrics/token-tooltip"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   formatCacheUsage,
   formatElapsedDuration,
   formatModelName,
-  formatTime,
+  formatRequestTime,
+  formatTimestamp,
+  getServerTimeZone,
   formatTokens,
+  formatUsageTokens,
+  formatTotalUsage,
+  mergeUsageCoverage,
   shortThreadId,
 } from "@/lib/format"
 import type { MetricsQuery, ThreadListItem } from "@/lib/types"
@@ -34,17 +39,18 @@ function ThreadTokenTotal({ thread }: { thread: ThreadListItem }) {
   const { t } = useTranslation()
   const usage = thread.subagentUsage
   const cached = usage.cachedInputTokens === null && usage.cacheUsage.cachedInputTokens !== null
-    ? `≥ ${formatTokens(usage.cacheUsage.cachedInputTokens)}`
+    ? formatTokens(usage.cacheUsage.cachedInputTokens)
     : formatTokens(usage.cachedInputTokens)
   const rows = [
-    [t("threads.tokenInput"), formatTokens(usage.inputTokens)],
+    [t("threads.tokenInput"), formatUsageTokens(usage.inputTokens, usage.requestCount, usage.usageCoverage.inputMissingRequestCount)],
     [t("threads.tokenCached"), cached],
     [t("metrics.cacheHitRate"), formatCacheUsage(usage.cacheUsage).rate],
-    [t("threads.tokenOutput"), formatTokens(usage.outputTokens)],
-    [t("threads.tokenSubtotal"), formatTokens(usage.inputTokens + usage.outputTokens)],
+    [t("threads.tokenOutput"), formatUsageTokens(usage.outputTokens, usage.requestCount, usage.usageCoverage.outputMissingRequestCount)],
+    [t("threads.tokenSubtotal"), formatTotalUsage(usage)],
   ]
-  const total = formatTokens(thread.totalTokens)
+  const total = formatTotalUsage({ inputTokens: thread.inputTokens + usage.inputTokens, outputTokens: thread.outputTokens + usage.outputTokens, requestCount: thread.requestCount + usage.requestCount, usageCoverage: mergeUsageCoverage(thread.usageCoverage, usage.usageCoverage) })
   const description = `${t("threads.tokenSubagents")}: ${rows.map(([label, value]) => `${label}: ${value}`).join(", ")}. ${t("threads.totalTokens")}: ${total}`
+  if (usage.requestCount === 0) return <span className="tabular-nums">{total}</span>
 
   return (
     <Tooltip>
@@ -103,8 +109,8 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
         <SortableHeader column={column}>{t("metrics.first")}</SortableHeader>
       ),
       cell: ({ getValue }) => (
-        <span className="tabular-nums text-muted-foreground">
-          {formatTime(getValue<number>())}
+        <span className="whitespace-nowrap tabular-nums text-muted-foreground" title={`${formatTimestamp(getValue<number>())} · ${getServerTimeZone()}`}>
+          {formatRequestTime(getValue<number>())}
         </span>
       ),
     },
@@ -172,19 +178,19 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "input",
       accessorFn: (thread) => thread.inputTokens,
       header: ({ column }) => <SortableHeader column={column} hint={t("metrics.input")}>{t("metrics.inputColumn")}</SortableHeader>,
-      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} cacheUsage={row.original.cacheUsage} />,
+      cell: ({ row }) => <InputTokenTooltip inputTokens={row.original.inputTokens} cachedInputTokens={row.original.cachedInputTokens} cacheUsage={row.original.cacheUsage} requestCount={row.original.requestCount} usageCoverage={row.original.usageCoverage} />,
     },
     {
       id: "cacheHitRate",
       enableSorting: false,
-      header: () => <TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint>,
+      header: () => <TableHint hint={t("metrics.cacheScopeHint")}>{t("metrics.cacheHitRateColumn")}</TableHint>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatCacheUsage(row.original.cacheUsage).rate}</span>,
     },
     {
       id: "output",
       accessorFn: (thread) => thread.outputTokens,
       header: ({ column }) => <SortableHeader column={column} hint={t("metrics.output")}>{t("metrics.outputColumn")}</SortableHeader>,
-      cell: ({ row }) => <span className="tabular-nums">{formatTokens(row.original.outputTokens)}</span>,
+      cell: ({ row }) => <TokenHint value={formatUsageTokens(row.original.outputTokens, row.original.requestCount, row.original.usageCoverage.outputMissingRequestCount)} />,
     },
     {
       id: "totalTokens",
@@ -218,8 +224,8 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
         <SortableHeader column={column}>{t("metrics.last")}</SortableHeader>
       ),
       cell: ({ getValue }) => (
-        <span className="tabular-nums text-muted-foreground">
-          {formatTime(getValue<number>())}
+        <span className="whitespace-nowrap tabular-nums text-muted-foreground" title={`${formatTimestamp(getValue<number>())} · ${getServerTimeZone()}`}>
+          {formatRequestTime(getValue<number>())}
         </span>
       ),
     },

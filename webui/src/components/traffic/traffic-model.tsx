@@ -1,6 +1,6 @@
 import { TriangleAlertIcon } from "lucide-react"
 import { TableHint, TruncatedText } from "@/components/metrics/data-table"
-import { autoReviewModelAlias, formatModelName, isClinePassProvider } from "@/lib/format"
+import { formatModelName, isClinePassProvider } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
 import { useTranslation } from "@/hooks/use-translation"
 import type { MessageKey } from "@/lib/i18n/messages"
@@ -22,20 +22,21 @@ export function TrafficModel({ request, responses, fallback, upstream, provider:
   const notProvided = t("modelComparison.notProvided")
   const echo = names.join(separator) || notProvided
   const rawName = request ?? (names.join(separator) || fallback) ?? null
-  const alias = autoReviewModelAlias(requestPurpose)
-  const name = alias ?? formatModelName(rawName, source)
+  const autoReview = requestPurpose === "autoApprovalReview"
+  const name = formatModelName(rawName, source)
   const provider = typeof upstream === "string" && upstream.trim() !== "" ? upstream.trim() : null
   const unexpectedProvider = isClinePass && (request === "cline-pass/deepseek-v4.1-flash" || request === `${source}/deepseek-v4.1-flash`)
     && provider !== null && provider !== "deepseek"
-  if (names.length === 0 && provider === null && alias === null) return <TruncatedText text={name} className="max-w-64" />
+  if (names.length === 0 && provider === null && !autoReview) return <TruncatedText text={name} className="max-w-64" />
   const comparisonHint = isClinePass
     ? t("modelComparison.requestOnly", { name: request ?? notProvided })
     : t(compareNames ? "modelComparison.requestAndResponses" : "modelComparison.requestAndEcho", { request: request ?? notProvided, responses: echo })
   const upstreamHint = provider === null ? "" : t("modelComparison.upstream", { provider })
   return (
-    <TableHint hint={[alias === null ? "" : t("requestPurpose.modelAliasHint"), comparisonHint, upstreamHint].filter(Boolean).join(" ")}>
+    <TableHint hint={[comparisonHint, upstreamHint].filter(Boolean).join(" ")}>
       <span className="inline-flex max-w-[32rem] flex-wrap items-center gap-1.5 align-middle">
         <span className="max-w-64 truncate">{name ?? "—"}</span>
+        {autoReview ? <Badge size="sm" variant="secondary">{t("requestPurpose.autoApprovalReview")}</Badge> : null}
         {names.filter(response => response !== request?.trim()).map(response => {
           const comparison = compareNames ? modelNameComparison(request, response) : null
           const comparisonKey = comparison === null ? undefined : comparisonKeys[comparison]

@@ -29,7 +29,6 @@ export interface GatewayConfigDocument {
     binary: string;
     socket_path: string;
     default_model?: string;
-    sandbox: "read-only" | "workspace-write";
     client_identity?: {
       name?: string;
       title?: string;
@@ -53,7 +52,6 @@ export interface GatewayConfigDocument {
     reasoning: boolean;
     model_aliases?: Record<string, string>;
   };
-  experimental: { plugin_api: boolean };
   debug?: {
     model_traffic_dump: boolean;
     model_traffic_input_items: number;
@@ -79,10 +77,6 @@ export interface GatewayConfigDocument {
     id: string;
     name: string;
     cwd: string;
-    sandbox?: "read-only" | "workspace-write" | "danger-full-access";
-    approval_policy?: "untrusted" | "on-request" | "never";
-    approvals_reviewer?: "user" | "auto_review";
-    permissions?: string;
   }>;
 }
 

@@ -238,6 +238,9 @@
   WebUI 提交精确 Provider ID、券 ID 或短期操作 ID，Gateway 使用现有账户适配器和统一代理查询，并保持指标库单写入者；
   公开错误文案按受控原因生成，不透传内部 message；调用方取消或连接结束时取消该等待，
   关闭主动取消刷新并释放 IPC 任务，不等待不响应取消的回调。
+- `gateway-thread-state.mjs` / `gateway-thread-state.d.mts`：为本机 WebUI 当前页提供只读 Thread 状态私有 IPC；
+  最多 100 个 UUID、4 个连接及有界报文和总期限，返回官方状态与观测时间或受控未知原因；读取预算先于 IPC 硬期限结束，保留已完成项，仅将未完成项标记超时。
+  客户端将指标中的非 UUID 标识逐项标记未知，不让一次状态补充阻断历史指标读取；取消与关闭撤销自有查询。
 - `service-targets.mjs` / `service-targets.d.mts`：集中声明公开服务目标、systemd unit、launchd
   label、Windows 计划任务名称、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor
   复用。
@@ -317,8 +320,6 @@
   目录持有一个 DPAPI 保护的随机 256-bit 主密钥，记录继续使用随机 IV 的 AES-256-GCM，文件名只含
   记录键摘要，目录和文件同时复用当前 SID 私有 ACL 与原子替换。
   异步记录操作按目录串行，至多接纳 16 项，整次预算 15 秒；主密钥以独占发布避免竞争覆盖，既有磁盘结构不变。
-- `workspace-permission.mjs` / `workspace-permission.d.mts`：统一 Workspace 的 Sandbox、审批策略
-  与 Permission Profile 更新及互斥规则，供 CLI、Config 菜单和渠道写入适配器复用。
 
 这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随本地 npm 打包产物安装，不向 npm Registry 发布新版本。
 

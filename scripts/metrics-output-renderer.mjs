@@ -6,6 +6,8 @@ import {
   formatLocalTimeZone,
   formatRequestCount,
   formatTokenCount,
+  formatObservedTokens as formatCoveredTokens,
+  formatObservedTotal as formatUsageTotal,
   markdownCell,
 } from "./metrics-export-format.mjs";
 
@@ -91,6 +93,8 @@ export function printMetricsReport(result, format) {
       ["cachedInputTokens", (row) => row.cachedInputTokens],
       ["outputTokens", (row) => row.outputTokens],
       ["reasoningOutputTokens", (row) => row.reasoningOutputTokens],
+      ...usageCoverageCsvColumns(),
+      ...reviewUsageCsvColumns(),
       ...compactCsvColumns(),
       ...weeklyQuotaCsvColumns(),
     ];
@@ -154,6 +158,7 @@ export function printMetricsReport(result, format) {
   console.log(`- 时间范围：${result.range.name}`);
   console.log(`- 起始时间：${formatLocalTime(result.range.startAtMs)}`);
   console.log(`- 截止时间：${formatLocalTime(result.range.endAtMs)}`);
+  printUsageNote();
   printWeeklyQuotaMarkdown(result.weeklyQuota);
   console.log("");
   console.log("## 汇总");
@@ -164,20 +169,22 @@ export function printMetricsReport(result, format) {
   }
   console.log(`- 模型请求：${formatRequestCount(aggregate.requestCount)}`);
   console.log(`- ${formatRequestOutcomes(aggregate.requestOutcomes)}`);
-  console.log(`- 输入 Token：${aggregate.inputTokens}`);
-  console.log(`- 缓存：${aggregate.cachedInputTokens ?? "未知"}`);
-  console.log(`- 输出 Token：${aggregate.outputTokens}`);
-  console.log(`- 推理输出 Token：${aggregate.reasoningOutputTokens}`);
+  console.log(`- 总 Token：${formatUsageTotal(aggregate)}`);
+  console.log(`- 输入 Token：${formatUsageField(aggregate, "input")}`);
+  console.log(`- 其中缓存：${formatObservedTokens(aggregate.cachedInputTokens)}`);
+  console.log(`- 输出 Token：${formatUsageField(aggregate, "output")}`);
+  console.log(`- 其中推理输出 Token：${formatUsageField(aggregate, "reasoning")}`);
+  console.log(`- 其中自动审批审查：${formatReviewUsage(aggregate.reviewUsage)}`);
   printCompactSummary(aggregate.compact);
   if (result.report.groups.length > 0) {
     console.log("");
     console.log("## 明细");
     console.log("");
-    console.log("| 提供商 | 模型 | 请求 | 请求结果 | 输入 | 缓存 | 输出 | 上下文压缩 |");
-    console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |");
+    console.log("| 提供商 | 模型 | 请求 | 请求结果 | 输入 | 其中缓存 | 输出 | 其中自动审批审查 | 其中上下文压缩 |");
+    console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |");
     for (const group of result.report.groups) {
       const value = group.aggregate;
-      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${value.requestCount} | ${formatRequestOutcomes(value.requestOutcomes)} | ${value.inputTokens} | ${value.cachedInputTokens ?? "未知"} | ${value.outputTokens} | ${markdownCell(formatCompactSummary(value.compact) ?? "无")} |`);
+      console.log(`| ${markdownCell(group.provider ?? "全部")} | ${markdownCell(group.model ?? "全部/未观测")} | ${value.requestCount} | ${formatRequestOutcomes(value.requestOutcomes)} | ${formatUsageField(value, "input")} | ${formatObservedTokens(value.cachedInputTokens)} | ${formatUsageField(value, "output")} | ${markdownCell(formatReviewUsage(value.reviewUsage))} | ${markdownCell(formatCompactSummary(value.compact) ?? "无")} |`);
     }
     const hidden = result.report.totalGroupCount - result.report.groups.length;
     if (hidden > 0) console.log(`\n仅显示请求量最高的 ${result.report.groups.length} 组，另有 ${hidden} 组。`);
@@ -230,15 +237,18 @@ function* renderMetricsExportBody(iterator, result, format) {
     return;
   }
   if (format === "markdown") {
-    yield `# Codex Connect 请求明细\n\n- 时区：${formatLocalTimeZone()}\n- 生成时间：${formatLocalTime(Date.parse(result.generatedAt))}\n- 时间范围：${result.range.name}\n`;
+    yield `# Codex Connect 请求明细\n\n- 时区：${formatLocalTimeZone()}\n- 生成时间：${formatLocalTime(Date.parse(result.generatedAt))}\n- 时间范围：${result.range.name}\n\n${usageNote}\n`;
+    if (result.aggregate !== null) {
+      yield `\n- 模型请求：${formatRequestCount(result.aggregate.requestCount)}\n- 总 Token：${formatUsageTotal(result.aggregate)}\n- 其中自动审批审查：${formatReviewUsage(result.aggregate.reviewUsage)}\n`;
+    }
     yield* weeklyQuotaMarkdownLines(result.weeklyQuota);
     const first = iterator.next();
     if (first.done) {
       yield "\n本时间范围没有请求记录。\n";
       return;
     }
-    yield "\n| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存 | 输出 | 首 Token | 速度 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |\n";
-    yield "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n";
+    yield "\n| 时间 | 提供商 | 模型 | 操作 | 用途 | 思考等级 | 状态 | 输入 | 其中缓存 | 输出 | 首 Token | 速度 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |\n";
+    yield "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n";
     for (let next = first; !next.done; next = iterator.next()) {
       const record = next.value.value;
       yield (
@@ -247,6 +257,7 @@ function* renderMetricsExportBody(iterator, result, format) {
           markdownCell(record.provider ?? ""),
           markdownCell(record.model ?? ""),
           markdownCell(record.operation),
+          markdownCell(record.requestPurpose === "autoApprovalReview" ? "自动审批审查" : "未标记（含历史未知）"),
           markdownCell(record.reasoningEffort ?? "模型默认"),
           markdownCell(formatRequestStatus(record)),
           markdownCell(record.inputTokens == null ? "未观测" : formatTokenCount(record.inputTokens)),
@@ -355,13 +366,55 @@ function compactCsvColumns() {
     ["compactInputTokens", (row) => row.compact?.inputTokens],
     ["compactCachedInputTokens", (row) => row.compact?.cachedInputTokens],
     ["compactOutputTokens", (row) => row.compact?.outputTokens],
+    ...usageCoverageCsvColumns("compact.", (row) => row.compact),
   ];
+}
+
+function usageCoverageCsvColumns(prefix = "", read = (row) => row) {
+  return ["inputMissingRequestCount", "outputMissingRequestCount", "reasoningMissingRequestCount"].map((key) => [
+    `${prefix}usageCoverage.${key}`, (row) => read(row)?.usageCoverage?.[key],
+  ]);
+}
+
+function reviewUsageCsvColumns() {
+  return [
+    ...["requestCount", "inputTokens", "outputTokens"].map((key) => [
+      `reviewUsage.${key}`, (row) => row.reviewUsage?.[key],
+    ]),
+    ...usageCoverageCsvColumns("reviewUsage.", (row) => row.reviewUsage),
+  ];
+}
+
+const usageNote = "Token 总量为输入加输出；缓存已包含在输入中，推理已包含在输出中，压缩与自动审批审查均为其中项。未观测不等于 0，≥ 表示已知用量下界。历史数据可能包含旧版本合成的 Turn 错误记录，保留原样且不推断用途。";
+
+function printUsageNote() {
+  console.log(`\n${usageNote}`);
+}
+
+function formatObservedTokens(value) {
+  return value == null ? "未观测" : formatTokenCount(value);
+}
+
+function formatUsageField(summary, field) {
+  const missing = summary.usageCoverage[`${field}MissingRequestCount`];
+  const value = summary[field === "reasoning" ? "reasoningOutputTokens" : `${field}Tokens`];
+  return formatCoveredTokens(value, summary.requestCount, missing);
+}
+
+function formatReviewUsage(summary) {
+  return `${formatRequestCount(summary.requestCount)} 次 · 输入 ${formatUsageField(summary, "input")} · 输出 ${formatUsageField(summary, "output")} · 总 Token ${formatUsageTotal(summary)}`;
+}
+
+function formatCacheRate(summary) {
+  if (summary.requestCount === 0) return "0%";
+  if (summary.cachedInputTokens === null || summary.usageCoverage.inputMissingRequestCount > 0) return "未观测";
+  return summary.inputTokens === 0 ? "0%" : `${((summary.cachedInputTokens / summary.inputTokens) * 100).toFixed(2)}%`;
 }
 
 function printCompactSummary(compact) {
   const summary = formatCompactSummary(compact);
   if (summary === null) return;
-  console.log(`- 上下文压缩：${summary}`);
+  console.log(`- 其中上下文压缩：${summary}`);
 }
 
 function formatCompactSummary(compact) {
@@ -369,7 +422,7 @@ function formatCompactSummary(compact) {
   const model = compact.hasMixedModels
     ? "混合模型"
     : compact.model ?? "模型未知";
-  return `${formatRequestCount(compact.requestCount)} 次 · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token · ${formatRequestOutcomes(compact.requestOutcomes)}`;
+  return `${formatRequestCount(compact.requestCount)} 次 · ${model} · ${formatUsageTotal(compact)} Token · ${formatRequestOutcomes(compact.requestOutcomes)}`;
 }
 
 function formatRequestOutcomes(outcomes) {
@@ -423,6 +476,7 @@ export function printMetricsRun(result, format) {
   console.log(`- Thread：${result.threadId}`);
   console.log(`- 时区：${formatLocalTimeZone()}`);
   console.log(`- 生成时间：${formatLocalTime(Date.parse(result.generatedAt))}`);
+  printUsageNote();
   console.log("");
   console.log("## 最近运行聚合");
   console.log("");
@@ -457,6 +511,7 @@ function printTurnSummaryCsv(rows) {
     ["cachedInputTokens", (row) => row.cachedInputTokens],
     ["outputTokens", (row) => row.outputTokens],
     ["reasoningOutputTokens", (row) => row.reasoningOutputTokens],
+    ...usageCoverageCsvColumns(),
     ...compactCsvColumns(),
   ];
   console.log(columns.map(([heading]) => csvCell(heading)).join(","));
@@ -480,17 +535,15 @@ export function printMetricsTurns(result, format) {
   console.log(`# 会话对话明细 · ${result.threadId}`);
   console.log(`- 时区：${formatLocalTimeZone()}`);
   console.log(`- 时间范围：${result.range.name} · 当前会话自身的期间统计`);
+  printUsageNote();
   console.log("");
   if (result.turns.length === 0) {
     console.log("该会话暂无可导出的对话记录。");
     return;
   }
-  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 请求结果 | 中断后续观测 | 总 Token | 缓存率 | 上下文压缩 |");
+  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 请求结果 | 中断后续观测 | 总 Token | 缓存率 | 其中上下文压缩 |");
   console.log("| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | --- | --- |");
   for (const [index, turn] of result.turns.entries()) {
-    const cacheRate = turn.cachedInputTokens === null || turn.inputTokens === 0
-      ? "未知"
-      : `${((turn.cachedInputTokens / turn.inputTokens) * 100).toFixed(2)}%`;
     console.log(
       [
         String(result.turns.length - index),
@@ -501,13 +554,13 @@ export function printMetricsTurns(result, format) {
         String(turn.requestCount),
         formatRequestOutcomes(turn.requestOutcomes),
         formatInterruptionSummary(turn.interruptionSummary),
-        formatTokenCount(turn.inputTokens + turn.outputTokens),
-        cacheRate,
+        formatUsageTotal(turn),
+        formatCacheRate(turn),
         markdownCell(formatCompactSummary(turn.compact) ?? "无"),
       ].join(" | "),
     );
   }
-  console.log("后续完成仅表示时间顺序，不代表重试或恢复因果；Token 仅含已观测用量。");
+  console.log("后续完成仅表示时间顺序，不代表重试或恢复因果。");
 }
 
 export function printMetricsThreads(result, format) {
@@ -527,6 +580,12 @@ export function printMetricsThreads(result, format) {
       ...outcomeCsvColumns(),
       ["inputTokens", (thread) => thread.inputTokens],
       ["outputTokens", (thread) => thread.outputTokens],
+      ["cachedInputTokens", (thread) => thread.cachedInputTokens],
+      ...usageCoverageCsvColumns(),
+      ...["requestCount", "inputTokens", "cachedInputTokens", "outputTokens"].map((key) => [
+        `subagentUsage.${key}`, (thread) => thread.subagentUsage?.[key],
+      ]),
+      ...usageCoverageCsvColumns("subagentUsage.", (thread) => thread.subagentUsage),
       ...compactCsvColumns(),
       ["lastRecordedAtMs", (thread) => thread.lastRecordedAtMs],
     ];
@@ -543,8 +602,9 @@ export function printMetricsThreads(result, format) {
   console.log(`# 指标会话列表（${result.threads.length}）`);
   console.log(`- 时区：${formatLocalTimeZone()}`);
   console.log(`- 时间范围：${result.range.name} · 各会话自身的期间统计`);
+  printUsageNote();
   console.log("");
-  console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 请求结果 | 总 Token | 上下文压缩 | 最近记录 |");
+  console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 请求结果 | 总 Token | 其中上下文压缩 | 最近记录 |");
   console.log("| --- | --- | --- | --- | --- | ---: | ---: | --- | ---: | --- | --- |");
   for (const [index, thread] of result.threads.entries()) {
     console.log(
@@ -559,7 +619,7 @@ export function printMetricsThreads(result, format) {
         String(thread.turnCount),
         String(thread.requestCount),
         formatRequestOutcomes(thread.requestOutcomes),
-        formatTokenCount(thread.inputTokens + thread.outputTokens),
+        formatUsageTotal(thread),
         markdownCell(formatCompactSummary(thread.compact) ?? "无"),
         markdownCell(formatLocalTime(thread.lastRecordedAtMs)),
       ].join(" | "),
@@ -570,7 +630,6 @@ export function printMetricsThreads(result, format) {
 }
 
 function printTurnSummary(summary) {
-  const totalTokens = summary.inputTokens + summary.outputTokens;
   if (summary.model !== undefined && summary.model !== null) {
     console.log(`- 模型：${summary.model}`);
   }
@@ -583,24 +642,21 @@ function printTurnSummary(summary) {
   console.log(`- ${formatRequestOutcomes(summary.requestOutcomes)}`);
   if (summary.requestOutcomes.interrupted > 0) {
     console.log(`- 中断后续观测：${formatInterruptionSummary(summary.interruptionSummary)}`);
-    console.log("- 后续完成仅表示时间顺序，不代表重试或恢复因果；Token 仅含已观测用量。");
+    console.log("- 后续完成仅表示时间顺序，不代表重试或恢复因果。");
   }
-  console.log(`- 总 Token：${formatTokenCount(totalTokens)}`);
+  console.log(`- 总 Token：${formatUsageTotal(summary)}`);
+  console.log(`  - 输入：${formatUsageField(summary, "input")}`);
   if (summary.cachedInputTokens === null) {
-    console.log("  - 缓存：上游未提供完整数据");
+    console.log("    - 其中缓存：未观测");
   } else {
-    console.log(`  - 缓存：${formatTokenCount(summary.cachedInputTokens)}`);
+    console.log(`    - 其中缓存：${formatTokenCount(summary.cachedInputTokens)}`);
     console.log(
-      `  - 无缓存：${formatTokenCount(Math.max(0, summary.inputTokens - summary.cachedInputTokens))}`,
-    );
-    console.log(
-      `  - 缓存命中率：${summary.inputTokens === 0 ? "0%" : `${((summary.cachedInputTokens / summary.inputTokens) * 100).toFixed(2)}%`}`,
+      `    - 无缓存：${summary.usageCoverage.inputMissingRequestCount > 0 ? "未观测" : formatTokenCount(Math.max(0, summary.inputTokens - summary.cachedInputTokens))}`,
     );
   }
-  console.log(`  - 输出：${formatTokenCount(summary.outputTokens)}`);
-  if (summary.reasoningOutputTokens > 0) {
-    console.log(`    - 其中推理输出：${formatTokenCount(summary.reasoningOutputTokens)}`);
-  }
+  console.log(`    - 缓存命中率：${formatCacheRate(summary)}`);
+  console.log(`  - 输出：${formatUsageField(summary, "output")}`);
+  console.log(`    - 其中推理输出：${formatUsageField(summary, "reasoning")}`);
   printCompactSummary(summary.compact);
 }
 

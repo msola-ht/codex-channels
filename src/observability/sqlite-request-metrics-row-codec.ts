@@ -8,6 +8,8 @@ import type {
   StoredModelRequestMetricsGroup,
   StoredThreadRequestMetricsAggregate,
   StoredTurnRequestMetricsSummary,
+  UsageCoverage,
+  ReviewUsage,
 } from "./request-metrics.js";
 
 export interface MetricRow {
@@ -75,6 +77,9 @@ export interface MetricRow {
 }
 
 export interface CompactSummaryRow {
+  compact_input_missing_request_count: number;
+  compact_output_missing_request_count: number;
+  compact_reasoning_output_missing_request_count: number;
   compact_completed_request_count: number;
   compact_interrupted_request_count: number;
   compact_failed_request_count: number;
@@ -106,7 +111,7 @@ export function toStoredRequestOutcomes(row: RequestOutcomeRow): RequestOutcomeC
   };
 }
 
-export interface TurnSummaryRow extends CompactSummaryRow, RequestOutcomeRow {
+export interface TurnSummaryRow extends CompactSummaryRow, RequestOutcomeRow, UsageCoverageRow {
   upstream_ttft_ms?: number | null;
   provider?: string | null;
   model?: string | null;
@@ -122,12 +127,49 @@ export interface TurnSummaryRow extends CompactSummaryRow, RequestOutcomeRow {
   cache_observed_request_count: number;
   output_tokens: number | null;
   reasoning_output_tokens: number | null;
+  reasoning_request_count: number;
 }
 
 export interface CacheUsageRow {
   known_cached_input_tokens: number | null;
   cache_observed_input_tokens: number | null;
   cache_missing_request_count: number;
+}
+
+export interface UsageCoverageRow {
+  input_missing_request_count: number;
+  output_missing_request_count: number;
+  reasoning_output_missing_request_count: number;
+}
+
+export interface ReviewUsageRow {
+  review_request_count: number;
+  review_input_tokens: number | null;
+  review_output_tokens: number | null;
+  review_input_missing_request_count: number;
+  review_output_missing_request_count: number;
+  review_reasoning_output_missing_request_count: number;
+}
+
+export function toStoredUsageCoverage(row: UsageCoverageRow): UsageCoverage {
+  return {
+    inputMissingRequestCount: row.input_missing_request_count ?? 0,
+    outputMissingRequestCount: row.output_missing_request_count ?? 0,
+    reasoningMissingRequestCount: row.reasoning_output_missing_request_count ?? 0,
+  };
+}
+
+export function toStoredReviewUsage(row: ReviewUsageRow): ReviewUsage {
+  return {
+    requestCount: row.review_request_count,
+    inputTokens: row.review_input_tokens ?? 0,
+    outputTokens: row.review_output_tokens ?? 0,
+    usageCoverage: toStoredUsageCoverage({
+      input_missing_request_count: row.review_input_missing_request_count,
+      output_missing_request_count: row.review_output_missing_request_count,
+      reasoning_output_missing_request_count: row.review_reasoning_output_missing_request_count,
+    }),
+  };
 }
 
 export function toStoredCacheUsage(row: CacheUsageRow): StoredCacheUsage {
@@ -138,7 +180,7 @@ export function toStoredCacheUsage(row: CacheUsageRow): StoredCacheUsage {
   };
 }
 
-export interface AggregateRow extends Omit<TurnSummaryRow, "turn_id" | "turn_count">, CacheUsageRow {
+export interface AggregateRow extends Omit<TurnSummaryRow, "turn_id" | "turn_count">, CacheUsageRow, ReviewUsageRow {
   provider: string | null;
   model: string | null;
   total_group_count: number;
@@ -247,9 +289,10 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
 }
 
 export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSummary {
-  // Fully unobserved requests do not affect the observed Turn rate, but input
-  // and cache fields from different requests must never fill each other's gaps.
+  // This field represents the complete request scope. Missing input/cache
+  // observations must not turn a subset rate into a full Turn rate.
   return {
+    usageCoverage: toStoredUsageCoverage(row),
     requestOutcomes: toStoredRequestOutcomes(row),
     interruptionSummary: { followedByCompletion: 0, noObservedCompletion: 0, usageUnobserved: 0 },
     ...(row.upstream_ttft_ms === undefined ? {} : { upstreamTtftMs: row.upstream_ttft_ms }),
@@ -260,13 +303,14 @@ export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetri
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
     inputTokens: row.input_tokens ?? 0,
-    cachedInputTokens: row.cache_observed_request_count > 0
+    cachedInputTokens: row.cache_observed_request_count === row.request_count
       && row.cache_observed_request_count === row.input_token_count
       && row.cache_observed_request_count === row.cached_input_token_count
       ? row.cached_input_tokens ?? 0
       : null,
     outputTokens: row.output_tokens ?? 0,
     reasoningOutputTokens: row.reasoning_output_tokens ?? 0,
+    reasoningRequestCount: row.reasoning_request_count,
     compact: toStoredCompactSummary(row),
   };
 }
@@ -279,6 +323,7 @@ export function toStoredThreadAggregate(
     turn_id: "aggregate",
   });
   return {
+    usageCoverage: summary.usageCoverage,
     requestOutcomes: summary.requestOutcomes,
     interruptionSummary: summary.interruptionSummary,
     provider: summary.provider,
@@ -303,6 +348,8 @@ export function toStoredMetricsGroup(row: AggregateRow): StoredModelRequestMetri
 
 export function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsAggregate {
   return {
+    usageCoverage: toStoredUsageCoverage(row),
+    reviewUsage: toStoredReviewUsage(row),
     requestOutcomes: toStoredRequestOutcomes(row),
     cacheUsage: toStoredCacheUsage(row),
     requestCount: row.request_count,
@@ -323,6 +370,11 @@ export function toStoredCompactSummary(
 ): StoredCompactRequestMetricsSummary | null {
   if (row.compact_request_count === 0) return null;
   return {
+    usageCoverage: toStoredUsageCoverage({
+      input_missing_request_count: row.compact_input_missing_request_count,
+      output_missing_request_count: row.compact_output_missing_request_count,
+      reasoning_output_missing_request_count: row.compact_reasoning_output_missing_request_count,
+    }),
     requestOutcomes: toStoredRequestOutcomes({
       completed_request_count: row.compact_completed_request_count,
       interrupted_request_count: row.compact_interrupted_request_count,

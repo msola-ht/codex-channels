@@ -340,17 +340,6 @@ if (document) {
   }
 
   setSection("扩展能力");
-  const experimental = table(document.experimental);
-  const pluginApiEnabled = experimental.plugin_api === true;
-  note(
-    "Plugin API",
-    pluginApiEnabled
-      ? `已启用（开发中；Codex ${requiredAppServerVersion} 暂不保证生产兼容性）`
-      : "已关闭",
-    pluginApiEnabled
-      ? "如需关闭，在 [experimental] 中设置 plugin_api = false 后重启 Gateway"
-      : "如需调试，在 [experimental] 中设置 plugin_api = true 后重启 Gateway",
-  );
   const scheduledTasks = table(document.scheduled_tasks);
   if (scheduledTasks.enabled === true) {
     const scheduledTaskPath = join(dirname(stateDatabasePath), "scheduled-tasks.sqlite3");

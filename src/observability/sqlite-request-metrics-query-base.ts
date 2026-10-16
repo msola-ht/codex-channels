@@ -15,6 +15,7 @@ export const interruptedRequestSql = `NOT (${observableCompletionSql}) AND COALE
   CASE WHEN source = 'relay' THEN error_code ELSE error_type END = 'client_disconnected', 0)`;
 export const normalizedStatusSql = "status";
 export const compactAggregateSql = `
+  ${usageCoverageSql("operation = 'compact'", "compact_")},
   ${requestOutcomeSql("operation = 'compact'", "compact_")},
   COUNT(CASE WHEN operation = 'compact' THEN 1 END) AS compact_request_count,
   SUM(CASE WHEN operation = 'compact' AND NOT (${observableCompletionSql})
@@ -39,6 +40,8 @@ export const cacheUsageSql = `
   SUM(CASE WHEN input_tokens IS NULL OR cached_input_tokens IS NULL THEN 1 ELSE 0 END) AS cache_missing_request_count
 `;
 export const metricsAggregateSql = `
+  ${usageCoverageSql()},
+  ${reviewUsageSql()},
   ${requestOutcomeSql()},
   ${cacheUsageSql},
   COUNT(*) AS request_count,
@@ -50,8 +53,23 @@ export const metricsAggregateSql = `
   COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
   SUM(output_tokens) AS output_tokens,
   SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+  COUNT(CASE WHEN reasoning_output_tokens > 0 THEN 1 END) AS reasoning_request_count,
   ${compactAggregateSql}
 `;
+
+export function usageCoverageSql(condition = "1", prefix = ""): string {
+  return ["input", "output", "reasoning_output"].map((field) =>
+    `COUNT(CASE WHEN (${condition}) AND ${field}_tokens IS NULL THEN 1 END) AS ${prefix}${field}_missing_request_count`,
+  ).join(", ");
+}
+
+export function reviewUsageSql(): string {
+  const condition = "request_purpose = 'autoApprovalReview'";
+  return `COUNT(CASE WHEN ${condition} THEN 1 END) AS review_request_count,
+    SUM(CASE WHEN ${condition} THEN input_tokens END) AS review_input_tokens,
+    SUM(CASE WHEN ${condition} THEN output_tokens END) AS review_output_tokens,
+    ${usageCoverageSql(condition, "review_")}`;
+}
 
 export function requestOutcomeSql(condition = "1", prefix = ""): string {
   const interrupted = interruptedRequestSql;
@@ -80,9 +98,11 @@ export function metricsScopeSql(query: ModelRequestMetricsScope, selectThreadRoo
   const conditions = ["recorded_at_ms >= ?", "recorded_at_ms < ?"];
   const params: Array<string | number> = [query.startAtMs, query.endAtMs];
   if (query.requestPurpose !== undefined) {
-    if (query.requestPurpose !== "autoApprovalReview") throw new Error("requestPurpose 筛选值无效");
-    conditions.push("request_purpose = ?");
-    params.push(query.requestPurpose);
+    if (query.requestPurpose === "unmarked") conditions.push("request_purpose IS NULL");
+    else if (query.requestPurpose === "autoApprovalReview") {
+      conditions.push("request_purpose = ?");
+      params.push(query.requestPurpose);
+    } else throw new Error("requestPurpose 筛选值无效");
   }
   for (const [key, column] of [
     ["threadId", "thread_id"], ["turnId", "turn_id"],

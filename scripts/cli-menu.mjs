@@ -15,7 +15,7 @@ export async function runCliMenu({ prompts = clackPrompts, runCommand }) {
   prompts.intro("Codex Connect");
   const options = [
     { value: "launch", label: "运行与连接", hint: "Codex TUI、WebUI 与前台服务" },
-    { value: "work", label: "工作区", hint: "选择项目与管理访问权限" },
+    { value: "work", label: "工作区", hint: "注册目录与选择默认项目" },
     { value: "config", label: "日常设置", hint: "会话偏好与 Gateway 配置" },
     { value: "setup", label: "接入与账户", hint: "Provider、通讯渠道与项目技能" },
     { value: "service", label: "状态与服务", hint: "状态、日志、诊断与后台服务管理" },
@@ -79,7 +79,7 @@ async function runRemoteSelection({ prompts, runCommand }) {
   const { workspaces, defaultWorkspace } = readWorkspaceConfig(document);
   const workspace = await prompts.select({ message: "选择本次连接的工作区", showInstructions: false, initialValue: "",
     options: [
-      { value: "", label: "当前目录", hint: "按当前目录匹配已注册工作区权限" },
+      { value: "", label: "当前目录", hint: "使用当前目录与原生 Codex 配置" },
       ...workspaces.slice().sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
         .map(item => ({ value: item.id, label: `${item.name} · ${item.id}${item.id === defaultWorkspace.id ? "（默认）" : ""}`, hint: item.cwd })),
     ],

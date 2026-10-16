@@ -13,6 +13,8 @@ import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatCodexProviderLabel, formatModelDisplayName } from "./provider-format.js";
 import {
   formatCacheHitRate,
+  formatObservedTokens,
+  formatObservedTotal,
   formatRequestCount,
   formatTokenCount,
 } from "./token-format.js";
@@ -31,6 +33,7 @@ export function formatConversationMetrics(
   }
   const lines = [
     "## 请求指标",
+    "任务执行统计排除明确标记的自动审查；Token 为保留记录中的已知累计，≥ 表示字段缺失。",
     `Session ID：${formatThreadId(summary.threadId)}`,
   ];
   if (summary.latestTurn) {
@@ -41,7 +44,7 @@ export function formatConversationMetrics(
       `模型请求：${formatRequestCount(turn.requestCount)} 次`,
       formatRequestOutcomes(turn.requestOutcomes),
       ...formatInterruptionSummary(turn.interruptionSummary),
-      `- **Token**：${formatTokenCount(turn.inputTokens + turn.outputTokens)}`,
+      `- **已记录 Token**：${formatObservedTotal(turn)}`,
       ...(turn.cachedInputTokens === null
         ? ["  - 缓存：上游未提供完整数据"]
         : [
@@ -49,9 +52,9 @@ export function formatConversationMetrics(
             `  - 无缓存：${formatTokenCount(Math.max(0, turn.inputTokens - turn.cachedInputTokens))}`,
             `  - 缓存命中率：${formatCacheHitRate(turn.inputTokens, turn.cachedInputTokens)}`,
           ]),
-      `  - 输出：${formatTokenCount(turn.outputTokens)}`,
+      `  - 输出：${formatObservedTokens(turn.outputTokens, turn.requestCount, turn.usageCoverage.outputMissingRequestCount)}`,
       ...(turn.reasoningOutputTokens > 0
-        ? [`  - 其中推理输出：${formatTokenCount(turn.reasoningOutputTokens)}`]
+        ? [`  - 其中推理输出：${formatObservedTokens(turn.reasoningOutputTokens, turn.requestCount, turn.usageCoverage.reasoningMissingRequestCount)}`]
         : []),
       ...(turn.compact
         ? [formatCompactMetrics(turn.compact)]
@@ -69,7 +72,7 @@ export function formatConversationMetrics(
       `模型请求：${formatRequestCount(aggregate.requestCount)} 次`,
       formatRequestOutcomes(aggregate.requestOutcomes),
       ...formatInterruptionSummary(aggregate.interruptionSummary),
-      `- **Token**：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
+      `- **已记录 Token**：${formatObservedTotal(aggregate)}`,
       ...(aggregate.cachedInputTokens === null
         ? ["  - 缓存：上游未提供完整数据"]
         : [
@@ -77,9 +80,9 @@ export function formatConversationMetrics(
             `  - 无缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
             `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
           ]),
-      `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,
+      `  - 输出：${formatObservedTokens(aggregate.outputTokens, aggregate.requestCount, aggregate.usageCoverage.outputMissingRequestCount)}`,
       ...(aggregate.reasoningOutputTokens > 0
-        ? [`  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`]
+        ? [`  - 其中推理输出：${formatObservedTokens(aggregate.reasoningOutputTokens, aggregate.requestCount, aggregate.usageCoverage.reasoningMissingRequestCount)}`]
         : []),
       ...(aggregate.compact
         ? [formatCompactMetrics(aggregate.compact)]
@@ -225,6 +228,8 @@ function formatAggregateMetricsReport(
 
 function formatMetricsAggregate(
   aggregate: {
+  usageCoverage: { inputMissingRequestCount: number; outputMissingRequestCount: number; reasoningMissingRequestCount: number };
+  reviewUsage?: { requestCount: number; inputTokens: number; outputTokens: number; usageCoverage: { inputMissingRequestCount: number; outputMissingRequestCount: number } };
   requestCount: number;
   unsuccessfulRequestCount: number;
   requestOutcomes: RequestOutcomeCounts;
@@ -238,7 +243,8 @@ function formatMetricsAggregate(
   return [
     `模型请求：${formatRequestCount(aggregate.requestCount)} 次`,
     formatRequestOutcomes(aggregate.requestOutcomes),
-    `- **Token**：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
+    `- **已记录 Token**：${formatObservedTotal(aggregate)}`,
+    ...(aggregate.reviewUsage ? [`  - 其中自动审查：${formatRequestCount(aggregate.reviewUsage.requestCount)} 次请求 · ${formatObservedTotal(aggregate.reviewUsage)} Token`] : []),
     ...(aggregate.cachedInputTokens === null
       ? ["  - 缓存：上游未提供完整数据"]
       : [
@@ -246,9 +252,9 @@ function formatMetricsAggregate(
           `  - 无缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
           `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
         ]),
-    `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,
+    `  - 输出：${formatObservedTokens(aggregate.outputTokens, aggregate.requestCount, aggregate.usageCoverage.outputMissingRequestCount)}`,
     ...(aggregate.reasoningOutputTokens > 0
-      ? [`  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`]
+      ? [`  - 其中推理输出：${formatObservedTokens(aggregate.reasoningOutputTokens, aggregate.requestCount, aggregate.usageCoverage.reasoningMissingRequestCount)}`]
       : []),
     ...(aggregate.compact
       ? [formatCompactMetrics(aggregate.compact)]
@@ -273,7 +279,7 @@ function formatMetricsGroup(
     : provider;
   const aggregate = group.aggregate;
   const reasoning = aggregate.reasoningOutputTokens > 0
-    ? `  - 其中推理输出：${formatTokenCount(aggregate.reasoningOutputTokens)}`
+    ? `  - 其中推理输出：${formatObservedTokens(aggregate.reasoningOutputTokens, aggregate.requestCount, aggregate.usageCoverage.reasoningMissingRequestCount)}`
     : "";
   return [
     `${index + 1}. ${label}`,
@@ -286,9 +292,10 @@ function formatMetricsGroup(
           `  - 无缓存：${formatTokenCount(Math.max(0, aggregate.inputTokens - aggregate.cachedInputTokens))}`,
           `  - 缓存命中率：${formatCacheHitRate(aggregate.inputTokens, aggregate.cachedInputTokens)}`,
         ]),
-    `  - 输出：${formatTokenCount(aggregate.outputTokens)}`,
+    `  - 输出：${formatObservedTokens(aggregate.outputTokens, aggregate.requestCount, aggregate.usageCoverage.outputMissingRequestCount)}`,
     ...(reasoning === "" ? [] : [reasoning]),
-    `  - 合计：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
+    `  - 已记录合计：${formatObservedTotal(aggregate)}`,
+    ...(aggregate.reviewUsage ? [`  - 其中自动审查：${formatRequestCount(aggregate.reviewUsage.requestCount)} 次请求 · ${formatObservedTotal(aggregate.reviewUsage)} Token`] : []),
     ...(aggregate.compact
       ? [`  - ${formatCompactMetrics(aggregate.compact)}`]
       : []),
@@ -298,11 +305,12 @@ function formatMetricsGroup(
 function formatCompactMetrics(
   compact: Parameters<typeof formatCompactMetricsValue>[0],
 ): string {
-  return `上下文压缩：${formatCompactMetricsValue(compact)}`;
+  return `其中上下文压缩：${formatCompactMetricsValue(compact)}`;
 }
 
 export function formatCompactMetricsValue(
   compact: {
+    usageCoverage?: { inputMissingRequestCount: number; outputMissingRequestCount: number };
     model: string | null;
     hasMixedModels: boolean;
     requestCount: number;
@@ -321,7 +329,7 @@ export function formatCompactMetricsValue(
     if (compact.hasMixedModels || !compact.model || compact.model !== options.currentModel) {
       parts.push(model);
     }
-    parts.push(`${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token`);
+    parts.push(`${formatObservedTotal(compact)} Token`);
     if (compact.requestOutcomes) {
       for (const [label, count] of [
         ["客户端中断", compact.requestOutcomes.interrupted],
@@ -340,7 +348,7 @@ export function formatCompactMetricsValue(
     : compact.unsuccessfulRequestCount > 0
       ? ` · 未完成 ${formatRequestCount(compact.unsuccessfulRequestCount)} 次（结果分类未提供）`
       : "";
-  return `${formatRequestCount(compact.requestCount)} 次 · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token${outcomes}`;
+  return `${formatRequestCount(compact.requestCount)} 次 · ${model} · ${formatObservedTotal(compact)} Token${outcomes}`;
 }
 
 function formatRequestOutcomes(outcomes: RequestOutcomeCounts): string {

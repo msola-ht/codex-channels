@@ -63,7 +63,7 @@ export async function runSessionCleanup(args, { environment = process.env, outpu
         terminateCodexProcess: terminateChildProcess,
         connectTimeoutMs: 3_000,
       });
-      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), {});
       try {
         await client.connect();
       } catch (error) {

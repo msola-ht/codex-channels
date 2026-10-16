@@ -22,33 +22,9 @@ export function formatConversationWorkspaces(
     ...result.workspaces.flatMap((workspace, index) => [
       `${index + 1}. ${workspace.name} · ${workspace.id}${workspace.id === result.currentWorkspaceId ? " ← 当前" : ""}`,
       `工作目录：${workspace.cwd}`,
-      ...workspacePermissionLines(workspace, false),
     ]),
     "",
     "切换：/workspace <序号、ID 或名称>",
-  ].join("\n"));
-}
-
-export function formatConversationWorkspacePermissions(
-  result: Extract<
-    ConversationCommandResult,
-    { kind: "workspace-permissions" }
-  >,
-): string {
-  const permissionLines = workspacePermissionLines(result.workspace);
-  return toStructuredMarkdownList([
-    `工作区权限（${result.workspace.name} · ${result.workspace.id}）：`,
-    ...(permissionLines.length > 0
-      ? permissionLines
-      : ["未配置（使用全局默认）"]),
-    "- 网络：跟随 Codex 用户默认设置",
-    "",
-    "修改：",
-    "- /workspaceperm sandbox <read-only|workspace-write|danger-full-access|clear>",
-    "- /workspaceperm approval <untrusted|on-request|never|clear>",
-    "- /workspaceperm autoreview <on|off|clear>",
-    "- /workspaceperm profile <Profile ID|clear>",
-    "工作区默认审批方式用于新建、分叉或卸载后恢复的会话；已加载会话保持原值，用 /autoreview 修改当前会话。",
   ].join("\n"));
 }
 
@@ -73,66 +49,19 @@ export function formatConversationAutoReview(
   ].join("\n"));
 }
 
-export function workspacePermissionLines(
-  workspace: Extract<ConversationCommandResult, { kind: "workspaces" }>["workspaces"][number],
-  showInactiveApprovalsReviewer = true,
-): string[] {
-  const lines: string[] = [];
-  if (workspace.sandbox !== undefined) {
-    lines.push(`  - 沙箱：${workspaceSandboxLabel(workspace.sandbox)}`);
-  }
-  if (workspace.approvalPolicy !== undefined) {
-    lines.push(`  - 审批：${workspaceApprovalPolicyLabel(workspace.approvalPolicy)}`);
-  }
-  if (workspace.permissions !== undefined) {
-    lines.push(`  - 权限 Profile：${workspace.permissions}`);
-  }
-  if (showInactiveApprovalsReviewer || isAutoApprovalReviewer(workspace.approvalsReviewer)) {
-    lines.push(`  - 工作区默认审批方式：${workspace.approvalsReviewer === undefined ? "跟随 Codex 默认" : formatThreadApprovalsReviewer(workspace.approvalsReviewer)}`);
-  }
-  return lines;
-}
-
-function workspaceSandboxLabel(
-  sandbox: "read-only" | "workspace-write" | "danger-full-access",
-): string {
-  return ({
-    "read-only": "只读",
-    "workspace-write": "工作区写",
-    "danger-full-access": "完全访问",
-  } as const)[sandbox];
-}
-
-function workspaceApprovalPolicyLabel(
-  policy: "untrusted" | "on-request" | "never",
-): string {
-  return ({
-    untrusted: "不信任",
-    "on-request": "按需审批",
-    never: "免审批",
-  } as const)[policy];
-}
-
 export function formatConversationPermissions(
   result: Extract<ConversationCommandResult, { kind: "permissions" }>,
 ): string {
   return toStructuredMarkdownList([
     "权限查询说明",
-    "- 本次为只读查询，不会修改当前 Workspace 权限；需要调整请使用 /workspaceperm。",
+    "- 权限由 Codex App Server 管理；本次仅查询可用的 Permission Profiles。",
     ...(result.workspace
       ? [
           `当前 Workspace：${result.workspace.name}（${result.workspace.id}）`,
-          `- 沙箱：${result.workspace.sandbox ?? "跟随 Gateway 默认"}`,
-          `- 审批：${result.workspace.approvalPolicy ?? "跟随默认"}`,
-          ...(isAutoApprovalReviewer(result.workspace.approvalsReviewer)
-            ? [`- 工作区默认审批方式：${formatThreadApprovalsReviewer(result.workspace.approvalsReviewer)}`]
-            : []),
-          `- Profile：${result.workspace.permissions ?? "未配置"}`,
         ]
       : [
-          "当前 Workspace 权限：未能从当前会话读取；Gateway 默认模式为配置中的 read-only 或 workspace-write。",
+          "当前 Workspace：未能从当前会话读取。",
         ]),
-    "- 沙盒网络：跟随 Codex 用户默认设置（当前 Workspace 无独立覆盖）。",
     "可选择的 Permission Profiles（可选择不代表当前正在使用）：",
     ...result.profiles.map(
       (profile) =>

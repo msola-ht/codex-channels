@@ -32,6 +32,7 @@ interface SubagentMetricsSummary {
     reasoningEffort: string | null;
   } | null;
   threadAggregate: {
+    usageCoverage: NonNullable<Extract<OutputEvent, { type: "subagent.completed" }>["usageCoverage"]>;
     requestCount: number;
     unsuccessfulRequestCount: number;
     inputTokens: number;
@@ -822,6 +823,7 @@ export class SubagentCompletionTracker {
         ? { upstreamTtftMs: summary.latestTurn.upstreamTtftMs } : {}),
       status: entry.terminalStatus ?? "errored",
       requestCount: aggregate?.requestCount ?? 0,
+      ...(aggregate ? { usageCoverage: aggregate.usageCoverage } : {}),
       unsuccessfulRequestCount: aggregate?.unsuccessfulRequestCount ?? 0,
       inputTokens: aggregate?.inputTokens ?? 0,
       cachedInputTokens: aggregate?.cachedInputTokens ?? null,

@@ -1,23 +1,6 @@
 import { UserFacingError } from "../conversation-core/index.js";
 
-export type WorkspaceSandboxMode =
-  | "read-only"
-  | "workspace-write"
-  | "danger-full-access";
-
-export type WorkspaceApprovalPolicy =
-  | "untrusted"
-  | "on-request"
-  | "never";
-
-export interface WorkspacePermissions {
-  readonly sandbox?: WorkspaceSandboxMode;
-  readonly approvalPolicy?: WorkspaceApprovalPolicy;
-  readonly approvalsReviewer?: "user" | "auto_review";
-  readonly permissions?: string;
-}
-
-export interface Workspace extends WorkspacePermissions {
+export interface Workspace {
   readonly id: string;
   readonly name: string;
   readonly cwd: string;
@@ -49,18 +32,6 @@ export class WorkspaceRegistry {
         id: workspace.id,
         name: workspace.name,
         cwd: workspace.cwd,
-        ...(workspace.sandbox === undefined
-          ? {}
-          : { sandbox: workspace.sandbox }),
-        ...(workspace.approvalPolicy === undefined
-          ? {}
-          : { approvalPolicy: workspace.approvalPolicy }),
-        ...(workspace.approvalsReviewer === undefined
-          ? {}
-          : { approvalsReviewer: workspace.approvalsReviewer }),
-        ...(workspace.permissions === undefined
-          ? {}
-          : { permissions: workspace.permissions }),
       });
       next.set(snapshot.id, snapshot);
     }

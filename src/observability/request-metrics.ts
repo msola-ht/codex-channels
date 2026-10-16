@@ -159,6 +159,7 @@ export interface StoredModelRequestMetric extends ModelRequestMetricSample {
 }
 
 export interface StoredCompactRequestMetricsSummary {
+  usageCoverage: UsageCoverage;
   requestOutcomes: RequestOutcomeCounts;
   model: string | null;
   hasMixedModels: boolean;
@@ -177,6 +178,7 @@ export interface ResponseUsageSummary {
 }
 
 export interface StoredTurnRequestMetricsSummary {
+  usageCoverage: UsageCoverage;
   performance?: RequestTimingSummary;
   requestOutcomes: RequestOutcomeCounts;
   interruptionSummary: RequestInterruptionSummary;
@@ -194,10 +196,13 @@ export interface StoredTurnRequestMetricsSummary {
   cachedInputTokens: number | null;
   outputTokens: number;
   reasoningOutputTokens: number;
+  /** 同一请求范围中明确观测到正数推理输出的请求数；缺失用量由 usageCoverage 单独表示。 */
+  reasoningRequestCount: number;
   compact: StoredCompactRequestMetricsSummary | null;
 }
 
 export interface StoredThreadRequestMetricsAggregate {
+  usageCoverage: UsageCoverage;
   performance?: RequestTimingSummary;
   requestOutcomes: RequestOutcomeCounts;
   interruptionSummary: RequestInterruptionSummary;
@@ -235,7 +240,23 @@ export interface StoredCacheUsage {
   missingRequestCount: number;
 }
 
+/** 保留记录中各用量字段缺失的请求数；数值合计仅累加已知值。 */
+export interface UsageCoverage {
+  inputMissingRequestCount: number;
+  outputMissingRequestCount: number;
+  reasoningMissingRequestCount: number;
+}
+
+/** 明确标记 autoApprovalReview 的请求子集，包含于总计中。 */
+export interface ReviewUsage {
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  usageCoverage: UsageCoverage;
+}
+
 export interface StoredThreadListItem {
+  usageCoverage: UsageCoverage;
   requestOutcomes: RequestOutcomeCounts;
   cacheUsage: StoredCacheUsage;
   sessionTiming: SessionExecutionTiming;
@@ -255,6 +276,8 @@ export interface StoredThreadListItem {
   cachedInputTokens: number | null;
   /** 当前请求筛选范围内所有已登记子代理后代的用量，不含自身。 */
   subagentUsage: {
+    requestCount: number;
+    usageCoverage: UsageCoverage;
     inputTokens: number;
     cachedInputTokens: number | null;
     outputTokens: number;
@@ -276,9 +299,20 @@ export interface StoredSubagentThreadRecord {
 }
 
 export interface StoredSubagentListItem extends StoredSubagentThreadRecord, Pick<StoredThreadListItem,
-  "provider" | "model" | "reasoningEffort" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"
+  "provider" | "model" | "reasoningEffort" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage" | "usageCoverage"
 > {
   directSubagentCount: number;
+  /** 仅按父 Turn 查询时返回精确子 Turn，最多 100 个；完整范围仍由父 Thread/Turn 确定。 */
+  turnIds: string[] | null;
+  turnIdsTruncated: boolean;
+  executionTiming: {
+    /** 已知官方整轮耗时之和；无已知值或累计超出安全整数时为 null。 */
+    durationMs: number | null;
+    /** 范围内登记的轮数，包括缺失官方耗时的轮次。 */
+    observedTurnCount: number;
+    missingDurationTurnCount: number;
+    historyComplete: boolean;
+  };
   firstRequestStartedAtMs: number | null;
   lastRecordedAtMs: number | null;
 }
@@ -294,10 +328,10 @@ export interface SubagentThreadsQuery {
 
 export interface StoredThreadSubagentsPage {
   subagents: StoredSubagentListItem[];
-  /** 全部关联子代理自身请求的合计，轮数跨模型按 Thread/Turn 去重。 */
-  summary: Pick<StoredSubagentListItem, "requestCount" | "requestOutcomes" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage">;
+  /** 全部关联子代理同范围自身请求的合计，父 Turn 查询仅纳入精确子 Turn；轮数跨模型去重。 */
+  summary: Pick<StoredSubagentListItem, "requestCount" | "requestOutcomes" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage" | "usageCoverage">;
   /** 当前关系范围内全部子代理自身请求按真实模型汇总，不受分页影响。 */
-  modelUsage: Array<Pick<StoredModelUsage, "model" | "requestCount" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage">>;
+  modelUsage: Array<Pick<StoredModelUsage, "model" | "requestCount" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage" | "usageCoverage">>;
   total: number;
   offset: number;
   limit: number;
@@ -310,7 +344,7 @@ export type ModelRequestMetricsAggregationDimension =
   | "model";
 
 export interface ModelRequestMetricsFilters {
-  requestPurpose?: "autoApprovalReview";
+  requestPurpose?: "unmarked" | "autoApprovalReview";
   source?: "owned" | "relay";
   callerId?: string;
   threadId?: string;
@@ -334,6 +368,8 @@ export interface ModelRequestMetricsAggregationQuery extends ModelRequestMetrics
 }
 
 export interface StoredModelRequestMetricsAggregate {
+  usageCoverage: UsageCoverage;
+  reviewUsage: ReviewUsage;
   requestOutcomes: RequestOutcomeCounts;
   cacheUsage: StoredCacheUsage;
   requestCount: number;
@@ -372,6 +408,8 @@ export interface StoredModelRequestMetricsReport {
 }
 
 export interface StoredModelRequestMetricsDailyRow {
+  usageCoverage: UsageCoverage;
+  reviewUsage: ReviewUsage;
   day: string;
   cacheUsage: StoredCacheUsage;
   requestCount: number;
@@ -515,6 +553,14 @@ export interface TurnExecutionStore {
 
 /** Counts observed official agent decisions; coverage describes the query-time snapshot. */
 export interface AutoApprovalReviewSummary {
+  /** Retained, explicitly attributed observations; IPC loss and retention prevent a complete-cost guarantee. */
+  usage?: {
+    coverage: "observed" | "partial";
+    requestCount: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    missingTokenRequestCount: number;
+  };
   approved: number;
   denied: number;
   timedOut: number;

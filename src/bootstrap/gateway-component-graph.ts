@@ -13,6 +13,7 @@ import { RelayMetricsComposition, createRelayMetricAuthorization } from "./relay
 import { modelRelayPaths } from "../../runtime/model-relay-paths.mjs";
 import { accountSnapshotEventsPath, metricsEventsPath } from "../../runtime/metrics-events.mjs";
 import { QueueEventsServer } from "../../runtime/queue-events.mjs";
+import { threadStateReadTimeoutMs, type GatewayThreadState } from "../../runtime/gateway-thread-state.mjs";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
 import {
@@ -153,13 +154,12 @@ import {
 } from "./openai-connectivity.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
-import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
+import { turnErrorDiagnostics } from "./turn-error-diagnostics.js";
 import { completionAccountStatus } from "./completion-account-status.js";
 import { mergeCompletionTiming } from "./completion-timing.js";
 import { TurnExecutionTracker } from "./turn-execution-tracker.js";
 import { AutoApprovalReviewTracker } from "./auto-approval-review-tracker.js";
 import { AutoApprovalReviewNotifications } from "./auto-approval-review-notifications.js";
-import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server-request.js";
 import { ScheduledTaskComposition } from "./scheduled-task-composition.js";
@@ -213,8 +213,8 @@ export abstract class GatewayComponentGraph {
   private readonly bindings: SqliteBindingStore;
   private readonly sessionDisplayCache?: SqliteSessionDisplayCache;
   private readonly workspaces: WorkspaceRegistry;
-  private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
   private readonly subagentCompletion: SubagentCompletionTracker;
+  private readonly subagentMetricsAbort = new AbortController();
   private readonly scheduledTasks: ScheduledTaskComposition | undefined;
   private bindingRestore: BindingRestoreCoordinator | undefined;
   private removeRpcNotification: (() => void) | undefined;
@@ -246,9 +246,6 @@ export abstract class GatewayComponentGraph {
     const primaryProvider = loadPrimaryModelProvider();
     const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider();
     const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders();
-    this.workspacePermissions = configPath === undefined
-      ? undefined
-      : new TomlWorkspacePermissionWriter(configPath);
     const managedProviders = loadManagedModelProviders();
     this.aggregateSettingsMembers = aggregateProviderMembers(primaryProvider, [
       ...managedProviders,
@@ -312,8 +309,7 @@ export abstract class GatewayComponentGraph {
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger, 64, config.codexClientIdentity),
       {
-      sandbox: config.codexSandbox,
-      ...(config.codexModel ? { model: config.codexModel } : {}),
+        ...(config.codexModel ? { model: config.codexModel } : {}),
       },
       primaryProvider === "openai" ? { upload: createProxyFetch(config.networkProxy) } : undefined,
     ));
@@ -323,9 +319,7 @@ export abstract class GatewayComponentGraph {
       );
       clients.set(managedProvider.provider, new CodexAppServerClient(
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
-        {
-          sandbox: config.codexSandbox,
-        },
+        {},
       ));
     }
     for (const customSwitchingProvider of customSwitchingProviders) {
@@ -334,7 +328,7 @@ export abstract class GatewayComponentGraph {
       );
       clients.set(customSwitchingProvider.provider, new CodexAppServerClient(
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
-        { sandbox: config.codexSandbox },
+        {},
       ));
     }
     if (aggregateEnabled) {
@@ -343,7 +337,7 @@ export abstract class GatewayComponentGraph {
       );
       clients.set(aggregateProviderId, new CodexAppServerClient(
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
-        { sandbox: config.codexSandbox },
+        {},
       ));
     }
     this.codex = new ProviderRoutingClient(
@@ -372,10 +366,10 @@ export abstract class GatewayComponentGraph {
         ? undefined
         : new Set([customPrimaryProvider.id]),
       customPrimaryProvider?.id ?? primaryProvider,
-      (provider, mode, operation) => {
+      (provider, mode, operation, signal) => {
         if (!this.providerIdleReleaser) return operation();
         return mode === "activity"
-          ? this.providerIdleReleaser.runActivity(provider, operation)
+          ? this.providerIdleReleaser.runActivity(provider, operation, signal)
           : this.providerIdleReleaser.runOperation(provider, operation);
       },
     );
@@ -490,13 +484,24 @@ export abstract class GatewayComponentGraph {
       () => this.metricsEvents?.changed(),
     );
     closeConstructionMetrics = () => metricsWriter.close();
+    const waitForMetricsScope = (
+      threadId: string,
+      scope: Parameters<typeof metricsStore.metricsWriteScopes>[1],
+      requestPurpose: "autoApprovalReview" | null,
+      signal?: AbortSignal,
+    ): Promise<boolean> => metricsWriter.waitForCurrentWritesInScope(
+      () => this.metricsDatabase.withSignal(signal).metricsWriteScopes(threadId, scope),
+      requestPurpose,
+      signal,
+    );
+    registerConstructionCleanup("Subagent Metrics Waits", () => this.subagentMetricsAbort.abort());
     this.relayMetrics = configPath === undefined ? undefined : new RelayMetricsComposition({
       path: modelRelayPaths(configPath).metrics,
       writer: metricsWriter,
       authorize: createRelayMetricAuthorization(configPath),
     });
     if (this.relayMetrics) registerConstructionCleanup("Relay Metrics", () => this.relayMetrics!.close());
-    const recordTurnErrorMetric = (
+    const recordTurnErrorDiagnostic = (
       provider: string,
       model: string | null,
       threadId: string | null,
@@ -505,22 +510,7 @@ export abstract class GatewayComponentGraph {
       error: unknown,
       structuredErrorCode?: TurnErrorCode,
     ): void => {
-      // 聚合请求由实际成员代理记账，Thread 级失败没有可靠账户归属，不能再生成聚合请求样本。
-      if (provider === aggregateProviderId) return;
-      try {
-        enqueueTurnErrorMetric(
-          metricsWriter,
-          provider,
-          model,
-          threadId,
-          turnId,
-          phase,
-          error,
-          structuredErrorCode,
-        );
-      } catch (cause) {
-        logger.warn({ err: cause }, "Turn 级错误指标写入失败");
-      }
+      logger.warn(turnErrorDiagnostics(provider, model, threadId, turnId, phase, error, structuredErrorCode), "Turn 执行失败");
     };
     this.providerMetrics = new ProviderMetricsComposition({
       providers: [
@@ -552,9 +542,17 @@ export abstract class GatewayComponentGraph {
     });
     closeConstructionMetrics = () => this.providerMetrics.close();
     this.subagentCompletion = new SubagentCompletionTracker({
-      readSummary: (agentThreadId, terminalTurnId, signal) => this.metricsDatabase.withSignal(signal).subagentCompletionSummary(agentThreadId, terminalTurnId),
+      readSummary: async (agentThreadId, terminalTurnId, signal) => {
+        const readSignal = signal
+          ? AbortSignal.any([signal, this.subagentMetricsAbort.signal])
+          : this.subagentMetricsAbort.signal;
+        const scope = terminalTurnId === undefined ? { type: "session" as const }
+          : { type: "task" as const, turnId: terminalTurnId };
+        if (!await waitForMetricsScope(agentThreadId, scope, null, readSignal)) throw new Error("子代理任务指标写入未确认");
+        return this.metricsDatabase.withSignal(readSignal).subagentCompletionSummary(agentThreadId, terminalTurnId);
+      },
       waitForMetrics: (agentThreadId, agentTurnId) =>
-        metricsWriter.waitForCurrentWrites(agentThreadId, agentTurnId),
+        metricsWriter.waitForCurrentWritesInScopes([{ threadId: agentThreadId, ...(agentTurnId === undefined ? {} : { turnId: agentTurnId }) }], null, this.subagentMetricsAbort.signal),
       onRunStarted: (details) => {
         this.autoApprovalReviewNotifications.recordRun(details);
         void metricsStore.recordSubagentTurn(details).catch((error) => {
@@ -737,14 +735,13 @@ export abstract class GatewayComponentGraph {
       },
       this.providerAccounts,
       new RequestMetricsQueryAdapter(metricsStore, this.router),
-      this.workspacePermissions,
       {
         recordTurnError: (record) => {
           const error = new Error(record.message ?? "Turn 错误");
           if (record.errorCode !== null) {
             (error as { code?: unknown }).code = record.errorCode;
           }
-          recordTurnErrorMetric(
+          recordTurnErrorDiagnostic(
             record.provider,
             record.model,
             record.threadId,
@@ -758,9 +755,6 @@ export abstract class GatewayComponentGraph {
         listAgentRoles: () => listConfiguredAgentRoles(process.env),
       },
       {
-        pluginApiEnabled: config.pluginApiEnabled,
-      },
-      {
         releaseThread: (target, force) => this.releaseThread(target, force),
       },
       execution,
@@ -769,7 +763,16 @@ export abstract class GatewayComponentGraph {
         this.subagentCompletion.hasPendingForParentThread(parentThreadId),
       this.sessionDisplayCache,
       {
-        port: this.codex,
+        port: {
+          accountRateLimits: options => this.codex.accountRateLimits(options),
+          lunaReserveModel: () => this.codex.lunaReserveModel(),
+          updateLunaReserveThreadSettings: async (threadId, settings, beforeSubmit) => {
+            await this.codex.updateLunaReserveThreadSettings(threadId, settings, beforeSubmit);
+            if (this.stopping) throw new Error("Gateway 正在停止");
+            await this.inbound.drain();
+            if (this.stopping) throw new Error("Gateway 正在停止");
+          },
+        },
         output: this.output,
         onError: (error, threadId) => {
           this.logger.warn(
@@ -980,25 +983,11 @@ export abstract class GatewayComponentGraph {
           logger,
           isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
             surface.surface === target.surface && surface.accountId === target.accountId),
+          isActorAuthorized: (target, actorId) =>
+            this.accessPolicy(target)?.isAllowed({ target, actorId }) === true,
           creationContext: (target) => {
             const status = service.status(target);
             const workspace = this.workspaces.require(status.workspaceId);
-            const sandbox = workspace.sandbox ?? "read-only";
-            if (sandbox === "danger-full-access") {
-              throw new UserFacingError(
-                "scheduled-task.state.invalid",
-                "计划任务不允许使用 danger-full-access Workspace",
-              );
-            }
-            if (
-              workspace.approvalPolicy !== undefined
-              && workspace.approvalPolicy !== "never"
-            ) {
-              throw new UserFacingError(
-                "scheduled-task.state.invalid",
-                "当前 Workspace 不能形成 approvalPolicy=never 的无人值守环境",
-              );
-            }
             return {
               workspaceId: workspace.id,
               workspaceName: workspace.name,
@@ -1007,9 +996,6 @@ export abstract class GatewayComponentGraph {
               model: status.model,
               reasoningEffort: status.effort,
               serviceTier: status.serviceTier,
-              sandbox,
-              approvalPolicy: "never",
-              permissions: workspace.permissions ?? null,
               modelPending: status.modelPending,
               effortPending: status.effortPending,
               serviceTierPending: status.fastModePending,
@@ -1093,7 +1079,7 @@ export abstract class GatewayComponentGraph {
           return completionAccountStatus(provider, await this.providerAccounts.accountUsage(provider, undefined, signal));
         },
         completionTiming: async (threadId, turnId, current, signal) => {
-          const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
+          const persisted = await metricsWriter.waitForCurrentWritesInScopes([{ threadId, turnId }], null, signal);
           if (!persisted) return current;
           const summary = await this.metricsDatabase.withSignal(signal).threadTurnSummary(threadId, turnId);
           return mergeCompletionTiming(summary, turnId, current);
@@ -1108,13 +1094,20 @@ export abstract class GatewayComponentGraph {
             sessionTiming,
           };
         },
-        autoApprovalReview: (threadId, turnId, signal) => this.autoApprovalReview.summary(threadId, turnId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal)),
-        sessionAutoApprovalReview: (threadId, signal) => this.autoApprovalReview.sessionSummary(threadId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal)),
+        autoApprovalReview: async (threadId, turnId, signal) => {
+          const persisted = await waitForMetricsScope(threadId, { type: "task", turnId }, "autoApprovalReview", signal);
+          const summary = await this.autoApprovalReview.summary(threadId, turnId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal));
+          if (!persisted && summary.usage) summary.usage.coverage = "partial";
+          return summary;
+        },
+        sessionAutoApprovalReview: async (threadId, signal) => {
+          const persisted = await waitForMetricsScope(threadId, { type: "sessionReview" }, "autoApprovalReview", signal);
+          const summary = await this.autoApprovalReview.sessionSummary(threadId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal));
+          if (!persisted && summary.usage) summary.usage.coverage = "partial";
+          return summary;
+        },
         taskAggregate: async (threadId, turnId, signal): Promise<TurnTaskMetricsSummary | undefined> => {
-          // The completion event can outrun the buffered request writer. Once
-          // a child is known, wait for the current queue watermark so the
-          // parent task total includes the root Turn's just-finished samples.
-          const persisted = await metricsWriter.waitForCurrentWrites(threadId);
+          const persisted = await waitForMetricsScope(threadId, { type: "task", turnId }, null, signal);
           if (!persisted) return undefined;
           const summary = await this.metricsDatabase.withSignal(signal).threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
@@ -1123,6 +1116,7 @@ export abstract class GatewayComponentGraph {
             requestOutcomes: summary.requestOutcomes,
             interruptionSummary: summary.interruptionSummary,
             requestCount: summary.requestCount,
+            usageCoverage: summary.usageCoverage,
             unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
             inputTokens: summary.inputTokens,
             cachedInputTokens: summary.cachedInputTokens,
@@ -1131,7 +1125,7 @@ export abstract class GatewayComponentGraph {
           };
         },
         sessionAggregate: async (threadId, signal): Promise<TurnTaskMetricsSummary | undefined> => {
-          const persisted = await metricsWriter.waitForCurrentWrites(threadId);
+          const persisted = await waitForMetricsScope(threadId, { type: "session" }, null, signal);
           if (!persisted) return undefined;
           const aggregate = (await this.metricsDatabase.withSignal(signal).threadSummary(threadId)).threadAggregate;
           if (aggregate === null) return undefined;
@@ -1142,6 +1136,7 @@ export abstract class GatewayComponentGraph {
             requestOutcomes: aggregate.requestOutcomes,
             interruptionSummary: aggregate.interruptionSummary,
             requestCount: aggregate.requestCount,
+            usageCoverage: aggregate.usageCoverage,
             unsuccessfulRequestCount: aggregate.unsuccessfulRequestCount,
             inputTokens: aggregate.inputTokens,
             cachedInputTokens: aggregate.cachedInputTokens,
@@ -1250,7 +1245,7 @@ export abstract class GatewayComponentGraph {
         conversationEvents.handle(coreEvent);
         if (coreEvent.type === "turn.error" && !coreEvent.willRetry) {
           const modelSettings = this.router.modelSettingsForThread(coreEvent.threadId);
-          recordTurnErrorMetric(
+          recordTurnErrorDiagnostic(
             modelSettings?.modelProvider ?? "openai",
             modelSettings?.model ?? null,
             coreEvent.threadId,
@@ -1299,6 +1294,9 @@ export abstract class GatewayComponentGraph {
     });
     const approvalHandler = (request: Parameters<typeof handleApprovalServerRequest>[0]) =>
       handleApprovalServerRequest(request, this.approval, approval => this.codex.fileApprovalChanges(approval));
+    const guardedApprovalHandler = this.scheduledTasks === undefined
+      ? approvalHandler
+      : createScheduledTaskServerRequestHandler(this.scheduledTasks.coordinator, approvalHandler);
     const appServerRequestHandler: Parameters<typeof this.codex.setServerRequestHandler>[0] =
       async (request) => {
         if (request.method === "item/tool/call") {
@@ -1307,16 +1305,9 @@ export abstract class GatewayComponentGraph {
           }
           return scheduledTaskToolHandler(request);
         }
-        return approvalHandler(request);
+        return guardedApprovalHandler(request);
       };
-    this.codex.setServerRequestHandler(
-      this.scheduledTasks === undefined
-        ? appServerRequestHandler
-        : createScheduledTaskServerRequestHandler(
-            this.scheduledTasks.coordinator,
-            appServerRequestHandler,
-        ),
-    );
+    this.codex.setServerRequestHandler(appServerRequestHandler);
     this.bindingRestoreCoordinator();
   }
 
@@ -1545,6 +1536,42 @@ export abstract class GatewayComponentGraph {
     return true;
   }
 
+  async readConnectedThreadStates(
+    threadIds: readonly string[],
+    signal: AbortSignal,
+  ): Promise<GatewayThreadState[]> {
+    this.requireRunning();
+    const deadline = new AbortController();
+    const timeout = setTimeout(() => deadline.abort(), threadStateReadTimeoutMs);
+    const cancellation = AbortSignal.any([signal, deadline.signal]);
+    const states: GatewayThreadState[] = threadIds.map(threadId => ({ threadId, status: "unknown", reason: "timeout" }));
+    let next = 0;
+    const read = async (): Promise<void> => {
+      while (next < threadIds.length) {
+        signal.throwIfAborted();
+        if (deadline.signal.aborted) return;
+        const index = next++;
+        const threadId = threadIds[index]!;
+        try {
+          const state = await this.codex.readConnectedThreadState(threadId, cancellation);
+          states[index] = { threadId, ...state };
+        } catch (error) {
+          signal.throwIfAborted();
+          if (deadline.signal.aborted) return;
+          throw error;
+        }
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(4, threadIds.length) }, read));
+      signal.throwIfAborted();
+      return states;
+    } finally {
+      clearTimeout(timeout);
+      deadline.abort();
+    }
+  }
+
   async resetCreditOperation(request: import("../../runtime/gateway-account-refresh.mjs").ResetCreditRequest, signal: AbortSignal): Promise<unknown> {
     this.requireRunning();
     if (!this.resetCredits) throw new Error("Account service unavailable");
@@ -1600,11 +1627,22 @@ export abstract class GatewayComponentGraph {
       await this.relayMetrics?.apply(true);
       this.requireRunning();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
+        // Revoke live tools before bounded asynchronous notification consumers.
+        const toolEvent = toConversationInputEvent(notification);
+        if (toolEvent) this.scheduledTasks?.toolHandler.handleInput(toolEvent);
+        if (notification.method === "serverRequest/resolved" && typeof notification.params === "object"
+          && notification.params !== null && !Array.isArray(notification.params)) {
+          const params = notification.params as { requestId?: unknown; threadId?: unknown };
+          if ((typeof params.requestId === "string" || typeof params.requestId === "number") && typeof params.threadId === "string") {
+            this.scheduledTasks?.toolHandler.resolved(params.requestId, params.threadId);
+          }
+        }
         // Persist minimal facts before bounded asynchronous presentation queues.
         this.autoApprovalReview.handleNotification(notification);
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
+        this.scheduledTasks?.toolHandler.cancelThreads((threadId) => this.codex.knownProvider(threadId) === provider);
         this.conversationIdleReleaser?.cancelPending(new Set(this.router.allBindings()
           .filter((binding) => this.codex.knownProvider(binding.threadId) === provider)
           .map((binding) => binding.threadId)));
@@ -1706,6 +1744,7 @@ export abstract class GatewayComponentGraph {
 
   protected async stopInternal(startup: Promise<void> | undefined, startupSettled: boolean): Promise<void> {
     this.stopping = true;
+    this.scheduledTasks?.toolHandler.close();
     this.providerSettingsAbort.abort(new Error("Gateway 正在停止"));
     this.conversationIdleReleaser?.cancelPending();
     this.conversations?.setIdleReleaseEnabled(false);
@@ -1820,6 +1859,7 @@ export abstract class GatewayComponentGraph {
 
   private async shutdownComponentsOnce(): Promise<void> {
     this.stopping = true;
+    this.scheduledTasks?.toolHandler.close();
     this.providerSettingsAbort.abort(new Error("Gateway 正在停止"));
     this.conversationIdleReleaser?.cancelPending();
     this.conversations?.setIdleReleaseEnabled(false);
@@ -1849,7 +1889,10 @@ export abstract class GatewayComponentGraph {
       ["Derived Output Inputs", () => this.output.drain()],
       ["Turn Execution Metrics", () => this.turnExecution.stop()],
       ["Auto-review Metrics", () => this.autoApprovalReview.stop()],
-      ["Subagent Terminals", () => this.subagentCompletion?.drain()],
+      ["Subagent Terminals", async () => {
+        try { await this.subagentCompletion?.drain(); }
+        finally { this.subagentMetricsAbort.abort(); }
+      }],
       ["Auto-review Notifications", () => this.autoApprovalReviewNotifications.reset()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Account Snapshot Warmup", async () => {

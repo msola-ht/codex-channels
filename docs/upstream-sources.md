@@ -15,7 +15,7 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 
 | 用途 | 本地目录 | 来源仓库 | 当前基线 |
 | --- | --- | --- | --- |
-| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex-0.162.1` | `openai/codex` | `rust-v0.162.1`，提交 `092d3acd6bec3e3a14bdc7e7a2810ab628ab759d` |
+| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex-0.163.0` | `openai/codex` | `rust-v0.163.0`，提交 `83086188ae0614bd882818ff1aa23f3194962012` |
 | 微信 ClawBot HTTP、消息和媒体合同 | `upstream/openclaw-weixin` | `Tencent/openclaw-weixin` | `v2.4.9`，提交 `43675b66551d12d6853155a7869a50fb12a18a1e` |
 | 飞书官方 Node SDK | `upstream/larksuite-node-sdk-1.75.0` | `larksuite/node-sdk` | `@larksuiteoapi/node-sdk@1.75.0`，公开源码提交 `e34a66f0d20935ee77f94909d16d93292d58b6c7`；发布包核对边界见飞书资料索引 |
 | 飞书官方 OpenClaw 插件参考 | `upstream/openclaw-lark` | `larksuite/openclaw-lark` | 提交 `dde0be3680d6fd5443cab426c8f4b3216266346a` |
@@ -24,9 +24,26 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 编排、授权、卡片、媒体和错误处理，不替代官方 SDK。微信未发布独立 SDK，固定版本官方插件的
 源码、类型和测试是协议研究基线，真实合同仍以本项目的脱敏探针结果为准。
 
-本次 0.162.1 审查使用独立任务目录中的正式 Tag 副本，已核对提交；未切换或修改原有
-`upstream/openai-codex-0.162.0`。表中 0.162.1 路径是长期参考目录约定，本机尚未创建；
-缺少该目录时使用固定 Tag 链接，不能拿旧副本冒充新基线。
+本机 `upstream/openai-codex-0.163.0` 已核对为上述固定提交，工作树干净。
+其他机器缺少该目录时使用固定 Tag 链接，不能拿旧副本冒充当前基线。
+
+## Codex 0.163.0 同步记录
+
+已按授权将官方 `rust-v0.163.0` 的完整源码及随仓文档同步到独立目录
+`upstream/openai-codex-0.163.0`，固定提交
+`83086188ae0614bd882818ff1aa23f3194962012`。官方 Release 发布于
+2026-10-15 21:30:38 UTC，非 Draft、非 Pre-release。
+旧基线 `upstream/openai-codex-0.162.1`（提交 `092d3acd6bec3e3a14bdc7e7a2810ab628ab759d`）保留，
+两个目录均只作只读参考。源码基线同步不表示已部署到正在运行的共享服务。
+
+- [正式 Release](https://github.com/openai/codex/releases/tag/rust-v0.163.0)。
+- [固定版 App Server 文档](https://github.com/openai/codex/blob/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/app-server/README.md)：本地对应 `upstream/openai-codex-0.163.0/codex-rs/app-server/README.md`。
+- [固定版协议定义](https://github.com/openai/codex/tree/83086188ae0614bd882818ff1aa23f3194962012/codex-rs/app-server-protocol/src)：本地对应同名路径。
+- [升级决策](codex-cli-upgrade-decisions.md)：采用范围、收益边界与验收限制。
+
+比较起点是升级前项目锁定的 `0.162.1`，不是 Release 页面所链接的 `0.162.0`。
+生成类型和 CLI 合同由隔离安装的精确版本生成；未升级全局 CLI 或运行服务，
+也不把在线滚动文档当作固定版合同。
 
 ## Windows 主配置与沙箱权限
 
@@ -89,7 +106,7 @@ Relay 更新和回退见[Relay 模型设置](provider-api-relay-development.md#c
 新工作区没有 `upstream/` 时，按当前锁定基线显式克隆：
 
 ```text
-git clone --depth 1 --branch rust-v0.162.1 https://github.com/openai/codex.git upstream/openai-codex-0.162.1
+git clone --depth 1 --branch rust-v0.163.0 https://github.com/openai/codex.git upstream/openai-codex-0.163.0
 git clone --branch v2.4.9 https://github.com/Tencent/openclaw-weixin.git upstream/openclaw-weixin
 git clone https://github.com/larksuite/node-sdk.git upstream/larksuite-node-sdk-1.75.0
 git -C upstream/larksuite-node-sdk-1.75.0 checkout e34a66f0d20935ee77f94909d16d93292d58b6c7

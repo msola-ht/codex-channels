@@ -6,11 +6,12 @@ import { ChevronDownIcon, SlidersHorizontalIcon, XIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { TruncatedText } from "@/components/metrics/data-table"
 import { Button } from "@/components/ui/button"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetTrigger } from "@/components/ui/sheet"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { MetricsQuery, RangeName } from "@/lib/types"
 import { metricsRangeSelection } from "@/lib/metrics-query"
 import { RangeSelector } from "@/components/metrics/range-selector"
@@ -128,15 +129,16 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
         {textFields.map(([key, label]) => (
           <Field key={key}><FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel><Input id={`${id}-${key}`} value={draft[key] ?? ""} maxLength={128} placeholder={t("common.all")} onChange={(event) => set(key, event.target.value)} /></Field>
         ))}
-        {showRequestPurpose ? <Field>
-          <FieldLabel htmlFor={`${id}-purpose`}>{t("requestPurpose.label")}</FieldLabel>
-          <Select items={[{ value: "all", label: t("common.all") }, { value: "autoApprovalReview", label: t("requestPurpose.autoApprovalReview") }]} value={draft.requestPurpose || "all"} onValueChange={(value) => {
-            if (value === "all" || value === "autoApprovalReview") setDraft(previous => ({ ...previous, requestPurpose: value === "all" ? undefined : value }))
+        {showRequestPurpose ? <FieldSet>
+          <FieldLegend id={`${id}-purpose-label`}>{t("requestPurpose.label")}</FieldLegend>
+          <ToggleGroup aria-labelledby={`${id}-purpose-label`} variant="outline" orientation="vertical" className="w-full" value={[draft.requestPurpose ?? "all"]} onValueChange={([value]) => {
+            if (value === "all" || value === "unmarked" || value === "autoApprovalReview") setDraft(previous => ({ ...previous, requestPurpose: value === "all" ? undefined : value }))
           }}>
-            <SelectTrigger id={`${id}-purpose`}><SelectValue /></SelectTrigger>
-            <SelectContent><SelectGroup><SelectItem value="all">{t("common.all")}</SelectItem><SelectItem value="autoApprovalReview">{t("requestPurpose.autoApprovalReview")}</SelectItem></SelectGroup></SelectContent>
-          </Select>
-        </Field> : null}
+            <ToggleGroupItem value="all">{t("common.all")}</ToggleGroupItem>
+            <ToggleGroupItem value="unmarked">{t("requestPurpose.unmarked")}</ToggleGroupItem>
+            <ToggleGroupItem value="autoApprovalReview">{t("requestPurpose.autoApprovalReview")}</ToggleGroupItem>
+          </ToggleGroup>
+        </FieldSet> : null}
         {([
           ["source", t("filters.source"), [["owned", t("filters.owned")], ["relay", t("filters.relay")]]],
           ["operation", t("filters.operation"), [["response", t("filters.response")], ["compact", t("metrics.compact")]]],

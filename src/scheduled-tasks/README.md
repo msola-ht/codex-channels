@@ -15,6 +15,8 @@
 - `sqlite-worker.ts`、`sqlite-worker-protocol.ts`：封闭的存储命令及脱敏失败分类；同步 Store 保留给 CLI 冷路径。
 - `scheduler.ts`：注入 Clock 与执行端口的有限调度循环。
 
+交互式手动运行及显式重试可携带原请求的取消与归属复核上下文，在串行等待、容量检查、领取和派发边界再次检查；领取完成但尚未提交执行时取消，将 Run 收敛为中断；已提交的 Thread/Turn 写入按实际结果记录，不回滚。执行端口继续在异步预检后和新 Thread 返回后检查该上下文，阻止失效请求继续启动 Turn。
+
 Schedule 目前支持 `interval`（每 N 分钟，UTC anchor 加固定分钟间隔）、`once`（绝对日期时间，或
 `afterMinutes + anchorAt` 的“从现在起 N 分钟后/小时后执行一次”；触发一次后进入 `finished` 终态）、
 `monthly`（每月指定日，月份无该日时跳过）、`daily`、`weekdays` 和 `weekly`。`monthly`、`daily`、`weekdays`、`weekly` 按任务时区的

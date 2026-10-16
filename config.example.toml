@@ -27,7 +27,6 @@ binary = "codex"
 socket_path = "runtime/codex-app-server.sock"
 # 仅覆盖当前主 Provider；模型必须存在于该 Provider 的目录中。
 default_model = ""
-sandbox = "workspace-write"
 # 默认以官方 codex-tui 身份连接 App Server，模型上游 User-Agent 由 App Server 按当前锁定
 # Codex CLI 版本生成，升级后自动跟随；下面两个字段缺省即使用默认值，仅在需要覆盖时填写，
 # 覆盖后不再跟随升级，可用 codexc config → 系统设置 → 一键设为官方 TUI 身份 重新生成：
@@ -68,10 +67,6 @@ operation_updates = "compact"
 plan_updates = true
 # 是否在渠道显示“思考中”状态卡；默认 false，不显示。
 reasoning = false
-
-[experimental]
-# Codex 0.148.0 Plugin API 仍在开发中，默认关闭；仅在需要调试时显式开启。
-plugin_api = false
 
 [debug]
 # Codex 与 Relay 共用的调用详情开关，写入 Gateway 数据目录下的 traffic，默认关闭；
@@ -122,15 +117,3 @@ max_rows = 1000000
 id = "main"
 name = "Main Project"
 cwd = "/absolute/path/to/project"
-# 工作区权限（可选，不配置时使用全局默认）：
-# 沙箱：read-only / workspace-write / danger-full-access
-sandbox = "workspace-write"
-# 审批：untrusted / on-request / never
-approval_policy = "on-request"
-# Auto-review（可选）：auto_review 自动审查 / user 手动审批。
-# 不配置时新建 Thread 跟随 Codex 默认；历史恢复保留 Codex 持久设置。
-# 显式覆盖对新建、分叉及卸载后恢复生效；已加载 Thread 保留实际 reviewer。
-# approvals_reviewer = "auto_review"
-# 权限 Profile（App Server 命名 profile，例如 :read-only、:workspace、:danger-full-access 或项目自定义）。
-# 设置了 permissions 后不能再设置 sandbox。
-# permissions = ":workspace"

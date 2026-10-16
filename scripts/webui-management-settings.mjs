@@ -5,7 +5,6 @@ export const managedSettingKinds = new Set([
   "display.model-aliases",
   "system.approval-timeout",
   "system.idle-release-minutes",
-  "system.sandbox",
   "system.default-model",
   "system.model-traffic-dump",
   "system.model-traffic-mode",
@@ -19,22 +18,17 @@ export const managedSettingKinds = new Set([
   "webui.token",
   "telegram.message-format",
   "system.default-workspace",
-  "advanced.plugin-api",
   "network.proxy",
   "network.proxy-batch",
-  "workspace.permissions",
 ])
 
 export const highRiskManagedSettingKinds = new Set([
-  "system.sandbox",
   "system.official-tui-identity",
   "automation.scheduled-tasks",
-  "advanced.plugin-api",
   "webui.host",
   "webui.token",
   "network.proxy",
   "network.proxy-batch",
-  "workspace.permissions",
 ])
 
 export function isHighRiskManagedSetting(input) {
@@ -46,8 +40,7 @@ export function normalizeManagedSetting(input) {
   if ((input.kind === "metrics.storage"
     || input.kind === "webui.token"
     || input.kind === "network.proxy"
-    || input.kind === "network.proxy-batch"
-    || input.kind === "workspace.permissions")
+    || input.kind === "network.proxy-batch")
     && input.value !== null && typeof input.value === "object" && !Array.isArray(input.value)) {
     return { ...input.value, kind: input.kind }
   }
@@ -61,21 +54,19 @@ export function redactManagedSettings(settings) {
     system: {
       approvalTimeoutSeconds: settings.system.approvalTimeoutSeconds,
       idleReleaseMinutes: settings.system.idleReleaseMinutes,
-      sandbox: settings.system.sandbox,
       defaultWorkspace: settings.system.defaultWorkspace,
       defaultModel: settings.system.defaultModel,
       modelTrafficMode: settings.system.modelTrafficMode,
       modelTrafficDumpEnabled: settings.system.modelTrafficDumpEnabled,
       modelTrafficRetentionDays: settings.system.modelTrafficRetentionDays,
       officialTuiIdentity: settings.system.officialTuiIdentity,
-      workspaces: settings.workspaces,
+      workspaces: settings.system.workspaces,
     },
     automation: {
       scheduledTasksEnabled: settings.automation.scheduledTasksEnabled,
     },
     advanced: {
       loggingLevel: settings.advanced.loggingLevel,
-      pluginApiEnabled: settings.advanced.pluginApiEnabled,
     },
     network: {
       configuredFields: Object.entries(settings.network)

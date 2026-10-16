@@ -93,6 +93,7 @@ function toThreadModelProvider(thread: Thread): string {
 }
 
 export function toThreadSession(response: ThreadSessionResponse): ThreadSession {
+  requireString(response.cwd, "session cwd");
   requireString(response.model, "model");
   if (response.reasoningEffort !== null) {
     requireString(response.reasoningEffort, "reasoningEffort");
@@ -108,7 +109,23 @@ export function toThreadSession(response: ThreadSessionResponse): ThreadSession 
     serviceTier: response.serviceTier,
     approvalsReviewer: toThreadApprovalsReviewer(response.approvalsReviewer),
     contextCompactionItemIds: contextCompactionItemIds(response.thread),
+    effectiveSettings: {
+      cwd: response.cwd,
+      approvalPolicy: typeof response.approvalPolicy === "string" ? response.approvalPolicy : "granular",
+      sandbox: toSandboxMode(response.sandbox.type),
+      permissions: response.activePermissionProfile?.id ?? null,
+    },
   };
+}
+
+function toSandboxMode(type: ThreadSessionResponse["sandbox"]["type"]): ThreadSession["effectiveSettings"]["sandbox"] {
+  switch (type) {
+    case "readOnly": return "read-only";
+    case "workspaceWrite": return "workspace-write";
+    case "dangerFullAccess": return "danger-full-access";
+    case "externalSandbox": return "external-sandbox";
+    default: throw new Error("Codex Thread 响应包含未知 sandbox 类型");
+  }
 }
 
 export function toThreadApprovalsReviewer(value: unknown): ThreadApprovalsReviewer | null {
@@ -119,34 +136,22 @@ export function toThreadApprovalsReviewer(value: unknown): ThreadApprovalsReview
 
 export function toThreadResumeSession(
   response: ThreadResumeResponse,
-  requested: { cwd: string; approvalPolicy: string; sandbox?: string; permissions?: string; approvalsReviewer?: "user" | "auto_review" },
+  requested: { cwd: string; approvalPolicy?: string; sandbox?: string; permissions?: string; approvalsReviewer?: "user" | "auto_review" },
 ): ThreadResumeSession {
   requireString(response.cwd, "resume cwd");
   const collaborationMode = response.collaborationMode?.mode;
   if (collaborationMode !== "default" && collaborationMode !== "plan") {
     throw new Error("Codex Thread 恢复响应缺少有效 collaborationMode");
   }
-  const sandboxModes = {
-    readOnly: "read-only",
-    workspaceWrite: "workspace-write",
-    dangerFullAccess: "danger-full-access",
-    externalSandbox: "external-sandbox",
-  } as const;
   return {
     ...toThreadSession(response),
     collaborationMode,
     settingsMatch: response.cwd === requested.cwd
-      && response.approvalPolicy === requested.approvalPolicy
+      && (requested.approvalPolicy === undefined || response.approvalPolicy === requested.approvalPolicy)
       && (requested.approvalsReviewer === undefined || response.approvalsReviewer === requested.approvalsReviewer)
       && (requested.permissions !== undefined
         ? response.activePermissionProfile?.id === requested.permissions
-        : sandboxModes[response.sandbox.type] === requested.sandbox),
-    effectiveSettings: {
-      cwd: response.cwd,
-      approvalPolicy: typeof response.approvalPolicy === "string" ? response.approvalPolicy : "granular",
-      sandbox: sandboxModes[response.sandbox.type],
-      permissions: response.activePermissionProfile?.id ?? null,
-    },
+        : requested.sandbox === undefined || toSandboxMode(response.sandbox.type) === requested.sandbox),
   };
 }
 

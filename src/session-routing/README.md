@@ -11,8 +11,8 @@
   模型 Provider、实际 Default/Plan 协作模式、实际审批审查方式、更新时间/最近活跃时间；可选 `parentThreadId` 保留官方派生父子关系供本机归档识别和子代理交互归属核验，
   压缩 Item ID，不向业务层暴露完整官方 Turn。Thread 快照还保留官方当前模型与思考设置，供子代理开始和继续展示；只读查询支持取消，不把当前配置当作历史轮次遥测。端口可选声明已配置的模型 Provider 判定，用于把
   Provider 已被移除的历史 Thread 排除在自动接续之外，未实现的部署视为不做限制。
-- `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权限（沙箱、审批策略、
-  权限 Profile、可选审批审查方式）作为启动参数传给新建、分叉或恢复的 Thread；不按 Provider 或模型限制审批方式。已加载会话保留实际审批方式、订阅和活动 Turn 恢复管理能力，未知或 Guardian 值仍按实际值投影。协调持久化映射、订阅恢复、Provider/模型设置、
+- `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，前台不注入 Workspace 权限；
+  由 App Server 解析原生配置及会话继承，不按 Provider 或模型限制审批方式。已加载会话保留实际审批方式、订阅和活动 Turn 恢复管理能力，未知或 Guardian 值仍按实际值投影。协调持久化映射、订阅恢复、Provider/模型设置、
   压缩 Item ID、新建前台 Thread 的动态工具注册及 `thread/unsubscribe`，并按 Thread 向 Core 提供已绑定
   Workspace 的稳定 ID 与名称；动态工具不会触发既有前台 Thread 的替换或解绑；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
   已删除、已归档或恢复校验明确不匹配时移除持久化绑定；订阅恢复时把稳定 Thread 快照交回组合根。跨渠道接管只允许
@@ -26,6 +26,8 @@
   `startBackground` 是计划任务专用的窄入口：始终发送稳定 `threadSource=automation`、强制
   `thread/start`，不调用 `ensure` 的空闲候选选择，并在写入前限制每个 Conversation 三个后台绑定；
   后台 Thread 不携带前台 `dynamicTools`，防止计划任务递归创建任务。
+  后台新建排队结束后复核本地提交守卫，并透传到 Client 的最终 RPC 发送边界；取消尚未提交的创建，
+  不丢弃已提交创建的响应和 Thread 身份。
   后台容量由 Router 统一维护：异步新建和增加后台绑定的恢复切换先预留容量，完成或失败后释放预留；
   前台降为后台同步复核同一预算。恢复已有后台到前台的等量交换不额外占位，计划任务调度也读取
   包含预留的可用容量，避免不同入口并发时突破每 Conversation 三个后台绑定的限制。

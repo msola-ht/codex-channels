@@ -11,10 +11,11 @@ export interface LunaReserveThreadSettings {
 }
 
 export interface LunaReservePort {
-  accountRateLimits(options?: { background?: boolean }): Promise<AccountRateLimits>;
+  accountRateLimits(options?: { background?: boolean; signal?: AbortSignal }): Promise<AccountRateLimits>;
   lunaReserveModel(): Promise<ModelOption | null>;
   updateLunaReserveThreadSettings(
     threadId: string,
     settings: LunaReserveThreadSettings,
+    beforeSubmit?: () => void,
   ): Promise<void>;
 }

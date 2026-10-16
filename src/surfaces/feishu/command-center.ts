@@ -32,13 +32,11 @@ const feishuLocalCommandActions = [
   "feishu-status",
   "feishu-doctor",
   "goal-set",
-  "workspace-perm-profile",
   "review-branch",
   "review-commit",
   "review-custom",
   "sessions-search",
   "archived-search",
-  "workspace-autoreview-select",
   "thread-autoreview-select",
 ] as const;
 
@@ -624,7 +622,6 @@ function renderFeishuCategorizedCommandsCard(
     ]),
     sectionTitle("当前内容"),
     actionRow(token, [
-      ["工作区权限", "workspaceperm", "default"],
       ["当前会话审批方式", "autoreview", "default"],
       ["权限查询", "permissions", "default"],
       ["Diff", "diff", "default"],
@@ -743,7 +740,6 @@ function commandCenterActionConsumesToken(
   input: string,
 ): boolean {
   return directStateChangingActions.has(action)
-    || action === "workspace-autoreview-select"
     || action === "thread-autoreview-select"
     || (
       action === "queue"

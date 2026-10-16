@@ -15,7 +15,6 @@ import {
   formatConversationModel,
   formatNextMessageModel,
 } from "./conversation-model-account-command-format.js";
-import { workspacePermissionLines } from "./conversation-workspace-status-command-format.js";
 import { formatDisplayedProvider, formatModelDisplayNameWithId } from "./provider-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
@@ -98,25 +97,6 @@ export function formatConversationCommandOutcome(
         `Workspace：${outcome.workspace.name}`,
         `工作目录：${outcome.workspace.cwd}`,
         formatNextMessageModel(outcome.nextModel),
-      ].join("\n"));
-    case "workspace.permissions-updated":
-      return toStructuredMarkdownList([
-        outcome.update.kind === "approvals-reviewer"
-          ? outcome.update.value === null
-            ? "已清除工作区默认审批方式覆盖"
-            : "已修改工作区默认审批方式"
-          : "已更新工作区权限",
-        `Workspace：${outcome.workspace.name}`,
-        ...workspacePermissionLines(outcome.workspace),
-        "",
-        ...(outcome.update.kind === "approvals-reviewer"
-          ? [
-            "已加载会话保持原值，用 /autoreview 修改当前会话。",
-            ...(outcome.update.value === null
-              ? ["已移除工作区覆盖；新会话跟随 Codex 默认，恢复历史会话可能保留其已保存设置。"]
-              : []),
-          ]
-          : ["权限已热加载；对新建或恢复的 Session 生效，不改变已绑定 Session。"]),
       ].join("\n"));
     case "turn.stop-requested":
       return outcome.stopped

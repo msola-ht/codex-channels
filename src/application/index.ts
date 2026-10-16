@@ -139,10 +139,6 @@ export {
   type SkillQueryPort,
 } from "./skill-port.js";
 export {
-  type WorkspacePermissionPort,
-  type WorkspacePermissionUpdate,
-} from "./workspace-permission-port.js";
-export {
   supportsMcpOAuthLogin,
   type McpAuthStatus,
   type McpHealthReport,

@@ -1,4 +1,4 @@
-/** Shared request stages, aligned with the locked Codex 0.162.1 defaults.
+/** Shared request stages, aligned with the locked Codex 0.163.0 defaults.
  * Generation has no total deadline. Preparation, protocol progress and delivery
  * are separate operations; outer local proxies must not restart upstream clocks.
  */

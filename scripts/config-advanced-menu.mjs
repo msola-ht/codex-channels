@@ -121,13 +121,11 @@ export async function runAdvancedSettings(options) {
     showInstructions: false,
     options: [
       { value: "logging", label: "日志等级", hint: "fatal / error / warn / info / debug / trace" },
-      { value: "plugin_api", label: "Plugin API", hint: "开发中，仅支持 OpenAI Thread" },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
   });
   if (prompts.isCancel(section) || section === "back") return { action: "back" };
   if (section === "logging") return runLoggingLevel(options);
-  if (section === "plugin_api") return runPluginApi(options);
   throw new Error(`未知高级设置：${String(section)}`);
 }
 
@@ -178,32 +176,6 @@ async function runLoggingLevel({ environment, output, prompts, writeConfig = wri
     level: selected,
   });
   return { logLevel: selected, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
-}
-
-async function runPluginApi({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
-  const settings = loadGatewaySettings(environment);
-  const selected = await prompts.select({
-    message: "开发中 Plugin API",
-    showInstructions: false,
-    initialValue: settings.advanced.pluginApiEnabled ? "enabled" : "disabled",
-    options: [
-      { value: "enabled", label: "开启", hint: "仅支持 OpenAI Thread；开放已安装 Plugin 查询与 mention 调用" },
-      { value: "disabled", label: "关闭", hint: "保持默认失败关闭" },
-      { value: "back", label: "返回配置菜单" },
-    ],
-  });
-  if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
-  if (selected !== "enabled" && selected !== "disabled") {
-    throw new Error(`未知 Plugin API 设置：${String(selected)}`);
-  }
-  const enabled = selected === "enabled";
-  const result = updateGatewaySetting({
-    kind: "advanced.plugin-api",
-    value: enabled,
-  }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`Plugin API 已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-  return { pluginApiEnabled: enabled, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 function stringValue(value) {

@@ -28,7 +28,7 @@ export interface Range<Name extends string = RangeName> {
 }
 
 export interface MetricsQuery {
-  requestPurpose?: "autoApprovalReview"
+  requestPurpose?: "unmarked" | "autoApprovalReview"
   source?: "owned" | "relay"
   callerId?: string
   range?: RangeName
@@ -86,6 +86,7 @@ export interface RequestInterruptionSummary {
 }
 
 export interface CompactSummary {
+  usageCoverage: UsageCoverage
   model: string | null
   hasMixedModels: boolean
   requestCount: number
@@ -102,7 +103,22 @@ export interface CacheUsage {
   missingRequestCount: number
 }
 
+export interface UsageCoverage {
+  inputMissingRequestCount: number
+  outputMissingRequestCount: number
+  reasoningMissingRequestCount: number
+}
+
+export interface ReviewUsage {
+  requestCount: number
+  inputTokens: number
+  outputTokens: number
+  usageCoverage: UsageCoverage
+}
+
 export interface Aggregate {
+  usageCoverage: UsageCoverage
+  reviewUsage: ReviewUsage
   cacheUsage: CacheUsage
   requestCount: number
   unsuccessfulRequestCount: number
@@ -190,6 +206,8 @@ export interface OverviewResponse {
 }
 
 export interface DailyUsageRow {
+  usageCoverage: UsageCoverage
+  reviewUsage: ReviewUsage
   day: string
   cacheUsage: CacheUsage
   requestCount: number
@@ -214,10 +232,11 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 )
 
 export interface ThreadListItem {
+  usageCoverage: UsageCoverage
   requestOutcomes: RequestOutcomeCounts
   totalTokens: number
   cachedInputTokens: number | null
-  subagentUsage: { inputTokens: number; cachedInputTokens: number | null; outputTokens: number; cacheUsage: CacheUsage }
+  subagentUsage: { requestCount: number; usageCoverage: UsageCoverage; inputTokens: number; cachedInputTokens: number | null; outputTokens: number; cacheUsage: CacheUsage }
   cacheUsage: CacheUsage
   sessionTiming: SessionExecutionTiming
   threadId: string
@@ -245,7 +264,7 @@ export interface ThreadsResponse extends MetricsPageSummary {
 }
 
 export interface SubagentListItem extends Pick<ThreadListItem,
-  "provider" | "model" | "reasoningEffort" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage"
+  "provider" | "model" | "reasoningEffort" | "turnCount" | "requestCount" | "requestOutcomes" | "inputTokens" | "outputTokens" | "cacheUsage" | "usageCoverage"
 > {
   threadId: string
   parentThreadId: string
@@ -253,6 +272,16 @@ export interface SubagentListItem extends Pick<ThreadListItem,
   agentPath: string
   recordedAtMs: number
   directSubagentCount: number
+  turnIds: string[] | null
+  turnIdsTruncated: boolean
+  executionTiming: {
+    durationMs: number | null
+    observedTurnCount: number
+    missingDurationTurnCount: number
+    historyComplete: boolean
+  }
+  liveState: { threadId: string; status: "active" | "idle" | "systemError" | "notLoaded"; observedAtMs: number }
+    | { threadId: string; status: "unknown"; reason: "gateway_unavailable" | "provider_unavailable" | "thread_unavailable" | "timeout" | "invalid_response" }
   firstRequestStartedAtMs: number | null
   lastRecordedAtMs: number | null
 }
@@ -260,8 +289,8 @@ export interface SubagentListItem extends Pick<ThreadListItem,
 export interface SubagentsResponse {
   generatedAt: string
   subagents: SubagentListItem[]
-  summary: Pick<SubagentListItem, "requestCount" | "requestOutcomes" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage">
-  modelUsage: Array<Pick<ModelUsage, "model" | "requestCount" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage">>
+  summary: Pick<SubagentListItem, "requestCount" | "requestOutcomes" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage" | "usageCoverage">
+  modelUsage: Array<Pick<ModelUsage, "model" | "requestCount" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage" | "usageCoverage">>
   total: number
   offset: number
   limit: number
@@ -273,6 +302,7 @@ export interface ThreadSubagentsResponse extends SubagentsResponse {
 }
 
 export interface TurnSummary {
+  usageCoverage: UsageCoverage
   durationMs?: number | null
   provider: string | null
   model: string | null
@@ -286,6 +316,7 @@ export interface TurnSummary {
   cachedInputTokens: number | null
   outputTokens: number
   reasoningOutputTokens: number
+  reasoningRequestCount: number
   compact: CompactSummary | null
   recordedAtMs?: number
 }
@@ -306,7 +337,7 @@ export interface ThreadRunResponse {
   parentThreadId: string | null
   parentTurnId: string | null
   latestTurn: TurnSummary | null
-  threadAggregate: (Omit<Aggregate, "cacheUsage"> & { turnCount: number; interruptionSummary: RequestInterruptionSummary }) | null
+  threadAggregate: (Omit<Aggregate, "cacheUsage" | "reviewUsage"> & { turnCount: number; interruptionSummary: RequestInterruptionSummary }) | null
 }
 
 export interface ThreadTurnsResponse extends MetricsPageSummary {
@@ -435,7 +466,6 @@ export interface SettingsSummaryResponse {
     }
     system: {
       approvalTimeoutSeconds: number
-      sandbox: "read-only" | "workspace-write"
       defaultWorkspace: string | null
       defaultModel: string | null
       modelTrafficMode: "production" | "debug"
@@ -446,7 +476,6 @@ export interface SettingsSummaryResponse {
     network: { configuredFields: string[] }
     advanced: {
       loggingLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace"
-      pluginApiEnabled: boolean
     }
     webui: { enabled?: boolean; host: string; port: number; tokenConfigured: boolean }
     metrics: {
@@ -529,7 +558,7 @@ export interface ManagementProvidersResponse {
 export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]
-  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
+  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {
       clientIdentity: { name: string | null; title: string | null; version: string | null }
@@ -537,10 +566,10 @@ export interface ManagementSettingsResponse {
       terminalIdentity: string | null
       defaults: { name: string; version: string }
     }
-    workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null; approvalsReviewer: string | null }>
+    workspaces: Array<{ id: string; name: string }>
   }
   automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled">
-  advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel" | "pluginApiEnabled">
+  advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel">
   network: Pick<SettingsSummaryResponse["gateway"]["network"], "configuredFields">
   telegram: { configured: boolean; messageFormat: "html" | "rich" }
   metrics: {

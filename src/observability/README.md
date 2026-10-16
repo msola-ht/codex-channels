@@ -9,6 +9,8 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
 轮次耗时沿用指标保留期限和行数上限，清理、Provider prune 和 reset 同时处理，不复用单次请求耗时列。
 轮次写入因保留期限跳过数据，或清理因期限、行数上限删除轮次时，历史补齐标记同步降级。
 会话自动审查累计只有在历史轮次集合已补齐、各轮审查观测也完整时才能标记完整；本轮任务覆盖独立判断。
+自动审查汇总同时读取精确运行范围内明确标记的审查请求用量，供完成卡独立显示；Token 缺失独立于审批事件覆盖，不按审批次数推算。Thread/Turn、任务、会话树与子代理的请求统计排除这些请求，包含请求数、Token、缓存、Credits、中断与性能；全局请求及模型分组保留审查成本，原始指标与归属不变。
+审查 `usage.coverage` 只区分 `observed`（保留记录中的已知值）与 `partial`（已知字段或写入缺口），没有完整用量状态。输入、输出分别累加已知值；没有相应观测时保持 null。IPC 漏帧、迟到记录和保留裁剪无法从现存行证明不存在，不借审批事件 coverage 作保证，不改变数据库格式或回填历史。
 
 ## 文件
 
@@ -38,8 +40,8 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
 - `request-metrics-writer.ts`：提供 10,000 条、16 MiB 上限的有界延迟写入队列；指标 Socket 只负责入队，
   批次成功提交后通过注入回调通知读取方失效，通知故障不改变写入结果；失败批次不发送成功通知。
   每批最多取 32 条并等待异步事务完成后再调度后续批次；关闭排空有总预算，预算耗尽显式记录未写入样本并关闭数据库，不继续无限等待。公开
-  持久化水位只等待调用时该 Thread 或 Turn 已经入队的最后一条记录，不被后续无关请求延长，并
-  返回该范围内的实际写入结果。已取出但未确认提交的批次仍属于水位；失败范围有界保留，迟到的等待不能把历史失败解释为成功，失败范围溢出时保守返回不可用。
+  持久化水位只等待调用时已经入队的记录，不被后续请求延长。单轮按已知范围等待，任务与会话先等待全局有限水位，再通过数据库只读 `metricsWriteScopes` 取得对应运行树或线程树，仅判断初始水位内相同范围和用途的写入失败；无关线程、其他父轮和审查用途失败不影响普通任务统计。未归属具体 Turn 的请求不进入任务或会话汇总，其写入失败也不影响这些汇总的就绪状态。
+  已取出但未确认提交的批次仍属于水位；等待支持取消并释放检查点和监听，不取消底层写入，等待队列容量耗尽显式拒绝。失败范围有界保留，迟到的等待不能把相关历史失败解释为成功，失败范围溢出时保守返回不可用。
 - `request-metrics-database.ts`：集中保存指标 Schema 版本、固定路径和进程级独占锁；Gateway 与 reset
   共用独立 SQLite 锁库中的排他事务，由操作系统在进程退出时释放，不依赖 PID 或失效锁删除；真实
   运行中持有者与并发重建均失败关闭。
@@ -52,9 +54,9 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
 - `sqlite-request-metrics-queries.ts`：请求分页、错误统计、日/小时汇总、Relay 调用方与 Key 的批量使用摘要及同步游标读取，并作为组合根持有线程域与子代理域查询；通过 Store 的读取与关闭检查端口执行，SQL 和行映射不介入写入、事务或数据库生命周期。
   错误聚合保留来源、提供商、模型、生成状态、HTTP 状态、错误类型和错误码维度；同组最新诊断按记录时间及行 ID 确定，有限组结果按全部分组维度稳定排序。CLI 与 WebUI 共用该投影，不修改存储 Schema。
   请求分页的 `isSubagent` 只读关联当前 `subagent_threads` 的精确 Thread 登记；Relay、自动审查及未登记归属返回 false，不代表已确认是主代理，不新增持久化字段。
-  `modelUsage(scope, modelAliases?)` 在相同请求范围内按模型显示名跨提供商合并：明确标记 `request_purpose = 'autoApprovalReview'` 的请求优先归入 `auto-review`，包括原始模型为空或配置了其他显示名的审查请求；其他请求的可选映射以持久化模型 ID 做一次精确匹配，未配置的模型和 null 保持原值，用途缺失时不从模型名称推断审查。相同原始模型的审查与其他请求按各自规则分组。同一显示名在 SQLite 内先分组，再汇总请求、Token、状态、压缩和缓存指标及按 Thread/Turn 去重的轮数。每组的 `members` 按提供商与原始模型 ID 返回同范围的请求、Token、状态、压缩、缓存指标和去重轮数，原始模型 null 保留；组轮数独立去重，跨审查模型的相同 Thread/Turn 仍只计一轮，不能把成员轮数相加。组与成员均完整返回，按请求量降序稳定排序，不沿用 CLI 的“提供商 + 模型”分组或前 20 组上限。控制台通过 `overview(range, modelAliases?).models` 在同一只读快照消费，其他查询和持久化模型字段保持原口径。
+  `modelUsage(scope, modelAliases?)` 在相同请求范围内按记录的模型和显示别名跨提供商合并：可选映射以持久化模型 ID 做一次精确匹配，未配置的模型和 null 保持原值，自动审查同样归入其记录模型，不生成用途伪模型。同一显示名在 SQLite 内先分组，再汇总请求、Token、状态、压缩和缓存指标及按 Thread/Turn 去重的轮数。每组的 `members` 按提供商与原始模型 ID 返回同范围的请求、Token、状态、压缩、缓存指标和去重轮数，原始模型 null 保留；组轮数独立去重，同一 Thread/Turn 的不同模型组或成员轮数不能相加。组与成员均完整返回，按请求量降序稳定排序，不沿用 CLI 的“提供商 + 模型”分组或前 20 组上限。控制台通过 `overview(range, modelAliases?).models` 在同一只读快照消费，原始指标与请求详情用途保持原值。
   Thread 列表额外返回同筛选范围的 `totalTokens`、自身缓存与后代输入/缓存/输出分项，以及按请求去重的 `treeAggregate`，支持总计 Token 排序；缓存是输入子集，不重复累加，自身与后代分别判断缓存完整性。自身 `cacheUsage` 与后代 `subagentUsage.cacheUsage` 分别保留输入和缓存均已观测的缓存样本及缺失请求数，供部分采集时展示已知缓存；完整缓存合计仍在任意请求缺失时返回 null。WebUI 主会话查询允许只有后代匹配的根入选。普通 Thread 查询仍保留自身有匹配记录的行集合，自身聚合与 Turn 查询口径不变；不新增持久化汇总或 Schema 字段。
-- `sqlite-request-metrics-thread-queries.ts`：Thread/Turn 列表、汇总与耗时查询，只被请求查询组合根持有；不接触写入、事务或数据库生命周期。代表会话或轮次的提供商、模型和思考等级只取相应范围内最近的普通响应（`source = owned`、`operation = response`、用途为空），不使用自动审查、压缩或后代请求兜底；无普通响应仍保留聚合与列表行，模型字段返回未知。子代理列表采用相同选择，单次轮次首 Token 时间同样排除审查请求；用量和请求统计保留全部匹配用途。
+- `sqlite-request-metrics-thread-queries.ts`：Thread/Turn 列表、汇总与耗时查询，只被请求查询组合根持有；不接触写入、事务或数据库生命周期。代表会话或轮次的提供商、模型和思考等级只取相应范围内最近的普通响应（`source = owned`、`operation = response`、用途为空），不使用自动审查、压缩或后代请求兜底；有非审查请求但无普通响应时仍保留聚合与列表行，模型字段返回未知。子代理列表采用相同选择，单次轮次首 Token 时间、用量和请求统计均排除明确标记的审查请求。
 - `sqlite-request-metrics-subagent-queries.ts`：子代理线程列表、单线程往返与同步游标查询，同样只被组合根持有并保持只读。
 - `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v31 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 持有初始化事务，仅在空库建表，已有非空库必须具有当前版本与结构。
@@ -97,27 +99,30 @@ Gateway 是唯一写入方，实时终态幂等更新，完整历史快照在事
   `threadTurnTaskSummary()` 提供，子代理完成卡片通过 `threadTurnSummary()` 精确读取官方终态对应
   Turn，再按需合并该 Turn 的子任务；`threadList()` 与 `threadTurnSummaries()` 供
   `codexc metrics threads` 和 `turns` 导出复用。
-  `subagents()` 从全部已登记关系读取各层子代理，`threadSubagents()` 限定为目标 Thread 的直接子代理；两者均包括尚无请求的代理，聚合各自全部保留请求的轮次、Token 与缓存指标，模型、提供商与思考等级共同取同范围最近的普通响应（`source = owned`、`operation = response`、用途为空；无普通响应时为 null），在数据库内按首次请求或最后记录排序后分页；会话列表的
+  `subagents()` 从全部已登记关系读取各层子代理，`threadSubagents()` 限定为目标 Thread 的直接子代理；两者均包括尚无请求的代理，未指定父 Turn 时聚合各自全部保留请求的轮次、Token 与缓存指标，模型、提供商与思考等级共同取同范围最近的普通响应（`source = owned`、`operation = response`、用途为空；无普通响应时为 null），在数据库内按首次请求或最后记录排序后分页；会话列表的
   `directSubagentCount` 同样只计直接子级，不随请求筛选变化，不把关系导航混入指标聚合。
-  每轮明细的 `directSubagentCount` 通过 `subagent_turns` 精确父 Thread/Turn 关联并验证直接父关系后，按不同子 Thread 计数；`threadSubagents()` 的可选 `parentTurnId` 使用相同关系筛选和分页，全局 `subagents()` 拒绝该字段，子代理行用量仍为自身全部保留历史。
+  每轮明细的 `directSubagentCount` 通过 `subagent_turns` 精确父 Thread/Turn 关联并验证直接父关系后，按不同子 Thread 计数；`threadSubagents()` 的可选 `parentTurnId` 使用相同关系筛选，行用量、请求数、代表模型、时间排序、分页前汇总与模型分布均只纳入这些精确子 Thread/Turn 的请求，不混入同一代理其他调用的历史。全局 `subagents()` 拒绝该字段。
+  子代理行的 `executionTiming` 仅累计 `turn_execution_metrics` 的官方耗时，`durationMs` 返回已知部分（无已知值或累计超出安全整数时为 null），`observedTurnCount` 返回范围内轮数，`missingDurationTurnCount` 保留缺失数；它不使用请求耗时推算。父 Turn 查询按全部精确关系轮次统计，缺失执行行也计入缺失，`historyComplete` 同时要求这些关系均已有官方执行行且 `thread_execution_state` 已确认历史完整；断开或恢复尚未补齐时保留已知值但标记部分累计；其余查询按全部自身保留执行轮次统计，完整性沿用 `thread_execution_state`。有已知累计不代表完整总耗时。
+  父 Turn 查询同时返回每个代理最多 100 个精确 `turnIds` 和显式 `turnIdsTruncated`；截断只限制导航信息，不裁剪聚合。其他查询的 `turnIds` 为 null，`turnIdsTruncated` 为 false。行的 `parentTurnId` 在父 Turn 查询中保持当前查询范围，其他查询沿用线程关系登记值。
   WebUI 顶层列表通过 `mainThreadsOnly` 在汇总和分页前排除已登记子代理；CLI 导出与控制台仍查询全部会话。
   会话列表的 `sessionTiming` 批量读取当前页各会话全部自身保留轮次的官方耗时，保留缺失轮数与历史完整性，不受请求筛选影响、不叠加后代。
-  时间范围聚合覆盖指标库全部保留记录，可按全局、提供商或“提供商 + 模型”分组；支持 `today`、`yesterday`、`24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围，最多
-  返回请求量最高的 20 组。OpenAI 请求还可保存统计代理归一化的周额度定点快照与账户套餐等级；
+  请求、Turn、Thread、任务树、子代理、压缩与趋势汇总保留 Token 已知值之和，同时返回必填 `usageCoverage`，分别统计输入、输出、推理字段缺失的请求数；数值为 0 不代表字段已采集，须结合请求数和覆盖判断。Thread 列表的后代 `subagentUsage` 独立返回请求数与覆盖，子代理页的列表、summary 和 modelUsage 同样保留覆盖。单条原始请求的可空字段不变，不回填历史。
+  全局、提供商、模型、请求页汇总与趋势额外返回 `reviewUsage`，包含明确标记为 `autoApprovalReview` 的请求数、输入、输出已知合计及三项缺失数；它是总量的子集，不能再次累加。请求用途筛选只接受 `unmarked` 和 `autoApprovalReview`，前者严格查询 `request_purpose IS NULL`，不代表已确认普通请求。Turn、Thread、任务树及子代理维持排除明确审查请求的范围。
+  时间范围聚合覆盖指标库全部保留记录，可按全局、提供商或“提供商 + 模型”分组；支持 `today`、`yesterday`、`24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围。提供商组完整返回；CLI 的“提供商 + 模型”分组最多返回请求量最高的 20 组，并返回完整组数。OpenAI 请求还可保存统计代理归一化的周额度定点快照与账户套餐等级；
   同一重置周期内
   从首个基线开始累计请求，只在后续快照超过该周期已观测最高比例时形成加权估算区间；
   同周期回退不降低基线，不同周期快照断开区间。估算仅使用闭合区间，周期请求总量另行累计。
   快照估算、最新额度及额度历史优先按采集时间排序；未观测采集时间的样本按入库时间近似排序，
   不把入库时间写回为采集时间。请求明细与导出保留两种时间。
-  WebSocket 上游握手失败、WS 内包装错误事件（如 429 usage_limit_reached）与 Gateway 层未发起
-  上游请求的 Turn 级失败（如用量上限）也以 failed 记录落库：前者保留 HTTP 状态，后者无 Token
-  失败记录还保存提供商、模型与受限长度的错误消息，供 WebUI 与导出展示详情。账户快照历史使用
+  WebSocket 上游握手失败和 WS 内包装错误事件（如 429 usage_limit_reached）作为实际请求的失败记录落库，
+  保留已观测 HTTP 状态、提供商、模型与受限错误消息。Gateway 的 Turn 级错误独立记录诊断日志，不再生成模型请求；
+  历史混入记录没有可靠区分标识，原样保留，不按空用量或错误码猜测排除。账户快照历史使用
   相同的保留期限清理，但每个账户源保留最新一条确认状态，避免把历史到期误作订阅恢复；OpenCode Go 账户窗口的本机 Token 汇总按精确
   Provider 对相关时间范围执行一次流式读取，不复用带总数统计的页面查询。
   普通 `/responses` 上由受控元数据标记的 remote compaction v2
   以 `operation = 'compact'` 独立分类，但其请求、Usage 与额度快照仍参与汇总、异常报告、
   会话指标和周额度估算；Turn、Thread 及时间范围聚合还从相同明细派生独立压缩摘要，不新增或
-  复制持久化数据。当前锁定 Codex 0.162.1 的 `request_kind=prewarm` 是 `generate=false` 的 WebSocket
+  复制持久化数据。当前锁定 Codex 0.163.0 的 `request_kind=prewarm` 是 `generate=false` 的 WebSocket
   连接预热而非模型推理，Provider Proxy 不将其写入本指标库，因此不会扩大请求、Token 或
   错误率分母。所有合计仍在 SQLite 内完成，不把缺失缓存字段当成零。期间汇总与 Thread 列表额外返回 `cacheUsage`，
   包含输入及缓存字段均已提供的样本对应的缓存和输入合计，以及缺失任一字段的请求数；

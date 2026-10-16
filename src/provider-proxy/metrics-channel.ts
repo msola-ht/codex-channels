@@ -15,6 +15,7 @@ import {
 } from "./response-metrics-observer.js";
 
 const maximumMetricsBytes = 8_192;
+const maximumConfirmationBytes = 16;
 const metricsFields = [
   "transport", "responseFormat", "operation", "threadId", "turnId", "requestPurpose",
   "reviewerThreadId", "reviewerTurnId", "model", "serviceTier", "requestServiceTier",
@@ -81,7 +82,10 @@ export class ProviderProxyMetricsServer {
       }
       bytes += chunk.length;
       if (bytes > maximumMetricsBytes) {
-        socket.destroy(new Error("模型代理指标超过大小限制"));
+        handled = true;
+        socket.pause();
+        socket.end("rejected\n");
+        this.onError?.(new Error("模型代理指标超过大小限制"));
         return;
       }
       chunks.push(chunk);
@@ -93,19 +97,22 @@ export class ProviderProxyMetricsServer {
       handled = true;
       socket.pause();
       try {
-        const metrics = parseMetrics(payload.subarray(0, newline).toString("utf8"));
-        if (metrics) {
-          this.onMetrics(metrics);
-        }
-      } catch (error) {
-        this.onError?.(asError(error));
-      } finally {
+        const metrics = newline === payload.length - 1
+          ? parseMetrics(new TextDecoder("utf-8", { fatal: true }).decode(payload.subarray(0, newline)))
+          : undefined;
+        if (!metrics) throw new Error("模型代理指标格式无效");
+        this.onMetrics(metrics);
         socket.end("ok\n");
+      } catch (error) {
+        socket.end("rejected\n");
+        this.onError?.(asError(error));
       }
     });
     socket.on("end", () => {
       if (!handled) {
-        socket.end();
+        handled = true;
+        socket.end("rejected\n");
+        this.onError?.(new Error("模型代理指标帧不完整"));
       }
     });
     socket.on("error", (error) => this.onError?.(asError(error)));
@@ -117,11 +124,12 @@ export function sendProviderProxyMetrics(
   socketPath: string,
   metrics: ProviderProxyMetrics,
 ): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let socket: Socket | undefined;
     const cancellation = new AbortController();
     let settled = false;
-    const finish = (): void => {
+    let confirmation = Buffer.alloc(0);
+    const finish = (error?: Error): void => {
       if (settled) {
         return;
       }
@@ -129,22 +137,42 @@ export function sendProviderProxyMetrics(
       clearTimeout(timer);
       cancellation.abort();
       socket?.destroy();
-      resolve();
+      if (error) reject(error);
+      else resolve();
     };
-    const timer = setTimeout(finish, modelRequestPolicy.metricsDeliveryTimeoutMs);
+    const timer = setTimeout(() => finish(new Error("模型代理指标确认超时")), modelRequestPolicy.metricsDeliveryTimeoutMs);
+    let payload: string;
+    try {
+      payload = `${JSON.stringify(metrics)}\n`;
+      if (Buffer.byteLength(payload) > maximumMetricsBytes) throw new Error();
+    } catch {
+      finish(new Error("模型代理指标无法编码或超过大小限制"));
+      return;
+    }
     void createPrivateIpcConnectionAsync(socketPath, { signal: cancellation.signal }).then(connection => {
       socket = connection;
-      socket.once("error", finish);
+      socket.once("error", () => finish(new Error("模型代理指标传输失败")));
       if (settled) { socket.destroy(); return; }
       socket.once("connect", () => {
-        if (!settled) connection.write(`${JSON.stringify(metrics)}\n`);
+        if (settled) return;
+        try { connection.write(payload); }
+        catch { finish(new Error("模型代理指标传输失败")); }
       });
       socket.on("data", (chunk: Buffer) => {
-        if (chunk.includes(10)) finish();
+        if (settled) return;
+        if (confirmation.length + chunk.length > maximumConfirmationBytes) {
+          finish(new Error("模型代理指标确认无效"));
+          return;
+        }
+        confirmation = Buffer.concat([confirmation, chunk]);
+        if (!confirmation.includes(10)) return;
+        const reply = confirmation.toString("utf8");
+        if (reply === "ok\n") finish();
+        else finish(new Error(reply === "rejected\n" ? "模型代理指标未获受理" : "模型代理指标确认无效"));
       });
-      socket.once("end", finish);
-      socket.once("close", finish);
-    }).catch(finish);
+      socket.once("end", () => finish(new Error("模型代理指标确认前连接已关闭")));
+      socket.once("close", () => finish(new Error("模型代理指标确认前连接已关闭")));
+    }).catch(() => finish(new Error("模型代理指标连接失败")));
   });
 }
 

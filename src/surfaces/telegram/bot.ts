@@ -34,7 +34,7 @@ import {
   conversationCommandHelpLines,
 } from "../conversation-command-help.js";
 import { formatConversationScheduledConfirmation } from "../conversation-scheduled-task-command-format.js";
-import { formatConversationAutoReview, formatConversationWorkspacePermissions } from "../conversation-workspace-status-command-format.js";
+import { formatConversationAutoReview } from "../conversation-workspace-status-command-format.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatOperationFailure,
@@ -53,7 +53,6 @@ import {
 } from "./format.js";
 import {
   renderTelegramCommandResult,
-  autoReviewKeyboard,
   threadAutoReviewKeyboard,
   scheduledTaskConfirmationKeyboard,
   formatTelegramThreadQueueDeleteConfirmation,
@@ -64,9 +63,6 @@ import {
   telegramPluginSelectionToken,
   threadQueueDeleteConfirmationKeyboard,
   threadQueueItemKeyboard,
-  workspacePermissionFieldKeyboard,
-  workspacePermissionKeyboard,
-  workspacePermissionPrompt,
   telegramWorkspaceSwitchToken,
 } from "./command-renderer.js";
 import { TelegramInteractionPort } from "./interactions.js";
@@ -173,9 +169,7 @@ export function createTelegramSurface(
   );
 }
 
-type AutoReviewSelectionScope =
-  | { scope: "workspace"; workspaceId: string }
-  | { scope: "thread"; threadId: string };
+type AutoReviewSelectionScope = { threadId: string };
 
 export class TelegramSurface {
   readonly surface = "telegram" as const;
@@ -455,33 +449,14 @@ export class TelegramSurface {
       await this.executeCommand(context, "stop");
       if (cancelledInteraction) await context.reply(interactionStoppedText);
     });
-    this.bot.callbackQuery(/^ar:(on|off|clear):([A-Za-z0-9_-]{24})$/, async (context) => {
-      const token = context.match[2]!;
-      const pending = this.autoReviewSelections.get(token);
-      const callbackTarget = target(context);
-      if (!pending
-        || pending.scope !== "workspace"
-        || pending.expiresAt <= this.now()
-        || pending.actorId !== String(context.from?.id ?? "")
-        || pending.target.conversationId !== callbackTarget.conversationId
-        || pending.target.accountId !== callbackTarget.accountId
-      ) {
-        throw new UserFacingError("workspace.permission.usage", "工作区审批按钮已失效，请重新发送 /workspaceperm", { reason: "stale-selection" });
-      }
-      this.autoReviewSelections.delete(token);
-      await context.answerCallbackQuery({ text: "正在修改工作区默认审批方式" });
-      await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
-      const result = await this.commands.selectWorkspaceAutoReview(callbackTarget, {
-        workspaceId: pending.workspaceId,
-        value: context.match[1] === "on" ? "auto_review" : context.match[1] === "off" ? "user" : null,
-      });
-      await renderTelegramCommandResult(context, result);
+    this.bot.callbackQuery(/^(?:wp|ar):/, async (context) => {
+      await context.answerCallbackQuery({ text: "工作区权限设置入口已停用，请使用原生 Codex 权限配置。" });
     });
     this.bot.callbackQuery(/^tar:(on|off):([A-Za-z0-9_-]{24})$/, async (context) => {
       const token = context.match[2]!;
       const pending = this.autoReviewSelections.get(token);
       const callbackTarget = target(context);
-      if (!pending || pending.scope !== "thread" || pending.expiresAt <= this.now()
+      if (!pending || pending.expiresAt <= this.now()
         || pending.actorId !== String(context.from?.id ?? "")
         || pending.target.conversationId !== callbackTarget.conversationId
         || pending.target.accountId !== callbackTarget.accountId
@@ -625,50 +600,6 @@ export class TelegramSurface {
         );
       },
     );
-    this.bot.callbackQuery(
-      /^wp:(sandbox|approval)$/,
-      async (context) => {
-        const field = context.match[1] === "sandbox"
-          ? "sandbox"
-          : "approval";
-        await context.editMessageText(
-          workspacePermissionPrompt(field),
-          {
-            parse_mode: "HTML",
-            reply_markup: workspacePermissionFieldKeyboard(field),
-          },
-        );
-        await context.answerCallbackQuery();
-      },
-    );
-    this.bot.callbackQuery(
-      /^wp:(sandbox|approval):([a-z-]+)$/,
-      async (context) => {
-        const field = context.match[1] === "sandbox"
-          ? "sandbox"
-          : "approval";
-        const value = context.match[2]!;
-        const result = await this.commands.execute(
-          target(context),
-          "workspaceperm",
-          `${field} ${value}`,
-        );
-        await context.answerCallbackQuery({ text: "已更新工作区权限" });
-        await context.editMessageText("已更新工作区权限。");
-        await renderTelegramCommandResult(
-          context,
-          result,
-        );
-      },
-    );
-    this.bot.callbackQuery(/^wp:profile$/, async (context) => {
-      await context.answerCallbackQuery({
-        text: "请输入权限 Profile 命令",
-      });
-      await context.editMessageText(
-        "请输入权限 Profile，例如发送：\n/workspaceperm profile :read-only",
-      );
-    });
     this.bot.callbackQuery(/^rc:page:([1-9]\d{0,3})$/, async context => {
       await context.answerCallbackQuery({ text: "正在查询重置券" });
       const result = await this.commands.execute(target(context), "limits", `reset ${context.match[1]}`, String(context.from.id));
@@ -892,6 +823,11 @@ export class TelegramSurface {
       },
     );
     this.bot.on("message:text", async (context) => {
+      if (context.message.entities?.some(
+        (entity) => entity.type === "bot_command" && entity.offset === 0,
+      )) {
+        throw new UserFacingError("command.unsupported", "Telegram 命令不受支持");
+      }
       const pluginPrompt = this.pluginTaskPrompts.consume(
         String(context.chat.id),
         String(context.from.id),
@@ -1381,10 +1317,6 @@ export class TelegramSurface {
       commandArguments(context),
       context.from ? String(context.from.id) : undefined,
     );
-    if (result.kind === "workspace-permissions") {
-      await this.renderWorkspacePermissionsResult(context, result);
-      return;
-    }
     if (result.kind === "auto-review") {
       await this.renderAutoReviewResult(context, result);
       return;
@@ -1416,27 +1348,6 @@ export class TelegramSurface {
     return token;
   }
 
-  private async renderWorkspacePermissionsResult(
-    context: Context,
-    result: Extract<ConversationCommandResult, { kind: "workspace-permissions" }>,
-  ): Promise<void> {
-    const token = this.registerAutoReviewSelection(context, {
-      scope: "workspace",
-      workspaceId: result.workspace.id,
-    });
-    try {
-      await replyTelegramPanel(context, formatConversationWorkspacePermissions(result), {
-        inline_keyboard: [
-          ...workspacePermissionKeyboard().inline_keyboard,
-          ...(token ? autoReviewKeyboard(token).inline_keyboard : []),
-        ],
-      });
-    } catch (error) {
-      if (token) this.autoReviewSelections.delete(token);
-      throw error;
-    }
-  }
-
   private async renderAutoReviewResult(
     context: Context,
     result: Extract<ConversationCommandResult, { kind: "auto-review" }>,
@@ -1445,7 +1356,6 @@ export class TelegramSurface {
     let token: string | undefined;
     if (threadId !== null && (reviewer === "user" || reviewer === "auto_review")) {
       token = this.registerAutoReviewSelection(context, {
-        scope: "thread",
         threadId,
       });
     }

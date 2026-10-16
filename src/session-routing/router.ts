@@ -95,23 +95,6 @@ export class SessionRouter {
     private readonly onSubscriptionRestoreRequired?: (binding: ConversationBinding) => void,
   ) {}
 
-  private workspacePermissions(workspace: Workspace): ThreadStartOptions {
-    return {
-      ...(workspace.sandbox === undefined
-        ? {}
-        : { sandbox: workspace.sandbox }),
-      ...(workspace.approvalPolicy === undefined
-        ? {}
-        : { approvalPolicy: workspace.approvalPolicy }),
-      ...(workspace.permissions === undefined
-        ? {}
-        : { permissions: workspace.permissions }),
-      ...(workspace.approvalsReviewer === undefined
-        ? {}
-        : { approvalsReviewer: workspace.approvalsReviewer }),
-    };
-  }
-
   workspace(target: ConversationTarget): Workspace {
     const workspaceId = this.bindings.getWorkspace(target) ?? this.workspaces.defaultWorkspaceId;
     const workspace = this.workspaces.get(workspaceId) ?? this.workspaces.default();
@@ -474,7 +457,6 @@ export class SessionRouter {
     }
 
     const started = await this.codex.startThread(workspace.cwd, {
-      ...this.workspacePermissions(workspace),
       ...startOptions,
       ...(this.dynamicTools.length > 0
         ? { dynamicTools: this.dynamicTools }
@@ -516,6 +498,7 @@ export class SessionRouter {
     this.backgroundStartQueues.set(key, queued);
     await previous;
     try {
+      startOptions.beforeSubmit?.();
       return await this.startBackgroundUnlocked(target, startOptions, workspaceId);
     } finally {
       release();
@@ -532,7 +515,7 @@ export class SessionRouter {
   ): Promise<{ binding: ConversationBinding; session: ThreadSession }> {
     if (startOptions.sandbox === "danger-full-access") {
       throw new UserFacingError(
-        "workspace.permission.conflict",
+        "scheduled-task.state.invalid",
         "后台计划任务不允许 danger-full-access",
       );
     }
@@ -541,7 +524,7 @@ export class SessionRouter {
       && startOptions.approvalPolicy !== "never"
     ) {
       throw new UserFacingError(
-        "workspace.permission.conflict",
+        "scheduled-task.state.invalid",
         "后台计划任务必须使用 approvalPolicy=never",
       );
     }
@@ -552,7 +535,6 @@ export class SessionRouter {
         ? this.workspace(target)
         : this.workspaces.require(workspaceId);
       const session = await this.codex.startThread(workspace.cwd, {
-        ...this.workspacePermissions(workspace),
         ...backgroundStartOptions,
         threadSource: "automation",
       });
@@ -705,11 +687,7 @@ export class SessionRouter {
       ), preserveSubscription);
     }
     const threadId = thread.id;
-    const requested = { ...this.workspacePermissions(workspace), ...options };
-    // A loaded Thread retains its current reviewer. Only loading persisted
-    // history can apply the Workspace default without mutating a live session.
-    if (thread.status.type !== "notLoaded") delete requested.approvalsReviewer;
-    const session = await this.codex.resumeThread(threadId, workspace.cwd, requested);
+    const session = await this.codex.resumeThread(threadId, workspace.cwd, options);
     if (isCurrent && !isCurrent()) {
       await this.cleanupFailedResume(threadId, new SupersededRestoreError(), this.bindings.getByThread(threadId) !== undefined);
     }
@@ -721,7 +699,7 @@ export class SessionRouter {
       || (session.thread.status.type === "active" && session.thread.activeTurnId === null)
     ) {
       await this.rejectIncompatibleThread(threadId, new UserFacingError(
-        "thread.takeover.changed", "恢复后的实际目录、权限或活动状态不符合要求，未切换会话",
+        "thread.takeover.changed", "恢复后的实际目录、请求约束或活动状态不符合要求，未切换会话",
       ), true);
     }
     // Restore authoritative settings and active-turn management without
@@ -1009,7 +987,6 @@ export class SessionRouter {
         ...(startOptions.modelProvider === undefined
           ? {}
           : { modelProvider: startOptions.modelProvider }),
-        ...this.workspacePermissions(workspace),
       },
     );
     const binding = {

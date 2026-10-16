@@ -5,9 +5,9 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20Preview-555555)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-在 Telegram、飞书或微信中使用本机 Codex。Gateway 与 `codexc remote` 共享同一个 Codex App Server，因此聊天渠道和原生 TUI 可以继续使用同一组 Thread、Workspace 和运行状态。
+在 Telegram、飞书或微信中使用本机 Codex。Gateway 与 `codexc remote` 共享同一个 Codex App Server，聊天渠道和原生 TUI 可在工作区与 Provider 匹配时接续同一 Thread，并共享运行状态。工作区选择与终端入口见[使用指南](docs/user-guide.md#4-workspaceprovider-与终端)。
 
-当前 `main` 开发基线：`0.162.1`。项目通过 Git 源码安装和更新，不再发布新的 npm 版本。
+当前源码开发基线：`0.163.0`。项目通过 Git 源码安装和更新，不再发布新的 npm 版本。
 
 完整安装、配置、渠道命令、服务管理、升级、排障和开发说明见[《Codex Connect 使用指导》](docs/user-guide.md)。
 
@@ -48,7 +48,7 @@ codexc setup                 # Provider、渠道和项目技能接入
 codexc config                # Codex 新会话偏好与 Gateway 日常设置
 codexc cleanup               # 统一交互归档会话、清理转储和维护指标
 codexc timezone              # App Server 与 WebUI 时区；--gateway 设置网关时区
-codexc work                  # 新建或注册已有工作区、管理权限
+codexc work                  # 新建或注册已有工作区
 codexc                       # 主菜单 → 后台服务
 codexc run                   # 前台运行核心服务
 codexc start                 # 启动全部后台服务，含已安装且未关闭的 WebUI 与已启用 Relay

@@ -69,6 +69,7 @@ export class ProviderMetricsComposition {
     // 此指标只接受 OpenAI 通道；其他 Provider 不借同名字段声明该统计口径。
     if (provider !== "openai") delete metrics.upstreamTtftMs;
     const sample = { ...metrics };
+    let enqueueFailure: Error | undefined;
     try {
       this.options.writer.enqueue({
         ...sample,
@@ -80,7 +81,8 @@ export class ProviderMetricsComposition {
             : this.options.resolveModelSettings?.(metrics.threadId)?.effort ?? null),
       });
     } catch (error) {
-      this.options.logger.warn({ err: error, provider }, "模型请求指标持久化失败");
+      this.options.logger.warn({ err: error, provider }, "模型请求指标入队失败");
+      enqueueFailure = new Error("模型请求指标未能入队");
     }
     const event = toModelTimingEvent(metrics);
     if (!event) {
@@ -88,13 +90,14 @@ export class ProviderMetricsComposition {
         { provider },
         "模型统计代理指标未归约到用户轮次执行状态",
       );
-      return;
+    } else {
+      this.options.onModelTiming(event);
+      this.options.logger.debug(
+        { provider },
+        "模型统计代理指标已关联到 Turn",
+      );
     }
-    this.options.onModelTiming(event);
-    this.options.logger.debug(
-      { provider },
-      "模型统计代理指标已关联到 Turn",
-    );
+    if (enqueueFailure) throw enqueueFailure;
   }
 }
 

@@ -76,7 +76,7 @@ export async function runConfig({
         { value: "scheduled_tasks", label: "Gateway 计划任务", hint: "启用或关闭无人值守任务" },
         { value: "network", label: "网络代理", hint: "Codex 与 Gateway 共用 HTTP、HTTPS、通用代理与直连规则" },
         { value: "services", label: "服务访问", hint: "Relay 监听与 WebUI 启用、监听、访问令牌" },
-        { value: "advanced", label: "日志与高级功能", hint: "Gateway 日志等级与开发中 Plugin API" },
+        { value: "advanced", label: "日志与高级功能", hint: "Gateway 日志等级" },
         { value: "metrics", label: "指标存储", hint: "本地保留天数与最大记录数" },
         { value: "paths", label: "查看配置路径", hint: "用户目录与配置文件位置" },
         { value: "cancel", label: "返回", hint: "结束日常设置" },

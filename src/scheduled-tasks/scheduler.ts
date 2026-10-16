@@ -8,6 +8,7 @@ import {
   type ScheduledTaskSchedulerOptions,
   type ScheduledTaskStorePort,
   type ScheduledTaskTickResult,
+  type ScheduledTaskOperationContext,
 } from "./types.js";
 
 const defaultCatchUpWindowMs = 5 * 60_000;
@@ -201,27 +202,32 @@ export class ScheduledTaskScheduler {
     return this.tick(nowMs);
   }
 
-  runTaskNow(taskId: string, nowMs = this.clock.now()): Promise<ScheduledRun> {
-    return this.runManual({ taskId }, nowMs);
+  runTaskNow(taskId: string, nowMs = this.clock.now(), operation?: ScheduledTaskOperationContext): Promise<ScheduledRun> {
+    return this.runManual({ taskId }, nowMs, operation);
   }
 
-  retryRun(runId: string, nowMs = this.clock.now()): Promise<ScheduledRun> {
-    return this.runManual({ runId }, nowMs);
+  retryRun(runId: string, nowMs = this.clock.now(), operation?: ScheduledTaskOperationContext): Promise<ScheduledRun> {
+    return this.runManual({ runId }, nowMs, operation);
   }
 
-  private async runManual(selection: { taskId: string } | { runId: string }, nowMs: number): Promise<ScheduledRun> {
+  private async runManual(selection: { taskId: string } | { runId: string }, nowMs: number, operation?: ScheduledTaskOperationContext): Promise<ScheduledRun> {
+    operation?.assertCurrent();
     let releaseManualRun!: () => void;
     const predecessor = this.manualRunTail;
     this.manualRunTail = new Promise<void>((resolve) => {
       releaseManualRun = resolve;
     });
     await predecessor;
+    let ownsTick = false;
     try {
+      operation?.assertCurrent();
       while (this.ticking && this.tickCompletion !== undefined) {
         await this.tickCompletion;
+        operation?.assertCurrent();
       }
       if (this.stopping) throw new Error("计划任务调度器正在停止");
       this.ticking = true;
+      ownsTick = true;
       this.tickCompletion = new Promise<void>((resolve) => {
         this.resolveTickCompletion = resolve;
       });
@@ -231,10 +237,14 @@ export class ScheduledTaskScheduler {
       }
       const taskId = "taskId" in selection ? selection.taskId : retry!.taskId;
       const task = await this.store.getTask(taskId);
+      operation?.assertCurrent();
       if (!task) throw new Error(`任务不存在：${taskId}`);
-      const claimOccurrence = (result: "claimed" | "skipped_capacity") => retry
-        ? this.store.claimRetry(retry.runId, nowMs, result)
-        : this.store.claimManual(taskId, nowMs, result);
+      const claimOccurrence = (result: "claimed" | "skipped_capacity") => {
+        operation?.assertCurrent();
+        return retry
+          ? this.store.claimRetry(retry.runId, nowMs, result)
+          : this.store.claimManual(taskId, nowMs, result);
+      };
       if (!await this.capacityAvailable(task, 0, retry !== undefined)) {
         if (this.stopping) throw new Error("计划任务调度器正在停止");
         return (await claimOccurrence("skipped_capacity")).run;
@@ -242,9 +252,9 @@ export class ScheduledTaskScheduler {
       if (this.stopping) throw new Error("计划任务调度器正在停止");
       const claim = await claimOccurrence("claimed");
       if (claim.kind !== "claimed") return claim.run;
-      return await this.dispatchSafely(task, claim.run);
+      return await this.dispatchSafely(task, claim.run, operation);
     } finally {
-      if (this.ticking) {
+      if (ownsTick) {
         this.ticking = false;
         this.resolveTickCompletion?.();
         this.resolveTickCompletion = undefined;
@@ -313,15 +323,18 @@ export class ScheduledTaskScheduler {
     return this.executor.canStart === undefined ? true : await this.executor.canStart(task);
   }
 
-  private async dispatch(task: ScheduledTask, run: ScheduledRun): Promise<ScheduledRun> {
-    if (this.stopping) {
+  private async dispatch(task: ScheduledTask, run: ScheduledRun, operation?: ScheduledTaskOperationContext): Promise<ScheduledRun> {
+    let revoked = false;
+    try { operation?.assertCurrent(); } catch { revoked = true; }
+    if (this.stopping || revoked) {
       return await this.notifyRunStateChanged(await this.store.markInterrupted(run.runId, this.transitionTime(run)));
     }
     const controller = new AbortController();
     this.abortControllers.add(controller);
     let outcome: ScheduledTaskExecutionResult;
     try {
-      outcome = await this.executor.execute(task, run, controller.signal);
+      const signal = operation ? AbortSignal.any([controller.signal, operation.signal]) : controller.signal;
+      outcome = await this.executor.execute(task, run, signal, operation);
     } catch {
       const updated = await this.store.markUncertain(run.runId, this.transitionTime(run));
       return await this.notifyRunStateChanged(updated);
@@ -392,9 +405,9 @@ export class ScheduledTaskScheduler {
     }
   }
 
-  private async dispatchSafely(task: ScheduledTask, run: ScheduledRun): Promise<ScheduledRun> {
+  private async dispatchSafely(task: ScheduledTask, run: ScheduledRun, operation?: ScheduledTaskOperationContext): Promise<ScheduledRun> {
     try {
-      return await this.dispatch(task, run);
+      return await this.dispatch(task, run, operation);
     } catch (error) {
       try {
         const latest = await this.store.getRun(run.runId);

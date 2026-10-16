@@ -21,6 +21,8 @@ export interface TurnCollaborationMode {
 }
 
 export interface TurnOverrides {
+  /** Local guard; never serialized, and does not cancel an already submitted write. */
+  beforeSubmit?: () => void;
   model?: string;
   modelProvider?: string;
   effort?: string;

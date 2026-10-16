@@ -40,7 +40,6 @@ import {
   formatConversationGoal,
   formatConversationPermissions,
   formatConversationStatus,
-  formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
 } from "./conversation-workspace-status-command-format.js";
 import { formatConversationCommandOutcome } from "./conversation-command-outcome-format.js";
@@ -74,8 +73,6 @@ export function renderConversationCommandResult(
       return formatConversationStatus(result.status);
     case "workspaces":
       return formatConversationWorkspaces(result);
-    case "workspace-permissions":
-      return formatConversationWorkspacePermissions(result);
     case "auto-review":
       return formatConversationAutoReview(result, formatCommand);
     case "models":
