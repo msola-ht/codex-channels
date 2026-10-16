@@ -1,7 +1,7 @@
 import { supportsChatReasoningOff } from "../../runtime/chat-reasoning.mjs";
 import type { RelayModelReasoning } from "../../runtime/chat-reasoning.mjs";
 import { ModelConversionError } from "./validation.js";
-import { applyExplicitReasoningPolicy, assertNoNestedReasoningControls, isRequestObject, reasoningControlFields, validateDirectModel, validateDirectStream } from "./direct-request.js";
+import { applyExplicitReasoningPolicy, clearReasoningControls, isRequestObject, validateDirectModel, validateDirectStream } from "./direct-request.js";
 
 /** Native Responses payload; model-specific parameters remain upstream-owned. */
 export interface DirectResponsesRequest extends Record<string, unknown> {
@@ -59,8 +59,6 @@ export function applyResponsesReasoningPolicy(request: DirectResponsesRequest, p
   if (!provider.startsWith("ds-") || !supportsChatReasoningOff(provider, request.model)) {
     return request;
   }
-  assertNoNestedReasoningControls(request, DirectResponsesRequestError);
-  const result: DirectResponsesRequest = { ...request, reasoning: { ...(isRequestObject(request.reasoning) ? request.reasoning : {}), effort: "none" } };
-  for (const key of reasoningControlFields) if (key !== "reasoning") delete result[key];
+  const result: DirectResponsesRequest = { ...clearReasoningControls(request, DirectResponsesRequestError), reasoning: { ...(isRequestObject(request.reasoning) ? request.reasoning : {}), effort: "none" } };
   return result;
 }

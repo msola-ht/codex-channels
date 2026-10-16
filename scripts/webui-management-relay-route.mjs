@@ -41,7 +41,7 @@ export async function routeRelayManagement({ environment, maximumBodyBytes, open
     activeReasoningProbes.add(state);
     const controller = new AbortController();
     const cancel = () => controller.abort();
-    const timer = setTimeout(cancel, 95_000);
+    const timer = setTimeout(cancel, 140_000);
     response.once("close", cancel);
     request.once("aborted", cancel);
     if (request.aborted || response.destroyed) cancel();

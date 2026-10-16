@@ -72,6 +72,8 @@ Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high
 
 当前关闭限制：历史记录中，相同的 `reasoning.effort=none` 和 `gateway.only=["deepseek"]` 在 2026-10-14 04:56 UTC 返回 `deepseek` 路由、0 推理 Token；12:22 UTC 返回的路由已变为 `openai-compatible-private`、模型为 `private/deepseek-v4p1-flash-contributor`，报告 145 推理 Token。这是路由变化与失效同时出现的证据，不能据此确定服务端变更机制或某次本地提交为根因。2026-10-15 12:27 UTC 经授权直接请求同一 Cline 上游，固定文本、模型、路由限定及 `max_tokens=64`，各执行一次：旧 `none` 返回思考正文和 15 推理 Token；`enabled=false` 不返回思考正文但报告 27 推理 Token；不设控制返回思考正文和 16 推理 Token。三次均为上述私有路由、HTTP 200、`finish_reason=stop`，收到流终帧。该对比支持新参数影响正文返回，但不证明内部推理已关闭，也不替代部署后完整客户端链路验证。
 
+2026-10-16 00:45:40–00:46:02 UTC，通过 WebUI 共用的 `probeRelayReasoning` 入口对 `clp-main/deepseek-v4.1-flash` 原生 Chat 执行九项检测，每项一次、固定文本 `Reply with exactly OK.`、`max_tokens=64`，沿用 Flash 路由限定。所有项目均为 HTTP 200、completed，整组未提前停止；响应模型均为 `vmc/deepseek-v4p1-flash-contributor-fallbacks`。基线、`reasoning.effort=none`、`reasoning_effort=none`、`thinking.type=disabled` 均报告推理/输出 13/16 并返回思考正文；`reasoning.enabled=false` 为 13/16、不返回思考正文；顶层 `enable_thinking=false` 为 24/27；模板 `chat_template_kwargs.enable_thinking=false` 为 15/18；Google 零预算为 24/27，后三项均返回思考正文。新增组合 `reasoning.enabled=false` 加 `thinking.type=disabled` 为 15/18、不返回思考正文，仍未观察到推理用量归零。组合对应 [Cline 官方参数规则](https://github.com/cline/cline/blob/23791b9323aadd91d7dbaea8a8fa262cd2f7ad0b/sdk/packages/llms/src/providers/routing/provider-option-rules.ts) 中通用关闭与 DeepSeek 家族规则的合并；源码依据不证明云端执行了关闭。此次直接调用检测后端，未操作浏览器保存或修改账户设置；没有采集路由元数据，不能仅凭响应模型名称判定实际 Provider。
+
 已有目录需通过“选择启用模型／更新共享目录”显式刷新才会增加开关选项；安装代码不自动改写目录，已有默认选择保留。聚合继承同一目录，仍按已有活动和租约条件刷新。回退到不支持 `enabled` 的旧版本前，先把相关默认值和会话选择改为 `none`，再按上述成对目录备份流程回退。此开关适配仅用于受管 CLP 的 Responses→Chat 桥；不自动改写其他提供商的原生 Responses 参数或独立 Relay 的客户端参数。
 未传入思考选项时沿用上游默认值；需要开启思考时，选择目录提供的 `enabled` 或非 `none` 等级。
 非 OpenAI Provider 的上下文压缩沿用锁定 Codex 的本地压缩路径，不伪造远程压缩结果。
@@ -98,6 +100,10 @@ Gateway 加载账户适配器并通过账户快照链路提供额度查询。
 ## 调用诊断与错误
 
 ### 上游路由限定探测
+
+2026-10-16 00:51 UTC 追加三次短请求核查（固定文本、`max_tokens=64`、单次限时 15 秒），响应中的 `choices[].delta.provider_metadata.gateway.routing` 均报告 `resolvedProvider=finalProvider=openai-compatible-private`，响应模型均为 `vmc/deepseek-v4p1-flash-contributor-fallbacks`。组合关闭加 `gateway.only=["deepseek"]` 返回推理/输出 14/18、不返回思考正文；`providerOptions.deepseek.thinking.type=disabled` 加相同限定返回 22/25、有思考正文；将组合关闭的允许列表改为不存在的 `codexc-nonexistent-provider`，仍返回 13/16、无思考正文。三次均 HTTP 200、completed 且收到流终帧。负对照表明当前 CLP Flash 路径未执行请求中的 Provider 限制，下面 2026-10-02 的成功限定仅为历史观察。
+
+[Vercel 虚拟模型文档](https://vercel.com/docs/ai-gateway/models-and-providers/virtual-models)说明 `vmc/` 用于虚拟模型，虚拟模型配置的 `only` 和同名 Provider 参数优先于请求。该机制与本次现象一致，但未取得 Cline 私有虚拟模型配置，不能确定是 Cline 转发层、虚拟模型覆盖还是最终私有服务造成思考关闭失效。本项目仅保证发出路由限定，不保证云端执行；没有通过切换未授权模型或直接复用 Cline 凭据访问 Vercel 来绕过该路径。
 
 2026-10-02（UTC）使用当前默认 CLP 账户，对官方 Chat Completions 端点进行了三次隔离短请求，
 模型均为 `cline-pass/deepseek-v4.1-flash`，关闭思考、输出上限 32 Token、使用 SSE。

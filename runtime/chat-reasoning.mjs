@@ -2,7 +2,7 @@
 export const relayModelReasoningModes = Object.freeze([
   "passthrough", "off", "minimal", "low", "medium", "high", "xhigh", "max",
   "off-reasoning-effort", "off-reasoning-enabled", "off-reasoning-effort-field",
-  "off-thinking", "off-enable-thinking",
+  "off-thinking", "off-enable-thinking", "off-chat-template-thinking", "off-google-thinking-budget", "off-reasoning-enabled-thinking",
 ]);
 
 /** Established automatic Chat mapping; no network, credentials or model-name inference. */

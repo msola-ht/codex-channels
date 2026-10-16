@@ -8,7 +8,7 @@ import { createRefreshableHttpProxySelector } from "../runtime/network-proxy.mjs
 import { readRelayManagement } from "./model-relay-management.mjs";
 import { ApiError } from "./webui-http.mjs";
 
-const modes = ["passthrough", "off-reasoning-effort", "off-reasoning-enabled", "off-reasoning-effort-field", "off-thinking", "off-enable-thinking"];
+const modes = ["passthrough", "off-reasoning-effort", "off-reasoning-enabled", "off-reasoning-effort-field", "off-thinking", "off-enable-thinking", "off-chat-template-thinking", "off-google-thinking-budget", "off-reasoning-enabled-thinking"];
 const maximumResponseBytes = 128 * 1024;
 const prompt = "Reply with exactly OK.";
 const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -18,7 +18,7 @@ const stale = () => new ApiError(409, "stale-revision", "Relay 配置或模型�
 const failed = () => new ApiError(502, "relay_probe_failed", "Relay 思考探测暂不可用");
 const emptyRow = mode => ({ mode, status: "not_run", httpStatus: null, reasoningText: null, reasoningTokens: null, outputTokens: null, responseModel: null });
 
-/** Six bounded, sequential requests; no persistence, content return, retry or inferred adoption. */
+/** Nine bounded, sequential requests; no persistence, content return, retry or inferred adoption. */
 export async function probeRelayReasoning(input, { environment = process.env, signal, onProgress } = {}) {
   if (!record(input) || Object.keys(input).length !== 3 || !Object.keys(input).every(key => ["revision", "model", "protocol"].includes(key))
     || !/^[a-f0-9]{64}$/u.test(input.revision) || !["chat", "responses"].includes(input.protocol)) throw invalid();
@@ -37,14 +37,14 @@ export async function probeRelayReasoning(input, { environment = process.env, si
   const rows = modes.map(emptyRow);
   const result = { model: input.model, protocol: input.protocol, revision: input.revision, observedAtMs: Date.now(), rows, stoppedReason: null };
   const controller = new AbortController();
-  const deadline = performance.now() + 90_000;
+  const deadline = performance.now() + 135_000;
   let selector;
   let proxySettings;
   let agent;
   let changed = false;
   let timedOut = false;
   const abort = () => { controller.abort(); void selector?.close().catch(() => {}); agent?.destroy(); };
-  const totalTimer = setTimeout(() => { timedOut = true; abort(); }, 90_000);
+  const totalTimer = setTimeout(() => { timedOut = true; abort(); }, 135_000);
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
   const recheck = () => {

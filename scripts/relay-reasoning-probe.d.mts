@@ -6,7 +6,7 @@ export interface RelayReasoningProbeInput {
 export interface RelayReasoningProbeResult extends RelayReasoningProbeInput {
   observedAtMs: number;
   rows: Array<{
-    mode: "passthrough" | "off-reasoning-effort" | "off-reasoning-enabled" | "off-reasoning-effort-field" | "off-thinking" | "off-enable-thinking";
+    mode: "passthrough" | "off-reasoning-effort" | "off-reasoning-enabled" | "off-reasoning-effort-field" | "off-thinking" | "off-enable-thinking" | "off-chat-template-thinking" | "off-google-thinking-budget" | "off-reasoning-enabled-thinking";
     status: "completed" | "incomplete" | "failed" | "timeout" | "not_run";
     httpStatus: number | null;
     reasoningText: boolean | null;
