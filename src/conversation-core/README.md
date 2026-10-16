@@ -23,7 +23,8 @@
   MCP OAuth 完成结果按 Thread 精确投递，
   无 Thread 的结果只广播给相同 Provider 的会话。
 - `turn-timing-accumulator.ts`：按单个 Turn 累加模型请求结果、Token 与压缩摘要；不追踪文本增量时间，
-  不路由 Thread、不发布事件、不读取数据库或 Provider 配置。
+  不路由 Thread、不发布事件、不读取数据库或 Provider 配置。各 Token 字段独立记录缺失请求数，压缩为其中项。
+  有模型请求观测时只累计其已知用量，不用最近单次官方 Token 快照填补本轮缺口；缓存全请求字段齐全才提供完整累计。
 - `input-events.ts`：定义 Client 可投递给 Core 的平台无关可辨识输入联合，不含 RPC method、
   未知 params 或生成协议类型；其中 `turn.modelTiming.updated` 由 Bootstrap 把模型代理的
   终态与 Usage 指标转换为稳定输入，Core 按 Thread/Turn 累计每个已确认请求；上下文压缩还按操作

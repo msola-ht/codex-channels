@@ -15,7 +15,7 @@ export function StatCard({
 }: {
   title?: string
   value: ReactNode
-  description?: string
+  description?: ReactNode
 }) {
   return (
     <Card size="sm">

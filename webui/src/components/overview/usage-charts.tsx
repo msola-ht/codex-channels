@@ -22,7 +22,7 @@ import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { useTranslation } from "@/hooks/use-translation"
-import { formatTokens } from "@/lib/format"
+import { formatTokens, formatUsageTokens, formatTotalUsage } from "@/lib/format"
 import type { Translate } from "@/lib/i18n/messages"
 import { fillRecentDays, usageTrendRows, type UsageTrendRow } from "@/lib/trend"
 import type { DailyUsageRow, RangeName, UsageTrendResponse } from "@/lib/types"
@@ -113,7 +113,14 @@ function UsageTrendCard({
               <XAxis dataKey="period" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} interval="preserveStartEnd" tickFormatter={(period) => String(period).slice(granularity === "hour" ? 11 : 5)} />
               <YAxis yAxisId="input" domain={[0, "auto"]} tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
               <YAxis yAxisId="output" orientation="right" domain={[0, "auto"]} tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} tick={{ style: { fill: "var(--color-outputTokens)" } }} />
-              <ChartTooltip content={<ChartTooltipContent valueFormatter={formatTokens} />} />
+              <ChartTooltip filterNull={false} content={<ChartTooltipContent formatter={(_value, name, item) => {
+                const row = item.payload as UsageTrendRow
+                const key = String(name)
+                const value = key === "inputTokens" ? formatUsageTokens(row.inputTokens ?? 0, row.requestCount, row.usageCoverage.inputMissingRequestCount)
+                  : key === "outputTokens" ? formatUsageTokens(row.outputTokens ?? 0, row.requestCount, row.usageCoverage.outputMissingRequestCount)
+                  : formatTokens(row.cachedInputTokens)
+                return <span>{chartConfig[key]?.label}: {value}</span>
+              }} />} />
               <Area yAxisId="input" dataKey="inputTokens" type="monotone" stroke="var(--color-inputTokens)" fill="url(#fillInput)" dot={data.length === 1} />
               <Area yAxisId="input" dataKey="cachedInputTokens" type="monotone" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" dot={data.length === 1} />
               <Area yAxisId="output" dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} dot={data.length === 1} />
@@ -163,8 +170,17 @@ function ActivityHeatmapCard({
             ? 3
             : 4
   }
-  const total = cells.reduce((sum, cell) => sum + cell.count, 0)
-  const activeDays = cells.filter((cell) => cell.count > 0).length
+  const totalUsage = rows.reduce((sum, row) => ({
+    requestCount: sum.requestCount + row.requestCount,
+    inputTokens: sum.inputTokens + row.inputTokens,
+    outputTokens: sum.outputTokens + row.outputTokens,
+    usageCoverage: {
+      inputMissingRequestCount: sum.usageCoverage.inputMissingRequestCount + row.usageCoverage.inputMissingRequestCount,
+      outputMissingRequestCount: sum.usageCoverage.outputMissingRequestCount + row.usageCoverage.outputMissingRequestCount,
+      reasoningMissingRequestCount: sum.usageCoverage.reasoningMissingRequestCount + row.usageCoverage.reasoningMissingRequestCount,
+    },
+  }), { requestCount: 0, inputTokens: 0, outputTokens: 0, usageCoverage: { inputMissingRequestCount: 0, outputMissingRequestCount: 0, reasoningMissingRequestCount: 0 } })
+  const activeDays = rows.filter((row) => row.requestCount > 0).length
 
   return (
     <Card size="sm" className="h-full">
@@ -198,14 +214,15 @@ function ActivityHeatmapCard({
                   legend: { less: t("overview.heatmapLess"), more: t("overview.heatmapMore") },
                 }}
                 tooltips={{
-                  activity: { text: (activity) => t("overview.heatmapActivity", {
-                    date: activity.date, tokens: formatTokens(activity.count),
-                  }) },
+                  activity: { text: (activity) => {
+                    const row = rows.find(item => item.day === activity.date)!
+                    return t("overview.heatmapActivity", { date: activity.date, tokens: formatTotalUsage(row) })
+                  } },
                 }}
               />
             </div>
             <p className="mt-2 text-center text-xs text-muted-foreground">
-              {t("overview.heatmapSummary", { total: formatTokens(total), days: activeDays })}
+              {t("overview.heatmapSummary", { total: formatTotalUsage(totalUsage), days: activeDays })}
             </p>
           </>
         )}

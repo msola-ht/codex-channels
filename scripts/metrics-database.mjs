@@ -44,6 +44,7 @@ import {
   isPrunableMetricsProviderId,
   metricsProviderIds,
   metricsQueryOptions,
+  metricsRequestPurposeOption,
   parseCleanupOptions,
   parseLocalDate,
   parseMetricsOptions,
@@ -621,7 +622,7 @@ if (
       } else if (command === "report") {
         const options = parseMetricsOptions(
           process.argv.slice(3),
-          new Set([...metricsQueryOptions, "--group", "--format"]),
+          new Set([...metricsQueryOptions, metricsRequestPurposeOption, "--group", "--format"]),
         );
         const format = options.format ?? "markdown";
         assertExportFormat(format, ["markdown", "json", "csv"]);
@@ -629,7 +630,7 @@ if (
       } else if (command === "export") {
         const options = parseMetricsOptions(
           process.argv.slice(3),
-          new Set([...metricsQueryOptions, "--format"]),
+          new Set([...metricsQueryOptions, metricsRequestPurposeOption, "--format"]),
         );
         const format = options.format ?? "json";
         assertExportFormat(format, ["json", "csv", "markdown"]);

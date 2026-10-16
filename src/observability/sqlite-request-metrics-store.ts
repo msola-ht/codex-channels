@@ -7,6 +7,7 @@ import { sumProviderQuotaTokens, type ProviderQuotaTokenRange } from "./provider
 import { SqliteAutoApprovalReviewMetrics } from "./sqlite-auto-approval-review-metrics.js";
 import { SqliteRequestMetricsQueries } from "./sqlite-request-metrics-queries.js";
 import { validateThreadId } from "./sqlite-request-metrics-query-base.js";
+import type { MetricsWriteScopeQuery } from "./metrics-worker-protocol.js";
 
 import {
   securePrivateDirectorySync,
@@ -227,6 +228,39 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore,
       const latestTurn = this.threadTurnSummary(threadId, turnId);
       return { latestTurn, threadAggregate: this.threadTurnTaskSummary(threadId, turnId) ?? latestTurn };
     });
+  }
+
+  metricsWriteScopes(threadId: string, scope: MetricsWriteScopeQuery): { threadId: string; turnId?: string }[] {
+    this.requireOpen();
+    validateThreadId(threadId, "Thread ID");
+    if (scope.type === "session") {
+      return this.database.prepare(`WITH RECURSIVE tree(thread_id) AS (
+        SELECT ? UNION
+        SELECT child.thread_id FROM subagent_threads child
+        JOIN tree parent ON child.parent_thread_id = parent.thread_id
+      ) SELECT thread_id AS threadId FROM tree`).all(threadId) as unknown as { threadId: string }[];
+    }
+    let seed: string;
+    let parameters: string[];
+    if (scope.type === "task") {
+      validateThreadId(scope.turnId, "Turn ID");
+      seed = "SELECT ? AS thread_id, ? AS turn_id";
+      parameters = [threadId, scope.turnId];
+    } else if (scope.type === "sessionReview") {
+      // Keep the same run-level seed as sessionAutoApprovalReviewSummary.
+      seed = `SELECT thread_id, turn_id FROM auto_approval_review_turns WHERE thread_id = ?
+        UNION SELECT thread_id, turn_id FROM turn_execution_metrics WHERE thread_id = ?
+        UNION SELECT thread_id, turn_id FROM model_request_metrics WHERE thread_id = ? AND turn_id IS NOT NULL
+        UNION SELECT parent_thread_id, parent_turn_id FROM subagent_turns WHERE parent_thread_id = ?`;
+      parameters = [threadId, threadId, threadId, threadId];
+    } else throw new Error("不支持的指标写入范围");
+    const scopes = this.database.prepare(`WITH RECURSIVE runs(thread_id, turn_id) AS (
+      ${seed} UNION
+      SELECT child.thread_id, child.turn_id FROM subagent_turns child
+      JOIN runs parent ON child.parent_thread_id = parent.thread_id AND child.parent_turn_id = parent.turn_id
+    ) SELECT thread_id AS threadId, turn_id AS turnId FROM runs`).all(...parameters) as unknown as { threadId: string; turnId: string }[];
+    // A failed root request may have left no retained row to seed the query.
+    return scope.type === "sessionReview" ? [{ threadId }, ...scopes.filter(run => run.threadId !== threadId)] : scopes;
   }
 
   isExecutionHistoryComplete(threadId: string): boolean {

@@ -17,6 +17,7 @@ export interface RequestInterruptionSummary {
 }
 
 export interface CompactRequestMetricsSummary {
+  usageCoverage: TokenUsageCoverage;
   requestOutcomes: RequestOutcomeCounts;
   model: string | null;
   hasMixedModels: boolean;
@@ -28,6 +29,7 @@ export interface CompactRequestMetricsSummary {
 }
 
 export interface TurnRequestMetricsSummary {
+  usageCoverage: TokenUsageCoverage;
   requestOutcomes: RequestOutcomeCounts;
   interruptionSummary: RequestInterruptionSummary;
   /** 上游轮次首 Token，不是本地单请求首 Token 延迟。 */
@@ -43,6 +45,7 @@ export interface TurnRequestMetricsSummary {
 }
 
 export interface ThreadRequestMetricsAggregate {
+  usageCoverage: TokenUsageCoverage;
   requestOutcomes: RequestOutcomeCounts;
   interruptionSummary: RequestInterruptionSummary;
   turnCount: number;
@@ -90,6 +93,13 @@ export interface RequestMetricsCommandQuery {
 }
 
 export interface RequestMetricsAggregate {
+  usageCoverage: TokenUsageCoverage;
+  reviewUsage: {
+    requestCount: number;
+    inputTokens: number;
+    outputTokens: number;
+    usageCoverage: TokenUsageCoverage;
+  };
   requestOutcomes: RequestOutcomeCounts;
   requestCount: number;
   unsuccessfulRequestCount: number;
@@ -98,6 +108,12 @@ export interface RequestMetricsAggregate {
   outputTokens: number;
   reasoningOutputTokens: number;
   compact?: CompactRequestMetricsSummary | null;
+}
+
+export interface TokenUsageCoverage {
+  inputMissingRequestCount: number;
+  outputMissingRequestCount: number;
+  reasoningMissingRequestCount: number;
 }
 
 export interface RequestMetricsGroup {

@@ -22,9 +22,12 @@ export interface MetricsFilterOptions extends MetricsRangeOptions {
   operation?: string;
   status?: string;
   filter?: string;
+  requestPurpose?: "unmarked" | "autoApprovalReview";
+  "request-purpose"?: string;
 }
 
 export const metricsQueryOptions: readonly string[];
+export const metricsRequestPurposeOption: "--request-purpose";
 
 export function metricsFilterOptions(
   options: MetricsFilterOptions & { threadId?: string; turnId?: string },

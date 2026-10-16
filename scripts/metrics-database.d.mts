@@ -1,4 +1,4 @@
-import type { ModelRequestMetricsFilters, RequestOutcomeCounts, StoredModelRequestMetricsAggregate } from "../dist/observability/index.js";
+import type { ModelRequestMetricsFilters, RequestOutcomeCounts, StoredModelRequestMetricsAggregate, UsageCoverage } from "../dist/observability/index.js";
 
 export interface MetricsQueryOptions extends ModelRequestMetricsFilters {
   range?: string;
@@ -23,6 +23,7 @@ export interface MetricsDatabaseResetResult {
 }
 
 export interface MetricsCompactSummary {
+  usageCoverage: UsageCoverage;
   requestOutcomes: RequestOutcomeCounts;
   model: string | null;
   hasMixedModels: boolean;
@@ -85,6 +86,7 @@ export interface MetricsThreadsDocument {
     turnCount: number;
     requestCount: number;
     requestOutcomes: RequestOutcomeCounts;
+    usageCoverage: UsageCoverage;
     inputTokens: number;
     outputTokens: number;
     compact: MetricsCompactSummary | null;

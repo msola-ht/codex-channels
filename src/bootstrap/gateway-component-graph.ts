@@ -154,7 +154,7 @@ import {
 } from "./openai-connectivity.js";
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
-import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
+import { turnErrorDiagnostics } from "./turn-error-diagnostics.js";
 import { completionAccountStatus } from "./completion-account-status.js";
 import { mergeCompletionTiming } from "./completion-timing.js";
 import { TurnExecutionTracker } from "./turn-execution-tracker.js";
@@ -214,6 +214,7 @@ export abstract class GatewayComponentGraph {
   private readonly sessionDisplayCache?: SqliteSessionDisplayCache;
   private readonly workspaces: WorkspaceRegistry;
   private readonly subagentCompletion: SubagentCompletionTracker;
+  private readonly subagentMetricsAbort = new AbortController();
   private readonly scheduledTasks: ScheduledTaskComposition | undefined;
   private bindingRestore: BindingRestoreCoordinator | undefined;
   private removeRpcNotification: (() => void) | undefined;
@@ -483,13 +484,24 @@ export abstract class GatewayComponentGraph {
       () => this.metricsEvents?.changed(),
     );
     closeConstructionMetrics = () => metricsWriter.close();
+    const waitForMetricsScope = (
+      threadId: string,
+      scope: Parameters<typeof metricsStore.metricsWriteScopes>[1],
+      requestPurpose: "autoApprovalReview" | null,
+      signal?: AbortSignal,
+    ): Promise<boolean> => metricsWriter.waitForCurrentWritesInScope(
+      () => this.metricsDatabase.withSignal(signal).metricsWriteScopes(threadId, scope),
+      requestPurpose,
+      signal,
+    );
+    registerConstructionCleanup("Subagent Metrics Waits", () => this.subagentMetricsAbort.abort());
     this.relayMetrics = configPath === undefined ? undefined : new RelayMetricsComposition({
       path: modelRelayPaths(configPath).metrics,
       writer: metricsWriter,
       authorize: createRelayMetricAuthorization(configPath),
     });
     if (this.relayMetrics) registerConstructionCleanup("Relay Metrics", () => this.relayMetrics!.close());
-    const recordTurnErrorMetric = (
+    const recordTurnErrorDiagnostic = (
       provider: string,
       model: string | null,
       threadId: string | null,
@@ -498,22 +510,7 @@ export abstract class GatewayComponentGraph {
       error: unknown,
       structuredErrorCode?: TurnErrorCode,
     ): void => {
-      // 聚合请求由实际成员代理记账，Thread 级失败没有可靠账户归属，不能再生成聚合请求样本。
-      if (provider === aggregateProviderId) return;
-      try {
-        enqueueTurnErrorMetric(
-          metricsWriter,
-          provider,
-          model,
-          threadId,
-          turnId,
-          phase,
-          error,
-          structuredErrorCode,
-        );
-      } catch (cause) {
-        logger.warn({ err: cause }, "Turn 级错误指标写入失败");
-      }
+      logger.warn(turnErrorDiagnostics(provider, model, threadId, turnId, phase, error, structuredErrorCode), "Turn 执行失败");
     };
     this.providerMetrics = new ProviderMetricsComposition({
       providers: [
@@ -545,9 +542,17 @@ export abstract class GatewayComponentGraph {
     });
     closeConstructionMetrics = () => this.providerMetrics.close();
     this.subagentCompletion = new SubagentCompletionTracker({
-      readSummary: (agentThreadId, terminalTurnId, signal) => this.metricsDatabase.withSignal(signal).subagentCompletionSummary(agentThreadId, terminalTurnId),
+      readSummary: async (agentThreadId, terminalTurnId, signal) => {
+        const readSignal = signal
+          ? AbortSignal.any([signal, this.subagentMetricsAbort.signal])
+          : this.subagentMetricsAbort.signal;
+        const scope = terminalTurnId === undefined ? { type: "session" as const }
+          : { type: "task" as const, turnId: terminalTurnId };
+        if (!await waitForMetricsScope(agentThreadId, scope, null, readSignal)) throw new Error("子代理任务指标写入未确认");
+        return this.metricsDatabase.withSignal(readSignal).subagentCompletionSummary(agentThreadId, terminalTurnId);
+      },
       waitForMetrics: (agentThreadId, agentTurnId) =>
-        metricsWriter.waitForCurrentWrites(agentThreadId, agentTurnId),
+        metricsWriter.waitForCurrentWritesInScopes([{ threadId: agentThreadId, ...(agentTurnId === undefined ? {} : { turnId: agentTurnId }) }], null, this.subagentMetricsAbort.signal),
       onRunStarted: (details) => {
         this.autoApprovalReviewNotifications.recordRun(details);
         void metricsStore.recordSubagentTurn(details).catch((error) => {
@@ -736,7 +741,7 @@ export abstract class GatewayComponentGraph {
           if (record.errorCode !== null) {
             (error as { code?: unknown }).code = record.errorCode;
           }
-          recordTurnErrorMetric(
+          recordTurnErrorDiagnostic(
             record.provider,
             record.model,
             record.threadId,
@@ -1074,7 +1079,7 @@ export abstract class GatewayComponentGraph {
           return completionAccountStatus(provider, await this.providerAccounts.accountUsage(provider, undefined, signal));
         },
         completionTiming: async (threadId, turnId, current, signal) => {
-          const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
+          const persisted = await metricsWriter.waitForCurrentWritesInScopes([{ threadId, turnId }], null, signal);
           if (!persisted) return current;
           const summary = await this.metricsDatabase.withSignal(signal).threadTurnSummary(threadId, turnId);
           return mergeCompletionTiming(summary, turnId, current);
@@ -1090,24 +1095,19 @@ export abstract class GatewayComponentGraph {
           };
         },
         autoApprovalReview: async (threadId, turnId, signal) => {
-          // Include queued descendant requests, not just the root Thread. This
-          // bounded watermark cannot prove IPC delivery or historical retention.
-          const persisted = await metricsWriter.waitForCurrentWrites();
+          const persisted = await waitForMetricsScope(threadId, { type: "task", turnId }, "autoApprovalReview", signal);
           const summary = await this.autoApprovalReview.summary(threadId, turnId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal));
           if (!persisted && summary.usage) summary.usage.coverage = "partial";
           return summary;
         },
         sessionAutoApprovalReview: async (threadId, signal) => {
-          const persisted = await metricsWriter.waitForCurrentWrites();
+          const persisted = await waitForMetricsScope(threadId, { type: "sessionReview" }, "autoApprovalReview", signal);
           const summary = await this.autoApprovalReview.sessionSummary(threadId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal));
           if (!persisted && summary.usage) summary.usage.coverage = "partial";
           return summary;
         },
         taskAggregate: async (threadId, turnId, signal): Promise<TurnTaskMetricsSummary | undefined> => {
-          // The completion event can outrun the buffered request writer. Once
-          // a child is known, wait for the current queue watermark so the
-          // parent task total includes the root Turn's just-finished samples.
-          const persisted = await metricsWriter.waitForCurrentWrites(threadId);
+          const persisted = await waitForMetricsScope(threadId, { type: "task", turnId }, null, signal);
           if (!persisted) return undefined;
           const summary = await this.metricsDatabase.withSignal(signal).threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
@@ -1116,6 +1116,7 @@ export abstract class GatewayComponentGraph {
             requestOutcomes: summary.requestOutcomes,
             interruptionSummary: summary.interruptionSummary,
             requestCount: summary.requestCount,
+            usageCoverage: summary.usageCoverage,
             unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
             inputTokens: summary.inputTokens,
             cachedInputTokens: summary.cachedInputTokens,
@@ -1124,7 +1125,7 @@ export abstract class GatewayComponentGraph {
           };
         },
         sessionAggregate: async (threadId, signal): Promise<TurnTaskMetricsSummary | undefined> => {
-          const persisted = await metricsWriter.waitForCurrentWrites(threadId);
+          const persisted = await waitForMetricsScope(threadId, { type: "session" }, null, signal);
           if (!persisted) return undefined;
           const aggregate = (await this.metricsDatabase.withSignal(signal).threadSummary(threadId)).threadAggregate;
           if (aggregate === null) return undefined;
@@ -1135,6 +1136,7 @@ export abstract class GatewayComponentGraph {
             requestOutcomes: aggregate.requestOutcomes,
             interruptionSummary: aggregate.interruptionSummary,
             requestCount: aggregate.requestCount,
+            usageCoverage: aggregate.usageCoverage,
             unsuccessfulRequestCount: aggregate.unsuccessfulRequestCount,
             inputTokens: aggregate.inputTokens,
             cachedInputTokens: aggregate.cachedInputTokens,
@@ -1243,7 +1245,7 @@ export abstract class GatewayComponentGraph {
         conversationEvents.handle(coreEvent);
         if (coreEvent.type === "turn.error" && !coreEvent.willRetry) {
           const modelSettings = this.router.modelSettingsForThread(coreEvent.threadId);
-          recordTurnErrorMetric(
+          recordTurnErrorDiagnostic(
             modelSettings?.modelProvider ?? "openai",
             modelSettings?.model ?? null,
             coreEvent.threadId,
@@ -1887,7 +1889,10 @@ export abstract class GatewayComponentGraph {
       ["Derived Output Inputs", () => this.output.drain()],
       ["Turn Execution Metrics", () => this.turnExecution.stop()],
       ["Auto-review Metrics", () => this.autoApprovalReview.stop()],
-      ["Subagent Terminals", () => this.subagentCompletion?.drain()],
+      ["Subagent Terminals", async () => {
+        try { await this.subagentCompletion?.drain(); }
+        finally { this.subagentMetricsAbort.abort(); }
+      }],
       ["Auto-review Notifications", () => this.autoApprovalReviewNotifications.reset()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Account Snapshot Warmup", async () => {

@@ -1,16 +1,16 @@
 import { cn } from "cn"
 import { TableHint, TruncatedText } from "@/components/metrics/data-table"
-import { InputTokenTooltip } from "@/components/metrics/token-tooltip"
+import { InputTokenTooltip, ReviewUsageSummary, TokenHint } from "@/components/metrics/token-tooltip"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useTranslation } from "@/hooks/use-translation"
-import { formatCacheUsage, formatModelName, formatRequestOutcomes, formatTokens } from "@/lib/format"
+import { formatCacheUsage, formatModelName, formatRequestOutcomes, formatUsageTokens } from "@/lib/format"
 import type { ModelUsage } from "@/lib/types"
 
-type CardUsage = Pick<ModelUsage, "model" | "requestCount" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage">
-  & Partial<Pick<ModelUsage, "requestOutcomes" | "members">>
+type CardUsage = Pick<ModelUsage, "model" | "requestCount" | "turnCount" | "inputTokens" | "outputTokens" | "cacheUsage" | "usageCoverage">
+  & Partial<Pick<ModelUsage, "requestOutcomes" | "members" | "reviewUsage">>
 
 /** 只展示调用方提供的汇总；不在卡片内计算或合并不同统计范围。 */
 export function ModelUsageCards({ usage, grouped = false }: { usage: readonly CardUsage[]; grouped?: boolean }) {
@@ -29,8 +29,8 @@ function ModelUsageCard({ item, grouped, formatCount }: { item: CardUsage; group
   const name = (grouped ? item.model : formatModelName(item.model, null)) ?? t("threads.unknownModel")
   const members = item.members ?? []
   const hasDetails = members.length > 0
-  const card = <Card size="sm" className={cn("relative min-w-0 gap-1", hasDetails && "ring-2 ring-primary/50 hover:ring-primary focus-within:ring-primary")}>
-      {hasDetails && <DialogTrigger render={<Button variant="ghost" />} className="absolute inset-0 size-full cursor-pointer rounded-xl" aria-label={t("overview.showModelDetailsLabel", { model: name })} />}
+  const card = <Card size="sm" className="relative min-w-0 gap-1 ring-0">
+      {hasDetails && <DialogTrigger render={<Button variant="ghost" />} className="absolute inset-0 size-full cursor-pointer rounded-xl focus-visible:ring-inset" aria-label={t("overview.showModelDetailsLabel", { model: name })} />}
       <CardHeader className={cn("flex min-w-0 flex-wrap items-center gap-2", hasDetails && "pointer-events-none relative [&_[data-slot=tooltip-trigger][tabindex]]:pointer-events-auto")}>
         <CardTitle className="min-w-[min(8rem,100%)] flex-1"><TruncatedText text={name} className="max-w-full" /></CardTitle>
         <dl className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
@@ -41,7 +41,7 @@ function ModelUsageCard({ item, grouped, formatCount }: { item: CardUsage; group
               : <TableHint hint={formatRequestOutcomes(item.requestOutcomes, t)}>{formatCount(item.requestCount)}</TableHint>}</dd>
           </div>
           <div className="flex items-center gap-1 whitespace-nowrap">
-            <dt className="text-muted-foreground">{t("metrics.turn")}</dt>
+            <dt className="text-muted-foreground">{t("metrics.involvedTurns")}</dt>
             <dd className="font-medium tabular-nums">{formatCount(item.turnCount)}</dd>
           </div>
         </dl>
@@ -52,6 +52,8 @@ function ModelUsageCard({ item, grouped, formatCount }: { item: CardUsage; group
             <dt className="text-muted-foreground">{t("metrics.inputColumn")}</dt>
             <dd className="font-medium tabular-nums"><InputTokenTooltip
               inputTokens={item.inputTokens}
+              requestCount={item.requestCount}
+              usageCoverage={item.usageCoverage}
               cachedInputTokens={item.cacheUsage.missingRequestCount > 0 ? null : item.cacheUsage.cachedInputTokens}
               cacheUsage={item.cacheUsage}
             /></dd>
@@ -62,7 +64,7 @@ function ModelUsageCard({ item, grouped, formatCount }: { item: CardUsage; group
           </div>
           <div className="flex items-center gap-1 whitespace-nowrap">
             <dt className="text-muted-foreground">{t("metrics.outputColumn")}</dt>
-            <dd className="font-medium tabular-nums">{formatTokens(item.outputTokens)}</dd>
+            <dd className="font-medium tabular-nums"><TokenHint value={formatUsageTokens(item.outputTokens, item.requestCount, item.usageCoverage.outputMissingRequestCount)} /></dd>
           </div>
         </dl>
       </CardContent>
@@ -81,17 +83,19 @@ function ModelUsageCard({ item, grouped, formatCount }: { item: CardUsage; group
             <Table>
               <TableHeader><TableRow>
                 <TableHead>{t("metrics.provider")}</TableHead><TableHead>{t("overview.originalModel")}</TableHead>
-                <TableHead className="text-right">{t("metrics.requests")}</TableHead><TableHead className="text-right">{t("metrics.turn")}</TableHead>
-                <TableHead className="text-right">{t("metrics.inputColumn")}</TableHead><TableHead className="text-right">{t("metrics.cacheHitRateColumn")}</TableHead><TableHead className="text-right">{t("metrics.outputColumn")}</TableHead>
+                <TableHead className="text-right">{t("metrics.requests")}</TableHead><TableHead className="text-right"><TableHint hint={t("metrics.involvedTurnsHint")}>{t("metrics.involvedTurns")}</TableHint></TableHead>
+                <TableHead className="text-right">{t("metrics.inputColumn")}</TableHead><TableHead className="text-right"><TableHint hint={t("metrics.cacheScopeHint")}>{t("metrics.cacheHitRateColumn")}</TableHint></TableHead><TableHead className="text-right">{t("metrics.outputColumn")}</TableHead>
+                <TableHead className="text-right">{t("metrics.reviewTokens")}</TableHead>
               </TableRow></TableHeader>
               <TableBody>{members.map(member => <TableRow key={JSON.stringify([member.provider, member.model])}>
                 <TableCell><TruncatedText text={member.provider} className="max-w-48" /></TableCell>
                 <TableCell><TruncatedText text={member.model ?? t("threads.unknownModel")} className="max-w-80" /></TableCell>
                 <TableCell className="text-right tabular-nums"><TableHint hint={formatRequestOutcomes(member.requestOutcomes, t)}>{formatCount(member.requestCount)}</TableHint></TableCell>
                 <TableCell className="text-right tabular-nums">{formatCount(member.turnCount)}</TableCell>
-                <TableCell className="text-right tabular-nums"><InputTokenTooltip inputTokens={member.inputTokens} cachedInputTokens={member.cacheUsage.missingRequestCount > 0 ? null : member.cacheUsage.cachedInputTokens} cacheUsage={member.cacheUsage} /></TableCell>
+                <TableCell className="text-right tabular-nums"><InputTokenTooltip inputTokens={member.inputTokens} requestCount={member.requestCount} usageCoverage={member.usageCoverage} cachedInputTokens={member.cacheUsage.missingRequestCount > 0 ? null : member.cacheUsage.cachedInputTokens} cacheUsage={member.cacheUsage} /></TableCell>
                 <TableCell className="text-right tabular-nums">{formatCacheUsage(member.cacheUsage).rate}</TableCell>
-                <TableCell className="text-right tabular-nums">{formatTokens(member.outputTokens)}</TableCell>
+                <TableCell className="text-right tabular-nums"><TokenHint value={formatUsageTokens(member.outputTokens, member.requestCount, member.usageCoverage.outputMissingRequestCount)} /></TableCell>
+                <TableCell className="text-right whitespace-nowrap tabular-nums"><ReviewUsageSummary usage={member.reviewUsage} /></TableCell>
               </TableRow>)}</TableBody>
             </Table>
           </div>

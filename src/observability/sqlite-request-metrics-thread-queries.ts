@@ -19,6 +19,7 @@ import {
   toStoredRequestOutcomes,
   toStoredThreadAggregate,
   toStoredTurnSummary,
+  toStoredUsageCoverage,
   type AggregateRow,
   type CacheUsageRow,
   type TurnSummaryRow,
@@ -28,13 +29,21 @@ import {
   compactAggregateSql,
   metricsAggregateSql,
   metricsPageOffset,
-  metricsScopeSql,
+  metricsScopeSql as requestMetricsScopeSql,
   observableCompletionSql,
   interruptedRequestSql,
   requestOutcomeSql,
+  usageCoverageSql,
   validateThreadId,
   type MetricsQueryReader,
 } from "./sqlite-request-metrics-query-base.js";
+
+function metricsScopeSql(...args: Parameters<typeof requestMetricsScopeSql>): ReturnType<typeof requestMetricsScopeSql> {
+  if (args[0].requestPurpose === "autoApprovalReview") {
+    throw new Error("任务统计排除自动审查，请使用请求明细查询审查用量");
+  }
+  return requestMetricsScopeSql(...args);
+}
 import type { SqliteRequestMetricsSubagentQueries } from "./sqlite-request-metrics-subagent-queries.js";
 
 /** 会话级只读查询：Thread/Turn 聚合、耗时、中断与分页列表。 */
@@ -77,6 +86,7 @@ export class SqliteRequestMetricsThreadQueries {
     `;
     const threadAggregate = this.reader.prepare(`${scopeSql}
       SELECT
+        ${usageCoverageSql()},
         ${requestOutcomeSql()},
         (SELECT provider FROM scoped WHERE thread_id = ? AND ${agentResponseSql} ORDER BY id DESC LIMIT 1) AS provider,
         NULL AS turn_id,
@@ -90,6 +100,7 @@ export class SqliteRequestMetricsThreadQueries {
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        COUNT(CASE WHEN reasoning_output_tokens > 0 THEN 1 END) AS reasoning_request_count,
         COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM scoped
@@ -168,6 +179,7 @@ export class SqliteRequestMetricsThreadQueries {
       ORDER BY id DESC LIMIT 1
     )
       SELECT
+        ${usageCoverageSql()},
         ${requestOutcomeSql()},
         (SELECT provider FROM representative) AS provider,
         (SELECT model FROM representative) AS model,
@@ -184,6 +196,7 @@ export class SqliteRequestMetricsThreadQueries {
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        COUNT(CASE WHEN reasoning_output_tokens > 0 THEN 1 END) AS reasoning_request_count,
         COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM scoped
@@ -318,6 +331,7 @@ export class SqliteRequestMetricsThreadQueries {
   ): TurnSummaryRow | undefined {
     return this.reader.prepare(`
       SELECT
+        ${usageCoverageSql()},
         ${requestOutcomeSql()},
         (
           SELECT upstream_ttft_ms FROM model_request_metrics AS first_timing
@@ -372,6 +386,7 @@ export class SqliteRequestMetricsThreadQueries {
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        COUNT(CASE WHEN reasoning_output_tokens > 0 THEN 1 END) AS reasoning_request_count,
         COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM model_request_metrics
@@ -476,6 +491,7 @@ export class SqliteRequestMetricsThreadQueries {
     return {
       ...page,
       threads: rows.map((row) => ({
+        usageCoverage: toStoredUsageCoverage(row),
         cacheUsage: row.request_count === null
           ? { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 0 }
           : toStoredCacheUsage(row),
@@ -496,6 +512,12 @@ export class SqliteRequestMetricsThreadQueries {
         cachedInputTokens: row.request_count === null ? 0
           : row.cache_missing_request_count === 0 ? row.cached_input_tokens ?? 0 : null,
         subagentUsage: {
+          requestCount: row.subagent_request_count,
+          usageCoverage: toStoredUsageCoverage({
+            input_missing_request_count: row.subagent_input_missing_request_count,
+            output_missing_request_count: row.subagent_output_missing_request_count,
+            reasoning_output_missing_request_count: row.subagent_reasoning_output_missing_request_count,
+          }),
           inputTokens: row.subagent_input_tokens ?? 0,
           cachedInputTokens: row.subagent_cache_missing_request_count === 0
             ? row.subagent_cached_input_tokens ?? 0 : null,
@@ -561,6 +583,8 @@ export class SqliteRequestMetricsThreadQueries {
         FROM tree JOIN scoped ON scoped.thread_id = tree.thread_id
       ), tree_grouped AS (
         SELECT root_thread_id,
+          COUNT(CASE WHEN thread_id != root_thread_id THEN 1 END) AS subagent_request_count,
+          ${usageCoverageSql("thread_id != root_thread_id", "subagent_")},
           SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)) AS total_tokens,
           SUM(CASE WHEN thread_id != root_thread_id THEN input_tokens END) AS subagent_input_tokens,
           SUM(CASE WHEN thread_id != root_thread_id THEN cached_input_tokens END) AS subagent_cached_input_tokens,
@@ -611,6 +635,10 @@ export class SqliteRequestMetricsThreadQueries {
       recorded_at_ms: number | null;
       total_tokens: number;
       subagent_input_tokens: number | null;
+      subagent_request_count: number;
+      subagent_input_missing_request_count: number;
+      subagent_output_missing_request_count: number;
+      subagent_reasoning_output_missing_request_count: number;
       subagent_cached_input_tokens: number | null;
       subagent_output_tokens: number | null;
       subagent_known_cached_input_tokens: number | null;

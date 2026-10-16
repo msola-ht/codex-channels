@@ -5,6 +5,8 @@ export type {
   RelayQueueSnapshot, RelayReasoning, RelayModelReasoning, RelayManagedCaller, RelayManagementSnapshot, RelayManagementInput, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
   RelayReasoningProbeProtocol, RelayReasoningProbeMode, RelayReasoningProbeInput, RelayReasoningProbeRow, RelayReasoningProbeResult, RelayReasoningProbeEvent,
   Aggregate,
+  UsageCoverage,
+  ReviewUsage,
   RequestOutcomeCounts,
   RequestInterruptionSummary,
   CacheUsage,

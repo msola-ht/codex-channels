@@ -4,7 +4,7 @@ import { Link } from "react-router"
 import { DataTable, SortableHeader, TableHint, TruncatedText, type DataTableColumn } from "@/components/metrics/data-table"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
-import { InputTokenTooltip } from "@/components/metrics/token-tooltip"
+import { InputTokenTooltip, TokenHint } from "@/components/metrics/token-tooltip"
 import { RefreshStatus } from "@/components/metrics/refresh-status"
 import { QuerySummary } from "@/components/metrics/query-summary"
 import { ModelUsageCards } from "@/components/metrics/model-usage-cards"
@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useThreadSubagents } from "@/hooks/use-thread-subagents"
 import { useTranslation } from "@/hooks/use-translation"
-import { formatCacheUsage, formatElapsedDuration, formatModelName, formatRequestTime, formatTimestamp, getServerTimeZone, formatTokens, shortThreadId } from "@/lib/format"
+import { formatCacheUsage, formatElapsedDuration, formatModelName, formatRequestTime, formatTimestamp, getServerTimeZone, formatUsageTokens, shortThreadId } from "@/lib/format"
 import { translateApiError } from "@/lib/i18n/translate"
 import { metricsLink } from "@/lib/metrics-query"
 import type { SubagentListItem } from "@/lib/types"
@@ -92,9 +92,11 @@ export function ThreadSubagents({ threadId, parentTurnId }: { threadId?: string;
       inputTokens={row.original.inputTokens}
       cachedInputTokens={row.original.cacheUsage.missingRequestCount > 0 ? null : row.original.cacheUsage.cachedInputTokens}
       cacheUsage={row.original.cacheUsage}
+      requestCount={row.original.requestCount}
+      usageCoverage={row.original.usageCoverage}
     /> },
-    { id: "cacheHitRate", enableSorting: false, header: () => <TableHint hint={t("metrics.cacheHitRate")}>{t("metrics.cacheHitRateColumn")}</TableHint>, cell: ({ row }) => formatCacheUsage(row.original.cacheUsage).rate },
-    { id: "output", enableSorting: false, header: () => <TableHint hint={t("metrics.output")}>{t("metrics.outputColumn")}</TableHint>, cell: ({ row }) => formatTokens(row.original.outputTokens) },
+    { id: "cacheHitRate", enableSorting: false, header: () => <TableHint hint={t("metrics.cacheScopeHint")}>{t("metrics.cacheHitRateColumn")}</TableHint>, cell: ({ row }) => formatCacheUsage(row.original.cacheUsage).rate },
+    { id: "output", enableSorting: false, header: () => <TableHint hint={t("metrics.output")}>{t("metrics.outputColumn")}</TableHint>, cell: ({ row }) => <TokenHint value={formatUsageTokens(row.original.outputTokens, row.original.requestCount, row.original.usageCoverage.outputMissingRequestCount)} /> },
     { id: "last", accessorFn: agent => agent.lastRecordedAtMs, sortDescFirst: true,
       header: ({ column }) => <SortableHeader column={column}>{t("metrics.last")}</SortableHeader>,
       cell: ({ row }) => row.original.lastRecordedAtMs == null ? "—" : <span className="whitespace-nowrap tabular-nums" title={`${formatTimestamp(row.original.lastRecordedAtMs)} · ${getServerTimeZone()}`}>{formatRequestTime(row.original.lastRecordedAtMs)}</span> },
@@ -111,6 +113,7 @@ export function ThreadSubagents({ threadId, parentTurnId }: { threadId?: string;
       <Button variant="outline" size="sm" disabled={refreshing} onClick={refetch}>{refreshing ? t("common.refreshing") : t("common.refresh")}</Button>
     </div>
     <p className="shrink-0 text-sm text-muted-foreground">{t("threads.subagentLiveStateHint")}</p>
+    <p className="shrink-0 text-sm text-muted-foreground">{t("metrics.conversationUsageScope")}</p>
     <ErrorBanner error={translateApiError(t, error, errorCode)} pending={refreshing} onRetry={refetch} />
     {error === null && !loading && data !== null && data.modelUsage.length > 0 ? <ModelUsageCards usage={data.modelUsage} /> : null}
     {error !== null ? null : <DataTable

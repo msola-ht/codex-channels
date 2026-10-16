@@ -137,7 +137,7 @@ export function parseRequestMetricsFilters(input: Record<string, unknown>): Mode
     filters.operation = input.operation;
   }
   if (input.requestPurpose !== undefined) {
-    if (input.requestPurpose !== "autoApprovalReview") throw new Error("requestPurpose 只支持 autoApprovalReview");
+    if (input.requestPurpose !== "unmarked" && input.requestPurpose !== "autoApprovalReview") throw new Error("requestPurpose 只支持 unmarked、autoApprovalReview");
     filters.requestPurpose = input.requestPurpose;
   }
   if (input.source !== undefined) {
@@ -232,6 +232,9 @@ export class RequestMetricsQueryService {
       return rowsByHour.get(hour) ?? {
         hour, requestCount: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
         cacheUsage: { inputTokens: 0, cachedInputTokens: 0, missingRequestCount: 0 },
+        usageCoverage: { inputMissingRequestCount: 0, outputMissingRequestCount: 0, reasoningMissingRequestCount: 0 },
+        reviewUsage: { requestCount: 0, inputTokens: 0, outputTokens: 0,
+          usageCoverage: { inputMissingRequestCount: 0, outputMissingRequestCount: 0, reasoningMissingRequestCount: 0 } },
       };
     });
     return { granularity: "hour" as const, hourly };

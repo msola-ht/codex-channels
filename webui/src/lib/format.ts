@@ -1,4 +1,4 @@
-import type { CacheUsage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
+import type { CacheUsage, UsageCoverage, RequestOutcomeCounts, RequestInterruptionSummary, RequestRecord, TrafficExchangeSummary } from "./types"
 import { messages, type Translate } from "./i18n/messages"
 import { translate } from "./i18n/translate"
 import { failureLabelKeys, recordedRequestFailure } from "./request-failure"
@@ -24,11 +24,6 @@ export function requestMethodDisplay(record: RequestRecord | TrafficExchangeSumm
 /** 调用转储使用 clp，请求指标使用精确账户 Provider clp-<id>。 */
 export function isClinePassProvider(provider: string | null | undefined): boolean {
   return provider === "clp" || /^clp-[a-z0-9_-]{1,32}$/.test(provider ?? "")
-}
-
-/** 审查显示别名只用于呈现，不改写请求、筛选或指标模型。 */
-export function autoReviewModelAlias(purpose: string | null | undefined): string | null {
-  return purpose === "autoApprovalReview" ? "auto-review" : null
 }
 
 export function formatModelName(model: string | null | undefined, provider: string | null | undefined): string | null {
@@ -92,6 +87,27 @@ export function formatTokens(value: number | null | undefined): string {
   return Math.abs(value) >= 1_000_000_000
     ? compactThreeDecimalFormatter.format(value)
     : compactTwoDecimalFormatter.format(value)
+}
+
+/** Aggregates retain known sums; missingness is independent for every token field. */
+export function formatUsageTokens(value: number, requestCount: number, missingRequestCount: number): string {
+  if (requestCount === 0) return formatTokens(0)
+  if (missingRequestCount === requestCount) return "—"
+  return formatTokens(value)
+}
+
+export function formatTotalUsage(value: { inputTokens: number; outputTokens: number; requestCount: number; usageCoverage: UsageCoverage }): string {
+  const { inputMissingRequestCount: input, outputMissingRequestCount: output } = value.usageCoverage
+  if (value.requestCount > 0 && input === value.requestCount && output === value.requestCount) return "—"
+  return formatTokens(value.inputTokens + value.outputTokens)
+}
+
+export function mergeUsageCoverage(left: UsageCoverage, right: UsageCoverage): UsageCoverage {
+  return {
+    inputMissingRequestCount: left.inputMissingRequestCount + right.inputMissingRequestCount,
+    outputMissingRequestCount: left.outputMissingRequestCount + right.outputMissingRequestCount,
+    reasoningMissingRequestCount: left.reasoningMissingRequestCount + right.reasoningMissingRequestCount,
+  }
 }
 
 export function formatCount(value: number): string {
@@ -240,19 +256,13 @@ export function formatInterruptionSummary(summary: RequestInterruptionSummary, t
   })
 }
 
-/** Missing usage remains unknown; positive observed totals are a lower bound. */
-export function formatInterruptedUsage(value: number, summary: RequestInterruptionSummary): string {
-  if (summary.usageUnobserved === 0) return formatTokens(value)
-  return value > 0 ? `≥ ${formatTokens(value)}` : "—"
-}
-
 export function shortThreadId(threadId: string): string {
   return threadId.length <= 14 ? threadId : `${threadId.slice(0, 8)}…${threadId.slice(-4)}`
 }
 export { formatElapsedDuration } from "../../../src/surfaces/elapsed-duration.js"
 
 export function formatCacheUsage(usage: CacheUsage | null) {
-  const cached = formatTokens(usage?.cachedInputTokens ?? null)
+  const cached = formatTokens(usage?.cachedInputTokens)
   const rate = usage !== null && usage.inputTokens > 0 && usage.cachedInputTokens !== null
     ? `${(usage.cachedInputTokens / usage.inputTokens * 100).toFixed(1)}%`
     : "—"

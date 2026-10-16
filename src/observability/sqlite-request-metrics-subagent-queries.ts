@@ -7,14 +7,17 @@ import type {
 import {
   toStoredCacheUsage,
   toStoredRequestOutcomes,
+  toStoredUsageCoverage,
   type CacheUsageRow,
   type RequestOutcomeRow,
+  type UsageCoverageRow,
 } from "./sqlite-request-metrics-row-codec.js";
 import {
   agentResponseSql,
   cacheUsageSql,
   metricsPageOffset,
   requestOutcomeSql,
+  usageCoverageSql,
   validateThreadId,
   type MetricsQueryReader,
 } from "./sqlite-request-metrics-query-base.js";
@@ -75,11 +78,12 @@ export class SqliteRequestMetricsSubagentQueries {
     const summary = this.reader.prepare(`
       ${scope}
       SELECT COUNT(*) AS request_count,
+        ${usageCoverageSql()},
         ${requestOutcomeSql()},
         COUNT(DISTINCT json_array(thread_id, turn_id)) FILTER (WHERE turn_id IS NOT NULL) AS turn_count,
         SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, ${cacheUsageSql}
       FROM scoped
-    `).get(...scopeParameters) as unknown as CacheUsageRow & RequestOutcomeRow & {
+    `).get(...scopeParameters) as unknown as CacheUsageRow & RequestOutcomeRow & UsageCoverageRow & {
       request_count: number;
       turn_count: number;
       input_tokens: number | null;
@@ -88,13 +92,14 @@ export class SqliteRequestMetricsSubagentQueries {
     const modelUsageRows = this.reader.prepare(`
       ${scope}
       SELECT model, COUNT(*) AS request_count,
+        ${usageCoverageSql()},
         COUNT(DISTINCT json_array(thread_id, turn_id)) FILTER (WHERE turn_id IS NOT NULL) AS turn_count,
         SUM(input_tokens) AS input_tokens,
         SUM(output_tokens) AS output_tokens, ${cacheUsageSql}
       FROM scoped
       GROUP BY model
       ORDER BY model IS NULL ASC, model ASC
-    `).all(...scopeParameters) as unknown as Array<CacheUsageRow & {
+    `).all(...scopeParameters) as unknown as Array<CacheUsageRow & UsageCoverageRow & {
       model: string | null;
       request_count: number;
       turn_count: number;
@@ -104,6 +109,7 @@ export class SqliteRequestMetricsSubagentQueries {
     const rows = this.reader.prepare(`
       ${scope}, grouped AS (
         SELECT thread_id, COUNT(DISTINCT turn_id) AS turn_count,
+          ${usageCoverageSql()},
           ${requestOutcomeSql()},
           COUNT(*) AS request_count, SUM(input_tokens) AS input_tokens,
           SUM(output_tokens) AS output_tokens, ${cacheUsageSql},
@@ -114,6 +120,8 @@ export class SqliteRequestMetricsSubagentQueries {
         GROUP BY thread_id
       )
       SELECT relation.*, grouped.turn_count, grouped.request_count,
+        grouped.input_missing_request_count, grouped.output_missing_request_count,
+        grouped.reasoning_output_missing_request_count,
         grouped.completed_request_count, grouped.interrupted_request_count,
         grouped.failed_request_count, grouped.incomplete_request_count,
         grouped.input_tokens, grouped.output_tokens, grouped.known_cached_input_tokens,
@@ -125,7 +133,7 @@ export class SqliteRequestMetricsSubagentQueries {
       LEFT JOIN model_request_metrics AS latest ON latest.id = grouped.latest_id
       ORDER BY grouped.${sortColumn} IS NULL ASC, grouped.${sortColumn} ${direction}, relation.thread_id ASC
       LIMIT ? OFFSET ?
-    `).all(...scopeParameters, query.limit, offset) as unknown as Array<CacheUsageRow & RequestOutcomeRow & {
+    `).all(...scopeParameters, query.limit, offset) as unknown as Array<CacheUsageRow & RequestOutcomeRow & UsageCoverageRow & {
       thread_id: string;
       parent_thread_id: string;
       parent_turn_id: string | null;
@@ -147,6 +155,7 @@ export class SqliteRequestMetricsSubagentQueries {
       : this.scopedTurnIds(rows.map((row) => row.thread_id), parentThreadId!, query.parentTurnId);
     return {
       subagents: rows.map((row) => ({
+          usageCoverage: toStoredUsageCoverage(row),
           threadId: row.thread_id,
           parentThreadId: row.parent_thread_id,
           parentTurnId: query.parentTurnId ?? row.parent_turn_id,
@@ -173,6 +182,7 @@ export class SqliteRequestMetricsSubagentQueries {
             : toStoredCacheUsage(row),
       })),
       summary: {
+        usageCoverage: toStoredUsageCoverage(summary),
         requestCount: summary.request_count,
         requestOutcomes: toStoredRequestOutcomes(summary),
         turnCount: summary.turn_count,
@@ -183,6 +193,7 @@ export class SqliteRequestMetricsSubagentQueries {
           : toStoredCacheUsage(summary),
       },
       modelUsage: modelUsageRows.map((row) => ({
+        usageCoverage: toStoredUsageCoverage(row),
         model: row.model,
         requestCount: row.request_count,
         turnCount: row.turn_count,

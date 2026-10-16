@@ -29,8 +29,12 @@ import {
   toStoredRequestOutcomes,
   toStoredMetricsAggregate,
   toStoredMetricsGroup,
+  toStoredUsageCoverage,
+  toStoredReviewUsage,
   type AggregateRow,
   type CacheUsageRow,
+  type UsageCoverageRow,
+  type ReviewUsageRow,
   type ErrorGroupRow,
   type ErrorSummaryRow,
   type MetricRow,
@@ -39,13 +43,14 @@ import { SqliteRequestMetricsSubagentQueries } from "./sqlite-request-metrics-su
 import { SqliteRequestMetricsThreadQueries } from "./sqlite-request-metrics-thread-queries.js";
 import {
   cacheUsageSql,
-  compactAggregateSql,
   metricsAggregateSql,
   metricsPageOffset,
   metricsScopeSql,
   normalizedStatusSql,
   observableCompletionSql,
   requestOutcomeSql,
+  usageCoverageSql,
+  reviewUsageSql,
   validateMetricsTimeRange,
   type MetricsQueryReader,
 } from "./sqlite-request-metrics-query-base.js";
@@ -227,10 +232,7 @@ export class SqliteRequestMetricsQueries {
     const aliasesSql = `WITH model_aliases AS MATERIALIZED (
       SELECT key AS original_model, value AS display_name FROM json_each(?)
     )`;
-    const displayModelSql = `CASE
-      WHEN model_request_metrics.request_purpose = 'autoApprovalReview' THEN 'auto-review'
-      ELSE COALESCE(model_aliases.display_name, model_request_metrics.model)
-    END`;
+    const displayModelSql = "COALESCE(model_aliases.display_name, model_request_metrics.model)";
     const rows = this.reader.prepare(`
       ${aliasesSql}
       SELECT ${displayModelSql} AS model, ${metricsAggregateSql},
@@ -326,6 +328,8 @@ export class SqliteRequestMetricsQueries {
       SELECT
         strftime(?, recorded_at_ms / 1000, 'unixepoch', 'localtime') AS period,
         ${cacheUsageSql},
+        ${usageCoverageSql()},
+        ${reviewUsageSql()},
         COUNT(*) AS request_count,
         SUM(input_tokens) AS input_tokens,
         SUM(cached_input_tokens) AS cached_input_tokens,
@@ -337,7 +341,7 @@ export class SqliteRequestMetricsQueries {
         AND recorded_at_ms < ?
       GROUP BY period
       ORDER BY period ASC
-    `).all(format, query.startAtMs, query.endAtMs) as unknown as Array<CacheUsageRow & {
+    `).all(format, query.startAtMs, query.endAtMs) as unknown as Array<CacheUsageRow & UsageCoverageRow & ReviewUsageRow & {
       period: string;
       request_count: number;
       input_tokens: number | null;
@@ -348,6 +352,8 @@ export class SqliteRequestMetricsQueries {
     }>;
     return rows.map((row) => ({
       period: row.period,
+      usageCoverage: toStoredUsageCoverage(row),
+      reviewUsage: toStoredReviewUsage(row),
       cacheUsage: toStoredCacheUsage(row),
       requestCount: row.request_count,
       inputTokens: row.input_tokens ?? 0,
@@ -544,7 +550,6 @@ export class SqliteRequestMetricsQueries {
   ): AggregateRow[] {
     const grouping = aggregationGrouping(dimension);
     const scope = metricsScopeSql(query);
-    const limit = dimension === "global" ? 1 : maximumAggregationGroups;
     return this.reader.prepare(`
       WITH filtered AS (
         SELECT
@@ -557,25 +562,13 @@ export class SqliteRequestMetricsQueries {
       SELECT
         group_provider AS provider,
         group_model AS model,
-        ${requestOutcomeSql()},
-        ${cacheUsageSql},
-        COUNT(*) AS request_count,
-        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
-          AS unsuccessful_request_count,
-        SUM(input_tokens) AS input_tokens,
-        SUM(cached_input_tokens) AS cached_input_tokens,
-        COUNT(input_tokens) AS input_token_count,
-        COUNT(cached_input_tokens) AS cached_input_token_count,
-        SUM(output_tokens) AS output_tokens,
-        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
-        ${compactAggregateSql},
+        ${metricsAggregateSql},
         COUNT(*) OVER () AS total_group_count
       FROM filtered
       GROUP BY group_provider, group_model
       ORDER BY request_count DESC, provider ASC, model ASC
-      LIMIT ?
-    `).all(...scope.params, limit) as unknown as AggregateRow[];
+      ${dimension === "model" ? "LIMIT ?" : ""}
+    `).all(...scope.params, ...(dimension === "model" ? [maximumAggregationGroups] : [])) as unknown as AggregateRow[];
   }
 }
 

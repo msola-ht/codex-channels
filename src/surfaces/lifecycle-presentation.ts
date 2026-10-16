@@ -35,6 +35,8 @@ import { missingFinalResponseText } from "./output-copy.js";
 import { formatReasoningEffort, reasoningEffortSettingName } from "./reasoning-effort-format.js";
 import {
   formatCacheHitRate,
+  formatObservedTokens,
+  formatObservedTotal,
   formatRequestCount,
   formatTokenCount,
 } from "./token-format.js";
@@ -413,10 +415,10 @@ export function createSubagentCompletedPresentation(
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
-    value: formatTokenCount(event.inputTokens + event.outputTokens),
+    value: formatObservedTotal(event),
     fields: debug ? [
       ...(cachedInputTokens === null
-        ? [{ label: "输入", value: formatTokenCount(event.inputTokens) }]
+        ? [{ label: "输入", value: formatObservedTokens(event.inputTokens, event.requestCount, event.usageCoverage?.inputMissingRequestCount) }]
         : [
             {
               label: "缓存",
@@ -427,11 +429,11 @@ export function createSubagentCompletedPresentation(
               value: formatTokenCount(Math.max(0, event.inputTokens - cachedInputTokens)),
             },
           ]),
-      { label: "输出", value: formatTokenCount(event.outputTokens) },
+      { label: "输出", value: formatObservedTokens(event.outputTokens, event.requestCount, event.usageCoverage?.outputMissingRequestCount) },
       ...(event.reasoningOutputTokens > 0
         ? [{
             label: "其中推理输出",
-            value: formatTokenCount(event.reasoningOutputTokens),
+            value: formatObservedTokens(event.reasoningOutputTokens, event.requestCount, event.usageCoverage?.reasoningMissingRequestCount),
           }]
         : []),
       ...(cachedInputTokens === null
@@ -547,8 +549,7 @@ export function createTurnCompletedPresentation(
       },
     );
     if (
-      event.timing?.requestInputTokens === undefined
-      || event.timing.requestCachedInputTokens === undefined
+      event.timing?.modelRequestCount === undefined
     ) {
       fallbackCacheField = {
         label: "最近请求缓存命中率",
@@ -578,7 +579,7 @@ export function createTurnCompletedPresentation(
   }
   if (event.contextCompactionCount !== undefined) {
     sessionFields.push({
-      label: "上下文压缩",
+      label: "其中上下文压缩",
       value: `${event.contextCompactionCount} 次`,
     });
   }
@@ -645,27 +646,28 @@ export function createTurnCompletedPresentation(
   }
   if (event.timing?.reasoningRequestCount !== undefined) {
     runFields.push({
-      label: "思考次数",
-      value: `${formatRequestCount(event.timing.reasoningRequestCount)} 次`,
+      label: "含推理输出的请求",
+      value: `${event.timing.usageCoverage?.reasoningMissingRequestCount ? "至少 " : ""}${formatRequestCount(event.timing.reasoningRequestCount)} 次`,
     });
   }
   if (fallbackCacheField) {
     runFields.push(fallbackCacheField);
   }
   if (
-    event.timing?.requestInputTokens !== undefined
+    event.timing?.modelRequestCount !== undefined
   ) {
-    const inputTokens = event.timing.requestInputTokens;
+    const inputTokens = event.timing.requestInputTokens ?? 0;
     const cachedInputTokens = event.timing.requestCachedInputTokens;
     const reasoningOutputTokens = event.timing.reasoningTokens ?? 0;
-    const outputTokens = event.timing.requestOutputTokens
-      ?? (event.timing.nonReasoningOutputTokens ?? 0) + reasoningOutputTokens;
+    const outputTokens = event.timing.requestOutputTokens ?? 0;
+    const coverage = event.timing.usageCoverage;
+    const requestCount = event.timing.modelRequestCount;
     runFields.push({
       title: "Token",
-      value: formatTokenCount(inputTokens + outputTokens),
+      value: formatObservedTotal({ inputTokens, outputTokens, requestCount, usageCoverage: coverage }),
       fields: debug ? [
         ...(cachedInputTokens === undefined
-          ? [{ label: "输入", value: formatTokenCount(inputTokens) }]
+          ? [{ label: "输入", value: formatObservedTokens(inputTokens, requestCount, coverage?.inputMissingRequestCount) }]
           : [
               {
                 label: "缓存",
@@ -678,12 +680,12 @@ export function createTurnCompletedPresentation(
             ]),
         {
           label: "输出",
-          value: formatTokenCount(outputTokens),
+          value: formatObservedTokens(outputTokens, requestCount, coverage?.outputMissingRequestCount),
         },
         ...(reasoningOutputTokens > 0
           ? [{
               label: "其中推理输出",
-              value: formatTokenCount(reasoningOutputTokens),
+              value: formatObservedTokens(reasoningOutputTokens, requestCount, coverage?.reasoningMissingRequestCount),
             }]
           : []),
         ...(cachedInputTokens === undefined
@@ -731,10 +733,10 @@ export function createTurnCompletedPresentation(
       ...requestOutcomeFields(task),
       {
         title: "Token",
-        value: formatTokenCount(task.inputTokens + task.outputTokens),
+        value: formatObservedTotal(task),
         fields: debug ? [
           ...(task.cachedInputTokens === null
-            ? [{ label: "输入", value: formatTokenCount(task.inputTokens) }]
+            ? [{ label: "输入", value: formatObservedTokens(task.inputTokens, task.requestCount, task.usageCoverage?.inputMissingRequestCount) }]
             : [
                 {
                   label: "缓存",
@@ -747,11 +749,11 @@ export function createTurnCompletedPresentation(
                   ),
                 },
               ]),
-          { label: "输出", value: formatTokenCount(task.outputTokens) },
+          { label: "输出", value: formatObservedTokens(task.outputTokens, task.requestCount, task.usageCoverage?.outputMissingRequestCount) },
           ...(task.reasoningOutputTokens > 0
             ? [{
                 label: "其中推理输出",
-                value: formatTokenCount(task.reasoningOutputTokens),
+                value: formatObservedTokens(task.reasoningOutputTokens, task.requestCount, task.usageCoverage?.reasoningMissingRequestCount),
               }]
             : []),
           ...(task.cachedInputTokens === null
@@ -784,7 +786,7 @@ export function createTurnCompletedPresentation(
     sessionFields.push(...requestOutcomeFields(session));
     sessionFields.push({
       title: "Token",
-      value: formatTokenCount(session.inputTokens + session.outputTokens),
+      value: formatObservedTotal(session),
       fields: [
         ...(session.cachedInputTokens === null ? [] : [{
             label: "缓存命中率",
@@ -859,6 +861,7 @@ function autoApprovalReviewField(
           : "未知（含子代理）",
     subfields: [
       ...outcomes.filter(([, count]) => count > 0).map(([label, count]) => ({ label, value: `${count} 次` })),
+      ...(review.usage === undefined ? [] : [{ label: "已记录审查请求", value: `${formatRequestCount(review.usage.requestCount)} 次` }]),
       ...(review.usage === undefined ? [] : [{
         label: "已记录审查 Token",
         value: review.usage.inputTokens === null && review.usage.outputTokens === null

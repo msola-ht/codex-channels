@@ -1033,6 +1033,9 @@ function parseMetricsFilters(url, threadId) {
 }
 
 function parseThreadQuery(url, threadId) {
+  if (url.searchParams.has("requestPurpose")) {
+    throw new ApiError(400, "unsupported_parameter", "任务统计固定排除自动审查，请在请求页按用途筛选");
+  }
   const sortKey = url.searchParams.get("sort") ?? "last";
   const sortDirection = url.searchParams.get("direction") ?? "desc";
   const sortKeys = threadId === undefined
