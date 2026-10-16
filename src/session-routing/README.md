@@ -11,8 +11,8 @@
   模型 Provider、实际 Default/Plan 协作模式、实际审批审查方式、更新时间/最近活跃时间；可选 `parentThreadId` 保留官方派生父子关系供本机归档识别和子代理交互归属核验，
   压缩 Item ID，不向业务层暴露完整官方 Turn。Thread 快照还保留官方当前模型与思考设置，供子代理开始和继续展示；只读查询支持取消，不把当前配置当作历史轮次遥测。端口可选声明已配置的模型 Provider 判定，用于把
   Provider 已被移除的历史 Thread 排除在自动接续之外，未实现的部署视为不做限制。
-- `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权限（沙箱、审批策略、
-  权限 Profile、可选审批审查方式）作为启动参数传给新建、分叉或恢复的 Thread；不按 Provider 或模型限制审批方式。已加载会话保留实际审批方式、订阅和活动 Turn 恢复管理能力，未知或 Guardian 值仍按实际值投影。协调持久化映射、订阅恢复、Provider/模型设置、
+- `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，前台不注入 Workspace 权限；
+  由 App Server 解析原生配置及会话继承，不按 Provider 或模型限制审批方式。已加载会话保留实际审批方式、订阅和活动 Turn 恢复管理能力，未知或 Guardian 值仍按实际值投影。协调持久化映射、订阅恢复、Provider/模型设置、
   压缩 Item ID、新建前台 Thread 的动态工具注册及 `thread/unsubscribe`，并按 Thread 向 Core 提供已绑定
   Workspace 的稳定 ID 与名称；动态工具不会触发既有前台 Thread 的替换或解绑；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
   已删除、已归档或恢复校验明确不匹配时移除持久化绑定；订阅恢复时把稳定 Thread 快照交回组合根。跨渠道接管只允许

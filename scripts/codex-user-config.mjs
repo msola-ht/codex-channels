@@ -96,7 +96,7 @@ export async function createCodexUserConfigClient({
         codexProcessInvocation(codexBinary, args, environment),
       terminateCodexProcess: terminateChildProcess,
     })),
-    { sandbox: "read-only" },
+    {},
   );
 }
 
@@ -137,7 +137,7 @@ export async function createSharedCodexUserConfigClient({ environment = process.
     createCodexProcessInvocation: (args) => codexProcessInvocation(codexBinary, args, environment),
     terminateCodexProcess: terminateChildProcess,
   });
-  return new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+  return new CodexAppServerClient(new JsonRpcClient(transport), {});
 }
 
 function configValueAtPath(config, keyPath) {

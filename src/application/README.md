@@ -16,8 +16,6 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
   按钮模型选择通过 `selectModel` 接受精确 Provider 与模型身份，不重新解释为文本选择器。
-  `/workspaceperm autoreview on|off|clear` 修改 Workspace 默认审批方式；`selectWorkspaceAutoReview` 的结构化按钮固定原 Workspace ID，防止旧菜单修改新工作区。
-  工作区权限修改结果同时携带已确认的 Workspace 与本次结构化更新，Surface 据更新类型呈现对应的生效范围。
   `/autoreview [on|off]` 查询或修改当前 Thread 实际审批方式；审批方式不受本地 Provider 与模型白名单限制；`selectAutoReview` 的按钮固定原 Thread ID，由会话用例在锁内复核。
   会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider；
   存在原 Thread 时，新会话结果同时携带原 Thread ID，供三个 Surface 像自动解除占用提示一样
@@ -44,7 +42,6 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   普通 `status` 不执行 Git IO，展示入口 `statusForDisplay` 通过组合根注入的异步只读端口取得当前 Workspace Git 分支；完成卡仅调用 `workspaceGitBranch`，不连带查询模型与账户状态；
   `/stop` 同时取消当前目标的视频准备及当前 Thread 尚未提交的图片准备；已提交 Turn 继续使用官方中断。
-  Workspace 权限更新只写配置；结构化 Auto-review 选择在 Conversation 锁内核对原 Workspace ID，拒绝过期按钮，不改变已加载 Thread 的实际审批方式。
   当前 Thread Auto-review 写入则在同一锁内要求已有绑定、空闲且无待处理交互，未知或 Guardian 实际值只读；已确认的相同值不写。等待 Client 的权威通知确认后再核对绑定，返回 Router 的实际值，不创建 Thread、启动 Turn 或乐观修改缓存。
   所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；
   通过 Core 跟踪恢复期间的 Turn 通知，在绑定成功后恢复仍有效的活动状态。
@@ -136,9 +133,6 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   不提供市场搜索、安装、卸载或分享能力；已安装目录的本地搜索由命令层处理。
 - `permission-port.ts`：定义 Permission Profile 的稳定 ID、说明和策略可选状态查询；只表示
   当前 Workspace 可见目录，不授予权限，也不承载审批决定。
-- `workspace-permission-port.ts`：定义渠道 `/workspaceperm` 使用的工作区权限写入窄端口；
-  Application 只按当前 Conversation 绑定的 Workspace 传递沙箱、审批策略或权限 Profile 更新，
-  不接触配置文件。
 - `thread-occupancy-port.ts`：定义渠道 `/release` 使用的 Thread 占用查询与释放窄端口；只返回
   稳定占用状态、持锁进程摘要和释放结果，不暴露进程级实现。
 - `thread-queue-port.ts`：定义原生 Thread Queue 的六个稳定用例；Application 只接收纯文本写入，

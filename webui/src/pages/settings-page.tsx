@@ -12,7 +12,6 @@ import { GatewaySettingsSection } from "@/components/settings/gateway-settings-s
 import { SettingsCliCommands } from "@/components/settings/settings-cli-commands"
 import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
 import { GatewaySettingsCard } from "@/components/settings/gateway-settings-card"
-import { WorkspaceSettingsCard } from "@/components/settings/workspace-settings-card"
 import { WebuiDataSettingsCard } from "@/components/settings/webui-data-settings-card"
 import { ManagedServices, RecentManagementTasks } from "@/components/settings/managed-services"
 import { ManagementTaskControls, ManagementTaskConfirmationDialog } from "@/components/settings/management-task-controls"
@@ -45,7 +44,6 @@ function PreferenceSettingsPage({ section, summary }: { section: "general" | "pe
     <AppServerSettingsCard management={codex} section={section} onChanged={reloadGateway} />
     <GatewaySettingsSection management={gateway} onChanged={reloadCodex}>
       <GatewaySettingsCard management={gateway} section={section} />
-      {section === "permissions" && <WorkspaceSettingsCard management={gateway} />}
     </GatewaySettingsSection>
     {section === "general" && summary && <SettingsCliCommands scope="general" summary={summary} />}
   </SettingsPageFrame>

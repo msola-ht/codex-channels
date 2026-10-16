@@ -132,7 +132,6 @@ const settingErrorKeys: Record<string, MessageKey> = {
   "too-long": "settingsUi.validation.tooLong",
   "invalid-proxy": "settingsUi.validation.proxy",
   "unknown-workspace": "settingsUi.validation.workspace",
-  "permission-conflict": "settingsUi.validation.permissionConflict",
   "required-revision": "relay.stale",
   "unknown-setting": "settingsUi.validation.unsupported",
   "unknown-field": "settingsUi.validation.unsupported",
@@ -180,7 +179,6 @@ export function translateSettingErrorCode(t: Translate, code: string, kind?: str
     return t(integerSettingKeys[kind]!)
   }
   if (code === "too-long" && kind === "system.default-model") return t("settingsUi.validation.modelLength")
-  if (code === "too-long" && kind === "workspace.permissions") return t("settingsUi.validation.profileLength")
   if (code === "too-long" && kind === "system.official-tui-identity") return t("settingsUi.validation.identityLength")
   return Object.hasOwn(settingErrorKeys, code) ? t(settingErrorKeys[code]!) : translateApiErrorCode(t, code)
 }

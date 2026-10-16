@@ -317,8 +317,6 @@
   目录持有一个 DPAPI 保护的随机 256-bit 主密钥，记录继续使用随机 IV 的 AES-256-GCM，文件名只含
   记录键摘要，目录和文件同时复用当前 SID 私有 ACL 与原子替换。
   异步记录操作按目录串行，至多接纳 16 项，整次预算 15 秒；主密钥以独占发布避免竞争覆盖，既有磁盘结构不变。
-- `workspace-permission.mjs` / `workspace-permission.d.mts`：统一 Workspace 的 Sandbox、审批策略
-  与 Permission Profile 更新及互斥规则，供 CLI、Config 菜单和渠道写入适配器复用。
 
 这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随本地 npm 打包产物安装，不向 npm Registry 发布新版本。
 

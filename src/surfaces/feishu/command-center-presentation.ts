@@ -19,7 +19,6 @@ import {
 import {
   formatConversationPermissions,
   formatConversationAutoReview,
-  formatConversationWorkspacePermissions,
   formatConversationStatus,
 } from "../conversation-workspace-status-command-format.js";
 import { formatCodexProviderLabel, formatModelDisplayName, formatModelDisplayNameWithId, formatModelSpeedSupport, formatProviderModelSummary, formatServiceTier, modelListDisplayName, modelListEntry } from "../provider-format.js";
@@ -457,7 +456,7 @@ export function renderCommandCenterChoices(
         `- ${reasoningEffortSettingName(task.reasoningEffort)}：${escapeFeishuCardMarkdown(formatReasoningEffort(task.reasoningEffort, "默认"))}`,
         `- Sandbox：${escapeFeishuCardMarkdown(task.sandbox)}`,
         `- 权限 Profile：${escapeFeishuCardMarkdown(task.permissions ?? "未配置")}`,
-        "- 网络：沿用 Workspace 当前权限",
+        "- 网络：沿用目标 App Server 的项目配置",
         "- 审批：无人值守时一律拒绝",
         "",
         "**任务内容**",
@@ -599,13 +598,9 @@ export function renderCommandCenterChoices(
   if (action === "permissions" && result.kind === "permissions") {
     return {
       title: "权限只读查询",
-      description: `${formatConversationPermissions(result)}\n\n点击下方按钮进入 Workspace 权限设置。`,
+      description: formatConversationPermissions(result),
       descriptionFormat: "markdown",
-      choices: [{
-        label: "修改 Workspace 权限",
-        action: "workspaceperm",
-        input: "",
-      }],
+      choices: [],
     };
   }
   if (action === "status" && result.kind === "status") {
@@ -634,44 +629,6 @@ export function renderCommandCenterChoices(
           input: `${value} ${threadId}`,
         }))
         : [],
-    };
-  }
-  if (
-    action === "workspaceperm"
-    && result.kind === "workspace-permissions"
-  ) {
-    return {
-      title: "工作区权限",
-      description: formatConversationWorkspacePermissions(result),
-      descriptionFormat: "markdown",
-      choices: [
-        ...(["on", "off", "clear"] as const).map((value) => ({
-          label: value === "on" ? "工作区默认：自动审批" : value === "off" ? "工作区默认：手动审批" : "工作区默认：跟随 Codex 默认",
-          action: "workspace-autoreview-select" as const,
-          input: `${value} ${result.workspace.id}`,
-        })),
-        {
-          label: `沙箱：${workspacePermissionLabel(
-            "sandbox",
-            result.workspace.sandbox,
-          )}`,
-          action: "workspaceperm",
-          input: "sandbox",
-        },
-        {
-          label: `审批：${workspacePermissionLabel(
-            "approval",
-            result.workspace.approvalPolicy,
-          )}`,
-          action: "workspaceperm",
-          input: "approval",
-        },
-        {
-          label: `权限 Profile：${result.workspace.permissions ?? "未配置"}`,
-          action: "workspace-perm-profile",
-          input: "",
-        },
-      ],
     };
   }
   if (result.kind !== "models") {
@@ -818,84 +775,6 @@ function sessionNavigationChoices(
         }]
       : []),
   ];
-}
-
-export function renderWorkspacePermissionFieldChoices(
-  field: "sandbox" | "approval",
-): FeishuCommandCenterChoices {
-  if (field === "sandbox") {
-    return {
-      title: "选择沙箱模式",
-      choices: [
-        {
-          label: "只读",
-          action: "workspaceperm",
-          input: "sandbox read-only",
-        },
-        {
-          label: "工作区可写",
-          action: "workspaceperm",
-          input: "sandbox workspace-write",
-        },
-        {
-          label: "完全访问",
-          action: "workspaceperm",
-          input: "sandbox danger-full-access",
-        },
-        {
-          label: "清除（使用全局）",
-          action: "workspaceperm",
-          input: "sandbox clear",
-        },
-      ],
-    };
-  }
-  return {
-    title: "选择审批策略",
-    choices: [
-      {
-        label: "不信任",
-        action: "workspaceperm",
-        input: "approval untrusted",
-      },
-      {
-        label: "按需审批",
-        action: "workspaceperm",
-        input: "approval on-request",
-      },
-      {
-        label: "免审批",
-        action: "workspaceperm",
-        input: "approval never",
-      },
-      {
-        label: "清除（使用默认）",
-        action: "workspaceperm",
-        input: "approval clear",
-      },
-    ],
-  };
-}
-
-function workspacePermissionLabel(
-  field: "sandbox" | "approval",
-  value: string | undefined,
-): string {
-  if (value === undefined) {
-    return "未配置";
-  }
-  const labels = field === "sandbox"
-    ? ({
-        "read-only": "只读",
-        "workspace-write": "工作区可写",
-        "danger-full-access": "完全访问",
-      } as const)
-    : ({
-        untrusted: "不信任",
-        "on-request": "按需审批",
-        never: "免审批",
-      } as const);
-  return (labels as Record<string, string>)[value] ?? value;
 }
 
 function stripMarkdownHeading(value: string): string {

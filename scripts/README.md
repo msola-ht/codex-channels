@@ -302,7 +302,7 @@
   和已配置的代理字段名，不显示渠道凭据、访问令牌或代理值。
 - `config-management.mjs` / `config-management.d.mts`：提供不依赖 prompts、TTY 或终端文案的 Gateway
   设置脱敏读取与明确修改接口；读取快照及写入前复用当前版本的完整结构校验，拒绝未知字段和非法值，校验不回填默认值或替换带注释来源的原文对象；只接受受控的显示、系统（含一键官方 TUI 身份与模型上游终端标识）、自动化、网络、
-  高级、Telegram 格式、WebUI、指标和 Workspace 权限输入，返回稳定字段错误与精确生效动作，
+  高级、Telegram 格式、WebUI、指标和默认 Workspace 输入，返回稳定字段错误与精确生效动作，
   凭据和网络读取只显示是否已配置；
   网络操作只更新共享 Codex `.env`，不写入 Gateway TOML；读取返回覆盖两个文件的修订，
   修改必须携带并在应用前复核；其他设置的最终提交复用 Gateway Config 的共享写锁
@@ -310,14 +310,13 @@
   在 `[codex].terminal_identity` 未配置且运行命令的终端可探测时按该终端补入，供
   `codexc install` 与 `codexc update` 复用；`codexc config` 与 WebUI 改用同一探测
   结果预填，由用户确认后写入。
-- `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`、
-  `config-workspace-management.mjs`：保存 Config 管理接口的共享稳定错误，以及 WebUI、指标和 Workspace
-  的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
-  Workspace 默认审批方式跨 Provider 共享，不按 Provider 或模型设限；CLI 与 WebUI 共用输入、配置修订校验及写入接口。
+- `config-management-error.mjs`、`config-webui-management.mjs`、`config-metrics-management.mjs`：
+  保存 Config 管理接口的共享稳定错误，以及 WebUI、指标的脱敏投影、输入校验与文档修改语义；
+  CLI 菜单不直接读写这些配置段。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理与日志等级；日志等级统一通过 `debug-setup.mjs` 写入，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入 Codex `.env`，与 WebUI 共用 Config 管理入口。
 - `config-display-menu.mjs`：独立管理模型显示组、操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
-- `config-system-menu.mjs` / `config-system-menu.d.mts`：以受控分组分别提供 Gateway 会话、身份与时区、调用记录入口，分组越界选择明确拒绝；向 Workspace 菜单公开默认项设置，复用配置修订与生效通知。管理模型请求转储及其保留天数、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
+- `config-system-menu.mjs` / `config-system-menu.d.mts`：以受控分组分别提供 Gateway 会话、身份与时区、调用记录入口，分组越界选择明确拒绝；向 Workspace 菜单公开默认项设置，复用配置修订与生效通知。管理模型请求转储及其保留天数、审批超时、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份、模型上游终端标识与服务时区；模型请求转储独立写入
   `[debug].model_traffic_dump` / 既有裁剪模式参数 / `model_traffic_retention_days` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
   编辑，留空即删除配置；服务时区与网关时区分别复用 `codexc timezone` 与 `codexc timezone --gateway`。
@@ -330,8 +329,6 @@
 - `config-webui-menu.mjs`：独立管理 WebUI 启用状态、监听地址、端口和访问令牌交互；启用状态写入
   `[webui] enabled` 并据此决定 `codexc start/restart all` 是否启动 WebUI；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
-- `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略、Permission Profile 与 Auto-review 默认审查方式；
-  保持 Sandbox 与 Permission Profile 互斥，并只写回被选择的 Workspace 配置。
 - `management-access.mjs`、`management-confirmations.mjs`、`management-audit.mjs`、
   `management-security.mjs` / `management-security.d.mts`：本机管理适配器复用的无 HTTP 安全基础，
   覆盖高风险确认、Origin、限速、请求上限、安全响应头和脱敏审计；WebUI 管理路由复用其中的请求约束、
@@ -395,7 +392,7 @@
   消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
   稳定错误；每次凭据验证使用独立 Token 缓存，鉴权和 Bot 查询均受请求期限与会话取消约束。
 - `feishu-registration.mjs` / `feishu-registration-worker.mjs`：在独立 Worker 内复用锁定 SDK 的扫码注册，限定注册开始和轮询请求期限；父端取消、失败或完成后等待 Worker 终止，不在后台遗留注册请求，也不更改主进程的 SDK HTTP 默认值。
-- `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单、目录创建与已有目录注册，并调用统一的 Workspace 权限设置用例；
+- `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单、目录创建与已有目录注册，不保存或写入执行权限；
   默认工作区选择复用 `config-system-menu.mjs` 的版本化配置写入，移除操作仅移除注册；本次菜单循环保留上次选择。
   `list --json` 返回稳定的 Workspace 注册摘要；CLI 入口只负责分发。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。交互菜单按精确 ID 移除，避免数字 ID 被解释为列表序号；目录状态复用共享只读检查。
@@ -420,18 +417,15 @@
   不根据 OpenAI 登录状态自动选择第三方，不修改主配置。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；未显式选择时连接主实例，
   显式 Provider 通过共享映射选择相应 Socket 和规范 `sf-*` Profile，连接对应隔离实例并供 Remote TUI
-  完成第三方 Provider 认证；同时按当前目录或显式
-  `--workspace` 解析有效 Sandbox、审批策略、Permission Profile 与可选审批审查方式，第三方 Profile 不复制权限，
-  用户显式传给 Codex 的权限参数优先；个人 Profile 也沿用匹配的 Workspace 权限；
+  完成第三方 Provider 认证；当前目录或显式 `--workspace` 只决定执行目录，第三方 Profile 不复制权限，
+  不注入 Gateway 权限；原生显式参数与个人 Profile 由 Codex 自行处理；
   聚合选择复用共享 Runtime 拓扑与 Supervisor 按需租约，不生成磁盘 Profile；启动前通过已有
   Codex Client 读取服务端默认模型与目录，投影启动设置，避免本地 OpenAI 默认模型覆盖聚合目录。
   透传 `-m`/`--model` 或 `-c model=...` 选择目录内精确模型时，按 Codex 的最终模型优先级使用目标模型的默认思考等级；
   服务端默认模型保留服务端思考等级，显式 `-c model_reasoning_effort=...` 优先，并尊重 `--` 参数边界。
-  自动审查沿用工作区或用户显式设置，不按 Provider 或模型过滤、降级，也不为此固定请求模型。
+  自动审查沿用原生配置或用户显式设置，不按 Provider 或模型过滤、降级，也不为此固定请求模型。
   Remote 恢复及继承式分叉保留历史实际模型和 reviewer。
   聚合目录和 Provider 不允许由透传参数替换；
-  Workspace 的 `untrusted` 保留给 App Server Thread，但在没有显式审批覆盖时拒绝映射为固定版 CLI
-  已退役的公开参数，不静默改成更宽松策略；
   配置错误由脚本稳定展示，Codex 子进程的终止信号原样向上传播。
 - `prepare-codex-upgrade.mjs`：在干净工作区校验精确目标 CLI，调用现有协议生成和版本同步，
   完成基础一致性检查后把差异交给 Codex 审查。
@@ -580,7 +574,7 @@
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
   稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用；Codex 用户偏好使用
   `next-thread / codex`、`next-tui / codex` 和 `next-thread-and-tui / codex` 分别表示新 Thread、
-  新启动 TUI 或两类生命周期读取，Workspace 权限使用 `reload / gateway`，
+  新启动 TUI 或两类生命周期读取，Workspace 注册表使用 `reload / gateway`，
   App Server 重启动作使用 `restart / app-server`，App Server 时区使用
   `restart / app-server-gateway-webui` 并列出三个服务的重启命令；本模块不承载服务控制。
 - `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一配置写入后的生效提示，区分新会话读取、

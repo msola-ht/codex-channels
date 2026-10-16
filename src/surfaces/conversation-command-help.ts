@@ -11,7 +11,6 @@ export const conversationCommandDescriptions = {
   unpin: "取消固定当前会话",
   status: "查看当前状态",
   workspace: "列出或切换 Workspace",
-  workspaceperm: "查看或修改当前工作区权限",
   autoreview: "查看或切换当前会话审批方式",
   stop: "停止当前任务",
   queue: "管理 App Server 持久队列",
@@ -54,9 +53,8 @@ export const conversationCommandHelpSections = [
   {
     title: "运行与项目：",
     lines: [
-      "/status · /workspace [序号|ID|名称] · /workspaceperm",
+      "/status · /workspace [序号|ID|名称]",
       { command: "/autoreview [on|off]", description: "（当前会话后续轮次）" },
-      { command: "/workspaceperm autoreview <on|off|clear>", description: "（工作区默认审批方式）" },
       "/stop · /queue add <文本> · /queue list [页码]",
       "/queue update <完整 ID 或列表序号> <文本> · /queue delete <完整 ID 或列表序号>",
       "/queue reorder <完整 ID 或列表序号> <目标位置> · /queue start [完整 ID 或列表序号]",

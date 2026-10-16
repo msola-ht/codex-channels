@@ -16,6 +16,8 @@
   回答提交结束前持续保护原 Thread，整个问题流程结束后触发后台空闲复核；审批类交互则在官方 `serverRequest/resolved` 后解析绑定祖先并复核，避免只清理交互状态而遗留后台订阅。
 - `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限；异步预检返回后及 Thread 创建后再次复核当前授权、取消、Workspace 与投递准入，撤权时释放新建后台绑定而不启动 Turn。临时容量拒绝不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
   同一提交守卫穿过后台排队、投递准入和 Provider 准备到 Client 最终写入前；提交前取消或授权失效明确收敛，已发写入仍按真实响应处理，已知新 Thread 的取消保留身份并释放绑定。
+  权限预检按实际 Provider 与授权 cwd 查询原生明确受限沙箱，未知缺省或命名 Profile 拒绝。
+  创建不覆盖沙箱，仅设置无人值守 `never`；实际响应符合目录、审批策略和预检沙箱后才启动 Turn。
 - `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态；确认离线终态后通过组合层向原 Conversation 发布恢复通知，再释放后台绑定。恢复包含已知 Thread 的 `uncertain` Run，结果未知不清除无人值守拒绝归属；精确 Turn 的终态只释放该未知 Run 的运行期归属，不改写历史结果。启动响应前每 Run 只保留一个带 Turn ID 的完成候选，其他轮次不覆盖它；启动响应不匹配时在五秒和分页上限内读取权威历史的精确 Turn，缺失或读取失败保留为 `uncertain`，不能将同 Thread 的其他轮次用于结算。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
 - `scheduled-task-server-request.ts`：按启动恢复及实时登记的 Thread/Run 归属，在首次异步操作前记录无人值守拒绝，避免并发 Turn 完成误报成功；持久化失败保留进程内拒绝事实并记录告警。为已关联的计划任务 Thread 返回五类 Server Request 的官方安全拒绝形状；普通命令和文件审批返回 `decline`，已有终端输入 `writeStdin` 返回 `cancel` 中止本轮，其他方法明确失败；非计划任务请求交给既有审批处理器。只在 `scheduled_tasks.enabled=true` 时由组合根安装。
 - `scheduled-task-tool-request.ts`：校验前台 `item/tool/call` 的 Thread 绑定、唯一授权 Actor 和
@@ -108,8 +110,6 @@
   思考等级、请求结果和 Token，不在 Tracker 内重复计算。关闭时组合根先排空入站及输出登记队列，
   再调用 `drain`，以共享 5 秒期限结算已确认终态（含分离的旧轮次），指标超时按不可用输出；
   迟到结算不重复发布，不为仍运行的子代理伪造终态，持久接收入口在结算后才关闭。
-- `workspace-permission-writer.ts`：把渠道 `/workspaceperm` 的工作区权限更新写回
-  `config.toml` 并校验 `permissions` 与 `sandbox` 互斥；审批方式不按 Provider 或模型设限，文件变化由配置监听热加载。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、窄会话能力与共享命令执行器上下文及运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
 - `surface-composition.ts`：在组件图构造前按已验证配置异步加载 Telegram、飞书和微信内置插件，再同步创建渠道；创建渠道前初始化共享 `uploads` 根并收紧私有权限，拒绝符号链接或非当前用户所有的根，无渠道插件时不创建目录。把组合根创建的共享命令执行器注入各端，并保留各平台访问策略、

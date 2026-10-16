@@ -37,18 +37,6 @@ const workspaceSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
   name: z.string().trim().min(1).max(64),
   cwd: z.string().trim().min(1),
-  sandbox: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
-  approval_policy: z.enum(["untrusted", "on-request", "never"]).optional(),
-  approvals_reviewer: z.enum(["user", "auto_review"]).optional(),
-  permissions: z.string().trim().min(1).max(128).optional(),
-}).superRefine((workspace, context) => {
-  if (workspace.sandbox !== undefined && workspace.permissions !== undefined) {
-    context.addIssue({
-      code: "custom",
-      path: ["permissions"],
-      message: "workspace 的 permissions 与 sandbox 不能同时设置",
-    });
-  }
 });
 
 const feishuSchema = z.strictObject({
@@ -181,7 +169,6 @@ const codexSchema = z.strictObject({
   binary: z.string().min(1).default("codex"),
   socket_path: z.string().min(1).default("runtime/codex-app-server.sock"),
   default_model: z.string().optional(),
-  sandbox: z.enum(["read-only", "workspace-write"]).default("workspace-write"),
   client_identity: clientIdentitySchema.optional(),
   upstream_user_agent: upstreamUserAgentSchema.optional(),
   terminal_identity: terminalIdentitySchema.optional(),

@@ -20,6 +20,7 @@ import type {
   ScheduledTaskExecutionPort,
   ScheduledTaskExecutionResult,
   ScheduledTaskOperationContext,
+  ScheduledTaskSandbox,
 } from "../scheduled-tasks/index.js";
 import type { SessionRouter } from "../session-routing/index.js";
 import type { BindingStore } from "../storage/index.js";
@@ -30,11 +31,16 @@ export interface ScheduledTaskModelPort {
   isProviderConfigured(provider: string): boolean;
   ensureProvider(provider: string): Promise<void>;
   isModelAvailable(provider: string, model: string): Promise<boolean>;
+  readPermissionSettings(cwd: string, provider: string, signal?: AbortSignal): Promise<{
+    readonly sandbox: ScheduledTaskSandbox;
+    readonly permissions: null;
+  }>;
 }
 
 export interface ScheduledTaskExecutorOptions {
   /** Return false when the configured Surface account is no longer running. */
   isSurfaceEnabled: (target: ConversationTarget) => boolean;
+  isActorAuthorized: (target: ConversationTarget, actorId: string) => boolean;
   /** Temporary output pressure does not revoke task authorization. */
   acceptsExecution: (target: ConversationTarget) => boolean;
   /** Associate a fresh Thread before the Turn-start write begins. */
@@ -62,6 +68,7 @@ export interface ScheduledTaskExecutorOptions {
 export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
   private readonly acceptsExecution: (target: ConversationTarget) => boolean;
   private readonly isSurfaceEnabled: (target: ConversationTarget) => boolean;
+  private readonly isActorAuthorized: ScheduledTaskExecutorOptions["isActorAuthorized"];
   private readonly onThreadStarted: ScheduledTaskExecutorOptions["onThreadStarted"];
   private readonly onTurnStarted: ScheduledTaskExecutorOptions["onTurnStarted"];
   private readonly onRunStateChangedHook: ScheduledTaskExecutorOptions["onRunStateChanged"];
@@ -80,7 +87,9 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       typeof models.isProviderConfigured !== "function"
       || typeof models.ensureProvider !== "function"
       || typeof models.isModelAvailable !== "function"
+      || typeof models.readPermissionSettings !== "function"
       || typeof options.isSurfaceEnabled !== "function"
+      || typeof options.isActorAuthorized !== "function"
       || typeof options.acceptsExecution !== "function"
       || typeof options.onThreadStarted !== "function"
       || typeof options.onTurnStarted !== "function"
@@ -89,6 +98,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       throw new Error("计划任务无人值守校验依赖不完整");
     }
     this.isSurfaceEnabled = options.isSurfaceEnabled;
+    this.isActorAuthorized = options.isActorAuthorized;
     this.acceptsExecution = options.acceptsExecution;
     this.onThreadStarted = options.onThreadStarted;
     this.onTurnStarted = options.onTurnStarted;
@@ -110,7 +120,9 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
   }
 
   async validateRun(task: ScheduledTask, signal?: AbortSignal): Promise<ScheduledTaskRunValidation | undefined> {
-    return await this.validate(task, toTarget(task), signal);
+    // Recovery settles an existing Turn. Current native permission settings
+    // govern only a fresh execution and cannot establish that Turn's outcome.
+    return this.validateAuthorization(task, toTarget(task), signal);
   }
 
   async execute(
@@ -121,17 +133,24 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
   ): Promise<ScheduledTaskExecutionResult> {
     const target = toTarget(task);
     if (!this.acceptsExecution(target)) return { kind: "failed", category: "capacity" };
-    let validation: ValidationFailure | undefined;
+    let prepared: Awaited<ReturnType<ScheduledTaskExecutor["validate"]>>;
     try {
       operation?.assertCurrent();
-      validation = await this.validate(task, target, signal);
+      prepared = await this.validate(task, target, signal);
       operation?.assertCurrent();
     }
     catch (error) {
       if (signal.aborted) return { kind: "interrupted" };
       throw error;
     }
-    validation ??= this.validateCurrent(task, target);
+    if ("category" in prepared) {
+      return {
+        kind: "failed",
+        category: prepared.category,
+        ...(prepared.blockTask ? { blockTask: true } : {}),
+      };
+    }
+    const validation = this.validateCurrent(task, target);
     if (validation) {
       return {
         kind: "failed",
@@ -146,6 +165,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     // Provider/model validation can await network I/O; recheck before creating a Thread.
     if (!this.acceptsExecution(target)) return { kind: "failed", category: "capacity" };
     const workspace = this.workspaces.require(task.workspaceId);
+    if (workspace.cwd !== prepared.cwd) return { kind: "failed", category: "workspace" };
     const rejectedBeforeSubmit = new Error("计划任务在提交前已失效");
     let submissionRejection: ScheduledTaskExecutionResult = { kind: "interrupted" };
     const beforeSubmit = (): void => {
@@ -157,10 +177,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       }
       const currentValidation = this.validateCurrent(task, target);
       const currentWorkspace = this.workspaces.get(task.workspaceId);
-      const workspaceChanged = currentWorkspace?.cwd !== workspace.cwd
-        || currentWorkspace.sandbox !== workspace.sandbox
-        || currentWorkspace.approvalPolicy !== workspace.approvalPolicy
-        || currentWorkspace.permissions !== workspace.permissions;
+      const workspaceChanged = currentWorkspace?.cwd !== workspace.cwd;
       if (currentValidation || workspaceChanged || !this.acceptsExecution(target)) {
         submissionRejection = {
           kind: "failed",
@@ -170,25 +187,11 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
         throw rejectedBeforeSubmit;
       }
     };
-    const permission = task.permission;
-    // Store v1 normalizes this field, but keep the executor closed if a test or
-    // a future store implementation supplies an invalid value.
-    if (
-      permission === null
-      || (permission.sandbox !== "read-only" && permission.sandbox !== "workspace-write")
-      || permission.approvalPolicy !== "never"
-    ) {
-      return { kind: "failed", category: "authorization" };
-    }
-
     const provider = task.modelProvider ?? "openai";
     const startOptions = {
       beforeSubmit,
       ...(task.model == null ? {} : { model: task.model }),
       ...(task.modelProvider == null ? {} : { modelProvider: provider }),
-      ...(workspace.permissions !== undefined
-        ? { permissions: workspace.permissions }
-        : { sandbox: workspace.sandbox ?? "read-only" }),
       approvalPolicy: "never" as const,
       threadSource: "automation" as const,
     };
@@ -213,6 +216,18 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       if (error !== rejectedBeforeSubmit) throw error;
       await this.releaseFreshBackground(threadId);
       return withThreadId(submissionRejection, threadId);
+    }
+
+    const effective = started.session.effectiveSettings;
+    if (
+      effective.cwd !== workspace.cwd
+      || effective.approvalPolicy !== "never"
+      || effective.sandbox !== prepared.permission.sandbox
+      || effective.permissions !== prepared.permission.permissions
+    ) {
+      this.logger?.error({ threadId }, "计划任务 Thread 的实际权限与原生受限预检不一致");
+      await this.releaseFreshBackground(threadId);
+      return { kind: "failed", category: "authorization", threadId };
     }
 
     const actualProvider = started.session.modelProvider ?? started.session.thread.modelProvider;
@@ -280,6 +295,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
   private validateCurrent(task: ScheduledTask, target: ConversationTarget): ValidationFailure | undefined {
     if (!isSupportedSurface(target.surface)) return permanent("authorization");
     if (!this.isSurfaceEnabled(target)) return permanent("authorization");
+    if (!this.isActorAuthorized(target, task.actorId)) return permanent("authorization");
     if (!this.bindings.conversations().some((candidate) => sameTarget(candidate, target))) {
       return permanent("authorization");
     }
@@ -296,10 +312,6 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     }
     const workspace = this.workspaces.get(task.workspaceId);
     if (!workspace) return permanent("workspace");
-    if (workspace.sandbox === "danger-full-access") return permanent("authorization");
-    if (workspace.approvalPolicy !== undefined && workspace.approvalPolicy !== "never") {
-      return permanent("approval");
-    }
     const provider = task.modelProvider ?? "openai";
     if (
       !this.models.isProviderConfigured(provider)
@@ -310,6 +322,37 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
   }
 
   private async validate(
+    task: ScheduledTask,
+    target: ConversationTarget,
+    signal?: AbortSignal,
+  ): Promise<ValidationFailure | {
+    readonly cwd: string;
+    readonly permission: { readonly sandbox: ScheduledTaskSandbox; readonly permissions: null };
+  }> {
+    const authorization = await this.validateAuthorization(task, target, signal);
+    if (authorization) return authorization;
+    signal?.throwIfAborted();
+    const current = this.validateCurrent(task, target);
+    if (current) return current;
+    const provider = task.modelProvider ?? "openai";
+    const cwd = this.workspaces.require(task.workspaceId).cwd;
+    let permission: { readonly sandbox: ScheduledTaskSandbox; readonly permissions: null };
+    try {
+      permission = await this.models.readPermissionSettings(cwd, provider, signal);
+      signal?.throwIfAborted();
+    } catch (error) {
+      signal?.throwIfAborted();
+      return { category: "authorization", blockTask: error instanceof UserFacingError };
+    }
+    const afterRead = this.validateCurrent(task, target);
+    if (afterRead) return afterRead;
+    if (this.workspaces.require(task.workspaceId).cwd !== cwd) {
+      return { category: "workspace", blockTask: false };
+    }
+    return { cwd, permission };
+  }
+
+  private async validateAuthorization(
     task: ScheduledTask,
     target: ConversationTarget,
     signal?: AbortSignal,

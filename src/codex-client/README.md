@@ -162,8 +162,10 @@ Thread/Turn 启动的本地 `beforeSubmit` 守卫透过 Provider 准备保留到
   `thread/loaded/list` 枚举当前内存中的持久及临时 Thread，再通过 `thread/read` 读取权威状态，只返回
   活动 Thread 数量。
   新 Thread 可显式携带官方 `modelProvider`、受控 `threadSource=automation` 与实验
-  `dynamicTools`；Fork 由 Session Router 注入当前 Workspace 的权限参数，调用方只允许选择模型
-  Provider，不得跨 Provider 或自行扩大权限。
+  `dynamicTools`；前台新建、恢复和 Fork 不补网关权限默认值，由 App Server 处理原生配置及继承。
+  Thread 响应保留实际目录、沙箱、审批策略和 Profile 身份；恢复只核对显式请求的约束。
+  无人值守预检按目标 Provider/CWD 读取原生明确受限沙箱配置，创建后的实际权限仍须复核。
+  Fork 调用方只允许选择同一 Provider，不承担跨 Provider 权限或历史转换。
   已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。

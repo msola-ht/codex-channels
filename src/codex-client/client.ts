@@ -175,7 +175,6 @@ import {
 
 export interface ThreadDefaults {
   model?: string;
-  sandbox: "read-only" | "workspace-write";
 }
 
 export class CodexAppServerClient implements
@@ -466,11 +465,11 @@ export class CodexAppServerClient implements
       params: {
         cwd,
         historyMode: "paginated",
-        approvalPolicy: options.approvalPolicy ?? "on-request",
+        ...(options.approvalPolicy === undefined ? {} : { approvalPolicy: options.approvalPolicy }),
         ...(options.approvalsReviewer === undefined ? {} : { approvalsReviewer: options.approvalsReviewer }),
         ...(options.permissions !== undefined
           ? { permissions: options.permissions }
-          : { sandbox: options.sandbox ?? this.defaults.sandbox }),
+          : options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
         ...(options.model
           ? { model: options.model }
           : this.defaults.model ? { model: this.defaults.model } : {}),
@@ -527,11 +526,11 @@ export class CodexAppServerClient implements
   ): Promise<ThreadResumeSession> {
     const settings = {
       cwd,
-      approvalPolicy: options.approvalPolicy ?? "on-request",
+      ...(options.approvalPolicy === undefined ? {} : { approvalPolicy: options.approvalPolicy }),
       ...(options.approvalsReviewer === undefined ? {} : { approvalsReviewer: options.approvalsReviewer }),
       ...(options.permissions !== undefined
         ? { permissions: options.permissions }
-        : { sandbox: options.sandbox ?? this.defaults.sandbox }),
+        : options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
     };
     const response = await this.rpc.request<ThreadResumeResponse>({
       method: "thread/resume",
@@ -891,6 +890,23 @@ export class CodexAppServerClient implements
     return effort;
   }
 
+  /** Preflight only; the created Thread's actual permissions must also be checked. */
+  async readUnattendedPermissionSettings(
+    cwd: string,
+    signal?: AbortSignal,
+  ): Promise<{ sandbox: "read-only" | "workspace-write"; permissions: null }> {
+    const response = await this.rpc.request<ConfigReadResponse>({
+      method: "config/read",
+      params: { cwd, includeLayers: false } satisfies ConfigReadParams,
+    }, { retryOverload: true, ...(signal === undefined ? {} : { signal }) });
+    const sandbox = response.config.sandbox_mode;
+    if (response.config.default_permissions != null || (sandbox !== "read-only" && sandbox !== "workspace-write")) {
+      throw new UserFacingError("scheduled-task.state.invalid",
+        "无法确认计划任务的原生权限：请在目标项目的 Codex 配置中显式设置受限 sandbox_mode；命名 Permission Profile 暂不支持无人值守预检");
+    }
+    return { sandbox, permissions: null };
+  }
+
   async readDefaultServiceTier(cwd: string): Promise<string | null> {
     const settings = await this.readModelAccelerationSettings(cwd);
     if (settings.serviceTier === "ultrafast" && !settings.ultrafastEnabled) return null;
@@ -1075,11 +1091,11 @@ export class CodexAppServerClient implements
       params: {
         threadId,
         cwd,
-        approvalPolicy: options.approvalPolicy ?? "on-request",
+        ...(options.approvalPolicy === undefined ? {} : { approvalPolicy: options.approvalPolicy }),
         ...(options.approvalsReviewer === undefined ? {} : { approvalsReviewer: options.approvalsReviewer }),
         ...(options.permissions !== undefined
           ? { permissions: options.permissions }
-          : { sandbox: options.sandbox ?? this.defaults.sandbox }),
+          : options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
         ...(options.model ? { model: options.model } : {}),
         ...(options.modelProvider ? { modelProvider: options.modelProvider } : {}),
       },

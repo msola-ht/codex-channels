@@ -88,13 +88,9 @@ Thread 的 Server Request。变化需要重启 Gateway，不需要重装或重�
 
 Thread 分区使用当前固定分区与置顶设置；严格 Schema 拒绝 `[thread_sections]` 等未定义字段。
 
-`[[workspaces]]` 除 `id`、`name`、`cwd` 外支持可选的工作区权限：`sandbox`（
-`read-only` / `workspace-write` / `danger-full-access`）、`approval_policy`（
-`untrusted` / `on-request` / `never`）和 `permissions`（App Server 命名权限 Profile）。
-`permissions` 与 `sandbox` 必须互斥，同时配置时失败关闭。权限只作用于该 Workspace 新建或
-恢复的 Thread 启动参数，不影响已绑定 Thread；权限变化按 `workspace.registry` 热加载，不要求
-重启 Gateway。`danger-full-access` 和 `never` 是显式放开的完全权限选项，仅应在明确可信的
-Workspace 上配置。
+`[[workspaces]]` 只支持 `id`、`name`、`cwd`。沙箱、审批策略和 Permission Profile 由 App Server
+原生配置与 Thread 状态负责；Gateway 不保存全局 `codex.sandbox` 或工作区权限覆盖。
+严格 Schema 拒绝这些旧字段，不静默迁移；备份、显式清理和回退步骤见用户指南。
 
 模型统计代理由 App Server 服务自动装配：主 Provider 随服务启动，切换 Provider 在首次使用时
 按需启动，不属于用户配置；其上游网络请求继续复用 Codex `.env`、标准环境变量与受支持系统代理的统一解析结果，不接受旧 `[network]` 表。

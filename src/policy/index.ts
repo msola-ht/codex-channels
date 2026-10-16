@@ -9,7 +9,4 @@ export {
 export {
   WorkspaceRegistry,
   type Workspace,
-  type WorkspaceApprovalPolicy,
-  type WorkspacePermissions,
-  type WorkspaceSandboxMode,
 } from "./workspace-registry.js";

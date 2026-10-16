@@ -49,17 +49,18 @@ export interface ThreadSession {
   /** Actual Thread reviewer returned by App Server; absent or null means unknown. */
   approvalsReviewer?: ThreadApprovalsReviewer | null;
   contextCompactionItemIds: readonly string[];
-}
-
-export interface ThreadResumeSession extends ThreadSession {
-  collaborationMode: "default" | "plan";
-  settingsMatch: boolean;
+  /** Actual runtime permission settings returned by App Server, not Gateway defaults. */
   effectiveSettings: {
     cwd: string;
     approvalPolicy: string;
     sandbox: "read-only" | "workspace-write" | "danger-full-access" | "external-sandbox";
     permissions: string | null;
   };
+}
+
+export interface ThreadResumeSession extends ThreadSession {
+  collaborationMode: "default" | "plan";
+  settingsMatch: boolean;
 }
 
 export interface ThreadDynamicToolSpec {

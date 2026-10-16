@@ -38,7 +38,6 @@ import {
   renderScheduleTaskChoices,
   renderCommandCenterForm,
   renderCommandCenterChoices,
-  renderWorkspacePermissionFieldChoices,
 } from "./command-center-presentation.js";
 import type { FeishuApplicationSetupController } from "./application-setup.js";
 import {
@@ -221,8 +220,8 @@ export class FeishuConversationAdapter {
           }
           return;
         }
-        if ((result.kind === "workspace-permissions" || result.kind === "auto-review") && this.commandCenter) {
-          const response = renderCommandCenterChoices(result.kind === "auto-review" ? "autoreview" : "workspaceperm", result);
+        if (result.kind === "auto-review" && this.commandCenter) {
+          const response = renderCommandCenterChoices("autoreview", result);
           if (response) {
             await this.commandCenter.openResponse(message.target, message.actorId, response);
             return;
@@ -358,19 +357,6 @@ export class FeishuConversationAdapter {
         this.notifyMarkdown(target.conversationId, renderFeishuHelp());
         return;
       }
-      if (action === "workspace-autoreview-select") {
-        const match = /^(on|off|clear) (\S{1,200})$/u.exec(input);
-        if (!match) {
-          throw new UserFacingError("workspace.permission.usage", "工作区审批按钮已失效，请重新发送 /workspaceperm", { reason: "stale-selection" });
-        }
-        const result = await this.commands.selectWorkspaceAutoReview(target, {
-          workspaceId: match[2]!,
-          value: match[1] === "on" ? "auto_review" : match[1] === "off" ? "user" : null,
-        });
-        const rendered = renderFeishuCommandResult(result);
-        if (rendered !== null) this.notifyMarkdown(target.conversationId, rendered);
-        return;
-      }
       if (action === "thread-autoreview-select") {
         const match = /^(on|off) (\S{1,200})$/u.exec(input);
         if (!match) throw new UserFacingError("autoreview.stale-selection", "当前会话审批按钮已失效");
@@ -432,19 +418,6 @@ export class FeishuConversationAdapter {
         : undefined;
       if (initialChoices) {
         return initialChoices;
-      }
-      if (action === "workspaceperm" && isWorkspacePermissionField(input)) {
-        return renderWorkspacePermissionFieldChoices(input);
-      }
-      if (action === "workspace-perm-profile") {
-        return {
-          kind: "form",
-          title: "权限 Profile",
-          action: "workspaceperm",
-          fieldLabel: "Profile ID",
-          placeholder: ":read-only、:workspace、:danger-full-access 或自定义",
-          inputPrefix: "profile ",
-        };
       }
       if (action === "plugin" && input !== "" && !/\s/u.test(input)) {
         return {
@@ -1071,6 +1044,9 @@ function parseSupportedFeishuSlashCommand(
     }
     throw error;
   }
+  if (command?.name === "workspaceperm") {
+    throw new UserFacingError("command.unsupported", "飞书命令不受支持");
+  }
   if (
     command === null
     || (
@@ -1095,12 +1071,6 @@ function containsFeishuCopiedMessageLink(text: string): boolean {
       return false;
     }
   });
-}
-
-function isWorkspacePermissionField(
-  value: string,
-): value is "sandbox" | "approval" {
-  return value === "sandbox" || value === "approval";
 }
 
 class FeishuOutputQueueError extends Error {

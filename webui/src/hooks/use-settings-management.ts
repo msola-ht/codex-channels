@@ -34,7 +34,6 @@ function currentValue(settings: ManagementSettingsResponse, setting: ManagementS
   if (setting.kind === "display.operation-updates") return settings.display.operationUpdates
   if (setting.kind === "display.plan-updates") return settings.display.planUpdatesEnabled
   if (setting.kind === "display.reasoning") return settings.display.reasoningEnabled
-  if (setting.kind === "system.sandbox") return settings.system.sandbox
   if (setting.kind === "system.approval-timeout") return settings.system.approvalTimeoutSeconds
   if (setting.kind === "system.idle-release-minutes") return settings.system.idleReleaseMinutes
   if (setting.kind === "system.model-traffic-mode") return settings.system.modelTrafficMode
@@ -53,11 +52,5 @@ function currentValue(settings: ManagementSettingsResponse, setting: ManagementS
     return { field, configured: settings.network.configuredFields.includes(field) }
   }
   if (setting.kind === "network.proxy-batch") return settings.network.configuredFields
-  if (setting.kind === "workspace.permissions" && setting.value !== null && typeof setting.value === "object") {
-    const workspaceId = "workspaceId" in setting.value && typeof setting.value.workspaceId === "string"
-      ? setting.value.workspaceId
-      : ""
-    return settings.system.workspaces.find((workspace) => workspace.id === workspaceId) ?? null
-  }
   return null
 }

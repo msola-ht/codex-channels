@@ -46,6 +46,7 @@ type ProviderClientMethod =
   | "updateThreadApprovalsReviewer"
   | "writeDefaultServiceTier"
   | "readDefaultReasoningEffort"
+  | "readUnattendedPermissionSettings"
   | "readDefaultServiceTier"
   | "readModelAccelerationSettings"
   | "forkThread"
@@ -715,6 +716,19 @@ export class ProviderRoutingClient {
     return this.withProviderActivity(modelProvider, async () =>
       (await this.ensureClient(modelProvider)).readDefaultServiceTier(cwd)
     );
+  }
+
+  async readUnattendedPermissionSettings(
+    cwd: string,
+    modelProvider = this.primaryProvider,
+    signal?: AbortSignal,
+  ): ReturnType<ProviderClientInstance["readUnattendedPermissionSettings"]> {
+    signal?.throwIfAborted();
+    return this.withProviderActivity(modelProvider, async () => {
+      const client = await this.ensureClient(modelProvider);
+      signal?.throwIfAborted();
+      return client.readUnattendedPermissionSettings(cwd, signal);
+    });
   }
 
   async readModelAccelerationSettings(

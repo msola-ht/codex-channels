@@ -20,11 +20,9 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
 
 当前实现：
 
-三渠道统一通过 `/workspaceperm autoreview <on|off|clear>` 管理工作区审批方式覆盖。飞书、Telegram
-按钮绑定原 Workspace、Actor 和限时一次性令牌，提交结构化选择，由 Application 在锁内复核工作区；
-微信复用同一文本语法。设置与 Thread 实际状态分开展示，`/status` 和生命周期卡片取 App Server 实际值。
+工作区只选择登记目录；`/status` 和生命周期卡片的权限相关状态取 App Server 实际值。
 `/autoreview [on|off]` 查询或切换当前已绑定 Thread，统一结果由共享格式化器呈现；飞书命令中心与
-Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌，并与工作区选择区分作用域。
+Telegram 按钮绑定原 Thread、Actor、Conversation 和限时一次性令牌。
 平台只提交结构化选择，Application 在锁内复核 Thread 与空闲状态，确认权威设置后才返回更新成功。
 三个渠道共用 `lifecycle-presentation.ts` 仅在自动审批完成后呈现结果与结构化内容摘要；Client 提供经脱敏和限长的纯文本，Telegram HTML 面板与飞书 Markdown 呈现边界转义字面字段，微信纯文本保留字符原样；通知经共享关键投递路径发送，不生成审批交互。
 普通状态与生命周期卡只在 Thread 权威设置启用自动审批时显示审批方式，完成卡的自动审批统计也受此条件约束；专用查询与设置入口保留完整状态和操作回执。

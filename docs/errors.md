@@ -106,9 +106,6 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `workspace.selector.required` | /workspace 用法提示 | 未提供 Workspace 选择参数 |
 | `workspace.selector.ambiguous` | Workspace 选择不唯一 | 选择器匹配多个 Workspace |
 | `workspace.selector.not-found` | 找不到指定 Workspace | 选择器无匹配 |
-| `workspace.permission.usage` | /workspaceperm 用法提示；旧按钮提示重新发送 /workspaceperm | 参数格式错误，或工作区审批按钮失效、原工作区已变化 |
-| `workspace.permission.conflict` | permissions 与 sandbox 互斥，不能同时配置；请先清除其中一项 | 同时配置 permissions 与 sandbox |
-| `workspace.permission.unavailable` | 当前 Gateway 不支持修改工作区权限 | Gateway 未装配权限修改能力 |
 
 ### 当前会话审批方式
 

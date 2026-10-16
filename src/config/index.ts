@@ -64,7 +64,6 @@ export interface GatewayConfig {
   codexModel?: string;
   codexTimezone?: string;
   gatewayTimezone?: string;
-  codexSandbox: "read-only" | "workspace-write";
   codexClientIdentity?: {
     name?: string;
     title?: string;
@@ -96,10 +95,6 @@ export interface ConfiguredWorkspace {
   id: string;
   name: string;
   cwd: string;
-  sandbox?: "read-only" | "workspace-write" | "danger-full-access";
-  approvalPolicy?: "untrusted" | "on-request" | "never";
-  approvalsReviewer?: "user" | "auto_review";
-  permissions?: string;
 }
 
 export type OperationUpdateDisplay = "full" | "compact" | "hidden";
@@ -286,7 +281,6 @@ function loadValidatedConfigDocument(
     ...(raw.codex.default_model ? { codexModel: raw.codex.default_model } : {}),
     ...(raw.codex.timezone === undefined ? {} : { codexTimezone: raw.codex.timezone }),
     ...(gatewayTimezone === undefined ? {} : { gatewayTimezone }),
-    codexSandbox: raw.codex.sandbox,
     ...(raw.codex.client_identity
       ? { codexClientIdentity: raw.codex.client_identity }
       : {}),
@@ -329,18 +323,6 @@ function validateWorkspaces(
       id: workspace.id,
       name: workspace.name,
       cwd: directory.cwd,
-      ...(workspace.sandbox === undefined
-        ? {}
-        : { sandbox: workspace.sandbox }),
-      ...(workspace.approval_policy === undefined
-        ? {}
-        : { approvalPolicy: workspace.approval_policy }),
-      ...(workspace.approvals_reviewer === undefined
-        ? {}
-        : { approvalsReviewer: workspace.approvals_reviewer }),
-      ...(workspace.permissions === undefined
-        ? {}
-        : { permissions: workspace.permissions }),
     };
   });
 }

@@ -86,7 +86,7 @@ export function formatConversationScheduledConfirmation(
     `下次运行：${formatScheduledAt(preview.task.nextRunAt)}`,
     `Sandbox：${preview.task.sandbox}`,
     `权限 Profile：${preview.task.permissions ?? "未配置"}`,
-    "网络：沿用 Workspace 当前权限；无人值守审批一律拒绝",
+    "网络：沿用目标 App Server 的项目配置；无人值守审批一律拒绝",
     "Approval Policy：never（无人值守请求将安全拒绝）",
     "该任务将在用户不在线时由 Gateway 无人值守执行。",
     `任务预览：${preview.task.promptPreview}`,

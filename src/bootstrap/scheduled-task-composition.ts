@@ -45,6 +45,7 @@ export interface ScheduledTaskCompositionOptions {
   output: EventBus<OutputEvent>;
   logger: Logger;
   isSurfaceEnabled(target: ConversationTarget): boolean;
+  isActorAuthorized(target: ConversationTarget, actorId: string): boolean;
   creationContext(target: ConversationTarget): ScheduledTaskCreationContext;
   presentConfirmation: NonNullable<ScheduledTaskToolLookup["presentConfirmation"]>;
 }
@@ -82,10 +83,13 @@ export class ScheduledTaskComposition {
         ensureProvider: (provider) => options.codex.ensureProviderAvailable(provider),
         isModelAvailable: (provider, model) =>
           options.codex.isModelAvailable(provider, model),
+        readPermissionSettings: (cwd, provider, signal) =>
+          options.codex.readUnattendedPermissionSettings(cwd, provider, signal),
       },
       options.core,
       {
         isSurfaceEnabled: (target) => options.isSurfaceEnabled(target),
+        isActorAuthorized: (target, actorId) => options.isActorAuthorized(target, actorId),
         acceptsExecution: options.acceptsExecution,
         onThreadStarted: (run, target, threadId) =>
           requireCoordinator().onThreadStarted(run, target, threadId),
@@ -129,13 +133,17 @@ export class ScheduledTaskComposition {
     options.output.observe((event) => this.coordinator.observeOutput(event));
     this.service = new ScheduledTaskApplicationService(this.store.operations, {
       isActorAuthorized: (target, actorId) =>
-        options.bindings.conversations().some((candidate) =>
+        options.isSurfaceEnabled(target)
+        && options.isActorAuthorized(target, actorId)
+        && options.bindings.conversations().some((candidate) =>
           surfaceAccountKey(candidate.surface, candidate.accountId)
             === surfaceAccountKey(target.surface, target.accountId)
           && candidate.conversationId === target.conversationId)
         && options.bindings.actors(target).includes(actorId),
       isProviderConfigured: (provider) => options.codex.isProviderConfigured(provider),
       creationContext: (target) => options.creationContext(target),
+      readPermissionSettings: (cwd, provider, signal) =>
+        options.codex.readUnattendedPermissionSettings(cwd, provider, signal),
       runTaskNow: (taskId, operation) => this.scheduler.runTaskNow(taskId, undefined, operation),
       retryRun: (runId, operation) => this.scheduler.retryRun(runId, undefined, operation),
     }, Date.now);

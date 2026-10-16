@@ -92,7 +92,6 @@ function restartRequiredReasons(
       JSON.stringify(Object.entries(current.modelDisplayAliases ?? {}).sort(([a], [b]) => a.localeCompare(b))),
       JSON.stringify(Object.entries(next.modelDisplayAliases ?? {}).sort(([a], [b]) => a.localeCompare(b))),
     ],
-    [configChange("codex.sandbox"), current.codexSandbox, next.codexSandbox],
     [configChange("gateway.timezone"), current.gatewayTimezone, next.gatewayTimezone],
     [configChange("codex.timezone"), current.codexTimezone, next.codexTimezone],
     [
@@ -254,11 +253,7 @@ function sameWorkspaces(
     const candidate = next[index];
     return candidate?.id === workspace.id
       && candidate.name === workspace.name
-      && candidate.cwd === workspace.cwd
-      && candidate.sandbox === workspace.sandbox
-      && candidate.approvalPolicy === workspace.approvalPolicy
-      && candidate.approvalsReviewer === workspace.approvalsReviewer
-      && candidate.permissions === workspace.permissions;
+      && candidate.cwd === workspace.cwd;
   });
 }
 

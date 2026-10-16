@@ -159,7 +159,6 @@ import { mergeCompletionTiming } from "./completion-timing.js";
 import { TurnExecutionTracker } from "./turn-execution-tracker.js";
 import { AutoApprovalReviewTracker } from "./auto-approval-review-tracker.js";
 import { AutoApprovalReviewNotifications } from "./auto-approval-review-notifications.js";
-import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
 import { createScheduledTaskServerRequestHandler } from "./scheduled-task-server-request.js";
 import { ScheduledTaskComposition } from "./scheduled-task-composition.js";
@@ -213,7 +212,6 @@ export abstract class GatewayComponentGraph {
   private readonly bindings: SqliteBindingStore;
   private readonly sessionDisplayCache?: SqliteSessionDisplayCache;
   private readonly workspaces: WorkspaceRegistry;
-  private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
   private readonly subagentCompletion: SubagentCompletionTracker;
   private readonly scheduledTasks: ScheduledTaskComposition | undefined;
   private bindingRestore: BindingRestoreCoordinator | undefined;
@@ -246,9 +244,6 @@ export abstract class GatewayComponentGraph {
     const primaryProvider = loadPrimaryModelProvider();
     const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider();
     const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders();
-    this.workspacePermissions = configPath === undefined
-      ? undefined
-      : new TomlWorkspacePermissionWriter(configPath);
     const managedProviders = loadManagedModelProviders();
     this.aggregateSettingsMembers = aggregateProviderMembers(primaryProvider, [
       ...managedProviders,
@@ -312,8 +307,7 @@ export abstract class GatewayComponentGraph {
     clients.set(primaryProvider, new CodexAppServerClient(
       new JsonRpcClient(this.transport, 60_000, logger, 64, config.codexClientIdentity),
       {
-      sandbox: config.codexSandbox,
-      ...(config.codexModel ? { model: config.codexModel } : {}),
+        ...(config.codexModel ? { model: config.codexModel } : {}),
       },
       primaryProvider === "openai" ? { upload: createProxyFetch(config.networkProxy) } : undefined,
     ));
@@ -323,9 +317,7 @@ export abstract class GatewayComponentGraph {
       );
       clients.set(managedProvider.provider, new CodexAppServerClient(
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
-        {
-          sandbox: config.codexSandbox,
-        },
+        {},
       ));
     }
     for (const customSwitchingProvider of customSwitchingProviders) {
@@ -334,7 +326,7 @@ export abstract class GatewayComponentGraph {
       );
       clients.set(customSwitchingProvider.provider, new CodexAppServerClient(
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
-        { sandbox: config.codexSandbox },
+        {},
       ));
     }
     if (aggregateEnabled) {
@@ -343,7 +335,7 @@ export abstract class GatewayComponentGraph {
       );
       clients.set(aggregateProviderId, new CodexAppServerClient(
         new JsonRpcClient(providerTransport, 60_000, logger, 64, config.codexClientIdentity),
-        { sandbox: config.codexSandbox },
+        {},
       ));
     }
     this.codex = new ProviderRoutingClient(
@@ -737,7 +729,6 @@ export abstract class GatewayComponentGraph {
       },
       this.providerAccounts,
       new RequestMetricsQueryAdapter(metricsStore, this.router),
-      this.workspacePermissions,
       {
         recordTurnError: (record) => {
           const error = new Error(record.message ?? "Turn 错误");
@@ -977,25 +968,11 @@ export abstract class GatewayComponentGraph {
           logger,
           isSurfaceEnabled: (target) => this.surfaces.some((surface) =>
             surface.surface === target.surface && surface.accountId === target.accountId),
+          isActorAuthorized: (target, actorId) =>
+            this.accessPolicy(target)?.isAllowed({ target, actorId }) === true,
           creationContext: (target) => {
             const status = service.status(target);
             const workspace = this.workspaces.require(status.workspaceId);
-            const sandbox = workspace.sandbox ?? "read-only";
-            if (sandbox === "danger-full-access") {
-              throw new UserFacingError(
-                "scheduled-task.state.invalid",
-                "计划任务不允许使用 danger-full-access Workspace",
-              );
-            }
-            if (
-              workspace.approvalPolicy !== undefined
-              && workspace.approvalPolicy !== "never"
-            ) {
-              throw new UserFacingError(
-                "scheduled-task.state.invalid",
-                "当前 Workspace 不能形成 approvalPolicy=never 的无人值守环境",
-              );
-            }
             return {
               workspaceId: workspace.id,
               workspaceName: workspace.name,
@@ -1004,9 +981,6 @@ export abstract class GatewayComponentGraph {
               model: status.model,
               reasoningEffort: status.effort,
               serviceTier: status.serviceTier,
-              sandbox,
-              approvalPolicy: "never",
-              permissions: workspace.permissions ?? null,
               modelPending: status.modelPending,
               effortPending: status.effortPending,
               serviceTierPending: status.fastModePending,

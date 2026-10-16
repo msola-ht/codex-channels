@@ -2,7 +2,6 @@ export type GlobalConfigChangeCode =
   | "codex.binary"
   | "codex.socket"
   | "codex.default-model"
-  | "codex.sandbox"
   | "codex.client-identity"
   | "codex.timezone"
   | "gateway.timezone"

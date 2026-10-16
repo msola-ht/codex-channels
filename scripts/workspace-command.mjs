@@ -9,7 +9,6 @@ import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { gatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { reportMenuError } from "./cli-menu.mjs";
 import { runDefaultWorkspace } from "./config-system-menu.mjs";
-import { runWorkspaceSettings } from "./config-workspace-menu.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import {
   addWorkspaceToConfig,
@@ -21,7 +20,7 @@ import {
 const helpText = {
   work: `用法：codexc work
 
-交互终端无子命令时进入菜单：列出、设置默认、注册当前或已有目录、新建、权限、移除注册；新建目录位于
+交互终端无子命令时进入菜单：列出、设置默认、注册当前或已有目录、新建、移除注册；新建目录位于
 配置文件所在目录的 <id>-work（通常为 ~/.codex-connect/<id>-work），不更改默认工作区。
 
 其他用法：
@@ -170,7 +169,6 @@ async function runWorkspaceMenu({
         { value: "register-current", label: "注册当前目录", hint: cwd },
         { value: "register-existing", label: "注册已有目录", hint: "输入目录路径，不创建或删除目录" },
         { value: "create", label: "新建工作区", hint: `在 ${runtime.dataDir}/<id>-work 下新建并注册` },
-        { value: "permissions", label: "工作区权限", hint: "沙箱、审批策略与权限 Profile" },
         { value: "remove", label: "移除工作区注册", hint: "从 Gateway 移除注册，保留磁盘目录" },
         { value: "cancel", label: "返回", hint: "结束工作区操作" },
       ],
@@ -220,14 +218,6 @@ async function runWorkspaceMenu({
           runtime,
           eventQueuePath,
           fallbackDefaultWorkspace,
-          prompts,
-        });
-        continue;
-      }
-      if (action === "permissions") {
-        await runWorkspaceSettings({
-          environment,
-          output,
           prompts,
         });
         continue;

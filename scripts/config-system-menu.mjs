@@ -27,7 +27,7 @@ export async function runSystemSettings({
   const groups = {
     conversation: {
       message: "Gateway 会话设置",
-      values: ["approval_timeout", "idle_release", "sandbox", "default_workspace", "default_model"],
+      values: ["approval_timeout", "idle_release", "default_workspace", "default_model"],
     },
     identity: {
       message: "身份与时区",
@@ -48,11 +48,6 @@ export async function runSystemSettings({
         value: "idle_release",
         label: "会话空闲自动解除",
         hint: "conversation.idle_release_minutes（默认 15 分钟，0 关闭）",
-      },
-      {
-        value: "sandbox",
-        label: "Gateway 渠道 Sandbox",
-        hint: "外部渠道默认值；Codex 新会话与用户偏好在 Config 中管理",
       },
       { value: "default_workspace", label: "默认工作区", hint: "Gateway 默认项；也可在 codexc work 中设置" },
       {
@@ -108,9 +103,6 @@ export async function runSystemSettings({
   }
   if (section === "idle_release") {
     return runIdleRelease({ environment, output, prompts, writeConfig });
-  }
-  if (section === "sandbox") {
-    return runSandbox({ environment, output, prompts, writeConfig });
   }
   if (section === "default_workspace") {
     return runDefaultWorkspace({ environment, output, prompts, writeConfig });
@@ -255,31 +247,6 @@ async function runIdleRelease({ environment, output, prompts, writeConfig }) {
     activation: result.activation,
     activationResult: result.activationResult,
   };
-}
-
-async function runSandbox({ environment, output, prompts, writeConfig }) {
-  const settings = loadGatewaySettings(environment);
-  const selected = await prompts.select({
-    message: "Gateway 渠道 Sandbox",
-    showInstructions: false,
-    initialValue: settings.system.sandbox,
-    options: [
-      { value: "read-only", label: "只读", hint: "禁止工作区写入" },
-      { value: "workspace-write", label: "工作区可写", hint: "允许修改授权 Workspace" },
-      { value: "back", label: "返回上一级" },
-    ],
-  });
-  if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
-  if (selected !== "read-only" && selected !== "workspace-write") {
-    throw new Error(`未知 Codex Sandbox 设置：${String(selected)}`);
-  }
-  const result = updateGatewaySetting({
-    kind: "system.sandbox",
-    value: selected,
-  }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`Gateway 渠道 Sandbox 已设为${selected}：${result.configPath}\n`);
-  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
-  return { sandbox: selected, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }
 
 export async function runDefaultWorkspace({ environment, output, prompts, writeConfig = writeGatewayConfig }) {

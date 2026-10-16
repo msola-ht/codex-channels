@@ -7,7 +7,6 @@ export function writeGatewayConfigSummary(output, document, configPath, environm
     `- 配置来源：${summary.configPath}`,
     `- 默认 Workspace：${summary.defaultWorkspace}`,
     `- 渠道新会话模型：${summary.defaultModel}`,
-    `- Gateway 渠道 Sandbox：${summary.sandbox}`,
     `- 通讯渠道：${summary.channels.join("、") || "未配置"}`,
     `- 操作详情：${summary.operationUpdates}`,
     `- 计划显示：${enabledLabel(summary.planUpdates)}`,
@@ -49,7 +48,6 @@ export function gatewayConfigSummary(document, configPath, environment = process
       ? `${stringValue(defaultWorkspace.name) || defaultWorkspaceId}（${defaultWorkspaceId}）`
       : defaultWorkspaceId || "未配置",
     defaultModel: stringValue(codex.default_model) || "跟随当前 Provider 默认值",
-    sandbox: codex.sandbox === "read-only" ? "read-only" : "workspace-write",
     channels: channelLabels(document),
     operationUpdates: ["full", "compact", "hidden"].includes(display.operation_updates)
       ? display.operation_updates

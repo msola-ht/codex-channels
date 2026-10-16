@@ -359,7 +359,7 @@ async function inspectMacDesktopAppActiveThreads({ socketPath, codexBinary, sign
       64,
       { name: "codex_app_server_daemon", title: "Codex Desktop App launch check" },
     ),
-    { sandbox: "read-only" },
+    {},
   );
   let closeTask;
   const close = () => {

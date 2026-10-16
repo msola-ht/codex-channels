@@ -77,7 +77,6 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
       binary: "codex",
       socket_path: "runtime/codex-app-server.sock",
       default_model: "",
-      sandbox: "workspace-write",
     },
     approval: { timeout_seconds: 900 },
     display: {

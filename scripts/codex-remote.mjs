@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import { parse } from "smol-toml";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
@@ -62,9 +62,8 @@ async function runRemoteCli() {
   );
   let workdir = realpathSync(cwd === undefined ? process.cwd() : resolve(cwd));
   if (!statSync(workdir).isDirectory()) throw new Error("Codex 工作目录必须是目录");
-  let workspace = workspaceForWorkdir(workspaces, workdir);
   if (workspaceId !== undefined) {
-    workspace = workspaces.find((candidate) => candidate.id === workspaceId);
+    const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
     if (!workspace) {
       throw new Error(`找不到 Workspace：${workspaceId}`);
     }
@@ -114,7 +113,6 @@ async function runRemoteCli() {
     leaseProvider = selectedProvider;
     assertAggregateProviderArguments(passthrough);
   }
-  const permissionArguments = workspacePermissionArguments(workspace, passthrough);
   const configuredBinary = stringValue(codex.binary) || "codex";
   const supervisorActive = selectedDefinition !== undefined || selectedProvider === aggregateProviderId
     || await inspectAppServerSupervisor(primarySocketPath) !== undefined;
@@ -134,7 +132,6 @@ async function runRemoteCli() {
         ? ["--profile", selectedDefinition.profileName]
         : []),
       ...modelArguments,
-      ...permissionArguments,
       ...passthrough,
     ]);
     const result = spawnSync(invocation.file, invocation.args, {
@@ -148,97 +145,6 @@ async function runRemoteCli() {
   } finally {
     await providerLease?.close();
   }
-}
-
-function workspaceForWorkdir(workspaces, workdir) {
-  let selected;
-  for (const workspace of workspaces) {
-    const childPath = relative(workspace.cwd, workdir);
-    const containsWorkdir = childPath === ""
-      || (childPath !== ".." && !childPath.startsWith(`..${sep}`) && !isAbsolute(childPath));
-    if (containsWorkdir && (!selected || workspace.cwd.length > selected.cwd.length)) {
-      selected = workspace;
-    }
-  }
-  return selected;
-}
-
-function workspacePermissionArguments(workspace, passthrough) {
-  const overrides = explicitPermissionOverrides(passthrough);
-  const permissions = stringValue(workspace?.permissions);
-  const approvalPolicy = stringValue(workspace?.approval_policy);
-  const approvalsReviewer = stringValue(workspace?.approvals_reviewer);
-  if (!overrides.approval && approvalPolicy === "untrusted") {
-    throw new Error(
-      "Workspace 审批策略 untrusted 不能传给当前 Codex CLI；"
-      + "请用 --ask-for-approval on-request|never 显式覆盖，或修改 Workspace 审批策略",
-    );
-  }
-  return [
-    ...(overrides.sandbox
-      ? []
-      : permissions
-        ? ["-c", `default_permissions=${JSON.stringify(permissions)}`]
-        : stringValue(workspace?.sandbox)
-          ? ["--sandbox", stringValue(workspace.sandbox)]
-          : []),
-    ...(overrides.approval
-      ? []
-      : approvalPolicy
-        ? ["--ask-for-approval", approvalPolicy]
-        : []),
-    ...(overrides.reviewer || !approvalsReviewer
-      ? []
-      : ["-c", `approvals_reviewer=${JSON.stringify(approvalsReviewer)}`]),
-  ];
-}
-
-function explicitPermissionOverrides(args) {
-  let sandbox = false;
-  let approval = false;
-  let reviewer = false;
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--") break;
-    if (["--approve-for-me", "--not-so-yolo", "--dangerously-bypass-approvals-and-sandbox", "--yolo"].includes(argument)) {
-      sandbox = true;
-      approval = true;
-      if (["--approve-for-me", "--not-so-yolo"].includes(argument)) {
-        reviewer = true;
-      }
-      continue;
-    }
-    if (argument === "--sandbox" || argument === "-s") {
-      sandbox = true;
-      index += 1;
-      continue;
-    }
-    if (argument.startsWith("--sandbox=") || /^-s[^-]/u.test(argument)) {
-      sandbox = true;
-      continue;
-    }
-    if (argument === "--ask-for-approval" || argument === "-a") {
-      approval = true;
-      index += 1;
-      continue;
-    }
-    if (argument.startsWith("--ask-for-approval=") || /^-a[^-]/u.test(argument)) {
-      approval = true;
-      continue;
-    }
-    const override = configOverrideArgument(args, index);
-    if (!override) continue;
-    index += override.consumed - 1;
-    const { key } = override;
-    if (key === "sandbox_mode" || key === "default_permissions") {
-      sandbox = true;
-    }
-    if (key === "approval_policy") approval = true;
-    if (key === "approvals_reviewer") {
-      reviewer = true;
-    }
-  }
-  return { sandbox, approval, reviewer };
 }
 
 function configOverrideArgument(args, index) {
@@ -294,7 +200,7 @@ async function aggregateModelArguments(socketPath, codexBinary, passthrough) {
       terminateCodexProcess: terminateChildProcess,
       connectTimeoutMs: 3_000,
     }),
-  ), { sandbox: "read-only" });
+  ), {});
   try {
     await client.connect();
     const [{ model, effort }, models] = await Promise.all([

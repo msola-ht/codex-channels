@@ -435,7 +435,6 @@ export interface SettingsSummaryResponse {
     }
     system: {
       approvalTimeoutSeconds: number
-      sandbox: "read-only" | "workspace-write"
       defaultWorkspace: string | null
       defaultModel: string | null
       modelTrafficMode: "production" | "debug"
@@ -528,7 +527,7 @@ export interface ManagementProvidersResponse {
 export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]
-  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
+  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {
       clientIdentity: { name: string | null; title: string | null; version: string | null }
@@ -536,7 +535,7 @@ export interface ManagementSettingsResponse {
       terminalIdentity: string | null
       defaults: { name: string; version: string }
     }
-    workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null; approvalsReviewer: string | null }>
+    workspaces: Array<{ id: string; name: string }>
   }
   automation: Pick<SettingsSummaryResponse["gateway"]["automation"], "scheduledTasksEnabled">
   advanced: Pick<SettingsSummaryResponse["gateway"]["advanced"], "loggingLevel">

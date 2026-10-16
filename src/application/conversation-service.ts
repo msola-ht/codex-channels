@@ -42,10 +42,6 @@ import type {
   ThreadOccupancyReleaseResult,
 } from "./thread-occupancy-port.js";
 import type { Workspace } from "../policy/index.js";
-import type {
-  WorkspacePermissionPort,
-  WorkspacePermissionUpdate,
-} from "./workspace-permission-port.js";
 import {
   ConversationCore,
   UserFacingError,
@@ -336,11 +332,6 @@ export interface ConversationSessionUseCases {
   artifacts(target: ConversationTarget): TurnArtifacts | undefined;
   listWorkspaces(): Workspace[];
   selectWorkspace(target: ConversationTarget, selector: string): Promise<Workspace>;
-  updateWorkspacePermissions(
-    target: ConversationTarget,
-    update: WorkspacePermissionUpdate,
-    expectedWorkspaceId?: string,
-  ): Promise<Workspace>;
   releaseThread(
     target: ConversationTarget,
     force?: boolean,
@@ -396,7 +387,6 @@ export class ConversationService implements
     private readonly transfers?: ConversationTransferPort,
     providerAccounts?: ProviderAccountQueryPort,
     requestMetricsQuery?: RequestMetricsQueryPort,
-    private readonly workspacePermissions?: WorkspacePermissionPort,
     private readonly turnErrorRecorder?: TurnErrorRecorder,
     private readonly agentRoles?: AgentRolePort,
     private readonly threadOccupancy?: ThreadOccupancyPort,
@@ -1257,33 +1247,6 @@ export class ConversationService implements
         this.restoreSelectionsAfterBindingChange(target, modelPreference);
       }
       return workspace;
-    });
-  }
-
-  updateWorkspacePermissions(
-    target: ConversationTarget,
-    update: WorkspacePermissionUpdate,
-    expectedWorkspaceId?: string,
-  ): Promise<Workspace> {
-    if (!this.workspacePermissions) {
-      throw new UserFacingError(
-        "workspace.permission.unavailable",
-        "当前 Gateway 不支持修改工作区权限",
-      );
-    }
-    return this.locked(target, () => {
-      const workspaceId = this.router.workspace(target).id;
-      if (expectedWorkspaceId !== undefined && workspaceId !== expectedWorkspaceId) {
-        throw new UserFacingError(
-          "workspace.permission.usage",
-          "当前工作区已变化，请重新发送 /workspaceperm",
-          { reason: "stale-selection" },
-        );
-      }
-      return this.workspacePermissions!.updateWorkspacePermissions(
-        workspaceId,
-        update,
-      );
     });
   }
 

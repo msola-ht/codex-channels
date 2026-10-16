@@ -34,7 +34,6 @@ import {
 import {
   formatConversationArtifacts,
   formatConversationPermissions,
-  formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
 } from "../conversation-workspace-status-command-format.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
@@ -86,13 +85,6 @@ export async function renderTelegramCommandResult(
         workspaceSelectionKeyboard(result),
       );
       return;
-    case "workspace-permissions":
-      await replyTelegramPanel(
-        context,
-        formatConversationWorkspacePermissions(result),
-        workspacePermissionKeyboard(),
-      );
-      return;
     case "models":
       if (result.view === "model") {
         const providerOnly = result.state.providerFilter === undefined;
@@ -142,7 +134,6 @@ export async function renderTelegramCommandResult(
       await replyTelegramPanel(
         context,
         formatConversationPermissions(result),
-        workspacePermissionKeyboard(),
       );
       return;
     case "artifacts":
@@ -168,26 +159,6 @@ export function hookKeyboard(
       text: choice.label,
       callback_data: `hooks:${choice.input.replace(" ", ":")}`,
     }]),
-  };
-}
-
-export function workspacePermissionKeyboard(): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [[
-      { text: "沙箱", callback_data: "wp:sandbox" },
-      { text: "审批", callback_data: "wp:approval" },
-      { text: "权限 Profile", callback_data: "wp:profile" },
-    ]],
-  };
-}
-
-export function autoReviewKeyboard(token: string): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [[
-      { text: "工作区默认：自动审批", callback_data: `ar:on:${token}` },
-      { text: "工作区默认：手动审批", callback_data: `ar:off:${token}` },
-      { text: "工作区默认：跟随 Codex 默认", callback_data: `ar:clear:${token}` },
-    ]],
   };
 }
 
@@ -490,38 +461,6 @@ export function formatTelegramThreadQueueDeleteConfirmation(
   ].join("\n");
 }
 
-
-export function workspacePermissionFieldKeyboard(
-  field: "sandbox" | "approval",
-): InlineKeyboardMarkup {
-  const options: ReadonlyArray<readonly [string, string]> = field === "sandbox"
-    ? [
-        ["只读", "read-only"],
-        ["工作区可写", "workspace-write"],
-        ["完全访问", "danger-full-access"],
-        ["清除（使用全局）", "clear"],
-      ]
-    : [
-        ["不信任", "untrusted"],
-        ["按需审批", "on-request"],
-        ["免审批", "never"],
-        ["清除（使用默认）", "clear"],
-      ];
-  return {
-    inline_keyboard: options.map(([label, value]) => [{
-      text: label,
-      callback_data: `wp:${field}:${value}`,
-    }]),
-  };
-}
-
-export function workspacePermissionPrompt(
-  field: "sandbox" | "approval",
-): string {
-  return field === "sandbox"
-    ? "选择沙箱模式："
-    : "选择审批策略：";
-}
 
 function renderOutcome(
   outcome: Extract<

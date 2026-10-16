@@ -39,7 +39,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 WebUI 开关位于 `codexc config → 服务访问 → WebUI 设置 → 启用状态`，写入 `[webui] enabled`；未设置时沿用已安装的服务定义。显式 `false` 后 `codexc start all` 不再启动它、`codexc restart all` 会停止它且不再启动，`codexc update` 也不恢复它；设置本身不停止正在运行的实例，也不删除已生成的服务定义。需要时仍可用 `codexc start webui` 单独启动，用 `codexc stop webui` 单独停止。
 菜单日志显示最近 100 行，持续跟随仍使用 `codexc logs <目标> -f`。卸载后台服务需确认。
 
-`codexc work` 按列表、设置默认、注册当前目录、注册已有目录、新建目录、权限和移除注册排序；选择默认项即保存，注册前显示实际目录并确认，移除注册不删除目录。`codexc metrics` 按聚合报告、会话列表、会话轮次明细、会话最近运行汇总、请求明细、历史额度和数据库状态排序；会话明细和最近运行汇总共用列表选择，并提供明确的手动输入 Thread ID 入口。清理与重置统一使用 `codexc cleanup`。上述操作菜单完成单项后可继续选择；“运行与连接”完成后返回该子菜单，退出后返回主菜单。Setup 和 Config 单项失败会显示错误并返回各自分类菜单，不自动重试写入。
+`codexc work` 按列表、设置默认、注册当前目录、注册已有目录、新建目录和移除注册排序；选择默认项即保存，注册前显示实际目录并确认，移除注册不删除目录。`codexc metrics` 按聚合报告、会话列表、会话轮次明细、会话最近运行汇总、请求明细、历史额度和数据库状态排序；会话明细和最近运行汇总共用列表选择，并提供明确的手动输入 Thread ID 入口。清理与重置统一使用 `codexc cleanup`。上述操作菜单完成单项后可继续选择；“运行与连接”完成后返回该子菜单，退出后返回主菜单。Setup 和 Config 单项失败会显示错误并返回各自分类菜单，不自动重试写入。
 新增或重复注册工作区保留有效的默认工作区；仅在默认值缺失时选择后备工作区，失效目录仍需显式清理。
 
 ```bash
@@ -135,7 +135,7 @@ Gateway 不再按 Provider 或模型白名单限制自动审查；已配置的�
 已经加载的 Thread 及恢复的历史会话保留自身审批方式，不随默认值切换；受管 Provider 独立实例
 仍以各自有效配置为准。无需为了此偏好重启 Gateway。
 
-Codex 用户默认和 Workspace 默认审批方式不依赖 Provider 或模型资格；Workspace 默认跨 Provider 共用。
+Codex 原生审批方式不依赖 Gateway 的 Provider 或模型资格白名单。
 新建、未加载恢复和分叉按已有权限继承规则传递审批方式，不因模型变化自动切回手动审批。
 已加载会话保留实际审批方式、订阅及活动任务状态。Gateway 不因第三方身份拦截新执行。
 
@@ -154,18 +154,20 @@ Codex 用户默认和 Workspace 默认审批方式不依赖 Provider 或模型�
 五分钟内有效且只能提交一次，切换会话后须重新查询。只有 App Server 权威设置确认后才报告已切换；
 未确认时不会自动重试，应重新用 `/autoreview` 核对实际状态。
 
-飞书、Telegram 和微信可用 `/workspaceperm` 查询当前工作区的默认审批方式；
-`/workspaceperm autoreview on` 开启自动审查，`off` 选择手动审批，`clear` 删除工作区覆盖。
-该覆盖对新建、分叉、卸载后恢复的会话生效；已加载会话保留实际审批方式，须用 `/autoreview` 修改当前会话。
-`clear` 只移除工作区覆盖；新会话跟随 Codex 默认，恢复历史会话可能保留其已保存设置，因此并非每次 `/resume` 都会继承新的默认值。
-当前会话的实际审批方式仍由 `/status` 及启动、完成卡片展示。
-飞书命令中心与 Telegram `/workspaceperm` 查询结果提供标明“工作区默认”的三种选择按钮，微信使用同一组文本命令。
-按钮限时、一次性并绑定原工作区与当前用户；切换工作区后须重新查询。WebUI 的「工作区与权限」
-同样支持自动审查、手动审批、跟随 Codex 默认，复用权限设置预览、配置版本校验和高风险确认。
-本机可通过 `codexc work` 的工作区权限菜单设置同一覆盖，配置字段为
-`[[workspaces]].approvals_reviewer`，仅接受 `auto_review` 或 `user`，删除该字段即跟随 Codex 默认。
+Workspace 只保存目录身份，不另存沙箱、审批策略、Permission Profile 或审批方式。
+渠道新会话由目标 App Server 按授权目录加载原生配置；恢复、重连和分叉遵循原生 Thread 权限继承规则，
+不会强制重置为当前项目默认。当前会话实际审批方式仍由 `/status`、`/autoreview` 及生命周期卡片展示。
+本机 CLI 与 WebUI 的 Codex 权限设置修改原生用户层配置；项目级差异使用受信任的 `.codex/config.toml`。
+用户层偏好不代表所有 Provider、项目或既有 Thread 的实际权限。渠道不再提供 `/workspaceperm`。
 
-工作区沙箱与审批策略未配置时，菜单默认保留继承状态。清除覆盖后，Gateway 分别使用全局 `codex.sandbox` 与 `on-request`；`codexc remote` 则沿用 Codex 自身默认设置。`untrusted` 可用于 Gateway，但当前 Remote 入口需要显式传入 `--ask-for-approval on-request|never` 覆盖。保存相同值不会改写配置，也不会要求热加载。
+升级前备份 Gateway `config.toml`。先在副本准备配置，待停止旧 Gateway 和会修改配置的 WebUI 后，
+再将清理后的配置用于新版；不要让旧 Gateway 热加载清理后的文件，否则旧默认值可能改变执行权限。
+显式删除 `[codex].sandbox` 和各 `[[workspaces]]` 的
+`sandbox`、`approval_policy`、`approvals_reviewer`、`permissions`。全局 sandbox 可能由旧默认补全写入，
+未手动设置也应检查。需要保留的项目差异应先在原生 Codex 配置中明确设置，不会自动搬到全局配置。
+旧字段会使严格配置校验失败，原文件保留不改写；清理前不能依赖新版配置菜单自行修复。
+失败时保持 Gateway 停止，修正新版配置后再启动；回退需先恢复旧程序及对应配置备份，
+再启动旧 Gateway。App Server 独立运行，不因这项清理而停止。现有 Thread 和计划任务数据库不随此次配置清理迁移或删除。
 
 ### 计划相关设置
 
@@ -344,7 +346,7 @@ Codex、Gateway 渠道和模型统计代理共用该文件；修改后在任务�
 不补读系统代理；仅有 `NO_PROXY` 时仍允许自动发现。Windows 不读取 WinINET/WinHTTP。
 不支持旧 TOML `[network]`，更新器不会迁移或修改代理配置。
 
-Workspace 只能从已登记项目中选择，并可分别设置 Sandbox、审批策略、Permission Profile 和默认审批方式；不会接受聊天用户提交的任意绝对路径。默认审批方式与当前会话实际设置的区别见[审批方式](#审批方式手动审批与自动审查auto-review)。
+Workspace 只能从已登记项目中选择，不接受聊天用户提交的任意绝对路径；沙箱与审批由 App Server 原生配置及 Thread 状态决定。默认审批方式与当前会话实际设置的区别见[审批方式](#审批方式手动审批与自动审查auto-review)。
 
 ## 4. Workspace、Provider 与终端
 
@@ -391,7 +393,7 @@ codexc remote --profile personal
 ```
 
 若要让新建终端会话使用渠道的登记目录，可运行 `codexc remote --workspace <ID>`。
-从登记目录的子目录启动时，Remote 会采用匹配 Workspace 的权限默认值，但仍使用子目录作为
+从登记目录的子目录启动时，Remote 保留子目录作为
 工作目录；渠道按登记根目录查询和恢复，不能保证列出或接续这些子目录会话。
 直接使用原生 `codex --remote` 不会读取 Gateway Workspace 注册表。
 
@@ -410,9 +412,8 @@ Remote 的 `--profile` 继续支持原生个人 Profile 和已登记的规范受
 直接运行 `codex` 会创建独立 TUI，不共享 Gateway Thread；需要共享会话时使用 `codexc remote`。跨 Provider 切换会创建目标 Provider 的新 Thread，不复制原 Provider 历史。
 直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，空闲释放可能停止对应实例；
 共享 App Server 的 TUI 请统一使用 `codexc remote`。
-`codexc remote` 会按当前目录或显式 `--workspace` 选中的工作区传递权限及可选 `approvals_reviewer`；
-也可用一次 `-C DIR` / `--cd DIR` 指定目录，按该目录匹配工作区及其权限；不能与 `--workspace` 同时使用。原生 `resume` / `fork` 上的目录参数同样参与选择，重复目录参数被拒绝。不能透传 `--remote` 或 `--remote-auth-token-env` 替换受管连接；原生 `--` 之后的内容按字面参数保留。
-显式传给 Codex 的 `-c approvals_reviewer=...` 或 `--approve-for-me` 优先于工作区默认审批方式。
+`codexc remote` 不注入网关权限参数，原生配置、Profile 和显式参数由 Codex 处理。
+可用 `--workspace` 选择登记目录，或用一次 `-C DIR` / `--cd DIR` 指定目录；两者不能同时使用。原生 `resume` / `fork` 上的目录参数同样参与选择，重复目录参数被拒绝。不能透传 `--remote` 或 `--remote-auth-token-env` 替换受管连接；原生 `--` 之后的内容按字面参数保留。
 Remote 不按 Provider 或模型限制自动审查，也不为审批资格固定模型或限制个人 Profile。
 聚合入口仍保护其 Provider 与模型目录，防止透传参数替换路由。
 Remote 的 `resume` 和继承式 `fork` 由原生 TUI 保留历史模型及审批方式，Codex 0.163.0 不应用启动参数中的 reviewer 覆盖；
@@ -547,7 +548,7 @@ Windows 先以临时 Provider 租约等待目标实例就绪，再检查桥并�
 新增入口会拒绝用户层、合并配置及已配置插件策略中已知的同名服务器，但不会读取插件清单；尚未出现在这些配置中的插件服务器可能重名。确认时会提示使用独立名称，Codex 的同名用户配置优先于插件服务器。
 
 “用户设置”与“App Server 合并配置”分别展示，未设置时不臆测上游默认值。合并结果来自用户配置管理连接，
-不包含当前渠道 Thread 的 Workspace/Profile 覆盖，也不表示组织策略、工具审批或操作系统权限已经放行。
+不包含当前渠道 Thread 的项目/Profile 配置及历史权限，也不表示组织策略、工具审批或操作系统权限已经放行。
 选择“移除用户设置”仅删除该字段；工具列表的 `[]` 是显式空列表，与删除字段不同。
 审批模式 `auto` 按工具属性判断，`prompt` 每次询问，`writes` 对非只读工具询问，`approve` 免除此层工具审批；
 应用/站点的 `allow` 不会取消其他审批。保存后在新会话中使用；已有 MCP 连接与桌面客户端不保证即时采用新配置。
@@ -745,10 +746,10 @@ codexc uninstall
 在聊天中发送 `/help` 查看当前渠道完整命令。常用命令包括：
 
 - 会话：`/new`、`/resume`、`/sessions`、`/archived`、`/rename`、`/archive`、`/unarchive`、`/pin`、`/unpin`
-- Workspace：`/workspace`、`/workspaceperm`
+- Workspace：`/workspace`
 - 运行：`/status`、`/stop`、`/queue`、`/revert`、`/compact`、`/fork`、`/review`、`/release`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
-- 工作区审批方式：`/workspaceperm autoreview <on|off|clear>`
+- 工作区权限由 App Server 原生配置及 Thread 状态管理。
 - 当前会话审批方式：`/autoreview [on|off]`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
 - 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/hooks`

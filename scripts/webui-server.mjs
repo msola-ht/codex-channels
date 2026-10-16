@@ -939,7 +939,6 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
       display: gateway.display,
       system: {
         approvalTimeoutSeconds: gateway.system.approvalTimeoutSeconds,
-        sandbox: gateway.system.sandbox,
         defaultWorkspace: gateway.system.defaultWorkspace,
         defaultModel: gateway.system.defaultModel,
         modelTrafficMode: gateway.system.modelTrafficMode,

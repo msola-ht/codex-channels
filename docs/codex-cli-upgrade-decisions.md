@@ -22,7 +22,7 @@
 | --- | --- | --- |
 | 多 Workspace 共用后台时，无目录配置查询的辅助加载也不受启动项目配置干扰 | 随 CLI 采用作用域修复；保持 `src/codex-client/client.ts` 的全局读取无 cwd、Workspace 查询显式 cwd | `config_manager_service.rs` 的全局读取本体原先已排除项目层；本次修复 `config_manager.rs::load_latest_config(None)` 的辅助加载。`model/list` 仍按实例启动配置与 Provider 目录工作，`permissionProfile/list` 保留明确 Workspace，不能把它们一并描述为全局目录变更 |
 | 中断正在执行的 Code Mode 时，其单元和嵌套工具也能停止 | 随 CLI 采用，不复制取消器；检查 `src/codex-client/client.ts` 的 `turn/steer`、`turn/interrupt` 和 Core 最终状态 | `codex-rs/features/src/lib.rs` 将 `code_mode_interrupt` 从默认关闭改为 Stable/默认开启；`instant_interrupt` 在项目原基线已默认开启，不能重复计为新增。实施时观察中断后终态、剩余工具和迟到输出 |
-| 恢复会话时仍遵守当前 Workspace 权限及受管策略 | 保留 Client 恢复时显式 `sandbox` 或 `permissions`，不为采用上游修复删除覆盖 | `codex-rs/app-server/src/request_processors/thread_processor.rs` 仅在无显式权限覆盖等条件下恢复保存的 profile；`codex-rs/core/src/config/mod.rs` 在准备网络配置前恢复有效授权。现有 Gateway 恢复始终带权限覆盖，不能宣称完整获得“无覆盖冷恢复”的收益 |
+| 恢复会话时保留 App Server 原生权限及受管策略 | 移除前台 Client 的网关权限默认覆盖；新建按目录加载原生配置，恢复及分叉沿用官方权限继承 | `codex-rs/app-server/src/request_processors/thread_processor.rs` 处理无覆盖恢复及持久 Profile；Gateway 仍核对目录、Thread 身份和活动状态，后台另保留无人值守准入，不把用户层配置显示当成旧 Thread 实际权限 |
 | 执行 Shell 命令继续使用官方支持的路径 | 随 CLI 移除定制 zsh 后端；不新增旧后端兼容；保持 `scripts/codex-remote.mjs` 的官方 `--remote` 入口 | `codex-rs/features/src/lib.rs` 将 `shell_zsh_fork` / `unified_exec_zsh_fork` 标为 Removed 并提示忽略；`core/src/config/mod.rs` 不再使用 `zsh_path`。项目运行脚本未注入这些配置；已用精确 CLI 刷新合同，受控公开参数内容无变化 |
 
 已审查精确 CLI 生成差异与固定源码：现有 `thread/resume`、`turn/steer`、`turn/interrupt` 和审批
@@ -178,7 +178,7 @@ daemon 的固定源码、完整调用链、双实例与持久 Thread 恢复实�
 
 | 上游能力 | 现有决定与收益 | 验证与限制 |
 | --- | --- | --- |
-| Auto-review 审批方式与审查状态 | 支持 Codex 用户默认、Workspace 覆盖和当前 Thread 的显式选择；展示实际审批方式、实时审查状态及本轮/会话递归分类计数，审查模型请求归入明确的触发任务 | 稳定设置字段及受控实验策略/状态投影；历史缺失不补推，未知状态只读，设置与人工批准不混用。协议和验证入口见[支持矩阵](index.md#当前支持矩阵)，渠道实机范围见[验收矩阵](channel-acceptance-matrix.md) |
+| Auto-review 审批方式与审查状态 | 支持 Codex 原生用户/项目配置和当前 Thread 的显式选择；展示实际审批方式、实时审查状态及本轮/会话递归分类计数，审查模型请求归入明确的触发任务 | 稳定设置字段及受控实验策略/状态投影；历史缺失不补推，未知状态只读，设置与人工批准不混用。协议和验证入口见[支持矩阵](index.md#当前支持矩阵)，渠道实机范围见[验收矩阵](channel-acceptance-matrix.md) |
 | 恢复响应增加实际协作模式 | 从稳定 `thread/resume.collaborationMode` 恢复 Default/Plan，显式接续、自动接续和重连不再固定为 Default | Client/Router 消费实际恢复模式；缺失或未知模式明确拒绝 |
 | 模型人格停用 | 移除 CLI/WebUI 人格选择和偏好写字段，避免无效设置；其他偏好保存保留原配置值 | 偏好投影、预览与事务保持一致；旧人格写请求明确报错，不迁移用户配置 |
 | 图片支持文件引用 | 共享 Queue 与历史把 URL/fileId 图片都裁剪为不可编辑的图片摘要 | Surface 提供受限 Data URL；OpenAI ChatGPT 由 Client 上传后使用官方 fileId，API Key 与第三方保留内联路径，详见下节 |
@@ -358,7 +358,7 @@ Base64；不要求文件管理、下载入口或单独命令。此前上传与�
 
 ### Workspace 与上游 Project 的职责
 
-Workspace 保留为渠道可选目录、权限默认值和 Conversation 路由配置；Thread、历史与执行权限
+Workspace 保留为渠道可选目录和 Conversation 路由配置；Thread、历史与执行权限
 仍由 App Server 管理。当前是 Surface Actor 准入加全局 Workspace 注册表，不是逐 Actor 的
 独立工作区 ACL；登记 cwd 也不等于建立操作系统沙箱。
 
@@ -370,15 +370,15 @@ Workspace 保留为渠道可选目录、权限默认值和 Conversation 路由�
 `app-server/src/request_processors/thread_processor.rs`、`state/src/runtime/projects.rs` 和
 `config/src/config_toml.rs`（均位于 `codex-rs/`）。
 
-因此，本次继续保留全局配置读取无 cwd、Workspace 查询显式 cwd，以及恢复时显式权限覆盖并
-核对实际响应的决定。Project 的实验状态不是永久拒绝理由；未来若需要与官方客户端共用项目
+因此，本次保留全局配置读取无 cwd、Workspace 查询显式 cwd；前台移除网关权限覆盖，恢复仍
+核对实际响应。Project 的实验状态不是永久拒绝理由；未来若需要与官方客户端共用项目
 名称、多根目录或 Thread 分组，应优先评估上游作为项目数据来源，避免两边重复维护。
 接入前仍须确定渠道准入、执行目录选择、项目变化与删除后的绑定处理，以及不同 Provider
 实例间的项目身份；不能把 Project 分组直接提升为授权。
 
-共享范围也须区分：`codexc remote` 读取 Gateway 注册表并传递 Workspace 权限默认值，
-原生 `codex --remote` 本身不读取该注册表。当前在登记目录的子目录启动 Remote，会继承匹配
-Workspace 的默认值但保留子目录 cwd；渠道按登记根目录精确查询和恢复，不能保证接续该 Thread。
+共享范围也须区分：`codexc remote --workspace` 读取 Gateway 注册表选择目录，不注入权限默认值，
+原生 `codex --remote` 本身不读取该注册表。在登记目录的子目录启动 Remote，
+仍保留子目录 cwd；渠道按登记根目录精确查询和恢复，不能保证接续该 Thread。
 `codexc remote --workspace <ID>` 使用登记根目录。此差异已沿
 `scripts/codex-remote.mjs`、`src/session-routing/router.ts`、`src/codex-client/client.ts`
 及上游 Thread 列表过滤实现核对，尚未运行复现，也没有证据将其归因于本次升级。

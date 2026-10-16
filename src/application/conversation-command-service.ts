@@ -15,7 +15,6 @@ import {
   parseSkillInvocation,
   parseThreadRevertOperation,
   parseThreadQueueOperation,
-  parseWorkspacePermissionCommand,
   toSessionQuery,
   type McpDetailView,
   type PluginListView,
@@ -30,7 +29,6 @@ import type {
 } from "./conversation-service.js";
 import type { ThreadGoal } from "./turn-port.js";
 import type { ThreadOccupancyReleaseResult } from "./thread-occupancy-port.js";
-import type { WorkspacePermissionUpdate } from "./workspace-permission-port.js";
 import {
   parseScheduledTaskOperation,
 } from "./scheduled-task-command.js";
@@ -62,7 +60,6 @@ export const conversationCommandNames = [
   "unpin",
   "status",
   "workspace",
-  "workspaceperm",
   "autoreview",
   "stop",
   "queue",
@@ -145,10 +142,6 @@ export type ConversationCommandResult =
       kind: "workspaces";
       workspaces: ReturnType<ConversationCommandUseCases["listWorkspaces"]>;
       currentWorkspaceId: string;
-    }
-  | {
-      kind: "workspace-permissions";
-      workspace: ReturnType<ConversationCommandUseCases["listWorkspaces"]>[number];
     }
   | {
       kind: "models";
@@ -251,11 +244,6 @@ export type ConversationCommandOutcome =
       workspace: Awaited<ReturnType<ConversationCommandUseCases["selectWorkspace"]>>;
       nextModel: ConversationModelSummary;
     }
-  | {
-      type: "workspace.permissions-updated";
-      workspace: Awaited<ReturnType<ConversationCommandUseCases["updateWorkspacePermissions"]>>;
-      update: WorkspacePermissionUpdate;
-    }
   | { type: "turn.stop-requested"; stopped: boolean }
   | {
       type: "thread-queue.added";
@@ -334,7 +322,6 @@ function modelSelectionResult(state: ModelSelectionState): ConversationCommandRe
 
 export interface ConversationCommandExecutor {
   selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }): Promise<ConversationCommandResult>;
-  selectWorkspaceAutoReview(target: ConversationTarget, selection: { workspaceId: string; value: "user" | "auto_review" | null }): Promise<ConversationCommandResult>;
   selectModel(target: ConversationTarget, selection: ModelSelectionIdentity): Promise<ConversationCommandResult>;
   execute(
     target: ConversationTarget,
@@ -357,15 +344,6 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   async selectModel(target: ConversationTarget, selection: ModelSelectionIdentity): Promise<ConversationCommandResult> {
     this.conversations.touchActivity?.(target);
     return modelSelectionResult(await this.conversations.selectModel(target, selection));
-  }
-
-  async selectWorkspaceAutoReview(target: ConversationTarget, selection: { workspaceId: string; value: "user" | "auto_review" | null }): Promise<ConversationCommandResult> {
-    this.conversations.touchActivity?.(target);
-    const update: WorkspacePermissionUpdate = { kind: "approvals-reviewer", value: selection.value };
-    const workspace = await this.conversations.updateWorkspacePermissions(
-      target, update, selection.workspaceId,
-    );
-    return { kind: "outcome", outcome: { type: "workspace.permissions-updated", workspace, update } };
   }
 
   async selectAutoReview(target: ConversationTarget, selection: { threadId: string; enabled: boolean }): Promise<ConversationCommandResult> {
@@ -517,24 +495,6 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           kind: "workspaces",
           workspaces: this.conversations.listWorkspaces(),
           currentWorkspaceId: this.conversations.status(target).workspaceId,
-        };
-      }
-      case "workspaceperm": {
-        const current = this.conversations.status(target).workspaceId;
-        const workspace = this.conversations.listWorkspaces().find(
-          (entry) => entry.id === current,
-        )!;
-        const update = parseWorkspacePermissionCommand(argumentsText);
-        if (update === null) {
-          return { kind: "workspace-permissions", workspace };
-        }
-        const updated = await this.conversations.updateWorkspacePermissions(
-          target,
-          update,
-        );
-        return {
-          kind: "outcome",
-          outcome: { type: "workspace.permissions-updated", workspace: updated, update },
         };
       }
       case "stop": {
