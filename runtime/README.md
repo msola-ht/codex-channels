@@ -17,6 +17,8 @@
 
 ## 文件
 
+- `codex-request-identity.mjs` / `codex-request-identity.d.mts`：仅在 `follow_cli_version = true` 时从当前锁定 CLI 版本解析官方客户端身份及 UA 的生效版本，保留系统和终端信息；无标记或 false 时保留显式值。Gateway、App Server 服务、CLI 与 WebUI 共用，不改写读取的配置。
+
 - `workspace-directory.mjs` / `workspace-directory.d.mts`：CLI 诊断、工作区管理和 Gateway 配置校验共用的只读目录检查，区分不存在、非目录和无法访问，不移除注册或修改目录。
 
 - `model-request-policy.mjs` / `model-request-policy.d.mts`：共享纯请求阶段预算与锁定 Codex 默认重试值；完整事件空闲 300 秒、WebSocket 建连 15 秒、HTTP 重试 4 次、流重试 5 次，生成没有总期限。第三方与聚合显式注入并通过 `config/read` 核验，官方 OpenAI 保持内置默认；所有 Codex 实例保留原生网络重连及 WS→HTTP 降级，代理和 Relay 不重发。核验连接关闭失败保留以便重试清理；可能启动实例的 Supervisor 操作两端统一等待 60 秒，涵盖启动、核验及连接收尾，不限制模型生成。不加载凭据、不写用户配置。

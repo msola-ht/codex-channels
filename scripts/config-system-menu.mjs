@@ -1,9 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { release as osRelease } from "node:os";
-import { join } from "node:path";
 
-import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { officialTuiUserAgentPattern, writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { officialTuiClientVersion } from "../runtime/codex-request-identity.mjs";
 import {
   detectTerminalIdentity,
   detectTerminalUserAgentToken,
@@ -13,7 +12,6 @@ import {
   loadGatewaySettings,
   updateGatewaySetting,
 } from "./config-management.mjs";
-import { packageDir } from "./runtime-config.mjs";
 import { runTimezoneCommand } from "./timezone-command.mjs";
 
 export async function runSystemSettings({
@@ -58,7 +56,7 @@ export async function runSystemSettings({
       {
         value: "official_tui_identity",
         label: "一键设为官方 TUI 身份",
-        hint: "同时设置 codex-tui 客户端身份与官方模型上游 UA",
+        hint: "同时设置官方身份与 UA，并启用版本自动跟随",
       },
       {
         value: "official_tui_terminal",
@@ -343,28 +341,27 @@ function terminalUserAgentToken() {
 
 export async function runOfficialTuiIdentity({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
   const settings = loadGatewaySettings(environment);
-  const protocolMetadata = JSON.parse(
-    readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"),
-  );
-  const codexCliVersion = String(protocolMetadata.codexCli).replace(/^codex-cli\s+/u, "");
+  const codexCliVersion = officialTuiClientVersion;
   const identity = { name: "codex-tui", version: codexCliVersion };
   const value = await prompts.text({
     message: `官方 TUI 身份：客户端将设为 codex-tui / ${codexCliVersion}；请确认模型上游 User-Agent`
-      + "（留空则删除现有 upstream_user_agent，改为透传 App Server 生成的官方 TUI UA）",
+      + "（将启用 follow_cli_version，后续升级自动更新 Codex 版本，系统和终端信息保留；留空则透传 App Server UA）",
     initialValue: buildOfficialCodexUserAgent(codexCliVersion),
-    validate: (input) => input.length <= 512 ? undefined : "User-Agent 过长",
+    validate: (input) => input.length > 512 ? "User-Agent 过长"
+      : input !== "" && !officialTuiUserAgentPattern.test(input) ? "跟随版本需要两处版本一致的完整官方 TUI UA" : undefined,
   });
   if (prompts.isCancel(value)) return { action: "back" };
   const result = updateGatewaySetting({
     kind: "system.official-tui-identity",
     value: {
+      followCliVersion: true,
       clientIdentity: identity,
       upstreamUserAgent: value === "" ? null : value,
       terminalIdentity: settings.system.officialTuiIdentity.terminalIdentity,
     },
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(
-    `已设为官方 TUI 请求身份（codex-tui / ${codexCliVersion}）：${result.configPath}\n`,
+    `已设为官方 TUI 请求身份并启用版本跟随（codex-tui / ${codexCliVersion}）：${result.configPath}\n`,
   );
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return {
@@ -390,6 +387,7 @@ async function runOfficialTuiTerminal({ environment, output, prompts, writeConfi
   const result = updateGatewaySetting({
     kind: "system.official-tui-identity",
     value: {
+      followCliVersion: current.followCliVersion,
       clientIdentity: current.clientIdentity,
       upstreamUserAgent: current.upstreamUserAgent,
       terminalIdentity: normalized === "" ? null : normalized,

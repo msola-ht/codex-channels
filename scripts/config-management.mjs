@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
+import { officialTuiClientVersion, resolveCodexRequestIdentity } from "../runtime/codex-request-identity.mjs";
 import { readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
 
 import {
   GatewayConfigConflictError,
+  officialTuiUserAgentPattern,
   parseGatewayConfig,
   timezonePattern,
   validateCodexConfigDocument,
@@ -26,7 +27,7 @@ import {
   projectWebuiSettings,
 } from "./config-webui-management.mjs";
 import { detectTerminalIdentity } from "../runtime/terminal-identity.mjs";
-import { packageDir, requireUserConfig } from "./runtime-config.mjs";
+import { requireUserConfig } from "./runtime-config.mjs";
 
 const operationUpdateValues = ["full", "compact", "hidden"];
 const messageFormatValues = ["html", "rich"];
@@ -42,7 +43,8 @@ export function loadGatewaySettings(environment = process.env) {
   const display = table(document.display);
   const codex = table(document.codex);
   const gateway = table(document.gateway);
-  const clientIdentity = table(codex.client_identity);
+  const requestIdentity = resolveCodexRequestIdentity(codex);
+  const clientIdentity = table(requestIdentity.clientIdentity);
   const approval = table(document.approval);
   const conversation = table(document.conversation);
   const scheduledTasks = table(document.scheduled_tasks);
@@ -79,14 +81,13 @@ export function loadGatewaySettings(environment = process.env) {
         36_500,
       ) ?? 30,
       officialTuiIdentity: {
+        followCliVersion: codex.follow_cli_version === true,
         clientIdentity: {
           name: stringValue(clientIdentity.name) || null,
           title: stringValue(clientIdentity.title) || null,
           version: stringValue(clientIdentity.version) || null,
         },
-        upstreamUserAgent: typeof codex.upstream_user_agent === "string"
-          ? codex.upstream_user_agent
-          : null,
+        upstreamUserAgent: requestIdentity.upstreamUserAgent ?? null,
         terminalIdentity: typeof codex.terminal_identity === "string"
           ? codex.terminal_identity
           : null,
@@ -227,12 +228,12 @@ export function applyTerminalIdentityFromEnvironment(environment = process.env) 
   const terminalIdentity = detectTerminalIdentity(environment);
   if (terminalIdentity === null) return null;
   const settings = loadGatewaySettings(environment);
-  const { clientIdentity, upstreamUserAgent, terminalIdentity: configured } =
+  const { clientIdentity, upstreamUserAgent, followCliVersion, terminalIdentity: configured } =
     settings.system.officialTuiIdentity;
   if (configured !== null) return null;
   const result = updateGatewaySetting({
     kind: "system.official-tui-identity",
-    value: { clientIdentity, upstreamUserAgent, terminalIdentity },
+    value: { clientIdentity, upstreamUserAgent, terminalIdentity, followCliVersion },
   }, { environment, expectedRevision: settings.revision });
   return result.value.terminalIdentity;
 }
@@ -344,6 +345,7 @@ function applySetting(document, input) {
       return changed(value, "restart-app-server");
     }
     case "system.official-tui-identity": {
+      const followCliVersion = booleanValue(input.value?.followCliVersion, "value.followCliVersion", "跟随 CLI 版本");
       const identity = table(input.value?.clientIdentity);
       const name = optionalStrictString(
         identity.name,
@@ -389,6 +391,13 @@ function applySetting(document, input) {
         "终端标识",
       );
       const codex = { ...table(document.codex) };
+      codex.follow_cli_version = followCliVersion;
+      if (followCliVersion && name !== null && name !== "codex-tui") {
+        throw invalid("value.clientIdentity.name", "invalid-value", "跟随 CLI 版本时客户端名称必须为 codex-tui");
+      }
+      if (followCliVersion && typeof upstreamUserAgent === "string" && !officialTuiUserAgentPattern.test(upstreamUserAgent)) {
+        throw invalid("value.upstreamUserAgent", "invalid-value", "跟随 CLI 版本需要两处版本一致的完整官方 TUI UA，请重新一键设置或关闭跟随");
+      }
       if (clientIdentity === null) delete codex.client_identity;
       else codex.client_identity = clientIdentity;
       if (upstreamUserAgent === null) delete codex.upstream_user_agent;
@@ -396,8 +405,19 @@ function applySetting(document, input) {
       if (terminalIdentity === null) delete codex.terminal_identity;
       else codex.terminal_identity = terminalIdentity;
       document.codex = validateCodexConfigDocument(codex);
+      const effective = resolveCodexRequestIdentity(document.codex);
+      if (effective.upstreamUserAgent !== undefined && effective.upstreamUserAgent.length > 512) {
+        throw invalid("value.upstreamUserAgent", "too-long", "上游 User-Agent 更新 Codex 版本后超过 512 个字符，请缩短系统或终端信息");
+      }
+      if (effective.clientIdentity) document.codex.client_identity = effective.clientIdentity;
+      if (effective.upstreamUserAgent !== undefined) document.codex.upstream_user_agent = effective.upstreamUserAgent;
       return changed(
-        { clientIdentity, upstreamUserAgent, terminalIdentity },
+        {
+          followCliVersion,
+          clientIdentity: effective.clientIdentity ?? null,
+          upstreamUserAgent: effective.upstreamUserAgent ?? null,
+          terminalIdentity,
+        },
         "restart-all",
       );
     }
@@ -541,12 +561,9 @@ function workspaceOptions(document) {
 
 /** 未配置 `[codex].client_identity` 时 Gateway 生效的官方 TUI 默认身份。 */
 function officialTuiIdentityDefaults() {
-  const protocolMetadata = JSON.parse(
-    readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"),
-  );
   return {
     name: "codex-tui",
-    version: String(protocolMetadata.codexCli).replace(/^codex-cli\s+/u, ""),
+    version: officialTuiClientVersion,
   };
 }
 

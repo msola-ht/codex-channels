@@ -1,5 +1,6 @@
 import { isCustomCatalogProvider, responsesProviderCatalogPath, parseResponsesModelCatalog, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
+import { resolveCodexRequestIdentity } from "./codex-request-identity.mjs";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
@@ -114,6 +115,9 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   };
   assertRunning();
   const validatedCodex = validateCodexConfigDocument(runtime.document.codex ?? {});
+  const { upstreamUserAgent } = resolveCodexRequestIdentity(validatedCodex);
+  // Version expansion can exceed the original UA's validated length.
+  validateCodexConfigDocument({ upstream_user_agent: upstreamUserAgent });
   const validatedDebug = validateDebugConfigDocument(runtime.document.debug ?? {});
   const trafficDumpDirectory = join(runtime.dataDir, "traffic");
   if (Object.hasOwn(runtime.document, "ds_proxy")) {
@@ -287,7 +291,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         clinePass,
         ...(modelGuard ? { readClinePassModelCapabilities: (model, signal) => modelGuard.modelCapabilities(model, signal) } : {}),
         onError: () => proxySelector.invalidate(),
-        ...(validatedCodex.upstream_user_agent ? { upstreamUserAgent: validatedCodex.upstream_user_agent } : {}),
+        ...(upstreamUserAgent ? { upstreamUserAgent } : {}),
       });
       ownedResources.add(bridge);
       await bridge.start();
@@ -296,8 +300,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     }
     const optionsWithUserAgent = {
       ...options,
-      ...(validatedCodex.upstream_user_agent
-        ? { upstreamUserAgent: validatedCodex.upstream_user_agent }
+      ...(upstreamUserAgent
+        ? { upstreamUserAgent }
         : {}),
       ...(!validatedDebug.model_traffic_dump
         ? {}

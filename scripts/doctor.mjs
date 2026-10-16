@@ -405,15 +405,17 @@ if (document) {
   note(
     "App Server 客户端身份",
     clientIdentityConfigured
-      ? "已自定义"
+      ? codex.follow_cli_version === true ? "已启用版本跟随" : "已固定"
       : `默认（codex-tui / ${requiredAppServerVersion}）`,
-    "默认即为官方 TUI 身份并跟随 Codex CLI 升级；需要覆盖时运行 codexc config → 身份与时区 → "
+    "未填写身份时使用当前默认版本；已填写的版本仅在 follow_cli_version = true 时跟随升级。启用跟随可运行 codexc config → 身份与时区 → "
       + "一键设为官方 TUI 身份，之后运行 codexc restart all",
   );
   note(
     "模型上游 User-Agent",
-    stringValue(codex.upstream_user_agent) ? "已自定义" : "默认（App Server 生成的官方 TUI UA）",
-    "默认由 App Server 按当前锁定版本生成并跟随升级；需要覆盖时运行 codexc config → 身份与时区 → "
+    stringValue(codex.upstream_user_agent)
+      ? codex.follow_cli_version === true ? "已启用版本跟随" : "已固定"
+      : "默认（App Server 生成的官方 TUI UA）",
+    "已填写的 UA 默认固定；follow_cli_version = true 时只更新 Codex 版本，保留系统和终端信息。启用跟随可运行 codexc config → 身份与时区 → "
       + "一键设为官方 TUI 身份，之后运行 codexc restart all",
   );
 
