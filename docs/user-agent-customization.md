@@ -8,10 +8,11 @@
 - 默认以官方 `codex --remote` TUI 身份连接 App Server：`initialize.clientInfo` 声明
   `codex-tui` 与当前锁定 Codex CLI 版本，模型上游收到官方形态的 `User-Agent`；无需用户操作，
   Codex CLI 升级后自动跟随。
-- 允许用户分别自定义 Gateway 初始化 App Server 时声明的客户端名称、标题和版本。
+- 允许用户分别自定义 Gateway 初始化 App Server 时声明的客户端名称、标题和版本；名称为
+  `codex-tui`（含缺省名称）时版本始终取当前锁定 CLI 版本。
 - 允许用户配置 App Server 进程上报的终端标识，补齐服务进程没有终端时模型上游 UA 中的
   `unknown`。
-- 允许用户完整覆盖模型上游最终收到的 `User-Agent`，配置值与出站 Header 保持一致。
+- 允许用户完整覆盖模型上游最终收到的 `User-Agent`；完整官方格式中的 Codex 版本随升级更新，其他自定义 UA 保持原值。
 - 未配置任何自定义字段时使用上述默认身份，服务生命周期不因是否覆盖而变化。
 - HTTP/SSE 与 WebSocket 请求使用相同规则，所有受管 Provider 使用同一全局配置。
 - 保留真实 Codex App Server 构建版本，不通过 Gateway 配置伪造上游二进制版本。
@@ -89,13 +90,17 @@ version = "1.0.0"
 | --- | --- | --- |
 | `codex.client_identity.name` | `codex-tui` | `initialize.clientInfo.name`；影响进程级 UA 前缀（由首个普通客户端或环境覆盖决定） |
 | `codex.client_identity.title` | `null` | `initialize.clientInfo.title` |
-| `codex.client_identity.version` | 当前锁定 Codex CLI 版本 | `initialize.clientInfo.version`；普通客户端初始化会更新进程级 UA 后缀，升级后自动跟随 |
+| `codex.client_identity.version` | 当前锁定 Codex CLI 版本 | `initialize.clientInfo.version`；名称为 `codex-tui` 或缺省时忽略已保存的旧版本并跟随升级，其他名称使用显式版本 |
 | `codex.upstream_user_agent` | 不覆盖 | Provider Proxy 发给模型上游的完整 UA；缺省时上游收到 App Server 按默认身份生成的官方 TUI UA |
 | `codex.terminal_identity` | 不设置 | App Server 进程上报的终端标识（`终端名` 或 `终端名/版本`）；缺省时由 App Server 自行探测，服务进程探测不到则为 `unknown` |
 
-不提供追加、模板、环境变量或自动拼接模式。`upstream_user_agent` 一旦存在，就完整替换出站
-`User-Agent`；删除该字段后恢复 App Server 生成的官方 TUI UA。这样可以保证“配置什么，上游就
-收到什么”，同时避免多个模式产生难以判断的组合结果。
+不提供追加、模板或环境变量模式。`upstream_user_agent` 一旦存在，就以解析后的完整值替换出站
+`User-Agent`；删除该字段后恢复 App Server 生成的官方 TUI UA。完整匹配
+`codex-tui/<version> (<os>; <arch>) <终端标识> (codex-tui; <version>)` 且两处版本相同时，
+版本须为 `主.次.补丁`（可带 `-`/`+` 后缀）；两处 Codex 版本统一取当前锁定 CLI 版本，系统、架构和终端信息原样保留。
+版本不一致、额外前后缀或其他客户端格式均视为自定义 UA，保持原值。
+读取配置不改写 TOML，CLI 与 WebUI 展示解析后的生效身份；显式保存身份时写入当前解析值。
+因此已有官方格式旧配置无需手动重填，源码升级并重启相关进程后自动生效；终端版本与时区不随 CLI 升级变化。
 
 `terminal_identity` 只影响 App Server 自己生成的 UA 前缀，`upstream_user_agent` 仍然完整覆盖
 出站 Header；两者同时配置时上游只看后者。终端标识不进入 Gateway 的 `initialize.clientInfo`，
@@ -130,7 +135,9 @@ WebSocket 请求时。内部指标、Thread、Turn 和 App Server 协议版本�
 - `client_identity.version`：1–64 个 ASCII 字符，允许字母、数字、`.`、`_`、`+`、`-`，
   首字符必须是字母或数字；不强制语义化版本。
 - `upstream_user_agent`：1–512 个可显示 ASCII 字符，不允许首尾空白、CR、LF、Tab 或其他控制
-  字符；验证通过后按原值写入 Header，不再修剪或改写。
+  字符；验证通过后只对上述完整官方格式更新 Codex 版本，其他值原样写入 Header。
+  版本更新后仍须满足 512 字符上限，保存、升级预检、服务启动和 UA 状态查询时超限明确报错，不截断或退回旧版本。
+  设置读取仍返回解析值，允许用户在 CLI/WebUI 缩短超长内容后重新保存。
 - `terminal_identity`：最长 64 个字符的 `终端名` 或 `终端名/版本`，允许字母、数字、`.`、`_`、
   `-`，`/` 只能出现一次且两侧都非空，两段均须以字母或数字开头。
 
@@ -141,7 +148,7 @@ WebSocket 请求时。内部指标、Thread、Turn 和 App Server 协议版本�
 
 ## Setup 与命令体验
 
-官方 TUI 身份是默认行为，不需要在 Setup、WebUI 或配置文件中操作。`codexc config` 的“系统设置”
+官方 TUI 身份是默认行为，不需要在 Setup、WebUI 或配置文件中操作。`codexc config` 的“身份与时区”
 仍保留“一键设为官方 TUI 身份”入口，形态为显式覆盖：
 
 一键设为官方 TUI 身份：在单次受 revision 保护的原子写入中把客户端身份写成
@@ -149,7 +156,7 @@ WebSocket 请求时。内部指标、Thread、Turn 和 App Server 协议版本�
 官方格式值（`codex-tui/<version> (<os>; <arch>) <终端标识> (codex-tui; <version>)`），
 可编辑后保存。预填值基于运行 `codexc config` 的当前系统和终端信息；tmux/zellij 等无法
 还原上游终端探测、或平台架构命名与上游 `os_info` 不一致时，可能与原生 TUI 实际输出不同，
-适合作为与原生 TUI 出站一致的起点。保存后配置里会写死当时的版本，不再跟随 Codex CLI 升级；
+适合作为与原生 TUI 出站一致的起点。保存后官方身份和完整官方格式 UA 的 Codex 版本继续跟随升级；
 删除 `[codex].client_identity` 与 `[codex].upstream_user_agent` 即可回到默认身份。其他自定义
 身份或 UA 仍可直接编辑 TOML。
 
@@ -183,7 +190,7 @@ WebUI 在“官方 TUI 请求身份”分区提供同一字段，手工填写后
 - `terminal_identity` 只在 App Server 服务进程启动子进程时写入环境，进程内终端探测只解析一次，
   因此修改后必须重启 App Server（受管服务下即 `codexc restart all` 中的 App Server 目标）。
 - 主 Provider、DeepSeek、OpenCode Go 多账户、自定义 Provider 和原生子代理使用同一全局值。
-- 默认身份随 Codex CLI 升级自动变化，只需重启 `codexc restart all` 即可生效；显式覆盖任一
+- 默认身份及显式官方身份随 Codex CLI 升级自动变化，只需重启 `codexc restart all` 即可生效；显式覆盖任一
   字段后运行 `codexc restart all`，同时应用 Gateway 身份与上游 UA；仅运行
   `codexc restart gateway` 不会重建 Provider Proxy，只重启
   App Server 时 Gateway 身份依赖受管自动重载或前台手动重启。
@@ -201,6 +208,8 @@ Provider ID 字符串插值到全局 UA。
 
 - `runtime/gateway-config.mjs` 与类型声明：`[codex].client_identity`、`[codex].upstream_user_agent`、
   `[codex].terminal_identity` 的严格 Schema、默认值和公共配置类型。
+- `runtime/codex-request-identity.mjs` 与类型声明：统一从锁定 CLI 元数据解析官方身份版本与完整官方 UA，
+  Gateway 初始化、所有 Provider Proxy、CLI/WebUI 设置和 UA 状态页共用；不修改读取的配置。
 - `src/config`：运行语义与重载分类；`client_identity` 在 Gateway 建立连接时使用并触发
   Gateway 重建；`upstream_user_agent` 不属于 Gateway 运行配置，只在 App Server 服务进程
   启动 Provider Proxy 时读取；`terminal_identity` 同样不属于 Gateway 运行配置，只在 App Server
@@ -232,9 +241,9 @@ Provider ID 字符串插值到全局 UA。
   默认值写回配置。
 - `runtime/app-server-read.mjs`：连接本机 App Server 完成一次 `initialize` 握手并返回完整
   `User-Agent`，供 Doctor 以 `codex_app_server_daemon` 非全局身份复用，不打印或缓存完整值。
-- `scripts/webui-management-status-route.mjs`：`/api/v1/management/upstream-user-agent` 返回模型上游实际使用的
-  `User-Agent` 与取值来源；配置覆盖优先，否则用同一非全局身份读取 App Server 生成的 UA，
-  App Server 未运行时返回不可用状态而不是让接口失败。
+- `scripts/webui-management-status-route.mjs`：`/api/v1/management/upstream-user-agent` 分别返回配置原值、
+  解析后的预期 `User-Agent` 与取值来源，并提供最近请求指标中的实际 UA，供界面判断是否需要重启。
+  配置覆盖优先，否则用同一非全局身份读取 App Server 生成的 UA；App Server 未运行时返回不可用状态而不是让接口失败。
 - `codexc doctor`：只显示「默认/已自定义」状态，不为 UA 校验发起模型生成请求，不打印完整值；常规只读 App Server 握手诊断仍保留。
 
 不修改 Codex `~/.codex/config.toml`、Provider Profile、API Key 文件、数据库 Schema、指标协议或
@@ -257,11 +266,11 @@ Codex `~/.codex/config.toml`。跨连接读取"原生 Codex TUI 的 UA"不在支
   与当前锁定 Codex CLI 版本，上游收到官方 TUI 形态的 UA，Codex CLI 升级后无需改配置即使用新版本。
 - 配置 `terminal_identity` 并重启 App Server 后，模型上游 UA 的终端标识等于该值；未配置或
   删除该字段时，服务进程探测不到终端仍上报 `unknown`，不写死任何默认终端。
-- 显式配置的字段覆盖对应默认值，未覆盖的字段仍取默认值。
+- 显式配置的字段覆盖对应默认值，未覆盖的字段仍取默认值；官方 `codex-tui` 版本统一跟随锁定 CLI。
 - `client_identity` 出现在 Gateway 的 `initialize.clientInfo` 声明中，并参与 App Server 进程级
   UA 后缀；跨客户端共享同一 App Server 时不作为确定性出站依据。
-- 配置 `upstream_user_agent` 后，HTTP 与 WebSocket 上游观察到的值与 TOML 字符串完全一致，
-  多客户端下同样确定。
+- 配置 `upstream_user_agent` 后，HTTP 与 WebSocket 上游观察到的值与共享解析结果一致，
+  完整官方格式的两处 Codex 版本随升级变化，其他自定义字符串原样保留，多客户端下同样确定。
 - 非法值在服务启动或交互保存前明确拒绝，不降级到默认值。
 - 实际出站 UA 经限长后进入指标库，供本机 WebUI 核对；不在普通日志、渠道消息或 PR 验证产物中输出完整自定义值。
 - 文档、配置示例、Setup 提示和模块 README 在实现提交中同步更新。

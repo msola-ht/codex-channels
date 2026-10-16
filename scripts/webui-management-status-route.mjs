@@ -1,6 +1,8 @@
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { readAppServerUserAgent } from "../runtime/app-server-read.mjs";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { readGatewayConfig, validateCodexConfigDocument } from "../runtime/gateway-config.mjs";
+import { resolveCodexRequestIdentity } from "../runtime/codex-request-identity.mjs";
+import { invalidSetting } from "./config-management-error.mjs";
 import { RequestMetricsQueryService } from "../dist/observability/index.js";
 import { metricsRange } from "./metrics-database-access.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
@@ -74,7 +76,7 @@ async function handleServices(
 }
 
 /**
- * 模型上游实际收到的 User-Agent：配置了 `[codex].upstream_user_agent` 时以配置为准且不探测
+ * 模型上游预期使用的 User-Agent：配置了 `[codex].upstream_user_agent` 时解析生效版本且不探测
  * App Server，否则以短缓存读取 App Server 生成的进程级 UA。应答同时携带最近一条指标记录实际
  * 发出的 UA，供界面判断配置是否已在运行中的服务里生效。App Server 未运行时不视为接口失败。
  */
@@ -87,14 +89,18 @@ async function handleUpstreamUserAgent(
 ) {
   const paths = runtimeConfig(environment);
   const document = readGatewayConfig(paths.configPath);
-  const codex = document.codex;
+  const codex = validateCodexConfigDocument(document.codex ?? {});
+  const { upstreamUserAgent } = resolveCodexRequestIdentity(codex);
+  if (upstreamUserAgent !== undefined && upstreamUserAgent.length > 512) {
+    throw invalidSetting("value.upstreamUserAgent", "too-long", "上游 User-Agent 更新 Codex 版本后超过 512 个字符，请缩短系统或终端信息");
+  }
   const configured = typeof codex.upstream_user_agent === "string"
     ? codex.upstream_user_agent
     : null;
   const appServerUserAgent = configured !== null
     ? null
     : await cachedAppServerUserAgent(document, paths.dataDir, cache, gatewayVersion);
-  const effectiveUserAgent = configured ?? appServerUserAgent;
+  const effectiveUserAgent = upstreamUserAgent ?? appServerUserAgent;
   const recentRequest = latestRecordedUserAgent(environment, openMetricsStore);
   sendManagementJson(response, 200, {
     observedAt: new Date().toISOString(),

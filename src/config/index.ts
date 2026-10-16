@@ -1,4 +1,5 @@
 import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
+import { resolveCodexRequestIdentity } from "../../runtime/codex-request-identity.mjs";
 import {
   lstatSync,
   readFileSync,
@@ -9,6 +10,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import {
   materializeGatewayConfigDefaults,
   parseGatewayConfig,
+  validateCodexConfigDocument,
   validateGatewayConfigDocument,
   type GatewayConfigDocument,
 } from "../../runtime/gateway-config.mjs";
@@ -222,6 +224,13 @@ function loadValidatedConfigDocument(
   } = {},
 ): GatewayConfig {
   const workspaces = validateWorkspaces(raw.workspaces);
+  const { clientIdentity, upstreamUserAgent } = resolveCodexRequestIdentity(raw.codex);
+  try {
+    // Also used by candidate-upgrade preflight, before any services are stopped.
+    validateCodexConfigDocument({ upstream_user_agent: upstreamUserAgent });
+  } catch (error) {
+    throw new ConfigurationError(error instanceof Error ? error.message : String(error));
+  }
   const gatewayTimezone = raw.gateway?.timezone === "system"
     ? undefined : raw.gateway?.timezone ?? raw.codex.timezone;
   if (raw.gateway?.timezone === undefined && gatewayTimezone !== undefined) {
@@ -281,8 +290,8 @@ function loadValidatedConfigDocument(
     ...(raw.codex.default_model ? { codexModel: raw.codex.default_model } : {}),
     ...(raw.codex.timezone === undefined ? {} : { codexTimezone: raw.codex.timezone }),
     ...(gatewayTimezone === undefined ? {} : { gatewayTimezone }),
-    ...(raw.codex.client_identity
-      ? { codexClientIdentity: raw.codex.client_identity }
+    ...(clientIdentity
+      ? { codexClientIdentity: clientIdentity }
       : {}),
     operationUpdateDisplay: raw.display.operation_updates,
     planUpdatesEnabled: raw.display.plan_updates,
