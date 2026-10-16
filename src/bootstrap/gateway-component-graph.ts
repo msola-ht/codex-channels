@@ -757,7 +757,16 @@ export abstract class GatewayComponentGraph {
         this.subagentCompletion.hasPendingForParentThread(parentThreadId),
       this.sessionDisplayCache,
       {
-        port: this.codex,
+        port: {
+          accountRateLimits: options => this.codex.accountRateLimits(options),
+          lunaReserveModel: () => this.codex.lunaReserveModel(),
+          updateLunaReserveThreadSettings: async (threadId, settings, beforeSubmit) => {
+            await this.codex.updateLunaReserveThreadSettings(threadId, settings, beforeSubmit);
+            if (this.stopping) throw new Error("Gateway 正在停止");
+            await this.inbound.drain();
+            if (this.stopping) throw new Error("Gateway 正在停止");
+          },
+        },
         output: this.output,
         onError: (error, threadId) => {
           this.logger.warn(

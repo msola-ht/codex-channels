@@ -5,6 +5,10 @@
 Thread/Turn 启动的本地 `beforeSubmit` 守卫透过 Provider 准备保留到 RPC 发送前同步执行，不编码为
 协议字段；守卫拒绝时不发请求，已经发出的写请求仍等待实际响应，不以取消丢弃写入结果。
 
+Luna Reserve 设置写入也在 Provider 准备后执行最终提交守卫，并与当前 Thread 审批方式更新复用
+RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 失效、重连或关闭会清理等待。
+空 RPC 响应不等于设置已经应用，组合根须等待共享入站归约后由 Application 核对实际设置。
+
 0.162.0 引入的 `partial_answer` 在通知边界继续保留，Goal set/clear 的渠道用户操作显式携带 `origin: "user"`。
 子代理 started 活动保留官方 `model` 与 `reasoningEffort`，空值不推断；其他活动不复用启动快照。
 

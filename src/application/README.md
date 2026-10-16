@@ -87,13 +87,14 @@ Fast 与 Ultrafast 按各自有效开关和模型目录选择；自动继承的�
   Fast 与 Ultrafast 只允许当前模型目录明确声明支持时开启，Standard 可显式退出已有加速档位；
   主 Provider 通过模型窄端口保存用户级默认层级，独立 Provider 不改写主配置。
   无绑定偏好恢复时重新检查档位；选择 OpenAI 模型统一重置 Fast/Ultrafast 为 Standard。
-- `luna-reserve-port.ts`：定义账户额度读取、隐藏 Reserve 模型解析和 Thread 设置更新的窄端口；
+- `luna-reserve-port.ts`：定义可取消的账户额度读取、隐藏 Reserve 模型解析和带最终提交守卫的 Thread 设置更新窄端口；
   Application 不接收生成协议类型。
 - `luna-reserve-service.ts`：在同一 Conversation 锁内处理最终用量错误后的后端授权切换，并按 Thread
-  在进程内保存原模型；活动 Turn 完成前延后设置写入，同一账户的多个 Reserve Thread 共用每轮额度读取，
+  在进程内保存原模型和已确认的 Reserve 设置；活动 Turn 完成前延后设置写入，同一账户的即时与定时刷新共用正在进行的轻量额度读取，
   失效期间的新触发会在旧操作结束后继续；账户、Thread 生命周期与关闭均有取消路径，设置写入失败不重试，
   账户失效前已被 App Server 接受的写入会提示用户确认当前模型，不执行可能覆盖后续选择的补偿写入；
-  失败消息不在 Gateway 重放。
+  切换成功须由 RPC 与实际设置通知共同确认并完成共享归约，不乐观改写 Router；原生客户端修改受支持模型设置后放弃自动切回。
+  未确认写入不由恢复定时器重试，失败消息不在 Gateway 重放。
 - `collaboration-mode-port.ts`：定义 Default/Plan 预设的稳定查询边界，不向 Application
   暴露完整实验协议。
 - `collaboration-mode-service.ts`：把官方预设与当前模型设置组合为下一 Turn 的协作模式覆盖；

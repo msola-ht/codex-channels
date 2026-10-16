@@ -15,6 +15,7 @@ const recoveryPollIntervalMs = 60_000;
 interface ReserveReturnState {
   accountId: string;
   settings: ThreadModelSettings;
+  reserveSettings: ThreadModelSettings;
 }
 
 interface RefreshGeneration {
@@ -26,7 +27,7 @@ export interface LunaReserveServiceOptions {
   port: LunaReservePort;
   router: Pick<
     SessionRouter,
-    "current" | "modelSettingsForThread" | "targetForThread" | "updateModelSettings"
+    "current" | "modelSettingsForThread" | "targetForThread"
   >;
   models: Pick<ModelSelectionService, "hasPending" | "state">;
   collaborationModes?: {
@@ -50,6 +51,7 @@ export class LunaReserveService {
   private readonly operations = new Map<string, Promise<void>>();
   private readonly threadGenerations = new Map<string, number>();
   private accountGeneration = 0;
+  private limitsRead: { controller: AbortController; promise: Promise<AccountRateLimits> } | undefined;
   private timer: NodeJS.Timeout | undefined;
   private closed = false;
 
@@ -75,7 +77,7 @@ export class LunaReserveService {
       this.pendingRefreshes.add(threadId);
       return;
     }
-    this.startRefresh(threadId, false);
+    this.startRefresh(threadId);
   }
 
   clearThread(threadId: string): void {
@@ -93,6 +95,7 @@ export class LunaReserveService {
 
   clearAccountState(): void {
     this.accountGeneration += 1;
+    this.cancelLimitsRead();
     this.usageLimitedTurns.clear();
     this.pendingRefreshes.clear();
     this.deferredUntilTurnCompletion.clear();
@@ -106,6 +109,7 @@ export class LunaReserveService {
   async close(): Promise<void> {
     this.closed = true;
     this.accountGeneration += 1;
+    this.cancelLimitsRead();
     this.usageLimitedTurns.clear();
     this.pendingRefreshes.clear();
     this.deferredUntilTurnCompletion.clear();
@@ -118,11 +122,7 @@ export class LunaReserveService {
     await waitAtMost(Promise.allSettled([...this.operations.values()]), 5_000);
   }
 
-  private startRefresh(
-    threadId: string,
-    background: boolean,
-    readLimits?: () => Promise<AccountRateLimits>,
-  ): void {
+  private startRefresh(threadId: string): void {
     if (this.closed || this.operations.has(threadId)) return;
     const target = this.options.router.targetForThread(threadId);
     if (!target) {
@@ -134,24 +134,24 @@ export class LunaReserveService {
       thread: this.threadGenerations.get(threadId) ?? 0,
     };
     const operation = this.options.locks.forConversation(target, async () => {
+      if (!this.isCurrentRefresh(threadId, generation)) return;
       const binding = this.options.router.current(target);
       if (binding?.threadId !== threadId) {
         this.clearThread(threadId);
         return;
       }
-      const limits = await (readLimits?.()
-        ?? this.options.port.accountRateLimits({ background }));
+      const limits = await this.readLimits();
       if (!this.isCurrentRefresh(threadId, generation)) return;
       await this.reconcile(threadId, limits, generation);
     });
     this.operations.set(threadId, operation);
     void operation.catch((error) => {
-      this.options.onError?.(error, threadId);
+      if (this.isCurrentRefresh(threadId, generation)) this.options.onError?.(error, threadId);
     }).finally(() => {
       if (this.operations.get(threadId) === operation) {
         this.operations.delete(threadId);
         if (this.pendingRefreshes.delete(threadId)) {
-          this.startRefresh(threadId, false);
+          this.startRefresh(threadId);
           return;
         }
         if (
@@ -175,12 +175,12 @@ export class LunaReserveService {
       this.clearThread(threadId);
       return;
     }
-    if (this.deferWhileActive(threadId)) return;
     const previous = this.returnByThread.get(threadId);
-    if (previous && current.model !== lunaReserveModel) {
+    if (previous && !sameModelSettings(current, previous.reserveSettings)) {
       this.clearThread(threadId);
       return;
     }
+    if (this.deferWhileActive(threadId)) return;
     if (current.model === lunaReserveModel) {
       await this.restoreOrdinaryModel(threadId, limits, generation);
       return;
@@ -218,18 +218,11 @@ export class LunaReserveService {
       return;
     }
     const settings = settingsForModel(reserve, current);
-    await this.options.port.updateLunaReserveThreadSettings(threadId, settings);
-    if (!this.isCurrentRefresh(threadId, generation)) {
-      this.warnInvalidatedAccountWrite(threadId, target, generation);
-      return;
-    }
+    if (!await this.applySettings(threadId, target, generation, current, settings)) return;
     this.returnByThread.set(threadId, {
       accountId: limits.accountId,
       settings: current,
-    });
-    this.options.router.updateModelSettings(threadId, {
-      ...settings,
-      modelProvider: "openai",
+      reserveSettings: { ...settings, modelProvider: "openai" },
     });
     this.ensureTimer();
     this.options.output.publish({
@@ -269,22 +262,14 @@ export class LunaReserveService {
     const current = this.options.router.modelSettingsForThread(threadId);
     if (
       !this.isCurrentRefresh(threadId, generation)
-      || current?.model !== lunaReserveModel
+      || !sameModelSettings(current, previous.reserveSettings)
       || this.hasPendingSelection(target)
       || this.deferWhileActive(threadId)
     ) {
       return;
     }
     const settings = settingsForModel(model, previous.settings);
-    await this.options.port.updateLunaReserveThreadSettings(threadId, settings);
-    if (!this.isCurrentRefresh(threadId, generation)) {
-      this.warnInvalidatedAccountWrite(threadId, target, generation);
-      return;
-    }
-    this.options.router.updateModelSettings(threadId, {
-      ...settings,
-      modelProvider: "openai",
-    });
+    if (!await this.applySettings(threadId, target, generation, previous.reserveSettings, settings)) return;
     this.returnByThread.delete(threadId);
     this.stopTimerWhenIdle();
     this.options.output.publish({
@@ -301,20 +286,85 @@ export class LunaReserveService {
     this.timer.unref();
   }
 
+  private async applySettings(
+    threadId: string,
+    target: ConversationTarget,
+    generation: RefreshGeneration,
+    expected: ThreadModelSettings,
+    settings: LunaReserveThreadSettings,
+  ): Promise<boolean> {
+    const invalidated = new Error("Luna Reserve 设置提交前已失效");
+    const beforeSubmit = () => {
+      if (
+        !this.isCurrentRefresh(threadId, generation)
+        || this.options.router.current(target)?.threadId !== threadId
+        || !sameModelSettings(this.options.router.modelSettingsForThread(threadId), expected)
+        || this.hasPendingSelection(target)
+        || this.deferWhileActive(threadId)
+      ) throw invalidated;
+    };
+    try {
+      await this.options.port.updateLunaReserveThreadSettings(threadId, settings, beforeSubmit);
+    } catch (error) {
+      if (error === invalidated) return false;
+      if (!this.isCurrentRefresh(threadId, generation)) {
+        this.warnInvalidatedAccountWrite(threadId, target, generation);
+        return false;
+      }
+      // An unconfirmed write may already have been applied. Never retry it
+      // from the recovery timer or overwrite a later client selection.
+      this.returnByThread.delete(threadId);
+      this.pendingRefreshes.delete(threadId);
+      this.stopTimerWhenIdle();
+      throw error;
+    }
+    if (!this.isCurrentRefresh(threadId, generation)) {
+      this.warnInvalidatedAccountWrite(threadId, target, generation);
+      return false;
+    }
+    if (
+      this.options.router.current(target)?.threadId !== threadId
+      || !sameModelSettings(this.options.router.modelSettingsForThread(threadId), {
+        ...settings,
+        modelProvider: "openai",
+      })
+    ) {
+      this.returnByThread.delete(threadId);
+      this.pendingRefreshes.delete(threadId);
+      this.stopTimerWhenIdle();
+      throw new Error("Luna Reserve 设置已变化，未确认自动切换");
+    }
+    return true;
+  }
+
   private startRecoveryPoll(): void {
     const threadIds = [...this.returnByThread.keys()].filter(
       (threadId) =>
         !this.operations.has(threadId)
         && !this.deferredUntilTurnCompletion.has(threadId),
     );
-    let limits: Promise<AccountRateLimits> | undefined;
-    const readLimits = () => {
-      limits ??= this.options.port.accountRateLimits({ background: true });
-      return limits;
-    };
     for (const threadId of threadIds) {
-      this.startRefresh(threadId, true, readLimits);
+      this.startRefresh(threadId);
     }
+  }
+
+  private readLimits(): Promise<AccountRateLimits> {
+    if (this.limitsRead) return this.limitsRead.promise;
+    const controller = new AbortController();
+    const promise = this.options.port.accountRateLimits({ background: true, signal: controller.signal });
+    const read = { controller, promise };
+    this.limitsRead = read;
+    const clear = () => {
+      if (this.limitsRead === read) this.limitsRead = undefined;
+    };
+    void promise.then(clear, clear);
+    return promise;
+  }
+
+  private cancelLimitsRead(): void {
+    const read = this.limitsRead;
+    this.limitsRead = undefined;
+    read?.controller.abort();
   }
 
   private stopTimerWhenIdle(): void {
@@ -387,7 +437,9 @@ function settingsForModel(
   return {
     model: model.model,
     effort,
-    serviceTier,
+    // App Server represents an explicitly cleared tier as "default" in the
+    // applied settings notification, rather than the catalog's null default.
+    serviceTier: serviceTier ?? "default",
     collaborationMode: previous.collaborationMode,
   };
 }
