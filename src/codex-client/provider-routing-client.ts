@@ -765,10 +765,11 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["readUnattendedPermissionSettings"]> {
     signal?.throwIfAborted();
     return this.withProviderActivity(modelProvider, async () => {
-      const client = await this.ensureClient(modelProvider);
+      signal?.throwIfAborted();
+      const client = await this.untilClosed(() => this.ensureClient(modelProvider), signal);
       signal?.throwIfAborted();
       return client.readUnattendedPermissionSettings(cwd, signal);
-    });
+    }, signal);
   }
 
   async readModelAccelerationSettings(

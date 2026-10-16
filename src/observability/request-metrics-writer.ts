@@ -227,8 +227,9 @@ function scopeMatcher(scopes: readonly { threadId: string; turnId?: string }[], 
     }
   }
   return scope => {
-    if (scope.threadId === null || !threads.has(scope.threadId) || (scope.requestPurpose ?? null) !== requestPurpose) return false;
+    // Thread/task summaries only consume requests attributed to a concrete Turn.
+    if (scope.threadId === null || scope.turnId === null || !threads.has(scope.threadId) || (scope.requestPurpose ?? null) !== requestPurpose) return false;
     const turns = threads.get(scope.threadId);
-    return turns === undefined || (scope.turnId !== null && turns.has(scope.turnId));
+    return turns === undefined || turns.has(scope.turnId);
   };
 }

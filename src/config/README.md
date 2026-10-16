@@ -1,6 +1,6 @@
 # Config
 
-Workspace 的可选 `approvals_reviewer` 严格接受 `user` 或 `auto_review`，映射为 `approvalsReviewer`；缺省保持缺省，不由配置补全写入。该字段通过既有 Workspace Registry 热加载更新，只作为新建、分叉及未加载 Thread 恢复的参数；已加载会话保持 App Server 返回的实际 reviewer。
+Workspace 仅定义 `id`、`name` 和 `cwd`；执行权限由 App Server 原生配置及 Thread 继承规则决定，Gateway 不提供工作区权限覆盖字段。
 
 本目录负责把共享运行时已完成结构校验的 TOML 文档转换为 Gateway 运行配置。
 `display.model_aliases` 映射为可选运行字段 `modelDisplayAliases`，未配置时为空映射；Bootstrap
