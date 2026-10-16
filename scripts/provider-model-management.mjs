@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parse } from "smol-toml";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
+import { clineRelayCatalogSchema } from "../runtime/cline-relay-catalog.mjs";
 import { managedProviderAccountFamilies, loadManagedModelProviderDefinitions, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
 import { managedProviderDirectory, managedProviderMarkerPath, customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath, primaryProviderBackupPath, loadConfiguredCustomPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { customProviderUpstreamMetadataPath } from "../runtime/model-provider-upstream-metadata.mjs";
@@ -17,6 +18,7 @@ import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 
 // Revisions cover private profiles too; avoid exposing a reusable credential fingerprint.
 const revisionSecret = randomBytes(32);
+const clineSourceMetadataSchema = clineRelayCatalogSchema.pick({ commit: true, downloadedAt: true });
 
 export class ProviderModelManagementError extends Error {
   constructor(code, field, message, options) {
@@ -145,14 +147,13 @@ async function buildRemovalPlan(input, environment) {
       throw invalid("provider-state-unavailable", "provider", "共享账户默认模型或思考等级与目录不一致，请先修复默认设置");
     }
     if (family.proxyKey === "clp") {
-      if (!manifest.cline || typeof manifest.cline.commit !== "string" || !/^[a-f0-9]{40}$/u.test(manifest.cline.commit)
-        || typeof manifest.cline.downloadedAt !== "string"
+      if (!clineSourceMetadataSchema.safeParse(manifest.cline).success
         || !["deepseek", "cline"].includes(manifest.source)
         || (manifest.source === "deepseek" && manifest.model !== "deepseek-flash")) {
-        throw invalid("provider-state-unavailable", "provider", "CLP 模型来源不完整，未执行移除");
+        throw invalid("catalog-source-invalid", "provider", "CLP 模型来源信息无效，请先核对共享目录来源，未执行移除");
       }
       const follows = catalog.models.some(model => model.slug === family.definition.defaultModel);
-      if (follows !== (manifest.source === "deepseek")) throw invalid("provider-state-unavailable", "provider", "CLP 目录与来源跟随关系不一致");
+      if (follows !== (manifest.source === "deepseek")) throw invalid("catalog-source-invalid", "provider", "CLP 目录与来源跟随关系不一致，未执行移除");
       nextManifest = { ...manifest };
       if (input.model === family.definition.defaultModel) {
         nextManifest.source = "cline";

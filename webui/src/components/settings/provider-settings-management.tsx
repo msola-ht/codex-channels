@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldContent, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Separator } from "@/components/ui/separator"
 import { ManagedSelect, ManagementConfirmationDialog, SettingsMutationFeedback } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsEmpty, SettingsError } from "@/components/settings/settings-feedback"
 import { formatTokens } from "@/lib/format"
@@ -383,14 +384,15 @@ function ProviderSettingsConfirmationDialog({
 }) {
   const { t } = useTranslation()
   const localRemoval = pending.operation === "model.remove"
-  const lines = [localRemoval ? t("modelCatalog.removeOperation") : pending.operation === "model.custom.save" ? t("modelCatalog.editOperation") : t("accountConfirmation.operation", { value: pending.operation })]
-  if (pending.provider !== undefined) lines.push(t("managementUi.providerConfirm", { name: pending.provider.displayName ?? pending.provider.name ?? pending.provider.id }))
+  const notices: string[] = []
+  const lines = localRemoval ? [] : [pending.operation === "model.custom.save" ? t("modelCatalog.editOperation") : t("accountConfirmation.operation", { value: pending.operation })]
+  if (!localRemoval && pending.provider !== undefined) lines.push(t("managementUi.providerConfirm", { name: pending.provider.displayName ?? pending.provider.name ?? pending.provider.id }))
   if (pending.provider?.model !== undefined) lines.push(t("managementUi.defaultModelConfirm", { value: pending.provider.model }))
   if (pending.provider !== undefined && "upstreamWireApi" in pending.provider) lines.push(t("managementUi.upstreamConfirm", { value: pending.provider.upstreamWireApi === "chat_completions" ? t("managementUi.upstreamChatCompletions") : t("managementUi.upstreamResponses") }))
   if (pending.provider?.models !== undefined) for (const model of pending.provider.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: t(model.supportsImages ? "managementUi.supported" : "managementUi.unsupported"), reasoning: model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? "none", patch: model.applyPatchToolType ?? t("managementUi.unsupported"), search: t(model.supportsSearchTool ? "managementUi.supported" : "managementUi.unsupported") }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model, mode: t(model.template.followContext ? "managementUi.follow" : "managementUi.independent") }) : ""))
   if (pending.target !== undefined) lines.push(t("managementUi.targetConfirm", { name: pending.target.displayName, id: pending.target.id }))
-  if (pending.model !== undefined) lines.push(t("managementUi.modelConfirm", { name: pending.model.displayName, id: pending.model.id }))
-  if (pending.providers !== undefined && pending.providers.length > 0) lines.push(t("managementUi.appliedProviders", { providers: pending.providers.join(t("managementUi.listSeparator")) }))
+  if (!localRemoval && pending.model !== undefined) lines.push(t("managementUi.modelConfirm", { name: pending.model.displayName, id: pending.model.id }))
+  if (pending.providers !== undefined && pending.providers.length > 0) lines.push(t(localRemoval ? "modelCatalog.removalScope" : "managementUi.appliedProviders", { providers: pending.providers.join(t("managementUi.listSeparator")) }))
   if (pending.overridden !== undefined && pending.overridden.length > 0) lines.push(t("managementUi.overridden", { values: pending.overridden.map(entry => t("managementUi.previousPercent", { provider: entry.provider, percent: entry.previousPercent })).join(t("managementUi.listSeparator")) }))
   if (pending.conflicts === true) lines.push(t("managementUi.percentConflictConfirm"))
   if (pending.windowConflict === true) lines.push(t("managementUi.maxWindowConflict"))
@@ -406,12 +408,28 @@ function ProviderSettingsConfirmationDialog({
     "provider-relay-inflight": "modelCatalog.inflight",
   }
   const unknownWarning = pending.warnings?.some(warning => !Object.hasOwn(warningKeys, warning.code)) === true
-  for (const warning of pending.warnings ?? []) lines.push(Object.hasOwn(warningKeys, warning.code) ? t(warningKeys[warning.code]!) : t("modelCatalog.unknownWarning", { code: warning.code }))
-  if (localRemoval) lines.push(t("modelCatalog.backup"), t("modelCatalog.activation"))
-  return <ManagementConfirmationDialog open saving={saving} loading={loading} title={t(localRemoval ? "modelCatalog.confirmTitle" : "managementUi.providerConfirmTitle")} description={t("accountConfirmation.changeDescription")} confirmDisabled={unknownWarning} confirmVariant={pending.operation === "remove" || localRemoval ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
-    <p className="whitespace-pre-line">{lines.join("\n")}</p>
+  for (const warning of pending.warnings ?? []) {
+    const known = Object.hasOwn(warningKeys, warning.code)
+    const target = localRemoval ? notices : lines
+    target.push(known ? t(warningKeys[warning.code]!) : t("modelCatalog.unknownWarning", { code: warning.code }))
+  }
+  if (localRemoval) notices.push(t("modelCatalog.backup"))
+  return <ManagementConfirmationDialog open saving={saving} loading={loading} title={t(localRemoval ? "modelCatalog.confirmTitle" : "managementUi.providerConfirmTitle")} description={t(localRemoval ? "modelCatalog.removeOperation" : "accountConfirmation.changeDescription")} confirmDisabled={unknownWarning} confirmVariant={pending.operation === "remove" || localRemoval ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
+    {localRemoval ? <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
+        {pending.model !== undefined ? <div>
+          <p className="font-medium break-words">{pending.model.displayName}</p>
+          <p className="text-sm text-muted-foreground break-all">{pending.model.id}</p>
+        </div> : null}
+        <p className="text-sm whitespace-pre-line break-words">{lines.join("\n")}</p>
+      </div>
+      <Separator />
+      <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+        {notices.map((notice, index) => <p key={index}>{notice}</p>)}
+      </div>
+    </div> : <p className="whitespace-pre-line">{lines.join("\n")}</p>}
     {pending.provider?.models?.map(entry => <CustomModelDetailsPreview key={entry.id} entry={entry} />)}
-    <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: pending.activation })}</p>
-    {pending.activation === "restart-all" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart all" })}</p> : null}
+    {!localRemoval ? <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: pending.activation })}</p> : null}
+    {!localRemoval && pending.activation === "restart-all" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart all" })}</p> : null}
   </ManagementConfirmationDialog>
 }

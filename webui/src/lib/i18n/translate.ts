@@ -37,6 +37,7 @@ const apiErrorKeys: Record<string, MessageKey> = {
   "last-model-protected": "modelCatalog.lastProtected",
   "gateway-default-protected": "modelCatalog.defaultProtected",
   "catalog-validation-failed": "settingsUi.unavailable",
+  "catalog-source-invalid": "modelCatalog.sourceInvalid",
   "readback-failed": "settingsUi.writeUnconfirmed",
   management_unavailable: "settingsUi.unavailable",
   codex_settings_unavailable: "settingsUi.unavailable",
