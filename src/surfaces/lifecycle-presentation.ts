@@ -857,7 +857,17 @@ function autoApprovalReviewField(
         : review.total > 0
           ? `至少 ${review.total} 次（含子代理）`
           : "未知（含子代理）",
-    subfields: outcomes.filter(([, count]) => count > 0).map(([label, count]) => ({ label, value: `${count} 次` })),
+    subfields: [
+      ...outcomes.filter(([, count]) => count > 0).map(([label, count]) => ({ label, value: `${count} 次` })),
+      ...(review.usage === undefined ? [] : [{
+        label: "已记录审查 Token",
+        value: review.usage.inputTokens === null && review.usage.outputTokens === null
+          ? "未观测到用量"
+          : `${formatTokenCount((review.usage.inputTokens ?? 0) + (review.usage.outputTokens ?? 0))}${
+            review.usage.coverage === "partial" ? "（用量不完整）" : ""
+          }`,
+      }]),
+    ],
   };
 }
 

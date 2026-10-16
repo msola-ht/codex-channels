@@ -1089,8 +1089,20 @@ export abstract class GatewayComponentGraph {
             sessionTiming,
           };
         },
-        autoApprovalReview: (threadId, turnId, signal) => this.autoApprovalReview.summary(threadId, turnId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal)),
-        sessionAutoApprovalReview: (threadId, signal) => this.autoApprovalReview.sessionSummary(threadId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal)),
+        autoApprovalReview: async (threadId, turnId, signal) => {
+          // Include queued descendant requests, not just the root Thread. This
+          // bounded watermark cannot prove IPC delivery or historical retention.
+          const persisted = await metricsWriter.waitForCurrentWrites();
+          const summary = await this.autoApprovalReview.summary(threadId, turnId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal));
+          if (!persisted && summary.usage) summary.usage.coverage = "partial";
+          return summary;
+        },
+        sessionAutoApprovalReview: async (threadId, signal) => {
+          const persisted = await metricsWriter.waitForCurrentWrites();
+          const summary = await this.autoApprovalReview.sessionSummary(threadId, this.subagentCompletion.pendingParentTurns(), this.metricsDatabase.withSignal(signal));
+          if (!persisted && summary.usage) summary.usage.coverage = "partial";
+          return summary;
+        },
         taskAggregate: async (threadId, turnId, signal): Promise<TurnTaskMetricsSummary | undefined> => {
           // The completion event can outrun the buffered request writer. Once
           // a child is known, wait for the current queue watermark so the

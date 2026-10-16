@@ -52,7 +52,7 @@ export class SqliteRequestMetricsThreadQueries {
     const latestTurn = this.reader.prepare(`
       SELECT turn_id
       FROM model_request_metrics
-      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
+      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response' AND request_purpose IS NULL
       ORDER BY id DESC
       LIMIT 1
     `).get(threadId) as { turn_id: string } | undefined;
@@ -72,6 +72,7 @@ export class SqliteRequestMetricsThreadQueries {
         FROM model_request_metrics AS metric
         WHERE metric.thread_id IN (SELECT thread_id FROM thread_tree)
           AND metric.turn_id IS NOT NULL
+          AND metric.request_purpose IS NULL
       )
     `;
     const threadAggregate = this.reader.prepare(`${scopeSql}
@@ -149,7 +150,7 @@ export class SqliteRequestMetricsThreadQueries {
       ), scoped AS (
         SELECT metric.*
         FROM model_request_metrics AS metric
-        WHERE (
+        WHERE metric.request_purpose IS NULL AND ((
           metric.thread_id = ? AND metric.turn_id = ?
         ) OR (
           EXISTS (
@@ -158,7 +159,7 @@ export class SqliteRequestMetricsThreadQueries {
             WHERE task.thread_id = metric.thread_id
               AND task.turn_id = metric.turn_id
           )
-        )
+        ))
       )
     `;
     const row = this.reader.prepare(`${scopeSql}, representative AS (
@@ -216,7 +217,7 @@ export class SqliteRequestMetricsThreadQueries {
 
   private turnPerformance(threadId: string, turnId: string): RequestTimingSummary {
     return this.scopedPerformance(`WITH scoped AS (
-      SELECT * FROM model_request_metrics WHERE thread_id = ? AND turn_id = ?
+      SELECT * FROM model_request_metrics WHERE thread_id = ? AND turn_id = ? AND request_purpose IS NULL
     )`, [threadId, turnId]);
   }
 
@@ -277,13 +278,13 @@ export class SqliteRequestMetricsThreadQueries {
 
   private turnResponseUsage(threadId: string, turnId: string): ResponseUsageSummary | null {
     return this.scopedResponseUsage(`WITH scoped AS (
-      SELECT provider, response_usage_amount FROM model_request_metrics WHERE thread_id = ? AND turn_id = ?
+      SELECT provider, response_usage_amount FROM model_request_metrics WHERE thread_id = ? AND turn_id = ? AND request_purpose IS NULL
     )`, [threadId, turnId]);
   }
 
   private turnInterruptionSummary(threadId: string, turnId: string): RequestInterruptionSummary {
     return this.queryInterruptionSummary(`WITH scoped AS (
-      SELECT * FROM model_request_metrics WHERE thread_id = ? AND turn_id = ?
+      SELECT * FROM model_request_metrics WHERE thread_id = ? AND turn_id = ? AND request_purpose IS NULL
     )`, [threadId, turnId]);
   }
 
@@ -374,7 +375,7 @@ export class SqliteRequestMetricsThreadQueries {
         COUNT(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS cache_observed_request_count,
         ${compactAggregateSql}
       FROM model_request_metrics
-      WHERE thread_id = ? AND turn_id = ?
+      WHERE thread_id = ? AND turn_id = ? AND request_purpose IS NULL
       GROUP BY turn_id
     `).get(threadId, turnId) as TurnSummaryRow | undefined;
   }
@@ -389,6 +390,7 @@ export class SqliteRequestMetricsThreadQueries {
     const scope = metricsScopeSql({ ...query, threadId });
     const interruptions = rows.length === 0 ? [] : this.queryInterruptionRows(`WITH scoped AS (
       SELECT * FROM model_request_metrics WHERE ${scope.sql}
+        AND request_purpose IS NULL
         AND turn_id IN (${rows.map(() => "?").join(", ")})
     )`, [...scope.params, ...rows.map((row) => row.turn_id!)], true);
     const interruptionByTurn = new Map(interruptions.map((row) => [row.turn_id, interruptionFromRow(row)]));
@@ -420,6 +422,7 @@ export class SqliteRequestMetricsThreadQueries {
     ), scoped AS (
       SELECT * FROM model_request_metrics
       WHERE ${scope.sql} AND turn_id IS NOT NULL
+        AND request_purpose IS NULL
         AND thread_id IN (SELECT thread_id FROM tree)
     )`;
     const parameters = [threadId, ...scope.params];
@@ -447,7 +450,7 @@ export class SqliteRequestMetricsThreadQueries {
     const row = this.reader.prepare(`
       SELECT COUNT(DISTINCT turn_id) AS turn_count, COUNT(*) AS request_count
       FROM model_request_metrics
-      WHERE thread_id = ? AND turn_id IS NOT NULL
+      WHERE thread_id = ? AND turn_id IS NOT NULL AND request_purpose IS NULL
     `).get(threadId) as { turn_count: number; request_count: number };
     return row.request_count === 0 ? null : row.turn_count;
   }
@@ -460,6 +463,7 @@ export class SqliteRequestMetricsThreadQueries {
       FROM (
         SELECT DISTINCT thread_id, turn_id FROM model_request_metrics
         WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL
+          AND request_purpose IS NULL
       )
     `).get(...scope.params) as { threadCount: number; turnCount: number };
   }
@@ -537,6 +541,7 @@ export class SqliteRequestMetricsThreadQueries {
     const cte = `WITH RECURSIVE scoped AS (
         SELECT * FROM model_request_metrics
         WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL
+          AND request_purpose IS NULL
       ), ancestors(thread_id) AS (
         SELECT DISTINCT thread_id FROM scoped
         UNION
@@ -665,7 +670,7 @@ export class SqliteRequestMetricsThreadQueries {
       throw new Error("会话指标排序无效");
     }
     const scoped = `SELECT * FROM model_request_metrics
-      WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL`;
+      WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL AND request_purpose IS NULL`;
     const summary = this.reader.prepare(`
       SELECT ${metricsAggregateSql},
         COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count

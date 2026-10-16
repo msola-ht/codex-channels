@@ -95,9 +95,17 @@ export class SqliteAutoApprovalReviewMetrics implements AutoApprovalReviewStore 
           COALESCE(SUM(status = 'inProgress'), 0) AS inProgress,
           COALESCE(SUM(status = 'unknown'), 0) AS unknown
         FROM auto_approval_reviews JOIN task_turns USING (thread_id, turn_id)
+      ), review_usage AS (
+        SELECT COUNT(*) AS request_count,
+          SUM(input_tokens) AS input_tokens,
+          SUM(output_tokens) AS output_tokens,
+          COUNT(*) FILTER (WHERE input_tokens IS NULL OR output_tokens IS NULL) AS missing_token_request_count
+        FROM model_request_metrics JOIN task_turns USING (thread_id, turn_id)
+        WHERE request_purpose = 'autoApprovalReview'
       )
       SELECT
         review_counts.*,
+        review_usage.*,
         COUNT(state.thread_id) AS observed,
         COUNT(*) AS expected,
         COALESCE(SUM(CASE WHEN state.started = 1 AND state.completed = 1 AND state.continuous = 1
@@ -108,10 +116,17 @@ export class SqliteAutoApprovalReviewMetrics implements AutoApprovalReviewStore 
             WHERE pending.thread_id = task.thread_id AND pending.turn_id = task.turn_id
               AND (pending.completed = 0 OR pending.status = 'unknown'))
           THEN 1 ELSE 0 END), 0) AS complete
-      FROM task_turns task LEFT JOIN auto_approval_review_turns state USING (thread_id, turn_id) CROSS JOIN review_counts
-    `).get(...parameters, JSON.stringify(pendingParentTurns)) as Omit<AutoApprovalReviewSummary, "coverage"> & { observed: number; expected: number; complete: number };
+      FROM task_turns task LEFT JOIN auto_approval_review_turns state USING (thread_id, turn_id)
+        CROSS JOIN review_counts CROSS JOIN review_usage
+    `).get(...parameters, JSON.stringify(pendingParentTurns)) as Omit<AutoApprovalReviewSummary, "coverage" | "usage"> & {
+      observed: number; expected: number; complete: number;
+      request_count: number | null; input_tokens: number | null; output_tokens: number | null; missing_token_request_count: number | null;
+    };
     return { approved: row.approved ?? 0, denied: row.denied ?? 0, timedOut: row.timedOut ?? 0,
       aborted: row.aborted ?? 0, inProgress: row.inProgress ?? 0, unknown: row.unknown ?? 0, total: row.total ?? 0,
+      usage: { coverage: (row.missing_token_request_count ?? 0) > 0 ? "partial" : "observed",
+        requestCount: row.request_count ?? 0, inputTokens: row.input_tokens, outputTokens: row.output_tokens,
+        missingTokenRequestCount: row.missing_token_request_count ?? 0 },
       coverage: row.observed === 0 ? "unknown"
       : row.complete === row.expected ? "complete" : "partial" };
   }

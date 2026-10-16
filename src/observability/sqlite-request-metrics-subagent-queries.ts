@@ -61,7 +61,8 @@ export class SqliteRequestMetricsSubagentQueries {
     ), scoped AS (
       SELECT metric.* FROM model_request_metrics AS metric
       JOIN relations ON relations.thread_id = metric.thread_id
-      ${query.parentTurnId === undefined ? "" : `WHERE EXISTS (
+      WHERE metric.request_purpose IS NULL
+      ${query.parentTurnId === undefined ? "" : `AND EXISTS (
         SELECT 1 FROM subagent_turns AS child
         WHERE child.thread_id = metric.thread_id AND child.turn_id = metric.turn_id
           AND child.parent_thread_id = relations.parent_thread_id AND child.parent_turn_id = ?

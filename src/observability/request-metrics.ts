@@ -526,6 +526,14 @@ export interface TurnExecutionStore {
 
 /** Counts observed official agent decisions; coverage describes the query-time snapshot. */
 export interface AutoApprovalReviewSummary {
+  /** Retained, explicitly attributed observations; IPC loss and retention prevent a complete-cost guarantee. */
+  usage?: {
+    coverage: "observed" | "partial";
+    requestCount: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    missingTokenRequestCount: number;
+  };
   approved: number;
   denied: number;
   timedOut: number;

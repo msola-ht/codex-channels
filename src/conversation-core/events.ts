@@ -12,6 +12,14 @@ export interface AutoApprovalReviewDetails {
   durationMs?: number;
 }
 export interface AutoApprovalReviewCounts {
+  /** Retained observations, never proof that all review costs were captured. */
+  usage?: {
+    coverage: "observed" | "partial";
+    requestCount: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    missingTokenRequestCount: number;
+  };
   approved: number;
   denied: number;
   timedOut: number;

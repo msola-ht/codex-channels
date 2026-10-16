@@ -28,7 +28,7 @@ function ModelUsageCard({ item, grouped, formatCount }: { item: CardUsage; group
   const { t } = useTranslation()
   const name = (grouped ? item.model : formatModelName(item.model, null)) ?? t("threads.unknownModel")
   const members = item.members ?? []
-  const hasDetails = members.length > 1
+  const hasDetails = members.length > 0
   const card = <Card size="sm" className={cn("relative min-w-0 gap-1", hasDetails && "ring-2 ring-primary/50 hover:ring-primary focus-within:ring-primary")}>
       {hasDetails && <DialogTrigger render={<Button variant="ghost" />} className="absolute inset-0 size-full cursor-pointer rounded-xl" aria-label={t("overview.showModelDetailsLabel", { model: name })} />}
       <CardHeader className={cn("flex min-w-0 flex-wrap items-center gap-2", hasDetails && "pointer-events-none relative [&_[data-slot=tooltip-trigger][tabindex]]:pointer-events-auto")}>
