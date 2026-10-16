@@ -596,6 +596,7 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
     apiKey,
     supportsWebsockets = false,
     catalogSource = { kind: "official" },
+    modelOnly = false,
   },
   environment = process.env,
   {
@@ -636,6 +637,19 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
     || (expectedProfilePresent === false && previousProfile !== undefined)
   ) {
     throw customSwitchingProfileChangedError(provider);
+  }
+  if (modelOnly) {
+    if (catalogSource.kind !== "custom" || previousProfile === undefined || expectedProfileContent === undefined
+      || expectedProfilePresent !== true || expectedProviderIds === undefined || !ids.includes(provider)) {
+      throw customSwitchingProfileChangedError(provider);
+    }
+    const profile = parse(previousProfile);
+    profile.model = model;
+    profile.model_reasoning_effort = catalogSource.reasoningEffort;
+    const content = stringify(profile);
+    configuredCustomSwitchingProfileFromContent(environment, provider, content);
+    writePrivateFileAtomicSync(profilePath, content);
+    return;
   }
   writePrivateFileAtomicSync(
     profilePath,

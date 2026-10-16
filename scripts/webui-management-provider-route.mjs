@@ -189,6 +189,9 @@ export async function routeProviderManagement({
     const resource = await readProviderSettings(environment, state);
     const inputFingerprint = fingerprintManagementValue(input);
     const resourceRevision = fingerprintManagementValue(resource);
+    if (input.operation === "model.custom.save" && input.resourceRevision !== resourceRevision) {
+      throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
+    }
     const issued = state.confirmations.issue({
       sessionId: principalId,
       operation: "provider-settings.write",
@@ -215,6 +218,9 @@ export async function routeProviderManagement({
     const safePreview = redactProviderSettingsResult(preview);
     const inputFingerprint = fingerprintManagementValue(input);
     const resourceRevision = fingerprintManagementValue(resource);
+    if (input.operation === "model.custom.save" && input.resourceRevision !== resourceRevision) {
+      throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
+    }
     state.confirmations.consume(body.confirmationToken, {
       sessionId: principalId,
       operation: "provider-settings.write",
@@ -406,6 +412,7 @@ function recordProviderAudit(state, details, failureMessage) {
 }
 
 function providerSettingsAuditTarget(input) {
+  if (input.operation === "model.remove" || input.operation === "model.custom.save") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
   if (input.operation === "primary.custom.save") return String(input.provider?.providerId ?? "unknown");
   if (input.operation === "managed.default") return String(input.provider ?? "unknown");
   if (input.operation === "managed.window") return String(input.model ?? "unknown");

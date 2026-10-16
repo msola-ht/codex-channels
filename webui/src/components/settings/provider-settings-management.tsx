@@ -15,11 +15,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldContent, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { ManagedSelect, ManagementConfirmationDialog } from "@/components/settings/settings-controls"
+import { ManagedSelect, ManagementConfirmationDialog, SettingsMutationFeedback } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsEmpty, SettingsError } from "@/components/settings/settings-feedback"
 import { formatTokens } from "@/lib/format"
 import type { ManagementProviderSettingsResponse } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
+import type { MessageKey } from "@/lib/i18n/messages"
 import { CustomModelDetails, CustomModelDetailsPreview } from "@/components/settings/custom-model-details"
 import type { CustomModelDraft } from "@/components/settings/custom-model-details"
 import { contextWindowPresetTokens } from "../../../../runtime/model-catalog.mjs"
@@ -47,6 +48,8 @@ function ProviderSettingsCard({
 }) {
   const { t } = useTranslation()
   const [editorOpen, setEditorOpen] = useState(false)
+  const [editorRevision, setEditorRevision] = useState<string | null>(null)
+  const [originalModelCount, setOriginalModelCount] = useState(0)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [providerId, setProviderId] = useState("")
   const [providerName, setProviderName] = useState("")
@@ -63,6 +66,8 @@ function ProviderSettingsCard({
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
   const [windowModel, setWindowModel] = useState(settings.modelWindow[0]?.id ?? "")
   const [windowError, setWindowError] = useState<"invalid-window" | null>(null)
+  const modelsOnly = section === "models"
+  const editorStale = modelsOnly && editorOpen && editorRevision !== settings.resourceRevision
 
   const managed = settings.managedProviders.find((provider) => provider.id === managedProvider) ?? settings.managedProviders[0]
   const windowEntry = settings.modelWindow.find((candidate) => candidate.id === windowModel) ?? settings.modelWindow[0]
@@ -76,9 +81,9 @@ function ProviderSettingsCard({
     ...settings.customProviders.switchingProviders,
     ...settings.customProviders.backupCandidates,
   ], [settings.customProviders])
-  const busy = management.busy || management.loading || management.error !== null
+  const busy = management.busy || management.loading || management.error !== null || management.readbackRequired
   const pending = management.pendingPreview
-  const probe = useCustomModelCapabilityProbe(JSON.stringify({ configVersion: settings.configVersion, editingId, providerId, providerName, baseUrl, apiKey, upstreamWireApi, customModels, mode, model, supportsWebsockets, confirmRemoveBaseUrl }), editorOpen && catalogKind === "custom" && pending === null)
+  const probe = useCustomModelCapabilityProbe(JSON.stringify({ configVersion: settings.configVersion, editingId, providerId, providerName, baseUrl, apiKey, upstreamWireApi, customModels, mode, model, supportsWebsockets, confirmRemoveBaseUrl }), editorOpen && !editorStale && catalogKind === "custom" && pending === null)
 
   const managedId = managed?.id
   const windowId = windowEntry?.id
@@ -88,6 +93,8 @@ function ProviderSettingsCard({
   const resetForm = () => {
     probe.invalidate()
     setEditorOpen(false)
+    setEditorRevision(null)
+    setOriginalModelCount(0)
     setEditingId(null)
     setProviderId("")
     setProviderName("")
@@ -104,6 +111,8 @@ function ProviderSettingsCard({
   }
 
   const edit = (candidate: typeof candidates[number]) => {
+    setEditorRevision(settings.resourceRevision)
+    setOriginalModelCount(candidate.models?.length ?? 0)
     setEditorOpen(true)
     setCatalogKind(candidate.catalog === "custom" ? "custom" : "official")
     setCustomModels(candidate.models?.map(entry => ({ ...entry, reasoningEfforts: [...entry.reasoningEfforts] })) ?? [])
@@ -122,6 +131,20 @@ function ProviderSettingsCard({
   }
 
   const saveCustom = async () => {
+    if (editorStale) return
+    if (modelsOnly && editingId !== null) {
+      const models = customModels.map(({ probeConnection: _probeConnection, ...entry }) => {
+        const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts.includes(effort)))
+        return { ...entry, reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions }
+      })
+      const probeConnections = customModels.flatMap(entry => (["applyPatch", "toolSearch"] as const).flatMap(capability => {
+        const token = entry.probeConnection?.[capability]
+        return token === undefined ? [] : [{ model: entry.id, capability, token }]
+      }))
+      if (editorRevision === null) return
+      await management.mutate({ operation: "model.custom.save", resourceRevision: editorRevision, provider: editingId, models, model: model.trim(), probeConnections })
+      return
+    }
     const credential = apiKey.trim() === ""
       ? { action: "preserve" as const }
       : { action: "replace" as const, apiKey }
@@ -196,7 +219,7 @@ function ProviderSettingsCard({
   const confirmPending = async () => {
     const operation = management.pendingPreview?.input.operation
     const result = await management.confirm()
-    if (result !== null && operation === "primary.custom.save") resetForm()
+    if (result !== null && (operation === "primary.custom.save" || operation === "model.custom.save")) resetForm()
     if (result !== null && operation === "managed.default") resetManaged()
     if (result !== null && operation === "managed.window") resetWindow()
     if (result !== null) onChanged?.()
@@ -204,10 +227,24 @@ function ProviderSettingsCard({
 
   return <Card>
     <CardHeader>
-      <CardTitle>{section === "providers" ? t("managementUi.customProviders") : section === "models" ? t("managementUi.managedDefaults") : t("managementUi.managedWindows")}</CardTitle>
-      <CardDescription>{section === "providers" ? t("managementUi.customProvidersHint") : section === "models" ? t("managementUi.managedDefaultsHint") : t("managementUi.managedWindowsHint")}</CardDescription>
+      <CardTitle>{section === "providers" ? t("managementUi.customProviders") : section === "models" ? t("modelCatalog.title") : t("managementUi.managedWindows")}</CardTitle>
+      <CardDescription>{section === "providers" ? t("managementUi.customProvidersHint") : section === "models" ? t("modelCatalog.hint") : t("managementUi.managedWindowsHint")}</CardDescription>
     </CardHeader>
     <CardContent className="flex flex-col gap-6 text-sm">
+      {section === "models" && <section className="flex flex-col gap-3">
+        {settings.modelCatalogs.length === 0 ? <SettingsEmpty>{t("modelCatalog.empty")}</SettingsEmpty> : settings.modelCatalogs.map(catalog => {
+          const custom = candidates.find(candidate => candidate.id === catalog.provider && candidate.catalog === "custom" && (("mode" in candidate && candidate.mode === "switching") || ("active" in candidate && candidate.active)))
+          return <section key={catalog.provider} className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2"><div><h4 className="font-medium">{catalog.displayName}</h4><p className="text-xs text-muted-foreground">{t("modelCatalog.scope", { providers: catalog.providers.join(t("managementUi.listSeparator")) })}</p></div>{custom ? <Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button> : null}</div>
+            {!catalog.canRemove ? <p className="text-muted-foreground">{catalog.unavailableReason === "deepseek-template-source" ? t("modelCatalog.deepseek") : catalog.unavailableReason === "shared-accounts-incomplete" ? t("modelCatalog.accountsIncomplete") : catalog.unavailableReason === "official-catalog-unavailable" ? t("modelCatalog.officialUnavailable") : catalog.unavailableReason === "official-shared-catalog" ? t("modelCatalog.official") : t("modelCatalog.unsupported")}</p> : null}
+            <Table><TableHeader><TableRow><TableHead>{t("modelManagement.model")}</TableHead><TableHead>{t("channelSettings.state")}</TableHead><TableHead>{t("modelManagement.actions")}</TableHead></TableRow></TableHeader><TableBody>{catalog.models.map(entry => {
+              const reason = entry.isDefault ? t("modelCatalog.defaultProtected") : catalog.models.length <= 1 ? t("modelCatalog.lastProtected") : !catalog.canRemove ? t("modelCatalog.unsupported") : undefined
+              return <TableRow key={entry.id}><TableCell><div className="flex flex-col gap-1"><span>{entry.displayName}</span><span className="text-xs text-muted-foreground">{entry.id}</span></div></TableCell><TableCell>{entry.isDefault ? <Badge variant="secondary">{t("managementUi.defaultModel")}</Badge> : "—"}</TableCell><TableCell><div className="flex flex-col items-start gap-1"><Button variant="destructive" size="sm" disabled={busy || pending !== null || reason !== undefined} onClick={() => void management.mutate({ operation: "model.remove", provider: catalog.provider, model: entry.id })}>{t("modelCatalog.remove")}</Button>{reason ? <span className="text-xs text-muted-foreground">{reason}</span> : null}</div></TableCell></TableRow>
+            })}</TableBody></Table>
+          </section>
+        })}
+        <Alert><AlertDescription>{t("modelCatalog.cliManaged")} <code>codexc setup</code></AlertDescription></Alert>
+      </section>}
       {section === "models" && <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div><h3 className="font-medium">{t("managementUi.managedDefaults")}</h3><p className="text-xs text-muted-foreground">{t("managementUi.managedDefaultsDetail")}</p></div>
@@ -253,7 +290,9 @@ function ProviderSettingsCard({
             <TableCell><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(candidate)}>{t("modelManagement.edit")}</Button><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => void switchProvider(candidate.id)}>{t("managementUi.switch")}</Button><Button variant="destructive" size="sm" disabled={busy || pending !== null} onClick={() => void removeProvider(candidate.id)}>{t("modelManagement.remove")}</Button></div></TableCell>
           </TableRow>)}
         </TableBody></Table>
-        <Dialog open={editorOpen} onOpenChange={open => { if (!open && !management.busy && pending === null) resetForm() }}><DialogContent closeLabel={t("common.close")} showCloseButton={!management.busy && pending === null} className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{editingId === null ? t("managementUi.addProvider") : t("managementUi.editProvider")}</DialogTitle><DialogDescription>{t("managementUi.providerEditorHint")}</DialogDescription></DialogHeader>
+      </section>}
+      {(section === "providers" || modelsOnly) && <Dialog open={editorOpen} onOpenChange={open => { if (!open && !management.busy && pending === null) resetForm() }}><DialogContent closeLabel={t("common.close")} showCloseButton={!management.busy && pending === null} className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{modelsOnly ? t("modelCatalog.editCustom") : editingId === null ? t("managementUi.addProvider") : t("managementUi.editProvider")}</DialogTitle><DialogDescription>{t(modelsOnly ? "modelCatalog.customHint" : "managementUi.providerEditorHint")}</DialogDescription></DialogHeader>
+        {!modelsOnly && <>
         <ManagedSelect label={t("managementUi.providerType")} value={catalogKind} options={[["official", t("managementUi.compatibleProvider")], ["custom", t("managementUi.responsesProvider")]]} disabled={busy || pending !== null || editingId !== null} onChange={(value) => { setCatalogKind(value); setProviderId(value === "custom" ? "cp-" : ""); setModel(""); setCustomModels([]) }} />
         <FieldGroup className="grid gap-3 md:grid-cols-2">
           <Field data-disabled={busy || pending !== null || editingId !== null}><FieldLabel htmlFor="custom-provider-id">{catalogKind === "custom" ? t("managementUi.responsesProviderId") : t("managementUi.providerId")}</FieldLabel><Input id="custom-provider-id" placeholder={t("managementUi.providerIdExample")} value={providerId} disabled={busy || pending !== null || editingId !== null} onChange={(event) => setProviderId(event.target.value)} /></Field>
@@ -264,15 +303,18 @@ function ProviderSettingsCard({
           {catalogKind === "custom" ? <ManagedSelect label={t("managementUi.upstreamInterface")} value={upstreamWireApi} options={[["responses", t("managementUi.upstreamResponses")], ["chat_completions", t("managementUi.upstreamChatCompletions")]]} disabled={busy || pending !== null} onChange={(value) => { const next = value === "chat_completions" ? "chat_completions" : "responses"; setUpstreamWireApi(next); setUpstreamTouched(true); if (next === "chat_completions") setSupportsWebsockets("false") }} /> : null}
           <ManagedSelect label="WebSocket" value={supportsWebsockets} options={[["true", t("managementUi.supported")], ["false", t("managementUi.unsupported")]]} disabled={busy || pending !== null || upstreamWireApi === "chat_completions"} onChange={setSupportsWebsockets} />
           <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-api-key">API Key</FieldLabel><Input id="custom-provider-api-key" type="password" autoComplete="new-password" placeholder={t("managementUi.preserveCredentials")} value={apiKey} disabled={busy || pending !== null} onChange={(event) => setApiKey(event.target.value)} /></Field>
-        </FieldGroup>
+        </FieldGroup></>}
+        {modelsOnly && <FieldGroup><ManagedSelect label={t("managementUi.defaultModelId")} value={model} options={customModels.map(entry => [entry.id, formatModelLabel(entry.id, entry.name)])} disabled={busy || pending !== null} onChange={setModel} /></FieldGroup>}
         {catalogKind === "custom" ? <div className="flex flex-col gap-3">
           <p className="text-xs text-muted-foreground">{t("managementUi.responsesHint")}</p>
+          {editingId !== null ? <p className="text-xs text-muted-foreground">{t("modelCatalog.editRequiresRemoval")}</p> : null}
           <Alert><AlertTitle>{t("modelProbe.title")}</AlertTitle><AlertDescription>{t("modelProbe.hint")}</AlertDescription></Alert>
           {customModels.map((entry, index) => {
+            const existingModel = editingId !== null && index < originalModelCount
             const patch = (changes: Partial<typeof entry>) => setCustomModels(current => current.map((value, position) => position === index ? { ...value, ...changes } : value))
             const reasoningEffort = probeReasoningEfforts.find(effort => effort === (entry.defaultReasoningEffort ?? "none"))
             return <FieldGroup key={index} className="rounded-md border p-3">
-              <Field><FieldLabel htmlFor={`responses-model-${index}`}>{t("managementUi.modelId")}</FieldLabel><Input id={`responses-model-${index}`} value={entry.id} disabled={busy || pending !== null} onChange={event => patch({ id: event.target.value })} /></Field>
+              <Field><FieldLabel htmlFor={`responses-model-${index}`}>{t("managementUi.modelId")}</FieldLabel><Input id={`responses-model-${index}`} value={entry.id} disabled={busy || pending !== null || existingModel} onChange={event => patch({ id: event.target.value })} /></Field>
               <Field><FieldLabel htmlFor={`responses-name-${index}`}>{t("managementUi.displayName")}</FieldLabel><Input id={`responses-name-${index}`} value={entry.name} disabled={busy || pending !== null} onChange={event => patch({ name: event.target.value })} /></Field>
               {entry.template?.source === "deepseek" ? <Field orientation="horizontal"><Checkbox id={`responses-follow-${index}`} checked={entry.template.followContext} disabled={busy || pending !== null} onCheckedChange={value => patch({template: {...entry.template!, followContext: value === true}})} /><FieldLabel htmlFor={`responses-follow-${index}`}>{t("managementUi.followDsContext", { model: entry.template.model })}</FieldLabel></Field> : null}
               <ManagedSelect label={t("managementUi.contextPreset")} value={entry.contextWindow ? String(entry.contextWindow) : ""} options={contextWindowPresetTokens.filter(value => value <= (entry.maxContextWindow ?? 100000000)).map(value => [String(value), t("managementUi.contextPresetLabel", { k: value / 1024, tokens: value })])} disabled={busy || pending !== null || entry.template?.followContext === true} onChange={value => patch({ contextWindow: Number(value) })} />
@@ -309,18 +351,19 @@ function ProviderSettingsCard({
                   {!probe.canApply ? <p className="text-muted-foreground">{t("modelProbe.cannotApply")}</p> : null}
                 </> : null}
               </div> : null}
-              <Button variant="outline" disabled={busy || pending !== null} onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>{t("managementUi.removeModel")}</Button>
+              {!existingModel ? <Button variant="outline" disabled={busy || pending !== null} onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>{t("managementUi.removeModel")}</Button> : null}
             </FieldGroup>
           })}
           <Button variant="outline" disabled={busy || pending !== null || customModels.length >= 64} onClick={() => setCustomModels(current => [...current, { id: current.length === 0 ? model : "", name: current.length === 0 ? model : "", contextWindow: 0, reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false }])}>{t("managementUi.addModel")}</Button>
         </div> : null}
-        {mode === "exclusive" ? <Field orientation="horizontal" data-disabled={busy || pending !== null}><Checkbox id="custom-provider-remove-base-url" checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} /><FieldLabel htmlFor="custom-provider-remove-base-url" className="text-xs text-muted-foreground">{t("managementUi.removeBaseUrl")}</FieldLabel></Field> : null}
-        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || probe.running || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
+        {!modelsOnly && mode === "exclusive" ? <Field orientation="horizontal" data-disabled={busy || pending !== null}><Checkbox id="custom-provider-remove-base-url" checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} /><FieldLabel htmlFor="custom-provider-remove-base-url" className="text-xs text-muted-foreground">{t("managementUi.removeBaseUrl")}</FieldLabel></Field> : null}
+        {editorStale ? <Alert variant="destructive"><AlertDescription>{t("modelCatalog.stale")}</AlertDescription></Alert> : null}
+        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || probe.running || editorStale || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{modelsOnly ? t("modelCatalog.saveCustom") : editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
-        </DialogContent></Dialog>
-      </section>}
+        </DialogContent></Dialog>}
       {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
       {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
+      <SettingsMutationFeedback result={management.actionResult} writeUnconfirmed={management.writeUnconfirmed} readbackRequired={management.readbackRequired} />
     </CardContent>
   </Card>
 }
@@ -339,7 +382,8 @@ function ProviderSettingsConfirmationDialog({
   onCancel: () => void
 }) {
   const { t } = useTranslation()
-  const lines = [t("accountConfirmation.operation", { value: pending.operation })]
+  const localRemoval = pending.operation === "model.remove"
+  const lines = [localRemoval ? t("modelCatalog.removeOperation") : pending.operation === "model.custom.save" ? t("modelCatalog.editOperation") : t("accountConfirmation.operation", { value: pending.operation })]
   if (pending.provider !== undefined) lines.push(t("managementUi.providerConfirm", { name: pending.provider.displayName ?? pending.provider.name ?? pending.provider.id }))
   if (pending.provider !== undefined && "upstreamWireApi" in pending.provider) lines.push(t("managementUi.upstreamConfirm", { value: pending.provider.upstreamWireApi === "chat_completions" ? t("managementUi.upstreamChatCompletions") : t("managementUi.upstreamResponses") }))
   if (pending.provider?.models !== undefined) for (const model of pending.provider.models) lines.push(t("managementUi.modelSummary", { name: model.name, id: model.id, context: model.contextWindow, images: t(model.supportsImages ? "managementUi.supported" : "managementUi.unsupported"), reasoning: model.reasoningEfforts.join("/") || t("managementUi.unsupported"), default: model.defaultReasoningEffort ?? "none", patch: model.applyPatchToolType ?? t("managementUi.unsupported"), search: t(model.supportsSearchTool ? "managementUi.supported" : "managementUi.unsupported") }) + (model.template ? t("managementUi.templateSummary", { source: model.template.source, model: model.template.model, mode: t(model.template.followContext ? "managementUi.follow" : "managementUi.independent") }) : ""))
@@ -354,9 +398,19 @@ function ProviderSettingsConfirmationDialog({
   else if (pending.windowPercent !== undefined) lines.push(t("managementUi.windowConfirm", { percent: pending.windowPercent }))
   if (pending.credential?.action !== undefined) lines.push(t("managementUi.credentialConfirm", { action: t(pending.credential.action === "replace" ? "managementUi.replaceCredential" : "managementUi.preserveCredential") }))
   if (pending.transport?.cleartext === true) lines.push(t("managementUi.cleartextUpstream"))
-  return <ManagementConfirmationDialog open saving={saving} loading={loading} title={t("managementUi.providerConfirmTitle")} description={t("accountConfirmation.changeDescription")} confirmVariant={pending.operation === "remove" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
+  const warningKeys: Record<string, MessageKey> = {
+    "shared-relay-grants-retained": "modelCatalog.grants",
+    "clp-relay-independent": "modelCatalog.independent",
+    "historical-references": "modelCatalog.historical",
+    "provider-relay-inflight": "modelCatalog.inflight",
+  }
+  const unknownWarning = pending.warnings?.some(warning => !Object.hasOwn(warningKeys, warning.code)) === true
+  for (const warning of pending.warnings ?? []) lines.push(Object.hasOwn(warningKeys, warning.code) ? t(warningKeys[warning.code]!) : t("modelCatalog.unknownWarning", { code: warning.code }))
+  if (localRemoval) lines.push(t("modelCatalog.backup"), t("modelCatalog.activation"))
+  return <ManagementConfirmationDialog open saving={saving} loading={loading} title={t(localRemoval ? "modelCatalog.confirmTitle" : "managementUi.providerConfirmTitle")} description={t("accountConfirmation.changeDescription")} confirmDisabled={unknownWarning} confirmVariant={pending.operation === "remove" || localRemoval ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
     <p className="whitespace-pre-line">{lines.join("\n")}</p>
     {pending.provider?.models?.map(entry => <CustomModelDetailsPreview key={entry.id} entry={entry} />)}
     <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: pending.activation })}</p>
+    {pending.activation === "restart-all" ? <p className="text-muted-foreground">{t("settingsUi.command", { value: "codexc restart all" })}</p> : null}
   </ManagementConfirmationDialog>
 }

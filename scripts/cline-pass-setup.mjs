@@ -1,4 +1,5 @@
 import * as clackPrompts from "@clack/prompts";
+import { runProviderModelSetup } from "./provider-model-setup.mjs";
 import { loadClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
 import { clinePassProviderDefinition as definition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
 import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
@@ -18,10 +19,11 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
   const accounts = loadClinePassAccounts(environment);
   const action = await prompts.select({ message: "Cline Pass 官方", options: [
     { value: "configure", label: "添加账户" },
-    ...(accounts.length ? [{ value: "reconfigure", label: "重新配置账户" }, { value: "catalog", label: "选择启用模型／更新共享目录" }, { value: "default", label: "设置默认账户" }, { value: "remove", label: "移除账户" }] : []),
+    ...(accounts.length ? [{ value: "reconfigure", label: "重新配置账户" }, { value: "models", label: "模型管理／本地移除" }, { value: "catalog", label: "选择新增模型／更新共享目录" }, { value: "default", label: "设置默认账户" }, { value: "remove", label: "移除账户" }] : []),
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (action === "models") return runProviderModelSetup({ environment, prompts, output, provider: "clp" });
   if (action === "catalog") {
     const result = await refreshClinePassCatalog({ environment, selectModels: selection => promptEnabledModels(prompts, output, selection) });
     if (result.action === "back") return result;

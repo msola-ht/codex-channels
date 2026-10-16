@@ -91,11 +91,11 @@ async function selectClinePassModels(models, providers, selectModels) {
     : [models.find(model => model.id === definition.defaultModel)?.id ?? models[0].id];
   const selection = {
     models: models.map(model => ({ id: model.id, name: model.name, reasoningEffort: providers[0]?.models.find(previous => previous.model === model.id && model.reasoningEfforts.includes(previous.reasoningEffort))?.reasoningEffort ?? model.defaultReasoningEffort })),
-    enabledModels, requiredModels,
+    enabledModels, requiredModels, retainedModels: providers.length ? enabledModels : [],
   };
   const selected = selectModels ? await selectModels(selection) : providers.length ? enabledModels : models.map(model => model.id);
   if (selected === undefined) return undefined;
-  return validateEnabledModelSelection(selected, { models, requiredModels });
+  return validateEnabledModelSelection(selected, { models, requiredModels, retainedModels: selection.retainedModels });
 }
 
 export function previewClinePassConfiguration(input, { environment = process.env } = {}) {

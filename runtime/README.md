@@ -122,6 +122,7 @@
   自定义目录提供商以 `cp-` 标识，管理 `sf-<id>`（如 `sf-cp-llm`）私有 Profile；Codex 兼容类型继续使用 `sf-custom-<id>`。按 Provider 类型校验官方或独立模型目录，并严格限制为单个目标 Provider
   块和直接 API Key 字段。注册表与 Profile 的增删改共用私有文件锁并支持执行前快照保护，
   Provider 块与 Key 不进入主配置。
+  模型专用保存仅在完整 Profile 与注册表守卫通过后修改默认模型和思考等级，保留连接块、已有超时参数及其他已校验字段。
   Gateway 新增或替换的固定 Key 使用不可变的当前用户私有凭据版本，主配置只引用独立 `env_key`；普通切换保留既有环境变量引用、OAuth 或无认证语义。提供私有凭据读取、创建及显式删除端口，
   校验 Provider、Origin、版本与文件私有性，拒绝旧主配置明文凭据启动。配置写入结果未知时保留新旧凭据供实际引用选择。
   `assertCustomPrimaryProviderAuthentication` 由切换计划和运行时共同消费，在切换写入前拒绝不支持的认证字段。

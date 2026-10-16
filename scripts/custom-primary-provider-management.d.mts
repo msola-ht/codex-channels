@@ -5,6 +5,14 @@ import type {
 } from "./codex-user-config.mjs";
 
 export const primaryProviderId: "OpenAI";
+export interface CustomProviderModelsSaveInput {
+  provider: string;
+  model: string;
+  models: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[];
+  probeConnections?: CustomPrimaryProviderSaveInput["probeConnections"];
+}
+export function previewCustomProviderModelsSave(input: CustomProviderModelsSaveInput, options?: CustomPrimaryProviderSaveOptions): Promise<Omit<Awaited<ReturnType<typeof previewCustomPrimaryProviderSave>>, "operation"> & { operation: "model.custom.save"; revision: string }>;
+export function applyCustomProviderModelsSave(input: CustomProviderModelsSaveInput, options: CustomPrimaryProviderSaveOptions & { preview: { revision?: string } }): Promise<Awaited<ReturnType<typeof applyCustomPrimaryProviderSave>> & { operation: "model.custom.save" }>;
 export function customModelProbeConnection(input: { baseUrl: string; upstreamWireApi: "responses" | "chat_completions"; apiKey: string; model: string; reasoningEffort: string; capability: "applyPatch" | "toolSearch" }): string;
 
 export interface CustomPrimaryProviderSaveInput {
@@ -27,6 +35,7 @@ export interface CustomPrimaryProviderSaveInput {
 
 export interface CustomPrimaryProviderSaveOptions {
   environment?: NodeJS.ProcessEnv;
+  expectedCatalogContent?: string;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CodexUserConfigTransactionClient & {

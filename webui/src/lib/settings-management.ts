@@ -79,6 +79,9 @@ export interface ManagementTaskController {
 }
 
 export interface ProviderSettingsController {
+  actionResult: ManagementSettingMutationResponse | null
+  writeUnconfirmed: boolean
+  readbackRequired: boolean
   settings: ManagementProviderSettingsResponse | null
   loading: boolean
   error: string | null

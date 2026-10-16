@@ -270,6 +270,8 @@ export function writeCustomPrimaryProviderSwitchingProfile(
     apiKey: string;
     supportsWebsockets?: boolean;
     catalogSource?: { kind: "official" } | { kind: "custom"; reasoningEffort: string | null };
+    /** Only update the model defaults in an existing guarded custom Profile. */
+    modelOnly?: boolean;
   },
   environment?: NodeJS.ProcessEnv,
   guards?: {

@@ -679,6 +679,14 @@ export interface ManagementProviderSettingsResponse {
   resourceRevision: string
   configVersion: string | number | null
   defaults: { model: string | null; reasoningEffort: string | null }
+  modelCatalogs: Array<{
+    provider: string
+    displayName: string
+    providers: string[]
+    models: Array<{ id: string; displayName: string; isDefault: boolean }>
+    canRemove: boolean
+    unavailableReason?: string
+  }>
   primary: {
     id: string
     displayName: string
@@ -752,6 +760,8 @@ export interface ManagementProviderSettingsResponse {
 }
 
 export type ManagementProviderSettingsMutationInput =
+  | { operation: "model.remove"; provider: string; model: string }
+  | { operation: "model.custom.save"; resourceRevision: string; provider: string; models: ResponsesModelDefinition[]; model: string; probeConnections?: Array<{ model: string; capability: "applyPatch" | "toolSearch"; token: string }> }
   | { operation: "primary.switch"; providerId: string; model?: string }
   | { operation: "primary.remove"; providerId: string }
   | {
@@ -784,7 +794,9 @@ export type ManagementProviderSettingsMutationInput =
     } & ({ contextWindow: number; windowPercent?: never } | { windowPercent: number; contextWindow?: never }))
 
 export interface ManagementProviderSettingsPreview {
-  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.window"
+  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.window" | "model.remove" | "model.custom.save"
+  revision?: string
+  warnings?: Array<{ code: string }>
   activation: string
   target?: {
     id: string

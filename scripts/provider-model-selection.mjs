@@ -1,4 +1,4 @@
-export function validateEnabledModelSelection(selected, { models, requiredModels = [] }) {
+export function validateEnabledModelSelection(selected, { models, requiredModels = [], retainedModels = [] }) {
   const available = new Set(models.map(model => model.id));
   if (requiredModels.some(id => !available.has(id))) {
     throw new Error("模型目录已不包含当前默认模型；请先调整默认模型，原目录未修改");
@@ -12,17 +12,19 @@ export function validateEnabledModelSelection(selected, { models, requiredModels
   if (requiredModels.some(id => !selected.includes(id))) {
     throw new Error("不能停用当前默认模型；请先修改默认模型");
   }
+  if (retainedModels.some(id => !selected.includes(id))) throw new Error("移除已保存模型请使用统一模型管理入口");
   return [...selected];
 }
 
 export async function promptEnabledProviderModels(prompts, output, {
-  models, enabledModels, requiredModels = [], label, defaultModelWhenUnrequired,
+  models, enabledModels, requiredModels = [], retainedModels = [], label, defaultModelWhenUnrequired,
 }) {
   if (typeof prompts.multiselect !== "function") throw new Error("当前交互入口缺少模型多选能力");
   if (requiredModels.some(id => !models.some(model => model.id === id))) {
     throw new Error("模型目录已不包含当前默认模型；请先调整默认模型，原目录未修改");
   }
-  let initialValues = [...new Set([...enabledModels.filter(id => models.some(model => model.id === id)), ...requiredModels])];
+  if (retainedModels.some(id => !models.some(model => model.id === id))) throw new Error("候选目录缺少已保存模型；请先使用模型管理处理缺失模型，原目录未修改");
+  let initialValues = [...new Set([...enabledModels.filter(id => models.some(model => model.id === id)), ...requiredModels, ...retainedModels])];
   while (true) {
     const selected = await prompts.multiselect({
       message: `选择启用的 ${label} 模型（空格勾选，回车确认）`,
@@ -30,7 +32,7 @@ export async function promptEnabledProviderModels(prompts, output, {
         value: model.id,
         label: `${model.name}（${model.id}）`,
         hint: [
-          ...(requiredModels.includes(model.id) ? ["当前默认，须保留"] : []),
+          ...(requiredModels.includes(model.id) ? ["当前默认，须保留"] : retainedModels.includes(model.id) ? ["已保存，移除请使用模型管理"] : []),
           ...(model.reasoningEffort === undefined ? [] : [`默认思考 ${model.reasoningEffort}${model.reasoningEffort === "none" ? "（关闭）" : ""}`]),
         ].join("；"),
       })),
@@ -40,11 +42,11 @@ export async function promptEnabledProviderModels(prompts, output, {
     if (prompts.isCancel(selected)) return undefined;
     let validated;
     try {
-      validated = validateEnabledModelSelection(selected, { models, requiredModels });
+      validated = validateEnabledModelSelection(selected, { models, requiredModels, retainedModels });
     } catch (error) {
       output.write(`${error.message}。\n`);
       if (Array.isArray(selected)) {
-        initialValues = [...new Set([...selected.filter(id => models.some(model => model.id === id)), ...requiredModels])];
+        initialValues = [...new Set([...selected.filter(id => models.some(model => model.id === id)), ...requiredModels, ...retainedModels])];
       }
       continue;
     }

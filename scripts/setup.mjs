@@ -278,6 +278,7 @@ async function runThirdPartyModelSetup({
       showInstructions: false,
       initialValue: selection.thirdPartyModule,
       options: [
+        { value: "models", label: "模型管理", hint: "统一查看、添加、编辑、本地移除与默认设置" },
         {
           value: "deepseek",
           label: "DeepSeek 官方",
@@ -322,12 +323,14 @@ async function runThirdPartyModelSetup({
       ],
     });
     if (prompts.isCancel(module) || module === "back") return { action: "back" };
-    if (!["deepseek", "opencode-go", "clp", "ccg", "custom_responses", "custom_primary", "provider_default", "model_window"].includes(module)) {
+    if (!["models", "deepseek", "opencode-go", "clp", "ccg", "custom_responses", "custom_primary", "provider_default", "model_window"].includes(module)) {
       throw new Error(`未知第三方设置：${String(module)}`);
     }
     selection.thirdPartyModule = module;
     let result;
-    if (module === "deepseek") {
+    if (module === "models") {
+      result = await (await import("./provider-model-setup.mjs")).runProviderModelSetup({ output, prompts });
+    } else if (module === "deepseek") {
       result = await deepseekSetup({ input, output, prompts, allowBack: true });
     } else if (module === "opencode-go") {
       result = await openCodeGoSetup({ input, output, prompts, allowBack: true });
