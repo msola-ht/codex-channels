@@ -79,6 +79,7 @@ export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
         error={translateApiError(t, dashboard.error, dashboard.errorCode)}
       />
       <AccountStatusCards
+        snapshotStatus={t("console.accountSnapshotUpdates", { status: t(`delivery.notifications.${officialAccounts.notificationStatus}`) })}
         onAccountRemoved={officialAccounts.accountRemoved}
         removalNotice={officialAccounts.removalNotice}
         weeklyQuota={officialAccounts.data?.openaiWeeklyQuota ?? null}
@@ -97,7 +98,6 @@ export function ConsolePage({ range, onRangeChange, refreshAttempts }: {
         refreshing={officialAccounts.refreshing}
         onRefresh={() => void refreshAccounts(undefined, true)}
       />
-      <p className="text-xs text-muted-foreground" role="status">{t("console.accountSnapshotUpdates", { status: t(`delivery.notifications.${officialAccounts.notificationStatus}`) })}</p>
     </div>
   )
 }
@@ -171,6 +171,7 @@ function DashboardRangeSelector({ query, onChange }: { query: MetricsRangeQuery;
 }
 
 function AccountStatusCards({
+  snapshotStatus,
   onAccountRemoved,
   removalNotice,
   weeklyQuota,
@@ -188,6 +189,7 @@ function AccountStatusCards({
   refreshing,
   onRefresh,
 }: {
+  snapshotStatus: string
   onAccountRemoved: (accountId: string, activation?: string) => void
   removalNotice: AccountRemovalNotice | null
   onCreditsChanged: () => void
@@ -210,7 +212,10 @@ function AccountStatusCards({
     <div className="flex flex-col gap-6">
       <div>
         <h2 className="text-lg font-semibold">{t("console.accountTitle")}</h2>
-        <p className="text-sm text-muted-foreground">{t("console.accountDescription")}</p>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <p className="text-sm text-muted-foreground">{t("console.accountDescription")}</p>
+          <p className="text-xs text-muted-foreground" role="status">{snapshotStatus}</p>
+        </div>
       </div>
       {accountError ? <Alert variant="destructive">
         <AlertTitle>{t("console.accountErrorTitle")}</AlertTitle>
