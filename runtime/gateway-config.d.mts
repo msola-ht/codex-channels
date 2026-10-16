@@ -34,6 +34,7 @@ export interface GatewayConfigDocument {
       title?: string;
       version?: string;
     };
+    follow_cli_version?: boolean;
     upstream_user_agent?: string;
     terminal_identity?: string;
     timezone?: string;
@@ -84,6 +85,7 @@ export class GatewayConfigConflictError extends Error {}
 
 export function parseGatewayConfig(content: string, source?: string): TomlTable;
 export const terminalIdentityPattern: RegExp;
+export const officialTuiUserAgentPattern: RegExp;
 export const timezonePattern: RegExp;
 export function tomlErrorSummary(error: unknown): string;
 export function validateGatewayConfigDocument(document: unknown): GatewayConfigDocument;

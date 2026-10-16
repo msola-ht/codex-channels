@@ -3,7 +3,7 @@
 Workspace 仅定义 `id`、`name` 和 `cwd`；执行权限由 App Server 原生配置及 Thread 继承规则决定，Gateway 不提供工作区权限覆盖字段。
 
 本目录负责把共享运行时已完成结构校验的 TOML 文档转换为 Gateway 运行配置。
-官方 `codex-tui` 客户端身份通过共享 `codex-request-identity` 解析当前锁定版本；其他名称保留显式版本，读取不改写身份配置。
+`follow_cli_version = true` 时通过共享 `codex-request-identity` 解析当前锁定版本；无标记或 false 时保留显式版本，读取不改写身份配置。
 `display.model_aliases` 映射为可选运行字段 `modelDisplayAliases`，未配置时为空映射；Bootstrap
 仅将它交给 Surface 显示格式化器。映射变化要求重启 Gateway，不改模型目录、选择标识或请求模型 ID。
 其中 `codexTimezone` 保留已有 `codex.timezone` 配置，供渠道启动卡展示，不修改 Gateway 进程时区。

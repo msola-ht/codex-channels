@@ -561,6 +561,7 @@ export interface ManagementSettingsResponse {
   system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {
+      followCliVersion: boolean
       clientIdentity: { name: string | null; title: string | null; version: string | null }
       upstreamUserAgent: string | null
       terminalIdentity: string | null

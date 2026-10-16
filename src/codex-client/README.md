@@ -36,7 +36,7 @@ RPC 成功和最新匹配设置通知的确认流程；超时、断线、Thread 
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；通知不附加本地接收时间戳。
   初始化期间
   通过组合根注入 `clientInfo`；缺省声明官方 `codex --remote` 的 `codex-tui` 与当前锁定 Codex CLI
-  版本，`[codex].client_identity` 可覆盖 name/title，官方 `codex-tui` 的 version 由配置层解析为当前锁定版本，其他名称可显式覆盖 version；
+  版本，`[codex].client_identity` 可覆盖 name/title/version；仅在 `follow_cli_version = true` 时由配置层将官方身份版本解析为当前锁定版本；
   建连与重连共用连接代次，清理旧 Transport、握手与初始化响应后的每个异步边界均拒绝过期连接；
   并发关闭及重连前清理共用 Transport 关闭任务，旧失败不清理替代连接。通过 `extensions` 显式声明已实现的 `openai/form`。
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned、运行状态、更新时间/最近活跃时间、来源（含稳定的

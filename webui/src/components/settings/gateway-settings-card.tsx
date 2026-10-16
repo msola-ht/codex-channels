@@ -1,4 +1,5 @@
 import { useTranslation } from "@/hooks/use-translation"
+import { Checkbox } from "@/components/ui/checkbox"
 import { useEffect } from "react"
 
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
@@ -21,13 +22,14 @@ export function GatewaySettingsCard({ management, upstreamAgent, section = "gene
   const managedSettings = management.managedSettings
   const identity = managedSettings?.system.officialTuiIdentity
   const [draft, patch, reset] = useSettingsDraft({
+    followCliVersion: String(identity?.followCliVersion ?? false),
     identityName: identity?.clientIdentity.name ?? "",
     identityTitle: identity?.clientIdentity.title ?? "",
     identityVersion: identity?.clientIdentity.version ?? "",
     upstreamUserAgent: identity?.upstreamUserAgent ?? "",
     terminalIdentity: identity?.terminalIdentity ?? "",
   })
-  const { identityName, identityTitle, identityVersion, upstreamUserAgent, terminalIdentity } = draft
+  const { identityName, identityTitle, identityVersion, upstreamUserAgent, terminalIdentity, followCliVersion } = draft
   useEffect(() => {
     if (management.lastAppliedSetting?.kind === "system.official-tui-identity") reset()
   }, [management.lastAppliedSetting, reset])
@@ -56,6 +58,7 @@ export function GatewaySettingsCard({ management, upstreamAgent, section = "gene
         : t("settingsFields.uaMismatch")
   const saveIdentity = () => {
     void management.previewSetting("system.official-tui-identity", {
+      followCliVersion: followCliVersion === "true",
       clientIdentity: {
         name: identityName.trim() || null,
         title: identityTitle.trim() || null,
@@ -87,6 +90,10 @@ export function GatewaySettingsCard({ management, upstreamAgent, section = "gene
       {section === "network" && <>
       <section className="flex flex-col gap-3">
         <div><h3 className="font-medium">{t("settingsFields.tuiIdentity")}</h3><p className="text-xs text-muted-foreground">{t("settingsFields.tuiIdentityHint", { name: identityDefaults.name, version: identityDefaults.version })}</p></div>
+        <Field orientation="horizontal" data-disabled={disabled}>
+          <Checkbox id="tui-follow-cli-version" checked={followCliVersion === "true"} disabled={disabled} onCheckedChange={value => patch({ followCliVersion: String(value === true) })} />
+          <FieldLabel htmlFor="tui-follow-cli-version">{t("settingsFields.followCliVersion")}</FieldLabel>
+        </Field>
         <FieldGroup className="grid gap-3 md:grid-cols-3">
           <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-name">{t("settingsFields.identityName")}</FieldLabel><Input id="tui-identity-name" value={identityName} disabled={disabled} maxLength={64} onChange={(event) => patch({ identityName: event.target.value })} placeholder={identityDefaults.name} /></Field>
           <Field data-disabled={disabled}><FieldLabel htmlFor="tui-identity-title">{t("settingsFields.identityTitle")}</FieldLabel><Input id="tui-identity-title" value={identityTitle} disabled={disabled} maxLength={128} onChange={(event) => patch({ identityTitle: event.target.value })} placeholder={t("settingsFields.optional")} /></Field>

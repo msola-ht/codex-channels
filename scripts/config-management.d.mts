@@ -33,6 +33,7 @@ export interface GatewaySettings {
     modelTrafficDumpEnabled: boolean;
     modelTrafficRetentionDays: number;
     officialTuiIdentity: {
+      followCliVersion: boolean;
       clientIdentity: {
         name: string | null;
         title: string | null;
@@ -97,6 +98,7 @@ export type GatewaySettingInput =
           title?: string;
           version?: string;
         } | null;
+        followCliVersion: boolean;
         upstreamUserAgent: string | null;
         terminalIdentity: string | null;
       };

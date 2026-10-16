@@ -165,11 +165,14 @@ const telegramSchema = z.strictObject({
   }
 });
 
+export const officialTuiUserAgentPattern = /^codex-tui\/([0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9._+-]+)?) (\([^();\r\n]+; [A-Za-z0-9_+-]+\) [A-Za-z0-9._/-]+) \(codex-tui; \1\)$/u;
+
 const codexSchema = z.strictObject({
   binary: z.string().min(1).default("codex"),
   socket_path: z.string().min(1).default("runtime/codex-app-server.sock"),
   default_model: z.string().optional(),
   client_identity: clientIdentitySchema.optional(),
+  follow_cli_version: z.boolean().optional(),
   upstream_user_agent: upstreamUserAgentSchema.optional(),
   terminal_identity: terminalIdentitySchema.optional(),
   timezone: timezoneSchema.optional(),
@@ -177,6 +180,14 @@ const codexSchema = z.strictObject({
     enabled: z.boolean().default(false),
     port: z.number().int().min(1).max(65_535).default(47_821),
   }).optional(),
+}).superRefine((value, context) => {
+  if (value.follow_cli_version !== true) return;
+  if (value.client_identity?.name !== undefined && value.client_identity.name !== "codex-tui") {
+    context.addIssue({ code: "custom", path: ["client_identity", "name"], message: "跟随 CLI 版本时客户端名称必须为 codex-tui；自定义身份请关闭 follow_cli_version" });
+  }
+  if (value.upstream_user_agent !== undefined && !officialTuiUserAgentPattern.test(value.upstream_user_agent)) {
+    context.addIssue({ code: "custom", path: ["upstream_user_agent"], message: "跟随 CLI 版本需要两处版本一致的完整官方 TUI UA；请重新一键设置或关闭 follow_cli_version" });
+  }
 });
 
 const debugSchema = z.strictObject({

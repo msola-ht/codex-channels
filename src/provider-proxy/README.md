@@ -99,7 +99,7 @@
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
   其中 `forwardedRequestHeaders` / `forwardedWebSocketHeaders` 在配置了
-  `[codex].upstream_user_agent` 时使用服务启动时解析的生效值覆盖出站 `User-Agent`（完整官方格式的 Codex 版本随升级更新），缺省则原样透传 App Server 生成的 UA；
+  `[codex].upstream_user_agent` 时使用服务启动时解析的生效值覆盖出站 `User-Agent`（仅 `follow_cli_version = true` 时更新官方格式中的 Codex 版本），缺省则原样透传 App Server 生成的 UA；
   不注入也不删除任何私有请求头，`x-responsesapi-include-timing-metrics` 只在客户端自己带上时透传；
   不影响私有元数据；该请求实际发往上游的 UA 由响应指标观察器写入指标记录，供 WebUI 请求明细读取。
 - `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的当前用户私有 IPC；Unix 使用

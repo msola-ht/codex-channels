@@ -17,7 +17,7 @@
 
 ## 文件
 
-- `codex-request-identity.mjs` / `codex-request-identity.d.mts`：从当前锁定 CLI 版本解析官方 `codex-tui` 客户端身份及完整官方格式 UA 的生效版本，保留系统和终端信息；Gateway、App Server 服务、CLI 与 WebUI 共用，不改写读取的配置。
+- `codex-request-identity.mjs` / `codex-request-identity.d.mts`：仅在 `follow_cli_version = true` 时从当前锁定 CLI 版本解析官方客户端身份及 UA 的生效版本，保留系统和终端信息；无标记或 false 时保留显式值。Gateway、App Server 服务、CLI 与 WebUI 共用，不改写读取的配置。
 
 - `workspace-directory.mjs` / `workspace-directory.d.mts`：CLI 诊断、工作区管理和 Gateway 配置校验共用的只读目录检查，区分不存在、非目录和无法访问，不移除注册或修改目录。
 
