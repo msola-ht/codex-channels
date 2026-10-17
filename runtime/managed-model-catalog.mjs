@@ -91,6 +91,10 @@ export function updateModelCatalogSettings(content, definition, settings) {
     throw new Error(`${definition.displayName} 模型上下文窗口无效`);
   }
   const entry = record(models[index]);
+  if (settings.contextWindow !== undefined
+    && entry.auto_compact_token_limit > Math.floor(settings.contextWindow * 9 / 10)) {
+    throw new Error(`${definition.displayName} 模型自动压缩阈值不能超过当前上下文窗口的 90%；请先调整阈值`);
+  }
   models[index] = {
     ...entry,
     default_reasoning_level: settings.reasoningEffort,

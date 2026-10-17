@@ -211,8 +211,10 @@ async function buildContextPlan(input, environment) {
     throw invalid("invalid-window", "contextWindow", `模型上下文窗口必须是 1024-${model.maxContextWindow} 的整数`);
   }
   const definition = snapshot.document.definitions?.find(entry => entry.id === input.model);
-  if (definition?.autoCompactTokenLimit > Math.floor(input.contextWindow * 9 / 10)) {
-    throw invalid("context-auto-compact-limit", "contextWindow", "模型上下文窗口不能小于已配置自动压缩阈值所需的窗口，请先调整模型详情中的自动压缩阈值");
+  const compactLimit = snapshot.source === "custom" ? definition?.autoCompactTokenLimit
+    : snapshot.document.models.find(entry => entry.slug === input.model)?.auto_compact_token_limit;
+  if (compactLimit > Math.floor(input.contextWindow * 9 / 10)) {
+    throw invalid("context-auto-compact-limit", "contextWindow", "自动压缩阈值不能超过当前上下文窗口的 90%；请增大窗口，或先调整模型的自动压缩阈值");
   }
   return { snapshot, preview: { operation: "model.context", provider: input.provider,
     model: { id: model.model, displayName: model.displayName, contextWindow: model.contextWindow, maxContextWindow: model.maxContextWindow },

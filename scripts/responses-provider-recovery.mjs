@@ -67,7 +67,13 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
       const catalog = parseResponsesModelCatalog(candidate);
       if (selection !== undefined) {
         const model = catalog.definitions.find(entry => entry.id === selection.model);
-        if (selection.model_catalog_json !== path || !model || selection.model_reasoning_effort !== (model.defaultReasoningEffort ?? "none")) {
+        // A fixed primary may override the model default, or leave it unset.
+        // Switching profiles still mirror the catalog's default exactly.
+        const effort = selection.model_reasoning_effort;
+        const validEffort = config.model_provider === id
+          ? effort === undefined || (model?.reasoningEfforts?.length ? model.reasoningEfforts.includes(effort) : effort === "none")
+          : effort === (model?.defaultReasoningEffort ?? "none");
+        if (selection.model_catalog_json !== path || !model || !validEffort) {
           throw new Error("所选目录与当前配置不一致，请先恢复对应配置");
         }
       }
