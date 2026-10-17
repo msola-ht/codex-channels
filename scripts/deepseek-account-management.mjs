@@ -165,8 +165,6 @@ function deepseekAccountRemovalPlan(accountId, environment) {
   if (remaining.length > 0 && !remaining.some((account) => account.default)) throw new AccountManagementError("default-account-conflict", "accountId", "请先选择其他默认账户");
   const snapshots = snapshotProviderFiles(Object.values(paths), environment);
   const updates = new Map([[paths.profile, undefined], [paths.marker, undefined], [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`]]);
-  updates.set(paths.catalog, undefined);
-  updates.set(paths.manifest, undefined);
   if (configured.mode === "exclusive") {
     const initial = readBackup(paths.backup, environment);
     if (!initial) throw new AccountManagementError("backup-unavailable", "accountId", "DeepSeek 账户初始备份缺失");

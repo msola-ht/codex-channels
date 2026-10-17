@@ -42,7 +42,7 @@ export function customPrimaryProviderCredentialPath(environment, provider, envir
   const version = typeof environmentKey === "string" && environmentKey.startsWith(prefix)
     ? environmentKey.slice(prefix.length).replace(/_API_KEY$/u, "") : "";
   if (!/^[a-f0-9]{32}$/u.test(version) || environmentKey !== `${prefix}${version}_API_KEY`) throw new Error("自定义主 Provider 凭据引用无效");
-  return join(providerStorageRoot(environment), "custom", provider, "primary-credentials", `${version}.json`);
+  return join(providerStorageRoot(environment), ...(isCustomCatalogProvider(provider) ? [provider] : ["custom", provider]), "primary-credentials", `${version}.json`);
 }
 
 function validateCustomApiKey(apiKey) {
@@ -94,7 +94,7 @@ export function removeCustomPrimaryProviderCredential(environment, provider, env
 /** Explicit Provider deletion; preserve unrelated names and validate every owned revision before removal. */
 export function removeCustomPrimaryProviderCredentials(environment, provider) {
   const key = customPrimaryProviderCredentialEnvironmentKey(provider, "0".repeat(32));
-  const directory = join(providerStorageRoot(environment), "custom", provider, "primary-credentials");
+  const directory = join(providerStorageRoot(environment), ...(isCustomCatalogProvider(provider) ? [provider] : ["custom", provider]), "primary-credentials");
   let names;
   try { names = readdirSync(directory); } catch (error) { if (error?.code === "ENOENT") return; throw error; }
   const owned = names.filter(name => /^[a-f0-9]{32}\.json$/u.test(name));

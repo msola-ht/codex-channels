@@ -240,8 +240,6 @@ export async function removeCcgConfiguration({ accountId, confirmRemove = false 
       [paths.marker, undefined],
       [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`],
     ]);
-    updates.set(paths.catalog, undefined);
-    updates.set(paths.manifest, undefined);
     if (current.mode === "exclusive") {
       updates.set(paths.config, stringify(restoreProviderBaseConfig(
         await readConfig(paths.config, environment), initial.config, definition,
@@ -270,7 +268,7 @@ export async function runCcgSetup({
       ...(accounts.length === 0 ? [] : [
         { value: "reconfigure", label: "重新配置账户" },
         { value: "settings", label: "修改默认模型与思考等级" },
-        { value: "catalog", label: "发现／添加账户模型" },
+        { value: "catalog", label: "发现／添加共享模型" },
         { value: "default", label: "设置默认账户" },
         { value: "remove", label: "删除账户" },
       ]),

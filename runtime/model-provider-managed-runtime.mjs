@@ -36,8 +36,7 @@ const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
 
 export function managedProviderDirectory(environment, definition) {
-  const root = join(providerStorageRoot(environment), definition.storageId ?? definition.id);
-  return definition.accountId === undefined ? root : join(root, "accounts", definition.accountId);
+  return join(providerStorageRoot(environment), definition.storageId ?? definition.id);
 }
 
 export function managedProviderMarkerPath(environment, definition) {
@@ -98,9 +97,16 @@ export function loadManagedModelProviderSettings(environment = process.env) {
   });
 }
 
-// 每条记录只属于一个准确的 Provider 账户。
+// 账户各自保留默认模型；目录内的模型设置由同家族账户共享。
 export function loadManagedModelWindow(environment = process.env) {
-  return loadManagedModelProviderSettings(environment).flatMap(provider =>
+  const configured = loadManagedModelProviderSettings(environment);
+  const definitions = managedProviderDefinitions(environment);
+  const familyProviders = provider => {
+    const definition = definitions.find(entry => entry.id === provider);
+    return configured.filter(candidate => definitions.find(entry => entry.id === candidate.provider)?.storageId === definition.storageId)
+      .map(candidate => candidate.provider);
+  };
+  return configured.flatMap(provider =>
     (provider.models ?? []).map(model => ({
       provider: provider.provider,
       model: model.model,
@@ -109,7 +115,7 @@ export function loadManagedModelWindow(environment = process.env) {
       maxContextWindow: model.maxContextWindow,
       reasoningEfforts: model.reasoningEfforts ?? [],
       windowPercent: model.windowPercent,
-      providers: [provider.provider],
+      providers: familyProviders(provider.provider),
     })));
 }
 
@@ -200,7 +206,7 @@ export function readManagedModelProviderCatalogContent(provider, environment = p
   return readPrivateFile(managedProviderCatalogPath(provider, environment).path, maximumCatalogBytes);
 }
 
-// 把模型目录写回给定原始内容；只用于回滚，不解析也不改写内容。
+// 按原始内容恢复模型目录，并把同家族账户的等级镜像回恢复后的默认值。
 export function restoreManagedModelProviderCatalogContent(
   provider,
   content,
@@ -216,26 +222,73 @@ function writeCatalogWithProfileMirrors(environment, catalogPath, content, updat
 }
 
 function collectCatalogWithProfileMirrors(environment, catalogPath, content, updates, originals) {
-  if (!originals.has(catalogPath)) originals.set(catalogPath,readPrivateFile(catalogPath,maximumCatalogBytes));
+  if (!originals.has(catalogPath)) originals.set(catalogPath, readPrivateFile(catalogPath, maximumCatalogBytes));
   updates.set(catalogPath, content);
-  // 账户 Profile 镜像目录默认值；角色独立选择模型与思考等级。
-  const catalog = JSON.parse(content);
-  for (const sibling of managedProviderDefinitions(environment)) {
-    if (join(managedProviderDirectory(environment, sibling), sibling.catalogFileName) !== catalogPath
-      || readManagedMarker(environment, sibling)?.mode !== "switching") continue;
-    const path = join(codexHomePath(environment), sibling.profileFileName);
-    if (updates.has(path)) continue;
-    const previousProfile=readPrivateFile(path);
-    originals.set(path,previousProfile);
-    const document = record(parse(previousProfile));
-    const model = catalog.models.find((entry) => entry.slug === document.model);
-    if (!model) throw new Error(`${sibling.displayName} 目录不支持当前模型`);
-    document.model_reasoning_effort = model.default_reasoning_level;
-    updates.set(path, stringify(document));
+  const definition = findManagedProviderDefinitionByCatalog(environment, catalogPath);
+  validateSettingsCatalog(content, definition);
+  rememberSettingsSnapshot(originals, join(managedProviderDirectory(environment, definition), definition.catalogManifestFileName), environment);
+  const family = managedProviderAccountFamilyForDefinition(definition);
+  rememberSettingsSnapshot(originals, family.accountsFilePath(environment), environment);
+  for (const sibling of managedCatalogDefinitions(environment, catalogPath)) {
+    rememberSettingsSnapshot(originals, managedProviderMarkerPath(environment, sibling), environment);
+    const marker = readManagedMarker(environment, sibling);
+    if (!marker) continue;
+    const path = configuredProfilePath(codexHomePath(environment), providerDescriptor(sibling), marker.mode);
+    rememberSettingsSnapshot(originals, path, environment);
+    readProviderProfile(path, providerDescriptor(sibling), {
+      expectedCatalogPath: catalogPath,
+      environment,
+      reasoningEffortPolicy: marker.mode === "switching" ? "ignore" : "absent",
+      tolerateMissingModel: true,
+      readCredential: false,
+    });
+    if (marker.mode === "exclusive") {
+      validateSettingsSelection(originals.get(path), content, sibling, marker.mode, catalogPath);
+      continue;
+    }
+    const previous = updates.get(path) ?? originals.get(path);
+    let document;
+    try { document = record(parse(previous)); }
+    catch { throw new Error("账户模型选择配置无法安全解析"); }
+    const model = modelCatalogSetting(content, sibling, document.model);
+    if (document.model_reasoning_effort !== model.reasoningEffort) {
+      document.model_reasoning_effort = model.reasoningEffort;
+      updates.set(path, stringify(document));
+    }
+    validateSettingsSelection(updates.get(path) ?? previous, content, sibling, marker.mode, catalogPath);
   }
 }
 
-/** Account catalog/manifest changes share settings recovery, without changing model templates. */
+function rememberSettingsSnapshot(originals, path, environment) {
+  if (!originals.has(path)) originals.set(path, readOptionalSettingsFile(path, environment));
+}
+
+function managedCatalogDefinitions(environment, catalogPath) {
+  return managedProviderDefinitions(environment).filter(definition =>
+    join(managedProviderDirectory(environment, definition), definition.catalogFileName) === catalogPath);
+}
+
+function validateSettingsCatalog(content, definition) {
+  const slugs = readCatalogSlugSet(content, definition);
+  const catalog = JSON.parse(content);
+  if (!slugs.size || slugs.size !== catalog.models.length) throw new Error("模型目录成员无效");
+  for (const slug of slugs) modelCatalogSetting(content, definition, slug);
+}
+
+function validateSettingsSelection(content, catalogContent, definition, mode, catalogPath) {
+  let document;
+  try { document = record(parse(content)); }
+  catch { throw new Error("恢复模型选择配置无法安全解析"); }
+  const model = modelCatalogSetting(catalogContent, definition, document.model);
+  if (document.model_provider !== definition.id || document.model_catalog_json !== catalogPath
+    || reasoningEffortMismatch(document, model, mode === "switching" ? "mirror" : "absent")
+    || document.model_context_window !== undefined || document.model_auto_compact_token_limit !== undefined
+    || document.model_auto_compact_token_limit_scope !== undefined) {
+    throw new Error("模型选择配置与提供商家族目录不一致");
+  }
+}
+
+/** Family catalog/manifest changes share settings recovery and every affected account mirror. */
 export function writeManagedModelProviderCatalogUpdates(provider, updates, originals, environment = process.env) {
   const { definition, path } = managedProviderCatalogPath(provider, environment);
   const manifest = join(managedProviderDirectory(environment, definition), definition.catalogManifestFileName);
@@ -244,10 +297,11 @@ export function writeManagedModelProviderCatalogUpdates(provider, updates, origi
     || required.some(file => !updates.has(file) || typeof updates.get(file) !== "string" || !originals.has(file))
     || typeof originals.get(path) !== "string" || typeof originals.get(manifest) !== "string"
     || updates.get(`${path}.backup`) !== originals.get(path) || updates.get(`${manifest}.backup`) !== originals.get(manifest)) {
-    throw new Error("账户模型目录更新必须包含准确的目录、来源及原始备份快照");
+    throw new Error("提供商家族模型目录更新必须包含准确的目录、来源及原始备份快照");
   }
   validateCatalogManifest(originals.get(path), originals.get(manifest), definition);
   validateCatalogManifest(updates.get(path), updates.get(manifest), definition);
+  collectCatalogWithProfileMirrors(environment, path, updates.get(path), updates, originals);
   writeCatalogUpdates(environment, updates, originals, path);
 }
 
@@ -264,23 +318,60 @@ function assertCatalogUpdateSnapshots(environment, originals, written = new Map(
   }
 }
 
+function managedSettingsScope(environment, catalogPath) {
+  const definitions = managedCatalogDefinitions(environment, catalogPath);
+  const definition = definitions[0];
+  if (!definition) throw new Error("模型设置目录不属于已配置的提供商家族");
+  const family = managedProviderAccountFamilyForDefinition(definition);
+  const manifestPath = join(managedProviderDirectory(environment, definition), definition.catalogManifestFileName);
+  const backupPaths = new Set([`${catalogPath}.backup`, `${manifestPath}.backup`]);
+  const profilePaths = new Set(definitions.map(entry => join(codexHomePath(environment), entry.profileFileName)));
+  const markerPaths = definitions.map(entry => managedProviderMarkerPath(environment, entry));
+  const registryPath = family.accountsFilePath(environment);
+  const selections = definitions.flatMap(entry => {
+    const marker = readManagedMarker(environment, entry);
+    return marker ? [{ definition: entry, mode: marker.mode,
+      path: configuredProfilePath(codexHomePath(environment), providerDescriptor(entry), marker.mode) }] : [];
+  });
+  const allowedUpdates = new Set([catalogPath, manifestPath, ...backupPaths,
+    ...selections.filter(entry => entry.mode === "switching").map(entry => entry.path)]);
+  const allowedGuards = new Set([registryPath, ...markerPaths, ...profilePaths, manifestPath, ...backupPaths,
+    join(codexHomePath(environment), "config.toml")]);
+  return { definition, manifestPath, backupPaths, profilePaths, selections, allowedUpdates, allowedGuards,
+    requiredSnapshots: [registryPath, manifestPath, ...markerPaths, ...selections.map(entry => entry.path)] };
+}
+
+function settingsFileLimit(path, scope) {
+  return scope.backupPaths.has(path) || path === scope.manifestPath
+    || !scope.allowedGuards.has(path) ? maximumCatalogBytes : maximumConfigBytes;
+}
+
 function writeCatalogUpdates(environment, updates, originals, catalogPath) {
   assertProviderCatalogIsolationComplete(environment);
   assertResponsesContextSyncComplete(environment);
   assertManagedCatalogSettingsComplete(catalogPath);
+  const scope = managedSettingsScope(environment, catalogPath);
+  if (!updates.has(catalogPath) || [...updates.keys()].some(path => !scope.allowedUpdates.has(path))) {
+    throw new Error("模型设置写入路径不属于同一提供商家族");
+  }
+  for (const path of scope.requiredSnapshots) rememberSettingsSnapshot(originals, path, environment);
   for (const path of updates.keys()) {
-    if (!originals.has(path)) originals.set(path,readPrivateFile(path,maximumCatalogBytes));
+    rememberSettingsSnapshot(originals, path, environment);
   }
   assertCatalogUpdateSnapshots(environment, originals);
   const files = [...updates].map(([path, next]) => ({ path, previous: originals.get(path) ?? null, next }));
+  const guards = [...originals].filter(([path]) => !updates.has(path) && scope.allowedGuards.has(path))
+    .map(([path, content]) => ({ path, content: content ?? null }));
   // Recovery reads both snapshots with the same bound as ordinary readers.
   // Check formatted output before publishing a journal or replacing any file.
-  const profilePath = join(codexHomePath(environment), findManagedProviderDefinitionByCatalog(environment, catalogPath).profileFileName);
-  if (files.some(file => Buffer.byteLength(file.next) > (file.path === profilePath ? maximumConfigBytes : maximumCatalogBytes)
-    || file.previous !== null && Buffer.byteLength(file.previous) > (file.path === profilePath ? maximumConfigBytes : maximumCatalogBytes))) {
+  if (files.some(file => typeof file.next !== "string"
+    || file.previous === null && !scope.backupPaths.has(file.path)
+    || Buffer.byteLength(file.next) > settingsFileLimit(file.path, scope)
+    || file.previous !== null && Buffer.byteLength(file.previous) > settingsFileLimit(file.path, scope))
+    || guards.some(file => file.content !== null && Buffer.byteLength(file.content) > settingsFileLimit(file.path, scope))) {
     throw new Error("模型设置保存结果超过文件大小限制（目录 2 MiB、Profile 1 MiB），未写入文件");
   }
-  const journal = `${JSON.stringify({ schemaVersion: 1, files }, null, 2)}\n`;
+  const journal = `${JSON.stringify({ schemaVersion: 2, files, guards }, null, 2)}\n`;
   if (Buffer.byteLength(journal) > 16 * 1024 * 1024) throw new Error("模型设置恢复记录超过大小限制");
   const pending = `${catalogPath}.settings-pending`;
   writePrivateFileAtomicSync(`${catalogPath}.settings-backup`, journal);
@@ -319,7 +410,7 @@ function writeCatalogUpdates(environment, updates, originals, catalogPath) {
 }
 
 function assertManagedCatalogSettingsComplete(path) {
-  if (existsSync(`${path}.settings-pending`)) throw new Error("账户模型设置尚未完成；请使用 codexc provider recover <Provider ID> keep 或 rollback 恢复");
+  if (existsSync(`${path}.settings-pending`)) throw new Error("提供商家族模型设置尚未完成；请使用 codexc provider recover <Provider ID> keep 或 rollback 恢复");
 }
 
 function assertSettingsSnapshot(file, environment) {
@@ -367,57 +458,69 @@ export function recoverManagedCatalogSettings(provider, action, environment = pr
   const content = readPrivateFile(pending, 16 * 1024 * 1024);
   let journal;
   try { journal = JSON.parse(content); } catch { throw new Error("模型设置恢复记录无法安全解析"); }
-  const profilePath = join(codexHomePath(environment), definition.profileFileName);
-  const manifestPath = join(managedProviderDirectory(environment, definition), definition.catalogManifestFileName);
-  const backupPaths = new Set([`${catalogPath}.backup`, `${manifestPath}.backup`]);
-  const allowed = new Set([catalogPath, profilePath, manifestPath, ...backupPaths]);
-  if (journal?.schemaVersion !== 1 || Object.keys(journal).some(key => !["schemaVersion", "files"].includes(key)) || !Array.isArray(journal.files) || journal.files.length < 1
-    || journal.files.length > 4 || new Set(journal.files.map(file => file?.path)).size !== journal.files.length
+  const scope = managedSettingsScope(environment, catalogPath);
+  const { manifestPath, backupPaths } = scope;
+  const hasGuards = journal?.schemaVersion === 2;
+  if (![1, 2].includes(journal?.schemaVersion)
+    || Object.keys(journal).some(key => !(hasGuards ? ["schemaVersion", "files", "guards"] : ["schemaVersion", "files"]).includes(key))
+    || !Array.isArray(journal.files) || journal.files.length < 1
+    || journal.files.length > scope.allowedUpdates.size || new Set(journal.files.map(file => file?.path)).size !== journal.files.length
     || !journal.files.some(file => file?.path === catalogPath)
     || journal.files.some(file => !file || Object.keys(file).some(key => !["path", "previous", "next"].includes(key))
-      || !allowed.has(file.path) || !(typeof file.previous === "string" || file.previous === null && backupPaths.has(file.path)) || typeof file.next !== "string"
-      || file.previous !== null && Buffer.byteLength(file.previous) > (file.path === profilePath ? maximumConfigBytes : maximumCatalogBytes)
-      || Buffer.byteLength(file.next) > (file.path === profilePath ? maximumConfigBytes : maximumCatalogBytes))) {
+      || !scope.allowedUpdates.has(file.path) || !(typeof file.previous === "string" || file.previous === null && backupPaths.has(file.path)) || typeof file.next !== "string"
+      || file.previous !== null && Buffer.byteLength(file.previous) > settingsFileLimit(file.path, scope)
+      || Buffer.byteLength(file.next) > settingsFileLimit(file.path, scope))) {
     throw new Error("模型设置恢复记录字段或路径无效");
   }
+  if (hasGuards && (!Array.isArray(journal.guards) || journal.guards.length > scope.allowedGuards.size
+    || new Set(journal.guards.map(file => file?.path)).size !== journal.guards.length
+    || journal.guards.some(file => !file || Object.keys(file).some(key => !["path", "content"].includes(key))
+      || !scope.allowedGuards.has(file.path) || journal.files.some(update => update.path === file.path)
+      || !(typeof file.content === "string" || file.content === null)
+      || file.content !== null && Buffer.byteLength(file.content) > settingsFileLimit(file.path, scope))
+    || scope.requiredSnapshots.some(path => !journal.files.some(file => file.path === path)
+      && !journal.guards.some(file => file.path === path)))) {
+    throw new Error("模型设置恢复记录缺少同家族账户快照，或包含不受支持的守卫路径");
+  }
+  const guards = new Map((hasGuards ? journal.guards : []).map(file => [file.path, file.content ?? undefined]));
+  // Historical records did not store guards. Freeze every current family selection
+  // for this recovery and still reject a snapshot that invalidates another account.
+  if (!hasGuards) {
+    for (const path of scope.requiredSnapshots) {
+      if (!journal.files.some(file => file.path === path)) rememberSettingsSnapshot(guards, path, environment);
+    }
+  }
+  assertCatalogUpdateSnapshots(environment, guards);
   const manifest = journal.files.find(file => file.path === manifestPath);
   if (manifest || journal.files.some(file => backupPaths.has(file.path))) {
     const catalog = journal.files.find(file => file.path === catalogPath);
-    if (!manifest || journal.files.length !== 4 || ![...backupPaths].every(path => journal.files.some(file => file.path === path))
+    if (!manifest || ![...backupPaths].every(path => journal.files.some(file => file.path === path))
       || journal.files.find(file => file.path === `${catalogPath}.backup`).next !== catalog.previous
       || journal.files.find(file => file.path === `${manifestPath}.backup`).next !== manifest.previous) throw new Error("模型目录与来源恢复快照不完整");
     for (const snapshot of ["previous", "next"]) validateCatalogManifest(catalog[snapshot], manifest[snapshot], definition);
   }
   const selected = action === "keep" ? "next" : "previous";
   const catalogContent = journal.files.find(file => file.path === catalogPath)[selected];
-  let catalog;
-  try { catalog = JSON.parse(catalogContent); } catch { throw new Error("恢复模型目录无法安全解析"); }
-  for (const model of readCatalogSlugSet(catalogContent, definition)) modelCatalogSetting(catalogContent, definition, model);
-  const profile = journal.files.find(file => file.path === profilePath);
-  const marker = readManagedMarker(environment, definition);
-  if (!marker) throw new Error("模型设置所属账户配置缺失，请先恢复账户配置");
-  const selectionContent = profile?.[selected] ?? (marker.mode === "switching"
-    ? readPrivateFile(profilePath) : readCodexConfigFile(join(codexHomePath(environment), "config.toml")));
-  {
-    let document;
-    try { document = parse(selectionContent); } catch { throw new Error("恢复模型选择配置无法安全解析"); }
-    const model = catalog.models.find(entry => entry.slug === document.model);
-    if (document.model_provider !== provider || document.model_catalog_json !== catalogPath
-      || !model || reasoningEffortMismatch(document, { reasoningEffort: model.default_reasoning_level }, marker.mode === "switching" ? "mirror" : "absent")
-      || document.model_context_window !== undefined || document.model_auto_compact_token_limit !== undefined
-      || document.model_auto_compact_token_limit_scope !== undefined) throw new Error("恢复模型选择配置与账户目录不一致");
+  validateSettingsCatalog(catalogContent, definition);
+  if (!scope.selections.some(entry => entry.definition.id === provider)) {
+    throw new Error("模型设置所属账户配置缺失，请先恢复账户配置");
+  }
+  for (const selection of scope.selections) {
+    const profile = journal.files.find(file => file.path === selection.path);
+    const selectionContent = profile?.[selected] ?? guards.get(selection.path);
+    validateSettingsSelection(selectionContent, catalogContent, selection.definition, selection.mode, catalogPath);
   }
   for (const file of journal.files) assertSettingsSnapshot(file, environment);
   const files = action === "rollback" ? [...journal.files].reverse() : journal.files;
   for (const file of files) {
+    assertCatalogUpdateSnapshots(environment, guards);
     assertSettingsSnapshot(file, environment);
     restoreSettingsFile(file.path, action === "keep" ? file.next : file.previous);
   }
   for (const file of files) {
     if (readOptionalSettingsFile(file.path, environment) !== ((action === "keep" ? file.next : file.previous) ?? undefined)) throw new Error("模型设置恢复结果发生变化，保留恢复记录");
   }
-  if (!profile && (marker.mode === "switching" ? readPrivateFile(profilePath)
-    : readCodexConfigFile(join(codexHomePath(environment), "config.toml"))) !== selectionContent) throw new Error("恢复期间模型选择配置发生变化，保留恢复记录");
+  assertCatalogUpdateSnapshots(environment, guards);
   if (readPrivateFile(pending, 16 * 1024 * 1024) !== content) throw new Error("模型设置恢复记录已变化");
   unlinkSync(pending);
   return true;
@@ -444,7 +547,8 @@ export function writeManagedModelWindow(
   }
   if (requestedContext === undefined) validateWindowPercent(windowPercent);
   if (typeof provider !== "string" || !provider || typeof model !== "string" || !model) throw new Error("必须提供准确的 Provider 和模型 ID");
-  const configured = loadManagedModelProviderSettings(environment).find(entry => entry.provider === provider);
+  const configuredProviders = loadManagedModelProviderSettings(environment);
+  const configured = configuredProviders.find(entry => entry.provider === provider);
   const modelEntry = configured?.models.find(entry => entry.model === model);
   if (!modelEntry) throw new Error(`未找到该 Provider 的已配置模型：${provider}/${model}`);
   const base = modelEntry.maxContextWindow;
@@ -456,9 +560,13 @@ export function writeManagedModelWindow(
   windowPercent = contextWindow * 100 / base;
   const updates = new Map();
   const originals = new Map();
-  const overridden = modelEntry.windowPercent !== undefined && modelEntry.windowPercent !== windowPercent
-    ? [{ provider, previousPercent: modelEntry.windowPercent }] : [];
   const { definition, path } = managedProviderCatalogPath(provider, environment);
+  const members = configuredProviders.filter(entry => {
+    const sibling = findManagedProviderDefinition(environment, entry.provider);
+    return join(managedProviderDirectory(environment, sibling), sibling.catalogFileName) === path;
+  });
+  const overridden = modelEntry.windowPercent !== undefined && modelEntry.windowPercent !== windowPercent
+    ? members.map(entry => ({ provider: entry.provider, previousPercent: modelEntry.windowPercent })) : [];
   const settings = { model, reasoningEffort: modelEntry.reasoningEffort ?? configured.reasoningEffort, contextWindow };
   validateManagedModelSettings(definition, settings);
   const previous = readPrivateFile(path, maximumCatalogBytes);
@@ -471,7 +579,7 @@ export function writeManagedModelWindow(
     model,
     windowPercent,
     contextWindow,
-    providers: [provider],
+    providers: members.map(entry => entry.provider),
     overridden,
   };
 }
@@ -667,7 +775,7 @@ export function readProviderProfile(
     throw new Error(`Codex ${descriptor.definition.displayName} Profile 未选择受支持模型`);
   }
   if (expectedCatalogPath !== undefined && document.model_catalog_json !== expectedCatalogPath) {
-    throw new Error(`Codex ${descriptor.definition.displayName} 必须使用独立账户模型目录；请先运行 node scripts/isolate-provider-catalogs.mjs --write 显式拆分旧目录`);
+    throw new Error(`Codex ${descriptor.definition.displayName} 必须使用提供商家族共享模型目录；请先运行 node scripts/isolate-provider-catalogs.mjs --write 显式整理目录`);
   }
   const selectedModel = expectedCatalogPath === undefined
     ? undefined
@@ -827,7 +935,13 @@ export function readManagedMarker(environment, definition) {
   try {
     marker = record(parse(readPrivateFile(markerPath)));
   } catch (error) {
-    if (error?.code === "ENOENT") return undefined;
+    if (error?.code === "ENOENT") {
+      if (definition.accountId !== undefined && existsSync(join(providerStorageRoot(environment),
+        definition.storageId ?? definition.id, "accounts", definition.accountId, definition.managedMarkerFileName))) {
+        throw new Error(`Provider ${definition.id} 仍使用旧账户目录；请先停止 App Server 并显式执行目录整理`, { cause: error });
+      }
+      return undefined;
+    }
     // TOML 解析错误可能包含带 API Key 的原始配置行，不能作为 cause 暴露。
     // eslint-disable-next-line preserve-caught-error
     throw new Error("Codex Connect 模型 Provider 标记无法安全读取");

@@ -166,7 +166,7 @@
   失败关闭、不修改数据。非交互调用不进入本模块，只创建用户目录、默认工作区仓库与初始配置。
 - `setup.mjs`：使用 `@clack/prompts` 提供接入类别菜单和脱敏总览，并把“模型与提供商”“通讯渠道”
   和“项目技能”流程委派给具体适配器；“完成接入”正常退出，与顶层“取消”区分。总览与具体流程在选中后按需加载，注入回调优先。模型与提供商下分 OpenAI 官方
-  登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级，并在本次向导内保留各层选择；第三方设置区分账户接入、受管 Provider 默认值和按 Provider ID／模型独立设置的目录窗口；配置写入后的激活结果由
+  登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级，并在本次向导内保留各层选择；第三方设置区分账户接入、受管 Provider 默认值和按提供商／模型共用设置的目录窗口；配置写入后的激活结果由
   `config-activation-result.mjs` 提供统一状态和目标定义，只转换子模块显式返回的激活范围，不为查询或取消操作推断重启。公开 CLI 的 `codexc setup --jsonl` 将交互提示
   写入终端 stderr，并按每行一个事件把脱敏结果或错误写入 stdout；完成接入返回 `result` 事件的 `action: completed`。输入或提示输出不连接终端时明确拒绝，操作失败后可继续选择。默认 `codexc setup` 保持纯交互文本输出。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
@@ -180,7 +180,7 @@
   `OpenAI` 选项固定写入同名 `name` 以允许 Codex 使用远程压缩，上游仍须兼容对应接口。新增默认推荐
   切换模式，编辑保持原模式；确认预览明确显示配置位置、API Key 明文存储、默认思考等级和服务层级。固定模式通过 Codex
   `config/batchWrite` 原子写入并激活 `~/.codex/config.toml` 的自定义主 Provider，主配置仅保存 `env_key` 引用，Key 写入
-  `~/.codex-connect/providers/custom/<ID>/primary-credentials/<版本>.json` 当前用户私有文件；切换模式保持主
+  `~/.codex-connect/providers/custom/<ID>/primary-credentials/<版本>.json` 当前用户私有文件（`cp-` Provider 使用 `providers/<ID>/primary-credentials/`）；切换模式保持主
   Provider 为 `openai` 且不修改主配置，为每个 Provider 写入包含完整 Provider 块、Key、模型、
   官方目录的 `medium` 或自定义目录声明的思考等级和服务层级的 0600 私有 Profile：自定义目录提供商使用 `~/.codex/sf-cp-<名称>.config.toml`，Codex 兼容类型使用 `~/.codex/sf-custom-<Provider ID>.config.toml`，
   并通过私有显式注册表支持多个隔离实例。Gateway 管理的 DeepSeek、OpenCode Go 与自定义
@@ -203,12 +203,12 @@
 - `model-catalog-validation.mjs` / `model-catalog-validation.d.mts`：Provider 保存前的 Codex 模型目录合同校验；先将自身新建的隔离临时目录设为私有，再写入目录数据，限制运行时间并清理临时文件，不修改系统 TEMP 根目录权限。
 - `responses-model-setup.mjs` / `responses-model-setup.d.mts`：逐项收集自定义模型描述、当前与最大窗口、思考与等级说明、图片精度、详细程度和摘要参数；高级设置支持指令、有效窗口比例、压缩阈值和截断策略，并选择启用列表。每模型独立询问默认采样参数，默认 No 保留已有值；Yes 逐项预填 `temperature=1.0`、`top_p=0.95`、`top_k=20`、`min_p=0.0`、`presence_penalty=0.0`、`repetition_penalty=1.0`（已有值优先），留空省略字段。新建非 DS 定义显式使用通用编程提示词，已有自定义指令保持。填写 Key 后由 `custom-model-capability-setup.mjs` 分别询问 `apply_patch` 与 `tool_search`，用户可手动选择或探测本项，新模型默认均不声明支持。
 - `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义提供商共用的 1–64 个模型多选、预览确认与默认模型保护。
-- `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG 按完整 Provider ID 管理账户目录的手填模型、DS 官方发现及 ID 映射、启用选择；只添加选中的新模型及明确来源关联，已有条目不重建。保存复用受管目录／来源持久事务与恢复入口，无内容变化不写入或更新备份。保护目标账户默认值，目录变化不修改账户凭据。
-- `provider-model-management.mjs` / `provider-model-management.d.mts`：CLI/WebUI 共用的账户目录能力、本地移除及单模型窗口预览和锁内保存；窗口修改绑定 Provider、模型和目录修订，自定义删除与窗口修改仅重编译已保存定义，不重新应用提示词模板。WebUI 从对应保存目录投影完整能力，按目录身份、精确模型 ID 和内容修订读取白名单提示词。列表不携带提示正文。保护账户和 Gateway 显式默认值、非空目录及文件修订；受管删除纳入账户目录／来源持久恢复，自定义写入统一前后摘要 pending 与回读校验。
+- `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG 按提供商管理共用目录的手填模型、DS 官方发现及 ID 映射、启用选择；只添加选中的新模型及明确来源关联，已有条目不重建。保存复用受管目录／来源持久事务与恢复入口，无内容变化不写入或更新备份。保护所有同族账户默认值，目录变化不修改账户凭据。
+- `provider-model-management.mjs` / `provider-model-management.d.mts`：CLI/WebUI 共用的提供商目录能力、本地移除及单模型窗口预览和锁内保存；窗口修改绑定 Provider、模型和目录修订，自定义删除与窗口修改仅重编译已保存定义，不重新应用提示词模板。WebUI 从对应保存目录投影完整能力，按目录身份、精确模型 ID 和内容修订读取白名单提示词。列表不携带提示正文。保护账户和 Gateway 显式默认值、非空目录及文件修订；受管删除纳入账户目录／来源持久恢复，自定义写入统一前后摘要 pending 与回读校验。
 - `provider-model-template-management.mjs` / `provider-model-template-management.d.mts`：DS、CLP、CCG、OCG 和 CP 的统一模板选项、显式来源关联、分组差异预览与锁内执行。按提示词／能力白名单更新，保留本地选择及其他模型；有界进程缓存绑定源快照、目标修订及有效期，CLP 仅获取选项时下载。CP 复用既有模型保存，受管账户复用目录与来源事务；无差异不写入，不自动重启。CLI 与 WebUI 复用同一计划接口。
 - `provider-model-setup.mjs` / `provider-model-setup.d.mts`：Setup 的统一模型管理菜单，复用移除、自定义模型专用保存、受管默认设置和 CLP／CCG／OCG 发现添加。五类独立目录均可选择来源、对比并更新模板，默认仅选择提示词，能力参数须另行勾选；逐字段预览差异，长内容显示 JSON 长度与 SHA-256 摘要并可在确认前展开，确认后保存，无差异不写入；不自动重启服务。
 - `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内校验当前配置，完成未结束的自定义模型目录保存或受管账户设置事务；受管恢复核对准确目录／Profile 路径及前后值，拒绝覆盖后续修改。
-- `isolate-provider-catalogs.mjs`：源码仓库的显式账户目录拆分入口，默认预览，`--write` 复制旧共享 catalog／manifest 并更新账户 Profile 或固定主配置引用，原共享文件保留；`--resume`／`--rollback` 消费私有恢复记录，拒绝覆盖后续改动。使用全局管理锁，写入及恢复要求整个 App Server 停止；不由更新器自动执行。步骤与回滚限制见[账户目录拆分](../docs/provider-integration-guide.md#旧共享目录账户升级)。
+- `isolate-provider-catalogs.mjs`：源码仓库的显式 Provider 目录整理入口，默认预览，`--write` 把嵌套或已扁平账户的模型目录整理到提供商家族共用目录，并更新配置与恢复备份引用。旧账户身份、安装备份及凭据显式复制到完整 ID 目录；旧 CP 模型、metadata 和凭据复制到各自 cp-ID 目录。源文件保留，模型、manifest 或身份目标冲突时拒绝猜测，CP 目录保持独立。`--resume`／`--rollback` 消费 v3 私有恢复记录，拒绝覆盖后续改动。使用全局管理锁，写入及恢复要求整个 App Server 停止；不由更新器自动执行。步骤与回滚限制见[目录整理](../docs/provider-integration-guide.md#旧共享目录账户升级)。
 - `custom-primary-provider-management.mjs` / `custom-primary-provider-management.d.mts`：提供自定义主
   Provider 新增与编辑的无终端校验、脱敏预览和执行接口；用 `preserve` / `replace` 明确表达 Key
   操作，现有 Key 只在内部计划闭包中用于同 Origin 保留，不进入预览或执行结果。固定模式复用 Codex
@@ -281,13 +281,13 @@
   时恢复模型目录，结果明确返回 App Server 重启动作。
 - `model-window-management.mjs` / `model-window-management.d.mts`：提供 CLI 受管模型上下文窗口的无终端
   校验与执行接口；WebUI 使用统一 `model.context` 窄更新。必须提供精确 Provider ID 和模型 ID，写入经
-  `writeManagedModelWindow` 只保存目标账户模型的 `context_window` 并同步该账户 Profile，复用统一 Provider 管理事务；
+  `writeManagedModelWindow` 保存该提供商共用目录中目标模型的 `context_window`，校验所有同族账户并同步必要的 Profile 镜像，复用统一 Provider 管理事务；
   按目标模型的 `max_context_window` 校验，结果明确返回 App Server 重启动作，不广播同名模型或联动 CP。
 - `model-window-setup.mjs` / `model-window-setup.d.mts`：`codexc setup` 的“受管模型目录上下文窗口”入口；
-  按 Provider ID 和模型选择受管模型，通过 128K、256K、384K、512K、1M 预设或自定义
+  按提供商和模型选择受管模型，通过 128K、256K、384K、512K、1M 预设或自定义
   Token 数设置窗口；预设按模型最大窗口过滤，可直接选择最大窗口，自定义范围为 1024 至模型最大值。
-  选择窗口前直接显示目标账户与模型；与添加自定义模型复用 `responses-model-setup.mjs` 的窗口选择交互，写入复用
-  `model-window-management.mjs` 的账户独立保存，结果返回 App Server 重启动作。
+  选择窗口前直接显示目标提供商、模型及受影响账户；与添加自定义模型复用 `responses-model-setup.mjs` 的窗口选择交互，写入复用
+  `model-window-management.mjs` 的提供商共用模型保存，结果返回 App Server 重启动作。
 - `model-provider-default-setup.mjs` / `model-provider-default-setup.d.mts`：负责受管 Provider 默认设置的
   Provider、模型与思考等级交互与中文渲染，写入复用管理接口；第三方 Provider 总菜单会先选择 Provider，DeepSeek 与 OpenCode Go 子菜单则复用同一入口并预选当前 Provider。上下文窗口不在本流程，转到
   `model-window-setup.mjs`；历史 Thread 仍保留创建时的模型。选择思考等级前明确目标账户；保存时在管理锁内重读 Provider，模式变化则拒绝旧选择，成功提示使用实际执行结果。
@@ -339,7 +339,7 @@
   覆盖高风险确认、Origin、限速、请求上限、安全响应头和脱敏审计；WebUI 管理路由复用其中的请求约束、
   限速和审计原语，配置了 WebUI 令牌时直接使用 Bearer 令牌认证。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 日志与高级功能选择完整日志等级，不改写显示设置或凭据。
-- `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、默认账户及 `codexc provider ccg remove` 删除入口；账户隔离 Key/Profile/App Server、目录与统计代理，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
+- `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、默认账户及 `codexc provider ccg remove` 删除入口；账户隔离 Key/Profile/App Server 与统计代理，模型目录由 CCG 账户共用，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录及显式来源关联，保留原模型并复制 Flash 增加 V4.1；模型 ID 与显示名来自根目录 `provider-model-catalog.json`，V4.1 的来源绑定指向 Flash。
 - `managed-provider-files.mjs` / `managed-provider-files.d.mts`：Provider 文件事务必须提供当前运行环境；统一访问器绑定文件归属，快照携带内存中的读取与写入闭包，并发复核、更新及回滚复用同一策略。固定模式先纳入不可变私有凭据再发布主配置，回滚先恢复已有文件，失败保留新增恢复资料并停止后续删除；未纳入快照的更新明确拒绝，不改变持久化备份格式。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。使用用户配置定位主 Socket，源码拆分入口直接运行时也遵守显式配置文件、用户数据目录与默认用户配置的优先级，不回退仓库配置。
@@ -358,10 +358,10 @@
 - `opencode-go-account-management.mjs` / `opencode-go-account-management.d.mts`：提供 OpenCode Go
   默认账户切换、运行实例停止与当前账户删除的无终端预览和执行接口；默认切换只更新注册表，
   停止明确区分未运行、Remote TUI 占用和已停止，删除在明确确认后保留私有备份并执行多文件回滚；
-  删除默认账户前必须先指定其他默认账户；删除时仅清理该账户模型目录与来源记录，固定模式账户只恢复其管理的主配置字段，保留无关子代理。
+  删除默认账户前必须先指定其他默认账户；删除时仅清理账户配置与管理标记，保留共用模型目录与来源记录，固定模式账户只恢复其管理的主配置字段，保留无关子代理。
 - `opencode-go-account-provisioning.mjs` / `opencode-go-account-provisioning.d.mts`：提供 OpenCode Go
   账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、每个账户进入固定模式时的恢复基线更新与旧基线归档、Key 写入、切换/固定模式配置和多文件事务回滚；同一家可保留一个固定账户与其他切换账户。
-  新账户从官方模板生成自己的目录，重配保留该账户已有目录，不继承其他 Provider 的同名模型窗口。
+  首次接入从官方模板生成共用目录，新增账户和重配均复用已有目录，不继承其他 Provider 的同名模型窗口。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
   （add/list/remove/default/stop，供 `codexc provider opencode-go` 调用）与 Setup 菜单；`list --json`
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
@@ -637,7 +637,7 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 发送一次官方归档。根会话只扫描一份共享历史，轮数超过阈值时不再扫描后代；扫描与执行显示进度。结果核验在写入批次后集中读取各 Workspace 的已归档/未归档根列表，各组再独立读取后代。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。
 
 - `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户交互菜单、模型多选、名单预览与确认；保留账户默认模型，委托账户管理模块执行后显示激活提示。
-- `cline-pass-account-management.mjs` / `cline-pass-account-management.d.mts`：CLI/WebUI 共用的 CLP 固定/切换配置、默认账户与移除预览及私有写入事务；从 Cline 官方元数据投影多模型目录，CLI 显式更新时备份与保留账户默认值，仅 Flash 复制仓库 DS 模板，窗口不跨账户联动，不依赖终端交互。
+- `cline-pass-account-management.mjs` / `cline-pass-account-management.d.mts`：CLI/WebUI 共用的 CLP 固定/切换配置、默认账户与移除预览及私有写入事务；从 Cline 官方元数据投影多模型目录，CLI 显式更新时备份与保留账户默认值，仅 Flash 复制仓库 DS 模板，窗口由全部 CLP 账户共用，不影响 DS，不依赖终端交互。
 
 - `model-relay-listen-menu.mjs`：CLI 与 Config 一级菜单共用的监听交互入口，关闭/本机/局域网/指定 IP，保存前确认和配置修订检查，不自动安装或启动服务。
 - `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑改绑/轮换/停用/删除、中文用途名称及每 Key 多提供商模型授权，不提供旧格式转换命令。

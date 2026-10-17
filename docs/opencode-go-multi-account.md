@@ -30,15 +30,15 @@ Codex Thread 的 `modelProvider` 创建后不可变。因此：
 
 ## 账户文件
 
-账户注册表和各账户模型目录位于 Gateway 数据目录，不保存 Key；注册表中的联系方式只用于本机展示：
+账户注册表和共用模型目录位于 Gateway 数据目录，不保存 Key；注册表中的联系方式只用于本机展示：
 
 ```text
-~/.codex-connect/providers/opencode-go/
-  accounts.json                            账户注册表（id、default、email 或 phone）
-  accounts/<account>/models.json           该账户模型目录
-  accounts/<account>/models.manifest.json  该账户目录来源
-  accounts/<account>/managed.toml          管理标记（version、provider、mode）
-  accounts/<account>/backup/               固定恢复基线及删除前的私有文件备份
+~/.codex-connect/providers/
+  opencode-go/accounts.json                家族注册表（id、default、email 或 phone）
+  opencode-go/models.json                  所有 OCG 账户共用模型目录
+  opencode-go/models.manifest.json         共用目录来源
+  ocg-<account>/managed.toml               管理标记（version、provider、mode）
+  ocg-<account>/backup/                    固定恢复基线及删除前的私有文件备份
 ```
 
 切换模式下，每个账户使用独立的 0600 Profile：
@@ -67,10 +67,10 @@ codexc provider opencode-go release <id>
 
 `list --json` 输出账户 ID、邮箱或手机号（若有）、展示名、默认标记、Provider ID 与运行模式，不包含 API Key 或 Profile 路径。
 
-- `add` 为新账户下载独立模型目录，写入账户 Profile、管理标记与注册表；重配复用该账户已有目录，失败时按写入前快照回滚；
+- `add` 在共用目录尚不存在时下载模型，后续账户及重配复用已有目录；写入各自 Profile、管理标记与注册表，失败时按写入前快照回滚；
 - `codexc provider opencode-go remove <accountId>` 先预览确认，停止账户实例并备份 Profile 与管理标记，再删除注册项和受管文件；任何删除步骤失败
   都按删除前快照回滚；存在 Remote TUI
-  租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；仅清理该账户模型目录和来源记录，若该账户是固定模式还会恢复安装前的 Codex 主配置；
+  租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；清理账户配置与管理标记，保留共用模型目录和来源记录，若该账户是固定模式还会恢复安装前的 Codex 主配置；
 - `default` 原子更新默认账户注册表；
 - `stop` 立即请求释放账户 App Server；如果对应 Remote TUI 正在持有租约，则保留实例并提示用户
   退出 TUI 后重试；
@@ -86,7 +86,7 @@ codexc provider opencode-go release <id>
 
 只接受当前多账户格式。账户删除保留其他账户、备份和历史统计，不恢复或删除无关子代理。
 
-默认模型、思考等级、上下文、启用名单与显式刷新均按完整 `ocg-<accountId>` 隔离，同名模型不跨账户联动。旧共享目录账户在新版启动前须停止整个 App Server，并从源码仓库根目录显式执行[账户目录拆分](provider-integration-guide.md#旧共享目录账户升级)。
+账户独立选择默认模型；思考等级、上下文、启用名单与显式刷新作用于共用 OCG 模型目录，不影响其他提供商。移除模型保护所有账户默认值，删除账户保留模型文件。旧独立模型目录须在停止整个 App Server 后，从源码仓库根目录显式执行[目录整理](provider-integration-guide.md#旧共享目录账户升级)，安装新版后再启动。
 
 ## 账户统计代理
 

@@ -25,12 +25,11 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
   if (action === "models") return runProviderModelSetup({ environment, prompts, output, provider: "clp" });
   if (action === "catalog") {
-    const accountId = await prompts.select({ message: "选择模型目录所属账户", options: accounts.map(account => ({ value: account.id, label: account.id })) });
-    if (prompts.isCancel(accountId)) return { action: "back" };
+    const accountId = accounts[0].id;
     const result = await refreshClinePassCatalog({ accountId, environment, selectModels: selection => promptEnabledModels(prompts, output, selection) });
     if (result.action === "back") return result;
     output.write(result.action === "unchanged" ? "没有新增模型，无需保存或重启。\n"
-      : `CLP ${accountId} 已添加新模型：现有 ${result.models.length} 个模型，来源 ${result.commit}。\n`);
+      : `CLP 共用目录已添加新模型：现有 ${result.models.length} 个模型，来源 ${result.commit}。\n`);
     writeCatalogExclusions(output, result.excludedModels);
     writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
     return result;

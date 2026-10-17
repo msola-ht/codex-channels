@@ -130,7 +130,7 @@ export class ChatCompletionsBridge {
       status = 400;
       // 自定义 Chat 上游可能不接受 response_format 与 tools 并存（托管 CLP 上游已验证接受，保持原样）。
       const { request: body, toolNames, structuredOutput } = responsesToChat(source, modelCapabilities?.reasoningEfforts,
-        this.options.clinePass ? {} : { structuredOutputWithTools: "prompt" });
+        this.options.clinePass ? { clinePass: true } : { structuredOutputWithTools: "prompt" });
       // 结构化输出降级只由提示词保证，记录有界事实以便与“模型没按 JSON 输出”区分。
       if (structuredOutput !== undefined) diagnostics.conversion({ structuredOutput });
       const { reasoning, ...parameters } = body;

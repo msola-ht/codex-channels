@@ -70,11 +70,11 @@
   查询 Credits 与 5 小时/7 天窗口；模型 ID
   支持上游命名空间，凭据按 Bearer 格式校验。
   `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 DS、OpenCode
-  Go、CCG 与 CLP 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>`、`ccg-<账户>` 与 `clp-<账户>` 实例；能力元数据声明实例展开与账户能力。CLP 显式声明 Chat 上游，各账户拥有服务创建的独立本地转换桥；账户实例继承基础定义，`sharedManagedProviderDefinition` 是取得基础定义的唯一入口；CLP 接受合法 `cline-pass/` 模型 ID，并按该账户目录校验成员身份；
+  Go、CCG 与 CLP 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>`、`ccg-<账户>` 与 `clp-<账户>` 实例；能力元数据声明实例展开与账户能力。CLP 显式声明 Chat 上游，各账户拥有服务创建的独立本地转换桥；账户实例继承基础定义，`sharedManagedProviderDefinition` 是取得基础定义的唯一入口；CLP 接受合法 `cline-pass/` 模型 ID，并按 CLP 共用目录校验模型成员身份；
   基础定义只描述能力，不包含单账户 Profile；`loadManagedModelProviderWatcherDefinitions`
   为当前账户监听目录、Profile 和管理标记，按 Provider ID 合并并去重路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，账户目录独立。
-- `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，模型目录和 Chat 转换代理按账户独立。
+- `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，模型目录按 CLP 家族共用，Chat 转换代理与凭据按账户独立。
 - `provider-model-guard.mjs` / `provider-model-guard.d.mts`：CLP Chat 桥、OCG/CCG 与自定义提供商代理共用的出站模型名单复核；显式传入 ID 校验规则，不缓存名单、不读取账户凭据或 Relay 目录，限制并发、读取大小和等待时间，取消后保留读取槽直到资源清理完成。
   CP 从同次已校验目录的精确模型定义读取默认采样，和启用状态共同交给代理；采样不进入编译后的 Codex 模型字段。
   CLP 在同一次目录读取中取得模型的思考选项，出站同时验证启用名单和思考能力，不为能力检查重复执行 ACL 读取。
@@ -114,8 +114,8 @@
   受管及自定义 Provider 材料复用 `provider-file-access` 的文件归属判断，指纹不自行选择 ACL 策略。
 - `managed-model-catalog.mjs`：受管目录的纯数据校验、单模型设置读取、窗口与思考等级更新及刷新时保留设置；窗口按精确 Token 数保留，百分比仅派生、不取整后反向还原；新上限小于原窗口或不再支持原思考等级时拒绝刷新，不静默替换非默认模型的等级。DS、OCG、CCG、CLP 共用，完整保留未修改的上游元数据，不执行文件读写。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile，复用 `managed-model-catalog` 处理目录数据；
-  管理每个受管 Provider 的独立模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
-  设置写入、单模型移除与 CLP 账户目录更新共用私有 `.settings-backup`／`.settings-pending`，记录账户目录、Profile 或来源文件及旧备份的前后快照，复核所有相关配置并回读一致后结束事务；未完成时阻止读取及出站，显式恢复严格限定账户路径，拒绝覆盖后续修改并复核目录来源与当前模型选择。
+  管理各受管提供商家族的共用模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
+  设置写入、单模型移除与 CLP 账户目录更新共用私有 `.settings-backup`／`.settings-pending`，记录共用目录、相关 Profile 或来源文件及旧备份的前后快照，并保存只读前置条件，复核所有相关配置并回读一致后结束事务；未完成时阻止读取及出站，显式恢复严格限定同一家族路径，拒绝覆盖后续修改并复核目录来源与当前模型选择。
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
   镜像所选模型的默认思考等级。Profile 位于 `~/.codex`，模型目录、清单与管理标记位于
   `~/.codex-connect/providers/<id>/`。
@@ -131,7 +131,7 @@
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
 - `responses-context-sync.mjs` / `responses-context-sync.d.mts`：仅保留旧版跨目录上下文事务的私有记录读取、校验及显式整批恢复；不再创建同步事务或提供跟随联动。
-- `provider-catalog-isolation.mjs` / `provider-catalog-isolation.d.mts`：账户目录拆分私有记录路径和未完成保护；拆分 pending 时拒绝 runtime 使用目录，显式拆分由 `scripts/isolate-provider-catalogs.mjs` 执行。
+- `provider-catalog-isolation.mjs` / `provider-catalog-isolation.d.mts`：Provider 目录整理私有记录路径和未完成保护；pending 时拒绝 runtime 使用受管及 CP 目录，显式整理由 `scripts/isolate-provider-catalogs.mjs` 执行。受管模型按家族放在 `providers/deepseek|clp|ccg|opencode-go/`；账户身份材料仍按完整 ID 保存，自定义 cp 模型保持各自目录。
 - `model-catalog.mjs` / `model-catalog.d.mts`：模型定义与 Codex 字段转换的纯数据层，集中校验基础及扩展能力、生成默认字段、导入官方／DS 模板及修正 DS 能力声明；CP、CLP 和 CLI 模板入口复用。导出 `SamplingParameters` 与严格数值校验，逐模型可选 `sampling` 仅保留于定义，空对象归一为省略，不进入 Codex 生成字段。完整官方及受管目录不经过 CP 白名单往返，避免丢失专用元数据。
 - `model-template-prompts.mjs` / `model-template-prompts.d.mts`：纯 JSON 提示词补全，保留显式值，补缺失文本及必要 token-budget 配套字段；`approvals: null` 是继承基础审批提示词的例外。
 - `model-template-bindings.mjs` / `model-template-bindings.d.mts`：校验受管目录 manifest 的显式模型来源关联；缺少关联保持未关联，拒绝无效或孤立引用，不按名称推断。

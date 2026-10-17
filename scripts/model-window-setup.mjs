@@ -9,6 +9,7 @@ import {
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { promptContextWindow } from "./responses-model-setup.mjs";
+import { managedProviderAccountFamilies } from "../runtime/model-provider-definitions.mjs";
 
 class ModelWindowSetupCancelled extends Error {}
 
@@ -19,7 +20,7 @@ export async function runModelWindowSetup({
   prompts = clackPrompts,
   prompter,
 } = {}) {
-  const models = loadManagedModelWindow(environment);
+  const models = loadManagedModelWindow(environment).filter(model => model.provider === model.providers[0]);
   if (models.length === 0) {
     throw new Error("尚未配置受管第三方模型，请先在 Setup 中完成第三方账户接入");
   }
@@ -29,7 +30,7 @@ export async function runModelWindowSetup({
     if (model === "back") return { action: "back" };
     const selected = models.find((candidate) => modelKey(candidate) === model);
     if (!selected) throw new Error(`未找到已配置模型：${model}`);
-    output.write(`本次窗口设置的 Provider：${selected.provider}。\n`);
+    output.write(`本次窗口设置影响同一提供商账户：${selected.providers.join("、")}。\n`);
     const contextWindow = await prompt.selectContextWindow(selected);
     const result = await applyModelWindowChange({
       provider: selected.provider,
@@ -62,13 +63,13 @@ function createPrompter(prompts, models, { allowBack }) {
   return {
     selectModel: async () => {
       const value = await prompts.select({
-        message: "选择 Provider 与模型",
+        message: "选择提供商与模型",
         options: [
           ...models.map((model) => ({
             value: modelKey(model),
-            label: `${model.displayName}（${model.provider}）`,
+            label: `${model.displayName}（${managedProviderAccountFamilies.find(family => family.matches(model.provider))?.definition.displayName ?? model.provider}）`,
             hint: [
-              `Provider：${model.provider}`,
+              `影响账户：${model.providers.join("、")}`,
               `最大窗口：${model.maxContextWindow.toLocaleString()} tokens`,
               `当前窗口：${model.contextWindow.toLocaleString()} tokens`,
             ].filter(Boolean).join(" · "),

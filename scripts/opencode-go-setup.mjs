@@ -252,7 +252,7 @@ export async function removeOpencodeGoAccount(accountId, {
   const confirmationMessage = removesLastAccount
     ? preview.effects?.restoresInitialConfig === true
       ? `确认删除最后一个 OpenCode Go 账户 ${accountId}？将恢复安装前 Codex 主配置，历史 Thread 将不可恢复。`
-      : `确认删除最后一个 OpenCode Go 账户 ${accountId}？将删除该账户配置与模型目录，历史 Thread 将不可恢复。`
+      : `确认删除最后一个 OpenCode Go 账户 ${accountId}？将删除该账户配置，保留共享模型目录，历史 Thread 将不可恢复。`
     : `确认删除 OpenCode Go 账户 ${accountId}？历史 Thread 将不可恢复。`;
   if (confirm && !await confirmPrompt(prompts, confirmationMessage, false)) {
     output.write("已取消，未修改任何文件。\n");
@@ -267,7 +267,7 @@ export async function removeOpencodeGoAccount(accountId, {
   const cleanupSummary = removesLastAccount
     ? result.effects?.restoresInitialConfig === true
       ? "，主配置已恢复为安装前状态"
-      : "，账户配置与模型目录已清理"
+      : "，账户配置已清理，共享模型目录已保留"
     : "";
   output.write(
     `OpenCode Go 账户已删除：${accountId}${cleanupSummary}（备份保留在 ${result.backupDirectory}）。\n`,
@@ -410,7 +410,7 @@ function createPrompter(prompts, { accounts = [], allowBack, hasModelSettings, h
       );
       if (hasModelSettings) {
         options.push({ value: "model-settings", label: "修改模型设置（思考等级）" });
-        options.push({ value: "catalog", label: "发现／添加账户模型" });
+        options.push({ value: "catalog", label: "发现／添加共享模型" });
       }
       if (allowBack) options.push({ value: "back", label: "返回上一级" });
       const value = await prompts.select({ message: "OpenCode Go Provider", options });

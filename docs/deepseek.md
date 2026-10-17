@@ -1,7 +1,7 @@
 # DeepSeek 多账户
 
-DeepSeek 账户使用独立 API Key、Profile、模型目录和按需启动的 App Server。目录按精确的
-`ds-<账户>` 隔离，OCG、CCG 的目录及增量模型保持独立。官方 `deepseek-flash` 已指向 V4.1 Flash，
+DeepSeek 账户使用独立 API Key、Profile 和按需启动的 App Server，所有 DS 账户共用一份模型目录。
+OCG、CCG 的目录及增量模型保持独立。官方 `deepseek-flash` 已指向 V4.1 Flash，
 DS 不另造 `deepseek-v4.1-flash` 模型 ID。
 
 ## 配置与移除
@@ -30,10 +30,10 @@ codexc restart all                 # 应用配置变化
 | --- | --- |
 | `~/.codex-connect/providers/deepseek/accounts.json` | 账户 ID 与默认标记，不含凭据 |
 | `~/.codex/sf-ds-<账户>.config.toml` | 切换账户的模型、Provider 与私有 Key |
-| `~/.codex-connect/providers/deepseek/accounts/<账户>/managed.toml` | 账户运行模式 |
-| `~/.codex-connect/providers/deepseek/accounts/<账户>/backup/config.json` | 本次安装前的基础配置 |
-| `~/.codex-connect/providers/deepseek/accounts/<账户>/models.json` | 该账户的官方模型目录 |
-| `~/.codex-connect/providers/deepseek/accounts/<账户>/models.manifest.json` | 该账户的目录来源和更新时间 |
+| `~/.codex-connect/providers/ds-<账户>/managed.toml` | 账户运行模式 |
+| `~/.codex-connect/providers/ds-<账户>/backup/config.json` | 本次安装前的基础配置 |
+| `~/.codex-connect/providers/deepseek/models.json` | 所有 DS 账户共用的模型目录 |
+| `~/.codex-connect/providers/deepseek/models.manifest.json` | 共用目录来源和更新时间 |
 
 切换模式保留 OpenAI 主配置，每个账户使用独立私有 Profile；固定模式在确认后修改 Codex
 主配置，同一时刻只能有一个固定主 Provider。切换账户 Key 保存在私有 Profile（Unix `0600`，Windows 私有 ACL），固定账户使用独立私有版本与主配置 `env_key` 引用，仅进入目标
@@ -82,16 +82,16 @@ DS、OCG、CCG 仍通过官方脚本下载目录；显式创建或更新目录�
 ## 模型与设置
 
 DS 目录从官方安装脚本提取，不执行下载脚本。当前目录为 `deepseek-flash` 与
-`deepseek-v4-pro`；实际选项以下载目录为准。新增账户独立下载并生成自己的 DS 目录；
+`deepseek-v4-pro`；实际选项以下载目录为准。首次接入生成 DS 目录，新增账户复用已有目录；
 模型目录由 Setup 配置，更新器不刷新目录。
 已下线模型会切到目录默认模型，同时更新对应账户配置。
 导入 DS 模板到自定义提供商或 CLP 时，目录自带的提示词（`model_messages.instructions_template`）随模型定义携带；deprecated 的顶层 `base_instructions` 只是旧客户端镜像，不单独保留。
 
-通过账户菜单选择默认模型和思考等级，通过“模型上下文窗口”选择准确账户和模型设置窗口 Token 数。
+通过账户菜单选择默认模型和思考等级，通过“模型上下文窗口”选择提供商和模型设置窗口 Token 数。
 可选 128K、256K、384K、512K、1M 预设（仅显示不超过模型最大窗口的值），
 也可选择最大窗口或自定义输入 1024 至模型最大值之间的整数；K 为 1024，M 为 1048576。
-默认模型、思考等级、上下文和能力字段均按账户独立保存，同名模型不会跨账户或 Provider 联动。
-该账户的切换 Profile 同步其目录默认思考等级；原生角色独立保存自己的思考等级，目录更新不覆盖角色选择。
+账户独立选择默认模型；思考等级、上下文和能力字段按 DS 模型共用，修改一个模型会影响所有使用该模型的 DS 账户，不影响其他提供商。相关 Profile 的默认思考等级同步保持一致。
+选择该模型的切换 Profile 同步目录默认思考等级；原生角色独立保存自己的思考等级，目录更新不覆盖角色选择。
 压缩使用上游默认，不写入独立自动压缩阈值。
 
 DS 自动审查不再受本地审批模型白名单限制；模型仍须符合正常目录与路由要求。
@@ -145,8 +145,8 @@ DS 目录生成时明确设置 `support_verbosity: false`、`default_verbosity: 
 复用该账户的本地目录，不重新下载，不重置模型、思考等级或上下文设置；只更新所选账户，
 写入失败按现有配置事务恢复原文件；完成后重启 App Server 生效。启动、Doctor 和源码更新器不隐式改写目录。
 
-旧共享目录账户升级前须先停止整个 App Server，并在源码仓库根目录显式执行
-[账户目录拆分](provider-integration-guide.md#旧共享目录账户升级)，完成后再启动新版；升级不会自动迁移真实用户目录。
+旧嵌套或扁平账户目录升级前须先停止整个 App Server，并在源码仓库根目录显式执行
+[提供商模型目录合并](provider-integration-guide.md#旧共享目录账户升级)，完成后再启动新版；升级不会自动迁移真实用户目录。
 
 2026-09-26 隔离线上验证：`deepseek-flash`、`low` 思考等级连续 4 次 Responses 请求均成功，
 依次覆盖客户端 `tool_search`、检索结果回传与命名空间函数调用、固定工具结果回传、下一轮用户输入。

@@ -278,6 +278,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           blockedPaths: [
             `${responsesProviderCatalogPath(runtime.environment, upstreamProvider)}.pending`,
             responsesContextSyncPath(runtime.environment),
+            providerCatalogIsolationPath(runtime.environment),
           ],
         })
         : undefined;

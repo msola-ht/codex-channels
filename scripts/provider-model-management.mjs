@@ -39,12 +39,17 @@ export async function loadProviderModelCatalogs({ environment = process.env } = 
     const state = await readManagementState(environment, true);
     const catalogs = [];
     const definitions = loadManagedModelProviderDefinitions(environment);
+    const seenFamilies = new Set();
     for (const definition of definitions) {
       const member = state.managedProviders.find(provider => provider.id === definition.id);
       if (!member) continue;
+      if (seenFamilies.has(definition.storageId)) continue;
+      seenFamilies.add(definition.storageId);
+      const family = managedProviderAccountFamilies.find(entry => entry.storageId === definition.storageId);
+      const members = state.managedProviders.filter(provider => definitions.some(entry => entry.storageId === definition.storageId && entry.id === provider.id));
       const canRemove = definition.storageId !== "deepseek";
-      catalogs.push({ provider: definition.id, displayName: definition.displayName, providers: [definition.id],
-        models: member.models.map(model => ({ id: model.id, displayName: model.displayName, isDefault: member.model === model.id })), canRemove,
+      catalogs.push({ provider: definition.id, displayName: family.definition.displayName, providers: members.map(entry => entry.id),
+        models: member.models.map(model => ({ id: model.id, displayName: model.displayName, isDefault: members.some(entry => entry.model === model.id) })), canRemove,
         ...(!canRemove ? { unavailableReason: "deepseek-template-source" } : {}),
       });
     }
@@ -94,7 +99,7 @@ export async function loadProviderModelPrompts(input, { environment = process.en
   validateInput({ provider: input.provider, model: input.model });
   try {
     const { catalogs } = await loadProviderModelCatalogs({ environment });
-    const catalog = catalogs.find(entry => entry.provider === input.provider);
+    const catalog = catalogs.find(entry => entry.providers.includes(input.provider));
     if (!catalog) throw invalid("stale-preview", "provider", "提供商目录已变化，请刷新");
     const snapshot = readPresentationSnapshot(catalog, environment);
     if (snapshot.revision !== input.revision) throw invalid("stale-preview", "revision", "模型目录已变化，请刷新");
@@ -189,7 +194,7 @@ async function buildContextPlan(input, environment) {
   }
   validateInput({ provider: input.provider, model: input.model });
   const { catalogs } = await loadProviderModelCatalogs({ environment });
-  const catalog = catalogs.find(entry => entry.provider === input.provider);
+  const catalog = catalogs.find(entry => entry.providers.includes(input.provider));
   if (!catalog) throw invalid("stale-preview", "provider", "提供商目录已变化，请刷新");
   const snapshot = readPresentationSnapshot(catalog, environment);
   if (snapshot.revision !== input.revision) throw invalid("stale-preview", "revision", "模型目录已变化，请刷新");
@@ -206,7 +211,7 @@ async function buildContextPlan(input, environment) {
   }
   return { snapshot, preview: { operation: "model.context", provider: input.provider,
     model: { id: model.model, displayName: model.displayName, contextWindow: model.contextWindow, maxContextWindow: model.maxContextWindow },
-    contextWindow: input.contextWindow, providers: [input.provider], revision: snapshot.revision,
+    contextWindow: input.contextWindow, providers: catalog.providers, revision: snapshot.revision,
     willChange: model.contextWindow !== input.contextWindow, activation: "restart-app-server" } };
 }
 
@@ -250,7 +255,7 @@ async function buildRemovalPlan(input, environment) {
   const family = definition && managedProviderAccountFamilies.find(candidate => definition.storageId === candidate.storageId);
   if (!family && !isCustomCatalogProvider(input.provider)) throw invalid("removal-not-supported", "provider", "该提供商不支持本地模型移除");
   if (family?.proxyKey === "deepseek") throw invalid("removal-not-supported", "provider", "DeepSeek 暂不支持单模型移除");
-  const memberDefinitions = definition ? [definition] : [];
+  const memberDefinitions = definition ? definitions.filter(entry => entry.storageId === definition.storageId) : [];
   const configPath = join(codexHomePath(environment), "config.toml");
   const paths = [configPath, customSwitchingProviderRegistryPath(environment), primaryProviderBackupPath(environment), responsesContextSyncPath(environment), providerCatalogIsolationPath(environment),
     ...(family ? [family.accountsFilePath(environment)] : []),
@@ -281,9 +286,9 @@ async function buildRemovalPlan(input, environment) {
   let providers, displayName, defaults;
   if (family) {
     const members = state.managedProviders.filter(provider => memberDefinitions.some(definition => definition.id === provider.id));
-    if (members.length !== 1) throw invalid("provider-not-configured", "provider", "请先完成该账户配置");
+    if (!members.some(member => member.id === input.provider)) throw invalid("provider-not-configured", "provider", "请先完成该账户配置");
     providers = members.map(provider => provider.id);
-    displayName = definition.displayName;
+    displayName = family.definition.displayName;
     defaults = members.map(provider => provider.model);
     catalog = parseJson(requiredContent(snapshots, catalogPath));
     const manifest = parseJson(requiredContent(snapshots, manifestPath));

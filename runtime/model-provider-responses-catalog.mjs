@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { connectHomePath, providerStorageRoot } from "./connect-home.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
+import { assertProviderCatalogIsolationComplete } from "./provider-catalog-isolation.mjs";
 
 import { compileModelDefinitions, validateModelDefinitions as validateResponsesModels } from "./model-catalog.mjs";
 import { completeDefinitionPrompts } from "./model-template-catalog.mjs";
@@ -21,7 +22,7 @@ export function responsesProviderCatalogPath(environment, id) {
   if (!/^cp-[A-Za-z0-9_-]{1,61}$/u.test(id)) {
     throw new Error("自定义提供商 ID 必须为 cp- 加 1-61 位字母、数字、- 或 _");
   }
-  return join(providerStorageRoot(environment), "responses", id, "models.json");
+  return join(providerStorageRoot(environment), id, "models.json");
 }
 
 export function createResponsesModelCatalog(definitions, defaultModel, options) {
@@ -47,6 +48,7 @@ export function parseResponsesModelCatalog(content) {
 }
 
 export function readResponsesModelCatalog(environment, id) {
+  assertProviderCatalogIsolationComplete(environment);
   assertResponsesContextSyncComplete(environment);
   const path = responsesProviderCatalogPath(environment, id);
   if (existsSync(`${path}.pending`) && activeCatalogWrite.getStore() !== path) throw new Error(`自定义提供商 ${id} 上次保存未完成；请先恢复目录事务`);

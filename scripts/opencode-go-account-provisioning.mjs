@@ -221,7 +221,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       await replaceOptionalProviderFile(path, content, environment);
       guards = refreshProviderFileSnapshot(guards, path);
     }
-    const catalogContent = `${JSON.stringify(managedCatalog, null, 2)}\n`;
     if (archivedBaselinePath !== undefined) {
       const previousBaseline = await readOptionalProviderFile(exclusiveBaselinePath, environment);
       if (previousBaseline === undefined) throw new Error("OpenCode Go 固定账户恢复基线缺失");
@@ -232,18 +231,18 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       await writePrivateFileAtomic(exclusiveBaselinePath, stringify(initialConfig));
       guards = refreshProviderFileSnapshot(guards, exclusiveBaselinePath);
     }
-    await assertProviderFileSnapshots(guards);
-    await writePrivateFileAtomic(plan.paths.catalogPath, catalogContent);
-    guards = refreshProviderFileSnapshot(guards, plan.paths.catalogPath);
-    await assertProviderFileSnapshots(guards);
-    await replaceOptionalProviderFile(
-      plan.paths.manifestPath,
-      catalogState.manifest === undefined
-        ? undefined
-        : `${JSON.stringify(catalogState.manifest, null, 2)}\n`,
-      environment,
-    );
-    guards = refreshProviderFileSnapshot(guards, plan.paths.manifestPath);
+    if (plan.downloadsCatalog) {
+      await assertProviderFileSnapshots(guards);
+      await writePrivateFileAtomic(plan.paths.catalogPath, `${JSON.stringify(managedCatalog, null, 2)}\n`);
+      guards = refreshProviderFileSnapshot(guards, plan.paths.catalogPath);
+      await assertProviderFileSnapshots(guards);
+      await replaceOptionalProviderFile(
+        plan.paths.manifestPath,
+        `${JSON.stringify(catalogState.manifest, null, 2)}\n`,
+        environment,
+      );
+      guards = refreshProviderFileSnapshot(guards, plan.paths.manifestPath);
+    }
     await assertProviderFileSnapshots(guards);
     if (mode === "exclusive" || previousMode === "exclusive") {
       await replaceOptionalProviderFile(

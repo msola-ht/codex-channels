@@ -263,8 +263,6 @@ async function applyOpencodeGoAccountRemovalUnlocked(
       opencodeGoAccountsFilePath(environment),
       paths.profilePath,
       paths.markerPath,
-      paths.catalogPath,
-      paths.manifestPath,
     ];
     if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
     const snapshots = snapshotProviderFiles(transactionPaths, environment);
@@ -291,11 +289,6 @@ async function applyOpencodeGoAccountRemovalUnlocked(
       await assertProviderFileSnapshots(guards);
       if (existsSync(paths.markerPath)) unlinkSync(paths.markerPath);
       guards = refreshProviderFileSnapshot(guards, paths.markerPath);
-      for (const path of [paths.catalogPath, paths.manifestPath]) {
-        await assertProviderFileSnapshots(guards);
-        await removeOptionalProviderFile(path);
-        guards = refreshProviderFileSnapshot(guards, path);
-      }
     } catch (error) {
       try {
         await restoreProviderFileSnapshots(snapshots, guards);
@@ -445,7 +438,6 @@ async function buildRemovalPlan(
     removesLastAccount,
     mode,
     restoresInitialConfig: mode === "exclusive",
-    removesManagedCatalog: true,
     stop,
     paths,
   };
@@ -472,7 +464,6 @@ async function applyLastAccountRemovalFiles(
     paths.markerPath,
   ];
   if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
-  if (plan.removesManagedCatalog) transactionPaths.push(paths.catalogPath, paths.manifestPath);
   const snapshots = snapshotProviderFiles(transactionPaths, environment);
   let guards = snapshots;
   try {
@@ -498,14 +489,6 @@ async function applyLastAccountRemovalFiles(
     }
     guards = refreshProviderFileSnapshot(guards, paths.markerPath);
     await assertProviderFileSnapshots(guards);
-    if (plan.removesManagedCatalog) {
-      await removeOptionalProviderFile(paths.catalogPath);
-      guards = refreshProviderFileSnapshot(guards, paths.catalogPath);
-      await assertProviderFileSnapshots(guards);
-      await removeOptionalProviderFile(paths.manifestPath);
-      guards = refreshProviderFileSnapshot(guards, paths.manifestPath);
-      await assertProviderFileSnapshots(guards);
-    }
   } catch (error) {
     try {
       await restoreProviderFileSnapshots(snapshots, guards);
@@ -597,7 +580,6 @@ function publicRemovalPreview(plan) {
   };
   if (plan.removesLastAccount) {
     effects.removesLastAccount = true;
-    effects.removesManagedCatalog = true;
   }
   if (plan.restoresInitialConfig) effects.restoresInitialConfig = true;
   return {

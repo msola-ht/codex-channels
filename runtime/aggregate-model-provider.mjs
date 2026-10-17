@@ -12,6 +12,7 @@ import { loadConfiguredCustomSwitchingModelProviders, loadCustomSwitchingProvide
 import { customOfficialModelCatalogPath } from "./model-provider-official-catalog.mjs";
 import { isCustomCatalogProvider, responsesProviderCatalogPath, responsesContextSyncPath,
   assertResponsesContextSyncComplete } from "./model-provider-responses-catalog.mjs";
+import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 
 export const aggregateProviderId = "codexc-aggregate";
 export const aggregateTokenEnvironmentKey = "CODEX_CONNECT_AGGREGATE_TOKEN";
@@ -33,6 +34,7 @@ export function aggregateProviderMaterialFiles(environment, expectedMembers) {
       .map((family) => [family.accountsFilePath(environment), 1_048_576]),
     [customSwitchingProviderRegistryPath(environment), 262_144],
     [responsesContextSyncPath(environment), 1_048_576],
+    [providerCatalogIsolationPath(environment), 16 * 1024 * 1024],
   ]);
   const definitions = loadManagedModelProviderDefinitions(environment);
   const customIds = loadCustomSwitchingProviderIds(environment);

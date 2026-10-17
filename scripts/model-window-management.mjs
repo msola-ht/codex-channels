@@ -107,7 +107,7 @@ function publicPreview(plan) {
     },
     windowPercent: plan.windowPercent,
     contextWindow: plan.contextWindow,
-    providers: [plan.model.provider],
+    providers: plan.model.providers,
     willChange: plan.willChange,
     activation: "restart-app-server",
   };

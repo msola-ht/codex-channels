@@ -121,17 +121,12 @@ export function validateOpencodeGoAccountId(accountId) {
   return accountId;
 }
 
-export function opencodeGoAccountsDirectory(environment = process.env) {
-  return join(providerStorageRoot(environment), "opencode-go", "accounts");
-}
-
 export function opencodeGoAccountsFilePath(environment = process.env) {
   return join(providerStorageRoot(environment), "opencode-go", "accounts.json");
 }
 
 export function opencodeGoAccountDirectory(environment, accountId) {
-  validateOpencodeGoAccountId(accountId);
-  return join(opencodeGoAccountsDirectory(environment), accountId);
+  return join(providerStorageRoot(environment), opencodeGoProviderId(accountId));
 }
 
 export function opencodeGoAccountMarkerPath(environment, accountId) {

@@ -71,19 +71,27 @@ export function createClinePassCatalog(templates, source, enabledModels) {
     const template = matches[0];
     if (template.reasoningEfforts.some(effort => !["none", "low", "high", "max"].includes(effort))) throw new Error("DS 模板包含 CLP 未支持的思考等级");
     const flash = {
+      ...template,
       id: definition.defaultModel, name: "CLP DeepSeek V4.1 Flash",
-      contextWindow: template.contextWindow, maxContextWindow: template.maxContextWindow,
       reasoningEfforts: [...new Set(["none", ...template.reasoningEfforts])],
-      defaultReasoningEffort: template.defaultReasoningEffort, supportsImages: template.supportsImages,
+      // Chat image parts accept auto/low/high, never Responses' original detail.
+      supportsImageDetailOriginal: false,
+      supportsVerbosity: true, defaultVerbosity: "medium",
       applyPatchToolType: "freeform",
-      ...(template.instructions === undefined ? {} : {instructions: template.instructions}),
-      ...(template.modelMessages === undefined ? {} : { modelMessages: template.modelMessages }),
       supportsSearchTool: true,
     };
+    // Managed CLP binds the projected composite in its manifest, not the DS definition.
+    delete flash.template;
     models[models.findIndex(model => model.id === flash.id)] = flash;
   }
   const defaultModel = models.find(model => model.id === definition.defaultModel)?.id ?? models[0]?.id;
-  return { models: createResponsesModelCatalog(models, defaultModel, { allowReasoningToggle: true }).models };
+  const catalog = createResponsesModelCatalog(models, defaultModel, { allowReasoningToggle: true });
+  return { models: catalog.models.map(model => model.slug === definition.defaultModel ? { ...model,
+    service_tiers: [
+      { id: "priority", name: "Priority", description: "Forward priority to CLP; upstream acceptance does not guarantee faster processing." },
+      { id: "flex", name: "Flex", description: "Forward flex to CLP; upstream acceptance does not guarantee different pricing or latency." },
+    ],
+  } : model) };
 }
 
 async function selectClinePassModels(models, providers, selectModels) {
@@ -179,7 +187,7 @@ function clinePassManifest(source, catalog) {
   modelTemplates: Object.fromEntries(catalog.models.map(model => [model.slug, { source: "cline", model: model.slug }])) };
 }
 
-/** Discover additions for one account without rebuilding saved model rows. */
+/** Discover additions for the shared CLP catalog without rebuilding saved model rows. */
 export async function refreshClinePassCatalog({ provider, accountId, environment = process.env, loadTemplates = loadResponsesModelTemplates, downloadClineCatalog = downloadClineRelayCatalog, selectModels } = {}) {
   return withModelProviderManagementTransaction(environment, async () => {
     const accounts = loadClinePassAccounts(environment);
@@ -192,8 +200,11 @@ export async function refreshClinePassCatalog({ provider, accountId, environment
     const snapshots = snapshotProviderFiles([
       ...Object.values(paths), ...backups,
     ], environment);
-    const providers = loadManagedModelProviderSettings(environment).filter(entry => entry.provider === targetDefinition.id);
-    if (providers.length !== 1) throw new Error("CLP 账户配置不完整，未更新模型目录");
+    const providers = loadManagedModelProviderSettings(environment)
+      .filter(entry => clinePassAccountIdFromProvider(entry.provider) !== undefined);
+    if (providers.length !== accounts.length || !providers.some(entry => entry.provider === targetDefinition.id)) {
+      throw new Error("CLP 账户配置不完整，未更新模型目录");
+    }
     const previousCatalog = snapshots.find(snapshot => snapshot.path === paths.catalog)?.content;
     const previousManifest = snapshots.find(snapshot => snapshot.path === paths.manifest)?.content;
     if (!previousCatalog || !previousManifest) throw new Error("CLP 原模型目录或来源缺失，未更新");
@@ -255,8 +266,6 @@ function clinePassRemovalPlan(accountId, environment) {
   const content = key => snapshots.find(item => item.path === paths[key]).content?.toString("utf8");
   const updates = new Map([paths.profile, paths.marker].map(path => [path, undefined]));
   updates.set(paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`);
-  updates.set(paths.catalog, undefined);
-  updates.set(paths.manifest, undefined);
   if (previous.mode === "exclusive") {
     if (content("backup") === undefined) throw new AccountManagementError("backup-unavailable", "accountId", "CLP 初始备份缺失");
     const backup = parsePrivateBackup(content("backup"));

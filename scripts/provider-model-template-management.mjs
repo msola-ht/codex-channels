@@ -149,7 +149,7 @@ function environmentScope(environment) {
 async function readTargetState(provider, environment) {
   if (typeof provider !== "string" || !provider || provider.length > 200) throw invalid("invalid-input", "provider", "请选择准确提供商账户");
   const { catalogs } = await loadProviderModelCatalogs({ environment });
-  const visible = catalogs.find(entry => entry.provider === provider);
+  const visible = catalogs.find(entry => entry.providers.includes(provider));
   if (!visible) throw invalid("provider-not-configured", "provider", "提供商账户不存在或无法读取");
   const scope = environmentScope(environment);
   if (provider.startsWith("cp-")) {
@@ -169,11 +169,12 @@ async function readTargetState(provider, environment) {
   const family = managedProviderAccountFamilies.find(entry => entry.storageId === definition?.storageId);
   if (!definition || !family) throw invalid("template-unavailable", "provider", "该提供商不支持账户模板更新");
   const directory = managedProviderDirectory(environment, definition);
+  const members = loadManagedModelProviderDefinitions(environment).filter(entry => entry.storageId === definition.storageId);
   const catalogPath = join(directory, definition.catalogFileName);
   const manifestPath = join(directory, definition.catalogManifestFileName);
   const snapshots = snapshotProviderFiles([catalogPath, manifestPath, `${catalogPath}.backup`, `${manifestPath}.backup`,
     `${catalogPath}.settings-pending`, join(codexHomePath(environment), "config.toml"),
-    join(codexHomePath(environment), definition.profileFileName), managedProviderMarkerPath(environment, definition),
+    ...members.flatMap(entry => [join(codexHomePath(environment), entry.profileFileName), managedProviderMarkerPath(environment, entry)]),
     family.accountsFilePath(environment)], environment);
   let catalog, manifest;
   try { catalog = JSON.parse(snapshotContent(snapshots, catalogPath)); manifest = JSON.parse(snapshotContent(snapshots, manifestPath)); }
@@ -287,6 +288,10 @@ async function buildManagedPlan(input, source, sections, state, environment) {
   const { catalog, manifest, catalogPath, manifestPath } = state;
   const before = catalog.models.find(entry => entry.slug === input.model);
   const after = selectedFields(before, source.template, "managed", sections);
+  if (state.family === "clp" && sections.includes("capabilities")) {
+    if (Object.hasOwn(source.template, "service_tiers")) after.service_tiers = structuredClone(source.template.service_tiers);
+    else delete after.service_tiers;
+  }
   if (after.context_window > (after.max_context_window ?? after.context_window)
     || (after.supported_reasoning_levels?.length === 0 ? after.default_reasoning_level !== null
       : !after.supported_reasoning_levels?.some(level => level.effort === after.default_reasoning_level))) {

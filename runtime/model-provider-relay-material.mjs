@@ -15,6 +15,7 @@ import { customProviderUpstreamMetadataPath, readCustomProviderUpstreamWireApi }
 import { isCustomCatalogProvider, readResponsesModelCatalog, responsesProviderCatalogPath,
   assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { readPrivateFileSync } from "./private-file.mjs";
+import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 
 /** Registration is distinct from credential availability, including metrics settlement. */
 export function listRelayProviderIds(environment = process.env) {
@@ -85,5 +86,5 @@ function loadBaseRelayProviderMaterial(provider, environment) {
     ...(isCustomCatalogProvider(provider) ? { modelSampling: Object.fromEntries(catalog.definitions
       .filter(model => model.sampling !== undefined).map(model => [model.id, model.sampling])) } : {}),
     protocols: upstreamWireApi === "chat_completions" ? ["chat"] : ["responses"],
-    paths: [...paths, responsesContextSyncPath(environment)], revision };
+    paths: [...paths, responsesContextSyncPath(environment), providerCatalogIsolationPath(environment)], revision };
 }

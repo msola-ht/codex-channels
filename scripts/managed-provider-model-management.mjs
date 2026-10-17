@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import * as clackPrompts from "@clack/prompts";
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { loadManagedModelProviderDefinitions, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
+import { loadManagedModelProviderDefinitions, isManagedProviderModelValid, managedProviderAccountFamilyForDefinition } from "../runtime/model-provider-definitions.mjs";
 import { ccgAccountsFilePath } from "../runtime/ccg-accounts.mjs";
 import { opencodeGoAccountsFilePath } from "../runtime/opencode-go-accounts.mjs";
 import { managedProviderDirectory, managedProviderMarkerPath, loadManagedModelProviderSettings, withManagedModelCatalogSettings, withPreservedManagedModelCatalogSettings, writeManagedModelProviderCatalogUpdates } from "../runtime/model-provider-runtime.mjs";
@@ -29,9 +29,9 @@ export async function updateManagedProviderModels(provider, { environment = proc
   const definition = definitionFor(provider, environment);
   if (typeof editCatalog !== "function") throw new Error("缺少模型目录编辑操作");
   return withModelProviderManagementTransaction(environment, async () => {
-    const definitions = [definition];
-    const providers = loadManagedModelProviderSettings(environment).filter(entry => entry.provider === provider);
-    if (providers.length !== 1) throw new Error("请先完成该账户配置，再管理模型目录");
+    const definitions = loadManagedModelProviderDefinitions(environment).filter(entry => entry.storageId === definition.storageId);
+    const providers = loadManagedModelProviderSettings(environment).filter(entry => definitions.some(definition => definition.id === entry.provider));
+    if (!providers.some(entry => entry.provider === provider)) throw new Error("请先完成该账户配置，再管理模型目录");
     const directory = managedProviderDirectory(environment, definition);
     const catalogPath = join(directory, definition.catalogFileName);
     const manifestPath = join(directory, definition.catalogManifestFileName);
@@ -95,12 +95,12 @@ export async function runManagedProviderModelSetup(provider, { environment = pro
     const storageId = provider === "ccg" ? "ccg" : "opencode-go";
     const accounts = loadManagedModelProviderDefinitions(environment).filter(entry => entry.storageId === storageId);
     if (!accounts.length) throw new Error("请先配置账户");
-    provider = await prompts.select({ message: "选择模型目录所属账户", options: accounts.map(entry => ({ value: entry.id, label: entry.displayName })) });
-    if (prompts.isCancel(provider)) return { action: "back", activation: "none" };
+    provider = accounts[0].id;
   }
   const definition = definitionFor(provider, environment);
+  const displayName = managedProviderAccountFamilyForDefinition(definition).definition.displayName;
   const result = await updateManagedProviderModels(provider, { environment, editCatalog: async ({ catalog, templateBindings, requiredModels }) => {
-    const action = await prompts.select({ message: `${definition.displayName} 模型目录`, options: [
+    const action = await prompts.select({ message: `${displayName} 模型目录`, options: [
       { value: "select", label: "查看启用模型", hint: "移除请使用统一模型管理入口" },
       { value: "add", label: "添加第三方 Responses 模型", hint: "按上游说明填写准确 ID 和能力" },
       { value: "templates", label: "发现／导入 DS 新模型", hint: "只添加选中的新模型，已有模型使用统一模板更新" },
@@ -123,7 +123,7 @@ export async function runManagedProviderModelSetup(provider, { environment = pro
       catalog.models.push(...discovered.catalog.models.filter(model => !previousIds.includes(model.slug)));
     } else if (action !== "select") throw new Error("未知模型目录操作");
     const enabled = await promptEnabledProviderModels(prompts, output, {
-      label: definition.displayName,
+      label: displayName,
       models: catalog.models.map(entry => ({ id: entry.slug, name: entry.display_name, reasoningEffort: entry.default_reasoning_level })),
       enabledModels: action === "add" ? catalog.models.map(entry => entry.slug) : previousIds,
       requiredModels,
@@ -143,7 +143,7 @@ export async function runManagedProviderModelSetup(provider, { environment = pro
   } });
   if (result.action === "unchanged") output.write("模型目录没有变化，无需保存或重启。\n");
   if (result.action === "catalog-updated") {
-    output.write(`${definition.displayName} 已保存 ${result.models.length} 个启用模型，并备份原目录。\n`);
+    output.write(`${displayName} 已保存 ${result.models.length} 个启用模型，并备份原目录。\n`);
     writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   }
   return result;

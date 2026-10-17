@@ -84,16 +84,17 @@ export async function runProviderModelSetup({ environment = process.env, prompts
   if (!catalogs.length) { output.write("尚未配置第三方模型，请先完成提供商接入。\n"); return { action: "back" }; }
   const requestedFamily = managedProviderAccountFamilies.find(entry => entry.proxyKey === provider);
   const choices = requestedFamily ? catalogs.filter(entry => requestedFamily.matches(entry.provider)) : catalogs;
-  const selected = provider !== undefined && !requestedFamily ? provider : await prompts.select({ message: "选择模型目录所属提供商账户", options: [
+  const selected = provider !== undefined && !requestedFamily ? provider : await prompts.select({ message: "选择模型目录所属提供商", options: [
     ...choices.map(entry => ({ value: entry.provider, label: entry.displayName, hint: entry.providers.join("、") })),
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
-  const catalog = catalogs.find(entry => entry.provider === selected);
+  const catalog = catalogs.find(entry => entry.providers.includes(selected));
   if (!catalog) throw new Error("提供商目录已变化，请重新打开模型管理");
   output.write(`${catalog.displayName}：${catalog.providers.join("、")}\n${catalog.models.map(entry => `  ${entry.id}${entry.isDefault ? "（账户默认）" : ""}`).join("\n")}\n`);
   const custom = catalog.provider.startsWith("cp-");
   const family = managedProviderAccountFamilies.find(entry => entry.matches(catalog.provider))?.proxyKey;
+  if (family) output.write("同一受管提供商的账户共用这份模型目录；修改当前模型会对这些账户生效。\n");
   if (!catalog.canRemove) output.write(catalog.unavailableReason === "deepseek-template-source"
     ? "DeepSeek 暂不支持单模型移除。\n"
     : "官方共享目录不支持按接入裁剪；默认设置使用既有提供商设置入口。\n");
