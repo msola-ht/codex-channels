@@ -17,6 +17,7 @@ import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import { createCcgCatalogWithTemplateBindings, createOpencodeGoCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
+import { promptContextWindow } from "./responses-model-setup.mjs";
 
 function definitionFor(provider, environment) {
   const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === provider);
@@ -156,8 +157,8 @@ async function promptAdditionalModel(prompts, definition, existing) {
   if (prompts.isCancel(id)) return undefined;
   const name = await prompts.text({ message: "显示名称", initialValue: id });
   if (prompts.isCancel(name)) return undefined;
-  const window = await prompts.text({ message: "上下文窗口（Token，按上游说明填写）", validate: value => Number.isSafeInteger(Number(value)) && Number(value) >= 1024 && Number(value) <= 100_000_000 ? undefined : "请输入 1024–100000000 的整数" });
-  if (prompts.isCancel(window)) return undefined;
+  const window = await promptContextWindow(prompts, id, undefined, 100_000_000);
+  if (window === undefined) return undefined;
   const efforts = await prompts.multiselect({ message: "支持的思考等级（不支持思考时仅选 none）", options: ["none", "minimal", "low", "medium", "high", "xhigh", "max"].map(value => ({ value, label: value })), required: true });
   if (prompts.isCancel(efforts)) return undefined;
   if (!Array.isArray(efforts) || !efforts.length) throw new Error("至少选择一个思考等级");

@@ -56,7 +56,7 @@ export function useOpenAiModelCatalog() {
     if (locked || draft !== null || !model.editable || management.data === null) return
     management.clearError()
     const value = model.contextWindow === null ? "" : String(model.contextWindow)
-    const preset = contextWindowPreset(model.contextWindow, model.maxContextWindow)
+    const preset = contextWindowPreset(model.contextWindow, model.maxContextWindow, "openai")
     setDraft({ revision: management.data.revision, scope: management.data.scope, model: model.model, displayName: model.displayName, previousContextWindow: model.contextWindow, maxContextWindow: model.maxContextWindow, value, preset })
   }
   const changePreset = (preset: ContextWindowPreset) => {

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { parse } from "smol-toml";
 import { codexHomePath } from "./codex-home.mjs";
-import { loadManagedProviderProfiles, managedProviderDirectory, managedProviderMarkerPath, readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
+import { loadManagedProviderProfiles, managedProviderDirectory, managedProviderMarkerPath, readManagedMarker, readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
 import { loadManagedModelProviderDefinitions, managedProviderAccountFamilies } from "./model-provider-definitions.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 import { loadConfiguredCustomSwitchingModelProviders, loadCustomSwitchingProviderIds,
@@ -16,6 +16,13 @@ import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 
 export const aggregateProviderId = "codexc-aggregate";
 export const aggregateTokenEnvironmentKey = "CODEX_CONNECT_AGGREGATE_TOKEN";
+
+export class AggregateProviderTopologyChangedError extends Error {
+  constructor() {
+    super("聚合账户拓扑已变化，需要显式重启 App Server 和 Gateway 服务");
+    this.code = "PROVIDER_TOPOLOGY_CHANGED";
+  }
+}
 
 // This is a derived, on-demand instance, not another account or persisted selection.
 export function aggregateProviderMembers(primaryProvider, providers) {
@@ -38,6 +45,11 @@ export function aggregateProviderMaterialFiles(environment, expectedMembers) {
   ]);
   const definitions = loadManagedModelProviderDefinitions(environment);
   const customIds = loadCustomSwitchingProviderIds(environment);
+  const currentMembers = [
+    ...definitions.filter(definition => readManagedMarker(environment, definition)?.mode === "switching").map(definition => definition.id),
+    ...customIds,
+  ];
+  if (JSON.stringify(currentMembers) !== JSON.stringify(expectedMembers)) throw new AggregateProviderTopologyChangedError();
   for (const id of expectedMembers) {
     const definition = definitions.find(entry => entry.id === id);
     if (definition) {
@@ -51,7 +63,7 @@ export function aggregateProviderMaterialFiles(environment, expectedMembers) {
       paths.set(catalogPath, isCustomCatalogProvider(id) ? 2_097_152 : 8_388_608);
       if (isCustomCatalogProvider(id)) paths.set(`${catalogPath}.pending`, 1_048_576);
     } else {
-      throw new Error("聚合账户拓扑已变化，需要显式重启 App Server 服务");
+      throw new AggregateProviderTopologyChangedError();
     }
   }
   return [...paths].map(([path, maximumBytes]) => ({ path, maximumBytes }));
@@ -112,7 +124,7 @@ export function loadAggregateModelMaterial(environment, expectedMembers) {
     })),
   ];
   if (JSON.stringify(aggregateProviderMembers("openai", configuredProfiles)) !== JSON.stringify(expectedMembers)) {
-    throw new Error("聚合账户拓扑已变化，需要显式重启 App Server 服务");
+    throw new AggregateProviderTopologyChangedError();
   }
   const profiles = configuredProfiles.filter(entry => expectedMembers.includes(entry.provider));
   if (profiles.length !== expectedMembers.length || profiles.length < 2) {

@@ -1,5 +1,8 @@
 export const aggregateProviderId: "codexc-aggregate";
 export const aggregateTokenEnvironmentKey: "CODEX_CONNECT_AGGREGATE_TOKEN";
+export class AggregateProviderTopologyChangedError extends Error {
+  readonly code: "PROVIDER_TOPOLOGY_CHANGED";
+}
 /** The same eligibility rule for service topology, Gateway and native Remote. */
 export function aggregateProviderMembers(
   primaryProvider: string,

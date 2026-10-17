@@ -2,12 +2,22 @@
 // Provider files and credentials belong to the runtime persistence owners.
 import { completeModelMessages } from "./model-template-prompts.mjs";
 export const contextWindowPresetTokens = Object.freeze([131072, 262144, 393216, 524288, 1048576]);
+export const openAiContextWindowPresetTokens = Object.freeze([272000, 372000, 500000]);
+export function contextWindowPresetLabel(tokens) {
+  return tokens === 1048576 ? "1M" : `${tokens / 1024}K`;
+}
 const efforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const verbosityLevels = new Set(["low", "medium", "high"]);
 const reasoningSummaries = new Set(["auto", "concise", "detailed", "none"]);
 const controlFree = (text) => !Array.from(text).some((character) => { const code = character.codePointAt(0); return (code < 32 && code !== 9 && code !== 10) || code === 127; });
 const descriptionControlFree = (text) => !/\p{Cc}/u.test(text.replace(/[\t\n]/gu, ""));
 const instructions = "You are a coding assistant. Follow the user's instructions, inspect the workspace before making changes, use the available tools when needed, and report results accurately. Respect tool permissions and do not claim actions succeeded without evidence.";
+
+// Project-owned starting values, independent of upstream model templates.
+export const customModelSamplingDefaults = Object.freeze({
+  temperature: 1, top_p: 0.95, top_k: 20, min_p: 0,
+  presence_penalty: 0, repetition_penalty: 1,
+});
 
 export function validateSamplingParameters(value) {
   if (value === undefined) return undefined;

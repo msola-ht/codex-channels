@@ -1,8 +1,8 @@
-import { contextWindowPresetTokens, validateModelDefinitions as validateResponsesModels, validateSamplingParameters } from "../runtime/model-catalog.mjs";
+import { contextWindowPresetTokens, contextWindowPresetLabel, customModelSamplingDefaults, validateModelDefinitions as validateResponsesModels, validateSamplingParameters } from "../runtime/model-catalog.mjs";
 import { loadCustomModelDraftTemplates } from "./responses-model-templates.mjs";
 
 const contextWindowPresets = contextWindowPresetTokens.map(tokens => ({
-  value: String(tokens), label: `${tokens === 1048576 ? "1M" : `${tokens / 1024}K`}（${tokens} Token）`,
+  value: String(tokens), label: `${contextWindowPresetLabel(tokens)}（${tokens} Token）`,
 }));
 
 const advancedSettingGroups = [
@@ -50,6 +50,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       const template = templates[selected];
       if (template === undefined) throw new Error("模型起点模板选择无效");
       model = structuredClone(template.draft);
+      output.write(`默认采样参数：${JSON.stringify(model.sampling ?? {})}；保存后自动补齐请求中未指定的参数，可在高级设置修改或清空。\n`);
       const suggested = template.suggested;
       output.write(`已带入模板提示词及运行设置：有效上下文比例 ${model.effectiveContextWindowPercent ?? 95}%；自动压缩阈值 ${model.autoCompactTokenLimit ?? "Codex 默认"}；截断策略 ${model.truncationPolicy === undefined ? "项目默认" : `${model.truncationPolicy.mode} ${model.truncationPolicy.limit}`}。可在高级设置中修改。\n`);
       output.write(`模板参考：${template.displayName}；上下文 ${suggested.contextWindow} Token；思考 ${suggested.reasoningEfforts?.join("/") || "未声明"}；图片 ${capabilityLabel(suggested.supportsImages)}；apply_patch ${capabilityLabel(suggested.applyPatchToolType === undefined ? undefined : suggested.applyPatchToolType === "freeform")}；tool_search ${capabilityLabel(suggested.supportsSearchTool)}。请按上游平台说明逐项确认，未知暂不启用。\n`);
@@ -161,11 +162,20 @@ async function promptCapability(prompts, message, current) {
 }
 
 async function promptSamplingParameters(prompts, model) {
+  const mode = await prompts.select({ message: `${model.id} 默认采样参数`, options: [
+    { value: "edit", label: "编辑当前值" },
+    { value: "template", label: "恢复固定采样模板后编辑" },
+    { value: "upstream", label: "全部清空，使用上游默认值" },
+  ], initialValue: "edit" });
+  if (prompts.isCancel(mode)) return undefined;
+  if (mode === "upstream") { delete model.sampling; return model; }
+  if (!["edit", "template"].includes(mode)) throw new Error("采样设置选项无效");
+  const initial = mode === "template" ? customModelSamplingDefaults : model.sampling;
   const sampling = {};
   for (const key of ["temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty"]) {
     const value = await prompts.text({
       message: `${model.id} ${key}（留空使用上游默认值）`,
-      initialValue: model.sampling?.[key] === undefined ? "" : String(model.sampling[key]),
+      initialValue: initial?.[key] === undefined ? "" : String(initial[key]),
       validate: value => {
         if (String(value).trim() === "") return undefined;
         try { validateSamplingParameters({[key]: Number(value)}); } catch (error) { return error.message; }

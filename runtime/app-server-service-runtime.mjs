@@ -476,7 +476,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       throw new Error("Provider 设置在读取期间发生变化");
     }
     if (JSON.stringify(next.topology) !== JSON.stringify(appServerRuntime.topology)) {
-      throw new Error("App Server 拓扑已变化，需要显式重启服务");
+      throw Object.assign(new Error("App Server 拓扑已变化，需要显式重启服务"), { code: "PROVIDER_TOPOLOGY_CHANGED" });
     }
     const managed = managedByProvider.get(provider);
     const material = next.managedProviders.find(value => value.provider === provider);

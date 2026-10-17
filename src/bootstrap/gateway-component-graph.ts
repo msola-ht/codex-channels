@@ -1602,6 +1602,7 @@ export abstract class GatewayComponentGraph {
       | "provider-settings-scheduled"
       | "provider-settings-restarting"
       | "provider-settings-applied"
+      | "provider-settings-restart-required"
       | "provider-settings-failed",
     providers: readonly string[],
   ): void {

@@ -8,6 +8,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { ManagedSelect } from "@/components/settings/settings-controls"
 import { useTranslation } from "@/hooks/use-translation"
 import type { ManagementProviderSettingsResponse } from "@/lib/types"
+import { customModelSamplingDefaults, type SamplingParameters } from "../../../../runtime/model-catalog.mjs"
+
+const samplingKeys = Object.keys(customModelSamplingDefaults) as (keyof SamplingParameters)[]
 
 type CustomModel = NonNullable<ManagementProviderSettingsResponse["customProviders"]["fixedCandidates"][number]["models"]>[number]
 export type CustomModelDraft = Omit<CustomModel, "contextWindow"> & { contextWindow?: number; probeConnection?: Partial<Record<"applyPatch" | "toolSearch", string>> }
@@ -26,6 +29,15 @@ export function CustomModelDetails({ entry, index, disabled, upstreamWireApi, pa
   const contextWindow = entry.contextWindow
   const compactMaximum = contextWindow === undefined ? undefined : Math.floor(contextWindow * 9 / 10)
   return <Collapsible><CollapsibleTrigger render={<Button variant="outline" />} disabled={disabled}>{t("customModel.advanced")}</CollapsibleTrigger><CollapsibleContent className="pt-3"><FieldGroup>
+    <FieldSet><FieldLegend>{t("customModel.sampling")}</FieldLegend><FieldDescription>{t("customModel.samplingHint")}</FieldDescription>
+      <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={disabled} onClick={() => patch({ sampling: { ...customModelSamplingDefaults } })}>{t("customModel.samplingRestore")}</Button><Button variant="outline" disabled={disabled} onClick={() => patch({ sampling: undefined })}>{t("customModel.samplingClear")}</Button></div>
+      <FieldGroup>{samplingKeys.map(key => <Field key={key} data-disabled={disabled}><FieldLabel htmlFor={id(key)}>{key}</FieldLabel><Input id={id(key)} type="number" step={key === "top_k" ? 1 : "any"} value={entry.sampling?.[key] ?? ""} placeholder={t("customModel.samplingUpstream")} disabled={disabled} onChange={event => {
+        const sampling = { ...entry.sampling }
+        if (event.target.value === "") delete sampling[key]
+        else sampling[key] = Number(event.target.value)
+        patch({ sampling: Object.keys(sampling).length ? sampling : undefined })
+      }} /></Field>)}</FieldGroup>
+    </FieldSet>
     <Field data-disabled={disabled}><FieldLabel htmlFor={id("description")}>{t("customModel.description")}</FieldLabel><Textarea id={id("description")} value={entry.description ?? ""} maxLength={4000} disabled={disabled} onChange={event => patch({ description: event.target.value === "" ? undefined : event.target.value })} /></Field>
     <Field data-disabled={disabled}><FieldLabel htmlFor={id("max-context")}>{t("customModel.maxContext")}</FieldLabel><Input id={id("max-context")} type="number" min={entry.contextWindow || 1024} max={100000000} value={entry.maxContextWindow ?? ""} disabled={disabled} placeholder={t("customModel.defaultValue")} onChange={event => patch({ maxContextWindow: optionalNumber(event.target.value) })} /><FieldDescription>{t("customModel.maxContextHint")}</FieldDescription></Field>
     {(entry.reasoningEfforts?.length ?? 0) > 0 ? <FieldSet><FieldLegend>{t("customModel.reasoningDescriptions")}</FieldLegend><FieldGroup>{entry.reasoningEfforts?.map((effort, position) => <Field key={`${effort}-${position}`} data-disabled={disabled}><FieldLabel htmlFor={id(`reasoning-${position}`)}>{t("customModel.reasoningDescription", { effort })}</FieldLabel><Input id={id(`reasoning-${position}`)} value={entry.reasoningDescriptions?.[effort] ?? ""} maxLength={2000} disabled={disabled} onChange={event => { const descriptions = { ...entry.reasoningDescriptions }; if (event.target.value === "") delete descriptions[effort]; else descriptions[effort] = event.target.value; patch({ reasoningDescriptions: Object.keys(descriptions).length === 0 ? undefined : descriptions }) }} /></Field>)}</FieldGroup></FieldSet> : null}
@@ -64,6 +76,7 @@ export function CustomModelDetailsPreview({ entry }: { entry: CustomModel }) {
     <p>{t("customModel.supportsSummary")}: {capability(entry.supportsReasoningSummary)}; {t("customModel.defaultSummary")}: {entry.defaultReasoningSummary ?? t("customModel.unset")}</p>
     {entry.reasoningEfforts?.map(effort => <p key={effort}>{t("customModel.reasoningDescription", { effort })}: {entry.reasoningDescriptions?.[effort] ?? t("customModel.defaultValue")}</p>)}
     <p>{t("customModel.effectivePercent")}: {entry.effectiveContextWindowPercent ?? 95}%</p>
+    <p>{t("customModel.sampling")}: {entry.sampling ? JSON.stringify(entry.sampling) : t("customModel.samplingUpstream")}</p>
     <p>{t("customModel.autoCompact")}: {entry.autoCompactTokenLimit ?? t("customModel.defaultValue")}</p>
     <p>{t("customModel.truncation")}: {entry.truncationPolicy ? `${entry.truncationPolicy.mode}: ${entry.truncationPolicy.limit}` : t("customModel.truncationDefault", { limit: Math.min(10000, Math.floor(entry.contextWindow / 4)) })}</p>
     <Field><FieldLabel>{t("customModel.instructions")}</FieldLabel><pre className="whitespace-pre-wrap break-words">{typeof instructions === "string" ? instructions : t("customModel.instructionsDefault")}</pre></Field>

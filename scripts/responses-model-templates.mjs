@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { customModelSamplingDefaults } from "../runtime/model-catalog.mjs";
 import { readCustomBaseModelCatalog, completeCatalogPrompts } from "../runtime/model-template-catalog.mjs";
 import { modelDefinitionsFromCatalog as responsesModelTemplatesFromCatalog } from "../runtime/model-catalog.mjs";
 export { modelDefinitionsFromCatalog as responsesModelTemplatesFromCatalog } from "../runtime/model-catalog.mjs";
@@ -13,7 +14,8 @@ export async function loadResponsesModelTemplates(source) {
 }
 
 // A template is a starting point, not evidence about an arbitrary upstream.
-// Copy prompts, their source and reusable context-management settings. Model
+// Copy prompts, their source and reusable context-management settings, plus
+// the project's fixed sampling defaults. Model
 // context and capabilities remain references until declared for the upstream.
 export async function loadCustomModelDraftTemplates() {
   const templates = [];
@@ -23,6 +25,7 @@ export async function loadCustomModelDraftTemplates() {
         id: suggested.id,
         name: suggested.name,
         defaultReasoningEffort: null,
+        sampling: { ...customModelSamplingDefaults },
         ...(suggested.instructions === undefined ? {} : { instructions: suggested.instructions }),
         ...(suggested.modelMessages === undefined ? {} : { modelMessages: structuredClone(suggested.modelMessages) }),
         ...(suggested.effectiveContextWindowPercent === undefined ? {} : { effectiveContextWindowPercent: suggested.effectiveContextWindowPercent }),

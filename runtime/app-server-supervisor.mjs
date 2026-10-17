@@ -315,7 +315,8 @@ export class AppServerSupervisorOwner {
           ? error.code : "PROVIDER_SETTINGS_FAILED";
         console.error(JSON.stringify({ event: "provider-settings-apply-failed", provider: request.provider, code }));
         if (!socket.destroyed) socket.end(`${JSON.stringify({ version: protocolVersion,
-          settingsProtocolVersion: providerSettingsProtocolVersion, ok: false, provider: request.provider })}\n`);
+          settingsProtocolVersion: providerSettingsProtocolVersion, ok: false, provider: request.provider,
+          ...(code === "PROVIDER_TOPOLOGY_CHANGED" ? { code } : {}) })}\n`);
       } finally {
         clearTimeout(timer);
         socket.removeListener("close", cancel);
@@ -771,6 +772,10 @@ export async function applyAppServerProviderSettings(primarySocketPath, provider
   try { value = JSON.parse(response); } catch { throw new Error("Provider 设置应用未确认"); }
   if (value?.version !== protocolVersion || value.settingsProtocolVersion !== providerSettingsProtocolVersion) {
     throw new Error("App Server 监管入口不支持定向设置应用，请运行 codexc restart appserver 后重试");
+  }
+  if (value.provider === provider && value.ok === false && value.code === "PROVIDER_TOPOLOGY_CHANGED"
+    && Object.keys(value).every(key => ["version", "settingsProtocolVersion", "provider", "ok", "code"].includes(key))) {
+    throw Object.assign(new Error("提供商拓扑已变化，需要显式重启 App Server 和 Gateway 服务"), { code: value.code });
   }
   if (value.provider !== provider || value.ok !== true
     || Object.keys(value).some(key => !["version", "settingsProtocolVersion", "provider", "ok", "applied", "reason", "changed", "snapshot"].includes(key))) {

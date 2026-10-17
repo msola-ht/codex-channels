@@ -1,4 +1,6 @@
-export const contextWindowPresetTokens: readonly number[];
+export const contextWindowPresetTokens: readonly [131072, 262144, 393216, 524288, 1048576];
+export const openAiContextWindowPresetTokens: readonly [272000, 372000, 500000];
+export function contextWindowPresetLabel(tokens: number): string;
 export interface SamplingParameters {
   temperature?: number;
   top_p?: number;
@@ -7,6 +9,7 @@ export interface SamplingParameters {
   presence_penalty?: number;
   repetition_penalty?: number;
 }
+export const customModelSamplingDefaults: Readonly<Required<SamplingParameters>>;
 export interface ModelDefinition {
   id: string;
   name: string;

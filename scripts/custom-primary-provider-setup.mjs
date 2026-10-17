@@ -402,6 +402,18 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error("API Key 不能为空");
   }
 
+  const supportsWebsockets = chatUpstream
+    ? false
+    : custom ? await prompts.confirm({ message: "是否支持 Responses WebSocket？（不检测，按平台说明选择）", initialValue: currentWebsockets === "yes" })
+    : await promptResponsesWebSocket(prompts, {
+        baseUrl: normalizedBaseUrl,
+        apiKey: replacementApiKey || currentApiKey,
+        model: normalizedModel,
+        reasoningEffort: custom ? models.find(entry => entry.id === normalizedModel)?.defaultReasoningEffort ?? "none" : "medium",
+        environment,
+      }, {output, probe: probeWebSocket, current: currentWebsockets === "yes"});
+  if (supportsWebsockets === undefined || prompts.isCancel(supportsWebsockets)) return { action: allowBack ? "back" : "cancel" };
+
   let catalogModels = models;
   let probeConnections;
   if (custom && !editingCustom) {
@@ -416,18 +428,6 @@ export async function runCustomPrimaryProviderSetup({
     catalogModels = selected.models;
     probeConnections = selected.probeConnections;
   }
-
-  const supportsWebsockets = chatUpstream
-    ? false
-    : custom ? await prompts.confirm({ message: "是否支持 Responses WebSocket？（不检测，按平台说明选择）", initialValue: currentWebsockets === "yes" })
-    : await promptResponsesWebSocket(prompts, {
-        baseUrl: normalizedBaseUrl,
-        apiKey: replacementApiKey || currentApiKey,
-        model: normalizedModel,
-        reasoningEffort: custom ? models.find(entry => entry.id === normalizedModel)?.defaultReasoningEffort ?? "none" : "medium",
-        environment,
-      }, {output, probe: probeWebSocket, current: currentWebsockets === "yes"});
-  if (supportsWebsockets === undefined || prompts.isCancel(supportsWebsockets)) return { action: allowBack ? "back" : "cancel" };
 
   const saveInput = {
     operation: fixedProviderId === undefined ? "create" : "update",
