@@ -7,7 +7,7 @@ import { parse } from "smol-toml";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
-import { responsesProviderCatalogPath, readResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { responsesProviderCatalogPath, parseResponsesModelCatalog, withResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import {
   customPrimaryProviderProfilePath,
   loadCustomSwitchingProviderIds,
@@ -24,18 +24,19 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
     if (recoverResponsesContextSync(environment,id,action)) return {providerId:id,action};
     if (recoverManagedCatalogSettings(id, action, environment)) return {providerId:id,action};
     const path = responsesProviderCatalogPath(environment, id);
-    let pending;
-    try { pending = JSON.parse(readPrivateFileSync(`${path}.pending`)); } catch {
+    let pending, pendingContent;
+    try { pendingContent = readPrivateFileSync(`${path}.pending`); pending = JSON.parse(pendingContent); } catch {
       throw new Error("没有可安全读取的 Responses 目录恢复记录");
     }
     const guarded = pending?.schemaVersion === 2;
     if (guarded
-      ? pending.previous !== true || Object.keys(pending).length !== 4
-        || !/^[a-f0-9]{64}$/u.test(pending.previousDigest) || !/^[a-f0-9]{64}$/u.test(pending.nextDigest)
+      ? typeof pending.previous !== "boolean" || Object.keys(pending).length !== 4
+        || (pending.previous ? typeof pending.previousDigest !== "string" || !/^[a-f0-9]{64}$/u.test(pending.previousDigest) : pending.previousDigest !== null)
+        || typeof pending.nextDigest !== "string" || !/^[a-f0-9]{64}$/u.test(pending.nextDigest)
       : pending?.schemaVersion !== 1 || typeof pending.previous !== "boolean" || Object.keys(pending).length !== 2) throw new Error("Responses 目录恢复记录格式无效");
     const previous = pending.previous ? readPrivateFileSync(`${path}.backup`, 2 * 1024 * 1024) : undefined;
     const current = existsSync(path) ? readPrivateFileSync(path, 2 * 1024 * 1024) : undefined;
-    const digest = value => typeof value === "string" ? createHash("sha256").update(value).digest("hex") : undefined;
+    const digest = value => typeof value === "string" ? createHash("sha256").update(value).digest("hex") : null;
     if (guarded && (digest(previous) !== pending.previousDigest
       || ![pending.previousDigest, pending.nextDigest].includes(digest(current)))) throw new Error("模型目录或备份存在后续修改，拒绝覆盖；请核对恢复记录");
     if (guarded && action === "keep" && digest(current) !== pending.nextDigest) throw new Error("新目录尚未完整写入，请选择 rollback");
@@ -54,34 +55,41 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
     if (action === "keep" && !referenced) throw new Error("自定义提供商没有连接配置或备份，请先恢复配置或选择 rollback");
     const selection = config.model_provider === id ? config : profile;
     if (candidate === undefined && referenced) throw new Error("配置仍引用此目录，不能回滚删除；请先恢复配置");
+    const assertRecoveryMaterials = expected => {
+      if ((existsSync(path) ? readPrivateFileSync(path, 2 * 1024 * 1024) : undefined) !== expected
+        || readPrivateFileSync(`${path}.pending`) !== pendingContent
+        || (pending.previous && readPrivateFileSync(`${path}.backup`, 2 * 1024 * 1024) !== previous)) {
+        throw new Error("模型目录或恢复材料已变化，保留恢复记录");
+      }
+    };
     if (candidate !== undefined) {
-      if (guarded && readPrivateFileSync(path, 2 * 1024 * 1024) !== current) throw new Error("模型目录已变化，保留恢复记录");
+      const catalog = parseResponsesModelCatalog(candidate);
+      if (selection !== undefined) {
+        const model = catalog.definitions.find(entry => entry.id === selection.model);
+        if (selection.model_catalog_json !== path || !model || selection.model_reasoning_effort !== (model.defaultReasoningEffort ?? "none")) {
+          throw new Error("所选目录与当前配置不一致，请先恢复对应配置");
+        }
+      }
+      if (guarded) assertRecoveryMaterials(current);
       writePrivateFileAtomicSync(path, candidate);
       try {
         await withResponsesModelCatalogWrite({path}, async () => {
-          const catalog = readResponsesModelCatalog(environment, id);
-          if (selection !== undefined) {
-            const model = catalog.definitions.find(entry => entry.id === selection.model);
-            if (selection.model_catalog_json !== path || !model || selection.model_reasoning_effort !== (model.defaultReasoningEffort ?? "none")) {
-              throw new Error("所选目录与当前配置不一致，请先恢复对应配置");
-            }
-          }
           if (config.model_provider === id) loadConfiguredCustomPrimaryModelProvider(environment);
           if (registered) loadConfiguredCustomSwitchingModelProviders(environment, id);
         });
       } catch (error) {
-        if (guarded) throw error;
+        if (guarded) assertRecoveryMaterials(candidate);
         if (current !== undefined) writePrivateFileAtomicSync(path, current);
         else unlinkSync(path);
         throw error;
       }
     }
-    if (guarded && (readPrivateFileSync(path, 2 * 1024 * 1024) !== candidate
-      || digest(readPrivateFileSync(`${path}.backup`, 2 * 1024 * 1024)) !== pending.previousDigest
-      || JSON.stringify(JSON.parse(readPrivateFileSync(`${path}.pending`))) !== JSON.stringify(pending))) {
-      throw new Error("模型目录恢复结果无法确认，保留恢复记录");
+    if (candidate === undefined && existsSync(path)) {
+      if (guarded) assertRecoveryMaterials(current);
+      unlinkSync(path);
     }
-    finishResponsesModelCatalogWrite({path, previous: undefined}, candidate === undefined);
+    if (guarded) assertRecoveryMaterials(candidate);
+    unlinkSync(`${path}.pending`);
     return { providerId: id, action };
   });
 }

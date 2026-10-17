@@ -408,7 +408,7 @@ Chat 桥以完整 Chat 数据事件计空闲，Codex 仍以实际收到的完整
 CLI 新增或编辑时分别询问是否导入官方 Codex、DeepSeek 模型，勾选平台支持的条目后，逐项填写平台模型 ID，确认“模板 ID → 平台 ID”。多选时按空格勾选、回车确认；空选会提示尚未导入，并提供返回选择或跳过本类模板的选项。两类均可导入，也可跳过后手填。
 官方模板读取当前 Codex CLI 的内置目录，排除不会原样作为请求等级发送的 Codex 专用 `ultra` / `persistent` 模式；其余等级与默认值仍需通过 CP 校验，不能转换时明确报错并使用手填入口。DS 模板读取仓库 `runtime/model-catalog-deepseek.json`，与 CLP Flash 共用，不读取账户目录或在导入时下载。读取失败明确报错，不回退其他来源。
 官方 Codex 与 DS 模板均导入模型 ID、显示名称、描述、当前及最大上下文窗口、思考等级与说明、默认等级、图片能力及受支持的扩展设置，并保留完整 `model_messages` 为 `modelMessages`。DS 模板先修正详细程度与摘要声明；工具支持声明、压缩兼容标识及其他专用能力不会因提示词导入而启用，工具能力在填写 Key 后分别询问 `apply_patch` 与 `tool_search`，用户可手动声明或选择探测本项。模型 ID 可映射为平台实际名称；生成目录的其余必需字段使用项目统一默认值。请求使用填写的平台 ID，同一 Provider 内不允许重复。导入后选择默认模型，可调整能力并继续手动添加其他模型。编辑时，唯一已有模板映射会预填平台 ID；同 ID 须明确确认才用模板替换已有模型的名称、能力及关联，默认不覆盖，拒绝则保留原值。按 ID 合并，不重复添加已有条目；同一批导入仍禁止两个模板占用同一平台 ID，未选中的模型继续保留供后续编辑。
-模板副本独立保存，后续源模板或 DS 账户窗口变化不联动 CP。旧 v5 中的 `template.followContext` 仅作为历史元数据读取，不产生跟随行为，显式保存时移除该字段。WebUI 可编辑保存后的能力；已有平台 ID 保持不变，改名需先添加再通过本地移除删除旧 ID。目前模板勾选入口在 CLI。
+模板副本独立保存，后续源模板或 DS 账户窗口变化不联动 CP。旧 v5 中的 `template.followContext` 仅作为历史元数据，不产生跟随行为；纯编译保留已有值，重新导入模板及交互编辑不再生成该字段。WebUI 可编辑保存后的能力；已有平台 ID 保持不变，改名需先添加再通过本地移除删除旧 ID。目前模板勾选入口在 CLI。
 每个模型声明准确 ID、显示名称、上下文窗口、图片输入能力、支持的思考等级与默认等级。
 自定义模型逐项选择能力；新模型默认不声明自由格式 `apply_patch` 或客户端 `tool_search`，已有模型保留当前值供用户确认。
 客户端 `tool_search` 在 Responses 上游默认不声明：声明后 Codex 会把 `tool_search_call` / `tool_search_output` 输入项回传上游，上游不接受时触发检索的回合会失败。
@@ -490,10 +490,12 @@ CLI Setup 的 Codex 兼容 Provider，新增与编辑均可在地址、模型及
 WebUI 模型管理按精确 Provider ID 的账户目录展示统一能力表格，点击模型名称查看能力和内置提示词。表格的“上下文比例”是目录的有效上下文比例，不是当前窗口占最大窗口的比例；加速与自动审批仅展示目录声明，不表示已经启用。账户范围在分组标题展示；模型 ID、模板关联和采样配置可在详情中查看。提示词按需读取，目录变化时需重新读取；未声明的能力不会按同名 OpenAI 模型补齐。
 上下文通过模型表格行内的“编辑”修改，与 OpenAI 共用 272K（272000）、372K（372000）、500K（500000）、最大值及自定义表单。第三方最低 1024 Token，且不超过当前目录的上限；保存绑定精确 Provider ID、模型 ID 和目录修订。自定义 v5 同步维护目标定义与生成结果，保留原有提示词、最大窗口及截断策略；已有自动压缩阈值与新窗口冲突时拒绝保存，需先调整模型详情。第三方官方模型目录保持只读，本地移除的账户默认保护、最后一个模型保护及 CLP Relay 独立范围不变。
 
-受管目录的设置写入先保存私有 `models.json.settings-backup` 和 `models.json.settings-pending`，记录目录及对应 Profile 的前后值。保存并回读一致后清除 pending；普通异常尝试恢复原值，无法确认则保留记录，阻止目录读取及新请求。停止对应服务并核对文件后，可用 `codexc provider recover <Provider ID> keep` 保留新值，或 `rollback` 恢复原值；文件已被后续修改时拒绝覆盖。备份可能包含 Profile 凭据，应保持私有，不要上传或粘贴。自定义窗口窄更新复用 `.backup`／`.pending`，新建版本 2 pending 保存前后内容摘要；恢复前核对备份和当前文件，拒绝覆盖后续修改，尚未写完新值时只能 rollback。其他自定义保存及历史 pending 保持版本 1 恢复合同。保存不会自动重启服务。
+受管目录的设置、本地模型移除及 CLP 目录更新先保存私有 `models.json.settings-backup` 和 `models.json.settings-pending`，记录本次涉及的目录、Profile 或来源清单与备份的前后值。保存并回读一致后清除 pending；普通异常尝试恢复原值，无法确认则保留记录，阻止目录读取及新请求。停止对应服务并核对文件后，可用 `codexc provider recover <Provider ID> keep` 保留新值，或 `rollback` 恢复原值；文件已被后续修改时拒绝覆盖。备份可能包含 Profile 凭据，应保持私有，不要上传或粘贴。自定义创建、编辑、删除与窗口修改统一使用 `.backup`／版本 2 `.pending`，保存前后内容摘要；首次创建的旧摘要为 null。恢复前核对备份和当前文件，拒绝覆盖后续修改，尚未写完新值时只能 rollback；历史版本 1 pending 仍可显式恢复。候选目录与当前模型配置冲突时，在覆盖前拒绝恢复，保留调用前目录供重新选择。保存不会自动重启服务。
+
+自定义模型的新建条目补齐基础提示词；已有条目的普通编辑、删除和窗口修改只编译已保存或明确提交的定义，不重新套用基础模板。删除不会改变保留模型的提示词。模板导入仍为显式替换操作，模板快照更新不会自动修改账户目录。
 
 每个 Provider 的 `~/.codex-connect/providers/responses/<Provider ID>/models.json` 使用版本 5 格式，
-包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`；生成的每个模型条目声明 `multi_agent_version: v2`，由 Codex 解析为多代理 v2 运行时，不写入主配置的 `features.multi_agent_v2`。模型定义可携带 `template: { source, model }` 来源关联及已固化的 `modelMessages` 提示词对象。旧 `followContext` 只读为历史元数据，显式保存时移除，不产生联动。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不保存旧完整 `snapshot` 字段，输入时明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联；版本 4 目录在本版本失败关闭，既不自动迁移也不写回，读取该目录的 Gateway 启动与管理界面会一起失败（`codexc provider recover` 只处理未完成写入事务，不处理版本升级），移除与切回官方 OpenAI 只依赖注册表与目标 Provider 自身的材料，其他 Provider 目录不可读不阻塞本次操作，因此目录缺失或不支持时仍可 `codexc provider remove` 后按原 ID 重建。Codex 读取其中的
+包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`；生成的每个模型条目声明 `multi_agent_version: v2`，由 Codex 解析为多代理 v2 运行时，不写入主配置的 `features.multi_agent_v2`。模型定义可携带 `template: { source, model }` 来源关联及已固化的 `modelMessages` 提示词对象。旧 `followContext` 仅作为历史元数据，不产生联动；普通编译不主动清理它。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不保存旧完整 `snapshot` 字段，输入时明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联；版本 4 目录在本版本失败关闭，既不自动迁移也不写回，读取该目录的 Gateway 启动与管理界面会一起失败（`codexc provider recover` 只处理未完成写入事务，不处理版本升级），移除与切回官方 OpenAI 只依赖注册表与目标 Provider 自身的材料，其他 Provider 目录不可读不阻塞本次操作，因此目录缺失或不支持时仍可 `codexc provider remove` 后按原 ID 重建。Codex 读取其中的
 `models`，Gateway 严格核对版本与生成结果；不接受未知字段、重复 ID、任意外部路径或手写的第三方目录。
 模型目录保存为两空格缩进的 JSON；账户注册表、账户初始备份与 `models.manifest.json` 同样使用两空格缩进。文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。
 上游接口选择单独保存在同目录的 `provider.json`（版本 1，仅含 `upstreamWireApi`，取值 `responses` 或
@@ -512,7 +514,7 @@ WebUI 的 Provider 预览与保存请求上限为 2 MiB，其他管理接口仍�
 预览及直接保存时，先用当前锁定 Codex CLI 的 `debug models` 在隔离临时目录校验最终生成目录；校验失败不写入模型目录、Profile 或主配置，不输出原始错误内容。准备好的预览在保存时复核目录未变更。保存前核对配置版本、Profile 与目录修订，并备份受影响配置；上一目录保存在同目录 `models.json.backup`。
 `models.json.pending` 标记未完成的保存；已知写入失败且主配置未改变时恢复目录和原 Profile。
 无法确认配置写入结果或发生进程中断时保留备份和 pending，拒绝启动，不自动重发写入。
-DS/CP 窗口联动在写入前将本次全局设置涉及的 DS、OCG、CCG 目录、Profile 和关联 CP 目录按路径去重，把前后内容一并备份到 `~/.codex-connect/private/responses-context-sync.json.backup`，事务期间使用同名无 `.backup` 后缀的恢复记录。文件为 0600，可能含 Profile 凭据，不可分享。失败时核对当前内容并回滚；无法确认时保留记录并阻止加载。恢复命令指定该事务内任一 CP ID，将整批恢复所有关联文件，拒绝覆盖后来修改的内容。
+当前修改不再创建 DS/CP 窗口联动事务。历史未完成事务的 `~/.codex-connect/private/responses-context-sync.json` 及 `.backup` 保留显式恢复入口，记录可能含 Profile 凭据，不可分享。恢复命令指定该历史事务内任一 CP ID，会整批恢复记录中的关联文件，拒绝覆盖后来修改的内容。
 先停止服务、核对或恢复私有快照中的配置，再明确选择目录恢复方向：
 
 ```bash

@@ -5,14 +5,14 @@ import { parse } from "smol-toml";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { clineRelayCatalogSchema } from "../runtime/cline-relay-catalog.mjs";
 import { managedProviderAccountFamilies, loadManagedModelProviderDefinitions, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
-import { managedProviderDirectory, managedProviderMarkerPath, customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath, primaryProviderBackupPath, loadConfiguredCustomPrimaryModelProvider, writeManagedModelWindow } from "../runtime/model-provider-runtime.mjs";
+import { managedProviderDirectory, managedProviderMarkerPath, customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath, primaryProviderBackupPath, loadConfiguredCustomPrimaryModelProvider, writeManagedModelWindow, writeManagedModelProviderCatalogUpdates } from "../runtime/model-provider-runtime.mjs";
 import { customProviderUpstreamMetadataPath } from "../runtime/model-provider-upstream-metadata.mjs";
 import { customOfficialModelCatalogPath } from "../runtime/model-provider-official-catalog.mjs";
-import { createResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog, responsesProviderCatalogPath, responsesContextSyncPath, writeResponsesModelCatalog, writeResponsesModelContextWindow, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { compileResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog, responsesProviderCatalogPath, responsesContextSyncPath, writeResponsesModelCatalog, writeResponsesModelContextWindow, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { validateGatewayConfigStructureDocument, parseGatewayConfig } from "../runtime/gateway-config.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
-import { snapshotProviderFiles, assertProviderFileSnapshots, applyProviderFileUpdates } from "./managed-provider-files.mjs";
+import { snapshotProviderFiles, assertProviderFileSnapshots } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
@@ -229,7 +229,8 @@ export async function applyProviderModelRemoval(input, { environment = process.e
     try {
       if (plan.custom) await applyCustomRemoval(plan, environment);
       else {
-        await applyProviderFileUpdates(plan.updates, plan.snapshots);
+        writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
+          new Map(plan.snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("utf8")])), environment);
         // An uncertain readback preserves the backup; never repeat the write automatically.
         assertSavedUpdates(plan);
       }
@@ -330,7 +331,7 @@ async function buildRemovalPlan(input, environment) {
   if (models.length === 1) throw invalid("last-model-protected", "model", "不能移除最后一个启用模型");
   if (defaults.includes(input.model)) throw invalid("default-model-protected", "model", "模型是账户或目录默认值，请先更改默认模型");
   if (gatewayDefault === input.model && providers.includes(state.primary.id)) throw invalid("gateway-default-protected", "model", "模型是当前主提供商的 Gateway 显式默认值，请先更改配置");
-  const nextCatalog = custom ? createResponsesModelCatalog(custom.definitions.filter(model => model.id !== input.model), custom.defaultModel)
+  const nextCatalog = custom ? compileResponsesModelCatalog(custom.definitions.filter(model => model.id !== input.model), custom.defaultModel)
     : { ...catalog, models: models.filter(model => model.slug !== input.model) };
   await assertProviderFileSnapshots(snapshots);
   const revision = createHmac("sha256", revisionSecret).update(JSON.stringify({ provider: input.provider, model: input.model,
@@ -343,7 +344,7 @@ async function buildRemovalPlan(input, environment) {
     model: { id: input.model, displayName: model.display_name ?? input.model }, providers, revision, warnings, activation: "restart-all" };
   return { preview, snapshots, catalog: nextCatalog, catalogPath, custom,
     updates: new Map(custom ? [] : [
-      [`${catalogPath}.backup`, requiredContent(snapshots, catalogPath)], [`${manifestPath}.backup`, requiredContent(snapshots, manifestPath)],
+      [`${catalogPath}.backup`, requiredContent(snapshots, catalogPath).toString("utf8")], [`${manifestPath}.backup`, requiredContent(snapshots, manifestPath).toString("utf8")],
       [catalogPath, `${JSON.stringify(nextCatalog, null, 2)}\n`], [manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`],
     ]),
   };
@@ -356,7 +357,7 @@ async function applyCustomRemoval(plan, environment) {
     if (current.content !== `${JSON.stringify(plan.catalog, null, 2)}\n`) throw invalid("readback-failed", "model", "模型目录保存结果无法确认，已保留 pending 和备份；勿自动重试");
     const backup = plan.snapshots.find(snapshot => snapshot.path === `${plan.catalogPath}.backup`).readCurrent();
     const pending = plan.snapshots.find(snapshot => snapshot.path === `${plan.catalogPath}.pending`).readCurrent();
-    if (!backup?.equals(Buffer.from(plan.custom.content)) || pending?.toString("utf8") !== JSON.stringify({ schemaVersion: 1, previous: true })) {
+    if (!backup?.equals(Buffer.from(plan.custom.content)) || pending?.toString("utf8") !== transaction.pendingContent) {
       throw invalid("readback-failed", "model", "目录备份或 pending 已变化，请人工核对，勿自动重试");
     }
     const unchanged = plan.snapshots.filter(snapshot => ![plan.catalogPath, `${plan.catalogPath}.backup`, `${plan.catalogPath}.pending`].includes(snapshot.path));

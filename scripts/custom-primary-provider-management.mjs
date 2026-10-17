@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
-import { createResponsesModelCatalog, isCustomCatalogProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { createResponsesModelCatalog, compileResponsesModelCatalog, isCustomCatalogProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { customProviderUpstreamMetadataPath, customProviderUpstreamWireApis, readCustomProviderUpstreamWireApi, removeCustomProviderUpstreamMetadata, writeCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { parse } from "smol-toml";
@@ -205,7 +205,7 @@ export async function applyCustomPrimaryProviderSave(input, options = {}) {
 async function applySavePlan(input, plan, options) {
   if (plan.models === undefined) return applyConnectionSavePlan(input, plan, options);
   const environment = options.environment ?? process.env;
-  if (JSON.stringify(createResponsesModelCatalog(plan.models, plan.provider.model)) !== plan.validatedCatalog) throw invalid("stale-preview", "catalog", "模型目录已变化，请重新预览并校验");
+  if (JSON.stringify(compileResponsesModelCatalog(plan.models, plan.provider.model)) !== plan.validatedCatalog) throw invalid("stale-preview", "catalog", "模型目录已变化，请重新预览并校验");
   const configPath = join(codexHomePath(environment), "config.toml");
   const read = createProviderFileReader(environment);
   const beforeConfig = existsSync(configPath) ? read(configPath) : undefined;
@@ -250,9 +250,9 @@ async function confirmModelOnlySave(plan, options, transaction) {
     const config = record(snapshot.config);
     const read = createProviderFileReader(environment);
     const catalog = readResponsesModelCatalog(environment, plan.provider.id);
-    if (catalog.content !== `${JSON.stringify(createResponsesModelCatalog(plan.models, plan.provider.model), null, 2)}\n`
-      || read(`${transaction.path}.backup`) !== plan.modelOnlyPreviousCatalogContent
-      || read(`${transaction.path}.pending`) !== JSON.stringify({ schemaVersion: 1, previous: true })
+    if (catalog.content !== transaction.content
+      || read(`${transaction.path}.backup`, 2_097_152) !== plan.modelOnlyPreviousCatalogContent
+      || read(`${transaction.path}.pending`, 1024) !== transaction.pendingContent
       || readCustomProviderUpstreamWireApi(environment, plan.provider.id) !== plan.upstreamWireApi) throw new Error("模型目录或恢复材料已变化");
     if (plan.provider.mode === "switching") {
       const expected = parse(plan.switchingProvider.profileContent);
@@ -425,7 +425,10 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
   }
   if (custom && input.operation === "create" && existsSync(responsesProviderCatalogPath(environment, providerId))) throw invalid("provider-exists", "providerId", "该 Provider 已有模型目录，请先恢复或删除已有配置");
   const model = requiredString(input.model, "model", "模型 ID 不能为空");
-  const models = custom ? createResponsesModelCatalog(validateResponsesModels(input.catalog.models, model), model).definitions : undefined;
+  const existingIds = new Set(previousCatalog?.definitions.map(entry => entry.id));
+  // Saved models are snapshots. Only new models receive missing base prompts.
+  const models = custom ? validateResponsesModels(input.catalog.models, model).map(entry => existingIds.has(entry.id)
+    ? entry : createResponsesModelCatalog([entry], entry.id).definitions[0]) : undefined;
   const reasoningEffort = models?.find((entry) => entry.id === model)?.defaultReasoningEffort ?? "none";
   const officialModelIds = new Set(
     officialModels.filter((candidate) => candidate.available !== false)
@@ -542,7 +545,7 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     envKey: customPrimaryProviderCredentialEnvironmentKey(providerId),
     supportsWebsockets: input.supportsWebsockets,
   });
-  const catalog = models ? createResponsesModelCatalog(models, model) : undefined;
+  const catalog = models ? compileResponsesModelCatalog(models, model) : undefined;
   if (catalog) await validateModelCatalogWithCodex(catalog, environment);
   const provider = {
     id: providerId,

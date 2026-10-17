@@ -110,6 +110,8 @@ export function loadManagedModelWindow(
 
 export function recoverManagedCatalogSettings(provider: string, action: "keep" | "rollback", environment?: NodeJS.ProcessEnv): boolean;
 
+export function writeManagedModelProviderCatalogUpdates(provider: string, updates: Map<string, string>, originals: Map<string, string | undefined>, environment?: NodeJS.ProcessEnv): void;
+
 export function writeManagedModelWindow(options: {
   provider: string;
   model: string;

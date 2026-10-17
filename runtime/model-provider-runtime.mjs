@@ -12,6 +12,7 @@ export {
   readManagedModelProviderCatalogContent,
   restoreManagedModelProviderCatalogContent,
   writeManagedModelWindow,
+  writeManagedModelProviderCatalogUpdates,
   recoverManagedCatalogSettings,
   withManagedModelCatalogSettings,
   withPreservedManagedModelCatalogSettings,

@@ -1,6 +1,6 @@
 import { promptResponsesWebSocket } from "./responses-websocket-setup.mjs";
 import { promptCustomModelCapabilities } from "./custom-model-capability-setup.mjs";
-import { createResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { compileResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { loadResponsesModelTemplates, promptResponsesModelImport } from "./responses-model-templates.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
@@ -446,7 +446,7 @@ export async function runCustomPrimaryProviderSetup({
     loadContext: async () => ({ snapshot, officialModels }),
   });
   const preview = prepared.preview;
-  const previewModelDetails = custom ? createResponsesModelCatalog(preview.provider.models, preview.provider.model).models : [];
+  const previewModelDetails = custom ? compileResponsesModelCatalog(preview.provider.models, preview.provider.model).models : [];
   output.write(preview.provider.mode === "switching"
     ? `\n将写入 ~/.codex/${customSwitchingProviderProfileName(normalizedId)}.config.toml：\n`
     : "\n将写入 ~/.codex/config.toml：\n");

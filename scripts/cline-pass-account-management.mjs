@@ -13,7 +13,7 @@ import { thirdPartyCodingInstructions } from "../runtime/third-party-coding-inst
 import { validateEnabledModelSelection } from "./provider-model-selection.mjs";
 import { clineRelayCatalogSchema, clinePassReasoningEfforts, clineRelayInputModalities } from "../runtime/cline-relay-catalog.mjs";
 import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
-import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider, withPreservedManagedModelCatalogSettings } from "../runtime/model-provider-runtime.mjs";
+import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider, withPreservedManagedModelCatalogSettings, writeManagedModelProviderCatalogUpdates } from "../runtime/model-provider-runtime.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { applyProviderFileUpdates, assertProviderFileSnapshots, snapshotProviderFiles, stageManagedPrimaryCredential } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
@@ -219,7 +219,8 @@ export async function refreshClinePassCatalog({ provider, accountId, environment
     updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
     updates.set(paths.manifest, `${JSON.stringify(clinePassManifest(source, catalog), null, 2)}\n`);
     await assertProviderFileSnapshots(snapshots);
-    await applyProviderFileUpdates(updates, snapshots);
+    writeManagedModelProviderCatalogUpdates(targetDefinition.id, updates,
+      new Map(snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("utf8")])), environment);
     return { action: "catalog-updated", activation: "restart-all", models: catalog.models.map(model => model.slug), excludedModels: projected.excludedModels, commit: source.commit };
   });
 }
