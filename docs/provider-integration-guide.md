@@ -88,7 +88,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
   `sha256`）；Profile（切换模式）与固定基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；
 - 目录按 Provider 隔离；同名模型（如两个 Provider 都提供 `deepseek-flash`）是独立选项，
   模型管理 key 为提供商加模型，思考等级、上下文、启用名单、移除与刷新由同族账户共用；账户各自选择默认模型；
-- 可选模型以各 Provider 生成的模型目录为准：OCG/CCG 初始从 DS 官方脚本下载完整目录，复制 Flash 内容增加 V4.1，并按 Provider 映射模型 ID；配置后可通过账户模型管理显式添加上游支持的 Responses 模型和选择启用列表。新增模型的准确 ID 与能力必须确认，不把 Cline 专属路由或 Chat 参数复制给其他提供商；
+- 可选模型以各 Provider 生成的模型目录为准：OCG/CCG 初始从 DS 官方脚本下载完整目录，复制 Flash 内容增加 V4.1，并按 Provider 映射模型 ID；配置后可通过账户模型管理查看已有模型、显式添加上游支持的 Responses 模型或发现／导入新模型，移除走独立的本地移除入口。新增模型的准确 ID 与能力必须确认，不把 Cline 专属路由或 Chat 参数复制给其他提供商；
 - 默认模型写入 Profile 后，各账户 Profile 顶层 `model_reasoning_effort` 必须镜像所选共享模型的默认值，目录写入和相关镜像在同一事务中保存，
   运行时校验不一致即失败关闭。
 
@@ -559,7 +559,7 @@ WebUI 模型管理按提供商展示一组模型，受管同族账户共用目�
 自定义模型的新建条目补齐基础提示词；已有条目的普通编辑、删除和窗口修改只编译已保存或明确提交的定义，不重新套用基础模板。删除不会改变保留模型的提示词。模板导入仅新增；已有模型使用明确来源、选定范围及差异确认的模板更新入口，模板快照更新不会自动修改提供商目录。
 
 每个 Provider 的 `~/.codex-connect/providers/<Provider ID>/models.json` 使用版本 5 格式，
-包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`；生成的每个模型条目声明 `multi_agent_version: v2`，由 Codex 解析为多代理 v2 运行时，不写入主配置的 `features.multi_agent_v2`。模型定义可携带 `template: { source, model }` 来源关联及已固化的 `modelMessages` 提示词对象。旧 `followContext` 仅作为历史元数据，不产生联动；普通编译不主动清理它。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不保存旧完整 `snapshot` 字段，输入时明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联；版本 4 目录在本版本失败关闭，既不自动迁移也不写回，读取该目录的 Gateway 启动与管理界面会一起失败（`codexc provider recover` 只处理未完成写入事务，不处理版本升级），移除与切回官方 OpenAI 只依赖注册表与目标 Provider 自身的材料，其他 Provider 目录不可读不阻塞本次操作，因此目录缺失或不支持时仍可 `codexc provider remove` 后按原 ID 重建。Codex 读取其中的
+包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`；生成的每个模型条目声明 `multi_agent_version: v2`，由 Codex 解析为多代理 v2 运行时，不写入主配置的 `features.multi_agent_v2`。模型定义可携带 `template: { source, model }` 来源关联及已固化的 `modelMessages` 提示词对象。旧 `followContext` 仅作为历史元数据，不产生联动；普通编译不主动清理它。`maxContextWindow` 可选，用于记录用户为该上游模型声明的最大窗口，省略时等于当前窗口；不保存旧完整 `snapshot` 字段，输入时明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联；版本 4 目录在本版本失败关闭，既不自动迁移也不写回，读取该目录的 Gateway 启动与管理界面会一起失败（`codexc provider recover` 只处理未完成写入事务，不处理版本升级），移除与切回官方 OpenAI 只依赖注册表与目标 Provider 自身的材料，其他 Provider 目录不可读不阻塞本次操作，因此目录缺失或不支持时仍可 `codexc provider remove` 后按原 ID 重建。Codex 读取其中的
 `models`，Gateway 严格核对版本与生成结果；不接受未知字段、重复 ID、任意外部路径或手写的第三方目录。
 模型目录保存为两空格缩进的 JSON；账户注册表、账户初始备份与 `models.manifest.json` 同样使用两空格缩进。文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。
 上游接口选择单独保存在同目录的 `provider.json`（版本 1，仅含 `upstreamWireApi`，取值 `responses` 或

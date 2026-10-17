@@ -178,8 +178,8 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "添加／编辑模型与默认值" }] : []),
     ...(custom && catalog.canRemove ? [{ value: "tools", label: "探测单个模型的工具能力", hint: "apply_patch、tool_search；明确选择才发请求，可能计费" }] : []),
     ...(family && catalog.providers.length ? [{ value: "default", label: "设置账户默认模型" }] : []),
-    ...(family === "ccg" || family === "ocg" ? [{ value: "manage", label: "选择启用／添加／导入模板" }] : []),
-    ...(family === "clp" ? [{ value: "refresh", label: "联网发现模型并选择启用", hint: "不更新已启用模型的模板内容" }] : []),
+    ...(family === "ccg" || family === "ocg" ? [{ value: "manage", label: "查看／添加／导入新模型" }] : []),
+    ...(family === "clp" ? [{ value: "refresh", label: "联网发现并添加新模型", hint: "只添加选中的新模型；已有模型保持不变" }] : []),
     ...(catalog.source !== "official-shared" && (custom || family) ? [{ value: "template-update", label: "对比并更新模型模板", hint: family === "clp" ? "读取远程模板后预览差异" : "选择来源和更新内容，预览差异后保存" }] : []),
     { value: "back", label: "返回" },
   ] });
