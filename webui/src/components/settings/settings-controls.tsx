@@ -138,17 +138,17 @@ export function SettingsMutationFeedback({ result, writeUnconfirmed, readbackReq
   </AlertDescription></Alert>
 }
 
-export function ManagedSelect({ label, value, options, disabled, disabledValues = [], onChange, description, placeholder }: { description?: string; placeholder?: string; label: string; value: string; options: string[][]; disabled: boolean; disabledValues?: readonly string[]; onChange: (value: string) => void }) {
+export function ManagedSelect({ label, value, options, disabled, disabledValues = [], onChange, description, placeholder, fullWidth = false }: { description?: string; placeholder?: string; fullWidth?: boolean; label: string; value: string; options: string[][]; disabled: boolean; disabledValues?: readonly string[]; onChange: (value: string) => void }) {
   const { t } = useTranslation()
   const selectId = useId()
   const nonEmptyOptions = options.filter(([option]) => option !== "")
   const effectiveOptions = value !== "" && !nonEmptyOptions.some(([option]) => option === value) ? [[value, value], ...nonEmptyOptions] : nonEmptyOptions
   const labelContent = <FieldLabel className="text-muted-foreground" htmlFor={selectId}>{label}</FieldLabel>
-  return <Field orientation="responsive" data-disabled={disabled}>
+  return <Field orientation={fullWidth ? "vertical" : "responsive"} data-disabled={disabled}>
     {description ? <FieldContent className="min-w-0">{labelContent}<FieldDescription id={`${selectId}-description`}>{description}</FieldDescription></FieldContent> : labelContent}
     <Select items={[{ value: null, label: placeholder ?? t("settingsUi.notConfigured") }, ...effectiveOptions.map(([value, label]) => ({ value, label }))]} value={value || null} disabled={disabled} onValueChange={next => { if (next !== null) onChange(next) }}>
-      <SelectTrigger id={selectId} aria-describedby={description ? `${selectId}-description` : undefined} size="sm" className="w-full sm:w-[160px]"><SelectValue placeholder={value === "" ? placeholder ?? t("settingsUi.notConfigured") : undefined} /></SelectTrigger>
-      {effectiveOptions.length > 0 ? <SelectContent><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option} disabled={disabledValues.includes(option)}>{text}</SelectItem>)}</SelectGroup></SelectContent> : null}
+      <SelectTrigger id={selectId} aria-describedby={description ? `${selectId}-description` : undefined} size="sm" className={fullWidth ? "w-full min-w-0 whitespace-normal data-[size=sm]:h-auto data-[size=sm]:min-h-7 *:data-[slot=select-value]:line-clamp-none" : "w-full sm:w-[160px]"}><SelectValue className={fullWidth ? "min-w-0 [overflow-wrap:anywhere]" : undefined} placeholder={value === "" ? placeholder ?? t("settingsUi.notConfigured") : undefined} /></SelectTrigger>
+      {effectiveOptions.length > 0 ? <SelectContent><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option} disabled={disabledValues.includes(option)} className={fullWidth ? "[&>span]:min-w-0 [&>span]:shrink [&>span]:whitespace-normal [&>span]:[overflow-wrap:anywhere]" : undefined}>{text}</SelectItem>)}</SelectGroup></SelectContent> : null}
     </Select>
   </Field>
 }

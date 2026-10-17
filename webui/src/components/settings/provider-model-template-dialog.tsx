@@ -54,7 +54,7 @@ export function ProviderModelTemplateDialog({ target, open, stale, management, p
       {request.error ? <Alert variant="destructive"><AlertDescription>{translateApiError(t, request.error, request.errorCode)}</AlertDescription></Alert> : null}
       {unavailable ? <Alert><AlertDescription>{t("modelTemplate.unavailable")}</AlertDescription></Alert> : null}
       {options && !request.loading && !request.error && !unavailable ? <FieldGroup>
-        <ManagedSelect label={t("modelTemplate.source")} value={selection} placeholder={t("modelTemplate.selectSource")} disabled={busy || catalogStale} options={templates.map((entry, index) => [String(index), `${t(`modelTemplate.${entry.source}`)} · ${entry.displayName} (${entry.model})`])} onChange={setSelected} />
+        <ManagedSelect fullWidth label={t("modelTemplate.source")} value={selection} placeholder={t("modelTemplate.selectSource")} disabled={busy || catalogStale} options={templates.map((entry, index) => [String(index), `${t(`modelTemplate.${entry.source}`)} · ${entry.displayName} (${entry.model})`])} onChange={setSelected} />
         <FieldSet disabled={busy || catalogStale}><FieldLegend>{t("modelTemplate.sections")}</FieldLegend><FieldGroup>
           {(["prompts", "capabilities"] as const).map(section => <Field key={section} orientation="horizontal"><Checkbox id={`template-${section}`} checked={sections.includes(section)} disabled={busy || catalogStale} onCheckedChange={checked => setSections(previous => checked ? [...previous.filter(value => value !== section), section] : previous.filter(value => value !== section))} /><FieldLabel htmlFor={`template-${section}`}>{t(`modelTemplate.${section}`)}</FieldLabel></Field>)}
         </FieldGroup></FieldSet>

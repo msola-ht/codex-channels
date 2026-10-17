@@ -81,16 +81,12 @@ export function ModelCapabilityCells({ model }: { model: OpenAiModelCatalogEntry
     </Tooltip></TableCell>
     <TableCell><ModelServiceTiers tiers={model.serviceTiers} /></TableCell>
     <TableCell><ModelApprovals approvals={model.approvals} /></TableCell>
-    <TableCell><div className="flex flex-wrap gap-1">
-      <Tooltip>
-        <TooltipTrigger render={<Badge variant={model.details.supports_search_tool === true ? "default" : model.details.supports_search_tool === false ? "destructive" : "secondary"} tabIndex={0} className="cursor-help" />}><span className="underline decoration-dotted underline-offset-2">{t("openAiModelCatalog.searchLabel")}</span></TooltipTrigger>
-        <TooltipContent>{t("openAiModelCatalog.searchTool", { value: t(model.details.supports_search_tool === null ? "openAiModelDetails.undeclared" : model.details.supports_search_tool ? "openAiModelCatalog.supported" : "openAiModelCatalog.unsupported") })}</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger render={<Badge variant={model.details.apply_patch_tool_type === null ? "secondary" : "outline"} tabIndex={0} className="cursor-help" />}><span className="underline decoration-dotted underline-offset-2">{t("openAiModelCatalog.editLabel")}</span></TooltipTrigger>
-        <TooltipContent>{t("openAiModelCatalog.patchTool", { value: model.details.apply_patch_tool_type ?? t("openAiModelDetails.undeclared") })}</TooltipContent>
-      </Tooltip>
-    </div></TableCell>
+    <TableCell><div className="flex flex-col items-start gap-1">
+      <span>{t("openAiModelCatalog.searchTool", { value: t(model.details.supports_search_tool === null ? "openAiModelDetails.undeclared" : model.details.supports_search_tool ? "openAiModelCatalog.supported" : "openAiModelCatalog.unsupported") })}</span>
+    <Tooltip>
+      <TooltipTrigger render={<span tabIndex={0} className="cursor-help" />}>{t("openAiModelCatalog.editSupport", { value: t(model.details.apply_patch_tool_type === null ? "openAiModelDetails.undeclared" : "openAiModelCatalog.supported") })}</TooltipTrigger>
+      <TooltipContent>{t("openAiModelCatalog.patchTool", { value: model.details.apply_patch_tool_type ?? t("openAiModelDetails.undeclared") })}</TooltipContent>
+    </Tooltip></div></TableCell>
   </>
 }
 
