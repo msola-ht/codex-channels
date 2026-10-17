@@ -18,10 +18,12 @@ import {
   recoverManagedCatalogSettings,
 } from "../runtime/model-provider-runtime.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { assertProviderCatalogIsolationComplete } from "../runtime/provider-catalog-isolation.mjs";
 
 export async function recoverResponsesProviderCatalog(id, action, environment = process.env) {
   if (action !== "keep" && action !== "rollback") throw new Error("恢复操作必须是 keep 或 rollback");
   return withModelProviderManagementTransaction(environment, async () => {
+    assertProviderCatalogIsolationComplete(environment);
     if (recoverResponsesContextSync(environment,id,action)) return {providerId:id,action};
     if (recoverManagedCatalogSettings(id, action, environment)) return {providerId:id,action};
     const path = responsesProviderCatalogPath(environment, id);

@@ -128,6 +128,7 @@ codexc start all
 脚本直接运行时默认读取 `~/.codex-connect/config.toml` 检查主 App Server Socket；设置了 `CODEX_CONNECT_HOME` 时使用该用户数据目录，显式 `CODEX_CONNECT_CONFIG_FILE` 优先。请与服务使用相同的环境设置；不会读取仓库根目录的 `config.toml`。
 
 写入前把原值、目标值和路径保存到私有 `~/.codex-connect/private/provider-catalog-isolation.json`。该未完成记录存在时，新 runtime 拒绝加载账户配置及使用目录；成功后保存为同路径 `.v3.backup` 并移除未完成记录，旧备份保留。中断后保持服务停止，运行 `node scripts/isolate-provider-catalogs.mjs --resume` 完成，或 `--rollback` 恢复整理前内容。当前文件既非原值也非目标值时拒绝覆盖；已有 `.v3.backup` 不覆盖。旧版 schema 1/2 未完成记录必须先用原版本恢复，不能删除记录绕过保护。
+同一未完成记录也阻止自定义目录首次创建及 `codexc provider recover` 的所有恢复分支；先处理目录整理事务，再恢复模型设置，避免两个恢复过程交叉修改文件。
 
 回滚仅恢复此次整理记录中的文件和引用，须配合对应旧代码；后续模型修改不会自动反向合并。若旧版本已有未完成的 DS/CP 上下文或模型设置事务，先使用旧版本的恢复入口处理。共享目录设置采用同一事务保存模型、来源和相关 Profile，schema 2 guards 记录同族注册表、管理标记等只读前置条件；任一同族账户均可发起受控恢复，不覆盖其他家族或后续修改。真实用户目录不会自动迁移。
 

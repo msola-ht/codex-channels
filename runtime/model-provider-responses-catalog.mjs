@@ -68,6 +68,7 @@ export function responsesModelSettings(environment, id, model) {
 }
 
 export function writeResponsesModelCatalog(environment, id, definitions, model, expectedRevision) {
+  assertProviderCatalogIsolationComplete(environment);
   assertResponsesContextSyncComplete(environment);
   const path = responsesProviderCatalogPath(environment, id);
   if (existsSync(`${path}.pending`)) throw new Error("Responses 模型目录上次保存未完成，请先恢复");
