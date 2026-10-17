@@ -23,6 +23,7 @@ import { withModelProviderManagementTransaction } from "./model-provider-managem
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
 import { createManagedDeepseekCatalog, downloadDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
 import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
+import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 
 export function deepseekAccountPaths(environment, accountId) {
   const definition = deepseekAccountDefinition(accountId);
@@ -126,6 +127,7 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
       updates.set(paths.manifest, `${JSON.stringify({ source: deepseekSetupScriptUrl,
         downloadedAt: new Date().toISOString(), modelTemplates }, null, 2)}\n`);
     }
+    await validateModelCatalogWithCodex(catalog, environment);
     const model = resolveManagedCatalogModel(catalog, definition, previous?.model);
     const configured = createManagedProviderConfiguration(current, initial.config, definition, {
       mode: preview.mode, previousMode: previous?.mode, apiKey: input.apiKey,
