@@ -205,7 +205,8 @@
 - `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义提供商共用的 1–64 个模型多选、预览确认与默认模型保护。
 - `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG 按完整 Provider ID 管理账户目录的手填模型、DS 官方下载及 ID 映射、启用选择和备份事务；保护目标账户默认值，目录变化不修改账户凭据。
 - `provider-model-management.mjs` / `provider-model-management.d.mts`：CLI/WebUI 共用的账户目录能力、本地移除及单模型窗口预览和锁内保存；窗口修改绑定 Provider、模型和目录修订，自定义删除与窗口修改仅重编译已保存定义，不重新应用提示词模板。WebUI 从对应保存目录投影完整能力，按目录身份、精确模型 ID 和内容修订读取白名单提示词。列表不携带提示正文。保护账户和 Gateway 显式默认值、非空目录及文件修订；受管删除纳入账户目录／来源持久恢复，自定义写入统一前后摘要 pending 与回读校验。
-- `provider-model-setup.mjs` / `provider-model-setup.d.mts`：Setup 的统一模型管理菜单，复用上述移除流程、自定义模型专用保存、受管默认设置、CCG/OCG 添加与模板导入及 CLP 显式更新；不自动重启服务。
+- `provider-model-template-management.mjs` / `provider-model-template-management.d.mts`：准确账户的模板更新目标、分组差异预览与锁内执行。仅接受 DS 家族或 CP 已保存模板关联；补全源模板后按提示词／能力白名单更新，保留本地选择及其他模型，修订绑定源与目标快照。CP 复用既有模型保存，DS 复用目录与来源事务；无差异不写入，不联网下载或自动重启。
+- `provider-model-setup.mjs` / `provider-model-setup.d.mts`：Setup 的统一模型管理菜单，复用上述移除流程、自定义模型专用保存、受管默认设置、CCG/OCG 添加与模板导入及 CLP 显式更新。自定义 Provider 与 DS 账户可对比并更新已有模板关联模型，默认仅选择提示词，能力参数须另行勾选；逐字段预览差异，长内容显示 JSON 长度与 SHA-256 摘要并可在确认前展开，确认后保存，无差异不写入；不自动重启服务。
 - `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内校验当前配置，完成未结束的自定义模型目录保存或受管账户设置事务；受管恢复核对准确目录／Profile 路径及前后值，拒绝覆盖后续修改。
 - `isolate-provider-catalogs.mjs`：源码仓库的显式账户目录拆分入口，默认预览，`--write` 复制旧共享 catalog／manifest 并更新账户 Profile 或固定主配置引用，原共享文件保留；`--resume`／`--rollback` 消费私有恢复记录，拒绝覆盖后续改动。使用全局管理锁，写入及恢复要求整个 App Server 停止；不由更新器自动执行。步骤与回滚限制见[账户目录拆分](../docs/provider-integration-guide.md#旧共享目录账户升级)。
 - `custom-primary-provider-management.mjs` / `custom-primary-provider-management.d.mts`：提供自定义主

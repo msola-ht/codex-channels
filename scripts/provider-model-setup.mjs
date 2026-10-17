@@ -1,5 +1,7 @@
 import * as clackPrompts from "@clack/prompts";
+import { createHash } from "node:crypto";
 import { loadProviderModelCatalogs, previewProviderModelRemoval, applyProviderModelRemoval } from "./provider-model-management.mjs";
+import { loadProviderModelTemplateTargets, previewProviderModelTemplateUpdate, applyProviderModelTemplateUpdate } from "./provider-model-template-management.mjs";
 import { readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { previewCustomProviderModelsSave, applyCustomProviderModelsSave } from "./custom-primary-provider-management.mjs";
@@ -18,6 +20,54 @@ const warningMessages = {
   "historical-references": "旧会话和计划任务保留，引用此模型时可能失败；不会自动换模型。聚合旧快照需刷新。",
   "provider-relay-inflight": "目录变更可能撤销该提供商的其他 Relay 在途请求。",
 };
+
+function templateDifferenceValue(value, full = false) {
+  if (value === undefined) return "未设置（undefined）";
+  const json = JSON.stringify(value);
+  if (full || json.length <= 2048) return json;
+  return JSON.stringify({ jsonLength: json.length, sha256: createHash("sha256").update(json).digest("hex"), content: "长内容摘要，可在确认前展开完整差异" });
+}
+
+async function runProviderModelTemplateSetup(provider, { environment, prompts, output }) {
+  const targets = await loadProviderModelTemplateTargets(provider, { environment });
+  if (!targets.length) {
+    output.write("此账户没有已关联模板的模型；请先通过模板导入建立关联，再对比并更新。\n");
+    return { action: "back" };
+  }
+  const model = await prompts.select({ message: "选择要对比模板的模型", options: targets.map(target => ({
+    value: target.model, label: `${target.displayName}（${target.model}）`,
+    hint: `${target.source === "official" ? "官方 Codex" : "DeepSeek"} → ${target.sourceModel}`,
+  })) });
+  if (prompts.isCancel(model)) return { action: "back" };
+  const sections = await prompts.multiselect({ message: "选择本次更新内容（空格勾选，回车确认）", options: [
+    { value: "prompts", label: "提示词" },
+    { value: "capabilities", label: "能力参数", hint: "请确认平台支持模板中的参数" },
+  ], initialValues: ["prompts"], required: true });
+  if (prompts.isCancel(sections)) return { action: "back" };
+  const input = { provider, model, sections };
+  const preview = await previewProviderModelTemplateUpdate(input, { environment });
+  output.write(`模板对比：${JSON.stringify(preview.provider)} / ${JSON.stringify(preview.model)}\n来源：${JSON.stringify(preview.source)} / ${JSON.stringify(preview.sourceModel)}\n修订：${JSON.stringify(preview.revision)}\n`);
+  output.write("保留本地模型 ID、显示名称、当前上下文、默认思考等级、工具支持、采样及压缩/截断设置；能力更新可改变最大上下文。\n");
+  for (const change of preview.changes) {
+    output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before)}\n  更新后：${templateDifferenceValue(change.after)}\n`);
+  }
+  if (!preview.willChange) {
+    output.write("所选模板内容与当前模型一致，无需保存。\n");
+    return { action: "unchanged", activation: "none" };
+  }
+  const longChanges = preview.changes.filter(change => [change.before, change.after].some(value => value !== undefined && JSON.stringify(value).length > 2048));
+  if (longChanges.length) {
+    const expand = await prompts.confirm({ message: "展开长内容的完整前后差异？", initialValue: false });
+    if (prompts.isCancel(expand)) return { action: "back" };
+    if (expand) for (const change of longChanges) output.write(`${JSON.stringify(change.field)}\n  更新前：${templateDifferenceValue(change.before, true)}\n  更新后：${templateDifferenceValue(change.after, true)}\n`);
+  }
+  output.write("保存前备份原目录，不自动重启服务。\n");
+  if (await prompts.confirm({ message: "确认按上述差异更新所选模板内容？", initialValue: false }) !== true) return { action: "back" };
+  const result = await applyProviderModelTemplateUpdate(input, { environment, preview });
+  output.write(result.action === "updated" ? "模型模板已更新并回读。\n" : "模型模板无需更新。\n");
+  if (result.action === "updated") writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  return result;
+}
 
 export async function runProviderModelSetup({ environment = process.env, prompts = clackPrompts, output = process.stdout, provider } = {}) {
   const { catalogs } = await loadProviderModelCatalogs({ environment });
@@ -43,9 +93,11 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     ...(family && catalog.providers.length ? [{ value: "default", label: "设置账户默认模型" }] : []),
     ...(family === "ccg" || family === "ocg" ? [{ value: "manage", label: "选择启用／添加／导入模板" }] : []),
     ...(family === "clp" ? [{ value: "refresh", label: "联网更新并选择启用模型" }] : []),
+    ...(custom || family === "deepseek" ? [{ value: "template-update", label: "对比并更新模型模板", hint: "仅更新已有模板关联，不联网下载" }] : []),
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
+  if (action === "template-update") return runProviderModelTemplateSetup(catalog.provider, { environment, prompts, output });
   if (action === "manage") return runManagedProviderModelSetup(catalog.provider, { environment, prompts, output });
   if (action === "default") {
     const account = catalog.providers.length === 1 ? catalog.providers[0] : await prompts.select({ message: "选择默认设置所属账户", options: catalog.providers.map(id => ({ value: id, label: id })) });
