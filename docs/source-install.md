@@ -93,6 +93,8 @@ Git 仓库用于跟踪和构建 `main`，日常命令由构建后的 npm 全局�
 
 ## 更新
 
+DS、CLP、CCG、OCG 模型分别共用 `~/.codex-connect/providers/deepseek|clp|ccg|opencode-go/models.json`，不按账户增加模型目录层级；账户身份材料和自定义 cp 模型仍独立。从此前的嵌套或扁平账户模型目录升级时，先在旧版本完成未结束事务，停止整个 App Server，按[Provider 目录整理](provider-integration-guide.md#旧共享目录账户升级)预览合并与冲突、显式更新引用，再执行 `npm run install:global` 安装新版，最后按原状态启动服务。源码更新器不代做数据迁移；程序安装路径改变时仍需 `codexc install`。源目录和私有迁移备份在回滚确认前保留。
+
 日常更新统一使用：
 
 ```bash

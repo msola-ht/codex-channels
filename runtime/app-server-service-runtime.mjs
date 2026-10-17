@@ -5,9 +5,11 @@ import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { aggregateProviderId, aggregateTokenEnvironmentKey, aggregateLaunchArguments, loadAggregateModelMaterial,
-  readAggregateProviderSettingsFingerprint } from "./aggregate-model-provider.mjs";
+  readAggregateProviderSettingsFingerprint, AggregateProviderTopologyChangedError } from "./aggregate-model-provider.mjs";
+import { readCustomProviderUpstreamWireApi } from "./model-provider-upstream-metadata.mjs";
 import { AggregateMaterialGuard } from "./aggregate-material-guard.mjs";
 import { ProviderModelGuard } from "./provider-model-guard.mjs";
+import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 import { assertProviderModelRequestPolicy, assertProviderModelRetryPolicy } from "./model-request-policy.mjs";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
@@ -36,7 +38,6 @@ import {
   managedProviderAccountFamilies,
   isManagedProviderModelValid,
   opencodeGoProviderDefinition,
-  sharedManagedProviderDefinition,
 } from "./model-provider-definitions.mjs";
 import {
   loadConfiguredCustomPrimaryModelProvider,
@@ -59,7 +60,6 @@ import {
 } from "./opencode-go-accounts.mjs";
 import {
   managedProviderAccountIdFromProvider,
-  sharedProviderProxyKey,
 } from "./managed-provider-account-routing.mjs";
 import { createOpencodeGoQuotaWindowsProvider } from "./opencode-go-quota-windows.mjs";
 import { createRefreshableHttpProxySelector } from "./network-proxy.mjs";
@@ -231,7 +231,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   // 上游接口：受管 Provider 来自定义；自定义第三方 Provider 来自其网关侧元数据。
   // 聚合会给自定义成员派生 `provider@<hash>` 路由键，因此先解析真实 Provider 身份。
   const upstreamWireApiFor = (provider, routeKey = provider) => {
-    const managed = providerDefinitions.get(routeKey) ?? sharedManagedProviderDefinition(routeKey);
+    const managed = providerDefinitions.get(routeKey);
     if (managed?.upstreamWireApi !== undefined) return managed.upstreamWireApi;
     if (customPrimaryProvider !== undefined
       && (provider === customPrimaryProvider.id || routeKey === primaryProvider)) {
@@ -250,7 +250,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const upstreamProvider = provider === primaryProvider
       ? customPrimaryProvider?.id ?? metricsProvider
       : metricsProvider;
-    const definition = providerDefinitions.get(provider) ?? sharedManagedProviderDefinition(provider);
+    const definition = providerDefinitions.get(provider);
     let bridge;
     let modelProxy;
     const ownedResources = new Set();
@@ -264,11 +264,14 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       if (errors.length) throw new AggregateError(errors, "模型代理资源未能完全关闭");
     } } };
     retain(proxyRuntime);
-    const guardedDefinition = definition && ["ocg", "opencode-go", "ccg", "clp"].includes(definition.storageId ?? definition.id)
+    const guardedDefinition = definition?.accountId !== undefined
       ? definition : undefined;
     const modelGuard = guardedDefinition
       ? new ProviderModelGuard(join(managedProviderDirectory(runtime.environment, guardedDefinition),
-        guardedDefinition.catalogFileName), model => isManagedProviderModelValid(guardedDefinition, model))
+        guardedDefinition.catalogFileName), model => isManagedProviderModelValid(guardedDefinition, model), {
+        blockedPaths: [providerCatalogIsolationPath(runtime.environment),
+          `${join(managedProviderDirectory(runtime.environment, guardedDefinition), guardedDefinition.catalogFileName)}.settings-pending`],
+      })
       : isCustomCatalogProvider(upstreamProvider)
         ? new ProviderModelGuard(responsesProviderCatalogPath(runtime.environment, upstreamProvider), model =>
           typeof model === "string" && model.trim() === model && model.length > 0 && model.length <= 200 && !/\p{Cc}/u.test(model), {
@@ -276,6 +279,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
           blockedPaths: [
             `${responsesProviderCatalogPath(runtime.environment, upstreamProvider)}.pending`,
             responsesContextSyncPath(runtime.environment),
+            providerCatalogIsolationPath(runtime.environment),
           ],
         })
         : undefined;
@@ -317,8 +321,9 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
             },
           }),
     };
-    const opencodeGo = provider === "ocg";
-    const accountFamily = managedProviderAccountFamilies.find(family => family.proxyKey === provider);
+    const accountFamily = managedProviderAccountFamilies.find(family => family.matches(upstreamProvider));
+    const accountId = accountFamily?.accountId(upstreamProvider);
+    const opencodeGo = accountFamily?.proxyKey === "ocg";
     const managedAccountProxyOptions = (accounts, providerId, label) => ({
       accountIds: accounts.map((account) => account.id),
       defaultAccountId: accounts.find((account) => account.default)?.id,
@@ -341,18 +346,16 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       ...(!bridge && !officialOpenAiRoute ? { normalizeResponsesInput: true } : {}),
       ...(opencodeGo
         ? {
-            accountIds: goAccountIds.length === 0 ? undefined : goAccountIds,
-            ...(goDefaultAccountId === undefined
-              ? {}
-              : { defaultAccountId: goDefaultAccountId }),
-            quotaWindowsProvider: (accountId, signal) => {
+            accountIds: [accountId],
+            defaultAccountId: accountId,
+            quotaWindowsProvider: (requestedAccountId, signal) => {
               const quota = opencodeGoQuotaWindows.get(
-                accountId ?? goDefaultAccountId,
+                requestedAccountId ?? accountId,
               );
               return quota ? quota(signal) : Promise.resolve(null);
             },
-            onMetrics: (metrics, accountId) => {
-              const targetAccountId = accountId ?? goDefaultAccountId;
+            onMetrics: (metrics, requestedAccountId) => {
+              const targetAccountId = requestedAccountId ?? accountId;
               if (targetAccountId === undefined) return undefined;
               const targetProvider = opencodeGoProviderId(targetAccountId);
               return sendProviderProxyMetrics(
@@ -362,7 +365,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
             },
           }
         : accountFamily
-          ? managedAccountProxyOptions(accountsByProxyKey.get(provider), accountFamily.providerId, accountFamily.definition.displayName)
+          ? managedAccountProxyOptions([{id: accountId, default: true}], accountFamily.providerId, accountFamily.definition.displayName)
               : {
                 onMetrics: (metrics) => sendProviderProxyMetrics(
                   providerMetricsSocketPath(socketPath, metricsProvider),
@@ -414,9 +417,6 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   ]));
   const goAccounts = accountsByProxyKey.get("ocg");
   const proxyAccountId = managedProviderAccountIdFromProvider;
-  const goAccountIds = goAccounts.map((account) => account.id);
-  const goDefaultAccount = goAccounts.find((account) => account.default);
-  const goDefaultAccountId = goDefaultAccount?.id;
   const opencodeGoQuotaWindows = new Map(goAccounts.map((account) => [
     account.id,
     createOpencodeGoQuotaWindowsProvider({
@@ -460,9 +460,28 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     provider.provider,
     { runtime: provider, socketPath: managedSocketPaths[index] },
   ]));
-  const providerSettingsFingerprint = provider => provider === aggregateProviderId
-    ? readAggregateProviderSettingsFingerprint(runtime.environment, appServerRuntime.aggregateMembers)
-    : readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+  const assertAggregateProtocols = (profiles) => {
+    for (const profile of profiles) {
+      if (isCustomCatalogProvider(profile.provider)
+        && profile.upstreamWireApi !== customSwitchingProvidersById.get(profile.provider)?.upstreamWireApi) {
+        // Member proxies retain the host's launch protocol, including proxies
+        // created later for a refreshed URL. Only a full host restart replaces it.
+        throw new AggregateProviderTopologyChangedError();
+      }
+    }
+  };
+  const providerSettingsFingerprint = (provider) => {
+    if (provider !== aggregateProviderId) return readAppServerProviderSettingsFingerprint(provider, runtime.environment);
+    // Check even before the first aggregate instance exists, and before an
+    // unchanged/active result can acknowledge or defer new protocol material.
+    assertCurrentAggregateProtocols();
+    return readAggregateProviderSettingsFingerprint(runtime.environment, appServerRuntime.aggregateMembers);
+  };
+  const assertCurrentAggregateProtocols = () => assertAggregateProtocols(
+    appServerRuntime.aggregateMembers.filter(isCustomCatalogProvider).map(provider => ({
+      provider, upstreamWireApi: readCustomProviderUpstreamWireApi(runtime.environment, provider),
+    })),
+  );
   const prepareProviderSettings = (provider) => {
     const aggregate = provider === aggregateProviderId;
     if (!providerDefinitions.has(provider) && !aggregate) return undefined;
@@ -471,13 +490,14 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const next = resolveAppServerRuntime(runtime.document, runtime.dataDir, runtime.environment);
     const aggregateMaterial = aggregate
       ? loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers) : undefined;
+    if (aggregateMaterial) assertAggregateProtocols(aggregateMaterial.profiles);
     const defaultModel = aggregate ? aggregateMaterial.defaultModel
       : loadManagedModelProviderSettings(runtime.environment).find(value => value.provider === provider)?.model ?? null;
     if (providerSettingsFingerprint(provider) !== fingerprint || aggregateMaterial && aggregateMaterial.fingerprint !== fingerprint) {
       throw new Error("Provider 设置在读取期间发生变化");
     }
     if (JSON.stringify(next.topology) !== JSON.stringify(appServerRuntime.topology)) {
-      throw new Error("App Server 拓扑已变化，需要显式重启服务");
+      throw Object.assign(new Error("App Server 拓扑已变化，需要显式重启服务"), { code: "PROVIDER_TOPOLOGY_CHANGED" });
     }
     const managed = managedByProvider.get(provider);
     const material = next.managedProviders.find(value => value.provider === provider);
@@ -531,6 +551,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       throw new Error("聚合模型旧资源尚未确认释放");
     }
     const material = loadAggregateModelMaterial(runtime.environment, appServerRuntime.aggregateMembers);
+    assertAggregateProtocols(material.profiles);
     if (material.fingerprint !== snapshot.fingerprint || material.defaultModel !== snapshot.defaultModel) {
       throw new Error("聚合设置在启动材料读取期间发生变化");
     }
@@ -543,7 +564,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const token = randomBytes(32).toString("hex");
     const urls = new Map();
     for (const profile of material.profiles) {
-      let key = sharedProviderProxyKey(profile.provider);
+      let key = profile.provider;
       const options = await proxyOptionsForUrl(new URL(profile.baseUrl));
       const signature = proxyTargetSignature(options);
       // A live standalone custom instance can retain its original upstream.
@@ -578,7 +599,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
   const failedInstanceStarts = new Set();
   const providerProxyIsInUse = (proxyKey) =>
     providerProxyRuntimes.hasUsers(proxyKey)
-    || sharedProviderProxyKey(primaryProvider) === proxyKey;
+    || primaryProvider === proxyKey;
   const { watchChild, detachChild } = lifecycle;
   const cleanFailedInstance = async (provider, child) => {
     failedInstanceStarts.add(provider);
@@ -766,7 +787,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         return;
       }
       await prepareAppServerSocketPaths([managed.socketPath], runtime.environment);
-      const proxyKey = sharedProviderProxyKey(provider);
+      const proxyKey = provider;
       if (!aggregate) providerProxyRuntimes.addUser(proxyKey, provider);
       let proxy;
       let child;
@@ -883,7 +904,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     settingsSnapshots.delete(provider);
     if (provider === aggregateProviderId) await closeAggregateProxy();
     if (provider !== primaryProvider) {
-      const proxyKey = sharedProviderProxyKey(provider);
+      const proxyKey = provider;
       providerProxyRuntimes.removeUser(proxyKey, provider);
       if (!providerProxyIsInUse(proxyKey)) {
         const proxy = providerProxyRuntimes.get(proxyKey)?.proxy;
@@ -1137,7 +1158,7 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
       if (definition.webSearch === "disabled") primaryArguments.push("-c", 'web_search="disabled"');
-      const providerKey = sharedProviderProxyKey(definition.id);
+      const providerKey = definition.id;
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         isGoProvider(definition.id)
@@ -1161,7 +1182,12 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
         ensureProvider: ensureInstance,
         releaseProvider: releaseInstance,
         applyProviderSettings,
-        providerSettingsSnapshot: provider => settingsSnapshots.get(provider),
+        providerSettingsSnapshot: provider => {
+          // The supervisor skips applyProviderSettings while a native client
+          // holds a lease. A lease cannot make a protocol change hot-applicable.
+          if (provider === aggregateProviderId) assertCurrentAggregateProtocols();
+          return settingsSnapshots.get(provider);
+        },
         attachDesktopApp,
         detachDesktopApp,
         desktopAppProviderSelectionEnabled: validatedCodex.desktop_app?.enabled === true

@@ -25,7 +25,7 @@ export interface CustomPrimaryProviderSetupOptions {
   providerId?: string;
   probeWebSocket?: typeof import("./responses-websocket-probe.mjs").probeResponsesWebSocket;
   probeModelCapabilities?: typeof import("./custom-model-capability-probe.mjs").probeCustomModelCapabilities;
-  loadModelTemplates?: (source: import("./responses-model-templates.mjs").ResponsesTemplateSource) => Promise<import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[]>;
+  loadDraftTemplates?: typeof import("./responses-model-templates.mjs").loadCustomModelDraftTemplates;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CustomPrimaryProviderSetupClient>;
@@ -33,6 +33,6 @@ export interface CustomPrimaryProviderSetupOptions {
 
 export function runCustomPrimaryProviderSetup(options?: CustomPrimaryProviderSetupOptions): Promise<
   | { provider: string; model: string }
-  | { action: "back" | "cancel" }
+  | { action: string; activation?: string }
   | undefined
 >;

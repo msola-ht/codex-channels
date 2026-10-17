@@ -105,6 +105,13 @@ export function formatSurfaceConfigurationChange(
           : []),
         "待应用状态已保留；Gateway 在重试预算内自动重试，耗尽后等待设置变化或 Gateway 重建。请查看服务日志。",
       ].join("\n"));
+    case "provider-settings-restart-required":
+      return toStructuredMarkdownList([
+        "提供商成员或上游协议已变化，需要重启服务",
+        ...(change.providers?.length ? [`Provider：${change.providers.join("、")}`] : []),
+        "新增、删除提供商、切换运行模式或修改自定义上游协议后，模型设置热更新无法重建运行中宿主的提供商及协议代理。",
+        "待应用状态已保留，已停止无效自动重试。请在方便时运行 codexc restart all，重建 App Server 和 Gateway 的提供商及协议代理。",
+      ].join("\n"));
   }
 }
 

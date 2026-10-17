@@ -1602,6 +1602,7 @@ export abstract class GatewayComponentGraph {
       | "provider-settings-scheduled"
       | "provider-settings-restarting"
       | "provider-settings-applied"
+      | "provider-settings-restart-required"
       | "provider-settings-failed",
     providers: readonly string[],
   ): void {
@@ -2047,13 +2048,13 @@ export abstract class GatewayComponentGraph {
   }
 
   private resolveAutoCompactPercent(
-    _provider: string | null | undefined,
+    provider: string | null | undefined,
     model: string | null | undefined,
   ): number | null {
     if (!model) return null;
     // 受管第三方 Provider 只配置模型窗口，压缩阈值由上游按窗口推导。
     const managed = loadManagedModelWindow(process.env).some(
-      (candidate: { model: string }) => candidate.model === model,
+      (candidate: { provider: string; model: string }) => candidate.provider === provider && candidate.model === model,
     );
     if (managed) return null;
     const override = readCodexConfigModelOverride(process.env);

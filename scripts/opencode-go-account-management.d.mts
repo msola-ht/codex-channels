@@ -37,7 +37,6 @@ export interface OpenCodeGoAccountRemovalPreview {
     historyThreadsBecomeUnavailable: true;
     removesLastAccount?: true;
     restoresInitialConfig?: true;
-    removesManagedCatalog?: true;
   };
   confirmation: { required: true; field: "confirmHistoryLoss" };
   activation: "restart-all";

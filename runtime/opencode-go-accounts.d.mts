@@ -35,9 +35,6 @@ export function loadOpencodeGoProviderIdentities(
   environment?: NodeJS.ProcessEnv,
 ): Array<{ provider: string; displayName: string; email?: string; phone?: string }>;
 
-export function opencodeGoAccountsDirectory(
-  environment?: NodeJS.ProcessEnv,
-): string;
 export function opencodeGoAccountsFilePath(
   environment?: NodeJS.ProcessEnv,
 ): string;

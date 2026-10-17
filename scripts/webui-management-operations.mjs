@@ -52,6 +52,8 @@ export function isHighRiskManagementPath(path) {
   // They retain the ordinary POST budget without spending the apply budget.
   if (path === "/relay/preview") return false;
   return path.startsWith("/accounts/openai/reset-credits/")
+    || path === "/models/official/context"
+    || path === "/models/official/refresh"
     || path.startsWith("/relay/")
     || path.startsWith("/delivery/")
     || path.startsWith("/provider-settings")

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { parse } from "smol-toml";
 import { codexHomePath } from "./codex-home.mjs";
-import { loadManagedProviderProfiles, managedProviderDirectory, managedProviderMarkerPath, readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
+import { loadManagedProviderProfiles, managedProviderDirectory, managedProviderMarkerPath, readManagedMarker, readCodexConfigFile } from "./model-provider-managed-runtime.mjs";
 import { loadManagedModelProviderDefinitions, managedProviderAccountFamilies } from "./model-provider-definitions.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 import { loadConfiguredCustomSwitchingModelProviders, loadCustomSwitchingProviderIds,
@@ -12,9 +12,18 @@ import { loadConfiguredCustomSwitchingModelProviders, loadCustomSwitchingProvide
 import { customOfficialModelCatalogPath } from "./model-provider-official-catalog.mjs";
 import { isCustomCatalogProvider, responsesProviderCatalogPath, responsesContextSyncPath,
   assertResponsesContextSyncComplete } from "./model-provider-responses-catalog.mjs";
+import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
+import { customProviderUpstreamMetadataPath } from "./model-provider-upstream-metadata.mjs";
 
 export const aggregateProviderId = "codexc-aggregate";
 export const aggregateTokenEnvironmentKey = "CODEX_CONNECT_AGGREGATE_TOKEN";
+
+export class AggregateProviderTopologyChangedError extends Error {
+  constructor() {
+    super("聚合账户拓扑或上游协议已变化，需要显式重启 App Server 和 Gateway 服务");
+    this.code = "PROVIDER_TOPOLOGY_CHANGED";
+  }
+}
 
 // This is a derived, on-demand instance, not another account or persisted selection.
 export function aggregateProviderMembers(primaryProvider, providers) {
@@ -33,23 +42,33 @@ export function aggregateProviderMaterialFiles(environment, expectedMembers) {
       .map((family) => [family.accountsFilePath(environment), 1_048_576]),
     [customSwitchingProviderRegistryPath(environment), 262_144],
     [responsesContextSyncPath(environment), 1_048_576],
+    [providerCatalogIsolationPath(environment), 16 * 1024 * 1024],
   ]);
   const definitions = loadManagedModelProviderDefinitions(environment);
   const customIds = loadCustomSwitchingProviderIds(environment);
+  const currentMembers = [
+    ...definitions.filter(definition => readManagedMarker(environment, definition)?.mode === "switching").map(definition => definition.id),
+    ...customIds,
+  ];
+  if (JSON.stringify(currentMembers) !== JSON.stringify(expectedMembers)) throw new AggregateProviderTopologyChangedError();
   for (const id of expectedMembers) {
     const definition = definitions.find(entry => entry.id === id);
     if (definition) {
       paths.set(managedProviderMarkerPath(environment, definition), 1_048_576);
       paths.set(join(codexHomePath(environment), definition.profileFileName), 1_048_576);
       paths.set(join(managedProviderDirectory(environment, definition), definition.catalogFileName), 2_097_152);
+      paths.set(`${join(managedProviderDirectory(environment, definition), definition.catalogFileName)}.settings-pending`, 16 * 1024 * 1024);
     } else if (customIds.includes(id)) {
       paths.set(customPrimaryProviderProfilePath(environment, id), 1_048_576);
       const catalogPath = isCustomCatalogProvider(id)
         ? responsesProviderCatalogPath(environment, id) : customOfficialModelCatalogPath(environment);
       paths.set(catalogPath, isCustomCatalogProvider(id) ? 2_097_152 : 8_388_608);
-      if (isCustomCatalogProvider(id)) paths.set(`${catalogPath}.pending`, 1_048_576);
+      if (isCustomCatalogProvider(id)) {
+        paths.set(`${catalogPath}.pending`, 1_048_576);
+        paths.set(customProviderUpstreamMetadataPath(environment, id), 16 * 1024);
+      }
     } else {
-      throw new Error("聚合账户拓扑已变化，需要显式重启 App Server 服务");
+      throw new AggregateProviderTopologyChangedError();
     }
   }
   return [...paths].map(([path, maximumBytes]) => ({ path, maximumBytes }));
@@ -110,7 +129,7 @@ export function loadAggregateModelMaterial(environment, expectedMembers) {
     })),
   ];
   if (JSON.stringify(aggregateProviderMembers("openai", configuredProfiles)) !== JSON.stringify(expectedMembers)) {
-    throw new Error("聚合账户拓扑已变化，需要显式重启 App Server 服务");
+    throw new AggregateProviderTopologyChangedError();
   }
   const profiles = configuredProfiles.filter(entry => expectedMembers.includes(entry.provider));
   if (profiles.length !== expectedMembers.length || profiles.length < 2) {

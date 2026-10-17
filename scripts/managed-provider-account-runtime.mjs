@@ -1,11 +1,11 @@
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { inspectAppServerSupervisorState, releaseAppServerProvider } from "../runtime/app-server-supervisor.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import { runtimeConfig } from "./runtime-config.mjs";
+import { locateUserConfig } from "./runtime-config.mjs";
 import { AccountManagementError } from "./account-management-error.mjs";
 
 export function managedAccountPrimarySocket(environment) {
-  const { configPath, dataDir } = runtimeConfig(environment);
+  const { configPath, dataDir } = locateUserConfig(environment);
   return resolvePrimaryAppServerSocketPath(readGatewayConfig(configPath), dataDir);
 }
 

@@ -1,6 +1,6 @@
 import { readClineRelayCatalog, clineRelayCatalogPath, clineRelayInputModalities, clineRelayReasoningEfforts } from "./cline-relay-catalog.mjs";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import { codexHomePath } from "./codex-home.mjs";
 import { loadManagedModelProviderDefinitions } from "./model-provider-definitions.mjs";
@@ -15,6 +15,7 @@ import { customProviderUpstreamMetadataPath, readCustomProviderUpstreamWireApi }
 import { isCustomCatalogProvider, readResponsesModelCatalog, responsesProviderCatalogPath,
   assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { readPrivateFileSync } from "./private-file.mjs";
+import { providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 
 /** Registration is distinct from credential availability, including metrics settlement. */
 export function listRelayProviderIds(environment = process.env) {
@@ -56,11 +57,23 @@ function loadBaseRelayProviderMaterial(provider, environment) {
     ? customPrimaryProviderCredentialPath(environment, provider, primaryBlock.env_key) : undefined;
   const metadataPath = isCustomCatalogProvider(provider) ? customProviderUpstreamMetadataPath(environment, provider) : undefined;
   const paths = [...(switching ? [customSwitchingProviderRegistryPath(environment), customPrimaryProviderProfilePath(environment, provider)] : []),
-    configPath, ...(credentialPath ? [credentialPath] : []), ...(metadataPath !== undefined && existsSync(metadataPath) ? [metadataPath] : []), catalogPath];
+    configPath, ...(credentialPath ? [credentialPath] : []), ...(metadataPath !== undefined ? [metadataPath] : []), catalogPath];
   const fingerprint = () => {
     const hash = createHash("sha256");
     const read = createProviderFileReader(environment);
-    for (const path of paths) hash.update(JSON.stringify([path, read(path, 8 * 1024 * 1024)]));
+    for (const path of paths) {
+      let content;
+      try {
+        // Include absence in the revision too. Check it before Windows ACL
+        // validation, which does not report a missing file as plain ENOENT.
+        if (path === metadataPath) lstatSync(path);
+        content = read(path, path === metadataPath ? 16 * 1024 : 8 * 1024 * 1024);
+      } catch (error) {
+        if (path !== metadataPath || error?.code !== "ENOENT") throw error;
+        content = null;
+      }
+      hash.update(JSON.stringify([path, content]));
+    }
     return hash.digest("hex");
   };
   const revision = fingerprint();
@@ -85,5 +98,5 @@ function loadBaseRelayProviderMaterial(provider, environment) {
     ...(isCustomCatalogProvider(provider) ? { modelSampling: Object.fromEntries(catalog.definitions
       .filter(model => model.sampling !== undefined).map(model => [model.id, model.sampling])) } : {}),
     protocols: upstreamWireApi === "chat_completions" ? ["chat"] : ["responses"],
-    paths: [...paths, responsesContextSyncPath(environment)], revision };
+    paths: [...paths, responsesContextSyncPath(environment), providerCatalogIsolationPath(environment)], revision };
 }

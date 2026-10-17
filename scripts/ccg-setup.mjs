@@ -51,7 +51,8 @@ import {
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
-import { createCcgCatalog } from "./provider-model-catalog.mjs";
+import { createCcgCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
+import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
 import { runManagedProviderModelSetup } from "./managed-provider-model-management.mjs";
 
 const maximumCatalogBytes = 2 * 1024 * 1024;
@@ -101,6 +102,7 @@ export async function applyCcgConfiguration({
   accountId,
   apiKey,
   catalog: source,
+  templateBindings,
   model,
   mode = "switching",
   reconfigure = false,
@@ -171,10 +173,13 @@ export async function applyCcgConfiguration({
     }
     updates.set(paths.backup, `${JSON.stringify(initial, null, 2)}\n`);
     if (writesCatalog) {
+      const modelTemplates = templateBindings === undefined ? undefined
+        : readModelTemplateBindings({ modelTemplates: templateBindings }, catalog.models.map(entry => entry.slug));
       updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
       updates.set(paths.manifest, `${JSON.stringify({
         source: deepseekSetupScriptUrl,
         downloadedAt: new Date().toISOString(),
+        ...(modelTemplates === undefined ? {} : { modelTemplates }),
       }, null, 2)}\n`);
     }
     updates.set(paths.profile, profile === undefined ? undefined : stringify(profile));
@@ -235,10 +240,6 @@ export async function removeCcgConfiguration({ accountId, confirmRemove = false 
       [paths.marker, undefined],
       [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`],
     ]);
-    if (remaining.length === 0) {
-      updates.set(paths.catalog, undefined);
-      updates.set(paths.manifest, undefined);
-    }
     if (current.mode === "exclusive") {
       updates.set(paths.config, stringify(restoreProviderBaseConfig(
         await readConfig(paths.config, environment), initial.config, definition,
@@ -267,7 +268,7 @@ export async function runCcgSetup({
       ...(accounts.length === 0 ? [] : [
         { value: "reconfigure", label: "重新配置账户" },
         { value: "settings", label: "修改默认模型与思考等级" },
-        { value: "catalog", label: "管理共享模型（添加／启用／更新）" },
+        { value: "catalog", label: "发现／添加共享模型" },
         { value: "default", label: "设置默认账户" },
         { value: "remove", label: "删除账户" },
       ]),
@@ -275,7 +276,7 @@ export async function runCcgSetup({
     ],
   });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
-  if (action === "catalog") return runManagedProviderModelSetup("ccg", { environment, prompts, output, downloadCatalog });
+  if (action === "catalog") return runManagedProviderModelSetup(requestedAccountId === undefined ? "ccg" : ccgProviderId(requestedAccountId), { environment, prompts, output, downloadCatalog });
   const accountId = requestedAccountId ?? (action === "add"
     ? await promptManagedAccountId(prompts, accounts)
     : await prompts.select({
@@ -326,13 +327,13 @@ export async function runCcgSetup({
         ? undefined : "CCG API Key 无效",
     });
     if (prompts.isCancel(apiKey)) return { action: "back" };
-    let catalog;
+    let catalog, templateBindings;
     const paths = ccgSetupPaths(environment, accountId);
     if (existsSync(paths.catalog)) {
       catalog = JSON.parse(readPrivateFileSync(paths.catalog, maximumCatalogBytes));
     } else {
       const downloaded = await downloadCatalog(fetchImpl);
-      catalog = createCcgCatalog(downloaded.catalog);
+      ({ catalog, templateBindings } = createCcgCatalogWithTemplateBindings(downloaded.catalog));
     }
     const model = await prompts.select({
       message: "选择 CCG 默认模型（来自目录文件）",
@@ -341,7 +342,7 @@ export async function runCcgSetup({
     });
     if (prompts.isCancel(model)) return { action: "back" };
     result = await applyCcgConfiguration({
-      accountId, apiKey, catalog, model, mode,
+      accountId, apiKey, catalog, templateBindings, model, mode,
       reconfigure: action === "reconfigure",
       confirmExclusiveConfigChange,
     }, { environment });

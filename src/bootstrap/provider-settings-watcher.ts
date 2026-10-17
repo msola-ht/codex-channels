@@ -23,6 +23,7 @@ export type ProviderSettingsStateKind =
   | "scheduled"
   | "restarting"
   | "applied"
+  | "restart-required"
   | "failed";
 
 export interface ProviderSettingsStateChange {
@@ -59,6 +60,7 @@ export class ProviderSettingsWatcher {
   private readonly pendingProviders = new Map<string, number>();
   private readonly applyFailures = new Map<string, { generation: number; count: number }>();
   private readonly deferredGenerations = new Map<string, number>();
+  private readonly restartRequiredProviders = new Set<string>();
   private generation = 0;
   private readonly cancellation = new AbortController();
   private readonly stopTimeoutMs: number;
@@ -168,7 +170,7 @@ export class ProviderSettingsWatcher {
         this.applyFailures.delete(provider);
         this.deferredGenerations.delete(provider);
       }
-      this.emitState("scheduled", providers);
+      this.emitState("scheduled", providers.filter(provider => !this.restartRequiredProviders.has(provider)));
       this.logger.info(
         { providers },
         "第三方模型设置已变化，等待对应 Provider 安全应用",
@@ -187,6 +189,7 @@ export class ProviderSettingsWatcher {
       return;
     }
     const pending = new Map([...this.pendingProviders].filter(([provider, generation]) => {
+      if (this.restartRequiredProviders.has(provider)) return false;
       const failures = this.applyFailures.get(provider);
       return failures?.generation !== generation || failures.count < maximumApplyFailures;
     }));
@@ -204,12 +207,14 @@ export class ProviderSettingsWatcher {
     this.lastRestartAttemptAt = this.nowMs();
     for (const [provider, generation] of pending) {
       if (this.stopping) return;
+      if (this.restartRequiredProviders.has(provider)) continue;
       try {
         const fingerprint = this.fingerprints.get(provider);
         const wasDeferred = this.deferredGenerations.get(provider) === generation;
         if (generation > 0 && !wasDeferred) this.emitState("restarting", [provider]);
         const applied = await this.applyProviderSettings(provider, this.cancellation.signal);
         if (this.stopping) return;
+        if (this.restartRequiredProviders.has(provider)) continue;
         if (!applied) {
           if (generation > 0 && !wasDeferred) this.emitState("scheduled", [provider]);
           this.deferredGenerations.set(provider, generation);
@@ -221,6 +226,7 @@ export class ProviderSettingsWatcher {
         const current = await this.tryReadFingerprints();
         if (this.stopping) return;
         if (current) this.acceptFingerprints(current);
+        if (this.restartRequiredProviders.has(provider)) continue;
         if (!current || current.get(provider) !== fingerprint) continue;
         if (this.pendingProviders.get(provider) !== generation) continue;
         await this.refreshProviderModels(provider, this.cancellation.signal);
@@ -228,6 +234,7 @@ export class ProviderSettingsWatcher {
         const confirmed = await this.tryReadFingerprints();
         if (this.stopping) return;
         if (confirmed) this.acceptFingerprints(confirmed);
+        if (this.restartRequiredProviders.has(provider)) continue;
         if (!confirmed || confirmed.get(provider) !== fingerprint) continue;
         if (this.pendingProviders.get(provider) !== generation) continue;
         this.pendingProviders.delete(provider);
@@ -236,6 +243,11 @@ export class ProviderSettingsWatcher {
         this.logger.info({ provider }, "第三方模型设置已安全应用到对应 Provider");
       } catch (error) {
         if (this.stopping) return;
+        if (this.restartRequiredProviders.has(provider)) continue;
+        if (error instanceof Error && "code" in error && error.code === "PROVIDER_TOPOLOGY_CHANGED") {
+          this.requireServiceRestart(provider);
+          continue;
+        }
         this.deferredGenerations.delete(provider);
         const old = this.applyFailures.get(provider);
         const count = old?.generation === generation ? old.count + 1 : 1;
@@ -256,7 +268,7 @@ export class ProviderSettingsWatcher {
     kind: ProviderSettingsStateKind,
     providers: string[],
   ): void {
-    if (this.stopping || !this.onStateChange) {
+    if (this.stopping || !this.onStateChange || providers.length === 0) {
       return;
     }
     try {
@@ -269,10 +281,20 @@ export class ProviderSettingsWatcher {
     }
   }
 
+  private requireServiceRestart(provider: string): void {
+    if (this.restartRequiredProviders.has(provider)) return;
+    this.restartRequiredProviders.add(provider);
+    this.deferredGenerations.delete(provider);
+    this.emitState("restart-required", [provider]);
+    this.logger.warn({ provider, code: "PROVIDER_TOPOLOGY_CHANGED" },
+      "提供商拓扑已变化，停止自动应用重试；请显式重启 App Server 和 Gateway");
+  }
+
   private async tryReadFingerprints(): Promise<Map<string, string> | undefined> {
     try {
       const snapshot = await this.reader.readFresh();
       if (this.stopping) return undefined;
+      if (snapshot.aggregateRestartRequired) this.requireServiceRestart(aggregateProviderId);
       this.validate?.();
       this.visibleProviderIds ??= new Set(snapshot.visibleProviders);
       return new Map(snapshot.fingerprints);

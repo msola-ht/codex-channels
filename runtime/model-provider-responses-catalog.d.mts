@@ -6,10 +6,12 @@ export function validateResponsesModels(values: unknown, defaultModel: string, o
 export function createResponsesModelCatalog(definitions: ResponsesModelDefinition[], defaultModel: string, options?: { allowReasoningToggle?: boolean }): {
   schemaVersion: number; defaultModel: string; definitions: ResponsesModelDefinition[]; models: Record<string, unknown>[];
 };
+export function compileResponsesModelCatalog(definitions: ResponsesModelDefinition[], defaultModel: string, options?: { allowReasoningToggle?: boolean }): ReturnType<typeof createResponsesModelCatalog>;
 export function readResponsesModelCatalog(environment: NodeJS.ProcessEnv | undefined, id: string): ReturnType<typeof createResponsesModelCatalog> & { path: string; content: string; revision: string };
 export function parseResponsesModelCatalog(content: string): ReturnType<typeof createResponsesModelCatalog>;
 export function responsesModelSettings(environment: NodeJS.ProcessEnv | undefined, id: string, model?: string): { catalog: ReturnType<typeof readResponsesModelCatalog>; model: string; reasoningEffort: string | null };
-export function writeResponsesModelCatalog(environment: NodeJS.ProcessEnv | undefined, id: string, definitions: ResponsesModelDefinition[], model: string, expectedRevision?: string): {path: string; previous: ReturnType<typeof readResponsesModelCatalog> | undefined};
+export function writeResponsesModelCatalog(environment: NodeJS.ProcessEnv | undefined, id: string, definitions: ResponsesModelDefinition[], model: string, expectedRevision?: string): {path: string; previous: ReturnType<typeof readResponsesModelCatalog> | undefined; content: string; pendingContent: string};
+export function writeResponsesModelContextWindow(environment: NodeJS.ProcessEnv | undefined, id: string, model: string, contextWindow: number, expectedRevision: string): ReturnType<typeof writeResponsesModelCatalog>;
 export function finishResponsesModelCatalogWrite(transaction: ReturnType<typeof writeResponsesModelCatalog>, rollback?: boolean): void;
 export function removeResponsesModelCatalog(environment: NodeJS.ProcessEnv | undefined, id: string): void;
 
@@ -19,4 +21,3 @@ export function responsesProviderBackupPath(environment: NodeJS.ProcessEnv | und
 
 export function responsesContextSyncPath(environment: NodeJS.ProcessEnv | undefined): string;
 export function assertResponsesContextSyncComplete(environment: NodeJS.ProcessEnv | undefined): void;
-export function resolveResponsesTemplateContexts(definitions: ResponsesModelDefinition[], environment: NodeJS.ProcessEnv): ResponsesModelDefinition[];

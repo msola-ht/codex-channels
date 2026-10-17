@@ -15,8 +15,8 @@ export function managedPrimaryCredentialPath(environment, definition, environmen
   const version = typeof environmentKey === "string" && environmentKey.startsWith(prefix)
     ? environmentKey.slice(prefix.length) : "";
   if (!/^[a-f0-9]{32}$/u.test(version)) throw new Error("受管主 Provider 凭据引用无效");
-  return join(providerStorageRoot(environment), definition.storageId ?? definition.id,
-    "primary-credentials", definition.id, `${version}.json`);
+  return join(providerStorageRoot(environment), definition.id,
+    "primary-credentials", `${version}.json`);
 }
 
 export function createManagedPrimaryCredential(definition, apiKey) {

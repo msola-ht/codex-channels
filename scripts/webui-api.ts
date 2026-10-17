@@ -3,18 +3,22 @@ import type { GenerationTiming } from "../runtime/request-timing.mjs"
 import type { ClineRelayCatalogSnapshot } from "./cline-relay-catalog.mjs";
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 import type { CustomModelCapabilityProbeResult } from "./custom-model-capability-probe.mjs"
+export type { ProviderWebSearchProbeInput as ManagementProviderWebSearchProbeInput, ProviderWebSearchProbeResult as ManagementProviderWebSearchProbeResult } from "./provider-web-search-probe.mjs"
 import type { RelayModelReasoning } from "../runtime/chat-reasoning.mjs";
 export type { RelayModelReasoning } from "../runtime/chat-reasoning.mjs";
 import type { RelayReasoningProbeInput, RelayReasoningProbeResult } from "./relay-reasoning-probe.mjs";
 export type { RelayReasoningProbeInput, RelayReasoningProbeResult, RelayReasoningProbeEvent } from "./relay-reasoning-probe.mjs";
 
-export type ManagementCustomModelProbeResult = CustomModelCapabilityProbeResult & { connectionToken: string }
+export type ManagementCustomModelProbeResult = CustomModelCapabilityProbeResult & (
+  | { capability: "webSearch"; connectionToken?: never }
+  | { capability: "applyPatch" | "toolSearch"; connectionToken: string }
+)
 export interface ManagementCustomModelProbeInput {
   providerId?: string
   baseUrl: string
   model: string
   upstreamWireApi: "responses" | "chat_completions"
-  capability: "applyPatch" | "toolSearch"
+  capability: "applyPatch" | "toolSearch" | "webSearch"
   reasoningEffort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
   credential: { action: "preserve" } | { action: "replace"; apiKey: string }
 }
@@ -592,6 +596,48 @@ export interface ManagementSettingMutationResponse {
   confirmationExpiresAt?: number
 }
 
+export type OpenAiModelCatalogEntry = import("./webui-official-model-catalog.mjs").OpenAiModelCatalogEntry
+
+export interface OpenAiModelCatalogResponse {
+  source: "codex-cache"
+  revision: string
+  scope: string
+  fetchedAt: string
+  clientVersion: string | null
+  models: OpenAiModelCatalogEntry[]
+}
+
+export interface OpenAiModelContextInput {
+  revision: string
+  model: string
+  contextWindow: number
+}
+
+export interface OpenAiModelContextPreview extends OpenAiModelContextInput {
+  scope: string
+  displayName: string
+  previousContextWindow: number | null
+  maxContextWindow: number | null
+}
+
+export interface OpenAiModelContextResult {
+  revision: string | null
+  scope: string
+  model: string
+  contextWindow: number
+  consistency: "confirmed" | "unknown"
+  backupCreated: true
+  auditStatus: "recorded" | "degraded"
+}
+
+export interface OpenAiModelRefreshInput { revision: string }
+export type OpenAiModelPromptsResponse = import("./webui-official-model-catalog.mjs").OpenAiModelPrompts
+export type ProviderModelPromptsResponse = OpenAiModelPromptsResponse & Pick<ResponsesModelDefinition, "template" | "sampling">
+export type OpenAiModelRefreshPreview = import("./webui-official-model-catalog.mjs").OpenAiModelRefreshPreview
+export type OpenAiModelRefreshResult = import("./webui-official-model-catalog.mjs").OpenAiModelRefreshResult & {
+  auditStatus: "recorded" | "degraded"
+}
+
 export interface CodexUserSettingsResponse {
   toolSettings: import("./codex-tool-settings.mjs").CodexToolSettings
   version: string
@@ -681,9 +727,11 @@ export interface ManagementProviderSettingsResponse {
   defaults: { model: string | null; reasoningEffort: string | null }
   modelCatalogs: Array<{
     provider: string
+    source: "managed" | "custom" | "official-shared"
+    revision: string
     displayName: string
     providers: string[]
-    models: Array<{ id: string; displayName: string; isDefault: boolean }>
+    models: Array<{ id: string; displayName: string; isDefault: boolean; presentation: OpenAiModelCatalogEntry & { editable: false } }>
     canRemove: boolean
     unavailableReason?: string
   }>
@@ -747,25 +795,55 @@ export interface ManagementProviderSettingsResponse {
       baseUrl: string
     }>
   }
-  modelWindow: Array<{
-    id: string
+}
+
+export type ProviderModelTemplateSource = "official" | "deepseek" | "cline"
+export interface CustomModelDraftTemplatesResponse {
+  templates: Array<{
+    source: "official" | "deepseek"
+    model: string
     displayName: string
-    contextWindow: number
-    maxContextWindow: number
-    providers: string[]
-    windowPercent?: number
-    conflicts?: boolean
-    perProvider?: Record<string, number>
+    draft: import("./responses-model-templates.mjs").CustomModelDraftDefinition
+    suggested: ResponsesModelDefinition
   }>
+}
+export type ProviderModelTemplateSection = "prompts" | "capabilities" | "settings"
+export type ProviderModelTemplateValue = { present: false } | { present: true; value: unknown }
+export interface ProviderModelTemplateOptionsResponse {
+  provider: string
+  revision: string
+  sourceToken: string
+  expiresAt: number
+  availableSections: ProviderModelTemplateSection[]
+  targets: Array<{ model: string; displayName: string; template: { source: ProviderModelTemplateSource; model: string } | null }>
+  templates: Array<{ source: ProviderModelTemplateSource; model: string; displayName: string }>
+}
+export interface ProviderModelTemplateUpdateInput {
+  operation: "model.template.update"
+  provider: string
+  model: string
+  sections: ProviderModelTemplateSection[]
+  revision: string
+  sourceToken: string
+  template: { source: ProviderModelTemplateSource; model: string }
 }
 
 export type ManagementProviderSettingsMutationInput =
+  | ({ operation: "model.add" } & import("./provider-model-additions.mjs").ProviderModelAdditionInput)
+  | ProviderModelTemplateUpdateInput
   | { operation: "model.remove"; provider: string; model: string }
+  | { operation: "model.context"; provider: string; model: string; contextWindow: number; revision: string }
   | { operation: "model.custom.save"; resourceRevision: string; provider: string; models: ResponsesModelDefinition[]; model: string; probeConnections?: Array<{ model: string; capability: "applyPatch" | "toolSearch"; token: string }> }
   | { operation: "primary.switch"; providerId: string; model?: string }
   | { operation: "primary.remove"; providerId: string }
   | {
+      operation: "primary.custom.connection.save"
+      resourceRevision: string
+      provider: import("./custom-primary-provider-management.mjs").CustomProviderConnectionSaveInput
+    }
+  | {
       operation: "primary.custom.save"
+      resourceRevision?: string
       provider: {
         operation: "create" | "update"
         providerId: string
@@ -786,16 +864,12 @@ export type ManagementProviderSettingsMutationInput =
       provider: string
       model: string
       reasoningEffort: string
-      windowPercent?: number
     }
-  | ({
-      operation: "managed.window"
-      model: string
-    } & ({ contextWindow: number; windowPercent?: never } | { windowPercent: number; contextWindow?: never }))
 
-export interface ManagementProviderSettingsPreview {
-  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.window" | "model.remove" | "model.custom.save"
+export interface ManagementProviderSettingsStandardPreview {
+  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "model.remove" | "model.context" | "model.custom.save"
   revision?: string
+  before?: { defaultModel: string; reasoningEffort: string }
   warnings?: Array<{ code: string }>
   activation: string
   target?: {
@@ -806,23 +880,21 @@ export interface ManagementProviderSettingsPreview {
     baseUrl?: string
     model?: string | null
   }
-  provider?: {
+  provider?: string | {
     id: string
     displayName?: string
     name?: string
     model?: string
     baseUrl?: string
     mode?: string
+    supportsWebsockets?: boolean
     upstreamWireApi?: "responses" | "chat_completions"
     catalog?: string
     models?: ResponsesModelDefinition[]
     apiKeyChange?: boolean
   }
-  model?: { id: string; displayName: string; contextWindow?: number }
+  model?: { id: string; displayName: string; contextWindow?: number; maxContextWindow?: number }
   providers?: string[]
-  conflicts?: boolean
-  windowConflict?: boolean
-  overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
   windowPercent?: number
   contextWindow?: number
@@ -835,6 +907,21 @@ export interface ManagementProviderSettingsPreview {
   }
   transport?: { scheme?: "http" | "https"; cleartext?: boolean }
 }
+
+export interface ProviderModelTemplateUpdatePreview extends Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "model"> {
+  operation: "model.template.update"
+  provider: string
+  model: string
+  source: ProviderModelTemplateSource
+  sourceModel: string
+  sections: ProviderModelTemplateSection[]
+  changes: Array<{ field: string; before: ProviderModelTemplateValue; after: ProviderModelTemplateValue }>
+  willChange: boolean
+}
+export type ProviderModelAdditionManagementPreview = Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "revision" | "activation" | "providers" | "willChange"> & import("./provider-model-additions.mjs").ProviderModelAdditionPreview & {
+  operation: "model.add"
+}
+export type ManagementProviderSettingsPreview = ManagementProviderSettingsStandardPreview | ProviderModelTemplateUpdatePreview | ProviderModelAdditionManagementPreview
 
 export interface ManagementProviderSettingsPreviewResponse {
   preview: ManagementProviderSettingsPreview
@@ -850,9 +937,6 @@ export interface ManagementProviderSettingsMutationResponse {
   provider?: ManagementProviderSettingsPreview["provider"]
   model?: ManagementProviderSettingsPreview["model"]
   providers?: string[]
-  conflicts?: boolean
-  windowConflict?: boolean
-  overridden?: Array<{ provider: string; previousPercent: number }>
   reasoningEffort?: string
   windowPercent?: number
   contextWindow?: number

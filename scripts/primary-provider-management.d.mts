@@ -44,6 +44,7 @@ export interface PrimaryProviderManagementWarning {
 
 export interface PrimaryProviderRemovalPreview {
   operation: "remove";
+  revision: string;
   target: PrimaryProviderRemovalTarget;
   activation: PrimaryProviderActivation;
   effects: { restoresOfficial: boolean };
@@ -51,6 +52,7 @@ export interface PrimaryProviderRemovalPreview {
 
 export interface PrimaryProviderSwitchPreview {
   operation: "switch";
+  revision: string;
   target: PrimaryProviderTarget;
   activation: "restart-all";
   effects: PrimaryProviderSwitchEffects;

@@ -9,7 +9,6 @@ import {
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import {
-  loadManagedModelWindow,
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
 } from "../runtime/model-provider-runtime.mjs";
@@ -31,7 +30,7 @@ import {
   writePrivateFileAtomic,
 } from "../runtime/private-file.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
-import { createOpencodeGoCatalog } from "./provider-model-catalog.mjs";
+import { createOpencodeGoCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import {
   createManagedProviderConfiguration,
@@ -139,17 +138,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   } catch (error) {
     throw normalize("provider-state-unavailable", "accountId", error);
   }
-  let contextWindowByModel;
-  try {
-    contextWindowByModel = plan.downloadsCatalog
-      ? configuredContextWindowByModel(
-          environment,
-          new Set(catalogState.catalog.models.map((model) => model.slug)),
-        )
-      : {};
-  } catch (error) {
-    throw normalize("provider-state-unavailable", "accountId", error);
-  }
   let managedCatalog;
   try {
     managedCatalog = plan.downloadsCatalog ? createManagedProviderCatalog(
@@ -157,7 +145,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       definition,
       {
         previousModels: previous?.models,
-        modelContextWindowByModel: contextWindowByModel,
       },
     ) : catalogState.catalog;
     await validateModelCatalogWithCodex(managedCatalog, environment);
@@ -234,7 +221,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       await replaceOptionalProviderFile(path, content, environment);
       guards = refreshProviderFileSnapshot(guards, path);
     }
-    const catalogContent = `${JSON.stringify(managedCatalog, null, 2)}\n`;
     if (archivedBaselinePath !== undefined) {
       const previousBaseline = await readOptionalProviderFile(exclusiveBaselinePath, environment);
       if (previousBaseline === undefined) throw new Error("OpenCode Go 固定账户恢复基线缺失");
@@ -245,18 +231,18 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       await writePrivateFileAtomic(exclusiveBaselinePath, stringify(initialConfig));
       guards = refreshProviderFileSnapshot(guards, exclusiveBaselinePath);
     }
-    await assertProviderFileSnapshots(guards);
-    await writePrivateFileAtomic(plan.paths.catalogPath, catalogContent);
-    guards = refreshProviderFileSnapshot(guards, plan.paths.catalogPath);
-    await assertProviderFileSnapshots(guards);
-    await replaceOptionalProviderFile(
-      plan.paths.manifestPath,
-      catalogState.manifest === undefined
-        ? undefined
-        : `${JSON.stringify(catalogState.manifest, null, 2)}\n`,
-      environment,
-    );
-    guards = refreshProviderFileSnapshot(guards, plan.paths.manifestPath);
+    if (plan.downloadsCatalog) {
+      await assertProviderFileSnapshots(guards);
+      await writePrivateFileAtomic(plan.paths.catalogPath, `${JSON.stringify(managedCatalog, null, 2)}\n`);
+      guards = refreshProviderFileSnapshot(guards, plan.paths.catalogPath);
+      await assertProviderFileSnapshots(guards);
+      await replaceOptionalProviderFile(
+        plan.paths.manifestPath,
+        `${JSON.stringify(catalogState.manifest, null, 2)}\n`,
+        environment,
+      );
+      guards = refreshProviderFileSnapshot(guards, plan.paths.manifestPath);
+    }
     await assertProviderFileSnapshots(guards);
     if (mode === "exclusive" || previousMode === "exclusive") {
       await replaceOptionalProviderFile(
@@ -433,12 +419,14 @@ async function loadCatalog(plan, { fetchImpl, downloadCatalog }) {
     };
   }
   const downloaded = await downloadCatalog(fetchImpl);
+  const { catalog, templateBindings } = createOpencodeGoCatalogWithTemplateBindings(downloaded.catalog);
   return {
-    catalog: createOpencodeGoCatalog(downloaded.catalog),
+    catalog,
     manifest: {
       source: deepseekSetupScriptUrl,
       sha256: downloaded.sha256,
       downloadedAt: new Date().toISOString(),
+      modelTemplates: templateBindings,
     },
   };
 }
@@ -499,19 +487,6 @@ function normalize(code, field, error) {
     field,
     error instanceof Error ? error.message : String(error),
     error,
-  );
-}
-
-export function configuredContextWindowByModel(environment, modelSlugs) {
-  return Object.fromEntries(
-    loadManagedModelWindow(environment)
-      .filter((entry) => modelSlugs.has(entry.model) && entry.contextWindow !== undefined)
-      .map((entry) => {
-        if (entry.conflicts || entry.windowConflict) {
-          throw new Error(`同名模型的窗口设置冲突，请先统一设置：${entry.model}`);
-        }
-        return [entry.model, entry.contextWindow];
-      }),
   );
 }
 

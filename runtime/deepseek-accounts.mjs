@@ -29,7 +29,7 @@ export function deepseekAccountsFilePath(environment = process.env) {
 }
 
 export function deepseekAccountDirectory(environment, id) {
-  return join(providerStorageRoot(environment), "deepseek", "accounts", validateDeepseekAccountId(id));
+  return join(providerStorageRoot(environment), deepseekProviderId(id));
 }
 
 export function deepseekAccountMarkerPath(environment, id) {

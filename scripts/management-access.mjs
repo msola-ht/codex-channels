@@ -79,7 +79,7 @@ export function validateManagementJsonRequest({
     throw new ManagementSecurityError("management.content-type-invalid", "管理请求只接受 JSON", 415);
   }
   const maximumBodyBytes = method === "POST" && path === "/relay/reasoning-probe" ? 2_048
-    : method === "POST" && path === "/provider-settings/probe" ? 16_384
+    : method === "POST" && ["/provider-settings/probe", "/provider-settings/web-search-probe"].includes(path) ? 16_384
     : method === "POST" && ["/provider-settings", "/provider-settings/preview"].includes(path) ? 2 * 1024 * 1024
     // A Key may contain 256 UTF-8 model IDs, repeated in its complete reasoning map.
     : method === "POST" && ["/relay/preview", "/relay/apply"].includes(path) ? 512 * 1024 : 65_536;

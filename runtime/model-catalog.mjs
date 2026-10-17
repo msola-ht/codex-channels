@@ -1,12 +1,23 @@
 // Pure model-definition validation, Codex field generation and source adaptation.
 // Provider files and credentials belong to the runtime persistence owners.
+import { completeModelMessages } from "./model-template-prompts.mjs";
 export const contextWindowPresetTokens = Object.freeze([131072, 262144, 393216, 524288, 1048576]);
+export const openAiContextWindowPresetTokens = Object.freeze([272000, 372000, 500000]);
+export function contextWindowPresetLabel(tokens) {
+  return tokens === 1048576 ? "1M" : `${tokens / 1024}K`;
+}
 const efforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const verbosityLevels = new Set(["low", "medium", "high"]);
 const reasoningSummaries = new Set(["auto", "concise", "detailed", "none"]);
 const controlFree = (text) => !Array.from(text).some((character) => { const code = character.codePointAt(0); return (code < 32 && code !== 9 && code !== 10) || code === 127; });
 const descriptionControlFree = (text) => !/\p{Cc}/u.test(text.replace(/[\t\n]/gu, ""));
 const instructions = "You are a coding assistant. Follow the user's instructions, inspect the workspace before making changes, use the available tools when needed, and report results accurately. Respect tool permissions and do not claim actions succeeded without evidence.";
+
+// Project-owned starting values, independent of upstream model templates.
+export const customModelSamplingDefaults = Object.freeze({
+  temperature: 1, top_p: 0.95, top_k: 20, min_p: 0,
+  presence_penalty: 0, repetition_penalty: 1,
+});
 
 export function validateSamplingParameters(value) {
   if (value === undefined) return undefined;
@@ -34,7 +45,7 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
   const seen = new Set();
   const models = values.map((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)
-      || Object.keys(value).some((key) => !["id", "name", "contextWindow", "maxContextWindow", "reasoningEfforts", "defaultReasoningEffort", "supportsImages", "applyPatchToolType", "instructions", "supportsSearchTool", "template", "description", "reasoningDescriptions", "supportsImageDetailOriginal", "supportsVerbosity", "defaultVerbosity", "supportsReasoningSummary", "defaultReasoningSummary", "effectiveContextWindowPercent", "autoCompactTokenLimit", "truncationPolicy", "sampling"].includes(key))) {
+      || Object.keys(value).some((key) => !["id", "name", "contextWindow", "maxContextWindow", "reasoningEfforts", "defaultReasoningEffort", "supportsImages", "applyPatchToolType", "instructions", "modelMessages", "supportsSearchTool", "template", "description", "reasoningDescriptions", "supportsImageDetailOriginal", "supportsVerbosity", "defaultVerbosity", "supportsReasoningSummary", "defaultReasoningSummary", "effectiveContextWindowPercent", "autoCompactTokenLimit", "truncationPolicy", "sampling"].includes(key))) {
       throw new Error("自定义模型包含不受支持的字段");
     }
     const { id, name, contextWindow, maxContextWindow, reasoningEfforts, defaultReasoningEffort, supportsImages, applyPatchToolType, instructions: prompt, supportsSearchTool } = value;
@@ -43,16 +54,16 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
     }
     if (typeof name !== "string" || name.trim() === "" || name.length > 120 || /\p{Cc}/u.test(name)) throw new Error("自定义模型显示名称无效");
     if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > 100_000_000) throw new Error("模型上下文窗口必须为 1024-100000000 的整数");
-    if (!Array.isArray(reasoningEfforts) || reasoningEfforts.some((effort) => !efforts.has(effort) && !(allowReasoningToggle && effort === "enabled")) || new Set(reasoningEfforts).size !== reasoningEfforts.length) throw new Error("模型思考等级无效或重复");
-    if (reasoningEfforts.length === 0 ? defaultReasoningEffort !== null : !reasoningEfforts.includes(defaultReasoningEffort)) throw new Error("默认思考等级必须属于模型声明的等级；不支持时必须为 null");
-    if (typeof supportsImages !== "boolean") throw new Error("模型图片能力必须为布尔值");
-    if (applyPatchToolType !== undefined && applyPatchToolType !== "freeform") throw new Error("模型 apply_patch 工具类型无效");
+    if (reasoningEfforts !== undefined && (!Array.isArray(reasoningEfforts) || reasoningEfforts.some((effort) => !efforts.has(effort) && !(allowReasoningToggle && effort === "enabled")) || new Set(reasoningEfforts).size !== reasoningEfforts.length)) throw new Error("模型思考等级无效或重复");
+    if ((reasoningEfforts?.length ?? 0) === 0 ? defaultReasoningEffort !== null : !reasoningEfforts.includes(defaultReasoningEffort)) throw new Error("默认思考等级必须属于模型声明的等级；未知或不支持时必须为 null");
+    if (supportsImages !== undefined && typeof supportsImages !== "boolean") throw new Error("模型图片能力必须为布尔值");
+    if (applyPatchToolType !== undefined && applyPatchToolType !== null && applyPatchToolType !== "freeform") throw new Error("模型 apply_patch 工具类型无效");
     if (prompt !== undefined && (typeof prompt !== "string" || prompt.trim() === "" || prompt.length > 200_000 || !controlFree(prompt))) throw new Error("模型提示词无效");
     if (supportsSearchTool !== undefined && typeof supportsSearchTool !== "boolean") throw new Error("模型检索工具能力必须为布尔值");
     const { description, reasoningDescriptions, supportsImageDetailOriginal, supportsVerbosity, defaultVerbosity, supportsReasoningSummary, defaultReasoningSummary, effectiveContextWindowPercent, autoCompactTokenLimit, truncationPolicy } = value;
     if (description !== undefined && (typeof description !== "string" || description.trim() === "" || description.length > 4000 || !descriptionControlFree(description))) throw new Error("模型描述必须为非空、无非法控制字符且不超过 4000 字符的文本");
     if (reasoningDescriptions !== undefined && (!reasoningDescriptions || typeof reasoningDescriptions !== "object" || Array.isArray(reasoningDescriptions)
-      || Object.entries(reasoningDescriptions).some(([effort, text]) => !reasoningEfforts.includes(effort) || typeof text !== "string" || text.trim() === "" || text.length > 2000 || !descriptionControlFree(text)))) throw new Error("思考等级描述必须仅包含已声明等级，文本须非空、无非法控制字符且不超过 2000 字符");
+      || Object.entries(reasoningDescriptions).some(([effort, text]) => !reasoningEfforts?.includes(effort) || typeof text !== "string" || text.trim() === "" || text.length > 2000 || !descriptionControlFree(text)))) throw new Error("思考等级描述必须仅包含已声明等级，文本须非空、无非法控制字符且不超过 2000 字符");
     if (supportsImageDetailOriginal !== undefined && typeof supportsImageDetailOriginal !== "boolean") throw new Error("模型原图细节能力必须为布尔值");
     if (supportsImageDetailOriginal === true && !supportsImages) throw new Error("支持原图细节的模型必须支持图片输入");
     if (supportsVerbosity !== undefined && typeof supportsVerbosity !== "boolean") throw new Error("模型详细程度能力必须为布尔值");
@@ -70,13 +81,15 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
     if (template !== undefined && (!template || typeof template !== "object" || Array.isArray(template)
       || Object.keys(template).some(key => !["source", "model", "followContext"].includes(key)) || !["official", "deepseek"].includes(template.source)
       || typeof template.model !== "string" || template.model.trim() !== template.model || template.model.length < 1 || template.model.length > 200 || /\p{Cc}/u.test(template.model)
-      || typeof template.followContext !== "boolean" || (template.source !== "deepseek" && template.followContext))) {
-      throw new Error("模型模板关联无效；只有 DeepSeek 模板可跟随上下文");
+      || (template.followContext !== undefined && typeof template.followContext !== "boolean"))) {
+      throw new Error("模型模板来源无效");
     }
     if (maxContextWindow !== undefined && (!Number.isSafeInteger(maxContextWindow) || maxContextWindow < contextWindow || maxContextWindow > 100_000_000)) throw new Error("模型最大上下文必须为不小于当前窗口且不超过 100000000 的整数");
     const sampling = validateSamplingParameters(value.sampling);
+    const modelMessages = value.modelMessages === undefined ? undefined : completeModelMessages(value.modelMessages, {});
+    if (modelMessages !== undefined && new TextEncoder().encode(JSON.stringify(modelMessages)).length > 200_000) throw new Error("模型提示词对象超过大小限制");
     seen.add(id);
-    return { id, name: name.trim(), contextWindow, ...(maxContextWindow === undefined ? {} : {maxContextWindow}), reasoningEfforts: [...reasoningEfforts], defaultReasoningEffort, supportsImages, ...(applyPatchToolType === undefined ? {} : {applyPatchToolType}), ...(prompt === undefined ? {} : {instructions: prompt}), ...(supportsSearchTool === true ? {supportsSearchTool: true} : {}), ...(template === undefined ? {} : {template: {source: template.source, model: template.model, followContext: template.followContext}}),
+    return { id, name: name.trim(), contextWindow, ...(maxContextWindow === undefined ? {} : {maxContextWindow}), ...(reasoningEfforts === undefined ? {} : {reasoningEfforts: [...reasoningEfforts]}), defaultReasoningEffort, ...(supportsImages === undefined ? {} : {supportsImages}), ...(applyPatchToolType === undefined ? {} : {applyPatchToolType}), ...(prompt === undefined ? {} : {instructions: prompt}), ...(supportsSearchTool === undefined ? {} : {supportsSearchTool}), ...(template === undefined ? {} : {template: {source: template.source, model: template.model, ...(template.followContext === undefined ? {} : {followContext: template.followContext})}}),
       ...(description === undefined ? {} : {description}),
       ...(reasoningDescriptions === undefined ? {} : {reasoningDescriptions: Object.fromEntries(Object.entries(reasoningDescriptions))}),
       ...(supportsImageDetailOriginal === undefined ? {} : {supportsImageDetailOriginal}),
@@ -88,6 +101,7 @@ export function validateModelDefinitions(values, defaultModel, { allowReasoningT
       ...(autoCompactTokenLimit === undefined ? {} : {autoCompactTokenLimit}),
       ...(truncationPolicy === undefined ? {} : {truncationPolicy: {mode: truncationPolicy.mode, limit: truncationPolicy.limit}}),
       ...(sampling === undefined ? {} : {sampling}),
+      ...(modelMessages === undefined ? {} : {modelMessages}),
     };
   });
   if (!seen.has(defaultModel)) throw new Error("默认模型必须存在于自定义模型目录");
@@ -102,18 +116,18 @@ export function compileModelDefinitions(definitions, defaultModel, { allowReason
     models: validated.map((model, index) => ({
       slug: model.id, display_name: model.name, description: model.description ?? "User-configured Responses model",
       default_reasoning_level: model.defaultReasoningEffort,
-      supported_reasoning_levels: model.reasoningEfforts.map((effort) => ({ effort,
+      supported_reasoning_levels: (model.reasoningEfforts ?? []).map((effort) => ({ effort,
         description: model.reasoningDescriptions?.[effort] ?? (model.reasoningEfforts.includes("enabled") && effort === "none" ? "关闭思考"
           : effort === "enabled" ? "开启思考，使用模型默认强度" : effort) })),
       shell_type: "unified_exec", visibility: "list", supported_in_api: true,
       priority: model.id === defaultModel ? 0 : index + 1,
       availability_nux: null, upgrade: null,
-      model_messages: { instructions_template: model.instructions ?? instructions },
+      model_messages: { ...model.modelMessages, instructions_template: model.instructions ?? model.modelMessages?.instructions_template ?? instructions },
       include_apps_usage_instructions: false,
       supports_reasoning_summary_parameter: model.supportsReasoningSummary ?? false,
       ...(model.defaultReasoningSummary === undefined ? {} : {default_reasoning_summary: model.defaultReasoningSummary}),
       support_verbosity: model.supportsVerbosity ?? false, default_verbosity: model.defaultVerbosity ?? null, apply_patch_tool_type: model.applyPatchToolType ?? null,
-      ...(model.supportsSearchTool === true ? {supports_search_tool: true} : {}),
+      ...(model.supportsSearchTool === undefined ? {} : {supports_search_tool: model.supportsSearchTool}),
       truncation_policy: model.truncationPolicy ?? { mode: "tokens", limit: Math.min(10_000, Math.floor(model.contextWindow / 4)) },
       context_window: model.contextWindow, max_context_window: model.maxContextWindow ?? model.contextWindow,
       ...(model.autoCompactTokenLimit === undefined ? {} : {auto_compact_token_limit: model.autoCompactTokenLimit}),
@@ -140,7 +154,9 @@ export function modelDefinitionsFromCatalog(catalog, source = "official") {
     ...(model.supported_reasoning_levels?.some(entry => entry.effort !== "ultra" && entry.effort !== "persistent" && entry.description != null)
       ? {reasoningDescriptions: Object.fromEntries(model.supported_reasoning_levels.filter(entry => entry.effort !== "ultra" && entry.effort !== "persistent" && entry.description != null).map(entry => [entry.effort, entry.description]))} : {}),
     defaultReasoningEffort: model.default_reasoning_level ?? null,
-    supportsImages: model.input_modalities?.includes("image") === true,
+    ...(model.input_modalities === undefined ? {} : {supportsImages: model.input_modalities.includes("image")}),
+    ...(model.apply_patch_tool_type === undefined ? {} : {applyPatchToolType: model.apply_patch_tool_type}),
+    ...(model.supports_search_tool === undefined ? {} : {supportsSearchTool: model.supports_search_tool}),
     ...(model.supports_image_detail_original === undefined ? {} : {supportsImageDetailOriginal: model.supports_image_detail_original}),
     ...(model.support_verbosity === undefined ? {} : {supportsVerbosity: model.support_verbosity}),
     ...(model.default_verbosity === undefined ? {} : {defaultVerbosity: model.default_verbosity}),
@@ -151,7 +167,8 @@ export function modelDefinitionsFromCatalog(catalog, source = "official") {
     ...(model.auto_compact_token_limit == null ? {} : {autoCompactTokenLimit: model.auto_compact_token_limit}),
     ...(model.truncation_policy === undefined ? {} : {truncationPolicy: model.truncation_policy}),
     ...(source === "deepseek" && typeof model.model_messages?.instructions_template === "string" && model.model_messages.instructions_template.length > 0 ? {instructions: model.model_messages.instructions_template} : {}),
-    ...(source === "official" ? {} : {template: {source, model: model.slug, followContext: false}}),
+    ...(model.model_messages == null ? {} : {modelMessages: model.model_messages}),
+    template: {source, model: model.slug},
   }));
   return validateModelDefinitions(models, models[0]?.id);
 }

@@ -4,10 +4,6 @@ export function managedProviderAccountIdFromProvider(provider) {
   return managedProviderAccountFamilies.find((family) => family.matches(provider))?.accountId(provider);
 }
 
-export function sharedProviderProxyKey(provider) {
-  return managedProviderAccountFamilies.find((family) => family.matches(provider))?.proxyKey ?? provider;
-}
-
 export function resolveDefaultManagedProvider(providers, environment = process.env) {
   const candidates = [...new Set(providers)];
   if (candidates.length < 2) return undefined;

@@ -84,7 +84,6 @@ export function createManagedProviderConfiguration(current, initial, definition,
 export function createManagedProviderCatalog(catalog, definition, {
   previousModels = [],
   windowPercent = null,
-  modelContextWindowByModel = {},
 } = {}) {
   const models = Array.isArray(catalog?.models) ? catalog.models : [];
   const defaultEntry = selectCatalogDefaultModel(models, definition);
@@ -102,14 +101,9 @@ export function createManagedProviderCatalog(catalog, definition, {
     definition,
     previousModels,
   );
-  const windowsApplied = applyModelContextWindowByModel(
-    preserved,
-    definition,
-    modelContextWindowByModel,
-  );
-  if (windowPercent === null) return windowsApplied;
-  const selected = windowsApplied.models.find((entry) => entry.slug === defaultEntry.slug);
-  return withManagedModelCatalogSettings(windowsApplied, definition, {
+  if (windowPercent === null) return preserved;
+  const selected = preserved.models.find((entry) => entry.slug === defaultEntry.slug);
+  return withManagedModelCatalogSettings(preserved, definition, {
     model: defaultEntry.slug,
     reasoningEffort: selected.default_reasoning_level,
     contextWindow: Math.round(managedCatalogWindowBase(defaultEntry) * windowPercent / 100),
@@ -136,34 +130,6 @@ export function resolveManagedCatalogModel(catalog, definition, preferred) {
     return preferred;
   }
   return selectCatalogDefaultModel(models, definition).slug;
-}
-
-function applyModelContextWindowByModel(catalog, definition, windows) {
-  let next = catalog;
-  const models = Array.isArray(catalog?.models) ? catalog.models : [];
-  for (const candidate of models) {
-    const slug = candidate?.slug;
-    const contextWindow = typeof slug === "string" ? windows[slug] : undefined;
-    if (contextWindow === undefined) continue;
-    const windowBase = managedCatalogWindowBase(candidate);
-    const reasoningEffort = candidate?.default_reasoning_level;
-    if (
-      !Number.isSafeInteger(windowBase)
-      || windowBase <= 0
-      || typeof reasoningEffort !== "string"
-    ) {
-      throw new Error(`${definition.displayName} 模型目录缺少窗口所需字段：${slug}`);
-    }
-    if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > windowBase) {
-      throw new Error(`${definition.displayName} 模型上下文窗口必须是 1024-${windowBase} 的整数：${slug}`);
-    }
-    next = withManagedModelCatalogSettings(next, definition, {
-      model: slug,
-      reasoningEffort,
-      contextWindow,
-    });
-  }
-  return next;
 }
 
 function managedCatalogWindowBase(entry) {

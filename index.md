@@ -11,7 +11,7 @@
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换、网页搜索能力与运行统计。
 - [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行与官方目录模型。
 - [`docs/cline-pass.md`](docs/cline-pass.md)：CLP 配置、Chat 转换边界与用量。
-- [`docs/ccg.md`](docs/ccg.md)：CCG 多账户接入、共享模型目录、额度查询与固定/切换模式。
+- [`docs/ccg.md`](docs/ccg.md)：CCG 多账户接入、账户模型目录、额度查询与固定/切换模式。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
@@ -44,7 +44,7 @@
   App Server 执行边界、持久化、安全状态机与验收范围。
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道指南。
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
-  Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
+  Provider 的标准流程、安全边界、旧共享目录显式拆分、用户配置主 Provider 支持和验收清单。
 - [`docs/custom-provider-capability-probe.md`](docs/custom-provider-capability-probe.md)：自定义提供商的实际能力探测记录、思考参数观察、配置建议与验证边界。
 - [`docs/provider-api-relay-development.md`](docs/provider-api-relay-development.md)：Provider 模型 API
   当前转发合同：独立服务、原生 Chat/Responses、提供商接入、鉴权与队列、指标与转储、数据格式及验收边界。
@@ -55,7 +55,7 @@
 - [`docs/model-timezone.md`](docs/model-timezone.md)：模型请求里 environment context 的时区与日期
   来源、`codex.timezone` 配置、`codexc timezone` 命令、WebUI 时间跟随与生效边界。
 - [`docs/opencode-go-multi-account.md`](docs/opencode-go-multi-account.md)：OpenCode Go
-  多账户实现（账户文件、CLI/Setup、共享代理、会话切换与租约生命周期）。
+  多账户实现（账户文件、CLI/Setup、账户代理、会话切换与租约生命周期）。
 - [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 当前设计决策与停止条件。
 - [`docs/feishu-reference-index.md`](docs/feishu-reference-index.md)：飞书资料与实现映射。
 - [`docs/weixin-surface-plan.md`](docs/weixin-surface-plan.md)：微信 Surface 当前设计决策与停止条件。
