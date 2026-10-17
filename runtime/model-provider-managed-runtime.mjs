@@ -1,6 +1,7 @@
 import { isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
 import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
 import { createHash } from "node:crypto";
+import { existsSync, unlinkSync } from "node:fs";
 import { assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import { assertProviderCatalogIsolationComplete, providerCatalogIsolationPath } from "./provider-catalog-isolation.mjs";
 import { join } from "node:path";
@@ -209,7 +210,7 @@ export function restoreManagedModelProviderCatalogContent(
 
 function writeCatalogWithProfileMirrors(environment, catalogPath, content, updates = new Map(), originals = new Map()) {
   collectCatalogWithProfileMirrors(environment, catalogPath, content, updates, originals);
-  writeCatalogUpdates(environment, updates, originals);
+  writeCatalogUpdates(environment, updates, originals, catalogPath);
 }
 
 function collectCatalogWithProfileMirrors(environment, catalogPath, content, updates, originals) {
@@ -232,28 +233,110 @@ function collectCatalogWithProfileMirrors(environment, catalogPath, content, upd
   }
 }
 
-function writeCatalogUpdates(environment, updates, originals) {
+function writeCatalogUpdates(environment, updates, originals, catalogPath) {
   assertProviderCatalogIsolationComplete(environment);
   assertResponsesContextSyncComplete(environment);
+  assertManagedCatalogSettingsComplete(catalogPath);
   for (const path of updates.keys()) {
     if (!originals.has(path)) originals.set(path,readPrivateFile(path,maximumCatalogBytes));
     if (readPrivateFile(path,maximumCatalogBytes) !== originals.get(path)) throw new Error("模型目录或 Profile 已变化，请重新预览");
   }
-  const written = [];
+  const files = [...updates].map(([path, next]) => ({ path, previous: originals.get(path), next }));
+  // Recovery reads both snapshots with the same bound as ordinary readers.
+  // Check formatted output before publishing a journal or replacing any file.
+  if (files.some(file => Buffer.byteLength(file.next) > (file.path === catalogPath ? maximumCatalogBytes : maximumConfigBytes))) {
+    throw new Error("模型设置保存结果超过文件大小限制（目录 2 MiB、Profile 1 MiB），未写入文件");
+  }
+  const journal = `${JSON.stringify({ schemaVersion: 1, files }, null, 2)}\n`;
+  if (Buffer.byteLength(journal) > 16 * 1024 * 1024) throw new Error("模型设置恢复记录超过大小限制");
+  const pending = `${catalogPath}.settings-pending`;
+  writePrivateFileAtomicSync(`${catalogPath}.settings-backup`, journal);
+  writePrivateFileAtomicSync(pending, journal);
   try {
     for (const [path, next] of updates) {
+      if (readPrivateFile(path, maximumCatalogBytes) !== originals.get(path)) throw new Error("模型目录或 Profile 已变化，请重新预览");
       writePrivateFileAtomicSync(path, next);
-      written.push(path);
     }
+    for (const [path, next] of updates) {
+      if (readPrivateFile(path, maximumCatalogBytes) !== next) throw new Error("模型设置写入后发生变化，请核对恢复记录");
+    }
+    if (readPrivateFile(pending, 16 * 1024 * 1024) !== journal) throw new Error("模型设置恢复记录已变化");
+    unlinkSync(pending);
   } catch (error) {
     const errors = [error];
-    for (const path of written.reverse()) {
-      try { writePrivateFileAtomicSync(path, originals.get(path)); }
-      catch (rollbackError) { errors.push(rollbackError); }
+    try {
+      // Never overwrite subsequent edits, even while rolling back our own failure.
+      for (const file of files) assertSettingsSnapshot(file);
+      for (const file of [...files].reverse()) writePrivateFileAtomicSync(file.path, file.previous);
+      for (const file of files) {
+        if (readPrivateFile(file.path, maximumCatalogBytes) !== file.previous) throw new Error("模型设置回滚后发生变化", { cause: error });
+      }
+      if (readPrivateFile(pending, 16 * 1024 * 1024) !== journal) throw new Error("模型设置恢复记录已变化", { cause: error });
+      unlinkSync(pending);
+    } catch (rollbackError) {
+      errors.push(rollbackError);
     }
     if (errors.length > 1) throw new AggregateError(errors, "模型目录与引用配置回滚未完成", { cause: error });
     throw error;
   }
+}
+
+function assertManagedCatalogSettingsComplete(path) {
+  if (existsSync(`${path}.settings-pending`)) throw new Error("账户模型设置尚未完成；请使用 codexc provider recover <Provider ID> keep 或 rollback 恢复");
+}
+
+function assertSettingsSnapshot(file) {
+  const current = readPrivateFile(file.path, maximumCatalogBytes);
+  if (current !== file.previous && current !== file.next) throw new Error("模型设置存在后续修改，拒绝覆盖；请核对私有恢复记录");
+}
+
+/** Called only by the explicit recovery command under the Provider management lock. */
+export function recoverManagedCatalogSettings(provider, action, environment = process.env) {
+  const definition = findManagedProviderDefinition(environment, provider);
+  if (!definition) return false;
+  if (!["keep", "rollback"].includes(action)) throw new Error("模型设置恢复操作无效");
+  assertProviderCatalogIsolationComplete(environment);
+  assertResponsesContextSyncComplete(environment);
+  const catalogPath = join(managedProviderDirectory(environment, definition), definition.catalogFileName);
+  const pending = `${catalogPath}.settings-pending`;
+  const content = readPrivateFile(pending, 16 * 1024 * 1024);
+  let journal;
+  try { journal = JSON.parse(content); } catch { throw new Error("模型设置恢复记录无法安全解析"); }
+  const allowed = new Set([catalogPath, join(codexHomePath(environment), definition.profileFileName)]);
+  if (journal?.schemaVersion !== 1 || Object.keys(journal).some(key => !["schemaVersion", "files"].includes(key)) || !Array.isArray(journal.files) || journal.files.length < 1
+    || journal.files.length > 2 || new Set(journal.files.map(file => file?.path)).size !== journal.files.length
+    || !journal.files.some(file => file?.path === catalogPath)
+    || journal.files.some(file => !file || Object.keys(file).some(key => !["path", "previous", "next"].includes(key))
+      || !allowed.has(file.path) || typeof file.previous !== "string" || typeof file.next !== "string"
+      || Buffer.byteLength(file.previous) > (file.path === catalogPath ? maximumCatalogBytes : maximumConfigBytes)
+      || Buffer.byteLength(file.next) > (file.path === catalogPath ? maximumCatalogBytes : maximumConfigBytes))) {
+    throw new Error("模型设置恢复记录字段或路径无效");
+  }
+  const selected = action === "keep" ? "next" : "previous";
+  const catalogContent = journal.files.find(file => file.path === catalogPath)[selected];
+  let catalog;
+  try { catalog = JSON.parse(catalogContent); } catch { throw new Error("恢复模型目录无法安全解析"); }
+  for (const model of readCatalogSlugSet(catalogContent, definition)) modelCatalogSetting(catalogContent, definition, model);
+  const profile = journal.files.find(file => file.path !== catalogPath);
+  if (profile) {
+    let document;
+    try { document = parse(profile[selected]); } catch { throw new Error("恢复 Profile 无法安全解析"); }
+    const model = catalog.models.find(entry => entry.slug === document.model);
+    if (document.model_provider !== provider || document.model_catalog_json !== catalogPath
+      || !model || document.model_reasoning_effort !== model.default_reasoning_level) throw new Error("恢复 Profile 与账户目录不一致");
+  }
+  for (const file of journal.files) assertSettingsSnapshot(file);
+  const files = action === "rollback" ? [...journal.files].reverse() : journal.files;
+  for (const file of files) {
+    assertSettingsSnapshot(file);
+    writePrivateFileAtomicSync(file.path, action === "keep" ? file.next : file.previous);
+  }
+  for (const file of files) {
+    if (readPrivateFile(file.path, maximumCatalogBytes) !== (action === "keep" ? file.next : file.previous)) throw new Error("模型设置恢复结果发生变化，保留恢复记录");
+  }
+  if (readPrivateFile(pending, 16 * 1024 * 1024) !== content) throw new Error("模型设置恢复记录已变化");
+  unlinkSync(pending);
+  return true;
 }
 
 function managedProviderCatalogPath(provider, environment) {
@@ -298,7 +381,7 @@ export function writeManagedModelWindow(
   originals.set(path, previous);
   collectCatalogWithProfileMirrors(environment, path,
     updateModelCatalogSettings(previous, definition, settings), updates, originals);
-  writeCatalogUpdates(environment, updates, originals);
+  writeCatalogUpdates(environment, updates, originals, path);
   return {
     provider,
     model,
@@ -461,7 +544,7 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
   const protocols = definition.upstreamWireApi === "chat_completions" ? ["chat"]
     : definition.storageId === "deepseek" ? ["chat", "responses"] : ["responses"];
   return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs, protocols,
-    paths: [...paths, responsesContextSyncPath(environment), providerCatalogIsolationPath(environment)], revision: before };
+    paths: [...paths, responsesContextSyncPath(environment), providerCatalogIsolationPath(environment), `${join(directory, definition.catalogFileName)}.settings-pending`], revision: before };
 }
 
 export function readProviderProfile(
@@ -477,6 +560,7 @@ export function readProviderProfile(
   } = {},
 ) {
   assertProviderCatalogIsolationComplete(environment);
+  if (expectedCatalogPath !== undefined) assertManagedCatalogSettingsComplete(expectedCatalogPath);
   let document;
   let fileAccess;
   try {

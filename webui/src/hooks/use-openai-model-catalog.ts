@@ -3,6 +3,7 @@ import { useManagementConfirmedMutation } from "@/hooks/use-management-confirmed
 import { fetchOpenAiModelCatalog, previewOpenAiModelContext, previewOpenAiModelRefresh, refreshOpenAiModelCatalog, updateOpenAiModelContext } from "@/lib/api"
 import { readOpenAiModelCacheEdits, recordOpenAiModelCacheEdit } from "@/lib/openai-model-cache-edits"
 import type { OpenAiModelCatalogResponse, OpenAiModelContextInput, OpenAiModelContextPreview, OpenAiModelContextResult, OpenAiModelRefreshInput, OpenAiModelRefreshPreview, OpenAiModelRefreshResult } from "@/lib/types"
+import { contextWindowPreset, validContextWindow, type ContextWindowPreset } from "@/lib/model-context-window"
 
 type CatalogInput = { kind: "context"; value: OpenAiModelContextInput } | { kind: "refresh"; value: OpenAiModelRefreshInput }
 type CatalogPreview = { kind: "context"; value: OpenAiModelContextPreview } | { kind: "refresh"; value: OpenAiModelRefreshPreview }
@@ -23,8 +24,6 @@ async function applyCatalog(input: CatalogInput, token: string, signal?: AbortSi
     : { kind: "refresh", value: await refreshOpenAiModelCatalog(input.value, token, signal) }
 }
 
-type ContextPreset = "272000" | "372000" | "500000" | "max" | "custom"
-
 interface ContextDraft {
   revision: string
   scope: string
@@ -33,7 +32,7 @@ interface ContextDraft {
   previousContextWindow: number | null
   maxContextWindow: number | null
   value: string
-  preset: ContextPreset
+  preset: ContextWindowPreset
 }
 
 export function useOpenAiModelCatalog() {
@@ -48,7 +47,7 @@ export function useOpenAiModelCatalog() {
   const [tracking, setTracking] = useState(readOpenAiModelCacheEdits)
   const locked = management.busy || management.loading || management.pendingPreview !== null || management.error !== null || management.readbackRequired
   const value = draft !== null && /^[1-9]\d*$/u.test(draft.value) ? Number(draft.value) : NaN
-  const valid = Number.isSafeInteger(value) && value > 0 && (draft?.maxContextWindow === null || value <= (draft?.maxContextWindow ?? 0))
+  const valid = draft !== null && validContextWindow(draft.value, 1, draft.maxContextWindow)
   const stale = draft !== null && management.data !== null && (draft.revision !== management.data.revision || draft.scope !== management.data.scope)
   const changedModels = management.data === null || management.loading || management.error !== null ? [] : tracking.edits
     .filter(edit => edit.scope === management.data?.scope && management.data.models.find(model => model.model === edit.model)?.contextWindow !== edit.contextWindow)
@@ -57,11 +56,10 @@ export function useOpenAiModelCatalog() {
     if (locked || draft !== null || !model.editable || management.data === null) return
     management.clearError()
     const value = model.contextWindow === null ? "" : String(model.contextWindow)
-    const preset: ContextPreset = value === "272000" || value === "372000" || value === "500000" ? value
-      : model.contextWindow !== null && model.contextWindow === model.maxContextWindow ? "max" : "custom"
+    const preset = contextWindowPreset(model.contextWindow, model.maxContextWindow)
     setDraft({ revision: management.data.revision, scope: management.data.scope, model: model.model, displayName: model.displayName, previousContextWindow: model.contextWindow, maxContextWindow: model.maxContextWindow, value, preset })
   }
-  const changePreset = (preset: ContextPreset) => {
+  const changePreset = (preset: ContextWindowPreset) => {
     if (locked) return
     setDraft(previous => {
       if (previous === null) return previous

@@ -83,11 +83,7 @@ export function ModelConfigurationPage() {
 
 export function ModelContextPage() {
   const codex = useCodexSettingsManagement()
-  const providers = useProviderSettingsManagement()
-  const reloadCodex = codex.refetch, reloadProviders = providers.refetch
-  const refresh = useCallback(() => { reloadCodex(); reloadProviders() }, [reloadCodex, reloadProviders])
-  return <SettingsPageFrame title="modelManagement.context" busy={codex.loading || codex.saving || codex.pendingSetting !== null || providers.loading || providers.busy || providers.pendingPreview !== null} refresh={refresh}>
-    <ProviderSettingsManagement management={providers} section="context" onChanged={reloadCodex} />
-    <AppServerSettingsCard management={codex} section="context" onChanged={reloadProviders} />
+  return <SettingsPageFrame title="modelManagement.context" busy={codex.loading || codex.saving || codex.pendingSetting !== null} refresh={codex.refetch}>
+    <AppServerSettingsCard management={codex} section="context" />
   </SettingsPageFrame>
 }

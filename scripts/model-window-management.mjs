@@ -13,16 +13,6 @@ export class ModelWindowManagementError extends Error {
   }
 }
 
-export function previewModelWindowChange(
-  input,
-  {
-    environment = process.env,
-    loadWindow = loadManagedModelWindow,
-  } = {},
-) {
-  return publicPreview(buildPlan(input, loadWindow(environment)));
-}
-
 export async function applyModelWindowChange(
   input,
   {
@@ -139,18 +129,4 @@ function invalid(code, field, message, cause) {
     message,
     cause === undefined ? undefined : { cause },
   );
-}
-
-export function projectModelWindow(models) {
-  return models.map((model) => ({
-    provider: model.provider,
-    id: model.model,
-    displayName: model.displayName,
-    contextWindow: model.contextWindow,
-    maxContextWindow: model.maxContextWindow,
-    providers: [model.provider],
-    ...(model.windowPercent === undefined
-      ? {}
-      : { windowPercent: model.windowPercent }),
-  }));
 }

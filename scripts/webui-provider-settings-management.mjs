@@ -1,5 +1,5 @@
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
-import { loadProviderModelCatalogPresentations, previewProviderModelRemoval, applyProviderModelRemoval, ProviderModelManagementError } from "./provider-model-management.mjs";
+import { loadProviderModelCatalogPresentations, previewProviderModelRemoval, applyProviderModelRemoval, previewProviderModelContextChange, applyProviderModelContextChange, ProviderModelManagementError } from "./provider-model-management.mjs";
 import {
   applyManagedProviderDefaultChange,
   previewManagedProviderDefaultChange,
@@ -19,15 +19,6 @@ import {
   applyCustomProviderModelsSave,
 } from "./custom-primary-provider-management.mjs";
 import { ManagementOperationError, managementOperationError } from "./webui-management-operations.mjs";
-import {
-  applyModelWindowChange,
-  previewModelWindowChange,
-  projectModelWindow,
-  ModelWindowManagementError,
-} from "./model-window-management.mjs";
-import {
-  loadManagedModelWindow,
-} from "../runtime/model-provider-runtime.mjs";
 
 export async function loadProviderSettingsResource(
   environment,
@@ -38,9 +29,6 @@ export async function loadProviderSettingsResource(
     return {
       ...projectProviderSettings(state),
       modelCatalogs: (await loadProviderModelCatalogPresentations({ environment })).catalogs,
-      modelWindow: projectModelWindow(
-        loadManagedModelWindow(environment),
-      ),
     };
   } catch {
     throw new ManagementOperationError(
@@ -55,6 +43,11 @@ export function normalizeProviderSettingsMutation(input) {
     throw new ManagementOperationError("invalid_json", "Provider 设置操作正文必须是对象");
   }
   switch (input.operation) {
+    case "model.context":
+      if (Object.keys(input).some(key => !["operation", "provider", "model", "contextWindow", "revision", "confirmationToken"].includes(key))) {
+        throw new ManagementOperationError("invalid_provider_operation", "模型上下文请求包含不支持的字段");
+      }
+      return { operation: input.operation, provider: input.provider, model: input.model, contextWindow: input.contextWindow, revision: input.revision };
     case "model.custom.save":
       if (Object.keys(input).some(key => !["operation", "provider", "model", "models", "probeConnections", "resourceRevision", "confirmationToken"].includes(key))) {
         throw new ManagementOperationError("invalid_provider_operation", "模型保存请求包含不支持的字段");
@@ -109,20 +102,6 @@ export function normalizeProviderSettingsMutation(input) {
           ? {}
           : { windowPercent: input.windowPercent }),
       };
-    case "managed.window":
-      if (Object.keys(input).some(key => !["operation", "provider", "model", "contextWindow", "windowPercent", "confirmationToken"].includes(key))) {
-        throw new ManagementOperationError("invalid_provider_operation", "模型窗口请求包含不支持的字段");
-      }
-      if (typeof input.provider !== "string" || input.provider.trim() === "") {
-        throw new ManagementOperationError("required", "Provider ID 不能为空", "provider");
-      }
-      return {
-        operation: input.operation,
-        provider: input.provider,
-        model: input.model,
-        ...(input.contextWindow === undefined ? {} : { contextWindow: input.contextWindow }),
-        ...(input.windowPercent === undefined ? {} : { windowPercent: input.windowPercent }),
-      };
     default:
       throw new ManagementOperationError(
         "invalid_provider_operation",
@@ -134,6 +113,8 @@ export function normalizeProviderSettingsMutation(input) {
 export async function previewProviderSettingsMutation(input, environment) {
   try {
     switch (input.operation) {
+      case "model.context":
+        return await previewProviderModelContextChange(contextMutationInput(input), { environment });
       case "model.custom.save":
         return await previewCustomProviderModelsSave(input, { environment });
       case "model.remove":
@@ -163,14 +144,6 @@ export async function previewProviderSettingsMutation(input, environment) {
             { environment },
           ),
         };
-      case "managed.window":
-        return {
-          operation: "managed.window",
-          ...previewModelWindowChange(
-            input,
-            { environment },
-          ),
-        };
       default:
         throw new ManagementOperationError("invalid_provider_operation", "Provider 设置操作不受支持");
     }
@@ -182,6 +155,8 @@ export async function previewProviderSettingsMutation(input, environment) {
 export async function applyProviderSettingsMutation(input, environment, preview) {
   try {
     switch (input.operation) {
+      case "model.context":
+        return await applyProviderModelContextChange(contextMutationInput(input), { environment, preview });
       case "model.custom.save":
         return await applyCustomProviderModelsSave(input, { environment, preview });
       case "model.remove":
@@ -206,11 +181,6 @@ export async function applyProviderSettingsMutation(input, environment, preview)
             reasoningEffort: input.reasoningEffort,
             windowPercent: input.windowPercent,
           },
-          { environment },
-        );
-      case "managed.window":
-        return await applyModelWindowChange(
-          input,
           { environment },
         );
       default:
@@ -355,7 +325,11 @@ function redactModel(model) {
 }
 
 function toManagementError(error) {
-  return managementOperationError(error, [PrimaryProviderManagementError, ModelProviderDefaultManagementError, ModelWindowManagementError, ProviderModelManagementError], "provider_settings_failed");
+  return managementOperationError(error, [PrimaryProviderManagementError, ModelProviderDefaultManagementError, ProviderModelManagementError], "provider_settings_failed");
+}
+
+function contextMutationInput(input) {
+  return { provider: input.provider, model: input.model, contextWindow: input.contextWindow, revision: input.revision };
 }
 
 function redactCatalog(provider) {

@@ -434,10 +434,9 @@ function recordProviderAudit(state, details, failureMessage) {
 }
 
 function providerSettingsAuditTarget(input) {
-  if (input.operation === "model.remove" || input.operation === "model.custom.save") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
+  if (input.operation === "model.remove" || input.operation === "model.custom.save" || input.operation === "model.context") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
   if (input.operation === "primary.custom.save") return String(input.provider?.providerId ?? "unknown");
   if (input.operation === "managed.default") return String(input.provider ?? "unknown");
-  if (input.operation === "managed.window") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
   return String(input.providerId ?? "unknown");
 }
 

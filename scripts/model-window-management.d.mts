@@ -42,24 +42,7 @@ export class ModelWindowManagementError extends Error {
   field: string;
 }
 
-export function previewModelWindowChange(
-  input: ModelWindowChangeInput,
-  options?: Pick<ModelWindowChangeOptions, "environment" | "loadWindow">,
-): ModelWindowChangePreview;
-
 export function applyModelWindowChange(
   input: ModelWindowChangeInput,
   options?: ModelWindowChangeOptions,
 ): Promise<{ action: "updated" } & ModelWindowChangePreview>;
-
-export function projectModelWindow(
-  models: ModelWindowImportEntry[],
-): Array<{
-  provider: string;
-  id: string;
-  displayName: string;
-  contextWindow: number;
-  maxContextWindow: number;
-  providers: string[];
-  windowPercent?: number;
-}>;

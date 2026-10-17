@@ -5,10 +5,10 @@ import { parse } from "smol-toml";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { clineRelayCatalogSchema } from "../runtime/cline-relay-catalog.mjs";
 import { managedProviderAccountFamilies, loadManagedModelProviderDefinitions, isManagedProviderModelValid } from "../runtime/model-provider-definitions.mjs";
-import { managedProviderDirectory, managedProviderMarkerPath, customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath, primaryProviderBackupPath, loadConfiguredCustomPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
+import { managedProviderDirectory, managedProviderMarkerPath, customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath, primaryProviderBackupPath, loadConfiguredCustomPrimaryModelProvider, writeManagedModelWindow } from "../runtime/model-provider-runtime.mjs";
 import { customProviderUpstreamMetadataPath } from "../runtime/model-provider-upstream-metadata.mjs";
 import { customOfficialModelCatalogPath } from "../runtime/model-provider-official-catalog.mjs";
-import { createResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog, responsesProviderCatalogPath, responsesContextSyncPath, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { createResponsesModelCatalog, isCustomCatalogProvider, readResponsesModelCatalog, responsesProviderCatalogPath, responsesContextSyncPath, writeResponsesModelCatalog, writeResponsesModelContextWindow, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { validateGatewayConfigStructureDocument, parseGatewayConfig } from "../runtime/gateway-config.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
@@ -137,6 +137,76 @@ function readPresentationSnapshot(catalog, environment) {
   const revision = createHmac("sha256", revisionSecret)
     .update(JSON.stringify([catalog.provider, catalog.providers, catalog.models, content])).digest("hex");
   return { source, revision, document, models };
+}
+
+export async function previewProviderModelContextChange(input, { environment = process.env } = {}) {
+  try { return (await buildContextPlan(input, environment)).preview; }
+  catch (error) { throw stateError(error); }
+}
+
+export async function applyProviderModelContextChange(input, { environment = process.env, preview } = {}) {
+  return withModelProviderManagementTransaction(environment, async () => {
+    let plan;
+    try { plan = await buildContextPlan(input, environment); }
+    catch (error) { throw stateError(error); }
+    if (!preview || preview.operation !== "model.context" || preview.provider !== plan.preview.provider
+      || preview.model?.id !== plan.preview.model.id || preview.contextWindow !== plan.preview.contextWindow
+      || preview.revision !== plan.preview.revision) {
+      throw invalid("stale-preview", "revision", "模型目录已变化，请重新预览");
+    }
+    if (plan.preview.willChange) {
+      try {
+        if (plan.snapshot.source === "managed") {
+          writeManagedModelWindow({ provider: input.provider, model: input.model, contextWindow: input.contextWindow, environment });
+        } else {
+          const transaction = writeResponsesModelContextWindow(environment, input.provider, input.model, input.contextWindow, plan.snapshot.document.revision);
+          await withResponsesModelCatalogWrite(transaction, async () => {
+            const saved = readResponsesModelCatalog(environment, input.provider);
+            const read = createProviderFileReader(environment);
+            if (saved.content !== transaction.content
+              || read(`${transaction.path}.backup`, 2_097_152) !== transaction.previous.content
+              || read(`${transaction.path}.pending`, 1024) !== transaction.pendingContent) {
+              throw invalid("readback-failed", "contextWindow", "模型上下文保存结果无法确认，已保留 pending 和备份；勿自动重试");
+            }
+            finishResponsesModelCatalogWrite(transaction);
+          });
+        }
+      } catch (error) {
+        if (error instanceof ProviderModelManagementError) throw error;
+        throw invalid("operation-failed", "contextWindow", "模型上下文保存未完成；请检查目录与备份，勿自动重试", error);
+      }
+    }
+    return { ...plan.preview, action: "updated" };
+  });
+}
+
+async function buildContextPlan(input, environment) {
+  if (!input || typeof input !== "object" || Array.isArray(input)
+    || Object.keys(input).some(key => !["provider", "model", "contextWindow", "revision"].includes(key))
+    || typeof input.revision !== "string" || !/^[a-f0-9]{64}$/u.test(input.revision)) {
+    throw invalid("invalid-input", "revision", "模型上下文请求参数无效，请刷新模型目录后重新编辑");
+  }
+  validateInput({ provider: input.provider, model: input.model });
+  const { catalogs } = await loadProviderModelCatalogs({ environment });
+  const catalog = catalogs.find(entry => entry.provider === input.provider);
+  if (!catalog) throw invalid("stale-preview", "provider", "提供商目录已变化，请刷新");
+  const snapshot = readPresentationSnapshot(catalog, environment);
+  if (snapshot.revision !== input.revision) throw invalid("stale-preview", "revision", "模型目录已变化，请刷新");
+  if (snapshot.source === "official-shared") throw invalid("context-not-supported", "provider", "官方共享模型目录仅支持只读查看");
+  const model = snapshot.models.find(entry => entry.model === input.model);
+  if (!model) throw invalid("invalid-input", "model", "模型不在当前可见目录中");
+  if (!Number.isSafeInteger(model.maxContextWindow) || !Number.isSafeInteger(input.contextWindow)
+    || input.contextWindow < 1024 || input.contextWindow > model.maxContextWindow) {
+    throw invalid("invalid-window", "contextWindow", `模型上下文窗口必须是 1024-${model.maxContextWindow} 的整数`);
+  }
+  const definition = snapshot.document.definitions?.find(entry => entry.id === input.model);
+  if (definition?.autoCompactTokenLimit > Math.floor(input.contextWindow * 9 / 10)) {
+    throw invalid("context-auto-compact-limit", "contextWindow", "模型上下文窗口不能小于已配置自动压缩阈值所需的窗口，请先调整模型详情中的自动压缩阈值");
+  }
+  return { snapshot, preview: { operation: "model.context", provider: input.provider,
+    model: { id: model.model, displayName: model.displayName, contextWindow: model.contextWindow, maxContextWindow: model.maxContextWindow },
+    contextWindow: input.contextWindow, providers: [input.provider], revision: snapshot.revision,
+    willChange: model.contextWindow !== input.contextWindow, activation: "restart-app-server" } };
 }
 
 export async function previewProviderModelRemoval(input, { environment = process.env } = {}) {
@@ -374,5 +444,5 @@ function invalid(code, field, message, cause) {
 
 function stateError(error) {
   return error instanceof ProviderModelManagementError ? error
-    : invalid("provider-state-unavailable", "provider", "模型目录或关联配置无法安全读取，未执行移除", error);
+    : invalid("provider-state-unavailable", "provider", "模型目录或关联配置无法安全读取，未执行模型操作", error);
 }

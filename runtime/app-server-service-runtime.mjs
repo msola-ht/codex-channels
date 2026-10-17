@@ -268,7 +268,8 @@ async function startAppServerService(runtime, resolveDefaultWorkspace, children,
     const modelGuard = guardedDefinition
       ? new ProviderModelGuard(join(managedProviderDirectory(runtime.environment, guardedDefinition),
         guardedDefinition.catalogFileName), model => isManagedProviderModelValid(guardedDefinition, model), {
-        blockedPaths: [providerCatalogIsolationPath(runtime.environment)],
+        blockedPaths: [providerCatalogIsolationPath(runtime.environment),
+          `${join(managedProviderDirectory(runtime.environment, guardedDefinition), guardedDefinition.catalogFileName)}.settings-pending`],
       })
       : isCustomCatalogProvider(upstreamProvider)
         ? new ProviderModelGuard(responsesProviderCatalogPath(runtime.environment, upstreamProvider), model =>

@@ -10,6 +10,7 @@ export function readResponsesModelCatalog(environment: NodeJS.ProcessEnv | undef
 export function parseResponsesModelCatalog(content: string): ReturnType<typeof createResponsesModelCatalog>;
 export function responsesModelSettings(environment: NodeJS.ProcessEnv | undefined, id: string, model?: string): { catalog: ReturnType<typeof readResponsesModelCatalog>; model: string; reasoningEffort: string | null };
 export function writeResponsesModelCatalog(environment: NodeJS.ProcessEnv | undefined, id: string, definitions: ResponsesModelDefinition[], model: string, expectedRevision?: string): {path: string; previous: ReturnType<typeof readResponsesModelCatalog> | undefined};
+export function writeResponsesModelContextWindow(environment: NodeJS.ProcessEnv | undefined, id: string, model: string, contextWindow: number, expectedRevision: string): {path: string; previous: ReturnType<typeof readResponsesModelCatalog>; content: string; pendingContent: string};
 export function finishResponsesModelCatalogWrite(transaction: ReturnType<typeof writeResponsesModelCatalog>, rollback?: boolean): void;
 export function removeResponsesModelCatalog(environment: NodeJS.ProcessEnv | undefined, id: string): void;
 

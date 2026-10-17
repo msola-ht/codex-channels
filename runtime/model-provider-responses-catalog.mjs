@@ -78,6 +78,34 @@ export function writeResponsesModelCatalog(environment, id, definitions, model, 
   return { path, previous };
 }
 
+/** Update one saved model without reapplying the current prompt template. */
+export function writeResponsesModelContextWindow(environment, id, model, contextWindow, expectedRevision) {
+  const previous = readResponsesModelCatalog(environment, id);
+  if (previous.revision !== expectedRevision) throw new Error("Responses 模型目录已变化，请重新预览");
+  const selected = previous.definitions.find(entry => entry.id === model);
+  const compiled = previous.models.find(entry => entry.slug === model);
+  if (!selected || !compiled) throw new Error("模型 ID 不在该自定义提供商的目录中");
+  if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > compiled.max_context_window) {
+    throw new Error(`模型上下文窗口必须是 1024-${compiled.max_context_window} 的整数`);
+  }
+  const definitions = previous.definitions.map(entry => entry.id !== model ? entry : {
+    ...entry, contextWindow,
+    // Materialize implicit defaults so narrowing the window preserves their meaning.
+    ...(entry.maxContextWindow === undefined ? { maxContextWindow: compiled.max_context_window } : {}),
+    ...(entry.truncationPolicy === undefined ? { truncationPolicy: compiled.truncation_policy } : {}),
+  });
+  const content = `${JSON.stringify(compileCatalog(definitions, previous.defaultModel), null, 2)}\n`;
+  const { path } = previous;
+  const pendingContent = JSON.stringify({ schemaVersion: 2, previous: true,
+    previousDigest: previous.revision, nextDigest: createHash("sha256").update(content).digest("hex") });
+  writePrivateFileAtomicSync(`${path}.backup`, previous.content);
+  if (readPrivateFileSync(path, maximumBytes) !== previous.content) throw new Error("Responses 模型目录已变化，请重新预览");
+  writePrivateFileAtomicSync(`${path}.pending`, pendingContent);
+  if (readPrivateFileSync(path, maximumBytes) !== previous.content) throw new Error("Responses 模型目录已变化，保留恢复记录");
+  writePrivateFileAtomicSync(path, content);
+  return { path, previous, content, pendingContent };
+}
+
 export function finishResponsesModelCatalogWrite(transaction, rollback = false) {
   const { path, previous } = transaction;
   if (rollback) {

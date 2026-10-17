@@ -488,7 +488,9 @@ CLI Setup 的 Codex 兼容 Provider，新增与编辑均可在地址、模型及
 ### 存储、备份与恢复
 
 WebUI 模型管理按精确 Provider ID 的账户目录展示统一能力表格，点击模型名称查看能力和内置提示词。表格的“上下文比例”是目录的有效上下文比例，不是当前窗口占最大窗口的比例；加速与自动审批仅展示目录声明，不表示已经启用。账户范围在分组标题展示；模型 ID、模板关联和采样配置可在详情中查看。提示词按需读取，目录变化时需重新读取；未声明的能力不会按同名 OpenAI 模型补齐。
-上下文设置仍使用独立入口，只修改选定 Provider ID 的模型。第三方官方模型目录保持只读，本地移除的账户默认保护、最后一个模型保护及 CLP Relay 独立范围不变。
+上下文通过模型表格行内的“编辑”修改，与 OpenAI 共用 272K（272000）、372K（372000）、500K（500000）、最大值及自定义表单。第三方最低 1024 Token，且不超过当前目录的上限；保存绑定精确 Provider ID、模型 ID 和目录修订。自定义 v5 同步维护目标定义与生成结果，保留原有提示词、最大窗口及截断策略；已有自动压缩阈值与新窗口冲突时拒绝保存，需先调整模型详情。第三方官方模型目录保持只读，本地移除的账户默认保护、最后一个模型保护及 CLP Relay 独立范围不变。
+
+受管目录的设置写入先保存私有 `models.json.settings-backup` 和 `models.json.settings-pending`，记录目录及对应 Profile 的前后值。保存并回读一致后清除 pending；普通异常尝试恢复原值，无法确认则保留记录，阻止目录读取及新请求。停止对应服务并核对文件后，可用 `codexc provider recover <Provider ID> keep` 保留新值，或 `rollback` 恢复原值；文件已被后续修改时拒绝覆盖。备份可能包含 Profile 凭据，应保持私有，不要上传或粘贴。自定义窗口窄更新复用 `.backup`／`.pending`，新建版本 2 pending 保存前后内容摘要；恢复前核对备份和当前文件，拒绝覆盖后续修改，尚未写完新值时只能 rollback。其他自定义保存及历史 pending 保持版本 1 恢复合同。保存不会自动重启服务。
 
 每个 Provider 的 `~/.codex-connect/providers/responses/<Provider ID>/models.json` 使用版本 5 格式，
 包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`；生成的每个模型条目声明 `multi_agent_version: v2`，由 Codex 解析为多代理 v2 运行时，不写入主配置的 `features.multi_agent_v2`。模型定义可携带 `template: { source, model }` 来源关联及已固化的 `modelMessages` 提示词对象。旧 `followContext` 只读为历史元数据，显式保存时移除，不产生联动。`maxContextWindow` 可选，用于独立保留源模型声明的最大窗口；不保存旧完整 `snapshot` 字段，输入时明确拒绝。只接受当前版本，未知字段和不支持的版本原样保留并明确拒绝，不推断模型关联；版本 4 目录在本版本失败关闭，既不自动迁移也不写回，读取该目录的 Gateway 启动与管理界面会一起失败（`codexc provider recover` 只处理未完成写入事务，不处理版本升级），移除与切回官方 OpenAI 只依赖注册表与目标 Provider 自身的材料，其他 Provider 目录不可读不阻塞本次操作，因此目录缺失或不支持时仍可 `codexc provider remove` 后按原 ID 重建。Codex 读取其中的

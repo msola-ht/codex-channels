@@ -166,6 +166,8 @@ const settingErrorKeys: Record<string, MessageKey> = {
   "invalid-verbosity": "settingsUi.validation.choice",
   "invalid-historyPersistence": "settingsUi.validation.choice",
   "invalid-window": "settingsUi.validation.window",
+  "context-auto-compact-limit": "modelCatalog.contextAutoCompactLimit",
+  "context-not-supported": "modelCatalog.contextReadOnly",
   "invalid-percent": "settingsUi.validation.percent",
   "window-required": "settingsUi.validation.windowRequired",
   "permission-profile-active": "settingsUi.validation.permissionProfile",

@@ -204,9 +204,9 @@
 - `responses-model-setup.mjs` / `responses-model-setup.d.mts`：逐项收集自定义模型描述、当前与最大窗口、思考与等级说明、图片精度、详细程度和摘要参数；高级设置支持指令、有效窗口比例、压缩阈值和截断策略，并选择启用列表。每模型独立询问默认采样参数，默认 No 保留已有值；Yes 逐项预填 `temperature=1.0`、`top_p=0.95`、`top_k=20`、`min_p=0.0`、`presence_penalty=0.0`、`repetition_penalty=1.0`（已有值优先），留空省略字段。新建非 DS 定义显式使用通用编程提示词，已有自定义指令保持。填写 Key 后由 `custom-model-capability-setup.mjs` 分别询问 `apply_patch` 与 `tool_search`，用户可手动选择或探测本项，新模型默认均不声明支持。
 - `provider-model-selection.mjs` / `provider-model-selection.d.mts`：CLP、OCG、CCG、自定义提供商共用的 1–64 个模型多选、预览确认与默认模型保护。
 - `managed-provider-model-management.mjs` / `managed-provider-model-management.d.mts`：OCG/CCG 按完整 Provider ID 管理账户目录的手填模型、DS 官方下载及 ID 映射、启用选择和备份事务；保护目标账户默认值，目录变化不修改账户凭据。
-- `provider-model-management.mjs` / `provider-model-management.d.mts`：CLI/WebUI 共用的账户目录能力、本地移除预览及锁内保存；WebUI 从对应保存目录投影完整能力，按目录身份、精确模型 ID 和内容修订读取白名单提示词。列表不携带提示正文。保护账户和 Gateway 显式默认值、非空目录及文件修订，保留私有备份、CLP 来源和自定义 pending 合同。
+- `provider-model-management.mjs` / `provider-model-management.d.mts`：CLI/WebUI 共用的账户目录能力、本地移除及单模型窗口预览和锁内保存；窗口修改绑定 Provider、模型和目录修订，自定义目录仅重编译已保存定义，不重新应用提示词模板。WebUI 从对应保存目录投影完整能力，按目录身份、精确模型 ID 和内容修订读取白名单提示词。列表不携带提示正文。保护账户和 Gateway 显式默认值、非空目录及文件修订，保留私有备份、CLP 来源和自定义 pending 合同。
 - `provider-model-setup.mjs` / `provider-model-setup.d.mts`：Setup 的统一模型管理菜单，复用上述移除流程、自定义模型专用保存、受管默认设置、CCG/OCG 添加与模板导入及 CLP 显式更新；不自动重启服务。
-- `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内校验当前配置，完成未结束的模型目录保存或回滚目录备份。
+- `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内校验当前配置，完成未结束的自定义模型目录保存或受管账户设置事务；受管恢复核对准确目录／Profile 路径及前后值，拒绝覆盖后续修改。
 - `isolate-provider-catalogs.mjs`：源码仓库的显式账户目录拆分入口，默认预览，`--write` 复制旧共享 catalog／manifest 并更新账户 Profile 或固定主配置引用，原共享文件保留；`--resume`／`--rollback` 消费私有恢复记录，拒绝覆盖后续改动。使用全局管理锁，写入及恢复要求整个 App Server 停止；不由更新器自动执行。步骤与回滚限制见[账户目录拆分](../docs/provider-integration-guide.md#旧共享目录账户升级)。
 - `custom-primary-provider-management.mjs` / `custom-primary-provider-management.d.mts`：提供自定义主
   Provider 新增与编辑的无终端校验、脱敏预览和执行接口；用 `preserve` / `replace` 明确表达 Key
@@ -278,8 +278,8 @@
   窗口由「受管模型目录上下文窗口」按精确 Provider ID 和模型管理；切换模式更新私有 Profile，固定模式与切换模式共用统一
   Provider 管理事务；固定模式以用户配置修订为前置条件，响应丢失时先只读确认写入结果，仅在确认未生效
   时恢复模型目录，结果明确返回 App Server 重启动作。
-- `model-window-management.mjs` / `model-window-management.d.mts`：提供受管模型上下文窗口的无终端
-  校验、预览与执行接口；必须提供精确 Provider ID 和模型 ID，写入经
+- `model-window-management.mjs` / `model-window-management.d.mts`：提供 CLI 受管模型上下文窗口的无终端
+  校验与执行接口；WebUI 使用统一 `model.context` 窄更新。必须提供精确 Provider ID 和模型 ID，写入经
   `writeManagedModelWindow` 只保存目标账户模型的 `context_window` 并同步该账户 Profile，复用统一 Provider 管理事务；
   按目标模型的 `max_context_window` 校验，结果明确返回 App Server 重启动作，不广播同名模型或联动 CP。
 - `model-window-setup.mjs` / `model-window-setup.d.mts`：`codexc setup` 的“受管模型目录上下文窗口”入口；

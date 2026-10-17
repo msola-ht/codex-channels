@@ -1,5 +1,6 @@
 import { recoverResponsesContextSync } from "../runtime/responses-context-sync.mjs";
 import { existsSync, unlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 
@@ -13,6 +14,7 @@ import {
   loadConfiguredCustomSwitchingModelProviders,
   loadConfiguredCustomPrimaryModelProvider,
   readPrimaryProviderBackup,
+  recoverManagedCatalogSettings,
 } from "../runtime/model-provider-runtime.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
@@ -20,14 +22,23 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
   if (action !== "keep" && action !== "rollback") throw new Error("恢复操作必须是 keep 或 rollback");
   return withModelProviderManagementTransaction(environment, async () => {
     if (recoverResponsesContextSync(environment,id,action)) return {providerId:id,action};
+    if (recoverManagedCatalogSettings(id, action, environment)) return {providerId:id,action};
     const path = responsesProviderCatalogPath(environment, id);
     let pending;
     try { pending = JSON.parse(readPrivateFileSync(`${path}.pending`)); } catch {
       throw new Error("没有可安全读取的 Responses 目录恢复记录");
     }
-    if (pending?.schemaVersion !== 1 || typeof pending.previous !== "boolean" || Object.keys(pending).length !== 2) throw new Error("Responses 目录恢复记录格式无效");
+    const guarded = pending?.schemaVersion === 2;
+    if (guarded
+      ? pending.previous !== true || Object.keys(pending).length !== 4
+        || !/^[a-f0-9]{64}$/u.test(pending.previousDigest) || !/^[a-f0-9]{64}$/u.test(pending.nextDigest)
+      : pending?.schemaVersion !== 1 || typeof pending.previous !== "boolean" || Object.keys(pending).length !== 2) throw new Error("Responses 目录恢复记录格式无效");
     const previous = pending.previous ? readPrivateFileSync(`${path}.backup`, 2 * 1024 * 1024) : undefined;
     const current = existsSync(path) ? readPrivateFileSync(path, 2 * 1024 * 1024) : undefined;
+    const digest = value => typeof value === "string" ? createHash("sha256").update(value).digest("hex") : undefined;
+    if (guarded && (digest(previous) !== pending.previousDigest
+      || ![pending.previousDigest, pending.nextDigest].includes(digest(current)))) throw new Error("模型目录或备份存在后续修改，拒绝覆盖；请核对恢复记录");
+    if (guarded && action === "keep" && digest(current) !== pending.nextDigest) throw new Error("新目录尚未完整写入，请选择 rollback");
     const candidate = action === "rollback" ? previous : current;
     if (action === "keep" && candidate === undefined) throw new Error("新目录尚未写入，请选择 rollback");
     const home = codexHomePath(environment);
@@ -44,6 +55,7 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
     const selection = config.model_provider === id ? config : profile;
     if (candidate === undefined && referenced) throw new Error("配置仍引用此目录，不能回滚删除；请先恢复配置");
     if (candidate !== undefined) {
+      if (guarded && readPrivateFileSync(path, 2 * 1024 * 1024) !== current) throw new Error("模型目录已变化，保留恢复记录");
       writePrivateFileAtomicSync(path, candidate);
       try {
         await withResponsesModelCatalogWrite({path}, async () => {
@@ -58,10 +70,16 @@ export async function recoverResponsesProviderCatalog(id, action, environment = 
           if (registered) loadConfiguredCustomSwitchingModelProviders(environment, id);
         });
       } catch (error) {
+        if (guarded) throw error;
         if (current !== undefined) writePrivateFileAtomicSync(path, current);
         else unlinkSync(path);
         throw error;
       }
+    }
+    if (guarded && (readPrivateFileSync(path, 2 * 1024 * 1024) !== candidate
+      || digest(readPrivateFileSync(`${path}.backup`, 2 * 1024 * 1024)) !== pending.previousDigest
+      || JSON.stringify(JSON.parse(readPrivateFileSync(`${path}.pending`))) !== JSON.stringify(pending))) {
+      throw new Error("模型目录恢复结果无法确认，保留恢复记录");
     }
     finishResponsesModelCatalogWrite({path, previous: undefined}, candidate === undefined);
     return { providerId: id, action };

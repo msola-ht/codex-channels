@@ -108,6 +108,8 @@ export function loadManagedModelWindow(
   environment?: NodeJS.ProcessEnv,
 ): ManagedModelWindowEntry[];
 
+export function recoverManagedCatalogSettings(provider: string, action: "keep" | "rollback", environment?: NodeJS.ProcessEnv): boolean;
+
 export function writeManagedModelWindow(options: {
   provider: string;
   model: string;

@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { useTranslation } from "@/hooks/use-translation"
 import type { OpenAiModelCatalogController } from "@/hooks/use-openai-model-catalog"
 import type { OpenAiModelRefreshResult } from "@/lib/types"
@@ -9,14 +9,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ModelContextWindowFields } from "@/components/settings/model-context-window-fields"
 import { ModelDetailFields, OpenAiModelDetails } from "@/components/settings/openai-model-details"
 import { ModelApprovals, ModelServiceTiers, type ModelCatalogGroup } from "@/components/settings/model-catalog-columns"
 
@@ -26,7 +24,6 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, renderCatalo
   renderCatalog: (group: ModelCatalogGroup) => ReactNode
 }) {
   const { t, language } = useTranslation()
-  const inputId = useId()
   const [selectedModel, setSelectedModel] = useState<{ id: string; scope: string } | null>(null)
   const detailModel = !catalog.loading && !catalog.error && catalog.data?.scope === selectedModel?.scope
     ? catalog.data?.models.find(model => model.model === selectedModel?.id) ?? null : null
@@ -92,28 +89,12 @@ export function OpenAiModelCatalogCard({ catalog, disabled = false, renderCatalo
     <Dialog open={catalog.draft !== null && pending === undefined} disablePointerDismissal onOpenChange={(open, details) => { if (catalog.busy) { details.cancel(); return }; if (!open) catalog.closeEdit() }}>
       <DialogContent closeLabel={t("modelManagement.cancel")} showCloseButton={!catalog.busy} className="max-h-[85dvh] overflow-y-auto">
         <DialogHeader><DialogTitle>{t("openAiModelCatalog.editContext")}</DialogTitle><DialogDescription>{t("openAiModelCatalog.editHint")}</DialogDescription></DialogHeader>
-        {catalog.draft && <FieldGroup>
-          <span>{catalog.draft.displayName}</span>
-          <SettingsRow label={t("openAiModelCatalog.maxContext")} value={context(catalog.draft.maxContextWindow)} />
-          <FieldSet disabled={catalog.locked || disabled}>
-            <FieldLegend id={`${inputId}-label`}>{t("openAiModelCatalog.defaultContext")}</FieldLegend>
-            <ToggleGroup variant="outline" size="sm" className="max-w-full flex-wrap" value={[catalog.draft.preset]} disabled={catalog.locked || disabled} aria-labelledby={`${inputId}-label`} aria-describedby={`${inputId}-hint`} onValueChange={([value]) => {
-              if (value === "272000" || value === "372000" || value === "500000" || value === "max" || value === "custom") catalog.changePreset(value)
-            }}>
-              {(["272000", "372000", "500000"] as const).map(value => <ToggleGroupItem key={value} value={value} disabled={catalog.draft?.maxContextWindow == null || Number(value) > catalog.draft.maxContextWindow}>{Number(value) / 1000}K</ToggleGroupItem>)}
-              <ToggleGroupItem value="max" disabled={catalog.draft.maxContextWindow === null}>{t("openAiModelCatalog.contextMaximum")}</ToggleGroupItem>
-              <ToggleGroupItem value="custom">{t("openAiModelCatalog.contextCustom")}</ToggleGroupItem>
-            </ToggleGroup>
-            {catalog.draft.preset === "custom" ? <Field data-invalid={!catalog.valid} data-disabled={catalog.locked || disabled}>
-              <FieldLabel htmlFor={inputId}>{t("openAiModelCatalog.contextCustom")}</FieldLabel>
-              <Input id={inputId} inputMode="numeric" value={catalog.draft.value} maxLength={16} aria-invalid={!catalog.valid} aria-describedby={`${inputId}-hint`} disabled={catalog.locked || disabled} onChange={event => catalog.changeValue(event.target.value)} />
-            </Field> : <SettingsRow label={t("openAiModelCatalog.selectedContext")} value={context(Number(catalog.draft.value))} />}
-            <FieldDescription id={`${inputId}-hint`}>{t("openAiModelCatalog.contextValidation")}</FieldDescription>
-          </FieldSet>
+        {catalog.draft && <div className="flex flex-col gap-6">
+          <ModelContextWindowFields displayName={catalog.draft.displayName} maxContextWindow={catalog.draft.maxContextWindow} value={catalog.draft.value} preset={catalog.draft.preset} valid={catalog.valid} disabled={catalog.locked || disabled} onPresetChange={catalog.changePreset} onValueChange={catalog.changeValue} />
           {catalog.stale && <Alert variant="destructive"><AlertDescription>{t("openAiModelCatalog.stale")}</AlertDescription></Alert>}
           {catalog.error && <Alert variant="destructive"><AlertDescription>{catalog.error}</AlertDescription></Alert>}
           {catalog.actionError && <Alert variant="destructive"><AlertDescription>{catalog.actionError}</AlertDescription></Alert>}
-        </FieldGroup>}
+        </div>}
         <DialogFooter><Button variant="outline" disabled={catalog.busy} onClick={catalog.closeEdit}>{t("modelManagement.cancel")}</Button><Button disabled={disabled || catalog.locked || catalog.stale || !catalog.valid || catalog.draft?.value === String(catalog.draft?.previousContextWindow)} onClick={() => void catalog.preview()}>{catalog.busy && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("modelManagement.preview")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
