@@ -8,7 +8,7 @@ Flash 的上下文、图片、思考等级与提示词复用仓库 `runtime/mode
 通过“模型上下文窗口”选择准确的 `clp-<账户>` 与模型修改窗口；默认模型、思考等级和上下文均按账户独立保存，不联动 DS 或其他账户。
 每个 Cline 账户拥有独立的 Codex 模型目录。独立 Relay 保持自己的原生 Cline 目录，可下载／更新模型文件，并在每把 Key 下逐模型设置[思考策略](provider-api-relay-development.md#clp-转发模型目录与设置)，不写入 Codex 目录。更新密钥保留该账户已有上下文及思考等级。
 
-已有账户通过 `codexc setup → 模型与提供商 → 第三方 Provider → Cline Pass 官方 → 选择新增模型／更新账户目录` 选择所属账户后扩展或更新模型，无需删除账户、重新输入 Key。空格勾选、回车确认，再预览最终名单并保存；默认勾选该账户当前启用项，新增模型不自动勾选。首次在 CLI 配置时也提供多选，Flash 可用时默认勾选它，但允许只选择其他模型；更换 Key 沿用该账户名单。聚合读取各账户自己的启用选择，未勾选项不进入该账户运行时目录。账户当前默认模型必须保留；要停用它，先在模型设置中更换默认模型。取消多选或放弃保存不会写入配置。WebUI 首次配置仍生成完整的受支持目录，启用名单在 CLI 调整。
+已有账户通过 `codexc setup → 模型与提供商 → 第三方 Provider → Cline Pass 官方` 的发现／添加模型入口选择所属账户，扩展模型名单，无需删除账户、重新输入 Key。空格勾选、回车确认，再预览最终名单并保存；默认勾选当前启用项，新增模型不自动勾选。发现只添加新模型，已有条目完整保留；下载目录缺失的旧模型也不会自动移除，没有新增时不写文件和备份。更新已有模型请在 CLI 模型管理或 WebUI 选择“更新模板”，明确提示词／能力范围后对比保存，见[账户模板更新](provider-integration-guide.md#对比并更新账户模型模板)。首次在 CLI 配置时也提供多选，Flash 可用时默认勾选它，但允许只选择其他模型；更换 Key 沿用该账户名单。聚合读取各账户自己的启用选择。移除使用独立的本地移除入口；账户当前默认模型须先切换再移除。取消操作不写入配置。WebUI 首次配置仍生成完整的受支持目录。
 
 未启用 Flash 时，新增账户和刷新目录不要求 DS 模板，也不要求 Cline 目录包含 Flash。重新启用 Flash 时校验仓库 DS 模板；失败保留原目录。
 
@@ -54,7 +54,7 @@ Desktop，更换 App Server 实例仍须完全退出。聚合请求复用现有 
 
 非 Flash 的 CLP 模型使用项目内 `runtime/third-party-coding-instructions.mjs` 维护的通用编程提示词，通过目录的 `model_messages.instructions_template` 加载；新增 OCG/CCG 手填模型及新增非 DS 自定义 Responses 模型复用同一资源。内容覆盖任务范围、上下文延续、仓库规则、工具使用、权限、用户数据保护、验证与交付；不声明具体模型身份，不强制新增测试、委派或提交，工具与能力仍以实际环境和模型目录为准。它参考 DS 模板的协作主题独立编写。精确 Flash 使用仓库 DS 模板；显式生成目录时还补全基础提示词，既有目录读取保持其已保存内容。
 
-新建账户目录时采用当前提示词；已有账户需在 CLP 菜单执行“选择新增模型／更新账户目录”，沿用目录备份与激活流程。更新代码或重新配置 Key 不会覆盖现有目录；旧会话是否采用新的基础提示词还取决于客户端的会话恢复行为，不能只凭目录已更新就认定生效。Chat 桥仅转换请求中实际携带的指令，不再次追加这份提示词。
+新建账户目录时采用当前提示词；已有账户需在模型管理中执行“更新模板”并选择提示词，预览后保存，沿用目录备份与激活流程。发现模型、更新代码或重新配置 Key 不会覆盖现有条目；旧会话是否采用新的基础提示词还取决于客户端的会话恢复行为，不能只凭目录已更新就认定生效。Chat 桥仅转换请求中实际携带的指令，不再次追加这份提示词。
 
 锁定 Codex 仅支持 Responses。App Server 仍配置 `wire_api = "responses"`，服务拥有的本地回环代理
 把完整请求转换后发送至 `https://api.cline.bot/api/v1/chat/completions`，再把 Chat SSE 转换回 Responses。
@@ -74,7 +74,7 @@ Flash 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high
 
 2026-10-16 00:45:40–00:46:02 UTC，通过 WebUI 共用的 `probeRelayReasoning` 入口对 `clp-main/deepseek-v4.1-flash` 原生 Chat 执行九项检测，每项一次、固定文本 `Reply with exactly OK.`、`max_tokens=64`，沿用 Flash 路由限定。所有项目均为 HTTP 200、completed，整组未提前停止；响应模型均为 `vmc/deepseek-v4p1-flash-contributor-fallbacks`。基线、`reasoning.effort=none`、`reasoning_effort=none`、`thinking.type=disabled` 均报告推理/输出 13/16 并返回思考正文；`reasoning.enabled=false` 为 13/16、不返回思考正文；顶层 `enable_thinking=false` 为 24/27；模板 `chat_template_kwargs.enable_thinking=false` 为 15/18；Google 零预算为 24/27，后三项均返回思考正文。新增组合 `reasoning.enabled=false` 加 `thinking.type=disabled` 为 15/18、不返回思考正文，仍未观察到推理用量归零。组合对应 [Cline 官方参数规则](https://github.com/cline/cline/blob/23791b9323aadd91d7dbaea8a8fa262cd2f7ad0b/sdk/packages/llms/src/providers/routing/provider-option-rules.ts) 中通用关闭与 DeepSeek 家族规则的合并；源码依据不证明云端执行了关闭。此次直接调用检测后端，未操作浏览器保存或修改账户设置；没有采集路由元数据，不能仅凭响应模型名称判定实际 Provider。
 
-已有目录需通过“选择新增模型／更新账户目录”显式刷新才会增加开关选项；安装代码不自动改写目录，已有默认选择保留。聚合继承同一目录，仍按已有活动和租约条件刷新。回退到不支持 `enabled` 的旧版本前，先把相关默认值和会话选择改为 `none`，再按上述成对目录备份流程回退。此开关适配仅用于受管 CLP 的 Responses→Chat 桥；不自动改写其他提供商的原生 Responses 参数或独立 Relay 的客户端参数。
+已有目录需通过“更新模板”明确选择能力参数，预览后保存才会增加开关选项；安装代码和发现新模型不改写已有条目，默认选择保留。聚合继承同一目录，仍按已有活动和租约条件刷新。回退到不支持 `enabled` 的旧版本前，先把相关默认值和会话选择改为 `none`，再按上述成对目录备份流程回退。此开关适配仅用于受管 CLP 的 Responses→Chat 桥；不自动改写其他提供商的原生 Responses 参数或独立 Relay 的客户端参数。
 未传入思考选项时沿用上游默认值；需要开启思考时，选择目录提供的 `enabled` 或非 `none` 等级。
 非 OpenAI Provider 的上下文压缩沿用锁定 Codex 的本地压缩路径，不伪造远程压缩结果。
 

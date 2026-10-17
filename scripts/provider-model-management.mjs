@@ -18,6 +18,7 @@ import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { createProviderFileReader } from "../runtime/provider-file-access.mjs";
 import { projectModelCatalogEntries, projectModelPrompts } from "../runtime/model-catalog-presentation.mjs";
 import { providerCatalogIsolationPath } from "../runtime/provider-catalog-isolation.mjs";
+import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
 
 // Revisions cover private profiles too; avoid exposing a reusable credential fingerprint.
 const revisionSecret = randomBytes(32);
@@ -290,6 +291,7 @@ async function buildRemovalPlan(input, environment) {
       throw invalid("provider-state-unavailable", "provider", "模型来源文件无效，未执行移除");
     }
     validateManagedCatalog(catalog, definition);
+    const templateBindings = readModelTemplateBindings(manifest, catalog.models.map(model => model.slug));
     if (members.some(member => !catalog.models.some(model => model.slug === member.model
       && model.default_reasoning_level === member.reasoningEffort))) {
       throw invalid("provider-state-unavailable", "provider", "账户默认模型或思考等级与目录不一致，请先修复默认设置");
@@ -307,7 +309,18 @@ async function buildRemovalPlan(input, environment) {
         nextManifest.source = "cline";
         delete nextManifest.model;
       }
-    } else nextManifest = { source: "user-configured", updatedAt: new Date().toISOString() };
+    } else nextManifest = { ...manifest, updatedAt: new Date().toISOString() };
+    if (Object.hasOwn(manifest, "modelTemplates")) {
+      nextManifest.modelTemplates = { ...templateBindings };
+      delete nextManifest.modelTemplates[input.model];
+    }
+    if (Object.hasOwn(manifest, "templateUpdates")) {
+      if (!manifest.templateUpdates || typeof manifest.templateUpdates !== "object" || Array.isArray(manifest.templateUpdates)) {
+        throw invalid("catalog-source-invalid", "provider", "模型模板更新记录无效，未执行移除");
+      }
+      nextManifest.templateUpdates = { ...manifest.templateUpdates };
+      delete nextManifest.templateUpdates[input.model];
+    }
   } else {
     const provider = [...state.customProviders.fixedCandidates.filter(candidate => candidate.active), ...state.customProviders.switchingProviders]
       .find(candidate => candidate.id === input.provider);

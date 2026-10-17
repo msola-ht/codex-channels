@@ -1,5 +1,11 @@
 export interface ProviderModelCatalog {
   models: Array<Record<string, unknown>>;
 }
-export function createOpencodeGoCatalog(source: ProviderModelCatalog): ProviderModelCatalog;
-export function createCcgCatalog(source: ProviderModelCatalog): ProviderModelCatalog;
+export function createOpencodeGoCatalogWithTemplateBindings(source: ProviderModelCatalog): {
+  catalog: ProviderModelCatalog;
+  templateBindings: Record<string, import("../runtime/model-template-bindings.mjs").ModelTemplateBinding>;
+};
+export function createCcgCatalogWithTemplateBindings(source: ProviderModelCatalog): {
+  catalog: ProviderModelCatalog;
+  templateBindings: Record<string, import("../runtime/model-template-bindings.mjs").ModelTemplateBinding>;
+};

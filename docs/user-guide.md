@@ -109,7 +109,7 @@ Setup 仅按具体操作返回的激活范围提示重启。列出账户、停�
 
 日常模型操作从 `setup → 模型与提供商 → 第三方 Provider → 模型管理` 或 WebUI「模型管理 → 模型配置」进入。
 自定义目录、CCG、OCG、CLP 支持预览后本地移除；账户范围、默认保护、Relay 影响和恢复方式见[日常模型管理](provider-integration-guide.md#日常模型管理)。
-CLI 模型管理还提供 DS 账户及已关联模板的自定义模型的[模板更新对比](provider-integration-guide.md#对比并更新账户模型模板)：明确选择提示词或能力范围，确认后仅更新目标账户模型。
+CLI 与 WebUI 模型管理均提供 DS、CLP、CCG、OCG 和自定义模型的[模板更新对比](provider-integration-guide.md#对比并更新账户模型模板)：明确来源，选择提示词或能力范围，查看差异并确认后仅更新目标账户模型；旧模型缺少来源关联时须手动选择。
 
 `codexc timezone` 设置服务时区，WebUI 同步跟随；网关默认也跟随，可用 `codexc timezone --gateway` 选择系统或自定义时区，细节见[`服务时区`](model-timezone.md)。
 

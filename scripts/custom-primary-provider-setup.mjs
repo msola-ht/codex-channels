@@ -336,16 +336,20 @@ export async function runCustomPrimaryProviderSetup({
     }
   }
 
+  if (previousCatalog?.definitions.length) {
+    output.write("模板导入仅新增模型；已有模型的模板更新请从模型管理选择“对比并更新模型模板”。本向导仍可手动编辑已有模型参数。\n");
+  }
   const imported = custom ? await promptResponsesModelImport(prompts, previousCatalog?.definitions, loadModelTemplates) : [];
   if (imported === undefined) return { action: allowBack ? "back" : "cancel" };
-  const definitions = [...new Map([...(previousCatalog?.definitions ?? []), ...imported.map(entry => {
-    const previous = previousCatalog?.definitions.find(model => model.id === entry.id);
-    return {
-      ...entry,
-      ...(previous?.instructions === undefined ? {} : { instructions: previous.instructions }),
-      ...(previous?.sampling === undefined ? {} : { sampling: structuredClone(previous.sampling) }),
-    };
-  })].map(entry => [entry.id, entry])).values()];
+  const definitions = [...(previousCatalog?.definitions ?? [])];
+  const definitionIds = new Set(definitions.map(entry => entry.id));
+  for (const entry of imported) {
+    if (definitionIds.has(entry.id)) {
+      throw new Error("模板导入的平台模型 ID 与已有模型或本次导入重复；已有模型的模板更新请使用模型管理中的“对比并更新模型模板”");
+    }
+    definitionIds.add(entry.id);
+    definitions.push(entry);
+  }
   let selectedModel;
   if (imported.length > 0) {
     selectedModel = await prompts.select({

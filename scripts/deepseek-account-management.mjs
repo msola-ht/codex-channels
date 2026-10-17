@@ -21,8 +21,8 @@ import { applyProviderFileUpdates, snapshotProviderFiles, stageManagedPrimaryCre
 import { createManagedProviderConfiguration, hasProviderBaseConfig, resolveManagedCatalogModel, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
-import { createManagedDeepseekCatalog, downloadDeepseekCatalog, deepseekSetupScriptUrl, normalizeDeepseekCatalogCapabilities } from "./deepseek-setup.mjs";
-import { completeCatalogPrompts } from "../runtime/model-template-catalog.mjs";
+import { createManagedDeepseekCatalog, downloadDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
+import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
 
 export function deepseekAccountPaths(environment, accountId) {
   const definition = deepseekAccountDefinition(accountId);
@@ -114,16 +114,17 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
     }
     let catalog;
     if (existsSync(paths.catalog)) {
-      const previousCatalog = JSON.parse(createProviderFileReader(environment)(paths.catalog, 2_097_152));
-      catalog = normalizeDeepseekCatalogCapabilities(completeCatalogPrompts(previousCatalog));
-      if (JSON.stringify(catalog) !== JSON.stringify(previousCatalog)) {
-        updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
-      }
+      catalog = JSON.parse(createProviderFileReader(environment)(paths.catalog, 2_097_152));
     } else {
       const downloaded = await (options.downloadCatalog ?? downloadDeepseekCatalog)(options.fetchImpl ?? fetch);
       catalog = createManagedDeepseekCatalog(downloaded.catalog);
       updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
-      updates.set(paths.manifest, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() }, null, 2)}\n`);
+      const modelIds = catalog.models.map(model => model.slug);
+      const modelTemplates = readModelTemplateBindings({ modelTemplates: Object.fromEntries(
+        modelIds.map(model => [model, { source: "deepseek", model }]),
+      ) }, modelIds);
+      updates.set(paths.manifest, `${JSON.stringify({ source: deepseekSetupScriptUrl,
+        downloadedAt: new Date().toISOString(), modelTemplates }, null, 2)}\n`);
     }
     const model = resolveManagedCatalogModel(catalog, definition, previous?.model);
     const configured = createManagedProviderConfiguration(current, initial.config, definition, {

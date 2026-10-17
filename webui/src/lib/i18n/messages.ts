@@ -5,6 +5,18 @@ import type { DisplayLanguage } from "../format"
  * 由 `Messages` 类型检查在构建期保证两种语言键一致。
  */
 const zh = {
+  modelTemplate: {
+    title: "更新模板", hint: "选择模板来源与更新内容，核对差异后保存。CLP 会读取远程模板。",
+    source: "模板来源与模型", selectSource: "请选择模板", sections: "更新内容", prompts: "提示词", capabilities: "能力参数",
+    capabilityHint: "能力更新可能改变最大上下文；请确认平台支持模板声明。",
+    official: "官方 Codex", deepseek: "DeepSeek", cline: "Cline",
+    confirmTitle: "确认更新模型模板？", confirmHint: "仅更新所选账户和模型。保存前备份目录，不会自动重启服务。",
+    sourceSummary: "模板：{source} · {model}", sectionSummary: "更新：{sections}", before: "更新前", after: "更新后", absent: "未设置",
+    unchanged: "所选内容与当前模型一致，无需保存。", unavailable: "没有可用于此模型的模板，请重新读取或检查模板来源。",
+    expired: "模板来源已失效，请关闭并重新打开更新模板，再核对差异。", tooLarge: "模板来源超过安全读取限制，无法预览。",
+    conflict: "新模板不支持当前上下文窗口或默认思考等级，请先单独调整这些设置，再更新模板。",
+    retry: "重新读取模板", open: "更新 {provider} 中 {model} 的模板", busy: "已有模板读取正在进行，请稍后重试。",
+  },
   openAiModelPrompts: {
     title: "模型提示词", capabilities: "模型能力",
     hint: "仅展示当前模型缓存提供的原文，不是当前会话的完整提示词。未提供的字段可能使用 Codex 内置默认值；此处不补齐、不执行。",
@@ -1589,6 +1601,18 @@ const zh = {
 export type Messages = typeof zh
 
 const en: Messages = {
+  modelTemplate: {
+    title: "Update template", hint: "Choose a template and the sections to update, then review the differences. CLP loads remote templates.",
+    source: "Template source and model", selectSource: "Choose a template", sections: "Sections to update", prompts: "Prompts", capabilities: "Capabilities",
+    capabilityHint: "Capability updates may change the maximum context. Confirm your provider supports the template's declarations.",
+    official: "Official Codex", deepseek: "DeepSeek", cline: "Cline",
+    confirmTitle: "Update this model's template?", confirmHint: "Only the selected provider and model are updated. The catalog is backed up before saving. Services are not restarted automatically.",
+    sourceSummary: "Template: {source} · {model}", sectionSummary: "Update: {sections}", before: "Before", after: "After", absent: "Not set",
+    unchanged: "The selected sections already match this model. No save is needed.", unavailable: "No template is available for this model. Reload or check the template source.",
+    expired: "The template source expired. Close and reopen the template editor, then review the differences again.", tooLarge: "The template source exceeds the safe read limit and cannot be previewed.",
+    conflict: "The new template does not support the current context window or default reasoning effort. Adjust these settings before updating the template.",
+    retry: "Reload templates", open: "Update the template for {model} in {provider}", busy: "A template read is already in progress. Try again shortly.",
+  },
   openAiModelPrompts: {
     title: "Model prompts", capabilities: "Capabilities",
     hint: "Original text supplied by the current model cache, not the complete session prompt. Missing fields may use Codex defaults; these are not filled in or executed here.",

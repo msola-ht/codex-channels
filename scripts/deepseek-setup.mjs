@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { deepseekProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { normalizeDeepseekCatalogCapabilities } from "../runtime/model-catalog.mjs";
 import { completeCatalogPrompts } from "../runtime/model-template-catalog.mjs";
-export { normalizeDeepseekCatalogCapabilities } from "../runtime/model-catalog.mjs";
 import { createManagedProviderCatalog } from "./managed-model-provider-setup.mjs";
 
 export const deepseekSetupScriptUrl = "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh";

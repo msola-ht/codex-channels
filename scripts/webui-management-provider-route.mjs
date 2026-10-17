@@ -37,6 +37,9 @@ import { fingerprintManagementValue } from "./management-security.mjs";
 import { routeCustomModelCapabilityProbe } from "./webui-custom-model-probe.mjs";
 import { routeOfficialModelManagement } from "./webui-management-official-model-route.mjs";
 import { loadProviderModelPrompts, ProviderModelManagementError } from "./provider-model-management.mjs";
+import { loadProviderModelTemplateOptions } from "./provider-model-template-management.mjs";
+
+const activeTemplateOptionsReads = new WeakSet();
 
 export async function routeProviderManagement({
   configPath,
@@ -50,6 +53,31 @@ export async function routeProviderManagement({
   state,
 }) {
   if (await routeOfficialModelManagement({ environment, maximumBodyBytes, path, principalId, request, response, state })) return true;
+  if (path === "/provider-model-templates" && request.method === "GET") {
+    const params = new URL(request.url, "http://localhost").searchParams;
+    if (params.size !== 1 || params.getAll("provider").length !== 1) {
+      throw new ApiError(400, "provider_models_invalid_input", "模型模板请求参数无效");
+    }
+    if (activeTemplateOptionsReads.has(state)) {
+      throw new ApiError(503, "provider_templates_busy", "已有模型模板读取正在进行，请稍后重试");
+    }
+    const controller = new AbortController();
+    const disconnect = () => { if (!response.writableEnded) controller.abort(); };
+    activeTemplateOptionsReads.add(state);
+    response.once("close", disconnect);
+    if (response.destroyed) controller.abort();
+    try {
+      const options = await loadProviderModelTemplateOptions(params.get("provider"), { environment, signal: controller.signal });
+      controller.signal.throwIfAborted();
+      sendManagementJson(response, 200, options);
+    } catch (error) {
+      throw managementOperationError(error, [ProviderModelManagementError], "provider_models_unavailable");
+    } finally {
+      response.removeListener("close", disconnect);
+      activeTemplateOptionsReads.delete(state);
+    }
+    return true;
+  }
   if (path === "/provider-model-prompts" && request.method === "GET") {
     const params = new URL(request.url, "http://localhost").searchParams;
     if (params.size !== 3 || ["provider", "model", "revision"].some(key => params.getAll(key).length !== 1)) {
@@ -211,7 +239,8 @@ export async function routeProviderManagement({
     const resource = await readProviderSettings(environment, state);
     const inputFingerprint = fingerprintManagementValue(input);
     const resourceRevision = fingerprintManagementValue(resource);
-    if (input.operation === "model.custom.save" && input.resourceRevision !== resourceRevision) {
+    if ((input.operation === "model.custom.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
+      && input.resourceRevision !== resourceRevision) {
       throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
     }
     const issued = state.confirmations.issue({
@@ -240,7 +269,8 @@ export async function routeProviderManagement({
     const safePreview = redactProviderSettingsResult(preview);
     const inputFingerprint = fingerprintManagementValue(input);
     const resourceRevision = fingerprintManagementValue(resource);
-    if (input.operation === "model.custom.save" && input.resourceRevision !== resourceRevision) {
+    if ((input.operation === "model.custom.save" || input.operation === "primary.custom.save" && input.provider.operation === "update")
+      && input.resourceRevision !== resourceRevision) {
       throw new ApiError(409, "stale-preview", "模型设置已变化，请刷新后重新编辑");
     }
     state.confirmations.consume(body.confirmationToken, {
@@ -434,7 +464,7 @@ function recordProviderAudit(state, details, failureMessage) {
 }
 
 function providerSettingsAuditTarget(input) {
-  if (input.operation === "model.remove" || input.operation === "model.custom.save" || input.operation === "model.context") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
+  if (input.operation === "model.remove" || input.operation === "model.custom.save" || input.operation === "model.context" || input.operation === "model.template.update") return `model:${fingerprintManagementValue({ provider: input.provider, model: input.model })}`;
   if (input.operation === "primary.custom.save") return String(input.provider?.providerId ?? "unknown");
   if (input.operation === "managed.default") return String(input.provider ?? "unknown");
   return String(input.providerId ?? "unknown");

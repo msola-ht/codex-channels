@@ -19,7 +19,7 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
   const accounts = loadClinePassAccounts(environment);
   const action = await prompts.select({ message: "Cline Pass 官方", options: [
     { value: "configure", label: "添加账户" },
-    ...(accounts.length ? [{ value: "reconfigure", label: "重新配置账户" }, { value: "models", label: "模型管理／本地移除" }, { value: "catalog", label: "选择新增模型／更新账户目录" }, { value: "default", label: "设置默认账户" }, { value: "remove", label: "移除账户" }] : []),
+    ...(accounts.length ? [{ value: "reconfigure", label: "重新配置账户" }, { value: "models", label: "模型管理／本地移除" }, { value: "catalog", label: "发现／添加新模型" }, { value: "default", label: "设置默认账户" }, { value: "remove", label: "移除账户" }] : []),
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
@@ -29,7 +29,8 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
     if (prompts.isCancel(accountId)) return { action: "back" };
     const result = await refreshClinePassCatalog({ accountId, environment, selectModels: selection => promptEnabledModels(prompts, output, selection) });
     if (result.action === "back") return result;
-    output.write(`CLP ${accountId} 模型目录已更新：${result.models.length} 个模型，来源 ${result.commit}。\n`);
+    output.write(result.action === "unchanged" ? "没有新增模型，无需保存或重启。\n"
+      : `CLP ${accountId} 已添加新模型：现有 ${result.models.length} 个模型，来源 ${result.commit}。\n`);
     writeCatalogExclusions(output, result.excludedModels);
     writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
     return result;

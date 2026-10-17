@@ -1,5 +1,6 @@
 import { isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
 import { clineRelayCatalogSchema } from "./cline-relay-catalog.mjs";
+import { readModelTemplateBindings } from "./model-template-bindings.mjs";
 import { assertProviderModelRequestPolicy } from "./model-request-policy.mjs";
 import { createHash } from "node:crypto";
 import { existsSync, unlinkSync } from "node:fs";
@@ -346,6 +347,7 @@ function validateCatalogManifest(catalogContent, manifestContent, definition) {
   if (!Array.isArray(catalog.models) || !slugs.size || slugs.size !== catalog.models.length) throw new Error("模型目录成员无效");
   for (const slug of slugs) modelCatalogSetting(catalogContent, definition, slug);
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) || typeof manifest.source !== "string" || !manifest.source) throw new Error("模型来源无效");
+  readModelTemplateBindings(manifest, [...slugs]);
   if (isClinePassAccountProvider(definition.id)
     && (!clineRelayCatalogSchema.pick({ commit: true, downloadedAt: true }).safeParse(manifest.cline).success
       || !["deepseek", "cline"].includes(manifest.source)

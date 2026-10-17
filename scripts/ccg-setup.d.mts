@@ -11,6 +11,7 @@ export function applyCcgConfiguration(input: {
   accountId: string;
   apiKey: string;
   catalog: CcgCatalog;
+  templateBindings?: Record<string, import("../runtime/model-template-bindings.mjs").ModelTemplateBinding>;
   model: string;
   mode?: "switching" | "exclusive";
   reconfigure?: boolean;

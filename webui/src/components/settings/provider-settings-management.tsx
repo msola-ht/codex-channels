@@ -1,6 +1,6 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { useTranslation } from "@/hooks/use-translation"
 import { formatModelLabel } from "@/lib/format"
 
@@ -29,6 +29,7 @@ import { ModelContextWindowFields } from "@/components/settings/model-context-wi
 import { contextWindowPreset, validContextWindow, type ContextWindowPreset } from "@/lib/model-context-window"
 import type { CustomModelDraft } from "@/components/settings/custom-model-details"
 import { contextWindowPresetTokens } from "../../../../runtime/model-catalog.mjs"
+import { ProviderModelTemplateDialog, ProviderModelTemplateConfirmation, type ProviderModelTemplateTarget } from "@/components/settings/provider-model-template-dialog"
 
 const probeReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 
@@ -95,11 +96,22 @@ function ProviderSettingsCard({
   const [confirmRemoveBaseUrl, setConfirmRemoveBaseUrl] = useState(false)
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
   const [contextDraft, setContextDraft] = useState<ModelContextDraft | null>(null)
+  const [templateTarget, setTemplateTarget] = useState<ProviderModelTemplateTarget | null>(null)
+  const templateTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const templatePreviewRef = useRef<HTMLButtonElement | null>(null)
+  const templateSavedTarget = useRef<ProviderModelTemplateTarget | null>(null)
+  useEffect(() => {
+    if (templateSavedTarget.current === null || management.loading || management.busy || management.readbackRequired) return
+    if (templateTriggerRef.current?.isConnected) {
+      templateTriggerRef.current.focus()
+      templateSavedTarget.current = null
+    }
+  }, [management.loading, management.busy, management.readbackRequired, settings])
   const contextCatalog = settings.modelCatalogs.find(catalog => catalog.provider === contextDraft?.provider)
   const contextStale = contextDraft !== null && (contextCatalog?.revision !== contextDraft.revision || contextCatalog.source === "official-shared")
   const contextValid = contextDraft !== null && validContextWindow(contextDraft.value, 1024, contextDraft.maxContextWindow)
   const modelsOnly = section === "models"
-  const editorStale = modelsOnly && editorOpen && editorRevision !== settings.resourceRevision
+  const editorStale = editingId !== null && editorOpen && editorRevision !== settings.resourceRevision
 
   const managed = settings.managedProviders.find((provider) => provider.id === managedProvider) ?? settings.managedProviders[0]
   const [managedDraft, patchManaged, resetManaged] = useSettingsDraft({ model: managed?.model ?? "", reasoning: managed?.reasoningEffort ?? "" })
@@ -159,6 +171,7 @@ function ProviderSettingsCard({
 
   const saveCustom = async () => {
     if (editorStale) return
+    if (editingId !== null && editorRevision === null) return
     if (modelsOnly && editingId !== null) {
       const models = customModels.map(({ probeConnection: _probeConnection, ...entry }) => {
         const descriptions = Object.fromEntries(Object.entries(entry.reasoningDescriptions ?? {}).filter(([effort]) => entry.reasoningEfforts.includes(effort)))
@@ -178,6 +191,7 @@ function ProviderSettingsCard({
       : { action: "replace" as const, apiKey }
     const result = await management.mutate({
       operation: "primary.custom.save",
+      ...(editingId !== null && editorRevision !== null ? { resourceRevision: editorRevision } : {}),
       provider: {
         operation: editingId === null ? "create" : "update",
         providerId: providerId.trim(),
@@ -247,6 +261,10 @@ function ProviderSettingsCard({
     if (result !== null && (operation === "primary.custom.save" || operation === "model.custom.save")) resetForm()
     if (result !== null && operation === "managed.default") resetManaged()
     if (result !== null && operation === "model.context") setContextDraft(null)
+    if (result !== null && operation === "model.template.update") {
+      templateSavedTarget.current = templateTarget
+      setTemplateTarget(null)
+    }
     if (result !== null) onChanged?.()
   }
 
@@ -258,13 +276,13 @@ function ProviderSettingsCard({
         <div className="flex flex-col gap-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{catalog.displayName}</h3><Badge variant="outline">{t(catalog.source === "managed" ? "modelCatalog.sourceManaged" : catalog.source === "custom" ? "modelCatalog.sourceCustom" : "modelCatalog.sourceOfficial")}</Badge></div>
           <p className="text-xs font-normal text-muted-foreground">{t("modelCatalog.scope", { providers: catalog.providers.join(t("managementUi.listSeparator")) })}</p>
         </div>
-        {custom && <Button variant="outline" size="sm" disabled={busy || pending !== null || contextDraft !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button>}
+        {custom && <Button variant="outline" size="sm" disabled={busy || pending !== null || contextDraft !== null || templateTarget !== null} onClick={() => edit(custom)}>{t("modelCatalog.editCustom")}</Button>}
       </div>,
       models: catalog.models.map(entry => ({ ...entry.presentation, isDefault: entry.isDefault })),
       onSelect: model => setSelectedModel({ provider: catalog.provider, model: model.model, revision: catalog.revision }),
       renderAction: model => {
         const reason = model.isDefault ? t("modelCatalog.defaultProtected") : catalog.models.length <= 1 ? t("modelCatalog.lastProtected") : !catalog.canRemove ? t("modelCatalog.unsupported") : undefined
-        const locked = busy || pending !== null || contextDraft !== null || editorOpen
+        const locked = busy || pending !== null || contextDraft !== null || editorOpen || templateTarget !== null
         const action = <Button variant="outline" size="sm" disabled={locked || reason !== undefined} onClick={() => void management.mutate({ operation: "model.remove", provider: catalog.provider, model: model.model })}>{t("modelCatalog.remove")}</Button>
         return <div className="flex flex-wrap justify-end gap-2">
           {catalog.source === "official-shared" ? <span className="self-center text-muted-foreground">{t("openAiModelCatalog.notEditable")}</span> : <Button variant="outline" size="sm" disabled={locked || model.contextWindow === null || model.maxContextWindow === null} aria-label={t("modelCatalog.editContextModel", { model: model.displayName, provider: catalog.provider })} onClick={() => {
@@ -272,6 +290,10 @@ function ProviderSettingsCard({
             management.clearError()
             setContextDraft({ provider: catalog.provider, model: model.model, revision: catalog.revision, displayName: model.displayName, previousContextWindow: model.contextWindow, maxContextWindow: model.maxContextWindow, value: String(model.contextWindow), preset: contextWindowPreset(model.contextWindow, model.maxContextWindow) })
           }}>{t("openAiModelCatalog.adjustContext")}</Button>}
+          {catalog.source !== "official-shared" ? <Button ref={node => {
+            const target = templateTarget ?? templateSavedTarget.current
+            if (target?.provider === catalog.provider && target.model === model.model) templateTriggerRef.current = node
+          }} variant="outline" size="sm" disabled={locked} focusableWhenDisabled aria-label={t("modelTemplate.open", { provider: catalog.provider, model: model.displayName })} onClick={event => { if (locked) return; templateTriggerRef.current = event.currentTarget; management.clearError(); setTemplateTarget({ provider: catalog.provider, model: model.model, revision: catalog.revision }) }}>{t("modelTemplate.title")}</Button> : null}
           {reason ? <Tooltip><TooltipTrigger render={<span tabIndex={0} className="inline-flex cursor-help" aria-label={reason} />}>{action}</TooltipTrigger><TooltipContent>{reason}</TooltipContent></Tooltip> : action}
         </div>
       },
@@ -387,7 +409,10 @@ function ProviderSettingsCard({
         <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || probe.running || editorStale || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{modelsOnly ? t("modelCatalog.saveCustom") : editingId === null ? t("managementUi.addProvider") : t("managementUi.saveProvider")}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>{t("managementUi.cancelEditing")}</Button> : null}</div>
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
         </DialogContent></Dialog>}
-      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
+      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading} templateFinalFocus={() => {
+        const preview = templatePreviewRef.current
+        return preview === null ? templateTriggerRef.current ?? true : preview.disabled ? false : preview
+      }} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
       {section !== "models" && feedback}
     </CardContent>
   </Card>
@@ -408,6 +433,7 @@ function ProviderSettingsCard({
         <DialogFooter><Button variant="outline" disabled={management.busy} onClick={() => setContextDraft(null)}>{t("modelManagement.cancel")}</Button><Button disabled={busy || contextStale || !contextValid || contextDraft?.value === String(contextDraft?.previousContextWindow)} onClick={() => void updateContext()}>{t("modelManagement.preview")}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
+    {templateTarget !== null ? <ProviderModelTemplateDialog key={`${templateTarget.provider}:${templateTarget.model}:${templateTarget.revision}`} target={templateTarget} open={pending === null} stale={settings.modelCatalogs.find(catalog => catalog.provider === templateTarget.provider)?.revision !== templateTarget.revision} management={management} previewRef={templatePreviewRef} finalFocus={templateTriggerRef} onClose={() => setTemplateTarget(null)} /> : null}
     {section === "models" && <OpenAiModelDetails model={detailModel} revision={selectedModel?.revision ?? null} provider={selectedModel?.provider} stale={detailsStale} open={selectedModel !== null} loading={management.loading} onClose={() => setSelectedModel(null)} onReload={() => { setSelectedModel(null); management.refetch() }} />}
   </>
 }
@@ -416,16 +442,19 @@ function ProviderSettingsConfirmationDialog({
   pending,
   saving,
   loading,
+  templateFinalFocus,
   onConfirm,
   onCancel,
 }: {
   pending: NonNullable<ProviderSettingsController["pendingPreview"]>["preview"]
   saving: boolean
   loading?: boolean
+  templateFinalFocus?: ComponentProps<typeof ProviderModelTemplateConfirmation>["finalFocus"]
   onConfirm: () => void
   onCancel: () => void
 }) {
   const { t } = useTranslation()
+  if (pending.operation === "model.template.update") return <ProviderModelTemplateConfirmation preview={pending} saving={saving} loading={loading} finalFocus={templateFinalFocus} onConfirm={onConfirm} onCancel={onCancel} />
   const localRemoval = pending.operation === "model.remove"
   const providerDetails = typeof pending.provider === "object" ? pending.provider : undefined
   const notices: string[] = []

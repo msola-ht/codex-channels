@@ -19,6 +19,7 @@ import {
   applyCustomProviderModelsSave,
 } from "./custom-primary-provider-management.mjs";
 import { ManagementOperationError, managementOperationError } from "./webui-management-operations.mjs";
+import { previewProviderModelTemplateUpdate, applyProviderModelTemplateUpdate } from "./provider-model-template-management.mjs";
 
 export async function loadProviderSettingsResource(
   environment,
@@ -43,6 +44,11 @@ export function normalizeProviderSettingsMutation(input) {
     throw new ManagementOperationError("invalid_json", "Provider 设置操作正文必须是对象");
   }
   switch (input.operation) {
+    case "model.template.update":
+      if (Object.keys(input).some(key => !["operation", "provider", "model", "sections", "revision", "sourceToken", "template", "confirmationToken"].includes(key))) {
+        throw new ManagementOperationError("invalid_provider_operation", "模板更新请求包含不支持的字段");
+      }
+      return { operation: input.operation, ...templateMutationInput(input) };
     case "model.context":
       if (Object.keys(input).some(key => !["operation", "provider", "model", "contextWindow", "revision", "confirmationToken"].includes(key))) {
         throw new ManagementOperationError("invalid_provider_operation", "模型上下文请求包含不支持的字段");
@@ -71,8 +77,13 @@ export function normalizeProviderSettingsMutation(input) {
     case "primary.remove":
       return { operation: input.operation, providerId: input.providerId };
     case "primary.custom.save":
+      if (input.provider?.operation === "update"
+        && (typeof input.resourceRevision !== "string" || !/^[a-f0-9]{64}$/u.test(input.resourceRevision))) {
+        throw new ManagementOperationError("stale-preview", "请刷新提供商设置后重新编辑");
+      }
       return {
         operation: input.operation,
+        ...(input.resourceRevision === undefined ? {} : { resourceRevision: input.resourceRevision }),
         provider: {
           operation: input.provider?.operation,
           providerId: input.provider?.providerId,
@@ -113,6 +124,8 @@ export function normalizeProviderSettingsMutation(input) {
 export async function previewProviderSettingsMutation(input, environment) {
   try {
     switch (input.operation) {
+      case "model.template.update":
+        return { operation: input.operation, ...await previewProviderModelTemplateUpdate(templateMutationInput(input), { environment }) };
       case "model.context":
         return await previewProviderModelContextChange(contextMutationInput(input), { environment });
       case "model.custom.save":
@@ -155,6 +168,11 @@ export async function previewProviderSettingsMutation(input, environment) {
 export async function applyProviderSettingsMutation(input, environment, preview) {
   try {
     switch (input.operation) {
+      case "model.template.update": {
+        const templatePreview = { ...preview };
+        delete templatePreview.operation;
+        return await applyProviderModelTemplateUpdate(templateMutationInput(input), { environment, preview: templatePreview });
+      }
       case "model.context":
         return await applyProviderModelContextChange(contextMutationInput(input), { environment, preview });
       case "model.custom.save":
@@ -193,6 +211,14 @@ export async function applyProviderSettingsMutation(input, environment, preview)
 
 export function redactProviderSettingsResult(result) {
   if (!result || typeof result !== "object") return { action: "completed" };
+  if (result.operation === "model.template.update") {
+    return {
+      operation: result.operation, provider: result.provider, model: result.model,
+      revision: result.revision, source: result.source, sourceModel: result.sourceModel,
+      sections: structuredClone(result.sections), changes: structuredClone(result.changes),
+      willChange: result.willChange, activation: result.activation,
+    };
+  }
   return {
     ...(typeof result.action === "string" ? { action: result.action } : {}),
     ...(typeof result.operation === "string" ? { operation: result.operation } : {}),
@@ -330,6 +356,11 @@ function toManagementError(error) {
 
 function contextMutationInput(input) {
   return { provider: input.provider, model: input.model, contextWindow: input.contextWindow, revision: input.revision };
+}
+
+function templateMutationInput(input) {
+  return { provider: input.provider, model: input.model, sections: input.sections, revision: input.revision,
+    sourceToken: input.sourceToken, template: input.template };
 }
 
 function redactCatalog(provider) {

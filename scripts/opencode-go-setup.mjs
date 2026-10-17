@@ -410,7 +410,7 @@ function createPrompter(prompts, { accounts = [], allowBack, hasModelSettings, h
       );
       if (hasModelSettings) {
         options.push({ value: "model-settings", label: "修改模型设置（思考等级）" });
-        options.push({ value: "catalog", label: "管理账户模型（添加／启用／更新）" });
+        options.push({ value: "catalog", label: "发现／添加账户模型" });
       }
       if (allowBack) options.push({ value: "back", label: "返回上一级" });
       const value = await prompts.select({ message: "OpenCode Go Provider", options });

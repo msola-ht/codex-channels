@@ -1,10 +1,12 @@
 import type { ModelProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 export interface ManagedEditableCatalog { models: Array<Record<string, unknown>>; [key: string]: unknown }
 export type ManagedCatalogUpdateResult = { action: "back"; activation: "none" }
+  | { action: "unchanged"; activation: "none"; models: string[] }
   | { action: "catalog-updated"; activation: "restart-all"; models: string[] };
 export function updateManagedProviderModels(provider: string, options: {
   environment?: NodeJS.ProcessEnv;
   editCatalog: (input: { catalog: ManagedEditableCatalog; requiredModels: string[]; definition: ModelProviderDefinition;
+    templateBindings: Record<string, import("../runtime/model-template-bindings.mjs").ModelTemplateBinding>;
     previousModels: Parameters<typeof import("../runtime/model-provider-runtime.mjs").withPreservedManagedModelCatalogSettings>[2];
   }) => Promise<ManagedEditableCatalog | undefined>;
 }): Promise<ManagedCatalogUpdateResult>;

@@ -102,6 +102,7 @@
     "scripts/managed-model-provider-setup.mjs",
     "scripts/managed-provider-model-management.mjs",
     "scripts/provider-model-management.mjs",
+    "scripts/provider-model-template-management.mjs",
     "scripts/provider-model-setup.mjs",
     "scripts/provider-model-selection.mjs",
     "scripts/managed-provider-files.mjs",

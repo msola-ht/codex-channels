@@ -1,13 +1,19 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { codexHomePath } from "../runtime/codex-home.mjs";
+import { connectHomePath } from "../runtime/connect-home.mjs";
 import { normalizeDeepseekCatalogCapabilities } from "../runtime/model-catalog.mjs";
 import { completeCatalogPrompts, completeDefinitionPrompts } from "../runtime/model-template-catalog.mjs";
+import { readModelTemplateBindings } from "../runtime/model-template-bindings.mjs";
 import { loadManagedModelProviderDefinitions, managedProviderAccountFamilies } from "../runtime/model-provider-definitions.mjs";
-import { managedProviderDirectory, managedProviderMarkerPath, writeManagedModelProviderCatalogUpdates } from "../runtime/model-provider-runtime.mjs";
-import { readResponsesModelCatalog, validateResponsesModels } from "../runtime/model-provider-responses-catalog.mjs";
+import { managedProviderDirectory, managedProviderMarkerPath, writeManagedModelProviderCatalogUpdates,
+  customPrimaryProviderProfilePath, customSwitchingProviderRegistryPath } from "../runtime/model-provider-runtime.mjs";
+import { readResponsesModelCatalog, validateResponsesModels, responsesProviderCatalogPath } from "../runtime/model-provider-responses-catalog.mjs";
+import { customProviderUpstreamMetadataPath } from "../runtime/model-provider-upstream-metadata.mjs";
+import { downloadClineRelayCatalog } from "../runtime/cline-relay-catalog-update.mjs";
+import { createClinePassCatalog } from "./cline-pass-account-management.mjs";
 import { loadProviderModelCatalogs, ProviderModelManagementError } from "./provider-model-management.mjs";
 import { loadResponsesModelTemplates } from "./responses-model-templates.mjs";
 import { previewCustomProviderModelsSave, applyCustomProviderModelsSave } from "./custom-primary-provider-management.mjs";
@@ -16,6 +22,11 @@ import { withModelProviderManagementTransaction } from "./model-provider-managem
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 
 const revisionSecret = randomBytes(32);
+const sourceSnapshots = new Map();
+const sourceLifetimeMs = 10 * 60 * 1000;
+const maximumSnapshotBytes = 8 * 1024 * 1024;
+const maximumCacheBytes = 32 * 1024 * 1024;
+const maximumCacheEntries = 16;
 const fields = {
   custom: {
     prompts: ["instructions", "modelMessages"],
@@ -27,19 +38,31 @@ const fields = {
   },
 };
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const authenticatedRevision = value => createHmac("sha256", revisionSecret).update(JSON.stringify(value)).digest("hex");
 
-/** Only persisted CP mappings and the official DS family establish template identity. */
-export async function loadProviderModelTemplateTargets(provider, { environment = process.env } = {}) {
-  const { catalogs } = await loadProviderModelCatalogs({ environment });
-  const catalog = catalogs.find(entry => entry.provider === provider);
-  if (!catalog) throw invalid("provider-not-configured", "provider", "提供商账户不存在或无法读取");
-  if (provider.startsWith("cp-")) {
-    return readResponsesModelCatalog(environment, provider).definitions.filter(entry => entry.template)
-      .map(entry => ({ model: entry.id, displayName: entry.name, source: entry.template.source, sourceModel: entry.template.model }));
+/** Fetch sources once; previews and writes consume only this bounded process-local snapshot. */
+export async function loadProviderModelTemplateOptions(provider, { environment = process.env, signal } = {}) {
+  signal?.throwIfAborted();
+  const state = await readTargetState(provider, environment);
+  const templates = await loadSourceTemplates(state, environment, signal);
+  const current = await readTargetState(provider, environment);
+  signal?.throwIfAborted();
+  if (current.revision !== state.revision) throw staleTarget();
+  const snapshot = { provider, scope: state.scope, revision: state.revision, templates,
+    expiresAt: Date.now() + sourceLifetimeMs, sourceRevision: digest(templates) };
+  const bytes = Buffer.byteLength(JSON.stringify(snapshot));
+  if (bytes > maximumSnapshotBytes) throw invalid("template-source-too-large", "template", "候选模板超过 8 MiB，请缩小源目录后重试");
+  pruneSourceSnapshots();
+  let totalBytes = [...sourceSnapshots.values()].reduce((total, entry) => total + entry.bytes, 0);
+  while (sourceSnapshots.size >= maximumCacheEntries || totalBytes + bytes > maximumCacheBytes) {
+    const oldest = sourceSnapshots.keys().next().value;
+    totalBytes -= sourceSnapshots.get(oldest).bytes;
+    sourceSnapshots.delete(oldest);
   }
-  const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === provider);
-  if (definition?.storageId !== "deepseek") return [];
-  return catalog.models.map(entry => ({ model: entry.id, displayName: entry.displayName, source: "deepseek", sourceModel: entry.id }));
+  const sourceToken = randomBytes(32).toString("hex");
+  sourceSnapshots.set(sourceToken, { ...snapshot, bytes });
+  return { provider, revision: state.revision, sourceToken, expiresAt: snapshot.expiresAt, targets: state.targets,
+    templates: templates.map(({ source, model, displayName }) => ({ source, model, displayName })) };
 }
 
 export async function previewProviderModelTemplateUpdate(input, { environment = process.env } = {}) {
@@ -49,46 +72,182 @@ export async function previewProviderModelTemplateUpdate(input, { environment = 
 export async function applyProviderModelTemplateUpdate(input, { environment = process.env, preview } = {}) {
   return withModelProviderManagementTransaction(environment, async () => {
     const plan = await buildPlan(input, environment);
-    if (!preview || preview.revision !== plan.preview.revision) throw invalid("stale-preview", "revision", "账户目录、模板或更新范围已变化，请重新对比");
+    if (!preview || preview.revision !== plan.preview.revision) throw invalid("stale-preview", "revision", "账户目录、候选模板或更新范围已变化，请重新对比");
     if (!plan.preview.willChange) return { action: "unchanged", activation: "none" };
+    await assertProviderFileSnapshots(plan.snapshots);
     if (plan.customInput) {
       await applyCustomProviderModelsSave(plan.customInput, {
         environment, preview: plan.customPreview, expectedCatalogContent: plan.previousContent,
       });
     } else {
-      await assertProviderFileSnapshots(plan.snapshots);
       writeManagedModelProviderCatalogUpdates(input.provider, plan.updates,
-        new Map(plan.snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("utf8")])), environment);
+        new Map(plan.snapshots.filter(snapshot => !snapshot.path.endsWith(".settings-pending"))
+          .map(snapshot => [snapshot.path, snapshot.content?.toString("utf8")])), environment);
     }
     return { action: "updated", activation: plan.preview.activation };
   });
 }
 
 async function buildPlan(input, environment) {
+  validateInput(input);
+  pruneSourceSnapshots();
+  const source = sourceSnapshots.get(input.sourceToken);
+  if (!source || source.provider !== input.provider || source.scope !== environmentScope(environment)) {
+    throw invalid("template-source-expired", "sourceToken", "候选模板已过期或不属于当前账户，请重新加载模板");
+  }
+  if (source.revision !== input.revision) throw staleTarget();
+  const state = await readTargetState(input.provider, environment);
+  if (state.revision !== input.revision) throw staleTarget();
+  if (!state.targets.some(target => target.model === input.model)) throw invalid("template-unavailable", "model", "模型不在当前账户目录中");
+  const matches = source.templates.filter(template => template.source === input.template.source && template.model === input.template.model);
+  if (matches.length !== 1 || !allowedTemplate(state, input.model, input.template)) {
+    throw invalid("template-unavailable", "template", "所选源模板不适用于当前账户模型，请明确选择可用模板");
+  }
+  const sections = ["prompts", "capabilities"].filter(section => input.sections.includes(section));
+  const plan = state.custom
+    ? await buildCustomPlan(input, matches[0], sections, state, environment)
+    : await buildManagedPlan(input, matches[0], sections, state, environment);
+  const changes = changedFields(plan.before, plan.after);
+  if (!state.custom && !isDeepStrictEqual(Object.hasOwn(state.bindings, input.model) ? state.bindings[input.model] : null, input.template)) {
+    changes.push({ field: "template", before: presence(state.bindings, input.model), after: { present: true, value: { ...input.template } } });
+  }
+  const preview = { provider: input.provider, model: input.model, source: input.template.source, sourceModel: input.template.model,
+    sections, changes, willChange: changes.length > 0,
+    activation: changes.length === 0 ? "none" : state.custom ? "restart-all" : "restart-app-server" };
+  await assertProviderFileSnapshots(state.snapshots);
+  // Codex validation may await; do not finish with an expired or evicted candidate.
+  if (source.expiresAt <= Date.now() || sourceSnapshots.get(input.sourceToken) !== source) {
+    throw invalid("template-source-expired", "sourceToken", "候选模板已过期，请重新加载模板");
+  }
+  const revision = authenticatedRevision({ preview, sourceToken: input.sourceToken, sourceRevision: source.sourceRevision,
+    targetRevision: state.revision, customRevision: plan.customPreview?.revision ?? null, scope: state.scope });
+  return { ...plan, snapshots: state.snapshots, preview: { ...preview, revision } };
+}
+
+function validateInput(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)
-    || Object.keys(input).some(key => !["provider", "model", "sections"].includes(key))
+    || Object.keys(input).some(key => !["provider", "model", "sections", "revision", "sourceToken", "template"].includes(key))
     || typeof input.provider !== "string" || typeof input.model !== "string"
+    || typeof input.revision !== "string" || !/^[a-f0-9]{64}$/u.test(input.revision)
+    || typeof input.sourceToken !== "string" || !/^[a-f0-9]{64}$/u.test(input.sourceToken)
+    || !input.template || typeof input.template !== "object" || Array.isArray(input.template)
+    || Object.keys(input.template).some(key => !["source", "model"].includes(key))
+    || !["official", "deepseek", "cline"].includes(input.template.source)
+    || typeof input.template.model !== "string" || !input.template.model
     || !Array.isArray(input.sections) || input.sections.length < 1 || input.sections.length > 2
     || new Set(input.sections).size !== input.sections.length
     || input.sections.some(section => !["prompts", "capabilities"].includes(section))) {
-    throw invalid("invalid-input", "sections", "请选择准确账户、模型与非空更新范围");
+    throw invalid("invalid-input", "template", "请选择准确账户、模型、候选源模板与非空更新范围");
   }
-  const sections = ["prompts", "capabilities"].filter(section => input.sections.includes(section));
-  const target = (await loadProviderModelTemplateTargets(input.provider, { environment })).find(entry => entry.model === input.model);
-  if (!target) throw invalid("template-unavailable", "model", "模型没有可更新的模板关联；请先显式导入模板");
-  const plan = input.provider.startsWith("cp-")
-    ? await buildCustomPlan(input, target, sections, environment)
-    : await buildManagedPlan(input, target, sections, environment);
-  const changes = Object.keys(plan.after).concat(Object.keys(plan.before))
-    .filter((key, index, keys) => keys.indexOf(key) === index && !isDeepStrictEqual(plan.before[key], plan.after[key]))
-    .map(field => ({ field, before: plan.before[field], after: plan.after[field] }));
-  const preview = { provider: input.provider, model: input.model, source: target.source, sourceModel: target.sourceModel,
-    sections, changes, willChange: changes.length > 0,
-    activation: changes.length === 0 ? "none" : plan.customInput ? "restart-all" : "restart-app-server" };
-  const revision = createHmac("sha256", revisionSecret).update(JSON.stringify({ preview,
-    sourceRevision: plan.sourceRevision, targetRevision: plan.customPreview?.revision ?? plan.snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("base64") ?? null]),
-  })).digest("hex");
-  return { ...plan, preview: { ...preview, revision } };
+}
+
+function environmentScope(environment) {
+  return JSON.stringify([codexHomePath(environment), connectHomePath(environment),
+    resolve(environment.CODEX_CONNECT_CONFIG_FILE?.trim() || join(connectHomePath(environment), "config.toml"))]);
+}
+
+async function readTargetState(provider, environment) {
+  if (typeof provider !== "string" || !provider || provider.length > 200) throw invalid("invalid-input", "provider", "请选择准确提供商账户");
+  const { catalogs } = await loadProviderModelCatalogs({ environment });
+  const visible = catalogs.find(entry => entry.provider === provider);
+  if (!visible) throw invalid("provider-not-configured", "provider", "提供商账户不存在或无法读取");
+  const scope = environmentScope(environment);
+  if (provider.startsWith("cp-")) {
+    const previous = readResponsesModelCatalog(environment, provider);
+    const path = responsesProviderCatalogPath(environment, provider);
+    const snapshots = snapshotProviderFiles([path, `${path}.backup`, `${path}.pending`,
+      join(codexHomePath(environment), "config.toml"), customPrimaryProviderProfilePath(environment, provider),
+      customSwitchingProviderRegistryPath(environment), customProviderUpstreamMetadataPath(environment, provider)], environment);
+    if (snapshotContent(snapshots, path) !== previous.content) throw staleTarget();
+    assertVisibleModels(visible, previous.definitions.map(model => model.id));
+    const targets = previous.definitions.map(entry => ({ model: entry.id, displayName: entry.name,
+      template: entry.template ? { source: entry.template.source, model: entry.template.model } : null }));
+    return { provider, custom: true, family: "custom", scope, previous, targets, snapshots,
+      revision: targetRevision(provider, scope, visible, snapshots) };
+  }
+  const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === provider);
+  const family = managedProviderAccountFamilies.find(entry => entry.storageId === definition?.storageId);
+  if (!definition || !family) throw invalid("template-unavailable", "provider", "该提供商不支持账户模板更新");
+  const directory = managedProviderDirectory(environment, definition);
+  const catalogPath = join(directory, definition.catalogFileName);
+  const manifestPath = join(directory, definition.catalogManifestFileName);
+  const snapshots = snapshotProviderFiles([catalogPath, manifestPath, `${catalogPath}.backup`, `${manifestPath}.backup`,
+    `${catalogPath}.settings-pending`, join(codexHomePath(environment), "config.toml"),
+    join(codexHomePath(environment), definition.profileFileName), managedProviderMarkerPath(environment, definition),
+    family.accountsFilePath(environment)], environment);
+  let catalog, manifest;
+  try { catalog = JSON.parse(snapshotContent(snapshots, catalogPath)); manifest = JSON.parse(snapshotContent(snapshots, manifestPath)); }
+  catch { throw invalid("provider-state-unavailable", "provider", "账户目录或来源清单无法安全解析"); }
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) || typeof manifest.source !== "string" || !manifest.source
+    || !Array.isArray(catalog?.models) || catalog.models.length === 0
+    || catalog.models.some(model => !model || typeof model.slug !== "string")
+    || new Set(catalog.models.map(model => model.slug)).size !== catalog.models.length) {
+    throw invalid("provider-state-unavailable", "provider", "账户目录或来源清单无效");
+  }
+  const ids = catalog.models.map(model => model.slug);
+  assertVisibleModels(visible, ids);
+  let bindings;
+  try { bindings = readModelTemplateBindings(manifest, ids); }
+  catch { throw invalid("provider-state-unavailable", "template", "账户模型模板关联无效，请先修复来源清单"); }
+  const state = { provider, custom: false, family: family.storageId, scope, definition, catalogPath, manifestPath,
+    catalog, manifest, bindings, snapshots, revision: targetRevision(provider, scope, visible, snapshots) };
+  if (Object.entries(bindings).some(([model, template]) => !allowedTemplate(state, model, template))) {
+    throw invalid("provider-state-unavailable", "template", "账户模型模板关联超出支持的来源或模型范围");
+  }
+  return { ...state, targets: visible.models.map(entry => ({ model: entry.id, displayName: entry.displayName,
+    template: Object.hasOwn(bindings, entry.id) ? bindings[entry.id] : null })) };
+}
+
+function allowedTemplate(state, model, template) {
+  if (state.custom) return ["official", "deepseek"].includes(template.source);
+  if (state.family === "deepseek") return template.source === "deepseek" && template.model === model;
+  if (state.family === "clp") return template.source === "cline" && template.model === model;
+  return ["ccg", "opencode-go"].includes(state.family) && template.source === "deepseek";
+}
+
+function assertVisibleModels(visible, ids) {
+  if (!isDeepStrictEqual([...ids].sort(), visible.models.map(model => model.id).sort())) throw staleTarget();
+}
+
+function targetRevision(provider, scope, visible, snapshots) {
+  return authenticatedRevision([provider, scope, visible, snapshots.map(snapshot => [snapshot.path, snapshot.content?.toString("base64") ?? null])]);
+}
+
+function snapshotContent(snapshots, path) {
+  const value = snapshots.find(snapshot => snapshot.path === path)?.content?.toString("utf8");
+  if (value === undefined) throw invalid("provider-state-unavailable", "provider", "账户模型目录或来源清单缺失");
+  return value;
+}
+
+async function loadSourceTemplates(state, environment, signal) {
+  let result;
+  if (state.custom) {
+    const sources = await Promise.all(["official", "deepseek"].map(async source =>
+      completeDefinitionPrompts(await loadResponsesModelTemplates(source, environment)).map(template => ({ source,
+        model: template.id, displayName: template.name,
+        template: { ...template, maxContextWindow: template.maxContextWindow ?? template.contextWindow } }))));
+    result = sources.flat();
+  } else if (state.family === "clp") {
+    const timeout = globalThis.AbortSignal.timeout(25_000);
+    const downloaded = await downloadClineRelayCatalog(environment, signal ? globalThis.AbortSignal.any([signal, timeout]) : timeout);
+    const templates = await loadResponsesModelTemplates("deepseek", environment);
+    const catalog = createClinePassCatalog(templates, downloaded, state.targets.map(target => target.model));
+    result = catalog.models.map(template => ({ source: "cline", model: template.slug, displayName: template.display_name,
+      template: { ...template, max_context_window: template.max_context_window ?? template.context_window } }));
+  } else {
+    const catalog = normalizeDeepseekCatalogCapabilities(completeCatalogPrompts(JSON.parse(readFileSync(new URL("../runtime/model-catalog-deepseek.json", import.meta.url), "utf8"))));
+    result = catalog.models.map(template => ({ source: "deepseek", model: template.slug, displayName: template.display_name,
+      template: { ...template, max_context_window: template.max_context_window ?? template.context_window } }));
+  }
+  if (!result.length || new Set(result.map(template => JSON.stringify([template.source, template.model]))).size !== result.length) {
+    throw invalid("template-unavailable", "template", "源模板缺失或不唯一，未修改账户目录");
+  }
+  return JSON.parse(JSON.stringify(result));
+}
+
+function pruneSourceSnapshots() {
+  const now = Date.now();
+  for (const [token, snapshot] of sourceSnapshots) if (snapshot.expiresAt <= now) sourceSnapshots.delete(token);
 }
 
 function selectedFields(before, template, kind, sections) {
@@ -100,16 +259,20 @@ function selectedFields(before, template, kind, sections) {
   return after;
 }
 
-async function buildCustomPlan(input, target, sections, environment) {
-  const previous = readResponsesModelCatalog(environment, input.provider);
+function presence(record, field) {
+  return Object.hasOwn(record, field) ? { present: true, value: structuredClone(record[field]) } : { present: false };
+}
+
+function changedFields(before, after) {
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter(field => !isDeepStrictEqual(presence(before, field), presence(after, field)))
+    .map(field => ({ field, before: presence(before, field), after: presence(after, field) }));
+}
+
+async function buildCustomPlan(input, source, sections, state, environment) {
+  const previous = state.previous;
   const before = previous.definitions.find(entry => entry.id === input.model);
-  if (!before || before.template?.source !== target.source || before.template.model !== target.sourceModel) {
-    throw invalid("stale-preview", "model", "模型模板关联已变化，请重新对比");
-  }
-  const matches = (await loadResponsesModelTemplates(target.source, environment)).filter(entry => entry.id === target.sourceModel);
-  if (matches.length !== 1) throw invalid("template-unavailable", "model", "源模板缺失或不唯一，未修改账户目录");
-  const template = { ...completeDefinitionPrompts(matches)[0], maxContextWindow: matches[0].maxContextWindow ?? matches[0].contextWindow };
-  const after = selectedFields(before, template, "custom", sections);
+  const after = { ...selectedFields(before, source.template, "custom", sections), template: { ...input.template } };
   if (after.contextWindow > (after.maxContextWindow ?? after.contextWindow)
     || (after.reasoningEfforts.length === 0 ? after.defaultReasoningEffort !== null : !after.reasoningEfforts.includes(after.defaultReasoningEffort))) {
     throw invalid("template-conflict", "model", "新模板不支持当前窗口或默认思考等级；请先单独调整本地设置");
@@ -117,58 +280,34 @@ async function buildCustomPlan(input, target, sections, environment) {
   const models = validateResponsesModels(previous.definitions.map(entry => entry.id === input.model ? after : entry), previous.defaultModel);
   const customInput = { provider: input.provider, model: previous.defaultModel, models };
   const customPreview = await previewCustomProviderModelsSave(customInput, { environment, expectedCatalogContent: previous.content });
-  return { before, after: models.find(entry => entry.id === input.model), customInput, customPreview,
-    previousContent: previous.content, sourceRevision: digest(template) };
+  return { before, after: models.find(entry => entry.id === input.model), customInput, customPreview, previousContent: previous.content };
 }
 
-async function buildManagedPlan(input, target, sections, environment) {
-  const definition = loadManagedModelProviderDefinitions(environment).find(entry => entry.id === input.provider);
-  if (definition?.storageId !== "deepseek") throw invalid("template-unavailable", "provider", "该账户没有明确的 DS 模板来源");
-  const family = managedProviderAccountFamilies.find(entry => entry.storageId === definition.storageId);
-  const directory = managedProviderDirectory(environment, definition);
-  const catalogPath = join(directory, definition.catalogFileName);
-  const manifestPath = join(directory, definition.catalogManifestFileName);
-  const snapshots = snapshotProviderFiles([catalogPath, manifestPath, `${catalogPath}.backup`, `${manifestPath}.backup`,
-    join(codexHomePath(environment), "config.toml"), join(codexHomePath(environment), definition.profileFileName),
-    managedProviderMarkerPath(environment, definition), family.accountsFilePath(environment)], environment);
-  const content = path => {
-    const value = snapshots.find(snapshot => snapshot.path === path)?.content?.toString("utf8");
-    if (value === undefined) throw invalid("provider-state-unavailable", "provider", "账户模型目录或来源清单缺失");
-    return value;
-  };
-  let catalog, manifest;
-  try { catalog = JSON.parse(content(catalogPath)); manifest = JSON.parse(content(manifestPath)); }
-  catch { throw invalid("provider-state-unavailable", "provider", "账户目录或来源清单无法安全解析"); }
-  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) || typeof manifest.source !== "string" || !manifest.source) {
-    throw invalid("provider-state-unavailable", "provider", "账户来源清单无效");
-  }
-  if (!Array.isArray(catalog?.models) || catalog.models.length === 0
-    || catalog.models.some(model => !model || typeof model.slug !== "string")
-    || new Set(catalog.models.map(model => model.slug)).size !== catalog.models.length) {
-    throw invalid("provider-state-unavailable", "model", "账户模型目录成员缺失或重复，请先修复目录");
-  }
-  const source = normalizeDeepseekCatalogCapabilities(completeCatalogPrompts(JSON.parse(readFileSync(new URL("../runtime/model-catalog-deepseek.json", import.meta.url), "utf8"))));
-  const matches = source.models.filter(entry => entry.slug === target.sourceModel);
+async function buildManagedPlan(input, source, sections, state, environment) {
+  const { catalog, manifest, catalogPath, manifestPath } = state;
   const before = catalog.models.find(entry => entry.slug === input.model);
-  if (matches.length !== 1 || !before) throw invalid("template-unavailable", "model", "源模板或账户模型缺失，未修改账户目录");
-  const template = { ...matches[0], max_context_window: matches[0].max_context_window ?? matches[0].context_window };
-  const after = selectedFields(before, template, "managed", sections);
+  const after = selectedFields(before, source.template, "managed", sections);
   if (after.context_window > (after.max_context_window ?? after.context_window)
-    || !after.supported_reasoning_levels?.some(level => level.effort === after.default_reasoning_level)) {
+    || (after.supported_reasoning_levels?.length === 0 ? after.default_reasoning_level !== null
+      : !after.supported_reasoning_levels?.some(level => level.effort === after.default_reasoning_level))) {
     throw invalid("template-conflict", "model", "新模板不支持当前窗口或默认思考等级；请先单独调整本地设置");
   }
   const nextCatalog = { ...catalog, models: catalog.models.map(entry => entry.slug === input.model ? after : entry) };
   await validateModelCatalogWithCodex(nextCatalog, environment);
-  const sourceRevision = digest(template);
   if (manifest.templateUpdates !== undefined && (!manifest.templateUpdates || typeof manifest.templateUpdates !== "object" || Array.isArray(manifest.templateUpdates))) {
     throw invalid("provider-state-unavailable", "provider", "账户模板更新来源记录无效");
   }
-  const nextManifest = { ...manifest, templateUpdates: { ...manifest.templateUpdates,
-    [input.model]: { source: "deepseek", model: target.sourceModel, revision: sourceRevision, sections } } };
-  const updates = new Map([[`${catalogPath}.backup`, content(catalogPath)], [`${manifestPath}.backup`, content(manifestPath)],
+  const nextManifest = { ...manifest, modelTemplates: { ...state.bindings, [input.model]: { ...input.template } },
+    templateUpdates: { ...manifest.templateUpdates,
+      [input.model]: { source: input.template.source, model: input.template.model, revision: digest(source.template), sections } } };
+  const updates = new Map([[`${catalogPath}.backup`, snapshotContent(state.snapshots, catalogPath)],
+    [`${manifestPath}.backup`, snapshotContent(state.snapshots, manifestPath)],
     [catalogPath, `${JSON.stringify(nextCatalog, null, 2)}\n`], [manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`]]);
-  await assertProviderFileSnapshots(snapshots);
-  return { before, after, snapshots, updates, sourceRevision };
+  return { before, after, updates };
+}
+
+function staleTarget() {
+  return invalid("stale-preview", "revision", "账户目录或模板关联已变化，请重新加载候选模板并对比");
 }
 
 function invalid(code, field, message) {

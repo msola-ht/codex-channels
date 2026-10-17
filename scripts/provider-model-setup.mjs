@@ -1,7 +1,7 @@
 import * as clackPrompts from "@clack/prompts";
 import { createHash } from "node:crypto";
 import { loadProviderModelCatalogs, previewProviderModelRemoval, applyProviderModelRemoval } from "./provider-model-management.mjs";
-import { loadProviderModelTemplateTargets, previewProviderModelTemplateUpdate, applyProviderModelTemplateUpdate } from "./provider-model-template-management.mjs";
+import { loadProviderModelTemplateOptions, previewProviderModelTemplateUpdate, applyProviderModelTemplateUpdate } from "./provider-model-template-management.mjs";
 import { readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { readCustomProviderUpstreamWireApi } from "../runtime/model-provider-upstream-metadata.mjs";
 import { previewCustomProviderModelsSave, applyCustomProviderModelsSave } from "./custom-primary-provider-management.mjs";
@@ -22,29 +22,39 @@ const warningMessages = {
 };
 
 function templateDifferenceValue(value, full = false) {
-  if (value === undefined) return "未设置（undefined）";
-  const json = JSON.stringify(value);
+  if (!value.present) return "未设置";
+  const json = JSON.stringify(value.value);
   if (full || json.length <= 2048) return json;
   return JSON.stringify({ jsonLength: json.length, sha256: createHash("sha256").update(json).digest("hex"), content: "长内容摘要，可在确认前展开完整差异" });
 }
 
 async function runProviderModelTemplateSetup(provider, { environment, prompts, output }) {
-  const targets = await loadProviderModelTemplateTargets(provider, { environment });
-  if (!targets.length) {
-    output.write("此账户没有已关联模板的模型；请先通过模板导入建立关联，再对比并更新。\n");
+  const options = await loadProviderModelTemplateOptions(provider, { environment });
+  if (!options.targets.length) {
+    output.write("此账户没有可更新模板的模型。\n");
     return { action: "back" };
   }
-  const model = await prompts.select({ message: "选择要对比模板的模型", options: targets.map(target => ({
+  const model = await prompts.select({ message: "选择要对比模板的模型", options: options.targets.map(target => ({
     value: target.model, label: `${target.displayName}（${target.model}）`,
-    hint: `${target.source === "official" ? "官方 Codex" : "DeepSeek"} → ${target.sourceModel}`,
+    hint: target.template ? `${target.template.source} → ${target.template.model}` : "尚未关联模板，请明确选择来源",
   })) });
   if (prompts.isCancel(model)) return { action: "back" };
+  const target = options.targets.find(entry => entry.model === model);
+  const templates = options.templates.filter(entry => !provider.startsWith("ds-") && !provider.startsWith("clp-") || entry.model === model);
+  if (!templates.length) { output.write("来源中没有可用于此模型的模板。\n"); return { action: "back" }; }
+  const initialTemplate = target?.template ? templates.findIndex(entry => entry.source === target.template.source && entry.model === target.template.model) : -1;
+  const selected = await prompts.select({ message: "明确选择模板来源及模型", options: templates.map((entry, index) => ({
+    value: index, label: `${entry.source} · ${entry.displayName}（${entry.model}）`,
+  })), ...(initialTemplate < 0 ? {} : { initialValue: initialTemplate }) });
+  if (prompts.isCancel(selected)) return { action: "back" };
+  const template = templates[selected];
+  if (!template) throw new Error("模板选项已变化，请重新打开模型管理");
   const sections = await prompts.multiselect({ message: "选择本次更新内容（空格勾选，回车确认）", options: [
     { value: "prompts", label: "提示词" },
     { value: "capabilities", label: "能力参数", hint: "请确认平台支持模板中的参数" },
   ], initialValues: ["prompts"], required: true });
   if (prompts.isCancel(sections)) return { action: "back" };
-  const input = { provider, model, sections };
+  const input = { provider, model, sections, revision: options.revision, sourceToken: options.sourceToken, template: { source: template.source, model: template.model } };
   const preview = await previewProviderModelTemplateUpdate(input, { environment });
   output.write(`模板对比：${JSON.stringify(preview.provider)} / ${JSON.stringify(preview.model)}\n来源：${JSON.stringify(preview.source)} / ${JSON.stringify(preview.sourceModel)}\n修订：${JSON.stringify(preview.revision)}\n`);
   output.write("保留本地模型 ID、显示名称、当前上下文、默认思考等级、工具支持、采样及压缩/截断设置；能力更新可改变最大上下文。\n");
@@ -55,7 +65,7 @@ async function runProviderModelTemplateSetup(provider, { environment, prompts, o
     output.write("所选模板内容与当前模型一致，无需保存。\n");
     return { action: "unchanged", activation: "none" };
   }
-  const longChanges = preview.changes.filter(change => [change.before, change.after].some(value => value !== undefined && JSON.stringify(value).length > 2048));
+  const longChanges = preview.changes.filter(change => [change.before, change.after].some(value => value.present && JSON.stringify(value.value).length > 2048));
   if (longChanges.length) {
     const expand = await prompts.confirm({ message: "展开长内容的完整前后差异？", initialValue: false });
     if (prompts.isCancel(expand)) return { action: "back" };
@@ -92,8 +102,8 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     ...(custom && catalog.canRemove ? [{ value: "edit", label: "添加／编辑模型与默认值" }] : []),
     ...(family && catalog.providers.length ? [{ value: "default", label: "设置账户默认模型" }] : []),
     ...(family === "ccg" || family === "ocg" ? [{ value: "manage", label: "选择启用／添加／导入模板" }] : []),
-    ...(family === "clp" ? [{ value: "refresh", label: "联网更新并选择启用模型" }] : []),
-    ...(custom || family === "deepseek" ? [{ value: "template-update", label: "对比并更新模型模板", hint: "仅更新已有模板关联，不联网下载" }] : []),
+    ...(family === "clp" ? [{ value: "refresh", label: "联网发现模型并选择启用", hint: "不更新已启用模型的模板内容" }] : []),
+    ...(catalog.source !== "official-shared" && (custom || family) ? [{ value: "template-update", label: "对比并更新模型模板", hint: family === "clp" ? "读取远程模板后预览差异" : "选择来源和更新内容，预览差异后保存" }] : []),
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
@@ -133,6 +143,10 @@ export async function runProviderModelSetup({ environment = process.env, prompts
     result = await applyProviderModelRemoval(input, { environment, preview });
   } else throw new Error("不支持的模型操作");
   if (result.action !== "back") {
+    if (action === "refresh" && result.action === "unchanged") {
+      output.write("启用模型目录未变化；已有模型的模板更新请使用对比并更新模型模板。\n");
+      return result;
+    }
     output.write(action === "edit" || action === "remove" ? "模型目录已保存并回读。\n" : "模型目录已保存。\n");
     writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   }

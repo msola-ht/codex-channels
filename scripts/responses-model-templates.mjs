@@ -13,6 +13,7 @@ export async function loadResponsesModelTemplates(source, environment = process.
 }
 
 export async function promptResponsesModelImport(prompts, previous = [], loadTemplates = loadResponsesModelTemplates) {
+  const previousIds = new Set(previous.map(model => model.id));
   const selected = [];
   for (const [source, label] of [["official", "官方 Codex"], ["deepseek", "DeepSeek"]]) {
     const enabled = await prompts.confirm({ message: `平台是否提供 ${label} 模型，是否从模板导入？${source === "official" ? "（只复制普通思考等级，不导入 Codex 专用 ultra/persistent 模式）" : ""}`, initialValue: false });
@@ -41,21 +42,20 @@ export async function promptResponsesModelImport(prompts, previous = [], loadTem
     for (const id of ids) {
       const template = templates.find(model => model.id === id);
       const used = new Set(selected.map(model => model.id));
-      const linked = previous.filter(model => model.template?.source === source && model.template.model === id);
       const validate = value => {
         try { validateResponsesModels([{...template, id: String(value).trim()}], String(value).trim()); } catch { return "请输入有效的平台模型 ID"; }
         const targetId = String(value).trim();
+        if (previousIds.has(targetId)) return "该平台模型 ID 已存在；模板更新请使用模型管理中的“对比并更新模型模板”，或使用其他 ID 新增";
         if (used.has(targetId)) return "本次导入已使用该平台模型 ID，请使用不同 ID";
-        if (new Set([...previous, ...selected].map(model => model.id)).size >= 64 && !previous.some(model => model.id === targetId)) return "自定义模型目录最多包含 64 个模型";
+        if (previousIds.size + selected.length >= 64) return "自定义模型目录最多包含 64 个模型";
         return undefined;
       };
-      const target = await prompts.text({ message: `${id} → 平台模型 ID（请求实际使用的名称）`, initialValue: linked.length === 1 ? linked[0].id : id, validate });
+      const target = await prompts.text({ message: `${id} → 新增平台模型 ID（请求实际使用的名称）`, initialValue: id, validate });
       if (prompts.isCancel(target)) return undefined;
       const error = validate(target);
       if (error) throw new Error(error);
-      const existing = previous.find(model => model.id === String(target).trim());
       const model = {...template, id: String(target).trim(), template: {source, model: id}};
-      const confirmed = await prompts.confirm({ message: `${existing ? "用模板更新已有模型" : "复制"} ${id} → ${model.id}（${model.contextWindow} Token；图片${model.supportsImages ? "支持" : "不支持"}；思考等级 ${model.reasoningEfforts.join("/") || "none"}）？复制模板已提供的描述、等级说明、图片细节、详细程度、思考摘要及有效上下文、压缩和截断元数据；请确认平台支持这些参数。${existing ? "将替换该模型的名称、能力参数及模板关联；拒绝则保留原值。" : ""}`, initialValue: existing === undefined });
+      const confirmed = await prompts.confirm({ message: `复制 ${id} → ${model.id}（${model.contextWindow} Token；图片${model.supportsImages ? "支持" : "不支持"}；思考等级 ${model.reasoningEfforts.join("/") || "none"}）？复制模板已提供的描述、等级说明、图片细节、详细程度、思考摘要及有效上下文、压缩和截断元数据；请确认平台支持这些参数。`, initialValue: true });
       if (prompts.isCancel(confirmed)) return undefined;
       if (confirmed) selected.push(model);
     }

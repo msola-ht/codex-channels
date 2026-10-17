@@ -132,15 +132,13 @@ export function withPreservedManagedModelCatalogSettings(
   for (const previous of previousModels) {
     if (!presentModels.has(previous.model)) continue;
     const current = modelCatalogSetting(JSON.stringify(next), definition, previous.model);
-    const reasoningEffort = current.reasoningEfforts.some(
+    if (!current.reasoningEfforts.some(
       ({ effort }) => effort === previous.reasoningEffort,
-    )
-      ? previous.reasoningEffort
-      : current.reasoningEffort;
+    )) throw new Error(`${definition.displayName} 模型 ${previous.model} 的原思考等级 ${previous.reasoningEffort} 不受新目录支持；请先调整本地设置，未更新目录`);
     const contextWindow = previous.contextWindow;
     next = withManagedModelCatalogSettings(next, definition, {
       model: previous.model,
-      reasoningEffort,
+      reasoningEffort: previous.reasoningEffort,
       ...(contextWindow === undefined ? {} : { contextWindow }),
     });
   }

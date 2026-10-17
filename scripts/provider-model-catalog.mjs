@@ -14,17 +14,24 @@ function appendFlashClone(source, slug) {
   return catalog;
 }
 
-export function createOpencodeGoCatalog(source) {
-  return appendFlashClone(source, settings.ocg.v41Model);
+export function createOpencodeGoCatalogWithTemplateBindings(source) {
+  const catalog = appendFlashClone(source, settings.ocg.v41Model);
+  const templateBindings = Object.fromEntries(catalog.models.map(entry => [entry.slug, {
+    source: "deepseek", model: entry.slug === settings.ocg.v41Model ? settings.flashSourceModel : entry.slug,
+  }]));
+  return { catalog, templateBindings };
 }
 
-export function createCcgCatalog(source) {
+export function createCcgCatalogWithTemplateBindings(source) {
   const catalog = appendFlashClone(source, settings.ccg.v41Model);
+  const templateBindings = {};
   catalog.models = catalog.models.map((entry) => {
-    if (entry.slug === settings.ccg.v41Model) return entry;
-    const slug = settings.ccg.modelIds[entry.slug];
+    const clone = entry.slug === settings.ccg.v41Model;
+    const slug = clone ? entry.slug : settings.ccg.modelIds[entry.slug];
     if (typeof slug !== "string") throw new Error(`CCG 缺少 DS 模型 ID 映射：${entry.slug}`);
+    if (Object.hasOwn(templateBindings, slug)) throw new Error(`CCG DS 模型 ID 映射重复：${slug}`);
+    templateBindings[slug] = { source: "deepseek", model: clone ? settings.flashSourceModel : entry.slug };
     return { ...entry, slug };
   });
-  return catalog;
+  return { catalog, templateBindings };
 }

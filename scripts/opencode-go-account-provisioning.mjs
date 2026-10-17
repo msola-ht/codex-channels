@@ -30,7 +30,7 @@ import {
   writePrivateFileAtomic,
 } from "../runtime/private-file.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
-import { createOpencodeGoCatalog } from "./provider-model-catalog.mjs";
+import { createOpencodeGoCatalogWithTemplateBindings } from "./provider-model-catalog.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import {
   createManagedProviderConfiguration,
@@ -420,12 +420,14 @@ async function loadCatalog(plan, { fetchImpl, downloadCatalog }) {
     };
   }
   const downloaded = await downloadCatalog(fetchImpl);
+  const { catalog, templateBindings } = createOpencodeGoCatalogWithTemplateBindings(downloaded.catalog);
   return {
-    catalog: createOpencodeGoCatalog(downloaded.catalog),
+    catalog,
     manifest: {
       source: deepseekSetupScriptUrl,
       sha256: downloaded.sha256,
       downloadedAt: new Date().toISOString(),
+      modelTemplates: templateBindings,
     },
   };
 }

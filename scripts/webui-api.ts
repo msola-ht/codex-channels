@@ -793,7 +793,29 @@ export interface ManagementProviderSettingsResponse {
   }
 }
 
+export type ProviderModelTemplateSource = "official" | "deepseek" | "cline"
+export type ProviderModelTemplateSection = "prompts" | "capabilities"
+export type ProviderModelTemplateValue = { present: false } | { present: true; value: unknown }
+export interface ProviderModelTemplateOptionsResponse {
+  provider: string
+  revision: string
+  sourceToken: string
+  expiresAt: number
+  targets: Array<{ model: string; displayName: string; template: { source: ProviderModelTemplateSource; model: string } | null }>
+  templates: Array<{ source: ProviderModelTemplateSource; model: string; displayName: string }>
+}
+export interface ProviderModelTemplateUpdateInput {
+  operation: "model.template.update"
+  provider: string
+  model: string
+  sections: ProviderModelTemplateSection[]
+  revision: string
+  sourceToken: string
+  template: { source: ProviderModelTemplateSource; model: string }
+}
+
 export type ManagementProviderSettingsMutationInput =
+  | ProviderModelTemplateUpdateInput
   | { operation: "model.remove"; provider: string; model: string }
   | { operation: "model.context"; provider: string; model: string; contextWindow: number; revision: string }
   | { operation: "model.custom.save"; resourceRevision: string; provider: string; models: ResponsesModelDefinition[]; model: string; probeConnections?: Array<{ model: string; capability: "applyPatch" | "toolSearch"; token: string }> }
@@ -801,6 +823,7 @@ export type ManagementProviderSettingsMutationInput =
   | { operation: "primary.remove"; providerId: string }
   | {
       operation: "primary.custom.save"
+      resourceRevision?: string
       provider: {
         operation: "create" | "update"
         providerId: string
@@ -824,7 +847,7 @@ export type ManagementProviderSettingsMutationInput =
       windowPercent?: number
     }
 
-export interface ManagementProviderSettingsPreview {
+export interface ManagementProviderSettingsStandardPreview {
   operation: "switch" | "remove" | "create" | "update" | "managed.default" | "model.remove" | "model.context" | "model.custom.save"
   revision?: string
   warnings?: Array<{ code: string }>
@@ -863,6 +886,18 @@ export interface ManagementProviderSettingsPreview {
   }
   transport?: { scheme?: "http" | "https"; cleartext?: boolean }
 }
+
+export interface ProviderModelTemplateUpdatePreview extends Omit<ManagementProviderSettingsStandardPreview, "operation" | "provider" | "model"> {
+  operation: "model.template.update"
+  provider: string
+  model: string
+  source: ProviderModelTemplateSource
+  sourceModel: string
+  sections: ProviderModelTemplateSection[]
+  changes: Array<{ field: string; before: ProviderModelTemplateValue; after: ProviderModelTemplateValue }>
+  willChange: boolean
+}
+export type ManagementProviderSettingsPreview = ManagementProviderSettingsStandardPreview | ProviderModelTemplateUpdatePreview
 
 export interface ManagementProviderSettingsPreviewResponse {
   preview: ManagementProviderSettingsPreview

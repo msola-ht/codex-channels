@@ -35,6 +35,7 @@ export function ManagementConfirmationDialog({
   confirmLabel,
   confirmVariant = "default",
   confirmDisabled = false,
+  finalFocus,
   children,
 }: {
   open: boolean
@@ -47,13 +48,14 @@ export function ManagementConfirmationDialog({
   confirmLabel?: string
   confirmVariant?: ComponentProps<typeof Button>["variant"]
   confirmDisabled?: boolean
+  finalFocus?: ComponentProps<typeof AlertDialogContent>["finalFocus"]
   children: ReactNode
 }) {
   const { t } = useTranslation()
   const cancelRef = useRef<HTMLButtonElement>(null)
   return (
     <AlertDialog open={open} onOpenChange={(nextOpen, details) => { if (saving) { details.cancel(); return }; if (!nextOpen) onCancel() }}>
-      <AlertDialogContent initialFocus={cancelRef} className="max-h-[85dvh] overflow-y-auto">
+      <AlertDialogContent initialFocus={cancelRef} finalFocus={finalFocus} className="max-h-[85dvh] overflow-y-auto">
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>

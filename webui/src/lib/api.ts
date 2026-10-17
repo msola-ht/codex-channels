@@ -24,6 +24,7 @@ import type {
   OpenAiModelCatalogResponse,
   OpenAiModelPromptsResponse,
   ProviderModelPromptsResponse,
+  ProviderModelTemplateOptionsResponse,
   OpenAiModelContextInput,
   OpenAiModelContextPreview,
   OpenAiModelContextResult,
@@ -469,6 +470,10 @@ export function cancelManagementTask(id: string, signal?: AbortSignal): Promise<
 
 export function fetchManagementProviderSettings(signal?: AbortSignal): Promise<ManagementProviderSettingsResponse> {
   return getJson<ManagementProviderSettingsResponse>(`${API_PREFIX}/management/provider-settings`, signal)
+}
+
+export function fetchProviderModelTemplateOptions(provider: string, signal?: AbortSignal): Promise<ProviderModelTemplateOptionsResponse> {
+  return getJson(`${API_PREFIX}/management/provider-model-templates?${new URLSearchParams({ provider })}`, signal)
 }
 
 export function probeManagementCustomModel(input: ManagementCustomModelProbeInput, signal: AbortSignal): Promise<ManagementCustomModelProbeResult> {
