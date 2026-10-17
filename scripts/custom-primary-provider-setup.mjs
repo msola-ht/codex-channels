@@ -159,7 +159,7 @@ export async function runCustomPrimaryProviderSetup({
     : fixedProvider;
   const currentModel = switchingProvider !== undefined && switchingProvider.id === fixedProviderId
     ? switchingProvider.model
-    : effectiveActiveProviderId === fixedProviderId
+    : fixedProviderId !== undefined && effectiveActiveProviderId === fixedProviderId
       ? optionalString(config.model)
       : undefined;
   const currentBaseUrl = optionalString(currentProvider?.base_url) ?? "";
